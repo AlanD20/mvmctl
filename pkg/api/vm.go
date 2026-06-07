@@ -533,7 +533,7 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 	// Console relay setup (before spawn)
 	if resolved.EnableConsole {
 		consoleCtrl := console.NewController(builder.vmID, builder.vmDir, builder.name,
-			resolved.ConsolePIDFilename, resolved.ConsoleSocketFilename, "firecracker.console.log")
+			resolved.ConsolePIDFilename, resolved.ConsoleSocketFilename)
 		ptyFD, ptyErr := consoleCtrl.CreatePTY()
 		if ptyErr != nil {
 			return fmt.Errorf("console PTY creation failed: %w", ptyErr)
@@ -1297,7 +1297,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 	var consoleController *console.Controller
 	if v.EnableConsole {
 		consoleController = console.NewController(v.ID, vmDir, v.Name,
-			"console.pid", "console.sock", "firecracker.console.log")
+			consolesvc.DefaultConsolePIDFilename, consolesvc.DefaultConsoleSocketFilename)
 		ptyFD, ptyErr := consoleController.CreatePTY()
 		if ptyErr != nil {
 			slog.Warn("Console PTY creation failed during respawn", "vm", v.Name, "error", ptyErr)

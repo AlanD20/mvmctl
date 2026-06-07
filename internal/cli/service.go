@@ -104,6 +104,9 @@ func newConsoleRelayCmd() *cobra.Command {
 	cmd.Flags().String("vm-path", "", "VM path (required)")
 	cmd.Flags().String("vm-name", "", "VM name")
 	cmd.Flags().Int("pty-fd", 0, "PTY file descriptor (required)")
+	cmd.Flags().String("pid-filename", "", "PID file name (default: console.pid)")
+	cmd.Flags().String("socket-filename", "", "Socket file name (default: console.sock)")
+	cmd.Flags().String("log-filename", "", "Log file name (default: firecracker.console.log)")
 	cmd.Flags().Bool("daemon", false, "Run as a background daemon process")
 	cmd.MarkFlagRequired("vm-id")
 	cmd.MarkFlagRequired("vm-path")
@@ -114,13 +117,19 @@ func newConsoleRelayCmd() *cobra.Command {
 		vmPath, _ := c.Flags().GetString("vm-path")
 		vmName, _ := c.Flags().GetString("vm-name")
 		ptyFD, _ := c.Flags().GetInt("pty-fd")
+		pidFilename, _ := c.Flags().GetString("pid-filename")
+		socketFilename, _ := c.Flags().GetString("socket-filename")
+		logFilename, _ := c.Flags().GetString("log-filename")
 		daemon, _ := c.Flags().GetBool("daemon")
 
 		cfg := console.Config{
-			VMID:   vmID,
-			VMPath: vmPath,
-			VMName: vmName,
-			PtyFD:  ptyFD,
+			VMID:           vmID,
+			VMPath:         vmPath,
+			VMName:         vmName,
+			PtyFD:          ptyFD,
+			PIDFilename:    pidFilename,
+			SocketFilename: socketFilename,
+			LogFilename:    logFilename,
 		}
 		if daemon {
 			ptyFile := os.NewFile(uintptr(ptyFD), "pty")

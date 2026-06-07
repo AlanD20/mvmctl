@@ -29,10 +29,13 @@ const (
 
 // Config holds configuration for the console relay subprocess.
 type Config struct {
-	VMID   string
-	VMPath string
-	VMName string
-	PtyFD  int
+	VMID           string
+	VMPath         string
+	VMName         string
+	PtyFD          int
+	PIDFilename    string // optional, defaults to DefaultConsolePIDFilename
+	SocketFilename string // optional, defaults to DefaultConsoleSocketFilename
+	LogFilename    string // optional, defaults to DefaultConsoleLogFilename
 }
 
 // Run starts the console relay with the given config.
@@ -42,10 +45,22 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("missing required arguments for console relay")
 	}
 
-	// Compute paths from VM directory.
-	pidPath := filepath.Join(cfg.VMPath, DefaultConsolePIDFilename)
-	socketPath := filepath.Join(cfg.VMPath, DefaultConsoleSocketFilename)
-	logPath := filepath.Join(cfg.VMPath, DefaultConsoleLogFilename)
+	// Compute paths from VM directory, using provided filenames or defaults.
+	pidName := cfg.PIDFilename
+	if pidName == "" {
+		pidName = DefaultConsolePIDFilename
+	}
+	sockName := cfg.SocketFilename
+	if sockName == "" {
+		sockName = DefaultConsoleSocketFilename
+	}
+	logName := cfg.LogFilename
+	if logName == "" {
+		logName = DefaultConsoleLogFilename
+	}
+	pidPath := filepath.Join(cfg.VMPath, pidName)
+	socketPath := filepath.Join(cfg.VMPath, sockName)
+	logPath := filepath.Join(cfg.VMPath, logName)
 
 	// Open the PTY FD inherited from parent (passed as ExtraFiles[0] = FD 3).
 	ptyFile := os.NewFile(uintptr(cfg.PtyFD), "pty")

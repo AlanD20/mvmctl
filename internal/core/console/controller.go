@@ -6,117 +6,65 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"golang.org/x/sys/unix"
 
 	consolesvc "mvmctl/internal/service/console"
 )
 
-// ── Controller — Manages console lifecycle for a single VM ──────
-// Matches Python's Controller (197 lines, ~15 methods) exactly.
-//
-// Python's Controller handles:
-//   - create_pty() — creates a PTY pair, returns client FD
-//   - start() — starts console relay with given PTY controller FD
-//   - close_client_fd() — closes client FD after Firecracker takes ownership
-//   - close_pty() — closes both PTY FDs
-//   - cleanup() — stops relay and closes PTY FDs
-//   - stop() — stops console relay
-//   - is_running() — checks if relay is alive
-//   - connect() — creates and connects a consolesvc.RelayClient
-//   - disconnect() — disconnects the client
-//   - get_pid() — returns relay PID
-//   - properties: controller_fd, client_fd, manager, socket_path, pid
-
 // Controller manages the console lifecycle for a single VM.
+//
+// The Controller owns:
+//   - PTY pair creation/teardown (master → relay, slave → Firecracker)
+//   - Relay subprocess spawning/management (Start, Stop, IsRunning, GetPID)
+//   - Relay client connection (Connect, Disconnect)
+//
+// The API layer creates a Controller and calls these methods — it never
+// touches the service package directly.
+//
+// A Controller is not safe for concurrent use. The API layer serializes
+// calls per-VM through its own execution model.
 type Controller struct {
-	mu sync.Mutex
-
-	vmID   string
-	vmPath string
-	vmName string
-
-	relayManager *consolesvc.Relay
-	client       *consolesvc.RelayClient
+	vmID, vmPath, vmName string
+	pidFilename, socketFilename string
 
 	// PTY state
-	masterFD  int    // PTY master file descriptor (for relay loop)
-	clientFD  int    // PTY slave/client file descriptor (for Firecracker)
-	slaveName string // PTY slave name (e.g., "/dev/pts/5")
-	hasPTY    bool
+	masterFD int // PTY master → relay subprocess
+	clientFD int // PTY slave → Firecracker
+	hasPTY   bool
 
-	// PID tracking
-	relayPID int
+	// Relay (set by Start, used by Stop/IsRunning/PID/SocketPath/Connect)
+	relayManager *consolesvc.Relay
 
-	// Socket path (stored from Start result, matching Python's _socket_path)
-	socketPath string
+	// Client (set by Connect)
+	client *consolesvc.RelayClient
 }
 
 // NewController creates a new Controller for the given VM.
-// Matches Python's Controller.__init__().
-// Accepts optional pidFilename, socketFilename, logFilename (empty strings use defaults).
-func NewController(vmID, vmPath, vmName string, pidFilename, socketFilename, logFilename string) *Controller {
-	if pidFilename == "" {
-		pidFilename = consolesvc.DefaultConsolePIDFilename
-	}
-	if socketFilename == "" {
-		socketFilename = consolesvc.DefaultConsoleSocketFilename
-	}
-	if logFilename == "" {
-		logFilename = consolesvc.DefaultConsoleLogFilename
-	}
+func NewController(vmID, vmPath, vmName, pidFilename, socketFilename string) *Controller {
 	if vmName == "" {
 		vmName = vmID
 	}
-	pidPath := filepath.Join(vmPath, pidFilename)
-	socketPath := filepath.Join(vmPath, socketFilename)
 	return &Controller{
-		vmID:   vmID,
-		vmPath: vmPath,
-		vmName: vmName,
-		relayManager: consolesvc.NewRelay(vmName, pidPath, socketPath),
+		vmID:           vmID,
+		vmPath:         vmPath,
+		vmName:         vmName,
+		pidFilename:    pidFilename,
+		socketFilename: socketFilename,
 	}
 }
 
 // CreatePTY creates a PTY pair and returns the slave/client FD.
-// Matches Python's Controller.create_pty() exactly:
-//
-// Python: os.openpty() → (master_fd, slave_fd)
-//   - master_fd: for relay I/O (reading/writing serial console data)
-//   - slave_fd:  stored as self._client_fd, passed to Firecracker,
-//     and returned from create_pty()
-//
-// Go: opens /dev/ptmx for master, uses IoctlGetInt for ptsname,
-// IoctlSetPointerInt for unlockpt, then opens the slave device.
-// Both FDs are stored internally. Returns only the client (slave) FD
-// to match Python's create_pty() return type (int).
-//
-// Raises ConsoleError if client FD is None after creation
-// (matching Python's ConsoleError("PTY allocation failed: client FD is None after creation")).
 func (cc *Controller) CreatePTY() (int, error) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
 	if cc.hasPTY {
 		return cc.clientFD, nil
 	}
 
-	return cc.createPTYLocked()
-}
-
-// createPTYLocked creates a PTY (must hold mu).
-// Returns the client (slave) FD to match Python's create_pty() return type.
-func (cc *Controller) createPTYLocked() (int, error) {
-	// Open /dev/ptmx for the master side of the PTY.
-	// This is the Go equivalent of Python's os.openpty().
 	ptmx, err := os.OpenFile("/dev/ptmx", os.O_RDWR, 0)
 	if err != nil {
 		return 0, fmt.Errorf("failed to open /dev/ptmx: %w", err)
 	}
 
-	// Get the slave PTY name via TIOCGPTN ioctl.
-	// Uses IoctlGetInt instead of raw Syscall+unsafe, matching Go's x/sys/unix API.
 	masterFD := int(ptmx.Fd())
 	ptyno, err := unix.IoctlGetInt(masterFD, unix.TIOCGPTN)
 	if err != nil {
@@ -125,15 +73,11 @@ func (cc *Controller) createPTYLocked() (int, error) {
 	}
 	slaveName := fmt.Sprintf("/dev/pts/%d", ptyno)
 
-	// Unlock the slave PTY via TIOCSPTLCK ioctl.
-	// This is the Go equivalent of Python's os.openpty() which automatically
-	// unlocks the slave.
 	if err := unix.IoctlSetPointerInt(masterFD, unix.TIOCSPTLCK, 0); err != nil {
 		ptmx.Close()
 		return 0, fmt.Errorf("failed to unlock PTY: %w", err)
 	}
 
-	// Open the slave PTY device.
 	slave, err := os.OpenFile(slaveName, os.O_RDWR, 0)
 	if err != nil {
 		ptmx.Close()
@@ -142,18 +86,13 @@ func (cc *Controller) createPTYLocked() (int, error) {
 
 	cc.masterFD = masterFD
 	cc.clientFD = int(slave.Fd())
-	cc.slaveName = slaveName
 	cc.hasPTY = true
 
-	// Verify client FD is not None, matching Python's post-creation check:
-	//   if self._client_fd is None:
-	//       raise ConsoleError("PTY allocation failed: client FD is None after creation")
 	if cc.clientFD == 0 {
 		ptmx.Close()
 		slave.Close()
 		cc.masterFD = 0
 		cc.hasPTY = false
-		cc.slaveName = ""
 		return 0, errors.New("PTY allocation failed: client FD is None after creation")
 	}
 
@@ -161,26 +100,22 @@ func (cc *Controller) createPTYLocked() (int, error) {
 }
 
 // Start starts the console relay for this controller's VM.
-// Matches Python's Controller.start() exactly.
-// Python raises RuntimeError("Must call create_pty() before start()") if PTY not created.
 func (cc *Controller) Start(ctx context.Context) (string, *int, error) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
 	if !cc.hasPTY {
 		return "", nil, errors.New("Must call create_pty() before start()")
 	}
 
-	// Spawn the console relay subprocess with the PTY master FD.
 	ptyFile := os.NewFile(uintptr(cc.masterFD), "pty")
 	if ptyFile == nil {
 		return "", nil, fmt.Errorf("invalid PTY controller FD %d", cc.masterFD)
 	}
 
 	cfg := consolesvc.Config{
-		VMID:   cc.vmID,
-		VMPath: cc.vmPath,
-		VMName: cc.vmName,
+		VMID:           cc.vmID,
+		VMPath:         cc.vmPath,
+		VMName:         cc.vmName,
+		PIDFilename:    cc.pidFilename,
+		SocketFilename: cc.socketFilename,
 	}
 
 	result, err := consolesvc.Spawn(ctx, cfg, ptyFile)
@@ -188,58 +123,38 @@ func (cc *Controller) Start(ctx context.Context) (string, *int, error) {
 		return "", nil, err
 	}
 
-	cc.socketPath = result.SocketPath
-	cc.relayPID = result.PID
+	// Spawn closed ptyFile (parent's copy of the PTY master fd). Clear
+	// masterFD to prevent ClosePTY/Cleanup from double-closing.
+	cc.masterFD = 0
+
+	// Create the relay manager now that the subprocess is alive.
+	// Spawn already wrote the PID file, so the Relay can find the PID.
+	pidPath := filepath.Join(cc.vmPath, cc.pidFilename)
+	sockPath := filepath.Join(cc.vmPath, cc.socketFilename)
+	cc.relayManager = consolesvc.NewRelay(cc.vmName, pidPath, sockPath)
+
 	return result.SocketPath, &result.PID, nil
 }
 
-// Manager returns the underlying relay manager.
-// Matches Python's Controller.manager property.
-func (cc *Controller) Manager() *consolesvc.Relay {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	return cc.relayManager
-}
-
 // SocketPath returns the relay socket path (set after Start).
-// Matches Python's Controller.socket_path property.
 func (cc *Controller) SocketPath() string {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	return cc.socketPath
+	if cc.relayManager == nil {
+		return ""
+	}
+	return cc.relayManager.SocketPath()
 }
 
-// ControllerFD returns the PTY controller file descriptor (for the relay loop).
-// Matches Python's Controller.controller_fd property.
-func (cc *Controller) ControllerFD() int {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	return cc.masterFD
-}
-
-// ClientFD returns the PTY client file descriptor (for Firecracker).
-// Matches Python's Controller.client_fd property.
-func (cc *Controller) ClientFD() int {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-	return cc.clientFD
-}
-
-// Connect connects to the console relay and returns a consolesvc.RelayClient.
-// Matches Python's Controller.connect() exactly.
+// Connect connects to the console relay and returns a RelayClient.
 func (cc *Controller) Connect() (*consolesvc.RelayClient, error) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
 	if cc.client != nil && cc.client.IsConnected() {
 		return cc.client, nil
 	}
 
-	socketPath := cc.socketPath
-	if socketPath == "" {
-		socketPath = cc.relayManager.SocketPath()
+	if cc.relayManager == nil {
+		return nil, errors.New("relay not started: call Start() before Connect()")
 	}
 
+	socketPath := cc.relayManager.SocketPath()
 	client := consolesvc.NewRelayClient(socketPath, nil)
 	if err := client.Connect(); err != nil {
 		return nil, err
@@ -250,11 +165,7 @@ func (cc *Controller) Connect() (*consolesvc.RelayClient, error) {
 }
 
 // Disconnect disconnects from the console relay.
-// Matches Python's Controller.disconnect() exactly.
 func (cc *Controller) Disconnect() error {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
 	if cc.client != nil {
 		cc.client.Disconnect()
 		cc.client = nil
@@ -263,110 +174,63 @@ func (cc *Controller) Disconnect() error {
 }
 
 // Stop stops the console relay.
-// Matches Python's Controller.stop().
 func (cc *Controller) Stop(force bool) bool {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
+	if cc.relayManager == nil {
+		return false
+	}
 	return cc.relayManager.Stop(force)
 }
 
 // IsRunning returns true if the relay is currently running.
-// Matches Python's Controller.is_running().
 func (cc *Controller) IsRunning() bool {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
+	if cc.relayManager == nil {
+		return false
+	}
 	return cc.relayManager.IsRunning()
 }
 
 // GetPID returns the relay PID and whether it's running.
-// Matches Python's Controller.get_pid().
 func (cc *Controller) GetPID() (int, bool) {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
+	if cc.relayManager == nil {
+		return 0, false
+	}
 	return cc.relayManager.PIDAlive()
 }
 
-// CloseClientFD closes the PTY slave/client file descriptor and resets it.
-// Matches Python's Controller.close_client_fd() exactly:
-//
-//	if self._client_fd is not None:
-//	    try: os.close(self._client_fd)
-//	    except OSError: pass
-//	    self._client_fd = None
+// CloseClientFD closes the PTY slave/client file descriptor.
 func (cc *Controller) CloseClientFD() {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
 	if cc.clientFD != 0 {
-		// Use syscall.Close directly, matching Python's os.close()
 		_ = unix.Close(cc.clientFD)
 		cc.clientFD = 0
 	}
 }
 
-// ClosePTY closes both the PTY slave/client and master file descriptors
-// and resets PTY state. Client FD is closed first (matching Python's
-// close_client_fd call in cleanup → close_pty → close controller FD).
-// Matches Python's Controller.close_pty() exactly:
-//
-//	self.close_client_fd()
-//	if self._controller_fd is not None:
-//	    try: os.close(self._controller_fd)
-//	    except OSError: pass
-//	    self._controller_fd = None
+// ClosePTY closes both PTY file descriptors.
 func (cc *Controller) ClosePTY() {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
-	// Close client FD first (matches Python's close_client_fd)
 	if cc.clientFD != 0 {
 		_ = unix.Close(cc.clientFD)
 		cc.clientFD = 0
 	}
-	// Then close master/controller FD (matches Python's os.close(self._controller_fd))
 	if cc.masterFD != 0 {
 		_ = unix.Close(cc.masterFD)
 		cc.masterFD = 0
 	}
 	cc.hasPTY = false
-	cc.slaveName = ""
 }
 
 // Cleanup stops the relay gracefully and closes PTY FDs.
-// Matches Python's Controller.cleanup() exactly:
-//
-//	self.stop()
-//	self.close_pty()
-//	self.close_client_fd()
-//
-// Note: Python calls close_client_fd() redundantly after close_pty()
-// (close_pty already calls close_client_fd). Go matches this exactly.
 func (cc *Controller) Cleanup() {
-	cc.mu.Lock()
-	defer cc.mu.Unlock()
-
-	// Stop the relay gracefully first (matches Python's self.stop() with force=False)
 	if cc.relayManager != nil {
 		cc.relayManager.Stop(false)
 	}
 
-	// Close client FD — matches Python's close_pty() which calls close_client_fd()
 	if cc.clientFD != 0 {
 		_ = unix.Close(cc.clientFD)
 		cc.clientFD = 0
 	}
-	// Then close master/controller FD
 	if cc.masterFD != 0 {
 		_ = unix.Close(cc.masterFD)
 		cc.masterFD = 0
 	}
 	cc.hasPTY = false
-	cc.slaveName = ""
-
-	// Python's cleanup then redundantly calls close_client_fd() again.
-	// Since clientFD is already 0, this is a no-op in both Python and Go.
-	// We match Python by doing it unconditionally (it's a no-op here too):
-	// close_client_fd is already handled above, so we skip the redundant call
-	// for cleanliness. Both implementations produce identical behavior.
 }

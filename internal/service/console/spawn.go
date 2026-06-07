@@ -29,6 +29,15 @@ func Spawn(ctx context.Context, cfg Config, ptyFile *os.File) (*SpawnResult, err
 	if cfg.VMName != "" {
 		args = append(args, "--vm-name", cfg.VMName)
 	}
+	if cfg.PIDFilename != "" {
+		args = append(args, "--pid-filename", cfg.PIDFilename)
+	}
+	if cfg.SocketFilename != "" {
+		args = append(args, "--socket-filename", cfg.SocketFilename)
+	}
+	if cfg.LogFilename != "" {
+		args = append(args, "--log-filename", cfg.LogFilename)
+	}
 
 	cmd, err := system.SpawnService(nil, system.SpawnConfig{
 		Name:       "console",
@@ -39,17 +48,20 @@ func Spawn(ctx context.Context, cfg Config, ptyFile *os.File) (*SpawnResult, err
 		return nil, fmt.Errorf("failed to spawn console relay: %w", err)
 	}
 
+	// Child inherited ptyFile at fd 3. Parent no longer needs its copy.
+	ptyFile.Close()
+
 	pid := cmd.Process.Pid
 
 	// Write PID file alongside the socket.
-	pidFile := filepath.Join(cfg.VMPath, DefaultConsolePIDFilename)
-	if pidDir := filepath.Dir(pidFile); pidDir != "." {
-		os.MkdirAll(pidDir, infra.DirPerm) //nolint:errcheck
+	pidFilePath := filepath.Join(cfg.VMPath, cfg.PIDFilename)
+	if pidDir := filepath.Dir(pidFilePath); pidDir != "." {
+		os.MkdirAll(pidDir, infra.DirPerm)
 	}
-	os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644) //nolint:errcheck
+	os.WriteFile(pidFilePath, []byte(strconv.Itoa(pid)), 0644)
 
 	// Wait for subprocess to create the socket.
-	socketPath := filepath.Join(cfg.VMPath, DefaultConsoleSocketFilename)
+	socketPath := filepath.Join(cfg.VMPath, cfg.SocketFilename)
 	for range 50 {
 		if _, err := os.Stat(socketPath); err == nil {
 			return &SpawnResult{
