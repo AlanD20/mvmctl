@@ -109,6 +109,7 @@ var OverridableDefaults = map[string]map[string]any{
 		"nocloud_port_range_start": 8000,
 		"nocloud_port_range_end":   9000,
 		"nocloud_max_port_retries": 100,
+		"nocloud_kill_after":       "5m",
 	},
 	"defaults.binary": {
 		"remote_version_limit": 5,

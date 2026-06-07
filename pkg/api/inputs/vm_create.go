@@ -613,6 +613,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	nocloudPortStart, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_start")
 	nocloudPortEnd, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_end")
 	nocloudMaxRetries, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries")
+	nocloudKillAfter, _ := r.cfg.GetDuration(ctx, "defaults.cloudinit", "nocloud_kill_after")
 
 	// Build the resolved result (matches Python's ResolvedVMCreateInput construction)
 	result := &ResolvedVMCreateInput{
@@ -672,6 +673,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		NocloudPortRangeStart: nocloudPortStart,
 		NocloudPortRangeEnd:   nocloudPortEnd,
 		NocloudMaxPortRetries: nocloudMaxRetries,
+		NoCloudKillAfter:      nocloudKillAfter,
 	}
 
 	// Validate (matches Python's ensure_validate)
