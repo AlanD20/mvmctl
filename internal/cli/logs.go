@@ -17,7 +17,7 @@ func NewLogsCmd(op *api.Operation) *cobra.Command {
 	var follow bool
 
 	cmd := &cobra.Command{
-		Use:   "logs [vm-name]",
+		Use:   "logs [VM identifier]",
 		Short: "VM log management",
 		Long: `View VM logs.
 

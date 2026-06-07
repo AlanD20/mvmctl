@@ -22,7 +22,7 @@ func ErrLogsReadFailed(err error) *errs.DomainError {
 	return &errs.DomainError{
 		Code:    errs.CodeInternal,
 		Op:      "logs",
-		Message: fmt.Sprintf("Error reading log file: %s", err),
+		Message: fmt.Sprintf("error reading log file: %s", err),
 		Err:     err,
 		Class:   errs.ClassInternal,
 	}
@@ -34,7 +34,7 @@ func ErrLogsFollowFailed(err error) *errs.DomainError {
 	return &errs.DomainError{
 		Code:    errs.CodeInternal,
 		Op:      "logs",
-		Message: fmt.Sprintf("Error following log: %s", err),
+		Message: fmt.Sprintf("error following log: %s", err),
 		Err:     err,
 		Class:   errs.ClassInternal,
 	}

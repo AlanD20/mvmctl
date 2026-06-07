@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/model"
 )
 
 // Controller is a stateful log controller bound to a single VM.
@@ -32,22 +31,6 @@ func NewController(vmID, vmDir, vmName string) *Controller {
 		vmName: vmName,
 		svc:    NewService(),
 	}
-}
-
-// VMHash returns the VM hash. Matches Python's vm property.
-func (c *Controller) VMHash() string { return c.vmHash }
-
-// VMDir returns the VM directory. Matches Python's vm_dir property.
-func (c *Controller) VMDir() string { return c.vmDir }
-
-// VMName returns the VM name. Matches Python's vm name property.
-func (c *Controller) VMName() string { return c.vmName }
-
-// VMInfo returns all three VM identifier fields at once.
-// Matches Python's LogController.vm property (which returns a full
-// VMInstanceItem with .id and .name).
-func (c *Controller) VMInfo() model.VMInfo {
-	return model.VMInfo{Hash: c.vmHash, Dir: c.vmDir, Name: c.vmName}
 }
 
 // Show reads the last N lines from the VM's log file.
