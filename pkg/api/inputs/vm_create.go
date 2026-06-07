@@ -130,6 +130,7 @@ type ResolvedVMCreateInput struct {
 	NoCloudPort         int
 	NoCloudPID          int
 	NoCloudKillAfter    time.Duration
+	NoCloudSharedDir    string // shared batch directory for nocloud files
 	CPUConfig          *model.CpuConfig
 	BootArgs           string
 	SSHKeys            []*model.SSHKeyItem

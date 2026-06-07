@@ -102,6 +102,78 @@ func (op *Operation) VMCreate(
 		return nil, err
 	}
 
+	// Network bridge setup (shared across all VMs in the batch, done once).
+	bridgeAddr, calcErr := network.ComputeBridgeAddress(
+		sharedResolved.Network.IPv4Gateway, sharedResolved.Network.Subnet,
+	)
+	if calcErr != nil {
+		return nil, fmt.Errorf("compute bridge address: %w", calcErr)
+	}
+	// Bridge + NAT in a single batch for atomic network and firewall rule application.
+	natGateways := network.NatGatewaysList(sharedResolved.Network)
+	var bridgeErr error
+	op.Services.Network.WithBatch(ctx, func() {
+		if err := op.Services.Network.EnsureBridge(ctx, sharedResolved.Network.Bridge, bridgeAddr); err != nil {
+			bridgeErr = err
+			return
+		}
+		if sharedResolved.Network.NATEnabled && len(natGateways) > 0 {
+			if natErr := op.Services.Network.EnsureNAT(ctx, sharedResolved.Network.Bridge,
+				natGateways, sharedResolved.Network.Subnet, sharedResolved.Network.ID); natErr != nil {
+				slog.Warn("failed to ensure NAT rules during VM creation",
+					"vm", "(shared)", "error", natErr)
+			}
+		}
+	})
+	if bridgeErr != nil {
+		return nil, fmt.Errorf("ensure bridge: %w", bridgeErr)
+	}
+
+	// Shared nocloudnet server for NET mode (across all VMs in the batch).
+	if sharedResolved.CloudInitMode == model.CloudInitModeNET {
+		// Create shared batch directory.
+		batchID := crypto.BatchID(input.Name, time.Now().Format(time.RFC3339))
+		nocloudDir := infra.GetNoCloudNetBatchDir(batchID)
+		if err := os.MkdirAll(nocloudDir, 0755); err != nil {
+			return nil, fmt.Errorf("create nocloud batch directory: %w", err)
+		}
+
+		// Find a free port for the nocloud server.
+		port := sharedResolved.NocloudNetPort
+		var freePort int
+		if port != nil && *port > 0 {
+			freePort = *port
+		} else {
+			p, err := infra.FindFreePort(
+				sharedResolved.Network.IPv4Gateway,
+				sharedResolved.NocloudPortRangeStart,
+				sharedResolved.NocloudPortRangeEnd,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("find free port for nocloud server: %w", err)
+			}
+			freePort = p
+		}
+
+		// Spawn ONE nocloud server for the entire batch.
+		nocloudLog := infra.GetNoCloudNetLogPath(batchID)
+		result, err := nocloudnetsvc.Spawn(ctx, nocloudnetsvc.Config{
+			BaseDir:   nocloudDir,
+			Port:      freePort,
+			Host:      sharedResolved.Network.IPv4Gateway,
+			LogFile:   nocloudLog,
+			KillAfter: sharedResolved.NoCloudKillAfter,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("spawn nocloud server: %w", err)
+		}
+
+		sharedResolved.NoCloudURL = result.URL
+		sharedResolved.NoCloudPort = result.Port
+		sharedResolved.NoCloudPID = result.PID
+		sharedResolved.NoCloudSharedDir = nocloudDir
+	}
+
 	createdVMs := make([]*model.VM, 0)
 	var errors []string
 
@@ -271,6 +343,16 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 		return fmt.Errorf("failed to resolve necessary dependencies")
 	}
 
+	// Validate socket path before any expensive operations (cloud-init, resize, etc.).
+	if apiSocketPath := filepath.Join(builder.vmDir, resolved.APISocketFilename); len(apiSocketPath) >= 108 {
+		return fmt.Errorf(
+			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). This is a system limit for Unix domain sockets. Path: %s",
+			builder.vmID,
+			len(apiSocketPath),
+			apiSocketPath,
+		)
+	}
+
 	// Generate MAC and TAP name
 	if resolved.RequestedGuestMAC != nil {
 		builder.guestMAC = *resolved.RequestedGuestMAC
@@ -287,15 +369,6 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 
 	// Progress: network
 	emitProgress(builder.onProgress, "network", "running", "Configuring network...")
-
-	// Network setup
-	bridgeAddr, calcErr := network.ComputeBridgeAddress(resolved.Network.IPv4Gateway, resolved.Network.Subnet)
-	if calcErr != nil {
-		return fmt.Errorf("compute bridge address: %w", calcErr)
-	}
-	if err := op.Services.Network.EnsureBridge(ctx, resolved.Network.Bridge, bridgeAddr); err != nil {
-		return fmt.Errorf("ensure bridge: %w", err)
-	}
 
 	// IP Lease (reuse pre-injected lease repo)
 	leaseCtrl, err := network.NewLeaseController(ctx, resolved.Network, op.Repos.Lease, nil)
@@ -316,17 +389,9 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 		builder.guestIP = ip
 	}
 
-	// NAT and TAP in a single batch for atomic firewall rule application
-	natGateways := network.NatGatewaysList(resolved.Network)
+	// TAP setup (NAT rules are done once before the per-VM loop).
 	var tapErr error
 	op.Services.Network.WithBatch(ctx, func() {
-		if resolved.Network.NATEnabled && len(natGateways) > 0 {
-			if natErr := op.Services.Network.EnsureNAT(ctx, resolved.Network.Bridge,
-				natGateways, resolved.Network.Subnet, resolved.Network.ID); natErr != nil {
-				slog.Warn("failed to ensure NAT rules during VM creation",
-					"vm", resolved.Name, "error", natErr)
-			}
-		}
 		if err := op.Services.Network.EnsureTap(ctx, builder.tapName, resolved.Network.Bridge,
 			resolved.Network.ID, resolved.Network.Subnet); err != nil {
 			tapErr = err
@@ -437,12 +502,21 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 		builder.markCreated("cloud-init-inject")
 
 	} else if resolved.CloudInitMode == model.CloudInitModeISO || resolved.CloudInitMode == model.CloudInitModeNET {
+		// Determine the cloud-init directory. For NET mode with a shared batch
+		// nocloud server, use a per-VM subdirectory under the shared batch dir.
+		cloudInitDir := filepath.Join(builder.vmDir, "cloud-init")
+		nocloudURL := resolved.NoCloudURL
+		if resolved.CloudInitMode == model.CloudInitModeNET && resolved.NoCloudSharedDir != "" {
+			cloudInitDir = filepath.Join(resolved.NoCloudSharedDir, builder.guestIP)
+			nocloudURL = fmt.Sprintf("http://%s:%d/%s/",
+				resolved.Network.IPv4Gateway, resolved.NoCloudPort, builder.guestIP)
+		}
 		ciConfig := &cloudinit.Config{
 			Mode:                  resolved.CloudInitMode,
 			VMName:                resolved.Name,
 			VMID:                  builder.vmID,
 			VMDir:                 builder.vmDir,
-			CloudInitDir:          filepath.Join(builder.vmDir, "cloud-init"),
+			CloudInitDir:          cloudInitDir,
 			GuestIP:               builder.guestIP,
 			TapName:               builder.tapName,
 			User:                  resolved.User,
@@ -459,8 +533,8 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 			NocloudPortRangeStart: resolved.NocloudPortRangeStart,
 			NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
 			NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
-			// Pre-allocated server (shared across batch, empty if unset)
-			NoCloudURL:  resolved.NoCloudURL,
+			// Pre-allocated server (shared port, per-VM URL)
+			NoCloudURL:  nocloudURL,
 			NoCloudPort: resolved.NoCloudPort,
 			NoCloudPID:  resolved.NoCloudPID,
 			KillAfter:   resolved.NoCloudKillAfter,
@@ -518,17 +592,6 @@ func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuil
 		return fmt.Errorf("write firecracker config: %w", err)
 	}
 	builder.markCreated("firecracker")
-
-	// Validate socket path won't exceed Unix domain socket limit
-	socketPath := spawner.APISocketPath
-	if len(socketPath) >= 108 {
-		return fmt.Errorf(
-			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). This is a system limit for Unix domain sockets. Path: %s",
-			builder.vmID,
-			len(socketPath),
-			socketPath,
-		)
-	}
 
 	// Console relay setup (before spawn)
 	if resolved.EnableConsole {

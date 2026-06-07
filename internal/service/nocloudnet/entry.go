@@ -12,27 +12,41 @@ import (
 
 // Config holds configuration for the NoCloud HTTP metadata server.
 type Config struct {
+	// CloudInitDir is the single-directory mode — all cloud-init files live here.
+	// Used in non-batch contexts (e.g. single-VM res pawn).
 	CloudInitDir string
-	Port         int
-	Host         string
-	LogFile      string
-	KillAfter    time.Duration
+
+	// BaseDir is the shared batch directory containing per-VM subdirectories.
+	// The URL path /<vm-id>/<file> resolves to <BaseDir>/<vm-id>/<file>.
+	// Falls back to <BaseDir>/common/<file> for shared files.
+	// Only one of CloudInitDir or BaseDir should be set.
+	BaseDir string
+
+	Port      int
+	Host      string
+	LogFile   string
+	KillAfter time.Duration
 }
 
 // Run starts the NoCloud HTTP metadata server with the given config.
-// This is the canonical entry point for foreground execution.
-// Port is required — use FindFreePort in callers to discover a free port.
-// For background execution, use Spawn() instead.
 func Run(ctx context.Context, cfg Config) error {
-	// Validate port is set.
 	if cfg.Port == 0 {
 		return fmt.Errorf("port is required")
 	}
 
-	// Validate cloud-init directory exists.
-	info, err := os.Stat(cfg.CloudInitDir)
-	if err != nil || !info.IsDir() {
-		return fmt.Errorf("cloud-init directory does not exist: %s", cfg.CloudInitDir)
+	var handler *cloudInitRequestHandler
+	if cfg.BaseDir != "" {
+		info, err := os.Stat(cfg.BaseDir)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("base directory does not exist: %s", cfg.BaseDir)
+		}
+		handler = &cloudInitRequestHandler{baseDir: cfg.BaseDir, singleDir: false}
+	} else {
+		info, err := os.Stat(cfg.CloudInitDir)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("cloud-init directory does not exist: %s", cfg.CloudInitDir)
+		}
+		handler = &cloudInitRequestHandler{baseDir: cfg.CloudInitDir, singleDir: true}
 	}
 
 	// Open log file and redirect stdout/stderr to it.
@@ -46,11 +60,15 @@ func Run(ctx context.Context, cfg Config) error {
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Handler: &cloudInitRequestHandler{cloudInitDir: cfg.CloudInitDir},
+		Handler: handler,
 	}
 
+	baseDesc := cfg.BaseDir
+	if baseDesc == "" {
+		baseDesc = cfg.CloudInitDir
+	}
 	fmt.Fprintf(logFP, "NoCloud-net HTTP server starting on %s\n", server.Addr)
-	fmt.Fprintf(logFP, "Serving cloud-init files from: %s\n", cfg.CloudInitDir)
+	fmt.Fprintf(logFP, "Serving cloud-init files from: %s\n", baseDesc)
 
 	// Shutdown triggers: OS signal (SIGTERM/SIGINT) or auto-kill timer.
 	sigCh := make(chan os.Signal, 1)

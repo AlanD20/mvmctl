@@ -76,6 +76,14 @@ func NetworkID(name, subnet, createdAt string) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+// BatchID generates a 16-char SHA256 batch ID from name and creation timestamp.
+// Short length keeps cache directory paths manageable.
+func BatchID(name, createdAt string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s:%s", name, createdAt)
+	return Truncate(fmt.Sprintf("%x", h.Sum(nil)), 16)
+}
+
 // VolumeID generates a SHA256 volume ID from name and creation timestamp.
 func VolumeID(name, createdAt string) string {
 	h := sha256.New()

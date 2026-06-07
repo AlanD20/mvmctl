@@ -25,10 +25,16 @@ type SpawnResult struct {
 // Use infra.FindFreePort to discover a free port before calling Spawn.
 // Writes a PID file alongside the log file for external process tracking.
 func Spawn(ctx context.Context, cfg Config) (*SpawnResult, error) {
+	dirFlag := "--cloud-init-dir"
+	dirVal := cfg.CloudInitDir
+	if cfg.BaseDir != "" {
+		dirFlag = "--base-dir"
+		dirVal = cfg.BaseDir
+	}
 	cmd, err := system.SpawnService(nil, system.SpawnConfig{
 		Name: "nocloudnet",
 		Args: append([]string{"serve"},
-			"--cloud-init-dir", cfg.CloudInitDir,
+			dirFlag, dirVal,
 			"--port", fmt.Sprintf("%d", cfg.Port),
 			"--host", cfg.Host,
 			"--log-file", cfg.LogFile,

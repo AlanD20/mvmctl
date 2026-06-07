@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 
 	"mvmctl/internal/service/console"
@@ -45,22 +46,23 @@ func newNoCloudNetServeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Serve nocloudnet HTTP metadata",
-		Long:  "Starts the nocloudnet HTTP metadata server for cloud-init. Runs in the foreground by default; pass --daemon to run as a background subprocess.",
+		Long:  "Starts the nocloudnet HTTP metadata server for cloud-init. Runs in the foreground by default; pass --daemon to run as a background daemon process.",
 	}
 
-	cmd.Flags().String("cloud-init-dir", "", "Cloud-init seed directory (required)")
+	cmd.Flags().String("cloud-init-dir", "", "Cloud-init seed directory (single-VM mode)")
+	cmd.Flags().String("base-dir", "", "Shared batch directory (multi-VM mode)")
 	cmd.Flags().Int("port", 0, "HTTP server port (required)")
 	cmd.Flags().String("host", "", "Bind address (required)")
 	cmd.Flags().String("log-file", "", "Log file path (required)")
 	cmd.Flags().Duration("kill-after", 0, "Auto-kill after duration (e.g. 5m)")
 	cmd.Flags().Bool("daemon", false, "Run as a background daemon process")
-	cmd.MarkFlagRequired("cloud-init-dir")
 	cmd.MarkFlagRequired("port")
 	cmd.MarkFlagRequired("host")
 	cmd.MarkFlagRequired("log-file")
 
 	cmd.RunE = func(c *cobra.Command, _ []string) error {
 		cloudInitDir, _ := c.Flags().GetString("cloud-init-dir")
+		baseDir, _ := c.Flags().GetString("base-dir")
 		port, _ := c.Flags().GetInt("port")
 		host, _ := c.Flags().GetString("host")
 		logFile, _ := c.Flags().GetString("log-file")
@@ -69,10 +71,14 @@ func newNoCloudNetServeCmd() *cobra.Command {
 
 		cfg := nocloudnet.Config{
 			CloudInitDir: cloudInitDir,
+			BaseDir:      baseDir,
 			Port:         port,
 			Host:         host,
 			LogFile:      logFile,
 			KillAfter:    killAfter,
+		}
+		if cloudInitDir == "" && baseDir == "" {
+			return fmt.Errorf("either --cloud-init-dir or --base-dir is required")
 		}
 		if daemon {
 			_, err := nocloudnet.Spawn(c.Context(), cfg)
