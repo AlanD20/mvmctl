@@ -53,7 +53,7 @@ func SpawnService(ctx context.Context, cfg SpawnConfig) (*exec.Cmd, error) {
 	}
 
 	var cmd *exec.Cmd
-	if cfg.Privileged {
+	if cfg.Privileged && !IsRoot() {
 		if isCancelable(ctx) {
 			cmd = exec.CommandContext(ctx, "sudo", exe, "run", cfg.Name)
 		} else {

@@ -70,12 +70,12 @@ from common import (
 # User-facing names (tweak these to match your naming preference)
 # ---------------------------------------------------------------------------
 
-KEY_NAME = "test"
-VM_NAME = "vm"
-VOLUME_NAME = "vol1"
-NESTED_VM_NAME = "nested-vm"
+KEY_NAME = "fenv-test-1"
+VM_NAME = "fenv-vm-1"
+VOLUME_NAME = "fenv-vol-1"
+NESTED_VM_NAME = "nested-vm-1"
 IMAGE_SELECTOR = "ubuntu:noble"
-KERNEL_SELECTOR = "official:6.19.9"
+KERNEL_SELECTOR = "official:7.0.11"
 
 # ---------------------------------------------------------------------------
 # Resolver helpers
@@ -196,7 +196,7 @@ def _build_chain_cmd(kernel_filename: str, image_filename: str) -> str:
         '&& echo "=== [5/8] mvm image import ===" '
         f"&& mvm image import {IMAGE_SELECTOR} /mnt/{image_filename} --default --force "
         '&& echo "=== [6/8] mvm kernel import ===" '
-        f"&& mvm kernel import {KERNEL_SELECTOR} /mnt/{kernel_filename} --version 6.19.9 --default "
+        f"&& mvm kernel import {KERNEL_SELECTOR} /mnt/{kernel_filename} --version 7.0.11 --default "
         '&& echo "=== [7/8] mvm bin pull ===" '
         "&& MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker --version 1.15.1 --default --force"
         '&& echo "=== [8/8] mvm vm create ===" '
@@ -317,7 +317,7 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
         },
         "copy_bin": {
             "desc": "Copy mvm binary into guest",
-            "args": ["cp", "dist/mvm", f"{VM_NAME}:/root/"],
+            "args": ["cp", "./mvm", f"{VM_NAME}:/root/"],
             "timeout": 60,
         },
         "install_bin": {
