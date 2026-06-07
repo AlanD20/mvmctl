@@ -174,74 +174,102 @@ func (op *Operation) VMCreate(
 		sharedResolved.NoCloudSharedDir = nocloudDir
 	}
 
-	createdVMs := make([]*model.VM, 0)
-	var errors []string
+	// Parallel VM creation: one goroutine per VM.
+	batchCtx, batchCancel := context.WithCancel(ctx)
+	defer batchCancel()
+
+	type vmResult struct {
+		idx int
+		vm  *model.VM
+		err error
+	}
+	resultCh := make(chan vmResult, len(names))
 
 	for idx, name := range names {
-		createdAt := time.Now()
-		vmID := crypto.VMID(name, createdAt.Format(time.RFC3339))
-		vmDir := infra.GetVMDirByID(vmID)
+		go func(idx int, name string) {
+			createdAt := time.Now()
+			vmID := crypto.VMID(name, createdAt.Format(time.RFC3339))
+			vmDir := infra.GetVMDirByID(vmID)
 
-		resolved := request.CloneVMInput(sharedResolved, name, vmID, vmDir)
+			resolved := request.CloneVMInput(sharedResolved, name, vmID, vmDir)
 
-		// Wrap progress with [i/N] prefix for batch; pass onProgress directly for single VM.
-		// (Go 1.22+ loop variables are per-iteration, no capture shadowing needed.)
-		progress := onProgress
-		if count > 1 {
-			progress = func(e event.Progress) {
-				if onProgress != nil {
-					onProgress(event.Progress{
-						Phase:   e.Phase,
-						Status:  e.Status,
-						Message: fmt.Sprintf("[%d/%d] %s: %s", idx+1, count, name, e.Message),
-					})
+			// Progress wrapper (idx, name captured by value via closure param).
+			progress := onProgress
+			if count > 1 {
+				progress = func(e event.Progress) {
+					if onProgress != nil {
+						onProgress(event.Progress{
+							Phase:   e.Phase,
+							Status:  e.Status,
+							Message: fmt.Sprintf("[%d/%d] %s: %s", idx+1, count, name, e.Message),
+						})
+					}
 				}
 			}
-		}
 
-		vmInstance, execErr := op.vmBuilderCreate(ctx, resolved, progress)
-		if execErr != nil {
-			errors = append(errors, fmt.Sprintf("%s: %v", name, execErr))
-			if input.Atomic && len(createdVMs) > 0 {
-				for _, vm := range createdVMs {
-					_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: true})
+			vmInstance, execErr := op.vmBuilderCreate(batchCtx, resolved, progress)
+			if execErr != nil {
+				resultCh <- vmResult{idx: idx, err: execErr}
+				return
+			}
+
+			// Handle volumes (per VM, inside goroutine for independence).
+			if resolved.Volumes != nil && len(resolved.Volumes) > 0 {
+				op.Services.Volume.SetVolumesState(ctx, resolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
+				vmInstance.VolumeIDs = make([]string, len(resolved.Volumes))
+				for i, v := range resolved.Volumes {
+					vmInstance.VolumeIDs[i] = v.ID
 				}
-				return nil, &errs.DomainError{
-					Code: "vm.atomic_failed",
-					Op:   "vm",
-					Message: fmt.Sprintf(
-						"Atomic creation failed at '%s': %v. All %d previously created VMs have been removed.",
-						name,
-						execErr,
-						len(createdVMs),
-					),
-					Class: errs.ClassInternal,
-				}
+				op.Repos.VM.Upsert(ctx, vmInstance)
+			}
+
+			// Audit log per VM.
+			op.AuditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", name))
+
+			resultCh <- vmResult{idx: idx, vm: vmInstance}
+		}(idx, name)
+	}
+
+	// Collect results. On first error in atomic mode, cancel remaining goroutines.
+	createdVMs := make([]*model.VM, 0, len(names))
+	var createErrors []string
+	atomicFailed := false
+
+	for range names {
+		res := <-resultCh
+		if res.err != nil {
+			createErrors = append(createErrors, fmt.Sprintf("%s: %v", names[res.idx], res.err))
+			if input.Atomic {
+				atomicFailed = true
+				batchCancel()
 			}
 			continue
 		}
-
-		// Handle volumes (matches Python's volume handling after _execute_create)
-		if resolved.Volumes != nil && len(resolved.Volumes) > 0 {
-			op.Services.Volume.SetVolumesState(ctx, resolved.Volumes, model.VolumeStatusAttached, &vmInstance.ID)
-			vmInstance.VolumeIDs = make([]string, len(resolved.Volumes))
-			for i, v := range resolved.Volumes {
-				vmInstance.VolumeIDs[i] = v.ID
-			}
-			op.Repos.VM.Upsert(ctx, vmInstance)
-		}
-
-		// Audit log per VM (matches Python's AuditLog.log(audit_action, ...) in _execute_create)
-		op.AuditLog.LogOperation("vm.create", nil, fmt.Sprintf("name=%s", name))
-
-		createdVMs = append(createdVMs, vmInstance)
+		createdVMs = append(createdVMs, res.vm)
 	}
 
-	if len(errors) > 0 && len(createdVMs) == 0 {
+	// Atomic rollback: remove all successfully created VMs.
+	if atomicFailed && len(createdVMs) > 0 {
+		for _, vm := range createdVMs {
+			_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: true})
+		}
+		return nil, &errs.DomainError{
+			Code: "vm.atomic_failed",
+			Op:   "vm",
+			Message: fmt.Sprintf(
+				"Atomic creation failed: %s. All %d created VMs have been removed.",
+				strings.Join(createErrors, "; "),
+				len(createdVMs),
+			),
+			Class: errs.ClassInternal,
+		}
+	}
+
+	if len(createErrors) > 0 && len(createdVMs) == 0 {
 		return nil, &errs.DomainError{
 			Code:    "vm.create_failure",
 			Op:      "vm",
-			Message: strings.Join(errors, "; "),
+			Message: strings.Join(createErrors, "; "),
 			Class:   errs.ClassInternal,
 		}
 	}
