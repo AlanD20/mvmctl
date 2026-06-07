@@ -18,43 +18,43 @@ import (
 //	    vcpus: int | None = None
 //	    mem: int | None = None
 type VMExportComputeConfig struct {
-	VCPUs *int `json:"vcpus,omitempty"`
-	Mem   *int `json:"mem,omitempty"`
+	VCPUs int `json:"vcpus,omitempty"`
+	Mem   int `json:"mem,omitempty"`
 }
 
 // VMExportImageConfig holds portable image references for export.
 // Matches Python's VMExportImageConfig: all fields are str | None = None.
 type VMExportImageConfig struct {
-	Type     *string `json:"type,omitempty"`
-	Arch     *string `json:"arch,omitempty"`
-	DiskSize *string `json:"disk_size,omitempty"`
+	Type     string `json:"type,omitempty"`
+	Arch     string `json:"arch,omitempty"`
+	DiskSize string `json:"disk_size,omitempty"`
 }
 
 // VMExportKernelConfig holds portable kernel references for export.
 // Matches Python's VMExportKernelConfig: all fields are str | None = None.
 type VMExportKernelConfig struct {
-	Version *string `json:"version,omitempty"`
-	Arch    *string `json:"arch,omitempty"`
-	Type    *string `json:"type,omitempty"`
+	Version string `json:"version,omitempty"`
+	Arch    string `json:"arch,omitempty"`
+	Type    string `json:"type,omitempty"`
 }
 
 // VMExportBinaryConfig holds portable binary references for export.
 // Matches Python's VMExportBinaryConfig: name: str = "firecracker", version: str | None = None.
 type VMExportBinaryConfig struct {
-	Name    string  `json:"name"`
-	Version *string `json:"version,omitempty"`
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
 }
 
 // VMExportNetworkConfig holds portable network references for export.
 // Matches Python's VMExportNetworkConfig: most fields are str | None = None.
 type VMExportNetworkConfig struct {
-	Name        *string `json:"name,omitempty"`
-	Subnet      *string `json:"subnet,omitempty"`
-	IPv4Gateway *string `json:"ipv4_gateway,omitempty"`
-	NATGateways *string `json:"nat_gateways,omitempty"`
-	NATEnabled  *bool   `json:"nat_enabled,omitempty"`
-	IP          *string `json:"ip,omitempty"`
-	MAC         *string `json:"mac,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Subnet      string `json:"subnet,omitempty"`
+	IPv4Gateway string `json:"ipv4_gateway,omitempty"`
+	NATGateways string `json:"nat_gateways,omitempty"`
+	NATEnabled  *bool  `json:"nat_enabled,omitempty"`
+	IP          string `json:"ip,omitempty"`
+	MAC         string `json:"mac,omitempty"`
 }
 
 // VMExportBootConfig holds boot configuration for export.
@@ -72,21 +72,21 @@ type VMExportBootConfig struct {
 // VMExportFirecrackerConfig holds Firecracker feature flags for export.
 // Matches Python's VMExportFirecrackerConfig: lsm_flags and cpu_config are str | None.
 type VMExportFirecrackerConfig struct {
-	EnableAPISocket *bool   `json:"enable_api_socket,omitempty"`
-	PCIEnabled      *bool   `json:"pci_enabled,omitempty"`
+	EnableAPISocket *bool  `json:"enable_api_socket,omitempty"`
+	PCIEnabled      *bool  `json:"pci_enabled,omitempty"`
 	LsmFlags        string `json:"lsm_flags"`
-	NestedVirt      *bool   `json:"nested_virt,omitempty"`
-	CPUConfig       *string `json:"cpu_config,omitempty"`
+	NestedVirt      *bool  `json:"nested_virt,omitempty"`
+	CPUConfig       string `json:"cpu_config,omitempty"`
 }
 
 // VMExportCloudInitConfig holds cloud-init configuration for export.
 // Matches Python's VMExportCloudInitConfig: mode, user, ssh_key are str | None = None.
 type VMExportCloudInitConfig struct {
-	Mode           *string `json:"mode,omitempty"`
-	User           *string `json:"user,omitempty"`
-	SSHKey         *string `json:"ssh_key,omitempty"`
-	KeepISO        *bool   `json:"keep_iso,omitempty"`
-	NocloudNetPort *int    `json:"nocloud_net_port,omitempty"`
+	Mode           string `json:"mode,omitempty"`
+	User           string `json:"user,omitempty"`
+	SSHKey         string `json:"ssh_key,omitempty"`
+	KeepISO        *bool  `json:"keep_iso,omitempty"`
+	NocloudNetPort int    `json:"nocloud_net_port,omitempty"`
 }
 
 // VMExportConfig is a portable VM configuration for export/import across hosts.

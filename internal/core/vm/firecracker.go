@@ -149,6 +149,7 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}
+	cmd.Env = append(os.Environ(), infra.MVMBackgroundServiceEnv)
 
 	if err := cmd.Start(); err != nil {
 		return err

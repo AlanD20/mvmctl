@@ -98,6 +98,15 @@ func ShlexQuote(s string) string {
 	return s
 }
 
+// NonZero returns v if it is non-zero, otherwise returns fallback.
+func NonZero[T comparable](v T, fallback T) T {
+	var zero T
+	if v != zero {
+		return v
+	}
+	return fallback
+}
+
 // MapToStruct converts a map[string]any to a struct via JSON marshal/unmarshal.
 // Returns nil if m is nil or conversion fails.
 func MapToStruct[T any](m map[string]any) *T {

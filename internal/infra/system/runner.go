@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 )
 
@@ -68,7 +69,16 @@ type ProcessSignalHandlerConfig struct {
 	PID               int
 	IsChild           bool
 	ExpectedStartTime *int64
+	GracefulTimeout   time.Duration // defaults to 30s if zero
+	KillTimeout       time.Duration // defaults to 5s if zero
+	PollInterval      time.Duration // defaults to 100ms if zero
 }
+
+const (
+	defaultGracefulTimeout = 4 * time.Second
+	defaultKillTimeout     = 5 * time.Second
+	defaultPollInterval    = 100 * time.Millisecond
+)
 
 // ProcessSignalHandler struct to match Python's class.
 type ProcessSignalHandler struct {
@@ -83,15 +93,15 @@ type ProcessSignalHandler struct {
 }
 
 // NewProcessSignalHandler creates a new ProcessSignalHandler.
-// The config struct supplies PID and overridable fields; timeouts use defaults.
+// Fields in cfg use their provided values, or fall back to defaults.
 func NewProcessSignalHandler(cfg ProcessSignalHandlerConfig) *ProcessSignalHandler {
 	return &ProcessSignalHandler{
 		Pid:               cfg.PID,
 		IsChild:           cfg.IsChild,
 		ExpectedStartTime: cfg.ExpectedStartTime,
-		GracefulTimeout:   30 * time.Second,
-		KillTimeout:       5 * time.Second,
-		PollInterval:      100 * time.Millisecond,
+		GracefulTimeout:   infra.NonZero(cfg.GracefulTimeout, defaultGracefulTimeout),
+		KillTimeout:       infra.NonZero(cfg.KillTimeout, defaultKillTimeout),
+		PollInterval:      infra.NonZero(cfg.PollInterval, defaultPollInterval),
 	}
 }
 

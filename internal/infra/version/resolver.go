@@ -282,22 +282,7 @@ func (g *VersionGate) Require(binaryName, version, minimum string) error {
 // Matches Python's VersionGate._parse_version() exactly.
 // Python: re.sub(r"^(\d+(?:\.\d+)*).*$", r"\1", version) then split(".") and map(int).
 func (g *VersionGate) ParseVersion(version string) []int {
-	match := versionCleanPattern.FindStringSubmatch(version)
-	if match == nil {
-		return nil
-	}
-	cleaned := match[1]
-
-	parts := strings.Split(cleaned, ".")
-	var nums []int
-	for _, p := range parts {
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			return nil
-		}
-		nums = append(nums, n)
-	}
-	return nums
+	return parseVersionNums(version)
 }
 
 // IsSatisfiedBy compares version against minimum.
@@ -318,23 +303,7 @@ func (g *VersionGate) IsSatisfiedBy(version, minimum string) bool {
 		return false
 	}
 
-	// Compare component-by-component, stopping at the shorter tuple
-	n := len(vParts)
-	if len(mParts) < n {
-		n = len(mParts)
-	}
-	for i := range n {
-		if vParts[i] > mParts[i] {
-			return true
-		}
-		if vParts[i] < mParts[i] {
-			return false
-		}
-	}
-
-	// All compared components are equal — satisfied if version has at least
-	// as many components as minimum (or more).
-	return len(vParts) >= len(mParts)
+	return isAtLeast(vParts, mParts)
 }
 
 // ── Semver comparison helpers ──

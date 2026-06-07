@@ -221,7 +221,7 @@ func completeVMNamesEnhanced(cmd *cobra.Command, _ []string, toComplete string) 
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	vms := opRef.VMList(cmd.Context(), nil)
+	vms := opRef.VMList(cmd.Context())
 	var results []string
 	for _, vm := range vms {
 		if vm.Name != "" && strings.HasPrefix(vm.Name, toComplete) && !slices.Contains(results, vm.Name) {

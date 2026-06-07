@@ -1,5 +1,7 @@
 package responses
 
+import "mvmctl/internal/infra/model"
+
 // VMVolume is a volume entry in the VM inspect response.
 type VMVolume struct {
 	ID     string `json:"id"`
@@ -38,21 +40,17 @@ type VMResourcesInfo struct {
 
 // VMNetworkingInfo groups VM networking info in an inspect response.
 type VMNetworkingInfo struct {
-	IPv4        string  `json:"ipv4"`
-	MAC         string  `json:"mac"`
-	NetworkID   string  `json:"network_id"`
-	NetworkName *string `json:"network_name"`
-	TapDevice   string  `json:"tap_device"`
+	IPv4      string         `json:"ipv4"`
+	MAC       string         `json:"mac"`
+	Network   *model.Network `json:"network,omitempty"`
+	TapDevice string         `json:"tap_device"`
 }
 
 // VMAssetsInfo groups VM asset references in an inspect response.
 type VMAssetsInfo struct {
-	ImageID       string  `json:"image_id"`
-	ImageName     *string `json:"image_name"`
-	KernelID      string  `json:"kernel_id"`
-	KernelVersion *string `json:"kernel_version"`
-	BinaryID      string  `json:"binary_id"`
-	BinaryName    *string `json:"binary_name"`
+	Image  *model.ImageItem   `json:"image,omitempty"`
+	Kernel *model.KernelItem  `json:"kernel,omitempty"`
+	Binary *model.BinaryItem  `json:"binary,omitempty"`
 }
 
 // VMFilesystemInfo groups VM filesystem paths in an inspect response.
