@@ -129,9 +129,25 @@ func (r *sqliteRepo) GetByVersionAndType(ctx context.Context, version, kernelTyp
 }
 
 func (r *sqliteRepo) SetDefault(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE kernels SET is_default = 1 WHERE id = ?`, id)
-	return err
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE kernels SET is_default = 0 WHERE deleted_at IS NULL`)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE kernels SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL`, id)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *sqliteRepo) UpdateManyIsPresent(ctx context.Context, ids []string, present bool) error {

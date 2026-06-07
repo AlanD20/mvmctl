@@ -106,7 +106,7 @@ func NewImageAcquireRequest(inputs any, cfg *config.Service, imageRepo image.Rep
 // ResolvePull resolves pull inputs.
 // Matches Python's ImageAcquireRequest.resolve_pull().
 func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAcquireInput, error) {
-	in, ok := r.input.(*ImagePullInput)
+	in, ok := r.input.(ImagePullInput)
 	if !ok {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImagePullFailed,
@@ -154,7 +154,7 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 // ResolveImport resolves import inputs.
 // Matches Python's ImageAcquireRequest.resolve_import().
 func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImageAcquireInput, error) {
-	in, ok := r.input.(*ImageImportInput)
+	in, ok := r.input.(ImageImportInput)
 	if !ok {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImageImportFailed,

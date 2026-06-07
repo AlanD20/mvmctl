@@ -1346,6 +1346,8 @@ func (s *Service) resolveSourceTemplate(
 }
 
 // ResolveVersion resolves a version spec (latest, partial, or exact) to a concrete version.
+// If the version spec is a codename alias (e.g. "jammy" → "22.04"), the codename
+// mapping from the matching type config is applied before semver parsing.
 func (s *Service) ResolveVersion(
 	ctx context.Context,
 	imageType string,
@@ -1354,6 +1356,19 @@ func (s *Service) ResolveVersion(
 	ciVersion string,
 	configs []download.ResolverConfig,
 ) (string, error) {
+	// Apply codename mapping before semver parsing (matches ConstructSpecFromTypeConfig).
+	for _, cfg := range configs {
+		if imageType != "" && cfg.Type != imageType {
+			continue
+		}
+		if cfg.Options.CodenameMapping != nil {
+			if mapped, ok := cfg.Options.CodenameMapping[versionSpec]; ok {
+				versionSpec = mapped
+				break
+			}
+		}
+	}
+
 	spec, err := version.ParseSpec(versionSpec)
 	if err != nil {
 		return "", NewImageError(fmt.Sprintf("Invalid version spec %q: %s", versionSpec, err))
