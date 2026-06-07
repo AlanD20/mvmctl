@@ -5,6 +5,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/infra/errs"
@@ -40,10 +41,11 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput) erro
 	if resolved.Key != nil {
 		keyPath = *resolved.Key
 	}
-	svc, err := ssh.NewService(resolved.TargetIP, resolved.User, keyPath, resolved.Timeout)
-	if err != nil {
-		return newSSHError(err)
+	timeout := 0 * time.Second
+	if resolved.Timeout != nil && *resolved.Timeout > 0 {
+		timeout = time.Duration(*resolved.Timeout) * time.Second
 	}
+	svc := ssh.NewService(resolved.TargetIP, resolved.User, keyPath, timeout)
 
 	// Connect (matches Python: service.connect(command=..., exec_mode=resolved.cmd is None))
 	command := ""

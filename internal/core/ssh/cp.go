@@ -10,19 +10,18 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"unicode"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/errs"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 )
-
-// ProgressCallback is called with the number of bytes copied during a transfer.
-type ProgressCallback func(bytesCopied int64)
 
 // ── Constants matching Python's _pipeChunkSize, _GNU_CREATE_EXTRAS,
 //    _GNU_EXTRACT_EXTRAS, and _tarCache ─────────────────────────────
 
 const pipeChunkSize = 65536
+const sshConnectTimeout = 5 // seconds, matches Python's hardcoded connect timeout
 
 // gnuCreateExtras mirrors Python's _GNU_CREATE_EXTRAS:
 //
@@ -34,61 +33,25 @@ var gnuCreateExtras = []string{"--xattrs", "--acls"}
 //	["-p", "--same-owner", "--delay-directory-restore"]
 var gnuExtractExtras = []string{"-p", "--same-owner", "--delay-directory-restore"}
 
-// tarCache mirrors Python's _tar_cache: "user@host" → is_gnu_bool
-// The "local" key caches the host tar detection.
-var (
-	tarCacheMu sync.RWMutex
-	tarCache   = map[string]bool{}
-)
-
 // CPService provides tar-over-SSH file copy between host and VM.
 // Matches Python's CPService (tar-over-SSH pipe chain).
 // NEVER falls back to SCP — always uses tar pipe, even for single files.
-type CPService struct{}
+type CPService struct {
+	// tarCache mirrors Python's _tar_cache: "user@host" → is_gnu_bool.
+	// The "local" key caches the host tar detection.
+	tarCache   map[string]bool
+	tarCacheMu sync.RWMutex
+}
 
 func NewCPService() *CPService {
-	return &CPService{}
-}
-
-// ── Path parsing ───────────────────────────────────────────────────
-
-// _parseVMPath splits a path into optional (vmIdentifier, remotePath).
-// Matches Python's CPService._parse_vm_path() exactly.
-// Python returns tuple[str | None, str]; Go returns (vmID, path)
-// where vmID="" corresponds to Python's None.
-func (s *CPService) _parseVMPath(path string) (vmID string, filePath string) {
-	prefix, rest, found := strings.Cut(path, ":")
-	if found {
-		return prefix, rest
+	return &CPService{
+		tarCache: map[string]bool{},
 	}
-	return "", path
-}
-
-// ── SSH command prefix ─────────────────────────────────────────────
-
-// _buildSSHPrefix builds the SSH command prefix list.
-// Matches Python's CPService._build_ssh_prefix() EXACTLY —
-// no port flag, exact same options.
-func (s *CPService) _buildSSHPrefix(ip, user, keyPath string) []string {
-	prefix := []string{
-		"ssh",
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "BatchMode=yes",
-		"-o", "ServerAliveInterval=2",
-		"-o", "ServerAliveCountMax=3",
-		"-o", "ConnectTimeout=5",
-	}
-	if keyPath != "" {
-		prefix = append(prefix, "-i", keyPath)
-	}
-	prefix = append(prefix, fmt.Sprintf("%s@%s", user, ip))
-	return prefix
 }
 
 // ── Remote path probing ────────────────────────────────────────────
 
-// _probeRemotePath probes a remote path and returns (pathType, sizeInBytes, error).
+// probeRemotePath probes a remote path and returns (pathType, sizeInBytes, error).
 // pathType is "FILE" or "DIR".
 // Matches Python's CPService._probe_remote_path() exactly.
 //
@@ -96,112 +59,95 @@ func (s *CPService) _buildSSHPrefix(ip, user, keyPath string) []string {
 // raises ProcessError on any failure (SSH error, non-zero exit, etc.). The
 // ProcessError propagates unwrapped to the caller. Go mirrors this by returning
 // the raw exec error without wrapping in a domain error.
-func (s *CPService) _probeRemotePath(sshPrefix []string, remotePath string) (string, int64, error) {
+func (s *CPService) probeRemotePath(ctx context.Context, sshPrefix []string, remotePath string) (string, int64, error) {
 	probeCmd := fmt.Sprintf(
-		"test -f '%s' && echo FILE && stat -c%%s '%s' || (test -d '%s' && echo DIR && du -sb '%s' | cut -f1) || echo NONE",
-		remotePath,
-		remotePath,
-		remotePath,
+		"test -f '%[1]s' && echo FILE && stat -c%%s '%[1]s' || (test -d '%[1]s' && echo DIR && du -sb '%[1]s' | cut -f1) || echo NONE",
 		remotePath,
 	)
-	cmd := append([]string{}, sshPrefix...)
-	cmd = append(cmd, probeCmd)
+	cmdArgs := append([]string{}, sshPrefix...)
+	cmdArgs = append(cmdArgs, probeCmd)
 
-	execCmd := exec.Command(cmd[0], cmd[1:]...)
-	out, err := execCmd.Output()
+	c := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+	c.Env = append(os.Environ(), "MVM_SSH_CONNECTION=1")
+	stdout, err := c.Output()
 	if err != nil {
-		// Python: ProcessError propagates from run_cmd(cmd, capture=True, check=True).
-		// We return the raw error (matching Python's exception propagation).
 		return "", 0, err
 	}
 
-	lines := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)
-	if len(lines) == 0 {
-		return "", 0, ErrCPSourceNotFound(
-			fmt.Sprintf("Remote path not found: %s", remotePath),
-		)
-	}
+	lines := strings.SplitN(strings.TrimSpace(string(stdout)), "\n", 2)
 
 	pathType := strings.TrimSpace(lines[0])
 	if pathType == "NONE" {
-		return "", 0, ErrCPSourceNotFound(
-			fmt.Sprintf("Remote path not found: %s", remotePath),
-		)
+		return "", 0, &errs.DomainError{
+			Code:    errs.CodeCPSourceNotFound,
+			Op:      "cp",
+			Message: fmt.Sprintf("remote path not found: %s", remotePath),
+			Class:   errs.ClassValidation,
+		}
 	}
 
 	var size int64
 	if len(lines) > 1 {
-		fmt.Sscanf(strings.TrimSpace(lines[1]), "%d", &size)
+		if _, err := fmt.Sscanf(strings.TrimSpace(lines[1]), "%d", &size); err != nil {
+			slog.Warn("failed to parse remote path size from probe output",
+				"remotePath", remotePath,
+				"output", lines[1],
+				"error", err,
+			)
+		}
 	}
 	return pathType, size, nil
 }
 
 // ── Tar capability probing ─────────────────────────────────────────
 
-// _probeRemoteTar probes remote tar and returns true if it's GNU tar.
-// Results are cached per host. Matches Python's CPService._probe_remote_tar() exactly:
-//
-//	target = ssh_prefix[-1] if ssh_prefix else "unknown"
-func (s *CPService) _probeRemoteTar(sshPrefix []string) bool {
-	target := "unknown"
+// probeTarGNU probes tar --version and returns true if it's GNU tar.
+// If sshPrefix is non-empty, the probe runs remotely via SSH.
+// Results are cached per target (SSH host or "local").
+// Matches Python's CPService._probe_remote_tar() and _is_local_tar_gnu().
+func (s *CPService) probeTarGNU(ctx context.Context, sshPrefix ...string) bool {
+	target := "local"
 	if len(sshPrefix) > 0 {
 		target = sshPrefix[len(sshPrefix)-1]
 	}
 
-	tarCacheMu.RLock()
-	isGnu, ok := tarCache[target]
-	tarCacheMu.RUnlock()
+	s.tarCacheMu.RLock()
+	isGNU, ok := s.tarCache[target]
+	s.tarCacheMu.RUnlock()
 	if ok {
-		return isGnu
+		return isGNU
 	}
 
-	probeCmd := "tar --version 2>/dev/null | head -1"
-	cmd := append([]string{}, sshPrefix...)
-	cmd = append(cmd, probeCmd)
-
-	execCmd := exec.Command(cmd[0], cmd[1:]...)
-	out, err := execCmd.Output()
-	if err != nil {
-		isGnu = false
+	var stdout []byte
+	var err error
+	if len(sshPrefix) > 0 {
+		cmdArgs := append([]string{}, sshPrefix...)
+		cmdArgs = append(cmdArgs, "tar --version 2>/dev/null | head -1")
+		c := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+		c.Env = append(os.Environ(), "MVM_SSH_CONNECTION=1")
+		stdout, err = c.Output()
 	} else {
-		isGnu = strings.Contains(string(out), "GNU tar")
+		c := exec.CommandContext(ctx, "tar", "--version")
+		stdout, err = c.Output()
 	}
 
-	tarCacheMu.Lock()
-	tarCache[target] = isGnu
-	tarCacheMu.Unlock()
-	return isGnu
-}
-
-// _isLocalTarGnu checks if local tar is GNU tar. Result cached.
-// Matches Python's CPService._is_local_tar_gnu().
-func (s *CPService) _isLocalTarGnu() bool {
-	tarCacheMu.RLock()
-	isGnu, ok := tarCache["local"]
-	tarCacheMu.RUnlock()
-	if ok {
-		return isGnu
-	}
-
-	cmd := exec.Command("tar", "--version")
-	out, err := cmd.Output()
 	if err != nil {
-		isGnu = false
+		isGNU = false
 	} else {
-		isGnu = strings.Contains(string(out), "GNU tar")
+		isGNU = strings.Contains(string(stdout), "GNU tar")
 	}
 
-	tarCacheMu.Lock()
-	tarCache["local"] = isGnu
-	tarCacheMu.Unlock()
-	return isGnu
+	s.tarCacheMu.Lock()
+	s.tarCache[target] = isGNU
+	s.tarCacheMu.Unlock()
+	return isGNU
 }
 
 // ── Tar command builders ───────────────────────────────────────────
 
-// _buildSourceTar builds the tar create command list for a local path.
+// buildSourceTar builds the tar create command list for a local path.
 // Matches Python's CPService._build_source_tar() exactly.
-func (s *CPService) _buildSourceTar(path string, isDir bool, gnuExtras bool) []string {
+func (s *CPService) buildSourceTar(path string, isDir bool, gnuExtras bool) []string {
 	var extra []string
 	if gnuExtras {
 		extra = gnuCreateExtras
@@ -217,19 +163,19 @@ func (s *CPService) _buildSourceTar(path string, isDir bool, gnuExtras bool) []s
 	return append([]string{"tar", "cf", "-"}, append(extra, "-C", parent, base)...)
 }
 
-// _buildRemoteSourceTar builds the tar create shell command string for a remote path.
+// buildRemoteSourceTar builds the tar create shell command string for a remote path.
 // Matches Python's CPService._build_remote_source_tar().
-func (s *CPService) _buildRemoteSourceTar(path string, isDir bool, gnuExtras bool) string {
+func (s *CPService) buildRemoteSourceTar(path string, isDir bool, gnuExtras bool) string {
 	var extraFlags string
 	if gnuExtras {
 		parts := make([]string, len(gnuCreateExtras))
 		for i, f := range gnuCreateExtras {
-			parts[i] = shellQuote(f)
+			parts[i] = infra.ShlexQuote(f)
 		}
 		extraFlags = strings.Join(parts, " ")
 	}
 
-	quotedPath := shellQuote(path)
+	quotedPath := infra.ShlexQuote(path)
 	if isDir {
 		if extraFlags != "" {
 			return fmt.Sprintf("tar cf - %s -C %s .", extraFlags, quotedPath)
@@ -242,14 +188,14 @@ func (s *CPService) _buildRemoteSourceTar(path string, isDir bool, gnuExtras boo
 	}
 	base := filepath.Base(path)
 	if extraFlags != "" {
-		return fmt.Sprintf("tar cf - %s -C %s %s", extraFlags, shellQuote(parent), shellQuote(base))
+		return fmt.Sprintf("tar cf - %s -C %s %s", extraFlags, infra.ShlexQuote(parent), infra.ShlexQuote(base))
 	}
-	return fmt.Sprintf("tar cf - -C %s %s", shellQuote(parent), shellQuote(base))
+	return fmt.Sprintf("tar cf - -C %s %s", infra.ShlexQuote(parent), infra.ShlexQuote(base))
 }
 
-// _buildDestTar builds the tar extract command list for a local destination.
+// buildDestTar builds the tar extract command list for a local destination.
 // Matches Python's CPService._build_dest_tar() exactly.
-func (s *CPService) _buildDestTar(dstPath string, gnuExtras bool, noOverwrite bool) []string {
+func (s *CPService) buildDestTar(dstPath string, gnuExtras bool, noOverwrite bool) []string {
 	var flags []string
 	if noOverwrite {
 		flags = append(flags, "-k")
@@ -266,9 +212,9 @@ func (s *CPService) _buildDestTar(dstPath string, gnuExtras bool, noOverwrite bo
 	return args
 }
 
-// _buildRemoteDestTar builds the tar extract shell command string for a remote path.
+// buildRemoteDestTar builds the tar extract shell command string for a remote path.
 // Matches Python's CPService._build_remote_dest_tar() exactly.
-func (s *CPService) _buildRemoteDestTar(dstPath string, gnuExtras bool, noOverwrite bool) string {
+func (s *CPService) buildRemoteDestTar(dstPath string, gnuExtras bool, noOverwrite bool) string {
 	var parts []string
 	if noOverwrite {
 		parts = append(parts, "-k")
@@ -281,178 +227,178 @@ func (s *CPService) _buildRemoteDestTar(dstPath string, gnuExtras bool, noOverwr
 		}
 	}
 	parts = append(parts, "--no-same-owner")
-	parts = append(parts, "-C", shellQuote(dstPath))
+	parts = append(parts, "-C", infra.ShlexQuote(dstPath))
 	return "tar xf - " + strings.Join(parts, " ")
 }
 
-// shellQuote matches Python's shlex.quote() exactly.
+// ── Pipe ───────────────────────────────────────────────────────────
+
+// progressWriter wraps an io.Writer, tracking bytes written and calling
+// the onProgress callback after each write.
+type progressWriter struct {
+	w           io.Writer
+	totalCopied *int64
+	totalSize   int64
+	onProgress  event.OnDownloadCallback
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n, err := pw.w.Write(p)
+	*pw.totalCopied += int64(n)
+	if pw.onProgress != nil && n > 0 {
+		pw.onProgress(*pw.totalCopied, pw.totalSize)
+	}
+	return n, err
+}
+
+// pipe sets up a source→destination tar pipe, copies data, waits for
+// completion, and returns a classified error. If onProgress is non-nil,
+// progress is reported via callback. Always uses a 64 KiB copy buffer.
 //
-// Python's shlex.quote:
-//   - Empty string → "”"
-//   - If the string contains only safe characters (\w@%+=:,./-), return as-is
-//   - Otherwise wrap in single quotes, escaping embedded single quotes as '"'"'
-func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	if isSafe(s) {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
-}
-
-// isSafe checks if a string contains only shell-safe characters (matches
-// Python's shlex._find_unsafe: r'[^\w@%+=:,./-]').
-func isSafe(s string) bool {
-	for _, r := range s {
-		if !isShellSafeRune(r) {
-			return false
-		}
-	}
-	return true
-}
-
-// isShellSafeRune returns true for characters that are safe in shell arguments
-// without quoting. Matches Python's shlex unsafe regex [^\w@%+=:,./-].
-func isShellSafeRune(r rune) bool {
-	if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' {
-		return true
-	}
-	switch r {
-	case '@', '%', '+', '=', ':', ',', '.', '/', '-':
-		return true
-	}
-	return false
-}
-
-// ── Directory size helper ──────────────────────────────────────────
-
-// _getDirectorySize returns the approximate total size of a directory
-// by summing file sizes. Matches Python's CPService._get_directory_size().
-func (s *CPService) _getDirectorySize(path string) int64 {
-	var total int64
-	filepath.Walk(path, func(fp string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip inaccessible files, matching Python's OSError pass
-		}
-		if !fi.IsDir() {
-			total += fi.Size()
-		}
-		return nil
-	})
-	return total
-}
-
-// ── Pipe with progress ─────────────────────────────────────────────
-
-// _pipeWithProgress pipes source stdout into dest stdin, reporting progress.
-// Matches Python's CPService._pipe_with_progress() exactly.
-//
-// Python:
-//   - Reads src stdout in 64 KiB chunks
-//   - Writes each chunk to dest stdin
-//   - Calls on_progress(len(chunk)) when set
-//   - Closes dest stdin and src stdout after copying
-//   - Checks src exit code → CPError(code="cp.source_failed")
-//   - Checks dest exit code → CPDestinationExistsError if
-//     "Cannot open"/"Exists"/"File exists" in stderr, otherwise CPError
-//
-// checkDestExists controls the error classification (separate from pipe
-// progress). Python passes checkDestExists implicitly by which copy method
-// calls _pipe_with_progress. The behavior is:
-//   - copy_host_to_vm: checkExists=true
-//   - copy_vm_to_host and copy_vm_to_vm: checkExists=false
-func (s *CPService) _pipeWithProgress(
+// Replaces Python's CPService._pipe_with_progress() and the old
+// pipeWithProgress/runBashPipe split. Error classification:
+//   - Source failure → ErrCPSourceFailed (code="cp.source_failed")
+//   - Dest failure with "Cannot open"/"Exists"/"File exists" → CodeCPDestinationExists
+//   - Other dest failure → CodeCPDestinationFailed
+func (s *CPService) pipe(
 	ctx context.Context,
-	sourceCmd, destCmd []string,
+	srcCmd, destCmd []string,
 	totalSize int64,
-	onProgress func(int64),
-	checkDestExists bool,
+	onProgress event.OnDownloadCallback,
 ) error {
-	srcProc := exec.CommandContext(ctx, sourceCmd[0], sourceCmd[1:]...)
+	srcProc := exec.CommandContext(ctx, srcCmd[0], srcCmd[1:]...)
+	srcProc.Env = append(os.Environ(), "MVM_SSH_CONNECTION=1")
 	destProc := exec.CommandContext(ctx, destCmd[0], destCmd[1:]...)
+	destProc.Env = append(os.Environ(), "MVM_SSH_CONNECTION=1")
 
 	srcStdout, err := srcProc.StdoutPipe()
 	if err != nil {
-		return ErrCPFailed("Failed to set up pipe between processes")
+		return &errs.DomainError{
+			Code:    errs.CodeCPError,
+			Op:      "cp",
+			Message: "failed to set up pipe between processes",
+			Class:   errs.ClassInternal,
+		}
 	}
 	destStdin, err := destProc.StdinPipe()
 	if err != nil {
-		return ErrCPFailed("Failed to set up pipe between processes")
+		return &errs.DomainError{
+			Code:    errs.CodeCPError,
+			Op:      "cp",
+			Message: "failed to set up pipe between processes",
+			Class:   errs.ClassInternal,
+		}
 	}
 	destStderr, err := destProc.StderrPipe()
 	if err != nil {
-		return ErrCPFailed("Failed to set up pipe between processes")
+		return &errs.DomainError{
+			Code:    errs.CodeCPError,
+			Op:      "cp",
+			Message: "failed to set up pipe between processes",
+			Class:   errs.ClassInternal,
+		}
 	}
 
 	if err := srcProc.Start(); err != nil {
-		return ErrCPFailed("Failed to set up pipe between processes")
+		return &errs.DomainError{
+			Code:    errs.CodeCPError,
+			Op:      "cp",
+			Message: "failed to set up pipe between processes",
+			Class:   errs.ClassInternal,
+		}
 	}
 	if err := destProc.Start(); err != nil {
-		return ErrCPFailed("Failed to set up pipe between processes")
+		return &errs.DomainError{
+			Code:    errs.CodeCPError,
+			Op:      "cp",
+			Message: "failed to set up pipe between processes",
+			Class:   errs.ClassInternal,
+		}
 	}
 
-	// Read src stdout in 64 KiB chunks, write to dest stdin
-	buf := make([]byte, pipeChunkSize)
-	for {
-		n, readErr := srcStdout.Read(buf)
-		if n > 0 {
-			if _, writeErr := destStdin.Write(buf[:n]); writeErr != nil {
-				break
-			}
-			if onProgress != nil {
-				onProgress(int64(n))
-			}
+	// Copy src stdout → dest stdin with optional progress tracking
+	var totalCopied int64
+	copyDest := io.Writer(destStdin)
+	if onProgress != nil {
+		// Python progress path: use progressWriter wrapper
+		copyDest = &progressWriter{
+			w:           destStdin,
+			totalCopied: &totalCopied,
+			totalSize:   totalSize,
+			onProgress:  onProgress,
 		}
-		if readErr != nil {
-			break
-		}
+	}
+	if _, err := io.CopyBuffer(copyDest, srcStdout, make([]byte, pipeChunkSize)); err != nil {
+		slog.Debug("pipe copy ended with error", "error", err)
 	}
 
 	destStdin.Close()
 	srcStdout.Close()
 
-	srcErr := srcProc.Wait()
-	destErr := destProc.Wait()
-
-	// Python reads dest stderr AFTER both processes finish (not concurrently):
-	//   dest_stderr = dest_proc.stderr.read().decode() if dest_proc.stderr else ""
+	// Read dest stderr BEFORE Wait() — Wait() closes the pipe, making
+	// ReadAll return empty. Matches Go stdlib documented pattern:
+	// https://pkg.go.dev/os/exec#Cmd.StderrPipe
 	destStderrStr := ""
 	if destStderr != nil {
-		stderrBytes, _ := io.ReadAll(destStderr)
+		stderrBytes, err := io.ReadAll(destStderr)
+		if err != nil {
+			slog.Warn("failed to read destination process stderr", "error", err)
+		}
 		destStderrStr = strings.TrimSpace(string(stderrBytes))
 	}
 
+	srcErr := srcProc.Wait()
+	destErr := destProc.Wait()
+
 	if srcErr != nil {
-		exitCode := 1
-		if exitErr, ok := srcErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
+		exitCode := exitCodeFromExitErr(srcErr)
 		// Python: raise CPError(f"Source tar process failed (exit {src_rc})", code="cp.source_failed")
 		return ErrCPSourceFailed(exitCode)
 	}
 	if destErr != nil {
-		exitCode := 1
-		if exitErr, ok := destErr.(*exec.ExitError); ok {
-			exitCode = exitErr.ExitCode()
-		}
+		exitCode := exitCodeFromExitErr(destErr)
 		msg := destStderrStr
 		if msg == "" {
-			msg = fmt.Sprintf("Destination process failed (exit %d)", exitCode)
+			msg = fmt.Sprintf("destination process failed (exit %d)", exitCode)
 		}
 		if strings.Contains(msg, "Cannot open") || strings.Contains(msg, "Exists") ||
 			strings.Contains(msg, "File exists") {
 			// Python: raise CPDestinationExistsError(f"Destination exists: {msg}", code="cp.destination_exists")
-			return ErrCPDestinationExists(fmt.Sprintf("Destination exists: %s", msg))
+			return &errs.DomainError{
+				Code:    errs.CodeCPDestinationExists,
+				Op:      "cp",
+				Message: fmt.Sprintf("destination exists: %s", msg),
+				Class:   errs.ClassValidation,
+			}
 		}
 		// Python: raise CPError(msg, code="cp.destination_failed")
-		return ErrCPDestinationFailed(msg)
+		return &errs.DomainError{
+			Code:    errs.CodeCPDestinationFailed,
+			Op:      "cp",
+			Message: msg,
+			Class:   errs.ClassInternal,
+		}
 	}
 
 	return nil
 }
 
+// exitCodeFromExitErr extracts the exit code from an exec.ExitError, defaulting to 1.
+func exitCodeFromExitErr(err error) int {
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode()
+	}
+	return 1
+}
+
 // ── Copy directions ────────────────────────────────────────────────
+
+// sourceInfo holds metadata about a source path for multi-source copy.
+type sourceInfo struct {
+	path  string
+	isDir bool
+	size  int64
+}
 
 // CopyToVM copies one or more files/directories from host to VM using tar-over-SSH pipe.
 // ALWAYS uses tar (never SCP), matching Python's CPService.copy_host_to_vm().
@@ -468,7 +414,7 @@ func (s *CPService) CopyToVM(
 	dest string,
 	info model.ConnectionInfo,
 	force bool,
-	onProgress ProgressCallback,
+	onProgress event.OnDownloadCallback,
 ) (int64, string, error) {
 	if len(srcs) == 0 {
 		return 0, "", fmt.Errorf("no source paths specified")
@@ -482,18 +428,28 @@ func (s *CPService) CopyToVM(
 		if err != nil {
 			if os.IsNotExist(err) {
 				// Python: raise CPSourceNotFoundError(f"Local path not found: {p}", code="cp.source_not_found")
-				return 0, "", ErrCPSourceNotFound(fmt.Sprintf("Local path not found: %s", src))
+				return 0, "", &errs.DomainError{
+					Code:    errs.CodeCPSourceNotFound,
+					Op:      "cp",
+					Message: fmt.Sprintf("local path not found: %s", src),
+					Class:   errs.ClassValidation,
+				}
 			}
 			return 0, "", err
 		}
 		// Python: if not os.path.isfile(p) and not os.path.isdir(p): raise CPSourceNotFoundError
 		if !fi.Mode().IsRegular() && !fi.IsDir() {
-			return 0, "", ErrCPSourceNotFound(fmt.Sprintf("Local path not found: %s", src))
+			return 0, "", &errs.DomainError{
+				Code:    errs.CodeCPSourceNotFound,
+				Op:      "cp",
+				Message: fmt.Sprintf("local path not found: %s", src),
+				Class:   errs.ClassValidation,
+			}
 		}
 		isDir := fi.IsDir()
 		size := int64(0)
 		if isDir {
-			size = s._getDirectorySize(src)
+			size = getDirectorySize(src)
 		} else {
 			size = fi.Size()
 		}
@@ -501,66 +457,30 @@ func (s *CPService) CopyToVM(
 		totalSize += size
 	}
 
-	sshPrefix := s._buildSSHPrefix(info.Host, info.User, info.KeyPath)
-	remoteGnu := s._probeRemoteTar(sshPrefix)
-	localGnu := s._isLocalTarGnu()
+	sshPrefix := buildSSHOpts(info.Host, info.User, info.KeyPath, sshConnectTimeout)
+	remoteGNU := s.probeTarGNU(ctx, sshPrefix...)
+	localGNU := s.probeTarGNU(ctx)
 
 	isMulti := len(srcs) > 1
 
 	// Build combined tar source
 	var srcCmd []string
 	if isMulti {
-		srcCmd = s._buildMultiSourceTar(srcs, localGnu)
+		srcCmd = s.buildMultiSourceTar(srcs, localGNU)
 	} else {
-		srcCmd = s._buildSourceTar(sourceInfos[0].path, sourceInfos[0].isDir, localGnu)
+		srcCmd = s.buildSourceTar(sourceInfos[0].path, sourceInfos[0].isDir, localGNU)
 	}
 
 	noOverwrite := !force
-	remoteDestCmdStr := s._buildRemoteDestTar(dest, remoteGnu, noOverwrite)
+	remoteDestCmdStr := s.buildRemoteDestTar(dest, remoteGNU, noOverwrite)
 	destCmd := append([]string{}, sshPrefix...)
 	destCmd = append(destCmd, remoteDestCmdStr)
 
-	if onProgress != nil {
-		// Python progress path: _pipe_with_progress(src_cmd, dest_cmd, total_size, on_progress)
-		if err := s._pipeWithProgress(ctx, srcCmd, destCmd, totalSize, onProgress, true); err != nil {
-			return 0, "", err
-		}
-	} else {
-		// Python non-progress path: inline bash pipe chain
-		//   src_tar_str = " ".join(shlex.quote(a) for a in _build_source_tar(...))
-		//   dest_tar_str = _build_remote_dest_tar(...)
-		//   ssh_opts_str = " ".join(shlex.quote(a) for a in ssh_prefix)
-		//   pipe_cmd = f"set -o pipefail && {src_tar_str} | {ssh_opts_str} {shlex.quote(dest_tar_str)}"
-		//   run_cmd(["bash", "-c", pipe_cmd], capture=True, check=False)
-		srcParts := make([]string, len(srcCmd))
-		for i, a := range srcCmd {
-			srcParts[i] = shellQuote(a)
-		}
-		dstParts := make([]string, len(destCmd))
-		for i, a := range destCmd {
-			dstParts[i] = shellQuote(a)
-		}
-		srcStr := strings.Join(srcParts, " ")
-		dstStr := strings.Join(dstParts, " ")
-		pipeCmd := fmt.Sprintf("set -o pipefail && %s | %s", srcStr, dstStr)
-
-		bashCmd := exec.CommandContext(ctx, "bash", "-c", pipeCmd)
-		var stderrBuf strings.Builder
-		bashCmd.Stderr = &stderrBuf
-		_, err := bashCmd.Output()
-		if err != nil {
-			stderr := strings.TrimSpace(stderrBuf.String())
-			exitCode := 1
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			}
-			// Python: check for "Cannot open"/"Exists" in stderr
-			if stderr != "" && (strings.Contains(stderr, "Cannot open") || strings.Contains(stderr, "Exists")) {
-				return 0, "", ErrCPDestinationExists(fmt.Sprintf("Destination exists: %s", stderr))
-			}
-			// Python: raise CPError(f"Copy failed (exit {rc}): {stderr}", code="cp.copy_failed")
-			return 0, "", ErrCPCopyFailed(exitCode, stderr)
-		}
+	// Python: _pipe_with_progress(src_cmd, dest_cmd, total_size, on_progress)
+	// Unified pipe handles both progress and non-progress paths, including
+	// the "Cannot open"/"Exists" check that was previously done inline.
+	if err := s.pipe(ctx, srcCmd, destCmd, totalSize, onProgress); err != nil {
+		return 0, "", err
 	}
 
 	// Python logger.info after successful copy
@@ -604,14 +524,14 @@ func (s *CPService) CopyFromVM(
 	src, dest string,
 	info model.ConnectionInfo,
 	force bool,
-	onProgress ProgressCallback,
+	onProgress event.OnDownloadCallback,
 ) (int64, string, error) {
-	sshPrefix := s._buildSSHPrefix(info.Host, info.User, info.KeyPath)
-	remoteGnu := s._probeRemoteTar(sshPrefix)
-	localGnu := s._isLocalTarGnu()
+	sshPrefix := buildSSHOpts(info.Host, info.User, info.KeyPath, sshConnectTimeout)
+	remoteGNU := s.probeTarGNU(ctx, sshPrefix...)
+	localGNU := s.probeTarGNU(ctx)
 
 	// Probe remote path to determine type and size
-	pathType, totalSize, err := s._probeRemotePath(sshPrefix, src)
+	pathType, totalSize, err := s.probeRemotePath(ctx, sshPrefix, src)
 	if err != nil {
 		return 0, "", err
 	}
@@ -635,9 +555,12 @@ func (s *CPService) CopyFromVM(
 		// For files, check if the target file exists (Python: inline validation)
 		if noOverwrite {
 			if _, err := os.Stat(dstPathObj); err == nil {
-				return 0, "", ErrCPDestinationExists(
-					fmt.Sprintf("Local destination exists: %s. Use --force to overwrite.", dest),
-				)
+				return 0, "", &errs.DomainError{
+					Code:    errs.CodeCPDestinationExists,
+					Op:      "cp",
+					Message: fmt.Sprintf("local destination exists: %s. Use --force to overwrite.", dest),
+					Class:   errs.ClassValidation,
+				}
 			}
 		}
 		// Ensure parent directory exists
@@ -651,7 +574,7 @@ func (s *CPService) CopyFromVM(
 	}
 
 	basename := filepath.Base(strings.TrimRight(src, "/"))
-	remoteTarCmdStr := s._buildRemoteSourceTar(src, isDir, remoteGnu)
+	remoteTarCmdStr := s.buildRemoteSourceTar(src, isDir, remoteGNU)
 
 	// Build tar pipe
 	srcCmd := append([]string{}, sshPrefix...)
@@ -659,51 +582,18 @@ func (s *CPService) CopyFromVM(
 
 	var destCmd []string
 	if isDir {
-		destCmd = s._buildDestTar(dstPathObj, localGnu, noOverwrite)
+		destCmd = s.buildDestTar(dstPathObj, localGNU, noOverwrite)
 	} else {
 		destParent := filepath.Dir(dstPathObj)
 		if destParent == "" {
 			destParent = "."
 		}
-		destCmd = s._buildDestTar(destParent, localGnu, noOverwrite)
+		destCmd = s.buildDestTar(destParent, localGNU, noOverwrite)
 	}
 
-	if onProgress != nil {
-		// Python progress path: _pipe_with_progress
-		if err := s._pipeWithProgress(ctx, srcCmd, destCmd, totalSize, onProgress, false); err != nil {
-			return 0, "", err
-		}
-	} else {
-		// Python non-progress path: inline bash pipe chain
-		//   src_ssh_str = " ".join(shlex.quote(a) for a in ssh_prefix)
-		//   dest_tar_str = " ".join(shlex.quote(a) for a in _build_dest_tar(...))
-		//   pipe_cmd = f"set -o pipefail && {src_ssh_str} {shlex.quote(remote_tar_cmd)} | {dest_tar_str}"
-		//   result = run_cmd(["bash", "-c", pipe_cmd], capture=True, check=False)
-		srcParts := make([]string, len(srcCmd))
-		for i, a := range srcCmd {
-			srcParts[i] = shellQuote(a)
-		}
-		dstParts := make([]string, len(destCmd))
-		for i, a := range destCmd {
-			dstParts[i] = shellQuote(a)
-		}
-		srcStr := strings.Join(srcParts, " ")
-		dstStr := strings.Join(dstParts, " ")
-		pipeCmd := fmt.Sprintf("set -o pipefail && %s | %s", srcStr, dstStr)
-
-		bashCmd := exec.CommandContext(ctx, "bash", "-c", pipeCmd)
-		var stderrBuf strings.Builder
-		bashCmd.Stderr = &stderrBuf
-		_, err := bashCmd.Output()
-		if err != nil {
-			stderr := strings.TrimSpace(stderrBuf.String())
-			exitCode := 1
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			}
-			// Python: raise CPError(f"Copy failed (exit {rc}): {stderr}", code="cp.copy_failed")
-			return 0, "", ErrCPCopyFailed(exitCode, stderr)
-		}
+	// Python: _pipe_with_progress — unified pipe handles both paths
+	if err := s.pipe(ctx, srcCmd, destCmd, totalSize, onProgress); err != nil {
+		return 0, "", err
 	}
 
 	// Python logger.info after successful copy
@@ -729,26 +619,26 @@ func (s *CPService) CopyVMToVM(
 	srcVMInfo, destVMInfo model.ConnectionInfo,
 	src, dest string,
 	force bool,
-	onProgress ProgressCallback,
+	onProgress event.OnDownloadCallback,
 ) (int64, string, error) {
 	noOverwrite := !force
-	srcSSHPrefix := s._buildSSHPrefix(srcVMInfo.Host, srcVMInfo.User, srcVMInfo.KeyPath)
-	destSSHPrefix := s._buildSSHPrefix(destVMInfo.Host, destVMInfo.User, destVMInfo.KeyPath)
+	srcSSHPrefix := buildSSHOpts(srcVMInfo.Host, srcVMInfo.User, srcVMInfo.KeyPath, sshConnectTimeout)
+	destSSHPrefix := buildSSHOpts(destVMInfo.Host, destVMInfo.User, destVMInfo.KeyPath, sshConnectTimeout)
 
 	// Probe remote source to determine type
-	pathType, totalSize, err := s._probeRemotePath(srcSSHPrefix, src)
+	pathType, totalSize, err := s.probeRemotePath(ctx, srcSSHPrefix, src)
 	if err != nil {
 		return 0, "", err
 	}
 	isDir := pathType == "DIR"
 
 	// Build source tar command (remote)
-	remoteGnu := s._probeRemoteTar(srcSSHPrefix)
-	sourceTarCmdStr := s._buildRemoteSourceTar(src, isDir, remoteGnu)
+	remoteGNU := s.probeTarGNU(ctx, srcSSHPrefix...)
+	sourceTarCmdStr := s.buildRemoteSourceTar(src, isDir, remoteGNU)
 
 	// Build dest tar command (remote)
-	destGnu := s._probeRemoteTar(destSSHPrefix)
-	destTarCmdStr := s._buildRemoteDestTar(dest, destGnu, noOverwrite)
+	destGNU := s.probeTarGNU(ctx, destSSHPrefix...)
+	destTarCmdStr := s.buildRemoteDestTar(dest, destGNU, noOverwrite)
 
 	// Build pipe: ssh srcVM "tar cf - src" → ssh destVM "tar xf - -C dest"
 	srcCmd := append([]string{}, srcSSHPrefix...)
@@ -757,38 +647,9 @@ func (s *CPService) CopyVMToVM(
 	destCmd := append([]string{}, destSSHPrefix...)
 	destCmd = append(destCmd, destTarCmdStr)
 
-	if onProgress != nil {
-		// Python progress path: _pipe_with_progress
-		if err := s._pipeWithProgress(ctx, srcCmd, destCmd, totalSize, onProgress, false); err != nil {
-			return 0, "", err
-		}
-	} else {
-		// Python non-progress path: inline bash pipe chain
-		srcParts := make([]string, len(srcCmd))
-		for i, a := range srcCmd {
-			srcParts[i] = shellQuote(a)
-		}
-		dstParts := make([]string, len(destCmd))
-		for i, a := range destCmd {
-			dstParts[i] = shellQuote(a)
-		}
-		srcStr := strings.Join(srcParts, " ")
-		dstStr := strings.Join(dstParts, " ")
-		pipeCmd := fmt.Sprintf("set -o pipefail && %s | %s", srcStr, dstStr)
-
-		bashCmd := exec.CommandContext(ctx, "bash", "-c", pipeCmd)
-		var stderrBuf strings.Builder
-		bashCmd.Stderr = &stderrBuf
-		_, err := bashCmd.Output()
-		if err != nil {
-			stderr := strings.TrimSpace(stderrBuf.String())
-			exitCode := 1
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				exitCode = exitErr.ExitCode()
-			}
-			// Python: raise CPError(f"Copy failed (exit {rc}): {stderr}", code="cp.copy_failed")
-			return 0, "", ErrCPCopyFailed(exitCode, stderr)
-		}
+	// Python: _pipe_with_progress — unified pipe handles both paths
+	if err := s.pipe(ctx, srcCmd, destCmd, totalSize, onProgress); err != nil {
+		return 0, "", err
 	}
 
 	// Python logger.info after successful copy
@@ -808,19 +669,12 @@ func (s *CPService) CopyVMToVM(
 	return totalSize, message, nil
 }
 
-// sourceInfo holds metadata about a source path for multi-source copy.
-type sourceInfo struct {
-	path  string
-	isDir bool
-	size  int64
-}
-
-// _buildMultiSourceTar builds a combined tar command for multiple paths.
+// buildMultiSourceTar builds a combined tar command for multiple paths.
 // Matches Python's CPService._build_multi_source_tar() exactly.
 // Uses `-C <parent> <base>` for ALL paths (both files and directories),
 // matching Python's behavior: parent = os.path.dirname(path) or ".",
 // base = os.path.basename(path); cmd.extend(["-C", parent, base])
-func (s *CPService) _buildMultiSourceTar(srcs []string, gnuExtras bool) []string {
+func (s *CPService) buildMultiSourceTar(srcs []string, gnuExtras bool) []string {
 	args := []string{"tar", "cf", "-"}
 	if gnuExtras {
 		args = append(args, gnuCreateExtras...)

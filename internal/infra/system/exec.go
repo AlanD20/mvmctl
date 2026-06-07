@@ -153,6 +153,14 @@ func runCmdInternal(ctx context.Context, opts RunCmdOpts) *RunCmdResult {
 		}
 		c.Env = env
 	}
+	// AppendEnv merges into the current process env instead of replacing.
+	if opts.AppendEnv != nil {
+		env := os.Environ()
+		for k, v := range opts.AppendEnv {
+			env = append(env, k+"="+v)
+		}
+		c.Env = env
+	}
 
 	// ── Stdin ──
 	if opts.Input != "" {
