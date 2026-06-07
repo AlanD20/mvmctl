@@ -20,7 +20,7 @@ type Controller struct {
 // If entity is a *Volume, it is used directly.
 // If entity is a string (name or ID prefix), it is resolved via the resolver.
 // Matches Python's VolumeController.__init__() exactly.
-func NewController(ctx context.Context, entity interface{}, repo Repository) (*Controller, error) {
+func NewController(ctx context.Context, entity any, repo Repository) (*Controller, error) {
 	c := &Controller{repo: repo}
 	switch e := entity.(type) {
 	case *model.VolumeItem:
@@ -86,10 +86,4 @@ func (c *Controller) Detach(ctx context.Context) error {
 	}
 	c.volume = updated
 	return nil
-}
-
-// Get returns the resolved VolumeItem.
-// Matches Python's VolumeController.get() — takes no parameters.
-func (c *Controller) Get() *model.VolumeItem {
-	return c.volume
 }

@@ -936,7 +936,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resp
 	for _, v := range srcVols {
 		volumes = append(volumes, responses.VMVolume{
 			ID: v.ID, Name: v.Name, Size: v.SizeBytes,
-			Format: v.Format, Status: string(v.Status),
+			Format: string(v.Format), Status: string(v.Status),
 		})
 	}
 
