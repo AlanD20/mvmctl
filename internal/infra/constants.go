@@ -640,6 +640,29 @@ func GetWarmImagesDir() string {
 	return path
 }
 
+// GetNoCloudNetDir returns the base cache directory for nocloud-net batch servers.
+func GetNoCloudNetDir() string {
+	cacheDir, err := GetCacheDir()
+	if err != nil {
+		cacheDir = filepath.Join(GetRealHome(), ".cache", ProjectName)
+	}
+	path := filepath.Join(cacheDir, "nocloudnet")
+	if err := ensureDirAndChown(path); err != nil {
+		slog.Warn("failed to create nocloudnet directory", "path", path, "error", err)
+	}
+	return path
+}
+
+// GetNoCloudNetBatchDir returns the batch directory for a given nocloud batch ID.
+func GetNoCloudNetBatchDir(batchID string) string {
+	return filepath.Join(GetNoCloudNetDir(), batchID)
+}
+
+// GetNoCloudNetLogPath returns the log file path for a given nocloud batch ID.
+func GetNoCloudNetLogPath(batchID string) string {
+	return filepath.Join(GetNoCloudNetDir(), batchID+".log")
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // CommonUtils — domain-agnostic helpers
 // ══════════════════════════════════════════════════════════════════════════════
