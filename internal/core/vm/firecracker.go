@@ -563,7 +563,7 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 					Class:   errs.ClassValidation,
 				}
 			}
-				bootArgs.set("ds", []string{fmt.Sprintf("nocloud;seedfrom=%s", *s.config.CloudInitNoCloudURL)})
+			bootArgs.set("ds", []string{fmt.Sprintf("nocloud;seedfrom=%s", *s.config.CloudInitNoCloudURL)})
 		} else if *cloudInitMode == model.CloudInitModeINJECT {
 			bootArgs.set("ds", []string{fmt.Sprintf("ds=nocloud;s=file://%s/", defaultLibguestfsSeedDir)})
 		} else if *cloudInitMode == model.CloudInitModeISO {

@@ -37,8 +37,8 @@ type TemplateData struct {
 // Explicit fields are for keys we manipulate; Extra preserves all other keys
 // via yaml:",inline" pass-through.
 type cloudInitUser struct {
-	Name              string                 `yaml:"name"`
-	SSHAuthorizedKeys []string               `yaml:"ssh-authorized-keys,omitempty"`
+	Name              string         `yaml:"name"`
+	SSHAuthorizedKeys []string       `yaml:"ssh-authorized-keys,omitempty"`
 	Extra             map[string]any `yaml:",inline"`
 }
 
@@ -194,7 +194,10 @@ func (m *Manager) parseCustomCloudInitConfig() error {
 	// YAML cloud-config: parse, validate, and merge SSH keys
 	var raw any
 	if err := yaml.Unmarshal(content, &raw); err != nil {
-		return errs.Wrap(errs.CodeCloudInitProvisionFailed, fmt.Errorf("invalid YAML in cloud-init config file: %w", err))
+		return errs.Wrap(
+			errs.CodeCloudInitProvisionFailed,
+			fmt.Errorf("invalid YAML in cloud-init config file: %w", err),
+		)
 	}
 	customUserdata, ok := raw.(map[string]any)
 	if !ok {

@@ -103,7 +103,10 @@ func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callb
 //
 // The caller must consume from lineCh until it is closed, then check errCh
 // for any runtime error.
-func (op *Operation) LogStreamChannel(ctx context.Context, input inputs.LogInput) (lineCh <-chan string, errCh <-chan error, err error) {
+func (op *Operation) LogStreamChannel(
+	ctx context.Context,
+	input inputs.LogInput,
+) (lineCh <-chan string, errCh <-chan error, err error) {
 	req := inputs.NewLogRequest(input, op.Services.Config, op.Connection.DB())
 	resolved, err := req.Resolve(ctx, op.Repos.VM)
 	if err != nil {

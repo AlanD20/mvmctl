@@ -66,7 +66,7 @@ type VMExportNetworkConfig struct {
 //	    enable_console: bool | None = None
 type VMExportBootConfig struct {
 	Args          string `json:"args"`
-	EnableConsole *bool   `json:"enable_console,omitempty"`
+	EnableConsole *bool  `json:"enable_console,omitempty"`
 }
 
 // VMExportFirecrackerConfig holds Firecracker feature flags for export.

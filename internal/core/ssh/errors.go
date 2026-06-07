@@ -16,5 +16,3 @@ func ErrCPSourceFailed(exitCode int) *errs.DomainError {
 		Class:   errs.ClassInternal,
 	}
 }
-
-

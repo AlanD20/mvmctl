@@ -718,7 +718,9 @@ func (s *Service) PrepareKernelConfig(
 		}
 	} else if len(spec.ConfigFragments) > 0 {
 		if onProgress != nil {
-			onProgress(event.Progress{Phase: "build", Status: "running", Message: "Applying kernel config fragments..."})
+			onProgress(
+				event.Progress{Phase: "build", Status: "running", Message: "Applying kernel config fragments..."},
+			)
 		}
 		if err := s.applyConfigFragments(ctx, kernelDir, spec.ConfigFragments, templateVars, onProgress); err != nil {
 			return nil, err
@@ -745,7 +747,13 @@ func (s *Service) PrepareKernelConfig(
 
 	if len(mergedConfigs) > 0 {
 		if onProgress != nil {
-			onProgress(event.Progress{Phase: "build", Status: "running", Message: fmt.Sprintf("Applying %d kernel config options...", len(mergedConfigs))})
+			onProgress(
+				event.Progress{
+					Phase:   "build",
+					Status:  "running",
+					Message: fmt.Sprintf("Applying %d kernel config options...", len(mergedConfigs)),
+				},
+			)
 		}
 		slog.Debug("Applying kernel config options", "count", len(mergedConfigs))
 		for option, value := range mergedConfigs {
@@ -764,7 +772,13 @@ func (s *Service) PrepareKernelConfig(
 	if userConfigPath != nil && *userConfigPath != "" {
 		if _, statErr := os.Stat(*userConfigPath); statErr == nil {
 			if onProgress != nil {
-				onProgress(event.Progress{Phase: "build", Status: "running", Message: fmt.Sprintf("Applying user config fragment: %s", *userConfigPath)})
+				onProgress(
+					event.Progress{
+						Phase:   "build",
+						Status:  "running",
+						Message: fmt.Sprintf("Applying user config fragment: %s", *userConfigPath),
+					},
+				)
 			}
 			slog.Info("Applying user config fragment", "path", *userConfigPath)
 			configPath := filepath.Join(kernelDir, ".config")
@@ -774,7 +788,13 @@ func (s *Service) PrepareKernelConfig(
 			}
 			mergeConfigLines(string(userData), configPath)
 			if onProgress != nil {
-				onProgress(event.Progress{Phase: "build", Status: "running", Message: "Resolving dependencies after user config..."})
+				onProgress(
+					event.Progress{
+						Phase:   "build",
+						Status:  "running",
+						Message: "Resolving dependencies after user config...",
+					},
+				)
 			}
 			slog.Debug("Resolving dependencies after user config")
 			if rc, _, _ := runMake(ctx, kernelDir, "olddefconfig", jobs); rc != 0 {
@@ -998,7 +1018,13 @@ func (s *Service) applyConfigFragments(
 
 		if strings.HasPrefix(rendered, "http://") || strings.HasPrefix(rendered, "https://") {
 			if onProgress != nil {
-				onProgress(event.Progress{Phase: "build", Status: "running", Message: fmt.Sprintf("Fetching config fragment: %s", rendered)})
+				onProgress(
+					event.Progress{
+						Phase:   "build",
+						Status:  "running",
+						Message: fmt.Sprintf("Fetching config fragment: %s", rendered),
+					},
+				)
 			}
 			content, err = s.dl.GetBody(ctx, rendered)
 			if err != nil {
@@ -1007,7 +1033,13 @@ func (s *Service) applyConfigFragments(
 		} else {
 			rel := strings.TrimPrefix(rendered, "assets/")
 			if onProgress != nil {
-				onProgress(event.Progress{Phase: "build", Status: "running", Message: fmt.Sprintf("Applying config fragment: %s", rel)})
+				onProgress(
+					event.Progress{
+						Phase:   "build",
+						Status:  "running",
+						Message: fmt.Sprintf("Applying config fragment: %s", rel),
+					},
+				)
 			}
 			content, err = assets.ReadFile(rel)
 			if err != nil {
@@ -1039,7 +1071,12 @@ func (s *Service) applyConfigFragments(
 
 // ── Caching helpers ────────────────────────────────────────────────────
 
-func (s *Service) computeConfigHash(spec *model.KernelSpec, version string, userConfigPath *string, featureEnforces map[string]string) string {
+func (s *Service) computeConfigHash(
+	spec *model.KernelSpec,
+	version string,
+	userConfigPath *string,
+	featureEnforces map[string]string,
+) string {
 	// Sort keys for deterministic hashing
 	defaultKeys := make([]string, 0, len(spec.DefaultConfigs))
 	for k := range spec.DefaultConfigs {
@@ -1163,7 +1200,13 @@ func (s *Service) ImportKernel(
 
 // ── Version Resolution ──────────────────────────────────────────────────
 
-func (s *Service) ResolveVersion(ctx context.Context, kernelType string, versionSpec string, arch string, ciVersion string) (string, error) {
+func (s *Service) ResolveVersion(
+	ctx context.Context,
+	kernelType string,
+	versionSpec string,
+	arch string,
+	ciVersion string,
+) (string, error) {
 	specs, err := s.LoadSpecs()
 	if err != nil {
 		return "", err

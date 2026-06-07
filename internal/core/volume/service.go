@@ -46,7 +46,14 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 	case model.VolumeFormatQCOW2:
 		result := system.RunCmdCompat(
 			ctx,
-			[]string{"qemu-img", "create", "-f", string(model.VolumeFormatQCOW2), vol.Path, strconv.FormatInt(vol.SizeBytes, 10)},
+			[]string{
+				"qemu-img",
+				"create",
+				"-f",
+				string(model.VolumeFormatQCOW2),
+				vol.Path,
+				strconv.FormatInt(vol.SizeBytes, 10),
+			},
 			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {

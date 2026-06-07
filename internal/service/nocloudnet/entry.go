@@ -79,7 +79,11 @@ func Run(ctx context.Context, cfg Config) error {
 			case <-sigCh:
 				fmt.Fprintf(logFP, "NoCloud-net server received signal, shutting down...\n")
 			case <-time.After(cfg.KillAfter):
-				fmt.Fprintf(logFP, "NoCloud-net server auto-kill timer expired after %v, shutting down\n", cfg.KillAfter)
+				fmt.Fprintf(
+					logFP,
+					"NoCloud-net server auto-kill timer expired after %v, shutting down\n",
+					cfg.KillAfter,
+				)
 			}
 		} else {
 			<-sigCh

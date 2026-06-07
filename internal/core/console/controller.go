@@ -25,7 +25,7 @@ import (
 // A Controller is not safe for concurrent use. The API layer serializes
 // calls per-VM through its own execution model.
 type Controller struct {
-	vmID, vmPath, vmName string
+	vmID, vmPath, vmName        string
 	pidFilename, socketFilename string
 
 	// PTY state

@@ -138,13 +138,13 @@ type MetricsConfig struct {
 // Optional sections use pointer fields with omitempty so they're omitted from JSON
 // when nil.
 type FirecrackerVMConfig struct {
-	BootSource        BootSourceConfig              `json:"boot-source"`
-	Drives            []DriveConfig                 `json:"drives"`
-	NetworkInterfaces []NetworkInterfaceConfig       `json:"network-interfaces"`
-	MachineConfig     MachineConfig                  `json:"machine-config"`
-	Logger            *LoggerConfig                  `json:"logger,omitempty"`
-	Metrics           *MetricsConfig                 `json:"metrics,omitempty"`
-	CPUConfig         *CpuConfig                     `json:"cpu-config,omitempty"`
+	BootSource        BootSourceConfig         `json:"boot-source"`
+	Drives            []DriveConfig            `json:"drives"`
+	NetworkInterfaces []NetworkInterfaceConfig `json:"network-interfaces"`
+	MachineConfig     MachineConfig            `json:"machine-config"`
+	Logger            *LoggerConfig            `json:"logger,omitempty"`
+	Metrics           *MetricsConfig           `json:"metrics,omitempty"`
+	CPUConfig         *CpuConfig               `json:"cpu-config,omitempty"`
 }
 
 // ── FirecrackerConfigDict ──

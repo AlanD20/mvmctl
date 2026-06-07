@@ -126,7 +126,14 @@ func (op *Operation) ImagePull(
 	}
 
 	// Resolve version spec (latest, partial, or exact) to concrete version
-	resolvedVersion, err := op.Services.Image.ResolveVersion(ctx, resolved.Type, resolved.Version, resolved.Arch, resolvedCIVersion, imageTypesConfig)
+	resolvedVersion, err := op.Services.Image.ResolveVersion(
+		ctx,
+		resolved.Type,
+		resolved.Version,
+		resolved.Arch,
+		resolvedCIVersion,
+		imageTypesConfig,
+	)
 	if err != nil {
 		return nil, &errs.DomainError{
 			Code:    errs.CodeImagePullFailed,

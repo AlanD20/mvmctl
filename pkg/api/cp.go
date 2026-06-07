@@ -81,11 +81,11 @@ func (op *Operation) CPCopy(
 	case "host_to_vm":
 		if resolved.DstInfo == nil || resolved.LocalPaths == nil {
 			return nil, op.copyError(&errs.DomainError{
-			Code:    errs.CodeCPError,
-			Op:      "cp",
-			Message: "Internal error: destination VM info not available",
-			Class:   errs.ClassInternal,
-		})
+				Code:    errs.CodeCPError,
+				Op:      "cp",
+				Message: "Internal error: destination VM info not available",
+				Class:   errs.ClassInternal,
+			})
 		}
 
 		dstKeyPath := ""
@@ -115,11 +115,11 @@ func (op *Operation) CPCopy(
 	case "vm_to_host":
 		if resolved.SrcInfo == nil || resolved.LocalPaths == nil {
 			return nil, op.copyError(&errs.DomainError{
-			Code:    errs.CodeCPError,
-			Op:      "cp",
-			Message: "Internal error: source VM info not available",
-			Class:   errs.ClassInternal,
-		})
+				Code:    errs.CodeCPError,
+				Op:      "cp",
+				Message: "Internal error: source VM info not available",
+				Class:   errs.ClassInternal,
+			})
 		}
 
 		srcKeyPath := ""
@@ -149,11 +149,11 @@ func (op *Operation) CPCopy(
 	case "vm_to_vm":
 		if resolved.SrcInfo == nil || resolved.DstInfo == nil {
 			return nil, op.copyError(&errs.DomainError{
-			Code:    errs.CodeCPError,
-			Op:      "cp",
-			Message: "Internal error: source or destination VM info not available",
-			Class:   errs.ClassInternal,
-		})
+				Code:    errs.CodeCPError,
+				Op:      "cp",
+				Message: "Internal error: source or destination VM info not available",
+				Class:   errs.ClassInternal,
+			})
 		}
 
 		srcKeyPath := ""
