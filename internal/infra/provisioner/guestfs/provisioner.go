@@ -97,9 +97,7 @@ func RunDeferred(ctx context.Context, cfg ProvisioningConfig) error {
 	initEnv(ctx)
 	allArgs := []string{
 		"-a", cfg.RootfsPath,
-		"--cachemode", "writeback",
-		"--no-recovery-proc", "--no-autosync", "--no-network",
-		"--smp", "1", "--memsize", "256", "--backend", "direct",
+		"--no-sync",
 	}
 	if cfg.Readonly {
 		allArgs = append(allArgs, "--ro")
@@ -396,9 +394,7 @@ func ConvertTo(ctx context.Context, rootfsPath string, targetFs string) error {
 
 	// initEnv already called by detectRootDevice's guestfishRun (sync.Once)
 	result2 := system.RunCmdCompat(ctx, []string{"guestfish",
-		"--no-recovery-proc", "--no-autosync", "--no-network",
-		"--smp", "1", "--memsize", "256", "--backend", "direct",
-		"-f", scriptPath,
+		"--no-sync", "-f", scriptPath,
 	}, system.RunCmdOpts{Capture: true, Check: true})
 	if result2.Err != nil {
 		os.Remove(outputPath)
