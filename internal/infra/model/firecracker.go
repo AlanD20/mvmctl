@@ -213,14 +213,14 @@ type FirecrackerConfig struct {
 	EnableLogging bool `json:"enable_logging"`
 	EnableMetrics bool `json:"enable_metrics"`
 
-	// File/path overrides
+	// File/path overrides (full paths, no VMDir joining)
 	LogLevel             string `json:"log_level"`
-	LogFilename          string `json:"log_filename"`
-	SerialOutputFilename string `json:"serial_output_filename"`
-	MetricsFilename      string `json:"metrics_filename"`
-	APISocketFilename    string `json:"api_socket_filename"`
-	PIDFilename          string `json:"pid_filename"`
-	ConfigFilename       string `json:"config_filename"`
+	LogPath              string `json:"log_path"`
+	SerialOutputPath     string `json:"serial_output_path"`
+	MetricsPath          string `json:"metrics_path"`
+	APISocketPath        string `json:"api_socket_path"`
+	PIDPath              string `json:"pid_path"`
+	ConfigPath           string `json:"config_path"`
 
 	// Cloud-init
 	CloudInitMode       *CloudInitMode `json:"cloud_init_mode,omitempty"`

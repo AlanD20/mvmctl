@@ -610,7 +610,7 @@ func (op *Operation) vmBuilderExecute(
 	emitProgress(builder.onProgress, "firecracker", "running", "Starting Firecracker microVM...")
 
 	// --- Firecracker config ---
-	fcConfig := builder.buildFirecrackerConfig(ctx)
+	fcConfig := builder.buildFirecrackerConfig()
 	if fcConfig == nil {
 		return fmt.Errorf("firecracker config is nil")
 	}
@@ -1143,6 +1143,9 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 	if v.RootfsPath == "" {
 		return fmt.Errorf("rootfs path is required for VM respawn")
 	}
+	if v.ImageID != "" && v.Image == nil {
+		return fmt.Errorf("image info is required for VM respawn")
+	}
 
 	// ── Force-kill any remaining Firecracker process ──
 	if v.PID > 0 && system.IsProcessRunning(v.PID) {
@@ -1188,33 +1191,37 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 		}
 		infranet.FlushARP(ctx, v.Network.Bridge)
 	}
+	logLevel, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_level")
+	fcPIDFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "pid_filename")
 
 	fcConfig := &model.FirecrackerConfig{
-		VMDir:                vmDir,
-		RootfsPath:           v.RootfsPath,
-		BinaryPath:           v.Binary.Path,
-		KernelPath:           v.Kernel.Path,
-		VCPUCount:            v.VCPUCount,
-		MemSizeMiB:           v.MemSizeMiB,
-		GuestIP:              v.IPv4,
-		GuestMAC:             v.MAC,
-		TapName:              v.TapDevice,
-		NetworkGateway:       v.Network.IPv4Gateway,
-		PCIEnabled:           v.PCIEnabled,
-		NestedVirt:           v.NestedVirt,
-		EnableConsole:        v.EnableConsole,
-		EnableLogging:        v.EnableLogging,
-		EnableMetrics:        v.EnableMetrics,
-		LogLevel:             v.LogLevel,
-		LogFilename:          v.LogFilename,
-		SerialOutputFilename: v.SerialOutputFilename,
-		MetricsFilename:      v.MetricsFilename,
-		APISocketFilename:    v.APISocketFilename,
-		PIDFilename:          v.PIDFilename,
-		ConfigFilename:       v.ConfigFilename,
-		BootArgs:             v.BootArgs,
-		LSMFlags:             v.LSMFlags,
-		SnapshotMode:         snapshotMode,
+		VMDir:          vmDir,
+		RootfsPath:     v.RootfsPath,
+		BinaryPath:     v.Binary.Path,
+		KernelPath:     v.Kernel.Path,
+		VCPUCount:      v.VCPUCount,
+		MemSizeMiB:     v.MemSizeMiB,
+		GuestIP:        v.IPv4,
+		GuestMAC:       v.MAC,
+		TapName:        v.TapDevice,
+		NetworkGateway: v.Network.IPv4Gateway,
+		PCIEnabled:     v.PCIEnabled,
+		NestedVirt:     v.NestedVirt,
+		EnableConsole:  v.EnableConsole,
+		EnableLogging:  v.EnableLogging,
+		EnableMetrics:  v.EnableMetrics,
+		BootArgs:       v.BootArgs,
+		LSMFlags:       v.LSMFlags,
+		SnapshotMode:   snapshotMode,
+		ImageFSUUID:    v.Image.FSUUID,
+		ImageFSType:    v.Image.FSType,
+		// Full paths from DB (field names match DB column names)
+		ConfigPath:       v.ConfigPath,
+		APISocketPath:    v.APISocketPath,
+		LogPath:          infra.DerefOrZero(v.LogPath),
+		SerialOutputPath: infra.DerefOrZero(v.SerialOutputPath),
+		LogLevel:         logLevel,
+		PIDPath:          filepath.Join(vmDir, fcPIDFilename),
 	}
 
 	// ── Console relay setup (before spawn) ──
@@ -2092,14 +2099,6 @@ type cloudInitResult struct {
 	nocloudPID  *int
 }
 
-// clean/execute/forRespawn/respawnExecute moved to Operation as vmBuilderCleanup/vmBuilderExecute
-
-// consoleRelayRef is a simplified console relay reference for the Go port.
-type consoleRelayRef struct {
-	vmID  string
-	vmDir string
-}
-
 func (c *VMCreateBuilder) cloneImage(
 	ctx context.Context,
 	imageSvc *image.Service,
@@ -2132,7 +2131,7 @@ func (c *VMCreateBuilder) wasCreated(resource string) bool {
 
 // buildFirecrackerConfig builds a FirecrackerConfig from the resolved create context.
 // Matches Python's VMCreateContext.build_firecracker_config() exactly.
-func (c *VMCreateBuilder) buildFirecrackerConfig(ctx context.Context) *model.FirecrackerConfig {
+func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 	if c.resolved == nil {
 		return nil
 	}
@@ -2153,37 +2152,39 @@ func (c *VMCreateBuilder) buildFirecrackerConfig(ctx context.Context) *model.Fir
 	}
 
 	fcConfig := &model.FirecrackerConfig{
-		VMDir:                c.vmDir,
-		RootfsPath:           c.rootfsPath,
-		BinaryPath:           c.resolved.Binary.Path,
-		KernelPath:           c.resolved.Kernel.Path,
-		VCPUCount:            c.resolved.VCPUCount,
-		MemSizeMiB:           c.resolved.MemSizeMib,
-		GuestIP:              c.guestIP,
-		GuestMAC:             c.guestMAC,
-		TapName:              c.tapName,
-		NetworkGateway:       c.resolved.Network.IPv4Gateway,
-		NetworkNetmask:       c.resolved.NetworkNetmask,
-		ImageFSUUID:          c.resolved.Image.FSUUID,
-		ImageFSType:          c.resolved.Image.FSType,
-		BootArgs:             c.resolved.BootArgs,
-		LSMFlags:             c.resolved.LSMFlags,
-		PCIEnabled:           c.resolved.PCIEnabled,
-		NestedVirt:           c.resolved.NestedVirt,
-		CPUVendor:            cpuVendor,
-		CPUArchitecture:      cpuArchitecture,
-		CloudInitMode:        &ciMode,
-		EnableConsole:        c.resolved.EnableConsole,
-		EnableLogging:        c.resolved.EnableLogging,
-		EnableMetrics:        c.resolved.EnableMetrics,
-		LogLevel:             c.resolved.LogLevel,
-		LogFilename:          c.resolved.LogFilename,
-		SerialOutputFilename: c.resolved.SerialOutputFilename,
-		MetricsFilename:      c.resolved.MetricsFilename,
-		APISocketFilename:    c.resolved.APISocketFilename,
-		PIDFilename:          c.resolved.PIDFilename,
-		ConfigFilename:       c.resolved.ConfigFilename,
-		ExtraDrives:          c.resolved.ExtraDrives,
+		VMDir:           c.vmDir,
+		RootfsPath:      c.rootfsPath,
+		BinaryPath:      c.resolved.Binary.Path,
+		KernelPath:      c.resolved.Kernel.Path,
+		VCPUCount:       c.resolved.VCPUCount,
+		MemSizeMiB:      c.resolved.MemSizeMib,
+		GuestIP:         c.guestIP,
+		GuestMAC:        c.guestMAC,
+		TapName:         c.tapName,
+		NetworkGateway:  c.resolved.Network.IPv4Gateway,
+		NetworkNetmask:  c.resolved.NetworkNetmask,
+		ImageFSUUID:     c.resolved.Image.FSUUID,
+		ImageFSType:     c.resolved.Image.FSType,
+		BootArgs:        c.resolved.BootArgs,
+		LSMFlags:        c.resolved.LSMFlags,
+		PCIEnabled:      c.resolved.PCIEnabled,
+		NestedVirt:      c.resolved.NestedVirt,
+		CPUVendor:       cpuVendor,
+		CPUArchitecture: cpuArchitecture,
+		CloudInitMode:   &ciMode,
+		EnableConsole:   c.resolved.EnableConsole,
+		EnableLogging:   c.resolved.EnableLogging,
+		EnableMetrics:   c.resolved.EnableMetrics,
+		LogLevel:        c.resolved.LogLevel,
+		ExtraDrives:     c.resolved.ExtraDrives,
+		// Full paths constructed from VMDir + resolved filenames.
+		// Field names match DB column names for respawn compatibility.
+		ConfigPath:       filepath.Join(c.vmDir, c.resolved.ConfigFilename),
+		APISocketPath:    filepath.Join(c.vmDir, c.resolved.APISocketFilename),
+		LogPath:          filepath.Join(c.vmDir, c.resolved.LogFilename),
+		SerialOutputPath: filepath.Join(c.vmDir, c.resolved.SerialOutputFilename),
+		MetricsPath:      filepath.Join(c.vmDir, c.resolved.MetricsFilename),
+		PIDPath:          filepath.Join(c.vmDir, c.resolved.PIDFilename),
 	}
 
 	// Cloud-init info from result (isoPath, nocloudURL)
