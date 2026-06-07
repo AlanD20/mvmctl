@@ -116,9 +116,25 @@ func (r *sqliteRepo) UpdateBridgeActive(ctx context.Context, networkID string, a
 }
 
 func (r *sqliteRepo) SetDefault(ctx context.Context, networkID string) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE networks SET is_default = 1 WHERE id = ?`, networkID)
-	return err
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE networks SET is_default = 0 WHERE deleted_at IS NULL`)
+	if err != nil {
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE networks SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL`, networkID)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (r *sqliteRepo) GetDefault(ctx context.Context) (*model.Network, error) {
