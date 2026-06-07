@@ -242,5 +242,5 @@ def resolve_mvm_cmd(bin_arg: str | None) -> str:
 
     Expands ``~`` and defaults to ``"uv run mvm"``.
     """
-    raw = bin_arg or "uv run mvm"
+    raw = bin_arg or "mvm"
     return str(Path(raw).expanduser())

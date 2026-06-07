@@ -26,7 +26,11 @@ func runWireOp(ctx context.Context, input *loopmountsvc.WireInput) (*loopmountsv
 	}
 
 	mvmPath, _ := os.Executable()
-	result := system.RunCmdCompat(ctx, []string{"sudo", mvmPath, "run", "provision"},
+	provisionArgs := []string{mvmPath, "run", "provision"}
+	if !system.IsRoot() {
+		provisionArgs = append([]string{"sudo"}, provisionArgs...)
+	}
+	result := system.RunCmdCompat(ctx, provisionArgs,
 		system.RunCmdOpts{Capture: true, Check: true, Input: string(data)})
 	if result.Err != nil {
 		return nil, fmt.Errorf("provision subprocess failed: %s: %w", result.Stderr, result.Err)
