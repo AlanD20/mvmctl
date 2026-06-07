@@ -795,9 +795,16 @@ func RenderVersionTree(versions []model.VersionInfo) {
 			if !isLast {
 				prefix = "  ├─ "
 			}
-			versionLabel := prefix + v.Version
-			if v.IsPresent {
-				versionLabel = prefix + "✓ " + v.Version
+
+			var versionLabel string
+			if v.Version == "" {
+				// Marker entry — no versions available for this type
+				versionLabel = prefix + "!"
+			} else {
+				versionLabel = prefix + v.Version
+				if v.IsPresent {
+					versionLabel = prefix + "✓ " + v.Version
+				}
 			}
 			display := v.DisplayName
 			rows = append(rows, []string{versionLabel, display})

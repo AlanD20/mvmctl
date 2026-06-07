@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mvmctl/internal/assets"
@@ -101,14 +102,6 @@ func (op *Operation) ImagePull(
 		cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.image", "remote_list_cache_ttl")
 	}
 
-	// Resolve ci_version from default firecracker binary
-	resolvedCIVersion, err := op.resolveCIVersion(ctx)
-	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeImagePullFailed, Message: err.Error(), Err: err,
-		}
-	}
-
 	// Load image types config from embedded assets
 	rawYAML, err := assets.ReadFile("images.yaml")
 	if err != nil {
@@ -122,6 +115,35 @@ func (op *Operation) ImagePull(
 			Code:    errs.CodeImagePullFailed,
 			Message: fmt.Sprintf("Failed to parse image types config: %v", err),
 			Err:     err,
+		}
+	}
+
+	// Determine CI version and ubuntu version:
+	// For firecracker-s3 types, the user-specified version IS the CI version.
+	// The ubuntu version is auto-discovered from the S3 listing.
+	resolvedCIVersion := ""
+	ciVersionFromInput := false
+	if resolved.Version != "" {
+		for _, cfg := range imageTypesConfig {
+			if cfg.Type == resolved.Type && cfg.Resolver == "firecracker-s3" {
+				v := resolved.Version
+				if !strings.HasPrefix(v, "v") && !strings.HasPrefix(v, "V") {
+					v = "v" + v
+				}
+				resolvedCIVersion = v
+				ciVersionFromInput = true
+				resolved.Version = "" // Auto-discover ubuntu version from S3 listing
+				slog.Debug("Using firecracker-s3 version as CI version", "ci_version", v, "type", resolved.Type)
+				break
+			}
+		}
+	}
+	if !ciVersionFromInput {
+		resolvedCIVersion, err = op.resolveCIVersion(ctx)
+		if err != nil {
+			return nil, &errs.DomainError{
+				Code: errs.CodeImagePullFailed, Message: err.Error(), Err: err,
+			}
 		}
 	}
 
