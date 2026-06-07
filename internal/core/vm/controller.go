@@ -216,10 +216,15 @@ func (c *Controller) Pause(ctx context.Context) error {
 	}
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
 		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is in %s state — cannot pause (current state: %s)", name, c.vm.Status, c.vm.Status),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeVMStateInvalid,
+			Op:   "vm.controller",
+			Message: fmt.Sprintf(
+				"VM '%s' is in %s state — cannot pause (current state: %s)",
+				name,
+				c.vm.Status,
+				c.vm.Status,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 
@@ -263,10 +268,15 @@ func (c *Controller) Resume(ctx context.Context) error {
 	// Error/crashed state
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
 		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is in %s state — remove and recreate (current state: %s)", name, c.vm.Status, c.vm.Status),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeVMStateInvalid,
+			Op:   "vm.controller",
+			Message: fmt.Sprintf(
+				"VM '%s' is in %s state — remove and recreate (current state: %s)",
+				name,
+				c.vm.Status,
+				c.vm.Status,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 
@@ -283,10 +293,14 @@ func (c *Controller) Resume(ctx context.Context) error {
 	// Wrong direction — shutting down
 	if c.vm.Status == model.VMStatusStopping {
 		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is shutting down — use start() after it stops (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeVMStateInvalid,
+			Op:   "vm.controller",
+			Message: fmt.Sprintf(
+				"VM '%s' is shutting down — use start() after it stops (current state: %s)",
+				name,
+				c.vm.Status,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 
@@ -337,10 +351,15 @@ func (c *Controller) Start(ctx context.Context) error {
 	// Error/crashed state
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
 		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is in %s state — remove and recreate (current state: %s)", name, c.vm.Status, c.vm.Status),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeVMStateInvalid,
+			Op:   "vm.controller",
+			Message: fmt.Sprintf(
+				"VM '%s' is in %s state — remove and recreate (current state: %s)",
+				name,
+				c.vm.Status,
+				c.vm.Status,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 
@@ -424,10 +443,15 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 	}
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
 		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is in %s state — cannot snapshot (current state: %s)", name, c.vm.Status, c.vm.Status),
-			Class:   errs.ClassValidation,
+			Code: errs.CodeVMStateInvalid,
+			Op:   "vm.controller",
+			Message: fmt.Sprintf(
+				"VM '%s' is in %s state — cannot snapshot (current state: %s)",
+				name,
+				c.vm.Status,
+				c.vm.Status,
+			),
+			Class: errs.ClassValidation,
 		}
 	}
 

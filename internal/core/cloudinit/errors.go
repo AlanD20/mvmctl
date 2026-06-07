@@ -43,5 +43,3 @@ func ErrCloudInitISOModeFailed(msg string) error {
 		Class:   errs.ClassInternal,
 	}
 }
-
-

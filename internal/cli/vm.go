@@ -239,18 +239,18 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 			}
 
 			input := inputs.VMCreateInput{
-				Name:    name,
-				SSHKeys: sshKeyList,
-				NoConsole:         noConsole,
-				BootArgs:          bootArgs,
-				LSMFlags:          lsmFlags,
-				CPUTemplate:       cpuTemplate,
-				MemSizeMib:        mem,
-				DiskSize:          diskSize,
-				SkipCleanup:       skipCleanup,
-				SkipDeblob:        skipDeblob,
-				Atomic:            atomic,
-				Volumes:           volume,
+				Name:        name,
+				SSHKeys:     sshKeyList,
+				NoConsole:   noConsole,
+				BootArgs:    bootArgs,
+				LSMFlags:    lsmFlags,
+				CPUTemplate: cpuTemplate,
+				MemSizeMib:  mem,
+				DiskSize:    diskSize,
+				SkipCleanup: skipCleanup,
+				SkipDeblob:  skipDeblob,
+				Atomic:      atomic,
+				Volumes:     volume,
 			}
 
 			if cmd.Flags().Changed("image") {

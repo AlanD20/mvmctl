@@ -1346,7 +1346,14 @@ func (s *Service) resolveSourceTemplate(
 }
 
 // ResolveVersion resolves a version spec (latest, partial, or exact) to a concrete version.
-func (s *Service) ResolveVersion(ctx context.Context, imageType string, versionSpec string, arch string, ciVersion string, configs []download.ResolverConfig) (string, error) {
+func (s *Service) ResolveVersion(
+	ctx context.Context,
+	imageType string,
+	versionSpec string,
+	arch string,
+	ciVersion string,
+	configs []download.ResolverConfig,
+) (string, error) {
 	spec, err := version.ParseSpec(versionSpec)
 	if err != nil {
 		return "", NewImageError(fmt.Sprintf("Invalid version spec %q: %s", versionSpec, err))

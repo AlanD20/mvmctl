@@ -34,37 +34,37 @@ type VMCreateInput struct {
 	SSHKeys []string
 
 	// Optional fields with CLI-layer defaults resolved in Build()
-	VCPUCount           *int
-	MemSizeMib          string
-	User                *string
-	PCIEnabled          *bool
-	NestedVirt          *bool
-	CPUTemplate         string // file path to CPU template JSON
-	CPUConfig           map[string]any
-	EnableConsole       *bool
-	EnableLogging       *bool
-	EnableMetrics       *bool
-	Image               *string
-	KernelID            *string
-	BinaryID            *string
-	DiskSize            string
-	RequestedGuestIP    *string
-	SkipCINetworkConfig bool
-	BootArgs            string
-	LSMFlags            string
-	NetworkName         *string
-	RequestedGuestMAC   *string
+	VCPUCount             *int
+	MemSizeMib            string
+	User                  *string
+	PCIEnabled            *bool
+	NestedVirt            *bool
+	CPUTemplate           string // file path to CPU template JSON
+	CPUConfig             map[string]any
+	EnableConsole         *bool
+	EnableLogging         *bool
+	EnableMetrics         *bool
+	Image                 *string
+	KernelID              *string
+	BinaryID              *string
+	DiskSize              string
+	RequestedGuestIP      *string
+	SkipCINetworkConfig   bool
+	BootArgs              string
+	LSMFlags              string
+	NetworkName           *string
+	RequestedGuestMAC     *string
 	CustomCloudInitConfig *string
-	CloudInitMode       *string
-	CloudInitISOPath    *string
-	KeepCloudInitISO    bool
-	NocloudNetPort      *int
-	NoConsole           bool // inverse of EnableConsole, kept for CLI compat
-	SkipCleanup         bool
-	SkipDeblob          bool
-	Count               *int
-	Atomic              bool
-	Volumes             []string
+	CloudInitMode         *string
+	CloudInitISOPath      *string
+	KeepCloudInitISO      bool
+	NocloudNetPort        *int
+	NoConsole             bool // inverse of EnableConsole, kept for CLI compat
+	SkipCleanup           bool
+	SkipDeblob            bool
+	Count                 *int
+	Atomic                bool
+	Volumes               []string
 }
 
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().
@@ -118,25 +118,25 @@ type ResolvedVMCreateInput struct {
 	NocloudPortRangeEnd   int
 	NocloudMaxPortRetries int
 
-	RequestedGuestIP   *string
-	RequestedGuestMAC  *string
-	NocloudNetPort          *int
-	CustomCloudInitConfig   *string
-	CloudInitISOPath        *string
+	RequestedGuestIP      *string
+	RequestedGuestMAC     *string
+	NocloudNetPort        *int
+	CustomCloudInitConfig *string
+	CloudInitISOPath      *string
 
 	// Pre-allocated nocloud server (shared across batch VMs).
 	// Set by VMCreate() before the batch loop; flows through CloneVMInput to each VM.
-	NoCloudURL          string
-	NoCloudPort         int
-	NoCloudPID          int
-	NoCloudKillAfter    time.Duration
-	NoCloudSharedDir    string // shared batch directory for nocloud files
-	CPUConfig          *model.CpuConfig
-	BootArgs           string
-	SSHKeys            []*model.SSHKeyItem
-	Provisioner        model.ProvisionerType
-	ExtraDrives        []model.DriveConfig
-	Volumes            []*model.VolumeItem
+	NoCloudURL       string
+	NoCloudPort      int
+	NoCloudPID       int
+	NoCloudKillAfter time.Duration
+	NoCloudSharedDir string // shared batch directory for nocloud files
+	CPUConfig        *model.CpuConfig
+	BootArgs         string
+	SSHKeys          []*model.SSHKeyItem
+	Provisioner      model.ProvisionerType
+	ExtraDrives      []model.DriveConfig
+	Volumes          []*model.VolumeItem
 }
 
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.
@@ -191,7 +191,10 @@ func NewVMCreateRequest(
 
 // CloneVMInput returns a copy of the resolved result with per-VM fields replaced.
 // Matches Python's dataclasses.replace(resolved, name=name, vm_id=vm_id, vm_dir=vm_dir).
-func (r *VMCreateRequest) CloneVMInput(resolved *ResolvedVMCreateInput, name, vmID, vmDir string) *ResolvedVMCreateInput {
+func (r *VMCreateRequest) CloneVMInput(
+	resolved *ResolvedVMCreateInput,
+	name, vmID, vmDir string,
+) *ResolvedVMCreateInput {
 	if resolved == nil {
 		return nil
 	}
@@ -618,47 +621,47 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 
 	// Build the resolved result (matches Python's ResolvedVMCreateInput construction)
 	result := &ResolvedVMCreateInput{
-		Name:                input.Name,
-		VMID:                r.vmID,
-		VMDir:               r.vmDir,
-		VCPUCount:           vcpuCount,
-		MemSizeMib:          memMib,
-		User:                user,
-		DNSServer:           dnsServer,
-		RootUID:             rootUID,
-		RootGID:             rootGID,
-		UserUID:             userUID,
-		UserGID:             userGID,
-		GuestMACPrefix:      guestMACPrefix,
-		Network:             netw,
-		Image:               img,
-		Kernel:              krnl,
-		Binary:              fcBinary,
-		NetworkPrefixLen:    networkPrefixLen,
-		CloudInitMode:       ciMode,
-		SkipCINetworkConfig: input.SkipCINetworkConfig,
-		PCIEnabled:          pciEnabled,
-		NestedVirt:          nestedVirt,
-		CPUConfig:           infra.MapToStruct[model.CpuConfig](cpuConfig),
-		EnableConsole:       enableConsole,
-		EnableLogging:       enableLogging,
-		EnableMetrics:       enableMetrics,
-		KeepCloudInitISO:    input.KeepCloudInitISO,
-		SkipCleanup:         input.SkipCleanup,
-		SkipDeblob:          input.SkipDeblob,
-		NetworkNetmask:      networkNetmask,
-		DiskSizeBytes:       rootfsDiskSizeBytes,
-		DiskSizeMib:         rootfsDiskSizeMib,
-		LSMFlags:            lsmFlags,
-		RequestedGuestIP:    input.RequestedGuestIP,
-		RequestedGuestMAC:   input.RequestedGuestMAC,
-		NocloudNetPort:      input.NocloudNetPort,
+		Name:                  input.Name,
+		VMID:                  r.vmID,
+		VMDir:                 r.vmDir,
+		VCPUCount:             vcpuCount,
+		MemSizeMib:            memMib,
+		User:                  user,
+		DNSServer:             dnsServer,
+		RootUID:               rootUID,
+		RootGID:               rootGID,
+		UserUID:               userUID,
+		UserGID:               userGID,
+		GuestMACPrefix:        guestMACPrefix,
+		Network:               netw,
+		Image:                 img,
+		Kernel:                krnl,
+		Binary:                fcBinary,
+		NetworkPrefixLen:      networkPrefixLen,
+		CloudInitMode:         ciMode,
+		SkipCINetworkConfig:   input.SkipCINetworkConfig,
+		PCIEnabled:            pciEnabled,
+		NestedVirt:            nestedVirt,
+		CPUConfig:             infra.MapToStruct[model.CpuConfig](cpuConfig),
+		EnableConsole:         enableConsole,
+		EnableLogging:         enableLogging,
+		EnableMetrics:         enableMetrics,
+		KeepCloudInitISO:      input.KeepCloudInitISO,
+		SkipCleanup:           input.SkipCleanup,
+		SkipDeblob:            input.SkipDeblob,
+		NetworkNetmask:        networkNetmask,
+		DiskSizeBytes:         rootfsDiskSizeBytes,
+		DiskSizeMib:           rootfsDiskSizeMib,
+		LSMFlags:              lsmFlags,
+		RequestedGuestIP:      input.RequestedGuestIP,
+		RequestedGuestMAC:     input.RequestedGuestMAC,
+		NocloudNetPort:        input.NocloudNetPort,
 		CustomCloudInitConfig: input.CustomCloudInitConfig,
-		CloudInitISOPath:    ciResult.ISOPath,
-		BootArgs:            bootArgs,
-		SSHKeys:             sshKeys,
-		Volumes:             vols,
-		ExtraDrives:         extraDrives,
+		CloudInitISOPath:      ciResult.ISOPath,
+		BootArgs:              bootArgs,
+		SSHKeys:               sshKeys,
+		Volumes:               vols,
+		ExtraDrives:           extraDrives,
 		// Firecracker defaults (matches Python's GetString calls)
 		LogLevel:              logLevel,
 		LogFilename:           logFilename,
@@ -709,7 +712,13 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 	}
 
 	if result.RequestedGuestIP != nil && *result.RequestedGuestIP != "" && result.Network != nil {
-		if err := validators.IPv4Address(*result.RequestedGuestIP, "Guest IP", true, result.Network.Subnet, result.Network.IPv4Gateway); err != nil {
+		if err := validators.IPv4Address(
+			*result.RequestedGuestIP,
+			"Guest IP",
+			true,
+			result.Network.Subnet,
+			result.Network.IPv4Gateway,
+		); err != nil {
 			return &errs.DomainError{
 				Code:    errs.CodeValidationFailed,
 				Op:      "vm_create",

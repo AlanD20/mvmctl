@@ -41,6 +41,6 @@ type CloudInitResult struct {
 	NocloudURL  *string
 	NocloudPort int
 
-	NocloudPID        *int
-	NocloudNetRules   []FirewallRule // Firewall rules created
+	NocloudPID      *int
+	NocloudNetRules []FirewallRule // Firewall rules created
 }

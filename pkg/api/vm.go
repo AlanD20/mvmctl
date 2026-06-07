@@ -363,7 +363,11 @@ func (op *Operation) vmBuilderCreate(
 
 // vmBuilderExecute performs the actual VM creation steps.
 // Moved from VMCreateBuilder.execute() to Operation to use services/repos directly.
-func (op *Operation) vmBuilderExecute(ctx context.Context, builder *VMCreateBuilder, resolved *inputs.ResolvedVMCreateInput) error {
+func (op *Operation) vmBuilderExecute(
+	ctx context.Context,
+	builder *VMCreateBuilder,
+	resolved *inputs.ResolvedVMCreateInput,
+) error {
 	if resolved == nil {
 		return fmt.Errorf("failed to resolve necessary dependencies")
 	}
@@ -663,7 +667,12 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 	// Cloud-init: remove firewall rules (server auto-kills after timeout)
 	// Networking: remove TAP device
 	if builder.wasCreated("network_tap") && builder.tapName != "" && resolved.Network != nil {
-		if tapErr := op.Services.Network.RemoveTap(ctx, builder.tapName, resolved.Network.Bridge, resolved.Network.ID); tapErr != nil {
+		if tapErr := op.Services.Network.RemoveTap(
+			ctx,
+			builder.tapName,
+			resolved.Network.Bridge,
+			resolved.Network.ID,
+		); tapErr != nil {
 			slog.Warn("failed to remove TAP during cleanup", "vm", builder.name, "error", tapErr)
 		}
 		if leaseErr := op.Repos.Lease.ReleaseByVM(ctx, builder.vmID); leaseErr != nil {
@@ -1165,7 +1174,13 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 						}
 					}
 				}
-				if err := op.Services.Network.EnsureTap(ctx, v.TapDevice, v.Network.Bridge, v.Network.ID, v.Network.Subnet); err != nil {
+				if err := op.Services.Network.EnsureTap(
+					ctx,
+					v.TapDevice,
+					v.Network.Bridge,
+					v.Network.ID,
+					v.Network.Subnet,
+				); err != nil {
 					slog.Warn("Failed to ensure TAP during respawn", "tap", v.TapDevice, "error", err)
 				}
 			})
@@ -1928,7 +1943,15 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 	}
 	netItem, err := op.Repos.Network.Get(ctx, vmItem.NetworkID)
 	if err != nil {
-		slog.Warn("failed to resolve network for export", "vm", vmItem.Name, "network_id", vmItem.NetworkID, "error", err)
+		slog.Warn(
+			"failed to resolve network for export",
+			"vm",
+			vmItem.Name,
+			"network_id",
+			vmItem.NetworkID,
+			"error",
+			err,
+		)
 	}
 
 	diskSize := ""
@@ -2076,7 +2099,11 @@ type consoleRelayRef struct {
 	vmDir string
 }
 
-func (c *VMCreateBuilder) cloneImage(ctx context.Context, imageSvc *image.Service, resolved *inputs.ResolvedVMCreateInput) error {
+func (c *VMCreateBuilder) cloneImage(
+	ctx context.Context,
+	imageSvc *image.Service,
+	resolved *inputs.ResolvedVMCreateInput,
+) error {
 	fsType := resolved.Image.FSType
 	if fsType == "" {
 		return fmt.Errorf("fsType is required")

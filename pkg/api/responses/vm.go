@@ -48,9 +48,9 @@ type VMNetworkingInfo struct {
 
 // VMAssetsInfo groups VM asset references in an inspect response.
 type VMAssetsInfo struct {
-	Image  *model.ImageItem   `json:"image,omitempty"`
-	Kernel *model.KernelItem  `json:"kernel,omitempty"`
-	Binary *model.BinaryItem  `json:"binary,omitempty"`
+	Image  *model.ImageItem  `json:"image,omitempty"`
+	Kernel *model.KernelItem `json:"kernel,omitempty"`
+	Binary *model.BinaryItem `json:"binary,omitempty"`
 }
 
 // VMFilesystemInfo groups VM filesystem paths in an inspect response.

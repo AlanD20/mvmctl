@@ -5,7 +5,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"mvmctl/internal/core/vm"
@@ -52,8 +51,12 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 		UpdatedAt:  timestamp,
 	}
 
-	if _, err := op.Services.Volume.CreateDisk(ctx, volumeItem); err != nil {
-		return nil, err
+	if _, volErr := op.Services.Volume.CreateDisk(ctx, volumeItem); volErr != nil {
+		return nil, &errs.DomainError{
+			Code:    errs.CodeInternal,
+			Message: fmt.Sprintf("Failed to create volume: %v", volErr),
+			Err:     volErr,
+		}
 	}
 
 	op.AuditLog.LogOperation("volume.create", map[string]any{"name": input.Name}, "")
@@ -231,11 +234,16 @@ func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreate
 		}
 	}
 
-	if _, err = op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes); err != nil {
-		return err
+	_, err = op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes)
+	if err != nil {
+		return &errs.DomainError{
+			Code:    "volume.resize_failed",
+			Message: fmt.Sprintf("Failed to resize volume: %v", err),
+			Err:     err,
+		}
 	}
 
-	op.AuditLog.LogOperation("volume.resize", map[string]interface{}{"name": vol.Name}, "")
+	op.AuditLog.LogOperation("volume.resize", map[string]any{"name": vol.Name}, "")
 
 	return nil
 }
@@ -250,13 +258,9 @@ func (op *Operation) VolumeGet(ctx context.Context, input inputs.VolumeInput) (*
 		return nil, err
 	}
 
+	// Python: if len(resolved.volumes) > 1: raise VolumeNotFoundError(...)
 	if len(resolved.Volumes) > 1 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "volume_get",
-			Message: fmt.Sprintf("found more than one result from given identifier: %s", strings.Join(input.Identifiers, ", ")),
-			Class:   errs.ClassValidation,
-		}
+		return nil, fmt.Errorf("Expected exactly one volume identifier")
 	}
 
 	return resolved.Volumes[0], nil
