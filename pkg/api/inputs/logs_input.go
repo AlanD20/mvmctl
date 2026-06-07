@@ -65,8 +65,6 @@ func NewLogRequest(inputs LogInput, cfg *config.Service, db *sqlx.DB) *LogReques
 	}
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-
 // Resolve resolves all inputs to explicit values.
 // Matches Python's LogRequest.resolve().
 func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*ResolvedLogInput, error) {

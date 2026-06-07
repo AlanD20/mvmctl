@@ -46,17 +46,10 @@ func (s *Service) GetLogPath(vmDir string, logType, logFilename, serialOutputFil
 
 	// Validate log file exists (matches Python LogsError("Log file not found for VM: ..."))
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
-		return "", ErrLogsNotFound("Log file not found for VM: " + logFile)
+		return "", ErrLogsNotFound("log file not found for VM: " + logFile)
 	}
 
 	return logFile, nil
-}
-
-// VMExists checks if a VM's data directory exists.
-// Matches Python's validation inline in LogController.
-func (s *Service) VMExists(vmDir string) bool {
-	_, err := os.Stat(vmDir)
-	return err == nil
 }
 
 // ReadLogLines reads the last N lines from a log file.
