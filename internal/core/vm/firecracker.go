@@ -47,20 +47,16 @@ type FirecrackerSpawner struct {
 
 // NewFirecrackerSpawner creates a new FirecrackerSpawner.
 // Matches Python's FirecrackerSpawner.__init__(config, *, config_path=None).
-func NewFirecrackerSpawner(config *model.FirecrackerConfig, configPath ...string) *FirecrackerSpawner {
+func NewFirecrackerSpawner(config *model.FirecrackerConfig) *FirecrackerSpawner {
 	s := &FirecrackerSpawner{
 		config: config,
 	}
-	if len(configPath) > 0 && configPath[0] != "" {
-		s.configPath = configPath[0]
-	} else {
-		s.configPath = filepath.Join(config.VMDir, config.ConfigFilename)
-	}
-	s.logPath = filepath.Join(config.VMDir, config.LogFilename)
-	s.metricsPath = filepath.Join(config.VMDir, config.MetricsFilename)
-	s.serialOutputPath = filepath.Join(config.VMDir, config.SerialOutputFilename)
-	s.pidPath = filepath.Join(config.VMDir, config.PIDFilename)
-	s.APISocketPath = filepath.Join(config.VMDir, config.APISocketFilename)
+	s.configPath = config.ConfigPath
+	s.logPath = config.LogPath
+	s.metricsPath = config.MetricsPath
+	s.serialOutputPath = config.SerialOutputPath
+	s.pidPath = config.PIDPath
+	s.APISocketPath = config.APISocketPath
 	return s
 }
 
