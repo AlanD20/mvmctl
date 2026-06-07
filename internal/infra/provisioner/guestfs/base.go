@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,6 +77,7 @@ func initEnv(ctx context.Context) {
 		}
 
 		os.Setenv("LIBGUESTFS_BACKEND", "direct")
+		os.Setenv("LIBGUESTFS_MEMSIZE", "256")
 		if _, err := os.Stat("/dev/shm"); err == nil {
 			os.Setenv("LIBGUESTFS_CACHEDIR", "/dev/shm")
 		}
@@ -107,15 +109,43 @@ func guestfishRun(
 	if readonly {
 		allArgs = append(allArgs, "--ro")
 	}
-	allArgs = append(allArgs,
-		"--cachemode", "writeback",
-		"--no-recovery-proc",
-		"--no-autosync",
-		"--no-network",
-		"--smp", "1",
-		"--memsize", "256",
-		"--backend", "direct",
-	)
+	allArgs = append(allArgs, "--no-sync")
+	// guestfish 1.56.x supports only: -a, --ro, --no-sync, --network,
+	// --format, -f, -i.  The --no-recovery-proc, --no-autosync, --smp,
+	// --memsize, --backend, and --cachemode flags from newer versions
+	// do not exist.  Use env vars (LIBGUESTFS_MEMSIZE, LIBGUESTFS_BACKEND)
+	// and stdin commands (set-smp, set-recovery-proc) instead.
+	//
+	// Commands must be passed via stdin (not positional CLI args)
+	// because 1.56.x treats all positional tokens as arguments to
+	// the first command rather than as separate commands.
+	// Args using the colon-separated format ("cmd : cmd : cmd")
+	// are split into stdin lines, each prefixed with config setup
+	// and run/launch.
+	if input == "" && !slices.Contains(args, "-i") && len(args) > 0 {
+		// Split args by ":" into command groups, join each group with spaces.
+		// This converts the colon-separated CLI arg format into stdin lines.
+		var cmdLines []string
+		var current []string
+		for _, arg := range args {
+			if arg == ":" {
+				if len(current) > 0 {
+					cmdLines = append(cmdLines, strings.Join(current, " "))
+					current = nil
+				}
+			} else {
+				current = append(current, arg)
+			}
+		}
+		if len(current) > 0 {
+			cmdLines = append(cmdLines, strings.Join(current, " "))
+		}
+
+		// Prepend config commands (not covered by env vars) before run.
+		input = "set-smp 1\nset-recovery-proc false\nrun\n" +
+			strings.Join(cmdLines, "\n") + "\n"
+		args = nil
+	}
 	allArgs = append(allArgs, args...)
 
 	var lastErr error
