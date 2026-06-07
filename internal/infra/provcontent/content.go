@@ -341,7 +341,13 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 		GID:  0,
 	})
 
-	if user != "root" {
+	if user == "root" {
+		// Fix /root ownership — some cloud images (e.g. Ubuntu cloud)
+		// ship with /root owned by a non-root user. SSHD's StrictModes
+		// checks home directory ownership and rejects publickey auth if
+		// it's not owned by the target user.
+		ops = append(ops, ChrootOp{Command: "chown root:root /root"})
+	} else {
 		userHome := "/home/" + user
 
 		// ALSO inject into the non-root user's authorized_keys

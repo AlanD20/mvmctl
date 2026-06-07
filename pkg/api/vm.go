@@ -98,6 +98,7 @@ func (op *Operation) VMCreate(
 	if err != nil {
 		return nil, err
 	}
+	sharedResolved.Provisioner = model.ProvisionerType(op.ProvisionerType)
 
 	// Network bridge setup (shared across all VMs in the batch, done once).
 	bridgeAddr, calcErr := network.ComputeBridgeAddress(
