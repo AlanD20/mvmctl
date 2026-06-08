@@ -3,7 +3,6 @@ package logging
 import (
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
@@ -11,9 +10,7 @@ import (
 	"mvmctl/internal/infra/logging/rotating"
 )
 
-var (
-	setupLoggingOnce sync.Once
-)
+var setupLoggingOnce sync.Once
 
 // SetupLogging configures the root slog logger with console-style format and
 // continuous file rotation. Mirrors Python's mvmctl.utils._io.setup_logging().
@@ -52,23 +49,15 @@ func SetupLogging(verbose, debug bool) {
 			}
 		}
 
-		// Console handler (stderr) at configured level
-		consoleH := &consoleHandler{
-			writer: os.Stderr,
-			level:  level,
-		}
-
-		handlers := []slog.Handler{consoleH}
+		// Stderr text handler at configured level
+		stderrH := &textHandler{writer: os.Stderr, level: level}
+		handlers := []slog.Handler{stderrH}
 
 		// File handler always at DEBUG — captures everything without --debug flags.
-		// Mirror's Python's "try: RotatingFileHandler(...) except Exception: pass"
-		logPath := GetLogPath()
+		logPath := infra.GetLogPath()
 		rw, err := rotating.NewRotatingFileWriter(logPath)
 		if err == nil {
-			fileH := &consoleHandler{
-				writer: rw,
-				level:  slog.LevelDebug,
-			}
+			fileH := &textHandler{writer: rw, level: slog.LevelDebug}
 			handlers = append(handlers, fileH)
 		}
 
@@ -82,17 +71,4 @@ func SetupLogging(verbose, debug bool) {
 		logger := slog.New(handler)
 		slog.SetDefault(logger)
 	})
-}
-
-// GetLogPath returns the full path to the mvmctl log file.
-// The path is derived from the cache directory (under $HOME/.cache/<project>).
-// The parent directory is created if it does not exist.
-func GetLogPath() string {
-	cacheDir, err := infra.GetCacheDir()
-	if err != nil {
-		cacheDir = filepath.Join(infra.GetRealHome(), ".cache", infra.ProjectName)
-	}
-	logPath := filepath.Join(cacheDir, "mvmctl.log")
-	os.MkdirAll(filepath.Dir(logPath), infra.DirPerm)
-	return logPath
 }

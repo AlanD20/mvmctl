@@ -9,6 +9,7 @@ import (
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
+	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/system"
 	infraversion "mvmctl/internal/infra/version"
 	"mvmctl/pkg/api"
@@ -167,7 +168,7 @@ func makePersistentPreRunE() func(*cobra.Command, []string) error {
 		verbose, _ := c.Flags().GetBool("verbose")
 		debug, _ := c.Flags().GetBool("debug")
 		infra.SetDebugMode(debug)
-		infra.SetupLogging(verbose, debug)
+		logging.SetupLogging(verbose, debug)
 
 		// Check that the database exists (matching Python lines 329-337).
 		// Python: click.echo("Error: '...' requires initialization...", err=True); ctx.exit(1)

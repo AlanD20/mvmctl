@@ -135,7 +135,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Repos:           r,
 		Services:        s,
 		ProvisionerType: provisionerType,
-		AuditLog:        logging.NewAuditLog(cacheDir),
+		AuditLog:        logging.NewAuditLog(),
 	}
 }
 
