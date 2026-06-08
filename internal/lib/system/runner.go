@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"mvmctl/internal/infra"
 	"mvmctl/pkg/errs"
 )
 
@@ -43,68 +42,15 @@ type RunCmdOpts struct {
 	StartOnly   bool
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Process lifecycle — ProcessSignalHandler
-// ────────────────────────────────────────────────────────────────────
+// DefaultGracefulTimeout is the default timeout for graceful SIGTERM shutdown.
+const DefaultGracefulTimeout = 4 * time.Second
+
+// DefaultKillTimeout is the default timeout for SIGKILL shutdown.
+const DefaultKillTimeout = 5 * time.Second
 
 // signalExitCodeBase matches Python's CONST_SIGNAL_EXIT_CODE_BASE = 128.
 // POSIX convention: exit code = 128 + signal number for signal death.
 const signalExitCodeBase = 128
-
-// ProcessSignalHandler matches Python's ProcessSignalHandler class.
-//
-// Robust Linux process lifecycle manager handling:
-// zombie detection, graceful shutdown, exit code capture,
-// PID reuse mitigation, D-state awareness.
-//
-// Python signature:
-//
-//	class ProcessSignalHandler:
-//	    def __init__(self, pid, *, is_child=True, expected_start_time=None,
-//	                 graceful_timeout=30.0, kill_timeout=5.0, poll_interval=0.1)
-//
-// ProcessSignalHandlerConfig holds all configurable fields for ProcessSignalHandler.
-// Instead of functional options, the caller populates this struct and passes it
-// to NewProcessSignalHandler. Zero values use sensible defaults.
-type ProcessSignalHandlerConfig struct {
-	PID               int
-	IsChild           bool
-	ExpectedStartTime *int64
-	GracefulTimeout   time.Duration // defaults to 30s if zero
-	KillTimeout       time.Duration // defaults to 5s if zero
-	PollInterval      time.Duration // defaults to 100ms if zero
-}
-
-const (
-	defaultGracefulTimeout = 4 * time.Second
-	defaultKillTimeout     = 5 * time.Second
-	defaultPollInterval    = 100 * time.Millisecond
-)
-
-// ProcessSignalHandler struct to match Python's class.
-type ProcessSignalHandler struct {
-	Pid               int
-	IsChild           bool
-	ExpectedStartTime *int64
-	GracefulTimeout   time.Duration
-	KillTimeout       time.Duration
-	PollInterval      time.Duration
-	exitCode          *int
-	reaped            bool
-}
-
-// NewProcessSignalHandler creates a new ProcessSignalHandler.
-// Fields in cfg use their provided values, or fall back to defaults.
-func NewProcessSignalHandler(cfg ProcessSignalHandlerConfig) *ProcessSignalHandler {
-	return &ProcessSignalHandler{
-		Pid:               cfg.PID,
-		IsChild:           cfg.IsChild,
-		ExpectedStartTime: cfg.ExpectedStartTime,
-		GracefulTimeout:   infra.NonZero(cfg.GracefulTimeout, defaultGracefulTimeout),
-		KillTimeout:       infra.NonZero(cfg.KillTimeout, defaultKillTimeout),
-		PollInterval:      infra.NonZero(cfg.PollInterval, defaultPollInterval),
-	}
-}
 
 // ── Static helpers ──
 
@@ -163,210 +109,141 @@ func GetProcessStartTime(pid int) *int64 {
 	return &stat.StartTime
 }
 
-// ── Instance methods ──
+// ── Process lifecycle functions ──
 
-// IsAlive checks if the process is genuinely running (not zombie, not dead,
-// not reused).  Returns false for: dead, zombie, already reaped, PID reused.
-// Returns true for: running, sleeping, D-state.
-//
-// Uses a single /proc/<pid>/stat read — no kill(0) needed since /proc is
-// world-readable and provides both state and start time in one call.
-func (h *ProcessSignalHandler) IsAlive() bool {
-	if h.reaped {
-		return false
-	}
-
-	stat, err := readProcStat(h.Pid)
+// IsProcessAlive checks if a process with the given PID is genuinely running
+// (not zombie, not dead, PID not reused).  Returns false for: dead, zombie,
+// already reaped, PID reused.  Returns true for: running, sleeping, D-state.
+func IsProcessAlive(pid int, expectedStartTime *int64) bool {
+	stat, err := readProcStat(pid)
 	if err != nil {
-		return false // Process doesn't exist
-	}
-
-	// PID reuse check (zero extra cost — same /proc read)
-	if h.ExpectedStartTime != nil && stat.StartTime != *h.ExpectedStartTime {
 		return false
 	}
-
+	// PID reuse check (zero extra cost — same /proc read)
+	if expectedStartTime != nil && stat.StartTime != *expectedStartTime {
+		return false
+	}
 	// Zombie or exiting (dead but not yet reaped)
 	if stat.State == 'Z' || stat.State == 'X' {
-		if h.IsChild {
-			h.tryReap()
-		}
 		return false
 	}
-
 	// Alive: running (R), sleeping (S), D-state, etc.
 	return true
 }
 
-// Kill sends SIGKILL. Returns true if signal was sent.
-// Python's kill() uses the same logic.
-func (h *ProcessSignalHandler) Kill() bool {
-	return h.SendSignal(syscall.SIGKILL)
+// KillProcess sends SIGKILL to a process. Returns true if signal was delivered.
+func KillProcess(pid int) bool {
+	return syscall.Kill(pid, syscall.SIGKILL) == nil
 }
 
-// TerminateBatch batch-terminates orphaned PIDs: SIGTERM all → wait →
-// SIGKILL survivors.  Returns list of PIDs confirmed dead.
-// Python's terminate_batch() class method uses the same logic.
-func TerminateBatch(pids []int, gracefulTimeout time.Duration) []int {
-	terminated := make([]int, 0)
+// CaptureExitCode attempts to reap a child process exit code (non-blocking).
+// Returns the exit code if the process has exited, nil otherwise.
+func CaptureExitCode(pid int) *int {
+	var wstatus syscall.WaitStatus
+	npid, err := syscall.Wait4(pid, &wstatus, syscall.WNOHANG, nil)
+	if err != nil {
+		return nil
+	}
+	if npid != 0 {
+		code := DecodeExitStatus(wstatus)
+		return &code
+	}
+	return nil
+}
 
-	// Phase 1: SIGTERM all
-	for _, pid := range pids {
-		handler := NewProcessSignalHandler(ProcessSignalHandlerConfig{PID: pid, IsChild: false})
-		if handler.SendSignal(syscall.SIGTERM) {
-			terminated = append(terminated, pid)
-		}
+// ShutdownConfig configures GracefulShutdown.
+// Zero values use sensible defaults for timeout fields.
+type ShutdownConfig struct {
+	Pid               int
+	IsChild           bool
+	PreSignalHook     func() bool  // optional: called before SIGTERM; if returns false, wait only
+	GracefulTimeout   time.Duration // zero = DefaultGracefulTimeout
+	KillTimeout       time.Duration // zero = DefaultKillTimeout
+	ExpectedStartTime *int64        // optional: PID reuse detection
+}
+
+// GracefulShutdown performs a complete SIGTERM → wait → SIGKILL cycle.
+// Fields in cfg use their provided values, or fall back to defaults.
+// Returns exit code if captured, nil if the process survived SIGKILL.
+func GracefulShutdown(cfg ShutdownConfig) *int {
+	gracefulTimeout := cfg.GracefulTimeout
+	if gracefulTimeout == 0 {
+		gracefulTimeout = DefaultGracefulTimeout
+	}
+	killTimeout := cfg.KillTimeout
+	if killTimeout == 0 {
+		killTimeout = DefaultKillTimeout
 	}
 
-	// Phase 2: Wait, then SIGKILL survivors
-	if len(terminated) > 0 {
-		time.Sleep(gracefulTimeout)
-		for _, pid := range terminated {
-			handler := NewProcessSignalHandler(ProcessSignalHandlerConfig{PID: pid, IsChild: false})
-			if handler.IsAlive() {
-				handler.Kill()
-				// Python logs: logger.debug("Sent SIGKILL to abandoned process %d", pid)
-				// — we skip the log here as it's caller's responsibility
+	if !IsProcessAlive(cfg.Pid, cfg.ExpectedStartTime) {
+		if cfg.IsChild {
+			if code := CaptureExitCode(cfg.Pid); code != nil {
+				return code
 			}
 		}
+		return nil
 	}
 
-	return terminated
-}
-
-// SendSignal sends a signal. Returns true if signal was delivered.
-// Python's send_signal() uses the same logic.
-func (h *ProcessSignalHandler) SendSignal(sig syscall.Signal) bool {
-	err := syscall.Kill(h.Pid, sig)
-	if err != nil {
-		// Catch ESRCH (process not found) and EPERM (no permission)
-		return false
-	}
-	return true
-}
-
-// GracefulShutdown performs a full graceful shutdown:
-// optional hook → SIGTERM → wait → SIGKILL → wait.
-//
-// The IsAlive guard is essential: kill(2) returns 0 for zombies on Linux,
-// so without it we'd waste a full timeout cycle waiting on a zombie process.
-//
-// Args:
-//   - preSignalHook: called before SIGTERM. Return false to skip SIGTERM
-//     and only wait for exit (e.g., for Firecracker: call SendCtrlAltDel
-//     here, then return false to wait for guest OS shutdown).
-//
-// Returns:
-//   - Exit code if captured, nil if process survived SIGKILL or is not a child.
-func (h *ProcessSignalHandler) GracefulShutdown(preSignalHook func() bool) *int {
-	if !h.IsAlive() {
-		return h.exitCode
-	}
-
-	// Optional pre-signal hook (e.g., Firecracker SendCtrlAltDel).
-	// If the hook returns false, it handled shutdown — just wait for exit.
-	if preSignalHook != nil && !preSignalHook() {
-		return h.waitForExit(h.GracefulTimeout)
+	// Pre-signal hook: if it returns false, hook initiated shutdown — just wait
+	if cfg.PreSignalHook != nil && !cfg.PreSignalHook() {
+		return waitForExit(cfg.Pid, cfg.IsChild, gracefulTimeout)
 	}
 
 	// Phase 1: SIGTERM
-	if exitCode := h.signalWithReap(syscall.SIGTERM); exitCode != nil {
+	if exitCode := signalAndCheck(cfg.Pid, cfg.IsChild, syscall.SIGTERM); exitCode != nil {
 		return exitCode
 	}
 
 	// Phase 2: Wait for graceful exit
-	if exitCode := h.waitForExit(h.GracefulTimeout); exitCode != nil {
+	if exitCode := waitForExit(cfg.Pid, cfg.IsChild, gracefulTimeout); exitCode != nil {
 		return exitCode
 	}
 
 	// Phase 3: SIGKILL
-	if exitCode := h.signalWithReap(syscall.SIGKILL); exitCode != nil {
+	if exitCode := signalAndCheck(cfg.Pid, cfg.IsChild, syscall.SIGKILL); exitCode != nil {
 		return exitCode
 	}
 
 	// Phase 4: Wait for SIGKILL (should be near-instant)
-	return h.waitForExit(h.KillTimeout)
+	return waitForExit(cfg.Pid, cfg.IsChild, killTimeout)
 }
 
-// signalWithReap sends sig and reaps exit code if the process is gone.
-// Returns the exit code if captured, or nil to signal "proceed to next phase".
-func (h *ProcessSignalHandler) signalWithReap(sig syscall.Signal) *int {
-	err := syscall.Kill(h.Pid, sig)
+// signalAndCheck sends a signal and checks if the process is gone.
+// Returns exit code if reaped, nil to signal "proceed to next phase".
+func signalAndCheck(pid int, isChild bool, sig syscall.Signal) *int {
+	err := syscall.Kill(pid, sig)
 	if err == nil {
 		return nil
 	}
 	// ESRCH = process doesn't exist, EPERM = no permission to signal
 	if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
-		h.tryReap()
-		return h.exitCode
+		if isChild {
+			return CaptureExitCode(pid)
+		}
+		return nil
 	}
 	// Unexpected error — log and proceed; SIGKILL may still succeed.
-	slog.Warn("unexpected error from kill", "pid", h.Pid, "signal", sig, "error", err)
+	slog.Warn("unexpected error from kill", "pid", pid, "signal", sig, "error", err)
 	return nil
-}
-
-// TryCaptureExit reaps the child exit code if available (non-blocking, WNOHANG).
-// Returns the exit code or nil if the process hasn't exited yet.
-// Safe to call multiple times.
-func (h *ProcessSignalHandler) TryCaptureExit() *int {
-	h.tryReap()
-	return h.exitCode
-}
-
-// ── Private helpers ──
-
-// tryReap attempts to reap a zombie child.  Safe to call multiple times.
-// Python's _try_reap() uses the same logic.
-func (h *ProcessSignalHandler) tryReap() {
-	if !h.IsChild || h.reaped {
-		return
-	}
-	var wstatus syscall.WaitStatus
-	pid, err := syscall.Wait4(h.Pid, &wstatus, syscall.WNOHANG, nil)
-	if err != nil {
-		// ChildProcessError — already waited
-		if errors.Is(err, syscall.ECHILD) {
-			h.reaped = true
-		}
-		return
-	}
-	if pid != 0 {
-		code := DecodeExitStatus(wstatus)
-		h.exitCode = &code
-		h.reaped = true
-	}
 }
 
 // waitForExit polls for process exit with a monotonic deadline.
-// Python's _wait_for_exit() uses the same logic.
-func (h *ProcessSignalHandler) waitForExit(timeout time.Duration) *int {
+func waitForExit(pid int, isChild bool, timeout time.Duration) *int {
+	const pollInterval = 100 * time.Millisecond
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if h.IsChild {
-			var wstatus syscall.WaitStatus
-			pid, err := syscall.Wait4(h.Pid, &wstatus, syscall.WNOHANG, nil)
-			if err != nil {
-				if errors.Is(err, syscall.ECHILD) {
-					h.reaped = true
-					return h.exitCode
-				}
-				return h.exitCode
-			}
-			if pid != 0 {
-				code := DecodeExitStatus(wstatus)
-				h.exitCode = &code
-				h.reaped = true
-				return h.exitCode
+		if isChild {
+			if code := CaptureExitCode(pid); code != nil {
+				return code
 			}
 		} else {
-			if !h.IsAlive() {
-				h.reaped = true
-				return h.exitCode
+			if !IsProcessAlive(pid, nil) {
+				return nil
 			}
 		}
-		time.Sleep(h.PollInterval)
+		time.Sleep(pollInterval)
 	}
-	return nil
+	return nil // timeout
 }
 
 // ────────────────────────────────────────────────────────────────────

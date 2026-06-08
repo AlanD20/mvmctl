@@ -55,17 +55,7 @@ func NewController(ctx context.Context, entity any, repo Repository) (*Controlle
 // code paths (non-running, process-gone) are OUTSIDE the try/except
 // in Python — exceptions from those paths propagate to the caller.
 func (c *Controller) Stop(ctx context.Context, force bool) error {
-	var handler *system.ProcessSignalHandler
-	if c.vm.PID > 0 {
-		cfg := system.ProcessSignalHandlerConfig{
-			PID:     c.vm.PID,
-			IsChild: true,
-		}
-		if c.vm.ProcessStartTime != nil {
-			cfg.ExpectedStartTime = c.vm.ProcessStartTime
-		}
-		handler = system.NewProcessSignalHandler(cfg)
-	}
+	pid := c.vm.PID
 
 	// ── Non-running VMs: idempotent + orphan cleanup ──
 	// The DB status might be STOPPED/PAUSED/ERROR but the actual
@@ -75,12 +65,15 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 	// Python calls update_status() OUTSIDE the try/except block in this
 	// code path, so exceptions must propagate to caller — NOT absorbed.
 	if c.vm.Status != model.VMStatusRunning && c.vm.Status != model.VMStatusStarting {
-		if c.vm.PID != 0 && handler.IsAlive() {
-			handler.Kill()
+		if pid > 0 && system.IsProcessAlive(pid, c.vm.ProcessStartTime) {
+			system.KillProcess(pid)
 			if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
 				return err
 			}
 			c.vm.Status = model.VMStatusStopped
+		} else if pid > 0 {
+			// Process is a zombie or dead — reap exit code if child
+			system.CaptureExitCode(pid)
 		}
 		return nil
 	}
@@ -88,7 +81,11 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 	// ── RUNNING/STARTING but process is already gone ──
 	// Python calls update_status() OUTSIDE try/except — exception propagates.
 	// Python does NOT update in-memory status here (only DB).
-	if c.vm.PID == 0 || !handler.IsAlive() {
+	if pid == 0 || !system.IsProcessAlive(pid, c.vm.ProcessStartTime) {
+		if pid > 0 {
+			// Process is a zombie or dead — reap exit code if child
+			system.CaptureExitCode(pid)
+		}
 		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
 			return err
 		}
@@ -110,7 +107,7 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 		return err
 	}
 
-	stopErr := c.shutdownProcess(ctx, force, handler)
+	stopErr := c.shutdownProcess(ctx, force, pid)
 	if stopErr != nil {
 		// Python catches ANY exception and sets status to ERROR, then returns
 		// None (error absorbed). The error is logged but NOT returned to caller.
@@ -127,7 +124,7 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 // shutdownProcess handles the actual Firecracker process shutdown.
 // This is the "normal stop" logic from Python's try/except block in Stop().
 // Any error returned causes Stop() to set DB status to ERROR.
-func (c *Controller) shutdownProcess(ctx context.Context, force bool, handler *system.ProcessSignalHandler) error {
+func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) error {
 	var exitCode *int
 
 	if !force && c.vm.APISocketPath != "" {
@@ -142,23 +139,36 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, handler *s
 		// initiates shutdown, and the hook (returns false) tells the
 		// signal handler to wait rather than sending SIGTERM.
 		if ctrlErr == nil && wasCtrlAltDel {
-			exitCode = handler.GracefulShutdown(func() bool { return false })
+			exitCode = system.GracefulShutdown(system.ShutdownConfig{
+				Pid:               pid,
+				IsChild:           true,
+				PreSignalHook:     func() bool { return false },
+				ExpectedStartTime: c.vm.ProcessStartTime,
+			})
 		}
 
 		// Fallback: signal-based shutdown (SIGTERM → wait → SIGKILL)
 		if exitCode == nil {
-			exitCode = handler.GracefulShutdown(nil)
+			exitCode = system.GracefulShutdown(system.ShutdownConfig{
+				Pid:               pid,
+				IsChild:           true,
+				ExpectedStartTime: c.vm.ProcessStartTime,
+			})
 		}
 	} else {
 		if force {
-			handler.Kill()
+			system.KillProcess(pid)
 		}
-		exitCode = handler.GracefulShutdown(nil)
+		exitCode = system.GracefulShutdown(system.ShutdownConfig{
+			Pid:               pid,
+			IsChild:           true,
+			ExpectedStartTime: c.vm.ProcessStartTime,
+		})
 	}
 
 	// Capture exit code if not already captured (non-blocking)
 	if exitCode == nil {
-		exitCode = handler.TryCaptureExit()
+		exitCode = system.CaptureExitCode(pid)
 	}
 
 	// Persist exit code to database
