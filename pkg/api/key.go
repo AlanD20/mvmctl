@@ -253,10 +253,7 @@ func (op *Operation) KeyExport(
 
 	// Use KeyController.export() matching Python:
 	// controller = KeyController(resolved.keys[0], repo)
-	ctrl, err := key.NewController(ctx, keyItem, op.Repos.Key)
-	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeKeyExportFailed, fmt.Sprintf("Failed to create key controller: %v", err), err)
-	}
+	ctrl := key.NewController(keyItem, op.Repos.Key)
 
 	destPriv, destPub, err := ctrl.Export(ctx, destination, overwrite)
 	if err != nil {

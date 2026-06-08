@@ -82,7 +82,7 @@ func (op *Operation) ConsoleKill(ctx context.Context, identifier string) error {
 
 	killed := resolved.Relay.Stop(true)
 	if killed {
-		op.AuditLog.LogOperation("console.kill", map[string]interface{}{"name": identifier}, "")
+		op.AuditLog.LogOperation("console.kill", map[string]any{"name": identifier}, "")
 		return nil
 	}
 	return errs.New(errs.CodeConsoleKillFailed, fmt.Sprintf("Failed to stop console relay for '%s'", identifier))

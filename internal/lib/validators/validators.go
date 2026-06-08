@@ -482,7 +482,7 @@ func cidrsOverlap(a, b *net.IPNet) bool {
 	return ipCmp(aFirst, bLast) <= 0 && ipCmp(bFirst, aLast) <= 0
 }
 
-func SubnetNoOverlap(subnet string, existing []interface{}, excludeName string) error {
+func SubnetNoOverlap(subnet string, existing []any, excludeName string) error {
 	_, newNet, err := net.ParseCIDR(subnet)
 	if err != nil {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid subnet: %v", err))
@@ -534,7 +534,7 @@ type SubnetProvider interface {
 }
 
 // duckTypedName returns the Name from an item implementing Namable.
-func duckTypedName(v interface{}) string {
+func duckTypedName(v any) string {
 	if n, ok := v.(Namable); ok {
 		return n.GetName()
 	}
@@ -542,7 +542,7 @@ func duckTypedName(v interface{}) string {
 }
 
 // duckTypedSubnet returns the Subnet from an item implementing SubnetProvider.
-func duckTypedSubnet(v interface{}) string {
+func duckTypedSubnet(v any) string {
 	if s, ok := v.(SubnetProvider); ok {
 		return s.GetSubnet()
 	}

@@ -64,7 +64,7 @@ func (op *Operation) CPCopy(
 	// Audit log (matches Python: AuditLog.log("cp.copy", changes={...}))
 	// Python order: resolution → audit log → direction dispatch.
 	// With destination validation moved before audit log.
-	op.AuditLog.LogOperation("cp.copy", map[string]interface{}{
+	op.AuditLog.LogOperation("cp.copy", map[string]any{
 		"direction": resolved.Direction,
 		"sources":   strings.Join(input.Sources, ", "),
 		"dst":       input.Dst,

@@ -110,7 +110,7 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 
 	// Audit log
 
-	op.AuditLog.LogOperation("network.create", map[string]interface{}{"name": resolved.Name}, "")
+	op.AuditLog.LogOperation("network.create", map[string]any{"name": resolved.Name}, "")
 
 	return updated, nil
 }
@@ -142,7 +142,7 @@ func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInpu
 			return errs.WrapMsg(code, errorMsg, err)
 		}
 
-		op.AuditLog.LogOperation("network.remove", map[string]interface{}{"id": net.ID, "name": net.Name}, "")
+		op.AuditLog.LogOperation("network.remove", map[string]any{"id": net.ID, "name": net.Name}, "")
 	}
 
 	return nil
@@ -178,10 +178,10 @@ func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) 
 
 // NetworkToJSON converts networks to JSON-serializable dicts.
 // Matches Python's NetworkOperation.to_json() exactly — delegates to model's to_dict().
-func (op *Operation) NetworkToJSON(networks []*model.Network) []map[string]interface{} {
-	result := make([]map[string]interface{}, 0, len(networks))
+func (op *Operation) NetworkToJSON(networks []*model.Network) []map[string]any {
+	result := make([]map[string]any, 0, len(networks))
 	for _, n := range networks {
-		result = append(result, map[string]interface{}{
+		result = append(result, map[string]any{
 			"id":            n.ID,
 			"name":          n.Name,
 			"subnet":        n.Subnet,
@@ -288,10 +288,7 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input inputs.Network
 	}
 
 	net := resolved.Networks[0]
-	controller, err := network.NewController(ctx, net, op.Repos.Network)
-	if err != nil {
-		return errs.New(errs.CodeNetworkDefaultSetFailed, fmt.Sprintf("Failed to create network controller: %v", err))
-	}
+	controller := network.NewController(net, op.Repos.Network)
 	if err := controller.SetDefault(ctx); err != nil {
 		return errs.WrapMsg(
 			errs.CodeNetworkDefaultSetFailed,
@@ -300,7 +297,7 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input inputs.Network
 		)
 	}
 
-	op.AuditLog.LogOperation("network.set_default", map[string]interface{}{"name": net.Name}, "")
+	op.AuditLog.LogOperation("network.set_default", map[string]any{"name": net.Name}, "")
 
 	return nil
 }

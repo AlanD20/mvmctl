@@ -52,7 +52,6 @@ import (
 	"fmt"
 	"maps"
 	"runtime/debug"
-	"strings"
 )
 
 // ── Error classification ────────────────────────────────────────────────
@@ -423,36 +422,8 @@ func (e *DomainError) Error() string {
 	return e.Message
 }
 
-// String returns the detailed error format: "code (op): entity: message: cause".
-func (e *DomainError) String() string {
-	var b strings.Builder
-	b.WriteString(string(e.Code))
-	if e.Op != "" {
-		b.WriteString(" (")
-		b.WriteString(e.Op)
-		b.WriteString(")")
-	}
-	if e.Entity != "" {
-		b.WriteString(": ")
-		b.WriteString(e.Entity)
-	}
-	if e.Message != "" {
-		b.WriteString(": ")
-		b.WriteString(e.Message)
-	}
-	if e.Err != nil {
-		b.WriteString(": ")
-		b.WriteString(e.Err.Error())
-	}
-	return b.String()
-}
-
 // Unwrap returns the wrapped error, enabling errors.Is/As chain walking.
 func (e *DomainError) Unwrap() error { return e.Err }
-
-// IsMVMError marks DomainError as an MVMError subclass for the enricher's
-// soft-fail interface check. Library consumers should ignore this marker.
-func (e *DomainError) IsMVMError() bool { return true }
 
 // ── Options ──────────────────────────────────────────────────────────────
 

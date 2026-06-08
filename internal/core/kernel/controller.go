@@ -4,38 +4,17 @@ import (
 	"context"
 
 	"mvmctl/internal/lib/model"
-	"mvmctl/pkg/errs"
 )
 
 // Controller matches Python's Controller.
-// Stateful kernel controller — bound to a single kernel instance.
 type Controller struct {
 	kernel *model.KernelItem
 	repo   Repository
 }
 
-// NewController creates a Controller from an entity.
-// entity can be a *model.KernelItem or a string identifier.
-// Matches Python's Controller.__init__() which delegates string
-// resolution to Resolver.resolve() for enrichment support.
-func NewController(ctx context.Context, entity interface{}, repo Repository) (*Controller, error) {
-	ctrl := &Controller{repo: repo}
-	switch e := entity.(type) {
-	case *model.KernelItem:
-		ctrl.kernel = e
-	case string:
-		// Delegate to Resolver.Resolve() for full resolution logic,
-		// matching Python's Controller which uses the resolver.
-		r := NewResolver(repo, nil)
-		k, err := r.Resolve(ctx, e)
-		if err != nil {
-			return nil, err
-		}
-		ctrl.kernel = k
-	default:
-		return nil, errs.New(errs.CodeKernelBuildFailed, "invalid entity type", errs.WithClass(errs.ClassInternal))
-	}
-	return ctrl, nil
+// NewController creates a Controller bound to a resolved kernel.
+func NewController(kernel *model.KernelItem, repo Repository) *Controller {
+	return &Controller{kernel: kernel, repo: repo}
 }
 
 // Get returns the bound kernel item.

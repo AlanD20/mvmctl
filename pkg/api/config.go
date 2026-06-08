@@ -66,7 +66,7 @@ func (op *Operation) ConfigSet(
 
 	op.AuditLog.LogOperation(
 		"config.set",
-		map[string]interface{}{
+		map[string]any{
 			"category": resolved.Category,
 			"key":      resolved.Key,
 			"value":    resolved.Value,

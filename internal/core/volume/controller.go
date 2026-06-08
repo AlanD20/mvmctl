@@ -2,42 +2,19 @@ package volume
 
 import (
 	"context"
-	"fmt"
 
 	"mvmctl/internal/lib/model"
-	"mvmctl/pkg/errs"
 )
 
 // Controller manages volume operations for a specific volume instance.
-// Matches Python's VolumeController exactly — stateful: resolves entity eagerly
-// in NewController and stores it internally.
 type Controller struct {
 	volume *model.VolumeItem
 	repo   Repository
 }
 
-// NewController creates a new VolumeController for the given entity.
-// If entity is a *Volume, it is used directly.
-// If entity is a string (name or ID prefix), it is resolved via the resolver.
-// Matches Python's VolumeController.__init__() exactly.
-func NewController(ctx context.Context, entity any, repo Repository) (*Controller, error) {
-	c := &Controller{repo: repo}
-	switch e := entity.(type) {
-	case *model.VolumeItem:
-		c.volume = e
-		return c, nil
-	case string:
-		resolver := NewResolver(repo)
-		vol, err := resolver.Resolve(ctx, e)
-		if err != nil {
-			return nil, err
-		}
-		c.volume = vol
-		return c, nil
-	default:
-		return nil, errs.NotFound(errs.CodeVolumeNotFound,
-			fmt.Sprintf("Volume not found: '%v'", entity))
-	}
+// NewController creates a VolumeController bound to a resolved volume.
+func NewController(volume *model.VolumeItem, repo Repository) *Controller {
+	return &Controller{volume: volume, repo: repo}
 }
 
 // Attach attaches the volume to a VM by updating its status and vm_id.

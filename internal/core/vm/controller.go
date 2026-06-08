@@ -21,23 +21,8 @@ type Controller struct {
 }
 
 // NewController creates a new VM controller.
-// Matches Python's VMController.__init__(self, entity: str | VMInstanceItem, repo: Repository).
-func NewController(ctx context.Context, entity any, repo Repository) (*Controller, error) {
-	c := &Controller{repo: repo}
-	switch e := entity.(type) {
-	case *model.VM:
-		c.vm = e
-	case string:
-		resolver := NewResolver(repo)
-		resolved, err := resolver.Resolve(ctx, e)
-		if err != nil {
-			return nil, err
-		}
-		c.vm = resolved
-	default:
-		return nil, fmt.Errorf("invalid entity type: %T (expected *model.VM or string)", entity)
-	}
-	return c, nil
+func NewController(vm *model.VM, repo Repository) *Controller {
+	return &Controller{vm: vm, repo: repo}
 }
 
 // ── Stop ──
