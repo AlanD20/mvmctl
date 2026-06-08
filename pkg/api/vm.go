@@ -504,6 +504,8 @@ func (op *Operation) vmBuilderExecute(
 			GuestIP:               builder.guestIP,
 			TapName:               builder.tapName,
 			User:                  resolved.User,
+			NetworkID:             resolved.Network.ID,
+			NetworkName:           resolved.Network.Name,
 			IPv4Gateway:           resolved.Network.IPv4Gateway,
 			NetworkPrefixLen:      resolved.NetworkPrefixLen,
 			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
@@ -550,6 +552,8 @@ func (op *Operation) vmBuilderExecute(
 			GuestIP:               builder.guestIP,
 			TapName:               builder.tapName,
 			User:                  resolved.User,
+			NetworkID:             resolved.Network.ID,
+			NetworkName:           resolved.Network.Name,
 			IPv4Gateway:           resolved.Network.IPv4Gateway,
 			NetworkPrefixLen:      resolved.NetworkPrefixLen,
 			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
@@ -1893,6 +1897,7 @@ func (op *Operation) VMImport(
 	resolved, execErr = request.Resolve(ctx)
 	var vmInstance *model.VM
 	if execErr == nil {
+		resolved.Provisioner = model.ProvisionerType(op.ProvisionerType)
 		// Signal-based cleanup is handled inside vmBuilderCreate via ctx.Done().
 		// The parent ctx (from main()) already cancels on SIGINT/SIGTERM.
 		vmInstance, execErr = op.vmBuilderCreate(ctx, resolved, onProgress)

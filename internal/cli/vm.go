@@ -106,6 +106,9 @@ func runVMList(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput boo
 	vms := op.VMList(cmd.Context())
 
 	if jsonOutput {
+		if vms == nil {
+			vms = []*model.VM{}
+		}
 		b, _ := json.MarshalIndent(vms, "", "  ")
 		fmt.Println(string(b))
 		return nil
@@ -138,6 +141,9 @@ func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
 	vms := op.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
 
 	if jsonOutput {
+		if vms == nil {
+			vms = []*model.VM{}
+		}
 		b, _ := json.MarshalIndent(vms, "", "  ")
 		fmt.Println(string(b))
 		return nil

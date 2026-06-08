@@ -64,6 +64,9 @@ func newVolumeListCmd(op *api.Operation, configAPI *api.Operation) *cobra.Comman
 			volumes := op.VolumeListAll(cmd.Context())
 
 			if jsonOutput {
+				if volumes == nil {
+					volumes = []*model.VolumeItem{}
+				}
 				jsonBytes, _ := json.MarshalIndent(volumes, "", "  ")
 				fmt.Println(string(jsonBytes))
 				return nil

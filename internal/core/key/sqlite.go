@@ -80,25 +80,13 @@ func (r *sqliteRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-func (r *sqliteRepo) SetDefault(ctx context.Context, name string) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `UPDATE ssh_keys SET is_default = 0`)
-	if err != nil {
-		return err
-	}
-	_, err = tx.ExecContext(
+func (r *sqliteRepo) SetDefault(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(
 		ctx,
-		`UPDATE ssh_keys SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE name = ?`,
-		name,
+		`UPDATE ssh_keys SET is_default = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		id,
 	)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
+	return err
 }
 
 func (r *sqliteRepo) List(ctx context.Context) ([]*model.SSHKeyItem, error) {

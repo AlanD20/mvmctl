@@ -340,17 +340,16 @@ func (t *NFTablesTracker) findRuleHandle(ctx context.Context, rule *model.Firewa
 func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 	var expr []string
 
-	// Protocol
-	if rule.Protocol != model.FirewallProtocolAll {
-		expr = append(expr, string(rule.Protocol))
-	}
+	// nftables requires L3 (network layer) matches BEFORE L4 (transport layer).
+	// The protocol keyword (tcp/udp) must appear after ip saddr/daddr but
+	// immediately before dport/sport when port matches are present.
 
-	// Source address
+	// Source address (L3)
 	if rule.Source != string(model.FirewallWildcardAnyCIDR) {
 		expr = append(expr, "ip", "saddr", rule.Source)
 	}
 
-	// Destination address
+	// Destination address (L3)
 	if rule.Destination != string(model.FirewallWildcardAnyCIDR) {
 		expr = append(expr, "ip", "daddr", rule.Destination)
 	}
@@ -366,12 +365,17 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 		expr = append(expr, "oifname", fmt.Sprintf(`"%s"`, rule.OutInterface))
 	}
 
-	// Source port
+	// Protocol — standalone when no L4 port matches follow
+	if rule.Protocol != model.FirewallProtocolAll && rule.SPort == model.FirewallPortAny && rule.DPort == model.FirewallPortAny {
+		expr = append(expr, string(rule.Protocol))
+	}
+
+	// Source port (L4) — protocol keyword is required immediately before port expression
 	if rule.SPort != model.FirewallPortAny {
 		expr = append(expr, string(rule.Protocol), "sport", strconv.Itoa(rule.SPort))
 	}
 
-	// Destination port
+	// Destination port (L4)
 	if rule.DPort != model.FirewallPortAny {
 		expr = append(expr, string(rule.Protocol), "dport", strconv.Itoa(rule.DPort))
 	}

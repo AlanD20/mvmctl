@@ -68,6 +68,9 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if jsonOutput {
+				if local == nil {
+					local = []*model.BinaryItem{}
+				}
 				b, _ := json.MarshalIndent(local, "", "  ")
 				fmt.Println(string(b))
 				return nil

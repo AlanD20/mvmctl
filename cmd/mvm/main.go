@@ -29,6 +29,10 @@ func main() {
 	rootCmd := cli.NewRootCmd(op)
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		// Delegate ALL error handling to the single shared handler in helpers.go.
-		common.HandleErrors(func() error { return err })()
+		// HandleErrors returns nil for non-fatal errors (BrokenPipe), non-nil for
+		// everything else. Exit with code 1 so Go respects the error exit convention.
+		if common.HandleErrors(func() error { return err })() != nil {
+			os.Exit(1)
+		}
 	}
 }
