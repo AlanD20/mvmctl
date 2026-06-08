@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra/download"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 // rustTargetTriple returns the Rust target triple for the current architecture.
@@ -47,11 +47,7 @@ func CIVersion(version string) string {
 // ── Error helpers ──────────────────────────────────────────────────────────
 
 func binaryError(code errs.Code, msg string) *errs.DomainError {
-	return &errs.DomainError{
-		Code:    code,
-		Op:      "binary",
-		Message: msg,
-	}
+	return errs.New(code, msg)
 }
 
 // mapGitHubAPIError converts an error from the GitHub API into the Python-matching

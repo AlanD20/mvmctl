@@ -27,6 +27,7 @@ import (
 	"mvmctl/internal/infra/provisioner"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
+	"mvmctl/pkg/errs"
 )
 
 // Time constants matching Python's CONST_MEBIBYTE_BYTES etc.
@@ -78,7 +79,7 @@ func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force
 	hasVMs := len(vms) > 0
 
 	if hasVMs && !force {
-		return NewImageError("Image is referenced by VMs")
+		return errs.New(errs.CodeImageError, "Image is referenced by VMs")
 	}
 
 	// Delete ALL related files from disk
@@ -263,7 +264,7 @@ func (s *Service) OptimizeImage(
 	}
 
 	if _, statErr := os.Stat(imagePath); os.IsNotExist(statErr) {
-		return nil, warnings, NewImageError(
+		return nil, warnings, errs.New(errs.CodeImageError,
 			fmt.Sprintf("Image processing failed: output file not created at %s", imagePath),
 		)
 	}
@@ -445,7 +446,7 @@ func (s *Service) ExtractImage(
 	case "squashfs":
 		return s.handleSquashfs(ctx, sourcePath, finalPath, "dynamic")
 	default:
-		return "", NewImageError(fmt.Sprintf("Unknown format: %s", format))
+		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Unknown format: %s", format))
 	}
 }
 
@@ -453,11 +454,11 @@ func (s *Service) ExtractImage(
 func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath string) error {
 	cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", imageID, fsType))
 	if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
-		return NewImageError(fmt.Sprintf("Image not in cache: %s", imageID))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("Image not in cache: %s", imageID))
 	}
 
 	if err := os.MkdirAll(filepath.Dir(outputPath), infra.DirPerm); err != nil {
-		return NewImageError(fmt.Sprintf("Failed to create output directory: %s", err))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to create output directory: %s", err))
 	}
 
 	// Try reflink copy (matching Python: run_cmd(["cp", "--reflink=auto", ...]) with ProcessError fallback)
@@ -469,21 +470,24 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
 		if err := system.CopyWithDD(ctx, cachedPath, outputPath, true); err != nil {
-			return NewImageError(fmt.Sprintf("cp and dd fallback both failed: cp: %s; dd: %s", combined, err))
+			return errs.New(
+				errs.CodeImageError,
+				fmt.Sprintf("cp and dd fallback both failed: cp: %s; dd: %s", combined, err),
+			)
 		}
 	}
 
 	// fdatasync (matching Python's os.fdatasync(f.fileno()), reading file in RB mode)
 	f, err := os.Open(outputPath)
 	if err != nil {
-		return NewImageError(fmt.Sprintf("Failed to open file for fdatasync: %s", err))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to open file for fdatasync: %s", err))
 	}
 	if err := syscall.Fdatasync(int(f.Fd())); err != nil {
 		f.Close()
-		return NewImageError(fmt.Sprintf("fdatasync failed: %s", err))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("fdatasync failed: %s", err))
 	}
 	if err := f.Close(); err != nil {
-		return NewImageError(fmt.Sprintf("fdatasync close failed: %s", err))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("fdatasync close failed: %s", err))
 	}
 
 	slog.Info("Copied image", "output", filepath.Base(outputPath))
@@ -575,7 +579,10 @@ func GetSpecsFor(
 
 			spec, err := ConstructSpecFromTypeConfig(config, version, arch, ciVersion)
 			if err != nil {
-				return nil, NewImageError(fmt.Sprintf("Failed to construct spec for type '%s': %s", type_, err))
+				return nil, errs.New(
+					errs.CodeImageError,
+					fmt.Sprintf("Failed to construct spec for type '%s': %s", type_, err),
+				)
 			}
 			results = append(results, spec)
 		}
@@ -672,13 +679,13 @@ func GetSpecsFor(
 				if len(availableTypes) > 0 {
 					msg += fmt.Sprintf("Available image types: %s", strings.Join(availableTypes, ", "))
 				}
-				return nil, NewImageError(msg)
+				return nil, errs.New(errs.CodeImageError, msg)
 			}
 			msg := fmt.Sprintf("Image(s) not found: %s. ", strings.Join(unresolved, ", "))
 			if len(availableTypes) > 0 {
 				msg += fmt.Sprintf("Available image types: %s", strings.Join(availableTypes, ", "))
 			}
-			return nil, NewImageError(msg)
+			return nil, errs.New(errs.CodeImageError, msg)
 		}
 	}
 
@@ -743,7 +750,10 @@ func (s *Service) ResolveRemoteSizes(
 // Matches Python's Service.compress() exactly.
 func (s *Service) compress(imagePath string, level int, keepSource bool) (string, error) {
 	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		return "", NewImageCompressionError(fmt.Sprintf("Cannot compress: source file does not exist: %s", imagePath))
+		return "", errs.New(
+			errs.CodeImageCompressionError,
+			fmt.Sprintf("Cannot compress: source file does not exist: %s", imagePath),
+		)
 	}
 
 	info, _ := os.Stat(imagePath)
@@ -766,7 +776,7 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 		}
 	}
 	if allZeros {
-		return "", NewImageCorruptError(
+		return "", errs.New(errs.CodeImageCorrupt,
 			fmt.Sprintf("Source file appears to be all zeros: %s. File may be corrupted.", imagePath),
 		)
 	}
@@ -778,13 +788,13 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 
 	src, err := os.Open(imagePath)
 	if err != nil {
-		return "", NewImageCompressionError(fmt.Sprintf("Failed to open source: %v", err))
+		return "", errs.New(errs.CodeImageCompressionError, fmt.Sprintf("Failed to open source: %v", err))
 	}
 	defer src.Close()
 
 	dst, err := os.Create(compressedPath)
 	if err != nil {
-		return "", NewImageCompressionError(fmt.Sprintf("Failed to create output: %v", err))
+		return "", errs.New(errs.CodeImageCompressionError, fmt.Sprintf("Failed to create output: %v", err))
 	}
 	defer dst.Close()
 
@@ -794,7 +804,7 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 		zstd.WithEncoderConcurrency(runtime.NumCPU()),
 	)
 	if err != nil {
-		return "", NewImageCompressionError(fmt.Sprintf("Failed to create zstd compressor: %v", err))
+		return "", errs.New(errs.CodeImageCompressionError, fmt.Sprintf("Failed to create zstd compressor: %v", err))
 	}
 
 	// Copy source data through zstd encoder
@@ -803,20 +813,23 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 		compressedWriter.Close()
 		dst.Close()
 		os.Remove(compressedPath)
-		return "", NewImageCompressionError(fmt.Sprintf("Failed to compress image: %v", err))
+		return "", errs.New(errs.CodeImageCompressionError, fmt.Sprintf("Failed to compress image: %v", err))
 	}
 	compressedWriter.Close()
 	dst.Close()
 
 	if _, err := os.Stat(compressedPath); os.IsNotExist(err) {
-		return "", NewImageCompressionError(fmt.Sprintf("Compression failed: output not created: %s", compressedPath))
+		return "", errs.New(
+			errs.CodeImageCompressionError,
+			fmt.Sprintf("Compression failed: output not created: %s", compressedPath),
+		)
 	}
 
 	compInfo, _ := os.Stat(compressedPath)
 	compressedSize := compInfo.Size()
 	if compressedSize == 0 {
 		os.Remove(compressedPath)
-		return "", NewImageCompressionError(
+		return "", errs.New(errs.CodeImageCompressionError,
 			fmt.Sprintf("Compression failed: output is empty (source was %d bytes)", originalSize),
 		)
 	}
@@ -840,10 +853,10 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 // Matches Python's Service.decompress() exactly.
 func (s *Service) decompress(compressedPath, outputPath, compressedFormat string) error {
 	if compressedFormat == "" {
-		return NewImageDecompressionError("compressedFormat must be specified; got empty string")
+		return errs.New(errs.CodeImageDecompressionError, "compressedFormat must be specified; got empty string")
 	}
 	if compressedFormat != "zst" {
-		return NewImageDecompressionError(
+		return errs.New(errs.CodeImageDecompressionError,
 			fmt.Sprintf("Unsupported compression format: '%s'. Only 'zst' (zstd) is supported.", compressedFormat),
 		)
 	}
@@ -851,34 +864,34 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 	// Python's decompress() calls self._validate_image_path() first, which raises
 	// ImageError (not ImageDecompressionError) if the path does not exist or is empty.
 	if _, err := os.Stat(compressedPath); os.IsNotExist(err) {
-		return NewImageError(fmt.Sprintf("Image file not found: %s", compressedPath))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("Image file not found: %s", compressedPath))
 	}
 	if info, _ := os.Stat(compressedPath); info != nil && info.Size() == 0 {
-		return NewImageEmptyError(fmt.Sprintf("Image file is empty: %s", compressedPath))
+		return errs.New(errs.CodeImageEmpty, fmt.Sprintf("Image file is empty: %s", compressedPath))
 	}
 
 	// Use in-process zstd (matching Python's zstandard library)
 	src, err := os.Open(compressedPath)
 	if err != nil {
-		return NewImageDecompressionError(fmt.Sprintf("Failed to open compressed file: %v", err))
+		return errs.New(errs.CodeImageDecompressionError, fmt.Sprintf("Failed to open compressed file: %v", err))
 	}
 	defer src.Close()
 
 	dst, err := os.Create(outputPath)
 	if err != nil {
-		return NewImageDecompressionError(fmt.Sprintf("Failed to create output file: %v", err))
+		return errs.New(errs.CodeImageDecompressionError, fmt.Sprintf("Failed to create output file: %v", err))
 	}
 	defer dst.Close()
 
 	decoder, err := zstd.NewReader(src)
 	if err != nil {
-		return NewImageDecompressionError(fmt.Sprintf("Failed to create zstd decompressor: %v", err))
+		return errs.New(errs.CodeImageDecompressionError, fmt.Sprintf("Failed to create zstd decompressor: %v", err))
 	}
 	defer decoder.Close()
 
 	_, err = io.Copy(dst, decoder)
 	if err != nil {
-		return NewImageDecompressionError(fmt.Sprintf("Failed to decompress image: %v", err))
+		return errs.New(errs.CodeImageDecompressionError, fmt.Sprintf("Failed to decompress image: %v", err))
 	}
 
 	dst.Close()
@@ -887,14 +900,14 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 	// Python catches ImageEmptyError from _validate_image_path and re-raises as
 	// ImageDecompressionError with output_path unlinked.
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
-		return NewImageDecompressionError(
+		return errs.New(errs.CodeImageDecompressionError,
 			fmt.Sprintf("Decompression failed: output could not be verified: %s", outputPath),
 		)
 	}
 	outInfo, _ := os.Stat(outputPath)
 	if outInfo.Size() == 0 {
 		os.Remove(outputPath)
-		return NewImageDecompressionError(
+		return errs.New(errs.CodeImageDecompressionError,
 			fmt.Sprintf("Decompression failed: output could not be verified: %s", outputPath),
 		)
 	}
@@ -913,7 +926,7 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 
 func (s *Service) validateDownloadedFile(ctx context.Context, downloadedPath, imageFormat string) error {
 	if _, err := os.Stat(downloadedPath); os.IsNotExist(err) {
-		return NewImageValidationError("Downloaded file not found")
+		return errs.New(errs.CodeImageFormatInvalid, "Downloaded file not found")
 	}
 
 	fileInfo, err := os.Stat(downloadedPath)
@@ -923,7 +936,7 @@ func (s *Service) validateDownloadedFile(ctx context.Context, downloadedPath, im
 	fileSize := fileInfo.Size()
 	if fileSize == 0 {
 		os.Remove(downloadedPath)
-		return NewImageValidationError("Downloaded file is empty")
+		return errs.New(errs.CodeImageFormatInvalid, "Downloaded file is empty")
 	}
 
 	var validateErr error
@@ -942,11 +955,11 @@ func (s *Service) validateDownloadedFile(ctx context.Context, downloadedPath, im
 		validateErr = disk.ValidateTar(ctx, downloadedPath)
 	default:
 		os.Remove(downloadedPath)
-		return NewImageValidationError(fmt.Sprintf("Unknown format for validation: %s", imageFormat))
+		return errs.New(errs.CodeImageFormatInvalid, fmt.Sprintf("Unknown format for validation: %s", imageFormat))
 	}
 	if validateErr != nil {
 		os.Remove(downloadedPath)
-		return NewImageValidationError(validateErr.Error())
+		return errs.New(errs.CodeImageFormatInvalid, validateErr.Error())
 	}
 	return nil
 }
@@ -989,7 +1002,7 @@ func (s *Service) extractDiskImage(ctx context.Context,
 	} else if format == "raw" {
 		return ExtractViaBackend(ctx, inputPath, imgPath, partition, disabledDetectors, provisionerType)
 	} else {
-		return "", NewImageError(fmt.Sprintf("Unsupported disk image format: %s", format))
+		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Unsupported disk image format: %s", format))
 	}
 }
 
@@ -999,7 +1012,7 @@ func (s *Service) convertToRaw(ctx context.Context, inputPath, outputPath, fmtFl
 		"-t", "none", "-T", "none", "-W", inputPath, outputPath}, system.DefaultRunCmdOpts())
 	combined := string(result.StdoutBytes) + string(result.StderrBytes)
 	if result.Err != nil {
-		return NewImageError(fmt.Sprintf("qemu-img conversion failed: %s", combined))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("qemu-img conversion failed: %s", combined))
 	}
 	slog.Info("Converted to raw", "output", filepath.Base(outputPath))
 	return nil
@@ -1020,11 +1033,11 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 		system.DefaultRunCmdOpts(),
 	)
 	if result.Err != nil {
-		return "", NewImageError("unsquashfs failed")
+		return "", errs.New(errs.CodeImageError, "unsquashfs failed")
 	}
 
 	if _, err := exec.LookPath("mkfs.ext4"); err != nil {
-		return "", NewImageError("mkfs.ext4 not found. Install e2fsprogs package.")
+		return "", errs.New(errs.CodeImageError, "mkfs.ext4 not found. Install e2fsprogs package.")
 	}
 
 	duResult := system.RunCmdCompat(ctx, []string{"du", "-sb", extractDir}, system.DefaultRunCmdOpts())
@@ -1050,7 +1063,7 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 	)
 	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
 	if truncResult.Err != nil {
-		return "", NewImageError(fmt.Sprintf("Failed to allocate ext4 image file: %s", truncCombined))
+		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Failed to allocate ext4 image file: %s", truncCombined))
 	}
 
 	mkfsResult := system.RunCmdCompat(
@@ -1060,7 +1073,7 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 	)
 	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
 	if mkfsResult.Err != nil {
-		return "", NewImageError(fmt.Sprintf("Failed to create ext4 from squashfs: %s", mkfsCombined))
+		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Failed to create ext4 from squashfs: %s", mkfsCombined))
 	}
 
 	slog.Info("Created ext4 from squashfs", "path", finalPath)
@@ -1107,13 +1120,13 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 
 	if duExitCode != 0 && duExitCode != 1 {
 		if duStderr != "" {
-			return NewImageError(fmt.Sprintf("Failed to get directory size: %s", duStderr))
+			return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to get directory size: %s", duStderr))
 		}
-		return NewImageError(fmt.Sprintf("Failed to get directory size (exit %d)", duExitCode))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to get directory size (exit %d)", duExitCode))
 	}
 	fields := strings.Fields(duStdout)
 	if len(fields) == 0 {
-		return NewImageError("Failed to get directory size")
+		return errs.New(errs.CodeImageError, "Failed to get directory size")
 	}
 	actualBytes, _ := strconv.ParseInt(fields[0], 10, 64)
 	t4 := time.Now()
@@ -1134,7 +1147,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 		freeBytes := int64(statfs.Bavail) * int64(statfs.Bsize)
 		neededBytes := int64(rawSizeMB) * MiB
 		if freeBytes < neededBytes {
-			return NewImageError(
+			return errs.New(errs.CodeImageError,
 				fmt.Sprintf(
 					"Not enough free space on %s to create the ext4 image: need %d MiB, only %d MiB available. Free up space or set MVM_CACHE_DIR to a larger filesystem.",
 					filepath.Dir(outputPath),
@@ -1173,7 +1186,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 		} else {
 			slog.Warn("Failed to create ext4 image", "error", msg)
 		}
-		return NewImageError(fmt.Sprintf("Failed to create ext4 image: %s", msg))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to create ext4 image: %s", msg))
 	}
 	t6 := time.Now()
 	slog.Debug("mkfs.ext4", "elapsed_seconds", t6.Sub(t5).Seconds())
@@ -1260,7 +1273,7 @@ func (s *Service) resolveFSType(ctx context.Context, imagePath string) (string, 
 	if mapped, ok := infra.ExtToFSType[ext]; ok {
 		return mapped, nil
 	}
-	return "", NewImageError(fmt.Sprintf(
+	return "", errs.New(errs.CodeImageError, fmt.Sprintf(
 		"Could not detect filesystem type for %s. Ensure the image has a valid filesystem.",
 		imagePath,
 	))
@@ -1295,7 +1308,7 @@ func (s *Service) resolveSourceTemplate(
 		listURLTmpl = *spec.ListURLTemplate
 	}
 	if listURLTmpl == "" {
-		return "", NewImageError(
+		return "", errs.New(errs.CodeImageError,
 			fmt.Sprintf("Missing 'list_url_template' in images.yaml for %s:%s", spec.Type, spec.Version),
 		)
 	}
@@ -1308,7 +1321,7 @@ func (s *Service) resolveSourceTemplate(
 		URL: listURL, Timeout: 30,
 	})
 	if err != nil {
-		return "", NewImageError("Failed to list Firecracker CI ubuntu images")
+		return "", errs.New(errs.CodeImageError, "Failed to list Firecracker CI ubuntu images")
 	}
 
 	ciVersion := templateVars["ci_version"]
@@ -1319,7 +1332,10 @@ func (s *Service) resolveSourceTemplate(
 	matches := re.FindAllStringSubmatch(xmlContent, -1)
 
 	if len(matches) == 0 {
-		return "", NewImageError(fmt.Sprintf("No ubuntu squashfs found for CI version %s / arch %s", ciVersion, arch))
+		return "", errs.New(
+			errs.CodeImageError,
+			fmt.Sprintf("No ubuntu squashfs found for CI version %s / arch %s", ciVersion, arch),
+		)
 	}
 
 	keys := make([]string, len(matches))
@@ -1371,7 +1387,7 @@ func (s *Service) ResolveVersion(
 
 	spec, err := version.ParseSpec(versionSpec)
 	if err != nil {
-		return "", NewImageError(fmt.Sprintf("Invalid version spec %q: %s", versionSpec, err))
+		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Invalid version spec %q: %s", versionSpec, err))
 	}
 
 	// Exact version — no resolution needed
@@ -1387,7 +1403,7 @@ func (s *Service) ResolveVersion(
 		}
 	}
 	if len(matched) == 0 {
-		return "", NewImageError(fmt.Sprintf("No image types matched %q", imageType))
+		return "", errs.New(errs.CodeImageError, fmt.Sprintf("No image types matched %q", imageType))
 	}
 
 	versionMap := ResolveVersions(ctx, matched, arch, 0, ciVersion)
@@ -1398,12 +1414,12 @@ func (s *Service) ResolveVersion(
 		}
 	}
 	if len(allVersions) == 0 {
-		return "", NewImageError(fmt.Sprintf("No versions available for image type %q", imageType))
+		return "", errs.New(errs.CodeImageError, fmt.Sprintf("No versions available for image type %q", imageType))
 	}
 
 	resolved, err := version.Resolve(allVersions, spec)
 	if err != nil {
-		return "", NewImageError(fmt.Sprintf("Cannot resolve version %q: %s", versionSpec, err))
+		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Cannot resolve version %q: %s", versionSpec, err))
 	}
 	return resolved, nil
 }

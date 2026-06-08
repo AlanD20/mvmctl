@@ -3,8 +3,8 @@ package binary
 import (
 	"context"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // Controller matches Python's BinaryController.
@@ -31,11 +31,7 @@ func NewController(ctx context.Context, entity any, repo Repository) (*Controlle
 			return nil, err
 		}
 	default:
-		return nil, &errs.DomainError{
-			Code:    errs.CodeInternal,
-			Op:      "binary",
-			Message: "invalid entity type",
-		}
+		return nil, errs.New(errs.CodeInternal, "invalid entity type")
 	}
 	return &Controller{binary: b, repo: repo}, nil
 }

@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -73,11 +73,12 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 	// Expand and resolve path — Python: Path(self._inputs.path).expanduser().resolve()
 	sourcePath, err := system.ExpandAndResolve(r.input.Path)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeKernelBuildFailed, Op: "kernel_import",
-			Message: fmt.Sprintf("Failed to resolve kernel path: %v", err),
-			Err:     err, Class: errs.ClassValidation,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Failed to resolve kernel path: %v", err),
+			err,
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// Python: parsed = KernelService.parse_filename(source_path.name)
@@ -123,53 +124,36 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 // ensureValidate matches Python's KernelImportRequest.ensure_validate() exactly.
 func (r *KernelImportRequest) ensureValidate() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelBuildFailed,
-			Op:      "kernel_import",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeKernelBuildFailed,
+			"Failed to resolve necessary dependencies to validate",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// 1. Path exists — Python: if not self.result.path.exists()
 	if _, err := os.Stat(r.result.Path); os.IsNotExist(err) {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelNotFound,
-			Op:      "kernel_import",
-			Message: fmt.Sprintf("Kernel file not found: %s", r.result.Path),
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeKernelNotFound, fmt.Sprintf("Kernel file not found: %s", r.result.Path))
 	}
 
 	// 2. Path is non-empty — Python: if self.result.path.stat().st_size == 0
 	fi, err := os.Stat(r.result.Path)
 	if err == nil && fi.Size() == 0 {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelNotFound,
-			Op:      "kernel_import",
-			Message: fmt.Sprintf("Kernel file is empty: %s", r.result.Path),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeKernelNotFound, fmt.Sprintf("Kernel file is empty: %s", r.result.Path))
 	}
 
 	// 3. Arch is supported — Python: if self.result.arch not in FIRECRACKER_SUPPORTED_ARCH
 	if !slices.Contains(infra.FirecrackerSupportedArches, r.result.Arch) {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelBuildFailed,
-			Op:      "kernel_import",
-			Message: fmt.Sprintf("Unknown arch: %s. Valid: x86_64, amd64, aarch64, arm64", r.result.Arch),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Unknown arch: %s. Valid: x86_64, amd64, aarch64, arm64", r.result.Arch),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// 4. Name is non-empty — Python: if not self.result.name
 	if r.result.Name == "" {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelBuildFailed,
-			Op:      "kernel_import",
-			Message: "Kernel name cannot be empty",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeKernelBuildFailed, "Kernel name cannot be empty", errs.WithClass(errs.ClassValidation))
 	}
 
 	return nil

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 // ── Disk-specific constants (moved from infra/constants.go) ──
@@ -105,14 +105,10 @@ func ParseDiskSize(s string) (int64, error) {
 	upper := strings.ToUpper(s)
 	match := sizePattern.FindStringSubmatch(upper)
 	if match == nil {
-		return 0, &errs.DomainError{
-			Code:  errs.CodeValidationFailed,
-			Class: errs.ClassValidation,
-			Message: fmt.Sprintf(
-				"Invalid disk size format: '%s'. Expected format: <number><unit> where unit is B, K, KB, M, MB, G, GB, T, TB",
-				upper,
-			),
-		}
+		return 0, errs.New(errs.CodeValidationFailed, fmt.Sprintf(
+			"Invalid disk size format: '%s'. Expected format: <number><unit> where unit is B, K, KB, M, MB, G, GB, T, TB",
+			upper,
+		))
 	}
 
 	numberStr, unit := match[1], match[2]
@@ -122,29 +118,20 @@ func ParseDiskSize(s string) (int64, error) {
 
 	number, err := strconv.ParseFloat(numberStr, 64)
 	if err != nil {
-		return 0, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Invalid number in disk size: '%s'", numberStr),
-		}
+		return 0, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid number in disk size: '%s'", numberStr))
 	}
 
 	multiplier, ok := sizeMultipliers[unit]
 	if !ok {
-		return 0, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Unknown size unit: '%s'. Valid: B, K, KB, M, MB, G, GB, T, TB", unit),
-		}
+		return 0, errs.New(
+			errs.CodeValidationFailed,
+			fmt.Sprintf("Unknown size unit: '%s'. Valid: B, K, KB, M, MB, G, GB, T, TB", unit),
+		)
 	}
 
 	bytesCount := int64(number * float64(multiplier))
 	if bytesCount < 0 {
-		return 0, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Class:   errs.ClassValidation,
-			Message: fmt.Sprintf("Disk size cannot be negative: %s", upper),
-		}
+		return 0, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Disk size cannot be negative: %s", upper))
 	}
 
 	return bytesCount, nil
@@ -387,7 +374,7 @@ func (d *RootPartitionDetector) Register(detector PartitionDetector) {
 
 func (d *RootPartitionDetector) Detect(partitions []Partition) (int, error) {
 	if len(partitions) == 0 {
-		return 0, errs.RootPartitionDetectionError(nil, "no partitions to evaluate")
+		return 0, errs.New(errs.CodeRootPartitionDetection, "no partitions to evaluate")
 	}
 	if len(partitions) == 1 {
 		return 1, nil
@@ -429,14 +416,14 @@ func (d *RootPartitionDetector) Detect(partitions []Partition) (int, error) {
 		for i, idx := range bestPartitions {
 			tiedParts[i] = strconv.Itoa(idx)
 		}
-		return 0, errs.TieDetectedError(tiedParts, fmt.Sprintf("tie score %f", bestScore), nil)
+		return 0, errs.New(errs.CodeTieDetected, fmt.Sprintf("tie score %f", bestScore),
+			errs.WithDetails(map[string]any{"tied_partitions": tiedParts}))
 	}
 
 	if bestScore < 0 {
-		return 0, errs.RootPartitionDetectionError(
-			partitionsToMaps(partitions),
+		return 0, errs.New(errs.CodeRootPartitionDetection,
 			fmt.Sprintf("Best score %f < 0, no suitable root partition found", bestScore),
-		)
+			errs.WithDetails(map[string]any{"partitions": partitionsToMaps(partitions)}))
 	}
 
 	return bestPartitions[0], nil

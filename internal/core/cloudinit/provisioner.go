@@ -12,6 +12,7 @@ import (
 	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/model"
 	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
+	"mvmctl/pkg/errs"
 )
 
 // Default auto-kill timeout for spawned nocloud-net server subprocess.
@@ -46,7 +47,7 @@ func (p *Provisioner) Provision(ctx context.Context) (*model.CloudInitResult, er
 
 	// Prepare the cloud-init config directory — Python uses CONST_DIR_PERMS_CACHE = 0o700
 	if err := os.MkdirAll(p.config.CloudInitDir, 0700); err != nil {
-		return nil, ErrCloudInitProvisionFailed(
+		return nil, errs.New(errs.CodeCloudInitProvisionFailed,
 			fmt.Sprintf("create cloud-init dir: %s", err))
 	}
 
@@ -161,7 +162,7 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 		if fwResult.ErrorMessage != nil {
 			msg = *fwResult.ErrorMessage
 		}
-		return nil, ErrCloudInitNetModeFailed(
+		return nil, errs.New(errs.CodeCloudInitNetModeFailed,
 			fmt.Sprintf("Nocloud-net provisioning failed: %s", msg))
 	}
 
@@ -181,7 +182,7 @@ func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult,
 	if p.config.CloudInitISOPath != nil {
 		isoPath := *p.config.CloudInitISOPath
 		if _, err := os.Stat(isoPath); os.IsNotExist(err) {
-			return nil, ErrCloudInitISOModeFailed(
+			return nil, errs.New(errs.CodeCloudInitISOModeFailed,
 				fmt.Sprintf("Custom cloud-init ISO not found: %s", isoPath),
 			)
 		}
@@ -196,7 +197,7 @@ func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult,
 	// Python: except Exception as exc: raise CloudInitIsoModeError(f"Failed to create cloud-init ISO: {exc}") from exc
 	isoPath := filepath.Join(p.config.VMDir, p.config.CloudInitISOName)
 	if err := p.manager.CreateSeedISO(ctx, p.config.CloudInitDir, isoPath); err != nil {
-		return nil, ErrCloudInitISOModeFailed(
+		return nil, errs.New(errs.CodeCloudInitISOModeFailed,
 			fmt.Sprintf("Failed to create cloud-init ISO: %s", err),
 		)
 	}

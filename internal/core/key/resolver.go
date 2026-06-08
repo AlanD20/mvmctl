@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // ResolveResult holds the result of resolving multiple key identifiers.
@@ -78,23 +78,15 @@ func (r *Resolver) ByID(ctx context.Context, keyID string) (*model.SSHKeyItem, e
 			return r.enrich(ctx, matches)[0], nil
 		}
 		if len(matches) > 1 {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeKeyNotFound,
-				Op:      "key",
-				Entity:  keyID,
-				Message: fmt.Sprintf("Key ID is ambiguous: '%s'", keyID),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(errs.CodeKeyNotFound,
+				fmt.Sprintf("Key ID is ambiguous: '%s'", keyID),
+				errs.WithEntity(keyID))
 		}
 	}
 
-	return nil, &errs.DomainError{
-		Code:    errs.CodeKeyNotFound,
-		Op:      "key",
-		Entity:  keyID,
-		Message: fmt.Sprintf("Key not found: '%s'", keyID),
-		Class:   errs.ClassValidation,
-	}
+	return nil, errs.NotFound(errs.CodeKeyNotFound,
+		fmt.Sprintf("Key not found: '%s'", keyID),
+		errs.WithEntity(keyID))
 }
 
 // ByName resolves a key by name.
@@ -105,13 +97,9 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.SSHKeyItem, 
 		return nil, err
 	}
 	if key == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeKeyNotFound,
-			Op:      "key",
-			Entity:  name,
-			Message: fmt.Sprintf("Key not found: '%s'", name),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeKeyNotFound,
+			fmt.Sprintf("Key not found: '%s'", name),
+			errs.WithEntity(name))
 	}
 	return r.enrich(ctx, []*model.SSHKeyItem{key})[0], nil
 }
@@ -152,22 +140,20 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.SSHKeyItem
 		}
 		// Python raises MVMKeyError here (not KeyNotFoundError), which propagates
 		// through resolve_many as an uncaught exception.
-		return nil, errs.MVMKeyError(
-			"Public key file '" + value + "' found on disk but key '" + stem + "' is not in the cache. " +
-				"Import it first with: mvm key import " + stem + " " + value,
+		return nil, errs.New(errs.CodeKeyError,
+			"Public key file '"+value+"' found on disk but key '"+stem+"' is not in the cache. "+
+				"Import it first with: mvm key import "+stem+" "+value,
 		)
 	}
 
-	return nil, &errs.DomainError{
-		Code:   errs.CodeKeyNotFound,
-		Op:     "key",
-		Entity: value,
-		Message: fmt.Sprintf(
+	return nil, errs.NotFound(
+		errs.CodeKeyNotFound,
+		fmt.Sprintf(
 			"Key not found: '%s' is not a cached key name, a readable .pub file path, or a resolvable ID.",
 			value,
 		),
-		Class: errs.ClassValidation,
-	}
+		errs.WithEntity(value),
+	)
 }
 
 // ResolveMany resolves multiple key identifiers, deduplicating by input.

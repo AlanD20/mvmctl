@@ -5,9 +5,9 @@ import (
 	"fmt"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/version"
+	"mvmctl/pkg/errs"
 )
 
 // RELATIONS defines the cross-domain relations for image enrichment.
@@ -73,10 +73,10 @@ func (r *Resolver) ByID(ctx context.Context, imageID string) (*model.ImageItem, 
 		return nil, fmt.Errorf("resolve image by ID: %w", err)
 	}
 	if len(matches) == 0 {
-		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found: '%s'", imageID))
+		return nil, errs.NotFound(errs.CodeImageNotFound, fmt.Sprintf("Image not found: '%s'", imageID))
 	}
 	if len(matches) > 1 {
-		return nil, NewImageNotFoundError(fmt.Sprintf("Image ID is ambiguous: '%s'", imageID))
+		return nil, errs.NotFound(errs.CodeImageNotFound, fmt.Sprintf("Image ID is ambiguous: '%s'", imageID))
 	}
 	return r.enrich(ctx, matches)[0], nil
 }
@@ -88,7 +88,10 @@ func (r *Resolver) ByVersionType(ctx context.Context, version, imgType string) (
 		return nil, err
 	}
 	if dbImage == nil {
-		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found: version='%s', type='%s'", version, imgType))
+		return nil, errs.NotFound(
+			errs.CodeImageNotFound,
+			fmt.Sprintf("Image not found: version='%s', type='%s'", version, imgType),
+		)
 	}
 	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
 }
@@ -100,7 +103,7 @@ func (r *Resolver) ByType(ctx context.Context, imgType string) (*model.ImageItem
 		return nil, err
 	}
 	if dbImage == nil {
-		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found: '%s'", imgType))
+		return nil, errs.NotFound(errs.CodeImageNotFound, fmt.Sprintf("Image not found: '%s'", imgType))
 	}
 	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
 }
@@ -124,7 +127,7 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.ImageItem, e
 		return nil, err
 	}
 	if dbImage == nil {
-		return nil, NewImageNotFoundError(fmt.Sprintf("Image not found by name: '%s'", name))
+		return nil, errs.NotFound(errs.CodeImageNotFound, fmt.Sprintf("Image not found by name: '%s'", name))
 	}
 	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
 }

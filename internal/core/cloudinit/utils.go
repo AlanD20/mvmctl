@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // CloudInitModeResolved matches Python's CloudInitModeResolved dataclass.
@@ -28,24 +28,18 @@ func ResolveMode(mode *string, isoPath *string) (CloudInitModeResolved, error) {
 	modeLower := strings.ToLower(*mode)
 	modeVal := model.CloudInitMode(modeLower)
 	if !IsValidMode(modeVal) {
-		return CloudInitModeResolved{}, &errs.DomainError{
-			Code:    errs.CodeCloudInitProvisionFailed,
-			Op:      "cloudinit",
-			Message: fmt.Sprintf("Invalid --cloud-init-mode '%s'. Valid modes: inject, iso, off, net", *mode),
-			Class:   errs.ClassValidation,
-		}
+		return CloudInitModeResolved{}, errs.New(errs.CodeCloudInitProvisionFailed,
+			fmt.Sprintf("Invalid --cloud-init-mode '%s'. Valid modes: inject, iso, off, net", *mode),
+			errs.WithClass(errs.ClassValidation))
 	}
 
 	switch modeVal {
 	case model.CloudInitModeISO:
 		if isoPath != nil && *isoPath != "" {
 			if _, err := os.Stat(*isoPath); os.IsNotExist(err) {
-				return CloudInitModeResolved{}, &errs.DomainError{
-					Code:    errs.CodeCloudInitProvisionFailed,
-					Op:      "cloudinit",
-					Message: fmt.Sprintf("Cloud-init ISO not found: %s", *isoPath),
-					Class:   errs.ClassValidation,
-				}
+				return CloudInitModeResolved{}, errs.New(errs.CodeCloudInitProvisionFailed,
+					fmt.Sprintf("Cloud-init ISO not found: %s", *isoPath),
+					errs.WithClass(errs.ClassValidation))
 			}
 			result = CloudInitModeResolved{Mode: model.CloudInitModeISO, ISOPath: isoPath}
 		} else {
@@ -119,7 +113,7 @@ func validateCloudinitConfig(cfg map[string]any) error {
 		for _, d := range found {
 			details = append(details, fmt.Sprintf("%s: %s", d, dangerousCloudInitDirectives[d]))
 		}
-		return ErrCloudInitProvisionFailed(
+		return errs.New(errs.CodeCloudInitProvisionFailed,
 			fmt.Sprintf(
 				"custom cloud-init config contains blocked directive(s): %s. %s",
 				strings.Join(found, ", "),

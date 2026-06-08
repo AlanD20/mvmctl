@@ -9,8 +9,8 @@ import (
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/disk"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // CLI_TO_INTERNAL_DETECTOR maps CLI detector names to internal detector codes.
@@ -108,12 +108,7 @@ func NewImageAcquireRequest(inputs any, cfg *config.Service, imageRepo image.Rep
 func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAcquireInput, error) {
 	in, ok := r.input.(ImagePullInput)
 	if !ok {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeImagePullFailed,
-			Op:      "image_acquire",
-			Message: "Expected ImagePullInput",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeImagePullFailed, "Expected ImagePullInput", errs.WithClass(errs.ClassValidation))
 	}
 
 	// Arch always matches the host machine — not user-configurable
@@ -156,12 +151,11 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImageAcquireInput, error) {
 	in, ok := r.input.(ImageImportInput)
 	if !ok {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeImageImportFailed,
-			Op:      "image_acquire",
-			Message: "Expected ImageImportInput",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeImageImportFailed,
+			"Expected ImageImportInput",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// Arch always matches the host machine — not user-configurable
@@ -211,22 +205,16 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 
 func (r *ImageAcquireRequest) ensureValidate() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeImageImportFailed,
-			Op:      "image_acquire",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeImageImportFailed,
+			"Failed to resolve necessary dependencies to validate",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	arch := r.result.Arch
 	if arch == "" {
-		return &errs.DomainError{
-			Code:    errs.CodeImageImportFailed,
-			Op:      "image_acquire",
-			Message: "arch is required",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeImageImportFailed, "arch is required", errs.WithClass(errs.ClassValidation))
 	}
 	parts := infra.FirecrackerSupportedArches
 	archOk := false
@@ -237,25 +225,18 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 		}
 	}
 	if !archOk {
-		return &errs.DomainError{
-			Code: errs.CodeImageImportFailed,
-			Op:   "image_acquire",
-			Message: fmt.Sprintf(
-				"Unknown arch: %s. Valid: %s",
-				arch,
-				strings.Join(infra.FirecrackerSupportedArches, ", "),
-			),
-			Class: errs.ClassValidation,
-		}
+		return errs.New(errs.CodeImageImportFailed,
+			fmt.Sprintf("Unknown arch: %s. Valid: %s", arch, strings.Join(infra.FirecrackerSupportedArches, ", ")),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	if r.result.Partition < 0 {
-		return &errs.DomainError{
-			Code:    errs.CodeImageImportFailed,
-			Op:      "image_acquire",
-			Message: "Partition cannot be less than 1",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeImageImportFailed,
+			"Partition cannot be less than 1",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	return nil
@@ -263,12 +244,11 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 
 func (r *ImageAcquireRequest) ensureValidateImport() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeImageImportFailed,
-			Op:      "image_acquire",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeImageImportFailed,
+			"Failed to resolve necessary dependencies to validate",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 	return nil
 }
@@ -286,12 +266,11 @@ func (r *ImageAcquireRequest) resolveDisabledDetectors(detectors []string) ([]st
 		if internalName, ok := CLI_TO_INTERNAL_DETECTOR[name]; ok {
 			disabled = append(disabled, internalName)
 		} else {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeImageImportFailed,
-				Op:      "image_acquire",
-				Message: "Unknown detector: " + name + ". Valid: type,label,size,filesystem,all",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeImageImportFailed,
+				"Unknown detector: "+name+". Valid: type,label,size,filesystem,all",
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 	}
 	return disabled, nil

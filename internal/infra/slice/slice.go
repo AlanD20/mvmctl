@@ -3,7 +3,7 @@ package slice
 import (
 	"strings"
 
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 // JoinStringsPtrs joins error messages from a BatchResult.

@@ -3,9 +3,9 @@ package vm
 import (
 	"context"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/pool"
+	"mvmctl/pkg/errs"
 )
 
 // ── Service ──

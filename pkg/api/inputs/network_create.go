@@ -4,9 +4,9 @@ import (
 	"context"
 
 	"mvmctl/internal/core/network"
-	"mvmctl/internal/infra/errs"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/validators"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -90,12 +90,7 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 	} else {
 		gw, err := infranet.ComputeIPv4Gateway(r.input.Subnet)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeNetworkNotFound,
-				Op:      "network_create",
-				Message: "Failed to compute gateway: " + err.Error(),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(errs.CodeNetworkNotFound, "Failed to compute gateway: "+err.Error())
 		}
 		ipv4Gateway = gw
 	}
@@ -135,106 +130,56 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 
 func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeNetworkNotFound,
-			Op:      "network_create",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeNetworkNotFound, "Failed to resolve necessary dependencies to validate")
 	}
 
 	// Validate name (no dots, lowercase only)
 	if err := validators.NetworkName(r.result.Name); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "network_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
 
 	// Validate and normalize subnet
 	if _, err := validators.Subnet(r.result.Subnet); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "network_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
 
 	// Validate gateway is in subnet
 	if _, err := validators.IPv4Gateway(r.result.IPv4Gateway, r.result.Subnet); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "network_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
 
 	// Validate bridge name
 	if err := validators.BridgeName(ctx, r.result.Bridge); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "network_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
 
 	// Validate NAT gateways
 	if len(r.result.NATGateways) > 0 {
 		if _, err := validators.NATGateways(ctx, r.result.NATGateways); err != nil {
-			return &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Op:      "network_create",
-				Message: err.Error(),
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(errs.CodeValidationFailed, err.Error())
 		}
 	}
 
 	// Check if network already exists
 	existing, err := r.networkRepo.GetByName(ctx, r.result.Name)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeDatabaseError,
-			Op:      "network_create",
-			Message: "Failed to check existing networks: " + err.Error(),
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeDatabaseError, "Failed to check existing networks: "+err.Error())
 	}
 	if existing != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeNetworkAlreadyExists,
-			Op:      "network_create",
-			Message: "Network '" + r.result.Name + "' already exists",
-			Class:   errs.ClassConflict,
-		}
+		return errs.AlreadyExists(errs.CodeNetworkAlreadyExists, "Network '"+r.result.Name+"' already exists")
 	}
 
 	// Validate no subnet overlap
 	existingNetworks, err := r.networkRepo.ListAll(ctx)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeDatabaseError,
-			Op:      "network_create",
-			Message: "Failed to list existing networks: " + err.Error(),
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeDatabaseError, "Failed to list existing networks: "+err.Error())
 	}
 	existingNetworksGeneric := make([]interface{}, len(existingNetworks))
 	for i, n := range existingNetworks {
 		existingNetworksGeneric[i] = n
 	}
 	if err := validators.SubnetNoOverlap(r.result.Subnet, existingNetworksGeneric, r.result.Name); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeNetworkSubnetOverlap,
-			Op:      "network_create",
-			Message: err.Error(),
-			Class:   errs.ClassConflict,
-		}
+		return errs.New(errs.CodeNetworkSubnetOverlap, err.Error(), errs.WithClass(errs.ClassConflict))
 	}
 
 	return nil

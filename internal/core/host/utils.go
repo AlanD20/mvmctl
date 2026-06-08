@@ -11,10 +11,10 @@ import (
 	"syscall"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/validators"
+	"mvmctl/pkg/errs"
 )
 
 // POSIX access mode constants matching Python's os.R_OK, os.W_OK.
@@ -119,8 +119,15 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 func ValidateSudoersBinaries() error {
 	for binary, pkg := range infra.PrivilegedBinaries {
 		if _, err := os.Stat(binary); os.IsNotExist(err) {
-			return hostError(errs.CodeHostInitFailed,
-				fmt.Sprintf("Required binary not found: %s (install %s)", binary, pkg))
+			return errs.New(
+				errs.CodeHostInitFailed,
+				fmt.Sprintf(
+					"Required binary not found: %s (install %s)",
+					binary,
+					pkg,
+				),
+				errs.WithClass(errs.ClassInternal),
+			)
 		}
 	}
 	return nil
@@ -157,13 +164,21 @@ func WriteSudoers(ctx context.Context, path string, content string) error {
 	// mode="w", suffix=".sudoers", delete=False
 	tmpFile, err := os.CreateTemp("", "*.sudoers")
 	if err != nil {
-		return hostError(errs.CodeHostInitFailed, fmt.Sprintf("Failed to create temp file: %v", err))
+		return errs.New(
+			errs.CodeHostInitFailed,
+			fmt.Sprintf("Failed to create temp file: %v", err),
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	tmpPath := tmpFile.Name()
 	if _, err := tmpFile.Write([]byte(content)); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
-		return hostError(errs.CodeHostInitFailed, fmt.Sprintf("Failed to write sudoers file %s: %v", path, err))
+		return errs.New(
+			errs.CodeHostInitFailed,
+			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err),
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	tmpFile.Close()
 	// Clean up temp file on function exit (Python uses try/finally/except OSError: pass)
@@ -181,21 +196,31 @@ func WriteSudoers(ctx context.Context, path string, content string) error {
 	result := system.RunCmdCompat(ctx, []string{"visudo", "-c", "-f", tmpPath}, opts)
 	if result.Err != nil {
 		// Command not found or other execution failure → "visudo not found"
-		return hostError(errs.CodePrivilegeSudoers, "visudo not found — cannot validate sudoers syntax")
+		return errs.New(
+			errs.CodePrivilegeSudoers,
+			"visudo not found — cannot validate sudoers syntax",
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	if result.ExitCode != 0 {
-		return hostError(errs.CodePrivilegeSudoers,
-			fmt.Sprintf("Generated sudoers file failed visudo validation: %s", result.Stderr))
+		return errs.New(
+			errs.CodePrivilegeSudoers,
+			fmt.Sprintf(
+				"Generated sudoers file failed visudo validation: %s",
+				result.Stderr,
+			),
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 
 	// Write to final location
 	if err := os.MkdirAll(filepath.Dir(path), infra.DirPerm); err != nil {
-		return hostError(errs.CodeHostInitFailed,
-			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err))
+		return errs.New(errs.CodeHostInitFailed,
+			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err), errs.WithClass(errs.ClassInternal))
 	}
 	if err := os.WriteFile(path, []byte(content), infra.SudoersPerm); err != nil {
-		return hostError(errs.CodeHostInitFailed,
-			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err))
+		return errs.New(errs.CodeHostInitFailed,
+			fmt.Sprintf("Failed to write sudoers file %s: %v", path, err), errs.WithClass(errs.ClassInternal))
 	}
 
 	return nil
@@ -207,8 +232,8 @@ func RemoveSudoers(ctx context.Context, path string) (bool, error) {
 		return false, nil
 	}
 	if err := os.Remove(path); err != nil {
-		return false, hostError(errs.CodeHostCleanFailed,
-			fmt.Sprintf("Failed to remove sudoers file %s: %v", path, err))
+		return false, errs.New(errs.CodeHostCleanFailed,
+			fmt.Sprintf("Failed to remove sudoers file %s: %v", path, err), errs.WithClass(errs.ClassInternal))
 	}
 	return true, nil
 }

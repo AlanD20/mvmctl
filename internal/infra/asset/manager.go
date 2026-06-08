@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/assets"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 // AssetFile represents a bundled asset file, matching Python's Traversable.
@@ -103,12 +103,7 @@ func New() *Manager {
 // Matches Python's AssetManager.get_file() which returns a Traversable.
 func (m *Manager) GetFile(pathParts ...string) (*AssetFile, error) {
 	if len(pathParts) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBundledAssetError,
-			Message: "At least one path part is required",
-			Op:      "asset",
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.New(errs.CodeBundledAssetError, "At least one path part is required")
 	}
 
 	return &AssetFile{path: strings.Join(pathParts, "/")}, nil
@@ -118,12 +113,7 @@ func (m *Manager) GetFile(pathParts ...string) (*AssetFile, error) {
 // Matches Python's AssetManager.read_file().
 func (m *Manager) ReadFile(pathParts ...string) (string, error) {
 	if len(pathParts) == 0 {
-		return "", &errs.DomainError{
-			Code:    errs.CodeBundledAssetError,
-			Message: "At least one path part is required",
-			Op:      "asset",
-			Class:   errs.ClassInternal,
-		}
+		return "", errs.New(errs.CodeBundledAssetError, "At least one path part is required")
 	}
 
 	path := strings.Join(pathParts, "/")
@@ -138,12 +128,7 @@ func (m *Manager) ReadFile(pathParts ...string) (string, error) {
 // Matches Python's AssetManager.read_bytes().
 func (m *Manager) ReadBytes(pathParts ...string) ([]byte, error) {
 	if len(pathParts) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBundledAssetError,
-			Message: "At least one path part is required",
-			Op:      "asset",
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.New(errs.CodeBundledAssetError, "At least one path part is required")
 	}
 
 	path := strings.Join(pathParts, "/")
@@ -190,20 +175,13 @@ func (m *Manager) ListFiles() []string {
 // matching Python's BundledAssetNotFoundError and BundledAssetError patterns.
 func convertError(path string, err error) error {
 	if isFileNotFound(err) {
-		return &errs.DomainError{
-			Code:    errs.CodeBundledAssetNotFound,
-			Message: fmt.Sprintf("Asset file not found: '%s'", path),
-			Op:      "asset",
-			Entity:  path,
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeBundledAssetNotFound,
+			fmt.Sprintf("Asset file not found: '%s'", path),
+			errs.WithEntity(path),
+		)
 	}
-	return &errs.DomainError{
-		Code:    errs.CodeBundledAssetError,
-		Message: fmt.Sprintf("Failed to read asset file '%s': %v", path, err),
-		Op:      "asset",
-		Class:   errs.ClassInternal,
-	}
+	return errs.New(errs.CodeBundledAssetError, fmt.Sprintf("Failed to read asset file '%s': %v", path, err))
 }
 
 // isFileNotFound checks if an error is a "file not found" error.

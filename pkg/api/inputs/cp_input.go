@@ -9,8 +9,8 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // CPInput matches Python's CPInput dataclass.
@@ -114,12 +114,10 @@ func (r *CPRequest) Resolve(
 	if len(sources) > 1 {
 		// Multi-source only works for host -> VM
 		if dstVM == "" {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeCPMultiSourceNoVMDest,
-				Op:      "cp",
-				Message: "Multiple sources require a VM destination (use vm_name:/path format)",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeCPMultiSourceNoVMDest,
+				"Multiple sources require a VM destination (use vm_name:/path format)",
+			)
 		}
 		direction = "host_to_vm"
 		localPaths = sources
@@ -140,12 +138,10 @@ func (r *CPRequest) Resolve(
 		} else if dstVM != "" {
 			direction = "host_to_vm"
 		} else {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeCPNoVMSpecified,
-				Op:      "cp",
-				Message: "At least one path must reference a VM (use vm_name:/path format)",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeCPNoVMSpecified,
+				"At least one path must reference a VM (use vm_name:/path format)",
+			)
 		}
 
 		switch direction {
@@ -208,12 +204,11 @@ func (r *CPRequest) resolveVMSide(
 	}
 
 	if vmEntity.IPv4 == "" {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeCPVMNoIP,
-			Op:      "cp",
-			Message: fmt.Sprintf("VM '%s' has no IP address assigned", vmIdent),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeCPVMNoIP,
+			fmt.Sprintf("VM '%s' has no IP address assigned", vmIdent),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	return &ResolvedCPInfo{
@@ -231,20 +226,13 @@ func (r *CPRequest) resolveVM(ctx context.Context, identifier string, vmRepo vm.
 	vmResolver := vm.NewResolver(vmRepo)
 	vmEntity, err := vmResolver.Resolve(ctx, identifier)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeCPVMNotFound,
-			Op:      "cp",
-			Message: fmt.Sprintf("Could not resolve VM '%s': %s", identifier, err.Error()),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeCPVMNotFound,
+			fmt.Sprintf("Could not resolve VM '%s': %s", identifier, err.Error()),
+		)
 	}
 	if vmEntity == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeCPVMNotFound,
-			Op:      "cp",
-			Message: fmt.Sprintf("VM '%s' not found", identifier),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeCPVMNotFound, fmt.Sprintf("VM '%s' not found", identifier))
 	}
 	return vmEntity, nil
 }
@@ -286,12 +274,11 @@ func (r *CPRequest) resolveKey(ctx context.Context, vmEntity *model.VM, keyRepo 
 			}
 		}
 
-		return nil, &errs.DomainError{
-			Code:    errs.CodeSSHError,
-			Op:      "cp",
-			Message: fmt.Sprintf("Key '%s' not found or is not a valid private key", keyStr),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeSSHError,
+			fmt.Sprintf("Key '%s' not found or is not a valid private key", keyStr),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// Check VM's stored ssh_keys (these are IDs)

@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 // versionCleanPattern matches Python's re.sub(r"^(\d+(?:\.\d+)*).*$", r"\1", version)
@@ -140,7 +140,10 @@ func SemverKey(v string) []int {
 // Matches Python's VersionResolver.resolve() exactly.
 func Resolve(versions []string, spec VersionSpec) (string, error) {
 	if len(versions) == 0 {
-		return "", errs.VersionError(fmt.Sprintf("No versions available to resolve spec %#v", spec))
+		return "", errs.New(
+			errs.CodeVersionResolveFailed,
+			fmt.Sprintf("No versions available to resolve spec %#v", spec),
+		)
 	}
 
 	// Work on a copy — never mutate the input list
@@ -186,7 +189,7 @@ func Resolve(versions []string, spec VersionSpec) (string, error) {
 				return target, nil
 			}
 		}
-		return "", errs.VersionError(
+		return "", errs.New(errs.CodeVersionResolveFailed,
 			fmt.Sprintf("Version '%s' not found in available versions: %v", target, versions),
 		)
 	}
@@ -223,7 +226,7 @@ func Resolve(versions []string, spec VersionSpec) (string, error) {
 	if spec.Patch != nil {
 		patchStr = strconv.Itoa(*spec.Patch)
 	}
-	return "", errs.VersionError(
+	return "", errs.New(errs.CodeVersionResolveFailed,
 		fmt.Sprintf("No version matching spec (major=%s, minor=%s, patch=%s) found in available versions: %v",
 			majorStr, minorStr, patchStr, versions),
 	)
@@ -251,7 +254,7 @@ type VersionGate struct{}
 // Matches Python's VersionGate.require() exactly.
 func (g *VersionGate) Require(binaryName, version, minimum string) error {
 	if version == "" {
-		return errs.VersionGateError(
+		return errs.New(errs.CodeBinaryVersionGate,
 			fmt.Sprintf("Cannot determine %s version. %s v%s+ required.", binaryName, binaryName, minimum),
 		)
 	}
@@ -262,7 +265,7 @@ func (g *VersionGate) Require(binaryName, version, minimum string) error {
 	}
 
 	if !g.IsSatisfiedBy(version, minimum) {
-		return errs.VersionGateError(
+		return errs.New(errs.CodeBinaryVersionGate,
 			fmt.Sprintf(
 				"%s v%s+ required for this operation (current: v%s). Stop the VM first, perform the operation, then start it again.",
 				binaryName,

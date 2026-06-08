@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -64,23 +64,16 @@ func (r *VolumeRequest) Resolve(ctx context.Context) (*ResolvedVolumeInput, erro
 	identifiers := r.input.Identifiers
 
 	if len(identifiers) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "volume",
-			Message: "No volume identifiers provided",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVolumeNotFound, "No volume identifiers provided")
 	}
 
 	result := r.resolver.ResolveMany(ctx, identifiers)
 
 	if len(result.Errors) > 0 && len(result.Volumes) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "volume",
-			Message: "Could not resolve any volumes: " + strings.Join(result.Errors, ", "),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeVolumeNotFound,
+			"Could not resolve any volumes: "+strings.Join(result.Errors, ", "),
+		)
 	}
 
 	// Store partial-match errors so callers can surface them
@@ -101,21 +94,11 @@ func (r *VolumeRequest) Resolve(ctx context.Context) (*ResolvedVolumeInput, erro
 
 func (r *VolumeRequest) ensureValidate() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "volume",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVolumeNotFound, "Failed to resolve necessary dependencies to validate")
 	}
 
 	if len(r.result.Volumes) == 0 {
-		return &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "volume",
-			Message: "No volumes found matching identifiers",
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVolumeNotFound, "No volumes found matching identifiers")
 	}
 
 	return nil

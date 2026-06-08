@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // privateKeyPerm matches Python's CONST_FILE_PERMS_PRIVATE_KEY = 0o600.
@@ -40,12 +40,7 @@ func NewController(ctx context.Context, entity any, repo Repository) (*Controlle
 			return nil, err
 		}
 	default:
-		return nil, &errs.DomainError{
-			Code:    errs.CodeKeyNotFound,
-			Op:      "key",
-			Message: "invalid entity type",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeKeyNotFound, "invalid entity type")
 	}
 	return &Controller{key: key, repo: repo}, nil
 }
@@ -58,13 +53,9 @@ func (c *Controller) Export(ctx context.Context, destDir string, overwrite bool)
 
 	sourcePublic := c.key.PublicKeyPath
 	if sourcePublic == "" {
-		return "", "", &errs.DomainError{
-			Code:    errs.CodeKeyExportFailed,
-			Op:      "key",
-			Entity:  c.key.Name,
-			Message: "Public key path not set for '" + c.key.Name + "'",
-			Class:   errs.ClassValidation,
-		}
+		return "", "", errs.New(errs.CodeKeyExportFailed,
+			"Public key path not set for '"+c.key.Name+"'",
+			errs.WithEntity(c.key.Name))
 	}
 	sourcePrivate := ""
 	if c.key.PrivateKeyPath != nil {
@@ -72,23 +63,15 @@ func (c *Controller) Export(ctx context.Context, destDir string, overwrite bool)
 	}
 
 	if _, err := os.Stat(sourcePublic); os.IsNotExist(err) {
-		return "", "", &errs.DomainError{
-			Code:    errs.CodeKeyExportFailed,
-			Op:      "key",
-			Entity:  c.key.Name,
-			Message: "Public key not found at '" + sourcePublic + "'",
-			Class:   errs.ClassValidation,
-		}
+		return "", "", errs.New(errs.CodeKeyExportFailed,
+			"Public key not found at '"+sourcePublic+"'",
+			errs.WithEntity(c.key.Name))
 	}
 	if sourcePrivate != "" {
 		if _, err := os.Stat(sourcePrivate); os.IsNotExist(err) {
-			return "", "", &errs.DomainError{
-				Code:    errs.CodeKeyExportFailed,
-				Op:      "key",
-				Entity:  c.key.Name,
-				Message: "Private key not found at '" + sourcePrivate + "'",
-				Class:   errs.ClassValidation,
-			}
+			return "", "", errs.New(errs.CodeKeyExportFailed,
+				"Private key not found at '"+sourcePrivate+"'",
+				errs.WithEntity(c.key.Name))
 		}
 	}
 
@@ -108,12 +91,8 @@ func (c *Controller) Export(ctx context.Context, destDir string, overwrite bool)
 			existing = append(existing, destPublic)
 		}
 		if len(existing) > 0 {
-			return "", "", &errs.DomainError{
-				Code:    errs.CodeKeyExportFailed,
-				Op:      "key",
-				Message: "Key file(s) already exist: " + strings.Join(existing, ", ") + ". Use --overwrite to replace.",
-				Class:   errs.ClassValidation,
-			}
+			return "", "", errs.New(errs.CodeKeyExportFailed,
+				"Key file(s) already exist: "+strings.Join(existing, ", ")+". Use --overwrite to replace.")
 		}
 	}
 

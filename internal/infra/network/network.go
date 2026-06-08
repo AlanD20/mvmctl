@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // ── Private helpers (used by Python-equivalent functions) ──
@@ -200,7 +200,7 @@ func AllocateNextIP(existingIPs []string, subnet, gateway string) (string, error
 			return candidate, nil
 		}
 	}
-	return "", errs.NetworkError(fmt.Sprintf("No available IPs in subnet %s", subnet))
+	return "", errs.New(errs.CodeNetworkError, fmt.Sprintf("No available IPs in subnet %s", subnet))
 }
 
 // ── System Queries (Host State) ──
@@ -213,11 +213,11 @@ var excludedInterfaces = []string{"lo"}
 func GetPhysicalInterfaces() ([]string, error) {
 	netPath := "/sys/class/net"
 	if _, err := os.Stat(netPath); os.IsNotExist(err) {
-		return nil, errs.NetworkError("Unable to access /sys/class/net")
+		return nil, errs.New(errs.CodeNetworkError, "Unable to access /sys/class/net")
 	}
 	entries, err := os.ReadDir(netPath)
 	if err != nil {
-		return nil, errs.NetworkError("Failed to list network interfaces")
+		return nil, errs.New(errs.CodeNetworkError, "Failed to list network interfaces")
 	}
 
 	var interfaces []string
@@ -413,17 +413,17 @@ func GetBridgeTaps(ctx context.Context, bridge string) []string {
 // Returns nil on success, error on failure.
 func EnsureInterfaceReady(ctx context.Context, iface string) error {
 	if iface == "lo" {
-		return errs.NetworkError("Loopback interface 'lo' cannot be used for NAT")
+		return errs.New(errs.CodeNetworkError, "Loopback interface 'lo' cannot be used for NAT")
 	}
 
 	netPath := filepath.Join("/sys/class/net", iface)
 	if _, err := os.Stat(netPath); os.IsNotExist(err) {
-		return errs.NetworkError(fmt.Sprintf("Interface '%s' does not exist", iface))
+		return errs.New(errs.CodeNetworkError, fmt.Sprintf("Interface '%s' does not exist", iface))
 	}
 
 	operstate, err := os.ReadFile(filepath.Join(netPath, "operstate"))
 	if err == nil && strings.TrimSpace(string(operstate)) == "down" {
-		return errs.NetworkError(
+		return errs.New(errs.CodeNetworkError,
 			fmt.Sprintf("Interface '%s' is down. Bring it up with: ip link set %s up", iface, iface),
 		)
 	}
@@ -434,11 +434,11 @@ func EnsureInterfaceReady(ctx context.Context, iface string) error {
 		Text:    true,
 	})
 	if result.Err != nil {
-		return errs.NetworkError("'ip' command not found — install iproute2")
+		return errs.New(errs.CodeNetworkError, "'ip' command not found — install iproute2")
 	}
 
 	if !result.Success || strings.TrimSpace(result.Stdout) == "" {
-		return errs.NetworkError(
+		return errs.New(errs.CodeNetworkError,
 			fmt.Sprintf(
 				"Interface '%s' has no IPv4 address assigned. NAT requires an interface with a valid IP address.",
 				iface,

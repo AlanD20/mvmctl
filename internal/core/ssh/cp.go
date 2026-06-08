@@ -12,9 +12,9 @@ import (
 	"sync"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // ── Constants matching Python's _pipeChunkSize, _GNU_CREATE_EXTRAS,
@@ -78,12 +78,8 @@ func (s *CPService) probeRemotePath(ctx context.Context, sshPrefix []string, rem
 
 	pathType := strings.TrimSpace(lines[0])
 	if pathType == "NONE" {
-		return "", 0, &errs.DomainError{
-			Code:    errs.CodeCPSourceNotFound,
-			Op:      "cp",
-			Message: fmt.Sprintf("remote path not found: %s", remotePath),
-			Class:   errs.ClassValidation,
-		}
+		return "", 0, errs.NotFound(errs.CodeCPSourceNotFound,
+			fmt.Sprintf("remote path not found: %s", remotePath))
 	}
 
 	var size int64
@@ -273,47 +269,22 @@ func (s *CPService) pipe(
 
 	srcStdout, err := srcProc.StdoutPipe()
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeCPError,
-			Op:      "cp",
-			Message: "failed to set up pipe between processes",
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
 	}
 	destStdin, err := destProc.StdinPipe()
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeCPError,
-			Op:      "cp",
-			Message: "failed to set up pipe between processes",
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
 	}
 	destStderr, err := destProc.StderrPipe()
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeCPError,
-			Op:      "cp",
-			Message: "failed to set up pipe between processes",
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
 	}
 
 	if err := srcProc.Start(); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeCPError,
-			Op:      "cp",
-			Message: "failed to set up pipe between processes",
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
 	}
 	if err := destProc.Start(); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeCPError,
-			Op:      "cp",
-			Message: "failed to set up pipe between processes",
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
 	}
 
 	// Copy src stdout → dest stdin with optional progress tracking
@@ -353,7 +324,7 @@ func (s *CPService) pipe(
 	if srcErr != nil {
 		exitCode := exitCodeFromExitErr(srcErr)
 		// Python: raise CPError(f"Source tar process failed (exit {src_rc})", code="cp.source_failed")
-		return ErrCPSourceFailed(exitCode)
+		return errs.New(errs.CodeCPSourceFailed, fmt.Sprintf("source tar process failed (exit %d)", exitCode))
 	}
 	if destErr != nil {
 		exitCode := exitCodeFromExitErr(destErr)
@@ -364,20 +335,11 @@ func (s *CPService) pipe(
 		if strings.Contains(msg, "Cannot open") || strings.Contains(msg, "Exists") ||
 			strings.Contains(msg, "File exists") {
 			// Python: raise CPDestinationExistsError(f"Destination exists: {msg}", code="cp.destination_exists")
-			return &errs.DomainError{
-				Code:    errs.CodeCPDestinationExists,
-				Op:      "cp",
-				Message: fmt.Sprintf("destination exists: %s", msg),
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(errs.CodeCPDestinationExists,
+				fmt.Sprintf("destination exists: %s", msg))
 		}
 		// Python: raise CPError(msg, code="cp.destination_failed")
-		return &errs.DomainError{
-			Code:    errs.CodeCPDestinationFailed,
-			Op:      "cp",
-			Message: msg,
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeCPDestinationFailed, msg)
 	}
 
 	return nil
@@ -428,28 +390,20 @@ func (s *CPService) CopyToVM(
 		if err != nil {
 			if os.IsNotExist(err) {
 				// Python: raise CPSourceNotFoundError(f"Local path not found: {p}", code="cp.source_not_found")
-				return 0, "", &errs.DomainError{
-					Code:    errs.CodeCPSourceNotFound,
-					Op:      "cp",
-					Message: fmt.Sprintf("local path not found: %s", src),
-					Class:   errs.ClassValidation,
-				}
+				return 0, "", errs.NotFound(errs.CodeCPSourceNotFound,
+					fmt.Sprintf("local path not found: %s", src))
 			}
 			return 0, "", err
 		}
 		// Python: if not os.path.isfile(p) and not os.path.isdir(p): raise CPSourceNotFoundError
 		if !fi.Mode().IsRegular() && !fi.IsDir() {
-			return 0, "", &errs.DomainError{
-				Code:    errs.CodeCPSourceNotFound,
-				Op:      "cp",
-				Message: fmt.Sprintf("local path not found: %s", src),
-				Class:   errs.ClassValidation,
-			}
+			return 0, "", errs.NotFound(errs.CodeCPSourceNotFound,
+				fmt.Sprintf("local path not found: %s", src))
 		}
 		isDir := fi.IsDir()
 		size := int64(0)
 		if isDir {
-			size = getDirectorySize(src)
+			size = infra.DirSize(src)
 		} else {
 			size = fi.Size()
 		}
@@ -555,12 +509,8 @@ func (s *CPService) CopyFromVM(
 		// For files, check if the target file exists (Python: inline validation)
 		if noOverwrite {
 			if _, err := os.Stat(dstPathObj); err == nil {
-				return 0, "", &errs.DomainError{
-					Code:    errs.CodeCPDestinationExists,
-					Op:      "cp",
-					Message: fmt.Sprintf("local destination exists: %s. Use --force to overwrite.", dest),
-					Class:   errs.ClassValidation,
-				}
+				return 0, "", errs.New(errs.CodeCPDestinationExists,
+					fmt.Sprintf("local destination exists: %s. Use --force to overwrite.", dest))
 			}
 		}
 		// Ensure parent directory exists

@@ -255,17 +255,17 @@ For PowerShell:
 				return rootCmd.GenBashCompletion(os.Stdout)
 			case "zsh":
 				return rootCmd.GenZshCompletion(os.Stdout)
-		case "fish":
-			if err := rootCmd.GenFishCompletion(os.Stdout, true); err != nil {
-				return err
-			}
-			// Add the _mvm_completion helper function expected by tests.
-			// Wraps Cobra's __mvm_get_completions which is defined in the generated output above.
-			fmt.Fprintln(os.Stdout)
-			fmt.Fprintf(os.Stdout, "function _mvm_completion -d 'mvm completions'\n")
-			fmt.Fprintf(os.Stdout, "    __mvm_get_completions (commandline -opc) (commandline -t)\n")
-			fmt.Fprintf(os.Stdout, "end\n")
-			return nil
+			case "fish":
+				if err := rootCmd.GenFishCompletion(os.Stdout, true); err != nil {
+					return err
+				}
+				// Add the _mvm_completion helper function expected by tests.
+				// Wraps Cobra's __mvm_get_completions which is defined in the generated output above.
+				fmt.Fprintln(os.Stdout)
+				fmt.Fprintf(os.Stdout, "function _mvm_completion -d 'mvm completions'\n")
+				fmt.Fprintf(os.Stdout, "    __mvm_get_completions (commandline -opc) (commandline -t)\n")
+				fmt.Fprintf(os.Stdout, "end\n")
+				return nil
 			case "powershell":
 				return rootCmd.GenPowerShellCompletion(os.Stdout)
 			default:

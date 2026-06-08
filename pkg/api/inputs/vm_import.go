@@ -18,7 +18,7 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -65,12 +65,11 @@ func (r *VMImportRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	// 1. Read export config from JSON file
 	exportConfig, err := FromVMExportConfigJSONFile(r.input.ConfigPath)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_import",
-			Message: fmt.Sprintf("Failed to read config: %s", err.Error()),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf("Failed to read config: %s", err.Error()),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// 2. Create repos from DB (matching Python's per-request repo creation)
@@ -228,16 +227,9 @@ func (r *VMImportRequest) resolveImage(
 	resolver := image.NewResolver(imageRepo)
 	img, err := resolver.ByType(ctx, imgConfig.Type)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeImageNotFound,
-			Op:   "vm_import",
-			Message: fmt.Sprintf(
-				"Image '%s' not found. Fetch it first: mvm image pull %s",
-				imgConfig.Type,
-				imgConfig.Type,
-			),
-			Class: errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeImageNotFound,
+			fmt.Sprintf("Image '%s' not found. Fetch it first: mvm image pull %s", imgConfig.Type, imgConfig.Type),
+		)
 	}
 	t := img.Type
 	return &t, nil
@@ -254,18 +246,15 @@ func (r *VMImportRequest) resolveKernel(
 	resolver := kernel.NewResolver(kernelRepo, nil)
 	krnl, err := resolver.ByVersionType(ctx, knlConfig.Version, knlConfig.Type)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeKernelNotFound,
-			Op:   "vm_import",
-			// Python uses !r (repr) which adds quotes: version='6.1.0', type='vmlinux'
-			Message: fmt.Sprintf(
+		return nil, errs.NotFound(
+			errs.CodeKernelNotFound,
+			fmt.Sprintf(
 				"Kernel version=%q, type=%q not found. Fetch it first: mvm kernel pull --type %s",
 				knlConfig.Version,
 				knlConfig.Type,
 				knlConfig.Type,
 			),
-			Class: errs.ClassValidation,
-		}
+		)
 	}
 	return &krnl.ID, nil
 }
@@ -281,17 +270,15 @@ func (r *VMImportRequest) resolveBinary(
 	resolver := binary.NewResolver(binaryRepo)
 	bin, err := resolver.ByNameVersion(ctx, binConfig.Name, binConfig.Version)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeBinaryNotFound,
-			Op:   "vm_import",
-			Message: fmt.Sprintf(
+		return nil, errs.NotFound(
+			errs.CodeBinaryNotFound,
+			fmt.Sprintf(
 				"Binary '%s' version='%s' not found. Fetch it first: mvm bin pull %s",
 				binConfig.Name,
 				binConfig.Version,
 				binConfig.Version,
 			),
-			Class: errs.ClassValidation,
-		}
+		)
 	}
 	return &bin.ID, nil
 }
@@ -307,16 +294,14 @@ func (r *VMImportRequest) resolveNetwork(
 	resolver := network.NewResolver(networkRepo, nil)
 	net, err := resolver.ByName(ctx, netConfig.Name)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeNetworkNotFound,
-			Op:   "vm_import",
-			Message: fmt.Sprintf(
+		return nil, errs.NotFound(
+			errs.CodeNetworkNotFound,
+			fmt.Sprintf(
 				"Network '%s' not found. Create it first: mvm network create %s",
 				netConfig.Name,
 				netConfig.Name,
 			),
-			Class: errs.ClassValidation,
-		}
+		)
 	}
 	return &net.Name, nil
 }

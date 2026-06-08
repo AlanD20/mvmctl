@@ -20,8 +20,8 @@ import (
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // ── Domain relation registries ─────────────────────────────────────────────

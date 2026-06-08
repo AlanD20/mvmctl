@@ -10,10 +10,10 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/errs"
 
 	"mvmctl/internal/cli/common"
 

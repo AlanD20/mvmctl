@@ -7,8 +7,8 @@ import (
 	"log/slog"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/provisioner"
+	"mvmctl/pkg/errs"
 )
 
 // Provisioner matches Python's Provisioner in _provisioner.py.
@@ -160,7 +160,7 @@ func ExtractViaBackend(
 		if err != nil {
 			var de *errs.DomainError
 			if !errors.As(err, &de) {
-				err = NewImageError(err.Error())
+				err = errs.New(errs.CodeImageError, err.Error())
 			}
 		}
 	}()

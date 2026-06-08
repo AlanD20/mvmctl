@@ -6,8 +6,8 @@ import (
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -77,12 +77,7 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 
 	// Validate log_type before passing to service
 	if logType != "boot" && logType != "os" {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "logs",
-			Message: fmt.Sprintf("Unknown log type '%s'. Valid: boot, os", logType),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Unknown log type '%s'. Valid: boot, os", logType))
 	}
 
 	lines := r.resolveLines(ctx)

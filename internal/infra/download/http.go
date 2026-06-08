@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
+	"mvmctl/pkg/errs"
 )
 
 // RequestOpts bundles common HTTP request parameters.
@@ -513,10 +513,10 @@ func (d *Downloader) DownloadFile(
 		actualSHA256 := hex.EncodeToString(sha256Hash.Sum(nil))
 		if !strings.EqualFold(actualSHA256, expectedSHA256) {
 			os.Remove(dest)
-			return &errs.DomainError{
-				Code:    errs.CodeImageChecksumMismatch,
-				Message: fmt.Sprintf("Checksum mismatch! Expected %s, got %s", expectedSHA256, actualSHA256),
-			}
+			return errs.New(
+				errs.CodeImageChecksumMismatch,
+				fmt.Sprintf("Checksum mismatch! Expected %s, got %s", expectedSHA256, actualSHA256),
+			)
 		}
 		slog.Info("Checksum verified")
 	}
@@ -597,37 +597,26 @@ func (d *Downloader) GetJSON(
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeDownloadFailed, fmt.Sprintf("Failed to fetch %s: %v", url, err), err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: HTTP %d", url, resp.StatusCode),
-		}
+		return nil, errs.New(errs.CodeDownloadFailed, fmt.Sprintf("Failed to fetch %s: HTTP %d", url, resp.StatusCode))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeDownloadFailed, fmt.Sprintf("Failed to fetch %s: %v", url, err), err)
 	}
 
 	var parsed any
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to parse JSON from %s: %v", url, err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeDownloadFailed,
+			fmt.Sprintf("Failed to parse JSON from %s: %v", url, err),
+			err,
+		)
 	}
 
 	if useCache && d.cache != nil {
@@ -675,28 +664,20 @@ func (d *Downloader) GetContent(
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return "", &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: %v", opts.URL, err),
-			Err:     err,
-		}
+		return "", errs.WrapMsg(errs.CodeDownloadFailed, fmt.Sprintf("Failed to fetch %s: %v", opts.URL, err), err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: HTTP %d", opts.URL, resp.StatusCode),
-		}
+		return "", errs.New(
+			errs.CodeDownloadFailed,
+			fmt.Sprintf("Failed to fetch %s: HTTP %d", opts.URL, resp.StatusCode),
+		)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: %v", opts.URL, err),
-			Err:     err,
-		}
+		return "", errs.WrapMsg(errs.CodeDownloadFailed, fmt.Sprintf("Failed to fetch %s: %v", opts.URL, err), err)
 	}
 
 	if opts.UseCache && d.cache != nil {
@@ -773,28 +754,17 @@ func (d *Downloader) GetBody(ctx context.Context, url string) ([]byte, error) {
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeDownloadFailed, fmt.Sprintf("Failed to fetch %s: %v", url, err), err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: HTTP %d", url, resp.StatusCode),
-		}
+		return nil, errs.New(errs.CodeDownloadFailed, fmt.Sprintf("Failed to fetch %s: HTTP %d", url, resp.StatusCode))
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDownloadFailed,
-			Message: fmt.Sprintf("Failed to fetch %s: %v", url, err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeDownloadFailed, fmt.Sprintf("Failed to fetch %s: %v", url, err), err)
 	}
 
 	return data, nil

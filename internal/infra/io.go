@@ -219,6 +219,22 @@ func EnsureDir(path string, perm os.FileMode) error {
 	return os.MkdirAll(path, perm)
 }
 
+// DirSize returns the total size in bytes of all files within a directory tree.
+// Inaccessible files are silently skipped (matches Python's OSError pass).
+func DirSize(path string) int64 {
+	var total int64
+	filepath.Walk(path, func(fp string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if !fi.IsDir() {
+			total += fi.Size()
+		}
+		return nil
+	})
+	return total
+}
+
 // WriteJSON marshals v as indented JSON and writes to path.
 func WriteJSON(path string, v any) error {
 	data, err := json.MarshalIndent(v, "", "  ")

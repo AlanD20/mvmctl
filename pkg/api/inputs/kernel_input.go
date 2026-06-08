@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/kernel"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -49,35 +49,26 @@ func NewKernelRequest(inputs KernelInput, db *sqlx.DB, kernelRepo kernel.Reposit
 // Matches Python's KernelRequest.resolve().
 func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, error) {
 	if len(r.input.Identifiers) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeKernelNotFound,
-			Op:      "kernel",
-			Message: "No kernel identifiers provided",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeKernelNotFound, "No kernel identifiers provided")
 	}
 
 	// Validate identifier length — max 64 chars.
 	for _, ident := range r.input.Identifiers {
 		if len(ident) > 64 {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Op:      "kernel",
-				Message: fmt.Sprintf("Kernel identifier too long: '%s' exceeds maximum length of 64 characters", ident),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeValidationFailed,
+				fmt.Sprintf("Kernel identifier too long: '%s' exceeds maximum length of 64 characters", ident),
+			)
 		}
 	}
 
 	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeKernelNotFound,
-			Op:      "kernel",
-			Message: "Could not resolve any kernels: " + strings.Join(result.Errors, ", "),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeKernelNotFound,
+			"Could not resolve any kernels: "+strings.Join(result.Errors, ", "),
+		)
 	}
 
 	r.result = &ResolvedKernelInput{
@@ -95,21 +86,11 @@ func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, erro
 
 func (r *KernelRequest) ensureValidate() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelNotFound,
-			Op:      "kernel",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeKernelNotFound, "Failed to resolve necessary dependencies to validate")
 	}
 
 	if len(r.result.Kernels) == 0 {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelNotFound,
-			Op:      "kernel",
-			Message: "No kernels found matching identifiers",
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeKernelNotFound, "No kernels found matching identifiers")
 	}
 
 	return nil

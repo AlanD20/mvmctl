@@ -2,6 +2,7 @@ package guestfs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -42,7 +44,7 @@ type GuestfsHandle struct {
 // NewHandle creates a new GuestfsHandle.
 func NewHandle(diskPath string, readonly bool) (*GuestfsHandle, error) {
 	if _, err := exec.LookPath(guestfishBin); err != nil {
-		return nil, &GuestfsNotAvailableError{msg: "libguestfs is not available"}
+		return nil, errs.New(errs.CodeGuestfsNotAvailable, "libguestfs is not available")
 	}
 	return &GuestfsHandle{diskPath: diskPath, readonly: readonly}, nil
 }
@@ -192,7 +194,10 @@ func (h *GuestfsHandle) run(ctx context.Context, args ...string) (string, error)
 func (h *GuestfsHandle) MountRootfs(ctx context.Context) (string, error) {
 	out, err := h.run(ctx, "list-filesystems")
 	if err != nil {
-		return "", &GuestfsError{msg: fmt.Sprintf("Failed to list filesystems for %s: %v", h.diskPath, err)}
+		return "", errs.New(
+			errs.CodeGuestfsError,
+			fmt.Sprintf("Failed to list filesystems for %s: %v", h.diskPath, err),
+		)
 	}
 
 	lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -231,7 +236,7 @@ func (h *GuestfsHandle) MountRootfs(ctx context.Context) (string, error) {
 	}
 
 	if rootDevice == "" {
-		return "", &GuestfsError{msg: fmt.Sprintf("No filesystem found in %s", h.diskPath)}
+		return "", errs.New(errs.CodeGuestfsError, fmt.Sprintf("No filesystem found in %s", h.diskPath))
 	}
 
 	return rootDevice, nil
@@ -241,7 +246,7 @@ func (h *GuestfsHandle) MountRootfs(ctx context.Context) (string, error) {
 func (h *GuestfsHandle) ListPartitions(ctx context.Context) ([]string, error) {
 	out, err := h.run(ctx, "list-partitions")
 	if err != nil {
-		return nil, &GuestfsError{msg: fmt.Sprintf("Failed to list partitions: %v", err)}
+		return nil, errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to list partitions: %v", err))
 	}
 	var parts []string
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
@@ -256,7 +261,7 @@ func (h *GuestfsHandle) ListPartitions(ctx context.Context) ([]string, error) {
 func (h *GuestfsHandle) VfsType(ctx context.Context, device string) (string, error) {
 	out, err := guestfishRun(ctx, h.diskPath, true, "", "-i", "vfs-type", device)
 	if err != nil {
-		return "", &GuestfsError{msg: fmt.Sprintf("Failed to get vfs-type for %s: %v", device, err)}
+		return "", errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to get vfs-type for %s: %v", device, err))
 	}
 	return strings.TrimSpace(out), nil
 }
@@ -265,7 +270,7 @@ func (h *GuestfsHandle) VfsType(ctx context.Context, device string) (string, err
 func (h *GuestfsHandle) BlockdevGetSize64(ctx context.Context, device string) (int64, error) {
 	out, err := guestfishRun(ctx, h.diskPath, true, "", "blockdev-getsize64", device)
 	if err != nil {
-		return 0, &GuestfsError{msg: fmt.Sprintf("Failed to get blockdev size for %s: %v", device, err)}
+		return 0, errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to get blockdev size for %s: %v", device, err))
 	}
 	return strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 }
@@ -274,7 +279,10 @@ func (h *GuestfsHandle) BlockdevGetSize64(ctx context.Context, device string) (i
 func (h *GuestfsHandle) CopyDeviceToFile(ctx context.Context, device string, outputPath string) error {
 	_, err := guestfishRun(ctx, h.diskPath, true, "", "copy-device-to-file", device, outputPath)
 	if err != nil {
-		return &GuestfsError{msg: fmt.Sprintf("Failed to copy device %s to %s: %v", device, outputPath, err)}
+		return errs.New(
+			errs.CodeGuestfsError,
+			fmt.Sprintf("Failed to copy device %s to %s: %v", device, outputPath, err),
+		)
 	}
 	return nil
 }
@@ -323,12 +331,12 @@ func (h *GuestfsHandle) GetFSSize(ctx context.Context, device string) (int64, er
 		":", "umount", "/",
 	)
 	if err != nil {
-		return 0, &GuestfsError{msg: fmt.Sprintf("Failed to get fs size for %s: %v", device, err)}
+		return 0, errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to get fs size for %s: %v", device, err))
 	}
 	blocks := parseStatvfsField(out, "blocks")
 	bsize := parseStatvfsField(out, "bsize")
 	if blocks == 0 || bsize == 0 {
-		return 0, &GuestfsError{msg: fmt.Sprintf("Failed to parse statvfs for %s", device)}
+		return 0, errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to parse statvfs for %s", device))
 	}
 	return blocks * bsize, nil
 }
@@ -344,7 +352,7 @@ func (h *GuestfsHandle) ShrinkExt4(ctx context.Context, device string) error {
 		":", "resize2fs-size", device, "0",
 	)
 	if err != nil {
-		return &GuestfsError{msg: fmt.Sprintf("Failed to shrink ext4 %s: %v", device, err)}
+		return errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to shrink ext4 %s: %v", device, err))
 	}
 	return nil
 }
@@ -359,7 +367,7 @@ func (h *GuestfsHandle) ShrinkBtrfs(ctx context.Context, device string) error {
 		":", "umount", "/",
 	)
 	if err != nil {
-		return &GuestfsError{msg: fmt.Sprintf("Failed to shrink btrfs %s: %v", device, err)}
+		return errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to shrink btrfs %s: %v", device, err))
 	}
 	return nil
 }
@@ -368,13 +376,13 @@ func (h *GuestfsHandle) ShrinkBtrfs(ctx context.Context, device string) error {
 func (h *GuestfsHandle) GrowFS(ctx context.Context, device string, targetSizeBytes int64) error {
 	fsType, err := h.VfsType(ctx, device)
 	if err != nil {
-		return &GuestfsError{msg: fmt.Sprintf("Failed to get fs type for grow: %v", err)}
+		return errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to get fs type for grow: %v", err))
 	}
 	switch fsType {
 	case "ext2", "ext3", "ext4":
 		_, err := guestfishRun(ctx, h.diskPath, false, "", "-i", "resize2fs", device)
 		if err != nil {
-			return &GuestfsError{msg: fmt.Sprintf("Failed to grow ext fs %s: %v", device, err)}
+			return errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to grow ext fs %s: %v", device, err))
 		}
 	case "btrfs":
 		targetStr := strconv.FormatInt(targetSizeBytes, 10)
@@ -384,10 +392,10 @@ func (h *GuestfsHandle) GrowFS(ctx context.Context, device string, targetSizeByt
 			":", "umount", "/",
 		)
 		if err != nil {
-			return &GuestfsError{msg: fmt.Sprintf("Failed to grow btrfs %s: %v", device, err)}
+			return errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to grow btrfs %s: %v", device, err))
 		}
 	default:
-		return &GuestfsError{msg: fmt.Sprintf("Cannot grow %s filesystem: not supported", fsType)}
+		return errs.New(errs.CodeGuestfsError, fmt.Sprintf("Cannot grow %s filesystem: not supported", fsType))
 	}
 	return nil
 }
@@ -407,7 +415,7 @@ func (h *GuestfsHandle) RunBatch(ctx context.Context, commands string) (string, 
 func (h *GuestfsHandle) ReadFile(ctx context.Context, path string) (string, error) {
 	out, err := guestfishRun(ctx, h.diskPath, true, "", "read-file", path)
 	if err != nil {
-		return "", &GuestfsError{msg: fmt.Sprintf("read-file %s failed: %v", path, err)}
+		return "", errs.New(errs.CodeGuestfsError, fmt.Sprintf("read-file %s failed: %v", path, err))
 	}
 	return out, nil
 }
@@ -434,7 +442,7 @@ func parseStatvfsField(out, field string) int64 {
 func (h *GuestfsHandle) StatVFS(ctx context.Context, path string) (map[string]int64, error) {
 	out, err := guestfishRun(ctx, h.diskPath, true, "", "-i", "statvfs", path)
 	if err != nil {
-		return nil, &GuestfsError{msg: fmt.Sprintf("statvfs %s failed: %v", path, err)}
+		return nil, errs.New(errs.CodeGuestfsError, fmt.Sprintf("statvfs %s failed: %v", path, err))
 	}
 
 	result := make(map[string]int64)
@@ -461,7 +469,8 @@ func (h *GuestfsHandle) StatVFS(ctx context.Context, path string) (map[string]in
 func ExtractPartition(ctx context.Context, rawPath, outputPath string, partition int) (string, error) {
 	handle, err := NewHandle(rawPath, true)
 	if err != nil {
-		if _, ok := err.(*GuestfsNotAvailableError); ok {
+		var de *errs.DomainError
+		if errors.As(err, &de) && de.Code == errs.CodeGuestfsNotAvailable {
 			return "", nil
 		}
 		return "", err

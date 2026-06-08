@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 const sysctlKey = "net.ipv4.ip_forward"
@@ -82,12 +82,12 @@ func PersistSysctl(ctx context.Context) (*model.HostStateChangeItem, error) {
 	}
 
 	if err := os.MkdirAll(filepath.Dir(sysctlConfPath), infra.DirPerm); err != nil {
-		return nil, hostError(errs.CodeHostInitFailed,
-			fmt.Sprintf("Failed to write %s: %v", sysctlConfPath, err))
+		return nil, errs.New(errs.CodeHostInitFailed,
+			fmt.Sprintf("Failed to write %s: %v", sysctlConfPath, err), errs.WithClass(errs.ClassInternal))
 	}
 	if err := os.WriteFile(sysctlConfPath, []byte(content), 0644); err != nil {
-		return nil, hostError(errs.CodeHostInitFailed,
-			fmt.Sprintf("Failed to write %s: %v", sysctlConfPath, err))
+		return nil, errs.New(errs.CodeHostInitFailed,
+			fmt.Sprintf("Failed to write %s: %v", sysctlConfPath, err), errs.WithClass(errs.ClassInternal))
 	}
 
 	return &model.HostStateChangeItem{
@@ -166,9 +166,10 @@ func (s *Service) EnsureKVMModules(
 			slog.Warn("KVM appears to be built into the kernel (no modules to manage) — /dev/kvm is accessible")
 			return changes, nextOrder, nil
 		}
-		return nil, 0, hostError(
+		return nil, 0, errs.New(
 			errs.CodeHostInitFailed,
 			"No KVM vendor modules available. Ensure virtualization is enabled in BIOS and KVM kernel modules are installed.",
+			errs.WithClass(errs.ClassInternal),
 		)
 	}
 
@@ -270,7 +271,11 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 		return nil, err
 	}
 	if len(changes) == 0 {
-		return nil, hostError(errs.CodeHostResetFailed, "No saved host state to restore")
+		return nil, errs.New(
+			errs.CodeHostResetFailed,
+			"No saved host state to restore",
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 
 	var reverted []*model.HostStateChangeItem
@@ -332,18 +337,38 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 						opts.Input = *change.OriginalValue
 						result := system.RunCmdCompat(ctx, []string{"visudo", "-c", "-f", "-"}, opts)
 						if result.ExitCode != 0 {
-							return nil, hostError(errs.CodeHostResetFailed,
-								fmt.Sprintf("Sudoers content from state failed visudo validation: %s", result.Stderr))
+							return nil, errs.New(
+								errs.CodeHostResetFailed,
+								fmt.Sprintf(
+									"Sudoers content from state failed visudo validation: %s",
+									result.Stderr,
+								),
+								errs.WithClass(errs.ClassInternal),
+							)
 						}
 					}
 					if err := os.WriteFile(target, []byte(*change.OriginalValue), 0644); err != nil {
-						return nil, hostError(errs.CodeHostResetFailed,
-							fmt.Sprintf("Failed to revert file %s: %v", target, err))
+						return nil, errs.New(
+							errs.CodeHostResetFailed,
+							fmt.Sprintf(
+								"Failed to revert file %s: %v",
+								target,
+								err,
+							),
+							errs.WithClass(errs.ClassInternal),
+						)
 					}
 				} else {
 					if err := os.Remove(target); err != nil {
-						return nil, hostError(errs.CodeHostResetFailed,
-							fmt.Sprintf("Failed to revert file %s: %v", target, err))
+						return nil, errs.New(
+							errs.CodeHostResetFailed,
+							fmt.Sprintf(
+								"Failed to revert file %s: %v",
+								target,
+								err,
+							),
+							errs.WithClass(errs.ClassInternal),
+						)
 					}
 				}
 				appliedVal := "(removed)"

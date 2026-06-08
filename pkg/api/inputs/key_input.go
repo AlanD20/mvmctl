@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/key"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // KeyInput is the raw input for identifying existing SSH keys.
@@ -48,12 +48,7 @@ func (r *KeyRequest) Resolve(ctx context.Context) (*ResolvedKeyInput, error) {
 	identifiers := r.input.Identifiers
 
 	if len(identifiers) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeKeyNotFound,
-			Op:      "key",
-			Message: "No key identifiers provided",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeKeyNotFound, "No key identifiers provided")
 	}
 
 	result, err := r.resolver.ResolveMany(ctx, identifiers)
@@ -62,12 +57,10 @@ func (r *KeyRequest) Resolve(ctx context.Context) (*ResolvedKeyInput, error) {
 	}
 
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeKeyNotFound,
-			Op:      "key",
-			Message: fmt.Sprintf("Could not resolve any keys: %s", strings.Join(result.Errors, ", ")),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeKeyNotFound,
+			fmt.Sprintf("Could not resolve any keys: %s", strings.Join(result.Errors, ", ")),
+		)
 	}
 
 	return &ResolvedKeyInput{

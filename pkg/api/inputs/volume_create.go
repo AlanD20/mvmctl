@@ -8,9 +8,9 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/disk"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -73,12 +73,7 @@ func NewVolumeCreateRequest(inputs VolumeCreateInput, db *sqlx.DB, volumeRepo vo
 func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreateInput, error) {
 	sizeBytes, err := disk.ParseDiskSizeToBytes(r.input.Size)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "volume_create",
-			Message: fmt.Sprintf("Invalid volume size: %s", err.Error()),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid volume size: %s", err.Error()))
 	}
 
 	// Default format is "raw" — Python: fmt = self._inputs.format if self._inputs.format is not None else "raw"
@@ -88,12 +83,10 @@ func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreat
 	}
 
 	if format != model.VolumeFormatRaw && format != model.VolumeFormatQCOW2 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "volume_create",
-			Message: fmt.Sprintf("Unsupported format: %s. Use 'raw' or 'qcow2'.", format),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeValidationFailed,
+			fmt.Sprintf("Unsupported format: %s. Use 'raw' or 'qcow2'.", format),
+		)
 	}
 
 	path := filepath.Join(infra.GetVolumesDir(), fmt.Sprintf("%s.%s", r.input.Name, string(format)))
@@ -120,40 +113,23 @@ func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreat
 
 func (r *VolumeCreateRequest) ensureValidate(ctx context.Context) error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "volume_create",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVolumeNotFound, "Failed to resolve necessary dependencies to validate")
 	}
 
 	if err := validators.VolumeName(r.result.Name); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "volume_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
 
 	// Check for existing volume with same name
 	existing, err := r.repo.GetByName(ctx, r.result.Name)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeDatabaseError,
-			Op:      "volume_create",
-			Message: "Failed to check existing volume: " + err.Error(),
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeDatabaseError, "Failed to check existing volume: "+err.Error())
 	}
 	if existing != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVolumeAlreadyExists,
-			Op:      "volume_create",
-			Message: fmt.Sprintf("Volume '%s' already exists", r.result.Name),
-			Class:   errs.ClassConflict,
-		}
+		return errs.AlreadyExists(
+			errs.CodeVolumeAlreadyExists,
+			fmt.Sprintf("Volume '%s' already exists", r.result.Name),
+		)
 	}
 
 	return nil

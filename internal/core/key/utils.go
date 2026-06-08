@@ -11,23 +11,23 @@ import (
 	"strings"
 	"unicode"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // readPubKeyFile reads and validates a public key file.
 func readPubKeyFile(path string) (string, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return "", &keyError{err: errs.KeyFileError(fmt.Sprintf("Public key file not found: %s", path))}
+		return "", errs.New(errs.CodeKeyError, fmt.Sprintf("Public key file not found: %s", path))
 	}
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return "", &keyError{err: errs.KeyFileError(fmt.Sprintf("Failed to read public key file: %v", err))}
+		return "", errs.New(errs.CodeKeyError, fmt.Sprintf("Failed to read public key file: %v", err))
 	}
 	trimmed := strings.TrimSpace(string(content))
 	if trimmed == "" {
-		return "", &keyError{err: errs.KeyFileError(fmt.Sprintf("Public key file is empty: %s", path))}
+		return "", errs.New(errs.CodeKeyError, fmt.Sprintf("Public key file is empty: %s", path))
 	}
 	return trimmed, nil
 }
@@ -35,11 +35,8 @@ func readPubKeyFile(path string) (string, error) {
 // checkDependencies checks that ssh-keygen is available.
 func checkDependencies() error {
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
-		return &keyError{err: &errs.DomainError{
-			Code:    errs.CodeKeyDependencyMissing,
-			Op:      "key",
-			Message: "ssh-keygen is not installed. Install openssh-client (apt install openssh-client / brew install openssh).",
-		}}
+		return errs.New(errs.CodeKeyDependencyMissing,
+			"ssh-keygen is not installed. Install openssh-client (apt install openssh-client / brew install openssh).")
 	}
 	return nil
 }
@@ -55,7 +52,7 @@ func ReadPubKeyContents(keys []*model.SSHKeyItem) ([]string, error) {
 		if _, err := os.Stat(k.PublicKeyPath); err == nil {
 			data, err := os.ReadFile(k.PublicKeyPath)
 			if err != nil {
-				return nil, errs.KeyFileError(fmt.Sprintf("Failed to read public key file: %v", err))
+				return nil, errs.New(errs.CodeKeyError, fmt.Sprintf("Failed to read public key file: %v", err))
 			}
 			contents = append(contents, strings.TrimSpace(string(data)))
 		}
@@ -70,11 +67,11 @@ func ReadPubKeyContents(keys []*model.SSHKeyItem) ([]string, error) {
 func computeFingerprint(pubKeyContent string) (string, error) {
 	parts := strings.Fields(pubKeyContent)
 	if len(parts) < 2 {
-		return "", &keyError{err: errs.MVMKeyError("Invalid public key format")}
+		return "", errs.New(errs.CodeKeyError, "Invalid public key format")
 	}
 	keyBytes, err := base64.RawStdEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", &keyError{err: errs.MVMKeyError("Invalid public key format")}
+		return "", errs.New(errs.CodeKeyError, "Invalid public key format")
 	}
 	digest := sha256.Sum256(keyBytes)
 	fp := base64.StdEncoding.EncodeToString(digest[:])
@@ -93,7 +90,7 @@ func IsPrivateKey(content string) bool {
 func ParseAlgorithm(pubKeyContent string) (string, error) {
 	parts := strings.Fields(pubKeyContent)
 	if len(parts) == 0 {
-		return "", &keyError{err: errs.MVMKeyError("Invalid public key format")}
+		return "", errs.New(errs.CodeKeyError, "Invalid public key format")
 	}
 	return parts[0], nil
 }
@@ -146,14 +143,12 @@ func generateKeypair(
 	}
 	result := system.RunCmdCompat(ctx, append([]string{"ssh-keygen"}, args...), system.DefaultRunCmdOpts())
 	if result.Err != nil {
-		return "", &keyError{
-			err: errs.MVMKeyError(fmt.Sprintf("ssh-keygen failed: %s", strings.TrimSpace(result.Stderr))),
-		}
+		return "", errs.New(errs.CodeKeyError, fmt.Sprintf("ssh-keygen failed: %s", strings.TrimSpace(result.Stderr)))
 	}
 
 	pubContent, err := os.ReadFile(pubKeyPath)
 	if err != nil {
-		return "", &keyError{err: errs.KeyFileError(fmt.Sprintf("Failed to read generated public key: %v", err))}
+		return "", errs.New(errs.CodeKeyError, fmt.Sprintf("Failed to read generated public key: %v", err))
 	}
 	return strings.TrimSpace(string(pubContent)), nil
 }

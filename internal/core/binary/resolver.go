@@ -7,9 +7,9 @@ import (
 	"sort"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/version"
+	"mvmctl/pkg/errs"
 )
 
 // Enricher resolves VM relations for BinaryItems.
@@ -87,18 +87,12 @@ func (r *Resolver) ByID(ctx context.Context, binaryID string) (*model.BinaryItem
 		return nil, err
 	}
 	if len(matches) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "binary",
-			Message: fmt.Sprintf("Binary not found: %s", binaryID),
-		}
+		return nil, errs.NotFound(errs.CodeBinaryNotFound,
+			fmt.Sprintf("Binary not found: %s", binaryID))
 	}
 	if len(matches) > 1 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "binary",
-			Message: fmt.Sprintf("Binary ID is ambiguous: %s", binaryID),
-		}
+		return nil, errs.New(errs.CodeBinaryNotFound,
+			fmt.Sprintf("Binary ID is ambiguous: %s", binaryID))
 	}
 	enriched := r.enrich(ctx, matches)
 	return enriched[0], nil
@@ -111,11 +105,8 @@ func (r *Resolver) ByNameVersion(ctx context.Context, name, version string) (*mo
 		return nil, err
 	}
 	if binary == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "binary",
-			Message: fmt.Sprintf("Binary not found: name='%s', version='%s'", name, version),
-		}
+		return nil, errs.NotFound(errs.CodeBinaryNotFound,
+			fmt.Sprintf("Binary not found: name='%s', version='%s'", name, version))
 	}
 	enriched := r.enrich(ctx, []*model.BinaryItem{binary})
 	return enriched[0], nil
@@ -128,11 +119,8 @@ func (r *Resolver) ByNameLatest(ctx context.Context, name string) (*model.Binary
 		return nil, err
 	}
 	if len(matches) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "binary",
-			Message: fmt.Sprintf("Binary not found by name: %s", name),
-		}
+		return nil, errs.NotFound(errs.CodeBinaryNotFound,
+			fmt.Sprintf("Binary not found by name: %s", name))
 	}
 	if len(matches) == 1 {
 		enriched := r.enrich(ctx, matches)

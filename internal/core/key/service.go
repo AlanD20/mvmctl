@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // publicKeyPerm matches Python's 0o666 for public key files.
@@ -53,9 +53,9 @@ func (s *Service) CreateKeypair(ctx context.Context, params *CreateParams) (*mod
 				return nil, err
 			}
 		} else {
-			return nil, &keyError{err: errs.MVMKeyError(
+			return nil, errs.New(errs.CodeKeyError,
 				fmt.Sprintf("Key '%s' already exists in cache. Remove it first.", params.Name),
-			)}
+			)
 		}
 	}
 
@@ -133,16 +133,16 @@ func (s *Service) Import(
 				return nil, err
 			}
 		} else {
-			return nil, &keyError{err: errs.MVMKeyError(
+			return nil, errs.New(errs.CodeKeyError,
 				fmt.Sprintf("Key '%s' already exists. Remove it first to replace.", name),
-			)}
+			)
 		}
 	}
 
 	// Persist public key to keys dir
 	pubPath := filepath.Join(s.keysDir, name+".pub")
 	if err := os.WriteFile(pubPath, []byte(pubKeyContent+"\n"), publicKeyPerm); err != nil {
-		return nil, &keyError{err: errs.KeyFileError(fmt.Sprintf("Failed to write public key file: %v", err))}
+		return nil, errs.New(errs.CodeKeyError, fmt.Sprintf("Failed to write public key file: %v", err))
 	}
 	persistedPubPath := pubPath
 
@@ -203,7 +203,7 @@ func (s *Service) GetPubkey(ctx context.Context, entity any) (string, error) {
 		}
 		return readPubKeyFile(sshKey.PublicKeyPath)
 	default:
-		return "", &keyError{err: errs.KeyFileError("Invalid key identifier")}
+		return "", errs.New(errs.CodeKeyError, "Invalid key identifier")
 	}
 }
 
@@ -218,7 +218,7 @@ func (s *Service) GetPubkeys(ctx context.Context, keys any) ([]string, error) {
 			return nil, err
 		}
 		if len(result.Errors) > 0 && len(result.Items) == 0 {
-			return nil, &keyError{err: errs.MVMKeyError(result.Errors[0])}
+			return nil, errs.New(errs.CodeKeyError, result.Errors[0])
 		}
 		contents := make([]string, 0, len(result.Items))
 		for _, key := range result.Items {
@@ -244,7 +244,7 @@ func (s *Service) GetPubkeys(ctx context.Context, keys any) ([]string, error) {
 		}
 		return contents, nil
 	default:
-		return nil, &keyError{err: errs.KeyFileError("invalid keys type: expected []string or []*SSHKeyItem")}
+		return nil, errs.New(errs.CodeKeyError, "invalid keys type: expected []string or []*SSHKeyItem")
 	}
 }
 

@@ -2,15 +2,16 @@ package volume
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // Service handles volume disk operations — creation, removal, resizing, and inspection.
@@ -29,7 +30,7 @@ func NewService(repo Repository) *Service {
 func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model.VolumeItem, error) {
 	parentDir := filepath.Dir(vol.Path)
 	if err := os.MkdirAll(parentDir, os.ModePerm); err != nil {
-		return nil, NewVolumeErrorf("create disk directory: %s", err)
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("create disk directory: %s", err))
 	}
 
 	switch vol.Format {
@@ -41,7 +42,7 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 		)
 		if result.Err != nil {
 			// Python: raise VolumeError(f"fallocate failed: {e}") from e
-			return nil, NewVolumeErrorf("fallocate failed: %s", result.Err.Error())
+			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate failed: %s", result.Err.Error()))
 		}
 	case model.VolumeFormatQCOW2:
 		result := system.RunCmdCompat(
@@ -57,14 +58,14 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
-			return nil, NewVolumeErrorf("qemu-img create failed: %s", result.Err.Error())
+			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img create failed: %s", result.Err.Error()))
 		}
 	default:
-		return nil, NewVolumeErrorf("Unsupported format: %s", vol.Format)
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Unsupported format: %s", vol.Format))
 	}
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
-		return nil, NewVolumeErrorf("upsert volume after creation: %s", err)
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("upsert volume after creation: %s", err))
 	}
 
 	return vol, nil
@@ -95,9 +96,9 @@ func (s *Service) ResizeDisk(
 ) (*model.VolumeItem, error) {
 	if _, err := os.Stat(vol.Path); err != nil {
 		if os.IsNotExist(err) {
-			return nil, NewVolumeErrorf("Disk file not found: %s", vol.Path)
+			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Disk file not found: %s", vol.Path))
 		}
-		return nil, NewVolumeErrorf("stat disk file: %s", err)
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("stat disk file: %s", err))
 	}
 
 	switch vol.Format {
@@ -108,7 +109,7 @@ func (s *Service) ResizeDisk(
 			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
-			return nil, NewVolumeErrorf("fallocate resize failed: %s", result.Err.Error())
+			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate resize failed: %s", result.Err.Error()))
 		}
 	case model.VolumeFormatQCOW2:
 		result := system.RunCmdCompat(
@@ -117,10 +118,10 @@ func (s *Service) ResizeDisk(
 			system.DefaultRunCmdOpts(),
 		)
 		if result.Err != nil {
-			return nil, NewVolumeErrorf("qemu-img resize failed: %s", result.Err.Error())
+			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img resize failed: %s", result.Err.Error()))
 		}
 	default:
-		return nil, NewVolumeErrorf("Unsupported format: %s", vol.Format)
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Unsupported format: %s", vol.Format))
 	}
 
 	// Update volume fields — matches Python's resize_disk() which sets
@@ -129,7 +130,7 @@ func (s *Service) ResizeDisk(
 	vol.UpdatedAt = time.Now().Format(time.RFC3339)
 
 	if err := s.repo.Upsert(ctx, vol); err != nil {
-		return nil, NewVolumeErrorf("upsert volume after resize: %s", err)
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("upsert volume after resize: %s", err))
 	}
 
 	return vol, nil
@@ -153,8 +154,7 @@ func (s *Service) SetVolumesState(
 	switch status {
 	case model.VolumeStatusAttached:
 		if vmID == nil || *vmID == "" {
-			return errs.ValidationFailed(
-				errs.CodeValidationFailed,
+			return errs.New(errs.CodeValidationFailed,
 				"vm_id is required when state is ATTACHED",
 			)
 		}

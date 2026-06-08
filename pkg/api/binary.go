@@ -7,12 +7,12 @@ import (
 	"sort"
 
 	"mvmctl/internal/core/binary"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 )
 
 // BinaryPrune prunes unused binaries.
@@ -20,9 +20,7 @@ import (
 func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) ([]string, error) {
 	allBinaries, err := op.Repos.Binary.ListAll(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeDatabaseError, Message: fmt.Sprintf("Failed to list binaries: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list binaries: %v", err), err)
 	}
 
 	defaultBinary, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
@@ -63,9 +61,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	request := inputs.NewBinaryPullRequest(input, op.Connection.DB())
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: "binary.pull_failed", Message: err.Error(), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, err.Error(), err)
 	}
 
 	// ---- Git build path (parallel to release download) ----
@@ -74,9 +70,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 
 		binaries, err := op.Services.Binary.BuildFromSource(ctx, *resolved.GitRef)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code: "binary.pull_failed", Message: fmt.Sprintf("Build failed: %v", err), Err: err,
-			}
+			return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, fmt.Sprintf("Build failed: %v", err), err)
 		}
 
 		noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
@@ -107,9 +101,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	// ---- Release download path ----
 	resolvedVersion, err := op.Services.Binary.ResolveVersion(ctx, resolved.Name, resolved.Version)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: "binary.pull_failed", Message: err.Error(), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, err.Error(), err)
 	}
 
 	normalized := binary.NormalizeVersion(resolvedVersion)
@@ -118,10 +110,10 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	versionExists := fcExists != nil && jlExists != nil
 
 	if versionExists && !resolved.DownloadOverride {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBinaryAlreadyExists,
-			Message: fmt.Sprintf("Firecracker v%s already exists. Use --force to re-download.", normalized),
-		}
+		return nil, errs.AlreadyExists(
+			errs.CodeBinaryAlreadyExists,
+			fmt.Sprintf("Firecracker v%s already exists. Use --force to re-download.", normalized),
+		)
 	}
 
 	noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
@@ -136,9 +128,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 
 	binaries, err := op.Services.Binary.DownloadFirecracker(ctx, resolvedVersion, arch, progressBridge)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: "binary.pull_failed", Message: fmt.Sprintf("Download failed: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, fmt.Sprintf("Download failed: %v", err), err)
 	}
 
 	for _, b := range binaries {
@@ -234,9 +224,7 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 	}
 
 	if len(binariesToRemove) == 0 {
-		return &errs.DomainError{
-			Code: "binary.not_found", Message: fmt.Sprintf("No binaries found for version %s", normalized),
-		}
+		return errs.New(errs.CodeBinaryNotFound, fmt.Sprintf("No binaries found for version %s", normalized))
 	}
 
 	// Batch-enrich with VM references (matching Python's:
@@ -255,9 +243,7 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 	for _, bin := range binariesToRemove {
 		// Python: svc.remove(binary, force=force) — returns (*BinaryItem, error)
 		if _, err := op.Services.Binary.Remove(ctx, bin, force); err != nil {
-			return &errs.DomainError{
-				Code: "binary.remove_failed", Message: fmt.Sprintf("Failed to remove %s: %v", bin.Name, err), Err: err,
-			}
+			return errs.WrapMsg(errs.CodeBinaryRemoveFailed, fmt.Sprintf("Failed to remove %s: %v", bin.Name, err), err)
 		}
 
 		op.AuditLog.LogOperation("binary.remove", map[string]interface{}{
@@ -335,16 +321,12 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryIn
 	request := inputs.NewBinaryRequest(input, op.Repos.Binary)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: "binary.default_set_failed", Message: fmt.Sprintf("Binary not found: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeBinaryDefaultSetFailed, fmt.Sprintf("Binary not found: %v", err), err)
 	}
 
 	// Match Python's: if len(resolved.binaries) > 1: raise BinaryError("Ambiguous ID to set to default")
 	if len(resolved.Binaries) > 1 {
-		return nil, &errs.DomainError{
-			Code: "binary.default_set_failed", Message: "Ambiguous ID to set to default",
-		}
+		return nil, errs.New(errs.CodeBinaryDefaultSetFailed, "Ambiguous ID to set to default")
 	}
 
 	bin := resolved.Binaries[0]
@@ -353,15 +335,11 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryIn
 	// controller = BinaryController(entity=binary, repo=repo); controller.set_default()
 	ctrl, err := binary.NewController(ctx, bin, op.Repos.Binary)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: "binary.default_set_failed", Message: fmt.Sprintf("Failed to set default: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeBinaryDefaultSetFailed, fmt.Sprintf("Failed to set default: %v", err), err)
 	}
 
 	if err := ctrl.SetDefault(ctx); err != nil {
-		return nil, &errs.DomainError{
-			Code: "binary.default_set_failed", Message: fmt.Sprintf("Failed to set default: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeBinaryDefaultSetFailed, fmt.Sprintf("Failed to set default: %v", err), err)
 	}
 
 	op.AuditLog.LogOperation("binary.set_default", map[string]interface{}{
@@ -380,9 +358,11 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryIn
 func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem, error) {
 	local, err := op.Services.Binary.ListAll(ctx, true, true)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: "binary.ensure_default_failed", Message: fmt.Sprintf("Failed to list binaries: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeBinaryEnsureDefaultFailed,
+			fmt.Sprintf("Failed to list binaries: %v", err),
+			err,
+		)
 	}
 	if len(local) == 0 {
 		return nil, nil
@@ -412,19 +392,19 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 
 	ctrl, err := binary.NewController(ctx, latest, op.Repos.Binary)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "binary.ensure_default_failed",
-			Message: fmt.Sprintf("Failed to set default binary: %v", err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeBinaryEnsureDefaultFailed,
+			fmt.Sprintf("Failed to set default binary: %v", err),
+			err,
+		)
 	}
 
 	if err := ctrl.SetDefault(ctx); err != nil {
-		return nil, &errs.DomainError{
-			Code:    "binary.ensure_default_failed",
-			Message: fmt.Sprintf("Failed to set default binary: %v", err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeBinaryEnsureDefaultFailed,
+			fmt.Sprintf("Failed to set default binary: %v", err),
+			err,
+		)
 	}
 
 	op.AuditLog.LogOperation("binary.ensure_default", map[string]interface{}{

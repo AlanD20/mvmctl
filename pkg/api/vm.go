@@ -22,7 +22,6 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
@@ -33,6 +32,7 @@ import (
 	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 )
 
 // ── Create ──
@@ -45,12 +45,12 @@ func (op *Operation) VMCreate(
 	onProgress event.OnProgressCallback,
 ) ([]*model.VM, error) {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "create VMs"); err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Message: fmt.Sprintf("Privilege check failed: %v", err),
-			Err:     err,
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodePrivilegeRequired,
+			fmt.Sprintf("Privilege check failed: %v", err),
+			err,
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 
 	count := 1
@@ -63,20 +63,13 @@ func (op *Operation) VMCreate(
 	// Pre-allocate: check name collisions (single query, matching Python)
 	existing, err := op.Repos.VM.NamesExist(ctx, names)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDatabaseError,
-			Message: fmt.Sprintf("Failed to check name collisions: %v", err),
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to check name collisions: %v", err), err)
 	}
 	if len(existing) > 0 {
-		return nil, &errs.DomainError{
-			Code:    "vm.name_collision",
-			Op:      "vm",
-			Message: fmt.Sprintf("VM name(s) already exist: %s", strings.Join(existing, ", ")),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeVMNameCollision,
+			fmt.Sprintf("VM name(s) already exist: %s", strings.Join(existing, ", ")),
+		)
 	}
 
 	// Resolve shared state ONCE before the loop (matches Python's VMCreateRequest.resolve())
@@ -251,25 +244,18 @@ func (op *Operation) VMCreate(
 		for _, vm := range createdVMs {
 			_ = op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: true})
 		}
-		return nil, &errs.DomainError{
-			Code: "vm.atomic_failed",
-			Op:   "vm",
-			Message: fmt.Sprintf(
+		return nil, errs.New(
+			errs.CodeVMAtomicFailed,
+			fmt.Sprintf(
 				"Atomic creation failed: %s. All %d created VMs have been removed.",
 				strings.Join(createErrors, "; "),
 				len(createdVMs),
 			),
-			Class: errs.ClassInternal,
-		}
+		)
 	}
 
 	if len(createErrors) > 0 && len(createdVMs) == 0 {
-		return nil, &errs.DomainError{
-			Code:    "vm.create_failure",
-			Op:      "vm",
-			Message: strings.Join(createErrors, "; "),
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.New(errs.CodeVMCreateFailure, strings.Join(createErrors, "; "))
 	}
 
 	return createdVMs, nil
@@ -839,22 +825,17 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 // Matches Python's VMOperation.prune() exactly.
 func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "prune VMs"); err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Message: fmt.Sprintf("Privilege check failed: %v", err),
-			Err:     err,
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodePrivilegeRequired,
+			fmt.Sprintf("Privilege check failed: %v", err),
+			err,
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 
 	allVMs, err := op.Repos.VM.ListAll(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeDatabaseError,
-			Message: fmt.Sprintf("Failed to list VMs: %v", err),
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list VMs: %v", err), err)
 	}
 
 	var removed []string
@@ -1304,32 +1285,23 @@ func (op *Operation) VMSnapshot(
 	vmResolver := vm.NewResolver(op.Repos.VM)
 	vmItem, err := vmResolver.Resolve(ctx, input.Identifiers[0])
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Op:      "vm",
-			Message: fmt.Sprintf("VM not found: %s", input.Identifiers[0]),
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVMNotFound, fmt.Sprintf("VM not found: %s", input.Identifiers[0]))
 	}
 
 	controller, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM)
 	if ctrlErr != nil {
-		return &errs.DomainError{
-			Code:    "vm.snapshot_failed",
-			Op:      "vm",
-			Message: fmt.Sprintf("Failed to snapshot VM '%s': %v", vmItem.Name, ctrlErr),
-			Err:     ctrlErr,
-			Class:   errs.ClassInternal,
-		}
+		return errs.WrapMsg(
+			errs.CodeVMSnapshotFailed,
+			fmt.Sprintf("Failed to snapshot VM '%s': %v", vmItem.Name, ctrlErr),
+			ctrlErr,
+		)
 	}
 	if err := controller.Snapshot(ctx, memFile, stateFile); err != nil {
-		return &errs.DomainError{
-			Code:    "vm.snapshot_failed",
-			Op:      "vm",
-			Message: fmt.Sprintf("Failed to snapshot VM '%s': %v", vmItem.Name, err),
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return errs.WrapMsg(
+			errs.CodeVMSnapshotFailed,
+			fmt.Sprintf("Failed to snapshot VM '%s': %v", vmItem.Name, err),
+			err,
+		)
 	}
 
 	op.AuditLog.LogOperation("vm.snapshot", nil, fmt.Sprintf("name=%s", vmItem.Name))
@@ -1353,12 +1325,7 @@ func (op *Operation) VMLoad(
 
 	// Validate only one VM for load (matches Python's exactly one VM identifier check)
 	if len(input.Identifiers) != 1 {
-		return &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Op:      "vm",
-			Message: "Expected exactly one VM identifier",
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVMNotFound, "Expected exactly one VM identifier")
 	}
 
 	var missing []string
@@ -1374,23 +1341,21 @@ func (op *Operation) VMLoad(
 	}
 	if len(missing) > 0 {
 		paths := strings.Join(missing, ", ")
-		return &errs.DomainError{
-			Code:    "vm.load_snapshot_failed",
-			Op:      "vm",
-			Message: fmt.Sprintf("Snapshot file(s) not found: %s", paths),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeVMLoadSnapshotFailed,
+			fmt.Sprintf("Snapshot file(s) not found: %s", paths),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	vmResolver := vm.NewResolver(op.Repos.VM)
 	vmItem, err := vmResolver.Resolve(ctx, input.Identifiers[0])
 	if err != nil {
-		return &errs.DomainError{
-			Code:    "vm.load_snapshot_failed",
-			Op:      "vm",
-			Message: fmt.Sprintf("VM not found: %s", input.Identifiers[0]),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeVMLoadSnapshotFailed,
+			fmt.Sprintf("VM not found: %s", input.Identifiers[0]),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// If the VM is stopped, spawn a fresh Firecracker in pre-boot (snapshot) mode
@@ -1399,13 +1364,11 @@ func (op *Operation) VMLoad(
 	//         repo = Repository(Database()); updated = repo.get(vm.id); if updated: vm = updated
 	if vmItem.Status == model.VMStatusStopped {
 		if err := op.vmRespawnFirecracker(ctx, vmItem, true); err != nil {
-			return &errs.DomainError{
-				Code:    "vm.load_snapshot_failed",
-				Op:      "vm",
-				Message: fmt.Sprintf("Failed to respawn Firecracker for snapshot load: %v", err),
-				Err:     err,
-				Class:   errs.ClassInternal,
-			}
+			return errs.WrapMsg(
+				errs.CodeVMLoadSnapshotFailed,
+				fmt.Sprintf("Failed to respawn Firecracker for snapshot load: %v", err),
+				err,
+			)
 		}
 		// Python re-reads the updated vm from DB after respawn:
 		updated, getErr := repo.Get(ctx, vmItem.ID)
@@ -1416,22 +1379,18 @@ func (op *Operation) VMLoad(
 
 	controller, ctrlErr := vm.NewController(ctx, vmItem, repo)
 	if ctrlErr != nil {
-		return &errs.DomainError{
-			Code:    "vm.load_snapshot_failed",
-			Op:      "vm",
-			Message: fmt.Sprintf("Failed to load snapshot for VM '%s': %v", vmItem.Name, ctrlErr),
-			Err:     ctrlErr,
-			Class:   errs.ClassInternal,
-		}
+		return errs.WrapMsg(
+			errs.CodeVMLoadSnapshotFailed,
+			fmt.Sprintf("Failed to load snapshot for VM '%s': %v", vmItem.Name, ctrlErr),
+			ctrlErr,
+		)
 	}
 	if err := controller.LoadSnapshot(ctx, memFile, stateFile, resume); err != nil {
-		return &errs.DomainError{
-			Code:    "vm.load_snapshot_failed",
-			Op:      "vm",
-			Message: fmt.Sprintf("Failed to load snapshot for VM '%s': %v", vmItem.Name, err),
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return errs.WrapMsg(
+			errs.CodeVMLoadSnapshotFailed,
+			fmt.Sprintf("Failed to load snapshot for VM '%s': %v", vmItem.Name, err),
+			err,
+		)
 	}
 
 	op.AuditLog.LogOperation("vm.load", nil, fmt.Sprintf("name=%s", vmItem.Name))
@@ -1638,12 +1597,12 @@ func (op *Operation) VMAttachVolume(
 	volumeName string,
 ) error {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "attach volume"); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Message: fmt.Sprintf("Privilege check failed: %v", err),
-			Err:     err,
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return errs.WrapMsg(
+			errs.CodePrivilegeRequired,
+			fmt.Sprintf("Privilege check failed: %v", err),
+			err,
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 
 	// Resolve VM using VMRequest pipeline (matches Python: VMRequest(inputs=vm_inputs, db=db).resolve())
@@ -1658,18 +1617,10 @@ func (op *Operation) VMAttachVolume(
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Message: fmt.Sprintf("VM not found: %v", resolveErr),
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVMNotFound, fmt.Sprintf("VM not found: %v", resolveErr))
 	}
 	if len(resolved.VMs) != 1 {
-		return &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Message: "Expected exactly one VM identifier",
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVMNotFound, "Expected exactly one VM identifier")
 	}
 	vmItem := resolved.VMs[0]
 
@@ -1677,20 +1628,16 @@ func (op *Operation) VMAttachVolume(
 	volResolver := volume.NewResolver(op.Repos.Volume)
 	vol, err := volResolver.Resolve(ctx, volumeName)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Message: fmt.Sprintf("Volume '%s' not found", volumeName),
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume '%s' not found", volumeName))
 	}
 
 	// Check volume status (matches Python: if vol.status != VolumeStatus.AVAILABLE: raise VMCreateError(...))
 	if vol.Status != model.VolumeStatusAvailable {
-		return &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Message: fmt.Sprintf("Volume '%s' is not available", volumeName),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf("Volume '%s' is not available", volumeName),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// Hotplug on running VM (matches Python: if vm.status == VMStatus.RUNNING)
@@ -1700,14 +1647,13 @@ func (op *Operation) VMAttachVolume(
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
 			if bin != nil && bin.Version != "" {
 				if !version.IsAtLeastFor(bin.Version, version.FeatureHotplug) {
-					return &errs.DomainError{
-						Code: errs.CodeBinaryVersionGate,
-						Message: fmt.Sprintf(
+					return errs.New(
+						errs.CodeBinaryVersionGate,
+						fmt.Sprintf(
 							"Volume hotplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or attach the volume while the VM is stopped.",
 							bin.Version,
 						),
-						Class: errs.ClassValidation,
-					}
+					)
 				}
 			}
 		}
@@ -1770,12 +1716,12 @@ func (op *Operation) VMDetachVolume(
 	volumeName string,
 ) error {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "detach volume"); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Message: fmt.Sprintf("Privilege check failed: %v", err),
-			Err:     err,
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return errs.WrapMsg(
+			errs.CodePrivilegeRequired,
+			fmt.Sprintf("Privilege check failed: %v", err),
+			err,
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 
 	// Resolve VM using VMRequest pipeline (matches Python: VMRequest(inputs=vm_inputs, db=db).resolve())
@@ -1790,18 +1736,10 @@ func (op *Operation) VMDetachVolume(
 	)
 	resolved, resolveErr := vmRequest.Resolve(ctx)
 	if resolveErr != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Message: fmt.Sprintf("VM not found: %v", resolveErr),
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVMNotFound, fmt.Sprintf("VM not found: %v", resolveErr))
 	}
 	if len(resolved.VMs) != 1 {
-		return &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Message: "Expected exactly one VM identifier",
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVMNotFound, "Expected exactly one VM identifier")
 	}
 	vmItem := resolved.VMs[0]
 
@@ -1809,11 +1747,7 @@ func (op *Operation) VMDetachVolume(
 	volResolver := volume.NewResolver(op.Repos.Volume)
 	vol, err := volResolver.Resolve(ctx, volumeName)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Message: fmt.Sprintf("Volume '%s' not found", volumeName),
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume '%s' not found", volumeName))
 	}
 
 	// Hot-unplug if running (matches Python: if vm.status == VMStatus.RUNNING)
@@ -1823,14 +1757,13 @@ func (op *Operation) VMDetachVolume(
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
 			if bin != nil && bin.Version != "" {
 				if !version.IsAtLeastFor(bin.Version, version.FeatureHotUnplug) {
-					return &errs.DomainError{
-						Code: errs.CodeBinaryVersionGate,
-						Message: fmt.Sprintf(
+					return errs.New(
+						errs.CodeBinaryVersionGate,
+						fmt.Sprintf(
 							"Volume hot-unplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or detach the volume while the VM is stopped.",
 							bin.Version,
 						),
-						Class: errs.ClassValidation,
-					}
+					)
 				}
 			}
 		}
@@ -1879,12 +1812,12 @@ func (op *Operation) VMImport(
 	onProgress event.OnProgressCallback,
 ) error {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "import VM"); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Message: fmt.Sprintf("Privilege check failed: %v", err),
-			Err:     err,
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return errs.WrapMsg(
+			errs.CodePrivilegeRequired,
+			fmt.Sprintf("Privilege check failed: %v", err),
+			err,
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 
 	// Python wraps the resolve+create in a try/except that catches MVMError and Exception.
@@ -1919,13 +1852,7 @@ func (op *Operation) VMImport(
 	}
 
 	if execErr != nil {
-		return &errs.DomainError{
-			Code:    "vm.import_failed",
-			Op:      "vm",
-			Message: execErr.Error(),
-			Err:     execErr,
-			Class:   errs.ClassInternal,
-		}
+		return errs.WrapMsg(errs.CodeVMImportFailed, execErr.Error(), execErr)
 	}
 
 	op.AuditLog.LogOperation("vm.import", nil, fmt.Sprintf("name=%s,config=%s", resolved.Name, input.ConfigPath))

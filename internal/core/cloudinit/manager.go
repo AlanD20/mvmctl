@@ -13,8 +13,8 @@ import (
 
 	"mvmctl/internal/assets"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
@@ -110,7 +110,7 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 	// Validate required files exist (network-config is optional for NO_CLOUD_NET mode)
 	for _, name := range []string{"meta-data", "user-data"} {
 		if _, err := os.Stat(filepath.Join(cloudInitDir, name)); os.IsNotExist(err) {
-			return ErrCloudInitFailed(
+			return errs.New(errs.CodeCloudInitProvisionFailed,
 				fmt.Sprintf("Missing required cloud-init file: %s", name),
 			)
 		}
@@ -135,7 +135,10 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 	}
 
 	stderr := strings.TrimSpace(result.Stderr)
-	return ErrCloudInitFailed(fmt.Sprintf("cloud-localds failed (exit %d): %s", result.ExitCode, stderr))
+	return errs.New(
+		errs.CodeCloudInitProvisionFailed,
+		fmt.Sprintf("cloud-localds failed (exit %d): %s", result.ExitCode, stderr),
+	)
 }
 
 // parseCustomCloudInitConfig processes a custom cloud-init config provided to the API.
@@ -148,9 +151,9 @@ func (m *Manager) parseCustomCloudInitConfig() error {
 	// Resolve and validate path — prevent path traversal
 	configPath := filepath.Clean(*m.config.CustomCloudInitConfig)
 	if strings.Contains(configPath, "..") {
-		return errs.ValidationFailed(
-			errs.CodeCloudInitProvisionFailed,
+		return errs.New(errs.CodeCloudInitProvisionFailed,
 			fmt.Sprintf("cloud-init config path must not contain '..': %s", configPath),
+			errs.WithClass(errs.ClassValidation),
 		)
 	}
 
@@ -182,12 +185,12 @@ func (m *Manager) parseCustomCloudInitConfig() error {
 		if runeCount > 80 {
 			preview = string([]rune(preview)[:80])
 		}
-		return errs.ValidationFailed(
-			errs.CodeCloudInitProvisionFailed,
+		return errs.New(errs.CodeCloudInitProvisionFailed,
 			fmt.Sprintf(
 				"custom cloud-init config must start with '#cloud-config' (YAML), '#!' (shell script), or 'Content-Type:' (MIME multipart). Got: %q",
 				preview,
 			),
+			errs.WithClass(errs.ClassValidation),
 		)
 	}
 
@@ -201,9 +204,9 @@ func (m *Manager) parseCustomCloudInitConfig() error {
 	}
 	customUserdata, ok := raw.(map[string]any)
 	if !ok {
-		return errs.ValidationFailed(
-			errs.CodeCloudInitProvisionFailed,
+		return errs.New(errs.CodeCloudInitProvisionFailed,
 			"cloud-init config must parse to a YAML mapping/object",
+			errs.WithClass(errs.ClassValidation),
 		)
 	}
 
@@ -337,37 +340,22 @@ func (m *Manager) mergeSSHKeys(customUserdata map[string]any) error {
 func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
 	templateBytes, err := assets.ReadFile("cloud-init.template.yaml")
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeCloudInitProvisionFailed,
-			Op:      "cloudinit",
-			Message: "read cloud-init template",
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.WrapMsg(errs.CodeCloudInitProvisionFailed,
+			"read cloud-init template", err)
 	}
 
 	tmpl, err := template.New("cloud-init").Parse(string(templateBytes))
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeCloudInitProvisionFailed,
-			Op:      "cloudinit",
-			Message: "parse cloud-init template",
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.WrapMsg(errs.CodeCloudInitProvisionFailed,
+			"parse cloud-init template", err)
 	}
 
 	// Generate password hash from resolved UserPassword
 	// bcrypt cost 10 matches Python's passlib default.
 	hashBytes, hashErr := bcrypt.GenerateFromPassword([]byte(m.config.UserPassword), bcrypt.DefaultCost)
 	if hashErr != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeCloudInitProvisionFailed,
-			Op:      "cloudinit",
-			Message: "generate password hash",
-			Err:     hashErr,
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.WrapMsg(errs.CodeCloudInitProvisionFailed,
+			"generate password hash", hashErr)
 	}
 	passwordHash := string(hashBytes)
 
@@ -383,9 +371,9 @@ func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
 
 	// Validate all required fields are non-empty
 	if err := validateTemplateData(data); err != nil {
-		return nil, errs.ValidationFailed(
-			errs.CodeCloudInitProvisionFailed,
+		return nil, errs.New(errs.CodeCloudInitProvisionFailed,
 			err.Error(),
+			errs.WithClass(errs.ClassValidation),
 		)
 	}
 
@@ -395,13 +383,8 @@ func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
 	for _, name := range sectionNames {
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeCloudInitProvisionFailed,
-				Op:      "cloudinit",
-				Message: fmt.Sprintf("render section %q", name),
-				Err:     err,
-				Class:   errs.ClassInternal,
-			}
+			return nil, errs.WrapMsg(errs.CodeCloudInitProvisionFailed,
+				fmt.Sprintf("render section %q", name), err)
 		}
 		result[name] = buf.String()
 	}

@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	infraptr "mvmctl/internal/infra/ptr"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"

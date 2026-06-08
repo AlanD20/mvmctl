@@ -8,11 +8,11 @@ import (
 	"log/slog"
 	"strings"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 )
 
 // copyError converts a CPService error to a DomainError.
@@ -51,15 +51,13 @@ func (op *Operation) CPCopy(
 	if resolved.Direction == "host_to_vm" && resolved.DstInfo != nil {
 		dstPath := resolved.DstInfo.RemotePath
 		if dstPath != "" && !strings.HasSuffix(dstPath, "/") {
-			return nil, &errs.DomainError{
-				Code: errs.CodeCPDestinationNotDir,
-				Op:   "cp",
-				Message: fmt.Sprintf(
+			return nil, errs.New(
+				errs.CodeCPDestinationNotDir,
+				fmt.Sprintf(
 					"Destination path must be a directory (end with /). Got: '%s'. Use 'vm_name:/dest/dir/' to copy into a directory.",
 					dstPath,
 				),
-				Class: errs.ClassValidation,
-			}
+			)
 		}
 	}
 
@@ -80,12 +78,7 @@ func (op *Operation) CPCopy(
 	switch resolved.Direction {
 	case "host_to_vm":
 		if resolved.DstInfo == nil || resolved.LocalPaths == nil {
-			return nil, op.copyError(&errs.DomainError{
-				Code:    errs.CodeCPError,
-				Op:      "cp",
-				Message: "Internal error: destination VM info not available",
-				Class:   errs.ClassInternal,
-			})
+			return nil, op.copyError(errs.New(errs.CodeCPError, "Internal error: destination VM info not available"))
 		}
 
 		dstKeyPath := ""
@@ -114,12 +107,7 @@ func (op *Operation) CPCopy(
 
 	case "vm_to_host":
 		if resolved.SrcInfo == nil || resolved.LocalPaths == nil {
-			return nil, op.copyError(&errs.DomainError{
-				Code:    errs.CodeCPError,
-				Op:      "cp",
-				Message: "Internal error: source VM info not available",
-				Class:   errs.ClassInternal,
-			})
+			return nil, op.copyError(errs.New(errs.CodeCPError, "Internal error: source VM info not available"))
 		}
 
 		srcKeyPath := ""
@@ -148,12 +136,9 @@ func (op *Operation) CPCopy(
 
 	case "vm_to_vm":
 		if resolved.SrcInfo == nil || resolved.DstInfo == nil {
-			return nil, op.copyError(&errs.DomainError{
-				Code:    errs.CodeCPError,
-				Op:      "cp",
-				Message: "Internal error: source or destination VM info not available",
-				Class:   errs.ClassInternal,
-			})
+			return nil, op.copyError(
+				errs.New(errs.CodeCPError, "Internal error: source or destination VM info not available"),
+			)
 		}
 
 		srcKeyPath := ""
@@ -189,12 +174,7 @@ func (op *Operation) CPCopy(
 		}
 
 	default:
-		return nil, &errs.DomainError{
-			Code:    "cp.failed",
-			Op:      "cp",
-			Message: fmt.Sprintf("Unknown copy direction: %s", resolved.Direction),
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.New(errs.CodeCPError, fmt.Sprintf("Unknown copy direction: %s", resolved.Direction))
 	}
 
 	return &responses.CPCopyResult{

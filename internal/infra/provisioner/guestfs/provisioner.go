@@ -13,6 +13,7 @@ import (
 	"mvmctl/internal/infra/disk"
 	"mvmctl/internal/infra/provcontent"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 var pc = provcontent.Builder{}
@@ -295,7 +296,10 @@ func buildFileOps(tmpDir string) []string {
 func detectRootDevice(ctx context.Context, rootfsPath string) (string, error) {
 	out, err := guestfishRun(ctx, rootfsPath, true, "", "list-filesystems")
 	if err != nil {
-		return "", &GuestfsError{msg: fmt.Sprintf("Failed to list filesystems for root device detection: %v", err)}
+		return "", errs.New(
+			errs.CodeGuestfsError,
+			fmt.Sprintf("Failed to list filesystems for root device detection: %v", err),
+		)
 	}
 
 	type fsEntry struct {
@@ -330,7 +334,7 @@ func detectRootDevice(ctx context.Context, rootfsPath string) (string, error) {
 		return e.device, nil
 	}
 
-	return "", &GuestfsError{msg: fmt.Sprintf("No filesystem found in %s", rootfsPath)}
+	return "", errs.New(errs.CodeGuestfsError, fmt.Sprintf("No filesystem found in %s", rootfsPath))
 }
 
 // ConvertTo converts a disk image's filesystem to targetFs using guestfish

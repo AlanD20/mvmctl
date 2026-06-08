@@ -9,9 +9,9 @@ import (
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 
 	"github.com/spf13/cobra"
 )

@@ -16,11 +16,11 @@ import (
 	"mvmctl/internal/infra/archive"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
+	"mvmctl/pkg/errs"
 )
 
 // safeTagChars matches characters unsafe for filenames in mirror tags.
