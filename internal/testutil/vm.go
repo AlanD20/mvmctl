@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // In-memory VM repository for testing.

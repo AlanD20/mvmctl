@@ -3,7 +3,7 @@ package responses
 import (
 	"maps"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // HostOSInfo groups OS-level host information.

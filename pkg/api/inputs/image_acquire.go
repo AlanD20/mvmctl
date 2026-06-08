@@ -8,8 +8,8 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/disk"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/disk"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
 

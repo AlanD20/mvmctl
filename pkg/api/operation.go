@@ -21,12 +21,12 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/db"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/firewall"
-	"mvmctl/internal/infra/logging"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/provisioner"
+	"mvmctl/internal/lib/db"
+	"mvmctl/internal/lib/firewall"
+	"mvmctl/internal/lib/logging"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/provisioner"
 	"mvmctl/pkg/errs"
 )
 

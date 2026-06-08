@@ -109,3 +109,4 @@ docs/analyses/
 .full-review/
 MagicMock/
 .prompts/
+/coverage.out

@@ -8,7 +8,7 @@ import (
 	"os/exec"
 
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
 )

@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"mvmctl/internal/core/network"
-	infranet "mvmctl/internal/infra/network"
-	"mvmctl/internal/infra/validators"
+	libnet "mvmctl/internal/lib/network"
+	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
@@ -88,7 +88,7 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 	if r.input.IPv4Gateway != nil {
 		ipv4Gateway = *r.input.IPv4Gateway
 	} else {
-		gw, err := infranet.ComputeIPv4Gateway(r.input.Subnet)
+		gw, err := libnet.ComputeIPv4Gateway(r.input.Subnet)
 		if err != nil {
 			return nil, errs.New(errs.CodeNetworkNotFound, "Failed to compute gateway: "+err.Error())
 		}
@@ -101,7 +101,7 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 	// Auto-detect NAT gateways when enabled but none specified
 	natGateways := r.input.NATGateways
 	if len(natGateways) == 0 && natEnabled {
-		outbound := infranet.DetectOutboundInterface(ctx)
+		outbound := libnet.DetectOutboundInterface(ctx)
 		if outbound != "" {
 			natGateways = []string{outbound}
 		} else {

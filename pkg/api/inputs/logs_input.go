@@ -6,7 +6,7 @@ import (
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"

@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"mvmctl/internal/infra/download"
+	"mvmctl/internal/lib/download"
 	"mvmctl/pkg/errs"
 )
 

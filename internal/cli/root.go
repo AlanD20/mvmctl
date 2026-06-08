@@ -8,10 +8,10 @@ import (
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/db"
-	"mvmctl/internal/infra/logging"
-	"mvmctl/internal/infra/system"
-	infraversion "mvmctl/internal/infra/version"
+	"mvmctl/internal/lib/db"
+	"mvmctl/internal/lib/logging"
+	"mvmctl/internal/lib/system"
+	libversion "mvmctl/internal/lib/version"
 	"mvmctl/pkg/api"
 
 	"github.com/spf13/cobra"
@@ -57,7 +57,7 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 			fmt.Printf(
 				"%s %s\n",
 				infra.CLIName,
-				infraversion.FormatVersion(c.Context(), infraversion.GetVersion(c.Context())),
+				libversion.FormatVersion(c.Context(), libversion.GetVersion(c.Context())),
 			)
 			return nil
 		}
@@ -204,8 +204,8 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Show the version and exit",
 		RunE: func(c *cobra.Command, args []string) error {
-			fullVersion := infraversion.FormatVersion(c.Context(), infraversion.GetVersion(c.Context()))
-			gitInfo := infraversion.GetGitVersionInfo(c.Context())
+			fullVersion := libversion.FormatVersion(c.Context(), libversion.GetVersion(c.Context()))
+			gitInfo := libversion.GetGitVersionInfo(c.Context())
 
 			fmt.Printf("%s %s\n", infra.CLIName, fullVersion)
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -316,4 +317,61 @@ func CopyPreservingMetadata(src, dst string) error {
 		_ = os.Chmod(dst, srcInfo.Mode().Perm())
 	}
 	return nil
+}
+
+// SafeMove moves a file with cross-filesystem fallback (os.Rename + copy+delete).
+func SafeMove(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+	if err := CopyFile(src, dst); err != nil {
+		return err
+	}
+	return os.Remove(src)
+}
+
+// CopyFile copies a file from src to dst.
+func CopyFile(src, dst string) error {
+	s, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open source %s: %w", src, err)
+	}
+	defer s.Close()
+
+	d, err := os.Create(dst)
+	if err != nil {
+		return fmt.Errorf("create destination %s: %w", dst, err)
+	}
+	defer d.Close()
+
+	if _, err := io.Copy(d, s); err != nil {
+		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
+	}
+	return d.Sync()
+}
+
+// IsSubDir checks whether path is under parent using proper path hierarchy comparison.
+// Uses filepath.Rel() to avoid false positives with string prefix matching
+// (e.g., "/home/user1" incorrectly matching "/home/user").
+// Returns true when path == parent (exact match counts as "under").
+func IsSubDir(path, parent string) bool {
+	rel, err := filepath.Rel(parent, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".."
+}
+
+// FindFreePort finds a free TCP port in [start, end] by probing.
+// Returns 0 and an error if no port is available in the range.
+func FindFreePort(host string, start, end int) (int, error) {
+	for port := start; port <= end; port++ {
+		addr := fmt.Sprintf("%s:%d", host, port)
+		ln, err := net.Listen("tcp", addr)
+		if err == nil {
+			ln.Close()
+			return port, nil
+		}
+	}
+	return 0, fmt.Errorf("no free port in range %d-%d", start, end)
 }

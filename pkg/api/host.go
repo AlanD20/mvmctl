@@ -15,12 +15,12 @@ import (
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/firewall"
-	"mvmctl/internal/infra/model"
-	infranet "mvmctl/internal/infra/network"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/firewall"
+	"mvmctl/internal/lib/model"
+	libnet "mvmctl/internal/lib/network"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
 	"mvmctl/pkg/errs"
@@ -109,7 +109,7 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 	// --- iptables comment module check ---
 	xtcommentAvail := true
 	if fwBackend == "iptables" {
-		if !infranet.CheckIPTablesCommentAvailable(ctx) {
+		if !libnet.CheckIPTablesCommentAvailable(ctx) {
 			slog.Info("iptables comment module (xt_comment) not available; rule comments will be skipped")
 			_ = op.Services.Config.Set(ctx, "settings.firewall", "iptables_xtcomment", false)
 			xtcommentAvail = false
@@ -489,7 +489,7 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 	var summary []string
 
 	// Remove TAP devices
-	tapNames := infranet.GetTunTapDevices(ctx)
+	tapNames := libnet.GetTunTapDevices(ctx)
 	var fallbackTaps []string
 	for _, tap := range tapNames {
 		if strings.HasPrefix(tap, fmt.Sprintf("%s-", infra.CLIName)) {
@@ -528,7 +528,7 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 
 	defaultNetNameStr, _ := op.Services.Config.GetString(ctx, "defaults.network", "name")
 	defaultBridge := fmt.Sprintf("%s-%s", infra.CLIName, system.TruncateString(defaultNetNameStr, 10))
-	if infranet.BridgeExists(ctx, defaultBridge) {
+	if libnet.BridgeExists(ctx, defaultBridge) {
 		if err := op.Services.Network.RemoveRawBridge(ctx, defaultBridge); err != nil {
 			summary = append(
 				summary,
@@ -539,7 +539,7 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 		}
 	}
 
-	for _, bridge := range infranet.GetBridges(ctx) {
+	for _, bridge := range libnet.GetBridges(ctx) {
 		if !strings.HasPrefix(bridge, fmt.Sprintf("%s-", infra.CLIName)) {
 			continue
 		}
@@ -554,7 +554,7 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 	}
 
 	// Remove default network from database (matching Python)
-	defaultNet := infranet.FindNetworkByName(networks, defaultNetNameStr)
+	defaultNet := libnet.FindNetworkByName(networks, defaultNetNameStr)
 	if defaultNet != nil {
 		removeErr := op.NetworkRemove(ctx, inputs.NetworkInput{Identifiers: []string{defaultNetNameStr}}, true)
 		if removeErr != nil {

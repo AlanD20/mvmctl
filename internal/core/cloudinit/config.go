@@ -3,7 +3,7 @@ package cloudinit
 import (
 	"time"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // Config holds all cloud-init provisioning parameters.

@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"mvmctl/internal/core/network"
-	"mvmctl/internal/infra/model"
-	infranet "mvmctl/internal/infra/network"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/model"
+	libnet "mvmctl/internal/lib/network"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
 	"mvmctl/pkg/errs"
@@ -90,7 +90,7 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 	}
 
 	// Update bridge_active
-	bridgeActive := infranet.BridgeExists(ctx, resolved.Bridge)
+	bridgeActive := libnet.BridgeExists(ctx, resolved.Bridge)
 	_ = op.Repos.Network.UpdateBridgeActive(ctx, networkID, bridgeActive)
 
 	// Re-fetch
@@ -217,7 +217,7 @@ func (op *Operation) NetworkInspect(
 
 	net := resolved.Networks[0]
 
-	bridgeActive := infranet.BridgeExists(ctx, net.Bridge)
+	bridgeActive := libnet.BridgeExists(ctx, net.Bridge)
 	if bridgeActive != net.BridgeActive {
 		_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 		net.BridgeActive = bridgeActive
@@ -330,7 +330,7 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 	syncErr := func() error {
 		// Step 1: Restore missing bridges (post-reboot recovery)
 		for _, net := range networks {
-			if !infranet.BridgeExists(ctx, net.Bridge) {
+			if !libnet.BridgeExists(ctx, net.Bridge) {
 				bridgeAddr, calcErr := network.ComputeBridgeAddress(net.IPv4Gateway, net.Subnet)
 				if calcErr != nil {
 					return fmt.Errorf("compute bridge address: %w", calcErr)
@@ -354,7 +354,7 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 
 		// Step 2: Reconcile bridge state (DB vs kernel)
 		for _, net := range networks {
-			bridgeActive := infranet.BridgeExists(ctx, net.Bridge)
+			bridgeActive := libnet.BridgeExists(ctx, net.Bridge)
 			if bridgeActive != net.BridgeActive {
 				_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 			}
@@ -460,7 +460,7 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Ne
 	// Check existing
 	internalNetwork, _ := op.Repos.Network.GetByName(ctx, defaultName)
 	if internalNetwork == nil {
-		outboundIf := infranet.DetectOutboundInterface(ctx)
+		outboundIf := libnet.DetectOutboundInterface(ctx)
 		var natGateways []string
 		if outboundIf != "" {
 			natGateways = []string{outboundIf}
@@ -518,7 +518,7 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Ne
 		)
 	}
 
-	bridgeActive := infranet.BridgeExists(ctx, defaultNetwork.Bridge)
+	bridgeActive := libnet.BridgeExists(ctx, defaultNetwork.Bridge)
 	_ = op.Repos.Network.UpdateBridgeActive(ctx, defaultNetwork.ID, bridgeActive)
 
 	return defaultNetwork, nil

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // Controller matches Python's Controller.

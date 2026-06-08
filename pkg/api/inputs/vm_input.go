@@ -7,8 +7,8 @@ import (
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/enricher"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/validators"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"

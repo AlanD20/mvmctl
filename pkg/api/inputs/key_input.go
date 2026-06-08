@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/key"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"mvmctl/internal/infra/validators"
+	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
 

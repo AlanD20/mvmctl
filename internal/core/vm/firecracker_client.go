@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
 

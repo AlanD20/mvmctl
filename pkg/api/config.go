@@ -6,7 +6,7 @@ import (
 	"context"
 	"fmt"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
 )

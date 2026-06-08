@@ -5,7 +5,7 @@ import (
 	"sort"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api"
 
 	"github.com/spf13/cobra"

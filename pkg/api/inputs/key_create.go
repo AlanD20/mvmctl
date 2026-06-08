@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/system"
-	"mvmctl/internal/infra/validators"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
 

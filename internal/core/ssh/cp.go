@@ -13,7 +13,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
 

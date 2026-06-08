@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"mvmctl/internal/core/image"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"

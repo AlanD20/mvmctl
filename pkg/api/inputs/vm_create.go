@@ -21,9 +21,9 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/disk"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/validators"
+	"mvmctl/internal/lib/disk"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
 

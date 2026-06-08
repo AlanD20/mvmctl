@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/system"
 )
 
 // Service is a stateful SSH connection service.

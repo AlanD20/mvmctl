@@ -3,7 +3,7 @@ package network
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // Repository — database operations for networks.

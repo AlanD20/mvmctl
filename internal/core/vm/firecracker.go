@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
 

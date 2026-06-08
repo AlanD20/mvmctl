@@ -20,7 +20,7 @@ import (
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
 

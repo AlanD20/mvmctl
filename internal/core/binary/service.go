@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/archive"
-	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/system"
-	"mvmctl/internal/infra/version"
+	"mvmctl/internal/lib/archive"
+	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/download"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
 )
 

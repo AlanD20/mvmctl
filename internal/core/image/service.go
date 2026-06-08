@@ -20,13 +20,13 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/disk"
-	"mvmctl/internal/infra/download"
-	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/pool"
-	"mvmctl/internal/infra/provisioner"
-	"mvmctl/internal/infra/system"
-	"mvmctl/internal/infra/version"
+	"mvmctl/internal/lib/disk"
+	"mvmctl/internal/lib/download"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/provisioner"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
 )
 

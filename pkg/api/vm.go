@@ -21,14 +21,13 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/model"
-	infranet "mvmctl/internal/infra/network"
-	"mvmctl/internal/infra/provisioner"
-	infraslice "mvmctl/internal/infra/slice"
-	"mvmctl/internal/infra/system"
-	"mvmctl/internal/infra/version"
+	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/model"
+	libnet "mvmctl/internal/lib/network"
+	"mvmctl/internal/lib/provisioner"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/version"
 	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
@@ -373,9 +372,9 @@ func (op *Operation) vmBuilderExecute(
 	if resolved.RequestedGuestMAC != nil {
 		builder.guestMAC = *resolved.RequestedGuestMAC
 	} else {
-		builder.guestMAC = infranet.VMGenerateMAC(resolved.GuestMACPrefix)
+		builder.guestMAC = libnet.VMGenerateMAC(resolved.GuestMACPrefix)
 	}
-	builder.tapName = infranet.VMGenerateTAPName(resolved.Network.Name, resolved.Name)
+	builder.tapName = libnet.VMGenerateTAPName(resolved.Network.Name, resolved.Name)
 
 	// Create VM directory
 	if err := os.MkdirAll(builder.vmDir, 0755); err != nil {
@@ -417,7 +416,7 @@ func (op *Operation) vmBuilderExecute(
 		return fmt.Errorf("ensure TAP: %w", tapErr)
 	}
 	builder.markCreated("network_tap")
-	infranet.FlushARP(ctx, resolved.Network.Bridge)
+	libnet.FlushARP(ctx, resolved.Network.Bridge)
 
 	// Progress: rootfs
 	emitProgress(builder.onProgress, "rootfs", "running", "Copying root filesystem...")
@@ -849,7 +848,7 @@ func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) 
 		if !dryRun {
 			result := op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{vm.Name}, Force: true})
 			if result.HasErrors() {
-				slog.Warn("Failed to remove VM", "name", vm.Name, "error", infraslice.JoinStringsPtrs(result))
+				slog.Warn("Failed to remove VM", "name", vm.Name, "error", infra.JoinStringsPtrs(result))
 				continue
 			}
 		}
@@ -1174,7 +1173,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 				}
 			})
 		}
-		infranet.FlushARP(ctx, v.Network.Bridge)
+		libnet.FlushARP(ctx, v.Network.Bridge)
 	}
 	logLevel, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_level")
 	fcPIDFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "pid_filename")

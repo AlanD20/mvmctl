@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"mvmctl/internal/infra/model"
-	infranet "mvmctl/internal/infra/network"
+	"mvmctl/internal/lib/model"
+	libnet "mvmctl/internal/lib/network"
 	"mvmctl/pkg/errs"
 )
 
@@ -103,7 +103,7 @@ func (s *LeaseController) Lease(ctx context.Context, vmID string) (string, error
 			usedIPs[i] = l.IPv4
 		}
 
-		allocatedIP, err := infranet.AllocateNextIP(usedIPs, s.net.Subnet, s.net.IPv4Gateway)
+		allocatedIP, err := libnet.AllocateNextIP(usedIPs, s.net.Subnet, s.net.IPv4Gateway)
 		if err != nil {
 			return "", errs.Wrap(errs.CodeNetworkLeaseExhausted, err)
 		}

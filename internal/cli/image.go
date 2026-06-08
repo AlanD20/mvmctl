@@ -12,7 +12,7 @@ import (
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"

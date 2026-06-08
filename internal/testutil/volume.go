@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // VolumeRepo is an in-memory volume repository for testing.

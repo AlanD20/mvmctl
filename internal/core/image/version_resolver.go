@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/download"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/download"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 
 	"gopkg.in/yaml.v3"

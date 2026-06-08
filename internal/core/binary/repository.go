@@ -3,7 +3,7 @@ package binary
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // Repository matches Python's Repository class methods exactly.

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/image"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // ImageRepo is an in-memory image repository for testing.

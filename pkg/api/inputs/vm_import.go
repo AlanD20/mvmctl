@@ -17,7 +17,7 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/crypto"
+	"mvmctl/internal/lib/crypto"
 	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"

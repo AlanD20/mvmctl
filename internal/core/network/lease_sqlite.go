@@ -7,8 +7,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"mvmctl/internal/infra/model"
-	infranet "mvmctl/internal/infra/network"
+	"mvmctl/internal/lib/model"
+	libnet "mvmctl/internal/lib/network"
 )
 
 type sqliteLeaseRepo struct {
@@ -119,7 +119,7 @@ func (r *sqliteLeaseRepo) CountAvailable(ctx context.Context, networkID string) 
 	if err != nil {
 		return 0, err
 	}
-	totalHosts := infranet.CountHosts(ipnet)
+	totalHosts := libnet.CountHosts(ipnet)
 	gatewayCount := 0
 	if gateway != "" {
 		gatewayCount = 1

@@ -13,7 +13,7 @@ import (
 
 	"mvmctl/internal/assets"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 
 	"golang.org/x/crypto/bcrypt"

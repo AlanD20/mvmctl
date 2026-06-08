@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"mvmctl/internal/infra/crypto"
+	"mvmctl/internal/lib/crypto"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 

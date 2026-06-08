@@ -8,8 +8,8 @@ import (
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/model"
 	infraptr "mvmctl/internal/infra/ptr"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"

@@ -12,10 +12,9 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/provisioner/guestfs"
-	infraslice "mvmctl/internal/infra/slice"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/provisioner/guestfs"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/responses"
 	"mvmctl/pkg/errs"
 )
@@ -225,16 +224,16 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 
 	miscMap, miscErr := op.CachePruneMisc(ctx, dryRun)
 	if miscErr == nil {
-		if infraslice.IsTrue(miscMap["appliance"]) {
+		if infra.IsTrue(miscMap["appliance"]) {
 			prunedIDs = append(prunedIDs, "appliance")
 		}
-		if infraslice.IsTrue(miscMap["warm_images"]) {
+		if infra.IsTrue(miscMap["warm_images"]) {
 			prunedIDs = append(prunedIDs, "warm_images")
 		}
-		if infraslice.IsTrue(miscMap["guestfs_state"]) {
+		if infra.IsTrue(miscMap["guestfs_state"]) {
 			prunedIDs = append(prunedIDs, "guestfs_state")
 		}
-		if infraslice.IsTrue(miscMap["stale_provision_mounts"]) {
+		if infra.IsTrue(miscMap["stale_provision_mounts"]) {
 			prunedIDs = append(prunedIDs, "stale_provision_mounts")
 		}
 	}

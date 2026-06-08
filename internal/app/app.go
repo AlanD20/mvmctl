@@ -10,9 +10,9 @@ import (
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/db"
-	"mvmctl/internal/infra/download"
-	infraversion "mvmctl/internal/infra/version"
+	"mvmctl/internal/lib/db"
+	"mvmctl/internal/lib/download"
+	libversion "mvmctl/internal/lib/version"
 	"mvmctl/pkg/api"
 )
 
@@ -88,7 +88,7 @@ func Initialize(ctx context.Context) (op *api.Operation, cleanup func(), err err
 	}
 
 	// Set HTTP User-Agent matching Python's HTTP_USER_AGENT = f"{CLI_NAME}/{_resolve_version()}".
-	download.SetUserAgent(infraversion.GetVersion(ctx))
+	download.SetUserAgent(libversion.GetVersion(ctx))
 
 	op = api.NewOperation(ctx, database, cacheDir)
 	config.InitSettings()

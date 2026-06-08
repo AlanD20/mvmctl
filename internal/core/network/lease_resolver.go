@@ -3,7 +3,7 @@ package network
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // LeaseResolver resolves network IP leases.

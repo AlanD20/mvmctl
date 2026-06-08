@@ -8,7 +8,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 type sqliteRepo struct {

@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // Firewall chain names as typed compile-time constants.
