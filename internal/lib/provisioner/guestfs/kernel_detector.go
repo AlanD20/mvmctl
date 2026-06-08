@@ -163,14 +163,14 @@ func (kd *KernelDetector) extractVersion(ctx context.Context, kernelPath string)
 	// Try 'file' command first
 	// Python's _extract_version: raises ProcessError on timeout,
 	// logs and returns None on other errors.
-	result := system.RunCmdCompat(ctx, []string{"file", kernelPath}, system.RunCmdOpts{
+	result, err := system.DefaultRunner.Run(ctx, []string{"file", kernelPath}, system.RunCmdOpts{
 		Capture: true,
 		Check:   false,
 		Timeout: 5000,
 	})
-	if result.Err != nil {
+	if err != nil {
 		// Check for timeout — re-raise with specific message like Python
-		if strings.Contains(result.Err.Error(), "timed out") {
+		if strings.Contains(err.Error(), "timed out") {
 			return "", fmt.Errorf("'file' command timed out for %s", kernelPath)
 		}
 		// Other errors: silently fall through to filename fallback

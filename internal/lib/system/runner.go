@@ -17,29 +17,25 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// RunCmdOpts matches Python's run_cmd() parameter set exactly.
-// Fields map to Python's: args, check, capture, cwd, timeout, input, env,
-// privileged, text.  Plus a StartOnly flag for background/spawn-and-forget.
+// RunCmdOpts configures subprocess execution.
+// Zero values use sensible defaults.
 //
+// Env is merged into the current process environment (never replaces).
 // Interactive controls sudo mode:
 //   - true  → plain "sudo" (allows password prompt via TTY forwarding)
 //   - false → "sudo -n" (non-interactive, fails immediately if password required)
 //
 // Default is false (non-interactive), suitable for automated operations.
 type RunCmdOpts struct {
-	Cmd         string
-	Args        []string
-	Check       bool
-	Capture     bool
-	Cwd         string
-	Timeout     time.Duration
-	Input       string
-	Env         map[string]string
-	AppendEnv   map[string]string // merged into current env, not replacing
-	Privileged  bool
-	Interactive bool
-	Text        bool
-	StartOnly   bool
+	Check       bool              // return error on non-zero exit
+	Capture     bool              // capture stdout/stderr
+	Cwd         string            // working directory
+	Timeout     time.Duration     // execution timeout
+	Input       string            // stdin content
+	Env         map[string]string // merged into process environment (append, never replace)
+	Privileged  bool              // run via sudo if not root
+	Interactive bool              // allow sudo password prompt
+	StartOnly   bool              // spawn and forget (no wait)
 }
 
 // DefaultGracefulTimeout is the default timeout for graceful SIGTERM shutdown.
@@ -297,38 +293,8 @@ func HasAncestorWithCmdline(pid int, substr ...string) bool {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// CommandRunner interface and RealRunner implementation
+// Subprocess execution
 // ────────────────────────────────────────────────────────────────────
-
-// CommandRunner is the interface for executing subprocesses.
-// Enables mocking in tests via testutil.FakeRunner.
-type CommandRunner interface {
-	Run(ctx context.Context, args []string, opts ...RunOption) (*RunResult, error)
-	Stream(ctx context.Context, args []string, opts ...RunOption) (<-chan StreamLine, error)
-}
-
-// RunOption configures subprocess execution.
-type RunOption func(*runConfig)
-
-// runConfig holds the internal configuration for a command execution.
-type runConfig struct {
-	timeout     time.Duration
-	cwd         string
-	env         map[string]string
-	stdin       string
-	capture     bool
-	privileged  bool
-	interactive bool
-	check       bool
-	startOnly   bool
-}
-
-// defaultRunConfig returns a runConfig with sensible defaults.
-func defaultRunConfig() *runConfig {
-	return &runConfig{
-		capture: true,
-	}
-}
 
 // RunResult holds command output.
 type RunResult struct {
@@ -337,79 +303,176 @@ type RunResult struct {
 	ExitCode int
 }
 
+// Success returns true if the command exited with code 0.
+// This is the correct check regardless of the Check option —
+// non-zero exits and exceptional errors (not found, timeout)
+// both produce a non-zero ExitCode.
+func (r *RunResult) Success() bool { return r.ExitCode == 0 }
+
 // StreamLine carries either a line of output or a final error.
 type StreamLine struct {
 	Line string
 	Err  error
 }
 
+// CommandRunner is the interface for executing subprocesses.
+// Enables mocking in tests via testutil.FakeRunner.
+type CommandRunner interface {
+	Run(ctx context.Context, args []string, opts RunCmdOpts) (*RunResult, error)
+	Stream(ctx context.Context, args []string, opts RunCmdOpts) (<-chan StreamLine, error)
+}
+
 // RealRunner executes commands using os/exec.
 type RealRunner struct{}
 
-// DefaultRunner is the global CommandRunner used by RunCmdCompat and StreamCmd.
+// DefaultRunner is the global CommandRunner.
 // Defaults to RealRunner. Tests can replace it with FakeRunner.
 var DefaultRunner CommandRunner = &RealRunner{}
 
 // Run executes a command and returns the result.
-// Delegates to the existing runCmdInternal function.
-func (r *RealRunner) Run(ctx context.Context, args []string, opts ...RunOption) (*RunResult, error) {
-	cfg := defaultRunConfig()
-	for _, opt := range opts {
-		opt(cfg)
+func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*RunResult, error) {
+	if len(args) == 0 {
+		return &RunResult{ExitCode: 1}, fmt.Errorf("no command specified")
 	}
 
-	cmdOpts := RunCmdOpts{
-		Cmd:         args[0],
-		Capture:     cfg.capture,
-		Cwd:         cfg.cwd,
-		Timeout:     cfg.timeout,
-		Input:       cfg.stdin,
-		Env:         cfg.env,
-		Privileged:  cfg.privileged,
-		Interactive: cfg.interactive,
-		Text:        true,
-		Check:       cfg.check,
-		StartOnly:   cfg.startOnly,
-	}
-	if len(args) > 1 {
-		cmdOpts.Args = args[1:]
+	// ── Build argument list, handling privileged mode ──
+	cmdArgs := args
+	if opts.Privileged && !IsRoot() {
+		_ = RequireMvmGroupMembership() // warn only
+		if opts.Interactive {
+			cmdArgs = append([]string{"sudo"}, args...)
+		} else {
+			cmdArgs = append([]string{"sudo", "-n"}, args...)
+		}
 	}
 
-	result := runCmdInternal(ctx, cmdOpts)
-	if result.Err != nil {
-		return &RunResult{
-			Stdout:   result.Stdout,
-			Stderr:   result.Stderr,
-			ExitCode: result.ExitCode,
-		}, result.Err
+	// ── Create timeout context if needed ──
+	runCtx := ctx
+	var cancel context.CancelFunc
+	if opts.Timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
 	}
 
-	return &RunResult{
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
-	}, nil
+	// ── Build exec.Cmd ──
+	cmd := exec.CommandContext(runCtx, cmdArgs[0], cmdArgs[1:]...)
+	if opts.Cwd != "" {
+		cmd.Dir = opts.Cwd
+	}
+
+	// Environment: merge into current process env (always append)
+	if opts.Env != nil {
+		env := os.Environ()
+		for k, v := range opts.Env {
+			env = append(env, k+"="+v)
+		}
+		cmd.Env = env
+	}
+
+	// ── Stdin ──
+	if opts.Input != "" {
+		cmd.Stdin = strings.NewReader(opts.Input)
+	} else if opts.Interactive && opts.Privileged && !IsRoot() {
+		cmd.Stdin = os.Stdin
+	}
+
+	// ── Stdout / Stderr ──
+	var stdout, stderr strings.Builder
+	if opts.Capture {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	} else {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
+
+	// ── StartOnly (background / fire-and-forget) ──
+	if opts.StartOnly {
+		if err := cmd.Start(); err != nil {
+			return &RunResult{ExitCode: -1},
+				errs.WrapMsg(errs.CodeProcessError, fmt.Sprintf("failed to start: %s", cmdArgs[0]), err)
+		}
+		return &RunResult{ExitCode: 0}, nil
+	}
+
+	// ── Run and capture ──
+	err := cmd.Run()
+
+	result := &RunResult{
+		ExitCode: 0,
+	}
+	if opts.Capture {
+		result.Stdout = stdout.String()
+		result.Stderr = strings.TrimSpace(stderr.String())
+	}
+
+	if err != nil {
+		// 1. Timeout — must check BEFORE exit-error because CommandContext
+		//    kills the process on timeout, which also produces ExitError.
+		if opts.Timeout > 0 && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			result.ExitCode = -1
+			timeoutStr := strconv.FormatFloat(opts.Timeout.Seconds(), 'f', -1, 64)
+			if !strings.ContainsRune(timeoutStr, '.') {
+				timeoutStr += ".0"
+			}
+			return result, errs.New(errs.CodeProcessError,
+				fmt.Sprintf("Command timed out after %ss: %s", timeoutStr, cmdArgs[0]))
+		}
+
+		// 2. Command not found
+		if errors.Is(err, exec.ErrNotFound) {
+			result.ExitCode = -1
+			return result, errs.New(errs.CodeProcessError,
+				fmt.Sprintf("Command not found: %s", cmdArgs[0]))
+		}
+
+		// 3. Non-zero exit — only error when Check is true
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitErr.ExitCode()
+			if opts.Check {
+				sanitized := strings.TrimSpace(result.Stderr)
+				if len(sanitized) > 100 {
+					sanitized = sanitized[:100] + "..."
+				}
+				msg := fmt.Sprintf("Command failed (exit %d): %s", result.ExitCode, cmdArgs[0])
+				if sanitized != "" {
+					msg += "\n" + sanitized
+				}
+				return result, errs.New(errs.CodeProcessError, msg)
+			}
+			return result, nil
+		}
+
+		// 4. Other error — wrap with CodeProcessError
+		result.ExitCode = -1
+		return result, errs.Wrap(errs.CodeProcessError, err)
+	}
+
+	return result, nil
 }
 
 // Stream executes a command and streams stdout lines as they are produced.
-// Implements the streaming logic directly rather than delegating to StreamCmd
-// to avoid circular dependency (StreamCmd delegates to DefaultRunner.Stream).
-func (r *RealRunner) Stream(ctx context.Context, args []string, opts ...RunOption) (<-chan StreamLine, error) {
-	cfg := defaultRunConfig()
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
+func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts) (<-chan StreamLine, error) {
 	if len(args) == 0 {
 		return nil, fmt.Errorf("no command specified")
 	}
 
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	if cfg.cwd != "" {
-		cmd.Dir = cfg.cwd
+	// Build command with privileged mode
+	cmdArgs := args
+	if opts.Privileged && !IsRoot() {
+		if opts.Interactive {
+			cmdArgs = append([]string{"sudo"}, args...)
+		} else {
+			cmdArgs = append([]string{"sudo", "-n"}, args...)
+		}
 	}
 
-	// Merge stderr into stdout, matching StreamCmd behavior.
+	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+	if opts.Cwd != "" {
+		cmd.Dir = opts.Cwd
+	}
+
+	// Merge stderr into stdout
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create pipe: %w", err)
@@ -427,7 +490,7 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts ...RunOptio
 		if err := cmd.Start(); err != nil {
 			if errors.Is(err, exec.ErrNotFound) {
 				ch <- StreamLine{Err: errs.New(errs.CodeProcessError,
-					fmt.Sprintf("Command not found: %s", args[0]),
+					fmt.Sprintf("Command not found: %s", cmdArgs[0]),
 				)}
 			} else {
 				ch <- StreamLine{Err: errs.New(errs.CodeProcessError, err.Error())}
@@ -441,68 +504,20 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts ...RunOptio
 			select {
 			case ch <- StreamLine{Line: line}:
 			case <-ctx.Done():
-				// Context cancelled; the command will be killed by CommandContext
 				_ = cmd.Wait()
 				return
 			}
 		}
 
-		// Wait for command to finish
 		waitErr := cmd.Wait()
 		if waitErr != nil {
 			if exitErr, ok := waitErr.(*exec.ExitError); ok {
 				ch <- StreamLine{Err: errs.New(errs.CodeProcessError,
-					fmt.Sprintf("Command failed (exit %d): %s", exitErr.ExitCode(), args[0]),
+					fmt.Sprintf("Command failed (exit %d): %s", exitErr.ExitCode(), cmdArgs[0]),
 				)}
 			}
 		}
 	}()
 
 	return ch, nil
-}
-
-// WithTimeout sets execution timeout.
-func WithTimeout(d time.Duration) RunOption {
-	return func(cfg *runConfig) { cfg.timeout = d }
-}
-
-// WithCWD sets working directory.
-func WithCWD(dir string) RunOption {
-	return func(cfg *runConfig) { cfg.cwd = dir }
-}
-
-// WithEnv sets environment variables.
-func WithEnv(env map[string]string) RunOption {
-	return func(cfg *runConfig) { cfg.env = env }
-}
-
-// WithStdin sets stdin input.
-func WithStdin(input string) RunOption {
-	return func(cfg *runConfig) { cfg.stdin = input }
-}
-
-// WithCapture controls whether stdout/stderr are captured.
-func WithCapture(capture bool) RunOption {
-	return func(cfg *runConfig) { cfg.capture = capture }
-}
-
-// WithPrivileged prepends sudo when not root.
-func WithPrivileged(priv bool) RunOption {
-	return func(cfg *runConfig) { cfg.privileged = priv }
-}
-
-// WithInteractive controls sudo mode: true uses plain "sudo" (allows password
-// prompt via TTY forwarding), false uses "sudo -n" (non-interactive).
-func WithInteractive(interactive bool) RunOption {
-	return func(cfg *runConfig) { cfg.interactive = interactive }
-}
-
-// WithCheck causes non-zero exit codes to return as errors.
-func WithCheck(check bool) RunOption {
-	return func(cfg *runConfig) { cfg.check = check }
-}
-
-// WithStartOnly spawns the process without waiting for it to complete.
-func WithStartOnly(startOnly bool) RunOption {
-	return func(cfg *runConfig) { cfg.startOnly = startOnly }
 }

@@ -90,17 +90,17 @@ func GetDiskInfo(ctx context.Context, path string) (map[string]any, error) {
 		return nil, fmt.Errorf("stat disk file: %w", err)
 	}
 
-	result := system.RunCmdCompat(
+	result, err := system.DefaultRunner.Run(
 		ctx,
 		[]string{"qemu-img", "info", "--output=json", path},
-		system.DefaultRunCmdOpts(),
+		system.RunCmdOpts{Check: true, Capture: true},
 	)
-	if result.Err != nil {
-		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img info failed: %s", result.Err.Error()))
+	if err != nil {
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img info failed: %s", err.Error()))
 	}
 
 	var data map[string]any
-	if err := json.Unmarshal(result.StdoutBytes, &data); err != nil {
+	if err := json.Unmarshal([]byte(result.Stdout), &data); err != nil {
 		return nil, fmt.Errorf("parse qemu-img info output: %w", err)
 	}
 

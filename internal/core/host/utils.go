@@ -78,9 +78,9 @@ func CreateGroup(ctx context.Context, groupName string) (bool, error) {
 		return false, nil
 	}
 
-	res := system.RunCmdCompat(ctx, []string{"groupadd", "--system", groupName}, system.DefaultRunCmdOpts())
-	if res.Err != nil {
-		return false, fmt.Errorf("failed to create group %s: %w", groupName, res.Err)
+	_, err := system.DefaultRunner.Run(ctx, []string{"groupadd", "--system", groupName}, system.RunCmdOpts{Check: true, Capture: true})
+	if err != nil {
+		return false, fmt.Errorf("failed to create group %s: %w", groupName, err)
 	}
 	return true, nil
 }
@@ -91,9 +91,9 @@ func AddUserToGroup(ctx context.Context, username, groupName string) (bool, erro
 		return false, nil
 	}
 
-	res := system.RunCmdCompat(ctx, []string{"usermod", "-aG", groupName, username}, system.DefaultRunCmdOpts())
-	if res.Err != nil {
-		return false, fmt.Errorf("failed to add %s to group %s: %w", username, groupName, res.Err)
+	_, err := system.DefaultRunner.Run(ctx, []string{"usermod", "-aG", groupName, username}, system.RunCmdOpts{Check: true, Capture: true})
+	if err != nil {
+		return false, fmt.Errorf("failed to add %s to group %s: %w", username, groupName, err)
 	}
 	return true, nil
 }
@@ -107,9 +107,9 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 		return false, nil
 	}
 
-	res := system.RunCmdCompat(ctx, []string{"gpasswd", "-d", username, groupName}, system.DefaultRunCmdOpts())
-	if res.Err != nil {
-		return false, fmt.Errorf("failed to remove user %s from group %s: %w", username, groupName, res.Err)
+	_, err := system.DefaultRunner.Run(ctx, []string{"gpasswd", "-d", username, groupName}, system.RunCmdOpts{Check: true, Capture: true})
+	if err != nil {
+		return false, fmt.Errorf("failed to remove user %s from group %s: %w", username, groupName, err)
 	}
 	return true, nil
 }
@@ -191,10 +191,9 @@ func WriteSudoers(ctx context.Context, path string, content string) error {
 	//            if result.returncode != 0: raise HostError(...)
 	//         except ProcessError: raise HostError("visudo not found ...")
 	// ProcessError is raised when the command binary cannot be found.
-	opts := system.DefaultRunCmdOpts()
-	opts.Check = false
-	result := system.RunCmdCompat(ctx, []string{"visudo", "-c", "-f", tmpPath}, opts)
-	if result.Err != nil {
+	result, err := system.DefaultRunner.Run(ctx, []string{"visudo", "-c", "-f", tmpPath},
+		system.RunCmdOpts{Check: false, Capture: true})
+	if err != nil {
 		// Command not found or other execution failure → "visudo not found"
 		return errs.New(
 			errs.CodePrivilegeSudoers,
@@ -202,7 +201,7 @@ func WriteSudoers(ctx context.Context, path string, content string) error {
 			errs.WithClass(errs.ClassInternal),
 		)
 	}
-	if result.ExitCode != 0 {
+	if !result.Success() {
 		return errs.New(
 			errs.CodePrivilegeSudoers,
 			fmt.Sprintf(
@@ -244,19 +243,18 @@ func RemoveGroup(ctx context.Context, groupName string) (bool, error) {
 		return false, nil
 	}
 
-	res := system.RunCmdCompat(ctx, []string{"groupdel", groupName}, system.DefaultRunCmdOpts())
-	if res.Err != nil {
-		return false, fmt.Errorf("failed to remove group %s: %w", groupName, res.Err)
+	_, err := system.DefaultRunner.Run(ctx, []string{"groupdel", groupName}, system.RunCmdOpts{Check: true, Capture: true})
+	if err != nil {
+		return false, fmt.Errorf("failed to remove group %s: %w", groupName, err)
 	}
 	return true, nil
 }
 
 // ── isModuleLoaded ──
 func isModuleLoaded(ctx context.Context, module string) bool {
-	opts := system.DefaultRunCmdOpts()
-	opts.Check = false
-	result := system.RunCmdCompat(ctx, []string{"lsmod"}, opts)
-	if result.ExitCode != 0 {
+	result, _ := system.DefaultRunner.Run(ctx, []string{"lsmod"},
+		system.RunCmdOpts{Check: false, Capture: true})
+	if !result.Success() {
 		return false
 	}
 	for line := range strings.SplitSeq(result.Stdout, "\n") {
@@ -275,9 +273,9 @@ func isModuleLoaded(ctx context.Context, module string) bool {
 // ── GetIPForwardStatus ──
 func GetIPForwardStatus(ctx context.Context) (string, error) {
 
-	res := system.RunCmdCompat(ctx, []string{"sysctl", "-n", sysctlKey}, system.DefaultRunCmdOpts())
-	if res.Err != nil {
-		return "", fmt.Errorf("failed to read %s: %w", sysctlKey, res.Err)
+	res, err := system.DefaultRunner.Run(ctx, []string{"sysctl", "-n", sysctlKey}, system.RunCmdOpts{Check: true, Capture: true})
+	if err != nil {
+		return "", fmt.Errorf("failed to read %s: %w", sysctlKey, err)
 	}
 	return strings.TrimSpace(res.Stdout), nil
 }

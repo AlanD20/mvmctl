@@ -162,7 +162,7 @@ Examples:
 							)
 
 							sudoArgs := append([]string{"env"}, append(envAssignments, os.Args...)...)
-							result := system.RunCmdCompat(
+							result, err := system.DefaultRunner.Run(
 								cmd.Context(),
 								append([]string{"sudo"}, sudoArgs...),
 								system.RunCmdOpts{
@@ -170,14 +170,14 @@ Examples:
 									Check:   false,
 								},
 							)
-							if !result.Success && result.Err != nil {
-								common.Cli.Error(fmt.Sprintf("sudo command failed: %s", result.Err.Error()))
+							if err != nil {
+								common.Cli.Error(fmt.Sprintf("sudo command failed: %s", err.Error()))
 								if result.Stderr != "" {
 									common.Cli.Warning(result.Stderr)
 								}
-								return result.Err
+								return err
 							}
-							if !result.Success {
+							if !result.Success() {
 								return fmt.Errorf("sudo command failed with exit code %d", result.ExitCode)
 							}
 							common.Cli.Success("Host init completed successfully.")

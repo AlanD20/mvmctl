@@ -24,12 +24,12 @@ func FindNetworkByName(networks []*model.Network, name string) *model.Network {
 func CheckIPTablesCommentAvailable(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"iptables", "-m", "comment", "--comment", "test", "-L"},
 		system.RunCmdOpts{Check: false},
 	)
-	return result.Success
+	return result.Success()
 }
 
 // SubnetsOverlap checks if two CIDR subnets overlap.

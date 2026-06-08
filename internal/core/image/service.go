@@ -462,13 +462,13 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 	}
 
 	// Try reflink copy (matching Python: run_cmd(["cp", "--reflink=auto", ...]) with ProcessError fallback)
-	result := system.RunCmdCompat(
+	result, err := system.DefaultRunner.Run(
 		ctx,
 		[]string{"cp", "--reflink=auto", "--sparse=always", cachedPath, outputPath},
-		system.DefaultRunCmdOpts(),
+		system.RunCmdOpts{Check: true, Capture: true},
 	)
-	combined := string(result.StdoutBytes) + string(result.StderrBytes)
-	if result.Err != nil {
+	combined := result.Stdout + result.Stderr
+	if err != nil {
 		if err := system.CopyWithDD(ctx, cachedPath, outputPath, true); err != nil {
 			return errs.New(
 				errs.CodeImageError,
@@ -1008,10 +1008,10 @@ func (s *Service) extractDiskImage(ctx context.Context,
 
 func (s *Service) convertToRaw(ctx context.Context, inputPath, outputPath, fmtFlag string) error {
 	slog.Info("Converting to raw...", "file", filepath.Base(inputPath))
-	result := system.RunCmdCompat(ctx, []string{"qemu-img", "convert", "-m", "16", "-f", fmtFlag, "-O", "raw",
-		"-t", "none", "-T", "none", "-W", inputPath, outputPath}, system.DefaultRunCmdOpts())
-	combined := string(result.StdoutBytes) + string(result.StderrBytes)
-	if result.Err != nil {
+	result, err := system.DefaultRunner.Run(ctx, []string{"qemu-img", "convert", "-m", "16", "-f", fmtFlag, "-O", "raw",
+		"-t", "none", "-T", "none", "-W", inputPath, outputPath}, system.RunCmdOpts{Check: true, Capture: true})
+	combined := result.Stdout + result.Stderr
+	if err != nil {
 		return errs.New(errs.CodeImageError, fmt.Sprintf("qemu-img conversion failed: %s", combined))
 	}
 	slog.Info("Converted to raw", "output", filepath.Base(outputPath))
@@ -1027,12 +1027,12 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 
 	extractDir := filepath.Join(tmpDir, "squashfs-root")
 
-	result := system.RunCmdCompat(
+	_, err = system.DefaultRunner.Run(
 		ctx,
 		[]string{"unsquashfs", "-d", extractDir, inputPath},
-		system.DefaultRunCmdOpts(),
+		system.RunCmdOpts{Check: true, Capture: true},
 	)
-	if result.Err != nil {
+	if err != nil {
 		return "", errs.New(errs.CodeImageError, "unsquashfs failed")
 	}
 
@@ -1040,9 +1040,9 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 		return "", errs.New(errs.CodeImageError, "mkfs.ext4 not found. Install e2fsprogs package.")
 	}
 
-	duResult := system.RunCmdCompat(ctx, []string{"du", "-sb", extractDir}, system.DefaultRunCmdOpts())
+	duResult, duErr := system.DefaultRunner.Run(ctx, []string{"du", "-sb", extractDir}, system.RunCmdOpts{Check: true, Capture: true})
 	contentBytes := int64(0)
-	if duResult.Err == nil {
+	if duErr == nil {
 		fields := strings.Fields(duResult.Stdout)
 		if len(fields) > 0 {
 			contentBytes, _ = strconv.ParseInt(fields[0], 10, 64)
@@ -1056,23 +1056,23 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 		imageSizeMB, _ = strconv.Atoi(minimumRootfsSize)
 	}
 
-	truncResult := system.RunCmdCompat(
+	truncResult, truncErr := system.DefaultRunner.Run(
 		ctx,
 		[]string{"truncate", "-s", fmt.Sprintf("%dM", imageSizeMB), finalPath},
-		system.DefaultRunCmdOpts(),
+		system.RunCmdOpts{Check: true, Capture: true},
 	)
-	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
-	if truncResult.Err != nil {
+	truncCombined := truncResult.Stdout + truncResult.Stderr
+	if truncErr != nil {
 		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Failed to allocate ext4 image file: %s", truncCombined))
 	}
 
-	mkfsResult := system.RunCmdCompat(
+	mkfsResult, mkfsErr := system.DefaultRunner.Run(
 		ctx,
 		[]string{"mkfs.ext4", "-d", extractDir, "-L", "", finalPath},
-		system.DefaultRunCmdOpts(),
+		system.RunCmdOpts{Check: true, Capture: true},
 	)
-	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
-	if mkfsResult.Err != nil {
+	mkfsCombined := mkfsResult.Stdout + mkfsResult.Stderr
+	if mkfsErr != nil {
 		return "", errs.New(errs.CodeImageError, fmt.Sprintf("Failed to create ext4 from squashfs: %s", mkfsCombined))
 	}
 
@@ -1092,16 +1092,16 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	t1 := time.Now()
 	slog.Info("Extracting tar...", "tmp_dir", tmpDir)
 
-	tarResult := system.RunCmdCompat(ctx, []string{"tar", "-xf", tarPath, "-C", tmpDir,
-		"--exclude=dev/*", "--no-same-owner", "--no-same-permissions"}, system.DefaultRunCmdOpts())
-	tarCombined := string(tarResult.StdoutBytes) + string(tarResult.StderrBytes)
-	if tarResult.Err != nil {
-		return fmt.Errorf("tar extract failed: %s: %w", tarCombined, tarResult.Err)
+	tarResult, tarErr := system.DefaultRunner.Run(ctx, []string{"tar", "-xf", tarPath, "-C", tmpDir,
+		"--exclude=dev/*", "--no-same-owner", "--no-same-permissions"}, system.RunCmdOpts{Check: true, Capture: true})
+	tarCombined := tarResult.Stdout + tarResult.Stderr
+	if tarErr != nil {
+		return fmt.Errorf("tar extract failed: %s: %w", tarCombined, tarErr)
 	}
 	t2 := time.Now()
 	slog.Debug("tar extract", "elapsed_seconds", t2.Sub(t1).Seconds())
 
-	system.RunCmdCompat(
+	_, _ = system.DefaultRunner.Run(
 		ctx,
 		[]string{"chmod", "-R", "u+rwx", tmpDir},
 		system.RunCmdOpts{Capture: false, Check: false},
@@ -1109,7 +1109,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	t3 := time.Now()
 	slog.Debug("chmod", "elapsed_seconds", t3.Sub(t2).Seconds())
 
-	duResult := system.RunCmdCompat(
+	duResult, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"du", "-sb", tmpDir},
 		system.RunCmdOpts{Capture: true, Check: false},
@@ -1158,25 +1158,25 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 		}
 	}
 
-	truncResult := system.RunCmdCompat(
+	truncResult, truncErr := system.DefaultRunner.Run(
 		ctx,
 		[]string{"truncate", "-s", fmt.Sprintf("%dM", rawSizeMB), outputPath},
-		system.DefaultRunCmdOpts(),
+		system.RunCmdOpts{Check: true, Capture: true},
 	)
-	truncCombined := string(truncResult.StdoutBytes) + string(truncResult.StderrBytes)
-	if truncResult.Err != nil {
-		return fmt.Errorf("truncate failed: %s: %w", truncCombined, truncResult.Err)
+	truncCombined := truncResult.Stdout + truncResult.Stderr
+	if truncErr != nil {
+		return fmt.Errorf("truncate failed: %s: %w", truncCombined, truncErr)
 	}
 	t5 := time.Now()
 	slog.Debug("truncate", "elapsed_seconds", t5.Sub(t4).Seconds())
 
-	mkfsResult := system.RunCmdCompat(
+	mkfsResult, mkfsErr := system.DefaultRunner.Run(
 		ctx,
 		[]string{"mkfs.ext4", "-d", tmpDir, "-F", outputPath},
-		system.DefaultRunCmdOpts(),
+		system.RunCmdOpts{Check: true, Capture: true},
 	)
-	mkfsCombined := string(mkfsResult.StdoutBytes) + string(mkfsResult.StderrBytes)
-	if mkfsResult.Err != nil {
+	mkfsCombined := mkfsResult.Stdout + mkfsResult.Stderr
+	if mkfsErr != nil {
 		msg := mkfsCombined
 		if strings.Contains(msg, "No space left on device") || strings.Contains(msg, "ENOSPC") {
 			slog.Warn("Disk full while creating ext4 image",

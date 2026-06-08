@@ -124,13 +124,13 @@ func mergeConfigLines(content, configPath string) {
 func runConfigScript(ctx context.Context, configScript, kernelDir string, args ...string) {
 	cmdArgs := []string{configScript}
 	cmdArgs = append(cmdArgs, args...)
-	result := system.RunCmdCompat(ctx, cmdArgs, system.RunCmdOpts{
+	result, err := system.DefaultRunner.Run(ctx, cmdArgs, system.RunCmdOpts{
 		Cwd:     kernelDir,
 		Capture: true,
 		Check:   false,
 	})
 	exitCode := result.ExitCode
-	if result.Err != nil || exitCode != 0 {
+	if err != nil || !result.Success() {
 		slog.Warn("scripts/config failed",
 			"args", strings.Join(args, " "),
 			"rc", exitCode,
@@ -139,7 +139,7 @@ func runConfigScript(ctx context.Context, configScript, kernelDir string, args .
 }
 
 func runMake(ctx context.Context, kernelDir, target string, jobs int) (int, string, string) {
-	result := system.RunCmdCompat(ctx, []string{"make", target, fmt.Sprintf("-j%d", jobs)}, system.RunCmdOpts{
+	result, _ := system.DefaultRunner.Run(ctx, []string{"make", target, fmt.Sprintf("-j%d", jobs)}, system.RunCmdOpts{
 		Cwd:     kernelDir,
 		Capture: true,
 		Check:   false,
@@ -160,19 +160,19 @@ func runMake(ctx context.Context, kernelDir, target string, jobs int) (int, stri
 func checkBuildDependencies(ctx context.Context) error {
 	var missing []string
 	for _, cmd := range KernelBuildCommands {
-		result := system.RunCmdCompat(ctx, []string{"which", cmd}, system.RunCmdOpts{Capture: true, Check: false})
-		if result.ExitCode != 0 {
+		result, _ := system.DefaultRunner.Run(ctx, []string{"which", cmd}, system.RunCmdOpts{Capture: true, Check: false})
+		if !result.Success() {
 			missing = append(missing, cmd)
 		}
 	}
 
 	for _, lc := range KernelBuildLibraries {
-		result := system.RunCmdCompat(
+		_, err := system.DefaultRunner.Run(
 			ctx,
 			[]string{"pkg-config", "--exists", lc.Pkg},
 			system.RunCmdOpts{Check: true},
 		)
-		if result.Err != nil {
+		if err != nil {
 			missing = append(missing, lc.Display)
 		}
 	}

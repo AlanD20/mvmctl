@@ -527,7 +527,7 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 	}
 
 	defaultNetNameStr, _ := op.Services.Config.GetString(ctx, "defaults.network", "name")
-	defaultBridge := fmt.Sprintf("%s-%s", infra.CLIName, system.TruncateString(defaultNetNameStr, 10))
+	defaultBridge := libnet.ComputeBridgeName(infra.CLIName, defaultNetNameStr)
 	if libnet.BridgeExists(ctx, defaultBridge) {
 		if err := op.Services.Network.RemoveRawBridge(ctx, defaultBridge); err != nil {
 			summary = append(

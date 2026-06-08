@@ -866,7 +866,7 @@ func (s *Service) RunMakeVmlinux(
 	buildLogPath := outputPath + KernelBuildLogSuffix
 	os.MkdirAll(filepath.Dir(buildLogPath), infra.DirPerm)
 
-	result := system.RunCmdCompat(
+	result, err := system.DefaultRunner.Run(
 		ctx,
 		[]string{KernelMakeCmd, KernelMakeTarget, fmt.Sprintf("-j%d", jobs)},
 		system.RunCmdOpts{
@@ -882,8 +882,8 @@ func (s *Service) RunMakeVmlinux(
 	}
 	os.WriteFile(buildLogPath, []byte(logData), 0644)
 
-	if result.Err != nil {
-		if strings.Contains(result.Err.Error(), "Command not found") {
+	if err != nil {
+		if strings.Contains(err.Error(), "Command not found") {
 			return nil, errs.New(errs.CodeKernelBuildFailed, "Kernel build failed: unable to execute make")
 		}
 		warnings = append(warnings, parseBuildWarnings(logData)...)

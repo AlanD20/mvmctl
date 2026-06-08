@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
@@ -93,7 +92,8 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Default comment (Python: f"{name}@{socket.gethostname()}")
 	comment := r.input.Comment
 	if comment == "" {
-		comment = fmt.Sprintf("%s@%s", r.input.Name, system.Hostname())
+		hostname, _ := os.Hostname()
+		comment = fmt.Sprintf("%s@%s", r.input.Name, hostname)
 	}
 
 	// Default output_dir resolved via CacheUtils

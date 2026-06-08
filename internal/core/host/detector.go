@@ -92,7 +92,7 @@ func readMeminfo() map[string]int {
 // ── DetectHardware ──
 // Matches Python's HostDetector.detect_hardware().
 func DetectHardware() (*model.HostHardware, error) {
-	hostname := system.Hostname()
+	hostname, _ := os.Hostname()
 
 	cpuModel := ""
 	cpuVendor := ""

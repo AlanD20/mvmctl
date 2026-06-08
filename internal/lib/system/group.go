@@ -138,8 +138,8 @@ func RequireMvmGroupMembership() error {
 // Service Switch libraries via libc, matching Python's NSS-compatible
 // behavior.
 func getGroupMembers(ctx context.Context, groupName string) []string {
-	result := RunCmdCompat(ctx, []string{"getent", "group", groupName}, RunCmdOpts{Capture: true})
-	if result.Err != nil {
+	result, err := DefaultRunner.Run(ctx, []string{"getent", "group", groupName}, RunCmdOpts{Capture: true})
+	if err != nil {
 		return nil
 	}
 	// Format: groupname:password:GID:member1,member2,...
@@ -200,9 +200,9 @@ func UserInGroup(ctx context.Context, username, groupName string) bool {
 //
 // TODO: Consolidate with getGroupMembers (unexported) which has similar logic.
 func GroupMembersViaNSS(ctx context.Context, groupName string) ([]string, error) {
-	result := RunCmdCompat(ctx, []string{"getent", "group", groupName}, RunCmdOpts{Capture: true})
-	if result.Err != nil {
-		return nil, fmt.Errorf("unable to resolve group %q via NSS: %w", groupName, result.Err)
+	result, err := DefaultRunner.Run(ctx, []string{"getent", "group", groupName}, RunCmdOpts{Capture: true})
+	if err != nil {
+		return nil, fmt.Errorf("unable to resolve group %q via NSS: %w", groupName, err)
 	}
 	// Parse "groupname:x:gid:member1,member2"
 	parts := strings.SplitN(strings.TrimSpace(result.Stdout), ":", 4)

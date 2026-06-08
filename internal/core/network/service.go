@@ -704,29 +704,29 @@ func (s *Service) RemoveRawBridge(ctx context.Context, bridge string) error {
 // Matches Python Service.check_nftables_available()
 
 func (s *Service) CheckNFTablesAvailable(ctx context.Context) bool {
-	result := system.RunCmdCompat(ctx, []string{"nft", "--version"},
+	result, err := system.DefaultRunner.Run(ctx, []string{"nft", "--version"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result == nil || !result.Success {
+	if err != nil || !result.Success() {
 		slog.Debug("nftables not available: nft --version failed")
 		return false
 	}
 
-	system.RunCmdCompat(ctx, []string{"modprobe", "nft_chain_nat"},
+	_, _ = system.DefaultRunner.Run(ctx, []string{"modprobe", "nft_chain_nat"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 
 	test := "add table inet __mvm_nft_test\n" +
 		"add chain inet __mvm_nft_test test_post { type nat hook postrouting priority srcnat; policy accept; }\n" +
 		"add rule inet __mvm_nft_test test_post masquerade\n"
-	testResult := system.RunCmdCompat(ctx, []string{"nft", "-f", "-"},
+	testResult, testErr := system.DefaultRunner.Run(ctx, []string{"nft", "-f", "-"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Input: test})
 
-	system.RunCmdCompat(ctx, []string{"nft", "delete", "table", "inet", "__mvm_nft_test"},
+	_, _ = system.DefaultRunner.Run(ctx, []string{"nft", "delete", "table", "inet", "__mvm_nft_test"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 
-	if testResult == nil || !testResult.Success {
+	if testErr != nil || !testResult.Success() {
 		slog.Debug("nftables MASQUERADE not available (kernel module nft_chain_nat may be missing)")
 	}
-	return testResult != nil && testResult.Success
+	return testErr == nil && testResult.Success()
 }
 
 // EnrichWithLeases batch-loads leases for all networks and attaches them.

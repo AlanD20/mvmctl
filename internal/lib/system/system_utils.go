@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/user"
 	"runtime"
-	"strconv"
 )
 
 // CurrentUsername returns the current OS username.
@@ -19,61 +18,6 @@ func CurrentUsername() (string, error) {
 		return "", fmt.Errorf("cannot determine current username: %w", err)
 	}
 	return u.Username, nil
-}
-
-// GetRealUserIDs returns the real (original) user UID and GID.
-// Uses SUDO_UID/SUDO_GID env vars if set (running under sudo).
-// Returns (uid, gid, isRoot) where isRoot is true when current user is root.
-func GetRealUserIDs() (int, int, bool) {
-	uidStr := os.Getenv("SUDO_UID")
-	gidStr := os.Getenv("SUDO_GID")
-	if uidStr != "" && gidStr != "" {
-		uid, err1 := strconv.Atoi(uidStr)
-		gid, err2 := strconv.Atoi(gidStr)
-		if err1 == nil && err2 == nil {
-			return uid, gid, false
-		}
-	}
-	return os.Getuid(), os.Getgid(), os.Getuid() == 0
-}
-
-// ChownToRealUser changes file ownership to the real (original) user.
-// If running under sudo, uses SUDO_UID/SUDO_GID. Otherwise uses current user.
-func ChownToRealUser(pathStr string) {
-	uid, gid, _ := GetRealUserIDs()
-	_ = os.Chown(pathStr, uid, gid)
-}
-
-// FileExists returns true if path exists and is a regular file.
-func FileExists(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return !info.IsDir()
-}
-
-// MakeExecutable sets the executable permission bit on path.
-func MakeExecutable(path string) error {
-	return os.Chmod(path, 0755)
-}
-
-// TruncateString truncates s to at most maxLen characters.
-func TruncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen]
-}
-
-// Hostname returns the system hostname.
-// Returns empty string on error (matching Python's socket.gethostname() behavior).
-func Hostname() string {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return ""
-	}
-	return hostname
 }
 
 // RuntimeArch returns the CPU architecture using Firecracker's naming convention.

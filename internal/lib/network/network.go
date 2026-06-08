@@ -247,13 +247,13 @@ func GetPhysicalInterfaces() ([]string, error) {
 func DetectOutboundInterface(ctx context.Context) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, err := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "route", "show", "default"},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	if result.Err != nil || result.ExitCode != 0 {
-		slog.Debug("Failed to detect outbound network interface", "error", result.Err)
+	if err != nil || !result.Success() {
+		slog.Debug("Failed to detect outbound network interface", "error", err)
 		return ""
 	}
 	for line := range strings.SplitSeq(strings.TrimSpace(result.Stdout), "\n") {
@@ -272,12 +272,12 @@ func DetectOutboundInterface(ctx context.Context) string {
 func BridgeExists(ctx context.Context, bridge string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "link", "show", bridge},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	return result.Success
+	return result.Success()
 }
 
 // TapExists checks if a TAP interface exists.
@@ -285,12 +285,12 @@ func BridgeExists(ctx context.Context, bridge string) bool {
 func TapExists(ctx context.Context, tap string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "link", "show", tap},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	return result.Success
+	return result.Success()
 }
 
 // ChainExists checks if an iptables chain exists.
@@ -299,12 +299,12 @@ func TapExists(ctx context.Context, tap string) bool {
 func ChainExists(ctx context.Context, chain, table string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"iptables", "-t", table, "-L", chain, "-n"},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	return result.Success
+	return result.Success()
 }
 
 // GetTunTapDevices lists all TUN/TAP devices.
@@ -312,12 +312,12 @@ func ChainExists(ctx context.Context, chain, table string) bool {
 func GetTunTapDevices(ctx context.Context) []string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "-o", "link", "show", "type", "tuntap"},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	if !result.Success {
+	if !result.Success() {
 		return nil
 	}
 	var devices []string
@@ -335,12 +335,12 @@ func GetTunTapDevices(ctx context.Context) []string {
 func GetBridges(ctx context.Context) []string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "-o", "link", "show", "type", "bridge"},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	if !result.Success {
+	if !result.Success() {
 		return nil
 	}
 	var bridges []string
@@ -358,12 +358,12 @@ func GetBridges(ctx context.Context) []string {
 func GetBridgeSlaves(ctx context.Context, bridge string) []string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "-o", "link", "show", "master", bridge},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	if !result.Success {
+	if !result.Success() {
 		return nil
 	}
 	var slaves []string
@@ -389,12 +389,12 @@ func GetBridgeSlaves(ctx context.Context, bridge string) []string {
 func GetBridgeTaps(ctx context.Context, bridge string) []string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "link", "show", "master", bridge},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	if !result.Success {
+	if !result.Success() {
 		return nil
 	}
 	var devices []string
@@ -428,16 +428,15 @@ func EnsureInterfaceReady(ctx context.Context, iface string) error {
 		)
 	}
 
-	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "-4", "addr", "show", iface}, system.RunCmdOpts{
+	result, err := system.DefaultRunner.Run(ctx, []string{"ip", "-o", "-4", "addr", "show", iface}, system.RunCmdOpts{
 		Check:   false,
 		Capture: true,
-		Text:    true,
 	})
-	if result.Err != nil {
+	if err != nil {
 		return errs.New(errs.CodeNetworkError, "'ip' command not found — install iproute2")
 	}
 
-	if !result.Success || strings.TrimSpace(result.Stdout) == "" {
+	if !result.Success() || strings.TrimSpace(result.Stdout) == "" {
 		return errs.New(errs.CodeNetworkError,
 			fmt.Sprintf(
 				"Interface '%s' has no IPv4 address assigned. NAT requires an interface with a valid IP address.",
@@ -454,12 +453,12 @@ func EnsureInterfaceReady(ctx context.Context, iface string) error {
 func BridgeHasSubnet(ctx context.Context, bridge, subnet string) bool {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "-o", "addr", "show", bridge},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	if !result.Success {
+	if !result.Success() {
 		return false
 	}
 	return strings.Contains(result.Stdout, subnet)
@@ -470,12 +469,12 @@ func BridgeHasSubnet(ctx context.Context, bridge, subnet string) bool {
 func GetTapBridge(ctx context.Context, tap string) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(
+	result, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"ip", "link", "show", tap},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
-	if !result.Success {
+	if !result.Success() {
 		return ""
 	}
 	for line := range strings.SplitSeq(result.Stdout, "\n") {
@@ -528,24 +527,23 @@ func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	versionResult := system.RunCmdCompat(
+	versionResult, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"iptables", "--version"},
-		system.RunCmdOpts{Check: false, Capture: true, Text: true},
+		system.RunCmdOpts{Check: false, Capture: true},
 	)
 	currentBackend := "legacy"
-	if versionResult.Success && strings.Contains(versionResult.Stderr, "nf_tables") {
+	if versionResult.Success() && strings.Contains(versionResult.Stderr, "nf_tables") {
 		currentBackend = "nft"
 	}
 
 	legacyActive := false
-	legacyResult := system.RunCmdCompat(ctx, []string{"iptables-legacy", "-L", "-n", "-v"}, system.RunCmdOpts{
+	legacyResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables-legacy", "-L", "-n", "-v"}, system.RunCmdOpts{
 		Check:      false,
 		Capture:    true,
-		Text:       true,
 		Privileged: true,
 	})
-	if legacyResult.Success {
+	if legacyResult.Success() {
 		for line := range strings.SplitSeq(legacyResult.Stdout, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
@@ -558,13 +556,12 @@ func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
 	}
 
 	nftActive := false
-	nftResult := system.RunCmdCompat(ctx, []string{"iptables", "-L", "-n", "-v"}, system.RunCmdOpts{
+	nftResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables", "-L", "-n", "-v"}, system.RunCmdOpts{
 		Check:      false,
 		Capture:    true,
-		Text:       true,
 		Privileged: true,
 	})
-	if nftResult.Success {
+	if nftResult.Success() {
 		for line := range strings.SplitSeq(nftResult.Stdout, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
@@ -588,15 +585,14 @@ func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
 // Python: _run_batch(commands) -> None
 func RunBatch(ctx context.Context, commands []string) error {
 	batch := strings.Join(commands, "\n") + "\n"
-	result := system.RunCmdCompat(ctx, []string{"ip", "-batch", "-"}, system.RunCmdOpts{
+	result, err := system.DefaultRunner.Run(ctx, []string{"ip", "-batch", "-"}, system.RunCmdOpts{
 		Check:      true,
 		Capture:    true,
-		Text:       true,
 		Input:      batch,
 		Privileged: true,
 	})
-	if result.Err != nil {
-		return fmt.Errorf("ip -batch failed: %w\n%s", result.Err, result.Stderr)
+	if err != nil {
+		return fmt.Errorf("ip -batch failed: %w\n%s", err, result.Stderr)
 	}
 	return nil
 }
@@ -608,17 +604,17 @@ func RemoveRawTap(ctx context.Context, tap string) error {
 	defer cancel()
 
 	// Try standard link delete first
-	result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", tap},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
-	if result.Success {
+	result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", tap},
+		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
+	if result.Success() {
 		return nil
 	}
 	stderrFirst := strings.TrimSpace(result.Stderr)
 
 	// Fallback for tuntap-type interfaces
-	result = system.RunCmdCompat(ctx, []string{"ip", "tuntap", "del", "dev", tap, "mode", "tap"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
-	if result.Success {
+	result, _ = system.DefaultRunner.Run(ctx, []string{"ip", "tuntap", "del", "dev", tap, "mode", "tap"},
+		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
+	if result.Success() {
 		return nil
 	}
 
@@ -638,32 +634,32 @@ func RemoveRawBridge(ctx context.Context, bridge string) error {
 
 	// Remove slave interfaces first
 	for _, slave := range GetBridgeSlaves(ctx, bridge) {
-		system.RunCmdCompat(ctx, []string{"ip", "link", "set", slave, "down"},
-			system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
-		result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", slave},
-			system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
-		if !result.Success {
-			system.RunCmdCompat(ctx, []string{"ip", "tuntap", "del", "dev", slave, "mode", "tap"},
-				system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
+		system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", slave, "down"},
+			system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
+		result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", slave},
+			system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
+		if !result.Success() {
+			system.DefaultRunner.Run(ctx, []string{"ip", "tuntap", "del", "dev", slave, "mode", "tap"},
+				system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 		}
 	}
 
 	// Bring bridge down
-	system.RunCmdCompat(ctx, []string{"ip", "link", "set", bridge, "down"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
+	system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", bridge, "down"},
+		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 
 	// Delete bridge with type
-	result := system.RunCmdCompat(ctx, []string{"ip", "link", "delete", bridge, "type", "bridge"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
-	if result.Success {
+	result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", bridge, "type", "bridge"},
+		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
+	if result.Success() {
 		return nil
 	}
 	stderrFirst := strings.TrimSpace(result.Stderr)
 
 	// Fallback: try without type specifier
-	result = system.RunCmdCompat(ctx, []string{"ip", "link", "delete", bridge},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
-	if result.Success {
+	result, _ = system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", bridge},
+		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
+	if result.Success() {
 		return nil
 	}
 
@@ -680,9 +676,9 @@ func RemoveRawBridge(ctx context.Context, bridge string) error {
 func GetSystemBridges(ctx context.Context) []string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	result := system.RunCmdCompat(ctx, []string{"ip", "-o", "link", "show", "type", "bridge"},
-		system.RunCmdOpts{Capture: true, Check: false, Text: true})
-	if !result.Success {
+	result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "-o", "link", "show", "type", "bridge"},
+		system.RunCmdOpts{Capture: true, Check: false})
+	if !result.Success() {
 		return nil
 	}
 	var bridges []string
@@ -700,8 +696,8 @@ func GetSystemBridges(ctx context.Context) []string {
 func FlushARP(ctx context.Context, bridge string) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	system.RunCmdCompat(ctx, []string{"ip", "neigh", "flush", "dev", bridge},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Text: true})
+	system.DefaultRunner.Run(ctx, []string{"ip", "neigh", "flush", "dev", bridge},
+		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 }
 
 // IPToUint32 converts an IPv4 address to a uint32.

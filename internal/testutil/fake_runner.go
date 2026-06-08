@@ -25,7 +25,7 @@ type FakeCall struct {
 }
 
 // Run records the call and returns the stubbed result or error.
-func (f *FakeRunner) Run(ctx context.Context, args []string, opts ...system.RunOption) (*system.RunResult, error) {
+func (f *FakeRunner) Run(ctx context.Context, args []string, opts system.RunCmdOpts) (*system.RunResult, error) {
 	f.mu.Lock()
 	f.Calls = append(f.Calls, FakeCall{Args: append([]string{}, args...)})
 	f.mu.Unlock()
@@ -42,7 +42,7 @@ func (f *FakeRunner) Run(ctx context.Context, args []string, opts ...system.RunO
 func (f *FakeRunner) Stream(
 	ctx context.Context,
 	args []string,
-	opts ...system.RunOption,
+	opts system.RunCmdOpts,
 ) (<-chan system.StreamLine, error) {
 	ch := make(chan system.StreamLine)
 	close(ch)

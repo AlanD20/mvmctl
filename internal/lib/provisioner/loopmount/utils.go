@@ -28,10 +28,10 @@ type sfdiskTable struct {
 
 // parsePartitionsSfdisk parses partition table using sfdisk --json.
 func parsePartitionsSfdisk(ctx context.Context, rawPath string, partition int) *parseResult {
-	result := system.RunCmdCompat(ctx, []string{"sfdisk", "--json", rawPath}, system.RunCmdOpts{
+	result, _ := system.DefaultRunner.Run(ctx, []string{"sfdisk", "--json", rawPath}, system.RunCmdOpts{
 		Check: false, Capture: true, Timeout: partedTimeout,
 	})
-	if result.ExitCode != 0 {
+	if !result.Success() {
 		return noPartitionTableSentinel
 	}
 
@@ -54,10 +54,10 @@ func parsePartitionsSfdisk(ctx context.Context, rawPath string, partition int) *
 
 // parsePartitionsParted parses partition table using parted as fallback.
 func parsePartitionsParted(ctx context.Context, rawPath string, partition int) *parseResult {
-	result := system.RunCmdCompat(ctx, []string{"parted", "-sm", rawPath, "unit", "B", "print"}, system.RunCmdOpts{
+	result, _ := system.DefaultRunner.Run(ctx, []string{"parted", "-sm", rawPath, "unit", "B", "print"}, system.RunCmdOpts{
 		Check: false, Capture: true, Timeout: partedTimeout,
 	})
-	if result.ExitCode != 0 {
+	if !result.Success() {
 		return nil
 	}
 
