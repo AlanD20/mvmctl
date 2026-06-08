@@ -2,7 +2,6 @@ package vm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 
@@ -408,8 +407,7 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 		// propagate to the caller via named return err.
 		if wasRunning {
 			if resumeErr := client.ResumeVM(ctx); resumeErr != nil {
-				var de *errs.DomainError
-				if errors.As(resumeErr, &de) {
+				if _, ok := errs.AsType[*errs.DomainError](resumeErr); ok {
 					slog.Warn("Failed to resume VM after snapshot — leaving in paused state", "name", name)
 				} else {
 					// Non-DomainError propagates (matches Python's except MVMError:
@@ -418,8 +416,7 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 					err = resumeErr
 				}
 			} else if updateErr := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); updateErr != nil {
-				var de *errs.DomainError
-				if errors.As(updateErr, &de) {
+				if _, ok := errs.AsType[*errs.DomainError](updateErr); ok {
 					slog.Warn("Failed to resume VM after snapshot — leaving in paused state", "name", name)
 				} else {
 					err = updateErr

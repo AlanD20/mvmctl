@@ -2,10 +2,12 @@ package system
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
+	"slices"
 
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/errs"
@@ -22,15 +24,11 @@ type PrivilegeDetails struct {
 
 // NewPrivilegeError creates a privilege error with structured PrivilegeDetails.
 func NewPrivilegeError(msg string, details *PrivilegeDetails) *errs.DomainError {
-	d := map[string]any{
-		"message":              details.Message,
-		"missing_capabilities": []string{},
-	}
-	if len(details.MissingBinaries) > 0 {
-		d["missing_binaries"] = details.MissingBinaries
-	}
-	if len(details.Suggestions) > 0 {
-		d["suggestions"] = details.Suggestions
+	var d map[string]any
+	data, _ := json.Marshal(details)
+	json.Unmarshal(data, &d)
+	if d == nil {
+		d = make(map[string]any)
 	}
 	return errs.New(errs.CodePrivilegeRequired, msg, errs.WithDetails(d))
 }
@@ -86,12 +84,7 @@ func CheckPrivileges(binary string, operationDescription string) error {
 	isSupplementaryMember := false
 	members, parseErr := GroupMembersViaNSS(context.Background(), infra.MVMUnixGroup)
 	if parseErr == nil {
-		for _, m := range members {
-			if m == username {
-				isSupplementaryMember = true
-				break
-			}
-		}
+		isSupplementaryMember = slices.Contains(members, username)
 	}
 	isPrimaryGroup := currentUser.Gid == grpInfo.Gid
 	userInGroup := isSupplementaryMember || isPrimaryGroup

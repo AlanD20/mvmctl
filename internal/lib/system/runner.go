@@ -152,7 +152,7 @@ func CaptureExitCode(pid int) *int {
 type ShutdownConfig struct {
 	Pid               int
 	IsChild           bool
-	PreSignalHook     func() bool  // optional: called before SIGTERM; if returns false, wait only
+	PreSignalHook     func() bool   // optional: called before SIGTERM; if returns false, wait only
 	GracefulTimeout   time.Duration // zero = DefaultGracefulTimeout
 	KillTimeout       time.Duration // zero = DefaultKillTimeout
 	ExpectedStartTime *int64        // optional: PID reuse detection
