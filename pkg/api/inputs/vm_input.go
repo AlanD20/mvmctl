@@ -101,7 +101,7 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 // Matches Python's VMRequest._validate_identifiers().
 func (r *VMRequest) validateIdentifiers() error {
 	for _, identifier := range r.input.Identifiers {
-		if validators.IsMAC(identifier) {
+		if validators.ValidMACRegex.MatchString(identifier) {
 			if err := validators.MAC(identifier); err != nil {
 				return errs.New(errs.CodeVMResolveFailed, fmt.Sprintf("Invalid MAC address: %s", identifier))
 			}

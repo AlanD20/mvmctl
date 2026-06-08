@@ -172,13 +172,13 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	// Validate no subnet overlap
 	existingNetworks, err := r.networkRepo.ListAll(ctx)
 	if err != nil {
-		return errs.New(errs.CodeDatabaseError, "Failed to list existing networks: "+err.Error())
+		return errs.New(errs.CodeDatabaseError, "failed to list existing networks: "+err.Error())
 	}
-	existingNetworksGeneric := make([]any, len(existingNetworks))
-	for i, n := range existingNetworks {
-		existingNetworksGeneric[i] = n
+	subnets := make([]string, 0, len(existingNetworks))
+	for _, n := range existingNetworks {
+		subnets = append(subnets, n.Subnet)
 	}
-	if err := validators.SubnetNoOverlap(r.result.Subnet, existingNetworksGeneric, r.result.Name); err != nil {
+	if err := validators.SubnetNoOverlap(r.result.Subnet, subnets); err != nil {
 		return errs.New(errs.CodeNetworkSubnetOverlap, err.Error(), errs.WithClass(errs.ClassConflict))
 	}
 
