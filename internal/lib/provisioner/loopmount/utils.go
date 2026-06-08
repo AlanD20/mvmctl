@@ -54,9 +54,13 @@ func parsePartitionsSfdisk(ctx context.Context, rawPath string, partition int) *
 
 // parsePartitionsParted parses partition table using parted as fallback.
 func parsePartitionsParted(ctx context.Context, rawPath string, partition int) *parseResult {
-	result, _ := system.DefaultRunner.Run(ctx, []string{"parted", "-sm", rawPath, "unit", "B", "print"}, system.RunCmdOpts{
-		Check: false, Capture: true, Timeout: partedTimeout,
-	})
+	result, _ := system.DefaultRunner.Run(
+		ctx,
+		[]string{"parted", "-sm", rawPath, "unit", "B", "print"},
+		system.RunCmdOpts{
+			Check: false, Capture: true, Timeout: partedTimeout,
+		},
+	)
 	if !result.Success() {
 		return nil
 	}

@@ -843,7 +843,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	if len(s3Versions) == 0 {
 		// No images found for this CI version — emit a warning and a marker
 		// entry so the type still shows in listings.
-		slog.Warn(fmt.Sprintf("Firecracker CI %s has no images at %s", resolvedCIVersion, listURL))
+		slog.Warn("Firecracker CI has no images", "ci_version", resolvedCIVersion, "url", listURL)
 		s3Versions = append(s3Versions, model.VersionInfo{
 			Version:     "",
 			DisplayName: fmt.Sprintf("No images for %s", resolvedCIVersion),

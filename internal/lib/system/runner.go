@@ -338,7 +338,7 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 	// ── Build argument list, handling privileged mode ──
 	cmdArgs := args
 	if opts.Privileged && !IsRoot() {
-		_ = RequireMvmGroupMembership() // warn only
+		_ = requireMvmGroupMembership() // warn only
 		if opts.Interactive {
 			cmdArgs = append([]string{"sudo"}, args...)
 		} else {

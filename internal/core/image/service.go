@@ -1040,7 +1040,11 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 		return "", errs.New(errs.CodeImageError, "mkfs.ext4 not found. Install e2fsprogs package.")
 	}
 
-	duResult, duErr := system.DefaultRunner.Run(ctx, []string{"du", "-sb", extractDir}, system.RunCmdOpts{Check: true, Capture: true})
+	duResult, duErr := system.DefaultRunner.Run(
+		ctx,
+		[]string{"du", "-sb", extractDir},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
 	contentBytes := int64(0)
 	if duErr == nil {
 		fields := strings.Fields(duResult.Stdout)

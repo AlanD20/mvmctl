@@ -22,7 +22,6 @@ func ResolvePath(path string) string {
 }
 
 // ExpandTilde expands ~ to the user's home directory, matching Python's Path.expanduser().
-// TODO(verdict#33): moved from kernel/resolver.go — shared utility
 func ExpandTilde(path string) string {
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()
@@ -35,8 +34,6 @@ func ExpandTilde(path string) string {
 
 // ExpandAndResolve expands ~ to home directory, resolves symlinks, and makes
 // path absolute — matching Python's Path.expanduser().resolve() semantics.
-// Python's resolve() resolves all symlinks; Go's filepath.Abs() alone does not.
-// TODO(verdict#33): moved from kernel/resolver.go — shared utility
 func ExpandAndResolve(path string) (string, error) {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()

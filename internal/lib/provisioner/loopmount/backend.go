@@ -214,7 +214,11 @@ func (b *LoopMountBackend) ExtractPartition(
 	if fsType == "ext4" || fsType == "ext3" || fsType == "ext2" ||
 		fsType == "btrfs" || fsType == "xfs" {
 		slog.Info("Image is filesystem, using as-is", "type", fsType)
-		result, _ := system.DefaultRunner.Run(ctx, []string{"cp", "--sparse=always", rawPath, outputPath}, system.RunCmdOpts{Capture: true, Check: false})
+		result, _ := system.DefaultRunner.Run(
+			ctx,
+			[]string{"cp", "--sparse=always", rawPath, outputPath},
+			system.RunCmdOpts{Capture: true, Check: false},
+		)
 		if !result.Success() {
 			if err := system.CopyBytesDD(ctx, rawPath, outputPath, 0, 0); err != nil {
 				return "", err

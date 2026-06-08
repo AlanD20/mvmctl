@@ -160,7 +160,11 @@ func runMake(ctx context.Context, kernelDir, target string, jobs int) (int, stri
 func checkBuildDependencies(ctx context.Context) error {
 	var missing []string
 	for _, cmd := range KernelBuildCommands {
-		result, _ := system.DefaultRunner.Run(ctx, []string{"which", cmd}, system.RunCmdOpts{Capture: true, Check: false})
+		result, _ := system.DefaultRunner.Run(
+			ctx,
+			[]string{"which", cmd},
+			system.RunCmdOpts{Capture: true, Check: false},
+		)
 		if !result.Success() {
 			missing = append(missing, cmd)
 		}

@@ -141,7 +141,11 @@ func generateKeypair(
 		}
 		args = append(args, "-b", strconv.Itoa(bits))
 	}
-	result, err := system.DefaultRunner.Run(ctx, append([]string{"ssh-keygen"}, args...), system.RunCmdOpts{Check: true, Capture: true})
+	result, err := system.DefaultRunner.Run(
+		ctx,
+		append([]string{"ssh-keygen"}, args...),
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
 	if err != nil {
 		return "", errs.New(errs.CodeKeyError, fmt.Sprintf("ssh-keygen failed: %s", strings.TrimSpace(result.Stderr)))
 	}

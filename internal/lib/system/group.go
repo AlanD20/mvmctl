@@ -38,7 +38,7 @@ var _mvmGroupMu sync.Mutex
 //	lets sudo handle authentication with its normal password prompt.
 //
 // Uses infra.MVMUnixGroup (which defaults to "mvm" from the CLI binary name).
-func RequireMvmGroupMembership() error {
+func requireMvmGroupMembership() error {
 	_mvmGroupMu.Lock()
 	if _mvmGroupVerified {
 		_mvmGroupMu.Unlock()
@@ -75,8 +75,7 @@ func RequireMvmGroupMembership() error {
 	username := currentUser.Username
 
 	// Get group member list like Python's g.gr_mem
-	// Use getent group (NSS-compatible) instead of reading /etc/group directly.
-	groupMembers := getGroupMembers(context.Background(), g.Name)
+	groupMembers, _ := GroupMembersViaNSS(context.Background(), g.Name)
 
 	// -- Check 1: is user a member (supplementary OR primary)? --
 	// Python:
@@ -124,31 +123,6 @@ func RequireMvmGroupMembership() error {
 	return nil
 }
 
-// getGroupMembers returns the list of members of a Unix group.
-// Python's grp.getgrnam() returns a grp.struct_group with a gr_mem field.
-// Go's user.LookupGroup() does not provide member lists.
-//
-// Instead of reading /etc/group directly (which breaks with NSS — LDAP,
-// SSSD, etc.), we use `getent group` which queries the configured Name
-// Service Switch libraries via libc, matching Python's NSS-compatible
-// behavior.
-func getGroupMembers(ctx context.Context, groupName string) []string {
-	result, err := DefaultRunner.Run(ctx, []string{"getent", "group", groupName}, RunCmdOpts{Capture: true})
-	if err != nil {
-		return nil
-	}
-	// Format: groupname:password:GID:member1,member2,...
-	parts := strings.Split(strings.TrimRight(result.Stdout, "\n"), ":")
-	if len(parts) >= 4 {
-		membersStr := parts[3]
-		if membersStr == "" {
-			return nil
-		}
-		return strings.Split(membersStr, ",")
-	}
-	return nil
-}
-
 // ── OS helpers ──
 
 // IsRoot returns true if the effective user ID is 0 (root).
@@ -187,8 +161,6 @@ func UserInGroup(ctx context.Context, username, groupName string) bool {
 // Returns the member list for a group via NSS (getent).
 // This matches Python's grp.getgrnam().gr_mem which resolves through NSS
 // (LDAP, systemd-userdb, etc.) instead of parsing /etc/group directly.
-//
-// TODO: Consolidate with getGroupMembers (unexported) which has similar logic.
 func GroupMembersViaNSS(ctx context.Context, groupName string) ([]string, error) {
 	result, err := DefaultRunner.Run(ctx, []string{"getent", "group", groupName}, RunCmdOpts{Capture: true})
 	if err != nil {
@@ -204,12 +176,4 @@ func GroupMembersViaNSS(ctx context.Context, groupName string) ([]string, error)
 		return nil, nil
 	}
 	return strings.Split(members, ","), nil
-}
-
-// ResetGroupCache resets the module-level group membership cache.
-// Intended for testing only.
-func ResetGroupCache() {
-	_mvmGroupMu.Lock()
-	_mvmGroupVerified = false
-	_mvmGroupMu.Unlock()
 }
