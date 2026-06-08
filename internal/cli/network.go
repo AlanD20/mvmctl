@@ -78,6 +78,9 @@ func newNetworkListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if jsonOutput {
+				if nets == nil {
+					nets = []*model.Network{}
+				}
 				data, _ := json.MarshalIndent(nets, "", "  ")
 				fmt.Println(string(data))
 				return nil

@@ -128,6 +128,9 @@ func newImageListCmd(op *api.Operation) *cobra.Command {
 
 func printRemoteImages(versions []model.VersionInfo, jsonOutput bool) {
 	if jsonOutput {
+		if versions == nil {
+			versions = []model.VersionInfo{}
+		}
 		b, _ := json.MarshalIndent(versions, "", "  ")
 		fmt.Println(string(b))
 		return
@@ -144,6 +147,9 @@ func printRemoteImages(versions []model.VersionInfo, jsonOutput bool) {
 // printLocalImages prints the local image listing table.
 func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput bool, ctx context.Context) {
 	if jsonOutput {
+		if images == nil {
+			images = []*model.ImageItem{}
+		}
 		b, _ := json.MarshalIndent(images, "", "  ")
 		fmt.Println(string(b))
 		return

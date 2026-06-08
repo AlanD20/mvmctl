@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"path/filepath"
 
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
@@ -133,7 +131,7 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, handler *s
 	var exitCode *int
 
 	if !force && c.vm.APISocketPath != "" {
-		apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
+		apiSocket := c.vm.APISocketPath
 
 		// Try graceful shutdown via Firecracker API first
 		client := NewFirecrackerClient(apiSocket)
@@ -238,8 +236,8 @@ func (c *Controller) Pause(ctx context.Context) error {
 		}
 	}
 
-	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
+	// APISocketPath is already a full path from DB
+	apiSocket := c.vm.APISocketPath
 	client := NewFirecrackerClient(apiSocket)
 	// Python: try: ... finally: client.close()
 	defer client.Close()
@@ -314,8 +312,8 @@ func (c *Controller) Resume(ctx context.Context) error {
 		}
 	}
 
-	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
+	// APISocketPath is already a full path from DB
+	apiSocket := c.vm.APISocketPath
 	client := NewFirecrackerClient(apiSocket)
 	// Python: try: ... finally: client.close()
 	defer client.Close()
@@ -383,8 +381,8 @@ func (c *Controller) Start(ctx context.Context) error {
 		}
 	}
 
-	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
+	// APISocketPath is already a full path from DB
+	apiSocket := c.vm.APISocketPath
 	client := NewFirecrackerClient(apiSocket)
 	// Python: try: ... finally: client.close()
 	defer client.Close()
@@ -464,8 +462,8 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 		}
 	}
 
-	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
+	// APISocketPath is already a full path from DB
+	apiSocket := c.vm.APISocketPath
 	client := NewFirecrackerClient(apiSocket)
 	wasRunning := c.vm.Status == model.VMStatusRunning
 
@@ -533,8 +531,8 @@ func (c *Controller) LoadSnapshot(ctx context.Context, memIn, stateIn string, re
 		}
 	}
 
-	// Resolve full path: Python joins vm_dir / api_socket_path
-	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
+	// APISocketPath is already a full path from DB
+	apiSocket := c.vm.APISocketPath
 	client := NewFirecrackerClient(apiSocket)
 	// Python: try: ... finally: client.close()
 	defer client.Close()
@@ -563,8 +561,8 @@ func (c *Controller) LoadSnapshot(ctx context.Context, memIn, stateIn string, re
 // AttachVolume hotplugs a drive into the running Firecracker process and
 // persists the config so it survives reboot.
 func (c *Controller) AttachVolume(ctx context.Context, driveConfig model.DriveConfig) error {
-	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
-	configPath := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.ConfigPath)
+	apiSocket := c.vm.APISocketPath
+	configPath := c.vm.ConfigPath
 
 	// Hotplug into the running Firecracker process
 	client := NewFirecrackerClient(apiSocket)
@@ -588,8 +586,8 @@ func (c *Controller) AttachVolume(ctx context.Context, driveConfig model.DriveCo
 // DetachVolume hot-unplugs a drive from the running Firecracker process and
 // removes it from the persisted config.
 func (c *Controller) DetachVolume(ctx context.Context, driveID string) error {
-	apiSocket := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.APISocketPath)
-	configPath := filepath.Join(infra.GetVMDirByID(c.vm.ID), c.vm.ConfigPath)
+	apiSocket := c.vm.APISocketPath
+	configPath := c.vm.ConfigPath
 
 	// Call Firecracker API to delete the drive
 	client := NewFirecrackerClient(apiSocket)

@@ -66,6 +66,30 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	// PersistentPreRunE: logging setup + DB check + root warning matching Python app()
 	cmd.PersistentPreRunE = makePersistentPreRunE()
 
+	// Override built-in help command to return error for unknown topics.
+	// Cobra's default uses Run (not RunE) and silently returns 0 even for "help nonexistent".
+	// Matching Python: unknown help topics should exit with code 1.
+	cmd.SetHelpCommand(&cobra.Command{
+		Use:   "help [command]",
+		Short: "Help about any command",
+		Long: `Help provides help for any command in the application.
+	Type ` + "`" + cmd.Use + " help [command]`" + ` for help about a command.`,
+		Args: cobra.ArbitraryArgs,
+		RunE: func(c *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return c.Root().Help()
+			}
+			target, _, err := c.Root().Find(args)
+			if target == nil || err != nil {
+				for _, suggestion := range c.Root().SuggestionsFor(args[0]) {
+					fmt.Fprintf(c.ErrOrStderr(), "Did you mean this?\n\t%s\n", suggestion)
+				}
+				return fmt.Errorf("unknown help topic: %q", strings.Join(args, " "))
+			}
+			return target.Help()
+		},
+	})
+
 	// Subcommands matching Python's version_cmd, completion_cmd
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newCompletionCmd())
@@ -230,8 +254,17 @@ For PowerShell:
 				return rootCmd.GenBashCompletion(os.Stdout)
 			case "zsh":
 				return rootCmd.GenZshCompletion(os.Stdout)
-			case "fish":
-				return rootCmd.GenFishCompletion(os.Stdout, true)
+		case "fish":
+			if err := rootCmd.GenFishCompletion(os.Stdout, true); err != nil {
+				return err
+			}
+			// Add the _mvm_completion helper function expected by tests.
+			// Wraps Cobra's __mvm_get_completions which is defined in the generated output above.
+			fmt.Fprintln(os.Stdout)
+			fmt.Fprintf(os.Stdout, "function _mvm_completion -d 'mvm completions'\n")
+			fmt.Fprintf(os.Stdout, "    __mvm_get_completions (commandline -opc) (commandline -t)\n")
+			fmt.Fprintf(os.Stdout, "end\n")
+			return nil
 			case "powershell":
 				return rootCmd.GenPowerShellCompletion(os.Stdout)
 			default:

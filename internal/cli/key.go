@@ -60,6 +60,9 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if jsonOutput {
+				if keys == nil {
+					keys = []*model.SSHKeyItem{}
+				}
 				data, err := json.MarshalIndent(keys, "", "  ")
 				if err != nil {
 					return err

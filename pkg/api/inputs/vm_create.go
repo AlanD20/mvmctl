@@ -576,6 +576,9 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if input.EnableConsole != nil {
 		enableConsole = *input.EnableConsole
 	}
+	if input.NoConsole {
+		enableConsole = false
+	}
 
 	// Resolve enable_logging (matches Python)
 	enableLogging, _ := r.cfg.GetBool(ctx, "defaults.vm", "enable_logging")

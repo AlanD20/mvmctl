@@ -68,6 +68,9 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 				}
 
 				if jsonOutput {
+					if remoteVersions == nil {
+						remoteVersions = []model.VersionInfo{}
+					}
 					b, _ := json.MarshalIndent(remoteVersions, "", "  ")
 					fmt.Println(string(b))
 					return nil
