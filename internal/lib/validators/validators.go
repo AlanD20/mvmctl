@@ -32,7 +32,7 @@ var (
 var validSSHUsernameRegex = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
 // ── MAC address strict regex ──
-var validMACRegex = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
+var ValidMACRegex = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
 
 // ValidSemverRegex matches semver-like version strings (e.g. "1.15" or "1.15.0").
 // Used for version format validation across domains.
@@ -62,11 +62,11 @@ func EntityName(name, entityType string, maxLength int) error {
 		maxLength = 63
 	}
 	if name == "" {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid %s name: cannot be empty", entityType))
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid %s name: cannot be empty", entityType))
 	}
 	if len(name) > maxLength {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"Invalid %s name '%s': exceeds maximum length of %d characters",
+			"invalid %s name '%s': exceeds maximum length of %d characters",
 			entityType,
 			name,
 			maxLength,
@@ -75,18 +75,18 @@ func EntityName(name, entityType string, maxLength int) error {
 	if strings.HasPrefix(name, "-") {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid %s name '%s': cannot start with a hyphen", entityType, name),
+			fmt.Sprintf("invalid %s name '%s': cannot start with a hyphen", entityType, name),
 		)
 	}
 	if infra.IsReservedName(name) {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid %s name '%s': '%s' is a reserved name", entityType, name, name),
+			fmt.Sprintf("invalid %s name '%s': '%s' is a reserved name", entityType, name, name),
 		)
 	}
 	if infra.ContainsDangerousChars(name) {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"Invalid %s name '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
+			"invalid %s name '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
 			entityType,
 			name,
 		))
@@ -95,60 +95,21 @@ func EntityName(name, entityType string, maxLength int) error {
 	if IsIPAddress(name) {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid %s name '%s': cannot be an IP address", entityType, name),
+			fmt.Sprintf("invalid %s name '%s': cannot be an IP address", entityType, name),
 		)
 	}
 	if !validNameRegex.MatchString(name) {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid %s name '%s': must match ^[a-z0-9][a-z0-9._-]{0,62}$", entityType, name),
+			fmt.Sprintf("invalid %s name '%s': must match ^[a-z0-9][a-z0-9._-]{0,62}$", entityType, name),
 		)
 	}
 	return nil
-}
-
-// ValidateName validates a general entity name (1-63 chars, alphanumeric, dot, underscore, hyphen).
-// Wrapper around EntityName with default type and max length.
-// Returns *errs.DomainError matching Python's MVMError pattern.
-func Name(name string) error {
-	return EntityName(name, "name", 63)
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CIDR / IP / Port validation
 // ══════════════════════════════════════════════════════════════════════════════
-
-func CIDR(cidr string) error {
-	if cidr == "" {
-		return errs.New(errs.CodeValidationFailed, "Invalid subnet: cannot be empty")
-	}
-	if strings.Contains(cidr, " ") {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid subnet: '%s' cannot contain spaces", cidr))
-	}
-	// Enforce IPv4 only, matching Python's ipaddress.IPv4Network
-	_, ipnet, err := net.ParseCIDR(cidr)
-	if err != nil || ipnet.IP.To4() == nil {
-		return errs.New(
-			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid subnet: '%s' is not a valid IPv4 CIDR: %v", cidr, err),
-		)
-	}
-	return nil
-}
-
-func IP(ip string) error {
-	if net.ParseIP(ip) == nil {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid IP address: %s", ip))
-	}
-	return nil
-}
-
-func Port(port int) error {
-	if port < 1 || port > 65535 {
-		return errs.New(errs.CodeValidationFailed, "Port must be 1-65535")
-	}
-	return nil
-}
 
 func IsIPAddress(s string) bool {
 	return net.ParseIP(s) != nil
@@ -163,39 +124,39 @@ func IPv4Address(ip string, fieldName string, requirePrivate bool, subnet string
 		fieldName = "IP address"
 	}
 	if ip == "" {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid %s: cannot be empty", fieldName))
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid %s: cannot be empty", fieldName))
 	}
 	if strings.Contains(ip, " ") {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid %s: '%s' cannot contain spaces", fieldName, ip))
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid %s: '%s' cannot contain spaces", fieldName, ip))
 	}
 	parsed := net.ParseIP(ip)
 	if parsed == nil || parsed.To4() == nil {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid %s: '%s' is not a valid IPv4 address", fieldName, ip),
+			fmt.Sprintf("invalid %s: '%s' is not a valid IPv4 address", fieldName, ip),
 		)
 	}
 	if requirePrivate && !parsed.IsPrivate() {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid %s: '%s' must be a private/internal address", fieldName, ip),
+			fmt.Sprintf("invalid %s: '%s' must be a private/internal address", fieldName, ip),
 		)
 	}
 	if subnet != "" {
 		_, ipnet, err := net.ParseCIDR(subnet)
 		if err != nil {
-			return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid subnet: %v", err))
+			return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid subnet: %v", err))
 		}
 		if !ipnet.Contains(parsed) {
 			return errs.New(
 				errs.CodeValidationFailed,
-				fmt.Sprintf("Invalid %s: '%s' is not within subnet %s", fieldName, ip, subnet),
+				fmt.Sprintf("invalid %s: '%s' is not within subnet %s", fieldName, ip, subnet),
 			)
 		}
 		if parsed.Equal(ipnet.IP) {
 			return errs.New(
 				errs.CodeValidationFailed,
-				fmt.Sprintf("Invalid %s: '%s' is the network address of %s", fieldName, ip, subnet),
+				fmt.Sprintf("invalid %s: '%s' is the network address of %s", fieldName, ip, subnet),
 			)
 		}
 	}
@@ -204,7 +165,7 @@ func IPv4Address(ip string, fieldName string, requirePrivate bool, subnet string
 		if gw != nil && parsed.Equal(gw) {
 			return errs.New(
 				errs.CodeValidationFailed,
-				fmt.Sprintf("Invalid %s: '%s' is the gateway address", fieldName, ip),
+				fmt.Sprintf("invalid %s: '%s' is the gateway address", fieldName, ip),
 			)
 		}
 	}
@@ -231,15 +192,6 @@ func VolumeName(name string) error {
 // CoerceBool helper
 // ══════════════════════════════════════════════════════════════════════════════
 
-func CoerceBool(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "1", "true", "yes", "y", "on":
-		return true
-	default:
-		return false
-	}
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // Network validation (Python: NetworkValidator)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -251,19 +203,19 @@ func NetworkName(name string) error {
 	}
 	// Network names must not contain dots
 	if strings.Contains(name, ".") {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid network name '%s': cannot contain dots", name))
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid network name '%s': cannot contain dots", name))
 	}
 	// Network names must not be reserved interface names
 	if ReservedInterfaces[strings.ToLower(name)] {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid network name '%s': '%s' is a reserved interface name", name, name),
+			fmt.Sprintf("invalid network name '%s': '%s' is a reserved interface name", name, name),
 		)
 	}
 	// Network names must not start with CLI_NAME- prefix (reserved for bridges)
 	if strings.HasPrefix(name, infra.CLIName+"-") {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"Invalid network name '%s': cannot start with '%s-' (reserved for bridge names)",
+			"invalid network name '%s': cannot start with '%s-' (reserved for bridge names)",
 			name,
 			infra.CLIName,
 		))
@@ -272,51 +224,32 @@ func NetworkName(name string) error {
 }
 
 func MAC(mac string) error {
-	if !validMACRegex.MatchString(mac) {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid MAC address format: %s", mac))
+	if !ValidMACRegex.MatchString(mac) {
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid MAC address format: %s", mac))
 	}
 	return nil
 }
 
-// IsMAC checks if a string looks like a MAC address (6 colon-separated hex pairs).
-func IsMAC(identifier string) bool {
-	parts := strings.Split(identifier, ":")
-	if len(parts) != 6 {
-		return false
-	}
-	for _, p := range parts {
-		if len(p) != 2 {
-			return false
-		}
-		for _, c := range p {
-			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 func Subnet(subnet string) (string, error) {
 	if subnet == "" {
-		return "", errs.New(errs.CodeValidationFailed, "Invalid subnet: cannot be empty")
+		return "", errs.New(errs.CodeValidationFailed, "invalid subnet: cannot be empty")
 	}
 	if strings.Contains(subnet, " ") {
 		return "", errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid subnet: '%s' cannot contain spaces", subnet),
+			fmt.Sprintf("invalid subnet: '%s' cannot contain spaces", subnet),
 		)
 	}
 	_, ipnet, err := net.ParseCIDR(subnet)
 	if err != nil {
 		return "", errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid subnet: '%s' is not a valid IPv4 CIDR: %v", subnet, err),
+			fmt.Sprintf("invalid subnet: '%s' is not a valid IPv4 CIDR: %v", subnet, err),
 		)
 	}
 	if ipnet.IP.To4() == nil {
 		return "", errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"Invalid subnet: '%s' is not a valid IPv4 CIDR: '%s' does not appear to be an IPv4 network",
+			"invalid subnet: '%s' is not a valid IPv4 CIDR: '%s' does not appear to be an IPv4 network",
 			subnet,
 			subnet,
 		))
@@ -329,41 +262,41 @@ func Subnet(subnet string) (string, error) {
 
 func IPv4Gateway(gateway string, subnet string) (string, error) {
 	if gateway == "" {
-		return "", errs.New(errs.CodeValidationFailed, "Invalid gateway: cannot be empty")
+		return "", errs.New(errs.CodeValidationFailed, "invalid gateway: cannot be empty")
 	}
 	if strings.Contains(gateway, " ") {
 		return "", errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid gateway: '%s' cannot contain spaces", gateway),
+			fmt.Sprintf("invalid gateway: '%s' cannot contain spaces", gateway),
 		)
 	}
 	parsed := net.ParseIP(gateway)
 	if parsed == nil || parsed.To4() == nil {
 		return "", errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid gateway: '%s' is not a valid IPv4 address", gateway),
+			fmt.Sprintf("invalid gateway: '%s' is not a valid IPv4 address", gateway),
 		)
 	}
 	if !parsed.IsPrivate() {
 		return "", errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"Invalid gateway: '%s' must be a private/internal address. Use a subnet from RFC1918 ranges: 10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16",
+			"invalid gateway: '%s' must be a private/internal address. Use a subnet from RFC1918 ranges: 10.0.0.0/8, 172.16.0.0/12, or 192.168.0.0/16",
 			gateway,
 		))
 	}
 	_, ipnet, err := net.ParseCIDR(subnet)
 	if err != nil {
-		return "", errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid subnet: %v", err))
+		return "", errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid subnet: %v", err))
 	}
 	if !ipnet.Contains(parsed) {
 		return "", errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid gateway: '%s' is not within subnet %s", gateway, subnet),
+			fmt.Sprintf("invalid gateway: '%s' is not within subnet %s", gateway, subnet),
 		)
 	}
 	if parsed.Equal(ipnet.IP) {
 		return "", errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid gateway: '%s' is the network address of %s", gateway, subnet),
+			fmt.Sprintf("invalid gateway: '%s' is the network address of %s", gateway, subnet),
 		)
 	}
 	return parsed.String(), nil
@@ -371,64 +304,64 @@ func IPv4Gateway(gateway string, subnet string) (string, error) {
 
 func BridgeName(ctx context.Context, bridge string) error {
 	if bridge == "" {
-		return errs.New(errs.CodeValidationFailed, "Invalid bridge name: cannot be empty")
+		return errs.New(errs.CodeValidationFailed, "invalid bridge name: cannot be empty")
 	}
 	if len(bridge) > ifnamSiz {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid bridge name: '%s' exceeds maximum length of %d", bridge, ifnamSiz),
+			fmt.Sprintf("invalid bridge name: '%s' exceeds maximum length of %d", bridge, ifnamSiz),
 		)
 	}
 	if strings.HasPrefix(bridge, "-") {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid bridge name: '%s' cannot start with a hyphen", bridge),
+			fmt.Sprintf("invalid bridge name: '%s' cannot start with a hyphen", bridge),
 		)
 	}
 	if infra.ContainsDangerousChars(bridge) {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"Invalid bridge name: '%s' contains forbidden characters (shell metacharacters, path traversal, or control characters)",
+			"invalid bridge name: '%s' contains forbidden characters (shell metacharacters, path traversal, or control characters)",
 			bridge,
 		))
 	}
 	if !validInterfaceNameRegex.MatchString(bridge) {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"Invalid bridge name: '%s' must contain only lowercase alphanumeric, hyphen, and underscore characters",
+			"invalid bridge name: '%s' must contain only lowercase alphanumeric, hyphen, and underscore characters",
 			bridge,
 		))
 	}
 	// Check if bridge already exists on host (non-mvm interface)
 	if network.BridgeExists(ctx, bridge) {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Bridge '%s' already exists on this host", bridge))
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("bridge '%s' already exists on this host", bridge))
 	}
 	return nil
 }
 
 func NATGateways(ctx context.Context, gateways []string) ([]string, error) {
 	if len(gateways) == 0 {
-		return nil, errs.New(errs.CodeValidationFailed, "NAT gateways cannot be empty")
+		return nil, errs.New(errs.CodeValidationFailed, "nat gateways cannot be empty")
 	}
 	var validated []string
 	for _, iface := range gateways {
 		iface = strings.TrimSpace(iface)
 		if iface == "" {
-			return nil, errs.New(errs.CodeValidationFailed, "NAT gateway interface name cannot be empty")
+			return nil, errs.New(errs.CodeValidationFailed, "nat gateway interface name cannot be empty")
 		}
 		if len(iface) > ifnamSiz {
 			return nil, errs.New(
 				errs.CodeValidationFailed,
-				fmt.Sprintf("Invalid NAT gateway '%s': exceeds maximum length of %d", iface, ifnamSiz),
+				fmt.Sprintf("invalid NAT gateway '%s': exceeds maximum length of %d", iface, ifnamSiz),
 			)
 		}
 		if infra.ContainsDangerousChars(iface) {
 			return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-				"Invalid NAT gateway '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
+				"invalid NAT gateway '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
 				iface,
 			))
 		}
 		if !validInterfaceNameRegex.MatchString(iface) {
 			return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-				"Invalid NAT gateway '%s': must contain only lowercase alphanumeric, hyphen, and underscore characters",
+				"invalid NAT gateway '%s': must contain only lowercase alphanumeric, hyphen, and underscore characters",
 				iface,
 			))
 		}
@@ -436,7 +369,7 @@ func NATGateways(ctx context.Context, gateways []string) ([]string, error) {
 		if err := network.EnsureInterfaceReady(ctx, iface); err != nil {
 			return nil, errs.New(
 				errs.CodeValidationFailed,
-				fmt.Sprintf("NAT gateway '%s': interface does not exist on this host", iface),
+				fmt.Sprintf("nat gateway '%s': interface does not exist on this host", iface),
 			)
 		}
 		validated = append(validated, iface)
@@ -482,10 +415,16 @@ func cidrsOverlap(a, b *net.IPNet) bool {
 	return ipCmp(aFirst, bLast) <= 0 && ipCmp(bFirst, aLast) <= 0
 }
 
-func SubnetNoOverlap(subnet string, existing []any, excludeName string) error {
+// SubnetProvider is implemented by types that have both a Name and a Subnet field.
+type SubnetProvider interface {
+	GetName() string
+	GetSubnet() string
+}
+
+func SubnetNoOverlap(subnet string, existingSubnets []string) error {
 	_, newNet, err := net.ParseCIDR(subnet)
 	if err != nil {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid subnet: %v", err))
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid subnet: %v", err))
 	}
 	// Python uses strict=True in subnet overlap check, which rejects host bits.
 	// net.ParseCIDR strips host bits, so we must check if the input had host bits set.
@@ -495,18 +434,10 @@ func SubnetNoOverlap(subnet string, existing []any, excludeName string) error {
 	if inputIP != nil && !inputIP.Equal(newNet.IP) {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid subnet: '%s' has host bits set (use strict=True)", subnet),
+			fmt.Sprintf("invalid subnet: '%s' has host bits set (use strict=True)", subnet),
 		)
 	}
-	for _, item := range existing {
-		name := duckTypedName(item)
-		itemSubnet := duckTypedSubnet(item)
-		if name == "" || itemSubnet == "" {
-			continue
-		}
-		if name == excludeName {
-			continue
-		}
+	for _, itemSubnet := range existingSubnets {
 		_, existingNet, err := net.ParseCIDR(itemSubnet)
 		if err != nil {
 			continue
@@ -514,39 +445,11 @@ func SubnetNoOverlap(subnet string, existing []any, excludeName string) error {
 		if cidrsOverlap(newNet, existingNet) {
 			return errs.New(
 				errs.CodeNetworkSubnetOverlap,
-				fmt.Sprintf("Subnet %s overlaps with network '%s' (%s)", subnet, name, itemSubnet),
+				fmt.Sprintf("subnet %s overlaps with %s", subnet, itemSubnet),
 			)
 		}
 	}
 	return nil
-}
-
-// Namable is implemented by types that have a Name field (matching Python's
-// duck-typed item.name access pattern).
-type Namable interface {
-	GetName() string
-}
-
-// SubnetProvider is implemented by types that have a Subnet field (matching
-// Python's duck-typed item.subnet access pattern).
-type SubnetProvider interface {
-	GetSubnet() string
-}
-
-// duckTypedName returns the Name from an item implementing Namable.
-func duckTypedName(v any) string {
-	if n, ok := v.(Namable); ok {
-		return n.GetName()
-	}
-	return ""
-}
-
-// duckTypedSubnet returns the Subnet from an item implementing SubnetProvider.
-func duckTypedSubnet(v any) string {
-	if s, ok := v.(SubnetProvider); ok {
-		return s.GetSubnet()
-	}
-	return ""
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -566,7 +469,7 @@ func BootArgComponent(value, componentName string) error {
 	}
 	if validBootArgComponentRegex.MatchString(value) {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"Invalid %s '%s': must not contain spaces or shell metacharacters",
+			"invalid %s '%s': must not contain spaces or shell metacharacters",
 			componentName,
 			value,
 		))
@@ -578,7 +481,7 @@ func SSHUsername(user string) error {
 	if !validSSHUsernameRegex.MatchString(user) {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("Invalid SSH username '%s': must match ^[a-z_][a-z0-9_-]*$", user),
+			fmt.Sprintf("invalid SSH username '%s': must match ^[a-z_][a-z0-9_-]*$", user),
 		)
 	}
 	return nil
@@ -610,7 +513,7 @@ func BootArgs(bootArgs, rootUUID, guestIP string) []string {
 		// Python: uuid_pattern.match(root_uuid) — anchored at start only (no $).
 		if strings.Contains(bootArgs, "root_uuid") && rootUUID != "" {
 			if !validUUIDRegex.MatchString(rootUUID) {
-				errors = append(errors, fmt.Sprintf("Invalid root UUID format: %s", rootUUID))
+				errors = append(errors, fmt.Sprintf("invalid root UUID format: %s", rootUUID))
 			}
 		}
 	}
