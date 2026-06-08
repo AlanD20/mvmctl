@@ -88,26 +88,26 @@ func (s *Service) RunCommand(ctx context.Context, command string) (int, error) {
 	sshArgs := s.BuildCommand(command)
 
 	opts := system.RunCmdOpts{
-		Capture:   false,
-		Check:     false,
-		AppendEnv: map[string]string{"MVM_SSH_CONNECTION": "1"},
+		Capture: false,
+		Check:   false,
+		Env:     map[string]string{"MVM_SSH_CONNECTION": "1"},
 	}
 	if s.timeout > 0 {
 		opts.Timeout = s.timeout
 	}
-	result := system.RunCmdCompat(ctx, sshArgs, opts)
+	result, err := system.DefaultRunner.Run(ctx, sshArgs, opts)
 
-	if result.Err != nil {
-		// Check timeout via error message. RunCmdCompat formats timeout errors
+	if err != nil {
+		// Check timeout via error message. RunCmdCompat formatted timeout errors
 		// as "Command timed out after Xs: ssh", matching Python's ProcessError.
-		if strings.Contains(result.Err.Error(), "timed out") {
+		if strings.Contains(err.Error(), "timed out") {
 			return -1, fmt.Errorf("SSH command timed out after %ds", int(s.timeout.Seconds()))
 		}
 
-		return -1, result.Err
+		return -1, err
 	}
 
-	if result.ExitCode != 0 {
+	if !result.Success() {
 		return result.ExitCode, nil
 	}
 	return 0, nil

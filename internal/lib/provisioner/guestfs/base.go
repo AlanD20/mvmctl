@@ -164,16 +164,16 @@ func guestfishRun(
 		if input != "" {
 			runOpts.Input = input
 		}
-		result := system.RunCmdCompat(ctx, append([]string{guestfishBin}, allArgs...), runOpts)
-		if result.Err != nil {
+		result, err := system.DefaultRunner.Run(ctx, append([]string{guestfishBin}, allArgs...), runOpts)
+		if err != nil {
 			label := "guestfish"
 			if input != "" {
 				label = "guestfish[stdin]"
 			}
 			if result.Stderr != "" {
-				lastErr = fmt.Errorf("%s[%s]: %s: %w", label, strings.Join(allArgs, " "), result.Stderr, result.Err)
+				lastErr = fmt.Errorf("%s[%s]: %s: %w", label, strings.Join(allArgs, " "), result.Stderr, err)
 			} else {
-				lastErr = fmt.Errorf("%s[%s]: %w", label, strings.Join(allArgs, " "), result.Err)
+				lastErr = fmt.Errorf("%s[%s]: %w", label, strings.Join(allArgs, " "), err)
 			}
 			continue
 		}

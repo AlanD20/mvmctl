@@ -105,13 +105,13 @@ func RunDeferred(ctx context.Context, cfg ProvisioningConfig) error {
 	}
 	allArgs = append(allArgs, "-f", scriptPath)
 
-	result := system.RunCmdCompat(
+	result, err := system.DefaultRunner.Run(
 		ctx,
 		append([]string{"guestfish"}, allArgs...),
 		system.RunCmdOpts{Capture: true, Check: true},
 	)
-	if result.Err != nil {
-		return fmt.Errorf("guestfish session failed: %s: %w", result.Stderr, result.Err)
+	if err != nil {
+		return fmt.Errorf("guestfish session failed: %s: %w", result.Stderr, err)
 	}
 
 	// Post-session shrink: get block device size for truncation
@@ -357,12 +357,12 @@ func ConvertTo(ctx context.Context, rootfsPath string, targetFs string) error {
 	sizeBytes = ((sizeBytes + mebi - 1) / mebi) * mebi
 	sizeMiB := sizeBytes / mebi
 
-	result := system.RunCmdCompat(ctx,
+	result, err := system.DefaultRunner.Run(ctx,
 		[]string{"truncate", "-s", fmt.Sprintf("%dM", sizeMiB), outputPath},
 		system.RunCmdOpts{Capture: true, Check: true},
 	)
-	if result.Err != nil {
-		return fmt.Errorf("truncate output: %s: %w", result.Stdout, result.Err)
+	if err != nil {
+		return fmt.Errorf("truncate output: %s: %w", result.Stdout, err)
 	}
 
 	rootDev, err := detectRootDevice(ctx, rootfsPath)
@@ -397,13 +397,13 @@ func ConvertTo(ctx context.Context, rootfsPath string, targetFs string) error {
 	}
 
 	// initEnv already called by detectRootDevice's guestfishRun (sync.Once)
-	result2 := system.RunCmdCompat(ctx, []string{"guestfish",
+	result2, err := system.DefaultRunner.Run(ctx, []string{"guestfish",
 		"--no-sync", "-f", scriptPath,
 	}, system.RunCmdOpts{Capture: true, Check: true})
-	if result2.Err != nil {
+	if err != nil {
 		os.Remove(outputPath)
 		return fmt.Errorf("guestfish convert failed: %s: %s: %w",
-			result2.Stderr, strings.TrimSpace(result2.Stdout), result2.Err)
+			result2.Stderr, strings.TrimSpace(result2.Stdout), err)
 	}
 
 	if err := os.Rename(outputPath, rootfsPath); err != nil {

@@ -38,13 +38,13 @@ func EnableIPForward(ctx context.Context) (*model.HostStateChangeItem, error) {
 		slog.Debug("IP forwarding already enabled")
 		return nil, nil
 	}
-	res := system.RunCmdCompat(
+	_, err = system.DefaultRunner.Run(
 		ctx,
 		[]string{"sysctl", "-w", fmt.Sprintf("%s=1", sysctlKey)},
-		system.DefaultRunCmdOpts(),
+		system.RunCmdOpts{Check: true, Capture: true},
 	)
-	if res.Err != nil {
-		return nil, fmt.Errorf("failed to enable IP forwarding: %w", res.Err)
+	if err != nil {
+		return nil, fmt.Errorf("failed to enable IP forwarding: %w", err)
 	}
 	return &model.HostStateChangeItem{
 		SessionID:     "",
@@ -111,9 +111,9 @@ func (s *Service) loadModule(
 	changeOrder int,
 	initTimestamp, createdAt string,
 ) (*model.HostStateChangeItem, error) {
-	res := system.RunCmdCompat(ctx, []string{"modprobe", module}, system.DefaultRunCmdOpts())
-	if res.Err != nil {
-		return nil, fmt.Errorf("failed to load kernel module %s: %w", module, res.Err)
+	_, err := system.DefaultRunner.Run(ctx, []string{"modprobe", module}, system.RunCmdOpts{Check: true, Capture: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to load kernel module %s: %w", module, err)
 	}
 	change := &model.HostStateChangeItem{
 		SessionID:     sessionID,
@@ -152,10 +152,9 @@ func (s *Service) EnsureKVMModules(
 	var vendorModules []string
 	for _, mod := range []string{"kvm_intel", "kvm_amd"} {
 		loaded := isModuleLoaded(ctx, mod)
-		opts := system.DefaultRunCmdOpts()
-		opts.Check = false
-		dryRunResult := system.RunCmdCompat(ctx, []string{"modprobe", "--dry-run", mod}, opts)
-		if loaded || dryRunResult.ExitCode == 0 {
+		dryRunResult, _ := system.DefaultRunner.Run(ctx, []string{"modprobe", "--dry-run", mod},
+			system.RunCmdOpts{Check: false})
+		if loaded || dryRunResult.Success() {
 			vendorModules = append(vendorModules, mod)
 		}
 	}
@@ -300,13 +299,13 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 				slog.Warn("Skipping disallowed sysctl key from state", "key", change.Setting)
 				continue
 			}
-			res := system.RunCmdCompat(
+			_, err := system.DefaultRunner.Run(
 				ctx,
 				[]string{"sysctl", "-w", fmt.Sprintf("%s=%s", change.Setting, *change.OriginalValue)},
-				system.DefaultRunCmdOpts(),
+				system.RunCmdOpts{Check: true, Capture: true},
 			)
-			if res.Err != nil {
-				return nil, fmt.Errorf("failed to revert %s: %w", change.Setting, res.Err)
+			if err != nil {
+				return nil, fmt.Errorf("failed to revert %s: %w", change.Setting, err)
 			}
 			reverted = append(reverted, &model.HostStateChangeItem{
 				SessionID:     change.SessionID,
@@ -332,11 +331,9 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 				if change.OriginalValue != nil {
 					// Validate sudoers content if the target is under sudoers dir
 					if strings.HasPrefix(target, infra.DefaultSudoersDir) {
-						opts := system.DefaultRunCmdOpts()
-						opts.Check = false
-						opts.Input = *change.OriginalValue
-						result := system.RunCmdCompat(ctx, []string{"visudo", "-c", "-f", "-"}, opts)
-						if result.ExitCode != 0 {
+					result, _ := system.DefaultRunner.Run(ctx, []string{"visudo", "-c", "-f", "-"},
+						system.RunCmdOpts{Check: false, Capture: true, Input: *change.OriginalValue})
+					if !result.Success() {
 							return nil, errs.New(
 								errs.CodeHostResetFailed,
 								fmt.Sprintf(

@@ -412,11 +412,11 @@ func runCacheCleanWithSudo(ctx context.Context) error {
 
 	common.Cli.Info("")
 	common.Cli.Info("Running cache clean with sudo...")
-	result := system.RunCmdCompat(ctx, []string{"sudo", mvmBin, "cache", "clean"}, system.RunCmdOpts{
+	result, err := system.DefaultRunner.Run(ctx, []string{"sudo", mvmBin, "cache", "clean"}, system.RunCmdOpts{
 		Capture: false,
 		Check:   false,
 	})
-	if !result.Success {
+	if err != nil || !result.Success() {
 		return fmt.Errorf("cache clean with sudo failed (exit %d)", result.ExitCode)
 	}
 	return nil

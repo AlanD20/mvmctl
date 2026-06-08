@@ -264,7 +264,9 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		cachedFC := filepath.Join(mirrorDir, fmt.Sprintf("firecracker-%s", mirrorTag))
 		cachedJL := filepath.Join(mirrorDir, fmt.Sprintf("jailer-%s", mirrorTag))
 
-		if system.FileExists(cachedFC) && system.FileExists(cachedJL) {
+		fi, fcErr := os.Stat(cachedFC)
+		fj, fjErr := os.Stat(cachedJL)
+		if fcErr == nil && !fi.IsDir() && fjErr == nil && !fj.IsDir() {
 			buildVersion := fmt.Sprintf("dev-%s", mirrorTag)
 			fcDest := filepath.Join(s.binDir, fmt.Sprintf("firecracker-%s", buildVersion))
 			jlDest := filepath.Join(s.binDir, fmt.Sprintf("jailer-%s", buildVersion))
@@ -284,8 +286,8 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	}
 
 	// ── Check git availability ──
-	gitCheck := system.RunCmdCompat(ctx, []string{"which", "git"}, system.RunCmdOpts{Capture: true, Check: false})
-	if gitCheck.ExitCode != 0 {
+	gitCheck, _ := system.DefaultRunner.Run(ctx, []string{"which", "git"}, system.RunCmdOpts{Capture: true, Check: false})
+	if !gitCheck.Success() {
 		return nil, binaryError(errs.CodeProcessError,
 			"Git is required to build from source. "+
 				"Install git (e.g., 'apt install git' or 'brew install git') "+
@@ -300,24 +302,24 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		slog.Info("Cloning Firecracker repository (this may take a while)...")
 		cloneCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
-		result := system.RunCmdCompat(cloneCtx, []string{"git", "clone", infra.FirecrackerGitRepoURL, srcDir},
+		_, err := system.DefaultRunner.Run(cloneCtx, []string{"git", "clone", infra.FirecrackerGitRepoURL, srcDir},
 			system.RunCmdOpts{Capture: false, Check: true})
-		if result.Err != nil {
+		if err != nil {
 			return nil, binaryError(
 				errs.CodeProcessError,
-				fmt.Sprintf("Failed to clone Firecracker repository: %v", result.Err),
+				fmt.Sprintf("Failed to clone Firecracker repository: %v", err),
 			)
 		}
 	} else {
 		slog.Info("Updating existing Firecracker repository...")
 		fetchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		result := system.RunCmdCompat(fetchCtx, []string{"git", "fetch", "origin"},
+		_, err := system.DefaultRunner.Run(fetchCtx, []string{"git", "fetch", "origin"},
 			system.RunCmdOpts{Cwd: srcDir, Capture: false, Check: true})
-		if result.Err != nil {
+		if err != nil {
 			return nil, binaryError(
 				errs.CodeProcessError,
-				fmt.Sprintf("Failed to update Firecracker repository: %v", result.Err),
+				fmt.Sprintf("Failed to update Firecracker repository: %v", err),
 			)
 		}
 	}
@@ -325,22 +327,22 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	// ── Checkout requested ref ──
 	checkoutCtx, checkoutCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer checkoutCancel()
-	result := system.RunCmdCompat(checkoutCtx, []string{"git", "checkout", gitRef},
+	_, err := system.DefaultRunner.Run(checkoutCtx, []string{"git", "checkout", gitRef},
 		system.RunCmdOpts{Cwd: srcDir, Capture: false, Check: true})
-	if result.Err != nil {
+	if err != nil {
 		return nil, binaryError(
 			errs.CodeProcessError,
-			fmt.Sprintf("Failed to checkout git ref '%s': %v", gitRef, result.Err),
+			fmt.Sprintf("Failed to checkout git ref '%s': %v", gitRef, err),
 		)
 	}
 
 	// ── Resolve short commit hash ──
 	revParseCtx, revParseCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer revParseCancel()
-	hashResult := system.RunCmdCompat(revParseCtx, []string{"git", "rev-parse", "--short", "HEAD"},
+	hashResult, hashErr := system.DefaultRunner.Run(revParseCtx, []string{"git", "rev-parse", "--short", "HEAD"},
 		system.RunCmdOpts{Cwd: srcDir, Capture: true, Check: true})
-	if hashResult.Err != nil {
-		return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to get commit hash: %v", hashResult.Err))
+	if hashErr != nil {
+		return nil, binaryError(errs.CodeProcessError, fmt.Sprintf("Failed to get commit hash: %v", hashErr))
 	}
 	shortHash := strings.TrimSpace(hashResult.Stdout)
 	buildVersion := fmt.Sprintf("dev-%s", shortHash)
@@ -355,11 +357,11 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	// ── Run the build with live output ──
 	buildCtx, buildCancel := context.WithTimeout(ctx, 1800*time.Second)
 	defer buildCancel()
-	buildResult := system.RunCmdCompat(buildCtx, []string{"tools/devtool", "build", "--release"},
+	buildResult, buildErr := system.DefaultRunner.Run(buildCtx, []string{"tools/devtool", "build", "--release"},
 		system.RunCmdOpts{Cwd: srcDir, Capture: false, Check: false})
-	if buildResult.Err != nil {
+	if buildErr != nil {
 		return nil, binaryError(errs.CodeProcessError,
-			fmt.Sprintf("Build process failed: %v", buildResult.Err),
+			fmt.Sprintf("Build process failed: %v", buildErr),
 		)
 	}
 
@@ -389,10 +391,10 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	jlSrc := filepath.Join(buildOutput, "jailer")
 
 	var missing []string
-	if !system.FileExists(fcSrc) {
+	if fi, err := os.Stat(fcSrc); err != nil || fi.IsDir() {
 		missing = append(missing, "firecracker")
 	}
-	if !system.FileExists(jlSrc) {
+	if fi, err := os.Stat(jlSrc); err != nil || fi.IsDir() {
 		missing = append(missing, "jailer")
 	}
 	if len(missing) > 0 {
@@ -482,7 +484,7 @@ func (s *Service) copyBinary(name, version, src, dest, label string) (*model.Bin
 		return nil, binaryError(errs.CodeInternal,
 			fmt.Sprintf("Failed to copy %s %s: %v", label, name, err))
 	}
-	system.MakeExecutable(dest)
+	os.Chmod(dest, 0755)
 	return s.createBinaryItem(name, version, dest, false)
 }
 

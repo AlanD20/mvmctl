@@ -126,11 +126,11 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 		filepath.Join(cloudInitDir, "meta-data"),
 	)
 
-	result := system.RunCmdCompat(ctx,
+	result, err := system.DefaultRunner.Run(ctx,
 		append([]string{infra.RequiredISOTool}, args...),
 		system.RunCmdOpts{Capture: true, Check: false},
 	)
-	if result.Success {
+	if err == nil && result.Success() {
 		return nil
 	}
 

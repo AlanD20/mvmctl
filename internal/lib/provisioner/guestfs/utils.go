@@ -109,14 +109,14 @@ func BuildAppliance(ctx context.Context, cacheDir string) (string, error) {
 	cmdCtx, cmdCancel := context.WithTimeout(ctx, applianceBuildTimeout)
 	defer cmdCancel()
 
-	result := system.RunCmdCompat(cmdCtx, []string{makeTool, applianceDir}, system.RunCmdOpts{
+	result, err := system.DefaultRunner.Run(cmdCtx, []string{makeTool, applianceDir}, system.RunCmdOpts{
 		Capture: true,
 		Check:   true,
 		Timeout: applianceBuildTimeout,
 		Env:     runEnv,
 	})
-	if result.Err != nil {
-		errStr := result.Err.Error()
+	if err != nil {
+		errStr := err.Error()
 		if strings.Contains(errStr, "timed out") {
 			slog.Warn("libguestfs appliance build timed out after 60s")
 			return "", nil
@@ -126,7 +126,7 @@ func BuildAppliance(ctx context.Context, cacheDir string) (string, error) {
 			return "", nil
 		}
 		slog.Warn("libguestfs appliance build failed",
-			"error", result.Err,
+			"error", err,
 			"output", result.Stdout+result.Stderr,
 		)
 		return "", nil

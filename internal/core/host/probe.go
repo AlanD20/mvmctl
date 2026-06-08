@@ -322,20 +322,17 @@ func detectIPTablesBackendConflict(ctx context.Context) bool {
 	// This determines the current iptables backend (nft vs legacy).
 	// The diagnosis string is computed but discarded by the probe caller
 	// (has_conflict, _ = ...); the call itself is preserved for completeness.
-	versionOpts := system.DefaultRunCmdOpts()
-	versionOpts.Check = false
-	versionResult := system.RunCmdCompat(ctx, []string{"iptables", "--version"}, versionOpts)
+	versionResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables", "--version"},
+		system.RunCmdOpts{Check: false})
 	_ = versionResult // result not used by probe, but the system call is made
 
 	legacyActive := false
 	nftActive := false
 
 	// Check legacy: iptables-legacy -L -n -v (with privileged=True, matching Python)
-	legacyOpts := system.DefaultRunCmdOpts()
-	legacyOpts.Check = false
-	legacyOpts.Privileged = true
-	legacyResult := system.RunCmdCompat(ctx, []string{"iptables-legacy", "-L", "-n", "-v"}, legacyOpts)
-	if legacyResult.ExitCode == 0 {
+	legacyResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables-legacy", "-L", "-n", "-v"},
+		system.RunCmdOpts{Check: false, Capture: true, Privileged: true})
+	if legacyResult.Success() {
 		for line := range strings.SplitSeq(legacyResult.Stdout, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
@@ -348,11 +345,9 @@ func detectIPTablesBackendConflict(ctx context.Context) bool {
 	}
 
 	// Check nft: iptables -L -n -v (with privileged=True, matching Python)
-	nftOpts := system.DefaultRunCmdOpts()
-	nftOpts.Check = false
-	nftOpts.Privileged = true
-	nftResult := system.RunCmdCompat(ctx, []string{"iptables", "-L", "-n", "-v"}, nftOpts)
-	if nftResult.ExitCode == 0 {
+	nftResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables", "-L", "-n", "-v"},
+		system.RunCmdOpts{Check: false, Capture: true, Privileged: true})
+	if nftResult.Success() {
 		for line := range strings.SplitSeq(nftResult.Stdout, "\n") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {

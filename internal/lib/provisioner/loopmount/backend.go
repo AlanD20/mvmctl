@@ -30,10 +30,10 @@ func runWireOp(ctx context.Context, input *loopmountsvc.WireInput) (*loopmountsv
 	if !system.IsRoot() {
 		provisionArgs = append([]string{"sudo"}, provisionArgs...)
 	}
-	result := system.RunCmdCompat(ctx, provisionArgs,
+	result, err := system.DefaultRunner.Run(ctx, provisionArgs,
 		system.RunCmdOpts{Capture: true, Check: true, Input: string(data)})
-	if result.Err != nil {
-		return nil, fmt.Errorf("provision subprocess failed: %s: %w", result.Stderr, result.Err)
+	if err != nil {
+		return nil, fmt.Errorf("provision subprocess failed: %s: %w", result.Stderr, err)
 	}
 
 	var output loopmountsvc.WireOutput
@@ -214,11 +214,8 @@ func (b *LoopMountBackend) ExtractPartition(
 	if fsType == "ext4" || fsType == "ext3" || fsType == "ext2" ||
 		fsType == "btrfs" || fsType == "xfs" {
 		slog.Info("Image is filesystem, using as-is", "type", fsType)
-		opts := system.DefaultRunCmdOpts()
-		opts.Capture = true
-		opts.Check = false
-		result := system.RunCmdCompat(ctx, []string{"cp", "--sparse=always", rawPath, outputPath}, opts)
-		if result.ExitCode != 0 {
+		result, _ := system.DefaultRunner.Run(ctx, []string{"cp", "--sparse=always", rawPath, outputPath}, system.RunCmdOpts{Capture: true, Check: false})
+		if !result.Success() {
 			if err := system.CopyBytesDD(ctx, rawPath, outputPath, 0, 0); err != nil {
 				return "", err
 			}

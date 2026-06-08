@@ -2,6 +2,7 @@ package logging
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -43,8 +44,7 @@ func (l *AuditLog) Path() string {
 func detectUser() string {
 	u, err := system.CurrentUsername()
 	if err != nil {
-		uid, _, _ := system.GetRealUserIDs()
-		return fmt.Sprintf("%d", uid)
+		return fmt.Sprintf("%d", os.Getuid())
 	}
 	return u
 }
