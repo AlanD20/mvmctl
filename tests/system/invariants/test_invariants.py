@@ -371,7 +371,7 @@ class TestInvariants:
             img_result = _run_mvm(mvm_binary, "image", "ls", "--json")
             images: list[dict[str, Any]] = json.loads(img_result.stdout)
 
-            vm_image_id = vm_info.get("assets", {}).get("image_id")
+            vm_image_id = vm_info.get("assets", {}).get("image", {}).get("id")
             image_ids: set[str] = {i["id"] for i in images if i.get("id")}
             assert vm_image_id in image_ids, (
                 f"VM '{vm_name}' references image_id '{vm_image_id}' "
@@ -424,7 +424,7 @@ class TestInvariants:
             kernel_result = _run_mvm(mvm_binary, "kernel", "ls", "--json")
             kernels: list[dict[str, Any]] = json.loads(kernel_result.stdout)
 
-            vm_kernel_id = vm_info.get("assets", {}).get("kernel_id")
+            vm_kernel_id = vm_info.get("assets", {}).get("kernel", {}).get("id")
             kernel_ids: set[str] = {k["id"] for k in kernels if k.get("id")}
             assert vm_kernel_id in kernel_ids, (
                 f"VM '{vm_name}' references kernel_id '{vm_kernel_id}' "
@@ -477,7 +477,9 @@ class TestInvariants:
             net_result = _run_mvm(mvm_binary, "network", "ls", "--json")
             networks: list[dict[str, Any]] = json.loads(net_result.stdout)
 
-            vm_network_id = vm_info.get("networking", {}).get("network_id")
+            vm_network_id = (
+                vm_info.get("networking", {}).get("network", {}).get("id")
+            )
             network_ids: set[str] = {n["id"] for n in networks if n.get("id")}
             assert vm_network_id in network_ids, (
                 f"VM '{vm_name}' references network_id '{vm_network_id}' "
@@ -605,8 +607,7 @@ class TestJsonConsistency:
                 f"not a dict: {type(resource_group).__name__}"
             )
             assert "id" in resource_group, (
-                f"{resource} inspect --json group '{group_key}' "
-                f"missing 'id'"
+                f"{resource} inspect --json group '{group_key}' missing 'id'"
             )
 
             # Check that ``created_at`` exists somewhere in the inspect output
@@ -717,9 +718,9 @@ class TestFlagNaming:
     def test_force_flag_used_consistently(self, mvm_binary) -> None:
         # Rationale: Only needs --help output (free). No resources needed.
         """``--force`` (not ``--overwrite``) should be used in add/create/export."""
-        add_help = _run_mvm(mvm_binary, "key", "add", "--help")
-        assert "--force" in add_help.stdout or "-f" in add_help.stdout
-        assert "--overwrite" not in add_help.stdout
+        import_help = _run_mvm(mvm_binary, "key", "import", "--help")
+        assert "--force" in import_help.stdout or "-f" in import_help.stdout
+        assert "--overwrite" not in import_help.stdout
 
         create_help = _run_mvm(mvm_binary, "key", "create", "--help")
         assert "--force" in create_help.stdout or "-f" in create_help.stdout
@@ -816,7 +817,7 @@ class TestJsonOutputConsistency:
                 assert "id" in item, "volume ls --json missing 'id'"
                 assert "name" in item, "volume ls --json missing 'name'"
                 assert "status" in item, "volume ls --json missing 'status'"
-                assert "size" in item, "volume ls --json missing 'size'"
+                assert "size_bytes" in item, "volume ls --json missing 'size_bytes'"
 
 
 # ============================================================================
@@ -1251,8 +1252,8 @@ class TestNetworkVMConsistency:
             vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
             vm_info = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_info is not None, f"VM '{vm_name}' not found"
-            assert vm_info.get("network_name") == net_name, (
-                f"VM is on network '{vm_info.get('network_name')}', "
+            assert vm_info.get("network", {}).get("name") == net_name, (
+                f"VM is on network '{vm_info.get('network', {}).get('name')}', "
                 f"expected '{net_name}'"
             )
             assert vm_info.get("ipv4"), f"VM '{vm_name}' has no IPv4 address"

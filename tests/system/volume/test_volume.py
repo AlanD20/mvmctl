@@ -1340,7 +1340,7 @@ class TestVolumeRunningVMDependency:
                 {},
             )
             original_size = (
-                vol_info_before.get("size") if vol_info_before else None
+                vol_info_before.get("size_bytes") if vol_info_before else None
             )
 
             result = _run_mvm(
@@ -1363,7 +1363,7 @@ class TestVolumeRunningVMDependency:
                     {},
                 )
                 new_size = (
-                    vol_info_after.get("size") if vol_info_after else None
+                    vol_info_after.get("size_bytes") if vol_info_after else None
                 )
                 assert new_size is not None
                 assert original_size is None or new_size != original_size
@@ -1449,7 +1449,7 @@ class TestVolumeNegativeFailure:
             )
             if result_ins.returncode == 0:
                 vm_info = json.loads(result_ins.stdout)
-                attached_vols = vm_info.get("volumes", [])
+                attached_vols = vm_info.get("volumes") or []
                 assert not any(
                     v.get("name") == "nonexistent-volume-name"
                     for v in attached_vols
@@ -1524,7 +1524,7 @@ class TestVolumeNegativeFailure:
             )
             if result_ins.returncode == 0:
                 vm_info = json.loads(result_ins.stdout)
-                attached_vols = vm_info.get("volumes", [])
+                attached_vols = vm_info.get("volumes") or []
                 assert len(attached_vols) == 0
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)

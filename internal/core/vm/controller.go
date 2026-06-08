@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
@@ -136,6 +137,8 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) e
 			exitCode = system.GracefulShutdown(system.ShutdownConfig{
 				Pid:               pid,
 				IsChild:           true,
+				GracefulTimeout:   2 * time.Second,
+				KillTimeout:       1 * time.Millisecond,
 				ExpectedStartTime: c.vm.ProcessStartTime,
 			})
 		}

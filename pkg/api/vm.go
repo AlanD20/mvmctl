@@ -771,7 +771,11 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 
 		// Console relay, TAP, IP lease cleanup
 		if vmLocal.RelayPID != nil {
-			system.GracefulShutdown(system.ShutdownConfig{Pid: *vmLocal.RelayPID})
+			system.GracefulShutdown(system.ShutdownConfig{
+				Pid:             *vmLocal.RelayPID,
+				GracefulTimeout: 1 * time.Second,
+				KillTimeout:     1 * time.Millisecond,
+			})
 		}
 		if vmLocal.RelaySocketPath != nil {
 			_ = os.Remove(*vmLocal.RelaySocketPath)
@@ -1898,6 +1902,11 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 	rootUser := "root"
 	enableAPISocket := true
 
+	cloudInitMode := vmItem.CloudInitMode
+	if cloudInitMode == "" {
+		cloudInitMode = string(model.CloudInitModeOFF)
+	}
+
 	cfg := &inputs.VMExportConfig{
 		SchemaVersion: "1.0",
 		Name:          vmItem.Name,
@@ -1940,7 +1949,7 @@ func (op *Operation) VMExport(ctx context.Context, input inputs.VMInput) (*input
 			CPUConfig:       cpuConfigStr,
 		},
 		CloudInit: inputs.VMExportCloudInitConfig{
-			Mode:           vmItem.CloudInitMode,
+			Mode:           cloudInitMode,
 			User:           rootUser,
 			NocloudNetPort: nocloudPort,
 		},

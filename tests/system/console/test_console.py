@@ -110,7 +110,7 @@ class TestConsoleKill:
             )
         else:
             combined = result.stdout + result.stderr
-            assert "not running" in combined
+            assert "not running" in combined or "No console relay" in combined
 
     def test_console_kill_check_state_then_kill(self, mvm_binary, module_vm):
         """Check console state, then kill the relay, then verify it's no longer running.
@@ -164,8 +164,8 @@ class TestConsoleKill:
                 )
         else:
             combined = kill_result.stdout + kill_result.stderr
-            assert "not running" in combined, (
-                f"Expected 'not running' if kill fails, got: {combined}"
+            assert "not running" in combined or "No console relay" in combined, (
+                f"Expected 'not running' or 'No console relay' if kill fails, got: {combined}"
             )
 
 
@@ -203,6 +203,8 @@ class TestConsoleOnStoppedVM:
                 "--network",
                 net_name,
             )
+
+            _run_mvm(mvm_binary, "vm", "stop", vm_name)
 
             result = _run_mvm(
                 mvm_binary,

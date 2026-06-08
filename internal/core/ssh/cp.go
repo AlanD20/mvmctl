@@ -76,6 +76,15 @@ func (s *CPService) probeRemotePath(ctx context.Context, sshPrefix []string, rem
 
 	lines := strings.SplitN(strings.TrimSpace(string(stdout)), "\n", 2)
 
+	// Guard against empty/near-empty output, matching Python's:
+	//   lines = result.stdout.strip().splitlines()
+	//   if not lines:
+	//       raise CPSourceNotFoundError(...)
+	if len(lines) == 0 || lines[0] == "" {
+		return "", 0, errs.NotFound(errs.CodeCPSourceNotFound,
+			fmt.Sprintf("remote path not found: %s", remotePath))
+	}
+
 	pathType := strings.TrimSpace(lines[0])
 	if pathType == "NONE" {
 		return "", 0, errs.NotFound(errs.CodeCPSourceNotFound,
@@ -264,6 +273,7 @@ func (s *CPService) pipe(
 ) error {
 	srcProc := exec.CommandContext(ctx, srcCmd[0], srcCmd[1:]...)
 	srcProc.Env = append(os.Environ(), "MVM_SSH_CONNECTION=1")
+	srcProc.Stderr = os.Stderr // Direct src stderr to host stderr for diagnostics
 	destProc := exec.CommandContext(ctx, destCmd[0], destCmd[1:]...)
 	destProc.Env = append(os.Environ(), "MVM_SSH_CONNECTION=1")
 
@@ -280,10 +290,19 @@ func (s *CPService) pipe(
 		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
 	}
 
+	// Deferred pipe closing — ensures cleanup on early failure,
+	// matching Python's try/finally block in _pipe_with_progress.
+	defer destStdin.Close()
+	defer srcStdout.Close()
+
 	if err := srcProc.Start(); err != nil {
 		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
 	}
 	if err := destProc.Start(); err != nil {
+		// srcProc is running with no consumer on its stdout — it would
+		// hang forever. Kill and reap to avoid a zombie process.
+		srcProc.Process.Kill()
+		srcProc.Wait()
 		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
 	}
 

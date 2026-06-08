@@ -119,8 +119,8 @@ class TestConfigLifecycle:
                 mvm_binary, "config", "set", "defaults.vm", "vcpu_count", "6"
             )
 
-            # Reset all
-            result = _run_mvm(mvm_binary, "config", "reset", "--all")
+            # Reset all (Go requires --force per PORTING doc #50)
+            result = _run_mvm(mvm_binary, "config", "reset", "--all", "--force")
             assert result.returncode == 0
 
             # Verify the value is no longer the custom one
@@ -215,7 +215,8 @@ class TestConfigEdgeCases:
                 mvm_binary,
                 "config",
                 "reset",
-                "defaults.vm",
+                "--all",
+                "--force",
                 check=False,
             )
 
@@ -287,7 +288,7 @@ class TestConfigEdgeCasesResetAllAfterSet:
             )
             assert "8" in result.stdout
 
-            _run_mvm(mvm_binary, "config", "reset", "--all")
+            _run_mvm(mvm_binary, "config", "reset", "--all", "--force")
 
             result = _run_mvm(
                 mvm_binary, "config", "get", "defaults.vm", "vcpu_count"
