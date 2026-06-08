@@ -31,7 +31,7 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput) erro
 	}
 
 	// Audit log (matches Python: AuditLog.log("vm.ssh", changes={"ip": ..., "user": ...}))
-	op.AuditLog.LogOperation("vm.ssh", map[string]interface{}{
+	op.AuditLog.LogOperation("vm.ssh", map[string]any{
 		"ip":   resolved.TargetIP,
 		"user": resolved.User,
 	}, "")

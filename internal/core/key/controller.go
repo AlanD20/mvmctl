@@ -23,26 +23,9 @@ type Controller struct {
 	repo Repository
 }
 
-// NewController creates a new KeyController.
-// If entity is an SSHKeyItem, it uses it directly.
-// If entity is a string (name or ID prefix), it resolves it eagerly
-// at construction time (matching Python's __init__ behavior).
-func NewController(ctx context.Context, entity any, repo Repository) (*Controller, error) {
-	var key *model.SSHKeyItem
-	switch e := entity.(type) {
-	case *model.SSHKeyItem:
-		key = e
-	case string:
-		resolver := NewResolver(repo)
-		var err error
-		key, err = resolver.Resolve(ctx, e)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, errs.NotFound(errs.CodeKeyNotFound, "invalid entity type")
-	}
-	return &Controller{key: key, repo: repo}, nil
+// NewController creates a KeyController bound to a resolved key.
+func NewController(key *model.SSHKeyItem, repo Repository) *Controller {
+	return &Controller{key: key, repo: repo}
 }
 
 // Export copies both public and private key files to a destination directory.

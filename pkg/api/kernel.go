@@ -494,10 +494,7 @@ func (op *Operation) KernelSetDefault(ctx context.Context, identifier string) er
 
 	kItem := resolved.Kernels[0]
 
-	ctrl, err := kernel.NewController(ctx, kItem, op.Repos.Kernel)
-	if err != nil {
-		return errs.WrapMsg(errs.CodeKernelDefaultSetFailed, fmt.Sprintf("Failed to create controller: %v", err), err)
-	}
+	ctrl := kernel.NewController(kItem, op.Repos.Kernel)
 
 	if err := ctrl.SetDefault(ctx); err != nil {
 		return errs.WrapMsg(errs.CodeKernelDefaultSetFailed, fmt.Sprintf("Failed to set default kernel: %v", err), err)

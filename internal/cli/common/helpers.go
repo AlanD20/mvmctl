@@ -136,7 +136,7 @@ func handleDomainError(de *errs.DomainError) error {
 					for _, suggestion := range sugList {
 						Cli.Info("  - " + suggestion)
 					}
-				} else if sugList, ok := suggestions.([]interface{}); ok {
+				} else if sugList, ok := suggestions.([]any); ok {
 					for _, s := range sugList {
 						Cli.Info(fmt.Sprintf("  - %v", s))
 					}

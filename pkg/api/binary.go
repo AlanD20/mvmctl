@@ -88,7 +88,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 			versionStr = binaries[0].Version
 		}
 
-		op.AuditLog.LogOperation("binary.pull", map[string]interface{}{
+		op.AuditLog.LogOperation("binary.pull", map[string]any{
 			"git_ref": *resolved.GitRef,
 			"version": versionStr,
 		}, "")
@@ -138,7 +138,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 		}
 	}
 
-	op.AuditLog.LogOperation("binary.pull", map[string]interface{}{"version": resolvedVersion}, "")
+	op.AuditLog.LogOperation("binary.pull", map[string]any{"version": resolvedVersion}, "")
 
 	emitProgress(onProgress, "complete", "complete", "Firecracker downloaded successfully")
 
@@ -186,7 +186,7 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 			continue
 		}
 
-		op.AuditLog.LogOperation("binary.remove", map[string]interface{}{
+		op.AuditLog.LogOperation("binary.remove", map[string]any{
 			"id":      bin.ID,
 			"name":    bin.Name,
 			"version": bin.FullVersion,
@@ -246,7 +246,7 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 			return errs.WrapMsg(errs.CodeBinaryRemoveFailed, fmt.Sprintf("Failed to remove %s: %v", bin.Name, err), err)
 		}
 
-		op.AuditLog.LogOperation("binary.remove", map[string]interface{}{
+		op.AuditLog.LogOperation("binary.remove", map[string]any{
 			"id":      bin.ID,
 			"name":    bin.Name,
 			"version": normalized,
@@ -333,16 +333,13 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryIn
 
 	// Use BinaryController for the default-setting operation, matching Python:
 	// controller = BinaryController(entity=binary, repo=repo); controller.set_default()
-	ctrl, err := binary.NewController(ctx, bin, op.Repos.Binary)
-	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeBinaryDefaultSetFailed, fmt.Sprintf("Failed to set default: %v", err), err)
-	}
+	ctrl := binary.NewController(bin, op.Repos.Binary)
 
 	if err := ctrl.SetDefault(ctx); err != nil {
 		return nil, errs.WrapMsg(errs.CodeBinaryDefaultSetFailed, fmt.Sprintf("Failed to set default: %v", err), err)
 	}
 
-	op.AuditLog.LogOperation("binary.set_default", map[string]interface{}{
+	op.AuditLog.LogOperation("binary.set_default", map[string]any{
 		"id":      bin.ID,
 		"name":    bin.Name,
 		"version": bin.Version,
@@ -390,14 +387,7 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 	})
 	latest := firecrackerBins[0]
 
-	ctrl, err := binary.NewController(ctx, latest, op.Repos.Binary)
-	if err != nil {
-		return nil, errs.WrapMsg(
-			errs.CodeBinaryEnsureDefaultFailed,
-			fmt.Sprintf("Failed to set default binary: %v", err),
-			err,
-		)
-	}
+	ctrl := binary.NewController(latest, op.Repos.Binary)
 
 	if err := ctrl.SetDefault(ctx); err != nil {
 		return nil, errs.WrapMsg(
@@ -407,7 +397,7 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 		)
 	}
 
-	op.AuditLog.LogOperation("binary.ensure_default", map[string]interface{}{
+	op.AuditLog.LogOperation("binary.ensure_default", map[string]any{
 		"id":      latest.ID,
 		"name":    latest.Name,
 		"version": latest.Version,

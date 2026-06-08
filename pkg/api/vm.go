@@ -324,11 +324,11 @@ func (op *Operation) vmBuilderCreate(
 		// Python: if vm_instance is None: raise VMCreateError("Failed to create VM instance model")
 		if vmInstance == nil {
 			if builder.spawner == nil {
-				execErr = fmt.Errorf("Firecracker spawner is not set in context")
+				execErr = fmt.Errorf("firecracker spawner is not set in context")
 			} else if builder.spawner.PID == nil {
-				execErr = fmt.Errorf("Failed to spawn Firecracker process")
+				execErr = fmt.Errorf("failed to spawn firecracker process")
 			} else {
-				execErr = fmt.Errorf("Failed to create VM instance model")
+				execErr = fmt.Errorf("failed to create VM instance model")
 			}
 		} else if err := op.Repos.VM.Upsert(ctx, vmInstance); err != nil {
 			execErr = fmt.Errorf("upsert VM: %w", err)
@@ -758,10 +758,8 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 		vmDir := infra.GetVMDirByID(vmLocal.ID)
 
 		// Stop the VM
-		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
-		if ctrlErr == nil {
-			controller.Stop(ctx, resolved.Force)
-		}
+		controller := vm.NewController(vmLocal, repo)
+		controller.Stop(ctx, resolved.Force)
 
 		// Defense-in-depth: force-kill
 		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
@@ -801,7 +799,9 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 		}
 
 		// Delete from DB
-		_ = repo.Delete(ctx, vmLocal.ID)
+		if err := repo.Delete(ctx, vmLocal.ID); err != nil {
+			slog.Warn("failed to delete VM from DB", "vm", vmLocal.Name, "error", err)
+		}
 		if vmDir != "" {
 			os.RemoveAll(vmDir)
 		}
@@ -885,7 +885,7 @@ func (op *Operation) VMList(ctx context.Context, statuses ...string) []*model.VM
 // Python always includes ALL fields in every entry (with None/null if not set).
 func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM, error) {
 	if len(input.Identifiers) != 1 {
-		return nil, fmt.Errorf("Expected exactly one VM identifier")
+		return nil, fmt.Errorf("expected exactly one VM identifier")
 	}
 	// Use the full resolution pipeline (name, IP, MAC, ID prefix) matching Python's VMResolver
 	vmResolver := vm.NewResolver(op.Repos.VM)
@@ -1018,15 +1018,7 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 				continue
 			}
 		} else {
-			controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
-			if ctrlErr != nil {
-				results = append(results, errs.OperationResult{
-					Status: "error", Code: "vm.start_failed",
-					Message:   fmt.Sprintf("start '%s': %v", vmLocal.Name, ctrlErr),
-					Exception: ctrlErr,
-				})
-				continue
-			}
+			controller := vm.NewController(vmLocal, repo)
 			if err := controller.Start(ctx); err != nil {
 				results = append(results, errs.OperationResult{
 					Status: "error", Code: "vm.start_failed",
@@ -1079,15 +1071,7 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 
 	for _, vmLocal := range resolved.VMs {
 
-		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
-		if ctrlErr != nil {
-			results = append(results, errs.OperationResult{
-				Status: "error", Code: "vm.stop_failed",
-				Message:   fmt.Sprintf("stop '%s': %v", vmLocal.Name, ctrlErr),
-				Exception: ctrlErr,
-			})
-			continue
-		}
+		controller := vm.NewController(vmLocal, repo)
 		controller.Stop(ctx, input.Force)
 
 		// Defense-in-depth: force-kill if stop() silently left the Firecracker process alive
@@ -1285,14 +1269,7 @@ func (op *Operation) VMSnapshot(
 		return errs.NotFound(errs.CodeVMNotFound, fmt.Sprintf("VM not found: %s", input.Identifiers[0]))
 	}
 
-	controller, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM)
-	if ctrlErr != nil {
-		return errs.WrapMsg(
-			errs.CodeVMSnapshotFailed,
-			fmt.Sprintf("Failed to snapshot VM '%s': %v", vmItem.Name, ctrlErr),
-			ctrlErr,
-		)
-	}
+	controller := vm.NewController(vmItem, op.Repos.VM)
 	if err := controller.Snapshot(ctx, memFile, stateFile); err != nil {
 		return errs.WrapMsg(
 			errs.CodeVMSnapshotFailed,
@@ -1374,14 +1351,7 @@ func (op *Operation) VMLoad(
 		}
 	}
 
-	controller, ctrlErr := vm.NewController(ctx, vmItem, repo)
-	if ctrlErr != nil {
-		return errs.WrapMsg(
-			errs.CodeVMLoadSnapshotFailed,
-			fmt.Sprintf("Failed to load snapshot for VM '%s': %v", vmItem.Name, ctrlErr),
-			ctrlErr,
-		)
-	}
+	controller := vm.NewController(vmItem, repo)
 	if err := controller.LoadSnapshot(ctx, memFile, stateFile, resume); err != nil {
 		return errs.WrapMsg(
 			errs.CodeVMLoadSnapshotFailed,
@@ -1428,15 +1398,7 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 	for _, vmLocal := range resolved.VMs {
 
 		// Stop the VM first (kills the firecracker process)
-		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
-		if ctrlErr != nil {
-			results = append(results, errs.OperationResult{
-				Status: "error", Code: "vm.reboot_failed",
-				Message:   fmt.Sprintf("reboot '%s': %v", vmLocal.Name, ctrlErr),
-				Exception: ctrlErr,
-			})
-			continue
-		}
+		controller := vm.NewController(vmLocal, repo)
 		controller.Stop(ctx, input.Force)
 
 		// After stop, respawn a fresh firecracker process
@@ -1490,15 +1452,7 @@ func (op *Operation) VMPause(ctx context.Context, input inputs.VMInput) *errs.Ba
 
 	for _, vmLocal := range resolved.VMs {
 
-		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
-		if ctrlErr != nil {
-			results = append(results, errs.OperationResult{
-				Status: "error", Code: "vm.pause_failed",
-				Message:   fmt.Sprintf("pause '%s': %v", vmLocal.Name, ctrlErr),
-				Exception: ctrlErr,
-			})
-			continue
-		}
+		controller := vm.NewController(vmLocal, repo)
 		if err := controller.Pause(ctx); err != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.pause_failed",
@@ -1550,15 +1504,7 @@ func (op *Operation) VMResume(ctx context.Context, input inputs.VMInput) *errs.B
 
 	for _, vmLocal := range resolved.VMs {
 
-		controller, ctrlErr := vm.NewController(ctx, vmLocal, repo)
-		if ctrlErr != nil {
-			results = append(results, errs.OperationResult{
-				Status: "error", Code: "vm.resume_failed",
-				Message:   fmt.Sprintf("resume '%s': %v", vmLocal.Name, ctrlErr),
-				Exception: ctrlErr,
-			})
-			continue
-		}
+		controller := vm.NewController(vmLocal, repo)
 		if err := controller.Resume(ctx); err != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.resume_failed",
@@ -1655,25 +1601,23 @@ func (op *Operation) VMAttachVolume(
 			}
 		}
 		// Try Firecracker API hotplug (matches Python's try: controller.attach_volume(vol) except Exception: logger.warning)
-		controller, ctrlErr := vm.NewController(ctx, vmItem, op.Repos.VM)
-		if ctrlErr == nil {
-			if err := controller.AttachVolume(ctx, model.DriveConfig{
-				DriveID:      vol.ID,
-				PathOnHost:   vol.Path,
-				IsRootDevice: false,
-				IsReadOnly:   vol.IsReadOnly,
-				CacheType:    "Unsafe",
-				IOEngine:     "Sync",
-			}); err != nil {
-				slog.Warn("Hotplug failed for drive", "volume", vol.ID, "error", err)
-			}
+		controller := vm.NewController(vmItem, op.Repos.VM)
+		if err := controller.AttachVolume(ctx, model.DriveConfig{
+			DriveID:      vol.ID,
+			PathOnHost:   vol.Path,
+			IsRootDevice: false,
+			IsReadOnly:   vol.IsReadOnly,
+			CacheType:    "Unsafe",
+			IOEngine:     "Sync",
+		}); err != nil {
+			slog.Warn("Hotplug failed for drive", "volume", vol.ID, "error", err)
 		}
 	}
 
 	// VolumeController.attach (matches Python's vol_controller = VolumeController(vol, vol_repo); vol_controller.attach(vm.id))
-	volController, volCtrlErr := volume.NewController(ctx, vol, op.Repos.Volume)
-	if volCtrlErr == nil {
-		_ = volController.Attach(ctx, vmItem.ID)
+	volController := volume.NewController(vol, op.Repos.Volume)
+	if err := volController.Attach(ctx, vmItem.ID); err != nil {
+		slog.Warn("failed to attach volume to VM", "vm", vmItem.Name, "volume", vol.Name, "error", err)
 	}
 
 	// Update VM's volume_ids (matches Python's list comprehension + append-if-not-present)
@@ -1692,9 +1636,11 @@ func (op *Operation) VMAttachVolume(
 		vmVolumeIDs = append(vmVolumeIDs, vol.ID)
 	}
 	vmItem.VolumeIDs = vmVolumeIDs
-	_ = op.Repos.VM.Upsert(ctx, vmItem)
+	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
+		slog.Warn("failed to update VM volume IDs", "vm", vmItem.Name, "error", err)
+	}
 
-	op.AuditLog.LogOperation("vm.attach_volume", map[string]interface{}{
+	op.AuditLog.LogOperation("vm.attach_volume", map[string]any{
 		"vm": vmItem.Name, "volume": vol.Name,
 	}, "")
 
@@ -1768,9 +1714,9 @@ func (op *Operation) VMDetachVolume(
 	}
 
 	// VolumeController.detach (matches Python's vol_controller = VolumeController(vol, vol_repo); vol_controller.detach())
-	volController, volCtrlErr := volume.NewController(ctx, vol, op.Repos.Volume)
-	if volCtrlErr == nil {
-		_ = volController.Detach(ctx)
+	volController := volume.NewController(vol, op.Repos.Volume)
+	if err := volController.Detach(ctx); err != nil {
+		slog.Warn("failed to detach volume from VM", "vm", vmItem.Name, "volume", vol.Name, "error", err)
 	}
 
 	// Update VM's volume_ids (matches Python's list comprehension + remove-if-present)
@@ -1785,9 +1731,11 @@ func (op *Operation) VMDetachVolume(
 		}
 	}
 	vmItem.VolumeIDs = newIDs
-	_ = op.Repos.VM.Upsert(ctx, vmItem)
+	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
+		slog.Warn("failed to update VM volume IDs", "vm", vmItem.Name, "error", err)
+	}
 
-	op.AuditLog.LogOperation("vm.detach_volume", map[string]interface{}{
+	op.AuditLog.LogOperation("vm.detach_volume", map[string]any{
 		"vm": vmItem.Name, "volume": vol.Name,
 	}, "")
 

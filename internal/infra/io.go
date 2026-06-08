@@ -188,7 +188,7 @@ func ReadFile(path string) (string, error) {
 // Returns dict[str, Any] | list[Any], matching Python's FsUtils.read_yaml()
 // which returns dict[str, Any] | list[Any] (union, not just map).
 // Returns {} (empty map) for empty files.
-func ReadYAML(path string) (interface{}, error) {
+func ReadYAML(path string) (any, error) {
 	f, err := OpenNoFollow(path)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to read YAML from %s: %w", path, err)
@@ -201,7 +201,7 @@ func ReadYAML(path string) (interface{}, error) {
 	if len(data) == 0 {
 		return make(map[string]any), nil
 	}
-	var result interface{}
+	var result any
 	if err := yaml.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("Failed to read YAML from %s: %w", path, err)
 	}

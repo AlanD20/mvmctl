@@ -111,17 +111,17 @@ type VMExportConfig struct {
 
 // ToMap serializes to a dictionary, omitting nil/zero values.
 // Matches Python's VMExportConfig.to_dict() which calls asdict() + _omit_none().
-func (c *VMExportConfig) ToMap() map[string]interface{} {
+func (c *VMExportConfig) ToMap() map[string]any {
 	data, err := json.Marshal(c)
 	if err != nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"schema_version": c.SchemaVersion,
 			"name":           c.Name,
 		}
 	}
-	var result map[string]interface{}
+	var result map[string]any
 	if err := json.Unmarshal(data, &result); err != nil {
-		return map[string]interface{}{
+		return map[string]any{
 			"schema_version": c.SchemaVersion,
 			"name":           c.Name,
 		}
@@ -162,7 +162,7 @@ func FromVMExportConfigJSONFile(path string) (*VMExportConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("VM config file not found: %s", path)
 	}
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return nil, fmt.Errorf("invalid JSON in VM config file %s: %w", path, err)
 	}
@@ -174,7 +174,7 @@ func FromVMExportConfigJSONFile(path string) (*VMExportConfig, error) {
 
 // fromVMExportConfigMap deserializes a map into VMExportConfig, filtering unknown fields.
 // Matches Python's VMExportConfig.from_dict() which uses __dataclass_fields__ for filtering.
-func fromVMExportConfigMap(data map[string]interface{}) *VMExportConfig {
+func fromVMExportConfigMap(data map[string]any) *VMExportConfig {
 	cfg := &VMExportConfig{
 		SchemaVersion: "1.0",
 		Binary: VMExportBinaryConfig{
@@ -194,7 +194,7 @@ func fromVMExportConfigMap(data map[string]interface{}) *VMExportConfig {
 	}
 
 	// Parse nested sub-configs using JSON round-trip for field filtering
-	for fieldName, target := range map[string]interface{}{
+	for fieldName, target := range map[string]any{
 		"compute":     &cfg.Compute,
 		"image":       &cfg.Image,
 		"kernel":      &cfg.Kernel,
@@ -205,7 +205,7 @@ func fromVMExportConfigMap(data map[string]interface{}) *VMExportConfig {
 		"cloud_init":  &cfg.CloudInit,
 	} {
 		if subData, ok := data[fieldName]; ok {
-			if subMap, ok := subData.(map[string]interface{}); ok {
+			if subMap, ok := subData.(map[string]any); ok {
 				subJSON, err := json.Marshal(subMap)
 				if err == nil {
 					_ = json.Unmarshal(subJSON, target)

@@ -174,7 +174,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	if err != nil {
 		return errs.New(errs.CodeDatabaseError, "Failed to list existing networks: "+err.Error())
 	}
-	existingNetworksGeneric := make([]interface{}, len(existingNetworks))
+	existingNetworksGeneric := make([]any, len(existingNetworks))
 	for i, n := range existingNetworks {
 		existingNetworksGeneric[i] = n
 	}

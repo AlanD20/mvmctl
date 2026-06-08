@@ -64,25 +64,12 @@ func (r *OperationResult) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// Init ensures Metadata and Warnings are non-nil, matching Python's
-// field(default_factory=dict/list) semantics. Safe to call multiple times.
-func (r *OperationResult) Init() {
-	if r.Metadata == nil {
-		r.Metadata = make(map[string]any)
-	}
-	if r.Warnings == nil {
-		r.Warnings = []string{}
-	}
-}
-
 // IsOK returns true if the operation completed without error.
-// Python: @property def is_ok(self) -> bool: return self.status in ("success", "skipped", "warning")
 func (r *OperationResult) IsOK() bool {
 	return r.Status == string(StatusSuccess) || r.Status == string(StatusSkipped) || r.Status == string(StatusWarning)
 }
 
 // IsError returns true if the operation failed.
-// Python: @property def is_error(self) -> bool: return self.status in ("error", "failure")
 func (r *OperationResult) IsError() bool {
 	return r.Status == string(StatusError) || r.Status == string(StatusFailure)
 }
@@ -98,9 +85,9 @@ func (r *OperationResult) ToError() *DomainError {
 	return &DomainError{
 		Code:    Code(r.Code),
 		Message: r.Message,
-		Entity:  "",
+		Op:      opForCode(Code(r.Code)),
+		Class:   classForCode(Code(r.Code)),
 		Err:     r.Exception,
-		Class:   ClassInternal,
 	}
 }
 
@@ -127,53 +114,7 @@ type BatchResult struct {
 	Metadata map[string]any    `json:"metadata,omitempty"`
 }
 
-// Init ensures Warnings and Metadata are non-nil, matching Python's
-// field(default_factory=list/dict) semantics. Safe to call multiple times.
-func (br *BatchResult) Init() {
-	if br.Metadata == nil {
-		br.Metadata = make(map[string]any)
-	}
-	if br.Warnings == nil {
-		br.Warnings = []string{}
-	}
-}
-
-// StatusSummary returns a count of each status across all items.
-// Python: @property def status_summary(self) -> dict[str, int]:
-func (br *BatchResult) StatusSummary() map[string]int {
-	counts := make(map[string]int)
-	for _, r := range br.Items {
-		counts[r.Status] = counts[r.Status] + 1
-	}
-	return counts
-}
-
-// Successes returns all successful items (status == "success").
-// Python: @property def successes(self) -> list[OperationResult[T]]:
-func (br *BatchResult) Successes() []OperationResult {
-	var result []OperationResult
-	for _, item := range br.Items {
-		if item.Status == "success" {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
-// Skipped returns all skipped items (status == "skipped").
-// Python: @property def skipped(self) -> list[OperationResult[T]]:
-func (br *BatchResult) Skipped() []OperationResult {
-	var result []OperationResult
-	for _, item := range br.Items {
-		if item.Status == "skipped" {
-			result = append(result, item)
-		}
-	}
-	return result
-}
-
 // Errors returns all failed items (status == "error" or "failure").
-// Python: @property def errors(self) -> list[OperationResult[T]]:
 func (br *BatchResult) Errors() []OperationResult {
 	var result []OperationResult
 	for _, item := range br.Items {
@@ -184,30 +125,12 @@ func (br *BatchResult) Errors() []OperationResult {
 	return result
 }
 
-// HasAnyError returns true if any item has an error/failure status.
-// Python: @property def has_any_error(self) -> bool:
-func (br *BatchResult) HasAnyError() bool {
+// HasErrors returns true if any item has an error/failure status.
+func (br *BatchResult) HasErrors() bool {
 	for _, item := range br.Items {
 		if item.Status == "error" || item.Status == "failure" {
 			return true
 		}
 	}
 	return false
-}
-
-// HasErrors returns true if any item has an error/failure status.
-// Alias for HasAnyError. Prefer HasAnyError() for Python compatibility.
-func (br *BatchResult) HasErrors() bool {
-	return br.HasAnyError()
-}
-
-// AllOK returns true if all items have an OK status (success, skipped, or warning).
-// Python: @property def all_ok(self) -> bool:
-func (br *BatchResult) AllOK() bool {
-	for _, item := range br.Items {
-		if !item.IsOK() {
-			return false
-		}
-	}
-	return true
 }

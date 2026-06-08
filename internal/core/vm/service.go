@@ -28,46 +28,31 @@ func NewService(repo Repository) *Service {
 
 // Stop stops a single VM. Matches Python's stop().
 func (s *Service) Stop(ctx context.Context, vm *model.VM, force bool) error {
-	c, err := NewController(ctx, vm, s.repo)
-	if err != nil {
-		return err
-	}
+	c := NewController(vm, s.repo)
 	return c.Stop(ctx, force)
 }
 
 // Start starts a single VM. Matches Python's start().
 func (s *Service) Start(ctx context.Context, vm *model.VM) error {
-	c, err := NewController(ctx, vm, s.repo)
-	if err != nil {
-		return err
-	}
+	c := NewController(vm, s.repo)
 	return c.Start(ctx)
 }
 
 // Pause pauses a single VM. Matches Python's pause().
 func (s *Service) Pause(ctx context.Context, vm *model.VM) error {
-	c, err := NewController(ctx, vm, s.repo)
-	if err != nil {
-		return err
-	}
+	c := NewController(vm, s.repo)
 	return c.Pause(ctx)
 }
 
 // Resume resumes a single VM. Matches Python's resume().
 func (s *Service) Resume(ctx context.Context, vm *model.VM) error {
-	c, err := NewController(ctx, vm, s.repo)
-	if err != nil {
-		return err
-	}
+	c := NewController(vm, s.repo)
 	return c.Resume(ctx)
 }
 
 // Reboot reboots a single VM. Matches Python's reboot().
 func (s *Service) Reboot(ctx context.Context, vm *model.VM, force bool) error {
-	c, err := NewController(ctx, vm, s.repo)
-	if err != nil {
-		return err
-	}
+	c := NewController(vm, s.repo)
 	return c.Reboot(ctx, force)
 }
 

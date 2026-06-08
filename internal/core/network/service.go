@@ -216,19 +216,19 @@ func (s *Service) EnsureNAT(
 			if !result.Success {
 				errMsg := infra.DerefOrZero(result.ErrorMessage)
 				return errs.Wrap(errs.CodeNetworkNATFailed,
-					fmt.Errorf("Failed to add MASQUERADE rule for %s via %s: %s", bridge, gatewayIface, errMsg))
+					fmt.Errorf("failed to add MASQUERADE rule for %s via %s: %s", bridge, gatewayIface, errMsg))
 			}
 			result = s.firewallTracker.EnsureRule(ctx, *fwdOutRule, context)
 			if !result.Success {
 				errMsg := infra.DerefOrZero(result.ErrorMessage)
 				return errs.Wrap(errs.CodeNetworkNATFailed,
-					fmt.Errorf("Failed to add FORWARD out rule for %s via %s: %s", bridge, gatewayIface, errMsg))
+					fmt.Errorf("failed to add FORWARD out rule for %s via %s: %s", bridge, gatewayIface, errMsg))
 			}
 			result = s.firewallTracker.EnsureRule(ctx, *fwdInRule, context)
 			if !result.Success {
 				errMsg := infra.DerefOrZero(result.ErrorMessage)
 				return errs.Wrap(errs.CodeNetworkNATFailed,
-					fmt.Errorf("Failed to add FORWARD in rule for %s via %s: %s", bridge, gatewayIface, errMsg))
+					fmt.Errorf("failed to add FORWARD in rule for %s via %s: %s", bridge, gatewayIface, errMsg))
 			}
 		}
 	}
@@ -467,14 +467,14 @@ func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet 
 		if !result.Success {
 			errMsg := infra.DerefOrZero(result.ErrorMessage)
 			return errs.Wrap(errs.CodeNetworkFirewallFailed,
-				fmt.Errorf("Failed to add FORWARD rule for bridge %s to TAP %s: %s", bridge, tap, errMsg))
+				fmt.Errorf("failed to add FORWARD rule for bridge %s to TAP %s: %s", bridge, tap, errMsg))
 		}
 		result = s.firewallTracker.EnsureRule(ctx, *fwdTapToBridge, fmt.Sprintf("tap:%s", tap))
 		if !result.Success {
 			s.firewallTracker.RemoveRule(ctx, *fwdBridgeToTap)
 			errMsg := infra.DerefOrZero(result.ErrorMessage)
 			return errs.Wrap(errs.CodeNetworkFirewallFailed,
-				fmt.Errorf("Failed to add FORWARD rule for TAP %s to bridge %s: %s", tap, bridge, errMsg))
+				fmt.Errorf("failed to add FORWARD rule for TAP %s to bridge %s: %s", tap, bridge, errMsg))
 		}
 	}
 
@@ -710,8 +710,11 @@ func (s *Service) CheckNFTablesAvailable(ctx context.Context) bool {
 		return false
 	}
 
-	_, _ = system.DefaultRunner.Run(ctx, []string{"modprobe", "nft_chain_nat"},
+	_, modErr := system.DefaultRunner.Run(ctx, []string{"modprobe", "nft_chain_nat"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
+	if modErr != nil {
+		slog.Debug("nft_chain_nat kernel module not available", "error", modErr)
+	}
 
 	test := "add table inet __mvm_nft_test\n" +
 		"add chain inet __mvm_nft_test test_post { type nat hook postrouting priority srcnat; policy accept; }\n" +
@@ -719,6 +722,7 @@ func (s *Service) CheckNFTablesAvailable(ctx context.Context) bool {
 	testResult, testErr := system.DefaultRunner.Run(ctx, []string{"nft", "-f", "-"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false, Input: test})
 
+	// Best-effort cleanup of test table — may not exist if test failed to create
 	_, _ = system.DefaultRunner.Run(ctx, []string{"nft", "delete", "table", "inet", "__mvm_nft_test"},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 

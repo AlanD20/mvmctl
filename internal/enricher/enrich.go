@@ -7,7 +7,6 @@ package enricher
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -147,48 +146,6 @@ func New(
 }
 
 // ── Generic Enrich ─────────────────────────────────────────────────────────
-
-// Enrich validates include paths against a registry, sorts them by dependency
-// order (parents before children), and dispatches to the correct domain method.
-//
-// Matches Python's RelationEnricher.enrich(entities, include, registry).
-// entities must be a pointer to a slice of entity pointers (e.g., *[]*model.VM).
-func (e *Enricher) Enrich(
-	ctx context.Context,
-	entities any,
-	include []string,
-	registry map[string]model.RelationSpec,
-) error {
-	if len(include) == 0 {
-		return nil
-	}
-
-	// Validate paths
-	if err := validatePaths(include, registry); err != nil {
-		return err
-	}
-
-	// Sort by dot count (parents before children)
-	sorted := sortByDotCount(include)
-
-	switch ents := entities.(type) {
-	case []*model.VM:
-		return e.enrichVMFromPaths(ctx, ents, sorted, registry)
-	case []*model.Network:
-		return e.enrichNetworkFromPaths(ctx, ents, sorted, registry)
-	case []*model.ImageItem:
-		return e.enrichImageFromPaths(ctx, ents, sorted, registry)
-	case []*model.KernelItem:
-		return e.enrichKernelFromPaths(ctx, ents, sorted, registry)
-	case []*model.BinaryItem:
-		return e.enrichBinaryFromPaths(ctx, ents, sorted, registry)
-	case []*model.VolumeItem:
-		return e.enrichVolumeFromPaths(ctx, ents, sorted, registry)
-	default:
-		// Unknown entity type — nothing to do (matches Python's no-op for unknown types)
-		return nil
-	}
-}
 
 // validatePaths checks that all include paths exist in the registry.
 // Matches Python's RelationEnricher._validate_paths() exactly.
@@ -499,16 +456,13 @@ func safeCastNetwork(v any) (*model.Network, error) {
 // Matches Python's VolumeResolver.resolve_by_vm_volume_ids() method.
 func (e *Enricher) resolveByVMVolumeIDs(
 	ctx context.Context,
-	jsonIDKeys []string,
+	volKeys []string,
 ) (map[string][]*model.VolumeItem, error) {
-	// Collect all unique volume IDs across all JSON keys.
+	// Collect all unique volume IDs across all keys.
 	allVolumeIDs := make(map[string]bool)
-	keyToIDs := make(map[string][]string, len(jsonIDKeys))
-	for _, key := range jsonIDKeys {
-		var ids []string
-		if err := json.Unmarshal([]byte(key), &ids); err != nil {
-			continue
-		}
+	keyToIDs := make(map[string][]string, len(volKeys))
+	for _, key := range volKeys {
+		ids := strings.Split(key, "\x00")
 		keyToIDs[key] = ids
 		for _, vid := range ids {
 			allVolumeIDs[vid] = true
@@ -535,9 +489,9 @@ func (e *Enricher) resolveByVMVolumeIDs(
 		volByID[v.ID] = v
 	}
 
-	// Build results dict mapping JSON string key -> resolved Volume list.
-	results := make(map[string][]*model.VolumeItem, len(jsonIDKeys))
-	for _, key := range jsonIDKeys {
+	// Build results dict mapping joined key -> resolved Volume list.
+	results := make(map[string][]*model.VolumeItem, len(volKeys))
+	for _, key := range volKeys {
 		ids, ok := keyToIDs[key]
 		if !ok {
 			results[key] = []*model.VolumeItem{}
@@ -566,50 +520,41 @@ func (e *Enricher) resolveByVMVolumeIDs(
 // Delegates to resolveByVMVolumeIDs for the actual resolution,
 // matching Python's VolumeResolver.resolve_by_vm_volume_ids().
 func (e *Enricher) enrichVMVolumes(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
-	// Collect unique volume ID lists (as JSON strings for stable keys).
-	var jsonKeys []string
-	seenJSON := make(map[string]bool)
+	// Collect unique volume ID lists as joined strings for stable keys.
+	var volKeys []string
+	seenKeys := make(map[string]bool)
 	for _, vm := range vms {
 		if len(vm.VolumeIDs) == 0 {
 			continue
 		}
-		// Normalize list to stable JSON string (matching Python's json.dumps with sort_keys=True).
-		data, err := json.Marshal(vm.VolumeIDs)
-		if err != nil {
+		key := strings.Join(vm.VolumeIDs, "\x00")
+		if seenKeys[key] {
 			continue
 		}
-		jsonStr := string(data)
-		if seenJSON[jsonStr] {
-			continue
-		}
-		seenJSON[jsonStr] = true
-		jsonKeys = append(jsonKeys, jsonStr)
+		seenKeys[key] = true
+		volKeys = append(volKeys, key)
 	}
 
-	if len(jsonKeys) == 0 {
+	if len(volKeys) == 0 {
 		return nil
 	}
 
-	results, err := e.resolveByVMVolumeIDs(ctx, jsonKeys)
+	results, err := e.resolveByVMVolumeIDs(ctx, volKeys)
 	if err != nil {
 		if isEnrichmentError(err) {
-			enrichSoftFail(spec.Resolver, spec.BatchMethod, strings.Join(jsonKeys, ","))
+			enrichSoftFail(spec.Resolver, spec.BatchMethod, strings.Join(volKeys, ","))
 			return nil
 		}
 		return err
 	}
 
-	// Build VM -> jsonStr map to avoid re-marshaling per VM.
-	vmToKey := make(map[string]string)
+	// Build VM -> key map to avoid re-joining per VM.
+	vmToKey := make(map[string]string, len(vms))
 	for _, vm := range vms {
 		if len(vm.VolumeIDs) == 0 {
 			continue
 		}
-		data, err := json.Marshal(vm.VolumeIDs)
-		if err != nil {
-			continue
-		}
-		vmToKey[vm.ID] = string(data)
+		vmToKey[vm.ID] = strings.Join(vm.VolumeIDs, "\x00")
 	}
 
 	// Assign volumes back to each VM.
@@ -617,8 +562,8 @@ func (e *Enricher) enrichVMVolumes(ctx context.Context, vms []*model.VM, spec mo
 		if len(vm.VolumeIDs) == 0 {
 			continue
 		}
-		jsonStr := vmToKey[vm.ID]
-		matchedVols := results[jsonStr]
+		key := vmToKey[vm.ID]
+		matchedVols := results[key]
 		if matchedVols == nil {
 			matchedVols = []*model.VolumeItem{}
 		}
@@ -920,7 +865,7 @@ func (e *Enricher) enrichBinaryFromPaths(
 
 // enrichBinaryVMs resolves VMs that reference each binary.
 // Matches Python's _resolve_reverse for "vm" relation with batch_method.
-// Sets full *model.VM objects on bin.VMs ([]any), matching Python's VMInstanceItem list.
+// Sets full *model.VM objects on bin.VMs, matching Python's VMInstanceItem list.
 func (e *Enricher) enrichBinaryVMs(ctx context.Context, binaries []*model.BinaryItem, spec model.RelationSpec) error {
 	ids := collectBinaryIDs(binaries)
 	if len(ids) == 0 {
@@ -946,7 +891,7 @@ func (e *Enricher) enrichBinaryVMs(ctx context.Context, binaries []*model.Binary
 			continue
 		}
 		matchedVMs := vmsByBinID[bin.ID]
-		// Set full VM objects ([]*model.VM as []any), matching Python's list[VMInstanceItem].
+		// Set full VM objects on bin.VMs, matching Python's list[VMInstanceItem].
 		anyVMs := make([]*model.VM, len(matchedVMs))
 		for i, vm := range matchedVMs {
 			anyVMs[i] = vm
@@ -1029,16 +974,6 @@ func (e *Enricher) enrichVolumeVMs(ctx context.Context, volumes []*model.VolumeI
 		vol.VMs = anyVMs
 	}
 
-	return nil
-}
-
-// ── Key enrichment ─────────────────────────────────────────────────────────
-
-// EnrichKey populates resolved relations on Key items.
-// KeyResolver.RELATIONS is empty in Python, so this is a no-op.
-// Included for symmetry with other domain methods.
-func (e *Enricher) EnrichKey(keys []any) error {
-	// No relations defined for keys — matches Python's KeyResolver.RELATIONS = {}.
 	return nil
 }
 
