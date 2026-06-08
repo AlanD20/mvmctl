@@ -78,7 +78,11 @@ func CreateGroup(ctx context.Context, groupName string) (bool, error) {
 		return false, nil
 	}
 
-	_, err := system.DefaultRunner.Run(ctx, []string{"groupadd", "--system", groupName}, system.RunCmdOpts{Check: true, Capture: true})
+	_, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{"groupadd", "--system", groupName},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
 	if err != nil {
 		return false, fmt.Errorf("failed to create group %s: %w", groupName, err)
 	}
@@ -91,7 +95,11 @@ func AddUserToGroup(ctx context.Context, username, groupName string) (bool, erro
 		return false, nil
 	}
 
-	_, err := system.DefaultRunner.Run(ctx, []string{"usermod", "-aG", groupName, username}, system.RunCmdOpts{Check: true, Capture: true})
+	_, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{"usermod", "-aG", groupName, username},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
 	if err != nil {
 		return false, fmt.Errorf("failed to add %s to group %s: %w", username, groupName, err)
 	}
@@ -107,7 +115,11 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 		return false, nil
 	}
 
-	_, err := system.DefaultRunner.Run(ctx, []string{"gpasswd", "-d", username, groupName}, system.RunCmdOpts{Check: true, Capture: true})
+	_, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{"gpasswd", "-d", username, groupName},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
 	if err != nil {
 		return false, fmt.Errorf("failed to remove user %s from group %s: %w", username, groupName, err)
 	}
@@ -243,7 +255,11 @@ func RemoveGroup(ctx context.Context, groupName string) (bool, error) {
 		return false, nil
 	}
 
-	_, err := system.DefaultRunner.Run(ctx, []string{"groupdel", groupName}, system.RunCmdOpts{Check: true, Capture: true})
+	_, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{"groupdel", groupName},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
 	if err != nil {
 		return false, fmt.Errorf("failed to remove group %s: %w", groupName, err)
 	}
@@ -273,7 +289,11 @@ func isModuleLoaded(ctx context.Context, module string) bool {
 // ── GetIPForwardStatus ──
 func GetIPForwardStatus(ctx context.Context) (string, error) {
 
-	res, err := system.DefaultRunner.Run(ctx, []string{"sysctl", "-n", sysctlKey}, system.RunCmdOpts{Check: true, Capture: true})
+	res, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{"sysctl", "-n", sysctlKey},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
 	if err != nil {
 		return "", fmt.Errorf("failed to read %s: %w", sysctlKey, err)
 	}

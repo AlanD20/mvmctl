@@ -286,7 +286,11 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	}
 
 	// ── Check git availability ──
-	gitCheck, _ := system.DefaultRunner.Run(ctx, []string{"which", "git"}, system.RunCmdOpts{Capture: true, Check: false})
+	gitCheck, _ := system.DefaultRunner.Run(
+		ctx,
+		[]string{"which", "git"},
+		system.RunCmdOpts{Capture: true, Check: false},
+	)
 	if !gitCheck.Success() {
 		return nil, binaryError(errs.CodeProcessError,
 			"Git is required to build from source. "+
