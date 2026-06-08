@@ -1230,7 +1230,7 @@ func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, sourceFilen
 	}
 
 	sourceBasename := filepath.Base(sourceFilename)
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

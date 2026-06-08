@@ -77,13 +77,13 @@ func parseKernelConfig(kernelDir string) (map[string]bool, error) {
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 
 	settings := make(map[string]bool)
-	for _, line := range strings.Split(normalized, "\n") {
+	for line := range strings.SplitSeq(normalized, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if eq := strings.IndexByte(line, '='); eq != -1 {
-			settings[line[:eq]] = true
+		if key, _, ok := strings.Cut(line, "="); ok {
+			settings[key] = true
 		}
 	}
 	return settings, nil
@@ -103,7 +103,7 @@ func mergeConfigLines(content, configPath string) {
 		}
 	}
 
-	for _, fragLine := range strings.Split(content, "\n") {
+	for fragLine := range strings.SplitSeq(content, "\n") {
 		normalized := strings.TrimSpace(fragLine)
 		if key := extractConfigKey(normalized); key != "" {
 			if idx, ok := keyToIdx[key]; ok {
@@ -147,7 +147,7 @@ func runMake(ctx context.Context, kernelDir, target string, jobs int) (int, stri
 	stdoutStr := result.Stdout
 	stderrStr := result.Stderr
 	// Log config warnings from make output (matching Python)
-	for _, line := range strings.Split(stderrStr, "\n") {
+	for line := range strings.SplitSeq(stderrStr, "\n") {
 		stripped := strings.TrimSpace(line)
 		if strings.Contains(stripped, ".config:") || strings.Contains(strings.ToLower(stripped), "warning:") {
 			slog.Debug("Config warning", "message", stripped)

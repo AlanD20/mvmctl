@@ -143,8 +143,8 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 			cmd,
 			system.RunCmdOpts{Privileged: true, Capture: true, Check: true},
 		)
-	if !result.Success() {
-		slog.Error("Failed to create nftables chain",
+		if !result.Success() {
+			slog.Error("Failed to create nftables chain",
 				"chain", string(chain),
 				"table", table,
 				"error", fmt.Sprintf("command %s failed (exit %d): %s", cmd[0], result.ExitCode, result.Stderr),
@@ -210,8 +210,8 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 			cmd,
 			system.RunCmdOpts{Privileged: true, Capture: true, Check: true},
 		)
-	if !result.Success() {
-		slog.Error("Failed to insert jump rule",
+		if !result.Success() {
+			slog.Error("Failed to insert jump rule",
 				"builtin", jr.builtin,
 				"target", jr.target,
 				"family", jr.family,

@@ -307,7 +307,7 @@ func detectRootDevice(ctx context.Context, rootfsPath string) (string, error) {
 		fstype string
 	}
 	var entries []fsEntry
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

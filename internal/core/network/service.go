@@ -2,7 +2,6 @@ package network
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -758,8 +757,7 @@ func isNetworkError(err error) bool {
 	if err == nil {
 		return false
 	}
-	var de *errs.DomainError
-	if errors.As(err, &de) {
+	if de, ok := errs.AsType[*errs.DomainError](err); ok {
 		switch de.Code {
 		case errs.CodeNetworkBridgeFailed, errs.CodeNetworkNATFailed,
 			errs.CodeNetworkFirewallFailed, errs.CodeNetworkNotFound,

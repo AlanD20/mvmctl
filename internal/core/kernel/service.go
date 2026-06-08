@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -458,7 +459,7 @@ func (s *Service) fetchSHA256(ctx context.Context, sha256URL, filename string) (
 		return "", nil
 	}
 
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "-----") || strings.HasPrefix(line, "Hash:") {
 			continue
@@ -750,12 +751,8 @@ func (s *Service) PrepareKernelConfig(
 	// Merge default configs with feature enforces (features override defaults).
 	configScriptPath := filepath.Join(kernelDir, "scripts", "config")
 	mergedConfigs := make(map[string]string, len(spec.DefaultConfigs)+len(featureEnforces))
-	for k, v := range spec.DefaultConfigs {
-		mergedConfigs[k] = v
-	}
-	for k, v := range featureEnforces {
-		mergedConfigs[k] = v
-	}
+	maps.Copy(mergedConfigs, spec.DefaultConfigs)
+	maps.Copy(mergedConfigs, featureEnforces)
 
 	if len(mergedConfigs) > 0 {
 		if onProgress != nil {
@@ -922,7 +919,7 @@ func (s *Service) RunMakeVmlinux(
 // parseBuildWarnings extracts build warnings from kernel build output.
 func parseBuildWarnings(logData string) []string {
 	var warnings []string
-	for _, line := range strings.Split(logData, "\n") {
+	for line := range strings.SplitSeq(logData, "\n") {
 		line = strings.TrimRight(line, "\r")
 		slog.Debug("Build output", "line", line)
 		if buildLogPattern.MatchString(line) {

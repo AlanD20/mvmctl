@@ -71,7 +71,7 @@ func (p *Provisioner) Provision(ctx context.Context) (*model.CloudInitResult, er
 // provisionOff handles OFF mode — cloud-init disabled.
 // Matches Python's _provision_off().
 // Python: CloudInitmodel.CloudInitResult(mode=CloudInitMode.OFF) -> nocloud_net_rules=[] (factory default)
-func (p *Provisioner) provisionOff(ctx context.Context) *model.CloudInitResult {
+func (p *Provisioner) provisionOff(_ context.Context) *model.CloudInitResult {
 	return &model.CloudInitResult{Mode: model.CloudInitModeOFF, NocloudNetRules: []model.FirewallRule{}}
 }
 
@@ -211,6 +211,6 @@ func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult,
 
 // provisionInject handles INJECT mode — config files already written.
 // Matches Python's _provision_inject().
-func (p *Provisioner) provisionInject(ctx context.Context) (*model.CloudInitResult, error) {
+func (p *Provisioner) provisionInject(_ context.Context) (*model.CloudInitResult, error) {
 	return &model.CloudInitResult{Mode: model.CloudInitModeINJECT, NocloudNetRules: []model.FirewallRule{}}, nil
 }

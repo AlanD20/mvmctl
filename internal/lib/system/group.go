@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/user"
+	"slices"
 	"strings"
 	"sync"
 
@@ -81,13 +82,7 @@ func RequireMvmGroupMembership() error {
 	// Python:
 	//   is_supplementary_member = username in g.gr_mem
 	//   is_primary_group = user_pw.pw_gid == g.gr_gid
-	isSupplementaryMember := false
-	for _, m := range groupMembers {
-		if m == username {
-			isSupplementaryMember = true
-			break
-		}
-	}
+	isSupplementaryMember := slices.Contains(groupMembers, username)
 	isPrimaryGroup := currentUser.Gid == g.Gid
 
 	if !(isSupplementaryMember || isPrimaryGroup) {
@@ -158,7 +153,7 @@ func getGroupMembers(ctx context.Context, groupName string) []string {
 
 // IsRoot returns true if the effective user ID is 0 (root).
 // Uses os.Geteuid() because the kernel checks the effective UID for
-// permission decisions. This correctly detects priviledged access
+// permission decisions. This correctly detects privileged access
 // via sudo, doas, or setuid binaries.
 func IsRoot() bool {
 	return os.Geteuid() == 0
@@ -185,12 +180,7 @@ func UserInGroup(ctx context.Context, username, groupName string) bool {
 	if err != nil {
 		return false
 	}
-	for _, m := range members {
-		if m == username {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(members, username)
 }
 
 // ── GroupMembersViaNSS ──

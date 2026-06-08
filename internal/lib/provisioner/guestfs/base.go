@@ -249,7 +249,7 @@ func (h *GuestfsHandle) ListPartitions(ctx context.Context) ([]string, error) {
 		return nil, errs.New(errs.CodeGuestfsError, fmt.Sprintf("Failed to list partitions: %v", err))
 	}
 	var parts []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
 			parts = append(parts, trimmed)
 		}
@@ -425,10 +425,10 @@ func (h *GuestfsHandle) ReadFile(ctx context.Context, path string) (string, erro
 // parseStatvfsField parses a field from guestfish statvfs output.
 // Output format: "fieldname: value\nfieldname: value\n..."
 func parseStatvfsField(out, field string) int64 {
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, field+":") {
-			valStr := strings.TrimSpace(strings.TrimPrefix(line, field+":"))
+		if valStr, ok := strings.CutPrefix(line, field+":"); ok {
+			valStr = strings.TrimSpace(valStr)
 			val, err := strconv.ParseInt(valStr, 10, 64)
 			if err == nil {
 				return val
@@ -446,7 +446,7 @@ func (h *GuestfsHandle) StatVFS(ctx context.Context, path string) (map[string]in
 	}
 
 	result := make(map[string]int64)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

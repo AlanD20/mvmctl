@@ -556,8 +556,8 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 			[]string{"iptables-restore", "-n"},
 			system.RunCmdOpts{Privileged: true, Capture: true, Check: true, Input: restoreInput},
 		)
-	if !result.Success() {
-		errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
+		if !result.Success() {
+			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
 			return model.FirewallRuleResult{
 				Success:      false,
 				ErrorMessage: &errMsg,
@@ -572,8 +572,8 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 			[]string{"iptables-restore", "-n"},
 			system.RunCmdOpts{Privileged: true, Capture: true, Check: true, Input: restoreInput},
 		)
-	if !result.Success() {
-		errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
+		if !result.Success() {
+			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
 			return model.FirewallRuleResult{
 				Success:      false,
 				ErrorMessage: &errMsg,

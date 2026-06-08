@@ -331,9 +331,9 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 				if change.OriginalValue != nil {
 					// Validate sudoers content if the target is under sudoers dir
 					if strings.HasPrefix(target, infra.DefaultSudoersDir) {
-					result, _ := system.DefaultRunner.Run(ctx, []string{"visudo", "-c", "-f", "-"},
-						system.RunCmdOpts{Check: false, Capture: true, Input: *change.OriginalValue})
-					if !result.Success() {
+						result, _ := system.DefaultRunner.Run(ctx, []string{"visudo", "-c", "-f", "-"},
+							system.RunCmdOpts{Check: false, Capture: true, Input: *change.OriginalValue})
+						if !result.Success() {
 							return nil, errs.New(
 								errs.CodeHostResetFailed,
 								fmt.Sprintf(

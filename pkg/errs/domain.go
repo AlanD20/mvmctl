@@ -559,6 +559,21 @@ func AlreadyExists(code Code, msg string, opts ...ErrorOption) *DomainError {
 	return e
 }
 
+// AsType extracts and type-asserts an error from the chain using generics.
+// Returns the typed error and true if found, or zero value and false otherwise.
+// Usage:
+//
+//	if de, ok := errs.AsType[*errs.DomainError](err); ok {
+//	    switch de.Code { ... }
+//	}
+func AsType[T error](err error) (T, bool) {
+	var target T
+	if errors.As(err, &target) {
+		return target, true
+	}
+	return target, false
+}
+
 // ── Internal helpers ────────────────────────────────────────────────────
 
 // AsDomainError extracts a *DomainError from an error chain.
