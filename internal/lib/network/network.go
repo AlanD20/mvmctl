@@ -35,15 +35,6 @@ func intToIP(n uint32) net.IP {
 	return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
 }
 
-// sortStrings sorts a slice of strings (simple insertion sort, matching Python's sorted).
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j-1] > s[j]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
-	}
-}
-
 // ── Subnet Math & Computation ──
 // These directly map to Python's NetworkUtils methods.
 
@@ -72,6 +63,9 @@ func ComputePrefixLength(subnet string) int {
 // For standard subnets this is total - 2 (excludes network and broadcast).
 // For /31 and /32 (RFC 3021) all addresses are usable.
 func CountHosts(ipnet *net.IPNet) int {
+	if ipnet == nil {
+		return 0
+	}
 	ip := ipnet.IP.To4()
 	if ip == nil {
 		return 0
@@ -238,7 +232,7 @@ func GetPhysicalInterfaces() ([]string, error) {
 		}
 		interfaces = append(interfaces, name)
 	}
-	sortStrings(interfaces)
+	slices.Sort(interfaces)
 	return interfaces, nil
 }
 
@@ -265,46 +259,6 @@ func DetectOutboundInterface(ctx context.Context) string {
 		}
 	}
 	return ""
-}
-
-// BridgeExists checks if a bridge interface exists.
-// Python: bridge_exists(bridge) -> bool
-func BridgeExists(ctx context.Context, bridge string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(
-		ctx,
-		[]string{"ip", "link", "show", bridge},
-		system.RunCmdOpts{Check: false, Capture: true},
-	)
-	return result.Success()
-}
-
-// TapExists checks if a TAP interface exists.
-// Python: tap_exists(tap) -> bool
-func TapExists(ctx context.Context, tap string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(
-		ctx,
-		[]string{"ip", "link", "show", tap},
-		system.RunCmdOpts{Check: false, Capture: true},
-	)
-	return result.Success()
-}
-
-// ChainExists checks if an iptables chain exists.
-// Python: chain_exists(chain, table="filter") -> bool
-// NOTE: Go does not support default parameters; callers must pass table explicitly.
-func ChainExists(ctx context.Context, chain, table string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(
-		ctx,
-		[]string{"iptables", "-t", table, "-L", chain, "-n"},
-		system.RunCmdOpts{Check: false, Capture: true},
-	)
-	return result.Success()
 }
 
 // GetTunTapDevices lists all TUN/TAP devices.
@@ -353,61 +307,6 @@ func GetBridges(ctx context.Context) []string {
 	return bridges
 }
 
-// GetBridgeSlaves returns all interface names attached to a bridge.
-// Python: get_bridge_slaves(bridge) -> list[str]
-func GetBridgeSlaves(ctx context.Context, bridge string) []string {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(
-		ctx,
-		[]string{"ip", "-o", "link", "show", "master", bridge},
-		system.RunCmdOpts{Check: false, Capture: true},
-	)
-	if !result.Success() {
-		return nil
-	}
-	var slaves []string
-	for line := range strings.SplitSeq(result.Stdout, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			slave := strings.TrimRight(parts[1], ":")
-			slave = strings.SplitN(slave, "@", 2)[0]
-			if slave != bridge {
-				slaves = append(slaves, slave)
-			}
-		}
-	}
-	return slaves
-}
-
-// GetBridgeTaps lists all TAP devices currently attached to the bridge.
-// Python: get_bridge_taps(bridge) -> list[str]
-func GetBridgeTaps(ctx context.Context, bridge string) []string {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(
-		ctx,
-		[]string{"ip", "link", "show", "master", bridge},
-		system.RunCmdOpts{Check: false, Capture: true},
-	)
-	if !result.Success() {
-		return nil
-	}
-	var devices []string
-	for line := range strings.SplitSeq(result.Stdout, "\n") {
-		parts := strings.Fields(line)
-		if len(parts) > 0 && len(parts[0]) > 0 && parts[0][0] >= '0' && parts[0][0] <= '9' && len(parts) >= 2 {
-			iface := strings.TrimRight(parts[1], ":")
-			devices = append(devices, iface)
-		}
-	}
-	return devices
-}
-
 // EnsureInterfaceReady ensures a network interface exists and is usable for NAT.
 // Python: ensure_interface_ready(interface) -> bool
 // Returns nil on success, error on failure.
@@ -446,48 +345,6 @@ func EnsureInterfaceReady(ctx context.Context, iface string) error {
 	}
 
 	return nil
-}
-
-// BridgeHasSubnet checks if a bridge already has a given subnet assigned.
-// Python: bridge_has_subnet(bridge, subnet) -> bool
-func BridgeHasSubnet(ctx context.Context, bridge, subnet string) bool {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(
-		ctx,
-		[]string{"ip", "-o", "addr", "show", bridge},
-		system.RunCmdOpts{Check: false, Capture: true},
-	)
-	if !result.Success() {
-		return false
-	}
-	return strings.Contains(result.Stdout, subnet)
-}
-
-// GetTapBridge returns the bridge that a TAP device is attached to.
-// Python: get_tap_bridge(tap) -> str | None
-func GetTapBridge(ctx context.Context, tap string) string {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(
-		ctx,
-		[]string{"ip", "link", "show", tap},
-		system.RunCmdOpts{Check: false, Capture: true},
-	)
-	if !result.Success() {
-		return ""
-	}
-	for line := range strings.SplitSeq(result.Stdout, "\n") {
-		if strings.Contains(line, "master") {
-			parts := strings.Fields(line)
-			for i, part := range parts {
-				if part == "master" && i+1 < len(parts) {
-					return parts[i+1]
-				}
-			}
-		}
-	}
-	return ""
 }
 
 // ── Internal Helpers ──
@@ -581,116 +438,6 @@ func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
 	return BackendConflictResult{HasConflict: hasConflict, Diagnosis: diagnosis}
 }
 
-// RunBatch executes a batch of ip commands using ip -batch mode.
-// Python: _run_batch(commands) -> None
-func RunBatch(ctx context.Context, commands []string) error {
-	batch := strings.Join(commands, "\n") + "\n"
-	result, err := system.DefaultRunner.Run(ctx, []string{"ip", "-batch", "-"}, system.RunCmdOpts{
-		Check:      true,
-		Capture:    true,
-		Input:      batch,
-		Privileged: true,
-	})
-	if err != nil {
-		return fmt.Errorf("ip -batch failed: %w\n%s", err, result.Stderr)
-	}
-	return nil
-}
-
-// RemoveRawTap removes a TAP device by name with fallback to tuntap del.
-// Python: remove_raw_tap(tap, privileged=True) -> None
-func RemoveRawTap(ctx context.Context, tap string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	// Try standard link delete first
-	result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", tap},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result.Success() {
-		return nil
-	}
-	stderrFirst := strings.TrimSpace(result.Stderr)
-
-	// Fallback for tuntap-type interfaces
-	result, _ = system.DefaultRunner.Run(ctx, []string{"ip", "tuntap", "del", "dev", tap, "mode", "tap"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result.Success() {
-		return nil
-	}
-
-	details := ""
-	if stderrFirst != "" {
-		details = fmt.Sprintf(" (%s)", stderrFirst)
-	}
-	return errs.Wrap(errs.CodeNetworkBridgeFailed,
-		fmt.Errorf("failed to remove TAP device '%s': tried 'ip link delete'%s and 'ip tuntap del'", tap, details))
-}
-
-// RemoveRawBridge removes a bridge interface with slave cleanup.
-// Python: remove_raw_bridge(bridge, privileged=True) -> None
-func RemoveRawBridge(ctx context.Context, bridge string) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	// Remove slave interfaces first
-	for _, slave := range GetBridgeSlaves(ctx, bridge) {
-		system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", slave, "down"},
-			system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", slave},
-			system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		if !result.Success() {
-			system.DefaultRunner.Run(ctx, []string{"ip", "tuntap", "del", "dev", slave, "mode", "tap"},
-				system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-		}
-	}
-
-	// Bring bridge down
-	system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", bridge, "down"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-
-	// Delete bridge with type
-	result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", bridge, "type", "bridge"},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result.Success() {
-		return nil
-	}
-	stderrFirst := strings.TrimSpace(result.Stderr)
-
-	// Fallback: try without type specifier
-	result, _ = system.DefaultRunner.Run(ctx, []string{"ip", "link", "delete", bridge},
-		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-	if result.Success() {
-		return nil
-	}
-
-	details := ""
-	if stderrFirst != "" {
-		details = fmt.Sprintf(" (%s)", stderrFirst)
-	}
-	return errs.Wrap(errs.CodeNetworkBridgeFailed,
-		fmt.Errorf("failed to remove bridge '%s': tried 'ip link delete' with type%s and without", bridge, details))
-}
-
-// GetSystemBridges returns all bridge interfaces on the host.
-// Python: get_system_bridges() -> list[str]
-func GetSystemBridges(ctx context.Context) []string {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	result, _ := system.DefaultRunner.Run(ctx, []string{"ip", "-o", "link", "show", "type", "bridge"},
-		system.RunCmdOpts{Capture: true, Check: false})
-	if !result.Success() {
-		return nil
-	}
-	var bridges []string
-	for line := range strings.SplitSeq(result.Stdout, "\n") {
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			bridges = append(bridges, strings.TrimRight(parts[1], ":"))
-		}
-	}
-	return bridges
-}
-
 // FlushARP flushes the ARP cache for a bridge interface.
 // Python: flush_arp(bridge, privileged=True) -> None
 func FlushARP(ctx context.Context, bridge string) {
@@ -698,17 +445,6 @@ func FlushARP(ctx context.Context, bridge string) {
 	defer cancel()
 	system.DefaultRunner.Run(ctx, []string{"ip", "neigh", "flush", "dev", bridge},
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
-}
-
-// IPToUint32 converts an IPv4 address to a uint32.
-func IPToUint32(ip net.IP) uint32 {
-	ip = ip.To4()
-	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
-}
-
-// IntToIP converts a uint32 to an IPv4 address.
-func IntToIP(n uint32) net.IP {
-	return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
 }
 
 // ── Internal helpers ──

@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
-	"os/user"
 	"slices"
 
 	"mvmctl/internal/infra"
@@ -43,8 +40,8 @@ func CheckPrivileges(binary string, operationDescription string) error {
 	}
 
 	var missingBinaries []string
-	if _, err := exec.LookPath(binary); err != nil {
-		if _, err := os.Stat(binary); os.IsNotExist(err) {
+	if _, err := DefaultOS.LookPath(binary); err != nil {
+		if _, err := DefaultOS.Stat(binary); err != nil && DefaultOS.IsNotExist(err) {
 			missingBinaries = append(missingBinaries, binary)
 		}
 	}
@@ -53,7 +50,7 @@ func CheckPrivileges(binary string, operationDescription string) error {
 		return nil
 	}
 
-	grpInfo, err := user.LookupGroup(infra.MVMUnixGroup)
+	grpInfo, err := DefaultOS.LookupGroup(infra.MVMUnixGroup)
 	if err != nil {
 		details := &PrivilegeDetails{
 			Message: fmt.Sprintf(
@@ -73,7 +70,7 @@ func CheckPrivileges(binary string, operationDescription string) error {
 		)
 	}
 
-	currentUser, err := user.Current()
+	currentUser, err := DefaultOS.Current()
 	if err != nil {
 		return NewPrivilegeError(fmt.Sprintf("Elevated privileges required%s", opStr),
 			&PrivilegeDetails{Message: err.Error()})
@@ -138,18 +135,18 @@ func CheckPrivileges(binary string, operationDescription string) error {
 // SessionHasGroup checks if the current process has the mvm group GID active in its credentials.
 // Uses os.Getgroups(), os.Getgid(), and os.Getegid().
 func SessionHasGroup() bool {
-	g, err := user.LookupGroup(infra.MVMUnixGroup)
+	g, err := DefaultOS.LookupGroup(infra.MVMUnixGroup)
 	if err != nil {
 		return false
 	}
 
 	processGIDs := make(map[string]bool)
-	groups, _ := os.Getgroups()
+	groups, _ := DefaultOS.Getgroups()
 	for _, gid := range groups {
 		processGIDs[fmt.Sprintf("%d", gid)] = true
 	}
-	processGIDs[fmt.Sprintf("%d", os.Getgid())] = true
-	processGIDs[fmt.Sprintf("%d", os.Getegid())] = true
+	processGIDs[fmt.Sprintf("%d", DefaultOS.Getgid())] = true
+	processGIDs[fmt.Sprintf("%d", DefaultOS.Getegid())] = true
 
 	return processGIDs[g.Gid]
 }

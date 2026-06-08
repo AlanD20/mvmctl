@@ -471,12 +471,15 @@ func New(code Code, msg string, opts ...ErrorOption) *DomainError {
 
 // Wrap wraps an existing error. If the wrapped error is a *DomainError,
 // its Class is inherited. Otherwise ClassUnknown is used.
+// Message is initialised from err.Error() so that Error() returns a
+// meaningful string.
 func Wrap(code Code, err error, opts ...ErrorOption) *DomainError {
 	e := &DomainError{
-		Code:  code,
-		Err:   err,
-		Class: classFrom(err),
-		Op:    opForCode(code),
+		Code:    code,
+		Message: err.Error(),
+		Err:     err,
+		Class:   classFrom(err),
+		Op:      opForCode(code),
 	}
 	for _, opt := range opts {
 		opt(e)

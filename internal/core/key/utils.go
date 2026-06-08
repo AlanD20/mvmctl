@@ -69,7 +69,7 @@ func computeFingerprint(pubKeyContent string) (string, error) {
 	if len(parts) < 2 {
 		return "", errs.New(errs.CodeKeyError, "Invalid public key format")
 	}
-	keyBytes, err := base64.RawStdEncoding.DecodeString(parts[1])
+	keyBytes, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(parts[1], "="))
 	if err != nil {
 		return "", errs.New(errs.CodeKeyError, "Invalid public key format")
 	}

@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/user"
 	"slices"
 	"strings"
 	"sync"
@@ -49,7 +47,7 @@ func requireMvmGroupMembership() error {
 	groupName := infra.MVMUnixGroup
 
 	// Match Python's: import grp; g = grp.getgrnam(MVM_UNIX_GROUP)
-	g, err := user.LookupGroup(groupName)
+	g, err := DefaultOS.LookupGroup(groupName)
 	if err != nil {
 		// Python: logger.warning("Group '%s' does not exist. ...")
 		// slog routes to the configured logging infrastructure (stderr + file).
@@ -65,7 +63,7 @@ func requireMvmGroupMembership() error {
 	}
 
 	// Match Python's: user_pw = pwd.getpwuid(os.getuid()); username = user_pw.pw_name
-	currentUser, err := user.Current()
+	currentUser, err := DefaultOS.Current()
 	if err != nil {
 		_mvmGroupMu.Lock()
 		_mvmGroupVerified = true
@@ -100,12 +98,12 @@ func requireMvmGroupMembership() error {
 	//   process_gids = set(os.getgroups()) | {os.getgid(), os.getegid()}
 	//   if g.gr_gid not in process_gids:
 	processGIDs := make(map[string]struct{})
-	groups, _ := os.Getgroups()
+	groups, _ := DefaultOS.Getgroups()
 	for _, gid := range groups {
 		processGIDs[fmt.Sprintf("%d", gid)] = struct{}{}
 	}
-	processGIDs[fmt.Sprintf("%d", os.Getgid())] = struct{}{}
-	processGIDs[fmt.Sprintf("%d", os.Getegid())] = struct{}{}
+	processGIDs[fmt.Sprintf("%d", DefaultOS.Getgid())] = struct{}{}
+	processGIDs[fmt.Sprintf("%d", DefaultOS.Getegid())] = struct{}{}
 
 	if _, ok := processGIDs[g.Gid]; !ok {
 		// Python: logger.warning("Your user is in the '%s' group, but your
@@ -130,14 +128,14 @@ func requireMvmGroupMembership() error {
 // permission decisions. This correctly detects privileged access
 // via sudo, doas, or setuid binaries.
 func IsRoot() bool {
-	return os.Geteuid() == 0
+	return DefaultOS.Geteuid() == 0
 }
 
 // ── GroupExists ──
 // Uses stdlib os/user.LookupGroup matching Python's grp.getgrnam()
 // which resolves through NSS (LDAP, systemd-userdb, etc.).
 func GroupExists(groupName string) bool {
-	_, err := user.LookupGroup(groupName)
+	_, err := DefaultOS.LookupGroup(groupName)
 	return err == nil
 }
 
@@ -146,7 +144,7 @@ func GroupExists(groupName string) bool {
 // Uses stdlib os/user.LookupGroup + GroupMembersViaNSS to get member list
 // via NSS (LDAP, systemd-userdb, etc.), matching Python's grp.getgrnam().gr_mem.
 func UserInGroup(ctx context.Context, username, groupName string) bool {
-	_, err := user.LookupGroup(groupName)
+	_, err := DefaultOS.LookupGroup(groupName)
 	if err != nil {
 		return false
 	}

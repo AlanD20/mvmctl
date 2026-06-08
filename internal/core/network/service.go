@@ -67,7 +67,7 @@ func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.Network, e
 
 	var missingIDs []string
 	for _, network := range networks {
-		if !libnet.BridgeExists(ctx, network.Bridge) {
+		if !libnet.DefaultNetOps.BridgeExists(ctx, network.Bridge) {
 			missingIDs = append(missingIDs, network.ID)
 		}
 	}
@@ -108,19 +108,19 @@ func (s *Service) Teardown(ctx context.Context) error {
 // ── Bridge management ──
 
 func (s *Service) EnsureBridge(ctx context.Context, bridge, bridgeAddress string) error {
-	if libnet.BridgeExists(ctx, bridge) {
+	if libnet.DefaultNetOps.BridgeExists(ctx, bridge) {
 		slog.Debug("Bridge already exists, reconciling state", "bridge", bridge)
 		var reconcileCmds []string
-		if !libnet.BridgeHasSubnet(ctx, bridge, bridgeAddress) {
+		if !libnet.DefaultNetOps.BridgeHasSubnet(ctx, bridge, bridgeAddress) {
 			reconcileCmds = append(reconcileCmds, fmt.Sprintf("addr add %s dev %s", bridgeAddress, bridge))
 		}
 		reconcileCmds = append(reconcileCmds, fmt.Sprintf("link set %s up", bridge))
-		if err := libnet.RunBatch(ctx, reconcileCmds); err != nil {
+		if err := libnet.DefaultNetOps.RunBatch(ctx, reconcileCmds); err != nil {
 			return errs.WrapMsg(errs.CodeNetworkBridgeFailed,
 				fmt.Sprintf("Failed to setup bridge %s", bridge), err)
 		}
 	} else {
-		if err := libnet.RunBatch(ctx, []string{
+		if err := libnet.DefaultNetOps.RunBatch(ctx, []string{
 			fmt.Sprintf("link add name %s type bridge", bridge),
 			fmt.Sprintf("addr add %s dev %s", bridgeAddress, bridge),
 			fmt.Sprintf("link set %s up", bridge),
@@ -135,12 +135,12 @@ func (s *Service) EnsureBridge(ctx context.Context, bridge, bridgeAddress string
 }
 
 func (s *Service) RemoveBridge(ctx context.Context, bridge string, networkID string) error {
-	attachedTaps := libnet.GetBridgeTaps(ctx, bridge)
+	attachedTaps := libnet.DefaultNetOps.GetBridgeTaps(ctx, bridge)
 	for _, tap := range attachedTaps {
 		slog.Debug("Removing attached TAP from bridge", "tap", tap, "bridge", bridge)
 		s.RemoveTap(ctx, tap, bridge, networkID)
 	}
-	if err := libnet.RemoveRawBridge(ctx, bridge); err != nil {
+	if err := libnet.DefaultNetOps.RemoveRawBridge(ctx, bridge); err != nil {
 		return errs.WrapMsg(errs.CodeNetworkBridgeFailed,
 			fmt.Sprintf("Failed to teardown bridge %s", bridge), err)
 	}
@@ -284,7 +284,7 @@ func (s *Service) RemoveNAT(
 	}
 
 	// Check for attached TAPs — matches Python's NetworkError
-	attachedTaps := libnet.GetBridgeTaps(ctx, bridge)
+	attachedTaps := libnet.DefaultNetOps.GetBridgeTaps(ctx, bridge)
 	if len(attachedTaps) > 0 {
 		if !force {
 			return errs.New(errs.CodeNetworkError,
@@ -379,14 +379,14 @@ func (s *Service) RemoveNAT(
 // ── TAP management ──
 
 func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet string) error {
-	if libnet.TapExists(ctx, tap) {
-		currentBridge := libnet.GetTapBridge(ctx, tap)
+	if libnet.DefaultNetOps.TapExists(ctx, tap) {
+		currentBridge := libnet.DefaultNetOps.GetTapBridge(ctx, tap)
 		if currentBridge == bridge {
 			slog.Debug("TAP device already attached to bridge", "tap", tap, "bridge", bridge)
 		} else if currentBridge != "" {
 			slog.Warn("TAP device exists but attached to different bridge, reattaching",
 				"tap", tap, "current_bridge", currentBridge, "target_bridge", bridge)
-			if err := libnet.RunBatch(ctx, []string{
+			if err := libnet.DefaultNetOps.RunBatch(ctx, []string{
 				fmt.Sprintf("link set %s down", tap),
 				fmt.Sprintf("link set %s master %s", tap, bridge),
 				fmt.Sprintf("link set %s up", tap),
@@ -396,7 +396,7 @@ func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet 
 			}
 			slog.Info("TAP device reattached to bridge", "tap", tap, "bridge", bridge)
 		} else {
-			if err := libnet.RunBatch(ctx, []string{
+			if err := libnet.DefaultNetOps.RunBatch(ctx, []string{
 				fmt.Sprintf("link set %s master %s", tap, bridge),
 				fmt.Sprintf("link set %s up", tap),
 			}); err != nil {
@@ -406,7 +406,7 @@ func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet 
 			slog.Info("TAP device reattached to bridge", "tap", tap, "bridge", bridge)
 		}
 	} else {
-		if err := libnet.RunBatch(ctx, []string{
+		if err := libnet.DefaultNetOps.RunBatch(ctx, []string{
 			fmt.Sprintf("tuntap add dev %s mode tap", tap),
 			fmt.Sprintf("link set %s master %s", tap, bridge),
 			fmt.Sprintf("link set %s up", tap),
@@ -482,17 +482,17 @@ func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet 
 }
 
 func (s *Service) RemoveTap(ctx context.Context, tap, bridge string, networkID string) error {
-	if !libnet.TapExists(ctx, tap) {
+	if !libnet.DefaultNetOps.TapExists(ctx, tap) {
 		slog.Debug("TAP device does not exist, skipping removal", "tap", tap)
 		return nil
 	}
 
 	effectiveBridge := bridge
 	if effectiveBridge == "" {
-		effectiveBridge = libnet.GetTapBridge(ctx, tap)
+		effectiveBridge = libnet.DefaultNetOps.GetTapBridge(ctx, tap)
 	}
 
-	if effectiveBridge != "" {
+	if effectiveBridge != "" && s.firewallTracker != nil {
 		dbRules, err := s.firewallTracker.GetByNetworkIDAndInterface(ctx, networkID, tap, false)
 		if err == nil && len(dbRules) > 0 {
 			valRules := make([]model.FirewallRule, len(dbRules))
@@ -511,7 +511,7 @@ func (s *Service) RemoveTap(ctx context.Context, tap, bridge string, networkID s
 		slog.Warn("Could not determine bridge for TAP, skipping rule cleanup", "tap", tap)
 	}
 
-	if err := libnet.RemoveRawTap(ctx, tap); err != nil {
+	if err := libnet.DefaultNetOps.RemoveRawTap(ctx, tap); err != nil {
 		return err
 	}
 	slog.Info("TAP device removed", "tap", tap)
@@ -641,7 +641,7 @@ func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*mode
 		dbBridgeNames[n.Bridge] = true
 	}
 
-	hostBridges := libnet.GetSystemBridges(ctx)
+	hostBridges := libnet.DefaultNetOps.GetSystemBridges(ctx)
 	count := 0
 	for _, bridge := range hostBridges {
 		if !strings.HasPrefix(bridge, "mvm-") {
@@ -651,12 +651,12 @@ func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*mode
 			continue
 		}
 		err := func() error {
-			for _, slave := range libnet.GetBridgeSlaves(ctx, bridge) {
-				if err := libnet.RemoveRawTap(ctx, slave); err != nil {
+			for _, slave := range libnet.DefaultNetOps.GetBridgeSlaves(ctx, bridge) {
+				if err := libnet.DefaultNetOps.RemoveRawTap(ctx, slave); err != nil {
 					return err
 				}
 			}
-			return libnet.RemoveRawBridge(ctx, bridge)
+			return libnet.DefaultNetOps.RemoveRawBridge(ctx, bridge)
 		}()
 		if err != nil {
 			slog.Warn("Failed to remove orphaned bridge", "bridge", bridge, "error", err)
@@ -673,13 +673,13 @@ func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*mode
 
 func (s *Service) RemoveStaleInterfaces(ctx context.Context, prefix string) []string {
 	var summary []string
-	bridges := libnet.GetSystemBridges(ctx)
+	bridges := libnet.DefaultNetOps.GetSystemBridges(ctx)
 	for _, bridge := range bridges {
 		if !strings.HasPrefix(bridge, prefix) {
 			continue
 		}
-		for _, slave := range libnet.GetBridgeSlaves(ctx, bridge) {
-			if err := libnet.RemoveRawTap(ctx, slave); err != nil {
+		for _, slave := range libnet.DefaultNetOps.GetBridgeSlaves(ctx, bridge) {
+			if err := libnet.DefaultNetOps.RemoveRawTap(ctx, slave); err != nil {
 				summary = append(summary, fmt.Sprintf("Warning: failed to remove interface '%s': %s", slave, err))
 			} else {
 				summary = append(summary, fmt.Sprintf("Removed interface '%s'", slave))
@@ -691,12 +691,12 @@ func (s *Service) RemoveStaleInterfaces(ctx context.Context, prefix string) []st
 
 // RemoveRawTap removes a TAP device by name.
 func (s *Service) RemoveRawTap(ctx context.Context, tap string) error {
-	return libnet.RemoveRawTap(ctx, tap)
+	return libnet.DefaultNetOps.RemoveRawTap(ctx, tap)
 }
 
 // RemoveRawBridge removes a bridge interface by name.
 func (s *Service) RemoveRawBridge(ctx context.Context, bridge string) error {
-	return libnet.RemoveRawBridge(ctx, bridge)
+	return libnet.DefaultNetOps.RemoveRawBridge(ctx, bridge)
 }
 
 // ── nftables availability check ──
