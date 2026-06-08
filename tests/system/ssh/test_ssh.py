@@ -238,7 +238,6 @@ class TestSSHConnect:
             "key",
             "export",
             key_name,
-            "--out",
             str(key_export_dir),
             check=False,
         )

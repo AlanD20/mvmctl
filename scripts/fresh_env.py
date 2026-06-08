@@ -276,7 +276,7 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
                 "4g",
                 "--nested-virt",
                 "-s",
-                "8g",
+                "20g",
             ],
             "timeout": 600,
         },

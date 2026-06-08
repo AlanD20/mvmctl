@@ -188,6 +188,30 @@ def _assert_masquerade_rule(backend: str) -> None:
             )
 
 
+def _get_default_interface() -> str:
+    """Detect the default network interface via ``ip route show default``.
+
+    Returns the interface name (e.g., ``"eth0"``, ``"wlo1"``) used for NAT
+    gateways.
+    """
+    result = subprocess.run(
+        ["ip", "route", "show", "default"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"Failed to detect default route:\n{result.stderr}"
+    )
+    parts = result.stdout.strip().split()
+    if "dev" in parts:
+        dev_idx = parts.index("dev")
+        if dev_idx + 1 < len(parts):
+            return parts[dev_idx + 1]
+    msg = f"Could not determine default interface from:\n{result.stdout}"
+    raise RuntimeError(msg)
+
+
 def _assert_no_masquerade_rule(backend: str) -> None:
     """Assert no MASQUERADE rule exists in MVM-POSTROUTING (``--no-nat``
     mode).
@@ -366,8 +390,9 @@ class TestNetworkLifecycle:
         """Calling network default without a name should show guidance."""
         result = _run_mvm(mvm_binary, "network", "default", check=False)
         assert result.returncode != 0
-        assert "Usage" in result.stdout or "Usage" in result.stderr, (
-            f"Expected usage/help message, got: "
+        combined = (result.stdout + result.stderr).lower()
+        assert "missing required argument" in combined, (
+            f"Expected 'missing required argument', got: "
             f"{result.stdout} / {result.stderr}"
         )
 
@@ -422,7 +447,7 @@ class TestNetworkLifecycle:
             check=False,
         )
         assert result.returncode != 0
-        assert "expected 4 octets" in result.stderr.lower()
+        assert "invalid CIDR address" in result.stderr
 
         ls_result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
@@ -861,11 +886,9 @@ class TestNetworkInspectTree:
         # Rationale: Uses module_network fixture. Verifies default inspect
         # output format.
         """Inspect a network and verify tree characters in default output."""
-        result = _run_mvm(
-            mvm_binary, "network", "inspect", module_network
-        )
+        result = _run_mvm(mvm_binary, "network", "inspect", module_network)
         assert result.returncode == 0
-        assert "├──" in result.stdout or "└──" in result.stdout
+        assert "├─ " in result.stdout or "└─ " in result.stdout
 
 
 class TestNetworkAdvancedCreate:
@@ -925,6 +948,7 @@ class TestNetworkAdvancedCreate:
     ):
         """Create a network with explicit --nat-gateways."""
         subnet = _unique_subnet(unique_network_name)
+        default_iface = _get_default_interface()
         try:
             result = _run_mvm(
                 mvm_binary,
@@ -934,7 +958,7 @@ class TestNetworkAdvancedCreate:
                 "--subnet",
                 subnet,
                 "--nat-gateways",
-                "wlo1",
+                default_iface,
                 "--non-interactive",
             )
             assert result.returncode == 0
@@ -948,7 +972,7 @@ class TestNetworkAdvancedCreate:
             )
             data: dict[str, Any] = json.loads(inspect.stdout)
             gateways = data.get("nat", {}).get("nat_gateways", [])
-            assert "wlo1" in gateways
+            assert default_iface in gateways
         finally:
             _run_mvm(
                 mvm_binary, "network", "rm", unique_network_name, check=False
@@ -1308,8 +1332,8 @@ class TestNetworkVMDependency:
             result = _run_mvm(
                 mvm_binary, "network", "inspect", net_name, "--json"
             )
-            data: list[dict[str, Any]] = json.loads(result.stdout)
-            assert data.get("vm_count", 0) == 0
+            data: dict[str, Any] = json.loads(result.stdout)
+            assert len(data.get("leases", [])) == 0
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "network", "rm", net_name, check=False)

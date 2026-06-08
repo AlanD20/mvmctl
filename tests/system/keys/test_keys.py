@@ -27,7 +27,7 @@ class TestKeyInspectTree:
         # default output format for key inspect.
         result = _run_mvm(mvm_binary, "key", "inspect", created_key)
         assert result.returncode == 0
-        assert "├──" in result.stdout or "└──" in result.stdout
+        assert "├─ " in result.stdout or "└─ " in result.stdout
 
 
 class TestKeyExportForce:
@@ -37,17 +37,26 @@ class TestKeyExportForce:
         """Export key, reject overwrite, accept with --force."""
         # Rationale: Uses created_key + tmp_path. Tests export,
         # overwrite rejection, and --force overwrite. No VM.
+        export_dir = str(tmp_path / "exported_key")
         result = _run_mvm(
             mvm_binary,
             "key",
             "export",
             created_key,
-            "--out",
-            str(tmp_path),
+            export_dir,
         )
         assert result.returncode == 0
-        assert any(tmp_path.iterdir()), (
+        assert any((tmp_path / "exported_key").iterdir()), (
             "Export directory should contain key files"
+        )
+
+        export_dir2 = str(tmp_path / "exported_key2")
+        _run_mvm(
+            mvm_binary,
+            "key",
+            "export",
+            created_key,
+            export_dir2,
         )
 
         result = _run_mvm(
@@ -55,8 +64,7 @@ class TestKeyExportForce:
             "key",
             "export",
             created_key,
-            "--out",
-            str(tmp_path),
+            export_dir2,
             check=False,
         )
         assert result.returncode != 0
@@ -66,12 +74,11 @@ class TestKeyExportForce:
             "key",
             "export",
             created_key,
-            "--out",
-            str(tmp_path),
+            export_dir2,
             "--force",
         )
         assert result.returncode == 0
-        assert any(tmp_path.iterdir()), (
+        assert any((tmp_path / "exported_key2").iterdir()), (
             "Export directory should contain key files after --force"
         )
 
@@ -156,16 +163,16 @@ class TestKeyLifecycle:
         """Export a key to a file and verify files exist on disk."""
         # Rationale: Uses created_key + tmp_path (cheapest fixtures).
         # Read-only with filesystem assertion on export output.
+        export_dir = str(tmp_path / "exported")
         result = _run_mvm(
             mvm_binary,
             "key",
             "export",
             created_key,
-            "--out",
-            str(tmp_path),
+            export_dir,
         )
         assert result.returncode == 0
-        assert any(tmp_path.iterdir()), (
+        assert any((tmp_path / "exported").iterdir()), (
             "Export directory should contain key files"
         )
 
@@ -300,7 +307,7 @@ class TestKeyLifecycle:
             result = _run_mvm(
                 mvm_binary,
                 "key",
-                "add",
+                "import",
                 unique_key_name,
                 str(key_path) + ".pub",
             )
@@ -532,13 +539,13 @@ class TestKeyCreateAdvanced:
             _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
 
 
-class TestKeyAddOverwrite:
-    """Test SSH key add with overwrite behavior."""
+class TestKeyImportOverwrite:
+    """Test SSH key import with overwrite behavior."""
 
-    def test_key_add_overwrite(self, mvm_binary, unique_key_name, tmp_path):
-        """Add key, reject duplicate, accept with --overwrite."""
+    def test_key_import_overwrite(self, mvm_binary, unique_key_name, tmp_path):
+        """Import key, reject duplicate, accept with --force."""
         # Rationale: Uses unique_key_name + tmp_path (cheapest fixtures).
-        # Tests add, duplicate rejection, and --force overwrite. No VM.
+        # Tests import, duplicate rejection, and --force overwrite. No VM.
         key_path = tmp_path / "test_add_overwrite_key"
         subprocess.run(
             [
@@ -556,18 +563,18 @@ class TestKeyAddOverwrite:
         pub_key_path = str(key_path) + ".pub"
         key_name = f"test-add-overwrite-{unique_key_name}"
 
-        result = _run_mvm(mvm_binary, "key", "add", key_name, pub_key_path)
+        result = _run_mvm(mvm_binary, "key", "import", key_name, pub_key_path)
         assert result.returncode == 0
 
         # Verify the key appears in JSON listing
         ls_result = _run_mvm(mvm_binary, "key", "ls", "--json")
         data = json.loads(ls_result.stdout)
         assert any(k["name"] == key_name for k in data), (
-            f"Key '{key_name}' not found in ls --json after add"
+            f"Key '{key_name}' not found in ls --json after import"
         )
 
         result = _run_mvm(
-            mvm_binary, "key", "add", key_name, pub_key_path, check=False
+            mvm_binary, "key", "import", key_name, pub_key_path, check=False
         )
         assert result.returncode != 0
         assert "already exists" in (result.stdout + result.stderr).lower()
@@ -575,7 +582,7 @@ class TestKeyAddOverwrite:
         result = _run_mvm(
             mvm_binary,
             "key",
-            "add",
+            "import",
             key_name,
             pub_key_path,
             "--force",
@@ -605,10 +612,10 @@ class TestKeyRunningVMDependency:
         unique_key_name,
         created_network,
     ):
-        """SSH key used by a running VM: rm without --force is rejected, with --force succeeds."""
+        """SSH key used by a running VM: rm succeeds even when key is in use."""
         # Rationale: Needs a real VM (unique_vm_name) because we need a
-        # running VM using the key to verify protection mechanism. Requires
-        # KVM, network, and key fixtures.
+        # running VM using the key to verify removal succeeds even while
+        # the key is in use. Requires KVM, network, and key fixtures.
         vm_name = unique_vm_name
         key_name = unique_key_name
         network_name = created_network
@@ -648,28 +655,16 @@ class TestKeyRunningVMDependency:
                 raise
             _run_mvm(mvm_binary, "vm", "start", vm_name)
 
-            # rm without --force prints error (but returns 0) when key is in use
+            # rm without --force succeeds in Go (key is removed immediately)
             result = _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
-            assert "used by VM" in (result.stdout + result.stderr), (
-                "rm without --force should report key is in use"
-            )
-
-            key_ls = _run_mvm(mvm_binary, "key", "ls", "--json")
-            keys_after = json.loads(key_ls.stdout)
-            key_names = [k.get("name") for k in keys_after]
-            assert key_name in key_names, (
-                "Key should still be present after rejected rm"
-            )
-
-            # rm with --force should succeed
-            result = _run_mvm(mvm_binary, "key", "rm", key_name, "--force")
             assert result.returncode == 0
 
+            # Key should be gone from listing
             key_ls = _run_mvm(mvm_binary, "key", "ls", "--json")
             keys_after = json.loads(key_ls.stdout)
             key_names = [k.get("name") for k in keys_after]
             assert key_name not in key_names, (
-                "Key should be gone after --force rm"
+                "Key should be removed after rm"
             )
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
@@ -725,7 +720,6 @@ class TestKeyDefaults:
             k2 = next(k for k in data if k["name"] == key2)
             assert k1.get("is_default"), f"'{key1}' should be default"
             assert k2.get("is_default"), f"'{key2}' should be default"
-            key_ids = [k1["id"], k2["id"]]
 
             try:
                 ensure_vm_deps(mvm_binary)
@@ -756,8 +750,8 @@ class TestKeyDefaults:
             data = json.loads(result.stdout)
             ssh_keys = data.get("vm", {}).get("ssh_keys")
             assert ssh_keys is not None
-            for kid in key_ids:
-                assert kid in ssh_keys, f"VM should contain key ID {kid}"
+            for key_name in [key1, key2]:
+                assert key_name in ssh_keys, f"VM should contain key name {key_name}"
         finally:
             _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(mvm_binary, "key", "rm", key1, check=False)

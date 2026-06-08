@@ -260,7 +260,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 			}
 
 			if cmd.Flags().Changed("image") {
-				input.Image = infraptr.Ptr(image)
+				input.ImageID = infraptr.Ptr(image)
 			}
 			if cmd.Flags().Changed("kernel") {
 				input.KernelID = infraptr.Ptr(kernel)
@@ -272,7 +272,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 				input.RequestedGuestIP = infraptr.Ptr(ip)
 			}
 			if cmd.Flags().Changed("network") {
-				input.NetworkName = infraptr.Ptr(networkName)
+				input.NetworkID = infraptr.Ptr(networkName)
 			}
 			if cmd.Flags().Changed("mac") {
 				input.RequestedGuestMAC = infraptr.Ptr(mac)

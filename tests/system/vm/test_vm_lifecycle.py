@@ -99,7 +99,7 @@ class TestVMListEmpty:
 
 
 class TestVMAdvancedCreateFlags:
-    """Advanced vm create flags: --ssh-key <filepath>, --user, --firecracker-bin,
+    """Advanced vm create flags: --ssh-key <filepath>, --user,
     --lsm-flags, --skip-cleanup, --skip-deblob."""
 
     pytestmark = [
@@ -158,7 +158,7 @@ class TestVMAdvancedCreateFlags:
             _run_mvm(
                 mvm_binary,
                 "key",
-                "add",
+                "import",
                 key_name,
                 str(test_key_priv.with_suffix(".pub")),
             )
@@ -187,9 +187,7 @@ class TestVMAdvancedCreateFlags:
             _run_mvm(
                 mvm_binary, "network", "rm", net_name, "--force", check=False
             )
-            _run_mvm(
-                mvm_binary, "key", "rm", key_name, check=False
-            )
+            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
 
     def test_create_with_user_flag(
         self,
@@ -246,97 +244,6 @@ class TestVMAdvancedCreateFlags:
             assert user_val == "customuser" or "customuser" in str(data), (
                 f"Expected 'customuser' in inspect output, got: {data}"
             )
-        finally:
-            _run_mvm(
-                mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-            _run_mvm(
-                mvm_binary, "network", "rm", net_name, "--force", check=False
-            )
-
-    def test_create_with_firecracker_bin(
-        self,
-        mvm_binary,
-        unique_vm_name,
-        unique_network_name,
-    ):
-        """Create VM with --firecracker-bin set to the default firecracker binary path.
-
-        Resolves the default firecracker binary path via ``bin ls --json``, then
-        passes it to --firecracker-bin. Verifies VM creates with status=running (L2).
-
-        Rationale: --firecracker-bin allows overriding the firecracker binary used
-        for the VM. A regression where a custom binary path is rejected or silently
-        ignored would break users who need to use a specific firecracker build.
-        """
-        net_name = unique_network_name
-        _run_mvm(
-            mvm_binary,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-            "--non-interactive",
-        )
-        try:
-            # Resolve default firecracker binary path
-            bins = json.loads(
-                _run_mvm(mvm_binary, "bin", "ls", "--json").stdout
-            )
-            default_bin = next(
-                (
-                    b
-                    for b in bins
-                    if b.get("name") == "firecracker"
-                    and b.get("is_default")
-                    and b.get("is_present")
-                ),
-                None,
-            )
-            if not default_bin:
-                default_bin = next(
-                    (
-                        b
-                        for b in bins
-                        if b.get("name") == "firecracker"
-                        and b.get("is_present")
-                    ),
-                    None,
-                )
-            if not default_bin:
-                # Skip-reason: No firecracker binary available to resolve a path.
-                # This can happen on a fresh system before bin pull. To run
-                # unconditionally, ensure at least one firecracker binary is pulled.
-                pytest.skip("No cached firecracker binary available")
-
-            bin_dir = Path.home() / ".cache" / "mvmctl" / "bin"
-            bin_path = bin_dir / default_bin.get(
-                "path", default_bin.get("name", "")
-            )
-            if not bin_path.exists():
-                # Skip-reason: The binary file reported by bin ls --json does not
-                # exist on disk (stale DB entry or cache clean). To run
-                # unconditionally, ensure the binary file is present.
-                pytest.skip(f"Firecracker binary not found at {bin_path}")
-
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.21",
-                "--network",
-                net_name,
-                "--firecracker-bin",
-                str(bin_path),
-            )
-
-            # L2: Verify VM is running
-            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
-            vm = next(v for v in vms if v["name"] == unique_vm_name)
-            assert vm["status"] == "running"
         finally:
             _run_mvm(
                 mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
@@ -2107,9 +2014,7 @@ class TestVMStateTransitions:
         )
         old_pid = inspect_before.get("vm", {}).get("pid")
 
-        result = _run_mvm(
-            mvm_binary, "vm", "reboot", vm_name, "--force"
-        )
+        result = _run_mvm(mvm_binary, "vm", "reboot", vm_name, "--force")
         assert result.returncode == 0
         result = _run_mvm(mvm_binary, "vm", "ls", "--json")
         vms = json.loads(result.stdout)
@@ -2133,8 +2038,7 @@ class TestVMStateTransitions:
                 f"VM may not have restarted"
             )
         assert os.path.exists(f"/proc/{new_pid}"), (
-            f"Firecracker PID {new_pid} should be alive after "
-            f"reboot --force"
+            f"Firecracker PID {new_pid} should be alive after reboot --force"
         )
 
     # ── State machine edge cases (from state_transitions.py) ────────
@@ -2469,7 +2373,9 @@ class TestVMStateTransitions:
             if result_ins.returncode == 0:
                 info = json.loads(result_ins.stdout)
                 vm_dir = Path(
-                    info.get("filesystem", {}).get("vm_dir", info.get("vm_dir", ""))
+                    info.get("filesystem", {}).get(
+                        "vm_dir", info.get("vm_dir", "")
+                    )
                 )
                 if vm_dir.is_dir():
                     snap_files = list(vm_dir.glob("*snapshot*"))
@@ -5268,7 +5174,7 @@ class TestVMCreate:
             )
             assert result.returncode != 0
             combined = (result.stdout + result.stderr).lower()
-            assert "cannot use --count with --volume" in combined
+            assert "mutually exclusive" in combined
         finally:
             _run_mvm(
                 mvm_binary, "network", "rm", net_name, "--force", check=False
@@ -5413,70 +5319,6 @@ class TestVMCreate:
                 "alpine:3.21",
                 "--lsm-flags",
                 "apparmor=0",
-                "--network",
-                net_name,
-            )
-            vms = json.loads(_run_mvm(mvm_binary, "vm", "ls", "--json").stdout)
-            vm = next((v for v in vms if v["name"] == unique_vm_name), None)
-            assert vm is not None
-            assert vm["status"] == "running"
-        finally:
-            _run_mvm(
-                mvm_binary, "network", "rm", net_name, "--force", check=False
-            )
-            _run_mvm(
-                mvm_binary, "vm", "rm", unique_vm_name, "--force", check=False
-            )
-
-    @pytest.mark.requires_kvm
-    @pytest.mark.slow
-    def test_create_with_firecracker_bin(
-        # Rationale: Verifies VM creation and lifecycle operations against a real Firecracker instance. A regression where create succeeds in DB but fails to start Firecracker would not be caught by JSON-only checks.
-        self,
-        mvm_binary,
-        unique_vm_name,
-        system_cache_dir,
-        unique_network_name,
-    ):
-        """Create VM with --firecracker-bin."""
-        # to verify --firecracker-bin path override works correctly.
-        net_name = unique_network_name
-        _run_mvm(
-            mvm_binary,
-            "network",
-            "create",
-            net_name,
-            "--subnet",
-            _unique_subnet(net_name),
-            "--non-interactive",
-        )
-        bins = json.loads(_run_mvm(mvm_binary, "bin", "ls", "--json").stdout)
-        firecracker_bins = [
-            b
-            for b in bins
-            if b.get("name") == "firecracker" and b.get("is_present")
-        ]
-        if not firecracker_bins:
-            # Skip-reason: No firecracker binary cached to test --firecracker-bin.
-            # When CI pre-caches the binary, this skip can be removed.
-            pytest.skip("No firecracker binary available")
-        bin_rel_path = firecracker_bins[0]["path"]
-        bin_path = system_cache_dir / "bin" / bin_rel_path
-        if not bin_path.exists():
-            # Skip-reason: Firecracker binary record exists in DB but file
-            # is missing from disk. DB may be stale from a previous cleanup.
-            pytest.skip(f"Firecracker binary not found at {bin_path}")
-        try:
-            ensure_vm_deps(mvm_binary)
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "create",
-                unique_vm_name,
-                "--image",
-                "alpine:3.21",
-                "--firecracker-bin",
-                str(bin_path),
                 "--network",
                 net_name,
             )
@@ -5747,7 +5589,7 @@ class TestVMCreate:
             ],
             check=True,
         )
-        _run_mvm(mvm_binary, "key", "add", key_name, str(pub_key_path))
+        _run_mvm(mvm_binary, "key", "import", key_name, str(pub_key_path))
         try:
             _run_mvm(
                 mvm_binary,

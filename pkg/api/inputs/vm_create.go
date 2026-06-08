@@ -709,18 +709,16 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 		)
 	}
 
-	if result.DiskSizeBytes > 0 {
-		minRequiredBytes := int64(result.Image.MinRootfsSizeMiB) * disk.MebibyteBytes
-		if result.DiskSizeBytes < minRequiredBytes {
-			return errs.New(
-				errs.CodeVMCreateFailed,
-				fmt.Sprintf(
-					"Requested disk size is smaller than minimum required (%d MiB). Use a larger size or choose a different image.",
-					result.Image.MinRootfsSizeMiB,
-				),
-				errs.WithClass(errs.ClassValidation),
-			)
-		}
+	minRequiredBytes := int64(result.Image.MinRootfsSizeMiB) * disk.MebibyteBytes
+	if result.DiskSizeBytes < minRequiredBytes {
+		return errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf(
+				"Requested disk size is smaller than minimum required (%d MiB). Use a larger size or choose a different image.",
+				result.Image.MinRootfsSizeMiB,
+			),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	if result.BootArgs != "" {
