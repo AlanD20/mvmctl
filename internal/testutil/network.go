@@ -82,13 +82,13 @@ func (r *NetworkRepo) Count(_ context.Context) (int, error) {
 	return count, nil
 }
 
-// ListAll returns all non-deleted networks ordered by created_at (Python: WHERE deleted_at IS NULL ORDER BY created_at).
+// ListAll returns all non-deleted networks ordered by created_at (Python: WHERE deleted_at IS NULL AND is_present = 1 ORDER BY created_at).
 func (r *NetworkRepo) ListAll(_ context.Context) ([]*model.Network, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.Network
 	for _, n := range r.networks {
-		if n.DeletedAt == nil {
+		if r.isNotDeleted(n) {
 			result = append(result, n)
 		}
 	}

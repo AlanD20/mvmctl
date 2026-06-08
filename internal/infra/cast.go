@@ -46,7 +46,11 @@ func ToBool(v any, defaultVal bool) bool {
 		if b, err := strconv.ParseBool(val); err == nil {
 			return b
 		}
-	case int, int64, float64:
+	case int:
+		return val != 0
+	case int64:
+		return val != 0
+	case float64:
 		return val != 0
 	}
 	return defaultVal

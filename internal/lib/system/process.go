@@ -1,7 +1,6 @@
 package system
 
 import (
-	"os"
 	"syscall"
 )
 
@@ -12,7 +11,7 @@ func IsProcessRunning(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	proc, err := os.FindProcess(pid)
+	proc, err := DefaultOS.FindProcess(pid)
 	if err != nil {
 		return false
 	}

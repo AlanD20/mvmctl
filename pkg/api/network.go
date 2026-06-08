@@ -90,7 +90,7 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 	}
 
 	// Update bridge_active
-	bridgeActive := libnet.BridgeExists(ctx, resolved.Bridge)
+	bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, resolved.Bridge)
 	_ = op.Repos.Network.UpdateBridgeActive(ctx, networkID, bridgeActive)
 
 	// Re-fetch
@@ -217,7 +217,7 @@ func (op *Operation) NetworkInspect(
 
 	net := resolved.Networks[0]
 
-	bridgeActive := libnet.BridgeExists(ctx, net.Bridge)
+	bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge)
 	if bridgeActive != net.BridgeActive {
 		_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 		net.BridgeActive = bridgeActive
@@ -327,7 +327,7 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 	syncErr := func() error {
 		// Step 1: Restore missing bridges (post-reboot recovery)
 		for _, net := range networks {
-			if !libnet.BridgeExists(ctx, net.Bridge) {
+			if !libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge) {
 				bridgeAddr, calcErr := network.ComputeBridgeAddress(net.IPv4Gateway, net.Subnet)
 				if calcErr != nil {
 					return fmt.Errorf("compute bridge address: %w", calcErr)
@@ -351,7 +351,7 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 
 		// Step 2: Reconcile bridge state (DB vs kernel)
 		for _, net := range networks {
-			bridgeActive := libnet.BridgeExists(ctx, net.Bridge)
+			bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge)
 			if bridgeActive != net.BridgeActive {
 				_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 			}
@@ -515,7 +515,7 @@ func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Ne
 		)
 	}
 
-	bridgeActive := libnet.BridgeExists(ctx, defaultNetwork.Bridge)
+	bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, defaultNetwork.Bridge)
 	_ = op.Repos.Network.UpdateBridgeActive(ctx, defaultNetwork.ID, bridgeActive)
 
 	return defaultNetwork, nil

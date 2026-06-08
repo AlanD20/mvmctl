@@ -84,18 +84,21 @@ func EntityName(name, entityType string, maxLength int) error {
 			fmt.Sprintf("invalid %s name '%s': '%s' is a reserved name", entityType, name, name),
 		)
 	}
-	if infra.ContainsDangerousChars(name) {
-		return errs.New(errs.CodeValidationFailed, fmt.Sprintf(
-			"invalid %s name '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
-			entityType,
-			name,
-		))
-	}
-	// Check if name is an IP address
+	// Check IP address BEFORE dangerous chars — IPv4 addresses contain dots,
+	// which are in DangerousChars (path traversal). Without this ordering,
+	// users get a misleading "forbidden characters" error instead of
+	// "cannot be an IP address".
 	if IsIPAddress(name) {
 		return errs.New(
 			errs.CodeValidationFailed,
 			fmt.Sprintf("invalid %s name '%s': cannot be an IP address", entityType, name),
+		)
+	}
+	if infra.ContainsDangerousChars(name) {
+		return errs.New(
+			errs.CodeValidationFailed,
+			fmt.Sprintf("invalid %s name '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
+				entityType, name),
 		)
 	}
 	if !validNameRegex.MatchString(name) {
@@ -331,7 +334,7 @@ func BridgeName(ctx context.Context, bridge string) error {
 		))
 	}
 	// Check if bridge already exists on host (non-mvm interface)
-	if network.BridgeExists(ctx, bridge) {
+	if network.DefaultNetOps.BridgeExists(ctx, bridge) {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("bridge '%s' already exists on this host", bridge))
 	}
 	return nil
