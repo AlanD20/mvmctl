@@ -16,7 +16,6 @@ import (
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/model"
@@ -24,6 +23,7 @@ import (
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 )
 
 // HostInit initializes host configuration.
@@ -85,13 +85,7 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 	// Run detection first, then probe against the detected state (verdict #53).
 	hardware, detErr := host.DetectHardware()
 	if detErr != nil {
-		return nil, &errs.DomainError{
-			Code:    "host.init.detect_failed",
-			Op:      "host",
-			Message: fmt.Sprintf("Hardware detection failed: %v", detErr),
-			Err:     detErr,
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.WrapMsg(errs.CodeHostInitFailed, fmt.Sprintf("Hardware detection failed: %v", detErr), detErr)
 	}
 	limits := host.DetectLimits()
 	resources, _ := host.DetectResources(ctx, hardware, limits, op.CacheDir)
@@ -102,12 +96,11 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 		for i, c := range probeResult.Critical {
 			criticalNames[i] = c.Name
 		}
-		return nil, &errs.DomainError{
-			Code:    "host.init.probe_failed",
-			Op:      "host",
-			Message: fmt.Sprintf("Probe failures: %s", strings.Join(criticalNames, ", ")),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeHostInitFailed,
+			fmt.Sprintf("Probe failures: %s", strings.Join(criticalNames, ", ")),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// Resolve firewall backend once (verdict #44).
@@ -140,12 +133,7 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 	// --- Setup host environment ---
 	allChanges, err := op.hostInitSetupEnvironment(ctx, sessionID, hostCtrl, fwBackend)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "host.init.failed",
-			Op:      "host",
-			Message: err.Error(),
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.New(errs.CodeHostInitFailed, err.Error())
 	}
 
 	// --- Finalize ---
@@ -345,21 +333,14 @@ func (op *Operation) HostNetworkSetup(ctx context.Context) error {
 func (op *Operation) HostInfo(ctx context.Context) (*responses.HostInfo, error) {
 	state, err := op.Repos.Host.GetState(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "host.info.no_state",
-			Op:      "host",
-			Message: fmt.Sprintf("Failed to get host state: %v", err),
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.WrapMsg(errs.CodeHostInfoFailed, fmt.Sprintf("Failed to get host state: %v", err), err)
 	}
 	if state == nil {
-		return nil, &errs.DomainError{
-			Code:    "host.info.no_state",
-			Op:      "host",
-			Message: "Host not yet detected. Run 'mvm host init' first.",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeHostInfoFailed,
+			"Host not yet detected. Run 'mvm host init' first.",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	hardware := host.HardwareFromState(state)
@@ -369,34 +350,26 @@ func (op *Operation) HostInfo(ctx context.Context) (*responses.HostInfo, error) 
 		// Auto-detect if this is the first time
 		hardware, limits, err = op.Services.Host.DetectAndSaveCapacity(ctx)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code:    "host.info.detect_failed",
-				Op:      "host",
-				Message: fmt.Sprintf("Failed to detect host capacity: %v", err),
-				Err:     err,
-				Class:   errs.ClassInternal,
-			}
+			return nil, errs.WrapMsg(
+				errs.CodeHostInfoFailed,
+				fmt.Sprintf("Failed to detect host capacity: %v", err),
+				err,
+			)
 		}
 		state, err = op.Repos.Host.GetState(ctx)
 		if err != nil || state == nil {
-			return nil, &errs.DomainError{
-				Code:    "host.info.no_state",
-				Op:      "host",
-				Message: "Failed to retrieve host state after detection.",
-				Class:   errs.ClassInternal,
-			}
+			return nil, errs.New(
+				errs.CodeHostInfoFailed,
+				"Failed to retrieve host state after detection.",
+				errs.WithClass(errs.ClassInternal),
+			)
 		}
 	}
 
 	// Detect resources
 	resources, err := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "host.info_failed",
-			Op:      "host",
-			Message: fmt.Sprintf("Failed to detect resources: %v", err),
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.New(errs.CodeHostInfoFailed, fmt.Sprintf("Failed to detect resources: %v", err))
 	}
 
 	// Use HostInfo.to_dict() matching Python exactly
@@ -414,33 +387,25 @@ func (op *Operation) HostInfo(ctx context.Context) (*responses.HostInfo, error) 
 func (op *Operation) HostRefreshCapacity(ctx context.Context) (*responses.HostInfo, error) {
 	hardware, limits, err := op.Services.Host.DetectAndSaveCapacity(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "host.capacity.detect_failed",
-			Op:      "host",
-			Message: fmt.Sprintf("Failed to detect host capacity: %v", err),
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeHostCapacityFailed,
+			fmt.Sprintf("Failed to detect host capacity: %v", err),
+			err,
+		)
 	}
 
 	state, err := op.Repos.Host.GetState(ctx)
 	if err != nil || state == nil {
-		return nil, &errs.DomainError{
-			Code:    "host.info.no_state",
-			Op:      "host",
-			Message: "Failed to retrieve host state after detection.",
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.New(
+			errs.CodeHostInfoFailed,
+			"Failed to retrieve host state after detection.",
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 
 	resources, err := host.DetectResources(ctx, hardware, limits, op.CacheDir)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "host.capacity_failed",
-			Op:      "host",
-			Message: fmt.Sprintf("Failed to detect resources: %v", err),
-			Class:   errs.ClassInternal,
-		}
+		return nil, errs.New(errs.CodeHostCapacityFailed, fmt.Sprintf("Failed to detect resources: %v", err))
 	}
 
 	// Use HostInfo.to_dict() matching Python exactly
@@ -513,13 +478,12 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *responses.HostStatusC
 func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 
 	if err := system.CheckPrivileges("/usr/sbin/ip", "clean host"); err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Op:      "host",
-			Message: fmt.Sprintf("Privilege check failed: %v", err),
-			Err:     err,
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodePrivilegeRequired,
+			fmt.Sprintf("Privilege check failed: %v", err),
+			err,
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 
 	var summary []string
@@ -621,13 +585,12 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 func (op *Operation) HostReset(ctx context.Context) ([]string, error) {
 
 	if err := system.CheckPrivileges("/usr/sbin/ip", "reset host"); err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Op:      "host",
-			Message: fmt.Sprintf("Privilege check failed: %v", err),
-			Err:     err,
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodePrivilegeRequired,
+			fmt.Sprintf("Privilege check failed: %v", err),
+			err,
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 
 	cleanSummary, cleanErr := op.HostClean(ctx)

@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // Controller manages volume operations for a specific volume instance.
@@ -35,12 +35,8 @@ func NewController(ctx context.Context, entity any, repo Repository) (*Controlle
 		c.volume = vol
 		return c, nil
 	default:
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "volume",
-			Message: fmt.Sprintf("Volume not found: '%v'", entity),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVolumeNotFound,
+			fmt.Sprintf("Volume not found: '%v'", entity))
 	}
 }
 

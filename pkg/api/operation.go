@@ -22,12 +22,12 @@ import (
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/db"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/logging"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/provisioner"
+	"mvmctl/pkg/errs"
 )
 
 // Operation is the single composition root for all API operations.
@@ -152,23 +152,20 @@ func emitProgress(onProgress event.OnProgressCallback, phase, status, msg string
 func (op *Operation) resolveCIVersion(ctx context.Context) (string, error) {
 	defaultFC, err := op.Repos.Binary.GetDefault(ctx, "firecracker")
 	if err != nil {
-		return "", &errs.DomainError{
-			Code:    errs.CodeDatabaseError,
-			Message: fmt.Sprintf("Failed to query default firecracker binary: %v", err),
-			Err:     err,
-		}
+		return "", errs.WrapMsg(
+			errs.CodeDatabaseError,
+			fmt.Sprintf("Failed to query default firecracker binary: %v", err),
+			err,
+		)
 	}
 	if defaultFC == nil {
-		return "", &errs.DomainError{
-			Code:    "binary.not_found",
-			Message: "No firecracker binary is installed. Use 'mvm binary pull firecracker' to install one.",
-		}
+		return "", errs.New(
+			errs.CodeBinaryNotFound,
+			"No firecracker binary is installed. Use 'mvm binary pull firecracker' to install one.",
+		)
 	}
 	if defaultFC.CIVersion == nil {
-		return "", &errs.DomainError{
-			Code:    "binary.no_ci_version",
-			Message: "Installed firecracker binary has no CI version.",
-		}
+		return "", errs.New(errs.CodeBinaryNoCIVersion, "Installed firecracker binary has no CI version.")
 	}
 	return *defaultFC.CIVersion, nil
 }

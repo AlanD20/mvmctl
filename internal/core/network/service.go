@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/firewall"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // Service manages network interfaces, bridges, TAP devices, and NAT/firewall rules.
@@ -288,7 +288,7 @@ func (s *Service) RemoveNAT(
 	attachedTaps := infranet.GetBridgeTaps(ctx, bridge)
 	if len(attachedTaps) > 0 {
 		if !force {
-			return errs.NetworkError(
+			return errs.New(errs.CodeNetworkError,
 				fmt.Sprintf(
 					"Cannot remove NAT: %d TAP(s) still attached on bridge %s. Use --force to override.",
 					len(attachedTaps),
@@ -558,7 +558,7 @@ func (s *Service) Remove(ctx context.Context, network *model.Network, force bool
 				vmNames = append(vmNames, vm.Name)
 			}
 		}
-		return errs.NetworkError(
+		return errs.New(errs.CodeNetworkError,
 			fmt.Sprintf("model.Network referenced by VMs: %s", strings.Join(vmNames, ", ")))
 	}
 

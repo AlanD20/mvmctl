@@ -18,12 +18,12 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 )
 
 // ImagePrune prunes unused images.
@@ -32,9 +32,7 @@ import (
 func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	allImages, err := op.Repos.Image.ListAll(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeDatabaseError, Message: fmt.Sprintf("Failed to list images: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list images: %v", err), err)
 	}
 
 	defaultItem, _ := op.Repos.Image.GetDefault(ctx)
@@ -91,9 +89,7 @@ func (op *Operation) ImagePull(
 	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
 	resolved, err := req.ResolvePull(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeImagePullFailed, Message: fmt.Sprintf("Failed to resolve pull input: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to resolve pull input: %v", err), err)
 	}
 
 	// Resolve cache TTL from settings
@@ -105,17 +101,15 @@ func (op *Operation) ImagePull(
 	// Load image types config from embedded assets
 	rawYAML, err := assets.ReadFile("images.yaml")
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeImagePullFailed, Message: fmt.Sprintf("Failed to load images.yaml: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to load images.yaml: %v", err), err)
 	}
 	imageTypesConfig, err := image.LoadImageTypesConfig(rawYAML)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeImagePullFailed,
-			Message: fmt.Sprintf("Failed to parse image types config: %v", err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeImagePullFailed,
+			fmt.Sprintf("Failed to parse image types config: %v", err),
+			err,
+		)
 	}
 
 	// Determine CI version and ubuntu version:
@@ -141,9 +135,7 @@ func (op *Operation) ImagePull(
 	if !ciVersionFromInput {
 		resolvedCIVersion, err = op.resolveCIVersion(ctx)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code: errs.CodeImagePullFailed, Message: err.Error(), Err: err,
-			}
+			return nil, errs.WrapMsg(errs.CodeImagePullFailed, err.Error(), err)
 		}
 	}
 
@@ -157,11 +149,7 @@ func (op *Operation) ImagePull(
 		imageTypesConfig,
 	)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeImagePullFailed,
-			Message: fmt.Sprintf("Failed to resolve image version: %v", err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to resolve image version: %v", err), err)
 	}
 
 	specs, err := image.GetSpecsFor(
@@ -174,17 +162,17 @@ func (op *Operation) ImagePull(
 		imageTypesConfig,
 	)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeImagePullFailed,
-			Message: fmt.Sprintf("Failed to resolve spec for %s: %v", resolved.Type, err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeImagePullFailed,
+			fmt.Sprintf("Failed to resolve spec for %s: %v", resolved.Type, err),
+			err,
+		)
 	}
 	if len(specs) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeImagePullFailed,
-			Message: fmt.Sprintf("No matching image spec for type=%q version=%q", resolved.Type, resolved.Version),
-		}
+		return nil, errs.New(
+			errs.CodeImagePullFailed,
+			fmt.Sprintf("No matching image spec for type=%q version=%q", resolved.Type, resolved.Version),
+		)
 	}
 	spec := specs[0]
 
@@ -207,9 +195,7 @@ func (op *Operation) ImagePull(
 
 	workDir, err := os.MkdirTemp(infra.GetTempDir(), "mvm-pull-*")
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeImagePullFailed, Message: fmt.Sprintf("Failed to create temp dir: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to create temp dir: %v", err), err)
 	}
 	defer os.RemoveAll(workDir)
 
@@ -229,9 +215,7 @@ func (op *Operation) ImagePull(
 		progressBridge,
 	)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeImagePullFailed, Message: fmt.Sprintf("Download failed: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Download failed: %v", err), err)
 	}
 
 	if onProgress != nil {
@@ -253,13 +237,9 @@ func (op *Operation) ImagePull(
 	if err != nil {
 		// Catch RootPartitionDetectionError and TieDetectedError (matching Python)
 		if isPartitionDetectionError(err) {
-			return nil, &errs.DomainError{
-				Code: "image.acquire_failed", Message: err.Error(), Err: err,
-			}
+			return nil, errs.WrapMsg(errs.CodeImageAcquireFailed, err.Error(), err)
 		}
-		return nil, &errs.DomainError{
-			Code: errs.CodeImageCorrupt, Message: fmt.Sprintf("Extraction failed: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImageCorrupt, fmt.Sprintf("Extraction failed: %v", err), err)
 	}
 
 	if onProgress != nil {
@@ -280,13 +260,9 @@ func (op *Operation) ImagePull(
 	)
 	if err != nil {
 		if isPartitionDetectionError(err) {
-			return nil, &errs.DomainError{
-				Code: "image.acquire_failed", Message: err.Error(), Err: err,
-			}
+			return nil, errs.WrapMsg(errs.CodeImageAcquireFailed, err.Error(), err)
 		}
-		return nil, &errs.DomainError{
-			Code: errs.CodeImageCorrupt, Message: fmt.Sprintf("Optimization failed: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImageCorrupt, fmt.Sprintf("Optimization failed: %v", err), err)
 	}
 
 	// Move compressed result to images dir
@@ -354,9 +330,11 @@ func (op *Operation) ImageImport(
 	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
 	resolved, err := req.ResolveImport(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: errs.CodeImageImportFailed, Message: fmt.Sprintf("Failed to resolve import input: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodeImageImportFailed,
+			fmt.Sprintf("Failed to resolve import input: %v", err),
+			err,
+		)
 	}
 
 	existing, _ := op.Repos.Image.GetByType(ctx, resolved.Type)
@@ -413,13 +391,9 @@ func (op *Operation) ImageImport(
 	)
 	if err != nil {
 		if isPartitionDetectionError(err) {
-			return nil, &errs.DomainError{
-				Code: "image.import_failed", Message: err.Error(), Err: err,
-			}
+			return nil, errs.WrapMsg(errs.CodeImageImportFailed, err.Error(), err)
 		}
-		return nil, &errs.DomainError{
-			Code: errs.CodeImageImportFailed, Message: fmt.Sprintf("Extraction failed: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImageImportFailed, fmt.Sprintf("Extraction failed: %v", err), err)
 	}
 
 	if onProgress != nil {
@@ -440,13 +414,9 @@ func (op *Operation) ImageImport(
 	)
 	if err != nil {
 		if isPartitionDetectionError(err) {
-			return nil, &errs.DomainError{
-				Code: "image.import_failed", Message: err.Error(), Err: err,
-			}
+			return nil, errs.WrapMsg(errs.CodeImageImportFailed, err.Error(), err)
 		}
-		return nil, &errs.DomainError{
-			Code: errs.CodeImageImportFailed, Message: fmt.Sprintf("Optimization failed: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImageImportFailed, fmt.Sprintf("Optimization failed: %v", err), err)
 	}
 
 	_ = op.Repos.Image.Upsert(ctx, imageItem)
@@ -488,17 +458,13 @@ func (op *Operation) ImageWarm(
 		var err error
 		images, err = op.Repos.Image.ListAll(ctx)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code: errs.CodeDatabaseError, Message: fmt.Sprintf("Failed to list images: %v", err), Err: err,
-			}
+			return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list images: %v", err), err)
 		}
 	} else {
 		request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
 		resolved, err := request.Resolve(ctx)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code: errs.CodeImageNotFound, Message: fmt.Sprintf("Image resolution failed: %v", err), Err: err,
-			}
+			return nil, errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Image resolution failed: %v", err), err)
 		}
 		images = resolved.Images
 	}
@@ -511,9 +477,7 @@ func (op *Operation) ImageWarm(
 
 	warmed, err := op.Services.Image.EnsureCached(images)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code: "image.warm_failed", Message: fmt.Sprintf("Warming failed: %v", err), Err: err,
-		}
+		return nil, errs.WrapMsg(errs.CodeImageWarmFailed, fmt.Sprintf("Warming failed: %v", err), err)
 	}
 
 	if onProgress != nil {
@@ -719,20 +683,14 @@ func (op *Operation) ImageSetDefault(ctx context.Context, input inputs.ImageInpu
 	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return &errs.DomainError{
-			Code: errs.CodeImageNotFound, Message: fmt.Sprintf("Image not found: %v", err), Err: err,
-		}
+		return errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Image not found: %v", err), err)
 	}
 	if len(resolved.Images) > 1 {
-		return &errs.DomainError{
-			Code: errs.CodeImageNotFound, Message: "Expected exactly one image identifier",
-		}
+		return errs.New(errs.CodeImageNotFound, "Expected exactly one image identifier")
 	}
 	img := resolved.Images[0]
 	if err := op.Repos.Image.SetDefault(ctx, img.ID); err != nil {
-		return &errs.DomainError{
-			Code: errs.CodeImageNotFound, Message: fmt.Sprintf("Failed to set default: %v", err), Err: err,
-		}
+		return errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Failed to set default: %v", err), err)
 	}
 
 	op.AuditLog.LogOperation("image.set_default", map[string]any{"id": img.ID}, "")

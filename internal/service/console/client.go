@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"mvmctl/pkg/errs"
+
 	"golang.org/x/term"
 )
 
@@ -63,7 +65,11 @@ func NewRelayClient(socketPath string, detachSequence []byte) *RelayClient {
 func (c *RelayClient) Connect() error {
 	conn, err := net.DialTimeout("unix", c.socketPath, consoleSocketTimeout)
 	if err != nil {
-		return ErrConnectionFailed(c.socketPath, err)
+		return errs.WrapMsg(
+			errs.CodeConsoleRelayFailed,
+			fmt.Sprintf("Failed to connect to console relay at %s: %s", c.socketPath, err),
+			err,
+		)
 	}
 	c.mu.Lock()
 	c.conn = conn

@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"mvmctl/internal/core/binary"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // BinaryInput matches Python's BinaryInput dataclass.
@@ -42,34 +42,22 @@ func NewBinaryRequest(inputs BinaryInput, binaryRepo binary.Repository) *BinaryR
 // Matches Python's BinaryRequest.resolve().
 func (r *BinaryRequest) Resolve(ctx context.Context) (*ResolvedBinaryInput, error) {
 	if len(r.input.Identifiers) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "binary",
-			Message: "No binary identifiers provided or could be resolved",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeBinaryNotFound, "No binary identifiers provided or could be resolved")
 	}
 
 	// Validate identifier length — max 64 chars matching SHA256 hex ID length.
 	for _, ident := range r.input.Identifiers {
 		if len(ident) > 64 {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Op:      "binary",
-				Message: fmt.Sprintf("Binary identifier too long: '%s' exceeds maximum length of 64 characters", ident),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeValidationFailed,
+				fmt.Sprintf("Binary identifier too long: '%s' exceeds maximum length of 64 characters", ident),
+			)
 		}
 	}
 
 	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if result == nil || len(result.Items) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "binary",
-			Message: "No binary identifiers provided or could be resolved",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeBinaryNotFound, "No binary identifiers provided or could be resolved")
 	}
 
 	r.result = &ResolvedBinaryInput{

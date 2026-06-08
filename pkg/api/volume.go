@@ -11,10 +11,10 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/disk"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 )
 
 // VolumeListAll returns all volumes.
@@ -52,11 +52,7 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 	}
 
 	if _, volErr := op.Services.Volume.CreateDisk(ctx, volumeItem); volErr != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeInternal,
-			Message: fmt.Sprintf("Failed to create volume: %v", volErr),
-			Err:     volErr,
-		}
+		return nil, errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("Failed to create volume: %v", volErr), volErr)
 	}
 
 	op.AuditLog.LogOperation("volume.create", map[string]any{"name": input.Name}, "")
@@ -216,11 +212,7 @@ func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreate
 	req := inputs.NewVolumeRequest(volInput, op.Connection.DB(), op.Repos.Volume)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Message: err.Error(),
-			Err:     err,
-		}
+		return errs.WrapMsg(errs.CodeVolumeNotFound, err.Error(), err)
 	}
 
 	vol := resolved.Volumes[0]
@@ -228,19 +220,12 @@ func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreate
 	// Python: size_bytes = DiskUtils.parse_disk_size_to_bytes(inputs.size)
 	sizeBytes, err := disk.ParseDiskSizeToBytes(input.Size)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Message: fmt.Sprintf("Invalid size: %v", err),
-		}
+		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid size: %v", err))
 	}
 
 	_, err = op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    "volume.resize_failed",
-			Message: fmt.Sprintf("Failed to resize volume: %v", err),
-			Err:     err,
-		}
+		return errs.WrapMsg(errs.CodeVolumeResizeFailed, fmt.Sprintf("Failed to resize volume: %v", err), err)
 	}
 
 	op.AuditLog.LogOperation("volume.resize", map[string]any{"name": vol.Name}, "")

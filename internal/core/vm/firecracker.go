@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // ── Constants matching Python's constants.py ──
@@ -101,12 +101,8 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 
 	if !s.config.SnapshotMode && s.config.RelayClientFD != nil {
 		if *s.config.RelayClientFD == 0 {
-			return &errs.DomainError{
-				Code:    errs.CodeFirecrackerSpawnError,
-				Op:      "firecracker",
-				Message: "console enabled but PTY client FD is unavailable",
-				Class:   errs.ClassInternal,
-			}
+			return errs.New(errs.CodeFirecrackerSpawnError,
+				"console enabled but PTY client FD is unavailable")
 		}
 		relayFile = os.NewFile(uintptr(*s.config.RelayClientFD), "relay-client")
 		fcStdin = relayFile
@@ -171,22 +167,14 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 			if waitErr == nil && ps != nil {
 				exitCode = ps.ExitCode()
 			}
-			return &errs.DomainError{
-				Code:    errs.CodeFirecrackerSpawnError,
-				Op:      "firecracker",
-				Message: fmt.Sprintf("firecracker process exited immediately with code %d", exitCode),
-				Class:   errs.ClassInternal,
-			}
+			return errs.New(errs.CodeFirecrackerSpawnError,
+				fmt.Sprintf("firecracker process exited immediately with code %d", exitCode))
 		}
 	}
 
 	if _, err := os.Stat(s.APISocketPath); os.IsNotExist(err) {
-		return &errs.DomainError{
-			Code:    errs.CodeFirecrackerSpawnError,
-			Op:      "firecracker",
-			Message: fmt.Sprintf("firecracker API socket not available after 2s"),
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeFirecrackerSpawnError,
+			"firecracker API socket not available after 2s")
 	}
 
 	s.CloseFilePointers()
@@ -520,14 +508,10 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 	}
 
 	if s.config.PCIEnabled && s.config.ImageFSUUID == "" {
-		return "", &errs.DomainError{
-			Code: errs.CodeFirecrackerConfigError,
-			Op:   "firecracker",
-			Message: "PCI transport enabled but no filesystem UUID available for " +
-				"root device identification. Use an image with a known " +
-				"filesystem UUID, or pass --no-pci to disable PCI transport.",
-			Class: errs.ClassValidation,
-		}
+		return "", errs.New(errs.CodeFirecrackerConfigError,
+			"PCI transport enabled but no filesystem UUID available for "+
+				"root device identification. Use an image with a known "+
+				"filesystem UUID, or pass --no-pci to disable PCI transport.")
 	}
 
 	if s.config.ImageFSUUID != "" {
@@ -552,12 +536,8 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 		if *cloudInitMode == model.CloudInitModeNET {
 			// For nocloud-net, validate URL is configured
 			if s.config.CloudInitNoCloudURL == nil || *s.config.CloudInitNoCloudURL == "" {
-				return "", &errs.DomainError{
-					Code:    errs.CodeFirecrackerConfigError,
-					Op:      "firecracker",
-					Message: "NoCloud URL must be set when using NET mode",
-					Class:   errs.ClassValidation,
-				}
+				return "", errs.New(errs.CodeFirecrackerConfigError,
+					"NoCloud URL must be set when using NET mode")
 			}
 			bootArgs.set("ds", []string{fmt.Sprintf("nocloud;seedfrom=%s", *s.config.CloudInitNoCloudURL)})
 		} else if *cloudInitMode == model.CloudInitModeINJECT {

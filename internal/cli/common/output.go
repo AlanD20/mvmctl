@@ -20,9 +20,9 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/errs"
 )
 
 // ─── Braille spinner (matching Python's Rich console.status) ──────────────────

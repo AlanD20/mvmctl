@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // ── Controller ──
@@ -189,51 +189,26 @@ func (c *Controller) Pause(ctx context.Context) error {
 
 	// Cannot pause from these states
 	if c.vm.Status == model.VMStatusStarting {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is still starting — cannot pause (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is still starting — cannot pause (current state: %s)", name, c.vm.Status))
 	}
 	if c.vm.Status == model.VMStatusStopped {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is stopped — cannot pause (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is stopped — cannot pause (current state: %s)", name, c.vm.Status))
 	}
 	if c.vm.Status == model.VMStatusStopping {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is shutting down — cannot pause (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is shutting down — cannot pause (current state: %s)", name, c.vm.Status))
 	}
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
-		return &errs.DomainError{
-			Code: errs.CodeVMStateInvalid,
-			Op:   "vm.controller",
-			Message: fmt.Sprintf(
-				"VM '%s' is in %s state — cannot pause (current state: %s)",
-				name,
-				c.vm.Status,
-				c.vm.Status,
-			),
-			Class: errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is in %s state — cannot pause (current state: %s)", name, c.vm.Status, c.vm.Status))
 	}
 
 	// Valid transition — must be RUNNING
 	if c.vm.APISocketPath == "" {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' has no API socket enabled", name),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' has no API socket enabled", name))
 	}
 
 	// APISocketPath is already a full path from DB
@@ -265,51 +240,33 @@ func (c *Controller) Resume(ctx context.Context) error {
 
 	// Error/crashed state
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
-		return &errs.DomainError{
-			Code: errs.CodeVMStateInvalid,
-			Op:   "vm.controller",
-			Message: fmt.Sprintf(
+		return errs.New(
+			errs.CodeVMStateInvalid,
+			fmt.Sprintf(
 				"VM '%s' is in %s state — remove and recreate (current state: %s)",
 				name,
 				c.vm.Status,
 				c.vm.Status,
 			),
-			Class: errs.ClassValidation,
-		}
+		)
 	}
 
 	// Wrong direction — stopped
 	if c.vm.Status == model.VMStatusStopped {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is stopped — use start() instead (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is stopped — use start() instead (current state: %s)", name, c.vm.Status))
 	}
 
 	// Wrong direction — shutting down
 	if c.vm.Status == model.VMStatusStopping {
-		return &errs.DomainError{
-			Code: errs.CodeVMStateInvalid,
-			Op:   "vm.controller",
-			Message: fmt.Sprintf(
-				"VM '%s' is shutting down — use start() after it stops (current state: %s)",
-				name,
-				c.vm.Status,
-			),
-			Class: errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is shutting down — use start() after it stops (current state: %s)", name, c.vm.Status))
 	}
 
 	// Valid transition — must be PAUSED
 	if c.vm.APISocketPath == "" {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' has no API socket enabled", name),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' has no API socket enabled", name))
 	}
 
 	// APISocketPath is already a full path from DB
@@ -348,37 +305,27 @@ func (c *Controller) Start(ctx context.Context) error {
 
 	// Error/crashed state
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
-		return &errs.DomainError{
-			Code: errs.CodeVMStateInvalid,
-			Op:   "vm.controller",
-			Message: fmt.Sprintf(
+		return errs.New(
+			errs.CodeVMStateInvalid,
+			fmt.Sprintf(
 				"VM '%s' is in %s state — remove and recreate (current state: %s)",
 				name,
 				c.vm.Status,
 				c.vm.Status,
 			),
-			Class: errs.ClassValidation,
-		}
+		)
 	}
 
 	// Wrong direction — paused
 	if c.vm.Status == model.VMStatusPaused {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is paused — use resume() instead (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is paused — use resume() instead (current state: %s)", name, c.vm.Status))
 	}
 
 	// Valid transition — must be STOPPED
 	if c.vm.APISocketPath == "" {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' has no API socket enabled", name),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' has no API socket enabled", name))
 	}
 
 	// APISocketPath is already a full path from DB
@@ -416,50 +363,25 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 
 	// Validate state — snapshot requires RUNNING or PAUSED
 	if c.vm.Status == model.VMStatusStarting {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is still starting — cannot snapshot (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is still starting — cannot snapshot (current state: %s)", name, c.vm.Status))
 	}
 	if c.vm.Status == model.VMStatusStopped {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is stopped — cannot snapshot (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is stopped — cannot snapshot (current state: %s)", name, c.vm.Status))
 	}
 	if c.vm.Status == model.VMStatusStopping {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("VM '%s' is shutting down — cannot snapshot (current state: %s)", name, c.vm.Status),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is shutting down — cannot snapshot (current state: %s)", name, c.vm.Status))
 	}
 	if c.vm.Status == model.VMStatusError || c.vm.Status == model.VMStatusCrashed {
-		return &errs.DomainError{
-			Code: errs.CodeVMStateInvalid,
-			Op:   "vm.controller",
-			Message: fmt.Sprintf(
-				"VM '%s' is in %s state — cannot snapshot (current state: %s)",
-				name,
-				c.vm.Status,
-				c.vm.Status,
-			),
-			Class: errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("VM '%s' is in %s state — cannot snapshot (current state: %s)", name, c.vm.Status, c.vm.Status))
 	}
 
 	if c.vm.APISocketPath == "" {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", name),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", name))
 	}
 
 	// APISocketPath is already a full path from DB
@@ -523,12 +445,8 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 // Matches Python's VMController.load_snapshot(mem_in, state_in, resume_after=False).
 func (c *Controller) LoadSnapshot(ctx context.Context, memIn, stateIn string, resumeAfter bool) error {
 	if c.vm.APISocketPath == "" {
-		return &errs.DomainError{
-			Code:    errs.CodeVMStateInvalid,
-			Op:      "vm.controller",
-			Message: fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", c.vm.Name),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMStateInvalid,
+			fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", c.vm.Name))
 	}
 
 	// APISocketPath is already a full path from DB

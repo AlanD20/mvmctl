@@ -13,8 +13,8 @@ import (
 	"syscall"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // ─── Error handler wrapper (matching Python's @handle_errors) ────────────────

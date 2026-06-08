@@ -73,5 +73,3 @@ func (h *textHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 func (h *textHandler) WithGroup(_ string) slog.Handler {
 	return h
 }
-
-

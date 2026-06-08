@@ -1,26 +1,6 @@
 package ssh
 
-import (
-	"fmt"
-	"os"
-	"path/filepath"
-)
-
-// getDirectorySize returns the approximate total size of a directory
-// by summing file sizes. Matches Python's CPService._get_directory_size().
-func getDirectorySize(path string) int64 {
-	var total int64
-	filepath.Walk(path, func(fp string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip inaccessible files, matching Python's OSError pass
-		}
-		if !fi.IsDir() {
-			total += fi.Size()
-		}
-		return nil
-	})
-	return total
-}
+import "fmt"
 
 // buildSSHOpts builds the base SSH argument list shared by all SSH connections.
 // connectTimeout is in seconds; 0 means no ConnectTimeout flag.

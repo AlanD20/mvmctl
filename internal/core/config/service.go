@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // Service matches the Python mvmctl.core.config._service.SettingsService.
@@ -34,12 +34,8 @@ func NewService(repo SettingsRepository, constraints *ConstraintRegistry) *Servi
 func (s *Service) Set(ctx context.Context, category, key string, value any) error {
 	expected := GetExpectedType(category, key)
 	if expected == "" {
-		return &errs.DomainError{
-			Code:    errs.CodeConfigError,
-			Message: "'" + category + "." + key + "' is not an overridable setting. Use 'mvm config ls' to see valid keys.",
-			Op:      "config.set",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeConfigError,
+			"'"+category+"."+key+"' is not an overridable setting. Use 'mvm config ls' to see valid keys.")
 	}
 
 	coerced, err := infra.Coerce(value, expected)
@@ -131,12 +127,8 @@ func (s *Service) Delete(ctx context.Context, category, key string) (bool, error
 // Matches Python: validates category exists, then repo.delete_by_category().
 func (s *Service) DeleteByCategory(ctx context.Context, category string) (int, error) {
 	if _, ok := OverridableSettings[category]; !ok {
-		return 0, &errs.DomainError{
-			Code:    errs.CodeConfigError,
-			Message: "'" + category + "' is not a valid setting category. Use 'mvm config ls' to see valid categories.",
-			Op:      "config.delete",
-			Class:   errs.ClassValidation,
-		}
+		return 0, errs.New(errs.CodeConfigError,
+			"'"+category+"' is not a valid setting category. Use 'mvm config ls' to see valid categories.")
 	}
 	return s.repo.DeleteByCategory(ctx, category)
 }
@@ -153,12 +145,8 @@ func (s *Service) DeleteAll(ctx context.Context) (int, error) {
 // Go matches this exactly with model.SettingInfo{Type, Default, Override}.
 func (s *Service) ListByCategory(ctx context.Context, category string) (map[string]model.SettingInfo, error) {
 	if _, ok := OverridableSettings[category]; !ok {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeConfigError,
-			Message: "'" + category + "' is not a valid setting category. Use 'mvm config ls' to see valid categories.",
-			Op:      "config.list",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeConfigError,
+			"'"+category+"' is not a valid setting category. Use 'mvm config ls' to see valid categories.")
 	}
 
 	// Python: overrides = self._repo.list_by_category(category)

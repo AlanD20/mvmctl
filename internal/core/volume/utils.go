@@ -11,6 +11,7 @@ import (
 
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // VolumesToDrives converts volume items to Firecracker drive configurations.
@@ -84,7 +85,7 @@ func sanitizeStderr(stderr string) string {
 func GetDiskInfo(ctx context.Context, path string) (map[string]any, error) {
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			return nil, NewVolumeErrorf("Disk file not found: %s", path)
+			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Disk file not found: %s", path))
 		}
 		return nil, fmt.Errorf("stat disk file: %w", err)
 	}
@@ -95,7 +96,7 @@ func GetDiskInfo(ctx context.Context, path string) (map[string]any, error) {
 		system.DefaultRunCmdOpts(),
 	)
 	if result.Err != nil {
-		return nil, NewVolumeErrorf("qemu-img info failed: %s", result.Err.Error())
+		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("qemu-img info failed: %s", result.Err.Error()))
 	}
 
 	var data map[string]any

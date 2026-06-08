@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 const applianceBuildTimeout = 60 * time.Second
@@ -279,7 +279,7 @@ func EnsureAppliance(cacheDir string) error {
 
 	entries, err := filepath.Glob(filepath.Join(applianceDir, "*"))
 	if err != nil || len(entries) == 0 {
-		return errs.GuestfsError("libguestfs appliance cache not found. Run: mvm cache init")
+		return errs.New(errs.CodeGuestfsError, "libguestfs appliance cache not found. Run: mvm cache init")
 	}
 
 	for _, entry := range entries {
@@ -291,7 +291,7 @@ func EnsureAppliance(cacheDir string) error {
 
 	for _, found := range required {
 		if !found {
-			return errs.GuestfsError("libguestfs appliance cache not found. Run: mvm cache init")
+			return errs.New(errs.CodeGuestfsError, "libguestfs appliance cache not found. Run: mvm cache init")
 		}
 	}
 

@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/network"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -58,31 +58,19 @@ func NewNetworkRequest(inputs NetworkInput, db *sqlx.DB, networkRepo network.Rep
 // Matches Python's NetworkRequest.resolve().
 func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, error) {
 	if len(r.input.Identifiers) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeNetworkNotFound,
-			Op:      "network",
-			Message: "No network identifiers provided",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeNetworkNotFound, "No network identifiers provided")
 	}
 
 	result, err := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeNetworkNotFound,
-			Op:      "network",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeNetworkNotFound, err.Error())
 	}
 
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeNetworkNotFound,
-			Op:      "network",
-			Message: "Could not resolve any networks: " + strings.Join(result.Errors, ", "),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeNetworkNotFound,
+			"Could not resolve any networks: "+strings.Join(result.Errors, ", "),
+		)
 	}
 
 	r.result = &ResolvedNetworkInput{
@@ -100,21 +88,11 @@ func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, er
 
 func (r *NetworkRequest) ensureValidate() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeNetworkNotFound,
-			Op:      "network",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeNetworkNotFound, "Failed to resolve necessary dependencies to validate")
 	}
 
 	if len(r.result.Networks) == 0 {
-		return &errs.DomainError{
-			Code:    errs.CodeNetworkNotFound,
-			Op:      "network",
-			Message: "No networks found matching identifiers",
-			Class:   errs.ClassValidation,
-		}
+		return errs.NotFound(errs.CodeNetworkNotFound, "No networks found matching identifiers")
 	}
 
 	return nil

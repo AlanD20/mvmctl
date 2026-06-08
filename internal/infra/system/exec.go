@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 const stderrPreviewLimit = 100
@@ -190,7 +190,7 @@ func runCmdInternal(ctx context.Context, opts RunCmdOpts) *RunCmdResult {
 			return &RunCmdResult{
 				ExitCode: -1,
 				Success:  false,
-				Err:      errs.ProcessErrorWrapped(fmt.Sprintf("failed to start: %s", cmdArgs[0]), err),
+				Err:      errs.WrapMsg(errs.CodeProcessError, fmt.Sprintf("failed to start: %s", cmdArgs[0]), err),
 			}
 		}
 		return &RunCmdResult{
@@ -248,7 +248,7 @@ func runCmdInternal(ctx context.Context, opts RunCmdOpts) *RunCmdResult {
 			if !strings.ContainsRune(timeoutStr, '.') {
 				timeoutStr += ".0"
 			}
-			result.Err = errs.ProcessError(
+			result.Err = errs.New(errs.CodeProcessError,
 				fmt.Sprintf("Command timed out after %ss: %s", timeoutStr, cmdArgs[0]),
 			)
 			return result
@@ -257,7 +257,7 @@ func runCmdInternal(ctx context.Context, opts RunCmdOpts) *RunCmdResult {
 		// 2. Check for command not found (matches Python's FileNotFoundError).
 		if errors.Is(err, exec.ErrNotFound) {
 			result.ExitCode = -1
-			result.Err = errs.ProcessError(
+			result.Err = errs.New(errs.CodeProcessError,
 				fmt.Sprintf("Command not found: %s", cmdArgs[0]),
 			)
 			return result
@@ -273,7 +273,7 @@ func runCmdInternal(ctx context.Context, opts RunCmdOpts) *RunCmdResult {
 				if sanitized != "" {
 					msg += "\n" + sanitized
 				}
-				result.Err = errs.ProcessError(msg)
+				result.Err = errs.New(errs.CodeProcessError, msg)
 			}
 			result.Success = result.ExitCode == 0
 			return result

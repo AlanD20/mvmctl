@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // ── Constants ──
@@ -113,12 +113,8 @@ func (fc *FirecrackerClient) request(
 				continue
 			}
 
-			return 0, nil, &errs.DomainError{
-				Code:    errs.CodeFirecrackerClientError,
-				Op:      "firecracker.client",
-				Message: fmt.Sprintf("api request failed: %v", err),
-				Class:   errs.ClassInternal,
-			}
+			return 0, nil, errs.New(errs.CodeFirecrackerClientError,
+				fmt.Sprintf("api request failed: %v", err))
 		}
 
 		status := resp.StatusCode
@@ -134,12 +130,8 @@ func (fc *FirecrackerClient) request(
 		return status, bodyBytes, nil
 	}
 
-	return 0, nil, &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: fmt.Sprintf("api request failed after %d retries: %v", maxRetries, lastErr),
-		Class:   errs.ClassInternal,
-	}
+	return 0, nil, errs.New(errs.CodeFirecrackerClientError,
+		fmt.Sprintf("api request failed after %d retries: %v", maxRetries, lastErr))
 }
 
 func isConnRefused(err error) bool {
@@ -168,12 +160,7 @@ func (fc *FirecrackerClient) CreateSnapshot(ctx context.Context, memPath, snapsh
 	if len(raw) > 0 {
 		msg += fmt.Sprintf(" response: %s", string(raw))
 	}
-	return false, &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: msg,
-		Class:   errs.ClassInternal,
-	}
+	return false, errs.New(errs.CodeFirecrackerClientError, msg)
 }
 
 // LoadSnapshot loads a VM from snapshot via PUT /snapshot/load.
@@ -200,12 +187,7 @@ func (fc *FirecrackerClient) LoadSnapshot(
 	if len(raw) > 0 {
 		msg += fmt.Sprintf(" response: %s", string(raw))
 	}
-	return false, &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: msg,
-		Class:   errs.ClassInternal,
-	}
+	return false, errs.New(errs.CodeFirecrackerClientError, msg)
 }
 
 // ── Instance Info Operations ──
@@ -255,12 +237,8 @@ func (fc *FirecrackerClient) StartInstance(ctx context.Context) (bool, error) {
 		slog.Debug("VM started")
 		return true, nil
 	}
-	return false, &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: fmt.Sprintf("failed to start VM: %d", status),
-		Class:   errs.ClassInternal,
-	}
+	return false, errs.New(errs.CodeFirecrackerClientError,
+		fmt.Sprintf("failed to start VM: %d", status))
 }
 
 // SendCtrlAltDel sends Ctrl+Alt+Del to the VM via PUT /actions.
@@ -295,12 +273,8 @@ func (fc *FirecrackerClient) PauseVM(ctx context.Context) error {
 		slog.Debug("VM paused")
 		return nil
 	}
-	return &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: fmt.Sprintf("failed to pause VM: %d", status),
-		Class:   errs.ClassInternal,
-	}
+	return errs.New(errs.CodeFirecrackerClientError,
+		fmt.Sprintf("failed to pause VM: %d", status))
 }
 
 // ResumeVM resumes a paused microVM via PATCH /vm with state: "Resumed".
@@ -314,12 +288,8 @@ func (fc *FirecrackerClient) ResumeVM(ctx context.Context) error {
 		slog.Debug("VM resumed")
 		return nil
 	}
-	return &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: fmt.Sprintf("failed to resume VM: %d", status),
-		Class:   errs.ClassInternal,
-	}
+	return errs.New(errs.CodeFirecrackerClientError,
+		fmt.Sprintf("failed to resume VM: %d", status))
 }
 
 // ── Drive Operations ──
@@ -345,12 +315,7 @@ func (fc *FirecrackerClient) PutDrive(ctx context.Context, driveConfig model.Dri
 	if len(raw) > 0 {
 		msg += fmt.Sprintf(" response: %s", string(raw))
 	}
-	return &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: msg,
-		Class:   errs.ClassInternal,
-	}
+	return errs.New(errs.CodeFirecrackerClientError, msg)
 }
 
 // PatchDrive removes a drive from a running VM via PATCH /drives/{drive_id}.
@@ -367,12 +332,7 @@ func (fc *FirecrackerClient) PatchDrive(ctx context.Context, driveID string) err
 	if len(raw) > 0 {
 		msg += fmt.Sprintf(" response: %s", string(raw))
 	}
-	return &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: msg,
-		Class:   errs.ClassInternal,
-	}
+	return errs.New(errs.CodeFirecrackerClientError, msg)
 }
 
 // DeleteDrive removes a drive from a running VM via DELETE /drives/{drive_id}.
@@ -388,10 +348,5 @@ func (fc *FirecrackerClient) DeleteDrive(ctx context.Context, driveID string) er
 	if len(raw) > 0 {
 		msg += fmt.Sprintf(" response: %s", string(raw))
 	}
-	return &errs.DomainError{
-		Code:    errs.CodeFirecrackerClientError,
-		Op:      "firecracker.client",
-		Message: msg,
-		Class:   errs.ClassInternal,
-	}
+	return errs.New(errs.CodeFirecrackerClientError, msg)
 }

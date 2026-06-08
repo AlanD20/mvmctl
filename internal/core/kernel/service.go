@@ -18,11 +18,11 @@ import (
 	"mvmctl/internal/infra/archive"
 	"mvmctl/internal/infra/crypto"
 	"mvmctl/internal/infra/download"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
+	"mvmctl/pkg/errs"
 
 	"mvmctl/internal/assets"
 )
@@ -110,8 +110,8 @@ func (s *Service) FetchFirecrackerKernel(
 	onProgress event.OnDownloadCallback,
 ) (*model.KernelPullResult, error) {
 	if spec.ListURLTemplate == nil || *spec.ListURLTemplate == "" {
-		return nil, NewKernelErrorf(
-			"Missing 'list_url_template' in kernels.yaml for %s", spec.Name)
+		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
+			"Missing 'list_url_template' in kernels.yaml for %s", spec.Name))
 	}
 
 	templateVars := map[string]string{
@@ -121,20 +121,20 @@ func (s *Service) FetchFirecrackerKernel(
 	}
 	listURL, err := infra.RenderTemplate(*spec.ListURLTemplate, templateVars)
 	if err != nil {
-		return nil, NewKernelErrorf("Failed to render list URL template: %s", err)
+		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to render list URL template: %s", err))
 	}
 
 	xmlContent, err := s.dl.GetBody(ctx, listURL)
 	if err != nil {
-		return nil, NewKernelErrorf("Failed to list CI kernels: %s", err)
+		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to list CI kernels: %s", err))
 	}
 
 	pattern := fmt.Sprintf(KernelS3XMLPattern,
 		regexp.QuoteMeta(ciVersion), regexp.QuoteMeta(arch))
 	matches := regexp.MustCompile(pattern).FindAllStringSubmatch(string(xmlContent), -1)
 	if len(matches) == 0 {
-		return nil, NewKernelErrorf(
-			"No vmlinux found for Firecracker CI version %s / arch %s", ciVersion, arch)
+		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
+			"No vmlinux found for Firecracker CI version %s / arch %s", ciVersion, arch))
 	}
 
 	var versions []string
@@ -186,13 +186,16 @@ func (s *Service) FetchFirecrackerKernel(
 		}
 	}
 	if expectedSHA256 == "" && !intentionalNoChecksum {
-		return nil, NewKernelErrorf(
-			"Checksum required for Firecracker CI kernel download: %s", downloadURL)
+		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
+			"Checksum required for Firecracker CI kernel download: %s", downloadURL))
 	}
 
 	slog.Info("Downloading Firecracker CI kernel", "url", downloadURL)
 	if err := s.dl.DownloadFile(ctx, downloadURL, outputPath, expectedSHA256, true, true, onProgress); err != nil {
-		return nil, NewKernelErrorf("Failed to download Firecracker CI kernel: %s", err)
+		return nil, errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Failed to download Firecracker CI kernel: %s", err),
+		)
 	}
 	os.Chmod(outputPath, infra.ExecutablePerm)
 
@@ -313,7 +316,7 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 			true,
 			cfg.OnDownload,
 		); err != nil {
-			return nil, NewKernelErrorf("Download failed: %s", err)
+			return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Download failed: %s", err))
 		}
 	} else {
 		slog.Debug("Using cached tarball", "path", tarball)
@@ -327,7 +330,10 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 		}
 		if extracted != kernelSrcDir {
 			if err := os.Rename(extracted, kernelSrcDir); err != nil {
-				return nil, NewKernelErrorf("Failed to rename kernel source directory: %s", err)
+				return nil, errs.New(
+					errs.CodeKernelBuildFailed,
+					fmt.Sprintf("Failed to rename kernel source directory: %s", err),
+				)
 			}
 		}
 	} else {
@@ -404,7 +410,10 @@ func (s *Service) resolveSourceURL(
 	}
 	resolvedSourceURL, err := infra.RenderTemplate(spec.Source, templateVars)
 	if err != nil {
-		return "", "", NewKernelErrorf("Failed to render source URL template: %s", err)
+		return "", "", errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Failed to render source URL template: %s", err),
+		)
 	}
 
 	intentionalNoChecksum := spec.SHA256 == "" && spec.SHA256URL == ""
@@ -426,8 +435,8 @@ func (s *Service) resolveSourceURL(
 	}
 
 	if resolvedSHA256 == "" && !intentionalNoChecksum {
-		return resolvedSourceURL, "", NewKernelErrorf(
-			"Checksum required for kernel source download: %s", resolvedSourceURL)
+		return resolvedSourceURL, "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
+			"Checksum required for kernel source download: %s", resolvedSourceURL))
 	}
 
 	return resolvedSourceURL, resolvedSHA256, nil
@@ -503,7 +512,10 @@ func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bo
 		for _, vm := range vms {
 			names = append(names, vm.Name)
 		}
-		return nil, NewKernelErrorf("Kernel referenced by VMs: %s", strings.Join(names, ", "))
+		return nil, errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Kernel referenced by VMs: %s", strings.Join(names, ", ")),
+		)
 	}
 
 	if _, statErr := os.Stat(kernel.Path); statErr == nil {
@@ -543,13 +555,13 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 
 	data, err := assets.ReadFile("kernels.yaml")
 	if err != nil {
-		return nil, NewKernelErrorf("Failed to load kernels.yaml: %s", err)
+		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to load kernels.yaml: %s", err))
 	}
 
 	// Unmarshal into raw map to get spec names (the YAML keys).
 	var raw map[string]any
 	if err := yaml.Unmarshal(data, &raw); err != nil {
-		return nil, NewKernelErrorf("Failed to parse kernels.yaml: %s", err)
+		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to parse kernels.yaml: %s", err))
 	}
 
 	// Intermediate YAML struct matching the file format for clean unmarshal.
@@ -580,11 +592,11 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 	for name, rawAny := range raw {
 		entry, err := yaml.Marshal(rawAny)
 		if err != nil {
-			return nil, NewKernelErrorf("Failed to encode spec %s: %s", name, err)
+			return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to encode spec %s: %s", name, err))
 		}
 		var sy specYAML
 		if err := yaml.Unmarshal(entry, &sy); err != nil {
-			return nil, NewKernelErrorf("Failed to decode spec %s: %s", name, err)
+			return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to decode spec %s: %s", name, err))
 		}
 
 		specs[name] = &model.KernelSpec{
@@ -637,9 +649,9 @@ func (s *Service) GetSpecsFor(names []string, kernelType, version string) ([]*mo
 			for k := range allSpecs {
 				avail = append(avail, k)
 			}
-			return nil, NewKernelErrorf(
+			return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
 				"Kernel spec(s) not found: %s. Available: %s",
-				strings.Join(missing, ", "), strings.Join(avail, ", "))
+				strings.Join(missing, ", "), strings.Join(avail, ", ")))
 		}
 		return results, nil
 	}
@@ -711,7 +723,7 @@ func (s *Service) PrepareKernelConfig(
 			}
 			slog.Info("Using defconfig instead")
 			if rc, _, _ := runMake(ctx, kernelDir, KernelDefconfigTarget, jobs); rc != 0 {
-				return nil, NewKernelError("defconfig failed")
+				return nil, errs.New(errs.CodeKernelBuildFailed, "defconfig failed")
 			}
 		} else {
 			return nil, err
@@ -732,7 +744,7 @@ func (s *Service) PrepareKernelConfig(
 	}
 	slog.Debug("Synchronizing config")
 	if rc, _, _ := runMake(ctx, kernelDir, KernelOlddefconfigTarget, jobs); rc != 0 {
-		return nil, NewKernelError("olddefconfig failed")
+		return nil, errs.New(errs.CodeKernelBuildFailed, "olddefconfig failed")
 	}
 
 	// Merge default configs with feature enforces (features override defaults).
@@ -766,7 +778,7 @@ func (s *Service) PrepareKernelConfig(
 	}
 	slog.Debug("Resolving dependencies")
 	if rc, _, _ := runMake(ctx, kernelDir, KernelOlddefconfigTarget, jobs); rc != 0 {
-		return nil, NewKernelError("olddefconfig failed after enabling options")
+		return nil, errs.New(errs.CodeKernelBuildFailed, "olddefconfig failed after enabling options")
 	}
 
 	if userConfigPath != nil && *userConfigPath != "" {
@@ -784,7 +796,10 @@ func (s *Service) PrepareKernelConfig(
 			configPath := filepath.Join(kernelDir, ".config")
 			userData, err := os.ReadFile(*userConfigPath)
 			if err != nil {
-				return nil, NewKernelErrorf("Failed to read user config fragment %s: %s", *userConfigPath, err)
+				return nil, errs.New(
+					errs.CodeKernelBuildFailed,
+					fmt.Sprintf("Failed to read user config fragment %s: %s", *userConfigPath, err),
+				)
 			}
 			mergeConfigLines(string(userData), configPath)
 			if onProgress != nil {
@@ -798,7 +813,7 @@ func (s *Service) PrepareKernelConfig(
 			}
 			slog.Debug("Resolving dependencies after user config")
 			if rc, _, _ := runMake(ctx, kernelDir, "olddefconfig", jobs); rc != 0 {
-				return nil, NewKernelError("olddefconfig failed after user config")
+				return nil, errs.New(errs.CodeKernelBuildFailed, "olddefconfig failed after user config")
 			}
 		}
 	}
@@ -869,21 +884,24 @@ func (s *Service) RunMakeVmlinux(
 
 	if result.Err != nil {
 		if strings.Contains(result.Err.Error(), "Command not found") {
-			return nil, NewKernelError("Kernel build failed: unable to execute make")
+			return nil, errs.New(errs.CodeKernelBuildFailed, "Kernel build failed: unable to execute make")
 		}
 		warnings = append(warnings, parseBuildWarnings(logData)...)
-		return nil, NewKernelErrorf(
-			"Kernel build failed (exit %d). Log: %s", result.ExitCode, buildLogPath)
+		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
+			"Kernel build failed (exit %d). Log: %s", result.ExitCode, buildLogPath))
 	}
 
 	warnings = append(warnings, parseBuildWarnings(logData)...)
 
 	vmlinuxPath := filepath.Join(kernelDir, "vmlinux")
 	if _, err := os.Stat(vmlinuxPath); os.IsNotExist(err) {
-		return nil, NewKernelError("Build succeeded but vmlinux not found")
+		return nil, errs.New(errs.CodeKernelBuildFailed, "Build succeeded but vmlinux not found")
 	}
 	if err := infra.CopyPreservingMetadata(vmlinuxPath, outputPath); err != nil {
-		return nil, NewKernelErrorf("Kernel build failed: unable to copy vmlinux: %s", err)
+		return nil, errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Kernel build failed: unable to copy vmlinux: %s", err),
+		)
 	}
 	os.Chmod(outputPath, 0755)
 
@@ -925,7 +943,7 @@ func (s *Service) DownloadKernelSource(ctx context.Context, url, dest string, sh
 
 func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir string) (string, error) {
 	if err := archive.Extract(ctx, tarball, extractDir); err != nil {
-		return "", NewKernelErrorf("Extraction failed: %s", err)
+		return "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Extraction failed: %s", err))
 	}
 	entries, err := os.ReadDir(extractDir)
 	if err != nil {
@@ -936,7 +954,7 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 			return filepath.Join(extractDir, entry.Name()), nil
 		}
 	}
-	return "", NewKernelErrorf("No linux-* directory found in kernel tarball")
+	return "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("No linux-* directory found in kernel tarball"))
 }
 
 // ── Remote Version Listing ──────────────────────────────────────────────
@@ -988,15 +1006,18 @@ func (s *Service) downloadFCConfig(
 	vars map[string]string,
 ) error {
 	if spec.ConfigURLTemplate == nil || *spec.ConfigURLTemplate == "" {
-		return NewKernelErrorf("Missing 'config_url_template' in kernels.yaml for %s", spec.Name)
+		return errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Missing 'config_url_template' in kernels.yaml for %s", spec.Name),
+		)
 	}
 	url, err := infra.RenderTemplate(*spec.ConfigURLTemplate, vars)
 	if err != nil {
-		return NewKernelErrorf("Failed to render config URL template: %s", err)
+		return errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to render config URL template: %s", err))
 	}
 	data, err := s.dl.GetBody(ctx, url)
 	if err != nil {
-		return NewKernelErrorf("Failed to download config: %s", err)
+		return errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to download config: %s", err))
 	}
 	return os.WriteFile(filepath.Join(kernelDir, ".config"), data, 0644)
 }
@@ -1012,7 +1033,10 @@ func (s *Service) applyConfigFragments(
 	for idx, fragment := range fragments {
 		rendered, err := infra.RenderTemplate(fragment, vars)
 		if err != nil {
-			return NewKernelErrorf("Failed to render config fragment %d: %s", idx, err)
+			return errs.New(
+				errs.CodeKernelBuildFailed,
+				fmt.Sprintf("Failed to render config fragment %d: %s", idx, err),
+			)
 		}
 		var content []byte
 
@@ -1028,7 +1052,10 @@ func (s *Service) applyConfigFragments(
 			}
 			content, err = s.dl.GetBody(ctx, rendered)
 			if err != nil {
-				return NewKernelErrorf("Failed to fetch config fragment %s: %s", rendered, err)
+				return errs.New(
+					errs.CodeKernelBuildFailed,
+					fmt.Sprintf("Failed to fetch config fragment %s: %s", rendered, err),
+				)
 			}
 		} else {
 			rel := strings.TrimPrefix(rendered, "assets/")
@@ -1043,7 +1070,10 @@ func (s *Service) applyConfigFragments(
 			}
 			content, err = assets.ReadFile(rel)
 			if err != nil {
-				return NewKernelErrorf("Config fragment not found: %s (from '%s')", rel, fragment)
+				return errs.New(
+					errs.CodeKernelBuildFailed,
+					fmt.Sprintf("Config fragment not found: %s (from '%s')", rel, fragment),
+				)
 			}
 		}
 
@@ -1054,14 +1084,17 @@ func (s *Service) applyConfigFragments(
 					baseContent += "\n"
 				}
 				if err := os.WriteFile(configPath, []byte(baseContent), 0644); err != nil {
-					return NewKernelErrorf("Failed to write base config fragment: %s", err)
+					return errs.New(
+						errs.CodeKernelBuildFailed,
+						fmt.Sprintf("Failed to write base config fragment: %s", err),
+					)
 				}
 				continue
 			}
 		}
 		if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
 			if err := os.WriteFile(configPath, []byte{}, 0644); err != nil {
-				return NewKernelErrorf("Failed to create empty .config: %s", err)
+				return errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to create empty .config: %s", err))
 			}
 		}
 		mergeConfigLines(string(content), configPath)
@@ -1148,7 +1181,10 @@ func (s *Service) ImportKernel(
 ) (*model.KernelItem, error) {
 	resolvedPath, err := system.ExpandAndResolve(sourcePath)
 	if err != nil {
-		return nil, NewKernelErrorf("Failed to resolve source path '%s': %s", sourcePath, err)
+		return nil, errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Failed to resolve source path '%s': %s", sourcePath, err),
+		)
 	}
 
 	kernelsDir := filepath.Join(s.cacheDir, "kernels")
@@ -1160,7 +1196,10 @@ func (s *Service) ImportKernel(
 	destPath := filepath.Join(kernelsDir, destFilename)
 
 	if err := infra.CopyPreservingMetadata(resolvedPath, destPath); err != nil {
-		return nil, NewKernelErrorf("Failed to copy kernel file to %s: %s", destPath, err)
+		return nil, errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Failed to copy kernel file to %s: %s", destPath, err),
+		)
 	}
 	os.Chmod(destPath, 0755)
 
@@ -1219,13 +1258,16 @@ func (s *Service) ResolveVersion(
 		}
 	}
 	if len(matching) == 0 {
-		return "", NewKernelErrorf("Cannot resolve version for unknown type: %s", kernelType)
+		return "", errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Cannot resolve version for unknown type: %s", kernelType),
+		)
 	}
 
 	// Parse the version spec
 	spec, err := version.ParseSpec(versionSpec)
 	if err != nil {
-		return "", NewKernelErrorf("Invalid version spec %q: %s", versionSpec, err)
+		return "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Invalid version spec %q: %s", versionSpec, err))
 	}
 
 	// Exact version — no resolution needed
@@ -1244,13 +1286,16 @@ func (s *Service) ResolveVersion(
 		}
 	}
 	if len(allVersions) == 0 {
-		return "", NewKernelErrorf(
-			"Cannot resolve version %q for %s: no versions available from upstream", versionSpec, kernelType)
+		return "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
+			"Cannot resolve version %q for %s: no versions available from upstream", versionSpec, kernelType))
 	}
 
 	resolved, err := version.Resolve(allVersions, spec)
 	if err != nil {
-		return "", NewKernelErrorf("Cannot resolve version %q for %s: %s", versionSpec, kernelType, err)
+		return "", errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Cannot resolve version %q for %s: %s", versionSpec, kernelType, err),
+		)
 	}
 	return resolved, nil
 }

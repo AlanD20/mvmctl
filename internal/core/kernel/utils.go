@@ -14,6 +14,7 @@ import (
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
+	"mvmctl/pkg/errs"
 )
 
 // ── Type definitions ────────────────────────────────────────────────────────
@@ -178,7 +179,7 @@ func checkBuildDependencies(ctx context.Context) error {
 	if len(missing) > 0 {
 		sort.Strings(missing)
 		missingStr := strings.Join(missing, ", ")
-		return NewKernelErrorf(
+		return errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
 			"Missing kernel build dependencies: %s\n\n"+
 				"Install on Ubuntu/Debian:\n"+
 				"  sudo apt update\n"+
@@ -187,7 +188,7 @@ func checkBuildDependencies(ctx context.Context) error {
 				"Install on Arch Linux:\n"+
 				"  sudo pacman -S base-devel ncurses bison flex\n"+
 				"  sudo pacman -S openssl bc curl git pahole\n",
-			missingStr)
+			missingStr), errs.WithClass(errs.ClassInternal))
 	}
 	return nil
 }

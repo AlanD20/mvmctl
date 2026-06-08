@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"mvmctl/internal/core/image"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -46,34 +46,22 @@ func NewImageRequest(inputs ImageInput, db *sqlx.DB, imageRepo image.Repository)
 // Matches Python's ImageRequest.resolve().
 func (r *ImageRequest) Resolve(ctx context.Context) (*ResolvedImageInput, error) {
 	if len(r.input.Identifiers) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeImageNotFound,
-			Op:      "image",
-			Message: "No image identifiers provided",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeImageNotFound, "No image identifiers provided")
 	}
 
 	// Validate identifier length — max 64 chars.
 	for _, ident := range r.input.Identifiers {
 		if len(ident) > 64 {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Op:      "image",
-				Message: fmt.Sprintf("Image identifier too long: '%s' exceeds maximum length of 64 characters", ident),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeValidationFailed,
+				fmt.Sprintf("Image identifier too long: '%s' exceeds maximum length of 64 characters", ident),
+			)
 		}
 	}
 
 	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if result == nil || len(result.Items) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeImageNotFound,
-			Op:      "image",
-			Message: "No images found matching identifiers",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeImageNotFound, "No images found matching identifiers")
 	}
 
 	r.result = &ResolvedImageInput{

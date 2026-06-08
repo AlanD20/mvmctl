@@ -9,10 +9,10 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/key"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 )
 
 // KeyListAll lists all SSH keys.
@@ -49,11 +49,7 @@ func (op *Operation) KeyCreate(ctx context.Context, input inputs.KeyCreateInput)
 	req := inputs.NewKeyCreateRequest(input)
 	resolved, err := req.Resolve()
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "key.create_failed",
-			Message: err.Error(),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeKeyCreateFailed, err.Error(), err)
 	}
 
 	// Use resolved fields (name, algorithm, output_dir, comment, etc.)
@@ -72,11 +68,7 @@ func (op *Operation) KeyCreate(ctx context.Context, input inputs.KeyCreateInput)
 	}
 	keyItem, err := op.Services.Key.CreateKeypair(ctx, params)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "key.create_failed",
-			Message: fmt.Sprintf("Key creation failed: %v", err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeKeyCreateFailed, fmt.Sprintf("Key creation failed: %v", err), err)
 	}
 
 	op.AuditLog.LogOperation("key.create", map[string]any{
@@ -91,50 +83,40 @@ func (op *Operation) KeyCreate(ctx context.Context, input inputs.KeyCreateInput)
 func (op *Operation) KeyImport(ctx context.Context, input inputs.KeyImportInput) (*model.SSHKeyItem, error) {
 	// Python does inline validation at the API layer before calling service
 	if _, err := os.Stat(input.PubKeyPath); os.IsNotExist(err) {
-		return nil, &errs.DomainError{
-			Code:    "key.add_failed",
-			Message: fmt.Sprintf("Public key file not found: %s", input.PubKeyPath),
-		}
+		return nil, errs.New(errs.CodeKeyAddFailed, fmt.Sprintf("Public key file not found: %s", input.PubKeyPath))
 	}
 
 	data, err := os.ReadFile(input.PubKeyPath)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "key.add_failed",
-			Message: fmt.Sprintf("Failed to read public key file: %v", err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeKeyAddFailed, fmt.Sprintf("Failed to read public key file: %v", err), err)
 	}
 	pubKeyContent := strings.TrimSpace(string(data))
 	if pubKeyContent == "" {
-		return nil, &errs.DomainError{
-			Code:    "key.add_failed",
-			Message: fmt.Sprintf("Public key file is empty: %s", input.PubKeyPath),
-		}
+		return nil, errs.New(errs.CodeKeyAddFailed, fmt.Sprintf("Public key file is empty: %s", input.PubKeyPath))
 	}
 
 	// Detect if user accidentally passed a private key file
 	if key.IsPrivateKey(pubKeyContent) {
 		altPath := input.PubKeyPath + ".pub"
 		if _, err := os.Stat(altPath); err == nil {
-			return nil, &errs.DomainError{
-				Code: "key.add_failed",
-				Message: fmt.Sprintf(
+			return nil, errs.New(
+				errs.CodeKeyAddFailed,
+				fmt.Sprintf(
 					"'%s' looks like a private key.\nUse the public key instead: mvm key import %s %s",
 					input.PubKeyPath,
 					input.Name,
 					altPath,
 				),
-			}
+			)
 		}
-		return nil, &errs.DomainError{
-			Code: "key.add_failed",
-			Message: fmt.Sprintf(
+		return nil, errs.New(
+			errs.CodeKeyAddFailed,
+			fmt.Sprintf(
 				"'%s' looks like a private key.\nPass the corresponding .pub file instead: mvm key import %s <path>.pub",
 				input.PubKeyPath,
 				input.Name,
 			),
-		}
+		)
 	}
 
 	keyItem, err := op.Services.Key.Import(
@@ -146,11 +128,7 @@ func (op *Operation) KeyImport(ctx context.Context, input inputs.KeyImportInput)
 		input.SetDefault,
 	)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "key.add_failed",
-			Message: fmt.Sprintf("Failed to add key: %v", err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeKeyAddFailed, fmt.Sprintf("Failed to add key: %v", err), err)
 	}
 
 	op.AuditLog.LogOperation("key.add", map[string]any{"name": keyItem.Name}, "")
@@ -261,17 +239,14 @@ func (op *Operation) KeyExport(
 	req := inputs.NewKeyRequest(input, op.Repos.Key)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "key.export_failed",
-			Message: fmt.Sprintf("Key not found: %s", err.Error()),
-		}
+		return nil, errs.New(errs.CodeKeyExportFailed, fmt.Sprintf("Key not found: %s", err.Error()))
 	}
 	// Python: if len(resolved.keys) != 1: return error
 	if len(resolved.Keys) != 1 {
-		return nil, &errs.DomainError{
-			Code:    "key.export_failed",
-			Message: fmt.Sprintf("Expected exactly one key, got %d", len(resolved.Keys)),
-		}
+		return nil, errs.New(
+			errs.CodeKeyExportFailed,
+			fmt.Sprintf("Expected exactly one key, got %d", len(resolved.Keys)),
+		)
 	}
 
 	keyItem := resolved.Keys[0]
@@ -280,20 +255,12 @@ func (op *Operation) KeyExport(
 	// controller = KeyController(resolved.keys[0], repo)
 	ctrl, err := key.NewController(ctx, keyItem, op.Repos.Key)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "key.export_failed",
-			Message: fmt.Sprintf("Failed to create key controller: %v", err),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeKeyExportFailed, fmt.Sprintf("Failed to create key controller: %v", err), err)
 	}
 
 	destPriv, destPub, err := ctrl.Export(ctx, destination, overwrite)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    "key.export_failed",
-			Message: err.Error(),
-			Err:     err,
-		}
+		return nil, errs.WrapMsg(errs.CodeKeyExportFailed, err.Error(), err)
 	}
 
 	return []string{destPriv, destPub}, nil
@@ -306,19 +273,12 @@ func (op *Operation) KeySetDefaults(ctx context.Context, input inputs.KeyInput) 
 	req := inputs.NewKeyRequest(input, op.Repos.Key)
 	resolved, err := req.Resolve(ctx)
 	if err != nil || len(resolved.Keys) == 0 {
-		return &errs.DomainError{
-			Code:    "key.default_set_failed",
-			Message: "Key not found",
-		}
+		return errs.New(errs.CodeKeyDefaultSetFailed, "Key not found")
 	}
 
 	// Pass resolved key items directly — SetDefaultKeys no longer re-lists the DB.
 	if err := op.Services.Key.SetDefaults(ctx, resolved.Keys); err != nil {
-		return &errs.DomainError{
-			Code:    "key.default_set_failed",
-			Message: fmt.Sprintf("Failed to set default key: %v", err),
-			Err:     err,
-		}
+		return errs.WrapMsg(errs.CodeKeyDefaultSetFailed, fmt.Sprintf("Failed to set default key: %v", err), err)
 	}
 
 	for _, k := range resolved.Keys {
@@ -340,11 +300,7 @@ func (op *Operation) KeyGetDefaults(ctx context.Context) ([]*model.SSHKeyItem, e
 // Python wraps service.clear_default_keys() in try/except Exception.
 func (op *Operation) KeyClearDefaults(ctx context.Context) error {
 	if err := op.Services.Key.ClearDefaultKeys(ctx); err != nil {
-		return &errs.DomainError{
-			Code:    "key.defaults_clear_failed",
-			Message: fmt.Sprintf("Failed to clear defaults: %v", err),
-			Err:     err,
-		}
+		return errs.WrapMsg(errs.CodeKeyDefaultsClearFailed, fmt.Sprintf("Failed to clear defaults: %v", err), err)
 	}
 
 	op.AuditLog.LogOperation("key.clear_defaults", nil, "")

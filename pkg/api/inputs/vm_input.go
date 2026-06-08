@@ -7,9 +7,9 @@ import (
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/enricher"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -65,12 +65,7 @@ func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository, enricher *e
 // Matches Python's VMRequest.resolve().
 func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 	if len(r.input.Identifiers) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Op:      "vm",
-			Message: "No VM identifiers provided",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVMNotFound, "No VM identifiers provided")
 	}
 	if err := r.validateIdentifiers(); err != nil {
 		return nil, err
@@ -78,21 +73,14 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 
 	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if result == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Op:      "vm",
-			Message: "Could not resolve any VMs",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVMNotFound, "Could not resolve any VMs")
 	}
 
 	if len(result.Errors) > 0 && len(result.VMs) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMNotFound,
-			Op:      "vm",
-			Message: fmt.Sprintf("Could not resolve any VMs: %s", strings.Join(result.Errors, ", ")),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeVMNotFound,
+			fmt.Sprintf("Could not resolve any VMs: %s", strings.Join(result.Errors, ", ")),
+		)
 	}
 
 	// Enrich resolved VMs with related data (image, kernel, network, volumes, binary).
@@ -115,31 +103,16 @@ func (r *VMRequest) validateIdentifiers() error {
 	for _, identifier := range r.input.Identifiers {
 		if validators.IsMAC(identifier) {
 			if err := validators.MAC(identifier); err != nil {
-				return &errs.DomainError{
-					Code:    errs.CodeVMResolveFailed,
-					Op:      "vm",
-					Message: fmt.Sprintf("Invalid MAC address: %s", identifier),
-					Class:   errs.ClassValidation,
-				}
+				return errs.New(errs.CodeVMResolveFailed, fmt.Sprintf("Invalid MAC address: %s", identifier))
 			}
 		} else if validators.IsIPAddress(identifier) {
 			if err := validators.IPv4Address(identifier, "guest IP", true, "", ""); err != nil {
-				return &errs.DomainError{
-					Code:    errs.CodeVMResolveFailed,
-					Op:      "vm",
-					Message: fmt.Sprintf("Invalid guest IP: %s", identifier),
-					Class:   errs.ClassValidation,
-				}
+				return errs.New(errs.CodeVMResolveFailed, fmt.Sprintf("Invalid guest IP: %s", identifier))
 			}
 		} else {
 			// Name or ID — validate as entity name
 			if err := validators.EntityName(identifier, "VM", 63); err != nil {
-				return &errs.DomainError{
-					Code:    errs.CodeVMResolveFailed,
-					Op:      "vm",
-					Message: fmt.Sprintf("Invalid VM identifier: %s", identifier),
-					Class:   errs.ClassValidation,
-				}
+				return errs.New(errs.CodeVMResolveFailed, fmt.Sprintf("Invalid VM identifier: %s", identifier))
 			}
 		}
 	}

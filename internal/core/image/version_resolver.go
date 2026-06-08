@@ -8,6 +8,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/download"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 
 	"gopkg.in/yaml.v3"
 )
@@ -122,7 +123,7 @@ func ConstructSpecFromTypeConfig(
 	source, err := infra.RenderTemplate(downloadURLTmpl, templateVars)
 	if err != nil {
 		// Python's render_template raises KeyError → propagates up to caller
-		return nil, NewImageError(fmt.Sprintf("Failed to render download URL template: %s", err))
+		return nil, errs.New(errs.CodeImageError, fmt.Sprintf("Failed to render download URL template: %s", err))
 	}
 
 	sha256URL := ""

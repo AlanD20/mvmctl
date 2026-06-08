@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 
 	"github.com/spf13/cobra"
 )

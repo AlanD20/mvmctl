@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -82,22 +82,15 @@ func (r *BinaryPullRequest) Resolve(ctx context.Context) (*ResolvedBinaryPullInp
 
 func (r *BinaryPullRequest) ensureValidate() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "binary_pull",
-			Message: "No resolved pull input to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeBinaryNotFound, "No resolved pull input to validate")
 	}
 
 	// Validate binary name — only firecracker is supported for pull/build
 	if strings.ToLower(r.result.Name) != "firecracker" {
-		return &errs.DomainError{
-			Code:    errs.CodeBinaryNotFound,
-			Op:      "binary_pull",
-			Message: "Unsupported binary: '" + r.result.Name + "'. Only 'firecracker' is supported for download or build.",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeBinaryNotFound,
+			"Unsupported binary: '"+r.result.Name+"'. Only 'firecracker' is supported for download or build.",
+		)
 	}
 
 	// Skip version check for git builds — version is determined after build

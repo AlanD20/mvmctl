@@ -11,13 +11,13 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/provisioner/guestfs"
 	infraslice "mvmctl/internal/infra/slice"
 	"mvmctl/internal/infra/system"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 )
 
 // CacheCheckPrivileges checks if the current process has the required system privileges
@@ -172,12 +172,12 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[strin
 func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error) {
 	// Python: HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "prune all cache resources")
 	if err := system.CheckPrivileges("/usr/sbin/ip", "prune all cache resources"); err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Message: fmt.Sprintf("Privilege check failed: %v", err),
-			Err:     err,
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return nil, errs.WrapMsg(
+			errs.CodePrivilegeRequired,
+			fmt.Sprintf("Privilege check failed: %v", err),
+			err,
+			errs.WithClass(errs.ClassNeedsInteraction),
+		)
 	}
 
 	// Detect running VMs (Python: Repository(db).list_all() then check status)
@@ -290,15 +290,10 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanR
 			}
 
 			return &model.CleanResult{
-					PruneResult:     *pruneResult,
-					CacheDirRemoved: false,
-					CacheDir:        op.CacheDir,
-				}, &errs.DomainError{
-					Code:    "cache.clean_failed",
-					Op:      "cache",
-					Message: strings.Join(messages, "; "),
-					Class:   errs.ClassInternal,
-				}
+				PruneResult:     *pruneResult,
+				CacheDirRemoved: false,
+				CacheDir:        op.CacheDir,
+			}, errs.New(errs.CodeCacheCleanFailed, strings.Join(messages, "; "))
 		}
 	}
 

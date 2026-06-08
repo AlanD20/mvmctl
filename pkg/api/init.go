@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"os/exec"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 )
 
 // InitStepResult matches Python's InitStepResult dataclass.
@@ -41,12 +41,7 @@ func (op *Operation) InitSetupHost(ctx context.Context) error {
 		return err
 	}
 	if _, ok := raw.(*errs.NeedsInteraction); ok {
-		return &errs.DomainError{
-			Code:    errs.CodePrivilegeRequired,
-			Op:      "host",
-			Message: "Root privileges required",
-			Class:   errs.ClassNeedsInteraction,
-		}
+		return errs.New(errs.CodePrivilegeRequired, "Root privileges required")
 	}
 	return nil
 }

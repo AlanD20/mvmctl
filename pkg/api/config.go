@@ -6,9 +6,9 @@ import (
 	"context"
 	"fmt"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 )
 
 // ConfigGet returns a config value for category and optional key.
@@ -30,12 +30,7 @@ func (op *Operation) ConfigGet(ctx context.Context, category, key string) (any, 
 	}
 
 	if resolved.Category == "" {
-		return nil, &errs.DomainError{
-			Code:    "config.get.missing_category",
-			Op:      "config",
-			Message: "Category is required for config get operation.",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.Code("config.get.missing_category"), "Category is required for config get operation.")
 	}
 
 	if resolved.Key == "" {
@@ -94,23 +89,13 @@ func (op *Operation) ConfigReset(ctx context.Context, category, key string, allO
 	req := inputs.NewConfigRequest(rawInput)
 	resolved, err := req.Resolve(ctx)
 	if err != nil {
-		return 0, &errs.DomainError{
-			Code:    errs.CodeConfigError,
-			Message: err.Error(),
-			Err:     err,
-			Class:   errs.ClassValidation,
-		}
+		return 0, errs.WrapMsg(errs.CodeConfigError, err.Error(), err, errs.WithClass(errs.ClassValidation))
 	}
 
 	if resolved.AllOverrides {
 		deleted, err := op.Services.Config.DeleteAll(ctx)
 		if err != nil {
-			return 0, &errs.DomainError{
-				Code:    errs.CodeConfigError,
-				Message: err.Error(),
-				Err:     err,
-				Class:   errs.ClassInternal,
-			}
+			return 0, errs.WrapMsg(errs.CodeConfigError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 		}
 		if deleted > 0 {
 			op.AuditLog.LogOperation("config.reset", nil, fmt.Sprintf("all overrides (%d removed)", deleted))
@@ -121,12 +106,7 @@ func (op *Operation) ConfigReset(ctx context.Context, category, key string, allO
 	if resolved.Key == "" {
 		deleted, err := op.Services.Config.DeleteByCategory(ctx, resolved.Category)
 		if err != nil {
-			return 0, &errs.DomainError{
-				Code:    errs.CodeConfigError,
-				Message: err.Error(),
-				Err:     err,
-				Class:   errs.ClassInternal,
-			}
+			return 0, errs.WrapMsg(errs.CodeConfigError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 		}
 		if deleted > 0 {
 			op.AuditLog.LogOperation("config.reset", nil, fmt.Sprintf("%s.* (%d removed)", resolved.Category, deleted))
@@ -136,12 +116,7 @@ func (op *Operation) ConfigReset(ctx context.Context, category, key string, allO
 
 	deletedBool, err := op.Services.Config.Delete(ctx, resolved.Category, resolved.Key)
 	if err != nil {
-		return 0, &errs.DomainError{
-			Code:    errs.CodeConfigError,
-			Message: err.Error(),
-			Err:     err,
-			Class:   errs.ClassInternal,
-		}
+		return 0, errs.WrapMsg(errs.CodeConfigError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 	}
 	resultCount := 0
 	if deletedBool {

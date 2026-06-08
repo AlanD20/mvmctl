@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // Controller is the stateful network entity lifecycle manager.

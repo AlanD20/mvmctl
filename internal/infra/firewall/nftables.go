@@ -366,7 +366,8 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 	}
 
 	// Protocol — standalone when no L4 port matches follow
-	if rule.Protocol != model.FirewallProtocolAll && rule.SPort == model.FirewallPortAny && rule.DPort == model.FirewallPortAny {
+	if rule.Protocol != model.FirewallProtocolAll && rule.SPort == model.FirewallPortAny &&
+		rule.DPort == model.FirewallPortAny {
 		expr = append(expr, string(rule.Protocol))
 	}
 

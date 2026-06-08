@@ -3,13 +3,14 @@ package logs
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 const logFollowPollIntervalS = 0.3
@@ -34,7 +35,7 @@ func NewService() *Service {
 func (s *Service) GetLogPath(vmDir string, logType, logFilename, serialOutputFilename string) (string, error) {
 	// Validate VM directory exists (matches Python LogsError("VM directory not found at ..."))
 	if _, err := os.Stat(vmDir); os.IsNotExist(err) {
-		return "", ErrLogsNotFound("VM directory not found at " + vmDir)
+		return "", errs.New(errs.CodeValidationFailed, "VM directory not found at "+vmDir)
 	}
 
 	var logFile string
@@ -46,7 +47,7 @@ func (s *Service) GetLogPath(vmDir string, logType, logFilename, serialOutputFil
 
 	// Validate log file exists (matches Python LogsError("Log file not found for VM: ..."))
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
-		return "", ErrLogsNotFound("log file not found for VM: " + logFile)
+		return "", errs.New(errs.CodeValidationFailed, "log file not found for VM: "+logFile)
 	}
 
 	return logFile, nil
@@ -58,17 +59,12 @@ func (s *Service) GetLogPath(vmDir string, logType, logFilename, serialOutputFil
 func (s *Service) ReadLogLines(logFile string, lines int) ([]string, error) {
 	f, err := os.Open(logFile)
 	if err != nil {
-		return nil, ErrLogsReadFailed(err)
+		return nil, errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("error reading log file: %s", err), err)
 	}
 	defer f.Close()
 
 	if lines < 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "logs",
-			Message: "maxlen must be non-negative",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeValidationFailed, "maxlen must be non-negative")
 	}
 	if lines == 0 {
 		return []string{}, nil
@@ -99,7 +95,7 @@ func (s *Service) ReadLogLines(logFile string, lines int) ([]string, error) {
 			if readErr == io.EOF {
 				break
 			}
-			return nil, ErrLogsReadFailed(readErr)
+			return nil, errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("error reading log file: %s", readErr), readErr)
 		}
 	}
 
@@ -137,7 +133,7 @@ func (s *Service) FollowLogSync(ctx context.Context, logFile string) (<-chan str
 		f, err := os.Open(logFile)
 		if err != nil {
 			select {
-			case errCh <- ErrLogsFollowFailed(err):
+			case errCh <- errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("error following log: %s", err), err):
 			case <-ctx.Done():
 			}
 			return
@@ -147,7 +143,7 @@ func (s *Service) FollowLogSync(ctx context.Context, logFile string) (<-chan str
 		// Seek to end of file (like tail -f starting from current end)
 		if _, err := f.Seek(0, io.SeekEnd); err != nil {
 			select {
-			case errCh <- ErrLogsFollowFailed(err):
+			case errCh <- errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("error following log: %s", err), err):
 			case <-ctx.Done():
 			}
 			return
@@ -182,7 +178,7 @@ func (s *Service) FollowLogSync(ctx context.Context, logFile string) (<-chan str
 					continue
 				}
 				select {
-				case errCh <- ErrLogsFollowFailed(readErr):
+				case errCh <- errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("error following log: %s", readErr), readErr):
 				case <-ctx.Done():
 				}
 				return
@@ -199,13 +195,13 @@ func (s *Service) FollowLogSync(ctx context.Context, logFile string) (<-chan str
 func (s *Service) FollowLog(ctx context.Context, logFile string, lines chan<- string) error {
 	f, err := os.Open(logFile)
 	if err != nil {
-		return ErrLogsFollowFailed(err)
+		return errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("error following log: %s", err), err)
 	}
 	defer f.Close()
 
 	// Seek to end of file (like tail -f starting from current end)
 	if _, err := f.Seek(0, io.SeekEnd); err != nil {
-		return ErrLogsFollowFailed(err)
+		return errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("error following log: %s", err), err)
 	}
 
 	reader := bufio.NewReader(f)
@@ -236,7 +232,7 @@ func (s *Service) FollowLog(ctx context.Context, logFile string, lines chan<- st
 				}
 				continue
 			}
-			return ErrLogsFollowFailed(readErr)
+			return errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("error following log: %s", readErr), readErr)
 		}
 	}
 }

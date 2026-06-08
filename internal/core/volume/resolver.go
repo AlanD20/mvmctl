@@ -3,10 +3,11 @@ package volume
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // RELATIONS defines the cross-domain relations for volume enrichment.
@@ -77,11 +78,11 @@ func (r *Resolver) ByID(ctx context.Context, volumeID string) (*model.VolumeItem
 
 	if len(matches) == 0 {
 		// Python: raise VolumeNotFoundError(f"Volume not found: {volume_id!r}")
-		return nil, ErrVolumeNotFound(volumeID)
+		return nil, errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume not found: '%s'", volumeID))
 	}
 	if len(matches) > 1 {
 		// Python: raise VolumeNotFoundError(f"Volume ID is ambiguous: {volume_id!r}")
-		return nil, ErrVolumeAmbiguous(volumeID)
+		return nil, errs.New(errs.CodeVolumeNotFound, fmt.Sprintf("Volume ID is ambiguous: '%s'", volumeID))
 	}
 	return r.enrich(ctx, matches)[0], nil
 }
@@ -95,7 +96,7 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.VolumeItem, 
 	}
 	if v == nil {
 		// Python: raise VolumeNotFoundError(f"Volume not found by name: {name!r}")
-		return nil, ErrVolumeNotFoundByName(name)
+		return nil, errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume not found by name: '%s'", name))
 	}
 	return r.enrich(ctx, []*model.VolumeItem{v})[0], nil
 }

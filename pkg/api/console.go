@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/service/console"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/errs"
 )
 
 // ConsoleGetState returns console relay state for a VM.
@@ -51,12 +51,11 @@ func (op *Operation) ConsoleGetConnectionInfo(
 	}
 
 	if !resolved.Relay.IsRunning() {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeConsoleRelayFailed,
-			Op:      "console",
-			Message: fmt.Sprintf("No console relay running for VM '%s'", identifier),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeConsoleRelayFailed,
+			fmt.Sprintf("No console relay running for VM '%s'", identifier),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	return &model.ConsoleConnectionInfo{
@@ -78,12 +77,7 @@ func (op *Operation) ConsoleKill(ctx context.Context, identifier string) error {
 	}
 
 	if !resolved.Relay.IsRunning() {
-		return &errs.DomainError{
-			Code:    "console.not_running",
-			Op:      "console",
-			Message: fmt.Sprintf("No console relay running for '%s'", identifier),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeConsoleNotRunning, fmt.Sprintf("No console relay running for '%s'", identifier))
 	}
 
 	killed := resolved.Relay.Stop(true)
@@ -91,12 +85,7 @@ func (op *Operation) ConsoleKill(ctx context.Context, identifier string) error {
 		op.AuditLog.LogOperation("console.kill", map[string]interface{}{"name": identifier}, "")
 		return nil
 	}
-	return &errs.DomainError{
-		Code:    "console.kill_failed",
-		Op:      "console",
-		Message: fmt.Sprintf("Failed to stop console relay for '%s'", identifier),
-		Class:   errs.ClassInternal,
-	}
+	return errs.New(errs.CodeConsoleKillFailed, fmt.Sprintf("Failed to stop console relay for '%s'", identifier))
 }
 
 // ConsoleAttachConsole attaches to a running console relay in interactive mode.

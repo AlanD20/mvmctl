@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"mvmctl/internal/core/ssh"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 )
 
 // SSHConnect opens SSH session or executes command on a VM.
@@ -66,11 +66,5 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput) erro
 
 // newSSHError wraps any error as a DomainError with "ssh.failed" code.
 func newSSHError(err error) error {
-	return &errs.DomainError{
-		Code:    "ssh.failed",
-		Op:      "ssh",
-		Message: err.Error(),
-		Err:     err,
-		Class:   errs.ClassInternal,
-	}
+	return errs.WrapMsg(errs.CodeSSHError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 }

@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
+	"mvmctl/pkg/errs"
 )
 
 // RELATIONS defines the cross-domain relations for kernel enrichment.
@@ -83,10 +83,18 @@ func (r *Resolver) ByID(ctx context.Context, kernelID string) (*model.KernelItem
 		return nil, err
 	}
 	if len(matches) == 0 {
-		return nil, KernelNotFoundError(fmt.Sprintf("Kernel not found: '%s'", kernelID))
+		return nil, errs.NotFound(
+			errs.CodeKernelNotFound,
+			"",
+			errs.WithEntity(fmt.Sprintf("Kernel not found: '%s'", kernelID)),
+		)
 	}
 	if len(matches) > 1 {
-		return nil, KernelNotFoundError(fmt.Sprintf("Kernel ID is ambiguous: '%s'", kernelID))
+		return nil, errs.NotFound(
+			errs.CodeKernelNotFound,
+			"",
+			errs.WithEntity(fmt.Sprintf("Kernel ID is ambiguous: '%s'", kernelID)),
+		)
 	}
 	enriched := r.Enrich(ctx, matches)
 	return enriched[0], nil
@@ -100,7 +108,11 @@ func (r *Resolver) ByVersionType(ctx context.Context, version, kernelType string
 		return nil, err
 	}
 	if k == nil {
-		return nil, KernelNotFoundError(fmt.Sprintf("Kernel not found: version='%s', type='%s'", version, kernelType))
+		return nil, errs.NotFound(
+			errs.CodeKernelNotFound,
+			"",
+			errs.WithEntity(fmt.Sprintf("Kernel not found: version='%s', type='%s'", version, kernelType)),
+		)
 	}
 	enriched := r.Enrich(ctx, []*model.KernelItem{k})
 	return enriched[0], nil
@@ -121,7 +133,11 @@ func (r *Resolver) ByType(ctx context.Context, typeStr string) (*model.KernelIte
 		return nil, err
 	}
 	if k == nil {
-		return nil, KernelNotFoundError(fmt.Sprintf("Kernel not found: type='%s'", typeStr))
+		return nil, errs.NotFound(
+			errs.CodeKernelNotFound,
+			"",
+			errs.WithEntity(fmt.Sprintf("Kernel not found: type='%s'", typeStr)),
+		)
 	}
 	enriched := r.Enrich(ctx, []*model.KernelItem{k})
 	return enriched[0], nil
@@ -157,7 +173,11 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 		if _, err := os.Stat(path); err == nil {
 			return r.ItemFromPath(path), nil
 		}
-		return nil, KernelNotFoundError(fmt.Sprintf("Kernel not found at path: '%s'", value))
+		return nil, errs.NotFound(
+			errs.CodeKernelNotFound,
+			"",
+			errs.WithEntity(fmt.Sprintf("Kernel not found at path: '%s'", value)),
+		)
 	}
 
 	// Try by ID prefix without enrichment (matching Python's resolve flow)
@@ -178,7 +198,11 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 		return r.ItemFromPath(value), nil
 	}
 
-	return nil, KernelNotFoundError(fmt.Sprintf("Kernel not found: '%s'", value))
+	return nil, errs.NotFound(
+		errs.CodeKernelNotFound,
+		"",
+		errs.WithEntity(fmt.Sprintf("Kernel not found: '%s'", value)),
+	)
 }
 
 // ResolveMany resolves multiple kernel identifiers.
@@ -256,7 +280,11 @@ func (r *Resolver) byIDRaw(ctx context.Context, kernelID string) (*model.KernelI
 		return nil, nil
 	}
 	if len(matches) > 1 {
-		return nil, NewKernelErrorfWithCode(errs.CodeKernelNotFound, "Kernel ID is ambiguous: '%s'", kernelID)
+		return nil, errs.New(
+			errs.CodeKernelNotFound,
+			fmt.Sprintf("Kernel ID is ambiguous: '%s'", kernelID),
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	return matches[0], nil
 }

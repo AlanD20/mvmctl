@@ -8,7 +8,7 @@ import (
 	"os/user"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 // PrivilegeDetails carries structured metadata about a privilege failure,
@@ -22,23 +22,17 @@ type PrivilegeDetails struct {
 
 // NewPrivilegeError creates a privilege error with structured PrivilegeDetails.
 func NewPrivilegeError(msg string, details *PrivilegeDetails) *errs.DomainError {
-	err := &errs.DomainError{
-		Code:    errs.CodePrivilegeRequired,
-		Op:      "host",
-		Message: msg,
-		Class:   errs.ClassNeedsInteraction,
-	}
-	err.Details = map[string]any{
+	d := map[string]any{
 		"message":              details.Message,
 		"missing_capabilities": []string{},
 	}
 	if len(details.MissingBinaries) > 0 {
-		err.Details["missing_binaries"] = details.MissingBinaries
+		d["missing_binaries"] = details.MissingBinaries
 	}
 	if len(details.Suggestions) > 0 {
-		err.Details["suggestions"] = details.Suggestions
+		d["suggestions"] = details.Suggestions
 	}
-	return err
+	return errs.New(errs.CodePrivilegeRequired, msg, errs.WithDetails(d))
 }
 
 // CheckPrivileges checks privileges; if lacking, returns an error with structured details.

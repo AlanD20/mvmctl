@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/validators"
+	"mvmctl/pkg/errs"
 )
 
 // KeyCreateInput holds options for key creation.
@@ -72,12 +72,7 @@ func NewKeyCreateRequest(inputs KeyCreateInput) *KeyCreateRequest {
 func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Validate key name early — before any work
 	if err := validators.KeyName(r.input.Name); err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "key_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeValidationFailed, err.Error())
 	}
 
 	// Default algorithm
@@ -89,12 +84,10 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Validate algorithm
 	validAlgorithms := map[string]bool{"ed25519": true, "rsa": true, "ecdsa": true}
 	if !validAlgorithms[algorithm] {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "key_create",
-			Message: fmt.Sprintf("Invalid algorithm: '%s'. Valid choices: ed25519, rsa, ecdsa", algorithm),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeValidationFailed,
+			fmt.Sprintf("Invalid algorithm: '%s'. Valid choices: ed25519, rsa, ecdsa", algorithm),
+		)
 	}
 
 	// Default comment (Python: f"{name}@{socket.gethostname()}")
@@ -143,20 +136,16 @@ func keyFilesExist(name, outputDir string) error {
 	pubKeyPath := filepath.Join(outputDir, name+".pub")
 
 	if _, err := os.Stat(privateKeyPath); err == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeKeyAlreadyExists,
-			Op:      "key_create",
-			Message: fmt.Sprintf("Key file already exists: %s. Use --force to replace.", privateKeyPath),
-			Class:   errs.ClassConflict,
-		}
+		return errs.AlreadyExists(
+			errs.CodeKeyAlreadyExists,
+			fmt.Sprintf("Key file already exists: %s. Use --force to replace.", privateKeyPath),
+		)
 	}
 	if _, err := os.Stat(pubKeyPath); err == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeKeyAlreadyExists,
-			Op:      "key_create",
-			Message: fmt.Sprintf("Key file already exists: %s. Use --force to replace.", pubKeyPath),
-			Class:   errs.ClassConflict,
-		}
+		return errs.AlreadyExists(
+			errs.CodeKeyAlreadyExists,
+			fmt.Sprintf("Key file already exists: %s. Use --force to replace.", pubKeyPath),
+		)
 	}
 	return nil
 }

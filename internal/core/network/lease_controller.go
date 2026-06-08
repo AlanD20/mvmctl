@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	infranet "mvmctl/internal/infra/network"
+	"mvmctl/pkg/errs"
 )
 
 // LeaseController manages IP leases for a specific network.
@@ -123,10 +123,10 @@ func (s *LeaseController) Lease(ctx context.Context, vmID string) (string, error
 	}
 
 	if lastError != nil {
-		return "", errs.NetworkError(
+		return "", errs.New(errs.CodeNetworkError,
 			fmt.Sprintf("Failed to allocate IP after %d attempts", maxRetries))
 	}
-	return "", errs.NetworkError(
+	return "", errs.New(errs.CodeNetworkError,
 		fmt.Sprintf("Failed to allocate IP after %d attempts", maxRetries))
 }
 
@@ -138,7 +138,7 @@ func (s *LeaseController) LeaseSpecific(ctx context.Context, ip, vmID string) (s
 		return "", err
 	}
 	if !available {
-		return "", errs.NetworkError(fmt.Sprintf("IP %s is already leased", ip))
+		return "", errs.New(errs.CodeNetworkError, fmt.Sprintf("IP %s is already leased", ip))
 	}
 
 	vmIDCopy := vmID

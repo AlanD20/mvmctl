@@ -8,9 +8,9 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
+	"mvmctl/pkg/errs"
 )
 
 // SSHInput matches Python's SSHInput dataclass.
@@ -107,40 +107,28 @@ func (r *SSHRequest) Resolve(
 
 func (r *SSHRequest) ensureValidate() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeSSHError,
-			Op:      "ssh",
-			Message: "resolve() must be called before validation",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeSSHError,
+			"resolve() must be called before validation",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	if !validators.IsIPAddress(r.result.TargetIP) {
-		return &errs.DomainError{
-			Code:    errs.CodeSSHError,
-			Op:      "ssh",
-			Message: fmt.Sprintf("Invalid IP address: %s", r.result.TargetIP),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeSSHError,
+			fmt.Sprintf("Invalid IP address: %s", r.result.TargetIP),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	if err := validators.SSHUsername(r.result.User); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeSSHError,
-			Op:      "ssh",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeSSHError, err.Error(), errs.WithClass(errs.ClassValidation))
 	}
 
 	if r.result.Key != nil && *r.result.Key != "" {
 		if _, err := os.Stat(*r.result.Key); os.IsNotExist(err) {
-			return &errs.DomainError{
-				Code:    errs.CodeKeyNotFound,
-				Op:      "ssh",
-				Message: fmt.Sprintf("SSH key not found: %s", *r.result.Key),
-				Class:   errs.ClassValidation,
-			}
+			return errs.NotFound(errs.CodeKeyNotFound, fmt.Sprintf("SSH key not found: %s", *r.result.Key))
 		}
 	}
 
@@ -153,12 +141,11 @@ func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (s
 	target := r.input.Identifier
 
 	if target == "" {
-		return "", &errs.DomainError{
-			Code:    errs.CodeSSHError,
-			Op:      "ssh",
-			Message: "Provide a VM identifier (name, ID prefix, IP, or MAC address)",
-			Class:   errs.ClassValidation,
-		}
+		return "", errs.New(
+			errs.CodeSSHError,
+			"Provide a VM identifier (name, ID prefix, IP, or MAC address)",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// Try to resolve as a VM entity
@@ -211,12 +198,11 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 			}
 		}
 
-		return nil, &errs.DomainError{
-			Code:    errs.CodeSSHError,
-			Op:      "ssh",
-			Message: fmt.Sprintf("Key '%s' not found or is not a valid private key", keyStr),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(
+			errs.CodeSSHError,
+			fmt.Sprintf("Key '%s' not found or is not a valid private key", keyStr),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// 2. No key provided — check VM's stored ssh_keys

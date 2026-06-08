@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"mvmctl/internal/core/config"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 // ConfigInput matches Python's ConfigInput dataclass.
@@ -72,71 +72,42 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 
 	if r.input.Action == "get" {
 		if category == "" {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeConfigError,
-				Op:      "config",
-				Message: "Category is required for get operation",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(errs.CodeConfigError, "Category is required for get operation")
 		}
 		// key is optional for category-level get
 		if key != "" {
 			if !config.IsKeyInCategory(category, key) {
-				return nil, &errs.DomainError{
-					Code:    errs.CodeConfigError,
-					Op:      "config",
-					Message: "'" + category + "." + key + "' is not a valid setting key. Use 'mvm config ls' to see valid keys.",
-					Class:   errs.ClassValidation,
-				}
+				return nil, errs.New(
+					errs.CodeConfigError,
+					"'"+category+"."+key+"' is not a valid setting key. Use 'mvm config ls' to see valid keys.",
+				)
 			}
 		}
 	} else if r.input.Action == "set" {
 		if category == "" || key == "" {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeConfigError,
-				Op:      "config",
-				Message: "Category and key are required for set operation",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(errs.CodeConfigError, "Category and key are required for set operation")
 		}
 		if r.input.Value == nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeConfigError,
-				Op:      "config",
-				Message: "Value is required for set operation",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(errs.CodeConfigError, "Value is required for set operation")
 		}
 
 		// Validate key is overridable
 		if !config.IsKeyInCategory(category, key) {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeConfigError,
-				Op:      "config",
-				Message: "'" + category + "." + key + "' is not an overridable setting. Use 'mvm config ls' to see valid keys.",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeConfigError,
+				"'"+category+"."+key+"' is not an overridable setting. Use 'mvm config ls' to see valid keys.",
+			)
 		}
 	} else if r.input.Action == "reset" {
 		if r.input.AllOverrides {
 			// category and key are both optional for --all
 		} else if category == "" {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeConfigError,
-				Op:      "config",
-				Message: "Category is required for reset operation (or use --all)",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(errs.CodeConfigError, "Category is required for reset operation (or use --all)")
 		}
 		// key is optional for category-level reset
 		if key != "" {
 			if !config.IsKeyInCategory(category, key) {
-				return nil, &errs.DomainError{
-					Code:    errs.CodeConfigError,
-					Op:      "config",
-					Message: "'" + category + "." + key + "' is not a valid setting key",
-					Class:   errs.ClassValidation,
-				}
+				return nil, errs.New(errs.CodeConfigError, "'"+category+"."+key+"' is not a valid setting key")
 			}
 		}
 	}

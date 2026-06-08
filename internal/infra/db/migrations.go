@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 //go:embed migrations/*.sql
@@ -49,13 +49,12 @@ func listMigrationFiles() ([]migrationFile, error) {
 		}
 		matches := migrationFileRegex.FindStringSubmatch(entry.Name())
 		if matches == nil {
-			return nil, errs.ValidationFailed(
-				errs.CodeMigrationFailed,
+			return nil, errs.New(errs.CodeMigrationFailed,
 				fmt.Sprintf(
 					"Invalid migration filename: %s. Expected format: '{version:03d}_{description}.sql'",
 					entry.Name(),
 				),
-			)
+				errs.WithClass(errs.ClassValidation))
 		}
 		version, err := strconv.Atoi(matches[1])
 		if err != nil || version == 0 {
@@ -82,15 +81,14 @@ func listMigrationFiles() ([]migrationFile, error) {
 	// Validate no version gaps: after sorting, files[i].version must be i+1.
 	for i, f := range files {
 		if f.version != i+1 {
-			return nil, errs.ValidationFailed(
-				errs.CodeMigrationFailed,
+			return nil, errs.New(errs.CodeMigrationFailed,
 				fmt.Sprintf(
 					"Missing migration version %d: found version %d in file %s. Versions must be sequential starting from 1.",
 					i+1,
 					f.version,
 					f.name,
 				),
-			)
+				errs.WithClass(errs.ClassValidation))
 		}
 	}
 
@@ -179,7 +177,7 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 						"version", f.version, "snapshot", snapshotPath, "error", restoreErr)
 				}
 			}
-			return applied, errs.MigrationError(
+			return applied, errs.New(errs.CodeMigrationFailed,
 				fmt.Sprintf("Migration %s (version %d) failed: %v", f.name, f.version, err))
 		}
 
@@ -191,7 +189,7 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 			"INSERT INTO db_migrations (version, name, applied_at, snapshot_path) VALUES (?, ?, ?, ?)",
 			f.version, f.name, appliedAt, snapshotPath,
 		); err != nil {
-			return applied, errs.MigrationError(
+			return applied, errs.New(errs.CodeMigrationFailed,
 				fmt.Sprintf("Failed to record migration %s: %v", f.name, err))
 		}
 		slog.Info("Applied migration", "name", f.name)

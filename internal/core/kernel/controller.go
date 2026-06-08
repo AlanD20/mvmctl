@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"mvmctl/internal/infra/model"
+	"mvmctl/pkg/errs"
 )
 
 // Controller matches Python's Controller.
@@ -32,7 +33,7 @@ func NewController(ctx context.Context, entity interface{}, repo Repository) (*C
 		}
 		ctrl.kernel = k
 	default:
-		return nil, NewKernelError("invalid entity type")
+		return nil, errs.New(errs.CodeKernelBuildFailed, "invalid entity type", errs.WithClass(errs.ClassInternal))
 	}
 	return ctrl, nil
 }

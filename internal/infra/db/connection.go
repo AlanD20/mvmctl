@@ -12,7 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 
 	_ "modernc.org/sqlite"
 )
@@ -147,7 +147,7 @@ func (d *Handle) RestoreFromSnapshot(snapshotPath string) error {
 	}
 
 	if _, err := os.Stat(snapshotPath); os.IsNotExist(err) {
-		return errs.MigrationError(
+		return errs.New(errs.CodeMigrationFailed,
 			fmt.Sprintf("Snapshot not found: %s", snapshotPath))
 	}
 
@@ -158,7 +158,7 @@ func (d *Handle) RestoreFromSnapshot(snapshotPath string) error {
 	defer srcDB.Close()
 
 	if _, err := srcDB.Exec(fmt.Sprintf("VACUUM INTO '%s'", d.dbPath)); err != nil {
-		return errs.MigrationError(
+		return errs.New(errs.CodeMigrationFailed,
 			fmt.Sprintf("Failed to restore from snapshot: %v", err))
 	}
 

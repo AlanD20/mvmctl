@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
+	"mvmctl/pkg/errs"
 )
 
 // RunCmdOpts matches Python's run_cmd() parameter set exactly.
@@ -549,11 +549,11 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts ...RunOptio
 
 		if err := cmd.Start(); err != nil {
 			if errors.Is(err, exec.ErrNotFound) {
-				ch <- StreamLine{Err: errs.ProcessError(
+				ch <- StreamLine{Err: errs.New(errs.CodeProcessError,
 					fmt.Sprintf("Command not found: %s", args[0]),
 				)}
 			} else {
-				ch <- StreamLine{Err: errs.ProcessError(err.Error())}
+				ch <- StreamLine{Err: errs.New(errs.CodeProcessError, err.Error())}
 			}
 			return
 		}
@@ -574,7 +574,7 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts ...RunOptio
 		waitErr := cmd.Wait()
 		if waitErr != nil {
 			if exitErr, ok := waitErr.(*exec.ExitError); ok {
-				ch <- StreamLine{Err: errs.ProcessError(
+				ch <- StreamLine{Err: errs.New(errs.CodeProcessError,
 					fmt.Sprintf("Command failed (exit %d): %s", exitErr.ExitCode(), args[0]),
 				)}
 			}

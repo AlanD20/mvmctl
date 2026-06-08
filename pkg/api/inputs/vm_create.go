@@ -22,9 +22,9 @@ import (
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/disk"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/validators"
+	"mvmctl/pkg/errs"
 )
 
 // VMCreateInput matches Python's VMCreateInput dataclass exactly.
@@ -216,20 +216,13 @@ func (r *VMCreateRequest) resolveImage(ctx context.Context, input *VMCreateInput
 		img, err = r.imageResolver.Resolve(ctx, *input.Image)
 	}
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMImageNotFound,
-			Op:      "vm_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVMImageNotFound, err.Error())
 	}
 	if img == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMImageNotFound,
-			Op:      "vm_create",
-			Message: "No image specified and no default image set. Use 'mvm image pull <name>' then 'mvm image default <name>', or pass --image.",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeVMImageNotFound,
+			"No image specified and no default image set. Use 'mvm image pull <name>' then 'mvm image default <name>', or pass --image.",
+		)
 	}
 	return img, nil
 }
@@ -245,20 +238,13 @@ func (r *VMCreateRequest) resolveKernel(ctx context.Context, input *VMCreateInpu
 		krnl, err = r.kernelResolver.Resolve(ctx, *input.KernelID)
 	}
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMKernelNotFound,
-			Op:      "vm_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVMKernelNotFound, err.Error())
 	}
 	if krnl == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMKernelNotFound,
-			Op:      "vm_create",
-			Message: "No kernel specified and no default kernel set. Use 'mvm kernel pull --type <firecracker|official>' then 'mvm kernel default <id>', or pass --kernel.",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeVMKernelNotFound,
+			"No kernel specified and no default kernel set. Use 'mvm kernel pull --type <firecracker|official>' then 'mvm kernel default <id>', or pass --kernel.",
+		)
 	}
 	return krnl, nil
 }
@@ -274,20 +260,13 @@ func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInp
 		netw, err = r.networkResolver.Resolve(ctx, *input.NetworkName)
 	}
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMNetworkNotFound,
-			Op:      "vm_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVMNetworkNotFound, err.Error())
 	}
 	if netw == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMNetworkNotFound,
-			Op:      "vm_create",
-			Message: "No network specified and no default network set. Use 'mvm network create' then 'mvm network default <id>', or pass --network.",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeVMNetworkNotFound,
+			"No network specified and no default network set. Use 'mvm network create' then 'mvm network default <id>', or pass --network.",
+		)
 	}
 	return netw, nil
 }
@@ -299,33 +278,21 @@ func (r *VMCreateRequest) resolveBinary(ctx context.Context, input *VMCreateInpu
 	if input.BinaryID != nil && *input.BinaryID != "" {
 		res, err := r.binaryResolver.Resolve(ctx, *input.BinaryID)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeVMBinaryNotFound,
-				Op:      "vm_create",
-				Message: err.Error(),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.NotFound(errs.CodeVMBinaryNotFound, err.Error())
 		}
 		fcBinary = res
 	} else {
 		defaultBin, err := r.binaryResolver.GetDefault(ctx, "firecracker")
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeDatabaseError,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Failed to get default binary: %s", err.Error()),
-				Class:   errs.ClassInternal,
-			}
+			return nil, errs.New(errs.CodeDatabaseError, fmt.Sprintf("Failed to get default binary: %s", err.Error()))
 		}
 		fcBinary = defaultBin
 	}
 	if fcBinary == nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMBinaryNotFound,
-			Op:      "vm_create",
-			Message: "No binary specified and no default binary set. Use 'mvm bin pull <version>' then 'mvm bin default <id>'.",
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(
+			errs.CodeVMBinaryNotFound,
+			"No binary specified and no default binary set. Use 'mvm bin pull <version>' then 'mvm bin default <id>'.",
+		)
 	}
 	return fcBinary, nil
 }
@@ -336,31 +303,16 @@ func (r *VMCreateRequest) resolveSSHKeys(ctx context.Context, input *VMCreateInp
 	if len(input.SSHKeys) == 0 {
 		defaults, err := r.keyResolver.GetDefaults(ctx)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeDatabaseError,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Failed to get default SSH keys: %s", err.Error()),
-				Class:   errs.ClassInternal,
-			}
+			return nil, errs.New(errs.CodeDatabaseError, fmt.Sprintf("Failed to get default SSH keys: %s", err.Error()))
 		}
 		return defaults, nil
 	}
 	result, err := r.keyResolver.ResolveMany(ctx, input.SSHKeys)
 	if err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMSSHKeyNotFound,
-			Op:      "vm_create",
-			Message: err.Error(),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVMSSHKeyNotFound, err.Error())
 	}
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVMSSHKeyNotFound,
-			Op:      "vm_create",
-			Message: result.Errors[0],
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVMSSHKeyNotFound, result.Errors[0])
 	}
 	return result.Items, nil
 }
@@ -373,12 +325,7 @@ func (r *VMCreateRequest) resolveVolumes(ctx context.Context, input *VMCreateInp
 	}
 	result := r.volumeResolver.ResolveMany(ctx, input.Volumes)
 	if len(result.Errors) > 0 && len(result.Volumes) == 0 {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeVolumeNotFound,
-			Op:      "vm_create",
-			Message: result.Errors[0],
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.NotFound(errs.CodeVolumeNotFound, result.Errors[0])
 	}
 	return result.Volumes, nil
 }
@@ -395,12 +342,7 @@ func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInpu
 	}
 	bytes, err := disk.ParseDiskSizeToBytes(memStr)
 	if err != nil {
-		return 0, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Invalid memory size: %s", memStr),
-			Class:   errs.ClassValidation,
-		}
+		return 0, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid memory size: %s", memStr))
 	}
 	return int(bytes / disk.MebibyteBytes), nil
 }
@@ -412,12 +354,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 
 	// Validate VM name early (matches Python: VMValidator.validate_name)
 	if err := validators.VMName(input.Name); err != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeValidationFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Invalid VM name: %s", err.Error()),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid VM name: %s", err.Error()))
 	}
 
 	// Resolve image, kernel, network, binary, keys, volumes (matches Python's _resolve_* methods)
@@ -456,12 +393,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	// Validate and parse network subnet (matches Python: ipaddress.IPv4Network(network.subnet, strict=False))
 	_, ipv4Net, parseErr := net.ParseCIDR(netw.Subnet)
 	if parseErr != nil {
-		return nil, &errs.DomainError{
-			Code:    errs.CodeNetworkNotFound,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Invalid network subnet: %s", netw.Subnet),
-			Class:   errs.ClassValidation,
-		}
+		return nil, errs.New(errs.CodeNetworkNotFound, fmt.Sprintf("Invalid network subnet: %s", netw.Subnet))
 	}
 	networkPrefixLen, _ := ipv4Net.Mask.Size()
 	networkNetmask := net.IP(ipv4Net.Mask).String()
@@ -471,12 +403,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if input.DiskSize != "" {
 		bytes, err := disk.ParseDiskSizeToBytes(input.DiskSize)
 		if err != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Invalid disk size: %s", err.Error()),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid disk size: %s", err.Error()))
 		}
 		rootfsDiskSizeMib = int(bytes / disk.MebibyteBytes)
 	} else {
@@ -516,40 +443,36 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	}
 	if input.CPUTemplate != "" {
 		if cpuConfig != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeVMCreateFailed,
-				Op:      "vm_create",
-				Message: "Cannot specify both --cpu-template and a pre-resolved cpu_config",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeVMCreateFailed,
+				"Cannot specify both --cpu-template and a pre-resolved cpu_config",
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 		data, readErr := os.ReadFile(input.CPUTemplate)
 		if readErr != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeVMCreateFailed,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Cannot read CPU template: %s", readErr.Error()),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeVMCreateFailed,
+				fmt.Sprintf("Cannot read CPU template: %s", readErr.Error()),
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 		var parsed any
 		if jsonErr := json.Unmarshal(data, &parsed); jsonErr != nil {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeVMCreateFailed,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Invalid CPU template JSON: %s", jsonErr.Error()),
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeVMCreateFailed,
+				fmt.Sprintf("Invalid CPU template JSON: %s", jsonErr.Error()),
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 		var ok bool
 		cpuConfig, ok = parsed.(map[string]any)
 		if !ok {
-			return nil, &errs.DomainError{
-				Code:    errs.CodeVMCreateFailed,
-				Op:      "vm_create",
-				Message: "CPU template must be a JSON object",
-				Class:   errs.ClassValidation,
-			}
+			return nil, errs.New(
+				errs.CodeVMCreateFailed,
+				"CPU template must be a JSON object",
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 	}
 
@@ -695,22 +618,12 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 // Matches Python's VMCreateRequest.ensure_validate() exactly.
 func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVMCreateInput) error {
 	if result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_create",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeVMCreateFailed, "Failed to resolve necessary dependencies to validate")
 	}
 
 	if result.RequestedGuestMAC != nil && *result.RequestedGuestMAC != "" {
 		if err := validators.MAC(*result.RequestedGuestMAC); err != nil {
-			return &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Op:      "vm_create",
-				Message: err.Error(),
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(errs.CodeValidationFailed, err.Error())
 		}
 	}
 
@@ -722,75 +635,62 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			result.Network.Subnet,
 			result.Network.IPv4Gateway,
 		); err != nil {
-			return &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Op:      "vm_create",
-				Message: err.Error(),
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(errs.CodeValidationFailed, err.Error())
 		}
 	}
 
 	if result.VCPUCount < infra.VCPUMin || result.VCPUCount > infra.VCPUMax {
-		return &errs.DomainError{
-			Code: errs.CodeVMCreateFailed,
-			Op:   "vm_create",
-			Message: fmt.Sprintf(
-				"Invalid vcpus=%d: must be between %d and %d",
-				result.VCPUCount, infra.VCPUMin, infra.VCPUMax,
-			),
-			Class: errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMCreateFailed,
+			fmt.Sprintf("Invalid vcpus=%d: must be between %d and %d", result.VCPUCount, infra.VCPUMin, infra.VCPUMax),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	if result.MemSizeMib < infra.MemMinMB || result.MemSizeMib > infra.MemMaxMB {
-		return &errs.DomainError{
-			Code: errs.CodeVMCreateFailed,
-			Op:   "vm_create",
-			Message: fmt.Sprintf(
+		return errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf(
 				"Invalid mem_size_mib=%d: must be between %d and %d",
-				result.MemSizeMib, infra.MemMinMB, infra.MemMaxMB,
+				result.MemSizeMib,
+				infra.MemMinMB,
+				infra.MemMaxMB,
 			),
-			Class: errs.ClassValidation,
-		}
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	kernelPath := result.Kernel.Path
 	if _, err := os.Stat(kernelPath); os.IsNotExist(err) {
-		return &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Kernel not found: %s", kernelPath),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf("Kernel not found: %s", kernelPath),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	binPath := result.Binary.Path
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
-		return &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Firecracker binary not found: %s", binPath),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf("Firecracker binary not found: %s", binPath),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 	if err := syscall.Access(binPath, 1); err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Firecracker binary not executable: %s", binPath),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf("Firecracker binary not executable: %s", binPath),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	if result.CustomCloudInitConfig != nil && *result.CustomCloudInitConfig != "" {
 		if _, err := os.Stat(*result.CustomCloudInitConfig); os.IsNotExist(err) {
-			return &errs.DomainError{
-				Code:    errs.CodeVMCreateFailed,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Cloud-init config file not found: %s", *result.CustomCloudInitConfig),
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(
+				errs.CodeVMCreateFailed,
+				fmt.Sprintf("Cloud-init config file not found: %s", *result.CustomCloudInitConfig),
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 	}
 
@@ -799,53 +699,41 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 		if r.input.Image != nil {
 			imageRef = *r.input.Image
 		}
-		return &errs.DomainError{
-			Code: errs.CodeVMCreateFailed,
-			Op:   "vm_create",
-			Message: fmt.Sprintf(
+		return errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf(
 				"Image %s is missing minimum_rootfs_size_mib. This image was created with an older version. Re-import the image: mvm image pull <slug> --force",
 				imageRef,
 			),
-			Class: errs.ClassValidation,
-		}
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	if result.DiskSizeBytes > 0 {
 		minRequiredBytes := int64(result.Image.MinRootfsSizeMiB) * disk.MebibyteBytes
 		if result.DiskSizeBytes < minRequiredBytes {
-			return &errs.DomainError{
-				Code: errs.CodeVMCreateFailed,
-				Op:   "vm_create",
-				Message: fmt.Sprintf(
+			return errs.New(
+				errs.CodeVMCreateFailed,
+				fmt.Sprintf(
 					"Requested disk size is smaller than minimum required (%d MiB). Use a larger size or choose a different image.",
 					result.Image.MinRootfsSizeMiB,
 				),
-				Class: errs.ClassValidation,
-			}
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 	}
 
 	if result.BootArgs != "" {
 		for component := range strings.FieldsSeq(result.BootArgs) {
 			if err := validators.BootArgComponent(component, "boot_args"); err != nil {
-				return &errs.DomainError{
-					Code:    errs.CodeValidationFailed,
-					Op:      "vm_create",
-					Message: fmt.Sprintf("Invalid boot_args: %s", err.Error()),
-					Class:   errs.ClassValidation,
-				}
+				return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid boot_args: %s", err.Error()))
 			}
 		}
 	}
 
 	if result.LSMFlags != "" {
 		if err := validators.BootArgComponent(result.LSMFlags, "lsm_flags"); err != nil {
-			return &errs.DomainError{
-				Code:    errs.CodeValidationFailed,
-				Op:      "vm_create",
-				Message: fmt.Sprintf("Invalid lsm_flags: %s", err.Error()),
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid lsm_flags: %s", err.Error()))
 		}
 	}
 
@@ -855,82 +743,59 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 		count = *r.input.Count
 	}
 	if count < 1 {
-		return &errs.DomainError{
-			Code:    errs.CodeVMCreateFailed,
-			Op:      "vm_create",
-			Message: "--count must be at least 1",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMCreateFailed, "--count must be at least 1", errs.WithClass(errs.ClassValidation))
 	}
 
 	// Check VM limit (matches Python's _execute_create limit check)
 	vmCount, err := r.vmRepo.Count(ctx)
 	if err != nil {
-		return &errs.DomainError{
-			Code:    errs.CodeDatabaseError,
-			Op:      "vm_create",
-			Message: fmt.Sprintf("Failed to count VMs: %s", err.Error()),
-			Class:   errs.ClassInternal,
-		}
+		return errs.New(errs.CodeDatabaseError, fmt.Sprintf("Failed to count VMs: %s", err.Error()))
 	}
 	maxVMs, _ := r.cfg.GetInt(ctx, "settings.vm", "max_vms")
 	if vmCount >= maxVMs {
-		return &errs.DomainError{
-			Code: errs.CodeVMResourceExhausted,
-			Op:   "vm_create",
-			Message: fmt.Sprintf(
-				"VM limit reached (%d). Remove existing VMs before creating new ones.",
-				maxVMs,
-			),
-			Class: errs.ClassValidation,
-		}
+		return errs.New(errs.CodeVMResourceExhausted,
+			fmt.Sprintf("VM limit reached (%d). Remove existing VMs before creating new ones.", maxVMs),
+		)
 	}
 
 	if count > 1 {
 		if r.input.RequestedGuestIP != nil {
-			return &errs.DomainError{
-				Code:    errs.CodeVMCreateFailed,
-				Op:      "vm_create",
-				Message: "Cannot specify --ip with --count > 1",
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(
+				errs.CodeVMCreateFailed,
+				"Cannot specify --ip with --count > 1",
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 		if r.input.RequestedGuestMAC != nil {
-			return &errs.DomainError{
-				Code:    errs.CodeVMCreateFailed,
-				Op:      "vm_create",
-				Message: "Cannot specify --mac with --count > 1",
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(
+				errs.CodeVMCreateFailed,
+				"Cannot specify --mac with --count > 1",
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 
 		// Check subnet capacity (matches Python: lease_repo.count_available)
 		if result.Network != nil {
 			available, availErr := r.leaseRepo.CountAvailable(ctx, result.Network.ID)
 			if availErr == nil && count > available {
-				return &errs.DomainError{
-					Code: errs.CodeNetworkLeaseExhausted,
-					Op:   "vm_create",
-					Message: fmt.Sprintf(
-						"Subnet has only %d IPs available, but %d VMs requested",
-						available, count,
-					),
-					Class: errs.ClassValidation,
-				}
+				return errs.New(errs.CodeNetworkLeaseExhausted,
+					fmt.Sprintf("Subnet has only %d IPs available, but %d VMs requested", available, count),
+					errs.WithClass(errs.ClassValidation),
+				)
 			}
 		}
 
 		// Check global VM limit for batch (matches Python: current + count > max_vms)
 		if vmCount+count > maxVMs {
-			return &errs.DomainError{
-				Code: errs.CodeVMResourceExhausted,
-				Op:   "vm_create",
-				Message: fmt.Sprintf(
+			return errs.New(
+				errs.CodeVMResourceExhausted,
+				fmt.Sprintf(
 					"Creating %d VMs would exceed the limit (%d/%d). Remove existing VMs first.",
-					count, vmCount, maxVMs,
+					count,
+					vmCount,
+					maxVMs,
 				),
-				Class: errs.ClassValidation,
-			}
+			)
 		}
 	}
 

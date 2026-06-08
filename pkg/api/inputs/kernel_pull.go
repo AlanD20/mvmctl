@@ -11,9 +11,9 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/errs"
 	"mvmctl/internal/infra/system"
 	"mvmctl/internal/infra/version"
+	"mvmctl/pkg/errs"
 )
 
 // KernelPullInput matches Python's KernelPullInput dataclass.
@@ -192,26 +192,20 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 
 func (r *KernelPullRequest) ensureValidate() error {
 	if r.result == nil {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelBuildFailed,
-			Op:      "kernel_pull",
-			Message: "Failed to resolve necessary dependencies to validate",
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeKernelBuildFailed,
+			"Failed to resolve necessary dependencies to validate",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// 1. Validate kernel type
 	validTypes := kernel.KernelValidTypes
 	if !validTypes[r.result.KernelType] {
-		return &errs.DomainError{
-			Code: errs.CodeKernelBuildFailed,
-			Op:   "kernel_pull",
-			Message: fmt.Sprintf(
-				"Unsupported kernel type: %s. Valid types: firecracker, official",
-				r.result.KernelType,
-			),
-			Class: errs.ClassValidation,
-		}
+		return errs.New(errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Unsupported kernel type: %s. Valid types: firecracker, official", r.result.KernelType),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// 2. Validate version (semver-like: 5.10, 6.1.0, v6.1) — Python:
@@ -222,53 +216,50 @@ func (r *KernelPullRequest) ensureValidate() error {
 	if r.result.Version != "" {
 		stripped := strings.TrimPrefix(r.result.Version, "v")
 		if !version.IsValidVersion(stripped) {
-			return &errs.DomainError{
-				Code: errs.CodeKernelBuildFailed,
-				Op:   "kernel_pull",
-				Message: fmt.Sprintf(
+			return errs.New(
+				errs.CodeKernelBuildFailed,
+				fmt.Sprintf(
 					"Invalid kernel version: '%s'. Expected format like '5.10', '6.1.0', or 'v6.1'",
 					r.result.Version,
 				),
-				Class: errs.ClassValidation,
-			}
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 	}
 
 	// 3. Validate architecture
 	if !slices.Contains(infra.FirecrackerSupportedArches, r.result.Arch) {
-		return &errs.DomainError{
-			Code: errs.CodeKernelBuildFailed,
-			Op:   "kernel_pull",
-			Message: fmt.Sprintf(
+		return errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf(
 				"Unsupported architecture: %s. Valid architectures: %s",
-				r.result.Arch, strings.Join(infra.FirecrackerSupportedArches, ", "),
+				r.result.Arch,
+				strings.Join(infra.FirecrackerSupportedArches, ", "),
 			),
-			Class: errs.ClassValidation,
-		}
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	// 4. Validate output directory (must exist or be creatable) — Python:
 	//    if output_dir.exists() and not output_dir.is_dir():
 	if r.result.OutputDir != "" {
 		if fi, err := os.Stat(r.result.OutputDir); err == nil && !fi.IsDir() {
-			return &errs.DomainError{
-				Code:    errs.CodeKernelBuildFailed,
-				Op:      "kernel_pull",
-				Message: fmt.Sprintf("Output path exists but is not a directory: %s", r.result.OutputDir),
-				Class:   errs.ClassValidation,
-			}
+			return errs.New(
+				errs.CodeKernelBuildFailed,
+				fmt.Sprintf("Output path exists but is not a directory: %s", r.result.OutputDir),
+				errs.WithClass(errs.ClassValidation),
+			)
 		}
 	}
 
 	// 5. Validate build jobs (positive integer) — Python:
 	//    if jobs <= 0:
 	if r.result.Jobs <= 0 {
-		return &errs.DomainError{
-			Code:    errs.CodeKernelBuildFailed,
-			Op:      "kernel_pull",
-			Message: fmt.Sprintf("Invalid build jobs: %d. Must be a positive integer.", r.result.Jobs),
-			Class:   errs.ClassValidation,
-		}
+		return errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Invalid build jobs: %d. Must be a positive integer.", r.result.Jobs),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 
 	return nil
