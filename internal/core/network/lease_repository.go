@@ -3,7 +3,7 @@ package network
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // LeaseRepository — database operations for network IP leases.

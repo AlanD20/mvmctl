@@ -8,9 +8,9 @@ import (
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/system"
-	"mvmctl/internal/infra/version"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
 )

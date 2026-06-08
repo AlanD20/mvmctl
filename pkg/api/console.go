@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/service/console"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"

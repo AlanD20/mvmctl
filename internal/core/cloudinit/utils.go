@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
 

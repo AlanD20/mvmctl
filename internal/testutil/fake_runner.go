@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/system"
 )
 
 // FakeRunner implements system.CommandRunner for testing.

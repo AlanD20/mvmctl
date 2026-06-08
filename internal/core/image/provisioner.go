@@ -7,7 +7,7 @@ import (
 	"log/slog"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/provisioner"
+	"mvmctl/internal/lib/provisioner"
 	"mvmctl/pkg/errs"
 )
 

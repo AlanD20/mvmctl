@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/kernel"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // KernelRepo is an in-memory kernel repository for testing.

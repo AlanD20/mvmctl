@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/model"
 )
 
 // ── Controller ──

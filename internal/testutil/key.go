@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"mvmctl/internal/core/key"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 type KeyRepo struct {

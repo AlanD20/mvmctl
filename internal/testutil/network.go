@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/network"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // NetworkRepo is an in-memory network repository for testing.

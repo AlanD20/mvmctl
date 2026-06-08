@@ -3,8 +3,8 @@ package vm
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
 	"mvmctl/internal/infra/pool"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
 

@@ -1,6 +1,6 @@
 package responses
 
-import "mvmctl/internal/infra/model"
+import "mvmctl/internal/lib/model"
 
 // VMVolume is a volume entry in the VM inspect response.
 type VMVolume struct {

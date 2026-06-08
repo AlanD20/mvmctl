@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/crypto"
+	"mvmctl/internal/lib/crypto"
 
 	"github.com/spf13/cobra"
 )

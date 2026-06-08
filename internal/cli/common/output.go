@@ -19,8 +19,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/errs"
 )

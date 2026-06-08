@@ -3,7 +3,7 @@ package vm
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // Repository is the data access interface for VM instances.

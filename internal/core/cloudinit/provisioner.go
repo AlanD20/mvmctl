@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/firewall"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/firewall"
+	"mvmctl/internal/lib/model"
 	nocloudnetsvc "mvmctl/internal/service/nocloudnet"
 	"mvmctl/pkg/errs"
 )

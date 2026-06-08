@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/system"
 )
 
 // SpawnResult holds the result of a successful spawn.

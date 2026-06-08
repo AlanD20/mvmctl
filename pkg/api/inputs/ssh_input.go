@@ -8,8 +8,8 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/validators"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
 

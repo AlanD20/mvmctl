@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
 )
 
 // ── Probe ──

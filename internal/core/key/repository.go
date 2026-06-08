@@ -3,7 +3,7 @@ package key
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // Repository defines all database operations for SSH keys.

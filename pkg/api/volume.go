@@ -9,9 +9,9 @@ import (
 
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/disk"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/disk"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/responses"
 	"mvmctl/pkg/errs"

@@ -1,6 +1,6 @@
 // Package provcontent holds shared provisioning content types and builders.
 //
-// This package is intentionally separate from "mvmctl/internal/infra/provisioner"
+// This package is intentionally separate from "mvmctl/internal/lib/provisioner"
 // to avoid circular imports: guestfs and loopmount packages import this for
 // Operation types and ProvisionerContent, while provisioner/backend.go imports
 // guestfs and loopmount directly.

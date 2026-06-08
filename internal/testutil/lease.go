@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/network"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // LeaseRepo is an in-memory lease repository for testing.

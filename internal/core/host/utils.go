@@ -11,9 +11,9 @@ import (
 	"syscall"
 
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/model"
-	"mvmctl/internal/infra/system"
-	"mvmctl/internal/infra/validators"
+	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
 

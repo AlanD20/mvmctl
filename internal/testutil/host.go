@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/host"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // HostRepo is an in-memory host repository for testing.

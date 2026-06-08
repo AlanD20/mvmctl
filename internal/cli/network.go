@@ -8,9 +8,9 @@ import (
 	"strings"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra/crypto"
-	"mvmctl/internal/infra/model"
-	infranet "mvmctl/internal/infra/network"
+	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/model"
+	libnet "mvmctl/internal/lib/network"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
 
@@ -187,7 +187,7 @@ func newNetworkCreateCmd(op *api.Operation) *cobra.Command {
 // resolveUserNATGateways prompts the user to select NAT gateway interfaces.
 // Matches Python's _resolve_user_nat_gateways() exactly.
 func resolveUserNATGateways(ctx context.Context) (string, error) {
-	interfaces, err := infranet.GetPhysicalInterfaces()
+	interfaces, err := libnet.GetPhysicalInterfaces()
 	if err != nil {
 		return "", fmt.Errorf("failed to list network interfaces: %w", err)
 	}

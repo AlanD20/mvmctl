@@ -3,7 +3,7 @@ package host
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // Repository matches Python's mvmctl.core.host._repository.Repository.

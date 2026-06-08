@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/binary"
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 )
 
 // BinaryRepo is an in-memory binary repository for testing.

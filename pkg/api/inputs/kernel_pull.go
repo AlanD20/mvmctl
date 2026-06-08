@@ -11,8 +11,8 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
-	"mvmctl/internal/infra/system"
-	"mvmctl/internal/infra/version"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
 )
 

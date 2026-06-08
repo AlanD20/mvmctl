@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/system"
 )
 
 // SpawnResult holds the result of a successful spawn.

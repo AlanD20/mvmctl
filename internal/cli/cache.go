@@ -11,7 +11,7 @@ import (
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/infra/system"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api"
 
 	"github.com/spf13/cobra"

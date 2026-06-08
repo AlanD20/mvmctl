@@ -3,7 +3,7 @@ package inputs
 import (
 	"context"
 
-	"mvmctl/internal/infra/model"
+	"mvmctl/internal/lib/model"
 
 	"github.com/jmoiron/sqlx"
 )
