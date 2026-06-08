@@ -773,8 +773,7 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 
 		// Console relay, TAP, IP lease cleanup
 		if vmLocal.RelayPID != nil {
-			handler := system.NewProcessSignalHandler(system.ProcessSignalHandlerConfig{PID: *vmLocal.RelayPID})
-			handler.GracefulShutdown(nil)
+			system.GracefulShutdown(system.ShutdownConfig{Pid: *vmLocal.RelayPID})
 		}
 		if vmLocal.RelaySocketPath != nil {
 			_ = os.Remove(*vmLocal.RelaySocketPath)
@@ -1133,12 +1132,11 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 
 	// ── Force-kill any remaining Firecracker process ──
 	if v.PID > 0 && system.IsProcessRunning(v.PID) {
-		handler := system.NewProcessSignalHandler(system.ProcessSignalHandlerConfig{
-			PID:             v.PID,
+		system.GracefulShutdown(system.ShutdownConfig{
+			Pid:             v.PID,
 			GracefulTimeout: 100 * time.Millisecond,
 			KillTimeout:     50 * time.Millisecond,
 		})
-		handler.GracefulShutdown(nil)
 	}
 
 	// ── Batch: bridge, NAT, TAP, then ARP flush ──
