@@ -8,11 +8,20 @@ jobs:
     runs-on: kvm-runner
     steps:
       - uses: actions/checkout@v6
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --locked --group dev
+          go-version: "1.26"
+          cache: true
+
+      - name: Build binary
+        run: |
+          mkdir -p dist
+          go build -o dist/mvm ./cmd/mvm
+
+      - name: Install test dependencies
+        run: pip install pytest
+
       - name: Run system tests
-        run: uv run scripts/run_tests.py --system
+        run: python3 scripts/run_tests.py --bin dist/mvm

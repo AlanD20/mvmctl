@@ -6,7 +6,7 @@ export DH_VERBOSE = 1
 	dh $@
 
 override_dh_auto_build:
-	test -f dist/mvm || { echo "dist/mvm not found — build it first with: python scripts/build_services.py"; exit 1; }
+	test -f dist/mvm || { echo "dist/mvm not found — build it first with: go build -o dist/mvm ./cmd/mvm"; exit 1; }
 	mkdir -p debian/mvmctl/usr/bin
 	cp dist/mvm debian/mvmctl/usr/bin/
 	chmod 755 debian/mvmctl/usr/bin/mvm
