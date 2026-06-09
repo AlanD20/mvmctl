@@ -1,15 +1,9 @@
-# Python
+# Python (scripts at root generate these)
 __pycache__/
 **/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
-.Python
-*.egg-info/
-dist/
-build/
-*.egg
-.eggs/
 
 # Virtual environments
 .venv/
@@ -22,7 +16,6 @@ ENV/
 .coverage
 .coverage.*
 htmlcov/
-.tox/
 coverage.xml
 coverage.json
 *.cover
@@ -47,33 +40,24 @@ uv.lock
 .DS_Store
 Thumbs.db
 
-# MVM runtime data (user cache dir)
-# Note: actual files go to ~/.cache/firecracker-manager/ not in project
-*.pid
-*.socket
-*.log
-
 # Build artifacts
+dist/
 /mvm
 *.tar.xz
 *.ext4
 *.raw
 *.img
+*.iso
+*.metrics
+*.pid
+*.socket
+*.log
 vmlinux
 vmlinux-*
 
 # Kernel build dir
 kernel-build/
 linux-*/
-
-# VM runtime dirs — see legacy/single-vm/env/ and legacy/multi-vm/env/ below
-
-# Build-time generated version file
-_build_version.py
-
-# Misc binary/image artifacts
-*.iso
-*.metrics
 
 # ========== LEGACY SHELL SCRIPTS (moved to legacy/shell/) ==========
 # Legacy centralized asset downloads
