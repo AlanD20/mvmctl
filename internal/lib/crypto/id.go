@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // SHA256FileHash computes the SHA-256 hex digest of a file.
@@ -20,6 +21,12 @@ func SHA256FileHash(path string) (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+// SHA256 returns the SHA-256 hex digest of data.
+func SHA256(data []byte) string {
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum)
 }
 
 // ContentHash computes a SHA-256 hex digest of the concatenated string parts.
@@ -89,6 +96,18 @@ func VolumeID(name, createdAt string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "%s:%s", name, createdAt)
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// WorkflowID derives a deterministic workflow ID from a spec file path.
+// Returns the first 16 characters of the SHA-256 hash of the resolved absolute
+// path (8 bytes). Deterministic per file path.
+func WorkflowID(path string) string {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		absPath = path
+	}
+	h := sha256.Sum256([]byte(absPath))
+	return fmt.Sprintf("%x", h[:8])
 }
 
 // ShortenID returns the first N characters of an ID for display (default 12).

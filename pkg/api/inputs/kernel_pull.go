@@ -32,17 +32,17 @@ import (
 //	    set_default: bool = False
 //	    features: str = ""
 type KernelPullInput struct {
-	KernelType   string `json:"kernel_type"`
-	Version      string `json:"version,omitempty"`
+	KernelType   string `json:"kernel_type" yaml:"kernel_type"`
+	Version      string `json:"version,omitempty" yaml:"version,omitempty"`
 	OutputDir    string `json:"output_dir,omitempty"`
-	OutputName   string `json:"output_name,omitempty"`
+	OutputName   string `json:"output_name,omitempty" yaml:"name,omitempty"`
 	OutputPath   string `json:"output_path,omitempty"`
-	Jobs         int    `json:"jobs,omitempty"`
-	KeepBuildDir bool   `json:"keep_build_dir"`
-	CleanBuild   bool   `json:"clean_build"`
-	KernelConfig string `json:"kernel_config,omitempty"`
-	SetDefault   bool   `json:"set_default"`
-	Features     string `json:"features"`
+	Jobs         int    `json:"jobs,omitempty" yaml:"jobs,omitempty"`
+	KeepBuildDir bool   `json:"keep_build_dir" yaml:"keep_build_dir"`
+	CleanBuild   bool   `json:"clean_build" yaml:"clean_build"`
+	KernelConfig string `json:"kernel_config,omitempty" yaml:"kernel_config,omitempty"`
+	SetDefault   bool   `json:"set_default" yaml:"default"`
+	Features     string `json:"features" yaml:"features"`
 }
 
 // ResolvedKernelPullRequest matches Python's ResolvedKernelPullRequest (frozen dataclass).

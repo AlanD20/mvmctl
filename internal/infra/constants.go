@@ -533,6 +533,23 @@ func GetVMDirByID(id string) string {
 	return filepath.Join(GetVmsDir(), id)
 }
 
+func GetWorkflowsStateDir() string {
+	cacheDir, err := GetCacheDir()
+	if err != nil {
+		cacheDir = filepath.Join(GetRealHome(), ".cache", ProjectName)
+	}
+	path := filepath.Join(cacheDir, "workflows")
+	if err := ensureDirAndChown(path); err != nil {
+		slog.Warn("failed to create workflows state directory", "path", path, "error", err)
+	}
+	return path
+}
+
+// GetWorkflowsStateDirByID returns the workflow state directory for a specific workflow ID.
+func GetWorkflowsStateDirByID(wfID string) string {
+	return filepath.Join(GetWorkflowsStateDir(), wfID)
+}
+
 func GetImagesDir() string {
 	cacheDir, err := GetCacheDir()
 	if err != nil {
@@ -970,6 +987,11 @@ func FormatBytesHumanReadable(sizeBytes int64) string {
 // Only Go stdlib time constants are used (ARCHITECTURE: V17 — RFC3339 everywhere).
 // Legacy Python microsecond/no-timezone formats are NOT supported — DB migration
 // converts them to RFC3339 on read.
+
+// Now returns the current timestamp in RFC3339 format.
+func Now() string {
+	return time.Now().Format(time.RFC3339)
+}
 
 func HumanReadableDatetime(isoTimestamp string) string {
 	if isoTimestamp == "" {

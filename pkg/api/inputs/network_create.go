@@ -22,12 +22,12 @@ import (
 //	    nat_gateways: list[str] = field(default_factory=list)
 //	    set_default: bool = False
 type NetworkCreateInput struct {
-	Name        string   `json:"name"`
-	Subnet      string   `json:"subnet"`
-	IPv4Gateway *string  `json:"ipv4_gateway,omitempty"`
-	NATEnabled  bool     `json:"nat_enabled"`
-	NATGateways []string `json:"nat_gateways,omitempty"`
-	SetDefault  bool     `json:"set_default"`
+	Name        string   `json:"name" yaml:"name"`
+	Subnet      string   `json:"subnet" yaml:"subnet"`
+	IPv4Gateway *string  `json:"ipv4_gateway,omitempty" yaml:"ipv4_gateway,omitempty"`
+	NATEnabled  bool     `json:"nat_enabled" yaml:"nat_enabled"`
+	NATGateways []string `json:"nat_gateways,omitempty" yaml:"nat_gateways,omitempty"`
+	SetDefault  bool     `json:"set_default" yaml:"default"`
 }
 
 // ResolvedNetworkCreateRequest matches Python's ResolvedNetworkCreateRequest (frozen dataclass).
@@ -130,7 +130,7 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 
 func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	if r.result == nil {
-		return errs.New(errs.CodeNetworkNotFound, "Failed to resolve necessary dependencies to validate")
+		return errs.New(errs.CodeNetworkNotFound, "failed to resolve necessary dependencies to validate")
 	}
 
 	// Validate name (no dots, lowercase only)
@@ -163,7 +163,7 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	// Check if network already exists
 	existing, err := r.networkRepo.GetByName(ctx, r.result.Name)
 	if err != nil {
-		return errs.New(errs.CodeDatabaseError, "Failed to check existing networks: "+err.Error())
+		return errs.New(errs.CodeDatabaseError, "failed to check existing networks: "+err.Error())
 	}
 	if existing != nil {
 		return errs.AlreadyExists(errs.CodeNetworkAlreadyExists, "Network '"+r.result.Name+"' already exists")

@@ -13,11 +13,11 @@ import (
 // BinaryPullInput is the raw input for pulling a firecracker binary.
 // Matches Python's BinaryPullInput dataclass exactly:
 type BinaryPullInput struct {
-	Version          string  `json:"version"`
-	Name             string  `json:"name"`
-	GitRef           *string `json:"git_ref,omitempty"`
-	SetDefault       bool    `json:"set_default"`
-	DownloadOverride bool    `json:"download_override"`
+	Version          string  `json:"version" yaml:"version"`
+	Name             string  `json:"name" yaml:"type"`
+	GitRef           *string `json:"git_ref,omitempty" yaml:"git_ref,omitempty"`
+	SetDefault       bool    `json:"set_default" yaml:"default"`
+	DownloadOverride bool    `json:"download_override" yaml:"force"`
 }
 
 // ResolvedBinaryPullInput matches Python's ResolvedBinaryPullInput (frozen dataclass).

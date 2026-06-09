@@ -12,24 +12,14 @@ import (
 
 // KeyCreateInput holds options for key creation.
 // Matches Python's KeyCreateInput dataclass:
-//
-//	@dataclass
-//	class KeyCreateInput:
-//	    name: str
-//	    algorithm: str | None = None  # "ed25519", "rsa", "ecdsa"
-//	    bits: int | None = None
-//	    output_dir: Path | None = None
-//	    comment: str | None = None
-//	    overwrite: bool = False
-//	    set_default: bool = False
 type KeyCreateInput struct {
-	Name       string `json:"name"`
-	Algorithm  string `json:"algorithm,omitempty"`
-	Bits       int    `json:"bits,omitempty"`
+	Name       string `json:"name" yaml:"name"`
+	Algorithm  string `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
+	Bits       int    `json:"bits,omitempty" yaml:"bits,omitempty"`
 	OutputDir  string `json:"output_dir,omitempty"`
-	Comment    string `json:"comment,omitempty"`
-	Overwrite  bool   `json:"overwrite"`
-	SetDefault bool   `json:"set_default"`
+	Comment    string `json:"comment,omitempty" yaml:"comment,omitempty"`
+	Overwrite  bool   `json:"overwrite" yaml:"force"`
+	SetDefault bool   `json:"set_default" yaml:"default"`
 }
 
 // ResolvedKeyCreateInput matches Python's ResolvedKeyCreateInput (frozen dataclass).
@@ -92,7 +82,10 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Default comment (Python: f"{name}@{socket.gethostname()}")
 	comment := r.input.Comment
 	if comment == "" {
-		hostname, _ := os.Hostname()
+		hostname, err := os.Hostname()
+		if err != nil {
+			hostname = "unknown"
+		}
 		comment = fmt.Sprintf("%s@%s", r.input.Name, hostname)
 	}
 
