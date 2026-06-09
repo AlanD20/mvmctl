@@ -258,8 +258,8 @@ func TestCheckPrivileges(t *testing.T) {
 
 	t.Run("user_not_in_group_errors", func(t *testing.T) {
 		system.DefaultOS = &testutil.FakeOS{
-			LookPathFn:  func(file string) (string, error) { return "/usr/bin/ip", nil },
-			GeteuidVal:  1000,
+			LookPathFn:    func(file string) (string, error) { return "/usr/bin/ip", nil },
+			GeteuidVal:    1000,
 			LookupGroupFn: func(name string) (*user.Group, error) { return mvmGroup, nil },
 			CurrentFn: func() (*user.User, error) {
 				// Gid "1000" does not match mvmGroup Gid "999", and GroupMembersViaNSS
@@ -279,15 +279,15 @@ func TestCheckPrivileges(t *testing.T) {
 
 	t.Run("user_in_group_but_session_without_group_errors", func(t *testing.T) {
 		system.DefaultOS = &testutil.FakeOS{
-			LookPathFn:  func(file string) (string, error) { return "/usr/bin/ip", nil },
-			GeteuidVal:  1000,
+			LookPathFn:    func(file string) (string, error) { return "/usr/bin/ip", nil },
+			GeteuidVal:    1000,
 			LookupGroupFn: func(name string) (*user.Group, error) { return mvmGroup, nil },
 			CurrentFn: func() (*user.User, error) {
 				return &user.User{Username: "testuser", Gid: "999"}, nil
 			},
-			GetgroupsVal: []int{},     // session doesn't have group GID
-			GetgidVal:    1000,         // primary GID matches but...
-			GetegidVal:   1000,         // neither GID nor EGID is 999
+			GetgroupsVal: []int{}, // session doesn't have group GID
+			GetgidVal:    1000,    // primary GID matches but...
+			GetegidVal:   1000,    // neither GID nor EGID is 999
 		}
 		err := system.CheckPrivileges("/usr/bin/ip", "test")
 		require.Error(t, err)
@@ -301,8 +301,8 @@ func TestCheckPrivileges(t *testing.T) {
 
 	t.Run("all_checks_pass", func(t *testing.T) {
 		system.DefaultOS = &testutil.FakeOS{
-			LookPathFn:  func(file string) (string, error) { return "/usr/bin/ip", nil },
-			GeteuidVal:  1000,
+			LookPathFn:    func(file string) (string, error) { return "/usr/bin/ip", nil },
+			GeteuidVal:    1000,
 			LookupGroupFn: func(name string) (*user.Group, error) { return mvmGroup, nil },
 			CurrentFn: func() (*user.User, error) {
 				return &user.User{Username: "testuser", Gid: "999"}, nil

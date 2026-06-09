@@ -1,8 +1,8 @@
 package infra_test
 
 import (
-	"text/template"
 	"testing"
+	"text/template"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -230,7 +230,10 @@ func TestExecTemplate(t *testing.T) {
 
 	t.Run("template_with_conditionals", func(t *testing.T) {
 		tmpl := template.Must(template.New("cond").Parse("{{if .Show}}{{.Val}}{{end}}"))
-		data := struct{ Show bool; Val string }{true, "visible"}
+		data := struct {
+			Show bool
+			Val  string
+		}{true, "visible"}
 		got := infra.ExecTemplate(tmpl, data)
 		assert.Equal(t, "visible", got)
 	})

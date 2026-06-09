@@ -66,15 +66,15 @@ func TestComputePrefixLength(t *testing.T) {
 
 func TestCountHosts(t *testing.T) {
 	tests := []struct {
-		name  string
-		cidr  string
-		want  int
+		name string
+		cidr string
+		want int
 	}{
 		{"24", "10.0.0.0/24", 254},
 		{"16", "10.0.0.0/16", 65534},
 		{"28", "10.0.0.0/28", 14},
 		{"30", "10.0.0.0/30", 2},
-		{"31_rfc3021", "10.0.0.0/31", 2},  // /31: both usable
+		{"31_rfc3021", "10.0.0.0/31", 2}, // /31: both usable
 		{"32_single", "10.0.0.1/32", 1},
 		{"ipv6_returns_zero", "fe80::1/64", 0}, // To4() returns nil
 		{"invalid", "not-a-cidr", 0},

@@ -48,9 +48,9 @@ func (r ResourceSpec) GetInt(key string) int {
 
 // SavedResource represents a single step's persisted state within a workflow.
 type SavedResource struct {
-	StepName     string         `yaml:"step_name"`
-	StepType     string         `yaml:"step_type"`
-	Dependencies []string       `yaml:"depends_on,omitempty"`
+	StepName     string       `yaml:"step_name"`
+	StepType     string       `yaml:"step_type"`
+	Dependencies []string     `yaml:"depends_on,omitempty"`
 	State        ResourceSpec `yaml:"state,omitempty"`
 }
 

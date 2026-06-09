@@ -181,10 +181,10 @@ func TestController_Stop_idempotent(t *testing.T) {
 			assert.NoError(t, ctrl.Stop(ctx, false))
 
 			// Verify DB state unchanged
-		got, err := repo.Get(ctx, m.ID)
-		require.NoError(t, err)
-		require.NotNil(t, got)
-		assert.Equal(t, status, got.Status)
+			got, err := repo.Get(ctx, m.ID)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			assert.Equal(t, status, got.Status)
 		})
 	}
 }

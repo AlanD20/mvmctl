@@ -91,7 +91,12 @@ func (s *KernelStep) StateData() model.ResourceSpec {
 	return StructToMap(s.saved)
 }
 
-func newKernelStepFromSpec(stepType string, name string, spec model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newKernelStepFromSpec(
+	stepType string,
+	name string,
+	spec model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -117,7 +122,12 @@ func newKernelStepFromSpec(stepType string, name string, spec model.ResourceSpec
 	}, nil
 }
 
-func newKernelStepFromState(stepType string, name string, saved model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newKernelStepFromState(
+	stepType string,
+	name string,
+	saved model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	ks := StateFromMap[KernelState](saved)
 	return &KernelStep{
 		stepType: stepType,

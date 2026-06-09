@@ -13,13 +13,13 @@ import (
 // KeyCreateInput holds options for key creation.
 // Matches Python's KeyCreateInput dataclass:
 type KeyCreateInput struct {
-	Name       string `json:"name" yaml:"name"`
-	Algorithm  string `json:"algorithm,omitempty" yaml:"algorithm,omitempty"`
-	Bits       int    `json:"bits,omitempty" yaml:"bits,omitempty"`
+	Name       string `json:"name"                 yaml:"name"`
+	Algorithm  string `json:"algorithm,omitempty"  yaml:"algorithm,omitempty"`
+	Bits       int    `json:"bits,omitempty"       yaml:"bits,omitempty"`
 	OutputDir  string `json:"output_dir,omitempty"`
-	Comment    string `json:"comment,omitempty" yaml:"comment,omitempty"`
-	Overwrite  bool   `json:"overwrite" yaml:"force"`
-	SetDefault bool   `json:"set_default" yaml:"default"`
+	Comment    string `json:"comment,omitempty"    yaml:"comment,omitempty"`
+	Overwrite  bool   `json:"overwrite"            yaml:"force"`
+	SetDefault bool   `json:"set_default"          yaml:"default"`
 }
 
 // ResolvedKeyCreateInput matches Python's ResolvedKeyCreateInput (frozen dataclass).

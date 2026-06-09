@@ -49,11 +49,11 @@ func TestDedup_ints(t *testing.T) {
 		input []int
 		want  []int
 	}{
-		"no_duplicates":  {input: []int{1, 2, 3}, want: []int{1, 2, 3}},
-		"all_same":       {input: []int{42, 42, 42}, want: []int{42}},
-		"mixed":          {input: []int{1, 2, 1, 3, 2, 3}, want: []int{1, 2, 3}},
-		"zero_values":    {input: []int{0, 0, 1, 0}, want: []int{0, 1}},
-		"negative":       {input: []int{-1, -2, -1, -3}, want: []int{-1, -2, -3}},
+		"no_duplicates": {input: []int{1, 2, 3}, want: []int{1, 2, 3}},
+		"all_same":      {input: []int{42, 42, 42}, want: []int{42}},
+		"mixed":         {input: []int{1, 2, 1, 3, 2, 3}, want: []int{1, 2, 3}},
+		"zero_values":   {input: []int{0, 0, 1, 0}, want: []int{0, 1}},
+		"negative":      {input: []int{-1, -2, -1, -3}, want: []int{-1, -2, -3}},
 	}
 
 	for name, tc := range tests {
@@ -76,14 +76,20 @@ func TestSortedKeys(t *testing.T) {
 		input map[string]any
 		want  []string
 	}{
-		"nil_map":                          {input: nil, want: []string{}},
-		"empty_map":                        {input: map[string]any{}, want: []string{}},
-		"single_key":                       {input: map[string]any{"z": 1}, want: []string{"z"}},
-		"reverse_alphabetical_input":       {input: map[string]any{"c": 3, "b": 2, "a": 1}, want: []string{"a", "b", "c"}},
-		"already_sorted":                   {input: map[string]any{"a": 1, "b": 2, "c": 3}, want: []string{"a", "b", "c"}},
-		"mixed_case":                       {input: map[string]any{"Z": 1, "a": 2, "m": 3}, want: []string{"Z", "a", "m"}},
-		"numbers_as_strings":               {input: map[string]any{"10": "x", "2": "y", "1": "z"}, want: []string{"1", "10", "2"}},
-		"diverse_value_types":              {input: map[string]any{"a": 1, "b": "two", "c": true}, want: []string{"a", "b", "c"}},
+		"nil_map":                    {input: nil, want: []string{}},
+		"empty_map":                  {input: map[string]any{}, want: []string{}},
+		"single_key":                 {input: map[string]any{"z": 1}, want: []string{"z"}},
+		"reverse_alphabetical_input": {input: map[string]any{"c": 3, "b": 2, "a": 1}, want: []string{"a", "b", "c"}},
+		"already_sorted":             {input: map[string]any{"a": 1, "b": 2, "c": 3}, want: []string{"a", "b", "c"}},
+		"mixed_case":                 {input: map[string]any{"Z": 1, "a": 2, "m": 3}, want: []string{"Z", "a", "m"}},
+		"numbers_as_strings": {
+			input: map[string]any{"10": "x", "2": "y", "1": "z"},
+			want:  []string{"1", "10", "2"},
+		},
+		"diverse_value_types": {
+			input: map[string]any{"a": 1, "b": "two", "c": true},
+			want:  []string{"a", "b", "c"},
+		},
 	}
 
 	for name, tc := range tests {
@@ -173,30 +179,30 @@ func TestIsTrue(t *testing.T) {
 		want  bool
 	}{
 		// True values
-		"bool_true":               {input: true, want: true},
-		"string_1":                {input: "1", want: true},
-		"string_true":             {input: "true", want: true},
-		"string_yes":              {input: "yes", want: true},
-		"string_on":               {input: "on", want: true},
-		"int_nonzero":             {input: 1, want: true},
-		"int_negative":            {input: -1, want: true},
-		"int64_nonzero":           {input: int64(99), want: true},
-		"float64_nonzero":         {input: float64(3.14), want: true},
+		"bool_true":       {input: true, want: true},
+		"string_1":        {input: "1", want: true},
+		"string_true":     {input: "true", want: true},
+		"string_yes":      {input: "yes", want: true},
+		"string_on":       {input: "on", want: true},
+		"int_nonzero":     {input: 1, want: true},
+		"int_negative":    {input: -1, want: true},
+		"int64_nonzero":   {input: int64(99), want: true},
+		"float64_nonzero": {input: float64(3.14), want: true},
 
 		// False values
-		"bool_false":              {input: false, want: false},
-		"string_0":                {input: "0", want: false},
-		"string_false":            {input: "false", want: false},
-		"string_no":               {input: "no", want: false},
-		"string_off":              {input: "off", want: false},
-		"string_random":           {input: "maybe", want: false},
-		"string_empty":            {input: "", want: false},
-		"int_zero":                {input: 0, want: false},
-		"int64_zero":              {input: int64(0), want: false},
-		"float64_zero":            {input: float64(0), want: false},
-		"nil":                     {input: nil, want: false},
-		"slice_value":             {input: []string{"a"}, want: false},
-		"struct_value":            {input: struct{}{}, want: false},
+		"bool_false":    {input: false, want: false},
+		"string_0":      {input: "0", want: false},
+		"string_false":  {input: "false", want: false},
+		"string_no":     {input: "no", want: false},
+		"string_off":    {input: "off", want: false},
+		"string_random": {input: "maybe", want: false},
+		"string_empty":  {input: "", want: false},
+		"int_zero":      {input: 0, want: false},
+		"int64_zero":    {input: int64(0), want: false},
+		"float64_zero":  {input: float64(0), want: false},
+		"nil":           {input: nil, want: false},
+		"slice_value":   {input: []string{"a"}, want: false},
+		"struct_value":  {input: struct{}{}, want: false},
 	}
 
 	for name, tc := range tests {

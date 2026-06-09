@@ -91,7 +91,12 @@ func (s *ImageStep) StateData() model.ResourceSpec {
 	return StructToMap(s.saved)
 }
 
-func newImageStepFromSpec(stepType string, name string, spec model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newImageStepFromSpec(
+	stepType string,
+	name string,
+	spec model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -110,7 +115,12 @@ func newImageStepFromSpec(stepType string, name string, spec model.ResourceSpec,
 	}, nil
 }
 
-func newImageStepFromState(stepType string, name string, saved model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newImageStepFromState(
+	stepType string,
+	name string,
+	saved model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	is := StateFromMap[ImageState](saved)
 	return &ImageStep{
 		stepType: stepType,

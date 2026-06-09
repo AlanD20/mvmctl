@@ -25,13 +25,13 @@ type mockTracker struct {
 	flushChainCalls   int
 	orphanedCalls     int
 
-	stubEnsureRule   model.FirewallRuleResult
-	stubRemoveRule   model.FirewallRuleResult
-	stubBatchEnsure  model.FirewallRuleResult
-	stubBatchRemove  model.FirewallRuleResult
-	stubChain        bool
-	stubFlush        bool
-	stubOrphaned     int
+	stubEnsureRule  model.FirewallRuleResult
+	stubRemoveRule  model.FirewallRuleResult
+	stubBatchEnsure model.FirewallRuleResult
+	stubBatchRemove model.FirewallRuleResult
+	stubChain       bool
+	stubFlush       bool
+	stubOrphaned    int
 }
 
 type ensureRuleCall struct {
@@ -39,8 +39,16 @@ type ensureRuleCall struct {
 	label string
 }
 
-func (m *mockTracker) Initialize(_ context.Context)          { m.mu.Lock(); defer m.mu.Unlock(); m.initializeCalls++ }
-func (m *mockTracker) Teardown(_ context.Context)            { m.mu.Lock(); defer m.mu.Unlock(); m.teardownCalls++ }
+func (m *mockTracker) Initialize(_ context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.initializeCalls++
+}
+func (m *mockTracker) Teardown(_ context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.teardownCalls++
+}
 
 func (m *mockTracker) EnsureRule(_ context.Context, rule model.FirewallRule, label string) model.FirewallRuleResult {
 	m.mu.Lock()
@@ -70,7 +78,13 @@ func (m *mockTracker) BatchRemoveRules(_ context.Context, _ []model.FirewallRule
 	return m.stubBatchRemove
 }
 
-func (m *mockTracker) EnsureChain(_ context.Context, _ model.FirewallChain, _ model.FirewallTable, _ string, _ int) bool {
+func (m *mockTracker) EnsureChain(
+	_ context.Context,
+	_ model.FirewallChain,
+	_ model.FirewallTable,
+	_ string,
+	_ int,
+) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.ensureChainCalls++
@@ -94,7 +108,7 @@ func (m *mockTracker) CountOrphanedRules(_ context.Context, _ *model.Network) in
 type mockRepo struct {
 	mu sync.Mutex
 
-	getByNetworkIDCalls  int
+	getByNetworkIDCalls   int
 	getByNetworkIDIFCalls int
 
 	stubRules []*model.FirewallRule

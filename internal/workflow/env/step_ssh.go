@@ -68,7 +68,12 @@ func (s *SSHStep) StateData() model.ResourceSpec {
 	return StructToMap(s.saved)
 }
 
-func newSSHStepFromSpec(stepType string, name string, spec model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newSSHStepFromSpec(
+	stepType string,
+	name string,
+	spec model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -86,7 +91,12 @@ func newSSHStepFromSpec(stepType string, name string, spec model.ResourceSpec, o
 	}, nil
 }
 
-func newSSHStepFromState(stepType string, name string, saved model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newSSHStepFromState(
+	stepType string,
+	name string,
+	saved model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	ss := StateFromMap[SSHState](saved)
 	return &SSHStep{
 		stepType: stepType,

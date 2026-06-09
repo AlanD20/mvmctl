@@ -22,12 +22,12 @@ import (
 //	    nat_gateways: list[str] = field(default_factory=list)
 //	    set_default: bool = False
 type NetworkCreateInput struct {
-	Name        string   `json:"name" yaml:"name"`
-	Subnet      string   `json:"subnet" yaml:"subnet"`
+	Name        string   `json:"name"                   yaml:"name"`
+	Subnet      string   `json:"subnet"                 yaml:"subnet"`
 	IPv4Gateway *string  `json:"ipv4_gateway,omitempty" yaml:"ipv4_gateway,omitempty"`
-	NATEnabled  bool     `json:"nat_enabled" yaml:"nat_enabled"`
+	NATEnabled  bool     `json:"nat_enabled"            yaml:"nat_enabled"`
 	NATGateways []string `json:"nat_gateways,omitempty" yaml:"nat_gateways,omitempty"`
-	SetDefault  bool     `json:"set_default" yaml:"default"`
+	SetDefault  bool     `json:"set_default"            yaml:"default"`
 }
 
 // ResolvedNetworkCreateRequest matches Python's ResolvedNetworkCreateRequest (frozen dataclass).

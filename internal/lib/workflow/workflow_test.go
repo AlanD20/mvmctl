@@ -25,17 +25,17 @@ import (
 // A minimal Step implementation for testing DAG and pipeline behavior.
 
 type mockStep struct {
-	name         string
-	stepType     string
-	deps         []string
-	applyFn      func(ctx context.Context, state *SharedState, saved model.ResourceSpec) error
-	destroyFn    func(ctx context.Context, saved model.ResourceSpec) error
-	stateDataFn  func() model.ResourceSpec
+	name        string
+	stepType    string
+	deps        []string
+	applyFn     func(ctx context.Context, state *SharedState, saved model.ResourceSpec) error
+	destroyFn   func(ctx context.Context, saved model.ResourceSpec) error
+	stateDataFn func() model.ResourceSpec
 }
 
-func (s *mockStep) Name() string                         { return s.name }
-func (s *mockStep) Type() string                         { return s.stepType }
-func (s *mockStep) Dependencies() []string                { return s.deps }
+func (s *mockStep) Name() string           { return s.name }
+func (s *mockStep) Type() string           { return s.stepType }
+func (s *mockStep) Dependencies() []string { return s.deps }
 func (s *mockStep) Apply(ctx context.Context, state *SharedState, saved model.ResourceSpec) error {
 	if s.applyFn != nil {
 		return s.applyFn(ctx, state, saved)

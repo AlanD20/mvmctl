@@ -14,22 +14,22 @@ import (
 // defaultHardware returns a HostHardware with all-green values.
 func defaultHardware() model.HostHardware {
 	return model.HostHardware{
-		Hostname:        "test-host",
-		CPUCores:        8,
-		MemoryTotalMiB:  8192,
-		KernelVersion:   "6.2.0",
-		CPUHasVMX:       true,
-		CPUHypervisor:   false,
+		Hostname:       "test-host",
+		CPUCores:       8,
+		MemoryTotalMiB: 8192,
+		KernelVersion:  "6.2.0",
+		CPUHasVMX:      true,
+		CPUHypervisor:  false,
 	}
 }
 
 // defaultLimits returns a HostLimits with all-green values.
 func defaultLimits() model.HostLimits {
 	return model.HostLimits{
-		SwapTotalMiB:        4096,  // >= 8192/2=4096, at threshold
+		SwapTotalMiB:        4096, // >= 8192/2=4096, at threshold
 		KernelMinimumMet:    true,
 		NestedVirtAvailable: true,
-		HugepageCount2MB:    0,     // no hugepages by default
+		HugepageCount2MB:    0, // no hugepages by default
 	}
 }
 
@@ -70,18 +70,18 @@ func TestProbe_checkVMHost(t *testing.T) {
 		limits    model.HostLimits
 		resources model.HostResources
 		// expected results
-		wantCPUVirt     *bool // nil = don't check
-		wantDevKVMOK    *bool
-		wantDevTunOK    *bool
-		wantKVMModOK    *bool
-		wantKernelOK    *bool
-		wantNestedOK    *bool
+		wantCPUVirt  *bool // nil = don't check
+		wantDevKVMOK *bool
+		wantDevTunOK *bool
+		wantKVMModOK *bool
+		wantKernelOK *bool
+		wantNestedOK *bool
 	}{
 		{
-			name:      "all_green",
-			hardware:  defaultHardware(),
-			limits:    defaultLimits(),
-			resources: defaultResources(),
+			name:         "all_green",
+			hardware:     defaultHardware(),
+			limits:       defaultLimits(),
+			resources:    defaultResources(),
 			wantCPUVirt:  boolPtr(true),
 			wantDevKVMOK: boolPtr(true),
 			wantDevTunOK: boolPtr(true),
@@ -96,9 +96,9 @@ func TestProbe_checkVMHost(t *testing.T) {
 				h.CPUHasVMX = false
 				return h
 			}(),
-			limits:    defaultLimits(),
-			resources: defaultResources(),
-			wantCPUVirt:  boolPtr(false),
+			limits:      defaultLimits(),
+			resources:   defaultResources(),
+			wantCPUVirt: boolPtr(false),
 			// /dev/kvm check is about device accessibility, not CPU caps
 			wantDevKVMOK: boolPtr(true),
 			wantDevTunOK: boolPtr(true),
@@ -175,7 +175,7 @@ func TestProbe_checkVMHost(t *testing.T) {
 			wantNestedOK: boolPtr(true),
 		},
 		{
-			name:     "kvm_module_in_proc_modules",
+			name: "kvm_module_in_proc_modules",
 			hardware: func() model.HostHardware {
 				h := defaultHardware()
 				h.CPUHasVMX = false // no VMX, so first path fails
@@ -184,7 +184,7 @@ func TestProbe_checkVMHost(t *testing.T) {
 			limits: defaultLimits(),
 			resources: func() model.HostResources {
 				r := defaultResources()
-				r.DevKVMStatus = "no_permission" // also not ok, so first path fails
+				r.DevKVMStatus = "no_permission"               // also not ok, so first path fails
 				r.ModulesLoaded = map[string]bool{"kvm": true} // BUT kvm in /proc/modules
 				return r
 			}(),
@@ -196,7 +196,7 @@ func TestProbe_checkVMHost(t *testing.T) {
 			wantNestedOK: boolPtr(true),
 		},
 		{
-			name:     "kvm_module_not_loaded",
+			name: "kvm_module_not_loaded",
 			hardware: func() model.HostHardware {
 				h := defaultHardware()
 				h.CPUHasVMX = false
@@ -224,7 +224,7 @@ func TestProbe_checkVMHost(t *testing.T) {
 				l.KernelMinimumMet = false
 				return l
 			}(),
-			resources:   defaultResources(),
+			resources:    defaultResources(),
 			wantCPUVirt:  boolPtr(true),
 			wantDevKVMOK: boolPtr(true),
 			wantDevTunOK: boolPtr(true),
@@ -240,7 +240,7 @@ func TestProbe_checkVMHost(t *testing.T) {
 				l.NestedVirtAvailable = false
 				return l
 			}(),
-			resources:   defaultResources(),
+			resources:    defaultResources(),
 			wantCPUVirt:  boolPtr(true),
 			wantDevKVMOK: boolPtr(true),
 			wantDevTunOK: boolPtr(true),
@@ -304,72 +304,72 @@ func TestProbe_checkSystemResources(t *testing.T) {
 		limits    model.HostLimits
 		resources model.HostResources
 		// expectations
-		wantSwapWarning      bool
-		wantCloudLocaldsOK   *bool
-		wantHugepageMsg      bool // has hugepage info check
+		wantSwapWarning    bool
+		wantCloudLocaldsOK *bool
+		wantHugepageMsg    bool // has hugepage info check
 	}{
 		{
-			name:      "swap_adequate",
-			hardware:  func() model.HostHardware { h := defaultHardware(); h.MemoryTotalMiB = 8192; return h }(),
-			limits:    func() model.HostLimits { l := defaultLimits(); l.SwapTotalMiB = 5000; return l }(), // 5000 >= 4096
-			resources: defaultResources(),
-			wantSwapWarning: false,
+			name:               "swap_adequate",
+			hardware:           func() model.HostHardware { h := defaultHardware(); h.MemoryTotalMiB = 8192; return h }(),
+			limits:             func() model.HostLimits { l := defaultLimits(); l.SwapTotalMiB = 5000; return l }(), // 5000 >= 4096
+			resources:          defaultResources(),
+			wantSwapWarning:    false,
 			wantCloudLocaldsOK: boolPtr(true),
-			wantHugepageMsg: false,
+			wantHugepageMsg:    false,
 		},
 		{
-			name: "swap_low_large_ram",
-			hardware: func() model.HostHardware { h := defaultHardware(); h.MemoryTotalMiB = 8192; return h }(),
-			limits:   func() model.HostLimits { l := defaultLimits(); l.SwapTotalMiB = 1024; return l }(), // 1024 < 4096
-			resources: defaultResources(),
-			wantSwapWarning: true,
+			name:               "swap_low_large_ram",
+			hardware:           func() model.HostHardware { h := defaultHardware(); h.MemoryTotalMiB = 8192; return h }(),
+			limits:             func() model.HostLimits { l := defaultLimits(); l.SwapTotalMiB = 1024; return l }(), // 1024 < 4096
+			resources:          defaultResources(),
+			wantSwapWarning:    true,
 			wantCloudLocaldsOK: boolPtr(true),
-			wantHugepageMsg: false,
+			wantHugepageMsg:    false,
 		},
 		{
-			name: "swap_low_small_ram_no_warning",
-			hardware: func() model.HostHardware { h := defaultHardware(); h.MemoryTotalMiB = 512; return h }(), // <= 1024 → no swap check
-			limits:   func() model.HostLimits { l := defaultLimits(); l.SwapTotalMiB = 128; return l }(),
-			resources: defaultResources(),
-			wantSwapWarning: false, // RAM <= 1024, so check is skipped
+			name:               "swap_low_small_ram_no_warning",
+			hardware:           func() model.HostHardware { h := defaultHardware(); h.MemoryTotalMiB = 512; return h }(), // <= 1024 → no swap check
+			limits:             func() model.HostLimits { l := defaultLimits(); l.SwapTotalMiB = 128; return l }(),
+			resources:          defaultResources(),
+			wantSwapWarning:    false, // RAM <= 1024, so check is skipped
 			wantCloudLocaldsOK: boolPtr(true),
-			wantHugepageMsg: false,
+			wantHugepageMsg:    false,
 		},
 		{
-			name: "swap_exact_threshold",
-			hardware: func() model.HostHardware { h := defaultHardware(); h.MemoryTotalMiB = 8192; return h }(),
-			limits:   func() model.HostLimits { l := defaultLimits(); l.SwapTotalMiB = 4096; return l }(), // == 8192/2 → not less, no warning
-			resources: defaultResources(),
-			wantSwapWarning: false,
+			name:               "swap_exact_threshold",
+			hardware:           func() model.HostHardware { h := defaultHardware(); h.MemoryTotalMiB = 8192; return h }(),
+			limits:             func() model.HostLimits { l := defaultLimits(); l.SwapTotalMiB = 4096; return l }(), // == 8192/2 → not less, no warning
+			resources:          defaultResources(),
+			wantSwapWarning:    false,
 			wantCloudLocaldsOK: boolPtr(true),
-			wantHugepageMsg: false,
+			wantHugepageMsg:    false,
 		},
 		{
-			name:      "cloud_localds_not_available",
-			hardware:  defaultHardware(),
-			limits:    defaultLimits(),
-			resources: func() model.HostResources { r := defaultResources(); r.CloudLocaldsAvailable = false; return r }(),
-			wantSwapWarning: false,
+			name:               "cloud_localds_not_available",
+			hardware:           defaultHardware(),
+			limits:             defaultLimits(),
+			resources:          func() model.HostResources { r := defaultResources(); r.CloudLocaldsAvailable = false; return r }(),
+			wantSwapWarning:    false,
 			wantCloudLocaldsOK: boolPtr(false),
-			wantHugepageMsg: false,
+			wantHugepageMsg:    false,
 		},
 		{
-			name:     "hugepages_configured",
-			hardware: defaultHardware(),
-			limits:   func() model.HostLimits { l := defaultLimits(); l.HugepageCount2MB = 1024; return l }(),
-			resources: defaultResources(),
-			wantSwapWarning: false,
+			name:               "hugepages_configured",
+			hardware:           defaultHardware(),
+			limits:             func() model.HostLimits { l := defaultLimits(); l.HugepageCount2MB = 1024; return l }(),
+			resources:          defaultResources(),
+			wantSwapWarning:    false,
 			wantCloudLocaldsOK: boolPtr(true),
-			wantHugepageMsg: true,
+			wantHugepageMsg:    true,
 		},
 		{
-			name:     "no_hugepages_no_check",
-			hardware: defaultHardware(),
-			limits:   defaultLimits(), // HugepageCount2MB = 0
-			resources: defaultResources(),
-			wantSwapWarning: false,
+			name:               "no_hugepages_no_check",
+			hardware:           defaultHardware(),
+			limits:             defaultLimits(), // HugepageCount2MB = 0
+			resources:          defaultResources(),
+			wantSwapWarning:    false,
 			wantCloudLocaldsOK: boolPtr(true),
-			wantHugepageMsg: false,
+			wantHugepageMsg:    false,
 		},
 	}
 
@@ -488,8 +488,16 @@ func TestProbe_EdgeCases(t *testing.T) {
 		)
 		// No crash, no swap warning (RAM <= 1024, check skipped)
 		assert.Condition(t, func() bool {
-			for _, c := range result.Warnings { if c.Name == "swap_size" { return false } }
-			for _, c := range result.Critical { if c.Name == "swap_size" { return false } }
+			for _, c := range result.Warnings {
+				if c.Name == "swap_size" {
+					return false
+				}
+			}
+			for _, c := range result.Critical {
+				if c.Name == "swap_size" {
+					return false
+				}
+			}
 			return true
 		}, "no swap_size check for zero RAM")
 	})

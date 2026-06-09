@@ -94,7 +94,12 @@ func (s *BinaryStep) StateData() model.ResourceSpec {
 	return StructToMap(s.saved)
 }
 
-func newBinaryStepFromSpec(stepType string, name string, spec model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newBinaryStepFromSpec(
+	stepType string,
+	name string,
+	spec model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -114,7 +119,12 @@ func newBinaryStepFromSpec(stepType string, name string, spec model.ResourceSpec
 	}, nil
 }
 
-func newBinaryStepFromState(stepType string, name string, saved model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newBinaryStepFromState(
+	stepType string,
+	name string,
+	saved model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	bs := StateFromMap[BinaryState](saved)
 	return &BinaryStep{
 		stepType: stepType,

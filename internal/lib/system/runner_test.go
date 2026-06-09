@@ -23,9 +23,9 @@ func TestDecodeExitStatus(t *testing.T) {
 		want   int
 	}{
 		// Normal exit
-		"exit_0":  {status: exitStatus(0), want: 0},
-		"exit_1":  {status: exitStatus(1), want: 1},
-		"exit_42": {status: exitStatus(42), want: 42},
+		"exit_0":   {status: exitStatus(0), want: 0},
+		"exit_1":   {status: exitStatus(1), want: 1},
+		"exit_42":  {status: exitStatus(42), want: 42},
 		"exit_255": {status: exitStatus(255), want: 255},
 
 		// Signal death: 128 + signal number

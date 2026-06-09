@@ -104,7 +104,12 @@ func (s *NetworkStep) StateData() model.ResourceSpec {
 	return StructToMap(s.saved)
 }
 
-func newNetworkStepFromSpec(stepType string, name string, spec model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newNetworkStepFromSpec(
+	stepType string,
+	name string,
+	spec model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -137,7 +142,12 @@ func newNetworkStepFromSpec(stepType string, name string, spec model.ResourceSpe
 	}, nil
 }
 
-func newNetworkStepFromState(stepType string, name string, saved model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newNetworkStepFromState(
+	stepType string,
+	name string,
+	saved model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	ns := StateFromMap[NetworkState](saved)
 	return &NetworkStep{
 		stepType: stepType,

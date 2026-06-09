@@ -69,7 +69,12 @@ func (s *CopyStep) StateData() model.ResourceSpec {
 	return StructToMap(s.saved)
 }
 
-func newCopyStepFromSpec(stepType string, name string, spec model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newCopyStepFromSpec(
+	stepType string,
+	name string,
+	spec model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	// Normalize single-string src to a slice for proper YAML unmarshalling into []string.
 	// YAML spec allows `src: ./mvm` as a convenience — marshal/unmarshal would fail
 	// because a single string cannot be decoded into a []string field.
@@ -105,7 +110,12 @@ func newCopyStepFromSpec(stepType string, name string, spec model.ResourceSpec, 
 	}, nil
 }
 
-func newCopyStepFromState(stepType string, name string, saved model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newCopyStepFromState(
+	stepType string,
+	name string,
+	saved model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	cs := StateFromMap[CPState](saved)
 	return &CopyStep{
 		stepType: stepType,

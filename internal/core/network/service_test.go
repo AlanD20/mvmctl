@@ -461,7 +461,7 @@ func TestService_EnsureBridge(t *testing.T) {
 
 		var ran []string
 		libnet.DefaultNetOps = &testutil.FakeNetOps{
-			BridgeExistsFn: func(_ context.Context, _ string) bool { return true },
+			BridgeExistsFn:    func(_ context.Context, _ string) bool { return true },
 			BridgeHasSubnetFn: func(_ context.Context, _, _ string) bool { return false },
 			RunBatchFn: func(_ context.Context, cmds []string) error {
 				ran = append(ran, cmds...)
@@ -484,7 +484,7 @@ func TestService_EnsureBridge(t *testing.T) {
 
 		var ran []string
 		libnet.DefaultNetOps = &testutil.FakeNetOps{
-			BridgeExistsFn:   func(_ context.Context, _ string) bool { return true },
+			BridgeExistsFn:    func(_ context.Context, _ string) bool { return true },
 			BridgeHasSubnetFn: func(_ context.Context, _, _ string) bool { return true },
 			RunBatchFn: func(_ context.Context, cmds []string) error {
 				ran = append(ran, cmds...)
@@ -566,7 +566,7 @@ func TestService_EnsureTap(t *testing.T) {
 
 		var ran []string
 		libnet.DefaultNetOps = &testutil.FakeNetOps{
-			TapExistsFn:   func(_ context.Context, _ string) bool { return false },
+			TapExistsFn:    func(_ context.Context, _ string) bool { return false },
 			GetTapBridgeFn: func(_ context.Context, _ string) string { return "" },
 			RunBatchFn: func(_ context.Context, cmds []string) error {
 				ran = append(ran, cmds...)
