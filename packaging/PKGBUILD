@@ -17,7 +17,7 @@ depends=(
 )
 optdepends=(
   'cloud-image-utils: cloud-init ISO mode (--cloud-init-mode iso)'
-  'python-libguestfs: alternative rootfs provisioning backend (slower, more capable)'
+  'libguestfs: alternative rootfs provisioning backend (slower, more capable)'
 )
 makedepends=()
 provides=('mvmctl')
