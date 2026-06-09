@@ -75,29 +75,29 @@ _build_version.py
 *.iso
 *.metrics
 
-# ========== LEGACY BASH SCRIPTS (moved to legacy/) ==========
+# ========== LEGACY SHELL SCRIPTS (moved to legacy/shell/) ==========
 # Legacy centralized asset downloads
-legacy/assets/bin/
-legacy/assets/kernels/
-legacy/assets/images/
-legacy/assets/keys/*
-!legacy/assets/keys/.gitkeep
+legacy/shell/assets/bin/
+legacy/shell/assets/kernels/
+legacy/shell/assets/images/
+legacy/shell/assets/keys/*
+!legacy/shell/assets/keys/.gitkeep
 
 # Legacy Single VM generated environment
-legacy/single-vm/env/
+legacy/shell/single-vm/env/
 
 # Legacy Multi VM generated environments and VMs
-legacy/multi-vm/env/
-legacy/multi-vm/vms/
+legacy/shell/multi-vm/env/
+legacy/shell/multi-vm/vms/
 
 # Legacy generated temporary files
-legacy/**/*.iso
-legacy/**/*.img
-legacy/**/*.ext4
-legacy/**/*.log
-legacy/**/*.metrics
-legacy/**/*.pid
-legacy/**/*.socket
+legacy/shell/**/*.iso
+legacy/shell/**/*.img
+legacy/shell/**/*.ext4
+legacy/shell/**/*.log
+legacy/shell/**/*.metrics
+legacy/shell/**/*.pid
+legacy/shell/**/*.socket
 
 # ========== AGENT WORK DIRECTORIES (preserve locally, exclude from git) ==========
 .opencode/*
