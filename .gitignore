@@ -88,7 +88,7 @@ legacy/shell/**/*.socket
 !.opencode/agent/
 .reports/
 .sisyphus/
-docs/analyses/
+legacy/python/docs/analyses/
 .full-review/
 MagicMock/
 .prompts/
