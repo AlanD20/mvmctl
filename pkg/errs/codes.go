@@ -21,7 +21,6 @@ const (
 	CodeVMCreateFailure      Code = "vm.create_failure"
 	CodeVMSnapshotFailed     Code = "vm.snapshot_failed"
 	CodeVMLoadSnapshotFailed Code = "vm.load_snapshot_failed"
-	CodeVMImportFailed       Code = "vm.import_failed"
 
 	// ── Network domain ──
 	CodeNetworkSubnetOverlap       Code = "network.subnet.overlap"

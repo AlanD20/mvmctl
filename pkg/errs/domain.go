@@ -106,7 +106,6 @@ var codeClassMap = map[Code]Class{
 	CodeVMCreateFailure:      ClassInternal,
 	CodeVMSnapshotFailed:     ClassInternal,
 	CodeVMLoadSnapshotFailed: ClassInternal,
-	CodeVMImportFailed:       ClassInternal,
 
 	// ── Network domain ──
 	CodeNetworkSubnetOverlap:       ClassValidation,
@@ -271,7 +270,6 @@ var codeOpMap = map[Code]string{
 	CodeVMCreateFailure:      "vm",
 	CodeVMSnapshotFailed:     "vm",
 	CodeVMLoadSnapshotFailed: "vm",
-	CodeVMImportFailed:       "vm",
 
 	CodeNetworkSubnetOverlap:       "network",
 	CodeNetworkNotFound:            "network",
