@@ -12,7 +12,6 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/errs"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -75,8 +74,6 @@ func NewVMCmd(op *api.Operation) *cobra.Command {
 	cmd.AddCommand(newVMSnapshotCmd(op))
 	cmd.AddCommand(newVMLoadCmd(op))
 	cmd.AddCommand(newVMInspectCmd(op))
-	cmd.AddCommand(newVMExportCmd(op))
-	cmd.AddCommand(newVMImportCmd(op))
 	cmd.AddCommand(newVMAttachVolumeCmd(op))
 	cmd.AddCommand(newVMDetachVolumeCmd(op))
 	return cmd
@@ -712,78 +709,6 @@ func newVMInspectCmd(op *api.Operation) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
-	return cmd
-}
-
-// ─── export ───────────────────────────────────────────────────────────────────
-
-func newVMExportCmd(op *api.Operation) *cobra.Command {
-	return &cobra.Command{
-		Use:   "export [id] [output]",
-		Short: "Export a VM's configuration to a portable JSON file.",
-		Long: `Export a VM's configuration to a portable JSON file.
-
-The exported config uses semantic references (type, version, name)
-instead of internal IDs, making it portable across machines.`,
-		Args:              cobra.RangeArgs(1, 2),
-		ValidArgsFunction: completeVMNames,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			outputPath := ""
-			if len(args) > 1 {
-				outputPath = args[1]
-			}
-
-			exportConfig, err := op.VMExport(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
-			if err != nil {
-				return fmt.Errorf("export failed: %w", err)
-			}
-
-			jsonBytes, _ := json.MarshalIndent(exportConfig, "", "  ")
-
-			if outputPath != "" {
-				if err := os.WriteFile(outputPath, jsonBytes, 0644); err != nil {
-					return err
-				}
-				common.Cli.Success(fmt.Sprintf("Exported: %s", outputPath))
-			} else {
-				fmt.Println(string(jsonBytes))
-			}
-			return nil
-		},
-	}
-}
-
-// ─── import ───────────────────────────────────────────────────────────────────
-
-func newVMImportCmd(op *api.Operation) *cobra.Command {
-	var name string
-
-	cmd := &cobra.Command{
-		Use:   "import [config_path]",
-		Short: "Create a VM from a portable config file.",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			var nameOverride *string
-			if cmd.Flags().Changed("name") && name != "" {
-				nameOverride = infraptr.Ptr(name)
-			}
-			if err := op.VMImport(
-				cmd.Context(),
-				inputs.VMImportInput{ConfigPath: args[0], NameOverride: nameOverride},
-				nil,
-			); err != nil {
-				if errs.IsNeedsInteraction(err) {
-					return fmt.Errorf("import requires privileges")
-				}
-				return fmt.Errorf("import failed: %w", err)
-			}
-			common.Cli.Success(fmt.Sprintf("VM imported from %s", args[0]))
-			return nil
-		},
-	}
-
-	cmd.Flags().StringVarP(&name, "name", "n", "", "Override VM name from config")
 	return cmd
 }
 
