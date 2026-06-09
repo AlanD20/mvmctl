@@ -95,7 +95,7 @@ func TestSplitVersionParts(t *testing.T) {
 		{"with_prerelease", "1.2.3-rc1", []int{1, 2, 3}, "rc1"},
 		{"with_dev_prerelease", "2.0.0-dev20240101", []int{2, 0, 0}, "dev20240101"},
 		{"non_numeric_part", "1.a.3", []int{1, 0, 3}, ""}, // Atoi("a") → 0
-		{"empty", "", []int{0}, ""},                         // Split("") → [""], Atoi("") → 0
+		{"empty", "", []int{0}, ""},                       // Split("") → [""], Atoi("") → 0
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

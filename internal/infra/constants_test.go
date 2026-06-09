@@ -67,11 +67,11 @@ func TestEnvKey(t *testing.T) {
 		want  string
 	}{
 		// Note: EnvKey uppercases the MVM prefix but preserves the suffix case
-		"simple_suffix":          {input: "cache_dir", want: "MVM_cache_dir"},
-		"already_uppercased":     {input: "CACHE_DIR", want: "MVM_CACHE_DIR"},
-		"empty_suffix":           {input: "", want: "MVM_"},
-		"single_char":            {input: "x", want: "MVM_x"},
-		"with_numbers":           {input: "log2", want: "MVM_log2"},
+		"simple_suffix":      {input: "cache_dir", want: "MVM_cache_dir"},
+		"already_uppercased": {input: "CACHE_DIR", want: "MVM_CACHE_DIR"},
+		"empty_suffix":       {input: "", want: "MVM_"},
+		"single_char":        {input: "x", want: "MVM_x"},
+		"with_numbers":       {input: "log2", want: "MVM_log2"},
 	}
 
 	for name, tc := range tests {
@@ -95,48 +95,48 @@ func TestIsReservedName(t *testing.T) {
 		want  bool
 	}{
 		// CLI subcommands
-		"create_is_reserved":         {input: "create", want: true},
-		"vm_is_reserved":             {input: "vm", want: true},
-		"network_is_reserved":        {input: "network", want: true},
-		"image_is_reserved":          {input: "image", want: true},
-		"delete_is_reserved":         {input: "delete", want: true},
+		"create_is_reserved":  {input: "create", want: true},
+		"vm_is_reserved":      {input: "vm", want: true},
+		"network_is_reserved": {input: "network", want: true},
+		"image_is_reserved":   {input: "image", want: true},
+		"delete_is_reserved":  {input: "delete", want: true},
 
 		// State transitions
-		"start_is_reserved":          {input: "start", want: true},
-		"stop_is_reserved":           {input: "stop", want: true},
-		"pause_is_reserved":          {input: "pause", want: true},
-		"resume_is_reserved":         {input: "resume", want: true},
+		"start_is_reserved":  {input: "start", want: true},
+		"stop_is_reserved":   {input: "stop", want: true},
+		"pause_is_reserved":  {input: "pause", want: true},
+		"resume_is_reserved": {input: "resume", want: true},
 
 		// Observability
-		"log_is_reserved":            {input: "log", want: true},
-		"status_is_reserved":         {input: "status", want: true},
+		"log_is_reserved":    {input: "log", want: true},
+		"status_is_reserved": {input: "status", want: true},
 
 		// Type names
-		"string_is_reserved":         {input: "string", want: true},
-		"bool_is_reserved":           {input: "bool", want: true},
-		"int_is_reserved":            {input: "int", want: true},
+		"string_is_reserved": {input: "string", want: true},
+		"bool_is_reserved":   {input: "bool", want: true},
+		"int_is_reserved":    {input: "int", want: true},
 
 		// Special identifiers
-		"all_is_reserved":            {input: "all", want: true},
-		"default_is_reserved":        {input: "default", want: true},
-		"force_is_reserved":          {input: "force", want: true},
-		"help_is_reserved":           {input: "help", want: true},
+		"all_is_reserved":     {input: "all", want: true},
+		"default_is_reserved": {input: "default", want: true},
+		"force_is_reserved":   {input: "force", want: true},
+		"help_is_reserved":    {input: "help", want: true},
 
 		// Boolean-like
-		"true_is_reserved":           {input: "true", want: true},
-		"false_is_reserved":          {input: "false", want: true},
-		"yes_is_reserved":            {input: "yes", want: true},
-		"no_is_reserved":             {input: "no", want: true},
+		"true_is_reserved":  {input: "true", want: true},
+		"false_is_reserved": {input: "false", want: true},
+		"yes_is_reserved":   {input: "yes", want: true},
+		"no_is_reserved":    {input: "no", want: true},
 
 		// Case insensitivity
-		"CREATE_uppercase":           {input: "CREATE", want: true},
-		"Create_MixedCase":           {input: "Create", want: true},
+		"CREATE_uppercase": {input: "CREATE", want: true},
+		"Create_MixedCase": {input: "Create", want: true},
 
 		// Valid names
-		"my_vm_is_not_reserved":      {input: "my-vm", want: false},
-		"my_server":                  {input: "my-server", want: false},
-		"alphanumeric123":            {input: "alphanumeric123", want: false},
-		"empty_string":               {input: "", want: false},
+		"my_vm_is_not_reserved": {input: "my-vm", want: false},
+		"my_server":             {input: "my-server", want: false},
+		"alphanumeric123":       {input: "alphanumeric123", want: false},
+		"empty_string":          {input: "", want: false},
 	}
 
 	for name, tc := range tests {
@@ -158,28 +158,28 @@ func TestContainsDangerousChars(t *testing.T) {
 		input string
 		want  bool
 	}{
-		"safe_alphanumeric":         {input: "my-vm-123", want: false},
-		"safe_with_dash":            {input: "test-vm", want: false},
-		"safe_with_underscore":      {input: "my_vm", want: false},
-		"semicolon_injection":       {input: "vm;rm -rf /", want: true},
-		"pipe_injection":            {input: "vm|ls", want: true},
-		"backtick_command":          {input: "`ls`", want: true},
-		"dollar_sign":               {input: "vm$PATH", want: true},
-		"double_quote":              {input: `vm"test`, want: true},
-		"single_quote":              {input: "vm'test", want: true},
-		"backslash":                 {input: "vm\\test", want: true},
-		"ampersand":                 {input: "a&b", want: true},
-		"newline_injection":         {input: "vm\nls", want: true},
-		"tab_injection":             {input: "vm\tls", want: true},
-		"carriage_return":           {input: "vm\rls", want: true},
-		"path_traversal_back":       {input: "../etc", want: true},
-		"path_traversal_forward":    {input: "./config", want: true},
-		"tilde_expansion":           {input: "~/config", want: true},
-		"null_byte":                 {input: "vm\x00test", want: true},
-		"control_char_0x01":         {input: "vm\x01test", want: true},
-		"zero_width_space_200b":     {input: "vm\u200btest", want: true},
-		"bom_fe81":                  {input: "vm\ufefftest", want: true},
-		"empty_string":              {input: "", want: false},
+		"safe_alphanumeric":      {input: "my-vm-123", want: false},
+		"safe_with_dash":         {input: "test-vm", want: false},
+		"safe_with_underscore":   {input: "my_vm", want: false},
+		"semicolon_injection":    {input: "vm;rm -rf /", want: true},
+		"pipe_injection":         {input: "vm|ls", want: true},
+		"backtick_command":       {input: "`ls`", want: true},
+		"dollar_sign":            {input: "vm$PATH", want: true},
+		"double_quote":           {input: `vm"test`, want: true},
+		"single_quote":           {input: "vm'test", want: true},
+		"backslash":              {input: "vm\\test", want: true},
+		"ampersand":              {input: "a&b", want: true},
+		"newline_injection":      {input: "vm\nls", want: true},
+		"tab_injection":          {input: "vm\tls", want: true},
+		"carriage_return":        {input: "vm\rls", want: true},
+		"path_traversal_back":    {input: "../etc", want: true},
+		"path_traversal_forward": {input: "./config", want: true},
+		"tilde_expansion":        {input: "~/config", want: true},
+		"null_byte":              {input: "vm\x00test", want: true},
+		"control_char_0x01":      {input: "vm\x01test", want: true},
+		"zero_width_space_200b":  {input: "vm\u200btest", want: true},
+		"bom_fe81":               {input: "vm\ufefftest", want: true},
+		"empty_string":           {input: "", want: false},
 	}
 
 	for name, tc := range tests {
@@ -236,21 +236,21 @@ func TestFormatBytesHumanReadable(t *testing.T) {
 		input int64
 		want  string
 	}{
-		"bytes":           {input: 0, want: "0 B"},
-		"single_byte":     {input: 1, want: "1 B"},
-		"max_bytes":       {input: 1023, want: "1023 B"},
-		"one_kib":         {input: 1024, want: "1.0 KiB"},
-		"one_point_five":  {input: 1536, want: "1.5 KiB"},
-		"one_mib":         {input: 1024 * 1024, want: "1.0 MiB"},
-		"big_mib":         {input: 500 * 1024 * 1024, want: "500.0 MiB"},
-		"one_gib":         {input: 1024 * 1024 * 1024, want: "1.0 GiB"},
-		"two_gib":         {input: 2 * 1024 * 1024 * 1024, want: "2.0 GiB"},
-		"decimal_tricky":  {input: 2000 * 1024 * 1024, want: "2.0 GiB"},
+		"bytes":          {input: 0, want: "0 B"},
+		"single_byte":    {input: 1, want: "1 B"},
+		"max_bytes":      {input: 1023, want: "1023 B"},
+		"one_kib":        {input: 1024, want: "1.0 KiB"},
+		"one_point_five": {input: 1536, want: "1.5 KiB"},
+		"one_mib":        {input: 1024 * 1024, want: "1.0 MiB"},
+		"big_mib":        {input: 500 * 1024 * 1024, want: "500.0 MiB"},
+		"one_gib":        {input: 1024 * 1024 * 1024, want: "1.0 GiB"},
+		"two_gib":        {input: 2 * 1024 * 1024 * 1024, want: "2.0 GiB"},
+		"decimal_tricky": {input: 2000 * 1024 * 1024, want: "2.0 GiB"},
 		// Note: large_tib is skipped because FormatBytesHumanReadable has a known bug
 		// where values >= 1 TiB are not normalized. The loop only has 3 iterations
 		// (KiB/MiB/GiB) — it needs a fourth TiB division step.
 		// FormatBytesHumanReadable treats negative as < 1024, returning "B" format
-		"negative":        {input: -1024, want: "-1024 B"},
+		"negative": {input: -1024, want: "-1024 B"},
 	}
 
 	for name, tc := range tests {
@@ -275,15 +275,15 @@ func TestHumanReadableDatetime(t *testing.T) {
 		input string
 		want  string
 	}{
-		"empty_string":                     {input: "", want: "-"},
-		"rfc3339_standard":                 {input: "2024-01-15T10:30:00Z", want: "2024-01-15T10:30:00Z"},
-		"rfc3339_with_offset":              {input: "2024-01-15T10:30:00+05:00", want: "2024-01-15T10:30:00+05:00"},
-		"rfc3339_nano":                     {input: "2024-01-15T10:30:00.467308Z", want: "2024-01-15T10:30:00Z"},
+		"empty_string":        {input: "", want: "-"},
+		"rfc3339_standard":    {input: "2024-01-15T10:30:00Z", want: "2024-01-15T10:30:00Z"},
+		"rfc3339_with_offset": {input: "2024-01-15T10:30:00+05:00", want: "2024-01-15T10:30:00+05:00"},
+		"rfc3339_nano":        {input: "2024-01-15T10:30:00.467308Z", want: "2024-01-15T10:30:00Z"},
 		// Go's time.RFC3339 format uses "Z" for UTC instead of "+00:00"
-		"rfc3339_nano_with_offset":         {input: "2024-01-15T10:30:00.123456+00:00", want: "2024-01-15T10:30:00Z"},
-		"invalid_format_returns_as_is":     {input: "not-a-timestamp", want: "not-a-timestamp"},
-		"partially_valid_format":           {input: "2024-01-15", want: "2024-01-15"},
-		"z_suffix_replaced_for_parsing":    {input: "2024-06-01T00:00:00Z", want: "2024-06-01T00:00:00Z"},
+		"rfc3339_nano_with_offset":      {input: "2024-01-15T10:30:00.123456+00:00", want: "2024-01-15T10:30:00Z"},
+		"invalid_format_returns_as_is":  {input: "not-a-timestamp", want: "not-a-timestamp"},
+		"partially_valid_format":        {input: "2024-01-15", want: "2024-01-15"},
+		"z_suffix_replaced_for_parsing": {input: "2024-06-01T00:00:00Z", want: "2024-06-01T00:00:00Z"},
 	}
 
 	for name, tc := range tests {
@@ -418,16 +418,16 @@ func TestSafeInt(t *testing.T) {
 		defaultVal int
 		want       int
 	}{
-		"int_direct":         {input: 42, defaultVal: 0, want: 42},
-		"float64_truncates":  {input: float64(3.99), defaultVal: 0, want: 3},
-		"string_numeric":     {input: "100", defaultVal: 0, want: 100},
-		"string_negative":    {input: "-5", defaultVal: 0, want: -5},
-		"nil":                {input: nil, defaultVal: 99, want: 99},
+		"int_direct":          {input: 42, defaultVal: 0, want: 42},
+		"float64_truncates":   {input: float64(3.99), defaultVal: 0, want: 3},
+		"string_numeric":      {input: "100", defaultVal: 0, want: 100},
+		"string_negative":     {input: "-5", defaultVal: 0, want: -5},
+		"nil":                 {input: nil, defaultVal: 99, want: 99},
 		"string_not_a_number": {input: "abc", defaultVal: 99, want: 99},
-		"bool_value":         {input: true, defaultVal: 99, want: 99},
-		"string_empty":       {input: "", defaultVal: 99, want: 99},
-		"negative_default":   {input: "abc", defaultVal: -1, want: -1},
-		"zero_is_valid":      {input: "0", defaultVal: 99, want: 0},
+		"bool_value":          {input: true, defaultVal: 99, want: 99},
+		"string_empty":        {input: "", defaultVal: 99, want: 99},
+		"negative_default":    {input: "abc", defaultVal: -1, want: -1},
+		"zero_is_valid":       {input: "0", defaultVal: 99, want: 0},
 	}
 
 	for name, tc := range tests {

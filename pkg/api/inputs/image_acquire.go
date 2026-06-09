@@ -38,14 +38,14 @@ var CLI_TO_INTERNAL_DETECTOR = map[string]string{
 //	    skip_optimization: bool = False
 //	    disabled_detectors: list[str] = field(default_factory=list)
 type ImagePullInput struct {
-	Type              string   `json:"type" yaml:"type"`
-	Name              *string  `json:"name,omitempty" yaml:"name,omitempty"`
-	Force             bool     `json:"force" yaml:"force"`
-	SetDefault        bool     `json:"set_default" yaml:"default"`
-	Version           string   `json:"version,omitempty" yaml:"version,omitempty"`
-	NoCache           bool     `json:"no_cache" yaml:"no_cache"`
-	Partition         int      `json:"partition,omitempty" yaml:"partition,omitempty"`
-	SkipOptimization  bool     `json:"skip_optimization" yaml:"skip_optimization"`
+	Type              string   `json:"type"                         yaml:"type"`
+	Name              *string  `json:"name,omitempty"               yaml:"name,omitempty"`
+	Force             bool     `json:"force"                        yaml:"force"`
+	SetDefault        bool     `json:"set_default"                  yaml:"default"`
+	Version           string   `json:"version,omitempty"            yaml:"version,omitempty"`
+	NoCache           bool     `json:"no_cache"                     yaml:"no_cache"`
+	Partition         int      `json:"partition,omitempty"          yaml:"partition,omitempty"`
+	SkipOptimization  bool     `json:"skip_optimization"            yaml:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty" yaml:"disabled_detectors,omitempty"`
 	OutputDir         string   `json:"output_dir,omitempty"`
 }

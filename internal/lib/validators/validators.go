@@ -97,8 +97,11 @@ func EntityName(name, entityType string, maxLength int) error {
 	if infra.ContainsDangerousChars(name) {
 		return errs.New(
 			errs.CodeValidationFailed,
-			fmt.Sprintf("invalid %s name '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
-				entityType, name),
+			fmt.Sprintf(
+				"invalid %s name '%s': contains forbidden characters (shell metacharacters, path traversal, or control characters)",
+				entityType,
+				name,
+			),
 		)
 	}
 	if !validNameRegex.MatchString(name) {

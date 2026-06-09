@@ -71,10 +71,10 @@ type FakeOS struct {
 	FindProcessFn func(pid int) (*os.Process, error)
 }
 
-func (f *FakeOS) Geteuid() int                      { return f.GeteuidVal }
-func (f *FakeOS) Getegid() int                      { return f.GetegidVal }
-func (f *FakeOS) Getgid() int                       { return f.GetgidVal }
-func (f *FakeOS) Getgroups() ([]int, error)         { return f.GetgroupsVal, nil }
+func (f *FakeOS) Geteuid() int              { return f.GeteuidVal }
+func (f *FakeOS) Getegid() int              { return f.GetegidVal }
+func (f *FakeOS) Getgid() int               { return f.GetgidVal }
+func (f *FakeOS) Getgroups() ([]int, error) { return f.GetgroupsVal, nil }
 
 func (f *FakeOS) LookupGroup(name string) (*user.Group, error) {
 	if f.LookupGroupFn != nil {

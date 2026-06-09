@@ -107,7 +107,12 @@ func (s *KeyStep) StateData() model.ResourceSpec {
 	return StructToMap(s.saved)
 }
 
-func newKeyStepFromSpec(stepType string, name string, spec model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newKeyStepFromSpec(
+	stepType string,
+	name string,
+	spec model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -128,7 +133,12 @@ func newKeyStepFromSpec(stepType string, name string, spec model.ResourceSpec, o
 	}, nil
 }
 
-func newKeyStepFromState(stepType string, name string, saved model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newKeyStepFromState(
+	stepType string,
+	name string,
+	saved model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	ks := StateFromMap[KeyState](saved)
 	return &KeyStep{
 		stepType: stepType,

@@ -18,13 +18,13 @@ func TestToString(t *testing.T) {
 		defaultVal string
 		want       string
 	}{
-		"string_value":     {input: "hello", defaultVal: "fallback", want: "hello"},
-		"empty_string":     {input: "", defaultVal: "fallback", want: ""},
-		"int_value":        {input: 42, defaultVal: "fallback", want: "fallback"},
-		"nil_value":        {input: nil, defaultVal: "default", want: "default"},
-		"bool_value":       {input: true, defaultVal: "nope", want: "nope"},
-		"empty_default":    {input: 99, defaultVal: "", want: ""},
-		"tricky_string":    {input: "42", defaultVal: "x", want: "42"},
+		"string_value":              {input: "hello", defaultVal: "fallback", want: "hello"},
+		"empty_string":              {input: "", defaultVal: "fallback", want: ""},
+		"int_value":                 {input: 42, defaultVal: "fallback", want: "fallback"},
+		"nil_value":                 {input: nil, defaultVal: "default", want: "default"},
+		"bool_value":                {input: true, defaultVal: "nope", want: "nope"},
+		"empty_default":             {input: 99, defaultVal: "", want: ""},
+		"tricky_string":             {input: "42", defaultVal: "x", want: "42"},
 		"empty_input_empty_default": {input: nil, defaultVal: "", want: ""},
 	}
 
@@ -47,20 +47,20 @@ func TestToInt(t *testing.T) {
 		want       int
 	}{
 		// Happy paths
-		"int_direct":                {input: 42, defaultVal: 0, want: 42},
-		"int64_value":              {input: int64(42), defaultVal: 0, want: 42},
-		"float64_value":            {input: float64(3.14), defaultVal: 0, want: 3},
-		"float64_truncates_down":   {input: float64(3.99), defaultVal: 0, want: 3},
-		"string_numeric":           {input: "42", defaultVal: 0, want: 42},
-		"string_zero":              {input: "0", defaultVal: 99, want: 0},
-		"string_negative":          {input: "-5", defaultVal: 0, want: -5},
+		"int_direct":             {input: 42, defaultVal: 0, want: 42},
+		"int64_value":            {input: int64(42), defaultVal: 0, want: 42},
+		"float64_value":          {input: float64(3.14), defaultVal: 0, want: 3},
+		"float64_truncates_down": {input: float64(3.99), defaultVal: 0, want: 3},
+		"string_numeric":         {input: "42", defaultVal: 0, want: 42},
+		"string_zero":            {input: "0", defaultVal: 99, want: 0},
+		"string_negative":        {input: "-5", defaultVal: 0, want: -5},
 
 		// Edge cases — fallback to default
-		"nil":                      {input: nil, defaultVal: -1, want: -1},
-		"string_non_numeric":       {input: "abc", defaultVal: 99, want: 99},
-		"string_empty":             {input: "", defaultVal: 99, want: 99},
-		"bool_value":               {input: true, defaultVal: 99, want: 99},
-		"slice_value":              {input: []int{1, 2, 3}, defaultVal: 99, want: 99},
+		"nil":                       {input: nil, defaultVal: -1, want: -1},
+		"string_non_numeric":        {input: "abc", defaultVal: 99, want: 99},
+		"string_empty":              {input: "", defaultVal: 99, want: 99},
+		"bool_value":                {input: true, defaultVal: 99, want: 99},
+		"slice_value":               {input: []int{1, 2, 3}, defaultVal: 99, want: 99},
 		"negative_default_returned": {input: "abc", defaultVal: -1, want: -1},
 	}
 
@@ -83,23 +83,23 @@ func TestToBool(t *testing.T) {
 		want       bool
 	}{
 		// Happy paths
-		"bool_true":              {input: true, defaultVal: false, want: true},
-		"bool_false":             {input: false, defaultVal: true, want: false},
-		"string_true":            {input: "true", defaultVal: false, want: true},
-		"string_false":           {input: "false", defaultVal: true, want: false},
-		"string_1":               {input: "1", defaultVal: false, want: true},
-		"string_0":               {input: "0", defaultVal: true, want: false},
-		"int_one_true":           {input: 1, defaultVal: false, want: true},
-		"int_zero_false":         {input: 0, defaultVal: true, want: false},
-		"float64_nonzero_true":   {input: float64(3.14), defaultVal: false, want: true},
-		"float64_zero_false":     {input: float64(0), defaultVal: true, want: false},
+		"bool_true":            {input: true, defaultVal: false, want: true},
+		"bool_false":           {input: false, defaultVal: true, want: false},
+		"string_true":          {input: "true", defaultVal: false, want: true},
+		"string_false":         {input: "false", defaultVal: true, want: false},
+		"string_1":             {input: "1", defaultVal: false, want: true},
+		"string_0":             {input: "0", defaultVal: true, want: false},
+		"int_one_true":         {input: 1, defaultVal: false, want: true},
+		"int_zero_false":       {input: 0, defaultVal: true, want: false},
+		"float64_nonzero_true": {input: float64(3.14), defaultVal: false, want: true},
+		"float64_zero_false":   {input: float64(0), defaultVal: true, want: false},
 
 		// Edge cases — fallback to default
-		"nil":                     {input: nil, defaultVal: true, want: true},
-		"nil_false_default":       {input: nil, defaultVal: false, want: false},
-		"string_invalid":          {input: "maybe", defaultVal: true, want: true},
-		"empty_string":            {input: "", defaultVal: false, want: false},
-		"slice_value":             {input: []string{"a"}, defaultVal: true, want: true},
+		"nil":               {input: nil, defaultVal: true, want: true},
+		"nil_false_default": {input: nil, defaultVal: false, want: false},
+		"string_invalid":    {input: "maybe", defaultVal: true, want: true},
+		"empty_string":      {input: "", defaultVal: false, want: false},
+		"slice_value":       {input: []string{"a"}, defaultVal: true, want: true},
 	}
 
 	for name, tc := range tests {
@@ -224,22 +224,22 @@ func TestShlexQuote(t *testing.T) {
 		input string
 		want  string
 	}{
-		"empty_string":             {input: "", want: "''"},
-		"simple_word":              {input: "hello", want: "hello"},
-		"alphanumeric":             {input: "abc123", want: "abc123"},
-		"path_with_slashes":        {input: "/usr/local/bin", want: "/usr/local/bin"},
-		"mixed_safe_chars":         {input: "user@host:port/path", want: "user@host:port/path"},
-		"needs_quoting":            {input: "hello world", want: "'hello world'"},
-		"single_quote_inside":      {input: "it's", want: `'it'"'"'s'`},
-		"double_quote_inside":      {input: `say "hi"`, want: `'say "hi"'`},
-		"special_chars":            {input: "foo$bar", want: "'foo$bar'"},
-		"backtick":                 {input: "cmd`ls`", want: "'cmd`ls`'"},
-		"newline":                  {input: "line1\nline2", want: "'line1\nline2'"},
-		"multiple_quotes":          {input: `'a'"b`, want: `''"'"'a'"'"'"b'`},
-		"dash_prefix":              {input: "--flag=value", want: "--flag=value"},
-		"underscore":               {input: "my_var", want: "my_var"},
-		"percent":                  {input: "100%", want: "100%"},
-		"tricky_quotes":            {input: "'", want: `''"'"''`},
+		"empty_string":        {input: "", want: "''"},
+		"simple_word":         {input: "hello", want: "hello"},
+		"alphanumeric":        {input: "abc123", want: "abc123"},
+		"path_with_slashes":   {input: "/usr/local/bin", want: "/usr/local/bin"},
+		"mixed_safe_chars":    {input: "user@host:port/path", want: "user@host:port/path"},
+		"needs_quoting":       {input: "hello world", want: "'hello world'"},
+		"single_quote_inside": {input: "it's", want: `'it'"'"'s'`},
+		"double_quote_inside": {input: `say "hi"`, want: `'say "hi"'`},
+		"special_chars":       {input: "foo$bar", want: "'foo$bar'"},
+		"backtick":            {input: "cmd`ls`", want: "'cmd`ls`'"},
+		"newline":             {input: "line1\nline2", want: "'line1\nline2'"},
+		"multiple_quotes":     {input: `'a'"b`, want: `''"'"'a'"'"'"b'`},
+		"dash_prefix":         {input: "--flag=value", want: "--flag=value"},
+		"underscore":          {input: "my_var", want: "my_var"},
+		"percent":             {input: "100%", want: "100%"},
+		"tricky_quotes":       {input: "'", want: `''"'"''`},
 	}
 
 	for name, tc := range tests {
@@ -256,16 +256,16 @@ func TestShlexQuote(t *testing.T) {
 
 func TestNonZero(t *testing.T) {
 	tests := map[string]struct {
-		value    any    // stored as any to test different types
+		value    any // stored as any to test different types
 		fallback any
 		want     any
 	}{
-		"int_nonzero":         {value: 42, fallback: 0, want: 42},
-		"int_zero":            {value: 0, fallback: 99, want: 99},
-		"string_nonzero":      {value: "hello", fallback: "default", want: "hello"},
-		"string_empty":        {value: "", fallback: "default", want: "default"},
-		"bool_true":           {value: true, fallback: false, want: true},
-		"bool_false":          {value: false, fallback: true, want: true},
+		"int_nonzero":    {value: 42, fallback: 0, want: 42},
+		"int_zero":       {value: 0, fallback: 99, want: 99},
+		"string_nonzero": {value: "hello", fallback: "default", want: "hello"},
+		"string_empty":   {value: "", fallback: "default", want: "default"},
+		"bool_true":      {value: true, fallback: false, want: true},
+		"bool_false":     {value: false, fallback: true, want: true},
 	}
 
 	for name, tc := range tests {
@@ -379,14 +379,14 @@ func TestToTitle(t *testing.T) {
 		input string
 		want  string
 	}{
-		"single_word":        {input: "hello", want: "Hello"},
-		"multiple_words":     {input: "hello world", want: "Hello World"},
-		"already_capitalized": {input: "Hello World", want: "Hello World"},
-		"empty_string":       {input: "", want: ""},
-		"all_lower":          {input: "the quick brown fox", want: "The Quick Brown Fox"},
-		"mixed_case":         {input: "hELLO wORLD", want: "HELLO WORLD"},
-		"single_letter_words": {input: "a b c", want: "A B C"},
-		"numbers_and_letters": {input: "hello 2nd world", want: "Hello 2nd World"},
+		"single_word":             {input: "hello", want: "Hello"},
+		"multiple_words":          {input: "hello world", want: "Hello World"},
+		"already_capitalized":     {input: "Hello World", want: "Hello World"},
+		"empty_string":            {input: "", want: ""},
+		"all_lower":               {input: "the quick brown fox", want: "The Quick Brown Fox"},
+		"mixed_case":              {input: "hELLO wORLD", want: "HELLO WORLD"},
+		"single_letter_words":     {input: "a b c", want: "A B C"},
+		"numbers_and_letters":     {input: "hello 2nd world", want: "Hello 2nd World"},
 		"leading_trailing_spaces": {input: "  hello world  ", want: "Hello World"},
 	}
 

@@ -49,11 +49,11 @@ type Step interface {
 // literals. This allows creating ad-hoc steps without defining a full struct.
 type StepFunc struct {
 	stepType    string
-	name         string
-	deps         []string
-	applyFn      func(ctx context.Context, state *SharedState, saved model.ResourceSpec) error
-	destroyFn    func(ctx context.Context, saved model.ResourceSpec) error
-	stateDataFn  func() model.ResourceSpec
+	name        string
+	deps        []string
+	applyFn     func(ctx context.Context, state *SharedState, saved model.ResourceSpec) error
+	destroyFn   func(ctx context.Context, saved model.ResourceSpec) error
+	stateDataFn func() model.ResourceSpec
 }
 
 // NewStepFunc creates a StepFunc adapter from function literals.
@@ -75,9 +75,13 @@ func NewStepFunc(
 	}
 }
 
-func (s *StepFunc) Name() string                       { return s.name }
-func (s *StepFunc) Type() string                       { return s.stepType }
-func (s *StepFunc) Dependencies() []string              { return s.deps }
-func (s *StepFunc) Apply(ctx context.Context, state *SharedState, saved model.ResourceSpec) error { return s.applyFn(ctx, state, saved) }
-func (s *StepFunc) Destroy(ctx context.Context, saved model.ResourceSpec) error { return s.destroyFn(ctx, saved) }
-func (s *StepFunc) StateData() model.ResourceSpec             { return s.stateDataFn() }
+func (s *StepFunc) Name() string           { return s.name }
+func (s *StepFunc) Type() string           { return s.stepType }
+func (s *StepFunc) Dependencies() []string { return s.deps }
+func (s *StepFunc) Apply(ctx context.Context, state *SharedState, saved model.ResourceSpec) error {
+	return s.applyFn(ctx, state, saved)
+}
+func (s *StepFunc) Destroy(ctx context.Context, saved model.ResourceSpec) error {
+	return s.destroyFn(ctx, saved)
+}
+func (s *StepFunc) StateData() model.ResourceSpec { return s.stateDataFn() }

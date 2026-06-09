@@ -465,18 +465,18 @@ func TestIsSubDir(t *testing.T) {
 		parent string
 		want   bool
 	}{
-		"direct_child":              {path: "/home/user/sub", parent: "/home/user", want: true},
-		"grandchild":                {path: "/home/user/a/b", parent: "/home/user", want: true},
-		"exact_match":               {path: "/home/user", parent: "/home/user", want: true},
-		"unrelated_path":            {path: "/other/path", parent: "/home/user", want: false},
-		"prefix_trap":               {path: "/home/user-extra", parent: "/home/user", want: false},
-		"prefix_trap_nested":        {path: "/home/user-extra/sub", parent: "/home/user", want: false},
-		"empty_path":                {path: "", parent: "/home", want: false},
-		"parent_traversal":          {path: "/home/user/../../etc", parent: "/home/user", want: false},
-		"current_dir":               {path: ".", parent: ".", want: true},
-		"relative_child":            {path: "a/b/c", parent: "a", want: true},
-		"relative_not_child":        {path: "../other", parent: "a", want: false},
-		"sibling_via_dotdot":        {path: "a/../b", parent: "a", want: false},
+		"direct_child":       {path: "/home/user/sub", parent: "/home/user", want: true},
+		"grandchild":         {path: "/home/user/a/b", parent: "/home/user", want: true},
+		"exact_match":        {path: "/home/user", parent: "/home/user", want: true},
+		"unrelated_path":     {path: "/other/path", parent: "/home/user", want: false},
+		"prefix_trap":        {path: "/home/user-extra", parent: "/home/user", want: false},
+		"prefix_trap_nested": {path: "/home/user-extra/sub", parent: "/home/user", want: false},
+		"empty_path":         {path: "", parent: "/home", want: false},
+		"parent_traversal":   {path: "/home/user/../../etc", parent: "/home/user", want: false},
+		"current_dir":        {path: ".", parent: ".", want: true},
+		"relative_child":     {path: "a/b/c", parent: "a", want: true},
+		"relative_not_child": {path: "../other", parent: "a", want: false},
+		"sibling_via_dotdot": {path: "a/../b", parent: "a", want: false},
 	}
 
 	for name, tc := range tests {

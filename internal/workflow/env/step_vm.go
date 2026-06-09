@@ -206,7 +206,12 @@ func (s *VMStep) StateData() model.ResourceSpec {
 	return StructToMap(s.saved)
 }
 
-func newVMStepFromSpec(stepType string, name string, spec model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newVMStepFromSpec(
+	stepType string,
+	name string,
+	spec model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -240,7 +245,12 @@ func newVMStepFromSpec(stepType string, name string, spec model.ResourceSpec, op
 	}, nil
 }
 
-func newVMStepFromState(stepType string, name string, saved model.ResourceSpec, op *api.Operation) (workflow.Step, error) {
+func newVMStepFromState(
+	stepType string,
+	name string,
+	saved model.ResourceSpec,
+	op *api.Operation,
+) (workflow.Step, error) {
 	vs := StateFromMap[VMState](saved)
 	return &VMStep{
 		stepType: stepType,

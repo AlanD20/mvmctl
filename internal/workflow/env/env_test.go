@@ -126,7 +126,13 @@ func TestFromSpec_SSHStep_NameFormat(t *testing.T) {
 }
 
 func TestFromSpec_CopyStep_NameFormat(t *testing.T) {
-	spec := map[string]any{"name": "copy-binary", "target": "fenv-vm-1", "user": "root", "src": "./mvm", "dst": "/root/"}
+	spec := map[string]any{
+		"name":   "copy-binary",
+		"target": "fenv-vm-1",
+		"user":   "root",
+		"src":    "./mvm",
+		"dst":    "/root/",
+	}
 	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "copy:copy-binary", step.Name())
@@ -278,7 +284,14 @@ vms:
 	for _, step := range steps {
 		stepByName[step.Name()] = step.Name()
 	}
-	expected := []string{"network:my-net", "key:my-key", "image:alpine", "kernel:fc-kernel", "binary:firecracker", "vm:my-vm"}
+	expected := []string{
+		"network:my-net",
+		"key:my-key",
+		"image:alpine",
+		"kernel:fc-kernel",
+		"binary:firecracker",
+		"vm:my-vm",
+	}
 	for _, want := range expected {
 		_, ok := stepByName[want]
 		assert.True(t, ok, "expected step %q not found", want)
@@ -583,7 +596,13 @@ func TestResolveWorkflowID_PrefixMatch(t *testing.T) {
 
 // Rationale: SSH step with a key reference should set SSHInput.Key correctly.
 func TestFromSpec_SSHStep_WithKey(t *testing.T) {
-	spec := map[string]any{"name": "install-qemu", "target": "fenv-vm-1", "user": "root", "key": "fenv-key", "cmd": "apt update"}
+	spec := map[string]any{
+		"name":   "install-qemu",
+		"target": "fenv-vm-1",
+		"user":   "root",
+		"key":    "fenv-key",
+		"cmd":    "apt update",
+	}
 	step, err := envpkg.Registry["ssh"].FromSpec("ssh", "install-qemu", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "ssh:install-qemu", step.Name())
@@ -594,7 +613,13 @@ func TestFromSpec_SSHStep_WithKey(t *testing.T) {
 // Rationale: Copy step with single-string src and explicit target+dst must
 // build a valid CPInput with Sources=[src] and Dst=target:dst.
 func TestFromSpec_CopyStep_BuildsDst(t *testing.T) {
-	spec := map[string]any{"name": "copy-binary", "target": "fenv-vm-1", "user": "root", "src": "./mvm", "dst": "/root/"}
+	spec := map[string]any{
+		"name":   "copy-binary",
+		"target": "fenv-vm-1",
+		"user":   "root",
+		"src":    "./mvm",
+		"dst":    "/root/",
+	}
 	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "copy:copy-binary", step.Name())

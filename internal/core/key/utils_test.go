@@ -97,7 +97,11 @@ func TestParseComment(t *testing.T) {
 		{"with_comment", "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDA== test@host", "test@host"},
 		{"no_comment", "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDA==", ""},
 		{"only_two_fields", "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDA==", ""},
-		{"multi_word", "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDA== user@host additional info", "user@host additional info"},
+		{
+			"multi_word",
+			"ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDA== user@host additional info",
+			"user@host additional info",
+		},
 		{"empty", "", ""},
 		{"whitespace_trimmed", "  ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDA== test@host  ", "test@host"},
 	}
