@@ -57,12 +57,12 @@ gzip -9 %{buildroot}/usr/share/man/man1/mvm.1
 - `mvm ssh`** -- SSH into VMs by name, ID, IP, or MAC with custom user, key, and connection timeout
 - `mvm volume`** -- Persistent data disk management: create, rm, ls, inspect, resize
 - Three-layer architecture** (CLI -> API -> Core) with strict import boundaries
-- LazyMVMGroup** -- Custom Click group with lazy-loaded Typer sub-apps for sub-150ms startup
+- Cobra CLI framework
 - Controller / Service / Repository / Resolver** pattern across all 14 core domains
 - Input -> Request -> Resolved** pipeline for type-safe, validated VM operations
 - Provisioning backend abstraction** (LoopMount vs Guestfs) with factory pattern
 - SQLite database** (`db/migrations/` directory) with migration system (`001_initial_schema.sql`) for persistent state: images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings
-- Shared utility helpers** (`utils/`): fs, _system, http, network, crypto, template, yaml, _validators, _io, _lazy_import, progress, cli, operation_utils, auditlog, common, _disk, timinglog
+- Shared utility packages** (`internal/infra/`): cast, io, slice, yaml, template, progress, timinglog
 - Relation enrichment** system with batch loading to prevent N+1 queries
 - Privilege delegation** model via `mvm` unix group and sudoers drop-in (no sudo for normal operations)
 - Create VMs with configurable vCPUs, memory, disk size, PCI, console, logging, and metrics
@@ -108,21 +108,15 @@ gzip -9 %{buildroot}/usr/share/man/man1/mvm.1
 - Console relay** -- PTY-over-vsock bridge for interactive serial console without SSH
 - nocloud-net server** -- Per-VM HTTP server for cloud-init datasource delivery
 - mvm-provision** -- Loop-mount rootfs provisioning binary for SSH key injection, hostname setup, DNS config, cloud-init disable, and filesystem resize (~200ms per VM, replaces libguestfs as primary path)
-- Python API** -- All CLI commands map 1:1 to `*Operation` static methods in `mvmctl.api`
-- Strict mypy** -- Full type annotations across the codebase, no `type: ignore` suppressions
-- Ruff** -- Linting and formatting, zero-tolerance for violations
-- Test suite** -- Unit, integration, system, and layer compliance tests
-- uv** -- Fast Python package and project management
-- Build scripts** (`scripts/`): build_services.py, run_tests.py, setup-test-environment.py, profile_test_memory.py
-- Standalone Nuitka-compiled binary (zero Python runtime dependency)
-- Nuitka is the primary build tool (PyInstaller is available as a fallback)
-- PyPI package (`mvmctl`)
+- Go API** -- All CLI commands map to typed Operation methods
+- Go toolchain** -- Built with `go build`, no runtime dependencies
+- Test suite** -- Unit and system tests
 - Distribution packages: .deb (Debian/Ubuntu), .rpm (RHEL/Fedora), PKGBUILD (Arch Linux)
 - Man page (`mvm.1`)
-- CLI startup under 200ms via lazy-loading LazyMVMGroup
+- Native Go binary with instant startup (no interpreter overhead)
 - Batch relation loading with deduplication (O(relations) queries, not O(entities x relations))
 - Durable incremental image copying with reflink support (instant copy on btrfs/XFS)
-- SQL-level computation (COUNT, WHERE IN) instead of fetch-all + Python filtering
+- SQL-level computation (COUNT, WHERE IN) instead of fetch-all + application-level filtering
 
 * Mon Mar 30 2026 AlanD20 <aland20@pm.me> - 0.1.0-1
 - Initial RPM release
