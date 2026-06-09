@@ -1,164 +1,101 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 version: '3'
 vars:
+  BINARY_NAME: 'mvm'
+  VERSION:
+    sh: git describe --tags --dirty --always 2>/dev/null || echo "0.1.0-dev"
+  BUILD_FLAGS: '-ldflags "-X mvmctl/internal/infra/version.BuildVersion={{.VERSION}}"'
+  RELEASE_FLAGS: '-trimpath -ldflags "-s -w -X mvmctl/internal/infra/version.BuildVersion={{.VERSION}}"'
   ASSET_MIRROR: '{{.HOME}}/.cache/mvm-asset-mirror'
 tasks:
-  sync:
-    desc: Install development dependencies (uv sync --group dev)
+  default:
+    desc: Build the Go binary
     cmds:
-      - uv sync --group dev
-  sync-all:
-    desc: Install dev and build dependencies (required before binary builds)
-    cmds:
-      - uv sync --group dev --group build
-  lint:
-    desc: Run ruff linter (line-length=100, py313, import sorting)
-    cmds:
-      - uv run ruff check src/
-  format-check:
-    desc: Check code formatting with ruff (does not modify files)
-    cmds:
-      - uv run ruff format --check src/
-  format:
-    desc: Apply code formatting with ruff (modifies files in src/)
-    cmds:
-      - uv run ruff format src/
-  typecheck:
-    desc: Run mypy in strict mode
-    cmds:
-      - uv run mypy src/
-  test:
-    desc: Run all tests with 60% branch coverage gate (via test runner)
-    cmds:
-      - uv run scripts/run_tests.py --pytest-extra "--cov=src/mvmctl --cov-report=term-missing --cov-fail-under=60"
-  test-integration:
-    desc: Run integration tests via the test runner script
-    cmds:
-      - uv run scripts/run_tests.py --integration
-  test-ci:
-    desc: Run all tests with 60% branch coverage gate in CI mode (via test runner)
-    cmds:
-      - uv run scripts/run_tests.py --ci --pytest-extra "--cov=src/mvmctl --cov-report=term-missing --cov-fail-under=60"
-  test-ci-fast:
-    desc: Run all test levels — stop on first failure (fast feedback)
-    cmds:
-      - uv run scripts/run_tests.py --ci
-  check:
-    desc: Run all quality gates — lint, format-check, typecheck
-    cmds:
-      - uv run ruff check src/
-      - uv run ruff format --check src/
-      - uv run mypy src/
+      - task: build
+
+  # =====================================================================
+  # Go Build
+  # =====================================================================
   build:
-    desc: Build Python wheel and sdist into dist/
-    cmds:
-      - uv build
-  build-pyinstaller:
-    desc: Build standalone binary with PyInstaller (faster build, slower startup)
-    deps: [sync-all]
-    cmds:
-      - uv run pyinstaller --onefile --name mvm --collect-all mvmctl src/mvmctl/main.py
-  build-nuitka:
-    desc: Build standalone binary with Nuitka — production build (compiled C++, fast startup)
-    deps: [sync-all]
-    cmds:
-      - |
-        uv run python -m nuitka \
-          --onefile \
-          --output-dir=dist \
-          --output-filename=mvm \
-          --include-package=mvmctl \
-          --include-data-dir=src/mvmctl/assets=mvmctl/assets \
-          --lto=yes \
-          --enable-plugin=anti-bloat \
-          --jobs=$(nproc) \
-          src/mvmctl/main.py
-  # =====================================================================
-  # Go Build — version injected via ldflags, matching standard Go CLI pattern
-  # =====================================================================
-  build-go:
     desc: Build Go binary with version from git tags
     cmds:
       - |
-        VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "0.1.0-dev")
-        echo "Building mvmctl Go binary (version: $VERSION)..."
-        go build -ldflags "-X 'mvmctl/internal/infra/version.BuildVersion=$VERSION'" -o mvmctl ./cmd/mvm/
+        echo "Building mvmctl Go binary (version: {{.VERSION}})..."
+        go build {{.BUILD_FLAGS}} -o {{.BINARY_NAME}} ./cmd/mvm/
     sources:
       - '**/*.go'
       - go.mod
       - go.sum
     generates:
-      - mvmctl
-  build-go-release:
+      - '{{.BINARY_NAME}}'
+
+  build-release:
     desc: Build Go binary with release ldflags (stripped, no DWARF)
     cmds:
       - |
-        VERSION=$(git describe --tags --dirty --always 2>/dev/null || echo "0.1.0-dev")
-        echo "Building mvmctl release binary (version: $VERSION)..."
-        go build -trimpath -ldflags "-s -w -X 'mvmctl/internal/infra/version.BuildVersion=$VERSION'" -o mvmctl ./cmd/mvm/
+        echo "Building mvmctl release binary (version: {{.VERSION}})..."
+        go build {{.RELEASE_FLAGS}} -o {{.BINARY_NAME}} ./cmd/mvm/
     sources:
       - '**/*.go'
       - go.mod
       - go.sum
     generates:
-      - mvmctl
+      - '{{.BINARY_NAME}}'
 
-  link-guestfs:
-    desc: Links libguestfs into uv .venv (Supports Arch, Debian, Fedora, Ubuntu)
-    vars:
-      HOST_PYTHON: /usr/bin/python3
-      HOST_SITE:
-        sh: /usr/bin/python3 -c "import site; print(site.getsitepackages()[0])"
-      VENV_SITE:
-        sh: uv run python -c "import site; print(site.getsitepackages()[0])"
-    cmds:
-      - |
-        rm -rf "{{.VENV_SITE}}/guestfs" "{{.VENV_SITE}}/guestfs.py" "{{.VENV_SITE}}/libguestfsmod*"
-        if [ -d "{{.HOST_SITE}}/guestfs" ]; then
-          ln -sf "{{.HOST_SITE}}/guestfs" "{{.VENV_SITE}}/"
-          echo "Linked guestfs directory (Debian/Fedora style)"
-        elif [ -f "{{.HOST_SITE}}/guestfs.py" ]; then
-          ln -sf "{{.HOST_SITE}}/guestfs.py" "{{.VENV_SITE}}/guestfs.py"
-          echo "Linked guestfs.py (Arch style)"
-        else
-          echo "Error: Could not find guestfs in {{.HOST_SITE}}"
-          exit 1
-        fi
-        SRC_SO=$(ls {{.HOST_SITE}}/libguestfsmod.*.so 2>/dev/null | head -n 1)
-        if [ -n "$SRC_SO" ]; then
-          SO_NAME=$(basename "$SRC_SO")
-          ln -sf "$SRC_SO" "{{.VENV_SITE}}/$SO_NAME"
-          ln -sf "$SRC_SO" "{{.VENV_SITE}}/libguestfsmod.so"
-          echo "Linked $SO_NAME as libguestfsmod.so"
-        else
-          echo "Warning: libguestfsmod.so not found. System bindings might be incomplete."
-        fi
-    silent: true
-  unlink-guestfs:
-    desc: Remove all guestfs symlinks
-    vars:
-      VENV_SITE:
-        sh: uv run python -c "import site; print(site.getsitepackages()[0])"
-    cmds:
-      - rm -rf "{{.VENV_SITE}}/guestfs" "{{.VENV_SITE}}/guestfs.py" "{{.VENV_SITE}}/libguestfsmod*"
-      - echo "Unlinked."
-    silent: true
-  test-guestfs:
-    desc: Verify the link works within uv/pyenv
-    cmds:
-      - uv run python -c "import guestfs; print('libguestfs is active in .venv')"
   # =====================================================================
-  # System Test Setup — pre-pull required assets before running tests
+  # Quality Gates
+  # =====================================================================
+  check:
+    desc: Run all quality gates — formatting, vet
+    cmds:
+      - task: fmt-check
+      - task: vet
+
+  fmt:
+    desc: Format Go source code
+    cmds:
+      - gofmt -w .
+
+  fmt-check:
+    desc: Check Go formatting
+    cmds:
+      - test -z "$(gofmt -l .)"
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Run go mod tidy
+    cmds:
+      - go mod tidy
+
+  # =====================================================================
+  # Testing
+  # =====================================================================
+  test:
+    desc: Run all Go tests
+    cmds:
+      - go test ./... -coverprofile=coverage.out -covermode=atomic
+
+  test-verbose:
+    desc: Run all Go tests with verbose output
+    cmds:
+      - go test ./... -v -coverprofile=coverage.out -covermode=atomic
+
+  # =====================================================================
+  # System Tests — binary-agnostic, run via Python runner at root
   # =====================================================================
   sys-setup:
-    desc: Pre-fetch required system test assets (kernel + images + service binaries)
+    desc: Pre-fetch required system test assets
     deps:
       - sys-setup-kernel
       - sys-setup-image-alpine
       - sys-setup-image-ubuntu
       - sys-setup-binary
   sys-setup-kernel:
-    desc: Fetch kernel if not cached (uses 'mvm kernel pull --type official')
+    desc: Fetch kernel if not cached
     status:
       - uv run python -c "import json,subprocess as sp; r=sp.run(['uv','run','mvm','kernel','ls','--json'],capture_output=True,text=True); exit(0 if r.returncode==0 and json.loads(r.stdout) else 1)"
     cmds:
@@ -181,64 +118,8 @@ tasks:
       - uv run mvm bin ls --json | uv run python -c "import sys,json; sys.exit(0 if json.load(sys.stdin) else 1)"
     cmds:
       - uv run mvm bin pull 1.15.1 --default
-  # =====================================================================
-  # System Tests — these run on real KVM hardware, produce release gate
-  # =====================================================================
-  # TARGETS:
-  #   sys-test      — FULL run: serial (1) → cache LAST (2)
-  #   sys-test-fast — DEV run: only non-slow, non-KVM tests
-  #
-  # ASSET MIRROR (MVM_ASSET_MIRROR):
-  #   The first run downloads assets from the internet and caches them in
-  #   ~/.cache/mvm-asset-mirror/ (outside the mvmctl cache, so cache clean
-  #   doesn't wipe it). Subsequent runs copy from the local mirror instead
-  #   of re-downloading — dramatically faster.
-  #
-  #   To seed the mirror before tests: task sys-setup-seed
-  #   (This is optional — sys-test auto-seeds on first run.)
-  #
-  # MARKERS (pytest -m):
-  #   system            — every test in tests/system/
-  #   domain_{bin|kernel|image|network|key|config|host|init|vm}
-  #                     — which domain the test belongs to.
-  #                     Domain tests operate on isolated DB tables and
-  #                     can safely run in parallel via --dist loadfile.
-  #   domain_vm         — VM lifecycle tests.  Create real microVMs that
-  #                     depend on all domains being stable.
-  #                     Tests marked `serial` touch iptables or share a
-  #                     VM fixture.  All others are independent: each test
-  #                     creates its own uniquely-named VM and cleans up.
-  #   slow              — tests taking >30 seconds (downloads, VM creation)
-  #   requires_kvm      — tests that create actual VMs (need /dev/kvm)
-  #   requires_network  — tests that create host network bridges
-  #
-  # PHASES:
-  #   1. Domain tests (parallel, --dist loadfile -n auto):
-  #      bin, kernel, image, key, config, init
-  #      Each file gets its own worker.  Safe because they operate on
-  #      different DB tables (binaries, kernels, images, ssh_keys,
-  #      user_settings).  Destructive classes (rm/remove/force) run
-  #      at the END of each file.
-  #
-  #   2a. VM tests that MUST be serial (-n 0):
-  #       network (iptables is kernel-level shared state),
-  #       host (host clean/reset modifies iptables),
-  #       TestVMStateOperationsShared (shares one module-scoped VM fixture)
-  #
-  #   2b. VM tests that CAN run in parallel (--dist loadfile -n 6):
-  #       console, full_journeys, image_import, logs, ssh,
-  #       vm_lifecycle (independent tests only), vm_snapshot,
-  #       cli_edge_cases (non-iptables classes)
-  #       Each test creates its own VM with a unique name.  No shared state.
-  #
-  #   3. Cache cleanup (LAST! destroys environment):
-  #      test_cache.py
-  #
-  # IMPORTANT: test_cache.py MUST run LAST — cache clean --force destroys
-  #            everything (DB, service binaries, iptables chains).
-  # =====================================================================
   sys-setup-seed:
-    desc: Seed the local asset mirror — one-time download, then fast copies thereafter
+    desc: Seed the local asset mirror
     cmds:
       - mkdir -p {{.ASSET_MIRROR}}
       - 'echo "Seeding asset mirror ({{.ASSET_MIRROR}})..."'
@@ -248,7 +129,7 @@ tasks:
       - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm image pull ubuntu-24.04'
       - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run mvm bin pull 1.15.1 --default'
   sys-test:
-    desc: Run all system tests — parallel domain (1) → serial VM (2) → cache LAST (3) [uses asset mirror]
+    desc: Run all system tests
     deps: [sys-setup]
     cmds:
       - 'echo "=== Phase 1: Domain tests (parallel, --dist loadfile) ==="'
@@ -260,6 +141,6 @@ tasks:
       - 'echo "=== Phase 3: Cache cleanup (LAST! destroys environment) ==="'
       - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run pytest tests/system/test_cache.py -v -n 0 --no-cov -rx'
   sys-test-fast:
-    desc: Run fast system tests only — no KVM, no slow downloads, no cache cleanup [uses asset mirror]
+    desc: Run fast system tests only — no KVM, no slow downloads
     cmds:
       - 'MVM_ASSET_MIRROR={{.ASSET_MIRROR}} uv run pytest tests/system/ --ignore=tests/system/test_cache.py -v -n 0 --no-cov -m "not slow and not requires_kvm"'
