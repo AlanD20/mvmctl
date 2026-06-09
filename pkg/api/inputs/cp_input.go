@@ -23,11 +23,11 @@ import (
 //	    key: str | None = None
 //	    force: bool = False
 type CPInput struct {
-	Sources []string `json:"sources"`
-	Dst     string   `json:"dst"`
-	User    *string  `json:"user,omitempty"`
-	Key     *string  `json:"key,omitempty"`
-	Force   bool     `json:"force"`
+	Sources []string `json:"sources" yaml:"src"`
+	Dst     string   `json:"dst" yaml:"-"`
+	User    *string  `json:"user,omitempty" yaml:"user,omitempty"`
+	Key     *string  `json:"key,omitempty" yaml:"key,omitempty"`
+	Force   bool     `json:"force" yaml:"force"`
 }
 
 // ResolvedCPInfo matches Python's ResolvedCPInfo dataclass.

@@ -118,6 +118,7 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		cmd.AddCommand(NewSSHCmd(op))
 		cmd.AddCommand(NewCpCmd(op))
 		cmd.AddCommand(NewInitCmd(op))
+		cmd.AddCommand(NewEnvCmd(op))
 	}
 
 	return cmd

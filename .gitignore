@@ -14,7 +14,7 @@ build/
 # Virtual environments
 .venv/
 venv/
-env/
+/env/
 ENV/
 
 # Test & coverage
@@ -66,8 +66,7 @@ vmlinux-*
 kernel-build/
 linux-*/
 
-# VM runtime dirs (env/ used by PoC bash scripts)
-env/
+# VM runtime dirs — see legacy/single-vm/env/ and legacy/multi-vm/env/ below
 
 # Build-time generated version file
 _build_version.py
