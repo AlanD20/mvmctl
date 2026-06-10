@@ -102,11 +102,11 @@ ARCH_PACKAGES = [
 ]
 
 TEST_IMAGES = [
-    "alpine-3.21",
-    "ubuntu-24.04-minimal",
-    "ubuntu-24.04",
+    "alpine:3.21",
+    "ubuntu-minimal:24.04",
+    "ubuntu:24.04",
     "archlinux",
-    "debian-bookworm",
+    "debian:bookworm",
 ]
 
 MIN_RAM_GB = 4
@@ -311,10 +311,7 @@ def setup_kvm(os_family: str) -> None:
         print_info("Detected Intel CPU — configuring kvm_intel...")
         nested_conf = Path("/etc/modprobe.d/kvm-intel.conf")
         nested_content = "options kvm_intel nested=1\n"
-        if (
-            not nested_conf.exists()
-            or nested_conf.read_text() != nested_content
-        ):
+        if not nested_conf.exists() or nested_conf.read_text() != nested_content:
             run_cmd(
                 [
                     "sh",
@@ -335,17 +332,12 @@ def setup_kvm(os_family: str) -> None:
         if check_nested_virt_intel():
             print_success("Nested virtualization enabled for Intel")
         else:
-            print_warn(
-                "Could not verify nested virtualization — check BIOS settings"
-            )
+            print_warn("Could not verify nested virtualization — check BIOS settings")
     elif is_amd:
         print_info("Detected AMD CPU — configuring kvm_amd...")
         nested_conf = Path("/etc/modprobe.d/kvm-amd.conf")
         nested_content = "options kvm_amd nested=1\n"
-        if (
-            not nested_conf.exists()
-            or nested_conf.read_text() != nested_content
-        ):
+        if not nested_conf.exists() or nested_conf.read_text() != nested_content:
             run_cmd(
                 [
                     "sh",
@@ -356,16 +348,12 @@ def setup_kvm(os_family: str) -> None:
                 description="Enable nested virtualization for AMD",
             )
             run_cmd(["modprobe", "-r", "kvm_amd"], sudo=True, check=False)
-            run_cmd(
-                ["modprobe", "kvm_amd"], sudo=True, description="Reload kvm_amd"
-            )
+            run_cmd(["modprobe", "kvm_amd"], sudo=True, description="Reload kvm_amd")
 
         if check_nested_virt_amd():
             print_success("Nested virtualization enabled for AMD")
         else:
-            print_warn(
-                "Could not verify nested virtualization — check BIOS settings"
-            )
+            print_warn("Could not verify nested virtualization — check BIOS settings")
     else:
         print_warn("No KVM vendor module detected")
 
@@ -495,9 +483,7 @@ def download_assets(target_dir: Path) -> None:
     if result.returncode == 0:
         print_success("Firecracker binary downloaded")
     else:
-        print_warn(
-            "Failed to download Firecracker binary — will be fetched on-demand"
-        )
+        print_warn("Failed to download Firecracker binary — will be fetched on-demand")
 
 
 def validate_resources() -> dict:
@@ -539,9 +525,7 @@ def validate_resources() -> dict:
         )
 
     if cpu_cores < RECOMMENDED_CPU_CORES:
-        print_warn(
-            f"CPU: {cpu_cores} cores (recommended {RECOMMENDED_CPU_CORES}+)"
-        )
+        print_warn(f"CPU: {cpu_cores} cores (recommended {RECOMMENDED_CPU_CORES}+)")
     else:
         print_success(f"CPU: {cpu_cores} cores ({cpu_model})")
 
