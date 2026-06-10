@@ -12,12 +12,12 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// BuildVersion is set at build time via ldflags: -X mvmctl/internal/infra/version.BuildVersion=1.0.0
+// BuildVersion is set at build time via ldflags: -X mvmctl/internal/lib/version.BuildVersion=1.0.0
 var BuildVersion string
 
 // SourceDir is the source directory embedded at build time via:
 //
-//	-ldflags "-X mvmctl/internal/infra/version.SourceDir=$(pwd)"
+//	-ldflags "-X mvmctl/internal/lib/version.SourceDir=$(pwd)"
 //
 // When set, GetGitVersionInfo() starts its search from SourceDir instead of
 // os.Getwd(), matching Python's Path(__file__).parent.parent.parent which

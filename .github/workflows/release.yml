@@ -53,10 +53,7 @@ jobs:
 
       - name: Build binary
         run: |
-          mkdir -p dist
-          CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-s -w -X 'mvmctl/internal/infra/version.BuildVersion=${GITHUB_REF_NAME#v}'" \
-            -o dist/mvm ./cmd/mvm/
+          ./scripts/build.sh release --version "${GITHUB_REF_NAME#v}"
 
       - name: Smoke test binary
         run: |
