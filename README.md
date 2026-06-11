@@ -10,7 +10,7 @@
 
 ## Why mvmctl?
 
-- ⚡ **Blazing fast** -- VMs boot in milliseconds, not minutes
+- ⚡ **Blazing fast** -- VMs boot in ~1 second (loop-mount) or ~4 seconds (guestfs), not minutes
 - 🔥 **Powered by Firecracker** -- AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
 - 🛡️ **Secure by default** -- Hardware-level isolation with KVM
 - 📦 **Single binary** -- One statically-linked Go binary, no runtime dependencies
@@ -20,7 +20,7 @@
 - 🚧 **Pre-production** -- Still under active development
 
 ```bash
-# Create and SSH into a VM in under 60 seconds
+# Create and SSH into a VM in under 10 seconds
 mvm vm create myvm --image ubuntu:24.04
 mvm ssh myvm
 ```
@@ -53,12 +53,13 @@ mvm ssh myvm
 
   Ubuntu/Debian:
   ```bash
-  sudo apt-get install -y iproute2 iptables nftables cloud-image-utils qemu-utils e2fsprogs kmod
+  sudo apt-get install -y iproute2 iptables nftables qemu-utils e2fsprogs util-linux procps kmod openssh-client tar sudo passwd
   ```
   Arch Linux:
   ```bash
-  sudo pacman -S --needed iproute2 iptables nftables qemu e2fsprogs kmod
+  sudo pacman -S --needed iproute2 iptables nftables qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow
   ```
+  Optional (for ISO cloud-init mode only): `cloud-image-utils` (Ubuntu/Debian) or `cloud-utils` (Arch)
 - **Root access (one-time):** run `mvm host init` once to create the `mvm` group and a sudoers drop-in; normal `mvm` commands require no `sudo` after that
 - **Environment variables:** Configure runtime behavior via `MVM_*` variables. See [docs/REFERENCES.md](docs/REFERENCES.md#environment-variables) for the full list.
 
@@ -66,16 +67,19 @@ mvm ssh myvm
 
 ## Installation
 
-### 1. Download prebuilt binary (recommended -- once a release is tagged)
+### 1. Download prebuilt binary (recommended)
 
 No Go required:
 
 ```bash
 curl -L -o mvm https://github.com/AlanD20/mvmctl/releases/latest/download/mvm
 chmod +x mvm
-sudo mv mvm /usr/local/bin/
+mkdir -p ~/.local/bin
+mv mvm ~/.local/bin/
 mvm --help
 ```
+
+> Make sure `~/.local/bin` is in your `$PATH`. Most modern Linux distros include it by default.
 
 ### 2. Build from source
 
@@ -83,7 +87,7 @@ mvm --help
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
 ./scripts/build.sh
-sudo cp ./mvm /usr/local/bin/
+cp ./mvm ~/.local/bin/
 mvm --help
 ```
 
@@ -179,7 +183,7 @@ mvm bin pull firecracker --version 1.15.0               # Download Firecracker +
 mvm bin pull firecracker --git-ref my-branch             # Build from source at a git ref
 mvm bin default firecracker                              # Set default binary
 mvm key create mykey --default              # Generate SSH key
-mvm key add mykey ./id_ed25519.pub          # Add existing public key
+mvm key import mykey ./id_ed25519.pub      # Import existing public key
 mvm key inspect mykey                       # Inspect key details
 mvm key export mykey ./backup               # Export keypair to directory
 ```
@@ -243,9 +247,8 @@ cd mvmctl
 ### Release build
 
 ```bash
-./scripts/build.sh release --version 0.2.0
-./dist/mvm --version
-sudo cp dist/mvm /usr/local/bin/mvm
+./scripts/build.sh release
+cp dist/mvm ~/.local/bin/mvm
 ```
 
 See [docs/RELEASE.md](docs/RELEASE.md) for detailed build and release instructions.
@@ -258,10 +261,10 @@ Common issues and quick fixes:
 
 | Issue | Solution |
 |-------|----------|
-| **Permission denied: /dev/kvm** | If missing: `sudo modprobe kvm kvm_intel`. If unreadable: `sudo usermod -aG kvm $USER` then log out/back in |
+| **Permission denied: /dev/kvm** | If missing: `sudo modprobe kvm && sudo modprobe kvm_intel` (or `kvm_amd`). If unreadable: `sudo usermod -aG kvm $USER` then log out/back in |
 | **Bridge not found** | Run `mvm host init` once |
 | **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs myvm --follow` |
-| **Kernel not found** | `mvm kernel pull` |
+| **Kernel not found** | `mvm kernel pull --type firecracker` |
 | **Image not found** | `mvm image pull ubuntu:24.04` |
 | **nocloud-net server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
 
@@ -275,12 +278,11 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for complete troubleshoot
 
 ## Contributing
 
-Contributions are welcome! See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for the full guide on:
-- Development setup
-- Running tests and linting
-- Adding new commands and images
-- Build system and version bumping
-- Development guidelines
+Contributions are welcome! See [docs/STANDARDS.md](docs/STANDARDS.md) for Go coding standards and conventions.
+
+- Development setup: `git clone` + `./scripts/build.sh`
+- Running tests: `go test ./...` and `uv run scripts/run_tests.py`
+- Build system: `./scripts/build.sh` (dev) or `./scripts/build.sh release --version X.Y.Z`
 
 ---
 

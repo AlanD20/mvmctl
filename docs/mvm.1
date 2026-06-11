@@ -59,38 +59,32 @@ Load VM from snapshot.
 Show detailed information about a VM.
 .TP
 .BR vm\ start
-Start the specified stopped VM.
+Start one or more stopped VMs.
 .TP
 .BR vm\ stop
-Stop the specified running VM.
+Stop one or more running VMs.
 .TP
 .BR vm\ pause
-Pause the specified running VM.
+Pause one or more running VMs.
 .TP
 .BR vm\ resume
-Resume the specified paused VM.
+Resume one or more paused VMs.
 .TP
 .BR vm\ reboot
-Reboot the specified VM.
-.TP
-.BR vm\ import
-Create a VM from a portable config file.
-.TP
-.BR vm\ export
-Export a VM's configuration to portable JSON.
+Reboot one or more VMs.
 .TP
 .BR vm\ attach-volume
-Attach a volume to a running or stopped VM.
+Attach a volume to a running VM.
 .TP
 .BR vm\ detach-volume
-Detach a volume from a running or stopped VM.
+Detach a volume from a running VM.
 .SS Host Configuration
 .TP
 .BR host\ init
 Apply host configuration (KVM, modules, ip_forward, mvm group, sudoers).
 .TP
 .BR host\ status
-Show current host configuration state.
+Show current host configuration state vs expected.
 .TP
 .BR host\ info
 Show host hardware, limits, and VM capacity projection.
@@ -147,7 +141,7 @@ Pre-decompress image to ready pool.
 List local Firecracker versions.
 .TP
 .BR bin\ pull
-Pull a specific Firecracker release.
+Download a Firecracker version or build from source.
 .TP
 .BR bin\ default
 Set the active Firecracker version.
@@ -194,11 +188,11 @@ Sync firewall rules between database and host.
 .BR key\ ls
 List cached keys.
 .TP
-.BR key\ add
+.BR key\ import
 Import an existing public key.
 .TP
 .BR key\ create
-Generate a new ED25519 keypair.
+Generate a new SSH keypair (ed25519, rsa, or ecdsa).
 .TP
 .BR key\ rm
 Remove a key from the cache.
@@ -240,6 +234,9 @@ Configuration management (get, set, ls, reset).
 .BR cp
 Copy files between host and microVMs.
 .TP
+.BR env
+Environment workflow management (apply, ls, destroy).
+.TP
 .BR init
 Initialize mvm (guided setup wizard).
 .TP
@@ -257,26 +254,23 @@ Show Firecracker OS log instead of boot log.
 Follow log output in real-time (tail -f style).
 .RE
 .TP
-.BR version
-Show version and exit.
-.TP
 .BR help
 Show help for mvm or a subcommand.
-.SH SERVICE BINARIES
-The project ships three service binaries compiled into the \fBmvm-services\fR
-multi-call binary. These are extracted on first run via \fBmvm init\fR.
+.SH SERVICE COMMANDS
+All services are compiled into the single \fBmvm\fR binary.
+No separate service binaries, no extraction step.
 .TP
-.BR mvm-console-relay
+.BR mvm\ run\ console\ relay
 Bidirectional PTY-to-socket relay for VM serial console access.
 Bridges Firecracker's serial console (Unix socket) to a host PTY,
 enabling interactive console access without SSH.
 .TP
-.BR mvm-nocloud-server
+.BR mvm\ run\ nocloudnet\ serve
 HTTP server for the nocloud-net cloud-init datasource.
 Serves meta-data, user-data, and network-config to VMs during
 cloud-init provisioning.
 .TP
-.BR mvm-provision
+.BR mvm\ run\ provision
 Privileged helper for loop-mount provisioning of root filesystem
 images. Handles partition detection, mounting, file operations,
 chroot commands, and filesystem resize (ext4/btrfs grow and shrink).
@@ -289,9 +283,6 @@ Override cache directory (default: ~/.cache/mvmctl).
 .BR MVM_CONFIG_DIR
 Override config directory (default: ~/.config/mvmctl).
 .TP
-.BR MVM_FIRECRACKER_BIN
-Override Firecracker binary path.
-.TP
 .BR MVM_LOG_LEVEL
 Set log level (DEBUG, INFO, WARNING, ERROR, default: WARNING).
 .TP
@@ -300,16 +291,19 @@ Local mirror directory for downloaded assets (default: not set).
 .TP
 .BR MVM_TEMP_DIR
 Override temp directory (default: /tmp/mvmctl).
+.TP
+.BR MVM_ESCALATED
+Set by sudo wrapper to indicate privilege escalation (default: not set).
+.TP
+.BR MVM_SUDO_RESTART
+Set internally when re-running with sudo for host init (default: not set).
 .SH FILES
 .TP
 .I ~/.cache/mvmctl/
-Cache directory for binaries, kernels, images, VM state.
-.TP
-.I ~/.config/mvmctl/config.json
-User configuration file.
+Cache directory for binaries, kernels, images, volumes, VM state.
 .TP
 .I ~/.cache/mvmctl/mvmdb.db
-SQLite database (images, kernels, binaries, VMs, networks, keys).
+SQLite database (canonical store for images, kernels, binaries, VMs, networks, keys, settings).
 .SH EXAMPLES
 .PP
 One-time host setup:
@@ -365,7 +359,7 @@ Linux (x86_64 or aarch64) - Firecracker only runs on Linux
 .IP \(bu 2
 KVM access (/dev/kvm) - add user to kvm group
 .IP \(bu 2
-System packages: iproute2, iptables, nftables, qemu-utils
+System packages: iproute2, iptables/nftables, qemu-utils, e2fsprogs, util-linux, openssh-client, tar, procps, kmod, sudo, passwd
 .SH NOTES
 .IP \(bu 2
 After \fBsudo mvm host init\fR, normal mvm commands require no sudo.

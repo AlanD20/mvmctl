@@ -69,7 +69,6 @@ These are required for pulling, importing, and converting VM images.
 | `mkfs.ext4` | Formatting extracted rootfs images | `e2fsprogs` | `e2fsprogs` |
 | `blkid` | Detecting root partitions and UUIDs | `util-linux` | `util-linux` |
 | `sfdisk` | Partition table manipulation | `util-linux` | `util-linux` |
-| `dumpe2fs` | Filesystem inspection | `e2fsprogs` | `e2fsprogs` |
 | `truncate` | Creating sparse files for new images | `coreutils` | `coreutils` |
 | `dd` | Raw block-level file copy | `coreutils` | `coreutils` |
 | `du` | Disk usage reporting | `coreutils` | `coreutils` |
@@ -93,14 +92,14 @@ Required when using cloud-init to configure VMs.
 
 Both `mvm vm create` (rootfs provisioning) and `mvm image pull`/`mvm image import`
 (image optimization — shrink, deblob, OS detection) use the same provisioning backend.
-**Loop-mount is the default and recommended** (~200ms per VM).
+**Loop-mount is the default and recommended** (~1.2s end-to-end creation, ~2.8s to SSH-ready per benchmark data).
 
 ### E1. Loop-Mount (Default)
 
 The `mvm run provision` subcommand is a hidden CLI command built into the same `mvm` binary.
 It uses system tools directly — no runtime dependencies.
 
-**Installed by:** `mvm init` (extracts the `mvm` binary itself, which contains the `run provision` subcommand).
+**Installed by:** The `mvm` binary is a compiled Go binary — the `run provision` subcommand is built in at compile time. No extraction step needed.
 
 | Binary | Purpose | Debian/Ubuntu | Arch |
 |--------|---------|---------------|------|
@@ -122,7 +121,7 @@ It uses system tools directly — no runtime dependencies.
 ### E2. libguestfs (Alternative)
 
 libguestfs provides filesystem-agnostic rootfs access via a QEMU appliance.
-Slower (~2600ms per VM) but more capable OS detection. Enable with:
+Slower (~3.9s creation, ~5.8s to SSH-ready per benchmark data) but more capable OS detection. Enable with:
 
 ```bash
 mvm config set settings guestfs_enabled true
@@ -136,7 +135,8 @@ mvm config set settings guestfs_enabled true
 | RHEL/Fedora | `sudo dnf install libguestfs libguestfs-tools supermin` |
 | Arch | `sudo pacman -S libguestfs supermin` |
 
-> **Note:** The Go libguestfs bindings are **not required** — the codebase uses the `libguestfs` C library directly via Go's `cgo` interface. `mvm init` checks for the library and configures the sudoers entry for `supermin` automatically.
+> **Note:** The codebase uses the `guestfish` CLI tool as a subprocess — no cgo or Go bindings required.
+> `mvm init` checks for the `guestfish` binary and configures the sudoers entry for `supermin` automatically.
 
 ---
 
@@ -160,7 +160,6 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 **Development libraries:**
 - `libelf-dev` / `libelf` (Debian/Arch)
 - `libssl-dev` / `openssl` (Debian/Arch)
-- `libncurses-dev` / `ncurses` (Debian/Arch)
 
 ---
 
@@ -174,7 +173,8 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 | `kvm_intel` or `kvm_amd` | Vendor-specific KVM extensions |
 | `tun` | TAP networking |
 | `bridge` | Bridge networking (loaded on demand) |
-| `vhost_vsock` | Console relay |
+| `vhost_vsock` | Checked during host detection (loaded on demand) |
+| `nft_chain_nat` | nftables NAT support (loaded on demand) |
 
 ### Hardware
 
@@ -187,16 +187,16 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 
 | Command | External Binaries Invoked |
 |---------|--------------------------|
-| `mvm host init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `ip`, `iptables`/`nft`, `modprobe` |
+| `mvm host init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `lsmod`, `iptables`/`nft`, `modprobe` |
 | `mvm host clean` | `sudo`, `ip`, `iptables`/`nft` |
 | `mvm host reset` | `sudo`, `groupdel`, `sysctl` |
 | `mvm network create` | `ip`, `iptables`/`nft` |
 | `mvm network rm` / `sync` | `ip`, `iptables`/`nft` |
 | `mvm image pull` | `qemu-img` (may trigger conversion) |
-| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
+| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs`, `du`, `chmod`, `dd` |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
 | `mvm kernel pull --type firecracker` | (internal logic — download only) |
-| `mvm key` | `create` → `ssh-keygen`; `add/ls/rm/inspect/export/default` → internal only |
+| `mvm key` | `create` → `ssh-keygen`; `import/ls/rm/inspect/export/default` → internal only |
 | `mvm bin` | `pull/ls/rm/default` → internal only (downloads from GitHub API) |
 | `mvm vm create` | `firecracker` + `jailer`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
 | `mvm vm start/stop/reboot/pause/resume` | `firecracker`, `ip`, `iptables`/`nft` |

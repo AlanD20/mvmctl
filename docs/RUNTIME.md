@@ -25,12 +25,12 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
 ### 1.1 Loop-Mount Backend (Primary, ~200ms)
 
 - **Type:** `model.ProvisionerTypeLoopMount`
-- **Entry:** `mvm run loopmount` (compiled into the same `mvm` binary)
+- **Entry:** `mvm run provision` (compiled into the same `mvm` binary)
 - **Architecture:**
   ```
-  api.Operation.VMCreate() → vm.Service → provisioner.Run() → system.SpawnService("mvm", "run", "loopmount") → losetup/mount/chroot
+  api.Operation.VMCreate() → vm.Service → provisioner.Run() → system.SpawnService("mvm", "run", "provision") → losetup/mount/chroot
   ```
-- **Speed:** ~200ms per VM (full provisioning: SSH keys, DNS, hostname, resize)
+- **Speed:** ~1.2s average end-to-end creation (provisioning + Firecracker boot), ~2.8s to SSH-ready (benchmark data)
 - **Dependencies:** `losetup`, `mount`, `umount`, `blkid`, `blockdev`, `chroot`, `resize2fs`, `e2fsck`, `tune2fs`, `fstrim`, `btrfs`
 - **Sudo:** Requires passwordless sudo for `mvm-provision` (via `mvm host init`)
 - **Communication:** JSON operation list on stdin, JSON results on stdout
@@ -46,29 +46,29 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
   - Write arbitrary files with mode/uid/gid (base64-encoded content)
   - Execute chroot commands (tries multiple shell paths: /bin/sh, /bin/bash, /bin/dash, /bin/ash, /usr/bin/sh, /usr/bin/bash, /bin/busybox, /usr/bin/busybox)
 - **Binary Flow:**
-  ```
-  1. truncate file (pre-loop for grow resize)
-  2. losetup -f -P --show <image>          # Set up loop with partition scanning
-  3. Detect root partition                  # p1/p2/largest Linux fs/raw device
-  4. Detect filesystem type via blkid       # fallback: ext4
-  5. mount <root_part> <mount_point>
-  6. Write all files with base64 decode, correct mode/uid/gid
-  7. Copy directories from host to guest (recursive os.walk)
-  8. chroot <mount_point> for each command  # tries multiple shell paths
-  9. Post-mount resize:
-     - ext4 shrink: e2fsck + resize2fs -M → truncate
-     - ext4 grow: e2fsck + resize2fs
-     - btrfs grow: btrfs filesystem resize max
-     - btrfs shrink: fstrim + btrfs filesystem resize → truncate
-  10. umount + losetup -d (always via finally)
-  ```
+```
+1. truncate file (pre-loop for grow resize)
+2. losetup -f -P --show <image>          # Set up loop with partition scanning
+3. Detect root partition                  # p1/p2/largest Linux fs/raw device
+4. Detect filesystem type via blkid       # fallback: ext4
+5. mount <root_part> <mount_point>
+6. Write all files with base64 decode, correct mode/uid/gid
+7. Copy directories from host to guest (recursive os.walk)
+8. chroot <mount_point> for each command  # tries multiple shell paths (60s timeout each)
+9. Post-mount resize:
+   - ext4 shrink: e2fsck + resize2fs -M → truncate
+   - ext4 grow: e2fsck + resize2fs
+   - btrfs grow: btrfs filesystem resize max
+   - btrfs shrink: fstrim + btrfs filesystem resize → truncate
+10. umount + losetup -d (always via finally)
+```
 - **Files:**
   - `internal/service/loopmount/provisioner.go` — Provisioning engine (losetup/mount/chroot)
   - `internal/service/loopmount/entry.go` — Config struct + `Run()` entry point
   - `internal/service/loopmount/spawn.go` — `Spawn()` via `system.SpawnService()`
   - `internal/service/loopmount/wire.go` — JSON wire protocol types
   - `internal/lib/provisioner/backend.go` — Backend interface
-  - `internal/lib/provisioner/content.go` — Shared provisioning content builders
+  - `internal/infra/provcontent/content.go` — Shared provisioning content builders
 
 ### 1.2 GuestFS Backend (Opt-in, ~2600ms)
 
@@ -78,29 +78,29 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
   ```
   api.Operation.VMCreate() → vm.Service → provisioner.Run() → guestfs.Backend → libguestfs (QEMU appliance)
   ```
-- **Speed:** ~2600ms per VM (QEMU appliance launch is the dominant cost)
+- **Speed:** ~3.9s average end-to-end creation, ~5.8s to SSH-ready (benchmark data — exceeds 6s threshold on most images)
 - **Dependencies:** `libguestfs` (system package), `supermin`, `qemu`, libguestfs fixed appliance
 - **Sudo:** Requires passwordless sudo for `supermin`
-- **Used when:** GuestFS is enabled via the `guestfs_enabled` setting (opt-in). Falls back to loop-mount when GuestFS is not enabled.
+- **Used when:** GuestFS is enabled via the `guestfs_enabled` setting (opt-in). Loop-mount is the default when GuestFS is not enabled.
 - **Capabilities:** Same as Loop-Mount (same operations via different mechanism)
 - **Key Differences from Loop-Mount:**
   - Uses `libguestfs` API instead of JSON subprocess protocol
   - OS detection reads `/etc/os-release` via guestfs `ReadFile()` instead of `chroot`
   - SSH setup detects init system: systemd/OpenRC/sysvinit
-  - Supports user creation (passwd/shadow/sudoers) instead of only root
-  - Cloud-init inject copies files via guestfs `Write()` instead of directory copy
+  - Supports user creation via `useradd` (with sudoers drop-in) instead of only root
+  - Cloud-init inject copies files via guestfish `upload` command instead of directory copy
   - Shrink uses `ZeroFreeSpace()` + `e2fsck` + `Resize2fsSize()` with safety margin
-  - Deblob/fstab-fix uses shared `ProvisionerContent` builders (same as loop-mount)
+  - Deblob uses shared `ProvisionerContent` builders for SSH config and first-boot scripts; fstab fix is inline in guestfs scripts
 - **Appliance Management:**
-  - Fixed appliance built by `guestfs.Service.BuildAppliance()` via `libguestfs-make-fixed-appliance`
+  - Fixed appliance built by `guestfs.BuildAppliance()` via `libguestfs-make-fixed-appliance`
   - Cached at `~/.cache/mvmctl/appliance/` (requires `kernel`, `initrd`, `root` files)
   - `guestfs.KernelDetector.FindBestKernel()` selects a kernel with virtio drivers for appliance build
   - Stale state cleanup: orphaned QEMU processes, lock files, daemon sockets, cached appliances
-  - Pruning via `guestfs.Service.PruneAppliance()` (called by `mvm cache prune misc`)
+  - Pruning via `guestfs.PruneAppliance()` (called by `mvm cache prune misc`)
 - **Files:**
   - `internal/lib/provisioner/guestfs/provisioner.go` — All rootfs operations via guestfs API
   - `internal/lib/provisioner/guestfs/base.go` — Low-level wrapper: handle creation, mount, partition extraction
-  - `internal/lib/provisioner/guestfs/service.go` — Appliance building, stale state cleanup
+  - `internal/lib/provisioner/guestfs/utils.go` — Appliance building, stale state cleanup
   - `internal/lib/provisioner/guestfs/kernel_detector.go` — Finds suitable appliance kernel
 
 ### 1.3 Backend Selection
@@ -116,18 +116,18 @@ All callers use `op.ProvisionerType` directly. The `Provisioner` struct in `inte
 
 ### 1.4 Shared Provisioner Content
 
-Both backends share provisioning operation definitions via `ProvisionerContent` in `internal/lib/provisioner/content.go`:
+Both backends share provisioning operation definitions via `ProvisionerContent` in `internal/infra/provcontent/content.go`:
 
 | Content Builder | Purpose |
 |----------------|---------|
 | `BuildHostnameOps(hostname)` | /etc/hostname + /etc/hosts entries |
-| `BuildDNSOps(dns_server)` | /etc/resolv.conf with nameserver |
-| `BuildSSHOps(user, pubkeys)` | Authorized keys and user account setup |
+| `BuildDNSOps(dnsServer)` | /etc/resolv.conf with nameserver |
+| `BuildSSHOps(user, sshPubkeys)` | Authorized keys and user account setup |
 | `BuildCloudInitDisableOps()` | Datasource blocking + service masking |
-| `BuildCloudInitInjectOps(dir)` | Copy cloud-init seed directory tree |
-| `BuildResizeOps(target_size)` | Grow filesystem to target size |
-| `BuildShrinkOps(limit_bytes=0)` | Shrink filesystem to minimum (0) or limit bytes |
-| `BuildDeblobOps(os_type)` | OS-specific cache cleanup (apt, yum, apk, pacman) |
+| `BuildCloudInitInjectOps(cloudInitDir)` | Copy cloud-init seed directory tree |
+| `BuildResizeOps(targetSizeBytes)` | Grow filesystem to target size |
+| `BuildShrinkOps(limitBytes)` | Shrink filesystem to minimum (pass 0 for minimum) |
+| `BuildDeblobOps(osType)` | OS-specific cache cleanup (apt, yum, apk, pacman) |
 | `BuildFixFstabOps()` | PARTUUID → /dev/vda in /etc/fstab |
 
 The loop-mount and guestfs backends each consume these same builders but execute them differently (JSON subprocess vs. guestfs API).
@@ -140,7 +140,7 @@ Cloud-init provisioning has four modes (ordered from most to least integrated):
 
 | Mode | Flag | Mechanism | Speed | Use Case |
 |------|------|-----------|-------|----------|
-| **inject** | `--cloud-init-mode inject` | Direct injection into rootfs via loop-mount provisioner (guestfs fallback) | ~200ms | Primary mode — no external dependencies, files persistent in rootfs |
+| **inject** | `--cloud-init-mode inject` | Direct injection into rootfs via loop-mount provisioner (or guestfs alternative) | ~200ms | Primary mode — no external dependencies, files persistent in rootfs |
 | **net** | `--cloud-init-mode net` | HTTP server (nocloud-net datasource) | ~50ms | Dynamic cloud-init, no rootfs modification required |
 | **iso** | `--cloud-init-mode iso` | Cloud-init seed ISO via `cloud-localds` | ~500ms | Legacy mode for specific images that require ISO datasource |
 | **off** | `--cloud-init-mode off` | No cloud-init (datasources blocked, services masked) | 0ms | Minimal VM, no provisioning needed |
@@ -153,7 +153,7 @@ api.Operation.VMCreate()
     → Generate user-data, meta-data, network-config
     → cloudinit.Manager.WriteConfigFiles()
     → provisioner.InjectCloudInit(cloudInitDir)
-      → loop-mount backend copies files into rootfs
+      → loop-mount (or guestfs) backend copies files into rootfs
   → Continue with VM boot (files are baked into rootfs)
 ```
 
@@ -169,7 +169,7 @@ api.Operation.VMCreate()
       → Spawns nocloud-net HTTP server via system.SpawnService()
       → Binds to bridge gateway IP (never 0.0.0.0)
       → Adds firewall rule allowing VM access (via the active backend — default nftables)
-  → VM boots with ds=nocloud-net kernel parameter
+  → VM boots with ds=nocloud;seedfrom=http://<gateway>:<port>/ kernel parameter
   → Server stays running for the lifetime of the VM (stopped on VM removal)
 ```
 
@@ -180,7 +180,7 @@ api.Operation.VMCreate()
   → cloudinit.Provisioner.Prepare()
     → Generate user-data, meta-data, network-config
     → cloudinit.Manager.WriteConfigFiles()
-    → cloudinit.Manager.CreateSeedISO() (via genisoimage subprocess)
+    → cloudinit.Manager.CreateSeedISO() (via cloud-localds subprocess)
   → ISO attached as secondary drive to Firecracker VM
   → VM boots, cloud-init reads from ISO datasource
 ```
@@ -217,9 +217,9 @@ binary. At runtime, `mvm run <service>` dispatches to the appropriate entry poin
 
 | Service | Entry Point | Runs As | Purpose |
 |---------|-------------|---------|---------|
-| `mvm run console` | `console.Run(ctx, cfg)` | user | PTY-to-socket relay for serial console |
-| `mvm run nocloudnet` | `nocloudnet.Run(ctx, cfg)` | user | HTTP server for cloud-init nocloud-net |
-| `mvm run loopmount` | `loopmount.Run(ctx, cfg)` | **root** (sudo) | Loop-mount rootfs provisioning |
+| `mvm run console relay` | `console.Run(ctx, cfg)` | user | PTY-to-socket relay for serial console |
+| `mvm run nocloudnet serve` | `nocloudnet.Run(ctx, cfg)` | user | HTTP server for cloud-init nocloud-net |
+| `mvm run provision` | `loopmount.Run(ctx, cfg)` | **root** (sudo) | Loop-mount rootfs provisioning |
 
 Each service follows a consistent three-function pattern:
 - **`Config`** struct — holds all configuration for the service.
@@ -243,7 +243,7 @@ Each service follows a consistent three-function pattern:
                                                                     │
                                                               console.log
   ```
-- **Speed:** Real-time (`select.select()` multiplexing between PTY, socket, and log file)
+- **Speed:** Real-time (Go `select` + channels + `SetDeadline()` multiplexing between PTY, socket, and log file)
 - **Signals:** SIGTERM/SIGINT for graceful shutdown (PID file + socket cleanup)
 - **PID file:** `$MVM_CACHE_DIR/vms/<vm-id>/console.pid`
 - **Socket:** `$MVM_CACHE_DIR/vms/<vm-id>/console.sock`
@@ -268,13 +268,13 @@ Each service follows a consistent three-function pattern:
                                                                            network-config
   ```
 - **Port range:** 8000–9000 (auto-allocated via `socket.bind()` test)
-- **Security:** Binds to bridge gateway IP only (never `0.0.0.0`), firewall rule in `MVM_NOCLOUD_NET_INPUT_CHAIN` (via active backend)
+- **Security:** Binds to bridge gateway IP only (never `0.0.0.0`), firewall rule in `MVM-NOCLOUDNET-INPUT` chain (via active backend)
 - **PID file:** `$MVM_CACHE_DIR/vms/<vm-id>/nocloud-server.pid`
 - **Headers:** Cache-disabling headers (`Cache-Control: no-cache, no-store, must-revalidate`)
 
 ### 3.4 Loop-Mount Provisioner Service
 
-- **Entry:** `mvm run loopmount`
+- **Entry:** `mvm run provision`
 - **Purpose:** Rootfs provisioning via loop-mount (SSH keys, hostname, DNS, resize, cloud-init inject)
 - **Files:**
   - `internal/service/loopmount/provisioner.go` — Provisioning engine (losetup/mount/chroot)
@@ -283,16 +283,16 @@ Each service follows a consistent three-function pattern:
   - `internal/service/loopmount/wire.go` — JSON wire protocol types
 - **Architecture:**
   ```
-  vm.Service → provisioner.Run() → loopmount.Spawn(ctx, cfg, wireInput)
+   vm.Service → provisioner.Run() → loopmount.Spawn(ctx, cfg, wireInput)
                                                         │
-                                                 system.SpawnService("mvm", "run", "loopmount")
+                                                 system.SpawnService("mvm", "run", "provision")
                                                         │
                                     JSON ops stdin → losetup/mount/chroot → JSON results stdout
   ```
 - **Communication:** Receives JSON operation list on stdin, writes JSON results to stdout
-- **Timeout:** 60 seconds (configurable via `LOOP_MOUNT_TIMEOUT` Python constant in `core/_shared/_loopmount/_manager.py`)
+- **Timeout:** 60 seconds per chroot command (hardcoded in `provisioner.go`)
 - **Sudo:** Requires passwordless sudo via `/etc/sudoers.d/mvm-provision` drop-in
-- **Speed:** ~200ms per VM (full provisioning: SSH + DNS + hostname + resize)
+- **Speed:** ~1.2s average end-to-end (benchmark data)
 
 ### 3.5 Service Lifecycle
 
@@ -301,7 +301,7 @@ Each service follows a consistent three-function pattern:
 | **Init** | `mvm host init` creates sudoers drop-in, iptables chains, cache dirs | `host.Service.Init()` |
 | **Create VM** | Start NoCloud server (net mode) or inject cloud-init (inject mode) | `nocloudnet.Spawn()` / `provisioner.InjectCloudInit()` |
 | **Create VM** | Start console relay (unless `--no-console`) | `console.Spawn()` |
-| **Runtime** | Provision rootfs via loop-mount or guestfs | `provisioner.Run()` |
+| **Runtime** | Provision rootfs via loop-mount or guestfs | `provisioner.Run()` (via `mvm run provision`) |
 | **Remove VM** | Stop console relay + NoCloud server + clean firewall rules | `console.Stop()`, `nocloudnet.Stop()` |
 | **Cache prune** | Clean up stale PID files + orphan processes | `cache.Service.Prune()` |
 
@@ -324,8 +324,8 @@ A unified `FirewallTracker` in `internal/lib/firewall/tracker.go` delegates to t
 
 | Scenario | Recommended Backend | Rationale |
 |----------|-------------------|-----------|
-| Normal VM creation (default) | Loop-Mount provisioning + inject cloud-init | Fastest path (~200ms provisioning, no external deps) |
-| No sudo for mvm-provision | GuestFS provisioning | Falls back automatically if `mvm-provision` binary unavailable |
+| Normal VM creation (default) | Loop-Mount provisioning + inject cloud-init | Fastest path (~1.2s creation, ~2.8s to SSH) |
+| No sudo for mvm-provision | GuestFS provisioning | Uses `guestfs_enabled` setting to opt-in (~3.9s creation) |
 | Minimal VM, no customization | Off mode cloud-init | Fastest boot, no provisioning at all |
 | Dynamic cloud-init needed | Net mode cloud-init | Config served over network, no rootfs modification |
 | Custom ISO required | ISO mode cloud-init | Use pre-built cloud-init ISO via `cloud-localds` |
@@ -337,18 +337,42 @@ A unified `FirewallTracker` in `internal/lib/firewall/tracker.go` delegates to t
 
 ## 6. Performance Comparison
 
-| Operation | Loop-Mount | GuestFS | Improvement |
-|-----------|-----------|---------|-------------|
-| Full provisioning (SSH + DNS + hostname + resize) | ~200ms | ~2600ms | **13x faster** |
-| Partition extraction | ~500ms | ~2000ms | **4x faster** |
-| Filesystem grow (e.g., 3GB → 8GB) | ~50ms | ~1000ms | **20x faster** |
-| Filesystem shrink (ext4) | ~100ms | ~1500ms | **15x faster** |
-| Filesystem shrink (btrfs) | ~200ms | ~1500ms | **7.5x faster** |
-| Console relay startup | ~10ms | N/A | — |
-| NoCloud server startup | ~50ms | N/A | — |
-| OS detection | ~100ms | ~600ms | **6x faster** |
+Benchmark data from `benchmarks/results.json` (2026-06-07, kernel official:7.0.11):
 
-The loop-mount backend is the default and preferred path. GuestFS is an opt-in alternative enabled via the `guestfs_enabled` setting.
+### End-to-End VM Creation (create_s — provisioning + Firecracker boot)
+
+| Image | Go Loop-Mount | Python Loop-Mount | Go GuestFS | Python GuestFS |
+|-------|--------------|-------------------|------------|----------------|
+| alpine | 0.9s | 1.4s | 3.7s | 2.8s |
+| ubuntu:24.04 | 1.4s | 2.2s | 4.0s | 3.4s |
+| ubuntu-minimal:24.04 | 1.1s | 1.6s | 3.4s | 3.0s |
+| archlinux | 1.5s | 2.1s | 4.0s | 3.4s |
+| debian:12 | 1.5s | 2.1s | 4.0s | 4.6s |
+| firecracker | 1.0s | 1.6s | 4.5s | 3.1s |
+| **Average** | **1.2s** | **1.8s** | **3.9s** | **3.4s** |
+
+### Full Lifecycle (total_s — create + SSH available)
+
+| Image | Go Loop-Mount | Python Loop-Mount | Go GuestFS | Python GuestFS |
+|-------|--------------|-------------------|------------|----------------|
+| alpine | 2.0s | 1.8s | 4.8s | 3.2s |
+| ubuntu:24.04 | 2.9s | 3.2s | 6.0s ❌ | 4.5s |
+| ubuntu-minimal:24.04 | 2.3s | 2.2s | 6.5s ❌ | 3.6s |
+| archlinux | 4.7s | 5.9s | 7.0s ❌ | 6.2s ❌ |
+| debian:12 | 2.7s | 3.9s | 6.0s ❌ | 6.5s ❌ |
+| firecracker | 2.2s | 2.1s | 6.6s ❌ | 3.7s |
+| **Average** | **2.8s** | **3.2s** | **5.8s ❌** | **4.5s** |
+
+❌ = exceeded 6s threshold
+
+### Key Takeaways
+
+- **Go loop-mount is the fastest path**: ~1.2s average creation, ~2.8s to SSH-ready
+- **Go vs Python (loop-mount)**: Go is ~1.5x faster for creation, comparable for total lifecycle
+- **GuestFS is 3x slower than loop-mount**: ~3.9s creation vs ~1.2s (Go), consistent across backends
+- **Go GuestFS underperforms Python GuestFS**: Go guestfs averaged 5.8s total (5/6 failed threshold) vs Python's 4.5s — the Go guestfs integration needs optimization
+- **Console relay startup**: ~10ms (negligible, no separate benchmark)
+- **NoCloud server startup**: ~50ms (negligible, no separate benchmark)
 
 ---
 
@@ -368,9 +392,9 @@ into the same binary. No separate service binaries, no symlinks, no extraction s
 Services are invoked via `mvm run <service>`:
 
 ```bash
-mvm run console          # Start console relay
-mvm run nocloudnet       # Start nocloud-net HTTP server
-mvm run loopmount        # Start loopmount provisioner (requires sudo)
+mvm run console relay     # Start console relay
+mvm run nocloudnet serve  # Start nocloud-net HTTP server
+mvm run provision         # Start loopmount provisioner (requires sudo)
 ```
 
 The CLI layer dispatches `mvm run <service>` to the appropriate service entry point.
@@ -378,7 +402,7 @@ Services are spawned in the background by the core layer via `system.SpawnServic
 
 ### Sudoers
 
-Only `mvm run loopmount` requires passwordless sudo. Managed by `mvm host init` which
+Only `mvm run provision` requires passwordless sudo. Managed by `mvm host init` which
 creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless sudo.
 
 ---
@@ -397,7 +421,7 @@ creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless 
 │  op.VMCreate(ctx, input)                                                    │
 │    ├── cloudinit.Provisioner.Prepare()  (prepare configs)                   │
 │    ├── provisioner.Run(ctx, provisionerType)  (select backend)              │
-│    │   ├── LoopMount → loopmount.Spawn() → system.SpawnService()           │
+│    │   ├── LoopMount → loopmount.Spawn() → system.SpawnService("provision")│
 │    │   │   └── losetup → mount → write files → chroot → resize → umount    │
 │    │   └── GuestFS   → guestfs.Backend → libguestfs (QEMU appliance)       │
 │    ├── console.Spawn()  (unless --no-console)                               │
@@ -429,8 +453,8 @@ creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless 
 │                      Service Layer (internal/service)                        │
 │                                                                             │
 │  All compiled into the single mvm binary                                    │
-│    ├── mvm run console     → console relay (PTY proxy)                      │
-│    ├── mvm run nocloudnet  → nocloud-net HTTP server                        │
-│    └── mvm run loopmount   → loopmount provisioner (requires sudo)          │
+│    ├── mvm run console relay    → console relay (PTY proxy)                 │
+│    ├── mvm run nocloudnet serve → nocloud-net HTTP server                   │
+│    └── mvm run provision        → loopmount provisioner (requires sudo)     │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
