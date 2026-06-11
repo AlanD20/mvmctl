@@ -1,17 +1,16 @@
 # Two-Phase Validation with Caller-Trusts-Callee
 
+**Status:** accepted
+**Date:** 2026-05-22
+
 Validation is split into two phases by layer. The API layer handles structural validation (format, existence, cross-field). Core Service/Controller classes do not validate caller input — they execute, detect state, and guard invariants. The trade-off favors speed over defensive duplication.
-
-## Status
-
-Accepted
 
 ## Context
 
 mvmctl is a speed-first CLI. Every redundant subprocess call in a defensive validation check adds 10-50ms of latency. Many of these checks duplicate what the operation naturally detects — `bridge_exists()` is called once to "validate" and again to branch execution.
 
 The codebase had three problems:
-1. **Validation scattered across all layers** — Request, Service, and Controller all had overlapping checks.
+1. **Validation scattered across all layers** — Input, Service, and Controller all had overlapping checks.
 2. **Speed erosion** — redundant subprocess calls accumulated across operations.
 3. **Blurred responsibility** — Service classes mixed validation, state detection, and execution in the same methods.
 
@@ -21,7 +20,7 @@ The codebase had three problems:
 - Format checks (CIDR syntax, name length, port ranges)
 - Existence/duplicate checks (does this ID/name exist?)
 - Cross-field constraints (cannot set X when Y is Z)
-- Lives in `*Input`/`*Request` classes in `api/inputs/`
+- Lives in `*Input`/`*Request` structs in `pkg/api/inputs/`
 
 **Phase 2 — Execution (Core layer, no validation):**
 - Service receives clean, validated data from the caller
@@ -47,4 +46,8 @@ A Service may check preconditions before an irreversible action (e.g., "are TAPs
 - **API layer carries more responsibility** — callers must validate completely before delegating.
 - **Cross-domain data access requires API as intermediary** — API layer queries VMRepository for a network operation, passes results to NetworkService.
 - **No defensive safety net** — a bug in the API layer's validation may reach Service. Mitigated by testing at the API boundary.
-- **Future reader may add validation "for safety"** — the ADR and CONTEXT.md exist to prevent this.
+- **Future reader may add validation "for safety"** — the ADR and docs/STANDARDS.md exist to prevent this.
+
+## Related Decisions
+
+- CONTEXT.md "Validation (caller's responsibility)" — the validation boundary is enforced by the layer separation.

@@ -1,3 +1,0 @@
-# Mount/Umount Consolidated in mvm-provision Binary
-
-All loop-mount and umount operations live exclusively in the `mvm-provision` subprocess binary, never in core Python code. The `--umount <path>` flag was added to `process.py` for stale mount cleanup (`LoopMountManager.cleanup_mount()`). Previously, `CacheService.clean_stale_provision_mounts()` called `run_cmd(["umount", ...], privileged=True)` directly — a raw privileged subprocess outside the provisioner binary and a cross-cutting concern scattered across layers. Consolidating ensures all filesystem mount/umount goes through a single compiled binary, reducing the privileged-subprocess surface area in core Python code and making audit/logging uniform.

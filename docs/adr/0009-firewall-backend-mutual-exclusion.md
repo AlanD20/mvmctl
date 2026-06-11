@@ -1,36 +1,36 @@
-# 0018 — Firewall Backend Mutual Exclusion — nftables vs iptables
+# Firewall Backend Mutual Exclusion — nftables vs iptables
 
 **Status:** accepted
-**Original number:** ADR-0010 (renumbered to 0018 on collision resolution)
+**Date:** 2026-05-22
 
-The project provides two independent firewall rule tracking backends: **nftables** (default) and **iptables**. These backends are **mutually exclusive** — a single session uses exactly one backend, never a combination. The `firewall_backend` setting acts as a toggle selector.
+The project provides two independent firewall rule tracking backends: **nftables** (default) and **iptables** (legacy). These backends are **mutually exclusive** — a single session uses exactly one backend, never a combination. The `firewall_backend` setting acts as a toggle selector.
 
 ## Mutual Exclusion Rule
 
-Only one backend is active for a given session. The selection logic in `FirewallTracker.__init__()`:
+Only one backend is active for a given session. The selection logic in `NewFirewallTracker()`:
 
-1. Read the `firewall_backend` setting (from user settings / `OVERRIDABLE_DEFAULTS`).
+1. Read the `firewall_backend` setting (from user settings / `OverridableDefaults`).
 2. If the value is `"nftables"` → use **NFTablesTracker**.
 3. Else → use **IPTablesTracker**.
 
-The setting defaults to `"nftables"` in `constants.py` (`OVERRIDABLE_DEFAULTS["settings"]["firewall_backend"] = "nftables"`). It can be changed via `mvm config set settings firewall_backend iptables`.
+The setting defaults to `"nftables"` in `internal/infra/constants.go` (`OverridableDefaults["settings"]["firewall_backend"] = "nftables"`). It can be changed via `mvm config set settings firewall_backend iptables`.
 
 ## Independence
 
-Each backend lives in its own directory under `core/_shared/` with its own tracker, repository, and resolver. They never share runtime state:
+Each backend lives in its own package under `internal/lib/firewall/` with its own tracker, repository, and rules. They never share runtime state:
 
 | Aspect | nftables | iptables |
 |--------|----------|----------|
 | Mechanism | `nft -f -` with atomic batch files | Per-rule iptables calls |
-| Implementation | `NFTablesTracker` → `NFTablesRuleRepository` | `IPTablesTracker` → `IPTablesRuleRepository` |
+| Implementation | `internal/lib/firewall/nftables.go` | `internal/lib/firewall/iptables.go` |
 | Batch flush | Single atomic `nft -f -` | Individual rule execution |
 | DB table | `nftables_rules` | `iptables_rules` |
-| Resolver | `NFTablesRuleResolver` | `IPTablesRuleResolver` |
+| Tracker | `NFTablesTracker` | `IPTablesTracker` |
 | Default | **Yes** (`firewall_backend: "nftables"`) | **No** (fallback when value is not `"nftables"`) |
 
 ## No Mixing
 
-The `FirewallTracker` selects the backend once at construction time. All `ensure_rule()`, `remove_rule()`, and batch operations go through the same backend for the lifetime of the tracker instance. Both DB tables (`iptables_rules`, `nftables_rules`) exist in the schema and are populated independently depending on which backend is active — they are never both used in the same session.
+The `FirewallTracker` selects the backend once at construction time. All `EnsureRule()`, `RemoveRule()`, and batch operations go through the same backend for the lifetime of the tracker instance. Both DB tables (`iptables_rules`, `nftables_rules`) exist in the schema and are populated independently depending on which backend is active — they are never both used in the same session.
 
 ## Why Default to nftables
 
@@ -54,5 +54,5 @@ mvm config set settings firewall_backend iptables
 
 ## Related Decisions
 
-- ADR-0006: Provisioning backend mutual exclusion (same architecture pattern for rootfs provisioning).
-- ADR-0009: Sudo privilege architecture — both backends use `PRIVILEGED_BINARIES` for privilege escalation.
+- ADR-0003: Provisioning backend mutual exclusion (same architecture pattern for rootfs provisioning).
+- ADR-0005: Sudo privilege architecture — both backends use `PrivilegedBinaries` for privilege escalation.

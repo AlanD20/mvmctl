@@ -180,7 +180,7 @@ mvm logs myvm --os
 
 **2. Kernel file is not readable by Firecracker.** Verify the kernel exists and the path is correct:
 ```bash
-mvm kernel ls --json | python3 -c "import sys,json; [print(k['path']) for k in json.load(sys.stdin)]"
+mvm kernel ls --json | jq -r '.[].path'
 ls -l <path_from_output>
 ```
 
@@ -198,7 +198,7 @@ ls -la ~/.cache/mvmctl/vms/*/firecracker.api.socket
 
 **5. Binary / kernel architecture mismatch.** A kernel built for `x86_64` won't boot under an `aarch64` Firecracker binary. Verify both match:
 ```bash
-file $(mvm kernel ls --json | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['path'])")
+file $(mvm kernel ls --json | jq -r '.[0].path')
 mvm bin ls
 ```
 
