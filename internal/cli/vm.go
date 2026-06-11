@@ -360,7 +360,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().
 		StringVar(&cpuTemplate, "cpu-template", "", "Path to CPU template JSON file (merged with nested-virt config if both set)")
 	cmd.Flags().BoolVar(&noConsole, "no-console", false, "Disable serial console")
-	cmd.Flags().StringVar(&bootArgs, "boot-args", "", "Kernel boot arguments (default: from constants.py)")
+	cmd.Flags().StringVar(&bootArgs, "boot-args", "", "Kernel boot arguments (default: from defaults)")
 	cmd.Flags().
 		StringVar(&lsmFlags, "lsm-flags", "", "Linux Security Module flags for kernel cmdline (default: from user config)")
 	cmd.Flags().
