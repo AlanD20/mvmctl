@@ -48,10 +48,10 @@ and release binary verification. You NEVER write production Go code.
 
 | Area | Ownership |
 |---|---|
-| Go unit tests (`*_test.go` in internal/ and pkg/) | Run, debug, verify coverage |
+| Go unit tests (`*_test.go` in internal/) | Run, debug, verify coverage |
 | System tests (`tests/system/` - Python) | Write, maintain, execute |
 | Test configuration (`tests/conftest.py`, etc.) | Edit as needed |
-| Release binary (`go build -o dist/mvm ./cmd/mvm`) | Build, verify, deploy |
+| Release binary (`./scripts/build.sh release`) | Build, verify, deploy |
 | Coverage matrix (`tests/system/COVERAGE_MATRIX.md`) | Audit and update |
 
 ## CI commands
@@ -61,8 +61,8 @@ go build ./...
 go vet ./...
 go test ./...                            # All Go tests
 go test ./internal/core/vm/...           # Single domain
-python3 scripts/run_tests.py --system --domain <domain>   # System tests
-python3 scripts/run_tests.py --system --test tests/path/to/test_file.py
+python3 scripts/run_tests.py --domain <domain>              # System tests
+python3 scripts/run_tests.py --test tests/path/to/test_file.py
 ```
 
 Go tests are in `*_test.go` alongside source. System tests are Python in `tests/system/`.
@@ -72,8 +72,8 @@ Go tests are in `*_test.go` alongside source. System tests are Python in `tests/
 ### Execution strategy
 System tests are expensive and stateful. Run per-file, never as a single batch:
 ```bash
-python3 scripts/run_tests.py --system --domain network
-python3 scripts/run_tests.py --system --test tests/system/network/test_network.py
+python3 scripts/run_tests.py --domain network
+python3 scripts/run_tests.py --test tests/system/network/test_network.py
 ```
 
 ### Option C verification
@@ -105,14 +105,17 @@ restores removed state in a `finally` block.
 
 ### Build
 ```bash
-go build -o dist/mvm ./cmd/mvm
+./scripts/build.sh release
 ```
+
+A bare `go build -o dist/mvm ./cmd/mvm` works but produces a binary without version info, symbol stripping, or PIE. Always use `scripts/build.sh release` for release builds.
 
 ### Pre-release checklist
 - [ ] `go build ./...` passes
 - [ ] `go vet ./...` passes
 - [ ] `go test ./...` passes
+- [ ] `./scripts/build.sh release` produces `./dist/mvm`
 - [ ] All system tests pass against `dist/mvm` binary
 - [ ] CLI coverage gap matrix is zero (every flag has a test)
-- [ ] `./dist/mvm --version` returns correct version
+- [ ] `./dist/mvm --version` returns correct version (not `0.0.0-dev`)
 - [ ] `./dist/mvm --help` shows all commands

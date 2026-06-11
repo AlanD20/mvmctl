@@ -90,16 +90,16 @@ STEP 6: VERIFY — Run go build ./...; go vet ./...
 - Errors in `pkg/errs/` — single `DomainError` type with `Code` + `Class`, no exception hierarchy.
 
 ### Error handling
-- Single error type: `pkg/errs.DomainError` with fields `Code`, `Class`, `Message`, `Err`.
+- Single error type: `pkg/errs.DomainError` with fields `Code`, `Message`, `Op`, `Entity`, `Class`, `Err`, `Details`.
 - Use `errs.New(code, msg)`, `errs.Wrap(code, err)`, `errs.WrapMsg(code, msg, err)`.
 - Check via `errors.As(err, &de)` + switch on `de.Code`.
-- Helper functions: `errs.NotFound(code, entity)`, `errs.AlreadyExists(code, entity)`.
+- Helper functions: `errs.NotFound(code, msg)`, `errs.AlreadyExists(code, msg)` — set entity via `errs.WithEntity(entity)` option.
 - Do NOT create Python-style factory functions per domain (no `VMRequestError`, `NetworkBridgeFailed`).
 - Log before return: `slog.Error(...)` before every error return in Service/Controller.
 
 ### Subprocess
-- ALL subprocess calls through `system.RunCmd(ctx, args, system.RunCmdOpts{...})`.
-- No raw `os/exec.Command` outside documented exceptions: Firecracker spawn (pass_fds), kernel build (log streaming), tar-pipe in cp, service subprocesses (console relay, nocloudnet server, loopmount provisioner).
+- ALL subprocess calls through `system.DefaultRunner.Run(ctx, args, system.RunCmdOpts{...})` or `system.DefaultRunner.Stream(ctx, args, opts)`.
+- No raw `os/exec.Command` outside documented exceptions: Firecracker spawn (FD inheritance + Setsid), kernel build (log streaming), tar-pipe in cp, service subprocesses (console relay, nocloudnet server, loopmount provisioner).
 - Service subprocesses use `system.SpawnService(ctx, cfg)`.
 
 ### Context
@@ -149,7 +149,7 @@ STEP 6: VERIFY — Run go build ./...; go vet ./...
 - **Error checking** — `errors.As` / `errors.Is`, not multi-type assertion chains.
 - **No discarded errors** — Every error return must be checked or explicitly intended. No `_ = someFunc()` unless the func returns nothing meaningful. If a returned error must be ignored, assign to `_` with a comment explaining why.
 - **Lowercase error messages** — Go convention: error strings start with lowercase. `"failed to open file"` not `"Failed to open file"`. The exception is proper nouns and acronyms.
-- **No `new(T)` for pointer types** — Use `&Type{}` or `ptr.To(val)` (`internal/infra/ptr/`) instead of `new(string)`, `new(bool)`, `new(int)`, etc.
+- **No `new(T)` for pointer types** — Use `&Type{}` or `ptr.Ptr(val)` (`internal/infra/ptr/`) instead of `new(string)`, `new(bool)`, `new(int)`, etc.
 - **No `_` prefix on struct fields** — Unused fields must be removed, not silenced with `_` prefix. If a struct field genuinely needs to be present but unused, document why with a comment.
 
 ### Infra helper checklist
@@ -186,7 +186,7 @@ Before declaring a task complete, verify:
 - [ ] Does `go vet ./...` pass?
 - [ ] Did I use `*T` for every nullable field where zero value has meaning?
 - [ ] Did I avoid `reflect`, `goto`, `log.Printf`, `init()`, `os.Exit()` in handlers?
-- [ ] Did I avoid `new(T)` for pointer types? (use `&Type{}` or `ptr.To()`)
+- [ ] Did I avoid `new(T)` for pointer types? (use `&Type{}` or `ptr.Ptr()`)
 - [ ] Did I avoid `_ =` for discarded errors? (check or comment why ignored)
 - [ ] Do error messages start with lowercase? (Go convention)
 - [ ] Is `ctx context.Context` the first param in every method/side-effect function?
