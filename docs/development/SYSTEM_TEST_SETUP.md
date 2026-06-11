@@ -101,7 +101,7 @@ sudo pacman -S --needed \
 | `ip` (iproute2) | Network tests | Bridge, addr, link management | `ip link show` |
 | `nft` / `iptables` | Network tests | Firewall rule verification | `sudo nft --version` or `sudo iptables --version` |
 
-### 2.3 Python Toolchain
+### 2.3 Python Toolchain (Host — for running tests on bare metal)
 
 ```bash
 # Install uv (if not already present)
@@ -109,11 +109,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Sync project dependencies
 uv sync --group dev --group build
-
-# Build the mvm binary (required for host clean/reset tests)
-go build -o dist/mvm ./cmd/mvm
-cp dist/mvm ~/.local/bin/mvm
 ```
+
+**For nested VM testing:** Python + pytest are installed inside the guest VM (see section 6). The host only needs Go to build the release binary.
 
 ---
 
@@ -186,29 +184,28 @@ clean --force` does not wipe it.
 
 System tests are **stateful**. Running `pytest tests/system/` as a single batch
 causes cross-file state pollution (VMs, bridges, iptables). Each file MUST be
-run individually. See [ADR 0007](/docs/adr/0007-system-test-execution-strategy.md).
+run individually. See [RC_QA.md](../RC_QA.md) for the release qualification process.
 
 ### 5.2 Using the Unified Test Runner
 
 ```bash
-# Run ALL system tests
-uv run scripts/run_tests.py --system
+# Run ALL system tests (per-domain)
+python3 scripts/run_tests.py --domain vm
+python3 scripts/run_tests.py --domain network
+# ... etc for each domain
 
 # Build binary first, then run all system tests
-go build -o dist/mvm ./cmd/mvm
-uv run scripts/run_tests.py --system
+./scripts/build.sh release
+python3 scripts/run_tests.py --domain vm
 
 # Run a specific domain
-uv run scripts/run_tests.py --system --domain vm
+python3 scripts/run_tests.py --domain vm
 
 # Run a single test file
-uv run scripts/run_tests.py --system --test tests/system/network/test_network.py
+python3 scripts/run_tests.py --test tests/system/network/test_network.py
 
 # Re-run only previously failed tests
-uv run scripts/run_tests.py --system --failed-only
-
-# Run all three levels (unit, integration, system)
-uv run scripts/run_tests.py
+python3 scripts/run_tests.py --failed-only
 ```
 
 The script:
@@ -220,26 +217,26 @@ The script:
 
 ```bash
 # Exclude slow tests (>30s each)
-uv run pytest tests/system/vm/ -n 0 -m "not slow"
+python3 scripts/run_tests.py --domain vm -- -m "not slow"
 
 # Run only kernel build tests (requires build tools)
-uv run pytest tests/system/kernel/ -n 0 -m kernel_build
+python3 scripts/run_tests.py --domain kernel -- -m kernel_build
 
 # Run only destructive host tests (requires explicit opt-in)
-uv run pytest tests/system/host/ -n 0 -m host_reset
+python3 scripts/run_tests.py --domain host -- -m host_reset
 
 # Run everything except kernel builds
-uv run scripts/run_tests.py --system -- -m "not kernel_build"
+python3 scripts/run_tests.py --domain kernel -- -m "not kernel_build"
 ```
 
 ### 5.4 Manual Per-File
 
 ```bash
-uv run scripts/run_tests.py --system --test tests/system/network/test_network.py
+python3 scripts/run_tests.py --test tests/system/network/test_network.py
 
 # Directly with pytest (fallback):
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror MVM_BINARY=dist/mvm \
-  uv run pytest tests/system/network/test_network.py -n 0
+  python3 -m pytest tests/system/network/test_network.py -n 0
 ```
 
 ---
@@ -321,8 +318,10 @@ mvm ssh testrunner -u ubuntu --cmd "
     openssh-client coreutils curl qemu-utils e2fsprogs zstd
 "
 
-# 4. Copy the mvm binary and source into the guest
-mvm ssh testrunner -u ubuntu --cmd "git clone <repo-url> && cd mvmctl && uv sync --group dev"
+# 4. Copy the pre-built release binary and test scripts into the guest
+mvm cp dist/mvm testrunner:~/.local/bin/mvm
+mvm cp ./scripts testrunner:~/mvmctl/scripts
+mvm cp ./tests testrunner:~/mvmctl/tests
 ```
 
 To verify nested virtualization is working inside the Firecracker VM:
@@ -363,7 +362,7 @@ grep -o 'vmx\|svm' /proc/cpuinfo | sort -u   # should show vmx or svm
 
 ### 6.4 Inside the Guest: Setup
 
-Once inside the guest VM, follow the same setup as a bare-metal machine:
+Once inside the guest VM, install dependencies and copy the pre-built binary:
 
 ```bash
 # Add user to mvm group
@@ -384,9 +383,8 @@ cat /sys/module/kvm_intel/parameters/nested   # should print Y
 ### 6.5 Running the Tests Inside the Guest
 
 ```bash
-# Build binary and run the full suite inside the guest (same commands as bare metal)
-go build -o dist/mvm ./cmd/mvm
-uv run scripts/run_tests.py --system
+# Run system tests against the pre-built binary (no Go toolchain needed)
+python3 scripts/run_tests.py --domain vm
 ```
 
 ### 6.6 Resource Considerations
@@ -404,7 +402,7 @@ uv run scripts/run_tests.py --system
   bare metal due to nested VM-exit overhead.
 - **Kernel build tests**: Building kernels inside a nested VM is extremely
   slow (>30 min). Use `--kernel_build` marker to exclude these:
-  `uv run scripts/run_tests.py --system -- -m "not kernel_build"`.
+  `python3 scripts/run_tests.py --domain kernel -- -m "not kernel_build"`.
 - **`/dev/kvm` ownership**: The guest user must have access to `/dev/kvm`.
   If using a Firecracker guest, the device is owned by root:root by default.
   Fix with `sudo chmod 666 /dev/kvm` or add udev rules.
@@ -441,13 +439,7 @@ echo "mvm init:   $(~/.local/bin/mvm host status --json 2>/dev/null | python3 -c
 
 # === Binary ===
 echo "mvm binary: $(test -f ~/.local/bin/mvm && echo OK || echo MISSING)"
-echo "services:   $(python3 -c "
-import json, subprocess, shlex
-r = subprocess.run(['uv','run','mvm','bin','ls','--json'], capture_output=True, text=True, timeout=30)
-if r.returncode == 0:
-    bins = json.loads(r.stdout)
-    for name in ['mvm-provision','mvm-console-relay','mvm-nocloud-server']:
-        print(f'  {name}: {\"OK\" if any(b.get(\"name\")==name for b in bins) else \"MISSING\"}')" 2>/dev/null || echo "  (check failed)")"
+echo "mvm version: $(~/.local/bin/mvm --version 2>/dev/null || echo MISSING)"
 ```
 
 ---
@@ -457,26 +449,22 @@ if r.returncode == 0:
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `iptables` errors in tests | Firewall not initialized | `sudo ~/.local/bin/mvm host init` |
-| VM creation hangs | Binary not compiled or missing | Build with `go build -o dist/mvm ./cmd/mvm` |
+| VM creation hangs | Binary not compiled or missing | Build with `./scripts/build.sh release` |
 | `mvm` group errors | User not in group | `sudo usermod -aG mvm $USER` then log out/back in |
 | `/dev/loop*` permission denied | User not in `disk` group | `sudo usermod -aG disk $USER` |
 | Address already in use | Stale VMs from previous run | `mvm vm ls --json` then `mvm vm rm <name> --force` |
-| mvm-provision not found | Service binaries missing from cache | Run `mvm cache init` or `go build -o dist/mvm ./cmd/mvm` |
-| Console relay spawn failure | Service process not found in PATH | Use `go build -o dist/mvm ./cmd/mvm` and ensure binary is in PATH |
 | Kernel build >10 min | Full kernel compilation from source | Use `--keep-build-dir` for incremental builds, or use firecracker kernels (default) |
-| Skip ratio >10% on CI | Missing dependencies | Run verification checklist (section 6) |
-| `qemu-img` not found | qemu-utils/not installed | Debian: `sudo apt-get install qemu-utils` Arch: `sudo pacman -S qemu-img` |
+| Skip ratio >10% on CI | Missing dependencies | Run verification checklist (section 7) |
+| `qemu-img` not found | qemu-utils not installed | Debian: `sudo apt-get install qemu-utils` Arch: `sudo pacman -S qemu-img` |
 | `mkfs.ext4` not found | e2fsprogs not installed | Debian: `sudo apt-get install e2fsprogs` Arch: `sudo pacman -S e2fsprogs` |
 | `zstd` decompress fails | zstd not installed | Debian: `sudo apt-get install zstd` Arch: `sudo pacman -S zstd` |
-| `genisoimage` not found | Not installed | Debian: `sudo apt-get install genisoimage` Arch: `sudo pacman -S libisoburn` |
-| `cloud-image-utils` not found | Not installed | Debian: `sudo apt-get install cloud-image-utils` Arch: `yay -S cloud-image-utils` (AUR) |
+| `cloud-localds` not found | Not installed | Debian: `sudo apt-get install cloud-image-utils` Arch: `sudo pacman -S cloud-utils` |
 | Network-dependent tests skip | No outbound HTTP access | Configure `MVM_ASSET_MIRROR` with pre-seeded assets |
 
 ---
 
 ## Related Documents
 
-- [ADR 0007: System Test Execution Strategy](../adr/0007-system-test-execution-strategy.md) — per-file execution mandate
-- [ADR 0016: System Test Coverage Standard](../adr/0016-system-test-coverage-standard.md) — depth standard, skip discipline
+- [RC_QA.md](../RC_QA.md) — release qualification gates and evidence requirements
 - [HOW_AGENTS_WRITE_TESTS.md](HOW_AGENTS_WRITE_TESTS.md) — scenario catalogs, test writing rules
 - [COVERAGE_MATRIX.md](../../tests/system/COVERAGE_MATRIX.md) — accountability matrix, current coverage status
