@@ -290,8 +290,8 @@ func (s *Service) OptimizeImage(
 	if !optimized && warnings != nil {
 		warnings = append(warnings,
 			"Image optimization skipped: no provisioner backend available. "+
-				"Run 'python scripts/build_services.py' or enable libguestfs for "+
-				"faster boot times.")
+				"Enable GuestFS via 'mvm config set settings guestfs_enabled true' for "+
+				"alternative provisioning.")
 	}
 
 	postShrinkInfo, _ := os.Stat(imagePath)
