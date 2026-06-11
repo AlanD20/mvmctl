@@ -10,13 +10,13 @@
 |---|---|---|
 | **IVMMDriver interface** | ❌ Not implemented | No driver interface exists. Controller directly imports `FirecrackerClient`. |
 | **VMMFactory** | ❌ Not implemented | No factory exists. Firecracker is hardcoded everywhere. |
-| **FirecrackerDriver** | ❌ Not implemented | `FirecrackerSpawner` and `FirecrackerClient` remain inline. |
+| **FirecrackerDriver** | ❌ Not implemented | `FirecrackerClient` and `firecracker.go` remain inline. |
 | **CrosvmDriver** | ❌ Not started | Not a single file exists. |
 | **VMMConfig** | ❌ Not implemented | `FirecrackerConfig` is still the only config model. |
-| **vmm_type on VMInstanceItem** | ❌ Not implemented | No `vmm_type` field. Columns named `api_socket_path`, `config_path`. |
+| **vmm_type on VM model** | ❌ Not implemented | No `vmm_type` field. Columns named `api_socket_path`, `config_path`. |
 | **DB Migration (vmm_type)** | ❌ Not implemented | Schema has no `vmm_type` or renamed columns. |
 | **Controller accepts IVMMDriver** | ❌ Not implemented | `VMController` creates `FirecrackerClient` directly. |
-| **--vmm CLI flag** | ❌ Not implemented | CLI still uses `--firecracker-bin`. No `--vmm` or `--vmm-bin` flags. |
+| **--vmm CLI flag** | ❌ Not implemented | No `--vmm` or `--vmm-bin` flags. |
 | **Constants cleanup** | ❌ Not implemented | `FirecrackerGithubReleasesAPIURL`, `FirecrackerGithubDownloadURL`, `DefaultFirecrackerCIVersion` still in `internal/infra/constants.go`. |
 | **Binary domain VMM-agnostic** | ❌ Not implemented | Binary domain is still Firecracker-specific. |
 | **Console source abstraction** | ❌ Not implemented | Console relay reads Firecracker's serial output file only. |
@@ -53,13 +53,13 @@ This coupling creates several problems:
 | File / Location | Coupling | What Needs to Change |
 |---|---|---|
 | `internal/core/vm/firecracker_client.go` | `FirecrackerClient` — HTTP-over-Unix-socket client for runtime control | Extract into `FirecrackerDriver`. |
-| `internal/core/vm/firecracker_spawner.go` | `FirecrackerSpawner` — writes JSON config, launches with `--config-file` | Extract into `FirecrackerDriver`. |
+| `internal/core/vm/firecracker.go` | `FirecrackerSpawner` — writes JSON config, launches with `--config-file` | Extract into `FirecrackerDriver`. |
 | `internal/lib/model/firecracker.go` | `FirecrackerConfig` struct — Firecracker-specific fields | Becomes internal to `FirecrackerDriver`. |
 | `internal/core/vm/controller.go` | Direct `FirecrackerClient` imports for pause/resume/start/snapshot | Controller accepts `VMMDriver` instead. |
 | `pkg/api/vm.go` | `buildFirecrackerConfig()`, `FirecrackerSpawner` usage | Replace with `buildVMMConfig()`, factory-based driver creation. |
 | `internal/infra/constants.go` | `OverridableDefaults["defaults.firecracker"]` (8 filenames + log_level) | Move to `FirecrackerDriver`. |
 | `internal/infra/constants.go` | `FirecrackerGithubReleasesAPIURL`, `FirecrackerGithubDownloadURL` | Move into `FirecrackerDriver`. |
-| `internal/cli/vm.go` | `--firecracker-bin` CLI option | Replace with `--vmm` + `--vmm-bin`. |
+| `internal/cli/vm.go` | No `--vmm` or `--vmm-bin` flags | Add `--vmm` + `--vmm-bin` flags. |
 
 ### 2.2 Moderately Coupled (Pattern Differences)
 
@@ -88,7 +88,7 @@ These layers are VMM-agnostic and survive intact:
 | `internal/core/volume/*` | Volume management — attach/detach abstracted through driver |
 | `pkg/api/inputs/*` | Input/Request/Resolved pipeline — VMM-agnostic |
 | `internal/cli/*` (except `vm.go` VMM selection) | Most CLI commands are VMM-agnostic |
-| All models except `firecracker.go` | `VMInstanceItem`, `NetworkItem`, etc. — VMM-agnostic |
+| All models except `firecracker.go` | `VM`, `Network`, etc. — VMM-agnostic |
 
 ---
 
@@ -282,14 +282,14 @@ type ConsoleSource struct {
 // internal/core/vm/factory.go
 
 type VMMFactory struct {
-    registry map[VMMType]func(vm *model.VMInstanceItem, repo vm.Repository) VMMDriver
+    registry map[VMMType]func(vm *model.VM, repo vm.Repository) VMMDriver
 }
 
-func (f *VMMFactory) Register(vmmType VMMType, constructor func(*model.VMInstanceItem, vm.Repository) VMMDriver) {
+func (f *VMMFactory) Register(vmmType VMMType, constructor func(*model.VM, vm.Repository) VMMDriver) {
     f.registry[vmmType] = constructor
 }
 
-func (f *VMMFactory) CreateDriver(vmmType VMMType, vm *model.VMInstanceItem, repo vm.Repository) (VMMDriver, error) {
+func (f *VMMFactory) CreateDriver(vmmType VMMType, vm *model.VM, repo vm.Repository) (VMMDriver, error) {
     constructor, ok := f.registry[vmmType]
     if !ok {
         return nil, fmt.Errorf("unknown VMM type: %s", vmmType)
@@ -381,7 +381,7 @@ func (f *VMMFactory) CreateDriver(vmmType VMMType, vm *model.VMInstanceItem, rep
 |---|---|---|---|
 | Models | `internal/lib/model/vm.go` | Add `vmm_type` field, rename columns | ❌ |
 | Core/VM | `internal/core/vm/controller.go` | Accept `VMMDriver`, delegate to driver | ❌ |
-| Core/VM | `internal/core/vm/firecracker_spawner.go` | Trim to thin driver implementation | ❌ |
+| Core/VM | `internal/core/vm/firecracker.go` | Trim to thin driver implementation | ❌ |
 | Core/VM | `internal/lib/provisioner/` | VMM-aware block device naming | ❌ |
 | API | `pkg/api/vm.go`, `pkg/api/inputs/*` | VMM-agnostic config building, factory usage | ❌ |
 | CLI | `internal/cli/vm.go` | `--vmm`/`--vmm-bin` flags, generic help text | ❌ |

@@ -117,8 +117,6 @@ gzip -9 %{buildroot}/usr/share/man/man1/mvm.1
 - Batch relation loading with deduplication (O(relations) queries, not O(entities x relations))
 - Durable incremental image copying with reflink support (instant copy on btrfs/XFS)
 - SQL-level computation (COUNT, WHERE IN) instead of fetch-all + application-level filtering
-
-* Mon Mar 30 2026 AlanD20 <aland20@pm.me> - 0.1.0-1
 - Initial RPM release
 - Firecracker microVM management
 - Network bridge and TAP management
