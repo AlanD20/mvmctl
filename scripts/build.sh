@@ -12,7 +12,6 @@
 # Options:
 #   --version X.Y.Z     Explicit version (overrides auto-detection)
 #   --output ./path     Output path for the binary
-#   --cgo               Enable CGO (default: disabled, fully static)
 #
 # Version detection priority:
 #   1. --version X.Y.Z flag
@@ -131,10 +130,6 @@ main() {
       fi
       output="$2"
       shift 2
-      ;;
-    --cgo)
-      unset CGO_ENABLED
-      shift
       ;;
     --help | -h)
       sed -n '2,26p' "$0" | sed 's/^# \?//'
