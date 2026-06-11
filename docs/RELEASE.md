@@ -12,6 +12,7 @@ This document covers how to release a new version of mvmctl from start to finish
 - [Step 5: Tag and Push the Tag](#step-5-tag-and-push-the-tag)
 - [Step 6: CI Pipeline](#step-6-ci-pipeline)
 - [Step 7: Verify the Release](#step-7-verify-the-release)
+- [Step 8: Update AUR Package](#step-8-update-aur-package)
 - [Issuing a Hotfix](#issuing-a-hotfix)
 - [Yanking a Bad Release](#yanking-a-bad-release)
 
@@ -73,7 +74,7 @@ python scripts/bump-version.py X.Y.Z --commit
 The script updates version strings in:
 - `internal/lib/version/info.go` — Go source version defaults
 - `packaging/PKGBUILD` — Arch Linux pkgver
-- `packaging/mvmctl.spec` — RPM spec Version
+- `packaging/mvmctl.spec` — RPM spec Version + `%changelog` entry
 - `packaging/debian/changelog` — Debian changelog entry
 - `docs/mvm.1` — Man page `.TH` header version
 - `CHANGELOG.md` — Moves `[Unreleased]` content to new version section
@@ -101,7 +102,6 @@ The build script (`scripts/build.sh`) is the canonical way to build. It supports
 Options:
 - `--version X.Y.Z` — Explicit version (overrides auto-detection)
 - `--output ./path` — Custom output path
-- `--cgo` — Enable CGO (default: disabled, fully static)
 
 Version detection priority:
 1. `--version X.Y.Z` flag
@@ -139,7 +139,7 @@ The `release.yml` workflow runs on tag push (`v*.*.*`):
 3. `go build ./...` — compile check
 4. `go test ./...` — unit tests with coverage
 5. Build release binary via `./scripts/build.sh release --version X.Y.Z`
-6. Smoke test the binary (`./dist/mvm version`, `./dist/mvm --help`)
+6. Smoke test the binary (`./dist/mvm --version`, `./dist/mvm --help`)
 7. Generate SHA256 checksum
 8. Build distribution packages (`.deb`, `.rpm`, PKGBUILD)
 9. Create GitHub release with all assets
@@ -148,6 +148,8 @@ The `ci.yml` workflow (push to main, PRs) additionally runs:
 - `go mod tidy` + diff check
 - `gofmt` formatting check
 - `golines --max-len=120` line-length enforcement
+- `go vet ./...` — static analysis
+- `go build ./...` — compile check
 - Coverage report generation and upload
 
 System tests (`system-tests.yml`) are triggered manually via `workflow_dispatch`
@@ -163,10 +165,31 @@ git tag -l 'v*'
 
 # Verify the binary
 ./scripts/build.sh release --version X.Y.Z
-./dist/mvm version
+./dist/mvm --version
 
 # Check the GitHub release
 gh release view vX.Y.Z
+```
+
+---
+
+## Step 8: Update AUR Package
+
+After the GitHub release is published, update the AUR PKGBUILD checksums:
+
+```bash
+# Preview changes
+python scripts/post-release.py --aur --dry-run
+
+# Update checksums and regenerate .SRCINFO
+python scripts/post-release.py --aur
+```
+
+Then push to AUR:
+
+```bash
+cd packaging
+git push aur master
 ```
 
 ---
