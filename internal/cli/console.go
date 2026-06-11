@@ -30,7 +30,8 @@ Use --state to show the console relay state without attaching.
 Use --kill to stop the console relay.`,
 		// Python uses no_args_is_help=True on the Typer group, so running
 		// "mvm console" with no args prints help text instead of an error.
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Simulate no_args_is_help=True: show help when no arguments given.
 			if len(args) == 0 {

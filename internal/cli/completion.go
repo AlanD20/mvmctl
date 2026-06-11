@@ -2,6 +2,7 @@
 package cli
 
 import (
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -216,30 +217,78 @@ func completeRemoteImageIDs(cmd *cobra.Command, args []string, toComplete string
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeVMNamesEnhanced completes with VM names, short IDs, IPv4 addresses, and MAC addresses.
-// Matches Python's _complete_vm_names() in cli/_completion.py with full dedup.
-func completeVMNamesEnhanced(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-	if opRef == nil {
+// completeVMThenVolume completes positionally: arg0 = VM names, arg1+ = volume names.
+func completeVMThenVolume(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return completeVMNames(cmd, args, toComplete)
+	}
+	return completeVolumeNames(cmd, args, toComplete)
+}
+
+// completeVMThenFile completes positionally: arg0 = VM names, arg1+ = native file completion.
+func completeVMThenFile(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return completeVMNames(cmd, args, toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveDefault
+}
+
+// completeKeyThenDir completes positionally: arg0 = key names, arg1+ = directory-only completion.
+func completeKeyThenDir(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return completeKeyNames(cmd, args, toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveFilterDirs
+}
+
+// completeVolumeThenSize completes positionally: arg0 = volume names, arg1+ = size suggestions.
+func completeVolumeThenSize(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 {
+		return completeVolumeNames(cmd, args, toComplete)
+	}
+	sizes := []string{"10G", "20G", "50G", "100G", "512M", "1G", "5G"}
+	var results []string
+	for _, s := range sizes {
+		if strings.HasPrefix(s, toComplete) {
+			results = append(results, s)
+		}
+	}
+	return results, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeEnvDestroy completes with workflow state IDs or YAML/YML file paths.
+func completeEnvDestroy(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	vms := opRef.VMList(cmd.Context())
 	var results []string
-	for _, vm := range vms {
-		if vm.Name != "" && strings.HasPrefix(vm.Name, toComplete) && !slices.Contains(results, vm.Name) {
-			results = append(results, vm.Name)
-		}
-		if vm.ID != "" {
-			short := crypto.Truncate(vm.ID, 6)
-			if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
-				results = append(results, short)
+
+	// 1. Workflow IDs from state directory
+	stateDir := infra.GetWorkflowsStateDir()
+	if entries, err := os.ReadDir(stateDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && strings.HasPrefix(e.Name(), toComplete) {
+				if !slices.Contains(results, e.Name()) {
+					results = append(results, e.Name())
+				}
 			}
 		}
-		if vm.IPv4 != "" && strings.HasPrefix(vm.IPv4, toComplete) && !slices.Contains(results, vm.IPv4) {
-			results = append(results, vm.IPv4)
-		}
-		if vm.MAC != "" && strings.HasPrefix(vm.MAC, toComplete) && !slices.Contains(results, vm.MAC) {
-			results = append(results, vm.MAC)
+	}
+
+	// 2. YAML/YML files in current working directory
+	if cwd, err := os.Getwd(); err == nil {
+		if files, err := os.ReadDir(cwd); err == nil {
+			for _, f := range files {
+				if !f.IsDir() {
+					name := f.Name()
+					if (strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) &&
+						strings.HasPrefix(name, toComplete) && !slices.Contains(results, name) {
+						results = append(results, name)
+					}
+				}
+			}
 		}
 	}
+
 	return results, cobra.ShellCompDirectiveNoFileComp
 }

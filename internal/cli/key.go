@@ -268,7 +268,7 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 		Use:               "export [identifier] [path]",
 		Short:             "Export a keypair to a directory",
 		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeKeyNames,
+		ValidArgsFunction: completeKeyThenDir,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier, err := common.Cli.CheckArg(cmd, args[0])
 			if err != nil {
