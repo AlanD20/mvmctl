@@ -608,7 +608,7 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 		Use:               "snapshot [id] [mem_file] [state_file]",
 		Short:             "Snapshot VM memory and disk state.",
 		Args:              cobra.ExactArgs(3),
-		ValidArgsFunction: completeVMNames,
+		ValidArgsFunction: completeVMThenFile,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			memFile := args[1]
@@ -649,7 +649,7 @@ Arguments:
 Flags:
   --resume    Resume VM after loading (default: leave paused)`,
 		Args:              cobra.ExactArgs(3),
-		ValidArgsFunction: completeVMNames,
+		ValidArgsFunction: completeVMThenFile,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			memFile := args[1]
@@ -724,7 +724,7 @@ Arguments:
   id           VM identifier (name, ID prefix, IP, or MAC)
   volume_name  Name or ID of the volume to attach`,
 		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeVMNames,
+		ValidArgsFunction: completeVMThenVolume,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			volumeName := args[1]
@@ -755,7 +755,7 @@ Arguments:
   id           VM identifier (name, ID prefix, IP, or MAC)
   volume_name  Name or ID of the volume to detach`,
 		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeVMNames,
+		ValidArgsFunction: completeVMThenVolume,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 			volumeName := args[1]

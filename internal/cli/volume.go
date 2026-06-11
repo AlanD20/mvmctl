@@ -217,7 +217,7 @@ func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
 		Use:               "resize [identifier] [size]",
 		Short:             "Resize a volume",
 		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeVolumeNames,
+		ValidArgsFunction: completeVolumeThenSize,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 			sizeArg := args[1]

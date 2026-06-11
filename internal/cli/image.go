@@ -391,6 +391,12 @@ Examples:
   mvm image import my-image /path/to/image.qcow2
   mvm image import my-image /path/to/image.raw --format raw`,
 		Args: cobra.ExactArgs(2),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp // arg0 "name" is new — no completion
+			}
+			return nil, cobra.ShellCompDirectiveDefault // arg1 "path" — file completion
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			sourcePath := args[1]

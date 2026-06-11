@@ -408,7 +408,70 @@ Two independent backends: **LoopMount** (default) and **GuestFS** (opt-in).
 | Workflow/env | `pkg/api`, `internal/infra`, `internal/lib/*`, `internal/workflow/*` |
 | Infra/lib | stdlib, `github.com/jmoiron/sqlx`, external deps |
 
-## 25. Verification Checklist
+## 26. Shell Completion
+
+All CLI commands with positional arguments MUST have a `ValidArgsFunction` for shell autocompletion (bash/zsh/fish/powershell).
+
+### Where completion functions live
+
+- **Shared/reusable completions** — `internal/cli/completion.go`. One function per entity type (e.g., `completeVMNames`, `completeVolumeNames`, `completeKeyNames`).
+- **Position-aware dispatch** — `internal/cli/completion.go`. Functions that return different completions based on `len(args)` (e.g., `completeVMThenVolume`).
+- **Single-use inline** — Defined inline in the command constructor for simple cases (e.g., file path completion for `image import`).
+
+### ShellCompDirective usage guide
+
+| Directive | When to use |
+|-----------|-------------|
+| `NoFileComp` | Entity completions (VM names, volume names, key names, etc.) — never show files |
+| `Default` (0) | Fall back to native file/path completion (e.g., `vm snapshot` mem_file/state_file args) |
+| `FilterFileExt` | File completion filtered by extension — return extensions in results (e.g., `env apply` for `*.yaml`/`*.yml`) |
+| `FilterDirs` | Directory-only completion (e.g., `key export` path arg) |
+
+### Position-aware dispatch pattern
+
+When a command has multiple positional args of different types, dispatch on `len(args)`:
+
+```go
+func completeVMThenVolume(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+    if len(args) == 0 {
+        return completeVMNames(cmd, args, toComplete)  // arg0: VM names
+    }
+    return completeVolumeNames(cmd, args[1:], toComplete)  // arg1+: volume names
+}
+```
+
+Existing examples in codebase:
+- `completeConfigGet` / `completeConfigSet` — dispatch by category vs key
+- `completeVMThenVolume` — VM names then volume names
+- `completeVMThenFile` — VM names then file paths
+- `completeKeyThenDir` — key names then directory paths
+- `completeVolumeThenSize` — volume names then size suggestions
+
+### Smart composite completions
+
+For arguments that accept multiple types (e.g., `env destroy` accepts both workflow IDs and spec file paths), read both sources and return a combined list:
+
+```go
+func completeEnvDestroy(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+    if len(args) > 0 {
+        return nil, cobra.ShellCompDirectiveNoFileComp
+    }
+    var results []string
+    // 1. Workflow IDs from state directory
+    // 2. YAML/YML files from current directory
+    return results, cobra.ShellCompDirectiveNoFileComp
+}
+```
+
+### Rules
+
+- Every command taking existing entities MUST complete them. No entity-taking command without `ValidArgsFunction`.
+- Commands creating new entities (e.g., `key create [name]`) do NOT need completion for that arg.
+- `ValidArgsFunction` MUST silently return empty/`NoFileComp` when `opRef == nil` (no DB initialized).
+- Do NOT import packages that create side effects from completion functions — they may run before DB init.
+- Inline `ValidArgsFunction` is acceptable for ≤ 3 lines. Otherwise define a named function in `completion.go`.
+
+## 27. Verification Checklist
 
 Before declaring code complete:
 - [ ] Does `go build ./...` pass?
