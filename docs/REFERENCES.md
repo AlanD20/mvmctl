@@ -160,8 +160,6 @@ VM lifecycle management.
 | `mvm vm inspect` | `IDENTIFIER`, `--json` | Show detailed information about a VM |
 | `mvm vm snapshot` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE` | Snapshot VM memory and disk state |
 | `mvm vm load` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE`, `--resume` | Load VM from snapshot |
-| `mvm vm export` | `IDENTIFIER`, `[OUTPUT]` | Export a VM's configuration to a portable JSON file |
-| `mvm vm import` | `CONFIG_PATH`, `--name, -n` | Create a VM from a portable config file |
 | `mvm vm attach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Attach a volume to a VM (supports hotplug on Firecracker v1.16+ for running VMs) |
 | `mvm vm detach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Detach a volume from a VM (supports hot-unplug on Firecracker v1.16+ for running VMs) |
 
@@ -192,7 +190,6 @@ VM lifecycle management.
 | `--lsm-flags FLAGS` | Linux Security Module kernel cmdline flags | from config |
 | `--boot-args ARGS` | Kernel boot arguments | from config |
 | `--no-console` | Disable serial console | false |
-| `--firecracker-bin PATH` | Path to firecracker binary | active version |
 | `--skip-cleanup` | Keep resources on failure for debugging | false |
 | `--count, -c N` | Create N VMs in batch (base name keeps, subsequent get `-N` suffix) | 1 |
 | `--atomic` | All-or-nothing batch: roll back all VMs if any creation fails | false |
@@ -406,17 +403,17 @@ Persistent data disk management. Create, remove, list, inspect, and resize volum
 1. CLI flags (highest priority)
 2. `MVM_*` environment variables
 3. SQLite database (`~/.cache/mvmctl/mvmdb.db`) — canonical store for user overrides
-4. Built-in fallbacks (`constants.py`)
+4. Built-in fallbacks (`internal/infra/constants.go`)
 
 ### Kernel Defaults
 
-Built-in fallbacks for kernel operations (defined in `constants.py` under `defaults.kernel`):
+Built-in fallbacks for kernel operations (defined in `internal/infra/constants.go` under `defaults.kernel`):
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `arch` | `x86_64` | Default architecture |
 | `version` | `6.19.9` | Default version for `--type official` |
-| `build_jobs` | `None` | Parallel build jobs (None = all cores) |
+| `build_jobs` | `0` | Parallel build jobs (0 = all cores) |
 | `remote_list_limit` | `5` | Max remote versions to list per type |
 | `remote_list_cache_ttl` | `14400` | Cache TTL in seconds (4 hours) for remote version listings |
 
@@ -473,10 +470,10 @@ The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb
 | `MVM_CACHE_DIR` | Override cache directory | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `WARNING` |
-| `MVM_FIRECRACKER_BIN` | Override Firecracker binary path | (default from DB) |
 | `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
 | `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
 | `MVM_TEMP_DIR` | Override temp directory for microVMs | `/tmp/mvmctl` |
+| `MVM_SUDO_RESTART` | Set internally when re-running with sudo for host init | (not set) |
 
 ---
 
@@ -484,7 +481,7 @@ The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb
 
 ```
 ~/.cache/mvmctl/
-├── bin/               # Firecracker + jailer binaries + service binaries (mvm-console-relay, mvm-nocloud-server, mvm-provision)
+├── bin/               # Firecracker + jailer binaries
 ├── kernels/           # vmlinux kernel images
 ├── images/            # Root filesystem images (.ext4, .btrfs, .zst)
 ├── logs/              # VM and process log files
@@ -500,9 +497,6 @@ The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb
 ├── mvmdb.db           # SQLite database (canonical asset state)
 ├── audit.log          # Append-only operation log
 └── ...
-
-~/.config/mvmctl/
-└── keys/              # Cached SSH public keys
 ```
 
 ---

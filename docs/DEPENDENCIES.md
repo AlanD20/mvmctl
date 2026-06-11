@@ -36,17 +36,7 @@ checks for them automatically.
 | `ssh-keygen` | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 | `tar` | Extracting rootfs from tarballs | `tar` | `tar` |
 
-**Python libraries (bundled into compiled binary; included via `uv sync` when running from source):**
-
-| Library | Purpose |
-|---------|---------|
-| `typer-slim` | CLI framework (lightweight, without Rich/Markdown deps) |
-| `rich` | Console output formatting (progress bars, tables, syntax highlighting) |
-| `pyyaml` | YAML config parsing for bundled assets (images.yaml, kernels.yaml) |
-| `jinja2` | Template rendering for cloud-init and Firecracker config generation |
-| `zstandard` | Zstandard compression/decompression of images |
-| `passlib` | Password hashing (bcrypt scheme support) |
-| `bcrypt` | BCrypt password hashing for cloud-init user data |
+**Go toolchain:** The `mvm` binary is a single compiled Go binary. No runtime dependencies.
 
 ---
 
@@ -86,9 +76,6 @@ These are required for pulling, importing, and converting VM images.
 | `chmod` | File permission changes (used across all domains) | `coreutils` | `coreutils` |
 | `unsquashfs` | Extracting SquashFS images | `squashfs-tools` | `squashfs-tools` |
 
-**Python library:** `zstandard` — for zstd compression/decompression of images.
-Bundled into the compiled binary; included via `uv sync` when running from source.
-
 ---
 
 ## D. Cloud-Init
@@ -110,10 +97,10 @@ Both `mvm vm create` (rootfs provisioning) and `mvm image pull`/`mvm image impor
 
 ### E1. Loop-Mount (Default)
 
-The `mvm-provision` binary is a symlink to the combined `mvm-services` multidist binary
-(compiled via Nuitka). It uses system tools directly — no Python dependencies beyond stdlib.
+The `mvm run provision` subcommand is a hidden CLI command built into the same `mvm` binary.
+It uses system tools directly — no runtime dependencies.
 
-**Installed by:** `mvm init` (extracts `mvm-provision` from the `mvm-services` bundle).
+**Installed by:** `mvm init` (extracts the `mvm` binary itself, which contains the `run provision` subcommand).
 
 | Binary | Purpose | Debian/Ubuntu | Arch |
 |--------|---------|---------------|------|
@@ -145,13 +132,11 @@ mvm config set settings guestfs_enabled true
 
 | Distro | Command |
 |--------|---------|
-| Debian/Ubuntu | `sudo apt-get install libguestfs0 libguestfs-tools supermin python3-libguestfs` |
-| RHEL/Fedora | `sudo dnf install libguestfs libguestfs-tools supermin python3-libguestfs` |
-| Arch | `sudo pacman -S libguestfs supermin` (Python bindings included) |
+| Debian/Ubuntu | `sudo apt-get install libguestfs0 libguestfs-tools supermin` |
+| RHEL/Fedora | `sudo dnf install libguestfs libguestfs-tools supermin` |
+| Arch | `sudo pacman -S libguestfs supermin` |
 
-> **Note:** The `guestfs` Python package is **not on PyPI**. It must be installed via your
-> system package manager. `mvm init` checks for it and configures the sudoers entry for
-> `supermin` automatically.
+> **Note:** The Go libguestfs bindings are **not required** — the codebase uses the `libguestfs` C library directly via Go's `cgo` interface. `mvm init` checks for the library and configures the sudoers entry for `supermin` automatically.
 
 ---
 
@@ -210,10 +195,10 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 | `mvm image pull` | `qemu-img` (may trigger conversion) |
 | `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs` |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
-| `mvm kernel pull --type firecracker` | (internal Python logic — download only) |
+| `mvm kernel pull --type firecracker` | (internal logic — download only) |
 | `mvm key` | `create` → `ssh-keygen`; `add/ls/rm/inspect/export/default` → internal only |
 | `mvm bin` | `pull/ls/rm/default` → internal only (downloads from GitHub API) |
-| `mvm vm create` | `firecracker` + `jailer`, `ip`, `iptables`/`nft`, `mvm-provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
+| `mvm vm create` | `firecracker` + `jailer`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
 | `mvm vm start/stop/reboot/pause/resume` | `firecracker`, `ip`, `iptables`/`nft` |
 | `mvm vm rm` | `firecracker`, `ip`, `iptables`/`nft` |
 | `mvm vm snapshot/load` | internal (Firecracker API via Unix socket) |

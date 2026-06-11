@@ -1,4 +1,7 @@
-# 0010 — ARP cache flush before VM spawn: stale entries inflate SSH timing
+# ARP Cache Flush Before VM Spawn: Stale Entries Inflate SSH Timing
+
+**Status:** accepted
+**Date:** 2026-05-22
 
 The project flushes the bridge ARP cache (`ip neigh flush dev <bridge>`) after creating the TAP device and before spawning Firecracker. Without this flush, a new VM that reuses an IP address from a recently-removed VM inherits the host's stale ARP entry pointing to the old (now-dead) TAP. SSH connections route to the dead interface, hit TCP SYN timeouts (~3s), and retry — inflating perceived boot time by 5-10s.
 
@@ -14,19 +17,15 @@ Flush the bridge's ARP cache (`ip neigh flush dev <bridge>`) after the TAP devic
 
 ## Implementation
 
-The flush is a single `run_cmd` call in `NetworkService.flush_arp()`:
+The flush is a single `system.RunCmd` call in `internal/lib/network/network.go`:
 
-```python
-def flush_arp(self, bridge: str) -> None:
-    """Flush ARP cache entries for the bridge.
-    
-    Without this, a new VM reusing an old IP will experience TCP timeouts
-    from stale ARP entries pointing to a deleted TAP device.
-    """
-    run_cmd(["ip", "neigh", "flush", "dev", bridge], privileged=True)
+```go
+func FlushARP(ctx context.Context, bridge string) {
+    system.RunCmd(ctx, []string{"ip", "neigh", "flush", "dev", bridge}, system.RunCmdOpts{Privileged: true})
+}
 ```
 
-Called from `vm_operations.py` at the end of the `network_setup` phase, after the TAP is attached to the bridge.
+Called from `pkg/api/vm.go` at the end of the network setup phase, after the TAP is attached to the bridge.
 
 ## Considered alternatives
 
