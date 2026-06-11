@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"mvmctl/internal/cli/common"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
@@ -59,6 +60,12 @@ func newEnvApplyCmd(op *api.Operation) *cobra.Command {
 		Aliases: []string{"up"},
 		Short:   "Apply an environment spec (create or reconcile resources)",
 		Args:    cobra.MaximumNArgs(1),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			return []string{"yaml", "yml"}, cobra.ShellCompDirectiveFilterFileExt
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			specPath := ""
 			if len(args) > 0 {
@@ -133,6 +140,23 @@ The argument can be either a workflow ID (short hash shown by 'env ls') or
 the path to the original spec file. Resources that were already present before
 apply (not created by the workflow) are left intact.`,
 		Args: cobra.MaximumNArgs(1),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			// Complete with workflow IDs from state directory
+			entries, err := os.ReadDir(infra.GetWorkflowsStateDir())
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveFilterFileExt
+			}
+			var ids []string
+			for _, e := range entries {
+				if e.IsDir() {
+					ids = append(ids, e.Name())
+				}
+			}
+			return ids, cobra.ShellCompDirectiveNoFileComp
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ident := ""
 			if len(args) > 0 {
