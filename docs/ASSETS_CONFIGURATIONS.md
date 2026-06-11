@@ -398,4 +398,4 @@ the constants relevant to asset management.
 ---
 
 *See also: [KERNEL.md](KERNEL.md) for the kernel build workflow,
-[API.md](API.md) for the Go API reference.*
+[CONTEXT.md](../CONTEXT.md) for the Go API patterns.*
