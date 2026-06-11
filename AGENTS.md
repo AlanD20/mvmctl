@@ -1,7 +1,7 @@
 # mvmctl
 
 **Scope:** Production-grade Go CLI for managing Firecracker microVMs.
-**Stack:** Go 1.26, Cobra (CLI), sqlx (SQLite), slog (logging).
+**Stack:** Go 1.26.3, Cobra (CLI), sqlx (SQLite), slog (logging).
 **Entry:** `cmd/mvm/main.go` -> `app.Initialize()` -> `cli.NewRootCmd(op)` -> `ExecuteContext()`.
 
 ## Where to find context
@@ -11,7 +11,6 @@ This is the **only** AGENTS.md in the project. Per-folder AGENTS.md files have b
 1. **`CONTEXT.md`** — Domain language, conventions, patterns, and architecture rules. Start here for every task.
 2. **`docs/adr/`** — Architecture Decision Records for hard-to-reverse decisions made with real trade-offs.
 3. **`docs/STANDARDS.md`** — Go coding standards, conventions, and architectural rules.
-4. **`legacy/python/docs/PORTING_TO_GOLANG.md`** — Historical porting specification from Python to Go (99 verified decisions, archived).
 
 Individual agent instructions live in `.opencode/agent/`:
 - `architect.md` — Planner, analyzer, delegator. NEVER writes code.
@@ -22,7 +21,7 @@ Individual agent instructions live in `.opencode/agent/`:
 
 - **`engineer` agent**: Go engineer — handles all Go source code (`cmd/`, `internal/`, `pkg/`, `go.mod`, etc.).
 - **`qa-engineer` agent**: QA engineer — owns all test and release processes. Never writes production Go code.
-- **`architect` agent**: Plans, analyzes, delegates. NEVER writes code. May spawn `explore` for research.
+- **`architect` agent**: Plans, analyzes, delegates. NEVER writes code. OWNS all documentation (CONTEXT.md, AGENTS.md, docs/, .opencode/). May spawn `explore` for research.
 
 ## CI commands
 

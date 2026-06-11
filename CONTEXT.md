@@ -35,7 +35,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
 
 ### Domain
 
-A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `internal/core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` has only a Service, `ssh/` has a Service and a file-copy module, `console/` has only a Controller, `host/` has the full Controller/Service/Repository pattern plus a detector, probe, and utils, `config/` has constraints instead of a controller, `logs/` has controller + service, `cloudinit/` uses manager + provisioner). Domains do NOT import other domains.
+A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `internal/core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` has a Service and utils, `ssh/` has a Service, a file-copy module, and utils, `console/` has only a Controller, `host/` has the full Controller/Service/Repository pattern plus a detector, probe, and utils, `config/` has constraints, a Service, a Repository, settings, and utils (no controller), `logs/` has controller + service, `cloudinit/` uses manager + provisioner plus config and utils). Domains do NOT import other domains.
 
 All model types are centralized in `internal/lib/model/` -- a single package with zero domain imports. Every domain and every layer imports from `model` directly. Model types are concrete structs with `db:"column"` and `json:"field"` tags for sqlx and JSON serialization.
 
@@ -170,8 +170,8 @@ Tables include: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network
 
 Architecture rules are enforced by the Go compiler (circular import errors prevent cross-domain imports in core) and code review. Key rules:
 - Core domains NEVER import other core/* packages -- enforced by Go compiler.
-- CLI imports from `pkg/api/`, `internal/cli/common/`, `internal/infra/`, `internal/lib/` -- enforced by code review.
-- API imports `internal/core/*` + `internal/enricher/` + `internal/infra/` + `internal/lib/*`.
+- CLI imports from `pkg/api/`, `pkg/api/inputs`, `pkg/api/responses`, `pkg/errs`, `internal/cli/common/`, `internal/infra/`, `internal/lib/`, `internal/service/` -- enforced by code review.
+- API imports `internal/core/*` + `internal/enricher/` + `internal/infra/` + `internal/infra/event` + `internal/lib/*` + `internal/assets` + `pkg/errs` + `pkg/api/inputs` + `pkg/api/responses`.
 - `internal/infra/` and `internal/lib/` are LEAVES -- import NOTHING from core, api, cli, or service.
 - `internal/service/` MAY import from `internal/infra/` / `internal/lib/` but NOT from `pkg/api/` or `internal/cli/`.
 
@@ -225,7 +225,7 @@ The `FirewallTracker` also reads an `iptables_xtcomment` user setting that adds 
 
 ### Error handling
 
-A single `DomainError` type in `pkg/errs/` replaces Python's rich exception hierarchy. Every error has a `Code`, `Class`, `Message`, `Op`, `Entity`, `Details`, and optional wrapped `Err`. Codes are dot-separated: `vm.not_found`, `network.subnet.overlap`, `host.init.sudoers_failed`.
+A single `DomainError` type in `pkg/errs/` replaces Python's rich exception hierarchy. Every error has a `Code`, `Message`, `Op`, `Entity`, `Class`, `Err`, and optional `Details`. Codes are dot-separated: `vm.not_found`, `network.subnet.overlap`, `host.init.sudoers_failed`.
 
 ```go
 // Creating errors
@@ -286,16 +286,16 @@ host.init.sudoers_failed
 - **No Python-style type names**: Go-native `fmt.Sprintf("%T", v)` for type names in error messages.
 - **No `reflect`**: Banned unless explicitly approved with an ADR.
 - **No `goto`**: Banned in all Go code.
-- **Centralized subprocess**: All subprocess calls through `system.RunCmdOpts` (`internal/lib/system/runner.go`). No raw `os/exec` outside documented exceptions.
+- **Centralized subprocess**: All subprocess calls through `system.DefaultRunner.Run()` / `system.DefaultRunner.Stream()` with `system.RunCmdOpts` (`internal/lib/system/runner.go`). No raw `os/exec` outside documented exceptions.
 - **Domain `utils.go` for helpers**: Domain-specific utility functions that don't reference the Service struct live in `utils.go` within the domain package.
 
 ### Subprocess invocation
 
-ONE canonical path for all subprocess calls: `system.RunCmdOpts` in `internal/lib/system/runner.go`. No raw `os/exec.Command` except in documented exceptions.
+ONE canonical path for all subprocess calls: `system.DefaultRunner.Run()` / `system.DefaultRunner.Stream()` with `system.RunCmdOpts` in `internal/lib/system/runner.go`. No raw `os/exec.Command` except in documented exceptions.
 
 ```go
 // Correct -- everything routes through the centralized runner
-result, err := system.RunCmd(ctx, []string{"ip", "link", "set", tap, "down"}, system.RunCmdOpts{Privileged: true})
+result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", tap, "down"}, system.RunCmdOpts{Privileged: true})
 
 // Forbidden -- raw os/exec scattered across modules
 exec.Command("iptables", ...) // NEVER
@@ -303,14 +303,14 @@ exec.Command("iptables", ...) // NEVER
 
 The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeout`, `Input`, `Env`, `Privileged`, `Interactive`, `StartOnly`.
 
-**Documented exceptions** -- code that directly uses `os/exec.Command` because `RunCmd` cannot fulfill the requirement:
+**Documented exceptions** -- code that directly uses `os/exec.Command` because `DefaultRunner.Run()` cannot fulfill the requirement:
 
-| Location | Why `RunCmd` doesn't work |
+| Location | Why `DefaultRunner.Run()` doesn't work |
 |---|---|
-| `internal/core/vm/firecracker.go` (Firecracker spawn) | Needs `pass_fds` to pass VM API socket and log file descriptors to child |
+| `internal/core/vm/firecracker.go` (Firecracker spawn) | Fine-grained control over stdin/stdout/stderr FD redirection and `Setsid` session management for the Firecracker child process |
 | `internal/core/ssh/cp.go` (tar-pipe transfer) | Pipes two child processes (tar + ssh) together via stdin/stdout |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
-| `internal/lib/system/runner.go` | Implementation of `RunCmd` / `StreamCmd` itself |
+| `internal/lib/system/runner.go` | Implementation of `DefaultRunner.Run()` / `DefaultRunner.Stream()` itself |
 | `internal/lib/system/spawn.go` | Implementation of `SpawnService` for service subprocess spawning |
 
 Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The services themselves (console relay, nocloudnet server, loopmount entry point) do NOT use `os/exec` except for the provisioning engine noted above.
@@ -342,10 +342,10 @@ JSON-serialized DB fields use `db.StringSlice` (for `[]string`) or custom `Scan`
 
 | Layer | Imports from | Example |
 |---|---|---|
-| **CLI** | `pkg/api`, `internal/cli/common`, `internal/infra`, `internal/lib/*` | `import "mvmctl/pkg/api"` |
-| **API** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/lib/*` | `import "mvmctl/internal/core/vm"` |
+| **CLI** | `pkg/api`, `pkg/api/inputs`, `pkg/api/responses`, `pkg/errs`, `internal/cli/common`, `internal/infra`, `internal/lib/*`, `internal/service/*` (for `mvm run <service>` wiring) | `import "mvmctl/pkg/api"` |
+| **API** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/infra/event`, `internal/lib/*`, `internal/assets`, `pkg/errs`, `pkg/api/inputs`, `pkg/api/responses` | `import "mvmctl/internal/core/vm"` |
 | **API inputs** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/lib/*` | `import "mvmctl/internal/lib/model"` |
-| **Core domain** | `internal/infra`, `internal/lib/*` only (no other domains) | `import "mvmctl/internal/lib/model"` |
+| **Core domain** | `internal/infra`, `internal/lib/*`, `internal/assets`, `internal/service/*` (for subprocess spawning) — no other core domains | `import "mvmctl/internal/lib/model"` |
 | **Infra/lib** | stdlib, `github.com/jmoiron/sqlx`, external deps | N/A -- leaf nodes |
 
 Key conventions:
@@ -360,7 +360,7 @@ Concurrent operations use `internal/infra/pool/`:
 - `pool.Gather[T,R](ctx, workers, items, fn)` -- parallel transform, returns `[]Result[R]`.
 - `pool.Seq[T,R](ctx, items, fn)` -- sequential fail-fast execution.
 
-Workers defaults to `runtime.NumCPU() * 2` when ≤ 0. All accept `context.Context` for cancellation.
+Workers defaults to `min(runtime.NumCPU() * 2, len(items))` (minimum 1) when ≤ 0. All accept `context.Context` for cancellation.
 
 ## Test types
 

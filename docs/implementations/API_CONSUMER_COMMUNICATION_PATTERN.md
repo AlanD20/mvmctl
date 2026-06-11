@@ -107,9 +107,12 @@ Unlike the Python version (which uses a single `OperationResult` for everything)
 ```go
 type DomainError struct {
     Code    Code
-    Class   Class
     Message string
-    Err     error
+    Op      string         // Operation that failed (e.g. "VMCreate", "NetworkRemove")
+    Entity  string         // Entity being operated on (e.g. "my-vm", "default")
+    Class   Class
+    Err     error          // Wrapped underlying error
+    Details map[string]any // Structured extra data
 }
 
 type Class int
@@ -326,9 +329,9 @@ All domains are converted. The following table shows which patterns each API ope
 | **Key** | `pkg/api/key.go` | `(*model.KeyItem, error)` / `*errs.BatchResult` | N/A |
 | **Cache** | `pkg/api/cache.go` | `*errs.OperationResult` | `onProgress` (init only) |
 | **Config** | `pkg/api/config.go` | `(string, error)` | N/A |
-| **SSH** | `pkg/api/ssh.go` | `*errs.OperationResult` | N/A |
-| **CP** | `pkg/api/cp.go` | `*errs.OperationResult` | `onProgress` (bytes-chunk callback) |
-| **Console** | `pkg/api/console.go` | `*errs.OperationResult` | N/A |
+| **SSH** | `pkg/api/ssh.go` | `error` | N/A |
+| **CP** | `pkg/api/cp.go` | `(*responses.CPCopyResult, error)` | `OnDownloadCallback` (bytes-chunk callback) |
+| **Console** | `pkg/api/console.go` | `(*responses.ConsoleStateResult, error)` / `error` | N/A |
 | **Init** | `pkg/api/init.go` | `*InitResult` with `NeedsInteraction` | `onProgress` threaded to cache |
 
 ---
@@ -421,7 +424,6 @@ common.Cli.Success(fmt.Sprintf("Removed: %s", strings.Join(names, ", ")))
 | **Progress callback** | `on_progress: Callable[[ProgressEvent], None] \| None` | `OnProgressCallback func(Progress)` |
 | **Download progress** | `ASCIIProgressBar` (not via callback) | `FormatProgress` bridge function |
 | **Code convention** | `<domain>.<verb>[.<reason>]` | `<domain>.<noun>.<verb>` |
-| **Bulk operations** | N/A (BatchResult handles all) | `BulkResult` / `BulkResultItem` for simple item+error pairs |
 
 ---
 

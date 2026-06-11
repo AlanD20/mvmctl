@@ -10,5 +10,4 @@
 > architecture, see:
 > - **[CONTEXT.md](../CONTEXT.md)** — Domain language, conventions, patterns, architecture rules
 > - **[docs/STANDARDS.md](STANDARDS.md)** — Go coding standards and conventions
-> - **[docs/API.md](API.md)** — Go API reference
 > - **[docs/RUNTIME.md](RUNTIME.md)** — Backend systems (provisioning, cloud-init, firewall)

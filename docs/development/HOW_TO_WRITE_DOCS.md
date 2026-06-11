@@ -50,7 +50,7 @@ Spawn multiple subagent instances (e.g., using the task system) for parallel exp
 | Subagent | Scope |
 |----------|-------|
 | Explore 1 | Root docs (CONTEXT.md, AGENTS.md, README.md, CHANGELOG.md) |
-| Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, API.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, KERNEL.md, RELEASE.md) |
+| Explore 2 | `docs/` folder (PROJECT_ARCHITECTURE.md, REFERENCES.md, TROUBLESHOOTING.md, RUNTIME.md, DEPENDENCIES.md, ASSETS_CONFIGURATIONS.md, KERNEL.md, RELEASE.md) |
 | Explore 3 | ADR docs (all docs/adr/ files) |
 | Explore 4 | Improvement, implementation, development, and optimization docs |
 | Explore 5 | Agent instruction files (`.opencode/agent/*.md`) |
@@ -148,8 +148,8 @@ The project has two distinct documentation audiences:
 |----------|-----|----------------------|
 | Internal architecture | Three-layer design, domain structure, Controller/Service/Repository/Resolver | `CONTEXT.md`, `docs/PROJECT_ARCHITECTURE.md` |
 | Build system | Go build flags, `go build`, dist/ layout | `docs/RELEASE.md`, `CONTEXT.md` |
-| Sudoers/sudo internals | `PRIVILEGED_BINARIES`, `sg mvm -c`, sudoers file contents | `docs/adr/0009-sudo-privilege-architecture.md` |
-| Provisioner backends | LoopMount vs GuestFS comparison, losetup/btrfs/chroot deps | `CONTEXT.md`, `docs/adr/0006-loopmount-guestfs-mutual-exclusion.md` |
+| Sudoers/sudo internals | `PRIVILEGED_BINARIES`, `sg mvm -c`, sudoers file contents | `docs/adr/0005-sudo-privilege-architecture.md` |
+| Provisioner backends | LoopMount vs GuestFS comparison, losetup/btrfs/chroot deps | `CONTEXT.md`, `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` |
 | Manual sudoers config | `mvm init` handles this | No doc needed (automated) |
 | Kernel build deps | Build packages for `kernel pull --type official` | `docs/KERNEL.md` |
 | DB schema | SQLite tables, migrations, column layout | `CONTEXT.md` |
@@ -230,9 +230,9 @@ When removing internal content from the public site, follow this pattern:
 
 **Before (internal):**
 ```markdown
-### mvm-provision sudoers configuration
-The mvm-provision binary needs passwordless sudo...
-%mvm ALL=(ALL) NOPASSWD: /home/*/.cache/mvmctl/bin/mvm-provision
+### mvm sudoers configuration
+The mvm binary needs passwordless sudo for provisioner operations...
+%mvm ALL=(root) NOPASSWD: /home/*/.cache/mvmctl/bin/mvm
 ```
 
 **After (user-facing):**
@@ -248,18 +248,18 @@ Every documentation file drifts from reality over time. The key drifts are:
 
 | Drift type | How it happens | Prevention |
 |-----------|----------------|------------|
-| CLI flag changes | `--set-default` → `--default`, `--force` added to a command | Every PR that changes a CLI flag must update all doc files that reference it. |
+| CLI flag changes | Subcommand `set-default` → `--default` flag, `--force` added to a command | Every PR that changes a CLI flag must update all doc files that reference it. |
 | Flat slug changes | `ubuntu-24.04` → `ubuntu:24.04` | Search for the old pattern across ALL .md and .ts files. |
 | Line number references | Code moves, line numbers become wrong | Never reference absolute line numbers in docs. Reference function/type names instead. |
 | Package names per distro | Package renamed upstream | Keep distro package tables in `docs/DEPENDENCIES.md` only. Reference from other docs by link. |
-| Go code examples | API changes | Keep examples using `mvm` CLI commands where possible. Go API examples only in `docs/API.md`. |
+| Go code examples | API changes | Keep examples using `mvm` CLI commands where possible. Go API patterns in `CONTEXT.md`. |
 
 ### Pre-submit checklist (for every doc change)
 
 Before submitting any doc change, run these checks:
 
 1. **Copy-paste every code block** into a terminal and verify it works. This catches dead flags, renamed commands, and placeholder syntax.
-2. **Search for old patterns** — If you changed `--set-default` to `--default`, grep the entire project for `--set-default`. If you changed the image pull syntax, grep for the old slug.
+2. **Search for old patterns** — If you changed `set-default` subcommand to `--default` flag, grep the entire project for `set-default`. If you changed the image pull syntax, grep for the old slug.
 3. **Check line number references** — If the doc says `service.go lines 200-210`, open that file and verify the lines still match the described behavior. Better: replace with function/type names.
 4. **Verify links** — Every internal link (`#section`) and external link (`https://...`) must work. Run the public site build if applicable.
 5. **Check for dead code examples** — If an error type is documented, verify it's still used somewhere in `internal/` or `pkg/`. If not, remove it.
