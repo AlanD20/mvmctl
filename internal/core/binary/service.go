@@ -453,8 +453,8 @@ func (s *Service) Repo() Repository {
 
 // ── Internal helpers ───────────────────────────────────────────────────────
 
-func (s *Service) createBinaryItem(name, versionStr, path string, resolveCIVersion bool) (*model.BinaryItem, error) {
-	id, err := crypto.BinaryID(path, name, versionStr)
+func (s *Service) createBinaryItem(typ, versionStr, path string, resolveCIVersion bool) (*model.BinaryItem, error) {
+	id, err := crypto.BinaryID(path, typ, versionStr)
 	if err != nil {
 		return nil, binaryError(errs.CodeInternal, fmt.Sprintf("Failed to generate binary ID: %v", err))
 	}
@@ -469,7 +469,7 @@ func (s *Service) createBinaryItem(name, versionStr, path string, resolveCIVersi
 
 	return &model.BinaryItem{
 		ID:          id,
-		Name:        name,
+		Type:        typ,
 		Version:     versionStr,
 		FullVersion: "v" + versionStr,
 		CIVersion:   ciVer,
@@ -483,18 +483,18 @@ func (s *Service) createBinaryItem(name, versionStr, path string, resolveCIVersi
 
 // copyBinary handles: copy + chmod + createItem for one binary,
 // with an error message label (e.g. "cached" or "built").
-func (s *Service) copyBinary(name, version, src, dest, label string) (*model.BinaryItem, error) {
+func (s *Service) copyBinary(typ, version, src, dest, label string) (*model.BinaryItem, error) {
 	if err := infra.CopyPreservingMetadata(src, dest); err != nil {
 		return nil, binaryError(errs.CodeInternal,
-			fmt.Sprintf("Failed to copy %s %s: %v", label, name, err))
+			fmt.Sprintf("Failed to copy %s %s: %v", label, typ, err))
 	}
 	os.Chmod(dest, 0755)
-	return s.createBinaryItem(name, version, dest, false)
+	return s.createBinaryItem(typ, version, dest, false)
 }
 
 // ResolveVersion resolves a version spec (latest, partial, or exact) to a concrete version.
-// name is the binary name (e.g. "firecracker").
-func (s *Service) ResolveVersion(ctx context.Context, name string, versionSpec string) (string, error) {
+// typ is the binary type (e.g. "firecracker").
+func (s *Service) ResolveVersion(ctx context.Context, typ string, versionSpec string) (string, error) {
 	spec, err := version.ParseSpec(versionSpec)
 	if err != nil {
 		return "", binaryError(errs.CodeBinaryVersionGate,
@@ -525,7 +525,7 @@ func (s *Service) ResolveVersion(ctx context.Context, name string, versionSpec s
 	resolved, err := version.Resolve(allVersions, spec)
 	if err != nil {
 		return "", binaryError(errs.CodeBinaryVersionGate,
-			fmt.Sprintf("Cannot resolve version %q for %s: %s", versionSpec, name, err))
+			fmt.Sprintf("Cannot resolve version %q for %s: %s", versionSpec, typ, err))
 	}
 	return resolved, nil
 }

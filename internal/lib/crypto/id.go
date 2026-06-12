@@ -58,13 +58,13 @@ func KernelID(filePath, version, arch, timestamp string) (string, error) {
 }
 
 // BinaryID generates a 64-char SHA256 binary ID from file content and metadata.
-func BinaryID(filePath, name, version string) (string, error) {
+func BinaryID(filePath, typ, version string) (string, error) {
 	fileHash, err := SHA256FileHash(filePath)
 	if err != nil {
 		return "", err
 	}
 	h := sha256.New()
-	fmt.Fprintf(h, "%s:%s:%s", fileHash, name, version)
+	fmt.Fprintf(h, "%s:%s:%s", fileHash, typ, version)
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 

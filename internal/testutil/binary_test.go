@@ -10,8 +10,8 @@ import (
 	"mvmctl/internal/testutil"
 )
 
-func newBinary(id, name, version string) *model.BinaryItem {
-	return &model.BinaryItem{ID: id, Name: name, Version: version, IsPresent: true}
+func newBinary(id, typ, version string) *model.BinaryItem {
+	return &model.BinaryItem{ID: id, Type: typ, Version: version, IsPresent: true}
 }
 
 func seedBin(t *testing.T, repo *testutil.BinaryRepo, b *model.BinaryItem) {
@@ -27,7 +27,7 @@ func TestBinaryRepo_Get(t *testing.T) {
 		got, err := repo.Get(ctx, "b-1")
 		require.NoError(t, err)
 		require.NotNil(t, got)
-		assert.Equal(t, "firecracker", got.Name)
+		assert.Equal(t, "firecracker", got.Type)
 	})
 
 	t.Run("not_found", func(t *testing.T) {
@@ -68,17 +68,17 @@ func TestBinaryRepo_ListAll(t *testing.T) {
 	assert.Len(t, got, 1)
 }
 
-func TestBinaryRepo_ListByName(t *testing.T) {
+func TestBinaryRepo_ListByType(t *testing.T) {
 	repo := testutil.NewBinaryRepo()
 	seedBin(t, repo, newBinary("b-1", "firecracker", "1.15.0"))
 	seedBin(t, repo, newBinary("b-2", "firecracker", "1.14.0"))
 	seedBin(t, repo, newBinary("b-3", "jailer", "1.15.0"))
 
-	fc, err := repo.ListByName(ctx, "firecracker")
+	fc, err := repo.ListByType(ctx, "firecracker")
 	require.NoError(t, err)
 	assert.Len(t, fc, 2)
 
-	j, err := repo.ListByName(ctx, "jailer")
+	j, err := repo.ListByType(ctx, "jailer")
 	require.NoError(t, err)
 	assert.Len(t, j, 1)
 }

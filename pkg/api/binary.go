@@ -41,11 +41,11 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 			removeResult := op.BinaryRemove(ctx, inputs.BinaryInput{Identifiers: []string{bin.ID}}, force)
 			if removeResult.HasErrors() {
 				slog.Warn("Failed to remove binary",
-					"name", bin.Name, "version", bin.Version, "error", removeResult.Errors()[0].Message)
+					"type", bin.Type, "version", bin.Version, "error", removeResult.Errors()[0].Message)
 				continue
 			}
 		}
-		removed = append(removed, fmt.Sprintf("%s:%s", bin.Name, bin.Version))
+		removed = append(removed, fmt.Sprintf("%s:%s", bin.Type, bin.Version))
 	}
 
 	return removed, nil
@@ -79,7 +79,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 		for _, b := range binaries {
 			_ = op.Repos.Binary.Upsert(ctx, b)
 			if shouldSetDefault {
-				_ = op.Repos.Binary.SetDefault(ctx, b.Name, b.Version, b.Path)
+				_ = op.Repos.Binary.SetDefault(ctx, b.Type, b.Version, b.Path)
 			}
 		}
 
@@ -99,14 +99,14 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	}
 
 	// ---- Release download path ----
-	resolvedVersion, err := op.Services.Binary.ResolveVersion(ctx, resolved.Name, resolved.Version)
+	resolvedVersion, err := op.Services.Binary.ResolveVersion(ctx, resolved.Type, resolved.Version)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, err.Error(), err)
 	}
 
 	normalized := binary.NormalizeVersion(resolvedVersion)
-	fcExists, _ := op.Repos.Binary.GetByNameAndVersion(ctx, "firecracker", normalized)
-	jlExists, _ := op.Repos.Binary.GetByNameAndVersion(ctx, "jailer", normalized)
+	fcExists, _ := op.Repos.Binary.GetByTypeAndVersion(ctx, "firecracker", normalized)
+	jlExists, _ := op.Repos.Binary.GetByTypeAndVersion(ctx, "jailer", normalized)
 	versionExists := fcExists != nil && jlExists != nil
 
 	if versionExists && !resolved.DownloadOverride {
@@ -134,7 +134,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	for _, b := range binaries {
 		_ = op.Repos.Binary.Upsert(ctx, b)
 		if shouldSetDefault {
-			_ = op.Repos.Binary.SetDefault(ctx, b.Name, b.Version, b.Path)
+			_ = op.Repos.Binary.SetDefault(ctx, b.Type, b.Version, b.Path)
 		}
 	}
 
@@ -179,7 +179,7 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "binary.remove_failed",
-				Message:   fmt.Sprintf("Failed to remove %s v%s: %v", bin.Name, bin.FullVersion, err),
+				Message:   fmt.Sprintf("Failed to remove %s v%s: %v", bin.Type, bin.FullVersion, err),
 				Exception: err,
 				Item:      bin,
 			})
@@ -188,14 +188,14 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 
 		op.AuditLog.LogOperation("binary.remove", map[string]any{
 			"id":      bin.ID,
-			"name":    bin.Name,
+			"type":    bin.Type,
 			"version": bin.FullVersion,
 		}, "")
 
 		items = append(items, errs.OperationResult{
 			Status:  "success",
 			Code:    "binary.removed",
-			Message: fmt.Sprintf("Removed %s v%s", bin.Name, bin.FullVersion),
+			Message: fmt.Sprintf("Removed %s v%s", bin.Type, bin.FullVersion),
 			Item:    bin,
 		})
 	}
@@ -213,7 +213,7 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 
 	binariesToRemove := make([]*model.BinaryItem, 0)
 	for _, name := range []string{"firecracker", "jailer"} {
-		bin, err := resolver.ByNameVersion(ctx, name, normalized)
+		bin, err := resolver.ByTypeVersion(ctx, name, normalized)
 		if err != nil {
 			// Python: logger.debug("Binary %s v%s not found in DB, skipping", name, normalized)
 			slog.Debug("Binary not found in DB, skipping",
@@ -243,12 +243,12 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 	for _, bin := range binariesToRemove {
 		// Python: svc.remove(binary, force=force) — returns (*BinaryItem, error)
 		if _, err := op.Services.Binary.Remove(ctx, bin, force); err != nil {
-			return errs.WrapMsg(errs.CodeBinaryRemoveFailed, fmt.Sprintf("Failed to remove %s: %v", bin.Name, err), err)
+			return errs.WrapMsg(errs.CodeBinaryRemoveFailed, fmt.Sprintf("Failed to remove %s: %v", bin.Type, err), err)
 		}
 
 		op.AuditLog.LogOperation("binary.remove", map[string]any{
 			"id":      bin.ID,
-			"name":    bin.Name,
+			"type":    bin.Type,
 			"version": normalized,
 		}, "")
 	}
@@ -341,7 +341,7 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryIn
 
 	op.AuditLog.LogOperation("binary.set_default", map[string]any{
 		"id":      bin.ID,
-		"name":    bin.Name,
+		"type":    bin.Type,
 		"version": bin.Version,
 	}, "")
 
@@ -372,7 +372,7 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 
 	firecrackerBins := make([]*model.BinaryItem, 0)
 	for _, b := range local {
-		if b.Name == "firecracker" {
+		if b.Type == "firecracker" {
 			firecrackerBins = append(firecrackerBins, b)
 		}
 	}
@@ -399,7 +399,7 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 
 	op.AuditLog.LogOperation("binary.ensure_default", map[string]any{
 		"id":      latest.ID,
-		"name":    latest.Name,
+		"type":    latest.Type,
 		"version": latest.Version,
 	}, "")
 

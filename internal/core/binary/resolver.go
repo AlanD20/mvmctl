@@ -98,29 +98,29 @@ func (r *Resolver) ByID(ctx context.Context, binaryID string) (*model.BinaryItem
 	return enriched[0], nil
 }
 
-// ByNameVersion resolves a binary by name and version (both required).
-func (r *Resolver) ByNameVersion(ctx context.Context, name, version string) (*model.BinaryItem, error) {
-	binary, err := r.repo.GetByNameAndVersion(ctx, name, version)
+// ByTypeVersion resolves a binary by type and version (both required).
+func (r *Resolver) ByTypeVersion(ctx context.Context, typ, version string) (*model.BinaryItem, error) {
+	binary, err := r.repo.GetByTypeAndVersion(ctx, typ, version)
 	if err != nil {
 		return nil, err
 	}
 	if binary == nil {
 		return nil, errs.NotFound(errs.CodeBinaryNotFound,
-			fmt.Sprintf("Binary not found: name='%s', version='%s'", name, version))
+			fmt.Sprintf("Binary not found: type='%s', version='%s'", typ, version))
 	}
 	enriched := r.enrich(ctx, []*model.BinaryItem{binary})
 	return enriched[0], nil
 }
 
-// ByNameLatest resolves a binary by name — returns the highest local version.
-func (r *Resolver) ByNameLatest(ctx context.Context, name string) (*model.BinaryItem, error) {
-	matches, err := r.repo.ListByName(ctx, name)
+// ByTypeLatest resolves a binary by type — returns the highest local version.
+func (r *Resolver) ByTypeLatest(ctx context.Context, typ string) (*model.BinaryItem, error) {
+	matches, err := r.repo.ListByType(ctx, typ)
 	if err != nil {
 		return nil, err
 	}
 	if len(matches) == 0 {
 		return nil, errs.NotFound(errs.CodeBinaryNotFound,
-			fmt.Sprintf("Binary not found by name: %s", name))
+			fmt.Sprintf("Binary not found by type: %s", typ))
 	}
 	if len(matches) == 1 {
 		enriched := r.enrich(ctx, matches)
@@ -135,9 +135,9 @@ func (r *Resolver) ByNameLatest(ctx context.Context, name string) (*model.Binary
 	return enriched[0], nil
 }
 
-// GetDefault resolves the default binary for a given name, or nil if not set.
-func (r *Resolver) GetDefault(ctx context.Context, name string) (*model.BinaryItem, error) {
-	binary, err := r.repo.GetDefault(ctx, name)
+// GetDefault resolves the default binary for a given type, or nil if not set.
+func (r *Resolver) GetDefault(ctx context.Context, typ string) (*model.BinaryItem, error) {
+	binary, err := r.repo.GetDefault(ctx, typ)
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +150,10 @@ func (r *Resolver) GetDefault(ctx context.Context, name string) (*model.BinaryIt
 
 // Resolve resolves a binary by ID prefix or name (latest version).
 func (r *Resolver) Resolve(ctx context.Context, value string) (*model.BinaryItem, error) {
-	// Try "name:version" selector format first
-	name, ver := version.ParseSelector(value)
-	if name != "" && ver != "" {
-		return r.ByNameVersion(ctx, name, ver)
+	// Try "type:version" selector format first
+	typ, ver := version.ParseSelector(value)
+	if typ != "" && ver != "" {
+		return r.ByTypeVersion(ctx, typ, ver)
 	}
 
 	// Try by ID first
@@ -164,7 +164,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.BinaryItem
 
 	// Only fall through on BinaryNotFoundError.
 	if domainErr, ok := err.(*errs.DomainError); ok && domainErr.Code == errs.CodeBinaryNotFound {
-		return r.ByNameLatest(ctx, value)
+		return r.ByTypeLatest(ctx, value)
 	}
 	return nil, err
 }

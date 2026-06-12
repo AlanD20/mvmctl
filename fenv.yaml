@@ -47,7 +47,7 @@ ssh:
       apt-get update && \
       apt-get install -y qemu-utils
   - name: install net-tools
-    depends_on: ['vm:fenv-vm-1', 'key:fenv-key']
+    depends_on: ['vm:fenv-vm-1', 'key:fenv-key', 'ssh:install qemu-utils']
     target: fenv-vm-1
     key: fenv-key
     timeout: 150

@@ -243,7 +243,7 @@ func (op *Operation) initStepBinary(
 
 	fcBinaries := make([]*model.BinaryItem, 0)
 	for _, b := range local {
-		if b.Name == "firecracker" || b.Name == "jailer" {
+		if b.Type == "firecracker" || b.Type == "jailer" {
 			fcBinaries = append(fcBinaries, b)
 		}
 	}
@@ -302,7 +302,7 @@ func (op *Operation) initDownloadBinary(ctx context.Context, version string) Ini
 	}
 	versionStr := version
 	for _, b := range binaries {
-		if b.Name == "firecracker" {
+		if b.Type == "firecracker" {
 			versionStr = b.Version
 			break
 		}
@@ -332,7 +332,7 @@ func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResul
 
 	versionStr := version
 	for _, b := range binaries {
-		if b.Name == "firecracker" {
+		if b.Type == "firecracker" {
 			versionStr = b.Version
 			break
 		}
