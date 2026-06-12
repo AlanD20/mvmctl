@@ -146,17 +146,11 @@ func (s *Service) waitForSSH(ctx context.Context, timeout time.Duration) (time.D
 		if dialErr == nil {
 			conn.Close()
 			if attempt > 1 {
-				fmt.Fprintf(os.Stderr, "\r  [ssh] VM reachable after ~%ds      \n",
-					int(time.Since(deadline.Add(-timeout)).Seconds()))
+				slog.Debug("VM reachable after probe", "attempts", attempt, "elapsed", time.Since(deadline.Add(-timeout)).String())
 			}
 			return remaining, nil
 		}
 
-		if attempt == 1 {
-			fmt.Fprintf(os.Stderr, "  [ssh] Waiting for VM to become reachable...")
-		} else {
-			fmt.Fprintf(os.Stderr, ".")
-		}
 		time.Sleep(probeInterval)
 	}
 }

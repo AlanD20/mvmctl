@@ -581,7 +581,7 @@ func (t *NFTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 			string(model.FirewallChainMVMNocloudNetIn)))
 	lines = append(lines, "")
 
-	// 3. Add all DB rules
+	// 3. Add all batch rules
 	var newRules []*model.FirewallRule
 	for i := range rules {
 		rule := rules[i]
@@ -612,7 +612,6 @@ func (t *NFTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 	}
 
 	// DB sync: find existing rules, update verified_at, insert new ones.
-	// Uses a single compound query instead of N individual lookups.
 	if _, err := t.repo.FindAndUpsertRules(ctx, newRules); err != nil {
 		slog.Error("Failed to sync nftables rules in DB after batch", "error", err)
 	}

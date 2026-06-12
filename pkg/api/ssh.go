@@ -41,8 +41,7 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput) erro
 	if resolved.Key != nil {
 		keyPath = *resolved.Key
 	}
-	timeoutDur, _ := op.Services.Config.GetDuration(ctx, "settings.vm", "ssh_timeout_sec")
-	timeout := timeoutDur * time.Second
+	timeout, _ := op.Services.Config.GetDuration(ctx, "settings.vm", "ssh_timeout_sec")
 	if resolved.Timeout != nil && *resolved.Timeout > 0 {
 		timeout = time.Duration(*resolved.Timeout) * time.Second
 	}

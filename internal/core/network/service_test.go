@@ -575,7 +575,7 @@ func TestService_EnsureTap(t *testing.T) {
 		}
 
 		svc := network.NewService(testutil.NewNetworkRepo(), nil)
-		err := svc.EnsureTap(ctx, "tap-test", "mvm-br0", "net-1", "10.0.0.0/24")
+		err := svc.EnsureTapDevice(ctx, "tap-test", "mvm-br0")
 		require.NoError(t, err)
 		require.Len(t, ran, 3)
 		assert.Contains(t, ran[0], "tuntap add")
@@ -598,7 +598,7 @@ func TestService_EnsureTap(t *testing.T) {
 		}
 
 		svc := network.NewService(testutil.NewNetworkRepo(), nil)
-		err := svc.EnsureTap(ctx, "tap-test", "mvm-br0", "net-1", "10.0.0.0/24")
+		err := svc.EnsureTapDevice(ctx, "tap-test", "mvm-br0")
 		require.NoError(t, err)
 		assert.Empty(t, ran, "no ip commands when TAP already on correct bridge")
 	})
@@ -618,7 +618,7 @@ func TestService_EnsureTap(t *testing.T) {
 		}
 
 		svc := network.NewService(testutil.NewNetworkRepo(), nil)
-		err := svc.EnsureTap(ctx, "tap-test", "mvm-br0", "net-1", "10.0.0.0/24")
+		err := svc.EnsureTapDevice(ctx, "tap-test", "mvm-br0")
 		require.NoError(t, err)
 		require.Len(t, ran, 3)
 		assert.Contains(t, ran[0], "down")

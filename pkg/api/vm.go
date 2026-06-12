@@ -98,7 +98,12 @@ func (op *Operation) VMCreate(
 	if calcErr != nil {
 		return nil, fmt.Errorf("compute bridge address: %w", calcErr)
 	}
-	// Bridge + NAT in a single batch for atomic network and firewall rule application.
+	// Pre-compute TAP names so we can add firewall rules in the shared batch.
+	tapNames := make([]string, len(names))
+	for i, name := range names {
+		tapNames[i] = libnet.VMGenerateTAPName(sharedResolved.Network.Name, name)
+	}
+	// Bridge + NAT + TAP firewall rules in a single batch for atomic application.
 	natGateways := network.NatGatewaysList(sharedResolved.Network)
 	var bridgeErr error
 	op.Services.Network.WithBatch(ctx, func() {
@@ -111,6 +116,15 @@ func (op *Operation) VMCreate(
 				natGateways, sharedResolved.Network.Subnet, sharedResolved.Network.ID); natErr != nil {
 				slog.Warn("failed to ensure NAT rules during VM creation",
 					"vm", "(shared)", "error", natErr)
+			}
+		}
+		// TAP FORWARD rules for all VMs in the batch.
+		for _, tapName := range tapNames {
+			if err := op.Services.Network.AddTapFirewallRules(ctx, tapName,
+				sharedResolved.Network.Bridge, sharedResolved.Network.ID,
+				sharedResolved.Network.Subnet); err != nil {
+				slog.Warn("failed to add TAP firewall rules during VM creation",
+					"tap", tapName, "error", err)
 			}
 		}
 	})
@@ -403,16 +417,9 @@ func (op *Operation) vmBuilderExecute(
 		builder.guestIP = ip
 	}
 
-	// TAP setup (NAT rules are done once before the per-VM loop).
-	var tapErr error
-	op.Services.Network.WithBatch(ctx, func() {
-		if err := op.Services.Network.EnsureTap(ctx, builder.tapName, resolved.Network.Bridge,
-			resolved.Network.ID, resolved.Network.Subnet); err != nil {
-			tapErr = err
-		}
-	})
-	if tapErr != nil {
-		return fmt.Errorf("ensure TAP: %w", tapErr)
+	// TAP device creation (firewall rules were added in the shared batch before goroutines).
+	if err := op.Services.Network.EnsureTapDevice(ctx, builder.tapName, resolved.Network.Bridge); err != nil {
+		return fmt.Errorf("ensure TAP: %w", err)
 	}
 	builder.markCreated("network_tap")
 	libnet.FlushARP(ctx, resolved.Network.Bridge)
@@ -1147,16 +1154,15 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 						}
 					}
 				}
-				if err := op.Services.Network.EnsureTap(
-					ctx,
-					v.TapDevice,
-					v.Network.Bridge,
-					v.Network.ID,
-					v.Network.Subnet,
-				); err != nil {
-					slog.Warn("Failed to ensure TAP during respawn", "tap", v.TapDevice, "error", err)
+				if err := op.Services.Network.AddTapFirewallRules(ctx, v.TapDevice,
+					v.Network.Bridge, v.Network.ID, v.Network.Subnet); err != nil {
+					slog.Warn("Failed to add TAP firewall rules during respawn", "tap", v.TapDevice, "error", err)
 				}
 			})
+			// TAP device creation outside batch (device is idempotent).
+			if err := op.Services.Network.EnsureTapDevice(ctx, v.TapDevice, v.Network.Bridge); err != nil {
+				slog.Warn("Failed to ensure TAP device during respawn", "tap", v.TapDevice, "error", err)
+			}
 		}
 		libnet.FlushARP(ctx, v.Network.Bridge)
 	}

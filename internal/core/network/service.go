@@ -378,7 +378,10 @@ func (s *Service) RemoveNAT(
 
 // ── TAP management ──
 
-func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet string) error {
+// EnsureTapDevice creates or reconciles a TAP device and attaches it to the bridge.
+// No firewall rules are added — callers that batch firewall rules should use
+// AddTapFirewallRules in their own WithBatch context.
+func (s *Service) EnsureTapDevice(ctx context.Context, tap, bridge string) error {
 	if libnet.DefaultNetOps.TapExists(ctx, tap) {
 		currentBridge := libnet.DefaultNetOps.GetTapBridge(ctx, tap)
 		if currentBridge == bridge {
@@ -416,68 +419,24 @@ func (s *Service) EnsureTap(ctx context.Context, tap, bridge, networkID, subnet 
 		}
 		slog.Info("TAP device created and attached to bridge", "tap", tap, "bridge", bridge)
 	}
+	return nil
+}
 
-	s.Initialize(ctx)
-
-	// Matches Python ensure_tap exactly:
-	//   forward_bridge_to_tap: source=subnet or ANY_CIDR, destination=ANY_CIDR
-	//   forward_tap_to_bridge: source=ANY_CIDR,           destination=subnet or ANY_CIDR
-	wildcard := string(model.FirewallWildcardAnyCIDR)
-
-	fwdBridgeToTap := &model.FirewallRule{
-		TableName:    model.FirewallTableFilter,
-		ChainName:    FirewallChainMVMForward,
-		RuleType:     model.FirewallRuleTypeForwardOut,
-		Target:       model.FirewallTargetAccept,
-		NetworkID:    networkID,
-		Protocol:     model.FirewallProtocolAll,
-		Source:       wildcard, // overwritten below if subnet != ""
-		Destination:  wildcard, // ALWAYS wildcard — matches Python
-		InInterface:  bridge,
-		OutInterface: tap,
-		SPort:        int(model.FirewallPortAny),
-		DPort:        int(model.FirewallPortAny),
-		IsActive:     true,
-		NetworkName:  &bridge,
+// AddTapFirewallRules adds the TAP FORWARD rules to the firewall tracker.
+// When called inside a WithBatch context, rules are accumulated for batch application.
+func (s *Service) AddTapFirewallRules(ctx context.Context, tap, bridge, networkID, subnet string) error {
+	if s.firewallTracker == nil {
+		return nil
 	}
-	fwdTapToBridge := &model.FirewallRule{
-		TableName:    model.FirewallTableFilter,
-		ChainName:    FirewallChainMVMForward,
-		RuleType:     model.FirewallRuleTypeForwardIn,
-		Target:       model.FirewallTargetAccept,
-		NetworkID:    networkID,
-		Protocol:     model.FirewallProtocolAll,
-		Source:       wildcard, // ALWAYS wildcard — matches Python
-		Destination:  wildcard, // overwritten below if subnet != ""
-		InInterface:  tap,
-		OutInterface: bridge,
-		SPort:        int(model.FirewallPortAny),
-		DPort:        int(model.FirewallPortAny),
-		IsActive:     true,
-		NetworkName:  &bridge,
-	}
-
-	if subnet != "" {
-		fwdBridgeToTap.Source = subnet
-		fwdTapToBridge.Destination = subnet
-	}
-
-	if s.firewallTracker != nil {
-		result := s.firewallTracker.EnsureRule(ctx, *fwdBridgeToTap, fmt.Sprintf("tap:%s", tap))
+	rules := model.NewTapForwardRules(tap, bridge, networkID, subnet)
+	for _, rule := range rules {
+		result := s.firewallTracker.EnsureRule(ctx, rule, fmt.Sprintf("tap:%s", tap))
 		if !result.Success {
 			errMsg := infra.DerefOrZero(result.ErrorMessage)
 			return errs.Wrap(errs.CodeNetworkFirewallFailed,
-				fmt.Errorf("failed to add FORWARD rule for bridge %s to TAP %s: %s", bridge, tap, errMsg))
-		}
-		result = s.firewallTracker.EnsureRule(ctx, *fwdTapToBridge, fmt.Sprintf("tap:%s", tap))
-		if !result.Success {
-			s.firewallTracker.RemoveRule(ctx, *fwdBridgeToTap)
-			errMsg := infra.DerefOrZero(result.ErrorMessage)
-			return errs.Wrap(errs.CodeNetworkFirewallFailed,
-				fmt.Errorf("failed to add FORWARD rule for TAP %s to bridge %s: %s", tap, bridge, errMsg))
+				fmt.Errorf("failed to add FORWARD rule for TAP %s: %s", tap, errMsg))
 		}
 	}
-
 	return nil
 }
 
