@@ -179,13 +179,13 @@ This is a read-only operation — nothing is created or destroyed.`,
 			if len(result.New) > 0 {
 				fmt.Fprintf(os.Stderr, "New resources (in spec, not in state):\n")
 				for _, name := range result.New {
-					fmt.Fprintf(os.Stderr, "  + %s\n", name)
+					fmt.Fprintf(os.Stderr, "  %s+ %s%s\n", common.AnsiGreen, name, common.AnsiReset)
 				}
 			}
 			if len(result.Removed) > 0 {
 				fmt.Fprintf(os.Stderr, "Removed resources (in state, not in spec):\n")
 				for _, name := range result.Removed {
-					fmt.Fprintf(os.Stderr, "  - %s\n", name)
+					fmt.Fprintf(os.Stderr, "  %s- %s%s\n", common.AnsiRed, name, common.AnsiReset)
 				}
 			}
 			if len(result.Existing) > 0 {

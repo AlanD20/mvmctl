@@ -138,7 +138,7 @@ func ReadWorkflowState(dir string) (*model.WorkflowState, error) {
 
 	data, err := os.ReadFile(statePath)
 	if err != nil {
-		return nil, fmt.Errorf("read state file %s: %w", statePath, err)
+		return nil, err
 	}
 
 	var state model.WorkflowState

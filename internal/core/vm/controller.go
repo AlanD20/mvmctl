@@ -128,6 +128,8 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) e
 				Pid:               pid,
 				IsChild:           true,
 				PreSignalHook:     func() bool { return false },
+				GracefulTimeout:   2 * time.Second,
+				KillTimeout:       100 * time.Millisecond,
 				ExpectedStartTime: c.vm.ProcessStartTime,
 			})
 		}
@@ -146,9 +148,14 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) e
 		if force {
 			system.KillProcess(pid)
 		}
+		// Force path: SIGKILL already sent (or we skip SIGTERM for non-force
+		// if no API socket). Either way, use aggressive timeouts — the process
+		// should die within milliseconds.
 		exitCode = system.GracefulShutdown(system.ShutdownConfig{
 			Pid:               pid,
 			IsChild:           true,
+			GracefulTimeout:   100 * time.Millisecond,
+			KillTimeout:       100 * time.Millisecond,
 			ExpectedStartTime: c.vm.ProcessStartTime,
 		})
 	}
