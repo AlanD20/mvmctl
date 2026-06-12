@@ -388,3 +388,49 @@ copy:
     depends_on:
       - vm:dev-vm
 ```
+
+---
+
+## State File
+
+After running `mvm env apply`, the engine persists the full state to `~/.cache/mvmctl/workflows/<workflow-id>/state.yaml`.
+
+**Structure:**
+
+```yaml
+workflow_id: "ec729934a8fb9c67"
+spec_path: "./my-env.yaml"
+schema_version: "1.0"
+created_at: "2026-06-12T10:00:00Z"
+updated_at: "2026-06-12T10:05:00Z"
+resources:
+  - name: "network:default"        # resource name
+    type: "network"                 # resource type
+    state:
+      spec:                         # full input spec from YAML
+        name: "default"
+        subnet: "172.27.0.0/24"
+        nat: true
+        default: true
+      output:                       # data produced by Apply
+        network_id: "net-abc123"
+      meta:
+        was_created: true           # did we create this resource?
+        spec_hash: "a1b2c3..."      # hash for drift detection
+```
+
+**Fields:**
+
+| Field | Description |
+|-------|-------------|
+| `name` | Resource name (e.g. `"network:default"`) |
+| `type` | Resource type (e.g. `"network"`) |
+| `depends_on` | Explicit dependencies (optional) |
+| `state.spec` | Full input spec from YAML — enables drift detection |
+| `state.output` | Data produced by Apply (IDs, paths, etc.) |
+| `state.meta.was_created` | `true` if we created the resource, `false` if pre-existing |
+| `state.meta.spec_hash` | SHA256 hash of input spec — compared on re-apply for drift detection |
+
+**Drift detection:** On `mvm env diff`, the engine hashes the current spec and compares against the saved `spec_hash`. If different, the resource is marked as drifted (shown in yellow).
+
+**Crash resilience:** State is written after every successful step, not batched at the end. If `mvm env apply` crashes or fails partway, the state file already contains all completed steps. Re-running picks up where it left off — completed steps are skipped via existence checks. Same for `mvm env destroy` — if it fails partway, re-running destroys only the remaining resources.

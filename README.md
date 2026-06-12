@@ -71,7 +71,7 @@ vm:
 # Provision everything
 mvm env apply my-env.yaml
 
-# See what would change
+# See what would change (new, removed, drifted)
 mvm env diff my-env.yaml
 
 # List applied environments

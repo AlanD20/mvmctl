@@ -10,17 +10,19 @@ import (
 // that a step wants to expose to its dependents.
 type SharedState struct {
 	mu   sync.RWMutex
-	data model.ResourceSpec
+	data model.ResourceMap
 }
 
 // NewSharedState creates an empty shared state.
 func NewSharedState() *SharedState {
 	return &SharedState{
-		data: make(model.ResourceSpec),
+		data: make(model.ResourceMap),
 	}
 }
 
 // Set stores a value under the given step name. Safe for concurrent use.
+// value is any because step output types vary per domain (NetworkState, VMState, etc.)
+// and the shared state is a generic pass-through between pipeline steps.
 func (s *SharedState) Set(stepName string, value any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

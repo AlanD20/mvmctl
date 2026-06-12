@@ -31,6 +31,8 @@ vm:
   - name: fenv-vm-1
     depends_on: ['network:fenv-net', 'key:fenv-key', 'image:ubuntu-noble', 'binary:fc-16', 'kernel:fenv-vmlinux']
     disk_size: 20G
+    vcpu: 4
+    mem: 6G
     network: fenv-net
     key: fenv-key
     image: ubuntu-noble
@@ -61,5 +63,5 @@ copy:
     target: fenv-vm-1
     user: root
     key: fenv-key
-    src: ./mvm
+    src: ./dist/mvm
     dst: /root/

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 
@@ -28,31 +29,33 @@ type mockStep struct {
 	name        string
 	stepType    string
 	deps        []string
-	applyFn     func(ctx context.Context, state *SharedState, saved model.ResourceSpec) error
-	destroyFn   func(ctx context.Context, saved model.ResourceSpec) error
-	stateDataFn func() model.ResourceSpec
+	specHash    string
+	applyFn     func(ctx context.Context, state *SharedState, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error
+	destroyFn   func(ctx context.Context, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error
+	stateDataFn func() model.ResourceState
 }
 
 func (s *mockStep) Name() string           { return s.name }
 func (s *mockStep) Type() string           { return s.stepType }
 func (s *mockStep) Dependencies() []string { return s.deps }
-func (s *mockStep) Apply(ctx context.Context, state *SharedState, saved model.ResourceSpec) error {
+func (s *mockStep) SpecHash() string       { return s.specHash }
+func (s *mockStep) Apply(ctx context.Context, state *SharedState, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error {
 	if s.applyFn != nil {
-		return s.applyFn(ctx, state, saved)
+		return s.applyFn(ctx, state, saved, write, onProgress)
 	}
 	return nil
 }
-func (s *mockStep) Destroy(ctx context.Context, saved model.ResourceSpec) error {
+func (s *mockStep) Destroy(ctx context.Context, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error {
 	if s.destroyFn != nil {
-		return s.destroyFn(ctx, saved)
+		return s.destroyFn(ctx, saved, write, onProgress)
 	}
 	return nil
 }
-func (s *mockStep) StateData() model.ResourceSpec {
+func (s *mockStep) StateData() model.ResourceState {
 	if s.stateDataFn != nil {
 		return s.stateDataFn()
 	}
-	return nil
+	return model.ResourceState{}
 }
 
 // errSentinel is a reusable test error.
@@ -274,7 +277,7 @@ func TestPipeline_Execute_AllSucceed(t *testing.T) {
 	steps := []Step{
 		&mockStep{stepType: "",
 			name: "a",
-			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceSpec) error {
+			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				execOrder = append(execOrder, "a")
 				mu.Unlock()
@@ -284,7 +287,7 @@ func TestPipeline_Execute_AllSucceed(t *testing.T) {
 		&mockStep{stepType: "",
 			name: "b",
 			deps: []string{"a"},
-			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceSpec) error {
+			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				execOrder = append(execOrder, "b")
 				mu.Unlock()
@@ -294,7 +297,7 @@ func TestPipeline_Execute_AllSucceed(t *testing.T) {
 		&mockStep{stepType: "",
 			name: "c",
 			deps: []string{"a"},
-			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceSpec) error {
+			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				execOrder = append(execOrder, "c")
 				mu.Unlock()
@@ -323,7 +326,7 @@ func TestPipeline_Execute_StepFails(t *testing.T) {
 		&mockStep{stepType: "",
 			name: "b",
 			deps: []string{"a"},
-			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceSpec) error {
+			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				return errSentinel
 			},
 		},
@@ -358,9 +361,9 @@ func TestPipeline_Execute_ProgressCallback(t *testing.T) {
 		&mockStep{stepType: "", name: "b", deps: []string{"a"}},
 	}
 
-	onProgress := func(phase, status, msg string) {
+	onProgress := func(e event.Progress) {
 		mu.Lock()
-		progressEvents = append(progressEvents, phase+":"+status)
+		progressEvents = append(progressEvents, e.Phase+":"+e.Status)
 		mu.Unlock()
 	}
 
@@ -382,7 +385,7 @@ func TestPipeline_Execute_ContextCancellation(t *testing.T) {
 	steps := []Step{
 		&mockStep{stepType: "",
 			name: "blocked",
-			applyFn: func(ctx context.Context, _ *SharedState, _ model.ResourceSpec) error {
+			applyFn: func(ctx context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				<-ctx.Done()
 				return ctx.Err()
 			},
@@ -408,7 +411,7 @@ func TestPipeline_Destroy_ReverseOrder(t *testing.T) {
 	steps := []Step{
 		&mockStep{stepType: "",
 			name: "a",
-			destroyFn: func(_ context.Context, _ model.ResourceSpec) error {
+			destroyFn: func(_ context.Context, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				destroyOrder = append(destroyOrder, "a")
 				mu.Unlock()
@@ -418,7 +421,7 @@ func TestPipeline_Destroy_ReverseOrder(t *testing.T) {
 		&mockStep{stepType: "",
 			name: "b",
 			deps: []string{"a"},
-			destroyFn: func(_ context.Context, _ model.ResourceSpec) error {
+			destroyFn: func(_ context.Context, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				destroyOrder = append(destroyOrder, "b")
 				mu.Unlock()
@@ -428,7 +431,7 @@ func TestPipeline_Destroy_ReverseOrder(t *testing.T) {
 		&mockStep{stepType: "",
 			name: "c",
 			deps: []string{"b"},
-			destroyFn: func(_ context.Context, _ model.ResourceSpec) error {
+			destroyFn: func(_ context.Context, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				destroyOrder = append(destroyOrder, "c")
 				mu.Unlock()
@@ -440,10 +443,10 @@ func TestPipeline_Destroy_ReverseOrder(t *testing.T) {
 	p, err := NewPipeline(steps)
 	require.NoError(t, err)
 
-	saved := []model.SavedResource{
-		{StepName: "a", StepType: "mock", State: model.ResourceSpec{}},
-		{StepName: "b", StepType: "mock", State: model.ResourceSpec{}},
-		{StepName: "c", StepType: "mock", State: model.ResourceSpec{}},
+	saved := []model.AppliedResource{
+		{Name: "a", Type: "mock"},
+		{Name: "b", Type: "mock"},
+		{Name: "c", Type: "mock"},
 	}
 
 	ctx := context.Background()
@@ -453,15 +456,15 @@ func TestPipeline_Destroy_ReverseOrder(t *testing.T) {
 	assert.Equal(t, []string{"c", "b", "a"}, destroyOrder)
 }
 
-// Rationale: Destroy must pass the saved state from model.SavedResource.State to the step's Destroy
+// Rationale: Destroy must pass the saved state from AppliedResource.State to the step's Destroy
 // method so the step knows what resources to tear down.
 func TestPipeline_Destroy_WithSavedState(t *testing.T) {
-	var receivedState model.ResourceSpec
+	var receivedState model.ResourceState
 
 	steps := []Step{
 		&mockStep{stepType: "",
 			name: "a",
-			destroyFn: func(_ context.Context, saved model.ResourceSpec) error {
+			destroyFn: func(_ context.Context, saved model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				receivedState = saved
 				return nil
 			},
@@ -471,9 +474,12 @@ func TestPipeline_Destroy_WithSavedState(t *testing.T) {
 	p, err := NewPipeline(steps)
 	require.NoError(t, err)
 
-	expectedState := model.ResourceSpec{"key": "value", "num": 42}
-	saved := []model.SavedResource{
-		{StepName: "a", StepType: "mock", State: expectedState},
+	expectedState := model.ResourceState{
+		Spec: model.ResourceMap{"key": "value", "num": 42},
+		Meta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
+	}
+	saved := []model.AppliedResource{
+		{Name: "a", Type: "mock", State: expectedState},
 	}
 
 	ctx := context.Background()
@@ -491,7 +497,7 @@ func TestPipeline_Destroy_StepFails(t *testing.T) {
 	steps := []Step{
 		&mockStep{stepType: "",
 			name: "a",
-			destroyFn: func(_ context.Context, _ model.ResourceSpec) error {
+			destroyFn: func(_ context.Context, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				return errSentinel
 			},
 		},
@@ -500,8 +506,8 @@ func TestPipeline_Destroy_StepFails(t *testing.T) {
 	p, err := NewPipeline(steps)
 	require.NoError(t, err)
 
-	saved := []model.SavedResource{
-		{StepName: "a", StepType: "mock", State: model.ResourceSpec{}},
+	saved := []model.AppliedResource{
+		{Name: "a", Type: "mock"},
 	}
 
 	ctx := context.Background()
@@ -517,7 +523,7 @@ func TestPipeline_Destroy_ContextCancellation(t *testing.T) {
 	steps := []Step{
 		&mockStep{stepType: "",
 			name: "blocked",
-			destroyFn: func(ctx context.Context, _ model.ResourceSpec) error {
+			destroyFn: func(ctx context.Context, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				<-ctx.Done()
 				return ctx.Err()
 			},
@@ -530,8 +536,8 @@ func TestPipeline_Destroy_ContextCancellation(t *testing.T) {
 	p, err := NewPipeline(steps)
 	require.NoError(t, err)
 
-	saved := []model.SavedResource{
-		{StepName: "blocked", StepType: "mock", State: model.ResourceSpec{}},
+	saved := []model.AppliedResource{
+		{Name: "blocked", Type: "mock"},
 	}
 
 	err = p.Destroy(ctx, saved, nil)
@@ -574,11 +580,14 @@ func TestStatePersistence_WriteRead(t *testing.T) {
 		SchemaVersion: "1.0",
 		CreatedAt:     "2025-06-01T12:00:00Z",
 		UpdatedAt:     "2025-06-01T12:00:00Z",
-		Resources: []model.SavedResource{
+		Resources: []model.AppliedResource{
 			{
-				StepName: "network:my-net",
-				StepType: "network",
-				State:    model.ResourceSpec{"network_id": "net-abc", "was_created": true},
+				Name: "network:my-net",
+				Type: "network",
+				State: model.ResourceState{
+					Spec: model.ResourceMap{"network_id": "net-abc"},
+					Meta: model.ResourceMeta{WasCreated: true},
+				},
 			},
 		},
 	}
@@ -609,24 +618,31 @@ func TestStatePersistence_RoundTripPreservesAllFields(t *testing.T) {
 		SchemaVersion: "2.0",
 		CreatedAt:     "2025-01-15T08:30:00Z",
 		UpdatedAt:     "2025-01-15T09:45:00Z",
-		Resources: []model.SavedResource{
+		Resources: []model.AppliedResource{
 			{
-				StepName:     "network:primary",
-				StepType:     "network",
-				Dependencies: nil,
-				State:        model.ResourceSpec{"network_id": "net-001", "subnet": "10.0.0.0/24", "was_created": true},
+				Name: "network:primary",
+				Type: "network",
+				State: model.ResourceState{
+					Spec: model.ResourceMap{"network_id": "net-001", "subnet": "10.0.0.0/24"},
+					Meta: model.ResourceMeta{WasCreated: true, SpecHash: "hash-net"},
+				},
 			},
 			{
-				StepName:     "key:admin",
-				StepType:     "key",
-				Dependencies: nil,
-				State:        model.ResourceSpec{"key_id": "key-001", "was_created": true},
+				Name: "key:admin",
+				Type: "key",
+				State: model.ResourceState{
+					Spec: model.ResourceMap{"key_id": "key-001"},
+					Meta: model.ResourceMeta{WasCreated: true, SpecHash: "hash-key"},
+				},
 			},
 			{
-				StepName:     "vm:web-server",
-				StepType:     "vm",
+				Name: "vm:web-server",
+				Type: "vm",
 				Dependencies: []string{"network:primary", "key:admin"},
-				State:        model.ResourceSpec{"vm_id": "vm-001", "vm_dir": "/mnt/vms/vm-001", "was_created": true},
+				State: model.ResourceState{
+					Spec: model.ResourceMap{"vm_id": "vm-001", "vm_dir": "/mnt/vms/vm-001"},
+					Meta: model.ResourceMeta{WasCreated: true, SpecHash: "hash-vm"},
+				},
 			},
 		},
 	}
@@ -649,7 +665,7 @@ func TestStatePersistence_RemoveWorkflowState(t *testing.T) {
 	state := &model.WorkflowState{
 		WorkflowID: wfID,
 		SpecPath:   "/tmp/remove-me.yaml",
-		Resources:  []model.SavedResource{{StepName: "network:test", StepType: "network"}},
+		Resources:  []model.AppliedResource{{Name: "network:test", Type: "network"}},
 	}
 
 	require.NoError(t, WriteWorkflowState(dir, state))
@@ -673,7 +689,7 @@ func TestStatePersistence_ReadWorkflowState_NonExistent(t *testing.T) {
 	// No state.yaml written
 	_, err := ReadWorkflowState(dir)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read state file")
+	assert.Contains(t, err.Error(), "state.yaml")
 }
 
 // Rationale: ReadWorkflowState must return an error when state.yaml contains invalid YAML,
@@ -756,12 +772,3 @@ func TestNow_ReturnsRFC3339(t *testing.T) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-// stepNames extracts names from a slice of steps for readable test output.
-func stepNames(steps []Step) []string {
-	names := make([]string, len(steps))
-	for i, s := range steps {
-		names[i] = s.Name()
-	}
-	return names
-}
