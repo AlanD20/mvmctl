@@ -25,6 +25,64 @@ mvm vm create myvm --image ubuntu:24.04
 mvm ssh myvm
 ```
 
+### Declarative Environments
+
+Define your entire VM setup in a single YAML file:
+
+```yaml
+# my-env.yaml
+version: "1"
+
+network:
+  - name: default
+    subnet: "172.27.0.0/24"
+    nat: true
+
+key:
+  - name: main-key
+    algorithm: ed25519
+
+image:
+  - name: os-image
+    type: alpine
+    version: "3.21"
+
+kernel:
+  - name: default-kernel
+    type: firecracker
+
+binary:
+  - name: firecracker
+    version: "1.15.0"
+
+vm:
+  - name: dev-vm
+    network: default
+    key: main-key
+    image: os-image
+    kernel: default-kernel
+    binary: firecracker
+    vcpu: 2
+    mem: 2048
+    disk_size: 10G
+```
+
+```bash
+# Provision everything
+mvm env apply my-env.yaml
+
+# See what would change
+mvm env diff my-env.yaml
+
+# List applied environments
+mvm env ls
+
+# Tear it all down
+mvm env destroy my-env.yaml
+```
+
+See [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) for all available fields and types.
+
 ---
 
 ## Table of Contents
@@ -201,6 +259,17 @@ mvm cache prune  # Clean up stale cache
 mvm cache clean  # Nuclear option for cache cleanup
 ```
 
+### Environment Management
+
+```bash
+mvm env apply spec.yaml      # Provision everything in the spec
+mvm env ls                    # List applied environments
+mvm env diff spec.yaml        # Show what would change
+mvm env destroy <wf-id|path>  # Tear down an environment
+```
+
+See [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) for the full YAML spec reference.
+
 ### Configuration
 
 ```bash
@@ -220,6 +289,7 @@ Comprehensive documentation is available in the `docs/` directory:
 
 | Document | Description |
 |----------|-------------|
+| [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) | **Environment spec reference** -- all YAML fields, types, and examples for `mvm env` |
 | [docs/REFERENCES.md](docs/REFERENCES.md) | **Complete command reference** -- all `mvm` commands, flags, and options. **Configuration** -- config files, environment variables, cache structure. **Cloud-Init** -- nocloud-net setup, security, modes |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions. Debug mode, permission fixes, network issues |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | System dependencies by category. Package names for Debian/Ubuntu/Arch |
@@ -228,6 +298,7 @@ Comprehensive documentation is available in the `docs/` directory:
 | [docs/ASSETS_CONFIGURATIONS.md](docs/ASSETS_CONFIGURATIONS.md) | Bundled asset configurations: image specs, kernel specs, and runtime defaults |
 | [docs/STANDARDS.md](docs/STANDARDS.md) | Go coding standards, conventions, and architectural rules |
 | [docs/RUNTIME.md](docs/RUNTIME.md) | Runtime internals: provisioning backends, service architecture, and firewall backend |
+| [docs/implementations/ENVIRONMENT_WORKFLOW_ENGINE.md](docs/implementations/ENVIRONMENT_WORKFLOW_ENGINE.md) | **Workflow engine internals** -- architecture, DAG resolution, state persistence, design decisions |
 
 ---
 

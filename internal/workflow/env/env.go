@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -179,7 +180,7 @@ func Destroy(
 	// Reconstruct steps from saved resources.
 	var steps []workflow.Step
 	for _, res := range wfState.Resources {
-		factory, ok := LookupFactoryByStepType(res.StepType)
+		factory, ok := Registry[res.StepType]
 		if !ok {
 			slog.Warn("unknown step type in saved state, skipping", "type", res.StepType, "name", res.StepName)
 			continue
@@ -329,21 +330,68 @@ func ResolveWorkflowID(specOrID string) string {
 // For steps named "type:name", returns "name".
 func BareStepName(stepName, stepType string) string {
 	prefix := stepType + ":"
-	if strings.HasPrefix(stepName, prefix) {
-		return strings.TrimPrefix(stepName, prefix)
+	if after, found := strings.CutPrefix(stepName, prefix); found && after != "" {
+		return after
 	}
 	return stepName
 }
 
-// LookupFactoryByStepType finds a StepFactory by its singular StepType
-// (e.g. "network") by scanning Registry. This is used in the Destroy path
-// where StepType comes from saved state (singular) but Registry keys are
-// plural YAML keys (e.g. "networks"). Returns the factory and true if found.
-func LookupFactoryByStepType(stepType string) (StepFactory, bool) {
-	for _, factory := range Registry {
-		if factory.StepType == stepType {
-			return factory, true
+// ── Diff ──
+
+// DiffResult holds the result of comparing a spec against a saved workflow state.
+type DiffResult struct {
+	// New contains step names present in the spec but not in the state.
+	New []string `json:"new"`
+	// Removed contains step names present in the state but not in the spec.
+	Removed []string `json:"removed"`
+	// Existing contains step names present in both the spec and the state.
+	Existing []string `json:"existing"`
+}
+
+// Diff compares the step names from a resolved spec against the step names
+// from a saved workflow state and returns the set differences.
+// If stateDir is empty, all spec steps are considered new.
+func Diff(ctx context.Context, specPath string, stateDir string) (*DiffResult, error) {
+	// Resolve spec step names.
+	steps, err := ResolveSpec(ctx, specPath, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	specNames := make(map[string]struct{}, len(steps))
+	for _, s := range steps {
+		specNames[s.Name()] = struct{}{}
+	}
+
+	// Read state step names.
+	stateNames := make(map[string]struct{})
+	if stateDir != "" {
+		wfState, rErr := workflow.ReadWorkflowState(stateDir)
+		if rErr == nil && wfState != nil {
+			for _, res := range wfState.Resources {
+				stateNames[res.StepName] = struct{}{}
+			}
 		}
 	}
-	return StepFactory{}, false
+
+	result := &DiffResult{}
+	for name := range specNames {
+		if _, inState := stateNames[name]; inState {
+			result.Existing = append(result.Existing, name)
+		} else {
+			result.New = append(result.New, name)
+		}
+	}
+	for name := range stateNames {
+		if _, inSpec := specNames[name]; !inSpec {
+			result.Removed = append(result.Removed, name)
+		}
+	}
+
+	// Sort for deterministic output.
+	sort.Strings(result.New)
+	sort.Strings(result.Removed)
+	sort.Strings(result.Existing)
+
+	return result, nil
 }

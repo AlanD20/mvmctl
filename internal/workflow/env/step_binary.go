@@ -45,11 +45,11 @@ func (s *BinaryStep) Apply(ctx context.Context, state *workflow.SharedState, sav
 	if saved != nil {
 		prev = StateFromMap[BinaryState](saved)
 	}
-	existing, err := s.op.Repos.Binary.GetByNameAndVersion(ctx, s.input.Name, s.input.Version)
+	existing, err := s.op.Repos.Binary.GetByTypeAndVersion(ctx, s.input.Type, s.input.Version)
 	if err != nil {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
-			fmt.Sprintf("check binary %q: %v", s.input.Name, err),
+			fmt.Sprintf("check binary %q: %v", s.input.Type, err),
 			err,
 		)
 	}
@@ -68,7 +68,7 @@ func (s *BinaryStep) Apply(ctx context.Context, state *workflow.SharedState, sav
 		return err
 	}
 	if len(binaries) == 0 {
-		return errs.New(errs.CodeInternal, fmt.Sprintf("binary pull returned no items for %q", s.input.Name))
+		return errs.New(errs.CodeInternal, fmt.Sprintf("binary pull returned no items for %q", s.input.Type))
 	}
 
 	s.saved = &BinaryState{
@@ -132,7 +132,7 @@ func newBinaryStepFromState(
 		name:     name,
 		deps:     deps,
 		input: inputs.BinaryPullInput{
-			Name: name,
+			Type: name,
 		},
 		op:    op,
 		saved: bs,

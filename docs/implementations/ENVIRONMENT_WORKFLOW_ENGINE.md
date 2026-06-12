@@ -46,19 +46,20 @@ The `env` package is a pure consumer of the API layer — exactly like the CLI. 
 
 Steps hold a `*api.Operation` reference directly. There is no `Operation` interface, no mock, no indirection. The `Operation` interface that previously lived in `pkg/api/env/operation.go` was deleted — it was only a circular dependency workaround.
 
-### Registry keys: plural YAML ↔ singular StepType
+### Registry keys: singular everywhere
 
-A key design choice: **Registry keys are plural** (matching YAML spec keys like `networks:`, `keys:`), while **`StepFactory.StepType` is singular** (the step's identity, e.g. `"network"`, `"vm"`).
+**All identifiers are singular** — YAML keys, step types, `depends_on`, step names, state files. One convention, no bridging.
 
 ```
-YAML key:     networks:
-Registry key: "networks"    (plural, matches YAML for direct lookup)
+YAML key:     network:
+Registry key: "network"     (singular, matches YAML for direct lookup)
 StepType:     "network"     (singular, returned by step.Type())
 State StepType: "network"   (singular, stored from step.Type())
 Step name:    "network:my-net" (singular, FormatStepName(stepType, name))
+depends_on:   - network:my-net (singular, same as step name)
 ```
 
-The `Destroy` path bridges the gap: state files store `StepType` (singular), but Registry is keyed by YAML keys (plural). The helper `lookupFactoryByStepType()` scans Registry to find the factory whose `StepType` matches the saved value.
+The `Destroy` path is straightforward: state files store `StepType` (singular), and Registry is keyed by the same singular value. Direct lookup via `Registry[stepType]` — no bridge function needed.
 
 ---
 
@@ -163,8 +164,8 @@ Algorithm:
 
 1. Build adjacency map from `Dependencies()`
 2. Kahn's algorithm to produce topological levels
-3. Level 0 = no dependencies (networks, keys, images, kernels, binaries, ssh, copy)
-4. Level 1 = depends on level 0 (VMs)
+3. Level 0 = no dependencies (network, key, image, kernel, binary, ssh, copy)
+4. Level 1 = depends on level 0 (vm)
 5. Detect cycles → error with cycle trace
 
 ### 3.5 State Persistence
@@ -223,8 +224,8 @@ A `mvm env clean` command can be added later to prune orphaned state directories
 
 ```go
 // StepFactory creates a Step from either a spec entry or saved state.
-// The map key in Registry is the plural YAML key (e.g. "networks").
-// StepType is the singular step type identifier returned by step.Type().
+// The map key in Registry is the singular YAML key (e.g. "network").
+// StepType is the same singular identifier returned by step.Type().
 type StepFactory struct {
     StepType  string
     FromSpec  func(stepType, name string, spec ResourceSpec, op *api.Operation) (workflow.Step, error)
@@ -232,18 +233,18 @@ type StepFactory struct {
 }
 
 // Registry is a package-level map literal in factory.go.
-// Map keys are plural YAML keys matching env spec files directly.
-// StepType is the singular identifier used by step.Type() and state files.
+// Map keys are singular YAML keys matching env spec files directly.
+// StepType matches the map key — singular everywhere.
 // No init() calls, no side effects — all step types visible in one place.
 var Registry = map[string]StepFactory{
-    "networks": {StepType: "network", FromSpec: newNetworkStepFromSpec, FromState: newNetworkStepFromState},
-    "keys":     {StepType: "key",     FromSpec: newKeyStepFromSpec,     FromState: newKeyStepFromState},
-    "images":   {StepType: "image",   FromSpec: newImageStepFromSpec,   FromState: newImageStepFromState},
-    "kernels":  {StepType: "kernel",  FromSpec: newKernelStepFromSpec,  FromState: newKernelStepFromState},
-    "binaries": {StepType: "binary",  FromSpec: newBinaryStepFromSpec,  FromState: newBinaryStepFromState},
-    "vms":      {StepType: "vm",      FromSpec: newVMStepFromSpec,      FromState: newVMStepFromState},
-    "ssh":      {StepType: "ssh",     FromSpec: newSSHStepFromSpec,     FromState: newSSHStepFromState},
-    "copy":     {StepType: "copy",    FromSpec: newCopyStepFromSpec,    FromState: newCopyStepFromState},
+    "network": {StepType: "network", FromSpec: newNetworkStepFromSpec, FromState: newNetworkStepFromState},
+    "key":     {StepType: "key",     FromSpec: newKeyStepFromSpec,     FromState: newKeyStepFromState},
+    "image":   {StepType: "image",   FromSpec: newImageStepFromSpec,   FromState: newImageStepFromState},
+    "kernel":  {StepType: "kernel",  FromSpec: newKernelStepFromSpec,  FromState: newKernelStepFromState},
+    "binary":  {StepType: "binary",  FromSpec: newBinaryStepFromSpec,  FromState: newBinaryStepFromState},
+    "vm":      {StepType: "vm",      FromSpec: newVMStepFromSpec,      FromState: newVMStepFromState},
+    "ssh":     {StepType: "ssh",     FromSpec: newSSHStepFromSpec,     FromState: newSSHStepFromState},
+    "copy":    {StepType: "copy",    FromSpec: newCopyStepFromSpec,    FromState: newCopyStepFromState},
 }
 ```
 
@@ -252,144 +253,38 @@ Key points:
 - Factory functions never call methods on `op` during construction — they only store the reference
 - This means tests can pass `nil` for `op` during step construction testing
 - No `Operation` interface exists — steps are coupled to the concrete `api.Operation` struct
+- Registry keys match StepType — direct lookup via `Registry[stepType]`, no bridge needed
 
-### 5.2 Step Implementations
+### 5.2 Step Types
 
-All steps follow these common patterns:
+All steps implement the `Step` interface. The engine treats them uniformly — it calls `Apply`, `Destroy`, `StateData` without knowing the concrete type.
 
-1. **`depends_on` support**: Every `FromSpec` factory calls `extractDependsOn(spec)` to read explicit `depends_on` from the YAML entry. The helper returns a `[]string` of full step names (e.g. `"network:my-net"`), or nil if the field is missing.
+**Step categories:**
 
-2. **Nil guards**: Every `Apply()` and `Destroy()` checks `s.op == nil` at the top and returns an error immediately.
+| Category | Step Types | Apply Behavior | Destroy Behavior |
+|----------|-----------|----------------|------------------|
+| **DB-backed** | network, key, vm | Check existence → skip or create | Remove if `WasCreated`, skip if pre-existing |
+| **Pull-based** | image, kernel, binary | Check existence → skip or pull | No-op (persist in DB) |
+| **Imperative** | ssh, copy | Always execute (no skip check) | No-op (ephemeral) |
 
-3. **Re-apply detection**: Every `Apply(ctx, state, saved)` reads the `saved` parameter (previous state from a prior workflow execution). If `saved != nil`, it reconstructs the previous state via `StateFromMap[T]()` and preserves the `WasCreated` flag. If the resource already exists (checked via `op.Repos`), `WasCreated` is carried forward from the previous state — ensuring destroy correctly skips resources that were pre-existing at the time of first apply.
+**Common patterns across all steps:**
+
+1. **`depends_on` support**: Every `FromSpec` factory calls `extractDependsOn(spec)` to read explicit `depends_on` from the YAML entry. Returns `[]string` of full step names (e.g. `"network:my-net"`), or nil if missing.
+
+2. **Nil guards**: Every `Apply()` and `Destroy()` checks `s.op == nil` at the top and returns error immediately.
+
+3. **Re-apply detection**: `Apply(ctx, state, saved)` reads the `saved` parameter (previous state). If not nil, reconstructs via `StateFromMap[T]()` and preserves `WasCreated` flag. If resource exists, carries forward previous `WasCreated` — ensuring destroy skips pre-existing resources.
 
 4. **`Name()`**: `FormatStepName(s.stepType, s.name)` → `"network:my-net"`
 
-5. **`Type()`**: Returns the singular step type string (e.g. `"network"`, `"vm"`, `"ssh"`), which is persisted as `StepType` in the workflow state file.
+5. **`Type()`**: Returns singular step type string (e.g. `"network"`), persisted as `StepType` in state files.
 
----
+**VM step — dependency deduplication:**
 
-**NetworkStep**
-
-```go
-type NetworkStep struct {
-    stepType string
-    name     string
-    deps     []string
-    input    inputs.NetworkCreateInput
-    op       *api.Operation
-    saved    *NetworkState
-}
-
-type NetworkState struct {
-    NetworkID   string `yaml:"network_id"`
-    Subnet      string `yaml:"subnet"`
-    WasCreated  bool   `yaml:"was_created"`
-}
-
-func (s *NetworkStep) Apply(ctx, state, saved) error {
-    // Nil guard: s.op == nil → error
-    // If saved != nil, reconstruct previous state via StateFromMap[NetworkState](saved)
-    // Check if network exists via op.Repos.Network.GetByName(...)
-    // → skip if exists, preserve WasCreated from previous state
-    // Not found → op.NetworkCreate(...)
-    // Store network state in shared state for downstream steps (via state.Set)
-}
-
-func (s *NetworkStep) Destroy(ctx, saved) error {
-    // Nil guard: s.op == nil → error
-    // If WasCreated is false, skip (was pre-existing)
-    // If WasCreated is true → op.NetworkRemove(...)
-}
-
-func (s *NetworkStep) StateData() model.ResourceSpec {
-    return StructToMap(s.saved)
-}
-
-func newNetworkStepFromSpec(stepType, name, spec, op) {
-    // YAML unmarshal into NetworkCreateInput
-    // extractDependsOn(spec) for explicit deps
-    // Return step
-}
-```
-
----
-
-**KeyStep**
-
-```go
-type KeyStep struct {
-    stepType string
-    name     string
-    deps     []string
-    input    inputs.KeyCreateInput
-    op       *api.Operation
-    saved    *KeyState
-}
-
-type KeyState struct {
-    KeyID      string `yaml:"key_id"`
-    WasCreated bool   `yaml:"was_created"`
-}
-
-func (s *KeyStep) Apply(ctx, state, saved) error {
-    // Same pattern: check existence → skip or create
-    // Re-apply: preserve WasCreated from saved state
-}
-```
-
----
-
-**ImageStep, KernelStep, BinaryStep** follow the same pattern:
-- Existence check via `op.Repos` (e.g., `op.Repos.Image.GetByType(...)`)
-- If exists → skip, preserve `WasCreated` from previous state
-- If not → pull via `op.ImagePull(...)`, `op.KernelPull(...)`, `op.BinaryPull(...)`
-- Destroy is a no-op for Image/Kernel/Binary (they persist in the DB)
-- All have nil guards on `s.op == nil`
-
----
-
-**VMStep**
-
-```go
-type VMStep struct {
-    stepType string
-    name     string
-    deps     []string
-    input    inputs.VMCreateInput
-    op       *api.Operation
-    saved    *VMState
-}
-
-type VMState struct {
-    VMID        string `yaml:"vm_id"`
-    VMDir       string `yaml:"vm_dir"`
-    NocloudPort int    `yaml:"nocloud_port,omitempty"`
-    TapName     string `yaml:"tap_name,omitempty"`
-    WasCreated  bool   `yaml:"was_created"`
-}
-
-func (s *VMStep) Dependencies() []string {
-    // Deduplicates explicit depends_on against inferred deps
-    // from reference fields (network, key, image, kernel, binary)
-    // Uses a seen-set to avoid duplicates
-}
-
-func (s *VMStep) Apply(ctx, state, saved) error {
-    // Nil guard
-    // Read resolved dependency IDs from shared state
-    // (NetworkStep stores NetworkID, KeyStep stores KeyID, etc.)
-    // Check if VM already exists → skip, preserve WasCreated
-    // Not found → op.VMCreate(resolvedInput)
-}
-```
-
-**Dependency deduplication in VMStep:**
-
-The VM step's `Dependencies()` performs deduplication against the explicit `depends_on` entries (from `extractDependsOn()`) and the inferred dependencies from reference fields (`network`, `key`, `image`, `kernel`, `binary`). If a user writes:
+The VM step's `Dependencies()` deduplicates explicit `depends_on` against inferred dependencies from reference fields (`network`, `key`, `image`, `kernel`, `binary`). If a user writes:
 
 ```yaml
-vms:
+vm:
   - name: dev-vm
     network: default
     depends_on:
@@ -398,71 +293,13 @@ vms:
 
 The dependency `network:default` is not duplicated — the seen-set ensures it appears once.
 
----
+**SSH and Copy — always re-run:**
 
-**SSHStep** — Imperative, always re-runs on re-apply
+These are imperative steps with no existence check. Unlike DB-backed resources that check `op.Repos` and skip if exists, SSH and Copy always execute on apply. Destroy is a no-op for both.
 
-```go
-type SSHStep struct {
-    stepType string
-    name     string
-    deps     []string
-    input    inputs.SSHInput
-    op       *api.Operation
-    saved    *SSHState
-}
+**Copy `Dst` construction:**
 
-type SSHState struct {
-    Command string `yaml:"command"`
-    WasRun  bool   `yaml:"was_run"`
-}
-
-func (s *SSHStep) Apply(ctx, state, saved) error {
-    // Nil guard
-    // SSH commands are imperative — always execute on apply (no skip check)
-    // op.SSHConnect(ctx, input)
-}
-
-func (s *SSHStep) Destroy(ctx, saved) error {
-    // SSH commands are ephemeral — no teardown needed
-    return nil
-}
-```
-
----
-
-**CopyStep** — Imperative, always re-runs on re-apply
-
-```go
-type CopyStep struct {
-    stepType string
-    name     string
-    deps     []string
-    input    inputs.CPInput
-    op       *api.Operation
-    saved    *CPState
-}
-
-type CPState struct {
-    Source string `yaml:"source"`
-    WasRun bool   `yaml:"was_run"`
-}
-
-func (s *CopyStep) Apply(ctx, state, saved) error {
-    // Nil guard
-    // Copy commands are imperative — always execute on apply (no skip check)
-    // op.CPCopy(ctx, input, nil)
-}
-
-func (s *CopyStep) Destroy(ctx, saved) error {
-    // File copies are ephemeral — no teardown needed
-    return nil
-}
-```
-
-**Copy Dst construction:** The YAML spec uses separate `target` (VM name) and `dst` (remote path) fields. The `FromSpec` factory builds the `CPInput.Dst` as `target + ":" + dst` — matching the `vm:path` format expected by the cp operation.
-
-**SSH and Copy are always re-run** on re-apply. They are imperative steps with no existence check — unlike DB-backed resources (networks, keys, VMs) that check `op.Repos` and skip if the resource already exists.
+The YAML spec uses separate `target` (VM name) and `dst` (remote path) fields. The `FromSpec` factory builds `CPInput.Dst` as `target + ":" + dst` — matching the `vm:path` format expected by the cp operation.
 
 ---
 
@@ -495,7 +332,7 @@ Resolution flow:
    - `factory.StepType` is the singular step type name (e.g. "network")
 4. Collect all steps → feed to `workflow.NewPipeline()`
 
-No per-resource-type fields needed on `EnvSpec` — the `Registry` is the schema. Adding a new step type means adding one entry to `Registry` (with `StepType`, `FromSpec`, `FromState`) and one `step_*.go` file.
+No per-resource-type fields needed on `EnvSpec` — the `Registry` is the schema. Adding a new step type means adding one entry to `Registry` (with `StepType`, `FromSpec`, `FromState`) and one `step_*.go` file. Registry keys are singular YAML keys — same as step types.
 
 ### 5.4 Apply/Destroy/List — Standalone Functions
 
@@ -531,9 +368,9 @@ func Destroy(ctx context.Context, op *api.Operation, specOrID string,
 Destroy flow:
 1. Resolve the identifier via `ResolveWorkflowID(specOrID)` — supports exact match, prefix match, and path-based hashing
 2. Read saved `WorkflowState` from state directory
-3. For each `SavedResource`, look up factory by `StepType` via `LookupFactoryByStepType(stepType)`:
-   - Scans `Registry` to find factory where `StepType == res.StepType`
-   - This bridges the gap between state files (singular) and Registry keys (plural)
+3. For each `SavedResource`, look up factory by `StepType` via `Registry[stepType]`:
+   - Direct lookup — Registry keys match StepType (both singular)
+   - No bridge function needed
 4. Extract bare name from step name via `BareStepName(res.StepName, res.StepType)` — strips `"type:"` prefix
 5. `factory.FromState(factory.StepType, bareName, res.State, op)` → reconstruct step
 6. `workflow.NewPipeline(steps)` → validate
@@ -553,27 +390,35 @@ type ListSummary struct {
 }
 ```
 
-### 5.5 Step Reconstruction from State
-
-When destroying without the spec file, each step type's `FromState` factory reconstructs a minimal Step instance that only needs `Destroy()` and `StateData()`. The factory reparses the saved state through `StateFromMap[T]()`:
-
 ```go
-func newNetworkStepFromState(stepType string, name string, saved model.ResourceSpec,
-    op *api.Operation) (workflow.Step, error) {
-    ns := StateFromMap[NetworkState](saved)
-    return &NetworkStep{
-        stepType: stepType,
-        name:     name,
-        op:       op,
-        saved:    ns,
-    }, nil
+// Diff compares spec against saved state and shows what would change.
+func Diff(ctx context.Context, op *api.Operation, specPath string) (*DiffResult, error)
+
+type DiffResult struct {
+    New      []string `json:"new"`      // in spec, not in state → will create
+    Removed  []string `json:"removed"`  // in state, not in spec → will destroy
+    Existing []string `json:"existing"` // in both → no change
 }
 ```
+
+Diff flow:
+1. `ResolveSpec(ctx, specPath, op)` → `[]workflow.Step` → extract step names
+2. Derive workflow ID from spec path → read saved `WorkflowState`
+3. Extract step names from `state.Resources`
+4. Set operations:
+   - `New = specNames - stateNames`
+   - `Removed = stateNames - specNames`
+   - `Existing = specNames ∩ stateNames`
+5. Return `DiffResult`
+
+### 5.5 Step Reconstruction from State
+
+When destroying without the spec file, each step type's `FromState` factory reconstructs a minimal Step instance that only needs `Destroy()` and `StateData()`. The factory reparses the saved state through `StateFromMap[T]()`.
 
 The reconstructed step's `Type()` returns the singular step type, and `Name()` uses `FormatStepName(stepType, name)`.
 
 The reconstructed step uses the `WasCreated` flag to decide whether to tear down:
-- `WasCreated: true` → call `op.NetworkRemove(...)` / `op.VMRemove(...)` with the saved IDs
+- `WasCreated: true` → call the appropriate remove operation with saved IDs
 - `WasCreated: false` → skip (resource was pre-existing, not ours to destroy)
 
 For SSH and Copy steps, `Destroy()` is always a no-op — the reconstructed step does nothing with the saved state.
@@ -592,56 +437,40 @@ The engine is a DAG walker. It calls `Apply`, `Destroy`, `StateData`, and persis
 
 ---
 
-## 7. Migrating Away from vm export/import
-
-### Removal Plan
-
-| File | Action |
-|------|--------|
-| `src/mvmctl/api/inputs/_vm_export_config.py` | Remove entire file |
-| `src/mvmctl/api/inputs/_vm_import_input.py` | Remove entire file |
-| `src/mvmctl/api/vm_operations.py` — `export()`, `import_()` | Remove methods |
-| `src/mvmctl/cli/vm.py` — `vm_export`, `vm_import` commands | Remove CLI handlers |
-| `tests/unit/api/test_vm_export_config.py` | Remove entire file |
-| `pkg/api/inputs/vm_export_config.go` | Remove entire file |
-| `pkg/api/inputs/vm_import.go` | Remove entire file |
-| `pkg/api/vm.go` — `VMExport()`, `VMImport()` | Remove methods |
-| `internal/cli/vm.go` — `newVMExportCmd`, `newVMImportCmd` | Remove CLI commands |
-
-### YAML Spec Format
+## 7. YAML Spec Format
 
 ```yaml
 # example-env.yaml
 version: "1"
 
-networks:
+network:
   - name: default
     subnet: "172.27.0.0/24"
     nat: true
 
-keys:
+key:
   - name: main-key
     algorithm: ed25519
     bits: 256
     comment: "my-key"
 
-images:
+image:
   - name: os-image
     type: alpine
     version: "3.21"
 
-kernels:
+kernel:
   - name: default-kernel
     type: firecracker
     version: "6.1"
 
-binaries:
+binary:
   - name: firecracker       # yaml: "type" maps to BinaryPullInput.Name
     version: "1.15.1"       # yaml: "version"
     default: true           # yaml: "default" maps to SetDefault
     force: false            # yaml: "force" maps to DownloadOverride
 
-vms:
+vm:
   - name: dev-vm
     network: default
     key: main-key
@@ -652,7 +481,11 @@ vms:
     mem: 2048
     disk_size: 10G
     depends_on:             # explicit deps — deduplicated against inferred refs
+      - network:default
       - key:main-key
+      - image:os-image
+      - kernel:default-kernel
+      - binary:firecracker
 
 ssh:                        # imperative — always re-run on re-apply
   - name: setup-hostname
@@ -694,6 +527,7 @@ copy:                       # imperative — always re-run on re-apply
 ```
 mvm env apply <spec-path>     # Provision everything in the spec
 mvm env ls                    # List applied environments
+mvm env diff <spec-path>      # Show what would change (spec vs state)
 mvm env destroy <wf-id|path>  # Tear down exactly what was provisioned
                               # Accepts full or prefix workflow ID
 ```
@@ -717,12 +551,11 @@ internal/lib/model/
                          # SavedResource, WorkflowState
 
 internal/workflow/env/
-    env.go               # Apply, Destroy, List (standalone functions)
+    env.go               # Apply, Destroy, List, Diff (standalone functions)
     spec.go              # EnvSpec (dynamic Steps map via UnmarshalYAML), ResolveSpec
-    factory.go           # StepFactory, Registry (plural keys, StepType field)
+    factory.go           # StepFactory, Registry (singular keys, StepType matches key)
     utils.go             # FormatStepName, InferStepType, BareStepName,
-                         # StateFromMap, StructToMap, extractDependsOn,
-                         # LookupFactoryByStepType
+                         # StateFromMap, StructToMap, extractDependsOn
     step_network.go      # NetworkStep
     step_key.go          # KeyStep
     step_image.go        # ImageStep
@@ -734,7 +567,7 @@ internal/workflow/env/
     env_test.go          # Black-box tests (package env_test)
 
 internal/cli/
-    env.go               # newEnvApplyCmd, newEnvListCmd, newEnvDestroyCmd
+    env.go               # newEnvApplyCmd, newEnvListCmd, newEnvDiffCmd, newEnvDestroyCmd
 ```
 
 Note: `pkg/api/` no longer contains any env-related files. The old `pkg/api/env/` directory and `pkg/api/env.go` have been deleted. The `env` package is purely under `internal/`.
@@ -756,7 +589,7 @@ Note: `internal/lib/util/` has been removed entirely. `StateFromMap` and `Struct
 | Path-based workflow ID (16 hex chars) | ✅ |
 | Prefix matching for workflow ID on destroy | ✅ |
 | Dynamic YAML spec resolver — EnvSpec uses Steps map via UnmarshalYAML, Registry is the schema | ✅ |
-| Step factory registry (plural YAML keys + singular StepType field) | ✅ |
+| Step factory registry (singular YAML keys, StepType matches key — direct lookup) | ✅ |
 | `depends_on` support on all step types via extractDependsOn helper | ✅ |
 | VM step deduplicates explicit deps against inferred ref deps | ✅ |
 | ResourceSpec type definition with GetString/GetBool/GetInt methods | ✅ |
@@ -764,25 +597,15 @@ Note: `internal/lib/util/` has been removed entirely. `StateFromMap` and `Struct
 | StateFromMap logging (slog.Error on marshal/unmarshal failure) | ✅ |
 | Nil guards (s.op == nil) on every Apply() and Destroy() | ✅ |
 | Re-apply detection: Apply(ctx, state, saved) preserves WasCreated from previous state | ✅ |
-| NetworkStep (apply: op.NetworkCreate, destroy: op.NetworkRemove, skip if exists) | ✅ |
-| KeyStep (apply: op.KeyCreate, destroy: op.KeyRemove, skip if exists) | ✅ |
-| ImageStep (apply: op.ImagePull, destroy: skip) | ✅ |
-| KernelStep (apply: op.KernelPull, destroy: skip) | ✅ |
-| BinaryStep (apply: op.BinaryPull, destroy: skip) | ✅ |
-| VMStep (apply: op.VMCreate, destroy: op.VMRemove, skip if exists) | ✅ |
-| SSHStep (apply: op.SSHConnect, destroy: no-op, always re-run) | ✅ |
-| CopyStep (apply: op.CPCopy, destroy: no-op, always re-run) | ✅ |
+| All 8 step types (network, key, image, kernel, binary, vm, ssh, copy) | ✅ |
 | Step reconstruction from state for spec-less destroy | ✅ |
-| YAML tags on all *CreateInput / *PullInput / SSHInput / CPInput types | ✅ |
+| YAML tags on all input types | ✅ |
 | No Operation interface — steps use *api.Operation directly | ✅ |
 | Env package moved to internal/ (consumer of API, like CLI) | ✅ |
 | `mvm env apply` CLI command | ✅ |
 | `mvm env ls` CLI command | ✅ |
 | `mvm env destroy` CLI command | ✅ |
-| Remove Python vm export/import | ✅ |
-| Remove Go vm export/import | ✅ |
-| `mvm env sync` (reconcile existing env) | 🟡 V1.1 |
-| `mvm env diff` (show pending changes) | ❌ Future |
+| `mvm env diff` (spec vs state comparison) | ✅ |
 | In-place spec update (Update on Step) | ❌ Future |
 | Multi-VM compose (cross-VM references) | ❌ Future |
 
@@ -794,6 +617,4 @@ Note: `internal/lib/util/` has been removed entirely. `StateFromMap` and `Struct
 2. **Step implementations**: `internal/workflow/env/` — 8 step types, registry, spec resolver. Test each step in isolation.
 3. **Orchestration**: `internal/workflow/env/env.go` — `Apply`, `Destroy`, `List` standalone functions.
 4. **CLI**: `internal/cli/env.go` — cobra commands, output formatting.
-5. **Cleanup**: Remove Python and Go vm export/import files.
-6. **Package move**: Move from `pkg/api/env/` to `internal/workflow/env/`, delete `Operation` interface.
-7. **System tests**: Write black-box tests for the full `apply → ls → destroy` cycle.
+5. **System tests**: Write black-box tests for the full `apply → ls → destroy` cycle.

@@ -1,33 +1,33 @@
 version: "1"
-networks:
+network:
   - name: fenv-net
     subnet: 10.10.0.0/24
     nat_enabled: true
     nat_gateways:
       - wlo1
     default: true
-keys:
+key:
   - name: fenv-key
     algorithm: ed25519
     default: true
     force: true
-images:
+image:
   - name: ubuntu-noble
     type: ubuntu
     version: noble
     default: true
-binaries:
+binary:
   - name: fc-16
     type: firecracker
     version: 1.16.0
     default: true
-kernels:
+kernel:
   - name: fenv-vmlinux
     type: official
     version: 7.0.11
     default: true
     features: kvm,nftables,tuntap
-vms:
+vm:
   - name: fenv-vm-1
     depends_on: ['network:fenv-net', 'key:fenv-key', 'image:ubuntu-noble', 'binary:fc-16', 'kernel:fenv-vmlinux']
     disk_size: 20G
