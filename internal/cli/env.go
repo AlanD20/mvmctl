@@ -3,8 +3,10 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"mvmctl/internal/cli/common"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
@@ -48,6 +50,7 @@ destroy environments even after reboots.`,
 	cmd.AddCommand(newEnvApplyCmd(op))
 	cmd.AddCommand(newEnvListCmd(op))
 	cmd.AddCommand(newEnvDestroyCmd(op))
+	cmd.AddCommand(newEnvDiffCmd(op))
 
 	return cmd
 }
@@ -104,7 +107,7 @@ func newEnvApplyCmd(op *api.Operation) *cobra.Command {
 }
 
 // newEnvListCmd creates the "env ls" subcommand.
-func newEnvListCmd(op *api.Operation) *cobra.Command {
+func newEnvListCmd(_ *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -127,6 +130,77 @@ func newEnvListCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
+// newEnvDiffCmd creates the "env diff" subcommand.
+func newEnvDiffCmd(_ *api.Operation) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "diff [spec-path]",
+		Short: "Show differences between a spec and the saved workflow state",
+		Long: `Compare an environment spec file against the saved workflow state and show
+which resources would be new, removed, or already exist.
+
+This is a read-only operation — nothing is created or destroyed.`,
+		Args: cobra.MaximumNArgs(1),
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) > 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			return []string{"yaml", "yml"}, cobra.ShellCompDirectiveFilterFileExt
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			specPath := ""
+			if len(args) > 0 {
+				var err error
+				specPath, err = common.Cli.CheckArg(cmd, args[0])
+				if err != nil {
+					return err
+				}
+			} else {
+				return fmt.Errorf("missing required argument: spec-path")
+			}
+
+			if _, err := os.Stat(specPath); os.IsNotExist(err) {
+				return fmt.Errorf("spec file not found: %s", specPath)
+			}
+
+			// Resolve the workflow state directory (may not exist yet).
+			wfID := env.ResolveWorkflowID(specPath)
+			stateDir := filepath.Join(infra.GetWorkflowsStateDir(), wfID)
+
+			result, err := env.Diff(cmd.Context(), specPath, stateDir)
+			if err != nil {
+				return fmt.Errorf("env diff failed: %w", err)
+			}
+
+			if len(result.New) == 0 && len(result.Removed) == 0 {
+				common.Cli.Success("No differences — spec matches saved state")
+				return nil
+			}
+
+			if len(result.New) > 0 {
+				fmt.Fprintf(os.Stderr, "New resources (in spec, not in state):\n")
+				for _, name := range result.New {
+					fmt.Fprintf(os.Stderr, "  + %s\n", name)
+				}
+			}
+			if len(result.Removed) > 0 {
+				fmt.Fprintf(os.Stderr, "Removed resources (in state, not in spec):\n")
+				for _, name := range result.Removed {
+					fmt.Fprintf(os.Stderr, "  - %s\n", name)
+				}
+			}
+			if len(result.Existing) > 0 {
+				fmt.Fprintf(os.Stderr, "Existing resources (unchanged):\n")
+				for _, name := range result.Existing {
+					fmt.Fprintf(os.Stderr, "    %s\n", name)
+				}
+			}
+
+			return nil
+		},
+	}
+	return cmd
+}
+
 // newEnvDestroyCmd creates the "env destroy" subcommand.
 func newEnvDestroyCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
@@ -138,7 +212,7 @@ func newEnvDestroyCmd(op *api.Operation) *cobra.Command {
 The argument can be either a workflow ID (short hash shown by 'env ls') or
 the path to the original spec file. Resources that were already present before
 apply (not created by the workflow) are left intact.`,
-		Args: cobra.MaximumNArgs(1),
+		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeEnvDestroy,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ident := ""

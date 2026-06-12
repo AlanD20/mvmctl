@@ -25,37 +25,39 @@ type StepFactory struct {
 	FromState func(stepType, name string, saved model.ResourceSpec, deps []string, op *api.Operation) (workflow.Step, error)
 }
 
-// Registry maps YAML step type keys (plural resource names, e.g. "networks")
-// to factory functions. The key matches the YAML key in an env spec file
-// directly, so UnmarshalYAML can look it up without any mapping.
-// Adding a new step type means adding a step_*.go file and one entry here.
+// Registry maps singular step type keys (e.g. "network", "vm") to factory
+// functions. The key matches the YAML key in an env spec file directly, so
+// UnmarshalYAML can look it up without any mapping. The key also equals
+// StepType, so callers can do a direct Registry[stepType] lookup instead
+// of scanning. Adding a new step type means adding a step_*.go file and
+// one entry here.
 var Registry = map[string]StepFactory{
-	"networks": {
+	"network": {
 		StepType:  "network",
 		FromSpec:  newNetworkStepFromSpec,
 		FromState: newNetworkStepFromState,
 	},
-	"keys": {
+	"key": {
 		StepType:  "key",
 		FromSpec:  newKeyStepFromSpec,
 		FromState: newKeyStepFromState,
 	},
-	"images": {
+	"image": {
 		StepType:  "image",
 		FromSpec:  newImageStepFromSpec,
 		FromState: newImageStepFromState,
 	},
-	"kernels": {
+	"kernel": {
 		StepType:  "kernel",
 		FromSpec:  newKernelStepFromSpec,
 		FromState: newKernelStepFromState,
 	},
-	"binaries": {
+	"binary": {
 		StepType:  "binary",
 		FromSpec:  newBinaryStepFromSpec,
 		FromState: newBinaryStepFromState,
 	},
-	"vms": {
+	"vm": {
 		StepType:  "vm",
 		FromSpec:  newVMStepFromSpec,
 		FromState: newVMStepFromState,

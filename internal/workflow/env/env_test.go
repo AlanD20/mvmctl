@@ -28,14 +28,14 @@ import (
 
 func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
 	expectedTypes := map[string]struct{}{
-		"networks": {},
-		"keys":     {},
-		"images":   {},
-		"kernels":  {},
-		"binaries": {},
-		"vms":      {},
-		"ssh":      {},
-		"copy":     {},
+		"network": {},
+		"key":     {},
+		"image":   {},
+		"kernel":  {},
+		"binary":  {},
+		"vm":      {},
+		"ssh":     {},
+		"copy":    {},
 	}
 
 	for typ := range expectedTypes {
@@ -61,7 +61,7 @@ func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
 
 func TestFromSpec_NetworkStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "my-net", "subnet": "10.0.0.0/24"}
-	step, err := envpkg.Registry["networks"].FromSpec("network", "my-net", spec, nil)
+	step, err := envpkg.Registry["network"].FromSpec("network", "my-net", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "network:my-net", step.Name())
 	assert.Equal(t, "network", step.Type())
@@ -70,7 +70,7 @@ func TestFromSpec_NetworkStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_KeyStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "my-key"}
-	step, err := envpkg.Registry["keys"].FromSpec("key", "my-key", spec, nil)
+	step, err := envpkg.Registry["key"].FromSpec("key", "my-key", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "key:my-key", step.Name())
 	assert.Equal(t, "key", step.Type())
@@ -79,7 +79,7 @@ func TestFromSpec_KeyStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_ImageStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "alpine", "type": "alpine", "version": "3.21"}
-	step, err := envpkg.Registry["images"].FromSpec("image", "alpine", spec, nil)
+	step, err := envpkg.Registry["image"].FromSpec("image", "alpine", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "image:alpine", step.Name())
 	assert.Equal(t, "image", step.Type())
@@ -88,7 +88,7 @@ func TestFromSpec_ImageStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_KernelStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "fc-kernel", "type": "firecracker", "version": "1.15.1"}
-	step, err := envpkg.Registry["kernels"].FromSpec("kernel", "fc-kernel", spec, nil)
+	step, err := envpkg.Registry["kernel"].FromSpec("kernel", "fc-kernel", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "kernel:fc-kernel", step.Name())
 	assert.Equal(t, "kernel", step.Type())
@@ -96,8 +96,8 @@ func TestFromSpec_KernelStep_NameFormat(t *testing.T) {
 }
 
 func TestFromSpec_BinaryStep_NameFormat(t *testing.T) {
-	spec := map[string]any{"name": "firecracker", "version": "1.15.1"}
-	step, err := envpkg.Registry["binaries"].FromSpec("binary", "firecracker", spec, nil)
+	spec := map[string]any{"type": "firecracker", "version": "1.15.1"}
+	step, err := envpkg.Registry["binary"].FromSpec("binary", "firecracker", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "binary:firecracker", step.Name())
 	assert.Equal(t, "binary", step.Type())
@@ -109,7 +109,7 @@ func TestFromSpec_VMStep_NameFormat(t *testing.T) {
 		"name": "my-vm", "network": "my-net", "key": "my-key",
 		"image": "alpine", "kernel": "fc-kernel", "binary": "firecracker",
 	}
-	step, err := envpkg.Registry["vms"].FromSpec("vm", "my-vm", spec, nil)
+	step, err := envpkg.Registry["vm"].FromSpec("vm", "my-vm", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "vm:my-vm", step.Name())
 	assert.Equal(t, "vm", step.Type())
@@ -152,7 +152,7 @@ func TestFromState_NetworkStep_CorrectType(t *testing.T) {
 		"subnet":      "10.0.0.0/24",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["networks"].FromState("network", "my-net", saved, nil, nil)
+	step, err := envpkg.Registry["network"].FromState("network", "my-net", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "network:my-net", step.Name())
 	assert.Equal(t, "network", step.Type())
@@ -164,7 +164,7 @@ func TestFromState_KeyStep_CorrectType(t *testing.T) {
 		"key_id":      "key-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["keys"].FromState("key", "my-key", saved, nil, nil)
+	step, err := envpkg.Registry["key"].FromState("key", "my-key", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "key:my-key", step.Name())
 	assert.Equal(t, "key", step.Type())
@@ -176,7 +176,7 @@ func TestFromState_ImageStep_CorrectType(t *testing.T) {
 		"image_id":    "img-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["images"].FromState("image", "alpine", saved, nil, nil)
+	step, err := envpkg.Registry["image"].FromState("image", "alpine", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "image:alpine", step.Name())
 	assert.Equal(t, "image", step.Type())
@@ -188,7 +188,7 @@ func TestFromState_KernelStep_CorrectType(t *testing.T) {
 		"kernel_id":   "krnl-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["kernels"].FromState("kernel", "fc-kernel", saved, nil, nil)
+	step, err := envpkg.Registry["kernel"].FromState("kernel", "fc-kernel", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "kernel:fc-kernel", step.Name())
 	assert.Equal(t, "kernel", step.Type())
@@ -200,7 +200,7 @@ func TestFromState_BinaryStep_CorrectType(t *testing.T) {
 		"binary_id":   "bin-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["binaries"].FromState("binary", "firecracker", saved, nil, nil)
+	step, err := envpkg.Registry["binary"].FromState("binary", "firecracker", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "binary:firecracker", step.Name())
 	assert.Equal(t, "binary", step.Type())
@@ -213,7 +213,7 @@ func TestFromState_VMStep_CorrectType(t *testing.T) {
 		"vm_dir":      "/mnt/vms/vm-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["vms"].FromState("vm", "my-vm", saved, nil, nil)
+	step, err := envpkg.Registry["vm"].FromState("vm", "my-vm", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "vm:my-vm", step.Name())
 	assert.Equal(t, "vm", step.Type())
@@ -247,23 +247,23 @@ func TestFromState_CopyStep_CorrectType(t *testing.T) {
 func TestResolveSpec_ValidSpecReturnsAllSteps(t *testing.T) {
 	specContent := `
 version: "1"
-networks:
+network:
   - name: my-net
     subnet: 10.0.0.0/24
-keys:
+key:
   - name: my-key
-images:
+image:
   - name: alpine
     type: alpine
     version: "3.21"
-kernels:
+kernel:
   - name: fc-kernel
     type: firecracker
     version: 1.15.1
-binaries:
+binary:
   - name: firecracker
     version: 1.15.1
-vms:
+vm:
   - name: my-vm
     network: my-net
     key: my-key
@@ -303,23 +303,23 @@ vms:
 func TestResolveSpec_VMStepHasDependencies(t *testing.T) {
 	specContent := `
 version: "1"
-networks:
+network:
   - name: my-net
     subnet: 10.0.0.0/24
-keys:
+key:
   - name: my-key
-images:
+image:
   - name: alpine
     type: alpine
     version: "3.21"
-kernels:
+kernel:
   - name: fc-kernel
     type: firecracker
     version: 1.15.1
-binaries:
+binary:
   - name: firecracker
     version: 1.15.1
-vms:
+vm:
   - name: full-vm
     network: my-net
     key: my-key
@@ -370,7 +370,7 @@ func TestResolveSpec_EmptySpecFile(t *testing.T) {
 // since version is required for schema validation.
 func TestResolveSpec_MissingVersion(t *testing.T) {
 	specContent := `
-networks:
+network:
   - name: test
     subnet: 10.0.0.0/24
 `
@@ -395,7 +395,7 @@ func TestResolveSpec_SpecFileNotFound(t *testing.T) {
 // Rationale: ResolveSpec must return a validation error when the spec file
 // contains invalid YAML, not silently return partial results.
 func TestResolveSpec_InvalidYAML(t *testing.T) {
-	specPath := writeSpec(t, "version: \"1\"\nnetworks:\n  - invalid_yaml: [")
+	specPath := writeSpec(t, "version: \"1\"\nnetwork:\n  - invalid_yaml: [")
 	_, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.Error(t, err)
 }
@@ -405,7 +405,7 @@ func TestResolveSpec_InvalidYAML(t *testing.T) {
 // yet use the context for cancellation, so a cancelled context must not error.
 func TestResolveSpec_ContextCancellation(t *testing.T) {
 	specContent := `version: "1"
-networks:
+network:
   - name: my-net
     subnet: 10.0.0.0/24
 `
@@ -425,12 +425,12 @@ networks:
 // Rationale: ResolveSpec must silently skip step types not in the Registry.
 // The Registry is the source of truth — unknown types in YAML are ignored.
 func TestResolveSpec_UnknownStepType(t *testing.T) {
-	origFactory := envpkg.Registry["networks"]
-	t.Cleanup(func() { envpkg.Registry["networks"] = origFactory })
-	delete(envpkg.Registry, "networks")
+	origFactory := envpkg.Registry["network"]
+	t.Cleanup(func() { envpkg.Registry["network"] = origFactory })
+	delete(envpkg.Registry, "network")
 
 	specContent := `version: "1"
-networks:
+network:
   - name: test
     subnet: 10.0.0.0/24
 `
@@ -447,11 +447,11 @@ networks:
 // if a StepFactory's FromSpec returns an error, ResolveSpec must return it to
 // the caller rather than continuing or panicking.
 func TestResolveSpec_FactoryFromSpecError(t *testing.T) {
-	origFactory := envpkg.Registry["networks"]
-	t.Cleanup(func() { envpkg.Registry["networks"] = origFactory })
+	origFactory := envpkg.Registry["network"]
+	t.Cleanup(func() { envpkg.Registry["network"] = origFactory })
 
 	errFactory := errors.New("from spec failed")
-	envpkg.Registry["networks"] = envpkg.StepFactory{
+	envpkg.Registry["network"] = envpkg.StepFactory{
 		StepType: "network",
 		FromSpec: func(_, _ string, _ model.ResourceSpec, _ *api.Operation) (workflow.Step, error) {
 			return nil, errFactory
@@ -460,7 +460,7 @@ func TestResolveSpec_FactoryFromSpecError(t *testing.T) {
 	}
 
 	specContent := `version: "1"
-networks:
+network:
   - name: test
     subnet: 10.0.0.0/24
 `
@@ -477,10 +477,10 @@ networks:
 func TestResolveSpec_ExplicitDependsOn(t *testing.T) {
 	specContent := `
 version: "1"
-networks:
+network:
   - name: my-net
     subnet: 10.0.0.0/24
-keys:
+key:
   - name: my-key
     depends_on:
       - network:my-net
@@ -541,19 +541,6 @@ func TestBareStepName_ExtractsName(t *testing.T) {
 func TestBareStepName_NoPrefix(t *testing.T) {
 	result := envpkg.BareStepName("my-net", "network")
 	assert.Equal(t, "my-net", result)
-}
-
-// Rationale: LookupFactoryByStepType must find the correct factory by singular step type.
-func TestLookupFactoryByStepType_FindsFactory(t *testing.T) {
-	factory, ok := envpkg.LookupFactoryByStepType("network")
-	require.True(t, ok)
-	require.NotNil(t, factory.FromSpec)
-}
-
-// Rationale: LookupFactoryByStepType must return false for unknown step types.
-func TestLookupFactoryByStepType_NotFound(t *testing.T) {
-	_, ok := envpkg.LookupFactoryByStepType("nonexistent")
-	assert.False(t, ok)
 }
 
 // Rationale: ResolveWorkflowID must hash file paths containing "/" into a 16-hex-char ID.
@@ -632,12 +619,12 @@ func TestFromSpec_CopyStep_BuildsDst(t *testing.T) {
 func TestResolveSpec_WithSSHAndCopy(t *testing.T) {
 	specContent := `
 version: "1"
-networks:
+network:
   - name: my-net
     subnet: 10.0.0.0/24
-keys:
+key:
   - name: my-key
-vms:
+vm:
   - name: my-vm
     network: my-net
     key: my-key
