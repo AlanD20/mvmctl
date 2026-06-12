@@ -5,7 +5,7 @@ package model
 // BinaryItem corresponds to Python's BinaryItem dataclass.
 type BinaryItem struct {
 	ID          string  `json:"id"                   db:"id"`
-	Name        string  `json:"name"                 db:"name"`
+	Type        string  `json:"type"                 db:"type"`
 	Version     string  `json:"version"              db:"version"`
 	FullVersion string  `json:"full_version"         db:"full_version"`
 	CIVersion   *string `json:"ci_version,omitempty" db:"ci_version"`

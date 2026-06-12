@@ -465,7 +465,8 @@ kernel:
     version: "6.1"
 
 binary:
-  - name: firecracker       # yaml: "type" maps to BinaryPullInput.Name
+  - name: fc-binary         # step name (common field); yaml "type" maps to BinaryPullInput.Type
+    type: firecracker        # yaml: "type" → BinaryPullInput.Type
     version: "1.15.1"       # yaml: "version"
     default: true           # yaml: "default" maps to SetDefault
     force: false            # yaml: "force" maps to DownloadOverride
@@ -476,7 +477,7 @@ vm:
     key: main-key
     image: os-image
     kernel: default-kernel
-    binary: firecracker
+    binary: fc-binary
     vcpu: 2
     mem: 2048
     disk_size: 10G
@@ -485,7 +486,7 @@ vm:
       - key:main-key
       - image:os-image
       - kernel:default-kernel
-      - binary:firecracker
+      - binary:fc-binary
 
 ssh:                        # imperative — always re-run on re-apply
   - name: setup-hostname
@@ -511,7 +512,7 @@ copy:                       # imperative — always re-run on re-apply
 
 | Input Type | YAML Field | Go Field | Notes |
 |-----------|-----------|----------|-------|
-| `BinaryPullInput` | `type` | `Name` | Spec uses `type: firecracker` for binary name |
+| `BinaryPullInput` | `type` | `Type` | Binary type, e.g. `firecracker` |
 | `BinaryPullInput` | `version` | `Version` | |
 | `BinaryPullInput` | `force` | `DownloadOverride` | |
 | `BinaryPullInput` | `default` | `SetDefault` | |

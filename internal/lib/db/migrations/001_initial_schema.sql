@@ -53,7 +53,7 @@ CREATE INDEX idx_kernels_version ON kernels(version);
 -- JSON mappings: package_version -> version
 CREATE TABLE binaries (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
+    type TEXT NOT NULL,
     version TEXT NOT NULL,
     full_version TEXT NOT NULL,
     ci_version TEXT,
@@ -64,7 +64,7 @@ CREATE TABLE binaries (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMP NULL
 );
-CREATE INDEX idx_binaries_name ON binaries(name);
+CREATE INDEX idx_binaries_type ON binaries(type);
 CREATE INDEX idx_binaries_version ON binaries(version);
 
 -- VOLUMES: Persistent data disks attachable to VMs

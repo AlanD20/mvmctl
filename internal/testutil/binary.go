@@ -71,13 +71,13 @@ func (r *BinaryRepo) ListAll(_ context.Context) ([]*model.BinaryItem, error) {
 	return result, nil
 }
 
-// ListByName returns all non-deleted binaries with a given name (Python: WHERE deleted_at IS NULL AND is_present = 1 ORDER BY created_at).
-func (r *BinaryRepo) ListByName(_ context.Context, name string) ([]*model.BinaryItem, error) {
+// ListByType returns all non-deleted binaries with a given type (Python: WHERE deleted_at IS NULL AND is_present = 1 ORDER BY created_at).
+func (r *BinaryRepo) ListByType(_ context.Context, typ string) ([]*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.BinaryItem
 	for _, b := range r.binaries {
-		if b.Name == name && r.isNotDeleted(b) {
+		if b.Type == typ && r.isNotDeleted(b) {
 			result = append(result, b)
 		}
 	}
@@ -87,12 +87,12 @@ func (r *BinaryRepo) ListByName(_ context.Context, name string) ([]*model.Binary
 	return result, nil
 }
 
-// GetByNameAndVersion returns a binary by name and version (Python: WHERE deleted_at IS NULL AND is_present = 1 LIMIT 1).
-func (r *BinaryRepo) GetByNameAndVersion(_ context.Context, name, version string) (*model.BinaryItem, error) {
+// GetByTypeAndVersion returns a binary by type and version (Python: WHERE deleted_at IS NULL AND is_present = 1 LIMIT 1).
+func (r *BinaryRepo) GetByTypeAndVersion(_ context.Context, typ, version string) (*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, b := range r.binaries {
-		if b.Name == name && b.Version == version && r.isNotDeleted(b) {
+		if b.Type == typ && b.Version == version && r.isNotDeleted(b) {
 			return b, nil
 		}
 	}
@@ -113,44 +113,44 @@ func (r *BinaryRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-func (r *BinaryRepo) DeleteByName(_ context.Context, name string) error {
+func (r *BinaryRepo) DeleteByType(_ context.Context, typ string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for id, b := range r.binaries {
-		if b.Name == name {
+		if b.Type == typ {
 			delete(r.binaries, id)
 		}
 	}
 	return nil
 }
 
-func (r *BinaryRepo) DeleteByNameAndVersion(_ context.Context, name, version string) error {
+func (r *BinaryRepo) DeleteByTypeAndVersion(_ context.Context, typ, version string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Match Python's version normalization: removeprefix("v") + f"v{normalized}"
 	normalized := strings.TrimPrefix(version, "v")
 	prefixed := "v" + normalized
 	for id, b := range r.binaries {
-		if b.Name == name && (b.Version == version || b.Version == normalized || b.Version == prefixed) {
+		if b.Type == typ && (b.Version == version || b.Version == normalized || b.Version == prefixed) {
 			delete(r.binaries, id)
 		}
 	}
 	return nil
 }
 
-// SetDefault sets a binary as default, clearing all others with the same name atomically (Python: BEGIN/COMMIT).
-func (r *BinaryRepo) SetDefault(_ context.Context, name, version, _ string) error {
+// SetDefault sets a binary as default, clearing all others with the same type atomically (Python: BEGIN/COMMIT).
+func (r *BinaryRepo) SetDefault(_ context.Context, typ, version, _ string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Match Python: UPDATE binaries SET is_default = 0 WHERE name = ? AND deleted_at IS NULL
+	// Match Python: UPDATE binaries SET is_default = 0 WHERE type = ? AND deleted_at IS NULL
 	for _, b := range r.binaries {
-		if b.Name == name && b.DeletedAt == nil {
+		if b.Type == typ && b.DeletedAt == nil {
 			b.IsDefault = false
 		}
 	}
-	// Match Python: UPDATE binaries SET is_default = 1 WHERE name = ? AND version = ? AND deleted_at IS NULL
+	// Match Python: UPDATE binaries SET is_default = 1 WHERE type = ? AND version = ? AND deleted_at IS NULL
 	for _, b := range r.binaries {
-		if b.Name == name && b.Version == version && b.DeletedAt == nil {
+		if b.Type == typ && b.Version == version && b.DeletedAt == nil {
 			b.IsDefault = true
 		}
 	}
@@ -170,12 +170,12 @@ func (r *BinaryRepo) Count(_ context.Context) (int, error) {
 	return count, nil
 }
 
-// GetDefault returns the default binary for a given name (Python: WHERE name = ? AND is_default = 1 AND deleted_at IS NULL AND is_present = 1).
-func (r *BinaryRepo) GetDefault(_ context.Context, name string) (*model.BinaryItem, error) {
+// GetDefault returns the default binary for a given type (Python: WHERE type = ? AND is_default = 1 AND deleted_at IS NULL AND is_present = 1).
+func (r *BinaryRepo) GetDefault(_ context.Context, typ string) (*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, b := range r.binaries {
-		if b.Name == name && b.IsDefault && r.isNotDeleted(b) {
+		if b.Type == typ && b.IsDefault && r.isNotDeleted(b) {
 			return b, nil
 		}
 	}

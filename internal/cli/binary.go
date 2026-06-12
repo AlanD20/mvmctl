@@ -20,7 +20,7 @@ import (
 var binaryColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.BinaryItem).IsDefault) }},
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.BinaryItem).ID) }},
-	{Header: "Name", Extract: func(v any) string { return v.(*model.BinaryItem).Name }},
+	{Header: "Type", Extract: func(v any) string { return v.(*model.BinaryItem).Type }},
 	{Header: "Version", Extract: func(v any) string { return v.(*model.BinaryItem).Version }},
 	{Header: "Full Version", Extract: func(v any) string {
 		fv := v.(*model.BinaryItem).FullVersion
@@ -109,29 +109,29 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "pull [name|selector]",
+		Use:               "pull [selector]",
 		Short:             "Download a Firecracker version or build from source",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeBinaryVersions,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			typ := args[0]
 			effectiveVersion := version
 
-			// Support name:version selector (matching kernel pull pattern)
-			if strings.Contains(name, ":") {
-				idx := strings.LastIndex(name, ":")
-				effectiveVersion = name[idx+1:]
-				name = name[:idx]
+			// Support type:version selector (matching kernel pull pattern)
+			if strings.Contains(typ, ":") {
+				idx := strings.LastIndex(typ, ":")
+				effectiveVersion = typ[idx+1:]
+				typ = typ[:idx]
 				if cmd.Flags().Changed("version") {
 					return fmt.Errorf("mutually exclusive options")
 				}
 			}
 
-			if strings.ToLower(name) != "firecracker" {
+			if strings.ToLower(typ) != "firecracker" {
 				common.Cli.Error(
 					fmt.Sprintf(
 						"Unsupported binary: '%s'. Only 'firecracker' is supported for download or build.",
-						name,
+						typ,
 					),
 				)
 				return fmt.Errorf("unsupported binary")
@@ -151,7 +151,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 				gitRefPtr := &gitRef
 				binaries, err := op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 					Version:          "",
-					Name:             name,
+					Type:             typ,
 					GitRef:           gitRefPtr,
 					SetDefault:       setDefault,
 					DownloadOverride: false,
@@ -163,7 +163,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 				common.Cli.Info("")
 				for _, b := range binaries {
 					shortID := common.Cli.FormatID(b.ID)
-					common.Cli.Success(fmt.Sprintf("Built: %s %s: %s", b.Name, b.Version, b.Path))
+					common.Cli.Success(fmt.Sprintf("Built: %s %s: %s", b.Type, b.Version, b.Path))
 					common.Cli.Info(fmt.Sprintf("  ID: %s", shortID))
 				}
 
@@ -177,7 +177,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			// Normal download path
 			binaries, err := op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 				Version:          effectiveVersion,
-				Name:             name,
+				Type:             typ,
 				SetDefault:       setDefault,
 				DownloadOverride: force,
 			}, nil)
@@ -199,7 +199,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 
 					binaries, err = op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 						Version:          effectiveVersion,
-						Name:             name,
+						Type:             typ,
 						SetDefault:       setDefault,
 						DownloadOverride: true,
 					}, nil)
@@ -210,7 +210,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}
 			for _, b := range binaries {
 				shortID := common.Cli.FormatID(b.ID)
-				common.Cli.Success(fmt.Sprintf("Downloaded: %s v%s: %s", b.Name, b.Version, b.Path))
+				common.Cli.Success(fmt.Sprintf("Downloaded: %s v%s: %s", b.Type, b.Version, b.Path))
 				common.Cli.Info(fmt.Sprintf("  ID: %s", shortID))
 			}
 
@@ -297,7 +297,7 @@ func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			common.Cli.Success(fmt.Sprintf("Default binary set to %s v%s", item.Name, item.Version))
+			common.Cli.Success(fmt.Sprintf("Default binary set to %s v%s", item.Type, item.Version))
 			return nil
 		},
 	}

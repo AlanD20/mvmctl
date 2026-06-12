@@ -42,19 +42,19 @@ func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.BinaryItem, error) {
 		`SELECT * FROM binaries WHERE deleted_at IS NULL ORDER BY created_at`)
 }
 
-func (r *sqliteRepo) ListByName(ctx context.Context, name string) ([]*model.BinaryItem, error) {
+func (r *sqliteRepo) ListByType(ctx context.Context, typ string) ([]*model.BinaryItem, error) {
 	var items []*model.BinaryItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM binaries WHERE name = ? AND deleted_at IS NULL  ORDER BY created_at`, name)
+		`SELECT * FROM binaries WHERE type = ? AND deleted_at IS NULL  ORDER BY created_at`, typ)
 }
 
-func (r *sqliteRepo) GetByNameAndVersion(ctx context.Context, name, version string) (*model.BinaryItem, error) {
+func (r *sqliteRepo) GetByTypeAndVersion(ctx context.Context, typ, version string) (*model.BinaryItem, error) {
 	var b model.BinaryItem
 	err := r.db.GetContext(
 		ctx,
 		&b,
-		`SELECT * FROM binaries WHERE name = ? AND version = ? AND deleted_at IS NULL `,
-		name,
+		`SELECT * FROM binaries WHERE type = ? AND version = ? AND deleted_at IS NULL `,
+		typ,
 		version,
 	)
 	if err == sql.ErrNoRows {
@@ -66,11 +66,11 @@ func (r *sqliteRepo) GetByNameAndVersion(ctx context.Context, name, version stri
 func (r *sqliteRepo) Upsert(ctx context.Context, b *model.BinaryItem) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO binaries (
-			id, name, version, full_version, ci_version, path,
+			id, type, version, full_version, ci_version, path,
 			is_default, is_present, created_at, updated_at, deleted_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
-			name = excluded.name,
+			type = excluded.type,
 			version = excluded.version,
 			full_version = excluded.full_version,
 			ci_version = excluded.ci_version,
@@ -79,7 +79,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, b *model.BinaryItem) error {
 			is_present = excluded.is_present,
 			updated_at = CURRENT_TIMESTAMP,
 			deleted_at = excluded.deleted_at`,
-		b.ID, b.Name, b.Version, b.FullVersion, b.CIVersion, b.Path,
+		b.ID, b.Type, b.Version, b.FullVersion, b.CIVersion, b.Path,
 		infra.BoolToInt(b.IsDefault), infra.BoolToInt(b.IsPresent),
 		b.CreatedAt, b.UpdatedAt, b.DeletedAt,
 	)
@@ -91,34 +91,34 @@ func (r *sqliteRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
-func (r *sqliteRepo) DeleteByName(ctx context.Context, name string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM binaries WHERE name = ?`, name)
+func (r *sqliteRepo) DeleteByType(ctx context.Context, typ string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM binaries WHERE type = ?`, typ)
 	return err
 }
 
-func (r *sqliteRepo) DeleteByNameAndVersion(ctx context.Context, name, version string) error {
+func (r *sqliteRepo) DeleteByTypeAndVersion(ctx context.Context, typ, version string) error {
 	normalized := strings.TrimPrefix(version, "v")
 	prefixed := "v" + normalized
 	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM binaries WHERE name = ? AND (version = ? OR version = ?)`,
-		name, normalized, prefixed)
+		`DELETE FROM binaries WHERE type = ? AND (version = ? OR version = ?)`,
+		typ, normalized, prefixed)
 	return err
 }
 
-func (r *sqliteRepo) SetDefault(ctx context.Context, name, version, path string) error {
+func (r *sqliteRepo) SetDefault(ctx context.Context, typ, version, path string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx,
-		`UPDATE binaries SET is_default = 0 WHERE name = ? AND deleted_at IS NULL`, name)
+		`UPDATE binaries SET is_default = 0 WHERE type = ? AND deleted_at IS NULL`, typ)
 	if err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx,
 		`UPDATE binaries SET is_default = 1, updated_at = CURRENT_TIMESTAMP
-		WHERE name = ? AND version = ? AND deleted_at IS NULL`, name, version)
+		WHERE type = ? AND version = ? AND deleted_at IS NULL`, typ, version)
 	if err != nil {
 		return err
 	}
@@ -131,10 +131,10 @@ func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 	return count, err
 }
 
-func (r *sqliteRepo) GetDefault(ctx context.Context, name string) (*model.BinaryItem, error) {
+func (r *sqliteRepo) GetDefault(ctx context.Context, typ string) (*model.BinaryItem, error) {
 	var b model.BinaryItem
 	err := r.db.GetContext(ctx, &b,
-		`SELECT * FROM binaries WHERE name = ? AND is_default = 1 AND deleted_at IS NULL `, name)
+		`SELECT * FROM binaries WHERE type = ? AND is_default = 1 AND deleted_at IS NULL `, typ)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

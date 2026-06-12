@@ -174,7 +174,7 @@ Download Firecracker binaries.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | `string` | `"firecracker"` | Binary name. Only `firecracker` supported. |
+| `type` | `string` | `"firecracker"` | Binary type. Only `firecracker` supported. |
 | `version` | `string` | **Required** | Version tag, e.g. `"1.15.0"`. |
 | `git_ref` | `string` | `""` | Build from git ref instead of downloading. |
 | `default` | `bool` | `false` | Set as default binary. |
@@ -183,7 +183,8 @@ Download Firecracker binaries.
 **Example:**
 ```yaml
 binary:
-  - name: firecracker
+  - name: fc-binary
+    type: firecracker
     version: "1.15.0"
     default: true
 ```
@@ -229,7 +230,7 @@ vm:
     key: main-key
     image: os-image
     kernel: default-kernel
-    binary: firecracker
+    binary: fc-binary
     vcpu: 2
     mem: 2048
     disk_size: 10G
@@ -238,7 +239,7 @@ vm:
       - key:main-key
       - image:os-image
       - kernel:default-kernel
-      - binary:firecracker
+      - binary:fc-binary
 ```
 
 ---
@@ -347,7 +348,8 @@ kernel:
     type: firecracker
 
 binary:
-  - name: firecracker
+  - name: fc-binary
+    type: firecracker
     version: "1.15.0"
     default: true
 
@@ -357,7 +359,7 @@ vm:
     key: main-key
     image: os-image
     kernel: default-kernel
-    binary: firecracker
+    binary: fc-binary
     vcpu: 2
     mem: 2048
     disk_size: 10G
@@ -366,7 +368,7 @@ vm:
       - key:main-key
       - image:os-image
       - kernel:default-kernel
-      - binary:firecracker
+      - binary:fc-binary
 
 ssh:
   - name: setup-hostname

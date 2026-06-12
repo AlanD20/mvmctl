@@ -84,8 +84,8 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 	binaries, _, _ := opRef.BinaryList(cmd.Context(), false, nil, nil)
 	var results []string
 	for _, b := range binaries {
-		if b.Name != "" && strings.HasPrefix(b.Name, toComplete) && !slices.Contains(results, b.Name) {
-			results = append(results, b.Name)
+		if b.Type != "" && strings.HasPrefix(b.Type, toComplete) && !slices.Contains(results, b.Type) {
+			results = append(results, b.Type)
 		}
 		if b.Version != "" && strings.HasPrefix(b.Version, toComplete) && !slices.Contains(results, b.Version) {
 			results = append(results, b.Version)

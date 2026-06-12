@@ -14,7 +14,7 @@ import (
 // Matches Python's BinaryPullInput dataclass exactly:
 type BinaryPullInput struct {
 	Version          string  `json:"version"           yaml:"version"`
-	Name             string  `json:"name"              yaml:"type"`
+	Type             string  `json:"type"              yaml:"type"`
 	GitRef           *string `json:"git_ref,omitempty" yaml:"git_ref,omitempty"`
 	SetDefault       bool    `json:"set_default"       yaml:"default"`
 	DownloadOverride bool    `json:"download_override" yaml:"force"`
@@ -23,7 +23,7 @@ type BinaryPullInput struct {
 // ResolvedBinaryPullInput matches Python's ResolvedBinaryPullInput (frozen dataclass).
 type ResolvedBinaryPullInput struct {
 	Version          string
-	Name             string
+	Type             string
 	GitRef           *string
 	SetDefault       bool
 	BinDir           string
@@ -57,15 +57,15 @@ func (r *BinaryPullRequest) Resolve(ctx context.Context) (*ResolvedBinaryPullInp
 	// which accepts latest, partial (e.g. "1.15"), and exact (e.g. "1.15.1") specs.
 	// When git_ref is provided, version may be empty.
 
-	// Default name to "firecracker"
-	name := r.input.Name
-	if name == "" {
-		name = "firecracker"
+	// Default type to "firecracker"
+	typ := r.input.Type
+	if typ == "" {
+		typ = "firecracker"
 	}
 
 	r.result = &ResolvedBinaryPullInput{
 		Version:          version,
-		Name:             name,
+		Type:             typ,
 		GitRef:           r.input.GitRef,
 		SetDefault:       r.input.SetDefault,
 		BinDir:           infra.GetBinDir(),
@@ -85,11 +85,11 @@ func (r *BinaryPullRequest) ensureValidate() error {
 		return errs.New(errs.CodeBinaryNotFound, "No resolved pull input to validate")
 	}
 
-	// Validate binary name — only firecracker is supported for pull/build
-	if strings.ToLower(r.result.Name) != "firecracker" {
+	// Validate binary type — only firecracker is supported for pull/build
+	if strings.ToLower(r.result.Type) != "firecracker" {
 		return errs.New(
 			errs.CodeBinaryNotFound,
-			"Unsupported binary: '"+r.result.Name+"'. Only 'firecracker' is supported for download or build.",
+			"Unsupported binary: '"+r.result.Type+"'. Only 'firecracker' is supported for download or build.",
 		)
 	}
 
