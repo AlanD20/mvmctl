@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -11,6 +12,12 @@ import (
 	"time"
 
 	"mvmctl/internal/lib/system"
+)
+
+// Probe defaults for waitForSSH.
+const (
+	probeInterval    = 100 * time.Millisecond
+	dialTimeout      = 500 * time.Millisecond
 )
 
 // Service is a stateful SSH connection service.
@@ -113,6 +120,47 @@ func (s *Service) RunCommand(ctx context.Context, command string) (int, error) {
 	return 0, nil
 }
 
+// waitForSSH retries TCP port 22 checks until the VM is reachable or the
+// total timeout expires. Returns the remaining timeout for the command.
+// Uses aggressive 100ms probing with TCP dial (instant "connection refused"
+// when VM is still booting) instead of SSH subprocess probes.
+// The caller MUST pass a positive timeout — no fallback.
+func (s *Service) waitForSSH(ctx context.Context, timeout time.Duration) (time.Duration, error) {
+	deadline := time.Now().Add(timeout)
+
+	dialer := net.Dialer{Timeout: dialTimeout}
+	addr := net.JoinHostPort(s.ip, "22")
+	attempt := 0
+
+	for {
+		attempt++
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return 0, fmt.Errorf("SSH connection timed out after waiting %ds for VM to become reachable",
+				int(timeout.Seconds()))
+		}
+
+		// TCP dial to port 22 — fails instantly with "connection refused"
+		// when VM is still booting, succeeds as soon as sshd listens.
+		conn, dialErr := dialer.DialContext(ctx, "tcp", addr)
+		if dialErr == nil {
+			conn.Close()
+			if attempt > 1 {
+				fmt.Fprintf(os.Stderr, "\r  [ssh] VM reachable after ~%ds      \n",
+					int(time.Since(deadline.Add(-timeout)).Seconds()))
+			}
+			return remaining, nil
+		}
+
+		if attempt == 1 {
+			fmt.Fprintf(os.Stderr, "  [ssh] Waiting for VM to become reachable...")
+		} else {
+			fmt.Fprintf(os.Stderr, ".")
+		}
+		time.Sleep(probeInterval)
+	}
+}
+
 // Connect connects to the host via SSH.
 // Matches Python's SSHService.connect() exactly.
 // Go: execMode maps to Python's exec_mode parameter.
@@ -122,6 +170,31 @@ func (s *Service) Connect(ctx context.Context, command string, execMode bool) (i
 	if execMode && command == "" {
 		return 0, s.ExecCommand(command)
 	}
-	// exec_mode=False or command provided → subprocess mode
-	return s.RunCommand(ctx, command)
+
+	// Phase 1: Wait for SSH port to become reachable.
+	// s.timeout is the total budget for wait + command execution.
+	remaining, err := s.waitForSSH(ctx, s.timeout)
+	if err != nil {
+		return -1, err
+	}
+
+	// Phase 2: SSH is reachable — run the actual command with the
+	// remaining timeout. Use RunCommand which respects s.timeout.
+	// Override opts.Timeout to remaining for the command itself.
+	sshArgs := s.BuildCommand(command)
+	opts := system.RunCmdOpts{
+		Capture: false,
+		Check:   false,
+		Env:     map[string]string{"MVM_SSH_CONNECTION": "1"},
+		Timeout: remaining,
+	}
+	result, runErr := system.DefaultRunner.Run(ctx, sshArgs, opts)
+
+	if runErr != nil {
+		return -1, runErr
+	}
+	if !result.Success() {
+		return result.ExitCode, nil
+	}
+	return 0, nil
 }

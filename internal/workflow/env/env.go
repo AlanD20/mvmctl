@@ -187,7 +187,7 @@ func Destroy(
 		// Extract the bare name from the full step name (format: "type:name").
 		bareName := BareStepName(res.StepName, res.StepType)
 
-		step, err := factory.FromState(factory.StepType, bareName, res.State, op)
+		step, err := factory.FromState(factory.StepType, bareName, res.State, res.Dependencies, op)
 		if err != nil {
 			return errs.WrapMsg(
 				errs.CodeInternal,

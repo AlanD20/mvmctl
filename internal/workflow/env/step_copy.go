@@ -3,6 +3,7 @@ package env
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"gopkg.in/yaml.v3"
 
@@ -41,10 +42,12 @@ func (s *CopyStep) Apply(ctx context.Context, state *workflow.SharedState, saved
 	}
 
 	// Copy commands are imperative — always execute on apply.
-	_, err := s.op.CPCopy(ctx, s.input, nil)
-	if err != nil {
+	// SSH reachability is guaranteed by the DAG (SSH step runs first).
+	// No retry loop needed — waitForSSH already confirmed port 22 is open.
+	if _, err := s.op.CPCopy(ctx, s.input, nil); err != nil {
 		return err
 	}
+
 	source := ""
 	if len(s.input.Sources) > 0 {
 		source = s.input.Sources[0]
@@ -79,9 +82,7 @@ func newCopyStepFromSpec(
 	// YAML spec allows `src: ./mvm` as a convenience — marshal/unmarshal would fail
 	// because a single string cannot be decoded into a []string field.
 	norm := make(model.ResourceSpec, len(spec))
-	for k, v := range spec {
-		norm[k] = v
-	}
+	maps.Copy(norm, spec)
 	if src, ok := norm["src"]; ok {
 		if s, ok := src.(string); ok {
 			norm["src"] = []any{s}
@@ -114,12 +115,14 @@ func newCopyStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceSpec,
+	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	cs := StateFromMap[CPState](saved)
 	return &CopyStep{
 		stepType: stepType,
 		name:     name,
+		deps:     deps,
 		op:       op,
 		saved:    cs,
 	}, nil

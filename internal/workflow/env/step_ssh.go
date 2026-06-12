@@ -95,12 +95,14 @@ func newSSHStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceSpec,
+	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	ss := StateFromMap[SSHState](saved)
 	return &SSHStep{
 		stepType: stepType,
 		name:     name,
+		deps:     deps,
 		op:       op,
 		saved:    ss,
 	}, nil

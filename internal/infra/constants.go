@@ -57,6 +57,7 @@ var OverridableDefaults = map[string]map[string]any{
 		"max_vms":    1000,
 		"log_lines":  50,
 		"log_follow": false,
+		"ssh_timeout_sec": 5,
 	},
 	"defaults.vm": {
 		"vcpu_count":       1,

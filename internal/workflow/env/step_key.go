@@ -137,12 +137,14 @@ func newKeyStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceSpec,
+	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	ks := StateFromMap[KeyState](saved)
 	return &KeyStep{
 		stepType: stepType,
 		name:     name,
+		deps:     deps,
 		input: inputs.KeyCreateInput{
 			Name: name,
 		},
