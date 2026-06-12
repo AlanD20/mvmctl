@@ -6,6 +6,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"mvmctl/internal/infra/event"
+	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/pkg/api"
@@ -19,7 +21,6 @@ type VMState struct {
 	VMDir       string `yaml:"vm_dir"` // Path to the rootfs image file (not a directory)
 	NocloudPort int    `yaml:"nocloud_port,omitempty"`
 	TapName     string `yaml:"tap_name,omitempty"`
-	WasCreated  bool   `yaml:"was_created"`
 }
 
 // VMStep implements workflow.Step for creating VMs via the API layer.
@@ -27,9 +28,11 @@ type VMStep struct {
 	stepType string
 	name     string
 	deps     []string
+	specHash string
 	input    inputs.VMCreateInput
 	op       *api.Operation
 	saved    *VMState
+	meta     model.ResourceMeta
 }
 
 func (s *VMStep) Type() string { return s.stepType }
@@ -70,7 +73,9 @@ func (s *VMStep) Dependencies() []string {
 	return deps
 }
 
-func (s *VMStep) Apply(ctx context.Context, state *workflow.SharedState, saved model.ResourceSpec) error {
+func (s *VMStep) SpecHash() string { return s.specHash }
+
+func (s *VMStep) Apply(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
@@ -126,10 +131,9 @@ func (s *VMStep) Apply(ctx context.Context, state *workflow.SharedState, saved m
 
 	// Check if VM already exists — skip creation if so.
 	// Preserve WasCreated from previous state if this is a re-apply.
-	var prevVM *VMState
-	if saved != nil {
-		prevVM = StateFromMap[VMState](saved)
-	}
+	wasCreated := saved.Meta.WasCreated
+
+	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
 	existing, err := s.op.Repos.VM.GetByName(ctx, s.name)
 	if err != nil {
 		return errs.WrapMsg(
@@ -139,17 +143,26 @@ func (s *VMStep) Apply(ctx context.Context, state *workflow.SharedState, saved m
 		)
 	}
 	if existing != nil {
-		wasCreated := prevVM != nil && prevVM.WasCreated
+		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})
 		s.saved = &VMState{
-			VMID:       existing.ID,
-			VMDir:      existing.RootfsPath,
+			VMID:  existing.ID,
+			VMDir: existing.RootfsPath,
+		}
+		s.meta = model.ResourceMeta{
 			WasCreated: wasCreated,
+			SpecHash:   s.specHash,
 		}
 		state.Set(s.Name(), s.saved)
+		if err := write(ctx, s.StateData()); err != nil {
+			return fmt.Errorf("persist step state after skip: %w", err)
+		}
 		return nil
 	}
 
-	vms, err := s.op.VMCreate(ctx, input, nil)
+	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "creating vm"})
+	// Wrap onProgress to inject step name into API-level progress events.
+	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
+	vms, err := s.op.VMCreate(ctx, input, stepProgress)
 	if err != nil {
 		return err
 	}
@@ -167,21 +180,31 @@ func (s *VMStep) Apply(ctx context.Context, state *workflow.SharedState, saved m
 		VMDir:       vmInstance.RootfsPath,
 		NocloudPort: nocloudPort,
 		TapName:     vmInstance.TapDevice,
-		WasCreated:  true,
+	}
+	s.meta = model.ResourceMeta{
+		WasCreated: true,
+		SpecHash:   s.specHash,
 	}
 	state.Set(s.Name(), s.saved)
+	if err := write(ctx, s.StateData()); err != nil {
+		return fmt.Errorf("persist step state: %w", err)
+	}
 	return nil
 }
 
-func (s *VMStep) Destroy(ctx context.Context, saved model.ResourceSpec) error {
+func (s *VMStep) Destroy(ctx context.Context, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved != nil {
-		s.saved = StateFromMap[VMState](saved)
+	if s.saved == nil && saved.Spec != nil {
+		s.saved = StateFromMap[VMState](saved.Spec)
+		s.meta = saved.Meta
 	}
 
-	if s.saved == nil || !s.saved.WasCreated {
+	if s.saved == nil || !s.meta.WasCreated {
+		if err := write(ctx, s.StateData()); err != nil {
+			return fmt.Errorf("persist step state after destroy skip: %w", err)
+		}
 		return nil
 	}
 
@@ -196,20 +219,27 @@ func (s *VMStep) Destroy(ctx context.Context, saved model.ResourceSpec) error {
 			}
 		}
 	}
+
+	if err := write(ctx, s.StateData()); err != nil {
+		return fmt.Errorf("persist step state after destroy: %w", err)
+	}
 	return nil
 }
 
-func (s *VMStep) StateData() model.ResourceSpec {
+func (s *VMStep) StateData() model.ResourceState {
 	if s.saved == nil {
-		return nil
+		return model.ResourceState{}
 	}
-	return StructToMap(s.saved)
+	return model.ResourceState{
+		Spec: StructToMap(s.saved),
+		Meta: s.meta,
+	}
 }
 
 func newVMStepFromSpec(
 	stepType string,
 	name string,
-	spec model.ResourceSpec,
+	spec model.ResourceMap,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
@@ -240,6 +270,7 @@ func newVMStepFromSpec(
 		stepType: stepType,
 		name:     name,
 		deps:     extractDependsOn(spec),
+		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,
 	}, nil
@@ -248,11 +279,11 @@ func newVMStepFromSpec(
 func newVMStepFromState(
 	stepType string,
 	name string,
-	saved model.ResourceSpec,
+	saved model.ResourceState,
 	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
-	vs := StateFromMap[VMState](saved)
+	vs := StateFromMap[VMState](saved.Spec)
 	return &VMStep{
 		stepType: stepType,
 		name:     name,
@@ -262,5 +293,6 @@ func newVMStepFromState(
 		},
 		op:    op,
 		saved: vs,
+		meta:  saved.Meta,
 	}, nil
 }

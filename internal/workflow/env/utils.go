@@ -13,7 +13,7 @@ import (
 // extractDependsOn reads the "depends_on" field from a spec entry and
 // returns it as a []string of full step names (e.g. "network:my-net").
 // Returns nil if the field is missing or not a list of strings.
-func extractDependsOn(spec model.ResourceSpec) []string {
+func extractDependsOn(spec model.ResourceMap) []string {
 	v, ok := spec["depends_on"]
 	if !ok {
 		return nil
@@ -47,10 +47,10 @@ func FormatStepName(stepType, name string) string {
 	return fmt.Sprintf("%s:%s", stepType, name)
 }
 
-// StateFromMap converts a model.ResourceSpec to a typed state struct via YAML
+// StateFromMap converts a model.ResourceMap to a typed state struct via YAML
 // round-trip. This is used by step implementations to unmarshal persisted
 // state back into a concrete state struct.
-func StateFromMap[T any](m model.ResourceSpec) *T {
+func StateFromMap[T any](m model.ResourceMap) *T {
 	if m == nil {
 		return nil
 	}
@@ -67,9 +67,9 @@ func StateFromMap[T any](m model.ResourceSpec) *T {
 	return &result
 }
 
-// StructToMap converts a struct to model.ResourceSpec via YAML round-trip.
+// StructToMap converts a struct to model.ResourceMap via YAML round-trip.
 // The returned map uses the yaml tags as keys.
-func StructToMap(v any) model.ResourceSpec {
+func StructToMap(v any) model.ResourceMap {
 	if v == nil {
 		return nil
 	}
@@ -77,7 +77,7 @@ func StructToMap(v any) model.ResourceSpec {
 	if err != nil {
 		return nil
 	}
-	var m model.ResourceSpec
+	var m model.ResourceMap
 	if err := yaml.Unmarshal(data, &m); err != nil {
 		return nil
 	}

@@ -17,19 +17,19 @@ import (
 // The Registry map defines which top-level keys are valid step types —
 // any key not in Registry (other than "version") is silently ignored.
 type EnvSpec struct {
-	Version string                          `yaml:"version"`
-	Steps   map[string][]model.ResourceSpec `yaml:"-"` // populated by UnmarshalYAML
+	Version string                        `yaml:"version"`
+	Steps   map[string][]model.ResourceMap `yaml:"-"` // populated by UnmarshalYAML
 }
 
 // UnmarshalYAML decodes a YAML mapping into EnvSpec. The "version" key is
 // decoded explicitly; all remaining keys that match an entry in Registry are
-// decoded as []model.ResourceSpec and stored in Steps.
+// decoded as []model.ResourceMap and stored in Steps.
 func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind != yaml.MappingNode {
 		return fmt.Errorf("env spec must be a mapping")
 	}
 
-	s.Steps = make(map[string][]model.ResourceSpec)
+	s.Steps = make(map[string][]model.ResourceMap)
 
 	for i := 0; i < len(value.Content); i += 2 {
 		keyNode := value.Content[i]
@@ -51,7 +51,7 @@ func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error {
 			continue // silently skip unknown keys
 		}
 
-		var specs []model.ResourceSpec
+		var specs []model.ResourceMap
 		if err := valNode.Decode(&specs); err != nil {
 			return fmt.Errorf("env spec %q: %v", key, err)
 		}
@@ -60,8 +60,6 @@ func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error {
 
 	return nil
 }
-
-const specSchemaVersion = 1
 
 // ResolveSpec reads a YAML spec file, validates it, and converts each
 // entry into a workflow.Step using the appropriate factory from Registry.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
@@ -85,13 +86,13 @@ func newEnvApplyCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("spec file not found: %s", specPath)
 			}
 
-			// Use a simple inline progress handler that prints to stderr
-			// so stdout stays clean for potential future --json output.
-			onProgress := func(ev event.Progress) {
-				if ev.Message != "" {
-					fmt.Fprintf(os.Stderr, "  [%s] %s: %s\n", ev.Phase, ev.Status, ev.Message)
-				} else {
-					fmt.Fprintf(os.Stderr, "  [%s] %s\n", ev.Phase, ev.Status)
+			onProgress := func(e event.Progress) {
+				if strings.HasPrefix(e.Phase, "ssh:") {
+					// SSH output — print directly, no formatting.
+					fmt.Fprintln(os.Stderr, e.Message)
+				} else if e.Message != "" {
+					// Step status — print as a dim status line.
+					fmt.Fprintf(os.Stderr, "  %s[%s] %s%s\n", common.AnsiDim, e.Phase, e.Message, common.AnsiReset)
 				}
 			}
 
@@ -171,7 +172,7 @@ This is a read-only operation — nothing is created or destroyed.`,
 				return fmt.Errorf("env diff failed: %w", err)
 			}
 
-			if len(result.New) == 0 && len(result.Removed) == 0 {
+			if len(result.New) == 0 && len(result.Removed) == 0 && len(result.Drifted) == 0 {
 				common.Cli.Success("No differences — spec matches saved state")
 				return nil
 			}
@@ -186,6 +187,12 @@ This is a read-only operation — nothing is created or destroyed.`,
 				fmt.Fprintf(os.Stderr, "Removed resources (in state, not in spec):\n")
 				for _, name := range result.Removed {
 					fmt.Fprintf(os.Stderr, "  %s- %s%s\n", common.AnsiRed, name, common.AnsiReset)
+				}
+			}
+			if len(result.Drifted) > 0 {
+				fmt.Fprintf(os.Stderr, "Drifted resources (spec changed since last apply):\n")
+				for _, name := range result.Drifted {
+					fmt.Fprintf(os.Stderr, "  %s~ %s%s\n", common.AnsiYellow, name, common.AnsiReset)
 				}
 			}
 			if len(result.Existing) > 0 {
@@ -226,11 +233,11 @@ apply (not created by the workflow) are left intact.`,
 				return fmt.Errorf("missing required argument: workflow-id or spec-path")
 			}
 
-			onProgress := func(ev event.Progress) {
-				if ev.Message != "" {
-					fmt.Fprintf(os.Stderr, "  [%s] %s: %s\n", ev.Phase, ev.Status, ev.Message)
-				} else {
-					fmt.Fprintf(os.Stderr, "  [%s] %s\n", ev.Phase, ev.Status)
+			onProgress := func(e event.Progress) {
+				if strings.HasPrefix(e.Phase, "ssh:") {
+					fmt.Fprintln(os.Stderr, e.Message)
+				} else if e.Message != "" {
+					fmt.Fprintf(os.Stderr, "  %s[%s] %s%s\n", common.AnsiDim, e.Phase, e.Message, common.AnsiReset)
 				}
 			}
 

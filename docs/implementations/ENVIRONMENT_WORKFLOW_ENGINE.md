@@ -36,8 +36,7 @@ internal/lib/workflow/     ← generic engine: DAG walker, state persistence, pr
     |  imports: internal/lib/model only
     |  zero domain knowledge
     |
-internal/lib/model/        ← ResourceSpec (type with GetString/GetBool/GetInt),
-                              SavedResource, WorkflowState (shared types)
+internal/lib/model/        ← ResourceMap, ResourceMeta, ResourceState, AppliedResource, WorkflowState
 ```
 
 ### Key design decision: no Operation interface
@@ -68,32 +67,45 @@ The `Destroy` path is straightforward: state files store `StepType` (singular), 
 ### 3.1 Step Interface
 
 ```go
+// StateWriter persists a step's state after a successful Apply or Destroy.
+// The step calls this after its API operation succeeds but before returning.
+// If it returns an error, the step should abort.
+type StateWriter func(ctx context.Context, stateData ResourceState) error
+
 // Step is the unit of provisioning. One instance per resource in the spec.
 type Step interface {
     // Name returns a unique identifier within this workflow, e.g. "network:default", "vm:dev-vm".
     Name() string
 
     // Type returns the singular step type identifier (e.g. "network", "vm", "ssh").
-    // Stored as StepType in state files for registry lookups during destroy.
+    // Stored as Type in state files for registry lookups during destroy.
     Type() string
 
     // Dependencies returns names of steps that must complete before this one.
     Dependencies() []string
 
     // Apply provisions the resource. Called in topological order.
-    // The saved parameter contains previously persisted state data for this
-    // step (from a prior workflow execution). Steps can use it to detect
-    // re-apply and preserve flags like WasCreated. If nil, this is a fresh
-    // execution.
-    Apply(ctx context.Context, state *SharedState, saved ResourceSpec) error
+    // The saved parameter contains previously persisted state for this
+    // resource (from a prior workflow execution). Steps can use it to detect
+    // re-apply, preserve flags like WasCreated, and detect drift via SpecHash.
+    // If zero value, this is a fresh execution.
+    // The write parameter is a StateWriter that the step calls after a
+    // successful API operation to persist its state immediately — narrowing
+    // the crash window to a single atomic file write.
+    Apply(ctx context.Context, state *SharedState, saved ResourceState, write StateWriter) error
 
     // Destroy tears down the resource using data from the saved state.
     // Called in reverse topological order during env destroy.
-    Destroy(ctx context.Context, saved ResourceSpec) error
+    // The write parameter is a StateWriter that the step calls after a
+    // successful destroy to update the persisted state — removing the
+    // resource from the state file so re-running destroy picks up from
+    // remaining resources.
+    Destroy(ctx context.Context, saved ResourceState, write StateWriter) error
 
-    // StateData returns the opaque data to persist for this step.
-    // This is passed back to Destroy() during env destroy.
-    StateData() ResourceSpec
+    // StateData returns the full state to persist for this resource.
+    // Contains the input spec, output data, and metadata.
+    // This is passed back to Apply() and Destroy() during re-apply/destroy.
+    StateData() ResourceState
 }
 ```
 
@@ -105,7 +117,7 @@ SharedState is the shared context passed through the pipeline. Steps read and wr
 // Shared mutable state across all steps in a workflow.
 type SharedState struct {
     mu   sync.RWMutex
-    data map[string]any   // step_name → any (cross-step data sharing)
+    data model.ResourceMap // step_name → any (cross-step data sharing)
 }
 
 func (s *SharedState) Set(stepName string, value any)
@@ -126,30 +138,44 @@ func NewPipeline(steps []Step) (*Pipeline, error)
 
 // Execute walks the DAG level by level. Steps within a level run in parallel.
 // Calls Apply on each step. The savedResources parameter contains state data
-// from a prior workflow execution — steps use it to detect re-apply and
-// preserve flags like WasCreated. Pass nil or an empty slice for fresh
-// executions.
+// from a prior workflow execution — steps use it to detect re-apply,
+// preserve flags like WasCreated, and detect drift via SpecHash.
+// Pass nil or an empty slice for fresh executions.
 func (p *Pipeline) Execute(ctx context.Context, state *SharedState,
     onProgress func(phase, status, msg string),
-    savedResources []SavedResource,
+    savedResources []AppliedResource,
     opts ...ExecuteOption) error
 
 // Destroy runs Destroy on each step in reverse topological order.
 // The step decides internally what to do based on its saved state.
 func (p *Pipeline) Destroy(ctx context.Context,
-    savedResources []SavedResource,
-    onProgress func(phase, status, msg string)) error
+    savedResources []AppliedResource,
+    onProgress func(phase, status, msg string),
+    opts ...DestroyOption) error
 ```
 
 **Execute options:**
 
 ```go
-// WithStepCompleteCallback registers a callback invoked after each step's
-// Apply completes successfully. The callback receives the step name and its
-// StateData at the time of completion. This is called from the step's
-// goroutine so the callback must be thread-safe. Used by the env layer to
-// collect state data incrementally for partial-state persistence on failure.
-func WithStepCompleteCallback(cb func(stepName string, stateData ResourceSpec)) ExecuteOption
+// WithOnStepComplete registers a callback invoked after each step's
+// Apply completes successfully. The callback receives the step and its
+// StateData at the time of completion. The callback must be thread-safe.
+// The pipeline wraps this into a StateWriter (one per goroutine) and passes
+// it to each step's Apply method so the step can persist its state immediately.
+// Used by the env layer for per-step state persistence on Apply.
+func WithOnStepComplete(cb func(ctx context.Context, step Step, stateData ResourceState)) ExecuteOption
+```
+
+**Destroy options:**
+
+```go
+// WithDestroyOnStepComplete registers a callback invoked after each step's
+// Destroy completes successfully. The callback receives the step and its
+// StateData at the time of completion. The callback must be thread-safe.
+// The pipeline wraps this into a StateWriter (one per goroutine) and passes
+// it to each step's Destroy method so the step can persist its state immediately.
+// Used by the env layer to track which resources have been destroyed.
+func WithDestroyOnStepComplete(cb func(ctx context.Context, step Step, stateData ResourceState)) DestroyOption
 ```
 
 ### 3.4 DAG Resolver
@@ -171,31 +197,147 @@ Algorithm:
 ### 3.5 State Persistence
 
 ```go
-type SavedResource struct {
-    StepName     string       `yaml:"step_name"`
-    StepType     string       `yaml:"step_type"`
-    Dependencies []string     `yaml:"depends_on,omitempty"`
-    State        ResourceSpec `yaml:"state,omitempty"`
+// ResourceMap — generic string→any map for specs and output data.
+type ResourceMap map[string]any
+
+// GetString safely extracts a string value from the map.
+func (r ResourceMap) GetString(key string) string { ... }
+
+// GetBool safely extracts a boolean value from the map.
+func (r ResourceMap) GetBool(key string) bool { ... }
+
+// GetInt safely extracts an int value from the map.
+func (r ResourceMap) GetInt(key string) int { ... }
+
+// ResourceMeta — workflow metadata per resource.
+type ResourceMeta struct {
+    WasCreated bool   `yaml:"was_created"`
+    SpecHash   string `yaml:"spec_hash,omitempty"`
 }
 
+// ResourceState — full state of a resource (input + output + metadata).
+type ResourceState struct {
+    Spec   ResourceMap  `yaml:"spec,omitempty"`
+    Output ResourceMap  `yaml:"output,omitempty"`
+    Meta   ResourceMeta `yaml:"meta,omitempty"`
+}
+
+// AppliedResource — a resource that has been applied and persisted.
+type AppliedResource struct {
+    Name         string         `yaml:"name"`
+    Type         string         `yaml:"type"`
+    Dependencies []string       `yaml:"depends_on,omitempty"`
+    State        ResourceState  `yaml:"state"`
+}
+
+// WorkflowState — top-level state file structure.
 type WorkflowState struct {
-    WorkflowID    string          `yaml:"workflow_id"`
-    SpecPath      string          `yaml:"spec_path"`
-    SchemaVersion string          `yaml:"schema_version"`
-    CreatedAt     string          `yaml:"created_at"`
-    UpdatedAt     string          `yaml:"updated_at"`
-    ContentHash   string          `yaml:"content_hash,omitempty"`
-    Resources     []SavedResource `yaml:"resources"`
+    WorkflowID    string            `yaml:"workflow_id"`
+    SpecPath      string            `yaml:"spec_path"`
+    SchemaVersion string            `yaml:"schema_version"`
+    CreatedAt     string            `yaml:"created_at"`
+    UpdatedAt     string            `yaml:"updated_at"`
+    ContentHash   string            `yaml:"content_hash,omitempty"`
+    Resources     []AppliedResource `yaml:"resources"`
 }
 ```
 
-Stored at `~/.cache/mvmctl/workflows/<workflow-id>/state.yaml`.
+**Example state file:**
+
+```yaml
+workflow_id: "ec729934a8fb9c67"
+spec_path: "./fenv.yaml"
+schema_version: "1.0"
+created_at: "2026-06-12T10:00:00Z"
+updated_at: "2026-06-12T10:05:00Z"
+resources:
+  - name: "network:default"
+    type: "network"
+    state:
+      spec:
+        name: "default"
+        subnet: "172.27.0.0/24"
+        nat: true
+        default: true
+      output:
+        network_id: "net-abc123"
+      meta:
+        was_created: true
+        spec_hash: "a1b2c3d4..."
+
+  - name: "vm:dev-vm"
+    type: "vm"
+    depends_on:
+      - "network:default"
+    state:
+      spec:
+        name: "dev-vm"
+        network: "default"
+        vcpu: 2
+        mem: 2048
+      output:
+        vm_id: "vm-xyz789"
+        vm_dir: "/var/lib/mvmctl/vms/dev-vm"
+      meta:
+        was_created: true
+        spec_hash: "e5f6g7h8..."
+```
+
+### 3.6 Per-Step State Persistence (Crash Resilience)
+
+State is persisted **per-step**, immediately after each successful API operation, not batched at the end. This narrows the crash window to a single atomic file write.
+
+**Before (batch write):**
+```
+step A → API (DB) ✅   step B → API (DB) ✅   step C → API (DB) ✅   WriteWorkflowState ❌CRASH
+                                                                    ^^^ all 3 resources orphaned
+```
+
+**After (per-step write):**
+```
+step A → API (DB) ✅ → write(ctx, stateData) → WriteWorkflowState (atomic) ✅
+step B → API (DB) ✅ → write(ctx, stateData) → WriteWorkflowState (atomic) ✅
+step C → API (DB) ✅ → write(ctx, stateData) → WriteWorkflowState (atomic) ✅
+                                                    ^^^ crash window = single atomic rename
+```
+
+The `StateWriter` closure is created per-goroutine in the pipeline by wrapping the `WithOnStepComplete` / `WithDestroyOnStepComplete` callback. The callback receives `(ctx, step, stateData)` — the pipeline wraps it into a `StateWriter` that captures the specific step reference:
+
+```go
+write := func(ctx context.Context, data ResourceState) error {
+    return cfg.onStepComplete(ctx, step, data)
+}
+step.Apply(ctx, state, saved, write)
+```
+
+The env layer's callback for **Apply** appends the step to an accumulator and writes the full state after each step:
+```go
+onStepComplete := func(ctx context.Context, step workflow.Step, stateData ResourceState) error {
+    resources = append(resources, AppliedResource{Name: step.Name(), ...})
+    wfState := &WorkflowState{Resources: resources, ...}
+    return WriteWorkflowState(stateDir, wfState)
+}
+```
+
+The env layer's callback for **Destroy** removes the step from the accumulator and writes the reduced state:
+```go
+onStepComplete := func(ctx context.Context, step workflow.Step, stateData ResourceState) error {
+    resources = removeByName(resources, step.Name())
+    updatedState := &WorkflowState{Resources: resources, ...}
+    return WriteWorkflowState(stateDir, updatedState)
+}
+```
+
+This means:
+- **On Apply failure:** The state file always contains every step that completed. Re-running `env apply` sees those steps as "existing" and skips them.
+- **On Destroy failure:** The state file contains only remaining resources. Re-running `env destroy` picks up from where it left off.
+- **No batch window:** The only crash window is the `WriteWorkflowState` call itself, which is atomic (`.tmp` → `os.Rename` → `state.yaml`).
 
 Persistence properties:
 - **Atomic writes:** `state.yaml.tmp` → `os.Rename` → `state.yaml` (atomic on POSIX)
 - **File locking:** `<state_dir>/.lock` via `unix.Flock` (exclusive on write, shared on read)
 - **Content verification:** SHA256 hash of state content stored in `WorkflowState.ContentHash`, verified on read — if present, the hash is validated; files without a ContentHash field are accepted as-is for backward compatibility
-- **Backup files:** Previous state is backed to `state.yaml.bak` before overwrite
+- **Backup files:** Previous state is backed to `state.yaml.backup` before overwrite
 
 ---
 
@@ -228,8 +370,8 @@ A `mvm env clean` command can be added later to prune orphaned state directories
 // StepType is the same singular identifier returned by step.Type().
 type StepFactory struct {
     StepType  string
-    FromSpec  func(stepType, name string, spec ResourceSpec, op *api.Operation) (workflow.Step, error)
-    FromState func(stepType, name string, saved ResourceSpec, op *api.Operation) (workflow.Step, error)
+    FromSpec  func(stepType, name string, spec ResourceMap, op *api.Operation) (workflow.Step, error)
+    FromState func(stepType, name string, saved ResourceState, deps []string, op *api.Operation) (workflow.Step, error)
 }
 
 // Registry is a package-level map literal in factory.go.
@@ -310,12 +452,12 @@ The YAML spec uses separate `target` (VM name) and `dst` (remote path) fields. T
 ```go
 type EnvSpec struct {
     Version string                         `yaml:"version"`
-    Steps   map[string][]model.ResourceSpec `yaml:"-"` // populated by UnmarshalYAML
+    Steps   map[string][]model.ResourceMap `yaml:"-"` // populated by UnmarshalYAML
 }
 
 // UnmarshalYAML decodes a YAML mapping into EnvSpec. The "version" key is
 // decoded explicitly; all remaining keys that match an entry in Registry
-// are decoded as []model.ResourceSpec and stored in Steps.
+// are decoded as []model.ResourceMap and stored in Steps.
 func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error
 ```
 
@@ -324,7 +466,7 @@ Resolution flow:
 1. Read YAML file → call `yaml.Unmarshal` → custom `UnmarshalYAML` populates `Steps`:
    - Extract `version` explicitly
    - For each remaining YAML key, check if `Registry[key]` exists
-   - If found, decode the value as `[]model.ResourceSpec` and store in `Steps[key]`
+   - If found, decode the value as `[]model.ResourceMap` and store in `Steps[key]`
    - Unknown keys are silently ignored
 2. Validate `Version` — must be `"1"` (the only supported version). Returns error for unknown versions.
 3. For each entry in `Registry`, look up matching step list from `spec.Steps[yamlKey]`
@@ -342,20 +484,24 @@ The orchestration layer lives in `internal/workflow/env/env.go` as standalone fu
 // Apply provisions everything in the spec file.
 // - Resolves spec → steps
 // - Builds pipeline, executes
-// - Persists partial state on failure so destroy can still clean up
+// - Persists state per-step so partial execution is always recoverable
 func Apply(ctx context.Context, op *api.Operation, specPath string,
     onProgress event.OnProgressCallback) error
 ```
 
 Apply flow:
 1. `ResolveSpec(ctx, specPath, op)` → `[]workflow.Step`
-2. Build `stepTypeByStepName` map from `step.Type()` (singular) for callback lookups
-3. `workflow.NewPipeline(steps)` → validates and topologically sorts
-4. Derive workflow ID from spec path → `~/.cache/mvmctl/workflows/<wf-id>/`
-5. **Read previous workflow state** for re-apply detection: `workflow.ReadWorkflowState(stateDir)` — reads `prevState.Resources` so steps receive their previous `saved` state during `Apply()`.
-6. `pipeline.Execute(ctx, state, progressFn, prevResources, opts...)` — passes previous resources for re-apply detection
-7. Collect per-step state data from `WithStepCompleteCallback` during execution (thread-safe)
-8. Persist `WorkflowState` to state directory — even if Execute fails, completed steps are saved
+2. `workflow.NewPipeline(steps)` → validates and topologically sorts
+3. Derive workflow ID from spec path → `~/.cache/mvmctl/workflows/<wf-id>/`
+4. **Read previous workflow state** for re-apply detection: `workflow.ReadWorkflowState(stateDir)` — reads `prevState.Resources` so steps receive their previous `saved` state during `Apply()`.
+5. **Register `WithOnStepComplete` callback** that persists state after each step:
+   - Appends the step's `AppliedResource` (name, type, deps, state) to an accumulator
+   - Writes the full `WorkflowState` to `state.yaml` after each append
+   - Thread-safe (mutex-guarded accumulator)
+6. `pipeline.Execute(ctx, state, progressFn, prevResources, workflow.WithOnStepComplete(onStepComplete))`
+   - Pipeline wraps the callback into a `StateWriter` per goroutine
+   - Each step calls `write(ctx, s.StateData())` after its API operation succeeds
+   - If execution fails partway, the state file already contains all completed steps
 
 ```go
 // Destroy tears down all resources created by a previous Apply.
@@ -368,14 +514,18 @@ func Destroy(ctx context.Context, op *api.Operation, specOrID string,
 Destroy flow:
 1. Resolve the identifier via `ResolveWorkflowID(specOrID)` — supports exact match, prefix match, and path-based hashing
 2. Read saved `WorkflowState` from state directory
-3. For each `SavedResource`, look up factory by `StepType` via `Registry[stepType]`:
-   - Direct lookup — Registry keys match StepType (both singular)
-   - No bridge function needed
-4. Extract bare name from step name via `BareStepName(res.StepName, res.StepType)` — strips `"type:"` prefix
+3. For each `AppliedResource`, look up factory by `Type` via `Registry[resource.Type]`:
+    - Direct lookup — Registry keys match Type (both singular)
+    - No bridge function needed
+4. Extract bare name from resource name via `BareStepName(res.Name, res.Type)` — strips `"type:"` prefix
 5. `factory.FromState(factory.StepType, bareName, res.State, op)` → reconstruct step
 6. `workflow.NewPipeline(steps)` → validate
-7. `pipeline.Destroy(ctx, savedResources, progressFn)`
-8. Remove workflow state directory
+7. **Register `WithDestroyOnStepComplete` callback** that persists state after each destroy:
+   - Removes the step from the accumulator (mutex-guarded)
+   - Writes the reduced `WorkflowState` to `state.yaml` after each removal
+   - If destroy fails partway, the state file contains only remaining resources — re-running picks up where it left off
+8. `pipeline.Destroy(ctx, savedResources, progressFn, workflow.WithDestroyOnStepComplete(onStepComplete))`
+9. Remove workflow state directory after all destroys succeed
 
 ```go
 // List returns summaries of all saved workflow states.
@@ -392,12 +542,13 @@ type ListSummary struct {
 
 ```go
 // Diff compares spec against saved state and shows what would change.
-func Diff(ctx context.Context, op *api.Operation, specPath string) (*DiffResult, error)
+func Diff(ctx context.Context, specPath string, stateDir string) (*DiffResult, error)
 
 type DiffResult struct {
     New      []string `json:"new"`      // in spec, not in state → will create
     Removed  []string `json:"removed"`  // in state, not in spec → will destroy
     Existing []string `json:"existing"` // in both → no change
+    Drifted  []string `json:"drifted"`  // in both, spec changed → will update
 }
 ```
 
@@ -434,6 +585,10 @@ A step's `Apply` returns an error or not — the step controls its own behavior 
 During `env destroy`, each step's `Destroy()` decides what to do based on its saved state: tear down, skip, log, error. The engine just calls it.
 
 The engine is a DAG walker. It calls `Apply`, `Destroy`, `StateData`, and persists whatever `StateData` returns. Nothing more.
+
+**Crash resilience via per-step writes:** Because state is persisted after every successful step (not batched at the end), a crash or partial failure never orphans all completed work. The state file always reflects exactly which steps succeeded. Re-running `env apply` skips completed steps via `GetByName` / existence checks. Re-running `env destroy` picks up from remaining resources in the state file.
+
+The only crash window is the `WriteWorkflowState` call itself, which is atomic (`.tmp` → `os.Rename`). A crash during this call leaves either the old state file intact (write hadn't started) or the new state file complete (rename completed) — never a corrupt partial file.
 
 ---
 
@@ -541,20 +696,20 @@ The `env` group is a new top-level command, defined in `internal/cli/env.go`.
 
 ```
 internal/lib/workflow/
-    step.go              # Step interface, StepFunc adapter
+    step.go              # Step interface, StateWriter type, StepFunc adapter
     pipeline.go          # Pipeline struct, Execute (with savedResources param, options), Destroy
     state.go             # SharedState (thread-safe)
     dag.go               # BuildDAG topo-sort
     persist.go           # Read/Write WorkflowState to YAML
 
 internal/lib/model/
-    workflow.go          # ResourceSpec (type definition with GetString/GetBool/GetInt methods),
-                         # SavedResource, WorkflowState
+    workflow.go          # ResourceMap, ResourceMeta, ResourceState, AppliedResource, WorkflowState
 
 internal/workflow/env/
     env.go               # Apply, Destroy, List, Diff (standalone functions)
     spec.go              # EnvSpec (dynamic Steps map via UnmarshalYAML), ResolveSpec
     factory.go           # StepFactory, Registry (singular keys, StepType matches key)
+    step_*.go            # Step implementations (8 types)
     utils.go             # FormatStepName, InferStepType, BareStepName,
                          # StateFromMap, StructToMap, extractDependsOn
     step_network.go      # NetworkStep
@@ -581,23 +736,29 @@ Note: `internal/lib/util/` has been removed entirely. `StateFromMap` and `Struct
 
 | Feature | Status |
 |---------|--------|
-| Step interface (Apply/Destroy/StateData with Type() and saved param) | ✅ |
+| Step interface (Apply/Destroy/StateData/SpecHash with Type() and saved ResourceState param) | ✅ |
 | DAG resolver (topological sort, cycle detection) | ✅ |
 | SharedState (thread-safe, cross-step data sharing) | ✅ |
 | Pipeline.Execute (sequential levels, parallel within level, savedResources param) | ✅ |
 | Pipeline.Destroy (reverse level order) | ✅ |
 | State persistence (atomic write, file locking, content hash, backup) | ✅ |
+| Per-step state persistence (crash resilience — state written after every step, not batched) | ✅ |
+| Destroy tracking (per-step state removal — re-running destroy picks up from remaining resources) | ✅ |
 | Path-based workflow ID (16 hex chars) | ✅ |
 | Prefix matching for workflow ID on destroy | ✅ |
 | Dynamic YAML spec resolver — EnvSpec uses Steps map via UnmarshalYAML, Registry is the schema | ✅ |
 | Step factory registry (singular YAML keys, StepType matches key — direct lookup) | ✅ |
 | `depends_on` support on all step types via extractDependsOn helper | ✅ |
 | VM step deduplicates explicit deps against inferred ref deps | ✅ |
-| ResourceSpec type definition with GetString/GetBool/GetInt methods | ✅ |
+| ResourceMap type (generic map[string]any) | ✅ |
+| ResourceMeta type (WasCreated, SpecHash) | ✅ |
+| ResourceState type (Spec, Output, Meta) | ✅ |
+| AppliedResource type (persisted resource in state file) | ✅ |
 | StateFromMap/StructToMap moved from internal/lib/util/ to env/utils.go | ✅ |
 | StateFromMap logging (slog.Error on marshal/unmarshal failure) | ✅ |
 | Nil guards (s.op == nil) on every Apply() and Destroy() | ✅ |
 | Re-apply detection: Apply(ctx, state, saved) preserves WasCreated from previous state | ✅ |
+| Drift detection via SpecHash in ResourceMeta | ✅ |
 | All 8 step types (network, key, image, kernel, binary, vm, ssh, copy) | ✅ |
 | Step reconstruction from state for spec-less destroy | ✅ |
 | YAML tags on all input types | ✅ |

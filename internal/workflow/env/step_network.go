@@ -6,6 +6,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"mvmctl/internal/infra/event"
+	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/pkg/api"
@@ -15,19 +17,20 @@ import (
 
 // NetworkState is the persisted state for a network step.
 type NetworkState struct {
-	NetworkID  string `yaml:"network_id"`
-	Subnet     string `yaml:"subnet"`
-	WasCreated bool   `yaml:"was_created"`
+	NetworkID string `yaml:"network_id"`
+	Subnet    string `yaml:"subnet"`
 }
 
 // NetworkStep implements workflow.Step for creating and destroying networks.
 type NetworkStep struct {
-	stepType string // singular, e.g. "network"
+	stepType string
 	name     string
 	deps     []string
+	specHash string
 	input    inputs.NetworkCreateInput
 	op       *api.Operation
 	saved    *NetworkState
+	meta     model.ResourceMeta
 }
 
 func (s *NetworkStep) Type() string { return s.stepType }
@@ -36,15 +39,17 @@ func (s *NetworkStep) Name() string { return FormatStepName(s.stepType, s.name) 
 
 func (s *NetworkStep) Dependencies() []string { return s.deps }
 
-func (s *NetworkStep) Apply(ctx context.Context, state *workflow.SharedState, saved model.ResourceSpec) error {
+func (s *NetworkStep) SpecHash() string { return s.specHash }
+
+func (s *NetworkStep) Apply(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
-	var prev *NetworkState
-	if saved != nil {
-		prev = StateFromMap[NetworkState](saved)
-	}
+	// Recover WasCreated from saved meta.
+	wasCreated := saved.Meta.WasCreated
+
+	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
 	existing, err := s.op.Repos.Network.GetByName(ctx, s.input.Name)
 	if err != nil {
 		return errs.WrapMsg(
@@ -55,59 +60,86 @@ func (s *NetworkStep) Apply(ctx context.Context, state *workflow.SharedState, sa
 	}
 
 	if existing != nil {
-		wasCreated := prev != nil && prev.WasCreated
+		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})
 		s.saved = &NetworkState{
-			NetworkID:  existing.ID,
-			Subnet:     existing.Subnet,
+			NetworkID: existing.ID,
+			Subnet:    existing.Subnet,
+		}
+		s.meta = model.ResourceMeta{
 			WasCreated: wasCreated,
+			SpecHash:   s.specHash,
 		}
 		state.Set(s.Name(), s.saved)
+		if err := write(ctx, s.StateData()); err != nil {
+			return fmt.Errorf("persist step state after skip: %w", err)
+		}
 		return nil
 	}
 
+	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "creating network"})
 	net, err := s.op.NetworkCreate(ctx, s.input)
 	if err != nil {
 		return err
 	}
 
 	s.saved = &NetworkState{
-		NetworkID:  net.ID,
-		Subnet:     net.Subnet,
+		NetworkID: net.ID,
+		Subnet:    net.Subnet,
+	}
+	s.meta = model.ResourceMeta{
 		WasCreated: true,
+		SpecHash:   s.specHash,
 	}
 	state.Set(s.Name(), s.saved)
+	if err := write(ctx, s.StateData()); err != nil {
+		return fmt.Errorf("persist step state: %w", err)
+	}
 	return nil
 }
 
-func (s *NetworkStep) Destroy(ctx context.Context, saved model.ResourceSpec) error {
+func (s *NetworkStep) Destroy(ctx context.Context, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved != nil {
-		s.saved = StateFromMap[NetworkState](saved)
+	if s.saved == nil && saved.Spec != nil {
+		s.saved = StateFromMap[NetworkState](saved.Spec)
+		s.meta = saved.Meta
 	}
 
-	if s.saved == nil || !s.saved.WasCreated {
+	if s.saved == nil || !s.meta.WasCreated {
+		if err := write(ctx, s.StateData()); err != nil {
+			return fmt.Errorf("persist step state after destroy skip: %w", err)
+		}
 		return nil
 	}
 
-	return s.op.NetworkRemove(ctx, inputs.NetworkInput{
+	if err := s.op.NetworkRemove(ctx, inputs.NetworkInput{
 		Identifiers: []string{s.saved.NetworkID},
 		Force:       true,
-	}, true)
+	}, true); err != nil {
+		return err
+	}
+
+	if err := write(ctx, s.StateData()); err != nil {
+		return fmt.Errorf("persist step state after destroy: %w", err)
+	}
+	return nil
 }
 
-func (s *NetworkStep) StateData() model.ResourceSpec {
+func (s *NetworkStep) StateData() model.ResourceState {
 	if s.saved == nil {
-		return nil
+		return model.ResourceState{}
 	}
-	return StructToMap(s.saved)
+	return model.ResourceState{
+		Spec: StructToMap(s.saved),
+		Meta: s.meta,
+	}
 }
 
 func newNetworkStepFromSpec(
 	stepType string,
 	name string,
-	spec model.ResourceSpec,
+	spec model.ResourceMap,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	data, err := yaml.Marshal(spec)
@@ -124,19 +156,15 @@ func newNetworkStepFromSpec(
 	// Canonical spec key is "nat". The "nat_enabled" key is accepted but
 	// deprecated — selecting both with different values is undefined.
 	input.NATEnabled = true // default to true
-	if v, ok := spec["nat"]; ok {
-		switch val := v.(type) {
-		case bool:
-			input.NATEnabled = val
-		case string:
-			input.NATEnabled = val == "true" || val == "yes"
-		}
+	if _, exists := spec["nat"]; exists {
+		input.NATEnabled = spec.GetBool("nat")
 	}
 
 	return &NetworkStep{
 		stepType: stepType,
 		name:     name,
 		deps:     extractDependsOn(spec),
+		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,
 	}, nil
@@ -145,11 +173,11 @@ func newNetworkStepFromSpec(
 func newNetworkStepFromState(
 	stepType string,
 	name string,
-	saved model.ResourceSpec,
+	saved model.ResourceState,
 	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
-	ns := StateFromMap[NetworkState](saved)
+	ns := StateFromMap[NetworkState](saved.Spec)
 	return &NetworkStep{
 		stepType: stepType,
 		name:     name,
@@ -159,5 +187,6 @@ func newNetworkStepFromState(
 		},
 		op:    op,
 		saved: ns,
+		meta:  saved.Meta,
 	}, nil
 }

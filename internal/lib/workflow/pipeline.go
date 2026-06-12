@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 )
 
@@ -35,17 +36,18 @@ func NewPipeline(steps []Step) (*Pipeline, error) {
 // ── Execute options ──
 
 type executeOptions struct {
-	onStepComplete func(stepName string, stateData model.ResourceSpec)
+	onStepComplete func(ctx context.Context, step Step, stateData model.ResourceState) error
 }
 
 // ExecuteOption configures the pipeline execution.
 type ExecuteOption func(*executeOptions)
 
-// WithStepCompleteCallback registers a callback that is invoked after each
-// step's Apply completes successfully. The callback receives the step name
-// and its StateData at the time of completion. This is called from the
-// step's goroutine so the callback must be thread-safe.
-func WithStepCompleteCallback(cb func(stepName string, stateData model.ResourceSpec)) ExecuteOption {
+// WithOnStepComplete registers a callback that is invoked after each step's
+// Apply completes successfully. The callback receives the step and its
+// StateData at the time of completion. The callback must be thread-safe.
+// The pipeline wraps this into a StateWriter and passes it to each step's
+// Apply method so the step can persist its state immediately.
+func WithOnStepComplete(cb func(ctx context.Context, step Step, stateData model.ResourceState) error) ExecuteOption {
 	return func(opts *executeOptions) {
 		opts.onStepComplete = cb
 	}
@@ -67,12 +69,12 @@ func WithStepCompleteCallback(cb func(stepName string, stateData model.ResourceS
 // step completes with "complete" (or "failed" on error).
 //
 // Additional options can be passed via ExecuteOption, such as
-// WithStepCompleteCallback to collect state data incrementally.
+// WithOnStepComplete to persist state after each step's Apply succeeds.
 func (p *Pipeline) Execute(
 	ctx context.Context,
 	state *SharedState,
-	onProgress func(phase, status, msg string),
-	savedResources []model.SavedResource,
+	onProgress event.OnProgressCallback,
+	savedResources []model.AppliedResource,
 	opts ...ExecuteOption,
 ) error {
 	if len(p.levels) == 0 {
@@ -85,9 +87,9 @@ func (p *Pipeline) Execute(
 	}
 
 	// Build a lookup from step name to saved state for re-apply detection.
-	savedByStep := make(map[string]model.ResourceSpec, len(savedResources))
+	savedByStep := make(map[string]model.ResourceState, len(savedResources))
 	for _, sr := range savedResources {
-		savedByStep[sr.StepName] = sr.State
+		savedByStep[sr.Name] = sr.State
 	}
 
 	for _, level := range p.levels {
@@ -102,18 +104,20 @@ func (p *Pipeline) Execute(
 		g, stepCtx := errgroup.WithContext(ctx)
 
 		for _, step := range level {
-			step := step // capture
 			g.Go(func() error {
-				emitP(onProgress, step.Name(), "running", "")
-				if err := step.Apply(stepCtx, state, savedByStep[step.Name()]); err != nil {
-					emitP(onProgress, step.Name(), "failed", err.Error())
+				var write StateWriter
+				if cfg.onStepComplete != nil {
+					write = func(ctx context.Context, data model.ResourceState) error {
+						return cfg.onStepComplete(ctx, step, data)
+					}
+				}
+
+				emitProgress(onProgress, step.Name(), "running", "starting")
+				if err := step.Apply(stepCtx, state, savedByStep[step.Name()], write, onProgress); err != nil {
+					emitProgress(onProgress, step.Name(), "failed", err.Error())
 					return fmt.Errorf("step %q: %w", step.Name(), err)
 				}
-				emitP(onProgress, step.Name(), "complete", "")
-
-				if cfg.onStepComplete != nil {
-					cfg.onStepComplete(step.Name(), step.StateData())
-				}
+				emitProgress(onProgress, step.Name(), "complete", "done")
 				return nil
 			})
 		}
@@ -126,30 +130,56 @@ func (p *Pipeline) Execute(
 	return nil
 }
 
+// ── Destroy options ──
+
+type destroyOptions struct {
+	onStepComplete func(ctx context.Context, step Step, stateData model.ResourceState) error
+}
+
+// DestroyOption configures the pipeline destroy execution.
+type DestroyOption func(*destroyOptions)
+
+// WithDestroyOnStepComplete registers a callback that is invoked after each
+// step's Destroy completes successfully. The callback receives the step and
+// its StateData at the time of completion. The callback must be thread-safe.
+// The pipeline wraps this into a StateWriter and passes it to each step's
+// Destroy method so the step can persist its state immediately.
+func WithDestroyOnStepComplete(cb func(ctx context.Context, step Step, stateData model.ResourceState) error) DestroyOption {
+	return func(opts *destroyOptions) {
+		opts.onStepComplete = cb
+	}
+}
+
 // ── Destroy ──
 
 // Destroy runs the Destroy method on each step in reverse topological
 // order (deepest level first). This ensures that resources are torn down
 // in dependency order — steps that depend on others are destroyed first.
 //
-// Each saved resource contains the step name, type, dependencies, and
+// Each saved resource contains the name, type, dependencies, and
 // the state data that was persisted after Apply. The step implementation
 // decides what to destroy based on its saved state.
 //
 // The onProgress callback follows the same convention as Execute.
 func (p *Pipeline) Destroy(
 	ctx context.Context,
-	savedResources []model.SavedResource,
-	onProgress func(phase, status, msg string),
+	savedResources []model.AppliedResource,
+	onProgress event.OnProgressCallback,
+	opts ...DestroyOption,
 ) error {
 	if len(p.levels) == 0 {
 		return nil
 	}
 
+	var cfg destroyOptions
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	// Build a lookup from step name to saved state.
-	savedByStep := make(map[string]model.SavedResource, len(savedResources))
+	savedByStep := make(map[string]model.AppliedResource, len(savedResources))
 	for _, sr := range savedResources {
-		savedByStep[sr.StepName] = sr
+		savedByStep[sr.Name] = sr
 	}
 
 	// Build a lookup from step name to Step.
@@ -175,15 +205,21 @@ func (p *Pipeline) Destroy(
 		g, stepCtx := errgroup.WithContext(ctx)
 
 		for _, step := range level {
-			step := step
 			g.Go(func() error {
+				var write StateWriter
+				if cfg.onStepComplete != nil {
+					write = func(ctx context.Context, data model.ResourceState) error {
+						return cfg.onStepComplete(ctx, step, data)
+					}
+				}
+
 				saved := savedByStep[step.Name()]
-				emitP(onProgress, step.Name(), "running", "destroying")
-				if err := step.Destroy(stepCtx, saved.State); err != nil {
-					emitP(onProgress, step.Name(), "failed", err.Error())
+				emitProgress(onProgress, step.Name(), "running", "destroying")
+				if err := step.Destroy(stepCtx, saved.State, write, onProgress); err != nil {
+					emitProgress(onProgress, step.Name(), "failed", err.Error())
 					return fmt.Errorf("destroy step %q: %w", step.Name(), err)
 				}
-				emitP(onProgress, step.Name(), "complete", "destroyed")
+				emitProgress(onProgress, step.Name(), "complete", "destroyed")
 				return nil
 			})
 		}
@@ -209,10 +245,10 @@ func (p *Pipeline) Levels() [][]Step {
 	return p.levels
 }
 
-// emitP calls the progress callback if non-nil.
-func emitP(onProgress func(phase, status, msg string), phase, status, msg string) {
+// emitProgress calls the progress callback if non-nil.
+func emitProgress(onProgress event.OnProgressCallback, phase, status, msg string) {
 	if onProgress == nil {
 		return
 	}
-	onProgress(phase, status, msg)
+	onProgress(event.Progress{Phase: phase, Status: status, Message: msg})
 }

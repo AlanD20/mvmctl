@@ -70,55 +70,32 @@ func Apply(
 	state := workflow.NewSharedState()
 
 	// Read existing workflow state for re-apply detection.
-	var prevResources []model.SavedResource
+	var prevResources []model.AppliedResource
 	prevState, rErr := workflow.ReadWorkflowState(stateDir)
 	if rErr == nil && prevState != nil {
 		prevResources = prevState.Resources
 	}
 
-	// Bridge between event.OnProgressCallback and pipeline callback.
-	progressFn := toPipelineProgress(onProgress)
-
-	// Collect saved resources per-step during execution.
-	// The callback is invoked from step goroutines and must be thread-safe.
+	// Register a callback that persists state after each step's Apply.
+	// Each step writes its own state immediately after a successful API call.
 	var (
 		mu        sync.Mutex
-		resources []model.SavedResource
+		resources []model.AppliedResource
 		createdAt string
 	)
 
-	// Build step type and dependency lookups for the callback.
-	stepTypeByStepName := make(map[string]string, len(steps))
-	stepDeps := make(map[string][]string, len(steps))
-	for _, s := range steps {
-		stepTypeByStepName[s.Name()] = s.Type()
-		stepDeps[s.Name()] = s.Dependencies()
-	}
-
-	onStepComplete := func(stepName string, stateData model.ResourceSpec) {
+	onStepComplete := func(ctx context.Context, step workflow.Step, stateData model.ResourceState) error {
 		mu.Lock()
-		// createdAt is set once, on the first step completion. The check-then-set
-		// is inside the mutex — do NOT move this outside the lock.
+		defer mu.Unlock()
 		if createdAt == "" {
 			createdAt = infra.Now()
 		}
-		resources = append(resources, model.SavedResource{
-			StepName:     stepName,
-			StepType:     stepTypeByStepName[stepName],
-			Dependencies: stepDeps[stepName],
+		resources = append(resources, model.AppliedResource{
+			Name:         step.Name(),
+			Type:         step.Type(),
+			Dependencies: step.Dependencies(),
 			State:        stateData,
 		})
-		mu.Unlock()
-	}
-
-	err = pipeline.Execute(ctx, state, progressFn, prevResources, workflow.WithStepCompleteCallback(onStepComplete))
-
-	// ═ Persist whatever state was collected (partial or full) ═
-	mu.Lock()
-	if createdAt == "" {
-		createdAt = infra.Now()
-	}
-	if len(resources) > 0 {
 		wfState := &model.WorkflowState{
 			WorkflowID:    wfID,
 			SpecPath:      specPath,
@@ -128,12 +105,14 @@ func Apply(
 			Resources:     resources,
 		}
 		if pErr := workflow.WriteWorkflowState(stateDir, wfState); pErr != nil {
-			slog.Warn("failed to persist workflow state", "wf_id", wfID, "error", pErr)
-		} else {
-			slog.Info("workflow state persisted", "wf_id", wfID, "dir", stateDir)
+			slog.Warn("failed to persist workflow state", "wf_id", wfID, "step", step.Name(), "error", pErr)
+			return fmt.Errorf("persist workflow state after step %q: %w", step.Name(), pErr)
 		}
+		slog.Debug("workflow state persisted after step", "wf_id", wfID, "step", step.Name(), "dir", stateDir)
+		return nil
 	}
-	mu.Unlock()
+
+	err = pipeline.Execute(ctx, state, onProgress, prevResources, workflow.WithOnStepComplete(onStepComplete))
 
 	if err != nil {
 		return errs.WrapMsg(
@@ -180,19 +159,19 @@ func Destroy(
 	// Reconstruct steps from saved resources.
 	var steps []workflow.Step
 	for _, res := range wfState.Resources {
-		factory, ok := Registry[res.StepType]
+		factory, ok := Registry[res.Type]
 		if !ok {
-			slog.Warn("unknown step type in saved state, skipping", "type", res.StepType, "name", res.StepName)
+			slog.Warn("unknown step type in saved state, skipping", "type", res.Type, "name", res.Name)
 			continue
 		}
 		// Extract the bare name from the full step name (format: "type:name").
-		bareName := BareStepName(res.StepName, res.StepType)
+		bareName := BareStepName(res.Name, res.Type)
 
 		step, err := factory.FromState(factory.StepType, bareName, res.State, res.Dependencies, op)
 		if err != nil {
 			return errs.WrapMsg(
 				errs.CodeInternal,
-				fmt.Sprintf("reconstruct step %q: %v", res.StepName, err),
+				fmt.Sprintf("reconstruct step %q: %v", res.Name, err),
 				err,
 			)
 		}
@@ -213,9 +192,44 @@ func Destroy(
 		)
 	}
 
-	progressFn := toPipelineProgress(onProgress)
+	// Register a callback that persists state after each step's Destroy.
+	// Each step removes itself from the accumulated resources list after a
+	// successful destroy, so re-running destroy picks up from remaining steps.
+	var (
+		mu        sync.Mutex
+		resources = wfState.Resources // copy the full list from saved state
+	)
 
-	if err := pipeline.Destroy(ctx, wfState.Resources, progressFn); err != nil {
+	onStepComplete := func(ctx context.Context, step workflow.Step, stateData model.ResourceState) error {
+		mu.Lock()
+		defer mu.Unlock()
+
+		// Remove this step from the accumulated resources.
+		filtered := make([]model.AppliedResource, 0, len(resources))
+		for _, r := range resources {
+			if r.Name != step.Name() {
+				filtered = append(filtered, r)
+			}
+		}
+		resources = filtered
+
+		updatedState := &model.WorkflowState{
+			WorkflowID:    wfID,
+			SpecPath:      wfState.SpecPath,
+			SchemaVersion: envStateSchemaVersion,
+			CreatedAt:     wfState.CreatedAt,
+			UpdatedAt:     infra.Now(),
+			Resources:     resources,
+		}
+		if pErr := workflow.WriteWorkflowState(stateDir, updatedState); pErr != nil {
+			slog.Warn("failed to persist workflow state after destroy", "wf_id", wfID, "step", step.Name(), "error", pErr)
+			return fmt.Errorf("persist workflow state after destroy step %q: %w", step.Name(), pErr)
+		}
+		slog.Debug("workflow state persisted after destroy", "wf_id", wfID, "step", step.Name(), "dir", stateDir)
+		return nil
+	}
+
+	if err := pipeline.Destroy(ctx, wfState.Resources, onProgress, workflow.WithDestroyOnStepComplete(onStepComplete)); err != nil {
 		return errs.WrapMsg(
 			errs.CodeInternal,
 			fmt.Sprintf("env destroy %s failed: %v", specOrID, err),
@@ -223,7 +237,7 @@ func Destroy(
 		)
 	}
 
-	// Remove the workflow state.
+	// Remove the workflow state after all destroys succeed.
 	if err := workflow.RemoveWorkflowState(wfID); err != nil {
 		slog.Warn("failed to remove workflow state", "wf_id", wfID, "error", err)
 	}
@@ -259,6 +273,11 @@ func List(ctx context.Context) ([]ListSummary, error) {
 
 	var summaries []ListSummary
 	for _, entry := range entries {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
 		if !entry.IsDir() {
 			continue
 		}
@@ -278,26 +297,10 @@ func List(ctx context.Context) ([]ListSummary, error) {
 		summaries = append(summaries, summary)
 	}
 
-	_ = ctx
 	return summaries, nil
 }
 
 // ── Helpers ──
-
-// toPipelineProgress bridges event.OnProgressCallback to the pipeline's
-// func(phase, status, msg string) callback.
-func toPipelineProgress(onProgress event.OnProgressCallback) func(string, string, string) {
-	if onProgress == nil {
-		return nil
-	}
-	return func(phase, status, msg string) {
-		onProgress(event.Progress{
-			Phase:   phase,
-			Status:  status,
-			Message: msg,
-		})
-	}
-}
 
 // ResolveWorkflowID returns the workflow ID for a given spec path or ID.
 // If the input looks like a file path (contains / or .), it's treated as
@@ -344,46 +347,62 @@ type DiffResult struct {
 	New []string `json:"new"`
 	// Removed contains step names present in the state but not in the spec.
 	Removed []string `json:"removed"`
-	// Existing contains step names present in both the spec and the state.
+	// Existing contains step names present in both the spec and the state
+	// with unchanged spec hashes.
 	Existing []string `json:"existing"`
+	// Drifted contains step names present in both the spec and the state
+	// but with different spec hashes (the spec has changed since last apply).
+	Drifted []string `json:"drifted"`
 }
 
 // Diff compares the step names from a resolved spec against the step names
 // from a saved workflow state and returns the set differences.
 // If stateDir is empty, all spec steps are considered new.
+// Drift detection compares spec hashes: if a step exists in both spec and state
+// but the spec hash has changed, it is marked as "drifted".
 func Diff(ctx context.Context, specPath string, stateDir string) (*DiffResult, error) {
-	// Resolve spec step names.
+	// Resolve spec step names and hashes.
 	steps, err := ResolveSpec(ctx, specPath, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	specNames := make(map[string]struct{}, len(steps))
+	type specEntry struct {
+		hash string
+	}
+	specByName := make(map[string]specEntry, len(steps))
 	for _, s := range steps {
-		specNames[s.Name()] = struct{}{}
+		specByName[s.Name()] = specEntry{hash: s.SpecHash()}
 	}
 
-	// Read state step names.
-	stateNames := make(map[string]struct{})
+	// Read state step names and hashes from ResourceState.Meta.SpecHash.
+	type stateEntry struct {
+		hash string
+	}
+	stateByName := make(map[string]stateEntry)
 	if stateDir != "" {
 		wfState, rErr := workflow.ReadWorkflowState(stateDir)
 		if rErr == nil && wfState != nil {
 			for _, res := range wfState.Resources {
-				stateNames[res.StepName] = struct{}{}
+				stateByName[res.Name] = stateEntry{hash: res.State.Meta.SpecHash}
 			}
 		}
 	}
 
 	result := &DiffResult{}
-	for name := range specNames {
-		if _, inState := stateNames[name]; inState {
-			result.Existing = append(result.Existing, name)
+	for name, spec := range specByName {
+		if st, inState := stateByName[name]; inState {
+			if spec.hash != "" && st.hash != "" && spec.hash != st.hash {
+				result.Drifted = append(result.Drifted, name)
+			} else {
+				result.Existing = append(result.Existing, name)
+			}
 		} else {
 			result.New = append(result.New, name)
 		}
 	}
-	for name := range stateNames {
-		if _, inSpec := specNames[name]; !inSpec {
+	for name := range stateByName {
+		if _, inSpec := specByName[name]; !inSpec {
 			result.Removed = append(result.Removed, name)
 		}
 	}
@@ -392,6 +411,7 @@ func Diff(ctx context.Context, specPath string, stateDir string) (*DiffResult, e
 	sort.Strings(result.New)
 	sort.Strings(result.Removed)
 	sort.Strings(result.Existing)
+	sort.Strings(result.Drifted)
 
 	return result, nil
 }

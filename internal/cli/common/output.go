@@ -158,20 +158,25 @@ func isStdoutTTY() bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
-// isStderrTTY returns true if stderr is a terminal (i.e. not piped).
-func isStderrTTY() bool {
+// IsStderrTTY returns true if stderr is a terminal (i.e. not piped).
+// Exported for use by CLI commands that need TTY-aware output (e.g. env apply/destroy).
+func IsStderrTTY() bool {
 	fi, _ := os.Stderr.Stat()
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
+// isStderrTTY is the unexported alias for internal use within this package.
+func isStderrTTY() bool { return IsStderrTTY() }
+
 // ANSI escape codes for Rich-compatible styling.
+// Exported for use by CLI commands that need direct ANSI control (e.g. env diff).
 const (
-	ansiRed    = "\033[31m"
-	ansiGreen  = "\033[32m"
-	ansiYellow = "\033[33m"
-	ansiDim    = "\033[2m"
-	ansiBold   = "\033[1m"
-	ansiReset  = "\033[0m"
+	AnsiRed    = "\033[31m"
+	AnsiGreen  = "\033[32m"
+	AnsiYellow = "\033[33m"
+	AnsiDim    = "\033[2m"
+	AnsiBold   = "\033[1m"
+	AnsiReset  = "\033[0m"
 )
 
 // MVMCli is a centralized display output matching Python's MVMCli.
@@ -190,7 +195,7 @@ func NewCli() *MVMCli { return Cli }
 // All errors use the same format — no "Unexpected" distinction.
 func (c *MVMCli) Error(message string) {
 	if isStderrTTY() {
-		fmt.Fprintf(os.Stderr, "%s✗ Error:%s %s\n", ansiRed, ansiReset, message)
+		fmt.Fprintf(os.Stderr, "%s✗ Error:%s %s\n", AnsiRed, AnsiReset, message)
 	} else {
 		fmt.Fprintf(os.Stderr, "✗ Error: %s\n", message)
 	}
@@ -200,7 +205,7 @@ func (c *MVMCli) Error(message string) {
 // Matches Python's mvm_cli.success() — Rich: "[green]✓ {message}[/]"
 func (c *MVMCli) Success(message string) {
 	if isStdoutTTY() {
-		fmt.Printf("%s✓ %s%s\n", ansiGreen, message, ansiReset)
+		fmt.Printf("%s✓ %s%s\n", AnsiGreen, message, AnsiReset)
 	} else {
 		fmt.Printf("✓ %s\n", message)
 	}
@@ -215,7 +220,7 @@ func (c *MVMCli) Text(message string) {
 
 func (c *MVMCli) Warning(message string) {
 	if isStderrTTY() {
-		fmt.Fprintf(os.Stderr, "%s! %s%s\n", ansiYellow, message, ansiReset)
+		fmt.Fprintf(os.Stderr, "%s! %s%s\n", AnsiYellow, message, AnsiReset)
 	} else {
 		fmt.Fprintf(os.Stderr, "! %s\n", message)
 	}
@@ -225,7 +230,7 @@ func (c *MVMCli) Warning(message string) {
 // Matches Python's mvm_cli.info() — Rich: "[dim]  {message}[/]"
 func (c *MVMCli) Info(message string) {
 	if isStdoutTTY() {
-		fmt.Printf("%s  %s%s\n", ansiDim, message, ansiReset)
+		fmt.Printf("%s  %s%s\n", AnsiDim, message, AnsiReset)
 	} else {
 		fmt.Printf("  %s\n", message)
 	}
@@ -235,7 +240,7 @@ func (c *MVMCli) Info(message string) {
 // Matches Python's mvm_cli.section_header() — Rich: "[bold]{title}[/]"
 func (c *MVMCli) SectionHeader(title string) {
 	if isStdoutTTY() {
-		fmt.Printf("\n%s%s%s\n", ansiBold, title, ansiReset)
+		fmt.Printf("\n%s%s%s\n", AnsiBold, title, AnsiReset)
 	} else {
 		fmt.Printf("\n%s\n", title)
 	}
@@ -248,14 +253,14 @@ func (c *MVMCli) InspectHeader(title, subtitle string) {
 	if subtitle != "" {
 		full := fmt.Sprintf("%s (%s)", title, subtitle)
 		if tty {
-			fmt.Printf("\n%s%s%s\n", ansiBold, full, ansiReset)
+			fmt.Printf("\n%s%s%s\n", AnsiBold, full, AnsiReset)
 		} else {
 			fmt.Printf("\n%s\n", full)
 		}
 		fmt.Println(strings.Repeat("=", len(full)))
 	} else {
 		if tty {
-			fmt.Printf("\n%s%s%s\n", ansiBold, title, ansiReset)
+			fmt.Printf("\n%s%s%s\n", AnsiBold, title, AnsiReset)
 		} else {
 			fmt.Printf("\n%s\n", title)
 		}
@@ -521,9 +526,7 @@ func (c *MVMCli) FormatSize(sizeBytes int64) string {
 // FormatID returns the first 6 characters of a hash for display.
 // Strips "SHA256:" prefix if present.
 func (c *MVMCli) FormatID(idString string) string {
-	if strings.HasPrefix(idString, "SHA256:") {
-		idString = idString[len("SHA256:"):]
-	}
+	idString = strings.TrimPrefix(idString, "SHA256:")
 	return crypto.Truncate(idString, 6)
 }
 
@@ -541,7 +544,7 @@ func (c *MVMCli) FormatMarker(isDefault bool) string {
 func (c *MVMCli) FormatName(name string, isMissing bool) string {
 	if isMissing {
 		if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
-			return "\033[31m" + name + "\033[0m"
+			return AnsiRed + name + AnsiReset
 		}
 		return name
 	}
@@ -840,14 +843,14 @@ func (c *MVMCli) PromptConfirm(ctx context.Context, prompt string, defaultYes bo
 		ch := make(chan string, 1)
 		go func() {
 			var response string
-			fmt.Scanln(&response)
+			_, _ = fmt.Scanln(&response) // best-effort read; partial input is fine
 			ch <- strings.TrimSpace(strings.ToLower(response))
 		}()
 
 		var response string
 		select {
 		case <-ctx.Done():
-			os.Stdin.Close()
+			_ = os.Stdin.Close() // best-effort; unblocks the Scanln goroutine
 			return false, ctx.Err()
 		case response = <-ch:
 		}
@@ -878,13 +881,13 @@ func (c *MVMCli) PromptSelect(ctx context.Context, title string, options []strin
 	ch := make(chan string, 1)
 	go func() {
 		var choice string
-		fmt.Scanln(&choice)
+		_, _ = fmt.Scanln(&choice) // best-effort read; partial input is fine
 		ch <- strings.TrimSpace(choice)
 	}()
 
 	select {
 	case <-ctx.Done():
-		os.Stdin.Close()
+		_ = os.Stdin.Close() // best-effort; unblocks the Scanln goroutine
 		return "", ctx.Err()
 	case choice := <-ch:
 		if choice == "" {
@@ -927,7 +930,7 @@ func (c *MVMCli) PromptMultiSelect(
 	var input string
 	select {
 	case <-ctx.Done():
-		os.Stdin.Close()
+		_ = os.Stdin.Close() // best-effort; unblocks the ReadString goroutine
 		return nil, ctx.Err()
 	case input = <-ch:
 	}

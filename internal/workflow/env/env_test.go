@@ -147,10 +147,12 @@ func TestFromSpec_CopyStep_NameFormat(t *testing.T) {
 // and be castable to the correct step type.
 
 func TestFromState_NetworkStep_CorrectType(t *testing.T) {
-	saved := map[string]any{
-		"network_id":  "net-123",
-		"subnet":      "10.0.0.0/24",
-		"was_created": true,
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"network_id": "net-123",
+			"subnet":     "10.0.0.0/24",
+		},
+		Meta: model.ResourceMeta{WasCreated: true},
 	}
 	step, err := envpkg.Registry["network"].FromState("network", "my-net", saved, nil, nil)
 	require.NoError(t, err)
@@ -160,9 +162,11 @@ func TestFromState_NetworkStep_CorrectType(t *testing.T) {
 }
 
 func TestFromState_KeyStep_CorrectType(t *testing.T) {
-	saved := map[string]any{
-		"key_id":      "key-123",
-		"was_created": true,
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"key_id": "key-123",
+		},
+		Meta: model.ResourceMeta{WasCreated: true},
 	}
 	step, err := envpkg.Registry["key"].FromState("key", "my-key", saved, nil, nil)
 	require.NoError(t, err)
@@ -172,9 +176,11 @@ func TestFromState_KeyStep_CorrectType(t *testing.T) {
 }
 
 func TestFromState_ImageStep_CorrectType(t *testing.T) {
-	saved := map[string]any{
-		"image_id":    "img-123",
-		"was_created": true,
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"image_id": "img-123",
+		},
+		Meta: model.ResourceMeta{WasCreated: true},
 	}
 	step, err := envpkg.Registry["image"].FromState("image", "alpine", saved, nil, nil)
 	require.NoError(t, err)
@@ -184,9 +190,11 @@ func TestFromState_ImageStep_CorrectType(t *testing.T) {
 }
 
 func TestFromState_KernelStep_CorrectType(t *testing.T) {
-	saved := map[string]any{
-		"kernel_id":   "krnl-123",
-		"was_created": true,
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"kernel_id": "krnl-123",
+		},
+		Meta: model.ResourceMeta{WasCreated: true},
 	}
 	step, err := envpkg.Registry["kernel"].FromState("kernel", "fc-kernel", saved, nil, nil)
 	require.NoError(t, err)
@@ -196,9 +204,11 @@ func TestFromState_KernelStep_CorrectType(t *testing.T) {
 }
 
 func TestFromState_BinaryStep_CorrectType(t *testing.T) {
-	saved := map[string]any{
-		"binary_id":   "bin-123",
-		"was_created": true,
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"binary_id": "bin-123",
+		},
+		Meta: model.ResourceMeta{WasCreated: true},
 	}
 	step, err := envpkg.Registry["binary"].FromState("binary", "firecracker", saved, nil, nil)
 	require.NoError(t, err)
@@ -208,10 +218,12 @@ func TestFromState_BinaryStep_CorrectType(t *testing.T) {
 }
 
 func TestFromState_VMStep_CorrectType(t *testing.T) {
-	saved := map[string]any{
-		"vm_id":       "vm-123",
-		"vm_dir":      "/mnt/vms/vm-123",
-		"was_created": true,
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"vm_id":  "vm-123",
+			"vm_dir": "/mnt/vms/vm-123",
+		},
+		Meta: model.ResourceMeta{WasCreated: true},
 	}
 	step, err := envpkg.Registry["vm"].FromState("vm", "my-vm", saved, nil, nil)
 	require.NoError(t, err)
@@ -221,7 +233,10 @@ func TestFromState_VMStep_CorrectType(t *testing.T) {
 }
 
 func TestFromState_SSHStep_CorrectType(t *testing.T) {
-	saved := map[string]any{"command": "apt update", "was_run": true}
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{"command": "apt update"},
+		Meta: model.ResourceMeta{WasCreated: true},
+	}
 	step, err := envpkg.Registry["ssh"].FromState("ssh", "install-qemu", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "ssh:install-qemu", step.Name())
@@ -230,7 +245,10 @@ func TestFromState_SSHStep_CorrectType(t *testing.T) {
 }
 
 func TestFromState_CopyStep_CorrectType(t *testing.T) {
-	saved := map[string]any{"source": "./mvm", "was_run": true}
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{"source": "./mvm"},
+		Meta: model.ResourceMeta{WasCreated: true},
+	}
 	step, err := envpkg.Registry["copy"].FromState("copy", "copy-binary", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "copy:copy-binary", step.Name())
@@ -453,7 +471,7 @@ func TestResolveSpec_FactoryFromSpecError(t *testing.T) {
 	errFactory := errors.New("from spec failed")
 	envpkg.Registry["network"] = envpkg.StepFactory{
 		StepType: "network",
-		FromSpec: func(_, _ string, _ model.ResourceSpec, _ *api.Operation) (workflow.Step, error) {
+		FromSpec: func(_, _ string, _ model.ResourceMap, _ *api.Operation) (workflow.Step, error) {
 			return nil, errFactory
 		},
 		FromState: origFactory.FromState,
