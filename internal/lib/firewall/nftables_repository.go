@@ -26,6 +26,11 @@ func (r *NFTablesRuleRepository) ListAll(ctx context.Context) ([]*model.Firewall
 	return rules, r.db.SelectContext(ctx, &rules, "SELECT "+nftablesColumns+" FROM nftables_rules ORDER BY id")
 }
 
+func (r *NFTablesRuleRepository) ListAllActive(ctx context.Context) ([]*model.FirewallRule, error) {
+	var rules []*model.FirewallRule
+	return rules, r.db.SelectContext(ctx, &rules, "SELECT "+nftablesColumns+" FROM nftables_rules WHERE is_active = 1 ORDER BY id")
+}
+
 func (r *NFTablesRuleRepository) ListByNetworkID(ctx context.Context, networkID string) ([]*model.FirewallRule, error) {
 	var rules []*model.FirewallRule
 	return rules, r.db.SelectContext(

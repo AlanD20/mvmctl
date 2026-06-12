@@ -1,5 +1,7 @@
 package model
 
+import "fmt"
+
 // ── Firewall enums ──
 
 // FirewallBackendType selects the firewall implementation.
@@ -133,6 +135,59 @@ type FirewallRule struct {
 	CommandString  *string `json:"command_string,omitempty"   db:"command_string"`
 	CreatedAt      *string `json:"created_at,omitempty"       db:"created_at"`
 	LastVerifiedAt *string `json:"last_verified_at,omitempty" db:"last_verified_at"`
+}
+
+// Key builds a dedup key from a rule's identifying fields.
+func (r FirewallRule) Key() string {
+	return fmt.Sprintf("%s:%s:%s:%s:%s:%d:%d",
+		r.TableName, r.ChainName, r.RuleType,
+		r.Source, r.OutInterface, r.SPort, r.DPort)
+}
+
+// NewTapForwardRules returns the two FORWARD rules needed for a TAP device:
+// bridge→tap (forward_out) and tap→bridge (forward_in).
+func NewTapForwardRules(tap, bridge, networkID, subnet string) []FirewallRule {
+	wildcard := string(FirewallWildcardAnyCIDR)
+
+	fwdBridgeToTap := FirewallRule{
+		TableName:    FirewallTableFilter,
+		ChainName:    FirewallChainMVMForward,
+		RuleType:     FirewallRuleTypeForwardOut,
+		Target:       FirewallTargetAccept,
+		NetworkID:    networkID,
+		Protocol:     FirewallProtocolAll,
+		Source:       wildcard,
+		Destination:  wildcard,
+		InInterface:  bridge,
+		OutInterface: tap,
+		SPort:        int(FirewallPortAny),
+		DPort:        int(FirewallPortAny),
+		IsActive:     true,
+		NetworkName:  &bridge,
+	}
+	fwdTapToBridge := FirewallRule{
+		TableName:    FirewallTableFilter,
+		ChainName:    FirewallChainMVMForward,
+		RuleType:     FirewallRuleTypeForwardIn,
+		Target:       FirewallTargetAccept,
+		NetworkID:    networkID,
+		Protocol:     FirewallProtocolAll,
+		Source:       wildcard,
+		Destination:  wildcard,
+		InInterface:  tap,
+		OutInterface: bridge,
+		SPort:        int(FirewallPortAny),
+		DPort:        int(FirewallPortAny),
+		IsActive:     true,
+		NetworkName:  &bridge,
+	}
+
+	if subnet != "" {
+		fwdBridgeToTap.Source = subnet
+		fwdTapToBridge.Destination = subnet
+	}
+
+	return []FirewallRule{fwdBridgeToTap, fwdTapToBridge}
 }
 
 // ── FirewallRuleResult ──
