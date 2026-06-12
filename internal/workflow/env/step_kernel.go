@@ -126,12 +126,14 @@ func newKernelStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceSpec,
+	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	ks := StateFromMap[KernelState](saved)
 	return &KernelStep{
 		stepType: stepType,
 		name:     name,
+		deps:     deps,
 		op:       op,
 		saved:    ks,
 	}, nil

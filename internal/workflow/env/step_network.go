@@ -146,12 +146,14 @@ func newNetworkStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceSpec,
+	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	ns := StateFromMap[NetworkState](saved)
 	return &NetworkStep{
 		stepType: stepType,
 		name:     name,
+		deps:     deps,
 		input: inputs.NetworkCreateInput{
 			Name: name,
 		},

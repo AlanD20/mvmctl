@@ -119,12 +119,14 @@ func newImageStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceSpec,
+	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	is := StateFromMap[ImageState](saved)
 	return &ImageStep{
 		stepType: stepType,
 		name:     name,
+		deps:     deps,
 		op:       op,
 		saved:    is,
 	}, nil

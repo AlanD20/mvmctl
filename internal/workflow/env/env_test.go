@@ -152,7 +152,7 @@ func TestFromState_NetworkStep_CorrectType(t *testing.T) {
 		"subnet":      "10.0.0.0/24",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["networks"].FromState("network", "my-net", saved, nil)
+	step, err := envpkg.Registry["networks"].FromState("network", "my-net", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "network:my-net", step.Name())
 	assert.Equal(t, "network", step.Type())
@@ -164,7 +164,7 @@ func TestFromState_KeyStep_CorrectType(t *testing.T) {
 		"key_id":      "key-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["keys"].FromState("key", "my-key", saved, nil)
+	step, err := envpkg.Registry["keys"].FromState("key", "my-key", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "key:my-key", step.Name())
 	assert.Equal(t, "key", step.Type())
@@ -176,7 +176,7 @@ func TestFromState_ImageStep_CorrectType(t *testing.T) {
 		"image_id":    "img-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["images"].FromState("image", "alpine", saved, nil)
+	step, err := envpkg.Registry["images"].FromState("image", "alpine", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "image:alpine", step.Name())
 	assert.Equal(t, "image", step.Type())
@@ -188,7 +188,7 @@ func TestFromState_KernelStep_CorrectType(t *testing.T) {
 		"kernel_id":   "krnl-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["kernels"].FromState("kernel", "fc-kernel", saved, nil)
+	step, err := envpkg.Registry["kernels"].FromState("kernel", "fc-kernel", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "kernel:fc-kernel", step.Name())
 	assert.Equal(t, "kernel", step.Type())
@@ -200,7 +200,7 @@ func TestFromState_BinaryStep_CorrectType(t *testing.T) {
 		"binary_id":   "bin-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["binaries"].FromState("binary", "firecracker", saved, nil)
+	step, err := envpkg.Registry["binaries"].FromState("binary", "firecracker", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "binary:firecracker", step.Name())
 	assert.Equal(t, "binary", step.Type())
@@ -213,7 +213,7 @@ func TestFromState_VMStep_CorrectType(t *testing.T) {
 		"vm_dir":      "/mnt/vms/vm-123",
 		"was_created": true,
 	}
-	step, err := envpkg.Registry["vms"].FromState("vm", "my-vm", saved, nil)
+	step, err := envpkg.Registry["vms"].FromState("vm", "my-vm", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "vm:my-vm", step.Name())
 	assert.Equal(t, "vm", step.Type())
@@ -222,7 +222,7 @@ func TestFromState_VMStep_CorrectType(t *testing.T) {
 
 func TestFromState_SSHStep_CorrectType(t *testing.T) {
 	saved := map[string]any{"command": "apt update", "was_run": true}
-	step, err := envpkg.Registry["ssh"].FromState("ssh", "install-qemu", saved, nil)
+	step, err := envpkg.Registry["ssh"].FromState("ssh", "install-qemu", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "ssh:install-qemu", step.Name())
 	assert.Equal(t, "ssh", step.Type())
@@ -231,7 +231,7 @@ func TestFromState_SSHStep_CorrectType(t *testing.T) {
 
 func TestFromState_CopyStep_CorrectType(t *testing.T) {
 	saved := map[string]any{"source": "./mvm", "was_run": true}
-	step, err := envpkg.Registry["copy"].FromState("copy", "copy-binary", saved, nil)
+	step, err := envpkg.Registry["copy"].FromState("copy", "copy-binary", saved, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "copy:copy-binary", step.Name())
 	assert.Equal(t, "copy", step.Type())

@@ -249,12 +249,14 @@ func newVMStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceSpec,
+	deps []string,
 	op *api.Operation,
 ) (workflow.Step, error) {
 	vs := StateFromMap[VMState](saved)
 	return &VMStep{
 		stepType: stepType,
 		name:     name,
+		deps:     deps,
 		input: inputs.VMCreateInput{
 			Name: name,
 		},
