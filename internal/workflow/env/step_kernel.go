@@ -41,7 +41,13 @@ func (s *KernelStep) Dependencies() []string { return s.deps }
 
 func (s *KernelStep) SpecHash() string { return s.specHash }
 
-func (s *KernelStep) Apply(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
+func (s *KernelStep) Apply(
+	ctx context.Context,
+	state *workflow.SharedState,
+	saved model.ResourceState,
+	write workflow.StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
@@ -96,7 +102,12 @@ func (s *KernelStep) Apply(ctx context.Context, state *workflow.SharedState, sav
 	return nil
 }
 
-func (s *KernelStep) Destroy(ctx context.Context, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
+func (s *KernelStep) Destroy(
+	ctx context.Context,
+	saved model.ResourceState,
+	write workflow.StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}

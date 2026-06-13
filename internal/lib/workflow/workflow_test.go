@@ -39,13 +39,26 @@ func (s *mockStep) Name() string           { return s.name }
 func (s *mockStep) Type() string           { return s.stepType }
 func (s *mockStep) Dependencies() []string { return s.deps }
 func (s *mockStep) SpecHash() string       { return s.specHash }
-func (s *mockStep) Apply(ctx context.Context, state *SharedState, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error {
+
+func (s *mockStep) Apply(
+	ctx context.Context,
+	state *SharedState,
+	saved model.ResourceState,
+	write StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.applyFn != nil {
 		return s.applyFn(ctx, state, saved, write, onProgress)
 	}
 	return nil
 }
-func (s *mockStep) Destroy(ctx context.Context, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error {
+
+func (s *mockStep) Destroy(
+	ctx context.Context,
+	saved model.ResourceState,
+	write StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.destroyFn != nil {
 		return s.destroyFn(ctx, saved, write, onProgress)
 	}
@@ -275,8 +288,9 @@ func TestPipeline_Execute_AllSucceed(t *testing.T) {
 	var execOrder []string
 
 	steps := []Step{
-		&mockStep{stepType: "",
-			name: "a",
+		&mockStep{
+			stepType: "",
+			name:     "a",
 			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				execOrder = append(execOrder, "a")
@@ -284,9 +298,10 @@ func TestPipeline_Execute_AllSucceed(t *testing.T) {
 				return nil
 			},
 		},
-		&mockStep{stepType: "",
-			name: "b",
-			deps: []string{"a"},
+		&mockStep{
+			stepType: "",
+			name:     "b",
+			deps:     []string{"a"},
 			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				execOrder = append(execOrder, "b")
@@ -294,9 +309,10 @@ func TestPipeline_Execute_AllSucceed(t *testing.T) {
 				return nil
 			},
 		},
-		&mockStep{stepType: "",
-			name: "c",
-			deps: []string{"a"},
+		&mockStep{
+			stepType: "",
+			name:     "c",
+			deps:     []string{"a"},
 			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				mu.Lock()
 				execOrder = append(execOrder, "c")
@@ -323,9 +339,10 @@ func TestPipeline_Execute_AllSucceed(t *testing.T) {
 func TestPipeline_Execute_StepFails(t *testing.T) {
 	steps := []Step{
 		&mockStep{stepType: "", name: "a"},
-		&mockStep{stepType: "",
-			name: "b",
-			deps: []string{"a"},
+		&mockStep{
+			stepType: "",
+			name:     "b",
+			deps:     []string{"a"},
 			applyFn: func(_ context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				return errSentinel
 			},
@@ -383,8 +400,9 @@ func TestPipeline_Execute_ProgressCallback(t *testing.T) {
 // Execute starts, the function must return the context error.
 func TestPipeline_Execute_ContextCancellation(t *testing.T) {
 	steps := []Step{
-		&mockStep{stepType: "",
-			name: "blocked",
+		&mockStep{
+			stepType: "",
+			name:     "blocked",
 			applyFn: func(ctx context.Context, _ *SharedState, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				<-ctx.Done()
 				return ctx.Err()
@@ -462,8 +480,9 @@ func TestPipeline_Destroy_WithSavedState(t *testing.T) {
 	var receivedState model.ResourceState
 
 	steps := []Step{
-		&mockStep{stepType: "",
-			name: "a",
+		&mockStep{
+			stepType: "",
+			name:     "a",
 			destroyFn: func(_ context.Context, saved model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				receivedState = saved
 				return nil
@@ -521,8 +540,9 @@ func TestPipeline_Destroy_StepFails(t *testing.T) {
 // the cancellation error.
 func TestPipeline_Destroy_ContextCancellation(t *testing.T) {
 	steps := []Step{
-		&mockStep{stepType: "",
-			name: "blocked",
+		&mockStep{
+			stepType: "",
+			name:     "blocked",
 			destroyFn: func(ctx context.Context, _ model.ResourceState, _ StateWriter, _ event.OnProgressCallback) error {
 				<-ctx.Done()
 				return ctx.Err()
@@ -636,8 +656,8 @@ func TestStatePersistence_RoundTripPreservesAllFields(t *testing.T) {
 				},
 			},
 			{
-				Name: "vm:web-server",
-				Type: "vm",
+				Name:         "vm:web-server",
+				Type:         "vm",
 				Dependencies: []string{"network:primary", "key:admin"},
 				State: model.ResourceState{
 					Spec: model.ResourceMap{"vm_id": "vm-001", "vm_dir": "/mnt/vms/vm-001"},

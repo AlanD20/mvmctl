@@ -48,7 +48,11 @@ func TestStream_stdoutLines(t *testing.T) {
 func TestStream_stderrMergedIntoStdout(t *testing.T) {
 	// sh -c writes to both stdout and stderr — both should appear on the channel
 	runner := &system.RealRunner{}
-	ch, err := runner.Stream(context.Background(), []string{"sh", "-c", "echo out1; echo err1 >&2; echo out2"}, system.RunCmdOpts{})
+	ch, err := runner.Stream(
+		context.Background(),
+		[]string{"sh", "-c", "echo out1; echo err1 >&2; echo out2"},
+		system.RunCmdOpts{},
+	)
 	require.NoError(t, err)
 
 	var lines []string

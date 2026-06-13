@@ -69,10 +69,10 @@ type ResourceState struct {
 
 // AppliedResource is a resource that has been applied and persisted.
 type AppliedResource struct {
-	Name         string         `yaml:"name"`
-	Type         string         `yaml:"type"`
-	Dependencies []string       `yaml:"depends_on,omitempty"`
-	State        ResourceState  `yaml:"state"`
+	Name         string        `yaml:"name"`
+	Type         string        `yaml:"type"`
+	Dependencies []string      `yaml:"depends_on,omitempty"`
+	State        ResourceState `yaml:"state"`
 }
 
 // WorkflowState holds the complete persisted state for a workflow execution.

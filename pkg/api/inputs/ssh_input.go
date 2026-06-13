@@ -23,7 +23,7 @@ import (
 //	    cmd: str | None = None
 //	    timeout: int | None = None
 type SSHInput struct {
-	Identifier string  `json:"target"        yaml:"target"`
+	Identifier string  `json:"target"            yaml:"target"`
 	User       *string `json:"user,omitempty"    yaml:"user,omitempty"`
 	Key        *string `json:"key,omitempty"     yaml:"key,omitempty"`
 	Cmd        *string `json:"cmd,omitempty"     yaml:"cmd,omitempty"`

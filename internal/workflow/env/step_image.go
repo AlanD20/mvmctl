@@ -41,7 +41,13 @@ func (s *ImageStep) Dependencies() []string { return s.deps }
 
 func (s *ImageStep) SpecHash() string { return s.specHash }
 
-func (s *ImageStep) Apply(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
+func (s *ImageStep) Apply(
+	ctx context.Context,
+	state *workflow.SharedState,
+	saved model.ResourceState,
+	write workflow.StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
@@ -96,7 +102,12 @@ func (s *ImageStep) Apply(ctx context.Context, state *workflow.SharedState, save
 	return nil
 }
 
-func (s *ImageStep) Destroy(ctx context.Context, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
+func (s *ImageStep) Destroy(
+	ctx context.Context,
+	saved model.ResourceState,
+	write workflow.StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}

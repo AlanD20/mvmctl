@@ -18,8 +18,8 @@ type KeyCreateInput struct {
 	Bits       int    `json:"bits,omitempty"       yaml:"bits,omitempty"`
 	OutputDir  string `json:"output_dir,omitempty"`
 	Comment    string `json:"comment,omitempty"    yaml:"comment,omitempty"`
-	Overwrite  bool   `json:"force"            yaml:"force"`
-	SetDefault bool   `json:"default"          yaml:"default"`
+	Overwrite  bool   `json:"force"                yaml:"force"`
+	SetDefault bool   `json:"default"              yaml:"default"`
 }
 
 // ResolvedKeyCreateInput matches Python's ResolvedKeyCreateInput (frozen dataclass).

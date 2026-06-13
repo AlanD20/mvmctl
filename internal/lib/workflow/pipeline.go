@@ -144,7 +144,9 @@ type DestroyOption func(*destroyOptions)
 // its StateData at the time of completion. The callback must be thread-safe.
 // The pipeline wraps this into a StateWriter and passes it to each step's
 // Destroy method so the step can persist its state immediately.
-func WithDestroyOnStepComplete(cb func(ctx context.Context, step Step, stateData model.ResourceState) error) DestroyOption {
+func WithDestroyOnStepComplete(
+	cb func(ctx context.Context, step Step, stateData model.ResourceState) error,
+) DestroyOption {
 	return func(opts *destroyOptions) {
 		opts.onStepComplete = cb
 	}

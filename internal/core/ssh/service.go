@@ -16,8 +16,8 @@ import (
 
 // Probe defaults for waitForSSH.
 const (
-	probeInterval    = 100 * time.Millisecond
-	dialTimeout      = 500 * time.Millisecond
+	probeInterval = 100 * time.Millisecond
+	dialTimeout   = 500 * time.Millisecond
 )
 
 // Service is a stateful SSH connection service.
@@ -146,7 +146,13 @@ func (s *Service) waitForSSH(ctx context.Context, timeout time.Duration) (time.D
 		if dialErr == nil {
 			conn.Close()
 			if attempt > 1 {
-				slog.Debug("VM reachable after probe", "attempts", attempt, "elapsed", time.Since(deadline.Add(-timeout)).String())
+				slog.Debug(
+					"VM reachable after probe",
+					"attempts",
+					attempt,
+					"elapsed",
+					time.Since(deadline.Add(-timeout)).String(),
+				)
 			}
 			return remaining, nil
 		}

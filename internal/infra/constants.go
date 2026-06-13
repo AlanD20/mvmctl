@@ -54,9 +54,9 @@ func SudoersDropInPath() string {
 // ── User-overridable defaults ──
 var OverridableDefaults = map[string]map[string]any{
 	"settings.vm": {
-		"max_vms":    1000,
-		"log_lines":  50,
-		"log_follow": false,
+		"max_vms":         1000,
+		"log_lines":       50,
+		"log_follow":      false,
 		"ssh_timeout_sec": 5,
 	},
 	"defaults.vm": {
