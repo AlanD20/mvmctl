@@ -3,11 +3,9 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
@@ -148,26 +146,11 @@ This is a read-only operation — nothing is created or destroyed.`,
 			return []string{"yaml", "yml"}, cobra.ShellCompDirectiveFilterFileExt
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			specPath := ""
-			if len(args) > 0 {
-				var err error
-				specPath, err = common.Cli.CheckArg(cmd, args[0])
-				if err != nil {
-					return err
-				}
-			} else {
-				return fmt.Errorf("missing required argument: spec-path")
+			if len(args) == 0 {
+				return fmt.Errorf("missing required argument: spec-path or workflow-id")
 			}
 
-			if _, err := os.Stat(specPath); os.IsNotExist(err) {
-				return fmt.Errorf("spec file not found: %s", specPath)
-			}
-
-			// Resolve the workflow state directory (may not exist yet).
-			wfID := env.ResolveWorkflowID(specPath)
-			stateDir := filepath.Join(infra.GetWorkflowsStateDir(), wfID)
-
-			result, err := env.Diff(cmd.Context(), specPath, stateDir)
+			result, err := env.Diff(cmd.Context(), args[0])
 			if err != nil {
 				return fmt.Errorf("env diff failed: %w", err)
 			}

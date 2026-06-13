@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,10 +13,10 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// Probe defaults for waitForSSH.
+// Probe defaults for waitForSSH and ProbeUntilReady.
 const (
-	probeInterval = 100 * time.Millisecond
-	dialTimeout   = 500 * time.Millisecond
+	probeInterval   = 100 * time.Millisecond
+	probeSSHTimeout = 2 // seconds — ConnectTimeout for the SSH probe
 )
 
 // Service is a stateful SSH connection service.
@@ -120,49 +119,13 @@ func (s *Service) RunCommand(ctx context.Context, command string) (int, error) {
 	return 0, nil
 }
 
-// waitForSSH retries TCP port 22 checks until the VM is reachable or the
+// waitForSSH retries SSH probe commands until the VM responds to SSH or the
 // total timeout expires. Returns the remaining timeout for the command.
-// Uses aggressive 100ms probing with TCP dial (instant "connection refused"
-// when VM is still booting) instead of SSH subprocess probes.
+// Unlike a TCP port check, an SSH probe confirms the VM is fully booted
+// (cloud-init finished, no apt locks, network configured).
 // The caller MUST pass a positive timeout — no fallback.
 func (s *Service) waitForSSH(ctx context.Context, timeout time.Duration) (time.Duration, error) {
-	deadline := time.Now().Add(timeout)
-
-	dialer := net.Dialer{Timeout: dialTimeout}
-	addr := net.JoinHostPort(s.ip, "22")
-	attempt := 0
-
-	for {
-		attempt++
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return 0, fmt.Errorf("SSH connection timed out after waiting %ds for VM to become reachable",
-				int(timeout.Seconds()))
-		}
-
-		// TCP dial to port 22 — fails instantly with "connection refused"
-		// when VM is still booting, succeeds as soon as sshd listens.
-		conn, dialErr := dialer.DialContext(ctx, "tcp", addr)
-		if dialErr == nil {
-			conn.Close()
-			if attempt > 1 {
-				slog.Debug(
-					"VM reachable after probe",
-					"attempts",
-					attempt,
-					"elapsed",
-					time.Since(deadline.Add(-timeout)).String(),
-				)
-			}
-			return remaining, nil
-		}
-
-		select {
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		case <-time.After(probeInterval):
-		}
-	}
+	return ProbeUntilReady(ctx, s.ip, s.user, s.keyPath, timeout)
 }
 
 // Connect connects to the host via SSH.
@@ -175,14 +138,14 @@ func (s *Service) Connect(ctx context.Context, command string, execMode bool) (i
 		return 0, s.ExecCommand(command)
 	}
 
-	// Phase 1: Wait for SSH port to become reachable.
+	// Phase 1: Wait for SSH to become ready (probe with actual SSH command).
 	// s.timeout is the total budget for wait + command execution.
 	remaining, err := s.waitForSSH(ctx, s.timeout)
 	if err != nil {
 		return -1, err
 	}
 
-	// Phase 2: SSH is reachable — run the actual command with the
+	// Phase 2: SSH is ready — run the actual command with the
 	// remaining timeout. Use RunCommand which respects s.timeout.
 	// Override opts.Timeout to remaining for the command itself.
 	sshArgs := s.BuildCommand(command)
@@ -208,7 +171,7 @@ func (s *Service) Connect(ctx context.Context, command string, execMode bool) (i
 // consume the channel until it's closed. Returns an error if SSH
 // is unreachable or the command fails to start.
 func (s *Service) StreamCommand(ctx context.Context, command string) (<-chan system.StreamLine, error) {
-	// Phase 1: Wait for SSH port to become reachable.
+	// Phase 1: Wait for SSH to become ready (probe with actual SSH command).
 	remaining, err := s.waitForSSH(ctx, s.timeout)
 	if err != nil {
 		return nil, err

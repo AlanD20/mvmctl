@@ -450,7 +450,9 @@ func (s *Service) ExtractImage(
 	}
 }
 
-// MaterializeTo performs fast durable copy from tmpfs cache to destination.
+// MaterializeTo performs fast durable copy from warm pool to destination.
+// Uses a fallback chain: sendfile(2) → io.Copy → dd, each trying the next
+// on failure. After copy, fdatasync ensures data integrity.
 func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath string) error {
 	cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", imageID, fsType))
 	if _, err := os.Stat(cachedPath); os.IsNotExist(err) {
@@ -461,23 +463,26 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 		return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to create output directory: %s", err))
 	}
 
-	// Try reflink copy (matching Python: run_cmd(["cp", "--reflink=auto", ...]) with ProcessError fallback)
-	result, err := system.DefaultRunner.Run(
-		ctx,
-		[]string{"cp", "--reflink=auto", "--sparse=always", cachedPath, outputPath},
-		system.RunCmdOpts{Check: true, Capture: true},
-	)
-	combined := result.Stdout + result.Stderr
-	if err != nil {
-		if err := system.CopyWithDD(ctx, cachedPath, outputPath, true); err != nil {
-			return errs.New(
-				errs.CodeImageError,
-				fmt.Sprintf("cp and dd fallback both failed: cp: %s; dd: %s", combined, err),
-			)
+	// Fallback chain: sendfile → io.Copy → dd
+	sendfileErr := copyViaSendfile(cachedPath, outputPath)
+	if sendfileErr != nil {
+		slog.Debug("sendfile copy failed, falling back to io.Copy",
+			"src", cachedPath, "dst", outputPath, "error", sendfileErr)
+
+		ioCopyErr := copyViaIO(cachedPath, outputPath)
+		if ioCopyErr != nil {
+			slog.Debug("io.Copy failed, falling back to dd",
+				"src", cachedPath, "dst", outputPath, "error", ioCopyErr)
+
+			if err := system.CopyWithDD(ctx, cachedPath, outputPath, true); err != nil {
+				return errs.New(errs.CodeImageError,
+					fmt.Sprintf("all copy methods failed: sendfile=%v, io.Copy=%v, dd=%v",
+						sendfileErr, ioCopyErr, err))
+			}
 		}
 	}
 
-	// fdatasync (matching Python's os.fdatasync(f.fileno()), reading file in RB mode)
+	// fdatasync — data integrity for rootfs
 	f, err := os.Open(outputPath)
 	if err != nil {
 		return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to open file for fdatasync: %s", err))

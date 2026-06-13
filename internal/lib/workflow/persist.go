@@ -92,24 +92,33 @@ func WriteWorkflowState(dir string, state *model.WorkflowState) error {
 		}
 	}
 
-	// Write to a temporary file first, then rename atomically.
+	// Marshal state to bytes in memory first, then write to disk.
+	// This avoids keeping an os.File open across yaml encoding, which
+	// has caused "bad file descriptor" errors during Encode.
+	data, err := marshalState(state)
+	if err != nil {
+		return fmt.Errorf("marshal workflow state: %w", err)
+	}
+
+	// Write to a temporary file, then rename atomically.
+	// Remove any stale .tmp first — it may have been left by a crash
+	// and could be a FIFO/socket that causes EBADF on write.
 	tmpPath := statePath + ".tmp"
-	f, err := os.Create(tmpPath)
+	os.Remove(tmpPath)
+	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("create temp state file %s: %w", tmpPath, err)
 	}
-
-	enc := yaml.NewEncoder(f)
-	enc.SetIndent(2)
-	if err := enc.Encode(state); err != nil {
+	if _, err := f.Write(data); err != nil {
 		f.Close()
 		os.Remove(tmpPath)
-		return fmt.Errorf("encode workflow state: %w", err)
+		return fmt.Errorf("write temp state file %s: %w", tmpPath, err)
 	}
-	enc.Close()
-	f.Close()
+	if err := f.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp state file %s: %w", tmpPath, err)
+	}
 
-	// Atomically replace the state file.
 	if err := os.Rename(tmpPath, statePath); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("rename state file %s -> %s: %w", tmpPath, statePath, err)

@@ -51,7 +51,7 @@ IMAGES: list[ImageBenchConfig] = [
     ImageBenchConfig(name="ubuntu-minimal:24.04", threshold_s=6),
     ImageBenchConfig(name="archlinux", threshold_s=6),
     ImageBenchConfig(name="debian:12", threshold_s=6),
-    ImageBenchConfig(name="firecracker", threshold_s=6),
+    ImageBenchConfig(name="firecracker:v1.15", threshold_s=6),
 ]
 
 # Wall-clock timeout for the ssh subprocess (seconds).  Lower = more
@@ -70,7 +70,7 @@ RESULTS_FILE = HERE / "results.json"
 # Helpers
 # ---------------------------------------------------------------------------
 
-MVM: list[str] = ["uv", "run", "mvm"]
+MVM: list[str] = ["~/.local/bin/mvm"]
 
 
 def _mvm(*args: str, timeout: int = 120) -> subprocess.CompletedProcess:
@@ -111,7 +111,9 @@ def save_run(run: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None, skip_deblob: bool = False) -> dict:
+def bench_image(
+    cfg: ImageBenchConfig, *, kernel_id: str | None = None, skip_deblob: bool = False
+) -> dict:
     """
     Benchmark a single image.  The threshold_s also serves as the max-wait:
     if SSH isn't available within that time the image is aborted immediately.
@@ -124,9 +126,7 @@ def bench_image(cfg: ImageBenchConfig, *, kernel_id: str | None = None, skip_deb
         name, threshold_s, create_s, total_s, passed, error, attempt, kernel
     """
     effective_kernel = cfg.kernel or kernel_id
-    unique = (
-        f"bm-{cfg.name.replace('.', '-').replace('_', '-').replace(':', '-')}-{int(time.time())}"
-    )
+    unique = f"bm-{cfg.name.replace('.', '-').replace('_', '-').replace(':', '-')}-{int(time.time())}"
     key_name = f"{unique}-key"
     vm_name = f"{unique}-vm"
 
@@ -551,11 +551,14 @@ def main() -> int:
 
     if args.parallel and len(configs) > 1:
         print(f"  Running {len(configs)} benchmarks in parallel...\n")
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(configs)
-        ) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(configs)) as pool:
             fut_map = {
-                pool.submit(bench_image, cfg, kernel_id=args.kernel, skip_deblob=args.skip_deblob): cfg
+                pool.submit(
+                    bench_image,
+                    cfg,
+                    kernel_id=args.kernel,
+                    skip_deblob=args.skip_deblob,
+                ): cfg
                 for cfg in configs
             }
             for future in concurrent.futures.as_completed(fut_map):
@@ -572,13 +575,9 @@ def main() -> int:
                         "error": str(e),
                     }
                 create_str = (
-                    f"{r['create_s']}s"
-                    if r.get("create_s") is not None
-                    else "?"
+                    f"{r['create_s']}s" if r.get("create_s") is not None else "?"
                 )
-                total_str = (
-                    f"{r['total_s']}s" if r.get("total_s") is not None else "?"
-                )
+                total_str = f"{r['total_s']}s" if r.get("total_s") is not None else "?"
                 mark = "✅" if r["passed"] else "❌"
                 print(
                     f"  {mark}  {cfg.name:<28s}  "

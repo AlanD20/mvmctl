@@ -467,33 +467,35 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts)
 		}
 	}
 
-	// ── Create timeout context if needed ──
+	// ── Create a context that enforces the timeout ──
+	// NOTE: cancel is NOT deferred here. Stream returns the channel
+	// immediately. defer cancel() would cancel runCtx right away,
+	// killing the process with SIGKILL. Instead, cancel is called
+	// inside the goroutine when the command finishes.
 	runCtx := ctx
 	var cancel context.CancelFunc
 	if opts.Timeout > 0 {
 		runCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
-		defer cancel()
+	} else {
+		runCtx, cancel = context.WithCancel(ctx)
 	}
 
 	cmd := exec.CommandContext(runCtx, cmdArgs[0], cmdArgs[1:]...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	// If context is cancelled, force-kill after 2s and force-close pipes
-	// after 3s. This prevents deadlock when orphaned subprocesses hold
-	// pipe descriptors open.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGKILL) }
-	cmd.WaitDelay = 3 * time.Second
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	// Merge stderr into stdout — must be set AFTER StdoutPipe(),
-	// which sets cmd.Stdout to the write end of the pipe.
+	// Merge stderr into stdout so the single scanner captures both streams.
+	// Must be set AFTER StdoutPipe(), which sets cmd.Stdout to the pipe writer.
 	cmd.Stderr = cmd.Stdout
 
 	if err := cmd.Start(); err != nil {
+		cancel()
 		stdout.Close()
 		if errors.Is(err, exec.ErrNotFound) {
 			return nil, errs.New(errs.CodeProcessError,
@@ -505,6 +507,7 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts)
 	ch := make(chan StreamLine)
 	go func() {
 		defer close(ch)
+		defer cancel()
 
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {

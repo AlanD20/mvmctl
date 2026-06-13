@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
@@ -430,6 +431,15 @@ func (s *CPService) CopyToVM(
 		totalSize += size
 	}
 
+	// Wait for VM to be SSH-reachable before attempting copy.
+	probeTimeout := info.ProbeTimeout
+	if probeTimeout <= 0 {
+		probeTimeout = 10 * time.Second
+	}
+	if _, err := ProbeUntilReady(ctx, info.Host, info.User, info.KeyPath, probeTimeout); err != nil {
+		return 0, "", fmt.Errorf("copy to VM: %w", err)
+	}
+
 	sshPrefix := buildSSHOpts(info.Host, info.User, info.KeyPath, sshConnectTimeout)
 	remoteGNU := s.probeTarGNU(ctx, sshPrefix...)
 	localGNU := s.probeTarGNU(ctx)
@@ -499,6 +509,15 @@ func (s *CPService) CopyFromVM(
 	force bool,
 	onProgress event.OnDownloadCallback,
 ) (int64, string, error) {
+	// Wait for VM to be SSH-reachable before attempting copy.
+	probeTimeout := info.ProbeTimeout
+	if probeTimeout <= 0 {
+		probeTimeout = 10 * time.Second
+	}
+	if _, err := ProbeUntilReady(ctx, info.Host, info.User, info.KeyPath, probeTimeout); err != nil {
+		return 0, "", fmt.Errorf("copy from VM: %w", err)
+	}
+
 	sshPrefix := buildSSHOpts(info.Host, info.User, info.KeyPath, sshConnectTimeout)
 	remoteGNU := s.probeTarGNU(ctx, sshPrefix...)
 	localGNU := s.probeTarGNU(ctx)
@@ -590,6 +609,22 @@ func (s *CPService) CopyVMToVM(
 	force bool,
 	onProgress event.OnDownloadCallback,
 ) (int64, string, error) {
+	// Wait for source and destination VMs to be SSH-reachable.
+	srcTimeout := srcVMInfo.ProbeTimeout
+	if srcTimeout <= 0 {
+		srcTimeout = 10 * time.Second
+	}
+	if _, err := ProbeUntilReady(ctx, srcVMInfo.Host, srcVMInfo.User, srcVMInfo.KeyPath, srcTimeout); err != nil {
+		return 0, "", fmt.Errorf("copy between VMs (source): %w", err)
+	}
+	dstTimeout := destVMInfo.ProbeTimeout
+	if dstTimeout <= 0 {
+		dstTimeout = 10 * time.Second
+	}
+	if _, err := ProbeUntilReady(ctx, destVMInfo.Host, destVMInfo.User, destVMInfo.KeyPath, dstTimeout); err != nil {
+		return 0, "", fmt.Errorf("copy between VMs (destination): %w", err)
+	}
+
 	noOverwrite := !force
 	srcSSHPrefix := buildSSHOpts(srcVMInfo.Host, srcVMInfo.User, srcVMInfo.KeyPath, sshConnectTimeout)
 	destSSHPrefix := buildSSHOpts(destVMInfo.Host, destVMInfo.User, destVMInfo.KeyPath, sshConnectTimeout)

@@ -57,7 +57,7 @@ var OverridableDefaults = map[string]map[string]any{
 		"max_vms":         1000,
 		"log_lines":       50,
 		"log_follow":      false,
-		"ssh_timeout_sec": 5,
+		"ssh_timeout_sec": 10,
 	},
 	"defaults.vm": {
 		"vcpu_count":       1,
@@ -651,6 +651,15 @@ func GetTimingLogPath() string {
 
 // ── Warm image directory ──
 func GetWarmImagesDir() string {
+	pool, ok := EnvGet("WARM_POOL")
+	if ok && pool == "disk" {
+		path := filepath.Join(GetImagesDir(), "ready")
+		if err := ensureDirAndChown(path); err != nil {
+			slog.Warn("failed to create warm image directory", "path", path, "error", err)
+		}
+		return path
+	}
+	// default: tmpfs
 	path := filepath.Join(GetTempDir(), "ready")
 	if err := ensureDirAndChown(path); err != nil {
 		slog.Warn("failed to create warm image directory", "path", path, "error", err)
