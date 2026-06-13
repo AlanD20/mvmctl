@@ -101,22 +101,11 @@ func WriteWorkflowState(dir string, state *model.WorkflowState) error {
 	}
 
 	// Write to a temporary file, then rename atomically.
-	// Remove any stale .tmp first — it may have been left by a crash
-	// and could be a FIFO/socket that causes EBADF on write.
 	tmpPath := statePath + ".tmp"
 	os.Remove(tmpPath)
-	f, err := os.OpenFile(tmpPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return fmt.Errorf("create temp state file %s: %w", tmpPath, err)
-	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		os.Remove(tmpPath)
 		return fmt.Errorf("write temp state file %s: %w", tmpPath, err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("close temp state file %s: %w", tmpPath, err)
 	}
 
 	if err := os.Rename(tmpPath, statePath); err != nil {
