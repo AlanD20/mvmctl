@@ -67,6 +67,7 @@ func buildSSHOpts(ip, user, keyPath string, connectTimeout int) []string {
 		"-o", "StrictHostKeyChecking=no",
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "BatchMode=yes",
+		"-o", "LogLevel=ERROR",
 		"-o", "ServerAliveInterval=2",
 		"-o", "ServerAliveCountMax=3",
 	}
