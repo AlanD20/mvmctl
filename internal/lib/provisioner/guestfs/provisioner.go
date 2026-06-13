@@ -40,6 +40,7 @@ type ProvisioningConfig struct {
 	Shrink           bool     // shrink filesystem to minimum
 	Deblob           bool     // OS cache cleanup + mask services
 	DisableCloudInit bool     // mask cloud-init services
+	SetupSudo        bool     // fix sudo ownership + setuid + sudoers drop-in
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -193,6 +194,15 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 	if len(cfg.SSHPubkeys) > 0 {
 		cmds = append(cmds, "# Enable SSH")
 		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(enableSSHTmpl, struct{}{})))
+	}
+
+	// Fix sudo — some Ubuntu cloud images ship with broken ownership
+	// on /etc/sudo.conf and /usr/bin/sudo (owned by uid 1000 instead of
+	// root). Without this, non-root users get "sudo: /etc/sudo.conf is
+	// owned by uid 1000, should be 0" when running sudo.
+	if cfg.SetupSudo {
+		cmds = append(cmds, "# Fix sudo ownership")
+		cmds = append(cmds, `sh -c 'chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo'`)
 	}
 
 	// Disable cloud-init
