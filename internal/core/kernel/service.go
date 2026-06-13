@@ -1200,11 +1200,13 @@ func (s *Service) ImportKernel(
 	}
 	os.Chmod(destPath, 0755)
 
-	now := time.Now().Format(time.RFC3339)
-	kernelID, err := crypto.KernelID(destPath, version, arch, now)
+	// Compute deterministic ID from the copied file (no timestamp)
+	kernelID, err := crypto.KernelID(destPath, version, arch)
 	if err != nil {
 		return nil, fmt.Errorf("compute kernel ID: %w", err)
 	}
+
+	now := time.Now().Format(time.RFC3339)
 
 	kernelItem := &model.KernelItem{
 		ID:        kernelID,

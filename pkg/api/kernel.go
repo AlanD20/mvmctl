@@ -9,6 +9,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mvmctl/internal/core/kernel"
@@ -81,23 +82,47 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 
 	kernelType := input.KernelType
 
-	// Phase 1: Resolve version spec to concrete version.
-	vs, err := version.ParseSpec(input.Version)
-	if err == nil && vs.IsPartial() {
-		ciVersion, err := op.resolveCIVersion(ctx)
+	// Determine CI version:
+	// For firecracker type, the user-specified version IS the CI version.
+	// Otherwise, use the default binary's CI version.
+	resolvedCIVersion := ""
+	ciVersionFromInput := false
+	if kernelType == "firecracker" && input.Version != "" {
+		v := input.Version
+		if !strings.HasPrefix(v, "v") && !strings.HasPrefix(v, "V") {
+			v = "v" + v
+		}
+		resolvedCIVersion = v
+		ciVersionFromInput = true
+		slog.Debug("Using user-specified version as CI version for firecracker kernel", "ci_version", v)
+	}
+	if !ciVersionFromInput {
+		var err error
+		resolvedCIVersion, err = op.resolveCIVersion(ctx)
 		if err != nil {
 			return nil, errs.WrapMsg(errs.CodeKernelPullFailed, err.Error(), err)
 		}
-		arch := system.RuntimeArch()
-		resolvedVersion, err := op.Services.Kernel.ResolveVersion(ctx, kernelType, input.Version, arch, ciVersion)
-		if err != nil {
-			return nil, errs.WrapMsg(
-				errs.CodeKernelPullFailed,
-				fmt.Sprintf("Failed to resolve version '%s' for '%s': %v", input.Version, kernelType, err),
-				err,
-			)
+	}
+
+	// Phase 1: Resolve version spec to concrete version.
+	// Skip when CI version came from user input — kernel version is auto-discovered from S3.
+	if !ciVersionFromInput {
+		vs, err := version.ParseSpec(input.Version)
+		if err == nil && vs.IsPartial() {
+			arch := system.RuntimeArch()
+			resolvedVersion, err := op.Services.Kernel.ResolveVersion(ctx, kernelType, input.Version, arch, resolvedCIVersion)
+			if err != nil {
+				return nil, errs.WrapMsg(
+					errs.CodeKernelPullFailed,
+					fmt.Sprintf("Failed to resolve version '%s' for '%s': %v", input.Version, kernelType, err),
+					err,
+				)
+			}
+			input.Version = resolvedVersion
 		}
-		input.Version = resolvedVersion
+	} else {
+		// Clear the version so it doesn't get used as kernel version
+		input.Version = ""
 	}
 
 	// Resolve through the Request pipeline (matches Python)
@@ -146,17 +171,12 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 	switch resolved.KernelType {
 	case "firecracker":
 
-		ciVersion, err := op.resolveCIVersion(ctx)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodeKernelPullFailed, err.Error(), err)
-		}
-
 		emitProgress(onProgress, "download", "running", "Downloading Firecracker kernel...")
 
 		fetchResult, err = op.Services.Kernel.FetchFirecrackerKernel(
 			ctx,
 			spec,
-			ciVersion,
+			resolvedCIVersion,
 			resolved.Arch,
 			resolved.OutputDir,
 			event.FormatProgress(onProgress),
@@ -205,7 +225,7 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 
 	// Generate kernel ID in the API layer (matches Python exactly)
 	timestamp := time.Now().Format(time.RFC3339)
-	kernelID, err := crypto.KernelID(fetchResult.Path, fetchResult.Version, resolved.Arch, timestamp)
+	kernelID, err := crypto.KernelID(fetchResult.Path, fetchResult.Version, resolved.Arch)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to compute kernel ID: %v", err), err)
 	}

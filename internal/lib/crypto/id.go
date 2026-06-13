@@ -47,13 +47,14 @@ func ImageID(type_, source, timestamp string) string {
 }
 
 // KernelID generates a 64-char SHA256 kernel ID from file content and metadata.
-func KernelID(filePath, version, arch, timestamp string) (string, error) {
+// Deterministic — same file + metadata always produces the same ID.
+func KernelID(filePath, version, arch string) (string, error) {
 	fileHash, err := SHA256FileHash(filePath)
 	if err != nil {
 		return "", err
 	}
 	h := sha256.New()
-	fmt.Fprintf(h, "%s:%s:%s:%s", fileHash, version, arch, timestamp)
+	fmt.Fprintf(h, "%s:%s:%s", fileHash, version, arch)
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
