@@ -17,7 +17,7 @@ type BinaryPullInput struct {
 	Type             string  `json:"type"              yaml:"type"`
 	GitRef           *string `json:"git_ref,omitempty" yaml:"git_ref,omitempty"`
 	SetDefault       bool    `json:"set_default"       yaml:"default"`
-	DownloadOverride bool    `json:"download_override" yaml:"force"`
+	DownloadOverride bool    `json:"force" yaml:"force"`
 }
 
 // ResolvedBinaryPullInput matches Python's ResolvedBinaryPullInput (frozen dataclass).

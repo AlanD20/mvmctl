@@ -17,48 +17,21 @@ import (
 )
 
 // KernelPullInput matches Python's KernelPullInput dataclass.
-//
-//	@dataclass
-//	class KernelPullInput:
-//	    kernel_type: str
-//	    version: str | None = None
-//	    output_dir: Path | None = None
-//	    output_name: str | None = None
-//	    output_path: Path | None = None
-//	    jobs: int | None = None
-//	    keep_build_dir: bool = False
-//	    clean_build: bool = False
-//	    kernel_config: Path | None = None
-//	    set_default: bool = False
-//	    features: str = ""
 type KernelPullInput struct {
-	KernelType   string `json:"kernel_type"             yaml:"kernel_type"`
+	KernelType   string `json:"type"             yaml:"type"`
 	Version      string `json:"version,omitempty"       yaml:"version,omitempty"`
 	OutputDir    string `json:"output_dir,omitempty"`
-	OutputName   string `json:"output_name,omitempty"   yaml:"name,omitempty"`
+	OutputName   string `json:"name,omitempty"   yaml:"name,omitempty"`
 	OutputPath   string `json:"output_path,omitempty"`
 	Jobs         int    `json:"jobs,omitempty"          yaml:"jobs,omitempty"`
 	KeepBuildDir bool   `json:"keep_build_dir"          yaml:"keep_build_dir"`
 	CleanBuild   bool   `json:"clean_build"             yaml:"clean_build"`
 	KernelConfig string `json:"kernel_config,omitempty" yaml:"kernel_config,omitempty"`
-	SetDefault   bool   `json:"set_default"             yaml:"default"`
+	SetDefault   bool   `json:"default"             yaml:"default"`
 	Features     string `json:"features"                yaml:"features"`
 }
 
 // ResolvedKernelPullRequest matches Python's ResolvedKernelPullRequest (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedKernelPullRequest:
-//	    kernel_type: str
-//	    arch: str
-//	    output_dir: Path
-//	    jobs: int
-//	    keep_build_dir: bool
-//	    clean_build: bool
-//	    set_default: bool
-//	    kernel_config: Path | None
-//	    version: str | None = None
-//	    features: list[str] = field(default_factory=list)
 type ResolvedKernelPullRequest struct {
 	KernelType   string
 	Arch         string
