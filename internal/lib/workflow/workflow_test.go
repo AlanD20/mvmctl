@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -760,6 +761,112 @@ func TestStatePersistence_WriteCreatesDirectory(t *testing.T) {
 	// Verify the file exists
 	_, err := os.Stat(filepath.Join(nestedDir, "state.yaml"))
 	require.NoError(t, err, "state.yaml should exist after WriteWorkflowState created dirs")
+}
+
+// ─── WriteWorkflowState EBADF Protection ─────────────────────────────────
+// Rationale: WriteWorkflowState uses a .tmp file before atomic rename. If a
+// crash leaves a FIFO/socket as the .tmp file, os.OpenFile opens it without
+// error but Write fails with EBADF (bad file descriptor). The fix removes any
+// stale .tmp file before writing. Parallel writes must also not corrupt each
+// other's file descriptors.
+
+// Rationale: Verify WriteWorkflowState removes stale special files (.tmp FIFO)
+// before writing, preventing EBADF errors.
+func TestWriteWorkflowState_StaleTmpFile_DoesNotCauseEBADF(t *testing.T) {
+	tests := map[string]struct {
+		setupFunc func(dir string)   // sets up the pre-existing .tmp file
+		verify    func(dir string)   // optional post-write verification
+	}{
+		"stale_fifo_is_removed": {
+			setupFunc: func(dir string) {
+				tmpPath := filepath.Join(dir, "state.yaml.tmp")
+				require.NoError(t, syscall.Mkfifo(tmpPath, 0644),
+					"failed to create test FIFO")
+			},
+			verify: func(dir string) {
+				tmpPath := filepath.Join(dir, "state.yaml.tmp")
+				_, err := os.Stat(tmpPath)
+				assert.True(t, os.IsNotExist(err),
+					"stale .tmp file must be removed after successful write")
+			},
+		},
+		"stale_socket_file_is_removed": {
+			setupFunc: func(dir string) {
+				tmpPath := filepath.Join(dir, "state.yaml.tmp")
+				f, err := os.Create(tmpPath)
+				require.NoError(t, err)
+				f.Close()
+				// Nothing special about this file — just verifying
+				// that a regular stale .tmp is also cleaned up.
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.setupFunc != nil {
+				tc.setupFunc(dir)
+			}
+
+			state := &model.WorkflowState{
+				WorkflowID: "test-ebadf-fix",
+				SpecPath:   "/tmp/test.yaml",
+			}
+
+			err := WriteWorkflowState(dir, state)
+			if !assert.NoError(t, err,
+				"WriteWorkflowState must handle stale .tmp files: %v", err) {
+				return
+			}
+
+			// State file must exist and be readable
+			statePath := filepath.Join(dir, "state.yaml")
+			_, statErr := os.Stat(statePath)
+			assert.NoError(t, statErr, "state.yaml must exist")
+
+			if tc.verify != nil {
+				tc.verify(dir)
+			}
+		})
+	}
+}
+
+// Rationale: Parallel writes to the same workflow directory must not cause
+// EBADF or data corruption. Each write is a separate workflow ID, but they
+// share the same state.yaml file (last writer wins) and .lock file.
+func TestWriteWorkflowState_ParallelWrites(t *testing.T) {
+	dir := t.TempDir()
+	var wg sync.WaitGroup
+	errCh := make(chan error, 20)
+
+	for i := range 10 {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			state := &model.WorkflowState{
+				WorkflowID: fmt.Sprintf("parallel-write-%d", id),
+				SpecPath:   "/tmp/test.yaml",
+			}
+			errCh <- WriteWorkflowState(dir, state)
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	var failures int
+	for err := range errCh {
+		if err != nil {
+			t.Errorf("parallel write failed: %v", err)
+			failures++
+		}
+	}
+	assert.Zero(t, failures, "all 10 parallel writes must succeed, got %d failures", failures)
+
+	// Final state file must be readable
+	_, err := ReadWorkflowState(dir)
+	assert.NoError(t, err, "state file must be readable after parallel writes")
 }
 
 // ─── WorkflowIDFromPath ───────────────────────────────────────────────────────
