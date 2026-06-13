@@ -240,29 +240,29 @@ func TestBuildRemoteDestTar(t *testing.T) {
 		// Error/boundary cases FIRST
 		"empty_path": {
 			dstPath: "", gnuExtra: false, noOverwrite: false,
-			want: "tar xf - --no-same-owner -C ''",
+			want: "mkdir -p '' && tar xf - --no-same-owner -C ''",
 		},
 
 		// Happy paths
 		"basic_extract": {
 			dstPath: "/tmp/dest", gnuExtra: false, noOverwrite: false,
-			want: "tar xf - --no-same-owner -C /tmp/dest",
+			want: "mkdir -p /tmp/dest && tar xf - --no-same-owner -C /tmp/dest",
 		},
 		"with_no_overwrite": {
 			dstPath: "/tmp/dest", gnuExtra: false, noOverwrite: true,
-			want: "tar xf - -k --no-same-owner -C /tmp/dest",
+			want: "mkdir -p /tmp/dest && tar xf - -k --no-same-owner -C /tmp/dest",
 		},
 		"with_gnu_extras": {
 			dstPath: "/tmp/dest", gnuExtra: true, noOverwrite: false,
-			want: "tar xf - --overwrite -p --same-owner --delay-directory-restore --no-same-owner -C /tmp/dest",
+			want: "mkdir -p /tmp/dest && tar xf - --overwrite -p --same-owner --delay-directory-restore --no-same-owner -C /tmp/dest",
 		},
 		"with_gnu_extras_and_no_overwrite": {
 			dstPath: "/tmp/dest", gnuExtra: true, noOverwrite: true,
-			want: "tar xf - -k -p --same-owner --delay-directory-restore --no-same-owner -C /tmp/dest",
+			want: "mkdir -p /tmp/dest && tar xf - -k -p --same-owner --delay-directory-restore --no-same-owner -C /tmp/dest",
 		},
 		"path_with_spaces": {
 			dstPath: "/tmp/my dest", gnuExtra: false, noOverwrite: false,
-			want: "tar xf - --no-same-owner -C '/tmp/my dest'",
+			want: "mkdir -p '/tmp/my dest' && tar xf - --no-same-owner -C '/tmp/my dest'",
 		},
 	}
 

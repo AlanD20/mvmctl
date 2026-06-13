@@ -234,7 +234,7 @@ func (s *CPService) buildRemoteDestTar(dstPath string, gnuExtras bool, noOverwri
 	}
 	parts = append(parts, "--no-same-owner")
 	parts = append(parts, "-C", infra.ShlexQuote(dstPath))
-	return "tar xf - " + strings.Join(parts, " ")
+	return "mkdir -p " + infra.ShlexQuote(dstPath) + " && tar xf - " + strings.Join(parts, " ")
 }
 
 // ── Pipe ───────────────────────────────────────────────────────────
