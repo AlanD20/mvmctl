@@ -10,6 +10,7 @@ import (
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
 
@@ -104,7 +105,10 @@ func (r *CPRequest) Resolve(
 	vmRepo vm.Repository,
 	keyRepo key.Repository,
 ) (*ResolvedCPInput, error) {
-	sources := r.input.Sources
+	sources := make([]string, len(r.input.Sources))
+	for i, src := range r.input.Sources {
+		sources[i] = system.ExpandTilde(src)
+	}
 	dstVM, dstPath := ParseVMPath(r.input.Dst)
 
 	var srcInfo, dstInfo *ResolvedCPInfo
