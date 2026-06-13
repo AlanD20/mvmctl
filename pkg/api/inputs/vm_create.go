@@ -41,19 +41,19 @@ type VMCreateInput struct {
 	NestedVirt            *bool          `json:"nested_virt,omitempty"              yaml:"nested_virt,omitempty"`
 	CPUTemplate           string         `json:"cpu_template,omitempty"             yaml:"cpu_template,omitempty"` // file path to CPU template JSON
 	CPUConfig             map[string]any `json:"cpu_config,omitempty"               yaml:"cpu_config,omitempty"`
-	EnableConsole         *bool          `json:"enable_console,omitempty"           yaml:"enable_console,omitempty"`
-	EnableLogging         *bool          `json:"enable_logging,omitempty"           yaml:"enable_logging,omitempty"`
-	EnableMetrics         *bool          `json:"enable_metrics,omitempty"           yaml:"enable_metrics,omitempty"`
+	EnableConsole         *bool          `json:"console_enable,omitempty"           yaml:"console_enable,omitempty"`
+	EnableLogging         *bool          `json:"logging_enable,omitempty"           yaml:"logging_enable,omitempty"`
+	EnableMetrics         *bool          `json:"metrics_enable,omitempty"           yaml:"metrics_enable,omitempty"`
 	ImageID               *string        `json:"image,omitempty"                    yaml:"image,omitempty"`
 	KernelID              *string        `json:"kernel,omitempty"                   yaml:"kernel,omitempty"`
 	BinaryID              *string        `json:"binary,omitempty"                   yaml:"binary,omitempty"`
 	DiskSize              string         `json:"disk_size,omitempty"                yaml:"disk_size,omitempty"`
-	RequestedGuestIP      *string        `json:"requested_guest_ip,omitempty"       yaml:"requested_guest_ip,omitempty"`
+	RequestedGuestIP      *string        `json:"guest_ip,omitempty"       yaml:"guest_ip,omitempty"`
 	SkipCINetworkConfig   bool           `json:"skip_ci_network_config"             yaml:"skip_ci_network_config"`
 	BootArgs              string         `json:"boot_args,omitempty"                yaml:"boot_args,omitempty"`
 	LSMFlags              string         `json:"lsm_flags,omitempty"                yaml:"lsm_flags,omitempty"`
 	NetworkID             *string        `json:"network,omitempty"                  yaml:"network,omitempty"`
-	RequestedGuestMAC     *string        `json:"requested_guest_mac,omitempty"      yaml:"requested_guest_mac,omitempty"`
+	RequestedGuestMAC     *string        `json:"guest_mac,omitempty"      yaml:"guest_mac,omitempty"`
 	CustomCloudInitConfig *string        `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
 	CloudInitMode         *string        `json:"cloud_init_mode,omitempty"          yaml:"cloud_init_mode,omitempty"`
 	CloudInitISOPath      *string        `json:"cloud_init_iso_path,omitempty"      yaml:"cloud_init_iso_path,omitempty"`

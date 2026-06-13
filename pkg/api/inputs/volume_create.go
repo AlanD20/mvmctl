@@ -16,13 +16,6 @@ import (
 )
 
 // VolumeCreateInput matches Python's VolumeCreateInput dataclass.
-//
-//	@dataclass
-//	class VolumeCreateInput:
-//	    name: str
-//	    size: str
-//	    format: str | None = None  # 'raw' or 'qcow2', default resolved in request
-//	    read_only: bool | None = None
 type VolumeCreateInput struct {
 	Name     string  `json:"name"`
 	Size     string  `json:"size"`
@@ -31,14 +24,6 @@ type VolumeCreateInput struct {
 }
 
 // ResolvedVolumeCreateInput matches Python's ResolvedVolumeCreateInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedVolumeCreateInput:
-//	    name: str
-//	    size_bytes: int
-//	    format: str
-//	    path: Path
-//	    is_read_only: bool = False
 type ResolvedVolumeCreateInput struct {
 	Name       string
 	SizeBytes  int64
