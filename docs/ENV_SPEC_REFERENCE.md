@@ -210,11 +210,11 @@ Create a virtual machine.
 | `pci_enabled` | `bool` | Config default | Enable PCI passthrough. |
 | `nested_virt` | `bool` | Config default | Enable nested virtualization. |
 | `cpu_template` | `string` | `""` | Path to CPU template JSON file. |
-| `enable_console` | `bool` | Config default | Enable serial console. |
-| `enable_logging` | `bool` | Config default | Enable Firecracker logging. |
-| `enable_metrics` | `bool` | Config default | Enable Firecracker metrics. |
-| `requested_guest_ip` | `string` | `""` | Request specific guest IP. |
-| `requested_guest_mac` | `string` | `""` | Request specific MAC address. |
+| `console_enable` | `bool` | Config default | Enable serial console. |
+| `logging_enable` | `bool` | Config default | Enable Firecracker logging. |
+| `metrics_enable` | `bool` | Config default | Enable Firecracker metrics. |
+| `guest_ip` | `string` | `""` | Request specific guest IP. |
+| `guest_mac` | `string` | `""` | Request specific MAC address. |
 | `boot_args` | `string` | Config default | Custom kernel boot args. |
 | `volumes` | `[]string` | `[]` | Volume names to attach. |
 | `count` | `int` | `1` | Batch count for creating multiple VMs. |

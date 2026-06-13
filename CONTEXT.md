@@ -179,6 +179,26 @@ Architecture rules are enforced by the Go compiler (circular import errors preve
 
 The `pkg/api` package IS the stable, curated public interface for all consumers -- CLI, future TUI/GUI, and external scripts. The `api.Operation` struct exposes all domain operations as methods. The `pkg/api/inputs` package exposes all Input types. The `internal/core` package is an implementation detail.
 
+### Build output (REQUIRED)
+
+**The `mvm` binary MUST be built to `~/.local/bin/mvm`.** This path has passwordless sudo privileges via the mvmctl sudoers rules, so subcommands requiring privilege escalation run without password prompts.
+
+Exact command:
+```bash
+go build -o ~/.local/bin/mvm ./cmd/mvm
+```
+
+### Asset mirror environment variable (REQUIRED)
+
+**The `MVM_ASSET_MIRROR` env var MUST be set before any `mvm` command.** Without it, asset downloads will fail.
+
+```bash
+export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
+mvm <subcommand>
+```
+
+This variable directs the local asset cache for downloaded kernel images, root filesystems, and firmware blobs.
+
 ### CLI is the canonical interface
 
 The `mvm` CLI is the ONLY supported interface for all mvmctl operations. Do NOT bypass it with raw commands. The CLI handles privilege escalation, database state tracking, and dynamic resolution of assets (IPs, keys, images, kernels).
