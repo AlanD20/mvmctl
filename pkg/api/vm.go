@@ -398,28 +398,38 @@ func (op *Operation) vmBuilderExecute(
 	// Progress: network
 	emitProgress(builder.onProgress, "network", "running", "Configuring network...")
 
-	// IP Lease (reuse pre-injected lease repo)
-	leaseCtrl, err := network.NewLeaseController(ctx, resolved.Network, op.Repos.Lease, nil)
-	if err != nil {
-		return fmt.Errorf("create lease controller: %w", err)
-	}
-	if resolved.RequestedGuestIP != nil {
-		ip, leaseErr := leaseCtrl.LeaseSpecific(ctx, *resolved.RequestedGuestIP, builder.vmID)
-		if leaseErr != nil {
-			return fmt.Errorf("lease specific ip: %w", leaseErr)
+	// IP Lease, TAP device creation (timed)
+	var networkErr error
+	infra.Timed("network", builder.name, builder.vmID, func() {
+		leaseCtrl, err := network.NewLeaseController(ctx, resolved.Network, op.Repos.Lease, nil)
+		if err != nil {
+			networkErr = fmt.Errorf("create lease controller: %w", err)
+			return
 		}
-		builder.guestIP = ip
-	} else {
-		ip, leaseErr := leaseCtrl.Lease(ctx, builder.vmID)
-		if leaseErr != nil {
-			return fmt.Errorf("lease ip: %w", leaseErr)
+		if resolved.RequestedGuestIP != nil {
+			ip, leaseErr := leaseCtrl.LeaseSpecific(ctx, *resolved.RequestedGuestIP, builder.vmID)
+			if leaseErr != nil {
+				networkErr = fmt.Errorf("lease specific ip: %w", leaseErr)
+				return
+			}
+			builder.guestIP = ip
+		} else {
+			ip, leaseErr := leaseCtrl.Lease(ctx, builder.vmID)
+			if leaseErr != nil {
+				networkErr = fmt.Errorf("lease ip: %w", leaseErr)
+				return
+			}
+			builder.guestIP = ip
 		}
-		builder.guestIP = ip
-	}
 
-	// TAP device creation (firewall rules were added in the shared batch before goroutines).
-	if err := op.Services.Network.EnsureTapDevice(ctx, builder.tapName, resolved.Network.Bridge); err != nil {
-		return fmt.Errorf("ensure TAP: %w", err)
+		// TAP device creation (firewall rules were added in the shared batch before goroutines).
+		if err := op.Services.Network.EnsureTapDevice(ctx, builder.tapName, resolved.Network.Bridge); err != nil {
+			networkErr = fmt.Errorf("ensure TAP: %w", err)
+			return
+		}
+	})
+	if networkErr != nil {
+		return networkErr
 	}
 	builder.markCreated("network_tap")
 	libnet.FlushARP(ctx, resolved.Network.Bridge)
@@ -427,224 +437,279 @@ func (op *Operation) vmBuilderExecute(
 	// Progress: rootfs
 	emitProgress(builder.onProgress, "rootfs", "running", "Copying root filesystem...")
 
-	// Clone rootfs
-	if err := builder.cloneImage(ctx, op.Services.Image, resolved); err != nil {
-		return err
+	// Clone rootfs (timed)
+	var cloneErr error
+	infra.Timed("clone_rootfs", builder.name, builder.vmID, func() {
+		if err := builder.cloneImage(ctx, op.Services.Image, resolved); err != nil {
+			cloneErr = err
+		}
+	})
+	if cloneErr != nil {
+		return cloneErr
 	}
 	builder.markCreated("rootfs")
 
 	// Progress: cloud-init
 	emitProgress(builder.onProgress, "cloud-init", "running", "Provisioning cloud-init...")
 
-	// --- Cloud-init provisioning ---
-	backend, backendErr := provisioner.NewBackend(ctx, provisioner.BackendOpts{
-		RootfsPath:      builder.rootfsPath,
-		FsType:          resolved.Image.FSType,
-		CacheDir:        op.CacheDir,
-		ProvisionerType: provisioner.ProvisionerType(resolved.Provisioner),
-		RootUID:         resolved.RootUID,
-		RootGID:         resolved.RootGID,
-		UserUID:         resolved.UserUID,
-		UserGID:         resolved.UserGID,
+	// Cloud-init provisioning, rootfs operations (timed)
+	var (
+		provisionErr    error
+		cloudInitMarker string
+		ciResultOut     *cloudInitResult
+	)
+	infra.Timed("provision_rootfs", builder.name, builder.vmID, func() {
+		backend, backendErr := provisioner.NewBackend(ctx, provisioner.BackendOpts{
+			RootfsPath:      builder.rootfsPath,
+			FsType:          resolved.Image.FSType,
+			CacheDir:        op.CacheDir,
+			ProvisionerType: provisioner.ProvisionerType(resolved.Provisioner),
+			RootUID:         resolved.RootUID,
+			RootGID:         resolved.RootGID,
+			UserUID:         resolved.UserUID,
+			UserGID:         resolved.UserGID,
+		})
+		if backendErr != nil {
+			provisionErr = fmt.Errorf("failed to create VM provisioner: %w", backendErr)
+			return
+		}
+
+		// Resize rootfs
+		if resizeErr := backend.Resize(ctx, resolved.DiskSizeBytes); resizeErr != nil {
+			provisionErr = fmt.Errorf("resize rootfs: %w", resizeErr)
+			return
+		}
+
+		// Read SSH pubkeys (errors logged but not fatal — SSH keys may be optional)
+		pubkeys, pubkeyErr := op.Services.Key.GetPubkeys(ctx, resolved.SSHKeys)
+		if pubkeyErr != nil {
+			slog.Warn("failed to read SSH pubkeys during VM creation",
+				"vm", resolved.Name, "error", pubkeyErr)
+		}
+
+		// Resolve user password from config defaults
+		userPassword, _ := op.Services.Config.GetString(ctx, "defaults.vm", "user_password")
+
+		// Common operations for OFF and INJECT modes
+		if resolved.CloudInitMode == model.CloudInitModeOFF || resolved.CloudInitMode == model.CloudInitModeINJECT {
+			if err := backend.SetHostname(ctx, resolved.Name); err != nil {
+				provisionErr = fmt.Errorf("set hostname: %w", err)
+				return
+			}
+			if err := backend.InjectDNS(ctx, resolved.DNSServer); err != nil {
+				provisionErr = fmt.Errorf("inject DNS: %w", err)
+				return
+			}
+			if err := backend.SetupSSH(ctx, resolved.User, pubkeys); err != nil {
+				provisionErr = fmt.Errorf("setup SSH: %w", err)
+				return
+			}
+		}
+
+		if resolved.CloudInitMode == model.CloudInitModeOFF {
+			if err := backend.DisableCloudInit(ctx); err != nil {
+				provisionErr = fmt.Errorf("disable cloud-init: %w", err)
+				return
+			}
+			cloudInitMarker = "cloud-init-off"
+
+		} else if resolved.CloudInitMode == model.CloudInitModeINJECT {
+			ciConfig := &cloudinit.Config{
+				Mode:                  resolved.CloudInitMode,
+				VMName:                resolved.Name,
+				VMID:                  builder.vmID,
+				VMDir:                 builder.vmDir,
+				CloudInitDir:          filepath.Join(builder.vmDir, "cloud-init"),
+				GuestIP:               builder.guestIP,
+				TapName:               builder.tapName,
+				User:                  resolved.User,
+				NetworkID:             resolved.Network.ID,
+				NetworkName:           resolved.Network.Name,
+				IPv4Gateway:           resolved.Network.IPv4Gateway,
+				NetworkPrefixLen:      resolved.NetworkPrefixLen,
+				SkipNetworkConfig:     resolved.SkipCINetworkConfig,
+				SSHPubkeys:            pubkeys,
+				UserPassword:          userPassword,
+				CustomCloudInitConfig: resolved.CustomCloudInitConfig,
+				NocloudNetPort:        resolved.NocloudNetPort,
+				CloudInitISOPath:      resolved.CloudInitISOPath,
+				KeepCloudInitISO:      resolved.KeepCloudInitISO,
+				CloudInitISOName:      resolved.CloudInitISOName,
+				NocloudPortRangeStart: resolved.NocloudPortRangeStart,
+				NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
+				NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
+			}
+			ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
+			ciResult, ciErr := ciProvisioner.Provision(ctx)
+			if ciErr != nil {
+				provisionErr = fmt.Errorf("cloud-init inject provisioning failed: %w", ciErr)
+				return
+			}
+			ciResultOut = &cloudInitResult{
+				mode: ciResult.Mode,
+			}
+			if err := backend.InjectCloudInit(ctx, ciConfig.CloudInitDir); err != nil {
+				provisionErr = fmt.Errorf("inject cloud-init: %w", err)
+				return
+			}
+			cloudInitMarker = "cloud-init-inject"
+
+		} else if resolved.CloudInitMode == model.CloudInitModeISO || resolved.CloudInitMode == model.CloudInitModeNET {
+			// Determine the cloud-init directory. For NET mode with a shared batch
+			// nocloud server, use a per-VM subdirectory under the shared batch dir.
+			cloudInitDir := filepath.Join(builder.vmDir, "cloud-init")
+			nocloudURL := resolved.NoCloudURL
+			if resolved.CloudInitMode == model.CloudInitModeNET && resolved.NoCloudSharedDir != "" {
+				cloudInitDir = filepath.Join(resolved.NoCloudSharedDir, builder.guestIP)
+				nocloudURL = fmt.Sprintf("http://%s:%d/%s/",
+					resolved.Network.IPv4Gateway, resolved.NoCloudPort, builder.guestIP)
+			}
+			ciConfig := &cloudinit.Config{
+				Mode:                  resolved.CloudInitMode,
+				VMName:                resolved.Name,
+				VMID:                  builder.vmID,
+				VMDir:                 builder.vmDir,
+				CloudInitDir:          cloudInitDir,
+				GuestIP:               builder.guestIP,
+				TapName:               builder.tapName,
+				User:                  resolved.User,
+				NetworkID:             resolved.Network.ID,
+				NetworkName:           resolved.Network.Name,
+				IPv4Gateway:           resolved.Network.IPv4Gateway,
+				NetworkPrefixLen:      resolved.NetworkPrefixLen,
+				SkipNetworkConfig:     resolved.SkipCINetworkConfig,
+				SSHPubkeys:            pubkeys,
+				UserPassword:          userPassword,
+				CustomCloudInitConfig: resolved.CustomCloudInitConfig,
+				NocloudNetPort:        resolved.NocloudNetPort,
+				CloudInitISOPath:      resolved.CloudInitISOPath,
+				KeepCloudInitISO:      resolved.KeepCloudInitISO,
+				CloudInitISOName:      resolved.CloudInitISOName,
+				NocloudPortRangeStart: resolved.NocloudPortRangeStart,
+				NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
+				NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
+				// Pre-allocated server (shared port, per-VM URL)
+				NoCloudURL:  nocloudURL,
+				NoCloudPort: resolved.NoCloudPort,
+				NoCloudPID:  resolved.NoCloudPID,
+				KillAfter:   resolved.NoCloudKillAfter,
+			}
+			ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
+			ciResult, ciErr := ciProvisioner.Provision(ctx)
+			if ciErr != nil {
+				provisionErr = fmt.Errorf("cloud-init provisioning failed: %w", ciErr)
+				return
+			}
+			ciResultOut = &cloudInitResult{
+				mode:        ciResult.Mode,
+				isoPath:     ciResult.ISOPath,
+				nocloudURL:  ciResult.NocloudURL,
+				nocloudPort: &ciResult.NocloudPort,
+				nocloudPID:  ciResult.NocloudPID,
+			}
+
+			if resolved.CloudInitMode == model.CloudInitModeISO {
+				cloudInitMarker = "cloud-init-iso"
+			} else {
+				cloudInitMarker = "cloud-init-net"
+			}
+		}
+
+		// Deblob (OS cache cleanup) unless explicitly skipped
+		if !resolved.SkipDeblob {
+			if err := backend.Deblob(ctx, &resolved.Image.Distro); err != nil {
+				provisionErr = fmt.Errorf("deblob rootfs: %w", err)
+				return
+			}
+		}
+
+		// Fix fstab for Firecracker (superfloppy /dev/vda layout)
+		if err := backend.FixFstab(ctx); err != nil {
+			provisionErr = fmt.Errorf("fix fstab: %w", err)
+			return
+		}
+
+		// Execute all queued provisioning operations
+		if err := backend.Run(ctx); err != nil {
+			provisionErr = fmt.Errorf("provision VM rootfs: %w", err)
+			return
+		}
 	})
-	if backendErr != nil {
-		return fmt.Errorf("failed to create VM provisioner: %w", backendErr)
+	if provisionErr != nil {
+		return provisionErr
 	}
-
-	// Resize rootfs
-	if resizeErr := backend.Resize(ctx, resolved.DiskSizeBytes); resizeErr != nil {
-		return fmt.Errorf("resize rootfs: %w", resizeErr)
+	if cloudInitMarker != "" {
+		builder.markCreated(cloudInitMarker)
 	}
-
-	// Read SSH pubkeys (errors logged but not fatal — SSH keys may be optional)
-	pubkeys, pubkeyErr := op.Services.Key.GetPubkeys(ctx, resolved.SSHKeys)
-	if pubkeyErr != nil {
-		slog.Warn("failed to read SSH pubkeys during VM creation",
-			"vm", resolved.Name, "error", pubkeyErr)
-	}
-
-	// Resolve user password from config defaults
-	userPassword, _ := op.Services.Config.GetString(ctx, "defaults.vm", "user_password")
-
-	// Common operations for OFF and INJECT modes
-	if resolved.CloudInitMode == model.CloudInitModeOFF || resolved.CloudInitMode == model.CloudInitModeINJECT {
-		if err := backend.SetHostname(ctx, resolved.Name); err != nil {
-			return fmt.Errorf("set hostname: %w", err)
-		}
-		if err := backend.InjectDNS(ctx, resolved.DNSServer); err != nil {
-			return fmt.Errorf("inject DNS: %w", err)
-		}
-		if err := backend.SetupSSH(ctx, resolved.User, pubkeys); err != nil {
-			return fmt.Errorf("setup SSH: %w", err)
-		}
-	}
-
-	if resolved.CloudInitMode == model.CloudInitModeOFF {
-		if err := backend.DisableCloudInit(ctx); err != nil {
-			return fmt.Errorf("disable cloud-init: %w", err)
-		}
-		builder.markCreated("cloud-init-off")
-
-	} else if resolved.CloudInitMode == model.CloudInitModeINJECT {
-		ciConfig := &cloudinit.Config{
-			Mode:                  resolved.CloudInitMode,
-			VMName:                resolved.Name,
-			VMID:                  builder.vmID,
-			VMDir:                 builder.vmDir,
-			CloudInitDir:          filepath.Join(builder.vmDir, "cloud-init"),
-			GuestIP:               builder.guestIP,
-			TapName:               builder.tapName,
-			User:                  resolved.User,
-			NetworkID:             resolved.Network.ID,
-			NetworkName:           resolved.Network.Name,
-			IPv4Gateway:           resolved.Network.IPv4Gateway,
-			NetworkPrefixLen:      resolved.NetworkPrefixLen,
-			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
-			SSHPubkeys:            pubkeys,
-			UserPassword:          userPassword,
-			CustomCloudInitConfig: resolved.CustomCloudInitConfig,
-			NocloudNetPort:        resolved.NocloudNetPort,
-			CloudInitISOPath:      resolved.CloudInitISOPath,
-			KeepCloudInitISO:      resolved.KeepCloudInitISO,
-			CloudInitISOName:      resolved.CloudInitISOName,
-			NocloudPortRangeStart: resolved.NocloudPortRangeStart,
-			NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
-			NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
-		}
-		ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
-		ciResult, ciErr := ciProvisioner.Provision(ctx)
-		if ciErr != nil {
-			return fmt.Errorf("cloud-init inject provisioning failed: %w", ciErr)
-		}
-		builder.cloudInitResult = &cloudInitResult{
-			mode: ciResult.Mode,
-		}
-		if err := backend.InjectCloudInit(ctx, ciConfig.CloudInitDir); err != nil {
-			return fmt.Errorf("inject cloud-init: %w", err)
-		}
-		builder.markCreated("cloud-init-inject")
-
-	} else if resolved.CloudInitMode == model.CloudInitModeISO || resolved.CloudInitMode == model.CloudInitModeNET {
-		// Determine the cloud-init directory. For NET mode with a shared batch
-		// nocloud server, use a per-VM subdirectory under the shared batch dir.
-		cloudInitDir := filepath.Join(builder.vmDir, "cloud-init")
-		nocloudURL := resolved.NoCloudURL
-		if resolved.CloudInitMode == model.CloudInitModeNET && resolved.NoCloudSharedDir != "" {
-			cloudInitDir = filepath.Join(resolved.NoCloudSharedDir, builder.guestIP)
-			nocloudURL = fmt.Sprintf("http://%s:%d/%s/",
-				resolved.Network.IPv4Gateway, resolved.NoCloudPort, builder.guestIP)
-		}
-		ciConfig := &cloudinit.Config{
-			Mode:                  resolved.CloudInitMode,
-			VMName:                resolved.Name,
-			VMID:                  builder.vmID,
-			VMDir:                 builder.vmDir,
-			CloudInitDir:          cloudInitDir,
-			GuestIP:               builder.guestIP,
-			TapName:               builder.tapName,
-			User:                  resolved.User,
-			NetworkID:             resolved.Network.ID,
-			NetworkName:           resolved.Network.Name,
-			IPv4Gateway:           resolved.Network.IPv4Gateway,
-			NetworkPrefixLen:      resolved.NetworkPrefixLen,
-			SkipNetworkConfig:     resolved.SkipCINetworkConfig,
-			SSHPubkeys:            pubkeys,
-			UserPassword:          userPassword,
-			CustomCloudInitConfig: resolved.CustomCloudInitConfig,
-			NocloudNetPort:        resolved.NocloudNetPort,
-			CloudInitISOPath:      resolved.CloudInitISOPath,
-			KeepCloudInitISO:      resolved.KeepCloudInitISO,
-			CloudInitISOName:      resolved.CloudInitISOName,
-			NocloudPortRangeStart: resolved.NocloudPortRangeStart,
-			NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
-			NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
-			// Pre-allocated server (shared port, per-VM URL)
-			NoCloudURL:  nocloudURL,
-			NoCloudPort: resolved.NoCloudPort,
-			NoCloudPID:  resolved.NoCloudPID,
-			KillAfter:   resolved.NoCloudKillAfter,
-		}
-		ciProvisioner := cloudinit.NewProvisioner(ciConfig, op.Services.Network.FirewallTracker())
-		ciResult, ciErr := ciProvisioner.Provision(ctx)
-		if ciErr != nil {
-			return fmt.Errorf("cloud-init provisioning failed: %w", ciErr)
-		}
-		builder.cloudInitResult = &cloudInitResult{
-			mode:        ciResult.Mode,
-			isoPath:     ciResult.ISOPath,
-			nocloudURL:  ciResult.NocloudURL,
-			nocloudPort: &ciResult.NocloudPort,
-			nocloudPID:  ciResult.NocloudPID,
-		}
-
-		if resolved.CloudInitMode == model.CloudInitModeISO {
-			builder.markCreated("cloud-init-iso")
-		} else {
-			builder.markCreated("cloud-init-net")
-		}
-	}
-
-	// Deblob (OS cache cleanup) unless explicitly skipped
-	if !resolved.SkipDeblob {
-		if err := backend.Deblob(ctx, &resolved.Image.Distro); err != nil {
-			return fmt.Errorf("deblob rootfs: %w", err)
-		}
-	}
-
-	// Fix fstab for Firecracker (superfloppy /dev/vda layout)
-	if err := backend.FixFstab(ctx); err != nil {
-		return fmt.Errorf("fix fstab: %w", err)
-	}
-
-	// Execute all queued provisioning operations
-	if err := backend.Run(ctx); err != nil {
-		return fmt.Errorf("provision VM rootfs: %w", err)
+	if ciResultOut != nil {
+		builder.cloudInitResult = ciResultOut
 	}
 
 	// Progress: firecracker
 	emitProgress(builder.onProgress, "firecracker", "running", "Starting Firecracker microVM...")
 
-	// --- Firecracker config ---
-	fcConfig := builder.buildFirecrackerConfig()
-	if fcConfig == nil {
-		return fmt.Errorf("firecracker config is nil")
-	}
-
-	spawner := vm.NewFirecrackerSpawner(fcConfig)
-	builder.fcManager = fcConfig
-
-	if err := spawner.WriteToFile(); err != nil {
-		return fmt.Errorf("write firecracker config: %w", err)
-	}
-	builder.markCreated("firecracker")
-
-	// Console relay setup (before spawn)
-	if resolved.EnableConsole {
-		consoleCtrl := console.NewController(builder.vmID, builder.vmDir, builder.name,
-			resolved.ConsolePIDFilename, resolved.ConsoleSocketFilename)
-		ptyFD, ptyErr := consoleCtrl.CreatePTY()
-		if ptyErr != nil {
-			return fmt.Errorf("console PTY creation failed: %w", ptyErr)
+	// Firecracker config write, console relay, spawn (timed)
+	var (
+		fcErr            error
+		firecrackerReady bool
+		consoleRelayUp   bool
+	)
+	infra.Timed("firecracker_spawn", builder.name, builder.vmID, func() {
+		fcConfig := builder.buildFirecrackerConfig()
+		if fcConfig == nil {
+			fcErr = fmt.Errorf("firecracker config is nil")
+			return
 		}
-		builder.relay = consoleCtrl
-		fcConfig.RelayClientFD = &ptyFD
-	}
 
-	// Spawn Firecracker
-	if err := spawner.Spawn(); err != nil {
-		return fmt.Errorf("failed to spawn Firecracker: %w", err)
-	}
+		spawner := vm.NewFirecrackerSpawner(fcConfig)
+		builder.fcManager = fcConfig
 
-	// Store spawner for toVMModel()
-	builder.spawner = spawner
-
-	// Start console relay after spawn
-	if resolved.EnableConsole && builder.relay != nil {
-		builder.relay.CloseClientFD()
-		_, _, startErr := builder.relay.Start(ctx)
-		if startErr != nil {
-			return fmt.Errorf("console relay start failed: %w", startErr)
+		if err := spawner.WriteToFile(); err != nil {
+			fcErr = fmt.Errorf("write firecracker config: %w", err)
+			return
 		}
+		firecrackerReady = true
+
+		// Console relay setup (before spawn)
+		if resolved.EnableConsole {
+			consoleCtrl := console.NewController(builder.vmID, builder.vmDir, builder.name,
+				resolved.ConsolePIDFilename, resolved.ConsoleSocketFilename)
+			ptyFD, ptyErr := consoleCtrl.CreatePTY()
+			if ptyErr != nil {
+				fcErr = fmt.Errorf("console PTY creation failed: %w", ptyErr)
+				return
+			}
+			builder.relay = consoleCtrl
+			fcConfig.RelayClientFD = &ptyFD
+		}
+
+		// Spawn Firecracker
+		if err := spawner.Spawn(); err != nil {
+			fcErr = fmt.Errorf("failed to spawn Firecracker: %w", err)
+			return
+		}
+
+		// Store spawner for toVMModel()
+		builder.spawner = spawner
+
+		// Start console relay after spawn
+		if resolved.EnableConsole && builder.relay != nil {
+			builder.relay.CloseClientFD()
+			_, _, startErr := builder.relay.Start(ctx)
+			if startErr != nil {
+				fcErr = fmt.Errorf("console relay start failed: %w", startErr)
+				return
+			}
+			consoleRelayUp = true
+		}
+	})
+	if fcErr != nil {
+		return fcErr
+	}
+	if firecrackerReady {
+		builder.markCreated("firecracker")
+	}
+	if consoleRelayUp {
 		builder.markCreated("console_relay")
 	}
 

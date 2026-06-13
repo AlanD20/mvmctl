@@ -71,6 +71,9 @@ func (op *Operation) CPCopy(
 		"force":     input.Force,
 	}, "")
 
+	// Look up SSH probe timeout from config (used for CPService readiness probe).
+	probeTimeout, _ := op.Services.Config.GetDuration(ctx, "settings.vm", "ssh_timeout_sec")
+
 	// Perform the copy (matches Python: CPService.copy_xxx(...) returns (total_bytes, message))
 	var totalBytes int64
 	var resultMessage string
@@ -90,9 +93,10 @@ func (op *Operation) CPCopy(
 			resolved.LocalPaths,
 			resolved.DstInfo.RemotePath,
 			model.ConnectionInfo{
-				Host:    resolved.DstInfo.IP,
-				User:    resolved.DstInfo.User,
-				KeyPath: dstKeyPath,
+				Host:         resolved.DstInfo.IP,
+				User:         resolved.DstInfo.User,
+				KeyPath:      dstKeyPath,
+				ProbeTimeout: probeTimeout,
 			},
 			resolved.Force,
 			func(current, total int64) {
@@ -119,9 +123,10 @@ func (op *Operation) CPCopy(
 			resolved.SrcInfo.RemotePath,
 			resolved.LocalPaths[0],
 			model.ConnectionInfo{
-				Host:    resolved.SrcInfo.IP,
-				User:    resolved.SrcInfo.User,
-				KeyPath: srcKeyPath,
+				Host:         resolved.SrcInfo.IP,
+				User:         resolved.SrcInfo.User,
+				KeyPath:      srcKeyPath,
+				ProbeTimeout: probeTimeout,
 			},
 			resolved.Force,
 			func(current, total int64) {
@@ -151,14 +156,16 @@ func (op *Operation) CPCopy(
 		}
 		totalBytes, resultMessage, err = op.Services.CP.CopyVMToVM(ctx,
 			model.ConnectionInfo{
-				Host:    resolved.SrcInfo.IP,
-				User:    resolved.SrcInfo.User,
-				KeyPath: srcKeyPath,
+				Host:         resolved.SrcInfo.IP,
+				User:         resolved.SrcInfo.User,
+				KeyPath:      srcKeyPath,
+				ProbeTimeout: probeTimeout,
 			},
 			model.ConnectionInfo{
-				Host:    resolved.DstInfo.IP,
-				User:    resolved.DstInfo.User,
-				KeyPath: dstKeyPath2,
+				Host:         resolved.DstInfo.IP,
+				User:         resolved.DstInfo.User,
+				KeyPath:      dstKeyPath2,
+				ProbeTimeout: probeTimeout,
 			},
 			resolved.SrcInfo.RemotePath,
 			resolved.DstInfo.RemotePath,

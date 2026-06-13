@@ -3,11 +3,16 @@ package env
 import (
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/workflow"
 )
 
 // extractDependsOn reads the "depends_on" field from a spec entry and
@@ -82,4 +87,59 @@ func StructToMap(v any) model.ResourceMap {
 		return nil
 	}
 	return m
+}
+
+// ResolveWorkflowID returns the workflow ID for a given spec path or ID.
+// If the input looks like a file path (contains / or .), it's treated as
+// a spec path and hashed. Otherwise it tries exact match, then prefix match
+// against existing workflow state directories.
+func ResolveWorkflowID(specOrID string) string {
+	if strings.Contains(specOrID, "/") || strings.Contains(specOrID, "\\") || strings.Contains(specOrID, ".") {
+		return crypto.WorkflowID(specOrID)
+	}
+
+	statesDir := infra.GetWorkflowsStateDir()
+	// Try exact match first
+	if _, err := os.Stat(filepath.Join(statesDir, specOrID)); err == nil {
+		return specOrID
+	}
+	// Prefix match: scan directories for one starting with the given prefix
+	entries, err := os.ReadDir(statesDir)
+	if err != nil {
+		return specOrID
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), specOrID) {
+			return entry.Name()
+		}
+	}
+	return specOrID
+}
+
+// BareStepName extracts the resource name from the full step name.
+// For steps named "type:name", returns "name".
+func BareStepName(stepName, stepType string) string {
+	prefix := stepType + ":"
+	if after, found := strings.CutPrefix(stepName, prefix); found && after != "" {
+		return after
+	}
+	return stepName
+}
+
+// resolveDiffInput resolves specOrID to a spec file path and state directory.
+// If specOrID matches a workflow ID (exact or prefix), the spec path is read
+// from the saved state. Otherwise it's treated as a file path.
+func resolveDiffInput(specOrID string) (specPath, stateDir string) {
+	wfID := ResolveWorkflowID(specOrID)
+	sd := infra.GetWorkflowsStateDirByID(wfID)
+
+	if _, err := os.Stat(sd); err == nil {
+		// Resolved as workflow ID — read saved spec path.
+		if wfState, rErr := workflow.ReadWorkflowState(sd); rErr == nil && wfState != nil && wfState.SpecPath != "" {
+			return wfState.SpecPath, sd
+		}
+	}
+
+	// Not a workflow ID — use as file path, no state dir.
+	return specOrID, ""
 }

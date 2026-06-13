@@ -159,7 +159,7 @@ if [ -f /etc/fstab ]; then
 fi
 # ── Mask slow services ──
 for svc in \
-  systemd-resolved systemd-networkd-wait-online \
+  systemd-resolved systemd-networkd systemd-networkd-wait-online \
   systemd-journal-flush systemd-tmpfiles-setup \
   lvm2-monitor mdmonitor multipathd \
   haveged snapd snapd.seeded; do

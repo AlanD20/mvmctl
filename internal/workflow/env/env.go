@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"sync"
 
 	"mvmctl/internal/infra"
@@ -313,45 +312,6 @@ func List(ctx context.Context) ([]ListSummary, error) {
 	return summaries, nil
 }
 
-// ── Helpers ──
-
-// ResolveWorkflowID returns the workflow ID for a given spec path or ID.
-// If the input looks like a file path (contains / or .), it's treated as
-// a spec path and hashed. Otherwise it tries exact match, then prefix match
-// against existing workflow state directories.
-func ResolveWorkflowID(specOrID string) string {
-	if strings.Contains(specOrID, "/") || strings.Contains(specOrID, "\\") || strings.Contains(specOrID, ".") {
-		return crypto.WorkflowID(specOrID)
-	}
-
-	statesDir := infra.GetWorkflowsStateDir()
-	// Try exact match first
-	if _, err := os.Stat(filepath.Join(statesDir, specOrID)); err == nil {
-		return specOrID
-	}
-	// Prefix match: scan directories for one starting with the given prefix
-	entries, err := os.ReadDir(statesDir)
-	if err != nil {
-		return specOrID
-	}
-	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), specOrID) {
-			return entry.Name()
-		}
-	}
-	return specOrID
-}
-
-// BareStepName extracts the resource name from the full step name.
-// For steps named "type:name", returns "name".
-func BareStepName(stepName, stepType string) string {
-	prefix := stepType + ":"
-	if after, found := strings.CutPrefix(stepName, prefix); found && after != "" {
-		return after
-	}
-	return stepName
-}
-
 // ── Diff ──
 
 // DiffResult holds the result of comparing a spec against a saved workflow state.
@@ -370,10 +330,13 @@ type DiffResult struct {
 
 // Diff compares the step names from a resolved spec against the step names
 // from a saved workflow state and returns the set differences.
-// If stateDir is empty, all spec steps are considered new.
+// specOrID is either a spec file path or a workflow ID (supports prefix matching).
 // Drift detection compares spec hashes: if a step exists in both spec and state
 // but the spec hash has changed, it is marked as "drifted".
-func Diff(ctx context.Context, specPath string, stateDir string) (*DiffResult, error) {
+func Diff(ctx context.Context, specOrID string) (*DiffResult, error) {
+	// Determine spec path and state directory from the input.
+	specPath, stateDir := resolveDiffInput(specOrID)
+
 	// Resolve spec step names and hashes.
 	steps, err := ResolveSpec(ctx, specPath, nil)
 	if err != nil {
@@ -428,3 +391,5 @@ func Diff(ctx context.Context, specPath string, stateDir string) (*DiffResult, e
 
 	return result, nil
 }
+
+

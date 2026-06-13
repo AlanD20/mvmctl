@@ -526,13 +526,15 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 
 	// Determine cloud-init datasource string
 	// Don't handle CloudInitMode.OFF since we don't have to add any boot args
+	// Mask systemd-networkd-wait-online to prevent 2+ minute boot delay.
+	// The kernel ip= parameter already configures the network; this service
+	// would block waiting for systemd-networkd to mark it as "online".
+	// Applied unconditionally — even with --cloud-init-mode off the network
+	// is pre-configured by the kernel ip= boot parameter.
+	bootArgs.set("systemd.mask", []string{"systemd-networkd-wait-online.service"})
+
 	cloudInitMode := s.config.CloudInitMode
 	if cloudInitMode != nil && *cloudInitMode != "" && *cloudInitMode != model.CloudInitModeOFF {
-		// Mask systemd-networkd-wait-online to prevent 2+ minute boot delay
-		// The kernel ip= parameter already configures the network; this service
-		// would block waiting for systemd-networkd to mark it as "online"
-		bootArgs.set("systemd.mask", []string{"systemd-networkd-wait-online.service"})
-
 		if *cloudInitMode == model.CloudInitModeNET {
 			// For nocloud-net, validate URL is configured
 			if s.config.CloudInitNoCloudURL == nil || *s.config.CloudInitNoCloudURL == "" {
