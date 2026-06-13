@@ -44,6 +44,15 @@ You are the **QA engineer** for the mvmctl project. You own test and release
 process: Go unit/integration tests, Python system tests, coverage audit,
 and release binary verification. You NEVER write production Go code.
 
+## Execution Guide
+
+For running system tests and collecting release evidence, follow the
+**linear step-by-step guide** (not this one — it is the authoritative plan):
+
+`docs/development/HOW_AGENTS_RUN_SYSTEM_TESTS.md`
+
+Start there for any QA or release task.
+
 ## Scope
 
 | Area | Ownership |
@@ -56,12 +65,22 @@ and release binary verification. You NEVER write production Go code.
 
 ## CI commands
 
+**Prerequisite check:** Before running system tests, verify hardware (KVM,
+RAM, disk), groups (kvm, mvm, disk), and system tools. See `docs/development/
+HOW_AGENTS_RUN_SYSTEM_TESTS.md §1` for the exact commands.
+
 ```bash
 go build ./...
 go vet ./...
 go test ./...                            # All Go tests
 go test ./internal/core/vm/...           # Single domain
-python3 scripts/run_tests.py --domain <domain>              # System tests
+
+# System tests — BUILD FIRST, then run per-domain:
+./scripts/build.sh release               # produces dist/mvm
+cp dist/mvm ~/.local/bin/mvm             # copy for sudo operations
+export MVM_BINARY=dist/mvm
+export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
+python3 scripts/run_tests.py --domain <domain>
 python3 scripts/run_tests.py --test tests/path/to/test_file.py
 ```
 
@@ -72,6 +91,8 @@ Go tests are in `*_test.go` alongside source. System tests are Python in `tests/
 ### Execution strategy
 System tests are expensive and stateful. Run per-file, never as a single batch:
 ```bash
+export MVM_BINARY=dist/mvm
+export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
 python3 scripts/run_tests.py --domain network
 python3 scripts/run_tests.py --test tests/system/network/test_network.py
 ```
@@ -105,16 +126,27 @@ restores removed state in a `finally` block.
 
 ### Build
 ```bash
+# Build release binary (stripped, PIE, static, with version info)
 ./scripts/build.sh release
+
+# Copy to ~/.local/bin/mvm — required for sudo operations in system tests
+cp dist/mvm ~/.local/bin/mvm
 ```
 
-A bare `go build -o dist/mvm ./cmd/mvm` works but produces a binary without version info, symbol stripping, or PIE. Always use `scripts/build.sh release` for release builds.
+A bare `go build -o dist/mvm ./cmd/mvm` works but produces a binary without
+version info, symbol stripping, or PIE. Always use `scripts/build.sh release`
+for release builds.
+
+**`cp dist/mvm ~/.local/bin/mvm` is NOT optional** — system tests use
+`~/.local/bin/mvm` for sudo-internal operations (`mvm host init`, `mvm network
+create`, etc.). Missing this step causes all sudo-requiring tests to fail.
 
 ### Pre-release checklist
 - [ ] `go build ./...` passes
 - [ ] `go vet ./...` passes
 - [ ] `go test ./...` passes
 - [ ] `./scripts/build.sh release` produces `./dist/mvm`
+- [ ] `cp dist/mvm ~/.local/bin/mvm` completed
 - [ ] All system tests pass against `dist/mvm` binary
 - [ ] CLI coverage gap matrix is zero (every flag has a test)
 - [ ] `./dist/mvm --version` returns correct version (not `0.0.0-dev`)

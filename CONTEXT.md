@@ -183,10 +183,15 @@ The `pkg/api` package IS the stable, curated public interface for all consumers 
 
 **The `mvm` binary MUST be built to `~/.local/bin/mvm`.** This path has passwordless sudo privileges via the mvmctl sudoers rules, so subcommands requiring privilege escalation run without password prompts.
 
-Exact command:
+For **release testing / RC QA / system tests**, always use the release build script:
 ```bash
-go build -o ~/.local/bin/mvm ./cmd/mvm
+./scripts/build.sh release          # produces dist/mvm
+cp dist/mvm ~/.local/bin/mvm        # copy for sudo operations
 ```
+
+A bare `go build -o ~/.local/bin/mvm ./cmd/mvm` works for dev but produces a
+binary without version info, symbol stripping, or PIE. **Never use it for
+release qualification.**
 
 ### Asset mirror environment variable (REQUIRED)
 
@@ -403,10 +408,10 @@ Python-based black-box CLI subprocess tests (no mocking, no imports from Go code
 **Execution strategy -- per-file, not as a single batch:**
 ```bash
 # Per-domain:
-uv run scripts/run_tests.py --system --domain network
+MVM_BINARY=dist/mvm python3 scripts/run_tests.py --domain network
 
 # Per-file:
-uv run scripts/run_tests.py --system --test tests/system/network/test_network.py
+MVM_BINARY=dist/mvm python3 scripts/run_tests.py --test tests/system/network/test_network.py
 ```
 
 ## System Tests
