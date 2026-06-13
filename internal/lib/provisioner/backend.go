@@ -23,6 +23,7 @@ type Backend interface {
 	SetHostname(ctx context.Context, hostname string) error
 	InjectDNS(ctx context.Context, dnsServer string) error
 	SetupSSH(ctx context.Context, user string, sshPubkeys []string) error
+	SetupSudo(ctx context.Context, user string) error
 	DisableCloudInit(ctx context.Context) error
 	InjectCloudInit(ctx context.Context, cloudInitDir string) error
 	DetectOS(ctx context.Context) (string, error)

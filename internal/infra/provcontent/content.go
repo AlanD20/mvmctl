@@ -364,15 +364,29 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s", user, user, userHome)})
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh", user, user, userHome)})
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)})
-		ops = append(ops, ChrootOp{Command: "mkdir -p /etc/sudoers.d"})
-		ops = append(
-			ops,
-			ChrootOp{Command: fmt.Sprintf("echo '%s ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/%s", user, user)},
-		)
-		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chmod 440 /etc/sudoers.d/%s", user)})
 	}
 
 	return ops
+}
+
+// SetupSudo generates operations to ensure sudo works inside the guest.
+// Fixes broken ownership in some cloud images (Ubuntu cloud ships with
+// /etc/sudo.conf and /usr/bin/sudo owned by uid 1000 instead of root,
+// which causes "sudo: /etc/sudo.conf is owned by uid 1000, should be 0").
+// Also creates a sudoers drop-in granting passwordless sudo to the user.
+func (Builder) SetupSudo(user string) []Operation {
+	return []Operation{
+		ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
+		ChrootOp{Command: fmt.Sprintf("echo '%s ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/%s", user, user)},
+		ChrootOp{Command: fmt.Sprintf("chmod 440 /etc/sudoers.d/%s", user)},
+		ChrootOp{Command: `chown root:root /etc/sudo.conf && \
+chmod 0440 /etc/sudo.conf && \
+chown root:root /etc/sudoers && \
+chmod 0440 /etc/sudoers && \
+chown root:root -R /etc/sudoers.d && \
+chown root:root /usr/bin/sudo && \
+chmod 4755 /usr/bin/sudo`},
+	}
 }
 
 // BuildCloudInitDisableOps generates operations to disable cloud-init.

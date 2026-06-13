@@ -504,6 +504,10 @@ func (op *Operation) vmBuilderExecute(
 				provisionErr = fmt.Errorf("setup SSH: %w", err)
 				return
 			}
+			if err := backend.SetupSudo(ctx, resolved.User); err != nil {
+				provisionErr = fmt.Errorf("setup sudo: %w", err)
+				return
+			}
 		}
 
 		if resolved.CloudInitMode == model.CloudInitModeOFF {

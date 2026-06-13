@@ -65,6 +65,12 @@ func (b *GuestfsBackend) SetupSSH(ctx context.Context, user string, sshPubkeys [
 	return nil
 }
 
+func (b *GuestfsBackend) SetupSudo(ctx context.Context, user string) error {
+	b.user = user
+	b.ops = append(b.ops, "setup_sudo")
+	return nil
+}
+
 func (b *GuestfsBackend) InjectCloudInit(ctx context.Context, cloudInitDir string) error {
 	b.cloudInitDir = cloudInitDir
 	b.ops = append(b.ops, "inject_cloud_init")
@@ -118,6 +124,8 @@ func (b *GuestfsBackend) Run(ctx context.Context) error {
 		switch op {
 		case "disable_cloud_init":
 			cfg.DisableCloudInit = true
+		case "setup_sudo":
+			cfg.SetupSudo = true
 		case "shrink":
 			cfg.Shrink = true
 		case "deblob", "fix_fstab":

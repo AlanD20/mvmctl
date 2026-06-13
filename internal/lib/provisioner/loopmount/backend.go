@@ -90,6 +90,11 @@ func (b *LoopMountBackend) SetupSSH(ctx context.Context, user string, sshPubkeys
 	return nil
 }
 
+func (b *LoopMountBackend) SetupSudo(ctx context.Context, user string) error {
+	b.ops = append(b.ops, pc.SetupSudo(user)...)
+	return nil
+}
+
 func (b *LoopMountBackend) DisableCloudInit(ctx context.Context) error {
 	return nil // no-op — cloud-init is disabled during image import, not VM creation
 }
