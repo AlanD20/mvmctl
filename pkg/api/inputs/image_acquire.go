@@ -41,7 +41,7 @@ type ImagePullInput struct {
 	Type              string   `json:"type"                         yaml:"type"`
 	Name              *string  `json:"name,omitempty"               yaml:"name,omitempty"`
 	Force             bool     `json:"force"                        yaml:"force"`
-	SetDefault        bool     `json:"default"                  yaml:"default"`
+	SetDefault        bool     `json:"default"                      yaml:"default"`
 	Version           string   `json:"version,omitempty"            yaml:"version,omitempty"`
 	NoCache           bool     `json:"no_cache"                     yaml:"no_cache"`
 	Partition         int      `json:"partition,omitempty"          yaml:"partition,omitempty"`

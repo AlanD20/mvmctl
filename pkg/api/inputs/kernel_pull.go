@@ -18,16 +18,16 @@ import (
 
 // KernelPullInput matches Python's KernelPullInput dataclass.
 type KernelPullInput struct {
-	KernelType   string `json:"type"             yaml:"type"`
+	KernelType   string `json:"type"                    yaml:"type"`
 	Version      string `json:"version,omitempty"       yaml:"version,omitempty"`
 	OutputDir    string `json:"output_dir,omitempty"`
-	OutputName   string `json:"name,omitempty"   yaml:"name,omitempty"`
+	OutputName   string `json:"name,omitempty"          yaml:"name,omitempty"`
 	OutputPath   string `json:"output_path,omitempty"`
 	Jobs         int    `json:"jobs,omitempty"          yaml:"jobs,omitempty"`
 	KeepBuildDir bool   `json:"keep_build_dir"          yaml:"keep_build_dir"`
 	CleanBuild   bool   `json:"clean_build"             yaml:"clean_build"`
 	KernelConfig string `json:"kernel_config,omitempty" yaml:"kernel_config,omitempty"`
-	SetDefault   bool   `json:"default"             yaml:"default"`
+	SetDefault   bool   `json:"default"                 yaml:"default"`
 	Features     string `json:"features"                yaml:"features"`
 }
 

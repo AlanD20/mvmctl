@@ -18,7 +18,7 @@ type NetworkCreateInput struct {
 	IPv4Gateway *string  `json:"ipv4_gateway,omitempty" yaml:"ipv4_gateway,omitempty"`
 	NATEnabled  bool     `json:"nat_enabled"            yaml:"nat_enabled"`
 	NATGateways []string `json:"nat_gateways,omitempty" yaml:"nat_gateways,omitempty"`
-	SetDefault  bool     `json:"default"            yaml:"default"`
+	SetDefault  bool     `json:"default"                yaml:"default"`
 }
 
 // ResolvedNetworkCreateRequest matches Python's ResolvedNetworkCreateRequest (frozen dataclass).

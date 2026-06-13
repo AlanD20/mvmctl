@@ -41,7 +41,13 @@ type Step interface {
 	// The onProgress callback reports granular progress events — the same type
 	// used by pkg/api operations. Steps emit events like:
 	//   onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "pulling image"})
-	Apply(ctx context.Context, state *SharedState, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error
+	Apply(
+		ctx context.Context,
+		state *SharedState,
+		saved model.ResourceState,
+		write StateWriter,
+		onProgress event.OnProgressCallback,
+	) error
 
 	// Destroy tears down the resource using previously saved state.
 	// The saved resource state contains whatever was returned by StateData()
@@ -49,7 +55,12 @@ type Step interface {
 	// to determine what to destroy from this data.
 	// The write parameter is a StateWriter that the step calls after a successful
 	// destroy to update the persisted state.
-	Destroy(ctx context.Context, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error
+	Destroy(
+		ctx context.Context,
+		saved model.ResourceState,
+		write StateWriter,
+		onProgress event.OnProgressCallback,
+	) error
 
 	// StateData returns a snapshot of the step's state for persistence.
 	// This is called after Apply completes successfully. The returned
@@ -98,10 +109,23 @@ func NewStepFunc(
 func (s *StepFunc) Name() string           { return s.name }
 func (s *StepFunc) Type() string           { return s.stepType }
 func (s *StepFunc) Dependencies() []string { return s.deps }
-func (s *StepFunc) Apply(ctx context.Context, state *SharedState, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error {
+
+func (s *StepFunc) Apply(
+	ctx context.Context,
+	state *SharedState,
+	saved model.ResourceState,
+	write StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	return s.applyFn(ctx, state, saved, write, onProgress)
 }
-func (s *StepFunc) Destroy(ctx context.Context, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error {
+
+func (s *StepFunc) Destroy(
+	ctx context.Context,
+	saved model.ResourceState,
+	write StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	return s.destroyFn(ctx, saved, write, onProgress)
 }
 func (s *StepFunc) StateData() model.ResourceState { return s.stateDataFn() }

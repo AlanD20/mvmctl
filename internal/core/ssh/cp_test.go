@@ -179,12 +179,37 @@ func TestBuildDestTar(t *testing.T) {
 			want: []string{"tar", "xf", "-", "-k", "--no-same-owner", "-C", "/tmp/dest"},
 		},
 		"with_gnu_extras": {
-			dstPath: "/tmp/dest", gnuExtra: true, noOverwrite: false,
-			want: []string{"tar", "xf", "-", "-p", "--same-owner", "--delay-directory-restore", "--no-same-owner", "-C", "/tmp/dest"},
+			dstPath:     "/tmp/dest",
+			gnuExtra:    true,
+			noOverwrite: false,
+			want: []string{
+				"tar",
+				"xf",
+				"-",
+				"-p",
+				"--same-owner",
+				"--delay-directory-restore",
+				"--no-same-owner",
+				"-C",
+				"/tmp/dest",
+			},
 		},
 		"with_gnu_extras_and_no_overwrite": {
-			dstPath: "/tmp/dest", gnuExtra: true, noOverwrite: true,
-			want: []string{"tar", "xf", "-", "-k", "-p", "--same-owner", "--delay-directory-restore", "--no-same-owner", "-C", "/tmp/dest"},
+			dstPath:     "/tmp/dest",
+			gnuExtra:    true,
+			noOverwrite: true,
+			want: []string{
+				"tar",
+				"xf",
+				"-",
+				"-k",
+				"-p",
+				"--same-owner",
+				"--delay-directory-restore",
+				"--no-same-owner",
+				"-C",
+				"/tmp/dest",
+			},
 		},
 	}
 
@@ -318,12 +343,12 @@ func TestExitCodeFromExitErr(t *testing.T) {
 		want int
 	}{
 		// Error paths FIRST
-		"nil_error":       {err: nil, want: 1},
-		"non_exit_error":  {err: fmt.Errorf("some error"), want: 1},
+		"nil_error":      {err: nil, want: 1},
+		"non_exit_error": {err: fmt.Errorf("some error"), want: 1},
 
 		// Happy paths — exec.Command("false").Run() returns *exec.ExitError
-		"exit_code_1": {err: exec.Command("false").Run(), want: 1},
-		"exit_code_2": {err: exec.Command("sh", "-c", "exit 2").Run(), want: 2},
+		"exit_code_1":  {err: exec.Command("false").Run(), want: 1},
+		"exit_code_2":  {err: exec.Command("sh", "-c", "exit 2").Run(), want: 2},
 		"exit_code_42": {err: exec.Command("sh", "-c", "exit 42").Run(), want: 42},
 	}
 

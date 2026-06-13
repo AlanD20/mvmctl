@@ -75,7 +75,13 @@ func (s *VMStep) Dependencies() []string {
 
 func (s *VMStep) SpecHash() string { return s.specHash }
 
-func (s *VMStep) Apply(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
+func (s *VMStep) Apply(
+	ctx context.Context,
+	state *workflow.SharedState,
+	saved model.ResourceState,
+	write workflow.StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
@@ -192,7 +198,12 @@ func (s *VMStep) Apply(ctx context.Context, state *workflow.SharedState, saved m
 	return nil
 }
 
-func (s *VMStep) Destroy(ctx context.Context, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
+func (s *VMStep) Destroy(
+	ctx context.Context,
+	saved model.ResourceState,
+	write workflow.StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}

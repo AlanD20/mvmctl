@@ -41,7 +41,13 @@ func (s *CopyStep) Dependencies() []string { return s.deps }
 
 func (s *CopyStep) SpecHash() string { return s.specHash }
 
-func (s *CopyStep) Apply(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
+func (s *CopyStep) Apply(
+	ctx context.Context,
+	state *workflow.SharedState,
+	saved model.ResourceState,
+	write workflow.StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
@@ -74,7 +80,12 @@ func (s *CopyStep) Apply(ctx context.Context, state *workflow.SharedState, saved
 	return nil
 }
 
-func (s *CopyStep) Destroy(ctx context.Context, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
+func (s *CopyStep) Destroy(
+	ctx context.Context,
+	saved model.ResourceState,
+	write workflow.StateWriter,
+	onProgress event.OnProgressCallback,
+) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}

@@ -17,7 +17,7 @@ import (
 // The Registry map defines which top-level keys are valid step types —
 // any key not in Registry (other than "version") is silently ignored.
 type EnvSpec struct {
-	Version string                        `yaml:"version"`
+	Version string                         `yaml:"version"`
 	Steps   map[string][]model.ResourceMap `yaml:"-"` // populated by UnmarshalYAML
 }
 

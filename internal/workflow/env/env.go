@@ -222,14 +222,27 @@ func Destroy(
 			Resources:     resources,
 		}
 		if pErr := workflow.WriteWorkflowState(stateDir, updatedState); pErr != nil {
-			slog.Warn("failed to persist workflow state after destroy", "wf_id", wfID, "step", step.Name(), "error", pErr)
+			slog.Warn(
+				"failed to persist workflow state after destroy",
+				"wf_id",
+				wfID,
+				"step",
+				step.Name(),
+				"error",
+				pErr,
+			)
 			return fmt.Errorf("persist workflow state after destroy step %q: %w", step.Name(), pErr)
 		}
 		slog.Debug("workflow state persisted after destroy", "wf_id", wfID, "step", step.Name(), "dir", stateDir)
 		return nil
 	}
 
-	if err := pipeline.Destroy(ctx, wfState.Resources, onProgress, workflow.WithDestroyOnStepComplete(onStepComplete)); err != nil {
+	if err := pipeline.Destroy(
+		ctx,
+		wfState.Resources,
+		onProgress,
+		workflow.WithDestroyOnStepComplete(onStepComplete),
+	); err != nil {
 		return errs.WrapMsg(
 			errs.CodeInternal,
 			fmt.Sprintf("env destroy %s failed: %v", specOrID, err),

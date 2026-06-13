@@ -48,12 +48,12 @@ type VMCreateInput struct {
 	KernelID              *string        `json:"kernel,omitempty"                   yaml:"kernel,omitempty"`
 	BinaryID              *string        `json:"binary,omitempty"                   yaml:"binary,omitempty"`
 	DiskSize              string         `json:"disk_size,omitempty"                yaml:"disk_size,omitempty"`
-	RequestedGuestIP      *string        `json:"guest_ip,omitempty"       yaml:"guest_ip,omitempty"`
+	RequestedGuestIP      *string        `json:"guest_ip,omitempty"                 yaml:"guest_ip,omitempty"`
 	SkipCINetworkConfig   bool           `json:"skip_ci_network_config"             yaml:"skip_ci_network_config"`
 	BootArgs              string         `json:"boot_args,omitempty"                yaml:"boot_args,omitempty"`
 	LSMFlags              string         `json:"lsm_flags,omitempty"                yaml:"lsm_flags,omitempty"`
 	NetworkID             *string        `json:"network,omitempty"                  yaml:"network,omitempty"`
-	RequestedGuestMAC     *string        `json:"guest_mac,omitempty"      yaml:"guest_mac,omitempty"`
+	RequestedGuestMAC     *string        `json:"guest_mac,omitempty"                yaml:"guest_mac,omitempty"`
 	CustomCloudInitConfig *string        `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
 	CloudInitMode         *string        `json:"cloud_init_mode,omitempty"          yaml:"cloud_init_mode,omitempty"`
 	CloudInitISOPath      *string        `json:"cloud_init_iso_path,omitempty"      yaml:"cloud_init_iso_path,omitempty"`
