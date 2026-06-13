@@ -148,6 +148,14 @@ def _resolve_official_kernel_id(mvm_binary: str) -> str | None:
 @pytest.fixture(scope="session")
 def built_binary() -> Path:
     """Path to the pre-built ``dist/mvm`` binary."""
+    env_path = os.environ.get("MVM_BINARY")
+    if env_path:
+        binary = Path(env_path).resolve()
+        assert binary.exists(), (
+            f"MVM_BINARY={env_path} does not exist"
+        )
+        assert os.access(str(binary), os.X_OK), "Binary must be executable"
+        return binary
     binary = Path("dist/mvm").resolve()
     assert binary.exists(), (
         "Build dist/mvm first: python scripts/build_services.py"
@@ -624,8 +632,8 @@ class TestNestedIsolated:
         assert "kvm_accessible" in status, (
             f"Missing 'kvm_accessible' in host status: {status}"
         )
-        assert "required_binaries" in status, (
-            f"Missing 'required_binaries' in host status: {status}"
+        assert "missing_binaries" in status, (
+            f"Missing 'missing_binaries' in host status: {status}"
         )
         # KVM may or may not be accessible inside the guest (depends on
         # kernel + Firecracker cpu-config).  We just document the state.

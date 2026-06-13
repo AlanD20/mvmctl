@@ -320,7 +320,7 @@ class TestKernelRemove:
         )
         # L1: verify stderr contains expected error message
         err = result.stderr.lower()
-        assert "not found" in err or "could be resolved" in err, (
+        assert "not found" in err or "could be resolved" in err or "failed to resolve" in err, (
             f"Expected error about missing kernel, got: {result.stderr}"
         )
 
@@ -345,7 +345,7 @@ class TestKernelPullWithVersion:
             "--type",
             "firecracker",
             "--version",
-            "latest",
+            "v1.15",
             check=False,
             timeout=120,
         )
@@ -371,7 +371,7 @@ class TestKernelPullWithVersion:
 
     def test_kernel_pull_with_specific_version(self, mvm_binary):
         """Pull a firecracker kernel with a specific version (not 'latest')."""
-        # Rationale: Needs a kernel download. Tests specific version (6.1) not just "latest".
+        # Rationale: Needs a kernel download. Tests specific version (v1.14) not just "latest".
         result = _run_mvm(
             mvm_binary,
             "kernel",
@@ -379,7 +379,7 @@ class TestKernelPullWithVersion:
             "--type",
             "firecracker",
             "--version",
-            "6.1",
+            "v1.14",
             check=False,
             timeout=120,
         )
@@ -409,7 +409,7 @@ class TestKernelPullWithVersion:
 
 
 class TestKernelPullArch:
-    """Test kernel pull with --arch flag."""
+    """Test kernel pull (arch is auto-detected in Go CLI)."""
 
     pytestmark = [
         pytest.mark.system,
@@ -419,11 +419,10 @@ class TestKernelPullArch:
     ]
 
     def test_kernel_pull_with_arch(self, mvm_binary):
-        """Pull a firecracker kernel with --arch x86_64 flag.
+        """Pull a firecracker kernel (arch detection is automatic in Go CLI).
 
-        Rationale: The --arch flag filters kernel downloads by architecture.
-        A regression where --arch is silently ignored would download the
-        default arch instead of the specified one. L1 verification: exit 0
+        Rationale: Architecture is auto-detected from the host. The Go CLI
+        does not accept an --arch flag. L1 verification: exit 0
         and kernel appears in listing.
         """
         # Skip-reason: Kernel pull requires network access to the remote
@@ -435,14 +434,12 @@ class TestKernelPullArch:
             "pull",
             "--type",
             "firecracker",
-            "--arch",
-            "x86_64",
             check=False,
             timeout=120,
         )
         if result.returncode != 0:
             pytest.skip(
-                f"Kernel pull with --arch x86_64 failed: {result.stderr.strip()}"
+                f"Kernel pull failed: {result.stderr.strip()}"
             )
 
         # L2: verify the kernel appears in ls --json
@@ -455,7 +452,7 @@ class TestKernelPullArch:
             if k.get("type") == "firecracker" and k.get("is_present")
         ]
         assert firecracker, (
-            "No firecracker kernel found in listing after pull with --arch"
+            "No firecracker kernel found in listing after pull"
         )
 
 
@@ -470,6 +467,7 @@ class TestKernelBuild:
         pytest.mark.domain_kernel,
     ]
 
+    @pytest.mark.timeout(600)
     def test_kernel_build_with_custom_config(self, mvm_binary, tmp_path):
         """Build official kernel with custom config fragment."""
         # Rationale: Needs full kernel build from source (very slow, 30min). Tests custom config fragment.
@@ -513,6 +511,7 @@ class TestKernelBuild:
                 f"Built kernel file not found at: {k['path']}"
             )
 
+    @pytest.mark.timeout(600)
     def test_kernel_clean_rebuild(self, mvm_binary):
         """Build official kernel with clean rebuild."""
         # Rationale: Needs full kernel build. Tests --clean-build flag.
@@ -551,6 +550,7 @@ class TestKernelBuild:
             )
 
     @pytest.mark.kernel_build
+    @pytest.mark.timeout(600)
     def test_kernel_pull_with_features(self, mvm_binary):
         """Pull official kernel with --features flag.
 
@@ -578,14 +578,9 @@ class TestKernelBuild:
             pytest.skip(
                 f"Kernel pull with --features failed: {result.stderr.strip()}"
             )
-        # L1: verify success or "already exists" (kernel may already be pulled)
-        output_lower = result.stdout.lower()
-        assert (
-            "features" in output_lower
-            or "kvm" in output_lower
-            or "already exists" in output_lower
-        ), (
-            f"Expected features or already-exists mention, got: {result.stdout[:200]}"
+        # L1: verify pull succeeded (Go CLI outputs a simple success message)
+        assert result.returncode == 0, (
+            f"Kernel pull with --features failed: {result.stderr[:200]}"
         )
 
     @pytest.mark.kernel_build

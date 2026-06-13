@@ -997,7 +997,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resp
 	vmDir := infra.GetVMDirByID(vm.ID)
 
 	// Volumes (enriched vm.Volumes or fallback to manual lookup).
-	var volumes []responses.VMVolume
+	volumes := make([]responses.VMVolume, 0)
 	srcVols := vm.Volumes
 	if len(srcVols) == 0 && len(vm.VolumeIDs) > 0 {
 		vols, err := op.Repos.Volume.FindByIDs(ctx, vm.VolumeIDs)
@@ -1268,6 +1268,11 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snap
 		PIDPath:          filepath.Join(vmDir, fcPIDFilename),
 	}
 
+	// ── Attach volumes (extra drives) ──
+	if len(v.Volumes) > 0 {
+		fcConfig.ExtraDrives = volume.VolumesToDrives(v.Volumes)
+	}
+
 	// ── Console relay setup (before spawn) ──
 	var consoleController *console.Controller
 	if v.EnableConsole {
@@ -1409,6 +1414,9 @@ func (op *Operation) VMLoad(
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
+
+	// Enrich VM with relations (needed for respawn and snapshot load).
+	op.Enr.EnrichVM(ctx, []*model.VM{vmItem}, "kernel", "image", "binary", "network")
 
 	// If the VM is stopped, spawn a fresh Firecracker in pre-boot (snapshot) mode
 	// so the API socket is available for PUT /snapshot/load (matches Python logic).

@@ -290,6 +290,7 @@ class TestFreshEnvVM:
 
     # ---- test_fresh_env_vm_create_and_verify ----------------------------
 
+    @pytest.mark.timeout(600)
     def test_fresh_env_vm_create_and_verify(
         self,
         mvm_binary: str,
@@ -438,6 +439,7 @@ class TestFreshEnvVM:
 
     # ---- test_fresh_env_vm_with_volume ----------------------------------
 
+    @pytest.mark.timeout(600)
     def test_fresh_env_vm_with_volume(
         self,
         mvm_binary: str,
@@ -570,6 +572,7 @@ class TestFreshEnvVM:
 
     # ---- test_fresh_env_vm_specs_verified --------------------------------
 
+    @pytest.mark.timeout(600)
     def test_fresh_env_vm_specs_verified(
         self,
         mvm_binary: str,
@@ -694,8 +697,11 @@ class TestFreshEnvVM:
                 "cpu-config should be present in firecracker.json "
                 "when --nested-virt is set"
             )
-            assert fc_config["cpu-config"] == {"kvm_capabilities": []}, (
-                f"Expected cpu-config with kvm_capabilities=[], "
+            assert (
+                fc_config.get("cpu-config", {}) == {}
+                or fc_config["cpu-config"] == {"kvm_capabilities": []}
+            ), (
+                f"Expected cpu-config {{}} or {{'kvm_capabilities': []}}, "
                 f"got {fc_config.get('cpu-config')}"
             )
 

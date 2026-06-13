@@ -9,6 +9,13 @@ from tests.system.conftest import _run_mvm
 pytestmark = [pytest.mark.system, pytest.mark.domain_init]
 
 
+def _has_passwordless_sudo() -> bool:
+    """Check if the current user can run sudo without a password."""
+    import subprocess as _sp
+    r = _sp.run(["sudo", "-n", "true"], capture_output=True, timeout=10)
+    return r.returncode == 0
+
+
 class TestInitWizard:
     """Test the mvm init wizard (non-destructive, no sudo required with --skip-host)."""
 
@@ -78,6 +85,22 @@ class TestInitWizard:
         """
         # Rationale: Only needs CLI invocation with intentional missing
         # --skip-host to verify graceful error handling. No resources needed.
+        if _has_passwordless_sudo():
+            # Inside rc-vm (or any env with passwordless sudo), init succeeds
+            # because the sudo prompt is never triggered. Verify it works.
+            result = _run_mvm(
+                mvm_binary,
+                "init",
+                "--non-interactive",
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"Expected zero exit with passwordless sudo, got rc={result.returncode}\n"
+                f"stdout: {result.stdout}\n"
+                f"stderr: {result.stderr}"
+            )
+            return
+
         result = _run_mvm(
             mvm_binary,
             "init",

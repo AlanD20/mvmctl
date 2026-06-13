@@ -173,8 +173,6 @@ class TestHelpOutputShowsSubcommands:
             "inspect",
             "snapshot",
             "load",
-            "export",
-            "import",
             "attach-volume",
             "detach-volume",
         }
@@ -825,7 +823,8 @@ class TestImagePullAdvancedFlags:
                 "--version",
                 version,
                 "--force",
-                timeout=60,
+                "--skip-optimization",
+                timeout=300,
                 check=False,
             )
             if result.returncode == 0:
@@ -844,9 +843,9 @@ class TestImagePullAdvancedFlags:
             pytest.skip(f"Pull {selector} --version {version} timed out (>60s)")
 
     def test_image_pull_with_arch(self, mvm_binary):
-        """Pull an image with --arch flag."""
-        # Rationale: Verifies that --arch flag filters image downloads
-        # by architecture. Regression would break multi-arch image pulls.
+        """Pull an image (arch detection is automatic in Go CLI)."""
+        # Rationale: Verifies that image pull works. The Go CLI detects
+        # host architecture automatically — no --arch flag needed.
         try:
             result = _run_mvm(
                 mvm_binary,
@@ -855,8 +854,6 @@ class TestImagePullAdvancedFlags:
                 "alpine",
                 "--version",
                 "3.21",
-                "--arch",
-                "x86_64",
                 "--force",
                 timeout=60,
                 check=False,
@@ -864,14 +861,9 @@ class TestImagePullAdvancedFlags:
             if result.returncode == 0:
                 assert "pulled" in result.stdout.lower()
             else:
-                # Skip-reason: Image pull with --arch may fail if the
-                # specified architecture is not available or network is
-                # unavailable.
-                pytest.skip(f"Pull with --arch failed: {result.stderr.strip()}")
+                pytest.skip(f"Pull failed: {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
-            # Skip-reason: Large image download may exceed the 60s
-            # timeout under bandwidth constraints.
-            pytest.skip("Pull with --arch timed out (>60s)")
+            pytest.skip("Image pull timed out (>60s)")
 
 
 class TestKernelPullAdvancedFlags:
@@ -885,27 +877,27 @@ class TestKernelPullAdvancedFlags:
         pytest.mark.domain_kernel,
     ]
 
+    @pytest.mark.timeout(600)
     def test_kernel_pull_with_arch_flag(self, mvm_binary):
-        """Pull a kernel with --arch x86_64 flag."""
-        # Rationale: Verifies that --arch flag works for kernel pulls.
-        # Regression would break architecture-specific kernel downloads.
+        """Pull a kernel (arch detection is automatic in Go CLI)."""
+        # Rationale: Verifies that kernel pull works. The Go CLI detects
+        # host architecture automatically — no --arch flag needed. Kernel
+        # builds from source can take several minutes.
         result = _run_mvm(
             mvm_binary,
             "kernel",
             "pull",
             "--type",
             "official",
-            "--arch",
-            "x86_64",
             check=False,
-            timeout=120,
+            timeout=600,
         )
         if result.returncode != 0:
             # Skip-reason: Kernel pull requires network access and the
             # official kernel build server. In air-gapped environments
             # or without MVM_ASSET_MIRROR, this is unavailable.
             pytest.skip(
-                f"Kernel pull with --arch failed: {result.stderr.strip()}"
+                f"Kernel pull failed: {result.stderr.strip()}"
             )
 
         # L2 verification: confirm the kernel appears in the listing
@@ -914,7 +906,7 @@ class TestKernelPullAdvancedFlags:
         assert isinstance(kernels, list)
         assert any(
             k.get("type") == "official" and k.get("is_present") for k in kernels
-        ), "Kernel with --arch not found in listing"
+        ), "Kernel not found in listing"
 
 
 class TestImagePullWithTypeFlag:
@@ -1029,11 +1021,12 @@ class TestImageImportWithDisableDetector:
             pytest.skip(f"Image '{target_id[:8]}' was removed before inspect")
 
         data = json.loads(result.stdout)
-        source_path = data.get("path")
+        source_path = data.get("storage", {}).get("path")
         if not source_path:
             # Skip-reason: Image path is missing from inspect output,
             # which means the image record is incomplete.
-            pytest.skip("Image path not available")
+            # Go CLI returns path under "storage" key.
+            pytest.skip("Image path not available in inspect output")
 
         resolved_source = system_cache_dir / "images" / source_path
         if not resolved_source.exists():

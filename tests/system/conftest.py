@@ -26,8 +26,8 @@ import pytest
 
 @pytest.fixture(scope="session")
 def mvm_binary() -> str:
-    """Resolve MVM binary path from env var or default."""
-    binary = os.environ.get("MVM_BINARY", "uv run mvm")
+    """Resolve MVM binary path from env var or default (system-installed mvm)."""
+    binary = os.environ.get("MVM_BINARY", "mvm")
     result = subprocess.run(
         [*shlex.split(binary), "--version"],
         capture_output=True,
@@ -39,57 +39,58 @@ def mvm_binary() -> str:
     return binary
 
 
-def _ensure_mvm_db(cache_dir: Path) -> None:
+def _ensure_mvm_db(cache_dir: Path, binary: str | None = None) -> None:
     """Ensure the SQLite database exists, migrating it if necessary."""
+    if binary is None:
+        binary = os.environ.get("MVM_BINARY", "mvm")
     db_path = cache_dir / "mvmdb.db"
     if db_path.exists():
         return
-    _print_prep("Migrating SQLite database...")
-    import sqlite3 as _sql3
-
-    _subp = subprocess.run(
-        ["uv", "run", "python3", "-c",
-         "from mvmctl.core._shared._db import Database; "
-         "from mvmctl.utils.common import CacheUtils; "
-         "import sqlite3; "
-         "Database().migrate(); "
-         "db = CacheUtils.get_mvm_db_path(); "
-         "conn = sqlite3.connect(str(db)); "
-         "conn.execute(\"INSERT OR IGNORE INTO host_state "
-         "(id, initialized, mvm_group_created, sudoers_configured, "
-         "default_network_created, initialized_at, updated_at) "
-         "VALUES (1, 1, 1, 1, 1, datetime('now'), datetime('now'))\"); "
-         "conn.commit(); conn.close(); "
-         "print(f'DB ready at {db}')"],
-        capture_output=True, text=True, timeout=60,
+    _print_prep("Running 'mvm init' to apply migrations...")
+    _run_cmd(
+        binary,
+        ["init", "--non-interactive", "--skip-host", "--skip-network"],
+        timeout=120,
+        check=False,
     )
-    if _subp.returncode != 0:
-        _print_prep(f"DB migration failed: {_subp.stderr.strip()}")
-    else:
-        _print_prep("DB migration complete")
+    if not db_path.exists():
+        _print_prep("Database still missing after init — running with host init")
         _run_cmd(
-            os.environ.get("MVM_BINARY", "uv run mvm"),
-            ["bin", "pull", "firecracker", "--version", "1.15.1", "--default"],
-            timeout=300,
+            binary,
+            ["init", "--non-interactive", "--skip-network"],
+            timeout=120,
         )
+    if db_path.exists():
+        _print_prep("Database ready")
 
 
 @pytest.fixture(scope="session")
-def check_system_prerequisites() -> None:
+def check_system_prerequisites(mvm_binary) -> None:
     """Verify system can run real VM tests."""
     if not Path("/dev/kvm").exists():
         pytest.skip("System tests require /dev/kvm (KVM not available)")
+
+    # Inside a VM (e.g. rc-vm with nested_virt), the mvm group may not
+    # exist — KVM access is via nested virt, not the mvm group. Only warn.
     import grp
 
     try:
         mvm_group = grp.getgrnam("mvm")
         if mvm_group.gr_gid not in os.getgroups() and os.getgid() != 0:
-            pytest.skip("User not in 'mvm' group")
+            _print_prep("WARNING: User not in 'mvm' group — KVM must be accessible via other means")
     except KeyError:
-        pytest.skip("'mvm' group not found")
+        _print_prep("WARNING: 'mvm' group not found — continuing without it")
 
     cache_dir = Path.home() / ".cache" / "mvmctl"
-    _ensure_mvm_db(cache_dir)
+    _ensure_mvm_db(cache_dir, mvm_binary)
+
+    # Increase SSH probe timeout for nested VMs (default 10s may be too short
+    # inside rc-vm with nested virtualization overhead).
+    _run_cmd(
+        os.environ.get("MVM_BINARY", "mvm"),
+        ["config", "set", "settings.vm", "ssh_timeout_sec", "30"],
+        check=False,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -157,7 +158,7 @@ def _ensure_kernel(binary: str) -> None:
     if r.returncode != 0:
         _pull_asset(
             binary,
-            ["kernel", "pull", "--type", "firecracker", "--default"],
+            ["kernel", "pull", "--type", "firecracker", "--version", "v1.15", "--default"],
             "kernel",
         )
         return
@@ -171,7 +172,7 @@ def _ensure_kernel(binary: str) -> None:
         else:
             _pull_asset(
                 binary,
-                ["kernel", "pull", "--type", "firecracker", "--default"],
+                ["kernel", "pull", "--type", "firecracker", "--version", "v1.15", "--default"],
                 "kernel",
             )
 
@@ -239,7 +240,7 @@ def _ensure_binary(binary: str) -> None:
     has = False
     if r.returncode == 0:
         has = any(
-            b.get("name") == "firecracker" and b.get("is_present")
+            b.get("type") == "firecracker" and b.get("is_present")
             for b in json.loads(r.stdout)
         )
     if not has:

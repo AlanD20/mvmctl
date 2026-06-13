@@ -285,9 +285,13 @@ func (r *CPRequest) resolveKey(ctx context.Context, vmEntity *model.VM, keyRepo 
 		)
 	}
 
-	// Check VM's stored ssh_keys (these are IDs)
-	for _, keyID := range vmEntity.SSHKeys {
-		keyItem, err := keyResolver.ByID(ctx, keyID)
+	// Check VM's stored ssh_keys (these are names, but check by ID first as well)
+	for _, keyName := range vmEntity.SSHKeys {
+		keyItem, err := keyResolver.ByID(ctx, keyName)
+		if err != nil && errs.IsNotFound(err) {
+			// Fall back to name lookup — SSHKeys stores names, not fingerprints
+			keyItem, err = keyResolver.ByName(ctx, keyName)
+		}
 		if err == nil && keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
 			if _, err := os.Stat(*keyItem.PrivateKeyPath); err == nil {
 				return keyItem.PrivateKeyPath, nil

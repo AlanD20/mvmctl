@@ -67,7 +67,7 @@ class TestCacheCleanActual:
                     mvm_binary, "bin", "default", fc["id"][:6], check=False
                 )
         kernel_result = _run_mvm(
-            mvm_binary, "kernel", "pull", "--type", "firecracker", check=False
+            mvm_binary, "kernel", "pull", "--type", "firecracker", "--version", "v1.15", check=False
         )
         if kernel_result.returncode == 0:
             # Fetch kernel listing and set the first present kernel as default

@@ -327,7 +327,7 @@ class TestBinaryEdges:
             non_default_fc = [
                 b
                 for b in binaries
-                if b.get("name") == "firecracker"
+                if b.get("type") == "firecracker"
                 and not b.get("is_default")
                 and b.get("is_present")
             ]
@@ -367,7 +367,7 @@ class TestBinaryEdges:
             fc_defaults = [
                 b
                 for b in binaries
-                if b.get("is_default") and b.get("name") == "firecracker"
+                if b.get("is_default") and b.get("type") == "firecracker"
             ]
             actual_default = (
                 fc_defaults[0].get("version") if fc_defaults else None
@@ -420,7 +420,7 @@ class TestBinaryPullAdvanced:
         cached_fc = [
             b
             for b in cached
-            if b.get("name") == "firecracker" and b.get("is_present")
+            if b.get("type") == "firecracker" and b.get("is_present")
         ]
 
         target: str | None = None
@@ -480,7 +480,7 @@ class TestBinaryPullAdvanced:
         non_default_fc = [
             b
             for b in cached
-            if b.get("name") == "firecracker"
+            if b.get("type") == "firecracker"
             and b.get("is_present")
             and not b.get("is_default")
         ]
@@ -543,7 +543,7 @@ class TestBinaryPullAdvanced:
         fc_defaults = [
             e
             for e in entries
-            if e.get("is_default") and e.get("name") == "firecracker"
+            if e.get("is_default") and e.get("type") == "firecracker"
         ]
         assert len(fc_defaults) >= 1, (
             "No default firecracker found after pull --default"
@@ -629,7 +629,7 @@ class TestBinaryPullAndLifecycle:
         local_non_default = [
             b
             for b in local_bins
-            if b.get("name") == "firecracker"
+            if b.get("type") == "firecracker"
             and b.get("is_present")
             and not b.get("is_default")
         ]
@@ -700,7 +700,7 @@ class TestBinaryPullAndLifecycle:
             pulled_entries = [
                 e
                 for e in entries
-                if e.get("version") == target and e.get("name") == "firecracker"
+                if e.get("version") == target and e.get("type") == "firecracker"
             ]
             assert len(pulled_entries) > 0, (
                 f"Pulled version {target} not found in listing"
@@ -746,7 +746,7 @@ class TestBinaryPullAndLifecycle:
             for b in binaries
             if not b.get("is_default", False)
             and b.get("is_present")
-            and b.get("name") in ("firecracker",)
+            and b.get("type") in ("firecracker",)
         ]
 
         # If no non-default firecracker exists, try to pull one
@@ -788,7 +788,7 @@ class TestBinaryPullAndLifecycle:
                         for b in binaries
                         if not b.get("is_default", False)
                         and b.get("is_present")
-                        and b.get("name") in ("firecracker",)
+                        and b.get("type") in ("firecracker",)
                     ]
 
         if not binaries:
@@ -819,7 +819,7 @@ class TestBinaryPullAndLifecycle:
             new_defaults = [
                 e
                 for e in entries
-                if e.get("is_default") and e.get("name") == "firecracker"
+                if e.get("is_default") and e.get("type") == "firecracker"
             ]
             assert len(new_defaults) >= 1, (
                 "No default firecracker found after setting default"
@@ -857,7 +857,7 @@ class TestBinaryPullAndLifecycle:
             for b in cached_bins
             if b.get("is_present")
             and not b.get("is_default")
-            and b.get("name") == "firecracker"
+            and b.get("type") == "firecracker"
         ]
 
         if non_default_present:

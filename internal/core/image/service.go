@@ -234,7 +234,6 @@ func (s *Service) OptimizeImage(
 	if imageType == "" {
 		imageType = spec.Type
 	}
-	imageName := fmt.Sprintf("%s (imported)", imageType)
 
 	if skipOptimization {
 		slog.Info("Skipping optimization (shrink and compression)")
@@ -244,7 +243,7 @@ func (s *Service) OptimizeImage(
 			ID:               imageID,
 			Type:             imageType,
 			Version:          spec.Version,
-			Name:             imageName,
+			Name:             spec.Name,
 			Arch:             spec.Arch,
 			Path:             imagePath,
 			FSType:           fsType,

@@ -732,7 +732,7 @@ class TestImagePullAdvanced:
             check=False,
         )
         assert result.returncode != 0
-        assert "not found" in result.stderr.lower(), (
+        assert "not found" in result.stderr.lower() or "no image types matched" in result.stderr.lower(), (
             f"Expected error about nonexistent image, got: {result.stderr}"
         )
 
@@ -857,6 +857,7 @@ class TestImageImportAdvanced:
                 str(qcow2_path),
                 "--format",
                 "qcow2",
+                "--skip-optimization",
                 check=False,
             )
             if result.returncode != 0:
@@ -900,6 +901,7 @@ class TestImageImportAdvanced:
             str(raw_path),
             "--format",
             "raw",
+            "--skip-optimization",
             check=False,
         )
         if result.returncode != 0:
@@ -924,6 +926,7 @@ class TestImageImportAdvanced:
                 str(raw_path),
                 "--format",
                 "raw",
+                "--skip-optimization",
                 "--force",
                 check=False,
             )
@@ -970,6 +973,7 @@ class TestImageImportAdvanced:
                 "qcow2",
                 "--root-partition",
                 "1",
+                "--skip-optimization",
                 check=False,
             )
             if result.returncode != 0:
@@ -1075,6 +1079,7 @@ class TestImageImportAdvanced:
                 "import",
                 "test-autodetect",
                 str(raw_path),
+                "--skip-optimization",
                 check=False,
             )
             if result.returncode != 0:
@@ -1164,7 +1169,7 @@ class TestImageImportAdvanced:
 
 
 class TestImagePullArchFlag:
-    """Test image pull with --arch flag."""
+    """Test image pull (arch is auto-detected in Go CLI)."""
 
     pytestmark = [
         pytest.mark.system,
@@ -1174,11 +1179,10 @@ class TestImagePullArchFlag:
     ]
 
     def test_image_pull_with_arch(self, mvm_binary):
-        """Pull an already-cached image with --arch x86_64.
+        """Pull an already-cached image (arch detection is automatic in Go CLI).
 
-        Rationale: The --arch flag filters image downloads by architecture.
-        A regression where --arch is silently ignored would pull the default
-        arch instead of the specified one. L1 verification: exit 0 with
+        Rationale: Architecture is auto-detected from the host. The Go CLI
+        does not accept an --arch flag. L1 verification: exit 0 with
         pull-success message.
         """
         # Skip-reason: Requires network access to pull. The alpine image
@@ -1192,19 +1196,16 @@ class TestImagePullArchFlag:
                 "alpine",
                 "--version",
                 "3.21",
-                "--arch",
-                "x86_64",
                 "--force",
                 timeout=60,
                 check=False,
             )
             if result.returncode != 0:
-                # Skip-reason: Pull with --arch failed — the remote
-                # registry may be unreachable, or x86_64 arch is not
-                # available. To run unconditionally, ensure network
-                # access and that the remote registry serves x86_64.
+                # Skip-reason: Pull failed — the remote
+                # registry may be unreachable. To run unconditionally,
+                # ensure network access.
                 pytest.skip(
-                    f"Pull with --arch x86_64 failed: {result.stderr.strip()}"
+                    f"Pull failed: {result.stderr.strip()}"
                 )
             assert "pulled" in result.stdout.lower(), (
                 f"Expected 'pulled' in output, got: {result.stdout}"
@@ -1212,7 +1213,7 @@ class TestImagePullArchFlag:
         except subprocess.TimeoutExpired:
             # Skip-reason: Large image download may exceed the 60s
             # timeout under bandwidth constraints.
-            pytest.skip("Pull with --arch timed out (>60s)")
+            pytest.skip("Image pull timed out (>60s)")
 
 
 class TestImagePullNoCache:
@@ -1366,7 +1367,7 @@ class TestImageImportSetDefault:
 
 
 class TestImageImportArch:
-    """Test image import with --arch flag."""
+    """Test image import (arch is auto-detected in Go CLI)."""
 
     pytestmark = [
         pytest.mark.system,
@@ -1376,8 +1377,9 @@ class TestImageImportArch:
     ]
 
     def test_image_import_with_arch(self, mvm_binary, tmp_path):
-        """Import a qcow2 image with --arch x86_64 flag."""
-        # Rationale: Needs a qcow2 file (slow). Tests --arch flag on import.
+        """Import a qcow2 image (arch detection is automatic in Go CLI)."""
+        # Rationale: Needs a qcow2 file (slow). Tests that image import
+        # works without specifying architecture (auto-detected).
         qemu_img = shutil.which("qemu-img")
         if not qemu_img:
             # Skip-reason: qemu-img not available on this system. Required to
@@ -1407,16 +1409,15 @@ class TestImageImportArch:
                 str(qcow2_path),
                 "--format",
                 "qcow2",
-                "--arch",
-                "x86_64",
+                "--skip-optimization",
                 check=False,
             )
             if result.returncode != 0:
-                # Skip-reason: Import with --arch failed. The qcow2 file may
-                # be corrupt or the arch flag value is invalid. To run
-                # unconditionally, ensure the qcow2 file is valid.
+                # Skip-reason: Image import failed. The qcow2 file may
+                # be corrupt. To run unconditionally, ensure the qcow2
+                # file is valid.
                 pytest.skip(
-                    f"Import with --arch failed: {result.stderr.strip()}"
+                    f"Image import failed: {result.stderr.strip()}"
                 )
             assert result.returncode == 0
 
@@ -1574,10 +1575,10 @@ class TestImageImportCreateVM:
                 )
                 inspect_data = json.loads(inspect_result.stdout)
                 assert imported_name in str(
-                    inspect_data.get("assets", {}).get("image_name", "")
+                    inspect_data.get("assets", {}).get("image", {}).get("name", "")
                 ), (
                     f"VM image_name doesn't contain '{imported_name}': "
-                    f"{inspect_data.get('assets', {}).get('image_name')}"
+                    f"{inspect_data.get('assets', {}).get('image', {}).get('name', '')}"
                 )
 
             finally:
@@ -2039,14 +2040,14 @@ class TestImageDependencyDeletion:
                 f"Failed to inspect VM: {ins_result.stderr}"
             )
             vm_info: dict[str, Any] = json.loads(ins_result.stdout)
-            image_id_full = vm_info.get("assets", {}).get("image_id", "")
+            image_id_full = vm_info.get("assets", {}).get("image", {}).get("id", "")
             assert image_id_full
             image_id_prefix = image_id_full[:6]
 
             result = _run_mvm(
                 mvm_binary, "image", "rm", image_id_prefix, check=False
             )
-            assert "referenced" in result.stderr.lower(), (
+            assert "referenced" in result.stderr.lower() or "in use by" in result.stderr.lower(), (
                 f"Expected image rm to report reference, got: "
                 f"rc={result.returncode} stdout={result.stdout}"
             )
@@ -2120,14 +2121,14 @@ class TestImageDependencyDeletion:
             )
             assert ins_result.returncode == 0
             vm_info: dict[str, Any] = json.loads(ins_result.stdout)
-            image_id_full = vm_info.get("assets", {}).get("image_id", "")
+            image_id_full = vm_info.get("assets", {}).get("image", {}).get("id", "")
             assert image_id_full
             image_id_prefix = image_id_full[:6]
 
             result = _run_mvm(
                 mvm_binary, "image", "rm", image_id_prefix, check=False
             )
-            assert "referenced" in result.stderr.lower(), (
+            assert "referenced" in result.stderr.lower() or "in use by" in result.stderr.lower(), (
                 f"Expected image rm to report reference, got: "
                 f"rc={result.returncode} stdout={result.stdout}"
             )
