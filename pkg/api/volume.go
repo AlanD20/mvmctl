@@ -21,6 +21,9 @@ import (
 // Matches Python's VolumeOperation.list_all() exactly.
 func (op *Operation) VolumeListAll(ctx context.Context) []*model.VolumeItem {
 	volumes, _ := op.Repos.Volume.ListAll(ctx)
+	if volumes == nil {
+		return []*model.VolumeItem{}
+	}
 	return volumes
 }
 

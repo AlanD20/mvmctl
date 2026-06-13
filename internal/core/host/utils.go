@@ -154,7 +154,7 @@ func GenerateSudoersContent(groupName string) string {
 	// Service binaries via "mvm run <service>" pattern (sudoers wildcard)
 	// Use the current binary's path so sudoers matches how provisioner invokes it.
 	mvmPath, _ := os.Executable()
-	runCmd := mvmPath + " run *"
+	runCmd := mvmPath + " *"
 	binaries := append(infra.PrivilegedBinariesOrdered[:], runCmd)
 	binariesStr := strings.Join(binaries, ", ")
 	return fmt.Sprintf(

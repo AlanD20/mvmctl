@@ -255,7 +255,7 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanR
 	// Step 1: Prune all cached resources (Python: CacheOperation.prune_all(dry_run=dry_run, include_all=True))
 	pruneResult, pruneErr := op.CachePruneAll(ctx, dryRun, true)
 
-	// Step 1b: Abort if any VMs failed to prune or orphan processes remain.
+	// Step 2: Abort if any VMs failed to prune or orphan processes remain post-prune.
 	// (Python: checks prune_result.failed_ids and CacheService.scan_orphan_processes())
 	if !dryRun && pruneErr == nil && pruneResult != nil {
 		failedIDs := pruneResult.FailedIDs
@@ -296,13 +296,13 @@ func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanR
 		}
 	}
 
-	// Step 2: Clean host networking (while DB still exists in cache dir)
+	// Step 3: Clean host networking (while DB still exists in cache dir)
 	// Python: HostOperation.clean(cache_dir) — unconditional call (hostOp is required constructor param)
 	if !dryRun {
 		_, _ = op.HostClean(ctx)
 	}
 
-	// Step 3: Remove the cache directory itself
+	// Step 4: Remove the cache directory itself
 	// Python: shutil.rmtree(cache_dir)
 	cacheDirRemoved := false
 	if _, err := os.Stat(op.CacheDir); err == nil {

@@ -1,0 +1,126 @@
+version: "1"
+network:
+  - name: rc-net
+    subnet: 10.8.0.0/24
+    nat_enabled: true
+    default: true
+key:
+  - name: rc-key
+    algorithm: ed25519
+    default: true
+    force: true
+image:
+  - name: ubuntu-noble
+    type: ubuntu
+    version: noble
+    default: true
+binary:
+  - name: fc-16
+    type: firecracker
+    version: 1.16.0
+    default: true
+kernel:
+  - name: rc-vmlinux
+    type: official
+    version: 7.0.11
+    default: true
+    features: kvm,nftables,tuntap
+vm:
+  - name: rc-vm
+    depends_on:
+      - "network:rc-net"
+      - "key:rc-key"
+      - "image:ubuntu-noble"
+      - "binary:fc-16"
+      - "kernel:rc-vmlinux"
+    disk_size: 25G
+    vcpu: 6
+    mem: 4G
+    nested_virt: true
+    user: runner
+    network: rc-net
+    key: rc-key
+    image: ubuntu-noble
+    kernel: rc-vmlinux
+    binary: fc-16
+copy:
+  - name: copy mvm
+    depends_on: ["vm:rc-vm", "key:rc-key"]
+    target: rc-vm
+    user: root
+    key: rc-key
+    src: ./dist/mvm
+    dst: /root/
+  - name: copy firecracker tarball
+    depends_on: ["vm:rc-vm", "key:rc-key"]
+    target: rc-vm
+    user: root
+    key: rc-key
+    src: ~/.cache/mvm-asset-mirror/firecracker-v1.16.0-x86_64.tgz
+    dst: /mnt/
+  - name: copy kernel
+    depends_on: ["vm:rc-vm", "key:rc-key"]
+    target: rc-vm
+    user: root
+    key: rc-key
+    src: ~/.cache/mvm-asset-mirror/kernel-cache-7.0.11-eddb0bcef9946d7d.vmlinux
+    dst: /mnt/
+  - name: copy alpine image
+    depends_on: ["vm:rc-vm", "key:rc-key"]
+    target: rc-vm
+    user: root
+    key: rc-key
+    src: ~/.cache/mvm-asset-mirror/aws_alpine-3.21.0-x86_64-bios-cloudinit-r0.vhd
+    dst: /mnt/
+  - name: copy ubuntu image
+    depends_on: ["vm:rc-vm", "key:rc-key"]
+    target: rc-vm
+    user: root
+    key: rc-key
+    src: ~/.cache/mvm-asset-mirror/ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz
+    dst: /mnt/
+  - name: copy system tests
+    depends_on: ["vm:rc-vm", "key:rc-key"]
+    target: rc-vm
+    user: runner
+    key: rc-key
+    src: ./tests/
+    dst: /home/runner/tests/
+ssh:
+  - name: install packages
+    depends_on: ["vm:rc-vm", "key:rc-key"]
+    target: rc-vm
+    key: rc-key
+    user: root
+    timeout: 300
+    cmd: |
+      apt-get update && \
+      apt-get install -y qemu-utils net-tools python3 python3-pip python3-venv jq \
+        docker.io cloud-image-utils \
+        libguestfs-tools build-essential libncurses-dev bison flex libssl-dev libelf-dev bc curl git dwarves pkg-config && \
+      pip3 install pytest pytest-timeout uv --break-system-packages && \
+      groupadd --force mvm && usermod -aG mvm runner && \
+      groupadd --force docker && usermod -aG docker runner && \
+      usermod -aG kvm runner
+  - name: install guestfs kernel
+    depends_on: ["vm:rc-vm", "key:rc-key"]
+    target: rc-vm
+    key: rc-key
+    user: root
+    timeout: 120
+    cmd: |
+      apt-get install -y linux-image-kvm 2>/dev/null; \
+      dpkg --configure -a 2>/dev/null; \
+      chmod 644 /boot/vmlinuz-* 2>/dev/null; \
+      true
+  - name: install mvm
+    depends_on: ["vm:rc-vm", "key:rc-key", "copy:copy mvm"]
+    target: rc-vm
+    key: rc-key
+    user: root
+    timeout: 60
+    cmd: |
+      cp /root/mvm /usr/bin/mvm && \
+      mkdir -p /mnt/tmp && \
+      chmod 644 /mnt/*.vhd /mnt/*.tgz /mnt/*.tar.xz 2>/dev/null; \
+      chmod 755 /mnt/*.vmlinux 2>/dev/null; true

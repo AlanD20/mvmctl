@@ -3,7 +3,6 @@
 package cache
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"os"
@@ -83,43 +82,22 @@ func (s *Service) ScanOrphanProcesses(ctx context.Context) []map[string]any {
 		pid := entry.Name()
 		procPath := filepath.Join("/proc", pid)
 
-		// Check /proc/PID/comm for separate binaries (e.g. firecracker).
+		// Check /proc/PID/comm — only firecracker/jailer count as VM processes.
 		commBytes, err := os.ReadFile(filepath.Join(procPath, "comm"))
 		if err != nil {
 			continue
 		}
 		comm := strings.TrimSpace(string(commBytes))
 
-		isKnown := false
 		for _, known := range knownMVMComms {
 			if comm == known {
-				isKnown = true
+				p, _ := strconv.Atoi(pid)
+				orphans = append(orphans, map[string]any{
+					"pid":  p,
+					"comm": comm,
+				})
 				break
 			}
-		}
-
-		// Check /proc/PID/environ for MVM_BACKGROUND_SERVICE=1 marker.
-		// Set by SpawnService for all "mvm run <service>" subprocesses.
-		if !isKnown {
-			environBytes, err := os.ReadFile(filepath.Join(procPath, "environ"))
-			if err != nil {
-				continue
-			}
-			// environ is null-byte separated: "KEY=val\0KEY2=val2\0"
-			for _, entry := range bytes.Split(environBytes, []byte{0}) {
-				if string(entry) == infra.MVMBackgroundServiceEnv {
-					isKnown = true
-					break
-				}
-			}
-		}
-
-		if isKnown {
-			p, _ := strconv.Atoi(pid)
-			orphans = append(orphans, map[string]any{
-				"pid":  p,
-				"comm": comm,
-			})
 		}
 	}
 

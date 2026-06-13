@@ -27,6 +27,8 @@ func VolumesToDrives(vols []*model.VolumeItem) []model.DriveConfig {
 			PathOnHost:   vol.Path,
 			IsRootDevice: false,
 			IsReadOnly:   vol.IsReadOnly,
+			CacheType:    "Unsafe",
+			IOEngine:     "Sync",
 		})
 	}
 	return drives

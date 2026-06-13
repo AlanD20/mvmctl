@@ -246,7 +246,7 @@ type WorkflowState struct {
 
 ```yaml
 workflow_id: "ec729934a8fb9c67"
-spec_path: "./fenv.yaml"
+spec_path: "./rc-env.yaml"
 schema_version: "1.0"
 created_at: "2026-06-12T10:00:00Z"
 updated_at: "2026-06-12T10:05:00Z"

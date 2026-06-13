@@ -156,7 +156,7 @@ def _ensure_firecracker_binary(mvm_binary: str) -> None:
     has = False
     if result.returncode == 0 and result.stdout.strip():
         has = any(
-            b.get("name") == "firecracker" and b.get("is_present")
+            b.get("type") == "firecracker" and b.get("is_present")
             for b in json.loads(result.stdout)
         )
     if not has:
@@ -1526,20 +1526,20 @@ class TestAtMostOneDefaultBinary:
             # This happens on a fresh system before any `bin pull`.
             pytest.skip("No cached binaries available")
 
-        # Setup: ensure at most 1 default per binary name before running test logic.
+        # Setup: ensure at most 1 default per binary type before running test logic.
         # Service binaries (mvm-console-relay, mvm-provision, mvm-nocloud-server) are
         # registered with is_default=True by extract_service_binaries().  If extra
         # entries exist (e.g. from prior runs with a different hashing scheme),
-        # duplicate defaults for the same (name, version) can exist.  ``bin default``
-        # cannot fix this (it matches by name+version, not by ID), so we delete the
+        # duplicate defaults for the same (type, version) can exist.  ``bin default``
+        # cannot fix this (it matches by type+version, not by ID), so we delete the
         # extra rows directly from the DB.
-        _setup_defaults_by_name: dict[str, list[dict[str, Any]]] = {}
+        _setup_defaults_by_type: dict[str, list[dict[str, Any]]] = {}
         for _b in binaries:
             if _b.get("is_default") and _b.get("is_present"):
-                _setup_defaults_by_name.setdefault(
-                    _b.get("name", "unknown"), []
+                _setup_defaults_by_type.setdefault(
+                    _b.get("type", "unknown"), []
                 ).append(_b)
-        if _setup_defaults_by_name:
+        if _setup_defaults_by_type:
             _db_path = (
                 Path(
                     os.environ.get(
@@ -1550,7 +1550,7 @@ class TestAtMostOneDefaultBinary:
             )
             _conn = sqlite3.connect(str(_db_path))
             try:
-                for _name, _entries in _setup_defaults_by_name.items():
+                for _type, _entries in _setup_defaults_by_type.items():
                     if len(_entries) > 1:
                         _keep = max(
                             _entries, key=lambda x: x.get("created_at", "")
@@ -1595,7 +1595,7 @@ class TestAtMostOneDefaultBinary:
             for b in binaries
             if not b.get("is_default")
             and b.get("is_present")
-            and b.get("name") in ("firecracker", "jailer")
+            and b.get("type") in ("firecracker", "jailer")
         ]
         if not non_defaults:
             # Pull a fresh firecracker binary without --default to create a non-default entry
@@ -1663,7 +1663,7 @@ class TestAtMostOneDefaultBinary:
                 for b in binaries
                 if not b.get("is_default")
                 and b.get("is_present")
-                and b.get("name") in ("firecracker", "jailer")
+                and b.get("type") in ("firecracker", "jailer")
             ]
             if not non_defaults:
                 # Create a non-default binary entry in the DB directly
@@ -1679,7 +1679,7 @@ class TestAtMostOneDefaultBinary:
                 try:
                     for _bname in ("firecracker", "jailer"):
                         _cur = _conn3.execute(
-                            "SELECT id, path FROM binaries WHERE name = ? AND is_present=1 LIMIT 1",
+                            "SELECT id, path FROM binaries WHERE type = ? AND is_present=1 LIMIT 1",
                             (_bname,),
                         )
                         _row = _cur.fetchone()
@@ -1695,7 +1695,7 @@ class TestAtMostOneDefaultBinary:
                             if not _already:
                                 _conn3.execute(
                                     """INSERT INTO binaries
-                                       (id, name, version, full_version, path,
+                                       (id, type, version, full_version, path,
                                         is_default, is_present, created_at, updated_at)
                                        VALUES (?, ?, ?, ?, ?, 0, 1, ?, ?)""",
                                     (
@@ -1727,7 +1727,7 @@ class TestAtMostOneDefaultBinary:
                     for b in binaries
                     if not b.get("is_default")
                     and b.get("is_present")
-                    and b.get("name") in ("firecracker", "jailer")
+                    and b.get("type") in ("firecracker", "jailer")
                 ]
 
         first_target = non_defaults[0]
@@ -1777,7 +1777,7 @@ class TestAtMostOneDefaultBinary:
             for b in json.loads(result.stdout)
             if not b.get("is_default")
             and b.get("is_present")
-            and b.get("name") in ("firecracker", "jailer")
+            and b.get("type") in ("firecracker", "jailer")
         ]
         if not other_non_defaults:
             # Manually insert another non-default binary entry
@@ -1863,25 +1863,25 @@ class TestAtMostOneDefaultBinary:
             for b in json.loads(result.stdout)
             if b.get("is_default") and b.get("is_present")
         ]
-        # Verify at most 1 default per name after second set.
-        second_defaults_by_name: dict[str, list[dict[str, Any]]] = {}
+        # Verify at most 1 default per type after second set.
+        second_defaults_by_type: dict[str, list[dict[str, Any]]] = {}
         for b in second_round:
-            name = b.get("name", "unknown")
-            second_defaults_by_name.setdefault(name, []).append(b)
-        for name, defaults in second_defaults_by_name.items():
+            typ = b.get("type", "unknown")
+            second_defaults_by_type.setdefault(typ, []).append(b)
+        for typ, defaults in second_defaults_by_type.items():
             assert len(defaults) <= 1, (
-                f"binary/{name}: expected at most 1 default after second set, "
+                f"binary/{typ}: expected at most 1 default after second set, "
                 f"got {len(defaults)}"
             )
-        # Verify second_target's name default is the one we set.
-        second_target_name = second_target.get("name", "unknown")
-        assert second_target_name in second_defaults_by_name, (
-            f"binary/{second_target_name}: expected a default after second set"
+        # Verify second_target's type default is the one we set.
+        second_target_type = second_target.get("type", "unknown")
+        assert second_target_type in second_defaults_by_type, (
+            f"binary/{second_target_type}: expected a default after second set"
         )
         assert (
-            second_defaults_by_name[second_target_name][0]["id"]
+            second_defaults_by_type[second_target_type][0]["id"]
             == second_target_id
-        ), "Second binary did not become the sole default for its name"
+        ), "Second binary did not become the sole default for its type"
 
         if original_default_id:
             _run_mvm(

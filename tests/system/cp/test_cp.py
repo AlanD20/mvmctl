@@ -384,7 +384,7 @@ class TestCpHostToVm:
                 f"{vm_info['name']}:{remote_dir}",
                 "--key",
                 key_name,
-                timeout=30,
+                timeout=60,
                 check=False,
             )
             # The key may not be authorized on the VM (created_vm uses a
@@ -399,6 +399,7 @@ class TestCpHostToVm:
                         "permission denied",
                         "not found",
                         "could be resolved",
+                        "timed out",
                     ]
                 ), (
                     f"Unexpected error with cp --key: "

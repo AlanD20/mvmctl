@@ -418,12 +418,27 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	}
 
 	// Resolve VCPU count (matches Python: self._inputs.vcpu_count if ... else SettingsService.resolve)
+
+	// Validate explicitly set vcpu count before defaulting
+	if input.VCPUCount != nil && *input.VCPUCount <= 0 {
+		return nil, errs.New(errs.CodeVMCreateFailed,
+			"--vcpus must be a positive integer",
+			errs.WithClass(errs.ClassValidation),
+		)
+	}
+
 	vcpuCount, _ := r.cfg.GetInt(ctx, "defaults.vm", "vcpu_count")
 	if input.VCPUCount != nil && *input.VCPUCount > 0 {
 		vcpuCount = *input.VCPUCount
 	}
 
 	// Resolve cloud-init mode (matches Python's _resolve_cloud_init_mode)
+	// Default to "off" when no explicit mode is set — the provisioner injects
+	// SSH keys directly into the rootfs regardless of cloud-init mode.
+	if input.CloudInitMode == nil && len(sshKeys) > 0 && input.CloudInitISOPath == nil {
+		ciStr := string(model.CloudInitModeOFF)
+		input.CloudInitMode = &ciStr
+	}
 	ciResult, err := cloudinit.ResolveMode(input.CloudInitMode, input.CloudInitISOPath)
 	if err != nil {
 		return nil, err

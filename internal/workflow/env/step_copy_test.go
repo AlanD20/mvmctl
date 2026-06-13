@@ -24,7 +24,7 @@ func newCopyStep(t *testing.T, op *api.Operation) workflow.Step {
 	t.Helper()
 	spec := map[string]any{
 		"name":   "copy-binary",
-		"target": "fenv-vm-1",
+		"target": "rc-vm",
 		"user":   "root",
 		"src":    "./mvm",
 		"dst":    "/root/",
@@ -297,7 +297,7 @@ func TestCopyStep_NameAndType(t *testing.T) {
 func TestCopyStep_Dependencies(t *testing.T) {
 	spec := map[string]any{
 		"name":       "copy-binary",
-		"target":     "fenv-vm-1",
+		"target":     "rc-vm",
 		"user":       "root",
 		"src":        "./mvm",
 		"dst":        "/root/",
@@ -318,7 +318,7 @@ func TestCopyStep_Dependencies(t *testing.T) {
 func TestFromSpec_CopyStep_MultiSource(t *testing.T) {
 	spec := map[string]any{
 		"name":   "copy-files",
-		"target": "fenv-vm-1",
+		"target": "rc-vm",
 		"user":   "root",
 		"src":    []any{"./file1", "./file2"},
 		"dst":    "/root/",

@@ -117,7 +117,7 @@ func TestFromSpec_VMStep_NameFormat(t *testing.T) {
 }
 
 func TestFromSpec_SSHStep_NameFormat(t *testing.T) {
-	spec := map[string]any{"name": "install-qemu", "target": "fenv-vm-1", "user": "root", "cmd": "apt update"}
+	spec := map[string]any{"name": "install-qemu", "target": "rc-vm", "user": "root", "cmd": "apt update"}
 	step, err := envpkg.Registry["ssh"].FromSpec("ssh", "install-qemu", spec, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "ssh:install-qemu", step.Name())
@@ -128,7 +128,7 @@ func TestFromSpec_SSHStep_NameFormat(t *testing.T) {
 func TestFromSpec_CopyStep_NameFormat(t *testing.T) {
 	spec := map[string]any{
 		"name":   "copy-binary",
-		"target": "fenv-vm-1",
+		"target": "rc-vm",
 		"user":   "root",
 		"src":    "./mvm",
 		"dst":    "/root/",
@@ -603,9 +603,9 @@ func TestResolveWorkflowID_PrefixMatch(t *testing.T) {
 func TestFromSpec_SSHStep_WithKey(t *testing.T) {
 	spec := map[string]any{
 		"name":   "install-qemu",
-		"target": "fenv-vm-1",
+		"target": "rc-vm",
 		"user":   "root",
-		"key":    "fenv-key",
+		"key":    "rc-key",
 		"cmd":    "apt update",
 	}
 	step, err := envpkg.Registry["ssh"].FromSpec("ssh", "install-qemu", spec, nil)
@@ -620,7 +620,7 @@ func TestFromSpec_SSHStep_WithKey(t *testing.T) {
 func TestFromSpec_CopyStep_BuildsDst(t *testing.T) {
 	spec := map[string]any{
 		"name":   "copy-binary",
-		"target": "fenv-vm-1",
+		"target": "rc-vm",
 		"user":   "root",
 		"src":    "./mvm",
 		"dst":    "/root/",

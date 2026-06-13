@@ -169,7 +169,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 		networkName     string
 		mac             string
 		sshKey          string
-		userData        string
+		cloudinitConfig string
 		cloudInitMode   string
 		nocloudNetPort  int
 		user            string
@@ -219,7 +219,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 				sshKeyList = strings.Split(sshKey, ",")
 			}
 
-			effectiveCount := max(count, 1)
+			effectiveCount := count
 			if effectiveCount > 1 && len(volume) > 0 {
 				return fmt.Errorf("--count and --volume are mutually exclusive")
 			}
@@ -281,7 +281,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 				input.CloudInitMode = infraptr.Ptr(cloudInitMode)
 			}
 			if cmd.Flags().Changed("cloudinit-config") {
-				input.CustomCloudInitConfig = infraptr.Ptr(userData)
+				input.CustomCloudInitConfig = infraptr.Ptr(cloudinitConfig)
 			}
 			if cmd.Flags().Changed("nocloud-net-port") {
 				input.NocloudNetPort = infraptr.Ptr(nocloudNetPort)
@@ -344,7 +344,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 	cmd.Flags().StringVar(&networkName, "network", "", "Named network to use")
 	cmd.Flags().StringVar(&mac, "mac", "", "Custom MAC address (auto-generated if omitted)")
 	cmd.Flags().StringVar(&sshKey, "ssh-key", "", "SSH public key name (from key cache) or file path")
-	cmd.Flags().StringVar(&userData, "cloudinit-config", "", "Path to custom cloud-init configuration file")
+	cmd.Flags().StringVar(&cloudinitConfig, "cloudinit-config", "", "Path to custom cloud-init configuration file")
 	cmd.Flags().
 		StringVar(&cloudInitMode, "cloud-init-mode", "", "Cloud-init mode: 'inject' (direct injection), 'iso' (ISO mode), 'net' (HTTP), 'off' (default, no cloud-init)")
 	cmd.Flags().
