@@ -242,6 +242,31 @@ func TestStream_longLines(t *testing.T) {
 // the old code deferred pw.Close() after cmd.Wait(), but cmd.Wait()
 // blocks until all I/O completes, which requires EOF on the pipe,
 // which requires pw.Close() — classic deadlock.
+func TestStream_timeout(t *testing.T) {
+	runner := &system.RealRunner{}
+	ch, err := runner.Stream(
+		context.Background(),
+		[]string{"sleep", "30"},
+		system.RunCmdOpts{Timeout: 1 * time.Second},
+	)
+	require.NoError(t, err)
+
+	// Drain the channel — it should close well before 30s
+	done := make(chan struct{})
+	go func() {
+		for range ch {
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good — timeout killed the process and closed the channel
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stream did not honour Timeout: channel still open after 5s (expected ~1s)")
+	}
+}
+
 func TestStream_noDeadlockOnProcessExit(t *testing.T) {
 	runner := &system.RealRunner{}
 	ch, err := runner.Stream(context.Background(), []string{"echo", "hello"}, system.RunCmdOpts{})
