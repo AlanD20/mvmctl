@@ -41,20 +41,32 @@ go vet ./...
 # Unit tests
 go test ./...
 
+# Build release binary for system tests
+./scripts/build.sh release
+cp dist/mvm ~/.local/bin/mvm
+
 # System tests (requires KVM, groups, assets)
-uv run scripts/run_tests.py
+# Run per-domain — batch runs cause cross-file state pollution.
+export MVM_BINARY=dist/mvm
+export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
+for domain in \
+  bin cache cli config console cp host \
+  images init invariants kernel keys logs \
+  network ssh vm volume zzz_destructive; do
+  python3 scripts/run_tests.py --domain "$domain"
+done
 ```
 
-All four must pass. If system tests fail, investigate before proceeding.
+All five must pass. If system tests fail, investigate before proceeding.
 
 To set up a test environment from scratch:
 
 ```bash
-python scripts/setup-test-environment.py
+sudo python3 scripts/setup-test-environment.py
 ```
 
 This installs system packages, configures KVM, sets up mvmctl, and pre-downloads
-test assets. See `python scripts/setup-test-environment.py --help` for options.
+test assets. See `python3 scripts/setup-test-environment.py --help` for options.
 
 ---
 

@@ -322,6 +322,25 @@ Steps within the same level run in parallel.
 
 ---
 
+## Destroy Behavior
+
+`mvm env destroy` runs each step's `Destroy()` method in reverse dependency order. What happens depends on the **step type**:
+
+| Step Type | Behavior on Destroy | Rationale |
+|-----------|---------------------|-----------|
+| `network` | **Deleted** — iptables NAT rules removed, bridge/tap interfaces deleted, DB record removed | Runtime network state — must be torn down |
+| `key` | **Deleted** — SSH key files removed from disk, DB record removed | Created per-environment |
+| `vm` | **Deleted** — Firecracker process killed, console relay shut down, TAP device removed, IP lease released, volumes detached, VM directory + DB record deleted | Full lifecycle teardown |
+| `image` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
+| `kernel` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to rebuild/re-download, shared across environments |
+| `binary` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
+| `ssh` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran inside the VM) |
+| `copy` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (file was already transferred) |
+
+**Why image/kernel/binary are preserved:** These are _downloaded assets_ cached for reuse across multiple environments. Deleting them on destroy would force a re-download on the next `env apply`, which is slow and unnecessary. They are only removed when explicitly deleted via `mvm image rm`, `mvm kernel rm`, or `mvm binary rm`.
+
+---
+
 ## Full Example
 
 ```yaml
