@@ -467,7 +467,15 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts)
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
+	// ── Create timeout context if needed ──
+	runCtx := ctx
+	var cancel context.CancelFunc
+	if opts.Timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(runCtx, cmdArgs[0], cmdArgs[1:]...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
