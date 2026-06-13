@@ -25,64 +25,6 @@ mvm vm create myvm --image ubuntu:24.04
 mvm ssh myvm
 ```
 
-### Declarative Environments
-
-Define your entire VM setup in a single YAML file:
-
-```yaml
-# my-env.yaml
-version: "1"
-
-network:
-  - name: default
-    subnet: "172.27.0.0/24"
-    nat: true
-
-key:
-  - name: main-key
-    algorithm: ed25519
-
-image:
-  - name: os-image
-    type: alpine
-    version: "3.21"
-
-kernel:
-  - name: default-kernel
-    type: firecracker
-
-binary:
-  - name: firecracker
-    version: "1.15.0"
-
-vm:
-  - name: dev-vm
-    network: default
-    key: main-key
-    image: os-image
-    kernel: default-kernel
-    binary: firecracker
-    vcpu: 2
-    mem: 2048
-    disk_size: 10G
-```
-
-```bash
-# Provision everything
-mvm env apply my-env.yaml
-
-# See what would change (new, removed, drifted)
-mvm env diff my-env.yaml
-
-# List applied environments
-mvm env ls
-
-# Tear it all down
-mvm env destroy my-env.yaml
-```
-
-See [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) for all available fields and types.
-
 ---
 
 ## Table of Contents
@@ -261,11 +203,63 @@ mvm cache clean  # Nuclear option for cache cleanup
 
 ### Environment Management
 
+Define your entire VM environment in a single YAML file — network, keys, images, kernels, binaries, VMs, and post-boot provisioning:
+
+```yaml
+# my-env.yaml
+version: "1"
+
+network:
+  - name: default
+    subnet: "172.27.0.0/24"
+
+key:
+  - name: main-key
+    algorithm: ed25519
+
+image:
+  - name: os
+    type: alpine
+    version: "3.21"
+
+kernel:
+  - name: default
+    type: firecracker
+
+binary:
+  - name: fc
+    version: "1.15.0"
+
+vm:
+  - name: dev-vm
+    image: os
+    kernel: default
+    binary: fc
+    network: default
+    key: main-key
+    vcpu: 2
+    mem: 2048
+
+ssh:
+  - name: setup
+    target: dev-vm
+    cmd: "hostnamectl set-hostname my-dev-vm"
+    depends_on:
+      - vm:dev-vm
+```
+
 ```bash
-mvm env apply spec.yaml      # Provision everything in the spec
-mvm env ls                    # List applied environments
-mvm env diff spec.yaml        # Show what would change
-mvm env destroy <wf-id|path>  # Tear down an environment
+# Provision everything: network → key → image → kernel → binary → VM → SSH
+mvm env apply my-env.yaml
+
+# See what would change (new, removed, drifted)
+mvm env diff my-env.yaml
+
+# List applied environments
+mvm env ls
+
+# Tear it all down (reverse order)
+mvm env destroy my-env.yaml
 ```
 
 See [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) for the full YAML spec reference.

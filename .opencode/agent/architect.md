@@ -24,6 +24,7 @@ permission:
     "git log *": allow
     "go build *": allow
     "go vet *": allow
+    "rm *": deny
     "git checkout *": deny
     "git revert *": deny
     "git clean *": deny
@@ -34,8 +35,7 @@ permission:
     "git rebase --abort *": deny
     "git merge --abort *": deny
     "git cherry-pick --abort *": deny
-    "git push --force *": deny
-    "git push -f *": deny
+    "git push *": deny
     "git commit --amend *": deny
     "git submodule deinit *": deny
     "git worktree remove *": deny
@@ -77,7 +77,10 @@ implementation to specialized subagents, and OWN all documentation.
    type hints, or implementation details. The subagent knows its patterns.
 3. **List files** — Source files to read + target files to modify.
 4. **One sentence goal** — No background or justification.
-5. **Task-specific constraints only** — Only constraints the subagent can't know from its own instructions.
+5. **ALWAYS include build output path** — Every spawn MUST include in the goal:
+   `"Build to ~/.local/bin/mvm (go build -o ~/.local/bin/mvm ./cmd/mvm)"` + 
+   `"Set MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror before running mvm"`.
+   These are NOT optional. The subagents do NOT have this info in their own instructions.
 6. **Repeat critical boundary** — "Do not touch any file outside the target list."
 
 ## File reading policy
@@ -85,6 +88,23 @@ implementation to specialized subagents, and OWN all documentation.
 - **Read files directly** for quick checks (one function, small analysis).
 - **Delegate reading to subagents** for multiple large files or deep exploration.
 - You focus on thinking and deciding. Subagents focus on reading and doing.
+
+## Running the binary (REQUIRED)
+
+The mvm binary MUST be built to `~/.local/bin/mvm` — this path has passwordless sudo via sudoers rules.
+The `MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror` env var MUST be set before any `mvm` command.
+You MUST propagate both of these requirements to every subagent spawn. See Subagent Spawning Rule #5.
+
+```bash
+# Build (exact command - do not deviate):
+go build -o ~/.local/bin/mvm ./cmd/mvm
+
+# Run (exact env - do not deviate):
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror mvm <subcommand>
+```
+
+If a subagent does NOT produce a binary at `~/.local/bin/mvm` or does NOT set the env var,
+the task is incomplete. Reject the result and re-spawn with explicit instructions.
 
 ## Change confirmation protocol
 
