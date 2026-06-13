@@ -471,50 +471,47 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
+	// If context is cancelled, force-kill after 2s and force-close pipes
+	// after 3s. This prevents deadlock when orphaned subprocesses hold
+	// pipe descriptors open.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGKILL) }
+	cmd.WaitDelay = 3 * time.Second
 
-	// Merge stderr into stdout
-	pr, pw, err := os.Pipe()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create pipe: %w", err)
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
-	cmd.Stdout = pw
-	cmd.Stderr = pw
+	// Merge stderr into stdout — must be set AFTER StdoutPipe(),
+	// which sets cmd.Stdout to the write end of the pipe.
+	cmd.Stderr = cmd.Stdout
+
+	if err := cmd.Start(); err != nil {
+		stdout.Close()
+		if errors.Is(err, exec.ErrNotFound) {
+			return nil, errs.New(errs.CodeProcessError,
+				fmt.Sprintf("Command not found: %s", cmdArgs[0]))
+		}
+		return nil, errs.New(errs.CodeProcessError, err.Error())
+	}
 
 	ch := make(chan StreamLine)
-
 	go func() {
 		defer close(ch)
-		defer pw.Close()
-		defer pr.Close()
 
-		if err := cmd.Start(); err != nil {
-			if errors.Is(err, exec.ErrNotFound) {
-				ch <- StreamLine{Err: errs.New(errs.CodeProcessError,
-					fmt.Sprintf("Command not found: %s", cmdArgs[0]),
-				)}
-			} else {
-				ch <- StreamLine{Err: errs.New(errs.CodeProcessError, err.Error())}
-			}
-			return
-		}
-
-		scanner := bufio.NewScanner(pr)
+		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
-			line := scanner.Text()
-			select {
-			case ch <- StreamLine{Line: line}:
-			case <-ctx.Done():
-				_ = cmd.Wait()
-				return
-			}
+			ch <- StreamLine{Line: scanner.Text()}
 		}
 
+		// Pipe closed (process exited or WaitDelay expired) — reap.
 		waitErr := cmd.Wait()
-		if waitErr != nil {
-			if exitErr, ok := waitErr.(*exec.ExitError); ok {
+		if waitErr != nil && !errors.Is(waitErr, context.Canceled) {
+			if errors.Is(waitErr, exec.ErrWaitDelay) {
 				ch <- StreamLine{Err: errs.New(errs.CodeProcessError,
-					fmt.Sprintf("Command failed (exit %d): %s", exitErr.ExitCode(), cmdArgs[0]),
-				)}
+					fmt.Sprintf("Command output truncated (orphaned subprocess?): %s", cmdArgs[0]))}
+			} else if exitErr, ok := waitErr.(*exec.ExitError); ok {
+				ch <- StreamLine{Err: errs.New(errs.CodeProcessError,
+					fmt.Sprintf("Command failed (exit %d): %s", exitErr.ExitCode(), cmdArgs[0]))}
 			}
 		}
 	}()

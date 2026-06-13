@@ -151,7 +151,11 @@ func (s *Service) waitForSSH(ctx context.Context, timeout time.Duration) (time.D
 			return remaining, nil
 		}
 
-		time.Sleep(probeInterval)
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(probeInterval):
+		}
 	}
 }
 
@@ -191,4 +195,26 @@ func (s *Service) Connect(ctx context.Context, command string, execMode bool) (i
 		return result.ExitCode, nil
 	}
 	return 0, nil
+}
+
+// StreamCommand runs an SSH command and streams output line by line.
+// Returns a channel that yields StreamLine entries. The caller must
+// consume the channel until it's closed. Returns an error if SSH
+// is unreachable or the command fails to start.
+func (s *Service) StreamCommand(ctx context.Context, command string) (<-chan system.StreamLine, error) {
+	// Phase 1: Wait for SSH port to become reachable.
+	remaining, err := s.waitForSSH(ctx, s.timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	// Phase 2: Stream the command output.
+	sshArgs := s.BuildCommand(command)
+	opts := system.RunCmdOpts{
+		Capture: false,
+		Check:   false,
+		Env:     map[string]string{"MVM_SSH_CONNECTION": "1"},
+		Timeout: remaining,
+	}
+	return system.DefaultRunner.Stream(ctx, sshArgs, opts)
 }

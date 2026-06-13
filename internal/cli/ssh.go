@@ -97,7 +97,7 @@ Examples:
 				input.Timeout = &timeout
 			}
 
-			if err := op.SSHConnect(cmd.Context(), input); err != nil {
+			if err := op.SSHConnect(cmd.Context(), input, nil); err != nil {
 				return err
 			}
 			return nil
