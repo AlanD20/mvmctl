@@ -274,7 +274,10 @@ func (s *CPService) pipe(
 ) error {
 	srcProc := exec.CommandContext(ctx, srcCmd[0], srcCmd[1:]...)
 	srcProc.Env = append(os.Environ(), "MVM_SSH_CONNECTION=1")
-	srcProc.Stderr = os.Stderr // Direct src stderr to host stderr for diagnostics
+	srcStderr, err := srcProc.StderrPipe()
+	if err != nil {
+		return errs.New(errs.CodeCPError, "failed to set up pipe between processes")
+	}
 	destProc := exec.CommandContext(ctx, destCmd[0], destCmd[1:]...)
 	destProc.Env = append(os.Environ(), "MVM_SSH_CONNECTION=1")
 
@@ -326,9 +329,15 @@ func (s *CPService) pipe(
 	destStdin.Close()
 	srcStdout.Close()
 
-	// Read dest stderr BEFORE Wait() — Wait() closes the pipe, making
-	// ReadAll return empty. Matches Go stdlib documented pattern:
-	// https://pkg.go.dev/os/exec#Cmd.StderrPipe
+	// Read stderr from BOTH processes BEFORE Wait() — Wait() closes pipes.
+	srcStderrStr := ""
+	if srcStderr != nil {
+		stderrBytes, err := io.ReadAll(srcStderr)
+		if err != nil {
+			slog.Warn("failed to read source process stderr", "error", err)
+		}
+		srcStderrStr = strings.TrimSpace(string(stderrBytes))
+	}
 	destStderrStr := ""
 	if destStderr != nil {
 		stderrBytes, err := io.ReadAll(destStderr)
@@ -343,8 +352,14 @@ func (s *CPService) pipe(
 
 	if srcErr != nil {
 		exitCode := exitCodeFromExitErr(srcErr)
-		// Python: raise CPError(f"Source tar process failed (exit {src_rc})", code="cp.source_failed")
-		return errs.New(errs.CodeCPSourceFailed, fmt.Sprintf("source tar process failed (exit %d)", exitCode))
+		msg := srcStderrStr
+		if msg == "" {
+			msg = destStderrStr
+		}
+		if msg == "" {
+			msg = fmt.Sprintf("source tar process failed (exit %d)", exitCode)
+		}
+		return errs.New(errs.CodeCPSourceFailed, fmt.Sprintf("source tar process failed (exit %d): %s", exitCode, msg))
 	}
 	if destErr != nil {
 		exitCode := exitCodeFromExitErr(destErr)
