@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"mvmctl/internal/core/ssh"
+	"mvmctl/internal/infra/event"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
 )
@@ -18,7 +19,11 @@ import (
 // in OperationResult; other exceptions propagate.
 // Go: returns error. Non-MVMError errors are wrapped with code
 // "ssh.failed" as well (Go has no exceptions, so all errors are returned).
-func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput) error {
+//
+// When onProgress is non-nil and a command is provided, SSH output is
+// streamed line by line through the callback instead of being printed
+// directly to the terminal. This allows the CLI layer to control display.
+func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onProgress event.OnProgressCallback) error {
 	// Python: try:
 	//   request = SSHRequest(inputs, db); resolved = request.resolve()
 	//   ...
@@ -47,11 +52,32 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput) erro
 	}
 	svc := ssh.NewService(resolved.TargetIP, resolved.User, keyPath, timeout)
 
-	// Connect (matches Python: service.connect(command=..., exec_mode=resolved.cmd is None))
 	command := ""
 	if resolved.Cmd != nil {
 		command = *resolved.Cmd
 	}
+
+	// If onProgress is provided and we have a command, stream output line by line.
+	// Otherwise fall back to Connect (direct terminal pipe).
+	if onProgress != nil && command != "" {
+		ch, streamErr := svc.StreamCommand(ctx, command)
+		if streamErr != nil {
+			return newSSHError(streamErr)
+		}
+		for line := range ch {
+			if line.Err != nil {
+				return newSSHError(line.Err)
+			}
+			onProgress(event.Progress{
+				Phase:   "ssh",
+				Status:  "running",
+				Message: line.Line,
+			})
+		}
+		return nil
+	}
+
+	// Connect (matches Python: service.connect(command=..., exec_mode=resolved.cmd is None))
 	exitCode, err := svc.Connect(ctx, command, resolved.Cmd == nil)
 	if err != nil {
 		return newSSHError(err)
