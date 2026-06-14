@@ -432,10 +432,9 @@ network:
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // immediately cancel
 
-	steps, err := envpkg.ResolveSpec(ctx, specPath, nil)
-	require.NoError(t, err)
-	require.Len(t, steps, 1)
-	assert.Equal(t, "network:my-net", steps[0].Name())
+	_, err := envpkg.ResolveSpec(ctx, specPath, nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 // NOTE: This test mutates the package-level Registry. Do NOT add t.Parallel().

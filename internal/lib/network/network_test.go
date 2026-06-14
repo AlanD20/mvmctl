@@ -4,9 +4,11 @@ import (
 	"net"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"mvmctl/internal/lib/model"
 	libnet "mvmctl/internal/lib/network"
 )
 
@@ -362,4 +364,69 @@ func TestAllocateNextIP(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "No available IPs")
 	})
+}
+
+// ─── SubnetsOverlap ────────────────────────────────────────────────────────
+// Rationale: Subnet overlap detection prevents conflicting network
+// assignments. A false negative allows overlapping CIDRs; a false positive
+// blocks valid configurations.
+
+func TestSubnetsOverlap(t *testing.T) {
+	tests := map[string]struct {
+		a    string
+		b    string
+		want bool
+	}{
+		// Error/boundary cases first
+		"invalid_cidr_a": {a: "not-a-cidr", b: "10.0.0.0/24", want: false},
+		"invalid_cidr_b": {a: "10.0.0.0/24", b: "not-a-cidr", want: false},
+		"both_invalid":   {a: "", b: "", want: false},
+
+		// Happy paths
+		"overlapping_subnets": {a: "10.0.0.0/24", b: "10.0.0.0/16", want: true},
+		"non_overlapping":     {a: "10.0.0.0/24", b: "192.168.0.0/16", want: false},
+		"same_subnet":         {a: "10.0.0.0/24", b: "10.0.0.0/24", want: true},
+		"contained_subnet":    {a: "192.168.0.0/16", b: "192.168.1.0/24", want: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := libnet.SubnetsOverlap(tc.a, tc.b)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// ─── FindNetworkByName ─────────────────────────────────────────────────────
+// Rationale: Network lookup by name is used for CLI name resolution and
+// cross-domain references. A nil-pointer dereference or wrong match would
+// crash the API layer.
+
+func TestFindNetworkByName(t *testing.T) {
+	net1 := &model.Network{Name: "net-a"}
+	net2 := &model.Network{Name: "net-b"}
+
+	tests := map[string]struct {
+		networks []*model.Network
+		name     string
+		want     *model.Network
+	}{
+		// Boundary/error cases first
+		"not_found":        {networks: []*model.Network{net1}, name: "nonexistent", want: nil},
+		"empty_slice":      {networks: []*model.Network{}, name: "net-a", want: nil},
+		"case_sensitivity": {networks: []*model.Network{{Name: "MyNet"}}, name: "mynet", want: nil},
+
+		// Happy paths
+		"found_by_name":     {networks: []*model.Network{net1}, name: "net-a", want: net1},
+		"multiple_networks": {networks: []*model.Network{net1, net2}, name: "net-b", want: net2},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := libnet.FindNetworkByName(tc.networks, tc.name)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("FindNetworkByName() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
