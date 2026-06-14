@@ -86,7 +86,7 @@ mvm --help
 ```bash
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
-./scripts/build.sh
+./scripts/build.sh release
 cp ./mvm ~/.local/bin/
 mvm --help
 ```
@@ -95,24 +95,26 @@ mvm --help
 
 ## Quick Start
 
-The easiest way to get started is with the interactive setup wizard. `mvm init` handles host configuration and cache setup. System packages must still be installed separately (see [Prerequisites](#prerequisites) above). After that, download a kernel and OS image, create an SSH key, and create your first VM:
+The easiest way to get started is with the interactive setup wizard. `mvm init` handles host configuration and cache setup. System packages must still be installed separately (see [Prerequisites](#prerequisites) above). After that, download a kernel and OS image, create an SSH key, then finally create your first VM:
 
 ```bash
 # Interactive setup -- guides you through everything
 # Handles privilege escalation automatically when prompted
 mvm init
 
+# First time setup requires logging out then logging back in to ensure your user is in the `mvm` group
+
 # Download the Firecracker kernel
-mvm kernel pull --type firecracker
+mvm kernel pull --type firecracker --default
 
 # Download an OS image
-mvm image pull ubuntu:24.04
+mvm image pull ubuntu:24.04 --default
 
 # Create a key and set it as default in one step
 mvm key create test --default
 
 # Create and start a VM
-mvm vm create myvm --image ubuntu:24.04
+mvm vm create myvm --vcpus 2 --memory 2G --disk-size 20G
 
 # Follow the boot log until SSH is ready (~30-60 s)
 mvm logs myvm --follow
@@ -131,7 +133,7 @@ mvm vm rm myvm
 
 ## Essential Commands
 
-> **Shortcuts:** `net` is an alias for `network`, `img` for `image`, and `vol` for `volume`.
+> **Command Aliases:** `net` for `network`, `img` for `image`, and `vol` for `volume`.
 > E.g. `mvm net ls`, `mvm img pull ubuntu:24.04`, `mvm vol ls`.
 
 ### VM Lifecycle
@@ -210,8 +212,8 @@ Define your entire VM environment in a single YAML file — network, keys, image
 version: "1"
 
 network:
-  - name: default
-    subnet: "172.27.0.0/24"
+  - name: mynet
+    subnet: "10.20.0.0/24"
 
 key:
   - name: main-key
@@ -223,7 +225,7 @@ image:
     version: "3.21"
 
 kernel:
-  - name: default
+  - name: fc-kernel
     type: firecracker
 
 binary:
@@ -233,12 +235,13 @@ binary:
 vm:
   - name: dev-vm
     image: os
-    kernel: default
+    kernel: fc-kernel
     binary: fc
-    network: default
+    network: mynet
     key: main-key
     vcpu: 2
     mem: 2048
+    disk_size: 20G
 
 ssh:
   - name: setup

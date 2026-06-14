@@ -19,7 +19,7 @@ Coding standards, conventions, and architectural rules for the mvmctl Go codebas
 | `pkg/api/` | Public API orchestration layer | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
 | `pkg/api/inputs/` | Input/Request/Resolved structs for validation | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
 | `pkg/errs/` | Domain error type and codes | Leaf package — no internal imports |
-| `internal/testutil/` | In-memory repo implementations and `FakeRunner` for tests | Imports `internal/lib/*` |
+| `internal/testutil/` | In-memory repo implementations, `FakeRunner`, and per-domain API mocks for tests | Imports `internal/lib/*`, `internal/infra/event`, `pkg/api/*`, `pkg/errs` |
 
 **Key rule:** `internal/infra/` and `internal/lib/` are LEAF dependencies. They import nothing from `core/`, `api/`, `cli/`, or `service/`. Everything else imports them.
 
