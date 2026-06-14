@@ -306,7 +306,12 @@ func TestImageStep_Destroy(t *testing.T) {
 			if tc.wantImageID != "" {
 				want.Spec = model.ResourceMap{"image_id": tc.wantImageID}
 			}
-			if diff := cmp.Diff(want, written, cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash"), cmpopts.EquateEmpty()); diff != "" {
+			if diff := cmp.Diff(
+				want,
+				written,
+				cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash"),
+				cmpopts.EquateEmpty(),
+			); diff != "" {
 				t.Errorf("written state mismatch (-want +got):\n%s", diff)
 			}
 		})

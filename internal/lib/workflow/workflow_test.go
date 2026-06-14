@@ -774,8 +774,8 @@ func TestStatePersistence_WriteCreatesDirectory(t *testing.T) {
 // before writing, preventing EBADF errors.
 func TestWriteWorkflowState_StaleTmpFile_DoesNotCauseEBADF(t *testing.T) {
 	tests := map[string]struct {
-		setupFunc func(dir string)   // sets up the pre-existing .tmp file
-		verify    func(dir string)   // optional post-write verification
+		setupFunc func(dir string) // sets up the pre-existing .tmp file
+		verify    func(dir string) // optional post-write verification
 	}{
 		"stale_fifo_is_removed": {
 			setupFunc: func(dir string) {

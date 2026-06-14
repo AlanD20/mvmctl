@@ -188,7 +188,11 @@ func TestKernelStep_Apply(t *testing.T) {
 
 			// Verify the full written state matches expectations.
 			// SpecHash is verified separately (must be non-empty for drift detection).
-			if diff := cmp.Diff(tc.wantState, written, cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash")); diff != "" {
+			if diff := cmp.Diff(
+				tc.wantState,
+				written,
+				cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash"),
+			); diff != "" {
 				t.Errorf("written state mismatch (-want +got):\n%s", diff)
 			}
 			assert.NotEmpty(t, written.Meta.SpecHash,

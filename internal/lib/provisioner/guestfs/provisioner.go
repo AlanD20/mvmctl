@@ -202,7 +202,13 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 	// owned by uid 1000, should be 0" when running sudo.
 	if cfg.SetupSudo {
 		cmds = append(cmds, "# Fix sudo ownership")
-		cmds = append(cmds, fmt.Sprintf("sh %q", `test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; true`))
+		cmds = append(
+			cmds,
+			fmt.Sprintf(
+				"sh %q",
+				`test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; true`,
+			),
+		)
 	}
 
 	// Disable cloud-init

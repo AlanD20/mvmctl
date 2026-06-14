@@ -110,7 +110,13 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		vs, err := version.ParseSpec(input.Version)
 		if err == nil && vs.IsPartial() {
 			arch := system.RuntimeArch()
-			resolvedVersion, err := op.Services.Kernel.ResolveVersion(ctx, kernelType, input.Version, arch, resolvedCIVersion)
+			resolvedVersion, err := op.Services.Kernel.ResolveVersion(
+				ctx,
+				kernelType,
+				input.Version,
+				arch,
+				resolvedCIVersion,
+			)
 			if err != nil {
 				return nil, errs.WrapMsg(
 					errs.CodeKernelPullFailed,

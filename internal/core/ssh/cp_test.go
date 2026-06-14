@@ -253,12 +253,16 @@ func TestBuildRemoteDestTar(t *testing.T) {
 			want: "mkdir -p /tmp/dest && tar xf - -k --no-same-owner -C /tmp/dest",
 		},
 		"with_gnu_extras": {
-			dstPath: "/tmp/dest", gnuExtra: true, noOverwrite: false,
-			want: "mkdir -p /tmp/dest && tar xf - --overwrite -p --same-owner --delay-directory-restore --no-same-owner -C /tmp/dest",
+			dstPath:     "/tmp/dest",
+			gnuExtra:    true,
+			noOverwrite: false,
+			want:        "mkdir -p /tmp/dest && tar xf - --overwrite -p --same-owner --delay-directory-restore --no-same-owner -C /tmp/dest",
 		},
 		"with_gnu_extras_and_no_overwrite": {
-			dstPath: "/tmp/dest", gnuExtra: true, noOverwrite: true,
-			want: "mkdir -p /tmp/dest && tar xf - -k -p --same-owner --delay-directory-restore --no-same-owner -C /tmp/dest",
+			dstPath:     "/tmp/dest",
+			gnuExtra:    true,
+			noOverwrite: true,
+			want:        "mkdir -p /tmp/dest && tar xf - -k -p --same-owner --delay-directory-restore --no-same-owner -C /tmp/dest",
 		},
 		"path_with_spaces": {
 			dstPath: "/tmp/my dest", gnuExtra: false, noOverwrite: false,
