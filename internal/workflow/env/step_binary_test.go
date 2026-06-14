@@ -300,7 +300,12 @@ func TestBinaryStep_Destroy(t *testing.T) {
 			if tc.wantBinaryID != "" {
 				want.Spec = model.ResourceMap{"binary_id": tc.wantBinaryID}
 			}
-			if diff := cmp.Diff(want, written, cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash"), cmpopts.EquateEmpty()); diff != "" {
+			if diff := cmp.Diff(
+				want,
+				written,
+				cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash"),
+				cmpopts.EquateEmpty(),
+			); diff != "" {
 				t.Errorf("written state mismatch (-want +got):\n%s", diff)
 			}
 		})

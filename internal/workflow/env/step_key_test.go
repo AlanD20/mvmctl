@@ -183,7 +183,11 @@ func TestKeyStep_Apply(t *testing.T) {
 					WasCreated: tc.wantWasCreated,
 				},
 			}
-			if diff := cmp.Diff(wantState, written, cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash")); diff != "" {
+			if diff := cmp.Diff(
+				wantState,
+				written,
+				cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash"),
+			); diff != "" {
 				t.Errorf("written state mismatch (-want +got):\n%s", diff)
 			}
 			assert.NotEmpty(t, written.Meta.SpecHash,

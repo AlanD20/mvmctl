@@ -391,5 +391,3 @@ func Diff(ctx context.Context, specOrID string) (*DiffResult, error) {
 
 	return result, nil
 }
-
-
