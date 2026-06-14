@@ -439,3 +439,243 @@ func TestSafeInt(t *testing.T) {
 		})
 	}
 }
+
+// ─── Coerce ─────────────────────────────────────────────────────────────────────────────
+// Rationale: Coerce is the central type conversion function used by config parsing.
+// Incorrect coercion would cause silent type mismatches, wrong defaults, or panics.
+
+func TestCoerce(t *testing.T) {
+	tests := map[string]struct {
+		target  string
+		input   any
+		want    any
+		wantErr string
+	}{
+		// ── Error paths ──
+		// target=bool: unsupported types
+		"bool/float64_error": {target: "bool", input: float64(3.14), wantErr: "cannot coerce float64 to bool"},
+		"bool/map_error":     {target: "bool", input: map[string]any{"a": 1}, wantErr: "cannot coerce"},
+		"bool/slice_error":   {target: "bool", input: []int{1}, wantErr: "cannot coerce"},
+
+		// target=int: unsupported types
+		"int/float32_error": {target: "int", input: float32(3.14), wantErr: "cannot coerce float32 to int"},
+		"int/bad_string":    {target: "int", input: "abc", wantErr: "cannot coerce string"},
+		"int/map_error":     {target: "int", input: map[string]any{}, wantErr: "cannot coerce"},
+
+		// target=float: unsupported types
+		"float/bool_error": {target: "float", input: true, wantErr: "cannot coerce bool to float"},
+		"float/bad_string": {target: "float", input: "abc", wantErr: "cannot coerce string"},
+		"float/map_error":  {target: "float", input: map[string]any{}, wantErr: "cannot coerce"},
+
+		// target=string: wrong types
+		"string/int_error":  {target: "string", input: 42, wantErr: "cannot coerce int to string"},
+		"string/bool_error": {target: "string", input: true, wantErr: "cannot coerce bool to string"},
+		"string/map_error":  {target: "string", input: map[string]any{}, wantErr: "cannot coerce"},
+
+		// target=map: wrong types
+		"map/int_error":  {target: "map", input: 42, wantErr: "cannot coerce int to map"},
+		"map/bool_error": {target: "map", input: true, wantErr: "cannot coerce bool to map"},
+		"map/bad_json":   {target: "map", input: "{invalid}", wantErr: "cannot coerce to map"},
+
+		// target=nil: non-nil value
+		"nil/int_error":    {target: "nil", input: 42, wantErr: "cannot coerce int to nil"},
+		"nil/string_error": {target: "nil", input: "hello", wantErr: "cannot coerce string to nil"},
+		"nil/bool_error":   {target: "nil", input: true, wantErr: "cannot coerce bool to nil"},
+
+		// unknown target
+		"unknown_target": {target: "unknown", input: "x", wantErr: "unsupported expected type"},
+
+		// ── Happy paths ──
+
+		// target=bool
+		"bool/true":           {target: "bool", input: true, want: true},
+		"bool/false":          {target: "bool", input: false, want: false},
+		"bool/string_true":    {target: "bool", input: "true", want: true},
+		"bool/string_TRUE":    {target: "bool", input: "TRUE", want: true},
+		"bool/string_1":       {target: "bool", input: "1", want: true},
+		"bool/string_yes":     {target: "bool", input: "yes", want: true},
+		"bool/string_on":      {target: "bool", input: "on", want: true},
+		"bool/string_false":   {target: "bool", input: "false", want: false},
+		"bool/string_0":       {target: "bool", input: "0", want: false},
+		"bool/string_no":      {target: "bool", input: "no", want: false},
+		"bool/string_off":     {target: "bool", input: "off", want: false},
+		"bool/string_random":  {target: "bool", input: "random", want: false},
+		"bool/string_trimmed": {target: "bool", input: "  true  ", want: true},
+		"bool/int_1":          {target: "bool", input: 1, want: true},
+		"bool/int_0":          {target: "bool", input: 0, want: false},
+		"bool/int_42":         {target: "bool", input: 42, want: false},
+		"bool/int64_1":        {target: "bool", input: int64(1), want: true},
+		"bool/int64_0":        {target: "bool", input: int64(0), want: false},
+
+		// target=int
+		"int/identity":          {target: "int", input: 42, want: 42},
+		"int/zero":              {target: "int", input: 0, want: 0},
+		"int/negative":          {target: "int", input: -5, want: -5},
+		"int/int64":             {target: "int", input: int64(99), want: 99},
+		"int/float64_truncates": {target: "int", input: float64(3.99), want: 3},
+		"int/float64_negative":  {target: "int", input: float64(-2.7), want: -2},
+		"int/bool_true":         {target: "int", input: true, want: 1},
+		"int/bool_false":        {target: "int", input: false, want: 0},
+		"int/string_numeric":    {target: "int", input: "42", want: 42},
+		"int/string_negative":   {target: "int", input: "-5", want: -5},
+		"int/string_zero":       {target: "int", input: "0", want: 0},
+		"int/string_trimmed":    {target: "int", input: "  42  ", want: 42},
+
+		// target=float
+		"float/identity":        {target: "float", input: float64(3.14), want: float64(3.14)},
+		"float/zero":            {target: "float", input: float64(0), want: float64(0)},
+		"float/negative":        {target: "float", input: float64(-1.5), want: float64(-1.5)},
+		"float/int":             {target: "float", input: 42, want: float64(42)},
+		"float/int64":           {target: "float", input: int64(99), want: float64(99)},
+		"float/string_valid":    {target: "float", input: "3.14", want: float64(3.14)},
+		"float/string_negative": {target: "float", input: "-2.5", want: float64(-2.5)},
+		"float/string_trimmed":  {target: "float", input: "  1.5  ", want: float64(1.5)},
+
+		// target=string
+		"string/identity": {target: "string", input: "hello", want: "hello"},
+		"string/empty":    {target: "string", input: "", want: ""},
+
+		// target=map
+		"map/identity": {target: "map", input: map[string]any{"key": "val"}, want: map[string]any{"key": "val"}},
+		"map/from_json": {
+			target: "map",
+			input:  `{"a":1,"b":"two"}`,
+			want:   map[string]any{"a": float64(1), "b": "two"},
+		},
+		"map/empty_json": {target: "map", input: "{}", want: map[string]any{}},
+		"map/empty_map":  {target: "map", input: map[string]any{}, want: map[string]any{}},
+
+		// target=nil
+		"nil/nil": {target: "nil", input: nil, want: nil},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := infra.Coerce(tc.input, tc.target)
+
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("Coerce() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// ─── CoerceBoolFields ───────────────────────────────────────────────────────────────────
+// Rationale: CoerceBoolFields normalises bool-typed fields in config maps.
+// Incorrect coercion would cause boolean fields to be silently misread
+// (e.g., "on" being treated as false, or 0 being treated as true).
+
+func TestCoerceBoolFields(t *testing.T) {
+	tests := map[string]struct {
+		instance   map[string]any
+		fieldNames []string
+		want       map[string]any
+	}{
+		"bool_true_stays_true": {
+			instance:   map[string]any{"flag": true},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": true},
+		},
+		"bool_false_stays_false": {
+			instance:   map[string]any{"flag": false},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"int_0_becomes_false": {
+			instance:   map[string]any{"flag": 0},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"int_1_becomes_true": {
+			instance:   map[string]any{"flag": 1},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": true},
+		},
+		"int_2_becomes_false": {
+			instance:   map[string]any{"flag": 2},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"float64_0_becomes_false": {
+			instance:   map[string]any{"flag": float64(0)},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"float64_1_becomes_true": {
+			instance:   map[string]any{"flag": float64(1)},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": true},
+		},
+		"float64_2_becomes_false": {
+			instance:   map[string]any{"flag": float64(2)},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"string_true_becomes_true": {
+			instance:   map[string]any{"flag": "true"},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": true},
+		},
+		"string_1_becomes_true": {
+			instance:   map[string]any{"flag": "1"},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": true},
+		},
+		"string_yes_becomes_true": {
+			instance:   map[string]any{"flag": "yes"},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": true},
+		},
+		"string_on_becomes_true": {
+			instance:   map[string]any{"flag": "on"},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": true},
+		},
+		"string_false_becomes_false": {
+			instance:   map[string]any{"flag": "false"},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"string_0_becomes_false": {
+			instance:   map[string]any{"flag": "0"},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"string_random_becomes_false": {
+			instance:   map[string]any{"flag": "random"},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"unknown_type_becomes_false": {
+			instance:   map[string]any{"flag": []int{1}},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"flag": false},
+		},
+		"missing_field_no_change": {
+			instance:   map[string]any{"other": "value"},
+			fieldNames: []string{"flag"},
+			want:       map[string]any{"other": "value"},
+		},
+		"multiple_fields_mixed_types": {
+			instance:   map[string]any{"a": true, "b": 0, "c": "yes", "d": "off", "e": float64(1)},
+			fieldNames: []string{"a", "b", "c", "d", "e"},
+			want:       map[string]any{"a": true, "b": false, "c": true, "d": false, "e": true},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			infra.CoerceBoolFields(tc.instance, tc.fieldNames)
+			if diff := cmp.Diff(tc.want, tc.instance); diff != "" {
+				t.Errorf("CoerceBoolFields() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}

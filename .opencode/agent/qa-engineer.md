@@ -28,6 +28,7 @@ permission:
     "git reset --hard *": deny
     "git restore *": deny
     "git stash *": deny
+    "git show *": deny
     "git branch -D *": deny
     "git rebase --abort *": deny
     "git merge --abort *": deny

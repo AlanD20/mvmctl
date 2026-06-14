@@ -19,18 +19,18 @@ func InitSettings() {
 	for cat, keys := range infra.OverridableDefaults {
 		typeMap := make(map[string]string, len(keys))
 		for key, val := range keys {
-			typeMap[key] = goTypeName(val)
+			typeMap[key] = GoTypeName(val)
 		}
 		OverridableSettings[cat] = typeMap
 	}
 }
 
-// goTypeName returns the Go type name for a value.
+// GoTypeName returns the Go type name for a value.
 // These names are stored in the OverridableSettings database for type-based coercion.
 // Note: Python used "NoneType"/"str"/"dict"/"list" but Go uses "nil"/"string"/"map"/"slice".
 // This is a deliberate behavioral change per the Porting Spec (Verdict 28).
 // Database values created by the Python codebase will need migration.
-func goTypeName(v any) string {
+func GoTypeName(v any) string {
 	if v == nil {
 		return "nil"
 	}
