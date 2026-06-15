@@ -19,6 +19,7 @@ import (
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
+	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/crypto"
@@ -50,6 +51,7 @@ type VMAPI interface {
 	VMLoad(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool) error
 	VMAttachVolume(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMDetachVolume(ctx context.Context, input inputs.VMInput, volumeName string) error
+	VMExec(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
 }
 
 // ── Create ──
@@ -364,6 +366,14 @@ func (op *Operation) vmBuilderCreate(
 			}
 		} else if err := op.Repos.VM.Upsert(ctx, vmInstance); err != nil {
 			execErr = fmt.Errorf("upsert VM: %w", err)
+		} else if builder.vsockCID > 0 && builder.vsockToken != "" {
+			if err := op.Services.Vsock.PersistConfig(ctx,
+				builder.vsockCID, builder.vmID, builder.name,
+				builder.vsockUDSPath, builder.vsockPort, builder.vsockToken,
+			); err != nil {
+				slog.Error("failed to persist vsock config",
+					"vm", builder.name, "error", err)
+			}
 		}
 	}
 
@@ -652,6 +662,24 @@ func (op *Operation) vmBuilderExecute(
 			return
 		}
 
+		// ── Vsock agent injection ──
+		// Queue guest agent binary, token, and init system integration into the rootfs.
+		if resolved.VsockPort > 0 {
+			builder.vsockPort = resolved.VsockPort
+			builder.vsockToken = crypto.UUIDV4()
+			builder.vsockUDSPath = filepath.Join(builder.vmDir, resolved.VsockFilename)
+
+			if agentBin := vsock.AgentBinary(); len(agentBin) > 0 {
+				if err := backend.InjectVsockAgent(ctx, agentBin, builder.vsockPort, builder.vsockToken); err != nil {
+					provisionErr = fmt.Errorf("inject vsock agent: %w", err)
+					return
+				}
+			} else {
+				slog.Warn("vsock agent binary not available, skipping agent injection",
+					"vm", resolved.Name)
+			}
+		}
+
 		// Execute all queued provisioning operations
 		if err := backend.Run(ctx); err != nil {
 			provisionErr = fmt.Errorf("provision VM rootfs: %w", err)
@@ -666,6 +694,17 @@ func (op *Operation) vmBuilderExecute(
 	}
 	if ciResultOut != nil {
 		builder.cloudInitResult = ciResultOut
+	}
+
+	// ── Vsock CID allocation ──
+	// Allocate a random guest CID if vsock is enabled. The CID is used in the
+	// Firecracker JSON config (vsock section) and persisted to the DB after spawn.
+	if builder.vsockPort > 0 {
+		cid, err := op.Services.Vsock.AllocateCID()
+		if err != nil {
+			return err
+		}
+		builder.vsockCID = cid
 	}
 
 	// Progress: firecracker
@@ -1887,6 +1926,89 @@ func (op *Operation) VMDetachVolume(
 	return nil
 }
 
+// ── Exec ──
+
+// VMExec executes a command inside a VM via the vsock guest agent.
+// If input.Command is empty, opens an interactive PTY shell session.
+// Matches Python's VMOperation.exec() exactly.
+//
+// For non-interactive execution, output is captured and returned as structured result.
+// For interactive shell, I/O is connected directly to the terminal and no result is returned.
+func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error) {
+	if input.Identifier == "" {
+		return nil, errs.New(errs.CodeVMNotFound, "no VM identifier provided", errs.WithClass(errs.ClassValidation))
+	}
+
+	// Resolve the VM.
+	vmResolver := vm.NewResolver(op.Repos.VM)
+	vmItem, err := vmResolver.Resolve(ctx, input.Identifier)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeVMNotFound, fmt.Sprintf("vm not found: %s", input.Identifier), err)
+	}
+
+	// Retrieve vsock configuration
+	vsockItem, err := op.Repos.Vsock.GetByVMID(ctx, vmItem.ID)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeVsockNotFound, fmt.Sprintf("failed to get vsock config for vm '%s'", vmItem.Name), err)
+	}
+	if vsockItem == nil {
+		return nil, errs.New(
+			errs.CodeVsockNotFound,
+			fmt.Sprintf("vm '%s' has no vsock agent configured. Create with --vsock-port to enable.", vmItem.Name),
+			errs.WithClass(errs.ClassValidation),
+		)
+	}
+
+	// Determine port: input overrides config, config defaults to 1024
+	port := vsockItem.Port
+	if input.Port > 0 {
+		port = input.Port
+	}
+
+	// Build a copy of the config with the effective port
+	item := &model.VsockConfigItem{
+		ID:       vsockItem.ID,
+		VmID:     vsockItem.VmID,
+		GuestCID: vsockItem.GuestCID,
+		UDSPath:  vsockItem.UDSPath,
+		Port:     port,
+		Token:    vsockItem.Token,
+	}
+
+	// Read probe timeout from config (defaults.vm.vsock_probe_timeout in constants.go).
+	probeTimeout, err := op.Services.Config.GetDuration(ctx, "defaults.vm", "vsock_probe_timeout")
+	if err != nil || probeTimeout <= 0 {
+		return nil, errs.New(errs.CodeInternal, "vsock_probe_timeout not configured — check defaults.vm.vsock_probe_timeout")
+	}
+	client := vsock.NewClient(item, probeTimeout)
+
+	// Interactive shell or captured exec
+	if input.Command == "" {
+		// Interactive shell session — no result returned since I/O is direct to terminal.
+		if err := client.Shell(ctx, input.User); err != nil {
+			return nil, errs.WrapMsg(errs.CodeVsockExecFailed, fmt.Sprintf("vsock shell session failed for vm '%s'", vmItem.Name), err)
+		}
+		return nil, nil
+	}
+
+	user := input.User
+	if user == "" {
+		user, _ = op.Services.Config.GetString(ctx, "defaults.vm", "vsock_user")
+	}
+	result, err := client.Exec(ctx, input.Command, user, input.Timeout)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeVsockExecFailed, fmt.Sprintf("vsock exec failed for vm '%s'", vmItem.Name), err)
+	}
+
+	return &results.VMExecResult{
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+		ExitCode: result.ExitCode,
+	}, nil
+}
+
+// ── Builder ──
+
 type VMCreateBuilder struct {
 	name             string
 	vmID             string
@@ -1902,6 +2024,12 @@ type VMCreateBuilder struct {
 	relay            *console.Controller
 	cloudInitResult  *cloudInitResult
 	resourcesCreated map[string]bool
+
+	// Vsock state (set during vmBuilderExecute, used in buildFirecrackerConfig and post-spawn)
+	vsockCID   int
+	vsockPort  int
+	vsockUDSPath string
+	vsockToken string
 }
 
 type cloudInitResult struct {
@@ -2015,6 +2143,14 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 	// CPU config
 	if c.resolved.CPUConfig != nil {
 		fcConfig.CPUConfig = c.resolved.CPUConfig
+	}
+
+	// Vsock device config
+	if c.vsockCID > 0 && c.vsockUDSPath != "" {
+		fcConfig.Vsock = &model.VsockConfig{
+			GuestCID: c.vsockCID,
+			UDSPath:  c.vsockUDSPath,
+		}
 	}
 
 	return fcConfig

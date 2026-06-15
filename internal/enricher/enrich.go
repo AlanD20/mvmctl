@@ -19,6 +19,7 @@ import (
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
+	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
@@ -54,6 +55,11 @@ var VMRelations = map[string]model.RelationSpec{
 		FKField: "volume_ids", Resolver: "volume",
 		Method: "", RelationName: "volumes",
 		BatchMethod: "resolve_by_vm_volume_ids",
+	},
+	"vsock": {
+		FKField: "id", Resolver: "vsock",
+		Method: "get_by_vm_id", RelationName: "vsock",
+		IsReverse: true,
 	},
 }
 
@@ -122,6 +128,7 @@ type Enricher struct {
 	kernelRepo  kernel.Repository
 	binaryRepo  binary.Repository
 	volumeRepo  volume.Repository
+	vsockRepo   vsock.Repository
 }
 
 // New creates an Enricher with the given repositories.
@@ -133,6 +140,7 @@ func New(
 	kernelRepo kernel.Repository,
 	binaryRepo binary.Repository,
 	volumeRepo volume.Repository,
+	vsockRepo vsock.Repository,
 ) *Enricher {
 	return &Enricher{
 		vmRepo:      vmRepo,
@@ -142,6 +150,7 @@ func New(
 		kernelRepo:  kernelRepo,
 		binaryRepo:  binaryRepo,
 		volumeRepo:  volumeRepo,
+		vsockRepo:   vsockRepo,
 	}
 }
 
@@ -267,6 +276,10 @@ func (e *Enricher) enrichVMFromPaths(
 			}
 		case "volumes":
 			if err := e.enrichVMVolumes(ctx, vms, spec); err != nil {
+				return err
+			}
+		case "vsock":
+			if err := e.enrichVMVsock(ctx, vms, spec); err != nil {
 				return err
 			}
 		}
@@ -572,6 +585,34 @@ func (e *Enricher) enrichVMVolumes(ctx context.Context, vms []*model.VM, spec mo
 			anyVols[i] = v
 		}
 		vm.Volumes = anyVols
+	}
+	return nil
+}
+
+// enrichVMVsock resolves vsock configuration for each VM via reverse relation.
+// Matches Python's _resolve_reverse for "vsock" relation.
+// Uses batch ListByVMIDs to avoid N+1 queries.
+func (e *Enricher) enrichVMVsock(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
+	ids := collectUniqueVMStrings(vms, func(vm *model.VM) string { return vm.ID })
+	if len(ids) == 0 {
+		return nil
+	}
+	items, err := e.vsockRepo.ListByVMIDs(ctx, ids)
+	if err != nil {
+		if isEnrichmentError(err) {
+			enrichSoftFail(spec.Resolver, spec.Method, strings.Join(ids, ","))
+			return nil
+		}
+		return err
+	}
+	vsockConfigs := make(map[string]*model.VsockConfigItem, len(items))
+	for _, item := range items {
+		vsockConfigs[item.VmID] = item
+	}
+	for _, vm := range vms {
+		if vc, ok := vsockConfigs[vm.ID]; ok {
+			vm.Vsock = vc
+		}
 	}
 	return nil
 }

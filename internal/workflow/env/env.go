@@ -283,7 +283,7 @@ func List(ctx context.Context) ([]ListSummary, error) {
 		)
 	}
 
-	var summaries []ListSummary
+	summaries := make([]ListSummary, 0)
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():

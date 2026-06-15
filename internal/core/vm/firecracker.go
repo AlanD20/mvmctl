@@ -240,6 +240,11 @@ func (s *FirecrackerSpawner) Generate() (*model.FirecrackerVMConfig, error) {
 
 	config.CPUConfig = s.buildCPUConfig()
 
+	if s.config.Vsock != nil {
+		vsockCfg := *s.config.Vsock
+		config.Vsock = &vsockCfg
+	}
+
 	return config, nil
 }
 

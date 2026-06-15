@@ -83,11 +83,12 @@ type VM struct {
 	CPUConfig *CpuConfig     `json:"cpu_config,omitempty" db:"cpu_config"`
 
 	// Resolved relations (typed as concrete model types from this package)
-	Kernel  *KernelItem   `json:"kernel,omitempty"`
-	Image   *ImageItem    `json:"image,omitempty"`
-	Binary  *BinaryItem   `json:"binary,omitempty"`
-	Network *Network      `json:"network,omitempty"`
-	Volumes []*VolumeItem `json:"volumes,omitempty"`
+	Kernel  *KernelItem      `json:"kernel,omitempty"`
+	Image   *ImageItem       `json:"image,omitempty"`
+	Binary  *BinaryItem      `json:"binary,omitempty"`
+	Network *Network         `json:"network,omitempty"`
+	Volumes []*VolumeItem    `json:"volumes,omitempty"`
+	Vsock   *VsockConfigItem `json:"vsock,omitempty"`
 }
 
 // ── ConsoleInfo ──

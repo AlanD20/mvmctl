@@ -12,6 +12,7 @@
 # Options:
 #   --version X.Y.Z     Explicit version (overrides auto-detection)
 #   --output ./path     Output path for the binary
+#   --arch ARCH         Target architecture for guest agent (amd64|arm64, default: host arch)
 #
 # Version detection priority:
 #   1. --version X.Y.Z flag
@@ -55,11 +56,44 @@ resolve_version() {
   echo "0.0.0-dev"
 }
 
+# ─── Build guest agent (pre-compiled, gzip-compressed for embedding) ─────────
+# Cross-compiles the vsock guest agent for the target architecture, then
+# gzips it. The compressed binary is embedded via //go:embed, reducing the
+# mvm binary size by ~60% for the agent portion.
+build_agent() {
+  local arch="$1"
+  local agent_dir="internal/service/vsockagent"
+  local agent_binary="agent-linux-${arch}"
+  local agent_gz="${agent_binary}.gz"
+
+  # Placeholder for //go:embed before building the agent binary.
+  touch "${agent_dir}/${agent_gz}"
+
+  echo "  → Building guest agent (linux/${arch})..."
+  GOOS=linux GOARCH="${arch}" go build \
+    -o "${agent_dir}/${agent_binary}" \
+    -ldflags="-s -w" \
+    ./internal/service/vsockagent/cmd/
+
+  # Compress for embedding — saves ~60% in embedded binary size.
+  # Decompressed lazily at runtime on first AgentBinary() call.
+  echo "  → Compressing guest agent..."
+  gzip -9 -f "${agent_dir}/${agent_binary}"
+}
+
+# ─── Clean up agent binaries ─────────────────────────────────────────────────
+cleanup_agent() {
+  local arch="$1"
+  rm -f "internal/service/vsockagent/agent-linux-${arch}" \
+        "internal/service/vsockagent/agent-linux-${arch}.gz"
+}
+
 # ─── Build the binary ────────────────────────────────────────────────────────
 do_build() {
   local mode="$1"
   local version="$2"
   local output="$3"
+  local arch="$4"
 
   local ldflags="-X '${LDFLAGS_VAR}=${version}'"
   local buildargs=()
@@ -79,6 +113,10 @@ do_build() {
   fi
 
   buildargs+=("-ldflags=${ldflags}")
+
+  # Step 1: Build guest agent binary for the target arch (needed for //go:embed)
+  build_agent "$arch"
+  trap "cleanup_agent $arch" EXIT
 
   echo "==> Building mvmctl ${mode} binary"
   echo "    version:  ${version}"
@@ -107,6 +145,7 @@ do_version() {
 main() {
   local mode="dev"
   local output=""
+  local arch="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
   EXPLICIT_VERSION=""
 
   while [[ $# -gt 0 ]]; do
@@ -129,6 +168,14 @@ main() {
         exit 1
       fi
       output="$2"
+      shift 2
+      ;;
+    --arch)
+      if [[ -z "${2:-}" ]]; then
+        echo "ERROR: --arch requires a value (amd64|arm64)" >&2
+        exit 1
+      fi
+      arch="$2"
       shift 2
       ;;
     --help | -h)
@@ -159,7 +206,7 @@ main() {
     do_version
     ;;
   dev | release)
-    do_build "$mode" "$version" "$output"
+    do_build "$mode" "$version" "$output" "$arch"
     ;;
   esac
 }

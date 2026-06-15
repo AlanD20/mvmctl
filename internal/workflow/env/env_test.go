@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -24,7 +23,7 @@ import (
 
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
-// Rationale: The Registry must contain all 6 required step types so that
+// Rationale: The Registry must contain all required step types so that
 // ResolveSpec can construct the correct steps from a YAML spec.
 
 func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
@@ -36,6 +35,7 @@ func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
 		"binary":  {},
 		"vm":      {},
 		"ssh":     {},
+		"exec":    {},
 		"copy":    {},
 	}
 
@@ -374,19 +374,9 @@ vm:
 		}
 	}
 	require.NotNil(t, vmStep, "expected VM step not found")
-	deps := vmStep.Dependencies()
-	require.Len(t, deps, 5)
-
-	expectedDeps := []string{
-		"network:my-net",
-		"key:my-key",
-		"image:alpine",
-		"kernel:fc-kernel",
-		"binary:firecracker",
-	}
-	if diff := cmp.Diff(expectedDeps, deps); diff != "" {
-		t.Errorf("Dependencies mismatch (-want +got):\n%s", diff)
-	}
+	// Resource references (network, key, image, kernel, binary) are passed
+	// directly to the API — no implicit DAG dependencies.
+	assert.Empty(t, vmStep.Dependencies(), "VM step has no implicit dependencies")
 }
 
 // Rationale: An empty spec (only version, no resources) must produce zero steps,

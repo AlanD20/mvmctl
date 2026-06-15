@@ -27,6 +27,7 @@ type MockVMAPI struct {
 	VMLoadFunc           func(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool) error
 	VMAttachVolumeFunc   func(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMDetachVolumeFunc   func(ctx context.Context, input inputs.VMInput, volumeName string) error
+	VMExecFunc           func(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
 }
 
 func (m *MockVMAPI) VMCreate(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VM, error) {
@@ -132,4 +133,11 @@ func (m *MockVMAPI) VMDetachVolume(ctx context.Context, input inputs.VMInput, vo
 		return m.VMDetachVolumeFunc(ctx, input, volumeName)
 	}
 	return nil
+}
+
+func (m *MockVMAPI) VMExec(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error) {
+	if m.VMExecFunc != nil {
+		return m.VMExecFunc(ctx, input)
 	}
+	return nil, nil
+}

@@ -145,6 +145,7 @@ type FirecrackerVMConfig struct {
 	Logger            *LoggerConfig            `json:"logger,omitempty"`
 	Metrics           *MetricsConfig           `json:"metrics,omitempty"`
 	CPUConfig         *CpuConfig               `json:"cpu-config,omitempty"`
+	Vsock             *VsockConfig             `json:"vsock,omitempty"`
 }
 
 // ── FirecrackerConfigDict ──
@@ -238,4 +239,7 @@ type FirecrackerConfig struct {
 	// Spawn behavior
 	RelayClientFD *int `json:"relay_client_fd,omitempty"`
 	SnapshotMode  bool `json:"snapshot_mode"`
+
+	// Vsock device config
+	Vsock *VsockConfig `json:"vsock,omitempty"`
 }

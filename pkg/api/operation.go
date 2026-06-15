@@ -19,6 +19,7 @@ import (
 	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
+	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/enricher"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
@@ -54,6 +55,7 @@ type Repos struct {
 	Volume  volume.Repository
 	Host    host.Repository
 	Config  config.SettingsRepository
+	Vsock   vsock.Repository
 }
 
 // Services bundles all domain services.
@@ -68,6 +70,7 @@ type Services struct {
 	Volume  *volume.Service
 	Cache   *cache.Service
 	CP      *ssh.CPService
+	Vsock   *vsock.Service
 }
 type RequiredService struct {
 	Name string
@@ -89,6 +92,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Volume:  volume.NewRepository(sqlDB),
 		Host:    host.NewRepository(sqlDB),
 		Config:  config.NewRepository(sqlDB),
+		Vsock:   vsock.NewRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
@@ -108,12 +112,14 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Volume:  volume.NewService(r.Volume),
 		Cache:   cache.NewService(cacheDir, infra.GetTempDir()),
 		CP:      ssh.NewCPService(),
+		Vsock:   vsock.NewService(r.Vsock),
 	}
 	// Enforce that all required services are non-nil — fail fast at startup.
 	required := []RequiredService{
 		{"Config", s.Config}, {"Image", s.Image}, {"Kernel", s.Kernel},
 		{"Binary", s.Binary}, {"Network", s.Network}, {"Host", s.Host},
 		{"Key", s.Key}, {"Volume", s.Volume}, {"Cache", s.Cache},
+		{"Vsock", s.Vsock},
 	}
 	for _, r := range required {
 		if r.Svc == nil {
@@ -129,11 +135,11 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	}
 
 	return &Operation{
-		Connection:      conn,
-		CacheDir:        cacheDir,
-		Enr:             enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume),
-		Repos:           r,
-		Services:        s,
+		Connection:       conn,
+		CacheDir:         cacheDir,
+		Enr:              enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume, r.Vsock),
+		Repos:            r,
+		Services:         s,
 		ProvisionerType: provisionerType,
 		AuditLog:        logging.NewAuditLog(),
 	}

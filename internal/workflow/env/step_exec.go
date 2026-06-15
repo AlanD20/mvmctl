@@ -15,54 +15,59 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// SSHState is the persisted state for an SSH step.
-type SSHState struct {
+// ExecState is the persisted state for an Exec step.
+type ExecState struct {
 	Command string `yaml:"command"`
 }
 
-// SSHStep implements workflow.Step for running SSH commands on VMs.
-// Destroy is a no-op because SSH commands are ephemeral.
-type SSHStep struct {
+// ExecStep implements workflow.Step for running commands inside VMs via vsock.
+// Destroy is a no-op because exec commands are ephemeral.
+type ExecStep struct {
 	stepType string
 	name     string
 	deps     []string
 	specHash string
-	input    inputs.SSHInput
-	op       api.SSHAPI
-	saved    *SSHState
+	input    inputs.VMExecInput
+	op       api.VMAPI
+	saved    *ExecState
 	meta     model.ResourceMeta
 }
 
-func (s *SSHStep) Type() string { return s.stepType }
+func (s *ExecStep) Type() string { return s.stepType }
 
-func (s *SSHStep) Name() string { return FormatStepName(s.stepType, s.name) }
+func (s *ExecStep) Name() string { return FormatStepName(s.stepType, s.name) }
 
-func (s *SSHStep) Dependencies() []string { return s.deps }
+func (s *ExecStep) Dependencies() []string { return s.deps }
 
-func (s *SSHStep) SpecHash() string { return s.specHash }
+func (s *ExecStep) SpecHash() string { return s.specHash }
 
-func (s *SSHStep) Apply(
+func (s *ExecStep) Apply(
 	ctx context.Context,
 	state *workflow.SharedState,
 	saved model.ResourceState,
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
-	// SSH commands are imperative — always execute on apply.
+	// Exec commands are imperative — always execute on apply.
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "running command"})
-	// Blank line to visually separate output from the step status line.
-	fmt.Println()
-	// Wrap onProgress to inject step name into SSH output events.
-	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
-	if err := s.op.SSHConnect(ctx, s.input, stepProgress); err != nil {
+
+	// Command is sent to the guest agent as-is — the agent wraps it in
+	// sh -c <command> internally (see vsockagent.handleExec).
+	if s.input.Command == "" {
+		return fmt.Errorf("%s: empty command", s.Name())
+	}
+
+	_, err := s.op.VMExec(ctx, s.input)
+	if err != nil {
 		return err
 	}
-	cmd := ""
-	if s.input.Cmd != nil {
-		cmd = *s.input.Cmd
-	}
-	s.saved = &SSHState{
-		Command: cmd,
+
+	// Print a blank line to visually separate from the step status line.
+	// Output is streamed directly by the vsock client during execution.
+	fmt.Println()
+
+	s.saved = &ExecState{
+		Command: s.input.Command,
 	}
 	s.meta = model.ResourceMeta{
 		WasCreated: true,
@@ -75,24 +80,24 @@ func (s *SSHStep) Apply(
 	return nil
 }
 
-func (s *SSHStep) Destroy(
+func (s *ExecStep) Destroy(
 	ctx context.Context,
 	saved model.ResourceState,
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
 	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[SSHState](saved.Spec)
+		s.saved = StateFromMap[ExecState](saved.Spec)
 		s.meta = saved.Meta
 	}
-	// SSH commands are ephemeral — no teardown needed.
+	// Exec commands are ephemeral — no teardown needed.
 	if err := write(ctx, s.StateData()); err != nil {
 		return fmt.Errorf("persist step state after destroy: %w", err)
 	}
 	return nil
 }
 
-func (s *SSHStep) StateData() model.ResourceState {
+func (s *ExecStep) StateData() model.ResourceState {
 	if s.saved == nil {
 		return model.ResourceState{}
 	}
@@ -102,7 +107,7 @@ func (s *SSHStep) StateData() model.ResourceState {
 	}
 }
 
-func newSSHStepFromSpec(
+func newExecStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
@@ -115,11 +120,11 @@ func newSSHStepFromSpec(
 	if err != nil {
 		return nil, err
 	}
-	var input inputs.SSHInput
+	var input inputs.VMExecInput
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		return nil, err
 	}
-	return &SSHStep{
+	return &ExecStep{
 		stepType: stepType,
 		name:     name,
 		deps:     extractDependsOn(spec),
@@ -129,7 +134,7 @@ func newSSHStepFromSpec(
 	}, nil
 }
 
-func newSSHStepFromState(
+func newExecStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceState,
@@ -139,8 +144,8 @@ func newSSHStepFromState(
 	if op == nil {
 		return nil, errors.New("operation not initialized")
 	}
-	ss := StateFromMap[SSHState](saved.Spec)
-	return &SSHStep{
+	ss := StateFromMap[ExecState](saved.Spec)
+	return &ExecStep{
 		stepType: stepType,
 		name:     name,
 		deps:     deps,

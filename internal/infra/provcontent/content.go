@@ -618,6 +618,90 @@ func (pc Builder) BuildDeblobOps(osType string) []Operation {
 	return ops
 }
 
+// BuildVsockAgentOps generates operations for embedding the vsock guest agent
+// into the root filesystem. Used by both loop-mount and guestfs provisioner
+// backends at VM creation time.
+//
+// Produces:
+//   - FileOp: /usr/bin/mvm-vsock-agent (agent binary, mode 0755)
+//   - FileOp: /var/run/mvm-vsock-agent.token (auth token, mode 0644)
+//   - FileOp: /etc/systemd/system/mvm-vsock-agent.service (systemd unit, mode 0644)
+//   - FileOp: /etc/init.d/mvm-vsock-agent (OpenRC init script, mode 0755)
+//   - ChrootOp: detect init system and enable agent
+//
+// Matches Python's build_vsock_agent_ops() classmethod.
+func (Builder) BuildVsockAgentOps(agentBinary []byte, port int, token string) []Operation {
+	return []Operation{
+		FileOp{
+			Path: "/usr/bin/mvm-vsock-agent",
+			Data: agentBinary,
+			Mode: 0755,
+			UID:  0,
+			GID:  0,
+		},
+		FileOp{
+			Path: "/var/run/mvm-vsock-agent.token",
+			Data: []byte(token),
+			Mode: 0600,
+			UID:  0,
+			GID:  0,
+		},
+		FileOp{
+			Path: "/etc/systemd/system/mvm-vsock-agent.service",
+			Data: fmt.Appendf(nil, `[Unit]
+Description=MVM Guest Agent
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/mvm-vsock-agent -port %d
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+`, port),
+			Mode: 0644,
+			UID:  0,
+			GID:  0,
+		},
+		FileOp{
+			Path: "/etc/init.d/mvm-vsock-agent",
+			Data: fmt.Appendf(nil, `#!/bin/sh
+# OpenRC init script for mvm-vsock-agent
+#
+### BEGIN INIT INFO
+# Provides:          mvm-vsock-agent
+# Required-Start:    $local_fs $remote_fs
+# Required-Stop:     $local_fs $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: MVM Guest Agent
+### END INIT INFO
+
+case "$1" in
+  start) /usr/bin/mvm-vsock-agent -port %d & ;;
+  stop)  pkill -f "mvm-vsock-agent -port %d" || true ;;
+  *)     echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac
+`, port, port),
+			Mode: 0755,
+			UID:  0,
+			GID:  0,
+		},
+		ChrootOp{
+			Command: `
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable mvm-vsock-agent
+elif rc-update >/dev/null 2>&1; then
+    rc-update add mvm-vsock-agent default
+else
+    echo "mvm: warning - unknown init system, mvm-vsock-agent not auto-enabled"
+fi
+`,
+		},
+	}
+}
+
 // BuildFixFstabOps generates operation to fix /etc/fstab for Firecracker.
 // Matches Python's build_fix_fstab_ops() classmethod.
 func (Builder) BuildFixFstabOps() []Operation {
