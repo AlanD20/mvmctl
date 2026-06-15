@@ -63,7 +63,14 @@ func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error {
 
 // ResolveSpec reads a YAML spec file, validates it, and converts each
 // entry into a workflow.Step using the appropriate factory from Registry.
-func ResolveSpec(ctx context.Context, specPath string, op *api.Operation) ([]workflow.Step, error) {
+func ResolveSpec(ctx context.Context, specPath string, op api.API) ([]workflow.Step, error) {
+	// Ensure op is non-nil — the factory constructors now reject nil op.
+	// Diff/Resolve create steps only for Name/SpecHash/Dependencies access,
+	// none of which require a real API connection.
+	if op == nil {
+		op = &api.Operation{}
+	}
+
 	if err := ctx.Err(); err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeInternal,
@@ -110,7 +117,7 @@ func ResolveSpec(ctx context.Context, specPath string, op *api.Operation) ([]wor
 	return steps, nil
 }
 
-func resolveSpecV1(spec EnvSpec, op *api.Operation) ([]workflow.Step, error) {
+func resolveSpecV1(spec EnvSpec, op api.API) ([]workflow.Step, error) {
 	var steps []workflow.Step
 
 	for resourceKey, factory := range Registry {

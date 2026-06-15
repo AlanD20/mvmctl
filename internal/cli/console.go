@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewConsoleCmd(op *api.Operation) *cobra.Command {
+func NewConsoleCmd(consoleAPI api.ConsoleAPI) *cobra.Command {
 	var state bool
 	var kill bool
 
@@ -40,12 +40,12 @@ Use --kill to stop the console relay.`,
 			identifier := args[0]
 
 			if state {
-				return showConsoleState(op, cmd.Context(), identifier)
+				return showConsoleState(consoleAPI, cmd.Context(), identifier)
 			}
 			if kill {
-				return killConsoleRelay(op, cmd.Context(), identifier)
+				return killConsoleRelay(consoleAPI, cmd.Context(), identifier)
 			}
-			return attachToConsole(op, cmd, identifier)
+			return attachToConsole(consoleAPI, cmd, identifier)
 		},
 	}
 
@@ -55,8 +55,8 @@ Use --kill to stop the console relay.`,
 	return cmd
 }
 
-func showConsoleState(op *api.Operation, ctx context.Context, identifier string) error {
-	state, err := op.ConsoleGetState(ctx, identifier)
+func showConsoleState(consoleAPI api.ConsoleAPI, ctx context.Context, identifier string) error {
+	state, err := consoleAPI.ConsoleGetState(ctx, identifier)
 	if err != nil {
 		// Python's _show_console_state does NOT catch exceptions from
 		// ConsoleOperation.get_state() — they propagate to @handle_errors,
@@ -84,8 +84,8 @@ func showConsoleState(op *api.Operation, ctx context.Context, identifier string)
 	return nil
 }
 
-func killConsoleRelay(op *api.Operation, ctx context.Context, identifier string) error {
-	err := op.ConsoleKill(ctx, identifier)
+func killConsoleRelay(consoleAPI api.ConsoleAPI, ctx context.Context, identifier string) error {
+	err := consoleAPI.ConsoleKill(ctx, identifier)
 	if err != nil {
 		common.Cli.Error(err.Error())
 		return err
@@ -95,8 +95,8 @@ func killConsoleRelay(op *api.Operation, ctx context.Context, identifier string)
 	return nil
 }
 
-func attachToConsole(op *api.Operation, cmd *cobra.Command, identifier string) error {
-	info, err := op.ConsoleGetConnectionInfo(cmd.Context(), identifier)
+func attachToConsole(consoleAPI api.ConsoleAPI, cmd *cobra.Command, identifier string) error {
+	info, err := consoleAPI.ConsoleGetConnectionInfo(cmd.Context(), identifier)
 	if err != nil {
 		// Python: get_connection_info raises MVMError which propagates to
 		// @handle_errors, which calls mvm_cli.error(str(e)) then typer.Exit(1).
@@ -108,7 +108,7 @@ func attachToConsole(op *api.Operation, cmd *cobra.Command, identifier string) e
 	common.Cli.Info(fmt.Sprintf("Attaching to console of '%s'...", info.VMName))
 	common.Cli.Info("Press Ctrl+X then D to detach")
 
-	err = op.ConsoleAttachConsole(cmd.Context(), info.SocketPath, os.Stdin, os.Stdout)
+	err = consoleAPI.ConsoleAttachConsole(cmd.Context(), info.SocketPath, os.Stdin, os.Stdout)
 	if err == nil {
 		// Python's _attach_to_console: mvm_cli.info("\nDetached from console")
 		common.Cli.Info("\nDetached from console")

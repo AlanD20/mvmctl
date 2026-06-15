@@ -17,6 +17,7 @@ import (
 	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/inputs"
 )
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
@@ -50,8 +51,12 @@ func (r *errorKeyRepo) GetByName(_ context.Context, _ string) (*model.SSHKeyItem
 }
 
 // newKeyStep is a shorthand for creating a KeyStep via the registry.
+// For nil-op tests, it constructs the step directly via NewKeyStep.
 func newKeyStep(t *testing.T, op *api.Operation) workflow.Step {
 	t.Helper()
+	if op == nil {
+		return envpkg.NewKeyStep(nil, "my-key", inputs.KeyCreateInput{Name: "my-key"})
+	}
 	spec := map[string]any{"name": "my-key"}
 	step, err := envpkg.Registry["key"].FromSpec("key", "my-key", spec, op)
 	require.NoError(t, err, "FromSpec must succeed")
@@ -533,7 +538,7 @@ func TestKeyStep_StateData_AfterDestroy(t *testing.T) {
 
 func TestKeyStep_FromSpec_NameAndType(t *testing.T) {
 	spec := map[string]any{"name": "ssh-key"}
-	step, err := envpkg.Registry["key"].FromSpec("key", "ssh-key", spec, nil)
+	step, err := envpkg.Registry["key"].FromSpec("key", "ssh-key", spec, &api.Operation{})
 	require.NoError(t, err)
 
 	assert.Equal(t, "key:ssh-key", step.Name())
@@ -551,7 +556,7 @@ func TestKeyStep_FromState_CorrectType(t *testing.T) {
 		Spec: model.ResourceMap{"key_id": "key-789"},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["key"].FromState("key", "restored-key", saved, nil, nil)
+	step, err := envpkg.Registry["key"].FromState("key", "restored-key", saved, nil, &api.Operation{})
 	require.NoError(t, err)
 
 	assert.Equal(t, "key:restored-key", step.Name())

@@ -16,6 +16,7 @@ import (
 	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/inputs"
 )
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
@@ -49,8 +50,13 @@ func (r *errorVMRepo) GetByName(_ context.Context, _ string) (*model.VM, error) 
 }
 
 // newVMStep is a shorthand for creating a VMStep via the registry.
+// For nil-op tests, it constructs the step directly via NewVMStep
+// since the factory now rejects nil op.
 func newVMStep(t *testing.T, op *api.Operation) workflow.Step {
 	t.Helper()
+	if op == nil {
+		return envpkg.NewVMStep(nil, "test-vm", inputs.VMCreateInput{Name: "test-vm"})
+	}
 	spec := map[string]any{
 		"name":    "test-vm",
 		"network": "my-net",

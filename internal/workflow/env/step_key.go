@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -27,7 +28,7 @@ type KeyStep struct {
 	deps     []string
 	specHash string
 	input    inputs.KeyCreateInput
-	op       *api.Operation
+	op       api.KeyAPI
 	saved    *KeyState
 	meta     model.ResourceMeta
 }
@@ -55,8 +56,8 @@ func (s *KeyStep) Apply(
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.Repos.Key.GetByName(ctx, s.input.Name)
-	if err != nil {
+	existing, err := s.op.KeyGet(ctx, inputs.KeyInput{Identifiers: []string{s.input.Name}})
+	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
 			fmt.Sprintf("check key %q: %v", s.input.Name, err),
@@ -147,12 +148,28 @@ func (s *KeyStep) StateData() model.ResourceState {
 	}
 }
 
+// NewKeyStep creates a KeyStep with the given API interface for testing.
+// Only for use in tests.
+func NewKeyStep(op api.KeyAPI, name string, input inputs.KeyCreateInput) *KeyStep {
+	return &KeyStep{
+		op:       op,
+		name:     name,
+		stepType: "key",
+		input:    input,
+		specHash: crypto.SHA256([]byte(name)),
+	}
+}
+
 func newKeyStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -179,8 +196,12 @@ func newKeyStepFromState(
 	name string,
 	saved model.ResourceState,
 	deps []string,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	ks := StateFromMap[KeyState](saved.Spec)
 	return &KeyStep{
 		stepType: stepType,

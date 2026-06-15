@@ -12,15 +12,23 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/service/console"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// ConsoleAPI defines the public interface for console relay operations.
+type ConsoleAPI interface {
+	ConsoleGetState(ctx context.Context, identifier string) (*results.ConsoleStateResult, error)
+	ConsoleGetConnectionInfo(ctx context.Context, identifier string) (*model.ConsoleConnectionInfo, error)
+	ConsoleKill(ctx context.Context, identifier string) error
+	ConsoleAttachConsole(ctx context.Context, socketPath string, stdin io.Reader, stdout io.Writer) error
+}
 
 // ConsoleGetState returns console relay state for a VM.
 // Matches Python's ConsoleOperation.get_state() exactly.
 // Python returns a raw dict with running, pid, socket_path.
 // On VM not found, raises VMNotFoundError — Go returns error.
-func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (*responses.ConsoleStateResult, error) {
+func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (*results.ConsoleStateResult, error) {
 	resolved, err := op.resolveWithRequest(ctx, identifier)
 	if err != nil {
 		return nil, err
@@ -31,7 +39,7 @@ func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (*r
 	if pidOK {
 		pidPtr = &pidVal
 	}
-	return &responses.ConsoleStateResult{
+	return &results.ConsoleStateResult{
 		Running:    resolved.Relay.IsRunning(),
 		PID:        pidPtr,
 		SocketPath: resolved.Relay.SocketPath(),
@@ -117,7 +125,7 @@ func (op *Operation) resolveWithRequest(ctx context.Context, identifier string) 
 	// Resolve VM first to get ID and name required for relay creation
 	vmRequest := inputs.NewVMRequest(
 		inputs.VMInput{Identifiers: []string{identifier}},
-		op.Connection.DB(), op.Repos.VM, nil,
+		op.Connection.DB(), op.Repos.VM,
 	)
 	vmResolved, err := vmRequest.Resolve(ctx)
 	if err != nil {

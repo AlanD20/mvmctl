@@ -10,42 +10,28 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/inputs"
 )
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
-// ctxKernelRepo wraps testutil.KernelRepo to propagate context cancellation
-// from GetByType. The plain mock ignores context, so this wrapper is needed
+// ctxKernelAPI wraps testutil.MockKernelAPI to propagate context cancellation
+// from KernelGet. The plain mock ignores context, so this wrapper is needed
 // to test the R8 (context cancellation) iron rule.
-type ctxKernelRepo struct {
-	*testutil.KernelRepo
+type ctxKernelAPI struct {
+	testutil.MockKernelAPI
 }
 
-var _ kernel.Repository = (*ctxKernelRepo)(nil)
-
-func (r *ctxKernelRepo) GetByType(ctx context.Context, kernelType string) (*model.KernelItem, error) {
+func (m *ctxKernelAPI) KernelGet(ctx context.Context, identifier string) (*model.KernelItem, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return r.KernelRepo.GetByType(ctx, kernelType)
-}
-
-// errorKernelRepo wraps testutil.KernelRepo to inject errors into GetByType.
-type errorKernelRepo struct {
-	*testutil.KernelRepo
-	getErr error
-}
-
-var _ kernel.Repository = (*errorKernelRepo)(nil)
-
-func (r *errorKernelRepo) GetByType(_ context.Context, _ string) (*model.KernelItem, error) {
-	return nil, r.getErr
+	return m.MockKernelAPI.KernelGet(ctx, identifier)
 }
 
 // ctxRecordingWriter returns a StateWriter that propagates context cancellation
@@ -62,17 +48,18 @@ func ctxRecordingWriter() (workflow.StateWriter, *[]model.ResourceState) {
 	}, &writes
 }
 
-// newKernelStep is a shorthand for creating a KernelStep via the registry.
-func newKernelStep(t *testing.T, op *api.Operation) workflow.Step {
+// newKernelStep is a shorthand for creating a KernelStep.
+// For nil-op tests, it constructs the step directly via NewKernelStep.
+func newKernelStep(t *testing.T, op api.KernelAPI) workflow.Step {
 	t.Helper()
-	spec := map[string]any{
-		"name":    "fc-kernel",
-		"type":    "firecracker",
-		"version": "1.15.1",
+	if op == nil {
+		return envpkg.NewKernelStep(nil, "fc-kernel", inputs.KernelPullInput{
+			KernelType: "firecracker", Version: "1.15.1",
+		})
 	}
-	step, err := envpkg.Registry["kernel"].FromSpec("kernel", "fc-kernel", spec, op)
-	require.NoError(t, err, "FromSpec must succeed")
-	return step
+	return envpkg.NewKernelStep(op, "fc-kernel", inputs.KernelPullInput{
+		KernelType: "firecracker", Version: "1.15.1",
+	})
 }
 
 // ─── KernelStep.Apply ────────────────────────────────────────────────────────
@@ -82,7 +69,7 @@ func newKernelStep(t *testing.T, op *api.Operation) workflow.Step {
 
 func TestKernelStep_Apply(t *testing.T) {
 	tests := map[string]struct {
-		setupOp      func(t *testing.T) *api.Operation
+		setupAPI     func(t *testing.T) api.KernelAPI
 		ctx          func() context.Context
 		saved        model.ResourceState
 		wantErr      string
@@ -92,14 +79,18 @@ func TestKernelStep_Apply(t *testing.T) {
 		// ── Error paths FIRST ──────────────────────────────────────────
 
 		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
-			ctx:     context.Background,
-			wantErr: "operation not initialized",
+			setupAPI: func(_ *testing.T) api.KernelAPI { return nil },
+			ctx:      context.Background,
+			wantErr:  "operation not initialized",
 		},
 		"context_cancelled_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{Kernel: &ctxKernelRepo{KernelRepo: testutil.NewKernelRepo()}},
+			setupAPI: func(_ *testing.T) api.KernelAPI {
+				return &ctxKernelAPI{
+					MockKernelAPI: testutil.MockKernelAPI{
+						KernelGetFunc: func(_ context.Context, _ string) (*model.KernelItem, error) {
+							return &model.KernelItem{}, nil
+						},
+					},
 				}
 			},
 			ctx: func() context.Context {
@@ -110,13 +101,10 @@ func TestKernelStep_Apply(t *testing.T) {
 			wantErr: "context canceled",
 		},
 		"getbytype_database_error_wraps_correctly": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{
-						Kernel: &errorKernelRepo{
-							KernelRepo: testutil.NewKernelRepo(),
-							getErr:     errors.New("connection refused"),
-						},
+			setupAPI: func(_ *testing.T) api.KernelAPI {
+				return &testutil.MockKernelAPI{
+					KernelGetFunc: func(_ context.Context, _ string) (*model.KernelItem, error) {
+						return nil, errors.New("connection refused")
 					},
 				}
 			},
@@ -127,14 +115,16 @@ func TestKernelStep_Apply(t *testing.T) {
 		// ── Happy paths AFTER ──────────────────────────────────────────
 
 		"kernel_exists_skips_pull_and_writes_state": {
-			setupOp: func(t *testing.T) *api.Operation {
-				repo := testutil.NewKernelRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.KernelItem{
-					ID:        "krnl-existing",
-					Type:      "firecracker",
-					IsPresent: true,
-				}))
-				return &api.Operation{Repos: api.Repos{Kernel: repo}}
+			setupAPI: func(_ *testing.T) api.KernelAPI {
+				return &testutil.MockKernelAPI{
+					KernelGetFunc: func(_ context.Context, _ string) (*model.KernelItem, error) {
+						return &model.KernelItem{
+							ID:        "krnl-existing",
+							Type:      "firecracker",
+							IsPresent: true,
+						}, nil
+					},
+				}
 			},
 			ctx:          context.Background,
 			wantKernelID: "krnl-existing",
@@ -144,14 +134,16 @@ func TestKernelStep_Apply(t *testing.T) {
 			},
 		},
 		"kernel_exists_preserves_was_created_from_saved": {
-			setupOp: func(t *testing.T) *api.Operation {
-				repo := testutil.NewKernelRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.KernelItem{
-					ID:        "krnl-preserved",
-					Type:      "firecracker",
-					IsPresent: true,
-				}))
-				return &api.Operation{Repos: api.Repos{Kernel: repo}}
+			setupAPI: func(_ *testing.T) api.KernelAPI {
+				return &testutil.MockKernelAPI{
+					KernelGetFunc: func(_ context.Context, _ string) (*model.KernelItem, error) {
+						return &model.KernelItem{
+							ID:        "krnl-preserved",
+							Type:      "firecracker",
+							IsPresent: true,
+						}, nil
+					},
+				}
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
@@ -167,7 +159,7 @@ func TestKernelStep_Apply(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := tc.setupOp(t)
+			op := tc.setupAPI(t)
 			step := newKernelStep(t, op)
 
 			state := workflow.NewSharedState()
@@ -215,7 +207,7 @@ func TestKernelStep_Apply(t *testing.T) {
 
 func TestKernelStep_Destroy(t *testing.T) {
 	tests := map[string]struct {
-		setupOp   func(t *testing.T) *api.Operation
+		setupAPI  func(t *testing.T) api.KernelAPI
 		ctx       func() context.Context
 		saved     model.ResourceState
 		wantErr   string
@@ -224,12 +216,12 @@ func TestKernelStep_Destroy(t *testing.T) {
 		// ── Error paths FIRST ──────────────────────────────────────────
 
 		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
-			wantErr: "operation not initialized",
+			setupAPI: func(_ *testing.T) api.KernelAPI { return nil },
+			wantErr:  "operation not initialized",
 		},
 		"context_cancelled_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Kernel: testutil.NewKernelRepo()}}
+			setupAPI: func(_ *testing.T) api.KernelAPI {
+				return &testutil.MockKernelAPI{}
 			},
 			ctx: func() context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -242,15 +234,15 @@ func TestKernelStep_Destroy(t *testing.T) {
 		// ── Happy paths AFTER ──────────────────────────────────────────
 
 		"writes_state_and_returns_nil": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Kernel: testutil.NewKernelRepo()}}
+			setupAPI: func(_ *testing.T) api.KernelAPI {
+				return &testutil.MockKernelAPI{}
 			},
 			saved:     model.ResourceState{},
 			wantState: model.ResourceState{},
 		},
 		"recovers_saved_state_from_param": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Kernel: testutil.NewKernelRepo()}}
+			setupAPI: func(_ *testing.T) api.KernelAPI {
+				return &testutil.MockKernelAPI{}
 			},
 			saved: model.ResourceState{
 				Spec: model.ResourceMap{"kernel_id": "krnl-456"},
@@ -265,7 +257,7 @@ func TestKernelStep_Destroy(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := tc.setupOp(t)
+			op := tc.setupAPI(t)
 			step := newKernelStep(t, op)
 
 			ctx := context.Background()
@@ -333,16 +325,16 @@ func TestKernelStep_StateData(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := &api.Operation{Repos: api.Repos{Kernel: testutil.NewKernelRepo()}}
+			dummyOp := &api.Operation{}
 
 			var step workflow.Step
 			if tc.fromState {
 				saved := model.ResourceState{Spec: tc.savedSpec, Meta: tc.savedMeta}
 				var err error
-				step, err = envpkg.Registry["kernel"].FromState("kernel", "fc-kernel", saved, nil, op)
+				step, err = envpkg.Registry["kernel"].FromState("kernel", "fc-kernel", saved, nil, dummyOp)
 				require.NoError(t, err)
 			} else {
-				step = newKernelStep(t, op)
+				step = newKernelStep(t, &testutil.MockKernelAPI{})
 			}
 
 			got := step.StateData()
@@ -358,14 +350,11 @@ func TestKernelStep_StateData(t *testing.T) {
 // propagate it rather than silently swallowing the persistence failure.
 
 func TestKernelStep_Apply_WriteFailure(t *testing.T) {
-	repo := testutil.NewKernelRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.KernelItem{
-		ID:        "krnl-1",
-		Type:      "firecracker",
-		IsPresent: true,
-	}))
-	op := &api.Operation{Repos: api.Repos{Kernel: repo}}
-	step := newKernelStep(t, op)
+	step := newKernelStep(t, &testutil.MockKernelAPI{
+		KernelGetFunc: func(_ context.Context, _ string) (*model.KernelItem, error) {
+			return &model.KernelItem{ID: "krnl-1", Type: "firecracker", IsPresent: true}, nil
+		},
+	})
 
 	writeErr := errors.New("disk full")
 	err := step.Apply(
@@ -382,8 +371,7 @@ func TestKernelStep_Apply_WriteFailure(t *testing.T) {
 }
 
 func TestKernelStep_Destroy_WriteFailure(t *testing.T) {
-	op := &api.Operation{Repos: api.Repos{Kernel: testutil.NewKernelRepo()}}
-	step := newKernelStep(t, op)
+	step := newKernelStep(t, &testutil.MockKernelAPI{})
 
 	writeErr := errors.New("disk full")
 	err := step.Destroy(

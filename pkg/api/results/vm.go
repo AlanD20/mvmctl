@@ -1,4 +1,4 @@
-package responses
+package results
 
 import "mvmctl/internal/lib/model"
 

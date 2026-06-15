@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -30,7 +31,7 @@ type VMStep struct {
 	deps     []string
 	specHash string
 	input    inputs.VMCreateInput
-	op       *api.Operation
+	op       api.VMAPI
 	saved    *VMState
 	meta     model.ResourceMeta
 }
@@ -140,8 +141,8 @@ func (s *VMStep) Apply(
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.Repos.VM.GetByName(ctx, s.name)
-	if err != nil {
+	existing, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{s.name}})
+	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
 			fmt.Sprintf("check vm %q: %v", s.name, err),
@@ -251,8 +252,12 @@ func newVMStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -287,13 +292,30 @@ func newVMStepFromSpec(
 	}, nil
 }
 
+// NewVMStep creates a VMStep with the given API interface for testing.
+// It bypasses the nil-op check in newVMStepFromSpec/newVMStepFromState.
+// Only for use in tests.
+func NewVMStep(op api.VMAPI, name string, input inputs.VMCreateInput) *VMStep {
+	return &VMStep{
+		op:       op,
+		name:     name,
+		stepType: "vm",
+		input:    input,
+		specHash: crypto.SHA256([]byte(name)),
+	}
+}
+
 func newVMStepFromState(
 	stepType string,
 	name string,
 	saved model.ResourceState,
 	deps []string,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	vs := StateFromMap[VMState](saved.Spec)
 	return &VMStep{
 		stepType: stepType,

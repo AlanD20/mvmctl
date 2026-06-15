@@ -13,9 +13,19 @@ import (
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// VolumeAPI defines the public interface for volume operations.
+type VolumeAPI interface {
+	VolumeListAll(ctx context.Context) []*model.VolumeItem
+	VolumeCreate(ctx context.Context, input inputs.VolumeCreateInput) (*model.VolumeItem, error)
+	VolumeRemove(ctx context.Context, input inputs.VolumeInput, force bool) *errs.BatchResult
+	VolumeInspect(ctx context.Context, input inputs.VolumeInput) (*results.VolumeInspect, error)
+	VolumeResize(ctx context.Context, input inputs.VolumeCreateInput) error
+	VolumeGet(ctx context.Context, input inputs.VolumeInput) (*model.VolumeItem, error)
+}
 
 // VolumeListAll returns all volumes.
 // Matches Python's VolumeOperation.list_all() exactly.
@@ -171,7 +181,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 // VolumeInspect returns detailed volume info as a raw dictionary.
 // Matches Python's VolumeOperation.inspect() exactly — returns dict[str, Any]
 // with volume metadata and disk information, not wrapped in OperationResult.
-func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput) (*responses.VolumeInspect, error) {
+func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput) (*results.VolumeInspect, error) {
 	vol, err := op.VolumeGet(ctx, input)
 	if err != nil {
 		return nil, err
@@ -187,17 +197,17 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 		}
 	}
 
-	return &responses.VolumeInspect{
-		Volume: responses.VolumeItemInfo{
+	return &results.VolumeInspect{
+		Volume: results.VolumeItemInfo{
 			ID: vol.ID, Name: vol.Name, SizeBytes: vol.SizeBytes,
 			Format: string(vol.Format), IsReadOnly: vol.IsReadOnly,
 			Path: vol.Path, Status: string(vol.Status),
 		},
-		Attachment: responses.VolumeAttachmentInfo{
+		Attachment: results.VolumeAttachmentInfo{
 			VMID: vol.VMID, VMName: vmName,
 		},
 		DiskInfo: diskInfo,
-		Timestamps: responses.VolumeTimestampsInfo{
+		Timestamps: results.VolumeTimestampsInfo{
 			CreatedAt: vol.CreatedAt, UpdatedAt: vol.UpdatedAt,
 		},
 	}, nil

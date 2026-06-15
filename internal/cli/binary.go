@@ -36,22 +36,22 @@ var binaryColumns = []common.ListingColumn{
 }
 
 // NewBinaryCmd creates the binary command and its subcommands.
-func NewBinaryCmd(op *api.Operation) *cobra.Command {
+func NewBinaryCmd(binaryAPI api.BinaryAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "bin",
 		Aliases: []string{"binary"},
 		Short:   "Binary management",
 	}
 
-	cmd.AddCommand(newBinaryListCmd(op))
-	cmd.AddCommand(newBinaryPullCmd(op))
-	cmd.AddCommand(newBinaryRemoveCmd(op))
-	cmd.AddCommand(newBinaryDefaultCmd(op))
+	cmd.AddCommand(newBinaryListCmd(binaryAPI, configAPI))
+	cmd.AddCommand(newBinaryPullCmd(binaryAPI))
+	cmd.AddCommand(newBinaryRemoveCmd(binaryAPI))
+	cmd.AddCommand(newBinaryDefaultCmd(binaryAPI))
 
 	return cmd
 }
 
-func newBinaryListCmd(op *api.Operation) *cobra.Command {
+func newBinaryListCmd(binaryAPI api.BinaryAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 	var remote bool
@@ -62,7 +62,7 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 		Aliases: []string{"list"},
 		Short:   "List local (and optionally remote) Firecracker versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			local, _, err := op.BinaryList(cmd.Context(), false, nil, nil)
+			local, _, err := binaryAPI.BinaryList(cmd.Context(), false, nil, nil)
 			if err != nil {
 				return err
 			}
@@ -78,7 +78,7 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 
 			if remote {
 				fmt.Fprintf(os.Stderr, "Fetching remote versions...\n")
-				_, remoteVersions, err := op.BinaryList(cmd.Context(), true, &limit, nil)
+				_, remoteVersions, err := binaryAPI.BinaryList(cmd.Context(), true, &limit, nil)
 				if err != nil {
 					return err
 				}
@@ -87,7 +87,7 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Local listing
-			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
+			style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, longOutput)
 			common.RenderListing(local, binaryColumns, style)
 
 			return nil
@@ -102,7 +102,7 @@ func newBinaryListCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryPullCmd(op *api.Operation) *cobra.Command {
+func newBinaryPullCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 	var version string
 	var gitRef string
 	var setDefault bool
@@ -149,7 +149,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 				common.Cli.Info("  The build output will appear below once it starts:\n")
 
 				gitRefPtr := &gitRef
-				binaries, err := op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
+				binaries, err := binaryAPI.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 					Version:          "",
 					Type:             typ,
 					GitRef:           gitRefPtr,
@@ -175,7 +175,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Normal download path
-			binaries, err := op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
+			binaries, err := binaryAPI.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 				Version:          effectiveVersion,
 				Type:             typ,
 				SetDefault:       setDefault,
@@ -197,7 +197,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 						return nil
 					}
 
-					binaries, err = op.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
+					binaries, err = binaryAPI.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 						Version:          effectiveVersion,
 						Type:             typ,
 						SetDefault:       setDefault,
@@ -231,7 +231,7 @@ func newBinaryPullCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
+func newBinaryRemoveCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 	var version string
 	var force bool
 
@@ -243,7 +243,7 @@ func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeBinaryVersions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if version != "" {
-				if err := op.BinaryRemoveByVersion(cmd.Context(), version, force); err != nil {
+				if err := binaryAPI.BinaryRemoveByVersion(cmd.Context(), version, force); err != nil {
 					return err
 				}
 				common.Cli.Success(fmt.Sprintf("Removed: v%s", version))
@@ -254,7 +254,7 @@ func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			batchResult := op.BinaryRemove(cmd.Context(), inputs.BinaryInput{Identifiers: args}, force)
+			batchResult := binaryAPI.BinaryRemove(cmd.Context(), inputs.BinaryInput{Identifiers: args}, force)
 			for _, r := range batchResult.Items {
 				if r.Status == "success" {
 					msg := r.Message
@@ -284,7 +284,7 @@ func newBinaryRemoveCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
+func newBinaryDefaultCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:               "default [identifier]",
 		Short:             "Set a binary as the active default",
@@ -293,7 +293,7 @@ func newBinaryDefaultCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
-			item, err := op.BinarySetDefault(cmd.Context(), inputs.BinaryInput{Identifiers: []string{identifier}})
+			item, err := binaryAPI.BinarySetDefault(cmd.Context(), inputs.BinaryInput{Identifiers: []string{identifier}})
 			if err != nil {
 				return err
 			}

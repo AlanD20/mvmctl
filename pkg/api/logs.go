@@ -10,13 +10,19 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
+// LogAPI defines the public interface for log operations.
+type LogAPI interface {
+	LogStream(ctx context.Context, input inputs.LogInput, callback func(string) error) error
+	LogStreamChannel(ctx context.Context, input inputs.LogInput) (lineCh <-chan string, errCh <-chan error, err error)
+}
+
 // LogStream streams log lines for a VM synchronously via callback.
 // Matches Python's LogOperation.stream() -> Generator[str] exactly.
 //
 // Python:
 //
 //	for line in LogOperation.stream(inputs):
-//	    print(line)
+//	    fmt.Println(line)
 //
 // Go equivalent:
 //

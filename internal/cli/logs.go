@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewLogsCmd(op *api.Operation) *cobra.Command {
+func NewLogsCmd(logsAPI api.LogAPI) *cobra.Command {
 	var osLog bool
 	var rawLines int
 	var follow bool
@@ -54,7 +54,7 @@ Use --os to show the Firecracker process log.`,
 
 			// Python: for line in LogOperation.stream(inputs): print(line)
 			// Go:     LogOperation.Stream(ctx, input, func(line) { fmt.Println(line) })
-			err := op.LogStream(cmd.Context(), input, func(line string) error {
+			err := logsAPI.LogStream(cmd.Context(), input, func(line string) error {
 				fmt.Println(line)
 				return nil
 			})

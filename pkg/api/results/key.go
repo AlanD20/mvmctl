@@ -1,4 +1,4 @@
-package responses
+package results
 
 // KeyInfo groups key metadata in an inspect response.
 type KeyInfo struct {

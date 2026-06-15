@@ -43,10 +43,10 @@ func replaceAndRestoreEntry(t *testing.T, key string, factory StepFactory) {
 func noopDestroyFactory(stepType string) StepFactory {
 	return StepFactory{
 		StepType: stepType,
-		FromSpec: func(stepType, name string, spec model.ResourceMap, op *api.Operation) (workflow.Step, error) {
+		FromSpec: func(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error) {
 			return nil, errors.New("FromSpec should not be called during Destroy")
 		},
-		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op *api.Operation) (workflow.Step, error) {
+		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op api.API) (workflow.Step, error) {
 			stepName := FormatStepName(stepType, name)
 			return workflow.NewStepFunc(
 				stepType,
@@ -71,10 +71,10 @@ func noopDestroyFactory(stepType string) StepFactory {
 func errDestroyFactory(stepType string, destroyErr error) StepFactory {
 	return StepFactory{
 		StepType: stepType,
-		FromSpec: func(stepType, name string, spec model.ResourceMap, op *api.Operation) (workflow.Step, error) {
+		FromSpec: func(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error) {
 			return nil, errors.New("FromSpec should not be called during Destroy")
 		},
-		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op *api.Operation) (workflow.Step, error) {
+		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op api.API) (workflow.Step, error) {
 			stepName := FormatStepName(stepType, name)
 			return workflow.NewStepFunc(
 				stepType,
@@ -246,10 +246,10 @@ func TestDestroy_VerifyStateFileAfterSingleDestroy(t *testing.T) {
 
 	replaceAndRestoreEntry(t, "test", StepFactory{
 		StepType: "test",
-		FromSpec: func(stepType, name string, spec model.ResourceMap, op *api.Operation) (workflow.Step, error) {
+		FromSpec: func(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error) {
 			return nil, errors.New("FromSpec should not be called during Destroy")
 		},
-		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op *api.Operation) (workflow.Step, error) {
+		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op api.API) (workflow.Step, error) {
 			stepName := FormatStepName(stepType, name)
 			return workflow.NewStepFunc(
 				stepType,

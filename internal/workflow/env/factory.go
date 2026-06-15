@@ -15,14 +15,14 @@ type StepFactory struct {
 
 	// FromSpec creates a Step from a YAML spec entry.
 	// stepType is singular (e.g. "network"), name is the resource name.
-	FromSpec func(stepType, name string, spec model.ResourceMap, op *api.Operation) (workflow.Step, error)
+	FromSpec func(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error)
 
 	// FromState creates a Step from a previously saved state entry.
 	// stepType is singular (e.g. "network"), name is the resource name.
 	// deps contains the dependencies saved in the workflow state file
 	// (the AppliedResource.Dependencies field), which steps can use to
 	// reconstruct their DAG edges during destroy.
-	FromState func(stepType, name string, saved model.ResourceState, deps []string, op *api.Operation) (workflow.Step, error)
+	FromState func(stepType, name string, saved model.ResourceState, deps []string, op api.API) (workflow.Step, error)
 }
 
 // Registry maps singular step type keys (e.g. "network", "vm") to factory

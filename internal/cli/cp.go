@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewCpCmd(op *api.Operation) *cobra.Command {
+func NewCpCmd(cpAPI api.CPAPI) *cobra.Command {
 	var user string
 	var key string
 	var force bool
@@ -173,7 +173,7 @@ before it is a source. Multiple sources only work for host -> VM.`,
 
 			// The progress callback receives (current, total) cumulatively.
 			// total is the actual total bytes from the copy service.
-			result, cpErr := op.CPCopy(cmd.Context(), input, func(current, total int64) {
+			result, cpErr := cpAPI.CPCopy(cmd.Context(), input, func(current, total int64) {
 				mu.Lock()
 				transferTotal = current
 				totalBytes = total

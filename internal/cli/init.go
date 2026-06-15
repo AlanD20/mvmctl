@@ -10,13 +10,13 @@ import (
 	"mvmctl/internal/cli/common"
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/api"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 
 	"github.com/spf13/cobra"
 )
 
-func NewInitCmd(op *api.Operation) *cobra.Command {
+func NewInitCmd(initAPI api.InitAPI, hostAPI api.HostAPI) *cobra.Command {
 	var nonInteractive bool
 	var skipHost bool
 	var skipNetwork bool
@@ -25,7 +25,7 @@ func NewInitCmd(op *api.Operation) *cobra.Command {
 		Use:   "init",
 		Short: fmt.Sprintf("Initialize %s", infra.CLIName),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInitWizard(cmd.Context(), op, nonInteractive, skipHost, skipNetwork)
+			return runInitWizard(cmd.Context(), initAPI, hostAPI, nonInteractive, skipHost, skipNetwork)
 		},
 	}
 
@@ -37,7 +37,7 @@ func NewInitCmd(op *api.Operation) *cobra.Command {
 }
 
 // runInitWizard drives the init wizard, handling sudo and download prompts.
-func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipHost, skipNetwork bool) error {
+func runInitWizard(ctx context.Context, initAPI api.InitAPI, hostAPI api.HostAPI, nonInteractive, skipHost, skipNetwork bool) error {
 	// Match Python: mvm_cli.info("")
 	common.Cli.Info("")
 	// Match Python: mvm_cli.info(f"{CLI_NAME} init — first-time setup")
@@ -46,7 +46,7 @@ func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipH
 	common.Cli.Info(strings.Repeat("─", 40))
 
 	// Call the Python-style _handle_interactive_flow logic
-	result, err := handleInteractiveFlow(ctx, op, nonInteractive, skipHost, skipNetwork)
+	result, err := handleInteractiveFlow(ctx, initAPI, hostAPI, nonInteractive, skipHost, skipNetwork)
 	if err != nil {
 		return err
 	}
@@ -101,7 +101,8 @@ func runInitWizard(ctx context.Context, op *api.Operation, nonInteractive, skipH
 
 // initState holds mutable state for the init wizard interaction loop.
 type initState struct {
-	op             *api.Operation
+	initAPI        api.InitAPI
+	hostAPI        api.HostAPI
 	nonInteractive bool
 	skipHost       bool
 	skipNetwork    bool
@@ -114,8 +115,8 @@ type initState struct {
 }
 
 // runInit calls InitRunFull with current state.
-func (s *initState) runInit(ctx context.Context) *api.InitResult {
-	return s.op.InitRunFull(
+func (s *initState) runInit(ctx context.Context) *results.InitResult {
+	return s.initAPI.InitRunFull(
 		ctx,
 		s.skipHost,
 		s.skipNetwork,
@@ -148,7 +149,7 @@ func (s *initState) dispatch(ctx context.Context, interaction *errs.NeedsInterac
 // running sudo host init, and updating loop state.
 func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.NeedsInteraction) error {
 	// Run pre-flight probes before prompting for sudo
-	probeResult := s.op.InitCheckReadiness(ctx)
+	probeResult := s.initAPI.InitCheckReadiness(ctx)
 	if len(probeResult.Critical) > 0 {
 		common.Cli.Warning("Pre-flight checks found issues:")
 		for _, c := range probeResult.Critical {
@@ -169,7 +170,7 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		}
 	}
 
-	hostStateBefore := s.op.HostStatusCheck(ctx)
+	hostStateBefore := s.hostAPI.HostStatusCheck(ctx)
 
 	sessionHasGroup, _ := interaction.Context["session_has_group"].(bool)
 
@@ -220,7 +221,7 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 		return fmt.Errorf("sudo host init failed")
 	}
 
-	hostStateAfter := s.op.HostStatusCheck(ctx)
+	hostStateAfter := s.hostAPI.HostStatusCheck(ctx)
 	s.hostSetupMsg = composeHostSetupMessage(hostStateBefore, hostStateAfter)
 	s.sudoCompleted = true
 	s.downloadVersion = ""
@@ -273,11 +274,13 @@ func (s *initState) handleGuestfs(ctx context.Context) error {
 // (lastResult, nil) so runInitWizard can display step progress.
 func handleInteractiveFlow(
 	ctx context.Context,
-	op *api.Operation,
+	initAPI api.InitAPI,
+	hostAPI api.HostAPI,
 	nonInteractive, skipHost, skipNetwork bool,
-) (*api.InitResult, error) {
+) (*results.InitResult, error) {
 	state := &initState{
-		op:             op,
+		initAPI:        initAPI,
+		hostAPI:        hostAPI,
 		nonInteractive: nonInteractive,
 		skipHost:       skipHost,
 		skipNetwork:    skipNetwork,
@@ -285,7 +288,7 @@ func handleInteractiveFlow(
 
 	// Always return the last result even on early exit,
 	// matching Python's "result: InitResult" at function scope.
-	var lastResult *api.InitResult
+	var lastResult *results.InitResult
 
 	for {
 		result := state.runInit(ctx)
@@ -306,7 +309,7 @@ func handleInteractiveFlow(
 }
 
 // composeHostSetupMessage composes a human-readable message about what changed.
-func composeHostSetupMessage(before, after *responses.HostStatusCheck) string {
+func composeHostSetupMessage(before, after *results.HostStatusCheck) string {
 	var parts []string
 	if !before.GroupExists && after.GroupExists {
 		parts = append(parts, "group created")

@@ -28,24 +28,24 @@ var keyColumns = []common.ListingColumn{
 	},
 }
 
-func NewKeyCmd(op *api.Operation) *cobra.Command {
+func NewKeyCmd(keyAPI api.KeyAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "key",
 		Short: "SSH key management",
 	}
 
-	cmd.AddCommand(newKeyListCmd(op))
-	cmd.AddCommand(newKeyCreateCmd(op))
-	cmd.AddCommand(newKeyImportCmd(op))
-	cmd.AddCommand(newKeyRemoveCmd(op))
-	cmd.AddCommand(newKeyInspectCmd(op))
-	cmd.AddCommand(newKeyExportCmd(op))
-	cmd.AddCommand(newKeyDefaultCmd(op))
+	cmd.AddCommand(newKeyListCmd(keyAPI, configAPI))
+	cmd.AddCommand(newKeyCreateCmd(keyAPI))
+	cmd.AddCommand(newKeyImportCmd(keyAPI))
+	cmd.AddCommand(newKeyRemoveCmd(keyAPI))
+	cmd.AddCommand(newKeyInspectCmd(keyAPI))
+	cmd.AddCommand(newKeyExportCmd(keyAPI))
+	cmd.AddCommand(newKeyDefaultCmd(keyAPI))
 
 	return cmd
 }
 
-func newKeyListCmd(op *api.Operation) *cobra.Command {
+func newKeyListCmd(keyAPI api.KeyAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 
@@ -54,7 +54,7 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 		Aliases: []string{"list"},
 		Short:   "List all SSH keys.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			keys, err := op.KeyListAll(cmd.Context())
+			keys, err := keyAPI.KeyListAll(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -71,7 +71,7 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 				return nil
 			}
 
-			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
+			style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, longOutput)
 			common.RenderListing(keys, keyColumns, style)
 			return nil
 		},
@@ -83,7 +83,7 @@ func newKeyListCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKeyCreateCmd(op *api.Operation) *cobra.Command {
+func newKeyCreateCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var algorithm string
 	var bits int
 	var comment string
@@ -128,7 +128,7 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 				SetDefault: setDefault,
 			}
 
-			createdKey, err := op.KeyCreate(cmd.Context(), input)
+			createdKey, err := keyAPI.KeyCreate(cmd.Context(), input)
 			if err != nil {
 				return err
 			}
@@ -149,7 +149,7 @@ func newKeyCreateCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKeyImportCmd(op *api.Operation) *cobra.Command {
+func newKeyImportCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var force bool
 	var setDefault bool
 
@@ -161,7 +161,7 @@ func newKeyImportCmd(op *api.Operation) *cobra.Command {
 			name := args[0]
 			pubKeyPath := args[1]
 
-			keyItem, err := op.KeyImport(cmd.Context(), inputs.KeyImportInput{
+			keyItem, err := keyAPI.KeyImport(cmd.Context(), inputs.KeyImportInput{
 				Name: name, PubKeyPath: pubKeyPath, Overwrite: force, SetDefault: setDefault,
 			})
 			if err != nil {
@@ -183,7 +183,7 @@ func newKeyImportCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
+func newKeyRemoveCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -198,7 +198,7 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Use API-side resolution matching Python's KeyInput(name=effective_names) + KeyOperation.remove()
-			removeResult := op.KeyRemove(cmd.Context(), inputs.KeyInput{Identifiers: args}, force)
+			removeResult := keyAPI.KeyRemove(cmd.Context(), inputs.KeyInput{Identifiers: args}, force)
 			for _, r := range removeResult.Items {
 				if r.Status == "success" {
 					if keyItem, ok := r.Item.(*model.SSHKeyItem); ok {
@@ -222,7 +222,7 @@ func newKeyRemoveCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKeyInspectCmd(op *api.Operation) *cobra.Command {
+func newKeyInspectCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -236,7 +236,7 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 				return err
 			}
 
-			info, err := op.KeyInspect(cmd.Context(), inputs.KeyInput{Identifiers: []string{identifier}})
+			info, err := keyAPI.KeyInspect(cmd.Context(), inputs.KeyInput{Identifiers: []string{identifier}})
 			if err != nil {
 				return err
 			}
@@ -261,7 +261,7 @@ func newKeyInspectCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKeyExportCmd(op *api.Operation) *cobra.Command {
+func newKeyExportCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -277,7 +277,7 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 
 			path := args[1]
 
-			paths, err := op.KeyExport(
+			paths, err := keyAPI.KeyExport(
 				cmd.Context(),
 				inputs.KeyInput{Identifiers: []string{identifier}},
 				path,
@@ -300,7 +300,7 @@ func newKeyExportCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
+func newKeyDefaultCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var clear bool
 
 	cmd := &cobra.Command{
@@ -310,7 +310,7 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 		ValidArgsFunction: completeKeyNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if clear {
-				if err := op.KeyClearDefaults(cmd.Context()); err != nil {
+				if err := keyAPI.KeyClearDefaults(cmd.Context()); err != nil {
 					return err
 				}
 				common.Cli.Success("Cleared: all default keys")
@@ -322,7 +322,7 @@ func newKeyDefaultCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Single API call with ALL names, matching Python exactly.
-			if err := op.KeySetDefaults(cmd.Context(), inputs.KeyInput{Identifiers: args}); err != nil {
+			if err := keyAPI.KeySetDefaults(cmd.Context(), inputs.KeyInput{Identifiers: args}); err != nil {
 				return fmt.Errorf("set default failed: %w", err)
 			}
 

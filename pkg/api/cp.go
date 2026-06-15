@@ -11,9 +11,14 @@ import (
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// CPAPI defines the public interface for copy file operations.
+type CPAPI interface {
+	CPCopy(ctx context.Context, input inputs.CPInput, onProgress event.OnDownloadCallback) (*results.CPCopyResult, error)
+}
 
 // copyError converts a CPService error to a DomainError.
 // Matches Python's except CPError as e: logger.debug("CP error: %s", e, exc_info=True)
@@ -35,7 +40,7 @@ func (op *Operation) CPCopy(
 	ctx context.Context,
 	input inputs.CPInput,
 	onProgress event.OnDownloadCallback,
-) (*responses.CPCopyResult, error) {
+) (*results.CPCopyResult, error) {
 	// Python: try: ... except CPError as e: ...
 	// Build CPRequest and resolve (matches Python: CPRequest(inputs, db).resolve())
 	req := inputs.NewCPRequest(input, op.Services.Config)
@@ -184,7 +189,7 @@ func (op *Operation) CPCopy(
 		return nil, errs.New(errs.CodeCPError, fmt.Sprintf("Unknown copy direction: %s", resolved.Direction))
 	}
 
-	return &responses.CPCopyResult{
+	return &results.CPCopyResult{
 		Bytes:   totalBytes,
 		Message: resultMessage,
 	}, nil

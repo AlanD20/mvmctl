@@ -40,7 +40,7 @@ func writeApplySpec(t *testing.T, content string) string {
 func noopFactory(stepType string) StepFactory {
 	return StepFactory{
 		StepType: stepType,
-		FromSpec: func(stepType, name string, spec model.ResourceMap, op *api.Operation) (workflow.Step, error) {
+		FromSpec: func(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error) {
 			stepName := FormatStepName(stepType, name)
 			return workflow.NewStepFunc(
 				stepType,
@@ -63,7 +63,7 @@ func noopFactory(stepType string) StepFactory {
 				},
 			), nil
 		},
-		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op *api.Operation) (workflow.Step, error) {
+		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op api.API) (workflow.Step, error) {
 			stepName := FormatStepName(stepType, name)
 			return workflow.NewStepFunc(
 				stepType,
@@ -88,7 +88,7 @@ func noopFactory(stepType string) StepFactory {
 func errFactory(stepType string, applyErr error) StepFactory {
 	return StepFactory{
 		StepType: stepType,
-		FromSpec: func(stepType, name string, spec model.ResourceMap, op *api.Operation) (workflow.Step, error) {
+		FromSpec: func(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error) {
 			stepName := FormatStepName(stepType, name)
 			return workflow.NewStepFunc(
 				stepType,
@@ -105,7 +105,7 @@ func errFactory(stepType string, applyErr error) StepFactory {
 				},
 			), nil
 		},
-		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op *api.Operation) (workflow.Step, error) {
+		FromState: func(stepType, name string, saved model.ResourceState, deps []string, op api.API) (workflow.Step, error) {
 			stepName := FormatStepName(stepType, name)
 			return workflow.NewStepFunc(
 				stepType,

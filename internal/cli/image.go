@@ -64,7 +64,7 @@ var imageColumns = []common.ListingColumn{
 }
 
 // NewImageCmd creates the image management command tree.
-func NewImageCmd(op *api.Operation) *cobra.Command {
+func NewImageCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "image",
 		Aliases: []string{"img"},
@@ -72,20 +72,20 @@ func NewImageCmd(op *api.Operation) *cobra.Command {
 		Long:    "Download, list, inspect, and manage VM images.",
 	}
 
-	cmd.AddCommand(newImageListCmd(op))
-	cmd.AddCommand(newImagePullCmd(op))
-	cmd.AddCommand(newImageRemoveCmd(op))
-	cmd.AddCommand(newImageInspectCmd(op))
-	cmd.AddCommand(newImageDefaultCmd(op))
-	cmd.AddCommand(newImageImportCmd(op))
-	cmd.AddCommand(newImageWarmCmd(op))
+	cmd.AddCommand(newImageListCmd(imageAPI, configAPI))
+	cmd.AddCommand(newImagePullCmd(imageAPI))
+	cmd.AddCommand(newImageRemoveCmd(imageAPI))
+	cmd.AddCommand(newImageInspectCmd(imageAPI))
+	cmd.AddCommand(newImageDefaultCmd(imageAPI))
+	cmd.AddCommand(newImageImportCmd(imageAPI))
+	cmd.AddCommand(newImageWarmCmd(imageAPI))
 
 	return cmd
 }
 
 // ─── ls ──────────────────────────────────────────────────────────────────────
 
-func newImageListCmd(op *api.Operation) *cobra.Command {
+func newImageListCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var (
 		jsonOutput bool
 		remote     bool
@@ -101,17 +101,17 @@ func newImageListCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote images")
-				_, versions, err := op.ImageListAll(cmd.Context(), true, typeFilter, noCache, nil)
+				_, versions, err := imageAPI.ImageListAll(cmd.Context(), true, typeFilter, noCache, nil)
 				if err != nil {
 					return err
 				}
 				printRemoteImages(versions, jsonOutput)
 			} else {
-				images, _, err := op.ImageListAll(cmd.Context(), false, "", false, nil)
+				images, _, err := imageAPI.ImageListAll(cmd.Context(), false, "", false, nil)
 				if err != nil {
 					return err
 				}
-				printLocalImages(images, jsonOutput, longOutput, cmd.Context())
+				printLocalImages(images, jsonOutput, longOutput, cmd.Context(), configAPI)
 			}
 			return nil
 		},
@@ -145,7 +145,7 @@ func printRemoteImages(versions []model.VersionInfo, jsonOutput bool) {
 }
 
 // printLocalImages prints the local image listing table.
-func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput bool, ctx context.Context) {
+func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput bool, ctx context.Context, configAPI api.ConfigAPI) {
 	if jsonOutput {
 		if images == nil {
 			images = []*model.ImageItem{}
@@ -155,13 +155,13 @@ func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput boo
 		return
 	}
 
-	style := common.Cli.ResolveListingStyle(ctx, opRef, longOutput)
+	style := common.Cli.ResolveListingStyle(ctx, configAPI, longOutput)
 	common.RenderListing(images, imageColumns, style)
 }
 
 // ─── pull ────────────────────────────────────────────────────────────────────
 
-func newImagePullCmd(op *api.Operation) *cobra.Command {
+func newImagePullCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
 		imageType        string
 		version          string
@@ -222,7 +222,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 
 			prog := common.NewProgress()
 			prog.Start("Downloading image...")
-			img, err := op.ImagePull(cmd.Context(), input, func(e event.Progress) {
+			img, err := imageAPI.ImagePull(cmd.Context(), input, func(e event.Progress) {
 				if e.Message != "" {
 					prog.UpdateText(e.Message)
 				}
@@ -261,7 +261,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 
 // ─── rm ──────────────────────────────────────────────────────────────────────
 
-func newImageRemoveCmd(op *api.Operation) *cobra.Command {
+func newImageRemoveCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -276,7 +276,7 @@ Examples:
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeImageIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result := op.ImageRemove(cmd.Context(), inputs.ImageInput{Identifiers: args}, force)
+			result := imageAPI.ImageRemove(cmd.Context(), inputs.ImageInput{Identifiers: args}, force)
 			for _, r := range result.Items {
 				itemID := "unknown"
 				if r.Item != nil {
@@ -303,7 +303,7 @@ Examples:
 
 // ─── inspect ─────────────────────────────────────────────────────────────────
 
-func newImageInspectCmd(op *api.Operation) *cobra.Command {
+func newImageInspectCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -320,7 +320,7 @@ Examples:
 			prefix := args[0]
 
 			input := inputs.ImageInput{Identifiers: []string{prefix}}
-			info, err := op.ImageInspect(cmd.Context(), input)
+			info, err := imageAPI.ImageInspect(cmd.Context(), input)
 			if err != nil {
 				return err
 			}
@@ -350,7 +350,7 @@ Examples:
 
 // ─── default ─────────────────────────────────────────────────────────────────
 
-func newImageDefaultCmd(op *api.Operation) *cobra.Command {
+func newImageDefaultCmd(imageAPI api.ImageAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "default [id]",
 		Short:             "Set the default image for VM creation.",
@@ -359,7 +359,7 @@ func newImageDefaultCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prefix := args[0]
 			imgInput := inputs.ImageInput{Identifiers: []string{prefix}}
-			if err := op.ImageSetDefault(cmd.Context(), imgInput); err != nil {
+			if err := imageAPI.ImageSetDefault(cmd.Context(), imgInput); err != nil {
 				return err
 			}
 			common.Cli.Success(fmt.Sprintf("Default image set to: %s", prefix))
@@ -372,7 +372,7 @@ func newImageDefaultCmd(op *api.Operation) *cobra.Command {
 
 // ─── import ──────────────────────────────────────────────────────────────────
 
-func newImageImportCmd(op *api.Operation) *cobra.Command {
+func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
 		rootPartition    int
 		format           string
@@ -456,7 +456,7 @@ Examples:
 
 			prog := common.NewProgress()
 			prog.Start("Importing image...")
-			img, err := op.ImageImport(cmd.Context(), input, func(e event.Progress) {
+			img, err := imageAPI.ImageImport(cmd.Context(), input, func(e event.Progress) {
 				if e.Message != "" {
 					prog.UpdateText(e.Message)
 				}
@@ -493,7 +493,7 @@ Examples:
 
 // ─── warm ────────────────────────────────────────────────────────────────────
 
-func newImageWarmCmd(op *api.Operation) *cobra.Command {
+func newImageWarmCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
 		warmAll bool
 	)
@@ -533,13 +533,13 @@ Examples:
 			var warmErr error
 			if imageID != "" {
 				warmInput := inputs.ImageInput{Identifiers: []string{imageID}}
-				paths, warmErr = op.ImageWarm(cmd.Context(), warmInput, false, func(e event.Progress) {
+				paths, warmErr = imageAPI.ImageWarm(cmd.Context(), warmInput, false, func(e event.Progress) {
 					if e.Message != "" {
 						prog.UpdateText(e.Message)
 					}
 				})
 			} else {
-				paths, warmErr = op.ImageWarm(cmd.Context(), inputs.ImageInput{}, true, func(e event.Progress) {
+				paths, warmErr = imageAPI.ImageWarm(cmd.Context(), inputs.ImageInput{}, true, func(e event.Progress) {
 					if e.Message != "" {
 						prog.UpdateText(e.Message)
 					}

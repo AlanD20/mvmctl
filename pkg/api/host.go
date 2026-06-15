@@ -22,9 +22,28 @@ import (
 	libnet "mvmctl/internal/lib/network"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// HostAPI defines the public interface for host operations.
+type HostAPI interface {
+	HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error)
+	HostGetState(ctx context.Context) (*model.HostStateItem, error)
+	HostDetectResources(ctx context.Context) (*model.HostResources, error)
+	HostNetworkSetup(ctx context.Context) error
+	HostInfo(ctx context.Context) (*results.HostInfo, error)
+	HostRefreshCapacity(ctx context.Context) (*results.HostInfo, error)
+	HostCheckKVMAccess() bool
+	HostCheckRequiredBinaries() []string
+	HostGetIPForwardStatus(ctx context.Context) (string, error)
+	HostStatusCheck(ctx context.Context) *results.HostStatusCheck
+	HostClean(ctx context.Context) ([]string, error)
+	HostReset(ctx context.Context) ([]string, error)
+	HostGetRunningVMs(ctx context.Context) ([]*model.VM, error)
+	HostIsInitialized(ctx context.Context) bool
+	HostCheckReadiness(ctx context.Context) *model.ProbeResult
+}
 
 // HostInit initializes host configuration.
 // Matches Python's HostOperation.init() exactly — returns NeedsInteraction directly
@@ -330,7 +349,7 @@ func (op *Operation) HostNetworkSetup(ctx context.Context) error {
 
 // HostInfo returns host info with capacity analysis.
 // Matches Python's HostOperation.info() exactly — uses HostInfo.to_dict().
-func (op *Operation) HostInfo(ctx context.Context) (*responses.HostInfo, error) {
+func (op *Operation) HostInfo(ctx context.Context) (*results.HostInfo, error) {
 	state, err := op.Repos.Host.GetState(ctx)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeHostInfoFailed, fmt.Sprintf("Failed to get host state: %v", err), err)
@@ -379,12 +398,12 @@ func (op *Operation) HostInfo(ctx context.Context) (*responses.HostInfo, error) 
 		Limits:    *limits,
 		Hardware:  *hardware,
 	}
-	return responses.BuildHostInfo(info), nil
+	return results.BuildHostInfo(info), nil
 }
 
 // HostRefreshCapacity re-detects host capacity.
 // Matches Python's HostOperation.refresh_capacity() exactly.
-func (op *Operation) HostRefreshCapacity(ctx context.Context) (*responses.HostInfo, error) {
+func (op *Operation) HostRefreshCapacity(ctx context.Context) (*results.HostInfo, error) {
 	hardware, limits, err := op.Services.Host.DetectAndSaveCapacity(ctx)
 	if err != nil {
 		return nil, errs.WrapMsg(
@@ -415,7 +434,7 @@ func (op *Operation) HostRefreshCapacity(ctx context.Context) (*responses.HostIn
 		Limits:    *limits,
 		Hardware:  *hardware,
 	}
-	return responses.BuildHostInfo(info), nil
+	return results.BuildHostInfo(info), nil
 }
 
 // HostCheckKVMAccess checks /dev/kvm accessibility.
@@ -434,16 +453,16 @@ func (op *Operation) HostGetIPForwardStatus(ctx context.Context) (string, error)
 }
 
 // HostStatusCheck returns a consolidated host status with all checks.
-func (op *Operation) HostStatusCheck(ctx context.Context) *responses.HostStatusCheck {
+func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusCheck {
 	kvmOK := op.HostCheckKVMAccess()
 	missing := op.HostCheckRequiredBinaries()
 	ipFwd, _ := op.HostGetIPForwardStatus(ctx)
 	fwdOK := ipFwd == "1"
 
-	var setup *responses.HostSetupInfo
+	var setup *results.HostSetupInfo
 	state, _ := op.HostGetState(ctx)
 	if state != nil {
-		setup = &responses.HostSetupInfo{
+		setup = &results.HostSetupInfo{
 			Initialized:   state.Initialized,
 			InitializedAt: state.InitializedAt,
 		}
@@ -460,7 +479,7 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *responses.HostStatusC
 		sudoersExists = true
 	}
 
-	return &responses.HostStatusCheck{
+	return &results.HostStatusCheck{
 		KVMOK:           kvmOK,
 		MissingBinaries: missing,
 		IPForward:       ipFwd,

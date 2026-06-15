@@ -33,7 +33,7 @@ const envStateSchemaVersion = "1.0"
 // the state from completed steps is persisted.
 func Apply(
 	ctx context.Context,
-	op *api.Operation,
+	op api.API,
 	specPath string,
 	onProgress event.OnProgressCallback,
 ) error {
@@ -131,7 +131,7 @@ func Apply(
 // a spec file. If it's a path, the workflow ID is derived from it.
 func Destroy(
 	ctx context.Context,
-	op *api.Operation,
+	op api.API,
 	specOrID string,
 	onProgress event.OnProgressCallback,
 ) error {

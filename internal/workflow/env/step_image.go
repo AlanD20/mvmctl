@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -28,7 +29,7 @@ type ImageStep struct {
 	deps     []string
 	specHash string
 	input    inputs.ImagePullInput
-	op       *api.Operation
+	op       api.ImageAPI
 	saved    *ImageState
 	meta     model.ResourceMeta
 }
@@ -56,8 +57,8 @@ func (s *ImageStep) Apply(
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.Repos.Image.GetByType(ctx, s.input.Type)
-	if err != nil {
+	existing, err := s.op.ImageGet(ctx, inputs.ImageInput{Identifiers: []string{s.input.Type}})
+	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
 			fmt.Sprintf("check image type %q: %v", s.input.Type, err),
@@ -132,12 +133,28 @@ func (s *ImageStep) StateData() model.ResourceState {
 	}
 }
 
+// NewImageStep creates an ImageStep with the given API interface for testing.
+// Only for use in tests.
+func NewImageStep(op api.ImageAPI, name string, input inputs.ImagePullInput) *ImageStep {
+	return &ImageStep{
+		op:       op,
+		name:     name,
+		stepType: "image",
+		input:    input,
+		specHash: crypto.SHA256([]byte(name)),
+	}
+}
+
 func newImageStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -162,8 +179,12 @@ func newImageStepFromState(
 	name string,
 	saved model.ResourceState,
 	deps []string,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	is := StateFromMap[ImageState](saved.Spec)
 	return &ImageStep{
 		stepType: stepType,

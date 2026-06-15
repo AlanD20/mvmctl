@@ -15,6 +15,18 @@ import (
 	"mvmctl/pkg/errs"
 )
 
+// BinaryAPI defines the public interface for binary operations.
+type BinaryAPI interface {
+	BinaryPrune(ctx context.Context, dryRun bool, force bool) ([]string, error)
+	BinaryPull(ctx context.Context, input inputs.BinaryPullInput, onProgress event.OnProgressCallback) ([]*model.BinaryItem, error)
+	BinaryRemove(ctx context.Context, input inputs.BinaryInput, force bool) *errs.BatchResult
+	BinaryRemoveByVersion(ctx context.Context, version string, force bool) error
+	BinaryList(ctx context.Context, remote bool, limit *int, onProgress event.OnProgressCallback) ([]*model.BinaryItem, []model.VersionInfo, error)
+	BinaryGet(ctx context.Context, input inputs.BinaryInput) ([]*model.BinaryItem, error)
+	BinarySetDefault(ctx context.Context, input inputs.BinaryInput) (*model.BinaryItem, error)
+	BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem, error)
+}
+
 // BinaryPrune prunes unused binaries.
 // Matches Python's BinaryOperation.prune() exactly.
 func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) ([]string, error) {

@@ -13,6 +13,11 @@ import (
 	"mvmctl/pkg/errs"
 )
 
+// SSHAPI defines the public interface for SSH operations.
+type SSHAPI interface {
+	SSHConnect(ctx context.Context, input inputs.SSHInput, onProgress event.OnProgressCallback) error
+}
+
 // SSHConnect opens SSH session or executes command on a VM.
 // Matches Python's SSHOperation.connect() exactly.
 // Python: returns OperationResult[int]; only MVMError is caught and wrapped

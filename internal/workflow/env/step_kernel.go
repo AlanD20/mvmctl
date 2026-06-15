@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -28,7 +29,7 @@ type KernelStep struct {
 	deps     []string
 	specHash string
 	input    inputs.KernelPullInput
-	op       *api.Operation
+	op       api.KernelAPI
 	saved    *KernelState
 	meta     model.ResourceMeta
 }
@@ -56,8 +57,8 @@ func (s *KernelStep) Apply(
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.Repos.Kernel.GetByType(ctx, s.input.KernelType)
-	if err != nil {
+	existing, err := s.op.KernelGet(ctx, s.input.KernelType)
+	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
 			fmt.Sprintf("check kernel type %q: %v", s.input.KernelType, err),
@@ -132,12 +133,28 @@ func (s *KernelStep) StateData() model.ResourceState {
 	}
 }
 
+// NewKernelStep creates a KernelStep with the given API interface for testing.
+// Only for use in tests.
+func NewKernelStep(op api.KernelAPI, name string, input inputs.KernelPullInput) *KernelStep {
+	return &KernelStep{
+		op:       op,
+		name:     name,
+		stepType: "kernel",
+		input:    input,
+		specHash: crypto.SHA256([]byte(name)),
+	}
+}
+
 func newKernelStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -169,8 +186,12 @@ func newKernelStepFromState(
 	name string,
 	saved model.ResourceState,
 	deps []string,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	ks := StateFromMap[KernelState](saved.Spec)
 	return &KernelStep{
 		stepType: stepType,

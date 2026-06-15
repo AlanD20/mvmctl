@@ -99,16 +99,21 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	// Store API reference for shell completion
 	opRef = op
 
+	// TUI command — accepts optional Operation; initializes lazily if nil
+	if tuiCmd := NewTUICmd(op); tuiCmd != nil {
+		cmd.AddCommand(tuiCmd)
+	}
+
 	// Domain commands require a fully initialized Operation. When op is nil
 	// (e.g., "mvm run <service>" mode), we register only the infrastructure
 	// commands above — version, completion, run.
 	if op != nil {
-		cmd.AddCommand(NewVMCmd(op))
-		cmd.AddCommand(NewNetworkCmd(op))
-		cmd.AddCommand(NewImageCmd(op))
-		cmd.AddCommand(NewKernelCmd(op))
-		cmd.AddCommand(NewBinaryCmd(op))
-		cmd.AddCommand(NewKeyCmd(op))
+		cmd.AddCommand(NewVMCmd(op, op))
+		cmd.AddCommand(NewNetworkCmd(op, op))
+		cmd.AddCommand(NewImageCmd(op, op))
+		cmd.AddCommand(NewKernelCmd(op, op))
+		cmd.AddCommand(NewBinaryCmd(op, op))
+		cmd.AddCommand(NewKeyCmd(op, op))
 		cmd.AddCommand(NewHostCmd(op))
 		cmd.AddCommand(NewConfigCmd(op))
 		cmd.AddCommand(NewConsoleCmd(op))
@@ -117,7 +122,7 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		cmd.AddCommand(NewCacheCmd(op))
 		cmd.AddCommand(NewSSHCmd(op))
 		cmd.AddCommand(NewCpCmd(op))
-		cmd.AddCommand(NewInitCmd(op))
+		cmd.AddCommand(NewInitCmd(op, op))
 		cmd.AddCommand(NewEnvCmd(op))
 	}
 
@@ -188,7 +193,7 @@ func shouldSkipPreRun(c *cobra.Command) bool {
 	for cc := c; cc != nil; cc = cc.Parent() {
 		if cc.Name() == "help" || cc.Name() == "version" || cc.Name() == "init" ||
 			cc.Name() == "completion" || cc.Name() == "host" || cc.Name() == "cache" ||
-			cc.Name() == "run" {
+			cc.Name() == "run" || cc.Name() == "tui" {
 			return true
 		}
 	}
