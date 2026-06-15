@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -27,7 +28,7 @@ type SSHStep struct {
 	deps     []string
 	specHash string
 	input    inputs.SSHInput
-	op       *api.Operation
+	op       api.SSHAPI
 	saved    *SSHState
 	meta     model.ResourceMeta
 }
@@ -47,10 +48,6 @@ func (s *SSHStep) Apply(
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
-	if s.op == nil {
-		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
-	}
-
 	// SSH commands are imperative — always execute on apply.
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "running command"})
 	// Wrap onProgress to inject step name into SSH output events.
@@ -82,9 +79,6 @@ func (s *SSHStep) Destroy(
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
-	if s.op == nil {
-		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
-	}
 	if s.saved == nil && saved.Spec != nil {
 		s.saved = StateFromMap[SSHState](saved.Spec)
 		s.meta = saved.Meta
@@ -110,8 +104,11 @@ func newSSHStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -135,8 +132,11 @@ func newSSHStepFromState(
 	name string,
 	saved model.ResourceState,
 	deps []string,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
 	ss := StateFromMap[SSHState](saved.Spec)
 	return &SSHStep{
 		stepType: stepType,

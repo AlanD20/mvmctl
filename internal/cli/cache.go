@@ -18,19 +18,19 @@ import (
 )
 
 // NewCacheCmd creates the cache command and its subcommands.
-func NewCacheCmd(op *api.Operation) *cobra.Command {
+func NewCacheCmd(cacheAPI api.CacheAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cache",
 		Short: "Cache management",
 	}
 
-	cmd.AddCommand(newCacheInitCmd(op))
-	cmd.AddCommand(newCachePruneCmd(op))
-	cmd.AddCommand(newCacheCleanCmd(op))
+	cmd.AddCommand(newCacheInitCmd(cacheAPI))
+	cmd.AddCommand(newCachePruneCmd(cacheAPI))
+	cmd.AddCommand(newCacheCleanCmd(cacheAPI))
 	return cmd
 }
 
-func newCacheInitCmd(op *api.Operation) *cobra.Command {
+func newCacheInitCmd(cacheAPI api.CacheAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Initialize all cache resources",
@@ -41,7 +41,7 @@ func newCacheInitCmd(op *api.Operation) *cobra.Command {
 			prog := common.NewProgress()
 			prog.Start("Initializing cache...")
 
-			item, err := op.CacheInitAll(cmd.Context(), func(e event.Progress) {
+			item, err := cacheAPI.CacheInitAll(cmd.Context(), func(e event.Progress) {
 				if e.Message != "" {
 					prog.UpdateText(e.Message)
 				}
@@ -112,7 +112,7 @@ func resourceDisplayNamePlural(resource string) string {
 // pruneResource handles pruning a specific resource type.
 // Matches Python's resource-specific blocks exactly.
 func pruneResource(
-	op *api.Operation,
+	cacheAPI api.CacheAPI,
 	cmd *cobra.Command,
 	resource string,
 	dryRun bool,
@@ -136,13 +136,13 @@ func pruneResource(
 
 	switch resource {
 	case "image":
-		ids, err := op.CachePruneImages(cmd.Context(), dryRun, allResources)
+		ids, err := cacheAPI.CachePruneImages(cmd.Context(), dryRun, allResources)
 		if err != nil {
 			return err
 		}
 		removed = ids
 	case "binary":
-		ids, err := op.CachePruneBinaries(cmd.Context(), dryRun, allResources)
+		ids, err := cacheAPI.CachePruneBinaries(cmd.Context(), dryRun, allResources)
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,7 @@ func pruneResource(
 	default:
 		switch resource {
 		case "vm":
-			opResult := op.CachePruneVMs(cmd.Context(), dryRun, allResources)
+			opResult := cacheAPI.CachePruneVMs(cmd.Context(), dryRun, allResources)
 			if opResult == nil {
 				return nil
 			}
@@ -161,13 +161,13 @@ func pruneResource(
 				removed = item
 			}
 		case "network":
-			ids, err := op.CachePruneNetworks(cmd.Context(), dryRun, allResources)
+			ids, err := cacheAPI.CachePruneNetworks(cmd.Context(), dryRun, allResources)
 			if err != nil {
 				return err
 			}
 			removed = ids
 		case "kernel":
-			ids, err := op.CachePruneKernels(cmd.Context(), dryRun, allResources)
+			ids, err := cacheAPI.CachePruneKernels(cmd.Context(), dryRun, allResources)
 			if err != nil {
 				return err
 			}
@@ -207,7 +207,7 @@ func pruneResource(
 	return nil
 }
 
-func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) error {
+func pruneMisc(cacheAPI api.CacheAPI, cmd *cobra.Command, dryRun bool, force bool) error {
 	if !force && !dryRun {
 		// Match Python: mvm_cli.warning("This will remove cached data (appliance folder, warm images)")
 		common.Cli.Warning("This will remove cached data (appliance folder, warm images)")
@@ -221,7 +221,7 @@ func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) e
 		}
 	}
 
-	miscMap, err := op.CachePruneMisc(cmd.Context(), dryRun)
+	miscMap, err := cacheAPI.CachePruneMisc(cmd.Context(), dryRun)
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func pruneMisc(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) e
 	return nil
 }
 
-func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) error {
+func pruneAll(cacheAPI api.CacheAPI, cmd *cobra.Command, dryRun bool, force bool) error {
 	if dryRun {
 		common.Cli.Info("[DRY RUN] The following would be removed:")
 		common.Cli.Info("  - ALL VMs (including RUNNING and STARTING)")
@@ -288,7 +288,7 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 		}
 	}
 
-	pruneItem, err := op.CachePruneAll(cmd.Context(), dryRun, true)
+	pruneItem, err := cacheAPI.CachePruneAll(cmd.Context(), dryRun, true)
 	if err != nil {
 		return err
 	}
@@ -319,7 +319,7 @@ func pruneAll(op *api.Operation, cmd *cobra.Command, dryRun bool, force bool) er
 	return nil
 }
 
-func newCachePruneCmd(op *api.Operation) *cobra.Command {
+func newCachePruneCmd(cacheAPI api.CacheAPI) *cobra.Command {
 	var allResources bool
 	var dryRun bool
 	var force bool
@@ -356,20 +356,20 @@ Examples:
 
 			switch resource {
 			case "vm":
-				return pruneResource(op, cmd, "vm", dryRun, allResources, force)
+				return pruneResource(cacheAPI, cmd, "vm", dryRun, allResources, force)
 			case "network":
-				return pruneResource(op, cmd, "network", dryRun, allResources, force)
+				return pruneResource(cacheAPI, cmd, "network", dryRun, allResources, force)
 			case "image":
-				return pruneResource(op, cmd, "image", dryRun, allResources, force)
+				return pruneResource(cacheAPI, cmd, "image", dryRun, allResources, force)
 			case "kernel":
-				return pruneResource(op, cmd, "kernel", dryRun, allResources, force)
+				return pruneResource(cacheAPI, cmd, "kernel", dryRun, allResources, force)
 			case "binary":
-				return pruneResource(op, cmd, "binary", dryRun, allResources, force)
+				return pruneResource(cacheAPI, cmd, "binary", dryRun, allResources, force)
 			case "misc":
-				return pruneMisc(op, cmd, dryRun, force)
+				return pruneMisc(cacheAPI, cmd, dryRun, force)
 			case "":
 				if allResources {
-					return pruneAll(op, cmd, dryRun, force)
+					return pruneAll(cacheAPI, cmd, dryRun, force)
 				}
 				// Match Python: mvm_cli.error("No resource specified. Use --all to prune all resource types.")
 				common.Cli.Error("No resource specified. Use --all to prune all resource types.")
@@ -380,7 +380,7 @@ Examples:
 				// Python: elif resource is None or all_resources: — unknown resource with
 				// --all should prune all, matching Python behavior.
 				if allResources {
-					return pruneAll(op, cmd, dryRun, force)
+					return pruneAll(cacheAPI, cmd, dryRun, force)
 				}
 				common.Cli.Error(fmt.Sprintf("Unknown resource: %s", resource))
 				common.Cli.Info("Valid resources: vm, network, image, kernel, binary, misc")
@@ -422,7 +422,7 @@ func runCacheCleanWithSudo(ctx context.Context) error {
 	return nil
 }
 
-func newCacheCleanCmd(op *api.Operation) *cobra.Command {
+func newCacheCleanCmd(cacheAPI api.CacheAPI) *cobra.Command {
 	var dryRun bool
 	var force bool
 
@@ -443,8 +443,8 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Match Python: Check privileges early — before the destructive confirmation.
 			// Python: HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "clean cache")
-			if err := op.CacheCheckPrivileges("/usr/sbin/ip", "clean cache"); err != nil {
-				if op.CacheSessionHasGroup() {
+			if err := cacheAPI.CacheCheckPrivileges("/usr/sbin/ip", "clean cache"); err != nil {
+				if cacheAPI.CacheSessionHasGroup() {
 					// Group is active but something else is wrong (missing binary, etc.)
 					// Match Python: raise — re-raise the original exception without printing,
 					// let Cobra's root error handler display it (avoids double-printing).
@@ -499,7 +499,7 @@ Examples:
 				}
 			}
 
-			cleanResult, err := op.CacheClean(cmd.Context(), dryRun)
+			cleanResult, err := cacheAPI.CacheClean(cmd.Context(), dryRun)
 			if err != nil {
 				return err
 			}

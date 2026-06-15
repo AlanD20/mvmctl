@@ -1,4 +1,4 @@
-package responses
+package results
 
 // KernelItemInfo groups kernel metadata in an inspect response.
 type KernelItemInfo struct {

@@ -19,9 +19,21 @@ import (
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// KernelAPI defines the public interface for kernel operations.
+type KernelAPI interface {
+	KernelPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	KernelPull(ctx context.Context, input inputs.KernelPullInput, onProgress event.OnProgressCallback) (*model.KernelItem, error)
+	KernelImport(ctx context.Context, input inputs.KernelImportInput) (*model.KernelItem, error)
+	KernelRemove(ctx context.Context, input inputs.KernelInput) *errs.BatchResult
+	KernelList(ctx context.Context, remote bool, noCache bool, onProgress event.OnProgressCallback) ([]*model.KernelItem, []model.VersionInfo, error)
+	KernelGet(ctx context.Context, identifier string) (*model.KernelItem, error)
+	KernelInspect(ctx context.Context, identifier string) (*results.KernelInspect, error)
+	KernelSetDefault(ctx context.Context, identifier string) error
+}
 
 // KernelPrune prunes unused kernels.
 // Matches Python's KernelOperation.prune() exactly.
@@ -469,7 +481,7 @@ func (op *Operation) KernelGet(ctx context.Context, identifier string) (*model.K
 	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("kernel not found: %s", identifier)
+		return nil, fmt.Errorf("kernel not found %q: %w", identifier, err)
 	}
 
 	if len(resolved.Kernels) != 1 {
@@ -482,19 +494,19 @@ func (op *Operation) KernelGet(ctx context.Context, identifier string) (*model.K
 
 // KernelInspect returns grouped dict of a kernel.
 // Matches Python's KernelOperation.inspect() exactly.
-func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*responses.KernelInspect, error) {
+func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*results.KernelInspect, error) {
 	k, err := op.KernelGet(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
-	return &responses.KernelInspect{
-		Kernel: responses.KernelItemInfo{
+	return &results.KernelInspect{
+		Kernel: results.KernelItemInfo{
 			ID: k.ID, Name: k.Name, BaseName: k.BaseName,
 			Version: k.Version, Arch: k.Arch, Type: k.Type,
 			IsDefault: k.IsDefault, IsPresent: k.IsPresent,
 		},
-		Storage: responses.KernelStorageInfo{Path: k.Path},
-		Timestamps: responses.KernelTimestampsInfo{
+		Storage: results.KernelStorageInfo{Path: k.Path},
+		Timestamps: results.KernelTimestampsInfo{
 			CreatedAt: k.CreatedAt, UpdatedAt: k.UpdatedAt,
 		},
 	}, nil

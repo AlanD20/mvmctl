@@ -16,6 +16,8 @@ import (
 	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/errs"
 )
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
@@ -61,8 +63,12 @@ func (r *errorBinaryRepo) GetByTypeAndVersion(_ context.Context, _, _ string) (*
 }
 
 // newBinaryStep is a shorthand for creating a BinaryStep via the registry.
+// For nil-op tests, it constructs the step directly via NewBinaryStep.
 func newBinaryStep(t *testing.T, op *api.Operation) workflow.Step {
 	t.Helper()
+	if op == nil {
+		return envpkg.NewBinaryStep(nil, "firecracker", inputs.BinaryPullInput{Type: "firecracker", Version: "1.15.1"})
+	}
 	spec := map[string]any{
 		"type":    "firecracker",
 		"version": "1.15.1",
@@ -80,6 +86,7 @@ func newBinaryStep(t *testing.T, op *api.Operation) workflow.Step {
 func TestBinaryStep_Apply(t *testing.T) {
 	tests := map[string]struct {
 		setupOp        func(t *testing.T) *api.Operation
+		setupStep      func(t *testing.T) workflow.Step // overrides setupOp
 		ctx            func() context.Context
 		saved          model.ResourceState
 		wantErr        string
@@ -94,10 +101,19 @@ func TestBinaryStep_Apply(t *testing.T) {
 			wantErr: "operation not initialized",
 		},
 		"context_cancelled_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{Binary: &ctxBinaryRepo{BinaryRepo: testutil.NewBinaryRepo()}},
+			setupStep: func(t *testing.T) workflow.Step {
+				t.Helper()
+				mockAPI := &testutil.MockBinaryAPI{
+					BinaryGetFunc: func(ctx context.Context, _ inputs.BinaryInput) ([]*model.BinaryItem, error) {
+						if err := ctx.Err(); err != nil {
+							return nil, err
+						}
+						return nil, errs.NotFound(errs.CodeBinaryNotFound, "not found")
+					},
 				}
+				return envpkg.NewBinaryStep(mockAPI, "firecracker",
+					inputs.BinaryPullInput{Type: "firecracker", Version: "1.15.1"},
+				)
 			},
 			ctx: func() context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -107,15 +123,16 @@ func TestBinaryStep_Apply(t *testing.T) {
 			wantErr: "context canceled",
 		},
 		"getbytypeandversion_database_error_wraps_correctly": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{
-						Binary: &errorBinaryRepo{
-							BinaryRepo: testutil.NewBinaryRepo(),
-							getErr:     errors.New("connection refused"),
-						},
+			setupStep: func(t *testing.T) workflow.Step {
+				t.Helper()
+				mockAPI := &testutil.MockBinaryAPI{
+					BinaryGetFunc: func(_ context.Context, _ inputs.BinaryInput) ([]*model.BinaryItem, error) {
+						return nil, errors.New("connection refused")
 					},
 				}
+				return envpkg.NewBinaryStep(mockAPI, "firecracker",
+					inputs.BinaryPullInput{Type: "firecracker", Version: "1.15.1"},
+				)
 			},
 			ctx:     context.Background,
 			wantErr: "check binary",
@@ -160,8 +177,13 @@ func TestBinaryStep_Apply(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := tc.setupOp(t)
-			step := newBinaryStep(t, op)
+			var step workflow.Step
+			if tc.setupStep != nil {
+				step = tc.setupStep(t)
+			} else {
+				op := tc.setupOp(t)
+				step = newBinaryStep(t, op)
+			}
 
 			state := workflow.NewSharedState()
 			writer, writes := recordingWriter()

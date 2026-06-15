@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
+func NewConfigCmd(configAPI api.ConfigAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Configuration management",
@@ -25,7 +25,7 @@ func NewConfigCmd(configAPI *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newConfigGetCmd(op *api.Operation) *cobra.Command {
+func newConfigGetCmd(configAPI api.ConfigAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:               "get [category] [key]",
 		Short:             "Get a config value.",
@@ -38,7 +38,7 @@ func newConfigGetCmd(op *api.Operation) *cobra.Command {
 				key = args[1]
 			}
 
-			val, err := op.ConfigGet(cmd.Context(), category, key)
+			val, err := configAPI.ConfigGet(cmd.Context(), category, key)
 			if err != nil {
 				common.Cli.Error(err.Error())
 				return err
@@ -80,14 +80,14 @@ func newConfigGetCmd(op *api.Operation) *cobra.Command {
 	}
 }
 
-func newConfigSetCmd(op *api.Operation) *cobra.Command {
+func newConfigSetCmd(configAPI api.ConfigAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:               "set [category] [key] [value]",
 		Short:             "Set a config value.",
 		Args:              cobra.ExactArgs(3),
 		ValidArgsFunction: completeConfigSet,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := op.ConfigSet(cmd.Context(), args[0], args[1], args[2]); err != nil {
+			if err := configAPI.ConfigSet(cmd.Context(), args[0], args[1], args[2]); err != nil {
 				common.Cli.Error(err.Error())
 				return err
 			}
@@ -97,7 +97,7 @@ func newConfigSetCmd(op *api.Operation) *cobra.Command {
 	}
 }
 
-func newConfigResetCmd(op *api.Operation) *cobra.Command {
+func newConfigResetCmd(configAPI api.ConfigAPI) *cobra.Command {
 	var allOverrides bool
 	var force bool
 
@@ -118,7 +118,7 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 						return nil
 					}
 				}
-				deleted, err := op.ConfigReset(cmd.Context(), "", "", true)
+				deleted, err := configAPI.ConfigReset(cmd.Context(), "", "", true)
 				if err != nil {
 					return err
 				}
@@ -131,7 +131,7 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 				common.Cli.Text("Provide a category, category and key, or use --all")
 			case 1:
 				category := args[0]
-				deleted, err := op.ConfigReset(cmd.Context(), category, "", false)
+				deleted, err := configAPI.ConfigReset(cmd.Context(), category, "", false)
 				if err != nil {
 					return err
 				}
@@ -139,7 +139,7 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 			case 2:
 				category := args[0]
 				key := args[1]
-				deleted, err := op.ConfigReset(cmd.Context(), category, key, false)
+				deleted, err := configAPI.ConfigReset(cmd.Context(), category, key, false)
 				if err != nil {
 					return err
 				}
@@ -159,7 +159,7 @@ func newConfigResetCmd(op *api.Operation) *cobra.Command {
 	return cc
 }
 
-func newConfigListCmd(configAPI *api.Operation) *cobra.Command {
+func newConfigListCmd(configAPI api.ConfigAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},

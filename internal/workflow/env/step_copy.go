@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 
@@ -28,7 +29,7 @@ type CopyStep struct {
 	deps     []string
 	specHash string
 	input    inputs.CPInput
-	op       *api.Operation
+	op       api.CPAPI
 	saved    *CPState
 	meta     model.ResourceMeta
 }
@@ -48,10 +49,6 @@ func (s *CopyStep) Apply(
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
-	if s.op == nil {
-		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
-	}
-
 	// Copy commands are imperative — always execute on apply.
 	// SSH reachability is guaranteed by the DAG (SSH step runs first).
 	// No retry loop needed — waitForSSH already confirmed port 22 is open.
@@ -86,9 +83,6 @@ func (s *CopyStep) Destroy(
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
-	if s.op == nil {
-		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
-	}
 	if s.saved == nil && saved.Spec != nil {
 		s.saved = StateFromMap[CPState](saved.Spec)
 		s.meta = saved.Meta
@@ -114,8 +108,11 @@ func newCopyStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
 	// Normalize single-string src to a slice for proper YAML unmarshalling into []string.
 	// YAML spec allows `src: ./mvm` as a convenience — marshal/unmarshal would fail
 	// because a single string cannot be decoded into a []string field.
@@ -155,8 +152,11 @@ func newCopyStepFromState(
 	name string,
 	saved model.ResourceState,
 	deps []string,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
 	cs := StateFromMap[CPState](saved.Spec)
 	return &CopyStep{
 		stepType: stepType,

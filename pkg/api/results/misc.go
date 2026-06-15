@@ -1,4 +1,4 @@
-package responses
+package results
 
 // CacheInitResult is the typed result of CacheInitAll.
 type CacheInitResult struct {

@@ -10,21 +10,16 @@ import (
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
 
-// InitStepResult matches Python's InitStepResult dataclass.
-type InitStepResult struct {
-	Step    string `json:"step"`
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-}
-
-// InitResult matches Python's InitResult dataclass.
-type InitResult struct {
-	Steps            []InitStepResult       `json:"steps"`
-	HostReady        bool                   `json:"host_ready"`
-	NeedsInteraction *errs.NeedsInteraction `json:"needs_interaction,omitempty"`
+// InitAPI defines the public interface for init/wizard operations.
+type InitAPI interface {
+	InitCheckReadiness(ctx context.Context) *model.ProbeResult
+	InitSetupHost(ctx context.Context) error
+	InitRun(ctx context.Context, skipHost bool, skipNetwork bool, nonInteractive bool, sudoCompleted bool, downloadVersion string, onProgress event.OnProgressCallback) *results.InitResult
+	InitRunFull(ctx context.Context, skipHost bool, skipNetwork bool, nonInteractive bool, sudoCompleted bool, hostSetupMessage string, downloadVersion string, guestfsEnabled *bool, onProgress event.OnProgressCallback) *results.InitResult
 }
 
 // InitCheckReadiness runs pre-flight host readiness checks via the public API layer.
@@ -57,7 +52,7 @@ func (op *Operation) InitRun(
 	sudoCompleted bool,
 	downloadVersion string,
 	onProgress event.OnProgressCallback,
-) *InitResult {
+) *results.InitResult {
 	return op.InitRunFull(
 		ctx,
 		skipHost,
@@ -82,8 +77,8 @@ func (op *Operation) InitRunFull(
 	downloadVersion string,
 	guestfsEnabled *bool,
 	onProgress event.OnProgressCallback,
-) *InitResult {
-	steps := make([]InitStepResult, 0)
+) *results.InitResult {
+	steps := make([]results.InitStepResult, 0)
 
 	// ── Step 1: Local state ──
 	steps = append(steps, op.initInitDatabase(ctx))
@@ -92,7 +87,7 @@ func (op *Operation) InitRunFull(
 	hostResult, hostInteraction := op.initStepHost(ctx, skipHost, sudoCompleted, hostSetupMessage, onProgress)
 	steps = append(steps, hostResult)
 	if hostInteraction != nil {
-		return &InitResult{
+		return &results.InitResult{
 			Steps:            steps,
 			HostReady:        false,
 			NeedsInteraction: hostInteraction,
@@ -103,7 +98,7 @@ func (op *Operation) InitRunFull(
 	guestfsResult, guestfsInteraction := op.initStepGuestfs(ctx, guestfsEnabled)
 	steps = append(steps, guestfsResult)
 	if guestfsInteraction != nil {
-		return &InitResult{
+		return &results.InitResult{
 			Steps:            steps,
 			HostReady:        false,
 			NeedsInteraction: guestfsInteraction,
@@ -112,7 +107,7 @@ func (op *Operation) InitRunFull(
 
 	// ── Step 5: Network setup ──
 	if skipNetwork {
-		steps = append(steps, InitStepResult{Step: "network_setup", Success: true, Message: "Skipped (--skip-network)"})
+		steps = append(steps, results.InitStepResult{Step: "network_setup", Success: true, Message: "Skipped (--skip-network)"})
 	} else {
 		steps = append(steps, op.initStepNetworkSetup(ctx))
 	}
@@ -124,7 +119,7 @@ func (op *Operation) InitRunFull(
 	binaryResult, binaryInteraction := op.initStepBinary(ctx, nonInteractive, downloadVersion)
 	steps = append(steps, binaryResult)
 	if binaryInteraction != nil {
-		return &InitResult{
+		return &results.InitResult{
 			Steps:            steps,
 			HostReady:        false,
 			NeedsInteraction: binaryInteraction,
@@ -143,23 +138,23 @@ func (op *Operation) InitRunFull(
 		}
 	}
 
-	return &InitResult{
+	return &results.InitResult{
 		Steps:     steps,
 		HostReady: hostReady && binaryReady,
 	}
 }
 
-func (op *Operation) initInitDatabase(ctx context.Context) InitStepResult {
+func (op *Operation) initInitDatabase(ctx context.Context) results.InitStepResult {
 	// Python: try: InitOperation.init_database() except Exception as e:
-	//         return InitStepResult("local_state", False, f"Failed: {e}")
+	//         return results.InitStepResult("local_state", False, f"Failed: {e}")
 	// Python's init_database: db = Database(); db.migrate()
 	// Go: run migrations via db.RunMigrationsCtx, wrapped in explicit error handling.
 	if op.Connection != nil {
 		if _, err := op.Connection.RunMigrationsCtx(ctx); err != nil {
-			return InitStepResult{Step: "local_state", Success: false, Message: fmt.Sprintf("Failed: %v", err)}
+			return results.InitStepResult{Step: "local_state", Success: false, Message: fmt.Sprintf("Failed: %v", err)}
 		}
 	}
-	return InitStepResult{Step: "local_state", Success: true, Message: "Local state ready"}
+	return results.InitStepResult{Step: "local_state", Success: true, Message: "Local state ready"}
 }
 
 func (op *Operation) initStepHost(
@@ -168,9 +163,9 @@ func (op *Operation) initStepHost(
 	sudoCompleted bool,
 	setupMessage string,
 	onProgress event.OnProgressCallback,
-) (InitStepResult, *errs.NeedsInteraction) {
+) (results.InitStepResult, *errs.NeedsInteraction) {
 	if skip {
-		return InitStepResult{Step: "host", Success: true, Message: "Skipped (--skip-host)"}, nil
+		return results.InitStepResult{Step: "host", Success: true, Message: "Skipped (--skip-host)"}, nil
 	}
 
 	if sudoCompleted {
@@ -178,27 +173,27 @@ func (op *Operation) initStepHost(
 		if msg == "" {
 			msg = "completed"
 		}
-		return InitStepResult{Step: "host", Success: true, Message: msg}, nil
+		return results.InitStepResult{Step: "host", Success: true, Message: msg}, nil
 	}
 
 	initResult, initErr := op.HostInit(ctx, onProgress)
 	if initErr != nil {
-		return InitStepResult{Step: "host", Success: false, Message: initErr.Error()}, nil
+		return results.InitStepResult{Step: "host", Success: false, Message: initErr.Error()}, nil
 	}
 
 	// Check for NeedsInteraction (Python: isinstance(result, NeedsInteraction))
 	if interaction, ok := initResult.(*errs.NeedsInteraction); ok {
-		return InitStepResult{Step: "host", Success: false, Message: "Root privileges required"}, interaction
+		return results.InitStepResult{Step: "host", Success: false, Message: "Root privileges required"}, interaction
 	}
 
 	if initResult == nil {
-		return InitStepResult{Step: "host", Success: true, Message: "Host already configured"}, nil
+		return results.InitStepResult{Step: "host", Success: true, Message: "Host already configured"}, nil
 	}
 
-	return InitStepResult{Step: "host", Success: true, Message: "Host initialized"}, nil
+	return results.InitStepResult{Step: "host", Success: true, Message: "Host initialized"}, nil
 }
 
-func (op *Operation) initStepNetworkSetup(ctx context.Context) InitStepResult {
+func (op *Operation) initStepNetworkSetup(ctx context.Context) results.InitStepResult {
 	err := op.HostNetworkSetup(ctx)
 	success := err == nil
 	msg := ""
@@ -212,15 +207,15 @@ func (op *Operation) initStepNetworkSetup(ctx context.Context) InitStepResult {
 			msg = "Failed to create default network"
 		}
 	}
-	return InitStepResult{Step: "network_setup", Success: success, Message: msg}
+	return results.InitStepResult{Step: "network_setup", Success: success, Message: msg}
 }
 
-func (op *Operation) initStepCache(ctx context.Context, onProgress event.OnProgressCallback) InitStepResult {
+func (op *Operation) initStepCache(ctx context.Context, onProgress event.OnProgressCallback) results.InitStepResult {
 	// Python: try: result = CacheOperation.init_all(...); except Exception as e:
-	//         return InitStepResult("cache", False, f"Cache init failed: {e}")
+	//         return results.InitStepResult("cache", False, f"Cache init failed: {e}")
 	cacheDict, err := op.CacheInitAll(ctx, onProgress)
 	if err != nil {
-		return InitStepResult{Step: "cache", Success: false, Message: fmt.Sprintf("Cache init failed: %v", err)}
+		return results.InitStepResult{Step: "cache", Success: false, Message: fmt.Sprintf("Cache init failed: %v", err)}
 	}
 	// Python: checks cache_dict.get("guestfs_appliance")
 	guestfsBuilt := cacheDict.GuestfsAppliance != ""
@@ -228,17 +223,17 @@ func (op *Operation) initStepCache(ctx context.Context, onProgress event.OnProgr
 	if guestfsBuilt {
 		msg = "Cache directories ready (libguestfs appliance built)"
 	}
-	return InitStepResult{Step: "cache", Success: true, Message: msg}
+	return results.InitStepResult{Step: "cache", Success: true, Message: msg}
 }
 
 func (op *Operation) initStepBinary(
 	ctx context.Context,
 	nonInteractive bool,
 	downloadVersion string,
-) (InitStepResult, *errs.NeedsInteraction) {
+) (results.InitStepResult, *errs.NeedsInteraction) {
 	local, _, err := op.BinaryList(ctx, false, nil, nil)
 	if err != nil {
-		return InitStepResult{Step: "binary", Success: false, Message: "Failed to list binaries"}, nil
+		return results.InitStepResult{Step: "binary", Success: false, Message: "Failed to list binaries"}, nil
 	}
 
 	fcBinaries := make([]*model.BinaryItem, 0)
@@ -256,7 +251,7 @@ func (op *Operation) initStepBinary(
 			}
 		}
 		if len(active) > 0 {
-			return InitStepResult{
+			return results.InitStepResult{
 				Step:    "binary",
 				Success: true,
 				Message: fmt.Sprintf("Binary available (v%s)", active[0].Version),
@@ -265,13 +260,13 @@ func (op *Operation) initStepBinary(
 		// Python: repaired = BinaryOperation.ensure_default()
 		repaired, err := op.BinaryEnsureDefault(ctx)
 		if err == nil && repaired != nil {
-			return InitStepResult{
+			return results.InitStepResult{
 				Step:    "binary",
 				Success: true,
 				Message: fmt.Sprintf("Binary available (v%s) — set as default", repaired.Version),
 			}, nil
 		}
-		return InitStepResult{
+		return results.InitStepResult{
 			Step:    "binary",
 			Success: true,
 			Message: fmt.Sprintf("Binary available (v%s)", fcBinaries[0].Version),
@@ -291,10 +286,10 @@ func (op *Operation) initStepBinary(
 	return op.initBinaryNeedsInteraction(ctx)
 }
 
-func (op *Operation) initDownloadBinary(ctx context.Context, version string) InitStepResult {
+func (op *Operation) initDownloadBinary(ctx context.Context, version string) results.InitStepResult {
 	binaries, err := op.BinaryPull(ctx, inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
 	if err != nil {
-		return InitStepResult{
+		return results.InitStepResult{
 			Step:    "binary",
 			Success: false,
 			Message: fmt.Sprintf("Download failed: %v", err),
@@ -307,23 +302,23 @@ func (op *Operation) initDownloadBinary(ctx context.Context, version string) Ini
 			break
 		}
 	}
-	return InitStepResult{Step: "binary", Success: true, Message: fmt.Sprintf("Downloaded v%s", versionStr)}
+	return results.InitStepResult{Step: "binary", Success: true, Message: fmt.Sprintf("Downloaded v%s", versionStr)}
 }
 
-func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResult {
+func (op *Operation) initDownloadBinaryLatest(ctx context.Context) results.InitStepResult {
 	// Python: try: BinaryOperation.list_all(remote=True, limit=1); except BinaryError:
-	//         return InitStepResult("binary", False, f"Download failed: {e}")
+	//         return results.InitStepResult("binary", False, f"Download failed: {e}")
 	// Go wraps the list and pull in an error-checking pattern.
 	one := 1
 	_, remote, err := op.BinaryList(ctx, true, &one, nil)
 	if err != nil || len(remote) == 0 {
-		return InitStepResult{Step: "binary", Success: false, Message: "No remote versions found"}
+		return results.InitStepResult{Step: "binary", Success: false, Message: "No remote versions found"}
 	}
 
 	version := remote[0].Version
 	binaries, err := op.BinaryPull(ctx, inputs.BinaryPullInput{Version: version, SetDefault: true}, nil)
 	if err != nil {
-		return InitStepResult{
+		return results.InitStepResult{
 			Step:    "binary",
 			Success: false,
 			Message: fmt.Sprintf("Download failed: %v", err),
@@ -337,10 +332,10 @@ func (op *Operation) initDownloadBinaryLatest(ctx context.Context) InitStepResul
 			break
 		}
 	}
-	return InitStepResult{Step: "binary", Success: true, Message: fmt.Sprintf("Downloaded v%s", versionStr)}
+	return results.InitStepResult{Step: "binary", Success: true, Message: fmt.Sprintf("Downloaded v%s", versionStr)}
 }
 
-func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepResult, *errs.NeedsInteraction) {
+func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (results.InitStepResult, *errs.NeedsInteraction) {
 	// Python: try: versions = BinaryOperation.list_all(remote=True, limit=5)
 	//         except BinaryError: versions = []
 	five := 5
@@ -355,7 +350,7 @@ func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepRe
 	}
 
 	if len(versions) == 0 {
-		return InitStepResult{Step: "binary", Success: false, Message: "No remote versions available"},
+		return results.InitStepResult{Step: "binary", Success: false, Message: "No remote versions available"},
 			&errs.NeedsInteraction{
 				Code:      "binary.confirm_download",
 				Message:   "No remote versions available",
@@ -364,7 +359,7 @@ func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepRe
 			}
 	}
 
-	return InitStepResult{Step: "binary", Success: false, Message: "No Firecracker binary found in cache"},
+	return results.InitStepResult{Step: "binary", Success: false, Message: "No Firecracker binary found in cache"},
 		&errs.NeedsInteraction{
 			Code:      "binary.confirm_download",
 			Message:   "No Firecracker binary found in cache",
@@ -379,16 +374,16 @@ func (op *Operation) initBinaryNeedsInteraction(ctx context.Context) (InitStepRe
 func (op *Operation) initStepGuestfs(
 	ctx context.Context,
 	guestfsEnabled *bool,
-) (InitStepResult, *errs.NeedsInteraction) {
+) (results.InitStepResult, *errs.NeedsInteraction) {
 	// Python: Matches InitOperation._step_guestfs(guestfs_enabled=guestfs_enabled)
 	// When guestfs_enabled is provided (from a previous interaction round),
 	// the decision is persisted directly.
 	if guestfsEnabled != nil {
 		op.Services.Config.Set(ctx, "settings", "guestfs_enabled", *guestfsEnabled)
 		if *guestfsEnabled {
-			return InitStepResult{Step: "guestfs", Success: true, Message: "enabled"}, nil
+			return results.InitStepResult{Step: "guestfs", Success: true, Message: "enabled"}, nil
 		}
-		return InitStepResult{Step: "guestfs", Success: true, Message: "disabled"}, nil
+		return results.InitStepResult{Step: "guestfs", Success: true, Message: "disabled"}, nil
 	}
 
 	// First pass — detect availability
@@ -405,11 +400,11 @@ func (op *Operation) initStepGuestfs(
 	if !available {
 		// libguestfs not installed — no point prompting (Python: svc.set("settings", "guestfs_enabled", False))
 		op.Services.Config.Set(ctx, "settings", "guestfs_enabled", false)
-		return InitStepResult{Step: "guestfs", Success: true, Message: "not installed"}, nil
+		return results.InitStepResult{Step: "guestfs", Success: true, Message: "not installed"}, nil
 	}
 
 	// Installed but user hasn't decided — prompt (Python: NeedsInteraction)
-	return InitStepResult{Step: "guestfs", Success: false, Message: "available"},
+	return results.InitStepResult{Step: "guestfs", Success: false, Message: "available"},
 		&errs.NeedsInteraction{
 			Code:      "guestfs.confirm_enable",
 			Message:   "libguestfs is available. Enable it as a fallback?",

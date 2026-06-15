@@ -15,9 +15,24 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/provisioner/guestfs"
 	"mvmctl/internal/lib/system"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// CacheAPI defines the public interface for cache operations.
+type CacheAPI interface {
+	CacheCheckPrivileges(binary, operation string) error
+	CacheSessionHasGroup() bool
+	CacheInitAll(ctx context.Context, onProgress event.OnProgressCallback) (*results.CacheInitResult, error)
+	CachePruneVMs(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult
+	CachePruneNetworks(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	CachePruneImages(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	CachePruneKernels(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	CachePruneBinaries(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	CachePruneMisc(ctx context.Context, dryRun bool) (map[string]any, error)
+	CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error)
+	CacheClean(ctx context.Context, dryRun bool) (*model.CleanResult, error)
+}
 
 // CacheCheckPrivileges checks if the current process has the required system privileges
 // for destructive cache operations. Returns nil if OK, or an error describing what's missing.
@@ -35,7 +50,7 @@ func (op *Operation) CacheSessionHasGroup() bool {
 func (op *Operation) CacheInitAll(
 	ctx context.Context,
 	onProgress event.OnProgressCallback,
-) (*responses.CacheInitResult, error) {
+) (*results.CacheInitResult, error) {
 	cacheDir := op.CacheDir
 	var created []string
 
@@ -89,7 +104,7 @@ func (op *Operation) CacheInitAll(
 	// Detected guestfs kernel (Python: KernelDetector.find_best_kernel())
 	kernelPath, _, _ := guestfs.FindBestKernel(ctx)
 
-	return &responses.CacheInitResult{
+	return &results.CacheInitResult{
 		CacheDir:         cacheDir,
 		Directories:      created,
 		GuestfsAppliance: appliancePath,

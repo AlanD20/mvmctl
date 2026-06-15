@@ -15,9 +15,23 @@ import (
 	libnet "mvmctl/internal/lib/network"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// NetworkAPI defines the public interface for network operations.
+type NetworkAPI interface {
+	NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error)
+	NetworkRemove(ctx context.Context, input inputs.NetworkInput, force bool) error
+	NetworkListAll(ctx context.Context) ([]*model.Network, error)
+	NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.Network, error)
+	NetworkToJSON(networks []*model.Network) []map[string]any
+	NetworkInspect(ctx context.Context, input inputs.NetworkInput) (*results.NetworkInspect, error)
+	NetworkSetDefault(ctx context.Context, input inputs.NetworkInput) error
+	NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error)
+	NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	NetworkCreateDefaultNetwork(ctx context.Context) (*model.Network, error)
+}
 
 // NetworkCreate creates a new network.
 // Matches Python's NetworkOperation.create() exactly.
@@ -205,7 +219,7 @@ func (op *Operation) NetworkToJSON(networks []*model.Network) []map[string]any {
 func (op *Operation) NetworkInspect(
 	ctx context.Context,
 	input inputs.NetworkInput,
-) (*responses.NetworkInspect, error) {
+) (*results.NetworkInspect, error) {
 	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
@@ -230,11 +244,11 @@ func (op *Operation) NetworkInspect(
 
 	// Load leases
 	leases, err := op.Repos.Lease.ListAll(ctx, updated.ID)
-	leaseList := make([]responses.NetworkLease, 0)
+	leaseList := make([]results.NetworkLease, 0)
 	if err == nil {
-		leaseList = make([]responses.NetworkLease, 0, len(leases))
+		leaseList = make([]results.NetworkLease, 0, len(leases))
 		for _, lease := range leases {
-			l := responses.NetworkLease{
+			l := results.NetworkLease{
 				IPv4:     lease.IPv4,
 				LeasedAt: lease.LeasedAt,
 			}
@@ -251,19 +265,19 @@ func (op *Operation) NetworkInspect(
 		}
 	}
 
-	return &responses.NetworkInspect{
-		Network: responses.NetworkItemInfo{
+	return &results.NetworkInspect{
+		Network: results.NetworkItemInfo{
 			ID: updated.ID, Name: updated.Name, Subnet: updated.Subnet,
 			Bridge: updated.Bridge, IPv4Gateway: updated.IPv4Gateway,
 			IsDefault: updated.IsDefault, IsPresent: updated.IsPresent,
 			CreatedAt: updated.CreatedAt, UpdatedAt: updated.UpdatedAt,
 		},
-		Status: responses.NetworkStatusInfo{
+		Status: results.NetworkStatusInfo{
 			BridgeActive: updated.BridgeActive,
 			IsPresent:    updated.IsPresent,
 			IsDefault:    updated.IsDefault,
 		},
-		NAT: responses.NetworkNATInfo{
+		NAT: results.NetworkNATInfo{
 			NATEnabled:  updated.NATEnabled,
 			NATGateways: network.NatGatewaysList(updated),
 		},

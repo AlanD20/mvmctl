@@ -1,4 +1,4 @@
-package responses
+package results
 
 // ImageItemInfo groups image metadata in an inspect response.
 type ImageItemInfo struct {

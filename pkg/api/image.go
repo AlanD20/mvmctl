@@ -22,9 +22,22 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// ImageAPI defines the public interface for image operations.
+type ImageAPI interface {
+	ImagePrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	ImagePull(ctx context.Context, input inputs.ImagePullInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
+	ImageImport(ctx context.Context, input inputs.ImageImportInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
+	ImageWarm(ctx context.Context, input inputs.ImageInput, all bool, onProgress event.OnProgressCallback) ([]string, error)
+	ImageRemove(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult
+	ImageListAll(ctx context.Context, remote bool, typeFilter string, noCache bool, onProgress event.OnProgressCallback) ([]*model.ImageItem, []model.VersionInfo, error)
+	ImageGet(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error)
+	ImageInspect(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error)
+	ImageSetDefault(ctx context.Context, input inputs.ImageInput) error
+}
 
 // ImagePrune prunes unused images.
 // Matches Python's ImageOperation.prune() exactly — queries Repository for
@@ -651,27 +664,27 @@ func (op *Operation) ImageGet(ctx context.Context, input inputs.ImageInput) (*mo
 
 // ImageInspect returns grouped dict of an image.
 // Matches Python's ImageOperation.inspect() exactly.
-func (op *Operation) ImageInspect(ctx context.Context, input inputs.ImageInput) (*responses.ImageInspect, error) {
+func (op *Operation) ImageInspect(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error) {
 	img, err := op.ImageGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	return &responses.ImageInspect{
-		Image: responses.ImageItemInfo{
+	return &results.ImageInspect{
+		Image: results.ImageItemInfo{
 			ID: img.ID, Name: img.Name, Type: img.Type,
 			Arch: img.Arch, IsDefault: img.IsDefault, IsPresent: img.IsPresent,
 		},
-		Storage: responses.ImageStorageInfo{
+		Storage: results.ImageStorageInfo{
 			Path: img.Path, FSType: img.FSType, FSUUID: img.FSUUID,
 			CompressedSize: img.CompressedSize, OriginalSize: img.OriginalSize,
 		},
-		Compression: responses.ImageCompressionInfo{
+		Compression: results.ImageCompressionInfo{
 			Format: img.CompressedFormat, Ratio: img.CompressionRatio,
 		},
-		Requirements: responses.ImageRequirementsInfo{
+		Requirements: results.ImageRequirementsInfo{
 			MinRootfsSizeMiB: img.MinRootfsSizeMiB,
 		},
-		Timestamps: responses.ImageTimestampsInfo{
+		Timestamps: results.ImageTimestampsInfo{
 			PulledAt: img.PulledAt, CreatedAt: img.CreatedAt, UpdatedAt: img.UpdatedAt,
 		},
 	}, nil

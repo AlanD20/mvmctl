@@ -1,4 +1,4 @@
-package responses
+package results
 
 // NetworkLease is a single lease entry in the network inspect response.
 type NetworkLease struct {

@@ -56,32 +56,32 @@ var vmColumns = []common.ListingColumn{
 	},
 }
 
-func NewVMCmd(op *api.Operation) *cobra.Command {
+func NewVMCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "vm",
 		Short: "VM lifecycle management",
 	}
 
-	cmd.AddCommand(newVMListCmd(op))
-	cmd.AddCommand(newVMpsCmd(op))
-	cmd.AddCommand(newVMCreateCmd(op))
-	cmd.AddCommand(newVMRemoveCmd(op))
-	cmd.AddCommand(newVMStartCmd(op))
-	cmd.AddCommand(newVMStopCmd(op))
-	cmd.AddCommand(newVMRebootCmd(op))
-	cmd.AddCommand(newVMPauseCmd(op))
-	cmd.AddCommand(newVMResumeCmd(op))
-	cmd.AddCommand(newVMSnapshotCmd(op))
-	cmd.AddCommand(newVMLoadCmd(op))
-	cmd.AddCommand(newVMInspectCmd(op))
-	cmd.AddCommand(newVMAttachVolumeCmd(op))
-	cmd.AddCommand(newVMDetachVolumeCmd(op))
+	cmd.AddCommand(newVMListCmd(vmAPI, configAPI))
+	cmd.AddCommand(newVMpsCmd(vmAPI, configAPI))
+	cmd.AddCommand(newVMCreateCmd(vmAPI))
+	cmd.AddCommand(newVMRemoveCmd(vmAPI))
+	cmd.AddCommand(newVMStartCmd(vmAPI))
+	cmd.AddCommand(newVMStopCmd(vmAPI))
+	cmd.AddCommand(newVMRebootCmd(vmAPI))
+	cmd.AddCommand(newVMPauseCmd(vmAPI))
+	cmd.AddCommand(newVMResumeCmd(vmAPI))
+	cmd.AddCommand(newVMSnapshotCmd(vmAPI))
+	cmd.AddCommand(newVMLoadCmd(vmAPI))
+	cmd.AddCommand(newVMInspectCmd(vmAPI))
+	cmd.AddCommand(newVMAttachVolumeCmd(vmAPI))
+	cmd.AddCommand(newVMDetachVolumeCmd(vmAPI))
 	return cmd
 }
 
 // ─── ls (list all VMs) ────────────────────────────────────────────────────────
 
-func newVMListCmd(op *api.Operation) *cobra.Command {
+func newVMListCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 
@@ -90,7 +90,7 @@ func newVMListCmd(op *api.Operation) *cobra.Command {
 		Aliases: []string{"list"},
 		Short:   "List all VMs.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVMList(op, cmd, jsonOutput, longOutput)
+			return runVMList(vmAPI, configAPI, cmd, jsonOutput, longOutput)
 		},
 	}
 
@@ -99,8 +99,8 @@ func newVMListCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func runVMList(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput bool) error {
-	vms := op.VMList(cmd.Context())
+func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonOutput, longOutput bool) error {
+	vms := vmAPI.VMList(cmd.Context())
 
 	if jsonOutput {
 		if vms == nil {
@@ -111,21 +111,21 @@ func runVMList(op *api.Operation, cmd *cobra.Command, jsonOutput, longOutput boo
 		return nil
 	}
 
-	style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
+	style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, longOutput)
 	common.RenderListing(vms, vmColumns, style)
 	return nil
 }
 
 // ─── ps (list running VMs) ────────────────────────────────────────────────────
 
-func newVMpsCmd(op *api.Operation) *cobra.Command {
+func newVMpsCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "ps",
 		Short: "List running VMs (active processes).",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVMps(op, cmd, jsonOutput)
+			return runVMps(vmAPI, configAPI, cmd, jsonOutput)
 		},
 	}
 
@@ -133,9 +133,9 @@ func newVMpsCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
+func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonOutput bool) error {
 	// Server-side filtering matching Python's list_all(status=[...])
-	vms := op.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
+	vms := vmAPI.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
 
 	if jsonOutput {
 		if vms == nil {
@@ -151,14 +151,14 @@ func runVMps(op *api.Operation, cmd *cobra.Command, jsonOutput bool) error {
 		return nil
 	}
 
-	style := common.Cli.ResolveListingStyle(cmd.Context(), op, false)
+	style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, false)
 	common.RenderListing(vms, vmColumns, style)
 	return nil
 }
 
 // ─── create ───────────────────────────────────────────────────────────────────
 
-func newVMCreateCmd(op *api.Operation) *cobra.Command {
+func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	var (
 		image           string
 		kernel          string
@@ -308,7 +308,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 				input.PCIEnabled = infraptr.Ptr(false)
 			}
 
-			vms, err := op.VMCreate(cmd.Context(), input, func(e event.Progress) {
+			vms, err := vmAPI.VMCreate(cmd.Context(), input, func(e event.Progress) {
 				if e.Message != "" {
 					prog.UpdateText(e.Message)
 				}
@@ -399,7 +399,7 @@ func newVMCreateCmd(op *api.Operation) *cobra.Command {
 
 // ─── rm (remove) ─────────────────────────────────────────────────────────────
 
-func newVMRemoveCmd(op *api.Operation) *cobra.Command {
+func newVMRemoveCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -409,7 +409,7 @@ func newVMRemoveCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runVMRemove(op, cmd, args, force)
+			return runVMRemove(vmAPI, cmd, args, force)
 		},
 	}
 
@@ -417,9 +417,9 @@ func newVMRemoveCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func runVMRemove(op *api.Operation, cmd *cobra.Command, identifiers []string, force bool) error {
+func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, force bool) error {
 	// Use batch API — pass all identifiers at once
-	removeResult := op.VMRemove(cmd.Context(), inputs.VMInput{Identifiers: identifiers, Force: force})
+	removeResult := vmAPI.VMRemove(cmd.Context(), inputs.VMInput{Identifiers: identifiers, Force: force})
 	if removeResult.HasErrors() {
 		for _, r := range removeResult.Items {
 			if r.IsOK() {
@@ -453,14 +453,14 @@ func runVMRemove(op *api.Operation, cmd *cobra.Command, identifiers []string, fo
 
 // ─── start ────────────────────────────────────────────────────────────────────
 
-func newVMStartCmd(op *api.Operation) *cobra.Command {
+func newVMStartCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:               "start [identifiers...]",
 		Short:             "Start one or more stopped VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			startResult := op.VMStart(cmd.Context(), inputs.VMInput{Identifiers: args})
+			startResult := vmAPI.VMStart(cmd.Context(), inputs.VMInput{Identifiers: args})
 			if startResult.HasErrors() {
 				for _, r := range startResult.Items {
 					if !r.IsOK() {
@@ -481,7 +481,7 @@ func newVMStartCmd(op *api.Operation) *cobra.Command {
 
 // ─── stop ─────────────────────────────────────────────────────────────────────
 
-func newVMStopCmd(op *api.Operation) *cobra.Command {
+func newVMStopCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -490,7 +490,7 @@ func newVMStopCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			stopResult := op.VMStop(cmd.Context(), inputs.VMInput{Identifiers: args, Force: force})
+			stopResult := vmAPI.VMStop(cmd.Context(), inputs.VMInput{Identifiers: args, Force: force})
 			if stopResult.HasErrors() {
 				for _, r := range stopResult.Items {
 					if !r.IsOK() {
@@ -514,7 +514,7 @@ func newVMStopCmd(op *api.Operation) *cobra.Command {
 
 // ─── reboot ───────────────────────────────────────────────────────────────────
 
-func newVMRebootCmd(op *api.Operation) *cobra.Command {
+func newVMRebootCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -523,7 +523,7 @@ func newVMRebootCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rebootResult := op.VMReboot(cmd.Context(), inputs.VMInput{Identifiers: args, Force: force})
+			rebootResult := vmAPI.VMReboot(cmd.Context(), inputs.VMInput{Identifiers: args, Force: force})
 			if rebootResult.HasErrors() {
 				for _, r := range rebootResult.Items {
 					if !r.IsOK() {
@@ -547,14 +547,14 @@ func newVMRebootCmd(op *api.Operation) *cobra.Command {
 
 // ─── pause ────────────────────────────────────────────────────────────────────
 
-func newVMPauseCmd(op *api.Operation) *cobra.Command {
+func newVMPauseCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:               "pause [identifiers...]",
 		Short:             "Pause one or more running VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pauseResult := op.VMPause(cmd.Context(), inputs.VMInput{Identifiers: args})
+			pauseResult := vmAPI.VMPause(cmd.Context(), inputs.VMInput{Identifiers: args})
 			if pauseResult.HasErrors() {
 				for _, r := range pauseResult.Items {
 					if !r.IsOK() {
@@ -575,14 +575,14 @@ func newVMPauseCmd(op *api.Operation) *cobra.Command {
 
 // ─── resume ───────────────────────────────────────────────────────────────────
 
-func newVMResumeCmd(op *api.Operation) *cobra.Command {
+func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:               "resume [identifiers...]",
 		Short:             "Resume one or more paused VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			resumeResult := op.VMResume(cmd.Context(), inputs.VMInput{Identifiers: args})
+			resumeResult := vmAPI.VMResume(cmd.Context(), inputs.VMInput{Identifiers: args})
 			if resumeResult.HasErrors() {
 				for _, r := range resumeResult.Items {
 					if !r.IsOK() {
@@ -603,7 +603,7 @@ func newVMResumeCmd(op *api.Operation) *cobra.Command {
 
 // ─── snapshot ─────────────────────────────────────────────────────────────────
 
-func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
+func newVMSnapshotCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "snapshot [id] [mem_file] [state_file]",
 		Short:             "Snapshot VM memory and disk state.",
@@ -614,7 +614,7 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 			memFile := args[1]
 			stateFile := args[2]
 
-			if err := op.VMSnapshot(
+			if err := vmAPI.VMSnapshot(
 				cmd.Context(),
 				inputs.VMInput{Identifiers: []string{id}},
 				memFile,
@@ -633,7 +633,7 @@ func newVMSnapshotCmd(op *api.Operation) *cobra.Command {
 
 // ─── load (from snapshot) ─────────────────────────────────────────────────────
 
-func newVMLoadCmd(op *api.Operation) *cobra.Command {
+func newVMLoadCmd(vmAPI api.VMAPI) *cobra.Command {
 	var resume bool
 
 	cmd := &cobra.Command{
@@ -655,7 +655,7 @@ Flags:
 			memFile := args[1]
 			stateFile := args[2]
 
-			if err := op.VMLoad(
+			if err := vmAPI.VMLoad(
 				cmd.Context(),
 				inputs.VMInput{Identifiers: []string{id}},
 				memFile,
@@ -677,7 +677,7 @@ Flags:
 
 // ─── inspect ──────────────────────────────────────────────────────────────────
 
-func newVMInspectCmd(op *api.Operation) *cobra.Command {
+func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -688,7 +688,7 @@ func newVMInspectCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := args[0]
 
-			info, err := op.VMInspect(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
+			info, err := vmAPI.VMInspect(cmd.Context(), inputs.VMInput{Identifiers: []string{id}})
 			if err != nil {
 				return err
 			}
@@ -714,7 +714,7 @@ func newVMInspectCmd(op *api.Operation) *cobra.Command {
 
 // ─── attach-volume ────────────────────────────────────────────────────────────
 
-func newVMAttachVolumeCmd(op *api.Operation) *cobra.Command {
+func newVMAttachVolumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:   "attach-volume [id] [volume_name]",
 		Short: "Attach a volume to a running VM.",
@@ -729,7 +729,7 @@ Arguments:
 			id := args[0]
 			volumeName := args[1]
 
-			if err := op.VMAttachVolume(
+			if err := vmAPI.VMAttachVolume(
 				cmd.Context(),
 				inputs.VMInput{Identifiers: []string{id}},
 				volumeName,
@@ -745,7 +745,7 @@ Arguments:
 
 // ─── detach-volume ────────────────────────────────────────────────────────────
 
-func newVMDetachVolumeCmd(op *api.Operation) *cobra.Command {
+func newVMDetachVolumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
 		Use:   "detach-volume [id] [volume_name]",
 		Short: "Detach a volume from a running VM.",
@@ -760,7 +760,7 @@ Arguments:
 			id := args[0]
 			volumeName := args[1]
 
-			if err := op.VMDetachVolume(
+			if err := vmAPI.VMDetachVolume(
 				cmd.Context(),
 				inputs.VMInput{Identifiers: []string{id}},
 				volumeName,

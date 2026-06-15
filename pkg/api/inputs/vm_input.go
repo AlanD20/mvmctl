@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/enricher"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
@@ -45,17 +44,14 @@ type VMRequest struct {
 	input    VMInput
 	result   *ResolvedVMInput
 	resolver *vm.Resolver
-	enricher *enricher.Enricher
 }
 
 // NewVMRequest creates a new VMRequest.
-// Accepts optional enricher for enriching resolved VMs with related data.
-func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository, enricher *enricher.Enricher) *VMRequest {
+func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository) *VMRequest {
 	return &VMRequest{
 		db:       db,
 		input:    inputs,
 		resolver: vm.NewResolver(vmRepo),
-		enricher: enricher,
 	}
 }
 
@@ -81,12 +77,6 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 			errs.CodeVMNotFound,
 			fmt.Sprintf("Could not resolve any VMs: %s", strings.Join(result.Errors, ", ")),
 		)
-	}
-
-	// Enrich resolved VMs with related data (image, kernel, network, volumes, binary).
-	// Matches Python's VMResolver(include=["image","kernel","network","network.leases","volumes","binary"]).
-	if r.enricher != nil && len(result.VMs) > 0 {
-		_ = r.enricher.EnrichVM(ctx, result.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	}
 
 	r.result = &ResolvedVMInput{

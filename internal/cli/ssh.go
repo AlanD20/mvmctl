@@ -46,7 +46,7 @@ func completeVMNames(cmd *cobra.Command, args []string, toComplete string) ([]st
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
-func NewSSHCmd(op *api.Operation) *cobra.Command {
+func NewSSHCmd(sshAPI api.SSHAPI) *cobra.Command {
 	var userFlag string
 	var key string
 	var cmdStr string
@@ -97,7 +97,7 @@ Examples:
 				input.Timeout = &timeout
 			}
 
-			if err := op.SSHConnect(cmd.Context(), input, nil); err != nil {
+			if err := sshAPI.SSHConnect(cmd.Context(), input, nil); err != nil {
 				return err
 			}
 			return nil

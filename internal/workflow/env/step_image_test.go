@@ -10,13 +10,13 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/inputs"
 )
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
@@ -54,45 +54,39 @@ func ctxAwareWriter(inner workflow.StateWriter) workflow.StateWriter {
 	}
 }
 
-// ctxImageRepo wraps testutil.ImageRepo to propagate context cancellation
-// from GetByType. The plain mock ignores context, so this wrapper is needed
+// ctxMockImageAPI wraps testutil.MockImageAPI to propagate context cancellation
+// from ImageGet. The plain mock ignores context, so this wrapper is needed
 // to test the R8 (context cancellation) iron rule.
-type ctxImageRepo struct {
-	*testutil.ImageRepo
+type ctxMockImageAPI struct {
+	testutil.MockImageAPI
 }
 
-var _ image.Repository = (*ctxImageRepo)(nil)
-
-func (r *ctxImageRepo) GetByType(ctx context.Context, imgType string) (*model.ImageItem, error) {
+func (m *ctxMockImageAPI) ImageGet(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return r.ImageRepo.GetByType(ctx, imgType)
+	return m.MockImageAPI.ImageGet(ctx, input)
 }
 
-// errorImageRepo wraps testutil.ImageRepo to inject errors into GetByType.
-type errorImageRepo struct {
-	*testutil.ImageRepo
+// errorMockImageAPI wraps testutil.MockImageAPI to inject errors into ImageGet.
+type errorMockImageAPI struct {
+	testutil.MockImageAPI
 	getErr error
 }
 
-var _ image.Repository = (*errorImageRepo)(nil)
-
-func (r *errorImageRepo) GetByType(_ context.Context, _ string) (*model.ImageItem, error) {
-	return nil, r.getErr
+func (m *errorMockImageAPI) ImageGet(_ context.Context, _ inputs.ImageInput) (*model.ImageItem, error) {
+	return nil, m.getErr
 }
 
-// newImageStep is a shorthand for creating an ImageStep via the registry.
-func newImageStep(t *testing.T, op *api.Operation) workflow.Step {
+// newImageStep is a shorthand for creating an ImageStep.
+// For nil-op tests, it constructs the step directly via NewImageStep.
+// For other tests, it uses the registry with the given Operation.
+func newImageStep(t *testing.T, op api.ImageAPI) workflow.Step {
 	t.Helper()
-	spec := map[string]any{
-		"name":    "alpine",
-		"type":    "alpine",
-		"version": "3.21",
+	if op == nil {
+		return envpkg.NewImageStep(nil, "alpine", inputs.ImagePullInput{Type: "alpine", Version: "3.21"})
 	}
-	step, err := envpkg.Registry["image"].FromSpec("image", "alpine", spec, op)
-	require.NoError(t, err, "FromSpec must succeed")
-	return step
+	return envpkg.NewImageStep(op, "alpine", inputs.ImagePullInput{Type: "alpine", Version: "3.21"})
 }
 
 // ─── ImageStep.Apply ─────────────────────────────────────────────────────────
@@ -102,7 +96,7 @@ func newImageStep(t *testing.T, op *api.Operation) workflow.Step {
 
 func TestImageStep_Apply(t *testing.T) {
 	tests := map[string]struct {
-		setupOp        func(t *testing.T) *api.Operation
+		setupAPI       func(t *testing.T) api.ImageAPI
 		ctx            func() context.Context
 		saved          model.ResourceState
 		wantErr        string
@@ -112,14 +106,18 @@ func TestImageStep_Apply(t *testing.T) {
 		// ── Error paths FIRST ──────────────────────────────────────────
 
 		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
-			ctx:     context.Background,
-			wantErr: "operation not initialized",
+			setupAPI: func(_ *testing.T) api.ImageAPI { return nil },
+			ctx:      context.Background,
+			wantErr:  "operation not initialized",
 		},
 		"context_cancelled_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{Image: &ctxImageRepo{ImageRepo: testutil.NewImageRepo()}},
+			setupAPI: func(_ *testing.T) api.ImageAPI {
+				return &ctxMockImageAPI{
+					MockImageAPI: testutil.MockImageAPI{
+						ImageGetFunc: func(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error) {
+							return &model.ImageItem{}, nil
+						},
+					},
 				}
 			},
 			ctx: func() context.Context {
@@ -130,14 +128,9 @@ func TestImageStep_Apply(t *testing.T) {
 			wantErr: "context canceled",
 		},
 		"getbytype_database_error_wraps_correctly": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{
-						Image: &errorImageRepo{
-							ImageRepo: testutil.NewImageRepo(),
-							getErr:    errors.New("connection refused"),
-						},
-					},
+			setupAPI: func(_ *testing.T) api.ImageAPI {
+				return &errorMockImageAPI{
+					getErr: errors.New("connection refused"),
 				}
 			},
 			ctx:     context.Background,
@@ -147,28 +140,24 @@ func TestImageStep_Apply(t *testing.T) {
 		// ── Happy paths AFTER ──────────────────────────────────────────
 
 		"image_exists_skips_pull_and_writes_state": {
-			setupOp: func(t *testing.T) *api.Operation {
-				repo := testutil.NewImageRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.ImageItem{
-					ID:        "img-existing",
-					Type:      "alpine",
-					IsPresent: true,
-				}))
-				return &api.Operation{Repos: api.Repos{Image: repo}}
+			setupAPI: func(_ *testing.T) api.ImageAPI {
+				return &testutil.MockImageAPI{
+					ImageGetFunc: func(_ context.Context, _ inputs.ImageInput) (*model.ImageItem, error) {
+						return &model.ImageItem{ID: "img-existing"}, nil
+					},
+				}
 			},
 			ctx:            context.Background,
 			wantImageID:    "img-existing",
 			wantWasCreated: false, // WasCreated defaults to false on fresh run
 		},
 		"image_exists_preserves_was_created_from_saved": {
-			setupOp: func(t *testing.T) *api.Operation {
-				repo := testutil.NewImageRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.ImageItem{
-					ID:        "img-preserved",
-					Type:      "alpine",
-					IsPresent: true,
-				}))
-				return &api.Operation{Repos: api.Repos{Image: repo}}
+			setupAPI: func(_ *testing.T) api.ImageAPI {
+				return &testutil.MockImageAPI{
+					ImageGetFunc: func(_ context.Context, _ inputs.ImageInput) (*model.ImageItem, error) {
+						return &model.ImageItem{ID: "img-preserved"}, nil
+					},
+				}
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
@@ -181,7 +170,7 @@ func TestImageStep_Apply(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := tc.setupOp(t)
+			op := tc.setupAPI(t)
 			step := newImageStep(t, op)
 
 			state := workflow.NewSharedState()
@@ -229,7 +218,7 @@ func TestImageStep_Apply(t *testing.T) {
 
 func TestImageStep_Destroy(t *testing.T) {
 	tests := map[string]struct {
-		setupOp        func(t *testing.T) *api.Operation
+		setupAPI       func(t *testing.T) api.ImageAPI
 		ctx            func() context.Context
 		saved          model.ResourceState
 		wantErr        string
@@ -239,13 +228,13 @@ func TestImageStep_Destroy(t *testing.T) {
 		// ── Error paths FIRST ──────────────────────────────────────────
 
 		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
-			ctx:     context.Background,
-			wantErr: "operation not initialized",
+			setupAPI: func(_ *testing.T) api.ImageAPI { return nil },
+			ctx:      context.Background,
+			wantErr:  "operation not initialized",
 		},
 		"context_cancelled_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Image: testutil.NewImageRepo()}}
+			setupAPI: func(_ *testing.T) api.ImageAPI {
+				return &testutil.MockImageAPI{}
 			},
 			ctx: func() context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -258,15 +247,15 @@ func TestImageStep_Destroy(t *testing.T) {
 		// ── Happy paths AFTER ──────────────────────────────────────────
 
 		"writes_state_and_returns_nil": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Image: testutil.NewImageRepo()}}
+			setupAPI: func(_ *testing.T) api.ImageAPI {
+				return &testutil.MockImageAPI{}
 			},
 			ctx:   context.Background,
 			saved: model.ResourceState{},
 		},
 		"recovers_saved_state_from_param": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Image: testutil.NewImageRepo()}}
+			setupAPI: func(_ *testing.T) api.ImageAPI {
+				return &testutil.MockImageAPI{}
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
@@ -280,7 +269,7 @@ func TestImageStep_Destroy(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := tc.setupOp(t)
+			op := tc.setupAPI(t)
 			step := newImageStep(t, op)
 
 			writer, writes := recordingWriter()
@@ -347,16 +336,16 @@ func TestImageStep_StateData(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := &api.Operation{Repos: api.Repos{Image: testutil.NewImageRepo()}}
+			dummyOp := &api.Operation{}
 
 			var step workflow.Step
 			if tc.fromState {
 				saved := model.ResourceState{Spec: tc.savedSpec, Meta: tc.savedMeta}
 				var err error
-				step, err = envpkg.Registry["image"].FromState("image", "alpine", saved, nil, op)
+				step, err = envpkg.Registry["image"].FromState("image", "alpine", saved, nil, dummyOp)
 				require.NoError(t, err)
 			} else {
-				step = newImageStep(t, op)
+				step = newImageStep(t, &testutil.MockImageAPI{})
 			}
 
 			got := step.StateData()
@@ -372,14 +361,15 @@ func TestImageStep_StateData(t *testing.T) {
 // propagate it rather than silently swallowing the persistence failure.
 
 func TestImageStep_Apply_WriteFailure(t *testing.T) {
-	repo := testutil.NewImageRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.ImageItem{
-		ID:        "img-1",
-		Type:      "alpine",
-		IsPresent: true,
-	}))
-	op := &api.Operation{Repos: api.Repos{Image: repo}}
-	step := newImageStep(t, op)
+	step := envpkg.NewImageStep(
+		&testutil.MockImageAPI{
+			ImageGetFunc: func(_ context.Context, _ inputs.ImageInput) (*model.ImageItem, error) {
+				return &model.ImageItem{ID: "img-1", Type: "alpine", IsPresent: true}, nil
+			},
+		},
+		"alpine",
+		inputs.ImagePullInput{Type: "alpine", Version: "3.21"},
+	)
 
 	writeErr := errors.New("disk full")
 	err := step.Apply(
@@ -396,8 +386,7 @@ func TestImageStep_Apply_WriteFailure(t *testing.T) {
 }
 
 func TestImageStep_Destroy_WriteFailure(t *testing.T) {
-	op := &api.Operation{Repos: api.Repos{Image: testutil.NewImageRepo()}}
-	step := newImageStep(t, op)
+	step := newImageStep(t, &testutil.MockImageAPI{})
 
 	writeErr := errors.New("disk full")
 	err := step.Destroy(

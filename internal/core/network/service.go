@@ -603,7 +603,7 @@ func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*mode
 	hostBridges := libnet.DefaultNetOps.GetSystemBridges(ctx)
 	count := 0
 	for _, bridge := range hostBridges {
-		if !strings.HasPrefix(bridge, "mvm-") {
+		if !strings.HasPrefix(bridge, fmt.Sprintf("%s-", infra.CLIName)) {
 			continue
 		}
 		if dbBridgeNames[bridge] {

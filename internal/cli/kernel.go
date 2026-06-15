@@ -32,24 +32,24 @@ var kernelColumns = []common.ListingColumn{
 	},
 }
 
-func NewKernelCmd(op *api.Operation) *cobra.Command {
+func NewKernelCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "kernel",
 		Short: "Kernel management",
 		Long:  "Manage kernels — list, pull, remove, inspect, set default, import.",
 	}
 
-	cmd.AddCommand(newKernelListCmd(op))
-	cmd.AddCommand(newKernelPullCmd(op))
-	cmd.AddCommand(newKernelRemoveCmd(op))
-	cmd.AddCommand(newKernelInspectCmd(op))
-	cmd.AddCommand(newKernelDefaultCmd(op))
-	cmd.AddCommand(newKernelImportCmd(op))
+	cmd.AddCommand(newKernelListCmd(kernelAPI, configAPI))
+	cmd.AddCommand(newKernelPullCmd(kernelAPI))
+	cmd.AddCommand(newKernelRemoveCmd(kernelAPI))
+	cmd.AddCommand(newKernelInspectCmd(kernelAPI))
+	cmd.AddCommand(newKernelDefaultCmd(kernelAPI))
+	cmd.AddCommand(newKernelImportCmd(kernelAPI))
 
 	return cmd
 }
 
-func newKernelListCmd(op *api.Operation) *cobra.Command {
+func newKernelListCmd(kernelAPI api.KernelAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 	var remote bool
@@ -62,7 +62,7 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if remote {
 				fmt.Fprintln(os.Stderr, "Fetching remote kernel versions...")
-				_, remoteVersions, err := op.KernelList(cmd.Context(), true, noCache, nil)
+				_, remoteVersions, err := kernelAPI.KernelList(cmd.Context(), true, noCache, nil)
 				if err != nil {
 					return err
 				}
@@ -86,7 +86,7 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Local listing
-			kernels, _, err := op.KernelList(cmd.Context(), false, false, nil)
+			kernels, _, err := kernelAPI.KernelList(cmd.Context(), false, false, nil)
 			if err != nil {
 				return err
 			}
@@ -101,7 +101,7 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 			}
 
 			// Local listing
-			style := common.Cli.ResolveListingStyle(cmd.Context(), op, longOutput)
+			style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, longOutput)
 			common.RenderListing(kernels, kernelColumns, style)
 			return nil
 		},
@@ -115,7 +115,7 @@ func newKernelListCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKernelPullCmd(op *api.Operation) *cobra.Command {
+func newKernelPullCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	var kernelType string
 	var version string
 	var setDefault bool
@@ -190,7 +190,7 @@ Examples:
 				Features:     featureStr,
 			}
 
-			kernelItem, err := op.KernelPull(cmd.Context(), kernelInput, func(e event.Progress) {
+			kernelItem, err := kernelAPI.KernelPull(cmd.Context(), kernelInput, func(e event.Progress) {
 				if e.Message != "" {
 					prog.UpdateText(e.Message)
 				}
@@ -222,7 +222,7 @@ Examples:
 	return cmd
 }
 
-func newKernelRemoveCmd(op *api.Operation) *cobra.Command {
+func newKernelRemoveCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -234,7 +234,7 @@ func newKernelRemoveCmd(op *api.Operation) *cobra.Command {
 			if len(args) == 0 {
 				return fmt.Errorf("usage error")
 			}
-			result := op.KernelRemove(cmd.Context(), inputs.KernelInput{Identifiers: args, Force: force})
+			result := kernelAPI.KernelRemove(cmd.Context(), inputs.KernelInput{Identifiers: args, Force: force})
 			for _, item := range result.Items {
 				if item.IsOK() {
 					msg := item.Message
@@ -262,7 +262,7 @@ func newKernelRemoveCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKernelInspectCmd(op *api.Operation) *cobra.Command {
+func newKernelInspectCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -273,7 +273,7 @@ func newKernelInspectCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			prefix := args[0]
 
-			info, err := op.KernelInspect(cmd.Context(), prefix)
+			info, err := kernelAPI.KernelInspect(cmd.Context(), prefix)
 			if err != nil {
 				return err
 			}
@@ -298,7 +298,7 @@ func newKernelInspectCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
+func newKernelDefaultCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "default [kernel-id]",
 		Short:             "Set a kernel as the default",
@@ -309,7 +309,7 @@ func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 			if checkErr != nil {
 				return checkErr
 			}
-			if err := op.KernelSetDefault(cmd.Context(), kernelID); err != nil {
+			if err := kernelAPI.KernelSetDefault(cmd.Context(), kernelID); err != nil {
 				return err
 			}
 			common.Cli.Success(fmt.Sprintf("Default kernel set to: %s", kernelID))
@@ -320,7 +320,7 @@ func newKernelDefaultCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newKernelImportCmd(op *api.Operation) *cobra.Command {
+func newKernelImportCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	var version string
 	var setDefault bool
 
@@ -360,7 +360,7 @@ Examples:
 				Version:    versionPtr,
 				SetDefault: setDefault,
 			}
-			kernelItem, err := op.KernelImport(cmd.Context(), importInput)
+			kernelItem, err := kernelAPI.KernelImport(cmd.Context(), importInput)
 			if err != nil {
 				return err
 			}

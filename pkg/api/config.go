@@ -11,6 +11,14 @@ import (
 	"mvmctl/pkg/errs"
 )
 
+// ConfigAPI defines the public interface for config operations.
+type ConfigAPI interface {
+	ConfigGet(ctx context.Context, category, key string) (any, error)
+	ConfigSet(ctx context.Context, category, key string, value any) error
+	ConfigReset(ctx context.Context, category, key string, allOverrides bool) (int, error)
+	ConfigListAll(ctx context.Context) (map[string]map[string]model.SettingInfo, error)
+}
+
 // ConfigGet returns a config value for category and optional key.
 // Matches Python's ConfigOperation.get() exactly — uses ConfigInput/ConfigRequest pipeline
 // with OVERRIDABLE_SETTINGS validation.

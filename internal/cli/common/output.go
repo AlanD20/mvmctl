@@ -706,12 +706,12 @@ type ListingColumn struct {
 
 // ResolveListingStyle resolves "short" or "long" from --long flag or user config.
 // Matches Python's resolve_listing_style() in cli/_common.py exactly.
-func (c *MVMCli) ResolveListingStyle(ctx context.Context, op *api.Operation, longOutput bool) string {
+func (c *MVMCli) ResolveListingStyle(ctx context.Context, cfg api.ConfigAPI, longOutput bool) string {
 	if longOutput {
 		return "long"
 	}
-	if op != nil {
-		value, err := op.ConfigGet(ctx, "settings", "listing_style")
+	if cfg != nil {
+		value, err := cfg.ConfigGet(ctx, "settings", "listing_style")
 		if err == nil {
 			if s, ok := value.(string); ok && s != "" {
 				return s

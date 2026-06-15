@@ -9,54 +9,53 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mvmctl/internal/core/network"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/inputs"
 )
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
-// ctxNetworkRepo wraps testutil.NetworkRepo to propagate context cancellation
-// from GetByName. The plain mock ignores context, so this wrapper is needed
-// to test the R8 (context cancellation) iron rule.
-type ctxNetworkRepo struct {
-	*testutil.NetworkRepo
+// ctxMockNetworkAPI wraps testutil.MockNetworkAPI to propagate context
+// cancellation from NetworkGet. The plain mock ignores context, so this
+// wrapper is needed to test the R8 (context cancellation) iron rule.
+type ctxMockNetworkAPI struct {
+	testutil.MockNetworkAPI
 }
 
-var _ network.Repository = (*ctxNetworkRepo)(nil)
-
-func (r *ctxNetworkRepo) GetByName(ctx context.Context, name string) (*model.Network, error) {
+func (m *ctxMockNetworkAPI) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.Network, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return r.NetworkRepo.GetByName(ctx, name)
+	return m.MockNetworkAPI.NetworkGet(ctx, input)
 }
 
-// errorNetworkRepo wraps testutil.NetworkRepo to inject errors into GetByName.
-type errorNetworkRepo struct {
-	*testutil.NetworkRepo
+// errorMockNetworkAPI wraps testutil.MockNetworkAPI to inject errors
+// into NetworkGet.
+type errorMockNetworkAPI struct {
+	testutil.MockNetworkAPI
 	getErr error
 }
 
-var _ network.Repository = (*errorNetworkRepo)(nil)
-
-func (r *errorNetworkRepo) GetByName(_ context.Context, _ string) (*model.Network, error) {
-	return nil, r.getErr
+func (m *errorMockNetworkAPI) NetworkGet(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
+	return nil, m.getErr
 }
 
-// newNetworkStep is a shorthand for creating a NetworkStep via the registry.
-func newNetworkStep(t *testing.T, op *api.Operation) workflow.Step {
+// newNetworkStep is a shorthand for creating a NetworkStep.
+// For nil-op tests, it constructs the step directly via NewNetworkStep.
+func newNetworkStep(t *testing.T, op api.NetworkAPI) workflow.Step {
 	t.Helper()
-	spec := map[string]any{
-		"name":   "test-net",
-		"subnet": "10.0.0.0/24",
+	if op == nil {
+		return envpkg.NewNetworkStep(nil, "test-net", inputs.NetworkCreateInput{
+			Name: "test-net", Subnet: "10.0.0.0/24",
+		})
 	}
-	step, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
-	require.NoError(t, err, "FromSpec must succeed")
-	return step
+	return envpkg.NewNetworkStep(op, "test-net", inputs.NetworkCreateInput{
+		Name: "test-net", Subnet: "10.0.0.0/24",
+	})
 }
 
 // ─── NetworkStep.Apply ───────────────────────────────────────────────────────
@@ -66,7 +65,7 @@ func newNetworkStep(t *testing.T, op *api.Operation) workflow.Step {
 
 func TestNetworkStep_Apply(t *testing.T) {
 	tests := map[string]struct {
-		setupOp        func(t *testing.T) *api.Operation
+		setupAPI       func(t *testing.T) api.NetworkAPI
 		ctx            func() context.Context
 		saved          model.ResourceState
 		wantErr        string
@@ -77,14 +76,18 @@ func TestNetworkStep_Apply(t *testing.T) {
 		// ── Error paths FIRST ──────────────────────────────────────────
 
 		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
-			ctx:     context.Background,
-			wantErr: "operation not initialized",
+			setupAPI: func(_ *testing.T) api.NetworkAPI { return nil },
+			ctx:      context.Background,
+			wantErr:  "operation not initialized",
 		},
 		"context_cancelled_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{Network: &ctxNetworkRepo{NetworkRepo: testutil.NewNetworkRepo()}},
+			setupAPI: func(_ *testing.T) api.NetworkAPI {
+				return &ctxMockNetworkAPI{
+					MockNetworkAPI: testutil.MockNetworkAPI{
+						NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
+							return &model.Network{}, nil
+						},
+					},
 				}
 			},
 			ctx: func() context.Context {
@@ -95,14 +98,9 @@ func TestNetworkStep_Apply(t *testing.T) {
 			wantErr: "context canceled",
 		},
 		"getbyname_database_error_wraps_correctly": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{
-					Repos: api.Repos{
-						Network: &errorNetworkRepo{
-							NetworkRepo: testutil.NewNetworkRepo(),
-							getErr:      errors.New("connection refused"),
-						},
-					},
+			setupAPI: func(_ *testing.T) api.NetworkAPI {
+				return &errorMockNetworkAPI{
+					getErr: errors.New("connection refused"),
 				}
 			},
 			ctx:     context.Background,
@@ -112,15 +110,17 @@ func TestNetworkStep_Apply(t *testing.T) {
 		// ── Happy paths AFTER ──────────────────────────────────────────
 
 		"already_exists_skips_and_writes_state": {
-			setupOp: func(t *testing.T) *api.Operation {
-				repo := testutil.NewNetworkRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.Network{
-					ID:        "net-existing",
-					Name:      "test-net",
-					Subnet:    "10.0.0.0/24",
-					IsPresent: true,
-				}))
-				return &api.Operation{Repos: api.Repos{Network: repo}}
+			setupAPI: func(_ *testing.T) api.NetworkAPI {
+				return &testutil.MockNetworkAPI{
+					NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
+						return &model.Network{
+							ID:        "net-existing",
+							Name:      "test-net",
+							Subnet:    "10.0.0.0/24",
+							IsPresent: true,
+						}, nil
+					},
+				}
 			},
 			ctx:            context.Background,
 			wantNetworkID:  "net-existing",
@@ -128,15 +128,17 @@ func TestNetworkStep_Apply(t *testing.T) {
 			wantWasCreated: false, // WasCreated defaults to false on fresh run
 		},
 		"already_exists_preserves_was_created_from_saved": {
-			setupOp: func(t *testing.T) *api.Operation {
-				repo := testutil.NewNetworkRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.Network{
-					ID:        "net-preserved",
-					Name:      "test-net",
-					Subnet:    "10.0.1.0/24",
-					IsPresent: true,
-				}))
-				return &api.Operation{Repos: api.Repos{Network: repo}}
+			setupAPI: func(_ *testing.T) api.NetworkAPI {
+				return &testutil.MockNetworkAPI{
+					NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
+						return &model.Network{
+							ID:        "net-preserved",
+							Name:      "test-net",
+							Subnet:    "10.0.1.0/24",
+							IsPresent: true,
+						}, nil
+					},
+				}
 			},
 			ctx: context.Background,
 			saved: model.ResourceState{
@@ -150,7 +152,7 @@ func TestNetworkStep_Apply(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := tc.setupOp(t)
+			op := tc.setupAPI(t)
 			step := newNetworkStep(t, op)
 
 			state := workflow.NewSharedState()
@@ -195,15 +197,16 @@ func TestNetworkStep_Apply(t *testing.T) {
 // rather than silently swallowing the persistence failure.
 
 func TestNetworkStep_Apply_WriteFailure(t *testing.T) {
-	repo := testutil.NewNetworkRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.Network{
-		ID:        "net-1",
-		Name:      "test-net",
-		Subnet:    "10.0.0.0/24",
-		IsPresent: true,
-	}))
-	op := &api.Operation{Repos: api.Repos{Network: repo}}
-	step := newNetworkStep(t, op)
+	step := newNetworkStep(t, &testutil.MockNetworkAPI{
+		NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
+			return &model.Network{
+				ID:        "net-1",
+				Name:      "test-net",
+				Subnet:    "10.0.0.0/24",
+				IsPresent: true,
+			}, nil
+		},
+	})
 
 	writeErr := errors.New("disk full")
 	err := step.Apply(
@@ -227,7 +230,7 @@ func TestNetworkStep_Apply_WriteFailure(t *testing.T) {
 
 func TestNetworkStep_Destroy(t *testing.T) {
 	tests := map[string]struct {
-		setupOp        func(t *testing.T) *api.Operation
+		setupAPI       func(t *testing.T) api.NetworkAPI
 		ctx            func() context.Context
 		saved          model.ResourceState
 		wantErr        string
@@ -239,12 +242,12 @@ func TestNetworkStep_Destroy(t *testing.T) {
 		// ── Error paths FIRST ──────────────────────────────────────────
 
 		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
-			wantErr: "operation not initialized",
+			setupAPI: func(_ *testing.T) api.NetworkAPI { return nil },
+			wantErr:  "operation not initialized",
 		},
 		"context_cancelled_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
+			setupAPI: func(_ *testing.T) api.NetworkAPI {
+				return &testutil.MockNetworkAPI{}
 			},
 			saved: model.ResourceState{
 				Spec: model.ResourceMap{"network_id": "net-ctx", "subnet": "10.0.0.0/24"},
@@ -262,14 +265,14 @@ func TestNetworkStep_Destroy(t *testing.T) {
 		// ── Happy paths AFTER ──────────────────────────────────────────
 
 		"nil_saved_and_empty_state_skips_destroy": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
+			setupAPI: func(_ *testing.T) api.NetworkAPI {
+				return &testutil.MockNetworkAPI{}
 			},
 			saved: model.ResourceState{},
 		},
 		"was_created_false_skips_destroy": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
+			setupAPI: func(_ *testing.T) api.NetworkAPI {
+				return &testutil.MockNetworkAPI{}
 			},
 			saved: model.ResourceState{
 				Spec: model.ResourceMap{"network_id": "net-123"},
@@ -279,8 +282,13 @@ func TestNetworkStep_Destroy(t *testing.T) {
 			wantWasCreated: false,
 		},
 		"recovers_saved_state_from_param_and_attempts_destroy": {
-			setupOp: func(_ *testing.T) *api.Operation {
-				return &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
+			setupAPI: func(_ *testing.T) api.NetworkAPI {
+				return &testutil.MockNetworkAPI{
+					NetworkRemoveFunc: func(_ context.Context, _ inputs.NetworkInput, _ bool) error {
+						// NetworkRemove succeeded (no panic)
+						return nil
+					},
+				}
 			},
 			saved: model.ResourceState{
 				Spec: model.ResourceMap{
@@ -289,15 +297,15 @@ func TestNetworkStep_Destroy(t *testing.T) {
 				},
 				Meta: model.ResourceMeta{WasCreated: true},
 			},
-			// WasCreated=true triggers NetworkRemove, which panics without a
-			// real DB Connection. We verify the code reaches that branch.
-			wantPanic: true,
+			// WasCreated=true triggers NetworkRemove, which now uses the mock
+			wantNetworkID:  "net-456",
+			wantWasCreated: true,
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := tc.setupOp(t)
+			op := tc.setupAPI(t)
 			step := newNetworkStep(t, op)
 
 			writer, writes := recordingWriter()
@@ -345,8 +353,7 @@ func TestNetworkStep_Destroy(t *testing.T) {
 // it must propagate the error rather than silently swallowing it.
 
 func TestNetworkStep_Destroy_WriteFailure(t *testing.T) {
-	op := &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
-	step := newNetworkStep(t, op)
+	step := newNetworkStep(t, &testutil.MockNetworkAPI{})
 
 	writeErr := errors.New("disk full")
 	err := step.Destroy(
@@ -391,16 +398,16 @@ func TestNetworkStep_StateData(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
+			dummyOp := &api.Operation{}
 
 			var step workflow.Step
 			if tc.fromState {
 				saved := model.ResourceState{Spec: tc.savedSpec, Meta: tc.savedMeta}
 				var err error
-				step, err = envpkg.Registry["network"].FromState("network", "test-net", saved, nil, op)
+				step, err = envpkg.Registry["network"].FromState("network", "test-net", saved, nil, dummyOp)
 				require.NoError(t, err)
 			} else {
-				step = newNetworkStep(t, op)
+				step = newNetworkStep(t, &testutil.MockNetworkAPI{})
 			}
 
 			got := step.StateData()
@@ -417,14 +424,14 @@ func TestNetworkStep_StateData(t *testing.T) {
 // silent network misconfiguration if the default changes.
 
 func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
-	op := &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
+	dummyOp := &api.Operation{}
 
 	t.Run("nat_key_absent_produces_nonempty_deterministic_hash", func(t *testing.T) {
 		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24"}
-		step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
+		step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
 
-		step2, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
+		step2, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
 
 		assert.NotEmpty(t, step1.SpecHash(), "SpecHash must be non-empty")
@@ -434,11 +441,11 @@ func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 
 	t.Run("nat_key_false_produces_different_hash", func(t *testing.T) {
 		specTrue := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": true}
-		stepTrue, err := envpkg.Registry["network"].FromSpec("network", "test-net", specTrue, op)
+		stepTrue, err := envpkg.Registry["network"].FromSpec("network", "test-net", specTrue, dummyOp)
 		require.NoError(t, err)
 
 		specFalse := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": false}
-		stepFalse, err := envpkg.Registry["network"].FromSpec("network", "test-net", specFalse, op)
+		stepFalse, err := envpkg.Registry["network"].FromSpec("network", "test-net", specFalse, dummyOp)
 		require.NoError(t, err)
 
 		assert.NotEqual(t, stepTrue.SpecHash(), stepFalse.SpecHash(),
@@ -447,10 +454,10 @@ func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 
 	t.Run("spec_hash_is_deterministic", func(t *testing.T) {
 		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24", "nat": true}
-		step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
+		step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
 
-		step2, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
+		step2, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
 
 		assert.NotEmpty(t, step1.SpecHash(), "SpecHash must be non-empty")
@@ -464,10 +471,10 @@ func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 // steps (e.g. VM) correctly declare their network dependency.
 
 func TestFromSpec_NetworkStep_Dependencies(t *testing.T) {
-	t.Run("no_depends_on_returns_nil", func(t *testing.T) {
+		t.Run("no_depends_on_returns_nil", func(t *testing.T) {
 		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24"}
-		op := &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
-		step, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
+		dummyOp := &api.Operation{}
+		step, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
 		assert.Nil(t, step.Dependencies(), "no depends_on should return nil")
 	})
@@ -478,8 +485,8 @@ func TestFromSpec_NetworkStep_Dependencies(t *testing.T) {
 			"subnet":     "10.0.0.0/24",
 			"depends_on": []any{"kernel:fc-kernel"},
 		}
-		op := &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
-		step, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
+		dummyOp := &api.Operation{}
+		step, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 		require.NoError(t, err)
 		require.Len(t, step.Dependencies(), 1)
 		assert.Equal(t, "kernel:fc-kernel", step.Dependencies()[0])
@@ -493,12 +500,12 @@ func TestFromSpec_NetworkStep_Dependencies(t *testing.T) {
 
 func TestFromSpec_NetworkStep_SpecHashDeterminism(t *testing.T) {
 	spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24"}
-	op := &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
+	dummyOp := &api.Operation{}
 
-	step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
+	step1, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 	require.NoError(t, err)
 
-	step2, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, op)
+	step2, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)
 	require.NoError(t, err)
 
 	assert.Equal(t, step1.SpecHash(), step2.SpecHash(),
@@ -536,9 +543,9 @@ func TestFromState_NetworkStep_StateRecovery(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			op := &api.Operation{Repos: api.Repos{Network: testutil.NewNetworkRepo()}}
+			fsDummyOp := &api.Operation{}
 			saved := model.ResourceState{Spec: tc.savedSpec, Meta: tc.savedMeta}
-			step, err := envpkg.Registry["network"].FromState("network", "test-net", saved, nil, op)
+			step, err := envpkg.Registry["network"].FromState("network", "test-net", saved, nil, fsDummyOp)
 			require.NoError(t, err)
 
 			got := step.StateData()

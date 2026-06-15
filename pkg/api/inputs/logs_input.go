@@ -101,7 +101,7 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*model.VM, error) {
 	// Use VMRequest pipeline like Python's LogRequest._resolve_vm()
 	// Python lets VMNotFoundError propagate directly, so we don't wrap
-	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r.input.Identifier}}, r.db, vmRepo, nil)
+	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r.input.Identifier}}, r.db, vmRepo)
 	resolved, err := vmRequest.Resolve(ctx)
 	if err != nil {
 		return nil, err

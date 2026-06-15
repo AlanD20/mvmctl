@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -28,7 +29,7 @@ type BinaryStep struct {
 	deps     []string
 	specHash string
 	input    inputs.BinaryPullInput
-	op       *api.Operation
+	op       api.BinaryAPI
 	saved    *BinaryState
 	meta     model.ResourceMeta
 }
@@ -56,13 +57,23 @@ func (s *BinaryStep) Apply(
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.Repos.Binary.GetByTypeAndVersion(ctx, s.input.Type, s.input.Version)
-	if err != nil {
+	existingBinaries, getErr := s.op.BinaryGet(ctx, inputs.BinaryInput{Identifiers: []string{s.input.Type}})
+	if getErr != nil && !errs.IsNotFound(getErr) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
-			fmt.Sprintf("check binary %q: %v", s.input.Type, err),
-			err,
+			fmt.Sprintf("check binary %q: %v", s.input.Type, getErr),
+			getErr,
 		)
+	}
+	// Filter by version — the API returns all binaries matching the type.
+	var existing *model.BinaryItem
+	if getErr == nil {
+		for _, b := range existingBinaries {
+			if b.Version == s.input.Version {
+				existing = b
+				break
+			}
+		}
 	}
 	if existing != nil {
 		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})
@@ -135,12 +146,28 @@ func (s *BinaryStep) StateData() model.ResourceState {
 	}
 }
 
+// NewBinaryStep creates a BinaryStep with the given API interface for testing.
+// Only for use in tests.
+func NewBinaryStep(op api.BinaryAPI, name string, input inputs.BinaryPullInput) *BinaryStep {
+	return &BinaryStep{
+		op:       op,
+		name:     name,
+		stepType: "binary",
+		input:    input,
+		specHash: crypto.SHA256([]byte(name)),
+	}
+}
+
 func newBinaryStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -166,8 +193,12 @@ func newBinaryStepFromState(
 	name string,
 	saved model.ResourceState,
 	deps []string,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	bs := StateFromMap[BinaryState](saved.Spec)
 	return &BinaryStep{
 		stepType: stepType,

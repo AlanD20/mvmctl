@@ -2,6 +2,7 @@ package env
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -28,7 +29,7 @@ type NetworkStep struct {
 	deps     []string
 	specHash string
 	input    inputs.NetworkCreateInput
-	op       *api.Operation
+	op       api.NetworkAPI
 	saved    *NetworkState
 	meta     model.ResourceMeta
 }
@@ -56,8 +57,8 @@ func (s *NetworkStep) Apply(
 	wasCreated := saved.Meta.WasCreated
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.Repos.Network.GetByName(ctx, s.input.Name)
-	if err != nil {
+	existing, err := s.op.NetworkGet(ctx, inputs.NetworkInput{Identifiers: []string{s.input.Name}})
+	if err != nil && !errs.IsNotFound(err) {
 		return errs.WrapMsg(
 			errs.CodeDatabaseError,
 			fmt.Sprintf("check network %q: %v", s.input.Name, err),
@@ -147,12 +148,28 @@ func (s *NetworkStep) StateData() model.ResourceState {
 	}
 }
 
+// NewNetworkStep creates a NetworkStep with the given API interface for testing.
+// Only for use in tests.
+func NewNetworkStep(op api.NetworkAPI, name string, input inputs.NetworkCreateInput) *NetworkStep {
+	return &NetworkStep{
+		op:       op,
+		name:     name,
+		stepType: "network",
+		input:    input,
+		specHash: crypto.SHA256([]byte(name)),
+	}
+}
+
 func newNetworkStepFromSpec(
 	stepType string,
 	name string,
 	spec model.ResourceMap,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -186,8 +203,12 @@ func newNetworkStepFromState(
 	name string,
 	saved model.ResourceState,
 	deps []string,
-	op *api.Operation,
+	op api.API,
 ) (workflow.Step, error) {
+	if op == nil {
+		return nil, errors.New("operation not initialized")
+	}
+
 	ns := StateFromMap[NetworkState](saved.Spec)
 	return &NetworkStep{
 		stepType: stepType,

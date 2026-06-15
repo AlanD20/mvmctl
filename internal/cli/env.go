@@ -28,7 +28,7 @@ var envListColumns = []common.ListingColumn{
 }
 
 // NewEnvCmd creates the env command group for managing environments.
-func NewEnvCmd(op *api.Operation) *cobra.Command {
+func NewEnvCmd(envAPI api.API) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "env",
 		Short: "Environment workflow management",
@@ -46,16 +46,16 @@ Workflow state is persisted in ~/.cache/mvmctl/states/ so you can inspect and
 destroy environments even after reboots.`,
 	}
 
-	cmd.AddCommand(newEnvApplyCmd(op))
-	cmd.AddCommand(newEnvListCmd(op))
-	cmd.AddCommand(newEnvDestroyCmd(op))
-	cmd.AddCommand(newEnvDiffCmd(op))
+	cmd.AddCommand(newEnvApplyCmd(envAPI))
+	cmd.AddCommand(newEnvListCmd(envAPI))
+	cmd.AddCommand(newEnvDestroyCmd(envAPI))
+	cmd.AddCommand(newEnvDiffCmd(envAPI))
 
 	return cmd
 }
 
 // newEnvApplyCmd creates the "env apply" subcommand.
-func newEnvApplyCmd(op *api.Operation) *cobra.Command {
+func newEnvApplyCmd(envAPI api.API) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "apply [spec-path]",
 		Aliases: []string{"up"},
@@ -94,7 +94,7 @@ func newEnvApplyCmd(op *api.Operation) *cobra.Command {
 				}
 			}
 
-			if err := env.Apply(cmd.Context(), op, specPath, onProgress); err != nil {
+			if err := env.Apply(cmd.Context(), envAPI, specPath, onProgress); err != nil {
 				return fmt.Errorf("env apply failed: %w", err)
 			}
 
@@ -106,7 +106,7 @@ func newEnvApplyCmd(op *api.Operation) *cobra.Command {
 }
 
 // newEnvListCmd creates the "env ls" subcommand.
-func newEnvListCmd(_ *api.Operation) *cobra.Command {
+func newEnvListCmd(_ api.API) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Aliases: []string{"list"},
@@ -130,7 +130,7 @@ func newEnvListCmd(_ *api.Operation) *cobra.Command {
 }
 
 // newEnvDiffCmd creates the "env diff" subcommand.
-func newEnvDiffCmd(_ *api.Operation) *cobra.Command {
+func newEnvDiffCmd(_ api.API) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diff [spec-path]",
 		Short: "Show differences between a spec and the saved workflow state",
@@ -192,7 +192,7 @@ This is a read-only operation — nothing is created or destroyed.`,
 }
 
 // newEnvDestroyCmd creates the "env destroy" subcommand.
-func newEnvDestroyCmd(op *api.Operation) *cobra.Command {
+func newEnvDestroyCmd(destroyAPI api.API) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "destroy [workflow-id|spec-path]",
 		Aliases: []string{"down"},
@@ -224,7 +224,7 @@ apply (not created by the workflow) are left intact.`,
 				}
 			}
 
-			if err := env.Destroy(cmd.Context(), op, ident, onProgress); err != nil {
+			if err := env.Destroy(cmd.Context(), destroyAPI, ident, onProgress); err != nil {
 				return fmt.Errorf("env destroy failed: %w", err)
 			}
 

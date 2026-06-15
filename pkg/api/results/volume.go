@@ -1,4 +1,4 @@
-package responses
+package results
 
 // VolumeItemInfo groups volume metadata in an inspect response.
 type VolumeItemInfo struct {

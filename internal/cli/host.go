@@ -66,8 +66,8 @@ func formatChange(mechanism, setting, appliedValue, originalValue string) string
 }
 
 // abortIfVMsRunning exits with an error if any VMs are currently running.
-func abortIfVMsRunning(ctx context.Context, op *api.Operation) error {
-	running, err := op.HostGetRunningVMs(ctx)
+func abortIfVMsRunning(ctx context.Context, hostAPI api.HostAPI) error {
+	running, err := hostAPI.HostGetRunningVMs(ctx)
 	if err != nil {
 		return nil
 	}
@@ -82,7 +82,7 @@ func abortIfVMsRunning(ctx context.Context, op *api.Operation) error {
 }
 
 // NewHostCmd creates the host command and its subcommands.
-func NewHostCmd(op *api.Operation) *cobra.Command {
+func NewHostCmd(hostAPI api.HostAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "host",
 		Short: "Host configuration",
@@ -91,16 +91,16 @@ func NewHostCmd(op *api.Operation) *cobra.Command {
 Requires root privileges for most operations. Run with: sudo mvm host <command>`,
 	}
 
-	cmd.AddCommand(newHostInitCmd(op))
-	cmd.AddCommand(newHostStatusCmd(op))
-	cmd.AddCommand(newHostInfoCmd(op))
-	cmd.AddCommand(newHostCleanCmd(op))
-	cmd.AddCommand(newHostResetCmd(op))
+	cmd.AddCommand(newHostInitCmd(hostAPI))
+	cmd.AddCommand(newHostStatusCmd(hostAPI))
+	cmd.AddCommand(newHostInfoCmd(hostAPI))
+	cmd.AddCommand(newHostCleanCmd(hostAPI))
+	cmd.AddCommand(newHostResetCmd(hostAPI))
 
 	return cmd
 }
 
-func newHostInitCmd(op *api.Operation) *cobra.Command {
+func newHostInitCmd(hostAPI api.HostAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Apply host configuration changes. Idempotent.",
@@ -122,7 +122,7 @@ membership to take effect.
 Examples:
   sudo mvm host init`, infra.MVMUnixGroup, infra.CLIName),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			rawResult, err := op.HostInit(cmd.Context(), nil)
+			rawResult, err := hostAPI.HostInit(cmd.Context(), nil)
 			if err != nil {
 				// NeedsInteraction flows through the error return
 				var ni *errs.NeedsInteraction
@@ -250,14 +250,14 @@ Examples:
 	return cmd
 }
 
-func newHostStatusCmd(op *api.Operation) *cobra.Command {
+func newHostStatusCmd(hostAPI api.HostAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show current host configuration state vs expected",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status := op.HostStatusCheck(cmd.Context())
+			status := hostAPI.HostStatusCheck(cmd.Context())
 
 			if jsonOutput {
 				b, _ := json.MarshalIndent(status, "", "  ")
@@ -330,7 +330,7 @@ func newHostStatusCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newHostInfoCmd(op *api.Operation) *cobra.Command {
+func newHostInfoCmd(hostAPI api.HostAPI) *cobra.Command {
 	var refresh bool
 	var jsonOutput bool
 
@@ -347,9 +347,9 @@ Use --refresh to re-detect hardware and limits before displaying.`,
 			var result any
 			var err error
 			if refresh {
-				result, err = op.HostRefreshCapacity(cmd.Context())
+				result, err = hostAPI.HostRefreshCapacity(cmd.Context())
 			} else {
-				result, err = op.HostInfo(cmd.Context())
+				result, err = hostAPI.HostInfo(cmd.Context())
 			}
 
 			if err != nil {
@@ -376,7 +376,7 @@ Use --refresh to re-detect hardware and limits before displaying.`,
 	return cmd
 }
 
-func newHostCleanCmd(op *api.Operation) *cobra.Command {
+func newHostCleanCmd(hostAPI api.HostAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -386,7 +386,7 @@ func newHostCleanCmd(op *api.Operation) *cobra.Command {
 
 Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUnixGroup),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := abortIfVMsRunning(cmd.Context(), op); err != nil {
+			if err := abortIfVMsRunning(cmd.Context(), hostAPI); err != nil {
 				return err
 			}
 
@@ -411,7 +411,7 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 				}
 			}
 
-			summary, err := op.HostClean(cmd.Context())
+			summary, err := hostAPI.HostClean(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -435,7 +435,7 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 	return cmd
 }
 
-func newHostResetCmd(op *api.Operation) *cobra.Command {
+func newHostResetCmd(hostAPI api.HostAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -455,7 +455,7 @@ All running VMs must be stopped before running this command.
 Examples:
   sudo mvm host reset --force`, infra.CLIName, infra.MVMUnixGroup),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := abortIfVMsRunning(cmd.Context(), op); err != nil {
+			if err := abortIfVMsRunning(cmd.Context(), hostAPI); err != nil {
 				return err
 			}
 
@@ -474,7 +474,7 @@ Examples:
 				}
 			}
 
-			summary, err := op.HostReset(cmd.Context())
+			summary, err := hostAPI.HostReset(cmd.Context())
 			if err != nil {
 				return err
 			}

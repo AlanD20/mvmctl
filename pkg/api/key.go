@@ -11,9 +11,23 @@ import (
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/api/responses"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
+
+// KeyAPI defines the public interface for SSH key operations.
+type KeyAPI interface {
+	KeyListAll(ctx context.Context) ([]*model.SSHKeyItem, error)
+	KeyGet(ctx context.Context, input inputs.KeyInput) (*model.SSHKeyItem, error)
+	KeyCreate(ctx context.Context, input inputs.KeyCreateInput) (*model.SSHKeyItem, error)
+	KeyImport(ctx context.Context, input inputs.KeyImportInput) (*model.SSHKeyItem, error)
+	KeyRemove(ctx context.Context, input inputs.KeyInput, force bool) *errs.BatchResult
+	KeyInspect(ctx context.Context, input inputs.KeyInput) (*results.KeyInspect, error)
+	KeyExport(ctx context.Context, input inputs.KeyInput, destination string, overwrite bool) ([]string, error)
+	KeySetDefaults(ctx context.Context, input inputs.KeyInput) error
+	KeyGetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error)
+	KeyClearDefaults(ctx context.Context) error
+}
 
 // KeyListAll lists all SSH keys.
 // Matches Python's KeyOperation.list_all() exactly — passes keys_dir only,
@@ -204,22 +218,22 @@ func (op *Operation) KeyRemove(ctx context.Context, input inputs.KeyInput, force
 // KeyInspect returns detailed key info.
 // Matches Python's KeyOperation.inspect() exactly — uses KeyRequest resolution,
 // returns raw dict (not wrapped in OperationResult).
-func (op *Operation) KeyInspect(ctx context.Context, input inputs.KeyInput) (*responses.KeyInspect, error) {
+func (op *Operation) KeyInspect(ctx context.Context, input inputs.KeyInput) (*results.KeyInspect, error) {
 	k, err := op.KeyGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-	return &responses.KeyInspect{
-		Key: responses.KeyInfo{
+	return &results.KeyInspect{
+		Key: results.KeyInfo{
 			ID: k.ID, Name: k.Name, Fingerprint: k.Fingerprint,
 			Algorithm: k.Algorithm, Comment: k.Comment,
 			IsDefault: k.IsDefault, IsPresent: k.IsPresent,
 		},
-		Files: responses.KeyFilesInfo{
+		Files: results.KeyFilesInfo{
 			PublicKeyPath:  k.PublicKeyPath,
 			PrivateKeyPath: k.PrivateKeyPath,
 		},
-		Timestamps: responses.KeyTimestampsInfo{
+		Timestamps: results.KeyTimestampsInfo{
 			CreatedAt: k.CreatedAt,
 			UpdatedAt: k.UpdatedAt,
 		},

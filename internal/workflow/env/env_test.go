@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -61,7 +62,9 @@ func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
 
 func TestFromSpec_NetworkStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "my-net", "subnet": "10.0.0.0/24"}
-	step, err := envpkg.Registry["network"].FromSpec("network", "my-net", spec, nil)
+	dummyOp := &api.Operation{}
+
+	step, err := envpkg.Registry["network"].FromSpec("network", "my-net", spec, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "network:my-net", step.Name())
 	assert.Equal(t, "network", step.Type())
@@ -70,7 +73,8 @@ func TestFromSpec_NetworkStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_KeyStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "my-key"}
-	step, err := envpkg.Registry["key"].FromSpec("key", "my-key", spec, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["key"].FromSpec("key", "my-key", spec, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "key:my-key", step.Name())
 	assert.Equal(t, "key", step.Type())
@@ -79,7 +83,8 @@ func TestFromSpec_KeyStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_ImageStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "alpine", "type": "alpine", "version": "3.21"}
-	step, err := envpkg.Registry["image"].FromSpec("image", "alpine", spec, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["image"].FromSpec("image", "alpine", spec, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "image:alpine", step.Name())
 	assert.Equal(t, "image", step.Type())
@@ -88,7 +93,8 @@ func TestFromSpec_ImageStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_KernelStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "fc-kernel", "type": "firecracker", "version": "1.15.1"}
-	step, err := envpkg.Registry["kernel"].FromSpec("kernel", "fc-kernel", spec, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["kernel"].FromSpec("kernel", "fc-kernel", spec, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "kernel:fc-kernel", step.Name())
 	assert.Equal(t, "kernel", step.Type())
@@ -97,7 +103,8 @@ func TestFromSpec_KernelStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_BinaryStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"type": "firecracker", "version": "1.15.1"}
-	step, err := envpkg.Registry["binary"].FromSpec("binary", "firecracker", spec, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["binary"].FromSpec("binary", "firecracker", spec, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "binary:firecracker", step.Name())
 	assert.Equal(t, "binary", step.Type())
@@ -109,7 +116,8 @@ func TestFromSpec_VMStep_NameFormat(t *testing.T) {
 		"name": "my-vm", "network": "my-net", "key": "my-key",
 		"image": "alpine", "kernel": "fc-kernel", "binary": "firecracker",
 	}
-	step, err := envpkg.Registry["vm"].FromSpec("vm", "my-vm", spec, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["vm"].FromSpec("vm", "my-vm", spec, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "vm:my-vm", step.Name())
 	assert.Equal(t, "vm", step.Type())
@@ -118,7 +126,7 @@ func TestFromSpec_VMStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_SSHStep_NameFormat(t *testing.T) {
 	spec := map[string]any{"name": "install-qemu", "target": "rc-vm", "user": "root", "cmd": "apt update"}
-	step, err := envpkg.Registry["ssh"].FromSpec("ssh", "install-qemu", spec, nil)
+	step, err := envpkg.Registry["ssh"].FromSpec("ssh", "install-qemu", spec, &api.Operation{})
 	require.NoError(t, err)
 	assert.Equal(t, "ssh:install-qemu", step.Name())
 	assert.Equal(t, "ssh", step.Type())
@@ -133,7 +141,7 @@ func TestFromSpec_CopyStep_NameFormat(t *testing.T) {
 		"src":    "./mvm",
 		"dst":    "/root/",
 	}
-	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", spec, nil)
+	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", spec, &api.Operation{})
 	require.NoError(t, err)
 	assert.Equal(t, "copy:copy-binary", step.Name())
 	assert.Equal(t, "copy", step.Type())
@@ -154,7 +162,8 @@ func TestFromState_NetworkStep_CorrectType(t *testing.T) {
 		},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["network"].FromState("network", "my-net", saved, nil, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["network"].FromState("network", "my-net", saved, nil, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "network:my-net", step.Name())
 	assert.Equal(t, "network", step.Type())
@@ -168,7 +177,8 @@ func TestFromState_KeyStep_CorrectType(t *testing.T) {
 		},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["key"].FromState("key", "my-key", saved, nil, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["key"].FromState("key", "my-key", saved, nil, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "key:my-key", step.Name())
 	assert.Equal(t, "key", step.Type())
@@ -182,7 +192,8 @@ func TestFromState_ImageStep_CorrectType(t *testing.T) {
 		},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["image"].FromState("image", "alpine", saved, nil, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["image"].FromState("image", "alpine", saved, nil, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "image:alpine", step.Name())
 	assert.Equal(t, "image", step.Type())
@@ -196,7 +207,8 @@ func TestFromState_KernelStep_CorrectType(t *testing.T) {
 		},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["kernel"].FromState("kernel", "fc-kernel", saved, nil, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["kernel"].FromState("kernel", "fc-kernel", saved, nil, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "kernel:fc-kernel", step.Name())
 	assert.Equal(t, "kernel", step.Type())
@@ -210,7 +222,8 @@ func TestFromState_BinaryStep_CorrectType(t *testing.T) {
 		},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["binary"].FromState("binary", "firecracker", saved, nil, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["binary"].FromState("binary", "firecracker", saved, nil, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "binary:firecracker", step.Name())
 	assert.Equal(t, "binary", step.Type())
@@ -225,7 +238,8 @@ func TestFromState_VMStep_CorrectType(t *testing.T) {
 		},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["vm"].FromState("vm", "my-vm", saved, nil, nil)
+	dummyOp := &api.Operation{}
+	step, err := envpkg.Registry["vm"].FromState("vm", "my-vm", saved, nil, dummyOp)
 	require.NoError(t, err)
 	assert.Equal(t, "vm:my-vm", step.Name())
 	assert.Equal(t, "vm", step.Type())
@@ -237,7 +251,7 @@ func TestFromState_SSHStep_CorrectType(t *testing.T) {
 		Spec: model.ResourceMap{"command": "apt update"},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["ssh"].FromState("ssh", "install-qemu", saved, nil, nil)
+	step, err := envpkg.Registry["ssh"].FromState("ssh", "install-qemu", saved, nil, &api.Operation{})
 	require.NoError(t, err)
 	assert.Equal(t, "ssh:install-qemu", step.Name())
 	assert.Equal(t, "ssh", step.Type())
@@ -249,7 +263,7 @@ func TestFromState_CopyStep_CorrectType(t *testing.T) {
 		Spec: model.ResourceMap{"source": "./mvm"},
 		Meta: model.ResourceMeta{WasCreated: true},
 	}
-	step, err := envpkg.Registry["copy"].FromState("copy", "copy-binary", saved, nil, nil)
+	step, err := envpkg.Registry["copy"].FromState("copy", "copy-binary", saved, nil, &api.Operation{})
 	require.NoError(t, err)
 	assert.Equal(t, "copy:copy-binary", step.Name())
 	assert.Equal(t, "copy", step.Type())
@@ -370,7 +384,9 @@ vm:
 		"kernel:fc-kernel",
 		"binary:firecracker",
 	}
-	assert.ElementsMatch(t, expectedDeps, deps)
+	if diff := cmp.Diff(expectedDeps, deps); diff != "" {
+		t.Errorf("Dependencies mismatch (-want +got):\n%s", diff)
+	}
 }
 
 // Rationale: An empty spec (only version, no resources) must produce zero steps,
@@ -470,7 +486,7 @@ func TestResolveSpec_FactoryFromSpecError(t *testing.T) {
 	errFactory := errors.New("from spec failed")
 	envpkg.Registry["network"] = envpkg.StepFactory{
 		StepType: "network",
-		FromSpec: func(_, _ string, _ model.ResourceMap, _ *api.Operation) (workflow.Step, error) {
+		FromSpec: func(_, _ string, _ model.ResourceMap, _ api.API) (workflow.Step, error) {
 			return nil, errFactory
 		},
 		FromState: origFactory.FromState,
@@ -607,7 +623,7 @@ func TestFromSpec_SSHStep_WithKey(t *testing.T) {
 		"key":    "rc-key",
 		"cmd":    "apt update",
 	}
-	step, err := envpkg.Registry["ssh"].FromSpec("ssh", "install-qemu", spec, nil)
+	step, err := envpkg.Registry["ssh"].FromSpec("ssh", "install-qemu", spec, &api.Operation{})
 	require.NoError(t, err)
 	assert.Equal(t, "ssh:install-qemu", step.Name())
 	assert.Equal(t, "ssh", step.Type())
@@ -624,7 +640,7 @@ func TestFromSpec_CopyStep_BuildsDst(t *testing.T) {
 		"src":    "./mvm",
 		"dst":    "/root/",
 	}
-	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", spec, nil)
+	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", spec, &api.Operation{})
 	require.NoError(t, err)
 	assert.Equal(t, "copy:copy-binary", step.Name())
 	assert.Equal(t, "copy", step.Type())
@@ -662,7 +678,7 @@ copy:
       - vm:my-vm
 `
 	specPath := writeSpec(t, specContent)
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	steps, err := envpkg.ResolveSpec(context.Background(), specPath, &api.Operation{})
 	require.NoError(t, err)
 	require.Len(t, steps, 5)
 

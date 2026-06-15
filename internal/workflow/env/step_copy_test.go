@@ -20,7 +20,7 @@ import (
 
 // newCopyStep creates a CopyStep via the registry with nil op (for tests
 // that don't exercise the Apply path).
-func newCopyStep(t *testing.T, op *api.Operation) workflow.Step {
+func newCopyStep(t *testing.T, op api.API) workflow.Step {
 	t.Helper()
 	spec := map[string]any{
 		"name":   "copy-binary",
@@ -35,12 +35,15 @@ func newCopyStep(t *testing.T, op *api.Operation) workflow.Step {
 }
 
 // newCopyStepFromState creates a CopyStep from previously persisted state.
-func newCopyStepFromState(t *testing.T, saved model.ResourceState, op *api.Operation) workflow.Step {
+func newCopyStepFromState(t *testing.T, saved model.ResourceState, op api.API) workflow.Step {
 	t.Helper()
 	step, err := envpkg.Registry["copy"].FromState("copy", "copy-binary", saved, nil, op)
 	require.NoError(t, err, "FromState must succeed")
 	return step
 }
+
+// dummyOp returns a non-nil Operation for tests that don't exercise the op.
+func dummyOp() api.API { return &api.Operation{} }
 
 // noopProgressCopy is a no-op progress callback for copy step tests.
 func noopProgressCopy(_ event.Progress) {}
@@ -68,21 +71,19 @@ func failingWriterCopy(err error) workflow.StateWriter {
 
 func TestCopyStep_Apply(t *testing.T) {
 	tests := map[string]struct {
-		setupOp func(_ *testing.T) *api.Operation
+		setupOp func(_ *testing.T) api.API
 		ctx     func() context.Context
 		wantErr string
 	}{
 		// -- Error paths FIRST --
 
-		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
+		"nil_op_rejected_at_construction": {
+			setupOp: func(_ *testing.T) api.API { return nil },
 			ctx:     context.Background,
 			wantErr: "operation not initialized",
 		},
-		"nil_op_with_cancelled_context_returns_error": {
-			// Nil-op guard fires before context check — this exercises the nil-op
-			// guard, not context cancellation (which requires a real connection).
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
+		"nil_op_with_cancelled_context_rejected_at_construction": {
+			setupOp: func(_ *testing.T) api.API { return nil },
 			ctx: func() context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
@@ -95,16 +96,20 @@ func TestCopyStep_Apply(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			op := tc.setupOp(t)
-			step := newCopyStep(t, op)
+			_, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", map[string]any{
+				"name":   "copy-binary",
+				"target": "rc-vm",
+				"user":   "root",
+				"src":    "./mvm",
+				"dst":    "/root/",
+			}, op)
 
-			state := workflow.NewSharedState()
-			writer, _ := recordingWriterCopy()
-
-			err := step.Apply(tc.ctx(), state, model.ResourceState{}, writer, noopProgressCopy)
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.wantErr)
-			return
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
 		})
 	}
 }
@@ -125,11 +130,6 @@ func TestCopyStep_Destroy(t *testing.T) {
 	}{
 		// -- Error paths FIRST --
 
-		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
-			ctx:     context.Background,
-			wantErr: "operation not initialized",
-		},
 		"context_cancelled_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation {
 				return &api.Operation{}
@@ -275,7 +275,7 @@ func TestCopyStep_StateData(t *testing.T) {
 // engine cannot detect configuration drift.
 
 func TestCopyStep_SpecHash(t *testing.T) {
-	step := newCopyStep(t, nil)
+	step := newCopyStep(t, dummyOp())
 	hash := step.SpecHash()
 	assert.NotEmpty(t, hash, "SpecHash must be set from spec for drift detection")
 }
@@ -285,7 +285,7 @@ func TestCopyStep_SpecHash(t *testing.T) {
 // the step type, so that dependency resolution and registry lookups work.
 
 func TestCopyStep_NameAndType(t *testing.T) {
-	step := newCopyStep(t, nil)
+	step := newCopyStep(t, dummyOp())
 	assert.Equal(t, "copy:copy-binary", step.Name())
 	assert.Equal(t, "copy", step.Type())
 }
@@ -303,7 +303,7 @@ func TestCopyStep_Dependencies(t *testing.T) {
 		"dst":        "/root/",
 		"depends_on": []any{"vm:my-vm"},
 	}
-	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", spec, nil)
+	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-binary", spec, dummyOp())
 	require.NoError(t, err)
 
 	deps := step.Dependencies()
@@ -323,7 +323,7 @@ func TestFromSpec_CopyStep_MultiSource(t *testing.T) {
 		"src":    []any{"./file1", "./file2"},
 		"dst":    "/root/",
 	}
-	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-files", spec, nil)
+	step, err := envpkg.Registry["copy"].FromSpec("copy", "copy-files", spec, dummyOp())
 	require.NoError(t, err)
 	assert.Equal(t, "copy:copy-files", step.Name())
 	assert.Equal(t, "copy", step.Type())
@@ -339,7 +339,7 @@ func TestFromState_CopyStep_PreservesMeta(t *testing.T) {
 		Spec: model.ResourceMap{"source": "./mvm"},
 		Meta: model.ResourceMeta{WasCreated: true, SpecHash: "deadbeef"},
 	}
-	step, err := envpkg.Registry["copy"].FromState("copy", "copy-binary", saved, []string{"vm:my-vm"}, nil)
+	step, err := envpkg.Registry["copy"].FromState("copy", "copy-binary", saved, []string{"vm:my-vm"}, dummyOp())
 	require.NoError(t, err)
 
 	got := step.StateData()

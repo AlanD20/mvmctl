@@ -22,21 +22,19 @@ import (
 
 func TestSSHStep_Apply(t *testing.T) {
 	tests := map[string]struct {
-		setupOp func(t *testing.T) *api.Operation
+		setupOp func(t *testing.T) api.API
 		ctx     func() context.Context
 		wantErr string
 	}{
 		// ── Error paths FIRST ──────────────────────────────────────────
 
-		"nil_op_returns_error": {
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
+		"nil_op_rejected_at_construction": {
+			setupOp: func(_ *testing.T) api.API { return nil },
 			ctx:     context.Background,
 			wantErr: "operation not initialized",
 		},
-		"nil_op_with_cancelled_context_returns_error": {
-			// Nil-op guard fires before context check — this exercises the nil-op
-			// guard, not context cancellation (which requires a real connection).
-			setupOp: func(_ *testing.T) *api.Operation { return nil },
+		"nil_op_with_cancelled_context_rejected_at_construction": {
+			setupOp: func(_ *testing.T) api.API { return nil },
 			ctx: func() context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
 				cancel()
@@ -49,16 +47,12 @@ func TestSSHStep_Apply(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			op := tc.setupOp(t)
-			step, err := envpkg.Registry["ssh"].FromSpec("ssh", "run-cmd", map[string]any{
+			_, err := envpkg.Registry["ssh"].FromSpec("ssh", "run-cmd", map[string]any{
 				"name":   "run-cmd",
 				"target": "my-vm",
 				"user":   "root",
 				"cmd":    "uptime",
 			}, op)
-			require.NoError(t, err, "FromSpec must succeed")
-
-			writer, _ := recordingWriter()
-			err = step.Apply(tc.ctx(), workflow.NewSharedState(), model.ResourceState{}, writer, noopProgress)
 
 			if tc.wantErr != "" {
 				require.Error(t, err)
@@ -87,12 +81,6 @@ func TestSSHStep_Destroy(t *testing.T) {
 	}{
 		// ── Error paths FIRST ──────────────────────────────────────────
 
-		"nil_op_returns_error": {
-			setupOp:     func(_ *testing.T) *api.Operation { return nil },
-			setupWriter: recordingWriter,
-			ctx:         context.Background,
-			wantErr:     "operation not initialized",
-		},
 		"context_cancelled_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return &api.Operation{} },
 			setupWriter: func() (workflow.StateWriter, *[]model.ResourceState) {
@@ -314,7 +302,7 @@ func TestSSHStep_Dependencies(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			step, err := envpkg.Registry["ssh"].FromSpec("ssh", "run-cmd", tc.spec, nil)
+			step, err := envpkg.Registry["ssh"].FromSpec("ssh", "run-cmd", tc.spec, &api.Operation{})
 			require.NoError(t, err, "FromSpec must succeed")
 
 			got := step.Dependencies()
@@ -344,10 +332,10 @@ func TestSSHStep_SpecHash(t *testing.T) {
 		"cmd":    "hostname",
 	}
 
-	step1, err := envpkg.Registry["ssh"].FromSpec("ssh", "run-cmd", spec1, nil)
+	step1, err := envpkg.Registry["ssh"].FromSpec("ssh", "run-cmd", spec1, &api.Operation{})
 	require.NoError(t, err)
 
-	step2, err := envpkg.Registry["ssh"].FromSpec("ssh", "run-cmd", spec2, nil)
+	step2, err := envpkg.Registry["ssh"].FromSpec("ssh", "run-cmd", spec2, &api.Operation{})
 	require.NoError(t, err)
 
 	assert.NotEmpty(t, step1.SpecHash(), "SpecHash must be non-empty for spec-created steps")

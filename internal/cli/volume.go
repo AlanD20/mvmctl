@@ -34,7 +34,7 @@ var volumeColumns = []common.ListingColumn{
 	},
 }
 
-func NewVolumeCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
+func NewVolumeCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "volume",
 		Aliases: []string{"vol"},
@@ -42,16 +42,16 @@ func NewVolumeCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
 		Long:    "Manage persistent volumes — list, create, remove, inspect, resize.",
 	}
 
-	cmd.AddCommand(newVolumeListCmd(op, configAPI))
-	cmd.AddCommand(newVolumeCreateCmd(op))
-	cmd.AddCommand(newVolumeRemoveCmd(op))
-	cmd.AddCommand(newVolumeInspectCmd(op))
-	cmd.AddCommand(newVolumeResizeCmd(op))
+	cmd.AddCommand(newVolumeListCmd(volumeAPI, configAPI))
+	cmd.AddCommand(newVolumeCreateCmd(volumeAPI))
+	cmd.AddCommand(newVolumeRemoveCmd(volumeAPI))
+	cmd.AddCommand(newVolumeInspectCmd(volumeAPI))
+	cmd.AddCommand(newVolumeResizeCmd(volumeAPI))
 
 	return cmd
 }
 
-func newVolumeListCmd(op *api.Operation, configAPI *api.Operation) *cobra.Command {
+func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
 	var longOutput bool
 
@@ -61,7 +61,7 @@ func newVolumeListCmd(op *api.Operation, configAPI *api.Operation) *cobra.Comman
 		Short:   "List all volumes",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			volumes := op.VolumeListAll(cmd.Context())
+			volumes := volumeAPI.VolumeListAll(cmd.Context())
 
 			if jsonOutput {
 				if volumes == nil {
@@ -84,7 +84,7 @@ func newVolumeListCmd(op *api.Operation, configAPI *api.Operation) *cobra.Comman
 	return cmd
 }
 
-func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
+func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	var format string
 	var readOnly bool
 
@@ -110,7 +110,7 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 				Format:   formatPtr,
 				ReadOnly: readOnlyPtr,
 			}
-			vol, err := op.VolumeCreate(cmd.Context(), input)
+			vol, err := volumeAPI.VolumeCreate(cmd.Context(), input)
 			if err != nil {
 				return err
 			}
@@ -139,7 +139,7 @@ func newVolumeCreateCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newVolumeRemoveCmd(op *api.Operation) *cobra.Command {
+func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
@@ -149,7 +149,7 @@ func newVolumeRemoveCmd(op *api.Operation) *cobra.Command {
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVolumeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			removeResult := op.VolumeRemove(cmd.Context(), inputs.VolumeInput{Identifiers: args}, force)
+			removeResult := volumeAPI.VolumeRemove(cmd.Context(), inputs.VolumeInput{Identifiers: args}, force)
 			// Match Python: for r in result.items: if r.is_ok: mvm_cli.success("Removed: {name}")
 			//              else: mvm_cli.error(r.message or "Remove failed: {name}")
 			for _, r := range removeResult.Items {
@@ -180,7 +180,7 @@ func newVolumeRemoveCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newVolumeInspectCmd(op *api.Operation) *cobra.Command {
+func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -191,7 +191,7 @@ func newVolumeInspectCmd(op *api.Operation) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
-			info, err := op.VolumeInspect(cmd.Context(), inputs.VolumeInput{Identifiers: []string{identifier}})
+			info, err := volumeAPI.VolumeInspect(cmd.Context(), inputs.VolumeInput{Identifiers: []string{identifier}})
 			if err != nil {
 				// Match Python: @handle_errors decorator — pass through actual error message
 				return err
@@ -212,7 +212,7 @@ func newVolumeInspectCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
+func newVolumeResizeCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "resize [identifier] [size]",
 		Short:             "Resize a volume",
@@ -222,7 +222,7 @@ func newVolumeResizeCmd(op *api.Operation) *cobra.Command {
 			identifier := args[0]
 			sizeArg := args[1]
 
-			if err := op.VolumeResize(
+			if err := volumeAPI.VolumeResize(
 				cmd.Context(),
 				inputs.VolumeCreateInput{Name: identifier, Size: sizeArg},
 			); err != nil {
