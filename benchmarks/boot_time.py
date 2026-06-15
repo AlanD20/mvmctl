@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Boot-time benchmark for mvmctl VM images.
 
-Measures wall-clock time from `vm create` to SSH availability for each image,
+Measures wall-clock time from `vm create` to VM readiness for each image,
 saves results to benchmarks/results.json, and shows a comparison against the
 previous run so you can see if changes improved or regressed boot times.
 
@@ -39,7 +39,7 @@ class ImageBenchConfig:
     """Configuration for a single image benchmark."""
 
     name: str  # Image slug as recognised by `mvm image ls -r`
-    threshold_s: int  # Maximum acceptable seconds from create → SSH
+    threshold_s: int  # Maximum acceptable seconds from create → ready
     kernel: str | None = (
         None  # Kernel ID or ``type:version`` (e.g. ``official:6.19.9``).  None = default kernel.
     )
@@ -54,9 +54,9 @@ IMAGES: list[ImageBenchConfig] = [
     ImageBenchConfig(name="firecracker:v1.15", threshold_s=6),
 ]
 
-# Wall-clock timeout for the ssh subprocess (seconds).  Lower = more
+# Wall-clock timeout for the probe subprocess (seconds).  Lower = more
 # granular threshold checks (more attempts within the kill window).
-SSH_SUBPROCESS_TIMEOUT = 5
+PROBE_TIMEOUT = 5
 
 # Hard ceiling — shouldn't be reached since threshold_s is the real abort
 # point.  This is just a safety net.
@@ -116,7 +116,7 @@ def bench_image(
 ) -> dict:
     """
     Benchmark a single image.  The threshold_s also serves as the max-wait:
-    if SSH isn't available within that time the image is aborted immediately.
+    if the VM isn't ready within that time the image is aborted immediately.
 
     Args:
         cfg: Image configuration (may include per-image kernel override).
@@ -172,8 +172,8 @@ def bench_image(
             result["error"] = f"VM creation: {err_msg}"
             return result
 
-        # -- poll for SSH ---------------------------------------------------
-        ssh_ok = False
+        # -- poll for VM readiness -----------------------------------------
+        ready = False
         deadline = time.monotonic() + POLL_TIMEOUT
         attempt = 0
 
@@ -186,31 +186,30 @@ def bench_image(
             if elapsed > cfg.threshold_s:
                 result["total_s"] = round(elapsed, 1)
                 result["error"] = (
-                    f"SSH unavailable after {result['total_s']}s "
+                    f"VM not ready after {result['total_s']}s "
                     f"(threshold {cfg.threshold_s}s)"
                 )
                 return result
 
             try:
                 r = _mvm(
-                    "ssh",
-                    vm_name,
-                    "--cmd",
-                    "echo OK",
-                    timeout=SSH_SUBPROCESS_TIMEOUT,
+                    "vm", "exec", vm_name,
+                    "--timeout", str(PROBE_TIMEOUT),
+                    "--", "ping", "-c", "2", "1.1.1.1",
+                    timeout=PROBE_TIMEOUT + 5,
                 )
-                if r.returncode == 0 and "OK" in r.stdout:
+                if r.returncode == 0:
                     t2 = time.monotonic()
                     result["total_s"] = round(t2 - t0, 1)
                     result["attempt"] = attempt
-                    ssh_ok = True
+                    ready = True
                     break
             except subprocess.TimeoutExpired:
                 pass  # retry
             time.sleep(1)
 
-        if not ssh_ok:
-            result["error"] = f"SSH unavailable after {POLL_TIMEOUT}s polling"
+        if not ready:
+            result["error"] = f"VM not ready after {POLL_TIMEOUT}s polling"
             return result
 
         result["passed"] = result["total_s"] <= cfg.threshold_s
@@ -258,7 +257,7 @@ def _find_previous(history: list[dict], name: str) -> dict | None:
 
 def print_current_results(results: list[dict], prev_run: dict | None) -> None:
     """Pretty-print benchmark results with comparison to previous run."""
-    header = f"  {'Image':<28s} {'Create':>7s} {'→SSH':>7s} {'Result':>8s}"
+    header = f"  {'Image':<28s} {'Create':>7s} {'→Ready':>7s} {'Result':>8s}"
     if prev_run:
         header += f"  {'Prev':>7s} {'Δ':>8s}"
     print()
@@ -315,7 +314,7 @@ def show_history() -> None:
     """Display an ASCII comparison table across all benchmark runs.
 
     Each column is a tagged run (chronologically), each row is an image.
-    Cells show the time-to-SSH for that image in that run.
+    Cells show the time-to-ready for that image in that run.
     """
     history = load_history()
     if not history:
@@ -581,7 +580,7 @@ def main() -> int:
                 mark = "✅" if r["passed"] else "❌"
                 print(
                     f"  {mark}  {cfg.name:<28s}  "
-                    f"(create {create_str:>5s}  →SSH {total_str:>5s})"
+                    f"(create {create_str:>5s}  →Ready {total_str:>5s})"
                 )
                 results_map[cfg.name] = r
     else:

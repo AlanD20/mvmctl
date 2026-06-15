@@ -25,7 +25,7 @@ func newEnricher() *Enricher {
 		testutil.NewImageRepo(),
 		testutil.NewKernelRepo(),
 		testutil.NewBinaryRepo(),
-		testutil.NewVolumeRepo(),
+		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 }
 
@@ -40,7 +40,7 @@ func TestEnrichVM_Kernel(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
-		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{{ID: "vm-1", KernelID: "k-1"}}
@@ -58,7 +58,7 @@ func TestEnrichVM_Image(t *testing.T) {
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), img,
 		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
-		testutil.NewVolumeRepo(),
+		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{{ID: "vm-1", ImageID: "img-1"}}
@@ -75,7 +75,7 @@ func TestEnrichVM_Binary(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
-		testutil.NewKernelRepo(), bin, testutil.NewVolumeRepo(),
+		testutil.NewKernelRepo(), bin, testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{{ID: "vm-1", BinaryID: "b-1"}}
@@ -92,7 +92,7 @@ func TestEnrichVM_Network(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), net, testutil.NewLeaseRepo(),
 		testutil.NewImageRepo(), testutil.NewKernelRepo(),
-		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{{ID: "vm-1", NetworkID: "net-1"}}
@@ -117,7 +117,7 @@ func TestEnrichVM_AllForward(t *testing.T) {
 
 	e := New(
 		testutil.NewVMRepo(), net, testutil.NewLeaseRepo(),
-		img, krn, bin, testutil.NewVolumeRepo(),
+		img, krn, bin, testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{{
@@ -171,7 +171,7 @@ func TestEnrichVM_Volumes(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
-		testutil.NewKernelRepo(), testutil.NewBinaryRepo(), vol,
+		testutil.NewKernelRepo(), testutil.NewBinaryRepo(), vol, testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{
@@ -206,7 +206,7 @@ func TestEnrichVM_NetworkLeases(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), net, lease,
 		testutil.NewImageRepo(), testutil.NewKernelRepo(),
-		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{{ID: "vm-1", NetworkID: "net-1"}}
@@ -229,7 +229,7 @@ func TestEnrichNetwork_Leases(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(), lease,
 		testutil.NewImageRepo(), testutil.NewKernelRepo(),
-		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	nets := []*model.Network{{ID: "net-1", Name: "test"}}
@@ -245,7 +245,7 @@ func TestEnrichNetwork_VMs(t *testing.T) {
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
 		testutil.NewImageRepo(), testutil.NewKernelRepo(),
-		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	nets := []*model.Network{{ID: "net-1", Name: "test"}}
@@ -264,7 +264,7 @@ func TestEnrichImage_VMs(t *testing.T) {
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
 		testutil.NewImageRepo(), testutil.NewKernelRepo(),
-		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	images := []*model.ImageItem{{ID: "img-1", Name: "alpine"}}
@@ -285,7 +285,7 @@ func TestEnrichKernel_VMs(t *testing.T) {
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
 		testutil.NewImageRepo(), testutil.NewKernelRepo(),
-		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	kernels := []*model.KernelItem{{ID: "k-1", Version: "6.1"}}
@@ -305,7 +305,7 @@ func TestEnrichBinary_VMs(t *testing.T) {
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
 		testutil.NewImageRepo(), testutil.NewKernelRepo(),
-		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	binaries := []*model.BinaryItem{{ID: "b-1", Version: "1.15"}}
@@ -325,7 +325,7 @@ func TestEnrichVolume_VMs(t *testing.T) {
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
 		testutil.NewImageRepo(), testutil.NewKernelRepo(),
-		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vols := []*model.VolumeItem{{ID: "vol-1", Name: "data"}}
@@ -365,7 +365,7 @@ func TestEnrichVM_DuplicateCall(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
-		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{{ID: "vm-1", KernelID: "k-1"}}
@@ -386,7 +386,7 @@ func TestEnrichVM_Concurrent(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
-		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	done := make(chan struct{})
@@ -415,7 +415,7 @@ func TestEnrichVM_ContextCancellation(t *testing.T) {
 	e := New(
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
-		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(),
+		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
 	vms := []*model.VM{{ID: "vm-1", KernelID: "k-1"}}
@@ -438,7 +438,7 @@ func TestEnrichNetwork_ContextCancellation(t *testing.T) {
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
 		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
-		testutil.NewVolumeRepo(),
+		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 	nets := []*model.Network{{ID: "net-1", Name: "default"}}
 	err := e.EnrichNetwork(ctx, nets, "leases")
@@ -452,7 +452,7 @@ func TestEnrichImage_ContextCancellation(t *testing.T) {
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
 		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
-		testutil.NewVolumeRepo(),
+		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 	imgs := []*model.ImageItem{{ID: "img-1"}}
 	err := e.EnrichImage(ctx, imgs, "vm")
@@ -466,7 +466,7 @@ func TestEnrichKernel_ContextCancellation(t *testing.T) {
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
 		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
-		testutil.NewVolumeRepo(),
+		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 	kernels := []*model.KernelItem{{ID: "k-1"}}
 	err := e.EnrichKernel(ctx, kernels, "vm")
@@ -480,7 +480,7 @@ func TestEnrichBinary_ContextCancellation(t *testing.T) {
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
 		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
-		testutil.NewVolumeRepo(),
+		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 	bins := []*model.BinaryItem{{ID: "b-1"}}
 	err := e.EnrichBinary(ctx, bins, "vm")
@@ -494,7 +494,7 @@ func TestEnrichVolume_ContextCancellation(t *testing.T) {
 		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
 		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
 		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
-		testutil.NewVolumeRepo(),
+		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 	vols := []*model.VolumeItem{{ID: "vol-1"}}
 	err := e.EnrichVolume(ctx, vols, "vm")
@@ -933,4 +933,72 @@ func TestSortByDotCount_EqualDotCount(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ─── EnrichVM: Vsock ────────────────────────────────────────────────────────
+// Rationale: Vsock enrichment uses a reverse relation lookup (VsockConfigItem
+// references VM by VmID). If the batch resolution or assignment is wrong, VMs
+// get incorrect or missing vsock configurations.
+
+func TestEnrichVM_Vsock(t *testing.T) {
+	vsockRepo := testutil.NewVsockRepo()
+	require.NoError(t, vsockRepo.Upsert(ctx, &model.VsockConfigItem{
+		ID: "vsock-1", VmID: "vm-1",
+		GuestCID: 3, UDSPath: "/tmp/vm-1.sock", Port: 1024, Token: "tok",
+	}))
+
+	e := New(
+		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
+		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
+		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
+		testutil.NewVolumeRepo(), vsockRepo,
+	)
+
+	vms := []*model.VM{{ID: "vm-1"}}
+	require.NoError(t, e.EnrichVM(ctx, vms, "vsock"))
+
+	require.NotNil(t, vms[0].Vsock)
+	assert.Equal(t, 3, vms[0].Vsock.GuestCID)
+	assert.Equal(t, "tok", vms[0].Vsock.Token)
+}
+
+// ─── EnrichVM: Vsock, no configs ────────────────────────────────────────────
+// Rationale: When no vsock config exists for any VM, enrichment must succeed
+// as a soft-fail (no error). All Vsock fields remain nil.
+
+func TestEnrichVM_Vsock_NoConfigs(t *testing.T) {
+	e := newEnricher()
+
+	vms := []*model.VM{{ID: "vm-1"}}
+	require.NoError(t, e.EnrichVM(ctx, vms, "vsock"))
+	assert.Nil(t, vms[0].Vsock, "Vsock must remain nil when no config exists")
+}
+
+// ─── EnrichVM: Vsock, mixed VMs ─────────────────────────────────────────────
+// Rationale: When some VMs have vsock configs and some don't, enrichment must
+// correctly assign configs only to the VMs that have them, leaving others nil.
+
+func TestEnrichVM_Vsock_Mixed(t *testing.T) {
+	vsockRepo := testutil.NewVsockRepo()
+	require.NoError(t, vsockRepo.Upsert(ctx, &model.VsockConfigItem{
+		ID: "vsock-1", VmID: "vm-1",
+		GuestCID: 3, UDSPath: "/tmp/vm-1.sock", Port: 1024, Token: "tok1",
+	}))
+
+	e := New(
+		testutil.NewVMRepo(), testutil.NewNetworkRepo(),
+		testutil.NewLeaseRepo(), testutil.NewImageRepo(),
+		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
+		testutil.NewVolumeRepo(), vsockRepo,
+	)
+
+	vms := []*model.VM{
+		{ID: "vm-1"},
+		{ID: "vm-2"},
+	}
+	require.NoError(t, e.EnrichVM(ctx, vms, "vsock"))
+
+	require.NotNil(t, vms[0].Vsock, "vm-1 must have vsock config")
+	assert.Equal(t, "tok1", vms[0].Vsock.Token)
+	assert.Nil(t, vms[1].Vsock, "vm-2 must have nil vsock config")
 }

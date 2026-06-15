@@ -355,5 +355,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_nftables_rules_unique_active
                       COALESCE(sport, -1), COALESCE(dport, -1))
     WHERE is_active = 1;
 
+-- VSOCK_CONFIG: Per-VM vsock device and agent configuration
+CREATE TABLE vm_vsock_config (
+    id TEXT PRIMARY KEY,
+    vm_id TEXT NOT NULL UNIQUE,
+    guest_cid INTEGER NOT NULL UNIQUE,
+    uds_path TEXT NOT NULL,
+    port INTEGER NOT NULL,
+    token TEXT NOT NULL,
+    FOREIGN KEY (vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_vsock_config_vm ON vm_vsock_config(vm_id);
+CREATE INDEX idx_vsock_config_cid ON vm_vsock_config(guest_cid);
+
 -- Set schema version
 PRAGMA user_version = 1;

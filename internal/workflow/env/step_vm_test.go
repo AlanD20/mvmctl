@@ -499,15 +499,9 @@ func TestVMStep_Dependencies(t *testing.T) {
 				"kernel":  "fc-kernel",
 				"binary":  "firecracker",
 			},
-			want: []string{
-				"network:my-net",
-				"key:my-key",
-				"image:alpine",
-				"kernel:fc-kernel",
-				"binary:firecracker",
-			},
+			want: nil, // resource refs are passed to API directly — no implicit deps
 		},
-		"explicit_depends_on_plus_implicit": {
+		"explicit_depends_on_only": {
 			spec: model.ResourceMap{
 				"name":       "test-vm",
 				"network":    "my-net",
@@ -515,7 +509,6 @@ func TestVMStep_Dependencies(t *testing.T) {
 			},
 			want: []string{
 				"custom:step-1",
-				"network:my-net",
 			},
 		},
 		"no_deps_when_no_resources": {
@@ -524,7 +517,7 @@ func TestVMStep_Dependencies(t *testing.T) {
 			},
 			want: nil,
 		},
-		"deduplicates_explicit_and_implicit": {
+		"explicit_depends_on_listed": {
 			spec: model.ResourceMap{
 				"name":       "test-vm",
 				"network":    "my-net",

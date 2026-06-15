@@ -67,6 +67,11 @@ var Registry = map[string]StepFactory{
 		FromSpec:  newSSHStepFromSpec,
 		FromState: newSSHStepFromState,
 	},
+	"exec": {
+		StepType:  "exec",
+		FromSpec:  newExecStepFromSpec,
+		FromState: newExecStepFromState,
+	},
 	"copy": {
 		StepType:  "copy",
 		FromSpec:  newCopyStepFromSpec,

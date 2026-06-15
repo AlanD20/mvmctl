@@ -31,16 +31,17 @@ type ProvisioningConfig struct {
 	UserGID    int
 
 	// Operations (zero-value = skip)
-	TargetSize       int64    // resize target, 0 = no resize
-	Hostname         string   // set hostname, "" = skip
-	User             string   // ensure user, "" = skip
-	SSHPubkeys       []string // SSH authorized keys, nil = skip
-	CloudInitDir     string   // inject cloud-init seed, "" = skip
-	DNSServer        string   // inject DNS, "" = skip
-	Shrink           bool     // shrink filesystem to minimum
-	Deblob           bool     // OS cache cleanup + mask services
-	DisableCloudInit bool     // mask cloud-init services
-	SetupSudo        bool     // fix sudo ownership + setuid + sudoers drop-in
+	TargetSize       int64                   // resize target, 0 = no resize
+	Hostname         string                  // set hostname, "" = skip
+	User             string                  // ensure user, "" = skip
+	SSHPubkeys       []string                // SSH authorized keys, nil = skip
+	CloudInitDir     string                  // inject cloud-init seed, "" = skip
+	DNSServer        string                  // inject DNS, "" = skip
+	Shrink           bool                    // shrink filesystem to minimum
+	Deblob           bool                    // OS cache cleanup + mask services
+	DisableCloudInit bool                    // mask cloud-init services
+	SetupSudo        bool                    // fix sudo ownership + setuid + sudoers drop-in
+	CustomOps        []provcontent.Operation // arbitrary FileOp/ChrootOp ops queued via ApplyOps
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -83,7 +84,10 @@ func RunDeferred(ctx context.Context, cfg ProvisioningConfig) error {
 	defer os.RemoveAll(tmpDir)
 
 	// Build the guestfish script
-	commands := buildScript(cfg, rootDevice, needsResize, tmpDir)
+	commands, cmdsErr := buildScript(cfg, rootDevice, needsResize, tmpDir)
+	if cmdsErr != nil {
+		return fmt.Errorf("build guestfish script: %w", cmdsErr)
+	}
 
 	if len(commands) == 0 {
 		return nil
@@ -139,7 +143,7 @@ func RunDeferred(ctx context.Context, cfg ProvisioningConfig) error {
 // Script builder
 // ═════════════════════════════════════════════════════════════════════════════
 
-func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tmpDir string) []string {
+func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tmpDir string) ([]string, error) {
 	var cmds []string
 	cmds = append(cmds, "run")
 	cmds = append(cmds, fmt.Sprintf("mount %s /", rootDevice))
@@ -243,9 +247,43 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 		cmds = append(cmds, fmt.Sprintf("resize2fs-size %s 0", rootDevice))
 	}
 
+	// Custom ops (queued via ApplyOps) — FileOp (upload + chmod) and ChrootOp (sh)
+	if len(cfg.CustomOps) > 0 {
+		cmds = append(cmds, "# Custom operations (ApplyOps)")
+		var hasCustomOps bool
+		for _, op := range cfg.CustomOps {
+			switch o := op.(type) {
+			case provcontent.FileOp:
+				hasCustomOps = true
+				// Write file content to a temp file, then upload via guestfish
+				relPath := strings.ReplaceAll(o.Path, "/", "_")
+				tmpFile := filepath.Join(tmpDir, relPath)
+				if err := os.WriteFile(tmpFile, o.Data, 0644); err != nil {
+					return nil, fmt.Errorf("write custom op temp file %s: %w", o.Path, err)
+				}
+				if idx := strings.LastIndex(o.Path, "/"); idx > 0 {
+					cmds = append(cmds, fmt.Sprintf("mkdir-p %s", o.Path[:idx]))
+				}
+				cmds = append(cmds, fmt.Sprintf("upload %s %s", tmpFile, o.Path))
+				mode := o.Mode
+				if mode == 0 {
+					mode = 0644
+				}
+				cmds = append(cmds, fmt.Sprintf("chmod %o %s", mode, o.Path))
+			case provcontent.ChrootOp:
+				hasCustomOps = true
+				// Execute as shell command inside the guest
+				cmds = append(cmds, fmt.Sprintf("sh %q", o.Command))
+			}
+		}
+		if !hasCustomOps {
+			_ = cmds // no useful custom ops added
+		}
+	}
+
 	cmds = append(cmds, "sync")
 	cmds = append(cmds, "# END")
-	return cmds
+	return cmds, nil
 }
 
 // buildCloudInitUploads returns guestfish upload commands for cloud-init seed files.

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"mvmctl/internal/cli/common"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
@@ -76,7 +77,16 @@ func newEnvApplyCmd(envAPI api.API) *cobra.Command {
 					return err
 				}
 			} else {
-				return fmt.Errorf("missing required argument: spec-path")
+				// Default: look for mvmctl.yaml or mvmctl.yml in the current directory.
+				for _, candidate := range infra.DefaultEnvSpecNames {
+					if _, err := os.Stat(candidate); err == nil {
+						specPath = candidate
+						break
+					}
+				}
+				if specPath == "" {
+					return fmt.Errorf("no spec file specified and neither mvmctl.yaml nor mvmctl.yml found in current directory")
+				}
 			}
 
 			// Verify the spec file exists.
@@ -213,7 +223,16 @@ apply (not created by the workflow) are left intact.`,
 					return err
 				}
 			} else {
-				return fmt.Errorf("missing required argument: workflow-id or spec-path")
+				// Default: look for mvmctl.yaml or mvmctl.yml in the current directory.
+				for _, candidate := range infra.DefaultEnvSpecNames {
+					if _, err := os.Stat(candidate); err == nil {
+						ident = candidate
+						break
+					}
+				}
+				if ident == "" {
+					return fmt.Errorf("missing required argument: workflow-id or spec-path (and neither mvmctl.yaml nor mvmctl.yml found in current directory)")
+				}
 			}
 
 			onProgress := func(e event.Progress) {

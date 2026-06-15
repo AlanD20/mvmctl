@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"mvmctl/internal/infra/provcontent"
 )
 
 // GuestfsBackend implements the Backend interface using guestfish CLI.
@@ -24,6 +26,7 @@ type GuestfsBackend struct {
 	cloudInitDir string
 	dnsServer    string
 	ops          []string
+	customOps    []provcontent.Operation // queued via ApplyOps
 }
 
 // NewGuestfsBackend creates a new GuestfsBackend.
@@ -97,6 +100,13 @@ func (b *GuestfsBackend) FixFstab(ctx context.Context) error {
 	return nil
 }
 
+// InjectVsockAgent builds and queues the vsock guest agent files into the rootfs.
+func (b *GuestfsBackend) InjectVsockAgent(_ context.Context, agentBinary []byte, port int, token string) error {
+	ops := provcontent.Builder{}.BuildVsockAgentOps(agentBinary, port, token)
+	b.customOps = append(b.customOps, ops...)
+	return nil
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // Execution
 // ═════════════════════════════════════════════════════════════════════════════
@@ -118,6 +128,7 @@ func (b *GuestfsBackend) Run(ctx context.Context) error {
 		DisableCloudInit: false,
 		Shrink:           false,
 		Deblob:           false,
+		CustomOps:        b.customOps,
 	}
 
 	for _, op := range b.ops {

@@ -41,36 +41,11 @@ func (s *VMStep) Type() string { return s.stepType }
 func (s *VMStep) Name() string { return FormatStepName(s.stepType, s.name) }
 
 func (s *VMStep) Dependencies() []string {
-	seen := make(map[string]struct{}, len(s.deps)+5)
-	var deps []string
-
-	addIfNew := func(dep string) {
-		if _, ok := seen[dep]; !ok {
-			seen[dep] = struct{}{}
-			deps = append(deps, dep)
-		}
+	if len(s.deps) == 0 {
+		return nil
 	}
-
-	for _, d := range s.deps {
-		addIfNew(d)
-	}
-
-	if s.input.NetworkID != nil && *s.input.NetworkID != "" {
-		addIfNew(FormatStepName("network", *s.input.NetworkID))
-	}
-	if len(s.input.SSHKeys) > 0 {
-		addIfNew(FormatStepName("key", s.input.SSHKeys[0]))
-	}
-	if s.input.ImageID != nil && *s.input.ImageID != "" {
-		addIfNew(FormatStepName("image", *s.input.ImageID))
-	}
-	if s.input.KernelID != nil && *s.input.KernelID != "" {
-		addIfNew(FormatStepName("kernel", *s.input.KernelID))
-	}
-	if s.input.BinaryID != nil && *s.input.BinaryID != "" {
-		addIfNew(FormatStepName("binary", *s.input.BinaryID))
-	}
-
+	deps := make([]string, len(s.deps))
+	copy(deps, s.deps)
 	return deps
 }
 
@@ -87,54 +62,11 @@ func (s *VMStep) Apply(
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
-	input := s.input // shallow copy — pointer fields are safe since we replace them below
-
-	// Read resolved dependency IDs from shared state instead of passing
-	// raw spec names. Each dependency step stores its state after Apply.
-	if s.input.NetworkID != nil && *s.input.NetworkID != "" {
-		depName := FormatStepName("network", *s.input.NetworkID)
-		if data, ok := state.Get(depName); ok {
-			if ns, ok2 := data.(*NetworkState); ok2 {
-				input.NetworkID = &ns.NetworkID
-			}
-		}
-	}
-
-	if len(s.input.SSHKeys) > 0 {
-		depName := FormatStepName("key", s.input.SSHKeys[0])
-		if data, ok := state.Get(depName); ok {
-			if ks, ok2 := data.(*KeyState); ok2 {
-				input.SSHKeys = []string{ks.KeyID}
-			}
-		}
-	}
-
-	if s.input.ImageID != nil && *s.input.ImageID != "" {
-		depName := FormatStepName("image", *s.input.ImageID)
-		if data, ok := state.Get(depName); ok {
-			if is, ok2 := data.(*ImageState); ok2 {
-				input.ImageID = &is.ImageID
-			}
-		}
-	}
-
-	if s.input.KernelID != nil && *s.input.KernelID != "" {
-		depName := FormatStepName("kernel", *s.input.KernelID)
-		if data, ok := state.Get(depName); ok {
-			if ks, ok2 := data.(*KernelState); ok2 {
-				input.KernelID = &ks.KernelID
-			}
-		}
-	}
-
-	if s.input.BinaryID != nil && *s.input.BinaryID != "" {
-		depName := FormatStepName("binary", *s.input.BinaryID)
-		if data, ok := state.Get(depName); ok {
-			if bs, ok2 := data.(*BinaryState); ok2 {
-				input.BinaryID = &bs.BinaryID
-			}
-		}
-	}
+	// Pass raw YAML values directly to the API input. The API resolvers
+	// (resolveNetwork, resolveImage, resolveKernel, resolveBinary,
+	// resolveSSHKeys) handle looking up resources by identifier (name or
+	// ID). If a field is unset (e.g. binary not specified), the API falls
+	// back to the default — no need to resolve or inject anything here.
 
 	// Check if VM already exists — skip creation if so.
 	// Preserve WasCreated from previous state if this is a re-apply.
@@ -169,7 +101,7 @@ func (s *VMStep) Apply(
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "creating vm"})
 	// Wrap onProgress to inject step name into API-level progress events.
 	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
-	vms, err := s.op.VMCreate(ctx, input, stepProgress)
+	vms, err := s.op.VMCreate(ctx, s.input, stepProgress)
 	if err != nil {
 		return err
 	}

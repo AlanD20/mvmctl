@@ -79,3 +79,10 @@ type VMInspect struct {
 	Console    VMConsoleInfo    `json:"console"`
 	Volumes    []VMVolume       `json:"volumes"`
 }
+
+// VMExecResult is the result of executing a command inside a VM via vsock.
+type VMExecResult struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
+}

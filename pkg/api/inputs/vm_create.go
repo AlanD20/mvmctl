@@ -65,6 +65,8 @@ type VMCreateInput struct {
 	Count                 *int           `json:"count,omitempty"                    yaml:"count,omitempty"`
 	Atomic                bool           `json:"atomic"                             yaml:"atomic"`
 	Volumes               []string       `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
+	VsockPort             *int           `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
+	NoVsock               bool           `json:"no_vsock"                           yaml:"no_vsock"`
 }
 
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().
@@ -111,6 +113,7 @@ type ResolvedVMCreateInput struct {
 	ConfigFilename        string
 	ConsoleSocketFilename string
 	ConsolePIDFilename    string
+	VsockFilename         string
 
 	// Cloud-init
 	CloudInitISOName      string
@@ -137,6 +140,7 @@ type ResolvedVMCreateInput struct {
 	Provisioner      model.ProvisionerType
 	ExtraDrives      []model.DriveConfig
 	Volumes          []*model.VolumeItem
+	VsockPort        int    // vsock port (0 = disabled / no vsock)
 }
 
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.
@@ -553,12 +557,22 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	configFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "config_filename")
 	consoleSocketFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_socket_filename")
 	consolePIDFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_pid_filename")
+	vsockFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "vsock_filename")
 
 	ciIsoName, _ := r.cfg.GetString(ctx, "defaults.cloudinit", "iso_name")
 	nocloudPortStart, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_start")
 	nocloudPortEnd, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_end")
 	nocloudMaxRetries, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries")
 	nocloudKillAfter, _ := r.cfg.GetDuration(ctx, "defaults.cloudinit", "nocloud_kill_after")
+
+	vsockPort := 0
+	if r.input.NoVsock {
+		vsockPort = 0
+	} else if r.input.VsockPort != nil && *r.input.VsockPort > 0 {
+		vsockPort = *r.input.VsockPort
+	} else {
+		vsockPort, _ = r.cfg.GetInt(ctx, "defaults.vm", "vsock_port")
+	}
 
 	// Build the resolved result (matches Python's ResolvedVMCreateInput construction)
 	result := &ResolvedVMCreateInput{
@@ -613,12 +627,14 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		ConfigFilename:        configFilename,
 		ConsoleSocketFilename: consoleSocketFilename,
 		ConsolePIDFilename:    consolePIDFilename,
+		VsockFilename:         vsockFilename,
 		// Cloud-init defaults (matches Python's GetString calls)
 		CloudInitISOName:      ciIsoName,
 		NocloudPortRangeStart: nocloudPortStart,
 		NocloudPortRangeEnd:   nocloudPortEnd,
 		NocloudMaxPortRetries: nocloudMaxRetries,
 		NoCloudKillAfter:      nocloudKillAfter,
+		VsockPort:             vsockPort,
 	}
 
 	// Validate (matches Python's ensure_validate)

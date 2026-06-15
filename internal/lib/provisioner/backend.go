@@ -43,6 +43,10 @@ type Backend interface {
 	) (string, error)
 	ConvertTo(ctx context.Context, targetFS string) error
 	Run(ctx context.Context) error
+	// InjectVsockAgent queues the vsock guest agent binary, auth token, and
+	// init system integration files into the rootfs. Called during VM creation
+	// to inject the agent before first boot.
+	InjectVsockAgent(ctx context.Context, agentBinary []byte, port int, token string) error
 }
 
 // BackendOpts configures a backend via NewBackend.
