@@ -68,6 +68,7 @@ func (op *Operation) CPCopy(
 		}
 
 		client := vsock.NewClient(resolved.DstInfo.Vsock, probeTimeout)
+		client.VmName = resolved.DstInfo.Identifier
 		ftResult, err := client.FTCopyToVM(ctx, resolved.LocalPaths, resolved.DstInfo.RemotePath,
 			resolved.Force, wrapProgress)
 		if err != nil {
@@ -94,6 +95,7 @@ func (op *Operation) CPCopy(
 		}
 
 		client := vsock.NewClient(resolved.SrcInfo.Vsock, probeTimeout)
+		client.VmName = resolved.SrcInfo.Identifier
 		ftResult, err := client.FTCopyFromVM(ctx, resolved.SrcInfo.RemotePath,
 			resolved.LocalPaths[0], resolved.Force, wrapProgress)
 		if err != nil {
@@ -121,7 +123,9 @@ func (op *Operation) CPCopy(
 		}
 
 		srcClient := vsock.NewClient(resolved.SrcInfo.Vsock, probeTimeout)
+		srcClient.VmName = resolved.SrcInfo.Identifier
 		dstClient := vsock.NewClient(resolved.DstInfo.Vsock, probeTimeout)
+		dstClient.VmName = resolved.DstInfo.Identifier
 		ftResult, err := srcClient.FTCopyVMToVM(ctx, resolved.SrcInfo.RemotePath,
 			resolved.DstInfo.RemotePath, resolved.Force, wrapProgress, dstClient)
 		if err != nil {

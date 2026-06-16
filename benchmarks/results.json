@@ -1,394 +1,131 @@
 [
   {
-    "tag": "go-seq",
-    "timestamp": "2026-06-07T19:15:46+00:00",
-    "kernel": "official:7.0.11",
+    "tag": "seq",
+    "timestamp": "2026-06-16T21:08:48+00:00",
+    "kernel": "default",
     "results": [
       {
         "name": "alpine",
-        "threshold_s": 6,
-        "create_s": 0.9,
-        "total_s": 2.0,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "ubuntu:24.04",
-        "threshold_s": 6,
+        "threshold_s": 5,
         "create_s": 1.4,
-        "total_s": 2.9,
+        "total_s": 2,
         "passed": true,
         "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "ubuntu-minimal:24.04",
-        "threshold_s": 6,
-        "create_s": 1.1,
-        "total_s": 2.3,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "archlinux",
-        "threshold_s": 6,
-        "create_s": 1.5,
-        "total_s": 4.7,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 4
-      },
-      {
-        "name": "debian:12",
-        "threshold_s": 6,
-        "create_s": 1.5,
-        "total_s": 2.7,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "firecracker",
-        "threshold_s": 6,
-        "create_s": 1.0,
-        "total_s": 2.2,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      }
-    ]
-  },
-  {
-    "tag": "nuitka-seq",
-    "timestamp": "2026-06-07T19:30:59+00:00",
-    "kernel": "official:7.0.11",
-    "results": [
-      {
-        "name": "alpine",
-        "threshold_s": 6,
-        "create_s": 1.4,
-        "total_s": 1.8,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
+        "kernel": "default",
         "attempt": 1
       },
       {
         "name": "ubuntu:24.04",
-        "threshold_s": 6,
-        "create_s": 2.2,
-        "total_s": 3.2,
+        "threshold_s": 5,
+        "create_s": 2,
+        "total_s": 2.4,
         "passed": true,
         "error": null,
-        "kernel": "official:7.0.11",
+        "kernel": "default",
         "attempt": 1
       },
       {
         "name": "ubuntu-minimal:24.04",
-        "threshold_s": 6,
-        "create_s": 1.6,
-        "total_s": 2.2,
+        "threshold_s": 5,
+        "create_s": 2,
+        "total_s": 2.4,
         "passed": true,
         "error": null,
-        "kernel": "official:7.0.11",
+        "kernel": "default",
         "attempt": 1
       },
       {
         "name": "archlinux",
-        "threshold_s": 6,
-        "create_s": 2.1,
-        "total_s": 5.9,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 3
-      },
-      {
-        "name": "debian:12",
-        "threshold_s": 6,
-        "create_s": 2.1,
+        "threshold_s": 5,
+        "create_s": 2.4,
         "total_s": 3.9,
         "passed": true,
         "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
+        "kernel": "default",
+        "attempt": 1
       },
       {
-        "name": "firecracker",
-        "threshold_s": 6,
-        "create_s": 1.6,
+        "name": "debian:12",
+        "threshold_s": 5,
+        "create_s": 4.3,
+        "total_s": 4.6,
+        "passed": true,
+        "error": null,
+        "kernel": "default",
+        "attempt": 1
+      },
+      {
+        "name": "firecracker:v1.15",
+        "threshold_s": 5,
+        "create_s": 1.9,
         "total_s": 2.1,
         "passed": true,
         "error": null,
-        "kernel": "official:7.0.11",
+        "kernel": "default",
         "attempt": 1
       }
     ]
   },
   {
-    "tag": "nuitka-seq-guestfs",
-    "timestamp": "2026-06-07T19:43:46+00:00",
-    "kernel": "official:7.0.11",
+    "tag": "parallel",
+    "timestamp": "2026-06-16T21:08:59+00:00",
+    "kernel": "default",
     "results": [
       {
         "name": "alpine",
-        "threshold_s": 6,
-        "create_s": 2.8,
-        "total_s": 3.2,
+        "threshold_s": 5,
+        "create_s": 1.6,
+        "total_s": 2.9,
         "passed": true,
         "error": null,
-        "kernel": "official:7.0.11",
+        "kernel": "default",
         "attempt": 1
       },
       {
         "name": "ubuntu:24.04",
-        "threshold_s": 6,
-        "create_s": 3.4,
-        "total_s": 4.5,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 1
+        "threshold_s": 5,
+        "create_s": 5.4,
+        "total_s": 5.4,
+        "passed": false,
+        "error": "VM not ready after 5.4s (threshold 5s)",
+        "kernel": "default"
       },
       {
         "name": "ubuntu-minimal:24.04",
-        "threshold_s": 6,
-        "create_s": 3.0,
-        "total_s": 3.6,
+        "threshold_s": 5,
+        "create_s": 3,
+        "total_s": 3.9,
         "passed": true,
         "error": null,
-        "kernel": "official:7.0.11",
+        "kernel": "default",
         "attempt": 1
       },
       {
         "name": "archlinux",
-        "threshold_s": 6,
-        "create_s": 3.4,
-        "total_s": 6.2,
+        "threshold_s": 5,
+        "create_s": 5.8,
+        "total_s": 5.8,
         "passed": false,
-        "error": "SSH unavailable after 6.2s (threshold 6s)",
-        "kernel": "official:7.0.11"
+        "error": "VM not ready after 5.8s (threshold 5s)",
+        "kernel": "default"
       },
       {
         "name": "debian:12",
-        "threshold_s": 6,
-        "create_s": 4.6,
-        "total_s": 6.5,
-        "passed": false,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "firecracker",
-        "threshold_s": 6,
-        "create_s": 3.1,
-        "total_s": 3.7,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 1
-      }
-    ]
-  },
-  {
-    "tag": "go-seq-guestfs",
-    "timestamp": "2026-06-07T19:46:03+00:00",
-    "kernel": "official:7.0.11",
-    "results": [
-      {
-        "name": "alpine",
-        "threshold_s": 6,
-        "create_s": 3.7,
-        "total_s": 4.8,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "ubuntu:24.04",
-        "threshold_s": 6,
-        "create_s": 4.0,
-        "total_s": 6.0,
-        "passed": false,
-        "error": "SSH unavailable after 6.0s (threshold 6s)",
-        "kernel": "official:7.0.11"
-      },
-      {
-        "name": "ubuntu-minimal:24.04",
-        "threshold_s": 6,
-        "create_s": 3.4,
-        "total_s": 6.5,
-        "passed": false,
-        "error": "SSH unavailable after 6.5s (threshold 6s)",
-        "kernel": "official:7.0.11"
-      },
-      {
-        "name": "archlinux",
-        "threshold_s": 6,
-        "create_s": 4.0,
-        "total_s": 7.0,
-        "passed": false,
-        "error": "SSH unavailable after 7.0s (threshold 6s)",
-        "kernel": "official:7.0.11"
-      },
-      {
-        "name": "debian:12",
-        "threshold_s": 6,
-        "create_s": 4.0,
-        "total_s": 6.0,
-        "passed": false,
-        "error": "SSH unavailable after 6.0s (threshold 6s)",
-        "kernel": "official:7.0.11"
-      },
-      {
-        "name": "firecracker",
-        "threshold_s": 6,
-        "create_s": 4.5,
-        "total_s": 6.6,
-        "passed": false,
-        "error": "SSH unavailable after 6.6s (threshold 6s)",
-        "kernel": "official:7.0.11"
-      }
-    ]
-  },
-  {
-    "tag": "go-parallel",
-    "timestamp": "2026-06-07T19:47:36+00:00",
-    "kernel": "official:7.0.11",
-    "results": [
-      {
-        "name": "alpine",
-        "threshold_s": 6,
-        "create_s": 1.9,
-        "total_s": 3.1,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "ubuntu:24.04",
-        "threshold_s": 6,
-        "create_s": 3.0,
-        "total_s": 4.6,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "ubuntu-minimal:24.04",
-        "threshold_s": 6,
-        "create_s": 2.9,
-        "total_s": 4.1,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "archlinux",
-        "threshold_s": 6,
-        "create_s": 3.0,
-        "total_s": 6.1,
-        "passed": false,
-        "error": "SSH unavailable after 6.1s (threshold 6s)",
-        "kernel": "official:7.0.11"
-      },
-      {
-        "name": "debian:12",
-        "threshold_s": 6,
-        "create_s": 3.0,
-        "total_s": 4.2,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "firecracker",
-        "threshold_s": 6,
-        "create_s": 2.8,
-        "total_s": 4.0,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      }
-    ]
-  },
-  {
-    "tag": "nuitka-parallel",
-    "timestamp": "2026-06-07T19:48:07+00:00",
-    "kernel": "official:7.0.11",
-    "results": [
-      {
-        "name": "alpine",
-        "threshold_s": 6,
-        "create_s": 2.6,
-        "total_s": 4.6,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "ubuntu:24.04",
-        "threshold_s": 6,
-        "create_s": 3.7,
-        "total_s": 6.3,
-        "passed": false,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "ubuntu-minimal:24.04",
-        "threshold_s": 6,
-        "create_s": 3.5,
+        "threshold_s": 5,
+        "create_s": 5.7,
         "total_s": 5.7,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 2
-      },
-      {
-        "name": "archlinux",
-        "threshold_s": 6,
-        "create_s": 3.9,
-        "total_s": 6.8,
         "passed": false,
-        "error": "SSH unavailable after 6.8s (threshold 6s)",
-        "kernel": "official:7.0.11"
+        "error": "VM not ready after 5.7s (threshold 5s)",
+        "kernel": "default"
       },
       {
-        "name": "debian:12",
-        "threshold_s": 6,
-        "create_s": 3.7,
-        "total_s": 4.6,
+        "name": "firecracker:v1.15",
+        "threshold_s": 5,
+        "create_s": 3.2,
+        "total_s": 4.3,
         "passed": true,
         "error": null,
-        "kernel": "official:7.0.11",
-        "attempt": 1
-      },
-      {
-        "name": "firecracker",
-        "threshold_s": 6,
-        "create_s": 3.5,
-        "total_s": 4.4,
-        "passed": true,
-        "error": null,
-        "kernel": "official:7.0.11",
+        "kernel": "default",
         "attempt": 1
       }
     ]

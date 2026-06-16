@@ -70,7 +70,7 @@ build_agent() {
   touch "${agent_dir}/${agent_gz}"
 
   echo "  → Building guest agent (linux/${arch})..."
-  GOOS=linux GOARCH="${arch}" go build \
+  CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build \
     -o "${agent_dir}/${agent_binary}" \
     -ldflags="-s -w" \
     ./internal/service/vsockagent/cmd/
@@ -143,7 +143,7 @@ do_version() {
 # Main
 # =============================================================================
 main() {
-  local mode="dev"
+  local mode="release"
   local output=""
   local arch="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
   EXPLICIT_VERSION=""

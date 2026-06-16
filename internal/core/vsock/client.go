@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
@@ -34,6 +35,11 @@ type Client struct {
 	// expires or the agent responds. Set by the API layer from config
 	// defaults.vm.vsock_probe_timeout (5s). Must be > 0.
 	ProbeTimeout time.Duration
+
+	// VmName is the human-readable VM name, used for timing log entries.
+	// Set by callers (API layer) after construction. Zero value (empty string)
+	// is acceptable — timing entries will just have an empty vm_name field.
+	VmName string
 }
 
 const vsockProbeInterval = 20 * time.Millisecond
@@ -247,24 +253,52 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 // waitForAgent retries dialAndHandshake until the guest agent responds or the
 // probe timeout expires. ProbeTimeout must be > 0 — callers (API layer) set it
 // from defaults.vm.vsock_probe_timeout (config default: 60s).
+// When timing is enabled, logs per-attempt vsock_dial and overall vsock_probe timing.
 func (c *Client) waitForAgent(ctx context.Context) (net.Conn, error) {
 	if c.ProbeTimeout <= 0 {
 		return nil, errs.New(errs.CodeVsockConnectionFailed,
 			"vsock agent probe timeout not set — API layer must set ProbeTimeout from config")
 	}
+
+	start := time.Now()
 	deadline := time.Now().Add(c.ProbeTimeout)
+	attempts := 0
 
 	for {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
+			elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+			infra.LogTiming("vsock_probe", c.VmName, c.item.VmID, elapsedMs,
+				"attempts", attempts,
+				"error", "timeout",
+			)
 			return nil, errs.New(errs.CodeVsockConnectionFailed,
-				fmt.Sprintf("vsock agent did not become reachable within %v", c.ProbeTimeout))
+				fmt.Sprintf("vsock agent did not become reachable within %v after %d attempt(s)", c.ProbeTimeout, attempts))
 		}
 
+		attempts++
+
+		// Per-attempt timing: wrap dialAndHandshake with vsock_dial
+		dialStart := time.Now()
 		conn, err := dialAndHandshake(ctx, c.item.UDSPath, c.item.Port)
+		dialElapsed := float64(time.Since(dialStart).Microseconds()) / 1000.0
+
 		if err == nil {
+			elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+			infra.LogTiming("vsock_probe", c.VmName, c.item.VmID, elapsedMs,
+				"attempts", attempts,
+			)
+			infra.LogTiming("vsock_dial", c.VmName, c.item.VmID, dialElapsed,
+				"attempt", attempts,
+			)
 			return conn, nil
 		}
+
+		// Log failed dial attempt timing
+		infra.LogTiming("vsock_dial", c.VmName, c.item.VmID, dialElapsed,
+			"attempt", attempts,
+			"error", err.Error(),
+		)
 
 		// Connection failed (agent not ready yet) — probe again after interval.
 		select {

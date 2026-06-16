@@ -649,7 +649,8 @@ func (Builder) BuildVsockAgentOps(agentBinary []byte, port int, token string) []
 		FileOp{
 			Path: "/etc/systemd/system/mvm-vsock-agent.service",
 			Data: fmt.Appendf(nil, `[Unit]
-Description=MVM Guest Agent
+Description=MVM VSock Agent
+DefaultDependencies=no
 
 [Service]
 Type=simple
@@ -658,7 +659,7 @@ Restart=always
 RestartSec=2
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=sysinit.target
 `, port),
 			Mode: 0644,
 			UID:  0,
@@ -666,32 +667,28 @@ WantedBy=multi-user.target
 		},
 		FileOp{
 			Path: "/etc/init.d/mvm-vsock-agent",
-			Data: fmt.Appendf(nil, `#!/bin/sh
-# OpenRC init script for mvm-vsock-agent
-#
-### BEGIN INIT INFO
-# Provides:          mvm-vsock-agent
-# Required-Start:    $local_fs $remote_fs
-# Required-Stop:     $local_fs $remote_fs
-# Default-Start:     2 3 4 5
-# Default-Stop:      0 1 6
-# Short-Description: MVM Guest Agent
-### END INIT INFO
+			Data: fmt.Appendf(nil, `#!/sbin/openrc-run
 
-case "$1" in
-  start) /usr/bin/mvm-vsock-agent -port %d & ;;
-  stop)  pkill -f "mvm-vsock-agent -port %d" || true ;;
-  *)     echo "Usage: $0 {start|stop}"; exit 1 ;;
-esac
-`, port, port),
+description="MVM VSock Agent"
+
+command=/usr/bin/mvm-vsock-agent
+command_args="-port %d"
+pidfile=/var/run/mvm-vsock-agent.pid
+command_background=true
+
+depend() {
+    need localmount
+}
+`, port),
 			Mode: 0755,
 			UID:  0,
 			GID:  0,
 		},
 		ChrootOp{
 			Command: `
-if command -v systemctl >/dev/null 2>&1; then
-    systemctl enable mvm-vsock-agent
+	if command -v systemctl >/dev/null 2>&1; then
+    mkdir -p /etc/systemd/system/multi-user.target.wants 2>/dev/null || true
+    ln -sf /etc/systemd/system/mvm-vsock-agent.service /etc/systemd/system/multi-user.target.wants/mvm-vsock-agent.service 2>/dev/null || true
 elif rc-update >/dev/null 2>&1; then
     rc-update add mvm-vsock-agent default
 else
