@@ -48,10 +48,10 @@ func handleTTY(ctx context.Context, conn net.Conn, req *execRequest) {
 	defer slave.Close()
 
 	var cmd *exec.Cmd
-	if req.User != "" && req.User != "root" {
+	if req.User != "" {
 		cmd = exec.CommandContext(ctx, "su", "-", req.User)
 	} else {
-		cmd = exec.CommandContext(ctx, "/bin/sh", "-i")
+		cmd = exec.CommandContext(ctx, "su", "-", "root")
 	}
 
 	// Merge environment if provided.

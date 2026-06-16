@@ -10,7 +10,7 @@ Currently, running commands inside a VM requires SSH:
 - SSH key injection adds ~200ms to pre-boot provisioning
 - No interactive shell access before SSH is ready
 
-For the `mvm env` workflow, the `ssh:` step type already runs post-boot commands. But there's a gap: **no way to run commands or get a shell the instant the VM boots**, and no way to do it without a network dependency.
+For the `mvm env` workflow, the `exec:` step type already runs post-boot commands via vsock. But there's a gap: **no way to run commands or get a shell the instant the VM boots**, and no way to do it without a network dependency.
 
 ## Solution
 
@@ -372,15 +372,8 @@ mvm vm exec my-vm --port 1025 -- /bin/bash
 # Interactive shell as a different user
 mvm vm exec my-vm --user ubuntu
 
-# Without agent (if VM was created with --no-vsock)
-```
-
-### CLI flags on `mvm vm create`
-
-```bash
-mvm vm create my-vm \
-  --no-vsock                # Skip agent injection and vsock device
-  --vsock-port 1024         # Default: 1024
+# With custom port
+mvm vm exec my-vm --port 1025 -- /bin/bash
 ```
 
 ### Host-side client flow
@@ -407,7 +400,7 @@ mvm vm create my-vm \
 
 | File | Change |
 |------|--------|
-| `internal/cli/vm.go` | New `mvm vm exec` cobra command. Add `--no-vsock`, `--vsock-port` flags on create. |
+| `internal/cli/vm.go` | New `mvm vm exec` cobra command. Add `--vsock-port` flag on create. |
 | `pkg/api/vm.go` | New `op.VMExec(ctx, input)` method. Inject vsock setup into `VMCreate`. |
 | `pkg/api/inputs/vm.go` | `VMExecInput{Identifiers, Command, Port, Timeout, User}`. `VMInput{VmCreateFlags..., VsockPort}`. |
 | `internal/core/vsock/` | Client, Repository, SQLite, Resolver, protocol. `Exec()` uses streaming read loop with `json.Decoder`. `crFilter` converts `\r` → `\n` for raw terminal input. `relayTTY` bidirectional relay for interactive shells. |

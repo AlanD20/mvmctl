@@ -17,6 +17,14 @@ const (
 	constConnectTimeout = 5 * time.Second
 )
 
+// ── File transfer protocol constants ──
+
+const (
+	requestTypeFileTransfer = "file-transfer"
+	responseTypeFTReady     = "ft-ready"
+	ftBufferSize            = 262144
+)
+
 // ── Wire protocol types (unexported) ──
 
 // execRequest is the JSON frame sent from host to guest agent.

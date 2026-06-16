@@ -191,7 +191,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		skipDeblob      bool
 		force           bool
 		volume          []string
-		noVsock         bool
 		vsockPort       int
 	)
 
@@ -310,9 +309,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			if cmd.Flags().Changed("no-pci") {
 				input.PCIEnabled = infraptr.Ptr(false)
 			}
-			if noVsock {
-				input.NoVsock = true
-			}
 			if cmd.Flags().Changed("vsock-port") {
 				input.VsockPort = infraptr.Ptr(vsockPort)
 			}
@@ -391,7 +387,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		BoolVar(&skipDeblob, "skip-deblob", false, "Skip debloat operations on rootfs (removes OS caches, cleans package manager caches)")
 	cmd.Flags().StringArrayVarP(&volume, "volume", "v", nil, "Attach volume(s) to the VM (can specify multiple times)")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompts")
-	cmd.Flags().BoolVar(&noVsock, "no-vsock", false, "Disable vsock guest agent injection and vsock device")
 	cmd.Flags().IntVar(&vsockPort, "vsock-port", 0, "Vsock port for the guest agent (default: 1024)")
 	cmd.Flags().SetNormalizeFunc(func(f *pflag.FlagSet, name string) pflag.NormalizedName {
 		switch name {

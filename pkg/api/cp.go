@@ -5,11 +5,12 @@ package api
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
+	"time"
 
+	"mvmctl/internal/core/vsock"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
-	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -20,179 +21,138 @@ type CPAPI interface {
 	CPCopy(ctx context.Context, input inputs.CPInput, onProgress event.OnDownloadCallback) (*results.CPCopyResult, error)
 }
 
-// copyError converts a CPService error to a DomainError.
-// Matches Python's except CPError as e: logger.debug("CP error: %s", e, exc_info=True)
-func (op *Operation) copyError(err error) error {
-	slog.Debug("CP error", "error", err)
-	return err
-}
-
-// CPCopy copies files between host and microVMs using tar-over-SSH.
-// Matches Python's CPOperation.copy() exactly.
-//
-// Python: The entire method body is wrapped in "try: ... except CPError as e:"
-// which catches all CPError exceptions (including CPDestinationNotDirectoryError)
-// from resolution, validation, and copy operations. In Go, errors returned by
-// the CopyToVM/CopyFromVM/CopyVMToVM methods are DomainError types that map
-// to CPError. All CP-path errors (resolution, validation, copy) go through
-// the unified copyError handler.
+// CPCopy copies files between host and microVMs using vsock binary frame protocol.
+// Matches Python's CPOperation.copy().
 func (op *Operation) CPCopy(
 	ctx context.Context,
 	input inputs.CPInput,
 	onProgress event.OnDownloadCallback,
 ) (*results.CPCopyResult, error) {
-	// Python: try: ... except CPError as e: ...
-	// Build CPRequest and resolve (matches Python: CPRequest(inputs, db).resolve())
+	// Build CPRequest and resolve.
 	req := inputs.NewCPRequest(input, op.Services.Config)
-	resolved, err := req.Resolve(ctx, op.Repos.VM, op.Repos.Key)
+	resolved, err := req.Resolve(ctx, op.Repos.VM, op.Repos.Vsock)
 	if err != nil {
-		return nil, op.copyError(err)
+		return nil, err
 	}
 
-	// ── Validate destination is a directory for host_to_vm ──────────────
-	// Python: Raises CPDestinationNotDirectoryError (subclass of CPError),
-	// which is caught by the outer "except CPError". Validation happens
-	// BEFORE audit log in the original Python order.
-	if resolved.Direction == "host_to_vm" && resolved.DstInfo != nil {
-		dstPath := resolved.DstInfo.RemotePath
-		if dstPath != "" && !strings.HasSuffix(dstPath, "/") {
-			return nil, errs.New(
-				errs.CodeCPDestinationNotDir,
-				fmt.Sprintf(
-					"Destination path must be a directory (end with /). Got: '%s'. Use 'vm_name:/dest/dir/' to copy into a directory.",
-					dstPath,
-				),
-			)
-		}
-	}
-
-	// Audit log (matches Python: AuditLog.log("cp.copy", changes={...}))
-	// Python order: resolution → audit log → direction dispatch.
-	// With destination validation moved before audit log.
+	// ── Audit log.
 	op.AuditLog.LogOperation("cp.copy", map[string]any{
 		"direction": resolved.Direction,
 		"sources":   strings.Join(input.Sources, ", "),
-		"dst":       input.Dst,
+		"dest":      input.Dest,
 		"force":     input.Force,
 	}, "")
 
-	// Look up SSH probe timeout from config (used for CPService readiness probe).
-	probeTimeout, _ := op.Services.Config.GetDuration(ctx, "settings.vm", "ssh_timeout_sec")
+	// Read vsock probe timeout from config.
+	probeTimeout, err := op.Services.Config.GetDuration(ctx, "defaults.vm", "vsock_probe_timeout")
+	if err != nil || probeTimeout <= 0 {
+		probeTimeout = 5 * time.Second
+	}
 
-	// Perform the copy (matches Python: CPService.copy_xxx(...) returns (total_bytes, message))
-	var totalBytes int64
-	var resultMessage string
+	// Wrap progress callback.
+	wrapProgress := func(current, total int64) {
+		if onProgress != nil {
+			onProgress(current, total)
+		}
+	}
 
+	// Perform the copy using vsock binary frame protocol.
 	switch resolved.Direction {
-	case "host_to_vm":
+	case infra.DirectionHostToVM:
 		if resolved.DstInfo == nil || resolved.LocalPaths == nil {
-			return nil, op.copyError(errs.New(errs.CodeCPError, "Internal error: destination VM info not available"))
+			return nil, errs.New(errs.CodeCPError, "Internal error: destination VM info not available")
+		}
+		if resolved.DstInfo.Vsock == nil {
+			return nil, errs.New(errs.CodeCPError,
+				fmt.Sprintf("VM '%s' has no vsock configuration", resolved.DstInfo.Identifier))
 		}
 
-		dstKeyPath := ""
-		if resolved.DstInfo.KeyPath != nil {
-			dstKeyPath = *resolved.DstInfo.KeyPath
-		}
-		totalBytes, resultMessage, err = op.Services.CP.CopyToVM(
-			ctx,
-			resolved.LocalPaths,
-			resolved.DstInfo.RemotePath,
-			model.ConnectionInfo{
-				Host:         resolved.DstInfo.IP,
-				User:         resolved.DstInfo.User,
-				KeyPath:      dstKeyPath,
-				ProbeTimeout: probeTimeout,
-			},
-			resolved.Force,
-			func(current, total int64) {
-				if onProgress != nil {
-					onProgress(current, total)
-				}
-			},
-		)
+		client := vsock.NewClient(resolved.DstInfo.Vsock, probeTimeout)
+		ftResult, err := client.FTCopyToVM(ctx, resolved.LocalPaths, resolved.DstInfo.RemotePath,
+			resolved.Force, wrapProgress)
 		if err != nil {
-			return nil, op.copyError(err)
+			return nil, err
 		}
 
-	case "vm_to_host":
+		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
+		if ftResult.Errors > 0 {
+			msg += fmt.Sprintf(" (%d errors)", ftResult.Errors)
+		}
+
+		return &results.CPCopyResult{
+			Bytes:   ftResult.Bytes,
+			Message: msg,
+		}, nil
+
+	case infra.DirectionVMToHost:
 		if resolved.SrcInfo == nil || resolved.LocalPaths == nil {
-			return nil, op.copyError(errs.New(errs.CodeCPError, "Internal error: source VM info not available"))
+			return nil, errs.New(errs.CodeCPError, "Internal error: source VM info not available")
+		}
+		if resolved.SrcInfo.Vsock == nil {
+			return nil, errs.New(errs.CodeCPError,
+				fmt.Sprintf("VM '%s' has no vsock configuration", resolved.SrcInfo.Identifier))
 		}
 
-		srcKeyPath := ""
-		if resolved.SrcInfo.KeyPath != nil {
-			srcKeyPath = *resolved.SrcInfo.KeyPath
-		}
-		totalBytes, resultMessage, err = op.Services.CP.CopyFromVM(
-			ctx,
-			resolved.SrcInfo.RemotePath,
-			resolved.LocalPaths[0],
-			model.ConnectionInfo{
-				Host:         resolved.SrcInfo.IP,
-				User:         resolved.SrcInfo.User,
-				KeyPath:      srcKeyPath,
-				ProbeTimeout: probeTimeout,
-			},
-			resolved.Force,
-			func(current, total int64) {
-				if onProgress != nil {
-					onProgress(current, total)
-				}
-			},
-		)
+		client := vsock.NewClient(resolved.SrcInfo.Vsock, probeTimeout)
+		ftResult, err := client.FTCopyFromVM(ctx, resolved.SrcInfo.RemotePath,
+			resolved.LocalPaths[0], resolved.Force, wrapProgress)
 		if err != nil {
-			return nil, op.copyError(err)
+			return nil, err
 		}
 
-	case "vm_to_vm":
+		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
+
+		return &results.CPCopyResult{
+			Bytes:   ftResult.Bytes,
+			Message: msg,
+		}, nil
+
+	case infra.DirectionVMToVM:
 		if resolved.SrcInfo == nil || resolved.DstInfo == nil {
-			return nil, op.copyError(
-				errs.New(errs.CodeCPError, "Internal error: source or destination VM info not available"),
-			)
+			return nil, errs.New(errs.CodeCPError, "Internal error: source or destination VM info not available")
+		}
+		if resolved.SrcInfo.Vsock == nil {
+			return nil, errs.New(errs.CodeCPError,
+				fmt.Sprintf("Source VM '%s' has no vsock configuration", resolved.SrcInfo.Identifier))
+		}
+		if resolved.DstInfo.Vsock == nil {
+			return nil, errs.New(errs.CodeCPError,
+				fmt.Sprintf("Destination VM '%s' has no vsock configuration", resolved.DstInfo.Identifier))
 		}
 
-		srcKeyPath := ""
-		if resolved.SrcInfo.KeyPath != nil {
-			srcKeyPath = *resolved.SrcInfo.KeyPath
-		}
-		dstKeyPath2 := ""
-		if resolved.DstInfo.KeyPath != nil {
-			dstKeyPath2 = *resolved.DstInfo.KeyPath
-		}
-		totalBytes, resultMessage, err = op.Services.CP.CopyVMToVM(ctx,
-			model.ConnectionInfo{
-				Host:         resolved.SrcInfo.IP,
-				User:         resolved.SrcInfo.User,
-				KeyPath:      srcKeyPath,
-				ProbeTimeout: probeTimeout,
-			},
-			model.ConnectionInfo{
-				Host:         resolved.DstInfo.IP,
-				User:         resolved.DstInfo.User,
-				KeyPath:      dstKeyPath2,
-				ProbeTimeout: probeTimeout,
-			},
-			resolved.SrcInfo.RemotePath,
-			resolved.DstInfo.RemotePath,
-			resolved.Force,
-			func(current, total int64) {
-				if onProgress != nil {
-					onProgress(current, total)
-				}
-			},
-		)
+		srcClient := vsock.NewClient(resolved.SrcInfo.Vsock, probeTimeout)
+		dstClient := vsock.NewClient(resolved.DstInfo.Vsock, probeTimeout)
+		ftResult, err := srcClient.FTCopyVMToVM(ctx, resolved.SrcInfo.RemotePath,
+			resolved.DstInfo.RemotePath, resolved.Force, wrapProgress, dstClient)
 		if err != nil {
-			return nil, op.copyError(err)
+			return nil, err
 		}
+
+		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
+
+		return &results.CPCopyResult{
+			Bytes:   ftResult.Bytes,
+			Message: msg,
+		}, nil
 
 	default:
 		return nil, errs.New(errs.CodeCPError, fmt.Sprintf("Unknown copy direction: %s", resolved.Direction))
 	}
-
-	return &results.CPCopyResult{
-		Bytes:   totalBytes,
-		Message: resultMessage,
-	}, nil
 }
 
-// Compile-time checks
+// formatBytes formats a byte count as a human-readable string.
+func formatBytes(b int64) string {
+	if b < 1024 {
+		return fmt.Sprintf("%d B", b)
+	}
+	if b < 1024*1024 {
+		return fmt.Sprintf("%.1f KiB", float64(b)/1024)
+	}
+	if b < 1024*1024*1024 {
+		return fmt.Sprintf("%.1f MiB", float64(b)/(1024*1024))
+	}
+	return fmt.Sprintf("%.1f GiB", float64(b)/(1024*1024*1024))
+}
+
+// Compile-time checks ensure interfaces are satisfied.
+var _ CPAPI = (*Operation)(nil)

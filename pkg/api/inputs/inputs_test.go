@@ -44,7 +44,7 @@ func TestParseVMPath(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			gotVM, gotPath := ParseVMPath(tc.input)
+			gotVM, gotPath := infra.ParseVMPath(tc.input)
 
 			if diff := cmp.Diff(tc.wantVM, gotVM); diff != "" {
 				t.Errorf("ParseVMPath() VM (-want +got):\n%s", diff)

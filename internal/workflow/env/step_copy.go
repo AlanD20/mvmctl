@@ -50,10 +50,8 @@ func (s *CopyStep) Apply(
 	onProgress event.OnProgressCallback,
 ) error {
 	// Copy commands are imperative — always execute on apply.
-	// SSH reachability is guaranteed by the DAG (SSH step runs first).
-	// No retry loop needed — waitForSSH already confirmed port 22 is open.
+	// vsock reachability is guaranteed by the DAG (VM start step runs first).
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "copying files"})
-	// Wrap onProgress to inject step name into API-level progress events.
 	stepProgress := func(e event.Progress) { e.Phase = s.Name(); onProgress(e) }
 	if _, err := s.op.CPCopy(ctx, s.input, event.FormatProgress(stepProgress)); err != nil {
 		return err
@@ -128,12 +126,6 @@ func newCopyStepFromSpec(
 	var input inputs.CPInput
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		return nil, err
-	}
-	// Build Dst from target + ":" + dst
-	target := spec.GetString("target")
-	dst := spec.GetString("dst")
-	if target != "" && dst != "" {
-		input.Dst = target + ":" + dst
 	}
 	// Hash the original spec (not normalized) for drift detection.
 	specData, _ := yaml.Marshal(spec)

@@ -3,6 +3,7 @@ package vsockagent
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"log/slog"
 	"net"
 )
@@ -58,6 +59,19 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 				slog.Error("write pong", "id", req.ID, "error", err)
 				return
 			}
+
+		case requestTypeFileTransfer:
+			ackPayload := fmt.Sprintf(`{"buf":%d}`, ftBufferSize)
+			if err := writeFrame(conn, &execResponse{
+				ID:   req.ID,
+				Type: responseTypeFTReady,
+				Data: ackPayload,
+			}); err != nil {
+				slog.Error("ft: write ready ack", "id", req.ID, "error", err)
+				return
+			}
+			handleFileTransfer(ctx, conn, req)
+			return
 
 		default:
 			slog.Warn("unknown request type", "id", req.ID, "type", req.Type)
