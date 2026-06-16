@@ -91,7 +91,7 @@ func TestMockCacheAPI_DefaultReturnsZero(t *testing.T) {
 func TestMockCacheAPI_CustomFunc(t *testing.T) {
 	t.Run("CacheInitAll_custom_func", func(t *testing.T) {
 		expected := &results.CacheInitResult{
-			CacheDir: "/tmp/cache",
+			CacheDir:    "/tmp/cache",
 			Directories: []string{"kernels", "images"},
 		}
 		m := &testutil.MockCacheAPI{

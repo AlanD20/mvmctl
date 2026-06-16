@@ -648,10 +648,10 @@ func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 		}
 		if comment != "" && strings.Contains(comment, network.Name) && !dbComments[comment] {
 			orphaned++
-		slog.Debug("Orphaned iptables rule on host for network",
-			"network", network.Name,
-			"rule", line,
-		)
+			slog.Debug("Orphaned iptables rule on host for network",
+				"network", network.Name,
+				"rule", line,
+			)
 		}
 	}
 

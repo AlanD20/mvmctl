@@ -293,7 +293,10 @@ func newBinaryDefaultCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			identifier := args[0]
 
-			item, err := binaryAPI.BinarySetDefault(cmd.Context(), inputs.BinaryInput{Identifiers: []string{identifier}})
+			item, err := binaryAPI.BinarySetDefault(
+				cmd.Context(),
+				inputs.BinaryInput{Identifiers: []string{identifier}},
+			)
 			if err != nil {
 				return err
 			}

@@ -45,9 +45,9 @@ type execRequest struct {
 // execResponse is a JSON frame sent back to the host agent.
 type execResponse struct {
 	ID         string `json:"id,omitempty"`
-	Type       string `json:"type"`              // "result", "tty", "pong", "error", "stdout", "stderr"
-	Status     int    `json:"status,omitempty"`  // exit code
-	Data       string `json:"data,omitempty"`    // streaming stdout/stderr chunk
+	Type       string `json:"type"`             // "result", "tty", "pong", "error", "stdout", "stderr"
+	Status     int    `json:"status,omitempty"` // exit code
+	Data       string `json:"data,omitempty"`   // streaming stdout/stderr chunk
 	Stdout     string `json:"stdout,omitempty"`
 	Stderr     string `json:"stderr,omitempty"`
 	DurationMs int    `json:"duration_ms,omitempty"`

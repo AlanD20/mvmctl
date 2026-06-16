@@ -145,7 +145,13 @@ func printRemoteImages(versions []model.VersionInfo, jsonOutput bool) {
 }
 
 // printLocalImages prints the local image listing table.
-func printLocalImages(images []*model.ImageItem, jsonOutput bool, longOutput bool, ctx context.Context, configAPI api.ConfigAPI) {
+func printLocalImages(
+	images []*model.ImageItem,
+	jsonOutput bool,
+	longOutput bool,
+	ctx context.Context,
+	configAPI api.ConfigAPI,
+) {
 	if jsonOutput {
 		if images == nil {
 			images = []*model.ImageItem{}

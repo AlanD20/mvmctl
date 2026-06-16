@@ -18,7 +18,11 @@ import (
 
 // CPAPI defines the public interface for copy file operations.
 type CPAPI interface {
-	CPCopy(ctx context.Context, input inputs.CPInput, onProgress event.OnDownloadCallback) (*results.CPCopyResult, error)
+	CPCopy(
+		ctx context.Context,
+		input inputs.CPInput,
+		onProgress event.OnDownloadCallback,
+	) (*results.CPCopyResult, error)
 }
 
 // CPCopy copies files between host and microVMs using vsock binary frame protocol.

@@ -26,10 +26,19 @@ import (
 // KernelAPI defines the public interface for kernel operations.
 type KernelAPI interface {
 	KernelPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	KernelPull(ctx context.Context, input inputs.KernelPullInput, onProgress event.OnProgressCallback) (*model.KernelItem, error)
+	KernelPull(
+		ctx context.Context,
+		input inputs.KernelPullInput,
+		onProgress event.OnProgressCallback,
+	) (*model.KernelItem, error)
 	KernelImport(ctx context.Context, input inputs.KernelImportInput) (*model.KernelItem, error)
 	KernelRemove(ctx context.Context, input inputs.KernelInput) *errs.BatchResult
-	KernelList(ctx context.Context, remote bool, noCache bool, onProgress event.OnProgressCallback) ([]*model.KernelItem, []model.VersionInfo, error)
+	KernelList(
+		ctx context.Context,
+		remote bool,
+		noCache bool,
+		onProgress event.OnProgressCallback,
+	) ([]*model.KernelItem, []model.VersionInfo, error)
 	KernelGet(ctx context.Context, identifier string) (*model.KernelItem, error)
 	KernelInspect(ctx context.Context, identifier string) (*results.KernelInspect, error)
 	KernelSetDefault(ctx context.Context, identifier string) error

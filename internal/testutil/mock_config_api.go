@@ -8,9 +8,9 @@ import (
 
 // MockConfigAPI implements api.ConfigAPI for testing.
 type MockConfigAPI struct {
-	ConfigGetFunc    func(ctx context.Context, category string, key string) (any, error)
-	ConfigSetFunc    func(ctx context.Context, category string, key string, value any) error
-	ConfigResetFunc  func(ctx context.Context, category string, key string, allOverrides bool) (int, error)
+	ConfigGetFunc     func(ctx context.Context, category string, key string) (any, error)
+	ConfigSetFunc     func(ctx context.Context, category string, key string, value any) error
+	ConfigResetFunc   func(ctx context.Context, category string, key string, allOverrides bool) (int, error)
 	ConfigListAllFunc func(ctx context.Context) (map[string]map[string]model.SettingInfo, error)
 }
 
@@ -40,4 +40,4 @@ func (m *MockConfigAPI) ConfigListAll(ctx context.Context) (map[string]map[strin
 		return m.ConfigListAllFunc(ctx)
 	}
 	return nil, nil
-	}
+}

@@ -18,8 +18,26 @@ import (
 type InitAPI interface {
 	InitCheckReadiness(ctx context.Context) *model.ProbeResult
 	InitSetupHost(ctx context.Context) error
-	InitRun(ctx context.Context, skipHost bool, skipNetwork bool, nonInteractive bool, sudoCompleted bool, downloadVersion string, onProgress event.OnProgressCallback) *results.InitResult
-	InitRunFull(ctx context.Context, skipHost bool, skipNetwork bool, nonInteractive bool, sudoCompleted bool, hostSetupMessage string, downloadVersion string, guestfsEnabled *bool, onProgress event.OnProgressCallback) *results.InitResult
+	InitRun(
+		ctx context.Context,
+		skipHost bool,
+		skipNetwork bool,
+		nonInteractive bool,
+		sudoCompleted bool,
+		downloadVersion string,
+		onProgress event.OnProgressCallback,
+	) *results.InitResult
+	InitRunFull(
+		ctx context.Context,
+		skipHost bool,
+		skipNetwork bool,
+		nonInteractive bool,
+		sudoCompleted bool,
+		hostSetupMessage string,
+		downloadVersion string,
+		guestfsEnabled *bool,
+		onProgress event.OnProgressCallback,
+	) *results.InitResult
 }
 
 // InitCheckReadiness runs pre-flight host readiness checks via the public API layer.
@@ -107,7 +125,10 @@ func (op *Operation) InitRunFull(
 
 	// ── Step 5: Network setup ──
 	if skipNetwork {
-		steps = append(steps, results.InitStepResult{Step: "network_setup", Success: true, Message: "Skipped (--skip-network)"})
+		steps = append(
+			steps,
+			results.InitStepResult{Step: "network_setup", Success: true, Message: "Skipped (--skip-network)"},
+		)
 	} else {
 		steps = append(steps, op.initStepNetworkSetup(ctx))
 	}

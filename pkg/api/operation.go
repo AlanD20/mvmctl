@@ -132,11 +132,11 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	}
 
 	return &Operation{
-		Connection:       conn,
-		CacheDir:         cacheDir,
-		Enr:              enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume, r.Vsock),
-		Repos:            r,
-		Services:         s,
+		Connection:      conn,
+		CacheDir:        cacheDir,
+		Enr:             enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume, r.Vsock),
+		Repos:           r,
+		Services:        s,
 		ProvisionerType: provisionerType,
 		AuditLog:        logging.NewAuditLog(),
 	}

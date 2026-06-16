@@ -139,7 +139,7 @@ type ResolvedVMCreateInput struct {
 	Provisioner      model.ProvisionerType
 	ExtraDrives      []model.DriveConfig
 	Volumes          []*model.VolumeItem
-	VsockPort        int    // vsock port (0 = disabled / no vsock)
+	VsockPort        int // vsock port (0 = disabled / no vsock)
 }
 
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.

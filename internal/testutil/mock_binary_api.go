@@ -28,7 +28,11 @@ func (m *MockBinaryAPI) BinaryPrune(ctx context.Context, dryRun bool, force bool
 	return nil, nil
 }
 
-func (m *MockBinaryAPI) BinaryPull(ctx context.Context, input inputs.BinaryPullInput, onProgress event.OnProgressCallback) ([]*model.BinaryItem, error) {
+func (m *MockBinaryAPI) BinaryPull(
+	ctx context.Context,
+	input inputs.BinaryPullInput,
+	onProgress event.OnProgressCallback,
+) ([]*model.BinaryItem, error) {
 	if m.BinaryPullFunc != nil {
 		return m.BinaryPullFunc(ctx, input, onProgress)
 	}
@@ -49,7 +53,12 @@ func (m *MockBinaryAPI) BinaryRemoveByVersion(ctx context.Context, version strin
 	return nil
 }
 
-func (m *MockBinaryAPI) BinaryList(ctx context.Context, remote bool, limit *int, onProgress event.OnProgressCallback) ([]*model.BinaryItem, []model.VersionInfo, error) {
+func (m *MockBinaryAPI) BinaryList(
+	ctx context.Context,
+	remote bool,
+	limit *int,
+	onProgress event.OnProgressCallback,
+) ([]*model.BinaryItem, []model.VersionInfo, error) {
 	if m.BinaryListFunc != nil {
 		return m.BinaryListFunc(ctx, remote, limit, onProgress)
 	}
@@ -75,4 +84,4 @@ func (m *MockBinaryAPI) BinaryEnsureDefault(ctx context.Context) (*model.BinaryI
 		return m.BinaryEnsureDefaultFunc(ctx)
 	}
 	return nil, nil
-	}
+}

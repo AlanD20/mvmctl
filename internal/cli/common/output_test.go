@@ -30,34 +30,34 @@ func TestPrettifyKey(t *testing.T) {
 		want  string
 	}{
 		// Boundary / edge cases
-		"empty_string":        {input: "", want: ""},
-		"already_exists":      {input: "already_exists", want: "Already Exists"},
-		"plain_single_word":   {input: "error", want: "Error"},
+		"empty_string":      {input: "", want: ""},
+		"already_exists":    {input: "already_exists", want: "Already Exists"},
+		"plain_single_word": {input: "error", want: "Error"},
 
 		// Happy paths — dotted keys with no underscores (dots preserved)
-		"dotted_key":          {input: "network.subnet.overlap", want: "Network.subnet.overlap"},
+		"dotted_key": {input: "network.subnet.overlap", want: "Network.subnet.overlap"},
 
 		// Happy paths — underscore keys trigger acronym prettification
 		// Note: dots are NOT replaced by prettifyKey, so "vm.not" → "VM.not"
-		"not_found_suffix":    {input: "vm.not_found", want: "VM.not Found"},
-		"id_acronym":          {input: "vm_id", want: "VM ID"},
-		"ssh_acronym":         {input: "ssh_key", want: "SSH Key"},
-		"ipv_prefix":          {input: "ipv4_address", want: "IPv4 Address"},
-		"ipv6_prefix":         {input: "ipv6_address", want: "IPv6 Address"},
-		"mac_acronym":         {input: "mac_address", want: "MAC Address"},
-		"pid_acronym":         {input: "process_pid", want: "Process PID"},
-		"uuid_acronym":        {input: "disk_uuid", want: "Disk UUID"},
-		"nat_acronym":         {input: "enable_nat", want: "Enable NAT"},
-		"tap_acronym":         {input: "tap_device", want: "TAP Device"},
-		"vm_singular":         {input: "vm_state", want: "VM State"},
-		"vms_plural":          {input: "running_vms", want: "Running VM"},
-		"cpu_singular":        {input: "cpu_count", want: "CPU Count"},
-		"cpus_plural":         {input: "num_cpus", want: "Num CPU"},
-		"kvm_acronym":         {input: "use_kvm", want: "Use KVM"},
-		"os_acronym":          {input: "host_os", want: "Host OS"},
-		"pci_acronym":         {input: "pci_device", want: "PCI Device"},
-		"tmpfs_acronym":       {input: "tmpfs_size", want: "TMPFS Size"},
-		"fs_acronym":          {input: "fs_type", want: "FS Type"},
+		"not_found_suffix": {input: "vm.not_found", want: "VM.not Found"},
+		"id_acronym":       {input: "vm_id", want: "VM ID"},
+		"ssh_acronym":      {input: "ssh_key", want: "SSH Key"},
+		"ipv_prefix":       {input: "ipv4_address", want: "IPv4 Address"},
+		"ipv6_prefix":      {input: "ipv6_address", want: "IPv6 Address"},
+		"mac_acronym":      {input: "mac_address", want: "MAC Address"},
+		"pid_acronym":      {input: "process_pid", want: "Process PID"},
+		"uuid_acronym":     {input: "disk_uuid", want: "Disk UUID"},
+		"nat_acronym":      {input: "enable_nat", want: "Enable NAT"},
+		"tap_acronym":      {input: "tap_device", want: "TAP Device"},
+		"vm_singular":      {input: "vm_state", want: "VM State"},
+		"vms_plural":       {input: "running_vms", want: "Running VM"},
+		"cpu_singular":     {input: "cpu_count", want: "CPU Count"},
+		"cpus_plural":      {input: "num_cpus", want: "Num CPU"},
+		"kvm_acronym":      {input: "use_kvm", want: "Use KVM"},
+		"os_acronym":       {input: "host_os", want: "Host OS"},
+		"pci_acronym":      {input: "pci_device", want: "PCI Device"},
+		"tmpfs_acronym":    {input: "tmpfs_size", want: "TMPFS Size"},
+		"fs_acronym":       {input: "fs_type", want: "FS Type"},
 	}
 
 	for name, tc := range tests {
@@ -81,15 +81,15 @@ func TestToTitle(t *testing.T) {
 		want  string
 	}{
 		// Boundary / edge cases
-		"empty_string":   {input: "", want: ""},
-		"single_lower":   {input: "a", want: "A"},
-		"single_upper":   {input: "A", want: "A"},
+		"empty_string": {input: "", want: ""},
+		"single_lower": {input: "a", want: "A"},
+		"single_upper": {input: "A", want: "A"},
 
 		// Happy paths
-		"two_words":      {input: "hello world", want: "Hello World"},
-		"all_upper":      {input: "HELLO", want: "HELLO"},
-		"mixed_case":     {input: "hELLO wORLD", want: "HELLO WORLD"},
-		"three_words":    {input: "one two three", want: "One Two Three"},
+		"two_words":        {input: "hello world", want: "Hello World"},
+		"all_upper":        {input: "HELLO", want: "HELLO"},
+		"mixed_case":       {input: "hELLO wORLD", want: "HELLO WORLD"},
+		"three_words":      {input: "one two three", want: "One Two Three"},
 		"collapsed_spaces": {input: "multiple   spaces", want: "Multiple Spaces"},
 	}
 
@@ -110,20 +110,32 @@ func TestToTitle(t *testing.T) {
 
 func TestParseTime(t *testing.T) {
 	tests := map[string]struct {
-		input string
-		want  time.Time
+		input  string
+		want   time.Time
 		wantOK bool
 	}{
 		// Invalid / boundary cases FIRST
-		"empty_string":             {input: "", wantOK: false},
-		"not_a_date":               {input: "not-a-date", wantOK: false},
-		"no_timezone":              {input: "2023-06-15T10:30:00", wantOK: false},
-		"rfc1123":                  {input: "Mon, 15 Jun 2023 10:30:00 GMT", wantOK: false},
+		"empty_string": {input: "", wantOK: false},
+		"not_a_date":   {input: "not-a-date", wantOK: false},
+		"no_timezone":  {input: "2023-06-15T10:30:00", wantOK: false},
+		"rfc1123":      {input: "Mon, 15 Jun 2023 10:30:00 GMT", wantOK: false},
 
 		// Valid cases
-		"rfc3339":                  {input: "2023-06-15T10:30:00Z", want: time.Date(2023, 6, 15, 10, 30, 0, 0, time.UTC), wantOK: true},
-		"rfc3339_nano":             {input: "2023-06-15T10:30:00.123456789Z", want: time.Date(2023, 6, 15, 10, 30, 0, 123456789, time.UTC), wantOK: true},
-		"rfc3339_utc_positive":     {input: "2023-06-15T12:30:00+02:00", want: time.Date(2023, 6, 15, 10, 30, 0, 0, time.UTC), wantOK: true},
+		"rfc3339": {
+			input:  "2023-06-15T10:30:00Z",
+			want:   time.Date(2023, 6, 15, 10, 30, 0, 0, time.UTC),
+			wantOK: true,
+		},
+		"rfc3339_nano": {
+			input:  "2023-06-15T10:30:00.123456789Z",
+			want:   time.Date(2023, 6, 15, 10, 30, 0, 123456789, time.UTC),
+			wantOK: true,
+		},
+		"rfc3339_utc_positive": {
+			input:  "2023-06-15T12:30:00+02:00",
+			want:   time.Date(2023, 6, 15, 10, 30, 0, 0, time.UTC),
+			wantOK: true,
+		},
 	}
 
 	for name, tc := range tests {
@@ -155,16 +167,16 @@ func TestIsNotFoundCode(t *testing.T) {
 		want  bool
 	}{
 		// False cases FIRST
-		"empty":                      {input: "", want: false},
-		"success_code":               {input: "vm.created", want: false},
-		"already_exists":             {input: "vm.already_exists", want: false},
-		"partial_suffix_no_match":    {input: "vm.not_found.extra", want: false},
-		"no_dot_prefix":              {input: "ismissing", want: false},
+		"empty":                   {input: "", want: false},
+		"success_code":            {input: "vm.created", want: false},
+		"already_exists":          {input: "vm.already_exists", want: false},
+		"partial_suffix_no_match": {input: "vm.not_found.extra", want: false},
+		"no_dot_prefix":           {input: "ismissing", want: false},
 
 		// True cases
-		"vm_not_found":               {input: errs.CodeVMNotFound, want: true},
-		"network_not_found":          {input: errs.CodeNetworkNotFound, want: true},
-		"bare_not_found":             {input: "not_found", want: true},
+		"vm_not_found":      {input: errs.CodeVMNotFound, want: true},
+		"network_not_found": {input: errs.CodeNetworkNotFound, want: true},
+		"bare_not_found":    {input: "not_found", want: true},
 	}
 
 	for name, tc := range tests {
@@ -188,14 +200,14 @@ func TestIsAlreadyExistsCode(t *testing.T) {
 		want  bool
 	}{
 		// False cases FIRST
-		"empty":                      {input: "", want: false},
-		"not_found":                  {input: "vm.not_found", want: false},
-		"partial_suffix_no_match":    {input: "vm.already_exists.extra", want: false},
+		"empty":                   {input: "", want: false},
+		"not_found":               {input: "vm.not_found", want: false},
+		"partial_suffix_no_match": {input: "vm.already_exists.extra", want: false},
 
 		// True cases
-		"vm_already_exists":          {input: errs.CodeVMAlreadyExists, want: true},
-		"network_already_exists":     {input: errs.CodeNetworkAlreadyExists, want: true},
-		"bare_already_exists":        {input: "already_exists", want: true},
+		"vm_already_exists":      {input: errs.CodeVMAlreadyExists, want: true},
+		"network_already_exists": {input: errs.CodeNetworkAlreadyExists, want: true},
+		"bare_already_exists":    {input: "already_exists", want: true},
 	}
 
 	for name, tc := range tests {
@@ -308,12 +320,12 @@ func TestFormatSize(t *testing.T) {
 		"zero":     {input: 0, want: "0 B"},
 
 		// Happy paths
-		"under_1kib":          {input: 1023, want: "1023 B"},
-		"exactly_1kib":        {input: 1024, want: "1.0 KiB"},
-		"exactly_1mib":        {input: 1 << 20, want: "1.0 MiB"},
-		"exactly_1gib":        {input: 1 << 30, want: "1.0 GiB"},
-		"exactly_1tib":        {input: int64(1) << 40, want: "1.0 TiB"},
-		"one_byte":            {input: 1, want: "1 B"},
+		"under_1kib":   {input: 1023, want: "1023 B"},
+		"exactly_1kib": {input: 1024, want: "1.0 KiB"},
+		"exactly_1mib": {input: 1 << 20, want: "1.0 MiB"},
+		"exactly_1gib": {input: 1 << 30, want: "1.0 GiB"},
+		"exactly_1tib": {input: int64(1) << 40, want: "1.0 TiB"},
+		"one_byte":     {input: 1, want: "1 B"},
 	}
 
 	for name, tc := range tests {
@@ -337,13 +349,13 @@ func TestFormatID(t *testing.T) {
 		want  string
 	}{
 		// Boundary cases FIRST
-		"empty":      {input: "", want: ""},
+		"empty":          {input: "", want: ""},
 		"shorter_than_6": {input: "ab", want: "ab"},
-		"exactly_6":  {input: "abcdef", want: "abcdef"},
+		"exactly_6":      {input: "abcdef", want: "abcdef"},
 
 		// Happy paths
-		"truncated":          {input: "abc123def456", want: "abc123"},
-		"sha256_prefix":      {input: "SHA256:abc123def456", want: "abc123"},
+		"truncated":     {input: "abc123def456", want: "abc123"},
+		"sha256_prefix": {input: "SHA256:abc123def456", want: "abc123"},
 	}
 
 	for name, tc := range tests {
@@ -501,7 +513,7 @@ func TestIsDatabaseError(t *testing.T) {
 			want:  false,
 		},
 
-		// True cases  
+		// True cases
 		"database_is_locked": {
 			input: func() error { return errors.New("database is locked") },
 			want:  true,
@@ -560,10 +572,10 @@ func TestFormatSettingValue(t *testing.T) {
 		"nil_empty_key":           {value: nil, key: "", want: "(unset)"},
 
 		// Happy paths
-		"string_value":            {value: "hello", key: "", want: "hello"},
-		"int_value":               {value: 42, key: "", want: "42"},
-		"bool_value":              {value: true, key: "", want: "true"},
-		"zero_int":                {value: 0, key: "", want: "0"},
+		"string_value": {value: "hello", key: "", want: "hello"},
+		"int_value":    {value: 42, key: "", want: "42"},
+		"bool_value":   {value: true, key: "", want: "true"},
+		"zero_int":     {value: 0, key: "", want: "0"},
 	}
 
 	for name, tc := range tests {

@@ -272,8 +272,14 @@ func (c *Client) waitForAgent(ctx context.Context) (net.Conn, error) {
 				"attempts", attempts,
 				"error", "timeout",
 			)
-			return nil, errs.New(errs.CodeVsockConnectionFailed,
-				fmt.Sprintf("vsock agent did not become reachable within %v after %d attempt(s)", c.ProbeTimeout, attempts))
+			return nil, errs.New(
+				errs.CodeVsockConnectionFailed,
+				fmt.Sprintf(
+					"vsock agent did not become reachable within %v after %d attempt(s)",
+					c.ProbeTimeout,
+					attempts,
+				),
+			)
 		}
 
 		attempts++

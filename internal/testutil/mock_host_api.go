@@ -10,21 +10,21 @@ import (
 
 // MockHostAPI implements api.HostAPI for testing.
 type MockHostAPI struct {
-	HostInitFunc              func(ctx context.Context, onProgress event.OnProgressCallback) (any, error)
-	HostGetStateFunc          func(ctx context.Context) (*model.HostStateItem, error)
-	HostDetectResourcesFunc   func(ctx context.Context) (*model.HostResources, error)
-	HostNetworkSetupFunc      func(ctx context.Context) error
-	HostInfoFunc              func(ctx context.Context) (*results.HostInfo, error)
-	HostRefreshCapacityFunc   func(ctx context.Context) (*results.HostInfo, error)
-	HostCheckKVMAccessFunc    func() bool
+	HostInitFunc                  func(ctx context.Context, onProgress event.OnProgressCallback) (any, error)
+	HostGetStateFunc              func(ctx context.Context) (*model.HostStateItem, error)
+	HostDetectResourcesFunc       func(ctx context.Context) (*model.HostResources, error)
+	HostNetworkSetupFunc          func(ctx context.Context) error
+	HostInfoFunc                  func(ctx context.Context) (*results.HostInfo, error)
+	HostRefreshCapacityFunc       func(ctx context.Context) (*results.HostInfo, error)
+	HostCheckKVMAccessFunc        func() bool
 	HostCheckRequiredBinariesFunc func() []string
-	HostGetIPForwardStatusFunc func(ctx context.Context) (string, error)
-	HostStatusCheckFunc       func(ctx context.Context) *results.HostStatusCheck
-	HostCleanFunc             func(ctx context.Context) ([]string, error)
-	HostResetFunc             func(ctx context.Context) ([]string, error)
-	HostGetRunningVMsFunc     func(ctx context.Context) ([]*model.VM, error)
-	HostIsInitializedFunc     func(ctx context.Context) bool
-	HostCheckReadinessFunc    func(ctx context.Context) *model.ProbeResult
+	HostGetIPForwardStatusFunc    func(ctx context.Context) (string, error)
+	HostStatusCheckFunc           func(ctx context.Context) *results.HostStatusCheck
+	HostCleanFunc                 func(ctx context.Context) ([]string, error)
+	HostResetFunc                 func(ctx context.Context) ([]string, error)
+	HostGetRunningVMsFunc         func(ctx context.Context) ([]*model.VM, error)
+	HostIsInitializedFunc         func(ctx context.Context) bool
+	HostCheckReadinessFunc        func(ctx context.Context) *model.ProbeResult
 }
 
 func (m *MockHostAPI) HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error) {
@@ -130,4 +130,4 @@ func (m *MockHostAPI) HostCheckReadiness(ctx context.Context) *model.ProbeResult
 		return m.HostCheckReadinessFunc(ctx)
 	}
 	return nil
-	}
+}

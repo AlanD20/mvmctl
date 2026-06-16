@@ -11,12 +11,12 @@ import (
 
 // MockVolumeAPI implements api.VolumeAPI for testing.
 type MockVolumeAPI struct {
-	VolumeListAllFunc  func(ctx context.Context) []*model.VolumeItem
-	VolumeCreateFunc   func(ctx context.Context, input inputs.VolumeCreateInput) (*model.VolumeItem, error)
-	VolumeRemoveFunc   func(ctx context.Context, input inputs.VolumeInput, force bool) *errs.BatchResult
-	VolumeInspectFunc  func(ctx context.Context, input inputs.VolumeInput) (*results.VolumeInspect, error)
-	VolumeResizeFunc   func(ctx context.Context, input inputs.VolumeCreateInput) error
-	VolumeGetFunc      func(ctx context.Context, input inputs.VolumeInput) (*model.VolumeItem, error)
+	VolumeListAllFunc func(ctx context.Context) []*model.VolumeItem
+	VolumeCreateFunc  func(ctx context.Context, input inputs.VolumeCreateInput) (*model.VolumeItem, error)
+	VolumeRemoveFunc  func(ctx context.Context, input inputs.VolumeInput, force bool) *errs.BatchResult
+	VolumeInspectFunc func(ctx context.Context, input inputs.VolumeInput) (*results.VolumeInspect, error)
+	VolumeResizeFunc  func(ctx context.Context, input inputs.VolumeCreateInput) error
+	VolumeGetFunc     func(ctx context.Context, input inputs.VolumeInput) (*model.VolumeItem, error)
 }
 
 func (m *MockVolumeAPI) VolumeListAll(ctx context.Context) []*model.VolumeItem {
@@ -59,4 +59,4 @@ func (m *MockVolumeAPI) VolumeGet(ctx context.Context, input inputs.VolumeInput)
 		return m.VolumeGetFunc(ctx, input)
 	}
 	return nil, nil
-	}
+}

@@ -1949,7 +1949,11 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 	// Retrieve vsock configuration
 	vsockItem, err := op.Repos.Vsock.GetByVMID(ctx, vmItem.ID)
 	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeVsockNotFound, fmt.Sprintf("failed to get vsock config for vm '%s'", vmItem.Name), err)
+		return nil, errs.WrapMsg(
+			errs.CodeVsockNotFound,
+			fmt.Sprintf("failed to get vsock config for vm '%s'", vmItem.Name),
+			err,
+		)
 	}
 	if vsockItem == nil {
 		return nil, errs.New(
@@ -1978,7 +1982,10 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 	// Read probe timeout from config (defaults.vm.vsock_probe_timeout in constants.go).
 	probeTimeout, err := op.Services.Config.GetDuration(ctx, "defaults.vm", "vsock_probe_timeout")
 	if err != nil || probeTimeout <= 0 {
-		return nil, errs.New(errs.CodeInternal, "vsock_probe_timeout not configured — check defaults.vm.vsock_probe_timeout")
+		return nil, errs.New(
+			errs.CodeInternal,
+			"vsock_probe_timeout not configured — check defaults.vm.vsock_probe_timeout",
+		)
 	}
 	client := vsock.NewClient(item, probeTimeout)
 	client.VmName = vmItem.Name
@@ -1987,7 +1994,11 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 	if input.Command == "" {
 		// Interactive shell session — no result returned since I/O is direct to terminal.
 		if err := client.Shell(ctx, input.User); err != nil {
-			return nil, errs.WrapMsg(errs.CodeVsockExecFailed, fmt.Sprintf("vsock shell session failed for vm '%s'", vmItem.Name), err)
+			return nil, errs.WrapMsg(
+				errs.CodeVsockExecFailed,
+				fmt.Sprintf("vsock shell session failed for vm '%s'", vmItem.Name),
+				err,
+			)
 		}
 		return nil, nil
 	}
@@ -1998,7 +2009,11 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 	}
 	result, err := client.Exec(ctx, input.Command, user, input.Timeout)
 	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeVsockExecFailed, fmt.Sprintf("vsock exec failed for vm '%s'", vmItem.Name), err)
+		return nil, errs.WrapMsg(
+			errs.CodeVsockExecFailed,
+			fmt.Sprintf("vsock exec failed for vm '%s'", vmItem.Name),
+			err,
+		)
 	}
 
 	return &results.VMExecResult{
@@ -2027,10 +2042,10 @@ type VMCreateBuilder struct {
 	resourcesCreated map[string]bool
 
 	// Vsock state (set during vmBuilderExecute, used in buildFirecrackerConfig and post-spawn)
-	vsockCID   int
-	vsockPort  int
+	vsockCID     int
+	vsockPort    int
 	vsockUDSPath string
-	vsockToken string
+	vsockToken   string
 }
 
 type cloudInitResult struct {
