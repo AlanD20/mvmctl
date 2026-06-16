@@ -3,11 +3,14 @@ package console
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"mvmctl/pkg/errs"
@@ -231,6 +234,43 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 	if err != nil {
 		return err
 	}
+
+	// ── Send initial terminal window size to relay ──
+	if f, ok := stdin.(*os.File); ok {
+		if rows, cols, err := term.GetSize(int(f.Fd())); err == nil {
+			var ws [wsHeaderSize]byte
+			copy(ws[:3], wsMagic)
+			ws[3] = wsVersion
+			binary.LittleEndian.PutUint16(ws[4:6], uint16(rows))
+			binary.LittleEndian.PutUint16(ws[6:8], uint16(cols))
+			sock.Write(ws[:]) // best-effort
+		}
+	}
+
+	// ── Watch for terminal resize (SIGWINCH) and notify relay ──
+	winchCh := make(chan os.Signal, 1)
+	signal.Notify(winchCh, syscall.SIGWINCH)
+	defer signal.Stop(winchCh)
+	go func() {
+		for {
+			select {
+			case <-winchCh:
+				if f, ok := stdin.(*os.File); ok {
+					if rows, cols, err := term.GetSize(int(f.Fd())); err == nil {
+						var ws [wsHeaderSize]byte
+						copy(ws[:3], wsMagic)
+						ws[3] = wsVersion
+						binary.LittleEndian.PutUint16(ws[4:6], uint16(rows))
+						binary.LittleEndian.PutUint16(ws[6:8], uint16(cols))
+						sock.Write(ws[:]) // best-effort
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	// ── Set terminal to raw mode (matching Python's tty.setraw()) ──
 	var oldState *term.State
 	var stdinFD int
