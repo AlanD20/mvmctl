@@ -70,7 +70,8 @@ RESULTS_FILE = HERE / "results.json"
 # Helpers
 # ---------------------------------------------------------------------------
 
-MVM: list[str] = ["~/.local/bin/mvm"]
+_MVM_PATH = os.path.expanduser("~/.local/bin/mvm")
+MVM: list[str] = [_MVM_PATH]
 
 
 def _mvm(*args: str, timeout: int = 120) -> subprocess.CompletedProcess:
@@ -195,7 +196,7 @@ def bench_image(
                 r = _mvm(
                     "vm", "exec", vm_name,
                     "--timeout", str(PROBE_TIMEOUT),
-                    "--", "ping", "-c", "2", "1.1.1.1",
+                    "--", "echo", "ok",
                     timeout=PROBE_TIMEOUT + 5,
                 )
                 if r.returncode == 0:

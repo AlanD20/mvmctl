@@ -132,3 +132,23 @@ func Timed(phase, vmName, vmID string, fn func()) {
 		"vm_id", vmID,
 	)
 }
+
+// LogTiming writes a timing entry directly to the timing log with the given
+// elapsed time and optional extra key-value pairs. No-op when timing is disabled.
+// This is the programmatic equivalent of Timed for cases where wrapping a
+// closure is not practical (e.g., per-attempt timing inside a loop).
+// Extra args follow the slog key-value pattern: "attempts", 5, "error", err.Error().
+func LogTiming(phase, vmName, vmID string, elapsedMs float64, extra ...any) {
+	if !timingEnabled {
+		return
+	}
+	logger := globalTimingLog.getLogger()
+	args := []any{
+		"phase", phase,
+		"elapsed_ms", fmt.Sprintf("%.3f", elapsedMs),
+		"vm_name", vmName,
+		"vm_id", vmID,
+	}
+	args = append(args, extra...)
+	logger.Info("", args...)
+}

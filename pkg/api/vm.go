@@ -1981,6 +1981,7 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 		return nil, errs.New(errs.CodeInternal, "vsock_probe_timeout not configured — check defaults.vm.vsock_probe_timeout")
 	}
 	client := vsock.NewClient(item, probeTimeout)
+	client.VmName = vmItem.Name
 
 	// Interactive shell or captured exec
 	if input.Command == "" {
