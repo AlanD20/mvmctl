@@ -76,14 +76,14 @@ func (rm *Relay) Stop(force bool) bool {
 
 	if force {
 		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-			slog.Warn("SIGKILL failed", "pid", pid, "error", err)
+			slog.Debug("SIGKILL failed", "pid", pid, "error", err)
 		}
 		return true
 	}
 
 	// Graceful: SIGTERM → poll → escalate
 	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		slog.Warn("SIGTERM failed", "pid", pid, "error", err)
+		slog.Debug("SIGTERM failed", "pid", pid, "error", err)
 		return true
 	}
 
@@ -95,7 +95,7 @@ func (rm *Relay) Stop(force bool) bool {
 		select {
 		case <-deadline:
 			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
-				slog.Warn("SIGKILL escalation failed", "pid", pid, "error", err)
+				slog.Debug("SIGKILL escalation failed", "pid", pid, "error", err)
 			}
 			return true
 		default:
@@ -106,10 +106,10 @@ func (rm *Relay) Stop(force bool) bool {
 
 func (rm *Relay) cleanupFiles() {
 	if err := os.Remove(rm.pidPath); err != nil && !os.IsNotExist(err) {
-		slog.Warn("Failed to remove PID file", "path", rm.pidPath, "error", err)
+		slog.Debug("Failed to remove PID file", "path", rm.pidPath, "error", err)
 	}
 	if err := os.Remove(rm.socketPath); err != nil && !os.IsNotExist(err) {
-		slog.Warn("Failed to remove socket file", "path", rm.socketPath, "error", err)
+		slog.Debug("Failed to remove socket file", "path", rm.socketPath, "error", err)
 	}
 }
 

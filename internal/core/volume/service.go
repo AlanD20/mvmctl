@@ -162,7 +162,7 @@ func (s *Service) SetVolumesState(
 			controller := &Controller{volume: vol, repo: s.repo}
 			if err := controller.Attach(ctx, *vmID); err != nil {
 				// Python: logger.warning("Failed to attach volume '%s': %s", vol.name, exc)
-				slog.Warn("Failed to attach volume", "name", vol.Name, "error", err)
+				slog.Debug("Failed to attach volume", "name", vol.Name, "error", err)
 			}
 		}
 	case model.VolumeStatusAvailable:
@@ -173,7 +173,7 @@ func (s *Service) SetVolumesState(
 			controller := &Controller{volume: vol, repo: s.repo}
 			if err := controller.Detach(ctx); err != nil {
 				// Python: logger.warning("Failed to detach volume '%s': %s", vol.name, exc)
-				slog.Warn("Failed to detach volume", "name", vol.Name, "error", err)
+				slog.Debug("Failed to detach volume", "name", vol.Name, "error", err)
 			}
 		}
 	}

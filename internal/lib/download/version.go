@@ -195,7 +195,7 @@ func (r *HttpDirVersionResolver) fetchRawContent(
 	if useCache && r.cache != nil {
 		cacheFile := r.cache.Path(url)
 		if writeErr := r.cache.Write(body, cacheFile); writeErr != nil {
-			slog.Warn("Failed to cache content", "error", writeErr)
+			slog.Debug("Failed to cache content", "error", writeErr)
 		}
 	}
 
@@ -330,7 +330,7 @@ func (r *HttpDirVersionResolver) Resolve(
 
 			downloadURL, err := infra.RenderTemplate(cfg.DownloadURL, tmplVars)
 			if err != nil {
-				slog.Warn("Failed to render download URL", "type", typeName, "error", err)
+				slog.Debug("Failed to render download URL", "type", typeName, "error", err)
 				return
 			}
 
@@ -339,7 +339,7 @@ func (r *HttpDirVersionResolver) Resolve(
 				var rendered string
 				rendered, err = infra.RenderTemplate(cfg.SHA256URL, tmplVars)
 				if err != nil {
-					slog.Warn("Failed to render sha256 URL", "type", typeName, "error", err)
+					slog.Debug("Failed to render sha256 URL", "type", typeName, "error", err)
 				} else {
 					sha256URL = rendered
 				}
@@ -427,7 +427,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 
 	html, err := r.fetchRawContent(ctx, versionsURL, useCache, ttl)
 	if err != nil {
-		slog.Warn("Failed to fetch version listing", "type", typeName, "url", versionsURL, "error", err)
+		slog.Debug("Failed to fetch version listing", "type", typeName, "url", versionsURL, "error", err)
 		result[typeName] = []model.VersionInfo{}
 		return
 	}
@@ -461,7 +461,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 
 		downloadURL, err := infra.RenderTemplate(config.DownloadURL, tmplVars)
 		if err != nil {
-			slog.Warn(
+			slog.Debug(
 				"Failed to render download URL for version",
 				"type",
 				typeName,
@@ -478,7 +478,7 @@ func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, tmplVars)
 			if err != nil {
-				slog.Warn(
+				slog.Debug(
 					"Failed to render sha256 URL for version",
 					"type",
 					typeName,
@@ -577,7 +577,7 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 
 		html, err := r.fetchRawContent(ctx, discoveryURL, useCache, ttl)
 		if err != nil {
-			slog.Warn("Failed to fetch version listing", "type", typeName, "url", discoveryURL, "error", err)
+			slog.Debug("Failed to fetch version listing", "type", typeName, "url", discoveryURL, "error", err)
 			continue
 		}
 
@@ -703,7 +703,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	ttl := max(cacheTTLSeconds, 0)
 
 	if config.ListURLTemplate == "" {
-		slog.Warn("Skipping type with missing list_url_template", "type", typeName)
+		slog.Debug("Skipping type with missing list_url_template", "type", typeName)
 		result[typeName] = []model.VersionInfo{}
 		return
 	}
@@ -725,20 +725,20 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	}
 	listURL, err := infra.RenderTemplate(config.ListURLTemplate, listVars)
 	if err != nil {
-		slog.Warn("Failed to render S3 list URL", "type", typeName, "error", err)
+		slog.Debug("Failed to render S3 list URL", "type", typeName, "error", err)
 		result[typeName] = []model.VersionInfo{}
 		return
 	}
 	xmlContent, err := r.fetchRawContent(ctx, listURL, useCache, ttl)
 	if err != nil {
-		slog.Warn("Failed to fetch S3 version listing", "type", typeName, "url", listURL, "error", err)
+		slog.Debug("Failed to fetch S3 version listing", "type", typeName, "url", listURL, "error", err)
 		result[typeName] = []model.VersionInfo{}
 		return
 	}
 
 	var bucketResult S3ListBucketResult
 	if err := xml.Unmarshal([]byte(xmlContent), &bucketResult); err != nil {
-		slog.Warn("Failed to parse S3 XML for type", "type", typeName, "error", err)
+		slog.Debug("Failed to parse S3 XML for type", "type", typeName, "error", err)
 		result[typeName] = []model.VersionInfo{}
 		return
 	}
@@ -769,7 +769,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 		if config.DownloadURL != "" {
 			downloadURL, err = infra.RenderTemplate(config.DownloadURL, downloadVars)
 			if err != nil {
-				slog.Warn(
+				slog.Debug(
 					"Failed to render download URL for version",
 					"type",
 					typeName,
@@ -789,7 +789,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 			var rendered string
 			rendered, err = infra.RenderTemplate(config.SHA256URL, downloadVars)
 			if err != nil {
-				slog.Warn(
+				slog.Debug(
 					"Failed to render sha256 URL for version",
 					"type",
 					typeName,
@@ -843,7 +843,7 @@ func (r *HttpDirVersionResolver) resolveViaFirecrackerS3(
 	if len(s3Versions) == 0 {
 		// No images found for this CI version — emit a warning and a marker
 		// entry so the type still shows in listings.
-		slog.Warn("Firecracker CI has no images", "ci_version", resolvedCIVersion, "url", listURL)
+		slog.Debug("Firecracker CI has no images", "ci_version", resolvedCIVersion, "url", listURL)
 		s3Versions = append(s3Versions, model.VersionInfo{
 			Version:     "",
 			DisplayName: fmt.Sprintf("No images for %s", resolvedCIVersion),

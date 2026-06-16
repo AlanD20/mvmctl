@@ -39,60 +39,40 @@ vm:
     nested_virt: true
     user: runner
     network: rc-net
-    key: rc-key
     image: ubuntu-noble
     kernel: rc-vmlinux
     binary: fc-16
 copy:
   - name: copy mvm
-    depends_on: ["vm:rc-vm", "key:rc-key"]
-    target: rc-vm
-    user: root
-    key: rc-key
+    depends_on: ["vm:rc-vm"]
     src: ./dist/mvm
-    dst: /root/
+    dest: rc-vm:/root/
   - name: copy firecracker tarball
-    depends_on: ["vm:rc-vm", "key:rc-key"]
-    target: rc-vm
-    user: root
-    key: rc-key
+    depends_on: ["vm:rc-vm"]
     src: ~/.cache/mvm-asset-mirror/firecracker-v1.16.0-x86_64.tgz
-    dst: /mnt/
+    dest: rc-vm:/mnt/
   - name: copy kernel
-    depends_on: ["vm:rc-vm", "key:rc-key"]
-    target: rc-vm
-    user: root
-    key: rc-key
+    depends_on: ["vm:rc-vm"]
     src: ~/.cache/mvm-asset-mirror/kernel-cache-7.0.11-eddb0bcef9946d7d.vmlinux
-    dst: /mnt/
+    dest: rc-vm:/mnt/
   - name: copy alpine image
-    depends_on: ["vm:rc-vm", "key:rc-key"]
-    target: rc-vm
-    user: root
-    key: rc-key
+    depends_on: ["vm:rc-vm"]
     src: ~/.cache/mvm-asset-mirror/aws_alpine-3.21.0-x86_64-bios-cloudinit-r0.vhd
-    dst: /mnt/
+    dest: rc-vm:/mnt/
   - name: copy ubuntu image
-    depends_on: ["vm:rc-vm", "key:rc-key"]
-    target: rc-vm
-    user: root
-    key: rc-key
+    depends_on: ["vm:rc-vm"]
     src: ~/.cache/mvm-asset-mirror/ubuntu-24.04-minimal-cloudimg-amd64-root.tar.xz
-    dst: /mnt/
+    dest: rc-vm:/mnt/
   - name: copy system tests
-    depends_on: ["vm:rc-vm", "key:rc-key"]
-    target: rc-vm
-    user: runner
-    key: rc-key
+    depends_on: ["vm:rc-vm"]
     src: ./tests/
-    dst: /home/runner/tests/
-ssh:
+    dest: rc-vm:/home/runner/tests/
+exec:
   - name: install packages
-    depends_on: ["vm:rc-vm", "key:rc-key"]
+    depends_on: ["vm:rc-vm"]
     target: rc-vm
-    key: rc-key
     user: root
-    timeout: 300
+    timeout: 120
     cmd: |
       apt-get update && \
       apt-get install -y qemu-utils net-tools python3 python3-pip python3-venv jq \
@@ -103,9 +83,8 @@ ssh:
       groupadd --force docker && usermod -aG docker runner && \
       usermod -aG kvm runner
   - name: install guestfs kernel
-    depends_on: ["vm:rc-vm", "key:rc-key"]
+    depends_on: ["vm:rc-vm"]
     target: rc-vm
-    key: rc-key
     user: root
     timeout: 120
     cmd: |
@@ -114,9 +93,8 @@ ssh:
       chmod 644 /boot/vmlinuz-* 2>/dev/null; \
       true
   - name: install mvm
-    depends_on: ["vm:rc-vm", "key:rc-key", "copy:copy mvm"]
+    depends_on: ["vm:rc-vm", "copy:copy mvm"]
     target: rc-vm
-    key: rc-key
     user: root
     timeout: 60
     cmd: |

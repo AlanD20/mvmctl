@@ -368,7 +368,7 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 	if cfg.UseCache {
 		os.MkdirAll(filepath.Dir(cachedKernelPath), infra.DirPerm)
 		if err := infra.CopyPreservingMetadata(cfg.OutputPath, cachedKernelPath); err != nil {
-			slog.Warn("Failed to cache kernel build", "error", err)
+			slog.Debug("Failed to cache kernel build", "error", err)
 		}
 		os.WriteFile(cacheMarker, []byte(cacheKey), 0644)
 	}
@@ -376,7 +376,7 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 	// Cleanup build directory
 	if !cfg.KeepBuildDir {
 		if err := os.RemoveAll(buildDir); err != nil {
-			slog.Warn("Failed to clean up build directory", "dir", buildDir, "error", err)
+			slog.Debug("Failed to clean up build directory", "dir", buildDir, "error", err)
 		} else {
 			slog.Debug("Build directory cleaned up", "dir", buildDir)
 		}

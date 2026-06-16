@@ -296,7 +296,7 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 
 		if change.Mechanism == "sysctl" && change.OriginalValue != nil {
 			if !restorableSysctl[change.Setting] {
-				slog.Warn("Skipping disallowed sysctl key from state", "key", change.Setting)
+				slog.Debug("Skipping disallowed sysctl key from state", "key", change.Setting)
 				continue
 			}
 			_, err := system.DefaultRunner.Run(
@@ -324,7 +324,7 @@ func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeIte
 			target := system.ResolvePath(change.AppliedValue)
 			allowed := slices.Contains(resolvedAllowedFiles, target)
 			if !allowed {
-				slog.Warn("Skipping disallowed file path from state", "path", target)
+				slog.Debug("Skipping disallowed file path from state", "path", target)
 				continue
 			}
 			if _, err := os.Stat(target); err == nil {

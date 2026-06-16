@@ -796,10 +796,10 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 			resolved.Network.Bridge,
 			resolved.Network.ID,
 		); tapErr != nil {
-			slog.Warn("failed to remove TAP during cleanup", "vm", builder.name, "error", tapErr)
+			slog.Debug("failed to remove TAP during cleanup", "vm", builder.name, "error", tapErr)
 		}
 		if leaseErr := op.Repos.Lease.ReleaseByVM(ctx, builder.vmID); leaseErr != nil {
-			slog.Warn("failed to release lease during cleanup", "vm", builder.name, "error", leaseErr)
+			slog.Debug("failed to release lease during cleanup", "vm", builder.name, "error", leaseErr)
 		}
 	}
 
@@ -817,7 +817,7 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 	// VM directory: remove all created files
 	if builder.wasCreated("vm_dir") && builder.vmDir != "" {
 		if rmErr := os.RemoveAll(builder.vmDir); rmErr != nil {
-			slog.Warn("failed to remove VM directory during cleanup", "vm", builder.name, "error", rmErr)
+			slog.Debug("failed to remove VM directory during cleanup", "vm", builder.name, "error", rmErr)
 		}
 	}
 }
