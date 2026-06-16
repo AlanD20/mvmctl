@@ -104,7 +104,7 @@ func Apply(
 			Resources:     resources,
 		}
 		if pErr := workflow.WriteWorkflowState(stateDir, wfState); pErr != nil {
-			slog.Warn("failed to persist workflow state", "wf_id", wfID, "step", step.Name(), "error", pErr)
+			slog.Debug("failed to persist workflow state", "wf_id", wfID, "step", step.Name(), "error", pErr)
 			return fmt.Errorf("persist workflow state after step %q: %w", step.Name(), pErr)
 		}
 		slog.Debug("workflow state persisted after step", "wf_id", wfID, "step", step.Name(), "dir", stateDir)
@@ -160,7 +160,7 @@ func Destroy(
 	for _, res := range wfState.Resources {
 		factory, ok := Registry[res.Type]
 		if !ok {
-			slog.Warn("unknown step type in saved state, skipping", "type", res.Type, "name", res.Name)
+			slog.Debug("unknown step type in saved state, skipping", "type", res.Type, "name", res.Name)
 			continue
 		}
 		// Extract the bare name from the full step name (format: "type:name").
@@ -221,7 +221,7 @@ func Destroy(
 			Resources:     resources,
 		}
 		if pErr := workflow.WriteWorkflowState(stateDir, updatedState); pErr != nil {
-			slog.Warn(
+			slog.Debug(
 				"failed to persist workflow state after destroy",
 				"wf_id",
 				wfID,
@@ -251,7 +251,7 @@ func Destroy(
 
 	// Remove the workflow state after all destroys succeed.
 	if err := workflow.RemoveWorkflowState(wfID); err != nil {
-		slog.Warn("failed to remove workflow state", "wf_id", wfID, "error", err)
+		slog.Debug("failed to remove workflow state", "wf_id", wfID, "error", err)
 	}
 
 	return nil
@@ -296,7 +296,7 @@ func List(ctx context.Context) ([]ListSummary, error) {
 		wfID := entry.Name()
 		wfState, err := workflow.ReadWorkflowState(filepath.Join(statesDir, wfID))
 		if err != nil {
-			slog.Warn("skipping unreadable workflow state", "id", wfID, "error", err)
+			slog.Debug("skipping unreadable workflow state", "id", wfID, "error", err)
 			continue
 		}
 		summary := ListSummary{

@@ -337,7 +337,7 @@ func (p *Provisioner) doDetectOS(ctx context.Context, input Op) Result {
 	// Cleanup on return
 	defer func() {
 		if err := exec.CommandContext(context.Background(), "losetup", "-d", loopDev).Run(); err != nil {
-			slog.Warn("failed to detach loop device", "device", loopDev, "error", err)
+			slog.Debug("failed to detach loop device", "device", loopDev, "error", err)
 		}
 	}()
 
@@ -360,7 +360,7 @@ func (p *Provisioner) doDetectOS(ctx context.Context, input Op) Result {
 	}
 	defer func() {
 		if err := os.RemoveAll(mountPoint); err != nil {
-			slog.Warn("failed to remove mount point", "path", mountPoint, "error", err)
+			slog.Debug("failed to remove mount point", "path", mountPoint, "error", err)
 		}
 	}()
 
@@ -373,7 +373,7 @@ func (p *Provisioner) doDetectOS(ctx context.Context, input Op) Result {
 	}
 	defer func() {
 		if err := exec.CommandContext(context.Background(), "umount", mountPoint).Run(); err != nil {
-			slog.Warn("failed to unmount", "path", mountPoint, "error", err)
+			slog.Debug("failed to unmount", "path", mountPoint, "error", err)
 		}
 	}()
 
@@ -432,7 +432,7 @@ func (p *Provisioner) doConvertFS(ctx context.Context, input Op) Result {
 	loopDev := strings.TrimSpace(string(output))
 	defer func() {
 		if err := exec.CommandContext(context.Background(), "losetup", "-d", loopDev).Run(); err != nil {
-			slog.Warn("failed to detach loop device", "device", loopDev, "error", err)
+			slog.Debug("failed to detach loop device", "device", loopDev, "error", err)
 		}
 	}()
 
@@ -498,13 +498,13 @@ func (p *Provisioner) doConvertFS(ctx context.Context, input Op) Result {
 
 	// Cleanup (unmount + detach) before replacing file
 	if err := exec.CommandContext(context.Background(), "umount", mountPoint).Run(); err != nil {
-		slog.Warn("failed to unmount during convert_fs cleanup", "path", mountPoint, "error", err)
+		slog.Debug("failed to unmount during convert_fs cleanup", "path", mountPoint, "error", err)
 	}
 	if err := os.RemoveAll(mountPoint); err != nil {
-		slog.Warn("failed to remove mount point during convert_fs cleanup", "path", mountPoint, "error", err)
+		slog.Debug("failed to remove mount point during convert_fs cleanup", "path", mountPoint, "error", err)
 	}
 	if err := exec.CommandContext(context.Background(), "losetup", "-d", loopDev).Run(); err != nil {
-		slog.Warn("failed to detach loop device during convert_fs cleanup", "device", loopDev, "error", err)
+		slog.Debug("failed to detach loop device during convert_fs cleanup", "device", loopDev, "error", err)
 	}
 
 	// Replace original with new ext4 file
@@ -536,7 +536,7 @@ func truncateImage(path string, size int64) error {
 		return fmt.Errorf("truncate: %v", err)
 	}
 	if err := f.Close(); err != nil {
-		slog.Warn("failed to close file after truncation", "path", path, "error", err)
+		slog.Debug("failed to close file after truncation", "path", path, "error", err)
 	}
 	return nil
 }
@@ -643,7 +643,7 @@ func detachLoopDevice(ctx context.Context, loopDev string) {
 	detachCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := exec.CommandContext(detachCtx, "losetup", "-d", loopDev).Run(); err != nil {
-		slog.Warn("failed to detach loop device during cleanup",
+		slog.Debug("failed to detach loop device during cleanup",
 			"device", loopDev, "error", err)
 	}
 }
@@ -1042,7 +1042,7 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 func shrinkBtrfs(ctx context.Context, mountPoint, rootPart string, targetBytes int64) (int64, error) {
 	// fstrim before shrink — matching Python (best-effort, log on error)
 	if err := exec.CommandContext(ctx, "fstrim", mountPoint).Run(); err != nil {
-		slog.Warn("fstrim before btrfs shrink failed", "mount", mountPoint, "error", err)
+		slog.Debug("fstrim before btrfs shrink failed", "mount", mountPoint, "error", err)
 	}
 
 	if targetBytes == 0 {

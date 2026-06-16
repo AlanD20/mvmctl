@@ -540,11 +540,11 @@ func autoPopulateMirror(url, srcPath string) {
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(mirrorDest), infra.DirPerm); err != nil {
-		slog.Warn("Failed to create asset mirror dir", "error", err)
+		slog.Debug("Failed to create asset mirror dir", "error", err)
 		return
 	}
 	if err := infra.CopyPreservingMetadata(srcPath, mirrorDest); err != nil {
-		slog.Warn("Failed to copy to asset mirror", "path", mirrorDest, "error", err)
+		slog.Debug("Failed to copy to asset mirror", "path", mirrorDest, "error", err)
 		return
 	}
 	slog.Info("Copied to asset mirror", "path", mirrorDest)
@@ -621,7 +621,7 @@ func (d *Downloader) GetJSON(
 
 	if useCache && d.cache != nil {
 		if writeErr := d.cache.Write(body, cacheFile); writeErr != nil {
-			slog.Warn("Failed to cache JSON response", "error", writeErr)
+			slog.Debug("Failed to cache JSON response", "error", writeErr)
 		}
 	}
 
@@ -682,7 +682,7 @@ func (d *Downloader) GetContent(
 
 	if opts.UseCache && d.cache != nil {
 		if writeErr := d.cache.Write(body, cacheFile); writeErr != nil {
-			slog.Warn("Failed to cache raw response", "error", writeErr)
+			slog.Debug("Failed to cache raw response", "error", writeErr)
 		}
 	}
 
@@ -735,7 +735,7 @@ func (d *Downloader) HeadSize(
 	if opts.UseCache && d.cache != nil {
 		cacheData := fmt.Sprintf("%d", contentLength)
 		if writeErr := d.cache.Write([]byte(cacheData), cacheFile); writeErr != nil {
-			slog.Warn("Failed to cache HEAD response", "error", writeErr)
+			slog.Debug("Failed to cache HEAD response", "error", writeErr)
 		}
 	}
 

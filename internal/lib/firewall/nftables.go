@@ -630,7 +630,7 @@ func (t *NFTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.Fi
 		if handle == nil {
 			lastError = fmt.Sprintf("Rule not found in nftables: %s in=%s out=%s",
 				string(rule.ChainName), rule.InInterface, rule.OutInterface)
-			slog.Warn("batch_remove_rules: rule not found",
+			slog.Debug("batch_remove_rules: rule not found",
 				"chain", string(rule.ChainName),
 				"in", rule.InInterface,
 				"out", rule.OutInterface,
@@ -716,10 +716,10 @@ func (t *NFTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 			comment := match[1]
 			if strings.Contains(comment, network.Name) && !dbComments[comment] {
 				orphaned++
-				slog.Warn("Orphaned nftables rule on host for network",
-					"network", network.Name,
-					"rule", cr.Text,
-				)
+			slog.Debug("Orphaned nftables rule on host for network",
+				"network", network.Name,
+				"rule", cr.Text,
+			)
 			}
 		}
 	}
@@ -775,7 +775,7 @@ func (t *NFTablesTracker) FlushChain(
 
 	deleted, err := t.repo.MarkDeletedByChain(ctx, chainName)
 	if err != nil {
-		slog.Warn("Failed to mark rules as deleted for chain",
+		slog.Debug("Failed to mark rules as deleted for chain",
 			"chain", chainName,
 			"error", err,
 		)

@@ -23,14 +23,14 @@ import (
 func configurePTY(slave *os.File) {
 	tio, err := unix.IoctlGetTermios(int(slave.Fd()), unix.TCGETS)
 	if err != nil {
-		slog.Warn("ptty: failed to get termios, using kernel defaults", "error", err)
+		slog.Debug("ptty: failed to get termios, using kernel defaults", "error", err)
 		return
 	}
 	tio.Iflag |= unix.ICRNL
 	tio.Lflag |= unix.ICANON | unix.ECHO | unix.ECHOE | unix.ISIG
 	tio.Oflag |= unix.OPOST | unix.ONLCR
 	if err := unix.IoctlSetTermios(int(slave.Fd()), unix.TCSETS, tio); err != nil {
-		slog.Warn("ptty: failed to set termios, using kernel defaults", "error", err)
+		slog.Debug("ptty: failed to set termios, using kernel defaults", "error", err)
 	}
 }
 
@@ -122,7 +122,7 @@ func handleTTY(ctx context.Context, conn net.Conn, req *execRequest) {
 	// Directly force-closes everything, bypassing the normal path.
 	go func() {
 		<-exitTimer.C
-		slog.Warn("tty: kill switch — exit timer expired, force-closing")
+		slog.Debug("tty: kill switch — exit timer expired, force-closing")
 		if cmd.Process != nil {
 			_ = cmd.Process.Kill()
 		}

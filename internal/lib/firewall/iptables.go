@@ -648,10 +648,10 @@ func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 		}
 		if comment != "" && strings.Contains(comment, network.Name) && !dbComments[comment] {
 			orphaned++
-			slog.Warn("Orphaned iptables rule on host for network",
-				"network", network.Name,
-				"rule", line,
-			)
+		slog.Debug("Orphaned iptables rule on host for network",
+			"network", network.Name,
+			"rule", line,
+		)
 		}
 	}
 
@@ -857,7 +857,7 @@ func (t *IPTablesTracker) FlushChain(
 	// Mark all rules for this chain as deleted in database
 	deleted, err := t.repo.MarkDeletedByTableChainName(ctx, chainName, table)
 	if err != nil {
-		slog.Warn("Failed to mark rules as deleted for chain",
+		slog.Debug("Failed to mark rules as deleted for chain",
 			"chain", chainNameStr,
 			"error", err,
 		)
