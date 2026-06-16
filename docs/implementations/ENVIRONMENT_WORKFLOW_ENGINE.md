@@ -387,6 +387,7 @@ var Registry = map[string]StepFactory{
     "vm":      {StepType: "vm",      FromSpec: newVMStepFromSpec,      FromState: newVMStepFromState},
     "ssh":     {StepType: "ssh",     FromSpec: newSSHStepFromSpec,     FromState: newSSHStepFromState},
     "copy":    {StepType: "copy",    FromSpec: newCopyStepFromSpec,    FromState: newCopyStepFromState},
+    "exec":    {StepType: "exec",    FromSpec: newExecStepFromSpec,    FromState: newExecStepFromState},
 }
 ```
 
@@ -407,7 +408,7 @@ All steps implement the `Step` interface. The engine treats them uniformly — i
 |----------|-----------|----------------|------------------|
 | **DB-backed** | network, key, vm | Check existence → skip or create | Remove if `WasCreated`, skip if pre-existing |
 | **Pull-based** | image, kernel, binary | Check existence → skip or pull | No-op (persist in DB) |
-| **Imperative** | ssh, copy | Always execute (no skip check) | No-op (ephemeral) |
+| **Imperative** | ssh, copy, exec | Always execute (no skip check) | No-op (ephemeral) |
 
 **Common patterns across all steps:**
 
@@ -435,9 +436,13 @@ vm:
 
 The dependency `network:default` is not duplicated — the seen-set ensures it appears once.
 
-**SSH and Copy — always re-run:**
+**SSH, Copy, and Exec — always re-run:**
 
-These are imperative steps with no existence check. Unlike DB-backed resources that check `op.Repos` and skip if exists, SSH and Copy always execute on apply. Destroy is a no-op for both.
+These are imperative steps with no existence check. Unlike DB-backed resources that check `op.Repos` and skip if exists, SSH, Copy, and Exec always execute on apply. Destroy is a no-op for all three.
+
+**Exec — command execution via vsock:**
+
+The `exec` step runs a command inside a VM via the vsock guest agent (same mechanism as `mvm vm exec`). It is fully imperative — every apply re-executes the command regardless of prior state. The vsock agent must be enabled on the target VM (default). The `cmd` field is sent to the guest agent as-is; the agent wraps it in `sh -c <command>` internally.
 
 **Copy `Dst` construction:**
 
@@ -651,6 +656,15 @@ ssh:                        # imperative — always re-run on re-apply
     depends_on:
       - vm:dev-vm
 
+exec:                       # imperative — always re-run on re-apply
+  - name: setup-app
+    target: dev-vm          # yaml: "target" maps to VMExecInput.Identifier
+    cmd: "curl -sS https://example.com/setup.sh | sh"  # yaml: "cmd"
+    user: root              # yaml: "user"
+    timeout: 30             # yaml: "timeout" in seconds
+    depends_on:
+      - vm:dev-vm
+
 copy:                       # imperative — always re-run on re-apply
   - name: deploy-binary
     target: dev-vm          # combined with dst → CPInput.Dst = "dev-vm:/opt/bin/"
@@ -673,6 +687,10 @@ copy:                       # imperative — always re-run on re-apply
 | `BinaryPullInput` | `default` | `SetDefault` | |
 | `KeyCreateInput` | `force` | `Overwrite` | |
 | `SSHInput` | `target` | `Identifier` | |
+| `VMExecInput` | `target` | `Identifier` | Target VM name/ID |
+| `VMExecInput` | `cmd` | `Command` | Command to execute |
+| `VMExecInput` | `timeout` | `Timeout` | Command timeout in seconds (0 = no timeout) |
+| `VMExecInput` | `port` | `Port` | Vsock agent port (default: 1024) |
 | `CPInput` | `src` | `Sources` | Single string auto-normalized to `[]string` |
 | `CPInput` | *(none)* | `Dst` | Built from `target` + `:` + `dst` in `FromSpec` |
 
@@ -720,6 +738,7 @@ internal/workflow/env/
     step_vm.go           # VMStep (with deduplicated Dependencies)
     step_ssh.go          # SSHStep (imperative, always re-run)
     step_copy.go         # CopyStep (imperative, always re-run)
+    step_exec.go         # ExecStep (imperative, always re-run, vsock-based)
     env_test.go          # Black-box tests (package env_test)
 
 internal/cli/
@@ -759,7 +778,7 @@ Note: `internal/lib/util/` has been removed entirely. `StateFromMap` and `Struct
 | Nil guards (s.op == nil) on every Apply() and Destroy() | ✅ |
 | Re-apply detection: Apply(ctx, state, saved) preserves WasCreated from previous state | ✅ |
 | Drift detection via SpecHash in ResourceMeta | ✅ |
-| All 8 step types (network, key, image, kernel, binary, vm, ssh, copy) | ✅ |
+| All 9 step types (network, key, image, kernel, binary, vm, ssh, copy, exec) | ✅ |
 | Step reconstruction from state for spec-less destroy | ✅ |
 | YAML tags on all input types | ✅ |
 | No Operation interface — steps use *api.Operation directly | ✅ |

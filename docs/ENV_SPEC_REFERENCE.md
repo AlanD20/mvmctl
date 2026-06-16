@@ -50,6 +50,10 @@ ssh:
   - name: <step-name>
     # ... fields
 
+exec:
+  - name: <step-name>
+    # ... fields
+
 copy:
   - name: <step-name>
     # ... fields
@@ -244,6 +248,33 @@ vm:
 
 ---
 
+### `exec`
+
+Run a command inside a VM via the vsock guest agent. **Imperative** — always
+re-runs on re-apply. Requires the VM to be created with vsock enabled (default).
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `target` | `string` | **Required** | VM name, ID prefix, IP, or MAC address. |
+| `cmd` | `string` | **Required** | Command to execute. Wrapped in `sh -c`. |
+| `user` | `string` | Config default | User to run the command as. |
+| `timeout` | `int` | `0` | Command timeout in seconds. 0 = no timeout. |
+| `port` | `int` | `1024` | Vsock agent port override. |
+
+**Example:**
+```yaml
+exec:
+  - name: setup-app
+    target: dev-vm
+    cmd: "curl -sS https://example.com/setup.sh | sh"
+    user: root
+    timeout: 30
+    depends_on:
+      - vm:dev-vm
+```
+
+---
+
 ### `ssh`
 
 Run a command on a VM via SSH. **Imperative** — always re-runs on re-apply.
@@ -271,26 +302,26 @@ ssh:
 
 ### `copy`
 
-Copy files to/from a VM. **Imperative** — always re-runs on re-apply.
+Copy files between host and VM via vsock binary frame protocol. **Imperative** — always re-runs on re-apply.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `target` | `string` | **Required** | VM name for destination (or source for vm-to-host). |
 | `src` | `string \| []string` | **Required** | Source path(s). Single string auto-normalized to list. |
-| `dst` | `string` | **Required** | Remote path. Combined with target as `"target:dst"`. |
-| `user` | `string` | VM/config default | SSH user. |
-| `key` | `string` | VM/config default | Key name or file path. |
+| `dest` | `string` | **Required** | Destination in `"vm-name:/remote/path"` format. |
 | `force` | `bool` | `false` | Force overwrite existing files. |
+
+**Destination rules** (handled by agent via `os.Stat`):
+- Trailing `/` on dest → directory mode (preserves source filename)
+- Existing directory → directory mode (preserves source filename)
+- Non-existent or file → file mode (uses exact dest path)
 
 **Example:**
 ```yaml
 copy:
   - name: deploy-binary
-    target: dev-vm
     src: ./mvm
-    dst: /opt/bin/
-    user: root
-    key: main-key
+    dest: dev-vm:/opt/bin/mvm
+    force: true
     depends_on:
       - vm:dev-vm
 ```
@@ -335,6 +366,7 @@ Steps within the same level run in parallel.
 | `kernel` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to rebuild/re-download, shared across environments |
 | `binary` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
 | `ssh` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran inside the VM) |
+| `exec` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran inside the VM via vsock) |
 | `copy` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (file was already transferred) |
 
 **Why image/kernel/binary are preserved:** These are _downloaded assets_ cached for reuse across multiple environments. Deleting them on destroy would force a re-download on the next `env apply`, which is slow and unnecessary. They are only removed when explicitly deleted via `mvm image rm`, `mvm kernel rm`, or `mvm binary rm`.
@@ -397,13 +429,19 @@ ssh:
     depends_on:
       - vm:dev-vm
 
+exec:
+  - name: bootstrap-app
+    target: dev-vm
+    cmd: "curl -sS https://example.com/bootstrap.sh | sh"
+    user: root
+    timeout: 60
+    depends_on:
+      - vm:dev-vm
+
 copy:
   - name: deploy-binary
-    target: dev-vm
     src: ./mvm
-    dst: /opt/bin/
-    user: root
-    key: main-key
+    dest: dev-vm:/opt/bin/mvm
     depends_on:
       - vm:dev-vm
 ```

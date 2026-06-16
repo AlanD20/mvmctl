@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/dustin/go-humanize"
+
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
@@ -198,6 +200,15 @@ func isDatabaseError(err error) bool {
 
 func formatUnexpected(err error) string {
 	return err.Error()
+}
+
+// FormatSpeed formats bytes-per-second as a human-readable transfer speed
+// using go-humanize (e.g. "5.2 MiB/s").
+func FormatSpeed(bytesPerSec float64) string {
+	if bytesPerSec < 1 {
+		return "0 B/s"
+	}
+	return humanize.Bytes(uint64(bytesPerSec)) + "/s"
 }
 
 // SudoResult carries the outcome of a sudo subprocess.

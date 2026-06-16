@@ -176,6 +176,13 @@ const DBFilePerm = 0640
 const ExecutablePerm = 0755
 const ShadowPerm = 0640
 
+// ── Copy direction constants ──
+const (
+	DirectionHostToVM = "host_to_vm"
+	DirectionVMToHost = "vm_to_host"
+	DirectionVMToVM   = "vm_to_vm"
+)
+
 // ── Firecracker architecture support ──
 var FirecrackerSupportedArches = []string{"x86_64", "amd64", "aarch64", "arm64"}
 

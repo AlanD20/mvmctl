@@ -34,8 +34,6 @@ func TestNewCpCmd(t *testing.T) {
 		name      string
 		shorthand string
 	}{
-		{name: "user", shorthand: "u"},
-		{name: "key", shorthand: ""},
 		{name: "force", shorthand: "f"},
 	}
 

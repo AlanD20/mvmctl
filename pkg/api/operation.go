@@ -16,7 +16,6 @@ import (
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/network"
-	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/core/vsock"
@@ -69,7 +68,6 @@ type Services struct {
 	Key     *key.Service
 	Volume  *volume.Service
 	Cache   *cache.Service
-	CP      *ssh.CPService
 	Vsock   *vsock.Service
 }
 type RequiredService struct {
@@ -111,7 +109,6 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Config:  config.NewService(r.Config, configReg),
 		Volume:  volume.NewService(r.Volume),
 		Cache:   cache.NewService(cacheDir, infra.GetTempDir()),
-		CP:      ssh.NewCPService(),
 		Vsock:   vsock.NewService(r.Vsock),
 	}
 	// Enforce that all required services are non-nil — fail fast at startup.

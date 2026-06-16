@@ -24,6 +24,13 @@ const (
 	responseTypeStderr = "stderr"
 )
 
+// File-transfer request/response types.
+const (
+	requestTypeFileTransfer = "file-transfer"
+	responseTypeFTReady     = "ft-ready"
+	ftBufferSize            = 262144
+)
+
 // execRequest is a JSON frame received from the host agent.
 type execRequest struct {
 	ID      string            `json:"id"`

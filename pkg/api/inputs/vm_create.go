@@ -66,7 +66,6 @@ type VMCreateInput struct {
 	Atomic                bool           `json:"atomic"                             yaml:"atomic"`
 	Volumes               []string       `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
 	VsockPort             *int           `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
-	NoVsock               bool           `json:"no_vsock"                           yaml:"no_vsock"`
 }
 
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().
@@ -566,9 +565,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	nocloudKillAfter, _ := r.cfg.GetDuration(ctx, "defaults.cloudinit", "nocloud_kill_after")
 
 	vsockPort := 0
-	if r.input.NoVsock {
-		vsockPort = 0
-	} else if r.input.VsockPort != nil && *r.input.VsockPort > 0 {
+	if r.input.VsockPort != nil && *r.input.VsockPort > 0 {
 		vsockPort = *r.input.VsockPort
 	} else {
 		vsockPort, _ = r.cfg.GetInt(ctx, "defaults.vm", "vsock_port")

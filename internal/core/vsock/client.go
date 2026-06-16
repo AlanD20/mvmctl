@@ -138,6 +138,9 @@ func (c *Client) Shell(ctx context.Context, user string) error {
 		Type:  "exec-tty",
 		Token: c.item.Token,
 		User:  user,
+		Env: map[string]string{
+			"TERM": os.Getenv("TERM"),
+		},
 	}
 
 	if err := sendFrame(conn, req); err != nil {
