@@ -85,7 +85,9 @@ func newEnvApplyCmd(envAPI api.API) *cobra.Command {
 					}
 				}
 				if specPath == "" {
-					return fmt.Errorf("no spec file specified and neither mvmctl.yaml nor mvmctl.yml found in current directory")
+					return fmt.Errorf(
+						"no spec file specified and neither mvmctl.yaml nor mvmctl.yml found in current directory",
+					)
 				}
 			}
 
@@ -231,7 +233,9 @@ apply (not created by the workflow) are left intact.`,
 					}
 				}
 				if ident == "" {
-					return fmt.Errorf("missing required argument: workflow-id or spec-path (and neither mvmctl.yaml nor mvmctl.yml found in current directory)")
+					return fmt.Errorf(
+						"missing required argument: workflow-id or spec-path (and neither mvmctl.yaml nor mvmctl.yml found in current directory)",
+					)
 				}
 			}
 

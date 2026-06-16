@@ -699,6 +699,3 @@ relayLoop:
 		"bytes", result.Bytes)
 	return result, nil
 }
-
-
-

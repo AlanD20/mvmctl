@@ -267,9 +267,9 @@ func TestHandleConnection_Auth(t *testing.T) {
 	tests := map[string]struct {
 		agentToken string
 		req        execRequest
-		wantType   string   // expected type of the last frame (error/pong/result)
-		wantErr    string   // expected error substring (empty = no error expected)
-		wantStdout string   // expected accumulated stdout for exec commands
+		wantType   string // expected type of the last frame (error/pong/result)
+		wantErr    string // expected error substring (empty = no error expected)
+		wantStdout string // expected accumulated stdout for exec commands
 	}{
 		"mismatched_token_rejected": {
 			agentToken: "secret",
@@ -753,8 +753,11 @@ func TestReadFrame_Robustness(t *testing.T) {
 		},
 		// Happy path — large payload (10MB).
 		"large_payload": {
-			input:   `{"id":"1","type":"exec","command":"echo","data":"` + strings.Repeat("a", 10*1024*1024) + `"}` + "\n",
-			want:    &execRequest{ID: "1", Type: "exec", Command: "echo"},
+			input: `{"id":"1","type":"exec","command":"echo","data":"` + strings.Repeat(
+				"a",
+				10*1024*1024,
+			) + `"}` + "\n",
+			want: &execRequest{ID: "1", Type: "exec", Command: "echo"},
 		},
 	}
 

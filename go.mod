@@ -3,6 +3,7 @@ module mvmctl
 go 1.26.3
 
 require (
+	github.com/dustin/go-humanize v1.0.1
 	github.com/google/go-cmp v0.6.0
 	github.com/jedib0t/go-pretty/v6 v6.7.10
 	github.com/jmoiron/sqlx v1.4.0
@@ -20,7 +21,6 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

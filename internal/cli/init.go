@@ -37,7 +37,12 @@ func NewInitCmd(initAPI api.InitAPI, hostAPI api.HostAPI) *cobra.Command {
 }
 
 // runInitWizard drives the init wizard, handling sudo and download prompts.
-func runInitWizard(ctx context.Context, initAPI api.InitAPI, hostAPI api.HostAPI, nonInteractive, skipHost, skipNetwork bool) error {
+func runInitWizard(
+	ctx context.Context,
+	initAPI api.InitAPI,
+	hostAPI api.HostAPI,
+	nonInteractive, skipHost, skipNetwork bool,
+) error {
 	// Match Python: mvm_cli.info("")
 	common.Cli.Info("")
 	// Match Python: mvm_cli.info(f"{CLI_NAME} init — first-time setup")

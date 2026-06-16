@@ -11,17 +11,17 @@ import (
 
 // MockCacheAPI implements api.CacheAPI for testing.
 type MockCacheAPI struct {
-	CacheCheckPrivilegesFunc  func(binary string, operation string) error
-	CacheSessionHasGroupFunc  func() bool
-	CacheInitAllFunc          func(ctx context.Context, onProgress event.OnProgressCallback) (*results.CacheInitResult, error)
-	CachePruneVMsFunc         func(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult
-	CachePruneNetworksFunc    func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	CachePruneImagesFunc      func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	CachePruneKernelsFunc     func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	CachePruneBinariesFunc    func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	CachePruneMiscFunc        func(ctx context.Context, dryRun bool) (map[string]any, error)
-	CachePruneAllFunc         func(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error)
-	CacheCleanFunc            func(ctx context.Context, dryRun bool) (*model.CleanResult, error)
+	CacheCheckPrivilegesFunc func(binary string, operation string) error
+	CacheSessionHasGroupFunc func() bool
+	CacheInitAllFunc         func(ctx context.Context, onProgress event.OnProgressCallback) (*results.CacheInitResult, error)
+	CachePruneVMsFunc        func(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult
+	CachePruneNetworksFunc   func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	CachePruneImagesFunc     func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	CachePruneKernelsFunc    func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	CachePruneBinariesFunc   func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	CachePruneMiscFunc       func(ctx context.Context, dryRun bool) (map[string]any, error)
+	CachePruneAllFunc        func(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error)
+	CacheCleanFunc           func(ctx context.Context, dryRun bool) (*model.CleanResult, error)
 }
 
 func (m *MockCacheAPI) CacheCheckPrivileges(binary string, operation string) error {
@@ -38,7 +38,10 @@ func (m *MockCacheAPI) CacheSessionHasGroup() bool {
 	return false
 }
 
-func (m *MockCacheAPI) CacheInitAll(ctx context.Context, onProgress event.OnProgressCallback) (*results.CacheInitResult, error) {
+func (m *MockCacheAPI) CacheInitAll(
+	ctx context.Context,
+	onProgress event.OnProgressCallback,
+) (*results.CacheInitResult, error) {
 	if m.CacheInitAllFunc != nil {
 		return m.CacheInitAllFunc(ctx, onProgress)
 	}
@@ -99,4 +102,4 @@ func (m *MockCacheAPI) CacheClean(ctx context.Context, dryRun bool) (*model.Clea
 		return m.CacheCleanFunc(ctx, dryRun)
 	}
 	return nil, nil
-	}
+}

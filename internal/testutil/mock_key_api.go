@@ -11,15 +11,15 @@ import (
 
 // MockKeyAPI implements api.KeyAPI for testing.
 type MockKeyAPI struct {
-	KeyListAllFunc      func(ctx context.Context) ([]*model.SSHKeyItem, error)
-	KeyGetFunc          func(ctx context.Context, input inputs.KeyInput) (*model.SSHKeyItem, error)
-	KeyCreateFunc       func(ctx context.Context, input inputs.KeyCreateInput) (*model.SSHKeyItem, error)
-	KeyImportFunc       func(ctx context.Context, input inputs.KeyImportInput) (*model.SSHKeyItem, error)
-	KeyRemoveFunc       func(ctx context.Context, input inputs.KeyInput, force bool) *errs.BatchResult
-	KeyInspectFunc      func(ctx context.Context, input inputs.KeyInput) (*results.KeyInspect, error)
-	KeyExportFunc       func(ctx context.Context, input inputs.KeyInput, destination string, overwrite bool) ([]string, error)
-	KeySetDefaultsFunc  func(ctx context.Context, input inputs.KeyInput) error
-	KeyGetDefaultsFunc  func(ctx context.Context) ([]*model.SSHKeyItem, error)
+	KeyListAllFunc       func(ctx context.Context) ([]*model.SSHKeyItem, error)
+	KeyGetFunc           func(ctx context.Context, input inputs.KeyInput) (*model.SSHKeyItem, error)
+	KeyCreateFunc        func(ctx context.Context, input inputs.KeyCreateInput) (*model.SSHKeyItem, error)
+	KeyImportFunc        func(ctx context.Context, input inputs.KeyImportInput) (*model.SSHKeyItem, error)
+	KeyRemoveFunc        func(ctx context.Context, input inputs.KeyInput, force bool) *errs.BatchResult
+	KeyInspectFunc       func(ctx context.Context, input inputs.KeyInput) (*results.KeyInspect, error)
+	KeyExportFunc        func(ctx context.Context, input inputs.KeyInput, destination string, overwrite bool) ([]string, error)
+	KeySetDefaultsFunc   func(ctx context.Context, input inputs.KeyInput) error
+	KeyGetDefaultsFunc   func(ctx context.Context) ([]*model.SSHKeyItem, error)
 	KeyClearDefaultsFunc func(ctx context.Context) error
 }
 
@@ -65,7 +65,12 @@ func (m *MockKeyAPI) KeyInspect(ctx context.Context, input inputs.KeyInput) (*re
 	return nil, nil
 }
 
-func (m *MockKeyAPI) KeyExport(ctx context.Context, input inputs.KeyInput, destination string, overwrite bool) ([]string, error) {
+func (m *MockKeyAPI) KeyExport(
+	ctx context.Context,
+	input inputs.KeyInput,
+	destination string,
+	overwrite bool,
+) ([]string, error) {
 	if m.KeyExportFunc != nil {
 		return m.KeyExportFunc(ctx, input, destination, overwrite)
 	}
@@ -91,4 +96,4 @@ func (m *MockKeyAPI) KeyClearDefaults(ctx context.Context) error {
 		return m.KeyClearDefaultsFunc(ctx)
 	}
 	return nil
-	}
+}

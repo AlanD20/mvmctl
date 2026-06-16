@@ -30,16 +30,44 @@ func (m *MockInitAPI) InitSetupHost(ctx context.Context) error {
 	return nil
 }
 
-func (m *MockInitAPI) InitRun(ctx context.Context, skipHost bool, skipNetwork bool, nonInteractive bool, sudoCompleted bool, downloadVersion string, onProgress event.OnProgressCallback) *results.InitResult {
+func (m *MockInitAPI) InitRun(
+	ctx context.Context,
+	skipHost bool,
+	skipNetwork bool,
+	nonInteractive bool,
+	sudoCompleted bool,
+	downloadVersion string,
+	onProgress event.OnProgressCallback,
+) *results.InitResult {
 	if m.InitRunFunc != nil {
 		return m.InitRunFunc(ctx, skipHost, skipNetwork, nonInteractive, sudoCompleted, downloadVersion, onProgress)
 	}
 	return nil
 }
 
-func (m *MockInitAPI) InitRunFull(ctx context.Context, skipHost bool, skipNetwork bool, nonInteractive bool, sudoCompleted bool, hostSetupMessage string, downloadVersion string, guestfsEnabled *bool, onProgress event.OnProgressCallback) *results.InitResult {
+func (m *MockInitAPI) InitRunFull(
+	ctx context.Context,
+	skipHost bool,
+	skipNetwork bool,
+	nonInteractive bool,
+	sudoCompleted bool,
+	hostSetupMessage string,
+	downloadVersion string,
+	guestfsEnabled *bool,
+	onProgress event.OnProgressCallback,
+) *results.InitResult {
 	if m.InitRunFullFunc != nil {
-		return m.InitRunFullFunc(ctx, skipHost, skipNetwork, nonInteractive, sudoCompleted, hostSetupMessage, downloadVersion, guestfsEnabled, onProgress)
+		return m.InitRunFullFunc(
+			ctx,
+			skipHost,
+			skipNetwork,
+			nonInteractive,
+			sudoCompleted,
+			hostSetupMessage,
+			downloadVersion,
+			guestfsEnabled,
+			onProgress,
+		)
 	}
 	return nil
 }

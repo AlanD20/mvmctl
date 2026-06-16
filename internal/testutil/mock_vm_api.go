@@ -12,25 +12,29 @@ import (
 
 // MockVMAPI implements api.VMAPI for testing.
 type MockVMAPI struct {
-	VMCreateFunc         func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VM, error)
-	VMRemoveFunc         func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMPruneFunc          func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	VMListFunc           func(ctx context.Context, statuses ...string) []*model.VM
-	VMGetFunc            func(ctx context.Context, input inputs.VMInput) (*model.VM, error)
-	VMInspectFunc        func(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error)
-	VMStartFunc          func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMStopFunc           func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMRebootFunc         func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMPauseFunc          func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMResumeFunc         func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMSnapshotFunc       func(ctx context.Context, input inputs.VMInput, memFile string, stateFile string) error
-	VMLoadFunc           func(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool) error
-	VMAttachVolumeFunc   func(ctx context.Context, input inputs.VMInput, volumeName string) error
-	VMDetachVolumeFunc   func(ctx context.Context, input inputs.VMInput, volumeName string) error
-	VMExecFunc           func(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
+	VMCreateFunc       func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VM, error)
+	VMRemoveFunc       func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMPruneFunc        func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	VMListFunc         func(ctx context.Context, statuses ...string) []*model.VM
+	VMGetFunc          func(ctx context.Context, input inputs.VMInput) (*model.VM, error)
+	VMInspectFunc      func(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error)
+	VMStartFunc        func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMStopFunc         func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMRebootFunc       func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMPauseFunc        func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMResumeFunc       func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMSnapshotFunc     func(ctx context.Context, input inputs.VMInput, memFile string, stateFile string) error
+	VMLoadFunc         func(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool) error
+	VMAttachVolumeFunc func(ctx context.Context, input inputs.VMInput, volumeName string) error
+	VMDetachVolumeFunc func(ctx context.Context, input inputs.VMInput, volumeName string) error
+	VMExecFunc         func(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
 }
 
-func (m *MockVMAPI) VMCreate(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VM, error) {
+func (m *MockVMAPI) VMCreate(
+	ctx context.Context,
+	input inputs.VMCreateInput,
+	onProgress event.OnProgressCallback,
+) ([]*model.VM, error) {
 	if m.VMCreateFunc != nil {
 		return m.VMCreateFunc(ctx, input, onProgress)
 	}
@@ -114,7 +118,13 @@ func (m *MockVMAPI) VMSnapshot(ctx context.Context, input inputs.VMInput, memFil
 	return nil
 }
 
-func (m *MockVMAPI) VMLoad(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool) error {
+func (m *MockVMAPI) VMLoad(
+	ctx context.Context,
+	input inputs.VMInput,
+	memFile string,
+	stateFile string,
+	resume bool,
+) error {
 	if m.VMLoadFunc != nil {
 		return m.VMLoadFunc(ctx, input, memFile, stateFile, resume)
 	}

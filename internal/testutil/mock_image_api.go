@@ -12,14 +12,14 @@ import (
 
 // MockImageAPI implements api.ImageAPI for testing.
 type MockImageAPI struct {
-	ImagePruneFunc     func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	ImagePullFunc      func(ctx context.Context, input inputs.ImagePullInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
-	ImageImportFunc    func(ctx context.Context, input inputs.ImageImportInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
-	ImageWarmFunc      func(ctx context.Context, input inputs.ImageInput, all bool, onProgress event.OnProgressCallback) ([]string, error)
-	ImageRemoveFunc    func(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult
-	ImageListAllFunc   func(ctx context.Context, remote bool, typeFilter string, noCache bool, onProgress event.OnProgressCallback) ([]*model.ImageItem, []model.VersionInfo, error)
-	ImageGetFunc       func(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error)
-	ImageInspectFunc   func(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error)
+	ImagePruneFunc      func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	ImagePullFunc       func(ctx context.Context, input inputs.ImagePullInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
+	ImageImportFunc     func(ctx context.Context, input inputs.ImageImportInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
+	ImageWarmFunc       func(ctx context.Context, input inputs.ImageInput, all bool, onProgress event.OnProgressCallback) ([]string, error)
+	ImageRemoveFunc     func(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult
+	ImageListAllFunc    func(ctx context.Context, remote bool, typeFilter string, noCache bool, onProgress event.OnProgressCallback) ([]*model.ImageItem, []model.VersionInfo, error)
+	ImageGetFunc        func(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error)
+	ImageInspectFunc    func(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error)
 	ImageSetDefaultFunc func(ctx context.Context, input inputs.ImageInput) error
 }
 
@@ -30,21 +30,34 @@ func (m *MockImageAPI) ImagePrune(ctx context.Context, dryRun bool, includeAll b
 	return nil, nil
 }
 
-func (m *MockImageAPI) ImagePull(ctx context.Context, input inputs.ImagePullInput, onProgress event.OnProgressCallback) (*model.ImageItem, error) {
+func (m *MockImageAPI) ImagePull(
+	ctx context.Context,
+	input inputs.ImagePullInput,
+	onProgress event.OnProgressCallback,
+) (*model.ImageItem, error) {
 	if m.ImagePullFunc != nil {
 		return m.ImagePullFunc(ctx, input, onProgress)
 	}
 	return nil, nil
 }
 
-func (m *MockImageAPI) ImageImport(ctx context.Context, input inputs.ImageImportInput, onProgress event.OnProgressCallback) (*model.ImageItem, error) {
+func (m *MockImageAPI) ImageImport(
+	ctx context.Context,
+	input inputs.ImageImportInput,
+	onProgress event.OnProgressCallback,
+) (*model.ImageItem, error) {
 	if m.ImageImportFunc != nil {
 		return m.ImageImportFunc(ctx, input, onProgress)
 	}
 	return nil, nil
 }
 
-func (m *MockImageAPI) ImageWarm(ctx context.Context, input inputs.ImageInput, all bool, onProgress event.OnProgressCallback) ([]string, error) {
+func (m *MockImageAPI) ImageWarm(
+	ctx context.Context,
+	input inputs.ImageInput,
+	all bool,
+	onProgress event.OnProgressCallback,
+) ([]string, error) {
 	if m.ImageWarmFunc != nil {
 		return m.ImageWarmFunc(ctx, input, all, onProgress)
 	}
@@ -58,7 +71,13 @@ func (m *MockImageAPI) ImageRemove(ctx context.Context, input inputs.ImageInput,
 	return nil
 }
 
-func (m *MockImageAPI) ImageListAll(ctx context.Context, remote bool, typeFilter string, noCache bool, onProgress event.OnProgressCallback) ([]*model.ImageItem, []model.VersionInfo, error) {
+func (m *MockImageAPI) ImageListAll(
+	ctx context.Context,
+	remote bool,
+	typeFilter string,
+	noCache bool,
+	onProgress event.OnProgressCallback,
+) ([]*model.ImageItem, []model.VersionInfo, error) {
 	if m.ImageListAllFunc != nil {
 		return m.ImageListAllFunc(ctx, remote, typeFilter, noCache, onProgress)
 	}
@@ -84,4 +103,4 @@ func (m *MockImageAPI) ImageSetDefault(ctx context.Context, input inputs.ImageIn
 		return m.ImageSetDefaultFunc(ctx, input)
 	}
 	return nil
-	}
+}

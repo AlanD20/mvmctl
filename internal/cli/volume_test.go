@@ -155,7 +155,12 @@ func TestNewVolumeCreateCmd(t *testing.T) {
 			VolumeCreateFunc: func(ctx context.Context, input inputs.VolumeCreateInput) (*model.VolumeItem, error) {
 				assert.Equal(t, "my-vol", input.Name)
 				assert.Equal(t, "10G", input.Size)
-				return &model.VolumeItem{ID: "vol-1", Name: "my-vol", SizeBytes: 10737418240, Status: model.VolumeStatusAvailable}, nil
+				return &model.VolumeItem{
+					ID:        "vol-1",
+					Name:      "my-vol",
+					SizeBytes: 10737418240,
+					Status:    model.VolumeStatusAvailable,
+				}, nil
 			},
 		}
 		cmd := cli.NewVolumeCmd(mock, nil)
@@ -171,7 +176,12 @@ func TestNewVolumeCreateCmd(t *testing.T) {
 				if input.Format != nil {
 					assert.Equal(t, "qcow2", *input.Format)
 				}
-				return &model.VolumeItem{ID: "vol-1", Name: "my-vol", SizeBytes: 10737418240, Status: model.VolumeStatusAvailable}, nil
+				return &model.VolumeItem{
+					ID:        "vol-1",
+					Name:      "my-vol",
+					SizeBytes: 10737418240,
+					Status:    model.VolumeStatusAvailable,
+				}, nil
 			},
 		}
 		cmd := cli.NewVolumeCmd(mock, nil)

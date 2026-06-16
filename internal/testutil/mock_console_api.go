@@ -23,7 +23,10 @@ func (m *MockConsoleAPI) ConsoleGetState(ctx context.Context, identifier string)
 	return nil, nil
 }
 
-func (m *MockConsoleAPI) ConsoleGetConnectionInfo(ctx context.Context, identifier string) (*model.ConsoleConnectionInfo, error) {
+func (m *MockConsoleAPI) ConsoleGetConnectionInfo(
+	ctx context.Context,
+	identifier string,
+) (*model.ConsoleConnectionInfo, error) {
 	if m.ConsoleGetConnectionInfoFunc != nil {
 		return m.ConsoleGetConnectionInfoFunc(ctx, identifier)
 	}
@@ -37,9 +40,14 @@ func (m *MockConsoleAPI) ConsoleKill(ctx context.Context, identifier string) err
 	return nil
 }
 
-func (m *MockConsoleAPI) ConsoleAttachConsole(ctx context.Context, socketPath string, stdin io.Reader, stdout io.Writer) error {
+func (m *MockConsoleAPI) ConsoleAttachConsole(
+	ctx context.Context,
+	socketPath string,
+	stdin io.Reader,
+	stdout io.Writer,
+) error {
 	if m.ConsoleAttachConsoleFunc != nil {
 		return m.ConsoleAttachConsoleFunc(ctx, socketPath, stdin, stdout)
 	}
 	return nil
-	}
+}

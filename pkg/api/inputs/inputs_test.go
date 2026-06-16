@@ -28,18 +28,22 @@ func TestParseVMPath(t *testing.T) {
 		wantPath string
 	}{
 		// Error / edge cases (colon not found means path-only)
-		"no colon":                  {input: "plainpath", wantVM: "", wantPath: "plainpath"},
-		"empty string":              {input: "", wantVM: "", wantPath: ""},
-		"empty vm identifier":       {input: ":/remote/path", wantVM: "", wantPath: "/remote/path"},
-		"empty path after colon":    {input: "vmname:", wantVM: "vmname", wantPath: ""},
+		"no colon":               {input: "plainpath", wantVM: "", wantPath: "plainpath"},
+		"empty string":           {input: "", wantVM: "", wantPath: ""},
+		"empty vm identifier":    {input: ":/remote/path", wantVM: "", wantPath: "/remote/path"},
+		"empty path after colon": {input: "vmname:", wantVM: "vmname", wantPath: ""},
 
 		// Happy paths
 		"vm colon absolute path":    {input: "my-vm:/etc/hosts", wantVM: "my-vm", wantPath: "/etc/hosts"},
 		"path with multiple colons": {input: "vm:/path:with:colons", wantVM: "vm", wantPath: "/path:with:colons"},
 		"root path":                 {input: "vm:/", wantVM: "vm", wantPath: "/"},
 		"vm with dots":              {input: "my.vm.name:/data/file", wantVM: "my.vm.name", wantPath: "/data/file"},
-		"vm with hyphens":           {input: "test-vm-42:/var/log/syslog", wantVM: "test-vm-42", wantPath: "/var/log/syslog"},
-		"relative path":             {input: "vm:relative/path", wantVM: "vm", wantPath: "relative/path"},
+		"vm with hyphens": {
+			input:    "test-vm-42:/var/log/syslog",
+			wantVM:   "test-vm-42",
+			wantPath: "/var/log/syslog",
+		},
+		"relative path": {input: "vm:relative/path", wantVM: "vm", wantPath: "relative/path"},
 	}
 
 	for name, tc := range tests {
@@ -66,19 +70,22 @@ func TestResolveDisabledDetectors(t *testing.T) {
 	allInternal := sortedValues(CLI_TO_INTERNAL_DETECTOR)
 
 	tests := map[string]struct {
-		input     []string
-		want      []string
-		wantErr   string
+		input   []string
+		want    []string
+		wantErr string
 	}{
 		// Error paths first
-		"unknown detector name":           {input: []string{"nonexistent"}, wantErr: "Unknown detector"},
-		"mix of valid and invalid":        {input: []string{"type", "bogus"}, wantErr: "Unknown detector"},
+		"unknown detector name":    {input: []string{"nonexistent"}, wantErr: "Unknown detector"},
+		"mix of valid and invalid": {input: []string{"type", "bogus"}, wantErr: "Unknown detector"},
 
 		// Happy paths
-		"empty list":                      {input: []string{}, want: nil},
-		"single valid detector":           {input: []string{"type"}, want: []string{"type_code"}},
-		"multiple valid detectors":        {input: []string{"type", "label", "size"}, want: []string{"type_code", "label", "size"}},
-		"identity mapping for filesystem": {input: []string{"filesystem"}, want: []string{"filesystem"}},
+		"empty list":            {input: []string{}, want: nil},
+		"single valid detector": {input: []string{"type"}, want: []string{"type_code"}},
+		"multiple valid detectors": {
+			input: []string{"type", "label", "size"},
+			want:  []string{"type_code", "label", "size"},
+		},
+		"identity mapping for filesystem":  {input: []string{"filesystem"}, want: []string{"filesystem"}},
 		"all shortcut disables everything": {input: []string{"all"}, want: allInternal},
 	}
 
@@ -137,18 +144,18 @@ func TestParseKernelFilename(t *testing.T) {
 		wantArch string
 	}{
 		// Edge cases
-		"empty filename":           {input: "", wantVer: "-", wantArch: "-"},
-		"no arch no version":       {input: "vmlinux", wantVer: "-", wantArch: "-"},
-		"only arch no version":     {input: "vmlinux-x86_64", wantVer: "-", wantArch: "x86_64"},
-		"only version no arch":     {input: "vmlinux-6.1", wantVer: "6.1", wantArch: "-"},
+		"empty filename":       {input: "", wantVer: "-", wantArch: "-"},
+		"no arch no version":   {input: "vmlinux", wantVer: "-", wantArch: "-"},
+		"only arch no version": {input: "vmlinux-x86_64", wantVer: "-", wantArch: "x86_64"},
+		"only version no arch": {input: "vmlinux-6.1", wantVer: "6.1", wantArch: "-"},
 
 		// Happy paths
-		"full semver with arch":    {input: "vmlinux-6.1.0-x86_64", wantVer: "6.1.0", wantArch: "x86_64"},
-		"two-part version":         {input: "vmlinux-5.10-arm64", wantVer: "5.10", wantArch: "arm64"},
-		"v prefix stripped":        {input: "vmlinux-v6.1.0-arm64", wantVer: "6.1.0", wantArch: "arm64"},
-		"amd64 arch":               {input: "vmlinux-5.15.3-amd64", wantVer: "5.15.3", wantArch: "amd64"},
-		"aarch64 arch":             {input: "bzImage-5.4-aarch64", wantVer: "5.4", wantArch: "aarch64"},
-		"rc version suffix":        {input: "vmlinux-5.15.0-rc3-arm64", wantVer: "5.15.0", wantArch: "arm64"},
+		"full semver with arch": {input: "vmlinux-6.1.0-x86_64", wantVer: "6.1.0", wantArch: "x86_64"},
+		"two-part version":      {input: "vmlinux-5.10-arm64", wantVer: "5.10", wantArch: "arm64"},
+		"v prefix stripped":     {input: "vmlinux-v6.1.0-arm64", wantVer: "6.1.0", wantArch: "arm64"},
+		"amd64 arch":            {input: "vmlinux-5.15.3-amd64", wantVer: "5.15.3", wantArch: "amd64"},
+		"aarch64 arch":          {input: "bzImage-5.4-aarch64", wantVer: "5.4", wantArch: "aarch64"},
+		"rc version suffix":     {input: "vmlinux-5.15.0-rc3-arm64", wantVer: "5.15.0", wantArch: "arm64"},
 	}
 
 	for name, tc := range tests {
@@ -171,11 +178,11 @@ func TestParseKernelFilename(t *testing.T) {
 
 func TestResolveLogType(t *testing.T) {
 	tests := map[string]struct {
-		osLog  bool
-		want   string
+		osLog bool
+		want  string
 	}{
-		"os log enabled":    {osLog: true, want: "os"},
-		"boot log default":  {osLog: false, want: "boot"},
+		"os log enabled":   {osLog: true, want: "os"},
+		"boot log default": {osLog: false, want: "boot"},
 	}
 
 	for name, tc := range tests {
@@ -197,9 +204,9 @@ func TestResolveLogType(t *testing.T) {
 
 func TestKeyCreateRequest_Resolve(t *testing.T) {
 	tests := map[string]struct {
-		input    KeyCreateInput
-		want     *ResolvedKeyCreateInput
-		wantErr  string
+		input   KeyCreateInput
+		want    *ResolvedKeyCreateInput
+		wantErr string
 	}{
 		// Error paths first
 		"empty name": {
@@ -284,8 +291,8 @@ func intPtr(v int) *int { return &v }
 
 func TestBinaryPullRequest_ensureValidate(t *testing.T) {
 	tests := map[string]struct {
-		result   *ResolvedBinaryPullInput
-		wantErr  string
+		result  *ResolvedBinaryPullInput
+		wantErr string
 	}{
 		// Error paths first
 		"nil result": {
@@ -303,13 +310,13 @@ func TestBinaryPullRequest_ensureValidate(t *testing.T) {
 
 		// Happy paths
 		"firecracker type passes": {
-			result:  &ResolvedBinaryPullInput{Type: "firecracker"},
+			result: &ResolvedBinaryPullInput{Type: "firecracker"},
 		},
 		"firecracker type mixed case": {
-			result:  &ResolvedBinaryPullInput{Type: "Firecracker"},
+			result: &ResolvedBinaryPullInput{Type: "Firecracker"},
 		},
 		"git ref skips type validation": {
-			result:  &ResolvedBinaryPullInput{Type: "firecracker", GitRef: strPtr("main")},
+			result: &ResolvedBinaryPullInput{Type: "firecracker", GitRef: strPtr("main")},
 		},
 	}
 
@@ -337,14 +344,14 @@ func strPtr(s string) *string { return &s }
 
 func TestVMCreateEnsureValidate_VCPURange(t *testing.T) {
 	tests := map[string]struct {
-		vcpu     int
-		wantErr  string
+		vcpu    int
+		wantErr string
 	}{
 		// Error paths — out of range (checked before I/O, no deps needed)
-		"zero vcpu":                     {vcpu: 0, wantErr: "Invalid vcpus"},
-		"negative vcpu":                 {vcpu: -1, wantErr: "Invalid vcpus"},
-		"below minimum by one":          {vcpu: infra.VCPUMin - 1, wantErr: "Invalid vcpus"},
-		"above maximum by one":          {vcpu: infra.VCPUMax + 1, wantErr: "Invalid vcpus"},
+		"zero vcpu":            {vcpu: 0, wantErr: "Invalid vcpus"},
+		"negative vcpu":        {vcpu: -1, wantErr: "Invalid vcpus"},
+		"below minimum by one": {vcpu: infra.VCPUMin - 1, wantErr: "Invalid vcpus"},
+		"above maximum by one": {vcpu: infra.VCPUMax + 1, wantErr: "Invalid vcpus"},
 	}
 
 	for name, tc := range tests {
@@ -379,14 +386,14 @@ func TestVMCreateEnsureValidate_VCPURange(t *testing.T) {
 
 func TestVMCreateEnsureValidate_MemoryRange(t *testing.T) {
 	tests := map[string]struct {
-		memMib   int
-		wantErr  string
+		memMib  int
+		wantErr string
 	}{
 		// Error paths — out of range (checked before I/O, no deps needed)
-		"zero memory":                   {memMib: 0, wantErr: "Invalid mem_size_mib"},
-		"below minimum by one":          {memMib: infra.MemMinMB - 1, wantErr: "Invalid mem_size_mib"},
-		"above maximum by one":          {memMib: infra.MemMaxMB + 1, wantErr: "Invalid mem_size_mib"},
-		"negative memory":               {memMib: -1, wantErr: "Invalid mem_size_mib"},
+		"zero memory":          {memMib: 0, wantErr: "Invalid mem_size_mib"},
+		"below minimum by one": {memMib: infra.MemMinMB - 1, wantErr: "Invalid mem_size_mib"},
+		"above maximum by one": {memMib: infra.MemMaxMB + 1, wantErr: "Invalid mem_size_mib"},
+		"negative memory":      {memMib: -1, wantErr: "Invalid mem_size_mib"},
 	}
 
 	for name, tc := range tests {
@@ -423,15 +430,15 @@ func TestVMCreateEnsureValidate_MemoryRange(t *testing.T) {
 
 func TestNetworkCreateEnsureValidate_Name(t *testing.T) {
 	tests := map[string]struct {
-		name     string
-		wantErr  string
+		name    string
+		wantErr string
 	}{
 		// Error paths (checked before I/O — no deps needed for these)
-		"empty name":                    {name: "", wantErr: "invalid network name"},
-		"name with dots":                {name: "my.network", wantErr: "invalid network name"},
-		"name starting with hyphen":     {name: "-mynet", wantErr: "invalid network name"},
-		"name with uppercase":           {name: "MyNet", wantErr: "invalid network name"},
-		"reserved interface name":       {name: "eth0", wantErr: "invalid network name"},
+		"empty name":                {name: "", wantErr: "invalid network name"},
+		"name with dots":            {name: "my.network", wantErr: "invalid network name"},
+		"name starting with hyphen": {name: "-mynet", wantErr: "invalid network name"},
+		"name with uppercase":       {name: "MyNet", wantErr: "invalid network name"},
+		"reserved interface name":   {name: "eth0", wantErr: "invalid network name"},
 	}
 
 	for name, tc := range tests {
@@ -469,15 +476,15 @@ func TestNetworkCreateEnsureValidate_Name(t *testing.T) {
 
 func TestNetworkCreateEnsureValidate_Subnet(t *testing.T) {
 	tests := map[string]struct {
-		subnet   string
-		wantErr  string
+		subnet  string
+		wantErr string
 	}{
 		// Error paths (checked before I/O — no deps needed for these)
-		"empty subnet":                  {subnet: "", wantErr: "invalid subnet"},
-		"not a CIDR":                    {subnet: "not-a-cidr", wantErr: "invalid subnet"},
-		"missing prefix":                {subnet: "10.0.0.0", wantErr: "invalid subnet"},
-		"ipv6 only":                     {subnet: "::1/128", wantErr: "IPv4"},
-		"prefix too large":              {subnet: "10.0.0.0/33", wantErr: "invalid subnet"},
+		"empty subnet":     {subnet: "", wantErr: "invalid subnet"},
+		"not a CIDR":       {subnet: "not-a-cidr", wantErr: "invalid subnet"},
+		"missing prefix":   {subnet: "10.0.0.0", wantErr: "invalid subnet"},
+		"ipv6 only":        {subnet: "::1/128", wantErr: "IPv4"},
+		"prefix too large": {subnet: "10.0.0.0/33", wantErr: "invalid subnet"},
 	}
 
 	for name, tc := range tests {
@@ -516,16 +523,16 @@ func TestNetworkCreateEnsureValidate_Subnet(t *testing.T) {
 
 func TestNetworkCreateEnsureValidate_Gateway(t *testing.T) {
 	tests := map[string]struct {
-		gateway  string
-		subnet   string
-		wantErr  string
+		gateway string
+		subnet  string
+		wantErr string
 	}{
 		// Error paths (checked before I/O — no deps needed for these)
-		"empty gateway":                 {gateway: "", subnet: "10.0.0.0/24", wantErr: "invalid gateway"},
-		"not an IP":                     {gateway: "not-an-ip", subnet: "10.0.0.0/24", wantErr: "invalid gateway"},
-		"public IP":                     {gateway: "1.2.3.4", subnet: "10.0.0.0/24", wantErr: "private"},
-		"outside subnet":                {gateway: "10.0.1.1", subnet: "10.0.0.0/24", wantErr: "not within subnet"},
-		"network address":               {gateway: "10.0.0.0", subnet: "10.0.0.0/24", wantErr: "network address"},
+		"empty gateway":   {gateway: "", subnet: "10.0.0.0/24", wantErr: "invalid gateway"},
+		"not an IP":       {gateway: "not-an-ip", subnet: "10.0.0.0/24", wantErr: "invalid gateway"},
+		"public IP":       {gateway: "1.2.3.4", subnet: "10.0.0.0/24", wantErr: "private"},
+		"outside subnet":  {gateway: "10.0.1.1", subnet: "10.0.0.0/24", wantErr: "not within subnet"},
+		"network address": {gateway: "10.0.0.0", subnet: "10.0.0.0/24", wantErr: "network address"},
 	}
 
 	for name, tc := range tests {

@@ -471,7 +471,7 @@ func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 // steps (e.g. VM) correctly declare their network dependency.
 
 func TestFromSpec_NetworkStep_Dependencies(t *testing.T) {
-		t.Run("no_depends_on_returns_nil", func(t *testing.T) {
+	t.Run("no_depends_on_returns_nil", func(t *testing.T) {
 		spec := map[string]any{"name": "test-net", "subnet": "10.0.0.0/24"}
 		dummyOp := &api.Operation{}
 		step, err := envpkg.Registry["network"].FromSpec("network", "test-net", spec, dummyOp)

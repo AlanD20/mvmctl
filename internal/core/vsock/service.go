@@ -40,7 +40,13 @@ func (s *Service) AllocateCID() (int, error) {
 // PersistConfig creates a vsock configuration record for a VM using the given CID.
 // If the Upsert fails (e.g. unique constraint collision on guest_cid), it retries
 // with a fresh random CID up to maxCIDRetries times.
-func (s *Service) PersistConfig(ctx context.Context, cid int, vmID, vmName, udsPath string, port int, token string) error {
+func (s *Service) PersistConfig(
+	ctx context.Context,
+	cid int,
+	vmID, vmName, udsPath string,
+	port int,
+	token string,
+) error {
 	const maxCIDRetries = 5
 
 	item := &model.VsockConfigItem{

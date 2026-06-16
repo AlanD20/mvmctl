@@ -92,10 +92,10 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 // VMExecInput holds the input for executing a command inside a VM via vsock.
 type VMExecInput struct {
 	Identifier string `json:"target"            yaml:"target"`
-	Command    string `json:"command,omitempty"    yaml:"cmd,omitempty"` // empty = interactive shell
-	User       string `json:"user"                 yaml:"user"`
-	Timeout    int    `json:"timeout"              yaml:"timeout"`
-	Port       int    `json:"port"                 yaml:"port"`
+	Command    string `json:"command,omitempty" yaml:"cmd,omitempty"` // empty = interactive shell
+	User       string `json:"user"              yaml:"user"`
+	Timeout    int    `json:"timeout"           yaml:"timeout"`
+	Port       int    `json:"port"              yaml:"port"`
 }
 
 // validateIdentifiers validates each identifier based on detected type.

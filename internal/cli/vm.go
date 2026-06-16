@@ -784,8 +784,8 @@ Arguments:
 
 func newVMExecCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "exec <identifier> [-- <command>...]",
-		Short:             "Execute a command inside a VM via vsock agent",
+		Use:   "exec <identifier> [-- <command>...]",
+		Short: "Execute a command inside a VM via vsock agent",
 		Long: `Execute a command inside a VM via the vsock guest agent.
 
 If no command is provided, starts an interactive shell session.
@@ -813,10 +813,10 @@ Examples:
 
 			input := inputs.VMExecInput{
 				Identifier: args[0],
-				Command:     command,
-				Port:        port,
-				Timeout:     timeout,
-				User:        user,
+				Command:    command,
+				Port:       port,
+				Timeout:    timeout,
+				User:       user,
 			}
 
 			result, err := vmAPI.VMExec(c.Context(), input)

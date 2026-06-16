@@ -716,10 +716,10 @@ func (t *NFTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 			comment := match[1]
 			if strings.Contains(comment, network.Name) && !dbComments[comment] {
 				orphaned++
-			slog.Debug("Orphaned nftables rule on host for network",
-				"network", network.Name,
-				"rule", cr.Text,
-			)
+				slog.Debug("Orphaned nftables rule on host for network",
+					"network", network.Name,
+					"rule", cr.Text,
+				)
 			}
 		}
 	}

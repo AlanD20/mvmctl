@@ -12,13 +12,13 @@ import (
 
 // MockKernelAPI implements api.KernelAPI for testing.
 type MockKernelAPI struct {
-	KernelPruneFunc     func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	KernelPullFunc      func(ctx context.Context, input inputs.KernelPullInput, onProgress event.OnProgressCallback) (*model.KernelItem, error)
-	KernelImportFunc    func(ctx context.Context, input inputs.KernelImportInput) (*model.KernelItem, error)
-	KernelRemoveFunc    func(ctx context.Context, input inputs.KernelInput) *errs.BatchResult
-	KernelListFunc      func(ctx context.Context, remote bool, noCache bool, onProgress event.OnProgressCallback) ([]*model.KernelItem, []model.VersionInfo, error)
-	KernelGetFunc       func(ctx context.Context, identifier string) (*model.KernelItem, error)
-	KernelInspectFunc   func(ctx context.Context, identifier string) (*results.KernelInspect, error)
+	KernelPruneFunc      func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	KernelPullFunc       func(ctx context.Context, input inputs.KernelPullInput, onProgress event.OnProgressCallback) (*model.KernelItem, error)
+	KernelImportFunc     func(ctx context.Context, input inputs.KernelImportInput) (*model.KernelItem, error)
+	KernelRemoveFunc     func(ctx context.Context, input inputs.KernelInput) *errs.BatchResult
+	KernelListFunc       func(ctx context.Context, remote bool, noCache bool, onProgress event.OnProgressCallback) ([]*model.KernelItem, []model.VersionInfo, error)
+	KernelGetFunc        func(ctx context.Context, identifier string) (*model.KernelItem, error)
+	KernelInspectFunc    func(ctx context.Context, identifier string) (*results.KernelInspect, error)
 	KernelSetDefaultFunc func(ctx context.Context, identifier string) error
 }
 
@@ -29,7 +29,11 @@ func (m *MockKernelAPI) KernelPrune(ctx context.Context, dryRun bool, includeAll
 	return nil, nil
 }
 
-func (m *MockKernelAPI) KernelPull(ctx context.Context, input inputs.KernelPullInput, onProgress event.OnProgressCallback) (*model.KernelItem, error) {
+func (m *MockKernelAPI) KernelPull(
+	ctx context.Context,
+	input inputs.KernelPullInput,
+	onProgress event.OnProgressCallback,
+) (*model.KernelItem, error) {
 	if m.KernelPullFunc != nil {
 		return m.KernelPullFunc(ctx, input, onProgress)
 	}
@@ -50,7 +54,12 @@ func (m *MockKernelAPI) KernelRemove(ctx context.Context, input inputs.KernelInp
 	return nil
 }
 
-func (m *MockKernelAPI) KernelList(ctx context.Context, remote bool, noCache bool, onProgress event.OnProgressCallback) ([]*model.KernelItem, []model.VersionInfo, error) {
+func (m *MockKernelAPI) KernelList(
+	ctx context.Context,
+	remote bool,
+	noCache bool,
+	onProgress event.OnProgressCallback,
+) ([]*model.KernelItem, []model.VersionInfo, error) {
 	if m.KernelListFunc != nil {
 		return m.KernelListFunc(ctx, remote, noCache, onProgress)
 	}
@@ -76,4 +85,4 @@ func (m *MockKernelAPI) KernelSetDefault(ctx context.Context, identifier string)
 		return m.KernelSetDefaultFunc(ctx, identifier)
 	}
 	return nil
-	}
+}

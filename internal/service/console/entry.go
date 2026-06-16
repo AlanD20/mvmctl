@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"mvmctl/internal/infra"
+
 	"golang.org/x/sys/unix"
 )
 
@@ -28,9 +29,9 @@ const (
 
 	// Wire protocol constants for the console relay control header.
 	// First 8 bytes of every connection: magic(3) + version(1) + rows(2) + cols(2).
-	wsMagic       = "MVM" // 3-byte magic identifier
-	wsVersion              = byte(1) // current protocol version
-	wsHeaderSize           = 8 // total control header bytes
+	wsMagic      = "MVM"   // 3-byte magic identifier
+	wsVersion    = byte(1) // current protocol version
+	wsHeaderSize = 8       // total control header bytes
 )
 
 // Config holds configuration for the console relay subprocess.

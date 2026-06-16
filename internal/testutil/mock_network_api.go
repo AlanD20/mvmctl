@@ -10,15 +10,15 @@ import (
 
 // MockNetworkAPI implements api.NetworkAPI for testing.
 type MockNetworkAPI struct {
-	NetworkCreateFunc            func(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error)
-	NetworkRemoveFunc            func(ctx context.Context, input inputs.NetworkInput, force bool) error
-	NetworkListAllFunc           func(ctx context.Context) ([]*model.Network, error)
-	NetworkGetFunc               func(ctx context.Context, input inputs.NetworkInput) (*model.Network, error)
-	NetworkToJSONFunc            func(networks []*model.Network) []map[string]any
-	NetworkInspectFunc           func(ctx context.Context, input inputs.NetworkInput) (*results.NetworkInspect, error)
-	NetworkSetDefaultFunc        func(ctx context.Context, input inputs.NetworkInput) error
-	NetworkSyncFunc              func(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error)
-	NetworkPruneFunc             func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	NetworkCreateFunc               func(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error)
+	NetworkRemoveFunc               func(ctx context.Context, input inputs.NetworkInput, force bool) error
+	NetworkListAllFunc              func(ctx context.Context) ([]*model.Network, error)
+	NetworkGetFunc                  func(ctx context.Context, input inputs.NetworkInput) (*model.Network, error)
+	NetworkToJSONFunc               func(networks []*model.Network) []map[string]any
+	NetworkInspectFunc              func(ctx context.Context, input inputs.NetworkInput) (*results.NetworkInspect, error)
+	NetworkSetDefaultFunc           func(ctx context.Context, input inputs.NetworkInput) error
+	NetworkSyncFunc                 func(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error)
+	NetworkPruneFunc                func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
 	NetworkCreateDefaultNetworkFunc func(ctx context.Context) (*model.Network, error)
 }
 
@@ -57,7 +57,10 @@ func (m *MockNetworkAPI) NetworkToJSON(networks []*model.Network) []map[string]a
 	return nil
 }
 
-func (m *MockNetworkAPI) NetworkInspect(ctx context.Context, input inputs.NetworkInput) (*results.NetworkInspect, error) {
+func (m *MockNetworkAPI) NetworkInspect(
+	ctx context.Context,
+	input inputs.NetworkInput,
+) (*results.NetworkInspect, error) {
 	if m.NetworkInspectFunc != nil {
 		return m.NetworkInspectFunc(ctx, input)
 	}
@@ -71,7 +74,10 @@ func (m *MockNetworkAPI) NetworkSetDefault(ctx context.Context, input inputs.Net
 	return nil
 }
 
-func (m *MockNetworkAPI) NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error) {
+func (m *MockNetworkAPI) NetworkSync(
+	ctx context.Context,
+	input inputs.NetworkInput,
+) (map[string]map[string]int, error) {
 	if m.NetworkSyncFunc != nil {
 		return m.NetworkSyncFunc(ctx, input)
 	}
@@ -90,4 +96,4 @@ func (m *MockNetworkAPI) NetworkCreateDefaultNetwork(ctx context.Context) (*mode
 		return m.NetworkCreateDefaultNetworkFunc(ctx)
 	}
 	return nil, nil
-	}
+}

@@ -17,4 +17,4 @@ func (m *MockSSHAPI) SSHConnect(ctx context.Context, input inputs.SSHInput, onPr
 		return m.SSHConnectFunc(ctx, input, onProgress)
 	}
 	return nil
-	}
+}

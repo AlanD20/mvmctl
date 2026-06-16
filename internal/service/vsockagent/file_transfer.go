@@ -560,5 +560,3 @@ func handleFTPull(ctx context.Context, conn net.Conn, pullPayload []byte) {
 
 	slog.Info("ft: pull complete", "path", pull.Path, "bytes", sentBytes)
 }
-
-

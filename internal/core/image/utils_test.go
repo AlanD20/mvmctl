@@ -30,13 +30,19 @@ func TestCalculateMinimumImageSizeMB(t *testing.T) {
 		// Edge cases first — boundaries around the minimum threshold
 		"zero_bytes_returns_minimum":    {contentBytes: 0, want: MinRootfsSizeMiB},
 		"small_content_returns_minimum": {contentBytes: 50 * MiB, want: MinRootfsSizeMiB},
-		"just_below_threshold":          {contentBytes: 102 * MiB, want: MinRootfsSizeMiB}, // 102*1.25=127.5→int=127 < 128
-		"at_exact_threshold":            {contentBytes: 103 * MiB, want: 128},               // 103*1.25=128.75→int=128 ≥ 128
+		"just_below_threshold": {
+			contentBytes: 102 * MiB,
+			want:         MinRootfsSizeMiB,
+		}, // 102*1.25=127.5→int=127 < 128
+		"at_exact_threshold": {
+			contentBytes: 103 * MiB,
+			want:         128,
+		}, // 103*1.25=128.75→int=128 ≥ 128
 
 		// Happy paths — calculated headroom above minimum
-		"moderate_content":              {contentBytes: 200 * MiB, want: 250},   // 200*1.25=250
-		"large_content":                 {contentBytes: 1024 * MiB, want: 1280}, // 1024*1.25=1280
-		"single_mebibyte":               {contentBytes: MiB, want: MinRootfsSizeMiB},
+		"moderate_content": {contentBytes: 200 * MiB, want: 250},   // 200*1.25=250
+		"large_content":    {contentBytes: 1024 * MiB, want: 1280}, // 1024*1.25=1280
+		"single_mebibyte":  {contentBytes: MiB, want: MinRootfsSizeMiB},
 	}
 
 	for name, tc := range tests {
@@ -196,13 +202,13 @@ func TestResolveConfigName(t *testing.T) {
 		want     string
 	}{
 		// Edge cases first
-		"nonexistent_type":    {typeName: "nonexistent", want: ""},
-		"empty_type_name":     {typeName: "", want: ""},
+		"nonexistent_type":     {typeName: "nonexistent", want: ""},
+		"empty_type_name":      {typeName: "", want: ""},
 		"type_with_empty_name": {typeName: "alpine", want: ""},
 
 		// Happy paths
-		"existing_type":       {typeName: "ubuntu", want: "Ubuntu LTS"},
-		"second_type":         {typeName: "debian", want: "Debian"},
+		"existing_type": {typeName: "ubuntu", want: "Ubuntu LTS"},
+		"second_type":   {typeName: "debian", want: "Debian"},
 	}
 
 	for name, tc := range tests {

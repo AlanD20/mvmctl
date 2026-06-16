@@ -168,7 +168,12 @@ func TestNewKeyCreateCmd(t *testing.T) {
 			KeyCreateFunc: func(ctx context.Context, input inputs.KeyCreateInput) (*model.SSHKeyItem, error) {
 				assert.Equal(t, "my-key", input.Name)
 				assert.Equal(t, "ed25519", input.Algorithm)
-				return &model.SSHKeyItem{ID: "key-1", Name: "my-key", Fingerprint: "SHA256:abc", Algorithm: "ed25519"}, nil
+				return &model.SSHKeyItem{
+					ID:          "key-1",
+					Name:        "my-key",
+					Fingerprint: "SHA256:abc",
+					Algorithm:   "ed25519",
+				}, nil
 			},
 		}
 		cmd := cli.NewKeyCmd(mock, nil)

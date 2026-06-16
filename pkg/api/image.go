@@ -29,11 +29,30 @@ import (
 // ImageAPI defines the public interface for image operations.
 type ImageAPI interface {
 	ImagePrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	ImagePull(ctx context.Context, input inputs.ImagePullInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
-	ImageImport(ctx context.Context, input inputs.ImageImportInput, onProgress event.OnProgressCallback) (*model.ImageItem, error)
-	ImageWarm(ctx context.Context, input inputs.ImageInput, all bool, onProgress event.OnProgressCallback) ([]string, error)
+	ImagePull(
+		ctx context.Context,
+		input inputs.ImagePullInput,
+		onProgress event.OnProgressCallback,
+	) (*model.ImageItem, error)
+	ImageImport(
+		ctx context.Context,
+		input inputs.ImageImportInput,
+		onProgress event.OnProgressCallback,
+	) (*model.ImageItem, error)
+	ImageWarm(
+		ctx context.Context,
+		input inputs.ImageInput,
+		all bool,
+		onProgress event.OnProgressCallback,
+	) ([]string, error)
 	ImageRemove(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult
-	ImageListAll(ctx context.Context, remote bool, typeFilter string, noCache bool, onProgress event.OnProgressCallback) ([]*model.ImageItem, []model.VersionInfo, error)
+	ImageListAll(
+		ctx context.Context,
+		remote bool,
+		typeFilter string,
+		noCache bool,
+		onProgress event.OnProgressCallback,
+	) ([]*model.ImageItem, []model.VersionInfo, error)
 	ImageGet(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error)
 	ImageInspect(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error)
 	ImageSetDefault(ctx context.Context, input inputs.ImageInput) error

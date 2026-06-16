@@ -95,5 +95,3 @@ Multiple sources require a directory destination (trailing "/").`,
 
 	return cmd
 }
-
-
