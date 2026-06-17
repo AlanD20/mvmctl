@@ -21,8 +21,12 @@ verbatim. Any deviation must be flagged and approved.
 6. [Pattern 4: Error-Path-First Table](#6-pattern-4-error-path-first-table)
 7. [Iron Rules (Violation = Rejected)](#7-iron-rules-violation--rejected)
 8. [What to Assert — And What NOT to Assert](#8-what-to-assert--and-what-not-to-assert)
-9. [File Structure Template](#9-file-structure-template)
-10. [Verification Checklist](#10-verification-checklist)
+9. [How to Derive Expected Values — The Three-Source Rule](#8a-how-to-derive-expected-values--the-three-source-rule)
+10. [File Structure Template](#9-file-structure-template)
+11. [Verification Checklist](#10-verification-checklist)
+12. [Mandatory Blind Adversarial Review](#11-mandatory-blind-adversarial-review)
+13. [Appendix: Examples of Worthless Tests (DO NOT WRITE THESE)](#appendix-examples-of-worthless-tests-do-not-write-these)
+14. [Appendix: Example of a GOOD Trustworthy Test](#appendix-example-of-a-good-trustworthy-test)
 
 ---
 
@@ -470,6 +474,212 @@ REQUIRED:
 Flat loops hide which case failed. Subtests enable `-run` filtering and
 isolate failures (one failure doesn't stop the rest).
 
+### R10: Expected values from contract, not implementation
+
+The expected value in every assertion must be independently derivable
+from the function's documented contract — NOT from its current
+implementation body.
+
+**Circular test injection:** If the test expected values were obtained
+by running the function under test and copying its output, the test is
+circular. It will pass even if the function is buggy, because the
+expected value was derived from the same buggy code.
+
+DETECTION: If you remove the function body and return a zero value,
+would the test fail? Yes? Good. But there's a more subtle variant:
+
+```
+// SUBTLE CIRCULAR: setup() returns both (input, want) and the agent
+// fills want from the function's output. The values are NOT zero,
+// they're "correct" — but only because they match the current
+// (possibly buggy) implementation.
+func setup(t *testing.T) ([]string, []fileEntry) {
+    dir := t.TempDir()
+    f := filepath.Join(dir, "a.txt")
+    os.WriteFile(f, []byte("a"), 0644)
+    return []string{dir}, []fileEntry{
+        {absPath: f, relativePath: "a.txt"},  // ← copied from buggy output
+    }
+}
+```
+
+This test would pass with buggy code because the expected value WAS
+the buggy output. The SURVIVAL check ("delete function body → fail?")
+passes because zero values don't match `"a.txt"`. But the test is
+still worthless — it only proves the function is consistent with
+itself.
+
+PREVENTION: Ask THREE questions before every expected value:
+
+1. **Where did this value come from?** If the answer is "the function's
+   output when I ran it", delete it and derive from contract instead.
+
+2. **Could I compute this value from the test inputs without calling
+   the function?** If yes, compute it inline. If no, your test is
+   under-specified (you don't know what correct behavior looks like).
+
+3. **Does a contract comment explain why this value is correct?**
+   If a reviewer can't tell why `"a.txt"` is the expected value
+   (vs `"tests/a.txt"` or `"./a.txt"`), add a contract comment.
+
+PRACTICE: Prefer computing expected values from test inputs rather
+than hardcoding them:
+
+```go
+// CONTRACT: expandSources of a directory produces
+// relativePath = <source_basename>/<walk_rel>.
+// Source dir is "mydir", file is "mydir/a.txt".
+// Expected: relativePath = "mydir/a.txt".
+wantRel := filepath.Base(dir) + "/" + "a.txt"
+```
+
+This is harder for the agent to get wrong because the contract rule
+is written down and the expected value is computed by a different
+expression than the function under test.
+
+### R0: Mandatory SURVIVAL — every test must fail when the function is gutted
+
+The SURVIVAL property from Section 1 is non-negotiable.
+
+Take the function under test, delete its body, and return zero values
+(zero, nil, empty struct, empty slice). If ANY test case still passes,
+that test case is worthless and must be removed or rewritten before the
+test file can be committed.
+
+This applies to EVERY table row and EVERY subtest — not just the test
+function as a whole. A table with 5 rows where 4 survive the gutted
+function is still defective.
+
+```
+FORBIDDEN:
+    // Function:  func Sum(a, b int) int { return a + b }
+    // Test row:  {a: 1, b: 2, want: 3}
+    // Gutted:    func Sum(a, b int) int { return 0 }
+    //
+    // SURVIVAL: 0 != 3 → PASS (dies on gutted function) ✓
+
+    // Function:  func GetName(u *User) string { return u.Name }
+    // Test row:  {input: &User{Name: "alice"}, want: "alice"}
+    // Gutted:    func GetName(u *User) string { var s string; return s }
+    //
+    // SURVIVAL: "" != "alice" → PASS (dies on gutted function) ✓
+
+    // Function:  func Validate(s string) error
+    // Test row:  {input: "", wantErr: "empty"}
+    // Gutted:    func Validate(s string) error { return nil }
+    //
+    // SURVIVAL: nil != error → PASS (dies on gutted function) ✓
+
+WORTHLESS (survives gutted function):
+    // Function:  func Exists(path string) bool { return fileExists(path) }
+    // Test row:  {input: "/tmp/exists.txt", want: true}
+    // Gutted:    func Exists(path string) bool { return true }
+    //
+    // SURVIVAL: true == true → FAIL (test passes with gutted function)
+    // The test doesn't prove Exists works — it just proves that
+    // returning true is accepted. Gutting to `return false` would
+    // fix survival but expose that no real file check happens.
+
+    // Function:  func ToUpper(s string) string { return strings.ToUpper(s) }
+    // Test row:  {input: "a", want: "A"}
+    // But the test uses `assert.Equal(t, want, want)` — tautology.
+    // Gutted function returns "" — but the assertion compares want
+    // to want, not to got. Test never fails.
+```
+
+DETECTION: Before submitting, mentally inline each assertion. Replace
+the function body with `return zero`. If the assertion passes, delete
+the test or strengthen the assertion until it fails.
+
+### R11: The Mirror Test — every write must be read back
+
+If the function under test writes, creates, or mutates data, the test
+must read back the result and verify it byte-for-byte or field-for-field.
+"Error is nil" or "file exists" is NOT sufficient verification.
+
+```
+FORBIDDEN — only checks error, never reads the written file:
+    err := os.WriteFile(path, data, 0644)
+    require.NoError(t, err)
+    // File could be empty, truncated, or corrupted.
+    // The test would never know.
+
+FORBIDDEN — only checks existence, not content:
+    err := repo.Upsert(ctx, &entity)
+    require.NoError(t, err)
+    got, err := repo.Get(ctx, entity.ID)
+    require.NoError(t, err)
+    // got could be a struct with zeroed fields.
+    // Test passes because `err == nil`.
+
+FORBIDDEN — only checks count, not items:
+    entries, err := expandSources(paths)
+    require.NoError(t, err)
+    assert.Len(t, entries, 1)
+    // What if entries[0].relativePath is ""?
+
+REQUIRED — Mirror Test:
+    err := os.WriteFile(path, data, 0644)
+    require.NoError(t, err)
+
+    got, err := os.ReadFile(path)
+    require.NoError(t, err)
+    if diff := cmp.Diff(data, got); diff != "" {
+        t.Errorf("written file content mismatch (-want +got):\n%s", diff)
+    }
+```
+
+READ THE WHOLE PAYLOAD. Not just metadata (exists, size, mode).
+Not just error. Read the actual bytes or retrieve the actual entity
+and compare every field.
+
+### R12: Assert every output field
+
+If the function returns a struct, map, slice, or multi-value output,
+every meaningful field must be explicitly asserted. A field that isn't
+asserted is a field that can be wrong without detection.
+
+```
+GOOD (every field checked):
+    require.Len(t, results, 1)
+    entry := results[0]
+    assert.Equal(t, "tests/a.txt", entry.relativePath)
+    assert.Equal(t, absPath, entry.absPath)
+
+BAD (field silently dropped):
+    require.Len(t, results, 1)
+    // relativePath never checked. Can be wrong, test passes.
+
+    files, err := os.ReadDir(dir)
+    require.NoError(t, err)
+    assert.Len(t, files, 3)
+    // Names, sizes, contents — none checked. Directory could
+    // contain "a.txt", "b.txt", "c.txt" or ".", "..", "tmp".
+    // Both pass.
+```
+
+EXCEPTIONS (must be documented with a comment):
+- **Non-deterministic fields** (timestamps, UUIDs, PIDs):
+  assert with a loose bound (`assert.WithinRange`, `assert.Len(t, id, 36)`)
+  or explicitly skip with `// non-deterministic`.
+- **Derived fields** that cannot independently be wrong because they are
+  computed from already-asserted fields: annotate with
+  `// derived from <field_name>`.
+
+```
+EXCEPTION EXAMPLE:
+    type Result struct {
+        ID        string    // UUID — non-deterministic
+        CreatedAt time.Time // timestamp — non-deterministic
+        Name      string    // from input
+        Slug      string    // derived from Name
+    }
+    assert.Equal(t, "my-thing", result.Name)
+    assert.Equal(t, "my-thing", result.Slug) // derived from Name
+    assert.Len(t, result.ID, 36)  // UUID format
+    // CreatedAt: non-deterministic, skip
+```
+
 ---
 
 ## 8. What to Assert — And What NOT to Assert
@@ -479,8 +689,8 @@ isolate failures (one failure doesn't stop the rest).
 | Priority | What | Example |
 |----------|------|---------|
 | 1 | **Return values** | `cmp.Diff(want, got)` |
-| 2 | **State changes in repo** | `repo.Get(id).Status == Stopped` |
-| 3 | **Side effects on filesystem** | `fileExists(path)` |
+| 2 | **State changes in repo** | Full read-back: `got := repo.Get(id); cmp.Diff(want, got)` |
+| 3 | **Side effects on filesystem** | Content read-back: `got := os.ReadFile(path); cmp.Diff(want, got)` |
 | 4 | **Subprocess calls (as secondary)** | `len(runner.Calls) > 0` |
 
 ### Do NOT assert on these
@@ -493,6 +703,109 @@ isolate failures (one failure doesn't stop the rest).
 | Internal/private functions | External test package enforces this |
 | Order of map iteration | Undefined by Go spec |
 | Timestamps or durations | Flaky — use `assert.WithinRange` or don't assert |
+| Count without content | `assert.Len(t, items, 3)` doesn't verify WHICH items are there |
+| Existence without content | `assert.FileExists(path)` doesn't verify the file content is correct |
+
+---
+
+## 8a. How to Derive Expected Values — The Three-Source Rule
+
+### Why this section exists
+
+The most common test failure pattern is a test that passes but asserts the
+wrong thing. The test runs, the code runs, they match — but both are wrong.
+This happens when the agent derives expected values from the function's
+output instead of from the function's contract.
+
+Every expected value must come from EXACTLY ONE of three sources:
+
+| Source | What it means | Example |
+|--------|---------------|---------|
+| **CONTRACT** | The function's documented behavior | `expandSources` says: "for a dir source, relativePath = `<source_basename>/<rel>`" → `wantRel = "mydir/a.txt"` |
+| **INPUT** | A direct literal from the test inputs | `input = "myfile.txt"` → `want = "myfile.txt"` (basename of the only input file) |
+| **REVERSE** | Computed via a DIFFERENT algorithm/round-trip | Serialize → deserialize → compare (NOT serialize → compare). The read path is a different code path than the write path, so it's independent. |
+
+### The `setup()` trap
+
+A common pattern in this codebase is:
+
+```go
+func setup(t *testing.T) (input, want SomeType) {
+    // ... create input ...
+    return input, SomeType{Field: "value"}  // ← want is hardcoded
+}
+```
+
+DANGER: When `setup()` returns both `input` and `want`, the agent can
+trivially make `want` match whatever the function currently returns.
+The derivation is hidden from the test body. The blind reviewer sees
+`setup()` as a black box and cannot verify that `want` is correct.
+
+PREFERRED: Compute `want` inline with an explicit contract reference:
+
+```go
+t.Run("preserves_source_dir_name", func(t *testing.T) {
+    dir := t.TempDir()
+    aFile := filepath.Join(dir, "a.txt")
+    os.WriteFile(aFile, []byte("a"), 0644)
+
+    entries, err := expandSources([]string{dir})
+    require.NoError(t, err)
+
+    // CONTRACT: expandSources of a directory produces
+    // relativePath = <source_basename>/<rel_from_walk>.
+    // This preserves the source directory name so that
+    // `cp ./mydir /dst` creates `/dst/mydir/...`.
+    wantRel := filepath.Base(dir) + "/" + "a.txt"
+
+    require.Len(t, entries, 1)
+    if diff := cmp.Diff(wantRel, entries[0].relativePath); diff != "" {
+        t.Errorf("relativePath (-want +got):\n%s", diff)
+    }
+})
+```
+
+`wantRel` came from the CONTRACT plus the test INPUT — NOT from
+calling `expandSources`. If `expandSources` returns `"a.txt"` (wrong),
+the test fails.
+
+### The LITERAL rule
+
+If the expected value is a hardcoded literal in the test body (not
+computed from inputs), the test MUST explain in a comment what
+contract rule that literal satisfies:
+
+```
+GOOD (contract documented):
+    // CONTRACT: For a file source, relativePath = <file_basename>.
+    // input = "/path/to/report.pdf" → basename = "report.pdf"
+    want := []fileEntry{{relativePath: "report.pdf"}}
+
+ACCEPTABLE (input is self-evident):
+    // Input is "test.txt", output basename must be "test.txt".
+    want := []fileEntry{{relativePath: "test.txt"}}
+
+BAD (no rationale):
+    want := []fileEntry{{relativePath: "a.txt"}}
+    // Where did "a.txt" come from? Was it the filename? Was it
+    // copied from the function output? The reviewer cannot tell.
+```
+
+### The SURVIVAL check for expected values
+
+In addition to the test-level SURVIVAL check ("would deleting the
+function body fail this test?"), apply SURVIVAL to EACH expected value:
+
+Take the expected value, replace it with a clearly wrong value, and
+mentally check: would the test fail? If the answer is "maybe not"
+(e.g., because the assertion is on length, not content, or because
+the other fields would still match), the assertion is too weak.
+
+### Independence test
+
+Before submitting, ask: "Could I have written this expected value
+before I ever saw the function's output?" If the answer is no, the
+expected value is implementation-derived and must be replaced.
 
 ---
 
@@ -557,6 +870,16 @@ Before submitting ANY test file, verify every item:
 [ ] Does the test use external package (_test suffix)?
 [ ] Does go test ./... compile cleanly?
 [ ] Does go test -race ./... pass with no data races?
+[ ] Is every expected value independently derivable from the function's
+    contract without running the function? (Not copied from its output)
+[ ] Does every hardcoded expected literal have a CONTRACT comment
+    explaining WHY that value is correct?
+[ ] SURVIVAL: Would replacing the function body with `return zero`
+    make this test fail? (Every row, every subtest.)
+[ ] Mirror Test: Does every write/create/mutate read back the payload
+    and compare byte-for-byte or field-for-field?
+[ ] Are ALL fields of every returned struct/slice/map asserted? Any
+    unasserted fields documented with a reason?
 ```
 
 ---
@@ -619,6 +942,20 @@ RULES:
 8. Context cancellation must be tested if the function takes context.Context.
 9. Every cleanup or error path must be tested.
 10. The test file MUST compile with `go vet` and pass `go test -race`.
+11. Expected values must be derivable from the function's contract, not
+    its implementation. If a hardcoded literal is used as the expected
+    value, the test must include a comment explaining what contract rule
+    produces that value. A test that passes only because the expected
+    value matches the current implementation (not an independent spec)
+    is circular and must be rejected.
+12. SURVIVAL: If the function body were replaced with `return zero` /
+    `return nil`, the test MUST fail. If any assertion survives a gutted
+    function body, that assertion is redundant or tautological.
+13. Mirror Test: Every write/create/mutate must be followed by a read-back
+    that verifies the payload byte-for-byte. Checking only error or
+    existence is insufficient.
+14. Every field of a returned struct, slice element, or map value must be
+    explicitly asserted unless documented as non-deterministic or derived.
 
 Report:
 - PASS: no issues found
