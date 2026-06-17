@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
+	"sort"
 	"testing"
 	"time"
 
@@ -227,4 +230,121 @@ func mustWriteFTFrame(t *testing.T, w io.Writer, typ byte, payload []byte) {
 	t.Helper()
 	err := vsockagent.WriteFTFrame(w, typ, payload)
 	require.NoError(t, err)
+}
+
+// ─── expandSources ──────────────────────────────────────────────────────────
+// Rationale: expandSources resolves user-provided source paths into a flat
+// list of {absPath, relativePath} entries. Bugs here skip files silently,
+// copy wrong paths, or produce unhelpful errors — corrupting file transfers.
+
+func TestExpandSources(t *testing.T) {
+	tests := map[string]struct {
+		setup   func(t *testing.T) (srcPaths []string, want []fileEntry)
+		wantErr string
+	}{
+		"non_existent_path": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				return []string{"/tmp/nonexistent-mvm-test-file"}, nil
+			},
+			wantErr: "source not found",
+		},
+		"single_file": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				f := filepath.Join(dir, "test.txt")
+				err := os.WriteFile(f, []byte("content"), 0644)
+				require.NoError(t, err)
+				return []string{f}, []fileEntry{{absPath: f, relativePath: "test.txt"}}
+			},
+		},
+		"directory_with_files": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				a := filepath.Join(dir, "a.txt")
+				b := filepath.Join(dir, "b.txt")
+				require.NoError(t, os.WriteFile(a, []byte("a"), 0644))
+				require.NoError(t, os.WriteFile(b, []byte("b"), 0644))
+				return []string{dir}, []fileEntry{
+					{absPath: a, relativePath: "a.txt"},
+					{absPath: b, relativePath: "b.txt"},
+				}
+			},
+		},
+		"nested_subdirectory": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				sub := filepath.Join(dir, "sub")
+				require.NoError(t, os.Mkdir(sub, 0755))
+				c := filepath.Join(sub, "c.txt")
+				require.NoError(t, os.WriteFile(c, []byte("c"), 0644))
+				return []string{dir}, []fileEntry{
+					{absPath: c, relativePath: "sub/c.txt"},
+				}
+			},
+		},
+		"empty_directory": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				return []string{dir}, nil
+			},
+		},
+		"multiple_sources_mixed": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+
+				// Single file source.
+				f1 := filepath.Join(dir, "root.txt")
+				require.NoError(t, os.WriteFile(f1, []byte("root"), 0644))
+
+				// Directory source with files.
+				sub := filepath.Join(dir, "subdir")
+				require.NoError(t, os.Mkdir(sub, 0755))
+				f2 := filepath.Join(sub, "nested.py")
+				require.NoError(t, os.WriteFile(f2, []byte("nested"), 0644))
+
+				return []string{f1, sub}, []fileEntry{
+					{absPath: f1, relativePath: "root.txt"},
+					{absPath: f2, relativePath: "nested.py"},
+				}
+			},
+		},
+		"symlink_followed": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				target := filepath.Join(dir, "target.txt")
+				link := filepath.Join(dir, "link.txt")
+				require.NoError(t, os.WriteFile(target, []byte("target"), 0644))
+				require.NoError(t, os.Symlink(target, link))
+				return []string{link}, []fileEntry{
+					{absPath: link, relativePath: "link.txt"},
+				}
+			},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			srcPaths, want := tc.setup(t)
+			got, err := expandSources(srcPaths)
+
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+
+			// Sort by relativePath for deterministic comparison.
+			sort.Slice(got, func(i, j int) bool {
+				return got[i].relativePath < got[j].relativePath
+			})
+			sort.Slice(want, func(i, j int) bool {
+				return want[i].relativePath < want[j].relativePath
+			})
+
+			if diff := cmp.Diff(want, got, cmp.AllowUnexported(fileEntry{})); diff != "" {
+				t.Errorf("expandSources() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
 }

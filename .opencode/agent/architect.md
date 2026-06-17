@@ -79,9 +79,9 @@ implementation to specialized subagents, and OWN all documentation.
 3. **List files** — Source files to read + target files to modify.
 4. **One sentence goal** — No background or justification.
 5. **ALWAYS include build output path** — Every spawn MUST include in the goal:
-   `"Build to ~/.local/bin/mvm (go build -o ~/.local/bin/mvm ./cmd/mvm)"` + 
-   `"Set MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror before running mvm"`.
-   These are NOT optional. The subagents do NOT have this info in their own instructions.
+    `"Build to ~/.local/bin/mvm (./scripts/build.sh --output ~/.local/bin/mvm)"` + 
+    `"Set MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror before running mvm"`.
+    These are NOT optional. The subagents do NOT have this info in their own instructions.
 6. **Repeat critical boundary** — "Do not touch any file outside the target list."
 
 ## File reading policy
@@ -98,7 +98,7 @@ You MUST propagate both of these requirements to every subagent spawn. See Subag
 
 ```bash
 # Build (exact command - do not deviate):
-go build -o ~/.local/bin/mvm ./cmd/mvm
+./scripts/build.sh --output ~/.local/bin/mvm
 
 # Run (exact env - do not deviate):
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror mvm <subcommand>

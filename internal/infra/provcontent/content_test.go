@@ -305,6 +305,32 @@ func TestBuilder_BuildSSHOps(t *testing.T) {
 					GID:  0,
 				},
 				provcontent.ChrootOp{Command: "chown root:root /root"},
+				// Static SSH infra (moved from BuildDeblobOps)
+				provcontent.FileOp{
+					Path: "/etc/ssh/sshd_config.d/mvm.conf",
+					Data: []byte(provcontent.Builder{}.SSHDConfig("root")),
+					Mode: 0644,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.FileOp{
+					Path: "/usr/local/bin/first-boot-ssh-installer.sh",
+					Data: []byte(provcontent.Builder{}.FirstBootInstaller()),
+					Mode: 0755,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.FileOp{
+					Path: "/etc/systemd/system/first-boot-ssh-installer.service",
+					Data: []byte(provcontent.Builder{}.FirstBootService()),
+					Mode: 0644,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.ChrootOp{Command: "ssh-keygen -A"},
+				provcontent.ChrootOp{Command: `if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
+fi`},
 			},
 		},
 		"non_root_user_with_pubkeys": {
@@ -329,6 +355,32 @@ func TestBuilder_BuildSSHOps(t *testing.T) {
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser/.ssh"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser/.ssh/authorized_keys"},
+				// Static SSH infra (moved from BuildDeblobOps)
+				provcontent.FileOp{
+					Path: "/etc/ssh/sshd_config.d/mvm.conf",
+					Data: []byte(provcontent.Builder{}.SSHDConfig("root")),
+					Mode: 0644,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.FileOp{
+					Path: "/usr/local/bin/first-boot-ssh-installer.sh",
+					Data: []byte(provcontent.Builder{}.FirstBootInstaller()),
+					Mode: 0755,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.FileOp{
+					Path: "/etc/systemd/system/first-boot-ssh-installer.service",
+					Data: []byte(provcontent.Builder{}.FirstBootService()),
+					Mode: 0644,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.ChrootOp{Command: "ssh-keygen -A"},
+				provcontent.ChrootOp{Command: `if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
+fi`},
 			},
 		},
 	}
@@ -591,15 +643,17 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 	t.Parallel()
 
 	// Expected operation counts per OS family (hardcoded static values)
+	// SSH infrastructure ops (5) moved to BuildSSHOps, so counts decreased by 5.
 	const (
-		countUbuntuDebian = 19
-		countAlpine       = 23
-		countArch         = 25
-		countRedHat       = 17
-		countUnknown      = 16
+		countUbuntuDebian = 14
+		countAlpine       = 18
+		countArch         = 20
+		countRedHat       = 12
+		countUnknown      = 11
 	)
 
 	// Verify base operations that are present in ALL results.
+	// Base ops occupy indices 0-3 (4 ops total after SSH infra moved to BuildSSHOps).
 	checkBaseOps := func(t *testing.T, ops []provcontent.Operation) {
 		t.Helper()
 
@@ -614,27 +668,9 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 		assert.Contains(t, maskScript, "unattended-upgrades.service")
 		assert.Contains(t, maskScript, "ln -sf /dev/null")
 
-		// ops[4]: SSH daemon config FileOp
-		fop4 := ops[4].(provcontent.FileOp)
-		assert.Equal(t, "/etc/ssh/sshd_config.d/mvm.conf", fop4.Path)
-		assert.Equal(t, 0644, fop4.Mode)
-		assert.Contains(t, string(fop4.Data), "PermitRootLogin prohibit-password")
-
-		// ops[5]: First boot installer FileOp
-		fop5 := ops[5].(provcontent.FileOp)
-		assert.Equal(t, "/usr/local/bin/first-boot-ssh-installer.sh", fop5.Path)
-		assert.Equal(t, 0755, fop5.Mode)
-
-		// ops[6]: First boot service FileOp
-		fop6 := ops[6].(provcontent.FileOp)
-		assert.Equal(t, "/etc/systemd/system/first-boot-ssh-installer.service", fop6.Path)
-		assert.Equal(t, 0644, fop6.Mode)
-
-		// ops[7]: ssh-keygen
-		assert.Equal(t, "ssh-keygen -A", ops[7].(provcontent.ChrootOp).Command)
-
-		// ops[8]: SSH enable script
-		assert.Contains(t, ops[8].(provcontent.ChrootOp).Command, "systemctl enable sshd")
+		// NOTE: SSH infrastructure ops (sshd_config, first-boot installer,
+		// first-boot service, ssh-keygen, enable SSH) have been moved to
+		// BuildSSHOps. OS-specific ops now start at index 4.
 	}
 
 	// Verify final operations (cloud-init disable + cleanup) present in ALL results.
@@ -673,29 +709,29 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "ubuntu",
 			wantCount: countUbuntuDebian,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				// ops[9-12]: OS-specific (ubuntu/debian)
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "apt-get clean")
-				assert.Contains(t, ops[10].(provcontent.ChrootOp).Command, "rm -rf /var/cache/apt/archives/*.deb")
-				assert.Contains(t, ops[11].(provcontent.ChrootOp).Command, "rm -rf /var/cache/debconf/*")
-				assert.Contains(t, ops[12].(provcontent.ChrootOp).Command, "e2scrub_all.timer")
+				// ops[4-7]: OS-specific (ubuntu/debian)
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "apt-get clean")
+				assert.Contains(t, ops[5].(provcontent.ChrootOp).Command, "rm -rf /var/cache/apt/archives/*.deb")
+				assert.Contains(t, ops[6].(provcontent.ChrootOp).Command, "rm -rf /var/cache/debconf/*")
+				assert.Contains(t, ops[7].(provcontent.ChrootOp).Command, "e2scrub_all.timer")
 
 				// Verify alpine-specific commands do NOT appear
-				assert.NotContains(t, ops[9].(provcontent.ChrootOp).Command, "apk")
-				assert.NotContains(t, ops[12].(provcontent.ChrootOp).Command, "chronyd")
+				assert.NotContains(t, ops[4].(provcontent.ChrootOp).Command, "apk")
+				assert.NotContains(t, ops[7].(provcontent.ChrootOp).Command, "chronyd")
 			},
 		},
 		"debian": {
 			osType:    "debian",
 			wantCount: countUbuntuDebian,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "apt-get clean")
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "apt-get clean")
 			},
 		},
 		"Ubuntu": {
 			osType:    "Ubuntu",
 			wantCount: countUbuntuDebian,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "apt-get clean",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "apt-get clean",
 					"case-insensitive: 'Ubuntu' must match ubuntu branch")
 			},
 		},
@@ -703,25 +739,25 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "alpine",
 			wantCount: countAlpine,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				// ops[9-16]: OS-specific (alpine)
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "apk cache clean")
-				assert.Contains(t, ops[10].(provcontent.ChrootOp).Command, "rm -rf /var/cache/apk/*")
-				assert.Contains(t, ops[11].(provcontent.ChrootOp).Command, "denyinterfaces eth0")
-				assert.Contains(t, ops[12].(provcontent.ChrootOp).Command, "rc-update add sshd")
-				assert.Contains(t, ops[13].(provcontent.ChrootOp).Command, "rc_parallel")
-				assert.Contains(t, ops[14].(provcontent.ChrootOp).Command, "rc-update del cloud-init")
-				assert.Contains(t, ops[15].(provcontent.ChrootOp).Command, "chronyd")
-				assert.Contains(t, ops[16].(provcontent.ChrootOp).Command, "sed -i '/ttyS0")
+				// ops[4-11]: OS-specific (alpine)
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "apk cache clean")
+				assert.Contains(t, ops[5].(provcontent.ChrootOp).Command, "rm -rf /var/cache/apk/*")
+				assert.Contains(t, ops[6].(provcontent.ChrootOp).Command, "denyinterfaces eth0")
+				assert.Contains(t, ops[7].(provcontent.ChrootOp).Command, "rc-update add sshd")
+				assert.Contains(t, ops[8].(provcontent.ChrootOp).Command, "rc_parallel")
+				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "rc-update del cloud-init")
+				assert.Contains(t, ops[10].(provcontent.ChrootOp).Command, "chronyd")
+				assert.Contains(t, ops[11].(provcontent.ChrootOp).Command, "sed -i '/ttyS0")
 
 				// Verify debian-specific commands do NOT appear
-				assert.NotContains(t, ops[9].(provcontent.ChrootOp).Command, "apt-get")
+				assert.NotContains(t, ops[4].(provcontent.ChrootOp).Command, "apt-get")
 			},
 		},
 		"ALPINE": {
 			osType:    "ALPINE",
 			wantCount: countAlpine,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "apk cache clean",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "apk cache clean",
 					"case-insensitive: 'ALPINE' must match alpine branch")
 			},
 		},
@@ -729,32 +765,32 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "arch",
 			wantCount: countArch,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				// ops[9-18]: OS-specific (arch)
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "pacman -Sc")
-				assert.Contains(t, ops[10].(provcontent.ChrootOp).Command, "rm -rf /var/cache/pacman/pkg/*")
-				assert.Contains(t, ops[11].(provcontent.ChrootOp).Command, "pacman-key --init")
-				assert.Contains(t, ops[12].(provcontent.ChrootOp).Command, "pacman-key --populate")
-				assert.Contains(t, ops[13].(provcontent.ChrootOp).Command, "LANG=en_US.UTF-8")
+				// ops[4-13]: OS-specific (arch)
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "pacman -Sc")
+				assert.Contains(t, ops[5].(provcontent.ChrootOp).Command, "rm -rf /var/cache/pacman/pkg/*")
+				assert.Contains(t, ops[6].(provcontent.ChrootOp).Command, "pacman-key --init")
+				assert.Contains(t, ops[7].(provcontent.ChrootOp).Command, "pacman-key --populate")
+				assert.Contains(t, ops[8].(provcontent.ChrootOp).Command, "LANG=en_US.UTF-8")
 				assert.Contains(
 					t,
-					ops[14].(provcontent.ChrootOp).Command,
+					ops[9].(provcontent.ChrootOp).Command,
 					"ln -sf /dev/null /etc/systemd/system/pacman-init.service",
 				)
 				assert.Contains(
 					t,
-					ops[15].(provcontent.ChrootOp).Command,
+					ops[10].(provcontent.ChrootOp).Command,
 					"ln -sf /dev/null /etc/systemd/system/systemd-firstboot.service",
 				)
-				assert.Contains(t, ops[16].(provcontent.ChrootOp).Command, "btrfs") // btrfs mkinitcpio
-				assert.Contains(t, ops[17].(provcontent.ChrootOp).Command, "btrfs balance")
-				assert.Contains(t, ops[18].(provcontent.ChrootOp).Command, "systemd-udev-settle")
+				assert.Contains(t, ops[11].(provcontent.ChrootOp).Command, "btrfs") // btrfs mkinitcpio
+				assert.Contains(t, ops[12].(provcontent.ChrootOp).Command, "btrfs balance")
+				assert.Contains(t, ops[13].(provcontent.ChrootOp).Command, "systemd-udev-settle")
 			},
 		},
 		"archlinux": {
 			osType:    "archlinux",
 			wantCount: countArch,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "pacman -Sc",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "pacman -Sc",
 					"'archlinux' must match arch branch")
 			},
 		},
@@ -762,7 +798,7 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "manjaro",
 			wantCount: countArch,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "pacman -Sc",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "pacman -Sc",
 					"'manjaro' must match arch branch")
 			},
 		},
@@ -770,7 +806,7 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "Arch",
 			wantCount: countArch,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "pacman -Sc",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "pacman -Sc",
 					"case-insensitive: 'Arch' must match arch branch")
 			},
 		},
@@ -778,20 +814,20 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "fedora",
 			wantCount: countRedHat,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				// ops[9-10]: OS-specific (fedora)
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "dnf clean all 2>/dev/null || yum clean all")
-				assert.Contains(t, ops[10].(provcontent.ChrootOp).Command, "rm -rf /var/cache/dnf/* /var/cache/yum/*")
+				// ops[4-5]: OS-specific (fedora)
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "dnf clean all 2>/dev/null || yum clean all")
+				assert.Contains(t, ops[5].(provcontent.ChrootOp).Command, "rm -rf /var/cache/dnf/* /var/cache/yum/*")
 
 				// Verify non-RedHat commands do NOT appear
-				assert.NotContains(t, ops[9].(provcontent.ChrootOp).Command, "apt-get")
-				assert.NotContains(t, ops[9].(provcontent.ChrootOp).Command, "apk")
+				assert.NotContains(t, ops[4].(provcontent.ChrootOp).Command, "apt-get")
+				assert.NotContains(t, ops[4].(provcontent.ChrootOp).Command, "apk")
 			},
 		},
 		"centos": {
 			osType:    "centos",
 			wantCount: countRedHat,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "dnf clean all",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "dnf clean all",
 					"'centos' must match Red Hat branch")
 			},
 		},
@@ -799,7 +835,7 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "rhel",
 			wantCount: countRedHat,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "dnf clean all",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "dnf clean all",
 					"'rhel' must match Red Hat branch")
 			},
 		},
@@ -807,7 +843,7 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "rocky",
 			wantCount: countRedHat,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "dnf clean all",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "dnf clean all",
 					"'rocky' must match Red Hat branch")
 			},
 		},
@@ -815,7 +851,7 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "almalinux",
 			wantCount: countRedHat,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Contains(t, ops[9].(provcontent.ChrootOp).Command, "dnf clean all",
+				assert.Contains(t, ops[4].(provcontent.ChrootOp).Command, "dnf clean all",
 					"'almalinux' must match Red Hat branch")
 			},
 		},
@@ -823,21 +859,21 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			osType:    "unknown",
 			wantCount: countUnknown,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				// ops[9]: Generic cache cleanup (default branch)
-				assert.Equal(t, "rm -rf /var/cache/* 2>/dev/null || true", ops[9].(provcontent.ChrootOp).Command)
+				// ops[4]: Generic cache cleanup (default branch)
+				assert.Equal(t, "rm -rf /var/cache/* 2>/dev/null || true", ops[4].(provcontent.ChrootOp).Command)
 
 				// Verify no OS-specific commands appear
-				assert.NotContains(t, ops[9].(provcontent.ChrootOp).Command, "apt-get")
-				assert.NotContains(t, ops[9].(provcontent.ChrootOp).Command, "apk")
-				assert.NotContains(t, ops[9].(provcontent.ChrootOp).Command, "pacman")
-				assert.NotContains(t, ops[9].(provcontent.ChrootOp).Command, "dnf")
+				assert.NotContains(t, ops[4].(provcontent.ChrootOp).Command, "apt-get")
+				assert.NotContains(t, ops[4].(provcontent.ChrootOp).Command, "apk")
+				assert.NotContains(t, ops[4].(provcontent.ChrootOp).Command, "pacman")
+				assert.NotContains(t, ops[4].(provcontent.ChrootOp).Command, "dnf")
 			},
 		},
 		"": {
 			osType:    "",
 			wantCount: countUnknown,
 			checkOS: func(t *testing.T, ops []provcontent.Operation) {
-				assert.Equal(t, "rm -rf /var/cache/* 2>/dev/null || true", ops[9].(provcontent.ChrootOp).Command,
+				assert.Equal(t, "rm -rf /var/cache/* 2>/dev/null || true", ops[4].(provcontent.ChrootOp).Command,
 					"empty string must fall through to default branch")
 			},
 		},
@@ -855,7 +891,8 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 			// Common base ops (indices 0-8)
 			checkBaseOps(t, got)
 
-			// OS-specific ops (indices 9 to len(got)-7)
+			// OS-specific ops (indices 4 to len(got)-7)
+			// 5 SSH infra ops moved to BuildSSHOps, so OS ops start at 4 instead of 9.
 			tc.checkOS(t, got)
 
 			// Final common ops (last 6)

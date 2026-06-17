@@ -92,7 +92,7 @@ Required when using cloud-init to configure VMs.
 
 Both `mvm vm create` (rootfs provisioning) and `mvm image pull`/`mvm image import`
 (image optimization — shrink, deblob, OS detection) use the same provisioning backend.
-**Loop-mount is the default and recommended** (~1.2s end-to-end creation, ~2.8s to SSH-ready per benchmark data).
+**Loop-mount is the default and recommended** (~2.3s end-to-end creation, ~2.9s to VM-ready per benchmark data).
 
 ### E1. Loop-Mount (Default)
 
@@ -121,7 +121,7 @@ It uses system tools directly — no runtime dependencies.
 ### E2. libguestfs (Alternative)
 
 libguestfs provides filesystem-agnostic rootfs access via a QEMU appliance.
-Slower (~3.9s creation, ~5.8s to SSH-ready per benchmark data) but more capable OS detection. Enable with:
+Slower (~3.9s creation, ~5.8s to SSH-ready per earlier benchmark data) but more capable OS detection. GuestFS is not tested in the current benchmark suite since loop-mount is the default. Enable with:
 
 ```bash
 mvm config set settings guestfs_enabled true

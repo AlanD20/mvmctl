@@ -26,6 +26,46 @@ type FTResult struct {
 	Errors int
 }
 
+// fileEntry holds an absolute path and its relative path from the source root.
+type fileEntry struct {
+	absPath      string
+	relativePath string
+}
+
+// expandSources walks each source path. Regular files are added as-is
+// (relativePath = basename). Directories are walked recursively; each file
+// gets a relativePath rooted at the directory. Symlinks are followed.
+func expandSources(srcPaths []string) ([]fileEntry, error) {
+	var entries []fileEntry
+	for _, src := range srcPaths {
+		fi, err := os.Stat(src)
+		if err != nil {
+			return nil, fmt.Errorf("source not found: %s", src)
+		}
+		if !fi.IsDir() {
+			entries = append(entries, fileEntry{absPath: src, relativePath: filepath.Base(src)})
+			continue
+		}
+		// Walk directory
+		base := filepath.Clean(src)
+		err = filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() {
+				return nil // skip directories themselves (parents created by files)
+			}
+			rel, _ := filepath.Rel(base, path)
+			entries = append(entries, fileEntry{absPath: path, relativePath: rel})
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("walk source %s: %w", src, err)
+		}
+	}
+	return entries, nil
+}
+
 // ── FTCopyToVM (host → VM push) ─────────────────────────────────────────────
 
 // FTCopyToVM copies files from the host to the VM using the binary frame protocol.
@@ -99,39 +139,37 @@ func (c *Client) FTCopyToVM(
 		return nil, fmt.Errorf("expected mkdir ack, got frame type 0x%02x", frameType)
 	}
 
+	// Expand source paths — walk directories to collect all regular files.
+	entries, err := expandSources(srcPaths)
+	if err != nil {
+		return nil, fmt.Errorf("expand sources: %w", err)
+	}
+
 	var totalBytes int64
 	var fileErrors int
 
-	for _, srcPath := range srcPaths {
+	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("push cancelled: %w", ctx.Err())
 		default:
 		}
 
-		// Stat the local file.
-		fi, err := os.Stat(srcPath)
+		fi, err := os.Stat(entry.absPath)
 		if err != nil {
-			slog.Error("ft: stat source", "path", srcPath, "error", err)
-			errPayload, _ := json.Marshal(vsockagent.FtErrorPayload{Code: "not_found", Message: err.Error()})
-			_ = vsockagent.WriteFTFrame(conn, vsockagent.FtError, errPayload)
-			fileErrors++
-			continue
+			return nil, fmt.Errorf("source not found: %s", entry.absPath)
 		}
 
 		fileSize := fi.Size()
 		fileMode := int(fi.Mode().Perm())
 
-		// Always use source basename as the meta path. The agent decides
-		// whether to use it (dir mode) or ignore it (file mode) based on
-		// stat of the destination path.
-		metaPath := filepath.Base(srcPath)
+		metaPath := entry.relativePath
 
 		// Compute SHA-256.
 		hasher := sha256.New()
-		f, err := os.Open(srcPath)
+		f, err := os.Open(entry.absPath)
 		if err != nil {
-			slog.Error("ft: open source", "path", srcPath, "error", err)
+			slog.Error("ft: open source", "path", entry.absPath, "error", err)
 			errPayload, _ := json.Marshal(vsockagent.FtErrorPayload{Code: "open_failed", Message: err.Error()})
 			_ = vsockagent.WriteFTFrame(conn, vsockagent.FtError, errPayload)
 			fileErrors++
@@ -140,8 +178,7 @@ func (c *Client) FTCopyToVM(
 
 		if _, err := io.Copy(hasher, f); err != nil {
 			f.Close()
-			slog.Error("ft: hash source", "path", srcPath, "error", err)
-			return nil, fmt.Errorf("hash source %s: %w", srcPath, err)
+			return nil, fmt.Errorf("read source %s: %w", entry.absPath, err)
 		}
 		f.Close()
 		hashHex := hex.EncodeToString(hasher.Sum(nil))
@@ -186,9 +223,9 @@ func (c *Client) FTCopyToVM(
 		}
 
 		// Re-open source for reading and stream.
-		f, err = os.Open(srcPath)
+		f, err = os.Open(entry.absPath)
 		if err != nil {
-			slog.Error("ft: re-open source", "path", srcPath, "error", err)
+			slog.Error("ft: re-open source", "path", entry.absPath, "error", err)
 			errPayload, _ := json.Marshal(vsockagent.FtErrorPayload{Code: "open_failed", Message: err.Error()})
 			_ = vsockagent.WriteFTFrame(conn, vsockagent.FtError, errPayload)
 			fileErrors++
@@ -218,7 +255,7 @@ func (c *Client) FTCopyToVM(
 				}
 				f.Close()
 				slog.Error("ft: read source", "error", readErr)
-				return nil, fmt.Errorf("read source %s: %w", srcPath, readErr)
+				return nil, fmt.Errorf("read source %s: %w", entry.absPath, readErr)
 			}
 		}
 		_ = f.Close() // best-effort: file was written successfully, close error is non-fatal
@@ -263,7 +300,7 @@ func (c *Client) FTCopyToVM(
 
 	// Send DONE.
 	donePayload, _ := json.Marshal(vsockagent.FtDonePayload{
-		Files:  len(srcPaths) - fileErrors,
+		Files:  len(entries) - fileErrors,
 		Bytes:  totalBytes,
 		Errors: fileErrors,
 	})
@@ -273,7 +310,7 @@ func (c *Client) FTCopyToVM(
 	}
 
 	result := &FTResult{
-		Files:  len(srcPaths) - fileErrors,
+		Files:  len(entries) - fileErrors,
 		Bytes:  totalBytes,
 		Errors: fileErrors,
 	}
@@ -699,3 +736,6 @@ relayLoop:
 		"bytes", result.Bytes)
 	return result, nil
 }
+
+// TestExport — exposed for testing.
+var ExpandSources = expandSources

@@ -337,40 +337,30 @@ A unified `FirewallTracker` in `internal/lib/firewall/tracker.go` delegates to t
 
 ## 6. Performance Comparison
 
-Benchmark data from `benchmarks/results.json` (2026-06-07, kernel official:7.0.11):
+Benchmark data from `benchmarks/results.json` (2026-06-16, sequential run, 5s threshold).
 
-### End-to-End VM Creation (create_s — provisioning + Firecracker boot)
+Measured via `mvm vm exec -- echo ok` inside the VM — replaces the earlier
+SSH-based probe. All images use the loop-mount provisioning backend (the default).
 
-| Image | Go Loop-Mount | Python Loop-Mount | Go GuestFS | Python GuestFS |
-|-------|--------------|-------------------|------------|----------------|
-| alpine | 0.9s | 1.4s | 3.7s | 2.8s |
-| ubuntu:24.04 | 1.4s | 2.2s | 4.0s | 3.4s |
-| ubuntu-minimal:24.04 | 1.1s | 1.6s | 3.4s | 3.0s |
-| archlinux | 1.5s | 2.1s | 4.0s | 3.4s |
-| debian:12 | 1.5s | 2.1s | 4.0s | 4.6s |
-| firecracker | 1.0s | 1.6s | 4.5s | 3.1s |
-| **Average** | **1.2s** | **1.8s** | **3.9s** | **3.4s** |
+### End-to-End VM Creation (create_s)
 
-### Full Lifecycle (total_s — create + SSH available)
+| Image | create_s | total_s | Threshold |
+|-------|----------|---------|-----------|
+| alpine | 1.4s | 2.0s | 5s ✅ |
+| ubuntu:24.04 | 2.0s | 2.4s | 5s ✅ |
+| ubuntu-minimal:24.04 | 2.0s | 2.4s | 5s ✅ |
+| archlinux | 2.4s | 3.9s | 5s ✅ |
+| debian:12 | 4.3s | 4.6s | 5s ✅ |
+| firecracker:v1.15 | 1.9s | 2.1s | 5s ✅ |
+| **Average** | **2.3s** | **2.9s** | **100% pass** |
 
-| Image | Go Loop-Mount | Python Loop-Mount | Go GuestFS | Python GuestFS |
-|-------|--------------|-------------------|------------|----------------|
-| alpine | 2.0s | 1.8s | 4.8s | 3.2s |
-| ubuntu:24.04 | 2.9s | 3.2s | 6.0s ❌ | 4.5s |
-| ubuntu-minimal:24.04 | 2.3s | 2.2s | 6.5s ❌ | 3.6s |
-| archlinux | 4.7s | 5.9s | 7.0s ❌ | 6.2s ❌ |
-| debian:12 | 2.7s | 3.9s | 6.0s ❌ | 6.5s ❌ |
-| firecracker | 2.2s | 2.1s | 6.6s ❌ | 3.7s |
-| **Average** | **2.8s** | **3.2s** | **5.8s ❌** | **4.5s** |
+### Notes
 
-❌ = exceeded 6s threshold
-
-### Key Takeaways
-
-- **Go loop-mount is the fastest path**: ~1.2s average creation, ~2.8s to SSH-ready
-- **Go vs Python (loop-mount)**: Go is ~1.5x faster for creation, comparable for total lifecycle
-- **GuestFS is 3x slower than loop-mount**: ~3.9s creation vs ~1.2s (Go), consistent across backends
-- **Go GuestFS underperforms Python GuestFS**: Go guestfs averaged 5.8s total (5/6 failed threshold) vs Python's 4.5s — the Go guestfs integration needs optimization
+- All six images passed within the 5s threshold in sequential mode.
+- Parallel execution (`--no-parallel`) can degrade boot times for resource-heavy
+  images (debian, archlinux) due to I/O contention on the host.
+- The probe now uses `echo ok` via `mvm vm exec` (vsock guest agent)
+  instead of SSH — this measures end-to-end VM readiness (vsock agent responding).
 - **Console relay startup**: ~10ms (negligible, no separate benchmark)
 - **NoCloud server startup**: ~50ms (negligible, no separate benchmark)
 

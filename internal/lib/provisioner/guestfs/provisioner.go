@@ -39,6 +39,7 @@ type ProvisioningConfig struct {
 	DNSServer        string                  // inject DNS, "" = skip
 	Shrink           bool                    // shrink filesystem to minimum
 	Deblob           bool                    // OS cache cleanup + mask services
+	FixFstab         bool                    // fix PARTUUID → /dev/vda in fstab
 	DisableCloudInit bool                    // mask cloud-init services
 	SetupSudo        bool                    // fix sudo ownership + setuid + sudoers drop-in
 	CustomOps        []provcontent.Operation // arbitrary FileOp/ChrootOp ops queued via ApplyOps
@@ -60,7 +61,7 @@ func RunDeferred(ctx context.Context, cfg ProvisioningConfig) error {
 		}
 	}
 	hasOps := cfg.Hostname != "" || cfg.DNSServer != "" || len(cfg.SSHPubkeys) > 0 ||
-		cfg.CloudInitDir != "" || cfg.DisableCloudInit || cfg.Shrink || cfg.Deblob
+		cfg.CloudInitDir != "" || cfg.DisableCloudInit || cfg.Shrink || cfg.Deblob || cfg.FixFstab
 	if !needsResize && !hasOps {
 		return nil
 	}
@@ -200,6 +201,13 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(enableSSHTmpl, struct{}{})))
 	}
 
+	// Upload SSH config files (sshd_config, first-boot installer, first-boot service)
+	// Moved here from deblob section — these are SSH infrastructure, not OS cleanup.
+	if len(cfg.SSHPubkeys) > 0 {
+		uploadCmds := buildFileOps(tmpDir)
+		cmds = append(cmds, uploadCmds...)
+	}
+
 	// Fix sudo — some Ubuntu cloud images ship with broken ownership
 	// on /etc/sudo.conf and /usr/bin/sudo (owned by uid 1000 instead of
 	// root). Without this, non-root users get "sudo: /etc/sudo.conf is
@@ -232,10 +240,13 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 	if cfg.Deblob {
 		cmds = append(cmds, "# Deblob + fix fstab")
 		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(deblobTmpl, struct{}{})))
+	}
 
-		// File uploads from provcontent (sshd_config, first-boot scripts)
-		uploadCmds := buildFileOps(tmpDir)
-		cmds = append(cmds, uploadCmds...)
+	// Standalone fstab fix (when SkipDeblob is true but FixFstab is still needed)
+	if cfg.FixFstab && !cfg.Deblob {
+		cmds = append(cmds, "# Fix fstab (PARTUUID → /dev/vda)")
+		cmds = append(cmds, fmt.Sprintf("sh %q",
+			`if [ -f /etc/fstab ]; then sed -i 's/^PARTUUID=[^[:space:]]*/\/dev\/vda/' /etc/fstab 2>/dev/null || true; fi`))
 	}
 
 	// Shrink (always runs — guestfish commands, not shell)
@@ -262,7 +273,9 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 					return nil, fmt.Errorf("write custom op temp file %s: %w", o.Path, err)
 				}
 				if idx := strings.LastIndex(o.Path, "/"); idx > 0 {
-					cmds = append(cmds, fmt.Sprintf("mkdir-p %s", o.Path[:idx]))
+					// Use sh command instead of guestfish mkdir-p because
+					// mkdir-p does NOT follow symlinks (e.g., /var/run → /run).
+					cmds = append(cmds, fmt.Sprintf(`sh "mkdir -p %s"`, o.Path[:idx]))
 				}
 				cmds = append(cmds, fmt.Sprintf("upload %s %s", tmpFile, o.Path))
 				mode := o.Mode
@@ -290,7 +303,8 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 func buildCloudInitUploads(cloudInitDir string) []string {
 	seedDir := "/var/lib/cloud/seed/nocloud"
 	var cmds []string
-	cmds = append(cmds, fmt.Sprintf("mkdir-p %s", seedDir))
+	// Use sh instead of mkdir-p: guestfish mkdir-p fails on symlinked paths like /var/run → /run.
+	cmds = append(cmds, fmt.Sprintf(`sh "mkdir -p %s"`, seedDir))
 
 	for _, filename := range []string{"meta-data", "user-data"} {
 		src := filepath.Join(cloudInitDir, filename)
@@ -332,7 +346,8 @@ func buildFileOps(tmpDir string) []string {
 			continue
 		}
 		if idx := strings.LastIndex(f.path, "/"); idx > 0 {
-			cmds = append(cmds, fmt.Sprintf("mkdir-p %s", f.path[:idx]))
+			// Use sh instead of mkdir-p: guestfish mkdir-p fails on symlinked paths like /var/run → /run.
+			cmds = append(cmds, fmt.Sprintf(`sh "mkdir -p %s"`, f.path[:idx]))
 		}
 		cmds = append(cmds, fmt.Sprintf("upload %s %s", tmpFile, f.path))
 		if f.mode != 0 {
