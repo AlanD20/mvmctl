@@ -260,25 +260,27 @@ func TestExpandSources(t *testing.T) {
 		"directory_with_files": {
 			setup: func(t *testing.T) ([]string, []fileEntry) {
 				dir := t.TempDir()
+				base := filepath.Base(dir)
 				a := filepath.Join(dir, "a.txt")
 				b := filepath.Join(dir, "b.txt")
 				require.NoError(t, os.WriteFile(a, []byte("a"), 0644))
 				require.NoError(t, os.WriteFile(b, []byte("b"), 0644))
 				return []string{dir}, []fileEntry{
-					{absPath: a, relativePath: "a.txt"},
-					{absPath: b, relativePath: "b.txt"},
+					{absPath: a, relativePath: filepath.Join(base, "a.txt")},
+					{absPath: b, relativePath: filepath.Join(base, "b.txt")},
 				}
 			},
 		},
 		"nested_subdirectory": {
 			setup: func(t *testing.T) ([]string, []fileEntry) {
 				dir := t.TempDir()
+				base := filepath.Base(dir)
 				sub := filepath.Join(dir, "sub")
 				require.NoError(t, os.Mkdir(sub, 0755))
 				c := filepath.Join(sub, "c.txt")
 				require.NoError(t, os.WriteFile(c, []byte("c"), 0644))
 				return []string{dir}, []fileEntry{
-					{absPath: c, relativePath: "sub/c.txt"},
+					{absPath: c, relativePath: filepath.Join(base, "sub/c.txt")},
 				}
 			},
 		},
@@ -298,13 +300,14 @@ func TestExpandSources(t *testing.T) {
 
 				// Directory source with files.
 				sub := filepath.Join(dir, "subdir")
+				subBase := filepath.Base(sub)
 				require.NoError(t, os.Mkdir(sub, 0755))
 				f2 := filepath.Join(sub, "nested.py")
 				require.NoError(t, os.WriteFile(f2, []byte("nested"), 0644))
 
 				return []string{f1, sub}, []fileEntry{
 					{absPath: f1, relativePath: "root.txt"},
-					{absPath: f2, relativePath: "nested.py"},
+					{absPath: f2, relativePath: filepath.Join(subBase, "nested.py")},
 				}
 			},
 		},

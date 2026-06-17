@@ -717,6 +717,73 @@ func TestHandleFTPush_MultipleFiles(t *testing.T) {
 	}
 }
 
+// TestHandleFTPush_DirSourceMultipleFiles catches the exact bug that caused
+// "expected meta/accept frame, got 0x60": push.Paths has 1 element (like
+// ["somedir"] from a directory source) but the host sends N META frames
+// (one per expanded file). The agent loop must NOT be bounded by push.Paths.
+func TestHandleFTPush_DirSourceMultipleFiles(t *testing.T) {
+	destDir := t.TempDir()
+
+	fileA := []byte("content of file A")
+	hashA := sha256.Sum256(fileA)
+	hashHexA := hex.EncodeToString(hashA[:])
+
+	fileB := []byte("content of file B is different")
+	hashB := sha256.Sum256(fileB)
+	hashHexB := hex.EncodeToString(hashB[:])
+
+	// push.Paths has 1 element ("somedir"), but we send 2 META frames.
+	// This simulates what happens when the host walks a directory:
+	// push.Paths=["somedir"] but expandSources produces 2 entries.
+	pushPayload, err := json.Marshal(FtPushPayload{
+		Paths:     []string{"somedir"},
+		Dest:      destDir,
+		Overwrite: true,
+	})
+	require.NoError(t, err)
+
+	runPushAgent(t, context.Background(), pushPayload, func(host *hostFrameHelper) {
+		_, _ = host.readFrame() // MKDIR
+
+		// Push file A (path includes dir prefix "somedir/").
+		pushFile(t, host, FtMetaPayload{
+			Path:   "somedir/a.txt",
+			Size:   int64(len(fileA)),
+			Mode:   0644,
+			SHA256: hashHexA,
+		}, fileA)
+
+		// Push file B (path includes dir prefix "somedir/").
+		pushFile(t, host, FtMetaPayload{
+			Path:   "somedir/b.txt",
+			Size:   int64(len(fileB)),
+			Mode:   0644,
+			SHA256: hashHexB,
+		}, fileB)
+
+		host.writeFrame(FtDone, nil)
+		ft, donePayload := host.readFrame()
+		assert.Equal(t, FtDone, ft)
+		var done FtDonePayload
+		json.Unmarshal(donePayload, &done)
+		assert.Equal(t, 2, done.Files)
+		assert.Equal(t, 0, done.Errors)
+	})
+
+	// Verify both files were written at destDir/somedir/* (agent joins dest + meta.Path).
+	gotA, err := os.ReadFile(filepath.Join(destDir, "somedir", "a.txt"))
+	require.NoError(t, err)
+	if diff := cmp.Diff(string(fileA), string(gotA)); diff != "" {
+		t.Errorf("file somedir/a.txt mismatch (-want +got):\n%s", diff)
+	}
+
+	gotB, err := os.ReadFile(filepath.Join(destDir, "somedir", "b.txt"))
+	require.NoError(t, err)
+	if diff := cmp.Diff(string(fileB), string(gotB)); diff != "" {
+		t.Errorf("file somedir/b.txt mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestHandleFTPush_AbortOnFtError(t *testing.T) {
 	destDir := t.TempDir()
 

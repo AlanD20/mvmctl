@@ -459,7 +459,7 @@ func (b *bootArgsBuilder) join() string {
 }
 
 // =============================================================================
-// Boot arguments — matches Python's boot args building exactly
+// Boot arguments — matches Python's _build_boot_args exactly
 // =============================================================================
 
 // buildBootArgs builds the kernel boot arguments string.
@@ -469,6 +469,12 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 
 	if s.config.BootArgs != "" {
 		bootArgs.parseFromString(s.config.BootArgs)
+	}
+
+	// Inject console=ttyS0 when console is enabled and user didn't set a console=
+	// Matches Python's _build_boot_args exactly
+	if s.config.EnableConsole && bootArgs.entryIndex("console") < 0 {
+		bootArgs.set("console", []string{"ttyS0"})
 	}
 
 	if !s.config.PCIEnabled {

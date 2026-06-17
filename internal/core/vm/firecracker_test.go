@@ -186,6 +186,7 @@ func TestFirecrackerSpawner_Generate_bootArgs(t *testing.T) {
 		"custom_boot_args_prepended": {
 			config: &model.FirecrackerConfig{
 				PCIEnabled:     false,
+				EnableConsole:  true,
 				BootArgs:       "quiet console=ttyS0",
 				GuestIP:        "10.0.0.2",
 				NetworkGateway: "10.0.0.1",
@@ -243,6 +244,39 @@ func TestFirecrackerSpawner_Generate_bootArgs(t *testing.T) {
 				CloudInitMode:  nil,
 			},
 			want: "pci=off ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service",
+		},
+		"custom_boot_args_without_console_console_enabled": {
+			config: &model.FirecrackerConfig{
+				PCIEnabled:     false,
+				EnableConsole:  true,
+				BootArgs:       "quiet",
+				GuestIP:        "10.0.0.2",
+				NetworkGateway: "10.0.0.1",
+				NetworkNetmask: "255.255.255.0",
+			},
+			want: "quiet console=ttyS0 pci=off ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service",
+		},
+		"custom_boot_args_with_console_tty0_console_enabled": {
+			config: &model.FirecrackerConfig{
+				PCIEnabled:     false,
+				EnableConsole:  true,
+				BootArgs:       "console=tty0",
+				GuestIP:        "10.0.0.2",
+				NetworkGateway: "10.0.0.1",
+				NetworkNetmask: "255.255.255.0",
+			},
+			want: "console=tty0 pci=off ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service",
+		},
+		"custom_boot_args_without_console_console_disabled": {
+			config: &model.FirecrackerConfig{
+				PCIEnabled:     false,
+				EnableConsole:  false,
+				BootArgs:       "quiet",
+				GuestIP:        "10.0.0.2",
+				NetworkGateway: "10.0.0.1",
+				NetworkNetmask: "255.255.255.0",
+			},
+			want: "quiet pci=off ip=10.0.0.2::10.0.0.1:255.255.255.0::eth0:off root=/dev/vda systemd.mask=systemd-networkd-wait-online.service",
 		},
 	}
 

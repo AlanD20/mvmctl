@@ -211,9 +211,10 @@ func handleFTPush(ctx context.Context, conn net.Conn, pushPayload []byte) {
 
 	var totalBytes int64
 	var fileErrors int
+	var fileSuccess int
 
-fileLoop:
-	for i := 0; i < len(push.Paths); i++ {
+mainLoop:
+	for {
 		select {
 		case <-ctx.Done():
 			slog.Warn("ft: push cancelled mid-transfer", "error", ctx.Err())
@@ -227,9 +228,14 @@ fileLoop:
 			slog.Error("ft: read meta frame", "error", err)
 			return
 		}
+		slog.Debug("ft: mainLoop read frame", "type", fmt.Sprintf("0x%02x", frameType))
+		if frameType == FtDone {
+			slog.Debug("ft: received done, breaking mainLoop")
+			break mainLoop
+		}
 		if frameType == FtError {
 			fileErrors++
-			continue fileLoop
+			continue mainLoop
 		}
 		if frameType != FtMeta {
 			slog.Error("ft: expected meta frame", "got", fmt.Sprintf("0x%02x", frameType))
@@ -261,7 +267,7 @@ fileLoop:
 				})
 				_ = WriteFTFrame(conn, FtError, errPayload)
 				fileErrors++
-				continue fileLoop
+				continue mainLoop
 			}
 		}
 
@@ -271,7 +277,7 @@ fileLoop:
 			errPayload, _ := json.Marshal(FtErrorPayload{Code: "mkdir_failed", Message: err.Error()})
 			_ = WriteFTFrame(conn, FtError, errPayload)
 			fileErrors++
-			continue fileLoop
+			continue mainLoop
 		}
 
 		// Open destination file.
@@ -281,10 +287,11 @@ fileLoop:
 			errPayload, _ := json.Marshal(FtErrorPayload{Code: "create_failed", Message: err.Error()})
 			_ = WriteFTFrame(conn, FtError, errPayload)
 			fileErrors++
-			continue fileLoop
+			continue mainLoop
 		}
 
 		// Send acceptance.
+		slog.Debug("ft: sending accept", "path", meta.Path, "destPath", destPath)
 		acceptPayload, _ := json.Marshal(FtMetaPayload{Accepted: true})
 		if err := WriteFTFrame(conn, FtMeta, acceptPayload); err != nil {
 			f.Close()
@@ -302,6 +309,7 @@ fileLoop:
 				slog.Error("ft: read data frame", "error", err)
 				return
 			}
+			slog.Debug("ft: dataLoop read frame", "type", fmt.Sprintf("0x%02x", frameType), "chunkLen", len(chunk))
 
 			switch frameType {
 			case FtData:
@@ -320,7 +328,7 @@ fileLoop:
 						})
 						_ = WriteFTFrame(conn, FtError, errPayload)
 						fileErrors++
-						continue fileLoop
+						continue mainLoop
 					}
 					okPayload, _ := json.Marshal(FtMetaPayload{
 						Path:   meta.Path,
@@ -332,8 +340,10 @@ fileLoop:
 						slog.Error("ft: write ok", "error", writeErr)
 						return
 					}
+					fileSuccess++
 					_ = f.Close() // best-effort: file was written successfully, close error is non-fatal
-					continue fileLoop
+					slog.Debug("ft: eos received, sending ok, continuing mainLoop", "path", meta.Path, "fileBytes", fileBytes)
+					continue mainLoop
 				}
 				n, writeErr := f.Write(chunk)
 				if writeErr != nil {
@@ -356,7 +366,7 @@ fileLoop:
 					slog.Error("ft: host error during push", "code", errPayload.Code, "message", errPayload.Message)
 				}
 				fileErrors++
-				continue fileLoop
+				continue mainLoop
 
 			default:
 				f.Close()
@@ -366,15 +376,11 @@ fileLoop:
 		}
 	}
 
-	// Read DONE frame from host (summary).
-	if _, _, err := ReadFTFrame(conn); err != nil {
-		slog.Error("ft: read done frame", "error", err)
-		return
-	}
-
 	// Send DONE back.
+	slog.Debug("ft: mainLoop done, sending done back",
+		"files", fileSuccess, "bytes", totalBytes, "errors", fileErrors)
 	donePayload, _ := json.Marshal(FtDonePayload{
-		Files:  len(push.Paths) - fileErrors,
+		Files:  fileSuccess,
 		Bytes:  totalBytes,
 		Errors: fileErrors,
 	})
@@ -383,7 +389,7 @@ fileLoop:
 		return
 	}
 
-	slog.Info("ft: push complete", "files", len(push.Paths)-fileErrors,
+	slog.Info("ft: push complete", "files", fileSuccess,
 		"bytes", totalBytes, "errors", fileErrors)
 }
 
