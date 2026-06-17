@@ -36,8 +36,8 @@ printf '%s\n' '{{.Hostname}}' > /etc/hostname`,
 ))
 
 var injectDNSTmpl = template.Must(template.New("inject_dns").Parse(
-	`grep -qs '^nameserver' /etc/resolv.conf 2>/dev/null ||
-  printf 'nameserver {{.DNSServer}}\n' > /etc/resolv.conf`,
+	`rm -f /etc/resolv.conf
+printf 'nameserver {{.DNSServer}}\n' > /etc/resolv.conf`,
 ))
 
 var ensureUserTmpl = template.Must(template.New("ensure_user").Parse(

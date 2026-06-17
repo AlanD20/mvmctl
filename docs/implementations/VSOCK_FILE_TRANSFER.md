@@ -27,6 +27,7 @@ Replace the tar-over-SSH pipe with a **binary frame protocol over vsock**. The h
 - **Transport**: Zero-copy via `sendfile()` where available, 256 KB buffered I/O otherwise
 - **Integrity**: SHA-256 streaming verification on both sides
 - **No SSH, no tar, no shell commands** — the agent handles file operations natively
+- **Recursive directory copy** — source directories are auto-detected and walked recursively; each file's relative path is preserved on the guest via `filepath.Walk` + `os.MkdirAll`, no `-r` flag needed
 
 ## Protocol Design
 
@@ -248,7 +249,7 @@ internal/service/vsockagent/
 
 internal/core/vsock/
 ├── file_transfer.go          # Host client: FTCopyToVM, FTCopyFromVM, FTCopyVMToVM
-├── file_transfer_test.go     # Tests: frame helpers, protocol exchange
+├── file_transfer_test.go     # Tests: frame helpers, protocol exchange, expandSources
 ├── protocol.go               # Constants: request types, buffer size
 ├── client.go                 # Base vsock Client (waitForAgent, Exec, Shell)
 
@@ -300,6 +301,18 @@ If the vsock connection drops mid-transfer:
 
 The agent calls `os.MkdirAll` on the destination base directory (push) or parent directory (file mode). Subdirectories in file paths are created via `os.MkdirAll(filepath.Dir(destPath), 0755)` before opening the file.
 
+### Recursive directory copy
+
+Source directories are auto-detected and expanded transparently — no `-r` flag needed:
+
+1. `expandSources()` calls `os.Stat` on each source path
+2. Regular files use `filepath.Base` as the relative path
+3. Directories are walked via `filepath.Walk`, each file gets a `relativePath` relative to the source root
+4. Files in subdirectories carry their full relative path (e.g. `sub/dir/file.txt`)
+5. The agent's existing `os.MkdirAll` creates parent dirs as needed
+
+Files inside a directory are streamed one at a time. Empty directories are skipped (their parent directories are created when files land in them).
+
 ### Empty files
 
 0-byte files are handled correctly: `FILE_META` with `size:0` is sent, followed immediately by an empty `FILE_DATA` (end-of-stream). The agent creates the file and skips the data loop.
@@ -337,5 +350,6 @@ The old SSH-based cp is backed up at `backup/ssh_cp/cp.go.bak`.
 | Integrity | None | SHA-256, 4 verification paths |
 | Progress | Tar pipe bytes | Per-chunk callback + PROGRESS frames (pull) |
 | Destination | Dir only (must end with /) | Standard cp semantics (dir or file) |
+| Recursive copy | Shell-expanded globs or `-r` | Auto-detected via `os.Stat`, transparent `filepath.Walk` |
 | Error recovery | Abort on any error | Per-file skip, partial cleanup |
 | Guest dependencies | sshd, tar, network | None (native Go) |

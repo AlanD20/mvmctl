@@ -23,7 +23,7 @@ Both backends have separate code paths, separate dependencies, separate error ha
 |--------|-----------|---------|
 | Mechanism | `losetup` + `mount` + `chroot` via compiled `mvm` binary (`mvm run provision`) | `libguestfs` via QEMU appliance |
 | Dependencies | Compiled binary (same `mvm` binary) | `libguestfs`, `supermin`, QEMU (system packages) |
-| Performance | ~200ms per VM | ~2600ms per VM |
+| Performance (create → ready, seq) | 2–5s per VM (see benchmarks) | 9–14s per VM (see benchmarks) |
 | Privilege | `mvm run provision` in sudoers | `supermin` in sudoers |
 | Implementation | `internal/lib/provisioner/loopmount/` (backend), `internal/service/loopmount/` (subprocess entry) | `internal/lib/provisioner/guestfs/` |
 | Default | **Yes** (`guestfs_enabled = false`) | **No** (opt-in via `mvm init` prompt or config) |
@@ -49,6 +49,24 @@ The natural alternative would be a fallback chain: try loop-mount first, fall ba
 
 The provisioner type is resolved **once at startup** in `api.NewOperation()` by reading `settings.guestfs_enabled`. All callers use `op.ProvisionerType` directly. This eliminates repeated Config.Get calls for the same setting.
 
+## Performance Benchmark (Wall-clock, Sequential)
+
+Measured from `mvm vm create` to first successful `vm exec echo ok` on a single host (x86_64, NVMe SSD). Each row is one VM, created sequentially.
+
+| Image | LoopMount (create → ready) | GuestFS (create → ready) | Slowdown |
+|---|---|---|---|
+| alpine | 1.4s → **2.0s** | 8.4s → **9.5s** | **4.8x** |
+| ubuntu:24.04 | 2.0s → **2.4s** | 9.5s → **10.1s** | **4.2x** |
+| ubuntu-minimal:24.04 | 2.0s → **2.4s** | 10.7s → **10.7s** | **4.5x** |
+| archlinux | 2.4s → **3.9s** | 13.7s → **13.7s** | **3.5x** |
+| debian:12 | 4.3s → **4.6s** | 13.5s → **13.5s** | **2.9x** |
+| firecracker:v1.15 | 1.9s → **2.1s** | 10.0s → **10.5s** | **5.0x** |
+
+GuestFS is **3–5x slower** than LoopMount for VM creation. Each `guestfish` invocation spins up a full QEMU process with the libguestfs appliance to mount and modify the rootfs. Under **parallel** load, GuestFS degrades further (15–27s per VM) because concurrent QEMU instances contend for the libguestfs appliance lock, serializing on disk I/O.
+
+The performance gap is an inherent property of the backend architecture, not an implementation issue. LoopMount modifies the rootfs via direct `mount` + `chroot`; GuestFS routes every filesystem operation through a QEMU-backed appliance.
+
 ## Related Decisions
 
 - CONTEXT.md "Provisioner Backend" — mount/umount consolidated in `mvm run provision` subcommand (loop-mount path only).
+- `benchmarks/results.json` — Full historical benchmark data for both backends.

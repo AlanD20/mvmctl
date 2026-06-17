@@ -139,8 +139,10 @@ func (b *GuestfsBackend) Run(ctx context.Context) error {
 			cfg.SetupSudo = true
 		case "shrink":
 			cfg.Shrink = true
-		case "deblob", "fix_fstab":
+		case "deblob":
 			cfg.Deblob = true
+		case "fix_fstab":
+			cfg.FixFstab = true
 		}
 	}
 

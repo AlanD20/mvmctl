@@ -366,6 +366,34 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)})
 	}
 
+	// ── Static SSH infrastructure (identical for every VM from this image) ──
+	// These ops set up the SSH daemon config, first-boot installer, host keys,
+	// and service enablement. Moved here from BuildDeblobOps so they are always
+	// produced when SSH keys are injected, regardless of deblobbing.
+	ops = append(ops, FileOp{
+		Path: "/etc/ssh/sshd_config.d/mvm.conf",
+		Data: []byte(pc.SSHDConfig("root")),
+		Mode: 0644,
+		UID:  0,
+		GID:  0,
+	})
+	ops = append(ops, FileOp{
+		Path: "/usr/local/bin/first-boot-ssh-installer.sh",
+		Data: []byte(pc.FirstBootInstaller()),
+		Mode: 0755,
+		UID:  0,
+		GID:  0,
+	})
+	ops = append(ops, FileOp{
+		Path: "/etc/systemd/system/first-boot-ssh-installer.service",
+		Data: []byte(pc.FirstBootService()),
+		Mode: 0644,
+		UID:  0,
+		GID:  0,
+	})
+	ops = append(ops, ChrootOp{Command: "ssh-keygen -A"})
+	ops = append(ops, ChrootOp{Command: enableSSHScript})
+
 	return ops
 }
 
@@ -490,31 +518,6 @@ func (pc Builder) BuildDeblobOps(osType string) []Operation {
 
 	// ── MicroVM boot optimizations (systemd) ──────────────────────────
 	ops = append(ops, ChrootOp{Command: maskServicesScript})
-
-	// ── SSH daemon configuration (identical for every VM from this image) ──
-	ops = append(ops, FileOp{
-		Path: "/etc/ssh/sshd_config.d/mvm.conf",
-		Data: []byte(pc.SSHDConfig("root")),
-		Mode: 0644,
-		UID:  0,
-		GID:  0,
-	})
-	ops = append(ops, FileOp{
-		Path: "/usr/local/bin/first-boot-ssh-installer.sh",
-		Data: []byte(pc.FirstBootInstaller()),
-		Mode: 0755,
-		UID:  0,
-		GID:  0,
-	})
-	ops = append(ops, FileOp{
-		Path: "/etc/systemd/system/first-boot-ssh-installer.service",
-		Data: []byte(pc.FirstBootService()),
-		Mode: 0644,
-		UID:  0,
-		GID:  0,
-	})
-	ops = append(ops, ChrootOp{Command: "ssh-keygen -A"})
-	ops = append(ops, ChrootOp{Command: enableSSHScript})
 
 	// ── OS-specific cache cleanup ─────────────────────────────────
 	osLower := strings.ToLower(osType)
