@@ -1279,6 +1279,19 @@ func (op *Operation) VMSnapshot(
 	memFile string,
 	stateFile string,
 ) error {
+	// Resolve relative paths against the caller's working directory.
+	// Firecracker resolves paths relative to its own CWD (set at spawn time),
+	// which may differ from the caller's CWD at snapshot time.
+	var err error
+	memFile, err = filepath.Abs(memFile)
+	if err != nil {
+		return errs.New(errs.CodeVMSnapshotFailed, fmt.Sprintf("invalid mem_file path: %v", err))
+	}
+	stateFile, err = filepath.Abs(stateFile)
+	if err != nil {
+		return errs.New(errs.CodeVMSnapshotFailed, fmt.Sprintf("invalid state_file path: %v", err))
+	}
+
 	// Exactly one VM must be resolved.
 	vmResolver := vm.NewResolver(op.Repos.VM)
 	vmItem, err := vmResolver.Resolve(ctx, input.Identifiers[0])
@@ -1313,6 +1326,18 @@ func (op *Operation) VMLoad(
 	// Validate only one VM for load
 	if len(input.Identifiers) != 1 {
 		return errs.NotFound(errs.CodeVMNotFound, "Expected exactly one VM identifier")
+	}
+	// Resolve relative paths against the caller's working directory.
+	// Firecracker resolves paths relative to its own CWD (set at spawn time),
+	// which may differ from the caller's CWD at snapshot/load time.
+	var err error
+	memFile, err = filepath.Abs(memFile)
+	if err != nil {
+		return errs.New(errs.CodeVMLoadSnapshotFailed, fmt.Sprintf("invalid mem_file path: %v", err))
+	}
+	stateFile, err = filepath.Abs(stateFile)
+	if err != nil {
+		return errs.New(errs.CodeVMLoadSnapshotFailed, fmt.Sprintf("invalid state_file path: %v", err))
 	}
 	var missing []string
 	if _, err := os.Stat(memFile); err != nil {
