@@ -21,8 +21,8 @@ const (
 
 // --- VM ---
 
-// VM represents a microVM instance.
-type VM struct {
+// VMItem represents a microVM instance.
+type VMItem struct {
 	ID            string   `json:"id"              db:"id"`
 	Name          string   `json:"name"            db:"name"`
 	Status        VMStatus `json:"status"          db:"status"`
@@ -87,7 +87,7 @@ type VM struct {
 	Kernel  *KernelItem      `json:"kernel,omitempty"`
 	Image   *ImageItem       `json:"image,omitempty"`
 	Binary  *BinaryItem      `json:"binary,omitempty"`
-	Network *Network         `json:"network,omitempty"`
+	Network *NetworkItem         `json:"network,omitempty"`
 	Volumes []*VolumeItem    `json:"volumes,omitempty"`
 	Vsock   *VsockConfigItem `json:"vsock,omitempty"`
 }

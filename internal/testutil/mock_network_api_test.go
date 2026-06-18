@@ -13,7 +13,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// --- MockNetworkAPI ------------------------------------------------------------
+// --- MockNetworkAPI ---
 // Rationale: MockNetworkAPI implements api.NetworkAPI for testing. These tests
 // verify default zero-value returns and custom function routing.
 
@@ -46,9 +46,9 @@ func TestMockNetworkAPI_DefaultReturnsNil(t *testing.T) {
 
 func TestMockNetworkAPI_CustomFunc(t *testing.T) {
 	t.Run("NetworkCreate_custom_func", func(t *testing.T) {
-		expected := &model.Network{ID: "net-1", Name: "test-net", Subnet: "10.0.0.0/24"}
+		expected := &model.NetworkItem{ID: "net-1", Name: "test-net", Subnet: "10.0.0.0/24"}
 		m := &testutil.MockNetworkAPI{
-			NetworkCreateFunc: func(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error) {
+			NetworkCreateFunc: func(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
 				return expected, nil
 			},
 		}
@@ -70,12 +70,12 @@ func TestMockNetworkAPI_CustomFunc(t *testing.T) {
 	})
 
 	t.Run("NetworkListAll_custom_func", func(t *testing.T) {
-		expected := []*model.Network{
+		expected := []*model.NetworkItem{
 			{ID: "net-1", Name: "alpha"},
 			{ID: "net-2", Name: "beta"},
 		}
 		m := &testutil.MockNetworkAPI{
-			NetworkListAllFunc: func(ctx context.Context) ([]*model.Network, error) {
+			NetworkListAllFunc: func(ctx context.Context) ([]*model.NetworkItem, error) {
 				return expected, nil
 			},
 		}
@@ -87,9 +87,9 @@ func TestMockNetworkAPI_CustomFunc(t *testing.T) {
 	})
 
 	t.Run("NetworkCreateDefaultNetwork_custom_func", func(t *testing.T) {
-		expected := &model.Network{ID: "default-net", Name: "default"}
+		expected := &model.NetworkItem{ID: "default-net", Name: "default"}
 		m := &testutil.MockNetworkAPI{
-			NetworkCreateDefaultNetworkFunc: func(ctx context.Context) (*model.Network, error) {
+			NetworkCreateDefaultNetworkFunc: func(ctx context.Context) (*model.NetworkItem, error) {
 				return expected, nil
 			},
 		}

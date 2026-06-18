@@ -17,7 +17,7 @@ type LogInput struct {
 }
 // ResolvedLogInput specifies resolved log input.
 type ResolvedLogInput struct {
-	VM                   *model.VM
+	VM                   *model.VMItem
 	LogType              string
 	Lines                int
 	Follow               bool
@@ -65,7 +65,7 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 	}
 	return r.result, nil
 }
-func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*model.VM, error) {
+func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*model.VMItem, error) {
 	// Use VMRequest pipeline for VM resolution.
 	// Let VMNotFoundError propagate directly.
 	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r.input.Identifier}}, r.db, vmRepo)

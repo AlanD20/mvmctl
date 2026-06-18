@@ -12,11 +12,11 @@ import (
 
 // MockVMAPI implements api.VMAPI for testing.
 type MockVMAPI struct {
-	VMCreateFunc       func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VM, error)
+	VMCreateFunc       func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VMItem, error)
 	VMRemoveFunc       func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMPruneFunc        func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	VMListFunc         func(ctx context.Context, statuses ...string) []*model.VM
-	VMGetFunc          func(ctx context.Context, input inputs.VMInput) (*model.VM, error)
+	VMListFunc         func(ctx context.Context, statuses ...string) []*model.VMItem
+	VMGetFunc          func(ctx context.Context, input inputs.VMInput) (*model.VMItem, error)
 	VMInspectFunc      func(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error)
 	VMStartFunc        func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMStopFunc         func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
@@ -34,7 +34,7 @@ func (m *MockVMAPI) VMCreate(
 	ctx context.Context,
 	input inputs.VMCreateInput,
 	onProgress event.OnProgressCallback,
-) ([]*model.VM, error) {
+) ([]*model.VMItem, error) {
 	if m.VMCreateFunc != nil {
 		return m.VMCreateFunc(ctx, input, onProgress)
 	}
@@ -55,14 +55,14 @@ func (m *MockVMAPI) VMPrune(ctx context.Context, dryRun bool, includeAll bool) (
 	return nil, nil
 }
 
-func (m *MockVMAPI) VMList(ctx context.Context, statuses ...string) []*model.VM {
+func (m *MockVMAPI) VMList(ctx context.Context, statuses ...string) []*model.VMItem {
 	if m.VMListFunc != nil {
 		return m.VMListFunc(ctx, statuses...)
 	}
 	return nil
 }
 
-func (m *MockVMAPI) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM, error) {
+func (m *MockVMAPI) VMGet(ctx context.Context, input inputs.VMInput) (*model.VMItem, error) {
 	if m.VMGetFunc != nil {
 		return m.VMGetFunc(ctx, input)
 	}

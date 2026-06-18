@@ -1,0 +1,21 @@
+version: 1
+vm:
+  - name: vsock-test
+    network: net
+    key: vsock
+    image: ubuntu:noble
+    kernel: ce6e44
+    disk_size: 8G
+    vcpu: 2
+    mem: 1G
+exec:
+  - name: show hello
+    target: vsock-test
+    cmd: echo 'hello'
+    depends_on:
+      - "vm:vsock-test"
+  - name: apt update
+    target: vsock-test
+    cmd: apt update && apt install -y net-tools
+    depends_on:
+      - "vm:vsock-test"

@@ -403,22 +403,22 @@ func TestSubnetsOverlap(t *testing.T) {
 // crash the API layer.
 
 func TestFindNetworkByName(t *testing.T) {
-	net1 := &model.Network{Name: "net-a"}
-	net2 := &model.Network{Name: "net-b"}
+	net1 := &model.NetworkItem{Name: "net-a"}
+	net2 := &model.NetworkItem{Name: "net-b"}
 
 	tests := map[string]struct {
-		networks []*model.Network
+		networks []*model.NetworkItem
 		name     string
-		want     *model.Network
+		want     *model.NetworkItem
 	}{
 		// Boundary/error cases first
-		"not_found":        {networks: []*model.Network{net1}, name: "nonexistent", want: nil},
-		"empty_slice":      {networks: []*model.Network{}, name: "net-a", want: nil},
-		"case_sensitivity": {networks: []*model.Network{{Name: "MyNet"}}, name: "mynet", want: nil},
+		"not_found":        {networks: []*model.NetworkItem{net1}, name: "nonexistent", want: nil},
+		"empty_slice":      {networks: []*model.NetworkItem{}, name: "net-a", want: nil},
+		"case_sensitivity": {networks: []*model.NetworkItem{{Name: "MyNet"}}, name: "mynet", want: nil},
 
 		// Happy paths
-		"found_by_name":     {networks: []*model.Network{net1}, name: "net-a", want: net1},
-		"multiple_networks": {networks: []*model.Network{net1, net2}, name: "net-b", want: net2},
+		"found_by_name":     {networks: []*model.NetworkItem{net1}, name: "net-a", want: net1},
+		"multiple_networks": {networks: []*model.NetworkItem{net1, net2}, name: "net-b", want: net2},
 	}
 
 	for name, tc := range tests {

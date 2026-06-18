@@ -586,7 +586,7 @@ func (t *IPTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.Fi
 
 // --- Count orphaned rules ---
 
-func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model.Network) int {
+func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model.NetworkItem) int {
 	dbRules, err := t.repo.GetByNetworkID(ctx, network.ID, true)
 	if err != nil {
 		return 0

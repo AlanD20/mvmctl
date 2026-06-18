@@ -17,19 +17,19 @@ import (
 )
 // NetworkAPI defines the public interface for network operations.
 type NetworkAPI interface {
-	NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error)
+	NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error)
 	NetworkRemove(ctx context.Context, input inputs.NetworkInput, force bool) error
-	NetworkListAll(ctx context.Context) ([]*model.Network, error)
-	NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.Network, error)
-	NetworkToJSON(networks []*model.Network) []map[string]any
+	NetworkListAll(ctx context.Context) ([]*model.NetworkItem, error)
+	NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error)
+	NetworkToJSON(networks []*model.NetworkItem) []map[string]any
 	NetworkInspect(ctx context.Context, input inputs.NetworkInput) (*results.NetworkInspect, error)
 	NetworkSetDefault(ctx context.Context, input inputs.NetworkInput) error
 	NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error)
 	NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	NetworkCreateDefaultNetwork(ctx context.Context) (*model.Network, error)
+	NetworkCreateDefaultNetwork(ctx context.Context) (*model.NetworkItem, error)
 }
 // NetworkCreate creates a new network.
-func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error) {
+func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
 	request := inputs.NewNetworkCreateRequest(input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
@@ -38,7 +38,7 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 	createdAt := time.Now().Format(time.RFC3339)
 	hashInput := fmt.Sprintf("%s:%s:%s", resolved.Name, resolved.Subnet, createdAt)
 	networkID := fmt.Sprintf("%x", sha256.Sum256([]byte(hashInput)))
-	networkItem := &model.Network{
+	networkItem := &model.NetworkItem{
 		ID:           networkID,
 		Name:         resolved.Name,
 		Subnet:       resolved.Subnet,
@@ -139,7 +139,7 @@ func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInpu
 	return nil
 }
 // NetworkListAll returns all networks with lease enrichment.
-func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.Network, error) {
+func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.NetworkItem, error) {
 	networks, err := op.Services.Network.ListAll(ctx, true)
 	if err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.Network, erro
 // NetworkGet returns a single network by Input/Request resolution pipeline.
 // uses NetworkInput/NetworkRequest
 // to resolve identifiers (by name or ID) and supports multi-identifier resolution.
-func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.Network, error) {
+func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error) {
 	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
 	resolved, err := request.Resolve(ctx)
 	if err != nil {
@@ -165,7 +165,7 @@ func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) 
 }
 // NetworkToJSON converts networks to JSON-serializable dicts.
 // delegates to model field mapping.
-func (op *Operation) NetworkToJSON(networks []*model.Network) []map[string]any {
+func (op *Operation) NetworkToJSON(networks []*model.NetworkItem) []map[string]any {
 	result := make([]map[string]any, 0, len(networks))
 	for _, n := range networks {
 		result = append(result, map[string]any{
@@ -280,7 +280,7 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input inputs.Network
 }
 // NetworkSync syncs firewall rules for one or more networks.
 func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error) {
-	var networks []*model.Network
+	var networks []*model.NetworkItem
 	var err error
 	if len(input.Identifiers) > 0 {
 		req := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
@@ -401,7 +401,7 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 }
 // NetworkCreateDefaultNetwork creates the default network if it doesn't exist.
 // Updates Repository component tracking after creation.
-func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Network, error) {
+func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.NetworkItem, error) {
 	defaultNameRaw, _ := op.ConfigGet(ctx, "defaults.network", "name")
 	defaultName, _ := defaultNameRaw.(string)
 	defaultSubnetRaw, _ := op.ConfigGet(ctx, "defaults.network", "subnet")

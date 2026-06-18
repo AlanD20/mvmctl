@@ -32,11 +32,11 @@ import (
 )
 // VMAPI defines the public interface for VM operations.
 type VMAPI interface {
-	VMCreate(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VM, error)
+	VMCreate(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VMItem, error)
 	VMRemove(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	VMList(ctx context.Context, statuses ...string) []*model.VM
-	VMGet(ctx context.Context, input inputs.VMInput) (*model.VM, error)
+	VMList(ctx context.Context, statuses ...string) []*model.VMItem
+	VMGet(ctx context.Context, input inputs.VMInput) (*model.VMItem, error)
 	VMInspect(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error)
 	VMStart(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMStop(ctx context.Context, input inputs.VMInput) *errs.BatchResult
@@ -55,7 +55,7 @@ func (op *Operation) VMCreate(
 	ctx context.Context,
 	input inputs.VMCreateInput,
 	onProgress event.OnProgressCallback,
-) ([]*model.VM, error) {
+) ([]*model.VMItem, error) {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "create VMs"); err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodePrivilegeRequired,
@@ -186,7 +186,7 @@ func (op *Operation) VMCreate(
 	defer batchCancel()
 	type vmResult struct {
 		idx int
-		vm  *model.VM
+		vm  *model.VMItem
 		err error
 	}
 	resultCh := make(chan vmResult, len(names))
@@ -229,7 +229,7 @@ func (op *Operation) VMCreate(
 		}(idx, name)
 	}
 	// Collect results. On first error in atomic mode, cancel remaining goroutines.
-	createdVMs := make([]*model.VM, 0, len(names))
+	createdVMs := make([]*model.VMItem, 0, len(names))
 	var createErrors []string
 	atomicFailed := false
 	for range names {
@@ -267,7 +267,7 @@ func (op *Operation) vmBuilderCreate(
 	ctx context.Context,
 	resolved *inputs.ResolvedVMCreateInput,
 	onProgress event.OnProgressCallback,
-) (*model.VM, error) {
+) (*model.VMItem, error) {
 	if resolved == nil {
 		return nil, fmt.Errorf("failed to resolve necessary dependencies")
 	}
@@ -300,7 +300,7 @@ func (op *Operation) vmBuilderCreate(
 		case <-cleanupDone:
 		}
 	})
-	var vmInstance *model.VM
+	var vmInstance *model.VMItem
 	var execErr error
 	// Execute
 	execErr = op.vmBuilderExecute(ctx, builder, resolved)
@@ -893,8 +893,8 @@ func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) 
 }
 // --- List / ToJSON ---
 // List returns all VMs, optionally filtered by status.
-func (op *Operation) VMList(ctx context.Context, statuses ...string) []*model.VM {
-	var vms []*model.VM
+func (op *Operation) VMList(ctx context.Context, statuses ...string) []*model.VMItem {
+	var vms []*model.VMItem
 	var err error
 	if len(statuses) > 0 {
 		vms, err = op.Repos.VM.ListByStatus(ctx, statuses...)
@@ -908,7 +908,7 @@ func (op *Operation) VMList(ctx context.Context, statuses ...string) []*model.VM
 	return vms
 }
 // VMGet returns a single VM by identifier with enriched relations.
-func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM, error) {
+func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VMItem, error) {
 	if len(input.Identifiers) != 1 {
 		return nil, fmt.Errorf("expected exactly one VM identifier")
 	}
@@ -919,7 +919,7 @@ func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM
 		return nil, err
 	}
 	// Enrich VM with relations
-	op.Enr.EnrichVM(ctx, []*model.VM{vm}, "kernel", "image", "binary", "network", "network.leases", "volumes")
+	op.Enr.EnrichVM(ctx, []*model.VMItem{vm}, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	return vm, nil
 }
 // Inspect returns detailed VM info with enriched data.
@@ -929,7 +929,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 		return nil, err
 	}
 	// Enrich all relations at once instead of manual repo calls.
-	if err := op.Enr.EnrichVM(ctx, []*model.VM{vm},
+	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vm},
 		"kernel", "image", "binary", "network", "network.leases", "volumes",
 	); err != nil {
 		return nil, err
@@ -1104,7 +1104,7 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 	}
 	return &errs.BatchResult{Items: results}
 }
-func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VM, snapshotMode bool) error {
+func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, snapshotMode bool) error {
 	vmDir := infra.GetVMDirByID(v.ID)
 	// Network info is required — the VM record must have it pre-loaded.
 	if v.Network == nil {
@@ -1324,7 +1324,7 @@ func (op *Operation) VMLoad(
 		)
 	}
 	// Enrich VM with relations (needed for respawn and snapshot load).
-	op.Enr.EnrichVM(ctx, []*model.VM{vmItem}, "kernel", "image", "binary", "network")
+	op.Enr.EnrichVM(ctx, []*model.VMItem{vmItem}, "kernel", "image", "binary", "network")
 	// If the VM is stopped, spawn a fresh Firecracker in pre-boot (snapshot) mode
 	// so the API socket is available for PUT /snapshot/load.
 	if vmItem.Status == model.VMStatusStopped {
@@ -1937,14 +1937,14 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 	}
 	return fcConfig
 }
-func (c *VMCreateBuilder) toVMModel() *model.VM {
+func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 	if c.resolved == nil || c.spawner == nil || c.spawner.PID == nil {
 		return nil
 	}
 	now := time.Now().Format(time.RFC3339)
 	logPath := filepath.Join(c.vmDir, c.resolved.LogFilename)
 	serialPath := filepath.Join(c.vmDir, c.resolved.SerialOutputFilename)
-	vm := &model.VM{
+	vm := &model.VMItem{
 		ID:               c.vmID,
 		Name:             c.resolved.Name,
 		PID:              *c.spawner.PID,

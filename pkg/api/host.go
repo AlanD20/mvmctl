@@ -36,7 +36,7 @@ type HostAPI interface {
 	HostStatusCheck(ctx context.Context) *results.HostStatusCheck
 	HostClean(ctx context.Context) ([]string, error)
 	HostReset(ctx context.Context) ([]string, error)
-	HostGetRunningVMs(ctx context.Context) ([]*model.VM, error)
+	HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error)
 	HostIsInitialized(ctx context.Context) bool
 	HostCheckReadiness(ctx context.Context) *model.ProbeResult
 }
@@ -594,7 +594,7 @@ func (op *Operation) HostReset(ctx context.Context) ([]string, error) {
 	return summary, nil
 }
 // HostGetRunningVMs returns running VMs.
-func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VM, error) {
+func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error) {
 	return op.Repos.VM.ListByStatus(ctx, string(model.VMStatusRunning), string(model.VMStatusStarting))
 }
 // HostIsInitialized checks if host is initialized.

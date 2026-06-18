@@ -77,8 +77,8 @@ const FirewallPortAny = 0
 
 // --- Network ---
 
-// Network represents a VM network.
-type Network struct {
+// NetworkItem represents a VM network.
+type NetworkItem struct {
 	ID           string  `json:"id"                     db:"id"`
 	Name         string  `json:"name"                   db:"name"`
 	Subnet       string  `json:"subnet"                 db:"subnet"`
@@ -96,7 +96,7 @@ type Network struct {
 	// Resolved relations (not stored in DB directly)
 	Leases        []*NetworkLeaseItem `json:"leases,omitempty"`
 	IPTablesRules []*FirewallRule     `json:"iptables_rules,omitempty"`
-	VMs           []*VM               `json:"vms,omitempty"`
+	VMs           []*VMItem               `json:"vms,omitempty"`
 }
 
 // --- NetworkLeaseItem ---

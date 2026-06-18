@@ -42,7 +42,7 @@ type VMResourcesInfo struct {
 type VMNetworkingInfo struct {
 	IPv4      string         `json:"ipv4"`
 	MAC       string         `json:"mac"`
-	Network   *model.Network `json:"network,omitempty"`
+	Network   *model.NetworkItem `json:"network,omitempty"`
 	TapDevice string         `json:"tap_device"`
 }
 

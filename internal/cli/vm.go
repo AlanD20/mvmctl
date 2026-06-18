@@ -19,40 +19,40 @@ import (
 
 // vmColumns defines the local listing columns for VMs.
 var vmColumns = []common.ListingColumn{
-	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VM).ID) }},
-	{Header: "Name", Extract: func(v any) string { return v.(*model.VM).Name }},
-	{Header: "Status", Extract: func(v any) string { return string(v.(*model.VM).Status) }},
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VMItem).ID) }},
+	{Header: "Name", Extract: func(v any) string { return v.(*model.VMItem).Name }},
+	{Header: "Status", Extract: func(v any) string { return string(v.(*model.VMItem).Status) }},
 	{Header: "Exit", Extract: func(v any) string {
-		ec := v.(*model.VM).ExitCode
+		ec := v.(*model.VMItem).ExitCode
 		if ec != nil {
 			return fmt.Sprintf("%d", *ec)
 		}
 		return "-"
 	}},
 	{Header: "IPv4", Extract: func(v any) string {
-		ip := v.(*model.VM).IPv4
+		ip := v.(*model.VMItem).IPv4
 		if ip == "" {
 			return "-"
 		}
 		return ip
 	}},
 	{Header: "Resources", Extract: func(v any) string {
-		vm := v.(*model.VM)
+		vm := v.(*model.VMItem)
 		return fmt.Sprintf("%d vCPU / %d MiB / %d MiB", vm.VCPUCount, vm.MemSizeMiB, vm.DiskSizeMiB)
 	}, LongOnly: true},
 	{
 		Header:   "Image",
-		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VM).ImageID) },
+		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VMItem).ImageID) },
 		LongOnly: true,
 	},
 	{
 		Header:   "Kernel",
-		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VM).KernelID) },
+		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VMItem).KernelID) },
 		LongOnly: true,
 	},
 	{
 		Header:  "Created",
-		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VM).CreatedAt, "relative") },
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VMItem).CreatedAt, "relative") },
 	},
 }
 
@@ -105,7 +105,7 @@ func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jso
 
 	if jsonOutput {
 		if vms == nil {
-			vms = []*model.VM{}
+			vms = []*model.VMItem{}
 		}
 		b, _ := json.MarshalIndent(vms, "", "  ")
 		fmt.Println(string(b))
@@ -140,7 +140,7 @@ func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonO
 
 	if jsonOutput {
 		if vms == nil {
-			vms = []*model.VM{}
+			vms = []*model.VMItem{}
 		}
 		b, _ := json.MarshalIndent(vms, "", "  ")
 		fmt.Println(string(b))
@@ -429,13 +429,13 @@ func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, forc
 	if removeResult.HasErrors() {
 		for _, r := range removeResult.Items {
 			if r.IsOK() {
-				vm, ok := r.Item.(*model.VM)
+				vm, ok := r.Item.(*model.VMItem)
 				if ok && vm != nil {
 					common.Cli.Success(fmt.Sprintf("Removed: %s", vm.Name))
 				}
 			} else {
 				itemName := "unknown"
-				if vm, ok := r.Item.(*model.VM); ok && vm != nil {
+				if vm, ok := r.Item.(*model.VMItem); ok && vm != nil {
 					itemName = vm.Name
 				}
 				msg := r.Message
@@ -449,7 +449,7 @@ func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, forc
 	}
 	names := make([]string, 0, len(removeResult.Items))
 	for _, r := range removeResult.Items {
-		if vm, ok := r.Item.(*model.VM); ok && vm != nil {
+		if vm, ok := r.Item.(*model.VMItem); ok && vm != nil {
 			names = append(names, vm.Name)
 		}
 	}

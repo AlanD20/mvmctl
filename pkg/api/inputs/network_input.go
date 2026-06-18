@@ -14,7 +14,7 @@ type NetworkInput struct {
 }
 // ResolvedNetworkInput specifies resolved network input.
 type ResolvedNetworkInput struct {
-	Networks []*model.Network
+	Networks []*model.NetworkItem
 	Force    bool
 }
 // NetworkRequest specifies network request.

@@ -32,7 +32,7 @@ type SSHRequest struct {
 	cfg    *config.Service
 	input  SSHInput
 	result *ResolvedSSHInput
-	vm     *model.VM
+	vm     *model.VMItem
 }
 // NewSSHRequest creates a new SSHRequest.
 func NewSSHRequest(inputs SSHInput, cfg *config.Service) *SSHRequest {

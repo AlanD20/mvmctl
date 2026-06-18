@@ -16,7 +16,7 @@ type VMInput struct {
 }
 // ResolvedVMInput specifies resolved v m input.
 type ResolvedVMInput struct {
-	VMs   []*model.VM
+	VMs   []*model.VMItem
 	Force bool
 }
 // VMRequest specifies v m request.

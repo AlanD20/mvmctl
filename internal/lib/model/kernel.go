@@ -18,7 +18,7 @@ type KernelItem struct {
 	DeletedAt *string `json:"deleted_at,omitempty" db:"deleted_at"`
 
 	// Resolved relations
-	VMs []*VM `json:"vms,omitempty"`
+	VMs []*VMItem `json:"vms,omitempty"`
 }
 
 // --- KernelPullResult ---

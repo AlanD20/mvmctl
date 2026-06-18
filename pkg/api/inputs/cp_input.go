@@ -140,7 +140,7 @@ func (r *CPRequest) resolveVMSide(
 	}, nil
 }
 // resolveVM resolves a VM by name, IP, MAC, or ID prefix.
-func (r *CPRequest) resolveVM(ctx context.Context, identifier string, vmRepo vm.Repository) (*model.VM, error) {
+func (r *CPRequest) resolveVM(ctx context.Context, identifier string, vmRepo vm.Repository) (*model.VMItem, error) {
 	vmResolver := vm.NewResolver(vmRepo)
 	vmEntity, err := vmResolver.Resolve(ctx, identifier)
 	if err != nil {

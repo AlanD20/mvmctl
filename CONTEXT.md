@@ -51,7 +51,7 @@ Work that coordinates across multiple domains (e.g., VM creation orchestrates vm
 
 A struct bound to a single entity instance. Manages lifecycle state transitions for that entity (start, stop, pause, resume, snapshot). The litmus test: if the operation doesn't need a specific entity instance to exist, it doesn't belong in Controller. Controller communicates with the running entity's Firecracker API socket -- but that's a consequence of the entity-orientation, not the definition. Does NOT validate input. Does NOT orchestrate across domains. Does NOT handle CRUD creation or removal.
 
-Constructed with the entity + its Repository: `vm.NewController(vm *model.VM, repo Repository)`. NOT wired at startup -- created per-operation in the Service layer.
+Constructed with the entity + its Repository: `vm.NewController(vm *model.VMItem, repo Repository)`. NOT wired at startup -- created per-operation in the Service layer.
 
 *Example: `vm.NewController(vmItem, repo).Snapshot(ctx)` -- snapshots this specific VM. `network.NewService(repo, tracker).RemoveBridge(ctx, bridge)` -- removes a bridge, no single network entity needed.*
 
@@ -88,7 +88,7 @@ Cloud-init domain (`internal/core/cloudinit/`) is distinct from services -- it's
 
 A struct for entity resolution by identifier (name, ID prefix, IP, MAC to domain object). Pure resolution -- no enrichment. Enrichment is handled by the `internal/enricher/` package. Resolver delegates to Repository for DB queries.
 
-*Example: `vm.Resolver` has `ByID(ctx, id)`, `ByName(ctx, name)`, `ByIP(ctx, ip)`, `ResolveMany(ctx, identifiers)`. Returns `*model.VM` or `ResolveResult{VMs, Errors, ExitCode}`.*
+*Example: `vm.Resolver` has `ByID(ctx, id)`, `ByName(ctx, name)`, `ByIP(ctx, ip)`, `ResolveMany(ctx, identifiers)`. Returns `*model.VMItem` or `ResolveResult{VMs, Errors, ExitCode}`.*
 
 ### Enrichment pattern
 
@@ -158,7 +158,7 @@ Every domain with public-facing input must follow this three-struct pattern in `
 
 Mandatory for any domain that has public CLI commands or API endpoints.
 
-*Example: `VMInput{Identifiers, Force}` -> `VMRequest{db, input, resolver, enricher}.Resolve(ctx)` -> `ResolvedVMInput{VMs []*model.VM, Force bool}`.*
+*Example: `VMInput{Identifiers, Force}` -> `VMRequest{db, input, resolver, enricher}.Resolve(ctx)` -> `ResolvedVMInput{VMs []*model.VMItem, Force bool}`.*
 
 ### SQLite schema overview
 
@@ -252,7 +252,7 @@ The `FirewallTracker` also reads an `iptables_xtcomment` user setting that adds 
 
 ### Error handling
 
-A single `DomainError` type in `pkg/errs/` replaces Python's rich exception hierarchy. Every error has a `Code`, `Message`, `Op`, `Entity`, `Class`, `Err`, and optional `Details`. Codes are dot-separated: `vm.not_found`, `network.subnet.overlap`, `host.init.sudoers_failed`.
+A single `DomainError` type in `pkg/errs/` handles all error scenarios. Every error has a `Code`, `Message`, `Op`, `Entity`, `Class`, `Err`, and optional `Details`. Codes are dot-separated: `vm.not_found`, `network.subnet.overlap`, `host.init.sudoers_failed`.
 
 ```go
 // Creating errors
@@ -347,8 +347,8 @@ Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(
 ALL model types live in `internal/lib/model/` -- a single shared package. No domain imports anything outside the model package. Every type has `json:"name"` struct tags and `db:"column"` struct tags for sqlx scanning.
 
 Key types:
-- `model.VM` -- VM instance (was `VMInstanceItem` in Python)
-- `model.Network` -- network (was `NetworkItem`)
+- `model.VMItem` -- VM instance
+- `model.NetworkItem` -- network
 - `model.ImageItem` -- image record
 - `model.KernelItem` -- kernel record
 - `model.BinaryItem` -- binary record

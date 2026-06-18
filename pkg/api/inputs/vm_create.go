@@ -77,7 +77,7 @@ type ResolvedVMCreateInput struct {
 	UserUID             int
 	UserGID             int
 	GuestMACPrefix      string
-	Network             *model.Network
+	Network             *model.NetworkItem
 	Image               *model.ImageItem
 	Kernel              *model.KernelItem
 	Binary              *model.BinaryItem
@@ -232,8 +232,8 @@ func (r *VMCreateRequest) resolveKernel(ctx context.Context, input *VMCreateInpu
 	return krnl, nil
 }
 // resolveNetwork resolves the network from a selector or gets the default.
-func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInput) (*model.Network, error) {
-	var netw *model.Network
+func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInput) (*model.NetworkItem, error) {
+	var netw *model.NetworkItem
 	var err error
 	if input.NetworkID == nil {
 		netw, err = r.networkResolver.GetDefault(ctx)
