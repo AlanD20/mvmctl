@@ -1,5 +1,7 @@
 //go:build arm64
 
+//go:generate touch agent-linux-arm64.gz
+
 package vsockagent
 
 import (

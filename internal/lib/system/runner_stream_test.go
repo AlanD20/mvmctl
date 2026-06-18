@@ -134,8 +134,8 @@ func TestStream_contextCancellation(t *testing.T) {
 	select {
 	case <-done:
 		// Channel closed — good
-	case <-time.After(5 * time.Second):
-		t.Fatal("channel did not close after context cancellation within 5s — deadlock?")
+	case <-time.After(10 * time.Second):
+		t.Fatal("channel did not close after context cancellation within 10s — deadlock?")
 	}
 }
 

@@ -99,11 +99,6 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	// Store API reference for shell completion
 	opRef = op
 
-	// TUI command — accepts optional Operation; initializes lazily if nil
-	if tuiCmd := NewTUICmd(op); tuiCmd != nil {
-		cmd.AddCommand(tuiCmd)
-	}
-
 	// Domain commands require a fully initialized Operation. When op is nil
 	// (e.g., "mvm run <service>" mode), we register only the infrastructure
 	// commands above — version, completion, run.

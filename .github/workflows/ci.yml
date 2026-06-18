@@ -38,14 +38,14 @@ jobs:
          golines --max-len=120 --list-files ./internal/ ./pkg/ ./cmd/ 2>&1 | \
          grep . && echo "Line length violations found" && exit 1 || true
 
+      - name: Generate embed placeholders
+        run: go generate ./internal/service/vsockagent/...
+
       - name: Vet
         run: go vet ./...
 
-      - name: Build
-        run: CGO_ENABLED=0 go build -trimpath ./...
-
       - name: Test
-        run: go test ./... -coverprofile=coverage.out -covermode=atomic
+        run: go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v7
