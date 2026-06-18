@@ -1,14 +1,11 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/crypto"
@@ -18,7 +15,12 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
+
 // KernelAPI defines the public interface for kernel operations.
 type KernelAPI interface {
 	KernelPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
@@ -39,6 +41,7 @@ type KernelAPI interface {
 	KernelInspect(ctx context.Context, identifier string) (*results.KernelInspect, error)
 	KernelSetDefault(ctx context.Context, identifier string) error
 }
+
 // KernelPrune prunes unused kernels.
 // KernelPrune uses the full KernelRemove pipeline
 // (resolution, enrichment, VM reference checks) instead of calling the service directly.
@@ -82,6 +85,7 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 	}
 	return removed, nil
 }
+
 // KernelPull downloads or builds a kernel with full pipeline.
 func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInput,
 	onProgress event.OnProgressCallback) (*model.KernelItem, error) {
@@ -274,6 +278,7 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 	}, "")
 	return kernelItem, nil
 }
+
 // KernelImport imports a local vmlinux file as a kernel.
 // uses KernelImportRequest
 // resolution pipeline for input validation and default resolution before
@@ -305,6 +310,7 @@ func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImport
 	}, "")
 	return kernelItem, nil
 }
+
 // KernelRemove removes kernels by identifiers.
 // uses KernelRequest.Resolve
 // to resolve identifiers, then enriches with VM references.
@@ -361,6 +367,7 @@ func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput)
 	}
 	return &errs.BatchResult{Items: items}
 }
+
 // KernelList returns locally cached or remote kernel listing.
 // When remote=false, returns ([]*model.KernelItem, nil, error).
 // When remote=true, returns (nil, []model.VersionInfo, error).
@@ -417,6 +424,7 @@ func (op *Operation) KernelList(
 	items, err := op.Services.Kernel.List(ctx)
 	return items, nil, err
 }
+
 // KernelGet returns a single kernel by identifier.
 // uses KernelRequest.Resolve
 // internally for consistent resolution behavior.
@@ -434,6 +442,7 @@ func (op *Operation) KernelGet(ctx context.Context, identifier string) (*model.K
 	}
 	return resolved.Kernels[0], nil
 }
+
 // KernelInspect returns detailed kernel information.
 func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*results.KernelInspect, error) {
 	k, err := op.KernelGet(ctx, identifier)
@@ -452,6 +461,7 @@ func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*res
 		},
 	}, nil
 }
+
 // KernelSetDefault sets a kernel as default.
 // uses KernelRequest.Resolve
 // for consistent identifier resolution, catches errors at the top level.

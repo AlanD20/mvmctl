@@ -96,7 +96,7 @@ type NetworkItem struct {
 	// Resolved relations (not stored in DB directly)
 	Leases        []*NetworkLeaseItem `json:"leases,omitempty"`
 	IPTablesRules []*FirewallRule     `json:"iptables_rules,omitempty"`
-	VMs           []*VMItem               `json:"vms,omitempty"`
+	VMs           []*VMItem           `json:"vms,omitempty"`
 }
 
 // --- NetworkLeaseItem ---

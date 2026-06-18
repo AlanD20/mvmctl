@@ -1,22 +1,27 @@
 package inputs
+
 import (
 	"context"
-	"strings"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
+	"strings"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // NetworkInput is the raw input for identifying existing networks.
 type NetworkInput struct {
 	Identifiers []string `json:"identifiers"`
 	Force       bool     `json:"force"`
 }
+
 // ResolvedNetworkInput specifies resolved network input.
 type ResolvedNetworkInput struct {
 	Networks []*model.NetworkItem
 	Force    bool
 }
+
 // NetworkRequest specifies network request.
 // Resolve network identifiers to DB records and validate.
 type NetworkRequest struct {
@@ -25,6 +30,7 @@ type NetworkRequest struct {
 	result   *ResolvedNetworkInput
 	resolver *network.Resolver
 }
+
 // NewNetworkRequest creates a new NetworkRequest.
 // Create resolver with lease enrichment.
 func NewNetworkRequest(inputs NetworkInput, db *sqlx.DB, networkRepo network.Repository) *NetworkRequest {
@@ -34,6 +40,7 @@ func NewNetworkRequest(inputs NetworkInput, db *sqlx.DB, networkRepo network.Rep
 		resolver: network.NewResolver(networkRepo, []string{"leases"}),
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves network identifiers to NetworkItem records.
 func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, error) {

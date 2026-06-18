@@ -1,17 +1,20 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // KernelImportInput specifies kernel import input.
 type KernelImportInput struct {
 	Name       string  `json:"name"`
@@ -19,6 +22,7 @@ type KernelImportInput struct {
 	Version    *string `json:"version,omitempty"`
 	SetDefault bool    `json:"set_default"`
 }
+
 // ResolvedKernelImportInput specifies resolved kernel import input.
 type ResolvedKernelImportInput struct {
 	Name       string
@@ -27,6 +31,7 @@ type ResolvedKernelImportInput struct {
 	Arch       string
 	SetDefault bool
 }
+
 // KernelImportRequest specifies kernel import request.
 // Resolve and validate kernel import inputs.
 type KernelImportRequest struct {
@@ -34,6 +39,7 @@ type KernelImportRequest struct {
 	input  KernelImportInput
 	result *ResolvedKernelImportInput
 }
+
 // NewKernelImportRequest creates a new KernelImportRequest.
 func NewKernelImportRequest(inputs KernelImportInput, db *sqlx.DB) *KernelImportRequest {
 	return &KernelImportRequest{
@@ -41,6 +47,7 @@ func NewKernelImportRequest(inputs KernelImportInput, db *sqlx.DB) *KernelImport
 		input: inputs,
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves all input fields to concrete values and validates.
 func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImportInput, error) {
@@ -87,6 +94,7 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 	}
 	return r.result, nil
 }
+
 // ensureValidate validates the resolved import request.
 func (r *KernelImportRequest) ensureValidate() error {
 	if r.result == nil {
@@ -119,8 +127,10 @@ func (r *KernelImportRequest) ensureValidate() error {
 	}
 	return nil
 }
+
 // parseKernelFilename extracts version and arch from a kernel filename.
 // Examples:
+//
 //	vmlinux-6.1.0-x86_64 -> version="6.1.0", arch="x86_64"
 //	vmlinux-5.10-arm64 -> version="5.10", arch="arm64"
 //	vmlinux -> version="-", arch="-"

@@ -40,10 +40,10 @@ type VMResourcesInfo struct {
 
 // VMNetworkingInfo groups VM networking info in an inspect response.
 type VMNetworkingInfo struct {
-	IPv4      string         `json:"ipv4"`
-	MAC       string         `json:"mac"`
+	IPv4      string             `json:"ipv4"`
+	MAC       string             `json:"mac"`
 	Network   *model.NetworkItem `json:"network,omitempty"`
-	TapDevice string         `json:"tap_device"`
+	TapDevice string             `json:"tap_device"`
 }
 
 // VMAssetsInfo groups VM asset references in an inspect response.

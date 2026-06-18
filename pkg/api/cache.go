@@ -1,12 +1,10 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"sort"
-	"strings"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
@@ -14,7 +12,11 @@ import (
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os"
+	"sort"
+	"strings"
 )
+
 // CacheAPI defines the public interface for cache operations.
 type CacheAPI interface {
 	CacheCheckPrivileges(binary, operation string) error
@@ -29,15 +31,18 @@ type CacheAPI interface {
 	CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error)
 	CacheClean(ctx context.Context, dryRun bool) (*model.CleanResult, error)
 }
+
 // CacheCheckPrivileges checks if the current process has the required system privileges
 // for destructive cache operations. Returns nil if OK, or an error describing what's missing.
 func (op *Operation) CacheCheckPrivileges(binary, operation string) error {
 	return system.CheckPrivileges(binary, operation)
 }
+
 // CacheSessionHasGroup returns true if the current process has the mvm group active.
 func (op *Operation) CacheSessionHasGroup() bool {
 	return system.SessionHasGroup()
 }
+
 // CacheInitAll initializes all cache directories.
 func (op *Operation) CacheInitAll(
 	ctx context.Context,
@@ -94,6 +99,7 @@ func (op *Operation) CacheInitAll(
 		GuestfsKernel:    kernelPath,
 	}, nil
 }
+
 // CachePruneVMs prunes VMs via VMOperation.Prune.
 func (op *Operation) CachePruneVMs(ctx context.Context, dryRun bool, includeAll bool) *errs.OperationResult {
 	ids, err := op.VMPrune(ctx, dryRun, includeAll)
@@ -111,22 +117,27 @@ func (op *Operation) CachePruneVMs(ctx context.Context, dryRun bool, includeAll 
 		Item:   ids,
 	}
 }
+
 // CachePruneNetworks prunes networks via NetworkOperation.Prune.
 func (op *Operation) CachePruneNetworks(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	return op.NetworkPrune(ctx, dryRun, includeAll)
 }
+
 // CachePruneImages prunes images via ImageOperation.Prune.
 func (op *Operation) CachePruneImages(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	return op.ImagePrune(ctx, dryRun, includeAll)
 }
+
 // CachePruneKernels prunes kernels via KernelOperation.Prune.
 func (op *Operation) CachePruneKernels(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	return op.KernelPrune(ctx, dryRun, includeAll)
 }
+
 // CachePruneBinaries prunes binaries via BinaryOperation.Prune.
 func (op *Operation) CachePruneBinaries(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	return op.BinaryPrune(ctx, dryRun, includeAll)
 }
+
 // CachePruneMisc prunes miscellaneous cache items.
 func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[string]any, error) {
 	binDir := infra.GetBinDir()
@@ -148,6 +159,7 @@ func (op *Operation) CachePruneMisc(ctx context.Context, dryRun bool) (map[strin
 	}
 	return result, nil
 }
+
 // CachePruneAll performs complete cache prune across all resource types.
 // Returns *model.PruneAllResult
 func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll bool) (*model.PruneAllResult, error) {
@@ -221,6 +233,7 @@ func (op *Operation) CachePruneAll(ctx context.Context, dryRun bool, includeAll 
 	}
 	return result, nil
 }
+
 // CacheClean performs complete cache clean.
 // Returns *model.CleanResult
 func (op *Operation) CacheClean(ctx context.Context, dryRun bool) (*model.CleanResult, error) {

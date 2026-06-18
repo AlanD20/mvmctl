@@ -26,7 +26,6 @@ func NewService(repo SettingsRepository, constraints *ConstraintRegistry) *Servi
 
 // Set coerces the value, validates constraints, and persists.
 //
-//
 //	"'{category}.{key}' is not an overridable setting. Use 'mvm config ls' to see valid keys."
 func (s *Service) Set(ctx context.Context, category, key string, value any) error {
 	expected := GetExpectedType(category, key)

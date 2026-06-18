@@ -222,7 +222,6 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 
 // --- Ensure chain ---
 
-
 func (t *NFTablesTracker) EnsureChain(
 	ctx context.Context,
 	chainName model.FirewallChain,

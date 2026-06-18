@@ -1,28 +1,33 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
-	"strings"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
+	"strings"
 )
+
 // KeyInput is the raw input for identifying existing SSH keys.
 // struct behavior — identifiers are resolved
 // by name or ID in a single pass (lumping both).
 type KeyInput struct {
 	Identifiers []string `json:"identifiers,omitempty"`
 }
+
 // ResolvedKeyInput specifies resolved key input.
 type ResolvedKeyInput struct {
 	Keys []*model.SSHKeyItem
 }
+
 // KeyRequest specifies key request.
 // Resolve key identifiers to DB records.
 type KeyRequest struct {
 	input    KeyInput
 	resolver *key.Resolver
 }
+
 // NewKeyRequest creates a new KeyRequest.
 func NewKeyRequest(inputs KeyInput, keyRepo key.Repository) *KeyRequest {
 	return &KeyRequest{
@@ -30,6 +35,7 @@ func NewKeyRequest(inputs KeyInput, keyRepo key.Repository) *KeyRequest {
 		resolver: key.NewResolver(keyRepo),
 	}
 }
+
 // Resolve resolves key identifiers to DB records.
 func (r *KeyRequest) Resolve(ctx context.Context) (*ResolvedKeyInput, error) {
 	identifiers := r.input.Identifiers

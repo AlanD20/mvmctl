@@ -35,7 +35,7 @@ func newCacheInitCmd(cacheAPI api.CacheAPI) *cobra.Command {
 		Use:   "init",
 		Short: "Initialize all cache resources",
 		RunE: func(cmd *cobra.Command, args []string) error {
-		// Uses progress callback for status updates during cache init.
+			// Uses progress callback for status updates during cache init.
 			prog := common.NewProgress()
 			prog.Start("Initializing cache...")
 

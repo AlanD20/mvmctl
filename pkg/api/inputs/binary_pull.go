@@ -1,11 +1,14 @@
 package inputs
+
 import (
 	"context"
-	"strings"
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/errs"
+	"strings"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // BinaryPullInput holds options for pulling a Firecracker binary.
 type BinaryPullInput struct {
 	Version          string  `json:"version"           yaml:"version"`
@@ -14,6 +17,7 @@ type BinaryPullInput struct {
 	SetDefault       bool    `json:"set_default"       yaml:"default"`
 	DownloadOverride bool    `json:"force"             yaml:"force"`
 }
+
 // ResolvedBinaryPullInput specifies resolved binary pull input.
 type ResolvedBinaryPullInput struct {
 	Version          string
@@ -23,12 +27,14 @@ type ResolvedBinaryPullInput struct {
 	BinDir           string
 	DownloadOverride bool
 }
+
 // BinaryPullRequest specifies binary pull request.
 type BinaryPullRequest struct {
 	db     *sqlx.DB
 	input  BinaryPullInput
 	result *ResolvedBinaryPullInput
 }
+
 // NewBinaryPullRequest creates a new BinaryPullRequest.
 func NewBinaryPullRequest(inputs BinaryPullInput, db *sqlx.DB) *BinaryPullRequest {
 	return &BinaryPullRequest{
@@ -36,6 +42,7 @@ func NewBinaryPullRequest(inputs BinaryPullInput, db *sqlx.DB) *BinaryPullReques
 		input: inputs,
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves and validates pull inputs.
 func (r *BinaryPullRequest) Resolve(ctx context.Context) (*ResolvedBinaryPullInput, error) {

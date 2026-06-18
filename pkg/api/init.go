@@ -1,15 +1,17 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os/exec"
 )
+
 // InitAPI defines the public interface for init/wizard operations.
 type InitAPI interface {
 	InitCheckReadiness(ctx context.Context) *model.ProbeResult
@@ -35,11 +37,13 @@ type InitAPI interface {
 		onProgress event.OnProgressCallback,
 	) *results.InitResult
 }
+
 // InitCheckReadiness runs pre-flight host readiness checks via the public API layer.
 // called from CLI.
 func (op *Operation) InitCheckReadiness(ctx context.Context) *model.ProbeResult {
 	return op.HostCheckReadiness(ctx)
 }
+
 // InitSetupHost sets up host configuration.
 func (op *Operation) InitSetupHost(ctx context.Context) error {
 	raw, err := op.HostInit(ctx, nil)
@@ -51,6 +55,7 @@ func (op *Operation) InitSetupHost(ctx context.Context) error {
 	}
 	return nil
 }
+
 // InitRun runs the init wizard steps in sequence.
 // with backward-compatible signature.
 // hostSetupMessage defaults to "", guestfsEnabled defaults to nil (auto-detect).
@@ -75,6 +80,7 @@ func (op *Operation) InitRun(
 		onProgress,
 	)
 }
+
 // InitRunFull runs the init wizard steps with all parameters.
 func (op *Operation) InitRunFull(
 	ctx context.Context,

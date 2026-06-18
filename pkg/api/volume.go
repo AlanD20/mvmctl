@@ -1,9 +1,9 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
-	"time"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/lib/crypto"
@@ -12,7 +12,9 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"time"
 )
+
 // VolumeAPI defines the public interface for volume operations.
 type VolumeAPI interface {
 	VolumeListAll(ctx context.Context) []*model.VolumeItem
@@ -22,6 +24,7 @@ type VolumeAPI interface {
 	VolumeResize(ctx context.Context, input inputs.VolumeCreateInput) error
 	VolumeGet(ctx context.Context, input inputs.VolumeInput) (*model.VolumeItem, error)
 }
+
 // VolumeListAll returns all volumes.
 func (op *Operation) VolumeListAll(ctx context.Context) []*model.VolumeItem {
 	volumes, _ := op.Repos.Volume.ListAll(ctx)
@@ -30,6 +33,7 @@ func (op *Operation) VolumeListAll(ctx context.Context) []*model.VolumeItem {
 	}
 	return volumes
 }
+
 // VolumeCreate creates a new volume.
 // uses VolumeCreateRequest
 // resolution pipeline and HashGenerator.volume() for ID.
@@ -59,6 +63,7 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 	op.AuditLog.LogOperation("volume.create", map[string]any{"name": input.Name}, "")
 	return volumeItem, nil
 }
+
 // VolumeRemove removes volumes by name or ID.
 // uses VolumeRequest resolution
 // with partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
@@ -147,6 +152,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 	}
 	return &errs.BatchResult{Items: results}
 }
+
 // VolumeInspect returns detailed volume info as a raw dictionary.
 // returns dict[str, Any]
 // with volume metadata and disk information, not wrapped in OperationResult.
@@ -178,6 +184,7 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 		},
 	}, nil
 }
+
 // VolumeResize resizes a volume.
 // uses VolumeRequest resolution
 // for identifier lookup and separate size parsing.
@@ -201,6 +208,7 @@ func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreate
 	op.AuditLog.LogOperation("volume.resize", map[string]any{"name": vol.Name}, "")
 	return nil
 }
+
 // VolumeGet returns a single volume by identifier.
 // uses VolumeRequest pipeline.
 func (op *Operation) VolumeGet(ctx context.Context, input inputs.VolumeInput) (*model.VolumeItem, error) {

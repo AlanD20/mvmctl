@@ -1,4 +1,5 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
@@ -6,6 +7,7 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 )
+
 // BinaryInput specifies binary input.
 type BinaryInput struct {
 	Identifiers []string `json:"identifiers,omitempty"`
@@ -14,6 +16,7 @@ type BinaryInput struct {
 type ResolvedBinaryInput struct {
 	Binaries []*model.BinaryItem
 }
+
 // BinaryRequest specifies binary request.
 // Resolve binary identifiers to DB records.
 type BinaryRequest struct {
@@ -21,6 +24,7 @@ type BinaryRequest struct {
 	result   *ResolvedBinaryInput
 	resolver *binary.Resolver
 }
+
 // NewBinaryRequest creates a new BinaryRequest.
 func NewBinaryRequest(inputs BinaryInput, binaryRepo binary.Repository) *BinaryRequest {
 	return &BinaryRequest{
@@ -28,6 +32,7 @@ func NewBinaryRequest(inputs BinaryInput, binaryRepo binary.Repository) *BinaryR
 		resolver: binary.NewResolver(binaryRepo),
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves identifiers to BinaryItem list.
 func (r *BinaryRequest) Resolve(ctx context.Context) (*ResolvedBinaryInput, error) {

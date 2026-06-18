@@ -1,9 +1,11 @@
 package inputs
+
 import (
 	"context"
 	"mvmctl/internal/core/config"
 	"mvmctl/pkg/errs"
 )
+
 // ConfigInput specifies config input.
 type ConfigInput struct {
 	Action       string `json:"action"`
@@ -12,6 +14,7 @@ type ConfigInput struct {
 	Value        any    `json:"value,omitempty"`
 	AllOverrides bool   `json:"all_overrides"`
 }
+
 // ResolvedConfigInput specifies resolved config input.
 type ResolvedConfigInput struct {
 	Action       string
@@ -20,18 +23,21 @@ type ResolvedConfigInput struct {
 	Value        any
 	AllOverrides bool
 }
+
 // ConfigRequest specifies config request.
 // Resolve ConfigInput against the database.
 type ConfigRequest struct {
 	input  ConfigInput
 	result *ResolvedConfigInput
 }
+
 // NewConfigRequest creates a new ConfigRequest.
 func NewConfigRequest(inputs ConfigInput) *ConfigRequest {
 	return &ConfigRequest{
 		input: inputs,
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves and validates config input.
 func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, error) {

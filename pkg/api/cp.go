@@ -1,11 +1,10 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
-	"time"
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
@@ -13,7 +12,10 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"strings"
+	"time"
 )
+
 // CPAPI defines the public interface for copy file operations.
 type CPAPI interface {
 	CPCopy(
@@ -22,6 +24,7 @@ type CPAPI interface {
 		onProgress event.OnDownloadCallback,
 	) (*results.CPCopyResult, error)
 }
+
 // CPCopy copies files between host and microVMs using vsock binary frame protocol.
 func (op *Operation) CPCopy(
 	ctx context.Context,
@@ -135,6 +138,7 @@ func (op *Operation) CPCopy(
 		return nil, errs.New(errs.CodeCPError, fmt.Sprintf("Unknown copy direction: %s", resolved.Direction))
 	}
 }
+
 // formatBytes formats a byte count as a human-readable string.
 func formatBytes(b int64) string {
 	if b < 1024 {
@@ -148,6 +152,7 @@ func formatBytes(b int64) string {
 	}
 	return fmt.Sprintf("%.1f GiB", float64(b)/(1024*1024*1024))
 }
+
 // newVsockClient creates a vsock client with upgrade lifecycle callbacks.
 // It checks for in-progress upgrades before connecting and wires up
 // OnUpgradeStarted/OnUpgradeCompleted callbacks that manage the DB upgrade lock.
@@ -187,5 +192,6 @@ func (op *Operation) newVsockClient(
 	}
 	return client, nil
 }
+
 // Compile-time checks ensure interfaces are satisfied.
 var _ CPAPI = (*Operation)(nil)

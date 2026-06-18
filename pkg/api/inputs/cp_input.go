@@ -1,4 +1,5 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
@@ -10,12 +11,14 @@ import (
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
+
 // CPInput specifies c p input.
 type CPInput struct {
 	Sources []string `json:"sources" yaml:"src"`
 	Dest    string   `json:"dest"    yaml:"dest"`
 	Force   bool     `json:"force"   yaml:"force"`
 }
+
 // ResolvedCPInfo holds resolved target VM info for a copy operation.
 type ResolvedCPInfo struct {
 	Identifier  string
@@ -24,6 +27,7 @@ type ResolvedCPInfo struct {
 	TotalBytes  *int64
 	Vsock       *model.VsockConfigItem
 }
+
 // ResolvedCPInput specifies resolved c p input.
 type ResolvedCPInput struct {
 	Direction  string
@@ -32,6 +36,7 @@ type ResolvedCPInput struct {
 	DstInfo    *ResolvedCPInfo
 	Force      bool
 }
+
 // CPRequest specifies c p request.
 // Resolve CPInput against the database and filesystem.
 type CPRequest struct {
@@ -39,6 +44,7 @@ type CPRequest struct {
 	input  CPInput
 	result *ResolvedCPInput
 }
+
 // NewCPRequest creates a new CPRequest.
 func NewCPRequest(inputs CPInput, cfg *config.Service) *CPRequest {
 	return &CPRequest{
@@ -46,6 +52,7 @@ func NewCPRequest(inputs CPInput, cfg *config.Service) *CPRequest {
 		input: inputs,
 	}
 }
+
 // Resolve expands tilde paths and resolves VM identifiers to vsock config.
 func (r *CPRequest) Resolve(
 	ctx context.Context,
@@ -111,6 +118,7 @@ func (r *CPRequest) Resolve(
 	}
 	return r.result, nil
 }
+
 // resolveVMSide resolves a VM-side path to vsock connection config.
 func (r *CPRequest) resolveVMSide(
 	ctx context.Context,
@@ -139,6 +147,7 @@ func (r *CPRequest) resolveVMSide(
 		Vsock:      vsockCfg,
 	}, nil
 }
+
 // resolveVM resolves a VM by name, IP, MAC, or ID prefix.
 func (r *CPRequest) resolveVM(ctx context.Context, identifier string, vmRepo vm.Repository) (*model.VMItem, error) {
 	vmResolver := vm.NewResolver(vmRepo)

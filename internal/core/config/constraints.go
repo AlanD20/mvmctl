@@ -12,7 +12,6 @@ import (
 // It receives (key, category...) and returns the effective value:
 // - new_value if the key matches the one being set and category matches
 // - current DB/default for any other key/category
-//
 type ResolveFn func(otherKey string, otherCategory ...string) (any, error)
 
 // Constraint receives (key_being_set, resolve_fn) and returns an error

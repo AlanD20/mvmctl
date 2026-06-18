@@ -263,7 +263,8 @@ func (s *Service) RemoveNAT(
 		return errs.Wrap(
 			errs.CodeNetworkNATFailed,
 			fmt.Errorf(
-				"Could not determine NAT gateways for bridge %s. Provide nat_gateways explicitly or ensure network exists in database.",
+				"Could not determine NAT gateways for bridge %s. "+
+					"Provide nat_gateways explicitly or ensure network exists in database.",
 				bridge,
 			),
 		)
@@ -679,7 +680,9 @@ func (s *Service) CheckNFTablesAvailable(ctx context.Context) bool {
 }
 
 // EnrichWithLeases batch-loads leases for all networks and attaches them.
-func (s *Service) EnrichWithLeases(ctx context.Context, networks []*model.NetworkItem, leaseRepo LeaseRepository) error {
+func (s *Service) EnrichWithLeases(
+	ctx context.Context, networks []*model.NetworkItem, leaseRepo LeaseRepository,
+) error {
 	ids := make([]string, len(networks))
 	for i, n := range networks {
 		ids[i] = n.ID

@@ -1,24 +1,29 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
-	"strings"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
+	"strings"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // VMInput specifies v m input.
 type VMInput struct {
 	Identifiers []string `json:"identifiers"`
 	Force       bool     `json:"force"`
 }
+
 // ResolvedVMInput specifies resolved v m input.
 type ResolvedVMInput struct {
 	VMs   []*model.VMItem
 	Force bool
 }
+
 // VMRequest specifies v m request.
 // Request to resolve a VM by name, ID, IP, or MAC.
 // Create VMResolver with full enrichment (image, kernel, network, volumes, binary).
@@ -28,6 +33,7 @@ type VMRequest struct {
 	result   *ResolvedVMInput
 	resolver *vm.Resolver
 }
+
 // NewVMRequest creates a new VMRequest.
 func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository) *VMRequest {
 	return &VMRequest{
@@ -36,6 +42,7 @@ func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository) *VMRequest 
 		resolver: vm.NewResolver(vmRepo),
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves VM identifiers to VMInstanceItem records.
 func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
@@ -61,6 +68,7 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 	}
 	return r.result, nil
 }
+
 // --- VMExecInput ---
 // VMExecInput holds the input for executing a command inside a VM via vsock.
 type VMExecInput struct {
@@ -70,6 +78,7 @@ type VMExecInput struct {
 	Timeout    int    `json:"timeout"           yaml:"timeout"`
 	Port       int    `json:"port"              yaml:"port"`
 }
+
 // validateIdentifiers validates each identifier based on detected type.
 func (r *VMRequest) validateIdentifiers() error {
 	for _, identifier := range r.input.Identifiers {

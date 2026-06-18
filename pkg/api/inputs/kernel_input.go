@@ -1,23 +1,28 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
-	"strings"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
+	"strings"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // KernelInput is the raw input for identifying existing kernels.
 type KernelInput struct {
 	Identifiers []string `json:"identifiers"`
 	Force       bool     `json:"force"`
 }
+
 // ResolvedKernelInput specifies resolved kernel input.
 type ResolvedKernelInput struct {
 	Kernels []*model.KernelItem
 	Force   bool
 }
+
 // KernelRequest specifies kernel request.
 // Resolve kernel identifiers to DB records and validate.
 type KernelRequest struct {
@@ -26,6 +31,7 @@ type KernelRequest struct {
 	result   *ResolvedKernelInput
 	resolver *kernel.Resolver
 }
+
 // NewKernelRequest creates a new KernelRequest.
 func NewKernelRequest(inputs KernelInput, db *sqlx.DB, kernelRepo kernel.Repository) *KernelRequest {
 	return &KernelRequest{
@@ -34,6 +40,7 @@ func NewKernelRequest(inputs KernelInput, db *sqlx.DB, kernelRepo kernel.Reposit
 		resolver: kernel.NewResolver(kernelRepo, nil),
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves kernel identifiers to KernelItem records.
 func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, error) {

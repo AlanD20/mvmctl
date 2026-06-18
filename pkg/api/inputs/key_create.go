@@ -1,12 +1,14 @@
 package inputs
+
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
+	"os"
+	"path/filepath"
 )
+
 // KeyCreateInput holds options for key creation.
 type KeyCreateInput struct {
 	Name       string `json:"name"                 yaml:"name"`
@@ -17,6 +19,7 @@ type KeyCreateInput struct {
 	Overwrite  bool   `json:"force"                yaml:"force"`
 	SetDefault bool   `json:"default"              yaml:"default"`
 }
+
 // ResolvedKeyCreateInput specifies resolved key create input.
 type ResolvedKeyCreateInput struct {
 	Name       string
@@ -27,17 +30,20 @@ type ResolvedKeyCreateInput struct {
 	Overwrite  bool
 	SetDefault bool
 }
+
 // KeyCreateRequest specifies key create request.
 type KeyCreateRequest struct {
 	input  KeyCreateInput
 	result *ResolvedKeyCreateInput
 }
+
 // NewKeyCreateRequest creates a new KeyCreateRequest.
 func NewKeyCreateRequest(inputs KeyCreateInput) *KeyCreateRequest {
 	return &KeyCreateRequest{
 		input: inputs,
 	}
 }
+
 // Resolve resolves defaults and validates.
 func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	// Validate key name early — before any work
@@ -94,6 +100,7 @@ func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
 	}
 	return r.result, nil
 }
+
 // keyFilesExist checks if key files already exist on disk.
 func keyFilesExist(name, outputDir string) error {
 	privateKeyPath := filepath.Join(outputDir, name)

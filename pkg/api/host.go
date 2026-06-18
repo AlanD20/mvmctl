@@ -1,14 +1,10 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/user"
-	"slices"
-	"strings"
-	"time"
 	"mvmctl/internal/core/host"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/infra"
@@ -21,7 +17,13 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os"
+	"os/user"
+	"slices"
+	"strings"
+	"time"
 )
+
 // HostAPI defines the public interface for host operations.
 type HostAPI interface {
 	HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error)
@@ -40,6 +42,7 @@ type HostAPI interface {
 	HostIsInitialized(ctx context.Context) bool
 	HostCheckReadiness(ctx context.Context) *model.ProbeResult
 }
+
 // HostInit initializes host configuration.
 // returns NeedsInteraction directly
 // (not wrapped in OperationResult.Item) when elevated privileges are required.
@@ -249,10 +252,12 @@ func (op *Operation) hostInitSetupEnvironment(
 	}
 	return allChanges, nil
 }
+
 // HostGetState returns the current host state snapshot.
 func (op *Operation) HostGetState(ctx context.Context) (*model.HostStateItem, error) {
 	return op.Repos.Host.GetState(ctx)
 }
+
 // HostDetectResources detects live host resources.
 func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResources, error) {
 	state, err := op.Repos.Host.GetState(ctx)
@@ -281,6 +286,7 @@ func (op *Operation) HostDetectResources(ctx context.Context) (*model.HostResour
 	}
 	return res, nil
 }
+
 // HostNetworkSetup sets up the default network.
 // static call to
 func (op *Operation) HostNetworkSetup(ctx context.Context) error {
@@ -298,6 +304,7 @@ func (op *Operation) HostNetworkSetup(ctx context.Context) error {
 	}
 	return nil
 }
+
 // HostInfo returns host info with capacity analysis.
 // uses HostInfo serialization to map.
 func (op *Operation) HostInfo(ctx context.Context) (*results.HostInfo, error) {
@@ -347,6 +354,7 @@ func (op *Operation) HostInfo(ctx context.Context) (*results.HostInfo, error) {
 	}
 	return results.BuildHostInfo(info), nil
 }
+
 // HostRefreshCapacity re-detects host capacity.
 func (op *Operation) HostRefreshCapacity(ctx context.Context) (*results.HostInfo, error) {
 	hardware, limits, err := op.Services.Host.DetectAndSaveCapacity(ctx)
@@ -378,18 +386,22 @@ func (op *Operation) HostRefreshCapacity(ctx context.Context) (*results.HostInfo
 	}
 	return results.BuildHostInfo(info), nil
 }
+
 // HostCheckKVMAccess checks /dev/kvm accessibility.
 func (op *Operation) HostCheckKVMAccess() bool {
 	return host.CheckKVMAccess()
 }
+
 // HostCheckRequiredBinaries checks for missing required binaries.
 func (op *Operation) HostCheckRequiredBinaries() []string {
 	return host.CheckRequiredBinaries()
 }
+
 // HostGetIPForwardStatus returns IP forwarding status.
 func (op *Operation) HostGetIPForwardStatus(ctx context.Context) (string, error) {
 	return host.GetIPForwardStatus(ctx)
 }
+
 // HostStatusCheck returns a consolidated host status with all checks.
 func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusCheck {
 	kvmOK := op.HostCheckKVMAccess()
@@ -425,6 +437,7 @@ func (op *Operation) HostStatusCheck(ctx context.Context) *results.HostStatusChe
 		Resources:       resources,
 	}
 }
+
 // HostClean cleans host networking configuration.
 // wraps errors in HostError/NetworkError pattern.
 func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
@@ -517,6 +530,7 @@ func (op *Operation) HostClean(ctx context.Context) ([]string, error) {
 	op.AuditLog.LogOperation("host.clean", map[string]any{"actions": len(summary)}, "")
 	return summary, nil
 }
+
 // HostReset resets host to pre-init state.
 // Reverts usermod changes in last-in-first-out order.
 func (op *Operation) HostReset(ctx context.Context) ([]string, error) {
@@ -593,15 +607,18 @@ func (op *Operation) HostReset(ctx context.Context) ([]string, error) {
 	op.AuditLog.LogOperation("host.reset", map[string]any{"actions": len(summary)}, "")
 	return summary, nil
 }
+
 // HostGetRunningVMs returns running VMs.
 func (op *Operation) HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error) {
 	return op.Repos.VM.ListByStatus(ctx, string(model.VMStatusRunning), string(model.VMStatusStarting))
 }
+
 // HostIsInitialized checks if host is initialized.
 func (op *Operation) HostIsInitialized(ctx context.Context) bool {
 	state, err := op.Repos.Host.GetState(ctx)
 	return err == nil && state != nil && state.Initialized
 }
+
 // HostCheckReadiness runs pre-flight checks.
 func (op *Operation) HostCheckReadiness(ctx context.Context) *model.ProbeResult {
 	hardware, _ := host.DetectHardware()
@@ -610,5 +627,6 @@ func (op *Operation) HostCheckReadiness(ctx context.Context) *model.ProbeResult 
 	probe := &host.Probe{}
 	return probe.RunAll(ctx, hardware, limits, resources)
 }
+
 // --- Host helpers inlined from core/host/_host_info.go ---
 // (Go ignores files starting with _, so these were never compiled into the host package.)

@@ -1,7 +1,10 @@
 package errs
+
 import "encoding/json"
+
 // --- OperationStatus typed constants ---
 type OperationStatus string
+
 const (
 	StatusSuccess OperationStatus = "success"
 	StatusSkipped OperationStatus = "skipped"
@@ -9,6 +12,7 @@ const (
 	StatusError   OperationStatus = "error"
 	StatusFailure OperationStatus = "failure"
 )
+
 // OperationResult represents the result of a domain operation.
 // Uses any for the Item field — each operation stores a different result type.
 type OperationResult struct {
@@ -20,6 +24,7 @@ type OperationResult struct {
 	Metadata  map[string]any `json:"-"`              // Structured extra data — serialized via MarshalJSON
 	Warnings  []string       `json:"-"`              // Non-fatal warnings — serialized via MarshalJSON
 }
+
 // MarshalJSON implements json.Marshaler for OperationResult.
 // The struct serializes all fields normally (exception included). Go's
 // error type cannot be serialized directly, so we convert Exception to its
@@ -54,14 +59,17 @@ func (r *OperationResult) MarshalJSON() ([]byte, error) {
 		Alias:     (*Alias)(r),
 	})
 }
+
 // IsOK returns true if the operation completed without error.
 func (r *OperationResult) IsOK() bool {
 	return r.Status == string(StatusSuccess) || r.Status == string(StatusSkipped) || r.Status == string(StatusWarning)
 }
+
 // IsError returns true if the operation failed.
 func (r *OperationResult) IsError() bool {
 	return r.Status == string(StatusError) || r.Status == string(StatusFailure)
 }
+
 // ToError converts an error-status OperationResult to a DomainError.
 // Returns nil if the result is not an error status.
 // This replaces the pattern of unwrapping result.Message into fmt.Errorf,
@@ -78,6 +86,7 @@ func (r *OperationResult) ToError() *DomainError {
 		Err:     r.Exception,
 	}
 }
+
 // NeedsInteraction specifies needs interaction.
 // Returned instead of OperationResult when the API cannot proceed without user input.
 // This is NOT an exception — it is normal control flow.
@@ -88,7 +97,9 @@ type NeedsInteraction struct {
 	InputType string         `json:"input_type"`        // "sudo", "confirm", "choice", "input"
 	Context   map[string]any `json:"context,omitempty"` // Structured context
 }
+
 func (n *NeedsInteraction) Error() string { return n.Message }
+
 // --- BatchResult ---
 // BatchResult aggregates multiple BulkResultItems into a single response.
 // Aggregated results of a batch operation with OperationResult items.
@@ -97,6 +108,7 @@ type BatchResult struct {
 	Warnings []string          `json:"warnings,omitempty"`
 	Metadata map[string]any    `json:"metadata,omitempty"`
 }
+
 // Errors returns all failed items (status == "error" or "failure").
 func (br *BatchResult) Errors() []OperationResult {
 	var result []OperationResult
@@ -107,6 +119,7 @@ func (br *BatchResult) Errors() []OperationResult {
 	}
 	return result
 }
+
 // HasErrors returns true if any item has an error/failure status.
 func (br *BatchResult) HasErrors() bool {
 	for _, item := range br.Items {

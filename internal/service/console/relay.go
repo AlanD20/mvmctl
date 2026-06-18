@@ -13,10 +13,10 @@ import (
 // --- Relay ---
 type Relay struct {
 	mu         sync.Mutex // guards relayPid and PID-file state
-	name       string // used for logging
-	pidPath    string // path to PID file (written by spawn.go)
-	socketPath string // path to Unix socket (created by subprocess)
-	relayPid   int    // in-memory PID, populated from file or spawn
+	name       string     // used for logging
+	pidPath    string     // path to PID file (written by spawn.go)
+	socketPath string     // path to Unix socket (created by subprocess)
+	relayPid   int        // in-memory PID, populated from file or spawn
 }
 
 // NewRelay creates a new console relay manager.
