@@ -146,11 +146,12 @@ const (
 	CodeCPVMNotFound          Code = "cp.vm_not_found"
 
 	// ── Vsock domain ──
-	CodeVsockNotFound         Code = "vsock.not_found"
-	CodeVsockConnectionFailed Code = "vsock.connection_failed"
-	CodeVsockHandshakeFailed  Code = "vsock.handshake_failed"
-	CodeVsockAgentUnreachable Code = "vsock.agent_unreachable"
-	CodeVsockExecFailed       Code = "vsock.exec_failed"
+	CodeVsockNotFound          Code = "vsock.not_found"
+	CodeVsockConnectionFailed  Code = "vsock.connection_failed"
+	CodeVsockHandshakeFailed   Code = "vsock.handshake_failed"
+	CodeVsockAgentUnreachable  Code = "vsock.agent_unreachable"
+	CodeVsockExecFailed        Code = "vsock.exec_failed"
+	CodeVsockUpgradeInProgress Code = "vsock.upgrade_in_progress"
 
 	// ── BundledAsset domain ──
 	CodeBundledAssetError    Code = "bundled_asset.error"

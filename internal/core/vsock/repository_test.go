@@ -130,3 +130,187 @@ func TestVsockRepo_NotFound(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+// ─── UpgradeLock ────────────────────────────────────────────────────────────
+// Rationale: Agent upgrade locking prevents concurrent upgrades of the vsock
+// agent. A bug here could cause race conditions during agent upgrades.
+
+func TestVsockRepo_UpgradeLock(t *testing.T) {
+	repo := testutil.NewVsockRepo()
+
+	// ─── Error paths first ───────────────────────────────────────────────
+
+	t.Run("set_lock_already_held", func(t *testing.T) {
+		item := &model.VsockConfigItem{
+			ID: "vsock-upgrade-lock-2", VmID: "vm-upgrade-lock-2",
+			GuestCID: 3, UDSPath: "/tmp/vm-upgrade-lock-2.sock",
+			Port: 1024, Token: "token-2",
+		}
+		require.NoError(t, repo.Upsert(ctx, item))
+
+		require.NoError(t, repo.SetUpgradeLock(ctx, item.VmID))
+
+		// CONTRACT: SetUpgradeLock returns error when lock is already held.
+		err := repo.SetUpgradeLock(ctx, item.VmID)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "upgrade already in progress")
+	})
+
+	t.Run("set_lock_nonexistent_vm", func(t *testing.T) {
+		// No Upsert — VM does not exist in the repo.
+
+		// CONTRACT: The SQLite implementation returns an error when 0 rows are affected.
+		// The mock repo matches this behavior. The error message "upgrade already in
+		// progress" is the same for both already-held locks and non-existent VMs because
+		// both cases result in 0 rows updated in SQLite.
+		err := repo.SetUpgradeLock(ctx, "vm-nonexistent")
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "upgrade already in progress")
+	})
+
+	// ─── Happy paths ─────────────────────────────────────────────────────
+
+	t.Run("set_lock_ok", func(t *testing.T) {
+		item := &model.VsockConfigItem{
+			ID: "vsock-upgrade-lock-1", VmID: "vm-upgrade-lock-1",
+			GuestCID: 3, UDSPath: "/tmp/vm-upgrade-lock-1.sock",
+			Port: 1024, Token: "token-1",
+		}
+		require.NoError(t, repo.Upsert(ctx, item))
+
+		require.NoError(t, repo.SetUpgradeLock(ctx, item.VmID))
+
+		// Mirror Test: read back and verify every field (R11, R12).
+		got, err := repo.GetByVMID(ctx, item.VmID)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+
+		// CONTRACT: SetUpgradeLock sets Upgrading=true.
+		assert.True(t, got.Upgrading, "after SetUpgradeLock, Upgrading must be true")
+		// UpgradeStartedAt: non-deterministic timestamp, assert not nil only.
+		assert.NotNil(t, got.UpgradeStartedAt, "after SetUpgradeLock, UpgradeStartedAt must be set")
+
+		// CONTRACT: Fields not related to the lock are preserved unchanged.
+		preserved := *got
+		preserved.Upgrading = item.Upgrading
+		preserved.UpgradeStartedAt = item.UpgradeStartedAt
+		preserved.AgentVersion = item.AgentVersion
+		if diff := cmp.Diff(item, &preserved); diff != "" {
+			t.Errorf("preserved fields mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("clear_lock", func(t *testing.T) {
+		item := &model.VsockConfigItem{
+			ID: "vsock-upgrade-lock-3", VmID: "vm-upgrade-lock-3",
+			GuestCID: 3, UDSPath: "/tmp/vm-upgrade-lock-3.sock",
+			Port: 1024, Token: "token-3",
+		}
+		require.NoError(t, repo.Upsert(ctx, item))
+		require.NoError(t, repo.SetUpgradeLock(ctx, item.VmID))
+
+		require.NoError(t, repo.ClearUpgradeLock(ctx, item.VmID))
+
+		// Mirror Test: read back and verify every field (R11, R12).
+		got, err := repo.GetByVMID(ctx, item.VmID)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+
+		// CONTRACT: ClearUpgradeLock resets Upgrading to false and UpgradeStartedAt to nil.
+		assert.False(t, got.Upgrading, "after ClearUpgradeLock, Upgrading must be false")
+		assert.Nil(t, got.UpgradeStartedAt, "after ClearUpgradeLock, UpgradeStartedAt must be nil")
+
+		// CONTRACT: Fields not related to the lock are preserved unchanged.
+		preserved := *got
+		preserved.Upgrading = item.Upgrading
+		preserved.UpgradeStartedAt = item.UpgradeStartedAt
+		preserved.AgentVersion = item.AgentVersion
+		if diff := cmp.Diff(item, &preserved); diff != "" {
+			t.Errorf("preserved fields mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("clear_lock_noop_when_not_set", func(t *testing.T) {
+		item := &model.VsockConfigItem{
+			ID: "vsock-upgrade-lock-4", VmID: "vm-upgrade-lock-4",
+			GuestCID: 3, UDSPath: "/tmp/vm-upgrade-lock-4.sock",
+			Port: 1024, Token: "token-4",
+		}
+		require.NoError(t, repo.Upsert(ctx, item))
+
+		// SAFETY INVARIANT: This subtest documents that ClearUpgradeLock is idempotent.
+		// It does NOT need to fail on gutted function — the value is proving a negative
+		// (no error/corruption from redundant calls).
+		// CONTRACT: ClearUpgradeLock on an unlocked VM is safe — no error, no corruption.
+		err := repo.ClearUpgradeLock(ctx, item.VmID)
+		assert.NoError(t, err)
+
+		got, err := repo.GetByVMID(ctx, item.VmID)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+
+		// CONTRACT: State is unchanged (no residual side effects).
+		assert.False(t, got.Upgrading)
+		assert.Nil(t, got.UpgradeStartedAt)
+
+		// CONTRACT: Fields not related to the lock are preserved unchanged.
+		preserved := *got
+		preserved.Upgrading = item.Upgrading
+		preserved.UpgradeStartedAt = item.UpgradeStartedAt
+		preserved.AgentVersion = item.AgentVersion
+		if diff := cmp.Diff(item, &preserved); diff != "" {
+			t.Errorf("preserved fields mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("set_lock_context_cancelled", func(t *testing.T) {
+		item := &model.VsockConfigItem{
+			ID: "vsock-upgrade-lock-cancel-1", VmID: "vm-upgrade-lock-cancel-1",
+			GuestCID: 3, UDSPath: "/tmp/vm-upgrade-lock-cancel-1.sock",
+			Port: 1024, Token: "token-cancel-1",
+		}
+		require.NoError(t, repo.Upsert(ctx, item))
+
+		ctxCancelled, cancel := context.WithCancel(ctx)
+		cancel()
+
+		// CONTRACT: SetUpgradeLock returns promptly even with cancelled context.
+		// The mock repo ignores context, so the operation will succeed since the VM
+		// exists and is not locked. The value is proving it doesn't block/hang.
+		err := repo.SetUpgradeLock(ctxCancelled, item.VmID)
+		assert.NoError(t, err)
+	})
+
+	t.Run("update_agent_version", func(t *testing.T) {
+		item := &model.VsockConfigItem{
+			ID: "vsock-upgrade-lock-5", VmID: "vm-upgrade-lock-5",
+			GuestCID: 3, UDSPath: "/tmp/vm-upgrade-lock-5.sock",
+			Port: 1024, Token: "token-5",
+		}
+		require.NoError(t, repo.Upsert(ctx, item))
+
+		version := "0.1.0"
+		require.NoError(t, repo.UpdateAgentVersion(ctx, item.VmID, version))
+
+		// Mirror Test: read back and verify every field (R11, R12).
+		got, err := repo.GetByVMID(ctx, item.VmID)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+
+		// CONTRACT: UpdateAgentVersion persists the agent version string.
+		assert.Equal(t, version, got.AgentVersion, "AgentVersion must match the persisted value")
+
+		// CONTRACT: Upgrading and UpgradeStartedAt are unaffected by UpdateAgentVersion.
+		assert.False(t, got.Upgrading)
+		assert.Nil(t, got.UpgradeStartedAt)
+
+		// CONTRACT: Fields not related to the agent version are preserved unchanged.
+		preserved := *got
+		preserved.Upgrading = item.Upgrading
+		preserved.UpgradeStartedAt = item.UpgradeStartedAt
+		preserved.AgentVersion = item.AgentVersion
+		if diff := cmp.Diff(item, &preserved); diff != "" {
+			t.Errorf("preserved fields mismatch (-want +got):\n%s", diff)
+		}
+	})
+}

@@ -3,6 +3,7 @@ package vsock
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"github.com/jmoiron/sqlx"
 
@@ -71,5 +72,43 @@ func (r *sqliteRepo) ListByVMIDs(ctx context.Context, vmIDs []string) ([]*model.
 // DeleteByVMID removes the vsock config for a VM. No-op if not found.
 func (r *sqliteRepo) DeleteByVMID(ctx context.Context, vmID string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM vm_vsock_config WHERE vm_id = ?", vmID)
+	return err
+}
+
+// SetUpgradeLock sets the upgrade lock for a VM. Returns error if lock already held.
+func (r *sqliteRepo) SetUpgradeLock(ctx context.Context, vmID string) error {
+	result, err := r.db.ExecContext(ctx,
+		`UPDATE vm_vsock_config SET upgrading = 1,
+		 upgrade_started_at = datetime('now')
+		 WHERE vm_id = ? AND upgrading = 0`,
+		vmID,
+	)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("upgrade already in progress for VM %s", vmID)
+	}
+	return nil
+}
+
+// ClearUpgradeLock removes the upgrade lock for a VM.
+func (r *sqliteRepo) ClearUpgradeLock(ctx context.Context, vmID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE vm_vsock_config SET upgrading = 0,
+		 upgrade_started_at = NULL
+		 WHERE vm_id = ?`,
+		vmID,
+	)
+	return err
+}
+
+// UpdateAgentVersion persists the agent version after a successful upgrade.
+func (r *sqliteRepo) UpdateAgentVersion(ctx context.Context, vmID, version string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE vm_vsock_config SET agent_version = ? WHERE vm_id = ?`,
+		version, vmID,
+	)
 	return err
 }

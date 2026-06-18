@@ -1971,12 +1971,15 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 
 	// Build a copy of the config with the effective port
 	item := &model.VsockConfigItem{
-		ID:       vsockItem.ID,
-		VmID:     vsockItem.VmID,
-		GuestCID: vsockItem.GuestCID,
-		UDSPath:  vsockItem.UDSPath,
-		Port:     port,
-		Token:    vsockItem.Token,
+		ID:               vsockItem.ID,
+		VmID:             vsockItem.VmID,
+		GuestCID:         vsockItem.GuestCID,
+		UDSPath:          vsockItem.UDSPath,
+		Port:             port,
+		Token:            vsockItem.Token,
+		AgentVersion:     vsockItem.AgentVersion,
+		Upgrading:        vsockItem.Upgrading,
+		UpgradeStartedAt: vsockItem.UpgradeStartedAt,
 	}
 
 	// Read probe timeout from config (defaults.vm.vsock_probe_timeout in constants.go).
@@ -1987,8 +1990,10 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 			"vsock_probe_timeout not configured — check defaults.vm.vsock_probe_timeout",
 		)
 	}
-	client := vsock.NewClient(item, probeTimeout)
-	client.VmName = vmItem.Name
+	client, err := op.newVsockClient(ctx, item, probeTimeout, vmItem.Name)
+	if err != nil {
+		return nil, err
+	}
 
 	// Interactive shell or captured exec
 	if input.Command == "" {

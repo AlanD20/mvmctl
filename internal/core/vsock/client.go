@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -15,7 +16,24 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/version"
+	"mvmctl/internal/service/vsockagent"
 	"mvmctl/pkg/errs"
+)
+
+const (
+	// defaultVersion is the fallback version string used when BuildVersion
+	// is empty (e.g. development builds without ldflags).
+	defaultVersion = "0.0.0"
+
+	// upgradeShellCommand replaces the running agent binary and restarts the
+	// agent service after a 2-second delay. The delay allows the exec
+	// response frame to be sent before the old agent is killed.
+	upgradeShellCommand = `cp /usr/bin/mvm-vsock-agent /usr/bin/mvm-vsock-agent.bak 2>/dev/null || true; mv /usr/bin/mvm-vsock-agent.new /usr/bin/mvm-vsock-agent && chmod 0755 /usr/bin/mvm-vsock-agent && ( sleep 2 && systemctl restart mvm-vsock-agent ) &`
+
+	// restoreShellCommand restores the previous agent binary from backup and
+	// restarts the service. Used as a rollback if the upgrade exec fails.
+	restoreShellCommand = `test -f /usr/bin/mvm-vsock-agent.bak && cp /usr/bin/mvm-vsock-agent.bak /usr/bin/mvm-vsock-agent && ( sleep 1 && systemctl restart mvm-vsock-agent ) &; true`
 )
 
 // Client is a per-VM vsock protocol client for communicating with the
@@ -40,6 +58,23 @@ type Client struct {
 	// Set by callers (API layer) after construction. Zero value (empty string)
 	// is acceptable — timing entries will just have an empty vm_name field.
 	VmName string
+
+	// AgentVersion is set by ensureAgent after a successful version probe.
+	AgentVersion string
+
+	// Internal: set during upgrade, cleared on successful retry.
+	upgradeInProgress bool
+
+	// Internal: bypasses version probe (used by upgradeAgent to avoid circular calls).
+	skipVersionCheck bool
+
+	// OnUpgradeStarted is called before the upgrade begins.
+	// The callback should set the DB upgrade lock and log the event.
+	OnUpgradeStarted func(ctx context.Context, fromVersion, toVersion string)
+
+	// OnUpgradeCompleted is called after the upgrade succeeds and the
+	// retry loop confirms the new agent version is running.
+	OnUpgradeCompleted func(ctx context.Context, newVersion string)
 }
 
 const vsockProbeInterval = 20 * time.Millisecond
@@ -64,7 +99,7 @@ type ExecResult struct {
 // stdout/stderr data is printed directly to the terminal as it arrives,
 // and also accumulated into the returned ExecResult.
 func (c *Client) Exec(ctx context.Context, command, user string, timeout int) (*ExecResult, error) {
-	conn, err := c.waitForAgent(ctx)
+	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
 		return nil, err
@@ -132,7 +167,7 @@ func (c *Client) Exec(ctx context.Context, command, user string, timeout int) (*
 // SIGWINCH is forwarded to the agent as a resize JSON frame.
 // The terminal is restored when the session ends.
 func (c *Client) Shell(ctx context.Context, user string) error {
-	conn, err := c.waitForAgent(ctx)
+	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
 		return err
@@ -250,11 +285,13 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 	return nil
 }
 
-// waitForAgent retries dialAndHandshake until the guest agent responds or the
-// probe timeout expires. ProbeTimeout must be > 0 — callers (API layer) set it
-// from defaults.vm.vsock_probe_timeout (config default: 60s).
+// ensureAgent retries dialAndHandshake until the guest agent responds or the
+// probe timeout expires. After a successful dial, it probes the agent version
+// and triggers an upgrade if the host binary is newer than the guest agent.
+// ProbeTimeout must be > 0 — callers (API layer) set it from
+// defaults.vm.vsock_probe_timeout (config default: 60s).
 // When timing is enabled, logs per-attempt vsock_dial and overall vsock_probe timing.
-func (c *Client) waitForAgent(ctx context.Context) (net.Conn, error) {
+func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 	if c.ProbeTimeout <= 0 {
 		return nil, errs.New(errs.CodeVsockConnectionFailed,
 			"vsock agent probe timeout not set — API layer must set ProbeTimeout from config")
@@ -297,6 +334,73 @@ func (c *Client) waitForAgent(ctx context.Context) (net.Conn, error) {
 			infra.LogTiming("vsock_dial", c.VmName, c.item.VmID, dialElapsed,
 				"attempt", attempts,
 			)
+
+			// If skipVersionCheck is set, skip version probe and return the
+			// connection directly. Used by upgradeAgent to avoid circular calls.
+			if c.skipVersionCheck {
+				return conn, nil
+			}
+
+			// Probe agent version
+			agentVersion, probeErr := c.probeVersion(ctx, conn)
+			if probeErr != nil {
+				conn.Close()
+				if c.upgradeInProgress {
+					// During upgrade retry, probe may fail because the agent
+					// is still restarting — just continue the probe loop.
+					continue
+				}
+				return nil, fmt.Errorf("version probe failed: %w", probeErr)
+			}
+
+			hostVersion := version.BuildVersion
+			if hostVersion == "" {
+				hostVersion = defaultVersion
+			}
+
+			// After a successful upgrade attempt, check if the new agent
+			// version is at least as new as the host binary.
+			if c.upgradeInProgress && !version.SemverGreater(hostVersion, agentVersion) {
+				c.upgradeInProgress = false
+				if c.OnUpgradeCompleted != nil {
+					c.OnUpgradeCompleted(ctx, agentVersion)
+				}
+				// Agent is now current — fall through to return conn.
+				c.AgentVersion = agentVersion
+				return conn, nil
+			}
+
+			// If the host binary is newer than the guest agent, trigger upgrade.
+			if version.SemverGreater(hostVersion, agentVersion) {
+				conn.Close()
+				if c.upgradeInProgress {
+					return nil, fmt.Errorf("upgrade already in progress for VM %s", c.VmName)
+				}
+				c.upgradeInProgress = true
+				if c.OnUpgradeStarted != nil {
+					c.OnUpgradeStarted(ctx, agentVersion, hostVersion)
+				}
+				if upgradeErr := c.upgradeAgent(ctx, agentVersion); upgradeErr != nil {
+					c.upgradeInProgress = false
+					return nil, fmt.Errorf("agent upgrade failed: %w", upgradeErr)
+				}
+				// Wait for agent to restart before retrying the dial loop.
+				// The upgrade exec uses a delayed restart (sleep 1 + systemctl)
+				// so the exec result frame is sent before the agent dies.
+				// Without this wait, the retry connects to the still-running
+				// old agent and tries to upgrade again.
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(3 * time.Second):
+				}
+				// Reset deadline: agent restart takes time.
+				deadline = time.Now().Add(c.ProbeTimeout)
+				continue
+			}
+
+			// Agent version is current — use this connection.
+			c.AgentVersion = agentVersion
 			return conn, nil
 		}
 
@@ -323,5 +427,100 @@ func (c *Client) Teardown(_ context.Context) error {
 			return errs.Wrap(errs.CodeVsockConnectionFailed, err)
 		}
 	}
+	return nil
+}
+
+// probeVersion sends a version request to the guest agent over an established
+// connection and returns the agent's version string. The agent responds with a
+// JSON payload containing the agent_version field.
+func (c *Client) probeVersion(ctx context.Context, conn net.Conn) (string, error) {
+	req := execRequest{
+		ID:    "v:1",
+		Type:  requestTypeVersion,
+		Token: c.item.Token,
+	}
+	if err := sendFrame(conn, req); err != nil {
+		return "", fmt.Errorf("send version request: %w", err)
+	}
+	var resp execResponse
+	if err := readFrame(conn, &resp); err != nil {
+		return "", fmt.Errorf("read version response: %w", err)
+	}
+	if resp.Type != responseTypeVersion {
+		return "", fmt.Errorf("unexpected version response type: %s", resp.Type)
+	}
+	var data struct {
+		AgentVersion string `json:"agent_version"`
+	}
+	if err := json.Unmarshal([]byte(resp.Data), &data); err != nil {
+		return "", fmt.Errorf("parse version response: %w", err)
+	}
+	if data.AgentVersion == "" {
+		return "", fmt.Errorf("empty agent version in response")
+	}
+	return data.AgentVersion, nil
+}
+
+// dialRaw dials the UDS socket and performs the CONNECT handshake only.
+// No version probe or upgrade check. Used by upgradeAgent to avoid
+// circular calls back into ensureAgent.
+func (c *Client) dialRaw(ctx context.Context) (net.Conn, error) {
+	return dialAndHandshake(ctx, c.item.UDSPath, c.item.Port)
+}
+
+// upgradeAgent upgrades the guest agent inside the VM to the version
+// embedded in the current host binary. It pushes the binary, verifies it,
+// replaces the running agent, and restarts the agent service.
+func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
+	hostVer := version.BuildVersion
+	if hostVer == "" {
+		hostVer = defaultVersion
+	}
+	slog.Info("upgrading vsock agent", "vm", c.VmName, "from", oldVersion, "to", hostVer)
+
+	// Step 1: Write embedded binary to temp file on host
+	embedded := vsockagent.AgentBinary()
+	if len(embedded) == 0 {
+		return fmt.Errorf("embedded agent binary is empty — check build process")
+	}
+	tmpPath := filepath.Join(os.TempDir(), "mvm-agent-upgrade-"+c.item.VmID)
+	if err := os.WriteFile(tmpPath, embedded, 0755); err != nil {
+		return fmt.Errorf("write agent binary to temp: %w", err)
+	}
+	defer os.Remove(tmpPath)
+
+	// Step 2: Push to VM via file transfer (skip version check)
+	pushClient := &Client{
+		item:             c.item,
+		ProbeTimeout:     c.ProbeTimeout,
+		VmName:           c.VmName,
+		skipVersionCheck: true,
+	}
+	_, err := pushClient.FTCopyToVM(ctx, []string{tmpPath}, "/usr/bin/mvm-vsock-agent.new", true, nil)
+	if err != nil {
+		return fmt.Errorf("push agent binary to VM: %w", err)
+	}
+
+	// Step 3: Replace and restart
+	// SHA-256 verification during FTCopyToVM already guarantees the binary
+	// was transferred correctly. No need to exec-verify it.
+	// Backup is best-effort (may not exist on first upgrade).
+	// The chain continues even if cp fails.
+	execClient := &Client{
+		item:             c.item,
+		ProbeTimeout:     c.ProbeTimeout,
+		VmName:           c.VmName,
+		skipVersionCheck: true,
+	}
+	_, err = execClient.Exec(ctx, upgradeShellCommand, "root", 30)
+	if err != nil {
+		// Try to restore from backup (if it exists)
+		_, restoreErr := execClient.Exec(ctx, restoreShellCommand, "root", 15)
+		if restoreErr != nil {
+			slog.Error("failed to restore agent backup", "vm", c.VmName, "error", restoreErr)
+		}
+		return fmt.Errorf("upgrade exec failed: %w", err)
+	}
+
 	return nil
 }

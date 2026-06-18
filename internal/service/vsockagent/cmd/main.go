@@ -5,12 +5,14 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 
+	"mvmctl/internal/lib/version"
 	"mvmctl/internal/service/vsockagent"
 )
 
@@ -18,7 +20,16 @@ func main() {
 	port := flag.Int("port", 1024, "vsock port to listen on")
 	token := flag.String("token", "", "auth token (overrides -token-file)")
 	tokenFile := flag.String("token-file", "/var/run/mvm-vsock-agent.token", "path to auth token file")
+	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	// Propagate ldflags-set BuildVersion into VersionString().
+	version.SetBuildVersion(version.BuildVersion)
+
+	if *versionFlag {
+		fmt.Println(version.VersionString())
+		os.Exit(0)
+	}
 
 	// Token resolution order:
 	//   1. -token flag (explicit value, highest priority)

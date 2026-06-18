@@ -245,8 +245,10 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 	// Standalone fstab fix (when SkipDeblob is true but FixFstab is still needed)
 	if cfg.FixFstab && !cfg.Deblob {
 		cmds = append(cmds, "# Fix fstab (PARTUUID → /dev/vda)")
-		cmds = append(cmds, fmt.Sprintf("sh %q",
-			`if [ -f /etc/fstab ]; then sed -i 's/^PARTUUID=[^[:space:]]*/\/dev\/vda/' /etc/fstab 2>/dev/null || true; fi`))
+		cmds = append(cmds, fmt.Sprintf(
+			"sh %q",
+			`if [ -f /etc/fstab ]; then sed -i 's/^PARTUUID=[^[:space:]]*/\/dev\/vda/' /etc/fstab 2>/dev/null || true; fi`,
+		))
 	}
 
 	// Shrink (always runs — guestfish commands, not shell)

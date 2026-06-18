@@ -30,4 +30,14 @@ type Repository interface {
 
 	// DeleteByVMID removes the vsock config for a VM. No-op if not found.
 	DeleteByVMID(ctx context.Context, vmID string) error
+
+	// SetUpgradeLock sets the upgrade lock for a VM's vsock agent.
+	// Returns error if lock is already held (upgrading=1).
+	SetUpgradeLock(ctx context.Context, vmID string) error
+
+	// ClearUpgradeLock removes the upgrade lock for a VM's vsock agent.
+	ClearUpgradeLock(ctx context.Context, vmID string) error
+
+	// UpdateAgentVersion persists the agent version after a successful upgrade.
+	UpdateAgentVersion(ctx context.Context, vmID, version string) error
 }

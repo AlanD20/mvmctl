@@ -363,6 +363,9 @@ CREATE TABLE vm_vsock_config (
     uds_path TEXT NOT NULL,
     port INTEGER NOT NULL,
     token TEXT NOT NULL,
+    agent_version TEXT NOT NULL DEFAULT '',
+    upgrading INTEGER NOT NULL DEFAULT 0,
+    upgrade_started_at TIMESTAMP NULL,
     FOREIGN KEY (vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_vsock_config_vm ON vm_vsock_config(vm_id);

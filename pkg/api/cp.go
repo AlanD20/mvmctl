@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
+	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -71,12 +73,14 @@ func (op *Operation) CPCopy(
 				fmt.Sprintf("VM '%s' has no vsock configuration", resolved.DstInfo.Identifier))
 		}
 
-		client := vsock.NewClient(resolved.DstInfo.Vsock, probeTimeout)
-		client.VmName = resolved.DstInfo.Identifier
-		ftResult, err := client.FTCopyToVM(ctx, resolved.LocalPaths, resolved.DstInfo.RemotePath,
-			resolved.Force, wrapProgress)
+		client, err := op.newVsockClient(ctx, resolved.DstInfo.Vsock, probeTimeout, resolved.DstInfo.Identifier)
 		if err != nil {
 			return nil, err
+		}
+		ftResult, ftErr := client.FTCopyToVM(ctx, resolved.LocalPaths, resolved.DstInfo.RemotePath,
+			resolved.Force, wrapProgress)
+		if ftErr != nil {
+			return nil, ftErr
 		}
 
 		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
@@ -98,8 +102,10 @@ func (op *Operation) CPCopy(
 				fmt.Sprintf("VM '%s' has no vsock configuration", resolved.SrcInfo.Identifier))
 		}
 
-		client := vsock.NewClient(resolved.SrcInfo.Vsock, probeTimeout)
-		client.VmName = resolved.SrcInfo.Identifier
+		client, err := op.newVsockClient(ctx, resolved.SrcInfo.Vsock, probeTimeout, resolved.SrcInfo.Identifier)
+		if err != nil {
+			return nil, err
+		}
 		ftResult, err := client.FTCopyFromVM(ctx, resolved.SrcInfo.RemotePath,
 			resolved.LocalPaths[0], resolved.Force, wrapProgress)
 		if err != nil {
@@ -126,10 +132,14 @@ func (op *Operation) CPCopy(
 				fmt.Sprintf("Destination VM '%s' has no vsock configuration", resolved.DstInfo.Identifier))
 		}
 
-		srcClient := vsock.NewClient(resolved.SrcInfo.Vsock, probeTimeout)
-		srcClient.VmName = resolved.SrcInfo.Identifier
-		dstClient := vsock.NewClient(resolved.DstInfo.Vsock, probeTimeout)
-		dstClient.VmName = resolved.DstInfo.Identifier
+		srcClient, err := op.newVsockClient(ctx, resolved.SrcInfo.Vsock, probeTimeout, resolved.SrcInfo.Identifier)
+		if err != nil {
+			return nil, err
+		}
+		dstClient, err := op.newVsockClient(ctx, resolved.DstInfo.Vsock, probeTimeout, resolved.DstInfo.Identifier)
+		if err != nil {
+			return nil, err
+		}
 		ftResult, err := srcClient.FTCopyVMToVM(ctx, resolved.SrcInfo.RemotePath,
 			resolved.DstInfo.RemotePath, resolved.Force, wrapProgress, dstClient)
 		if err != nil {
@@ -160,6 +170,47 @@ func formatBytes(b int64) string {
 		return fmt.Sprintf("%.1f MiB", float64(b)/(1024*1024))
 	}
 	return fmt.Sprintf("%.1f GiB", float64(b)/(1024*1024*1024))
+}
+
+// newVsockClient creates a vsock client with upgrade lifecycle callbacks.
+// It checks for in-progress upgrades before connecting and wires up
+// OnUpgradeStarted/OnUpgradeCompleted callbacks that manage the DB upgrade lock.
+func (op *Operation) newVsockClient(
+	ctx context.Context,
+	cfg *model.VsockConfigItem,
+	probeTimeout time.Duration,
+	vmName string,
+) (*vsock.Client, error) {
+	// Early DB lock check — reject before connecting if a recent upgrade is in progress.
+	if cfg.Upgrading {
+		if cfg.UpgradeStartedAt != nil && time.Since(*cfg.UpgradeStartedAt) < 60*time.Second {
+			return nil, errs.New(errs.CodeVsockUpgradeInProgress,
+				fmt.Sprintf("agent upgrade already in progress for VM '%s'", vmName))
+		}
+		// Stale lock — clear it
+		if err := op.Repos.Vsock.ClearUpgradeLock(ctx, cfg.VmID); err != nil {
+			slog.Warn("failed to clear stale upgrade lock", "vm", vmName, "error", err)
+		}
+	}
+
+	client := vsock.NewClient(cfg, probeTimeout)
+	client.VmName = vmName
+	client.OnUpgradeStarted = func(ctx context.Context, fromVersion, toVersion string) {
+		slog.Info("upgrading vsock agent", "vm", vmName, "from", fromVersion, "to", toVersion)
+		if err := op.Repos.Vsock.SetUpgradeLock(ctx, cfg.VmID); err != nil {
+			slog.Warn("failed to set upgrade lock", "vm", vmName, "error", err)
+		}
+	}
+	client.OnUpgradeCompleted = func(ctx context.Context, newVersion string) {
+		slog.Info("vsock agent upgrade complete", "vm", vmName, "version", newVersion)
+		if err := op.Repos.Vsock.ClearUpgradeLock(ctx, cfg.VmID); err != nil {
+			slog.Warn("failed to clear upgrade lock", "vm", vmName, "error", err)
+		}
+		if err := op.Repos.Vsock.UpdateAgentVersion(ctx, cfg.VmID, newVersion); err != nil {
+			slog.Warn("failed to persist agent version", "vm", vmName, "error", err)
+		}
+	}
+	return client, nil
 }
 
 // Compile-time checks ensure interfaces are satisfied.

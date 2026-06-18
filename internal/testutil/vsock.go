@@ -2,7 +2,9 @@ package testutil
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/lib/model"
@@ -58,6 +60,49 @@ func (r *VsockRepo) DeleteByVMID(_ context.Context, vmID string) error {
 	for id, c := range r.cfgs {
 		if c.VmID == vmID {
 			delete(r.cfgs, id)
+			break
+		}
+	}
+	return nil
+}
+
+func (r *VsockRepo) SetUpgradeLock(_ context.Context, vmID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.cfgs {
+		if c.VmID == vmID {
+			if c.Upgrading {
+				return fmt.Errorf("upgrade already in progress for VM %s", vmID)
+			}
+			now := time.Now()
+			c.Upgrading = true
+			c.UpgradeStartedAt = &now
+			return nil
+		}
+	}
+	// CONTRACT: no matching VM means zero rows affected → same error as SQLite.
+	return fmt.Errorf("upgrade already in progress for VM %s", vmID)
+}
+
+func (r *VsockRepo) ClearUpgradeLock(_ context.Context, vmID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.cfgs {
+		if c.VmID == vmID {
+			c.Upgrading = false
+			c.UpgradeStartedAt = nil
+			break
+		}
+	}
+	return nil
+}
+
+func (r *VsockRepo) UpdateAgentVersion(_ context.Context, vmID, version string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, c := range r.cfgs {
+		if c.VmID == vmID {
+			c.AgentVersion = version
 			break
 		}
 	}

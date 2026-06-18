@@ -72,7 +72,7 @@ build_agent() {
   echo "  → Building guest agent (linux/${arch})..."
   CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build \
     -o "${agent_dir}/${agent_binary}" \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X '${LDFLAGS_VAR}=${version}'" \
     ./internal/service/vsockagent/cmd/
 
   # Compress for embedding — saves ~60% in embedded binary size.

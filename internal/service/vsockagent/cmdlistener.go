@@ -3,9 +3,12 @@ package vsockagent
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net"
+
+	"mvmctl/internal/lib/version"
 )
 
 // handleConnection reads JSON frames from the vsock connection and dispatches
@@ -57,6 +60,20 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 				Type: responseTypePong,
 			}); err != nil {
 				slog.Error("write pong", "id", req.ID, "error", err)
+				return
+			}
+
+		case requestTypeVersion:
+			agentVersion := version.VersionString()
+			data, _ := json.Marshal(map[string]string{
+				"agent_version": agentVersion,
+			})
+			if err := writeFrame(conn, &execResponse{
+				ID:   req.ID,
+				Type: responseTypeVersion,
+				Data: string(data),
+			}); err != nil {
+				slog.Error("write version response", "id", req.ID, "error", err)
 				return
 			}
 
