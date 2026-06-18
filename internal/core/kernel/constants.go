@@ -39,6 +39,14 @@ const (
 // KernelValidTypes lists the accepted kernel type identifiers.
 var KernelValidTypes = map[string]bool{"firecracker": true, "official": true}
 
+// KernelValidFeatures lists the accepted kernel feature names for official builds.
+var KernelValidFeatures = map[string]bool{
+	"kvm":      true,
+	"nftables": true,
+	"tuntap":   true,
+	"btrfs":    true,
+}
+
 // --- Firecracker S3 ---
 
 const (
