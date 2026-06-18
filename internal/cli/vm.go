@@ -163,7 +163,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	var (
 		image           string
 		kernel          string
-		vcpus           int
+		vcpu            int
 		mem             string
 		diskSize        string
 		ip              string
@@ -264,8 +264,8 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			if cmd.Flags().Changed("kernel") {
 				input.KernelID = infraptr.Ptr(kernel)
 			}
-			if cmd.Flags().Changed("vcpus") {
-				input.VCPUCount = infraptr.Ptr(vcpus)
+			if cmd.Flags().Changed("vcpu") {
+				input.VCPUCount = infraptr.Ptr(vcpu)
 			}
 			if cmd.Flags().Changed("ip") {
 				input.RequestedGuestIP = infraptr.Ptr(ip)
@@ -341,7 +341,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.Flags().
 		StringVar(&image, "image", "", "Image name, type:version (e.g. ubuntu:24.04), short ID, or path to .ext4 file")
 	cmd.Flags().StringVar(&kernel, "kernel", "", "Kernel short ID or path to vmlinux file")
-	cmd.Flags().IntVar(&vcpus, "vcpus", 0, "Number of vCPUs (default: from user config)")
+	cmd.Flags().IntVar(&vcpu, "vcpu", 0, "Number of vCPUs (default: from user config)")
 	cmd.Flags().StringVar(&mem, "mem", "", "Memory in MiB or GiB (e.g. 512M, 1G, 4096). Default: from user config")
 	cmd.Flags().
 		StringVarP(&diskSize, "disk-size", "s", "", "Rootfs disk size in MiB/GiB (e.g., 512M=512MiB, 1G=1GiB). Default from config.")
@@ -390,8 +390,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.Flags().IntVar(&vsockPort, "vsock-port", 0, "Vsock port for the guest agent (default: 1024)")
 	cmd.Flags().SetNormalizeFunc(func(f *pflag.FlagSet, name string) pflag.NormalizedName {
 		switch name {
-		case "cpus":
-			name = "vcpus"
 		case "memory":
 			name = "mem"
 		case "net":
@@ -424,6 +422,11 @@ func newVMRemoveCmd(vmAPI api.VMAPI) *cobra.Command {
 }
 
 func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, force bool) error {
+	// Show a spinner during graceful shutdown (up to 30s per VM).
+	prog := common.NewProgress()
+	prog.Start("Removing VM(s)...")
+	defer prog.Stop()
+
 	// Use batch API — pass all identifiers at once
 	removeResult := vmAPI.VMRemove(cmd.Context(), inputs.VMInput{Identifiers: identifiers, Force: force})
 	if removeResult.HasErrors() {
@@ -640,7 +643,10 @@ func newVMSnapshotCmd(vmAPI api.VMAPI) *cobra.Command {
 // --- load (from snapshot) ---
 
 func newVMLoadCmd(vmAPI api.VMAPI) *cobra.Command {
-	var resume bool
+	var (
+		resume bool
+		rootfs string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "load [id] [mem_file] [state_file]",
@@ -667,6 +673,7 @@ Flags:
 				memFile,
 				stateFile,
 				resume,
+				rootfs,
 			); err != nil {
 				return err
 			}
@@ -677,6 +684,7 @@ Flags:
 	}
 
 	cmd.Flags().BoolVar(&resume, "resume", false, "Resume VM after loading")
+	cmd.Flags().StringVar(&rootfs, "rootfs", "", "Rootfs path (required when loading into a new VM)")
 	return cmd
 }
 

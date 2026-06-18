@@ -457,7 +457,7 @@ func (s *Service) RemoveTap(ctx context.Context, tap, bridge string, networkID s
 			res := s.firewallTracker.BatchRemoveRules(ctx, valRules)
 			if !res.Success {
 				msg := infra.DerefOrZero(res.ErrorMessage)
-				slog.Warn("Failed to remove FORWARD rules for TAP",
+				slog.Debug("Failed to remove FORWARD rules for TAP (rules likely already removed by network cleanup)",
 					"tap", tap,
 					"error", msg)
 			}

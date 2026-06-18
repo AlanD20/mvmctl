@@ -607,14 +607,14 @@ func (t *NFTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.Fi
 	for _, rule := range rules {
 		handle := t.findRuleHandle(ctx, &rule)
 		if handle == nil {
-			lastError = fmt.Sprintf("Rule not found in nftables: %s in=%s out=%s",
-				string(rule.ChainName), rule.InInterface, rule.OutInterface)
-			slog.Debug("batch_remove_rules: rule not found",
+			// Rule already gone from kernel — expected during env down
+			// (network/bridge cleanup may have flushed it first).
+			slog.Debug("batch_remove_rules: rule not found, already removed from kernel",
 				"chain", string(rule.ChainName),
 				"in", rule.InInterface,
 				"out", rule.OutInterface,
 			)
-			// Already gone from kernel — clean up DB entry too
+			// Clean up DB entry since kernel state is authoritative.
 			if rule.ID != nil {
 				_ = t.repo.MarkDeleted(ctx, *rule.ID)
 			}

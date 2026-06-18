@@ -24,7 +24,7 @@ type MockVMAPI struct {
 	VMPauseFunc        func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMResumeFunc       func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMSnapshotFunc     func(ctx context.Context, input inputs.VMInput, memFile string, stateFile string) error
-	VMLoadFunc         func(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool) error
+	VMLoadFunc         func(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool, rootfs string) error
 	VMAttachVolumeFunc func(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMDetachVolumeFunc func(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMExecFunc         func(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
@@ -124,9 +124,10 @@ func (m *MockVMAPI) VMLoad(
 	memFile string,
 	stateFile string,
 	resume bool,
+	rootfs string,
 ) error {
 	if m.VMLoadFunc != nil {
-		return m.VMLoadFunc(ctx, input, memFile, stateFile, resume)
+		return m.VMLoadFunc(ctx, input, memFile, stateFile, resume, rootfs)
 	}
 	return nil
 }

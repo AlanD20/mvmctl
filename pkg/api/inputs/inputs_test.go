@@ -348,10 +348,10 @@ func TestVMCreateEnsureValidate_VCPURange(t *testing.T) {
 		wantErr string
 	}{
 		// Error paths — out of range (checked before I/O, no deps needed)
-		"zero vcpu":            {vcpu: 0, wantErr: "Invalid vcpus"},
-		"negative vcpu":        {vcpu: -1, wantErr: "Invalid vcpus"},
-		"below minimum by one": {vcpu: infra.VCPUMin - 1, wantErr: "Invalid vcpus"},
-		"above maximum by one": {vcpu: infra.VCPUMax + 1, wantErr: "Invalid vcpus"},
+		"zero vcpu":            {vcpu: 0, wantErr: "Invalid vcpu"},
+		"negative vcpu":        {vcpu: -1, wantErr: "Invalid vcpu"},
+		"below minimum by one": {vcpu: infra.VCPUMin - 1, wantErr: "Invalid vcpu"},
+		"above maximum by one": {vcpu: infra.VCPUMax + 1, wantErr: "Invalid vcpu"},
 	}
 
 	for name, tc := range tests {

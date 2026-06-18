@@ -395,7 +395,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	// Validate explicitly set vcpu count before defaulting
 	if input.VCPUCount != nil && *input.VCPUCount <= 0 {
 		return nil, errs.New(errs.CodeVMCreateFailed,
-			"--vcpus must be a positive integer",
+			"--vcpu must be a positive integer",
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
@@ -617,7 +617,7 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 	}
 	if result.VCPUCount < infra.VCPUMin || result.VCPUCount > infra.VCPUMax {
 		return errs.New(errs.CodeVMCreateFailed,
-			fmt.Sprintf("Invalid vcpus=%d: must be between %d and %d", result.VCPUCount, infra.VCPUMin, infra.VCPUMax),
+			fmt.Sprintf("Invalid vcpu=%d: must be between %d and %d", result.VCPUCount, infra.VCPUMin, infra.VCPUMax),
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
