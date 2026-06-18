@@ -941,7 +941,7 @@ func TestBuilder_BuildVsockAgentOps(t *testing.T) {
 	assert.Equal(t, 0644, op2.Mode)
 
 	unitContent := string(op2.Data)
-	assert.Contains(t, unitContent, "Description=MVM Guest Agent")
+	assert.Contains(t, unitContent, "Description=MVM VSock Agent")
 	assert.Contains(t, unitContent, "/usr/bin/mvm-vsock-agent -port 1024")
 	assert.NotContains(t, unitContent, "-token", "ExecStart must not expose the token flag")
 	assert.NotContains(t, unitContent, "After=", "systemd unit must not have After=")
@@ -954,14 +954,14 @@ func TestBuilder_BuildVsockAgentOps(t *testing.T) {
 	assert.Equal(t, 0755, op3.Mode, "init script must be executable")
 
 	initContent := string(op3.Data)
-	assert.Contains(t, initContent, "mvm-vsock-agent -port 1024")
-	assert.Contains(t, initContent, "start)")
-	assert.Contains(t, initContent, "stop)")
+	assert.Contains(t, initContent, `command_args="-port 1024"`)
+	assert.Contains(t, initContent, "command_background=true")
+	assert.Contains(t, initContent, "depend()")
 
 	// ops[4]: Enable command (ChrootOp)
 	op4, ok4 := ops[4].(provcontent.ChrootOp)
 	require.True(t, ok4, "ops[4] must be ChrootOp")
-	assert.Contains(t, op4.Command, "systemctl enable mvm-vsock-agent")
+	assert.Contains(t, op4.Command, "ln -sf /etc/systemd/system/mvm-vsock-agent.service")
 	assert.Contains(t, op4.Command, "rc-update add mvm-vsock-agent default")
 	assert.Contains(t, op4.Command, "unknown init system")
 }

@@ -24,14 +24,14 @@ jobs:
       - name: Tidy
         run: go mod tidy && git diff --exit-code
 
+      - name: Generate embed placeholders
+        run: go generate ./internal/service/vsockagent/...
+
       - name: Vet
         run: go vet ./...
 
-      - name: Build
-        run: go build ./...
-
       - name: Test
-        run: go test ./... -coverprofile=coverage.out -covermode=atomic
+        run: go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
   build:
     name: Build (${{ matrix.os }})
