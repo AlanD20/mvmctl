@@ -199,5 +199,22 @@ func (r *KernelPullRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
+	// 6. Validate feature names (only for official builds) —
+	if r.result.KernelType == "official" && len(r.result.Features) > 0 {
+		valid := kernel.KernelValidFeatures
+		var invalid []string
+		for _, f := range r.result.Features {
+			if !valid[f] {
+				invalid = append(invalid, f)
+			}
+		}
+		if len(invalid) > 0 {
+			msg := fmt.Sprintf(
+				"Unknown kernel features: %s. Valid features: kvm, nftables, tuntap, btrfs",
+				strings.Join(invalid, ", "),
+			)
+			return errs.New(errs.CodeKernelBuildFailed, msg, errs.WithClass(errs.ClassValidation))
+		}
+	}
 	return nil
 }
