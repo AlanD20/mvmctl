@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── MockVolumeAPI ─────────────────────────────────────────────────────────────
+// --- MockVolumeAPI ---
 // Rationale: MockVolumeAPI implements api.VolumeAPI for testing. These tests
 // verify default zero-value returns and custom function routing.
 

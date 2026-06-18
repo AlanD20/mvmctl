@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/testutil"
 )
 
-// ─── NewInitCmd ────────────────────────────────────────────────────────────
+// --- NewInitCmd ---
 // Rationale: Init is a complex wizard command that orchestrates multiple
 // APIs (InitAPI, HostAPI). Verify the command shell is created correctly
 // with all expected flags registered.

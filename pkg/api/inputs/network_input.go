@@ -1,35 +1,23 @@
 package inputs
-
 import (
 	"context"
 	"strings"
-
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
-
 	"github.com/jmoiron/sqlx"
 )
-
 // NetworkInput is the raw input for identifying existing networks.
 type NetworkInput struct {
 	Identifiers []string `json:"identifiers"`
 	Force       bool     `json:"force"`
 }
-
-// ResolvedNetworkInput matches Python's ResolvedNetworkInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedNetworkInput:
-//	    networks: list[NetworkItem]
-//	    force: bool | None = None
+// ResolvedNetworkInput specifies resolved network input.
 type ResolvedNetworkInput struct {
 	Networks []*model.Network
 	Force    bool
 }
-
-// NetworkRequest matches Python's NetworkRequest.
-//
+// NetworkRequest specifies network request.
 // Resolve network identifiers to DB records and validate.
 type NetworkRequest struct {
 	db       *sqlx.DB
@@ -37,13 +25,8 @@ type NetworkRequest struct {
 	result   *ResolvedNetworkInput
 	resolver *network.Resolver
 }
-
 // NewNetworkRequest creates a new NetworkRequest.
-// Python creates resolver with include=["leases"]:
-//
-//	self._network_resolver = Resolver(
-//	    Repository(self._db), include=["leases"],
-//	)
+// Create resolver with lease enrichment.
 func NewNetworkRequest(inputs NetworkInput, db *sqlx.DB, networkRepo network.Repository) *NetworkRequest {
 	return &NetworkRequest{
 		db:       db,
@@ -51,49 +34,38 @@ func NewNetworkRequest(inputs NetworkInput, db *sqlx.DB, networkRepo network.Rep
 		resolver: network.NewResolver(networkRepo, []string{"leases"}),
 	}
 }
-
 // Result returns the resolved input, or nil if resolve() has not been called.
-
 // Resolve resolves network identifiers to NetworkItem records.
-// Matches Python's NetworkRequest.resolve().
 func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, error) {
 	if len(r.input.Identifiers) == 0 {
 		return nil, errs.NotFound(errs.CodeNetworkNotFound, "No network identifiers provided")
 	}
-
 	result, err := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if err != nil {
 		return nil, errs.New(errs.CodeNetworkNotFound, err.Error())
 	}
-
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
 		return nil, errs.NotFound(
 			errs.CodeNetworkNotFound,
 			"Could not resolve any networks: "+strings.Join(result.Errors, ", "),
 		)
 	}
-
 	r.result = &ResolvedNetworkInput{
 		Networks: result.Items,
 		Force:    r.input.Force,
 	}
-
 	// Validate
 	if err := r.ensureValidate(); err != nil {
 		return nil, err
 	}
-
 	return r.result, nil
 }
-
 func (r *NetworkRequest) ensureValidate() error {
 	if r.result == nil {
 		return errs.New(errs.CodeNetworkNotFound, "Failed to resolve necessary dependencies to validate")
 	}
-
 	if len(r.result.Networks) == 0 {
 		return errs.NotFound(errs.CodeNetworkNotFound, "No networks found matching identifiers")
 	}
-
 	return nil
 }

@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── MockVMAPI ─────────────────────────────────────────────────────────────────
+// --- MockVMAPI -----------------------------------------------------------------
 // Rationale: MockVMAPI implements api.VMAPI for testing. These tests verify the
 // mock's two behaviors: (1) when no function field is set, the method returns
 // nil/zero; (2) when a function field is set, the method routes to it and

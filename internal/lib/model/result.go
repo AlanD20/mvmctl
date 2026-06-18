@@ -1,6 +1,6 @@
 package model
 
-// ── OpStatus ──
+// --- OpStatus ---
 
 // OpStatus is a typed constant for operation result status.
 // Named OpStatus (not OperationStatus) to avoid collision with VM Status type.

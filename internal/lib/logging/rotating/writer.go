@@ -11,25 +11,23 @@ import (
 	"sync"
 )
 
-// RotatingFileWriter implements io.Writer with continuous log file rotation,
-// matching Python's RotatingFileHandler(maxBytes=10MB, backupCount=3).
+// RotatingFileWriter implements io.Writer with continuous log file rotation
+// (10MB max, 3 backups).
 //
 // Unlike a rotate-at-startup approach, this writer checks file size BEFORE
-// every write and rotates automatically, exactly like Python's
-// logging.handlers.RotatingFileHandler.
+// every write and rotates automatically.
 type RotatingFileWriter struct {
 	path        string
 	maxBytes    int64
 	backupCount int
 	file        *os.File
 	size        int64
-	mu          sync.Mutex
+	mu          sync.Mutex // guards file handle and size
 }
 
 // NewRotatingFileWriter opens (or creates) the log file and returns a writer
 // that rotates automatically. Returns an error if the file cannot be opened
-// at construction time (silently skipped by SetupLogging, matching Python's
-// "try: RotatingFileHandler(...) except Exception: pass").
+// at construction time (silently skipped by SetupLogging).
 func NewRotatingFileWriter(path string) (*RotatingFileWriter, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
@@ -52,7 +50,6 @@ func NewRotatingFileWriter(path string) (*RotatingFileWriter, error) {
 // Write implements io.Writer with pre-write rotation check.
 // Before writing, checks if adding p would exceed maxBytes. If so, rotates
 // the log file first (rename .1 → .2, rename current → .1, create new).
-// This matches Python's RotatingFileHandler which checks on every emit().
 func (w *RotatingFileWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -61,14 +58,14 @@ func (w *RotatingFileWriter) Write(p []byte) (int, error) {
 	if w.file == nil {
 		f, err := os.OpenFile(w.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			// File can't be opened — silently drop like Python's NullHandler fallback
+			// File can't be opened — silently drop.
 			return len(p), nil
 		}
 		w.file = f
 		w.size = 0
 	}
 
-	// Rotate if writing would exceed maxBytes (checked BEFORE write, like Python)
+	// Rotate if writing would exceed maxBytes (checked before write)
 	if w.maxBytes > 0 && w.size+int64(len(p)) > w.maxBytes {
 		w.rotate()
 		if w.file == nil {
@@ -83,9 +80,9 @@ func (w *RotatingFileWriter) Write(p []byte) (int, error) {
 }
 
 // rotate performs log file rotation:
-//   - Shifts .2 → .3, .1 → .2
-//   - Renames current → .1
-//   - Opens new empty log file
+// - Shifts .2 → .3, .1 → .2
+// - Renames current → .1
+// - Opens new empty log file
 func (w *RotatingFileWriter) rotate() {
 	if w.file != nil {
 		w.file.Close()

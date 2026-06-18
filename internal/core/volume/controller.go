@@ -18,7 +18,6 @@ func NewController(volume *model.VolumeItem, repo Repository) *Controller {
 }
 
 // Attach attaches the volume to a VM by updating its status and vm_id.
-// Matches Python's VolumeController.attach() exactly — mutates c.volume.
 func (c *Controller) Attach(ctx context.Context, vmID string) error {
 	updated := &model.VolumeItem{
 		ID:         c.volume.ID,
@@ -40,7 +39,6 @@ func (c *Controller) Attach(ctx context.Context, vmID string) error {
 }
 
 // Detach detaches the volume from any VM by setting status to available and clearing vm_id.
-// Matches Python's VolumeController.detach() exactly — mutates c.volume.
 func (c *Controller) Detach(ctx context.Context) error {
 	updated := &model.VolumeItem{
 		ID:         c.volume.ID,

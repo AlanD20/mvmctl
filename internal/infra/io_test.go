@@ -13,7 +13,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// ─── OpenNoFollow ────────────────────────────────────────────────────────────
+// --- OpenNoFollow ---
 // Rationale: OpenNoFollow is the foundation for all safe file reads. A symlink
 // bypass would enable TOCTOU race attacks on config and key files.
 
@@ -60,7 +60,7 @@ func TestOpenNoFollow(t *testing.T) {
 	})
 }
 
-// ─── ReadRaw ─────────────────────────────────────────────────────────────────
+// --- ReadRaw ---
 // Rationale: ReadRaw reads files with O_NOFOLLOW protection. Must fail on
 // symlinks to prevent traversal attacks.
 
@@ -101,7 +101,7 @@ func TestReadRaw(t *testing.T) {
 	})
 }
 
-// ─── ReadFile ────────────────────────────────────────────────────────────────
+// --- ReadFile ---
 // Rationale: Simple os.ReadFile wrapper used throughout the codebase.
 
 func TestReadFile(t *testing.T) {
@@ -121,7 +121,7 @@ func TestReadFile(t *testing.T) {
 	})
 }
 
-// ─── ReadYAML ────────────────────────────────────────────────────────────────
+// --- ReadYAML ---
 // Rationale: ReadYAML parses YAML files with O_NOFOLLOW protection. Used for
 // loading bundled YAML configs and user-provided YAML files.
 
@@ -167,7 +167,7 @@ func TestReadYAML(t *testing.T) {
 	})
 }
 
-// ─── WriteJSON / ReadJSON ────────────────────────────────────────────────────
+// --- WriteJSON / ReadJSON ---
 // Rationale: JSON read/write with O_NOFOLLOW protection. Used for config files
 // and structured data persistence.
 
@@ -231,7 +231,7 @@ func TestReadJSON(t *testing.T) {
 	})
 }
 
-// ─── EnsureDir ───────────────────────────────────────────────────────────────
+// --- EnsureDir ---
 // Rationale: Simple MkdirAll wrapper used for cache and config directory setup.
 
 func TestEnsureDir(t *testing.T) {
@@ -262,7 +262,7 @@ func TestEnsureDir(t *testing.T) {
 	})
 }
 
-// ─── DirSize ─────────────────────────────────────────────────────────────────
+// --- DirSize ---
 // Rationale: DirSize calculates directory sizes recursively. Used for cache
 // pruning and resource usage reporting.
 
@@ -303,7 +303,7 @@ func TestDirSize(t *testing.T) {
 	})
 }
 
-// ─── WritePIDFile ────────────────────────────────────────────────────────────
+// --- WritePIDFile ---
 // Rationale: PID files with flock locking prevent concurrent process conflicts.
 
 func TestWritePIDFile(t *testing.T) {
@@ -346,7 +346,7 @@ func TestWritePIDFile(t *testing.T) {
 	})
 }
 
-// ─── WaitForSocket ───────────────────────────────────────────────────────────
+// --- WaitForSocket ---
 // Rationale: Polls for Unix socket creation with timeout. Used for Firecracker
 // API socket readiness checks.
 
@@ -358,7 +358,7 @@ func TestWaitForSocket(t *testing.T) {
 	})
 }
 
-// ─── CopyFile ────────────────────────────────────────────────────────────────
+// --- CopyFile ---
 // Rationale: Low-level file copy used throughout the codebase.
 
 func TestCopyFile(t *testing.T) {
@@ -397,7 +397,7 @@ func TestCopyFile(t *testing.T) {
 	})
 }
 
-// ─── CopyPreservingMetadata ──────────────────────────────────────────────────
+// --- CopyPreservingMetadata ---
 // Rationale: shutil.copy2() equivalent — preserves timestamps and permissions.
 
 func TestCopyPreservingMetadata(t *testing.T) {
@@ -428,7 +428,7 @@ func TestCopyPreservingMetadata(t *testing.T) {
 	})
 }
 
-// ─── SafeMove ────────────────────────────────────────────────────────────────
+// --- SafeMove ---
 // Rationale: Atomic move with cross-filesystem fallback.
 
 func TestSafeMove(t *testing.T) {
@@ -455,7 +455,7 @@ func TestSafeMove(t *testing.T) {
 	})
 }
 
-// ─── IsSubDir ────────────────────────────────────────────────────────────────
+// --- IsSubDir ---
 // Rationale: Path containment check used for security boundary enforcement.
 // Must reject paths that only match by string prefix (not actual hierarchy).
 
@@ -489,7 +489,7 @@ func TestIsSubDir(t *testing.T) {
 	}
 }
 
-// ─── ReadInt ─────────────────────────────────────────────────────────────────
+// --- ReadInt ---
 // Rationale: Reads int from /proc-style files. Used for host resource detection.
 
 func TestReadInt(t *testing.T) {
@@ -544,7 +544,7 @@ func TestReadInt(t *testing.T) {
 	})
 }
 
-// ─── SecureMkdir ─────────────────────────────────────────────────────────────
+// --- SecureMkdir ---
 // Rationale: Creates directories with symlink-attack resistance. Used for
 // cache and config directory creation in privileged contexts.
 

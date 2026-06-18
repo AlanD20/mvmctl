@@ -16,7 +16,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── NewBinaryCmd ──────────────────────────────────────────────────────────
+// --- NewBinaryCmd ---
 // Rationale: NewBinaryCmd is the entry point for all binary CLI operations.
 // Missing subcommands silently disable binary management without error.
 
@@ -66,7 +66,7 @@ func TestNewBinaryCmd(t *testing.T) {
 	})
 }
 
-// ─── Binary list (via ls subcommand) ───────────────────────────────────────
+// --- Binary list (via ls subcommand) ---
 // Rationale: Binary listing shows users cached binaries and remote versions.
 // A broken list command prevents users from verifying or selecting binaries.
 
@@ -195,7 +195,7 @@ func TestNewBinaryListCmd(t *testing.T) {
 	})
 }
 
-// ─── Binary pull (via pull subcommand) ─────────────────────────────────────
+// --- Binary pull (via pull subcommand) ---
 // Rationale: Binary pull downloads Firecracker binaries. A broken pull command
 // prevents users from obtaining binaries needed to run VMs.
 

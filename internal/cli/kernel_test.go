@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── NewKernelCmd ─────────────────────────────────────────────────────────────
+// --- NewKernelCmd ---
 // Rationale: NewKernelCmd is the entry point for all kernel CLI operations.
 // Missing subcommands silently disable kernel management without error.
 
@@ -68,7 +68,7 @@ func TestNewKernelCmd(t *testing.T) {
 	})
 }
 
-// ─── kernel ls (via kernel ls) ────────────────────────────────────────────────
+// --- kernel ls (via kernel ls) ---
 // Rationale: Kernel listing is the primary way users see available kernels.
 // A broken list command prevents users from discovering kernels for VM creation.
 
@@ -174,7 +174,7 @@ func TestNewKernelListCmd(t *testing.T) {
 	})
 }
 
-// ─── kernel pull (via kernel pull) ────────────────────────────────────────────
+// --- kernel pull (via kernel pull) ---
 // Rationale: Kernel pull is the mechanism for downloading or building kernels.
 // A broken pull prevents users from obtaining the kernels needed for VMs.
 

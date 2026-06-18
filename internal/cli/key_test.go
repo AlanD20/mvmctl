@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── NewKeyCmd ────────────────────────────────────────────────────────────────
+// --- NewKeyCmd ---
 // Rationale: NewKeyCmd is the entry point for all SSH key CLI operations.
 // Missing subcommands silently disable key management without error.
 
@@ -67,7 +67,7 @@ func TestNewKeyCmd(t *testing.T) {
 	})
 }
 
-// ─── key ls (via key ls) ──────────────────────────────────────────────────────
+// --- key ls (via key ls) ---
 // Rationale: SSH key listing is how users see their registered keys.
 // A broken list command prevents users from selecting keys for VM SSH access.
 
@@ -158,7 +158,7 @@ func TestNewKeyListCmd(t *testing.T) {
 	})
 }
 
-// ─── key create (via key create) ──────────────────────────────────────────────
+// --- key create (via key create) ---
 // Rationale: Key create is the mechanism for generating new SSH keypairs.
 // A broken create command prevents users from setting up SSH access to VMs.
 

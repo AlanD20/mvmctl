@@ -12,7 +12,7 @@ import (
 	"mvmctl/internal/infra/provcontent"
 )
 
-// ─── SSHDConfig ─────────────────────────────────────────────────────────────
+// --- SSHDConfig ---
 // Rationale: SSHDConfig generates the sshd drop-in config. Wrong content means
 // SSH auth breaks — users get locked out of their microVMs.
 
@@ -70,7 +70,7 @@ func TestBuilder_SSHDConfig(t *testing.T) {
 	}
 }
 
-// ─── FirstBootInstaller ──────────────────────────────────────────────────────
+// --- FirstBootInstaller ---
 // Rationale: FirstBootInstaller returns a shell script that installs SSH on
 // first boot. Missing or malformed scripts mean VMs boot without SSH access.
 
@@ -85,7 +85,7 @@ func TestBuilder_FirstBootInstaller(t *testing.T) {
 	assert.Contains(t, got, "openssh", "must install SSH")
 }
 
-// ─── FirstBootService ────────────────────────────────────────────────────────
+// --- FirstBootService ---
 // Rationale: FirstBootService returns the systemd unit that triggers the
 // first-boot installer. Wrong unit means the installer never runs.
 
@@ -100,7 +100,7 @@ func TestBuilder_FirstBootService(t *testing.T) {
 	assert.Contains(t, got, "WantedBy=multi-user.target")
 }
 
-// ─── Hosts ───────────────────────────────────────────────────────────────────
+// --- Hosts ---
 // Rationale: Hosts generates /etc/hosts with the VM hostname at 127.0.1.1.
 // A misconfigured hosts file breaks hostname resolution and sudo.
 
@@ -147,7 +147,7 @@ func TestBuilder_Hosts(t *testing.T) {
 	}
 }
 
-// ─── BuildHostnameOps ────────────────────────────────────────────────────────
+// --- BuildHostnameOps ---
 // Rationale: BuildHostnameOps creates FileOps for /etc/hostname and /etc/hosts.
 // Wrong paths or modes mean hostname configuration fails silently.
 
@@ -224,7 +224,7 @@ func TestBuilder_BuildHostnameOps(t *testing.T) {
 	}
 }
 
-// ─── BuildDNSOps ─────────────────────────────────────────────────────────────
+// --- BuildDNSOps ---
 // Rationale: BuildDNSOps creates the resolv.conf FileOp. Wrong content means
 // VMs cannot resolve DNS names, breaking apt/apk/pacman on first boot.
 
@@ -273,7 +273,7 @@ func TestBuilder_BuildDNSOps(t *testing.T) {
 	}
 }
 
-// ─── BuildSSHOps ─────────────────────────────────────────────────────────────
+// --- BuildSSHOps ---
 // Rationale: BuildSSHOps injects SSH authorized_keys and ensures correct
 // ownership. Wrong chowns or missing useradd mean SSH pubkey auth fails.
 
@@ -397,7 +397,7 @@ fi`},
 	}
 }
 
-// ─── SetupSudo ───────────────────────────────────────────────────────────────
+// --- SetupSudo ---
 // Rationale: SetupSudo fixes broken ownership in cloud images and creates a
 // passwordless sudoers drop-in. Wrong chowns break sudo entirely.
 
@@ -452,7 +452,7 @@ func TestBuilder_SetupSudo(t *testing.T) {
 	}
 }
 
-// ─── BuildCloudInitDisableOps ────────────────────────────────────────────────
+// --- BuildCloudInitDisableOps ---
 // Rationale: BuildCloudInitDisableOps masks cloud-init to speed up boot.
 // Skipping cloud-init prevents 5+ seconds of unnecessary boot delay.
 
@@ -497,7 +497,7 @@ func TestBuilder_BuildCloudInitDisableOps(t *testing.T) {
 	}
 }
 
-// ─── BuildCloudInitInjectOps ─────────────────────────────────────────────────
+// --- BuildCloudInitInjectOps ---
 // Rationale: BuildCloudInitInjectOps injects a nocloud-net seed directory.
 // If the source dir doesn't exist, it must return nil to avoid build failures.
 
@@ -528,7 +528,7 @@ func TestBuilder_BuildCloudInitInjectOps(t *testing.T) {
 	})
 }
 
-// ─── BuildResizeOps ──────────────────────────────────────────────────────────
+// --- BuildResizeOps ---
 // Rationale: BuildResizeOps creates a grow operation. Wrong action means the
 // root filesystem is not expanded when the disk is larger than the image.
 
@@ -571,7 +571,7 @@ func TestBuilder_BuildResizeOps(t *testing.T) {
 	}
 }
 
-// ─── BuildShrinkOps ──────────────────────────────────────────────────────────
+// --- BuildShrinkOps ---
 // Rationale: BuildShrinkOps creates a shrink operation. Wrong action means the
 // filesystem grows instead of shrinking, potentially corrupting the image.
 
@@ -614,7 +614,7 @@ func TestBuilder_BuildShrinkOps(t *testing.T) {
 	}
 }
 
-// ─── BuildFixFstabOps ────────────────────────────────────────────────────────
+// --- BuildFixFstabOps ---
 // Rationale: BuildFixFstabOps comments out UUID/PARTUUID entries in /etc/fstab
 // that are invalid in Firecracker. Missing this step causes boot failures.
 
@@ -633,7 +633,7 @@ func TestBuilder_BuildFixFstabOps(t *testing.T) {
 	assert.Contains(t, op.Command, "UUID=")
 }
 
-// ─── BuildDeblobOps ──────────────────────────────────────────────────────────
+// --- BuildDeblobOps ---
 // Rationale: BuildDeblobOps removes OS package cache, disables unneeded
 // services, and injects SSH config. It is the most complex Builder method
 // with 6 OS-specific branches. Wrong branch selection means bloated images
@@ -901,7 +901,7 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 	}
 }
 
-// ─── BuildVsockAgentOps ────────────────────────────────────────────────────
+// --- BuildVsockAgentOps ---
 // Rationale: BuildVsockAgentOps generates the operations to embed the vsock
 // guest agent into the root filesystem. Wrong paths, modes, or systemd content
 // mean the agent won't start inside the VM, making Exec and Shell impossible.

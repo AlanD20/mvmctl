@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/api"
 )
 
-// ─── ExecStep.Apply ─────────────────────────────────────────────────────────
+// --- ExecStep.Apply ---
 // Rationale: ExecStep.Apply requires a real vsock connection via VMExec,
 // so we cannot test the happy path without a live VM. We test the nil-op
 // guard (R1: every error-returning function needs at least one error case).
@@ -26,7 +26,7 @@ func TestExecStep_Apply(t *testing.T) {
 		ctx     func() context.Context
 		wantErr string
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_rejected_at_construction": {
 			setupOp: func(_ *testing.T) api.API { return nil },
@@ -64,7 +64,7 @@ func TestExecStep_Apply(t *testing.T) {
 	}
 }
 
-// ─── ExecStep.Destroy ──────────────────────────────────────────────────────
+// --- ExecStep.Destroy ---
 // Rationale: Destroy is a no-op for Exec (commands are ephemeral), but it
 // must still handle nil op, write state, and recover saved state from the
 // parameter for workflow resumption after a crash.
@@ -79,7 +79,7 @@ func TestExecStep_Destroy(t *testing.T) {
 		wantCommand string
 		wantCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"context_cancelled_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return &api.Operation{} },
@@ -96,7 +96,7 @@ func TestExecStep_Destroy(t *testing.T) {
 			wantErr: "context canceled",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"noop_with_nil_saved_writes_empty_state": {
 			setupOp: func(_ *testing.T) *api.Operation {
@@ -168,7 +168,7 @@ func TestExecStep_Destroy(t *testing.T) {
 	}
 }
 
-// ─── ExecStep.Destroy write-failure propagation ─────────────────────────────
+// --- ExecStep.Destroy write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Destroy must propagate it
 // rather than silently swallowing the persistence failure.
 
@@ -195,7 +195,7 @@ func TestExecStep_Destroy_WriteFailure(t *testing.T) {
 		"Destroy must wrap write errors with context")
 }
 
-// ─── ExecStep.StateData ────────────────────────────────────────────────────
+// --- ExecStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision resources.
@@ -260,7 +260,7 @@ func TestExecStep_StateData(t *testing.T) {
 	}
 }
 
-// ─── ExecStep.Dependencies ────────────────────────────────────────────────
+// --- ExecStep.Dependencies ---
 // Rationale: Dependencies must round-trip through FromSpec so that the DAG
 // engine can correctly order Exec steps after their VM dependencies.
 
@@ -313,7 +313,7 @@ func TestExecStep_Dependencies(t *testing.T) {
 	}
 }
 
-// ─── ExecStep.SpecHash ─────────────────────────────────────────────────────
+// --- ExecStep.SpecHash ---
 // Rationale: SpecHash must be deterministic and non-empty for steps created
 // from specs, enabling drift detection. Different specs must produce different
 // hashes.

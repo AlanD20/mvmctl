@@ -1,6 +1,6 @@
 package kernel
 
-// ── Build dependencies ──
+// --- Build dependencies ---
 
 // KernelBuildCommands lists required executables for kernel builds.
 var KernelBuildCommands = []string{
@@ -13,7 +13,7 @@ var KernelBuildLibraries = []struct{ Pkg, Display string }{
 	{"openssl", "libssl-dev"},
 }
 
-// ── Make targets ──
+// --- Make targets ---
 
 const (
 	KernelMakeTarget         = "vmlinux"
@@ -22,7 +22,7 @@ const (
 	KernelConfigScript       = "scripts/config"
 )
 
-// ── File patterns ──
+// --- File patterns ---
 
 const (
 	KernelBuildLogSuffix = ".build.log"
@@ -34,12 +34,12 @@ const (
 	KernelMakeCmd        = "make"
 )
 
-// ── Valid kernel types ──
+// --- Valid kernel types ---
 
 // KernelValidTypes lists the accepted kernel type identifiers.
 var KernelValidTypes = map[string]bool{"firecracker": true, "official": true}
 
-// ── Firecracker S3 ──
+// --- Firecracker S3 ---
 
 const (
 	KernelS3KeyPattern   = "firecracker-ci/%s/%s/vmlinux-%s"

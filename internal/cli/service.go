@@ -1,4 +1,4 @@
-// Package cli implements the full CLI command tree matching Python's main.py.
+// Package cli — internal service subprocess entry points.
 package cli
 
 import (
@@ -12,10 +12,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ── Run subcommand ────────────────────────────────────────────────────────────
+// --- Run subcommand ---
 // Each "mvm run <service>" command parses flags into the service's own Config
 // type and calls the service's Run(ctx, cfg). The dependency direction is:
-//   cli/ → services/
+//
+//	cli/ → services/
+//
 // Services never import cli/.
 
 // newRunCmd creates the "run" subcommand for service entry points.

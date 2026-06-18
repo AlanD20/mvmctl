@@ -11,15 +11,12 @@ import (
 
 // LeaseController manages IP leases for a specific network.
 // Construction pattern matches Controller convention (per-entity binding).
-// Python equivalent: _lease_service.py LeaseService
 type LeaseController struct {
 	leaseRepo LeaseRepository
 	net       *model.Network
 }
 
 // NewLeaseController creates a LeaseController from a *model.Network or string identifier.
-// Python equivalent: _lease_service.py LeaseService(entity, repo)
-// Python's __init__ accepts both str and NetworkItem — if str, it resolves via
 // NetworkResolver() which uses the default database. Go requires an explicit
 // Repository for string resolution, and returns an error if networkRepo
 // is nil when it's needed.
@@ -78,7 +75,6 @@ func (s *LeaseController) GetByVMID(ctx context.Context, vmID string) ([]*model.
 }
 
 // IsAvailable checks if an IP address is available (not leased).
-// Matches Python's is_available.
 func (s *LeaseController) IsAvailable(ctx context.Context, ip string) (bool, error) {
 	lease, err := s.leaseRepo.Get(ctx, s.net.ID, ip)
 	if err != nil {
@@ -88,7 +84,6 @@ func (s *LeaseController) IsAvailable(ctx context.Context, ip string) (bool, err
 }
 
 // Lease allocates the next available IP from this network's subnet.
-// Matches Python's lease() with max_retries=10 and IntegrityError handling.
 func (s *LeaseController) Lease(ctx context.Context, vmID string) (string, error) {
 	maxRetries := 10
 	var lastError error
@@ -131,7 +126,6 @@ func (s *LeaseController) Lease(ctx context.Context, vmID string) (string, error
 }
 
 // LeaseSpecific allocates a specific IP address from this network's subnet.
-// Matches Python's lease_specific.
 func (s *LeaseController) LeaseSpecific(ctx context.Context, ip, vmID string) (string, error) {
 	available, err := s.IsAvailable(ctx, ip)
 	if err != nil {
@@ -150,7 +144,6 @@ func (s *LeaseController) LeaseSpecific(ctx context.Context, ip, vmID string) (s
 }
 
 // Release releases all leases for a VM from this network.
-// Matches Python's release.
 func (s *LeaseController) Release(ctx context.Context, vmID string) error {
 	return s.leaseRepo.ReleaseByVM(ctx, vmID)
 }

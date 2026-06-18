@@ -19,7 +19,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── prettifyKey ─────────────────────────────────────────────────────────────
+// --- prettifyKey ---
 // Rationale: prettifyKey is used for every key displayed in tree/error output.
 // A regression here would show raw underscored keys ("vm.not_found") instead of
 // user-friendly variants ("VM Not Found"), degrading the CLI UX.
@@ -70,7 +70,7 @@ func TestPrettifyKey(t *testing.T) {
 	}
 }
 
-// ─── toTitle ─────────────────────────────────────────────────────────────────
+// --- toTitle ---
 // Rationale: toTitle is the foundation for prettifyKey and any title-casing
 // output. It capitalises the first letter of each word without lowercasing
 // the rest, which preserves acronyms but must not strip or corrupt input.
@@ -103,7 +103,7 @@ func TestToTitle(t *testing.T) {
 	}
 }
 
-// ─── parseTime ───────────────────────────────────────────────────────────────
+// --- parseTime ---
 // Rationale: parseTime is the single entry point for timestamp parsing across
 // the CLI. A regression here would cause timestamps to appear as raw strings
 // ("-") or produce incorrect relative time display.
@@ -156,7 +156,7 @@ func TestParseTime(t *testing.T) {
 	}
 }
 
-// ─── isNotFoundCode ──────────────────────────────────────────────────────────
+// --- isNotFoundCode ---
 // Rationale: isNotFoundCode controls the "not found" branch in FormatError and
 // HandleErrors. A false negative would display raw code strings instead of
 // user-friendly "entity not found" messages.
@@ -189,7 +189,7 @@ func TestIsNotFoundCode(t *testing.T) {
 	}
 }
 
-// ─── isAlreadyExistsCode ─────────────────────────────────────────────────────
+// --- isAlreadyExistsCode ---
 // Rationale: isAlreadyExistsCode controls the "already exists" branch in
 // FormatError. A false negative would display raw code strings instead of
 // user-friendly "entity already exists" messages.
@@ -220,7 +220,7 @@ func TestIsAlreadyExistsCode(t *testing.T) {
 	}
 }
 
-// ─── FormatTimestamp ─────────────────────────────────────────────────────────
+// --- FormatTimestamp ---
 // Rationale: FormatTimestamp renders all timestamps in CLI output (list, inspect,
 // tree views). A regression here would display raw ISO strings to users or show
 // incorrect relative durations, creating confusion.
@@ -305,7 +305,7 @@ func TestFormatTimestamp(t *testing.T) {
 	})
 }
 
-// ─── FormatSize ──────────────────────────────────────────────────────────────
+// --- FormatSize ---
 // Rationale: FormatSize is used in every list/detail display for storage sizes
 // (images, volumes, kernels). Wrong formatting would mislead users about disk
 // usage.
@@ -338,7 +338,7 @@ func TestFormatSize(t *testing.T) {
 	}
 }
 
-// ─── FormatID ────────────────────────────────────────────────────────────────
+// --- FormatID ---
 // Rationale: FormatID is used to display truncated hashes in every list output
 // (vm ls, image ls, etc.). A regression would show full-length hashes or
 // corrupt display strings.
@@ -368,7 +368,7 @@ func TestFormatID(t *testing.T) {
 	}
 }
 
-// ─── MarshalJSONDefaultStr ───────────────────────────────────────────────────
+// --- MarshalJSONDefaultStr ---
 // Rationale: MarshalJSONDefaultStr is used by the API layer to serialise
 // responses. A regression could cause empty output "{}" for valid data or
 // crash on non-serialisable types.
@@ -420,9 +420,9 @@ func TestMarshalJSONDefaultStr(t *testing.T) {
 	})
 }
 
-// ─── isBrokenPipe ────────────────────────────────────────────────────────────
+// --- isBrokenPipe ---
 // Rationale: isBrokenPipe determines whether HandleErrors swallows the error
-// and exits with code 0 (matching Python's BrokenPipeError handling).
+// and exits with code 0 on broken pipe errors.
 // A false negative would cause CLI error spew on pipe close.
 
 func TestIsBrokenPipe(t *testing.T) {
@@ -489,7 +489,7 @@ func TestIsBrokenPipe(t *testing.T) {
 	}
 }
 
-// ─── isDatabaseError ─────────────────────────────────────────────────────────
+// --- isDatabaseError ---
 // Rationale: isDatabaseError routes errors to database-specific error messages
 // in HandleErrors ("Run 'mvm init' first", etc.). A false negative would show
 // a generic unexpected error instead of a helpful init hint.
@@ -555,7 +555,7 @@ func TestIsDatabaseError(t *testing.T) {
 	}
 }
 
-// ─── FormatSettingValue ──────────────────────────────────────────────────────
+// --- FormatSettingValue ---
 // Rationale: FormatSettingValue renders setting values in config display
 // ("mvm config show"). A regression would show "<nil>" or other internal
 // representations instead of human-friendly overrides like "<auto>".

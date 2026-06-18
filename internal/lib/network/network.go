@@ -18,7 +18,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Private helpers (used by Python-equivalent functions) ──
+// --- Private helpers ---
 
 // ipToInt converts IPv4 address to uint32 for arithmetic.
 // Used internally by ComputeIPv4Gateway and AllocateNextIP.
@@ -35,11 +35,9 @@ func intToIP(n uint32) net.IP {
 	return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
 }
 
-// ── Subnet Math & Computation ──
-// These directly map to Python's NetworkUtils methods.
+// --- Subnet Math & Computation ---
 
 // ComputeSubnetMask returns netmask from CIDR subnet.
-// Python: compute_subnet_mask(subnet) -> str
 func ComputeSubnetMask(subnet string) string {
 	_, ipnet, err := net.ParseCIDR(subnet)
 	if err != nil {
@@ -49,7 +47,6 @@ func ComputeSubnetMask(subnet string) string {
 }
 
 // ComputePrefixLength returns prefix length from CIDR subnet.
-// Python: compute_prefix_length(subnet) -> int
 func ComputePrefixLength(subnet string) int {
 	_, ipnet, err := net.ParseCIDR(subnet)
 	if err != nil {
@@ -79,7 +76,6 @@ func CountHosts(ipnet *net.IPNet) int {
 }
 
 // ComputeIPv4Gateway computes default gateway IP from subnet (first usable host).
-// Python: compute_ipv4_gateway(subnet) -> str
 // For /31 subnets (RFC 3021), both addresses are usable hosts, so we
 // return the second address to avoid colliding with the network address.
 func ComputeIPv4Gateway(subnet string) (string, error) {
@@ -102,14 +98,12 @@ func ComputeIPv4Gateway(subnet string) (string, error) {
 }
 
 // ComputeBridgeAddress returns gateway IP with subnet prefix (e.g. '172.29.0.1/28').
-// Python: compute_bridge_address(ipv4_gateway, subnet) -> str
 func ComputeBridgeAddress(gateway, subnet string) string {
 	prefix := ComputePrefixLength(subnet)
 	return fmt.Sprintf("%s/%d", gateway, prefix)
 }
 
 // ComputeBridgeName computes bridge name from network name.
-// Python: compute_bridge_name(network_name) -> str
 // Ensures the bridge name never exceeds the Linux IFNAMSIZ limit (15 chars).
 func ComputeBridgeName(cliName, networkName string) string {
 	raw := fmt.Sprintf("%s-%s", cliName, networkName)
@@ -127,10 +121,9 @@ func ComputeBridgeName(cliName, networkName string) string {
 	return fmt.Sprintf("%s%s-%s", prefix, nameTruncated, shortHash)
 }
 
-// ── Naming & Generation ──
+// --- Naming & Generation ---
 
 // GenerateMAC generates a MAC address with the given prefix.
-// Python: generate_mac(mac_prefix) -> str
 func GenerateMAC(macPrefix string) string {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
@@ -143,22 +136,19 @@ func GenerateMAC(macPrefix string) string {
 	}
 	suffix := fmt.Sprintf("%02x:%02x:%02x:%02x", b[0], b[1], b[2], b[3])
 	mac := fmt.Sprintf("%s:%s", macPrefix, suffix)
-	// Python returns UPPERCASE (.upper())
 	return strings.ToUpper(mac)
 }
 
 // GenerateTAPName generates a unique TAP device name (max 16 chars for IFNAMSIZ).
-// Python: generate_tap_name(network_name, vm_name) -> str
 func GenerateTAPName(cliName, networkName, vmName string) string {
 	raw := fmt.Sprintf("%s-%s", networkName, vmName)
 	tapHash := fmt.Sprintf("%x", sha256.Sum256([]byte(raw)))[:11]
 	return fmt.Sprintf("%s-%s", cliName, tapHash)
 }
 
-// ── IP Allocation ──
+// --- IP Allocation ---
 
 // AllocateNextIP allocates the next available IP in a subnet.
-// Python: allocate_next_ip(existing_ips, subnet, gateway=None) -> str
 // For /31 (RFC 3021): both addresses are usable.
 // For /32: the single address is usable.
 func AllocateNextIP(existingIPs []string, subnet, gateway string) (string, error) {
@@ -197,13 +187,12 @@ func AllocateNextIP(existingIPs []string, subnet, gateway string) (string, error
 	return "", errs.New(errs.CodeNetworkError, fmt.Sprintf("No available IPs in subnet %s", subnet))
 }
 
-// ── System Queries (Host State) ──
+// --- System Queries (Host State) ---
 
 var virtualInterfacePrefixes = []string{"mvm-", "tap", "br-", "virbr", "docker", "veth"}
 var excludedInterfaces = []string{"lo"}
 
 // GetPhysicalInterfaces returns available physical network interfaces.
-// Python: get_physical_interfaces() -> list[str]
 func GetPhysicalInterfaces() ([]string, error) {
 	netPath := "/sys/class/net"
 	if _, err := os.Stat(netPath); os.IsNotExist(err) {
@@ -237,7 +226,6 @@ func GetPhysicalInterfaces() ([]string, error) {
 }
 
 // DetectOutboundInterface returns the outbound (default route) network interface.
-// Python: detect_outbound_interface() -> str | None
 func DetectOutboundInterface(ctx context.Context) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -262,7 +250,6 @@ func DetectOutboundInterface(ctx context.Context) string {
 }
 
 // GetTunTapDevices lists all TUN/TAP devices.
-// Python: get_tuntap_devices() -> list[str]
 func GetTunTapDevices(ctx context.Context) []string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -285,7 +272,6 @@ func GetTunTapDevices(ctx context.Context) []string {
 }
 
 // GetBridges lists all bridge interfaces.
-// Python: get_bridges() -> list[str]
 func GetBridges(ctx context.Context) []string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -308,7 +294,6 @@ func GetBridges(ctx context.Context) []string {
 }
 
 // EnsureInterfaceReady ensures a network interface exists and is usable for NAT.
-// Python: ensure_interface_ready(interface) -> bool
 // Returns nil on success, error on failure.
 func EnsureInterfaceReady(ctx context.Context, iface string) error {
 	if iface == "lo" {
@@ -347,10 +332,9 @@ func EnsureInterfaceReady(ctx context.Context, iface string) error {
 	return nil
 }
 
-// ── Internal Helpers ──
+// --- Internal Helpers ---
 
 // StripTapRules strips TAP-related rules from iptables rules text.
-// Python: strip_tap_rules(rules_text) -> str
 func StripTapRules(ctx context.Context, rulesText string) string {
 	tapNames := GetTunTapDevices(ctx)
 	if len(tapNames) == 0 {
@@ -374,7 +358,6 @@ func StripTapRules(ctx context.Context, rulesText string) string {
 }
 
 // DetectIPTablesBackendConflict detects mixed iptables backend conflict.
-// Python: detect_iptables_backend_conflict() -> tuple[bool, str]
 type BackendConflictResult struct {
 	HasConflict bool
 	Diagnosis   string
@@ -439,7 +422,6 @@ func DetectIPTablesBackendConflict(ctx context.Context) BackendConflictResult {
 }
 
 // FlushARP flushes the ARP cache for a bridge interface.
-// Python: flush_arp(bridge, privileged=True) -> None
 func FlushARP(ctx context.Context, bridge string) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -447,4 +429,4 @@ func FlushARP(ctx context.Context, bridge string) {
 		system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 }
 
-// ── Internal helpers ──
+// --- Internal helpers ---

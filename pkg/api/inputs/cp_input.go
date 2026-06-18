@@ -1,9 +1,7 @@
 package inputs
-
 import (
 	"context"
 	"fmt"
-
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/vsock"
@@ -12,14 +10,12 @@ import (
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
-
-// CPInput matches Python's CPInput dataclass.
+// CPInput specifies c p input.
 type CPInput struct {
 	Sources []string `json:"sources" yaml:"src"`
 	Dest    string   `json:"dest"    yaml:"dest"`
 	Force   bool     `json:"force"   yaml:"force"`
 }
-
 // ResolvedCPInfo holds resolved target VM info for a copy operation.
 type ResolvedCPInfo struct {
 	Identifier  string
@@ -28,8 +24,7 @@ type ResolvedCPInfo struct {
 	TotalBytes  *int64
 	Vsock       *model.VsockConfigItem
 }
-
-// ResolvedCPInput matches Python's ResolvedCPInput (frozen dataclass).
+// ResolvedCPInput specifies resolved c p input.
 type ResolvedCPInput struct {
 	Direction  string
 	LocalPaths []string
@@ -37,16 +32,13 @@ type ResolvedCPInput struct {
 	DstInfo    *ResolvedCPInfo
 	Force      bool
 }
-
-// CPRequest matches Python's CPRequest.
-//
+// CPRequest specifies c p request.
 // Resolve CPInput against the database and filesystem.
 type CPRequest struct {
 	cfg    *config.Service
 	input  CPInput
 	result *ResolvedCPInput
 }
-
 // NewCPRequest creates a new CPRequest.
 func NewCPRequest(inputs CPInput, cfg *config.Service) *CPRequest {
 	return &CPRequest{
@@ -54,7 +46,6 @@ func NewCPRequest(inputs CPInput, cfg *config.Service) *CPRequest {
 		input: inputs,
 	}
 }
-
 // Resolve expands tilde paths and resolves VM identifiers to vsock config.
 func (r *CPRequest) Resolve(
 	ctx context.Context,
@@ -65,24 +56,20 @@ func (r *CPRequest) Resolve(
 	for i, src := range r.input.Sources {
 		sources[i] = system.ExpandTilde(src)
 	}
-
 	dstVM, dstPath := infra.ParseVMPath(r.input.Dest)
 	srcVM, srcRemotePath := infra.ParseVMPath(sources[0])
-
 	var (
 		srcInfo, dstInfo *ResolvedCPInfo
 		localPaths       []string
 		direction        string
 		err              error
 	)
-
 	// Determine direction.
 	multiSource := len(sources) > 1
 	switch {
 	case multiSource && dstVM == "":
 		return nil, errs.New(errs.CodeCPMultiSourceNoVMDest,
 			"Multiple sources require a VM destination (use vm_name:/path format)")
-
 	case multiSource || (srcVM == "" && dstVM != ""):
 		direction = infra.DirectionHostToVM
 		if multiSource {
@@ -94,7 +81,6 @@ func (r *CPRequest) Resolve(
 		if err != nil {
 			return nil, err
 		}
-
 	case srcVM != "" && dstVM == "":
 		direction = infra.DirectionVMToHost
 		localPaths = []string{dstPath}
@@ -102,7 +88,6 @@ func (r *CPRequest) Resolve(
 		if err != nil {
 			return nil, err
 		}
-
 	case srcVM != "" && dstVM != "":
 		direction = infra.DirectionVMToVM
 		srcInfo, err = r.resolveVMSide(ctx, srcVM, srcRemotePath, true, vmRepo, vsockRepo)
@@ -113,12 +98,10 @@ func (r *CPRequest) Resolve(
 		if err != nil {
 			return nil, err
 		}
-
 	default:
 		return nil, errs.New(errs.CodeCPNoVMSpecified,
 			"At least one path must reference a VM (use vm_name:/path format)")
 	}
-
 	r.result = &ResolvedCPInput{
 		Direction:  direction,
 		LocalPaths: localPaths,
@@ -128,7 +111,6 @@ func (r *CPRequest) Resolve(
 	}
 	return r.result, nil
 }
-
 // resolveVMSide resolves a VM-side path to vsock connection config.
 func (r *CPRequest) resolveVMSide(
 	ctx context.Context,
@@ -141,7 +123,6 @@ func (r *CPRequest) resolveVMSide(
 	if err != nil {
 		return nil, err
 	}
-
 	vsockCfg, err := vsockRepo.GetByVMID(ctx, vmEntity.ID)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeCPResolveFailed, err)
@@ -152,16 +133,13 @@ func (r *CPRequest) resolveVMSide(
 			fmt.Sprintf("VM '%s' has no vsock configuration — ensure vsock device is enabled", vmIdent),
 		)
 	}
-
 	return &ResolvedCPInfo{
 		Identifier: vmIdent,
 		RemotePath: remotePath,
 		Vsock:      vsockCfg,
 	}, nil
 }
-
 // resolveVM resolves a VM by name, IP, MAC, or ID prefix.
-// Matches Python's CPRequest._resolve_vm().
 func (r *CPRequest) resolveVM(ctx context.Context, identifier string, vmRepo vm.Repository) (*model.VM, error) {
 	vmResolver := vm.NewResolver(vmRepo)
 	vmEntity, err := vmResolver.Resolve(ctx, identifier)

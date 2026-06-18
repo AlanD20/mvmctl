@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ── Columns for env list ──
+// --- Columns for env list ---
 
 var envListColumns = []common.ListingColumn{
 	{Header: "Workflow ID", Extract: func(v any) string { return common.Cli.FormatID(v.(env.ListSummary).WorkflowID) }},

@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── MockBinaryAPI ─────────────────────────────────────────────────────────────
+// --- MockBinaryAPI ---
 // Rationale: MockBinaryAPI implements api.BinaryAPI for testing. These tests
 // verify default zero-value returns and custom function routing.
 

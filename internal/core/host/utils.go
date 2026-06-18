@@ -17,18 +17,13 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// POSIX access mode constants matching Python's os.R_OK, os.W_OK.
-// Go's syscall package may not define these on all platforms.
+// POSIX access mode constants. Go's syscall package may not define these on all platforms.
 const (
 	rOk = 4
 	wOk = 2
 )
 
-// ── _run (matches Python's HostService._run()) ──
-// ── CheckKVMAccess ──
-// Matches Python's HostService.check_kvm_access() — checks /dev/kvm exists and os.access(path, R_OK|W_OK).
-// Python's os.access checks the REAL UID; Go's os.OpenFile checks effective UID.
-// syscall.Access matches Python's os.access behavior.
+// --- CheckKVMAccess ---
 func CheckKVMAccess() bool {
 	kvmPath := "/dev/kvm"
 	if _, err := os.Stat(kvmPath); err != nil {
@@ -40,7 +35,7 @@ func CheckKVMAccess() bool {
 	return true
 }
 
-// ── CheckRequiredBinaries ──
+// --- CheckRequiredBinaries ---
 func CheckRequiredBinaries() []string {
 	var missing []string
 	for _, name := range infra.RequiredBinaries {
@@ -51,13 +46,13 @@ func CheckRequiredBinaries() []string {
 	return missing
 }
 
-// ── CheckCloudLocalds ──
+// --- CheckCloudLocalds ---
 func CheckCloudLocalds() bool {
 	_, err := exec.LookPath("cloud-localds")
 	return err == nil
 }
 
-// ── CheckKernelVersion ──
+// --- CheckKernelVersion ---
 func CheckKernelVersion() bool {
 	release := system.KernelRelease()
 	re := regexp.MustCompile(`(\d+)\.(\d+)`)
@@ -72,7 +67,7 @@ func CheckKernelVersion() bool {
 	return (major > infra.MinKernelMajor) || (major == infra.MinKernelMajor && minor >= infra.MinKernelMinor)
 }
 
-// ── CreateGroup ──
+// --- CreateGroup ---
 func CreateGroup(ctx context.Context, groupName string) (bool, error) {
 	if system.GroupExists(groupName) {
 		return false, nil
@@ -89,7 +84,7 @@ func CreateGroup(ctx context.Context, groupName string) (bool, error) {
 	return true, nil
 }
 
-// ── AddUserToGroup ──
+// --- AddUserToGroup ---
 func AddUserToGroup(ctx context.Context, username, groupName string) (bool, error) {
 	if system.UserInGroup(ctx, username, groupName) {
 		return false, nil
@@ -106,7 +101,7 @@ func AddUserToGroup(ctx context.Context, username, groupName string) (bool, erro
 	return true, nil
 }
 
-// ── RemoveUserFromGroup ──
+// --- RemoveUserFromGroup ---
 func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool, error) {
 	if !system.GroupExists(groupName) {
 		return false, nil
@@ -126,8 +121,7 @@ func RemoveUserFromGroup(ctx context.Context, username, groupName string) (bool,
 	return true, nil
 }
 
-// ── ValidateSudoersBinaries ──
-// Matches Python's HostService.validate_sudoers_binaries().
+// --- ValidateSudoersBinaries ---
 func ValidateSudoersBinaries() error {
 	for binary, pkg := range infra.PrivilegedBinaries {
 		if _, err := os.Stat(binary); os.IsNotExist(err) {
@@ -145,11 +139,8 @@ func ValidateSudoersBinaries() error {
 	return nil
 }
 
-// ── GenerateSudoersContent ──
-// Matches Python's HostService._generate_sudoers_content().
-// Python's PRIVILEGED_BINARIES dict (Python 3.7+) preserves insertion order.
-// Go maps have random iteration, so we iterate keys in an ordered slice
-// that matches Python's dict literal order from constants.py.
+// --- GenerateSudoersContent ---
+// Map iteration order is random; iterate over an ordered key slice instead.
 func GenerateSudoersContent(groupName string) string {
 	// Service binaries via "mvm run <service>" pattern (sudoers wildcard)
 	// Use the current binary's path so sudoers matches how provisioner invokes it.
@@ -165,8 +156,7 @@ func GenerateSudoersContent(groupName string) string {
 	)
 }
 
-// ── WriteSudoers ──
-// Matches Python's HostService.write_sudoers() exactly.
+// --- WriteSudoers ---
 func WriteSudoers(ctx context.Context, path string, content string) error {
 	if err := ValidateSudoersBinaries(); err != nil {
 		return err
@@ -193,16 +183,13 @@ func WriteSudoers(ctx context.Context, path string, content string) error {
 		)
 	}
 	tmpFile.Close()
-	// Clean up temp file on function exit (Python uses try/finally/except OSError: pass)
+	// Clean up temp file on function exit.
 	defer func() {
-		os.Remove(tmpPath) // ignore error, matching Python's except OSError: pass
+		os.Remove(tmpPath) // ignore error
 	}()
 
-	// Validate with visudo
-	// Python: try: run_cmd([...], check=False)
-	//            if result.returncode != 0: raise HostError(...)
-	//         except ProcessError: raise HostError("visudo not found ...")
-	// ProcessError is raised when the command binary cannot be found.
+	// Validate with visudo; non-zero exit indicates invalid syntax.
+	// If the binary is not found, RunCmd returns an execution error.
 	result, err := system.DefaultRunner.Run(ctx, []string{"visudo", "-c", "-f", tmpPath},
 		system.RunCmdOpts{Check: false, Capture: true})
 	if err != nil {
@@ -237,7 +224,7 @@ func WriteSudoers(ctx context.Context, path string, content string) error {
 	return nil
 }
 
-// ── RemoveSudoers ──
+// --- RemoveSudoers ---
 func RemoveSudoers(ctx context.Context, path string) (bool, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false, nil
@@ -249,7 +236,7 @@ func RemoveSudoers(ctx context.Context, path string) (bool, error) {
 	return true, nil
 }
 
-// ── RemoveGroup ──
+// --- RemoveGroup ---
 func RemoveGroup(ctx context.Context, groupName string) (bool, error) {
 	if !system.GroupExists(groupName) {
 		return false, nil
@@ -266,7 +253,7 @@ func RemoveGroup(ctx context.Context, groupName string) (bool, error) {
 	return true, nil
 }
 
-// ── isModuleLoaded ──
+// --- isModuleLoaded ---
 func isModuleLoaded(ctx context.Context, module string) bool {
 	result, _ := system.DefaultRunner.Run(ctx, []string{"lsmod"},
 		system.RunCmdOpts{Check: false, Capture: true})
@@ -286,7 +273,7 @@ func isModuleLoaded(ctx context.Context, module string) bool {
 	return false
 }
 
-// ── GetIPForwardStatus ──
+// --- GetIPForwardStatus ---
 func GetIPForwardStatus(ctx context.Context) (string, error) {
 
 	res, err := system.DefaultRunner.Run(
@@ -300,7 +287,7 @@ func GetIPForwardStatus(ctx context.Context) (string, error) {
 	return strings.TrimSpace(res.Stdout), nil
 }
 
-// ── HardwareFromState ──
+// --- HardwareFromState ---
 // Reconstructs HostHardware from stored host state (cache layer).
 func HardwareFromState(state *model.HostStateItem) *model.HostHardware {
 	if state.CPUModel == nil {
@@ -348,7 +335,7 @@ func HardwareFromState(state *model.HostStateItem) *model.HostHardware {
 	return h
 }
 
-// ── LimitsFromState ──
+// --- LimitsFromState ---
 // Reconstructs HostLimits from stored host state (cache layer).
 func LimitsFromState(state *model.HostStateItem) *model.HostLimits {
 	if state.PIDMax == nil {

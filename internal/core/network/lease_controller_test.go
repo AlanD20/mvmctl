@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Custom LeaseRepository wrappers ──────────────────────────────────────────
+// --- Custom LeaseRepository wrappers ------------------------------------------
 
 // retryLeaseRepo wraps testutil.LeaseRepo to simulate a concurrent lease
 // acquisition on a specific IP. On first Acquire for collideIP, it creates the
@@ -63,7 +63,7 @@ func (r *collideAllRepo) Acquire(
 	return nil, nil // Always collide
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 func newNetWithLeases(id, name, subnet, gateway string) *model.Network {
 	return &model.Network{
@@ -76,7 +76,7 @@ func newNetWithLeases(id, name, subnet, gateway string) *model.Network {
 	}
 }
 
-// ─── NewLeaseController ───────────────────────────────────────────────────────
+// --- NewLeaseController -------------------------------------------------------
 // Rationale: Must accept *model.Network, resolve string via repo, error on
 // string without repo, and reject invalid types.
 
@@ -127,7 +127,7 @@ func TestNewLeaseController(t *testing.T) {
 	})
 }
 
-// ─── LeaseController CRUD wrappers ────────────────────────────────────────────
+// --- LeaseController CRUD wrappers --------------------------------------------
 // Rationale: Thin wrappers around leaseRepo — verify delegation works.
 
 func TestLeaseController_CRUDWrappers(t *testing.T) {
@@ -183,7 +183,7 @@ func TestLeaseController_CRUDWrappers(t *testing.T) {
 	})
 }
 
-// ─── IsAvailable ──────────────────────────────────────────────────────────────
+// --- IsAvailable --------------------------------------------------------------
 // Rationale: Must return true for unleased IPs, false for taken ones.
 
 func TestLeaseController_IsAvailable(t *testing.T) {
@@ -210,7 +210,7 @@ func TestLeaseController_IsAvailable(t *testing.T) {
 	})
 }
 
-// ─── Lease ────────────────────────────────────────────────────────────────────
+// --- Lease --------------------------------------------------------------------
 // Rationale: Core IP allocation logic with retry loop, collision handling, and
 // exhaustion detection.
 
@@ -292,7 +292,7 @@ func TestLeaseController_Lease(t *testing.T) {
 	})
 }
 
-// ─── LeaseSpecific ────────────────────────────────────────────────────────────
+// --- LeaseSpecific ------------------------------------------------------------
 // Rationale: Allocate a specific IP. Must fail if already leased.
 
 func TestLeaseController_LeaseSpecific(t *testing.T) {
@@ -339,7 +339,7 @@ func TestLeaseController_LeaseSpecific(t *testing.T) {
 	})
 }
 
-// ─── Release ──────────────────────────────────────────────────────────────────
+// --- Release ------------------------------------------------------------------
 // Rationale: Releasing a VM's leases must remove them from the repo.
 
 func TestLeaseController_Release(t *testing.T) {
@@ -375,7 +375,7 @@ func TestLeaseController_Release(t *testing.T) {
 	})
 }
 
-// ─── Ensure retryLeaseRepo and collideAllRepo implement LeaseRepository ───────
+// --- Ensure retryLeaseRepo and collideAllRepo implement LeaseRepository -------
 
 var (
 	_ network.LeaseRepository = (*retryLeaseRepo)(nil)

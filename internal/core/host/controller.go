@@ -1,3 +1,5 @@
+// Package host provides host-level operations (sysinfo, resource checks).
+// Layer: Core domain — never imports other core/* packages.
 package host
 
 import (
@@ -8,8 +10,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ── Controller ──
-// Matches Python's HostController class.
+// --- Controller ---
 type Controller struct {
 	repo Repository
 }
@@ -22,7 +23,6 @@ func NewController(repo Repository) *Controller {
 // Uses an atomic bulk insert, then deletes all prior sessions so only
 // the latest backup remains.
 //
-// Matches Python's HostController.record_changes().
 func (c *Controller) RecordChanges(
 	ctx context.Context,
 	changes []*model.HostStateChangeItem,
@@ -51,7 +51,6 @@ func (c *Controller) RecordChanges(
 }
 
 // MarkInitialized marks host as fully initialized.
-// Matches Python's HostController.mark_initialized().
 func (c *Controller) MarkInitialized(ctx context.Context, timestamp string) error {
 	if _, err := c.repo.InitializeState(ctx); err != nil {
 		return err
@@ -60,7 +59,6 @@ func (c *Controller) MarkInitialized(ctx context.Context, timestamp string) erro
 }
 
 // ResetState resets all host state flags to False.
-// Matches Python's HostController.reset_state().
 func (c *Controller) ResetState(ctx context.Context) error {
 	return c.repo.ResetState(ctx)
 }

@@ -1,14 +1,11 @@
 // Package api provides the public orchestration layer for all operations.
-// Matches src/mvmctl/api/cp_operations.py exactly.
 package api
-
 import (
 	"context"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
-
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
@@ -17,7 +14,6 @@ import (
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
-
 // CPAPI defines the public interface for copy file operations.
 type CPAPI interface {
 	CPCopy(
@@ -26,9 +22,7 @@ type CPAPI interface {
 		onProgress event.OnDownloadCallback,
 	) (*results.CPCopyResult, error)
 }
-
 // CPCopy copies files between host and microVMs using vsock binary frame protocol.
-// Matches Python's CPOperation.copy().
 func (op *Operation) CPCopy(
 	ctx context.Context,
 	input inputs.CPInput,
@@ -40,28 +34,24 @@ func (op *Operation) CPCopy(
 	if err != nil {
 		return nil, err
 	}
-
-	// ── Audit log.
+	// -- Audit log.
 	op.AuditLog.LogOperation("cp.copy", map[string]any{
 		"direction": resolved.Direction,
 		"sources":   strings.Join(input.Sources, ", "),
 		"dest":      input.Dest,
 		"force":     input.Force,
 	}, "")
-
 	// Read vsock probe timeout from config.
 	probeTimeout, err := op.Services.Config.GetDuration(ctx, "defaults.vm", "vsock_probe_timeout")
 	if err != nil || probeTimeout <= 0 {
 		probeTimeout = 5 * time.Second
 	}
-
 	// Wrap progress callback.
 	wrapProgress := func(current, total int64) {
 		if onProgress != nil {
 			onProgress(current, total)
 		}
 	}
-
 	// Perform the copy using vsock binary frame protocol.
 	switch resolved.Direction {
 	case infra.DirectionHostToVM:
@@ -72,7 +62,6 @@ func (op *Operation) CPCopy(
 			return nil, errs.New(errs.CodeCPError,
 				fmt.Sprintf("VM '%s' has no vsock configuration", resolved.DstInfo.Identifier))
 		}
-
 		client, err := op.newVsockClient(ctx, resolved.DstInfo.Vsock, probeTimeout, resolved.DstInfo.Identifier)
 		if err != nil {
 			return nil, err
@@ -82,17 +71,14 @@ func (op *Operation) CPCopy(
 		if ftErr != nil {
 			return nil, ftErr
 		}
-
 		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
 		if ftResult.Errors > 0 {
 			msg += fmt.Sprintf(" (%d errors)", ftResult.Errors)
 		}
-
 		return &results.CPCopyResult{
 			Bytes:   ftResult.Bytes,
 			Message: msg,
 		}, nil
-
 	case infra.DirectionVMToHost:
 		if resolved.SrcInfo == nil || resolved.LocalPaths == nil {
 			return nil, errs.New(errs.CodeCPError, "Internal error: source VM info not available")
@@ -101,7 +87,6 @@ func (op *Operation) CPCopy(
 			return nil, errs.New(errs.CodeCPError,
 				fmt.Sprintf("VM '%s' has no vsock configuration", resolved.SrcInfo.Identifier))
 		}
-
 		client, err := op.newVsockClient(ctx, resolved.SrcInfo.Vsock, probeTimeout, resolved.SrcInfo.Identifier)
 		if err != nil {
 			return nil, err
@@ -111,14 +96,11 @@ func (op *Operation) CPCopy(
 		if err != nil {
 			return nil, err
 		}
-
 		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
-
 		return &results.CPCopyResult{
 			Bytes:   ftResult.Bytes,
 			Message: msg,
 		}, nil
-
 	case infra.DirectionVMToVM:
 		if resolved.SrcInfo == nil || resolved.DstInfo == nil {
 			return nil, errs.New(errs.CodeCPError, "Internal error: source or destination VM info not available")
@@ -131,7 +113,6 @@ func (op *Operation) CPCopy(
 			return nil, errs.New(errs.CodeCPError,
 				fmt.Sprintf("Destination VM '%s' has no vsock configuration", resolved.DstInfo.Identifier))
 		}
-
 		srcClient, err := op.newVsockClient(ctx, resolved.SrcInfo.Vsock, probeTimeout, resolved.SrcInfo.Identifier)
 		if err != nil {
 			return nil, err
@@ -145,19 +126,15 @@ func (op *Operation) CPCopy(
 		if err != nil {
 			return nil, err
 		}
-
 		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
-
 		return &results.CPCopyResult{
 			Bytes:   ftResult.Bytes,
 			Message: msg,
 		}, nil
-
 	default:
 		return nil, errs.New(errs.CodeCPError, fmt.Sprintf("Unknown copy direction: %s", resolved.Direction))
 	}
 }
-
 // formatBytes formats a byte count as a human-readable string.
 func formatBytes(b int64) string {
 	if b < 1024 {
@@ -171,7 +148,6 @@ func formatBytes(b int64) string {
 	}
 	return fmt.Sprintf("%.1f GiB", float64(b)/(1024*1024*1024))
 }
-
 // newVsockClient creates a vsock client with upgrade lifecycle callbacks.
 // It checks for in-progress upgrades before connecting and wires up
 // OnUpgradeStarted/OnUpgradeCompleted callbacks that manage the DB upgrade lock.
@@ -192,7 +168,6 @@ func (op *Operation) newVsockClient(
 			slog.Warn("failed to clear stale upgrade lock", "vm", vmName, "error", err)
 		}
 	}
-
 	client := vsock.NewClient(cfg, probeTimeout)
 	client.VmName = vmName
 	client.OnUpgradeStarted = func(ctx context.Context, fromVersion, toVersion string) {
@@ -212,6 +187,5 @@ func (op *Operation) newVsockClient(
 	}
 	return client, nil
 }
-
 // Compile-time checks ensure interfaces are satisfied.
 var _ CPAPI = (*Operation)(nil)

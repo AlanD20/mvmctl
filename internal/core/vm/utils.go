@@ -4,7 +4,6 @@ import "fmt"
 
 // GenerateBatchNames generates VM names for batch creation.
 // First VM keeps the base name; subsequent VMs get -N suffix.
-// Matches Python's CommonUtils.generate_batch_names() exactly.
 func GenerateBatchNames(baseName string, count int) []string {
 	if count == 1 {
 		return []string{baseName}

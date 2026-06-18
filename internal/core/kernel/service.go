@@ -1,3 +1,5 @@
+// Package kernel provides kernel binary download and management.
+// Layer: Core domain — never imports other core/* packages.
 package kernel
 
 import (
@@ -28,7 +30,7 @@ import (
 	"mvmctl/internal/assets"
 )
 
-// ── Service-layer types ──
+// --- Service-layer types ---
 
 type KernelPipelineResult struct {
 	ConfigResult *KernelConfigResult
@@ -101,7 +103,7 @@ func NewService(repo Repository, cacheDir string) *Service {
 	}
 }
 
-// ── Firecracker Kernel Download ──────────────────────────────────────────
+// --- Firecracker Kernel Download ---
 
 // FetchFirecrackerKernel downloads a pre-built Firecracker CI vmlinux.
 func (s *Service) FetchFirecrackerKernel(
@@ -211,7 +213,7 @@ func (s *Service) FetchFirecrackerKernel(
 	}, nil
 }
 
-// ── Official Kernel Build Pipeline ──────────────────────────────────────
+// --- Official Kernel Build Pipeline ---
 
 // BuildOfficialKernel builds an official kernel from source.
 func (s *Service) BuildOfficialKernel(
@@ -472,7 +474,7 @@ func (s *Service) fetchSHA256(ctx context.Context, sha256URL, filename string) (
 	return "", nil
 }
 
-// ── Kernel Listing ──────────────────────────────────────────────────────
+// --- Kernel Listing ---
 
 func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.KernelItem, error) {
 	kernels, err := s.repo.ListAll(ctx)
@@ -502,7 +504,7 @@ func (s *Service) List(ctx context.Context) ([]*model.KernelItem, error) {
 	return s.ListAll(ctx, true)
 }
 
-// ── Kernel Remove ───────────────────────────────────────────────────────
+// --- Kernel Remove ---
 
 func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bool) (*model.KernelItem, error) {
 	vms := kernel.VMs
@@ -547,7 +549,7 @@ func (s *Service) RemoveMany(
 	return deleted, nil
 }
 
-// ── Spec Loading ────────────────────────────────────────────────────────
+// --- Spec Loading ---
 
 func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 	if s.specs != nil {
@@ -566,7 +568,7 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 	}
 
 	// Intermediate YAML struct matching the file format for clean unmarshal.
-	// Note: KernelSpec's yaml tag for KernelType is "kernel_type", but the
+	// NOTE: KernelSpec's yaml tag for KernelType is "kernel_type", but the
 	// kernels.yaml file uses "type". The specYAML struct matches the file.
 	type specYAML struct {
 		KernelType        string                         `yaml:"type"`
@@ -687,7 +689,7 @@ func (s *Service) GetSpecsFor(names []string, kernelType, version string) ([]*mo
 	return filtered, nil
 }
 
-// ── Build Pipeline ──────────────────────────────────────────────────────
+// --- Build Pipeline ---
 
 func (s *Service) buildTemplateVars(spec *model.KernelSpec, arch string) map[string]string {
 	majorMinor := majorMinorFromVersion(spec.Version)
@@ -929,7 +931,7 @@ func parseBuildWarnings(logData string) []string {
 	return warnings
 }
 
-// ── Download Pipeline ───────────────────────────────────────────────────
+// --- Download Pipeline ---
 
 func (s *Service) DownloadKernelSource(ctx context.Context, url, dest string, sha256 string) error {
 	if sha256 != "" {
@@ -954,7 +956,7 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 	return "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("No linux-* directory found in kernel tarball"))
 }
 
-// ── Remote Version Listing ──────────────────────────────────────────────
+// --- Remote Version Listing ---
 
 func (s *Service) ListRemoteVersions(
 	ctx context.Context,
@@ -994,7 +996,7 @@ func (s *Service) ListRemoteVersions(
 	return result
 }
 
-// ── Internal helpers ────────────────────────────────────────────────────
+// --- Internal helpers ---
 
 func (s *Service) downloadFCConfig(
 	ctx context.Context,
@@ -1099,7 +1101,7 @@ func (s *Service) applyConfigFragments(
 	return nil
 }
 
-// ── Caching helpers ────────────────────────────────────────────────────
+// --- Caching helpers ---
 
 func (s *Service) computeConfigHash(
 	spec *model.KernelSpec,
@@ -1166,7 +1168,7 @@ func tryCacheHit(outputPath, cacheMarker, cachedKernelPath string, useCache bool
 	return false
 }
 
-// ── Import Kernel ───────────────────────────────────────────────────────
+// --- Import Kernel ---
 
 func (s *Service) ImportKernel(
 	ctx context.Context,
@@ -1236,7 +1238,7 @@ func (s *Service) ImportKernel(
 	return kernelItem, nil
 }
 
-// ── Version Resolution ──────────────────────────────────────────────────
+// --- Version Resolution ---
 
 func (s *Service) ResolveVersion(
 	ctx context.Context,

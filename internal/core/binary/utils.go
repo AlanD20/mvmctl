@@ -23,7 +23,7 @@ func rustTargetTriple() string {
 	}
 }
 
-// ── Version helpers ────────────────────────────────────────────────────────
+// --- Version helpers ---
 
 // githubRelease models a single release entry from the GitHub API.
 type githubRelease struct {
@@ -44,14 +44,13 @@ func CIVersion(version string) string {
 	return "v" + version
 }
 
-// ── Error helpers ──────────────────────────────────────────────────────────
+// --- Error helpers ---
 
 func binaryError(code errs.Code, msg string) *errs.DomainError {
 	return errs.New(code, msg)
 }
 
-// mapGitHubAPIError converts an error from the GitHub API into the Python-matching
-// BinaryError with the same message wording.
+// mapGitHubAPIError converts a GitHub API error into a BinaryError.
 func mapGitHubAPIError(err error) error {
 	var httpErr download.HttpError
 	if errors.As(err, &httpErr) {

@@ -17,7 +17,7 @@ import (
 // Compile-time check that *MockOperation satisfies the api.API interface.
 var _ api.API = (*testutil.MockOperation)(nil)
 
-// ─── MockOperation ─────────────────────────────────────────────────────────────
+// --- MockOperation ---
 // Rationale: MockOperation is the composite mock that embeds all per-domain
 // mocks and satisfies api.API. Tests verify that embedded mocks route through
 // correctly.
@@ -32,8 +32,8 @@ func TestMockOperation_EmbeddedVMAPI(t *testing.T) {
 	})
 
 	t.Run("VMGet_custom_func", func(t *testing.T) {
-		expected := &model.VM{ID: "vm-1", Name: "test-vm"}
-		m.MockVMAPI.VMGetFunc = func(ctx context.Context, input inputs.VMInput) (*model.VM, error) {
+		expected := &model.VMItem{ID: "vm-1", Name: "test-vm"}
+		m.MockVMAPI.VMGetFunc = func(ctx context.Context, input inputs.VMInput) (*model.VMItem, error) {
 			return expected, nil
 		}
 		result, err := m.VMGet(ctx, inputs.VMInput{Identifiers: []string{"vm-1"}})
@@ -45,7 +45,7 @@ func TestMockOperation_EmbeddedVMAPI(t *testing.T) {
 
 	t.Run("VMGet_custom_returns_error", func(t *testing.T) {
 		m := &testutil.MockOperation{}
-		m.MockVMAPI.VMGetFunc = func(ctx context.Context, input inputs.VMInput) (*model.VM, error) {
+		m.MockVMAPI.VMGetFunc = func(ctx context.Context, input inputs.VMInput) (*model.VMItem, error) {
 			return nil, errors.New("vm not found")
 		}
 		_, err := m.VMGet(ctx, inputs.VMInput{Identifiers: []string{"nonexistent"}})

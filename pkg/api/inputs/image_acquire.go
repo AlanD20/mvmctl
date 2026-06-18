@@ -1,10 +1,8 @@
 package inputs
-
 import (
 	"context"
 	"fmt"
 	"strings"
-
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
@@ -12,31 +10,14 @@ import (
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
-
 // CLI_TO_INTERNAL_DETECTOR maps CLI detector names to internal detector codes.
-// Matches Python's CLI_TO_INTERNAL_DETECTOR dict.
 var CLI_TO_INTERNAL_DETECTOR = map[string]string{
 	"type":       "type_code",
 	"label":      "label",
 	"size":       "size",
 	"filesystem": "filesystem",
 }
-
-// ImagePullInput is the raw input for pulling a remote image.
-// Matches Python's ImagePullInput dataclass:
-//
-//	@dataclass
-//	class ImagePullInput:
-//	    type: str
-//	    name: str | None = None
-//	    force: bool = False
-//	    set_default: bool = False
-//	    arch: str | None = None
-//	    version: str | None = None
-//	    no_cache: bool = False
-//	    partition: int | None = None
-//	    skip_optimization: bool = False
-//	    disabled_detectors: list[str] = field(default_factory=list)
+// ImagePullInput holds options for pulling a remote image.
 type ImagePullInput struct {
 	Type              string   `json:"type"                         yaml:"type"`
 	Name              *string  `json:"name,omitempty"               yaml:"name,omitempty"`
@@ -49,9 +30,7 @@ type ImagePullInput struct {
 	DisabledDetectors []string `json:"disabled_detectors,omitempty" yaml:"disabled_detectors,omitempty"`
 	OutputDir         string   `json:"output_dir,omitempty"`
 }
-
-// ImageImportInput is the raw input for importing a local image file.
-// Matches Python's ImageImportInput dataclass.
+// ImageImportInput holds options for importing a local image file.
 type ImageImportInput struct {
 	Name              string   `json:"name"`
 	SourcePath        string   `json:"source_path"`
@@ -62,8 +41,7 @@ type ImageImportInput struct {
 	SkipOptimization  bool     `json:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty"`
 }
-
-// ResolvedImageAcquireInput matches Python's ResolvedImageAcquireInput (frozen dataclass).
+// ResolvedImageAcquireInput specifies resolved image acquire input.
 type ResolvedImageAcquireInput struct {
 	Type              string
 	Arch              string
@@ -80,9 +58,7 @@ type ResolvedImageAcquireInput struct {
 	SkipOptimization  bool
 	DisabledDetectors []string
 }
-
-// ImageAcquireRequest matches Python's ImageAcquireRequest.
-//
+// ImageAcquireRequest specifies image acquire request.
 // input uses any because it is either ImagePullInput or ImageImportInput —
 // Go has no sum types.
 type ImageAcquireRequest struct {
@@ -91,7 +67,6 @@ type ImageAcquireRequest struct {
 	result   *ResolvedImageAcquireInput
 	resolver *image.Resolver
 }
-
 // NewImageAcquireRequest creates a new ImageAcquireRequest.
 func NewImageAcquireRequest(inputs any, cfg *config.Service, imageRepo image.Repository) *ImageAcquireRequest {
 	return &ImageAcquireRequest{
@@ -100,31 +75,24 @@ func NewImageAcquireRequest(inputs any, cfg *config.Service, imageRepo image.Rep
 		resolver: image.NewResolver(imageRepo),
 	}
 }
-
 // Result returns the resolved input, or nil if resolve() has not been called.
-
 // ResolvePull resolves pull inputs.
-// Matches Python's ImageAcquireRequest.resolve_pull().
 func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAcquireInput, error) {
 	in, ok := r.input.(ImagePullInput)
 	if !ok {
 		return nil, errs.New(errs.CodeImagePullFailed, "Expected ImagePullInput", errs.WithClass(errs.ClassValidation))
 	}
-
 	// Arch always matches the host machine — not user-configurable
 	arch := system.RuntimeArch()
-
-	// Resolve disabled detectors — Python: self._resolve_disabled_detectors(self._inputs.disabled_detectors)
+	// Resolve disabled detectors from input.
 	disabled, err := r.resolveDisabledDetectors(in.DisabledDetectors)
 	if err != nil {
 		return nil, err
 	}
-
 	outputDir := in.OutputDir
 	if outputDir == "" {
 		outputDir = infra.GetImagesDir()
 	}
-
 	r.result = &ResolvedImageAcquireInput{
 		Type:              in.Type,
 		Name:              in.Name,
@@ -138,16 +106,12 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 		SkipOptimization:  in.SkipOptimization,
 		DisabledDetectors: disabled,
 	}
-
 	if err := r.ensureValidate(); err != nil {
 		return nil, err
 	}
-
 	return r.result, nil
 }
-
 // ResolveImport resolves import inputs.
-// Matches Python's ImageAcquireRequest.resolve_import().
 func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImageAcquireInput, error) {
 	in, ok := r.input.(ImageImportInput)
 	if !ok {
@@ -157,30 +121,24 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	// Arch always matches the host machine — not user-configurable
 	arch := system.RuntimeArch()
-
 	// Resolve disabled detectors
 	disabled, err := r.resolveDisabledDetectors(in.DisabledDetectors)
 	if err != nil {
 		return nil, err
 	}
-
 	// Resolve format from config, fall back to auto-detection
 	format := in.Format
 	if format == "" {
 		format, _ = r.cfg.GetString(ctx, "defaults.image", "import_format")
 	}
-
 	// Auto-detect format from file if format is not known
 	detected := disk.DetectImageFormat(in.SourcePath)
 	if detected != "" && format == "" {
 		format = detected
 	}
-
 	sourcePath := in.SourcePath
-
 	r.result = &ResolvedImageAcquireInput{
 		Type:              in.Name,
 		Name:              &in.Name,
@@ -195,14 +153,11 @@ func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImage
 		SkipOptimization:  in.SkipOptimization,
 		FormatDetected:    detected,
 	}
-
 	if err := r.ensureValidate(); err != nil {
 		return nil, err
 	}
-
 	return r.result, nil
 }
-
 func (r *ImageAcquireRequest) ensureValidate() error {
 	if r.result == nil {
 		return errs.New(
@@ -211,7 +166,6 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	arch := r.result.Arch
 	if arch == "" {
 		return errs.New(errs.CodeImageImportFailed, "arch is required", errs.WithClass(errs.ClassValidation))
@@ -230,7 +184,6 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	if r.result.Partition < 0 {
 		return errs.New(
 			errs.CodeImageImportFailed,
@@ -238,10 +191,8 @@ func (r *ImageAcquireRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	return nil
 }
-
 func (r *ImageAcquireRequest) ensureValidateImport() error {
 	if r.result == nil {
 		return errs.New(
@@ -252,7 +203,6 @@ func (r *ImageAcquireRequest) ensureValidateImport() error {
 	}
 	return nil
 }
-
 func (r *ImageAcquireRequest) resolveDisabledDetectors(detectors []string) ([]string, error) {
 	var disabled []string
 	for _, name := range detectors {

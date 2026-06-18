@@ -21,7 +21,7 @@ import (
 	"mvmctl/internal/service/vsockagent"
 )
 
-// ─── readFTFrame / writeFTFrame ─────────────────────────────────────────────
+// --- readFTFrame / writeFTFrame ---
 // Rationale: Binary framing is duplicated between this package and
 // vsockagent. A bug here corrupts every file transfer initiated by the host.
 
@@ -96,7 +96,7 @@ func TestReadFTFrame_Error(t *testing.T) {
 	})
 }
 
-// ─── Frame protocol exchange ───────────────────────────────────────────────
+// --- Frame protocol exchange ---
 // Rationale: The binary frame protocol must be symmetric — frames written
 // by writeFTFrame on one side must be readable by readFTFrame on the other.
 // This test proves the full protocol exchange (push → mkdir → meta → accept
@@ -232,7 +232,7 @@ func mustWriteFTFrame(t *testing.T, w io.Writer, typ byte, payload []byte) {
 	require.NoError(t, err)
 }
 
-// ─── expandSources ──────────────────────────────────────────────────────────
+// --- expandSources ---
 // Rationale: expandSources resolves user-provided source paths into a flat
 // list of {absPath, relativePath} entries. Bugs here skip files silently,
 // copy wrong paths, or produce unhelpful errors — corrupting file transfers.

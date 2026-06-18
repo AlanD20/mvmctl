@@ -13,7 +13,7 @@ import (
 // intPtr returns a pointer to n for constructing VersionSpec fields.
 func intPtr(n int) *int { return &n }
 
-// ─── VersionSpec.IsPartial ─────────────────────────────────────────────────────
+// --- VersionSpec.IsPartial ---
 // Rationale: IsPartial controls how Resolve selects a version (exact vs prefix
 // match). An incorrect is-partial check would silently switch resolution strategies
 // and return the wrong version.
@@ -53,7 +53,7 @@ func TestVersionSpec_IsPartial(t *testing.T) {
 	}
 }
 
-// ─── ParseSpec ─────────────────────────────────────────────────────────────────
+// --- ParseSpec ---
 // Rationale: ParseSpec is the entry point for all version resolution — it converts
 // user-provided version strings into structured specs. A bug here would cause
 // silent resolution failures (e.g. "v1.15.1" parsed as major=v only).
@@ -134,7 +134,7 @@ func TestParseSpec(t *testing.T) {
 	}
 }
 
-// ─── ParseSelector ─────────────────────────────────────────────────────────────
+// --- ParseSelector ---
 // Rationale: ParseSelector splits "type:version" selectors used in binary
 // resolution. Incorrect splitting would misroute version lookups across domains.
 
@@ -190,7 +190,7 @@ func TestParseSelector(t *testing.T) {
 	}
 }
 
-// ─── SemverKey ─────────────────────────────────────────────────────────────────
+// --- SemverKey ---
 // Rationale: SemverKey converts version strings to sortable integer slices used
 // by Resolve for ordering. A sorting bug would cause "latest" to return the wrong
 // version or partial matching to find a non-maximal match.
@@ -246,7 +246,7 @@ func TestSemverKey(t *testing.T) {
 	}
 }
 
-// ─── Resolve ───────────────────────────────────────────────────────────────────
+// --- Resolve ---
 // Rationale: Resolve is the core version selection function — it decides which
 // binary/image version to use. Bugs here cause silent rollback or version not
 // found errors at runtime.
@@ -338,7 +338,7 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-// ─── VersionGate.Require ───────────────────────────────────────────────────────
+// --- VersionGate.Require ---
 // Rationale: Require gates features behind a minimum binary version. A bug here
 // would allow operations on incompatible binaries, causing silent failures.
 
@@ -406,7 +406,7 @@ func TestVersionGate_Require(t *testing.T) {
 	}
 }
 
-// ─── VersionGate.ParseVersion ──────────────────────────────────────────────────
+// --- VersionGate.ParseVersion ---
 // Rationale: ParseVersion extracts numeric version components from version strings
 // with non-numeric suffixes. A bug here would cause IsSatisfiedBy to make incorrect
 // comparisons, silently skipping version gates.
@@ -459,7 +459,7 @@ func TestVersionGate_ParseVersion(t *testing.T) {
 	}
 }
 
-// ─── VersionGate.IsSatisfiedBy ────────────────────────────────────────────────
+// --- VersionGate.IsSatisfiedBy ---
 // Rationale: IsSatisfiedBy is the core comparison that drives VersionGate.Require.
 // A comparison bug would gate features incorrectly (either blocking valid uses
 // or allowing incompatible operations).
@@ -528,7 +528,7 @@ func TestVersionGate_IsSatisfiedBy(t *testing.T) {
 	}
 }
 
-// ─── SemverGreater ────────────────────────────────────────────────────────────
+// --- SemverGreater ---
 // Rationale: SemverGreater is used by SortVersions and Resolve for ordering.
 // An incorrect comparison would produce wrong sort order (oldest first instead
 // of newest first).
@@ -578,7 +578,7 @@ func TestSemverGreater(t *testing.T) {
 	}
 }
 
-// ─── SortVersions ──────────────────────────────────────────────────────────────
+// --- SortVersions ---
 // Rationale: SortVersions orders version lists for display and selection. An
 // incorrect sort would show users the wrong "latest" version.
 
@@ -623,7 +623,7 @@ func TestSortVersions(t *testing.T) {
 	}
 }
 
-// ─── ParseSemverInts ───────────────────────────────────────────────────────────
+// --- ParseSemverInts ---
 // Rationale: ParseSemverInts extracts numeric version components up to the first
 // non-numeric segment. Used by SemverGreater for ordering. A bug would cause
 // incorrect comparison results.
@@ -679,7 +679,7 @@ func TestParseSemverInts(t *testing.T) {
 	}
 }
 
-// ─── IsValidVersion ────────────────────────────────────────────────────────────
+// --- IsValidVersion ---
 // Rationale: IsValidVersion is used to validate resolved version strings before
 // use. Accepting invalid versions would cause failures in downstream consumers
 // that expect a strict "digits and dots" format.
@@ -710,7 +710,7 @@ func TestIsValidVersion(t *testing.T) {
 	}
 }
 
-// ─── ExtractVersionFromFilename ────────────────────────────────────────────────
+// --- ExtractVersionFromFilename ---
 // Rationale: ExtractVersionFromFilename parses version strings out of binary
 // filenames like "vmlinux-6.1.0-x86_64". A mismatch here would prevent VM
 // kernel/binary discovery, causing silent startup failures.

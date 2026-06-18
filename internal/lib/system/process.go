@@ -5,8 +5,8 @@ import (
 )
 
 // IsProcessRunning checks if a process with the given PID is currently running.
-// Matches Python's: os.kill(pid, 0) → True if no error.
-// Returns false for pid <= 0 or any error (including process not found).
+// Uses signal 0 to test process existence. Returns false for pid <= 0 or any
+// error (including process not found).
 func IsProcessRunning(pid int) bool {
 	if pid <= 0 {
 		return false

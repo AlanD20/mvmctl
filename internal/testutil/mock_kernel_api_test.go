@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── MockKernelAPI ─────────────────────────────────────────────────────────────
+// --- MockKernelAPI ---
 // Rationale: MockKernelAPI implements api.KernelAPI for testing. These tests
 // verify default zero-value returns and custom function routing.
 

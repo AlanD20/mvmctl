@@ -1,3 +1,5 @@
+// Package network provides TAP/bridge network interface management.
+// Layer: Core domain — never imports other core/* packages.
 package network
 
 import (
@@ -7,7 +9,6 @@ import (
 )
 
 // Repository — database operations for networks.
-// Matches src/mvmctl/core/network/_repository.py: Repository
 type Repository interface {
 	Get(ctx context.Context, networkID string) (*model.Network, error)
 	GetByName(ctx context.Context, name string) (*model.Network, error)

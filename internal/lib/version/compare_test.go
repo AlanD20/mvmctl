@@ -8,7 +8,7 @@ import (
 	"mvmctl/internal/lib/version"
 )
 
-// ─── IsAtLeast ────────────────────────────────────────────────────────────────
+// --- IsAtLeast ---
 // Rationale: Must compare dotted version strings correctly, handling unequal
 // lengths, non-numeric suffixes, and edge cases.
 
@@ -54,7 +54,7 @@ func TestIsAtLeast(t *testing.T) {
 	}
 }
 
-// ─── IsAtLeastFor ─────────────────────────────────────────────────────────────
+// --- IsAtLeastFor ---
 // Rationale: Feature-gated version check. Min version comes from feature constant.
 
 func TestIsAtLeastFor(t *testing.T) {
@@ -78,7 +78,7 @@ func TestIsAtLeastFor(t *testing.T) {
 	}
 }
 
-// ─── SplitVersionParts ────────────────────────────────────────────────────────
+// --- SplitVersionParts ---
 // Rationale: Must split "X.Y.Z-prerelease" into release []int and pre-release
 // suffix, handling missing pre-release, dotted releases, non-numeric gracefully.
 
@@ -106,7 +106,7 @@ func TestSplitVersionParts(t *testing.T) {
 	}
 }
 
-// ─── CompareVersions ──────────────────────────────────────────────────────────
+// --- CompareVersions ---
 // Rationale: PEP 440-compatible comparison. Must handle release segments,
 // pre-release tags (dev < alpha < beta < rc < release < post), different
 // lengths, and bound the comparison correctly.

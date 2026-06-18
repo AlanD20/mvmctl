@@ -9,7 +9,7 @@ import (
 	"mvmctl/internal/lib/crypto"
 )
 
-// ─── ContentHash ──────────────────────────────────────────────────────────────
+// --- ContentHash ---
 // Rationale: Deterministic SHA-256 hex digest. Same inputs → same output.
 // Different inputs → different output.
 
@@ -37,7 +37,7 @@ func TestContentHash(t *testing.T) {
 	})
 }
 
-// ─── ImageID ──────────────────────────────────────────────────────────────────
+// --- ImageID ---
 // Rationale: Deterministic from type, source, timestamp.
 
 func TestImageID(t *testing.T) {
@@ -59,7 +59,7 @@ func TestImageID(t *testing.T) {
 	})
 }
 
-// ─── VMID ─────────────────────────────────────────────────────────────────────
+// --- VMID ---
 // Rationale: 32-char truncated SHA256 (for Unix socket path limits).
 
 func TestVMID(t *testing.T) {
@@ -81,7 +81,7 @@ func TestVMID(t *testing.T) {
 	})
 }
 
-// ─── NetworkID ────────────────────────────────────────────────────────────────
+// --- NetworkID ---
 // Rationale: 64-char SHA256 from name, subnet, timestamp.
 
 func TestNetworkID(t *testing.T) {
@@ -97,7 +97,7 @@ func TestNetworkID(t *testing.T) {
 	})
 }
 
-// ─── BatchID ──────────────────────────────────────────────────────────────────
+// --- BatchID ---
 // Rationale: 16-char truncated SHA256 (short for cache dir paths).
 
 func TestBatchID(t *testing.T) {
@@ -113,7 +113,7 @@ func TestBatchID(t *testing.T) {
 	})
 }
 
-// ─── VolumeID ─────────────────────────────────────────────────────────────────
+// --- VolumeID ---
 // Rationale: 64-char SHA256 from name and timestamp.
 
 func TestVolumeID(t *testing.T) {
@@ -129,7 +129,7 @@ func TestVolumeID(t *testing.T) {
 	})
 }
 
-// ─── ShortenID ────────────────────────────────────────────────────────────────
+// --- ShortenID ---
 // Rationale: Returns first N chars. Errors if ID is shorter than requested length.
 
 func TestShortenID(t *testing.T) {
@@ -160,7 +160,7 @@ func TestShortenID(t *testing.T) {
 	})
 }
 
-// ─── Truncate ─────────────────────────────────────────────────────────────────
+// --- Truncate ---
 // Rationale: Returns first n chars. If shorter, returns unchanged. Never errors.
 
 func TestTruncate(t *testing.T) {

@@ -27,9 +27,6 @@ func InitSettings() {
 
 // GoTypeName returns the Go type name for a value.
 // These names are stored in the OverridableSettings database for type-based coercion.
-// Note: Python used "NoneType"/"str"/"dict"/"list" but Go uses "nil"/"string"/"map"/"slice".
-// This is a deliberate behavioral change per the Porting Spec (Verdict 28).
-// Database values created by the Python codebase will need migration.
 func GoTypeName(v any) string {
 	if v == nil {
 		return "nil"

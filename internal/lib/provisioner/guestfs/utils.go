@@ -20,7 +20,7 @@ import (
 const applianceBuildTimeout = 60 * time.Second
 const staleProcessWaitTime = 500 * time.Millisecond
 
-// ── Low-level helpers ────────────────────────────────────────────────────────
+// --- Low-level helpers ---
 
 // doTruncateFile expands a file to targetSize if it's smaller.
 func doTruncateFile(path string, targetSize int64) {
@@ -35,9 +35,7 @@ func doTruncateFile(path string, targetSize int64) {
 	}
 }
 
-// ── Appliance management ─────────────────────────────────────────────────────
-//
-// Mirrors src/mvmctl/core/_shared/_guestfs/_service.py.
+// --- Appliance management ---
 
 // BuildAppliance builds the libguestfs fixed appliance for faster image ops.
 // Uses KernelDetector to find a suitable upstream kernel with virtio drivers.

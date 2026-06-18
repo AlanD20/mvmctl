@@ -7,7 +7,6 @@ import (
 )
 
 // Repository defines all database operations for SSH keys.
-// Matches Python's Repository exactly.
 type Repository interface {
 	// GetByName returns an SSH key by name, or nil if not found.
 	GetByName(ctx context.Context, name string) (*model.SSHKeyItem, error)

@@ -18,7 +18,7 @@ import (
 )
 
 type Handle struct {
-	mu     sync.Mutex
+	mu     sync.Mutex // guards db and opened (lazy init)
 	db     *sqlx.DB
 	dbPath string
 	opened bool
@@ -26,28 +26,26 @@ type Handle struct {
 
 // DBExists returns true if the mvm database file exists in the given cache
 // directory. This is a filesystem-only check — no connection is opened.
-// Matching Python's CacheUtils.get_mvm_db_path().exists().
 func DBExists(cacheDir string) bool {
 	_, err := os.Stat(filepath.Join(cacheDir, infra.MVMDBFilename))
 	return err == nil
 }
 
 // New creates a Handle for the given dbPath.
-// Does NOT open a database connection — matching Python's Database.__init__().
+// Does NOT open a database connection — call DB() or Connect() to open lazily.
 // The caller is responsible for ensuring the parent directory exists.
 //
 // PRAGMAs are passed via DSN parameters so they apply automatically to every
-// new connection from the pool (matching Python's connect() which sets PRAGMAs
-// on each new connection).
+// new connection from the pool.
 func New(dbPath string) *Handle {
 	return &Handle{
 		dbPath: dbPath,
 	}
 }
 
-// openLazy opens the database connection on first use, matching Python's lazy
-// connect() pattern. PRAGMAs are set via DSN parameters so they apply to
-// every new connection from the pool.
+// openLazy opens the database connection on first use.
+// PRAGMAs are set via DSN parameters so they apply to every new connection
+// from the pool.
 //
 // Panics on failure — a database connection is required for the application
 // to function and failures are unrecoverable.
@@ -59,9 +57,7 @@ func (d *Handle) openLazy() {
 		return
 	}
 
-	// PRAGMAs passed in DSN — applied to every new connection from the pool,
-	// matching Python's connect() which sets PRAGMAs on each new connection.
-	// These match Python's Database.connect() PRAGMA list:
+	// PRAGMAs passed in DSN — applied to every new connection from the pool:
 	//   - foreign_keys = ON
 	//   - journal_mode = WAL
 	//   - synchronous = NORMAL
@@ -70,8 +66,7 @@ func (d *Handle) openLazy() {
 	//   - cache_size = -64000
 	//
 	// NOTE: SetMaxOpenConns(1) and SetMaxIdleConns(1) serialize writes to match
-	// SQLite's single-writer semantics. This mirrors Python's serialized access
-	// pattern even though Python creates fresh connections each time.
+	// SQLite's single-writer semantics.
 	pragmaParams := "_pragma=foreign_keys(1)" +
 		"&_pragma=journal_mode=WAL" +
 		"&_pragma=synchronous=NORMAL" +
@@ -108,13 +103,12 @@ func (d *Handle) openLazy() {
 }
 
 // DB returns the underlying *sqlx.DB, opening it lazily if needed.
-// Matching Python's connect() which yields a connection, but Go uses a pool.
 func (d *Handle) DB() *sqlx.DB {
 	d.openLazy()
 	return d.db
 }
 
-// Path returns the database file path. Matches Python's db_path property.
+// Path returns the database file path.
 func (d *Handle) Path() string {
 	return d.dbPath
 }
@@ -132,7 +126,6 @@ func (d *Handle) Close() error {
 }
 
 // RestoreFromSnapshot restores the database from a snapshot file.
-// Mirrors Python's Database._restore_from_snapshot().
 //
 // VACUUM INTO creates a NEW inode on Linux, so existing connections holding
 // file descriptors to the old inode would continue serving stale data.

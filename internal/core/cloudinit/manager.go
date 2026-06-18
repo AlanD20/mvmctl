@@ -43,7 +43,6 @@ type cloudInitUser struct {
 }
 
 // dangerousCloudInitDirectives lists cloud-init directives that could be security risks.
-// Matches Python's _DANGEROUS_CLOUD_INIT_DIRECTIVES (module-level dict).
 var dangerousCloudInitDirectives = map[string]string{
 	"write_files": "Can write arbitrary files to the system",
 	"runcmd":      "Can execute arbitrary commands",
@@ -55,7 +54,6 @@ var dangerousCloudInitDirectives = map[string]string{
 }
 
 // Manager handles cloud-init configuration file generation and ISO creation.
-// Matches Python's CloudInitManager.
 type Manager struct {
 	config *Config
 }
@@ -66,7 +64,7 @@ func NewManager(config *Config) *Manager {
 }
 
 // Generate writes cloud-init configuration files (meta-data, user-data, network-config)
-// to the cloud-init seed directory. Matches Python's write_config_files().
+// to the cloud-init seed directory.
 func (m *Manager) Generate(ctx context.Context) error {
 	// Custom user data is the entire cloud-init content — write it directly.
 	if m.config.CustomCloudInitConfig != nil {
@@ -105,7 +103,6 @@ func (m *Manager) Generate(ctx context.Context) error {
 }
 
 // CreateSeedISO creates a cloud-init ISO from the seed directory using cloud-localds.
-// Matches Python's create_seed_iso() exactly.
 func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO string) error {
 	// Validate required files exist (network-config is optional for NO_CLOUD_NET mode)
 	for _, name := range []string{"meta-data", "user-data"} {
@@ -142,7 +139,6 @@ func (m *Manager) CreateSeedISO(ctx context.Context, cloudInitDir, outputISO str
 }
 
 // parseCustomCloudInitConfig processes a custom cloud-init config provided to the API.
-// Matches Python's _parse_custom_user_data().
 func (m *Manager) parseCustomCloudInitConfig() error {
 	if m.config.CustomCloudInitConfig == nil || *m.config.CustomCloudInitConfig == "" {
 		return nil
@@ -179,7 +175,7 @@ func (m *Manager) parseCustomCloudInitConfig() error {
 	}
 
 	if !strings.HasPrefix(contentStr, "#cloud-config") {
-		// Truncate for error message at rune boundary (like Python)
+		// Truncate for error message at rune boundary
 		preview := contentStr
 		runeCount := utf8.RuneCountInString(preview)
 		if runeCount > 80 {
@@ -242,7 +238,8 @@ func (m *Manager) parseCustomCloudInitConfig() error {
 	return os.WriteFile(userDataPath, []byte("#cloud-config\n"+string(out)), 0644)
 }
 
-// writeCustomCloudInitFiles writes meta-data and user-data for shell-script and MIME custom configs.
+// writeCustomCloudInitFiles writes meta-data and user-data for shell-script and
+// MIME custom configs.
 func (m *Manager) writeCustomCloudInitFiles(userDataContent []byte) error {
 	if err := m.writeMetaData(); err != nil {
 		return err
@@ -351,7 +348,7 @@ func (m *Manager) renderCloudInitTemplate() (map[string]string, error) {
 	}
 
 	// Generate password hash from resolved UserPassword
-	// bcrypt cost 10 matches Python's passlib default.
+	// bcrypt cost 10 used for password hashing.
 	hashBytes, hashErr := bcrypt.GenerateFromPassword([]byte(m.config.UserPassword), bcrypt.DefaultCost)
 	if hashErr != nil {
 		return nil, errs.WrapMsg(errs.CodeCloudInitProvisionFailed,

@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// ─── ToString ────────────────────────────────────────────────────────────────
+// --- ToString ---
 
 func TestToString(t *testing.T) {
 	tests := map[string]struct {
@@ -38,7 +38,7 @@ func TestToString(t *testing.T) {
 	}
 }
 
-// ─── ToInt ───────────────────────────────────────────────────────────────────
+// --- ToInt ---
 
 func TestToInt(t *testing.T) {
 	tests := map[string]struct {
@@ -74,7 +74,7 @@ func TestToInt(t *testing.T) {
 	}
 }
 
-// ─── ToBool ──────────────────────────────────────────────────────────────────
+// --- ToBool ---
 
 func TestToBool(t *testing.T) {
 	tests := map[string]struct {
@@ -112,7 +112,7 @@ func TestToBool(t *testing.T) {
 	}
 }
 
-// ─── BoolToInt ───────────────────────────────────────────────────────────────
+// --- BoolToInt ---
 
 func TestBoolToInt(t *testing.T) {
 	tests := map[string]struct {
@@ -133,7 +133,7 @@ func TestBoolToInt(t *testing.T) {
 	}
 }
 
-// ─── DerefOrZero ─────────────────────────────────────────────────────────────
+// --- DerefOrZero ---
 
 func TestDerefOrZero(t *testing.T) {
 	t.Run("int_non_nil", func(t *testing.T) {
@@ -183,7 +183,7 @@ func TestDerefOrZero(t *testing.T) {
 	})
 }
 
-// ─── DerefOrNil ──────────────────────────────────────────────────────────────
+// --- DerefOrNil ---
 
 func TestDerefOrNil(t *testing.T) {
 	t.Run("int_non_nil", func(t *testing.T) {
@@ -217,7 +217,7 @@ func TestDerefOrNil(t *testing.T) {
 	})
 }
 
-// ─── ShlexQuote ──────────────────────────────────────────────────────────────
+// --- ShlexQuote ---
 
 func TestShlexQuote(t *testing.T) {
 	tests := map[string]struct {
@@ -252,7 +252,7 @@ func TestShlexQuote(t *testing.T) {
 	}
 }
 
-// ─── NonZero ─────────────────────────────────────────────────────────────────
+// --- NonZero ---
 
 func TestNonZero(t *testing.T) {
 	tests := map[string]struct {
@@ -297,7 +297,7 @@ func TestNonZero(t *testing.T) {
 	}
 }
 
-// ─── MapToStruct ─────────────────────────────────────────────────────────────
+// --- MapToStruct ---
 
 type testMapStruct struct {
 	Name  string `json:"name"`
@@ -372,7 +372,7 @@ func TestMapToStruct(t *testing.T) {
 	})
 }
 
-// ─── ToTitle ─────────────────────────────────────────────────────────────────
+// --- ToTitle ---
 
 func TestToTitle(t *testing.T) {
 	tests := map[string]struct {

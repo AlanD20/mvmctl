@@ -13,8 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ── Shell completion functions ──
-// Matches Python's cli/_completion.py functions.
+// --- Shell completion functions ---
 
 // completeNetworkNames completes with network names and short IDs.
 func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -142,7 +141,7 @@ func completeVolumeNames(cmd *cobra.Command, args []string, toComplete string) (
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeCacheResources completes with cache resource types (static list matching Python's _complete_cache_resources).
+// completeCacheResources completes with cache resource types (static list).
 func completeCacheResources(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	resources := []string{"vm", "network", "image", "kernel", "binary", "misc"}
 	var results []string
@@ -204,14 +203,11 @@ func listCategories(toComplete string) ([]string, cobra.ShellCompDirective) {
 }
 
 // completeRemoteImageIDs completes with remote image IDs (via API).
-// Matches Python's _complete_remote_image_ids() in cli/_completion.py.
 func completeRemoteImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	// Match Python: ImageOperation.list_all(remote=True) returns list[ImageVersion]
-	// ImageVersion has no ID field in either Python or Go, so the Python completion
-	// `hasattr(img, "id")` always returns False, yielding zero results. Match that.
+	// ImageVersion has no ID field, so remote image ID completion always yields zero results.
 	_, _, _ = opRef.ImageListAll(cmd.Context(), true, "", false, nil)
 	var results []string
 	return results, cobra.ShellCompDirectiveNoFileComp

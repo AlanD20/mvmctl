@@ -17,16 +17,16 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Type definitions ────────────────────────────────────────────────────────
+// --- Type definitions ---
 
-// ParsedKernelFilename corresponds to Python's ParsedKernelFilename.
+// ParsedKernelFilename holds the parsed fields from a kernel filename.
 type ParsedKernelFilename struct {
 	BaseName string
 	Version  string
 	Arch     string
 }
 
-// ── String / slice helpers ──────────────────────────────────────────────────
+// --- String / slice helpers ---
 
 func majorMinorFromVersion(version string) string {
 	parts := strings.Split(version, ".")
@@ -36,7 +36,7 @@ func majorMinorFromVersion(version string) string {
 	return version
 }
 
-// ── Kernel-specific helpers ─────────────────────────────────────────────────
+// --- Kernel-specific helpers ---
 
 func extractVersionFromKey(key string) string {
 	idx := strings.LastIndex(key, "/vmlinux-")
@@ -72,7 +72,7 @@ func parseKernelConfig(kernelDir string) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Normalize line endings (matching Python's splitlines())
+	// Normalize line endings
 	normalized := strings.ReplaceAll(string(data), "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 
@@ -120,7 +120,6 @@ func mergeConfigLines(content, configPath string) {
 }
 
 // runConfigScript runs scripts/config with the given args, logging a warning on failure.
-// Matches Python's KernelService._run_config_script() which captures stderr separately.
 func runConfigScript(ctx context.Context, configScript, kernelDir string, args ...string) {
 	cmdArgs := []string{configScript}
 	cmdArgs = append(cmdArgs, args...)
@@ -146,7 +145,7 @@ func runMake(ctx context.Context, kernelDir, target string, jobs int) (int, stri
 	})
 	stdoutStr := result.Stdout
 	stderrStr := result.Stderr
-	// Log config warnings from make output (matching Python)
+	// Log config warnings from make output
 	for line := range strings.SplitSeq(stderrStr, "\n") {
 		stripped := strings.TrimSpace(line)
 		if strings.Contains(stripped, ".config:") || strings.Contains(strings.ToLower(stripped), "warning:") {
@@ -198,7 +197,6 @@ func checkBuildDependencies(ctx context.Context) error {
 }
 
 // ParseFilename parses a kernel filename to extract base name, version, and arch.
-// Matches Python's KernelService.parse_filename().
 func ParseFilename(filename string) ParsedKernelFilename {
 	name := filename
 	arches := infra.FirecrackerSupportedArches
@@ -229,7 +227,7 @@ func ParseFilename(filename string) ParsedKernelFilename {
 	return ParsedKernelFilename{BaseName: baseName, Version: version, Arch: arch}
 }
 
-// ── Version resolution helpers ─────────────────────────────────────────────
+// --- Version resolution helpers ---
 
 // kernelSpecsToResolverConfigs converts a list of KernelSpec to ResolverConfig structs
 // for delegation to the shared HttpDirVersionResolver.

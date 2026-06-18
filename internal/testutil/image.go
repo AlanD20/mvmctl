@@ -11,8 +11,7 @@ import (
 )
 
 // ImageRepo is an in-memory image repository for testing.
-// Matches Python's mvmctl.core.image._repository.Repository exactly,
-// including soft-delete filtering where Python applies it.
+// Includes soft-delete filtering where applicable.
 type ImageRepo struct {
 	mu     sync.RWMutex
 	images map[string]*model.ImageItem
@@ -23,12 +22,11 @@ func NewImageRepo() *ImageRepo {
 }
 
 // isNotDeleted returns true if the image is NOT soft-deleted.
-// Matches Python's WHERE deleted_at IS NULL AND is_present = 1.
 func (r *ImageRepo) isNotDeleted(img *model.ImageItem) bool {
 	return img.DeletedAt == nil && img.IsPresent
 }
 
-// Get returns an image by ID. Python does NOT filter on soft-delete for get() — just uses WHERE id = ?.
+// Get returns an image by ID. Does NOT filter on soft-delete.
 func (r *ImageRepo) Get(_ context.Context, id string) (*model.ImageItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -39,7 +37,7 @@ func (r *ImageRepo) Get(_ context.Context, id string) (*model.ImageItem, error) 
 	return img, nil
 }
 
-// FindByPrefix returns images whose ID starts with prefix (Python: WHERE deleted_at IS NULL AND is_present = 1).
+// FindByPrefix returns images whose ID starts with prefix.
 func (r *ImageRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.ImageItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -55,7 +53,7 @@ func (r *ImageRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.Ima
 	return result, nil
 }
 
-// GetByType returns an image by type (Python: WHERE deleted_at IS NULL AND is_present = 1 ORDER BY is_default DESC, created_at DESC).
+// GetByType returns an image by type, preferring default and newest.
 func (r *ImageRepo) GetByType(_ context.Context, imgType string) (*model.ImageItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -68,7 +66,7 @@ func (r *ImageRepo) GetByType(_ context.Context, imgType string) (*model.ImageIt
 	if len(candidates) == 0 {
 		return nil, nil
 	}
-	// Match Python ORDER BY is_default DESC, created_at DESC
+	// Sort: default first, then newest
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].IsDefault != candidates[j].IsDefault {
 			return candidates[i].IsDefault // true first (DESC)
@@ -78,7 +76,7 @@ func (r *ImageRepo) GetByType(_ context.Context, imgType string) (*model.ImageIt
 	return candidates[0], nil
 }
 
-// GetByVersionAndType returns an image by version and type (Python: WHERE deleted_at IS NULL AND is_present = 1 LIMIT 1).
+// GetByVersionAndType returns an image by version and type.
 func (r *ImageRepo) GetByVersionAndType(_ context.Context, version, imgType string) (*model.ImageItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -90,7 +88,7 @@ func (r *ImageRepo) GetByVersionAndType(_ context.Context, version, imgType stri
 	return nil, nil
 }
 
-// GetByName returns an image by name (Python: WHERE deleted_at IS NULL AND is_present = 1).
+// GetByName returns an image by name.
 func (r *ImageRepo) GetByName(_ context.Context, name string) (*model.ImageItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -102,7 +100,7 @@ func (r *ImageRepo) GetByName(_ context.Context, name string) (*model.ImageItem,
 	return nil, nil
 }
 
-// ListAll returns all non-deleted images (Python: WHERE deleted_at IS NULL ORDER BY created_at).
+// ListAll returns all non-deleted images ordered by created_at.
 func (r *ImageRepo) ListAll(_ context.Context) ([]*model.ImageItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -125,7 +123,7 @@ func (r *ImageRepo) Upsert(_ context.Context, img *model.ImageItem) error {
 	return nil
 }
 
-// SoftDelete marks an image as deleted (Python: datetime.now(tz=UTC).isoformat()).
+// SoftDelete marks an image as deleted.
 func (r *ImageRepo) SoftDelete(_ context.Context, imageID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -144,7 +142,7 @@ func (r *ImageRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// GetDefault returns the default image (Python: WHERE is_default = 1 AND is_present = 1 LIMIT 1).
+// GetDefault returns the default image.
 func (r *ImageRepo) GetDefault(_ context.Context) (*model.ImageItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -156,24 +154,24 @@ func (r *ImageRepo) GetDefault(_ context.Context) (*model.ImageItem, error) {
 	return nil, nil
 }
 
-// SetDefault sets one image as default, clearing all others atomically (Python: BEGIN/COMMIT transaction).
+// SetDefault sets one image as default, clearing all others atomically.
 func (r *ImageRepo) SetDefault(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Match Python: UPDATE images SET is_default = 0 WHERE deleted_at IS NULL
+	// Clear existing defaults
 	for _, img := range r.images {
 		if img.DeletedAt == nil {
 			img.IsDefault = false
 		}
 	}
-	// Match Python: UPDATE images SET is_default = 1 WHERE id = ? AND deleted_at IS NULL
+	// Set new default
 	if img, ok := r.images[id]; ok && img.DeletedAt == nil {
 		img.IsDefault = true
 	}
 	return nil
 }
 
-// Count returns total count of all non-deleted images (Python: WHERE deleted_at IS NULL).
+// Count returns total count of all non-deleted images.
 func (r *ImageRepo) Count(_ context.Context) (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

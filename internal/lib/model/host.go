@@ -1,8 +1,8 @@
 package model
 
-// ── HostStateItem ──
+// --- HostStateItem ---
 
-// HostStateItem matches Python's HostStateItem — singleton row (id=1).
+// HostStateItem holds singleton host initialization state (id=1).
 type HostStateItem struct {
 	ID                    int    `json:"id"                      db:"id"`
 	Initialized           bool   `json:"initialized"             db:"initialized"`
@@ -42,9 +42,9 @@ type HostStateItem struct {
 	KernelMinimumMet    *int `json:"kernel_minimum_met,omitempty"    db:"kernel_minimum_met"`
 }
 
-// ── HostStateChangeItem ──
+// --- HostStateChangeItem ---
 
-// HostStateChangeItem matches Python's HostStateChangeItem.
+// HostStateChangeItem tracks a setting change during host initialization.
 type HostStateChangeItem struct {
 	SessionID       string  `json:"session_id"`
 	InitTimestamp   string  `json:"init_timestamp"`
@@ -60,9 +60,9 @@ type HostStateChangeItem struct {
 	RevertMechanism *string `json:"revert_mechanism,omitempty"`
 }
 
-// ── HostHardware ──
+// --- HostHardware ---
 
-// HostHardware matches Python's HostHardware.
+// HostHardware holds detected host hardware information.
 type HostHardware struct {
 	Hostname          string `json:"hostname"`
 	CPUModel          string `json:"cpu_model"`
@@ -78,9 +78,9 @@ type HostHardware struct {
 	CPUHypervisor     bool   `json:"cpu_hypervisor"`
 }
 
-// ── HostLimits ──
+// --- HostLimits ---
 
-// HostLimits matches Python's HostLimits.
+// HostLimits holds detected host kernel limits.
 type HostLimits struct {
 	PIDMax              int    `json:"pid_max"`
 	FDMax               int    `json:"fd_max"`
@@ -96,9 +96,9 @@ type HostLimits struct {
 	KernelMinimumMet    bool   `json:"kernel_minimum_met"`
 }
 
-// ── HostResources ──
+// --- HostResources ---
 
-// HostResources matches Python's HostResources.
+// HostResources holds detected host resource usage.
 type HostResources struct {
 	MemoryAvailableMiB    int             `json:"memory_available_mib"`
 	TAPDevicesUsed        int             `json:"tap_devices_used"`
@@ -121,9 +121,9 @@ type HostResources struct {
 	DevNetTUNAccessible   bool            `json:"dev_net_tun_accessible"`
 }
 
-// ── ProbeCheck ──
+// --- ProbeCheck ---
 
-// ProbeCheck matches Python's ProbeCheck.
+// ProbeCheck represents the result of a single host probe check.
 type ProbeCheck struct {
 	Name    string `json:"name"`
 	Passed  bool   `json:"passed"`
@@ -131,18 +131,18 @@ type ProbeCheck struct {
 	Details string `json:"details,omitempty"`
 }
 
-// ── ProbeResult ──
+// --- ProbeResult ---
 
-// ProbeResult matches Python's ProbeResult.
+// ProbeResult holds the aggregated results of host probe checks.
 type ProbeResult struct {
 	Critical []ProbeCheck `json:"critical"`
 	Warnings []ProbeCheck `json:"warnings"`
 	Info     []ProbeCheck `json:"info"`
 }
 
-// ── HostInfo ──
+// --- HostInfo ---
 
-// HostInfo matches Python's HostInfo — aggregated host detection results.
+// HostInfo holds aggregated host detection results.
 type HostInfo struct {
 	State     HostStateItem `json:"state"`
 	Resources HostResources `json:"resources"`

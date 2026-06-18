@@ -1,4 +1,4 @@
-// Package cli — VM SSH commands, matching Python's cli/ssh.py
+// Package cli — VM SSH commands
 package cli
 
 import (
@@ -13,7 +13,6 @@ import (
 )
 
 // completeVMNames provides shell completion for VM identifiers.
-// Matches Python's _complete_vm_names() in cli/_completion.py.
 func completeVMNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if opRef == nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -65,22 +64,20 @@ Examples:
   mvm ssh my-vm --user admin
   mvm ssh my-vm --key ~/.ssh/id_rsa -c "ls -la"
   mvm ssh my-vm --timeout 30`,
-		// Match Python's no_args_is_help=True: show help when no args given.
-		// Use MaximumNArgs(1) instead of ExactArgs(1) so Cobra doesn't error
+		// Show help when no args given. Use MaximumNArgs(1) so Cobra doesn't error
 		// before RunE; we handle the 0-arg case by showing help.
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeVMNames,
 		TraverseChildren:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Python's no_args_is_help=True: show help when no identifier provided
+			// Show help when no identifier provided
 			if len(args) == 0 {
 				return cmd.Help()
 			}
 			identifier := args[0]
 
 			// Use nil semantics: only pass flag values when explicitly set by user.
-			// Zero/empty values mean "not specified" (like Python's None),
-			// and the API resolves defaults accordingly.
+			// Zero/empty values mean "not specified"; the API resolves defaults.
 			input := inputs.SSHInput{
 				Identifier: identifier,
 			}
@@ -109,9 +106,8 @@ Examples:
 	cobraCmd.Flags().StringVarP(&cmdStr, "cmd", "c", "", "Command to execute")
 	cobraCmd.Flags().IntVarP(&timeout, "timeout", "t", 0, "SSH connection timeout in seconds")
 
-	// Replicate Python's Typer context_settings={"allow_interspersed_args": True}.
-	// Cobra/pflag intersperses flags and positional args by default, but make it
-	// explicit to match Python behavior.
+	// Cobra/pflag intersperses flags and positional args by default.
+	// Make it explicit for SSH commands where flags may appear after positional args.
 	cobraCmd.Flags().SetInterspersed(true)
 
 	return cobraCmd

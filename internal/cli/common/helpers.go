@@ -1,5 +1,5 @@
 // Package common provides CLI display helpers — table rendering, JSON output,
-// error display, and the MVMCli singleton matching Python's “utils/cli.py:MVMCli“.
+// error display, and the MVMCli singleton.
 package common
 
 import (
@@ -19,20 +19,16 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Error handler wrapper (matching Python's @handle_errors) ────────────────
+// --- Error handler wrapper ---
 
-// HandleErrors wraps a command function with the global error handling
-// pattern from Python's “@handle_errors“ decorator in “utils/cli.py“.
+// HandleErrors wraps a command function with consistent error handling.
 //
-// Python behavior replicated:
-//   - typer.Exit         → re-raised (Cobra returns the error)
-//   - click.Abort        → exit code 130 (handled via signal in Go)
-//   - KeyboardInterrupt  → exit code 130 (handled via signal in Go)
-//   - BrokenPipeError    → exit code 0   (silent exit on pipe close)
-//   - PrivilegeError     → show details/suggestions via mvm_cli.error(), exit 1
-//   - MVMError           → show message via mvm_cli.error(), exit 1
-//   - sqlite3.OperationalError → show DB init hint or error, exit 1
-//   - Exception          → show unexpected error, exit 1
+// Error handling rules:
+// - BrokenPipeError    → silent exit (return nil)
+// - context.Canceled   → propagate as-is (Ctrl+C)
+// - DomainError        → display with Code/Message/Details, return error
+// - Database errors    → show "Run 'mvm init' first" or specific message
+// - Unexpected errors  → show generic error message
 //
 // Usage:
 //
@@ -49,31 +45,28 @@ func HandleErrors(fn func() error) func() error {
 			return nil
 		}
 
-		// ── 1. BrokenPipeError → silent exit (return nil) ────────
-		// Python catches BrokenPipeError and raises typer.Exit(code=0).
+		// --- 1. BrokenPipeError → silent exit (return nil) ---
 		if isBrokenPipe(err) {
 			// Silently close stderr to avoid further broken pipe
 			_ = os.Stderr.Close()
 			return nil
 		}
 
-		// ── 2. context.Canceled (KeyboardInterrupt) ─────────────
-		// Python catches KeyboardInterrupt and raises typer.Exit(code=130).
-		// Go's signal.NotifyContext cancels the context on SIGINT/SIGTERM.
+		// --- 2. context.Canceled (Ctrl+C) ---
+		// signal.NotifyContext cancels the context on SIGINT/SIGTERM.
 		if errors.Is(err, context.Canceled) {
 			return err
 		}
 
-		// ── 3. DomainError (MVMError / PrivilegeError) ──────────
+		// --- 3. DomainError ---
 		var domainErr *errs.DomainError
 		if errors.As(err, &domainErr) {
 			return handleDomainError(domainErr)
 		}
 
-		// ── 4. sqlite3.OperationalError (database errors) ───────
-		// Python checks for "no such table" in the message string.
-		// In Go with modernc.org/sqlite, database errors don't have a
-		// dedicated type; we check the message for known patterns.
+		// --- 4. Database errors ---
+		// modernc.org/sqlite doesn't have a dedicated error type;
+		// we check the message for known SQLite error patterns.
 		if isDatabaseError(err) {
 			msg := err.Error()
 			if strings.Contains(msg, "no such table") {
@@ -87,31 +80,21 @@ func HandleErrors(fn func() error) func() error {
 			return err
 		}
 
-		// ── 5. Unexpected error (Exception) ─────────────────────
+		// --- 5. Unexpected error ---
 		Cli.Error(formatUnexpected(err))
 		return err
 	}
 }
 
-// ─── internal helpers ────────────────────────────────────────────────────────
+// --- Internal helpers ---
 
-// handleDomainError displays a DomainError according to Python's PrivilegeError
-// and MVMError handling rules, then returns the error.
+// handleDomainError displays a DomainError and returns the error.
 //
-// Python PrivilegeError handling:
+// PrivilegeError (CodePrivilegeRequired + ClassNeedsInteraction):
+// - Shows error message, details, and suggestions
 //
-//	mvm_cli.error(str(e))
-//	if e.details:
-//	    detail_msg = e.details.get("message", "")
-//	    if detail_msg:
-//	        mvm_cli.warning(f"Details: {detail_msg}")
-//	    mvm_cli.info("Options:")
-//	    for suggestion in e.details.get("suggestions", []):
-//	        mvm_cli.info(f"  - {suggestion}")
-//
-// Python MVMError handling:
-//
-//	mvm_cli.error(str(e))
+// General DomainError:
+// - Shows error message
 func handleDomainError(de *errs.DomainError) error {
 	displayMsg := de.Message
 	if displayMsg == "" {
@@ -121,8 +104,7 @@ func handleDomainError(de *errs.DomainError) error {
 		displayMsg = "An error occurred"
 	}
 
-	// ── PrivilegeError subclass ──────────────────────────────────
-	// Matches Python's PrivilegeError(MVMError) handling.
+	// --- PrivilegeError (CodePrivilegeRequired) ---
 	if de.Code == errs.CodePrivilegeRequired && de.Class == errs.ClassNeedsInteraction {
 		Cli.Error(displayMsg)
 
@@ -149,14 +131,12 @@ func handleDomainError(de *errs.DomainError) error {
 		return de
 	}
 
-	// ── General MVMError (and all other DomainErrors) ────────────
-	// Python: mvm_cli.error(str(e))
+	// --- General DomainError ---
 	Cli.Error(displayMsg)
 	return de
 }
 
-// isBrokenPipe checks if err is a broken pipe / closed pipe error, matching
-// Python's “BrokenPipeError“.
+// isBrokenPipe checks if err is a broken pipe / closed pipe error.
 func isBrokenPipe(err error) bool {
 	if errors.Is(err, syscall.EPIPE) {
 		return true
@@ -169,10 +149,8 @@ func isBrokenPipe(err error) bool {
 	return strings.Contains(msg, "broken pipe") || strings.Contains(msg, "Broken pipe")
 }
 
-// isDatabaseError checks if err looks like a sqlite3.OperationalError.
-// Python catches sqlite3.OperationalError and checks for "no such table".
-// In Go with modernc.org/sqlite, there's no dedicated error type, so we
-// check for characteristic SQLite error patterns.
+// isDatabaseError checks if err matches known SQLite error patterns.
+// Uses message matching since modernc.org/sqlite lacks a dedicated error type.
 func isDatabaseError(err error) bool {
 	msg := err.Error()
 	// Common SQLite operational error patterns

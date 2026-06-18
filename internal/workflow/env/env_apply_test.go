@@ -23,7 +23,7 @@ import (
 
 // NOTE: Tests in this file mutate the package-level Registry. Do NOT add t.Parallel().
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // writeApplySpec writes YAML content to a temp file and returns the absolute path.
 func writeApplySpec(t *testing.T, content string) string {
@@ -154,7 +154,7 @@ func cleanupState(t *testing.T, specPath string) {
 	os.RemoveAll(stateDir)
 }
 
-// ─── Tests ─────────────────────────────────────────────────────────────────────
+// --- Tests ---
 
 // Rationale: A valid YAML spec with one resource must produce a workflow state
 // file containing the correct step metadata (name, type, schema version).

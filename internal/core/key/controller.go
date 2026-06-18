@@ -12,12 +12,11 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// privateKeyPerm matches Python's CONST_FILE_PERMS_PRIVATE_KEY = 0o600.
+// privateKeyPerm is the file permission for private key files (0600).
 const privateKeyPerm os.FileMode = 0600
 
 // Controller manages SSH key lifecycle for a specific key.
-// Matches Python's KeyController exactly — resolves key eagerly at
-// construction time and stores the resolved key for later use.
+// Resolves the key eagerly at construction time and stores the resolved key for later use.
 type Controller struct {
 	key  *model.SSHKeyItem
 	repo Repository
@@ -29,7 +28,6 @@ func NewController(key *model.SSHKeyItem, repo Repository) *Controller {
 }
 
 // Export copies both public and private key files to a destination directory.
-// Matches Python's KeyController.export() exactly.
 // Uses the actual paths stored in the DB model, not reconstructed paths.
 func (c *Controller) Export(ctx context.Context, destDir string, overwrite bool) (string, string, error) {
 	_ = ctx // context is unused here, kept for API consistency

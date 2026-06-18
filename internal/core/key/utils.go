@@ -42,7 +42,6 @@ func checkDependencies() error {
 }
 
 // ReadPubKeyContents extracts public key content strings from a list of SSHKeyItem.
-// Matches Python's KeyService.read_pubkey_contents() (a @staticmethod).
 func ReadPubKeyContents(keys []*model.SSHKeyItem) ([]string, error) {
 	var contents []string
 	for _, k := range keys {
@@ -60,8 +59,7 @@ func ReadPubKeyContents(keys []*model.SSHKeyItem) ([]string, error) {
 	return contents, nil
 }
 
-// computeFingerprint computes SHA256 fingerprint from public key content.
-// Matches Python's KeyService._compute_fingerprint() exactly:
+// computeFingerprint computes SHA256 fingerprint from public key content:
 //
 //	base64 decode key bytes → SHA256 → base64 encode (no padding) → "SHA256:..."
 func computeFingerprint(pubKeyContent string) (string, error) {
@@ -75,7 +73,7 @@ func computeFingerprint(pubKeyContent string) (string, error) {
 	}
 	digest := sha256.Sum256(keyBytes)
 	fp := base64.StdEncoding.EncodeToString(digest[:])
-	// Remove trailing padding, matching Python's rstrip(b"=")
+	// Remove trailing padding
 	fp = strings.TrimRight(fp, "=")
 	return "SHA256:" + fp, nil
 }
@@ -86,7 +84,6 @@ func IsPrivateKey(content string) bool {
 }
 
 // ParseAlgorithm extracts the algorithm (first field) from SSH public key content.
-// Matches Python's KeyService._parse_algorithm() which raises MVMKeyError on empty content.
 func ParseAlgorithm(pubKeyContent string) (string, error) {
 	parts := strings.Fields(pubKeyContent)
 	if len(parts) == 0 {
@@ -96,15 +93,13 @@ func ParseAlgorithm(pubKeyContent string) (string, error) {
 }
 
 // ParseComment extracts the comment (third+ field) from SSH public key content.
-// Matches Python's KeyService._parse_comment() which uses split(None, 2),
-// preserving internal whitespace in parts[2].
 func ParseComment(pubKeyContent string) string {
 	trimmed := strings.TrimSpace(pubKeyContent)
 	fields := strings.Fields(trimmed)
 	if len(fields) < 3 {
 		return ""
 	}
-	// Python's split(None, 2) preserves original whitespace in parts[2].
+	// Split into at most 3 fields, preserving whitespace in the comment.
 	pos := 0
 	for range 2 {
 		for pos < len(trimmed) && !unicode.IsSpace(rune(trimmed[pos])) {

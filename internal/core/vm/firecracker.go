@@ -17,7 +17,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Constants matching Python's constants.py ──
+// --- Constants ---
 const (
 	constSignalExitCodeBase     = 128
 	constDefaultGracefulTimeout = 30.0
@@ -25,12 +25,7 @@ const (
 	defaultLibguestfsSeedDir    = "/var/lib/cloud/seed/nocloud"
 )
 
-// =============================================================================
-// FirecrackerSpawner — matches Python's FirecrackerSpawner class exactly
-// =============================================================================
-
 // FirecrackerSpawner manages Firecracker process lifecycle and config generation.
-// Matches Python's core/vm/_firecracker.py:FirecrackerSpawner exactly.
 type FirecrackerSpawner struct {
 	config           *model.FirecrackerConfig
 	configPath       string
@@ -46,7 +41,6 @@ type FirecrackerSpawner struct {
 }
 
 // NewFirecrackerSpawner creates a new FirecrackerSpawner.
-// Matches Python's FirecrackerSpawner.__init__(config, *, config_path=None).
 func NewFirecrackerSpawner(config *model.FirecrackerConfig) *FirecrackerSpawner {
 	s := &FirecrackerSpawner{
 		config: config,
@@ -60,7 +54,7 @@ func NewFirecrackerSpawner(config *model.FirecrackerConfig) *FirecrackerSpawner 
 	return s
 }
 
-// ── Spawn ──
+// --- Spawn ---
 
 // Spawn starts a Firecracker process.
 //
@@ -190,18 +184,16 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	return nil
 }
 
-// ── Cleanup ──
+// --- Cleanup ---
 
 // Cleanup performs cleanup of all created resources.
-// Matches Python's FirecrackerSpawner.cleanup().
 func (s *FirecrackerSpawner) Cleanup() {
 	s.CloseFilePointers()
 }
 
-// ── Generate ──
+// --- Generate ---
 
 // Generate builds the Firecracker VM config.
-// Matches Python's FirecrackerSpawner.generate() exactly.
 func (s *FirecrackerSpawner) Generate() (*model.FirecrackerVMConfig, error) {
 	// Nested virt requires PCI — force it on
 	if s.config.NestedVirt {
@@ -248,10 +240,9 @@ func (s *FirecrackerSpawner) Generate() (*model.FirecrackerVMConfig, error) {
 	return config, nil
 }
 
-// ── WriteToFile ──
+// --- WriteToFile ---
 
 // WriteToFile generates and writes the config to disk.
-// Matches Python's FirecrackerSpawner.write_to_file().
 func (s *FirecrackerSpawner) WriteToFile() error {
 	config, err := s.Generate()
 	if err != nil {
@@ -268,10 +259,9 @@ func (s *FirecrackerSpawner) WriteToFile() error {
 	return os.WriteFile(s.configPath, data, 0644)
 }
 
-// ── CloseFilePointers ──
+// --- CloseFilePointers ---
 
-// CloseFilePointers closes both log and serial output file pointers,
-// suppressing OSError. Matches Python's _close_filepointers().
+// CloseFilePointers closes both log and serial output file pointers.
 func (s *FirecrackerSpawner) CloseFilePointers() {
 	if s.fcLogFP != nil {
 		if err := s.fcLogFP.Close(); err != nil {
@@ -288,12 +278,11 @@ func (s *FirecrackerSpawner) CloseFilePointers() {
 	}
 }
 
-// ── Internal config builders ──
+// --- Internal config builders ---
 
 // buildDrivesConfig builds the drives section of the Firecracker config.
-// Matches Python's _build_drives_config() exactly — calls .absolute() on paths.
 func (s *FirecrackerSpawner) buildDrivesConfig() []model.DriveConfig {
-	// Python uses str(self._config.rootfs_path.absolute()) — resolve to absolute path
+	// Resolve rootfs path to absolute path
 	rootfsAbs, err := filepath.Abs(s.config.RootfsPath)
 	if err != nil {
 		// Fallback to original if Abs fails (should not happen in practice)
@@ -316,7 +305,7 @@ func (s *FirecrackerSpawner) buildDrivesConfig() []model.DriveConfig {
 	if cloudInitMode != nil && *cloudInitMode != "" && *cloudInitMode != model.CloudInitModeOFF &&
 		cloudInitISOPath != nil &&
 		*cloudInitISOPath != "" {
-		// Python also calls .absolute() on cloud_init_iso_path
+		// Resolve cloud-init ISO path to absolute path
 		ciAbs, err := filepath.Abs(*cloudInitISOPath)
 		if err != nil {
 			ciAbs = *cloudInitISOPath
@@ -339,7 +328,6 @@ func (s *FirecrackerSpawner) buildDrivesConfig() []model.DriveConfig {
 }
 
 // buildLoggerConfig builds the logger section of the Firecracker config.
-// Matches Python's _build_logger_config() exactly.
 func (s *FirecrackerSpawner) buildLoggerConfig() model.LoggerConfig {
 	return model.LoggerConfig{
 		LogPath:       s.logPath,
@@ -350,7 +338,6 @@ func (s *FirecrackerSpawner) buildLoggerConfig() model.LoggerConfig {
 }
 
 // buildMetricsConfig builds the metrics section of the Firecracker config.
-// Matches Python's _build_metrics_config() exactly.
 func (s *FirecrackerSpawner) buildMetricsConfig() model.MetricsConfig {
 	return model.MetricsConfig{
 		MetricsPath: s.metricsPath,
@@ -362,7 +349,6 @@ func (s *FirecrackerSpawner) buildMetricsConfig() model.MetricsConfig {
 // Returns a *CpuConfig when nested virt is enabled or a custom CPU template
 // was provided. Returns nil when no CPU configuration is needed.
 //
-// Matches Python's _build_cpu_config() exactly.
 func (s *FirecrackerSpawner) buildCPUConfig() *model.CpuConfig {
 	if s.config.CPUConfig != nil {
 		return s.config.CPUConfig
@@ -373,10 +359,9 @@ func (s *FirecrackerSpawner) buildCPUConfig() *model.CpuConfig {
 	return nil
 }
 
-// ── Network config ──
+// --- Network config ---
 
 // buildNetworkConfig builds the network-interfaces section.
-// Matches Python's _build_network_config() exactly.
 func (s *FirecrackerSpawner) buildNetworkConfig() []model.NetworkInterfaceConfig {
 	networks := []model.NetworkInterfaceConfig{
 		{
@@ -385,12 +370,10 @@ func (s *FirecrackerSpawner) buildNetworkConfig() []model.NetworkInterfaceConfig
 			HostDevName: s.config.TapName,
 		},
 	}
-	// Extra networks — future improvement
 	return networks
 }
 
-// bootArgsBuilder maintains an ordered list of boot argument key-value pairs,
-// preserving insertion order to match Python 3.7+ dict semantics.
+// bootArgsBuilder maintains an ordered list of boot argument key-value pairs.
 type bootArgEntry struct {
 	key    string
 	values []string
@@ -458,12 +441,9 @@ func (b *bootArgsBuilder) join() string {
 	return strings.Join(parts, " ")
 }
 
-// =============================================================================
-// Boot arguments — matches Python's _build_boot_args exactly
-// =============================================================================
+// --- Boot arguments ---
 
 // buildBootArgs builds the kernel boot arguments string.
-// Matches Python's _build_boot_args() exactly (100+ lines).
 func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 	bootArgs := newBootArgsBuilder()
 
@@ -472,7 +452,6 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 	}
 
 	// Inject console=ttyS0 when console is enabled and user didn't set a console=
-	// Matches Python's _build_boot_args exactly
 	if s.config.EnableConsole && bootArgs.entryIndex("console") < 0 {
 		bootArgs.set("console", []string{"ttyS0"})
 	}
@@ -564,12 +543,7 @@ func (s *FirecrackerSpawner) buildBootArgs() (string, error) {
 	return bootArgs.join(), nil
 }
 
-// =============================================================================
-// FirecrackerConfigManager — matches Python's FirecrackerConfigManager class
-// =============================================================================
-
 // FirecrackerConfigManager reads and modifies Firecracker config JSON files on disk.
-// Matches Python's FirecrackerConfigManager.
 type FirecrackerConfigManager struct {
 	configPath string
 	config     map[string]any
@@ -583,7 +557,7 @@ func NewFirecrackerConfigManager(configPath string) *FirecrackerConfigManager {
 	}
 }
 
-// load reads the config from disk. Matches Python's _load().
+// load reads the config from disk.
 func (m *FirecrackerConfigManager) load() (map[string]any, error) {
 	if m.loaded {
 		return m.config, nil
@@ -607,7 +581,6 @@ func (m *FirecrackerConfigManager) load() (map[string]any, error) {
 }
 
 // save writes the current config back to disk with indentation.
-// Matches Python's _save().
 func (m *FirecrackerConfigManager) save() error {
 	dir := filepath.Dir(m.configPath)
 	if err := os.MkdirAll(dir, infra.DirPerm); err != nil {
@@ -620,7 +593,7 @@ func (m *FirecrackerConfigManager) save() error {
 	return os.WriteFile(m.configPath, data, 0644)
 }
 
-// RemoveDrive removes a drive entry by drive_id. Matches Python's remove_drive().
+// RemoveDrive removes a drive entry by drive_id.
 // Returns true if a drive was actually removed.
 func (m *FirecrackerConfigManager) RemoveDrive(driveID string) (bool, error) {
 	cfg, err := m.load()
@@ -649,7 +622,7 @@ func (m *FirecrackerConfigManager) RemoveDrive(driveID string) (bool, error) {
 	return false, nil
 }
 
-// AddDrive adds or replaces a drive entry. Matches Python's add_drive().
+// AddDrive adds or replaces a drive entry.
 func (m *FirecrackerConfigManager) AddDrive(driveConfig model.DriveConfig) error {
 	cfg, err := m.load()
 	if err != nil {

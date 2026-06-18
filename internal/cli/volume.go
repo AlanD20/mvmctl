@@ -1,4 +1,4 @@
-// Package cli — volume management commands, matching Python's cli/volume.py
+// Package cli — volume management commands
 package cli
 
 import (
@@ -14,7 +14,6 @@ import (
 )
 
 // volumeColumns defines the listing columns for volumes.
-// Matches Python's _VOLUME_COLUMNS in cli/volume.py.
 var volumeColumns = []common.ListingColumn{
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VolumeItem).ID) }},
 	{Header: "Name", Extract: func(v any) string { return v.(*model.VolumeItem).Name }},
@@ -114,7 +113,6 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// Match Python: mvm_cli.success(result.message)
 			common.Cli.Success(fmt.Sprintf("Volume '%s' created", name))
 			for _, col := range volumeColumns {
 				switch col.Header {
@@ -132,7 +130,7 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&format, "format", "", "Disk format: raw or qcow2 (default: raw)")
-	// Accept both --read-only and --readonly (matching Python's Typer alias)
+	// Accept both --read-only and --readonly as aliases
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "readonly", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "ro", false, "Mount volume as read-only (default: writable)")
@@ -150,8 +148,6 @@ func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		ValidArgsFunction: completeVolumeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			removeResult := volumeAPI.VolumeRemove(cmd.Context(), inputs.VolumeInput{Identifiers: args}, force)
-			// Match Python: for r in result.items: if r.is_ok: mvm_cli.success("Removed: {name}")
-			//              else: mvm_cli.error(r.message or "Remove failed: {name}")
 			for _, r := range removeResult.Items {
 				itemName := "unknown"
 				if r.Item != nil {
@@ -193,12 +189,10 @@ func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 
 			info, err := volumeAPI.VolumeInspect(cmd.Context(), inputs.VolumeInput{Identifiers: []string{identifier}})
 			if err != nil {
-				// Match Python: @handle_errors decorator — pass through actual error message
 				return err
 			}
 
 			if jsonOutput {
-				// Match Python's json.dumps(info, indent=2, default=str)
 				fmt.Println(common.MarshalJSONDefaultStr(info))
 				return nil
 			}
@@ -228,7 +222,6 @@ func newVolumeResizeCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			); err != nil {
 				return err
 			}
-			// Match Python: mvm_cli.success(result.message)
 			common.Cli.Success(fmt.Sprintf("Volume '%s' resized", identifier))
 			return nil
 		},

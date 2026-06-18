@@ -6,7 +6,6 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// Repository matches Python's Repository class methods exactly.
 type Repository interface {
 	// Get returns a kernel by its full 64-char ID, or nil if not found.
 	Get(ctx context.Context, id string) (*model.KernelItem, error)

@@ -10,7 +10,6 @@ import (
 )
 
 // VolumeRepo is an in-memory volume repository for testing.
-// Matches Python's mvmctl.core.volume._repository.Repository.
 type VolumeRepo struct {
 	mu      sync.RWMutex
 	volumes map[string]*model.VolumeItem
@@ -57,7 +56,6 @@ func (r *VolumeRepo) GetByName(_ context.Context, name string) (*model.VolumeIte
 }
 
 // ListAll returns all volumes ordered by created_at.
-// Matches Python's Repository.list_all().
 func (r *VolumeRepo) ListAll(_ context.Context) ([]*model.VolumeItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

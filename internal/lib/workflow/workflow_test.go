@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── mockStep ──────────────────────────────────────────────────────────────────
+// --- mockStep ---
 // A minimal Step implementation for testing DAG and pipeline behavior.
 
 type mockStep struct {
@@ -75,7 +75,7 @@ func (s *mockStep) StateData() model.ResourceState {
 // errSentinel is a reusable test error.
 var errSentinel = errors.New("step failed")
 
-// ─── BuildDAG ─────────────────────────────────────────────────────────────────
+// --- BuildDAG ---
 
 // Rationale: Verify BuildDAG handles the simplest case — a single step with no dependencies.
 func TestBuildDAG_SingleStep(t *testing.T) {
@@ -193,7 +193,7 @@ func TestBuildDAG_EmptySteps(t *testing.T) {
 	})
 }
 
-// ─── SharedState ──────────────────────────────────────────────────────────────
+// --- SharedState ---
 
 // Rationale: SharedState must correctly round-trip Set/Get for both string and int values.
 func TestSharedState_SetGet_RoundTrip(t *testing.T) {
@@ -258,7 +258,7 @@ func TestSharedState_ConcurrentAccess(t *testing.T) {
 	assert.Len(t, keys, 20, "expected 20 keys after concurrent Set/Get")
 }
 
-// ─── Pipeline ─────────────────────────────────────────────────────────────────
+// --- Pipeline ---
 
 // Rationale: NewPipeline must accept valid linear-chain steps and compute the correct level count.
 func TestNewPipeline_ValidSteps(t *testing.T) {
@@ -588,7 +588,7 @@ func TestPipeline_StepsAndLevels(t *testing.T) {
 	require.Len(t, levels, 2)
 }
 
-// ─── State Persistence ────────────────────────────────────────────────────────
+// --- State Persistence ---
 
 // Rationale: WriteWorkflowState must create a state.yaml file, and ReadWorkflowState must
 // return identical data. Field-by-field comparison via cmp.Diff ensures no field is missed.
@@ -763,7 +763,7 @@ func TestStatePersistence_WriteCreatesDirectory(t *testing.T) {
 	require.NoError(t, err, "state.yaml should exist after WriteWorkflowState created dirs")
 }
 
-// ─── WriteWorkflowState EBADF Protection ─────────────────────────────────
+// --- WriteWorkflowState EBADF Protection ---
 // Rationale: WriteWorkflowState uses a .tmp file before atomic rename. If a
 // crash leaves a FIFO/socket as the .tmp file, os.OpenFile opens it without
 // error but Write fails with EBADF (bad file descriptor). The fix removes any
@@ -869,7 +869,7 @@ func TestWriteWorkflowState_ParallelWrites(t *testing.T) {
 	assert.NoError(t, err, "state file must be readable after parallel writes")
 }
 
-// ─── WorkflowIDFromPath ───────────────────────────────────────────────────────
+// --- WorkflowIDFromPath ---
 
 // Rationale: WorkflowIDFromPath must produce stable, deterministic IDs. Same path →
 // same ID. Different paths → different IDs.
@@ -887,7 +887,7 @@ func TestStatePersistence_WorkflowIDFromPath(t *testing.T) {
 	assert.NotEqual(t, id, id3, "different paths should give different IDs")
 }
 
-// ─── Now ──────────────────────────────────────────────────────────────────────
+// --- Now ---
 
 // Rationale: Now must return a valid RFC3339 timestamp so workflow state timestamps
 // are consistently formatted and parseable.
@@ -898,4 +898,4 @@ func TestNow_ReturnsRFC3339(t *testing.T) {
 	assert.NoError(t, err, "Now() returned invalid RFC3339 timestamp %q", ts)
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ---

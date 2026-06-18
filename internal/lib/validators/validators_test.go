@@ -12,7 +12,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 func assertCode(t *testing.T, err error, code errs.Code) {
 	t.Helper()
@@ -32,7 +32,7 @@ func assertNoError(t *testing.T, err error) {
 	assert.NoError(t, err)
 }
 
-// ─── EntityName ───────────────────────────────────────────────────────────────
+// --- EntityName ---
 // Rationale: Must validate length, reserved names, dangerous chars, prefix, and regex.
 
 func TestEntityName(t *testing.T) {
@@ -84,7 +84,7 @@ func TestEntityName(t *testing.T) {
 	})
 }
 
-// ─── KeyName / VolumeName / VMName ────────────────────────────────────────────
+// --- KeyName / VolumeName / VMName ---
 // Rationale: Thin wrappers around EntityName with different defaults.
 
 func TestKeyName(t *testing.T) {
@@ -102,7 +102,7 @@ func TestVMName(t *testing.T) {
 	assert.Error(t, VMName(""))
 }
 
-// ─── NetworkName ──────────────────────────────────────────────────────────────
+// --- NetworkName ---
 // Rationale: EntityName + no dots + no reserved interfaces + no CLI_NAME- prefix.
 
 func TestNetworkName(t *testing.T) {
@@ -130,7 +130,7 @@ func TestNetworkName(t *testing.T) {
 	})
 }
 
-// ─── IsIPAddress ──────────────────────────────────────────────────────────────
+// --- IsIPAddress ---
 func TestIsIPAddress(t *testing.T) {
 	assert.True(t, IsIPAddress("10.0.0.1"))
 	assert.True(t, IsIPAddress("192.168.1.1"))
@@ -139,7 +139,7 @@ func TestIsIPAddress(t *testing.T) {
 	assert.False(t, IsIPAddress(""))
 }
 
-// ─── IPv4Address ─────────────────────────────────────────────────────────────
+// --- IPv4Address ---
 // Rationale: Validates format, private range, subnet containment, network addr
 // and gateway exclusion.
 
@@ -200,7 +200,7 @@ func TestIPv4Address(t *testing.T) {
 	})
 }
 
-// ─── IPv4Gateway ──────────────────────────────────────────────────────────────
+// --- IPv4Gateway ---
 // Rationale: Validates gateway is private, within subnet, not network address.
 
 func TestIPv4Gateway(t *testing.T) {
@@ -244,7 +244,7 @@ func TestIPv4Gateway(t *testing.T) {
 	})
 }
 
-// ─── MAC ──────────────────────────────────────────────────────────────────────
+// --- MAC ---
 func TestMAC(t *testing.T) {
 	assertNoError(t, MAC("02:FC:00:00:00:01"))
 	assertNoError(t, MAC("aa:bb:cc:dd:ee:ff"))
@@ -260,7 +260,7 @@ func TestMAC(t *testing.T) {
 	assertCode(t, err, errs.CodeValidationFailed)
 }
 
-// ─── Subnet ───────────────────────────────────────────────────────────────────
+// --- Subnet ---
 func TestSubnet(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
 		got, err := Subnet("10.0.0.0/24")
@@ -295,7 +295,7 @@ func TestSubnet(t *testing.T) {
 	})
 }
 
-// ─── SubnetNoOverlap ──────────────────────────────────────────────────────────
+// --- SubnetNoOverlap ---
 // Rationale: Must detect CIDR overlaps and reject host bits in strict mode.
 
 func TestSubnetNoOverlap(t *testing.T) {
@@ -331,7 +331,7 @@ func TestSubnetNoOverlap(t *testing.T) {
 	})
 }
 
-// ─── BootArgComponent ─────────────────────────────────────────────────────────
+// --- BootArgComponent ---
 func TestBootArgComponent(t *testing.T) {
 	assertNoError(t, BootArgComponent("hello", "arg"))
 	assertNoError(t, BootArgComponent("", "arg")) // empty is ok
@@ -346,7 +346,7 @@ func TestBootArgComponent(t *testing.T) {
 	assertCode(t, err, errs.CodeValidationFailed)
 }
 
-// ─── SSHUsername ──────────────────────────────────────────────────────────────
+// --- SSHUsername ---
 func TestSSHUsername(t *testing.T) {
 	assertNoError(t, SSHUsername("user"))
 	assertNoError(t, SSHUsername("root"))
@@ -363,7 +363,7 @@ func TestSSHUsername(t *testing.T) {
 	assertCode(t, err, errs.CodeValidationFailed)
 }
 
-// ─── BootArgs ─────────────────────────────────────────────────────────────────
+// --- BootArgs ---
 func TestBootArgs(t *testing.T) {
 	t.Run("missing_root_uuid_and_guest_ip", func(t *testing.T) {
 		errs := BootArgs("", "", "")
@@ -387,7 +387,7 @@ func TestBootArgs(t *testing.T) {
 	})
 }
 
-// ─── ParsePortRange ───────────────────────────────────────────────────────────
+// --- ParsePortRange ---
 func TestParsePortRange(t *testing.T) {
 	got := ParsePortRange("32768,60999")
 	assert.Equal(t, [2]int{32768, 60999}, got)
@@ -402,7 +402,7 @@ func TestParsePortRange(t *testing.T) {
 	assert.Equal(t, infra.DefaultIPLocalPortRange, got)
 }
 
-// ─── IsDigits ─────────────────────────────────────────────────────────────────
+// --- IsDigits ---
 func TestIsDigits(t *testing.T) {
 	assert.True(t, IsDigits("12345"))
 	assert.True(t, IsDigits("0"))
@@ -411,7 +411,7 @@ func TestIsDigits(t *testing.T) {
 	assert.False(t, IsDigits("12 34"))
 }
 
-// ─── networkRange / ipCmp / cidrsOverlap ────────────────────────────────────
+// --- networkRange / ipCmp / cidrsOverlap ---
 // Rationale: Internal helpers for subnet overlap detection. Must correctly
 // compute range boundaries and compare CIDR pairs.
 

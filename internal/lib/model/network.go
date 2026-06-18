@@ -2,7 +2,7 @@ package model
 
 import "fmt"
 
-// ── Firewall enums ──
+// --- Firewall enums ---
 
 // FirewallBackendType selects the firewall implementation.
 type FirewallBackendType string
@@ -75,9 +75,9 @@ const (
 // FirewallPortAny is the sentinel value meaning "any port".
 const FirewallPortAny = 0
 
-// ── Network ──
+// --- Network ---
 
-// Network matches Python's NetworkItem dataclass exactly.
+// Network represents a VM network.
 type Network struct {
 	ID           string  `json:"id"                     db:"id"`
 	Name         string  `json:"name"                   db:"name"`
@@ -99,9 +99,9 @@ type Network struct {
 	VMs           []*VM               `json:"vms,omitempty"`
 }
 
-// ── NetworkLeaseItem ──
+// --- NetworkLeaseItem ---
 
-// NetworkLeaseItem matches Python's NetworkLeaseItem dataclass.
+// NetworkLeaseItem represents an IP lease.
 type NetworkLeaseItem struct {
 	NetworkID string  `json:"network_id"           db:"network_id"`
 	IPv4      string  `json:"ipv4"                 db:"ipv4"`
@@ -111,9 +111,9 @@ type NetworkLeaseItem struct {
 	ExpiresAt *string `json:"expires_at,omitempty" db:"expires_at"`
 }
 
-// ── FirewallRule ──
+// --- FirewallRule ---
 
-// FirewallRule matches Python's FirewallRule dataclass.
+// FirewallRule represents a firewall rule.
 type FirewallRule struct {
 	TableName    FirewallTable    `json:"table_name"    db:"table_name"`
 	ChainName    FirewallChain    `json:"chain_name"    db:"chain_name"`
@@ -190,9 +190,9 @@ func NewTapForwardRules(tap, bridge, networkID, subnet string) []FirewallRule {
 	return []FirewallRule{fwdBridgeToTap, fwdTapToBridge}
 }
 
-// ── FirewallRuleResult ──
+// --- FirewallRuleResult ---
 
-// FirewallRuleResult matches Python's FirewallRuleResult.
+// FirewallRuleResult holds the result of a rule operation.
 type FirewallRuleResult struct {
 	Success         bool          `json:"success"`
 	Rule            *FirewallRule `json:"rule,omitempty"`

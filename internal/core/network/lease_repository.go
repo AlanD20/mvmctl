@@ -7,7 +7,6 @@ import (
 )
 
 // LeaseRepository — database operations for network IP leases.
-// Matches src/mvmctl/core/network/_repository.py: LeaseRepository
 type LeaseRepository interface {
 	Get(ctx context.Context, networkID string, ipv4 string) (*model.NetworkLeaseItem, error)
 	ListAll(ctx context.Context, networkID string) ([]*model.NetworkLeaseItem, error)

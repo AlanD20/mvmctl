@@ -7,7 +7,6 @@ import (
 )
 
 // Repository defines all database operations for volumes.
-// Matches Python's Repository exactly.
 type Repository interface {
 	// Get returns a volume by its full 64-char ID, or nil if not found.
 	Get(ctx context.Context, id string) (*model.VolumeItem, error)
@@ -19,7 +18,6 @@ type Repository interface {
 	GetByName(ctx context.Context, name string) (*model.VolumeItem, error)
 
 	// ListAll returns all volumes ordered by created_at.
-	// Matches Python's Repository.list_all().
 	ListAll(ctx context.Context) ([]*model.VolumeItem, error)
 
 	// Upsert inserts or replaces a volume record using INSERT ... ON CONFLICT(id) DO UPDATE.

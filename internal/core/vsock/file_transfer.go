@@ -1,6 +1,3 @@
-// Package vsock provides the vsock domain for guest agent communication.
-// File transfer implements a binary frame protocol for copying files
-// between the host and VM (and between VMs) over the vsock connection.
 package vsock
 
 import (
@@ -67,16 +64,16 @@ func expandSources(srcPaths []string) ([]fileEntry, error) {
 	return entries, nil
 }
 
-// ── FTCopyToVM (host → VM push) ─────────────────────────────────────────────
+// --- FTCopyToVM (host -> VM push) ---
 
 // FTCopyToVM copies files from the host to the VM using the binary frame protocol.
 // It connects to the guest agent, performs a JSON handshake, then switches to
 // binary frames to push each file.
 //
 // destPath determines the copy mode:
-//   - Trailing "/" or empty → directory mode: preserve source basename inside destPath
-//   - No trailing "/"       → file mode: use destPath as the exact destination filename.
-//     Multi-source with file mode returns an error.
+// - Trailing "/" or empty → directory mode: preserve source basename inside destPath
+// - No trailing "/"       → file mode: use destPath as the exact destination filename.
+// Multi-source with file mode returns an error.
 func (c *Client) FTCopyToVM(
 	ctx context.Context,
 	srcPaths []string,
@@ -91,7 +88,7 @@ func (c *Client) FTCopyToVM(
 	}
 	defer conn.Close()
 
-	// ── JSON handshake ──
+	// --- JSON handshake ---
 	req := execRequest{
 		ID:    "1",
 		Type:  requestTypeFileTransfer,
@@ -111,7 +108,7 @@ func (c *Client) FTCopyToVM(
 		return nil, fmt.Errorf("unexpected handshake response type: %s", resp.Type)
 	}
 
-	// ── Switch to binary frames ──
+	// --- Switch to binary frames ---
 
 	// Validate: multiple sources require explicit directory mode (trailing /).
 	if !strings.HasSuffix(destPath, "/") && len(srcPaths) > 1 {
@@ -328,13 +325,13 @@ func (c *Client) FTCopyToVM(
 	return result, nil
 }
 
-// ── FTCopyFromVM (VM → host pull) ───────────────────────────────────────────
+// --- FTCopyFromVM (VM -> host pull) ---
 
 // FTCopyFromVM copies a file from the VM to the host using the binary frame protocol.
 //
 // destPath determines the copy mode:
-//   - Trailing "/" or existing directory → directory mode: write to destPath/<source basename>
-//   - Otherwise                         → file mode: write to exact destPath
+// - Trailing "/" or existing directory → directory mode: write to destPath/<source basename>
+// - Otherwise                         → file mode: write to exact destPath
 func (c *Client) FTCopyFromVM(
 	ctx context.Context,
 	srcPath string,
@@ -349,7 +346,7 @@ func (c *Client) FTCopyFromVM(
 	}
 	defer conn.Close()
 
-	// ── JSON handshake ──
+	// --- JSON handshake ---
 	req := execRequest{
 		ID:    "1",
 		Type:  requestTypeFileTransfer,
@@ -369,7 +366,7 @@ func (c *Client) FTCopyFromVM(
 		return nil, fmt.Errorf("unexpected handshake response type: %s", resp.Type)
 	}
 
-	// ── Switch to binary frames ──
+	// --- Switch to binary frames ---
 
 	// Send PULL frame.
 	pullPayload, _ := json.Marshal(vsockagent.FtPullPayload{
@@ -406,7 +403,7 @@ func (c *Client) FTCopyFromVM(
 
 	slog.Debug("ft: pull meta", "path", meta.Path, "size", meta.Size, "mode", meta.Mode, "sha256", meta.SHA256)
 
-	// ── Determine copy mode from destination path ──
+	// --- Determine copy mode from destination path ---
 	// Directory mode: dest ends with "/" or is an existing directory.
 	// File mode:      dest has no trailing "/" and is not an existing directory.
 	destIsDir := strings.HasSuffix(destPath, "/")
@@ -540,14 +537,14 @@ receiveLoop:
 	return result, nil
 }
 
-// ── FTCopyVMToVM (VM → VM relay) ────────────────────────────────────────────
+// --- FTCopyVMToVM (VM -> VM relay) ---
 
 // FTCopyVMToVM copies a file from one VM to another via the host as a relay.
 // It connects to both VMs and relays binary frames between them.
 //
 // destPath determines the copy mode:
-//   - Trailing "/" or empty → directory mode: preserve source basename inside destPath
-//   - No trailing "/"       → file mode: use destPath as the exact destination filename
+// - Trailing "/" or empty → directory mode: preserve source basename inside destPath
+// - No trailing "/"       → file mode: use destPath as the exact destination filename
 func (c *Client) FTCopyVMToVM(
 	ctx context.Context,
 	srcPath string,
@@ -572,7 +569,7 @@ func (c *Client) FTCopyVMToVM(
 	}
 	defer dstConn.Close()
 
-	// ── JSON handshake for both ──
+	// --- JSON handshake for both ---
 	req := execRequest{ID: "1", Type: requestTypeFileTransfer, Token: c.item.Token}
 	if err := sendFrame(srcConn, req); err != nil {
 		return nil, fmt.Errorf("source handshake failed: %w", err)
@@ -591,7 +588,7 @@ func (c *Client) FTCopyVMToVM(
 		return nil, fmt.Errorf("dest handshake response failed: %w", err)
 	}
 
-	// ── Binary: send PULL to source, PUSH to dest ──
+	// --- Binary: send PULL to source, PUSH to dest ---
 
 	// Send PULL to source.
 	pullPayload, _ := json.Marshal(vsockagent.FtPullPayload{Path: srcPath, Overwrite: overwrite})

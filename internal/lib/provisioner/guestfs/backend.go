@@ -40,9 +40,7 @@ func NewGuestfsBackend(rootfsPath string, rootUID, rootGID, userUID, userGID int
 	}
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Builder methods — queue operations
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Builder methods -- queue operations ---
 
 func (b *GuestfsBackend) Resize(ctx context.Context, targetSizeBytes int64) error {
 	b.targetSize = targetSizeBytes
@@ -107,9 +105,7 @@ func (b *GuestfsBackend) InjectVsockAgent(_ context.Context, agentBinary []byte,
 	return nil
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Execution
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Execution ---
 
 // Run converts builder state to ProvisioningConfig and delegates to RunDeferred.
 func (b *GuestfsBackend) Run(ctx context.Context) error {
@@ -149,9 +145,7 @@ func (b *GuestfsBackend) Run(ctx context.Context) error {
 	return RunDeferred(ctx, cfg)
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Other Backend interface methods
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Other Backend interface methods ---
 
 // DetectOS reads /etc/os-release via guestfish to identify the OS.
 func (b *GuestfsBackend) DetectOS(ctx context.Context) (string, error) {

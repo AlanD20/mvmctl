@@ -18,11 +18,11 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Constants ──
+// --- Constants ---
 
 const envStateSchemaVersion = "1.0"
 
-// ── Apply ──
+// --- Apply ---
 
 // Apply reads a YAML spec file, resolves it into a DAG of provisioning
 // steps, and executes them in topological order. The result is persisted as
@@ -124,7 +124,7 @@ func Apply(
 	return nil
 }
 
-// ── Destroy ──
+// --- Destroy ---
 
 // Destroy tears down all resources created by a previous env apply.
 // The identifier can be either a workflow ID (short hash) or a path to
@@ -257,7 +257,7 @@ func Destroy(
 	return nil
 }
 
-// ── List ──
+// --- List ---
 
 // ListSummary is a summary of a saved workflow.
 type ListSummary struct {
@@ -312,7 +312,7 @@ func List(ctx context.Context) ([]ListSummary, error) {
 	return summaries, nil
 }
 
-// ── Diff ──
+// --- Diff ---
 
 // DiffResult holds the result of comparing a spec against a saved workflow state.
 type DiffResult struct {

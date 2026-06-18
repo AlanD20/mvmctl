@@ -24,7 +24,6 @@ func (c *Controller) Get() *model.Network {
 }
 
 // SetDefault sets this network as the default.
-// Matches Python: calls self._repo.set_default(self._network.id)
 func (c *Controller) SetDefault(ctx context.Context) error {
 	if c.network == nil {
 		return errs.NotFound(errs.CodeNetworkNotFound, "no network entity loaded")

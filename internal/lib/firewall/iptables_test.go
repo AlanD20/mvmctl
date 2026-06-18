@@ -10,14 +10,14 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // iptablesBaseArgs returns the fixed prefix for every buildIptablesArgs call.
 func iptablesBaseArgs(action RuleAction, table model.FirewallTable, chain model.FirewallChain) []string {
 	return []string{"iptables", "-t", string(table), string(action), string(chain)}
 }
 
-// ─── buildComment ──────────────────────────────────────────────────────────────
+// --- buildComment ---
 // Rationale: buildComment generates iptables comment tags used to identify and
 // match rules during deletion and orphan detection. Incorrect format or truncation
 // would cause rule deletion to silently fail or orphan rules to go undetected.
@@ -85,7 +85,7 @@ func TestBuildComment(t *testing.T) {
 	}
 }
 
-// ─── buildIptablesArgs ─────────────────────────────────────────────────────────
+// --- buildIptablesArgs ---
 // Rationale: buildIptablesArgs generates the correct iptables command-line
 // arguments for check, append, and delete operations. Wrong arguments cause
 // iptables to silently fail or modify the wrong rule.
@@ -112,7 +112,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 		xtcomment bool
 		appendFn  func(base []string) []string // appends to base args
 	}{
-		// ── Actions ──
+		// --- Actions ---
 		"action_append": {
 			action:   ActionAppend,
 			appendFn: func(b []string) []string { return append(b, "-j", "ACCEPT") },
@@ -126,7 +126,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 			appendFn: func(b []string) []string { return append(b, "-j", "ACCEPT") },
 		},
 
-		// ── Protocol variations ──
+		// --- Protocol variations ---
 		"protocol_tcp": {
 			modify: func(r *model.FirewallRule) { r.Protocol = model.FirewallProtocolTCP },
 			action: ActionAppend,
@@ -141,7 +141,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 				return append(b, "-p", "udp", "-j", "ACCEPT")
 			},
 		},
-		// ── Boundary: custom protocol string (not ALL/TCP/UDP) ──
+		// --- Boundary: custom protocol string (not ALL/TCP/UDP) ---
 		"protocol_custom_string": {
 			modify: func(r *model.FirewallRule) { r.Protocol = model.FirewallProtocol("sctp") },
 			action: ActionAppend,
@@ -150,7 +150,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 			},
 		},
 
-		// ── Source / Destination ──
+		// --- Source / Destination ---
 		"source_specific": {
 			modify: func(r *model.FirewallRule) { r.Source = "10.0.0.0/24" },
 			action: ActionAppend,
@@ -166,7 +166,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 			},
 		},
 
-		// ── Interface variations ──
+		// --- Interface variations ---
 		"in_interface_specific": {
 			modify: func(r *model.FirewallRule) { r.InInterface = "eth0" },
 			action: ActionAppend,
@@ -182,7 +182,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 			},
 		},
 
-		// ── Port variations ──
+		// --- Port variations ---
 		"source_port_specific": {
 			modify: func(r *model.FirewallRule) {
 				r.Protocol = model.FirewallProtocolTCP
@@ -204,7 +204,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 			},
 		},
 
-		// ── Target variations ──
+		// --- Target variations ---
 		"target_drop": {
 			modify:   func(r *model.FirewallRule) { r.Target = model.FirewallTargetDrop },
 			action:   ActionAppend,
@@ -216,7 +216,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 			appendFn: func(b []string) []string { return append(b, "-j", "MASQUERADE") },
 		},
 
-		// ── Combine all fields ──
+		// --- Combine all fields ---
 		"all_fields_set": {
 			modify: func(r *model.FirewallRule) {
 				r.Protocol = model.FirewallProtocolTCP
@@ -263,7 +263,7 @@ func TestBuildIptablesArgs(t *testing.T) {
 	}
 }
 
-// ─── buildIptablesArgs — comment variations ────────────────────────────────────
+// --- buildIptablesArgs -- comment variations ---
 // Rationale: Comment inclusion depends on both rule.CommentTag and the tracker's
 // xtcommentAvailable flag. Wrong comment handling causes orphan detection to
 // break or deletion to fail by argument mismatch.
@@ -327,7 +327,7 @@ func TestBuildIptablesArgs_comments(t *testing.T) {
 	}
 }
 
-// ─── buildRestoreLine ──────────────────────────────────────────────────────────
+// --- buildRestoreLine ---
 // Rationale: buildRestoreLine produces the space-joined iptables-restore line
 // used in batch mode. Mismatched format causes iptables-restore to reject the
 // entire input and silently drop ALL rules.
@@ -453,7 +453,7 @@ func TestBuildRestoreLine(t *testing.T) {
 	}
 }
 
-// ─── buildRestoreInput ─────────────────────────────────────────────────────────
+// --- buildRestoreInput ---
 // Rationale: buildRestoreInput assembles the complete iptables-restore input for
 // batch operations. Filter tables get conntrack rules; nat tables must NOT get
 // conntrack rules. Missing or extra conntrack rules break production traffic.

@@ -143,7 +143,7 @@ Examples:
 			if len(args) > 0 {
 				selector := args[0]
 				if strings.Contains(selector, ":") {
-					// Python uses rsplit(":", maxsplit=1) — split from the RIGHT
+					// Split from the right (last colon) so "a:b:c" → type="a:b", version="c"
 					// so "a:b:c" → type="a:b", version="c"
 					idx := strings.LastIndex(selector, ":")
 					effectiveType = selector[:idx]
@@ -168,7 +168,7 @@ Examples:
 				}
 			}
 
-			// jobs flag: only pass if explicitly set (matches Python's None default)
+			// jobs flag: only pass if explicitly set
 			jobsArg := 0
 			if cmd.Flags().Changed("jobs") {
 				jobsArg = jobs
@@ -177,7 +177,7 @@ Examples:
 			prog := common.NewProgress()
 			prog.Start("Pulling kernel...")
 
-			// Build KernelPullInput matching Python's KernelPullInput dataclass
+			// Build KernelPullInput
 			featureStr := strings.Join(featureList, ",")
 			kernelInput := inputs.KernelPullInput{
 				KernelType:   effectiveType,
@@ -348,7 +348,7 @@ Examples:
 				return fmt.Errorf("source file not found: %s", path)
 			}
 
-			// Build KernelImportInput matching Python's KernelImportInput dataclass
+			// Build KernelImportInput
 			var versionPtr *string
 			if version != "" {
 				v := version

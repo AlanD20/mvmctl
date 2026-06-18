@@ -19,10 +19,9 @@ func NewRepository(db *sqlx.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
-// Matches Python's "SELECT * FROM vm_instances" exactly.
 const vmBaseQuery = "SELECT * FROM vm_instances"
 
-// ── Basic CRUD ──
+// --- Basic CRUD ---
 
 func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.VM, error) {
 	var vm model.VM
@@ -76,7 +75,7 @@ func (r *sqliteRepo) NamesExist(ctx context.Context, names []string) ([]string, 
 	return existingNames, nil
 }
 
-// ── Lookups ──
+// --- Lookups ---
 
 func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.VM, error) {
 	var rows []*model.VM
@@ -86,7 +85,7 @@ func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.
 	return rows, nil
 }
 
-// ── Counting ──
+// --- Counting ---
 
 func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 	var c int
@@ -276,11 +275,10 @@ func (r *sqliteRepo) ListExcludingStatuses(ctx context.Context, excluded ...stri
 	return rows, nil
 }
 
-// ── Mutations ──
+// --- Mutations ---
 
 func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VM) error {
 
-	// Python's exact UPSERT query with ALL columns and ON CONFLICT DO UPDATE
 	var err error
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO vm_instances (
@@ -380,7 +378,6 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VM) error {
 }
 
 func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.VMStatus) error {
-	// Python: "UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
 		"UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -391,7 +388,6 @@ func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.V
 }
 
 func (r *sqliteRepo) UpdatePID(ctx context.Context, id string, pid *int) error {
-	// Python: "UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
 		"UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -402,7 +398,6 @@ func (r *sqliteRepo) UpdatePID(ctx context.Context, id string, pid *int) error {
 }
 
 func (r *sqliteRepo) UpdateProcessInfo(ctx context.Context, id string, pid *int, processStartTime *int64) error {
-	// Python: "UPDATE vm_instances SET pid = ?, process_start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
 		"UPDATE vm_instances SET pid = ?, process_start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -414,7 +409,6 @@ func (r *sqliteRepo) UpdateProcessInfo(ctx context.Context, id string, pid *int,
 }
 
 func (r *sqliteRepo) UpdateExitCode(ctx context.Context, id string, exitCode int) error {
-	// Python: "UPDATE vm_instances SET exit_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
 		"UPDATE vm_instances SET exit_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -424,7 +418,7 @@ func (r *sqliteRepo) UpdateExitCode(ctx context.Context, id string, exitCode int
 	return err
 }
 
-// ── Deletion ──
+// --- Deletion ---
 
 func (r *sqliteRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM vm_instances WHERE id = ?", id)

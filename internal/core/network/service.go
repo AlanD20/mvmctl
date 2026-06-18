@@ -15,7 +15,6 @@ import (
 )
 
 // Service manages network interfaces, bridges, TAP devices, and NAT/firewall rules.
-// Matches src/mvmctl/core/network/_service.py: Service
 type Service struct {
 	repo            Repository
 	firewallTracker *firewall.FirewallTracker
@@ -42,10 +41,7 @@ func (s *Service) FirewallTracker() *firewall.FirewallTracker {
 }
 
 // WithBatch runs a function inside a firewall batch context, flushing
-// all queued rule operations atomically on return. This matches Python's:
-// with self._tracker.batch():
-//
-//	...
+// all queued rule operations atomically on return.
 func (s *Service) WithBatch(ctx context.Context, fn func()) {
 	if s.firewallTracker == nil {
 		fn()
@@ -54,7 +50,7 @@ func (s *Service) WithBatch(ctx context.Context, fn func()) {
 	s.firewallTracker.WithBatch(ctx, fn)
 }
 
-// ── List ──
+// --- List ---
 
 func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.Network, error) {
 	networks, err := s.repo.ListAll(ctx)
@@ -81,7 +77,7 @@ func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.Network, e
 	return networks, nil
 }
 
-// ── Firewall chain management ──
+// --- Firewall chain management ---
 
 func (s *Service) EnsureMVMChains(ctx context.Context) error {
 	if s.firewallTracker != nil {
@@ -105,7 +101,7 @@ func (s *Service) Teardown(ctx context.Context) error {
 	return nil
 }
 
-// ── Bridge management ──
+// --- Bridge management ---
 
 func (s *Service) EnsureBridge(ctx context.Context, bridge, bridgeAddress string) error {
 	if libnet.DefaultNetOps.BridgeExists(ctx, bridge) {
@@ -148,7 +144,7 @@ func (s *Service) RemoveBridge(ctx context.Context, bridge string, networkID str
 	return nil
 }
 
-// ── NAT ──
+// --- NAT ---
 
 func (s *Service) EnsureNAT(
 	ctx context.Context,
@@ -250,7 +246,6 @@ func (s *Service) RemoveNAT(
 	effectiveGateways := natGateways
 	effectiveSubnet := subnet
 
-	// Matches Python: tries resolver.by_name(bridge), catching ALL exceptions silently
 	if effectiveGateways == nil || effectiveSubnet == "" {
 		resolver := NewResolver(s.repo, nil)
 		network, err := resolver.ByName(ctx, bridge)
@@ -283,7 +278,7 @@ func (s *Service) RemoveNAT(
 		)
 	}
 
-	// Check for attached TAPs — matches Python's NetworkError
+	// Check for attached TAPs
 	attachedTaps := libnet.DefaultNetOps.GetBridgeTaps(ctx, bridge)
 	if len(attachedTaps) > 0 {
 		if !force {
@@ -354,7 +349,7 @@ func (s *Service) RemoveNAT(
 		})
 	}
 
-	// Batch remove all rules (non-fatal on failure — matches Python's behavior)
+	// Batch remove all rules (non-fatal on failure)
 	if s.firewallTracker != nil {
 		fwRules := make([]model.FirewallRule, len(rulesToRemove))
 		for i := range rulesToRemove {
@@ -376,7 +371,7 @@ func (s *Service) RemoveNAT(
 	return nil
 }
 
-// ── TAP management ──
+// --- TAP management ---
 
 // EnsureTapDevice creates or reconciles a TAP device and attaches it to the bridge.
 // No firewall rules are added — callers that batch firewall rules should use
@@ -477,10 +472,10 @@ func (s *Service) RemoveTap(ctx context.Context, tap, bridge string, networkID s
 	return nil
 }
 
-// ── model.Network removal ──
+// --- model.Network removal ---
 
 func (s *Service) Remove(ctx context.Context, network *model.Network, force bool) error {
-	// 1. Tear down NAT — only catch NetworkError, matching Python's behavior
+	// 1. Tear down NAT — only catch NetworkError
 	if network.NATEnabled {
 		if err := s.RemoveNAT(
 			ctx,
@@ -535,14 +530,14 @@ func (s *Service) RemoveMany(ctx context.Context, networks []*model.Network, for
 	return nil
 }
 
-// ── Sync iptables rules ──
-// Matches src/mvmctl/core/network/_service.py: Service.sync_iptables_rules() exactly.
+// --- Sync iptables rules ---
 
-// SyncIPTablesRules ensures all active DB firewall rules exist in host iptables for the given network.
-// Returns counts of added, verified, and orphaned rules matching Python's behavior:
-//   - added: rules that were created (command_executed was not None)
-//   - verified: rules that already existed (command_executed is None)
-//   - orphaned: host iptables rules referencing the network but absent from the DB
+// SyncIPTablesRules ensures all active DB firewall rules exist in host iptables
+// for the given network.
+// Returns counts of added, verified, and orphaned rules:
+// - added: rules that were created (command_executed was not None)
+// - verified: rules that already existed (command_executed is None)
+// - orphaned: host iptables rules referencing the network but absent from the DB
 func (s *Service) SyncIPTablesRules(ctx context.Context, network *model.Network) (*SyncResult, error) {
 	// 1. Get active DB rules for the network through the tracker.
 	var dbRules []*model.FirewallRule
@@ -558,15 +553,11 @@ func (s *Service) SyncIPTablesRules(ctx context.Context, network *model.Network)
 	verified := 0
 
 	// 2. Use batch mode to queue ensure_rule calls and flush atomically.
-	//    Matches Python: with self._tracker.batch():
-	//                       for rule in db_rules: self._tracker.ensure_rule(rule)
-	//    Python does NOT pass a context parameter to ensure_rule.
 	if s.firewallTracker != nil && len(dbRules) > 0 {
 		s.WithBatch(ctx, func() {
 			for _, rule := range dbRules {
 				result := s.firewallTracker.EnsureRule(ctx, *rule, "")
 				if result.Success {
-					// Python: if result.command_executed is None → verified, else → added
 					if result.CommandExecuted == nil {
 						verified++
 					} else {
@@ -590,9 +581,7 @@ func (s *Service) SyncIPTablesRules(ctx context.Context, network *model.Network)
 	}, nil
 }
 
-// ── Orphan cleanup ──
-// Matches Python: Service.cleanup_orphaned_bridges(db_networks) exactly.
-// Python: @staticmethod cleanup_orphaned_bridges(db_networks: list[NetworkItem]) -> int
+// --- Orphan cleanup ---
 
 func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*model.Network) int {
 	dbBridgeNames := make(map[string]bool)
@@ -627,8 +616,7 @@ func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*mode
 	return count
 }
 
-// ── Remove stale interfaces ──
-// Matches Python: Service.remove_stale_interfaces()
+// --- Remove stale interfaces ---
 
 func (s *Service) RemoveStaleInterfaces(ctx context.Context, prefix string) []string {
 	var summary []string
@@ -658,8 +646,7 @@ func (s *Service) RemoveRawBridge(ctx context.Context, bridge string) error {
 	return libnet.DefaultNetOps.RemoveRawBridge(ctx, bridge)
 }
 
-// ── nftables availability check ──
-// Matches Python Service.check_nftables_available()
+// --- nftables availability check ---
 
 func (s *Service) CheckNFTablesAvailable(ctx context.Context) bool {
 	result, err := system.DefaultRunner.Run(ctx, []string{"nft", "--version"},
@@ -715,7 +702,6 @@ func (s *Service) EnrichWithLeases(ctx context.Context, networks []*model.Networ
 }
 
 // isNetworkError checks if an error is a NetworkError-type error.
-// Matches Python's "except NetworkError" which catches all network-related failures.
 func isNetworkError(err error) bool {
 	if err == nil {
 		return false

@@ -80,7 +80,7 @@ func NewVMCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── ls (list all VMs) ────────────────────────────────────────────────────────
+// --- ls (list all VMs) ---
 
 func newVMListCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
@@ -117,7 +117,7 @@ func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jso
 	return nil
 }
 
-// ─── ps (list running VMs) ────────────────────────────────────────────────────
+// --- ps (list running VMs) ---
 
 func newVMpsCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
@@ -135,7 +135,7 @@ func newVMpsCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 }
 
 func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonOutput bool) error {
-	// Server-side filtering matching Python's list_all(status=[...])
+	// Server-side filtering by status
 	vms := vmAPI.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
 
 	if jsonOutput {
@@ -157,7 +157,7 @@ func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonO
 	return nil
 }
 
-// ─── create ───────────────────────────────────────────────────────────────────
+// --- create ---
 
 func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	var (
@@ -403,7 +403,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── rm (remove) ─────────────────────────────────────────────────────────────
+// --- rm (remove) ---
 
 func newVMRemoveCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
@@ -457,7 +457,7 @@ func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, forc
 	return nil
 }
 
-// ─── start ────────────────────────────────────────────────────────────────────
+// --- start ---
 
 func newVMStartCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -485,7 +485,7 @@ func newVMStartCmd(vmAPI api.VMAPI) *cobra.Command {
 	}
 }
 
-// ─── stop ─────────────────────────────────────────────────────────────────────
+// --- stop ---
 
 func newVMStopCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
@@ -518,7 +518,7 @@ func newVMStopCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── reboot ───────────────────────────────────────────────────────────────────
+// --- reboot ---
 
 func newVMRebootCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
@@ -551,7 +551,7 @@ func newVMRebootCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── pause ────────────────────────────────────────────────────────────────────
+// --- pause ---
 
 func newVMPauseCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -579,7 +579,7 @@ func newVMPauseCmd(vmAPI api.VMAPI) *cobra.Command {
 	}
 }
 
-// ─── resume ───────────────────────────────────────────────────────────────────
+// --- resume ---
 
 func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -607,7 +607,7 @@ func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	}
 }
 
-// ─── snapshot ─────────────────────────────────────────────────────────────────
+// --- snapshot ---
 
 func newVMSnapshotCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd := &cobra.Command{
@@ -637,7 +637,7 @@ func newVMSnapshotCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── load (from snapshot) ─────────────────────────────────────────────────────
+// --- load (from snapshot) ---
 
 func newVMLoadCmd(vmAPI api.VMAPI) *cobra.Command {
 	var resume bool
@@ -671,7 +671,6 @@ Flags:
 				return err
 			}
 
-			// Match Python exactly: success message with no extra detail, no post-check.
 			common.Cli.Success(fmt.Sprintf("Snapshot loaded: %s", id))
 			return nil
 		},
@@ -681,7 +680,7 @@ Flags:
 	return cmd
 }
 
-// ─── inspect ──────────────────────────────────────────────────────────────────
+// --- inspect ---
 
 func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 	var jsonOutput bool
@@ -718,7 +717,7 @@ func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── attach-volume ────────────────────────────────────────────────────────────
+// --- attach-volume ---
 
 func newVMAttachVolumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -749,7 +748,7 @@ Arguments:
 	}
 }
 
-// ─── detach-volume ────────────────────────────────────────────────────────────
+// --- detach-volume ---
 
 func newVMDetachVolumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -780,7 +779,7 @@ Arguments:
 	}
 }
 
-// ─── exec ────────────────────────────────────────────────────────────────────
+// --- exec ---
 
 func newVMExecCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd := &cobra.Command{

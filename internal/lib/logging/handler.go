@@ -20,7 +20,7 @@ type textHandler struct {
 	writer io.Writer
 	level  slog.Leveler
 	attrs  []slog.Attr
-	mu     sync.Mutex
+	mu     sync.Mutex // guards writes to the underlying writer
 }
 
 func (h *textHandler) Enabled(_ context.Context, level slog.Level) bool {
@@ -46,7 +46,7 @@ func (h *textHandler) Handle(_ context.Context, r slog.Record) error {
 	}
 
 	level := r.Level.String()
-	// slog uses "WARN" but Python uses "WARNING" — normalize
+	// Normalize "WARN" to "WARNING" for consistency.
 	if level == "WARN" {
 		level = "WARNING"
 	}

@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── ParseVMPath ─────────────────────────────────────────────────────────────
+// --- ParseVMPath ---
 // Rationale: ParseVMPath splits "vm:path" references used by CPRequest
 // for scp-style copy targets. A bug here would misroute file copies
 // to the wrong VM or silently treat VM-less paths as local.
@@ -60,7 +60,7 @@ func TestParseVMPath(t *testing.T) {
 	}
 }
 
-// ─── resolveDisabledDetectors ────────────────────────────────────────────────
+// --- resolveDisabledDetectors ---
 // Rationale: resolveDisabledDetectors translates CLI detector names to
 // internal codes or rejects unknown names. A bug here would allow
 // typos to silently pass through, or disable the wrong detector.
@@ -132,7 +132,7 @@ func sortedValues(m map[string]string) []string {
 	return out
 }
 
-// ─── parseKernelFilename ─────────────────────────────────────────────────────
+// --- parseKernelFilename ---
 // Rationale: parseKernelFilename extracts version and architecture from
 // kernel filenames. Bugs here would mis-identify kernel versions,
 // causing version resolution to fall back to "unknown".
@@ -172,7 +172,7 @@ func TestParseKernelFilename(t *testing.T) {
 	}
 }
 
-// ─── resolveLogType ──────────────────────────────────────────────────────────
+// --- resolveLogType ---
 // Rationale: resolveLogType maps the OsLog boolean to "os" or "boot"
 // log type strings. A bug would show wrong logs (serial vs guest OS).
 
@@ -197,7 +197,7 @@ func TestResolveLogType(t *testing.T) {
 	}
 }
 
-// ─── KeyCreateRequest.Resolve ────────────────────────────────────────────────
+// --- KeyCreateRequest.Resolve ---
 // Rationale: KeyCreateRequest.Resolve validates key names and
 // algorithms before creating SSH keys. A bug here would let invalid
 // key names through, causing filesystem or SSH failures.
@@ -284,7 +284,7 @@ func TestKeyCreateRequest_Resolve(t *testing.T) {
 
 func intPtr(v int) *int { return &v }
 
-// ─── BinaryPullRequest.ensureValidate ────────────────────────────────────────
+// --- BinaryPullRequest.ensureValidate ---
 // Rationale: ensureValidate rejects unsupported binary types and allows
 // git-ref builds to skip version checks. A bug here could let invalid
 // binary types through and cause download/build failures.
@@ -337,7 +337,7 @@ func TestBinaryPullRequest_ensureValidate(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-// ─── VMCreateRequest.ensureValidate (VCPU range) ─────────────────────────────
+// --- VMCreateRequest.ensureValidate (VCPU range) ---
 // Rationale: VCPU range validation prevents creating VMs with
 // impossible or wasteful vCPU counts. A bug here could allow 0 or
 // 999 vCPUs, causing Firecracker startup failure or resource exhaustion.
@@ -380,7 +380,7 @@ func TestVMCreateEnsureValidate_VCPURange(t *testing.T) {
 	})
 }
 
-// ─── VMCreateRequest.ensureValidate (memory range) ───────────────────────────
+// --- VMCreateRequest.ensureValidate (memory range) ---
 // Rationale: Memory range validation prevents OOM or insufficient-memory
 // VM configurations. A bug could let 0 MiB or 99999 MiB through.
 
@@ -423,7 +423,7 @@ func TestVMCreateEnsureValidate_MemoryRange(t *testing.T) {
 	})
 }
 
-// ─── NetworkCreateRequest.ensureValidate (name validation) ───────────────────
+// --- NetworkCreateRequest.ensureValidate (name validat ---
 // Rationale: Network name validation prevents invalid names that would
 // break bridge creation or confuse users. A bug would allow dots or
 // empty names through.
@@ -470,7 +470,7 @@ func TestNetworkCreateEnsureValidate_Name(t *testing.T) {
 	})
 }
 
-// ─── NetworkCreateRequest.ensureValidate (subnet validation) ─────────────────
+// --- NetworkCreateRequest.ensureValidate (subnet valid ---
 // Rationale: Subnet validation prevents creating networks with invalid
 // CIDR notation. A bug here could allow malformed subnets through.
 
@@ -516,7 +516,7 @@ func TestNetworkCreateEnsureValidate_Subnet(t *testing.T) {
 	})
 }
 
-// ─── NetworkCreateRequest.ensureValidate (gateway validation) ────────────────
+// --- NetworkCreateRequest.ensureValidate (gateway vali ---
 // Rationale: Gateway validation ensures the gateway IP is within the
 // subnet and is a valid private address. A bug could produce a
 // non-routable or out-of-subnet gateway.

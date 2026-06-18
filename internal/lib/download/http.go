@@ -32,21 +32,15 @@ type RequestOpts struct {
 	CacheTTLSeconds int
 }
 
-// ── HttpDiskCache (file-based HTTP response cache) ──────────────────────────
+// --- HttpDiskCache (file-based HTTP response cache) ---
 
 // DefaultCacheTTLSeconds is the default TTL for cached HTTP responses (300s).
-// Mirrors Python's DEFAULT_CACHE_TTL_SECONDS: int = 300.
 const DefaultCacheTTLSeconds = 300
 
 // DefaultCacheDir is the subdirectory within the temp dir for HTTP cache files.
-// Mirrors Python's DEFAULT_CACHE_DIR = "http".
 const DefaultCacheDir = "http"
 
 // HttpDiskCache provides file-based caching for small remote HTTP resources.
-// Mirrors Python's HttpCache class in utils/http.py.
-//
-// Python uses all @staticmethod methods with no instance state. Go mirrors
-// this with a stateless struct and separate functions.
 type HttpDiskCache struct{}
 
 // NewHttpDiskCache creates a new HttpDiskCache. No state is maintained.
@@ -111,11 +105,10 @@ func (c *HttpDiskCache) Write(data []byte, cachePath string) error {
 	return nil
 }
 
-// ── User-Agent ────────────────────────────────────────────────────────────
+// --- User-Agent ---
 
 // UserAgent is the HTTP User-Agent header value.
 // Defaults to "mvmctl/dev". Set via SetUserAgent at startup.
-// Mirrors Python's HTTP_USER_AGENT constant.
 var UserAgent = infra.DefaultUserAgent
 
 // SetUserAgent sets the User-Agent header value.
@@ -124,7 +117,7 @@ func SetUserAgent(version string) {
 	UserAgent = fmt.Sprintf("%s/%s", infra.CLIName, version)
 }
 
-// HttpError represents an HTTP-level error (matching Python's URLError/HTTPError).
+// HttpError represents an HTTP-level error.
 type HttpError struct {
 	StatusCode int
 	URL        string
@@ -135,16 +128,12 @@ func (e HttpError) Error() string {
 }
 
 // ProgressFunc is called per-chunk during download with the raw chunk bytes.
-// Mirrors Python's Callable[[bytes], None].
 type ProgressFunc func(chunk []byte)
 
-// ── Downloader ─────────────────────────────────────────────────────────────
+// --- Downloader ---
 
 // Downloader handles HTTP downloads with retry, mirror support, and checksum
-// verification. Mirrors Python's HttpDownload class in utils/http.py.
-//
-// Python uses all @staticmethod methods with shared module-level opener.
-// Go uses a struct to bundle configuration, matching the same semantics.
+// verification.
 type Downloader struct {
 	client  *http.Client
 	retries int
@@ -190,18 +179,18 @@ func (d *Downloader) newRequest(ctx context.Context, method, urlStr string, body
 	return req, nil
 }
 
-// ── Pure transport: with_download (no checksum) ───────────────────────────
+// --- Pure transport: with_download (no checksum) ---
 
 // WithDownload downloads a remote file to dest with optional progress callback.
-// This is the **pure transport** entry point: it handles only HTTP mechanics,
+// This is the pure transport entry point: it handles only HTTP mechanics,
 // retries, and atomic placement. No checksum logic or progress-bar rendering
-// lives here. Mirrors Python's HttpDownload.with_download() exactly.
+// lives here.
 //
 // The file is downloaded to a temporary sibling of dest and then atomically
 // promoted with os.Rename, so readers never see a partially-written file.
 //
 // Returns the total Content-Length if the server reported one, else -1
-// (matching Python's int | None — -1 represents None).
+// (represents "unknown").
 func (d *Downloader) WithDownload(
 	ctx context.Context,
 	url, dest string,
@@ -297,8 +286,8 @@ func (d *Downloader) withDownloadOnce(
 	return totalSize, nil
 }
 
-// isRetryableError checks if an error corresponds to Python's retryable
-// exceptions tuple: (URLError, HTTPError, IOError).
+// isRetryableError checks if an error is transient and worth retrying:
+// URLError, HTTPError, IOError.
 func isRetryableError(err error) bool {
 	if err == context.Canceled || err == context.DeadlineExceeded {
 		return false
@@ -327,8 +316,8 @@ func isRetryableError(err error) bool {
 	return false
 }
 
-// withDownloadWithRetry implements the retry loop matching Python's @_with_retry decorator.
-// Retryable exceptions: (URLError, HTTPError, IOError).
+// withDownloadWithRetry implements the retry loop with exponential backoff.
+// Retryable exceptions: URLError, HTTPError, IOError.
 func (d *Downloader) withDownloadWithRetry(
 	ctx context.Context,
 	url, dest string,
@@ -370,10 +359,10 @@ func (d *Downloader) withDownloadWithRetry(
 	return -1, fmt.Errorf("download failed after %d retries: %w", d.retries, lastErr)
 }
 
-// ── Resolve mirror path (MVM_ASSET_MIRROR) ────────────────────────────────
+// --- Resolve mirror path (MVM_ASSET_MIRROR) ---
 
 // resolveMirrorPath checks if the URL's file exists in the local asset mirror.
-// Reads MVM_ASSET_MIRROR env var. Mirrors Python's HttpDownload._resolve_mirror_path().
+// Reads MVM_ASSET_MIRROR env var.
 func resolveMirrorPath(rawURL string) (string, bool) {
 	mirrorDir, ok := infra.EnvGet("ASSET_MIRROR")
 	if !ok || mirrorDir == "" {
@@ -389,7 +378,6 @@ func resolveMirrorPath(rawURL string) (string, bool) {
 }
 
 // extractFilename extracts the filename from a URL (last segment, strip query params).
-// Mirrors Python: url.rsplit("/", 1)[-1].split("?", 1)[0]
 func extractFilename(rawURL string) string {
 	if idx := strings.LastIndex(rawURL, "/"); idx >= 0 {
 		rawURL = rawURL[idx+1:]
@@ -414,14 +402,12 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// ── Orchestration: download_file ──────────────────────────────────────────
+// --- Orchestration: download_file ---
 
 // DownloadFile downloads a file with optional SHA256 verification, mirror
 // support, and missing-checksum logic. This is the orchestration entry point:
 // it delegates HTTP transfer to WithDownload and handles checksum verification
 // and user interaction for missing checksums.
-//
-// Mirrors Python's HttpDownload.download_file() exactly.
 func (d *Downloader) DownloadFile(
 	ctx context.Context,
 	url, dest, expectedSHA256 string,
@@ -432,7 +418,7 @@ func (d *Downloader) DownloadFile(
 		return fmt.Errorf("create dest dir: %w", err)
 	}
 
-	// ── Local asset mirror check ──
+	// --- Local asset mirror check ---
 	mirrorPath, found := resolveMirrorPath(url)
 	if found {
 		slog.Info("Using local mirror for download", "url", url)
@@ -455,7 +441,7 @@ func (d *Downloader) DownloadFile(
 		}
 	}
 
-	// ── Handle missing checksum ──
+	// --- Handle missing checksum ---
 	if expectedSHA256 == "" {
 		if silentMissingChecksum {
 			// pass — no warnings
@@ -481,7 +467,7 @@ func (d *Downloader) DownloadFile(
 		}
 	}
 
-	// ── Setup SHA256 hashing + progress wrapping ──
+	// --- Setup SHA256 hashing + progress wrapping ---
 	sha256Hash := sha256.New()
 	downloaded := int64(0)
 	totalSizeCell := int64(-1)
@@ -503,12 +489,12 @@ func (d *Downloader) DownloadFile(
 		}
 	}
 
-	// ── Download via HTTP with retry ──
+	// --- Download via HTTP with retry ---
 	if _, err := d.WithDownload(ctx, url, dest, chunkCallback, onStart); err != nil {
 		return err
 	}
 
-	// ── SHA256 verification ──
+	// --- SHA256 verification ---
 	if expectedSHA256 != "" {
 		actualSHA256 := hex.EncodeToString(sha256Hash.Sum(nil))
 		if !strings.EqualFold(actualSHA256, expectedSHA256) {
@@ -521,7 +507,7 @@ func (d *Downloader) DownloadFile(
 		slog.Info("Checksum verified")
 	}
 
-	// ── Auto-populate the local asset mirror ──
+	// --- Auto-populate the local asset mirror ---
 	autoPopulateMirror(url, dest)
 
 	return nil
@@ -550,12 +536,9 @@ func autoPopulateMirror(url, srcPath string) {
 	slog.Info("Copied to asset mirror", "path", mirrorDest)
 }
 
-// ── GetJSON (read_json_content) ─────────────────────────────────────────
+// --- GetJSON ---
 
 // GetJSON fetches a URL, parses the response as JSON, and returns the result.
-// Mirrors Python's HttpDownload.read_json_content() which returns
-// dict[str, Any] | list[Any] — already parsed JSON.
-//
 // Returns the parsed JSON value (typically map[string]any or []any).
 // On error, returns a DomainError wrapping the underlying cause.
 func (d *Downloader) GetJSON(
@@ -628,10 +611,9 @@ func (d *Downloader) GetJSON(
 	return parsed, nil
 }
 
-// ── GetContent (read_raw_content) ─────────────────────────────────────────────
+// --- GetContent ---
 
 // GetContent fetches a URL and returns the raw response body as a string.
-// Mirrors Python's HttpDownload.read_raw_content().
 func (d *Downloader) GetContent(
 	ctx context.Context,
 	opts RequestOpts,
@@ -689,11 +671,10 @@ func (d *Downloader) GetContent(
 	return string(body), nil
 }
 
-// ── HeadSize (head_size) ─────────────────────────────────────────────────
+// --- HeadSize ---
 
 // HeadSize sends a HEAD request and returns the Content-Length.
-// Returns (0, false) when size is unavailable (matching Python's int | None).
-// Mirrors Python's HttpDownload.head_size().
+// Returns (0, false) when size is unavailable.
 func (d *Downloader) HeadSize(
 	ctx context.Context,
 	opts RequestOpts,
@@ -742,10 +723,9 @@ func (d *Downloader) HeadSize(
 	return contentLength, true
 }
 
-// ── GetBody (simple fetch) ───────────────────────────────────────────────
+// --- GetBody ---
 
 // GetBody fetches a URL and returns the raw response body as bytes.
-// Mirrors Python's HttpDownload._download() for simple cases.
 func (d *Downloader) GetBody(ctx context.Context, url string) ([]byte, error) {
 	req, err := d.newRequest(ctx, http.MethodGet, url, nil)
 	if err != nil {

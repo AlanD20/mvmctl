@@ -17,7 +17,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── calculateMinimumImageSizeMB ─────────────────────────────────────────────
+// --- calculateMinimumImageSizeMB ---
 // Rationale: calculateMinimumImageSizeMB determines the minimum rootfs size from
 // content bytes with headroom. A bug here would create filesystems too small for
 // the image or waste disk space on tiny images.
@@ -55,7 +55,7 @@ func TestCalculateMinimumImageSizeMB(t *testing.T) {
 	}
 }
 
-// ─── specFromVersion ─────────────────────────────────────────────────────────
+// --- specFromVersion ---
 // Rationale: specFromVersion constructs an ImageSpec from a resolved VersionInfo.
 // A bug here would produce incorrect image metadata (type, version, source, format)
 // used by download, extraction, and provisioning — every subsequent pipeline step.
@@ -142,7 +142,7 @@ func TestSpecFromVersion(t *testing.T) {
 	}
 }
 
-// ─── getTemplateVariables ────────────────────────────────────────────────────
+// --- getTemplateVariables ---
 // Rationale: getTemplateVariables provides the variable substitution map for
 // source URL templates. Missing or incorrect keys would cause download URL
 // resolution failures that manifest as confusing "image not found" errors.
@@ -185,7 +185,7 @@ func TestGetTemplateVariables(t *testing.T) {
 	})
 }
 
-// ─── resolveConfigName ───────────────────────────────────────────────────────
+// --- resolveConfigName ---
 // Rationale: resolveConfigName maps a type name to its human-readable display
 // name from the image type config. A bug here would show wrong or empty names
 // in CLI list output and version display.
@@ -221,7 +221,7 @@ func TestResolveConfigName(t *testing.T) {
 	}
 }
 
-// ─── isImageNotFoundError ────────────────────────────────────────────────────
+// --- isImageNotFoundError ---
 // Rationale: isImageNotFoundError controls the fallthrough chain in Resolve().
 // A false-negative (not detecting ImageNotFoundError) would propagate fatal
 // errors instead of trying the next resolution method. A false-positive
@@ -246,8 +246,7 @@ func TestIsImageNotFoundError(t *testing.T) {
 			want: false,
 		},
 		"wrapped_not_found": {
-			// isImageNotFoundError uses direct type assertion (no unwrap),
-			// matching Python's bare 'except ImageNotFoundError'.
+			// isImageNotFoundError uses direct type assertion (no unwrap).
 			err:  fmt.Errorf("wrap: %w", errs.New(errs.CodeImageNotFound, "inner")),
 			want: false,
 		},
@@ -277,7 +276,7 @@ func TestIsImageNotFoundError(t *testing.T) {
 	}
 }
 
-// ─── Skipped: copyViaSendfile, copyViaIO ─────────────────────────────────────
+// --- Skipped: copyViaSendfile, copyViaIO ---
 // Rationale: Both functions perform real filesystem I/O (os.Open, unix.Sendfile,
 // io.Copy between file descriptors). They take file paths, not io.Writer/io.Reader
 // as originally assumed. These are integration-level functions tested by system

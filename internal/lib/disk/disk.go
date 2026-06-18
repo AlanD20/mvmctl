@@ -12,7 +12,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Disk-specific constants (moved from infra/constants.go) ──
+// --- Disk-specific constants ---
 const (
 	MinRootSizeMB   = 500
 	SizeTooSmallMB  = 100
@@ -41,7 +41,7 @@ var DetectorScores = map[string]float64{
 	"size_too_small_score": -0.5,
 }
 
-// ── Size multipliers (IEC binary units) ──
+// --- Size multipliers (IEC binary units) ---
 
 var sizeMultipliers = map[string]int64{
 	"B":  1,
@@ -56,9 +56,7 @@ var sizeMultipliers = map[string]int64{
 }
 
 // output units for FormatDiskSize — built from sizeMultipliers map, excluding short forms.
-// Mirrors Python's sorted(_SIZE_MULTIPLIERS.items(), key=lambda x: x[1], reverse=True) with skip of B/KB/MB/GB/TB.
 // Initialised lazily via getFormatDiskUnits().
-// TODO: call InitFormatDiskUnits() from app/app.go explicitly
 var (
 	formatDiskUnits []struct {
 		suffix string
@@ -92,14 +90,11 @@ func getFormatDiskUnits() []struct {
 var sizePattern = regexp.MustCompile(`^(\d+(?:\.\d+)?)\s*([KMGT]?B?|[kmgt]?b?)?$`)
 
 // ParseDiskSizeToBytes parses a disk size string like "512M", "1G", "2.5GB", "1024" into bytes.
-// Matches Python's DiskUtils.parse_disk_size_to_bytes() exactly, including error messages.
 func ParseDiskSizeToBytes(s string) (int64, error) {
 	return ParseDiskSize(s)
 }
 
 // ParseDiskSize parses a disk size string into bytes.
-// Matches Python's DiskUtils.parse_disk_size_to_bytes() exactly.
-// Python raises MVMError on format errs.
 func ParseDiskSize(s string) (int64, error) {
 	s = strings.TrimSpace(s)
 	upper := strings.ToUpper(s)
@@ -165,9 +160,7 @@ func FormatDiskSize(bytesCount int64) string {
 	return fmt.Sprintf("%dB", bytesCount)
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Root partition detection
-// ══════════════════════════════════════════════════════════════════════════════
+// --- Root partition detection ---
 
 // Partition represents a detected partition.
 type Partition struct {
@@ -187,7 +180,7 @@ type PartitionDetector interface {
 	Score(partition Partition, allPartitions []Partition) float64
 }
 
-// ── TypeCodeDetector ──
+// --- TypeCodeDetector ---
 
 type TypeCodeDetector struct{}
 
@@ -241,7 +234,7 @@ func (TypeCodeDetector) Score(partition Partition, allPartitions []Partition) fl
 	return getDetectorScore("neutral_score", 0.0)
 }
 
-// ── LabelDetector ──
+// --- LabelDetector ---
 
 type LabelDetector struct{}
 
@@ -275,7 +268,7 @@ func (LabelDetector) Score(partition Partition, allPartitions []Partition) float
 	return getDetectorScore("neutral_score", 0.0)
 }
 
-// ── SizeDetector ──
+// --- SizeDetector ---
 
 type SizeDetector struct{}
 
@@ -318,7 +311,7 @@ func (SizeDetector) Score(partition Partition, allPartitions []Partition) float6
 	return getDetectorScore("neutral_score", 0.0)
 }
 
-// ── FilesystemDetector ──
+// --- FilesystemDetector ---
 
 type FilesystemDetector struct{}
 
@@ -345,7 +338,7 @@ func (FilesystemDetector) Score(partition Partition, allPartitions []Partition) 
 	return getDetectorScore("neutral_score", 0.0)
 }
 
-// ── RootPartitionDetector ──
+// --- RootPartitionDetector ---
 
 type RootPartitionDetector struct {
 	detectors []PartitionDetector
@@ -429,8 +422,8 @@ func (d *RootPartitionDetector) Detect(partitions []Partition) (int, error) {
 	return bestPartitions[0], nil
 }
 
-// partitionsToMaps converts a slice of Partition structs to the []map[string]any
-// format expected by RootPartitionDetectionError, matching Python's partition dicts.
+// partitionsToMaps converts a slice of Partition structs to []map[string]any
+// for use in error details.
 func partitionsToMaps(partitions []Partition) []map[string]any {
 	result := make([]map[string]any, len(partitions))
 	for i, p := range partitions {

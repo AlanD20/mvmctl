@@ -23,16 +23,15 @@ var dirHrefRegex = regexp.MustCompile(`href="([^"]+)/"`)
 // allHrefRegex matches any href="..." attribute in HTML.
 var allHrefRegex = regexp.MustCompile(`href="([^"]+)"`)
 
-// ── HttpDirVersionResolver ─────────────────────────────────────────────────
+// --- HttpDirVersionResolver ---
 
 // HttpDirVersionResolver resolves available versions from Apache HTML directory
-// listings or S3 bucket XML listings. Mirrors the Python class in
-// src/mvmctl/core/_shared/_http_dir_version_resolver.py.
+// listings or S3 bucket XML listings.
 //
 // Three resolver strategies:
-//   - "http-dir" — Apache HTML directory listings
-//   - "firecracker-s3" — S3 bucket XML listings
-//   - "" or nil (single-source) — single "latest" version from URL templates
+// - "http-dir" — Apache HTML directory listings
+// - "firecracker-s3" — S3 bucket XML listings
+// - "" or nil (single-source) — single "latest" version from URL templates
 type HttpDirVersionResolver struct {
 	client *http.Client
 	cache  *HttpDiskCache
@@ -50,7 +49,6 @@ func NewHttpDirVersionResolver() *HttpDirVersionResolver {
 }
 
 // resolveVersion resolves a directory name to a (version, codename) pair.
-// Mirrors Python's _resolve_version().
 func resolveVersion(
 	dirName string,
 	skipPatterns []string,
@@ -86,7 +84,6 @@ func resolveVersion(
 }
 
 // parseDirectoryListing extracts directory names from Apache HTML directory listing.
-// Mirrors Python's _parse_directory_listing().
 func parseDirectoryListing(html string) []string {
 	matches := dirHrefRegex.FindAllStringSubmatch(html, -1)
 	dirs := make([]string, 0, len(matches))
@@ -97,7 +94,6 @@ func parseDirectoryListing(html string) []string {
 }
 
 // versionSortKey returns a sort key for a dotted numeric version string.
-// Mirrors Python's _version_sort_key().
 func versionSortKey(ver string) []int {
 	parts := strings.Split(ver, ".")
 	var nums []int
@@ -112,8 +108,7 @@ func versionSortKey(ver string) []int {
 }
 
 // discoverFileFromListing fetches a directory listing HTML and finds a matching file.
-// Mirrors Python's _discover_file_from_listing().
-// Returns "" (matching Python's None) when no match is found or fetch fails.
+// Returns "" when no match is found or fetch fails.
 func (r *HttpDirVersionResolver) discoverFileFromListing(
 	ctx context.Context,
 	url, pattern, suffix string,
@@ -202,10 +197,9 @@ func (r *HttpDirVersionResolver) fetchRawContent(
 	return string(body), nil
 }
 
-// ── Resolver configuration ─────────────────────────────────────────────────
+// --- Resolver configuration ---
 
 // ResolverConfig represents a single version source configuration.
-// Mirrors the Python config dicts for HttpDirVersionResolver.
 type ResolverConfig struct {
 	Type            string          `json:"type"                            yaml:"type"`
 	Resolver        string          `json:"resolver,omitempty"              yaml:"resolver,omitempty"`
@@ -244,11 +238,9 @@ type FileDiscoveryOpt struct {
 	SHA256Suffix string `json:"sha256_suffix,omitempty" yaml:"sha256_suffix,omitempty"`
 }
 
-// ── Resolve method ─────────────────────────────────────────────────────────
+// --- Resolve method ---
 
 // Resolve fetches and parses version listings for all provided configs.
-// Mirrors Python's HttpDirVersionResolver.resolve().
-//
 // Returns a map of type name → sorted list of VersionInfo (newest first).
 // On fetch failure for a given type, returns an empty list for that type.
 func (r *HttpDirVersionResolver) Resolve(
@@ -414,7 +406,7 @@ func (r *HttpDirVersionResolver) Resolve(
 	return result
 }
 
-// ── Phase 1 helpers: http-dir ─────────────────────────────────────────────
+// --- Phase 1 helpers: http-dir ---
 
 func (r *HttpDirVersionResolver) resolveViaDirectoryListing(
 	ctx context.Context, config ResolverConfig, arch string, cacheTTLSeconds int,
@@ -676,7 +668,7 @@ func (r *HttpDirVersionResolver) resolveViaVersionDiscoveries(
 	}
 }
 
-// ── Phase 3 helper: firecracker-s3 ────────────────────────────────────────
+// --- Phase 3 helper: firecracker-s3 ---
 
 // S3ListBucketResult represents an S3 ListBucketResult XML document.
 // Uses namespace-aware XML tags matching the default namespace

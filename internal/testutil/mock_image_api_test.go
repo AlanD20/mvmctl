@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── MockImageAPI ──────────────────────────────────────────────────────────────
+// --- MockImageAPI ---
 // Rationale: MockImageAPI implements api.ImageAPI for testing. These tests verify
 // default zero-value returns and custom function routing.
 

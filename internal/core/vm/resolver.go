@@ -11,7 +11,6 @@ import (
 )
 
 // ResolveResult holds the result of resolving multiple VM identifiers.
-// Matches Python's ResolveResult which has: vms, errors, exit_code.
 type ResolveResult struct {
 	VMs      []*model.VM
 	Errors   []string
@@ -31,10 +30,9 @@ func NewResolver(repo Repository) *Resolver {
 }
 
 // ByID resolves a VM by ID prefix. Returns error if not found or ambiguous.
-// Python's by_id() only does prefix matching via find_by_prefix — it does
-// NOT try an exact match first. Go behavior must match.
+// Uses prefix matching only — does not try an exact match first.
 func (r *Resolver) ByID(ctx context.Context, vmID string) (*model.VM, error) {
-	// Only prefix matching — matches Python's behavior exactly
+	// Only prefix matching
 	matches, err := r.repo.FindByPrefix(ctx, vmID)
 	if err != nil {
 		return nil, err
@@ -47,7 +45,7 @@ func (r *Resolver) ByID(ctx context.Context, vmID string) (*model.VM, error) {
 		for i, m := range matches {
 			names[i] = m.Name
 		}
-		// Python raises VMNotFoundError for ambiguous matches too
+		// Error for ambiguous matches
 		return nil, errs.NotFound(errs.CodeVMNotFound,
 			fmt.Sprintf("ID %s matches multiple VMs: %s", vmID, strings.Join(names, ", ")))
 	}
@@ -90,13 +88,12 @@ func (r *Resolver) ByMAC(ctx context.Context, mac string) (*model.VM, error) {
 	return vm, nil
 }
 
-// ByImageID resolves VMs by image ID. Matches Python's by_image_id().
+// ByImageID resolves VMs by image ID.
 func (r *Resolver) ByImageID(ctx context.Context, imageID string) ([]*model.VM, error) {
 	return r.repo.GetByImageIDs(ctx, []string{imageID})
 }
 
 // ByImageIDBatch resolves VMs by multiple image IDs, returning a map.
-// Matches Python's by_image_id_batch().
 func (r *Resolver) ByImageIDBatch(ctx context.Context, imageIDs []string) (map[string][]*model.VM, error) {
 	vms, err := r.repo.GetByImageIDs(ctx, imageIDs)
 	if err != nil {
@@ -115,7 +112,6 @@ func (r *Resolver) ByImageIDBatch(ctx context.Context, imageIDs []string) (map[s
 }
 
 // ByNetworkIDBatch resolves VMs by multiple network IDs.
-// Matches Python's by_network_id_batch().
 func (r *Resolver) ByNetworkIDBatch(ctx context.Context, networkIDs []string) (map[string][]*model.VM, error) {
 	vms, err := r.repo.GetByNetworkIDs(ctx, networkIDs)
 	if err != nil {
@@ -134,7 +130,6 @@ func (r *Resolver) ByNetworkIDBatch(ctx context.Context, networkIDs []string) (m
 }
 
 // ByKernelIDBatch resolves VMs by multiple kernel IDs.
-// Matches Python's by_kernel_id_batch().
 func (r *Resolver) ByKernelIDBatch(ctx context.Context, kernelIDs []string) (map[string][]*model.VM, error) {
 	vms, err := r.repo.GetByKernelIDs(ctx, kernelIDs)
 	if err != nil {
@@ -153,7 +148,6 @@ func (r *Resolver) ByKernelIDBatch(ctx context.Context, kernelIDs []string) (map
 }
 
 // ByBinaryIDBatch resolves VMs by multiple binary IDs.
-// Matches Python's by_binary_id_batch().
 func (r *Resolver) ByBinaryIDBatch(ctx context.Context, binaryIDs []string) (map[string][]*model.VM, error) {
 	vms, err := r.repo.GetByBinaryIDs(ctx, binaryIDs)
 	if err != nil {
@@ -172,7 +166,6 @@ func (r *Resolver) ByBinaryIDBatch(ctx context.Context, binaryIDs []string) (map
 }
 
 // ByVolumeIDBatch resolves VMs by multiple volume IDs.
-// Matches Python's by_volume_id_batch().
 func (r *Resolver) ByVolumeIDBatch(ctx context.Context, volumeIDs []string) (map[string][]*model.VM, error) {
 	vms, err := r.repo.FindByVolumeIDsBatch(ctx, volumeIDs)
 	if err != nil {
@@ -195,17 +188,14 @@ func (r *Resolver) ByVolumeIDBatch(ctx context.Context, volumeIDs []string) (map
 }
 
 // Resolve resolves a VM by name, IP, MAC, or ID prefix (in that order).
-// Matches Python's resolve() exactly:
-//   - Tries by_name first
-//   - If name fails, checks if identifier contains "." -> by_ip (immediate return on failure)
-//   - If identifier contains ":" -> by_mac (immediate return on failure)
-//   - Falls back to by_id
+// - Tries by_name first
+// - If name fails, checks if identifier contains "." -> by_ip (immediate return on failure)
+// - If identifier contains ":" -> by_mac (immediate return on failure)
+// - Falls back to by_id
 //
-// CRITICAL: Python's by_ip() and by_mac() raise immediately on failure
-// (no fall-through). The Go implementation must match this — if ByIP or ByMAC
-// returns ANY error (including IsNotFound), propagate it immediately.
+// ByIP and ByMAC fail immediately on error (no fall-through) —
+// propagate any error (including IsNotFound) before falling through to by_name/by_id.
 func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.VM, error) {
-	// Try by name first (Python catches VMNotFoundError and falls through)
 	vm, err := r.ByName(ctx, identifier)
 	if err == nil {
 		return vm, nil
@@ -214,16 +204,12 @@ func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.VM, e
 		return nil, err
 	}
 
-	// Contains "." -> likely an IP address
-	// Python: if "." in identifier: return self.by_ip(identifier)
-	// This raises immediately on failure (NO fall-through)
+	// Contains "." -> likely an IP address; raises immediately on failure (no fall-through)
 	if strings.Contains(identifier, ".") {
 		return r.ByIP(ctx, identifier)
 	}
 
-	// Contains ":" -> likely a MAC address
-	// Python: if ":" in identifier: return self.by_mac(identifier)
-	// This raises immediately on failure (NO fall-through)
+	// Contains ":" -> likely a MAC address; raises immediately on failure (no fall-through)
 	if strings.Contains(identifier, ":") {
 		return r.ByMAC(ctx, identifier)
 	}
@@ -233,10 +219,9 @@ func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.VM, e
 }
 
 // ResolveMany resolves multiple VM identifiers, deduplicating results.
-// Matches Python's resolve_many() exactly — computes exit_code as:
-// 1 if errors and not items, else 0.
+// exit_code is 1 if errors and not items, else 0.
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
-	// Deduplicate identifiers while preserving order (matches Python)
+	// Deduplicate identifiers while preserving order
 	uniqueIDs := infra.Dedup(identifiers)
 
 	var vms []*model.VM
@@ -255,7 +240,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 		}
 	}
 
-	// Python: exit_code = 1 if errors and not items else 0
+	// exit_code = 1 if errors and not items else 0
 	exitCode := 0
 	if len(errsList) > 0 && len(vms) == 0 {
 		exitCode = 1

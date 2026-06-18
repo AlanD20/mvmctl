@@ -12,7 +12,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── OperationResult.IsOK ──────────────────────────────────────────────────
+// --- OperationResult.IsOK ---
 // Rationale: IsOK gates success-path decisions in the API layer. A wrong
 // classification causes the caller to treat errors as success or vice versa.
 
@@ -43,7 +43,7 @@ func TestOperationResult_IsOK(t *testing.T) {
 	})
 }
 
-// ─── OperationResult.IsError ───────────────────────────────────────────────
+// --- OperationResult.IsError ---
 // Rationale: IsError gates error handling paths. Symmetric counterpart to
 // IsOK; both must agree on which statuses are success vs error.
 
@@ -74,7 +74,7 @@ func TestOperationResult_IsError(t *testing.T) {
 	})
 }
 
-// ─── OperationResult.ToError ───────────────────────────────────────────────
+// --- OperationResult.ToError ---
 // Rationale: ToError converts OperationResult back to *DomainError for
 // uniform error handling. Losing the DomainError type breaks classification.
 
@@ -127,7 +127,7 @@ func TestOperationResult_ToError(t *testing.T) {
 	})
 }
 
-// ─── OperationResult.MarshalJSON ───────────────────────────────────────────
+// --- OperationResult.MarshalJSON ---
 // Rationale: JSON serialization is used by the API layer to return results
 // to callers. Missing fields or wrong null/empty handling breaks clients.
 
@@ -214,7 +214,7 @@ func TestOperationResult_MarshalJSON(t *testing.T) {
 	})
 }
 
-// ─── NeedsInteraction.Error ────────────────────────────────────────────────
+// --- NeedsInteraction.Error ---
 // Rationale: NeedsInteraction implements the error interface for flow through
 // (T, error) return patterns. If Error() returns the wrong string, error
 // messages to users are misleading.
@@ -227,7 +227,7 @@ func TestNeedsInteraction_Error(t *testing.T) {
 	assert.Equal(t, "sudo password required", n.Error())
 }
 
-// ─── BatchResult.Errors ──────────────────────────────────────────────────
+// --- BatchResult.Errors ---
 // Rationale: Errors() filters batch results to failed items. Missing an
 // error item means the caller proceeds as if the batch fully succeeded.
 
@@ -260,7 +260,7 @@ func TestBatchResult_Errors(t *testing.T) {
 	})
 }
 
-// ─── BatchResult.HasErrors ────────────────────────────────────────────────
+// --- BatchResult.HasErrors ---
 // Rationale: HasErrors is a quick check before error handling. Wrong result
 // causes the caller to skip error handling or re-process a failed batch.
 

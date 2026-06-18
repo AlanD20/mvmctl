@@ -1,42 +1,21 @@
 package inputs
-
 import (
 	"context"
 	"fmt"
-
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
-
 	"github.com/jmoiron/sqlx"
 )
-
-// LogInput matches Python's LogInput dataclass.
-//
-//	@dataclass
-//	class LogInput:
-//	    identifier: str
-//	    os_log: bool = False
-//	    lines: int | None = None
-//	    follow: bool | None = None
+// LogInput specifies log input.
 type LogInput struct {
 	Identifier string `json:"identifier"`
 	OsLog      bool   `json:"os_log"`
 	Lines      *int   `json:"lines,omitempty"`
 	Follow     *bool  `json:"follow,omitempty"`
 }
-
-// ResolvedLogInput matches Python's ResolvedLogInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedLogInput:
-//	    vm: VMInstanceItem
-//	    log_type: str
-//	    lines: int
-//	    follow: bool
-//	    log_filename: str
-//	    serial_output_filename: str
+// ResolvedLogInput specifies resolved log input.
 type ResolvedLogInput struct {
 	VM                   *model.VM
 	LogType              string
@@ -45,9 +24,7 @@ type ResolvedLogInput struct {
 	LogFilename          string
 	SerialOutputFilename string
 }
-
-// LogRequest matches Python's LogRequest.
-//
+// LogRequest specifies log request.
 // Resolve LogInput against the database and constants.
 type LogRequest struct {
 	cfg    *config.Service
@@ -55,7 +32,6 @@ type LogRequest struct {
 	input  LogInput
 	result *ResolvedLogInput
 }
-
 // NewLogRequest creates a new LogRequest.
 func NewLogRequest(inputs LogInput, cfg *config.Service, db *sqlx.DB) *LogRequest {
 	return &LogRequest{
@@ -64,28 +40,21 @@ func NewLogRequest(inputs LogInput, cfg *config.Service, db *sqlx.DB) *LogReques
 		input: inputs,
 	}
 }
-
 // Resolve resolves all inputs to explicit values.
-// Matches Python's LogRequest.resolve().
 func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*ResolvedLogInput, error) {
 	vmEntity, err := r.resolveVM(ctx, vmRepo)
 	if err != nil {
 		return nil, err
 	}
-
 	logType := r.resolveLogType()
-
 	// Validate log_type before passing to service
 	if logType != "boot" && logType != "os" {
 		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Unknown log type '%s'. Valid: boot, os", logType))
 	}
-
 	lines := r.resolveLines(ctx)
 	follow := r.resolveFollow(ctx)
-
 	logFilenameStr, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_filename")
 	serialOutputFilenameStr, _ := r.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename")
-
 	r.result = &ResolvedLogInput{
 		VM:                   vmEntity,
 		LogType:              logType,
@@ -94,13 +63,11 @@ func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*Resolv
 		LogFilename:          logFilenameStr,
 		SerialOutputFilename: serialOutputFilenameStr,
 	}
-
 	return r.result, nil
 }
-
 func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*model.VM, error) {
-	// Use VMRequest pipeline like Python's LogRequest._resolve_vm()
-	// Python lets VMNotFoundError propagate directly, so we don't wrap
+	// Use VMRequest pipeline for VM resolution.
+	// Let VMNotFoundError propagate directly.
 	vmRequest := NewVMRequest(VMInput{Identifiers: []string{r.input.Identifier}}, r.db, vmRepo)
 	resolved, err := vmRequest.Resolve(ctx)
 	if err != nil {
@@ -108,14 +75,12 @@ func (r *LogRequest) resolveVM(ctx context.Context, vmRepo vm.Repository) (*mode
 	}
 	return resolved.VMs[0], nil
 }
-
 func (r *LogRequest) resolveLogType() string {
 	if r.input.OsLog {
 		return "os"
 	}
 	return "boot"
 }
-
 func (r *LogRequest) resolveLines(ctx context.Context) int {
 	if r.input.Lines != nil {
 		return *r.input.Lines
@@ -123,7 +88,6 @@ func (r *LogRequest) resolveLines(ctx context.Context) int {
 	v, _ := r.cfg.GetInt(ctx, "settings.vm", "log_lines")
 	return v
 }
-
 func (r *LogRequest) resolveFollow(ctx context.Context) bool {
 	if r.input.Follow != nil {
 		return *r.input.Follow

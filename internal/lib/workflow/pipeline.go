@@ -33,7 +33,7 @@ func NewPipeline(steps []Step) (*Pipeline, error) {
 	}, nil
 }
 
-// ── Execute options ──
+// --- Execute options ---
 
 type executeOptions struct {
 	onStepComplete func(ctx context.Context, step Step, stateData model.ResourceState) error
@@ -53,7 +53,7 @@ func WithOnStepComplete(cb func(ctx context.Context, step Step, stateData model.
 	}
 }
 
-// ── Execute ──
+// --- Execute ---
 
 // Execute runs all steps in topological order. Steps at the same level
 // are executed concurrently. For each step, Apply is called with the
@@ -130,7 +130,7 @@ func (p *Pipeline) Execute(
 	return nil
 }
 
-// ── Destroy options ──
+// --- Destroy options ---
 
 type destroyOptions struct {
 	onStepComplete func(ctx context.Context, step Step, stateData model.ResourceState) error
@@ -152,7 +152,7 @@ func WithDestroyOnStepComplete(
 	}
 }
 
-// ── Destroy ──
+// --- Destroy ---
 
 // Destroy runs the Destroy method on each step in reverse topological
 // order (deepest level first). This ensures that resources are torn down

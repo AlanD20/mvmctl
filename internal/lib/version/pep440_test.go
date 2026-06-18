@@ -9,7 +9,7 @@ import (
 	"mvmctl/internal/lib/version"
 )
 
-// ─── SplitVersionParts (additional edge cases) ─────────────────────────────────
+// --- SplitVersionParts (additional edge cases) ---
 // Rationale: Extends coverage beyond compare_test.go's TestSplitVersionParts with
 // four-part versions, multi-dash pre-releases, and dashes-without-digits. These
 // edge cases exercise the full SplitVersionParts codepath.
@@ -66,7 +66,7 @@ func TestSplitVersionPartsEdgeCases(t *testing.T) {
 	}
 }
 
-// ─── CompareVersions (pre-release edge cases) ─────────────────────────────────
+// --- CompareVersions (pre-release edge cases) ---
 // Rationale: Tests pre-release tag comparisons (dev < alpha < beta < rc < post),
 // release-vs-pre-release ordering, variant names (a vs alpha, b vs beta), unknown
 // tags, and numeric suffix ordering. Exercises comparePreRelease and

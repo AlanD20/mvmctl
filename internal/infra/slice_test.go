@@ -10,7 +10,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Dedup ───────────────────────────────────────────────────────────────────
+// --- Dedup ---
 // Rationale: Dedup is used throughout the codebase for cleaning up identifiers,
 // SSH key lists, and volume IDs. A bug here would cause duplicate entries to
 // appear in listings or be passed to subprocess calls.
@@ -66,7 +66,7 @@ func TestDedup_ints(t *testing.T) {
 	}
 }
 
-// ─── SortedKeys ──────────────────────────────────────────────────────────────
+// --- SortedKeys ---
 // Rationale: SortedKeys is used for deterministic iteration over config maps
 // and template data. Nondeterministic iteration would cause flaky tests and
 // inconsistent output.
@@ -102,7 +102,7 @@ func TestSortedKeys(t *testing.T) {
 	}
 }
 
-// ─── JoinStringsPtrs ────────────────────────────────────────────────────────
+// --- JoinStringsPtrs ---
 // Rationale: JoinStringsPtrs formats batch operation error messages for user
 // display. A bug would cause silent error swallowing or malformed output.
 
@@ -169,7 +169,7 @@ func TestJoinStringsPtrs(t *testing.T) {
 	})
 }
 
-// ─── IsTrue ──────────────────────────────────────────────────────────────────
+// --- IsTrue ---
 // Rationale: IsTrue is used for config parsing and flag interpretation.
 // Incorrect truthiness detection would cause silent misconfiguration.
 

@@ -1,17 +1,13 @@
 package results
-
 import (
 	"maps"
-
 	"mvmctl/internal/lib/model"
 )
-
 // HostOSInfo groups OS-level host information.
 type HostOSInfo struct {
 	Kernel  string `json:"kernel"`
 	Release string `json:"release"`
 }
-
 // HostCPUInfo groups CPU-level host information.
 type HostCPUInfo struct {
 	Model        string `json:"model"`
@@ -20,7 +16,6 @@ type HostCPUInfo struct {
 	Architecture string `json:"architecture"`
 	NumaNodes    int    `json:"numa_nodes"`
 }
-
 // HostVirtInfo groups virtualization-related host information.
 type HostVirtInfo struct {
 	CPUHasVMX           bool            `json:"cpu_has_vmx"`
@@ -30,13 +25,11 @@ type HostVirtInfo struct {
 	SMTActive           bool            `json:"smt_active"`
 	Modules             map[string]bool `json:"modules"`
 }
-
 // HostHugepagesInfo groups hugepages-related host information.
 type HostHugepagesInfo struct {
 	Count2MB int `json:"count_2mb"`
 	Free2MB  int `json:"free_2mb"`
 }
-
 // HostDepsInfo groups dependency availability information.
 type HostDepsInfo struct {
 	NftablesAvailable     bool `json:"nftables_available"`
@@ -44,7 +37,6 @@ type HostDepsInfo struct {
 	CloudLocaldsAvailable bool `json:"cloud_localds_available"`
 	DevNetTUNAccessible   bool `json:"dev_net_tun"`
 }
-
 // HostSystemInfo groups system-level host information.
 type HostSystemInfo struct {
 	CgroupVersion  int    `json:"cgroup_version"`
@@ -52,7 +44,6 @@ type HostSystemInfo struct {
 	DevKVMStatus   string `json:"dev_kvm_status"`
 	UserInKVMGroup bool   `json:"user_in_kvm_group"`
 }
-
 // HostMemoryInfo groups memory-related host information.
 type HostMemoryInfo struct {
 	TotalMiB     int `json:"total_mib"`
@@ -60,19 +51,16 @@ type HostMemoryInfo struct {
 	SwapTotalMiB int `json:"swap_total_mib"`
 	SwapUsedMiB  int `json:"swap_used_mib"`
 }
-
 // HostStorageInfo groups storage-related host information.
 type HostStorageInfo struct {
 	TotalBytes int `json:"total_bytes"`
 	FreeBytes  int `json:"free_bytes"`
 }
-
 // HostKernelInfo groups kernel-related host information.
 type HostKernelInfo struct {
 	Version           string `json:"version"`
 	MinimumVersionMet bool   `json:"minimum_version_met"`
 }
-
 // HostLimitsInfo groups kernel limit information.
 type HostLimitsInfo struct {
 	PIDMax           int   `json:"pid_max"`
@@ -81,7 +69,6 @@ type HostLimitsInfo struct {
 	TAPDevicesMax    int   `json:"tap_devices_max"`
 	IPLocalPortRange []int `json:"ip_local_port_range"`
 }
-
 // HostCapacityCurrentInfo groups current resource usage for capacity projection.
 type HostCapacityCurrentInfo struct {
 	PIDs       int `json:"pids"`
@@ -90,20 +77,17 @@ type HostCapacityCurrentInfo struct {
 	TAPDevices int `json:"tap_devices"`
 	ARPEntries int `json:"arp_entries"`
 }
-
 // HostCapacityInfo groups capacity projection information.
 type HostCapacityInfo struct {
 	Current           HostCapacityCurrentInfo `json:"current"`
 	RecommendedMaxVMs int                     `json:"recommended_max_vms"`
 	LimitingResource  *string                 `json:"limiting_resource"`
 }
-
 // HostSetupInfo groups host setup state information.
 type HostSetupInfo struct {
 	Initialized   bool   `json:"initialized"`
 	InitializedAt string `json:"initialized_at"`
 }
-
 // HostStatusCheck is the structured response for host status queries.
 type HostStatusCheck struct {
 	KVMOK           bool                 `json:"kvm_accessible"`
@@ -116,9 +100,8 @@ type HostStatusCheck struct {
 	State           *HostSetupInfo       `json:"state"`
 	Resources       *model.HostResources `json:"resources,omitempty"`
 }
-
 // HostInfo is the structured response for host info/capacity queries.
-// Matches Python's HostInfo.to_dict() output.
+// output.
 type HostInfo struct {
 	DetectedAt     string            `json:"detected_at"`
 	Hostname       string            `json:"hostname"`
@@ -135,16 +118,13 @@ type HostInfo struct {
 	Capacity       HostCapacityInfo  `json:"capacity"`
 	Setup          HostSetupInfo     `json:"setup"`
 }
-
 // BuildHostInfo builds a HostInfoResponse from model data.
 func BuildHostInfo(hi *model.HostInfo) *HostInfo {
 	detectedAt := ""
 	if hi.State.DetectedAt != nil {
 		detectedAt = *hi.State.DetectedAt
 	}
-
 	modules := maps.Clone(hi.Resources.ModulesLoaded)
-
 	return &HostInfo{
 		DetectedAt: detectedAt,
 		Hostname:   hi.Hardware.Hostname,

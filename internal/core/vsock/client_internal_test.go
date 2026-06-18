@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── relayTTY ──────────────────────────────────────────────────────────────
+// --- relayTTY ---
 // Rationale: relayTTY is the bidirectional relay loop at the heart of Shell().
 // Two goroutines relay stdin→vsock and vsock→stdout. When one direction ends
 // (EOF), the connection is closed to unblock the other. Must prove data flows
@@ -102,7 +102,7 @@ func TestRelayTTY_ExitWithoutKeypress(t *testing.T) {
 
 	buf := make([]byte, 1024)
 
-	// ── Step 1: stdin → vsock ──────────────────────────────────────────
+	// --- Step 1: stdin → vsock ---
 	// Prove the relay is working in the user-input direction.
 	_, err := stdinW.Write([]byte("echo hello\n"))
 	require.NoError(t, err)
@@ -111,7 +111,7 @@ func TestRelayTTY_ExitWithoutKeypress(t *testing.T) {
 	require.NoError(t, err, "stdin data must reach agent side within 5s")
 	require.Equal(t, "echo hello\n", string(buf[:n]))
 
-	// ── Step 2: vsock → stdout ─────────────────────────────────────────
+	// --- Step 2: vsock → stdout ---
 	// Prove the relay is working in the output direction.
 	_, err = agentConn.Write([]byte("hello\n"))
 	require.NoError(t, err)
@@ -136,18 +136,17 @@ func TestRelayTTY_ExitWithoutKeypress(t *testing.T) {
 		t.Fatal("timeout waiting for stdout data")
 	}
 
-	// ── Step 3: Close agent-side connection (guest disconnects) ────────
+	// --- Step 3: Close agent-side connection (guest disco ---
 	// This simulates the guest closing the vsock connection (e.g., after
 	// typing "exit" in the shell).  No data is written to stdin after this
 	// point — no "keypress" to unblock relay.
 	agentConn.Close()
 
-	// ── Step 4: Verify relay exits WITHOUT a keypress ──────────────────
+	// --- Step 4: Verify relay exits WITHOUT a keypress ---
 	// If the fix is working, relayTTY will close the dup'd stdin when the
 	// vsock→stdout goroutine finishes (hostConn.Read returns EOF), which
 	// unblocks io.Copy(conn, stdin) by making stdin.Read return EOF — no
 	// keypress required.
-	//
 	// If the fix is absent, relayTTY blocks here forever because
 	// io.Copy(conn, stdin) is stuck on stdin.Read().
 	select {

@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// ── Relay — PID/socket handle for a console relay subprocess ─────
+// --- Relay ---
 type Relay struct {
-	mu         sync.Mutex
+	mu         sync.Mutex // guards relayPid and PID-file state
 	name       string // used for logging
 	pidPath    string // path to PID file (written by spawn.go)
 	socketPath string // path to Unix socket (created by subprocess)

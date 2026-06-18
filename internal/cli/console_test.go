@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/api/results"
 )
 
-// ─── NewConsoleCmd ─────────────────────────────────────────────────────────
+// --- NewConsoleCmd ---
 // Rationale: NewConsoleCmd is the entry point for console operations.
 // Missing flags silently disable state/kill/attach without error.
 
@@ -37,7 +37,7 @@ func TestNewConsoleCmd(t *testing.T) {
 	require.NotNil(t, killFlag, "--kill flag must exist")
 }
 
-// ─── Console state (via --state flag) ──────────────────────────────────────
+// --- Console state (via --state flag) ---
 // Rationale: Console state shows whether a console relay is running for a VM.
 // A broken state check leaves users unable to debug console connectivity.
 
@@ -122,7 +122,7 @@ func TestShowConsoleState(t *testing.T) {
 	})
 }
 
-// ─── Console kill (via --kill flag) ────────────────────────────────────────
+// --- Console kill (via --kill flag) ---
 // Rationale: Console kill stops a console relay. A broken kill command leaves
 // orphaned relay processes consuming resources.
 
@@ -153,7 +153,7 @@ func TestKillConsoleRelay(t *testing.T) {
 	})
 }
 
-// ─── Console attach (via position arg, no flags) ───────────────────────────
+// --- Console attach (via position arg, no flags) ---
 // Rationale: Console attach connects to the VM serial console. A broken attach
 // command prevents users from accessing the VM console for debugging.
 

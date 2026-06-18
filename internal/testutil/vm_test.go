@@ -22,7 +22,7 @@ func newVM(id string, name string, status model.VMStatus) *model.VM {
 	return &model.VM{ID: id, Name: name, Status: status}
 }
 
-// ─── CRUD ────────────────────────────────────────────────────────────────────
+// --- CRUD --------------------------------------------------------------------
 
 func TestVMRepo_Get(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -149,7 +149,7 @@ func TestVMRepo_DeleteMany(t *testing.T) {
 	})
 }
 
-// ─── Listing ─────────────────────────────────────────────────────────────────
+// --- Listing -----------------------------------------------------------------
 
 func TestVMRepo_ListAll(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -205,7 +205,7 @@ func TestVMRepo_ListExcludingStatuses(t *testing.T) {
 	})
 }
 
-// ─── Counting ────────────────────────────────────────────────────────────────
+// --- Counting ----------------------------------------------------------------
 
 func TestVMRepo_Count(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -242,7 +242,7 @@ func TestVMRepo_CountByStatus(t *testing.T) {
 	})
 }
 
-// ─── Lookups ─────────────────────────────────────────────────────────────────
+// --- Lookups -----------------------------------------------------------------
 
 func TestVMRepo_FindByPrefix(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -299,7 +299,7 @@ func TestVMRepo_FindByMAC(t *testing.T) {
 	})
 }
 
-// ─── Foreign key lookups ─────────────────────────────────────────────────────
+// --- Foreign key lookups -----------------------------------------------------
 
 func TestVMRepo_FindByNetworkID(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -375,7 +375,7 @@ func TestVMRepo_GetByImageIDs(t *testing.T) {
 	assert.Equal(t, "vm-1", got[0].ID)
 }
 
-// ─── Volume lookups (JSON array fields) ──────────────────────────────────────
+// --- Volume lookups (JSON array fields) --------------------------------------
 
 func TestVMRepo_FindByVolumeID(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -415,7 +415,7 @@ func TestVMRepo_FindByVolumeIDsBatch(t *testing.T) {
 	})
 }
 
-// ─── SSH key lookups (JSON array fields) ────────────────────────────────────
+// --- SSH key lookups (JSON array fields) ------------------------------------
 
 func TestVMRepo_FindBySSHKeyID(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -436,7 +436,7 @@ func TestVMRepo_FindBySSHKeyID(t *testing.T) {
 	})
 }
 
-// ─── Mutations ───────────────────────────────────────────────────────────────
+// --- Mutations ---------------------------------------------------------------
 
 func TestVMRepo_UpdateStatus(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -492,7 +492,7 @@ func TestVMRepo_UpdateExitCode(t *testing.T) {
 	assert.Equal(t, 137, *got.ExitCode)
 }
 
-// ─── Concurrency safety ──────────────────────────────────────────────────────
+// --- Concurrency safety ------------------------------------------------------
 // Rationale: The in-memory repos use sync.RWMutex for thread safety.
 // These tests verify no data races under concurrent access (-race detects).
 
@@ -515,7 +515,7 @@ func TestVMRepo_ConcurrencySafety(t *testing.T) {
 	})
 }
 
-// ─── Edge cases ──────────────────────────────────────────────────────────────
+// --- Edge cases --------------------------------------------------------------
 
 func TestVMRepo_EmptyState(t *testing.T) {
 	repo := testutil.NewVMRepo()

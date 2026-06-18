@@ -85,7 +85,7 @@ func handleTTY(ctx context.Context, conn net.Conn, req *execRequest) {
 	// is NOT converted to \n — the shell would never receive a newline
 	// and appears "blocked". The shell handles its own terminal settings.
 
-	// ── Shell exit monitor ──
+	// --- Shell exit monitor ---
 	//
 	// When the user types "exit" or Ctrl+D, the shell process terminates.
 	// The PTY slave closes, causing master reads to return EOF. But the
@@ -131,7 +131,7 @@ func handleTTY(ctx context.Context, conn net.Conn, req *execRequest) {
 		conn.Close()
 	}()
 
-	// ── Bidirectional relay ──
+	// --- Bidirectional relay ---
 	//
 	// PTY→conn runs in a goroutine. conn→PTY runs in the main goroutine:
 	// when it returns (host disconnected or shell exited via monitor

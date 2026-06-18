@@ -12,7 +12,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // resolveMap returns a ResolveFn backed by the given map.
 // If the key exists in the map, returns the value. Otherwise returns an error.
@@ -49,7 +49,7 @@ func assertConfigError(t *testing.T, err error) {
 	}
 }
 
-// ─── ConstraintRegistry ───────────────────────────────────────────────────────
+// --- ConstraintRegistry ---
 // Rationale: Registry stores constraints keyed by (category, key). Register
 // must append to existing constraints, and Get returns a copy (or the slice).
 
@@ -122,7 +122,7 @@ func TestConstraintRegistry(t *testing.T) {
 	})
 }
 
-// ─── validateNoCloudPortRange ─────────────────────────────────────────────────
+// --- validateNoCloudPortRange ---
 // Rationale: end > start is valid. Any other relationship (end == start,
 // end < start) must error with a specific message.
 
@@ -217,7 +217,7 @@ func TestValidateNoCloudPortRange(t *testing.T) {
 	})
 }
 
-// ─── validateMACPrefix ───────────────────────────────────────────────────────
+// --- validateMACPrefix ---
 // Rationale: Must accept exactly two hex bytes separated by a colon.
 // Reject anything else — wrong length, wrong separator, extra characters.
 
@@ -325,7 +325,7 @@ func TestValidateMACPrefix(t *testing.T) {
 	})
 }
 
-// ─── RegisterBuiltinConstraints ───────────────────────────────────────────────
+// --- RegisterBuiltinConstraints ---
 // Rationale: Must register both constraints in the correct categories and keys.
 
 func TestRegisterBuiltinConstraints(t *testing.T) {

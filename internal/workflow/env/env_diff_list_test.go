@@ -19,7 +19,7 @@ import (
 	envpkg "mvmctl/internal/workflow/env"
 )
 
-// ─── Diff Tests ─────────────────────────────────────────────────────────────────
+// --- Diff Tests ---
 
 // Rationale: Diff must identify resources present in the spec but not in the
 // saved state. When no state exists, all spec steps are New.
@@ -289,7 +289,7 @@ network:
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
-// ─── List Tests ─────────────────────────────────────────────────────────────────
+// --- List Tests ---
 
 // Rationale: List must return a non-nil slice without error even when the
 // workflow states directory is empty or contains only unrelated entries.
@@ -388,7 +388,7 @@ func TestList_ContextCancelled(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // createWorkflowState creates a workflow state dir for the given spec path
 // and resources. The specPath is used to derive the workflow ID via

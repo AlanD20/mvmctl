@@ -1,8 +1,8 @@
 package model
 
-// ── BinaryItem ──
+// --- BinaryItem ---
 
-// BinaryItem corresponds to Python's BinaryItem dataclass.
+// BinaryItem represents a cached binary (Firecracker/Jailer).
 type BinaryItem struct {
 	ID          string  `json:"id"                   db:"id"`
 	Type        string  `json:"type"                 db:"type"`

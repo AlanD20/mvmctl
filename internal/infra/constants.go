@@ -15,12 +15,10 @@ import (
 	"time"
 )
 
-// ── Identity ──
+// --- Identity ---
 const BootstrapName = "mvmctl"
 
-// CLIName is the canonical CLI name. In Go, unlike Python (which needed dynamic
-// resolution for Nuitka console_scripts entry points), the binary name is
-// always "mvm" — a compiled Go binary has one name.
+// CLIName is the canonical CLI name. A compiled Go binary has one name.
 const CLIName = "mvm"
 
 // ProjectNameDefault is the compile-time constant default for the project name.
@@ -34,9 +32,6 @@ var DefaultEnvSpecNames = []string{ProjectNameDefault + ".yaml", ProjectNameDefa
 // It can be overridden at build time via:
 //
 //	-ldflags "-X mvmctl/internal/infra.ProjectName=customname"
-//
-// This matches Python's PROJECT_NAME which resolves from importlib.metadata
-// or falls back to _BOOTSTRAP_NAME ("mvmctl").
 var ProjectName = ProjectNameDefault
 
 // MVMUnixGroup is the Unix group name for mvm privilege management.
@@ -55,7 +50,7 @@ func SudoersDropInPath() string {
 	return fmt.Sprintf("/etc/sudoers.d/%s", CLIName)
 }
 
-// ── User-overridable defaults ──
+// --- User-overridable defaults ---
 var OverridableDefaults = map[string]map[string]any{
 	"settings.vm": {
 		"max_vms":         1000,
@@ -147,17 +142,17 @@ func GetDefault(category, key string) (any, error) {
 	return val, nil
 }
 
-// ── VM Limits ──
+// --- VM Limits ---
 const MemMinMB = 128
 const MemMaxMB = 65536
 const VCPUMin = 1
 const VCPUMax = 32
 const SignalExitCodeBase = 128
 
-// ── VM Lifecycle ──
+// --- VM Lifecycle ---
 const LogFollowPollIntervalS = 0.3
 
-// ── Network ──
+// --- Network ---
 const ConstIPTablesMaxCommentLen = 240
 const DefaultIPLocalPortRangeStart = 32768
 const DefaultIPLocalPortRangeEnd = 60999
@@ -166,7 +161,7 @@ const DefaultIPLocalPortRangeEnd = 60999
 // /proc/sys/net/ipv4/ip_local_port_range cannot be read.
 var DefaultIPLocalPortRange = [2]int{DefaultIPLocalPortRangeStart, DefaultIPLocalPortRangeEnd}
 
-// ── File permissions ──
+// --- File permissions ---
 const DirPerm = 0755
 const PrivateKeyPerm = 0600
 const PublicKeyPerm = 0644
@@ -176,17 +171,17 @@ const DBFilePerm = 0640
 const ExecutablePerm = 0755
 const ShadowPerm = 0640
 
-// ── Copy direction constants ──
+// --- Copy direction constants ---
 const (
 	DirectionHostToVM = "host_to_vm"
 	DirectionVMToHost = "vm_to_host"
 	DirectionVMToVM   = "vm_to_vm"
 )
 
-// ── Firecracker architecture support ──
+// --- Firecracker architecture support ---
 var FirecrackerSupportedArches = []string{"x86_64", "amd64", "aarch64", "arm64"}
 
-// ── HTTP defaults ──
+// --- HTTP defaults ---
 
 const HTTPTimeout = 900 * time.Second
 const HTTPChunkSize = 1 << 20 // 1 MiB
@@ -197,7 +192,7 @@ const DefaultUserAgent = "mvmctl/dev"
 const SocketTimeoutSeconds = 5.0
 const PollStepSeconds = 0.1
 
-// ── Filesystem type ↔ extension mapping ──
+// --- Filesystem type <-> extension mapping ---
 
 // FSTypeToExt maps filesystem type to file extension.
 var FSTypeToExt = map[string]string{
@@ -222,32 +217,32 @@ var QemuImgFormat = map[string]string{
 	"vhdx":  "vhdx",
 }
 
-// ── HTTP status codes ──
+// --- HTTP status codes ---
 const HTTPStatusNoContent = 204
 const HTTPStatusSuccess = 200
 
-// ── HTTP timeouts ──
+// --- HTTP timeouts ---
 const HTTPTimeoutKernelDownloadS = 600
 const HTTPTimeoutKernelConfigS = 60
 const HTTPTimeoutSha256FetchS = 30
 const HTTPTimeoutSha256SidecarS = 15
 
-// ── Default versions ──
+// --- Default versions ---
 const DefaultFirecrackerCIVersion = "v1.15"
 const MinKernelMajor = 5
 const MinKernelMinor = 10
 
-// ── Default VM config ──
+// --- Default VM config ---
 const DefaultVCPUCount = 1
 const DefaultMemoryMiB = 512
 const DefaultSSHUser = "root"
 const DefaultDNS = "1.1.1.1"
 const DefaultGuestMACPrefix = "02:FC"
 
-// ── Default network ──
+// --- Default network ---
 const DefaultNetworkSubnet = "172.27.0.0/24"
 
-// ── Image processing ──
+// --- Image processing ---
 const RuntimeBufferMB = 160
 const ShrinkSafetyMargin = 1.01
 const RatioMin = 1.0
@@ -256,21 +251,21 @@ const RootfsHeadroomFactor = 1.25
 const RootfsMinHeadroomBytes = 150 * 1024 * 1024
 const Percent = 100
 
-// ── Buffer / sector ──
+// --- Buffer / sector ---
 const BufferSizeBytes = 1024
 
-// ── Download retry backoff (float64 to match Python's CONST_DOWNLOAD_RETRY_BACKOFF) ──
+// --- Download retry backoff ---
 const DownloadRetryBackoff = 2.0
 
-// ── Cloud-init ──
+// --- Cloud-init ---
 const RequiredISOTool = "cloud-localds"
 const NoCloudNetBindTimeoutS = 5.0
 
-// ── Console ──
+// --- Console ---
 const ConsoleSocketTimeoutS = 2.0
 const ConsoleKillTimeoutS = 5.0
 
-// ── Kernel types ──
+// --- Kernel types ---
 const MVMBackgroundServiceEnv = "MVM_BACKGROUND_SERVICE=1"
 
 // MVMProvisionPrefix is the prefix for provisioner temp directories.
@@ -279,13 +274,13 @@ const MVMProvisionPrefix = CLIName + "-provision-"
 const KernelTypeFirecracker = "firecracker"
 const KernelTypeOfficial = "official"
 
-// ── Shadow file ──
+// --- Shadow file ---
 const ShadowDaysSinceEpoch = 19700
 const ShadowMinDays = 0
 const ShadowMaxDays = 99999
 const ShadowWarnDays = 7
 
-// ── Supported image extensions ──
+// --- Supported image extensions ---
 var SupportedImageExtensions = []string{
 	".ext4",
 	".btrfs",
@@ -295,7 +290,7 @@ var SupportedImageExtensions = []string{
 	".btrfs.zst",
 }
 
-// ── Image import format map ──
+// --- Image import format map ---
 var ImageImportFormatMap = map[string]string{
 	".qcow2":  "qcow2",
 	".raw":    "raw",
@@ -313,23 +308,23 @@ var ImageImportFormatMap = map[string]string{
 	".tgz":    "tar-rootfs",
 }
 
-// ── Binary size ──
+// --- Binary size ---
 const MinBinarySizeBytes = 512
 
-// ── Host system paths ──
+// --- Host system paths ---
 const DefaultSysctlConfDir = "/etc/sysctl.d"
 const DefaultSudoersDir = "/etc/sudoers"
 const DefaultSysctlConfPath = "/etc/sysctl.d/mvmctl.conf"
 
-// ── Libguestfs ──
+// --- Libguestfs ---
 const DefaultLibguestfsSeedDir = "/var/lib/cloud/seed/nocloud"
 
-// ── Firecracker GitHub ──
+// --- Firecracker GitHub ---
 const FirecrackerGithubReleasesAPIURL = "https://api.github.com/repos/firecracker-microvm/firecracker/releases"
 const FirecrackerGithubDownloadURL = "https://github.com/firecracker-microvm/firecracker/releases/download"
 const FirecrackerGitRepoURL = "https://github.com/firecracker-microvm/firecracker.git"
 
-// ── Privileged system binaries ──
+// --- Privileged system binaries ---
 var PrivilegedBinaries = map[string]string{
 	"/usr/sbin/ip":               "iproute2",
 	"/usr/sbin/iptables":         "iptables",
@@ -341,9 +336,8 @@ var PrivilegedBinaries = map[string]string{
 }
 
 // PrivilegedBinariesOrdered returns the keys of PrivilegedBinaries in
-// insertion order, matching Python's PRIVILEGED_BINARIES dict literal order.
-// Go maps have random iteration, so an ordered slice is needed for
-// deterministic sudoers content generation.
+// insertion order. Go maps have random iteration, so an ordered slice is
+// needed for deterministic sudoers content generation.
 var PrivilegedBinariesOrdered = [...]string{
 	"/usr/sbin/ip",
 	"/usr/sbin/iptables",
@@ -354,7 +348,7 @@ var PrivilegedBinariesOrdered = [...]string{
 	"/usr/sbin/modprobe",
 }
 
-// ── Init binaries ──
+// --- Init binaries ---
 var InitBinaries = []string{
 	"ip",
 	"modprobe",
@@ -367,7 +361,7 @@ var InitBinaries = []string{
 	"tar",
 }
 
-// ── Infra binaries ──
+// --- Infra binaries ---
 var InfraBinaries = []string{
 	"qemu-img",
 	"mkfs.ext4",
@@ -376,7 +370,7 @@ var InfraBinaries = []string{
 	"dumpe2fs",
 }
 
-// ── Required binaries ──
+// --- Required binaries ---
 var RequiredBinaries = []string{
 	"ip", "modprobe", "lsmod", "groupadd", "usermod",
 	"groupdel", "visudo", "ssh-keygen", "tar",
@@ -387,26 +381,21 @@ var RequiredBinaries = []string{
 // CloudInitMode type moved to mvmctl/internal/infra/model (model.CloudInitMode).
 // ProvisionerType type moved to mvmctl/internal/infra/model (model.ProvisionerType).
 
-// ── Debug ──
+// --- Debug ---
 var debugMode = false
 
 func SetDebugMode(v bool) { debugMode = v }
 func IsDebugMode() bool   { return debugMode }
 
-// ── Compiled mode ──
-//
+// --- Compiled mode ---
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Environment variable access
-// ══════════════════════════════════════════════════════════════════════════════
+// --- Environment variable access ---
 
 func EnvKey(suffix string) string {
 	return fmt.Sprintf("%s_%s", strings.ToUpper(CLIName), suffix)
 }
 
 // EnvGet returns the environment variable value and whether it was set.
-// Python's env.get(suffix) returns str|None — Go maps None to "" and
-// the bool indicates if the variable was present in the environment.
 func EnvGet(suffix string) (string, bool) {
 	val, ok := os.LookupEnv(EnvKey(suffix))
 	return val, ok
@@ -424,13 +413,10 @@ func EnvSet(suffix, value string) {
 	os.Setenv(EnvKey(suffix), value)
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CacheUtils — directory/path resolution
-// ══════════════════════════════════════════════════════════════════════════════
+// --- CacheUtils -- directory/path resolution ---
 
-// ensureDirAndChown creates the directory with 0700 permissions (matching
-// Python's CONST_DIR_PERMS_CACHE = 0o700) and chowns to the real invoking
-// user when running under sudo. Mirrors Python's CacheUtils.resolve_dir().
+// ensureDirAndChown creates the directory with 0700 permissions and chowns
+// to the real invoking user when running under sudo.
 func ensureDirAndChown(path string) error {
 	if err := os.MkdirAll(path, CacheDirPerm); err != nil {
 		return fmt.Errorf("create directory %s: %w", path, err)
@@ -470,8 +456,7 @@ func GetCacheDir() (string, error) {
 				cacheDirErr = fmt.Errorf("invalid cache dir path: %w", cacheDirErr)
 				return
 			}
-			// Ensure the directory exists with proper permissions (matching
-			// Python's CacheUtils.resolve_dir which creates the directory).
+			// Ensure the directory exists with proper permissions.
 			if err := ensureDirAndChown(resolved); err != nil {
 				cacheDirErr = fmt.Errorf("create cache dir: %w", err)
 				return
@@ -496,8 +481,7 @@ func GetConfigDir() (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("invalid config dir path: %w", err)
 		}
-		// Ensure the directory exists with proper permissions (matching
-		// Python's CacheUtils.resolve_dir which creates the directory).
+		// Ensure the directory exists with proper permissions.
 		if err := ensureDirAndChown(resolved); err != nil {
 			return "", fmt.Errorf("create config dir: %w", err)
 		}
@@ -664,7 +648,7 @@ func GetTimingLogPath() string {
 	return filepath.Join(cacheDir, "timing.log")
 }
 
-// ── Warm image directory ──
+// --- Warm image directory ---
 func GetWarmImagesDir() string {
 	pool, ok := EnvGet("WARM_POOL")
 	if ok && pool == "disk" {
@@ -705,9 +689,7 @@ func GetNoCloudNetLogPath(batchID string) string {
 	return filepath.Join(GetNoCloudNetDir(), batchID+".log")
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CommonUtils — domain-agnostic helpers
-// ══════════════════════════════════════════════════════════════════════════════
+// --- CommonUtils -- domain-agnostic helpers ---
 
 // ReservedNames that cannot be used as entity names.
 // Prevents conflicts with CLI subcommands, resource types, and common identifiers.
@@ -814,9 +796,6 @@ var DangerousChars = func() map[rune]bool {
 	for i := range 32 {
 		chars[rune(i)] = true
 	}
-	for i := range 32 {
-		chars[rune(i)] = true
-	}
 	chars[127] = true
 	chars[0x200b] = true
 	chars[0x200c] = true
@@ -865,23 +844,21 @@ func SanitizeForLog(value string) string {
 	return result.String()
 }
 
-// ── CommonUtils helpers ──
+// --- CommonUtils helpers ---
 
-// Coerce coerces a value to a target kind, matching Python's CommonUtils.coerce().
+// Coerce coerces a value to a target kind.
 //
-// NOTE ON PYTHON TYPE NAMES: The case labels below use Python-style type names
-// ("str", "dict", "NoneType") because the target parameter originates from DB
-// persistence — these string values were stored by the Python codebase and must
-// be kept for backward compatibility. The dispatch preserves the stored values.
-// Error messages to users use Go-native names ("string", "map", "nil").
+// The case labels use stored type names ("str", "dict", "NoneType") from DB
+// persistence. These must be kept for backward compatibility. Error messages
+// to users use Go-native names ("string", "map", "nil").
 //
-// Python semantics:
-//   - bool is a subclass of int: True→1, False→0 when target is int
-//   - string→bool via truthy keywords: "true"/"1"/"yes"/"on"
-//   - string→int via strconv.Atoi
-//   - string→float via strconv.ParseFloat
-//   - string→dict via json.Unmarshal
-//   - identity (already correct type): returns as-is
+// Conversion semantics:
+// - bool is convertible to int: true→1, false→0
+// - string→bool via truthy keywords: "true"/"1"/"yes"/"on"
+// - string→int via strconv.Atoi
+// - string→float via strconv.ParseFloat
+// - string→map via json.Unmarshal
+// - identity (already correct type): returns as-is
 //
 // target is a string like "bool", "int", "float", "string", "map", "nil".
 func Coerce(value any, target string) (any, error) {
@@ -910,7 +887,7 @@ func Coerce(value any, target string) (any, error) {
 		case float64:
 			return int(v), nil
 		case bool:
-			// Python: True is subclass of int, True→1, False→0
+			// bool converts to int: true→1, false→0
 			if v {
 				return 1, nil
 			}
@@ -1008,9 +985,9 @@ func FormatBytesHumanReadable(sizeBytes int64) string {
 	return fmt.Sprintf("%.1f TiB", sizeFloat)
 }
 
-// ── Timestamp format constants ──
+// --- Timestamp format constants ---
 // Only Go stdlib time constants are used (ARCHITECTURE: V17 — RFC3339 everywhere).
-// Legacy Python microsecond/no-timezone formats are NOT supported — DB migration
+// Legacy microsecond/no-timezone formats are NOT supported — DB migration
 // converts them to RFC3339 on read.
 
 // Now returns the current timestamp in RFC3339 format.
@@ -1023,7 +1000,6 @@ func HumanReadableDatetime(isoTimestamp string) string {
 		return "-"
 	}
 	// Only RFC3339 and nanosecond-precision RFC3339 are valid formats.
-	// Matches Python's .isoformat() behavior with microsecond precision loss.
 	formats := []string{
 		time.RFC3339,
 		time.RFC3339Nano,
@@ -1054,7 +1030,7 @@ func DeepMergeDict(base, override map[string]any) map[string]any {
 	return result
 }
 
-// NumCPU returns number of available CPUs, matching os.cpu_count() semantics.
+// NumCPU returns number of available CPUs.
 func NumCPU() int {
 	return runtime.NumCPU()
 }

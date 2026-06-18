@@ -16,7 +16,6 @@ import (
 )
 
 // KernelDetector detects the best host kernel for libguestfs appliance builds.
-// Mirrors src/mvmctl/core/_shared/_guestfs/_kernel_detector.py exactly.
 type KernelDetector struct{}
 
 var (
@@ -24,7 +23,7 @@ var (
 	driverExtensions = []string{".ko", ".ko.zst", ".ko.xz"}
 	virtioNetPaths   = []string{"kernel/drivers/net"}
 
-	// cached result for findBestKernel (like lru_cache in Python)
+	// cached result for findBestKernel
 	cachedKernelOnce sync.Once
 	cachedKernelPath string
 	cachedModulesDir string
@@ -161,15 +160,14 @@ func (kd *KernelDetector) scanBootDirectory(ctx context.Context) ([]kernelCandid
 
 func (kd *KernelDetector) extractVersion(ctx context.Context, kernelPath string) (string, error) {
 	// Try 'file' command first
-	// Python's _extract_version: raises ProcessError on timeout,
-	// logs and returns None on other errors.
+	// On timeout, return a specific error; other errors silently fall through.
 	result, err := system.DefaultRunner.Run(ctx, []string{"file", kernelPath}, system.RunCmdOpts{
 		Capture: true,
 		Check:   false,
 		Timeout: 5000,
 	})
 	if err != nil {
-		// Check for timeout — re-raise with specific message like Python
+		// Check for timeout — return a specific error message.
 		if strings.Contains(err.Error(), "timed out") {
 			return "", fmt.Errorf("'file' command timed out for %s", kernelPath)
 		}
@@ -276,7 +274,7 @@ func (kd *KernelDetector) ResetCache() {
 // Ensure kernelDetector satisfies the interface.
 var _ = (*KernelDetector)(nil)
 
-// For backward compatibility and to match Python's classmethod pattern.
+// FindBestKernel is a package-level helper wrapping KernelDetector.FindBestKernel.
 func FindBestKernel(ctx context.Context) (string, string, error) {
 	kd := &KernelDetector{}
 	return kd.FindBestKernel(ctx)

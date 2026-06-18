@@ -13,7 +13,6 @@ import (
 )
 
 // ResolveResult holds the result of resolving multiple key identifiers.
-// Matches Python's KeyResolveResult.
 type ResolveResult struct {
 	Items    []*model.SSHKeyItem
 	Errors   []string
@@ -26,8 +25,6 @@ type EnrichFunc func(ctx context.Context, keys []*model.SSHKeyItem, include []st
 
 // Resolver resolves key identifiers (name, ID prefix, or .pub file path)
 // to SSHKeyItem instances using database storage.
-// Matches Python's KeyResolver exactly — no keysDir field (Python resolver
-// only takes repo and include).
 type Resolver struct {
 	repo       Repository
 	include    []string
@@ -62,7 +59,6 @@ func (r *Resolver) enrich(ctx context.Context, keys []*model.SSHKeyItem) []*mode
 
 // ByID resolves a key by ID (fingerprint) prefix.
 // Accepts both "SHA256:abc..." and bare "abc..." by auto-prepending "SHA256:".
-// Matches Python's KeyResolver.by_id().
 func (r *Resolver) ByID(ctx context.Context, keyID string) (*model.SSHKeyItem, error) {
 	candidates := []string{keyID}
 	if !strings.HasPrefix(keyID, "SHA256:") {
@@ -90,7 +86,6 @@ func (r *Resolver) ByID(ctx context.Context, keyID string) (*model.SSHKeyItem, e
 }
 
 // ByName resolves a key by name.
-// Matches Python's KeyResolver.by_name().
 func (r *Resolver) ByName(ctx context.Context, name string) (*model.SSHKeyItem, error) {
 	key, err := r.repo.GetByName(ctx, name)
 	if err != nil {
@@ -105,9 +100,7 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.SSHKeyItem, 
 }
 
 // Resolve resolves a key by name, ID prefix, or .pub file path (in that order).
-// Matches Python's KeyResolver.resolve() exactly.
-// Only catches KeyNotFoundError (matching Python's except KeyNotFoundError);
-// other errors (e.g. database errors) propagate immediately.
+// Only catches KeyNotFoundError; other errors propagate immediately.
 func (r *Resolver) Resolve(ctx context.Context, value string) (*model.SSHKeyItem, error) {
 	// Try by name first
 	key, err := r.ByName(ctx, value)
@@ -134,12 +127,10 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.SSHKeyItem
 		if err == nil {
 			return key, nil
 		}
-		// Python catches ONLY KeyNotFoundError; other errors propagate as-is
 		if !errs.IsNotFound(err) {
 			return nil, err
 		}
-		// Python raises MVMKeyError here (not KeyNotFoundError), which propagates
-		// through resolve_many as an uncaught exception.
+		// Key exists on disk but not in cache — return a descriptive error.
 		return nil, errs.New(errs.CodeKeyError,
 			"Public key file '"+value+"' found on disk but key '"+stem+"' is not in the cache. "+
 				"Import it first with: mvm key import "+stem+" "+value,
@@ -157,10 +148,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.SSHKeyItem
 }
 
 // ResolveMany resolves multiple key identifiers, deduplicating by input.
-// Matches Python's KeyResolver.resolve_many().
-// Only catches KeyNotFoundError (not-found errors); all other errors
-// (e.g. MVMKeyError from a .pub path that exists but key is not cached)
-// propagate immediately, matching Python's except KeyNotFoundError clause.
+// Only catches KeyNotFoundError; all other errors propagate immediately.
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*ResolveResult, error) {
 	uniqueIDs := infra.Dedup(identifiers)
 
@@ -171,12 +159,11 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*Reso
 	for _, identifier := range uniqueIDs {
 		key, err := r.Resolve(ctx, identifier)
 		if err != nil {
-			// Only catch not-found errors (matching Python's except KeyNotFoundError).
-			// Other error types (MVMKeyError, database errors) propagate.
+		// Only catch not-found errors; other error types propagate.
 			if !errs.IsNotFound(err) {
 				return nil, err
 			}
-			// Match Python's str(e) which returns just the message for MVMError subclasses.
+			// Return just the error message.
 			errsList = append(errsList, err.Error())
 		} else if !resolvedIDs[key.ID] {
 			resolvedIDs[key.ID] = true
@@ -199,7 +186,6 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*Reso
 }
 
 // GetDefaults resolves all SSH keys marked as default.
-// Matches Python's KeyResolver.get_defaults().
 func (r *Resolver) GetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error) {
 	keys, err := r.repo.GetDefaults(ctx)
 	if err != nil {

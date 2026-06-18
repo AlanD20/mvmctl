@@ -29,7 +29,7 @@ func newEnricher() *Enricher {
 	)
 }
 
-// ─── EnrichVM: Forward relations ────────────────────────────────────────────
+// --- EnrichVM: Forward relations ---
 // Rationale: EnrichVM resolves kernel, image, binary, and network via
 // forward FK lookups. Each must correctly batch-resolve and assign.
 
@@ -102,7 +102,7 @@ func TestEnrichVM_Network(t *testing.T) {
 	assert.Equal(t, "default", vms[0].Network.Name)
 }
 
-// ─── EnrichVM: All forward relations combined ───────────────────────────────
+// --- EnrichVM: All forward relations combined ---
 // Rationale: Enrichment with multiple paths must resolve all correctly.
 
 func TestEnrichVM_AllForward(t *testing.T) {
@@ -132,7 +132,7 @@ func TestEnrichVM_AllForward(t *testing.T) {
 	assert.NotNil(t, vms[0].Network, "network")
 }
 
-// ─── EnrichVM: Missing FK ───────────────────────────────────────────────────
+// --- EnrichVM: Missing FK ---
 // Rationale: When a VM references a nonexistent kernel/image/binary,
 // enrichment should not error — the field remains nil (soft-fail).
 
@@ -150,7 +150,7 @@ func TestEnrichVM_MissingNetwork_leavesNil(t *testing.T) {
 	assert.Nil(t, vms[0].Network)
 }
 
-// ─── EnrichVM: Empty / nil input ────────────────────────────────────────────
+// --- EnrichVM: Empty / nil input ---
 // Rationale: Empty input must not error or panic.
 
 func TestEnrichVM_EmptyInput(t *testing.T) {
@@ -159,7 +159,7 @@ func TestEnrichVM_EmptyInput(t *testing.T) {
 	require.NoError(t, e.EnrichVM(ctx, []*model.VM{}, "kernel"))
 }
 
-// ─── EnrichVM: Volumes ──────────────────────────────────────────────────────
+// --- EnrichVM: Volumes ---
 // Rationale: Volume enrichment uses JSON-array-to-list resolution.
 // Must correctly match each VM to its volumes.
 
@@ -191,7 +191,7 @@ func TestEnrichVM_Volumes_noneAssigned(t *testing.T) {
 	assert.Nil(t, vms[0].Volumes)
 }
 
-// ─── EnrichVM: Network Leases (nested) ──────────────────────────────────────
+// --- EnrichVM: Network Leases (nested) ---
 // Rationale: network.leases is a nested relation. "network" must resolve
 // before "network.leases" — the sortByDotCount helper ensures this.
 
@@ -217,7 +217,7 @@ func TestEnrichVM_NetworkLeases(t *testing.T) {
 	assert.Len(t, vms[0].Network.Leases, 1)
 }
 
-// ─── EnrichNetwork ──────────────────────────────────────────────────────────
+// --- EnrichNetwork ---
 // Rationale: Network enrichment resolves leases and referencing VMs.
 
 func TestEnrichNetwork_Leases(t *testing.T) {
@@ -254,7 +254,7 @@ func TestEnrichNetwork_VMs(t *testing.T) {
 	assert.Len(t, nets[0].VMs, 1)
 }
 
-// ─── EnrichImage ────────────────────────────────────────────────────────────
+// --- EnrichImage ---
 // Rationale: Image enrichment resolves VMs referencing each image.
 
 func TestEnrichImage_VMs(t *testing.T) {
@@ -275,7 +275,7 @@ func TestEnrichImage_VMs(t *testing.T) {
 	assert.Equal(t, "vm-1", images[0].VMs[0].ID)
 }
 
-// ─── EnrichKernel ───────────────────────────────────────────────────────────
+// --- EnrichKernel ---
 // Rationale: Kernel enrichment resolves VMs referencing each kernel.
 
 func TestEnrichKernel_VMs(t *testing.T) {
@@ -295,7 +295,7 @@ func TestEnrichKernel_VMs(t *testing.T) {
 	assert.Len(t, kernels[0].VMs, 1)
 }
 
-// ─── EnrichBinary ───────────────────────────────────────────────────────────
+// --- EnrichBinary ---
 // Rationale: Binary enrichment resolves VMs referencing each binary.
 
 func TestEnrichBinary_VMs(t *testing.T) {
@@ -315,7 +315,7 @@ func TestEnrichBinary_VMs(t *testing.T) {
 	assert.Len(t, binaries[0].VMs, 1)
 }
 
-// ─── EnrichVolume ───────────────────────────────────────────────────────────
+// --- EnrichVolume ---
 // Rationale: Volume enrichment resolves VMs referencing each volume.
 
 func TestEnrichVolume_VMs(t *testing.T) {
@@ -335,7 +335,7 @@ func TestEnrichVolume_VMs(t *testing.T) {
 	assert.Len(t, vols[0].VMs, 1)
 }
 
-// ─── Error handling: invalid include path ───────────────────────────────────
+// --- Error handling: invalid include path ---
 // Rationale: Enrichment with an unknown path must error with available options.
 
 func TestEnrichVM_unknownPath(t *testing.T) {
@@ -355,7 +355,7 @@ func TestEnrichVM_emptyInclude(t *testing.T) {
 	assert.Contains(t, err.Error(), "include list is required")
 }
 
-// ─── Duplicate enrichment ───────────────────────────────────────────────────
+// --- Duplicate enrichment ---
 // Rationale: Enriching the same relation twice must not duplicate data.
 
 func TestEnrichVM_DuplicateCall(t *testing.T) {
@@ -375,7 +375,7 @@ func TestEnrichVM_DuplicateCall(t *testing.T) {
 	assert.NotNil(t, vms[0].Kernel)
 }
 
-// ─── Concurrent enrichment ──────────────────────────────────────────────────
+// --- Concurrent enrichment ---
 // Rationale: Enrichment is called from concurrent contexts (batch resolve).
 // No data races or panics.
 
@@ -400,7 +400,7 @@ func TestEnrichVM_Concurrent(t *testing.T) {
 	<-done
 }
 
-// ─── Context cancellation (enrichment methods) ──────────────────────────────
+// --- Context cancellation (enrichment methods) ---
 // Rationale: All Enrich* methods take context.Context. With in-memory repos
 // the context is not checked (no DB or HTTP I/O), so cancellation must not
 // cause panic or hang — it returns successfully with populated relations.
@@ -425,7 +425,7 @@ func TestEnrichVM_ContextCancellation(t *testing.T) {
 	assert.Equal(t, "6.1", vms[0].Kernel.Version)
 }
 
-// ─── Context cancellation — remaining Enrich* methods ───────────────────────
+// --- Context cancellation — remaining Enrich* methods ---
 // Rationale: EnrichNetwork, EnrichImage, EnrichKernel, EnrichBinary,
 // EnrichVolume all take context.Context. With in-memory repos the context
 // is not checked (no DB or HTTP I/O), so cancellation must not cause panic
@@ -501,7 +501,7 @@ func TestEnrichVolume_ContextCancellation(t *testing.T) {
 	require.NoError(t, err, "cancelled context must not block enrichment with in-memory repos")
 }
 
-// ─── validatePaths ──────────────────────────────────────────────────────────
+// --- validatePaths ---
 // Rationale: validatePaths guards every enrichment call. If it misses an
 // invalid path or rejects a valid one, enrichment silently skips or fails.
 
@@ -543,7 +543,7 @@ func TestValidatePaths(t *testing.T) {
 	}
 }
 
-// ─── resolveInclude ─────────────────────────────────────────────────────────
+// --- resolveInclude ---
 // Rationale: resolveInclude is the entry point for enrichment path resolution.
 // It validates and sorts include paths. An incorrect sort would break nested
 // relation ordering (parents must resolve before children).
@@ -594,7 +594,7 @@ func TestResolveInclude(t *testing.T) {
 	}
 }
 
-// ─── isEnrichmentError ──────────────────────────────────────────────────────
+// --- isEnrichmentError ---
 // Rationale: isEnrichmentError determines whether a repository error should
 // soft-fail or propagate. If it returns false for a DomainError, enrichment
 // would propagate not-found errors as hard failures instead of populating nil.
@@ -626,7 +626,7 @@ func TestIsEnrichmentError(t *testing.T) {
 	}
 }
 
-// ─── safeCastNetwork ───────────────────────────────────────────────────────
+// --- safeCastNetwork ---
 // Rationale: safeCastNetwork is used in nested enrichment (network.leases).
 // A panic or wrong-type handling here would crash the enricher on any VM with
 // a resolved network.
@@ -670,7 +670,7 @@ func TestSafeCastNetwork(t *testing.T) {
 	}
 }
 
-// ─── collectUniqueVMStrings ─────────────────────────────────────────────────
+// --- collectUniqueVMStrings ---
 // Rationale: collectUniqueVMStrings extracts and deduplicates string fields
 // from VM instances. If it misses duplicates, the enricher makes redundant
 // repository calls. If it includes empty strings, the enricher looks up
@@ -719,7 +719,7 @@ func TestCollectUniqueVMStrings(t *testing.T) {
 	}
 }
 
-// ─── extractNetworkIDs ──────────────────────────────────────────────────────
+// --- extractNetworkIDs ---
 // Rationale: extractNetworkIDs feeds network enrichment (leases, VMs). Nil
 // entries, empty IDs, or duplicates would cause wasted lookups or nil-deref.
 
@@ -760,7 +760,7 @@ func TestExtractNetworkIDs(t *testing.T) {
 	}
 }
 
-// ─── collectImageIDs (representative collect*ID helper) ─────────────────────
+// --- collectImageIDs (representative collect*ID helper) ---
 // Rationale: collectImageIDs, collectKernelIDs, collectBinaryIDs, and
 // collectVolumeIDs are structurally identical (nil-skip, empty-skip, dedup).
 // Testing one representative validates the pattern for all four.
@@ -802,7 +802,7 @@ func TestCollectImageIDs(t *testing.T) {
 	}
 }
 
-// ─── collectKernelIDs ─────────────────────────────────────────────────────
+// --- collectKernelIDs ---
 // Rationale: Same pattern as collectImageIDs — validates the structural
 // clone for KernelItem slices.
 
@@ -835,7 +835,7 @@ func TestCollectKernelIDs(t *testing.T) {
 	}
 }
 
-// ─── collectBinaryIDs ─────────────────────────────────────────────────────
+// --- collectBinaryIDs ---
 // Rationale: Same pattern as collectImageIDs — validates the structural
 // clone for BinaryItem slices.
 
@@ -868,7 +868,7 @@ func TestCollectBinaryIDs(t *testing.T) {
 	}
 }
 
-// ─── collectVolumeIDs ─────────────────────────────────────────────────────
+// --- collectVolumeIDs ---
 // Rationale: Same pattern as collectImageIDs — validates the structural
 // clone for VolumeItem slices.
 
@@ -901,7 +901,7 @@ func TestCollectVolumeIDs(t *testing.T) {
 	}
 }
 
-// ─── sortByDotCount (edge cases missing from batch_test.go) ─────────────────
+// --- sortByDotCount (edge cases missing from batch_test.go) ---
 // Rationale: sortByDotCount uses SliceStable. Equal-dot-count paths must
 // preserve their relative input order. This is critical for enrichment
 // ordering within the same depth level.
@@ -935,7 +935,7 @@ func TestSortByDotCount_EqualDotCount(t *testing.T) {
 	}
 }
 
-// ─── EnrichVM: Vsock ────────────────────────────────────────────────────────
+// --- EnrichVM: Vsock ---
 // Rationale: Vsock enrichment uses a reverse relation lookup (VsockConfigItem
 // references VM by VmID). If the batch resolution or assignment is wrong, VMs
 // get incorrect or missing vsock configurations.
@@ -962,7 +962,7 @@ func TestEnrichVM_Vsock(t *testing.T) {
 	assert.Equal(t, "tok", vms[0].Vsock.Token)
 }
 
-// ─── EnrichVM: Vsock, no configs ────────────────────────────────────────────
+// --- EnrichVM: Vsock, no configs ---
 // Rationale: When no vsock config exists for any VM, enrichment must succeed
 // as a soft-fail (no error). All Vsock fields remain nil.
 
@@ -974,7 +974,7 @@ func TestEnrichVM_Vsock_NoConfigs(t *testing.T) {
 	assert.Nil(t, vms[0].Vsock, "Vsock must remain nil when no config exists")
 }
 
-// ─── EnrichVM: Vsock, mixed VMs ─────────────────────────────────────────────
+// --- EnrichVM: Vsock, mixed VMs ---
 // Rationale: When some VMs have vsock configs and some don't, enrichment must
 // correctly assign configs only to the VMs that have them, leaving others nil.
 

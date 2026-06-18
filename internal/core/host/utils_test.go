@@ -13,7 +13,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── GenerateSudoersContent ────────────────────────────────────────────────────
+// --- GenerateSudoersContent ---
 // Rationale: This function produces the sudoers drop-in file for the mvm group.
 // A malformed sudoers file can lock out sudo access or leave privileged binaries
 // unwrapped, breaking network and firewall management.
@@ -58,7 +58,7 @@ func TestGenerateSudoersContent(t *testing.T) {
 	})
 }
 
-// ─── HardwareFromState ─────────────────────────────────────────────────────────
+// --- HardwareFromState ---
 // Rationale: Reconstructs HostHardware from persisted HostStateItem. Bugs here
 // cause stale capacity detection to silently report zero/null values, which
 // breaks VM placement and resource accounting.
@@ -217,7 +217,7 @@ func TestHardwareFromState(t *testing.T) {
 	}
 }
 
-// ─── LimitsFromState ───────────────────────────────────────────────────────────
+// --- LimitsFromState ---
 // Rationale: Reconstructs HostLimits from persisted HostStateItem. Incorrect
 // defaults (port range, KSM, cgroup version) can silently break networking,
 // overcommit host resources, or misreport virtualization capabilities.

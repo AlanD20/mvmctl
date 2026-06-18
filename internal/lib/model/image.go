@@ -1,8 +1,8 @@
 package model
 
-// ── ImageItem ──
+// --- ImageItem ---
 
-// ImageItem corresponds to Python's ImageItem dataclass exactly.
+// ImageItem represents a cached VM image.
 type ImageItem struct {
 	ID               string   `json:"id"                          db:"id"`
 	Type             string   `json:"type"                        db:"type"`
@@ -29,9 +29,9 @@ type ImageItem struct {
 	VMs []*VM `json:"vms,omitempty"`
 }
 
-// ── ImageSpec ──
+// --- ImageSpec ---
 
-// ImageSpec corresponds to Python's ImageSpec dataclass.
+// ImageSpec defines an image in the YAML spec.
 type ImageSpec struct {
 	Type            string  `yaml:"type"`
 	Version         string  `yaml:"version"`

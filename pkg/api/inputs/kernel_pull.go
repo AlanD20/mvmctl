@@ -1,5 +1,4 @@
 package inputs
-
 import (
 	"context"
 	"fmt"
@@ -7,7 +6,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
@@ -15,8 +13,7 @@ import (
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
 )
-
-// KernelPullInput matches Python's KernelPullInput dataclass.
+// KernelPullInput specifies kernel pull input.
 type KernelPullInput struct {
 	KernelType   string `json:"type"                    yaml:"type"`
 	Version      string `json:"version,omitempty"       yaml:"version,omitempty"`
@@ -30,8 +27,7 @@ type KernelPullInput struct {
 	SetDefault   bool   `json:"default"                 yaml:"default"`
 	Features     string `json:"features"                yaml:"features"`
 }
-
-// ResolvedKernelPullRequest matches Python's ResolvedKernelPullRequest (frozen dataclass).
+// ResolvedKernelPullRequest specifies resolved kernel pull request.
 type ResolvedKernelPullRequest struct {
 	KernelType   string
 	Arch         string
@@ -44,16 +40,13 @@ type ResolvedKernelPullRequest struct {
 	Version      string
 	Features     []string
 }
-
-// KernelPullRequest matches Python's KernelPullRequest.
-//
+// KernelPullRequest specifies kernel pull request.
 // Resolve and validate kernel pull/build inputs.
 type KernelPullRequest struct {
 	cfg    *config.Service
 	input  KernelPullInput
 	result *ResolvedKernelPullRequest
 }
-
 // NewKernelPullRequest creates a new KernelPullRequest.
 func NewKernelPullRequest(inputs KernelPullInput, cfg *config.Service) *KernelPullRequest {
 	return &KernelPullRequest{
@@ -61,35 +54,23 @@ func NewKernelPullRequest(inputs KernelPullInput, cfg *config.Service) *KernelPu
 		input: inputs,
 	}
 }
-
 // Result returns the resolved request, or nil if resolve() has not been called.
-
 // Resolve resolves all inputs to explicit values.
-// Matches Python's KernelPullRequest.resolve() exactly.
 func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullRequest, error) {
-	// Resolve version — Python:
-	//   if self._inputs.version is not None → version = self._inputs.version
-	//   else → version = SettingsService.resolve(self._db, "defaults.kernel", "version")
+	// Resolve version — use explicit input or fallback to default.
 	version := r.input.Version
 	if version == "" {
 		version, _ = r.cfg.GetString(ctx, "defaults.kernel", "version")
 	}
-
-	// Python: if self._inputs.kernel_type == "firecracker": version = None
-	//         elif version is not None: version = version.removeprefix("v")
+	// Strip "v" prefix from explicit version strings.
 	if r.input.KernelType == "firecracker" {
 		version = ""
 	} else if version != "" {
 		version = strings.TrimPrefix(version, "v")
 	}
-
 	// Arch always matches the host machine — not user-configurable
 	arch := system.RuntimeArch()
-
-	// Resolve jobs — Python:
-	//   if self._inputs.jobs is not None → jobs = self._inputs.jobs
-	//   else → jobs = SettingsService.resolve(self._db, "defaults.kernel", "build_jobs")
-	//   if jobs is None → jobs = os.cpu_count() or SettingsService.resolve(...)
+	// Resolve jobs — use explicit input, setting, or CPU count.
 	var jobs int
 	if r.input.Jobs != 0 {
 		jobs = r.input.Jobs
@@ -104,10 +85,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	if jobs == 0 {
 		jobs = 1
 	}
-
-	// Resolve features from comma-separated input string — Python:
-	//   features_raw = (self._inputs.features or "").strip()
-	//   features_list = ([f.strip() for f in features_raw.split(",") if f.strip()] if features_raw else [])
+	// Resolve features from comma-separated input string.
 	featuresRaw := strings.TrimSpace(r.input.Features)
 	var featuresList []string
 	if featuresRaw != "" {
@@ -118,30 +96,23 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 			}
 		}
 	}
-
-	// Auto-include "kvm" when defaults.vm.nested_virt is enabled — Python:
-	//   nested_virt = bool(SettingsService.resolve(self._db, "defaults.vm", "nested_virt"))
-	//   if nested_virt and "kvm" not in features_list: features_list.insert(0, "kvm")
-	// Python's bool() is truthy for many types: non-empty strings, non-zero numbers,
-	// non-None objects. In Go, we just check for a truthy config value.
+	// Auto-include "kvm" feature when nested virtualization is enabled
+	// (configured via "defaults.vm" setting).
 	nestedVirtBool, _ := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt")
 	if nestedVirtBool {
 		if !slices.Contains(featuresList, "kvm") {
 			featuresList = append([]string{"kvm"}, featuresList...)
 		}
 	}
-
-	// Resolve output_dir — Python: self._inputs.output_dir or CacheUtils.get_kernels_dir()
+	// Resolve output directory — use explicit input or the default kernels dir.
 	outputDir := infra.GetKernelsDir()
 	if r.input.OutputDir != "" {
 		outputDir = r.input.OutputDir
 	}
-
 	var kernelConfig *string
 	if r.input.KernelConfig != "" {
 		kernelConfig = &r.input.KernelConfig
 	}
-
 	r.result = &ResolvedKernelPullRequest{
 		KernelType:   r.input.KernelType,
 		Version:      version,
@@ -154,15 +125,12 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 		SetDefault:   r.input.SetDefault,
 		Features:     featuresList,
 	}
-
 	// Validate
 	if err := r.ensureValidate(); err != nil {
 		return nil, err
 	}
-
 	return r.result, nil
 }
-
 func (r *KernelPullRequest) ensureValidate() error {
 	if r.result == nil {
 		return errs.New(
@@ -171,7 +139,6 @@ func (r *KernelPullRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	// 1. Validate kernel type
 	validTypes := kernel.KernelValidTypes
 	if !validTypes[r.result.KernelType] {
@@ -180,12 +147,7 @@ func (r *KernelPullRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
-	// 2. Validate version (semver-like: 5.10, 6.1.0, v6.1) — Python:
-	//    version = self.result.version
-	//    if version:
-	//        stripped = version.removeprefix("v")
-	//        if not re.fullmatch(r"\d+(\.\d+)*", stripped):
+	// 2. Validate version (semver-like: 5.10, 6.1.0, v6.1).
 	if r.result.Version != "" {
 		stripped := strings.TrimPrefix(r.result.Version, "v")
 		if !version.IsValidVersion(stripped) {
@@ -199,7 +161,6 @@ func (r *KernelPullRequest) ensureValidate() error {
 			)
 		}
 	}
-
 	// 3. Validate architecture
 	if !slices.Contains(infra.FirecrackerSupportedArches, r.result.Arch) {
 		return errs.New(
@@ -212,9 +173,8 @@ func (r *KernelPullRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
-	// 4. Validate output directory (must exist or be creatable) — Python:
-	//    if output_dir.exists() and not output_dir.is_dir():
+	// 4. Validate output directory (must exist or be creatable) —
+	// if output_dir.exists() and not output_dir.is_dir():
 	if r.result.OutputDir != "" {
 		if fi, err := os.Stat(r.result.OutputDir); err == nil && !fi.IsDir() {
 			return errs.New(
@@ -224,9 +184,8 @@ func (r *KernelPullRequest) ensureValidate() error {
 			)
 		}
 	}
-
-	// 5. Validate build jobs (positive integer) — Python:
-	//    if jobs <= 0:
+	// 5. Validate build jobs (positive integer) —
+	// if jobs <= 0:
 	if r.result.Jobs <= 0 {
 		return errs.New(
 			errs.CodeKernelBuildFailed,
@@ -234,6 +193,5 @@ func (r *KernelPullRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	return nil
 }
