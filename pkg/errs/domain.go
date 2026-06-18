@@ -230,6 +230,9 @@ var codeClassMap = map[Code]Class{
 	CodeCPVMNoIP:              ClassInternal,
 	CodeCPVMNotFound:          ClassValidation,
 
+	// ── Vsock domain ──
+	CodeVsockUpgradeInProgress: ClassConflict,
+
 	// ── BundledAsset domain ──
 	CodeBundledAssetError:    ClassInternal,
 	CodeBundledAssetNotFound: ClassValidation,
@@ -383,6 +386,8 @@ var codeOpMap = map[Code]string{
 
 	CodeBundledAssetError:    "asset",
 	CodeBundledAssetNotFound: "asset",
+
+	CodeVsockUpgradeInProgress: "vsock",
 
 	CodeCacheCleanFailed: "cache",
 

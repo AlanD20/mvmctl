@@ -21,7 +21,9 @@ const (
 
 const (
 	requestTypeFileTransfer = "file-transfer"
+	requestTypeVersion      = "version"
 	responseTypeFTReady     = "ft-ready"
+	responseTypeVersion     = "version"
 	ftBufferSize            = 262144
 )
 

@@ -84,7 +84,7 @@ func (c *Client) FTCopyToVM(
 	overwrite bool,
 	onProgress event.OnDownloadCallback,
 ) (*FTResult, error) {
-	conn, err := c.waitForAgent(ctx)
+	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("ft: vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
 		return nil, fmt.Errorf("vsock connection failed: %w", err)
@@ -342,7 +342,7 @@ func (c *Client) FTCopyFromVM(
 	overwrite bool,
 	onProgress event.OnDownloadCallback,
 ) (*FTResult, error) {
-	conn, err := c.waitForAgent(ctx)
+	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("ft: vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
 		return nil, fmt.Errorf("vsock connection failed: %w", err)
@@ -557,7 +557,7 @@ func (c *Client) FTCopyVMToVM(
 	destClient *Client,
 ) (*FTResult, error) {
 	// Connect to source VM.
-	srcConn, err := c.waitForAgent(ctx)
+	srcConn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("ft: source vsock dial failed", "vm_id", c.item.VmID, "error", err)
 		return nil, fmt.Errorf("source vsock connection failed: %w", err)
@@ -565,7 +565,7 @@ func (c *Client) FTCopyVMToVM(
 	defer srcConn.Close()
 
 	// Connect to destination VM.
-	dstConn, err := destClient.waitForAgent(ctx)
+	dstConn, err := destClient.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("ft: dest vsock dial failed", "vm_id", destClient.item.VmID, "error", err)
 		return nil, fmt.Errorf("dest vsock connection failed: %w", err)

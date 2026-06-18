@@ -12,16 +12,18 @@ const (
 	requestTypeExec    = "exec"
 	requestTypeExecTTY = "exec-tty"
 	requestTypePing    = "ping"
+	requestTypeVersion = "version"
 )
 
 // execResponse type constants.
 const (
-	responseTypeResult = "result"
-	responseTypeTTY    = "tty"
-	responseTypePong   = "pong"
-	responseTypeError  = "error"
-	responseTypeStdout = "stdout"
-	responseTypeStderr = "stderr"
+	responseTypeResult  = "result"
+	responseTypeTTY     = "tty"
+	responseTypePong    = "pong"
+	responseTypeVersion = "version"
+	responseTypeError   = "error"
+	responseTypeStdout  = "stdout"
+	responseTypeStderr  = "stderr"
 )
 
 // File-transfer request/response types.

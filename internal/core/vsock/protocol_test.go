@@ -65,11 +65,30 @@ func startMockVsockAgent(t *testing.T, handshakeOK bool, execResult *vsock.ExecR
 					_, _ = fmt.Fprintf(conn, "ERR\n")
 				}
 
-				// If an exec response is configured, read the exec request
-				// and send back the response in streaming format.
+				// If an exec response is configured, handle the version probe
+				// followed by the exec request.
 				if execResult != nil {
-					// Read and discard the exec request frame
-					_, _ = reader.ReadString('\n')
+					// Read first JSON frame — might be version probe or exec request
+					firstLine, _ := reader.ReadString('\n')
+					var firstReq struct {
+						Type string `json:"type"`
+					}
+					if json.Unmarshal([]byte(firstLine), &firstReq) == nil && firstReq.Type == "version" {
+						// Respond to version probe
+						versionData, _ := json.Marshal(map[string]string{"agent_version": "0.0.0"})
+						versionResp := map[string]any{
+							"id":   "v:1",
+							"type": "version",
+							"data": string(versionData),
+						}
+						data, _ := json.Marshal(versionResp)
+						_, _ = conn.Write(data)
+						_, _ = conn.Write([]byte("\n"))
+						// Read the next frame — the actual exec request
+						_, _ = reader.ReadString('\n')
+					}
+					// If first frame was not a version probe, it was already the
+					// exec request — nothing more to read.
 
 					// Send stdout frame if there is stdout data.
 					if execResult.Stdout != "" {
