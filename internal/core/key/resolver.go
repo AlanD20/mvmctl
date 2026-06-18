@@ -159,7 +159,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*Reso
 	for _, identifier := range uniqueIDs {
 		key, err := r.Resolve(ctx, identifier)
 		if err != nil {
-		// Only catch not-found errors; other error types propagate.
+			// Only catch not-found errors; other error types propagate.
 			if !errs.IsNotFound(err) {
 				return nil, err
 			}

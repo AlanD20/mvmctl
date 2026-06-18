@@ -1,12 +1,15 @@
 package inputs
+
 import (
 	"context"
 	"mvmctl/internal/core/network"
 	libnet "mvmctl/internal/lib/network"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // NetworkCreateInput specifies network create input.
 type NetworkCreateInput struct {
 	Name        string   `json:"name"                   yaml:"name"`
@@ -16,6 +19,7 @@ type NetworkCreateInput struct {
 	NATGateways []string `json:"nat_gateways,omitempty" yaml:"nat_gateways,omitempty"`
 	SetDefault  bool     `json:"default"                yaml:"default"`
 }
+
 // ResolvedNetworkCreateRequest specifies resolved network create request.
 type ResolvedNetworkCreateRequest struct {
 	Name        string
@@ -25,6 +29,7 @@ type ResolvedNetworkCreateRequest struct {
 	NATEnabled  bool
 	NATGateways []string
 }
+
 // NetworkCreateRequest specifies network create request.
 // Resolve and validate network creation inputs.
 // Takes NetworkCreateInput and resolves DB-backed defaults,
@@ -36,6 +41,7 @@ type NetworkCreateRequest struct {
 	result      *ResolvedNetworkCreateRequest
 	networkRepo network.Repository
 }
+
 // NewNetworkCreateRequest creates a new NetworkCreateRequest.
 func NewNetworkCreateRequest(
 	inputs NetworkCreateInput,
@@ -48,6 +54,7 @@ func NewNetworkCreateRequest(
 		networkRepo: networkRepo,
 	}
 }
+
 // Result returns the resolved request, or nil if resolve() has not been called.
 // Resolve resolves all inputs to explicit values.
 func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCreateRequest, error) {

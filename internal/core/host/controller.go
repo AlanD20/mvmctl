@@ -22,7 +22,6 @@ func NewController(repo Repository) *Controller {
 // RecordChanges persists host state changes to the database.
 // Uses an atomic bulk insert, then deletes all prior sessions so only
 // the latest backup remains.
-//
 func (c *Controller) RecordChanges(
 	ctx context.Context,
 	changes []*model.HostStateChangeItem,

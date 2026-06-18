@@ -1,18 +1,20 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
-	"os"
-	"runtime"
-	"slices"
-	"strings"
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
+	"os"
+	"runtime"
+	"slices"
+	"strings"
 )
+
 // KernelPullInput specifies kernel pull input.
 type KernelPullInput struct {
 	KernelType   string `json:"type"                    yaml:"type"`
@@ -27,6 +29,7 @@ type KernelPullInput struct {
 	SetDefault   bool   `json:"default"                 yaml:"default"`
 	Features     string `json:"features"                yaml:"features"`
 }
+
 // ResolvedKernelPullRequest specifies resolved kernel pull request.
 type ResolvedKernelPullRequest struct {
 	KernelType   string
@@ -40,6 +43,7 @@ type ResolvedKernelPullRequest struct {
 	Version      string
 	Features     []string
 }
+
 // KernelPullRequest specifies kernel pull request.
 // Resolve and validate kernel pull/build inputs.
 type KernelPullRequest struct {
@@ -47,6 +51,7 @@ type KernelPullRequest struct {
 	input  KernelPullInput
 	result *ResolvedKernelPullRequest
 }
+
 // NewKernelPullRequest creates a new KernelPullRequest.
 func NewKernelPullRequest(inputs KernelPullInput, cfg *config.Service) *KernelPullRequest {
 	return &KernelPullRequest{
@@ -54,6 +59,7 @@ func NewKernelPullRequest(inputs KernelPullInput, cfg *config.Service) *KernelPu
 		input: inputs,
 	}
 }
+
 // Result returns the resolved request, or nil if resolve() has not been called.
 // Resolve resolves all inputs to explicit values.
 func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullRequest, error) {

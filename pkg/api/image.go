@@ -1,15 +1,12 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 	"mvmctl/internal/assets"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
@@ -21,7 +18,12 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
+
 // ImageAPI defines the public interface for image operations.
 type ImageAPI interface {
 	ImagePrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
@@ -53,6 +55,7 @@ type ImageAPI interface {
 	ImageInspect(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error)
 	ImageSetDefault(ctx context.Context, input inputs.ImageInput) error
 }
+
 // ImagePrune prunes unused images.
 // queries Repository for
 // referenced images instead of using img.VMs field.
@@ -98,6 +101,7 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 	}
 	return removed, nil
 }
+
 // ImagePull downloads an image with full orchestration.
 func (op *Operation) ImagePull(
 	ctx context.Context,
@@ -318,6 +322,7 @@ func (op *Operation) ImagePull(
 	}
 	return imageItem, nil
 }
+
 // ImageImport imports a local image file.
 func (op *Operation) ImageImport(
 	ctx context.Context,
@@ -428,6 +433,7 @@ func (op *Operation) ImageImport(
 	}
 	return imageItem, nil
 }
+
 // ImageWarm pre-decompresses images to ready pool for fast VM creation.
 func (op *Operation) ImageWarm(
 	ctx context.Context,
@@ -469,6 +475,7 @@ func (op *Operation) ImageWarm(
 	}
 	return warmed, nil
 }
+
 // ImageRemove removes images by input.
 func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult {
 	results := make([]errs.OperationResult, 0)
@@ -518,6 +525,7 @@ func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, f
 	}
 	return &errs.BatchResult{Items: results}
 }
+
 // ImageListAll returns images.
 // When remote=false, returns ([]*model.ImageItem, nil, error).
 // When remote=true, returns (nil, []model.VersionInfo, error).
@@ -590,6 +598,7 @@ func (op *Operation) ImageListAll(
 	items, err := op.Services.Image.ListAll(ctx, true, false)
 	return items, nil, err
 }
+
 // ImageGet returns a single image by ID prefix or type.
 // uses ImageRequest for resolution.
 func (op *Operation) ImageGet(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error) {
@@ -603,6 +612,7 @@ func (op *Operation) ImageGet(ctx context.Context, input inputs.ImageInput) (*mo
 	}
 	return resolved.Images[0], nil
 }
+
 // ImageInspect returns grouped dict of an image.
 func (op *Operation) ImageInspect(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error) {
 	img, err := op.ImageGet(ctx, input)
@@ -629,6 +639,7 @@ func (op *Operation) ImageInspect(ctx context.Context, input inputs.ImageInput) 
 		},
 	}, nil
 }
+
 // ImageSetDefault sets an image as default.
 // uses ImageRequest for resolution.
 func (op *Operation) ImageSetDefault(ctx context.Context, input inputs.ImageInput) error {
@@ -647,6 +658,7 @@ func (op *Operation) ImageSetDefault(ctx context.Context, input inputs.ImageInpu
 	op.AuditLog.LogOperation("image.set_default", map[string]any{"id": img.ID}, "")
 	return nil
 }
+
 // isPartitionDetectionError checks if an error is a RootPartitionDetectionError
 // or TieDetectedError.
 func isPartitionDetectionError(err error) bool {

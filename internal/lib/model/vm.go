@@ -87,7 +87,7 @@ type VMItem struct {
 	Kernel  *KernelItem      `json:"kernel,omitempty"`
 	Image   *ImageItem       `json:"image,omitempty"`
 	Binary  *BinaryItem      `json:"binary,omitempty"`
-	Network *NetworkItem         `json:"network,omitempty"`
+	Network *NetworkItem     `json:"network,omitempty"`
 	Volumes []*VolumeItem    `json:"volumes,omitempty"`
 	Vsock   *VsockConfigItem `json:"vsock,omitempty"`
 }

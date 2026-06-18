@@ -1,14 +1,9 @@
 package inputs
+
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"os"
-	"strconv"
-	"strings"
-	"syscall"
-	"time"
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cloudinit"
 	"mvmctl/internal/core/config"
@@ -23,7 +18,14 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 )
+
 // VMCreateInput specifies v m create input.
 type VMCreateInput struct {
 	// Required fields (no defaults)
@@ -63,6 +65,7 @@ type VMCreateInput struct {
 	Volumes               []string       `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
 	VsockPort             *int           `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
 }
+
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().
 type ResolvedVMCreateInput struct {
 	Name                string
@@ -132,6 +135,7 @@ type ResolvedVMCreateInput struct {
 	Volumes          []*model.VolumeItem
 	VsockPort        int // vsock port (0 = disabled / no vsock)
 }
+
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.
 type VMCreateRequest struct {
 	input  VMCreateInput
@@ -148,6 +152,7 @@ type VMCreateRequest struct {
 	volumeResolver  *volume.Resolver
 	leaseRepo       network.LeaseRepository
 }
+
 // NewVMCreateRequest creates a new VMCreateRequest with its own sub-resolvers.
 func NewVMCreateRequest(
 	vmID, vmDir string,
@@ -177,6 +182,7 @@ func NewVMCreateRequest(
 		leaseRepo:       leaseRepo,
 	}
 }
+
 // CloneVMInput returns a copy of the resolved result with per-VM fields replaced.
 func (r *VMCreateRequest) CloneVMInput(
 	resolved *ResolvedVMCreateInput,
@@ -191,6 +197,7 @@ func (r *VMCreateRequest) CloneVMInput(
 	cp.VMDir = vmDir
 	return &cp
 }
+
 // resolveImage resolves the image from a selector or gets the default.
 func (r *VMCreateRequest) resolveImage(ctx context.Context, input *VMCreateInput) (*model.ImageItem, error) {
 	var img *model.ImageItem
@@ -211,6 +218,7 @@ func (r *VMCreateRequest) resolveImage(ctx context.Context, input *VMCreateInput
 	}
 	return img, nil
 }
+
 // resolveKernel resolves the kernel from a selector or gets the default.
 func (r *VMCreateRequest) resolveKernel(ctx context.Context, input *VMCreateInput) (*model.KernelItem, error) {
 	var krnl *model.KernelItem
@@ -231,6 +239,7 @@ func (r *VMCreateRequest) resolveKernel(ctx context.Context, input *VMCreateInpu
 	}
 	return krnl, nil
 }
+
 // resolveNetwork resolves the network from a selector or gets the default.
 func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInput) (*model.NetworkItem, error) {
 	var netw *model.NetworkItem
@@ -251,6 +260,7 @@ func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInp
 	}
 	return netw, nil
 }
+
 // resolveBinary resolves the firecracker binary by ID or gets default.
 func (r *VMCreateRequest) resolveBinary(ctx context.Context, input *VMCreateInput) (*model.BinaryItem, error) {
 	var fcBinary *model.BinaryItem
@@ -275,6 +285,7 @@ func (r *VMCreateRequest) resolveBinary(ctx context.Context, input *VMCreateInpu
 	}
 	return fcBinary, nil
 }
+
 // resolveSSHKeys resolves SSH key names to key items.
 func (r *VMCreateRequest) resolveSSHKeys(ctx context.Context, input *VMCreateInput) ([]*model.SSHKeyItem, error) {
 	if len(input.SSHKeys) == 0 {
@@ -293,6 +304,7 @@ func (r *VMCreateRequest) resolveSSHKeys(ctx context.Context, input *VMCreateInp
 	}
 	return result.Items, nil
 }
+
 // resolveVolumes resolves volume names to VolumeItems.
 func (r *VMCreateRequest) resolveVolumes(ctx context.Context, input *VMCreateInput) ([]*model.VolumeItem, error) {
 	if len(input.Volumes) == 0 {
@@ -304,6 +316,7 @@ func (r *VMCreateRequest) resolveVolumes(ctx context.Context, input *VMCreateInp
 	}
 	return result.Volumes, nil
 }
+
 // resolveMemory resolves mem_size_mib from input or defaults to setting.
 // mem_size_mib resolution.
 func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInput) (int, error) {
@@ -320,6 +333,7 @@ func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInpu
 	}
 	return int(bytes / disk.MebibyteBytes), nil
 }
+
 // Resolve resolves all inputs to explicit values and validates.
 func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, error) {
 	input := &r.input
@@ -579,6 +593,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	}
 	return result, nil
 }
+
 // ensureValidate validates resolved dependencies and batch constraints.
 func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVMCreateInput) error {
 	if result == nil {

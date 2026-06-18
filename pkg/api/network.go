@@ -1,12 +1,11 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
-	"strings"
-	"time"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/lib/model"
 	libnet "mvmctl/internal/lib/network"
@@ -14,7 +13,10 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"strings"
+	"time"
 )
+
 // NetworkAPI defines the public interface for network operations.
 type NetworkAPI interface {
 	NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error)
@@ -28,6 +30,7 @@ type NetworkAPI interface {
 	NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
 	NetworkCreateDefaultNetwork(ctx context.Context) (*model.NetworkItem, error)
 }
+
 // NetworkCreate creates a new network.
 func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
 	request := inputs.NewNetworkCreateRequest(input, op.Connection.DB(), op.Repos.Network)
@@ -111,6 +114,7 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 	op.AuditLog.LogOperation("network.create", map[string]any{"name": resolved.Name}, "")
 	return updated, nil
 }
+
 // NetworkRemove removes one or more networks.
 // uses NetworkRequest for resolution,
 // enriches with VM references, checks "in use".
@@ -138,6 +142,7 @@ func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInpu
 	}
 	return nil
 }
+
 // NetworkListAll returns all networks with lease enrichment.
 func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.NetworkItem, error) {
 	networks, err := op.Services.Network.ListAll(ctx, true)
@@ -149,6 +154,7 @@ func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.NetworkItem, 
 	}
 	return networks, nil
 }
+
 // NetworkGet returns a single network by Input/Request resolution pipeline.
 // uses NetworkInput/NetworkRequest
 // to resolve identifiers (by name or ID) and supports multi-identifier resolution.
@@ -163,6 +169,7 @@ func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) 
 	}
 	return resolved.Networks[0], nil
 }
+
 // NetworkToJSON converts networks to JSON-serializable dicts.
 // delegates to model field mapping.
 func (op *Operation) NetworkToJSON(networks []*model.NetworkItem) []map[string]any {
@@ -185,6 +192,7 @@ func (op *Operation) NetworkToJSON(networks []*model.NetworkItem) []map[string]a
 	}
 	return result
 }
+
 // NetworkInspect returns detailed network info via Input/Request resolution pipeline.
 // uses NetworkInput/NetworkRequest
 // to resolve identifiers (by name or ID) with lease enrichment.
@@ -251,6 +259,7 @@ func (op *Operation) NetworkInspect(
 		Leases: leaseList,
 	}, nil
 }
+
 // NetworkSetDefault sets a network as default.
 // goes through Controller
 // and uses NetworkInput/NetworkRequest to resolve identifiers.
@@ -278,6 +287,7 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input inputs.Network
 	op.AuditLog.LogOperation("network.set_default", map[string]any{"name": net.Name}, "")
 	return nil
 }
+
 // NetworkSync syncs firewall rules for one or more networks.
 func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error) {
 	var networks []*model.NetworkItem
@@ -351,6 +361,7 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 	}
 	return results, nil
 }
+
 // NetworkPrune prunes unused networks.
 func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "prune networks"); err != nil {
@@ -399,6 +410,7 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 	}
 	return removed, nil
 }
+
 // NetworkCreateDefaultNetwork creates the default network if it doesn't exist.
 // Updates Repository component tracking after creation.
 func (op *Operation) NetworkCreateDefaultNetwork(ctx context.Context) (*model.NetworkItem, error) {

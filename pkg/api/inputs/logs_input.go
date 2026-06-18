@@ -1,4 +1,5 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
@@ -6,8 +7,10 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // LogInput specifies log input.
 type LogInput struct {
 	Identifier string `json:"identifier"`
@@ -15,6 +18,7 @@ type LogInput struct {
 	Lines      *int   `json:"lines,omitempty"`
 	Follow     *bool  `json:"follow,omitempty"`
 }
+
 // ResolvedLogInput specifies resolved log input.
 type ResolvedLogInput struct {
 	VM                   *model.VMItem
@@ -24,6 +28,7 @@ type ResolvedLogInput struct {
 	LogFilename          string
 	SerialOutputFilename string
 }
+
 // LogRequest specifies log request.
 // Resolve LogInput against the database and constants.
 type LogRequest struct {
@@ -32,6 +37,7 @@ type LogRequest struct {
 	input  LogInput
 	result *ResolvedLogInput
 }
+
 // NewLogRequest creates a new LogRequest.
 func NewLogRequest(inputs LogInput, cfg *config.Service, db *sqlx.DB) *LogRequest {
 	return &LogRequest{
@@ -40,6 +46,7 @@ func NewLogRequest(inputs LogInput, cfg *config.Service, db *sqlx.DB) *LogReques
 		input: inputs,
 	}
 }
+
 // Resolve resolves all inputs to explicit values.
 func (r *LogRequest) Resolve(ctx context.Context, vmRepo vm.Repository) (*ResolvedLogInput, error) {
 	vmEntity, err := r.resolveVM(ctx, vmRepo)

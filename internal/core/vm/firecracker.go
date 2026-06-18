@@ -348,7 +348,6 @@ func (s *FirecrackerSpawner) buildMetricsConfig() model.MetricsConfig {
 //
 // Returns a *CpuConfig when nested virt is enabled or a custom CPU template
 // was provided. Returns nil when no CPU configuration is needed.
-//
 func (s *FirecrackerSpawner) buildCPUConfig() *model.CpuConfig {
 	if s.config.CPUConfig != nil {
 		return s.config.CPUConfig

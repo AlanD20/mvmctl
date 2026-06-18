@@ -1,15 +1,10 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 	"mvmctl/internal/core/cloudinit"
 	"mvmctl/internal/core/console"
 	"mvmctl/internal/core/image"
@@ -29,10 +24,21 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
+
 // VMAPI defines the public interface for VM operations.
 type VMAPI interface {
-	VMCreate(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VMItem, error)
+	VMCreate(
+		ctx context.Context,
+		input inputs.VMCreateInput,
+		onProgress event.OnProgressCallback,
+	) ([]*model.VMItem, error)
 	VMRemove(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
 	VMList(ctx context.Context, statuses ...string) []*model.VMItem
@@ -49,6 +55,7 @@ type VMAPI interface {
 	VMDetachVolume(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMExec(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
 }
+
 // --- Create ---
 // Create creates one or more VMs.
 func (op *Operation) VMCreate(
@@ -345,6 +352,7 @@ func (op *Operation) vmBuilderCreate(
 	}
 	return vmInstance, nil
 }
+
 // vmBuilderExecute performs the actual VM creation steps.
 // Moved from VMCreateBuilder.execute() to Operation to use services/repos directly.
 func (op *Operation) vmBuilderExecute(
@@ -358,7 +366,8 @@ func (op *Operation) vmBuilderExecute(
 	// Validate socket path before any expensive operations (cloud-init, resize, etc.).
 	if apiSocketPath := filepath.Join(builder.vmDir, resolved.APISocketFilename); len(apiSocketPath) >= 108 {
 		return fmt.Errorf(
-			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). This is a system limit for Unix domain sockets. Path: %s",
+			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). "+
+				"This is a system limit for Unix domain sockets. Path: %s",
 			builder.vmID,
 			len(apiSocketPath),
 			apiSocketPath,
@@ -701,6 +710,7 @@ func (op *Operation) vmBuilderExecute(
 	emitProgress(builder.onProgress, "complete", "complete", "VM created successfully")
 	return nil
 }
+
 // vmBuilderCleanup cleans up partially-created VM resources on failure.
 func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuilder) {
 	if builder.vmDir == "" || builder.resolved == nil {
@@ -738,6 +748,7 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 		}
 	}
 }
+
 // --- Remove ---
 // Remove removes one or more VMs.
 // Uses the proper VMRequest pipeline (validation + resolution + enrichment)
@@ -858,6 +869,7 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 	}
 	return &errs.BatchResult{Items: results}
 }
+
 // --- Prune ---
 // Prune prunes VMs.
 func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
@@ -891,6 +903,7 @@ func (op *Operation) VMPrune(ctx context.Context, dryRun bool, includeAll bool) 
 	}
 	return removed, nil
 }
+
 // --- List / ToJSON ---
 // List returns all VMs, optionally filtered by status.
 func (op *Operation) VMList(ctx context.Context, statuses ...string) []*model.VMItem {
@@ -907,6 +920,7 @@ func (op *Operation) VMList(ctx context.Context, statuses ...string) []*model.VM
 	op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	return vms
 }
+
 // VMGet returns a single VM by identifier with enriched relations.
 func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VMItem, error) {
 	if len(input.Identifiers) != 1 {
@@ -922,6 +936,7 @@ func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM
 	op.Enr.EnrichVM(ctx, []*model.VMItem{vm}, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	return vm, nil
 }
+
 // Inspect returns detailed VM info with enriched data.
 func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error) {
 	vm, err := op.VMGet(ctx, input)
@@ -991,6 +1006,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 		Volumes: volumes,
 	}, nil
 }
+
 // --- Start / Stop / Reboot / Pause / Resume ---
 // Start starts one or more VMs.
 // returns BatchResult[VMInstanceItem].
@@ -1054,6 +1070,7 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 	}
 	return &errs.BatchResult{Items: results}
 }
+
 // Stop stops one or more VMs.
 // returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1).
@@ -1251,6 +1268,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	v.Status = newStatus
 	return nil
 }
+
 // --- Snapshot / Load ---
 // Snapshot creates a snapshot of a single VM.
 // Resolves exactly one VM; returns it in all cases.
@@ -1278,6 +1296,7 @@ func (op *Operation) VMSnapshot(
 	op.AuditLog.LogOperation("vm.snapshot", nil, fmt.Sprintf("name=%s", vmItem.Name))
 	return nil
 }
+
 // Load loads (resumes from snapshot) a single VM.
 // memFile and stateFile are input snapshot file paths; resume controls whether
 // VM starts after load.
@@ -1352,6 +1371,7 @@ func (op *Operation) VMLoad(
 	op.AuditLog.LogOperation("vm.load", nil, fmt.Sprintf("name=%s", vmItem.Name))
 	return nil
 }
+
 // --- Reboot / Pause / Resume ---
 // Reboot reboots one or more VMs.
 // returns BatchResult[VMInstanceItem].
@@ -1406,6 +1426,7 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 	}
 	return &errs.BatchResult{Items: results}
 }
+
 // Pause pauses one or more VMs.
 // returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1).
@@ -1456,6 +1477,7 @@ func (op *Operation) VMPause(ctx context.Context, input inputs.VMInput) *errs.Ba
 	}
 	return &errs.BatchResult{Items: results}
 }
+
 // Resume resumes one or more VMs.
 // returns BatchResult[VMInstanceItem].
 // Uses batch VMRequest resolution (no N+1).
@@ -1506,6 +1528,7 @@ func (op *Operation) VMResume(ctx context.Context, input inputs.VMInput) *errs.B
 	}
 	return &errs.BatchResult{Items: results}
 }
+
 // --- AttachVolume / DetachVolume ---
 // AttachVolume attaches a volume to a VM.
 // - VMInput for identification (name, ID, IP, MAC)
@@ -1572,7 +1595,8 @@ func (op *Operation) VMAttachVolume(
 					return errs.New(
 						errs.CodeBinaryVersionGate,
 						fmt.Sprintf(
-							"Volume hotplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or attach the volume while the VM is stopped.",
+							"Volume hotplug requires Firecracker >= 1.16, got %s. "+
+								"Use a newer Firecracker binary or attach the volume while the VM is stopped.",
 							bin.Version,
 						),
 					)
@@ -1621,6 +1645,7 @@ func (op *Operation) VMAttachVolume(
 	}, "")
 	return nil
 }
+
 // DetachVolume detaches a volume from a VM.
 // - VMInput for identification (name, ID, IP, MAC)
 // - VolumeResolver for volume resolution
@@ -1678,7 +1703,8 @@ func (op *Operation) VMDetachVolume(
 					return errs.New(
 						errs.CodeBinaryVersionGate,
 						fmt.Sprintf(
-							"Volume hot-unplug requires Firecracker >= 1.16, got %s. Use a newer Firecracker binary or detach the volume while the VM is stopped.",
+							"Volume hot-unplug requires Firecracker >= 1.16, got %s. "+
+								"Use a newer Firecracker binary or detach the volume while the VM is stopped.",
 							bin.Version,
 						),
 					)
@@ -1716,6 +1742,7 @@ func (op *Operation) VMDetachVolume(
 	}, "")
 	return nil
 }
+
 // --- Exec ---
 // VMExec executes a command inside a VM via the vsock guest agent.
 // If input.Command is empty, opens an interactive PTY shell session.
@@ -1806,6 +1833,7 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 		ExitCode: result.ExitCode,
 	}, nil
 }
+
 // --- Builder ---
 type VMCreateBuilder struct {
 	name             string
@@ -1835,6 +1863,7 @@ type cloudInitResult struct {
 	nocloudPort *int
 	nocloudPID  *int
 }
+
 func (c *VMCreateBuilder) cloneImage(
 	ctx context.Context,
 	imageSvc *image.Service,
@@ -1860,6 +1889,7 @@ func (c *VMCreateBuilder) markCreated(resource string) {
 func (c *VMCreateBuilder) wasCreated(resource string) bool {
 	return c.resourcesCreated[resource]
 }
+
 // buildFirecrackerConfig builds a FirecrackerConfig from the resolved create context.
 func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 	if c.resolved == nil {

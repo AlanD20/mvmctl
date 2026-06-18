@@ -620,7 +620,9 @@ func (e *Enricher) enrichNetworkFromPaths(
 }
 
 // enrichNetworkLeases resolves leases for each network via batch lease lookup.
-func (e *Enricher) enrichNetworkLeases(ctx context.Context, networks []*model.NetworkItem, spec model.RelationSpec) error {
+func (e *Enricher) enrichNetworkLeases(
+	ctx context.Context, networks []*model.NetworkItem, spec model.RelationSpec,
+) error {
 	netIDs := extractNetworkIDs(networks)
 	if len(netIDs) == 0 {
 		return nil

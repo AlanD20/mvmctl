@@ -22,7 +22,9 @@ type MockNetworkAPI struct {
 	NetworkCreateDefaultNetworkFunc func(ctx context.Context) (*model.NetworkItem, error)
 }
 
-func (m *MockNetworkAPI) NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
+func (m *MockNetworkAPI) NetworkCreate(
+	ctx context.Context, input inputs.NetworkCreateInput,
+) (*model.NetworkItem, error) {
 	if m.NetworkCreateFunc != nil {
 		return m.NetworkCreateFunc(ctx, input)
 	}
@@ -91,7 +93,9 @@ func (m *MockNetworkAPI) NetworkPrune(ctx context.Context, dryRun bool, includeA
 	return nil, nil
 }
 
-func (m *MockNetworkAPI) NetworkCreateDefaultNetwork(ctx context.Context) (*model.NetworkItem, error) {
+func (m *MockNetworkAPI) NetworkCreateDefaultNetwork(
+	ctx context.Context,
+) (*model.NetworkItem, error) {
 	if m.NetworkCreateDefaultNetworkFunc != nil {
 		return m.NetworkCreateDefaultNetworkFunc(ctx)
 	}

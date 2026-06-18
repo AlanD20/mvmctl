@@ -1,15 +1,17 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
-	"strings"
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
+	"strings"
 )
+
 // CLI_TO_INTERNAL_DETECTOR maps CLI detector names to internal detector codes.
 var CLI_TO_INTERNAL_DETECTOR = map[string]string{
 	"type":       "type_code",
@@ -17,6 +19,7 @@ var CLI_TO_INTERNAL_DETECTOR = map[string]string{
 	"size":       "size",
 	"filesystem": "filesystem",
 }
+
 // ImagePullInput holds options for pulling a remote image.
 type ImagePullInput struct {
 	Type              string   `json:"type"                         yaml:"type"`
@@ -30,6 +33,7 @@ type ImagePullInput struct {
 	DisabledDetectors []string `json:"disabled_detectors,omitempty" yaml:"disabled_detectors,omitempty"`
 	OutputDir         string   `json:"output_dir,omitempty"`
 }
+
 // ImageImportInput holds options for importing a local image file.
 type ImageImportInput struct {
 	Name              string   `json:"name"`
@@ -41,6 +45,7 @@ type ImageImportInput struct {
 	SkipOptimization  bool     `json:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty"`
 }
+
 // ResolvedImageAcquireInput specifies resolved image acquire input.
 type ResolvedImageAcquireInput struct {
 	Type              string
@@ -58,6 +63,7 @@ type ResolvedImageAcquireInput struct {
 	SkipOptimization  bool
 	DisabledDetectors []string
 }
+
 // ImageAcquireRequest specifies image acquire request.
 // input uses any because it is either ImagePullInput or ImageImportInput —
 // Go has no sum types.
@@ -67,6 +73,7 @@ type ImageAcquireRequest struct {
 	result   *ResolvedImageAcquireInput
 	resolver *image.Resolver
 }
+
 // NewImageAcquireRequest creates a new ImageAcquireRequest.
 func NewImageAcquireRequest(inputs any, cfg *config.Service, imageRepo image.Repository) *ImageAcquireRequest {
 	return &ImageAcquireRequest{
@@ -75,6 +82,7 @@ func NewImageAcquireRequest(inputs any, cfg *config.Service, imageRepo image.Rep
 		resolver: image.NewResolver(imageRepo),
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // ResolvePull resolves pull inputs.
 func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAcquireInput, error) {
@@ -111,6 +119,7 @@ func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAc
 	}
 	return r.result, nil
 }
+
 // ResolveImport resolves import inputs.
 func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImageAcquireInput, error) {
 	in, ok := r.input.(ImageImportInput)

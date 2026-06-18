@@ -1,18 +1,21 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
-	"time"
 	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/infra/event"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
+	"time"
 )
+
 // SSHAPI defines the public interface for SSH operations.
 type SSHAPI interface {
 	SSHConnect(ctx context.Context, input inputs.SSHInput, onProgress event.OnProgressCallback) error
 }
+
 // SSHConnect opens an SSH session or executes a command on a VM.
 // Returns an error. Non-DomainError errors are wrapped with code
 // "ssh.failed".
@@ -73,6 +76,7 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onPr
 	}
 	return nil
 }
+
 // newSSHError wraps any error as a DomainError with "ssh.failed" code.
 func newSSHError(err error) error {
 	return errs.WrapMsg(errs.CodeSSHError, err.Error(), err, errs.WithClass(errs.ClassInternal))

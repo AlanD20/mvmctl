@@ -1,9 +1,9 @@
 package api
+
 import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
@@ -11,7 +11,9 @@ import (
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
+	"sort"
 )
+
 // BinaryAPI defines the public interface for binary operations.
 type BinaryAPI interface {
 	BinaryPrune(ctx context.Context, dryRun bool, force bool) ([]string, error)
@@ -32,6 +34,7 @@ type BinaryAPI interface {
 	BinarySetDefault(ctx context.Context, input inputs.BinaryInput) (*model.BinaryItem, error)
 	BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem, error)
 }
+
 // BinaryPrune prunes unused binaries.
 func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) ([]string, error) {
 	allBinaries, err := op.Repos.Binary.ListAll(ctx)
@@ -62,6 +65,7 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 	}
 	return removed, nil
 }
+
 // BinaryPull downloads or builds a binary.
 // uses BinaryPullRequest
 // resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
@@ -134,6 +138,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	emitProgress(onProgress, "complete", "complete", "Firecracker downloaded successfully")
 	return binaries, nil
 }
+
 // BinaryRemove removes binaries by identifiers.
 // resolves via BinaryRequest
 // then enriches with VM references. Each binary removal is wrapped in per-binary
@@ -183,6 +188,7 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 	}
 	return &errs.BatchResult{Items: items}
 }
+
 // BinaryRemoveByVersion removes both firecracker and jailer for a version.
 // Errors propagate through the DomainError pipeline.
 func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, force bool) error {
@@ -224,6 +230,7 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 	}
 	return nil
 }
+
 // BinaryList returns local binaries or remote versions.
 // When remote=false, returns ([]*model.BinaryItem, nil, error).
 // When remote=true, returns (nil, []string, error) with remote version strings.
@@ -265,6 +272,7 @@ func (op *Operation) BinaryList(
 	emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found %d remote version(s)", len(versions)))
 	return nil, versions, nil
 }
+
 // BinaryGet returns binaries by identifier.
 // resolves via BinaryRequest
 // with multi-identifier resolution.
@@ -276,6 +284,7 @@ func (op *Operation) BinaryGet(ctx context.Context, input inputs.BinaryInput) ([
 	}
 	return resolved.Binaries, nil
 }
+
 // BinarySetDefault sets a binary as default.
 // resolves via BinaryRequest,
 // checks for ambiguous results, then delegates to BinaryController.
@@ -302,6 +311,7 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryIn
 	}, "")
 	return bin, nil
 }
+
 // BinaryEnsureDefault ensures a default Firecracker binary exists.
 // Uses PEP 440-compatible version sorting to pick the newest binary.
 func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem, error) {
@@ -349,4 +359,5 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 	}, "")
 	return latest, nil
 }
+
 // Compile-time check

@@ -1,5 +1,6 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
@@ -7,6 +8,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
 )
+
 // ConfigAPI defines the public interface for config operations.
 type ConfigAPI interface {
 	ConfigGet(ctx context.Context, category, key string) (any, error)
@@ -14,6 +16,7 @@ type ConfigAPI interface {
 	ConfigReset(ctx context.Context, category, key string, allOverrides bool) (int, error)
 	ConfigListAll(ctx context.Context) (map[string]map[string]model.SettingInfo, error)
 }
+
 // ConfigGet returns a config value for category and optional key.
 // uses ConfigInput/ConfigRequest pipeline
 // with OVERRIDABLE_SETTINGS validation.
@@ -38,6 +41,7 @@ func (op *Operation) ConfigGet(ctx context.Context, category, key string) (any, 
 	}
 	return op.Services.Config.GetValue(ctx, resolved.Category, resolved.Key)
 }
+
 // ConfigSet sets a config value for category.key.
 // ConfigError propagates from
 // SettingsService.set().
@@ -71,6 +75,7 @@ func (op *Operation) ConfigSet(
 	)
 	return nil
 }
+
 // ConfigReset resets a config value to its default (removes override).
 // uses ConfigRequest resolution pipeline.
 func (op *Operation) ConfigReset(ctx context.Context, category, key string, allOverrides bool) (int, error) {
@@ -116,6 +121,7 @@ func (op *Operation) ConfigReset(ctx context.Context, category, key string, allO
 	}
 	return resultCount, nil
 }
+
 // ConfigListAll returns all overridable settings.
 // uses ConfigRequest resolution pipeline.
 func (op *Operation) ConfigListAll(ctx context.Context) (map[string]map[string]model.SettingInfo, error) {

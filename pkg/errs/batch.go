@@ -1,10 +1,13 @@
 package errs
+
 import "encoding/json"
+
 // BulkResultItem represents the result of a single item in a bulk operation.
 type BulkResultItem struct {
 	Item  any   `json:"item"` // Item is any because BatchResultItem stores results of different types per operation. Concrete typing not feasible — it's a generic container.
 	Error error `json:"-"`    // Serialized via MarshalJSON
 }
+
 // MarshalJSON implements json.Marshaler for BulkResultItem.
 // BulkResultItem serializes error normally (default serialization).
 // Go's error type cannot be serialized directly, so we convert it to its
@@ -24,6 +27,7 @@ func (i *BulkResultItem) MarshalJSON() ([]byte, error) {
 		Alias: (*Alias)(i),
 	})
 }
+
 // BulkResult aggregates results of a bulk operation with BulkResultItem items.
 type BulkResult struct {
 	Items []BulkResultItem `json:"items"`

@@ -1,16 +1,19 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
+	"path/filepath"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // VolumeCreateInput specifies volume create input.
 type VolumeCreateInput struct {
 	Name     string  `json:"name"`
@@ -18,6 +21,7 @@ type VolumeCreateInput struct {
 	Format   *string `json:"format,omitempty"`
 	ReadOnly *bool   `json:"read_only,omitempty"`
 }
+
 // ResolvedVolumeCreateInput specifies resolved volume create input.
 type ResolvedVolumeCreateInput struct {
 	Name       string
@@ -26,6 +30,7 @@ type ResolvedVolumeCreateInput struct {
 	Path       string
 	IsReadOnly bool
 }
+
 // VolumeCreateRequest specifies volume create request.
 // Resolve volume creation inputs to explicit values.
 type VolumeCreateRequest struct {
@@ -34,6 +39,7 @@ type VolumeCreateRequest struct {
 	result *ResolvedVolumeCreateInput
 	repo   volume.Repository
 }
+
 // NewVolumeCreateRequest creates a new VolumeCreateRequest.
 func NewVolumeCreateRequest(inputs VolumeCreateInput, db *sqlx.DB, volumeRepo volume.Repository) *VolumeCreateRequest {
 	return &VolumeCreateRequest{
@@ -42,6 +48,7 @@ func NewVolumeCreateRequest(inputs VolumeCreateInput, db *sqlx.DB, volumeRepo vo
 		repo:  volumeRepo,
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves creation inputs to explicit values.
 func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreateInput, error) {

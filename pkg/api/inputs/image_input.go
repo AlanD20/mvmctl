@@ -1,20 +1,25 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // ImageInput is the raw input for identifying existing images.
 type ImageInput struct {
 	Identifiers []string `json:"identifiers"`
 }
+
 // ResolvedImageInput specifies resolved image input.
 type ResolvedImageInput struct {
 	Images []*model.ImageItem
 }
+
 // ImageRequest specifies image request.
 // Request that resolves ImageInput to ImageItem via DB.
 type ImageRequest struct {
@@ -23,6 +28,7 @@ type ImageRequest struct {
 	result   *ResolvedImageInput
 	resolver *image.Resolver
 }
+
 // NewImageRequest creates a new ImageRequest.
 func NewImageRequest(inputs ImageInput, db *sqlx.DB, imageRepo image.Repository) *ImageRequest {
 	return &ImageRequest{
@@ -31,6 +37,7 @@ func NewImageRequest(inputs ImageInput, db *sqlx.DB, imageRepo image.Repository)
 		resolver: image.NewResolver(imageRepo),
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves identifiers to ImageItem records from DB.
 func (r *ImageRequest) Resolve(ctx context.Context) (*ResolvedImageInput, error) {

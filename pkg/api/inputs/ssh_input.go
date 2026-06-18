@@ -1,15 +1,17 @@
 package inputs
+
 import (
 	"context"
 	"fmt"
-	"os"
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
+	"os"
 )
+
 // SSHInput specifies SSH input.
 type SSHInput struct {
 	Identifier string  `json:"target"            yaml:"target"`
@@ -18,6 +20,7 @@ type SSHInput struct {
 	Cmd        *string `json:"cmd,omitempty"     yaml:"cmd,omitempty"`
 	Timeout    *int    `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
+
 // ResolvedSSHInput specifies resolved SSH input.
 type ResolvedSSHInput struct {
 	TargetIP string
@@ -26,6 +29,7 @@ type ResolvedSSHInput struct {
 	Cmd      *string
 	Timeout  *int
 }
+
 // SSHRequest specifies s s h request.
 // Resolve SSHInput against the database.
 type SSHRequest struct {
@@ -34,6 +38,7 @@ type SSHRequest struct {
 	result *ResolvedSSHInput
 	vm     *model.VMItem
 }
+
 // NewSSHRequest creates a new SSHRequest.
 func NewSSHRequest(inputs SSHInput, cfg *config.Service) *SSHRequest {
 	return &SSHRequest{
@@ -41,6 +46,7 @@ func NewSSHRequest(inputs SSHInput, cfg *config.Service) *SSHRequest {
 		input: inputs,
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Resolve resolves all inputs to explicit values.
 func (r *SSHRequest) Resolve(
@@ -98,6 +104,7 @@ func (r *SSHRequest) ensureValidate() error {
 	}
 	return nil
 }
+
 // resolveTarget resolves the target to an IP address.
 func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (string, error) {
 	target := r.input.Identifier
@@ -118,6 +125,7 @@ func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (s
 	// Fallback: use raw identifier (e.g., IP for a VM not in DB)
 	return target, nil
 }
+
 // resolveUser resolves the SSH user.
 func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
 	if r.input.User != nil && *r.input.User != "" {
@@ -130,6 +138,7 @@ func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
 	user, _ := r.cfg.GetString(ctx, "defaults.vm", "ssh_user")
 	return user, nil
 }
+
 // resolveKey resolves SSH private key path via the key domain.
 func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*string, error) {
 	keyResolver := key.NewResolver(keyRepo)

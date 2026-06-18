@@ -1,22 +1,27 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"mvmctl/internal/core/logs"
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/api/inputs"
 )
+
 // LogAPI defines the public interface for log operations.
 type LogAPI interface {
 	LogStream(ctx context.Context, input inputs.LogInput, callback func(string) error) error
 	LogStreamChannel(ctx context.Context, input inputs.LogInput) (lineCh <-chan string, errCh <-chan error, err error)
 }
+
 // LogStream streams log lines for a VM synchronously via callback.
 // Callers use:
+//
 //	op.LogStream(ctx, inputs, func(line string) error {
 //		fmt.Println(line)
 //		return nil
 //	})
+//
 // For "show" (non-follow): resolves input, reads lines from controller, invokes
 // callback for each line, then returns. Blocks the caller's goroutine — no
 // goroutine spawn necessary
@@ -64,6 +69,7 @@ func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callb
 	}
 	return nil
 }
+
 // LogStreamChannel streams log lines for a VM via a channel.
 // Provides a goroutine+channel based version for callers that want asynchronous
 // channel-based consumption rather than synchronous callback iteration.

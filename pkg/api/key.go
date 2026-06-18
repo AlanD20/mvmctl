@@ -1,16 +1,18 @@
 // Package api provides the public orchestration layer for all operations.
 package api
+
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os"
+	"strings"
 )
+
 // KeyAPI defines the public interface for SSH key operations.
 type KeyAPI interface {
 	KeyListAll(ctx context.Context) ([]*model.SSHKeyItem, error)
@@ -24,12 +26,14 @@ type KeyAPI interface {
 	KeyGetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error)
 	KeyClearDefaults(ctx context.Context) error
 }
+
 // KeyListAll lists all SSH keys.
 // passes keys_dir only,
 // no verify parameter call).
 func (op *Operation) KeyListAll(ctx context.Context) ([]*model.SSHKeyItem, error) {
 	return op.Services.Key.List(ctx, false)
 }
+
 // Get returns a single key by name or ID.
 // uses KeyRequest resolution pipeline.
 func (op *Operation) KeyGet(ctx context.Context, input inputs.KeyInput) (*model.SSHKeyItem, error) {
@@ -44,6 +48,7 @@ func (op *Operation) KeyGet(ctx context.Context, input inputs.KeyInput) (*model.
 	}
 	return resolved.Keys[0], nil
 }
+
 // KeyCreate creates a new SSH keypair.
 // Calls checkDependencies first, then uses KeyCreateRequest resolution pipeline.
 // Top-level panic recovery catches unexpected errors.
@@ -78,6 +83,7 @@ func (op *Operation) KeyCreate(ctx context.Context, input inputs.KeyCreateInput)
 	}, "")
 	return keyItem, nil
 }
+
 // KeyImport imports an existing public key to the cache.
 func (op *Operation) KeyImport(ctx context.Context, input inputs.KeyImportInput) (*model.SSHKeyItem, error) {
 	// Does inline validation at the API layer before calling service
@@ -129,6 +135,7 @@ func (op *Operation) KeyImport(ctx context.Context, input inputs.KeyImportInput)
 	op.AuditLog.LogOperation("key.add", map[string]any{"name": keyItem.Name}, "")
 	return keyItem, nil
 }
+
 // KeyRemove removes keys by name or ID.
 // uses KeyRequest resolution pipeline.
 func (op *Operation) KeyRemove(ctx context.Context, input inputs.KeyInput, force bool) *errs.BatchResult {
@@ -186,6 +193,7 @@ func (op *Operation) KeyRemove(ctx context.Context, input inputs.KeyInput, force
 	}
 	return &errs.BatchResult{Items: results}
 }
+
 // KeyInspect returns detailed key info.
 // uses KeyRequest resolution,
 // returns raw dict (not wrapped in OperationResult).
@@ -210,6 +218,7 @@ func (op *Operation) KeyInspect(ctx context.Context, input inputs.KeyInput) (*re
 		},
 	}, nil
 }
+
 // KeyExport exports a keypair to a destination directory.
 // Uses KeyRequest resolution and KeyController.export().
 func (op *Operation) KeyExport(
@@ -238,6 +247,7 @@ func (op *Operation) KeyExport(
 	}
 	return []string{destPriv, destPub}, nil
 }
+
 // KeySetDefaults sets one or more keys as default.
 // uses KeyRequest resolution.
 func (op *Operation) KeySetDefaults(ctx context.Context, input inputs.KeyInput) error {
@@ -255,10 +265,12 @@ func (op *Operation) KeySetDefaults(ctx context.Context, input inputs.KeyInput) 
 	}
 	return nil
 }
+
 // KeyGetDefaults returns all default keys.
 func (op *Operation) KeyGetDefaults(ctx context.Context) ([]*model.SSHKeyItem, error) {
 	return op.Repos.Key.GetDefaults(ctx)
 }
+
 // KeyClearDefaults clears all default keys.
 func (op *Operation) KeyClearDefaults(ctx context.Context) error {
 	if err := op.Services.Key.ClearDefaultKeys(ctx); err != nil {

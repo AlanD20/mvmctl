@@ -1,44 +1,52 @@
 package inputs
+
 import (
 	"context"
-	"strings"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
+	"strings"
+
 	"github.com/jmoiron/sqlx"
 )
+
 // VolumeInput specifies volume input.
 type VolumeInput struct {
 	Identifiers []string `json:"identifiers,omitempty"`
 }
+
 // ResolvedVolumeInput specifies resolved volume input.
 type ResolvedVolumeInput struct {
 	Volumes []*model.VolumeItem
 }
+
 // VolumeRequest specifies volume request.
 // Request that resolves VolumeInput to VolumeItem via DB.
 type VolumeRequest struct {
-	db       *sqlx.DB
-	input    VolumeInput
-	result   *ResolvedVolumeInput
-	resolver *volume.Resolver
+	db          *sqlx.DB
+	input       VolumeInput
+	result      *ResolvedVolumeInput
+	resolver    *volume.Resolver
 	partialErrs []string
 }
+
 // NewVolumeRequest creates a new VolumeRequest.
 func NewVolumeRequest(inputs VolumeInput, db *sqlx.DB, volumeRepo volume.Repository) *VolumeRequest {
 	return &VolumeRequest{
-		db:       db,
-		input:    inputs,
-		resolver: volume.NewResolver(volumeRepo),
+		db:          db,
+		input:       inputs,
+		resolver:    volume.NewResolver(volumeRepo),
 		partialErrs: []string{},
 	}
 }
+
 // Result returns the resolved input, or nil if resolve() has not been called.
 // Errors returns partial-match errors from resolution (identifiers that couldn't be resolved).
 // .errors property.
 func (r *VolumeRequest) Errors() []string {
 	return r.partialErrs
 }
+
 // Resolve resolves identifiers to VolumeItem records from DB.
 func (r *VolumeRequest) Resolve(ctx context.Context) (*ResolvedVolumeInput, error) {
 	identifiers := r.input.Identifiers
