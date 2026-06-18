@@ -56,18 +56,18 @@ resolve_version() {
   echo "0.0.0-dev"
 }
 
-# ─── Build guest agent (pre-compiled, gzip-compressed for embedding) ─────────
+# ─── Build guest agent (pre-compiled, zstd-compressed for embedding) ─────────
 # Cross-compiles the vsock guest agent for the target architecture, then
-# gzips it. The compressed binary is embedded via //go:embed, reducing the
-# mvm binary size by ~60% for the agent portion.
+# compresses it with zstd. The compressed binary is embedded via //go:embed,
+# reducing the mvm binary size by ~60% for the agent portion.
 build_agent() {
   local arch="$1"
   local agent_dir="internal/service/vsockagent"
   local agent_binary="agent-linux-${arch}"
-  local agent_gz="${agent_binary}.gz"
+  local agent_zst="${agent_binary}.zst"
 
   # Placeholder for //go:embed before building the agent binary.
-  touch "${agent_dir}/${agent_gz}"
+  touch "${agent_dir}/${agent_zst}"
 
   echo "  → Building guest agent (linux/${arch})..."
   CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build \
@@ -77,15 +77,16 @@ build_agent() {
 
   # Compress for embedding — saves ~60% in embedded binary size.
   # Decompressed lazily at runtime on first AgentBinary() call.
+  # zstd gives ~10-15% better compression than gzip at level 19.
   echo "  → Compressing guest agent..."
-  gzip -9 -f "${agent_dir}/${agent_binary}"
+  zstd -19 -f -o "${agent_dir}/${agent_zst}" "${agent_dir}/${agent_binary}"
 }
 
 # ─── Clean up agent binaries ─────────────────────────────────────────────────
 cleanup_agent() {
   local arch="$1"
   rm -f "internal/service/vsockagent/agent-linux-${arch}" \
-        "internal/service/vsockagent/agent-linux-${arch}.gz"
+        "internal/service/vsockagent/agent-linux-${arch}.zst"
 }
 
 # ─── Build the binary ────────────────────────────────────────────────────────
