@@ -45,7 +45,7 @@ func TestVMLoad_AbsolutizesRelativePaths(t *testing.T) {
 	}
 
 	// Call VMLoad with relative paths from the temp dir.
-	err = op.VMLoad(context.Background(), inputs.VMInput{Identifiers: []string{"test-vm"}}, "test.mem", "test.state", false)
+	err = op.VMLoad(context.Background(), inputs.VMInput{Identifiers: []string{"test-vm"}}, "test.mem", "test.state", false, "")
 
 	// The function should NOT fail with "file not found" — that proves
 	// os.Stat() resolved relative paths correctly after Abs().

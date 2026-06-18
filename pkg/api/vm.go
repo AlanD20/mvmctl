@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cloudinit"
 	"mvmctl/internal/core/console"
 	"mvmctl/internal/core/image"
+	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
@@ -50,7 +52,7 @@ type VMAPI interface {
 	VMPause(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMResume(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMSnapshot(ctx context.Context, input inputs.VMInput, memFile string, stateFile string) error
-	VMLoad(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool) error
+	VMLoad(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool, rootfs string) error
 	VMAttachVolume(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMDetachVolume(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMExec(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
@@ -982,7 +984,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 			CreatedAt: vm.CreatedAt, UpdatedAt: vm.UpdatedAt,
 		},
 		Resources: results.VMResourcesInfo{
-			VCPUs: vm.VCPUCount, Mem: vm.MemSizeMiB, Disk: vm.DiskSizeMiB,
+			VCPU: vm.VCPUCount, Mem: vm.MemSizeMiB, Disk: vm.DiskSizeMiB,
 		},
 		Networking: results.VMNetworkingInfo{
 			IPv4: vm.IPv4, MAC: vm.MAC,
@@ -1313,14 +1315,14 @@ func (op *Operation) VMSnapshot(
 // Load loads (resumes from snapshot) a single VM.
 // memFile and stateFile are input snapshot file paths; resume controls whether
 // VM starts after load.
-// - re-reads VM after respawn → updated
-// - catches MVMError → status="error", error → status="failure", item=vm
+// rootfs is required when the VM identifier does not exist (new VM from snapshot).
 func (op *Operation) VMLoad(
 	ctx context.Context,
 	input inputs.VMInput,
 	memFile string,
 	stateFile string,
 	resume bool,
+	rootfs string,
 ) error {
 	repo := op.Repos.VM
 	// Validate only one VM for load
@@ -1358,14 +1360,22 @@ func (op *Operation) VMLoad(
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
+	// Resolve VM — if not found, create a new record for snapshot load.
 	vmResolver := vm.NewResolver(op.Repos.VM)
 	vmItem, err := vmResolver.Resolve(ctx, input.Identifiers[0])
 	if err != nil {
-		return errs.New(
-			errs.CodeVMLoadSnapshotFailed,
-			fmt.Sprintf("VM not found: %s", input.Identifiers[0]),
-			errs.WithClass(errs.ClassValidation),
-		)
+		if rootfs == "" {
+			return errs.New(
+				errs.CodeVMLoadSnapshotFailed,
+				fmt.Sprintf("VM not found: %s. Use --rootfs to create a new VM from this snapshot.", input.Identifiers[0]),
+				errs.WithClass(errs.ClassValidation),
+			)
+		}
+		// Auto-create a new VM record for the snapshot load.
+		vmItem, err = op.vmCreateForSnapshot(ctx, input.Identifiers[0], rootfs)
+		if err != nil {
+			return errs.WrapMsg(errs.CodeVMLoadSnapshotFailed, "Failed to create VM for snapshot load", err)
+		}
 	}
 	// Enrich VM with relations (needed for respawn and snapshot load).
 	op.Enr.EnrichVM(ctx, []*model.VMItem{vmItem}, "kernel", "image", "binary", "network")
@@ -1395,6 +1405,53 @@ func (op *Operation) VMLoad(
 	}
 	op.AuditLog.LogOperation("vm.load", nil, fmt.Sprintf("name=%s", vmItem.Name))
 	return nil
+}
+
+// vmCreateForSnapshot creates a new VM record for snapshot load with defaults
+// from config (kernel, network, binary, image) and the provided rootfs path.
+func (op *Operation) vmCreateForSnapshot(ctx context.Context, name, rootfs string) (*model.VMItem, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	vmItem := &model.VMItem{
+		ID:         crypto.VMID(name, now),
+		Name:       name,
+		Status:     model.VMStatusStopped,
+		RootfsPath: rootfs,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+
+	// Resolve default kernel.
+	kernelResolver := kernel.NewResolver(op.Repos.Kernel, nil)
+	kernelItem, err := kernelResolver.GetDefault(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no default kernel configured: %w", err)
+	}
+	vmItem.KernelID = kernelItem.ID
+	vmItem.Kernel = kernelItem
+
+	// Resolve default network.
+	networkResolver := network.NewResolver(op.Repos.Network, []string{"leases"})
+	networkItem, err := networkResolver.GetDefault(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("no default network configured: %w", err)
+	}
+	vmItem.NetworkID = networkItem.ID
+	vmItem.Network = networkItem
+
+	// Resolve default firecracker binary.
+	binaryResolver := binary.NewResolver(op.Repos.Binary)
+	binaryItem, err := binaryResolver.GetDefault(ctx, "firecracker")
+	if err != nil {
+		return nil, fmt.Errorf("no default firecracker binary configured: %w", err)
+	}
+	vmItem.BinaryID = binaryItem.ID
+
+	// Insert into DB.
+	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
+		return nil, fmt.Errorf("failed to save VM record: %w", err)
+	}
+
+	return vmItem, nil
 }
 
 // --- Reboot / Pause / Resume ---
