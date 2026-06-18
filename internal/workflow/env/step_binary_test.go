@@ -20,7 +20,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Test helpers ─────────────────────────────────────────────────────────────
+// --- Test helpers ---
 
 // ctxBinaryRepo wraps testutil.BinaryRepo to propagate context cancellation
 // from GetByTypeAndVersion. The plain mock ignores context, so this wrapper
@@ -78,7 +78,7 @@ func newBinaryStep(t *testing.T, op *api.Operation) workflow.Step {
 	return step
 }
 
-// ─── BinaryStep.Apply ────────────────────────────────────────────────────────
+// --- BinaryStep.Apply ---
 // Rationale: BinaryStep.Apply is the core provisioning path. A nil-op crash,
 // a missed context cancellation, or a database error swallowed as success
 // would all cause silent data loss or hung workflows.
@@ -93,7 +93,7 @@ func TestBinaryStep_Apply(t *testing.T) {
 		wantBinaryID   string
 		wantWasCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return nil },
@@ -138,7 +138,7 @@ func TestBinaryStep_Apply(t *testing.T) {
 			wantErr: "check binary",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"binary_exists_skips_pull_and_writes_state": {
 			setupOp: func(t *testing.T) *api.Operation {
@@ -223,7 +223,7 @@ func TestBinaryStep_Apply(t *testing.T) {
 	}
 }
 
-// ─── BinaryStep.Destroy ──────────────────────────────────────────────────────
+// --- BinaryStep.Destroy ---
 // Rationale: Destroy is a no-op for binaries (they persist in the DB), but it
 // must still handle nil op, write state, and recover saved state from the
 // parameter for workflow resumption after a crash.
@@ -239,7 +239,7 @@ func TestBinaryStep_Destroy(t *testing.T) {
 		wantBinaryID   string
 		wantWasCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return nil },
@@ -262,7 +262,7 @@ func TestBinaryStep_Destroy(t *testing.T) {
 			wantErrIs: context.Canceled,
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"writes_state_and_returns_nil": {
 			setupOp: func(_ *testing.T) *api.Operation {
@@ -334,7 +334,7 @@ func TestBinaryStep_Destroy(t *testing.T) {
 	}
 }
 
-// ─── BinaryStep.StateData ────────────────────────────────────────────────────
+// --- BinaryStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision resources.
@@ -383,7 +383,7 @@ func TestBinaryStep_StateData(t *testing.T) {
 	}
 }
 
-// ─── BinaryStep.StateData write-failure propagation ──────────────────────────
+// --- BinaryStep.StateData write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Apply and Destroy must
 // propagate it rather than silently swallowing the persistence failure.
 

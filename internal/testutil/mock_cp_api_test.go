@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/results"
 )
 
-// ─── MockCPAPI ────────────────────────────────────────────────────────────────
+// --- MockCPAPI ---
 // Rationale: MockCPAPI satisfies api.CPAPI for testing upper layers. CPCopy is
 // the only method; tests verify default return and custom function routing.
 

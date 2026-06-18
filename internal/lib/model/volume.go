@@ -1,6 +1,6 @@
 package model
 
-// ── VolumeStatus ──
+// --- VolumeStatus ---
 
 // VolumeStatus represents volume lifecycle states.
 type VolumeStatus string
@@ -10,7 +10,7 @@ const (
 	VolumeStatusAttached  VolumeStatus = "attached"
 )
 
-// ── VolumeFormat ──
+// --- VolumeFormat ---
 
 // VolumeFormat represents disk image format types.
 type VolumeFormat string
@@ -20,7 +20,7 @@ const (
 	VolumeFormatQCOW2 VolumeFormat = "qcow2"
 )
 
-// ── VolumeItem ──
+// --- VolumeItem ---
 
 // VolumeItem represents a persistent data disk attachable to VMs.
 type VolumeItem struct {

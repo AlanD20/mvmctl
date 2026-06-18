@@ -9,14 +9,13 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// CloudInitModeResolved matches Python's CloudInitModeResolved dataclass.
+// CloudInitModeResolved holds the resolved cloud-init mode and optional ISO path.
 type CloudInitModeResolved struct {
 	Mode    model.CloudInitMode
 	ISOPath *string
 }
 
 // ResolveMode resolves a cloud-init mode from raw CLI input.
-// Matches Python's VMCreateRequest._resolve_cloud_init_mode().
 func ResolveMode(mode *string, isoPath *string) (CloudInitModeResolved, error) {
 	// Off is default cloud-init mode
 	result := CloudInitModeResolved{Mode: model.CloudInitModeOFF, ISOPath: nil}
@@ -67,8 +66,7 @@ func ValidModes() []model.CloudInitMode {
 	}
 }
 
-// validateTemplateData checks all required TemplateData fields are non-empty,
-// mimicking Jinja2's StrictUndefined behavior in the Python implementation.
+// validateTemplateData checks all required TemplateData fields are non-empty.
 // If any required field is empty, it returns an error with the field name.
 func validateTemplateData(data TemplateData) error {
 	required := []struct {

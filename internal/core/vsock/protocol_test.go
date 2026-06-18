@@ -21,7 +21,6 @@ import (
 // package, so they cannot be tested directly from an external test package.
 // They are also thin wrappers around stdlib json.Encode/Decode — testing them
 // with bytes.Buffer would exercise stdlib, not our custom logic.
-//
 // Instead, these tests exercise the full protocol through Client.Exec, which
 // internally calls dialAndHandshake → sendFrame → readFrame. A local mock
 // UDS server simulates the guest agent's CONNECT handshake and JSON framing.
@@ -134,7 +133,7 @@ func startMockVsockAgent(t *testing.T, handshakeOK bool, execResult *vsock.ExecR
 	return sockPath, port
 }
 
-// ─── DialAndHandshake: Success ─────────────────────────────────────────────
+// --- DialAndHandshake: Success ---
 // Rationale: The CONNECT handshake is the entry point for all vsock
 // communication. A failure here makes all Exec/Shell calls fail.
 
@@ -159,7 +158,7 @@ func TestClient_DialAndHandshake_Success(t *testing.T) {
 	assert.Equal(t, 0, result.ExitCode)
 }
 
-// ─── DialAndHandshake: Bad response ────────────────────────────────────────
+// --- DialAndHandshake: Bad response ---
 // Rationale: If the agent sends an unexpected handshake response, the client
 // must fail with an appropriate handshake error.
 
@@ -180,7 +179,7 @@ func TestClient_DialAndHandshake_BadResponse(t *testing.T) {
 	assert.Contains(t, err.Error(), "reachable")
 }
 
-// ─── DialAndHandshake: Context cancellation ────────────────────────────────
+// --- DialAndHandshake: Context cancellation ---
 // Rationale: Context cancellation must abort the dial before it connects.
 // The function takes ctx context.Context and must respect ctx.Done().
 

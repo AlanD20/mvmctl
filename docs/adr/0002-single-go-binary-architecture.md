@@ -45,7 +45,7 @@ These are launched via `system.SpawnService()` which resolves the executable pat
 ## Why Go
 
 - **Zero runtime dependencies**: A single compiled binary with no interpreter, no virtual environment, no package manager.
-- **Fast startup**: Go binaries start in milliseconds vs Python's multi-second import time.
+- **Fast startup**: Go binaries start in milliseconds with zero interpreter startup overhead.
 - **Type safety**: Compile-time type checking prevents entire classes of runtime errors.
 - **Concurrency**: Native goroutines and channels for the parallel execution model (pool.Do, pool.Gather, pool.Seq).
 - **Cross-compilation**: Easy to build for different architectures (x86_64, aarch64) from a single toolchain.

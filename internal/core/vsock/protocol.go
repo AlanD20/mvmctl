@@ -11,13 +11,13 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Constants ──
+// --- Constants ---
 
 const (
 	constConnectTimeout = 5 * time.Second
 )
 
-// ── File transfer protocol constants ──
+// --- File transfer protocol constants ---
 
 const (
 	requestTypeFileTransfer = "file-transfer"
@@ -27,7 +27,7 @@ const (
 	ftBufferSize            = 262144
 )
 
-// ── Wire protocol types (unexported) ──
+// --- Wire protocol types (unexported) ---
 
 // execRequest is the JSON frame sent from host to guest agent.
 type execRequest struct {
@@ -52,7 +52,7 @@ type execResponse struct {
 	Error      string `json:"error,omitempty"`
 }
 
-// ── UDS dial and CONNECT handshake ──
+// --- UDS dial and CONNECT handshake ---
 
 // dialAndHandshake connects to the Firecracker vsock UDS and performs the
 // CONNECT handshake. Returns an open connection on success.
@@ -112,7 +112,7 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int) (net.Conn, 
 	}
 }
 
-// ── JSON framing helpers ──
+// --- JSON framing helpers ---
 
 // sendFrame marshals v as JSON and writes it to conn followed by a newline.
 func sendFrame(conn net.Conn, v any) error {

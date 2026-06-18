@@ -6,7 +6,7 @@
 
 ## Problem
 
-All service subprocesses need to run as separate processes (for privilege isolation, PTY FD passing, etc.). In the Python version, each service was compiled as a standalone Nuitka binary. In Go, we use a **self-spawning pattern**: the single `mvm` binary re-executes itself with a `mvm run <service>` subcommand.
+All service subprocesses need to run as separate processes (for privilege isolation, PTY FD passing, etc.). We use a **self-spawning pattern**: the single `mvm` binary re-executes itself with a `mvm run <service>` subcommand.
 
 ## Solution
 
@@ -108,51 +108,6 @@ This means:
 - **No embedding/extraction** — no `//go:embed` for service binaries
 - **No binary-first fallback** — mutual exclusion, not preference
 - **Privilege escalation** — `Privileged: true` auto-prepends `sudo`
-
-## Old vs. New
-
-### Before (Python — Nuitka compiled binaries)
-
-```python
-# console_relay/manager.py
-bin_dir = CacheUtils.get_bin_dir()
-binary = bin_dir / "mvm-console-relay"
-if binary.exists():
-    relay_cmd = [str(binary), "--pty-controller-fd", str(fd), ...]
-else:
-    # Development mode fallback
-    relay_cmd = [sys.executable, "-m", "mvmctl.services.console_relay.process", ...]
-
-proc = subprocess.Popen(relay_cmd, pass_fds=[pty_controller_fd])
-```
-
-### After (Go — self-spawning)
-
-```go
-// internal/service/console/spawn.go
-func Spawn(ctx context.Context, cfg Config, ptyFile *os.File) (*SpawnResult, error) {
-    spawnCfg := system.SpawnConfig{
-        Name: "console relay",
-        Args: []string{
-            "--vm-id", cfg.VMID,
-            "--vm-path", cfg.VMPath,
-            "--pty-fd", "3",
-        },
-        ExtraFiles: []*os.File{ptyFile},
-        Privileged: false,
-    }
-
-    cmd, err := system.SpawnService(ctx, spawnCfg)
-    if err != nil {
-        return nil, err
-    }
-
-    return &SpawnResult{
-        SocketPath: filepath.Join(cfg.VMPath, "console.sock"),
-        PID:        cmd.Process.Pid,
-    }, nil
-}
-```
 
 ## Service Binary Contract
 
@@ -441,7 +396,7 @@ All steps wrapped in `defer` cleanup — `umount` and `losetup -d` run even on e
 - Config setting `settings.guestfs_enabled` — if true, use GUESTFS
 - Else — use LOOP_MOUNT (default)
 
-**Key difference from Python:** No fallback chain. Mutual exclusion, not preference. If loopmount fails, it does NOT fall back to guestfs.
+**No fallback chain:** Mutual exclusion, not preference. If loopmount fails, it does NOT fall back to guestfs.
 
 ## Sudoers (provisioner only)
 
@@ -482,20 +437,6 @@ The sudoers file is managed by `mvm host init` via `HostService._generate_sudoer
 | `internal/service/nocloudnet/spawn.go` | **New** — NoCloud-net subprocess spawn |
 | `pkg/api/operation.go` | Modified — resolves provisioner type at startup |
 | `pkg/api/vm.go` | Modified — uses `provisioner.NewBackend()` instead of direct guestfs |
-
-## Key Differences from Python Version
-
-| Aspect | Python | Go |
-|--------|--------|-----|
-| **Service binaries** | 3 separate Nuitka-compiled binaries | Single binary, 3 `mvm run` subcommands |
-| **Binary embedding** | `//go:embed` + extraction to `~/.cache/mvmctl/bin/` | No embedding — self-spawning via `os.Executable()` |
-| **Binary-first fallback** | Try compiled binary, fall back to `sys.executable -m` | No fallback — mutual exclusion, not preference |
-| **Build pipeline** | `scripts/build_services.py` with Nuitka multidist | Standard `go build` — no separate build step |
-| **Sudoers management** | `PRIVILEGED_SERVICE_BINARIES` list in constants | `SpawnConfig.Privileged` auto-prepends sudo |
-| **Wire protocol** | JSON stdin/stdout | JSON stdin/stdout (identical) |
-| **Actions** | `provision`, `detect_os` | `provision`, `detect_os`, `convert_fs` (new) |
-| **Backend selection** | Config + binary availability | Config only (mutual exclusion) |
-| **Partition detection** | Python `os.scandir()` | Go `parsePartitionsSfdisk()` / `parsePartitionsParted()` |
 
 ## Risks
 

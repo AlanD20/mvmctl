@@ -17,7 +17,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 // assertCode checks that err is a DomainError with the given code.
 func assertCode(t *testing.T, err error, code errs.Code) {
@@ -47,7 +47,7 @@ func newNet(id, name, subnet, gateway string) *model.Network {
 
 func strPtr(s string) *string { return &s }
 
-// ─── ComputeBridgeAddress ─────────────────────────────────────────────────────
+// --- ComputeBridgeAddress -----------------------------------------------------
 // Rationale: CIDR parsing and gateway formatting. Invalid subnets must error.
 
 func TestComputeBridgeAddress(t *testing.T) {
@@ -102,7 +102,7 @@ func TestComputeBridgeAddress(t *testing.T) {
 	}
 }
 
-// ─── ComputeBridgeName ────────────────────────────────────────────────────────
+// --- ComputeBridgeName --------------------------------------------------------
 // Rationale: Must produce valid 15-char Linux bridge names. Short names stay
 // raw; long names use truncation + hash to fit within 15 chars.
 
@@ -164,7 +164,7 @@ func TestComputeBridgeName(t *testing.T) {
 	})
 }
 
-// ─── GenerateTAPName ──────────────────────────────────────────────────────────
+// --- GenerateTAPName ----------------------------------------------------------
 // Rationale: Deterministic hash-based TAP naming. Same inputs = same output.
 
 func TestGenerateTAPName(t *testing.T) {
@@ -199,8 +199,8 @@ func TestGenerateTAPName(t *testing.T) {
 	})
 }
 
-// ─── NatGatewaysList ──────────────────────────────────────────────────────────
-// Rationale: Python falsy values ("0", "false", "None") must be treated as
+// --- NatGatewaysList ----------------------------------------------------------
+// Rationale: Falsy values ("0", "false", "None") must be treated as
 // empty. Whitespace trimming and empty-skipping must work for multi-value.
 
 func TestNatGatewaysList(t *testing.T) {
@@ -284,7 +284,7 @@ func TestNatGatewaysList(t *testing.T) {
 	}
 }
 
-// ─── Controller.SetDefault ────────────────────────────────────────────────────
+// --- Controller.SetDefault ----------------------------------------------------
 // Rationale: Nil network must error; valid network delegates to repo.
 
 func TestController_SetDefault(t *testing.T) {
@@ -336,7 +336,7 @@ func TestController_SetDefault(t *testing.T) {
 	})
 }
 
-// ─── Service.EnrichWithLeases ─────────────────────────────────────────────────
+// --- Service.EnrichWithLeases -------------------------------------------------
 // Rationale: Batch-load leases from leaseRepo and attach to networks. Networks
 // without leases must get an empty slice (not nil) to prevent nil dereference
 // in callers.
@@ -388,7 +388,7 @@ func TestService_EnrichWithLeases(t *testing.T) {
 	})
 }
 
-// ─── Service.ListAll (no verify) ──────────────────────────────────────────────
+// --- Service.ListAll (no verify) ----------------------------------------------
 // Rationale: Without verify=true, ListAll is a passthrough to repo.ListAll.
 // With verify=true it calls libnet.BridgeExists (system ops) — skipped here.
 
@@ -407,7 +407,7 @@ func TestService_ListAll_noVerify(t *testing.T) {
 	assert.Len(t, got, 2)
 }
 
-// ─── Service.WithBatch and Initialize (nil tracker) ───────────────────────────
+// --- Service.WithBatch and Initialize (nil tracker) ---------------------------
 // Rationale: When firewall tracker is nil, these must be no-ops (not panic).
 
 func TestService_TrackerNilIsNoop(t *testing.T) {
@@ -427,7 +427,7 @@ func TestService_TrackerNilIsNoop(t *testing.T) {
 	assert.True(t, called)
 }
 
-// ─── Service.EnsureBridge ─────────────────────────────────────────────────────
+// --- Service.EnsureBridge -----------------------------------------------------
 // Rationale: Must create bridge when absent, or reconcile when present.
 
 func TestService_EnsureBridge(t *testing.T) {
@@ -517,7 +517,7 @@ func TestService_EnsureBridge(t *testing.T) {
 	})
 }
 
-// ─── Service.RemoveBridge ─────────────────────────────────────────────────────
+// --- Service.RemoveBridge -----------------------------------------------------
 // Rationale: Removes attached TAPs then bridge.
 
 func TestService_RemoveBridge(t *testing.T) {
@@ -553,7 +553,7 @@ func TestService_RemoveBridge(t *testing.T) {
 	})
 }
 
-// ─── Service.EnsureTap ────────────────────────────────────────────────────────
+// --- Service.EnsureTap --------------------------------------------------------
 // Rationale: Creates new TAP, reattaches to same bridge, or reattaches to
 // different bridge.
 
@@ -627,7 +627,7 @@ func TestService_EnsureTap(t *testing.T) {
 	})
 }
 
-// ─── Service.RemoveTap ────────────────────────────────────────────────────────
+// --- Service.RemoveTap --------------------------------------------------------
 // Rationale: Removes TAP device. Skips if TAP doesn't exist.
 
 func TestService_RemoveTap(t *testing.T) {
@@ -667,7 +667,7 @@ func TestService_RemoveTap(t *testing.T) {
 	})
 }
 
-// ─── Service.CleanupOrphanedBridges ───────────────────────────────────────────
+// --- Service.CleanupOrphanedBridges -------------------------------------------
 // Rationale: Removes host bridges not tracked in DB, skipping non-mvm bridges.
 
 func TestService_CleanupOrphanedBridges(t *testing.T) {
@@ -701,7 +701,7 @@ func TestService_CleanupOrphanedBridges(t *testing.T) {
 	})
 }
 
-// ─── Service.RemoveStaleInterfaces ────────────────────────────────────────────
+// --- Service.RemoveStaleInterfaces --------------------------------------------
 // Rationale: Removes TAPs for bridges matching a prefix.
 
 func TestService_RemoveStaleInterfaces(t *testing.T) {
@@ -732,7 +732,7 @@ func TestService_RemoveStaleInterfaces(t *testing.T) {
 	})
 }
 
-// ─── Service.ListAll with verify=true ─────────────────────────────────────────
+// --- Service.ListAll with verify=true -----------------------------------------
 // Rationale: verify=true checks bridge existence on host.
 
 func TestService_ListAll_verify(t *testing.T) {

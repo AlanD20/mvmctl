@@ -1,3 +1,5 @@
+// Package cloudinit provides cloud-init user data generation for VM provisioning.
+// Layer: Core domain — never imports other core/* packages.
 package cloudinit
 
 import (
@@ -16,11 +18,9 @@ import (
 )
 
 // Default auto-kill timeout for spawned nocloud-net server subprocess.
-// Matches Python's _KILL_NO_CLOUD_SERVER_AFTER.
 const defaultNocloudKillAfter = 5 * time.Minute
 
 // Provisioner handles all cloud-init provisioning modes.
-// Matches Python's CloudInitProvisioner.
 type Provisioner struct {
 	config          *Config
 	manager         *Manager
@@ -39,13 +39,12 @@ func NewProvisioner(config *Config, tracker *firewall.FirewallTracker) *Provisio
 }
 
 // Provision performs cloud-init provisioning based on the configured mode.
-// Matches Python's provision().
 func (p *Provisioner) Provision(ctx context.Context) (*model.CloudInitResult, error) {
 	if p.config.Mode == model.CloudInitModeOFF {
 		return p.provisionOff(ctx), nil
 	}
 
-	// Prepare the cloud-init config directory — Python uses CONST_DIR_PERMS_CACHE = 0o700
+	// Prepare the cloud-init config directory with restricted permissions.
 	if err := os.MkdirAll(p.config.CloudInitDir, 0700); err != nil {
 		return nil, errs.New(errs.CodeCloudInitProvisionFailed,
 			fmt.Sprintf("create cloud-init dir: %s", err))
@@ -69,8 +68,6 @@ func (p *Provisioner) Provision(ctx context.Context) (*model.CloudInitResult, er
 }
 
 // provisionOff handles OFF mode — cloud-init disabled.
-// Matches Python's _provision_off().
-// Python: CloudInitmodel.CloudInitResult(mode=CloudInitMode.OFF) -> nocloud_net_rules=[] (factory default)
 func (p *Provisioner) provisionOff(_ context.Context) *model.CloudInitResult {
 	return &model.CloudInitResult{Mode: model.CloudInitModeOFF, NocloudNetRules: []model.FirewallRule{}}
 }
@@ -80,7 +77,7 @@ func (p *Provisioner) provisionOff(_ context.Context) *model.CloudInitResult {
 // or spawns anew via nocloudnetsvc.Spawn if not pre-allocated.
 func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult, error) {
 
-	// ── Firewall rule creation ──
+	// --- Firewall rule creation ---
 	if p.firewallTracker == nil {
 		slog.Warn("No firewall tracker available, skipping NET mode firewall rules",
 			"vm_name", p.config.VMName)
@@ -176,9 +173,8 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 }
 
 // provisionISO handles ISO mode — create cloud-init ISO image.
-// Matches Python's _provision_iso().
 func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult, error) {
-	// Check for pre-existing custom ISO (Python: if self._config.cloud_init_iso_path is not None)
+	// Check for pre-existing custom ISO path
 	if p.config.CloudInitISOPath != nil {
 		isoPath := *p.config.CloudInitISOPath
 		if _, err := os.Stat(isoPath); os.IsNotExist(err) {
@@ -194,7 +190,6 @@ func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult,
 	}
 
 	// Generate ISO from seed directory
-	// Python: except Exception as exc: raise CloudInitIsoModeError(f"Failed to create cloud-init ISO: {exc}") from exc
 	isoPath := filepath.Join(p.config.VMDir, p.config.CloudInitISOName)
 	if err := p.manager.CreateSeedISO(ctx, p.config.CloudInitDir, isoPath); err != nil {
 		return nil, errs.New(errs.CodeCloudInitISOModeFailed,
@@ -210,7 +205,6 @@ func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult,
 }
 
 // provisionInject handles INJECT mode — config files already written.
-// Matches Python's _provision_inject().
 func (p *Provisioner) provisionInject(_ context.Context) (*model.CloudInitResult, error) {
 	return &model.CloudInitResult{Mode: model.CloudInitModeINJECT, NocloudNetRules: []model.FirewallRule{}}, nil
 }

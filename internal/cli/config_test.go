@@ -13,7 +13,7 @@ import (
 	"mvmctl/internal/testutil"
 )
 
-// ─── NewConfigCmd ──────────────────────────────────────────────────────────
+// --- NewConfigCmd ---
 // Rationale: NewConfigCmd is the entry point for all config CLI operations.
 // Missing subcommands silently disable config management without error.
 
@@ -62,7 +62,7 @@ func TestNewConfigCmd(t *testing.T) {
 	})
 }
 
-// ─── Config get (via config get) ───────────────────────────────────────────
+// --- Config get (via config get) ---
 // Rationale: Config get retrieves settings. A broken get command prevents
 // users from inspecting their configuration or debugging misconfiguration.
 
@@ -140,7 +140,7 @@ func TestNewConfigGetCmd(t *testing.T) {
 	})
 }
 
-// ─── Config set (via config set) ───────────────────────────────────────────
+// --- Config set (via config set) ---
 // Rationale: Config set modifies user configuration. A broken set command can
 // silently corrupt configuration or fail to apply user preferences.
 
@@ -171,7 +171,7 @@ func TestNewConfigSetCmd(t *testing.T) {
 	})
 }
 
-// ─── Config list (via config ls) ───────────────────────────────────────────
+// --- Config list (via config ls) ---
 // Rationale: Config list shows all available settings. A broken list command
 // prevents users from discovering what settings can be configured.
 
@@ -209,7 +209,7 @@ func TestNewConfigListCmd(t *testing.T) {
 	})
 }
 
-// ─── Config reset (via config reset) ───────────────────────────────────────
+// --- Config reset (via config reset) ---
 // Rationale: Config reset restores defaults. A broken reset command can leave
 // stale overrides in place or fail to revert misconfiguration.
 

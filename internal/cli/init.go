@@ -43,20 +43,15 @@ func runInitWizard(
 	hostAPI api.HostAPI,
 	nonInteractive, skipHost, skipNetwork bool,
 ) error {
-	// Match Python: mvm_cli.info("")
 	common.Cli.Info("")
-	// Match Python: mvm_cli.info(f"{CLI_NAME} init — first-time setup")
 	common.Cli.Info(fmt.Sprintf("%s init — first-time setup", infra.CLIName))
-	// Match Python: mvm_cli.info("─" * 40)
-	common.Cli.Info(strings.Repeat("─", 40))
-
-	// Call the Python-style _handle_interactive_flow logic
+	common.Cli.Info(strings.Repeat("-", 40))
 	result, err := handleInteractiveFlow(ctx, initAPI, hostAPI, nonInteractive, skipHost, skipNetwork)
 	if err != nil {
 		return err
 	}
 
-	// Match Python init_run step display (after _handle_interactive_flow returns)
+	// Display init step results
 	stepLabels := map[string]string{
 		"local_state":   "Local State",
 		"host":          fmt.Sprintf("sudoers / %s group", infra.MVMUnixGroup),
@@ -274,9 +269,8 @@ func (s *initState) handleGuestfs(ctx context.Context) error {
 
 // handleInteractiveFlow drives the init wizard with interaction handling.
 // Always returns the last InitResult (never nil), even when the loop breaks early.
-// Matches Python's _handle_interactive_flow() — returns (nil, err) only on
-// system failures (context cancellation); user-initiated breaks return
-// (lastResult, nil) so runInitWizard can display step progress.
+// Returns (nil, err) only on system failures (context cancellation);
+// user-initiated breaks return (lastResult, nil) so runInitWizard can display step progress.
 func handleInteractiveFlow(
 	ctx context.Context,
 	initAPI api.InitAPI,
@@ -291,8 +285,7 @@ func handleInteractiveFlow(
 		skipNetwork:    skipNetwork,
 	}
 
-	// Always return the last result even on early exit,
-	// matching Python's "result: InitResult" at function scope.
+	// Always return the last result even on early exit.
 	var lastResult *results.InitResult
 
 	for {

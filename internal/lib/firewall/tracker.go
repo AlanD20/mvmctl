@@ -39,7 +39,7 @@ type firewallRuleRepo interface {
 	) ([]*model.FirewallRule, error)
 }
 
-// ── FirewallTracker (dispatcher) ──
+// --- FirewallTracker (dispatcher) ---
 
 type FirewallTracker struct {
 	firewallRepo firewallRuleRepo
@@ -63,7 +63,7 @@ func NewFirewallTracker(backend model.FirewallBackendType, xtcommentAvail bool, 
 	return ft
 }
 
-// ── Batch context ──
+// --- Batch context ---
 
 func (ft *FirewallTracker) flushBatch(ctx context.Context) model.FirewallRuleResult {
 	ft.batchMode = false
@@ -89,7 +89,7 @@ func (ft *FirewallTracker) WithBatch(ctx context.Context, fn func()) {
 	fn()
 }
 
-// ── Rule lifecycle ──
+// --- Rule lifecycle ---
 
 func (ft *FirewallTracker) EnsureRule(
 	ctx context.Context,
@@ -119,7 +119,7 @@ func (ft *FirewallTracker) CountOrphanedRules(ctx context.Context, network *mode
 	return ft.backend.CountOrphanedRules(ctx, network)
 }
 
-// ── Chain lifecycle ──
+// --- Chain lifecycle ---
 
 func (ft *FirewallTracker) EnsureChain(
 	ctx context.Context,
@@ -147,7 +147,7 @@ func (ft *FirewallTracker) Teardown(ctx context.Context) {
 	ft.backend.Teardown(ctx)
 }
 
-// ── DB query methods ──
+// --- DB query methods ---
 
 func (ft *FirewallTracker) GetByNetworkID(
 	ctx context.Context,

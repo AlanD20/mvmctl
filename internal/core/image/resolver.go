@@ -11,7 +11,6 @@ import (
 )
 
 // RELATIONS defines the cross-domain relations for image enrichment.
-// Matches Python's Resolver.RELATIONS dict.
 var RELATIONS = map[string]model.RelationSpec{
 	"vm": {
 		FKField:      "id",
@@ -23,7 +22,7 @@ var RELATIONS = map[string]model.RelationSpec{
 	},
 }
 
-// ResolveResult matches Python's ResolveResult dataclass.
+// ResolveResult holds the result of a batch image resolution.
 type ResolveResult struct {
 	Items    []*model.ImageItem
 	Errors   []string
@@ -34,7 +33,7 @@ type ResolveResult struct {
 // Set by the API layer during wiring to avoid circular imports.
 type EnrichFunc func(ctx context.Context, images []*model.ImageItem, include []string, relations map[string]model.RelationSpec)
 
-// Resolver matches Python's Resolver in _resolver.py.
+// Resolver resolves images by ID, type:version, type, name, or ID prefix.
 type Resolver struct {
 	repo       Repository
 	include    []string
@@ -53,7 +52,6 @@ func (r *Resolver) SetEnrichFunc(fn EnrichFunc) {
 }
 
 // enrich enriches images with relations if include is set.
-// Matches Python's Resolver.enrich() which delegates to RelationEnricher.
 func (r *Resolver) enrich(ctx context.Context, images []*model.ImageItem) []*model.ImageItem {
 	if r.include != nil && len(images) > 0 && r.enrichFunc != nil {
 		r.enrichFunc(ctx, images, r.include, RELATIONS)
@@ -132,10 +130,8 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.ImageItem, e
 	return r.enrich(ctx, []*model.ImageItem{dbImage})[0], nil
 }
 
-// isImageNotFoundError checks if the error IS an ImageNotFoundError
-// using direct type assertion — NO unwrapping. Python's bare
-// "except ImageNotFoundError" only catches the exact exception type;
-// a wrapped ImageNotFoundError would NOT be caught in Python either.
+// isImageNotFoundError checks if the error is an ImageNotFoundError
+// using direct type assertion — no unwrapping.
 func isImageNotFoundError(err error) bool {
 	de, ok := err.(*errs.DomainError)
 	if !ok {
@@ -146,7 +142,7 @@ func isImageNotFoundError(err error) bool {
 
 // Resolve resolves image by type:version, type, display name, or ID prefix.
 // Only ImageNotFoundError causes fallthrough to the next resolution method
-// — all other errors propagate immediately, matching Python's behavior.
+// — all other errors propagate immediately.
 func (r *Resolver) Resolve(ctx context.Context, value string) (*model.ImageItem, error) {
 	// Try "type:version" selector format first using the shared version parser.
 	name, ver := version.ParseSelector(value)

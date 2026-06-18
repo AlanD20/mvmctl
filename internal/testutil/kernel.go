@@ -11,8 +11,7 @@ import (
 )
 
 // KernelRepo is an in-memory kernel repository for testing.
-// Matches Python's mvmctl.core.kernel._repository.Repository exactly,
-// including soft-delete filtering (deleted_at IS NULL AND is_present = 1).
+// Includes soft-delete filtering (deleted_at IS NULL AND is_present = 1).
 type KernelRepo struct {
 	mu      sync.RWMutex
 	kernels map[string]*model.KernelItem
@@ -27,7 +26,7 @@ func (r *KernelRepo) isNotDeleted(k *model.KernelItem) bool {
 	return k.DeletedAt == nil && k.IsPresent
 }
 
-// Get returns a kernel by ID. Returns nil if soft-deleted (Python: WHERE deleted_at IS NULL AND is_present = 1).
+// Get returns a kernel by ID. Returns nil if soft-deleted.
 func (r *KernelRepo) Get(_ context.Context, id string) (*model.KernelItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -54,7 +53,7 @@ func (r *KernelRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.Ke
 	return result, nil
 }
 
-// Count returns total count of all non-deleted kernels (Python: WHERE deleted_at IS NULL).
+// Count returns total count of all non-deleted kernels.
 func (r *KernelRepo) Count(_ context.Context) (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -67,7 +66,7 @@ func (r *KernelRepo) Count(_ context.Context) (int, error) {
 	return count, nil
 }
 
-// ListAll returns all non-deleted kernels ordered by created_at (Python: WHERE deleted_at IS NULL ORDER BY created_at).
+// ListAll returns all non-deleted kernels ordered by created_at.
 func (r *KernelRepo) ListAll(_ context.Context) ([]*model.KernelItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -90,7 +89,7 @@ func (r *KernelRepo) Upsert(_ context.Context, k *model.KernelItem) error {
 	return nil
 }
 
-// SoftDelete marks a kernel as deleted (Python: datetime.now(tz=UTC).isoformat()).
+// SoftDelete marks a kernel as deleted.
 func (r *KernelRepo) SoftDelete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -109,24 +108,24 @@ func (r *KernelRepo) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-// SetDefault sets one kernel as default, clearing all others atomically (Python: BEGIN/COMMIT transaction).
+// SetDefault sets one kernel as default, clearing all others atomically.
 func (r *KernelRepo) SetDefault(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Match Python: UPDATE kernels SET is_default = 0 WHERE deleted_at IS NULL
+	// Clear existing defaults
 	for _, k := range r.kernels {
 		if k.DeletedAt == nil {
 			k.IsDefault = false
 		}
 	}
-	// Match Python: UPDATE kernels SET is_default = 1 WHERE id = ? AND deleted_at IS NULL
+	// Set new default
 	if k, ok := r.kernels[id]; ok && k.DeletedAt == nil {
 		k.IsDefault = true
 	}
 	return nil
 }
 
-// GetDefault returns the default kernel (Python: WHERE is_default = 1 AND deleted_at IS NULL AND is_present = 1 LIMIT 1).
+// GetDefault returns the default kernel.
 func (r *KernelRepo) GetDefault(_ context.Context) (*model.KernelItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -138,7 +137,7 @@ func (r *KernelRepo) GetDefault(_ context.Context) (*model.KernelItem, error) {
 	return nil, nil
 }
 
-// GetByName returns a kernel by name (Python: WHERE deleted_at IS NULL AND is_present = 1 LIMIT 1).
+// GetByName returns a kernel by name.
 func (r *KernelRepo) GetByName(_ context.Context, name string) (*model.KernelItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -150,7 +149,7 @@ func (r *KernelRepo) GetByName(_ context.Context, name string) (*model.KernelIte
 	return nil, nil
 }
 
-// GetByType returns a kernel by type (Python: WHERE deleted_at IS NULL AND is_present = 1 LIMIT 1).
+// GetByType returns a kernel by type.
 func (r *KernelRepo) GetByType(_ context.Context, kernelType string) (*model.KernelItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -162,7 +161,7 @@ func (r *KernelRepo) GetByType(_ context.Context, kernelType string) (*model.Ker
 	return nil, nil
 }
 
-// GetByVersionAndType returns a kernel by version and type (Python: WHERE deleted_at IS NULL AND is_present = 1 LIMIT 1).
+// GetByVersionAndType returns a kernel by version and type.
 func (r *KernelRepo) GetByVersionAndType(_ context.Context, version, kernelType string) (*model.KernelItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

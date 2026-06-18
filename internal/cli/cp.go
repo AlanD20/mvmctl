@@ -52,7 +52,7 @@ Multiple sources require a directory destination (trailing "/").`,
 		Args:          cobra.ArbitraryArgs,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// ── Validation ──
+			// --- Validation ---
 			if len(args) < 2 {
 				return fmt.Errorf("at least two arguments required: one or more sources and a destination")
 			}
@@ -63,7 +63,7 @@ Multiple sources require a directory destination (trailing "/").`,
 				Force:   force,
 			}
 
-			// ── Progress ──
+			// --- Progress ---
 			prog := common.NewProgress()
 			prog.Start("Copying...")
 
@@ -76,7 +76,7 @@ Multiple sources require a directory destination (trailing "/").`,
 
 			prog.Stop()
 
-			// ── Result handling ──
+			// --- Result handling ---
 			if cpErr != nil {
 				return cpErr
 			}

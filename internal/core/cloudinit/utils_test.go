@@ -11,7 +11,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── ResolveMode ────────────────────────────────────────────────────────────
+// --- ResolveMode ---
 // Rationale: Resolves raw CLI input to CloudInitModeResolved.
 
 func TestResolveMode(t *testing.T) {
@@ -103,7 +103,7 @@ func TestResolveMode(t *testing.T) {
 
 func strPtr(s string) *string { return &s }
 
-// ─── IsValidMode ────────────────────────────────────────────────────────────
+// --- IsValidMode ---
 // Rationale: Returns true for valid CloudInitMode values.
 
 func TestIsValidMode(t *testing.T) {
@@ -128,7 +128,7 @@ func TestIsValidMode(t *testing.T) {
 	}
 }
 
-// ─── validateTemplateData ───────────────────────────────────────────────────
+// --- validateTemplateData ---
 // Rationale: Validates all required TemplateData fields are non-empty.
 
 func TestValidateTemplateData(t *testing.T) {
@@ -186,7 +186,7 @@ func TestValidateTemplateData(t *testing.T) {
 	})
 }
 
-// ─── validateCloudinitConfig ────────────────────────────────────────────────
+// --- validateCloudinitConfig ---
 // Rationale: Rejects custom cloud-init configs with dangerous directives.
 
 func TestValidateCloudinitConfig(t *testing.T) {

@@ -19,7 +19,6 @@ type Enricher interface {
 }
 
 // ResolveResult holds the result of resolving multiple binary identifiers.
-// Matches Python's ResolveResult dataclass exactly.
 type ResolveResult struct {
 	Items    []*model.BinaryItem
 	Errors   []string
@@ -27,7 +26,6 @@ type ResolveResult struct {
 }
 
 // RELATIONS defines the cross-domain relations for binary enrichment.
-// Matches Python's Resolver.RELATIONS dict exactly.
 var RELATIONS = map[string]model.RelationSpec{
 	"vm": {
 		FKField:      "id",
@@ -45,7 +43,6 @@ type EnrichFunc func(ctx context.Context, binaries []*model.BinaryItem, include 
 
 // Resolver resolves binary identifiers (ID prefix, name, [name, version] pair)
 // to BinaryItem instances.
-// Matches Python's Resolver exactly.
 type Resolver struct {
 	repo       Repository
 	include    []string
@@ -127,7 +124,7 @@ func (r *Resolver) ByTypeLatest(ctx context.Context, typ string) (*model.BinaryI
 		return enriched[0], nil
 	}
 
-	// Sort by semver descending (newest first), matching Python:
+	// Sort by semver descending (newest first)
 	sort.Slice(matches, func(i, j int) bool {
 		return version.SemverGreater(matches[i].Version, matches[j].Version)
 	})

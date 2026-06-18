@@ -6,9 +6,9 @@ import (
 	"fmt"
 )
 
-// ── CpuConfig ──
+// --- CpuConfig ---
 
-// CpuConfig matches Python's CpuConfig(TypedDict, total=False).
+// CpuConfig defines CPU template configuration for Firecracker.
 type CpuConfig struct {
 	KvmCapabilities []string              `json:"kvm_capabilities,omitempty"`
 	CpuidModifiers  []CpuidLeafModifier   `json:"cpuid_modifiers,omitempty"`
@@ -39,14 +39,14 @@ func (c CpuConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
-// ── CpuidRegisterModifier ──
+// --- CpuidRegisterModifier ---
 
 type CpuidRegisterModifier struct {
 	Register string `json:"register"`
 	Bitmap   string `json:"bitmap"`
 }
 
-// ── CpuidLeafModifier ──
+// --- CpuidLeafModifier ---
 
 type CpuidLeafModifier struct {
 	Leaf      string                  `json:"leaf"`
@@ -55,28 +55,28 @@ type CpuidLeafModifier struct {
 	Modifiers []CpuidRegisterModifier `json:"modifiers"`
 }
 
-// ── MsrModifier ──
+// --- MsrModifier ---
 
 type MsrModifier struct {
 	Addr   string `json:"addr"`
 	Bitmap string `json:"bitmap"`
 }
 
-// ── ArmRegisterModifier ──
+// --- ArmRegisterModifier ---
 
 type ArmRegisterModifier struct {
 	Addr   string `json:"addr"`
 	Bitmap string `json:"bitmap"`
 }
 
-// ── VcpuFeatures ──
+// --- VcpuFeatures ---
 
 type VcpuFeatures struct {
 	Index  int    `json:"index"`
 	Bitmap string `json:"bitmap"`
 }
 
-// ── DriveConfig ──
+// --- DriveConfig ---
 
 type DriveConfig struct {
 	DriveID      string  `json:"drive_id"`
@@ -90,7 +90,7 @@ type DriveConfig struct {
 	Socket       *string `json:"socket,omitempty"`
 }
 
-// ── BootSourceConfig ──
+// --- BootSourceConfig ---
 
 type BootSourceConfig struct {
 	BootArgs        string  `json:"boot_args"`
@@ -98,7 +98,7 @@ type BootSourceConfig struct {
 	InitrdPath      *string `json:"initrd_path,omitempty"`
 }
 
-// ── NetworkInterfaceConfig ──
+// --- NetworkInterfaceConfig ---
 
 type NetworkInterfaceConfig struct {
 	IfaceID     string `json:"iface_id"`
@@ -106,7 +106,7 @@ type NetworkInterfaceConfig struct {
 	HostDevName string `json:"host_dev_name"`
 }
 
-// ── MachineConfig ──
+// --- MachineConfig ---
 
 type MachineConfig struct {
 	VCPUCount       int     `json:"vcpu_count"`
@@ -116,7 +116,7 @@ type MachineConfig struct {
 	CPUTemplate     *string `json:"cpu_template,omitempty"`
 }
 
-// ── LoggerConfig ──
+// --- LoggerConfig ---
 
 type LoggerConfig struct {
 	LogPath       string `json:"log_path"`
@@ -125,13 +125,13 @@ type LoggerConfig struct {
 	ShowLogOrigin bool   `json:"show_log_origin"`
 }
 
-// ── MetricsConfig ──
+// --- MetricsConfig ---
 
 type MetricsConfig struct {
 	MetricsPath string `json:"metrics_path"`
 }
 
-// ── FirecrackerVMConfig ──
+// --- FirecrackerVMConfig ---
 
 // FirecrackerVMConfig is the JSON-serializable top-level Firecracker VM config.
 // This struct is written to the --config-file JSON that Firecracker reads at boot.
@@ -148,13 +148,14 @@ type FirecrackerVMConfig struct {
 	Vsock             *VsockConfig             `json:"vsock,omitempty"`
 }
 
-// ── FirecrackerConfigDict ──
+// --- FirecrackerConfigDict ---
 
-// FirecrackerConfigDict is a dynamic JSON map — Firecracker API has variable response shapes that can't be statically typed.
+// FirecrackerConfigDict is a dynamic JSON map — Firecracker API has variable
+// response shapes that can't be statically typed.
 // Raw Firecracker JSON config; schema controlled by Firecracker API, not by us
 type FirecrackerConfigDict map[string]any
 
-// ── InstanceInfo ──
+// --- InstanceInfo ---
 
 type InstanceInfo struct {
 	ID         string  `json:"id"`
@@ -164,7 +165,7 @@ type InstanceInfo struct {
 	BootTime   *string `json:"boot_time,omitempty"`
 }
 
-// ── InstanceDescription ──
+// --- InstanceDescription ---
 
 type InstanceDescription struct {
 	ID               string            `json:"id"`
@@ -176,9 +177,9 @@ type InstanceDescription struct {
 	UsedBlockDevices []string          `json:"used_block_devices"`
 }
 
-// ── FirecrackerConfig ──
+// --- FirecrackerConfig ---
 
-// FirecrackerConfig matches Python's FirecrackerConfig dataclass exactly.
+// FirecrackerConfig holds all VM configuration for spawning Firecracker.
 type FirecrackerConfig struct {
 	// Paths
 	VMDir      string `json:"vm_dir"`

@@ -12,7 +12,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── ParseFilename ───────────────────────────────────────────────────────────
+// --- ParseFilename ---
 // Rationale: ParseFilename extracts version, architecture and base name from
 // kernel image filenames. Incorrect parsing would cause version resolution and
 // arch-matching failures that silently download wrong kernels.
@@ -74,7 +74,7 @@ func TestParseFilename(t *testing.T) {
 	}
 }
 
-// ─── extractConfigKey ────────────────────────────────────────────────────────
+// --- extractConfigKey ---
 // Rationale: extractConfigKey identifies CONFIG_* keys from kernel .config
 // lines. False positives would inject bogus keys into the override map; false
 // negatives would silently drop intended config overrides.
@@ -140,7 +140,7 @@ func TestExtractConfigKey(t *testing.T) {
 	}
 }
 
-// ─── majorMinorFromVersion ───────────────────────────────────────────────────
+// --- majorMinorFromVersion ---
 // Rationale: majorMinorFromVersion extracts the major.minor prefix from a full
 // version string. A wrong prefix would cause kernel config paths and download
 // URLs to point at the wrong upstream directory, failing silently.
@@ -186,7 +186,7 @@ func TestMajorMinorFromVersion(t *testing.T) {
 	}
 }
 
-// ─── kernelSpecsToResolverConfigs ────────────────────────────────────────────
+// --- kernelSpecsToResolverConfigs ---
 // Rationale: kernelSpecsToResolverConfigs converts domain KernelSpec structs
 // into download.ResolverConfigs for the shared version resolver. An incorrect
 // conversion would skip resolver fields, drop format types, or fail to expand

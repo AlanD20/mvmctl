@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── NewVMCmd ──────────────────────────────────────────────────────────────
+// --- NewVMCmd --------------------------------------------------------------
 // Rationale: Missing subcommands silently disable VM operations without error.
 // NewVMCmd is the entry point for all VM CLI operations. If a subcommand is
 // not registered, the user gets a "unknown command" error with no indication
@@ -78,7 +78,7 @@ func TestNewVMCmd(t *testing.T) {
 	})
 }
 
-// ─── vm ls (via vm ls) ─────────────────────────────────────────────────────
+// --- vm ls (via vm ls) -----------------------------------------------------
 // Rationale: VM listing is the primary user-facing output for VM operations.
 // A broken list command makes the CLI unusable — users cannot see their VMs
 // and cannot target them for lifecycle operations.
@@ -189,7 +189,7 @@ func TestRunVMList(t *testing.T) {
 	})
 }
 
-// ─── vm start (via vm start) ───────────────────────────────────────────────
+// --- vm start (via vm start) -----------------------------------------------
 // Rationale: Start is the most common VM lifecycle operation. A broken start
 // leaves users with stopped VMs and no way to recover without manual
 // intervention. Both success and VM-not-found paths must work.
@@ -257,7 +257,7 @@ func TestRunVMStart(t *testing.T) {
 	})
 }
 
-// ─── vm stop (via vm stop) ────────────────────────────────────────────────
+// --- vm stop (via vm stop) ------------------------------------------------
 // Rationale: Stop must gracefully handle already-stopped VMs. An idempotent
 // stop is critical for cleanup scripts that call stop before remove.
 

@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── Mocks ────────────────────────────────────────────────────────────────────
+// --- Mocks ---
 
 type mockTracker struct {
 	mu sync.Mutex
@@ -129,7 +129,7 @@ func (m *mockRepo) GetByNetworkIDAndInterface(_ context.Context, _, _ string, _ 
 	return m.stubRules, m.stubErr
 }
 
-// ─── Delegation tests ─────────────────────────────────────────────────────────
+// --- Delegation tests ---
 // Rationale: Every FirewallTracker method should delegate to the backend or repo.
 
 func TestTracker_Initialize_teardown(t *testing.T) {
@@ -239,7 +239,7 @@ func TestTracker_GetByNetworkIDAndInterface_delegates(t *testing.T) {
 	assert.Equal(t, 1, mr.getByNetworkIDIFCalls)
 }
 
-// ─── Batch mode ───────────────────────────────────────────────────────────────
+// --- Batch mode ---
 // Rationale: WithBatch queues EnsureRule calls and flushes atomically on return.
 
 func TestTracker_WithBatch_empty(t *testing.T) {
@@ -316,7 +316,7 @@ func TestTracker_EnsureRule_inBatchMode_queuesRule(t *testing.T) {
 	assert.Equal(t, 0, len(mb.ensureRuleResults), "backend should not be called")
 }
 
-// ─── Nil backend guard ────────────────────────────────────────────────────────
+// --- Nil backend guard ---
 // Rationale: FirewallTracker constructed via NewFirewallTracker with an
 // unrecognised backend type has nil backend and nil repo. Must not panic.
 
@@ -332,6 +332,6 @@ func TestTracker_nilBackendDoesNotPanic(t *testing.T) {
 	assert.Panics(t, func() { ft.GetByNetworkID(ctx, "", true) })
 }
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
+// --- Helper ---
 
 func strPtr(s string) *string { return &s }

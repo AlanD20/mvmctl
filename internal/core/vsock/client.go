@@ -250,7 +250,7 @@ func (f *crFilter) Read(p []byte) (int, error) {
 // terminal (stdin/stdout). It returns when one direction completes (EOF or
 // error), triggering connection close to unblock the other direction.
 func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
-	// ── Bidirectional relay ──
+	// --- Bidirectional relay ---
 	//
 	// Two goroutines relay in both directions. The first one to finish
 	// (EOF or error) triggers connection close, which unblocks the other.

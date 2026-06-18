@@ -15,7 +15,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── NewFirecrackerSpawner ───────────────────────────────────────────────
+// --- NewFirecrackerSpawner -----------------------------------------------
 // Rationale: Ensures the spawner correctly copies config paths to its
 // exported fields. A bug here would misroute log/metrics/socket paths.
 
@@ -35,7 +35,7 @@ func TestNewFirecrackerSpawner(t *testing.T) {
 	assert.Nil(t, s.ProcessStartTime)
 }
 
-// ─── Generate: error paths ───────────────────────────────────────────────
+// --- Generate: error paths -----------------------------------------------
 // Rationale: buildBootArgs returns errors for invalid config combinations.
 // PCI transport requires a UUID, and NET cloud-init mode requires a URL.
 // These error paths must be tested first to establish the contract.
@@ -77,7 +77,7 @@ func TestFirecrackerSpawner_Generate_errors(t *testing.T) {
 	}
 }
 
-// ─── Generate: boot args ─────────────────────────────────────────────────
+// --- Generate: boot args -------------------------------------------------
 // Rationale: buildBootArgs assembles kernel command-line parameters from
 // config fields. Each feature (PCI, nested virt, LSM, cloud-init) adds or
 // omits specific flags. Wrong boot args cause VM boot failures.
@@ -294,7 +294,7 @@ func TestFirecrackerSpawner_Generate_bootArgs(t *testing.T) {
 	}
 }
 
-// ─── Generate: drives config ─────────────────────────────────────────────
+// --- Generate: drives config ---------------------------------------------
 // Rationale: buildDrivesConfig constructs the drive list from rootfs,
 // optional cloud-init ISO, and extra drives. Missing or extra drives
 // cause VM boot failures or data loss.
@@ -446,7 +446,7 @@ func TestFirecrackerSpawner_Generate_drivesConfig(t *testing.T) {
 	}
 }
 
-// ─── Generate: network config ────────────────────────────────────────────
+// --- Generate: network config --------------------------------------------
 // Rationale: buildNetworkConfig produces the network interfaces list.
 // A misconfigured interface prevents the VM from communicating.
 
@@ -482,7 +482,7 @@ func TestFirecrackerSpawner_Generate_networkConfig(t *testing.T) {
 	}
 }
 
-// ─── Generate: CPU config ────────────────────────────────────────────────
+// --- Generate: CPU config ------------------------------------------------
 // Rationale: buildCPUConfig returns nil or a CPU template based on nested
 // virt and explicit CPU config. A missing CPU template when nested virt is
 // enabled causes VM boot failure.
@@ -547,7 +547,7 @@ func TestFirecrackerSpawner_Generate_cpuConfig(t *testing.T) {
 	}
 }
 
-// ─── Generate: logger and metrics config ─────────────────────────────────
+// --- Generate: logger and metrics config ---------------------------------
 // Rationale: Logger and Metrics sections are conditionally included.
 // When disabled they must be nil; when enabled they must carry the
 // correct paths and levels.
@@ -614,7 +614,7 @@ func TestFirecrackerSpawner_Generate_loggerMetrics(t *testing.T) {
 	}
 }
 
-// ─── Generate: full config assembly ──────────────────────────────────────
+// --- Generate: full config assembly --------------------------------------
 // Rationale: Generate assembles all sub-configs into a single VM config.
 // This test verifies the full output struct including BootSource and
 // MachineConfig fields not covered by focused tests above.
@@ -654,7 +654,7 @@ func TestFirecrackerSpawner_Generate_fullConfig(t *testing.T) {
 	assert.False(t, got.MachineConfig.TrackDirtyPages)
 }
 
-// ─── RemoveDrive ─────────────────────────────────────────────────────────
+// --- RemoveDrive ---------------------------------------------------------
 // Rationale: Drive removal logic must correctly filter drive entries by
 // drive_id, persist the change to disk, and report whether removal occurred.
 // A bug here leaves stale drives attached or fails to free resources.
@@ -742,7 +742,7 @@ func TestFirecrackerConfigManager_RemoveDrive(t *testing.T) {
 	}
 }
 
-// ─── AddDrive ────────────────────────────────────────────────────────────
+// --- AddDrive ------------------------------------------------------------
 // Rationale: AddDrive must append new drive entries and replace existing
 // ones by drive_id. A bug here causes duplicate drives or data loss.
 

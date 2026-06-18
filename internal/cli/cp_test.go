@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/api/results"
 )
 
-// ─── NewCpCmd ──────────────────────────────────────────────────────────────
+// --- NewCpCmd ---
 // Rationale: CP is a leaf command wrapping CPAPI.CPCopy with a rich progress
 // display. Verify the command shell is created correctly with all expected
 // flags and basic arg validation.
@@ -52,7 +52,7 @@ func TestNewCpCmd(t *testing.T) {
 	assert.Empty(t, cmd.Commands(), "cp should have no subcommands")
 }
 
-// ─── CP validation ─────────────────────────────────────────────────────────
+// --- CP validation ---
 // Rationale: CP requires at least two arguments (source and target). A broken
 // validation would allow invalid invocations that result in confusing errors.
 

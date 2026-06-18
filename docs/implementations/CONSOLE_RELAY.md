@@ -292,7 +292,7 @@ The detach sequence is configurable via the `RelayClient` constructor.
 The CLI's socket reader goroutine uses a 50ms read deadline (`SetReadDeadline`).
 This is a trade-off: shorter deadlines would consume more CPU polling for
 context cancellation; longer would delay shutdown during detach. 50ms matches
-the Python implementation's `select.select` timeout.
+the `select.select` timeout used in the original implementation.
 
 ## Critical fixes
 

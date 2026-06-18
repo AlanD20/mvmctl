@@ -102,7 +102,7 @@ func (b *BatchResult) HasErrors() bool           { /* true if any item has error
 
 ### Go-Specific: DomainError with Code + Class
 
-Unlike the Python version (which uses a single `OperationResult` for everything), Go has a parallel error path via `DomainError`:
+Go has a parallel error path via `DomainError`:
 
 ```go
 type DomainError struct {
@@ -409,23 +409,6 @@ common.Cli.Success(fmt.Sprintf("Removed: %s", strings.Join(names, ", ")))
 - The `code` IS the audit log event name — no separate naming
 - `onProgress` is always `event.OnProgressCallback` (which is `func(event.Progress)`) — optional, nil means no progress
 - Every emitted `Progress` uses the direct `if onProgress == nil { return }` check pattern (or `emitProgress` helper)
-
----
-
-## Key Differences from Python Version
-
-| Aspect | Python | Go |
-|--------|--------|-----|
-| **Generic types** | `OperationResult(Generic[T])` | `OperationResult` with `Item any` |
-| **NeedsInteraction** | Return value, checked via `isinstance()` | Implements `error`, checked via `errors.As()` |
-| **Status constants** | `Literal["success", ...]` | `OperationStatus` typed string constants |
-| **Error handling** | `OperationResult(status="error")` for all errors | `DomainError` with `Code` + `Class` for errors |
-| **Batch result** | `BatchResult(Generic[T])` | `BatchResult` with `[]OperationResult` |
-| **Progress callback** | `on_progress: Callable[[ProgressEvent], None] \| None` | `OnProgressCallback func(Progress)` |
-| **Download progress** | `ASCIIProgressBar` (not via callback) | `FormatProgress` bridge function |
-| **Code convention** | `<domain>.<verb>[.<reason>]` | `<domain>.<noun>.<verb>` |
-
----
 
 ## Appendix: Master Code Table
 

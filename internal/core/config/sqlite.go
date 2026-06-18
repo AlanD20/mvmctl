@@ -21,8 +21,7 @@ func NewRepository(db *sqlx.DB) SettingsRepository {
 }
 
 // Get returns the parsed JSON value for a setting, or nil if not found.
-// Matches Python: json.loads(row["value"]), returns None on not found.
-// Error behavior matches Python: database errors (including "no such table") propagate;
+// Database errors (including "no such table") propagate;
 // only sql.ErrNoRows is treated as not-found (returns nil, nil).
 func (r *sqliteRepo) Get(ctx context.Context, category, key string) (any, error) {
 	var valueStr string
@@ -44,7 +43,6 @@ func (r *sqliteRepo) Get(ctx context.Context, category, key string) (any, error)
 }
 
 // Set stores a value as JSON. Uses INSERT ... ON CONFLICT with CURRENT_TIMESTAMP.
-// Matches Python exactly: json.dumps(value), CURRENT_TIMESTAMP, ON CONFLICT DO UPDATE.
 func (r *sqliteRepo) Set(ctx context.Context, category, key string, value any) error {
 	var valueStr string
 	if value == nil {
@@ -71,7 +69,6 @@ func (r *sqliteRepo) Set(ctx context.Context, category, key string, value any) e
 }
 
 // Delete removes a setting. Returns true if a row was deleted.
-// Matches Python: returns cursor.rowcount > 0.
 func (r *sqliteRepo) Delete(ctx context.Context, category, key string) (bool, error) {
 	result, err := r.db.ExecContext(ctx,
 		"DELETE FROM user_settings WHERE category = ? AND key = ?",
@@ -88,7 +85,6 @@ func (r *sqliteRepo) Delete(ctx context.Context, category, key string) (bool, er
 }
 
 // DeleteByCategory removes all settings in a category. Returns number of rows deleted.
-// Matches Python: returns cursor.rowcount.
 func (r *sqliteRepo) DeleteByCategory(ctx context.Context, category string) (int, error) {
 	result, err := r.db.ExecContext(ctx,
 		"DELETE FROM user_settings WHERE category = ?",
@@ -105,7 +101,6 @@ func (r *sqliteRepo) DeleteByCategory(ctx context.Context, category string) (int
 }
 
 // DeleteAll removes ALL user settings. Returns number of rows deleted.
-// Matches Python: DELETE FROM user_settings, return rowcount.
 func (r *sqliteRepo) DeleteAll(ctx context.Context) (int, error) {
 	result, err := r.db.ExecContext(ctx, "DELETE FROM user_settings")
 	if err != nil {
@@ -119,8 +114,7 @@ func (r *sqliteRepo) DeleteAll(ctx context.Context) (int, error) {
 }
 
 // Count returns total number of user settings.
-// Matches Python: SELECT COUNT(*) FROM user_settings.
-// Error behavior matches Python: database errors (including "no such table") propagate.
+// Database errors (including "no such table") propagate.
 func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 	var c int
 	err := sqlx.GetContext(ctx, r.db, &c, "SELECT COUNT(*) FROM user_settings")
@@ -132,9 +126,8 @@ func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 
 // ListByCategory lists settings, optionally filtered by category.
 // Returns nested map: {category: {key: value}} with ORDER BY category, key.
-// Matches Python: ORDER BY category, key; json.loads on each value.
 // If category is nil, returns all settings.
-// Error behavior matches Python: database errors (including "no such table") propagate.
+// Database errors (including "no such table") propagate.
 func (r *sqliteRepo) ListByCategory(ctx context.Context, category *string) (map[string]map[string]any, error) {
 	query := "SELECT category, key, value FROM user_settings"
 	var args []any

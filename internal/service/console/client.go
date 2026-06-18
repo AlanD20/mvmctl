@@ -20,12 +20,11 @@ import (
 
 const (
 	consoleSocketTimeout = 2 * time.Second // CONST_CONSOLE_SOCKET_TIMEOUT_S
-	consolePollIntervalS = 0.05            // polling interval used by CLI _interact
+	consolePollIntervalS = 0.05            // polling interval used by CLI interact
 )
 
 // defaultDetachSequence is the default byte sequence that triggers detach:
 // Ctrl+X (0x18) followed by 'd' (0x64).
-// Matches Python's CONST_CONSOLE_DETACH_SEQUENCE = b"\x18d".
 var defaultDetachSequence = []byte{0x18, 'd'}
 
 // DefaultDetachSequence returns a copy of the default detach sequence.
@@ -35,19 +34,18 @@ func DefaultDetachSequence() []byte {
 	return seq
 }
 
-// ── RelayClient connects to a console relay Unix socket ─────────────────
-// Matches Python's ConsoleRelayClient exactly.
+// --- RelayClient ---
+//
 // RelayClient provides a high-level client for bidirectional console
 // communication with detach keybind support.
 type RelayClient struct {
-	mu         sync.Mutex
+	mu         sync.Mutex // guards conn field
 	socketPath string
 	detachSeq  []byte
 	conn       net.Conn
 }
 
 // NewRelayClient creates a console relay client.
-// Matches Python's ConsoleRelayClient.__init__().
 func NewRelayClient(socketPath string, detachSequence []byte) *RelayClient {
 	if len(detachSequence) == 0 {
 		detachSequence = DefaultDetachSequence()
@@ -61,10 +59,6 @@ func NewRelayClient(socketPath string, detachSequence []byte) *RelayClient {
 }
 
 // Connect connects to the console relay socket.
-// Matches Python's ConsoleRelayClient.connect() exactly:
-//
-//	Python creates a socket, connects with timeout, then calls setblocking(False).
-//	Go does the same via net.DialTimeout.
 func (c *RelayClient) Connect() error {
 	conn, err := net.DialTimeout("unix", c.socketPath, consoleSocketTimeout)
 	if err != nil {
@@ -81,7 +75,6 @@ func (c *RelayClient) Connect() error {
 }
 
 // IsConnected checks if client is currently connected.
-// Matches Python's ConsoleRelayClient.is_connected().
 func (c *RelayClient) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -89,7 +82,6 @@ func (c *RelayClient) IsConnected() bool {
 }
 
 // Disconnect disconnects from the relay socket.
-// Matches Python's ConsoleRelayClient.disconnect().
 func (c *RelayClient) Disconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -99,15 +91,13 @@ func (c *RelayClient) Disconnect() {
 	}
 }
 
-// Close is the context-manager cleanup equivalent of Python's __exit__.
-// Matches Python's ConsoleRelayClient.__exit__() which calls self.disconnect().
+// Close disconnects the client. Implements io.Closer.
 func (c *RelayClient) Close() error {
 	c.Disconnect()
 	return nil
 }
 
 // Send sends data to the console.
-// Matches Python's ConsoleRelayClient.send().
 func (c *RelayClient) Send(data []byte) error {
 	c.mu.Lock()
 	conn := c.conn
@@ -123,17 +113,15 @@ func (c *RelayClient) Send(data []byte) error {
 }
 
 // Receive returns a channel that yields data chunks as they arrive from
-// the console relay socket. This is the Go equivalent of Python's
-// ConsoleRelayClient.receive() generator, which yields bytes until the
-// socket is closed or an error occurs.
+// the console relay socket.
 //
 // The channel is closed when:
-//   - The connection is closed (remote end hung up)
-//   - A non-recoverable error occurs (OSError, ConnectionResetError)
-//   - The context is cancelled
+// - The connection is closed (remote end hung up)
+// - A non-recoverable error occurs
+// - The context is cancelled
 //
-// BlockingIOError/InterruptedError equivalents cause a retry (not a close).
-// Timeouts (no data within select timeout) cause a retry (not a close).
+// Timeout errors cause a retry (not a close).
+// Non-timeout errors (connection reset, closed) close the channel.
 func (c *RelayClient) Receive(ctx context.Context, bufferSize int) <-chan []byte {
 	c.mu.Lock()
 	conn := c.conn
@@ -185,7 +173,6 @@ func (c *RelayClient) Receive(ctx context.Context, bufferSize int) <-chan []byte
 }
 
 // CheckDetach checks if buffer ends with the detach sequence.
-// Matches Python's ConsoleRelayClient.check_detach().
 func (c *RelayClient) CheckDetach(buf []byte) bool {
 	if len(buf) >= len(c.detachSeq) {
 		end := buf[len(buf)-len(c.detachSeq):]
@@ -194,21 +181,20 @@ func (c *RelayClient) CheckDetach(buf []byte) bool {
 	return false
 }
 
-// DetachSequence returns a copy of the detach sequence. Matches Python's property.
+// DetachSequence returns a copy of the detach sequence.
 func (c *RelayClient) DetachSequence() []byte {
 	seq := make([]byte, len(c.detachSeq))
 	copy(seq, c.detachSeq)
 	return seq
 }
 
-// SocketPath returns the socket path. Matches Python's property.
+// SocketPath returns the socket path.
 func (c *RelayClient) SocketPath() string {
 	return c.socketPath
 }
 
 // GetSocket returns the underlying connected socket for advanced use.
-// Matches Python's ConsoleRelayClient.get_socket() which raises
-// RuntimeError("Not connected - call connect() first") when not connected.
+// Returns an error if not connected.
 func (c *RelayClient) GetSocket() (net.Conn, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -218,11 +204,11 @@ func (c *RelayClient) GetSocket() (net.Conn, error) {
 	return c.conn, nil
 }
 
-// ── Interactive Console Attach ──────────────────────────────────────────
-// Matches Python's CLI _interact() exactly.
+// --- Interactive Console Attach ---
+//
 // InteractiveAttach connects to the console relay and enters interactive mode.
 // Sets terminal to raw mode, forwards stdin→relay and relay→stdout,
-// detaches on Ctrl+X then D. Matches the Python CLI attach behavior.
+// detaches on Ctrl+X then D.
 func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, stdout io.Writer) error {
 	client := NewRelayClient(socketPath, nil)
 	if err := client.Connect(); err != nil {
@@ -235,7 +221,7 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 		return err
 	}
 
-	// ── Send initial terminal window size to relay ──
+	// --- Send initial terminal window size to relay ---
 	if f, ok := stdin.(*os.File); ok {
 		if rows, cols, err := term.GetSize(int(f.Fd())); err == nil {
 			var ws [wsHeaderSize]byte
@@ -247,7 +233,7 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 		}
 	}
 
-	// ── Watch for terminal resize (SIGWINCH) and notify relay ──
+	// --- Watch for terminal resize (SIGWINCH) and notify relay ---
 	winchCh := make(chan os.Signal, 1)
 	signal.Notify(winchCh, syscall.SIGWINCH)
 	defer signal.Stop(winchCh)
@@ -271,7 +257,7 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 		}
 	}()
 
-	// ── Set terminal to raw mode (matching Python's tty.setraw()) ──
+	// --- Set terminal to raw mode ---
 	var oldState *term.State
 	var stdinFD int
 	if f, ok := stdin.(*os.File); ok {
@@ -286,11 +272,10 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 	if oldState != nil {
 		defer term.Restore(stdinFD, oldState) //nolint:errcheck
 	}
-	// ── Set up derived context for goroutine cancellation ──
+	// --- Set up derived context for goroutine cancellation ---
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	// ── Socket read goroutine: relay → stdout ──
-	// Matches Python's: if sock in ready: data = sock.recv(4096); sys.stdout.buffer.write(data)
+	// --- Socket read goroutine: relay → stdout ---
 	socketCh := make(chan []byte, 10)
 	socketErrCh := make(chan error, 1)
 	go func() {
@@ -327,8 +312,7 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 			}
 		}
 	}()
-	// ── Stdin read goroutine: stdin → stdinCh byte by byte ──
-	// Matches Python's: char = sys.stdin.buffer.read(1)
+	// --- Stdin read goroutine: stdin → stdinCh byte by byte ---
 	stdinCh := make(chan byte, 64)
 	go func() {
 		buf := make([]byte, 1)
@@ -351,13 +335,8 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 			}
 		}
 	}()
-	// ── Main interact loop (matches Python's _interact()) ──
-	// Python logic:
-	//   while True:
-	//     ready, _, _ = select.select([sys.stdin, sock], [], [], 0.05)
-	//     for fd in ready:
-	//       if fd == sock:  → read, write to stdout
-	//       if fd == sys.stdin: → read 1 byte, buffer, check detach, send
+	// --- Main interact loop ---
+	// Select-based event loop: socket data → stdout, stdin bytes → buffer → detach check → send
 	inputBuf := make([]byte, 0, 4096)
 	for {
 		select {
@@ -373,9 +352,9 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 		case err := <-socketErrCh:
 			return fmt.Errorf("console relay: %w", err)
 		case b := <-stdinCh:
-			// Append byte to input buffer (matches Python: input_buffer.extend(char))
+			// Append byte to input buffer.
 			inputBuf = append(inputBuf, b)
-			// ── Detach check: bytes(input_buffer[-2:]) == b"\x18d" ──
+			// --- Detach check: last 2 bytes match Ctrl+X + 'd' ---
 			if len(inputBuf) >= 2 {
 				if inputBuf[len(inputBuf)-2] == 0x18 && inputBuf[len(inputBuf)-1] == 'd' {
 					// Send any remaining data before the detach sequence
@@ -384,13 +363,13 @@ func InteractiveAttach(ctx context.Context, socketPath string, stdin io.Reader, 
 							return fmt.Errorf("console relay: %w", err)
 						}
 					}
-					// Print detach confirmation matching Python's mvm_cli.info("\nDetached from console")
+					// Print detach confirmation to stderr.
 					fmt.Fprintf(os.Stderr, "\nDetached from console\n")
 					return nil
 				}
 			}
-			// ── Send logic matching Python's input handling ──
-			// Python check: if input_buffer[0:1] != b"\x18":
+			// --- Send logic ---
+			// If first byte is not Ctrl+X, send entire buffer and clear.
 			if inputBuf[0] != 0x18 {
 				// First byte is not Ctrl+X — send entire buffer and clear
 				if err := client.Send(inputBuf); err != nil {

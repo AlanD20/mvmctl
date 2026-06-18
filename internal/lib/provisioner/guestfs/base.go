@@ -19,7 +19,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Constants ───────────────────────────────────────────────────────────────
+// --- Constants ---
 
 const (
 	guestfishBin   = "guestfish"
@@ -27,7 +27,7 @@ const (
 	defaultMemsize = 256
 )
 
-// ── GuestfsHandle ───────────────────────────────────────────────────────────
+// --- GuestfsHandle ---
 //
 // Uses guestfish CLI tool as a subprocess (Go has no native guestfs bindings).
 // Each method launches a separate guestfish subprocess.
@@ -49,7 +49,7 @@ func NewHandle(diskPath string, readonly bool) (*GuestfsHandle, error) {
 	return &GuestfsHandle{diskPath: diskPath, readonly: readonly}, nil
 }
 
-// ── Lazy environment initialization (once per process) ───────────────────────
+// --- Lazy env initialization (once per process) ---
 
 var (
 	envOnce     sync.Once
@@ -94,7 +94,7 @@ func initEnv(ctx context.Context) {
 	})
 }
 
-// ── Low-level guestfish invocation ──────────────────────────────────────────
+// --- Low-level guestfish invocation ---
 
 // guestfishRun executes guestfish with retry (3 attempts, backoff).
 // If input is non-empty, it is piped to guestfish's stdin (interactive mode).
@@ -187,7 +187,7 @@ func (h *GuestfsHandle) run(ctx context.Context, args ...string) (string, error)
 	return guestfishRun(ctx, h.diskPath, h.readonly, "", args...)
 }
 
-// ── High-level operations ───────────────────────────────────────────────────
+// --- High-level operations ---
 
 // MountRootfs lists filesystems, identifies root device, returns it.
 // No persistent mount in subprocess mode — use RunBatch() or provisioner's Run().
@@ -288,8 +288,7 @@ func (h *GuestfsHandle) CopyDeviceToFile(ctx context.Context, device string, out
 }
 
 // FindLargestLinuxFS finds the largest Linux filesystem among partitions.
-// Matches Python's find_largest_linux_fs: checks vfs_type, mounts Linux
-// filesystems, and selects the largest by statvfs.
+// Checks vfs_type, mounts Linux filesystems, and selects the largest by statvfs.
 func (h *GuestfsHandle) FindLargestLinuxFS(ctx context.Context, partitions []string) (string, error) {
 	var maxSize int64
 	var rootDevice string
@@ -400,7 +399,7 @@ func (h *GuestfsHandle) GrowFS(ctx context.Context, device string, targetSizeByt
 	return nil
 }
 
-// ── Utility / Session lifecycle ─────────────────────────────────────────────
+// --- Utility / Session lifecycle ---
 
 // RunBatch runs a batch of guestfish commands in a single invocation.
 func (h *GuestfsHandle) RunBatch(ctx context.Context, commands string) (string, error) {
@@ -420,7 +419,7 @@ func (h *GuestfsHandle) ReadFile(ctx context.Context, path string) (string, erro
 	return out, nil
 }
 
-// ── Parsing helpers ─────────────────────────────────────────────────────────
+// --- Parsing helpers ---
 
 // parseStatvfsField parses a field from guestfish statvfs output.
 // Output format: "fieldname: value\nfieldname: value\n..."
@@ -462,7 +461,7 @@ func (h *GuestfsHandle) StatVFS(ctx context.Context, path string) (map[string]in
 	return result, nil
 }
 
-// ── extract_partition (classmethod equivalent) ──────────────────────────────
+// --- extract_partition ---
 
 // ExtractPartition extracts root partition using guestfish for reliable VHD handling.
 // Returns the output path, or empty string if extraction fails/guestfs unavailable.

@@ -62,9 +62,7 @@ func NewLoopMountBackend(ctx context.Context, rootfsPath string, fsType string, 
 	return &LoopMountBackend{rootfsPath: rootfsPath, fsType: fsType, cacheDir: cacheDir}
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Builder methods — queue provisioning operations
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Builder methods -- queue provisioning operations ---
 
 func (b *LoopMountBackend) Resize(ctx context.Context, targetSizeBytes int64) error {
 	if targetSizeBytes == 0 {
@@ -150,9 +148,7 @@ func (b *LoopMountBackend) InjectVsockAgent(_ context.Context, agentBinary []byt
 	return nil
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Execution
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Execution ---
 
 // Run executes all queued operations via the loopmount service subprocess.
 func (b *LoopMountBackend) Run(ctx context.Context) error {
@@ -192,9 +188,7 @@ func (b *LoopMountBackend) Run(ctx context.Context) error {
 	return err
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Other Backend interface methods
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Other Backend interface methods ---
 
 // ConvertTo converts the image filesystem to targetFS via loop-mount subprocess.
 // On success, updates b.fsType so subsequent operations (deblob, shrink) use

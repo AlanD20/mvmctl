@@ -1,17 +1,12 @@
 package inputs
-
 import (
 	"context"
 	"strings"
-
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/errs"
-
 	"github.com/jmoiron/sqlx"
 )
-
-// BinaryPullInput is the raw input for pulling a firecracker binary.
-// Matches Python's BinaryPullInput dataclass exactly:
+// BinaryPullInput holds options for pulling a Firecracker binary.
 type BinaryPullInput struct {
 	Version          string  `json:"version"           yaml:"version"`
 	Type             string  `json:"type"              yaml:"type"`
@@ -19,8 +14,7 @@ type BinaryPullInput struct {
 	SetDefault       bool    `json:"set_default"       yaml:"default"`
 	DownloadOverride bool    `json:"force"             yaml:"force"`
 }
-
-// ResolvedBinaryPullInput matches Python's ResolvedBinaryPullInput (frozen dataclass).
+// ResolvedBinaryPullInput specifies resolved binary pull input.
 type ResolvedBinaryPullInput struct {
 	Version          string
 	Type             string
@@ -29,14 +23,12 @@ type ResolvedBinaryPullInput struct {
 	BinDir           string
 	DownloadOverride bool
 }
-
-// BinaryPullRequest matches Python's BinaryPullRequest.
+// BinaryPullRequest specifies binary pull request.
 type BinaryPullRequest struct {
 	db     *sqlx.DB
 	input  BinaryPullInput
 	result *ResolvedBinaryPullInput
 }
-
 // NewBinaryPullRequest creates a new BinaryPullRequest.
 func NewBinaryPullRequest(inputs BinaryPullInput, db *sqlx.DB) *BinaryPullRequest {
 	return &BinaryPullRequest{
@@ -44,25 +36,19 @@ func NewBinaryPullRequest(inputs BinaryPullInput, db *sqlx.DB) *BinaryPullReques
 		input: inputs,
 	}
 }
-
 // Result returns the resolved input, or nil if resolve() has not been called.
-
 // Resolve resolves and validates pull inputs.
-// Matches Python's BinaryPullRequest.resolve() exactly.
 func (r *BinaryPullRequest) Resolve(ctx context.Context) (*ResolvedBinaryPullInput, error) {
-	// Normalize version (strip 'v' prefix) — Python: version = self._inputs.version.removeprefix("v")
+	// Normalize version (strip 'v' prefix).
 	version := strings.TrimPrefix(r.input.Version, "v")
-
 	// Version validation is handled by the service's ResolveVersion method,
 	// which accepts latest, partial (e.g. "1.15"), and exact (e.g. "1.15.1") specs.
 	// When git_ref is provided, version may be empty.
-
 	// Default type to "firecracker"
 	typ := r.input.Type
 	if typ == "" {
 		typ = "firecracker"
 	}
-
 	r.result = &ResolvedBinaryPullInput{
 		Version:          version,
 		Type:             typ,
@@ -71,20 +57,16 @@ func (r *BinaryPullRequest) Resolve(ctx context.Context) (*ResolvedBinaryPullInp
 		BinDir:           infra.GetBinDir(),
 		DownloadOverride: r.input.DownloadOverride,
 	}
-
 	// Validate
 	if err := r.ensureValidate(); err != nil {
 		return nil, err
 	}
-
 	return r.result, nil
 }
-
 func (r *BinaryPullRequest) ensureValidate() error {
 	if r.result == nil {
 		return errs.New(errs.CodeBinaryNotFound, "No resolved pull input to validate")
 	}
-
 	// Validate binary type — only firecracker is supported for pull/build
 	if strings.ToLower(r.result.Type) != "firecracker" {
 		return errs.New(
@@ -92,11 +74,9 @@ func (r *BinaryPullRequest) ensureValidate() error {
 			"Unsupported binary: '"+r.result.Type+"'. Only 'firecracker' is supported for download or build.",
 		)
 	}
-
 	// Skip version check for git builds — version is determined after build
 	if r.result.GitRef != nil && *r.result.GitRef != "" {
 		return nil
 	}
-
 	return nil
 }

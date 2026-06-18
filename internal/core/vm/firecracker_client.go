@@ -17,14 +17,10 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Constants ──
+// --- Constants ---
 const (
 	constSocketTimeoutSeconds = 5.0
 )
-
-// =============================================================================
-// FirecrackerClient — HTTP client for the Firecracker API over a Unix socket
-// =============================================================================
 
 // FirecrackerClient provides HTTP access to the Firecracker API over a Unix socket.
 type FirecrackerClient struct {
@@ -48,18 +44,18 @@ func NewFirecrackerClient(socketPath string) *FirecrackerClient {
 	}
 }
 
-// Close implements Python's FirecrackerClient.close().
+// Close shuts down the Firecracker API client connection.
 func (fc *FirecrackerClient) Close() {
 	fc.httpClient.CloseIdleConnections()
 }
 
-// ── Low-level HTTP request with retry ──
+// --- Low-level HTTP request with retry ---
 
 // request makes an HTTP request to the Firecracker API with retry on connection refused.
-//   - 5 retries with exponential backoff (0.1s, 0.2s, 0.4s, 0.8s, 1.6s)
-//   - DomainError with CodeFirecrackerSocketNotFound when socket doesn't exist
-//   - On ECONNREFUSED: retry with reconnect
-//   - Returns (status, body, error) where body is the raw response body bytes.
+// - 5 retries with exponential backoff (0.1s, 0.2s, 0.4s, 0.8s, 1.6s)
+// - DomainError with CodeFirecrackerSocketNotFound when socket doesn't exist
+// - On ECONNREFUSED: retry with reconnect
+// - Returns (status, body, error) where body is the raw response body bytes.
 func (fc *FirecrackerClient) request(
 	ctx context.Context,
 	method, path string,
@@ -139,7 +135,7 @@ func isConnRefused(err error) bool {
 	return errors.As(err, &errno) && errno == syscall.ECONNREFUSED
 }
 
-// ── Snapshot Operations ──
+// --- Snapshot Operations ---
 
 // CreateSnapshot creates a VM snapshot via PUT /snapshot/create.
 func (fc *FirecrackerClient) CreateSnapshot(ctx context.Context, memPath, snapshotPath string) (bool, error) {
@@ -190,7 +186,7 @@ func (fc *FirecrackerClient) LoadSnapshot(
 	return false, errs.New(errs.CodeFirecrackerClientError, msg)
 }
 
-// ── Instance Info Operations ──
+// --- Instance Info Operations ---
 
 // GetInstanceInfo returns VM instance information via GET /.
 func (fc *FirecrackerClient) GetInstanceInfo(ctx context.Context) (*model.InstanceInfo, error) {
@@ -224,7 +220,7 @@ func (fc *FirecrackerClient) DescribeInstance(ctx context.Context) (*model.Insta
 	return nil, nil
 }
 
-// ── VM Lifecycle Operations ──
+// --- VM Lifecycle Operations ---
 
 // StartInstance starts the VM instance via PUT /actions with action_type InstanceStart.
 func (fc *FirecrackerClient) StartInstance(ctx context.Context) (bool, error) {
@@ -292,7 +288,7 @@ func (fc *FirecrackerClient) ResumeVM(ctx context.Context) error {
 		fmt.Sprintf("failed to resume VM: %d", status))
 }
 
-// ── Drive Operations ──
+// --- Drive Operations ---
 
 // PutDrive attaches or updates a drive via PUT /drives/{drive_id}.
 func (fc *FirecrackerClient) PutDrive(ctx context.Context, driveConfig model.DriveConfig) error {

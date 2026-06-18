@@ -11,7 +11,6 @@ import (
 )
 
 // HostRepo is an in-memory host repository for testing.
-// Matches Python's mvmctl.core.host._repository.Repository exactly.
 type HostRepo struct {
 	mu      sync.RWMutex
 	state   *model.HostStateItem
@@ -67,14 +66,14 @@ func (r *HostRepo) SetInitialized(_ context.Context, initializedAt string) error
 }
 
 // UpdateComponent updates a single host initialization component flag.
-// Matches Python exactly: validates against allowed set and raises error for unknown components.
+// Validates against allowed set and returns error for unknown components.
 func (r *HostRepo) UpdateComponent(_ context.Context, component string, value bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.state == nil {
 		return nil
 	}
-	// Match Python's allowed set validation
+	// Validate against allowed set
 	allowed := map[string]bool{
 		"mvm_group_created":       true,
 		"sudoers_configured":      true,
@@ -107,7 +106,6 @@ func (r *HostRepo) ResetState(_ context.Context) error {
 }
 
 // SaveCapacity upserts host capacity detection results atomically.
-// Matches Python's BEGIN/COMMIT/ROLLBACK transaction pattern.
 func (r *HostRepo) SaveCapacity(_ context.Context,
 	hostname string,
 	cpuModel string,
@@ -138,8 +136,7 @@ func (r *HostRepo) SaveCapacity(_ context.Context,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Match Python: BEGIN + INSERT OR IGNORE + UPDATE + COMMIT
-	// Ensure row exists (singleton id=1) — but we use lock as our transaction
+	// Ensure row exists (singleton id=1) — use lock as our transaction
 	now := time.Now().UTC().Format(time.RFC3339)
 	if r.state == nil {
 		r.state = &model.HostStateItem{
@@ -150,7 +147,7 @@ func (r *HostRepo) SaveCapacity(_ context.Context,
 		}
 	}
 
-	// Match Python: UPDATE host_state SET ... WHERE id = 1
+	// Update host state fields
 	h := hostname
 	cm := cpuModel
 	cv := cpuVendor
@@ -223,7 +220,7 @@ func (r *HostRepo) AddChange(_ context.Context, change *model.HostStateChangeIte
 	return nil
 }
 
-// AddChanges bulk inserts host state changes atomically (Python: BEGIN/COMMIT).
+// AddChanges bulk inserts host state changes atomically.
 func (r *HostRepo) AddChanges(_ context.Context, changes []*model.HostStateChangeItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -250,7 +247,6 @@ func (r *HostRepo) DeleteChangesExceptSession(_ context.Context, sessionID strin
 }
 
 // ListChanges returns host state changes, optionally filtered by session and reverted status.
-// Matches Python: ORDER BY change_order ASC.
 func (r *HostRepo) ListChanges(
 	_ context.Context,
 	sessionID *string,

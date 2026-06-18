@@ -1,4 +1,4 @@
-// Package cli — host configuration commands, matching Python's cli/host.py
+// Package cli — host configuration commands
 package cli
 
 import (
@@ -20,7 +20,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// formatChange returns a concise one-line description of a host change matching Python's _format_change.
+// formatChange returns a concise one-line description of a host change.
 func formatChange(mechanism, setting, appliedValue, originalValue string) string {
 	switch mechanism {
 	case "iptables_save":
@@ -30,8 +30,8 @@ func formatChange(mechanism, setting, appliedValue, originalValue string) string
 	case "groupadd":
 		return fmt.Sprintf("group '%s' created", appliedValue)
 	case "usermod":
-		// Python: v.split(":") — unlimited splits. Only use 2-part form when exactly 2 parts.
-		// For "user:group:extra", Python falls back to (v, v).
+		// Only use 2-part form when exactly 2 parts.
+		// For "user:group:extra", fall back to displaying the full value.
 		parts := strings.Split(appliedValue, ":")
 		user := appliedValue
 		group := appliedValue
@@ -56,8 +56,7 @@ func formatChange(mechanism, setting, appliedValue, originalValue string) string
 	case "network_create":
 		return fmt.Sprintf("Default network '%s' ready", appliedValue)
 	}
-	// Fallback: Python uses repr-style formatting: f"{s}: {orig_display!r} → {v!r}"
-	// In Go, use %q to reproduce repr semantics (proper escaping of quotes, backslashes, newlines).
+	// Fallback: use %q for repr-style display (proper escaping of quotes, backslashes, newlines).
 	origDisplay := originalValue
 	if len(origDisplay) > 50 {
 		origDisplay = origDisplay[:50] + "…"
@@ -416,7 +415,7 @@ Sysctl settings, sudoers, and the '%s' group will NOT be affected.`, infra.MVMUn
 				return err
 			}
 
-			// Show per-item lines matching Python
+			// Show per-item lines
 			for _, item := range summary {
 				if strings.HasPrefix(item, "Warning:") {
 					remainder := strings.TrimSpace(item[len("Warning:"):])
@@ -479,7 +478,7 @@ Examples:
 				return err
 			}
 
-			// Show per-item lines matching Python
+			// Show per-item lines
 			for _, item := range summary {
 				if strings.HasPrefix(item, "Warning:") {
 					remainder := strings.TrimSpace(item[len("Warning:"):])

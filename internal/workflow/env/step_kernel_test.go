@@ -18,7 +18,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── Test helpers ─────────────────────────────────────────────────────────────
+// --- Test helpers ---
 
 // ctxKernelAPI wraps testutil.MockKernelAPI to propagate context cancellation
 // from KernelGet. The plain mock ignores context, so this wrapper is needed
@@ -62,7 +62,7 @@ func newKernelStep(t *testing.T, op api.KernelAPI) workflow.Step {
 	})
 }
 
-// ─── KernelStep.Apply ────────────────────────────────────────────────────────
+// --- KernelStep.Apply ---
 // Rationale: KernelStep.Apply is the core provisioning path. A nil-op crash,
 // a missed context cancellation, or a database error swallowed as success
 // would all cause silent data loss or hung workflows.
@@ -76,7 +76,7 @@ func TestKernelStep_Apply(t *testing.T) {
 		wantKernelID string
 		wantState    model.ResourceState
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupAPI: func(_ *testing.T) api.KernelAPI { return nil },
@@ -112,7 +112,7 @@ func TestKernelStep_Apply(t *testing.T) {
 			wantErr: "check kernel type",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"kernel_exists_skips_pull_and_writes_state": {
 			setupAPI: func(_ *testing.T) api.KernelAPI {
@@ -200,7 +200,7 @@ func TestKernelStep_Apply(t *testing.T) {
 	}
 }
 
-// ─── KernelStep.Destroy ──────────────────────────────────────────────────────
+// --- KernelStep.Destroy ---
 // Rationale: Destroy is a no-op for kernels (they persist in the DB), but it
 // must still handle nil op, write state, and recover saved state from the
 // parameter for workflow resumption after a crash.
@@ -213,7 +213,7 @@ func TestKernelStep_Destroy(t *testing.T) {
 		wantErr   string
 		wantState model.ResourceState
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupAPI: func(_ *testing.T) api.KernelAPI { return nil },
@@ -231,7 +231,7 @@ func TestKernelStep_Destroy(t *testing.T) {
 			wantErr: "context canceled",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"writes_state_and_returns_nil": {
 			setupAPI: func(_ *testing.T) api.KernelAPI {
@@ -287,7 +287,7 @@ func TestKernelStep_Destroy(t *testing.T) {
 	}
 }
 
-// ─── KernelStep.StateData ────────────────────────────────────────────────────
+// --- KernelStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision resources.
@@ -345,7 +345,7 @@ func TestKernelStep_StateData(t *testing.T) {
 	}
 }
 
-// ─── KernelStep.StateData write-failure propagation ──────────────────────────
+// --- KernelStep.StateData write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Apply and Destroy must
 // propagate it rather than silently swallowing the persistence failure.
 

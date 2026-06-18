@@ -19,17 +19,10 @@ import (
 // lets cli/common/ control where the output goes.
 var ProgressOutput io.Writer = os.Stdout
 
-// ──────────────────────────────────────────────
-// Progress types
-// ──────────────────────────────────────────────
-
-// ──────────────────────────────────────────────
-// ASCIIProgressBar — matching Python's ASCIIProgressBar
-// ──────────────────────────────────────────────
+// --- ASCIIProgressBar ---
 
 // ASCIIProgressBar renders an ASCII progress bar for TTY and non-TTY environments.
 // Displays: [####      ] 45% (4.2MB/10MB)
-// Mirrors Python's mvmctl.utils.progress.ASCIIProgressBar.
 type ASCIIProgressBar struct {
 	total       int64
 	width       int
@@ -38,11 +31,10 @@ type ASCIIProgressBar struct {
 	lastPercent int
 	lastLineLen int
 	isTTY       bool
-	mu          sync.Mutex
+	mu          sync.Mutex // guards bar state (current, lastPercent, lastLineLen)
 }
 
 // NewASCIIProgressBar creates a new ASCII progress bar.
-// Matches Python's __init__(self, total, width=40, title="Downloading").
 func NewASCIIProgressBar(total int64, width int, title string) *ASCIIProgressBar {
 	if width <= 0 {
 		width = 40
@@ -64,8 +56,7 @@ func NewASCIIProgressBar(total int64, width int, title string) *ASCIIProgressBar
 }
 
 // isTerminal checks if the given file descriptor is a terminal.
-// Python uses os.isatty() which calls tcgetattr(3) internally.
-// Go uses ioctl TCGETS directly. Both are equivalent on Linux.
+// Uses ioctl TCGETS which is equivalent to tcgetattr(3) on Linux.
 func isTerminal(fd int) bool {
 	var termios syscall.Termios
 	_, _, err := syscall.Syscall6(
@@ -89,7 +80,6 @@ func (p *ASCIIProgressBar) Update(n int64) {
 }
 
 // Finish prints final completion message.
-// Matches Python: if TTY: os.write(1, b"\r\033[K"); print(f"{self.title} complete.")
 func (p *ASCIIProgressBar) Finish() {
 	if p.isTTY {
 		ProgressOutput.Write([]byte("\r\033[K"))
@@ -130,13 +120,8 @@ func (p *ASCIIProgressBar) display() {
 
 	output := terminator + line
 
-	// Python behavior:
-	//   TTY:     os.write(1, output.encode())        — bypass stdout wrapper, unbuffered
-	//   Non-TTY: sys.stdout.write(output); flush()    — go through wrapper, then flush
-	//
-	// In Go, os.Stdout.Write always writes directly to fd 1 (unbuffered), so
-	// both paths are equivalent. No Sync() call needed (unlike Python's flush()
-	// which flushes user-space buffer — Go's os.File writes go directly to fd).
+	// os.Stdout.Write writes directly to fd 1 (unbuffered), so both TTY and
+	// non-TTY paths use the same write. No Sync() call needed.
 	ProgressOutput.Write([]byte(output))
 
 	p.lastLineLen = len(line)
@@ -164,7 +149,6 @@ func getTermWidth() int {
 }
 
 // formatBytes formats bytes to human-readable (B, KB, MB, GB).
-// Matches Python's ASCIIProgressBar._format_size().
 func formatBytes(size int64) string {
 	if size < 1024 {
 		return fmt.Sprintf("%dB", size)
@@ -179,18 +163,15 @@ func formatBytes(size int64) string {
 	return fmt.Sprintf("%.1fGB", f/(1024*1024*1024))
 }
 
-// ──────────────────────────────────────────────
-// Spinner — matching Python's Spinner
-// ──────────────────────────────────────────────
+// --- Spinner ---
 
 // Spinner is a threaded ASCII spinner for indeterminate progress.
 // Displays a rotating Braille character with a message on a single line.
-// Mirrors Python's mvmctl.utils.progress.Spinner.
 type Spinner struct {
 	message string
 	stopCh  chan struct{}
 	doneCh  chan struct{}
-	mu      sync.Mutex
+	mu      sync.Mutex // guards started/stopped flags
 	started bool
 	stopped bool // prevents double-close panic on second Stop() call
 }
@@ -209,7 +190,6 @@ func NewSpinner(message string) *Spinner {
 var frames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // Start begins the spinner in a background goroutine.
-// Matches Python's start() which uses threading.Thread(target=self._run, daemon=True).
 // Creates channels once on first call; subsequent calls are no-ops.
 func (s *Spinner) Start() {
 	s.mu.Lock()
@@ -241,8 +221,8 @@ func (s *Spinner) Start() {
 }
 
 // Stop halts the spinner and optionally prints a completion message.
-// Matches Python's stop(done_message=None). Safe to call multiple times
-// (subsequent calls are no-ops). Uses stopped guard to prevent double-close panic.
+// Safe to call multiple times (subsequent calls are no-ops).
+// Uses stopped guard to prevent double-close panic.
 func (s *Spinner) Stop(doneMessage string) {
 	s.mu.Lock()
 	if s.stopped || !s.started {
@@ -263,21 +243,7 @@ func (s *Spinner) Stop(doneMessage string) {
 	}
 }
 
-// WithSpinner provides a context-manager equivalent for Python's
-// "with Spinner(message) as s:" pattern.
-//
-// Python:
-//
-//	with Spinner("Downloading") as s:
-//	    do_work()
-//	# s.stop() called automatically on exit
-//
-// Go:
-//
-//	infra.WithSpinner("Downloading", func() {
-//	    doWork()
-//	})
-//	// spinner started before fn, stopped after fn
+// WithSpinner starts a spinner, runs fn, and stops the spinner when fn returns.
 func WithSpinner(message string, fn func()) {
 	s := NewSpinner(message)
 	s.Start()

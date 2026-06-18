@@ -86,7 +86,7 @@ func newNetworkListCmd(networkAPI api.NetworkAPI, configAPI api.ConfigAPI) *cobr
 				return nil
 			}
 
-			// Resolve listing style from --long flag or DB config (matching Python's resolve_listing_style)
+			// Resolve listing style from --long flag or DB config
 			style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, longOutput)
 			common.RenderListing(nets, networkColumns, style)
 			return nil
@@ -119,7 +119,7 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 					return err
 				}
 			} else {
-				// Python raises typer.BadParameter — let Cobra handle the error
+				// Let Cobra handle the missing argument error
 				return fmt.Errorf("missing required argument: name")
 			}
 
@@ -185,7 +185,6 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 }
 
 // resolveUserNATGateways prompts the user to select NAT gateway interfaces.
-// Matches Python's _resolve_user_nat_gateways() exactly.
 func resolveUserNATGateways(ctx context.Context) (string, error) {
 	interfaces, err := libnet.GetPhysicalInterfaces()
 	if err != nil {
@@ -313,7 +312,7 @@ func newNetworkSyncCmd(networkAPI api.NetworkAPI) *cobra.Command {
 				nameMap[n.ID] = n.Name
 			}
 
-			// Build table rows matching Python format
+			// Build table rows
 			rows := make([][]string, 0, len(results))
 			for nid, counts := range results {
 				shortID := common.Cli.FormatID(nid)

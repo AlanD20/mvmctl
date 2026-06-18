@@ -6,7 +6,6 @@ import (
 
 // RequireString extracts a required string field from a YAML map.
 // Returns an error if the key is missing or the value is not a string.
-// Error messages use Go type names, not Python type names.
 func RequireString(m map[string]any, key string) (string, error) {
 	v, ok := m[key]
 	if !ok {
@@ -21,7 +20,6 @@ func RequireString(m map[string]any, key string) (string, error) {
 
 // OptionalString returns a pointer to the string value of key,
 // or nil if absent or not a string.
-// Mirrors Python's mvmctl.utils.yaml.optional_str().
 func OptionalString(data map[string]any, key string) *string {
 	v, ok := data[key]
 	if !ok {
@@ -36,14 +34,10 @@ func OptionalString(data map[string]any, key string) *string {
 
 // OptionalInt returns a pointer to the integer value of key,
 // or nil if absent or not an integer (or bool).
-// Mirrors Python's mvmctl.utils.yaml.optional_int().
 //
-// Python's optional_int accepts int AND bool (because isinstance(True, int)
-// is True in Python — bool is a subclass of int). YAML true/false decode as
-// bool in Go's yaml.v3, so we must accept bool as valid int (true→1, false→0).
-//
-// float64 values (even round ones like 42.0) are rejected, matching Python's
-// behavior where isinstance(42.0, int) returns False.
+// YAML true/false decode as bool in Go's yaml.v3, so we accept bool as valid
+// int (true→1, false→0). float64 values (even round ones like 42.0) are
+// rejected.
 func OptionalInt(data map[string]any, key string) *int {
 	v, ok := data[key]
 	if !ok {
@@ -67,7 +61,6 @@ func OptionalInt(data map[string]any, key string) *int {
 // RequireStrList returns the value of key as a list of strings.
 // An absent key is treated as an empty list. Returns an error if the value
 // is present but not a list of strings.
-// Mirrors Python's mvmctl.utils.yaml.require_str_list().
 func RequireStrList(data map[string]any, key string) ([]string, error) {
 	v, ok := data[key]
 	if !ok {
@@ -89,7 +82,6 @@ func RequireStrList(data map[string]any, key string) ([]string, error) {
 }
 
 // SetValEntry represents a parsed option/value pair from YAML.
-// Matches Python's _OptionValuePair named tuple.
 type SetValEntry struct {
 	Option string
 	Value  string
@@ -97,10 +89,8 @@ type SetValEntry struct {
 
 // ParseSetValList parses option/value pairs from YAML data map under the given key.
 // Each entry in the list should be either:
-//   - a map with "option" and "value" keys (like Python dict entries), or
-//   - a two-element list/tuple where item[0]=option, item[1]=value
-//
-// Matches Python's parse_set_val_list() function.
+// - a map with "option" and "value" keys, or
+// - a two-element list where item[0]=option, item[1]=value
 func ParseSetValList(data map[string]any, key string) ([]SetValEntry, error) {
 	v, ok := data[key]
 	if !ok {

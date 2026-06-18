@@ -3,7 +3,6 @@ package model
 import "time"
 
 // VsockConfigItem is the DB record for per-VM vsock configuration.
-// Matches Python's VsockConfigItem dataclass exactly.
 type VsockConfigItem struct {
 	ID               string     `json:"id"                           db:"id"`
 	VmID             string     `json:"vm_id"                        db:"vm_id"`

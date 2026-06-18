@@ -12,8 +12,7 @@ import (
 )
 
 // BinaryRepo is an in-memory binary repository for testing.
-// Matches Python's mvmctl.core.binary._repository.Repository exactly,
-// including soft-delete filtering (deleted_at IS NULL AND is_present = 1).
+// Includes soft-delete filtering (deleted_at IS NULL AND is_present = 1).
 type BinaryRepo struct {
 	mu       sync.RWMutex
 	binaries map[string]*model.BinaryItem
@@ -28,7 +27,7 @@ func (r *BinaryRepo) isNotDeleted(b *model.BinaryItem) bool {
 	return b.DeletedAt == nil && b.IsPresent
 }
 
-// Get returns a binary by ID. Returns nil if soft-deleted (Python: WHERE deleted_at IS NULL AND is_present = 1).
+// Get returns a binary by ID. Returns nil if soft-deleted.
 func (r *BinaryRepo) Get(_ context.Context, id string) (*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -55,7 +54,7 @@ func (r *BinaryRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.Bi
 	return result, nil
 }
 
-// ListAll returns all non-deleted binaries (Python: WHERE deleted_at IS NULL ORDER BY created_at).
+// ListAll returns all non-deleted binaries ordered by created_at.
 func (r *BinaryRepo) ListAll(_ context.Context) ([]*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -71,7 +70,7 @@ func (r *BinaryRepo) ListAll(_ context.Context) ([]*model.BinaryItem, error) {
 	return result, nil
 }
 
-// ListByType returns all non-deleted binaries with a given type (Python: WHERE deleted_at IS NULL AND is_present = 1 ORDER BY created_at).
+// ListByType returns all non-deleted binaries with a given type.
 func (r *BinaryRepo) ListByType(_ context.Context, typ string) ([]*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -87,7 +86,7 @@ func (r *BinaryRepo) ListByType(_ context.Context, typ string) ([]*model.BinaryI
 	return result, nil
 }
 
-// GetByTypeAndVersion returns a binary by type and version (Python: WHERE deleted_at IS NULL AND is_present = 1 LIMIT 1).
+// GetByTypeAndVersion returns a binary by type and version.
 func (r *BinaryRepo) GetByTypeAndVersion(_ context.Context, typ, version string) (*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -127,7 +126,7 @@ func (r *BinaryRepo) DeleteByType(_ context.Context, typ string) error {
 func (r *BinaryRepo) DeleteByTypeAndVersion(_ context.Context, typ, version string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Match Python's version normalization: removeprefix("v") + f"v{normalized}"
+	// Normalize version: strip "v" prefix, then re-add it
 	normalized := strings.TrimPrefix(version, "v")
 	prefixed := "v" + normalized
 	for id, b := range r.binaries {
@@ -138,17 +137,17 @@ func (r *BinaryRepo) DeleteByTypeAndVersion(_ context.Context, typ, version stri
 	return nil
 }
 
-// SetDefault sets a binary as default, clearing all others with the same type atomically (Python: BEGIN/COMMIT).
+// SetDefault sets a binary as default, clearing all others with the same type atomically.
 func (r *BinaryRepo) SetDefault(_ context.Context, typ, version, _ string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Match Python: UPDATE binaries SET is_default = 0 WHERE type = ? AND deleted_at IS NULL
+	// Clear existing defaults for this type
 	for _, b := range r.binaries {
 		if b.Type == typ && b.DeletedAt == nil {
 			b.IsDefault = false
 		}
 	}
-	// Match Python: UPDATE binaries SET is_default = 1 WHERE type = ? AND version = ? AND deleted_at IS NULL
+	// Set new default for this type and version
 	for _, b := range r.binaries {
 		if b.Type == typ && b.Version == version && b.DeletedAt == nil {
 			b.IsDefault = true
@@ -157,7 +156,7 @@ func (r *BinaryRepo) SetDefault(_ context.Context, typ, version, _ string) error
 	return nil
 }
 
-// Count returns total count of all non-deleted binaries (Python: WHERE deleted_at IS NULL).
+// Count returns total count of all non-deleted binaries.
 func (r *BinaryRepo) Count(_ context.Context) (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -170,7 +169,7 @@ func (r *BinaryRepo) Count(_ context.Context) (int, error) {
 	return count, nil
 }
 
-// GetDefault returns the default binary for a given type (Python: WHERE type = ? AND is_default = 1 AND deleted_at IS NULL AND is_present = 1).
+// GetDefault returns the default binary for a given type.
 func (r *BinaryRepo) GetDefault(_ context.Context, typ string) (*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -182,7 +181,7 @@ func (r *BinaryRepo) GetDefault(_ context.Context, typ string) (*model.BinaryIte
 	return nil, nil
 }
 
-// SoftDelete marks a binary as deleted (Python: datetime.now(tz=UTC).isoformat()).
+// SoftDelete marks a binary as deleted.
 func (r *BinaryRepo) SoftDelete(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -1,6 +1,6 @@
 package model
 
-// ── Setting ──
+// --- Setting ---
 
 // Setting represents a row in the user_settings table.
 // Value is stored as JSON in the DB and parsed on read.
@@ -11,7 +11,7 @@ type Setting struct {
 	UpdatedAt string `json:"updated_at" db:"updated_at"` // ISO timestamp from CURRENT_TIMESTAMP
 }
 
-// ── SettingInfo ──
+// --- SettingInfo ---
 
 // SettingInfo represents a single key's metadata for listing.
 type SettingInfo struct {
@@ -20,7 +20,7 @@ type SettingInfo struct {
 	Override any    `json:"override"` // Override is any because config overrides can be int, bool, string, nil, or map — nil means no override set
 }
 
-// ── Constraint / ConstraintRegistry ──
+// --- Constraint / ConstraintRegistry ---
 
 // ResolveFn is a callable that resolves the effective value of a setting.
 type ResolveFn func(otherKey string, otherCategory ...string) (any, error)

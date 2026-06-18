@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── NewImageCmd ──────────────────────────────────────────────────────────────
+// --- NewImageCmd ---
 // Rationale: NewImageCmd is the entry point for all image CLI operations.
 // Missing subcommands silently disable image operations without error.
 
@@ -69,7 +69,7 @@ func TestNewImageCmd(t *testing.T) {
 	})
 }
 
-// ─── image ls (via image ls) ──────────────────────────────────────────────────
+// --- image ls (via image ls) ---
 // Rationale: Image listing is the primary user-facing output for image
 // operations. A broken list command prevents users from discovering available
 // images and selecting them for VM creation.
@@ -176,7 +176,7 @@ func TestNewImageListCmd(t *testing.T) {
 	})
 }
 
-// ─── image pull (via image pull) ──────────────────────────────────────────────
+// --- image pull (via image pull) ---
 // Rationale: Pull is the mechanism for downloading new images. A broken pull
 // prevents users from fetching images needed for VM creation.
 

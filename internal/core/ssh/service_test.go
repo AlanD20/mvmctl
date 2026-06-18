@@ -11,7 +11,7 @@ import (
 	"mvmctl/internal/core/ssh"
 )
 
-// ─── Service.Connect — waitForSSH context cancellation ──────────────────────
+// --- Service.Connect — waitForSSH context cancellati ---
 // Rationale: waitForSSH has a tight probe loop (100ms). If it doesn't check
 // context cancellation, the loop blocks for the full timeout even when the
 // caller has cancelled. This was a real bug — Ctrl+C during env apply hung
@@ -57,7 +57,7 @@ func TestConnect_contextAlreadyCancelled(t *testing.T) {
 		"Pre-cancelled context must return immediately")
 }
 
-// ─── Service.Connect — waitForSSH timeout ───────────────────────────────────
+// --- Service.Connect — waitForSSH timeout ---
 // Rationale: If the VM never becomes reachable, waitForSSH must return a
 // timeout error after the specified duration — not hang forever.
 
@@ -77,7 +77,7 @@ func TestConnect_timeoutWhenPortClosed(t *testing.T) {
 		"Connect must return after approximately the specified timeout")
 }
 
-// ─── Service.StreamCommand — context cancellation ───────────────────────────
+// --- Service.StreamCommand — context cancellation ---
 // Rationale: StreamCommand also calls waitForSSH. It must respect context
 // cancellation the same way as Connect.
 
@@ -134,7 +134,7 @@ func TestStreamCommand_contextAlreadyCancelled(t *testing.T) {
 	assert.Less(t, elapsed, 1*time.Second)
 }
 
-// ─── Service.StreamCommand — timeout ────────────────────────────────────────
+// --- Service.StreamCommand — timeout ---
 // Rationale: StreamCommand must timeout when VM is unreachable, same as
 // Connect.
 

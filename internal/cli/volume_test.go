@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── NewVolumeCmd ─────────────────────────────────────────────────────────────
+// --- NewVolumeCmd ---
 // Rationale: NewVolumeCmd is the entry point for all volume CLI operations.
 // Missing subcommands silently disable volume management without error.
 
@@ -67,7 +67,7 @@ func TestNewVolumeCmd(t *testing.T) {
 	})
 }
 
-// ─── volume ls (via volume ls) ────────────────────────────────────────────────
+// --- volume ls (via volume ls) ---
 // Rationale: Volume listing is the primary way users see available volumes.
 // A broken list command prevents users from discovering volumes to attach.
 
@@ -145,7 +145,7 @@ func TestNewVolumeListCmd(t *testing.T) {
 	})
 }
 
-// ─── volume create (via volume create) ────────────────────────────────────────
+// --- volume create (via volume create) ---
 // Rationale: Volume create is the mechanism for adding persistent storage.
 // A broken create command prevents users from provisioning storage for VMs.
 

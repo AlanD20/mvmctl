@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// ── FakeRunner ──────────────────────────────────────────────────────────────
+// --- FakeRunner ---
 
 // FakeRunner implements system.CommandRunner for testing.
 // Records all calls and returns canned results.
@@ -54,7 +54,7 @@ func (f *FakeRunner) Stream(
 	return ch, nil
 }
 
-// ── FakeOS ──────────────────────────────────────────────────────────────────
+// --- FakeOS ---
 
 // FakeOS implements system.OSProvider for testing.
 // Each method returns the corresponding field value.

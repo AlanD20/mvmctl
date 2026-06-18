@@ -1,24 +1,10 @@
 package inputs
-
 import (
 	"context"
-
 	"mvmctl/internal/core/config"
 	"mvmctl/pkg/errs"
 )
-
-// ConfigInput matches Python's ConfigInput dataclass.
-//
-//	@dataclass
-//	class ConfigInput:
-//	    action: str  # 'get', 'set', 'list', 'reset'
-//	    category: str | None = None  # e.g. 'defaults.vm'
-//	    key: str | None = None  # e.g. 'vcpu_count'
-//	    value: Any | None = None  # for 'set'
-//	    all_overrides: bool = False  # for 'reset --all'
-//
-// Value uses any because config values can be int, bool, string, map, or
-// slice — Go has no union type for this.
+// ConfigInput specifies config input.
 type ConfigInput struct {
 	Action       string `json:"action"`
 	Category     string `json:"category,omitempty"`
@@ -26,19 +12,7 @@ type ConfigInput struct {
 	Value        any    `json:"value,omitempty"`
 	AllOverrides bool   `json:"all_overrides"`
 }
-
-// ResolvedConfigInput matches Python's ResolvedConfigInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedConfigInput:
-//	    action: str
-//	    category: str | None
-//	    key: str | None
-//	    value: Any | None
-//	    all_overrides: bool
-//
-// Value uses any because config values can be int, bool, string, map, or
-// slice — Go has no union type for this.
+// ResolvedConfigInput specifies resolved config input.
 type ResolvedConfigInput struct {
 	Action       string
 	Category     string
@@ -46,30 +20,23 @@ type ResolvedConfigInput struct {
 	Value        any
 	AllOverrides bool
 }
-
-// ConfigRequest matches Python's ConfigRequest.
-//
+// ConfigRequest specifies config request.
 // Resolve ConfigInput against the database.
 type ConfigRequest struct {
 	input  ConfigInput
 	result *ResolvedConfigInput
 }
-
 // NewConfigRequest creates a new ConfigRequest.
 func NewConfigRequest(inputs ConfigInput) *ConfigRequest {
 	return &ConfigRequest{
 		input: inputs,
 	}
 }
-
 // Result returns the resolved input, or nil if resolve() has not been called.
-
 // Resolve resolves and validates config input.
-// Matches Python's ConfigRequest.resolve().
 func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, error) {
 	category := r.input.Category
 	key := r.input.Key
-
 	if r.input.Action == "get" {
 		if category == "" {
 			return nil, errs.New(errs.CodeConfigError, "Category is required for get operation")
@@ -90,7 +57,6 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 		if r.input.Value == nil {
 			return nil, errs.New(errs.CodeConfigError, "Value is required for set operation")
 		}
-
 		// Validate key is overridable
 		if !config.IsKeyInCategory(category, key) {
 			return nil, errs.New(
@@ -111,7 +77,6 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 			}
 		}
 	}
-
 	r.result = &ResolvedConfigInput{
 		Action:       r.input.Action,
 		Category:     category,
@@ -119,6 +84,5 @@ func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, erro
 		Value:        r.input.Value,
 		AllOverrides: r.input.AllOverrides,
 	}
-
 	return r.result, nil
 }

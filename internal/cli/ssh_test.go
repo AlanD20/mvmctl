@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/testutil"
 )
 
-// ─── NewSSHCmd ─────────────────────────────────────────────────────────────
+// --- NewSSHCmd ---
 // Rationale: SSH is a complex command with many flags. Verify the command
 // shell is created correctly with all expected flags registered.
 
@@ -52,7 +52,7 @@ func TestNewSSHCmd(t *testing.T) {
 	assert.True(t, cmd.TraverseChildren, "TraverseChildren must be true for SSH")
 }
 
-// ─── SSH no-args behavior ──────────────────────────────────────────────────
+// --- SSH no-args behavior ---
 // Rationale: SSH shows help with no args. A broken no-args handler would
 // produce an error instead of help, confusing users.
 

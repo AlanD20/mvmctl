@@ -1,51 +1,33 @@
 package inputs
-
 import (
 	"context"
 	"fmt"
 	"strings"
-
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
-
 	"github.com/jmoiron/sqlx"
 )
-
-// VMInput matches Python's VMInput dataclass.
-//
-//	@dataclass
-//	class VMInput:
-//	    identifiers: list[str] = field(default_factory=list)
-//	    force: bool | None = None
+// VMInput specifies v m input.
 type VMInput struct {
 	Identifiers []string `json:"identifiers"`
 	Force       bool     `json:"force"`
 }
-
-// ResolvedVMInput matches Python's ResolvedVMInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedVMInput:
-//	    vms: list[VMInstanceItem]
-//	    force: bool
+// ResolvedVMInput specifies resolved v m input.
 type ResolvedVMInput struct {
 	VMs   []*model.VM
 	Force bool
 }
-
-// VMRequest matches Python's VMRequest.
-//
+// VMRequest specifies v m request.
 // Request to resolve a VM by name, ID, IP, or MAC.
-// Python version creates VMResolver with include=["image","kernel","network","network.leases","volumes","binary"].
+// Create VMResolver with full enrichment (image, kernel, network, volumes, binary).
 type VMRequest struct {
 	db       *sqlx.DB
 	input    VMInput
 	result   *ResolvedVMInput
 	resolver *vm.Resolver
 }
-
 // NewVMRequest creates a new VMRequest.
 func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository) *VMRequest {
 	return &VMRequest{
@@ -54,11 +36,8 @@ func NewVMRequest(inputs VMInput, db *sqlx.DB, vmRepo vm.Repository) *VMRequest 
 		resolver: vm.NewResolver(vmRepo),
 	}
 }
-
 // Result returns the resolved input, or nil if resolve() has not been called.
-
 // Resolve resolves VM identifiers to VMInstanceItem records.
-// Matches Python's VMRequest.resolve().
 func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 	if len(r.input.Identifiers) == 0 {
 		return nil, errs.NotFound(errs.CodeVMNotFound, "No VM identifiers provided")
@@ -66,29 +45,23 @@ func (r *VMRequest) Resolve(ctx context.Context) (*ResolvedVMInput, error) {
 	if err := r.validateIdentifiers(); err != nil {
 		return nil, err
 	}
-
 	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
 	if result == nil {
 		return nil, errs.NotFound(errs.CodeVMNotFound, "Could not resolve any VMs")
 	}
-
 	if len(result.Errors) > 0 && len(result.VMs) == 0 {
 		return nil, errs.NotFound(
 			errs.CodeVMNotFound,
 			fmt.Sprintf("Could not resolve any VMs: %s", strings.Join(result.Errors, ", ")),
 		)
 	}
-
 	r.result = &ResolvedVMInput{
 		VMs:   result.VMs,
 		Force: r.input.Force,
 	}
-
 	return r.result, nil
 }
-
-// ── VMExecInput ──
-
+// --- VMExecInput ---
 // VMExecInput holds the input for executing a command inside a VM via vsock.
 type VMExecInput struct {
 	Identifier string `json:"target"            yaml:"target"`
@@ -97,9 +70,7 @@ type VMExecInput struct {
 	Timeout    int    `json:"timeout"           yaml:"timeout"`
 	Port       int    `json:"port"              yaml:"port"`
 }
-
 // validateIdentifiers validates each identifier based on detected type.
-// Matches Python's VMRequest._validate_identifiers().
 func (r *VMRequest) validateIdentifiers() error {
 	for _, identifier := range r.input.Identifiers {
 		if validators.ValidMACRegex.MatchString(identifier) {

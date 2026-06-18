@@ -5,10 +5,10 @@
 // and interactive shells inside VMs via the Firecracker vsock device.
 //
 // Domain structure:
-//   - Client: per-VM protocol client (Exec, Shell, Teardown) — NOT a Controller
-//   - Repository: data access for VsockConfigItem
-//   - Resolver: GetByVMID enrichment support
-//   - protocol.go: unexported UDS dial, CONNECT handshake, JSON framing
+// - Client: per-VM protocol client (Exec, Shell, Teardown) — NOT a Controller
+// - Repository: data access for VsockConfigItem
+// - Resolver: GetByVMID enrichment support
+// - protocol.go: unexported UDS dial, CONNECT handshake, JSON framing
 package vsock
 
 import (

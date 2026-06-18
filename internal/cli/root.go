@@ -1,4 +1,4 @@
-// Package cli implements the full CLI command tree matching Python's main.py.
+// Package cli implements the full CLI command tree.
 package cli
 
 import (
@@ -17,17 +17,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ── Global state ─────────────────────────────────────────────────────────────
-// Matching Python's module-level helpers and lazy imports.
+// --- Global state ---
+// Module-level references for shell completion and lazy initialization.
 
 // opRef holds a reference to the Operation API for shell completion.
 // Set during wiring in NewRootCmd.
 var opRef *api.Operation
 
-// ── Root command ─────────────────────────────────────────────────────────────
-// Matching Python's LazyMVMGroup + app() + subcommands.
+// --- Root command ---
 
-// NewRootCmd creates the root command matching Python's LazyMVMGroup + app().
+// NewRootCmd creates the root command with all subcommands registered.
 func NewRootCmd(op *api.Operation) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:           infra.CLIName,
@@ -39,16 +38,15 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		},
 	}
 
-	// Persistent flags matching Python: --verbose, --debug
-	// SortFlags = false to preserve flag display order consistent with Python's Click.
+	// Persistent flags: --verbose, --debug
+	// SortFlags = false to preserve flag display order.
 	cmd.PersistentFlags().SortFlags = false
 	cmd.PersistentFlags().Bool("verbose", false, "Enable verbose output")
 	cmd.PersistentFlags().Bool("debug", false, "Enable debug mode")
 
-	// Version flag matching Python (not persistent, just on root)
-	// Python's _version_callback is is_eager=True and runs BEFORE app().
-	// In Cobra, we handle it in RunE: the PersistentPreRunE short-circuits
-	// when --version is set, and the RunE prints the version.
+	// Version flag on root command only (not persistent).
+	// Handled in RunE: PersistentPreRunE short-circuits when --version is set,
+	// and the RunE prints the version.
 	var showVersion bool
 	cmd.Flags().BoolVar(&showVersion, "version", false, "Show version and exit")
 	originalRunE := cmd.RunE
@@ -64,12 +62,11 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		return originalRunE(c, args)
 	}
 
-	// PersistentPreRunE: logging setup + DB check + root warning matching Python app()
+	// PersistentPreRunE: logging setup + DB check + root warning
 	cmd.PersistentPreRunE = makePersistentPreRunE()
 
 	// Override built-in help command to return error for unknown topics.
 	// Cobra's default uses Run (not RunE) and silently returns 0 even for "help nonexistent".
-	// Matching Python: unknown help topics should exit with code 1.
 	cmd.SetHelpCommand(&cobra.Command{
 		Use:   "help [command]",
 		Short: "Help about any command",
@@ -91,7 +88,7 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		},
 	})
 
-	// Subcommands matching Python's version_cmd, completion_cmd
+	// Infrastructure subcommands: version, completion, run
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newCompletionCmd())
 	cmd.AddCommand(newRunCmd())
@@ -124,12 +121,11 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 	return cmd
 }
 
-// ── PersistentPreRunE ────────────────────────────────────────────────────────
-// Matching Python's app() callback in main.py lines 300-337.
+// --- PersistentPreRunE ---
+// Logging setup, DB check, and root warning before each command execution.
 
 func makePersistentPreRunE() func(*cobra.Command, []string) error {
 	return func(c *cobra.Command, args []string) error {
-		// Python's _version_callback is is_eager=True and runs BEFORE app().
 		// Short-circuit everything when --version is set — no logging setup,
 		// no DB check. Version output happens in RunE.
 		if c.Flags().Changed("version") || c.Root().Flags().Changed("version") {
@@ -137,21 +133,19 @@ func makePersistentPreRunE() func(*cobra.Command, []string) error {
 		}
 
 		// If this is the root (no subcommand), skip completely — help is shown in RunE
-		// Matching Python: if ctx.invoked_subcommand is None: ctx.command.format_help(...); ctx.exit()
 		subCmd := c.CalledAs()
 		if subCmd == "" || subCmd == c.CommandPath() {
 			return nil
 		}
 
-		// Matching Python app() lines 310-318: skip logging + DB setup for these commands.
-		// Python uses ctx.invoked_subcommand which returns the first-level subcommand name
-		// (e.g., "host" for "mvm host init"). In Cobra, we check the command path to match
-		// Python's behavior of skipping ALL commands under 'host' and 'cache' groups.
+		// Skip logging + DB setup for infrastructure commands (host, cache, help,
+		// version, init, completion, run, tui). These commands work without a database.
+		// We check the command path to match the first-level subcommand name.
 		if shouldSkipPreRun(c) {
 			return nil
 		}
 
-		// Warn if running as root (matching Python _warn_if_running_as_root)
+		// Warn if running as root
 		if system.IsRoot() {
 			_, escalated := infra.EnvGet("ESCALATED")
 			if !escalated {
@@ -165,14 +159,13 @@ func makePersistentPreRunE() func(*cobra.Command, []string) error {
 			}
 		}
 
-		// Setup debug mode and logging (matching Python's set_debug_mode + setup_logging)
+		// Setup debug mode and logging
 		verbose, _ := c.Flags().GetBool("verbose")
 		debug, _ := c.Flags().GetBool("debug")
 		infra.SetDebugMode(debug)
 		logging.SetupLogging(verbose, debug)
 
-		// Check that the database exists (matching Python lines 329-337).
-		// Python: click.echo("Error: '...' requires initialization...", err=True); ctx.exit(1)
+		// Check that the database exists. If not, suggest running 'mvm init'.
 		if opRef != nil && !db.DBExists(opRef.CacheDir) {
 			return fmt.Errorf("'%s %s' requires initialization. Run '%s init' first",
 				infra.CLIName, subCmd, infra.CLIName)
@@ -183,7 +176,7 @@ func makePersistentPreRunE() func(*cobra.Command, []string) error {
 }
 
 // shouldSkipPreRun checks if the command path should skip PersistentPreRunE
-// setup. Matches Python app() lines 310-318 skip logic.
+// setup. These infrastructure commands work without a database.
 func shouldSkipPreRun(c *cobra.Command) bool {
 	for cc := c; cc != nil; cc = cc.Parent() {
 		if cc.Name() == "help" || cc.Name() == "version" || cc.Name() == "init" ||
@@ -195,12 +188,10 @@ func shouldSkipPreRun(c *cobra.Command) bool {
 	return false
 }
 
-// ── Subcommands ──────────────────────────────────────────────────────────────
-// Matching Python's help_cmd, version_cmd, completion_cmd.
+// --- Subcommands (infrastructure) ---
 
-// newVersionCmd creates the version subcommand matching Python's version_cmd().
+// newVersionCmd creates the version subcommand.
 func newVersionCmd() *cobra.Command {
-	// Python: @click.command(name="version", help="Show the version and exit")
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Show the version and exit",
@@ -222,10 +213,9 @@ func newVersionCmd() *cobra.Command {
 	}
 }
 
-// newCompletionCmd creates the completion subcommand matching Python's completion_cmd().
+// newCompletionCmd creates the completion subcommand.
 // Uses Cobra's built-in completion generators instead of hardcoded scripts.
 func newCompletionCmd() *cobra.Command {
-	// Python: @click.command(name="completion", help="Print shell completion script")
 	return &cobra.Command{
 		Use:   "completion [bash|zsh|fish|powershell]",
 		Short: "Generate shell completion script",

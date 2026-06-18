@@ -15,18 +15,15 @@ import (
 // MaxCommentLen maximum length for iptables comment tags.
 const MaxCommentLen = 240
 
-// ── Chain/table mapping ──
-// Matches Python's _CHAIN_TO_TABLE.
+// --- Chain/table mapping ---
 var chainToTable = map[model.FirewallChain]string{
 	model.FirewallChainMVMForward:      "filter",
 	model.FirewallChainMVMPostrouting:  "nat",
 	model.FirewallChainMVMNocloudNetIn: "filter",
 }
 
-// ── IPTablesTracker ──
-// Matches src/mvmctl/core/_shared/_iptables_tracker/_tracker.py IPTablesTracker.
+// --- IPTablesTracker ---
 
-// RuleAction matches Python's IPTablesTracker.RuleAction.
 type RuleAction string
 
 const (
@@ -49,8 +46,7 @@ func NewIPTablesTracker(repo *IPTablesRuleRepository, xtcommentAvailable bool) *
 	}
 }
 
-// ── Initialize ──
-// Matches Python IPTablesTracker.initialize().
+// --- Initialize ---
 
 func (t *IPTablesTracker) Initialize(ctx context.Context) {
 	type chainDef struct {
@@ -68,8 +64,7 @@ func (t *IPTablesTracker) Initialize(ctx context.Context) {
 	}
 }
 
-// ── CheckCommentAvailable (static method) ──
-// Matches Python IPTablesTracker.check_comment_available() static method.
+// --- CheckCommentAvailable ---
 
 func (t *IPTablesTracker) CheckCommentAvailable(ctx context.Context) bool {
 	result, _ := system.DefaultRunner.Run(ctx,
@@ -79,8 +74,7 @@ func (t *IPTablesTracker) CheckCommentAvailable(ctx context.Context) bool {
 	return result.Success()
 }
 
-// ── Build comment ──
-// Matches Python IPTablesTracker._build_comment().
+// --- Build comment ---
 
 func (t *IPTablesTracker) buildComment(ruleType model.FirewallRuleType, networkName, contextLabel string) string {
 	comment := fmt.Sprintf("%s:%s:%s", infra.CLIName, string(ruleType), networkName)
@@ -93,13 +87,7 @@ func (t *IPTablesTracker) buildComment(ruleType model.FirewallRuleType, networkN
 	return comment
 }
 
-// ── Shell-safe quote ──
-// Matches Python shlex.quote(). Wraps argument in single quotes if it contains
-// characters unsafe for shell tokenization. Safe characters:
-//
-//	ASCII letters, digits, and @%_+=:,./-
-// ── Build iptables args ──
-// Matches Python IPTablesTracker._build_iptables_args().
+// --- Build iptables args ---
 
 func (t *IPTablesTracker) buildIptablesArgs(rule *model.FirewallRule, action RuleAction) []string {
 	args := []string{
@@ -155,8 +143,7 @@ func (t *IPTablesTracker) buildIptablesArgs(rule *model.FirewallRule, action Rul
 	return args
 }
 
-// ── Build restore line ──
-// Matches Python IPTablesTracker._build_restore_line().
+// --- Build restore line ---
 
 func (t *IPTablesTracker) buildRestoreLine(rule *model.FirewallRule) string {
 	parts := []string{"-A", string(rule.ChainName)}
@@ -198,8 +185,7 @@ func (t *IPTablesTracker) buildRestoreLine(rule *model.FirewallRule) string {
 	return strings.Join(parts, " ")
 }
 
-// ── Build restore input ──
-// Matches Python IPTablesTracker._build_restore_input().
+// --- Build restore input ---
 
 func (t *IPTablesTracker) buildRestoreInput(rules []*model.FirewallRule, table string) string {
 	var lines []string
@@ -232,16 +218,15 @@ func (t *IPTablesTracker) buildRestoreInput(rules []*model.FirewallRule, table s
 	return strings.Join(lines, "\n")
 }
 
-// ── Ensure rule ──
-// Matches Python IPTablesTracker.ensure_rule().
+// --- Ensure rule ---
 
 func (t *IPTablesTracker) EnsureRule(
 	ctx context.Context,
 	rule model.FirewallRule,
 	contextLabel string,
 ) model.FirewallRuleResult {
-	// No clone — work directly on the input rule, matching Python behavior
-	// where comment_tag and command_string are mutated in place.
+	// Work directly on the input rule (no clone) so comment_tag and
+	// command_string modifications are reflected in the caller's copy.
 	r := &rule
 
 	// Build comment if not already set
@@ -258,7 +243,7 @@ func (t *IPTablesTracker) EnsureRule(
 	checkArgs := t.buildIptablesArgs(r, ActionCheck)
 	addArgs := t.buildIptablesArgs(r, ActionAppend)
 
-	// Python: rule.command_string = " ".join(shlex.quote(arg) for arg in add_args)
+	// Build the quoted command string for the rule.
 	quotedArgs := make([]string, len(addArgs))
 	for i, arg := range addArgs {
 		quotedArgs[i] = infra.ShlexQuote(arg)
@@ -363,12 +348,10 @@ func (t *IPTablesTracker) EnsureRule(
 	}
 }
 
-// ── Remove rule ──
-// Matches Python IPTablesTracker.remove_rule().
+// --- Remove rule ---
 
 func (t *IPTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRule) model.FirewallRuleResult {
 	dbRuleID := rule.ID
-	// Matches Python's reference assignment: effective_rule = rule
 	effectiveRule := &rule
 
 	// Find the rule in database first to get its comment_tag
@@ -434,8 +417,7 @@ func (t *IPTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 	}
 }
 
-// ── Remove by line number ──
-// Matches Python IPTablesTracker._remove_by_line_number().
+// --- Remove by line number ---
 
 func (t *IPTablesTracker) removeByLineNumber(ctx context.Context, rule *model.FirewallRule) bool {
 	listArgs := []string{
@@ -489,8 +471,7 @@ func (t *IPTablesTracker) removeByLineNumber(ctx context.Context, rule *model.Fi
 	return false
 }
 
-// ── Rule exists by interfaces ──
-// Matches Python IPTablesTracker._rule_exists_by_interfaces().
+// --- Rule exists by interfaces ---
 
 func (t *IPTablesTracker) ruleExistsByInterfaces(ctx context.Context, rule *model.FirewallRule) bool {
 	listArgs := []string{
@@ -532,8 +513,7 @@ func (t *IPTablesTracker) ruleExistsByInterfaces(ctx context.Context, rule *mode
 	return false
 }
 
-// ── Batch ensure rules ──
-// Matches Python IPTablesTracker.batch_ensure_rules().
+// --- Batch ensure rules ---
 
 func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult {
 	var filterRules []*model.FirewallRule
@@ -583,8 +563,7 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 
 	// DB sync: find existing rules, update verified_at, insert new ones.
 	// Uses a single compound query instead of N individual lookups.
-	// This also fixes a bug in the Python original where iptables batch
-	// did not update last_verified_at for existing rules.
+	// Deduplicates the update of last_verified_at for existing rules.
 	var ptrs []*model.FirewallRule
 	for i := range rules {
 		ptrs = append(ptrs, &rules[i])
@@ -596,8 +575,7 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 	return model.FirewallRuleResult{Success: true}
 }
 
-// ── Batch remove rules ──
-// Matches Python IPTablesTracker.batch_remove_rules().
+// --- Batch remove rules ---
 
 func (t *IPTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult {
 	for _, rule := range rules {
@@ -606,8 +584,7 @@ func (t *IPTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.Fi
 	return model.FirewallRuleResult{Success: true}
 }
 
-// ── Count orphaned rules ──
-// Matches Python IPTablesTracker.count_orphaned_rules().
+// --- Count orphaned rules ---
 
 func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model.Network) int {
 	dbRules, err := t.repo.GetByNetworkID(ctx, network.ID, true)
@@ -636,8 +613,7 @@ func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 		if !strings.HasPrefix(line, "-A MVM-") {
 			continue
 		}
-		// Use strings.Fields for whitespace splitting (equivalent to shlex.split()
-		// for MVM comments which use colons, not spaces).
+		// Use strings.Fields for whitespace splitting — MVM comments use colons, not spaces.
 		parts := strings.Fields(line)
 		var comment string
 		for i, part := range parts {
@@ -658,8 +634,7 @@ func (t *IPTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 	return orphaned
 }
 
-// ── Ensure chain ──
-// Matches Python IPTablesTracker.ensure_chain().
+// --- Ensure chain ---
 
 func (t *IPTablesTracker) EnsureChain(
 	ctx context.Context,
@@ -728,8 +703,7 @@ func (t *IPTablesTracker) EnsureChain(
 	return true
 }
 
-// ── Ensure jump rule ──
-// Matches Python IPTablesTracker.ensure_jump_rule().
+// --- Ensure jump rule ---
 
 func (t *IPTablesTracker) EnsureJumpRule(
 	ctx context.Context,
@@ -779,8 +753,7 @@ func (t *IPTablesTracker) EnsureJumpRule(
 	}
 }
 
-// ── Teardown ──
-// Matches Python IPTablesTracker.teardown().
+// --- Teardown ---
 
 func (t *IPTablesTracker) Teardown(ctx context.Context) {
 	type chainDef struct {
@@ -817,8 +790,7 @@ func (t *IPTablesTracker) Teardown(ctx context.Context) {
 	}
 }
 
-// ── Flush chain ──
-// Matches Python IPTablesTracker.flush_chain().
+// --- Flush chain ---
 
 func (t *IPTablesTracker) FlushChain(
 	ctx context.Context,
@@ -871,8 +843,7 @@ func (t *IPTablesTracker) FlushChain(
 	return true
 }
 
-// ── Remove chain ──
-// Matches Python IPTablesTracker.remove_chain().
+// --- Remove chain ---
 
 func (t *IPTablesTracker) RemoveChain(
 	ctx context.Context,

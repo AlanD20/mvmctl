@@ -17,7 +17,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Helpers ──────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // setupPubKeyFile writes a public key file to a temp dir and returns its path.
 func setupPubKeyFile(t *testing.T, content string) string {
@@ -28,7 +28,7 @@ func setupPubKeyFile(t *testing.T, content string) string {
 	return path
 }
 
-// ─── NewService ───────────────────────────────────────────────────────────
+// --- NewService ---
 // Rationale: Verify the constructor returns a usable, non-nil service.
 
 func TestNewService(t *testing.T) {
@@ -37,7 +37,7 @@ func TestNewService(t *testing.T) {
 	require.NotNil(t, svc)
 }
 
-// ─── GetPubkey ────────────────────────────────────────────────────────────
+// --- GetPubkey ---
 // Rationale: GetPubkey dispatches by entity type. *SSHKeyItem reads the file
 // directly. string resolves via repo then reads. Wrong types must return
 // a DomainError with CodeKeyError, not panic.
@@ -159,7 +159,7 @@ func TestService_GetPubkey(t *testing.T) {
 	})
 }
 
-// ─── GetPubkeys ──────────────────────────────────────────────────────────
+// --- GetPubkeys ---
 // Rationale: GetPubkeys dispatches by keys type. []string resolves via
 // ResolveMany. []*SSHKeyItem reads files directly. Partial resolution
 // errors must return partial content rather than failing entirely.

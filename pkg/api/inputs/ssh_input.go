@@ -1,10 +1,8 @@
 package inputs
-
 import (
 	"context"
 	"fmt"
 	"os"
-
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/vm"
@@ -12,16 +10,7 @@ import (
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
-
-// SSHInput matches Python's SSHInput dataclass.
-//
-//	@dataclass
-//	class SSHInput:
-//	    identifier: str
-//	    user: str | None = None
-//	    key: Path | None = None
-//	    cmd: str | None = None
-//	    timeout: int | None = None
+// SSHInput specifies SSH input.
 type SSHInput struct {
 	Identifier string  `json:"target"            yaml:"target"`
 	User       *string `json:"user,omitempty"    yaml:"user,omitempty"`
@@ -29,16 +18,7 @@ type SSHInput struct {
 	Cmd        *string `json:"cmd,omitempty"     yaml:"cmd,omitempty"`
 	Timeout    *int    `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
-
-// ResolvedSSHInput matches Python's ResolvedSSHInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedSSHInput:
-//	    target_ip: str
-//	    user: str
-//	    key: Path | None
-//	    cmd: str | None
-//	    timeout: int | None
+// ResolvedSSHInput specifies resolved SSH input.
 type ResolvedSSHInput struct {
 	TargetIP string
 	User     string
@@ -46,9 +26,7 @@ type ResolvedSSHInput struct {
 	Cmd      *string
 	Timeout  *int
 }
-
-// SSHRequest matches Python's SSHRequest.
-//
+// SSHRequest specifies s s h request.
 // Resolve SSHInput against the database.
 type SSHRequest struct {
 	cfg    *config.Service
@@ -56,7 +34,6 @@ type SSHRequest struct {
 	result *ResolvedSSHInput
 	vm     *model.VM
 }
-
 // NewSSHRequest creates a new SSHRequest.
 func NewSSHRequest(inputs SSHInput, cfg *config.Service) *SSHRequest {
 	return &SSHRequest{
@@ -64,11 +41,8 @@ func NewSSHRequest(inputs SSHInput, cfg *config.Service) *SSHRequest {
 		input: inputs,
 	}
 }
-
 // Result returns the resolved input, or nil if resolve() has not been called.
-
 // Resolve resolves all inputs to explicit values.
-// Matches Python's SSHRequest.resolve().
 func (r *SSHRequest) Resolve(
 	ctx context.Context,
 	vmRepo vm.Repository,
@@ -78,17 +52,14 @@ func (r *SSHRequest) Resolve(
 	if err != nil {
 		return nil, err
 	}
-
 	user, err := r.resolveUser(ctx)
 	if err != nil {
 		return nil, err
 	}
-
 	sshKey, err := r.resolveKey(ctx, keyRepo)
 	if err != nil {
 		return nil, err
 	}
-
 	r.result = &ResolvedSSHInput{
 		TargetIP: targetIP,
 		User:     user,
@@ -96,15 +67,12 @@ func (r *SSHRequest) Resolve(
 		Cmd:      r.input.Cmd,
 		Timeout:  r.input.Timeout,
 	}
-
 	// Validate
 	if err := r.ensureValidate(); err != nil {
 		return nil, err
 	}
-
 	return r.result, nil
 }
-
 func (r *SSHRequest) ensureValidate() error {
 	if r.result == nil {
 		return errs.New(
@@ -113,7 +81,6 @@ func (r *SSHRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	if !validators.IsIPAddress(r.result.TargetIP) {
 		return errs.New(
 			errs.CodeSSHError,
@@ -121,25 +88,19 @@ func (r *SSHRequest) ensureValidate() error {
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	if err := validators.SSHUsername(r.result.User); err != nil {
 		return errs.New(errs.CodeSSHError, err.Error(), errs.WithClass(errs.ClassValidation))
 	}
-
 	if r.result.Key != nil && *r.result.Key != "" {
 		if _, err := os.Stat(*r.result.Key); os.IsNotExist(err) {
 			return errs.NotFound(errs.CodeKeyNotFound, fmt.Sprintf("SSH key not found: %s", *r.result.Key))
 		}
 	}
-
 	return nil
 }
-
 // resolveTarget resolves the target to an IP address.
-// Matches Python's SSHRequest._resolve_target().
 func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (string, error) {
 	target := r.input.Identifier
-
 	if target == "" {
 		return "", errs.New(
 			errs.CodeSSHError,
@@ -147,7 +108,6 @@ func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (s
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	// Try to resolve as a VM entity
 	vmResolver := vm.NewResolver(vmRepo)
 	vmEntity, err := vmResolver.Resolve(ctx, target)
@@ -155,13 +115,10 @@ func (r *SSHRequest) resolveTarget(ctx context.Context, vmRepo vm.Repository) (s
 		r.vm = vmEntity
 		return vmEntity.IPv4, nil
 	}
-
 	// Fallback: use raw identifier (e.g., IP for a VM not in DB)
 	return target, nil
 }
-
 // resolveUser resolves the SSH user.
-// Matches Python's SSHRequest._resolve_user().
 func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
 	if r.input.User != nil && *r.input.User != "" {
 		return *r.input.User, nil
@@ -173,15 +130,11 @@ func (r *SSHRequest) resolveUser(ctx context.Context) (string, error) {
 	user, _ := r.cfg.GetString(ctx, "defaults.vm", "ssh_user")
 	return user, nil
 }
-
 // resolveKey resolves SSH private key path via the key domain.
-// Matches Python's SSHRequest._resolve_key().
 func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*string, error) {
 	keyResolver := key.NewResolver(keyRepo)
-
 	if r.input.Key != nil && *r.input.Key != "" {
 		keyStr := *r.input.Key
-
 		// 1a. Try as registered key name via key resolver
 		keyItem, err := keyResolver.Resolve(ctx, keyStr)
 		if err == nil && keyItem.PrivateKeyPath != nil && *keyItem.PrivateKeyPath != "" {
@@ -189,7 +142,6 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 				return keyItem.PrivateKeyPath, nil
 			}
 		}
-
 		// 1b. Try as direct filesystem path — validate private key content
 		if fi, err := os.Stat(keyStr); err == nil && !fi.IsDir() {
 			content, err := os.ReadFile(keyStr)
@@ -197,14 +149,12 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 				return &keyStr, nil
 			}
 		}
-
 		return nil, errs.New(
 			errs.CodeSSHError,
 			fmt.Sprintf("Key '%s' not found or is not a valid private key", keyStr),
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	// 2. No key provided — check VM's stored ssh_keys
 	// SSHKeys stores key NAMES; use the key resolver which handles
 	// resolution by name, ID, or .pub file path.
@@ -218,7 +168,6 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 			}
 		}
 	}
-
 	// 3. Fall back to default keys
 	defaults, err := keyRepo.GetDefaults(ctx)
 	if err == nil {
@@ -230,6 +179,5 @@ func (r *SSHRequest) resolveKey(ctx context.Context, keyRepo key.Repository) (*s
 			}
 		}
 	}
-
 	return nil, nil
 }

@@ -1,3 +1,5 @@
+// Package key provides SSH public key management.
+// Layer: Core domain — never imports other core/* packages.
 package key
 
 import (
@@ -13,11 +15,10 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// publicKeyPerm matches Python's 0o666 for public key files.
+// publicKeyPerm is the file permission for public key files (0666).
 const publicKeyPerm os.FileMode = 0666
 
 // Service provides stateless SSH key operations.
-// Matches Python's KeyService exactly — stores repo and keysDir.
 type Service struct {
 	repo    Repository
 	keysDir string
@@ -32,7 +33,6 @@ func NewService(repo Repository, keysDir string) *Service {
 }
 
 // CreateKeypair generates a new SSH keypair.
-// Matches Python's KeyService.create_keypair() exactly.
 func (s *Service) CreateKeypair(ctx context.Context, params *CreateParams) (*model.SSHKeyItem, error) {
 	if err := checkDependencies(); err != nil {
 		return nil, err
@@ -80,7 +80,7 @@ func (s *Service) CreateKeypair(ctx context.Context, params *CreateParams) (*mod
 		return nil, err
 	}
 
-	// persist public key (redundant write, matching Python behavior)
+	// persist public key (redundant write)
 	os.WriteFile(pubKeyPath, []byte(pubContent+"\n"), publicKeyPerm)
 
 	fingerprint, err := computeFingerprint(pubContent)
@@ -279,7 +279,7 @@ func (s *Service) List(ctx context.Context, verify bool) ([]*model.SSHKeyItem, e
 }
 
 // SetDefaults sets multiple keys as default.
-// Does NOT clear other defaults — matches Python's KeyService.set_default_keys().
+// Does NOT clear other defaults.
 func (s *Service) SetDefaults(ctx context.Context, keys []*model.SSHKeyItem) error {
 	for _, k := range keys {
 		if err := s.repo.SetDefault(ctx, k.ID); err != nil {

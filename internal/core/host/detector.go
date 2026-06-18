@@ -20,8 +20,7 @@ import (
 	"mvmctl/internal/lib/validators"
 )
 
-// ── CPU vendor maps ──
-// Matches Python's _CPU_VENDOR_MAP_X86 and _CPU_IMPLEMENTER_MAP_AARCH64.
+// --- CPU vendor maps ---
 var cpuVendorMapX86 = map[string]string{
 	"GenuineIntel": "intel",
 	"AuthenticAMD": "amd",
@@ -51,7 +50,7 @@ const (
 	vmConntrackPerVM = 64
 )
 
-// VM host kernel modules to check against /proc/modules — matching Python.
+// VM host kernel modules to check against /proc/modules.
 var vmHostKernelModules = []string{
 	"kvm",
 	"kvm_intel",
@@ -89,8 +88,7 @@ func readMeminfo() map[string]int {
 	return result
 }
 
-// ── DetectHardware ──
-// Matches Python's HostDetector.detect_hardware().
+// --- DetectHardware ---
 func DetectHardware() (*model.HostHardware, error) {
 	hostname, _ := os.Hostname()
 
@@ -270,7 +268,7 @@ func DetectHardware() (*model.HostHardware, error) {
 	}, nil
 }
 
-// ── DetectLimits ──
+// --- DetectLimits ---
 func DetectLimits() *model.HostLimits {
 	pidMax := infra.ReadInt("/proc/sys/kernel/pid_max", 32768)
 	fdMax := infra.ReadInt("/proc/sys/fs/file-max", 100000)
@@ -357,8 +355,7 @@ func DetectLimits() *model.HostLimits {
 
 var kernelVersionRE = regexp.MustCompile(`(\d+)\.(\d+)`)
 
-// ── checkKernelVersion ──
-// Matches Python's HostDetector._check_kernel_version().
+// --- checkKernelVersion ---
 func checkKernelVersion() bool {
 	release := system.KernelRelease()
 	re := kernelVersionRE
@@ -371,7 +368,7 @@ func checkKernelVersion() bool {
 	return (major > infra.MinKernelMajor) || (major == infra.MinKernelMajor && minor >= infra.MinKernelMinor)
 }
 
-// ── parseModules ──
+// --- parseModules ---
 func parseModules() map[string]bool {
 	result := make(map[string]bool)
 	data, err := os.ReadFile("/proc/modules")
@@ -391,7 +388,7 @@ func parseModules() map[string]bool {
 	return result
 }
 
-// ── DetectResources ──
+// --- DetectResources ---
 func DetectResources(
 	ctx context.Context,
 	hardware *model.HostHardware,
@@ -511,7 +508,7 @@ func DetectResources(
 	// Hugepages free
 	hugepagesFree2MB := infra.ReadInt("/sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages", 0)
 
-	// SMT (Hyper-Threading) — matching Python's bool(_read_int(...)) which treats any non-zero as true
+	// SMT (Hyper-Threading) — treats any non-zero as true
 	smtActive := infra.ReadInt("/sys/devices/system/cpu/smt/active", 0) != 0
 
 	// Binary availability
@@ -536,7 +533,6 @@ func DetectResources(
 	}
 
 	// User in kvm group
-	// Matches Python: grp.getgrnam("kvm") + pwd.getpwuid(os.getuid()).pw_name + user in g.gr_mem
 	userInKVMGroup := false
 	if g, err := user.LookupGroup("kvm"); err == nil {
 		currentUser, err := user.Current()
@@ -582,9 +578,8 @@ func DetectResources(
 	}, nil
 }
 
-// getUnameM returns the machine hardware name, matching Python's platform.machine().
-// Python's platform.machine() calls uname -m internally, returning values like
-// "x86_64" or "aarch64". We use the syscall.Uname syscall to get the real machine name.
+// getUnameM returns the machine hardware name ("x86_64" or "aarch64").
+// Uses syscall.Uname to get the real machine name.
 func getUnameM() string {
 	var uname syscall.Utsname
 	if err := syscall.Uname(&uname); err != nil {

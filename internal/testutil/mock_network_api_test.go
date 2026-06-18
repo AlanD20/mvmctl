@@ -13,7 +13,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── MockNetworkAPI ────────────────────────────────────────────────────────────
+// --- MockNetworkAPI ------------------------------------------------------------
 // Rationale: MockNetworkAPI implements api.NetworkAPI for testing. These tests
 // verify default zero-value returns and custom function routing.
 

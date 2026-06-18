@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-// ── Binary frame type constants ─────────────────────────────────────────────
+// --- Binary frame type constants ---
 // Single source of truth. Host side (internal/core/vsock) imports these as
 // vsockagent.FtPush, vsockagent.FtPull, etc.
 const (
@@ -34,7 +34,7 @@ const (
 	FtDone     byte = 0x60 // Transfer complete
 )
 
-// ── Binary frame helpers ────────────────────────────────────────────────────
+// --- Binary frame helpers ---
 
 // readFTFrame reads one binary frame from r. Returns frame type and payload.
 // Frame format: [4 bytes big-endian total_length][1 byte type][N bytes payload].
@@ -70,7 +70,7 @@ func WriteFTFrame(w io.Writer, frameType byte, payload []byte) error {
 	return nil
 }
 
-// ── Push/Pull JSON payload types ────────────────────────────────────────────
+// --- Push/Pull JSON payload types ---
 
 // FtPushPayload is the JSON payload for an FtPush frame from the host.
 type FtPushPayload struct {
@@ -117,7 +117,7 @@ type FtDonePayload struct {
 	Errors int   `json:"errors"`
 }
 
-// ── File transfer handler ───────────────────────────────────────────────────
+// --- File transfer handler ---
 
 // handleFileTransfer dispatches the first binary frame to push or pull handler.
 func handleFileTransfer(ctx context.Context, conn net.Conn, req *execRequest) {
@@ -142,7 +142,7 @@ func handleFileTransfer(ctx context.Context, conn net.Conn, req *execRequest) {
 	}
 }
 
-// ── Push handler (host uploads files to VM) ─────────────────────────────────
+// --- Push handler (host uploads files to VM) ---
 
 func handleFTPush(ctx context.Context, conn net.Conn, pushPayload []byte) {
 	var push FtPushPayload
@@ -155,7 +155,7 @@ func handleFTPush(ctx context.Context, conn net.Conn, pushPayload []byte) {
 
 	slog.Info("ft: push start", "paths", push.Paths, "dest", push.Dest, "overwrite", push.Overwrite)
 
-	// ── Determine mode via stat ──
+	// --- Determine mode via stat ---
 	// Directory mode: dest ends with "/" or is an existing directory.
 	// File mode:      dest has no trailing "/", does not exist, is not a directory.
 
@@ -393,7 +393,7 @@ mainLoop:
 		"bytes", totalBytes, "errors", fileErrors)
 }
 
-// ── Pull handler (host downloads files from VM) ─────────────────────────────
+// --- Pull handler (host downloads files from VM) ---
 
 func handleFTPull(ctx context.Context, conn net.Conn, pullPayload []byte) {
 	var pull FtPullPayload

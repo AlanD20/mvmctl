@@ -65,7 +65,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
-// ── vsock types ──────────────────────────────────────────────────────
+// --- vsock types ---
 
 // vsockListener implements net.Listener for AF_VSOCK sockets (Firecracker vsock).
 type vsockListener struct {

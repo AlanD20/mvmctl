@@ -4,9 +4,9 @@ package model
 
 import "mvmctl/internal/lib/db"
 
-// ── Status (VM lifecycle) ──
+// --- Status (VM lifecycle) ---
 
-// VMStatus is the VM lifecycle status type, matching Python's VMStatus(StrEnum).
+// VMStatus is the VM lifecycle status type.
 type VMStatus string
 
 const (
@@ -19,9 +19,9 @@ const (
 	VMStatusError    VMStatus = "error"
 )
 
-// ── VM ──
+// --- VM ---
 
-// VM matches Python's VMInstanceItem dataclass exactly.
+// VM represents a microVM instance.
 type VM struct {
 	ID            string   `json:"id"              db:"id"`
 	Name          string   `json:"name"            db:"name"`
@@ -76,7 +76,8 @@ type VM struct {
 	ConsolePIDFilename    string `json:"console_pid_filename"`
 	ConsoleSocketFilename string `json:"console_socket_filename"`
 
-	// JSON-serialized in DB fields (TEXT columns, scanned directly via db.StringSlice / CpuConfig.Scan)
+	// JSON-serialized in DB fields (TEXT columns, scanned directly via
+	// db.StringSlice / CpuConfig.Scan)
 	SSHKeys   db.StringSlice `json:"ssh_keys"             db:"ssh_keys"`
 	SSHUser   *string        `json:"ssh_user,omitempty"   db:"ssh_user"`
 	VolumeIDs db.StringSlice `json:"volume_ids,omitempty" db:"volume_ids"`
@@ -91,26 +92,26 @@ type VM struct {
 	Vsock   *VsockConfigItem `json:"vsock,omitempty"`
 }
 
-// ── ConsoleInfo ──
+// --- ConsoleInfo ---
 
-// ConsoleInfo matches Python's ConsoleInfo dataclass.
+// ConsoleInfo holds runtime console connection info.
 type ConsoleInfo struct {
 	SocketPath string `json:"socket_path"`
 	VMName     string `json:"vm_name"`
 }
 
-// ── ConsoleState ──
+// --- ConsoleState ---
 
-// ConsoleState matches Python's ConsoleState dataclass.
+// ConsoleState represents the runtime state of a console relay.
 type ConsoleState struct {
 	Running    bool    `json:"running"`
 	PID        *int    `json:"pid,omitempty"`
 	SocketPath *string `json:"socket_path,omitempty"`
 }
 
-// ── VMInspectInfo ──
+// --- VMInspectInfo ---
 
-// VMInspectInfo matches Python's VMInspectInfo dataclass.
+// VMInspectInfo holds enriched VM details for inspection output.
 type VMInspectInfo struct {
 	ID            string             `json:"id"`
 	Name          string             `json:"name"`

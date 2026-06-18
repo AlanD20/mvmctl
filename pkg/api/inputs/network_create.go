@@ -1,17 +1,13 @@
 package inputs
-
 import (
 	"context"
-
 	"mvmctl/internal/core/network"
 	libnet "mvmctl/internal/lib/network"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
-
 	"github.com/jmoiron/sqlx"
 )
-
-// NetworkCreateInput matches Python's NetworkCreateInput dataclass exactly.
+// NetworkCreateInput specifies network create input.
 type NetworkCreateInput struct {
 	Name        string   `json:"name"                   yaml:"name"`
 	Subnet      string   `json:"subnet"                 yaml:"subnet"`
@@ -20,8 +16,7 @@ type NetworkCreateInput struct {
 	NATGateways []string `json:"nat_gateways,omitempty" yaml:"nat_gateways,omitempty"`
 	SetDefault  bool     `json:"default"                yaml:"default"`
 }
-
-// ResolvedNetworkCreateRequest matches Python's ResolvedNetworkCreateRequest (frozen dataclass).
+// ResolvedNetworkCreateRequest specifies resolved network create request.
 type ResolvedNetworkCreateRequest struct {
 	Name        string
 	Subnet      string
@@ -30,9 +25,7 @@ type ResolvedNetworkCreateRequest struct {
 	NATEnabled  bool
 	NATGateways []string
 }
-
-// NetworkCreateRequest matches Python's NetworkCreateRequest.
-//
+// NetworkCreateRequest specifies network create request.
 // Resolve and validate network creation inputs.
 // Takes NetworkCreateInput and resolves DB-backed defaults,
 // validates subnet overlap and bridge conflicts, and produces
@@ -43,7 +36,6 @@ type NetworkCreateRequest struct {
 	result      *ResolvedNetworkCreateRequest
 	networkRepo network.Repository
 }
-
 // NewNetworkCreateRequest creates a new NetworkCreateRequest.
 func NewNetworkCreateRequest(
 	inputs NetworkCreateInput,
@@ -56,15 +48,11 @@ func NewNetworkCreateRequest(
 		networkRepo: networkRepo,
 	}
 }
-
 // Result returns the resolved request, or nil if resolve() has not been called.
-
 // Resolve resolves all inputs to explicit values.
-// Matches Python's NetworkCreateRequest.resolve().
 func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCreateRequest, error) {
-	// NAT defaults to true (Python: nat_enabled: bool = True)
+	// NAT defaults to true
 	natEnabled := r.input.NATEnabled
-
 	// Resolve or compute gateway
 	var ipv4Gateway string
 	if r.input.IPv4Gateway != nil {
@@ -76,10 +64,8 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 		}
 		ipv4Gateway = gw
 	}
-
-	// Compute bridge name — Python: NetworkUtils.compute_bridge_name(self._inputs.name)
+	// Compute bridge name from the input name.
 	bridge := network.ComputeBridgeName(r.input.Name)
-
 	// Auto-detect NAT gateways when enabled but none specified
 	natGateways := r.input.NATGateways
 	if len(natGateways) == 0 && natEnabled {
@@ -90,9 +76,7 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 			natEnabled = false
 		}
 	}
-
 	_ = ctx // context used for future DB operations if needed
-
 	r.result = &ResolvedNetworkCreateRequest{
 		Name:        r.input.Name,
 		Subnet:      r.input.Subnet,
@@ -101,47 +85,38 @@ func (r *NetworkCreateRequest) Resolve(ctx context.Context) (*ResolvedNetworkCre
 		NATEnabled:  natEnabled,
 		NATGateways: natGateways,
 	}
-
 	// Validate
 	if err := r.ensureValidate(ctx); err != nil {
 		return nil, err
 	}
-
 	return r.result, nil
 }
-
 func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	if r.result == nil {
 		return errs.New(errs.CodeNetworkNotFound, "failed to resolve necessary dependencies to validate")
 	}
-
 	// Validate name (no dots, lowercase only)
 	if err := validators.NetworkName(r.result.Name); err != nil {
 		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
-
 	// Validate and normalize subnet
 	if _, err := validators.Subnet(r.result.Subnet); err != nil {
 		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
-
 	// Validate gateway is in subnet
 	if _, err := validators.IPv4Gateway(r.result.IPv4Gateway, r.result.Subnet); err != nil {
 		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
-
 	// Validate bridge name
 	if err := validators.BridgeName(ctx, r.result.Bridge); err != nil {
 		return errs.New(errs.CodeValidationFailed, err.Error())
 	}
-
 	// Validate NAT gateways
 	if len(r.result.NATGateways) > 0 {
 		if _, err := validators.NATGateways(ctx, r.result.NATGateways); err != nil {
 			return errs.New(errs.CodeValidationFailed, err.Error())
 		}
 	}
-
 	// Check if network already exists
 	existing, err := r.networkRepo.GetByName(ctx, r.result.Name)
 	if err != nil {
@@ -150,7 +125,6 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	if existing != nil {
 		return errs.AlreadyExists(errs.CodeNetworkAlreadyExists, "Network '"+r.result.Name+"' already exists")
 	}
-
 	// Validate no subnet overlap
 	existingNetworks, err := r.networkRepo.ListAll(ctx)
 	if err != nil {
@@ -163,6 +137,5 @@ func (r *NetworkCreateRequest) ensureValidate(ctx context.Context) error {
 	if err := validators.SubnetNoOverlap(r.result.Subnet, subnets); err != nil {
 		return errs.New(errs.CodeNetworkSubnetOverlap, err.Error(), errs.WithClass(errs.ClassConflict))
 	}
-
 	return nil
 }

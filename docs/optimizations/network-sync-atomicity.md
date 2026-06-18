@@ -1,6 +1,6 @@
 # Network Sync Atomicity — Zero-Downtime Firewall Rule Replacement
 
-> **STATUS: Current — fully accurate.** The Go codebase is a direct port of the Python firewall system. All mechanisms described below are implemented in `internal/lib/firewall/`. The nftables backend is the default (`firewall_backend: "nftables"` at `internal/infra/constants.go:123`); iptables is the legacy fallback. See also [ADR-0009](../adr/0009-firewall-backend-mutual-exclusion.md) (firewall backend mutual exclusion) and `internal/infra/constants.go` for defaults.
+> **STATUS: Current — fully accurate.** All mechanisms described below are implemented in `internal/lib/firewall/`. The nftables backend is the default (`firewall_backend: "nftables"` at `internal/infra/constants.go:123`); iptables is the legacy fallback. See also [ADR-0009](../adr/0009-firewall-backend-mutual-exclusion.md) (firewall backend mutual exclusion) and `internal/infra/constants.go` for defaults.
 
 ## Overview
 
@@ -31,7 +31,7 @@ if !libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge) {
 
 ### Phase 2: Bridge State Reconciliation
 
-For every network, the `BridgeActive` field (called `is_present` in Python) is reconciled against actual bridge existence in the kernel. This ensures that `mvm network ls` and downstream operations see accurate state.
+For every network, the `BridgeActive` field (originally named `is_present`) is reconciled against actual bridge existence in the kernel. This ensures that `mvm network ls` and downstream operations see accurate state.
 
 **Code reference:** `pkg/api/network.go:353-358`
 
@@ -213,20 +213,6 @@ The iptables backend uses `iptables-restore -n` per table, so the number of subp
 ### Key Insight
 
 Both backends use atomic batch operations with comparable subprocess call counts for the sync operation (~62 calls for nftables vs ~62-82 for iptables for 20 networks). The number of subprocess calls is **constant per network** for both backends — `nft -f -` (nftables) and `iptables-restore -n` (iptables) each cover all rules in one atomic transaction per table.
-
-## Comparison with Python Legacy
-
-The Go firewall system is a direct port of the Python implementation. Key differences:
-
-| Aspect | Python (legacy) | Go (current) |
-|---|---|---|
-| **Firewall tracker** | `_firewall_tracker.py` | `internal/lib/firewall/tracker.go` |
-| **nftables backend** | `_nftables_tracker/_tracker.py` | `internal/lib/firewall/nftables.go` |
-| **iptables backend** | `_iptables_tracker/_tracker.py` | `internal/lib/firewall/iptables.go` |
-| **Batch pattern** | `with self._tracker.batch():` context manager | `s.WithBatch(ctx, func())` callback |
-| **Network sync** | `NetworkOperation.sync()` | `op.NetworkSync()` |
-| **Privileged execution** | `run_cmd(..., privileged=True)` | `system.RunCmdOpts{Privileged: true}` |
-| **iptables-restore flag** | No explicit `-n` | Uses `-n` (don't flush entire table) |
 
 ## Related Files
 

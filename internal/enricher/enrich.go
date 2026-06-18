@@ -1,7 +1,5 @@
 // Package enricher provides cross-domain enrichment — populating relation fields.
 // This is the ONLY package that imports across multiple core/* packages.
-//
-// Matches src/mvmctl/core/_shared/_enrichment.py exactly in behavior.
 // Uses explicit switch/case dispatch per relation (NO reflect, NO string dispatch).
 package enricher
 
@@ -24,11 +22,10 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Domain relation registries ─────────────────────────────────────────────
-// These match Python's Resolver.RELATIONS dicts exactly.
+// --- Domain relation registries ---
 // Keyed by relation path (e.g., "kernel", "network.leases").
 
-// VMRelations matches Python's VMResolver.RELATIONS.
+// VMRelations defines resolvable VM relations.
 var VMRelations = map[string]model.RelationSpec{
 	"kernel": {
 		FKField: "kernel_id", Resolver: "kernel", Method: "get_kernel",
@@ -63,7 +60,7 @@ var VMRelations = map[string]model.RelationSpec{
 	},
 }
 
-// NetworkRelations matches Python's Resolver.RELATIONS.
+// NetworkRelations defines resolvable network relations.
 var NetworkRelations = map[string]model.RelationSpec{
 	"leases": {
 		FKField: "id", Resolver: "network_lease",
@@ -77,7 +74,7 @@ var NetworkRelations = map[string]model.RelationSpec{
 	},
 }
 
-// ImageRelations matches Python's Resolver.RELATIONS.
+// ImageRelations defines resolvable image relations.
 var ImageRelations = map[string]model.RelationSpec{
 	"vm": {
 		FKField: "id", Resolver: "vm",
@@ -86,7 +83,7 @@ var ImageRelations = map[string]model.RelationSpec{
 	},
 }
 
-// KernelRelations matches Python's Resolver.RELATIONS.
+// KernelRelations defines resolvable kernel relations.
 var KernelRelations = map[string]model.RelationSpec{
 	"vm": {
 		FKField: "id", Resolver: "vm",
@@ -95,7 +92,7 @@ var KernelRelations = map[string]model.RelationSpec{
 	},
 }
 
-// BinaryRelations matches Python's Resolver.RELATIONS.
+// BinaryRelations defines resolvable binary relations.
 var BinaryRelations = map[string]model.RelationSpec{
 	"vm": {
 		FKField: "id", Resolver: "vm",
@@ -104,7 +101,7 @@ var BinaryRelations = map[string]model.RelationSpec{
 	},
 }
 
-// VolumeRelations matches Python's VolumeResolver.RELATIONS.
+// VolumeRelations defines resolvable volume relations.
 var VolumeRelations = map[string]model.RelationSpec{
 	"vm": {
 		FKField: "id", Resolver: "vm",
@@ -113,13 +110,12 @@ var VolumeRelations = map[string]model.RelationSpec{
 	},
 }
 
-// KeyRelations matches Python's KeyResolver.RELATIONS (empty — no relations defined).
+// KeyRelations defines resolvable key relations (empty — no relations defined).
 var KeyRelations = map[string]model.RelationSpec{}
 
-// ── Enricher ────────────────────────────────────────────────────────────────
+// --- Enricher ---
 
 // Enricher provides cross-domain enrichment — populating relation fields.
-// This is the ONLY package that imports across multiple core/* packages.
 type Enricher struct {
 	vmRepo      vm.Repository
 	networkRepo network.Repository
@@ -154,10 +150,9 @@ func New(
 	}
 }
 
-// ── Generic Enrich ─────────────────────────────────────────────────────────
+// --- Generic Enrich ---
 
 // validatePaths checks that all include paths exist in the registry.
-// Matches Python's RelationEnricher._validate_paths() exactly.
 func validatePaths(include []string, registry map[string]model.RelationSpec) error {
 	for _, path := range include {
 		if _, ok := registry[path]; !ok {
@@ -175,49 +170,29 @@ func validatePaths(include []string, registry map[string]model.RelationSpec) err
 	return nil
 }
 
-// ── Enrichment soft-fail helpers ────────────────────────────────────────────
-// These match Python's logger.debug format strings exactly.
+// --- Enrichment soft-fail helpers ---
 
 // enrichSoftFail logs a soft failure for a forward relation.
-// Matches Python:
-//
-//	logger.debug("Enrichment soft-fail: %s %s not found for FK %r",
-//	             spec.resolver, spec.method, fk_val)
 func enrichSoftFail(resolver, method, fkVal string) {
 	slog.Debug(fmt.Sprintf("Enrichment soft-fail: %s %s not found for FK '%s'", resolver, method, fkVal))
 }
 
 // enrichSoftFailReverse logs a soft failure for a reverse relation.
-// Matches Python:
-//
-//	logger.debug("Enrichment soft-fail: reverse %s %s not found for %r",
-//	             spec.resolver, spec.method, sid)
 func enrichSoftFailReverse(resolver, method, sid string) {
 	slog.Debug(fmt.Sprintf("Enrichment soft-fail: reverse %s %s not found for '%s'", resolver, method, sid))
 }
 
 // enrichSoftFailNested logs a soft failure for a nested relation.
-// Matches Python:
-//
-//	logger.debug("Enrichment soft-fail: nested %s %s not found for %r",
-//	             spec.resolver, spec.method, parent_id)
 func enrichSoftFailNested(resolver, method, parentID string) {
 	slog.Debug(fmt.Sprintf("Enrichment soft-fail: nested %s %s not found for '%s'", resolver, method, parentID))
 }
 
-// ── Enrichment error handling ──────────────────────────────────────────────
+// --- Enrichment error handling ---
 
 // isEnrichmentError checks whether err should be soft-failed rather than
-// propagated. Matches Python's "except MVMError" which catches the entire
-// MVMError hierarchy.
-//
-// In Go, DomainError is the replacement for MVMError. Every error type that
-// was an MVMError subclass in Python is now a *DomainError in Go (via the
-// error factory functions in internal/infra/errors/domain.go). Therefore,
-// ANY *DomainError should be soft-failed during enrichment.
-//
-// Non-DomainError errors (e.g., database connection errors, context deadlines)
-// are real failures that must propagate.
+// propagated. DomainError (the single error type) is soft-failed during
+// enrichment — non-DomainError errors (e.g., database connection errors,
+// context deadlines) are real failures that must propagate.
 func isEnrichmentError(err error) bool {
 	if err == nil {
 		return false
@@ -229,10 +204,11 @@ func isEnrichmentError(err error) bool {
 	return false
 }
 
-// ── VM enrichment ──────────────────────────────────────────────────────────
+// --- VM enrichment ---
 
 // EnrichVM populates resolved relations on VM instances.
-// include must specify which relations to load (e.g., "kernel", "image", "binary", "network", "volumes").
+// include must specify which relations to load (e.g., "kernel", "image",
+// "binary", "network", "volumes").
 func (e *Enricher) EnrichVM(ctx context.Context, vms []*model.VM, include ...string) error {
 	if len(vms) == 0 {
 		return nil
@@ -288,7 +264,6 @@ func (e *Enricher) enrichVMFromPaths(
 }
 
 // enrichVMKernel resolves VM kernel references via batch kernel ID lookup.
-// Matches Python's _resolve_forward for "kernel" relation.
 func (e *Enricher) enrichVMKernel(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
 	ids := collectUniqueVMStrings(vms, func(vm *model.VM) string { return vm.KernelID })
 	if len(ids) == 0 {
@@ -316,7 +291,6 @@ func (e *Enricher) enrichVMKernel(ctx context.Context, vms []*model.VM, spec mod
 }
 
 // enrichVMImage resolves VM image references via batch image ID lookup.
-// Matches Python's _resolve_forward for "image" relation.
 func (e *Enricher) enrichVMImage(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
 	ids := collectUniqueVMStrings(vms, func(vm *model.VM) string { return vm.ImageID })
 	if len(ids) == 0 {
@@ -344,7 +318,6 @@ func (e *Enricher) enrichVMImage(ctx context.Context, vms []*model.VM, spec mode
 }
 
 // enrichVMBinary resolves VM binary references via batch binary ID lookup.
-// Matches Python's _resolve_forward for "binary" relation.
 func (e *Enricher) enrichVMBinary(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
 	ids := collectUniqueVMStrings(vms, func(vm *model.VM) string { return vm.BinaryID })
 	if len(ids) == 0 {
@@ -372,7 +345,6 @@ func (e *Enricher) enrichVMBinary(ctx context.Context, vms []*model.VM, spec mod
 }
 
 // enrichVMNetwork resolves VM network references via batch network ID lookup.
-// Matches Python's _resolve_forward for "network" relation.
 func (e *Enricher) enrichVMNetwork(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
 	ids := collectUniqueVMStrings(vms, func(vm *model.VM) string { return vm.NetworkID })
 	if len(ids) == 0 {
@@ -401,7 +373,6 @@ func (e *Enricher) enrichVMNetwork(ctx context.Context, vms []*model.VM, spec mo
 
 // enrichVMNetworkLeases resolves leases onto each VM's resolved network.
 // Must be called AFTER enrichVMNetwork to ensure vm.Network is populated.
-// Matches Python's _resolve_nested for "network.leases" relation.
 func (e *Enricher) enrichVMNetworkLeases(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
 	netIDs := make(map[string]bool)
 	for _, vm := range vms {
@@ -465,8 +436,6 @@ func safeCastNetwork(v any) (*model.Network, error) {
 // resolveByVMVolumeIDs resolves volumes by VM volume ID lists.
 // Takes a list of JSON-encoded volume ID arrays (one per VM) and returns
 // a map from the JSON string key to the resolved VolumeItem list.
-//
-// Matches Python's VolumeResolver.resolve_by_vm_volume_ids() method.
 func (e *Enricher) resolveByVMVolumeIDs(
 	ctx context.Context,
 	volKeys []string,
@@ -527,11 +496,7 @@ func (e *Enricher) resolveByVMVolumeIDs(
 }
 
 // enrichVMVolumes resolves volume references onto VMs.
-// Matches Python's _resolve_forward for "volumes" relation with
-// batch_method="resolve_by_vm_volume_ids".
-//
-// Delegates to resolveByVMVolumeIDs for the actual resolution,
-// matching Python's VolumeResolver.resolve_by_vm_volume_ids().
+// Delegates to resolveByVMVolumeIDs for the actual resolution.
 func (e *Enricher) enrichVMVolumes(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
 	// Collect unique volume ID lists as joined strings for stable keys.
 	var volKeys []string
@@ -590,7 +555,6 @@ func (e *Enricher) enrichVMVolumes(ctx context.Context, vms []*model.VM, spec mo
 }
 
 // enrichVMVsock resolves vsock configuration for each VM via reverse relation.
-// Matches Python's _resolve_reverse for "vsock" relation.
 // Uses batch ListByVMIDs to avoid N+1 queries.
 func (e *Enricher) enrichVMVsock(ctx context.Context, vms []*model.VM, spec model.RelationSpec) error {
 	ids := collectUniqueVMStrings(vms, func(vm *model.VM) string { return vm.ID })
@@ -617,12 +581,10 @@ func (e *Enricher) enrichVMVsock(ctx context.Context, vms []*model.VM, spec mode
 	return nil
 }
 
-// ── Network enrichment ─────────────────────────────────────────────────────
+// --- Network enrichment ---
 
 // EnrichNetwork populates resolved relations on Network instances.
 // If include is empty/nil, enriches all known Network relations (backward compat).
-//
-// Matches Python's Resolver.enrich() with the specified include list.
 func (e *Enricher) EnrichNetwork(ctx context.Context, networks []*model.Network, include ...string) error {
 	if len(networks) == 0 {
 		return nil
@@ -658,7 +620,6 @@ func (e *Enricher) enrichNetworkFromPaths(
 }
 
 // enrichNetworkLeases resolves leases for each network via batch lease lookup.
-// Matches Python's _resolve_reverse for "leases" relation with batch_method.
 func (e *Enricher) enrichNetworkLeases(ctx context.Context, networks []*model.Network, spec model.RelationSpec) error {
 	netIDs := extractNetworkIDs(networks)
 	if len(netIDs) == 0 {
@@ -690,7 +651,6 @@ func (e *Enricher) enrichNetworkLeases(ctx context.Context, networks []*model.Ne
 }
 
 // enrichNetworkVMs resolves VMs referencing each network.
-// Matches Python's _resolve_reverse for "vm" relation with batch_method.
 func (e *Enricher) enrichNetworkVMs(ctx context.Context, networks []*model.Network, spec model.RelationSpec) error {
 	netIDs := extractNetworkIDs(networks)
 	if len(netIDs) == 0 {
@@ -722,12 +682,10 @@ func (e *Enricher) enrichNetworkVMs(ctx context.Context, networks []*model.Netwo
 	return nil
 }
 
-// ── Image enrichment ───────────────────────────────────────────────────────
+// --- Image enrichment ---
 
 // EnrichImage populates resolved relations on Image items.
 // If include is empty/nil, enriches all known Image relations (backward compat).
-//
-// Matches Python's Resolver.enrich() with the specified include list.
 func (e *Enricher) EnrichImage(ctx context.Context, images []*model.ImageItem, include ...string) error {
 	if len(images) == 0 {
 		return nil
@@ -759,7 +717,6 @@ func (e *Enricher) enrichImageFromPaths(
 }
 
 // enrichImageVMs resolves VMs that reference each image.
-// Matches Python's _resolve_reverse for "vm" relation with batch_method.
 func (e *Enricher) enrichImageVMs(ctx context.Context, images []*model.ImageItem, spec model.RelationSpec) error {
 	ids := collectImageIDs(images)
 	if len(ids) == 0 {
@@ -795,12 +752,10 @@ func (e *Enricher) enrichImageVMs(ctx context.Context, images []*model.ImageItem
 	return nil
 }
 
-// ── Kernel enrichment ──────────────────────────────────────────────────────
+// --- Kernel enrichment ---
 
 // EnrichKernel populates resolved relations on Kernel items.
 // If include is empty/nil, enriches all known Kernel relations (backward compat).
-//
-// Matches Python's Resolver.enrich() with the specified include list.
 func (e *Enricher) EnrichKernel(ctx context.Context, kernels []*model.KernelItem, include ...string) error {
 	if len(kernels) == 0 {
 		return nil
@@ -832,7 +787,6 @@ func (e *Enricher) enrichKernelFromPaths(
 }
 
 // enrichKernelVMs resolves VMs that reference each kernel.
-// Matches Python's _resolve_reverse for "vm" relation with batch_method.
 func (e *Enricher) enrichKernelVMs(ctx context.Context, kernels []*model.KernelItem, spec model.RelationSpec) error {
 	ids := collectKernelIDs(kernels)
 	if len(ids) == 0 {
@@ -868,12 +822,10 @@ func (e *Enricher) enrichKernelVMs(ctx context.Context, kernels []*model.KernelI
 	return nil
 }
 
-// ── Binary enrichment ──────────────────────────────────────────────────────
+// --- Binary enrichment ---
 
 // EnrichBinary populates resolved relations on Binary items.
 // If include is empty/nil, enriches all known Binary relations (backward compat).
-//
-// Matches Python's Resolver.enrich() with the specified include list.
 func (e *Enricher) EnrichBinary(ctx context.Context, binaries []*model.BinaryItem, include ...string) error {
 	if len(binaries) == 0 {
 		return nil
@@ -905,8 +857,7 @@ func (e *Enricher) enrichBinaryFromPaths(
 }
 
 // enrichBinaryVMs resolves VMs that reference each binary.
-// Matches Python's _resolve_reverse for "vm" relation with batch_method.
-// Sets full *model.VM objects on bin.VMs, matching Python's VMInstanceItem list.
+// Sets full *model.VM objects on bin.VMs.
 func (e *Enricher) enrichBinaryVMs(ctx context.Context, binaries []*model.BinaryItem, spec model.RelationSpec) error {
 	ids := collectBinaryIDs(binaries)
 	if len(ids) == 0 {
@@ -932,7 +883,7 @@ func (e *Enricher) enrichBinaryVMs(ctx context.Context, binaries []*model.Binary
 			continue
 		}
 		matchedVMs := vmsByBinID[bin.ID]
-		// Set full VM objects on bin.VMs, matching Python's list[VMInstanceItem].
+		// Set full VM objects on bin.VMs.
 		anyVMs := make([]*model.VM, len(matchedVMs))
 		for i, vm := range matchedVMs {
 			anyVMs[i] = vm
@@ -943,12 +894,10 @@ func (e *Enricher) enrichBinaryVMs(ctx context.Context, binaries []*model.Binary
 	return nil
 }
 
-// ── Volume enrichment ──────────────────────────────────────────────────────
+// --- Volume enrichment ---
 
 // EnrichVolume populates resolved relations on Volume items.
 // If include is empty/nil, enriches all known Volume relations (backward compat).
-//
-// Matches Python's VolumeResolver.enrich() with the specified include list.
 func (e *Enricher) EnrichVolume(ctx context.Context, volumes []*model.VolumeItem, include ...string) error {
 	if len(volumes) == 0 {
 		return nil
@@ -980,7 +929,6 @@ func (e *Enricher) enrichVolumeFromPaths(
 }
 
 // enrichVolumeVMs resolves VMs that reference each volume.
-// Matches Python's _resolve_reverse for "vm" relation with batch_method.
 func (e *Enricher) enrichVolumeVMs(ctx context.Context, volumes []*model.VolumeItem, spec model.RelationSpec) error {
 	ids := collectVolumeIDs(volumes)
 	if len(ids) == 0 {
@@ -1018,7 +966,7 @@ func (e *Enricher) enrichVolumeVMs(ctx context.Context, volumes []*model.VolumeI
 	return nil
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // resolveInclude validates and sorts the include list against the registry.
 // include must be non-empty — callers must explicitly specify relations to load.

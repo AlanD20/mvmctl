@@ -7,7 +7,6 @@ import (
 )
 
 // Controller is a stateful log controller bound to a single VM.
-// Matches Python's LogController exactly.
 type Controller struct {
 	vmHash string
 	vmDir  string
@@ -16,9 +15,7 @@ type Controller struct {
 }
 
 // NewController creates a LogController bound to the given VM.
-// In Python, the constructor takes a VMInstanceItem and extracts the hash
-// from vm.id (falling back to vm.name if id is falsy).
-// Here we accept the pre-resolved id/hash, VM directory path, and VM name.
+// Accepts the pre-resolved id/hash, VM directory path, and VM name.
 // The hash is set to vmID first; if vmID is empty, it falls back to vmName.
 func NewController(vmID, vmDir, vmName string) *Controller {
 	hash := vmID
@@ -34,7 +31,6 @@ func NewController(vmID, vmDir, vmName string) *Controller {
 }
 
 // Show reads the last N lines from the VM's log file.
-// Matches Python's LogController.show().
 func (c *Controller) Show(
 	ctx context.Context,
 	logType string,
@@ -50,10 +46,6 @@ func (c *Controller) Show(
 
 // FollowSync follows log file lines synchronously, sending each newly written line to the
 // returned channel. Returns a channel of log lines and a channel for errors.
-// Matching Python's Generator[str] behavior:
-//
-//	for line in controller.follow(...):
-//	    print(line)
 func (c *Controller) FollowSync(
 	ctx context.Context,
 	logType, logFilename, serialOutputFilename string,
@@ -72,7 +64,6 @@ func (c *Controller) FollowSync(
 
 // Follow streams log file lines in real-time.
 // Lines are sent to the provided channel until context is cancelled.
-// Matches Python's LogController.follow() — which returns a Generator[str].
 func (c *Controller) Follow(
 	ctx context.Context,
 	logType string,
@@ -87,8 +78,7 @@ func (c *Controller) Follow(
 }
 
 func (c *Controller) getLogPath(_ context.Context, logType, logFilename, serialOutputFilename string) (string, error) {
-	// Resolve the VM directory from the vmHash (matching Python's
-	// CacheUtils.get_vm_dir(vm_hash) in LogService.get_log_path()).
+	// Resolve the VM directory from the vmHash.
 	// The hash is guaranteed non-empty by NewController's fallback logic.
 	// Service.GetLogPath() checks:
 	//   1. VM directory exists (raises "VM directory not found at {path}")

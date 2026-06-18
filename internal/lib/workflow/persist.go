@@ -14,7 +14,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ── File locking ──
+// --- File locking ---
 
 // acquireLock opens or creates a .lock file in the given directory and
 // acquires a POSIX advisory lock (flock). exclusive=true acquires LOCK_EX,
@@ -48,7 +48,7 @@ func acquireLock(dir string, exclusive bool) (func(), error) {
 	}, nil
 }
 
-// ── State file helpers ──
+// --- State file helpers ---
 
 // marshalState serialises the state to YAML bytes using 2-space indent.
 // If the state has a ContentHash it is written, otherwise omitted.
@@ -63,7 +63,7 @@ func marshalState(state *model.WorkflowState) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ── WriteWorkflowState ──
+// --- WriteWorkflowState ---
 
 // WriteWorkflowState persists a WorkflowState to a YAML file within dir.
 // Creates dir if it does not exist. Writes are atomic (write to .tmp,
@@ -116,7 +116,7 @@ func WriteWorkflowState(dir string, state *model.WorkflowState) error {
 	return nil
 }
 
-// ── ReadWorkflowState ──
+// --- ReadWorkflowState ---
 
 // ReadWorkflowState reads a WorkflowState from a state.yaml file in dir.
 // Acquires a shared lock if a .lock file exists. Verifies the ContentHash
@@ -165,7 +165,7 @@ func ReadWorkflowState(dir string) (*model.WorkflowState, error) {
 	return &state, nil
 }
 
-// ── RemoveWorkflowState ──
+// --- RemoveWorkflowState ---
 
 // RemoveWorkflowState removes the entire workflow state directory for a given workflow ID.
 func RemoveWorkflowState(wfID string) error {

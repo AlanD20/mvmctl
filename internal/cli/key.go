@@ -197,7 +197,7 @@ func newKeyRemoveCmd(keyAPI api.KeyAPI) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			// Use API-side resolution matching Python's KeyInput(name=effective_names) + KeyOperation.remove()
+			// Use API-side resolution for batch removal
 			removeResult := keyAPI.KeyRemove(cmd.Context(), inputs.KeyInput{Identifiers: args}, force)
 			for _, r := range removeResult.Items {
 				if r.Status == "success" {
@@ -321,7 +321,7 @@ func newKeyDefaultCmd(keyAPI api.KeyAPI) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			// Single API call with ALL names, matching Python exactly.
+			// Single API call with ALL names.
 			if err := keyAPI.KeySetDefaults(cmd.Context(), inputs.KeyInput{Identifiers: args}); err != nil {
 				return fmt.Errorf("set default failed: %w", err)
 			}

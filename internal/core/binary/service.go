@@ -27,7 +27,6 @@ import (
 var safeTagChars = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
 // Service is the stateless intra-domain orchestrator for binary operations.
-// Mirrors Python mvmctl.core.binary._service.BinaryService exactly.
 type Service struct {
 	repo     Repository
 	binDir   string
@@ -44,7 +43,7 @@ func NewService(repo Repository, binDir, cacheDir string) *Service {
 	}
 }
 
-// ── List / Query ───────────────────────────────────────────────────────────
+// --- List / Query ---
 
 // ListAll lists all binaries, syncing is_present flag with filesystem.
 func (s *Service) ListAll(ctx context.Context, remote bool, verify bool) ([]*model.BinaryItem, error) {
@@ -78,7 +77,7 @@ func (s *Service) GetDefaultFirecracker(ctx context.Context) (*model.BinaryItem,
 	return s.repo.GetDefault(ctx, "firecracker")
 }
 
-// ── Remote listing ─────────────────────────────────────────────────────────
+// --- Remote listing ---
 
 // ListRemote fetches Firecracker release versions from GitHub.
 func (s *Service) ListRemote(ctx context.Context, limit int) ([]model.VersionInfo, error) {
@@ -117,7 +116,7 @@ func (s *Service) ListRemote(ctx context.Context, limit int) ([]model.VersionInf
 	return versions, nil
 }
 
-// ── Download ───────────────────────────────────────────────────────────────
+// --- Download ---
 
 // DownloadFirecracker downloads firecracker + jailer for version, returns Binary list.
 // arch is the target architecture (e.g. "x86_64", "aarch64") used in download URLs
@@ -138,7 +137,7 @@ func (s *Service) DownloadFirecracker(
 		infra.FirecrackerGithubDownloadURL, normalizedVersion, normalizedVersion, arch)
 	sha256URL := tgzURL + ".sha256.txt"
 
-	// ── Step 1: Fetch SHA256 checksum ──
+	// --- Step 1: Fetch SHA256 checksum ---
 	var expectedSHA256 string
 	sha256Content, err := s.dl.GetContent(ctx, download.RequestOpts{
 		URL: sha256URL, Timeout: 30,
@@ -164,7 +163,7 @@ func (s *Service) DownloadFirecracker(
 		)
 	}
 
-	// ── Step 2: Download .tgz with checksum verification ──
+	// --- Step 2: Download .tgz with checksum verification ---
 	slog.Info("Downloading Firecracker", "version", normalizedVersion)
 	if err := s.dl.DownloadFile(ctx, tgzURL, tgzPath, expectedSHA256, false, false, onProgress); err != nil {
 		os.Remove(tgzPath)
@@ -173,7 +172,7 @@ func (s *Service) DownloadFirecracker(
 		)
 	}
 
-	// ── Step 3: Extract firecracker and jailer from .tgz ──
+	// --- Step 3: Extract firecracker and jailer from .tgz ---
 	extractErr := archive.ExtractRenamed(ctx, tgzPath, []archive.RenameEntry{
 		{ArchiveName: fmt.Sprintf("firecracker-v%s-%s", normalizedVersion, arch), OutputPath: fcDest, Mode: 0755},
 		{ArchiveName: fmt.Sprintf("jailer-v%s-%s", normalizedVersion, arch), OutputPath: jlDest, Mode: 0755},
@@ -185,7 +184,7 @@ func (s *Service) DownloadFirecracker(
 		return nil, extractErr
 	}
 
-	// ── Step 4: Create BinaryItems ──
+	// --- Step 4: Create BinaryItems ---
 	fcBinary, err := s.createBinaryItem("firecracker", normalizedVersion, fcDest, true)
 	if err != nil {
 		return nil, err
@@ -198,7 +197,7 @@ func (s *Service) DownloadFirecracker(
 	return []*model.BinaryItem{fcBinary, jlBinary}, nil
 }
 
-// ── Remove ─────────────────────────────────────────────────────────────────
+// --- Remove ---
 
 // Remove removes a binary from disk and database.
 func (s *Service) Remove(ctx context.Context, binary *model.BinaryItem, force bool) (*model.BinaryItem, error) {
@@ -252,14 +251,14 @@ func (s *Service) RemoveMany(
 	return deleted, nil
 }
 
-// ── Build from source ─────────────────────────────────────────────────────
+// --- Build from source ---
 
 // BuildFromSource builds Firecracker from source using Docker-based devtool.
 func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.BinaryItem, error) {
 	mirrorTag := safeTagChars.ReplaceAllString(gitRef, "_")
 	mirrorDir, _ := infra.EnvGet("ASSET_MIRROR")
 
-	// ── Check local asset mirror ──
+	// --- Check local asset mirror ---
 	if mirrorDir != "" {
 		cachedFC := filepath.Join(mirrorDir, fmt.Sprintf("firecracker-%s", mirrorTag))
 		cachedJL := filepath.Join(mirrorDir, fmt.Sprintf("jailer-%s", mirrorTag))
@@ -285,7 +284,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		}
 	}
 
-	// ── Check git availability ──
+	// --- Check git availability ---
 	gitCheck, _ := system.DefaultRunner.Run(
 		ctx,
 		[]string{"which", "git"},
@@ -301,7 +300,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 
 	srcDir := filepath.Join(s.cacheDir, "firecracker-src")
 
-	// ── Clone or update repository ──
+	// --- Clone or update repository ---
 	if _, err := os.Stat(srcDir); os.IsNotExist(err) {
 		slog.Info("Cloning Firecracker repository (this may take a while)...")
 		cloneCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
@@ -328,7 +327,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		}
 	}
 
-	// ── Checkout requested ref ──
+	// --- Checkout requested ref ---
 	checkoutCtx, checkoutCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer checkoutCancel()
 	_, err := system.DefaultRunner.Run(checkoutCtx, []string{"git", "checkout", gitRef},
@@ -340,7 +339,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		)
 	}
 
-	// ── Resolve short commit hash ──
+	// --- Resolve short commit hash ---
 	revParseCtx, revParseCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer revParseCancel()
 	hashResult, hashErr := system.DefaultRunner.Run(revParseCtx, []string{"git", "rev-parse", "--short", "HEAD"},
@@ -358,7 +357,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	)
 	slog.Info("This may take several minutes...")
 
-	// ── Run the build with live output ──
+	// --- Run the build with live output ---
 	buildCtx, buildCancel := context.WithTimeout(ctx, 1800*time.Second)
 	defer buildCancel()
 	buildResult, buildErr := system.DefaultRunner.Run(buildCtx, []string{"tools/devtool", "build", "--release"},
@@ -389,7 +388,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 		return nil, binaryError(errs.CodeProcessError, msg)
 	}
 
-	// ── Locate built binaries ──
+	// --- Locate built binaries ---
 	buildOutput := filepath.Join(srcDir, "build", "cargo_target", rustTargetTriple(), "release")
 	fcSrc := filepath.Join(buildOutput, "firecracker")
 	jlSrc := filepath.Join(buildOutput, "jailer")
@@ -422,7 +421,7 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 
 	slog.Info("Built Firecracker", "version", buildVersion, "ref", gitRef)
 
-	// ── Cache in mirror ──
+	// --- Cache in mirror ---
 	if mirrorDir != "" {
 		os.MkdirAll(mirrorDir, infra.DirPerm)
 		cachedFC := filepath.Join(mirrorDir, fmt.Sprintf("firecracker-%s", mirrorTag))
@@ -444,14 +443,12 @@ func (s *Service) BuildFromSource(ctx context.Context, gitRef string) ([]*model.
 	return []*model.BinaryItem{fcBinary, jlBinary}, nil
 }
 
-// ── Service binaries ───────────────────────────────────────────────────────
-
 // Repo returns the underlying repository for use by the API layer.
 func (s *Service) Repo() Repository {
 	return s.repo
 }
 
-// ── Internal helpers ───────────────────────────────────────────────────────
+// --- Internal helpers ---
 
 func (s *Service) createBinaryItem(typ, versionStr, path string, resolveCIVersion bool) (*model.BinaryItem, error) {
 	id, err := crypto.BinaryID(path, typ, versionStr)

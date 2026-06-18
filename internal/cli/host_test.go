@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/api/results"
 )
 
-// ─── NewHostCmd ────────────────────────────────────────────────────────────
+// --- NewHostCmd ---
 // Rationale: NewHostCmd is the entry point for all host CLI operations.
 // Missing subcommands silently disable host management without error.
 
@@ -62,7 +62,7 @@ func TestNewHostCmd(t *testing.T) {
 	})
 }
 
-// ─── Host info (via host info) ─────────────────────────────────────────────
+// --- Host info (via host info) ---
 // Rationale: Host info shows hardware and capacity. A broken info command
 // prevents users from seeing available resources for VM placement.
 
@@ -143,7 +143,7 @@ func TestNewHostInfoCmd(t *testing.T) {
 	})
 }
 
-// ─── Host init (via host init) ─────────────────────────────────────────────
+// --- Host init (via host init) ---
 // Rationale: Host init applies host configuration changes. A broken init
 // command leaves the host unconfigured and VMs unable to start.
 
@@ -196,7 +196,7 @@ func TestNewHostInitCmd(t *testing.T) {
 	})
 }
 
-// ─── Host status (via host status) ─────────────────────────────────────────
+// --- Host status (via host status) ---
 // Rationale: Host status shows current state vs expected. A broken status
 // command prevents users from diagnosing host configuration issues.
 
@@ -231,14 +231,14 @@ func TestNewHostStatusCmd(t *testing.T) {
 	})
 }
 
-// ─── Host clean (via host clean) ───────────────────────────────────────────
+// --- Host clean (via host clean) ---
 // Rationale: Host clean removes network configuration. A broken clean command
 // can leave orphaned bridges/TAPs or fail to clean up network state.
 
 func TestNewHostCleanCmd(t *testing.T) {
 	t.Run("force_clean_success_no_vms", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VM, error) {
+			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return nil, nil
 			},
 			HostCleanFunc: func(_ context.Context) ([]string, error) {
@@ -254,8 +254,8 @@ func TestNewHostCleanCmd(t *testing.T) {
 
 	t.Run("aborts_if_vms_running", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VM, error) {
-				return []*model.VM{{Name: "vm-1", Status: model.VMStatusRunning}}, nil
+			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
+				return []*model.VMItem{{Name: "vm-1", Status: model.VMStatusRunning}}, nil
 			},
 		}
 		cmd := cli.NewHostCmd(mock)
@@ -268,7 +268,7 @@ func TestNewHostCleanCmd(t *testing.T) {
 
 	t.Run("get_running_vms_error_does_not_block", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VM, error) {
+			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return nil, errors.New("db error")
 			},
 			HostCleanFunc: func(_ context.Context) ([]string, error) {
@@ -283,15 +283,15 @@ func TestNewHostCleanCmd(t *testing.T) {
 	})
 }
 
-// ─── Host reset (via host reset) ───────────────────────────────────────────
+// --- Host reset (via host reset) ---
 // Rationale: Host reset performs a full rollback. A broken reset command can
 // leave the host in a partially rolled-back state requiring manual cleanup.
 
 func TestNewHostResetCmd(t *testing.T) {
 	t.Run("aborts_if_vms_running", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VM, error) {
-				return []*model.VM{{Name: "vm-1", Status: model.VMStatusRunning}}, nil
+			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
+				return []*model.VMItem{{Name: "vm-1", Status: model.VMStatusRunning}}, nil
 			},
 		}
 		cmd := cli.NewHostCmd(mock)
@@ -304,7 +304,7 @@ func TestNewHostResetCmd(t *testing.T) {
 
 	t.Run("force_reset_success", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VM, error) {
+			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return nil, nil
 			},
 			HostResetFunc: func(_ context.Context) ([]string, error) {
@@ -319,7 +319,7 @@ func TestNewHostResetCmd(t *testing.T) {
 	})
 }
 
-// ─── formatChange ──────────────────────────────────────────────────────────
+// --- formatChange ---
 // Rationale: formatChange produces user-facing change descriptions for host
 // init. Incorrect formatting would confuse users about what was modified.
 
@@ -418,14 +418,14 @@ func TestFormatChange(t *testing.T) {
 	}
 }
 
-// ─── abortIfVMsRunning ─────────────────────────────────────────────────────
+// --- abortIfVMsRunning ---
 // Rationale: abortIfVMsRunning is a safety check before destructive host
 // operations. A broken check could allow cleanup while VMs are running.
 
 func TestAbortIfVMsRunning(t *testing.T) {
 	t.Run("no_running_vms_returns_nil", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VM, error) {
+			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return nil, nil
 			},
 		}
@@ -435,8 +435,8 @@ func TestAbortIfVMsRunning(t *testing.T) {
 
 	t.Run("running_vms_returns_error", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VM, error) {
-				return []*model.VM{{Name: "vm-1"}}, nil
+			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
+				return []*model.VMItem{{Name: "vm-1"}}, nil
 			},
 		}
 		err := cli.AbortIfVMsRunning(context.Background(), mock)
@@ -446,7 +446,7 @@ func TestAbortIfVMsRunning(t *testing.T) {
 
 	t.Run("api_error_returns_nil", func(t *testing.T) {
 		mock := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VM, error) {
+			HostGetRunningVMsFunc: func(_ context.Context) ([]*model.VMItem, error) {
 				return nil, errors.New("db error")
 			},
 		}
@@ -455,6 +455,6 @@ func TestAbortIfVMsRunning(t *testing.T) {
 	})
 }
 
-// ─── Helper ────────────────────────────────────────────────────────────────
+// --- Helper ---
 
 func strPtr(s string) *string { return &s }

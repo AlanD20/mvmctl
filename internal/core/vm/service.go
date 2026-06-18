@@ -1,3 +1,5 @@
+// Package vm provides VM lifecycle management (start/stop/pause/resume).
+// Layer: Core domain — never imports other core/* packages.
 package vm
 
 import (
@@ -8,8 +10,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Service ──
-// Matches Python's VMService class exactly.
+// --- Service ---
 
 // Service is a stateless VM operations coordinator.
 // Handles bulk operations and delegates single-VM operations to Controller.
@@ -24,42 +25,41 @@ func NewService(repo Repository) *Service {
 	}
 }
 
-// ── Single-VM operations ──
+// --- Single-VM operations ---
 
-// Stop stops a single VM. Matches Python's stop().
+// Stop stops a single VM and cleans up its Firecracker process.
 func (s *Service) Stop(ctx context.Context, vm *model.VM, force bool) error {
 	c := NewController(vm, s.repo)
 	return c.Stop(ctx, force)
 }
 
-// Start starts a single VM. Matches Python's start().
+// Start boots a VM from its current state.
 func (s *Service) Start(ctx context.Context, vm *model.VM) error {
 	c := NewController(vm, s.repo)
 	return c.Start(ctx)
 }
 
-// Pause pauses a single VM. Matches Python's pause().
+// Pause suspends VM execution via the Firecracker API.
 func (s *Service) Pause(ctx context.Context, vm *model.VM) error {
 	c := NewController(vm, s.repo)
 	return c.Pause(ctx)
 }
 
-// Resume resumes a single VM. Matches Python's resume().
+// Resume continues execution of a paused VM.
 func (s *Service) Resume(ctx context.Context, vm *model.VM) error {
 	c := NewController(vm, s.repo)
 	return c.Resume(ctx)
 }
 
-// Reboot reboots a single VM. Matches Python's reboot().
+// Reboot restarts the VM by stopping and starting it.
 func (s *Service) Reboot(ctx context.Context, vm *model.VM, force bool) error {
 	c := NewController(vm, s.repo)
 	return c.Reboot(ctx, force)
 }
 
-// ── Bulk operations ──
-// These match Python's VMService stop_many, start_many, etc. exactly.
+// --- Bulk operations ---
 
-// StopMany stops multiple VMs. Matches Python's stop_many().
+// StopMany stops multiple VMs.
 func (s *Service) StopMany(
 	ctx context.Context,
 	vms []*model.VM,
@@ -79,7 +79,7 @@ func (s *Service) StopMany(
 	return toBulkResult(results)
 }
 
-// StartMany starts multiple VMs. Matches Python's start_many().
+// StartMany starts multiple VMs.
 func (s *Service) StartMany(
 	ctx context.Context,
 	vms []*model.VM,
@@ -98,7 +98,7 @@ func (s *Service) StartMany(
 	return toBulkResult(results)
 }
 
-// PauseMany pauses multiple VMs. Matches Python's pause_many().
+// PauseMany pauses multiple VMs.
 func (s *Service) PauseMany(
 	ctx context.Context,
 	vms []*model.VM,
@@ -117,7 +117,7 @@ func (s *Service) PauseMany(
 	return toBulkResult(results)
 }
 
-// ResumeMany resumes multiple VMs. Matches Python's resume_many().
+// ResumeMany resumes multiple VMs.
 func (s *Service) ResumeMany(
 	ctx context.Context,
 	vms []*model.VM,
@@ -136,7 +136,7 @@ func (s *Service) ResumeMany(
 	return toBulkResult(results)
 }
 
-// RebootMany reboots multiple VMs. Matches Python's reboot_many().
+// RebootMany reboots multiple VMs.
 func (s *Service) RebootMany(
 	ctx context.Context,
 	vms []*model.VM,

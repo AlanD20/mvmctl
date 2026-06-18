@@ -13,7 +13,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── MockKeyAPI ────────────────────────────────────────────────────────────────
+// --- MockKeyAPI ---
 // Rationale: MockKeyAPI implements api.KeyAPI for testing. These tests verify
 // default zero-value returns and custom function routing.
 

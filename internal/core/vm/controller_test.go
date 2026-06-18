@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Pause state validation ─────────────────────────────────────────────────
+// --- Pause state validation -------------------------------------------------
 // Rationale: Pause must reject invalid state transitions before any I/O.
 // All error paths are pure — they check c.vm.Status and c.vm.APISocketPath
 // without touching the Firecracker API or repository.
@@ -53,7 +53,7 @@ func TestController_Pause_stateValidation(t *testing.T) {
 	}
 }
 
-// ─── Resume state validation ────────────────────────────────────────────────
+// --- Resume state validation ------------------------------------------------
 // Rationale: Resume must reject invalid state transitions before any I/O.
 // Already-running and already-starting VMs are no-ops.
 
@@ -90,7 +90,7 @@ func TestController_Resume_stateValidation(t *testing.T) {
 	}
 }
 
-// ─── Start state validation ─────────────────────────────────────────────────
+// --- Start state validation -------------------------------------------------
 // Rationale: Start must reject invalid state transitions before any I/O.
 // Already-running, already-starting, and stopping VMs are no-ops.
 
@@ -127,7 +127,7 @@ func TestController_Start_stateValidation(t *testing.T) {
 	}
 }
 
-// ─── Stop idempotent no-op ──────────────────────────────────────────────────
+// --- Stop idempotent no-op --------------------------------------------------
 // Rationale: Stop on non-running VMs with pid=0 returns nil immediately without
 // touching the repository or subprocess. Every non-Running/non-Starting status
 // with pid <= 0 is idempotent regardless of force flag.
@@ -160,7 +160,7 @@ func TestController_Stop_nonRunningWithNoPID(t *testing.T) {
 	}
 }
 
-// ─── Snapshot state validation ──────────────────────────────────────────────
+// --- Snapshot state validation ----------------------------------------------
 // Rationale: Snapshot must reject invalid states before any I/O. Only RUNNING
 // and PAUSED are valid; all other statuses return DomainError. Missing API
 // socket also returns DomainError.
@@ -195,7 +195,7 @@ func TestController_Snapshot_stateValidationTable(t *testing.T) {
 	}
 }
 
-// ─── LoadSnapshot state validation ──────────────────────────────────────────
+// --- LoadSnapshot state validation ------------------------------------------
 // Rationale: LoadSnapshot checks APISocketPath before any I/O. Unlike other
 // lifecycle methods, it does not check c.vm.Status — only the socket path.
 
@@ -224,7 +224,7 @@ func TestController_LoadSnapshot_stateValidation(t *testing.T) {
 	}
 }
 
-// ─── Reboot delegation ──────────────────────────────────────────────────────
+// --- Reboot delegation ------------------------------------------------------
 // Rationale: Reboot calls Stop then Start. With a non-running VM (pid=0),
 // Stop returns nil immediately. If socket is missing, Start returns DomainError
 // — proving delegation is wired correctly.
@@ -258,7 +258,7 @@ func TestController_Reboot_delegation(t *testing.T) {
 	}
 }
 
-// ─── Context cancellation ────────────────────────────────────────────────────
+// --- Context cancellation ----------------------------------------------------
 // Rationale: Every controller method takes context.Context. The pure state
 // validation paths (no-op and socket-missing) must not block on a cancelled
 // context. These tests prove that cancellation does NOT affect early-return
@@ -341,7 +341,7 @@ func TestController_ContextCancellation(t *testing.T) {
 	})
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 // newController creates a Controller with a VM in the given state.
 func newController(status model.VMStatus, pid int, socketPath string) *vm.Controller {

@@ -6,7 +6,6 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// Repository matches Python's mvmctl.core.host._repository.Repository.
 type Repository interface {
 	// Count returns total count of all host state changes.
 	Count(ctx context.Context) (int, error)

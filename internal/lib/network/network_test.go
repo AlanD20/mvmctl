@@ -12,7 +12,7 @@ import (
 	libnet "mvmctl/internal/lib/network"
 )
 
-// ─── ComputeSubnetMask ────────────────────────────────────────────────────────
+// --- ComputeSubnetMask ---
 // Rationale: Must return the dotted-quad netmask for a given CIDR. Invalid
 // subnets return empty string.
 
@@ -38,7 +38,7 @@ func TestComputeSubnetMask(t *testing.T) {
 	}
 }
 
-// ─── ComputePrefixLength ──────────────────────────────────────────────────────
+// --- ComputePrefixLength ---
 // Rationale: Must return the prefix length from a CIDR. Invalid subnets return 0.
 
 func TestComputePrefixLength(t *testing.T) {
@@ -62,7 +62,7 @@ func TestComputePrefixLength(t *testing.T) {
 	}
 }
 
-// ─── CountHosts ───────────────────────────────────────────────────────────────
+// --- CountHosts ---
 // Rationale: Must count usable host addresses. Standard subnets exclude network
 // and broadcast (total - 2). /31 and /32 count all addresses.
 
@@ -96,7 +96,7 @@ func TestCountHosts(t *testing.T) {
 	}
 }
 
-// ─── ComputeIPv4Gateway ───────────────────────────────────────────────────────
+// --- ComputeIPv4Gateway ---
 // Rationale: Must return the first usable host address. For /31, returns the
 // second address (RFC 3021). Invalid subnets must error.
 
@@ -130,7 +130,7 @@ func TestComputeIPv4Gateway(t *testing.T) {
 	}
 }
 
-// ─── ComputeBridgeAddress ─────────────────────────────────────────────────────
+// --- ComputeBridgeAddress ---
 // Rationale: Formats gateway with subnet prefix length.
 
 func TestComputeBridgeAddress(t *testing.T) {
@@ -153,7 +153,7 @@ func TestComputeBridgeAddress(t *testing.T) {
 	}
 }
 
-// ─── ComputeBridgeName ────────────────────────────────────────────────────────
+// --- ComputeBridgeName ---
 // Rationale: Must produce bridge names ≤ 15 chars (IFNAMSIZ). Short names
 // stay raw; long names use hash truncation.
 
@@ -220,7 +220,7 @@ func TestComputeBridgeName(t *testing.T) {
 	})
 }
 
-// ─── GenerateTAPName ──────────────────────────────────────────────────────────
+// --- GenerateTAPName ---
 // Rationale: Deterministic hash-based TAP naming (max 16 chars for IFNAMSIZ).
 
 func TestGenerateTAPName(t *testing.T) {
@@ -253,7 +253,7 @@ func TestGenerateTAPName(t *testing.T) {
 	})
 }
 
-// ─── GenerateMAC ──────────────────────────────────────────────────────────────
+// --- GenerateMAC ---
 // Rationale: Must produce upper-case MAC addresses with the given prefix.
 // Non-deterministic (uses rand) — only format-check.
 
@@ -286,7 +286,7 @@ func TestGenerateMAC(t *testing.T) {
 	})
 }
 
-// ─── AllocateNextIP ───────────────────────────────────────────────────────────
+// --- AllocateNextIP ---
 // Rationale: Core IP allocation logic. Must skip network/base addresses,
 // skip gateway, skip existing IPs, handle /31 and /32 edge cases, and
 // report exhaustion when no IPs remain.
@@ -366,7 +366,7 @@ func TestAllocateNextIP(t *testing.T) {
 	})
 }
 
-// ─── SubnetsOverlap ────────────────────────────────────────────────────────
+// --- SubnetsOverlap ---
 // Rationale: Subnet overlap detection prevents conflicting network
 // assignments. A false negative allows overlapping CIDRs; a false positive
 // blocks valid configurations.
@@ -397,7 +397,7 @@ func TestSubnetsOverlap(t *testing.T) {
 	}
 }
 
-// ─── FindNetworkByName ─────────────────────────────────────────────────────
+// --- FindNetworkByName ---
 // Rationale: Network lookup by name is used for CLI name resolution and
 // cross-domain references. A nil-pointer dereference or wrong match would
 // crash the API layer.

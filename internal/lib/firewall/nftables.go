@@ -12,8 +12,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// ── Chain/table mapping ──
-// Matches Python's _CHAIN_TO_TABLE for nftables.
+// --- Chain/table mapping ---
 var nftChainToTable = map[model.FirewallChain]string{
 	model.FirewallChainMVMForward:      "filter",
 	model.FirewallChainMVMPostrouting:  "nat",
@@ -21,7 +20,6 @@ var nftChainToTable = map[model.FirewallChain]string{
 }
 
 // Jump rule definitions: (family, table, builtin_chain, target_chain).
-// Matches Python's _JUMP_RULES.
 var nftJumpRules = []struct {
 	family  string
 	table   string
@@ -34,7 +32,6 @@ var nftJumpRules = []struct {
 }
 
 // Base chain hook definitions: keyed by (family, table, chain_name).
-// Matches Python's _BASE_CHAINS.
 var nftBaseChains = map[string]string{
 	"ip/filter/FORWARD":  "{ type filter hook forward priority filter; policy accept; }",
 	"ip/filter/INPUT":    "{ type filter hook input priority filter; policy accept; }",
@@ -45,8 +42,7 @@ func nftBaseChainKey(family, table, chain string) string {
 	return fmt.Sprintf("%s/%s/%s", family, table, chain)
 }
 
-// ── NFTablesTracker ──
-// Matches src/mvmctl/core/_shared/_nftables_tracker/_tracker.py NFTablesTracker.
+// --- NFTablesTracker ---
 
 type NFTablesTracker struct {
 	repo *NFTablesRuleRepository
@@ -57,8 +53,7 @@ func NewNFTablesTracker(repo *NFTablesRuleRepository) *NFTablesTracker {
 	return &NFTablesTracker{repo: repo}
 }
 
-// ── Chain existence check ──
-// Matches Python NFTablesTracker._chain_exists().
+// --- Chain existence check ---
 
 func (t *NFTablesTracker) chainExists(ctx context.Context, family, table, chain string) bool {
 	result, _ := system.DefaultRunner.Run(ctx,
@@ -68,8 +63,7 @@ func (t *NFTablesTracker) chainExists(ctx context.Context, family, table, chain 
 	return result.Success()
 }
 
-// ── Jump rule existence check ──
-// Matches Python NFTablesTracker._jump_rule_exists().
+// --- Jump rule existence check ---
 
 func (t *NFTablesTracker) jumpRuleExists(ctx context.Context, family, table, builtinChain, targetChain string) bool {
 	result, _ := system.DefaultRunner.Run(ctx,
@@ -82,8 +76,7 @@ func (t *NFTablesTracker) jumpRuleExists(ctx context.Context, family, table, bui
 	return strings.Contains(result.Stdout, fmt.Sprintf("jump %s", targetChain))
 }
 
-// ── Find jump rule handle ──
-// Matches Python NFTablesTracker._find_jump_rule_handle().
+// --- Find jump rule handle ---
 
 func (t *NFTablesTracker) findJumpRuleHandle(
 	ctx context.Context,
@@ -103,7 +96,6 @@ func (t *NFTablesTracker) findJumpRuleHandle(
 		if !strings.Contains(stripped, targetStr) || !strings.Contains(stripped, "# handle ") {
 			continue
 		}
-		// Python: stripped.split(" # handle ")[-1]  — always takes last element
 		parts := strings.Split(stripped, "# handle ")
 		handleStr := strings.TrimSpace(parts[len(parts)-1])
 		handle, err := strconv.Atoi(handleStr)
@@ -114,11 +106,10 @@ func (t *NFTablesTracker) findJumpRuleHandle(
 	return nil
 }
 
-// ── Initialize ──
-// Matches Python NFTablesTracker.initialize().
+// --- Initialize ---
 
 func (t *NFTablesTracker) Initialize(ctx context.Context) {
-	// ── Ensure system tables exist ──
+	// --- Ensure system tables exist ---
 	seenTables := make(map[string]bool)
 	for _, table := range nftChainToTable {
 		if !seenTables[table] {
@@ -131,7 +122,7 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 		}
 	}
 
-	// ── Create chains in system tables ──
+	// --- Create chains in system tables ---
 	for chain, table := range nftChainToTable {
 		if t.chainExists(ctx, "ip", table, string(chain)) {
 			slog.Debug("Chain already exists", "chain", string(chain), "table", table)
@@ -154,7 +145,7 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 		slog.Info("Created nftables chain", "chain", string(chain), "table", table)
 	}
 
-	// ── Ensure built-in base chains exist ──
+	// --- Ensure built-in base chains exist ---
 	for _, jr := range nftJumpRules {
 		key := nftBaseChainKey(jr.family, jr.table, jr.builtin)
 		hookDef, ok := nftBaseChains[key]
@@ -189,7 +180,7 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 		)
 	}
 
-	// ── Insert jump rules at position 0 of built-in chains ──
+	// --- Insert jump rules at position 0 of built-in chains ---
 	for _, jr := range nftJumpRules {
 		if t.jumpRuleExists(ctx, jr.family, jr.table, jr.builtin, jr.target) {
 			slog.Debug("Jump rule already exists",
@@ -229,9 +220,8 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 	}
 }
 
-// ── Ensure chain ──
-// Matches Python NFTablesTracker.ensure_chain().
-// Python raises RuntimeError on failure; Go returns false.
+// --- Ensure chain ---
+
 
 func (t *NFTablesTracker) EnsureChain(
 	ctx context.Context,
@@ -270,8 +260,7 @@ func (t *NFTablesTracker) EnsureChain(
 	return true
 }
 
-// ── List chain rules ──
-// Matches Python NFTablesTracker._list_chain_rules().
+// --- List chain rules ---
 
 type chainRule struct {
 	Handle int
@@ -300,15 +289,13 @@ func (t *NFTablesTracker) listChainRules(ctx context.Context, chain model.Firewa
 		if !strings.Contains(stripped, "# handle ") {
 			continue
 		}
-		// Python: stripped.split(" # handle ")[-1] — always last element
 		parts := strings.Split(stripped, "# handle ")
 		handleStr := strings.TrimSpace(parts[len(parts)-1])
 		handle, err := strconv.Atoi(handleStr)
 		if err != nil {
 			continue
 		}
-		// Python: stripped.rsplit(" # handle ", 1)[0] — split from right,
-		// take everything before the LAST " # handle ".
+		// Split from right — take everything before the last "# handle ".
 		lastIdx := strings.LastIndex(stripped, "# handle ")
 		if lastIdx < 0 {
 			continue
@@ -319,8 +306,7 @@ func (t *NFTablesTracker) listChainRules(ctx context.Context, chain model.Firewa
 	return rules
 }
 
-// ── Find rule handle ──
-// Matches Python NFTablesTracker._find_rule_handle().
+// --- Find rule handle ---
 
 func (t *NFTablesTracker) findRuleHandle(ctx context.Context, rule *model.FirewallRule) *int {
 	nftExpr := t.ruleToNftExpr(rule)
@@ -334,8 +320,7 @@ func (t *NFTablesTracker) findRuleHandle(ctx context.Context, rule *model.Firewa
 	return nil
 }
 
-// ── Rule to nftables expression ──
-// Matches Python NFTablesTracker._rule_to_nft_expr().
+// --- Rule to nftables expression ---
 
 func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 	var expr []string
@@ -354,8 +339,7 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 		expr = append(expr, "ip", "daddr", rule.Destination)
 	}
 
-	// Input interface
-	// Matches Python: f'"{rule.in_interface}"' — uses double quotes around value
+	// Input interface (double-quoted for nftables)
 	if rule.InInterface != string(model.FirewallWildcardAnyInterface) {
 		expr = append(expr, "iifname", fmt.Sprintf(`"%s"`, rule.InInterface))
 	}
@@ -385,7 +369,7 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 	targetLower := strings.ToLower(string(rule.Target))
 	expr = append(expr, targetLower)
 
-	// Comment — matches Python: f'"{rule.comment_tag}"'
+	// Comment (double-quoted for nftables)
 	if rule.CommentTag != nil && *rule.CommentTag != "" {
 		expr = append(expr, "comment", fmt.Sprintf(`"%s"`, *rule.CommentTag))
 	}
@@ -393,8 +377,7 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 	return expr
 }
 
-// ── Ensure rule ──
-// Matches Python NFTablesTracker.ensure_rule().
+// --- Ensure rule ---
 
 func (t *NFTablesTracker) EnsureRule(
 	ctx context.Context,
@@ -442,7 +425,7 @@ func (t *NFTablesTracker) EnsureRule(
 
 	cmdStr := strings.Join(addCmd, " ")
 
-	// Python: command_string is set BEFORE potential failure
+	// Set command_string before the operation, so it's available even on failure.
 	ruleCmdStr := cmdStr
 	rule.CommandString = &ruleCmdStr
 
@@ -482,8 +465,7 @@ func (t *NFTablesTracker) EnsureRule(
 	}
 }
 
-// ── Remove rule ──
-// Matches Python NFTablesTracker.remove_rule().
+// --- Remove rule ---
 
 func (t *NFTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRule) model.FirewallRuleResult {
 	// Try to find the rule in the database first
@@ -550,8 +532,7 @@ func (t *NFTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 	}
 }
 
-// ── Batch ensure rules ──
-// Matches Python NFTablesTracker.batch_ensure_rules().
+// --- Batch ensure rules ---
 
 func (t *NFTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult {
 	var lines []string
@@ -619,8 +600,7 @@ func (t *NFTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 	return model.FirewallRuleResult{Success: true}
 }
 
-// ── Batch remove rules ──
-// Matches Python NFTablesTracker.batch_remove_rules().
+// --- Batch remove rules ---
 
 func (t *NFTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult {
 	var lastError string
@@ -678,8 +658,7 @@ func (t *NFTablesTracker) BatchRemoveRules(ctx context.Context, rules []model.Fi
 	return model.FirewallRuleResult{Success: true}
 }
 
-// ── Count orphaned rules ──
-// Matches Python NFTablesTracker.count_orphaned_rules().
+// --- Count orphaned rules ---
 
 func (t *NFTablesTracker) CountOrphanedRules(ctx context.Context, network *model.Network) int {
 	dbRules, err := t.repo.GetByNetworkID(ctx, network.ID, true)
@@ -727,8 +706,7 @@ func (t *NFTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 	return orphaned
 }
 
-// ── Teardown ──
-// Matches Python NFTablesTracker.teardown().
+// --- Teardown ---
 
 func (t *NFTablesTracker) Teardown(ctx context.Context) {
 	for _, jr := range nftJumpRules {
@@ -754,8 +732,7 @@ func (t *NFTablesTracker) Teardown(ctx context.Context) {
 	}
 }
 
-// ── Flush chain ──
-// Matches Python NFTablesTracker.flush_chain().
+// --- Flush chain ---
 
 func (t *NFTablesTracker) FlushChain(
 	ctx context.Context,

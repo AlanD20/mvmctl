@@ -14,7 +14,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── VolumesToDrives ────────────────────────────────────────────────────────
+// --- VolumesToDrives ---
 // Rationale: Converts VolumeItem slice to Firecracker DriveConfig slice.
 
 func TestVolumesToDrives(t *testing.T) {
@@ -73,8 +73,8 @@ func TestVolumesToDrives(t *testing.T) {
 	})
 }
 
-// ─── formatProcessError ─────────────────────────────────────────────────────
-// Rationale: Formats subprocess errors matching Python's ProcessError format.
+// --- formatProcessError ---
+// Rationale: Formats subprocess errors in the standard format.
 
 func TestFormatProcessError(t *testing.T) {
 	t.Run("exit_error_with_stderr", func(t *testing.T) {
@@ -148,7 +148,7 @@ func itoa(n int) string {
 	return string(buf[i:])
 }
 
-// ─── sanitizeStderr ─────────────────────────────────────────────────────────
+// --- sanitizeStderr ---
 // Rationale: Strips and truncates stderr output to 100 characters.
 
 func TestSanitizeStderr(t *testing.T) {

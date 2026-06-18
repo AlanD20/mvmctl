@@ -2,7 +2,7 @@ package guestfs
 
 import "text/template"
 
-// ── Template data structs ────────────────────────────────────────────────────
+// --- Template data structs ---
 
 type hostnameData struct {
 	Hostname string
@@ -24,7 +24,7 @@ type sshKeysData struct {
 	Keys []string
 }
 
-// ── Shell script templates ──────────────────────────────────────────────────
+// --- Shell script templates ---
 //
 // Each template produces a shell command that runs INSIDE the guest via
 // guestfish `sh "..."`. All conditionals use the guest's own tools.
@@ -137,11 +137,11 @@ done`,
 ))
 
 var deblobTmpl = template.Must(template.New("deblob").Parse(
-	`# ── Common cleanup ──
+	`# -- Common cleanup --
 rm -rf /var/log/* /tmp/* /var/tmp/* 2>/dev/null || true
 rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* 2>/dev/null || true
 find /var/log -type f -delete 2>/dev/null || true
-# ── OS-specific cache cleanup ──
+# -- OS-specific cache cleanup --
 case "$(grep ^ID= /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')" in
   alpine)
     apk cache clean 2>/dev/null || true
@@ -153,11 +153,11 @@ case "$(grep ^ID= /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"')" in
     rm -rf /var/cache/debconf/* 2>/dev/null || true
     ;;
 esac
-# ── Fix fstab (PARTUUID → /dev/vda) ──
+# -- Fix fstab (PARTUUID → /dev/vda) --
 if [ -f /etc/fstab ]; then
   sed -i 's/^PARTUUID=[^[:space:]]*/\/dev\/vda/' /etc/fstab 2>/dev/null || true
 fi
-# ── Mask slow services ──
+# -- Mask slow services --
 for svc in \
   systemd-resolved systemd-networkd systemd-networkd-wait-online \
   systemd-journal-flush systemd-tmpfiles-setup \

@@ -6,11 +6,9 @@ import (
 	"text/template"
 )
 
-// RenderTemplate renders a template using Python's str.format(**vars) syntax.
-// Variable placeholders use {key} syntax.
+// RenderTemplate renders a template with {key} placeholders.
 // If a variable referenced in the template is missing from vars, an error is returned.
-// Supports {{ → { and }} → } escape sequences (like Python's {{ and }}).
-// Mirrors Python's mvmctl.utils.template.render_template().
+// Supports {{ → { and }} → } escape sequences.
 func RenderTemplate(tmpl string, vars map[string]string) (string, error) {
 	const (
 		braceOpenSentinel  = "\x00OPEN\x00"
@@ -58,7 +56,6 @@ func findMissingPlaceholders(s string) []string {
 }
 
 // Dedent removes common leading whitespace from all non-empty lines.
-// Matches Python's textwrap.dedent().
 func Dedent(text string) string {
 	lines := strings.Split(text, "\n")
 	if len(lines) == 0 {

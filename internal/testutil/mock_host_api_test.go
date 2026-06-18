@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/results"
 )
 
-// ─── MockHostAPI ───────────────────────────────────────────────────────────────
+// --- MockHostAPI ---------------------------------------------------------------
 // Rationale: MockHostAPI implements api.HostAPI for testing. These tests verify
 // default zero-value returns and custom function routing.
 

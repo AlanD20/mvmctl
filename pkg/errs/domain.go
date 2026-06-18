@@ -1,13 +1,13 @@
 // Package errs provides the single error type for the entire mvmctl project.
 //
-// ── Error flow ──────────────────────────────────────────────────────────
+// --- Error flow ---
 //
-//  1. Core domain/services create errors via errs.New / Wrap / WrapMsg
-//  2. API layer orchestrates multiple domains, returning errors to CLI
-//  3. CLI renders errors for the user
-//  4. Enricher uses errors.As + IsMVMError() for soft-fail during enrichment
+// 1. Core domain/services create errors via errs.New / Wrap / WrapMsg
+// 2. API layer orchestrates multiple domains, returning errors to CLI
+// 3. CLI renders errors for the user
+// 4. Enricher uses errors.As + IsMVMError() for soft-fail during enrichment
 //
-// ── Creating errors ────────────────────────────────────────────────────
+// --- Creating errors ---
 //
 //	// Simple error — Class and Op auto-derived from Code
 //	errs.New(errs.CodeVMNotFound, "VM not found: my-vm")
@@ -20,13 +20,13 @@
 //
 //	// With structured details
 //	errs.New(errs.CodeRootPartitionDetection, "no candidates",
-//	    errs.WithDetails(map[string]any{"partitions": parts}))
+//	    errs.WithDetails(map[string]any{"partitions": parts})
 //
 //	// Override auto-derived Class
 //	errs.New(errs.CodePrivilegeRequired, "need sudo",
-//	    errs.WithClass(errs.ClassNeedsInteraction))
+//	    errs.WithClass(errs.ClassNeedsInteraction)
 //
-// ── Checking errors ────────────────────────────────────────────────────
+// --- Checking errors ---
 //
 //	var de *DomainError
 //	if errors.As(err, &de) {
@@ -39,12 +39,12 @@
 //	if errs.IsNotFound(err) { ... }
 //	if errs.IsRetryable(err) { ... }
 //
-// ── Rules ──────────────────────────────────────────────────────────────
+// --- Rules ---
 //
-//   - Do NOT create new error types. Always use DomainError.
-//   - Do NOT create new factory functions. Use New / Wrap / WrapMsg.
-//   - Use struct literal &DomainError{...} only when you need to set
-//     fields that aren't covered by the helpers (rare edge cases).
+// - Do NOT create new error types. Always use DomainError.
+// - Do NOT create new factory functions. Use New / Wrap / WrapMsg.
+// - Use struct literal &DomainError{...} only when you need to set
+// fields that aren't covered by the helpers (rare edge cases).
 package errs
 
 import (
@@ -54,7 +54,7 @@ import (
 	"runtime/debug"
 )
 
-// ── Error classification ────────────────────────────────────────────────
+// --- Error classification ---
 
 // Class categorises an error semantically, independent of its Code.
 type Class int
@@ -68,7 +68,7 @@ const (
 	ClassNeedsInteraction              // Needs user action (sudo, confirmation, etc.)
 )
 
-// ── Code → Class / Op lookup tables ────────────────────────────────────
+// --- Code -> Class / Op lookup tables ---
 
 // classForCode returns the canonical Class for a given Code.
 // Every Code has a fixed Class to ensure consistency.
@@ -88,7 +88,7 @@ func opForCode(code Code) string {
 }
 
 var codeClassMap = map[Code]Class{
-	// ── VM domain ──
+	// --- VM domain ---
 	CodeVMNotFound:           ClassValidation,
 	CodeVMAlreadyExists:      ClassConflict,
 	CodeVMStateInvalid:       ClassValidation,
@@ -107,7 +107,7 @@ var codeClassMap = map[Code]Class{
 	CodeVMSnapshotFailed:     ClassInternal,
 	CodeVMLoadSnapshotFailed: ClassInternal,
 
-	// ── Network domain ──
+	// --- Network domain ---
 	CodeNetworkSubnetOverlap:       ClassValidation,
 	CodeNetworkNotFound:            ClassValidation,
 	CodeNetworkAlreadyExists:       ClassConflict,
@@ -121,7 +121,7 @@ var codeClassMap = map[Code]Class{
 	CodeNetworkDefaultSetFailed:    ClassInternal,
 	CodeNetworkDefaultCreateFailed: ClassInternal,
 
-	// ── Image domain ──
+	// --- Image domain ---
 	CodeImageNotFound:           ClassValidation,
 	CodeImageAlreadyExists:      ClassConflict,
 	CodeImagePullFailed:         ClassInternal,
@@ -138,7 +138,7 @@ var codeClassMap = map[Code]Class{
 	CodeImageAcquireFailed:      ClassInternal,
 	CodeImageWarmFailed:         ClassInternal,
 
-	// ── Kernel domain ──
+	// --- Kernel domain ---
 	CodeKernelNotFound:         ClassValidation,
 	CodeKernelBuildFailed:      ClassRetryable,
 	CodeKernelConfigFailed:     ClassInternal,
@@ -146,7 +146,7 @@ var codeClassMap = map[Code]Class{
 	CodeKernelImportFailed:     ClassInternal,
 	CodeKernelDefaultSetFailed: ClassInternal,
 
-	// ── Binary domain ──
+	// --- Binary domain ---
 	CodeBinaryNotFound:            ClassValidation,
 	CodeBinaryAlreadyExists:       ClassConflict,
 	CodeBinaryVersionGate:         ClassValidation,
@@ -157,13 +157,13 @@ var codeClassMap = map[Code]Class{
 	CodeBinaryEnsureDefaultFailed: ClassInternal,
 	CodeBinaryNoCIVersion:         ClassValidation,
 
-	// ── Volume domain ──
+	// --- Volume domain ---
 	CodeVolumeNotFound:      ClassValidation,
 	CodeVolumeAlreadyExists: ClassConflict,
 	CodeVolumeError:         ClassInternal,
 	CodeVolumeResizeFailed:  ClassInternal,
 
-	// ── Key domain ──
+	// --- Key domain ---
 	CodeKeyNotFound:            ClassValidation,
 	CodeKeyAlreadyExists:       ClassConflict,
 	CodeKeyExportFailed:        ClassValidation,
@@ -173,7 +173,7 @@ var codeClassMap = map[Code]Class{
 	CodeKeyDefaultSetFailed:    ClassInternal,
 	CodeKeyDefaultsClearFailed: ClassInternal,
 
-	// ── Host domain ──
+	// --- Host domain ---
 	CodeHostInitFailed:     ClassInternal,
 	CodeHostCleanFailed:    ClassInternal,
 	CodeHostResetFailed:    ClassInternal,
@@ -182,7 +182,7 @@ var codeClassMap = map[Code]Class{
 	CodeHostInfoFailed:     ClassInternal,
 	CodeHostCapacityFailed: ClassInternal,
 
-	// ── Cloud-init domain ──
+	// --- Cloud-init domain ---
 	CodeCloudInitProvisionFailed: ClassInternal,
 	CodeCloudInitNetModeFailed:   ClassInternal,
 	CodeCloudInitISOModeFailed:   ClassInternal,
@@ -190,32 +190,32 @@ var codeClassMap = map[Code]Class{
 	CodeCloudInitModeError:       ClassValidation,
 	CodeCloudInitOffModeError:    ClassInternal,
 
-	// ── Console domain ──
+	// --- Console domain ---
 	CodeConsoleRelayFailed: ClassInternal,
 	CodeConsoleNotRunning:  ClassValidation,
 	CodeConsoleKillFailed:  ClassInternal,
 
-	// ── Logs domain ──
+	// --- Logs domain ---
 	CodeLogsError: ClassInternal,
 
-	// ── Firecracker domain ──
+	// --- Firecracker domain ---
 	CodeFirecrackerError:          ClassInternal,
 	CodeFirecrackerClientError:    ClassInternal,
 	CodeFirecrackerSpawnError:     ClassInternal,
 	CodeFirecrackerConfigError:    ClassValidation,
 	CodeFirecrackerSocketNotFound: ClassValidation,
 
-	// ── GuestFS domain ──
+	// --- GuestFS domain ---
 	CodeGuestfsError:        ClassInternal,
 	CodeGuestfsNotAvailable: ClassInternal,
 	CodeGuestfsWriteError:   ClassInternal,
 
-	// ── LoopMount domain ──
+	// --- LoopMount domain ---
 	CodeLoopMountError:          ClassInternal,
 	CodeLoopMountBinaryNotFound: ClassValidation,
 	CodeLoopMountTimeout:        ClassRetryable,
 
-	// ── SSH / CP domain ──
+	// --- SSH / CP domain ---
 	CodeSSHError:              ClassInternal,
 	CodeCPError:               ClassInternal,
 	CodeCPSourceNotFound:      ClassValidation,
@@ -230,17 +230,17 @@ var codeClassMap = map[Code]Class{
 	CodeCPVMNoIP:              ClassInternal,
 	CodeCPVMNotFound:          ClassValidation,
 
-	// ── Vsock domain ──
+	// --- Vsock domain ---
 	CodeVsockUpgradeInProgress: ClassConflict,
 
-	// ── BundledAsset domain ──
+	// --- BundledAsset domain ---
 	CodeBundledAssetError:    ClassInternal,
 	CodeBundledAssetNotFound: ClassValidation,
 
-	// ── Cache ──
+	// --- Cache ---
 	CodeCacheCleanFailed: ClassInternal,
 
-	// ── Common ──
+	// --- Common ---
 	CodeNetworkError:         ClassInternal,
 	CodeKeyError:             ClassInternal,
 	CodeVersionResolveFailed: ClassInternal,
@@ -405,7 +405,7 @@ var codeOpMap = map[Code]string{
 	CodeNotImplemented:       "",
 }
 
-// ── DomainError ─────────────────────────────────────────────────────────
+// --- DomainError ---
 
 // DomainError is the single error type for the entire project.
 // Every error in the system is a *DomainError.
@@ -428,7 +428,7 @@ func (e *DomainError) Error() string {
 // Unwrap returns the wrapped error, enabling errors.Is/As chain walking.
 func (e *DomainError) Unwrap() error { return e.Err }
 
-// ── Options ──────────────────────────────────────────────────────────────
+// --- Options ---
 
 // ErrorOption configures a DomainError during construction.
 type ErrorOption func(*DomainError)
@@ -454,7 +454,7 @@ func WithDetails(details map[string]any) ErrorOption {
 	}
 }
 
-// ── Constructors ────────────────────────────────────────────────────────
+// --- Constructors ---
 
 // New creates a DomainError with the given code and message.
 // Class and Op are auto-derived from Code via lookup tables.
@@ -551,7 +551,7 @@ func AsType[T error](err error) (T, bool) {
 	return target, false
 }
 
-// ── Internal helpers ────────────────────────────────────────────────────
+// --- Internal helpers ---
 
 // AsDomainError extracts a *DomainError from an error chain.
 // Returns nil if err is nil or doesn't unwrap to a DomainError.
@@ -571,7 +571,7 @@ func classFrom(err error) Class {
 	return ClassUnknown
 }
 
-// ── Check helpers ───────────────────────────────────────────────────────
+// --- Check helpers ---
 
 // IsNotFound checks if an error is a "not found" domain error.
 func IsNotFound(err error) bool {
@@ -604,7 +604,7 @@ func IsNeedsInteraction(err error) bool {
 	return false
 }
 
-// ── Formatting ──────────────────────────────────────────────────────────
+// --- Formatting ---
 
 // FormatExceptionDebug formats an error for debug output, optionally
 // including a full stack trace.

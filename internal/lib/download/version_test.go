@@ -6,7 +6,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// ─── resolveVersion ──────────────────────────────────────────────────────────
+// --- resolveVersion ---
 // Rationale: resolveVersion is the core version resolution logic for Apache
 // directory listings. It handles skip patterns, codename mappings, version
 // prefixes, and fallback passthrough. A bug would cause incorrect or missing
@@ -110,7 +110,7 @@ func TestResolveVersion(t *testing.T) {
 	}
 }
 
-// ─── parseDirectoryListing ──────────────────────────────────────────────────
+// --- parseDirectoryListing ---
 // Rationale: parseDirectoryListing extracts directory names from Apache-style
 // HTML directory listings using href="<dir>/" patterns. Dedup is applied so
 // duplicate entries don't cause duplicate versions.
@@ -164,7 +164,7 @@ func TestParseDirectoryListing(t *testing.T) {
 	}
 }
 
-// ─── extractAllHrefs ─────────────────────────────────────────────────────────
+// --- extractAllHrefs ---
 // Rationale: extractAllHrefs extracts all href attribute values from arbitrary
 // HTML. Used by file discovery in directory listings where file links may not
 // end with "/".
@@ -210,7 +210,7 @@ func TestExtractAllHrefs(t *testing.T) {
 	}
 }
 
-// ─── versionSortKey ──────────────────────────────────────────────────────────
+// --- versionSortKey ---
 // Rationale: versionSortKey converts a dotted version string to a []int for
 // sort.Slice comparison. Non-numeric parts or empty strings produce [0] so
 // they sort before valid versions. Used to order versions newest-first.

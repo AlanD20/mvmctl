@@ -13,7 +13,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── NewClient ─────────────────────────────────────────────────────────────
+// --- NewClient ---
 // Rationale: NewClient constructs a Client from a VsockConfigItem. If the
 // item reference is not stored, Exec/Shell/Teardown would have no state.
 
@@ -26,7 +26,7 @@ func TestNewClient(t *testing.T) {
 	require.NotNil(t, client)
 }
 
-// ─── Teardown ──────────────────────────────────────────────────────────────
+// --- Teardown ---
 // Rationale: Teardown removes the UDS socket file during VM cleanup. If it
 // fails to remove the file or errors on non-existent files, VM cleanup is
 // broken — stale sockets accumulate or cleanup fails spuriously.

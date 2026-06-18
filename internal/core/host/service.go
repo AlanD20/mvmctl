@@ -19,7 +19,7 @@ import (
 const sysctlKey = "net.ipv4.ip_forward"
 const sysctlConfPath = infra.DefaultSysctlConfPath
 
-// ── Service ──
+// --- Service ---
 type Service struct {
 	repo Repository
 }
@@ -28,7 +28,7 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
-// ── EnableIPForward ──
+// --- EnableIPForward ---
 func EnableIPForward(ctx context.Context) (*model.HostStateChangeItem, error) {
 	current, err := GetIPForwardStatus(ctx)
 	if err != nil {
@@ -59,7 +59,7 @@ func EnableIPForward(ctx context.Context) (*model.HostStateChangeItem, error) {
 	}, nil
 }
 
-// ── PersistSysctl ──
+// --- PersistSysctl ---
 func PersistSysctl(ctx context.Context) (*model.HostStateChangeItem, error) {
 	content := fmt.Sprintf("%s = 1\n", sysctlKey)
 
@@ -103,7 +103,7 @@ func PersistSysctl(ctx context.Context) (*model.HostStateChangeItem, error) {
 	}, nil
 }
 
-// ── loadModule ──
+// --- loadModule ---
 func (s *Service) loadModule(
 	ctx context.Context,
 	module string,
@@ -134,8 +134,7 @@ func (s *Service) loadModule(
 	return change, nil
 }
 
-// ── EnsureKVMModules ──
-// Matches Python's HostService.ensure_kvm_modules() exactly.
+// --- EnsureKVMModules ---
 func (s *Service) EnsureKVMModules(
 	ctx context.Context,
 	sessionID string,
@@ -208,8 +207,7 @@ func (s *Service) EnsureKVMModules(
 	return changes, nextOrder, nil
 }
 
-// ── DetectAndSaveCapacity ──
-// Matches Python's HostService.detect_and_save_capacity().
+// --- DetectAndSaveCapacity ---
 func (s *Service) DetectAndSaveCapacity(ctx context.Context) (*model.HostHardware, *model.HostLimits, error) {
 	hardware, err := DetectHardware()
 	if err != nil {
@@ -258,8 +256,7 @@ func (s *Service) DetectAndSaveCapacity(ctx context.Context) (*model.HostHardwar
 	return hardware, limits, nil
 }
 
-// ── RestoreState ──
-// Matches Python's HostService.restore_state() exactly.
+// --- RestoreState ---
 func (s *Service) RestoreState(ctx context.Context) ([]*model.HostStateChangeItem, error) {
 	_, err := s.repo.InitializeState(ctx)
 	if err != nil {

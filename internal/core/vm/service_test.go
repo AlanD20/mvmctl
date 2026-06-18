@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Controller: Pause state machine ─────────────────────────────────────────
+// --- Controller: Pause state machine -----------------------------------------
 // Rationale: Pause must reject invalid transitions with specific error messages
 // and be idempotent when already paused. Error paths cover starting, stopped,
 // stopping, error, and crashed states.
@@ -73,7 +73,7 @@ func TestController_Pause_stateTransitions(t *testing.T) {
 	})
 }
 
-// ─── Controller: Resume state machine ────────────────────────────────────────
+// --- Controller: Resume state machine ----------------------------------------
 // Rationale: Resume must reject invalid transitions and be idempotent when
 // already running.
 
@@ -117,7 +117,7 @@ func TestController_Resume_stateTransitions(t *testing.T) {
 	})
 }
 
-// ─── Controller: Start state machine ─────────────────────────────────────────
+// --- Controller: Start state machine -----------------------------------------
 // Rationale: Start must reject invalid transitions and be idempotent when
 // already running.
 
@@ -159,7 +159,7 @@ func TestController_Start_stateTransitions(t *testing.T) {
 	})
 }
 
-// ─── Controller: Stop idempotency ───────────────────────────────────────────
+// --- Controller: Stop idempotency -------------------------------------------
 // Rationale: Stop on non-running VMs (pid=0) must return nil immediately
 // without touching the repo. This is the most common error path.
 
@@ -189,7 +189,7 @@ func TestController_Stop_idempotent(t *testing.T) {
 	}
 }
 
-// ─── Controller: Snapshot state validation ───────────────────────────────────
+// --- Controller: Snapshot state validation -----------------------------------
 // Rationale: Snapshot must reject invalid states with specific messages.
 
 func TestController_Snapshot_stateValidation(t *testing.T) {
@@ -247,7 +247,7 @@ func TestController_Snapshot_stateValidation(t *testing.T) {
 	})
 }
 
-// ─── Service: Single-VM delegation ──────────────────────────────────────────
+// --- Service: Single-VM delegation ------------------------------------------
 // Rationale: Service.Stop/Start/Pause/Resume delegate to Controller.
 // Verified by checking state machine rules through Service.
 
@@ -296,7 +296,7 @@ func TestService_Stop(t *testing.T) {
 	})
 }
 
-// ─── Service: Bulk operations ────────────────────────────────────────────────
+// --- Service: Bulk operations ------------------------------------------------
 // Rationale: StopMany must process all VMs and collect errors.
 
 func TestService_StopMany(t *testing.T) {
@@ -348,7 +348,7 @@ func TestService_StopMany(t *testing.T) {
 	})
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers -----------------------------------------------------------------
 
 // ctrlFor creates a Controller with a VM in the given status.
 // PID=0, no socket — ensures only state-machine paths are hit.

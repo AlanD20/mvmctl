@@ -21,8 +21,7 @@ import (
 )
 
 // imageImportExtensionOrder defines the priority order for auto-detecting
-// image format from filename extension. Must match Python's
-// IMAGE_IMPORT_FORMAT_MAP iteration order for backwards compatibility.
+// image format from filename extension.
 var imageImportExtensionOrder = []string{
 	".qcow2",
 	".raw",
@@ -83,7 +82,7 @@ func NewImageCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Command 
 	return cmd
 }
 
-// ─── ls ──────────────────────────────────────────────────────────────────────
+// --- ls ---
 
 func newImageListCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var (
@@ -165,7 +164,7 @@ func printLocalImages(
 	common.RenderListing(images, imageColumns, style)
 }
 
-// ─── pull ────────────────────────────────────────────────────────────────────
+// --- pull ---
 
 func newImagePullCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
@@ -199,7 +198,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 				}
 			}
 
-			// Match Python: if image_type is None (not explicitly set), parse selector for type:version
+			// If --type is not explicitly set, parse selector for type:version
 			typeFlag := cmd.Flags().Lookup("type")
 			typeExplicitlySet := typeFlag != nil && typeFlag.Changed
 
@@ -265,7 +264,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 	return cmd
 }
 
-// ─── rm ──────────────────────────────────────────────────────────────────────
+// --- rm ---
 
 func newImageRemoveCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var force bool
@@ -307,7 +306,7 @@ Examples:
 	return cmd
 }
 
-// ─── inspect ─────────────────────────────────────────────────────────────────
+// --- inspect ---
 
 func newImageInspectCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var jsonOutput bool
@@ -354,7 +353,7 @@ Examples:
 	return cmd
 }
 
-// ─── default ─────────────────────────────────────────────────────────────────
+// --- default ---
 
 func newImageDefaultCmd(imageAPI api.ImageAPI) *cobra.Command {
 	cmd := &cobra.Command{
@@ -376,7 +375,7 @@ func newImageDefaultCmd(imageAPI api.ImageAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── import ──────────────────────────────────────────────────────────────────
+// --- import ---
 
 func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
@@ -423,13 +422,10 @@ Examples:
 			}
 
 			// Auto-detect format from extension if not explicitly set.
-			// Matches Python: if format is None or format == "auto":
-			//   fname = source_path.name.lower()
-			//   format = next((fmt for ext, fmt in IMAGE_IMPORT_FORMAT_MAP.items() if fname.endswith(ext)), None)
 			formatFlag := cmd.Flags().Lookup("format")
 			formatExplicitlySet := formatFlag != nil && formatFlag.Changed
 			if !formatExplicitlySet || format == "auto" {
-				// Use the centralized format map for values but iterate in Python-compatible order.
+				// Use the centralized format map with ordered extension priority.
 				fname := strings.ToLower(filepath.Base(sourcePath))
 				found := false
 				for _, ext := range imageImportExtensionOrder {
@@ -497,7 +493,7 @@ Examples:
 	return cmd
 }
 
-// ─── warm ────────────────────────────────────────────────────────────────────
+// --- warm ---
 
 func newImageWarmCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
@@ -530,9 +526,8 @@ Examples:
 				imageID = args[0]
 			}
 
-			// Match Python behavior:
-			//   if image_id is not None: warm specific image
-			//   else: warm all (defaults to all=True when no argument given)
+			// If image_id is provided, warm that specific image.
+			// Otherwise warm all images (defaults to all when no argument given).
 			prog := common.NewProgress()
 			prog.Start("Warming images...")
 			var paths []string
@@ -556,15 +551,13 @@ Examples:
 				return warmErr
 			}
 
-			// Match Python:  display_name = image_id or "all images"
 			displayName := imageID
 			if displayName == "" {
 				displayName = "all images"
 			}
 
 			for _, p := range paths {
-				// Match Python: size_str = mvm_cli.format_size(path.stat().st_size)
-				// Python would raise an exception if path.stat() fails — let error propagate.
+				// Let error propagate if path.Stat() fails.
 				info, err := os.Stat(p)
 				if err != nil {
 					prog.Stop()

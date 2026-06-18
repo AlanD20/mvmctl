@@ -16,8 +16,7 @@ const (
 )
 
 // Backend interface for rootfs provisioning.
-// Matches the methods exposed by _LoopMountBackend and _GuestfsBackend in Python.
-// Every method takes a context.Context as the first parameter (rule #16).
+// Every method takes a context.Context as the first parameter.
 type Backend interface {
 	Resize(ctx context.Context, targetSizeBytes int64) error
 	SetHostname(ctx context.Context, hostname string) error
@@ -29,8 +28,7 @@ type Backend interface {
 	DetectOS(ctx context.Context) (string, error)
 	// Deblob queues OS cache cleanup operations.
 	// osType is the detected OS identifier (e.g. "ubuntu", "alpine", "arch").
-	// If nil, the backend should detect the OS first (matching Python's
-	// _LoopMountBackend.deblob(self, os_type=None) which calls self.detect_os()).
+	// If nil, the backend should detect the OS first.
 	// GuestfsBackend ignores osType (it detects internally).
 	Deblob(ctx context.Context, osType *string) error
 	FixFstab(ctx context.Context) error

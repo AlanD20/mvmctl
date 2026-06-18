@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// UUIDV4 generates a random UUID v4 string matching Python's str(uuid.uuid4()).
+// UUIDV4 generates a random UUID v4 string.
 func UUIDV4() string {
 	u := make([]byte, 16)
 	rand.Read(u)

@@ -2,7 +2,7 @@ package system
 
 import "syscall"
 
-// KernelRelease returns the kernel release string matching Python's os.uname().release.
+// KernelRelease returns the kernel release string from syscall.Uname.
 func KernelRelease() string {
 	var uname syscall.Utsname
 	if err := syscall.Uname(&uname); err != nil {

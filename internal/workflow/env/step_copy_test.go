@@ -16,7 +16,7 @@ import (
 	"mvmctl/pkg/api"
 )
 
-// ─── Test helpers ─────────────────────────────────────────────────────────────
+// --- Test helpers ---
 
 // newCopyStep creates a CopyStep via the registry with nil op (for tests
 // that don't exercise the Apply path).
@@ -64,7 +64,7 @@ func failingWriterCopy(err error) workflow.StateWriter {
 	}
 }
 
-// ─── CopyStep.Apply ───────────────────────────────────────────────────────────
+// --- CopyStep.Apply ---
 // Rationale: CopyStep.Apply requires a real SSH connection to execute (CPCopy),
 // so we cannot test the happy path in unit tests. We test the nil-op guard to
 // ensure callers get a clear error instead of a nil pointer dereference crash.
@@ -75,7 +75,7 @@ func TestCopyStep_Apply(t *testing.T) {
 		ctx     func() context.Context
 		wantErr string
 	}{
-		// -- Error paths FIRST --
+		// --- Error paths FIRST ---
 
 		"nil_op_rejected_at_construction": {
 			setupOp: func(_ *testing.T) api.API { return nil },
@@ -114,7 +114,7 @@ func TestCopyStep_Apply(t *testing.T) {
 	}
 }
 
-// ─── CopyStep.Destroy ─────────────────────────────────────────────────────────
+// --- CopyStep.Destroy ---
 // Rationale: CopyStep.Destroy is a no-op for teardown (file copies are
 // ephemeral), but it must handle nil op, write state for persistence, and
 // recover saved state from the parameter for workflow resumption after a crash.
@@ -128,7 +128,7 @@ func TestCopyStep_Destroy(t *testing.T) {
 		wantSource     string
 		wantWasCreated bool
 	}{
-		// -- Error paths FIRST --
+		// --- Error paths FIRST ---
 
 		"context_cancelled_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation {
@@ -142,7 +142,7 @@ func TestCopyStep_Destroy(t *testing.T) {
 			wantErr: "context canceled",
 		},
 
-		// -- Happy paths AFTER --
+		// --- Happy paths AFTER ---
 
 		"writes_state_and_returns_nil": {
 			setupOp: func(_ *testing.T) *api.Operation {
@@ -200,7 +200,7 @@ func TestCopyStep_Destroy(t *testing.T) {
 	}
 }
 
-// ─── CopyStep.Destroy write failure ───────────────────────────────────────────
+// --- CopyStep.Destroy write failure ---
 // Rationale: If the StateWriter returns an error during Destroy, the error
 // must be wrapped and propagated. Silently swallowing persistence failures
 // causes state drift on the next workflow run.
@@ -222,7 +222,7 @@ func TestCopyStep_Destroy_WriteFailure(t *testing.T) {
 		"Destroy must wrap write errors with context")
 }
 
-// ─── CopyStep.StateData ───────────────────────────────────────────────────────
+// --- CopyStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision resources.
@@ -269,7 +269,7 @@ func TestCopyStep_StateData(t *testing.T) {
 	}
 }
 
-// ─── CopyStep.SpecHash ────────────────────────────────────────────────────────
+// --- CopyStep.SpecHash ---
 // Rationale: SpecHash must be set from the original YAML spec for drift
 // detection. If the hash is empty or changes between runs, the workflow
 // engine cannot detect configuration drift.
@@ -280,7 +280,7 @@ func TestCopyStep_SpecHash(t *testing.T) {
 	assert.NotEmpty(t, hash, "SpecHash must be set from spec for drift detection")
 }
 
-// ─── CopyStep.Name and Type ──────────────────────────────────────────────────
+// --- CopyStep.Name and Type ---
 // Rationale: Name() must return "type:name" format and Type() must return
 // the step type, so that dependency resolution and registry lookups work.
 
@@ -290,7 +290,7 @@ func TestCopyStep_NameAndType(t *testing.T) {
 	assert.Equal(t, "copy", step.Type())
 }
 
-// ─── CopyStep.Dependencies ────────────────────────────────────────────────────
+// --- CopyStep.Dependencies ---
 // Rationale: When depends_on is specified in the spec, Dependencies() must
 // return those values so the DAG executor runs steps in the correct order.
 
@@ -311,7 +311,7 @@ func TestCopyStep_Dependencies(t *testing.T) {
 	assert.Equal(t, "vm:my-vm", deps[0])
 }
 
-// ─── CopyStep from spec with multi-source ─────────────────────────────────────
+// --- CopyStep from spec with multi-source ---
 // Rationale: The YAML spec allows `src` as a single string (convenience) or
 // as a list. The factory must handle both cases correctly.
 
@@ -329,7 +329,7 @@ func TestFromSpec_CopyStep_MultiSource(t *testing.T) {
 	assert.Equal(t, "copy", step.Type())
 }
 
-// ─── CopyStep from state preserves meta ───────────────────────────────────────
+// --- CopyStep from state preserves meta ---
 // Rationale: When reconstructing a step from persisted state, the meta
 // (WasCreated, SpecHash) must be preserved exactly so that subsequent
 // Destroy operations can make correct decisions.

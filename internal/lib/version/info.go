@@ -20,8 +20,7 @@ var BuildVersion string
 //	-ldflags "-X mvmctl/internal/lib/version.SourceDir=$(pwd)"
 //
 // When set, GetGitVersionInfo() starts its search from SourceDir instead of
-// os.Getwd(), matching Python's Path(__file__).parent.parent.parent which
-// always looks relative to the source file.
+// os.Getwd().
 var SourceDir string
 
 var versionOnce sync.Once
@@ -44,12 +43,12 @@ func VersionString() string {
 	return versionString
 }
 
-// GetGitVersionInfo matches Python's _get_git_version_info() in main.py lines 61-104.
+// GetGitVersionInfo returns version info from git describe/rev-parse.
 // Starts the search from SourceDir (embedded build path) or os.Getwd().
 // Returns:
-//   - Tag name if current commit is tagged
-//   - "git+<short_hash>" if not tagged
-//   - empty string if not in a git repo or git not available
+// - Tag name if current commit is tagged
+// - "git+<short_hash>" if not tagged
+// - empty string if not in a git repo or git not available
 func GetGitVersionInfo(ctx context.Context) string {
 	searchDirs := []string{}
 	if SourceDir != "" {
@@ -100,11 +99,11 @@ func runGitCmd(ctx context.Context, repoDir string, args ...string) (string, err
 	return strings.TrimSpace(result.Stdout), nil
 }
 
-// FormatVersion produces the display version string matching Python _get_version().
+// FormatVersion produces the display version string.
 // Resolution chain:
-//  1. chosenVersion (set via ldflags) — returned as-is
-//  2. If empty, use "0.1.0" as hardcoded fallback.
-//  3. Append git info unless a tag is found (tag overrides version entirely).
+// 1. chosenVersion (set via ldflags) — returned as-is
+// 2. If empty, use "0.1.0" as hardcoded fallback.
+// 3. Append git info unless a tag is found (tag overrides version entirely).
 func FormatVersion(ctx context.Context, chosenVersion string) string {
 	if chosenVersion != "" {
 		return chosenVersion
@@ -125,7 +124,6 @@ func FormatVersion(ctx context.Context, chosenVersion string) string {
 }
 
 // GetVersion returns a cached full version string with git info.
-// Matches Python's _get_version().
 func GetVersion(ctx context.Context) string {
 	versionOnce.Do(func() {
 		if BuildVersion != "" {

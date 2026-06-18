@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/results"
 )
 
-// ─── MockConsoleAPI ────────────────────────────────────────────────────────────
+// --- MockConsoleAPI ---
 // Rationale: MockConsoleAPI satisfies api.ConsoleAPI for testing upper layers.
 // Tests verify default zero returns and custom function routing.
 

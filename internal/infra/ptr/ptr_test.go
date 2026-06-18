@@ -9,10 +9,10 @@ import (
 	"mvmctl/internal/infra/ptr"
 )
 
-// ─── StrNonEmpty ─────────────────────────────────────────────────────────────
-// Rationale: StrNonEmpty converts empty strings to nil (matching Python's None
-// for empty strings). A nil vs empty distinction affects JSON serialization
-// and database writes — wrong behavior would silently misrepresent data.
+// --- StrNonEmpty ---
+// Rationale: StrNonEmpty converts empty strings to nil. A nil vs empty
+// distinction affects JSON serialization and database writes — wrong behavior
+// would silently misrepresent data.
 
 func TestStrNonEmpty(t *testing.T) {
 	t.Run("non_empty_returns_pointer", func(t *testing.T) {
@@ -33,7 +33,7 @@ func TestStrNonEmpty(t *testing.T) {
 	})
 }
 
-// ─── SafeDeref ───────────────────────────────────────────────────────────────
+// --- SafeDeref ---
 // Rationale: SafeDeref replaces nil pointer checks with a helper. Must return
 // zero value for nil and the dereferenced value for non-nil.
 
@@ -56,7 +56,7 @@ func TestSafeDeref(t *testing.T) {
 	})
 }
 
-// ─── SafeDerefInt ────────────────────────────────────────────────────────────
+// --- SafeDerefInt ---
 // Rationale: Same as SafeDeref but for int. Must distinguish nil from zero.
 
 func TestSafeDerefInt(t *testing.T) {
@@ -84,7 +84,7 @@ func TestSafeDerefInt(t *testing.T) {
 	})
 }
 
-// ─── Ptr ─────────────────────────────────────────────────────────────────────
+// --- Ptr ---
 // Rationale: Ptr returns a pointer to any value. Used for creating pointer
 // literals (Go doesn't allow &42 or &true directly). Must always return a
 // non-nil pointer to the exact value.

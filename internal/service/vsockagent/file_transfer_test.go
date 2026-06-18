@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── readFTFrame / writeFTFrame ─────────────────────────────────────────────
+// --- readFTFrame / writeFTFrame ---
 // Rationale: Binary framing is the foundation of file transfer protocol.
 // A bug here corrupts every file transfer. Must handle all payload types.
 
@@ -96,7 +96,7 @@ func TestReadFTFrame_Error(t *testing.T) {
 	})
 }
 
-// ─── JSON payload types ────────────────────────────────────────────────────
+// --- JSON payload types ---
 // Rationale: JSON field names must match the wire protocol spec. Mismatched
 // names cause silent deserialisation failures — the payload arrives but fields
 // are zero-valued. Every payload type is tested.
@@ -352,7 +352,7 @@ func TestFTDonePayloadJSON(t *testing.T) {
 	}
 }
 
-// ─── handleFTPush helpers ─────────────────────────────────────────────────
+// --- handleFTPush helpers ---
 // Rationale: The push handler is the most complex code path in file transfer.
 // The host-side simulator reads/writes binary frames and is reused across
 // all push subtests.
@@ -448,7 +448,7 @@ func pushFile(t *testing.T, host *hostFrameHelper, meta FtMetaPayload, data []by
 	_ = okMeta
 }
 
-// ─── handleFTPush ──────────────────────────────────────────────────────────
+// --- handleFTPush ---
 // Rationale: handleFTPush is the core file upload path. A bug here means
 // files are silently corrupted or not written at all. Each subtest targets
 // a specific failure mode.
@@ -865,7 +865,7 @@ func TestHandleFTPush_ContextCancelled(t *testing.T) {
 	}
 }
 
-// ─── handleFTPush — mode detection (stat-based) ───────────────────────────
+// --- handleFTPush: mode detection (stat-based) ---
 // Rationale: The agent now decides file vs directory mode via os.Stat on the
 // dest path (or trailing /). These tests verify all five code paths.
 
@@ -1073,7 +1073,7 @@ func TestHandleFTPush_MultiSourceToFile(t *testing.T) {
 	assert.True(t, os.IsNotExist(err), "no files should be written after error")
 }
 
-// ─── handleFTPull ──────────────────────────────────────────────────────────
+// --- handleFTPull ---
 // Rationale: handleFTPull reads a file from the VM filesystem and streams it
 // to the host. A bug here leaks file contents or blocks the connection.
 

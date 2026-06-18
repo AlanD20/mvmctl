@@ -13,7 +13,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── GetByVMID ─────────────────────────────────────────────────────────────
+// --- GetByVMID ---
 // Rationale: Resolver.GetByVMID is the enrichment hook for "vsock" relations.
 // If it returns wrong data or fails silently, VMs get incorrect vsock config.
 
@@ -42,7 +42,7 @@ func TestResolver_GetByVMID(t *testing.T) {
 	assert.Equal(t, item.Token, got.Token)
 }
 
-// ─── GetByVMID: Not found ──────────────────────────────────────────────────
+// --- GetByVMID: Not found ---
 // Rationale: When no vsock config exists for a VM, the resolver must return
 // a DomainError with CodeVsockNotFound so the enricher can soft-fail.
 

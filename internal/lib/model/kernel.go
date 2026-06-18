@@ -1,8 +1,8 @@
 package model
 
-// ── KernelItem ──
+// --- KernelItem ---
 
-// KernelItem corresponds to Python's KernelItem dataclass.
+// KernelItem represents a cached kernel.
 type KernelItem struct {
 	ID        string  `json:"id"                   db:"id"`
 	Name      string  `json:"name"                 db:"name"`
@@ -21,9 +21,9 @@ type KernelItem struct {
 	VMs []*VM `json:"vms,omitempty"`
 }
 
-// ── KernelPullResult ──
+// --- KernelPullResult ---
 
-// KernelPullResult corresponds to Python's KernelPullResult.
+// KernelPullResult holds the result of a kernel pull.
 type KernelPullResult struct {
 	Path         string
 	Version      string
@@ -33,9 +33,9 @@ type KernelPullResult struct {
 	InfoMessages []string
 }
 
-// ── KernelFeature ──
+// --- KernelFeature ---
 
-// KernelFeature corresponds to Python's KernelFeature.
+// KernelFeature defines an optional kernel feature with enforced config keys.
 // When a feature is selected, its Enforce map is applied on top of the
 // spec's DefaultConfigs, and each enforced key is verified in the final .config.
 type KernelFeature struct {
@@ -43,9 +43,9 @@ type KernelFeature struct {
 	Enforce map[string]string `yaml:"enforce,omitempty"`
 }
 
-// ── KernelSpec ──
+// --- KernelSpec ---
 
-// KernelSpec corresponds to Python's KernelSpec.
+// KernelSpec defines a kernel in the YAML spec.
 type KernelSpec struct {
 	Name              string                   `yaml:"name"`
 	KernelType        string                   `yaml:"kernel_type"`

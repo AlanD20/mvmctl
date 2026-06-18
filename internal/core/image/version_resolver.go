@@ -63,8 +63,7 @@ func LoadImageTypesConfig(yamlContent []byte) ([]download.ResolverConfig, error)
 }
 
 // ConstructSpecFromTypeConfig constructs an model.ImageSpec from a type config.
-// Returns nil if source URL template resolution fails (missing variables),
-// matching Python's render_template KeyError propagation.
+// Returns nil if source URL template resolution fails (missing variables).
 func ConstructSpecFromTypeConfig(
 	config download.ResolverConfig,
 	versionStr, arch string,
@@ -122,7 +121,6 @@ func ConstructSpecFromTypeConfig(
 	downloadURLTmpl := config.DownloadURL
 	source, err := infra.RenderTemplate(downloadURLTmpl, templateVars)
 	if err != nil {
-		// Python's render_template raises KeyError → propagates up to caller
 		return nil, errs.New(errs.CodeImageError, fmt.Sprintf("Failed to render download URL template: %s", err))
 	}
 

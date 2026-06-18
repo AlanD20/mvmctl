@@ -21,7 +21,6 @@ type ResolveResult struct {
 type NetworkEnrichFunc func(ctx context.Context, networks []*model.Network) ([]*model.Network, error)
 
 // Resolver resolves network identifiers.
-// Matches src/mvmctl/core/network/_resolver.py: Resolver
 type Resolver struct {
 	repo     Repository
 	include  []string
@@ -40,8 +39,6 @@ func (r *Resolver) SetEnrichFunc(fn NetworkEnrichFunc) {
 }
 
 // Enrich enriches networks with relations if include is set.
-// Matches Python's Resolver.enrich() method which calls
-// RelationEnricher().enrich(networks, self._include, self.RELATIONS).
 func (r *Resolver) enrich(ctx context.Context, networks []*model.Network) []*model.Network {
 	if r.include == nil || len(r.include) == 0 || len(networks) == 0 {
 		return networks
@@ -57,7 +54,6 @@ func (r *Resolver) enrich(ctx context.Context, networks []*model.Network) []*mod
 
 // EnrichWithRelations loads relations for a resolved network.
 // This is the public entry point for the enricher package to call.
-// Matches Python's Resolver.enrich() used by RelationEnricher.
 func (r *Resolver) EnrichWithRelations(ctx context.Context, networks []*model.Network) []*model.Network {
 	return r.enrich(ctx, networks)
 }
@@ -101,7 +97,6 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.Network, error) {
 
 func (r *Resolver) Resolve(ctx context.Context, value string) (*model.Network, error) {
 	// Try by name first, then by ID prefix
-	// Matches Python's resolve() which catches only NetworkNotFoundError
 	// from by_name — any other error (DB error, etc.) propagates immediately.
 	network, err := r.ByName(ctx, value)
 	if err == nil {
@@ -114,7 +109,6 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.Network, e
 	if err2 == nil {
 		return network, nil
 	}
-	// Python: if by_id also raises, that exception (from by_id) propagates,
 	// NOT the original by_name exception.
 	return nil, err2
 }

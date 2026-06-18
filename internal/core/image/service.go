@@ -1,3 +1,5 @@
+// Package image provides rootfs image download and management.
+// Layer: Core domain — never imports other core/* packages.
 package image
 
 import (
@@ -30,8 +32,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// Time constants matching Python's CONST_MEBIBYTE_BYTES etc.
-// ── Compression defaults ──
+// --- Compression defaults ---
 const (
 	CompressionLevel  = 3
 	CompressionFormat = "zst"
@@ -53,8 +54,7 @@ var FSCanShrink = map[string]bool{
 	"ext2": true,
 }
 
-// Service matches Python's Service in _service.py.
-// Handles image processing: compression, decompression, shrinking, format conversion, and pool management.
+// Service handles image processing: compression, decompression, shrinking, format conversion, and pool management.
 type Service struct {
 	repo Repository
 	dl   *download.Downloader
@@ -68,9 +68,7 @@ func NewService(repo Repository) *Service {
 	}
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
 // Public API
-// ──────────────────────────────────────────────────────────────────────────────
 
 // RemoveImage removes an image, handling file deletion and hard/soft delete.
 // The image must be pre-enriched with VM references by the caller.
@@ -103,7 +101,6 @@ func (s *Service) RemoveImage(ctx context.Context, image *model.ImageItem, force
 }
 
 // RemoveManyPaths removes files for multiple images from disk. No DB changes.
-// Matches Python's Service.remove_many_paths().
 func (s *Service) RemoveManyPaths(images []*model.ImageItem) []string {
 	var removed []string
 	for _, image := range images {
@@ -113,7 +110,6 @@ func (s *Service) RemoveManyPaths(images []*model.ImageItem) []string {
 }
 
 // RemoveImageFiles removes all files for an image from disk. No DB changes.
-// Matches Python's Service._remove_image_files().
 func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
 	var removed []string
 
@@ -142,7 +138,7 @@ func (s *Service) RemoveImageFiles(image *model.ImageItem) []string {
 }
 
 // ListAll lists all images, syncing is_present flag with filesystem.
-// remote controls whether to also list remote images (matches Python signature).
+// remote controls whether to also list remote images.
 func (s *Service) ListAll(ctx context.Context, remote bool, verify bool) ([]*model.ImageItem, error) {
 	images, err := s.repo.ListAll(ctx)
 	if err != nil {
@@ -195,7 +191,6 @@ func (s *Service) resolveImagePath(image *model.ImageItem) string {
 }
 
 // OptimizeImage shrinks and compresses an image. Returns fully constructed model.ImageItem and warnings.
-// Matches Python's Service.optimize_image() parameter order EXACTLY.
 func (s *Service) OptimizeImage(
 	ctx context.Context,
 	imagePath string,
@@ -215,13 +210,13 @@ func (s *Service) OptimizeImage(
 	t1 := time.Now()
 	slog.Debug("fs detect", "elapsed_seconds", t1.Sub(t0).Seconds())
 
-	// ── Single Provisioner reused across all phases ──
+	// --- Single Provisioner reused across all phases ---
 	// Each method (DetectOS, Run) creates a fresh backend session internally,
 	// so the struct itself is just shared config. Flags are cleared after Run()
 	// to keep the struct reusable.
 	p := NewProvisioner(imagePath, provisionerType, fsType)
 
-	// ── Detect OS type from the image (always, even when skipping) ──
+	// --- Detect OS type from the image (always, even when skipping) ---
 	detectedOS := ""
 	osResult, osErr := p.DetectOS(ctx)
 	if osErr == nil {
@@ -268,7 +263,7 @@ func (s *Service) OptimizeImage(
 		)
 	}
 
-	// ── Convert, deblob, shrink in a single backend session ──
+	// --- Convert, deblob, shrink in a single backend session ---
 	if fsType == "btrfs" {
 		slog.Info("Converting filesystem from btrfs to ext4...")
 		p.ConvertTo("ext4")
@@ -355,7 +350,7 @@ func (s *Service) OptimizeImage(
 }
 
 // DownloadImage downloads image from remote source. Returns path to downloaded file.
-// progress is optional (nil allowed, matching Python's progress_callback=None).
+// progress is optional (nil allowed).
 // ctx is passed through to the shared HttpDownload infrastructure for proper
 // cancellation and timeout propagation.
 func (s *Service) DownloadImage(
@@ -421,7 +416,7 @@ func (s *Service) DownloadImage(
 
 // ExtractImage extracts/converts a source image to a root filesystem.
 // Handles all formats: qcow2, vhd, vhdx, raw, tar-rootfs, squashfs.
-// partition is optional (nil = auto-detect), matching Python's partition: int | None = None.
+// partition is optional (nil = auto-detect).
 func (s *Service) ExtractImage(
 	ctx context.Context,
 	sourcePath string,
@@ -537,8 +532,7 @@ func (s *Service) EnsureCached(images []*model.ImageItem) ([]string, error) {
 }
 
 // GetSpecsFor resolves ImageSpecs from image_types config by type identifiers.
-// Matches Python's Service.get_specs_for() EXACTLY with two-phase resolution.
-// This is a package-level function (not a method) matching Python's pattern.
+// Uses two-phase resolution: fast-path for explicit versions, then version resolver.
 func GetSpecsFor(
 	ctx context.Context,
 	types []string,
@@ -562,7 +556,7 @@ func GetSpecsFor(
 	remaining := make([]string, len(types))
 	copy(remaining, types)
 
-	// ── Phase 1a: fast-path — construct from type config when version is explicit ──
+	// --- Phase 1a: fast-path -- construct from config ---
 	if version != "" && len(remaining) > 0 {
 		var newRemaining []string
 		for _, type_ := range remaining {
@@ -593,7 +587,7 @@ func GetSpecsFor(
 		remaining = newRemaining
 	}
 
-	// ── Phase 2: try version resolver for types not in flat spec_map ──
+	// --- Phase 2: try version resolver for types not in flat spec_map ---
 	if len(remaining) > 0 {
 		availableHTTPTypes := make(map[string]bool)
 		var remaining2 []string
@@ -657,8 +651,8 @@ func GetSpecsFor(
 		}
 
 		// Compute unresolved types by checking which types in the
-		// original request have no result — matching Python's `remaining`
-		// semantics where ANY type still in remaining (whether configured
+		// original request have no result — remaining semantics where
+		// any type still in remaining (whether configured
 		// or not) is an error.
 		var unresolved []string
 		typeInResults := make(map[string]bool)
@@ -709,9 +703,7 @@ func specFromVersion(v model.VersionInfo, arch string) *model.ImageSpec {
 }
 
 // ResolveRemoteSizes resolves remote image sizes via concurrent HEAD requests.
-// Matches Python's Service.resolve_remote_sizes() with max_workers=5.
-// Uses download.Downloader.HeadSize (which includes retry + cache) matching
-// Python's HttpDownload.head_size().
+// Uses download.Downloader.HeadSize (which includes retry + cache).
 func (s *Service) ResolveRemoteSizes(
 	ctx context.Context,
 	specs []*model.ImageSpec,
@@ -725,7 +717,7 @@ func (s *Service) ResolveRemoteSizes(
 			var err error
 			source, err = s.resolveSourceTemplate(ctx, sp, templateVars)
 			if err != nil {
-				return nil // Python catches Exception → return without setting size
+				return nil // catch all → return without setting size
 			}
 		} else if strings.Contains(sp.Source, "{") {
 			// Static image with template: resolve variables
@@ -734,7 +726,7 @@ func (s *Service) ResolveRemoteSizes(
 			}
 		}
 
-		// HEAD request with retry + cache — matching Python's HttpDownload.head_size()
+		// HEAD request with retry + cache
 		size, ok := s.dl.HeadSize(ctx, download.RequestOpts{
 			URL: source, Timeout: 10,
 			UseCache: true, CacheTTLSeconds: 300,
@@ -742,8 +734,7 @@ func (s *Service) ResolveRemoteSizes(
 		if ok && size >= 0 {
 			sp.Size = &size
 		}
-		// Python's resolve_remote_sizes catches all exceptions (try/except Exception)
-		// and silently skips — matching our behavior of just returning without setting size
+		// Silently skip on any error — just return without setting size
 		return nil
 	})
 
@@ -751,7 +742,6 @@ func (s *Service) ResolveRemoteSizes(
 }
 
 // compress compresses the image using in-process zstd library.
-// Matches Python's Service.compress() exactly.
 func (s *Service) compress(imagePath string, level int, keepSource bool) (string, error) {
 	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
 		return "", errs.New(
@@ -785,8 +775,7 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 		)
 	}
 
-	// Python uses Path.with_suffix(".zst") which REPLACES the existing extension.
-	// e.g. foo.img → foo.zst, not foo.img.zst
+	// Replace the existing extension with ".zst".
 	ext := filepath.Ext(imagePath)
 	compressedPath := imagePath[:len(imagePath)-len(ext)] + ".zst"
 
@@ -802,7 +791,7 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 	}
 	defer dst.Close()
 
-	// Use in-process zstd (matching Python's zstandard library)
+	// Use in-process zstd
 	compressedWriter, err := zstd.NewWriter(dst,
 		zstd.WithEncoderLevel(zstd.EncoderLevel(level)),
 		zstd.WithEncoderConcurrency(runtime.NumCPU()),
@@ -854,7 +843,6 @@ func (s *Service) compress(imagePath string, level int, keepSource bool) (string
 }
 
 // decompress decompresses the image to the specified output path using in-process zstd.
-// Matches Python's Service.decompress() exactly.
 func (s *Service) decompress(compressedPath, outputPath, compressedFormat string) error {
 	if compressedFormat == "" {
 		return errs.New(errs.CodeImageDecompressionError, "compressedFormat must be specified; got empty string")
@@ -865,8 +853,7 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 		)
 	}
 
-	// Python's decompress() calls self._validate_image_path() first, which raises
-	// ImageError (not ImageDecompressionError) if the path does not exist or is empty.
+	// Validate the compressed path exists and is non-empty first.
 	if _, err := os.Stat(compressedPath); os.IsNotExist(err) {
 		return errs.New(errs.CodeImageError, fmt.Sprintf("Image file not found: %s", compressedPath))
 	}
@@ -874,7 +861,7 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 		return errs.New(errs.CodeImageEmpty, fmt.Sprintf("Image file is empty: %s", compressedPath))
 	}
 
-	// Use in-process zstd (matching Python's zstandard library)
+	// Use in-process zstd
 	src, err := os.Open(compressedPath)
 	if err != nil {
 		return errs.New(errs.CodeImageDecompressionError, fmt.Sprintf("Failed to open compressed file: %v", err))
@@ -900,9 +887,7 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 
 	dst.Close()
 
-	// Validate output — matching Python's _validate_image_path() result handling.
-	// Python catches ImageEmptyError from _validate_image_path and re-raises as
-	// ImageDecompressionError with output_path unlinked.
+	// Validate output exists and is non-empty.
 	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
 		return errs.New(errs.CodeImageDecompressionError,
 			fmt.Sprintf("Decompression failed: output could not be verified: %s", outputPath),
@@ -924,9 +909,8 @@ func (s *Service) decompress(compressedPath, outputPath, compressedFormat string
 	return nil
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Format detection — magic bytes for 6 formats
-// ─── Format validators — matching Python's _validate_* methods exactly ──
+// Format detection -- magic bytes for 6 formats
+// --- Format validators ---
 
 func (s *Service) validateDownloadedFile(ctx context.Context, downloadedPath, imageFormat string) error {
 	if _, err := os.Stat(downloadedPath); os.IsNotExist(err) {
@@ -968,22 +952,18 @@ func (s *Service) validateDownloadedFile(ctx context.Context, downloadedPath, im
 	return nil
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
 // disk extraction
-// ──────────────────────────────────────────────────────────────────────────────
 // Extraction helpers
-// ──────────────────────────────────────────────────────────────────────────────
 
 // extractDiskImage extracts root partition from a disk image (qcow2, vhd, vhdx, raw).
 // Tries the selected backend first, falls back to loop-mount on ImageError/RuntimeError.
-// partition is optional (nil = auto-detect), matching Python's partition: int | None = None.
-// Matches Python's _extract_disk_image() EXACTLY.
+// partition is optional (nil = auto-detect).
 func (s *Service) extractDiskImage(ctx context.Context,
 	inputPath, outputPath, format string,
 	partition int, disabledDetectors []string,
 	provisionerType provisioner.ProvisionerType,
 ) (string, error) {
-	// Enforce .img suffix — matching Python's output_path.with_suffix(".img") EXACTLY.
+	// Enforce .img suffix.
 	imgPath := outputPath
 	if ext := filepath.Ext(imgPath); ext != "" {
 		imgPath = imgPath[:len(imgPath)-len(ext)] + ".img"
@@ -1212,27 +1192,23 @@ func calculateMinimumImageSizeMB(contentBytes int64) int {
 	return calculatedMiB
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
 // SHA256 verification
-// ──────────────────────────────────────────────────────────────────────────────
 
 func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, sourceFilename string) (string, error) {
-	// Use shared HttpDownload.GetContent instead of raw http.Client.Get — provides
-	// retry logic, HTTP caching, and mirror support matching Python's behavior.
-	// Python passes timeout=HTTP_TIMEOUT_SHA256_FETCH_S (30s).
-	// Python catches HttpDownloadError → returns None (no error).
+	// Use shared HttpDownload.GetContent — provides retry, HTTP caching, and mirror support.
+	// Catches HttpDownloadError → returns empty (no error).
 	content, err := s.dl.GetContent(ctx, download.RequestOpts{
 		URL: sha256URL, Timeout: infra.HTTPTimeoutSha256FetchS,
 	})
 	if err != nil {
-		return "", nil // Python catches HttpDownloadError → returns None
+		return "", nil // HttpDownloadError → returns empty
 	}
 
 	content = strings.TrimSpace(content)
 	if sourceFilename == "" {
 		parts := strings.Fields(content)
 		if len(parts) == 0 {
-			return "", nil // Python returns None when parts is empty
+			return "", nil // empty parts → returns empty
 		}
 		return strings.ToLower(parts[0]), nil
 	}
@@ -1257,7 +1233,7 @@ func (s *Service) fetchSHA256FromURL(ctx context.Context, sha256URL, sourceFilen
 			return strings.ToLower(lineParts[0]), nil
 		}
 	}
-	return "", nil // Python returns None when not found (not an error)
+	return "", nil // not found — not an error
 }
 
 func (s *Service) downloadFile(
@@ -1287,9 +1263,7 @@ func (s *Service) resolveFSType(ctx context.Context, imagePath string) (string, 
 	))
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
 // Other helpers
-// ──────────────────────────────────────────────────────────────────────────────
 
 func (s *Service) getTemplateVariables(spec *model.ImageSpec, ciVersion string) map[string]string {
 	return map[string]string{
@@ -1304,8 +1278,7 @@ func (s *Service) getTemplateVariables(spec *model.ImageSpec, ciVersion string) 
 
 // resolveSourceTemplate resolves source URL by fetching and parsing CI image list.
 // Uses the shared HttpDownload.GetContent to benefit from retry + caching.
-// Matches Python's _resolve_source_template() exactly — sorts keys alphabetically
-// before picking the last (highest) one (C05).
+// Sorts keys alphabetically before picking the last (highest) one.
 func (s *Service) resolveSourceTemplate(
 	ctx context.Context,
 	spec *model.ImageSpec,
@@ -1323,8 +1296,7 @@ func (s *Service) resolveSourceTemplate(
 
 	listURL, _ := infra.RenderTemplate(listURLTmpl, templateVars)
 
-	// Use shared HttpDownload.GetContent instead of raw http.Client.Get — provides
-	// retry logic, HTTP caching, and mirror support matching Python's behavior.
+	// Use shared HttpDownload.GetContent — provides retry, HTTP caching, and mirror support.
 	xmlContent, err := s.dl.GetContent(ctx, download.RequestOpts{
 		URL: listURL, Timeout: 30,
 	})

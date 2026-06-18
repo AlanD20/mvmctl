@@ -6,7 +6,6 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// Controller matches Python's Controller.
 type Controller struct {
 	kernel *model.KernelItem
 	repo   Repository

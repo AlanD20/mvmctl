@@ -19,7 +19,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── Test helpers ─────────────────────────────────────────────────────────────
+// --- Test helpers ---
 
 // noopProgress is a no-op progress callback for tests that don't assert on events.
 func noopProgress(_ event.Progress) {}
@@ -89,7 +89,7 @@ func newImageStep(t *testing.T, op api.ImageAPI) workflow.Step {
 	return envpkg.NewImageStep(op, "alpine", inputs.ImagePullInput{Type: "alpine", Version: "3.21"})
 }
 
-// ─── ImageStep.Apply ─────────────────────────────────────────────────────────
+// --- ImageStep.Apply ---
 // Rationale: ImageStep.Apply is the core provisioning path. A nil-op crash,
 // a missed context cancellation, or a database error swallowed as success
 // would all cause silent data loss or hung workflows.
@@ -103,7 +103,7 @@ func TestImageStep_Apply(t *testing.T) {
 		wantImageID    string
 		wantWasCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupAPI: func(_ *testing.T) api.ImageAPI { return nil },
@@ -137,7 +137,7 @@ func TestImageStep_Apply(t *testing.T) {
 			wantErr: "check image type",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"image_exists_skips_pull_and_writes_state": {
 			setupAPI: func(_ *testing.T) api.ImageAPI {
@@ -211,7 +211,7 @@ func TestImageStep_Apply(t *testing.T) {
 	}
 }
 
-// ─── ImageStep.Destroy ───────────────────────────────────────────────────────
+// --- ImageStep.Destroy ---
 // Rationale: Destroy is a no-op for images (they persist in the DB), but it
 // must still handle nil op, write state, and recover saved state from the
 // parameter for workflow resumption after a crash.
@@ -225,7 +225,7 @@ func TestImageStep_Destroy(t *testing.T) {
 		wantImageID    string
 		wantWasCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupAPI: func(_ *testing.T) api.ImageAPI { return nil },
@@ -244,7 +244,7 @@ func TestImageStep_Destroy(t *testing.T) {
 			wantErr: "context canceled",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"writes_state_and_returns_nil": {
 			setupAPI: func(_ *testing.T) api.ImageAPI {
@@ -307,7 +307,7 @@ func TestImageStep_Destroy(t *testing.T) {
 	}
 }
 
-// ─── ImageStep.StateData ─────────────────────────────────────────────────────
+// --- ImageStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision resources.
@@ -356,7 +356,7 @@ func TestImageStep_StateData(t *testing.T) {
 	}
 }
 
-// ─── ImageStep.StateData write-failure propagation ────────────────────────────
+// --- ImageStep.StateData write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Apply and Destroy must
 // propagate it rather than silently swallowing the persistence failure.
 

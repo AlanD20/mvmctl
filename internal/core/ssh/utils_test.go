@@ -6,7 +6,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// ─── buildSSHOpts ────────────────────────────────────────────────────────────
+// --- buildSSHOpts ---
 // Rationale: buildSSHOpts constructs the base SSH argument list. It must
 // always include security hardening flags and conditionally add the identity
 // file and connect timeout. Empty IP or user may produce a syntactically

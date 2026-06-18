@@ -11,8 +11,7 @@ import (
 )
 
 // NetworkRepo is an in-memory network repository for testing.
-// Matches Python's mvmctl.core.network._repository.Repository exactly,
-// including soft-delete filtering (deleted_at IS NULL, is_present = 1).
+// Includes soft-delete filtering (deleted_at IS NULL, is_present = 1).
 type NetworkRepo struct {
 	mu       sync.RWMutex
 	networks map[string]*model.Network
@@ -25,12 +24,11 @@ func NewNetworkRepo() *NetworkRepo {
 }
 
 // isNotDeleted returns true if the network is NOT soft-deleted.
-// Matches Python's WHERE deleted_at IS NULL AND is_present = 1.
 func (r *NetworkRepo) isNotDeleted(n *model.Network) bool {
 	return n.DeletedAt == nil && n.IsPresent
 }
 
-// Get returns a network by ID. Returns nil if soft-deleted (Python: WHERE deleted_at IS NULL AND is_present = 1).
+// Get returns a network by ID. Returns nil if soft-deleted.
 func (r *NetworkRepo) Get(_ context.Context, id string) (*model.Network, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -69,7 +67,7 @@ func (r *NetworkRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.N
 	return result, nil
 }
 
-// Count returns total count of all non-deleted networks (Python: WHERE deleted_at IS NULL).
+// Count returns total count of all non-deleted networks.
 func (r *NetworkRepo) Count(_ context.Context) (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -82,7 +80,7 @@ func (r *NetworkRepo) Count(_ context.Context) (int, error) {
 	return count, nil
 }
 
-// ListAll returns all non-deleted networks ordered by created_at (Python: WHERE deleted_at IS NULL AND is_present = 1 ORDER BY created_at).
+// ListAll returns all non-deleted networks ordered by created_at.
 func (r *NetworkRepo) ListAll(_ context.Context) ([]*model.Network, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -114,24 +112,24 @@ func (r *NetworkRepo) UpdateBridgeActive(_ context.Context, networkID string, ac
 	return nil
 }
 
-// SetDefault sets one network as default, clearing all others atomically (Python: BEGIN/COMMIT transaction).
+// SetDefault sets one network as default, clearing all others atomically.
 func (r *NetworkRepo) SetDefault(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Match Python: UPDATE networks SET is_default = 0 WHERE deleted_at IS NULL
+	// Clear existing defaults
 	for _, n := range r.networks {
 		if n.DeletedAt == nil {
 			n.IsDefault = false
 		}
 	}
-	// Match Python: UPDATE networks SET is_default = 1 WHERE id = ? AND deleted_at IS NULL
+	// Set new default
 	if n, ok := r.networks[id]; ok && n.DeletedAt == nil {
 		n.IsDefault = true
 	}
 	return nil
 }
 
-// GetDefault returns the default network entry, or nil if not set (Python: WHERE is_default = 1 AND deleted_at IS NULL AND is_present = 1).
+// GetDefault returns the default network entry, or nil if not set.
 func (r *NetworkRepo) GetDefault(_ context.Context) (*model.Network, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -154,12 +152,12 @@ func (r *NetworkRepo) UpdateManyIsPresent(_ context.Context, networkIDs []string
 	return nil
 }
 
-// SoftDelete marks a network as deleted with timestamp (Python: datetime.now(tz=UTC).isoformat()).
+// SoftDelete marks a network as deleted with timestamp.
 func (r *NetworkRepo) SoftDelete(_ context.Context, networkID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if n, ok := r.networks[networkID]; ok {
-		// Match Python's datetime.now(tz=UTC).isoformat() output, e.g. "2024-01-15T10:30:00.123456+00:00"
+		// Use RFC3339 timestamp
 		now := time.Now().UTC().Format(time.RFC3339)
 		n.IsPresent = false
 		n.DeletedAt = &now

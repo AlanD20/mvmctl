@@ -1,3 +1,5 @@
+// Package binary provides Firecracker/jailer binary version management.
+// Layer: Core domain — never imports other core/* packages.
 package binary
 
 import (
@@ -6,7 +8,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// Controller matches Python's BinaryController.
+// Controller binds a resolved binary item to its repository for state management.
 type Controller struct {
 	binary *model.BinaryItem
 	repo   Repository

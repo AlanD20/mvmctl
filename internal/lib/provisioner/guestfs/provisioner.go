@@ -18,7 +18,7 @@ import (
 
 var pc = provcontent.Builder{}
 
-// ── ProvisioningConfig ───────────────────────────────────────────────────────
+// --- ProvisioningConfig ---
 
 // ProvisioningConfig describes an entire provisioning operation.
 // Pass to RunDeferred — no builder pattern, one shot, two guestfish sessions.
@@ -45,9 +45,7 @@ type ProvisioningConfig struct {
 	CustomOps        []provcontent.Operation // arbitrary FileOp/ChrootOp ops queued via ApplyOps
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// RunDeferred — one-shot provisioning, two guestfish sessions
-// ═════════════════════════════════════════════════════════════════════════════
+// --- RunDeferred -- one-shot, two guestfish sessions ---
 
 // RunDeferred executes all provisioning operations in a single guestfish session
 // (plus one pre-read session for root device detection).
@@ -140,9 +138,7 @@ func RunDeferred(ctx context.Context, cfg ProvisioningConfig) error {
 	return nil
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Script builder
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Script builder ---
 
 func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tmpDir string) ([]string, error) {
 	var cmds []string
@@ -359,9 +355,7 @@ func buildFileOps(tmpDir string) []string {
 	return cmds
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Helpers
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Helpers ---
 
 // detectRootDevice detects the root device by running guestfish list-filesystems.
 func detectRootDevice(ctx context.Context, rootfsPath string) (string, error) {

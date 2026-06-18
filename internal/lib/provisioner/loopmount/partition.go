@@ -7,7 +7,7 @@ const (
 	partedTimeout       = 15 * time.Second
 )
 
-// ── Partition parsing types (used by sfdisk/parted parsers) ──
+// --- Partition parsing types (sfdisk/parted) ---
 
 // partitionEntry represents a parsed partition entry from sfdisk or parted.
 type partitionEntry struct {
@@ -28,5 +28,4 @@ type parseResult struct {
 }
 
 // noPartitionTableSentinel is the package-private "no partition table" marker.
-// Matches Python's _NO_PARTITION_TABLE singleton.
 var noPartitionTableSentinel = &parseResult{noPartitionTable: true}
