@@ -1,23 +1,24 @@
 //go:build amd64
 
-//go:generate touch agent-linux-amd64.gz
+//go:generate touch agent-linux-amd64.zst
 
 package vsockagent
 
 import (
 	"bytes"
-	"compress/gzip"
 	_ "embed"
 	"io"
 	"log/slog"
 	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
-// Pre-compiled guest agent binary for the host architecture (gzip-compressed).
+// Pre-compiled guest agent binary for the host architecture (zstd-compressed).
 // Built by scripts/build.sh and embedded at compile time.
 //
-//go:embed agent-linux-amd64.gz
-var agentBinaryGZ []byte
+//go:embed agent-linux-amd64.zst
+var agentBinaryZST []byte
 
 var (
 	agentBinaryOnce sync.Once
@@ -25,16 +26,16 @@ var (
 )
 
 // AgentBinary returns the pre-compiled vsock guest agent binary for the
-// host architecture. The binary is embedded as gzip and decompressed once
+// host architecture. The binary is embedded as zstd and decompressed once
 // on first call, saving ~60% in embedded binary size.
 func AgentBinary() []byte {
 	agentBinaryOnce.Do(func() {
-		if len(agentBinaryGZ) == 0 {
+		if len(agentBinaryZST) == 0 {
 			return
 		}
-		r, err := gzip.NewReader(bytes.NewReader(agentBinaryGZ))
+		r, err := zstd.NewReader(bytes.NewReader(agentBinaryZST))
 		if err != nil {
-			slog.Error("vsockagent: failed to create gzip reader", "error", err)
+			slog.Error("vsockagent: failed to create zstd reader", "error", err)
 			return
 		}
 		defer r.Close()
