@@ -10,12 +10,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// --- isConnRefused ---------------------------------------------------------
+// --- isConnRefused ---
 // Rationale: Connection-refused detection drives the Firecracker client
 // retry loop (5 retries with exponential backoff). A false negative drops
 // retries prematurely; a false positive retries on unrelated errors,
 // delaying failure reporting.
-//
 // Note: This test is in an internal package (package vm, not vm_test) because
 // isConnRefused is unexported. External test packages cannot access it.
 

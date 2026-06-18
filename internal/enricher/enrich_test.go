@@ -43,7 +43,7 @@ func TestEnrichVM_Kernel(t *testing.T) {
 		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{{ID: "vm-1", KernelID: "k-1"}}
+	vms := []*model.VMItem{{ID: "vm-1", KernelID: "k-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "kernel"))
 
 	require.NotNil(t, vms[0].Kernel)
@@ -61,7 +61,7 @@ func TestEnrichVM_Image(t *testing.T) {
 		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{{ID: "vm-1", ImageID: "img-1"}}
+	vms := []*model.VMItem{{ID: "vm-1", ImageID: "img-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "image"))
 
 	require.NotNil(t, vms[0].Image)
@@ -78,7 +78,7 @@ func TestEnrichVM_Binary(t *testing.T) {
 		testutil.NewKernelRepo(), bin, testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{{ID: "vm-1", BinaryID: "b-1"}}
+	vms := []*model.VMItem{{ID: "vm-1", BinaryID: "b-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "binary"))
 
 	require.NotNil(t, vms[0].Binary)
@@ -87,7 +87,7 @@ func TestEnrichVM_Binary(t *testing.T) {
 
 func TestEnrichVM_Network(t *testing.T) {
 	net := testutil.NewNetworkRepo()
-	require.NoError(t, net.Upsert(ctx, &model.Network{ID: "net-1", Name: "default", IsPresent: true}))
+	require.NoError(t, net.Upsert(ctx, &model.NetworkItem{ID: "net-1", Name: "default", IsPresent: true}))
 
 	e := New(
 		testutil.NewVMRepo(), net, testutil.NewLeaseRepo(),
@@ -95,7 +95,7 @@ func TestEnrichVM_Network(t *testing.T) {
 		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{{ID: "vm-1", NetworkID: "net-1"}}
+	vms := []*model.VMItem{{ID: "vm-1", NetworkID: "net-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "network"))
 
 	require.NotNil(t, vms[0].Network)
@@ -113,14 +113,14 @@ func TestEnrichVM_AllForward(t *testing.T) {
 	require.NoError(t, krn.Upsert(ctx, &model.KernelItem{ID: "k-1", IsPresent: true}))
 	require.NoError(t, img.Upsert(ctx, &model.ImageItem{ID: "i-1", IsPresent: true}))
 	require.NoError(t, bin.Upsert(ctx, &model.BinaryItem{ID: "b-1", IsPresent: true}))
-	require.NoError(t, net.Upsert(ctx, &model.Network{ID: "n-1", IsPresent: true}))
+	require.NoError(t, net.Upsert(ctx, &model.NetworkItem{ID: "n-1", IsPresent: true}))
 
 	e := New(
 		testutil.NewVMRepo(), net, testutil.NewLeaseRepo(),
 		img, krn, bin, testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{{
+	vms := []*model.VMItem{{
 		ID: "vm-1", KernelID: "k-1", ImageID: "i-1",
 		BinaryID: "b-1", NetworkID: "n-1",
 	}}
@@ -138,14 +138,14 @@ func TestEnrichVM_AllForward(t *testing.T) {
 
 func TestEnrichVM_MissingFK_leavesNil(t *testing.T) {
 	e := newEnricher()
-	vms := []*model.VM{{ID: "vm-1", KernelID: "nonexistent"}}
+	vms := []*model.VMItem{{ID: "vm-1", KernelID: "nonexistent"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "kernel"))
 	assert.Nil(t, vms[0].Kernel)
 }
 
 func TestEnrichVM_MissingNetwork_leavesNil(t *testing.T) {
 	e := newEnricher()
-	vms := []*model.VM{{ID: "vm-1", NetworkID: "nonexistent"}}
+	vms := []*model.VMItem{{ID: "vm-1", NetworkID: "nonexistent"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "network"))
 	assert.Nil(t, vms[0].Network)
 }
@@ -156,7 +156,7 @@ func TestEnrichVM_MissingNetwork_leavesNil(t *testing.T) {
 func TestEnrichVM_EmptyInput(t *testing.T) {
 	e := newEnricher()
 	require.NoError(t, e.EnrichVM(ctx, nil, "kernel"))
-	require.NoError(t, e.EnrichVM(ctx, []*model.VM{}, "kernel"))
+	require.NoError(t, e.EnrichVM(ctx, []*model.VMItem{}, "kernel"))
 }
 
 // --- EnrichVM: Volumes ---
@@ -174,7 +174,7 @@ func TestEnrichVM_Volumes(t *testing.T) {
 		testutil.NewKernelRepo(), testutil.NewBinaryRepo(), vol, testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{
+	vms := []*model.VMItem{
 		{ID: "vm-1", VolumeIDs: []string{"vol-1", "vol-2"}},
 		{ID: "vm-2", VolumeIDs: []string{"vol-1"}},
 	}
@@ -186,7 +186,7 @@ func TestEnrichVM_Volumes(t *testing.T) {
 
 func TestEnrichVM_Volumes_noneAssigned(t *testing.T) {
 	e := newEnricher()
-	vms := []*model.VM{{ID: "vm-1"}}
+	vms := []*model.VMItem{{ID: "vm-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "volumes"))
 	assert.Nil(t, vms[0].Volumes)
 }
@@ -198,7 +198,7 @@ func TestEnrichVM_Volumes_noneAssigned(t *testing.T) {
 func TestEnrichVM_NetworkLeases(t *testing.T) {
 	net := testutil.NewNetworkRepo()
 	lease := testutil.NewLeaseRepo()
-	require.NoError(t, net.Upsert(ctx, &model.Network{ID: "net-1", Name: "default", IsPresent: true}))
+	require.NoError(t, net.Upsert(ctx, &model.NetworkItem{ID: "net-1", Name: "default", IsPresent: true}))
 	lease.SetNetwork(10, true)
 	_, err := lease.Acquire(ctx, "net-1", "vm-1", nil)
 	require.NoError(t, err)
@@ -209,7 +209,7 @@ func TestEnrichVM_NetworkLeases(t *testing.T) {
 		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{{ID: "vm-1", NetworkID: "net-1"}}
+	vms := []*model.VMItem{{ID: "vm-1", NetworkID: "net-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "network", "network.leases"))
 
 	require.NotNil(t, vms[0].Network)
@@ -232,7 +232,7 @@ func TestEnrichNetwork_Leases(t *testing.T) {
 		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	nets := []*model.Network{{ID: "net-1", Name: "test"}}
+	nets := []*model.NetworkItem{{ID: "net-1", Name: "test"}}
 	require.NoError(t, e.EnrichNetwork(ctx, nets, "leases"))
 	require.NotNil(t, nets[0].Leases)
 	assert.Len(t, nets[0].Leases, 1)
@@ -240,7 +240,7 @@ func TestEnrichNetwork_Leases(t *testing.T) {
 
 func TestEnrichNetwork_VMs(t *testing.T) {
 	vm := testutil.NewVMRepo()
-	require.NoError(t, vm.Upsert(ctx, &model.VM{ID: "vm-1", NetworkID: "net-1"}))
+	require.NoError(t, vm.Upsert(ctx, &model.VMItem{ID: "vm-1", NetworkID: "net-1"}))
 
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
@@ -248,7 +248,7 @@ func TestEnrichNetwork_VMs(t *testing.T) {
 		testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	nets := []*model.Network{{ID: "net-1", Name: "test"}}
+	nets := []*model.NetworkItem{{ID: "net-1", Name: "test"}}
 	require.NoError(t, e.EnrichNetwork(ctx, nets, "vm"))
 	require.NotNil(t, nets[0].VMs)
 	assert.Len(t, nets[0].VMs, 1)
@@ -259,7 +259,7 @@ func TestEnrichNetwork_VMs(t *testing.T) {
 
 func TestEnrichImage_VMs(t *testing.T) {
 	vm := testutil.NewVMRepo()
-	require.NoError(t, vm.Upsert(ctx, &model.VM{ID: "vm-1", ImageID: "img-1"}))
+	require.NoError(t, vm.Upsert(ctx, &model.VMItem{ID: "vm-1", ImageID: "img-1"}))
 
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
@@ -280,7 +280,7 @@ func TestEnrichImage_VMs(t *testing.T) {
 
 func TestEnrichKernel_VMs(t *testing.T) {
 	vm := testutil.NewVMRepo()
-	require.NoError(t, vm.Upsert(ctx, &model.VM{ID: "vm-1", KernelID: "k-1"}))
+	require.NoError(t, vm.Upsert(ctx, &model.VMItem{ID: "vm-1", KernelID: "k-1"}))
 
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
@@ -300,7 +300,7 @@ func TestEnrichKernel_VMs(t *testing.T) {
 
 func TestEnrichBinary_VMs(t *testing.T) {
 	vm := testutil.NewVMRepo()
-	require.NoError(t, vm.Upsert(ctx, &model.VM{ID: "vm-1", BinaryID: "b-1"}))
+	require.NoError(t, vm.Upsert(ctx, &model.VMItem{ID: "vm-1", BinaryID: "b-1"}))
 
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
@@ -320,7 +320,7 @@ func TestEnrichBinary_VMs(t *testing.T) {
 
 func TestEnrichVolume_VMs(t *testing.T) {
 	vm := testutil.NewVMRepo()
-	require.NoError(t, vm.Upsert(ctx, &model.VM{ID: "vm-1", VolumeIDs: []string{"vol-1"}}))
+	require.NoError(t, vm.Upsert(ctx, &model.VMItem{ID: "vm-1", VolumeIDs: []string{"vol-1"}}))
 
 	e := New(
 		vm, testutil.NewNetworkRepo(), testutil.NewLeaseRepo(),
@@ -340,7 +340,7 @@ func TestEnrichVolume_VMs(t *testing.T) {
 
 func TestEnrichVM_unknownPath(t *testing.T) {
 	e := newEnricher()
-	vms := []*model.VM{{ID: "vm-1"}}
+	vms := []*model.VMItem{{ID: "vm-1"}}
 	err := e.EnrichVM(ctx, vms, "nonexistent")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Unknown relation")
@@ -349,7 +349,7 @@ func TestEnrichVM_unknownPath(t *testing.T) {
 
 func TestEnrichVM_emptyInclude(t *testing.T) {
 	e := newEnricher()
-	vms := []*model.VM{{ID: "vm-1"}}
+	vms := []*model.VMItem{{ID: "vm-1"}}
 	err := e.EnrichVM(ctx, vms)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "include list is required")
@@ -368,7 +368,7 @@ func TestEnrichVM_DuplicateCall(t *testing.T) {
 		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{{ID: "vm-1", KernelID: "k-1"}}
+	vms := []*model.VMItem{{ID: "vm-1", KernelID: "k-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "kernel"))
 	require.NoError(t, e.EnrichVM(ctx, vms, "kernel"))
 
@@ -391,11 +391,11 @@ func TestEnrichVM_Concurrent(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		vms := []*model.VM{{ID: "vm-1", KernelID: "k-1"}}
+		vms := []*model.VMItem{{ID: "vm-1", KernelID: "k-1"}}
 		_ = e.EnrichVM(ctx, vms, "kernel")
 		done <- struct{}{}
 	}()
-	vms2 := []*model.VM{{ID: "vm-2", KernelID: "k-1"}}
+	vms2 := []*model.VMItem{{ID: "vm-2", KernelID: "k-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms2, "kernel"))
 	<-done
 }
@@ -418,14 +418,14 @@ func TestEnrichVM_ContextCancellation(t *testing.T) {
 		krn, testutil.NewBinaryRepo(), testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
 
-	vms := []*model.VM{{ID: "vm-1", KernelID: "k-1"}}
+	vms := []*model.VMItem{{ID: "vm-1", KernelID: "k-1"}}
 	err := e.EnrichVM(ctx, vms, "kernel")
 	require.NoError(t, err, "cancelled context must not block enrichment with in-memory repos")
 	require.NotNil(t, vms[0].Kernel, "enrichment must still populate relations")
 	assert.Equal(t, "6.1", vms[0].Kernel.Version)
 }
 
-// --- Context cancellation — remaining Enrich* methods ---
+// --- Context cancellation — remaining Enrich* method ---
 // Rationale: EnrichNetwork, EnrichImage, EnrichKernel, EnrichBinary,
 // EnrichVolume all take context.Context. With in-memory repos the context
 // is not checked (no DB or HTTP I/O), so cancellation must not cause panic
@@ -440,7 +440,7 @@ func TestEnrichNetwork_ContextCancellation(t *testing.T) {
 		testutil.NewKernelRepo(), testutil.NewBinaryRepo(),
 		testutil.NewVolumeRepo(), testutil.NewVsockRepo(),
 	)
-	nets := []*model.Network{{ID: "net-1", Name: "default"}}
+	nets := []*model.NetworkItem{{ID: "net-1", Name: "default"}}
 	err := e.EnrichNetwork(ctx, nets, "leases")
 	require.NoError(t, err, "cancelled context must not block enrichment with in-memory repos")
 }
@@ -632,11 +632,11 @@ func TestIsEnrichmentError(t *testing.T) {
 // a resolved network.
 
 func TestSafeCastNetwork(t *testing.T) {
-	testNet := &model.Network{ID: "net-1", Name: "test-net"}
+	testNet := &model.NetworkItem{ID: "net-1", Name: "test-net"}
 
 	tests := map[string]struct {
 		val     any
-		want    *model.Network
+		want    *model.NetworkItem
 		wantErr string
 	}{
 		"nil_returns_nil_nil": {
@@ -678,33 +678,33 @@ func TestSafeCastNetwork(t *testing.T) {
 
 func TestCollectUniqueVMStrings(t *testing.T) {
 	tests := map[string]struct {
-		vms  []*model.VM
-		fn   func(*model.VM) string
+		vms  []*model.VMItem
+		fn   func(*model.VMItem) string
 		want []string
 	}{
 		"empty_slice": {
-			vms:  []*model.VM{},
-			fn:   func(vm *model.VM) string { return vm.ID },
+			vms:  []*model.VMItem{},
+			fn:   func(vm *model.VMItem) string { return vm.ID },
 			want: nil,
 		},
 		"all_unique": {
-			vms:  []*model.VM{{ID: "vm-1"}, {ID: "vm-2"}},
-			fn:   func(vm *model.VM) string { return vm.ID },
+			vms:  []*model.VMItem{{ID: "vm-1"}, {ID: "vm-2"}},
+			fn:   func(vm *model.VMItem) string { return vm.ID },
 			want: []string{"vm-1", "vm-2"},
 		},
 		"duplicates_deduplicated": {
-			vms:  []*model.VM{{ID: "vm-1"}, {ID: "vm-1"}, {ID: "vm-2"}},
-			fn:   func(vm *model.VM) string { return vm.ID },
+			vms:  []*model.VMItem{{ID: "vm-1"}, {ID: "vm-1"}, {ID: "vm-2"}},
+			fn:   func(vm *model.VMItem) string { return vm.ID },
 			want: []string{"vm-1", "vm-2"},
 		},
 		"empty_strings_filtered": {
-			vms:  []*model.VM{{ID: "vm-1"}, {ID: ""}, {ID: "vm-2"}},
-			fn:   func(vm *model.VM) string { return vm.ID },
+			vms:  []*model.VMItem{{ID: "vm-1"}, {ID: ""}, {ID: "vm-2"}},
+			fn:   func(vm *model.VMItem) string { return vm.ID },
 			want: []string{"vm-1", "vm-2"},
 		},
 		"all_empty_filtered": {
-			vms:  []*model.VM{{ID: ""}, {ID: ""}},
-			fn:   func(vm *model.VM) string { return vm.ID },
+			vms:  []*model.VMItem{{ID: ""}, {ID: ""}},
+			fn:   func(vm *model.VMItem) string { return vm.ID },
 			want: nil,
 		},
 	}
@@ -725,27 +725,27 @@ func TestCollectUniqueVMStrings(t *testing.T) {
 
 func TestExtractNetworkIDs(t *testing.T) {
 	tests := map[string]struct {
-		nets []*model.Network
+		nets []*model.NetworkItem
 		want []string
 	}{
 		"empty_slice": {
-			nets: []*model.Network{},
+			nets: []*model.NetworkItem{},
 			want: nil,
 		},
 		"all_unique": {
-			nets: []*model.Network{{ID: "net-1"}, {ID: "net-2"}},
+			nets: []*model.NetworkItem{{ID: "net-1"}, {ID: "net-2"}},
 			want: []string{"net-1", "net-2"},
 		},
 		"nil_entries_skipped": {
-			nets: []*model.Network{nil, {ID: "net-1"}, nil},
+			nets: []*model.NetworkItem{nil, {ID: "net-1"}, nil},
 			want: []string{"net-1"},
 		},
 		"empty_id_skipped": {
-			nets: []*model.Network{{ID: ""}, {ID: "net-1"}},
+			nets: []*model.NetworkItem{{ID: ""}, {ID: "net-1"}},
 			want: []string{"net-1"},
 		},
 		"duplicates_deduplicated": {
-			nets: []*model.Network{{ID: "net-1"}, {ID: "net-1"}},
+			nets: []*model.NetworkItem{{ID: "net-1"}, {ID: "net-1"}},
 			want: []string{"net-1"},
 		},
 	}
@@ -760,7 +760,7 @@ func TestExtractNetworkIDs(t *testing.T) {
 	}
 }
 
-// --- collectImageIDs (representative collect*ID helper) ---
+// --- collectImageIDs (representative collect*ID helper ---
 // Rationale: collectImageIDs, collectKernelIDs, collectBinaryIDs, and
 // collectVolumeIDs are structurally identical (nil-skip, empty-skip, dedup).
 // Testing one representative validates the pattern for all four.
@@ -901,7 +901,7 @@ func TestCollectVolumeIDs(t *testing.T) {
 	}
 }
 
-// --- sortByDotCount (edge cases missing from batch_test.go) ---
+// --- sortByDotCount (edge cases missing from batch_tes ---
 // Rationale: sortByDotCount uses SliceStable. Equal-dot-count paths must
 // preserve their relative input order. This is critical for enrichment
 // ordering within the same depth level.
@@ -954,7 +954,7 @@ func TestEnrichVM_Vsock(t *testing.T) {
 		testutil.NewVolumeRepo(), vsockRepo,
 	)
 
-	vms := []*model.VM{{ID: "vm-1"}}
+	vms := []*model.VMItem{{ID: "vm-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "vsock"))
 
 	require.NotNil(t, vms[0].Vsock)
@@ -969,7 +969,7 @@ func TestEnrichVM_Vsock(t *testing.T) {
 func TestEnrichVM_Vsock_NoConfigs(t *testing.T) {
 	e := newEnricher()
 
-	vms := []*model.VM{{ID: "vm-1"}}
+	vms := []*model.VMItem{{ID: "vm-1"}}
 	require.NoError(t, e.EnrichVM(ctx, vms, "vsock"))
 	assert.Nil(t, vms[0].Vsock, "Vsock must remain nil when no config exists")
 }
@@ -992,7 +992,7 @@ func TestEnrichVM_Vsock_Mixed(t *testing.T) {
 		testutil.NewVolumeRepo(), vsockRepo,
 	)
 
-	vms := []*model.VM{
+	vms := []*model.VMItem{
 		{ID: "vm-1"},
 		{ID: "vm-2"},
 	}

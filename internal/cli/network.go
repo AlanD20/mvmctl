@@ -19,21 +19,21 @@ import (
 
 // networkColumns defines the local listing columns for networks.
 var networkColumns = []common.ListingColumn{
-	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.Network).IsDefault) }},
-	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.Network).ID) }},
+	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.NetworkItem).IsDefault) }},
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.NetworkItem).ID) }},
 	{Header: "Name", Extract: func(v any) string {
-		return common.Cli.FormatName(v.(*model.Network).Name, !v.(*model.Network).IsPresent)
+		return common.Cli.FormatName(v.(*model.NetworkItem).Name, !v.(*model.NetworkItem).IsPresent)
 	}},
-	{Header: "Subnet", Extract: func(v any) string { return v.(*model.Network).Subnet }},
+	{Header: "Subnet", Extract: func(v any) string { return v.(*model.NetworkItem).Subnet }},
 	{Header: "NAT", Extract: func(v any) string {
-		if v.(*model.Network).NATEnabled {
+		if v.(*model.NetworkItem).NATEnabled {
 			return "yes"
 		}
 		return "no"
 	}},
-	{Header: "Bridge", Extract: func(v any) string { return v.(*model.Network).Bridge }, LongOnly: true},
+	{Header: "Bridge", Extract: func(v any) string { return v.(*model.NetworkItem).Bridge }, LongOnly: true},
 	{Header: "VMs", Extract: func(v any) string {
-		l := v.(*model.Network).Leases
+		l := v.(*model.NetworkItem).Leases
 		if l != nil {
 			return fmt.Sprintf("%d", len(l))
 		}
@@ -41,7 +41,7 @@ var networkColumns = []common.ListingColumn{
 	}, LongOnly: true},
 	{
 		Header:  "Created",
-		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.Network).CreatedAt, "relative") },
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.NetworkItem).CreatedAt, "relative") },
 	},
 }
 
@@ -79,7 +79,7 @@ func newNetworkListCmd(networkAPI api.NetworkAPI, configAPI api.ConfigAPI) *cobr
 
 			if jsonOutput {
 				if nets == nil {
-					nets = []*model.Network{}
+					nets = []*model.NetworkItem{}
 				}
 				data, _ := json.MarshalIndent(nets, "", "  ")
 				fmt.Println(string(data))

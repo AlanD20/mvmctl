@@ -87,7 +87,7 @@ Three-layer flow: **CLI → API → Core**
 - Does NOT validate caller input
 - Does NOT orchestrate across domains
 - Does NOT handle creation or removal
-- Constructor takes entity + repo: `vm.NewController(vm *model.VM, repo Repository)`
+- Constructor takes entity + repo: `vm.NewController(vm *model.VMItem, repo Repository)`
 - Created per-operation in Service layer, NOT wired at startup
 
 ### Service (stateless, intra-domain)

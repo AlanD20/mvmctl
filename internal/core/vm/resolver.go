@@ -12,7 +12,7 @@ import (
 
 // ResolveResult holds the result of resolving multiple VM identifiers.
 type ResolveResult struct {
-	VMs      []*model.VM
+	VMs      []*model.VMItem
 	Errors   []string
 	ExitCode int
 }
@@ -31,7 +31,7 @@ func NewResolver(repo Repository) *Resolver {
 
 // ByID resolves a VM by ID prefix. Returns error if not found or ambiguous.
 // Uses prefix matching only — does not try an exact match first.
-func (r *Resolver) ByID(ctx context.Context, vmID string) (*model.VM, error) {
+func (r *Resolver) ByID(ctx context.Context, vmID string) (*model.VMItem, error) {
 	// Only prefix matching
 	matches, err := r.repo.FindByPrefix(ctx, vmID)
 	if err != nil {
@@ -53,7 +53,7 @@ func (r *Resolver) ByID(ctx context.Context, vmID string) (*model.VM, error) {
 }
 
 // ByName resolves a VM by exact name.
-func (r *Resolver) ByName(ctx context.Context, name string) (*model.VM, error) {
+func (r *Resolver) ByName(ctx context.Context, name string) (*model.VMItem, error) {
 	vm, err := r.repo.GetByName(ctx, name)
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (r *Resolver) ByName(ctx context.Context, name string) (*model.VM, error) {
 }
 
 // ByIP resolves a VM by IP address.
-func (r *Resolver) ByIP(ctx context.Context, ip string) (*model.VM, error) {
+func (r *Resolver) ByIP(ctx context.Context, ip string) (*model.VMItem, error) {
 	vm, err := r.repo.FindByIP(ctx, ip)
 	if err != nil {
 		return nil, err
@@ -77,7 +77,7 @@ func (r *Resolver) ByIP(ctx context.Context, ip string) (*model.VM, error) {
 }
 
 // ByMAC resolves a VM by MAC address.
-func (r *Resolver) ByMAC(ctx context.Context, mac string) (*model.VM, error) {
+func (r *Resolver) ByMAC(ctx context.Context, mac string) (*model.VMItem, error) {
 	vm, err := r.repo.FindByMAC(ctx, mac)
 	if err != nil {
 		return nil, err
@@ -89,17 +89,17 @@ func (r *Resolver) ByMAC(ctx context.Context, mac string) (*model.VM, error) {
 }
 
 // ByImageID resolves VMs by image ID.
-func (r *Resolver) ByImageID(ctx context.Context, imageID string) ([]*model.VM, error) {
+func (r *Resolver) ByImageID(ctx context.Context, imageID string) ([]*model.VMItem, error) {
 	return r.repo.GetByImageIDs(ctx, []string{imageID})
 }
 
 // ByImageIDBatch resolves VMs by multiple image IDs, returning a map.
-func (r *Resolver) ByImageIDBatch(ctx context.Context, imageIDs []string) (map[string][]*model.VM, error) {
+func (r *Resolver) ByImageIDBatch(ctx context.Context, imageIDs []string) (map[string][]*model.VMItem, error) {
 	vms, err := r.repo.GetByImageIDs(ctx, imageIDs)
 	if err != nil {
 		return nil, err
 	}
-	results := make(map[string][]*model.VM)
+	results := make(map[string][]*model.VMItem)
 	for _, iid := range imageIDs {
 		results[iid] = nil
 	}
@@ -112,12 +112,12 @@ func (r *Resolver) ByImageIDBatch(ctx context.Context, imageIDs []string) (map[s
 }
 
 // ByNetworkIDBatch resolves VMs by multiple network IDs.
-func (r *Resolver) ByNetworkIDBatch(ctx context.Context, networkIDs []string) (map[string][]*model.VM, error) {
+func (r *Resolver) ByNetworkIDBatch(ctx context.Context, networkIDs []string) (map[string][]*model.VMItem, error) {
 	vms, err := r.repo.GetByNetworkIDs(ctx, networkIDs)
 	if err != nil {
 		return nil, err
 	}
-	results := make(map[string][]*model.VM)
+	results := make(map[string][]*model.VMItem)
 	for _, nid := range networkIDs {
 		results[nid] = nil
 	}
@@ -130,12 +130,12 @@ func (r *Resolver) ByNetworkIDBatch(ctx context.Context, networkIDs []string) (m
 }
 
 // ByKernelIDBatch resolves VMs by multiple kernel IDs.
-func (r *Resolver) ByKernelIDBatch(ctx context.Context, kernelIDs []string) (map[string][]*model.VM, error) {
+func (r *Resolver) ByKernelIDBatch(ctx context.Context, kernelIDs []string) (map[string][]*model.VMItem, error) {
 	vms, err := r.repo.GetByKernelIDs(ctx, kernelIDs)
 	if err != nil {
 		return nil, err
 	}
-	results := make(map[string][]*model.VM)
+	results := make(map[string][]*model.VMItem)
 	for _, kid := range kernelIDs {
 		results[kid] = nil
 	}
@@ -148,12 +148,12 @@ func (r *Resolver) ByKernelIDBatch(ctx context.Context, kernelIDs []string) (map
 }
 
 // ByBinaryIDBatch resolves VMs by multiple binary IDs.
-func (r *Resolver) ByBinaryIDBatch(ctx context.Context, binaryIDs []string) (map[string][]*model.VM, error) {
+func (r *Resolver) ByBinaryIDBatch(ctx context.Context, binaryIDs []string) (map[string][]*model.VMItem, error) {
 	vms, err := r.repo.GetByBinaryIDs(ctx, binaryIDs)
 	if err != nil {
 		return nil, err
 	}
-	results := make(map[string][]*model.VM)
+	results := make(map[string][]*model.VMItem)
 	for _, bid := range binaryIDs {
 		results[bid] = nil
 	}
@@ -166,12 +166,12 @@ func (r *Resolver) ByBinaryIDBatch(ctx context.Context, binaryIDs []string) (map
 }
 
 // ByVolumeIDBatch resolves VMs by multiple volume IDs.
-func (r *Resolver) ByVolumeIDBatch(ctx context.Context, volumeIDs []string) (map[string][]*model.VM, error) {
+func (r *Resolver) ByVolumeIDBatch(ctx context.Context, volumeIDs []string) (map[string][]*model.VMItem, error) {
 	vms, err := r.repo.FindByVolumeIDsBatch(ctx, volumeIDs)
 	if err != nil {
 		return nil, err
 	}
-	results := make(map[string][]*model.VM)
+	results := make(map[string][]*model.VMItem)
 	for _, vid := range volumeIDs {
 		results[vid] = nil
 	}
@@ -195,7 +195,7 @@ func (r *Resolver) ByVolumeIDBatch(ctx context.Context, volumeIDs []string) (map
 //
 // ByIP and ByMAC fail immediately on error (no fall-through) —
 // propagate any error (including IsNotFound) before falling through to by_name/by_id.
-func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.VM, error) {
+func (r *Resolver) Resolve(ctx context.Context, identifier string) (*model.VMItem, error) {
 	vm, err := r.ByName(ctx, identifier)
 	if err == nil {
 		return vm, nil
@@ -224,7 +224,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 	// Deduplicate identifiers while preserving order
 	uniqueIDs := infra.Dedup(identifiers)
 
-	var vms []*model.VM
+	var vms []*model.VMItem
 	var errsList []string
 	resolvedVMIDs := make(map[string]bool)
 

@@ -52,7 +52,7 @@ func (s *Service) WithBatch(ctx context.Context, fn func()) {
 
 // --- List ---
 
-func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.Network, error) {
+func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.NetworkItem, error) {
 	networks, err := s.repo.ListAll(ctx)
 	if err != nil {
 		return nil, err
@@ -472,9 +472,9 @@ func (s *Service) RemoveTap(ctx context.Context, tap, bridge string, networkID s
 	return nil
 }
 
-// --- model.Network removal ---
+// --- model.NetworkItem removal ---
 
-func (s *Service) Remove(ctx context.Context, network *model.Network, force bool) error {
+func (s *Service) Remove(ctx context.Context, network *model.NetworkItem, force bool) error {
 	// 1. Tear down NAT — only catch NetworkError
 	if network.NATEnabled {
 		if err := s.RemoveNAT(
@@ -512,7 +512,7 @@ func (s *Service) Remove(ctx context.Context, network *model.Network, force bool
 			}
 		}
 		return errs.New(errs.CodeNetworkError,
-			fmt.Sprintf("model.Network referenced by VMs: %s", strings.Join(vmNames, ", ")))
+			fmt.Sprintf("model.NetworkItem referenced by VMs: %s", strings.Join(vmNames, ", ")))
 	}
 
 	if hasVMs {
@@ -521,7 +521,7 @@ func (s *Service) Remove(ctx context.Context, network *model.Network, force bool
 	return s.repo.Delete(ctx, network.ID)
 }
 
-func (s *Service) RemoveMany(ctx context.Context, networks []*model.Network, force bool) error {
+func (s *Service) RemoveMany(ctx context.Context, networks []*model.NetworkItem, force bool) error {
 	for _, n := range networks {
 		if err := s.Remove(ctx, n, force); err != nil {
 			return err
@@ -538,7 +538,7 @@ func (s *Service) RemoveMany(ctx context.Context, networks []*model.Network, for
 // - added: rules that were created (command_executed was not None)
 // - verified: rules that already existed (command_executed is None)
 // - orphaned: host iptables rules referencing the network but absent from the DB
-func (s *Service) SyncIPTablesRules(ctx context.Context, network *model.Network) (*SyncResult, error) {
+func (s *Service) SyncIPTablesRules(ctx context.Context, network *model.NetworkItem) (*SyncResult, error) {
 	// 1. Get active DB rules for the network through the tracker.
 	var dbRules []*model.FirewallRule
 	if s.firewallTracker != nil {
@@ -583,7 +583,7 @@ func (s *Service) SyncIPTablesRules(ctx context.Context, network *model.Network)
 
 // --- Orphan cleanup ---
 
-func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*model.Network) int {
+func (s *Service) CleanupOrphanedBridges(ctx context.Context, dbNetworks []*model.NetworkItem) int {
 	dbBridgeNames := make(map[string]bool)
 	for _, n := range dbNetworks {
 		dbBridgeNames[n.Bridge] = true
@@ -679,7 +679,7 @@ func (s *Service) CheckNFTablesAvailable(ctx context.Context) bool {
 }
 
 // EnrichWithLeases batch-loads leases for all networks and attaches them.
-func (s *Service) EnrichWithLeases(ctx context.Context, networks []*model.Network, leaseRepo LeaseRepository) error {
+func (s *Service) EnrichWithLeases(ctx context.Context, networks []*model.NetworkItem, leaseRepo LeaseRepository) error {
 	ids := make([]string, len(networks))
 	for i, n := range networks {
 		ids[i] = n.ID

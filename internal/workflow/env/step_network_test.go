@@ -17,7 +17,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// --- Test helpers -------------------------------------------------------------
+// --- Test helpers ---
 
 // ctxMockNetworkAPI wraps testutil.MockNetworkAPI to propagate context
 // cancellation from NetworkGet. The plain mock ignores context, so this
@@ -26,7 +26,7 @@ type ctxMockNetworkAPI struct {
 	testutil.MockNetworkAPI
 }
 
-func (m *ctxMockNetworkAPI) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.Network, error) {
+func (m *ctxMockNetworkAPI) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ type errorMockNetworkAPI struct {
 	getErr error
 }
 
-func (m *errorMockNetworkAPI) NetworkGet(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
+func (m *errorMockNetworkAPI) NetworkGet(_ context.Context, _ inputs.NetworkInput) (*model.NetworkItem, error) {
 	return nil, m.getErr
 }
 
@@ -58,7 +58,7 @@ func newNetworkStep(t *testing.T, op api.NetworkAPI) workflow.Step {
 	})
 }
 
-// --- NetworkStep.Apply -------------------------------------------------------
+// --- NetworkStep.Apply ---
 // Rationale: NetworkStep.Apply is the core provisioning path. A nil-op crash,
 // a missed context cancellation, or a database error swallowed as success
 // would all cause silent data loss or hung workflows.
@@ -73,7 +73,7 @@ func TestNetworkStep_Apply(t *testing.T) {
 		wantSubnet     string
 		wantWasCreated bool
 	}{
-		// --- Error paths FIRST ------------------------------------------
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupAPI: func(_ *testing.T) api.NetworkAPI { return nil },
@@ -84,8 +84,8 @@ func TestNetworkStep_Apply(t *testing.T) {
 			setupAPI: func(_ *testing.T) api.NetworkAPI {
 				return &ctxMockNetworkAPI{
 					MockNetworkAPI: testutil.MockNetworkAPI{
-						NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
-							return &model.Network{}, nil
+						NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.NetworkItem, error) {
+							return &model.NetworkItem{}, nil
 						},
 					},
 				}
@@ -107,13 +107,13 @@ func TestNetworkStep_Apply(t *testing.T) {
 			wantErr: "check network",
 		},
 
-		// --- Happy paths AFTER ------------------------------------------
+		// --- Happy paths AFTER ---
 
 		"already_exists_skips_and_writes_state": {
 			setupAPI: func(_ *testing.T) api.NetworkAPI {
 				return &testutil.MockNetworkAPI{
-					NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
-						return &model.Network{
+					NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.NetworkItem, error) {
+						return &model.NetworkItem{
 							ID:        "net-existing",
 							Name:      "test-net",
 							Subnet:    "10.0.0.0/24",
@@ -130,8 +130,8 @@ func TestNetworkStep_Apply(t *testing.T) {
 		"already_exists_preserves_was_created_from_saved": {
 			setupAPI: func(_ *testing.T) api.NetworkAPI {
 				return &testutil.MockNetworkAPI{
-					NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
-						return &model.Network{
+					NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.NetworkItem, error) {
+						return &model.NetworkItem{
 							ID:        "net-preserved",
 							Name:      "test-net",
 							Subnet:    "10.0.1.0/24",
@@ -192,14 +192,14 @@ func TestNetworkStep_Apply(t *testing.T) {
 	}
 }
 
-// --- NetworkStep.Apply write-failure propagation ------------------------------
+// --- NetworkStep.Apply write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Apply must propagate it
 // rather than silently swallowing the persistence failure.
 
 func TestNetworkStep_Apply_WriteFailure(t *testing.T) {
 	step := newNetworkStep(t, &testutil.MockNetworkAPI{
-		NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.Network, error) {
-			return &model.Network{
+		NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.NetworkItem, error) {
+			return &model.NetworkItem{
 				ID:        "net-1",
 				Name:      "test-net",
 				Subnet:    "10.0.0.0/24",
@@ -223,7 +223,7 @@ func TestNetworkStep_Apply_WriteFailure(t *testing.T) {
 	return
 }
 
-// --- NetworkStep.Destroy ------------------------------------------------------
+// --- NetworkStep.Destroy ---
 // Rationale: Destroy must handle nil op, skip when WasCreated=false (resource
 // was pre-existing), skip when saved state is nil, and recover saved state
 // from the parameter for workflow resumption after a crash.
@@ -239,7 +239,7 @@ func TestNetworkStep_Destroy(t *testing.T) {
 		wantNetworkID  string
 		wantWasCreated bool
 	}{
-		// --- Error paths FIRST ------------------------------------------
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupAPI: func(_ *testing.T) api.NetworkAPI { return nil },
@@ -262,7 +262,7 @@ func TestNetworkStep_Destroy(t *testing.T) {
 			wantErr:      "context canceled",
 		},
 
-		// --- Happy paths AFTER ------------------------------------------
+		// --- Happy paths AFTER ---
 
 		"nil_saved_and_empty_state_skips_destroy": {
 			setupAPI: func(_ *testing.T) api.NetworkAPI {
@@ -348,7 +348,7 @@ func TestNetworkStep_Destroy(t *testing.T) {
 	}
 }
 
-// --- NetworkStep.Destroy write-failure propagation ---------------------------
+// --- NetworkStep.Destroy write-failure propagation ---
 // Rationale: If the StateWriter returns an error during Destroy's skip path,
 // it must propagate the error rather than silently swallowing it.
 
@@ -369,7 +369,7 @@ func TestNetworkStep_Destroy_WriteFailure(t *testing.T) {
 	return
 }
 
-// --- NetworkStep.StateData ---------------------------------------------------
+// --- NetworkStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision networks.
@@ -418,7 +418,7 @@ func TestNetworkStep_StateData(t *testing.T) {
 	}
 }
 
-// --- NetworkStep.FromSpec NAT default ----------------------------------------
+// --- NetworkStep.FromSpec NAT default ---
 // Rationale: The network step defaults NATEnabled to true when the "nat" key
 // is absent from the spec. This matches the production default and prevents
 // silent network misconfiguration if the default changes.
@@ -466,7 +466,7 @@ func TestFromSpec_NetworkStep_NATDefault(t *testing.T) {
 	})
 }
 
-// --- NetworkStep.FromSpec dependencies ---------------------------------------
+// --- NetworkStep.FromSpec dependencies ---
 // Rationale: FromSpec must parse depends_on from the spec so that downstream
 // steps (e.g. VM) correctly declare their network dependency.
 
@@ -493,7 +493,7 @@ func TestFromSpec_NetworkStep_Dependencies(t *testing.T) {
 	})
 }
 
-// --- NetworkStep.FromSpec SpecHash determinism -------------------------------
+// --- NetworkStep.FromSpec SpecHash determinism ---
 // Rationale: Two steps with identical specs must produce identical SpecHash
 // values. If the hash is non-deterministic, drift detection will produce
 // false positives on every apply.
@@ -512,7 +512,7 @@ func TestFromSpec_NetworkStep_SpecHashDeterminism(t *testing.T) {
 		"identical specs must produce identical hashes")
 }
 
-// --- NetworkStep.FromState state recovery ------------------------------------
+// --- NetworkStep.FromState state recovery ---
 // Rationale: FromState must correctly recover NetworkState and ResourceMeta
 // from a saved ResourceState so that Destroy can determine whether to skip
 // (WasCreated=false) or attempt removal (WasCreated=true).

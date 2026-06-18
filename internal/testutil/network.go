@@ -14,22 +14,22 @@ import (
 // Includes soft-delete filtering (deleted_at IS NULL, is_present = 1).
 type NetworkRepo struct {
 	mu       sync.RWMutex
-	networks map[string]*model.Network
+	networks map[string]*model.NetworkItem
 }
 
 func NewNetworkRepo() *NetworkRepo {
 	return &NetworkRepo{
-		networks: make(map[string]*model.Network),
+		networks: make(map[string]*model.NetworkItem),
 	}
 }
 
 // isNotDeleted returns true if the network is NOT soft-deleted.
-func (r *NetworkRepo) isNotDeleted(n *model.Network) bool {
+func (r *NetworkRepo) isNotDeleted(n *model.NetworkItem) bool {
 	return n.DeletedAt == nil && n.IsPresent
 }
 
 // Get returns a network by ID. Returns nil if soft-deleted.
-func (r *NetworkRepo) Get(_ context.Context, id string) (*model.Network, error) {
+func (r *NetworkRepo) Get(_ context.Context, id string) (*model.NetworkItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	n, ok := r.networks[id]
@@ -40,7 +40,7 @@ func (r *NetworkRepo) Get(_ context.Context, id string) (*model.Network, error) 
 }
 
 // GetByName returns a network by name. Returns nil if soft-deleted.
-func (r *NetworkRepo) GetByName(_ context.Context, name string) (*model.Network, error) {
+func (r *NetworkRepo) GetByName(_ context.Context, name string) (*model.NetworkItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, n := range r.networks {
@@ -52,10 +52,10 @@ func (r *NetworkRepo) GetByName(_ context.Context, name string) (*model.Network,
 }
 
 // FindByPrefix returns all non-deleted networks whose ID starts with prefix.
-func (r *NetworkRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.Network, error) {
+func (r *NetworkRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.NetworkItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.Network
+	var result []*model.NetworkItem
 	for _, n := range r.networks {
 		if r.isNotDeleted(n) && len(n.ID) >= len(prefix) && n.ID[:len(prefix)] == prefix {
 			result = append(result, n)
@@ -81,10 +81,10 @@ func (r *NetworkRepo) Count(_ context.Context) (int, error) {
 }
 
 // ListAll returns all non-deleted networks ordered by created_at.
-func (r *NetworkRepo) ListAll(_ context.Context) ([]*model.Network, error) {
+func (r *NetworkRepo) ListAll(_ context.Context) ([]*model.NetworkItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.Network
+	var result []*model.NetworkItem
 	for _, n := range r.networks {
 		if r.isNotDeleted(n) {
 			result = append(result, n)
@@ -96,7 +96,7 @@ func (r *NetworkRepo) ListAll(_ context.Context) ([]*model.Network, error) {
 	return result, nil
 }
 
-func (r *NetworkRepo) Upsert(_ context.Context, n *model.Network) error {
+func (r *NetworkRepo) Upsert(_ context.Context, n *model.NetworkItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.networks[n.ID] = n
@@ -130,7 +130,7 @@ func (r *NetworkRepo) SetDefault(_ context.Context, id string) error {
 }
 
 // GetDefault returns the default network entry, or nil if not set.
-func (r *NetworkRepo) GetDefault(_ context.Context) (*model.Network, error) {
+func (r *NetworkRepo) GetDefault(_ context.Context) (*model.NetworkItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, n := range r.networks {

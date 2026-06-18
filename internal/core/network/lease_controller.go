@@ -13,10 +13,10 @@ import (
 // Construction pattern matches Controller convention (per-entity binding).
 type LeaseController struct {
 	leaseRepo LeaseRepository
-	net       *model.Network
+	net       *model.NetworkItem
 }
 
-// NewLeaseController creates a LeaseController from a *model.Network or string identifier.
+// NewLeaseController creates a LeaseController from a *model.NetworkItem or string identifier.
 // NetworkResolver() which uses the default database. Go requires an explicit
 // Repository for string resolution, and returns an error if networkRepo
 // is nil when it's needed.
@@ -27,7 +27,7 @@ func NewLeaseController(
 	networkRepo Repository,
 ) (*LeaseController, error) {
 	switch e := entity.(type) {
-	case *model.Network:
+	case *model.NetworkItem:
 		return &LeaseController{
 			leaseRepo: leaseRepo,
 			net:       e,
@@ -47,7 +47,7 @@ func NewLeaseController(
 			net:       net,
 		}, nil
 	default:
-		return nil, fmt.Errorf("expected *model.Network or string, got %T", entity)
+		return nil, fmt.Errorf("expected *model.NetworkItem or string, got %T", entity)
 	}
 }
 

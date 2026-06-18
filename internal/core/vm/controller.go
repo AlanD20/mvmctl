@@ -15,12 +15,12 @@ import (
 
 // Controller manages per-VM lifecycle operations.
 type Controller struct {
-	vm   *model.VM
+	vm   *model.VMItem
 	repo Repository
 }
 
 // NewController creates a new VM controller.
-func NewController(vm *model.VM, repo Repository) *Controller {
+func NewController(vm *model.VMItem, repo Repository) *Controller {
 	return &Controller{vm: vm, repo: repo}
 }
 

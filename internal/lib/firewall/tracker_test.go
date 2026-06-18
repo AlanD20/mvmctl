@@ -98,7 +98,7 @@ func (m *mockTracker) FlushChain(_ context.Context, _ model.FirewallChain, _ mod
 	return m.stubFlush
 }
 
-func (m *mockTracker) CountOrphanedRules(_ context.Context, _ *model.Network) int {
+func (m *mockTracker) CountOrphanedRules(_ context.Context, _ *model.NetworkItem) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.orphanedCalls++
@@ -212,7 +212,7 @@ func TestTracker_CountOrphanedRules_delegates(t *testing.T) {
 	ft := &FirewallTracker{backend: mb}
 	ctx := context.Background()
 
-	n := ft.CountOrphanedRules(ctx, &model.Network{ID: "n-1"})
+	n := ft.CountOrphanedRules(ctx, &model.NetworkItem{ID: "n-1"})
 	assert.Equal(t, 3, n)
 	assert.Equal(t, 1, mb.orphanedCalls)
 }

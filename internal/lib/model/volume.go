@@ -36,5 +36,5 @@ type VolumeItem struct {
 	IsReadOnly bool         `json:"is_read_only"    db:"is_read_only"`
 
 	// Resolved relations
-	VMs []*VM `json:"vms,omitempty"`
+	VMs []*VMItem `json:"vms,omitempty"`
 }

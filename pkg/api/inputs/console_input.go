@@ -10,7 +10,7 @@ type ConsoleInput struct {
 }
 // ResolvedConsoleInput specifies resolved console input.
 type ResolvedConsoleInput struct {
-	VM    *model.VM
+	VM    *model.VMItem
 	Relay model.ConsoleRelay
 }
 // ConsoleRequest specifies console request.
@@ -33,7 +33,7 @@ func NewConsoleRequest(inputs ConsoleInput, db *sqlx.DB) *ConsoleRequest {
 // internal/service/console from this package.
 func (r *ConsoleRequest) Resolve(
 	ctx context.Context,
-	vmEntity *model.VM,
+	vmEntity *model.VMItem,
 	relay model.ConsoleRelay,
 ) (*ResolvedConsoleInput, error) {
 	r.result = &ResolvedConsoleInput{

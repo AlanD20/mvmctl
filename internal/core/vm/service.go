@@ -28,31 +28,31 @@ func NewService(repo Repository) *Service {
 // --- Single-VM operations ---
 
 // Stop stops a single VM and cleans up its Firecracker process.
-func (s *Service) Stop(ctx context.Context, vm *model.VM, force bool) error {
+func (s *Service) Stop(ctx context.Context, vm *model.VMItem, force bool) error {
 	c := NewController(vm, s.repo)
 	return c.Stop(ctx, force)
 }
 
 // Start boots a VM from its current state.
-func (s *Service) Start(ctx context.Context, vm *model.VM) error {
+func (s *Service) Start(ctx context.Context, vm *model.VMItem) error {
 	c := NewController(vm, s.repo)
 	return c.Start(ctx)
 }
 
 // Pause suspends VM execution via the Firecracker API.
-func (s *Service) Pause(ctx context.Context, vm *model.VM) error {
+func (s *Service) Pause(ctx context.Context, vm *model.VMItem) error {
 	c := NewController(vm, s.repo)
 	return c.Pause(ctx)
 }
 
 // Resume continues execution of a paused VM.
-func (s *Service) Resume(ctx context.Context, vm *model.VM) error {
+func (s *Service) Resume(ctx context.Context, vm *model.VMItem) error {
 	c := NewController(vm, s.repo)
 	return c.Resume(ctx)
 }
 
 // Reboot restarts the VM by stopping and starting it.
-func (s *Service) Reboot(ctx context.Context, vm *model.VM, force bool) error {
+func (s *Service) Reboot(ctx context.Context, vm *model.VMItem, force bool) error {
 	c := NewController(vm, s.repo)
 	return c.Reboot(ctx, force)
 }
@@ -62,15 +62,15 @@ func (s *Service) Reboot(ctx context.Context, vm *model.VM, force bool) error {
 // StopMany stops multiple VMs.
 func (s *Service) StopMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	force bool,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Stop(ctx, vm, force)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
@@ -82,14 +82,14 @@ func (s *Service) StopMany(
 // StartMany starts multiple VMs.
 func (s *Service) StartMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Start(ctx, vm)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
@@ -101,14 +101,14 @@ func (s *Service) StartMany(
 // PauseMany pauses multiple VMs.
 func (s *Service) PauseMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Pause(ctx, vm)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
@@ -120,14 +120,14 @@ func (s *Service) PauseMany(
 // ResumeMany resumes multiple VMs.
 func (s *Service) ResumeMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Resume(ctx, vm)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
@@ -139,15 +139,15 @@ func (s *Service) ResumeMany(
 // RebootMany reboots multiple VMs.
 func (s *Service) RebootMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	force bool,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Reboot(ctx, vm, force)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
