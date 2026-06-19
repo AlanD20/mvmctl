@@ -18,18 +18,13 @@ type ConfigAPI interface {
 }
 
 // ConfigGet returns a config value for category and optional key.
-// uses ConfigInput/ConfigRequest pipeline
-// with OVERRIDABLE_SETTINGS validation.
-// Returns the raw config value (type varies by setting: string, int, bool, etc.)
-// or map[string]map[string]model.SettingInfo when key is empty (category listing).
 func (op *Operation) ConfigGet(ctx context.Context, category, key string) (any, error) {
 	rawInput := inputs.ConfigInput{
 		Action:   "get",
 		Category: category,
 		Key:      key,
 	}
-	req := inputs.NewConfigRequest(rawInput)
-	resolved, err := req.Resolve(ctx)
+	resolved, err := rawInput.Resolve()
 	if err != nil {
 		return nil, err
 	}
@@ -56,8 +51,7 @@ func (op *Operation) ConfigSet(
 		Key:      key,
 		Value:    value,
 	}
-	req := inputs.NewConfigRequest(rawInput)
-	resolved, err := req.Resolve(ctx)
+	resolved, err := rawInput.Resolve()
 	if err != nil {
 		return err
 	}
@@ -77,7 +71,6 @@ func (op *Operation) ConfigSet(
 }
 
 // ConfigReset resets a config value to its default (removes override).
-// uses ConfigRequest resolution pipeline.
 func (op *Operation) ConfigReset(ctx context.Context, category, key string, allOverrides bool) (int, error) {
 	rawInput := inputs.ConfigInput{
 		Action:       "reset",
@@ -85,8 +78,7 @@ func (op *Operation) ConfigReset(ctx context.Context, category, key string, allO
 		Key:          key,
 		AllOverrides: allOverrides,
 	}
-	req := inputs.NewConfigRequest(rawInput)
-	resolved, err := req.Resolve(ctx)
+	resolved, err := rawInput.Resolve()
 	if err != nil {
 		return 0, errs.WrapMsg(errs.CodeConfigError, err.Error(), err, errs.WithClass(errs.ClassValidation))
 	}
@@ -123,14 +115,11 @@ func (op *Operation) ConfigReset(ctx context.Context, category, key string, allO
 }
 
 // ConfigListAll returns all overridable settings.
-// uses ConfigRequest resolution pipeline.
 func (op *Operation) ConfigListAll(ctx context.Context) (map[string]map[string]model.SettingInfo, error) {
-	// ConfigRequest resolves the input for configuration listing.
 	rawInput := inputs.ConfigInput{
 		Action: "list",
 	}
-	req := inputs.NewConfigRequest(rawInput)
-	_, err := req.Resolve(ctx)
+	_, err := rawInput.Resolve()
 	if err != nil {
 		return nil, err
 	}

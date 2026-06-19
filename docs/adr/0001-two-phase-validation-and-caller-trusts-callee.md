@@ -20,7 +20,7 @@ The codebase had three problems:
 - Format checks (CIDR syntax, name length, port ranges)
 - Existence/duplicate checks (does this ID/name exist?)
 - Cross-field constraints (cannot set X when Y is Z)
-- Lives in `*Input`/`*Request` structs in `pkg/api/inputs/`
+- Lives in `*Input` structs in `pkg/api/inputs/` (see ADR-0011)
 
 **Phase 2 — Execution (Core layer, no validation):**
 - Service receives clean, validated data from the caller

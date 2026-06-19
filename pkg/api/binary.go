@@ -67,12 +67,9 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 }
 
 // BinaryPull downloads or builds a binary.
-// uses BinaryPullRequest
-// resolution pipeline and wraps all BinaryErrors in code="binary.pull_failed".
 func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInput,
 	onProgress event.OnProgressCallback) ([]*model.BinaryItem, error) {
-	request := inputs.NewBinaryPullRequest(input, op.Connection.DB())
-	resolved, err := request.Resolve(ctx)
+	resolved, err := input.Resolve()
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, err.Error(), err)
 	}
@@ -140,12 +137,10 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 }
 
 // BinaryRemove removes binaries by identifiers.
-// resolves via BinaryRequest
-// then enriches with VM references. Each binary removal is wrapped in per-binary
-// error handling).
+// Enriches with VM references. Each binary removal is wrapped in per-binary
+// error handling.
 func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput, force bool) *errs.BatchResult {
-	request := inputs.NewBinaryRequest(input, op.Repos.Binary)
-	resolved, err := request.Resolve(ctx)
+	binaries, err := input.Resolve(ctx, op.Repos.Binary)
 	if err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
@@ -159,7 +154,7 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 		}
 	}
 	// Enrich binaries with VM and snapshot references.
-	enriched := resolved.Binaries
+	enriched := binaries
 	op.Enr.EnrichBinary(ctx, enriched, "vm", "snapshots")
 	items := make([]errs.OperationResult, 0)
 	for _, bin := range enriched {
@@ -274,31 +269,26 @@ func (op *Operation) BinaryList(
 }
 
 // BinaryGet returns binaries by identifier.
-// resolves via BinaryRequest
-// with multi-identifier resolution.
 func (op *Operation) BinaryGet(ctx context.Context, input inputs.BinaryInput) ([]*model.BinaryItem, error) {
-	request := inputs.NewBinaryRequest(input, op.Repos.Binary)
-	resolved, err := request.Resolve(ctx)
+	binaries, err := input.Resolve(ctx, op.Repos.Binary)
 	if err != nil {
 		return nil, err
 	}
-	return resolved.Binaries, nil
+	return binaries, nil
 }
 
 // BinarySetDefault sets a binary as default.
-// resolves via BinaryRequest,
-// checks for ambiguous results, then delegates to BinaryController.
+// Checks for ambiguous results, then delegates to BinaryController.
 func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryInput) (*model.BinaryItem, error) {
-	request := inputs.NewBinaryRequest(input, op.Repos.Binary)
-	resolved, err := request.Resolve(ctx)
+	binaries, err := input.Resolve(ctx, op.Repos.Binary)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeBinaryDefaultSetFailed, fmt.Sprintf("Binary not found: %v", err), err)
 	}
 	// Reject ambiguous identifier matches
-	if len(resolved.Binaries) > 1 {
+	if len(binaries) > 1 {
 		return nil, errs.New(errs.CodeBinaryDefaultSetFailed, "Ambiguous ID to set to default")
 	}
-	bin := resolved.Binaries[0]
+	bin := binaries[0]
 	// Use BinaryController for the default-setting operation.
 	ctrl := binary.NewController(bin, op.Repos.Binary)
 	if err := ctrl.SetDefault(ctx); err != nil {

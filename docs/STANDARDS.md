@@ -19,7 +19,7 @@ Coding standards, conventions, and architectural rules for the mvmctl Go codebas
 - [13. CLI Patterns](#13-cli-patterns)
 - [14. Code Style](#14-code-style)
 - [15. Enrichment](#15-enrichment)
-- [16. Input/Request/Resolved Triple](#16-inputrequestresolved-triple)
+- [16. Input Pattern v2](#16-input-pattern-v2)
 - [17. Subprocess Services](#17-subprocess-services)
 - [18. Performance](#18-performance)
 - [19. ID Generation](#19-id-generation)
@@ -45,7 +45,7 @@ Coding standards, conventions, and architectural rules for the mvmctl Go codebas
 | `internal/infra/` | Generic leaf utilities (constants, io, template, yaml, cast, slice, pool, ptr, event, provcontent) | Imports ONLY stdlib and external deps. Never imports core, api, cli, or service. |
 | `internal/lib/` | Domain-adjacent leaf utilities (system, model, db, download, version, logging, crypto, firewall, provisioner, network, archive) | Imports ONLY stdlib and external deps. Never imports core, api, cli, or service. |
 | `pkg/api/` | Public API orchestration layer | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
-| `pkg/api/inputs/` | Input/Request/Resolved structs for validation | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
+| `pkg/api/inputs/` | Input Validate/Resolve structs (ADR-0011) | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
 | `pkg/errs/` | Domain error type and codes | Leaf package — no internal imports |
 | `internal/testutil/` | In-memory repo implementations, `FakeRunner`, and per-domain API mocks for tests | Imports `internal/lib/*`, `internal/infra/event`, `pkg/api/*`, `pkg/errs` |
 
@@ -67,7 +67,7 @@ Three-layer flow: **CLI → API → Core**
 - Sole orchestrator of multiple core domains
 - Cross-domain sequencing: VM creation orchestrates vm + network + image + kernel + cloudinit
 - Holds all repositories, services, and enricher
-- Validation lives in `pkg/api/inputs/` — `*Input` / `*Request` / `Resolved*` structs
+- Validation lives in `pkg/api/inputs/` — `*Input` structs with `Validate()` / `Resolve()` (ADR-0011)
 - Returns typed responses with JSON struct tags
 - Handles `--json` flag by `json.MarshalIndent`-ing typed response structs directly
 - No `ToJSON()` methods on API operations
@@ -340,13 +340,77 @@ Cross-domain enrichment in `internal/enricher/`:
 - Called from API layer, not from core.
 - Enrichment methods belong in service layer (e.g., `svc.EnrichWithLeases(ctx, networks, leaseRepo)`), not in API layer.
 
-## 16. Input/Request/Resolved Triple
+## 16. Input Pattern v2
 
-Every public-facing domain follows this three-struct pattern in `pkg/api/inputs/`:
+Every public-facing domain in `pkg/api/inputs/` uses a single `*Input` struct with
+`Validate()` and `Resolve()` methods (ADR-0011). No `*Request` wrapper struct.
 
-1. **`*Input`** — Raw CLI input. Thin struct with typed fields. Optional fields are `*T`. No DB-backed defaults.
-2. **`*Request`** — Accepts Input and dependencies (DB, repos, enricher). `Resolve(ctx)` looks up DB-backed records, validates, returns Resolved.
-3. **`Resolved*`** — Immutable output. Every field explicit and validated. No `nil` for required fields.
+### Rules
+
+1. **`*Input`** — Raw user input. Optional fields are `*T`. No DB-backed defaults.
+2. **`Validate() error`** — Checks input fields before resolution. Called first
+   in `Resolve()`, but callers may call it separately for early-exit patterns
+   (e.g., `Remove` with `BatchResult`).
+3. **`Resolve(ctx, deps...) (result, error)`** — Looks up DB records, resolves
+   defaults, returns domain entities or a `Resolved*` struct (kept only when
+   output shape differs from input).
+4. **No `*Request` struct** — Deps passed as function parameters, not stored on
+   a wrapper.
+
+### Simple lookup (no Resolved*):
+
+```go
+type VMInput struct {
+    Identifiers []string
+    Force       bool
+}
+
+func (i *VMInput) Validate() error { ... }
+func (i *VMInput) Resolve(ctx, vmRepo) ([]*model.VMItem, error) { ... }
+
+// Caller:
+vms, err := input.Resolve(ctx, op.Repos.VM)
+```
+
+### Create with Resolved* (output shape differs):
+
+```go
+type VolumeCreateInput struct {
+    Name   string
+    Size   string
+    Format *string
+}
+
+type ResolvedVolumeCreateInput struct {
+    Name      string
+    SizeBytes int64
+    Format    model.VolumeFormat
+    Path      string
+}
+
+func (i *VolumeCreateInput) Validate() error { ... }
+func (i *VolumeCreateInput) Resolve(ctx, repo) (*ResolvedVolumeCreateInput, error) { ... }
+
+// Caller:
+resolved, err := input.Resolve(ctx, op.Repos.Volume)
+```
+
+### Multi-domain resolution:
+
+```go
+type SnapshotRestoreInput struct {
+    SnapshotID string
+    Network    *string
+}
+
+func (i *SnapshotRestoreInput) ResolveSnapshot(ctx, snapRepo) (*model.SnapshotItem, error) { ... }
+func (i *SnapshotRestoreInput) ResolveNetwork(ctx, netRepo) (*model.NetworkItem, error) { ... }
+
+// API layer branches on results:
+snap, _ := input.ResolveSnapshot(ctx, snapRepo)
+net, _ := input.ResolveNetwork(ctx, netRepo)
+if net == nil { net = snap.Network }
+```
 
 ## 17. Subprocess Services
 

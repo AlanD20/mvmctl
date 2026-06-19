@@ -33,8 +33,7 @@ type NetworkAPI interface {
 
 // NetworkCreate creates a new network.
 func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
-	request := inputs.NewNetworkCreateRequest(input, op.Connection.DB(), op.Repos.Network)
-	resolved, err := request.Resolve(ctx)
+	resolved, err := input.Resolve(ctx, op.Repos.Network)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeNetworkCreateFailed, err.Error(), err)
 	}
@@ -116,19 +115,16 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 }
 
 // NetworkRemove removes one or more networks.
-// uses NetworkRequest for resolution,
-// enriches with VM references, checks "in use".
 func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInput, force bool) error {
-	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
-	resolved, err := request.Resolve(ctx)
+	networks, err := input.Resolve(ctx, op.Repos.Network)
 	if err != nil {
 		return errs.WrapMsg(errs.CodeNetworkRemoveFailed, err.Error(), err)
 	}
 	// Batch-enrich with VM and snapshot references
-	op.Enr.EnrichNetwork(ctx, resolved.Networks, "vm", "snapshots")
+	op.Enr.EnrichNetwork(ctx, networks, "vm", "snapshots")
 	// service.Remove raises error on failure.
 	// Return the first error encountered.
-	for _, net := range resolved.Networks {
+	for _, net := range networks {
 		if err := op.Services.Network.Remove(ctx, net, force); err != nil {
 			errorMsg := err.Error()
 			code := errs.Code("network.remove_failed")
@@ -154,19 +150,16 @@ func (op *Operation) NetworkListAll(ctx context.Context) ([]*model.NetworkItem, 
 	return networks, nil
 }
 
-// NetworkGet returns a single network by Input/Request resolution pipeline.
-// uses NetworkInput/NetworkRequest
-// to resolve identifiers (by name or ID) and supports multi-identifier resolution.
+// NetworkGet returns a single network by identifier.
 func (op *Operation) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error) {
-	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
-	resolved, err := request.Resolve(ctx)
+	networks, err := input.Resolve(ctx, op.Repos.Network)
 	if err != nil {
 		return nil, err
 	}
-	if len(resolved.Networks) != 1 {
-		return nil, fmt.Errorf("expected exactly one network, got %d", len(resolved.Networks))
+	if len(networks) != 1 {
+		return nil, fmt.Errorf("expected exactly one network, got %d", len(networks))
 	}
-	return resolved.Networks[0], nil
+	return networks[0], nil
 }
 
 // NetworkToJSON converts networks to JSON-serializable dicts.
@@ -192,22 +185,19 @@ func (op *Operation) NetworkToJSON(networks []*model.NetworkItem) []map[string]a
 	return result
 }
 
-// NetworkInspect returns detailed network info via Input/Request resolution pipeline.
-// uses NetworkInput/NetworkRequest
-// to resolve identifiers (by name or ID) with lease enrichment.
+// NetworkInspect returns detailed network info.
 func (op *Operation) NetworkInspect(
 	ctx context.Context,
 	input inputs.NetworkInput,
 ) (*results.NetworkInspect, error) {
-	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
-	resolved, err := request.Resolve(ctx)
+	networks, err := input.Resolve(ctx, op.Repos.Network)
 	if err != nil {
 		return nil, err
 	}
-	if len(resolved.Networks) != 1 {
-		return nil, fmt.Errorf("expected exactly one network, got %d", len(resolved.Networks))
+	if len(networks) != 1 {
+		return nil, fmt.Errorf("expected exactly one network, got %d", len(networks))
 	}
-	net := resolved.Networks[0]
+	net := networks[0]
 	bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge)
 	if bridgeActive != net.BridgeActive {
 		_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
@@ -260,21 +250,18 @@ func (op *Operation) NetworkInspect(
 }
 
 // NetworkSetDefault sets a network as default.
-// goes through Controller
-// and uses NetworkInput/NetworkRequest to resolve identifiers.
 func (op *Operation) NetworkSetDefault(ctx context.Context, input inputs.NetworkInput) error {
-	request := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
-	resolved, err := request.Resolve(ctx)
+	networks, err := input.Resolve(ctx, op.Repos.Network)
 	if err != nil {
 		return errs.WrapMsg(errs.CodeNetworkDefaultSetFailed, fmt.Sprintf("Failed to resolve network: %v", err), err)
 	}
-	if len(resolved.Networks) != 1 {
+	if len(networks) != 1 {
 		return errs.New(
 			errs.CodeNetworkDefaultSetFailed,
-			fmt.Sprintf("Expected exactly one network, got %d", len(resolved.Networks)),
+			fmt.Sprintf("Expected exactly one network, got %d", len(networks)),
 		)
 	}
-	net := resolved.Networks[0]
+	net := networks[0]
 	controller := network.NewController(net, op.Repos.Network)
 	if err := controller.SetDefault(ctx); err != nil {
 		return errs.WrapMsg(
@@ -292,12 +279,10 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 	var networks []*model.NetworkItem
 	var err error
 	if len(input.Identifiers) > 0 {
-		req := inputs.NewNetworkRequest(input, op.Connection.DB(), op.Repos.Network)
-		resolved, resolveErr := req.Resolve(ctx)
-		if resolveErr != nil {
-			return nil, errs.WrapMsg(errs.CodeNetworkNotFound, resolveErr.Error(), resolveErr)
+		networks, err = input.Resolve(ctx, op.Repos.Network)
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodeNetworkNotFound, err.Error(), err)
 		}
-		networks = resolved.Networks
 	} else {
 		networks, err = op.Repos.Network.ListAll(ctx)
 		if err != nil {

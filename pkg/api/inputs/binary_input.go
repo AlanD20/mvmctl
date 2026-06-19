@@ -13,47 +13,34 @@ type BinaryInput struct {
 	Identifiers []string `json:"identifiers,omitempty"`
 	Version     *string  `json:"version,omitempty"`
 }
-type ResolvedBinaryInput struct {
-	Binaries []*model.BinaryItem
-}
 
-// BinaryRequest specifies binary request.
-// Resolve binary identifiers to DB records.
-type BinaryRequest struct {
-	input    BinaryInput
-	result   *ResolvedBinaryInput
-	resolver *binary.Resolver
-}
-
-// NewBinaryRequest creates a new BinaryRequest.
-func NewBinaryRequest(inputs BinaryInput, binaryRepo binary.Repository) *BinaryRequest {
-	return &BinaryRequest{
-		input:    inputs,
-		resolver: binary.NewResolver(binaryRepo),
+// Validate checks that the binary input has valid identifiers.
+func (i *BinaryInput) Validate() error {
+	if len(i.Identifiers) == 0 {
+		return fmt.Errorf("at least one binary identifier is required")
 	}
-}
-
-// Result returns the resolved input, or nil if resolve() has not been called.
-// Resolve resolves identifiers to BinaryItem list.
-func (r *BinaryRequest) Resolve(ctx context.Context) (*ResolvedBinaryInput, error) {
-	if len(r.input.Identifiers) == 0 {
-		return nil, errs.NotFound(errs.CodeBinaryNotFound, "No binary identifiers provided or could be resolved")
-	}
-	// Validate identifier length — max 64 chars matching SHA256 hex ID length.
-	for _, ident := range r.input.Identifiers {
+	for _, ident := range i.Identifiers {
 		if len(ident) > 64 {
-			return nil, errs.New(
-				errs.CodeValidationFailed,
-				fmt.Sprintf("Binary identifier too long: '%s' exceeds maximum length of 64 characters", ident),
-			)
+			return fmt.Errorf("binary identifier too long: %q exceeds maximum length of 64 characters", ident)
 		}
 	}
-	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
+	return nil
+}
+
+// Resolve resolves all identifiers in the input to BinaryItem objects.
+// Delegates to binary.Resolver.ResolveMany for batch resolution with
+// deduplication and error collection.
+func (i *BinaryInput) Resolve(ctx context.Context, repo binary.Repository) ([]*model.BinaryItem, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	resolver := binary.NewResolver(repo)
+	result := resolver.ResolveMany(ctx, i.Identifiers)
 	if result == nil || len(result.Items) == 0 {
 		return nil, errs.NotFound(errs.CodeBinaryNotFound, "No binary identifiers provided or could be resolved")
 	}
-	r.result = &ResolvedBinaryInput{
-		Binaries: result.Items,
+	if len(result.Errors) > 0 {
+		return result.Items, fmt.Errorf("partial resolve failures: %s", result.Errors)
 	}
-	return r.result, nil
+	return result.Items, nil
 }

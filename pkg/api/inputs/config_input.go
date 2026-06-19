@@ -1,7 +1,6 @@
 package inputs
 
 import (
-	"context"
 	"mvmctl/internal/core/config"
 	"mvmctl/pkg/errs"
 )
@@ -15,80 +14,54 @@ type ConfigInput struct {
 	AllOverrides bool   `json:"all_overrides"`
 }
 
-// ResolvedConfigInput specifies resolved config input.
-type ResolvedConfigInput struct {
-	Action       string
-	Category     string
-	Key          string
-	Value        any
-	AllOverrides bool
-}
-
-// ConfigRequest specifies config request.
-// Resolve ConfigInput against the database.
-type ConfigRequest struct {
-	input  ConfigInput
-	result *ResolvedConfigInput
-}
-
-// NewConfigRequest creates a new ConfigRequest.
-func NewConfigRequest(inputs ConfigInput) *ConfigRequest {
-	return &ConfigRequest{
-		input: inputs,
-	}
-}
-
-// Result returns the resolved input, or nil if resolve() has not been called.
-// Resolve resolves and validates config input.
-func (r *ConfigRequest) Resolve(ctx context.Context) (*ResolvedConfigInput, error) {
-	category := r.input.Category
-	key := r.input.Key
-	if r.input.Action == "get" {
-		if category == "" {
-			return nil, errs.New(errs.CodeConfigError, "Category is required for get operation")
+// Validate checks that the config input is valid for the given action.
+func (i *ConfigInput) Validate() error {
+	switch i.Action {
+	case "get":
+		if i.Category == "" {
+			return errs.New(errs.CodeConfigError, "Category is required for get operation")
 		}
-		// key is optional for category-level get
-		if key != "" {
-			if !config.IsKeyInCategory(category, key) {
-				return nil, errs.New(
-					errs.CodeConfigError,
-					"'"+category+"."+key+"' is not a valid setting key. Use 'mvm config ls' to see valid keys.",
-				)
-			}
-		}
-	} else if r.input.Action == "set" {
-		if category == "" || key == "" {
-			return nil, errs.New(errs.CodeConfigError, "Category and key are required for set operation")
-		}
-		if r.input.Value == nil {
-			return nil, errs.New(errs.CodeConfigError, "Value is required for set operation")
-		}
-		// Validate key is overridable
-		if !config.IsKeyInCategory(category, key) {
-			return nil, errs.New(
+		if i.Key != "" && !config.IsKeyInCategory(i.Category, i.Key) {
+			return errs.New(
 				errs.CodeConfigError,
-				"'"+category+"."+key+"' is not an overridable setting. Use 'mvm config ls' to see valid keys.",
+				"'"+i.Category+"."+i.Key+"' is not a valid setting key. Use 'mvm config ls' to see valid keys.",
 			)
 		}
-	} else if r.input.Action == "reset" {
-		if r.input.AllOverrides {
+	case "set":
+		if i.Category == "" || i.Key == "" {
+			return errs.New(errs.CodeConfigError, "Category and key are required for set operation")
+		}
+		if i.Value == nil {
+			return errs.New(errs.CodeConfigError, "Value is required for set operation")
+		}
+		if !config.IsKeyInCategory(i.Category, i.Key) {
+			return errs.New(
+				errs.CodeConfigError,
+				"'"+i.Category+"."+i.Key+"' is not an overridable setting. Use 'mvm config ls' to see valid keys.",
+			)
+		}
+	case "reset":
+		if i.AllOverrides {
 			// category and key are both optional for --all
-		} else if category == "" {
-			return nil, errs.New(errs.CodeConfigError, "Category is required for reset operation (or use --all)")
+		} else if i.Category == "" {
+			return errs.New(errs.CodeConfigError, "Category is required for reset operation (or use --all)")
 		}
-		// key is optional for category-level reset
-		if key != "" {
-			if !config.IsKeyInCategory(category, key) {
-				return nil, errs.New(errs.CodeConfigError, "'"+category+"."+key+"' is not a valid setting key")
-			}
+		if i.Key != "" && !config.IsKeyInCategory(i.Category, i.Key) {
+			return errs.New(errs.CodeConfigError, "'"+i.Category+"."+i.Key+"' is not a valid setting key")
 		}
+	case "list":
+		// No additional validation needed for listing
+	default:
+		return errs.New(errs.CodeConfigError, "Invalid action: '"+i.Action+"'. Use get, set, reset, or list.")
 	}
-	r.result = &ResolvedConfigInput{
-		Action:       r.input.Action,
-		Category:     category,
-		Key:          key,
-		Value:        r.input.Value,
-		AllOverrides: r.input.AllOverrides,
+	return nil
+}
+
+// Resolve validates the config input and returns it. The resolved shape is
+// identical to the input, so this method simply validates and returns self.
+func (i *ConfigInput) Resolve() (*ConfigInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
 	}
-	return r.result, nil
+	return i, nil
 }

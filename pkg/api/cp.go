@@ -31,9 +31,8 @@ func (op *Operation) CPCopy(
 	input inputs.CPInput,
 	onProgress event.OnDownloadCallback,
 ) (*results.CPCopyResult, error) {
-	// Build CPRequest and resolve.
-	req := inputs.NewCPRequest(input, op.Services.Config)
-	resolved, err := req.Resolve(ctx, op.Repos.VM, op.Repos.Vsock)
+	// Resolve input.
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.VM, op.Repos.Vsock)
 	if err != nil {
 		return nil, err
 	}

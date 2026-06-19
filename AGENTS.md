@@ -49,6 +49,6 @@ The architect MUST verify these before approving any implementation plan:
 - ALL subprocess calls through `system.RunCmdOpts` / `system.RunCmd` — no raw `os/exec`. Documented exceptions (see CONTEXT.md "Subprocess invocation"): Firecracker spawn (pass_fds), kernel build (log streaming), tar-pipe in cp (two-child pipe chain), and service subprocesses (loopmount provisioner, console relay, nocloudnet server).
 - Context propagation: every repository method, every infrastructure function with side effects takes `ctx context.Context` as its first parameter.
 - The API layer (`pkg/api/`) is the SOLE orchestrator of multiple core domains.
-- Validation lives in API `pkg/api/inputs/` `*Input` / `*Request` structs, not in Service/Controller.
+- Validation lives in API `pkg/api/inputs/` `*Input` structs with `Validate()`/`Resolve()`, not in Service/Controller.
 - `No reflect`, no `goto` — banned unless approved via ADR.
 - Error handling uses `pkg/errs.DomainError` — single error type with Code + Class. No multiple error types.

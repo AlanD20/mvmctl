@@ -83,6 +83,9 @@ func IsPrivateKey(content string) bool {
 	return strings.Contains(content, "-----BEGIN") && strings.Contains(content, "PRIVATE KEY-----")
 }
 
+// ValidAlgorithms is the set of supported SSH key generation algorithms.
+var ValidAlgorithms = map[string]bool{"ed25519": true, "rsa": true, "ecdsa": true}
+
 // ParseAlgorithm extracts the algorithm (first field) from SSH public key content.
 func ParseAlgorithm(pubKeyContent string) (string, error) {
 	parts := strings.Fields(pubKeyContent)

@@ -7,9 +7,9 @@ import (
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
+	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
-	"strings"
 )
 
 // CLI_TO_INTERNAL_DETECTOR maps CLI detector names to internal detector codes.
@@ -34,6 +34,60 @@ type ImagePullInput struct {
 	OutputDir         string   `json:"output_dir,omitempty"`
 }
 
+// Validate checks that the image pull input is valid.
+func (i *ImagePullInput) Validate() error {
+	if i.Type == "" {
+		return fmt.Errorf("image type is required")
+	}
+	if i.Partition < 0 {
+		return fmt.Errorf("partition cannot be negative")
+	}
+	return nil
+}
+
+// Resolve resolves the pull input to a ResolvedImageAcquireInput.
+// Sets arch, resolves disabled detectors, applies output directory default,
+// then validates the resolved result.
+func (i *ImagePullInput) Resolve(ctx context.Context, cfg *config.Service, repo image.Repository) (*ResolvedImageAcquireInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	// Arch always matches the host machine — not user-configurable
+	arch := system.RuntimeArch()
+	// Resolve disabled detectors from input
+	disabled, err := resolveDisabledDetectors(i.DisabledDetectors)
+	if err != nil {
+		return nil, err
+	}
+	outputDir := i.OutputDir
+	if outputDir == "" {
+		outputDir = infra.GetImagesDir()
+	}
+	result := &ResolvedImageAcquireInput{
+		Type:              i.Type,
+		Name:              i.Name,
+		Force:             i.Force,
+		SetDefault:        i.SetDefault,
+		Arch:              arch,
+		Version:           i.Version,
+		NoCache:           i.NoCache,
+		Partition:         i.Partition,
+		OutputDir:         outputDir,
+		SkipOptimization:  i.SkipOptimization,
+		DisabledDetectors: disabled,
+	}
+	if result.Arch == "" {
+		return nil, errs.New(errs.CodeImageImportFailed, "arch is required", errs.WithClass(errs.ClassValidation))
+	}
+	if !firecracker.SupportsArch(result.Arch) {
+		return nil, errs.New(errs.CodeImageImportFailed,
+			fmt.Sprintf("unsupported arch: %s", result.Arch),
+			errs.WithClass(errs.ClassValidation),
+		)
+	}
+	return result, nil
+}
+
 // ImageImportInput holds options for importing a local image file.
 type ImageImportInput struct {
 	Name              string   `json:"name"`
@@ -44,6 +98,71 @@ type ImageImportInput struct {
 	Partition         int      `json:"partition,omitempty"`
 	SkipOptimization  bool     `json:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty"`
+}
+
+// Validate checks that the image import input is valid.
+func (i *ImageImportInput) Validate() error {
+	if i.Name == "" {
+		return fmt.Errorf("image name is required")
+	}
+	if i.SourcePath == "" {
+		return fmt.Errorf("source path is required")
+	}
+	if i.Partition < 0 {
+		return fmt.Errorf("partition cannot be negative")
+	}
+	return nil
+}
+
+// Resolve resolves the import input to a ResolvedImageAcquireInput.
+// Sets arch, resolves format (config → auto-detect), resolves disabled
+// detectors, then validates the resolved result.
+func (i *ImageImportInput) Resolve(ctx context.Context, cfg *config.Service, repo image.Repository) (*ResolvedImageAcquireInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	// Arch always matches the host machine — not user-configurable
+	arch := system.RuntimeArch()
+	// Resolve disabled detectors
+	disabled, err := resolveDisabledDetectors(i.DisabledDetectors)
+	if err != nil {
+		return nil, err
+	}
+	// Resolve format from config, fall back to auto-detection
+	format := i.Format
+	if format == "" {
+		format, _ = cfg.GetString(ctx, "defaults.image", "import_format")
+	}
+	// Auto-detect format from file if format is not known
+	detected := disk.DetectImageFormat(i.SourcePath)
+	if detected != "" && format == "" {
+		format = detected
+	}
+	sourcePath := i.SourcePath
+	result := &ResolvedImageAcquireInput{
+		Type:              i.Name,
+		Name:              &i.Name,
+		Arch:              arch,
+		SourcePath:        &sourcePath,
+		Format:            format,
+		OutputDir:         infra.GetImagesDir(),
+		DisabledDetectors: disabled,
+		Force:             i.Force,
+		Partition:         i.Partition,
+		SetDefault:        i.SetDefault,
+		SkipOptimization:  i.SkipOptimization,
+		FormatDetected:    detected,
+	}
+	if result.Arch == "" {
+		return nil, errs.New(errs.CodeImageImportFailed, "arch is required", errs.WithClass(errs.ClassValidation))
+	}
+	if !firecracker.SupportsArch(result.Arch) {
+		return nil, errs.New(errs.CodeImageImportFailed,
+			fmt.Sprintf("unsupported arch: %s", result.Arch),
+			errs.WithClass(errs.ClassValidation),
+		)
+	}
+	return result, nil
 }
 
 // ResolvedImageAcquireInput specifies resolved image acquire input.
@@ -64,155 +183,8 @@ type ResolvedImageAcquireInput struct {
 	DisabledDetectors []string
 }
 
-// ImageAcquireRequest specifies image acquire request.
-// input uses any because it is either ImagePullInput or ImageImportInput —
-// Go has no sum types.
-type ImageAcquireRequest struct {
-	cfg      *config.Service
-	input    any // ImagePullInput or ImageImportInput
-	result   *ResolvedImageAcquireInput
-	resolver *image.Resolver
-}
-
-// NewImageAcquireRequest creates a new ImageAcquireRequest.
-func NewImageAcquireRequest(inputs any, cfg *config.Service, imageRepo image.Repository) *ImageAcquireRequest {
-	return &ImageAcquireRequest{
-		cfg:      cfg,
-		input:    inputs,
-		resolver: image.NewResolver(imageRepo),
-	}
-}
-
-// Result returns the resolved input, or nil if resolve() has not been called.
-// ResolvePull resolves pull inputs.
-func (r *ImageAcquireRequest) ResolvePull(ctx context.Context) (*ResolvedImageAcquireInput, error) {
-	in, ok := r.input.(ImagePullInput)
-	if !ok {
-		return nil, errs.New(errs.CodeImagePullFailed, "Expected ImagePullInput", errs.WithClass(errs.ClassValidation))
-	}
-	// Arch always matches the host machine — not user-configurable
-	arch := system.RuntimeArch()
-	// Resolve disabled detectors from input.
-	disabled, err := r.resolveDisabledDetectors(in.DisabledDetectors)
-	if err != nil {
-		return nil, err
-	}
-	outputDir := in.OutputDir
-	if outputDir == "" {
-		outputDir = infra.GetImagesDir()
-	}
-	r.result = &ResolvedImageAcquireInput{
-		Type:              in.Type,
-		Name:              in.Name,
-		Force:             in.Force,
-		SetDefault:        in.SetDefault,
-		Arch:              arch,
-		Version:           in.Version,
-		NoCache:           in.NoCache,
-		Partition:         in.Partition,
-		OutputDir:         outputDir,
-		SkipOptimization:  in.SkipOptimization,
-		DisabledDetectors: disabled,
-	}
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-	return r.result, nil
-}
-
-// ResolveImport resolves import inputs.
-func (r *ImageAcquireRequest) ResolveImport(ctx context.Context) (*ResolvedImageAcquireInput, error) {
-	in, ok := r.input.(ImageImportInput)
-	if !ok {
-		return nil, errs.New(
-			errs.CodeImageImportFailed,
-			"Expected ImageImportInput",
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	// Arch always matches the host machine — not user-configurable
-	arch := system.RuntimeArch()
-	// Resolve disabled detectors
-	disabled, err := r.resolveDisabledDetectors(in.DisabledDetectors)
-	if err != nil {
-		return nil, err
-	}
-	// Resolve format from config, fall back to auto-detection
-	format := in.Format
-	if format == "" {
-		format, _ = r.cfg.GetString(ctx, "defaults.image", "import_format")
-	}
-	// Auto-detect format from file if format is not known
-	detected := disk.DetectImageFormat(in.SourcePath)
-	if detected != "" && format == "" {
-		format = detected
-	}
-	sourcePath := in.SourcePath
-	r.result = &ResolvedImageAcquireInput{
-		Type:              in.Name,
-		Name:              &in.Name,
-		Arch:              arch,
-		SourcePath:        &sourcePath,
-		Format:            format,
-		OutputDir:         infra.GetImagesDir(),
-		DisabledDetectors: disabled,
-		Force:             in.Force,
-		Partition:         in.Partition,
-		SetDefault:        in.SetDefault,
-		SkipOptimization:  in.SkipOptimization,
-		FormatDetected:    detected,
-	}
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-	return r.result, nil
-}
-func (r *ImageAcquireRequest) ensureValidate() error {
-	if r.result == nil {
-		return errs.New(
-			errs.CodeImageImportFailed,
-			"Failed to resolve necessary dependencies to validate",
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	arch := r.result.Arch
-	if arch == "" {
-		return errs.New(errs.CodeImageImportFailed, "arch is required", errs.WithClass(errs.ClassValidation))
-	}
-	parts := infra.FirecrackerSupportedArches
-	archOk := false
-	for _, p := range parts {
-		if p == arch {
-			archOk = true
-			break
-		}
-	}
-	if !archOk {
-		return errs.New(errs.CodeImageImportFailed,
-			fmt.Sprintf("Unknown arch: %s. Valid: %s", arch, strings.Join(infra.FirecrackerSupportedArches, ", ")),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	if r.result.Partition < 0 {
-		return errs.New(
-			errs.CodeImageImportFailed,
-			"Partition cannot be less than 1",
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	return nil
-}
-func (r *ImageAcquireRequest) ensureValidateImport() error {
-	if r.result == nil {
-		return errs.New(
-			errs.CodeImageImportFailed,
-			"Failed to resolve necessary dependencies to validate",
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	return nil
-}
-func (r *ImageAcquireRequest) resolveDisabledDetectors(detectors []string) ([]string, error) {
+// resolveDisabledDetectors resolves disabled detector names to internal codes.
+func resolveDisabledDetectors(detectors []string) ([]string, error) {
 	var disabled []string
 	for _, name := range detectors {
 		if name == "all" {

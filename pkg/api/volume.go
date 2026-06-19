@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/lib/crypto"
@@ -35,11 +36,8 @@ func (op *Operation) VolumeListAll(ctx context.Context) []*model.VolumeItem {
 }
 
 // VolumeCreate creates a new volume.
-// uses VolumeCreateRequest
-// resolution pipeline and HashGenerator.volume() for ID.
 func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreateInput) (*model.VolumeItem, error) {
-	req := inputs.NewVolumeCreateRequest(input, op.Connection.DB(), op.Repos.Volume)
-	resolved, err := req.Resolve(ctx)
+	resolved, err := input.Resolve(ctx, op.Repos.Volume)
 	if err != nil {
 		return nil, err
 	}
@@ -65,12 +63,10 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 }
 
 // VolumeRemove removes volumes by name or ID.
-// uses VolumeRequest resolution
-// with partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
+// Handles partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
 func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput, force bool) *errs.BatchResult {
-	req := inputs.NewVolumeRequest(input, op.Connection.DB(), op.Repos.Volume)
-	resolved, err := req.Resolve(ctx)
-	if err != nil {
+	volumes, err := input.Resolve(ctx, op.Repos.Volume)
+	if err != nil && len(volumes) == 0 {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
 				{
@@ -82,16 +78,12 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			},
 		}
 	}
-	results := make([]errs.OperationResult, 0)
-	// for error_msg in request.errors:
-	for _, errMsg := range req.Errors() {
-		results = append(results, errs.OperationResult{
-			Status:  "error",
-			Code:    "volume.not_found",
-			Message: errMsg,
-		})
+	// Log partial failures but continue with resolved volumes
+	if err != nil && len(volumes) > 0 {
+		slog.Warn("volume remove: partial resolve failures", "error", err)
 	}
-	if len(resolved.Volumes) == 0 && len(results) == 0 {
+	results := make([]errs.OperationResult, 0)
+	if len(volumes) == 0 && len(results) == 0 {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
 				{
@@ -103,8 +95,8 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 		}
 	}
 	// Batch-enrich with VM references for VM attachment check
-	op.Enr.EnrichVolume(ctx, resolved.Volumes, "vm")
-	for _, vol := range resolved.Volumes {
+	op.Enr.EnrichVolume(ctx, volumes, "vm")
+	for _, vol := range volumes {
 		if vol.Status == model.VolumeStatusAttached && !force {
 			results = append(results, errs.OperationResult{
 				Status:  "error",
@@ -186,17 +178,13 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 }
 
 // VolumeResize resizes a volume.
-// uses VolumeRequest resolution
-// for identifier lookup and separate size parsing.
 func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreateInput) error {
-	// VolumeRequest resolves the volume input to a volume entity for resizing.
 	volInput := inputs.VolumeInput{Identifiers: []string{input.Name}}
-	req := inputs.NewVolumeRequest(volInput, op.Connection.DB(), op.Repos.Volume)
-	resolved, err := req.Resolve(ctx)
+	volumes, err := volInput.Resolve(ctx, op.Repos.Volume)
 	if err != nil {
 		return errs.WrapMsg(errs.CodeVolumeNotFound, err.Error(), err)
 	}
-	vol := resolved.Volumes[0]
+	vol := volumes[0]
 	sizeBytes, err := disk.ParseDiskSizeToBytes(input.Size)
 	if err != nil {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid size: %v", err))
@@ -210,15 +198,13 @@ func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreate
 }
 
 // VolumeGet returns a single volume by identifier.
-// uses VolumeRequest pipeline.
 func (op *Operation) VolumeGet(ctx context.Context, input inputs.VolumeInput) (*model.VolumeItem, error) {
-	req := inputs.NewVolumeRequest(input, op.Connection.DB(), op.Repos.Volume)
-	resolved, err := req.Resolve(ctx)
+	volumes, err := input.Resolve(ctx, op.Repos.Volume)
 	if err != nil {
 		return nil, err
 	}
-	if len(resolved.Volumes) > 1 {
+	if len(volumes) > 1 {
 		return nil, fmt.Errorf("Expected exactly one volume identifier")
 	}
-	return resolved.Volumes[0], nil
+	return volumes[0], nil
 }

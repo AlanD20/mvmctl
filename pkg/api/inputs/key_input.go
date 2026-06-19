@@ -3,10 +3,10 @@ package inputs
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/lib/model"
-	"mvmctl/pkg/errs"
-	"strings"
 )
 
 // KeyInput is the raw input for identifying existing SSH keys.
@@ -16,43 +16,31 @@ type KeyInput struct {
 	Identifiers []string `json:"identifiers,omitempty"`
 }
 
-// ResolvedKeyInput specifies resolved key input.
-type ResolvedKeyInput struct {
-	Keys []*model.SSHKeyItem
-}
-
-// KeyRequest specifies key request.
-// Resolve key identifiers to DB records.
-type KeyRequest struct {
-	input    KeyInput
-	resolver *key.Resolver
-}
-
-// NewKeyRequest creates a new KeyRequest.
-func NewKeyRequest(inputs KeyInput, keyRepo key.Repository) *KeyRequest {
-	return &KeyRequest{
-		input:    inputs,
-		resolver: key.NewResolver(keyRepo),
+// Validate checks that the key input has valid identifiers.
+func (i *KeyInput) Validate() error {
+	if len(i.Identifiers) == 0 {
+		return fmt.Errorf("at least one key identifier is required")
 	}
+	return nil
 }
 
-// Resolve resolves key identifiers to DB records.
-func (r *KeyRequest) Resolve(ctx context.Context) (*ResolvedKeyInput, error) {
-	identifiers := r.input.Identifiers
-	if len(identifiers) == 0 {
-		return nil, errs.NotFound(errs.CodeKeyNotFound, "No key identifiers provided")
+// Resolve resolves all identifiers in the input to SSHKeyItem objects.
+// Delegates to key.Resolver.ResolveMany for batch resolution with
+// deduplication and error collection.
+func (i *KeyInput) Resolve(ctx context.Context, repo key.Repository) ([]*model.SSHKeyItem, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
 	}
-	result, err := r.resolver.ResolveMany(ctx, identifiers)
+	resolver := key.NewResolver(repo)
+	result, err := resolver.ResolveMany(ctx, i.Identifiers)
 	if err != nil {
 		return nil, err
 	}
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
-		return nil, errs.NotFound(
-			errs.CodeKeyNotFound,
-			fmt.Sprintf("Could not resolve any keys: %s", strings.Join(result.Errors, ", ")),
-		)
+		return nil, fmt.Errorf("failed to resolve keys: %s", strings.Join(result.Errors, "; "))
 	}
-	return &ResolvedKeyInput{
-		Keys: result.Items,
-	}, nil
+	if len(result.Errors) > 0 {
+		return result.Items, fmt.Errorf("partial resolve failures: %s", strings.Join(result.Errors, "; "))
+	}
+	return result.Items, nil
 }

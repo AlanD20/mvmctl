@@ -750,8 +750,6 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 
 // --- Remove ---
 // Remove removes one or more VMs.
-// Uses the proper VMRequest pipeline (validation + resolution + enrichment)
-// instead of inline resolution.
 func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	if err := system.CheckPrivileges("/usr/sbin/ip", "Remove VM"); err != nil {
 		return &errs.BatchResult{
@@ -761,16 +759,7 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 			},
 		}
 	}
-	// Use VMRequest pipeline.
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{
-			Identifiers: input.Identifiers,
-			Force:       input.Force,
-		},
-		op.Connection.DB(),
-		op.Repos.VM,
-	)
-	resolved, err := vmRequest.Resolve(ctx)
+	vms, err := input.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
@@ -779,13 +768,13 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 			},
 		}
 	}
-	if op.Enr != nil && len(resolved.VMs) > 0 {
-		_ = op.Enr.EnrichVM(ctx, resolved.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
+	if op.Enr != nil && len(vms) > 0 {
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 		// Enrichment is best-effort: enriched data improves inspect output but is not
 		// required for the operation to succeed. A failed enrichment should not fail
 		// the operation itself.
 	}
-	if len(resolved.VMs) == 0 {
+	if len(vms) == 0 {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
 				{Status: "error", Code: string(errs.CodeVMNotFound),
@@ -795,7 +784,7 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 	}
 	results := make([]errs.OperationResult, 0)
 	// Report identifiers that couldn't be resolved
-	unresolvedCount := len(input.Identifiers) - len(resolved.VMs)
+	unresolvedCount := len(input.Identifiers) - len(vms)
 	if unresolvedCount > 0 {
 		slog.Warn(
 			"VM rm: identifier(s) could not be resolved",
@@ -810,11 +799,11 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 		})
 	}
 	repo := op.Repos.VM
-	for _, vmLocal := range resolved.VMs {
+	for _, vmLocal := range vms {
 		vmDir := infra.GetVMDirByID(vmLocal.ID)
 		// Stop the VM
 		controller := vm.NewController(vmLocal, repo)
-		controller.Stop(ctx, resolved.Force)
+		controller.Stop(ctx, input.Force)
 		// Defense-in-depth: force-kill
 		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
 			proc, err := os.FindProcess(vmLocal.PID)
@@ -1008,21 +997,9 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 
 // --- Start / Stop / Reboot / Pause / Resume ---
 // Start starts one or more VMs.
-// returns BatchResult[VMInstanceItem].
-// Uses batch VMRequest resolution (no N+1).
 func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
-	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
-	// Batch resolve all VMs first.
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{
-			Identifiers: input.Identifiers,
-			Force:       input.Force,
-		},
-		op.Connection.DB(),
-		op.Repos.VM,
-	)
-	resolved, resolveErr := vmRequest.Resolve(ctx)
+	vms, resolveErr := input.Resolve(ctx, op.Repos.VM)
 	if resolveErr != nil {
 		for _, ident := range input.Identifiers {
 			results = append(results, errs.OperationResult{
@@ -1032,13 +1009,13 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 		}
 		return &errs.BatchResult{Items: results}
 	}
-	if op.Enr != nil && len(resolved.VMs) > 0 {
-		_ = op.Enr.EnrichVM(ctx, resolved.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
+	if op.Enr != nil && len(vms) > 0 {
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 		// Enrichment is best-effort: enriched data improves inspect output but is not
 		// required for the operation to succeed. A failed enrichment should not fail
 		// the operation itself.
 	}
-	for _, vmLocal := range resolved.VMs {
+	for _, vmLocal := range vms {
 		// If VM is stopped, respawn Firecracker process
 		if vmLocal.Status == model.VMStatusStopped {
 			if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
@@ -1071,21 +1048,11 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 }
 
 // Stop stops one or more VMs.
-// returns BatchResult[VMInstanceItem].
-// Uses batch VMRequest resolution (no N+1).
 func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 	// Batch resolve all VMs first.
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{
-			Identifiers: input.Identifiers,
-			Force:       input.Force,
-		},
-		op.Connection.DB(),
-		op.Repos.VM,
-	)
-	resolved, resolveErr := vmRequest.Resolve(ctx)
+	vms, resolveErr := input.Resolve(ctx, op.Repos.VM)
 	if resolveErr != nil {
 		for _, ident := range input.Identifiers {
 			results = append(results, errs.OperationResult{
@@ -1095,13 +1062,13 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 		}
 		return &errs.BatchResult{Items: results}
 	}
-	if op.Enr != nil && len(resolved.VMs) > 0 {
-		_ = op.Enr.EnrichVM(ctx, resolved.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
+	if op.Enr != nil && len(vms) > 0 {
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 		// Enrichment is best-effort: enriched data improves inspect output but is not
 		// required for the operation to succeed. A failed enrichment should not fail
 		// the operation itself.
 	}
-	for _, vmLocal := range resolved.VMs {
+	for _, vmLocal := range vms {
 		controller := vm.NewController(vmLocal, repo)
 		controller.Stop(ctx, input.Force)
 		// Defense-in-depth: force-kill if stop() silently left the Firecracker process alive
@@ -1270,21 +1237,11 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 
 // --- Reboot / Pause / Resume ---
 // Reboot reboots one or more VMs.
-// returns BatchResult[VMInstanceItem].
-// Uses batch VMRequest resolution (no N+1).
 func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 	// Batch resolve all VMs first.
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{
-			Identifiers: input.Identifiers,
-			Force:       input.Force,
-		},
-		op.Connection.DB(),
-		op.Repos.VM,
-	)
-	resolved, resolveErr := vmRequest.Resolve(ctx)
+	vms, resolveErr := input.Resolve(ctx, op.Repos.VM)
 	if resolveErr != nil {
 		for _, ident := range input.Identifiers {
 			results = append(results, errs.OperationResult{
@@ -1294,13 +1251,13 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 		}
 		return &errs.BatchResult{Items: results}
 	}
-	if op.Enr != nil && len(resolved.VMs) > 0 {
-		_ = op.Enr.EnrichVM(ctx, resolved.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
+	if op.Enr != nil && len(vms) > 0 {
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 		// Enrichment is best-effort: enriched data improves inspect output but is not
 		// required for the operation to succeed. A failed enrichment should not fail
 		// the operation itself.
 	}
-	for _, vmLocal := range resolved.VMs {
+	for _, vmLocal := range vms {
 		// Stop the VM first (kills the firecracker process)
 		controller := vm.NewController(vmLocal, repo)
 		controller.Stop(ctx, input.Force)
@@ -1324,21 +1281,11 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 }
 
 // Pause pauses one or more VMs.
-// returns BatchResult[VMInstanceItem].
-// Uses batch VMRequest resolution (no N+1).
 func (op *Operation) VMPause(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 	// Batch resolve all VMs first.
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{
-			Identifiers: input.Identifiers,
-			Force:       input.Force,
-		},
-		op.Connection.DB(),
-		op.Repos.VM,
-	)
-	resolved, resolveErr := vmRequest.Resolve(ctx)
+	vms, resolveErr := input.Resolve(ctx, op.Repos.VM)
 	if resolveErr != nil {
 		for _, ident := range input.Identifiers {
 			results = append(results, errs.OperationResult{
@@ -1348,13 +1295,13 @@ func (op *Operation) VMPause(ctx context.Context, input inputs.VMInput) *errs.Ba
 		}
 		return &errs.BatchResult{Items: results}
 	}
-	if op.Enr != nil && len(resolved.VMs) > 0 {
-		_ = op.Enr.EnrichVM(ctx, resolved.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
+	if op.Enr != nil && len(vms) > 0 {
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 		// Enrichment is best-effort: enriched data improves inspect output but is not
 		// required for the operation to succeed. A failed enrichment should not fail
 		// the operation itself.
 	}
-	for _, vmLocal := range resolved.VMs {
+	for _, vmLocal := range vms {
 		controller := vm.NewController(vmLocal, repo)
 		if err := controller.Pause(ctx); err != nil {
 			results = append(results, errs.OperationResult{
@@ -1375,21 +1322,11 @@ func (op *Operation) VMPause(ctx context.Context, input inputs.VMInput) *errs.Ba
 }
 
 // Resume resumes one or more VMs.
-// returns BatchResult[VMInstanceItem].
-// Uses batch VMRequest resolution (no N+1).
 func (op *Operation) VMResume(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
 	// Batch resolve all VMs first.
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{
-			Identifiers: input.Identifiers,
-			Force:       input.Force,
-		},
-		op.Connection.DB(),
-		op.Repos.VM,
-	)
-	resolved, resolveErr := vmRequest.Resolve(ctx)
+	vms, resolveErr := input.Resolve(ctx, op.Repos.VM)
 	if resolveErr != nil {
 		for _, ident := range input.Identifiers {
 			results = append(results, errs.OperationResult{
@@ -1399,13 +1336,13 @@ func (op *Operation) VMResume(ctx context.Context, input inputs.VMInput) *errs.B
 		}
 		return &errs.BatchResult{Items: results}
 	}
-	if op.Enr != nil && len(resolved.VMs) > 0 {
-		_ = op.Enr.EnrichVM(ctx, resolved.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
+	if op.Enr != nil && len(vms) > 0 {
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 		// Enrichment is best-effort: enriched data improves inspect output but is not
 		// required for the operation to succeed. A failed enrichment should not fail
 		// the operation itself.
 	}
-	for _, vmLocal := range resolved.VMs {
+	for _, vmLocal := range vms {
 		controller := vm.NewController(vmLocal, repo)
 		if err := controller.Resume(ctx); err != nil {
 			results = append(results, errs.OperationResult{
@@ -1427,10 +1364,6 @@ func (op *Operation) VMResume(ctx context.Context, input inputs.VMInput) *errs.B
 
 // --- AttachVolume / DetachVolume ---
 // AttachVolume attaches a volume to a VM.
-// - VMInput for identification (name, ID, IP, MAC)
-// - VolumeResolver for volume resolution
-// - Version gate for hotplug
-// - VolumeController.attach + VM volume_ids update
 func (op *Operation) VMAttachVolume(
 	ctx context.Context,
 	input inputs.VMInput,
@@ -1444,29 +1377,17 @@ func (op *Operation) VMAttachVolume(
 			errs.WithClass(errs.ClassNeedsInteraction),
 		)
 	}
-	// Resolve VM using VMRequest pipeline.
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{
-			Identifiers: input.Identifiers,
-			Force:       input.Force,
-		},
-		op.Connection.DB(),
-		op.Repos.VM,
-	)
-	resolved, resolveErr := vmRequest.Resolve(ctx)
+	vms, resolveErr := input.Resolve(ctx, op.Repos.VM)
 	if resolveErr != nil {
 		return errs.NotFound(errs.CodeVMNotFound, fmt.Sprintf("VM not found: %v", resolveErr))
 	}
-	if op.Enr != nil && len(resolved.VMs) > 0 {
-		_ = op.Enr.EnrichVM(ctx, resolved.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
-		// Enrichment is best-effort: enriched data improves inspect output but is not
-		// required for the operation to succeed. A failed enrichment should not fail
-		// the operation itself.
+	if op.Enr != nil && len(vms) > 0 {
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	}
-	if len(resolved.VMs) != 1 {
+	if len(vms) != 1 {
 		return errs.NotFound(errs.CodeVMNotFound, "Expected exactly one VM identifier")
 	}
-	vmItem := resolved.VMs[0]
+	vmItem := vms[0]
 	// Resolve volume using VolumeResolver.
 	volResolver := volume.NewResolver(op.Repos.Volume)
 	vol, err := volResolver.Resolve(ctx, volumeName)
@@ -1560,30 +1481,17 @@ func (op *Operation) VMDetachVolume(
 			errs.WithClass(errs.ClassNeedsInteraction),
 		)
 	}
-	// Resolve VM using VMRequest pipeline.
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{
-			Identifiers: input.Identifiers,
-			Force:       input.Force,
-		},
-		op.Connection.DB(),
-		op.Repos.VM,
-	)
-	resolved, resolveErr := vmRequest.Resolve(ctx)
+	vms, resolveErr := input.Resolve(ctx, op.Repos.VM)
 	if resolveErr != nil {
 		return errs.NotFound(errs.CodeVMNotFound, fmt.Sprintf("VM not found: %v", resolveErr))
 	}
-	if op.Enr != nil && len(resolved.VMs) > 0 {
-		_ = op.Enr.EnrichVM(ctx, resolved.VMs, "kernel", "image", "binary", "network", "network.leases", "volumes")
-		// Enrichment is best-effort: enriched data improves inspect output but is not
-		// required for the operation to succeed. A failed enrichment should not fail
-		// the operation itself.
+	if op.Enr != nil && len(vms) > 0 {
+		_ = op.Enr.EnrichVM(ctx, vms, "kernel", "image", "binary", "network", "network.leases", "volumes")
 	}
-	if len(resolved.VMs) != 1 {
+	if len(vms) != 1 {
 		return errs.NotFound(errs.CodeVMNotFound, "Expected exactly one VM identifier")
 	}
-	vmItem := resolved.VMs[0]
-	// Resolve volume using VolumeResolver.
+	vmItem := vms[0]
 	volResolver := volume.NewResolver(op.Repos.Volume)
 	vol, err := volResolver.Resolve(ctx, volumeName)
 	if err != nil {
@@ -1645,47 +1553,9 @@ func (op *Operation) VMDetachVolume(
 // For non-interactive execution, output is captured and returned as structured result.
 // For interactive shell, I/O is connected directly to the terminal and no result is returned.
 func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error) {
-	if input.Identifier == "" {
-		return nil, errs.New(errs.CodeVMNotFound, "no VM identifier provided", errs.WithClass(errs.ClassValidation))
-	}
-	// Resolve the VM.
-	vmResolver := vm.NewResolver(op.Repos.VM)
-	vmItem, err := vmResolver.Resolve(ctx, input.Identifier)
+	resolved, err := input.Resolve(ctx, op.Repos.VM, op.Repos.Vsock)
 	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeVMNotFound, fmt.Sprintf("vm not found: %s", input.Identifier), err)
-	}
-	// Retrieve vsock configuration
-	vsockItem, err := op.Repos.Vsock.GetByVMID(ctx, vmItem.ID)
-	if err != nil {
-		return nil, errs.WrapMsg(
-			errs.CodeVsockNotFound,
-			fmt.Sprintf("failed to get vsock config for vm '%s'", vmItem.Name),
-			err,
-		)
-	}
-	if vsockItem == nil {
-		return nil, errs.New(
-			errs.CodeVsockNotFound,
-			fmt.Sprintf("vm '%s' has no vsock agent configured. Create with --vsock-port to enable.", vmItem.Name),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	// Determine port: input overrides config, config defaults to 1024
-	port := vsockItem.Port
-	if input.Port > 0 {
-		port = input.Port
-	}
-	// Build a copy of the config with the effective port
-	item := &model.VsockConfigItem{
-		ID:               vsockItem.ID,
-		VmID:             vsockItem.VmID,
-		GuestCID:         vsockItem.GuestCID,
-		UDSPath:          vsockItem.UDSPath,
-		Port:             port,
-		Token:            vsockItem.Token,
-		AgentVersion:     vsockItem.AgentVersion,
-		Upgrading:        vsockItem.Upgrading,
-		UpgradeStartedAt: vsockItem.UpgradeStartedAt,
+		return nil, err
 	}
 	// Read probe timeout from config (defaults.vm.vsock_probe_timeout in constants.go).
 	probeTimeout, err := op.Services.Config.GetDuration(ctx, "defaults.vm", "vsock_probe_timeout")
@@ -1695,7 +1565,7 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 			"vsock_probe_timeout not configured — check defaults.vm.vsock_probe_timeout",
 		)
 	}
-	client, err := op.newVsockClient(ctx, item, probeTimeout, vmItem.Name)
+	client, err := op.newVsockClient(ctx, resolved.VsockItem, probeTimeout, resolved.VM.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -1705,13 +1575,13 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 		if err := client.Shell(ctx, input.User); err != nil {
 			return nil, errs.WrapMsg(
 				errs.CodeVsockExecFailed,
-				fmt.Sprintf("vsock shell session failed for vm '%s'", vmItem.Name),
+				fmt.Sprintf("vsock shell session failed for vm '%s'", resolved.VM.Name),
 				err,
 			)
 		}
 		return nil, nil
 	}
-	user := input.User
+	user := resolved.User
 	if user == "" {
 		user, _ = op.Services.Config.GetString(ctx, "defaults.vm", "vsock_user")
 	}
@@ -1719,7 +1589,7 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeVsockExecFailed,
-			fmt.Sprintf("vsock exec failed for vm '%s'", vmItem.Name),
+			fmt.Sprintf("vsock exec failed for vm '%s'", resolved.VM.Name),
 			err,
 		)
 	}
