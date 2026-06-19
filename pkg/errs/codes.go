@@ -157,6 +157,13 @@ const (
 	CodeBundledAssetError    Code = "bundled_asset.error"
 	CodeBundledAssetNotFound Code = "bundled_asset.not_found"
 
+	// --- Snapshot domain ---
+	CodeSnapshotNotFound      Code = "snapshot.not_found"
+	CodeSnapshotAlreadyExists Code = "snapshot.already_exists"
+	CodeSnapshotCreateFailed  Code = "snapshot.create_failed"
+	CodeSnapshotRestoreFailed Code = "snapshot.restore_failed"
+	CodeSnapshotRemoveFailed  Code = "snapshot.remove_failed"
+
 	// --- Common ---
 	CodeNetworkError         Code = "network.error"
 	CodeKeyError             Code = "key.error"

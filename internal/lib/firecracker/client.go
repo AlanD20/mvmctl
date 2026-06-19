@@ -1,4 +1,4 @@
-package vm
+package firecracker
 
 import (
 	"context"
@@ -22,20 +22,20 @@ const (
 	constSocketTimeoutSeconds = 5.0
 )
 
-// FirecrackerClient provides HTTP access to the Firecracker API over a Unix socket.
-type FirecrackerClient struct {
+// Client provides HTTP access to the Firecracker API over a Unix socket.
+type Client struct {
 	socketPath string
 	httpClient *http.Client
 }
 
-// NewFirecrackerClient creates a new client connected to the given Unix socket path.
-func NewFirecrackerClient(socketPath string) *FirecrackerClient {
+// NewClient creates a new client connected to the given Unix socket path.
+func NewClient(socketPath string) *Client {
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 			return net.DialTimeout("unix", socketPath, constSocketTimeoutSeconds*time.Second)
 		},
 	}
-	return &FirecrackerClient{
+	return &Client{
 		socketPath: socketPath,
 		httpClient: &http.Client{
 			Transport: transport,
@@ -45,7 +45,7 @@ func NewFirecrackerClient(socketPath string) *FirecrackerClient {
 }
 
 // Close shuts down the Firecracker API client connection.
-func (fc *FirecrackerClient) Close() {
+func (fc *Client) Close() {
 	fc.httpClient.CloseIdleConnections()
 }
 
@@ -56,7 +56,7 @@ func (fc *FirecrackerClient) Close() {
 // - DomainError with CodeFirecrackerSocketNotFound when socket doesn't exist
 // - On ECONNREFUSED: retry with reconnect
 // - Returns (status, body, error) where body is the raw response body bytes.
-func (fc *FirecrackerClient) request(
+func (fc *Client) request(
 	ctx context.Context,
 	method, path string,
 	body map[string]any,
@@ -138,7 +138,7 @@ func isConnRefused(err error) bool {
 // --- Snapshot Operations ---
 
 // CreateSnapshot creates a VM snapshot via PUT /snapshot/create.
-func (fc *FirecrackerClient) CreateSnapshot(ctx context.Context, memPath, snapshotPath string) (bool, error) {
+func (fc *Client) CreateSnapshot(ctx context.Context, memPath, snapshotPath string) (bool, error) {
 	slog.Debug("Creating snapshot...")
 	body := map[string]any{
 		"mem_file_path": memPath,
@@ -160,7 +160,7 @@ func (fc *FirecrackerClient) CreateSnapshot(ctx context.Context, memPath, snapsh
 }
 
 // LoadSnapshot loads a VM from snapshot via PUT /snapshot/load.
-func (fc *FirecrackerClient) LoadSnapshot(
+func (fc *Client) LoadSnapshot(
 	ctx context.Context,
 	memPath, snapshotPath string,
 	resume bool,
@@ -189,7 +189,7 @@ func (fc *FirecrackerClient) LoadSnapshot(
 // --- Instance Info Operations ---
 
 // GetInstanceInfo returns VM instance information via GET /.
-func (fc *FirecrackerClient) GetInstanceInfo(ctx context.Context) (*model.InstanceInfo, error) {
+func (fc *Client) GetInstanceInfo(ctx context.Context) (*model.InstanceInfo, error) {
 	status, body, err := fc.request(ctx, "GET", "/", nil)
 	if err != nil {
 		return nil, err
@@ -205,7 +205,7 @@ func (fc *FirecrackerClient) GetInstanceInfo(ctx context.Context) (*model.Instan
 }
 
 // DescribeInstance returns a VM description via GET /vm.
-func (fc *FirecrackerClient) DescribeInstance(ctx context.Context) (*model.InstanceDescription, error) {
+func (fc *Client) DescribeInstance(ctx context.Context) (*model.InstanceDescription, error) {
 	status, body, err := fc.request(ctx, "GET", "/vm", nil)
 	if err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func (fc *FirecrackerClient) DescribeInstance(ctx context.Context) (*model.Insta
 // --- VM Lifecycle Operations ---
 
 // StartInstance starts the VM instance via PUT /actions with action_type InstanceStart.
-func (fc *FirecrackerClient) StartInstance(ctx context.Context) (bool, error) {
+func (fc *Client) StartInstance(ctx context.Context) (bool, error) {
 	slog.Debug("Starting VM...")
 	status, _, err := fc.request(ctx, "PUT", "/actions", map[string]any{"action_type": "InstanceStart"})
 	if err != nil {
@@ -240,7 +240,7 @@ func (fc *FirecrackerClient) StartInstance(ctx context.Context) (bool, error) {
 // SendCtrlAltDel sends Ctrl+Alt+Del to the VM via PUT /actions.
 // DomainError (from Firecracker client) and socket-not-found errors are
 // absorbed (return false, nil). All other errors propagate (return false, err).
-func (fc *FirecrackerClient) SendCtrlAltDel(ctx context.Context) (bool, error) {
+func (fc *Client) SendCtrlAltDel(ctx context.Context) (bool, error) {
 	status, _, err := fc.request(ctx, "PUT", "/actions", map[string]any{"action_type": "SendCtrlAltDel"})
 	if err != nil {
 		var de *errs.DomainError
@@ -259,7 +259,7 @@ func (fc *FirecrackerClient) SendCtrlAltDel(ctx context.Context) (bool, error) {
 }
 
 // PauseVM pauses the microVM via PATCH /vm with state: "Paused".
-func (fc *FirecrackerClient) PauseVM(ctx context.Context) error {
+func (fc *Client) PauseVM(ctx context.Context) error {
 	slog.Debug("Pausing VM...")
 	status, _, err := fc.request(ctx, "PATCH", "/vm", map[string]any{"state": "Paused"})
 	if err != nil {
@@ -274,7 +274,7 @@ func (fc *FirecrackerClient) PauseVM(ctx context.Context) error {
 }
 
 // ResumeVM resumes a paused microVM via PATCH /vm with state: "Resumed".
-func (fc *FirecrackerClient) ResumeVM(ctx context.Context) error {
+func (fc *Client) ResumeVM(ctx context.Context) error {
 	slog.Debug("Resuming VM...")
 	status, _, err := fc.request(ctx, "PATCH", "/vm", map[string]any{"state": "Resumed"})
 	if err != nil {
@@ -291,7 +291,7 @@ func (fc *FirecrackerClient) ResumeVM(ctx context.Context) error {
 // --- Drive Operations ---
 
 // PutDrive attaches or updates a drive via PUT /drives/{drive_id}.
-func (fc *FirecrackerClient) PutDrive(ctx context.Context, driveConfig model.DriveConfig) error {
+func (fc *Client) PutDrive(ctx context.Context, driveConfig model.DriveConfig) error {
 	body := map[string]any{
 		"drive_id":       driveConfig.DriveID,
 		"path_on_host":   driveConfig.PathOnHost,
@@ -315,7 +315,7 @@ func (fc *FirecrackerClient) PutDrive(ctx context.Context, driveConfig model.Dri
 }
 
 // PatchDrive removes a drive from a running VM via PATCH /drives/{drive_id}.
-func (fc *FirecrackerClient) PatchDrive(ctx context.Context, driveID string) error {
+func (fc *Client) PatchDrive(ctx context.Context, driveID string) error {
 	body := map[string]any{"drive_id": driveID}
 	status, raw, err := fc.request(ctx, "PATCH", "/drives/"+driveID, body)
 	if err != nil {
@@ -332,7 +332,7 @@ func (fc *FirecrackerClient) PatchDrive(ctx context.Context, driveID string) err
 }
 
 // DeleteDrive removes a drive from a running VM via DELETE /drives/{drive_id}.
-func (fc *FirecrackerClient) DeleteDrive(ctx context.Context, driveID string) error {
+func (fc *Client) DeleteDrive(ctx context.Context, driveID string) error {
 	status, raw, err := fc.request(ctx, "DELETE", "/drives/"+driveID, nil)
 	if err != nil {
 		return err

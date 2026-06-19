@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
@@ -96,7 +97,7 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) e
 		apiSocket := c.vm.APISocketPath
 
 		// Try graceful shutdown via Firecracker API first
-		client := NewFirecrackerClient(apiSocket)
+		client := firecracker.NewClient(apiSocket)
 		wasCtrlAltDel, ctrlErr := client.SendCtrlAltDel(ctx)
 		client.Close()
 
@@ -196,7 +197,7 @@ func (c *Controller) Pause(ctx context.Context) error {
 
 	// APISocketPath is already a full path from DB
 	apiSocket := c.vm.APISocketPath
-	client := NewFirecrackerClient(apiSocket)
+	client := firecracker.NewClient(apiSocket)
 	defer client.Close()
 
 	if err := client.PauseVM(ctx); err != nil {
@@ -252,7 +253,7 @@ func (c *Controller) Resume(ctx context.Context) error {
 
 	// APISocketPath is already a full path from DB
 	apiSocket := c.vm.APISocketPath
-	client := NewFirecrackerClient(apiSocket)
+	client := firecracker.NewClient(apiSocket)
 	defer client.Close()
 
 	if err := client.ResumeVM(ctx); err != nil {
@@ -309,7 +310,7 @@ func (c *Controller) Start(ctx context.Context) error {
 
 	// APISocketPath is already a full path from DB
 	apiSocket := c.vm.APISocketPath
-	client := NewFirecrackerClient(apiSocket)
+	client := firecracker.NewClient(apiSocket)
 	defer client.Close()
 
 	if _, err := client.StartInstance(ctx); err != nil {
@@ -362,7 +363,7 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 
 	// APISocketPath is already a full path from DB
 	apiSocket := c.vm.APISocketPath
-	client := NewFirecrackerClient(apiSocket)
+	client := firecracker.NewClient(apiSocket)
 	wasRunning := c.vm.Status == model.VMStatusRunning
 
 	defer func() {
@@ -416,7 +417,7 @@ func (c *Controller) LoadSnapshot(ctx context.Context, memIn, stateIn string, re
 
 	// APISocketPath is already a full path from DB
 	apiSocket := c.vm.APISocketPath
-	client := NewFirecrackerClient(apiSocket)
+	client := firecracker.NewClient(apiSocket)
 	defer client.Close()
 
 	if _, err := client.LoadSnapshot(ctx, memIn, stateIn, resumeAfter); err != nil {
@@ -446,7 +447,7 @@ func (c *Controller) AttachVolume(ctx context.Context, driveConfig model.DriveCo
 	configPath := c.vm.ConfigPath
 
 	// Hotplug into the running Firecracker process
-	client := NewFirecrackerClient(apiSocket)
+	client := firecracker.NewClient(apiSocket)
 	err := client.PutDrive(ctx, driveConfig)
 	client.Close()
 	if err != nil {
@@ -471,7 +472,7 @@ func (c *Controller) DetachVolume(ctx context.Context, driveID string) error {
 	configPath := c.vm.ConfigPath
 
 	// Call Firecracker API to delete the drive
-	client := NewFirecrackerClient(apiSocket)
+	client := firecracker.NewClient(apiSocket)
 	err := client.DeleteDrive(ctx, driveID)
 	client.Close()
 	if err != nil {

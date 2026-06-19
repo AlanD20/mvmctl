@@ -240,6 +240,13 @@ var codeClassMap = map[Code]Class{
 	// --- Cache ---
 	CodeCacheCleanFailed: ClassInternal,
 
+	// --- Snapshot domain ---
+	CodeSnapshotNotFound:      ClassValidation,
+	CodeSnapshotAlreadyExists: ClassConflict,
+	CodeSnapshotCreateFailed:  ClassInternal,
+	CodeSnapshotRestoreFailed: ClassInternal,
+	CodeSnapshotRemoveFailed:  ClassInternal,
+
 	// --- Common ---
 	CodeNetworkError:         ClassInternal,
 	CodeKeyError:             ClassInternal,
@@ -390,6 +397,12 @@ var codeOpMap = map[Code]string{
 	CodeVsockUpgradeInProgress: "vsock",
 
 	CodeCacheCleanFailed: "cache",
+
+	CodeSnapshotNotFound:      "snapshot",
+	CodeSnapshotAlreadyExists: "snapshot",
+	CodeSnapshotCreateFailed:  "snapshot",
+	CodeSnapshotRestoreFailed: "snapshot",
+	CodeSnapshotRemoveFailed:  "snapshot",
 
 	CodeDatabaseError:        "db",
 	CodeMigrationFailed:      "db",

@@ -1,6 +1,6 @@
 -- Migration: 001_initial_schema
 -- Version: 1
--- Description: Initial database schema with 10 tables
+-- Description: Initial database schema with 11 tables (added snapshots)
 -- Created: 2026-04-02
 
 -- IMAGES: OS image metadata
@@ -370,6 +370,34 @@ CREATE TABLE vm_vsock_config (
 );
 CREATE INDEX idx_vsock_config_vm ON vm_vsock_config(vm_id);
 CREATE INDEX idx_vsock_config_cid ON vm_vsock_config(guest_cid);
+
+-- SNAPSHOTS: Managed Firecracker snapshot metadata
+CREATE TABLE snapshots (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    source_vm_id TEXT NOT NULL,
+    source_vm_name TEXT NOT NULL,
+    snapshot_dir TEXT NOT NULL,
+    memory_file TEXT NOT NULL,
+    state_file TEXT NOT NULL,
+    rootfs_file TEXT NOT NULL,
+    kernel_id TEXT NOT NULL,
+    network_id TEXT NOT NULL,
+    binary_id TEXT NOT NULL,
+    vcpu_count INTEGER NOT NULL,
+    mem_size_mib INTEGER NOT NULL,
+    disk_size_mib INTEGER NOT NULL,
+    ssh_keys TEXT NULL,
+    ssh_user TEXT NULL,
+    image_id TEXT NOT NULL,
+    extra_config TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+CREATE INDEX idx_snapshots_name ON snapshots(name);
+CREATE INDEX idx_snapshots_kernel ON snapshots(kernel_id);
+CREATE INDEX idx_snapshots_network ON snapshots(network_id);
+CREATE INDEX idx_snapshots_binary ON snapshots(binary_id);
 
 -- Set schema version
 PRAGMA user_version = 1;

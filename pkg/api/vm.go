@@ -5,11 +5,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"mvmctl/internal/core/binary"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"mvmctl/internal/core/cloudinit"
 	"mvmctl/internal/core/console"
 	"mvmctl/internal/core/image"
-	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
@@ -26,12 +31,6 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
-	"os"
-	"path/filepath"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 // VMAPI defines the public interface for VM operations.
@@ -51,8 +50,6 @@ type VMAPI interface {
 	VMReboot(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMPause(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 	VMResume(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMSnapshot(ctx context.Context, input inputs.VMInput, memFile string, stateFile string) error
-	VMLoad(ctx context.Context, input inputs.VMInput, memFile string, stateFile string, resume bool, rootfs string) error
 	VMAttachVolume(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMDetachVolume(ctx context.Context, input inputs.VMInput, volumeName string) error
 	VMExec(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
@@ -1269,189 +1266,6 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	v.ProcessStartTime = pst
 	v.Status = newStatus
 	return nil
-}
-
-// --- Snapshot / Load ---
-// Snapshot creates a snapshot of a single VM.
-// Resolves exactly one VM; returns it in all cases.
-// memFile and stateFile are output paths for the snapshot files.
-func (op *Operation) VMSnapshot(
-	ctx context.Context,
-	input inputs.VMInput,
-	memFile string,
-	stateFile string,
-) error {
-	// Resolve relative paths against the caller's working directory.
-	// Firecracker resolves paths relative to its own CWD (set at spawn time),
-	// which may differ from the caller's CWD at snapshot time.
-	var err error
-	memFile, err = filepath.Abs(memFile)
-	if err != nil {
-		return errs.New(errs.CodeVMSnapshotFailed, fmt.Sprintf("invalid mem_file path: %v", err))
-	}
-	stateFile, err = filepath.Abs(stateFile)
-	if err != nil {
-		return errs.New(errs.CodeVMSnapshotFailed, fmt.Sprintf("invalid state_file path: %v", err))
-	}
-
-	// Exactly one VM must be resolved.
-	vmResolver := vm.NewResolver(op.Repos.VM)
-	vmItem, err := vmResolver.Resolve(ctx, input.Identifiers[0])
-	if err != nil {
-		return errs.NotFound(errs.CodeVMNotFound, fmt.Sprintf("VM not found: %s", input.Identifiers[0]))
-	}
-	controller := vm.NewController(vmItem, op.Repos.VM)
-	if err := controller.Snapshot(ctx, memFile, stateFile); err != nil {
-		return errs.WrapMsg(
-			errs.CodeVMSnapshotFailed,
-			fmt.Sprintf("Failed to snapshot VM '%s': %v", vmItem.Name, err),
-			err,
-		)
-	}
-	op.AuditLog.LogOperation("vm.snapshot", nil, fmt.Sprintf("name=%s", vmItem.Name))
-	return nil
-}
-
-// Load loads (resumes from snapshot) a single VM.
-// memFile and stateFile are input snapshot file paths; resume controls whether
-// VM starts after load.
-// rootfs is required when the VM identifier does not exist (new VM from snapshot).
-func (op *Operation) VMLoad(
-	ctx context.Context,
-	input inputs.VMInput,
-	memFile string,
-	stateFile string,
-	resume bool,
-	rootfs string,
-) error {
-	repo := op.Repos.VM
-	// Validate only one VM for load
-	if len(input.Identifiers) != 1 {
-		return errs.NotFound(errs.CodeVMNotFound, "Expected exactly one VM identifier")
-	}
-	// Resolve relative paths against the caller's working directory.
-	// Firecracker resolves paths relative to its own CWD (set at spawn time),
-	// which may differ from the caller's CWD at snapshot/load time.
-	var err error
-	memFile, err = filepath.Abs(memFile)
-	if err != nil {
-		return errs.New(errs.CodeVMLoadSnapshotFailed, fmt.Sprintf("invalid mem_file path: %v", err))
-	}
-	stateFile, err = filepath.Abs(stateFile)
-	if err != nil {
-		return errs.New(errs.CodeVMLoadSnapshotFailed, fmt.Sprintf("invalid state_file path: %v", err))
-	}
-	var missing []string
-	if _, err := os.Stat(memFile); err != nil {
-		if os.IsNotExist(err) {
-			missing = append(missing, memFile)
-		}
-	}
-	if _, err := os.Stat(stateFile); err != nil {
-		if os.IsNotExist(err) {
-			missing = append(missing, stateFile)
-		}
-	}
-	if len(missing) > 0 {
-		paths := strings.Join(missing, ", ")
-		return errs.New(
-			errs.CodeVMLoadSnapshotFailed,
-			fmt.Sprintf("Snapshot file(s) not found: %s", paths),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	// Resolve VM — if not found, create a new record for snapshot load.
-	vmResolver := vm.NewResolver(op.Repos.VM)
-	vmItem, err := vmResolver.Resolve(ctx, input.Identifiers[0])
-	if err != nil {
-		if rootfs == "" {
-			return errs.New(
-				errs.CodeVMLoadSnapshotFailed,
-				fmt.Sprintf("VM not found: %s. Use --rootfs to create a new VM from this snapshot.", input.Identifiers[0]),
-				errs.WithClass(errs.ClassValidation),
-			)
-		}
-		// Auto-create a new VM record for the snapshot load.
-		vmItem, err = op.vmCreateForSnapshot(ctx, input.Identifiers[0], rootfs)
-		if err != nil {
-			return errs.WrapMsg(errs.CodeVMLoadSnapshotFailed, "Failed to create VM for snapshot load", err)
-		}
-	}
-	// Enrich VM with relations (needed for respawn and snapshot load).
-	op.Enr.EnrichVM(ctx, []*model.VMItem{vmItem}, "kernel", "image", "binary", "network")
-	// If the VM is stopped, spawn a fresh Firecracker in pre-boot (snapshot) mode
-	// so the API socket is available for PUT /snapshot/load.
-	if vmItem.Status == model.VMStatusStopped {
-		if err := op.vmRespawnFirecracker(ctx, vmItem, true); err != nil {
-			return errs.WrapMsg(
-				errs.CodeVMLoadSnapshotFailed,
-				fmt.Sprintf("Failed to respawn Firecracker for snapshot load: %v", err),
-				err,
-			)
-		}
-		// Re-read updated VM from DB after respawn:
-		updated, getErr := repo.Get(ctx, vmItem.ID)
-		if getErr == nil && updated != nil {
-			vmItem = updated
-		}
-	}
-	controller := vm.NewController(vmItem, repo)
-	if err := controller.LoadSnapshot(ctx, memFile, stateFile, resume); err != nil {
-		return errs.WrapMsg(
-			errs.CodeVMLoadSnapshotFailed,
-			fmt.Sprintf("Failed to load snapshot for VM '%s': %v", vmItem.Name, err),
-			err,
-		)
-	}
-	op.AuditLog.LogOperation("vm.load", nil, fmt.Sprintf("name=%s", vmItem.Name))
-	return nil
-}
-
-// vmCreateForSnapshot creates a new VM record for snapshot load with defaults
-// from config (kernel, network, binary, image) and the provided rootfs path.
-func (op *Operation) vmCreateForSnapshot(ctx context.Context, name, rootfs string) (*model.VMItem, error) {
-	now := time.Now().UTC().Format(time.RFC3339)
-	vmItem := &model.VMItem{
-		ID:         crypto.VMID(name, now),
-		Name:       name,
-		Status:     model.VMStatusStopped,
-		RootfsPath: rootfs,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-	}
-
-	// Resolve default kernel.
-	kernelResolver := kernel.NewResolver(op.Repos.Kernel, nil)
-	kernelItem, err := kernelResolver.GetDefault(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("no default kernel configured: %w", err)
-	}
-	vmItem.KernelID = kernelItem.ID
-	vmItem.Kernel = kernelItem
-
-	// Resolve default network.
-	networkResolver := network.NewResolver(op.Repos.Network, []string{"leases"})
-	networkItem, err := networkResolver.GetDefault(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("no default network configured: %w", err)
-	}
-	vmItem.NetworkID = networkItem.ID
-	vmItem.Network = networkItem
-
-	// Resolve default firecracker binary.
-	binaryResolver := binary.NewResolver(op.Repos.Binary)
-	binaryItem, err := binaryResolver.GetDefault(ctx, "firecracker")
-	if err != nil {
-		return nil, fmt.Errorf("no default firecracker binary configured: %w", err)
-	}
-	vmItem.BinaryID = binaryItem.ID
-
-	// Insert into DB.
-	if err := op.Repos.VM.Upsert(ctx, vmItem); err != nil {
-		return nil, fmt.Errorf("failed to save VM record: %w", err)
-	}
-
-	return vmItem, nil
 }
 
 // --- Reboot / Pause / Resume ---

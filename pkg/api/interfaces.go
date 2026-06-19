@@ -19,6 +19,7 @@ type API interface {
 	LogAPI
 	CPAPI
 	InitAPI
+	SnapshotAPI
 }
 
 // Compile-time check that *Operation satisfies the API interface.

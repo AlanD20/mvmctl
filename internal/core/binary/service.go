@@ -203,14 +203,22 @@ func (s *Service) DownloadFirecracker(
 func (s *Service) Remove(ctx context.Context, binary *model.BinaryItem, force bool) (*model.BinaryItem, error) {
 	vms := binary.VMs
 	hasVMs := len(vms) > 0
+	hasSnapshots := len(binary.Snapshots) > 0
 
-	if hasVMs && !force {
-		vmNames := make([]string, 0, len(vms))
+	if (hasVMs || hasSnapshots) && !force {
+		var refs []string
 		for _, vm := range vms {
-			vmNames = append(vmNames, vm.Name)
+			refs = append(refs, vm.Name)
+		}
+		if hasSnapshots {
+			names := make([]string, len(binary.Snapshots))
+			for i, s := range binary.Snapshots {
+				names[i] = s.Name
+			}
+			refs = append(refs, fmt.Sprintf("%d snapshot(s): %s", len(binary.Snapshots), strings.Join(names, ", ")))
 		}
 		return nil, binaryError(errs.CodeValidationFailed,
-			fmt.Sprintf("Binary referenced by VMs: %s", strings.Join(vmNames, ", ")),
+			fmt.Sprintf("Binary referenced by: %s", strings.Join(refs, ", ")),
 		)
 	}
 
@@ -220,8 +228,8 @@ func (s *Service) Remove(ctx context.Context, binary *model.BinaryItem, force bo
 		}
 	}
 
-	// Hard delete if no VMs, soft delete if VMs exist (with force)
-	if hasVMs {
+	// Hard delete if no VMs/snapshots, soft delete if references exist (with force)
+	if hasVMs || hasSnapshots {
 		if err := s.repo.SoftDelete(ctx, binary.ID); err != nil {
 			return nil, err
 		}

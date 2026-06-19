@@ -92,6 +92,15 @@ func BatchID(name, createdAt string) string {
 	return Truncate(fmt.Sprintf("%x", h.Sum(nil)), 16)
 }
 
+// SnapshotID generates a 64-char SHA256 snapshot ID from source VM ID and
+// creation timestamp. Full 64 chars (no truncation) since snapshot IDs are
+// not used in Unix domain socket paths.
+func SnapshotID(sourceVMID, createdAt string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "%s:%s", sourceVMID, createdAt)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 // VolumeID generates a SHA256 volume ID from name and creation timestamp.
 func VolumeID(name, createdAt string) string {
 	h := sha256.New()

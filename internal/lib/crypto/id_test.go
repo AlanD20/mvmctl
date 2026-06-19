@@ -3,6 +3,7 @@ package crypto_test
 import (
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -127,6 +128,55 @@ func TestVolumeID(t *testing.T) {
 		got := crypto.VolumeID("vol-1", "2024-01-01T00:00:00Z")
 		assert.Len(t, got, 64)
 	})
+}
+
+// --- SnapshotID ---
+// Rationale: SnapshotID generates a 64-char SHA256 hex digest from source VM
+// ID and creation timestamp. Bugs here cause snapshot identity collisions or
+// lookup failures — the ID is the primary key in the snapshots table.
+
+func TestSnapshotID(t *testing.T) {
+	t.Run("deterministic", func(t *testing.T) {
+		// CONTRACT: Same inputs always produce same output.
+		// Expected value is computed by a known SHA-256 of "vm-1:2024-01-01T00:00:00Z"
+		// which is the documented SnapshotID algorithm.
+		const want = "bbea08ed860f5d6db9284026d2f50774b22cedbc27790e6e3d08d8d683c9f25c"
+		got := crypto.SnapshotID("vm-1", "2024-01-01T00:00:00Z")
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Errorf("SnapshotID() determinism mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("different_inputs_different_outputs", func(t *testing.T) {
+		a := crypto.SnapshotID("vm-1", "2024-01-01T00:00:00Z")
+		b := crypto.SnapshotID("vm-2", "2024-01-01T00:00:00Z")
+		if diff := cmp.Diff(a, b); diff == "" {
+			t.Errorf("SnapshotID() must produce different outputs for different inputs")
+		}
+	})
+
+	// Table-driven format and boundary checks (no error return, so no error rows)
+	tests := map[string]struct {
+		sourceVMID string
+		createdAt  string
+	}{
+		"basic_case":    {sourceVMID: "vm-1", createdAt: "2024-01-01T00:00:00Z"},
+		"empty_source":  {sourceVMID: "", createdAt: "2024-01-01T00:00:00Z"},
+		"empty_created": {sourceVMID: "vm-1", createdAt: ""},
+		"both_empty":    {sourceVMID: "", createdAt: ""},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := crypto.SnapshotID(tc.sourceVMID, tc.createdAt)
+			// CONTRACT: Full 64 chars (no truncation) since snapshot IDs are
+			// not used in Unix domain socket paths.
+			assert.Len(t, got, 64, "SnapshotID must be 64 hex chars")
+			// CONTRACT: Output is lowercase hex (fmt.Sprintf("%x", ...))
+			assert.Regexp(t, "^[0-9a-f]{64}$", got,
+				"SnapshotID must be 64 lowercase hex characters")
+		})
+	}
 }
 
 // --- ShortenID ---
