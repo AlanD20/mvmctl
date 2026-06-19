@@ -158,9 +158,9 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 			},
 		}
 	}
-	// Enrich binaries with VM references.
+	// Enrich binaries with VM and snapshot references.
 	enriched := resolved.Binaries
-	op.Enr.EnrichBinary(ctx, enriched, "vm")
+	op.Enr.EnrichBinary(ctx, enriched, "vm", "snapshots")
 	items := make([]errs.OperationResult, 0)
 	for _, bin := range enriched {
 		// svc.Remove returns (*BinaryItem, error)

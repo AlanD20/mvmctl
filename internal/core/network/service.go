@@ -503,20 +503,29 @@ func (s *Service) Remove(ctx context.Context, network *model.NetworkItem, force 
 		}
 	}
 
-	// 3. VM reference check + DB removal
+	// 3. VM + snapshot reference check + DB removal
 	hasVMs := len(network.VMs) > 0
-	if hasVMs && !force {
-		vmNames := make([]string, 0, len(network.VMs))
+	hasSnapshots := len(network.Snapshots) > 0
+
+	if (hasVMs || hasSnapshots) && !force {
+		var refs []string
 		for _, vm := range network.VMs {
 			if vm != nil {
-				vmNames = append(vmNames, vm.Name)
+				refs = append(refs, vm.Name)
 			}
 		}
+		if hasSnapshots {
+			names := make([]string, len(network.Snapshots))
+			for i, s := range network.Snapshots {
+				names[i] = s.Name
+			}
+			refs = append(refs, fmt.Sprintf("%d snapshot(s): %s", len(network.Snapshots), strings.Join(names, ", ")))
+		}
 		return errs.New(errs.CodeNetworkError,
-			fmt.Sprintf("model.NetworkItem referenced by VMs: %s", strings.Join(vmNames, ", ")))
+			fmt.Sprintf("Network referenced by: %s", strings.Join(refs, ", ")))
 	}
 
-	if hasVMs {
+	if hasVMs || hasSnapshots {
 		return s.repo.SoftDelete(ctx, network.ID)
 	}
 	return s.repo.Delete(ctx, network.ID)

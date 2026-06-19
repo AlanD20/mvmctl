@@ -39,6 +39,44 @@ func (c CpuConfig) Value() (driver.Value, error) {
 	return json.Marshal(c)
 }
 
+// --- SnapshotExtraConfig ---
+
+// SnapshotExtraConfig preserves the source VM's Firecracker boot configuration
+// at snapshot time. Stored as JSON TEXT in the snapshots.extra_config column.
+type SnapshotExtraConfig struct {
+	BootArgs      string     `json:"boot_args,omitempty"`
+	LSMFlags      string     `json:"lsm_flags,omitempty"`
+	PCIEnabled    bool       `json:"pci_enabled,omitempty"`
+	NestedVirt    bool       `json:"nested_virt,omitempty"`
+	Console       bool       `json:"console,omitempty"`
+	EnableLogging bool       `json:"enable_logging,omitempty"`
+	EnableMetrics bool       `json:"enable_metrics,omitempty"`
+	LogLevel      string     `json:"log_level,omitempty"`
+	CPUConfig     *CpuConfig `json:"cpu_config,omitempty"`
+}
+
+// Scan implements sql.Scanner for reading JSON TEXT into SnapshotExtraConfig.
+func (c *SnapshotExtraConfig) Scan(src any) error {
+	if src == nil {
+		return nil
+	}
+	var val string
+	switch v := src.(type) {
+	case []byte:
+		val = string(v)
+	case string:
+		val = v
+	default:
+		return fmt.Errorf("model.SnapshotExtraConfig: unsupported scan type %T", src)
+	}
+	return json.Unmarshal([]byte(val), c)
+}
+
+// Value implements driver.Valuer for writing SnapshotExtraConfig as JSON TEXT.
+func (c SnapshotExtraConfig) Value() (driver.Value, error) {
+	return json.Marshal(c)
+}
+
 // --- CpuidRegisterModifier ---
 
 type CpuidRegisterModifier struct {

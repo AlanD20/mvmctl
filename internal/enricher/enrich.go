@@ -15,6 +15,7 @@ import (
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/network"
+	"mvmctl/internal/core/snapshot"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/core/vsock"
@@ -72,6 +73,11 @@ var NetworkRelations = map[string]model.RelationSpec{
 		Method: "by_network_id_batch", RelationName: "vm",
 		IsReverse: true, BatchMethod: "by_network_id_batch",
 	},
+	"snapshots": {
+		FKField: "id", Resolver: "snapshot",
+		Method: "by_network_id_batch", RelationName: "snapshots",
+		IsReverse: true, BatchMethod: "by_network_id_batch",
+	},
 }
 
 // ImageRelations defines resolvable image relations.
@@ -90,6 +96,11 @@ var KernelRelations = map[string]model.RelationSpec{
 		Method: "by_kernel_id_batch", RelationName: "vm",
 		IsReverse: true, BatchMethod: "by_kernel_id_batch",
 	},
+	"snapshots": {
+		FKField: "id", Resolver: "snapshot",
+		Method: "by_kernel_id_batch", RelationName: "snapshots",
+		IsReverse: true, BatchMethod: "by_kernel_id_batch",
+	},
 }
 
 // BinaryRelations defines resolvable binary relations.
@@ -97,6 +108,11 @@ var BinaryRelations = map[string]model.RelationSpec{
 	"vm": {
 		FKField: "id", Resolver: "vm",
 		Method: "by_binary_id_batch", RelationName: "vm",
+		IsReverse: true, BatchMethod: "by_binary_id_batch",
+	},
+	"snapshots": {
+		FKField: "id", Resolver: "snapshot",
+		Method: "by_binary_id_batch", RelationName: "snapshots",
 		IsReverse: true, BatchMethod: "by_binary_id_batch",
 	},
 }
@@ -117,14 +133,15 @@ var KeyRelations = map[string]model.RelationSpec{}
 
 // Enricher provides cross-domain enrichment — populating relation fields.
 type Enricher struct {
-	vmRepo      vm.Repository
-	networkRepo network.Repository
-	leaseRepo   network.LeaseRepository
-	imageRepo   image.Repository
-	kernelRepo  kernel.Repository
-	binaryRepo  binary.Repository
-	volumeRepo  volume.Repository
-	vsockRepo   vsock.Repository
+	vmRepo       vm.Repository
+	networkRepo  network.Repository
+	leaseRepo    network.LeaseRepository
+	imageRepo    image.Repository
+	kernelRepo   kernel.Repository
+	binaryRepo   binary.Repository
+	volumeRepo   volume.Repository
+	vsockRepo    vsock.Repository
+	snapshotRepo snapshot.Repository
 }
 
 // New creates an Enricher with the given repositories.
@@ -137,16 +154,18 @@ func New(
 	binaryRepo binary.Repository,
 	volumeRepo volume.Repository,
 	vsockRepo vsock.Repository,
+	snapshotRepo snapshot.Repository,
 ) *Enricher {
 	return &Enricher{
-		vmRepo:      vmRepo,
-		networkRepo: networkRepo,
-		leaseRepo:   leaseRepo,
-		imageRepo:   imageRepo,
-		kernelRepo:  kernelRepo,
-		binaryRepo:  binaryRepo,
-		volumeRepo:  volumeRepo,
-		vsockRepo:   vsockRepo,
+		vmRepo:       vmRepo,
+		networkRepo:  networkRepo,
+		leaseRepo:    leaseRepo,
+		imageRepo:    imageRepo,
+		kernelRepo:   kernelRepo,
+		binaryRepo:   binaryRepo,
+		volumeRepo:   volumeRepo,
+		vsockRepo:    vsockRepo,
+		snapshotRepo: snapshotRepo,
 	}
 }
 
@@ -614,6 +633,10 @@ func (e *Enricher) enrichNetworkFromPaths(
 			if err := e.enrichNetworkVMs(ctx, networks, spec); err != nil {
 				return err
 			}
+		case "snapshots":
+			if err := e.enrichNetworkSnapshots(ctx, networks, spec); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -680,6 +703,40 @@ func (e *Enricher) enrichNetworkVMs(ctx context.Context, networks []*model.Netwo
 			anyVMs[i] = vm
 		}
 		net.VMs = anyVMs
+	}
+	return nil
+}
+
+// enrichNetworkSnapshots resolves snapshots that reference each network.
+func (e *Enricher) enrichNetworkSnapshots(ctx context.Context, networks []*model.NetworkItem, spec model.RelationSpec) error {
+	netIDs := extractNetworkIDs(networks)
+	if len(netIDs) == 0 {
+		return nil
+	}
+
+	snaps, err := e.snapshotRepo.FindByNetworkIDs(ctx, netIDs)
+	if err != nil {
+		if isEnrichmentError(err) {
+			enrichSoftFailReverse(spec.Resolver, spec.Method, strings.Join(netIDs, ","))
+			return nil
+		}
+		return err
+	}
+
+	snapsByNetID := make(map[string][]*model.SnapshotItem)
+	for _, s := range snaps {
+		snapsByNetID[s.NetworkID] = append(snapsByNetID[s.NetworkID], s)
+	}
+
+	for _, net := range networks {
+		if net == nil {
+			continue
+		}
+		if matched := snapsByNetID[net.ID]; matched != nil {
+			net.Snapshots = matched
+		} else {
+			net.Snapshots = []*model.SnapshotItem{}
+		}
 	}
 	return nil
 }
@@ -783,6 +840,10 @@ func (e *Enricher) enrichKernelFromPaths(
 			if err := e.enrichKernelVMs(ctx, kernels, spec); err != nil {
 				return err
 			}
+		case "snapshots":
+			if err := e.enrichKernelSnapshots(ctx, kernels, spec); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -824,6 +885,40 @@ func (e *Enricher) enrichKernelVMs(ctx context.Context, kernels []*model.KernelI
 	return nil
 }
 
+// enrichKernelSnapshots resolves snapshots that reference each kernel.
+func (e *Enricher) enrichKernelSnapshots(ctx context.Context, kernels []*model.KernelItem, spec model.RelationSpec) error {
+	ids := collectKernelIDs(kernels)
+	if len(ids) == 0 {
+		return nil
+	}
+
+	snaps, err := e.snapshotRepo.FindByKernelIDs(ctx, ids)
+	if err != nil {
+		if isEnrichmentError(err) {
+			enrichSoftFailReverse(spec.Resolver, spec.Method, strings.Join(ids, ","))
+			return nil
+		}
+		return err
+	}
+
+	snapsByKrnID := make(map[string][]*model.SnapshotItem)
+	for _, s := range snaps {
+		snapsByKrnID[s.KernelID] = append(snapsByKrnID[s.KernelID], s)
+	}
+
+	for _, k := range kernels {
+		if k == nil {
+			continue
+		}
+		if matched := snapsByKrnID[k.ID]; matched != nil {
+			k.Snapshots = matched
+		} else {
+			k.Snapshots = []*model.SnapshotItem{}
+		}
+	}
+	return nil
+}
+
 // --- Binary enrichment ---
 
 // EnrichBinary populates resolved relations on Binary items.
@@ -851,6 +946,10 @@ func (e *Enricher) enrichBinaryFromPaths(
 		switch path {
 		case "vm":
 			if err := e.enrichBinaryVMs(ctx, binaries, spec); err != nil {
+				return err
+			}
+		case "snapshots":
+			if err := e.enrichBinarySnapshots(ctx, binaries, spec); err != nil {
 				return err
 			}
 		}
@@ -893,6 +992,40 @@ func (e *Enricher) enrichBinaryVMs(ctx context.Context, binaries []*model.Binary
 		bin.VMs = anyVMs
 	}
 
+	return nil
+}
+
+// enrichBinarySnapshots resolves snapshots that reference each binary.
+func (e *Enricher) enrichBinarySnapshots(ctx context.Context, binaries []*model.BinaryItem, spec model.RelationSpec) error {
+	ids := collectBinaryIDs(binaries)
+	if len(ids) == 0 {
+		return nil
+	}
+
+	snaps, err := e.snapshotRepo.FindByBinaryIDs(ctx, ids)
+	if err != nil {
+		if isEnrichmentError(err) {
+			enrichSoftFailReverse(spec.Resolver, spec.Method, strings.Join(ids, ","))
+			return nil
+		}
+		return err
+	}
+
+	snapsByBinID := make(map[string][]*model.SnapshotItem)
+	for _, s := range snaps {
+		snapsByBinID[s.BinaryID] = append(snapsByBinID[s.BinaryID], s)
+	}
+
+	for _, bin := range binaries {
+		if bin == nil {
+			continue
+		}
+		if matched := snapsByBinID[bin.ID]; matched != nil {
+			bin.Snapshots = matched
+		} else {
+			bin.Snapshots = []*model.SnapshotItem{}
+		}
+	}
 	return nil
 }
 

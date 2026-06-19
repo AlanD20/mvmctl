@@ -509,15 +509,23 @@ func (s *Service) List(ctx context.Context) ([]*model.KernelItem, error) {
 func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bool) (*model.KernelItem, error) {
 	vms := kernel.VMs
 	hasVMs := len(vms) > 0
+	hasSnapshots := len(kernel.Snapshots) > 0
 
-	if hasVMs && !force {
-		var names []string
+	if (hasVMs || hasSnapshots) && !force {
+		var refs []string
 		for _, vm := range vms {
-			names = append(names, vm.Name)
+			refs = append(refs, vm.Name)
+		}
+		if hasSnapshots {
+			names := make([]string, len(kernel.Snapshots))
+			for i, s := range kernel.Snapshots {
+				names[i] = s.Name
+			}
+			refs = append(refs, fmt.Sprintf("%d snapshot(s): %s", len(kernel.Snapshots), strings.Join(names, ", ")))
 		}
 		return nil, errs.New(
 			errs.CodeKernelBuildFailed,
-			fmt.Sprintf("Kernel referenced by VMs: %s", strings.Join(names, ", ")),
+			fmt.Sprintf("Kernel referenced by: %s", strings.Join(refs, ", ")),
 		)
 	}
 
@@ -527,7 +535,7 @@ func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bo
 		}
 	}
 
-	if hasVMs {
+	if hasVMs || hasSnapshots {
 		return kernel, s.repo.SoftDelete(ctx, kernel.ID)
 	}
 	return kernel, s.repo.Delete(ctx, kernel.ID)

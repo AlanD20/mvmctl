@@ -17,4 +17,5 @@ type MockOperation struct {
 	MockLogAPI
 	MockCPAPI
 	MockInitAPI
+	MockSnapshotAPI
 }

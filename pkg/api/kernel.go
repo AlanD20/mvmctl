@@ -333,15 +333,22 @@ func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput)
 		}
 	}
 	items := make([]errs.OperationResult, 0)
-	// Enrich kernels with VM references.
-	op.Enr.EnrichKernel(ctx, resolved.Kernels, "vm")
+	// Enrich kernels with VM and snapshot references.
+	op.Enr.EnrichKernel(ctx, resolved.Kernels, "vm", "snapshots")
 	for _, kernel := range resolved.Kernels {
-		if !resolved.Force && len(kernel.VMs) > 0 {
+		if !resolved.Force && (len(kernel.VMs) > 0 || len(kernel.Snapshots) > 0) {
+			var refs []string
+			if len(kernel.VMs) > 0 {
+				refs = append(refs, fmt.Sprintf("%d VM(s)", len(kernel.VMs)))
+			}
+			if len(kernel.Snapshots) > 0 {
+				refs = append(refs, fmt.Sprintf("%d snapshot(s)", len(kernel.Snapshots)))
+			}
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "kernel.in_use",
-				Message:   fmt.Sprintf("Kernel '%s' is in use by %d VM(s)", kernel.Name, len(kernel.VMs)),
-				Exception: fmt.Errorf("kernel in use by %d VMs", len(kernel.VMs)),
+				Message:   fmt.Sprintf("Kernel '%s' is in use by %s", kernel.Name, strings.Join(refs, ", ")),
+				Exception: fmt.Errorf("kernel in use by %s", strings.Join(refs, ", ")),
 			})
 			continue
 		}

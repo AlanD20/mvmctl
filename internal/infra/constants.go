@@ -237,7 +237,6 @@ const DefaultVCPUCount = 1
 const DefaultMemoryMiB = 512
 const DefaultSSHUser = "root"
 const DefaultDNS = "1.1.1.1"
-const DefaultGuestMACPrefix = "02:FC"
 
 // --- Default network ---
 const DefaultNetworkSubnet = "172.27.0.0/24"
@@ -649,6 +648,19 @@ func GetTimingLogPath() string {
 }
 
 // --- Warm image directory ---
+// GetSnapshotDir returns the cache directory for a snapshot with the given ID.
+func GetSnapshotDir(id string) string {
+	cacheDir, err := GetCacheDir()
+	if err != nil {
+		cacheDir = filepath.Join(GetRealHome(), ".cache", ProjectName)
+	}
+	path := filepath.Join(cacheDir, "snapshots", id)
+	if err := ensureDirAndChown(path); err != nil {
+		slog.Warn("failed to create snapshot directory", "path", path, "error", err)
+	}
+	return path
+}
+
 func GetWarmImagesDir() string {
 	pool, ok := EnvGet("WARM_POOL")
 	if ok && pool == "disk" {

@@ -124,9 +124,8 @@ func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInpu
 	if err != nil {
 		return errs.WrapMsg(errs.CodeNetworkRemoveFailed, err.Error(), err)
 	}
-	// Batch-enrich with VM references for VM reference check
-	// enriched with VM references
-	op.Enr.EnrichNetwork(ctx, resolved.Networks, "vm")
+	// Batch-enrich with VM and snapshot references
+	op.Enr.EnrichNetwork(ctx, resolved.Networks, "vm", "snapshots")
 	// service.Remove raises error on failure.
 	// Return the first error encountered.
 	for _, net := range resolved.Networks {

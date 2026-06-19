@@ -39,8 +39,6 @@ func TestNewVMCmd(t *testing.T) {
 		{use: "reboot", hasAlias: false},
 		{use: "pause", hasAlias: false},
 		{use: "resume", hasAlias: false},
-		{use: "snapshot", hasAlias: false},
-		{use: "load", hasAlias: false},
 		{use: "inspect", hasAlias: false},
 		{use: "exec", hasAlias: false},
 		{use: "attach-volume", hasAlias: false},

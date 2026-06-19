@@ -1,4 +1,4 @@
-package vm
+package firecracker
 
 import (
 	"errors"
@@ -15,8 +15,9 @@ import (
 // retry loop (5 retries with exponential backoff). A false negative drops
 // retries prematurely; a false positive retries on unrelated errors,
 // delaying failure reporting.
-// Note: This test is in an internal package (package vm, not vm_test) because
-// isConnRefused is unexported. External test packages cannot access it.
+// Note: This test is in an internal package (package firecracker, not
+// firecracker_test) because isConnRefused is unexported. External test
+// packages cannot access it.
 
 func TestIsConnRefused(t *testing.T) {
 	tests := map[string]struct {

@@ -16,6 +16,7 @@ import (
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/network"
+	"mvmctl/internal/core/snapshot"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/core/vsock"
@@ -44,31 +45,32 @@ type Operation struct {
 
 // Repos bundles all database repositories.
 type Repos struct {
-	VM      vm.Repository
-	Network network.Repository
-	Lease   network.LeaseRepository
-	Image   image.Repository
-	Kernel  kernel.Repository
-	Binary  binary.Repository
-	Key     key.Repository
-	Volume  volume.Repository
-	Host    host.Repository
-	Config  config.SettingsRepository
-	Vsock   vsock.Repository
+	VM       vm.Repository
+	Network  network.Repository
+	Lease    network.LeaseRepository
+	Image    image.Repository
+	Kernel   kernel.Repository
+	Binary   binary.Repository
+	Key      key.Repository
+	Volume   volume.Repository
+	Host     host.Repository
+	Config   config.SettingsRepository
+	Vsock    vsock.Repository
+	Snapshot snapshot.Repository
 }
 
 // Services bundles all domain services.
 type Services struct {
-	Binary  *binary.Service
-	Image   *image.Service
-	Kernel  *kernel.Service
-	Network *network.Service
-	Host    *host.Service
-	Config  *config.Service
-	Key     *key.Service
-	Volume  *volume.Service
-	Cache   *cache.Service
-	Vsock   *vsock.Service
+	Binary   *binary.Service
+	Image    *image.Service
+	Kernel   *kernel.Service
+	Network  *network.Service
+	Host     *host.Service
+	Config   *config.Service
+	Key      *key.Service
+	Volume   *volume.Service
+	Cache    *cache.Service
+	Vsock *vsock.Service
 }
 type RequiredService struct {
 	Name string
@@ -80,17 +82,18 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	sqlDB := conn.DB()
 
 	r := Repos{
-		VM:      vm.NewRepository(sqlDB),
-		Network: network.NewRepository(sqlDB),
-		Lease:   network.NewLeaseRepository(sqlDB),
-		Image:   image.NewRepository(sqlDB),
-		Kernel:  kernel.NewRepository(sqlDB),
-		Binary:  binary.NewRepository(sqlDB),
-		Key:     key.NewRepository(sqlDB),
-		Volume:  volume.NewRepository(sqlDB),
-		Host:    host.NewRepository(sqlDB),
-		Config:  config.NewRepository(sqlDB),
-		Vsock:   vsock.NewRepository(sqlDB),
+		VM:       vm.NewRepository(sqlDB),
+		Network:  network.NewRepository(sqlDB),
+		Lease:    network.NewLeaseRepository(sqlDB),
+		Image:    image.NewRepository(sqlDB),
+		Kernel:   kernel.NewRepository(sqlDB),
+		Binary:   binary.NewRepository(sqlDB),
+		Key:      key.NewRepository(sqlDB),
+		Volume:   volume.NewRepository(sqlDB),
+		Host:     host.NewRepository(sqlDB),
+		Config:   config.NewRepository(sqlDB),
+		Vsock:    vsock.NewRepository(sqlDB),
+		Snapshot: snapshot.NewRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
@@ -100,16 +103,16 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
 
 	s := Services{
-		Network: network.NewService(r.Network, defaultFwTracker),
-		Image:   image.NewService(r.Image),
-		Kernel:  kernel.NewService(r.Kernel, cacheDir),
-		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
-		Key:     key.NewService(r.Key, infra.GetKeysDir()),
-		Host:    host.NewService(r.Host),
-		Config:  config.NewService(r.Config, configReg),
-		Volume:  volume.NewService(r.Volume),
-		Cache:   cache.NewService(cacheDir, infra.GetTempDir()),
-		Vsock:   vsock.NewService(r.Vsock),
+		Network:  network.NewService(r.Network, defaultFwTracker),
+		Image:    image.NewService(r.Image),
+		Kernel:   kernel.NewService(r.Kernel, cacheDir),
+		Binary:   binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
+		Key:      key.NewService(r.Key, infra.GetKeysDir()),
+		Host:     host.NewService(r.Host),
+		Config:   config.NewService(r.Config, configReg),
+		Volume:   volume.NewService(r.Volume),
+		Cache:    cache.NewService(cacheDir, infra.GetTempDir()),
+		Vsock:    vsock.NewService(r.Vsock),
 	}
 	// Enforce that all required services are non-nil — fail fast at startup.
 	required := []RequiredService{
@@ -134,7 +137,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	return &Operation{
 		Connection:      conn,
 		CacheDir:        cacheDir,
-		Enr:             enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume, r.Vsock),
+		Enr: enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume, r.Vsock, r.Snapshot),
 		Repos:           r,
 		Services:        s,
 		ProvisionerType: provisionerType,

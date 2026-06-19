@@ -71,8 +71,6 @@ func NewVMCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd.AddCommand(newVMRebootCmd(vmAPI))
 	cmd.AddCommand(newVMPauseCmd(vmAPI))
 	cmd.AddCommand(newVMResumeCmd(vmAPI))
-	cmd.AddCommand(newVMSnapshotCmd(vmAPI))
-	cmd.AddCommand(newVMLoadCmd(vmAPI))
 	cmd.AddCommand(newVMInspectCmd(vmAPI))
 	cmd.AddCommand(newVMExecCmd(vmAPI))
 	cmd.AddCommand(newVMAttachVolumeCmd(vmAPI))
@@ -608,84 +606,6 @@ func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 			return nil
 		},
 	}
-}
-
-// --- snapshot ---
-
-func newVMSnapshotCmd(vmAPI api.VMAPI) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:               "snapshot [id] [mem_file] [state_file]",
-		Short:             "Snapshot VM memory and disk state.",
-		Args:              cobra.ExactArgs(3),
-		ValidArgsFunction: completeVMThenFile,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			memFile := args[1]
-			stateFile := args[2]
-
-			if err := vmAPI.VMSnapshot(
-				cmd.Context(),
-				inputs.VMInput{Identifiers: []string{id}},
-				memFile,
-				stateFile,
-			); err != nil {
-				return fmt.Errorf("snapshot failed: %w", err)
-			}
-
-			common.Cli.Success(fmt.Sprintf("Snapshot saved: %s", id))
-			return nil
-		},
-	}
-
-	return cmd
-}
-
-// --- load (from snapshot) ---
-
-func newVMLoadCmd(vmAPI api.VMAPI) *cobra.Command {
-	var (
-		resume bool
-		rootfs string
-	)
-
-	cmd := &cobra.Command{
-		Use:   "load [id] [mem_file] [state_file]",
-		Short: "Load VM from snapshot.",
-		Long: `Load a VM from a snapshot.
-
-Arguments:
-  id          VM identifier (name, ID prefix, IP, or MAC)
-  mem_file    Path to memory state file
-  state_file  Path to VM state file
-
-Flags:
-  --resume    Resume VM after loading (default: leave paused)`,
-		Args:              cobra.ExactArgs(3),
-		ValidArgsFunction: completeVMThenFile,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			memFile := args[1]
-			stateFile := args[2]
-
-			if err := vmAPI.VMLoad(
-				cmd.Context(),
-				inputs.VMInput{Identifiers: []string{id}},
-				memFile,
-				stateFile,
-				resume,
-				rootfs,
-			); err != nil {
-				return err
-			}
-
-			common.Cli.Success(fmt.Sprintf("Snapshot loaded: %s", id))
-			return nil
-		},
-	}
-
-	cmd.Flags().BoolVar(&resume, "resume", false, "Resume VM after loading")
-	cmd.Flags().StringVar(&rootfs, "rootfs", "", "Rootfs path (required when loading into a new VM)")
-	return cmd
 }
 
 // --- inspect ---

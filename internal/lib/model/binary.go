@@ -17,5 +17,6 @@ type BinaryItem struct {
 	DeletedAt   *string `json:"deleted_at,omitempty" db:"deleted_at"`
 
 	// Resolved relations
-	VMs []*VMItem `json:"vms,omitempty"`
+	VMs       []*VMItem       `json:"vms,omitempty"`
+	Snapshots []*SnapshotItem `json:"snapshots,omitempty"`
 }
