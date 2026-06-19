@@ -108,9 +108,8 @@ func (op *Operation) ImagePull(
 	input inputs.ImagePullInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
-	// Resolve pull input via ImageAcquireRequest (arch, output dir, validation)
-	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
-	resolved, err := req.ResolvePull(ctx)
+	// Resolve pull input (arch, output dir, validation)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to resolve pull input: %v", err), err)
 	}
@@ -329,9 +328,8 @@ func (op *Operation) ImageImport(
 	input inputs.ImageImportInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
-	// Resolve import input via ImageAcquireRequest (arch, format, validation)
-	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
-	resolved, err := req.ResolveImport(ctx)
+	// Resolve import input (arch, format, validation)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeImageImportFailed,
@@ -449,12 +447,11 @@ func (op *Operation) ImageWarm(
 			return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list images: %v", err), err)
 		}
 	} else {
-		request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
-		resolved, err := request.Resolve(ctx)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Image resolution failed: %v", err), err)
+		var resolveErr error
+		images, resolveErr = input.Resolve(ctx, op.Repos.Image)
+		if resolveErr != nil {
+			return nil, errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Image resolution failed: %v", resolveErr), resolveErr)
 		}
-		images = resolved.Images
 	}
 	if onProgress != nil {
 		onProgress(event.Progress{
@@ -479,8 +476,7 @@ func (op *Operation) ImageWarm(
 // ImageRemove removes images by input.
 func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult {
 	results := make([]errs.OperationResult, 0)
-	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
-	resolved, err := request.Resolve(ctx)
+	images, err := input.Resolve(ctx, op.Repos.Image)
 	if err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
@@ -493,7 +489,6 @@ func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, f
 			},
 		}
 	}
-	images := resolved.Images
 	// Batch-enrich with VM references
 	op.Enr.EnrichImage(ctx, images, "vm")
 	for _, img := range images {
@@ -600,17 +595,15 @@ func (op *Operation) ImageListAll(
 }
 
 // ImageGet returns a single image by ID prefix or type.
-// uses ImageRequest for resolution.
 func (op *Operation) ImageGet(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error) {
-	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
-	resolved, err := request.Resolve(ctx)
+	images, err := input.Resolve(ctx, op.Repos.Image)
 	if err != nil {
 		return nil, err
 	}
-	if len(resolved.Images) > 1 {
+	if len(images) > 1 {
 		return nil, fmt.Errorf("expected exactly one image identifier")
 	}
-	return resolved.Images[0], nil
+	return images[0], nil
 }
 
 // ImageInspect returns grouped dict of an image.
@@ -641,17 +634,15 @@ func (op *Operation) ImageInspect(ctx context.Context, input inputs.ImageInput) 
 }
 
 // ImageSetDefault sets an image as default.
-// uses ImageRequest for resolution.
 func (op *Operation) ImageSetDefault(ctx context.Context, input inputs.ImageInput) error {
-	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
-	resolved, err := request.Resolve(ctx)
+	images, err := input.Resolve(ctx, op.Repos.Image)
 	if err != nil {
 		return errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Image not found: %v", err), err)
 	}
-	if len(resolved.Images) > 1 {
+	if len(images) > 1 {
 		return errs.New(errs.CodeImageNotFound, "Expected exactly one image identifier")
 	}
-	img := resolved.Images[0]
+	img := images[0]
 	if err := op.Repos.Image.SetDefault(ctx, img.ID); err != nil {
 		return errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Failed to set default: %v", err), err)
 	}

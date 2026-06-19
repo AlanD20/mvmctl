@@ -23,8 +23,7 @@ type SSHAPI interface {
 // streamed line by line through the callback instead of being printed
 // directly to the terminal. This allows the CLI layer to control display.
 func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onProgress event.OnProgressCallback) error {
-	request := inputs.NewSSHRequest(input, op.Services.Config)
-	resolved, err := request.Resolve(ctx, op.Repos.VM, op.Repos.Key)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.VM, op.Repos.Key)
 	if err != nil {
 		return newSSHError(err)
 	}

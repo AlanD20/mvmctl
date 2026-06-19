@@ -137,9 +137,8 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		// Clear the version so it doesn't get used as kernel version
 		input.Version = ""
 	}
-	// Resolve through the Request pipeline
-	request := inputs.NewKernelPullRequest(input, op.Services.Config)
-	resolved, err := request.Resolve(ctx)
+	// Resolve through the Input pipeline
+	resolved, err := input.Resolve(ctx, op.Services.Config)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeKernelPullFailed,
@@ -280,13 +279,8 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 }
 
 // KernelImport imports a local vmlinux file as a kernel.
-// uses KernelImportRequest
-// resolution pipeline for input validation and default resolution before
-// calling KernelService.Import.
 func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImportInput) (*model.KernelItem, error) {
-	db := op.Connection.DB()
-	request := inputs.NewKernelImportRequest(input, db)
-	resolved, err := request.Resolve(ctx)
+	resolved, err := input.Resolve()
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeKernelImportFailed,
@@ -312,14 +306,8 @@ func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImport
 }
 
 // KernelRemove removes kernels by identifiers.
-// uses KernelRequest.Resolve
-// to resolve identifiers, then enriches with VM references.
-// Each kernel removal has per-kernel error handling.
-// The method parameter force is combined with
-// resolved.Force.
 func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput) *errs.BatchResult {
-	request := inputs.NewKernelRequest(input, op.Connection.DB(), op.Repos.Kernel)
-	resolved, err := request.Resolve(ctx)
+	kernels, err := input.Resolve(ctx, op.Repos.Kernel)
 	if err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
@@ -334,9 +322,9 @@ func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput)
 	}
 	items := make([]errs.OperationResult, 0)
 	// Enrich kernels with VM and snapshot references.
-	op.Enr.EnrichKernel(ctx, resolved.Kernels, "vm", "snapshots")
-	for _, kernel := range resolved.Kernels {
-		if !resolved.Force && (len(kernel.VMs) > 0 || len(kernel.Snapshots) > 0) {
+	op.Enr.EnrichKernel(ctx, kernels, "vm", "snapshots")
+	for _, kernel := range kernels {
+		if !input.Force && (len(kernel.VMs) > 0 || len(kernel.Snapshots) > 0) {
 			var refs []string
 			if len(kernel.VMs) > 0 {
 				refs = append(refs, fmt.Sprintf("%d VM(s)", len(kernel.VMs)))
@@ -352,7 +340,7 @@ func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput)
 			})
 			continue
 		}
-		if _, err := op.Services.Kernel.Remove(ctx, kernel, resolved.Force); err != nil {
+		if _, err := op.Services.Kernel.Remove(ctx, kernel, input.Force); err != nil {
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "kernel.remove_failed",
@@ -433,21 +421,18 @@ func (op *Operation) KernelList(
 }
 
 // KernelGet returns a single kernel by identifier.
-// uses KernelRequest.Resolve
-// internally for consistent resolution behavior.
 func (op *Operation) KernelGet(ctx context.Context, identifier string) (*model.KernelItem, error) {
 	kernelInput := inputs.KernelInput{
 		Identifiers: []string{identifier},
 	}
-	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
-	resolved, err := request.Resolve(ctx)
+	kernels, err := kernelInput.Resolve(ctx, op.Repos.Kernel)
 	if err != nil {
 		return nil, fmt.Errorf("kernel not found %q: %w", identifier, err)
 	}
-	if len(resolved.Kernels) != 1 {
-		return nil, fmt.Errorf("expected exactly one kernel, got %d", len(resolved.Kernels))
+	if len(kernels) != 1 {
+		return nil, fmt.Errorf("expected exactly one kernel, got %d", len(kernels))
 	}
-	return resolved.Kernels[0], nil
+	return kernels[0], nil
 }
 
 // KernelInspect returns detailed kernel information.
@@ -470,21 +455,18 @@ func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*res
 }
 
 // KernelSetDefault sets a kernel as default.
-// uses KernelRequest.Resolve
-// for consistent identifier resolution, catches errors at the top level.
 func (op *Operation) KernelSetDefault(ctx context.Context, identifier string) error {
 	kernelInput := inputs.KernelInput{
 		Identifiers: []string{identifier},
 	}
-	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
-	resolved, err := request.Resolve(ctx)
+	kernels, err := kernelInput.Resolve(ctx, op.Repos.Kernel)
 	if err != nil {
 		return errs.NotFound(errs.CodeKernelNotFound, fmt.Sprintf("Kernel not found: %s", identifier))
 	}
-	if len(resolved.Kernels) != 1 {
+	if len(kernels) != 1 {
 		return errs.NotFound(errs.CodeKernelNotFound, fmt.Sprintf("Kernel not found: %s", identifier))
 	}
-	kItem := resolved.Kernels[0]
+	kItem := kernels[0]
 	ctrl := kernel.NewController(kItem, op.Repos.Kernel)
 	if err := ctrl.SetDefault(ctx); err != nil {
 		return errs.WrapMsg(errs.CodeKernelDefaultSetFailed, fmt.Sprintf("Failed to set default kernel: %v", err), err)

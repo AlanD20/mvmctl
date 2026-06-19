@@ -29,8 +29,7 @@ type LogAPI interface {
 // FollowSync, invoking the callback for each line as it is received. Blocks until
 // the channel is closed (ctx cancelled or error occurs).
 func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callback func(string) error) error {
-	req := inputs.NewLogRequest(input, op.Services.Config, op.Connection.DB())
-	resolved, err := req.Resolve(ctx, op.Repos.VM)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.VM)
 	if err != nil {
 		return err
 	}
@@ -86,8 +85,7 @@ func (op *Operation) LogStreamChannel(
 	ctx context.Context,
 	input inputs.LogInput,
 ) (lineCh <-chan string, errCh <-chan error, err error) {
-	req := inputs.NewLogRequest(input, op.Services.Config, op.Connection.DB())
-	resolved, err := req.Resolve(ctx, op.Repos.VM)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.VM)
 	if err != nil {
 		return nil, nil, err
 	}

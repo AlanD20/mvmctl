@@ -6,6 +6,7 @@ import (
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
@@ -44,32 +45,42 @@ type ResolvedKernelPullRequest struct {
 	Features     []string
 }
 
-// KernelPullRequest specifies kernel pull request.
-// Resolve and validate kernel pull/build inputs.
-type KernelPullRequest struct {
-	cfg    *config.Service
-	input  KernelPullInput
-	result *ResolvedKernelPullRequest
-}
-
-// NewKernelPullRequest creates a new KernelPullRequest.
-func NewKernelPullRequest(inputs KernelPullInput, cfg *config.Service) *KernelPullRequest {
-	return &KernelPullRequest{
-		cfg:   cfg,
-		input: inputs,
+// Validate checks that the kernel pull input has valid fields.
+func (i *KernelPullInput) Validate() error {
+	// Validate kernel type
+	if !kernel.KernelValidTypes[i.KernelType] {
+		return errs.New(
+			errs.CodeKernelBuildFailed,
+			fmt.Sprintf("Unsupported kernel type: %s. Valid types: firecracker, official", i.KernelType),
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
+	// Validate version (semver-like: 5.10, 6.1.0, v6.1).
+	if i.Version != "" {
+		stripped := strings.TrimPrefix(i.Version, "v")
+		if !version.IsValidVersion(stripped) {
+			return errs.New(
+				errs.CodeKernelBuildFailed,
+				fmt.Sprintf("Invalid kernel version: '%s'. Expected format like '5.10', '6.1.0', or 'v6.1'", i.Version),
+				errs.WithClass(errs.ClassValidation),
+			)
+		}
+	}
+	return nil
 }
 
-// Result returns the resolved request, or nil if resolve() has not been called.
-// Resolve resolves all inputs to explicit values.
-func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullRequest, error) {
+// Resolve resolves and validates pull inputs, returning a ResolvedKernelPullRequest.
+func (i *KernelPullInput) Resolve(ctx context.Context, cfg *config.Service) (*ResolvedKernelPullRequest, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
 	// Resolve version — use explicit input or fallback to default.
-	version := r.input.Version
+	version := i.Version
 	if version == "" {
-		version, _ = r.cfg.GetString(ctx, "defaults.kernel", "version")
+		version, _ = cfg.GetString(ctx, "defaults.kernel", "version")
 	}
 	// Strip "v" prefix from explicit version strings.
-	if r.input.KernelType == "firecracker" {
+	if i.KernelType == "firecracker" {
 		version = ""
 	} else if version != "" {
 		version = strings.TrimPrefix(version, "v")
@@ -78,11 +89,11 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	arch := system.RuntimeArch()
 	// Resolve jobs — use explicit input, setting, or CPU count.
 	var jobs int
-	if r.input.Jobs != 0 {
-		jobs = r.input.Jobs
+	if i.Jobs != 0 {
+		jobs = i.Jobs
 	} else {
 		// Default to all cores when not configured
-		jobs, _ = r.cfg.GetInt(ctx, "defaults.kernel", "build_jobs")
+		jobs, _ = cfg.GetInt(ctx, "defaults.kernel", "build_jobs")
 	}
 	// Fallback for constrained environments where NumCPU() returns 0
 	if jobs == 0 {
@@ -92,7 +103,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 		jobs = 1
 	}
 	// Resolve features from comma-separated input string.
-	featuresRaw := strings.TrimSpace(r.input.Features)
+	featuresRaw := strings.TrimSpace(i.Features)
 	var featuresList []string
 	if featuresRaw != "" {
 		for f := range strings.SplitSeq(featuresRaw, ",") {
@@ -104,7 +115,7 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	}
 	// Auto-include "kvm" feature when nested virtualization is enabled
 	// (configured via "defaults.vm" setting).
-	nestedVirtBool, _ := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt")
+	nestedVirtBool, _ := cfg.GetBool(ctx, "defaults.vm", "nested_virt")
 	if nestedVirtBool {
 		if !slices.Contains(featuresList, "kvm") {
 			featuresList = append([]string{"kvm"}, featuresList...)
@@ -112,98 +123,62 @@ func (r *KernelPullRequest) Resolve(ctx context.Context) (*ResolvedKernelPullReq
 	}
 	// Resolve output directory — use explicit input or the default kernels dir.
 	outputDir := infra.GetKernelsDir()
-	if r.input.OutputDir != "" {
-		outputDir = r.input.OutputDir
+	if i.OutputDir != "" {
+		outputDir = i.OutputDir
 	}
 	var kernelConfig *string
-	if r.input.KernelConfig != "" {
-		kernelConfig = &r.input.KernelConfig
+	if i.KernelConfig != "" {
+		kernelConfig = &i.KernelConfig
 	}
-	r.result = &ResolvedKernelPullRequest{
-		KernelType:   r.input.KernelType,
+	result := &ResolvedKernelPullRequest{
+		KernelType:   i.KernelType,
 		Version:      version,
 		Arch:         arch,
 		OutputDir:    outputDir,
 		Jobs:         jobs,
-		KeepBuildDir: r.input.KeepBuildDir,
-		CleanBuild:   r.input.CleanBuild,
+		KeepBuildDir: i.KeepBuildDir,
+		CleanBuild:   i.CleanBuild,
 		KernelConfig: kernelConfig,
-		SetDefault:   r.input.SetDefault,
+		SetDefault:   i.SetDefault,
 		Features:     featuresList,
 	}
-	// Validate
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-	return r.result, nil
-}
-func (r *KernelPullRequest) ensureValidate() error {
-	if r.result == nil {
-		return errs.New(
-			errs.CodeKernelBuildFailed,
-			"Failed to resolve necessary dependencies to validate",
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	// 1. Validate kernel type
-	validTypes := kernel.KernelValidTypes
-	if !validTypes[r.result.KernelType] {
-		return errs.New(errs.CodeKernelBuildFailed,
-			fmt.Sprintf("Unsupported kernel type: %s. Valid types: firecracker, official", r.result.KernelType),
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-	// 2. Validate version (semver-like: 5.10, 6.1.0, v6.1).
-	if r.result.Version != "" {
-		stripped := strings.TrimPrefix(r.result.Version, "v")
-		if !version.IsValidVersion(stripped) {
-			return errs.New(
-				errs.CodeKernelBuildFailed,
-				fmt.Sprintf(
-					"Invalid kernel version: '%s'. Expected format like '5.10', '6.1.0', or 'v6.1'",
-					r.result.Version,
-				),
-				errs.WithClass(errs.ClassValidation),
-			)
-		}
-	}
-	// 3. Validate architecture
-	if !slices.Contains(infra.FirecrackerSupportedArches, r.result.Arch) {
-		return errs.New(
+	// Validate architecture
+	if !firecracker.SupportsArch(result.Arch) {
+		return nil, errs.New(
 			errs.CodeKernelBuildFailed,
 			fmt.Sprintf(
 				"Unsupported architecture: %s. Valid architectures: %s",
-				r.result.Arch,
-				strings.Join(infra.FirecrackerSupportedArches, ", "),
+				result.Arch,
+				strings.Join(firecracker.SupportedArches, ", "),
 			),
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-	// 4. Validate output directory (must exist or be creatable) —
+	// Validate output directory (must exist or be creatable) —
 	// if output_dir.exists() and not output_dir.is_dir():
-	if r.result.OutputDir != "" {
-		if fi, err := os.Stat(r.result.OutputDir); err == nil && !fi.IsDir() {
-			return errs.New(
+	if result.OutputDir != "" {
+		if fi, err := os.Stat(result.OutputDir); err == nil && !fi.IsDir() {
+			return nil, errs.New(
 				errs.CodeKernelBuildFailed,
-				fmt.Sprintf("Output path exists but is not a directory: %s", r.result.OutputDir),
+				fmt.Sprintf("Output path exists but is not a directory: %s", result.OutputDir),
 				errs.WithClass(errs.ClassValidation),
 			)
 		}
 	}
-	// 5. Validate build jobs (positive integer) —
+	// Validate build jobs (positive integer) —
 	// if jobs <= 0:
-	if r.result.Jobs <= 0 {
-		return errs.New(
+	if result.Jobs <= 0 {
+		return nil, errs.New(
 			errs.CodeKernelBuildFailed,
-			fmt.Sprintf("Invalid build jobs: %d. Must be a positive integer.", r.result.Jobs),
+			fmt.Sprintf("Invalid build jobs: %d. Must be a positive integer.", result.Jobs),
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-	// 6. Validate feature names (only for official builds) —
-	if r.result.KernelType == "official" && len(r.result.Features) > 0 {
+	// Validate feature names (only for official builds) —
+	if result.KernelType == "official" && len(result.Features) > 0 {
 		valid := kernel.KernelValidFeatures
 		var invalid []string
-		for _, f := range r.result.Features {
+		for _, f := range result.Features {
 			if !valid[f] {
 				invalid = append(invalid, f)
 			}
@@ -213,8 +188,8 @@ func (r *KernelPullRequest) ensureValidate() error {
 				"Unknown kernel features: %s. Valid features: kvm, nftables, tuntap, btrfs",
 				strings.Join(invalid, ", "),
 			)
-			return errs.New(errs.CodeKernelBuildFailed, msg, errs.WithClass(errs.ClassValidation))
+			return nil, errs.New(errs.CodeKernelBuildFailed, msg, errs.WithClass(errs.ClassValidation))
 		}
 	}
-	return nil
+	return result, nil
 }

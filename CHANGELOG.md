@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Three-layer architecture** (CLI -> API -> Core) with strict import boundaries enforced by Go compiler
 - **Cobra CLI framework** with root command and subcommand hierarchy
 - **Controller / Service / Repository / Resolver** pattern across all 14 core domains
-- **Input -> Request -> Resolved** pipeline for type-safe, validated VM operations
+- **Input Validate/Resolve** pattern for type-safe, validated operations across 11 domains (ADR-0011)
 - **Provisioning backend abstraction** (LoopMount vs GuestFS) with mutual exclusion
 - **Firewall backend abstraction** (nftables vs iptables) with mutual exclusion
 - **SQLite database** (`internal/lib/db/migrations/`) with migration system for persistent state: images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings

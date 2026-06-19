@@ -37,33 +37,32 @@ type ResolvedCPInput struct {
 	Force      bool
 }
 
-// CPRequest specifies c p request.
-// Resolve CPInput against the database and filesystem.
-type CPRequest struct {
-	cfg    *config.Service
-	input  CPInput
-	result *ResolvedCPInput
-}
-
-// NewCPRequest creates a new CPRequest.
-func NewCPRequest(inputs CPInput, cfg *config.Service) *CPRequest {
-	return &CPRequest{
-		cfg:   cfg,
-		input: inputs,
+// Validate checks that the copy input has valid sources and destination.
+func (i *CPInput) Validate() error {
+	if len(i.Sources) == 0 {
+		return errs.New(errs.CodeCPError, "At least one source path is required")
 	}
+	if i.Dest == "" {
+		return errs.New(errs.CodeCPError, "A destination path is required")
+	}
+	return nil
 }
 
 // Resolve expands tilde paths and resolves VM identifiers to vsock config.
-func (r *CPRequest) Resolve(
+func (i *CPInput) Resolve(
 	ctx context.Context,
+	cfg *config.Service,
 	vmRepo vm.Repository,
 	vsockRepo vsock.Repository,
 ) (*ResolvedCPInput, error) {
-	sources := make([]string, len(r.input.Sources))
-	for i, src := range r.input.Sources {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	sources := make([]string, len(i.Sources))
+	for i, src := range i.Sources {
 		sources[i] = system.ExpandTilde(src)
 	}
-	dstVM, dstPath := infra.ParseVMPath(r.input.Dest)
+	dstVM, dstPath := infra.ParseVMPath(i.Dest)
 	srcVM, srcRemotePath := infra.ParseVMPath(sources[0])
 	var (
 		srcInfo, dstInfo *ResolvedCPInfo
@@ -84,24 +83,24 @@ func (r *CPRequest) Resolve(
 		} else {
 			localPaths = []string{sources[0]}
 		}
-		dstInfo, err = r.resolveVMSide(ctx, dstVM, dstPath, false, vmRepo, vsockRepo)
+		dstInfo, err = resolveVMSide(ctx, dstVM, dstPath, vmRepo, vsockRepo)
 		if err != nil {
 			return nil, err
 		}
 	case srcVM != "" && dstVM == "":
 		direction = infra.DirectionVMToHost
 		localPaths = []string{dstPath}
-		srcInfo, err = r.resolveVMSide(ctx, srcVM, srcRemotePath, true, vmRepo, vsockRepo)
+		srcInfo, err = resolveVMSide(ctx, srcVM, srcRemotePath, vmRepo, vsockRepo)
 		if err != nil {
 			return nil, err
 		}
 	case srcVM != "" && dstVM != "":
 		direction = infra.DirectionVMToVM
-		srcInfo, err = r.resolveVMSide(ctx, srcVM, srcRemotePath, true, vmRepo, vsockRepo)
+		srcInfo, err = resolveVMSide(ctx, srcVM, srcRemotePath, vmRepo, vsockRepo)
 		if err != nil {
 			return nil, err
 		}
-		dstInfo, err = r.resolveVMSide(ctx, dstVM, dstPath, false, vmRepo, vsockRepo)
+		dstInfo, err = resolveVMSide(ctx, dstVM, dstPath, vmRepo, vsockRepo)
 		if err != nil {
 			return nil, err
 		}
@@ -109,25 +108,23 @@ func (r *CPRequest) Resolve(
 		return nil, errs.New(errs.CodeCPNoVMSpecified,
 			"At least one path must reference a VM (use vm_name:/path format)")
 	}
-	r.result = &ResolvedCPInput{
+	return &ResolvedCPInput{
 		Direction:  direction,
 		LocalPaths: localPaths,
 		SrcInfo:    srcInfo,
 		DstInfo:    dstInfo,
-		Force:      r.input.Force,
-	}
-	return r.result, nil
+		Force:      i.Force,
+	}, nil
 }
 
 // resolveVMSide resolves a VM-side path to vsock connection config.
-func (r *CPRequest) resolveVMSide(
+func resolveVMSide(
 	ctx context.Context,
 	vmIdent, remotePath string,
-	_ bool, // isSource — preserved for signature compat
 	vmRepo vm.Repository,
 	vsockRepo vsock.Repository,
 ) (*ResolvedCPInfo, error) {
-	vmEntity, err := r.resolveVM(ctx, vmIdent, vmRepo)
+	vmEntity, err := resolveVM(ctx, vmIdent, vmRepo)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +146,7 @@ func (r *CPRequest) resolveVMSide(
 }
 
 // resolveVM resolves a VM by name, IP, MAC, or ID prefix.
-func (r *CPRequest) resolveVM(ctx context.Context, identifier string, vmRepo vm.Repository) (*model.VMItem, error) {
+func resolveVM(ctx context.Context, identifier string, vmRepo vm.Repository) (*model.VMItem, error) {
 	vmResolver := vm.NewResolver(vmRepo)
 	vmEntity, err := vmResolver.Resolve(ctx, identifier)
 	if err != nil {

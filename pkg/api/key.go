@@ -35,27 +35,25 @@ func (op *Operation) KeyListAll(ctx context.Context) ([]*model.SSHKeyItem, error
 }
 
 // Get returns a single key by name or ID.
-// uses KeyRequest resolution pipeline.
+// uses KeyInput.Resolve pipeline.
 func (op *Operation) KeyGet(ctx context.Context, input inputs.KeyInput) (*model.SSHKeyItem, error) {
-	req := inputs.NewKeyRequest(input, op.Repos.Key)
-	resolved, err := req.Resolve(ctx)
+	keys, err := input.Resolve(ctx, op.Repos.Key)
 	if err != nil {
 		return nil, err
 	}
 	// Validate exactly one key matched
-	if len(resolved.Keys) != 1 {
-		return nil, fmt.Errorf("Expected exactly one key, got %d", len(resolved.Keys))
+	if len(keys) != 1 {
+		return nil, fmt.Errorf("expected exactly one key, got %d", len(keys))
 	}
-	return resolved.Keys[0], nil
+	return keys[0], nil
 }
 
 // KeyCreate creates a new SSH keypair.
-// Calls checkDependencies first, then uses KeyCreateRequest resolution pipeline.
+// Calls checkDependencies first, then uses KeyCreateInput.Resolve pipeline.
 // Top-level panic recovery catches unexpected errors.
 func (op *Operation) KeyCreate(ctx context.Context, input inputs.KeyCreateInput) (*model.SSHKeyItem, error) {
 	// CreateKeypair calls checkDependencies internally — no need to duplicate here.
-	req := inputs.NewKeyCreateRequest(input)
-	resolved, err := req.Resolve()
+	resolved, err := input.Resolve()
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeKeyCreateFailed, err.Error(), err)
 	}
@@ -137,18 +135,16 @@ func (op *Operation) KeyImport(ctx context.Context, input inputs.KeyImportInput)
 }
 
 // KeyRemove removes keys by name or ID.
-// uses KeyRequest resolution pipeline.
+// uses KeyInput.Resolve pipeline.
 func (op *Operation) KeyRemove(ctx context.Context, input inputs.KeyInput, force bool) *errs.BatchResult {
-	// Create and resolve KeyRequest
-	req := inputs.NewKeyRequest(input, op.Repos.Key)
-	resolved, err := req.Resolve(ctx)
+	keys, err := input.Resolve(ctx, op.Repos.Key)
 	if err != nil {
 		return &errs.BatchResult{Items: []errs.OperationResult{{
 			Status: "error", Code: "key.remove_failed", Message: err.Error(),
 		}}}
 	}
 	results := make([]errs.OperationResult, 0)
-	for _, key := range resolved.Keys {
+	for _, key := range keys {
 		// Check if any VMs reference this key
 		vms, _ := op.Repos.VM.FindBySSHKeyID(ctx, key.ID)
 		if len(vms) > 0 && !force {
@@ -195,8 +191,6 @@ func (op *Operation) KeyRemove(ctx context.Context, input inputs.KeyInput, force
 }
 
 // KeyInspect returns detailed key info.
-// uses KeyRequest resolution,
-// returns raw dict (not wrapped in OperationResult).
 func (op *Operation) KeyInspect(ctx context.Context, input inputs.KeyInput) (*results.KeyInspect, error) {
 	k, err := op.KeyGet(ctx, input)
 	if err != nil {
@@ -220,25 +214,24 @@ func (op *Operation) KeyInspect(ctx context.Context, input inputs.KeyInput) (*re
 }
 
 // KeyExport exports a keypair to a destination directory.
-// Uses KeyRequest resolution and KeyController.export().
+// Uses KeyInput.Resolve and KeyController.export().
 func (op *Operation) KeyExport(
 	ctx context.Context,
 	input inputs.KeyInput,
 	destination string,
 	overwrite bool,
 ) ([]string, error) {
-	req := inputs.NewKeyRequest(input, op.Repos.Key)
-	resolved, err := req.Resolve(ctx)
+	keys, err := input.Resolve(ctx, op.Repos.Key)
 	if err != nil {
 		return nil, errs.New(errs.CodeKeyExportFailed, fmt.Sprintf("Key not found: %s", err.Error()))
 	}
-	if len(resolved.Keys) != 1 {
+	if len(keys) != 1 {
 		return nil, errs.New(
 			errs.CodeKeyExportFailed,
-			fmt.Sprintf("Expected exactly one key, got %d", len(resolved.Keys)),
+			fmt.Sprintf("expected exactly one key, got %d", len(keys)),
 		)
 	}
-	keyItem := resolved.Keys[0]
+	keyItem := keys[0]
 	// Export via KeyController.
 	ctrl := key.NewController(keyItem, op.Repos.Key)
 	destPriv, destPub, err := ctrl.Export(ctx, destination, overwrite)
@@ -249,18 +242,17 @@ func (op *Operation) KeyExport(
 }
 
 // KeySetDefaults sets one or more keys as default.
-// uses KeyRequest resolution.
+// uses KeyInput.Resolve pipeline.
 func (op *Operation) KeySetDefaults(ctx context.Context, input inputs.KeyInput) error {
-	req := inputs.NewKeyRequest(input, op.Repos.Key)
-	resolved, err := req.Resolve(ctx)
-	if err != nil || len(resolved.Keys) == 0 {
+	keys, err := input.Resolve(ctx, op.Repos.Key)
+	if err != nil || len(keys) == 0 {
 		return errs.New(errs.CodeKeyDefaultSetFailed, "Key not found")
 	}
 	// Pass resolved key items directly — SetDefaultKeys no longer re-lists the DB.
-	if err := op.Services.Key.SetDefaults(ctx, resolved.Keys); err != nil {
+	if err := op.Services.Key.SetDefaults(ctx, keys); err != nil {
 		return errs.WrapMsg(errs.CodeKeyDefaultSetFailed, fmt.Sprintf("Failed to set default key: %v", err), err)
 	}
-	for _, k := range resolved.Keys {
+	for _, k := range keys {
 		op.AuditLog.LogOperation("key.set_default", map[string]any{"name": k.Name}, "")
 	}
 	return nil

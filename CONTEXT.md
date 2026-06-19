@@ -20,7 +20,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
   - [Speed-first principle](#speed-first-principle)
   - [Operation struct](#operation-struct)
   - [Direct repository calls in the API layer](#direct-repository-calls-in-the-api-layer)
-  - [Input/Input/Resolved triple (public-facing domains only)](#inputinputresolved-triple-public-facing-domains-only)
+  - [Input pattern (public-facing domains)](#input-pattern-public-facing-domains)
   - [SQLite schema overview](#sqlite-schema-overview)
   - [Layer compliance enforcement](#layer-compliance-enforcement)
   - [Public API boundary](#public-api-boundary)
@@ -118,7 +118,7 @@ The `Enricher` struct holds all repository interfaces and is wired once at start
 
 ### Validation (caller's responsibility)
 
-Checks that input is structurally valid: format, existence, cross-field constraints. Belongs in API layer (`pkg/api/inputs/` -- `*Input` or `*Request` structs). Does NOT belong in Service or Controller. The caller (API layer) is responsible for passing clean, validated data down.
+Checks that input is structurally valid: format, existence, cross-field constraints. Belongs in API layer (`pkg/api/inputs/` -- `*Input` structs with `Validate()`/`Resolve()`). Does NOT belong in Service or Controller. The caller (API layer) is responsible for passing clean, validated data down.
 
 **Why not validate at every layer:** mvmctl is a speed-first CLI. Redundant subprocess calls in defensive validation add 10-50ms latency each. Many checks duplicate what the operation naturally detects -- `bridge_exists()` called once to "validate" and again to branch execution. Validation in Service conflates concerns and slows operations. The caller-trusts-callee convention means Service receives clean data and executes without defensive checks. If a bug in API validation reaches Service, it's caught by testing at the API boundary.
 
@@ -146,19 +146,29 @@ The API layer may call a Repository directly (e.g., `op.Repos.VM.NamesExist(ctx,
 
 The rule: **user-facing input must go through the Request pipeline.** Internal cross-domain data lookups can call Repositories directly from the Operation method, but the result must be passed to Core Service classes (not queried from within Core).
 
-### Input/Input/Resolved triple (public-facing domains only)
+### Input pattern (public-facing domains)
 
-Every domain with public-facing input must follow this three-struct pattern in `pkg/api/inputs/`:
+Every domain with public-facing input uses a single `*Input` struct in `pkg/api/inputs/` with `Validate()` and `Resolve()` methods (ADR-0011). No `*Request` wrapper.
 
-1. **`*Input`** -- Raw CLI or external input. Thin struct with typed fields. Optional fields are `*T` -- no DB-backed defaults, no constants-backed defaults. The CLI layer resolves constants before creating this; the API layer resolves DB-backed defaults from `nil` in the Request.
+1. **`*Input`** -- Raw CLI or external input. Thin struct with typed fields. Optional fields are `*T` -- no DB-backed defaults, no constants-backed defaults. The CLI layer resolves constants before creating this; the API layer calls `Resolve()` to look up DB-backed defaults and validate.
 
-2. **`*Request`** -- Accepts the Input and dependencies (DB, repos, enricher). The `Resolve(ctx)` method looks up DB-backed records for any `nil` identifiers, resolves FK references, validates, and returns a Resolved struct.
+2. **`Validate() error`** -- Checks input fields. Called inside `Resolve()`, but callers may call it separately for early-exit patterns (e.g., batch removal).
 
-3. **`Resolved*`** -- Immutable output of Request.Resolve(). Every field is explicit and validated. No `nil` for required fields.
+3. **`Resolve(ctx, deps...) (result, error)`** -- Looks up DB records, resolves defaults, returns domain entities or a `Resolved*` struct (kept only when output shape differs from input).
 
-Mandatory for any domain that has public CLI commands or API endpoints.
+Examples:
 
-*Example: `VMInput{Identifiers, Force}` -> `VMRequest{db, input, resolver, enricher}.Resolve(ctx)` -> `ResolvedVMInput{VMs []*model.VMItem, Force bool}`.*
+```go
+// Simple lookup — returns domain entities directly
+vms, err := input.Resolve(ctx, op.Repos.VM)
+
+// Create with resolved defaults — returns Resolved* struct
+resolved, err := input.Resolve(ctx, op.Repos.Volume)
+
+// Multi-domain resolution — separate methods for each domain
+snap, _ := input.ResolveSnapshot(ctx, op.Repos.Snapshot)
+net, _ := input.ResolveNetwork(ctx, op.Repos.Network)
+```
 
 ### SQLite schema overview
 

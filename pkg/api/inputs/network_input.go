@@ -2,12 +2,11 @@ package inputs
 
 import (
 	"context"
+	"fmt"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
 	"strings"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // NetworkInput is the raw input for identifying existing networks.
@@ -16,63 +15,31 @@ type NetworkInput struct {
 	Force       bool     `json:"force"`
 }
 
-// ResolvedNetworkInput specifies resolved network input.
-type ResolvedNetworkInput struct {
-	Networks []*model.NetworkItem
-	Force    bool
-}
-
-// NetworkRequest specifies network request.
-// Resolve network identifiers to DB records and validate.
-type NetworkRequest struct {
-	db       *sqlx.DB
-	input    NetworkInput
-	result   *ResolvedNetworkInput
-	resolver *network.Resolver
-}
-
-// NewNetworkRequest creates a new NetworkRequest.
-// Create resolver with lease enrichment.
-func NewNetworkRequest(inputs NetworkInput, db *sqlx.DB, networkRepo network.Repository) *NetworkRequest {
-	return &NetworkRequest{
-		db:       db,
-		input:    inputs,
-		resolver: network.NewResolver(networkRepo, []string{"leases"}),
+// Validate checks that the network input has valid identifiers.
+func (i *NetworkInput) Validate() error {
+	if len(i.Identifiers) == 0 {
+		return fmt.Errorf("at least one network identifier is required")
 	}
+	return nil
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-// Resolve resolves network identifiers to NetworkItem records.
-func (r *NetworkRequest) Resolve(ctx context.Context) (*ResolvedNetworkInput, error) {
-	if len(r.input.Identifiers) == 0 {
-		return nil, errs.NotFound(errs.CodeNetworkNotFound, "No network identifiers provided")
+// Resolve resolves all identifiers in the input to NetworkItem objects.
+// Delegates to network.Resolver.ResolveMany for batch resolution with
+// deduplication and error collection.
+func (i *NetworkInput) Resolve(ctx context.Context, repo network.Repository) ([]*model.NetworkItem, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
 	}
-	result, err := r.resolver.ResolveMany(ctx, r.input.Identifiers)
+	resolver := network.NewResolver(repo, []string{"leases"})
+	result, err := resolver.ResolveMany(ctx, i.Identifiers)
 	if err != nil {
 		return nil, errs.New(errs.CodeNetworkNotFound, err.Error())
 	}
-	if len(result.Errors) > 0 && len(result.Items) == 0 {
-		return nil, errs.NotFound(
-			errs.CodeNetworkNotFound,
-			"Could not resolve any networks: "+strings.Join(result.Errors, ", "),
-		)
+	if len(result.Items) == 0 {
+		return nil, errs.NotFound(errs.CodeNetworkNotFound, "No networks found matching identifiers")
 	}
-	r.result = &ResolvedNetworkInput{
-		Networks: result.Items,
-		Force:    r.input.Force,
+	if len(result.Errors) > 0 {
+		return result.Items, fmt.Errorf("partial resolve failures: %s", strings.Join(result.Errors, "; "))
 	}
-	// Validate
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-	return r.result, nil
-}
-func (r *NetworkRequest) ensureValidate() error {
-	if r.result == nil {
-		return errs.New(errs.CodeNetworkNotFound, "Failed to resolve necessary dependencies to validate")
-	}
-	if len(r.result.Networks) == 0 {
-		return errs.NotFound(errs.CodeNetworkNotFound, "No networks found matching identifiers")
-	}
-	return nil
+	return result.Items, nil
 }

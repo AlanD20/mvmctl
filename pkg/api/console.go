@@ -26,7 +26,7 @@ type ConsoleAPI interface {
 // Returns running status, PID, and socket path.
 // On VM not found, raises VMNotFoundError — Go returns error.
 func (op *Operation) ConsoleGetState(ctx context.Context, identifier string) (*results.ConsoleStateResult, error) {
-	resolved, err := op.resolveWithRequest(ctx, identifier)
+	resolved, err := op.resolveConsole(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func (op *Operation) ConsoleGetConnectionInfo(
 	ctx context.Context,
 	identifier string,
 ) (*model.ConsoleConnectionInfo, error) {
-	resolved, err := op.resolveWithRequest(ctx, identifier)
+	resolved, err := op.resolveConsole(ctx, identifier)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (op *Operation) ConsoleGetConnectionInfo(
 // Returns error. Resolution errors propagate as error (not wrapped in
 // OperationResult)
 func (op *Operation) ConsoleKill(ctx context.Context, identifier string) error {
-	resolved, err := op.resolveWithRequest(ctx, identifier)
+	resolved, err := op.resolveConsole(ctx, identifier)
 	if err != nil {
 		return err
 	}
@@ -97,28 +97,22 @@ func (op *Operation) ConsoleAttachConsole(
 	return console.InteractiveAttach(ctx, socketPath, stdin, stdout)
 }
 
-// resolveWithRequest resolves a VM identifier and creates a console relay.
-// Resolution pipeline: ConsoleRequest resolves the input to a VM entity and console relay.
-// Raises VMNotFoundError if VM cannot be found — Go returns DomainError with CodeVMNotFound.
+// resolveConsole resolves a VM identifier and creates a console relay.
 // The relay creation is done here (API layer) rather than in the input resolver
 // to avoid importing internal/service/console from the inputs package.
-func (op *Operation) resolveWithRequest(ctx context.Context, identifier string) (*inputs.ResolvedConsoleInput, error) {
+func (op *Operation) resolveConsole(ctx context.Context, identifier string) (*inputs.ResolvedConsoleInput, error) {
 	rawInput := inputs.ConsoleInput{Identifier: identifier}
-	req := inputs.NewConsoleRequest(rawInput, op.Connection.DB())
 	// Resolve VM first to get ID and name required for relay creation
-	vmRequest := inputs.NewVMRequest(
-		inputs.VMInput{Identifiers: []string{identifier}},
-		op.Connection.DB(), op.Repos.VM,
-	)
-	vmResolved, err := vmRequest.Resolve(ctx)
+	vmInput := inputs.VMInput{Identifiers: []string{rawInput.Identifier}}
+	vms, err := vmInput.Resolve(ctx, op.Repos.VM)
 	if err != nil {
 		return nil, err
 	}
-	vmEntity := vmResolved.VMs[0]
+	vmEntity := vms[0]
 	// Create relay manager.
 	vmDir := infra.GetVMDirByID(vmEntity.ID)
 	pidPath := filepath.Join(vmDir, console.DefaultConsolePIDFilename)
 	socketPath := filepath.Join(vmDir, console.DefaultConsoleSocketFilename)
 	relay := console.NewRelay(vmEntity.Name, pidPath, socketPath)
-	return req.Resolve(ctx, vmEntity, relay)
+	return rawInput.Resolve(vmEntity, relay)
 }

@@ -9,9 +9,6 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
-	"path/filepath"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // VolumeCreateInput specifies volume create input.
@@ -31,35 +28,38 @@ type ResolvedVolumeCreateInput struct {
 	IsReadOnly bool
 }
 
-// VolumeCreateRequest specifies volume create request.
-// Resolve volume creation inputs to explicit values.
-type VolumeCreateRequest struct {
-	db     *sqlx.DB
-	input  VolumeCreateInput
-	result *ResolvedVolumeCreateInput
-	repo   volume.Repository
-}
-
-// NewVolumeCreateRequest creates a new VolumeCreateRequest.
-func NewVolumeCreateRequest(inputs VolumeCreateInput, db *sqlx.DB, volumeRepo volume.Repository) *VolumeCreateRequest {
-	return &VolumeCreateRequest{
-		db:    db,
-		input: inputs,
-		repo:  volumeRepo,
+// Validate checks that the volume create input is valid.
+func (i *VolumeCreateInput) Validate() error {
+	if i.Name == "" {
+		return fmt.Errorf("volume name is required")
 	}
+	if i.Size == "" {
+		return fmt.Errorf("volume size is required")
+	}
+	if i.Format != nil {
+		f := *i.Format
+		if f != "raw" && f != "qcow2" {
+			return fmt.Errorf("unsupported format: %s. Use 'raw' or 'qcow2'", f)
+		}
+	}
+	return nil
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-// Resolve resolves creation inputs to explicit values.
-func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreateInput, error) {
-	sizeBytes, err := disk.ParseDiskSizeToBytes(r.input.Size)
+// Resolve resolves the create input to a ResolvedVolumeCreateInput.
+// Parses size, defaults format and read-only, validates name, and checks
+// for existing volumes with the same name.
+func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository) (*ResolvedVolumeCreateInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	sizeBytes, err := disk.ParseDiskSizeToBytes(i.Size)
 	if err != nil {
 		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid volume size: %s", err.Error()))
 	}
-	// Default format is "raw" —
+	// Default format is "raw"
 	format := model.VolumeFormatRaw
-	if r.input.Format != nil {
-		format = model.VolumeFormat(*r.input.Format)
+	if i.Format != nil {
+		format = model.VolumeFormat(*i.Format)
 	}
 	if format != model.VolumeFormatRaw && format != model.VolumeFormatQCOW2 {
 		return nil, errs.New(
@@ -67,40 +67,32 @@ func (r *VolumeCreateRequest) Resolve(ctx context.Context) (*ResolvedVolumeCreat
 			fmt.Sprintf("Unsupported format: %s. Use 'raw' or 'qcow2'.", format),
 		)
 	}
-	path := filepath.Join(infra.GetVolumesDir(), fmt.Sprintf("%s.%s", r.input.Name, string(format)))
+	path := infra.GetVolumePath(i.Name, string(format))
 	isReadOnly := false
-	if r.input.ReadOnly != nil {
-		isReadOnly = *r.input.ReadOnly
+	if i.ReadOnly != nil {
+		isReadOnly = *i.ReadOnly
 	}
-	r.result = &ResolvedVolumeCreateInput{
-		Name:       r.input.Name,
+	result := &ResolvedVolumeCreateInput{
+		Name:       i.Name,
 		SizeBytes:  sizeBytes,
 		Format:     format,
 		Path:       path,
 		IsReadOnly: isReadOnly,
 	}
-	if err := r.ensureValidate(ctx); err != nil {
-		return nil, err
-	}
-	return r.result, nil
-}
-func (r *VolumeCreateRequest) ensureValidate(ctx context.Context) error {
-	if r.result == nil {
-		return errs.New(errs.CodeVolumeNotFound, "Failed to resolve necessary dependencies to validate")
-	}
-	if err := validators.VolumeName(r.result.Name); err != nil {
-		return errs.New(errs.CodeValidationFailed, err.Error())
+	// Validate volume name rules
+	if err := validators.VolumeName(result.Name); err != nil {
+		return nil, errs.New(errs.CodeValidationFailed, err.Error())
 	}
 	// Check for existing volume with same name
-	existing, err := r.repo.GetByName(ctx, r.result.Name)
+	existing, err := repo.GetByName(ctx, result.Name)
 	if err != nil {
-		return errs.New(errs.CodeDatabaseError, "Failed to check existing volume: "+err.Error())
+		return nil, errs.New(errs.CodeDatabaseError, "Failed to check existing volume: "+err.Error())
 	}
 	if existing != nil {
-		return errs.AlreadyExists(
+		return nil, errs.AlreadyExists(
 			errs.CodeVolumeAlreadyExists,
-			fmt.Sprintf("Volume '%s' already exists", r.result.Name),
+			fmt.Sprintf("Volume '%s' already exists", result.Name),
 		)
 	}
-	return nil
+	return result, nil
 }

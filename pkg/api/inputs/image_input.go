@@ -6,8 +6,6 @@ import (
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // ImageInput is the raw input for identifying existing images.
@@ -15,50 +13,30 @@ type ImageInput struct {
 	Identifiers []string `json:"identifiers"`
 }
 
-// ResolvedImageInput specifies resolved image input.
-type ResolvedImageInput struct {
-	Images []*model.ImageItem
-}
-
-// ImageRequest specifies image request.
-// Request that resolves ImageInput to ImageItem via DB.
-type ImageRequest struct {
-	db       *sqlx.DB
-	input    ImageInput
-	result   *ResolvedImageInput
-	resolver *image.Resolver
-}
-
-// NewImageRequest creates a new ImageRequest.
-func NewImageRequest(inputs ImageInput, db *sqlx.DB, imageRepo image.Repository) *ImageRequest {
-	return &ImageRequest{
-		db:       db,
-		input:    inputs,
-		resolver: image.NewResolver(imageRepo),
+// Validate checks that the image input has valid identifiers.
+func (i *ImageInput) Validate() error {
+	if len(i.Identifiers) == 0 {
+		return fmt.Errorf("at least one image identifier is required")
 	}
-}
-
-// Result returns the resolved input, or nil if resolve() has not been called.
-// Resolve resolves identifiers to ImageItem records from DB.
-func (r *ImageRequest) Resolve(ctx context.Context) (*ResolvedImageInput, error) {
-	if len(r.input.Identifiers) == 0 {
-		return nil, errs.NotFound(errs.CodeImageNotFound, "No image identifiers provided")
-	}
-	// Validate identifier length — max 64 chars.
-	for _, ident := range r.input.Identifiers {
+	for _, ident := range i.Identifiers {
 		if len(ident) > 64 {
-			return nil, errs.New(
-				errs.CodeValidationFailed,
-				fmt.Sprintf("Image identifier too long: '%s' exceeds maximum length of 64 characters", ident),
-			)
+			return fmt.Errorf("image identifier too long: %q exceeds maximum length of 64 characters", ident)
 		}
 	}
-	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
+	return nil
+}
+
+// Resolve resolves all identifiers in the input to ImageItem objects.
+// Delegates to image.Resolver.ResolveMany for batch resolution with
+// deduplication and error collection.
+func (i *ImageInput) Resolve(ctx context.Context, repo image.Repository) ([]*model.ImageItem, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	resolver := image.NewResolver(repo)
+	result := resolver.ResolveMany(ctx, i.Identifiers)
 	if result == nil || len(result.Items) == 0 {
 		return nil, errs.NotFound(errs.CodeImageNotFound, "No images found matching identifiers")
 	}
-	r.result = &ResolvedImageInput{
-		Images: result.Items,
-	}
-	return r.result, nil
+	return result.Items, nil
 }

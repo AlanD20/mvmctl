@@ -1,12 +1,9 @@
 package inputs
 
 import (
-	"context"
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/errs"
 	"strings"
-
-	"github.com/jmoiron/sqlx"
 )
 
 // BinaryPullInput holds options for pulling a Firecracker binary.
@@ -28,62 +25,45 @@ type ResolvedBinaryPullInput struct {
 	DownloadOverride bool
 }
 
-// BinaryPullRequest specifies binary pull request.
-type BinaryPullRequest struct {
-	db     *sqlx.DB
-	input  BinaryPullInput
-	result *ResolvedBinaryPullInput
-}
-
-// NewBinaryPullRequest creates a new BinaryPullRequest.
-func NewBinaryPullRequest(inputs BinaryPullInput, db *sqlx.DB) *BinaryPullRequest {
-	return &BinaryPullRequest{
-		db:    db,
-		input: inputs,
+// Validate checks that the binary pull input is valid.
+func (i *BinaryPullInput) Validate() error {
+	if i.Type != "" && strings.ToLower(i.Type) != "firecracker" {
+		return errs.New(
+			errs.CodeBinaryPullFailed,
+			"Unsupported binary: '"+i.Type+"'. Only 'firecracker' is supported for download or build.",
+		)
 	}
+	return nil
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-// Resolve resolves and validates pull inputs.
-func (r *BinaryPullRequest) Resolve(ctx context.Context) (*ResolvedBinaryPullInput, error) {
+// Resolve resolves and validates pull inputs, returning a ResolvedBinaryPullInput.
+func (i *BinaryPullInput) Resolve() (*ResolvedBinaryPullInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
 	// Normalize version (strip 'v' prefix).
-	version := strings.TrimPrefix(r.input.Version, "v")
+	version := strings.TrimPrefix(i.Version, "v")
 	// Version validation is handled by the service's ResolveVersion method,
 	// which accepts latest, partial (e.g. "1.15"), and exact (e.g. "1.15.1") specs.
 	// When git_ref is provided, version may be empty.
 	// Default type to "firecracker"
-	typ := r.input.Type
+	typ := i.Type
 	if typ == "" {
 		typ = "firecracker"
 	}
-	r.result = &ResolvedBinaryPullInput{
-		Version:          version,
-		Type:             typ,
-		GitRef:           r.input.GitRef,
-		SetDefault:       r.input.SetDefault,
-		BinDir:           infra.GetBinDir(),
-		DownloadOverride: r.input.DownloadOverride,
-	}
-	// Validate
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-	return r.result, nil
-}
-func (r *BinaryPullRequest) ensureValidate() error {
-	if r.result == nil {
-		return errs.New(errs.CodeBinaryNotFound, "No resolved pull input to validate")
-	}
-	// Validate binary type — only firecracker is supported for pull/build
-	if strings.ToLower(r.result.Type) != "firecracker" {
-		return errs.New(
-			errs.CodeBinaryNotFound,
-			"Unsupported binary: '"+r.result.Type+"'. Only 'firecracker' is supported for download or build.",
+	// Validate resolved type
+	if strings.ToLower(typ) != "firecracker" {
+		return nil, errs.New(
+			errs.CodeBinaryPullFailed,
+			"Unsupported binary: '"+typ+"'. Only 'firecracker' is supported for download or build.",
 		)
 	}
-	// Skip version check for git builds — version is determined after build
-	if r.result.GitRef != nil && *r.result.GitRef != "" {
-		return nil
-	}
-	return nil
+	return &ResolvedBinaryPullInput{
+		Version:          version,
+		Type:             typ,
+		GitRef:           i.GitRef,
+		SetDefault:       i.SetDefault,
+		BinDir:           infra.GetBinDir(),
+		DownloadOverride: i.DownloadOverride,
+	}, nil
 }
