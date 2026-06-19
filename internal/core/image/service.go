@@ -454,39 +454,12 @@ func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath
 	}
 
 	if err := os.MkdirAll(filepath.Dir(outputPath), infra.DirPerm); err != nil {
-		return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to create output directory: %s", err))
+		return errs.New(errs.CodeImageError, fmt.Sprintf("failed to create output directory: %s", err))
 	}
 
-	// Fallback chain: sendfile → io.Copy → dd
-	sendfileErr := copyViaSendfile(cachedPath, outputPath)
-	if sendfileErr != nil {
-		slog.Debug("sendfile copy failed, falling back to io.Copy",
-			"src", cachedPath, "dst", outputPath, "error", sendfileErr)
-
-		ioCopyErr := copyViaIO(cachedPath, outputPath)
-		if ioCopyErr != nil {
-			slog.Debug("io.Copy failed, falling back to dd",
-				"src", cachedPath, "dst", outputPath, "error", ioCopyErr)
-
-			if err := system.CopyWithDD(ctx, cachedPath, outputPath, true); err != nil {
-				return errs.New(errs.CodeImageError,
-					fmt.Sprintf("all copy methods failed: sendfile=%v, io.Copy=%v, dd=%v",
-						sendfileErr, ioCopyErr, err))
-			}
-		}
-	}
-
-	// fdatasync — data integrity for rootfs
-	f, err := os.Open(outputPath)
-	if err != nil {
-		return errs.New(errs.CodeImageError, fmt.Sprintf("Failed to open file for fdatasync: %s", err))
-	}
-	if err := syscall.Fdatasync(int(f.Fd())); err != nil {
-		f.Close()
-		return errs.New(errs.CodeImageError, fmt.Sprintf("fdatasync failed: %s", err))
-	}
-	if err := f.Close(); err != nil {
-		return errs.New(errs.CodeImageError, fmt.Sprintf("fdatasync close failed: %s", err))
+	// Use shared CopyFile (sendfile → io.Copy fallback + fdatasync)
+	if err := infra.CopyFile(cachedPath, outputPath); err != nil {
+		return errs.New(errs.CodeImageError, fmt.Sprintf("copy to output failed: %s", err))
 	}
 
 	slog.Info("Copied image", "output", filepath.Base(outputPath))

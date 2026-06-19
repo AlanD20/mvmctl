@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -307,24 +309,73 @@ func SafeMove(src, dst string) error {
 	return os.Remove(src)
 }
 
-// CopyFile copies a file from src to dst.
+// copyViaSendfile copies srcPath to dstPath using sendfile(2) for in-kernel
+// zero-copy transfer. Works across different filesystem types.
+func copyViaSendfile(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open src for sendfile: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("open dst for sendfile: %w", err)
+	}
+	defer dst.Close()
+
+	const maxSend = 0x7ffff000
+	var offset int64
+	for {
+		n, err := unix.Sendfile(int(dst.Fd()), int(src.Fd()), &offset, maxSend)
+		if err != nil {
+			return fmt.Errorf("sendfile at offset %d: %w", offset, err)
+		}
+		if n == 0 {
+			break
+		}
+	}
+	return nil
+}
+
+// copyViaIO copies srcPath to dstPath using io.Copy with a 32KB buffer.
+// Always works as a userspace fallback.
+func copyViaIO(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open src for io.Copy: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("open dst for io.Copy: %w", err)
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
+	return err
+}
+
+// CopyFile copies srcPath to dstPath using the optimized fallback chain:
+// sendfile(2) → io.Copy. Performs fdatasync after copy.
 func CopyFile(src, dst string) error {
-	s, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open source %s: %w", src, err)
+	if err := copyViaSendfile(src, dst); err != nil {
+		if ioErr := copyViaIO(src, dst); ioErr != nil {
+			return fmt.Errorf("all copy methods failed: sendfile=%v, io.Copy=%v", err, ioErr)
+		}
 	}
-	defer s.Close()
 
-	d, err := os.Create(dst)
+	// fdatasync — data integrity
+	f, err := os.Open(dst)
 	if err != nil {
-		return fmt.Errorf("create destination %s: %w", dst, err)
+		return fmt.Errorf("open for fdatasync: %w", err)
 	}
-	defer d.Close()
-
-	if _, err := io.Copy(d, s); err != nil {
-		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
+	if err := syscall.Fdatasync(int(f.Fd())); err != nil {
+		f.Close()
+		return fmt.Errorf("fdatasync failed: %w", err)
 	}
-	return d.Sync()
+	return f.Close()
 }
 
 // IsSubDir checks whether path is under parent using proper path hierarchy comparison.
