@@ -115,7 +115,12 @@ func resolveUser(ctx context.Context, inputUser *string, vmEntity *model.VMItem,
 }
 
 // resolveSSHKey resolves SSH private key path via the key domain.
-func resolveSSHKey(ctx context.Context, inputKey *string, vmEntity *model.VMItem, keyRepo key.Repository) (*string, error) {
+func resolveSSHKey(
+	ctx context.Context,
+	inputKey *string,
+	vmEntity *model.VMItem,
+	keyRepo key.Repository,
+) (*string, error) {
 	keyResolver := key.NewResolver(keyRepo)
 	if inputKey != nil && *inputKey != "" {
 		keyStr := *inputKey

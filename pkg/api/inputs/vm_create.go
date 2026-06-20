@@ -29,8 +29,8 @@ import (
 // VMCreateInput specifies v m create input.
 type VMCreateInput struct {
 	// Required fields (no defaults)
-	Name    string   `json:"name"               yaml:"name"`
-	SSHKeys []string `json:"ssh_keys,omitempty" yaml:"ssh_keys,omitempty"`
+	Name    string   `json:"name"                               yaml:"name"`
+	SSHKeys []string `json:"ssh_keys,omitempty"                 yaml:"ssh_keys,omitempty"`
 	// Optional fields with CLI-layer defaults resolved in Build()
 	VCPUCount             *int           `json:"vcpu,omitempty"                     yaml:"vcpu,omitempty"`
 	MemSizeMib            string         `json:"mem,omitempty"                      yaml:"mem,omitempty"`

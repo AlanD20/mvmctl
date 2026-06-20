@@ -708,7 +708,11 @@ func (e *Enricher) enrichNetworkVMs(ctx context.Context, networks []*model.Netwo
 }
 
 // enrichNetworkSnapshots resolves snapshots that reference each network.
-func (e *Enricher) enrichNetworkSnapshots(ctx context.Context, networks []*model.NetworkItem, spec model.RelationSpec) error {
+func (e *Enricher) enrichNetworkSnapshots(
+	ctx context.Context,
+	networks []*model.NetworkItem,
+	spec model.RelationSpec,
+) error {
 	netIDs := extractNetworkIDs(networks)
 	if len(netIDs) == 0 {
 		return nil
@@ -886,7 +890,11 @@ func (e *Enricher) enrichKernelVMs(ctx context.Context, kernels []*model.KernelI
 }
 
 // enrichKernelSnapshots resolves snapshots that reference each kernel.
-func (e *Enricher) enrichKernelSnapshots(ctx context.Context, kernels []*model.KernelItem, spec model.RelationSpec) error {
+func (e *Enricher) enrichKernelSnapshots(
+	ctx context.Context,
+	kernels []*model.KernelItem,
+	spec model.RelationSpec,
+) error {
 	ids := collectKernelIDs(kernels)
 	if len(ids) == 0 {
 		return nil
@@ -996,7 +1004,11 @@ func (e *Enricher) enrichBinaryVMs(ctx context.Context, binaries []*model.Binary
 }
 
 // enrichBinarySnapshots resolves snapshots that reference each binary.
-func (e *Enricher) enrichBinarySnapshots(ctx context.Context, binaries []*model.BinaryItem, spec model.RelationSpec) error {
+func (e *Enricher) enrichBinarySnapshots(
+	ctx context.Context,
+	binaries []*model.BinaryItem,
+	spec model.RelationSpec,
+) error {
 	ids := collectBinaryIDs(binaries)
 	if len(ids) == 0 {
 		return nil

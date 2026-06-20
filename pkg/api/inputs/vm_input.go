@@ -102,7 +102,11 @@ func (i *VMExecInput) Validate() error {
 }
 
 // Resolve resolves the VM and vsock configuration for exec operations.
-func (i *VMExecInput) Resolve(ctx context.Context, vmRepo vm.Repository, vsockRepo vsock.Repository) (*ResolvedVMExecInput, error) {
+func (i *VMExecInput) Resolve(
+	ctx context.Context,
+	vmRepo vm.Repository,
+	vsockRepo vsock.Repository,
+) (*ResolvedVMExecInput, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}

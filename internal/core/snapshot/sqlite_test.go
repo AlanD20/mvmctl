@@ -41,7 +41,7 @@ func TestRepo_Get(t *testing.T) {
 			DiskSizeMiB:  8192,
 			SSHKeys:      db.StringSlice{"ssh-ed25519 AAA...", "ssh-rsa BBB..."},
 			SSHUser:      strPtr("ubuntu"),
-			ExtraConfig:  strPtr(`{"balloon":true}`),
+			ExtraConfig:  &model.SnapshotExtraConfig{PCIEnabled: true},
 			CreatedAt:    "2024-01-01T00:00:00Z",
 			UpdatedAt:    "2024-01-01T00:00:00Z",
 		}
@@ -59,8 +59,8 @@ func TestRepo_Get(t *testing.T) {
 
 	t.Run("upsert_updates_existing", func(t *testing.T) {
 		original := &model.SnapshotItem{
-			ID:      "snap-2",
-			Name:    "original",
+			ID:        "snap-2",
+			Name:      "original",
 			VCPUCount: 1,
 			CreatedAt: "2024-01-01T00:00:00Z",
 			UpdatedAt: "2024-01-01T00:00:00Z",
@@ -140,8 +140,18 @@ func TestRepo_ListAll(t *testing.T) {
 	})
 
 	t.Run("returns_all_snapshots", func(t *testing.T) {
-		item1 := &model.SnapshotItem{ID: "s-a", Name: "snap-a", CreatedAt: "2024-01-01T00:00:00Z", UpdatedAt: "2024-01-01T00:00:00Z"}
-		item2 := &model.SnapshotItem{ID: "s-b", Name: "snap-b", CreatedAt: "2024-01-02T00:00:00Z", UpdatedAt: "2024-01-02T00:00:00Z"}
+		item1 := &model.SnapshotItem{
+			ID:        "s-a",
+			Name:      "snap-a",
+			CreatedAt: "2024-01-01T00:00:00Z",
+			UpdatedAt: "2024-01-01T00:00:00Z",
+		}
+		item2 := &model.SnapshotItem{
+			ID:        "s-b",
+			Name:      "snap-b",
+			CreatedAt: "2024-01-02T00:00:00Z",
+			UpdatedAt: "2024-01-02T00:00:00Z",
+		}
 		require.NoError(t, repo.Upsert(ctx, item1))
 		require.NoError(t, repo.Upsert(ctx, item2))
 
@@ -179,9 +189,18 @@ func TestRepo_FindByPrefix(t *testing.T) {
 	repo := testutil.NewSnapshotRepo()
 
 	// Seed data with intentional prefix overlaps
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "abc123", Name: "exact-match", CreatedAt: "t1", UpdatedAt: "t1"}))
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "abc456", Name: "prefix-match", CreatedAt: "t2", UpdatedAt: "t2"}))
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "def789", Name: "no-match", CreatedAt: "t3", UpdatedAt: "t3"}))
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "abc123", Name: "exact-match", CreatedAt: "t1", UpdatedAt: "t1"}),
+	)
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "abc456", Name: "prefix-match", CreatedAt: "t2", UpdatedAt: "t2"}),
+	)
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "def789", Name: "no-match", CreatedAt: "t3", UpdatedAt: "t3"}),
+	)
 
 	t.Run("exact_match", func(t *testing.T) {
 		got, err := repo.FindByPrefix(ctx, "abc123")
@@ -257,9 +276,18 @@ func TestRepo_CountByKernelID(t *testing.T) {
 	ctx := context.Background()
 	repo := testutil.NewSnapshotRepo()
 
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", KernelID: "k-1", CreatedAt: "t1", UpdatedAt: "t1"}))
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s2", KernelID: "k-1", CreatedAt: "t2", UpdatedAt: "t2"}))
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s3", KernelID: "k-2", CreatedAt: "t3", UpdatedAt: "t3"}))
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", KernelID: "k-1", CreatedAt: "t1", UpdatedAt: "t1"}),
+	)
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "s2", KernelID: "k-1", CreatedAt: "t2", UpdatedAt: "t2"}),
+	)
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "s3", KernelID: "k-2", CreatedAt: "t3", UpdatedAt: "t3"}),
+	)
 
 	t.Run("count_by_kernel_id", func(t *testing.T) {
 		count, err := repo.CountByKernelID(ctx, "k-1")
@@ -279,8 +307,14 @@ func TestRepo_CountByNetworkID(t *testing.T) {
 	ctx := context.Background()
 	repo := testutil.NewSnapshotRepo()
 
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", NetworkID: "n-1", CreatedAt: "t1", UpdatedAt: "t1"}))
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s2", NetworkID: "n-1", CreatedAt: "t2", UpdatedAt: "t2"}))
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", NetworkID: "n-1", CreatedAt: "t1", UpdatedAt: "t1"}),
+	)
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "s2", NetworkID: "n-1", CreatedAt: "t2", UpdatedAt: "t2"}),
+	)
 
 	t.Run("count_by_network_id", func(t *testing.T) {
 		count, err := repo.CountByNetworkID(ctx, "n-1")
@@ -294,7 +328,10 @@ func TestRepo_CountByBinaryID(t *testing.T) {
 	ctx := context.Background()
 	repo := testutil.NewSnapshotRepo()
 
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", BinaryID: "b-1", CreatedAt: "t1", UpdatedAt: "t1"}))
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", BinaryID: "b-1", CreatedAt: "t1", UpdatedAt: "t1"}),
+	)
 
 	t.Run("count_by_binary_id", func(t *testing.T) {
 		count, err := repo.CountByBinaryID(ctx, "b-1")
@@ -312,9 +349,27 @@ func TestRepo_FindByKernelID(t *testing.T) {
 	ctx := context.Background()
 	repo := testutil.NewSnapshotRepo()
 
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", Name: "snap-a", KernelID: "k-1", CreatedAt: "t1", UpdatedAt: "t1"}))
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s2", Name: "snap-b", KernelID: "k-1", CreatedAt: "t2", UpdatedAt: "t2"}))
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s3", Name: "snap-c", KernelID: "k-2", CreatedAt: "t3", UpdatedAt: "t3"}))
+	require.NoError(
+		t,
+		repo.Upsert(
+			ctx,
+			&model.SnapshotItem{ID: "s1", Name: "snap-a", KernelID: "k-1", CreatedAt: "t1", UpdatedAt: "t1"},
+		),
+	)
+	require.NoError(
+		t,
+		repo.Upsert(
+			ctx,
+			&model.SnapshotItem{ID: "s2", Name: "snap-b", KernelID: "k-1", CreatedAt: "t2", UpdatedAt: "t2"},
+		),
+	)
+	require.NoError(
+		t,
+		repo.Upsert(
+			ctx,
+			&model.SnapshotItem{ID: "s3", Name: "snap-c", KernelID: "k-2", CreatedAt: "t3", UpdatedAt: "t3"},
+		),
+	)
 
 	t.Run("find_by_kernel_id", func(t *testing.T) {
 		got, err := repo.FindByKernelID(ctx, "k-1")
@@ -351,7 +406,10 @@ func TestRepo_FindByNetworkID(t *testing.T) {
 	ctx := context.Background()
 	repo := testutil.NewSnapshotRepo()
 
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", NetworkID: "n-1", CreatedAt: "t1", UpdatedAt: "t1"}))
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", NetworkID: "n-1", CreatedAt: "t1", UpdatedAt: "t1"}),
+	)
 
 	t.Run("find_by_network_id", func(t *testing.T) {
 		got, err := repo.FindByNetworkID(ctx, "n-1")
@@ -369,7 +427,10 @@ func TestRepo_FindByBinaryID(t *testing.T) {
 	ctx := context.Background()
 	repo := testutil.NewSnapshotRepo()
 
-	require.NoError(t, repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", BinaryID: "b-1", CreatedAt: "t1", UpdatedAt: "t1"}))
+	require.NoError(
+		t,
+		repo.Upsert(ctx, &model.SnapshotItem{ID: "s1", BinaryID: "b-1", CreatedAt: "t1", UpdatedAt: "t1"}),
+	)
 
 	t.Run("find_by_binary_id", func(t *testing.T) {
 		got, err := repo.FindByBinaryID(ctx, "b-1")

@@ -450,7 +450,11 @@ func (op *Operation) ImageWarm(
 		var resolveErr error
 		images, resolveErr = input.Resolve(ctx, op.Repos.Image)
 		if resolveErr != nil {
-			return nil, errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Image resolution failed: %v", resolveErr), resolveErr)
+			return nil, errs.WrapMsg(
+				errs.CodeImageNotFound,
+				fmt.Sprintf("Image resolution failed: %v", resolveErr),
+				resolveErr,
+			)
 		}
 	}
 	if onProgress != nil {
