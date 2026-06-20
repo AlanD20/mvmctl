@@ -47,16 +47,11 @@ go test ./...
 ./scripts/build.sh release
 cp dist/mvm ~/.local/bin/mvm
 
-# System tests (requires KVM, groups, assets)
-# Run per-domain — batch runs cause cross-file state pollution.
+# E2E tests (requires KVM, groups, assets inside runner VM)
 export MVM_BINARY=dist/mvm
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
-for domain in \
-  bin cache cli config console cp host \
-  images init invariants kernel keys logs \
-  network ssh vm volume zzz_destructive; do
-  python3 scripts/run_tests.py --domain "$domain"
-done
+# Run inside the disposable runner VM (Firecracker VM with nested KVM)
+pytest tests/e2e/
 ```
 
 All five must pass. If system tests fail, investigate before proceeding.
