@@ -48,7 +48,11 @@ func (i *ImagePullInput) Validate() error {
 // Resolve resolves the pull input to a ResolvedImageAcquireInput.
 // Sets arch, resolves disabled detectors, applies output directory default,
 // then validates the resolved result.
-func (i *ImagePullInput) Resolve(ctx context.Context, cfg *config.Service, repo image.Repository) (*ResolvedImageAcquireInput, error) {
+func (i *ImagePullInput) Resolve(
+	ctx context.Context,
+	cfg *config.Service,
+	repo image.Repository,
+) (*ResolvedImageAcquireInput, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
@@ -117,7 +121,11 @@ func (i *ImageImportInput) Validate() error {
 // Resolve resolves the import input to a ResolvedImageAcquireInput.
 // Sets arch, resolves format (config → auto-detect), resolves disabled
 // detectors, then validates the resolved result.
-func (i *ImageImportInput) Resolve(ctx context.Context, cfg *config.Service, repo image.Repository) (*ResolvedImageAcquireInput, error) {
+func (i *ImageImportInput) Resolve(
+	ctx context.Context,
+	cfg *config.Service,
+	repo image.Repository,
+) (*ResolvedImageAcquireInput, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}

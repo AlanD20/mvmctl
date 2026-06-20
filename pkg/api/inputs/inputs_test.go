@@ -171,8 +171,6 @@ func TestParseKernelFilename(t *testing.T) {
 	}
 }
 
-
-
 // --- KeyCreateInput.Resolve ---
 // Rationale: KeyCreateInput.Resolve validates key names and
 // algorithms before creating SSH keys. A bug here would let invalid

@@ -17,9 +17,9 @@ import (
 	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
 	libnet "mvmctl/internal/lib/network"
-	"mvmctl/pkg/api/results"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
 )
 
@@ -253,7 +253,14 @@ func (op *Operation) SnapshotRestore(
 	}
 
 	// 2. Enrich snapshot with relations
-	if err := op.Enr.EnrichSnapshot(ctx, []*model.SnapshotItem{snap}, "image", "kernel", "network", "binary"); err != nil {
+	if err := op.Enr.EnrichSnapshot(
+		ctx,
+		[]*model.SnapshotItem{snap},
+		"image",
+		"kernel",
+		"network",
+		"binary",
+	); err != nil {
 		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
 			"failed to enrich snapshot with relations", err)
 	}
@@ -549,7 +556,10 @@ func (op *Operation) SnapshotList(ctx context.Context) []*model.SnapshotItem {
 // --- SnapshotInspect ---
 
 // SnapshotInspect returns detailed information about a single snapshot.
-func (op *Operation) SnapshotInspect(ctx context.Context, input inputs.SnapshotInput) (*results.SnapshotInspect, error) {
+func (op *Operation) SnapshotInspect(
+	ctx context.Context,
+	input inputs.SnapshotInput,
+) (*results.SnapshotInspect, error) {
 	snaps, err := input.Resolve(ctx, op.Repos.Snapshot)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeSnapshotNotFound,
@@ -568,7 +578,7 @@ func (op *Operation) SnapshotInspect(ctx context.Context, input inputs.SnapshotI
 			Name:         snap.Name,
 			SourceVMID:   snap.SourceVMID,
 			SourceVMName: snap.SourceVMName,
-			BaseDir:  snap.SnapshotDir,
+			BaseDir:      snap.SnapshotDir,
 			CreatedAt:    snap.CreatedAt,
 		},
 		Assets: results.SnapshotAssetsInfo{

@@ -87,7 +87,9 @@ func newSnapshotCreateCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				return fmt.Errorf("snapshot create failed: %w", err)
 			}
 
-			common.Cli.Success(fmt.Sprintf("Snapshot created: %s (ID: %s)", snapItem.Name, common.Cli.FormatID(snapItem.ID)))
+			common.Cli.Success(
+				fmt.Sprintf("Snapshot created: %s (ID: %s)", snapItem.Name, common.Cli.FormatID(snapItem.ID)),
+			)
 			return nil
 		},
 	}
@@ -282,7 +284,11 @@ func completeSnapshotIDs(cmd *cobra.Command, args []string, toComplete string) (
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
 
-func completeSnapshotThenName(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+func completeSnapshotThenName(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 {
 		return completeSnapshotIDs(cmd, args, toComplete)
 	}

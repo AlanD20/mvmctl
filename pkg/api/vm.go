@@ -998,8 +998,9 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 // --- Start / Stop / Reboot / Pause / Resume ---
 // Start starts one or more VMs.
 func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
+	repo := op.Repos.VM
 	results := make([]errs.OperationResult, 0)
-	vms, resolveErr := input.Resolve(ctx, op.Repos.VM)
+	vms, resolveErr := input.Resolve(ctx, repo)
 	if resolveErr != nil {
 		for _, ident := range input.Identifiers {
 			results = append(results, errs.OperationResult{

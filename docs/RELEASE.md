@@ -159,7 +159,7 @@ The `release.yml` workflow runs on tag push (`v*.*.*`):
 The `ci.yml` workflow (push to main, PRs) additionally runs:
 - `go mod tidy` + diff check
 - `gofmt` formatting check
-- `golines --max-len=120` line-length enforcement
+- `golines --max-len=120` line-length enforcement (install official: `go install github.com/segmentio/golines@latest`)
 - `go vet ./...` — static analysis
 - `go build ./...` — compile check
 - Coverage report generation and upload

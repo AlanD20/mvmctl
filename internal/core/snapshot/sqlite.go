@@ -121,7 +121,13 @@ func (r *sqliteRepo) Delete(ctx context.Context, id string) error {
 
 func (r *sqliteRepo) CountByKernelID(ctx context.Context, kernelID string) (int, error) {
 	var c int
-	if err := sqlx.GetContext(ctx, r.db, &c, "SELECT COUNT(*) FROM snapshots WHERE kernel_id = ?", kernelID); err != nil {
+	if err := sqlx.GetContext(
+		ctx,
+		r.db,
+		&c,
+		"SELECT COUNT(*) FROM snapshots WHERE kernel_id = ?",
+		kernelID,
+	); err != nil {
 		return 0, err
 	}
 	return c, nil
@@ -129,7 +135,13 @@ func (r *sqliteRepo) CountByKernelID(ctx context.Context, kernelID string) (int,
 
 func (r *sqliteRepo) CountByNetworkID(ctx context.Context, networkID string) (int, error) {
 	var c int
-	if err := sqlx.GetContext(ctx, r.db, &c, "SELECT COUNT(*) FROM snapshots WHERE network_id = ?", networkID); err != nil {
+	if err := sqlx.GetContext(
+		ctx,
+		r.db,
+		&c,
+		"SELECT COUNT(*) FROM snapshots WHERE network_id = ?",
+		networkID,
+	); err != nil {
 		return 0, err
 	}
 	return c, nil
@@ -137,7 +149,13 @@ func (r *sqliteRepo) CountByNetworkID(ctx context.Context, networkID string) (in
 
 func (r *sqliteRepo) CountByBinaryID(ctx context.Context, binaryID string) (int, error) {
 	var c int
-	if err := sqlx.GetContext(ctx, r.db, &c, "SELECT COUNT(*) FROM snapshots WHERE binary_id = ?", binaryID); err != nil {
+	if err := sqlx.GetContext(
+		ctx,
+		r.db,
+		&c,
+		"SELECT COUNT(*) FROM snapshots WHERE binary_id = ?",
+		binaryID,
+	); err != nil {
 		return 0, err
 	}
 	return c, nil

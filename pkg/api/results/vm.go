@@ -34,8 +34,8 @@ type VMItemInfo struct {
 // VMResourcesInfo groups VM resource allocation in an inspect response.
 type VMResourcesInfo struct {
 	VCPU int `json:"vcpu"`
-	Mem   int `json:"mem"`
-	Disk  int `json:"disk"`
+	Mem  int `json:"mem"`
+	Disk int `json:"disk"`
 }
 
 // VMNetworkingInfo groups VM networking info in an inspect response.

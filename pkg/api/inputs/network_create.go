@@ -41,7 +41,10 @@ func (i *NetworkCreateInput) Validate() error {
 
 // Resolve resolves and validates network creation inputs, returning
 // a ResolvedNetworkCreateRequest suitable for network creation.
-func (i *NetworkCreateInput) Resolve(ctx context.Context, repo network.Repository) (*ResolvedNetworkCreateRequest, error) {
+func (i *NetworkCreateInput) Resolve(
+	ctx context.Context,
+	repo network.Repository,
+) (*ResolvedNetworkCreateRequest, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}

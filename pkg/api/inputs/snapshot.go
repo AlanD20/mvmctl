@@ -59,7 +59,10 @@ func (i *SnapshotRestoreInput) Validate() error {
 }
 
 // ResolveSnapshot resolves the snapshot identifier to a SnapshotItem.
-func (i *SnapshotRestoreInput) ResolveSnapshot(ctx context.Context, repo snapshot.Repository) (*model.SnapshotItem, error) {
+func (i *SnapshotRestoreInput) ResolveSnapshot(
+	ctx context.Context,
+	repo snapshot.Repository,
+) (*model.SnapshotItem, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
@@ -68,7 +71,10 @@ func (i *SnapshotRestoreInput) ResolveSnapshot(ctx context.Context, repo snapsho
 }
 
 // ResolveNetwork resolves the optional network override. Returns nil if not set.
-func (i *SnapshotRestoreInput) ResolveNetwork(ctx context.Context, repo network.Repository) (*model.NetworkItem, error) {
+func (i *SnapshotRestoreInput) ResolveNetwork(
+	ctx context.Context,
+	repo network.Repository,
+) (*model.NetworkItem, error) {
 	if i.Network == nil || *i.Network == "" {
 		return nil, nil
 	}

@@ -10,8 +10,8 @@ import (
 
 	"mvmctl/internal/core/snapshot"
 	"mvmctl/internal/lib/model"
-	"mvmctl/pkg/errs"
 	"mvmctl/internal/testutil"
+	"mvmctl/pkg/errs"
 )
 
 // ─── Resolver ByID ─────────────────────────────────────────────────────

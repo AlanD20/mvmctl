@@ -633,7 +633,7 @@ sg mvm -c 'MVM_BINARY=/usr/bin/mvm python -m pytest tests/system/vm/test_vm_life
 
 ```bash
 gofmt -l .          # must return empty
-golines --max-len=120 --list-files .
+golines --max-len=120 --list-files .   # install official: go install github.com/segmentio/golines@latest
 go mod tidy
 go vet ./...
 go build -trimpath ./...

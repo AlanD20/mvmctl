@@ -61,16 +61,16 @@ type Repos struct {
 
 // Services bundles all domain services.
 type Services struct {
-	Binary   *binary.Service
-	Image    *image.Service
-	Kernel   *kernel.Service
-	Network  *network.Service
-	Host     *host.Service
-	Config   *config.Service
-	Key      *key.Service
-	Volume   *volume.Service
-	Cache    *cache.Service
-	Vsock *vsock.Service
+	Binary  *binary.Service
+	Image   *image.Service
+	Kernel  *kernel.Service
+	Network *network.Service
+	Host    *host.Service
+	Config  *config.Service
+	Key     *key.Service
+	Volume  *volume.Service
+	Cache   *cache.Service
+	Vsock   *vsock.Service
 }
 type RequiredService struct {
 	Name string
@@ -103,16 +103,16 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
 
 	s := Services{
-		Network:  network.NewService(r.Network, defaultFwTracker),
-		Image:    image.NewService(r.Image),
-		Kernel:   kernel.NewService(r.Kernel, cacheDir),
-		Binary:   binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
-		Key:      key.NewService(r.Key, infra.GetKeysDir()),
-		Host:     host.NewService(r.Host),
-		Config:   config.NewService(r.Config, configReg),
-		Volume:   volume.NewService(r.Volume),
-		Cache:    cache.NewService(cacheDir, infra.GetTempDir()),
-		Vsock:    vsock.NewService(r.Vsock),
+		Network: network.NewService(r.Network, defaultFwTracker),
+		Image:   image.NewService(r.Image),
+		Kernel:  kernel.NewService(r.Kernel, cacheDir),
+		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
+		Key:     key.NewService(r.Key, infra.GetKeysDir()),
+		Host:    host.NewService(r.Host),
+		Config:  config.NewService(r.Config, configReg),
+		Volume:  volume.NewService(r.Volume),
+		Cache:   cache.NewService(cacheDir, infra.GetTempDir()),
+		Vsock:   vsock.NewService(r.Vsock),
 	}
 	// Enforce that all required services are non-nil — fail fast at startup.
 	required := []RequiredService{
@@ -135,9 +135,19 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	}
 
 	return &Operation{
-		Connection:      conn,
-		CacheDir:        cacheDir,
-		Enr: enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume, r.Vsock, r.Snapshot),
+		Connection: conn,
+		CacheDir:   cacheDir,
+		Enr: enricher.New(
+			r.VM,
+			r.Network,
+			r.Lease,
+			r.Image,
+			r.Kernel,
+			r.Binary,
+			r.Volume,
+			r.Vsock,
+			r.Snapshot,
+		),
 		Repos:           r,
 		Services:        s,
 		ProvisionerType: provisionerType,

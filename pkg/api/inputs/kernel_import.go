@@ -100,7 +100,11 @@ func (i *KernelImportInput) Resolve() (*ResolvedKernelImportInput, error) {
 	}
 	// 4. Name is non-empty.
 	if result.Name == "" {
-		return nil, errs.New(errs.CodeKernelBuildFailed, "Kernel name cannot be empty", errs.WithClass(errs.ClassValidation))
+		return nil, errs.New(
+			errs.CodeKernelBuildFailed,
+			"Kernel name cannot be empty",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
 	return result, nil
 }

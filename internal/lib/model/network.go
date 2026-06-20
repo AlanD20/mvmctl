@@ -97,7 +97,7 @@ type NetworkItem struct {
 	Leases        []*NetworkLeaseItem `json:"leases,omitempty"`
 	IPTablesRules []*FirewallRule     `json:"iptables_rules,omitempty"`
 	VMs           []*VMItem           `json:"vms,omitempty"`
-	Snapshots []*SnapshotItem `json:"snapshots,omitempty"`
+	Snapshots     []*SnapshotItem     `json:"snapshots,omitempty"`
 }
 
 // --- NetworkLeaseItem ---
