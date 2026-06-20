@@ -62,11 +62,48 @@ func (s *VMStep) Apply(
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
 
-	// Pass raw YAML values directly to the API input. The API resolvers
-	// (resolveNetwork, resolveImage, resolveKernel, resolveBinary,
-	// resolveSSHKeys) handle looking up resources by identifier (name or
-	// ID). If a field is unset (e.g. binary not specified), the API falls
-	// back to the default — no need to resolve or inject anything here.
+	// Resolve step-name references to actual resource IDs from the
+	// SharedState. When the YAML spec references `kernel: default-kernel`,
+	// that's a step name (kernel:default-kernel), not a kernel ID. Look it
+	// up in the SharedState to get the actual kernel_id, then pass that
+	// to VMCreate so the API resolver can find it.
+	resolveStepRef := func(stepType, stepName string) *string {
+		if stepName == "" {
+			return nil
+		}
+		raw, ok := state.Get(stepType + ":" + stepName)
+		if !ok {
+			return &stepName // not a step reference, pass through
+		}
+		switch st := raw.(type) {
+		case *NetworkState:
+			return &st.NetworkID
+		case *KernelState:
+			return &st.KernelID
+		case *ImageState:
+			return &st.ImageID
+		case *BinaryState:
+			return &st.BinaryID
+		default:
+			return &stepName // unknown state type, pass through
+		}
+	}
+	if s.input.KernelID != nil {
+		resolved := resolveStepRef("kernel", *s.input.KernelID)
+		s.input.KernelID = resolved
+	}
+	if s.input.BinaryID != nil {
+		resolved := resolveStepRef("binary", *s.input.BinaryID)
+		s.input.BinaryID = resolved
+	}
+	if s.input.ImageID != nil {
+		resolved := resolveStepRef("image", *s.input.ImageID)
+		s.input.ImageID = resolved
+	}
+	if s.input.NetworkID != nil {
+		resolved := resolveStepRef("network", *s.input.NetworkID)
+		s.input.NetworkID = resolved
+	}
 
 	// Check if VM already exists — skip creation if so.
 	// Preserve WasCreated from previous state if this is a re-apply.
@@ -145,7 +182,26 @@ func (s *VMStep) Destroy(
 		s.meta = saved.Meta
 	}
 
-	if s.saved == nil || !s.meta.WasCreated {
+	// Determine the VM identifier to remove. Prefer the saved VMID from
+	// our own state, but if that's empty, try the step name as a fallback.
+	vmID := ""
+	if s.saved != nil && s.saved.VMID != "" {
+		vmID = s.saved.VMID
+	} else {
+		vmID = s.name
+	}
+
+	// Check if the VM actually exists before trying to remove it.
+	existing, err := s.op.VMGet(ctx, inputs.VMInput{Identifiers: []string{vmID}})
+	if err != nil && !errs.IsNotFound(err) {
+		return errs.WrapMsg(
+			errs.CodeDatabaseError,
+			fmt.Sprintf("check vm %q for destroy: %v", vmID, err),
+			err,
+		)
+	}
+	if existing == nil {
+		// VM doesn't exist — nothing to destroy.
 		if err := write(ctx, s.StateData()); err != nil {
 			return fmt.Errorf("persist step state after destroy skip: %w", err)
 		}
@@ -153,7 +209,7 @@ func (s *VMStep) Destroy(
 	}
 
 	result := s.op.VMRemove(ctx, inputs.VMInput{
-		Identifiers: []string{s.saved.VMID},
+		Identifiers: []string{vmID},
 		Force:       true,
 	})
 	if result.HasErrors() {

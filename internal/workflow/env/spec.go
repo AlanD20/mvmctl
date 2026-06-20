@@ -55,7 +55,7 @@ func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error {
 		if err := valNode.Decode(&specs); err != nil {
 			return fmt.Errorf("env spec %q: %v", key, err)
 		}
-		s.Steps[key] = specs
+		s.Steps[key] = append(s.Steps[key], specs...)
 	}
 
 	return nil
