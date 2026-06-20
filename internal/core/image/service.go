@@ -23,6 +23,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/pool"
+	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/download"
 	"mvmctl/internal/lib/model"
@@ -201,14 +202,15 @@ func (s *Service) OptimizeImage(
 	provisionerType provisioner.ProvisionerType,
 	warnings []string,
 ) (*model.ImageItem, []string, error) {
-	t0 := time.Now()
+	tl := timinglog.Start("optimize", "image_id", imageID)
+	defer tl.Complete()
+
 	fsType, resolveErr := s.resolveFSType(ctx, imagePath)
 	if resolveErr != nil {
 		return nil, warnings, resolveErr
 	}
 	fsUUID := system.DetectFilesystemUUID(ctx, imagePath)
-	t1 := time.Now()
-	slog.Debug("fs detect", "elapsed_seconds", t1.Sub(t0).Seconds())
+	tl.Stage("fs_detect")
 
 	// --- Single Provisioner reused across all phases ---
 	// Each method (DetectOS, Run) creates a fresh backend session internally,
@@ -291,8 +293,7 @@ func (s *Service) OptimizeImage(
 	postShrinkInfo, _ := os.Stat(imagePath)
 	postShrinkSize := postShrinkInfo.Size()
 
-	t2 := time.Now()
-	slog.Debug("shrink", "elapsed_seconds", t2.Sub(t1).Seconds())
+	tl.Stage("shrink")
 
 	shrinkSuccessful := preShrinkSize > 0 && postShrinkSize > 0
 	if shrinkSuccessful {
@@ -310,8 +311,7 @@ func (s *Service) OptimizeImage(
 		return nil, warnings, compErr
 	}
 
-	t3 := time.Now()
-	slog.Debug("compress", "elapsed_seconds", t3.Sub(t2).Seconds())
+	tl.Stage("compress")
 	compressedInfo, _ := os.Stat(compressedPath)
 	compressedSize := compressedInfo.Size()
 
@@ -322,7 +322,7 @@ func (s *Service) OptimizeImage(
 
 	minimumRootfsSizeMiB := int(postShrinkSize/MiB) + RuntimeBufferMB
 
-	slog.Info("Optimization complete", "total_seconds", t3.Sub(t0).Seconds())
+	tl.Stage("complete")
 
 	compressionFormatVal := CompressionFormat
 

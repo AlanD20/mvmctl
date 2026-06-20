@@ -21,6 +21,7 @@ import (
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
+	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 	libnet "mvmctl/internal/lib/network"
@@ -372,6 +373,9 @@ func (op *Operation) vmBuilderExecute(
 			apiSocketPath,
 		)
 	}
+	tl := timinglog.Start("vm_create", "vm_name", builder.name, "vm_id", builder.vmID)
+	defer tl.Complete()
+
 	// Generate MAC and TAP name
 	if resolved.RequestedGuestMAC != nil {
 		builder.guestMAC = *resolved.RequestedGuestMAC
@@ -388,7 +392,7 @@ func (op *Operation) vmBuilderExecute(
 	emitProgress(builder.onProgress, "network", "running", "Configuring network...")
 	// IP Lease, TAP device creation (timed)
 	var networkErr error
-	infra.Timed("network", builder.name, builder.vmID, func() {
+	tl.StageFunc("network", func() {
 		leaseCtrl, err := network.NewLeaseController(ctx, resolved.Network, op.Repos.Lease, nil)
 		if err != nil {
 			networkErr = fmt.Errorf("create lease controller: %w", err)
@@ -424,7 +428,7 @@ func (op *Operation) vmBuilderExecute(
 	emitProgress(builder.onProgress, "rootfs", "running", "Copying root filesystem...")
 	// Clone rootfs (timed)
 	var cloneErr error
-	infra.Timed("clone_rootfs", builder.name, builder.vmID, func() {
+	tl.StageFunc("clone_rootfs", func() {
 		if err := builder.cloneImage(ctx, op.Services.Image, resolved); err != nil {
 			cloneErr = err
 		}
@@ -441,7 +445,7 @@ func (op *Operation) vmBuilderExecute(
 		cloudInitMarker string
 		ciResultOut     *cloudInitResult
 	)
-	infra.Timed("provision_rootfs", builder.name, builder.vmID, func() {
+	tl.StageFunc("provision_rootfs", func() {
 		backend, backendErr := provisioner.NewBackend(ctx, provisioner.BackendOpts{
 			RootfsPath:      builder.rootfsPath,
 			FsType:          resolved.Image.FSType,
@@ -654,7 +658,7 @@ func (op *Operation) vmBuilderExecute(
 		firecrackerReady bool
 		consoleRelayUp   bool
 	)
-	infra.Timed("firecracker_spawn", builder.name, builder.vmID, func() {
+	tl.StageFunc("firecracker_spawn", func() {
 		fcConfig := builder.buildFirecrackerConfig()
 		if fcConfig == nil {
 			fcErr = fmt.Errorf("firecracker config is nil")

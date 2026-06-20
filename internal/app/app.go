@@ -10,6 +10,7 @@ import (
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/db"
 	"mvmctl/internal/lib/download"
 	libversion "mvmctl/internal/lib/version"
@@ -89,7 +90,7 @@ func Initialize(ctx context.Context) (op *api.Operation, cleanup func(), err err
 
 	op = api.NewOperation(ctx, database, cacheDir)
 	config.InitSettings()
-	infra.SetTimingEnabled(os.Getenv("MVM_TIMING_ENABLED") == "1")
+	timinglog.SetTimingEnabled(os.Getenv("MVM_TIMING_ENABLED") == "1")
 
 	cleanupFunc := func() { database.Close() }
 

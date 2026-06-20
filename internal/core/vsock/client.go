@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
-	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/version"
 	"mvmctl/internal/service/vsockagent"
@@ -305,7 +305,9 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
-			infra.LogTiming("vsock_probe", c.VmName, c.item.VmID, elapsedMs,
+			timinglog.Log("vsock_probe", elapsedMs,
+				"vm_name", c.VmName,
+				"vm_id", c.item.VmID,
 				"attempts", attempts,
 				"error", "timeout",
 			)
@@ -328,10 +330,14 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 
 		if err == nil {
 			elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
-			infra.LogTiming("vsock_probe", c.VmName, c.item.VmID, elapsedMs,
+			timinglog.Log("vsock_probe", elapsedMs,
+				"vm_name", c.VmName,
+				"vm_id", c.item.VmID,
 				"attempts", attempts,
 			)
-			infra.LogTiming("vsock_dial", c.VmName, c.item.VmID, dialElapsed,
+			timinglog.Log("vsock_dial", dialElapsed,
+				"vm_name", c.VmName,
+				"vm_id", c.item.VmID,
 				"attempt", attempts,
 			)
 
@@ -405,7 +411,9 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 		}
 
 		// Log failed dial attempt timing
-		infra.LogTiming("vsock_dial", c.VmName, c.item.VmID, dialElapsed,
+		timinglog.Log("vsock_dial", dialElapsed,
+			"vm_name", c.VmName,
+			"vm_id", c.item.VmID,
 			"attempt", attempts,
 			"error", err.Error(),
 		)
