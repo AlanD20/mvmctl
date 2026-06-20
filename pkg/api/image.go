@@ -11,6 +11,7 @@ import (
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
+	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/download"
 	"mvmctl/internal/lib/model"
@@ -192,6 +193,11 @@ func (op *Operation) ImagePull(
 		)
 	}
 	spec := specs[0]
+	tl := timinglog.Start("image_pull", "image_type", spec.Type, "image_version", spec.Version)
+	defer tl.Complete()
+
+	tl.Stage("resolve")
+
 	// Early return check
 	existing, _ := op.Repos.Image.GetByType(ctx, spec.Type)
 	if !input.Force && existing != nil && existing.Version == spec.Version {
@@ -205,6 +211,7 @@ func (op *Operation) ImagePull(
 			}
 		}
 	}
+
 	timestamp := time.Now().Format(time.RFC3339)
 	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
 	workDir, err := os.MkdirTemp(infra.GetTempDir(), "mvm-pull-*")
@@ -230,6 +237,8 @@ func (op *Operation) ImagePull(
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Download failed: %v", err), err)
 	}
+	tl.Stage("download")
+
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "extract", Status: "running", Message: "Extracting image...",
@@ -252,6 +261,8 @@ func (op *Operation) ImagePull(
 		}
 		return nil, errs.WrapMsg(errs.CodeImageCorrupt, fmt.Sprintf("Extraction failed: %v", err), err)
 	}
+	tl.Stage("extract")
+
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "optimize", Status: "running", Message: "Optimizing image...",
@@ -273,6 +284,8 @@ func (op *Operation) ImagePull(
 		}
 		return nil, errs.WrapMsg(errs.CodeImageCorrupt, fmt.Sprintf("Optimization failed: %v", err), err)
 	}
+	tl.Stage("optimize")
+
 	// Move compressed result to images dir
 	if imageItem.Path != "" {
 		src := imageItem.Path
@@ -314,6 +327,8 @@ func (op *Operation) ImagePull(
 			slog.Info("Cleaned up old image files", "count", len(removed), "type", spec.Type)
 		}
 	}
+	tl.Stage("finalize")
+
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "complete", Status: "complete", Message: "Image pull complete.",
@@ -367,6 +382,9 @@ func (op *Operation) ImageImport(
 		Source:  *resolved.SourcePath,
 		Format:  resolved.Format,
 	}
+	tl := timinglog.Start("image_import", "image_type", resolved.Type)
+	defer tl.Complete()
+
 	timestamp := time.Now().Format(time.RFC3339)
 	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
 	if onProgress != nil {
@@ -390,6 +408,8 @@ func (op *Operation) ImageImport(
 		}
 		return nil, errs.WrapMsg(errs.CodeImageImportFailed, fmt.Sprintf("Extraction failed: %v", err), err)
 	}
+	tl.Stage("extract")
+
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "optimize", Status: "running", Message: "Optimizing image...",
@@ -411,6 +431,8 @@ func (op *Operation) ImageImport(
 		}
 		return nil, errs.WrapMsg(errs.CodeImageImportFailed, fmt.Sprintf("Optimization failed: %v", err), err)
 	}
+	tl.Stage("optimize")
+
 	_ = op.Repos.Image.Upsert(ctx, imageItem)
 	if input.SetDefault {
 		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
@@ -424,6 +446,8 @@ func (op *Operation) ImageImport(
 			slog.Info("Cleaned up old image files", "count", len(removed), "id", imageItem.ID)
 		}
 	}
+	tl.Stage("finalize")
+
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "complete", Status: "complete", Message: "Image import complete.",
