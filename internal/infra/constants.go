@@ -72,7 +72,7 @@ var OverridableDefaults = map[string]map[string]any{
 		"nested_virt":         false,
 		"enable_logging":      true,
 		"enable_metrics":      false,
-		"enable_console":      true,
+		"enable_console":      false,
 		"lsm_flags":           "landlock,lockdown,yama,integrity,selinux,bpf",
 		"boot_args":           "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false",
 		"guest_mac_prefix":    "02:FC",

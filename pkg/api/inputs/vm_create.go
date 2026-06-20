@@ -57,7 +57,6 @@ type VMCreateInput struct {
 	CloudInitISOPath      *string        `json:"cloud_init_iso_path,omitempty"      yaml:"cloud_init_iso_path,omitempty"`
 	KeepCloudInitISO      bool           `json:"keep_cloud_init_iso"                yaml:"keep_cloud_init_iso"`
 	NocloudNetPort        *int           `json:"nocloud_net_port,omitempty"         yaml:"nocloud_net_port,omitempty"`
-	NoConsole             bool           `json:"no_console"                         yaml:"no_console"` // inverse of EnableConsole, kept for CLI compat
 	SkipCleanup           bool           `json:"skip_cleanup"                       yaml:"skip_cleanup"`
 	SkipDeblob            bool           `json:"skip_deblob"                        yaml:"skip_deblob"`
 	Count                 *int           `json:"count,omitempty"                    yaml:"count,omitempty"`
@@ -478,9 +477,6 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	enableConsole, _ := r.cfg.GetBool(ctx, "defaults.vm", "enable_console")
 	if input.EnableConsole != nil {
 		enableConsole = *input.EnableConsole
-	}
-	if input.NoConsole {
-		enableConsole = false
 	}
 	// Resolve enable_logging
 	enableLogging, _ := r.cfg.GetBool(ctx, "defaults.vm", "enable_logging")

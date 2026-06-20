@@ -422,7 +422,7 @@ func (d *Downloader) DownloadFile(
 	mirrorPath, found := resolveMirrorPath(url)
 	if found {
 		slog.Info("Using local mirror for download", "url", url)
-		if err := infra.CopyPreservingMetadata(mirrorPath, dest); err != nil {
+		if err := infra.CopyFile(mirrorPath, dest); err != nil {
 			return fmt.Errorf("copy from mirror: %w", err)
 		}
 		if expectedSHA256 != "" {

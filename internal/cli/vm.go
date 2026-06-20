@@ -176,7 +176,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		nestedVirt      bool
 		noNestedVirt    bool
 		cpuTemplate     string
-		noConsole       bool
 		bootArgs        string
 		lsmFlags        string
 		enableLogging   bool
@@ -244,7 +243,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			input := inputs.VMCreateInput{
 				Name:        name,
 				SSHKeys:     sshKeyList,
-				NoConsole:   noConsole,
 				BootArgs:    bootArgs,
 				LSMFlags:    lsmFlags,
 				CPUTemplate: cpuTemplate,
@@ -310,6 +308,9 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			if cmd.Flags().Changed("vsock-port") {
 				input.VsockPort = infraptr.Ptr(vsockPort)
 			}
+			if cmd.Flags().Changed("console") {
+				input.EnableConsole = infraptr.Ptr(true)
+			}
 
 			vms, err := vmAPI.VMCreate(cmd.Context(), input, func(e event.Progress) {
 				if e.Message != "" {
@@ -362,7 +363,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("nested-virt", "no-nested-virt")
 	cmd.Flags().
 		StringVar(&cpuTemplate, "cpu-template", "", "Path to CPU template JSON file (merged with nested-virt config if both set)")
-	cmd.Flags().BoolVar(&noConsole, "no-console", false, "Disable serial console")
+	cmd.Flags().Bool("console", false, "Enable serial console relay (default: disabled)")
 	cmd.Flags().StringVar(&bootArgs, "boot-args", "", "Kernel boot arguments (default: from defaults)")
 	cmd.Flags().
 		StringVar(&lsmFlags, "lsm-flags", "", "Linux Security Module flags for kernel cmdline (default: from user config)")
