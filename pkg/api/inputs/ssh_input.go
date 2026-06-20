@@ -14,11 +14,12 @@ import (
 
 // SSHInput specifies SSH input.
 type SSHInput struct {
-	Identifier string  `json:"target"            yaml:"target"`
-	User       *string `json:"user,omitempty"    yaml:"user,omitempty"`
-	Key        *string `json:"key,omitempty"     yaml:"key,omitempty"`
-	Cmd        *string `json:"cmd,omitempty"     yaml:"cmd,omitempty"`
-	Timeout    *int    `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Identifier string            `json:"target"            yaml:"target"`
+	User       *string           `json:"user,omitempty"    yaml:"user,omitempty"`
+	Key        *string           `json:"key,omitempty"     yaml:"key,omitempty"`
+	Cmd        *string           `json:"cmd,omitempty"     yaml:"cmd,omitempty"`
+	Timeout    *int              `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Env        map[string]string `json:"env,omitempty"     yaml:"env,omitempty"`
 }
 
 // ResolvedSSHInput specifies resolved SSH input.

@@ -66,11 +66,12 @@ func (i *VMInput) Resolve(ctx context.Context, repo vm.Repository) ([]*model.VMI
 // --- VMExecInput ---
 // VMExecInput holds the input for executing a command inside a VM via vsock.
 type VMExecInput struct {
-	Identifier string `json:"target"            yaml:"target"`
-	Command    string `json:"command,omitempty" yaml:"cmd,omitempty"` // empty = interactive shell
-	User       string `json:"user"              yaml:"user"`
-	Timeout    int    `json:"timeout"           yaml:"timeout"`
-	Port       int    `json:"port"              yaml:"port"`
+	Identifier string            `json:"target"            yaml:"target"`
+	Command    string            `json:"command,omitempty" yaml:"cmd,omitempty"` // empty = interactive shell
+	User       string            `json:"user"              yaml:"user"`
+	Timeout    int               `json:"timeout"           yaml:"timeout"`
+	Port       int               `json:"port"              yaml:"port"`
+	Env        map[string]string `json:"env,omitempty"     yaml:"env,omitempty"`
 }
 
 // ResolvedVMExecInput holds the resolved VM and vsock config for exec operations.

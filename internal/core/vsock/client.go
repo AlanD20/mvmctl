@@ -98,7 +98,7 @@ type ExecResult struct {
 // and the connection is closed — all in one shot.
 // stdout/stderr data is printed directly to the terminal as it arrives,
 // and also accumulated into the returned ExecResult.
-func (c *Client) Exec(ctx context.Context, command, user string, timeout int) (*ExecResult, error) {
+func (c *Client) Exec(ctx context.Context, command, user string, timeout int, env map[string]string) (*ExecResult, error) {
 	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
@@ -118,6 +118,7 @@ func (c *Client) Exec(ctx context.Context, command, user string, timeout int) (*
 		Token:   c.item.Token,
 		Timeout: timeout,
 		User:    user,
+		Env:     env,
 	}
 
 	if err := sendFrame(conn, req); err != nil {
@@ -520,10 +521,10 @@ func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
 		VmName:           c.VmName,
 		skipVersionCheck: true,
 	}
-	_, err = execClient.Exec(ctx, upgradeShellCommand, "root", 30)
+	_, err = execClient.Exec(ctx, upgradeShellCommand, "root", 30, nil)
 	if err != nil {
 		// Try to restore from backup (if it exists)
-		_, restoreErr := execClient.Exec(ctx, restoreShellCommand, "root", 15)
+		_, restoreErr := execClient.Exec(ctx, restoreShellCommand, "root", 15, nil)
 		if restoreErr != nil {
 			slog.Error("failed to restore agent backup", "vm", c.VmName, "error", restoreErr)
 		}
