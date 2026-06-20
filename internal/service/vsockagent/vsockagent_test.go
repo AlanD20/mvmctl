@@ -326,7 +326,7 @@ func TestHandleConnection_Auth(t *testing.T) {
 
 			agent := New(9999, tc.agentToken)
 
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
 			var wg sync.WaitGroup
@@ -543,7 +543,7 @@ func TestHandleExec_CommandFailure(t *testing.T) {
 		Type:    requestTypeExec,
 		Command: "sh -c 'exit 42'",
 	}
-	resp := runHandleExec(t.Context(), req)
+	resp := runHandleExec(context.Background(), req)
 
 	assert.Equal(t, responseTypeResult, resp.Type, "response type")
 	assert.Equal(t, 42, resp.Status, "exit code must match the command's exit code")
@@ -563,7 +563,7 @@ func TestHandleExec_WithEnv(t *testing.T) {
 		Command: "echo $TEST_VAR",
 		Env:     map[string]string{"TEST_VAR": "env_value"},
 	}
-	resp := runHandleExec(t.Context(), req)
+	resp := runHandleExec(context.Background(), req)
 
 	assert.Equal(t, responseTypeResult, resp.Type, "response type")
 	assert.Equal(t, 0, resp.Status, "exit code")
@@ -582,7 +582,7 @@ func TestHandleExec_RealTimeout(t *testing.T) {
 		Command: "sleep 5",
 		Timeout: 1,
 	}
-	resp := runHandleExec(t.Context(), req)
+	resp := runHandleExec(context.Background(), req)
 
 	assert.Equal(t, responseTypeResult, resp.Type, "response type")
 	assert.NotEqual(t, 0, resp.Status, "must return non-zero status on timeout — process was killed")
@@ -609,7 +609,7 @@ func TestHandleExec_UserSwitch(t *testing.T) {
 		Command: "whoami",
 		User:    "nobody",
 	}
-	resp := runHandleExec(t.Context(), req)
+	resp := runHandleExec(context.Background(), req)
 
 	assert.Equal(t, responseTypeResult, resp.Type, "response type")
 	assert.Equal(t, 0, resp.Status, "exit code")
@@ -632,7 +632,7 @@ func TestHandleConnection_ExecDispatch(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		agent.handleConnection(t.Context(), guest)
+		agent.handleConnection(context.Background(), guest)
 	}()
 
 	// Send exec request with matching token.
@@ -694,7 +694,7 @@ func TestHandleConnection_UnknownRequest(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		agent.handleConnection(t.Context(), guest)
+		agent.handleConnection(context.Background(), guest)
 	}()
 
 	// Send unknown request type.
@@ -737,7 +737,7 @@ func TestHandleConnection_PartialRead(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		agent.handleConnection(t.Context(), guest)
+		agent.handleConnection(context.Background(), guest)
 	}()
 
 	// Write partial JSON frame — no newline, incomplete.
@@ -821,7 +821,7 @@ func TestPTY_BidirectionalRelay_SlaveRaw(t *testing.T) {
 	defer func() { _ = term.Restore(int(slave.Fd()), rawState) }()
 
 	// Start cat on the slave side — it echoes stdin to stdout.
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(ctx, "cat")
 	cmd.Stdin = slave
@@ -871,7 +871,7 @@ func TestPTY_BidirectionalRelay_MasterRaw(t *testing.T) {
 	defer slave.Close()
 
 	// Same order as handleTTY: start command FIRST, then MakeRaw(master).
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(ctx, "cat")
 	cmd.Stdin = slave
@@ -935,7 +935,7 @@ func TestPTY_BidirectionalRelay_Shell(t *testing.T) {
 	defer slave.Close()
 
 	// Start /bin/sh -i on the slave, same as handleTTY.
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-i")
 	cmd.Stdin = slave
@@ -1028,7 +1028,7 @@ func TestHandleTTY_FullFlow(t *testing.T) {
 		Type: requestTypeExecTTY,
 	}
 
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	handleTTYDone := make(chan struct{})
@@ -1103,7 +1103,7 @@ func TestHandleTTY_HostDisconnect(t *testing.T) {
 		Type: requestTypeExecTTY,
 	}
 
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	handleTTYDone := make(chan struct{})
@@ -1171,7 +1171,7 @@ func TestHandleConnection_ExecTTYDispatch(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		agent.handleConnection(t.Context(), guest)
+		agent.handleConnection(context.Background(), guest)
 	}()
 
 	// Send exec-tty request.

@@ -1,19 +1,25 @@
 package vsockagent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
 	"net"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 )
 
 // handleExec runs a shell command and streams its output to the vsock
 // connection as JSON frames. Stdout is sent as "stdout" frames, stderr as
 // "stderr" frames. A final "result" frame carries the exit code and duration.
+//
+// Output is captured via cmd.Stdout/cmd.Stderr (bytes.Buffer), not via
+// cmd.StdoutPipe()/cmd.StderrPipe(). This avoids a race where the Go runtime's
+// pipe read goroutine (started internally by os/exec) might not be scheduled
+// before the child process exits under extreme CPU starvation, causing
+// (0, io.EOF) to be returned — i.e., no data captured and no frame sent.
 func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 	start := time.Now()
 
@@ -31,6 +37,15 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 		cmd = exec.CommandContext(ctx, "sh", "-c", req.Command)
 	}
 
+	// Capture stdout/stderr via bytes.Buffer to avoid kernel pipe races.
+	// Go's os/exec internally creates pipes and reads them in goroutines
+	// when cmd.Stdout/cmd.Stderr implement io.Writer (not *os.File).
+	// These internal goroutines are managed by os/exec and are reliably
+	// scheduled before cmd.Wait() returns.
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
 	// Merge provided environment with the current environment.
 	if len(req.Env) > 0 {
 		cmd.Env = os.Environ()
@@ -39,67 +54,14 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 		}
 	}
 
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		slog.Error("create stdout pipe", "id", req.ID, "error", err)
-		_ = writeFrame(conn, &execResponse{ID: req.ID, Type: responseTypeResult, Status: -1, Error: err.Error()})
-		return
-	}
-
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		slog.Error("create stderr pipe", "id", req.ID, "error", err)
-		_ = writeFrame(conn, &execResponse{ID: req.ID, Type: responseTypeResult, Status: -1, Error: err.Error()})
-		return
-	}
-
 	if err := cmd.Start(); err != nil {
 		slog.Error("command start failed", "id", req.ID, "error", err)
 		_ = writeFrame(conn, &execResponse{ID: req.ID, Type: responseTypeResult, Status: -1, Error: err.Error()})
 		return
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 32*1024)
-		for {
-			n, readErr := stdoutPipe.Read(buf)
-			if n > 0 {
-				_ = writeFrame(conn, &execResponse{
-					ID:   req.ID,
-					Type: responseTypeStdout,
-					Data: string(buf[:n]),
-				})
-			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 32*1024)
-		for {
-			n, readErr := stderrPipe.Read(buf)
-			if n > 0 {
-				_ = writeFrame(conn, &execResponse{
-					ID:   req.ID,
-					Type: responseTypeStderr,
-					Data: string(buf[:n]),
-				})
-			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
-
 	exitCode := 0
-	err = cmd.Wait()
+	err := cmd.Wait()
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
@@ -107,14 +69,28 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 		} else {
 			// Timeout or system error.
 			slog.Error("command execution failed", "id", req.ID, "error", err)
-			wg.Wait()
 			_ = writeFrame(conn, &execResponse{ID: req.ID, Type: responseTypeResult, Status: -1, Error: err.Error()})
 			return
 		}
 	}
 
-	// Both pipes are closed at this point — wait for goroutines to flush.
-	wg.Wait()
+	// Flush buffered stdout as streaming frames.
+	if stdoutBuf.Len() > 0 {
+		_ = writeFrame(conn, &execResponse{
+			ID:   req.ID,
+			Type: responseTypeStdout,
+			Data: stdoutBuf.String(),
+		})
+	}
+
+	// Flush buffered stderr as streaming frames.
+	if stderrBuf.Len() > 0 {
+		_ = writeFrame(conn, &execResponse{
+			ID:   req.ID,
+			Type: responseTypeStderr,
+			Data: stderrBuf.String(),
+		})
+	}
 
 	elapsed := time.Since(start)
 	slog.Debug("command executed",
