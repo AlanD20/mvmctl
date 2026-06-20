@@ -8,7 +8,8 @@ URL:            https://github.com/AlanD20/mvmctl
 Source0:        https://github.com/AlanD20/mvmctl/releases/download/v%{version}/mvm
 Source1:        https://raw.githubusercontent.com/AlanD20/mvmctl/v%{version}/docs/mvm.1
 
-BuildArch:      x86_64
+# BuildArch is auto-detected from build host; supports x86_64 and aarch64.
+# For multi-arch release, build the RPM on each target architecture.
 
 Requires:       iproute, iptables, nftables, qemu-img, openssh-clients, e2fsprogs, util-linux, shadow-utils, sudo, procps-ng, kmod, tar
 Recommends:     cloud-utils, libguestfs

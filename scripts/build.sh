@@ -89,12 +89,12 @@ cleanup_agent() {
         "internal/service/vsockagent/agent-linux-${arch}.zst"
 }
 
-# ─── Build the binary ────────────────────────────────────────────────────────
-do_build() {
+# ─── Build for one architecture ──────────────────────────────────────────────
+do_build_one() {
   local mode="$1"
   local version="$2"
   local output="$3"
-  local arch="$4"
+  local goarch="$4"   # Go arch name: amd64 or arm64
 
   local ldflags="-X '${LDFLAGS_VAR}=${version}'"
   local buildargs=()
@@ -116,10 +116,10 @@ do_build() {
   buildargs+=("-ldflags=${ldflags}")
 
   # Step 1: Build guest agent binary for the target arch (needed for //go:embed)
-  build_agent "$arch"
-  trap "cleanup_agent $arch" EXIT
+  build_agent "$goarch"
+  trap "cleanup_agent $goarch" EXIT
 
-  echo "==> Building mvmctl ${mode} binary"
+  echo "==> Building mvmctl ${mode} binary (linux/${goarch})"
   echo "    version:  ${version}"
   echo "    output:   ${output}"
   echo "    ldflags:  ${ldflags}"
@@ -130,9 +130,30 @@ do_build() {
   # Ensure output directory exists (e.g. dist/)
   mkdir -p "$(dirname "${output}")"
 
-  CGO_ENABLED=0 go build "${buildargs[@]}" -o "${output}" ./cmd/mvm/
+  GOARCH="${goarch}" CGO_ENABLED=0 go build "${buildargs[@]}" -o "${output}" ./cmd/mvm/
 
   echo "    done:     $(ls -lh "${output}" | awk '{print $5}')"
+}
+
+# ─── Build the binary (single arch or all) ──────────────────────────────────
+do_build() {
+  local mode="$1"
+  local version="$2"
+  local output="$3"
+  local arch="$4"
+
+  if [[ "$arch" == "all" ]]; then
+    # Build for both amd64 and arm64.
+    local outdir
+    outdir="$(dirname "${output}")"
+    local outname
+    outname="$(basename "${output}")"
+
+    do_build_one "$mode" "$version" "${outdir}/${outname}" "amd64"
+    do_build_one "$mode" "$version" "${outdir}/${outname}-arm64" "arm64"
+  else
+    do_build_one "$mode" "$version" "$output" "$arch"
+  fi
 }
 
 # ─── Print resolved version ──────────────────────────────────────────────────
@@ -173,7 +194,7 @@ main() {
       ;;
     --arch)
       if [[ -z "${2:-}" ]]; then
-        echo "ERROR: --arch requires a value (amd64|arm64)" >&2
+        echo "ERROR: --arch requires a value (amd64|arm64|all)" >&2
         exit 1
       fi
       arch="$2"
