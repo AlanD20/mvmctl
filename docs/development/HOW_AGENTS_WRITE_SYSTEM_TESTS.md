@@ -274,7 +274,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `vm stop --force` | **L2** | Real process kill |
 | `vm rm` / `vm rm --force` | **L2** | Real process + file cleanup |
 | `vm rm <name1> <name2>` | **L2** | Multiple real process cleanup |
-| `vm snapshot / load` | **L2** | Real Firecracker snapshot API |
+| `snapshot create / restore` | **L2** | Real Firecracker snapshot API |
 | `vm export / import` | **L2** | Real file I/O |
 | `vm attach-volume / detach-volume` | **L2** | Real volume lifecycle |
 | Volume persists stop/start | **L2** | Real VM state machine |

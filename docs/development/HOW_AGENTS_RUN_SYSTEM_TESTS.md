@@ -239,10 +239,7 @@ export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
 After `env apply` completes, snapshot the provisioned VM for instant restore on subsequent runs:
 
 ```bash
-mkdir -p ~/rc-vm-snapshot
-mvm vm snapshot rc-vm \
-  ~/rc-vm-snapshot/mem.snap \
-  ~/rc-vm-snapshot/state.snap
+mvm snapshot create rc-vm --name rc-vm-snap
 ```
 
 Now the VM can be restored and tests can run in ~5 seconds instead of waiting for provisioning.
@@ -250,10 +247,7 @@ Now the VM can be restored and tests can run in ~5 seconds instead of waiting fo
 ### 3.4 Restore from Snapshot (each test session)
 
 ```bash
-mvm vm load rc-vm \
-  ~/rc-vm-snapshot/mem.snap \
-  ~/rc-vm-snapshot/state.snap \
-  --resume
+mvm snapshot restore rc-vm-snap rc-vm --resume
 ```
 
 ---

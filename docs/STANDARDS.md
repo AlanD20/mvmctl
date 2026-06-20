@@ -507,7 +507,7 @@ All CLI commands with positional arguments MUST have a `ValidArgsFunction` for s
 | Directive | When to use |
 |-----------|-------------|
 | `NoFileComp` | Entity completions (VM names, volume names, key names, etc.) — never show files |
-| `Default` (0) | Fall back to native file/path completion (e.g., `vm snapshot` mem_file/state_file args) |
+| `Default` (0) | Fall back to native file/path completion (e.g., `snapshot restore` mem_file/state_file args) |
 | `FilterFileExt` | File completion filtered by extension — return extensions in results (e.g., `env apply` for `*.yaml`/`*.yml`) |
 | `FilterDirs` | Directory-only completion (e.g., `key export` path arg) |
 
