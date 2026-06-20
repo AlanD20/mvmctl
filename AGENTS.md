@@ -23,12 +23,26 @@ Individual agent instructions live in `.opencode/agent/`:
 - **`qa-engineer` agent**: QA engineer — owns all test and release processes. Never writes production Go code.
 - **`architect` agent**: Plans, analyzes, delegates. NEVER writes code. OWNS all documentation (CONTEXT.md, AGENTS.md, docs/, .opencode/). May spawn `explore` for research.
 
-## CI commands
+## CI standards (mirrors `.github/workflows/ci.yml`)
+
+Every agent MUST verify these pass before declaring a task complete.
+The CI pipeline enforces them; deviating locally means the PR fails.
+
+1. **Tidy** — `go mod tidy && git diff --exit-code` (no dirty go.mod/go.sum)
+2. **Format** — `test -z "$(gofmt -l .)"` (gofmt compliance, entire tree)
+3. **Line length** — `golines --max-len=120 --list-files ./internal/ ./pkg/ ./cmd/`
+   (120-char limit on Go source)
+4. **Generate** — `go generate ./internal/service/vsockagent/...` (embed placeholders)
+5. **Vet** — `go vet ./...` (zero static-analysis warnings)
+6. **Test** — `go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic`
 
 ```bash
-go build ./...
+go mod tidy && git diff --exit-code
+test -z "$(gofmt -l .)"
+golines --max-len=120 --list-files ./internal/ ./pkg/ ./cmd/ 2>&1 | grep . && echo "violations found" && exit 1 || true
+go generate ./internal/service/vsockagent/...
 go vet ./...
-go test ./...
+go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 ```
 
 ## Plan approval protocol
