@@ -32,37 +32,39 @@ type VMCreateInput struct {
 	Name    string   `json:"name"                               yaml:"name"`
 	SSHKeys []string `json:"ssh_keys,omitempty"                 yaml:"ssh_keys,omitempty"`
 	// Optional fields with CLI-layer defaults resolved in Build()
-	VCPUCount             *int           `json:"vcpu,omitempty"                     yaml:"vcpu,omitempty"`
-	MemSizeMib            string         `json:"mem,omitempty"                      yaml:"mem,omitempty"`
-	User                  *string        `json:"user,omitempty"                     yaml:"user,omitempty"`
-	PCIEnabled            *bool          `json:"pci_enabled,omitempty"              yaml:"pci_enabled,omitempty"`
-	NestedVirt            *bool          `json:"nested_virt,omitempty"              yaml:"nested_virt,omitempty"`
-	CPUTemplate           string         `json:"cpu_template,omitempty"             yaml:"cpu_template,omitempty"` // file path to CPU template JSON
-	CPUConfig             map[string]any `json:"cpu_config,omitempty"               yaml:"cpu_config,omitempty"`
-	EnableConsole         *bool          `json:"console_enable,omitempty"           yaml:"console_enable,omitempty"`
-	EnableLogging         *bool          `json:"logging_enable,omitempty"           yaml:"logging_enable,omitempty"`
-	EnableMetrics         *bool          `json:"metrics_enable,omitempty"           yaml:"metrics_enable,omitempty"`
-	ImageID               *string        `json:"image,omitempty"                    yaml:"image,omitempty"`
-	KernelID              *string        `json:"kernel,omitempty"                   yaml:"kernel,omitempty"`
-	BinaryID              *string        `json:"binary,omitempty"                   yaml:"binary,omitempty"`
-	DiskSize              string         `json:"disk_size,omitempty"                yaml:"disk_size,omitempty"`
-	RequestedGuestIP      *string        `json:"guest_ip,omitempty"                 yaml:"guest_ip,omitempty"`
-	SkipCINetworkConfig   bool           `json:"skip_ci_network_config"             yaml:"skip_ci_network_config"`
-	BootArgs              string         `json:"boot_args,omitempty"                yaml:"boot_args,omitempty"`
-	LSMFlags              string         `json:"lsm_flags,omitempty"                yaml:"lsm_flags,omitempty"`
-	NetworkID             *string        `json:"network,omitempty"                  yaml:"network,omitempty"`
-	RequestedGuestMAC     *string        `json:"guest_mac,omitempty"                yaml:"guest_mac,omitempty"`
-	CustomCloudInitConfig *string        `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
-	CloudInitMode         *string        `json:"cloud_init_mode,omitempty"          yaml:"cloud_init_mode,omitempty"`
-	CloudInitISOPath      *string        `json:"cloud_init_iso_path,omitempty"      yaml:"cloud_init_iso_path,omitempty"`
-	KeepCloudInitISO      bool           `json:"keep_cloud_init_iso"                yaml:"keep_cloud_init_iso"`
-	NocloudNetPort        *int           `json:"nocloud_net_port,omitempty"         yaml:"nocloud_net_port,omitempty"`
-	SkipCleanup           bool           `json:"skip_cleanup"                       yaml:"skip_cleanup"`
-	SkipDeblob            bool           `json:"skip_deblob"                        yaml:"skip_deblob"`
-	Count                 *int           `json:"count,omitempty"                    yaml:"count,omitempty"`
-	Atomic                bool           `json:"atomic"                             yaml:"atomic"`
-	Volumes               []string       `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
-	VsockPort             *int           `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
+	VCPUCount  *int    `json:"vcpu,omitempty"                     yaml:"vcpu,omitempty"`
+	MemSizeMib string  `json:"mem,omitempty"                      yaml:"mem,omitempty"`
+	User       *string `json:"user,omitempty"                     yaml:"user,omitempty"`
+	PCIEnabled *bool   `json:"pci_enabled,omitempty"              yaml:"pci_enabled,omitempty"`
+	NestedVirt *bool   `json:"nested_virt,omitempty"              yaml:"nested_virt,omitempty"`
+	// CPUTemplate is a file path to a CPU template JSON file.
+	CPUTemplate         string         `json:"cpu_template,omitempty"             yaml:"cpu_template,omitempty"`
+	CPUConfig           map[string]any `json:"cpu_config,omitempty"               yaml:"cpu_config,omitempty"`
+	EnableConsole       *bool          `json:"console_enable,omitempty"           yaml:"console_enable,omitempty"`
+	EnableLogging       *bool          `json:"logging_enable,omitempty"           yaml:"logging_enable,omitempty"`
+	EnableMetrics       *bool          `json:"metrics_enable,omitempty"           yaml:"metrics_enable,omitempty"`
+	ImageID             *string        `json:"image,omitempty"                    yaml:"image,omitempty"`
+	KernelID            *string        `json:"kernel,omitempty"                   yaml:"kernel,omitempty"`
+	BinaryID            *string        `json:"binary,omitempty"                   yaml:"binary,omitempty"`
+	DiskSize            string         `json:"disk_size,omitempty"                yaml:"disk_size,omitempty"`
+	RequestedGuestIP    *string        `json:"guest_ip,omitempty"                 yaml:"guest_ip,omitempty"`
+	SkipCINetworkConfig bool           `json:"skip_ci_network_config"             yaml:"skip_ci_network_config"`
+	BootArgs            string         `json:"boot_args,omitempty"                yaml:"boot_args,omitempty"`
+	LSMFlags            string         `json:"lsm_flags,omitempty"                yaml:"lsm_flags,omitempty"`
+	NetworkID           *string        `json:"network,omitempty"                  yaml:"network,omitempty"`
+	RequestedGuestMAC   *string        `json:"guest_mac,omitempty"                yaml:"guest_mac,omitempty"`
+	// CustomCloudInitConfig is a file path to a custom cloud-init user-data config.
+	CustomCloudInitConfig *string  `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
+	CloudInitMode         *string  `json:"cloud_init_mode,omitempty"          yaml:"cloud_init_mode,omitempty"`
+	CloudInitISOPath      *string  `json:"cloud_init_iso_path,omitempty"      yaml:"cloud_init_iso_path,omitempty"`
+	KeepCloudInitISO      bool     `json:"keep_cloud_init_iso"                yaml:"keep_cloud_init_iso"`
+	NocloudNetPort        *int     `json:"nocloud_net_port,omitempty"         yaml:"nocloud_net_port,omitempty"`
+	SkipCleanup           bool     `json:"skip_cleanup"                       yaml:"skip_cleanup"`
+	SkipDeblob            bool     `json:"skip_deblob"                        yaml:"skip_deblob"`
+	Count                 *int     `json:"count,omitempty"                    yaml:"count,omitempty"`
+	Atomic                bool     `json:"atomic"                             yaml:"atomic"`
+	Volumes               []string `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
+	VsockPort             *int     `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
 }
 
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().
@@ -212,7 +214,8 @@ func (r *VMCreateRequest) resolveImage(ctx context.Context, input *VMCreateInput
 	if img == nil {
 		return nil, errs.NotFound(
 			errs.CodeVMImageNotFound,
-			"No image specified and no default image set. Use 'mvm image pull <name>' then 'mvm image default <name>', or pass --image.",
+			"No image specified and no default image set. "+
+				"Use 'mvm image pull <name>' then 'mvm image default <name>', or pass --image.",
 		)
 	}
 	return img, nil
@@ -233,7 +236,9 @@ func (r *VMCreateRequest) resolveKernel(ctx context.Context, input *VMCreateInpu
 	if krnl == nil {
 		return nil, errs.NotFound(
 			errs.CodeVMKernelNotFound,
-			"No kernel specified and no default kernel set. Use 'mvm kernel pull --type <firecracker|official>' then 'mvm kernel default <id>', or pass --kernel.",
+			"No kernel specified and no default kernel set. "+
+				"Use 'mvm kernel pull --type <firecracker|official>' "+
+				"then 'mvm kernel default <id>', or pass --kernel.",
 		)
 	}
 	return krnl, nil
@@ -254,7 +259,8 @@ func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInp
 	if netw == nil {
 		return nil, errs.NotFound(
 			errs.CodeVMNetworkNotFound,
-			"No network specified and no default network set. Use 'mvm network create' then 'mvm network default <id>', or pass --network.",
+			"No network specified and no default network set. "+
+				"Use 'mvm network create' then 'mvm network default <id>', or pass --network.",
 		)
 	}
 	return netw, nil
@@ -669,7 +675,9 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 		return errs.New(
 			errs.CodeVMCreateFailed,
 			fmt.Sprintf(
-				"Image %s is missing minimum_rootfs_size_mib. This image was created with an older version. Re-import the image: mvm image pull <slug> --force",
+				"Image %s is missing minimum_rootfs_size_mib. "+
+					"This image was created with an older version. "+
+					"Re-import the image: mvm image pull <slug> --force",
 				imageRef,
 			),
 			errs.WithClass(errs.ClassValidation),
