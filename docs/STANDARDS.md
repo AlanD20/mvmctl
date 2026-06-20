@@ -251,16 +251,24 @@ pool.Seq[T,R](ctx, items, fn)             // sequential fail-fast, returns []Res
 
 ## 12. Testing
 
-Two layers — no separate integration layer:
+Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for the full specification.
 
-### Unit tests (`*_test.go` next to source)
-- Use interface mocks: `internal/testutil/` has in-memory repo implementations + `FakeRunner`.
+### L0: Pure Function Tests (Go)
+- Table-driven `map[string]struct{...}` with `t.Run()`. No I/O, no DB, no subprocess.
+- Input → output only. Runs in microseconds.
+- Example: `ParseDiskSize("1G") == 1073741824`
+
+### L1: Hermetic Integration Tests (Go)
+- Uses real I/O in controlled environments: in-memory SQLite (`:memory:`), `t.TempDir()`, `FakeRunner` for subprocess calls that can't run in CI.
+- No networking, no KVM, no sudo.
+- Example: seed DB → call handler → verify JSON output via `cmp.Diff`.
 - Run via `go test ./...`.
 
-### System tests (`tests/system/`)
-- Python-based black-box CLI subprocess tests.
-- No mocking, no imports from Go code.
-- Operate against the compiled `mvm` binary.
+### L2: Runner VM E2E Tests (Python in `tests/e2e/`)
+- Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM.
+- No mocking of any kind — the binary is real, the subprocesses are real.
+- **Ground truth:** A feature is not tested until it has an L2 test. L0/L1 are fast pre-filters, not replacements.
+- Run via `pytest tests/e2e/` inside the runner VM.
 
 ## 13. CLI Patterns
 

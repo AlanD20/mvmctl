@@ -19,8 +19,8 @@ Individual agent instructions live in `.opencode/agent/`:
 
 ## Agent boundaries
 
-- **`engineer` agent**: Go engineer — handles all Go source code (`cmd/`, `internal/`, `pkg/`, `go.mod`, etc.).
-- **`qa-engineer` agent**: QA engineer — owns all test and release processes. Never writes production Go code.
+- **`engineer` agent**: Go engineer — handles all Go source code (`cmd/`, `internal/`, `pkg/`, `go.mod`, etc.). Owns L0 (pure function) and L1 (hermetic) Go tests — table-driven tests, in-memory repos, `FakeRunner`, `go test ./...`.
+- **`qa-engineer` agent**: QA engineer — owns all test and release processes. Owns L2 (Python runner VM) e2e tests in `tests/e2e/`, coverage audit, and release verification. Never writes production Go code.
 - **`architect` agent**: Plans, analyzes, delegates. NEVER writes code. OWNS all documentation (CONTEXT.md, AGENTS.md, docs/, .opencode/). May spawn `explore` for research.
 
 ## CI standards (mirrors `.github/workflows/ci.yml`)

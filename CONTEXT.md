@@ -401,44 +401,53 @@ Workers defaults to `min(runtime.NumCPU() * 2, len(items))` (minimum 1) when ≤
 
 ## Test types
 
-Two test types exist (no separate integration layer -- per PORTING_TO_GOLANG.md verdict #9):
+Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for the full specification.
 
-### Unit tests (Go `*_test.go`)
+### L0: Pure Function Tests (Go `*_test.go`)
 
-Go test files alongside source code in `internal/` and `pkg/`. Use interface mocks (`internal/testutil/` has in-memory repo implementations + `FakeRunner` for subprocess mocking). Run via `go test ./...`. Fast (~ms per test).
+Table-driven tests with `map[string]struct{...}` and `t.Run()`. No I/O, no DB, no subprocess. Pure input → output assertions. Runs in microseconds.
 
 ```bash
 go test ./...
 go test ./internal/core/vm/...
-go test -v ./internal/core/network/...
 ```
 
-### System tests (Python `tests/system/`)
+### L1: Hermetic Integration Tests (Go `*_test.go`)
 
-Python-based black-box CLI subprocess tests (no mocking, no imports from Go code). Operate against the compiled `mvm` binary. Verify actual business outcomes at the OS level: JSON state, filesystem state, process state. Run in `tests/system/`.
+Uses real I/O in controlled environments: in-memory SQLite (`:memory:` via `testutil.NewInMemoryDB`), `t.TempDir()` for filesystem, `FakeRunner` for subprocess calls that can't run in CI. No networking, no KVM, no sudo. Catches bugs earlier during `go test ./...`.
 
-**Execution strategy -- per-file, not as a single batch:**
 ```bash
-# Per-domain:
-MVM_BINARY=dist/mvm python3 scripts/run_tests.py --domain network
-
-# Per-file:
-MVM_BINARY=dist/mvm python3 scripts/run_tests.py --test tests/system/network/test_network.py
+go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 ```
 
-## System Tests
+### L2: Runner VM E2E Tests (Python `tests/e2e/`)
+
+**Ground truth.** Every user-facing feature must have an L2 test. Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM. No mocking of any kind. Operates against the compiled `mvm` binary. Verifies actual business outcomes at the OS level: JSON state, filesystem state, process state, iptables rules.
+
+```bash
+# Run inside the runner VM (disposable Firecracker VM with nested KVM)
+pytest tests/e2e/
+
+# Single file
+pytest tests/e2e/test_network.py --tb=short -q
+```
+
+## System Tests (L2 E2E)
+
+L2 tests are the **ground truth** — every user-facing feature must have one.
+They run inside a disposable Firecracker VM (runner VM) with nested KVM.
 
 ### Option C verification
-The thoroughness standard for system test assertions. Every system test verifies system state at the deepest practical level: JSON field assertions from `* ls --json`, file existence/symlink checks, process presence via `/proc`, iptables rule presence, and/or direct SQLite queries. A test that only checks `returncode == 0` is incomplete.
+The thoroughness standard for L2 test assertions. Every test verifies system state at the deepest practical level: JSON field assertions from `* ls --json`, file existence/symlink checks, process presence via `/proc`, iptables rule presence, and/or direct SQLite queries. A test that only checks `returncode == 0` is incomplete.
 
-### Gap matrix
-A cross-reference of every CLI subcommand and flag against its system test coverage. All gaps must be filled.
+### Gap matrix (no longer a separate file)
+Coverage is tracked by the quick-reference table in `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md`. Every CLI subcommand and flag is classified as L0, L1, or L2. All gaps must be filled before release.
 
 ### Edge case categories (8 categories)
 For every CLI flag, check all eight: happy path (with state verify), missing required args, invalid values, boundary values, JSON output format, confirmation prompts, non-existent resources, duplicate creation.
 
 ### Marker
-A `pytest.mark.*` annotation on a test class or function. System test markers include: `system` (always), `domain_<name>` (file-level filter), `serial` (modifies shared state -- prevent race conditions), `slow` (>30s), `requires_kvm` (needs /dev/kvm), `requires_network` (needs real bridges), `kernel_build` (build from source, excluded from default run), `host_reset` (host clean/reset with sudo, excluded from default run).
+A `pytest.mark.*` annotation on a test class or function. L2 test markers include: `system` (always), `e2e` (always for L2), `domain_<name>` (file-level filter), `serial` (modifies shared state -- prevent race conditions), `slow` (>30s), `requires_kvm` (needs /dev/kvm), `requires_network` (needs real bridges), `kernel_build` (build from source, excluded from default run), `host_reset` (host clean/reset with sudo, excluded from default run).
 
 ### Serial test
 A test marked `pytest.mark.serial` because it modifies shared system state (default image, default network, cached binaries, kernel defaults). Must not run in parallel.
@@ -450,10 +459,10 @@ A test that does not modify persistent state -- reads JSON, inspects resources, 
 A test that modifies persistent state -- removes a resource, changes a default, prunes cache. Defined at the END of their file. Every destructive test must restore removed state in a `finally` block.
 
 ### Kernel build marker (`pytest.mark.kernel_build`)
-Designates tests requiring kernel compilation from source. EXCLUDED from default system test runs. Invoke explicitly: `pytest -m kernel_build`.
+Designates tests requiring kernel compilation from source. EXCLUDED from default test runs. Invoke explicitly: `pytest -m kernel_build`.
 
 ### Host reset marker (`pytest.mark.host_reset`)
-Designates tests executing `host clean` or `host reset` with sudo. EXCLUDED from default system test runs. Invoke explicitly: `pytest -m host_reset`.
+Designates tests executing `host clean` or `host reset` with sudo. EXCLUDED from default test runs. Invoke explicitly: `pytest -m host_reset`.
 
 ### Tautological test
-A test that verifies something trivially true by construction. Forbidden in system tests.
+A test that verifies something trivially true by construction. Forbidden in L2 tests.
