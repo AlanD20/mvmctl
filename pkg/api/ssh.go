@@ -4,11 +4,14 @@ package api
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
+	"time"
+
 	"mvmctl/internal/core/ssh"
 	"mvmctl/internal/infra/event"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
-	"time"
 )
 
 // SSHAPI defines the public interface for SSH operations.
@@ -45,6 +48,19 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onPr
 	command := ""
 	if resolved.Cmd != nil {
 		command = *resolved.Cmd
+	}
+	// Prepend environment variables to the command using POSIX env utility.
+	if len(input.Env) > 0 {
+		var parts []string
+		keys := make([]string, 0, len(input.Env))
+		for k := range input.Env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%s", k, input.Env[k]))
+		}
+		command = fmt.Sprintf("env %s %s", strings.Join(parts, " "), command)
 	}
 	// If onProgress is provided and we have a command, stream output line by line.
 	// Otherwise fall back to Connect (direct terminal pipe).
