@@ -144,20 +144,15 @@ This creates the VM `rc-vm` with:
 Once provisioned, snapshot so subsequent test sessions restore instantly.
 
 ```bash
-# Snapshot (automatically pauses the VM)
-mkdir -p ~/rc-vm-snapshot
-mvm vm snapshot rc-vm \
-  ~/rc-vm-snapshot/mem.snap \
-  ~/rc-vm-snapshot/state.snap
+# Create snapshot
+mvm snapshot create rc-vm --name rc-vm-snap
 ```
 
 ### Restore from snapshot (for each test run)
 
 ```bash
-mvm vm load rc-vm \
-  ~/rc-vm-snapshot/mem.snap \
-  ~/rc-vm-snapshot/state.snap \
-  --resume
+# Restore — replaces current rc-vm with snapshot copy, resumes it
+mvm snapshot restore rc-vm-snap rc-vm --resume
 ```
 
 ---
