@@ -480,6 +480,23 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts)
 		cmd.Dir = opts.Cwd
 	}
 
+	// CRITICAL: Use a process group so context cancellation kills the entire
+	// process tree, not just the direct child. Without this, child processes
+	// (e.g. "sleep" inside "sh -c") inherit the stdout pipe fd and keep it
+	// open, causing bufio.Scanner to block forever on cancellation.
+	//
+	// When running through sudo we skip this — sudo manages its own process
+	// groups and we can't control the inner command's pgid.
+	if !opts.Privileged || IsRoot() {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			if cmd.Process == nil {
+				return nil
+			}
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()

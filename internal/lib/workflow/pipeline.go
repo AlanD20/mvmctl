@@ -121,7 +121,7 @@ func (p *Pipeline) Execute(
 
 				emitProgress(onProgress, s.Name(), "running", "starting")
 				if err := s.Apply(ctx, state, savedByStep[s.Name()], write, onProgress); err != nil {
-				emitProgress(onProgress, s.Name(), "failed", err.Error())
+					emitProgress(onProgress, s.Name(), "failed", err.Error())
 					mu.Lock()
 					if firstErr == nil {
 						firstErr = fmt.Errorf("step %q: %w", s.Name(), err)
