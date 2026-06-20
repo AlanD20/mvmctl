@@ -164,6 +164,13 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		ps.debugLog(input.Debug, fmt.Sprintf("cleanup: mount_point=%q loop_dev=%q", mountPoint, ps.loopDev))
 		if mountPoint != "" {
 			CleanupMount(mountPoint)
+			// Final safety net: remove the temp directory even if unmount
+			// partially failed (e.g. already unmounted but rmdir was skipped).
+			// This cleans up stale mvm-provision-* dirs that accumulate when
+			// the provisioner subprocess is killed before deferred cleanup runs.
+			if err := os.Remove(mountPoint); err != nil && !os.IsNotExist(err) {
+				ps.debugLog(input.Debug, fmt.Sprintf("cleanup: failed to remove mount point %s: %v", mountPoint, err))
+			}
 			mountPoint = ""
 		}
 		detachLoopDevice(ctx, ps.loopDev)
@@ -819,13 +826,14 @@ func writeFile(mountPoint string, f FileOp, debug bool, ps *provisionState) erro
 	fullPath := filepath.Join(mountPoint, strings.TrimLeft(f.Path, "/"))
 	ps.debugLog(debug, fmt.Sprintf("write: path=%s full=%s", f.Path, fullPath))
 
-	// Remove existing path if it exists (handles symlinks, sockets, FIFOs, hardlinks)
-	if _, err := os.Lstat(fullPath); err == nil {
-		ps.debugLog(debug, fmt.Sprintf("write: removing existing at %s", f.Path))
-		if err := os.Remove(fullPath); err != nil {
-			ps.debugLog(debug, fmt.Sprintf("write: failed to remove %s: %v", f.Path, err))
-			return fmt.Errorf("cannot remove existing path %s: %v", f.Path, err)
-		}
+	// Remove existing path if it exists (handles symlinks, sockets, FIFOs, hardlinks).
+	// Direct Remove + ignore ENOENT avoids a TOCTOU race: when intermediate path
+	// components are absolute symlinks (e.g. /var/run → /run), Lstat may see the file
+	// on the host filesystem, but by the time Remove runs the host file is gone (cleaned
+	// by tmpfiles.d or concurrent provisioner), producing a spurious ENOENT.
+	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
+		ps.debugLog(debug, fmt.Sprintf("write: failed to remove %s: %v", f.Path, err))
+		return fmt.Errorf("cannot remove existing path %s: %v", f.Path, err)
 	}
 
 	// Create parent directories
