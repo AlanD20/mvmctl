@@ -56,7 +56,7 @@ Host (Go + KVM only)
 
 ```bash
 # Host only needs Go
-sudo apt-get install -y golang-go
+sudo apt-get install -y golang
 ```
 
 ---
@@ -120,8 +120,7 @@ ls ~/.cache/mvm-asset-mirror/     # downloaded assets
 The [`rc-env.yaml`](../../rc-env.yaml) file handles everything: network, key, image, binary, kernel, VM creation, file copies, and package installation.
 
 ```bash
-# Requires system tests deps (see scripts/setup-test-environment.py)
-mvm apply rc-env.yaml
+mvm env apply rc-env.yaml
 ```
 
 This creates the VM `rc-vm` with:
@@ -136,33 +135,7 @@ This creates the VM `rc-vm` with:
 
 ## 6. Post-Provisioning: Import Assets + Init DB
 
-`rc-env.yaml` copies all assets into `/mnt/` inside the VM. Point `MVM_ASSET_MIRROR` and `MVM_TEMP_DIR` there, then import everything into the DB. Add these `exec` entries to `rc-env.yaml` after the existing `install mvm` step:
-
-```yaml
-  - name: import cached assets
-    depends_on: ["vm:rc-vm"]
-    target: rc-vm
-    user: root
-    timeout: 300
-    env:
-      MVM_ASSET_MIRROR: /mnt
-      MVM_TEMP_DIR: /mnt
-    cmd: |
-      mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm
-      mvm image pull ubuntu:noble
-      mvm kernel pull --type firecracker --version v1.15 --default
-      mvm bin pull firecracker --version 1.16.0 --default
-      mvm init --non-interactive --skip-host
-  - name: set env vars
-    depends_on: ["vm:rc-vm"]
-    target: rc-vm
-    user: root
-    cmd: |
-      echo 'export MVM_ASSET_MIRROR=/mnt' >> /root/.bashrc
-      echo 'export MVM_TEMP_DIR=/mnt' >> /root/.bashrc
-```
-
-Then run `mvm apply rc-env.yaml` once and everything is wired up — no manual `mvm ssh` needed.
+`rc-env.yaml` copies all assets into `/mnt/` inside the VM. The `import cached assets` exec step points `MVM_ASSET_MIRROR` and `MVM_TEMP_DIR` to `/mnt/`, runs `mvm kernel pull`/`image pull`/`bin pull`/`init`, then sets env vars in `.bashrc`. Everything is wired up by `mvm env apply rc-env.yaml` — no manual `mvm ssh` needed.
 
 ---
 
@@ -194,11 +167,11 @@ mvm vm load rc-vm \
 ```bash
 # One file
 mvm ssh rc-vm -u runner --cmd \
-  "cd ~/tests/ && python3 -m pytest tests/e2e/volume/test_volume.py -xvs"
+  "cd ~ && python3 -m pytest tests/e2e/volume/test_volume.py -xvs"
 
 # All L2 tests
 mvm ssh rc-vm -u runner --cmd \
-  "cd ~/tests/ && python3 -m pytest tests/e2e/ -x --junitxml=results.xml"
+  "cd ~ && python3 -m pytest tests/e2e/ -x --junitxml=results.xml"
 
 # Collect results
 mvm cp rc-vm:/home/runner/tests/results.xml ./results.xml
@@ -215,11 +188,11 @@ Multiple runner VMs from the same snapshot run different suites:
 
 ```bash
 mvm ssh rc-vm-1 -u runner --cmd \
-  "cd ~/tests/ && python3 -m pytest tests/e2e/volume/ tests/e2e/network/ -x"
+  "cd ~ && python3 -m pytest tests/e2e/volume/ tests/e2e/network/ -x"
 mvm ssh rc-vm-2 -u runner --cmd \
-  "cd ~/tests/ && python3 -m pytest tests/e2e/vm/ -x"
+  "cd ~ && python3 -m pytest tests/e2e/vm/ -x"
 mvm ssh rc-vm-3 -u runner --cmd \
-  "cd ~/tests/ && python3 -m pytest tests/e2e/ --ignore=tests/e2e/volume/ --ignore=tests/e2e/network/ --ignore=tests/e2e/vm/ -x"
+  "cd ~ && python3 -m pytest tests/e2e/ --ignore=tests/e2e/volume/ --ignore=tests/e2e/network/ --ignore=tests/e2e/vm/ -x"
 ```
 
 ---
@@ -228,12 +201,12 @@ mvm ssh rc-vm-3 -u runner --cmd \
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `mvm apply` fails | `mvmctl` not initialized | Run `mvm init --non-interactive --skip-host` first |
+| `mvm env apply` fails | `mvmctl` not initialized | Run `mvm init --non-interactive --skip-host` first |
 | SSH not available after creation | Cloud-init still running | Check `mvm logs rc-vm --lines 50` |
 | Nested KVM missing inside VM | Host lacks `nested=1` | `cat /sys/module/kvm_intel/parameters/nested` → must be `Y` |
-| `kernel pull` rebuilds instead of cache hit | `.vmlinux` or `.marker` not in `/tmp/mvmctl/` | Re-run step 6.1 |
-| `image pull` downloads instead of cache hit | Mirror not at `/root/.cache/mvm-asset-mirror/` | Re-run step 6.2 |
-| Snapshot restore fails | Files corrupted | Rebuild: re-run `mvm apply`, steps 6-7 |
+| `kernel pull` downloads instead of cache hit | `.vmlinux` or `.marker` not in `/mnt/` | Re-run `mvm env apply` to re-copy assets |
+| `image pull` downloads instead of cache hit | Mirror not set to `/mnt/` | `MVM_ASSET_MIRROR=/mnt` must be set in the exec step |
+| Snapshot restore fails | Files corrupted | Rebuild: re-run `mvm env apply`, re-snapshot |
 | Test VM creation fails inside runner VM | Out of resources | Increase vcpu/mem/disk in `rc-env.yaml` |
 
 ---

@@ -15,7 +15,7 @@ environment variables, and flags are intentional.
 
 1. [Prerequisite Check](#1-prerequisite-check)
 2. [Build the Binary](#2-build-the-binary)
-3. [Deploy the Environment](#3-deploy-the-environment)
+3. [Deploy + Snapshot the Environment](#3-deploy--snapshot-the-environment)
 4. [Run System Tests Inside the VM](#4-run-system-tests-inside-the-vm)
 5. [Interpret Results](#5-interpret-results)
 6. [Collect Release Evidence](#6-collect-release-evidence)
@@ -203,7 +203,7 @@ sudo operations. The runner script finds `dist/mvm` via auto-detection.
 
 ---
 
-## 3. Deploy the Environment (Host)
+## 3. Deploy + Snapshot the Environment (Host)
 
 ### 3.1 Initialize the Host
 
@@ -226,11 +226,35 @@ export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
 
 **What this does (in order):**
 1. Creates network (`rc-net`), SSH key (`rc-key`)
-2. Pulls/creates image (`ubuntu:noble`), kernel (`official:7.0.11`), binary (`firecracker 1.16.0`)
-3. Creates VM (`rc-vm`) with 6 vcpu, 4G mem, 25G disk, `nested_virt: true`
-4. Copies into the VM: mvm binary, firecracker tarball, kernel, alpine image, ubuntu image, system tests
-5. SSH into VM: installs packages (`qemu-utils`, `net-tools`, `python3`, `pytest`, ...)
-6. SSH into VM: installs `mvm` into `/usr/bin/mvm`, creates `/mnt/tmp`
+2. Creates VM (`rc-vm`) with 6 vcpu, 4G mem, 25G disk, `nested_virt: true`
+3. Copies into the VM: mvm binary, firecracker tarball, kernel `.vmlinux` + `.marker`, alpine image, ubuntu image, e2e tests
+4. Executes `install packages` — system deps inside the VM
+5. Executes `install guestfs kernel` — libguestfs compat kernel
+6. Executes `install mvm` — copies binary to `/usr/bin/mvm`
+7. **Executes `import cached assets`** — runs `kernel pull`/`image pull`/`bin pull`/`init` with `MVM_ASSET_MIRROR=/mnt` (all cache hits, zero network)
+8. **Executes `set mvm env vars`** — adds `MVM_ASSET_MIRROR=/mnt`/`MVM_TEMP_DIR=/mnt` to root's `.bashrc`
+
+### 3.3 Snapshot the Runner VM
+
+After `env apply` completes, snapshot the provisioned VM for instant restore on subsequent runs:
+
+```bash
+mkdir -p ~/rc-vm-snapshot
+mvm vm snapshot rc-vm \
+  ~/rc-vm-snapshot/mem.snap \
+  ~/rc-vm-snapshot/state.snap
+```
+
+Now the VM can be restored and tests can run in ~5 seconds instead of waiting for provisioning.
+
+### 3.4 Restore from Snapshot (each test session)
+
+```bash
+mvm vm load rc-vm \
+  ~/rc-vm-snapshot/mem.snap \
+  ~/rc-vm-snapshot/state.snap \
+  --resume
+```
 
 ---
 
@@ -321,7 +345,7 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
   ~/.local/bin/mvm ssh rc-vm -u runner --timeout 600 --cmd \
   "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
   python3 -m pytest --timeout 300 \
-  tests/e2e/test_network.py --tb=short -q"
+   tests/e2e/network/test_network.py --tb=short -q"
 ```
 
 ### 4.4 Interactive Session (Debugging)
