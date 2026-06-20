@@ -168,14 +168,13 @@ func newSnapshotInspectCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 
 func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 	var (
-		count   int
 		network string
 		resume  bool
 	)
 
 	cmd := &cobra.Command{
 		Use:               "restore <identifier> <name>",
-		Short:             "Restore one or more VMs from a snapshot.",
+		Short:             "Restore a VM from a snapshot.",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeSnapshotThenName,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -189,7 +188,7 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 			input := inputs.SnapshotRestoreInput{
 				SnapshotID: snapshotID,
 				Name:       vmName,
-				Count:      count,
+				Count:      1, // Count is available on the input struct for programmatic use
 				Resume:     resume,
 			}
 			if cmd.Flags().Changed("network") {
@@ -214,9 +213,8 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().IntVarP(&count, "count", "c", 1, "Number of VMs to create from snapshot")
 	cmd.Flags().StringVar(&network, "network", "", "Network to use (defaults to snapshot's original network)")
-	cmd.Flags().BoolVar(&resume, "resume", false, "Resume VMs after loading snapshot")
+	cmd.Flags().BoolVar(&resume, "resume", false, "Resume VM after loading snapshot")
 	return cmd
 }
 
