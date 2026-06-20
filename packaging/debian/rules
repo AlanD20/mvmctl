@@ -6,12 +6,15 @@ export DH_VERBOSE = 1
 	dh $@
 
 override_dh_auto_build:
+	# Verify the pre-built binary exists (build it first with: go build -o dist/mvm ./cmd/mvm)
 	test -f dist/mvm || { echo "dist/mvm not found — build it first with: go build -o dist/mvm ./cmd/mvm"; exit 1; }
+
+override_dh_auto_install:
+	# Install binary — MUST be in override_dh_auto_install, NOT override_dh_auto_build,
+	# because dh_prep runs between build and install, wiping debian/<pkg>/.
 	mkdir -p debian/mvmctl/usr/bin
 	cp dist/mvm debian/mvmctl/usr/bin/
 	chmod 755 debian/mvmctl/usr/bin/mvm
-
-override_dh_auto_install:
 	# Install man page
 	mkdir -p debian/mvmctl/usr/share/man/man1
 	cp docs/mvm.1 debian/mvmctl/usr/share/man/man1/

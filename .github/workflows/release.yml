@@ -9,218 +9,66 @@ permissions:
   contents: write
 
 jobs:
-  test:
-    name: Test
+  release:
+    name: Build & release
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.26"
           cache: true
-
-      - name: Tidy
-        run: go mod tidy && git diff --exit-code
-
-      - name: Generate embed placeholders
-        run: go generate ./internal/service/vsockagent/...
-
-      - name: Vet
-        run: go vet ./...
 
       - name: Test
-        run: go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
-
-  build:
-    name: Build (${{ matrix.os }})
-    needs: test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04]
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.26"
-          cache: true
-
-      - name: Build binary
         run: |
-          ./scripts/build.sh release --version "${GITHUB_REF_NAME#v}"
+          go mod tidy && git diff --exit-code
+          go vet ./...
+          go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
-      - name: Smoke test binary
-        run: |
-          ./dist/mvm --version
-          ./dist/mvm --help
-
-      - name: Generate SHA256 checksum
-        working-directory: dist
-        run: |
-          sha256sum mvm > mvm.sha256
-          cat mvm.sha256
-
-      - name: Upload binary as artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: mvm-linux-${{ matrix.os }}
-          path: |
-            dist/mvm
-            dist/mvm.sha256
-
-      - name: Create GitHub release and upload asset
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/mvm
-            dist/mvm.sha256
-          name: Release ${{ github.ref_name }}
-
-  build-deb:
-    name: Build Debian Package
-    needs: build
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download binary artifact
-        uses: actions/download-artifact@v7
-        with:
-          name: mvm-linux-ubuntu-24.04
-          path: dist
-
-      - name: Install build dependencies
+      - name: Install package build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y debhelper build-essential
+          sudo apt-get install -y debhelper build-essential rpm
 
-      - name: Build .deb package
+      - name: Build all packages
         run: |
-          mkdir -p mvmctl-${GITHUB_REF_NAME#v}/debian
-          cp -r packaging/debian/* mvmctl-${GITHUB_REF_NAME#v}/debian/
-          mkdir -p mvmctl-${GITHUB_REF_NAME#v}/dist
-          cp dist/mvm mvmctl-${GITHUB_REF_NAME#v}/dist/
-          cp docs/mvm.1 mvmctl-${GITHUB_REF_NAME#v}/docs/
-          cd mvmctl-${GITHUB_REF_NAME#v}
-          dpkg-buildpackage -us -uc -b
-          cd ..
-          mv *.deb dist/
+          ./scripts/build-packages.sh --build-binaries --version "${GITHUB_REF_NAME#v}"
 
-      - name: Upload .deb artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: mvmctl-deb
-          path: dist/*.deb
+      - name: Smoke test
+        run: ./dist/mvm --version
 
-  build-rpm:
-    name: Build RPM Package
-    needs: build
-    runs-on: ubuntu-24.04
-    container: fedora:latest
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install RPM build tools
-        run: |
-          dnf install -y rpm-build rpmdevtools gzip
-
-      - name: Download binary artifact
-        uses: actions/download-artifact@v7
-        with:
-          name: mvm-linux-ubuntu-24.04
-          path: dist
-
-      - name: Build .rpm package
-        run: |
-          mkdir -p ~/rpmbuild/{SPECS,SOURCES,BUILD,RPMS,SRPMS}
-          cp packaging/mvmctl.spec ~/rpmbuild/SPECS/
-          cp dist/mvm ~/rpmbuild/SOURCES/
-          cp docs/mvm.1 ~/rpmbuild/SOURCES/
-          rpmbuild -bb ~/rpmbuild/SPECS/mvmctl.spec
-          mkdir -p dist
-          cp ~/rpmbuild/RPMS/x86_64/*.rpm dist/
-
-      - name: Upload .rpm artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: mvmctl-rpm
-          path: dist/*.rpm
-
-  build-arch:
-    name: Build Arch Package (PKGBUILD)
-    needs: build
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download binary artifact
-        uses: actions/download-artifact@v7
-        with:
-          name: mvm-linux-ubuntu-24.04
-          path: dist
-
-      - name: Create Arch package files
-        run: |
-          mkdir -p dist/arch
-          cp packaging/PKGBUILD dist/arch/
-
-      - name: Upload PKGBUILD artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: mvmctl-pkgbuild
-          path: |
-            dist/arch/PKGBUILD
-            dist/mvm
-
-  upload-packages-to-release:
-    name: Upload Packages to GitHub Release
-    needs: [build-deb, build-rpm, build-arch]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: artifacts
-          pattern: mvmctl-*
-
-      - name: Display downloaded artifacts
-        run: ls -R artifacts/
-
-      - name: Upload packages to release
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/mvmctl-deb/*.deb
-            artifacts/mvmctl-rpm/*.rpm
-            artifacts/mvmctl-pkgbuild/PKGBUILD
-          append_body: true
+          files: dist/packages/*
+          name: Release ${{ github.ref_name }}
           body: |
-            ## Distribution Packages
+            ## mvmctl ${{ github.ref_name }}
 
             ### Debian/Ubuntu (.deb)
-            ```bash
-            sudo dpkg -i mvmctl_*.deb
-            sudo apt-get install -f  # Install dependencies
-            ```
+            - `mvmctl_${{ github.ref_name }}_amd64.deb` — x86_64
+            - `mvmctl_${{ github.ref_name }}_arm64.deb` — ARM64
 
-            ### RHEL/CentOS/Fedora (.rpm)
-            ```bash
-            sudo dnf install mvmctl-*.rpm
-            ```
+            ### Fedora/RHEL (.rpm)
+            - `mvmctl-${{ github.ref_name }}-1.x86_64.rpm` — x86_64
+            - `mvmctl-${{ github.ref_name }}-1.aarch64.rpm` — ARM64
 
-            ### Arch Linux (PKGBUILD)
+            ### Arch Linux
+            - `mvmctl-bin-${{ github.ref_name }}-1-x86_64.pkg.tar.zst` — x86_64
+            - Also available on AUR as `mvmctl-bin`
+
+            ### Standalone binaries
+            - `mvm` — x86_64
+            - `mvm-arm64` — ARM64
+
+            ### Install
             ```bash
-            # Use your AUR helper or build manually
-            makepkg -si
+            # Debian/Ubuntu
+            sudo dpkg -i mvmctl_*_amd64.deb
+
+            # Fedora/RHEL
+            sudo dnf install mvmctl-*.x86_64.rpm
+
+            # Arch
+            sudo pacman -U mvmctl-bin-*.pkg.tar.zst
             ```
