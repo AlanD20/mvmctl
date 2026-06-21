@@ -147,6 +147,10 @@ func (s *Service) SetVolumesState(
 			)
 		}
 		for _, vol := range volumes {
+			// Shareable read-only volumes stay available — no status tracking needed.
+			if vol.IsShareable && vol.IsReadOnly {
+				continue
+			}
 			controller := &Controller{volume: vol, repo: s.repo}
 			if err := controller.Attach(ctx, *vmID); err != nil {
 				slog.Debug("Failed to attach volume", "name", vol.Name, "error", err)

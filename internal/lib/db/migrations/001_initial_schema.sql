@@ -74,6 +74,7 @@ CREATE TABLE volumes (
     size_bytes INTEGER NOT NULL,
     format TEXT NOT NULL DEFAULT 'raw',
     is_read_only INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
+    is_shareable INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
     path TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'available',
     vm_id TEXT,

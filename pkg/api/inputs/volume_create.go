@@ -13,19 +13,21 @@ import (
 
 // VolumeCreateInput specifies volume create input.
 type VolumeCreateInput struct {
-	Name     string  `json:"name"`
-	Size     string  `json:"size"`
-	Format   *string `json:"format,omitempty"`
-	ReadOnly *bool   `json:"read_only,omitempty"`
+	Name      string  `json:"name"`
+	Size      string  `json:"size"`
+	Format    *string `json:"format,omitempty"`
+	ReadOnly  *bool   `json:"read_only,omitempty"`
+	Shareable *bool   `json:"shareable,omitempty"`
 }
 
 // ResolvedVolumeCreateInput specifies resolved volume create input.
 type ResolvedVolumeCreateInput struct {
-	Name       string
-	SizeBytes  int64
-	Format     model.VolumeFormat
-	Path       string
-	IsReadOnly bool
+	Name        string
+	SizeBytes   int64
+	Format      model.VolumeFormat
+	Path        string
+	IsReadOnly  bool
+	IsShareable bool
 }
 
 // Validate checks that the volume create input is valid.
@@ -72,12 +74,17 @@ func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository)
 	if i.ReadOnly != nil {
 		isReadOnly = *i.ReadOnly
 	}
+	isShareable := false
+	if i.Shareable != nil {
+		isShareable = *i.Shareable
+	}
 	result := &ResolvedVolumeCreateInput{
-		Name:       i.Name,
-		SizeBytes:  sizeBytes,
-		Format:     format,
-		Path:       path,
-		IsReadOnly: isReadOnly,
+		Name:        i.Name,
+		SizeBytes:   sizeBytes,
+		Format:      format,
+		Path:        path,
+		IsReadOnly:  isReadOnly,
+		IsShareable: isShareable,
 	}
 	// Validate volume name rules
 	if err := validators.VolumeName(result.Name); err != nil {

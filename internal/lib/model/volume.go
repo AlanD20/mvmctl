@@ -33,7 +33,8 @@ type VolumeItem struct {
 	VMID       *string      `json:"vm_id,omitempty" db:"vm_id"`
 	CreatedAt  string       `json:"created_at"      db:"created_at"`
 	UpdatedAt  string       `json:"updated_at"      db:"updated_at"`
-	IsReadOnly bool         `json:"is_read_only"    db:"is_read_only"`
+	IsReadOnly  bool `json:"is_read_only"    db:"is_read_only"`
+	IsShareable bool `json:"is_shareable"   db:"is_shareable"`
 
 	// Resolved relations
 	VMs []*VMItem `json:"vms,omitempty"`
