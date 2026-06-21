@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api"
@@ -19,25 +17,6 @@ import (
 
 	"github.com/spf13/cobra"
 )
-
-// imageImportExtensionOrder defines the priority order for auto-detecting
-// image format from filename extension.
-var imageImportExtensionOrder = []string{
-	".qcow2",
-	".raw",
-	".img",
-	".ext4",
-	".ext3",
-	".ext2",
-	".btrfs",
-	".xfs",
-	".vhd",
-	".vhdx",
-	".tar",
-	".tar.gz",
-	".tar.xz",
-	".tgz",
-}
 
 // imageColumns defines the local listing columns for images.
 var imageColumns = []common.ListingColumn{
@@ -257,7 +236,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Re-download even if exists")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip cached version listing and fetch live from upstream")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default image after download")
-	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip shrink and compression, keep plain ext4")
+	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip OS cache cleanup (deblob)")
 	cmd.Flags().
 		StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
 
@@ -385,6 +364,7 @@ func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 		setDefault       bool
 		skipOptimization bool
 		disableDetector  string
+		version          string
 	)
 
 	cmd := &cobra.Command{
@@ -394,7 +374,8 @@ func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 
 Examples:
   mvm image import my-image /path/to/image.qcow2
-  mvm image import my-image /path/to/image.raw --format raw`,
+  mvm image import my-image /path/to/image.raw --format raw
+  mvm image import my-base-img:v1.0 vmtest --version v2.0`,
 		Args: cobra.ExactArgs(2),
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) == 0 {
@@ -406,14 +387,17 @@ Examples:
 			name := args[0]
 			sourcePath := args[1]
 
-			// Verify source exists
-			if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-				return fmt.Errorf("source file not found: %s", sourcePath)
+			// Support name:version selector (--version overrides)
+			effectiveVersion := version
+			if !cmd.Flags().Changed("version") && strings.Contains(name, ":") {
+				idx := strings.LastIndex(name, ":")
+				effectiveVersion = name[idx+1:]
+				name = name[:idx]
 			}
 
 			var disabledDetectors []string
 			if disableDetector != "" {
-				for _, s := range strings.Split(disableDetector, ",") {
+				for s := range strings.SplitSeq(disableDetector, ",") {
 					s = strings.TrimSpace(s)
 					if s != "" {
 						disabledDetectors = append(disabledDetectors, s)
@@ -421,34 +405,11 @@ Examples:
 				}
 			}
 
-			// Auto-detect format from extension if not explicitly set.
-			formatFlag := cmd.Flags().Lookup("format")
-			formatExplicitlySet := formatFlag != nil && formatFlag.Changed
-			if !formatExplicitlySet || format == "auto" {
-				// Use the centralized format map with ordered extension priority.
-				fname := strings.ToLower(filepath.Base(sourcePath))
-				found := false
-				for _, ext := range imageImportExtensionOrder {
-					if strings.HasSuffix(fname, ext) {
-						if fmtVal, ok := infra.ImageImportFormatMap[ext]; ok {
-							format = fmtVal
-							found = true
-							break
-						}
-					}
-				}
-				if !found {
-					return fmt.Errorf(
-						"Cannot auto-detect format from '%s'. Use --format qcow2|raw|tar-rootfs.",
-						filepath.Base(sourcePath),
-					)
-				}
-			}
-
 			input := inputs.ImageImportInput{
 				Name:              name,
 				Format:            format,
 				SourcePath:        sourcePath,
+				Version:           effectiveVersion,
 				Partition:         rootPartition,
 				DisabledDetectors: disabledDetectors,
 				SkipOptimization:  skipOptimization,
@@ -486,9 +447,10 @@ Examples:
 	cmd.Flags().StringVar(&format, "format", "", "Image format: qcow2, raw, tar-rootfs, or auto")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after import")
-	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip shrink and compression, keep plain ext4")
+	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", true, "Skip OS cache cleanup (deblob)")
 	cmd.Flags().
 		StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
+	cmd.Flags().StringVar(&version, "version", "", "Set image version (overrides name:ver format)")
 
 	return cmd
 }

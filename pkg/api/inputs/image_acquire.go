@@ -3,8 +3,14 @@ package inputs
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/core/image"
+	"mvmctl/internal/core/vm"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/firecracker"
@@ -99,6 +105,7 @@ type ImageImportInput struct {
 	Force             bool     `json:"force"`
 	Format            string   `json:"format,omitempty"`
 	SetDefault        bool     `json:"set_default"`
+	Version           string   `json:"version,omitempty"`
 	Partition         int      `json:"partition,omitempty"`
 	SkipOptimization  bool     `json:"skip_optimization"`
 	DisabledDetectors []string `json:"disabled_detectors,omitempty"`
@@ -125,10 +132,33 @@ func (i *ImageImportInput) Resolve(
 	ctx context.Context,
 	cfg *config.Service,
 	repo image.Repository,
+	vmRepo vm.Repository,
 ) (*ResolvedImageAcquireInput, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
+
+	// --- 1. Try VM resolution first — VM name supersedes local path ---
+	sourcePath := i.SourcePath
+	if vmRepo != nil {
+		vmResolver := vm.NewResolver(vmRepo)
+		vmItem, vmErr := vmResolver.Resolve(ctx, sourcePath)
+		if vmErr == nil && vmItem != nil {
+			sourcePath = vmItem.RootfsPath
+			i.Format = "raw"           // force raw for VM rootfs
+			i.SkipOptimization = true  // skip deblob for VM imports
+			slog.Debug("Importing from VM", "vm", vmItem.Name, "rootfs", sourcePath)
+		}
+	}
+
+	// --- 2. If NOT a VM, validate source file exists ---
+	if sourcePath == i.SourcePath { // still original = not resolved as VM
+		if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+			return nil, errs.New(errs.CodeImageImportFailed,
+				fmt.Sprintf("source file not found: %s", sourcePath))
+		}
+	}
+
 	// Arch always matches the host machine — not user-configurable
 	arch := system.RuntimeArch()
 	// Resolve disabled detectors
@@ -141,15 +171,27 @@ func (i *ImageImportInput) Resolve(
 	if format == "" {
 		format, _ = cfg.GetString(ctx, "defaults.image", "import_format")
 	}
-	// Auto-detect format from file if format is not known
-	detected := disk.DetectImageFormat(i.SourcePath)
+	// Extension-based auto-detect
+	if format == "" {
+		fname := strings.ToLower(filepath.Base(sourcePath))
+		for _, ext := range infra.ImageImportExtensionOrder {
+			if strings.HasSuffix(fname, ext) {
+				if fmtVal, ok := infra.ImageImportFormatMap[ext]; ok {
+					format = fmtVal
+					break
+				}
+			}
+		}
+	}
+	// Magic-byte fallback detection
+	detected := disk.DetectImageFormat(sourcePath)
 	if detected != "" && format == "" {
 		format = detected
 	}
-	sourcePath := i.SourcePath
 	result := &ResolvedImageAcquireInput{
 		Type:              i.Name,
 		Name:              &i.Name,
+		Version:           i.Version,
 		Arch:              arch,
 		SourcePath:        &sourcePath,
 		Format:            format,
@@ -160,6 +202,7 @@ func (i *ImageImportInput) Resolve(
 		SetDefault:        i.SetDefault,
 		SkipOptimization:  i.SkipOptimization,
 		FormatDetected:    detected,
+		IsImported:        true,
 	}
 	if result.Arch == "" {
 		return nil, errs.New(errs.CodeImageImportFailed, "arch is required", errs.WithClass(errs.ClassValidation))
@@ -188,6 +231,7 @@ type ResolvedImageAcquireInput struct {
 	SetDefault        bool
 	Partition         int // 0 = auto-detect
 	SkipOptimization  bool
+	IsImported        bool
 	DisabledDetectors []string
 }
 

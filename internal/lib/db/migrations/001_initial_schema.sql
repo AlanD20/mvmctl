@@ -23,6 +23,7 @@ CREATE TABLE images (
     pulled_at TIMESTAMP NOT NULL,
     is_default INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0 or 1
     is_present INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0=file missing, 1=file exists
+    is_imported INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0=pulled from remote, 1=imported from local
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     deleted_at TIMESTAMP NULL

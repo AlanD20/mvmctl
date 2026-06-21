@@ -14,6 +14,7 @@ type ImageItem struct {
 	OriginalSize     int64    `json:"original_size"               db:"original_size"`
 	IsDefault        bool     `json:"is_default"                  db:"is_default"`
 	IsPresent        bool     `json:"is_present"                  db:"is_present"`
+	IsImported       bool     `json:"is_imported"                 db:"is_imported"`
 	PulledAt         string   `json:"pulled_at"                   db:"pulled_at"`
 	CreatedAt        string   `json:"created_at"                  db:"created_at"`
 	UpdatedAt        string   `json:"updated_at"                  db:"updated_at"`

@@ -286,6 +286,8 @@ func (op *Operation) ImagePull(
 	}
 	tl.Stage("optimize")
 
+	imageItem.IsImported = false
+
 	// Move compressed result to images dir
 	if imageItem.Path != "" {
 		src := imageItem.Path
@@ -344,7 +346,7 @@ func (op *Operation) ImageImport(
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
 	// Resolve import input (arch, format, validation)
-	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image, op.Repos.VM)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeImageImportFailed,
@@ -376,7 +378,7 @@ func (op *Operation) ImageImport(
 	}
 	spec := &model.ImageSpec{
 		Type:    resolved.Type,
-		Version: "",
+		Version: resolved.Version,
 		Name:    resolved.Type,
 		Arch:    resolved.Arch,
 		Source:  *resolved.SourcePath,
@@ -433,6 +435,7 @@ func (op *Operation) ImageImport(
 	}
 	tl.Stage("optimize")
 
+	imageItem.IsImported = true
 	_ = op.Repos.Image.Upsert(ctx, imageItem)
 	if input.SetDefault {
 		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)

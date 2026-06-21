@@ -90,8 +90,8 @@ func (r *sqliteRepo) Upsert(ctx context.Context, img *model.ImageItem) error {
 			id, type, version, name, distro, arch, path, fs_type, fs_uuid,
 			compressed_size, original_size, compression_ratio,
 			compressed_format, minimum_rootfs_size_mib, pulled_at, is_default,
-			is_present, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			is_present, is_imported, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			type = excluded.type,
 			version = excluded.version,
@@ -109,12 +109,14 @@ func (r *sqliteRepo) Upsert(ctx context.Context, img *model.ImageItem) error {
 			pulled_at = excluded.pulled_at,
 			is_default = excluded.is_default,
 			is_present = excluded.is_present,
+			is_imported = excluded.is_imported,
 			updated_at = CURRENT_TIMESTAMP`,
 		img.ID, img.Type, img.Version, img.Name, img.Distro, img.Arch,
 		img.Path, img.FSType, img.FSUUID,
 		img.CompressedSize, img.OriginalSize, img.CompressionRatio,
 		img.CompressedFormat, img.MinRootfsSizeMiB, img.PulledAt,
 		infra.BoolToInt(img.IsDefault), infra.BoolToInt(img.IsPresent),
+		infra.BoolToInt(img.IsImported),
 		img.CreatedAt, img.UpdatedAt,
 	)
 	return err

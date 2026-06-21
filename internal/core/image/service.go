@@ -227,44 +227,6 @@ func (s *Service) OptimizeImage(
 		slog.Warn("OS detection failed, falling back to spec type", "image_id", imageID)
 	}
 
-	imageType := detectedOS
-	if imageType == "" {
-		imageType = spec.Type
-	}
-
-	if skipOptimization {
-		slog.Info("Skipping optimization (shrink and compression)")
-		info, _ := os.Stat(imagePath)
-		actualSize := info.Size()
-		return &model.ImageItem{
-			ID:               imageID,
-			Type:             imageType,
-			Version:          spec.Version,
-			Name:             spec.Name,
-			Arch:             spec.Arch,
-			Path:             imagePath,
-			FSType:           fsType,
-			Distro:           detectedOS,
-			MinRootfsSizeMiB: int(actualSize / MiB),
-			OriginalSize:     actualSize,
-			IsDefault:        false,
-			IsPresent:        true,
-			PulledAt:         timestamp,
-			CreatedAt:        timestamp,
-			UpdatedAt:        timestamp,
-			FSUUID:           fsUUID,
-			CompressedSize:   nil,
-			CompressionRatio: nil,
-			CompressedFormat: nil,
-		}, warnings, nil
-	}
-
-	if _, statErr := os.Stat(imagePath); os.IsNotExist(statErr) {
-		return nil, warnings, errs.New(errs.CodeImageError,
-			fmt.Sprintf("Image processing failed: output file not created at %s", imagePath),
-		)
-	}
-
 	// --- Convert, deblob, shrink in a single backend session ---
 	if fsType == "btrfs" {
 		slog.Info("Converting filesystem from btrfs to ext4...")
@@ -275,7 +237,9 @@ func (s *Service) OptimizeImage(
 	preShrinkInfo, _ := os.Stat(imagePath)
 	preShrinkSize := preShrinkInfo.Size()
 
-	p.Deblob()
+	if !skipOptimization {
+		p.Deblob()
+	}
 	if FSCanShrink[fsType] {
 		p.Shrink()
 	}
