@@ -290,6 +290,15 @@ var SupportedImageExtensions = []string{
 }
 
 // --- Image import format map ---
+
+// ImageImportExtensionOrder defines the priority order for auto-detecting
+// image format from filename extension.
+var ImageImportExtensionOrder = []string{
+	".qcow2", ".raw", ".img", ".ext4", ".ext3", ".ext2",
+	".btrfs", ".xfs", ".vhd", ".vhdx",
+	".tar", ".tar.gz", ".tar.xz", ".tgz",
+}
+
 var ImageImportFormatMap = map[string]string{
 	".qcow2":  "qcow2",
 	".raw":    "raw",
