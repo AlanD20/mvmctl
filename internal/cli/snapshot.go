@@ -224,16 +224,15 @@ func newSnapshotRemoveCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm <identifier>",
+		Use:               "rm [identifier ...]",
 		Aliases:           []string{"remove", "delete", "del"},
-		Short:             "Remove a snapshot.",
-		Args:              cobra.ExactArgs(1),
+		Short:             "Remove snapshots.",
+		Long:              "Remove one or more snapshots by name or ID prefix.",
+		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeSnapshotIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-
 			input := inputs.SnapshotInput{
-				Identifiers: []string{id},
+				Identifiers: args,
 				Force:       force,
 			}
 			result := snapshotAPI.SnapshotRemove(cmd.Context(), input)
@@ -254,7 +253,9 @@ func newSnapshotRemoveCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				return fmt.Errorf("one or more removals failed")
 			}
 
-			common.Cli.Success(fmt.Sprintf("Removed snapshot: %s", id))
+			if len(args) == 1 {
+				common.Cli.Success(fmt.Sprintf("Removed snapshot: %s", args[0]))
+			}
 			return nil
 		},
 	}

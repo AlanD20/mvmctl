@@ -327,7 +327,7 @@ func TestBuilder_BuildSSHOps(t *testing.T) {
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.ChrootOp{Command: "ssh-keygen -A"},
+				provcontent.ChrootOp{Command: "command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A || true"},
 				provcontent.ChrootOp{Command: `if command -v systemctl >/dev/null 2>&1; then
   systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
 fi`},
@@ -351,7 +351,7 @@ fi`},
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.ChrootOp{Command: "useradd -m testuser"},
+				provcontent.ChrootOp{Command: "id testuser 2>/dev/null || useradd -m testuser"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser/.ssh"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser/.ssh/authorized_keys"},
@@ -377,7 +377,7 @@ fi`},
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.ChrootOp{Command: "ssh-keygen -A"},
+				provcontent.ChrootOp{Command: "command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A || true"},
 				provcontent.ChrootOp{Command: `if command -v systemctl >/dev/null 2>&1; then
   systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
 fi`},
@@ -414,13 +414,10 @@ func TestBuilder_SetupSudo(t *testing.T) {
 				provcontent.ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
 				provcontent.ChrootOp{Command: "echo 'testuser ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/testuser"},
 				provcontent.ChrootOp{Command: "chmod 440 /etc/sudoers.d/testuser"},
-				provcontent.ChrootOp{Command: "chown root:root /etc/sudo.conf && \\\n" +
-					"chmod 0440 /etc/sudo.conf && \\\n" +
-					"chown root:root /etc/sudoers && \\\n" +
-					"chmod 0440 /etc/sudoers && \\\n" +
-					"chown root:root -R /etc/sudoers.d && \\\n" +
-					"chown root:root /usr/bin/sudo && \\\n" +
-					"chmod 4755 /usr/bin/sudo"},
+				provcontent.ChrootOp{Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
+					"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
+					"chown root:root -R /etc/sudoers.d; \\\n" +
+					"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo"},
 			},
 		},
 		"root_user": {
@@ -429,13 +426,10 @@ func TestBuilder_SetupSudo(t *testing.T) {
 				provcontent.ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
 				provcontent.ChrootOp{Command: "echo 'root ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/root"},
 				provcontent.ChrootOp{Command: "chmod 440 /etc/sudoers.d/root"},
-				provcontent.ChrootOp{Command: "chown root:root /etc/sudo.conf && \\\n" +
-					"chmod 0440 /etc/sudo.conf && \\\n" +
-					"chown root:root /etc/sudoers && \\\n" +
-					"chmod 0440 /etc/sudoers && \\\n" +
-					"chown root:root -R /etc/sudoers.d && \\\n" +
-					"chown root:root /usr/bin/sudo && \\\n" +
-					"chmod 4755 /usr/bin/sudo"},
+				provcontent.ChrootOp{Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
+					"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
+					"chown root:root -R /etc/sudoers.d; \\\n" +
+					"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo"},
 			},
 		},
 	}

@@ -150,6 +150,16 @@ func (s *initState) dispatch(ctx context.Context, interaction *errs.NeedsInterac
 func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.NeedsInteraction) error {
 	// Run pre-flight probes before prompting for sudo
 	probeResult := s.initAPI.InitCheckReadiness(ctx)
+
+	// In non-interactive mode: run host init directly (relies on passwordless sudo).
+	if s.nonInteractive {
+		proc := common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
+		if proc.Success {
+			s.sudoCompleted = true
+		}
+		return nil
+	}
+
 	if len(probeResult.Critical) > 0 {
 		common.Cli.Warning("Pre-flight checks found issues:")
 		for _, c := range probeResult.Critical {
@@ -198,12 +208,6 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 			"creates the %s group and sudoers drop-in for passwordless sudo on future runs",
 			infra.MVMUnixGroup,
 		))
-	}
-
-	if s.nonInteractive {
-		// Default: skip host setup in non-interactive mode
-		s.skipHost = true
-		return nil
 	}
 
 	runInit, pErr := common.Cli.PromptConfirm(ctx, fmt.Sprintf("Run '%s' now?", sudoCmd), true)
