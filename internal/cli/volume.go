@@ -86,6 +86,7 @@ func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.C
 func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	var format string
 	var readOnly bool
+	var shareable bool
 
 	cmd := &cobra.Command{
 		Use:   "create [name] [size]",
@@ -103,11 +104,16 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			if cmd.Flags().Changed("read-only") || cmd.Flags().Changed("readonly") {
 				readOnlyPtr = &readOnly
 			}
+			var shareablePtr *bool
+			if cmd.Flags().Changed("shareable") || cmd.Flags().Changed("s") {
+				shareablePtr = &shareable
+			}
 			input := inputs.VolumeCreateInput{
-				Name:     name,
-				Size:     sizeStr,
-				Format:   formatPtr,
-				ReadOnly: readOnlyPtr,
+				Name:      name,
+				Size:      sizeStr,
+				Format:    formatPtr,
+				ReadOnly:  readOnlyPtr,
+				Shareable: shareablePtr,
 			}
 			vol, err := volumeAPI.VolumeCreate(cmd.Context(), input)
 			if err != nil {
@@ -125,6 +131,9 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 				mode = "ro"
 			}
 			common.Cli.KeyValue("Mode", mode, 2, 12)
+			if vol.IsShareable {
+				common.Cli.KeyValue("Shareable", "yes", 2, 12)
+			}
 			return nil
 		},
 	}
@@ -134,6 +143,7 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "readonly", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "ro", false, "Mount volume as read-only (default: writable)")
+	cmd.Flags().BoolVarP(&shareable, "shareable", "s", false, "Allow volume to be attached to multiple VMs (requires --read-only)")
 	return cmd
 }
 

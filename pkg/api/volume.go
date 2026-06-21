@@ -45,15 +45,16 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 	// Generate ID matching The HashGenerator.volume(name, timestamp) exactly
 	volumeID := crypto.VolumeID(resolved.Name, timestamp)
 	volumeItem := &model.VolumeItem{
-		ID:         volumeID,
-		Name:       resolved.Name,
-		SizeBytes:  resolved.SizeBytes,
-		Format:     resolved.Format,
-		IsReadOnly: resolved.IsReadOnly,
-		Path:       resolved.Path,
-		Status:     model.VolumeStatusAvailable,
-		CreatedAt:  timestamp,
-		UpdatedAt:  timestamp,
+		ID:          volumeID,
+		Name:        resolved.Name,
+		SizeBytes:   resolved.SizeBytes,
+		Format:      resolved.Format,
+		IsReadOnly:  resolved.IsReadOnly,
+		IsShareable: resolved.IsShareable,
+		Path:        resolved.Path,
+		Status:      model.VolumeStatusAvailable,
+		CreatedAt:   timestamp,
+		UpdatedAt:   timestamp,
 	}
 	if _, volErr := op.Services.Volume.CreateDisk(ctx, volumeItem); volErr != nil {
 		return nil, errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("Failed to create volume: %v", volErr), volErr)
@@ -97,7 +98,10 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 	// Batch-enrich with VM references for VM attachment check
 	op.Enr.EnrichVolume(ctx, volumes, "vm")
 	for _, vol := range volumes {
-		if vol.Status == model.VolumeStatusAttached && !force {
+		// Shareable read-only volumes are treated as not attached
+		// since we can't track individual VM attachments for them.
+		isEffectivelyAttached := vol.Status == model.VolumeStatusAttached && !(vol.IsShareable && vol.IsReadOnly)
+		if isEffectivelyAttached && !force {
 			results = append(results, errs.OperationResult{
 				Status:  "error",
 				Code:    "volume.remove_failed",
