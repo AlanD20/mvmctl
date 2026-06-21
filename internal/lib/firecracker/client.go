@@ -288,6 +288,28 @@ func (fc *Client) ResumeVM(ctx context.Context) error {
 		fmt.Sprintf("failed to resume VM: %d", status))
 }
 
+// PutVsock configures the vsock device via PUT /vsock.
+// Must be called after LoadSnapshot to reconfigure the host-side UDS path.
+func (fc *Client) PutVsock(ctx context.Context, guestCID int, udsPath string) error {
+	body := map[string]any{
+		"guest_cid": guestCID,
+		"uds_path":  udsPath,
+	}
+	status, raw, err := fc.request(ctx, "PUT", "/vsock", body)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNoContent || status == http.StatusOK {
+		slog.Debug("Vsock device configured", "guest_cid", guestCID, "uds_path", udsPath)
+		return nil
+	}
+	msg := fmt.Sprintf("failed to configure vsock device: %d", status)
+	if len(raw) > 0 {
+		msg += fmt.Sprintf(" response: %s", string(raw))
+	}
+	return errs.New(errs.CodeFirecrackerClientError, msg)
+}
+
 // --- Drive Operations ---
 
 // PutDrive attaches or updates a drive via PUT /drives/{drive_id}.

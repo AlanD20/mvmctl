@@ -10,7 +10,7 @@ import (
 
 // CpuConfig defines CPU template configuration for Firecracker.
 type CpuConfig struct {
-	KvmCapabilities []string              `json:"kvm_capabilities,omitempty"`
+	KvmCapabilities []string              `json:"kvm_capabilities"`
 	CpuidModifiers  []CpuidLeafModifier   `json:"cpuid_modifiers,omitempty"`
 	MsrModifiers    []MsrModifier         `json:"msr_modifiers,omitempty"`
 	RegModifiers    []ArmRegisterModifier `json:"reg_modifiers,omitempty"`
@@ -53,6 +53,9 @@ type SnapshotExtraConfig struct {
 	EnableMetrics bool       `json:"enable_metrics,omitempty"`
 	LogLevel      string     `json:"log_level,omitempty"`
 	CPUConfig     *CpuConfig `json:"cpu_config,omitempty"`
+	VsockPort     int        `json:"vsock_port,omitempty"`
+	VsockCID      int        `json:"vsock_cid,omitempty"`
+	VsockToken    string     `json:"vsock_token,omitempty"`
 }
 
 // Scan implements sql.Scanner for reading JSON TEXT into SnapshotExtraConfig.

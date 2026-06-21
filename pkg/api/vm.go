@@ -826,6 +826,14 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 		if vmLocal.RelaySocketPath != nil {
 			_ = os.Remove(*vmLocal.RelaySocketPath)
 		}
+		// Nocloudnet server cleanup
+		if vmLocal.NocloudNetPID != nil {
+			system.GracefulShutdown(system.ShutdownConfig{
+				Pid:             *vmLocal.NocloudNetPID,
+				GracefulTimeout: 1 * time.Second,
+				KillTimeout:     1 * time.Millisecond,
+			})
+		}
 		if vmLocal.TapDevice != "" && vmLocal.NetworkID != "" {
 			_ = op.Services.Network.RemoveTap(ctx, vmLocal.TapDevice, "", vmLocal.NetworkID)
 		}
@@ -1182,6 +1190,13 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 		LogLevel:         logLevel,
 		PIDPath:          filepath.Join(vmDir, fcPIDFilename),
 	}
+	// --- Vsock config ---
+	if v.Vsock != nil {
+		fcConfig.Vsock = &model.VsockConfig{
+			GuestCID: v.Vsock.GuestCID,
+			UDSPath:  v.Vsock.UDSPath,
+		}
+	}
 	// --- Attach volumes (extra drives) ---
 	if len(v.Volumes) > 0 {
 		fcConfig.ExtraDrives = volume.VolumesToDrives(v.Volumes)
@@ -1400,7 +1415,8 @@ func (op *Operation) VMAttachVolume(
 		return errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume '%s' not found", volumeName))
 	}
 	// Check volume status.
-	if vol.Status != model.VolumeStatusAvailable {
+	// Shareable read-only volumes are always attachable regardless of status.
+	if vol.Status != model.VolumeStatusAvailable && !(vol.IsShareable && vol.IsReadOnly) {
 		return errs.New(
 			errs.CodeVMCreateFailed,
 			fmt.Sprintf("Volume '%s' is not available", volumeName),

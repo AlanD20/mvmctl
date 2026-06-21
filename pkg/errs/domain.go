@@ -594,7 +594,7 @@ func IsNotFound(err error) bool {
 			CodeKernelNotFound, CodeBinaryNotFound, CodeVolumeNotFound,
 			CodeKeyNotFound, CodeCPSourceNotFound, CodeBundledAssetNotFound,
 			CodeFirecrackerSocketNotFound, CodeLoopMountBinaryNotFound,
-			CodeCPVMNotFound:
+			CodeCPVMNotFound, CodeSnapshotNotFound:
 			return true
 		}
 	}

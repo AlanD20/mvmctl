@@ -7,6 +7,7 @@ import (
 
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/lib/model"
+	"mvmctl/pkg/errs"
 )
 
 // KeyInput is the raw input for identifying existing SSH keys.
@@ -37,7 +38,8 @@ func (i *KeyInput) Resolve(ctx context.Context, repo key.Repository) ([]*model.S
 		return nil, err
 	}
 	if len(result.Errors) > 0 && len(result.Items) == 0 {
-		return nil, fmt.Errorf("failed to resolve keys: %s", strings.Join(result.Errors, "; "))
+		return nil, errs.NotFound(errs.CodeKeyNotFound,
+			fmt.Sprintf("failed to resolve keys: %s", strings.Join(result.Errors, "; ")))
 	}
 	if len(result.Errors) > 0 {
 		return result.Items, fmt.Errorf("partial resolve failures: %s", strings.Join(result.Errors, "; "))

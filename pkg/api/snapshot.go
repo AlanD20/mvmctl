@@ -11,12 +11,14 @@ import (
 
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
+	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
 	libnet "mvmctl/internal/lib/network"
+	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
@@ -66,7 +68,7 @@ func (op *Operation) SnapshotCreate(
 
 	// 2. Enrich VM with needed relations
 	emitProgress(onProgress, "enrich", "running", "Enriching VM info...")
-	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vmItem}, "kernel", "image", "binary", "network"); err != nil {
+	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vmItem}, "kernel", "image", "binary", "network", "vsock"); err != nil {
 		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
 			"failed to enrich VM with relations", err)
 	}
@@ -169,7 +171,7 @@ func (op *Operation) SnapshotCreate(
 
 	// 8. Build extra config from VM boot settings
 	var extraConfig *model.SnapshotExtraConfig
-	if vmItem.BootArgs != "" || vmItem.LSMFlags != "" || vmItem.CPUConfig != nil {
+	if vmItem.BootArgs != "" || vmItem.LSMFlags != "" || vmItem.CPUConfig != nil || vmItem.Vsock != nil {
 		extraConfig = &model.SnapshotExtraConfig{
 			BootArgs:      vmItem.BootArgs,
 			LSMFlags:      vmItem.LSMFlags,
@@ -180,6 +182,11 @@ func (op *Operation) SnapshotCreate(
 			EnableMetrics: vmItem.EnableMetrics,
 			LogLevel:      vmItem.LogLevel,
 			CPUConfig:     vmItem.CPUConfig,
+		}
+		if vmItem.Vsock != nil {
+			extraConfig.VsockPort = vmItem.Vsock.Port
+			extraConfig.VsockCID = vmItem.Vsock.GuestCID
+			extraConfig.VsockToken = vmItem.Vsock.Token
 		}
 	}
 
@@ -473,6 +480,88 @@ func (op *Operation) SnapshotRestore(
 		}
 		vmItem.Network = networkItem
 
+		// --- Vsock setup for restored VM ---
+		// Use the same port and token from the snapshot (matches the frozen
+		// guest agent). Allocate a fresh CID to avoid conflicts with the
+		// source VM (which is still running with the original CID).
+		// Only the UDS path changes (new VM directory).
+		if snap.ExtraConfig != nil && snap.ExtraConfig.VsockPort > 0 && vmItem.RootfsPath != "" {
+			vsockFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "vsock_filename")
+			vsockUDSPath := filepath.Join(vmDir, vsockFilename)
+
+			// Allocate fresh CID — the snapshot's CID is already in use
+			// by the source VM (t2-base) which is still running.
+			vsockCID, cidErr := op.Services.Vsock.AllocateCID()
+			if cidErr != nil {
+				slog.Error("Failed to allocate vsock CID for restored VM",
+					"vm", name, "error", cidErr)
+			} else {
+				// Re-inject vsock agent into the copied rootfs with the
+				// saved token, so host and guest stay in sync.
+				if agentBin := vsock.AgentBinary(); len(agentBin) > 0 {
+					rootUID, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "root_uid")
+					rootGID, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "root_gid")
+					userUID, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "user_uid")
+					userGID, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "user_gid")
+
+					backend, beErr := provisioner.NewBackend(ctx, provisioner.BackendOpts{
+						RootfsPath:      vmItem.RootfsPath,
+						FsType:          rootfsSuffix,
+						CacheDir:        op.CacheDir,
+						ProvisionerType: provisioner.ProvisionerType(op.ProvisionerType),
+						RootUID:         rootUID,
+						RootGID:         rootGID,
+						UserUID:         userUID,
+						UserGID:         userGID,
+					})
+					if beErr != nil {
+						slog.Error("Failed to create provisioner backend for vsock injection",
+							"vm", name, "error", beErr)
+					} else {
+						if injErr := backend.InjectVsockAgent(ctx, agentBin, snap.ExtraConfig.VsockPort, snap.ExtraConfig.VsockToken); injErr != nil {
+							slog.Error("Failed to inject vsock agent into restored rootfs",
+								"vm", name, "error", injErr)
+						} else if runErr := backend.Run(ctx); runErr != nil {
+							slog.Error("Failed to run provisioner for vsock agent injection",
+								"vm", name, "error", runErr)
+						}
+					}
+				}
+
+				// Persist vsock config with fresh CID but same port + token.
+				if persistErr := op.Services.Vsock.PersistConfig(
+					ctx, vsockCID, vmID, name, vsockUDSPath,
+					snap.ExtraConfig.VsockPort, snap.ExtraConfig.VsockToken,
+				); persistErr != nil {
+					slog.Error("Failed to persist vsock config for restored VM",
+						"vm", name, "error", persistErr)
+				} else {
+					vmItem.Vsock = &model.VsockConfigItem{
+						GuestCID: vsockCID,
+						UDSPath:  vsockUDSPath,
+						Port:     snap.ExtraConfig.VsockPort,
+						Token:    snap.ExtraConfig.VsockToken,
+					}
+				}
+			}
+		}
+
+		// Set file paths for the new VM's directory
+		configFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "config_filename")
+		apiSocketFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "api_socket_filename")
+		logFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_filename")
+		serialOutputFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "serial_output_filename")
+		vmItem.ConfigPath = filepath.Join(vmDir, configFilename)
+		vmItem.APISocketPath = filepath.Join(vmDir, apiSocketFilename)
+		logPath := filepath.Join(vmDir, logFilename)
+		serialPath := filepath.Join(vmDir, serialOutputFilename)
+		vmItem.LogPath = &logPath
+		vmItem.SerialOutputPath = &serialPath
+
+		// Persist the in-memory paths back to DB so the re-read
+		// after respawn doesn't wipe them with stale empty values.
+		_ = op.Repos.VM.Upsert(ctx, vmItem)
+
 		// Respawn Firecracker in snapshot mode (stays paused)
 		if err := op.vmRespawnFirecracker(ctx, vmItem, true); err != nil {
 			// Don't rollback — VM record exists, just log error
@@ -493,6 +582,24 @@ func (op *Operation) SnapshotRestore(
 		// Load snapshot via Firecracker API
 		if vmItem.APISocketPath != "" {
 			fcClient := firecracker.NewClient(vmItem.APISocketPath)
+
+			// The snapshot's vmstate file hardcodes the ORIGINAL VM's
+			// rootfs path. We created a copy at vmItem.RootfsPath (new VM
+			// directory), but Firecracker will look for the rootfs at the
+			// old path. Create a symlink from old → new so the snapshot
+			// can find the rootfs file.
+			oldVMDir := infra.GetVMDirByID(snap.SourceVMID)
+			oldRootfsPath := filepath.Join(oldVMDir, filepath.Base(vmItem.RootfsPath))
+			if _, statErr := os.Stat(oldRootfsPath); os.IsNotExist(statErr) {
+				if mkdirErr := os.MkdirAll(oldVMDir, 0755); mkdirErr == nil {
+					if symlinkErr := os.Symlink(vmItem.RootfsPath, oldRootfsPath); symlinkErr != nil {
+						slog.Warn("failed to create rootfs symlink for snapshot restore", "vm", name, "from", oldRootfsPath, "to", vmItem.RootfsPath, "error", symlinkErr)
+					} else {
+						defer os.RemoveAll(oldVMDir)
+					}
+				}
+			}
+
 			if _, loadErr := fcClient.LoadSnapshot(ctx, snap.MemoryFile, snap.StateFile, input.Resume); loadErr != nil {
 				slog.Error("failed to load snapshot for VM", "vm", name, "error", loadErr)
 				// best-effort: mark as errored in DB so user can inspect
@@ -501,6 +608,18 @@ func (op *Operation) SnapshotRestore(
 				createdVMs = append(createdVMs, vmItem)
 				continue
 			}
+
+			// Reconfigure vsock device with the new CID and UDS path.
+			// Snapshot mode doesn't pass --config-file, so the vsock
+			// section from firecracker.json is ignored by Firecracker.
+			// The device must be configured via the API after loading.
+			if vmItem.Vsock != nil && vmItem.Vsock.GuestCID > 0 && vmItem.Vsock.UDSPath != "" {
+				if vsockErr := fcClient.PutVsock(ctx, vmItem.Vsock.GuestCID, vmItem.Vsock.UDSPath); vsockErr != nil {
+					slog.Warn("Failed to reconfigure vsock device after snapshot load",
+						"vm", name, "error", vsockErr)
+				}
+			}
+
 			fcClient.Close()
 		}
 
@@ -562,8 +681,7 @@ func (op *Operation) SnapshotInspect(
 ) (*results.SnapshotInspect, error) {
 	snaps, err := input.Resolve(ctx, op.Repos.Snapshot)
 	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeSnapshotNotFound,
-			fmt.Sprintf("snapshot not found: %s", strings.Join(input.Identifiers, ", ")), err)
+		return nil, err
 	}
 	if len(snaps) != 1 {
 		return nil, fmt.Errorf("expected exactly one snapshot identifier")

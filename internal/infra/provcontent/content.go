@@ -339,7 +339,7 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 			GID:  0,
 		})
 
-		ops = append(ops, ChrootOp{Command: fmt.Sprintf("useradd -m %s", user)})
+		ops = append(ops, ChrootOp{Command: fmt.Sprintf("id %s 2>/dev/null || useradd -m %s", user, user)})
 		// Fix ownership: useradd -m creates home owned by root:root in chroot
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s", user, user, userHome)})
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh", user, user, userHome)})
@@ -371,7 +371,7 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 		UID:  0,
 		GID:  0,
 	})
-	ops = append(ops, ChrootOp{Command: "ssh-keygen -A"})
+	ops = append(ops, ChrootOp{Command: "command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A || true"})
 	ops = append(ops, ChrootOp{Command: enableSSHScript})
 
 	return ops
@@ -387,13 +387,10 @@ func (Builder) SetupSudo(user string) []Operation {
 		ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
 		ChrootOp{Command: fmt.Sprintf("echo '%s ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/%s", user, user)},
 		ChrootOp{Command: fmt.Sprintf("chmod 440 /etc/sudoers.d/%s", user)},
-		ChrootOp{Command: `chown root:root /etc/sudo.conf && \
-chmod 0440 /etc/sudo.conf && \
-chown root:root /etc/sudoers && \
-chmod 0440 /etc/sudoers && \
-chown root:root -R /etc/sudoers.d && \
-chown root:root /usr/bin/sudo && \
-chmod 4755 /usr/bin/sudo`},
+		ChrootOp{Command: `test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \
+test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \
+chown root:root -R /etc/sudoers.d; \
+test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo`},
 	}
 }
 
