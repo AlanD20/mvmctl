@@ -119,6 +119,11 @@ type VcpuFeatures struct {
 
 // --- DriveConfig ---
 
+const (
+	CacheTypeWriteback = "Writeback"
+	CacheTypeUnsafe    = "Unsafe"
+)
+
 type DriveConfig struct {
 	DriveID      string  `json:"drive_id"`
 	PathOnHost   string  `json:"path_on_host"`
@@ -281,6 +286,11 @@ type FirecrackerConfig struct {
 	// Spawn behavior
 	RelayClientFD *int `json:"relay_client_fd,omitempty"`
 	SnapshotMode  bool `json:"snapshot_mode"`
+
+	// Cache type
+	// When true, rootfs + volumes use "Writeback" cache (safe, guest fsync honored).
+	// When false, defaults to config value or "Unsafe" (fast, guest fsync ignored).
+	Writeback bool `json:"writeback,omitempty"`
 
 	// Vsock device config
 	Vsock *VsockConfig `json:"vsock,omitempty"`

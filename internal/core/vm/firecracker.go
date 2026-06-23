@@ -288,18 +288,23 @@ func (s *FirecrackerSpawner) buildDrivesConfig() []model.DriveConfig {
 		// Fallback to original if Abs fails (should not happen in practice)
 		rootfsAbs = s.config.RootfsPath
 	}
+	cacheType := model.CacheTypeUnsafe
+	if s.config.Writeback {
+		cacheType = model.CacheTypeWriteback
+	}
 	drives := []model.DriveConfig{
 		{
 			DriveID:      "rootfs",
 			PathOnHost:   rootfsAbs,
 			IsRootDevice: true,
 			IsReadOnly:   false,
-			CacheType:    "Unsafe",
+			CacheType:    cacheType,
 			IOEngine:     "Sync",
 		},
 	}
 
-	// Cloud-init ISO drive (if configured)
+	// Cloud-init ISO drive (if configured) — not affected by writeback flag,
+	// ISO is read-only temporary data.
 	cloudInitMode := s.config.CloudInitMode
 	cloudInitISOPath := s.config.CloudInitISOPath
 	if cloudInitMode != nil && *cloudInitMode != "" && *cloudInitMode != model.CloudInitModeOFF &&
@@ -321,7 +326,7 @@ func (s *FirecrackerSpawner) buildDrivesConfig() []model.DriveConfig {
 		drives = append(drives, cloudInitDrive)
 	}
 
-	// Extra drives (volumes)
+	// Extra drives (volumes) — already built with correct cache type by VolumesToDrives
 	drives = append(drives, s.config.ExtraDrives...)
 
 	return drives

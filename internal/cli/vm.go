@@ -189,6 +189,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		force           bool
 		volume          []string
 		vsockPort       int
+		writeback       bool
 	)
 
 	cmd := &cobra.Command{
@@ -252,6 +253,10 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 				SkipDeblob:  skipDeblob,
 				Atomic:      atomic,
 				Volumes:     volume,
+			}
+
+			if cmd.Flags().Changed("writeback") {
+				input.Writeback = infraptr.Ptr(writeback)
 			}
 
 			if cmd.Flags().Changed("image") {
@@ -386,6 +391,9 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		BoolVar(&skipDeblob, "skip-deblob", false, "Skip debloat operations on rootfs (removes OS caches, cleans package manager caches)")
 	cmd.Flags().StringArrayVarP(&volume, "volume", "v", nil, "Attach volume(s) to the VM (can specify multiple times)")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompts")
+	cmd.Flags().BoolVar(&writeback, "writeback", false,
+		"Use writeback cache mode for drives (safe: guest fsync honored). "+
+			"Set defaults.firecracker.drive_cache_type in config for persistent default.")
 	cmd.Flags().IntVar(&vsockPort, "vsock-port", 0, "Vsock port for the guest agent (default: 1024)")
 	cmd.Flags().SetNormalizeFunc(func(f *pflag.FlagSet, name string) pflag.NormalizedName {
 		switch name {

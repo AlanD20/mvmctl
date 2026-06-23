@@ -1199,7 +1199,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	}
 	// --- Attach volumes (extra drives) ---
 	if len(v.Volumes) > 0 {
-		fcConfig.ExtraDrives = volume.VolumesToDrives(v.Volumes)
+		fcConfig.ExtraDrives = volume.VolumesToDrives(v.Volumes, false)
 	}
 	// --- Console relay setup (before spawn) ---
 	var consoleController *console.Controller
@@ -1721,6 +1721,7 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		EnableMetrics:   c.resolved.EnableMetrics,
 		LogLevel:        c.resolved.LogLevel,
 		ExtraDrives:     c.resolved.ExtraDrives,
+		Writeback:       c.resolved.Writeback,
 		// Full paths constructed from VMDir + resolved filenames.
 		// Field names match DB column names for respawn compatibility.
 		ConfigPath:       filepath.Join(c.vmDir, c.resolved.ConfigFilename),
