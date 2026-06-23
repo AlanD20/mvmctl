@@ -98,7 +98,7 @@ type ExecResult struct {
 // and the connection is closed — all in one shot.
 // stdout/stderr data is printed directly to the terminal as it arrives,
 // and also accumulated into the returned ExecResult.
-func (c *Client) Exec(ctx context.Context, command, user string, timeout int, env map[string]string) (*ExecResult, error) {
+func (c *Client) Exec(ctx context.Context, command, user string, timeout int, env map[string]string, noSync bool) (*ExecResult, error) {
 	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
@@ -119,6 +119,7 @@ func (c *Client) Exec(ctx context.Context, command, user string, timeout int, en
 		Timeout: timeout,
 		User:    user,
 		Env:     env,
+		NoSync:  noSync,
 	}
 
 	if err := sendFrame(conn, req); err != nil {
@@ -505,7 +506,7 @@ func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
 		VmName:           c.VmName,
 		skipVersionCheck: true,
 	}
-	_, err := pushClient.FTCopyToVM(ctx, []string{tmpPath}, "/usr/bin/mvm-vsock-agent.new", true, nil)
+	_, err := pushClient.FTCopyToVM(ctx, []string{tmpPath}, "/usr/bin/mvm-vsock-agent.new", true, false, nil)
 	if err != nil {
 		return fmt.Errorf("push agent binary to VM: %w", err)
 	}
@@ -521,10 +522,10 @@ func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
 		VmName:           c.VmName,
 		skipVersionCheck: true,
 	}
-	_, err = execClient.Exec(ctx, upgradeShellCommand, "root", 30, nil)
+	_, err = execClient.Exec(ctx, upgradeShellCommand, "root", 30, nil, false)
 	if err != nil {
 		// Try to restore from backup (if it exists)
-		_, restoreErr := execClient.Exec(ctx, restoreShellCommand, "root", 15, nil)
+		_, restoreErr := execClient.Exec(ctx, restoreShellCommand, "root", 15, nil, false)
 		if restoreErr != nil {
 			slog.Error("failed to restore agent backup", "vm", c.VmName, "error", restoreErr)
 		}

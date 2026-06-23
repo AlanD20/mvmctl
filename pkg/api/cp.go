@@ -69,7 +69,7 @@ func (op *Operation) CPCopy(
 			return nil, err
 		}
 		ftResult, ftErr := client.FTCopyToVM(ctx, resolved.LocalPaths, resolved.DstInfo.RemotePath,
-			resolved.Force, wrapProgress)
+			resolved.Force, resolved.NoSync, wrapProgress)
 		if ftErr != nil {
 			return nil, ftErr
 		}

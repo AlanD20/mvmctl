@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // handleExec runs a shell command and streams its output to the vsock
@@ -90,6 +92,14 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 			Type: responseTypeStderr,
 			Data: stderrBuf.String(),
 		})
+	}
+
+	// Sync to flush Firecracker's writeback cache. Files written by the
+	// command may still be in Firecracker's host-side cache. The sync()
+	// syscall triggers VIRTIO_BLK_T_FLUSH on virtio-blk devices.
+	if !req.NoSync {
+		slog.Debug("syncing filesystem after exec")
+		unix.Sync()
 	}
 
 	elapsed := time.Since(start)

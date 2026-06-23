@@ -1606,7 +1606,7 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 	if user == "" {
 		user, _ = op.Services.Config.GetString(ctx, "defaults.vm", "vsock_user")
 	}
-	result, err := client.Exec(ctx, input.Command, user, input.Timeout, input.Env)
+	result, err := client.Exec(ctx, input.Command, user, input.Timeout, input.Env, input.NoSync)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeVsockExecFailed,

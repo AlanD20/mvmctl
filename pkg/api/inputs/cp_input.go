@@ -17,6 +17,7 @@ type CPInput struct {
 	Sources []string `json:"sources" yaml:"src"`
 	Dest    string   `json:"dest"    yaml:"dest"`
 	Force   bool     `json:"force"   yaml:"force"`
+	NoSync  bool     `json:"no_sync" yaml:"no_sync"`
 }
 
 // ResolvedCPInfo holds resolved target VM info for a copy operation.
@@ -35,6 +36,7 @@ type ResolvedCPInput struct {
 	SrcInfo    *ResolvedCPInfo
 	DstInfo    *ResolvedCPInfo
 	Force      bool
+	NoSync     bool
 }
 
 // Validate checks that the copy input has valid sources and destination.
@@ -114,6 +116,7 @@ func (i *CPInput) Resolve(
 		SrcInfo:    srcInfo,
 		DstInfo:    dstInfo,
 		Force:      i.Force,
+		NoSync:     i.NoSync,
 	}, nil
 }
 

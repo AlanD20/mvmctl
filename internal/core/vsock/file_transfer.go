@@ -79,6 +79,7 @@ func (c *Client) FTCopyToVM(
 	srcPaths []string,
 	destPath string,
 	overwrite bool,
+	noSync bool,
 	onProgress event.OnDownloadCallback,
 ) (*FTResult, error) {
 	conn, err := c.ensureAgent(ctx)
@@ -121,6 +122,7 @@ func (c *Client) FTCopyToVM(
 		Paths:     srcPaths,
 		Dest:      destPath,
 		Overwrite: overwrite,
+		NoSync:    noSync,
 	})
 	if err := vsockagent.WriteFTFrame(conn, vsockagent.FtPush, pushPayload); err != nil {
 		slog.Error("ft: write push frame", "error", err)
