@@ -151,7 +151,7 @@ func TestClient_DialAndHandshake_Success(t *testing.T) {
 		Token:   "test-token",
 	}, time.Second)
 
-	result, err := client.Exec(ctx, "echo hello", "root", 5, nil)
+	result, err := client.Exec(ctx, "echo hello", "root", 5, nil, false)
 	require.NoError(t, err)
 	assert.Equal(t, "hello\n", result.Stdout)
 	assert.Equal(t, "", result.Stderr)
@@ -172,7 +172,7 @@ func TestClient_DialAndHandshake_BadResponse(t *testing.T) {
 		Token:   "test-token",
 	}, time.Second)
 
-	_, err := client.Exec(ctx, "echo hello", "root", 5, nil)
+	_, err := client.Exec(ctx, "echo hello", "root", 5, nil, false)
 	require.Error(t, err)
 	// waitForAgent retries until the probe timeout, then returns its own
 	// error wrapping the underlying handshake failure.
@@ -194,7 +194,7 @@ func TestClient_DialAndHandshake_ContextCancel(t *testing.T) {
 		Token:   "test-token",
 	}, time.Millisecond)
 
-	_, err := client.Exec(ctx, "echo hello", "root", 5, nil)
+	_, err := client.Exec(ctx, "echo hello", "root", 5, nil, false)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }

@@ -16,6 +16,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 // --- Binary frame type constants ---
@@ -77,6 +79,7 @@ type FtPushPayload struct {
 	Paths     []string `json:"paths"`
 	Dest      string   `json:"dest"`
 	Overwrite bool     `json:"overwrite"`
+	NoSync    bool     `json:"no_sync,omitempty"`
 }
 
 // FtPullPayload is the JSON payload for an FtPull frame from the host.
@@ -381,6 +384,17 @@ mainLoop:
 				return
 			}
 		}
+	}
+
+	// Sync filesystem to flush Firecracker's internal writeback cache.
+	// The per-file fsync only flushes through guest kernel → virtio-blk device,
+	// but does NOT flush Firecracker's host-side writeback cache. This sync()
+	// syscall triggers VIRTIO_BLK_T_FLUSH on the virtio-blk device, ensuring
+	// data reaches the backing file before we send DONE.
+	if !push.NoSync {
+		slog.Debug("ft: syncing filesystem before done")
+		unix.Sync()
+		slog.Debug("ft: sync complete")
 	}
 
 	// Send DONE back.

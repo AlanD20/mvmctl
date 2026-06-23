@@ -42,6 +42,7 @@ type execRequest struct {
 	Timeout int               `json:"timeout,omitempty"` // timeout in seconds
 	User    string            `json:"user,omitempty"`    // run as this user
 	Env     map[string]string `json:"env,omitempty"`     // extra environment variables
+	NoSync  bool              `json:"no_sync,omitempty"` // skip sync() after command
 }
 
 // execResponse is a JSON frame sent back to the host agent.

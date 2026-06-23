@@ -72,6 +72,7 @@ type VMExecInput struct {
 	Timeout    int               `json:"timeout"           yaml:"timeout"`
 	Port       int               `json:"port"              yaml:"port"`
 	Env        map[string]string `json:"env,omitempty"     yaml:"env,omitempty"`
+	NoSync     bool              `json:"no_sync,omitempty" yaml:"no_sync,omitempty"`
 }
 
 // ResolvedVMExecInput holds the resolved VM and vsock config for exec operations.

@@ -12,7 +12,10 @@ import (
 )
 
 func NewCpCmd(cpAPI api.CPAPI) *cobra.Command {
-	var force bool
+	var (
+		force  bool
+		noSync bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "cp [sources...] [destination]",
@@ -61,6 +64,7 @@ Multiple sources require a directory destination (trailing "/").`,
 				Sources: args[:len(args)-1],
 				Dest:    args[len(args)-1],
 				Force:   force,
+				NoSync:  noSync,
 			}
 
 			// --- Progress ---
@@ -92,6 +96,7 @@ Multiple sources require a directory destination (trailing "/").`,
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing destination files")
+	cmd.Flags().BoolVarP(&noSync, "no-sync", "", false, "Skip final sync() after transfer (faster but risks data loss on VM stop)")
 
 	return cmd
 }

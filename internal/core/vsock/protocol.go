@@ -38,6 +38,7 @@ type execRequest struct {
 	Timeout int               `json:"timeout,omitempty"`
 	User    string            `json:"user,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
+	NoSync  bool              `json:"no_sync,omitempty"`
 }
 
 // execResponse is the JSON frame received from the guest agent.

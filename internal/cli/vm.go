@@ -741,6 +741,7 @@ Examples:
 			port, _ := c.Flags().GetInt("port")
 			timeout, _ := c.Flags().GetInt("timeout")
 			user, _ := c.Flags().GetString("user")
+			noSync, _ := c.Flags().GetBool("no-sync")
 
 			command := ""
 			if len(args) > 1 {
@@ -753,8 +754,8 @@ Examples:
 				Port:       port,
 				Timeout:    timeout,
 				User:       user,
+				NoSync:     noSync,
 			}
-
 			result, err := vmAPI.VMExec(c.Context(), input)
 			if err != nil {
 				return err
@@ -771,6 +772,7 @@ Examples:
 	cmd.Flags().IntP("port", "p", 1024, "Vsock port for the guest agent")
 	cmd.Flags().IntP("timeout", "t", 0, "Command timeout in seconds (0 = no timeout)")
 	cmd.Flags().StringP("user", "u", "", "User to run the command as (default: root)")
+	cmd.Flags().Bool("no-sync", false, "Skip final sync() after command (faster but risks data loss on VM stop)")
 
 	return cmd
 }
