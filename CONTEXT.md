@@ -343,12 +343,11 @@ The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeou
 **Documented exceptions** -- code that directly uses `os/exec.Command` because `DefaultRunner.Run()` cannot fulfill the requirement:
 
 | Location | Why `DefaultRunner.Run()` doesn't work |
-|---|---|
+|---|---|---|
 | `internal/core/vm/firecracker.go` (Firecracker spawn) | Fine-grained control over stdin/stdout/stderr FD redirection and `Setsid` session management for the Firecracker child process |
 | `internal/core/ssh/cp.go` (tar-pipe transfer) | Pipes two child processes (tar + ssh) together via stdin/stdout |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
-| `internal/lib/system/runner.go` | Implementation of `DefaultRunner.Run()` / `DefaultRunner.Stream()` itself |
-| `internal/lib/system/spawn.go` | Implementation of `SpawnService` for service subprocess spawning |
+| `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of the subprocess abstraction layer (`DefaultRunner`, `RunInteractive`, `SpawnService`). These use raw `os/exec` because they ARE the abstraction boundary |
 
 Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The services themselves (console relay, nocloudnet server, loopmount entry point) do NOT use `os/exec` except for the provisioning engine noted above.
 

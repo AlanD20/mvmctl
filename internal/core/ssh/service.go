@@ -4,12 +4,11 @@ package ssh
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"mvmctl/internal/lib/system"
@@ -54,18 +53,24 @@ func (s *Service) BuildCommand(command string) []string {
 	return opts
 }
 
-// ExecCommand executes SSH via syscall.Exec, replacing the current process.
-// It resolves the ssh binary via exec.LookPath and propagates errors on failure.
-func (s *Service) ExecCommand(command string) error {
-	sshArgs := s.BuildCommand(command)
+// InteractiveSession opens an interactive SSH session as a subprocess.
+// It saves and restores the terminal state (termios and DEC private modes)
+// so programs like htop that enable mouse tracking don't leave the terminal
+// in a broken state after the session exits.
+func (s *Service) InteractiveSession(ctx context.Context) error {
+	sshArgs := s.BuildCommand("")
 	path, err := exec.LookPath("ssh")
 	if err != nil {
-		return err
+		return fmt.Errorf("ssh binary not found: %w", err)
 	}
-	// syscall.Exec replaces the current process; if it returns, it failed
-	env := append(os.Environ(), "MVM_SSH_CONNECTION=1")
-	if err := syscall.Exec(path, sshArgs, env); err != nil {
-		return err
+
+	err = system.RunInteractive(path, sshArgs[1:], []string{"MVM_SSH_CONNECTION=1"})
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil // SSH exit codes are expected for interactive sessions
+		}
+		return fmt.Errorf("interactive SSH session failed: %w", err)
 	}
 	return nil
 }
@@ -115,9 +120,9 @@ func (s *Service) waitForSSH(ctx context.Context, timeout time.Duration) (time.D
 // execMode controls whether to exec or run as subprocess.
 // Errors propagate via return.
 func (s *Service) Connect(ctx context.Context, command string, execMode bool) (int, error) {
-	// exec_mode=True and not command (None/"") → interactive session (exec)
+	// exec_mode=True and not command (None/"") → interactive session (subprocess)
 	if execMode && command == "" {
-		return 0, s.ExecCommand(command)
+		return 0, s.InteractiveSession(ctx)
 	}
 
 	// Phase 1: Wait for SSH to become ready (probe with actual SSH command).
