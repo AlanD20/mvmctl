@@ -8,6 +8,7 @@ package loopmount
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -590,13 +591,24 @@ func growBtrfs(ctx context.Context, mountPoint string) error {
 // Takes *string so it can clear mountPoint after successful umount, preventing
 // deferred cleanup from retrying an unmount on intermediate failure.
 func growExt4(ctx context.Context, mountPoint *string, rootPart string) error {
-	if _, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
-		return fmt.Errorf("umount failed: %v", err)
+	if output, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
+		return fmt.Errorf("umount failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	*mountPoint = "" // prevent deferred cleanup from retrying umount
 
-	if _, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
-		return fmt.Errorf("e2fsck: %v", err)
+	if output, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
+		// e2fsck exits with code 1 (errors corrected) or 2 (errors corrected,
+		// reboot recommended) as success — the filesystem was fixed.
+		// Code 4+ means actual unrecoverable errors.
+		// Without this check, any image with minor fixable inconsistencies
+		// (common in compressed/distributed ext4 images) would fail grow.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() <= 2 {
+			slog.Warn("e2fsck corrected filesystem errors",
+				"root_part", rootPart, "exit_code", exitErr.ExitCode())
+		} else {
+			return fmt.Errorf("e2fsck: %v: %s", err, strings.TrimSpace(string(output)))
+		}
 	}
 
 	var resizeOutBuf strings.Builder
@@ -615,13 +627,24 @@ func growExt4(ctx context.Context, mountPoint *string, rootPart string) error {
 // deferred cleanup from retrying an unmount on intermediate failure.
 // Returns the new filesystem size in bytes.
 func shrinkExt4(ctx context.Context, mountPoint *string, rootPart string, headroom int) (int64, error) {
-	if _, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
-		return 0, fmt.Errorf("umount failed: %v", err)
+	if output, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("umount failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	*mountPoint = "" // prevent deferred cleanup from retrying umount
 
-	if _, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
-		return 0, fmt.Errorf("e2fsck: %v", err)
+	if output, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
+		// e2fsck exits with code 1 (errors corrected) or 2 (errors corrected,
+		// reboot recommended) as success — the filesystem was fixed.
+		// Code 4+ means actual unrecoverable errors.
+		// Without this check, any image with minor fixable inconsistencies
+		// (common in compressed/distributed ext4 images) would fail shrink.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() <= 2 {
+			slog.Warn("e2fsck corrected filesystem errors",
+				"root_part", rootPart, "exit_code", exitErr.ExitCode())
+		} else {
+			return 0, fmt.Errorf("e2fsck: %v: %s", err, strings.TrimSpace(string(output)))
+		}
 	}
 
 	if _, err := exec.CommandContext(ctx, "resize2fs", "-M", rootPart).CombinedOutput(); err != nil {
@@ -826,17 +849,7 @@ func writeFile(mountPoint string, f FileOp, debug bool, ps *provisionState) erro
 	fullPath := filepath.Join(mountPoint, strings.TrimLeft(f.Path, "/"))
 	ps.debugLog(debug, fmt.Sprintf("write: path=%s full=%s", f.Path, fullPath))
 
-	// Remove existing path if it exists (handles symlinks, sockets, FIFOs, hardlinks).
-	// Direct Remove + ignore ENOENT avoids a TOCTOU race: when intermediate path
-	// components are absolute symlinks (e.g. /var/run → /run), Lstat may see the file
-	// on the host filesystem, but by the time Remove runs the host file is gone (cleaned
-	// by tmpfiles.d or concurrent provisioner), producing a spurious ENOENT.
-	if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
-		ps.debugLog(debug, fmt.Sprintf("write: failed to remove %s: %v", f.Path, err))
-		return fmt.Errorf("cannot remove existing path %s: %v", f.Path, err)
-	}
-
-	// Create parent directories
+	// Create parent directories first (needed regardless of the file type).
 	parent := filepath.Dir(fullPath)
 	if err := os.MkdirAll(parent, infra.DirPerm); err != nil {
 		return fmt.Errorf("mkdir %s: %v", parent, err)
@@ -853,9 +866,20 @@ func writeFile(mountPoint string, f FileOp, debug bool, ps *provisionState) erro
 		mode = 0644
 	}
 
-	// Write file
+	// Try direct write first — os.WriteFile uses O_CREATE|O_WRONLY|O_TRUNC.
+	// In the common case (overwriting an existing regular file), O_TRUNC
+	// reuses the inode and avoids an unnecessary Remove+Create cycle.
+	// Only fall back to remove-and-retry when the path is a non-regular
+	// file (symlink, socket, FIFO) that os.WriteFile cannot truncate.
 	if err := os.WriteFile(fullPath, data, os.FileMode(mode)); err != nil {
-		return fmt.Errorf("write %s: %v", f.Path, err)
+		// Write failed — path is a symlink, directory, socket, FIFO, etc.
+		// Remove it first, then retry.
+		if rmErr := os.Remove(fullPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			return fmt.Errorf("cannot remove existing path %s: %v", f.Path, rmErr)
+		}
+		if err := os.WriteFile(fullPath, data, os.FileMode(mode)); err != nil {
+			return fmt.Errorf("write %s: %v", f.Path, err)
+		}
 	}
 
 	// Set permissions and ownership. Best-effort: root in container may lack CAP_CHOWN.

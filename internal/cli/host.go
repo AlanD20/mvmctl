@@ -208,6 +208,17 @@ Examples:
 				return nil
 			}
 
+			// NeedsInteraction in result path (not error)
+			if ni, ok := rawResult.(*errs.NeedsInteraction); ok {
+				if ni.Code == "privilege.sudo_required" {
+					common.Cli.Warning("Root privileges required for: mvm host init")
+					common.Cli.Info("Run with sudo: sudo mvm host init")
+					return fmt.Errorf("needs sudo")
+				}
+				common.Cli.Error(ni.Message)
+				return fmt.Errorf("%s", ni.Message)
+			}
+
 			// Success case - rawResult is a map of metadata
 			meta, ok := rawResult.(map[string]any)
 			if !ok {

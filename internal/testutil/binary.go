@@ -138,7 +138,7 @@ func (r *BinaryRepo) DeleteByTypeAndVersion(_ context.Context, typ, version stri
 }
 
 // SetDefault sets a binary as default, clearing all others with the same type atomically.
-func (r *BinaryRepo) SetDefault(_ context.Context, typ, version, _ string) error {
+func (r *BinaryRepo) SetDefault(_ context.Context, typ, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// Clear existing defaults for this type
@@ -147,11 +147,9 @@ func (r *BinaryRepo) SetDefault(_ context.Context, typ, version, _ string) error
 			b.IsDefault = false
 		}
 	}
-	// Set new default for this type and version
-	for _, b := range r.binaries {
-		if b.Type == typ && b.Version == version && b.DeletedAt == nil {
-			b.IsDefault = true
-		}
+	// Set new default by ID
+	if b, ok := r.binaries[id]; ok && b.DeletedAt == nil {
+		b.IsDefault = true
 	}
 	return nil
 }

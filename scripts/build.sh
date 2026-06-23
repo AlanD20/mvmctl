@@ -70,7 +70,7 @@ build_agent() {
   touch "${agent_dir}/${agent_zst}"
 
   echo "  → Building guest agent (linux/${arch})..."
-  CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build \
+  CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build -a \
     -o "${agent_dir}/${agent_binary}" \
     -ldflags="-s -w -X '${LDFLAGS_VAR}=${version}'" \
     ./internal/service/vsockagent/cmd/

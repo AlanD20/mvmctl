@@ -85,7 +85,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 		for _, b := range binaries {
 			_ = op.Repos.Binary.Upsert(ctx, b)
 			if shouldSetDefault {
-				_ = op.Repos.Binary.SetDefault(ctx, b.Type, b.Version, b.Path)
+				_ = op.Repos.Binary.SetDefault(ctx, b.Type, b.ID)
 			}
 		}
 		versionStr := ""
@@ -128,7 +128,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	for _, b := range binaries {
 		_ = op.Repos.Binary.Upsert(ctx, b)
 		if shouldSetDefault {
-			_ = op.Repos.Binary.SetDefault(ctx, b.Type, b.Version, b.Path)
+			_ = op.Repos.Binary.SetDefault(ctx, b.Type, b.ID)
 		}
 	}
 	op.AuditLog.LogOperation("binary.pull", map[string]any{"version": resolvedVersion}, "")

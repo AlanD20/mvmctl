@@ -341,7 +341,14 @@ mainLoop:
 						return
 					}
 					fileSuccess++
-					_ = f.Close() // best-effort: file was written successfully, close error is non-fatal
+					// fsync before close to ensure data is on storage, not just page cache.
+					// Without this, data can be lost if Firecracker is killed before the kernel flushes.
+					if syncErr := f.Sync(); syncErr != nil {
+						f.Close()
+						slog.Error("ft: fsync failed", "path", destPath, "error", syncErr)
+						return
+					}
+					_ = f.Close()
 					slog.Debug("ft: eos received, sending ok, continuing mainLoop", "path", meta.Path, "fileBytes", fileBytes)
 					continue mainLoop
 				}

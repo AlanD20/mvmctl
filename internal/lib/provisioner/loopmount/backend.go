@@ -151,6 +151,7 @@ func (b *LoopMountBackend) InjectVsockAgent(_ context.Context, agentBinary []byt
 // --- Execution ---
 
 // Run executes all queued operations via the loopmount service subprocess.
+// Clears queued ops after execution so subsequent calls only send new ops.
 func (b *LoopMountBackend) Run(ctx context.Context) error {
 	winput := loopmountsvc.WireInput{
 		Image:  b.rootfsPath,
@@ -179,12 +180,14 @@ func (b *LoopMountBackend) Run(ctx context.Context) error {
 			})
 		case provcontent.ResizeOp:
 			winput.Ops.Resize = &loopmountsvc.WireResizeOp{
-				Action: string(o.Action), Bytes: o.Bytes,
+				Action: string(o.Action), Bytes: o.Bytes, Headroom: o.Headroom,
 			}
 		}
 	}
 
 	_, err := runWireOp(ctx, &winput)
+	// Clear queued ops so subsequent Run() calls don't re-execute stale ops.
+	b.ops = nil
 	return err
 }
 

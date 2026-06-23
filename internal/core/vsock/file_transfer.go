@@ -504,6 +504,11 @@ receiveLoop:
 		}
 	}
 
+	// fsync before verifying SHA-256 and closing, to ensure data is on storage.
+	if syncErr := f.Sync(); syncErr != nil {
+		return nil, fmt.Errorf("fsync after pull: %w", syncErr)
+	}
+
 	// Verify SHA-256 against file meta.
 	localHash := hex.EncodeToString(hasher.Sum(nil))
 	if meta.SHA256 != "" && localHash != meta.SHA256 {
