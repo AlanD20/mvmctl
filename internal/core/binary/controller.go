@@ -26,5 +26,5 @@ func (c *Controller) Get() *model.BinaryItem {
 
 // SetDefault sets this binary as default (clears others with same name).
 func (c *Controller) SetDefault(ctx context.Context) error {
-	return c.repo.SetDefault(ctx, c.binary.Type, c.binary.Version, c.binary.Path)
+	return c.repo.SetDefault(ctx, c.binary.Type, c.binary.ID)
 }

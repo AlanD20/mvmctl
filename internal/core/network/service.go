@@ -127,6 +127,19 @@ func (s *Service) EnsureBridge(ctx context.Context, bridge, bridgeAddress string
 	}
 
 	slog.Info("Bridge created with address", "bridge", bridge, "address", bridgeAddress)
+
+	// Disable bridge-nf-call-iptables to allow inter-VM traffic to bypass
+	// the firewall. br_netfilter causes bridged IP packets to traverse the
+	// inet family FORWARD chain, which may have different policies managed
+	// by system firewalld, while mvmctl only manages ip family rules.
+	if _, err := system.DefaultRunner.Run(
+		ctx,
+		[]string{"sysctl", "-w", "net.bridge.bridge-nf-call-iptables=0"},
+		system.RunCmdOpts{Capture: true, Privileged: true, Check: false},
+	); err != nil {
+		slog.Warn("Failed to set net.bridge.bridge-nf-call-iptables=0 (br_netfilter may not be loaded)", "error", err)
+	}
+
 	return nil
 }
 

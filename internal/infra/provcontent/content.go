@@ -53,8 +53,9 @@ const (
 
 // ResizeOp represents resizing the root filesystem (grow or shrink).
 type ResizeOp struct {
-	Action ResizeAction
-	Bytes  int64
+	Action   ResizeAction
+	Bytes    int64
+	Headroom int // extra headroom in bytes after shrink-to-minimum
 }
 
 // Operation is a union type: FileOp | ChrootOp | CopyDirOp | ResizeOp.

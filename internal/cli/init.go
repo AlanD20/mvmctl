@@ -152,11 +152,12 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 	probeResult := s.initAPI.InitCheckReadiness(ctx)
 
 	// In non-interactive mode: run host init directly (relies on passwordless sudo).
+	// Mark as completed after attempt — even on probe failures (e.g. no KVM inside
+	// a Firecracker VM) — to prevent an infinite loop. Degraded state is acceptable;
+	// the wizard summary will report "setup incomplete".
 	if s.nonInteractive {
-		proc := common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
-		if proc.Success {
-			s.sudoCompleted = true
-		}
+		common.RunWithSudo(ctx, []string{"host", "init"}, infra.EnvKey("ESCALATED")+"=1")
+		s.sudoCompleted = true
 		return nil
 	}
 

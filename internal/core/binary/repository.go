@@ -27,7 +27,7 @@ type Repository interface {
 	// DeleteByTypeAndVersion deletes the binary row matching type AND version.
 	DeleteByTypeAndVersion(ctx context.Context, typ, version string) error
 	// SetDefault sets a binary as default, clearing all others with the same type.
-	SetDefault(ctx context.Context, typ, version, path string) error
+	SetDefault(ctx context.Context, typ, id string) error
 	// Count returns total count of all non-deleted binaries.
 	Count(ctx context.Context) (int, error)
 	// GetDefault returns the default binary for a given type, or nil.
