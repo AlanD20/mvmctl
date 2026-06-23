@@ -65,6 +65,7 @@ type VMCreateInput struct {
 	Atomic                bool     `json:"atomic"                             yaml:"atomic"`
 	Volumes               []string `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
 	VsockPort             *int     `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
+	Writeback             *bool    `json:"writeback,omitempty"                 yaml:"writeback,omitempty"`
 }
 
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().
@@ -134,7 +135,8 @@ type ResolvedVMCreateInput struct {
 	Provisioner      model.ProvisionerType
 	ExtraDrives      []model.DriveConfig
 	Volumes          []*model.VolumeItem
-	VsockPort        int // vsock port (0 = disabled / no vsock)
+	VsockPort        int  // vsock port (0 = disabled / no vsock)
+	Writeback        bool // cache type override: when true, use "Writeback" for rootfs + volumes
 }
 
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.
@@ -371,7 +373,15 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if err != nil {
 		return nil, err
 	}
-	extraDrives := volume.VolumesToDrives(vols)
+	// Resolve writeback from config, CLI flag overrides
+	writeback := false
+	if cfgVal, cfgErr := r.cfg.GetString(ctx, "defaults.firecracker", "drive_cache_type"); cfgErr == nil {
+		writeback = cfgVal == model.CacheTypeWriteback
+	}
+	if input.Writeback != nil {
+		writeback = *input.Writeback
+	}
+	extraDrives := volume.VolumesToDrives(vols, writeback)
 	// Validate and parse network subnet.
 	_, ipv4Net, parseErr := net.ParseCIDR(netw.Subnet)
 	if parseErr != nil {
@@ -588,6 +598,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		NocloudMaxPortRetries: nocloudMaxRetries,
 		NoCloudKillAfter:      nocloudKillAfter,
 		VsockPort:             vsockPort,
+		Writeback:             writeback,
 	}
 	// Validate
 	if err := r.ensureValidate(ctx, result); err != nil {

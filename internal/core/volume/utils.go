@@ -15,7 +15,12 @@ import (
 )
 
 // VolumesToDrives converts volume items to Firecracker drive configurations.
-func VolumesToDrives(vols []*model.VolumeItem) []model.DriveConfig {
+// writeback controls the cache type: true uses "Writeback", false uses "Unsafe".
+func VolumesToDrives(vols []*model.VolumeItem, writeback bool) []model.DriveConfig {
+	cacheType := model.CacheTypeUnsafe
+	if writeback {
+		cacheType = model.CacheTypeWriteback
+	}
 	drives := make([]model.DriveConfig, 0, len(vols))
 	for _, vol := range vols {
 		if vol == nil {
@@ -26,7 +31,7 @@ func VolumesToDrives(vols []*model.VolumeItem) []model.DriveConfig {
 			PathOnHost:   vol.Path,
 			IsRootDevice: false,
 			IsReadOnly:   vol.IsReadOnly,
-			CacheType:    "Unsafe",
+			CacheType:    cacheType,
 			IOEngine:     "Sync",
 		})
 	}

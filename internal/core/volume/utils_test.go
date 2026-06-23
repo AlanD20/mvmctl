@@ -20,22 +20,22 @@ import (
 func TestVolumesToDrives(t *testing.T) {
 	t.Run("nil_volume_skipped", func(t *testing.T) {
 		vols := []*model.VolumeItem{nil, {ID: "v1", Path: "/dev/vda"}}
-		got := VolumesToDrives(vols)
+		got := VolumesToDrives(vols, false)
 		assert.Len(t, got, 1)
 		assert.Equal(t, "v1", got[0].DriveID)
 	})
 
 	t.Run("empty_list_returns_empty", func(t *testing.T) {
-		got := VolumesToDrives(nil)
+		got := VolumesToDrives(nil, false)
 		assert.Empty(t, got)
 	})
 
-	t.Run("single_volume_has_correct_defaults", func(t *testing.T) {
+	t.Run("default_cache_type_is_unsafe", func(t *testing.T) {
 		vols := []*model.VolumeItem{{
 			ID:   "root",
 			Path: "/dev/vda",
 		}}
-		got := VolumesToDrives(vols)
+		got := VolumesToDrives(vols, false)
 		require.Len(t, got, 1)
 		want := []model.DriveConfig{{
 			DriveID:      "root",
@@ -48,13 +48,31 @@ func TestVolumesToDrives(t *testing.T) {
 		assert.Empty(t, cmp.Diff(want, got))
 	})
 
+	t.Run("writeback_flag_uses_writeback_cache", func(t *testing.T) {
+		vols := []*model.VolumeItem{{
+			ID:   "safe-vol",
+			Path: "/dev/vdx",
+		}}
+		got := VolumesToDrives(vols, true)
+		require.Len(t, got, 1)
+		want := []model.DriveConfig{{
+			DriveID:      "safe-vol",
+			PathOnHost:   "/dev/vdx",
+			IsRootDevice: false,
+			IsReadOnly:   false,
+			CacheType:    "Writeback",
+			IOEngine:     "Sync",
+		}}
+		assert.Empty(t, cmp.Diff(want, got))
+	})
+
 	t.Run("is_read_only_propagated", func(t *testing.T) {
 		vols := []*model.VolumeItem{{
 			ID:         "data",
 			Path:       "/dev/vdb",
 			IsReadOnly: true,
 		}}
-		got := VolumesToDrives(vols)
+		got := VolumesToDrives(vols, false)
 		require.Len(t, got, 1)
 		assert.True(t, got[0].IsReadOnly)
 	})
@@ -65,7 +83,7 @@ func TestVolumesToDrives(t *testing.T) {
 			{ID: "b", Path: "/dev/vdb"},
 			{ID: "c", Path: "/dev/vdc"},
 		}
-		got := VolumesToDrives(vols)
+		got := VolumesToDrives(vols, false)
 		require.Len(t, got, 3)
 		assert.Equal(t, "a", got[0].DriveID)
 		assert.Equal(t, "b", got[1].DriveID)
