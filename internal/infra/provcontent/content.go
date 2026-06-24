@@ -350,7 +350,10 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 				GID:  0,
 			})
 			ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh", user, user, userHome)})
-			ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)})
+			ops = append(
+				ops,
+				ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)},
+			)
 		}
 	}
 

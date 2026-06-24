@@ -143,7 +143,8 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "readonly", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "ro", false, "Mount volume as read-only (default: writable)")
-	cmd.Flags().BoolVarP(&shareable, "shareable", "s", false, "Allow volume to be attached to multiple VMs (requires --read-only)")
+	cmd.Flags().
+		BoolVarP(&shareable, "shareable", "s", false, "Allow volume to be attached to multiple VMs (requires --read-only)")
 	return cmd
 }
 

@@ -145,8 +145,8 @@ func (i *ImageImportInput) Resolve(
 		vmItem, vmErr := vmResolver.Resolve(ctx, sourcePath)
 		if vmErr == nil && vmItem != nil {
 			sourcePath = vmItem.RootfsPath
-			i.Format = "raw"           // force raw for VM rootfs
-			i.SkipOptimization = true  // skip deblob for VM imports
+			i.Format = "raw"          // force raw for VM rootfs
+			i.SkipOptimization = true // skip deblob for VM imports
 			slog.Debug("Importing from VM", "vm", vmItem.Name, "rootfs", sourcePath)
 		}
 	}
