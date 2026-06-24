@@ -73,10 +73,12 @@ func (op *Operation) CPCopy(
 		if ftErr != nil {
 			return nil, ftErr
 		}
-		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
 		if ftResult.Errors > 0 {
-			msg += fmt.Sprintf(" (%d errors)", ftResult.Errors)
+			return nil, errs.New(errs.CodeCPError,
+				fmt.Sprintf("copy failed: %d error(s) — destination exists? use --force to overwrite",
+					ftResult.Errors))
 		}
+		msg := fmt.Sprintf("Copied %d file(s) (%s)", ftResult.Files, formatBytes(ftResult.Bytes))
 		return &results.CPCopyResult{
 			Bytes:   ftResult.Bytes,
 			Message: msg,

@@ -168,34 +168,34 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(injectDNSTmpl, dnsData{DNSServer: cfg.DNSServer})))
 	}
 
-	// Ensure user + SSH keys
-	if cfg.User != "" && len(cfg.SSHPubkeys) > 0 {
+	// Ensure user — unconditional when a non-empty user is specified.
+	// --user flag should always create the user, regardless of SSH keys.
+	if cfg.User != "" {
 		cmds = append(cmds, "# Ensure user")
 		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(ensureUserTmpl, userData{
 			User: cfg.User, UserUID: cfg.UserUID, UserGID: cfg.UserGID,
 		})))
 
-		cmds = append(cmds, "# Add SSH keys")
-		homeDir := "/root"
-		if cfg.User != "root" {
-			homeDir = "/home/" + cfg.User
+		// Add SSH keys only if provided
+		if len(cfg.SSHPubkeys) > 0 {
+			cmds = append(cmds, "# Add SSH keys")
+			homeDir := "/root"
+			if cfg.User != "root" {
+				homeDir = "/home/" + cfg.User
+			}
+			cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(addSSHKeysTmpl, sshKeysData{
+				User: cfg.User, Home: homeDir, Keys: cfg.SSHPubkeys,
+			})))
 		}
-		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(addSSHKeysTmpl, sshKeysData{
-			User: cfg.User, Home: homeDir, Keys: cfg.SSHPubkeys,
-		})))
 	}
 
 	// Generate host keys
-	if len(cfg.SSHPubkeys) > 0 {
-		cmds = append(cmds, "# Generate SSH host keys")
-		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(generateHostKeysTmpl, struct{}{})))
-	}
+	cmds = append(cmds, "# Generate SSH host keys")
+	cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(generateHostKeysTmpl, struct{}{})))
 
 	// Enable SSH
-	if len(cfg.SSHPubkeys) > 0 {
-		cmds = append(cmds, "# Enable SSH")
-		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(enableSSHTmpl, struct{}{})))
-	}
+	cmds = append(cmds, "# Enable SSH")
+	cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(enableSSHTmpl, struct{}{})))
 
 	// Upload SSH config files (sshd_config, first-boot installer, first-boot service)
 	// Moved here from deblob section — these are SSH infrastructure, not OS cleanup.

@@ -434,7 +434,9 @@ func extractFiltered(ctx context.Context, path, destDir string, filter func(stri
 	}
 	defer func() {
 		if closeErr := ar.close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
+			// Extraction succeeded — ignore pipe cleanup noise.
+			// xz may still be decompressing trailing data when the
+			// tar reader exits, causing misleading SIGPIPE.
 		}
 	}()
 

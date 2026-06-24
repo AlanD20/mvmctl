@@ -305,22 +305,23 @@ func (Builder) BuildDNSOps(dnsServer string) []Operation {
 }
 
 // BuildSSHOps generates operations for SSH key injection and SSHD config.
+// The user is created unconditionally when non-root. SSH keys are injected
+// only when sshPubkeys is non-empty.
 func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 	var ops []Operation
-	if len(sshPubkeys) == 0 {
-		return ops
+
+	if len(sshPubkeys) > 0 {
+		keyData := []byte(strings.Join(sshPubkeys, "\n") + "\n")
+
+		// Always inject into /root/.ssh/authorized_keys so root can always SSH in.
+		ops = append(ops, FileOp{
+			Path: "/root/.ssh/authorized_keys",
+			Data: keyData,
+			Mode: 0600,
+			UID:  0,
+			GID:  0,
+		})
 	}
-
-	keyData := []byte(strings.Join(sshPubkeys, "\n") + "\n")
-
-	// ALWAYS inject into /root/.ssh/authorized_keys
-	ops = append(ops, FileOp{
-		Path: "/root/.ssh/authorized_keys",
-		Data: keyData,
-		Mode: 0600,
-		UID:  0,
-		GID:  0,
-	})
 
 	if user == "root" {
 		// Fix /root ownership — some cloud images (e.g. Ubuntu cloud)
@@ -331,26 +332,32 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 	} else {
 		userHome := "/home/" + user
 
-		// ALSO inject into the non-root user's authorized_keys
-		ops = append(ops, FileOp{
-			Path: userHome + "/.ssh/authorized_keys",
-			Data: keyData,
-			Mode: 0600,
-			UID:  0,
-			GID:  0,
-		})
-
+		// Create the user unconditionally — --user flag should always work
+		// regardless of whether SSH keys are provided.
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("id %s 2>/dev/null || useradd -m %s", user, user)})
 		// Fix ownership: useradd -m creates home owned by root:root in chroot
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s", user, user, userHome)})
-		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh", user, user, userHome)})
-		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)})
+
+		if len(sshPubkeys) > 0 {
+			keyData := []byte(strings.Join(sshPubkeys, "\n") + "\n")
+
+			// Inject keys into the non-root user's authorized_keys
+			ops = append(ops, FileOp{
+				Path: userHome + "/.ssh/authorized_keys",
+				Data: keyData,
+				Mode: 0600,
+				UID:  0,
+				GID:  0,
+			})
+			ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh", user, user, userHome)})
+			ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)})
+		}
 	}
 
 	// --- Static SSH infrastructure (identical for every VM from this image) ---
 	// These ops set up the SSH daemon config, first-boot installer, host keys,
-	// and service enablement. Moved here from BuildDeblobOps so they are always
-	// produced when SSH keys are injected, regardless of deblobbing.
+	// and service enablement. Unconditional — needed even without SSH keys
+	// because the user may inject keys later or use password auth.
 	ops = append(ops, FileOp{
 		Path: "/etc/ssh/sshd_config.d/mvm.conf",
 		Data: []byte(pc.SSHDConfig("root")),
@@ -391,7 +398,8 @@ func (Builder) SetupSudo(user string) []Operation {
 		ChrootOp{Command: `test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \
 test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \
 chown root:root -R /etc/sudoers.d; \
-test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo`},
+test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \
+test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so`},
 	}
 }
 

@@ -956,10 +956,25 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 	if err != nil {
 		return "", err
 	}
+	// Find the most recently created linux-* directory (the one just extracted).
+	// Use the newest dir to avoid picking up stale directories from prior builds.
+	var newest string
+	var newestMod time.Time
 	for _, entry := range entries {
 		if entry.IsDir() && strings.HasPrefix(entry.Name(), "linux-") {
-			return filepath.Join(extractDir, entry.Name()), nil
+			fi, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			mod := fi.ModTime()
+			if newest == "" || mod.After(newestMod) {
+				newest = filepath.Join(extractDir, entry.Name())
+				newestMod = mod
+			}
 		}
+	}
+	if newest != "" {
+		return newest, nil
 	}
 	return "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("No linux-* directory found in kernel tarball"))
 }

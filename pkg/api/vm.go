@@ -1451,7 +1451,10 @@ func (op *Operation) VMAttachVolume(
 			CacheType:    "Unsafe",
 			IOEngine:     "Sync",
 		}); err != nil {
-			slog.Warn("Hotplug failed for drive", "volume", vol.ID, "error", err)
+			return errs.New(
+				errs.CodeFirecrackerClientError,
+				fmt.Sprintf("Hotplug failed: %v", err),
+			)
 		}
 	}
 	// VolumeController.Attach
