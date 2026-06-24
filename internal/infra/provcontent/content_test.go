@@ -288,10 +288,38 @@ func TestBuilder_BuildSSHOps(t *testing.T) {
 		pubkeys []string
 		want    []provcontent.Operation
 	}{
-		"empty_pubkeys_returns_empty": {
+		"empty_pubkeys_returns_ssh_infra": {
 			user:    "root",
 			pubkeys: nil,
-			want:    nil,
+			want: []provcontent.Operation{
+				provcontent.ChrootOp{Command: "chown root:root /root"},
+				// Static SSH infra (unconditional)
+				provcontent.FileOp{
+					Path: "/etc/ssh/sshd_config.d/mvm.conf",
+					Data: []byte(provcontent.Builder{}.SSHDConfig("root")),
+					Mode: 0644,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.FileOp{
+					Path: "/usr/local/bin/first-boot-ssh-installer.sh",
+					Data: []byte(provcontent.Builder{}.FirstBootInstaller()),
+					Mode: 0755,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.FileOp{
+					Path: "/etc/systemd/system/first-boot-ssh-installer.service",
+					Data: []byte(provcontent.Builder{}.FirstBootService()),
+					Mode: 0644,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.ChrootOp{Command: "command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A || true"},
+				provcontent.ChrootOp{Command: `if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
+fi`},
+			},
 		},
 		"root_user_with_pubkeys": {
 			user:    "root",
@@ -344,6 +372,8 @@ fi`},
 					UID:  0,
 					GID:  0,
 				},
+				provcontent.ChrootOp{Command: "id testuser 2>/dev/null || useradd -m testuser"},
+				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser"},
 				provcontent.FileOp{
 					Path: "/home/testuser/.ssh/authorized_keys",
 					Data: keyData,
@@ -351,8 +381,6 @@ fi`},
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.ChrootOp{Command: "id testuser 2>/dev/null || useradd -m testuser"},
-				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser/.ssh"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser/.ssh/authorized_keys"},
 				// Static SSH infra (moved from BuildDeblobOps)
@@ -417,7 +445,8 @@ func TestBuilder_SetupSudo(t *testing.T) {
 				provcontent.ChrootOp{Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
 					"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
 					"chown root:root -R /etc/sudoers.d; \\\n" +
-					"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo"},
+					"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \\\n" +
+					"test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so"},
 			},
 		},
 		"root_user": {
@@ -429,7 +458,8 @@ func TestBuilder_SetupSudo(t *testing.T) {
 				provcontent.ChrootOp{Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
 					"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
 					"chown root:root -R /etc/sudoers.d; \\\n" +
-					"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo"},
+					"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \\\n" +
+					"test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so"},
 			},
 		},
 	}

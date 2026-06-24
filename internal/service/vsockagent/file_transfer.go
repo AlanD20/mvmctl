@@ -284,13 +284,22 @@ mainLoop:
 		}
 
 		// Open destination file.
-		f, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(meta.Mode))
+		// Try without O_CREAT first to avoid fs.protected_regular=2 EACCES on
+		// Ubuntu 24.04 (kernel blocks O_CREAT for files owned by another user
+		// in sticky world-writable directories). Fall back to O_CREATE if the
+		// file does not exist.
+		f, err := os.OpenFile(destPath, os.O_WRONLY|os.O_TRUNC, 0)
 		if err != nil {
-			slog.Error("ft: create file", "path", destPath, "error", err)
-			errPayload, _ := json.Marshal(FtErrorPayload{Code: "create_failed", Message: err.Error()})
-			_ = WriteFTFrame(conn, FtError, errPayload)
-			fileErrors++
-			continue mainLoop
+			if os.IsNotExist(err) {
+				f, err = os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(meta.Mode))
+			}
+			if err != nil {
+				slog.Error("ft: create file", "path", destPath, "error", err)
+				errPayload, _ := json.Marshal(FtErrorPayload{Code: "create_failed", Message: err.Error()})
+				_ = WriteFTFrame(conn, FtError, errPayload)
+				fileErrors++
+				continue mainLoop
+			}
 		}
 
 		// Send acceptance.

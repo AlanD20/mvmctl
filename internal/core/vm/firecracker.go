@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -148,11 +149,21 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 		relayFile = nil
 	}
 
-	// Wait for Firecracker to initialize (poll up to 2s, exit early on socket).
+	// Wait for Firecracker to initialize (poll up to 4s, exit early on socket).
 	// Interleave liveness checks so a crashed process is caught early.
-	for range 20 {
+	// CRITICAL: WaitForSocket only checks that the socket file exists (bind() completed).
+	// Firecracker may crash between bind() and listen(), leaving a zombie socket file
+	// that reports ECONNREFUSED on connect. We must Dial to verify it's actually listening.
+	// Nested KVM environments may take longer to initialize (2s might not be enough).
+	for range 40 {
 		if infra.WaitForSocket(s.APISocketPath, 100*time.Millisecond) == nil {
-			break
+			// Socket file exists — verify it's accepting connections.
+			if conn, dialErr := net.DialTimeout("unix", s.APISocketPath, 50*time.Millisecond); dialErr == nil {
+				conn.Close()
+				break
+			}
+			// Socket file exists but nobody is listening (ECONNREFUSED likely).
+			// Fall through to liveness check.
 		}
 
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
@@ -166,9 +177,16 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 		}
 	}
 
+	// Final verification: socket must exist AND accept connections.
 	if _, err := os.Stat(s.APISocketPath); os.IsNotExist(err) {
 		return errs.New(errs.CodeFirecrackerSpawnError,
 			"firecracker API socket not available after 2s")
+	}
+	if conn, dialErr := net.DialTimeout("unix", s.APISocketPath, 200*time.Millisecond); dialErr != nil {
+		return errs.New(errs.CodeFirecrackerSpawnError,
+			fmt.Sprintf("firecracker API socket not accepting connections after 4s: %v", dialErr))
+	} else {
+		conn.Close()
 	}
 
 	s.CloseFilePointers()
