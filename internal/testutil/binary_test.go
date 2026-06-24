@@ -52,7 +52,7 @@ func TestBinaryRepo_SetDefault(t *testing.T) {
 	seedBin(t, repo, newBinary("b-1", "firecracker", "1.15.0"))
 	seedBin(t, repo, newBinary("b-2", "firecracker", "1.14.0"))
 
-	require.NoError(t, repo.SetDefault(ctx, "firecracker", "1.15.0", "b-1"))
+	require.NoError(t, repo.SetDefault(ctx, "firecracker", "b-1"))
 	found, _ := repo.GetDefault(ctx, "firecracker")
 	require.NotNil(t, found)
 	assert.Equal(t, "b-1", found.ID)

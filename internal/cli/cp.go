@@ -96,7 +96,8 @@ Multiple sources require a directory destination (trailing "/").`,
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing destination files")
-	cmd.Flags().BoolVarP(&noSync, "no-sync", "", false, "Skip final sync() after transfer (faster but risks data loss on VM stop)")
+	cmd.Flags().
+		BoolVarP(&noSync, "no-sync", "", false, "Skip final sync() after transfer (faster but risks data loss on VM stop)")
 
 	return cmd
 }

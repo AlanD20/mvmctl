@@ -98,7 +98,13 @@ type ExecResult struct {
 // and the connection is closed — all in one shot.
 // stdout/stderr data is printed directly to the terminal as it arrives,
 // and also accumulated into the returned ExecResult.
-func (c *Client) Exec(ctx context.Context, command, user string, timeout int, env map[string]string, noSync bool) (*ExecResult, error) {
+func (c *Client) Exec(
+	ctx context.Context,
+	command, user string,
+	timeout int,
+	env map[string]string,
+	noSync bool,
+) (*ExecResult, error) {
 	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)

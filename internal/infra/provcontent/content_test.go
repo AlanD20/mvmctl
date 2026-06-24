@@ -442,11 +442,13 @@ func TestBuilder_SetupSudo(t *testing.T) {
 				provcontent.ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
 				provcontent.ChrootOp{Command: "echo 'testuser ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/testuser"},
 				provcontent.ChrootOp{Command: "chmod 440 /etc/sudoers.d/testuser"},
-				provcontent.ChrootOp{Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
-					"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
-					"chown root:root -R /etc/sudoers.d; \\\n" +
-					"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \\\n" +
-					"test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so"},
+				provcontent.ChrootOp{
+					Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
+						"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
+						"chown root:root -R /etc/sudoers.d; \\\n" +
+						"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \\\n" +
+						"test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so",
+				},
 			},
 		},
 		"root_user": {
@@ -455,11 +457,13 @@ func TestBuilder_SetupSudo(t *testing.T) {
 				provcontent.ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
 				provcontent.ChrootOp{Command: "echo 'root ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/root"},
 				provcontent.ChrootOp{Command: "chmod 440 /etc/sudoers.d/root"},
-				provcontent.ChrootOp{Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
-					"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
-					"chown root:root -R /etc/sudoers.d; \\\n" +
-					"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \\\n" +
-					"test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so"},
+				provcontent.ChrootOp{
+					Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
+						"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
+						"chown root:root -R /etc/sudoers.d; \\\n" +
+						"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \\\n" +
+						"test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so",
+				},
 			},
 		},
 	}

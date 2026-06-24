@@ -29,30 +29,30 @@ import (
 // VMCreateInput specifies v m create input.
 type VMCreateInput struct {
 	// Required fields (no defaults)
-	Name    string   `json:"name"                               yaml:"name"`
-	SSHKeys []string `json:"ssh_keys,omitempty"                 yaml:"ssh_keys,omitempty"`
+	Name    string   `json:"name"               yaml:"name"`
+	SSHKeys []string `json:"ssh_keys,omitempty" yaml:"ssh_keys,omitempty"`
 	// Optional fields with CLI-layer defaults resolved in Build()
-	VCPUCount  *int    `json:"vcpu,omitempty"                     yaml:"vcpu,omitempty"`
-	MemSizeMib string  `json:"mem,omitempty"                      yaml:"mem,omitempty"`
-	User       *string `json:"user,omitempty"                     yaml:"user,omitempty"`
-	PCIEnabled *bool   `json:"pci_enabled,omitempty"              yaml:"pci_enabled,omitempty"`
-	NestedVirt *bool   `json:"nested_virt,omitempty"              yaml:"nested_virt,omitempty"`
+	VCPUCount  *int    `json:"vcpu,omitempty"        yaml:"vcpu,omitempty"`
+	MemSizeMib string  `json:"mem,omitempty"         yaml:"mem,omitempty"`
+	User       *string `json:"user,omitempty"        yaml:"user,omitempty"`
+	PCIEnabled *bool   `json:"pci_enabled,omitempty" yaml:"pci_enabled,omitempty"`
+	NestedVirt *bool   `json:"nested_virt,omitempty" yaml:"nested_virt,omitempty"`
 	// CPUTemplate is a file path to a CPU template JSON file.
-	CPUTemplate         string         `json:"cpu_template,omitempty"             yaml:"cpu_template,omitempty"`
-	CPUConfig           map[string]any `json:"cpu_config,omitempty"               yaml:"cpu_config,omitempty"`
-	EnableConsole       *bool          `json:"console_enable,omitempty"           yaml:"console_enable,omitempty"`
-	EnableLogging       *bool          `json:"logging_enable,omitempty"           yaml:"logging_enable,omitempty"`
-	EnableMetrics       *bool          `json:"metrics_enable,omitempty"           yaml:"metrics_enable,omitempty"`
-	ImageID             *string        `json:"image,omitempty"                    yaml:"image,omitempty"`
-	KernelID            *string        `json:"kernel,omitempty"                   yaml:"kernel,omitempty"`
-	BinaryID            *string        `json:"binary,omitempty"                   yaml:"binary,omitempty"`
-	DiskSize            string         `json:"disk_size,omitempty"                yaml:"disk_size,omitempty"`
-	RequestedGuestIP    *string        `json:"guest_ip,omitempty"                 yaml:"guest_ip,omitempty"`
-	SkipCINetworkConfig bool           `json:"skip_ci_network_config"             yaml:"skip_ci_network_config"`
-	BootArgs            string         `json:"boot_args,omitempty"                yaml:"boot_args,omitempty"`
-	LSMFlags            string         `json:"lsm_flags,omitempty"                yaml:"lsm_flags,omitempty"`
-	NetworkID           *string        `json:"network,omitempty"                  yaml:"network,omitempty"`
-	RequestedGuestMAC   *string        `json:"guest_mac,omitempty"                yaml:"guest_mac,omitempty"`
+	CPUTemplate         string         `json:"cpu_template,omitempty"   yaml:"cpu_template,omitempty"`
+	CPUConfig           map[string]any `json:"cpu_config,omitempty"     yaml:"cpu_config,omitempty"`
+	EnableConsole       *bool          `json:"console_enable,omitempty" yaml:"console_enable,omitempty"`
+	EnableLogging       *bool          `json:"logging_enable,omitempty" yaml:"logging_enable,omitempty"`
+	EnableMetrics       *bool          `json:"metrics_enable,omitempty" yaml:"metrics_enable,omitempty"`
+	ImageID             *string        `json:"image,omitempty"          yaml:"image,omitempty"`
+	KernelID            *string        `json:"kernel,omitempty"         yaml:"kernel,omitempty"`
+	BinaryID            *string        `json:"binary,omitempty"         yaml:"binary,omitempty"`
+	DiskSize            string         `json:"disk_size,omitempty"      yaml:"disk_size,omitempty"`
+	RequestedGuestIP    *string        `json:"guest_ip,omitempty"       yaml:"guest_ip,omitempty"`
+	SkipCINetworkConfig bool           `json:"skip_ci_network_config"   yaml:"skip_ci_network_config"`
+	BootArgs            string         `json:"boot_args,omitempty"      yaml:"boot_args,omitempty"`
+	LSMFlags            string         `json:"lsm_flags,omitempty"      yaml:"lsm_flags,omitempty"`
+	NetworkID           *string        `json:"network,omitempty"        yaml:"network,omitempty"`
+	RequestedGuestMAC   *string        `json:"guest_mac,omitempty"      yaml:"guest_mac,omitempty"`
 	// CustomCloudInitConfig is a file path to a custom cloud-init user-data config.
 	CustomCloudInitConfig *string  `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
 	CloudInitMode         *string  `json:"cloud_init_mode,omitempty"          yaml:"cloud_init_mode,omitempty"`
@@ -65,7 +65,7 @@ type VMCreateInput struct {
 	Atomic                bool     `json:"atomic"                             yaml:"atomic"`
 	Volumes               []string `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
 	VsockPort             *int     `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
-	Writeback             *bool    `json:"writeback,omitempty"                 yaml:"writeback,omitempty"`
+	Writeback             *bool    `json:"writeback,omitempty"                yaml:"writeback,omitempty"`
 }
 
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().

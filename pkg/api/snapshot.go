@@ -68,7 +68,15 @@ func (op *Operation) SnapshotCreate(
 
 	// 2. Enrich VM with needed relations
 	emitProgress(onProgress, "enrich", "running", "Enriching VM info...")
-	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vmItem}, "kernel", "image", "binary", "network", "vsock"); err != nil {
+	if err := op.Enr.EnrichVM(
+		ctx,
+		[]*model.VMItem{vmItem},
+		"kernel",
+		"image",
+		"binary",
+		"network",
+		"vsock",
+	); err != nil {
 		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
 			"failed to enrich VM with relations", err)
 	}
@@ -518,10 +526,17 @@ func (op *Operation) SnapshotRestore(
 						slog.Error("Failed to create provisioner backend for vsock injection",
 							"vm", name, "error", beErr)
 					} else {
-						if injErr := backend.InjectVsockAgent(ctx, agentBin, snap.ExtraConfig.VsockPort, snap.ExtraConfig.VsockToken); injErr != nil {
+						if injErr := backend.InjectVsockAgent(
+							ctx,
+							agentBin,
+							snap.ExtraConfig.VsockPort,
+							snap.ExtraConfig.VsockToken,
+						); injErr != nil {
 							slog.Error("Failed to inject vsock agent into restored rootfs",
 								"vm", name, "error", injErr)
-						} else if runErr := backend.Run(ctx); runErr != nil {
+						} else if runErr := backend.Run(
+							ctx,
+						); runErr != nil {
 							slog.Error("Failed to run provisioner for vsock agent injection",
 								"vm", name, "error", runErr)
 						}
@@ -593,7 +608,17 @@ func (op *Operation) SnapshotRestore(
 			if _, statErr := os.Stat(oldRootfsPath); os.IsNotExist(statErr) {
 				if mkdirErr := os.MkdirAll(oldVMDir, 0755); mkdirErr == nil {
 					if symlinkErr := os.Symlink(vmItem.RootfsPath, oldRootfsPath); symlinkErr != nil {
-						slog.Warn("failed to create rootfs symlink for snapshot restore", "vm", name, "from", oldRootfsPath, "to", vmItem.RootfsPath, "error", symlinkErr)
+						slog.Warn(
+							"failed to create rootfs symlink for snapshot restore",
+							"vm",
+							name,
+							"from",
+							oldRootfsPath,
+							"to",
+							vmItem.RootfsPath,
+							"error",
+							symlinkErr,
+						)
 					} else {
 						defer os.RemoveAll(oldVMDir)
 					}
