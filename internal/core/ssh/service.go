@@ -58,11 +58,17 @@ func (s *Service) BuildCommand(command string) []string {
 // so programs like htop that enable mouse tracking don't leave the terminal
 // in a broken state after the session exits.
 func (s *Service) InteractiveSession(ctx context.Context) error {
-	sshArgs := s.BuildCommand("")
 	path, err := exec.LookPath("ssh")
 	if err != nil {
 		return fmt.Errorf("ssh binary not found: %w", err)
 	}
+
+	// Build args and insert -o RequestTTY=yes before the destination
+	// (last element). Cannot append after the destination — SSH's getopt
+	// stops parsing options at the first non-option argument.
+	sshArgs := s.BuildCommand("")
+	dest := sshArgs[len(sshArgs)-1]
+	sshArgs = append(sshArgs[:len(sshArgs)-1], "-o", "RequestTTY=yes", dest)
 
 	err = system.RunInteractive(path, sshArgs[1:], []string{"MVM_SSH_CONNECTION=1"})
 	if err != nil {

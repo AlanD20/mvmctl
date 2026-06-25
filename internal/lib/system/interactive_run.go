@@ -17,9 +17,12 @@ import (
 const terminalReset = "\x1b[!p\x1b[?25h\x1b[0m"
 
 // RunInteractive runs an interactive subprocess with full terminal management.
-// It puts the local terminal in raw mode, runs the subprocess with
+// It saves the current terminal state, runs the subprocess with
 // stdin/stdout/stderr connected directly to the terminal, and restores the
 // terminal state (termios + DEC private modes) when the subprocess exits.
+//
+// The child process is responsible for managing raw/cooked terminal mode
+// itself; this function does not put the terminal in raw mode before launch.
 //
 // Signals (SIGINT, SIGTERM, SIGQUIT) are passed through to the subprocess
 // natively — Go's signal handlers discard them so the child can handle them.
@@ -28,7 +31,7 @@ const terminalReset = "\x1b[!p\x1b[?25h\x1b[0m"
 // exit. The caller should check for ExitError if they care about exit codes.
 func RunInteractive(path string, args []string, env []string) error {
 	// Save terminal state for restoration.
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	oldState, err := term.GetState(int(os.Stdin.Fd()))
 	if err != nil {
 		return err
 	}
