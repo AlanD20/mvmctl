@@ -627,6 +627,3 @@ func (op *Operation) HostCheckReadiness(ctx context.Context) *model.ProbeResult 
 	probe := &host.Probe{}
 	return probe.RunAll(ctx, hardware, limits, resources)
 }
-
-// --- Host helpers inlined from core/host/_host_info.go ---
-// (Go ignores files starting with _, so these were never compiled into the host package.)

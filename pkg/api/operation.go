@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cache"
@@ -184,4 +185,20 @@ func (op *Operation) resolveCIVersion(ctx context.Context) (string, error) {
 		return "", errs.New(errs.CodeBinaryNoCIVersion, "Installed firecracker binary has no CI version.")
 	}
 	return *defaultFC.CIVersion, nil
+}
+
+// vsockClient builds a vsock client for the given VM, returning nil and an
+// error if the vsock config is missing or the client cannot be created.
+// The error is returned only so callers can log a warning; a nil client means
+// guest-side vsock operations are unavailable for this VM.
+func (op *Operation) vsockClient(ctx context.Context, vm *model.VMItem) (*vsock.Client, error) {
+	cfg, err := op.Repos.Vsock.GetByVMID(ctx, vm.ID)
+	if err != nil || cfg == nil {
+		return nil, err
+	}
+	probeTimeout, err := op.Services.Config.GetDuration(ctx, "defaults.vm", "vsock_probe_timeout")
+	if err != nil || probeTimeout <= 0 {
+		probeTimeout = 5 * time.Second
+	}
+	return op.newVsockClient(ctx, cfg, probeTimeout, vm.Name)
 }

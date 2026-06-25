@@ -435,6 +435,26 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 	}
 }
 
+// RescanPCI triggers a PCI bus rescan inside the guest so that devices
+// hotplugged by the VMM are discovered by the kernel.
+func (c *Client) RescanPCI(ctx context.Context) error {
+	_, err := c.Exec(ctx, "echo 1 > /sys/bus/pci/rescan", "root", 10, nil, false)
+	return err
+}
+
+// RemoveHotpluggedPCIDevice removes the last non-root virtio block device from
+// the guest PCI bus. This is required before the host asks Firecracker to
+// hot-unplug the corresponding drive.
+func (c *Client) RemoveHotpluggedPCIDevice(ctx context.Context) error {
+	cmd := "last_dev=$(ls /sys/block | grep '^vd[b-z]' | sort | tail -1); " +
+		"if [ -n \"$last_dev\" ]; then " +
+		"bdf=$(basename \"$(readlink -f /sys/block/$last_dev/device/..)\"); " +
+		"echo 1 > /sys/bus/pci/devices/$bdf/remove; " +
+		"fi"
+	_, err := c.Exec(ctx, cmd, "root", 10, nil, false)
+	return err
+}
+
 // Teardown removes the vsock UDS socket file if it exists.
 // This is called during VM cleanup to ensure no stale socket remains.
 func (c *Client) Teardown(_ context.Context) error {

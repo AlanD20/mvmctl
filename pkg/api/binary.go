@@ -349,5 +349,3 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 	}, "")
 	return latest, nil
 }
-
-// Compile-time check
