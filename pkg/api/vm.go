@@ -1414,6 +1414,13 @@ func (op *Operation) VMAttachVolume(
 	if err != nil {
 		return errs.NotFound(errs.CodeVolumeNotFound, fmt.Sprintf("Volume '%s' not found", volumeName))
 	}
+	if vol.Status == model.VolumeStatusAttached {
+		return errs.New(
+			errs.CodeVMCreateFailed,
+			fmt.Sprintf("Volume '%s' is already attached", volumeName),
+			errs.WithClass(errs.ClassValidation),
+		)
+	}
 	// Check volume status.
 	// Shareable read-only volumes are always attachable regardless of status.
 	if vol.Status != model.VolumeStatusAvailable && !(vol.IsShareable && vol.IsReadOnly) {
@@ -1425,6 +1432,16 @@ func (op *Operation) VMAttachVolume(
 	}
 	// Hotplug on running VM
 	if vmItem.Status == model.VMStatusRunning {
+		if !vmItem.PCIEnabled {
+			return errs.New(
+				errs.CodeVMCreateFailed,
+				fmt.Sprintf(
+					"PCI is not enabled for VM '%s' — volume hotplug requires PCI access in the guest",
+					vmItem.Name,
+				),
+				errs.WithClass(errs.ClassValidation),
+			)
+		}
 		// Version gate: hotplug requires Firecracker v1.16+
 		if vmItem.BinaryID != "" {
 			bin, _ := op.Repos.Binary.Get(ctx, vmItem.BinaryID)
@@ -1455,6 +1472,17 @@ func (op *Operation) VMAttachVolume(
 				errs.CodeFirecrackerClientError,
 				fmt.Sprintf("Hotplug failed: %v", err),
 			)
+		}
+		client, err := op.vsockClient(ctx, vmItem)
+		if err != nil {
+			slog.Warn("vsock client not available for PCI rescan, device may not appear until reboot",
+				"vm", vmItem.Name, "volume", vol.Name, "error", err)
+		}
+		if client != nil {
+			if err := client.RescanPCI(ctx); err != nil {
+				slog.Warn("guest PCI rescan via vsock failed, device may not appear until reboot",
+					"vm", vmItem.Name, "volume", vol.Name, "error", err)
+			}
 		}
 	}
 	// VolumeController.Attach
@@ -1490,7 +1518,7 @@ func (op *Operation) VMAttachVolume(
 // DetachVolume detaches a volume from a VM.
 // - VMInput for identification (name, ID, IP, MAC)
 // - VolumeResolver for volume resolution
-// - Version gate + SSH PCI removal + Firecracker API for hot-unplug
+// - Version gate + vsock PCI removal + Firecracker API for hot-unplug
 // - VolumeController.detach + VM volume_ids update
 func (op *Operation) VMDetachVolume(
 	ctx context.Context,
@@ -1539,10 +1567,30 @@ func (op *Operation) VMDetachVolume(
 				}
 			}
 		}
+		client, err := op.vsockClient(ctx, vmItem)
+		if err != nil {
+			slog.Warn("vsock client not available for PCI device removal",
+				"vm", vmItem.Name, "volume", vol.Name, "error", err)
+		}
+		if client != nil {
+			if err := client.RemoveHotpluggedPCIDevice(ctx); err != nil {
+				slog.Warn("failed to remove PCI device from guest via sysfs",
+					"vm", vmItem.Name, "volume", vol.Name, "error", err)
+			}
+		}
+
 		// Attempt hot-unplug via Firecracker API.
 		ctrl := vm.NewController(vmItem, op.Repos.VM)
 		if err := ctrl.DetachVolume(ctx, vol.ID); err != nil {
 			slog.Warn("Hot-unplug failed for drive", "volume", vol.ID, "error", err)
+		}
+
+		// Post-detach PCI rescan so the guest kernel reclaims the device slot.
+		if client != nil {
+			if err := client.RescanPCI(ctx); err != nil {
+				slog.Warn("guest PCI rescan after hot-unplug failed",
+					"vm", vmItem.Name, "volume", vol.Name, "error", err)
+			}
 		}
 	}
 	// VolumeController.Detach

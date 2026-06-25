@@ -28,7 +28,7 @@ type SSHAPI interface {
 func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onProgress event.OnProgressCallback) error {
 	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.VM, op.Repos.Key)
 	if err != nil {
-		return newSSHError(err)
+		return errs.WrapMsg(errs.CodeSSHError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 	}
 	// Audit log.
 	op.AuditLog.LogOperation("vm.ssh", map[string]any{
@@ -67,11 +67,11 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onPr
 	if onProgress != nil && command != "" {
 		ch, streamErr := svc.StreamCommand(ctx, command)
 		if streamErr != nil {
-			return newSSHError(streamErr)
+			return errs.WrapMsg(errs.CodeSSHError, streamErr.Error(), streamErr, errs.WithClass(errs.ClassInternal))
 		}
 		for line := range ch {
 			if line.Err != nil {
-				return newSSHError(line.Err)
+				return errs.WrapMsg(errs.CodeSSHError, line.Err.Error(), line.Err, errs.WithClass(errs.ClassInternal))
 			}
 			onProgress(event.Progress{
 				Phase:   "ssh",
@@ -84,15 +84,11 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onPr
 	// Connect.
 	exitCode, err := svc.Connect(ctx, command, resolved.Cmd == nil)
 	if err != nil {
-		return newSSHError(err)
+		return errs.WrapMsg(errs.CodeSSHError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 	}
 	if exitCode != 0 {
-		return newSSHError(fmt.Errorf("SSH command failed with exit code %d", exitCode))
+		exitErr := fmt.Errorf("SSH command failed with exit code %d", exitCode)
+		return errs.WrapMsg(errs.CodeSSHError, exitErr.Error(), exitErr, errs.WithClass(errs.ClassInternal))
 	}
 	return nil
-}
-
-// newSSHError wraps any error as a DomainError with "ssh.failed" code.
-func newSSHError(err error) error {
-	return errs.WrapMsg(errs.CodeSSHError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 }

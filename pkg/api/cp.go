@@ -193,6 +193,3 @@ func (op *Operation) newVsockClient(
 	}
 	return client, nil
 }
-
-// Compile-time checks ensure interfaces are satisfied.
-var _ CPAPI = (*Operation)(nil)
