@@ -92,14 +92,15 @@ Keep 22,000 lines with shared DB, pervasive skipping, and per-domain serial exec
 - `COVERAGE_MATRIX.md` replaced by `go test -coverprofile` + machine-readable L2 scenario manifest
 - `scripts/run_tests.py` domain-looping replaced by `pytest tests/e2e/`
 
-## Ripple Effects on Existing Docs (Phase 4 ✅)
+## Related Documents
 
-| Doc | What Changed |
-|-----|-------------|
-| `HOW_AGENTS_WRITE_SYSTEM_TESTS.md` | Becomes the comprehensive reference: L0/L1/L2 definitions, decision tree, quick-reference table, runner VM fixture pattern, migration phases |
-| `HOW_AGENTS_WRITE_UNIT_TESTS.md` | Add section on L1 fast pre-filter tests (in-memory SQLite, temp dirs) |
-| `HOW_AGENTS_RUN_SYSTEM_TESTS.md` | Per-domain execution replaced with runner-VM execution (`pytest tests/e2e/`) |
-| `RC_QA.md` | Release gates: "system tests per domain" → "e2e tests in runner VM" |
-| `STANDARDS.md` §12 | Updated to describe three-level architecture |
-| `COVERAGE_MATRIX.md` | Deleted. Replaced by generated coverage reports |
-| `AGENTS.md` | `engineer` owns L0/L1 (Go), `qa-engineer` owns L2 (Python runner VM) |
+| Doc | Purpose |
+|-----|---------|
+| `docs/system-test-architecture.md` | **Primary implementation reference** — Three-tier orchestration, provisioning flow, fixture scoping, known-limitation patterns, per-file compliance checklist. Supersedes `DRAFT-system-test-architecture.md`. |
+| `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` | L0/L1/L2 definitions, decision tree, quick-reference table, runner VM fixture pattern, migration phases. |
+| `docs/development/HOW_AGENTS_WRITE_UNIT_TESTS.md` | L1 fast pre-filter tests (in-memory SQLite, temp dirs). |
+| `docs/development/HOW_AGENTS_RUN_SYSTEM_TESTS.md` | Execution plan for running system tests. |
+| `RC_QA.md` | Release gates: "L2 tests in runner VM". |
+| `STANDARDS.md` §12 | Three-level architecture description. |
+| `tests/system/COVERAGE_MATRIX.md` | Coverage tracking. |
+| `AGENTS.md` | `engineer` owns L0/L1 (Go), `qa-engineer` owns L2 (Python runner VM). |

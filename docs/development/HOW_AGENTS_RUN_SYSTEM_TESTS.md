@@ -300,12 +300,10 @@ and related commands.
 ~/.local/bin/mvm vm ls --json
 
 # Check mvm version inside the outer VM
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner --cmd 'mvm --version'
+~/.local/bin/mvm vm exec rc-vm --user runner --timeout 10 -- 'mvm --version'
 
 # Check tests and assets are present
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner --cmd 'ls ~/tests/e2e/ /mnt/'
+~/.local/bin/mvm vm exec rc-vm --user runner --timeout 10 -- 'ls ~/tests/e2e/ /mnt/'
 ```
 
 ### 4.2 Run All E2E Tests (Release Gate)
@@ -318,39 +316,36 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
 | `MVM_BINARY` | `/usr/bin/mvm` | Tests use this to find the mvm binary |
 | `MVM_CACHE_DIR` | `$HOME/.cache/mvmctl` | Test framework sets this automatically via conftest.py |
 
-Run the full e2e suite as a single non-interactive SSH command. The host sends one command,
+Run the full e2e suite as a single non-interactive command. The host sends one command via vsock,
 rc-vm executes all tests against nested VMs:
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner --timeout 600 --cmd \
+  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
   "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
   python3 -m pytest --timeout 300 \
   tests/e2e/ --tb=short -q"
 ```
 
 Note: The `--timeout 300` is pytest's per-test timeout (some VM tests take 5+
-minutes). The `--timeout 600` on `mvm ssh` is the SSH command timeout.
+minutes). The `--timeout 600` on `mvm vm exec` is the vsock command timeout.
 
 ### 4.3 Run a Single Test File
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner --timeout 600 --cmd \
+  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
   "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
   python3 -m pytest --timeout 300 \
-   tests/e2e/network/test_network.py --tb=short -q"
+  tests/e2e/network/test_network.py --tb=short -q"
 ```
 
 ### 4.4 Interactive Session (Debugging)
 
-SSH in interactively to debug failures:
+Open a shell inside rc-vm to debug failures:
 
 ```bash
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner
-
-# Inside rc-vm:
+mvm vm exec rc-vm --user runner
 cd ~
 MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
   python3 -m pytest --timeout 300 -x tests/e2e/ --tb=long
@@ -481,7 +476,7 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
 
 # System tests (inside rc-vm, single e2e run)
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner --timeout 600 --cmd \
+  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
   "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
   python3 -m pytest --timeout 300 \
   tests/e2e/ --tb=short -q" \

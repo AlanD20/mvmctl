@@ -102,7 +102,7 @@ ARCH_PACKAGES = [
 ]
 
 TEST_IMAGES = [
-    "alpine:3.21",
+    "alpine:3.23",
     "ubuntu-minimal:24.04",
     "ubuntu:24.04",
     "archlinux",

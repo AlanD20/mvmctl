@@ -9,82 +9,68 @@ Verifies nftables firewall backend end-to-end:
 
 Follows Option C verification: parses nft output for specific rule patterns
 rather than relying on returncode-only assertions.
+
+Migrated from tests/e2e/network/test_nftables.py.
+
+VIOLATIONS REMOVED:
+  - Module-level pytest.skip() if nftables unavailable → pytest.fail() inside tests
+  - _check_native_nftables() ran subprocess on HOST → runs inside test VM
+  - _run_nft() called subprocess.run(["sudo", "-n", "nft", ...]) on HOST → runs inside VM
+  - All nft/iptables commands run inside the test VM via _guest_run
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 import uuid
 from typing import Any
 
 import pytest
 
-from tests.system.conftest import (
-    _run_mvm,
-    _unique_subnet,
-    ensure_vm_deps,
-    wait_for_ssh,
-)
+from tests.system.conftest import _guest_run, _run_mvm, _unique_subnet, ensure_vm_deps, wait_for_ssh
 
 pytestmark = [
     pytest.mark.system,
     pytest.mark.requires_kvm,
     pytest.mark.slow,
-    pytest.mark.serial,
     pytest.mark.domain_network,
 ]
 
 
-def _check_native_nftables() -> bool:
-    """Return True if the system supports native nftables (not iptables-nft)."""
-    import subprocess as _subprocess
+# ============================================================================
+# Helpers — ALL nft commands run INSIDE the test VM
+# ============================================================================
 
-    result = _subprocess.run(
-        [
-            "sudo",
-            "-n",
-            "nft",
-            "-c",
-            "add",
-            "rule",
-            "ip",
-            "filter",
-            "FORWARD",
-            "accept",
-        ],
-        capture_output=True,
-        text=True,
+
+def _require_native_nftables(runner_vm: str) -> None:
+    """Fail the test if the test VM does not support native nftables.
+
+    Tests whether ``nft -c`` succeeds for an ``ip filter FORWARD`` rule.
+    If it fails, the system only supports iptables-nft which lacks direct
+    nft rule verification.
+    """
+    result = _guest_run(
+        runner_vm,
+        "sudo -n nft -c 'add rule ip filter FORWARD accept'",
+        check=False,
         timeout=15,
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        pytest.fail(
+            "Native nftables not available (system uses iptables-nft). "
+            "Cannot run nftables-specific tests."
+        )
 
 
-if not _check_native_nftables():
-    # Skip-reason: This module requires native nftables (not iptables-nft
-    # compatibility layer). The _check_native_nftables() helper tests whether
-    # ``nft -c`` succeeds for an ``ip filter FORWARD`` rule — if it fails,
-    # the system only supports iptables-nft which lacks direct nft rule
-    # verification. To run unconditionally, the test would need to parse
-    # compatibility-layer output or switch to iptables-equivalent assertions.
-    pytest.skip(
-        "Native nftables not available (system uses iptables-nft)",
-        allow_module_level=True,
-    )
+def _run_nft(runner_vm: str, *args: str) -> Any:
+    """Run a privileged nft command inside the test VM."""
+    from shlex import quote as _q
+
+    cmd_str = "sudo -n nft " + " ".join(_q(str(a)) for a in args)
+    return _guest_run(runner_vm, cmd_str, timeout=15)
 
 
-# ============================================================================
-# Helpers
-# ============================================================================
-
-
-def _run_nft(*args: str) -> subprocess.CompletedProcess[str]:
-    """Run a privileged nft command via sudo -n."""
-    cmd = ["sudo", "-n", "nft", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-
-
-def _nft_chain_output(chain: str) -> str:
+def _nft_chain_output(runner_vm: str, chain: str) -> str:
     """Return full text output of ``nft list chain ip <table> <chain>``.
 
     MVM chains are now created in system tables rather than a separate
@@ -101,19 +87,19 @@ def _nft_chain_output(chain: str) -> str:
         "MVM-NOCLOUDNET-INPUT": "filter",
     }
     table = _CHAIN_TABLE.get(chain, "filter")
-    result = _run_nft("list", "chain", "ip", table, chain)
+    result = _run_nft(runner_vm, "list", "chain", "ip", table, chain)
     if result.returncode != 0:
         return ""
     return result.stdout
 
 
-def _nft_chain_rule_count(chain: str) -> int:
+def _nft_chain_rule_count(runner_vm: str, chain: str) -> int:
     """Count the number of active rules in an nftables chain.
 
     Skips the table/chain header lines and closing brace.  A rule is any
     line that contains an action keyword (accept, masquerade, drop, etc.).
     """
-    output = _nft_chain_output(chain)
+    output = _nft_chain_output(runner_vm, chain)
     if not output:
         return 0
     count = 0
@@ -137,9 +123,9 @@ def _nft_chain_rule_count(chain: str) -> int:
     return count
 
 
-def _nft_has_rule_with(chain: str, *keywords: str) -> bool:
+def _nft_has_rule_with(runner_vm: str, chain: str, *keywords: str) -> bool:
     """Check whether the given nftables chain has a rule containing ALL keywords."""
-    output = _nft_chain_output(chain)
+    output = _nft_chain_output(runner_vm, chain)
     if not output:
         return False
     for line in output.splitlines():
@@ -157,13 +143,17 @@ def _nft_has_rule_with(chain: str, *keywords: str) -> bool:
 class TestNFTablesFirewallBackend:
     """End-to-end verification of nftables firewall backend."""
 
+    @pytest.fixture(autouse=True)
+    def _ensure_nftables(self, runner_vm: str) -> None:
+        """Fail if native nftables not available in the test VM."""
+        _require_native_nftables(runner_vm)
+
     def test_nftables_end_to_end(
         # Rationale: Needs a real VM (30-120s). Full nftables lifecycle: set backend, create resources, SSH, verify rules, cleanup.
         self,
-        mvm_binary: str,
+        runner_vm: str,
         unique_vm_name: str,
         unique_network_name: str,
-        tmp_path: Any,
         timing_targets: dict[str, float],
     ) -> None:
         """Set nftables backend, create resources, verify rules, SSH in,
@@ -176,7 +166,7 @@ class TestNFTablesFirewallBackend:
 
         # ── Save original firewall_backend ────────────────────────────
         orig_result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "config",
             "get",
             "settings",
@@ -198,7 +188,7 @@ class TestNFTablesFirewallBackend:
             # Step 1: Set firewall_backend to nftables
             # ═════════════════════════════════════════════════════════
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "config",
                 "set",
                 "settings",
@@ -210,15 +200,15 @@ class TestNFTablesFirewallBackend:
             # Step 2: Create SSH key
             # ═════════════════════════════════════════════════════════
             _run_mvm(
-                mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+                runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
             )
-            _run_mvm(mvm_binary, "key", "default", key_name)
+            _run_mvm(runner_vm, "key", "default", key_name)
 
             # ═════════════════════════════════════════════════════════
             # Step 3: Create network
             # ═════════════════════════════════════════════════════════
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -229,7 +219,7 @@ class TestNFTablesFirewallBackend:
 
             # Verify network was created
             inspect_result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "inspect",
                 net_name,
@@ -246,11 +236,14 @@ class TestNFTablesFirewallBackend:
             # ═════════════════════════════════════════════════════════
             # Step 4: Verify nftables rules after network creation
             # ═════════════════════════════════════════════════════════
-            forward_after_net = _nft_chain_output("MVM-FORWARD")
-            postrouting_after_net = _nft_chain_output("MVM-POSTROUTING")
+            forward_after_net = _nft_chain_output(runner_vm, "MVM-FORWARD")
+            postrouting_after_net = _nft_chain_output(
+                runner_vm, "MVM-POSTROUTING"
+            )
 
             # Option C: Verify FORWARD rules mention the bridge
             assert _nft_has_rule_with(
+                runner_vm,
                 "MVM-FORWARD",
                 bridge,
                 "accept",
@@ -261,6 +254,7 @@ class TestNFTablesFirewallBackend:
 
             # Option C: Verify POSTROUTING has masquerade for the subnet
             assert _nft_has_rule_with(
+                runner_vm,
                 "MVM-POSTROUTING",
                 "masquerade",
             ), (
@@ -272,33 +266,36 @@ class TestNFTablesFirewallBackend:
             # Recorded AFTER network setup so bridge-level rules are
             # already established. VM-level (per-TAP) rules will be
             # added on top of this baseline.
-            forward_rules_before = _nft_chain_rule_count("MVM-FORWARD")
+            forward_rules_before = _nft_chain_rule_count(
+                runner_vm, "MVM-FORWARD"
+            )
 
             # ═════════════════════════════════════════════════════════
             # Step 5: Create VM with SSH key
             # ═════════════════════════════════════════════════════════
-            ensure_vm_deps(mvm_binary)
+            ensure_vm_deps(runner_vm)
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 net_name,
                 "--ssh-key",
                 key_name,
                 "--cloud-init-mode",
                 "inject",
-                "--no-console",
             )
 
             # Verify VM was created and is running
-            vms_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms_result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms: list[dict[str, Any]] = json.loads(vms_result.stdout)
             vm_info = next((v for v in vms if v["name"] == vm_name), None)
-            assert vm_info is not None, f"VM '{vm_name}' not found in listing"
+            assert vm_info is not None, (
+                f"VM '{vm_name}' not found in listing"
+            )
             assert vm_info["status"] == "running", (
                 f"VM '{vm_name}' status is {vm_info['status']}, expected 'running'"
             )
@@ -306,9 +303,13 @@ class TestNFTablesFirewallBackend:
             # ═════════════════════════════════════════════════════════
             # Step 6: Verify nftables rules after VM creation
             # ═════════════════════════════════════════════════════════
-            forward_after_vm = _nft_chain_output("MVM-FORWARD")
-            forward_rules_after_vm = _nft_chain_rule_count("MVM-FORWARD")
-            postrouting_after_vm = _nft_chain_output("MVM-POSTROUTING")
+            forward_after_vm = _nft_chain_output(runner_vm, "MVM-FORWARD")
+            forward_rules_after_vm = _nft_chain_rule_count(
+                runner_vm, "MVM-FORWARD"
+            )
+            postrouting_after_vm = _nft_chain_output(
+                runner_vm, "MVM-POSTROUTING"
+            )
 
             # Option C: Conntrack rules must still be present
             assert "ct state established,related accept" in forward_after_vm, (
@@ -317,7 +318,9 @@ class TestNFTablesFirewallBackend:
             )
 
             # Option C: Bridge-level accept rules must still be present
-            assert _nft_has_rule_with("MVM-FORWARD", bridge, "accept"), (
+            assert _nft_has_rule_with(
+                runner_vm, "MVM-FORWARD", bridge, "accept"
+            ), (
                 f"Bridge '{bridge}' accept rule missing in MVM-FORWARD "
                 f"after VM creation.\nOutput:\n{forward_after_vm}"
             )
@@ -331,9 +334,11 @@ class TestNFTablesFirewallBackend:
             # ═════════════════════════════════════════════════════════
             # Step 7: SSH into the VM and verify echo
             # ═════════════════════════════════════════════════════════
-            ssh_timeout = max(timing_targets.get("alpine:3.21", 15.0), 30.0)
+            ssh_timeout = max(
+                timing_targets.get("alpine:3.23", 15.0), 30.0
+            )
             ssh_available = wait_for_ssh(
-                mvm_binary,
+                runner_vm,
                 vm_name,
                 "root",
                 ssh_timeout,
@@ -343,7 +348,7 @@ class TestNFTablesFirewallBackend:
             )
 
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "ssh",
                 vm_name,
                 "--cmd",
@@ -362,9 +367,11 @@ class TestNFTablesFirewallBackend:
             gateway = vm_info.get("network_gateway") or net_data.get(
                 "network", net_data
             ).get("ipv4_gateway", "")
-            assert gateway, "Could not determine gateway IP for connectivity test"
+            assert gateway, (
+                "Could not determine gateway IP for connectivity test"
+            )
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "ssh",
                 vm_name,
                 "--cmd",
@@ -387,10 +394,10 @@ class TestNFTablesFirewallBackend:
             # ═════════════════════════════════════════════════════════
             # Step 9: Remove the VM
             # ═════════════════════════════════════════════════════════
-            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force")
+            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force")
 
             # Option C: Verify VM is gone from listing
-            vms_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            vms_result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(vms_result.stdout)
             assert not any(v["name"] == vm_name for v in vms), (
                 f"VM '{vm_name}' should be removed from listing"
@@ -399,9 +406,13 @@ class TestNFTablesFirewallBackend:
             # ═════════════════════════════════════════════════════════
             # Step 10: Verify nftables rule cleanup after VM removal
             # ═════════════════════════════════════════════════════════
-            forward_after_rm = _nft_chain_output("MVM-FORWARD")
-            forward_rules_after_rm = _nft_chain_rule_count("MVM-FORWARD")
-            postrouting_after_rm = _nft_chain_output("MVM-POSTROUTING")
+            forward_after_rm = _nft_chain_output(runner_vm, "MVM-FORWARD")
+            forward_rules_after_rm = _nft_chain_rule_count(
+                runner_vm, "MVM-FORWARD"
+            )
+            postrouting_after_rm = _nft_chain_output(
+                runner_vm, "MVM-POSTROUTING"
+            )
 
             # Conntrack rules should still be present
             assert "ct state established,related accept" in forward_after_rm, (
@@ -411,6 +422,7 @@ class TestNFTablesFirewallBackend:
 
             # Bridge-level rules should still remain
             assert _nft_has_rule_with(
+                runner_vm,
                 "MVM-FORWARD",
                 bridge,
                 "accept",
@@ -428,20 +440,20 @@ class TestNFTablesFirewallBackend:
             # ═════════════════════════════════════════════════════════
             # Step 11: Remove the network
             # ═════════════════════════════════════════════════════════
-            _run_mvm(mvm_binary, "network", "rm", net_name)
+            _run_mvm(runner_vm, "network", "rm", net_name)
 
         finally:
             # ═══════════════════════════════════════════════════════
             # Cleanup: remove any leftover resources
             # ═══════════════════════════════════════════════════════
-            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
 
             # Reset firewall_backend to its original value
             if orig_fw:
                 _run_mvm(
-                    mvm_binary,
+                    runner_vm,
                     "config",
                     "set",
                     "settings",
@@ -451,7 +463,7 @@ class TestNFTablesFirewallBackend:
                 )
             else:
                 _run_mvm(
-                    mvm_binary,
+                    runner_vm,
                     "config",
                     "reset",
                     "settings",
@@ -461,10 +473,10 @@ class TestNFTablesFirewallBackend:
 
 
 @pytest.fixture(scope="class")
-def _nftables_env(mvm_binary: str):
+def _nftables_env(runner_vm: str):
     """Set firewall backend to nftables and restore on class teardown."""
     orig_result = _run_mvm(
-        mvm_binary,
+        runner_vm,
         "config",
         "get",
         "settings",
@@ -478,7 +490,7 @@ def _nftables_env(mvm_binary: str):
                 orig_fw = line.split("=", 1)[1].strip()
                 break
     _run_mvm(
-        mvm_binary,
+        runner_vm,
         "config",
         "set",
         "settings",
@@ -487,7 +499,7 @@ def _nftables_env(mvm_binary: str):
     )
     yield orig_fw
     _run_mvm(
-        mvm_binary,
+        runner_vm,
         "config",
         "set",
         "settings",
@@ -510,27 +522,31 @@ class TestAtomicRuleSync:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.requires_network,
-        pytest.mark.serial,
         pytest.mark.domain_network,
     ]
+
+    @pytest.fixture(autouse=True)
+    def _ensure_nftables(self, runner_vm: str) -> None:
+        """Fail if native nftables not available in the test VM."""
+        _require_native_nftables(runner_vm)
 
     def test_conntrack_rule_present_after_sync(
         # Rationale: Uses module_network fixture. Verifies conntrack rules in MVM-FORWARD and MVM-NOCLOUDNET-INPUT.
         self,
-        mvm_binary: str,
+        runner_vm: str,
         module_network: str,
     ) -> None:
         """Verify conntrack established/related accept rule exists after sync."""
-        _run_mvm(mvm_binary, "network", "sync")
+        _run_mvm(runner_vm, "network", "sync")
 
         # Option C: check MVM-FORWARD chain
-        output = _nft_chain_output("MVM-FORWARD")
+        output = _nft_chain_output(runner_vm, "MVM-FORWARD")
         assert "ct state established,related accept" in output, (
             f"Missing conntrack rule in MVM-FORWARD after sync:\n{output}"
         )
 
         # Option C: check MVM-NOCLOUDNET-INPUT chain
-        nocloud_output = _nft_chain_output("MVM-NOCLOUDNET-INPUT")
+        nocloud_output = _nft_chain_output(runner_vm, "MVM-NOCLOUDNET-INPUT")
         assert "ct state established,related accept" in nocloud_output, (
             f"Missing conntrack rule in MVM-NOCLOUDNET-INPUT:\n{nocloud_output}"
         )
@@ -538,7 +554,7 @@ class TestAtomicRuleSync:
     def test_sync_idempotent_no_rule_duplication(
         # Rationale: Uses module_network fixture. Verifies nftables rule count is stable across syncs.
         self,
-        mvm_binary: str,
+        runner_vm: str,
         module_network: str,
     ) -> None:
         """Sync twice — nftables rule count must not increase.
@@ -548,12 +564,12 @@ class TestAtomicRuleSync:
         exactly the same set of rules (no duplicates).
         """
         # First sync — establish baseline
-        _run_mvm(mvm_binary, "network", "sync")
-        count_first = _nft_chain_rule_count("MVM-FORWARD")
+        _run_mvm(runner_vm, "network", "sync")
+        count_first = _nft_chain_rule_count(runner_vm, "MVM-FORWARD")
 
         # Second sync — should not add duplicates
-        _run_mvm(mvm_binary, "network", "sync")
-        count_second = _nft_chain_rule_count("MVM-FORWARD")
+        _run_mvm(runner_vm, "network", "sync")
+        count_second = _nft_chain_rule_count(runner_vm, "MVM-FORWARD")
 
         assert count_second == count_first, (
             f"nftables rule count changed after second sync: "
@@ -567,7 +583,7 @@ class TestAtomicRuleSync:
         # during network creation.  Verifies MASQUERADE rule persists and
         # bridge is referenced in FORWARD after sync.
         self,
-        mvm_binary: str,
+        runner_vm: str,
         unique_network_name: str,
     ) -> None:
         """MASQUERADE rule in MVM-POSTROUTING persists after sync."""
@@ -575,7 +591,7 @@ class TestAtomicRuleSync:
         # nftables, so bridge-level nftables rules are created.
         net_name = unique_network_name
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -584,16 +600,18 @@ class TestAtomicRuleSync:
             "--non-interactive",
         )
         try:
-            _run_mvm(mvm_binary, "network", "sync")
+            _run_mvm(runner_vm, "network", "sync")
 
             # Option C: verify MASQUERADE rule in POSTROUTING
-            assert _nft_has_rule_with("MVM-POSTROUTING", "masquerade"), (
+            assert _nft_has_rule_with(
+                runner_vm, "MVM-POSTROUTING", "masquerade"
+            ), (
                 "MASQUERADE rule missing in MVM-POSTROUTING after sync"
             )
 
             # Also verify the bridge is referenced in FORWARD
             inspect = _run_mvm(
-                mvm_binary, "network", "inspect", net_name, "--json"
+                runner_vm, "network", "inspect", net_name, "--json"
             )
             net_data = json.loads(inspect.stdout)
             bridge = net_data.get("network", net_data).get(
@@ -602,19 +620,21 @@ class TestAtomicRuleSync:
             assert isinstance(bridge, str) and bridge, (
                 f"Expected non-empty bridge name, got: {bridge!r}"
             )
-            assert _nft_has_rule_with("MVM-FORWARD", bridge, "accept"), (
+            assert _nft_has_rule_with(
+                runner_vm, "MVM-FORWARD", bridge, "accept"
+            ), (
                 f"Bridge {bridge} accept rule missing in MVM-FORWARD after sync"
             )
         finally:
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-            import json as _json
-
-            result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            result = _run_mvm(
+                runner_vm, "network", "ls", "--json", check=False
+            )
             if result.returncode == 0:
-                nets = _json.loads(result.stdout)
+                nets = json.loads(result.stdout)
                 if not any(n.get("is_default") for n in nets) and nets:
                     _run_mvm(
-                        mvm_binary,
+                        runner_vm,
                         "network",
                         "default",
                         nets[0]["name"],

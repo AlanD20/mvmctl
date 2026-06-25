@@ -37,7 +37,7 @@ Host (Go + KVM only)
   ├── Additional steps wire up caches + DB
   ├── Snapshot for reuse
   │
-  └── Tests run via: mvm ssh rc-vm --cmd "pytest tests/e2e/..."
+  └── Tests run via: mvm vm exec rc-vm -- "pytest tests/e2e/..."
 ```
 
 ---
@@ -135,7 +135,7 @@ This creates the VM `rc-vm` with:
 
 ## 6. Post-Provisioning: Import Assets + Init DB
 
-`rc-env.yaml` copies all assets into `/mnt/` inside the VM. The `import cached assets` exec step points `MVM_ASSET_MIRROR` and `MVM_TEMP_DIR` to `/mnt/`, runs `mvm kernel pull`/`image pull`/`bin pull`/`init`, then sets env vars in `.bashrc`. Everything is wired up by `mvm env apply rc-env.yaml` — no manual `mvm ssh` needed.
+`rc-env.yaml` copies all assets into `/mnt/` inside the VM. The `import cached assets` exec step points `MVM_ASSET_MIRROR` and `MVM_TEMP_DIR` to `/mnt/`, runs `mvm kernel pull`/`image pull`/`bin pull`/`init`, then sets env vars in `.bashrc`. Everything is wired up by `mvm env apply rc-env.yaml`.
 
 ---
 
@@ -161,11 +161,11 @@ mvm snapshot restore rc-vm-snap rc-vm --resume
 
 ```bash
 # One file
-mvm ssh rc-vm -u runner --cmd \
+mvm vm exec rc-vm --user runner --timeout 600 -- \
   "cd ~ && python3 -m pytest tests/e2e/volume/test_volume.py -xvs"
 
 # All L2 tests
-mvm ssh rc-vm -u runner --cmd \
+mvm vm exec rc-vm --user runner --timeout 600 -- \
   "cd ~ && python3 -m pytest tests/e2e/ -x --junitxml=results.xml"
 
 # Collect results
@@ -182,11 +182,11 @@ go test ./... -count=1
 Multiple runner VMs from the same snapshot run different suites:
 
 ```bash
-mvm ssh rc-vm-1 -u runner --cmd \
+mvm vm exec rc-vm-1 --user runner --timeout 600 -- \
   "cd ~ && python3 -m pytest tests/e2e/volume/ tests/e2e/network/ -x"
-mvm ssh rc-vm-2 -u runner --cmd \
+mvm vm exec rc-vm-2 --user runner --timeout 600 -- \
   "cd ~ && python3 -m pytest tests/e2e/vm/ -x"
-mvm ssh rc-vm-3 -u runner --cmd \
+mvm vm exec rc-vm-3 --user runner --timeout 600 -- \
   "cd ~ && python3 -m pytest tests/e2e/ --ignore=tests/e2e/volume/ --ignore=tests/e2e/network/ --ignore=tests/e2e/vm/ -x"
 ```
 
@@ -217,10 +217,10 @@ echo "Krnl:  $(ls /tmp/mvmctl/vmlinux-7.0.11* 2>/dev/null)"
 echo "Mrkr:  $(ls /tmp/mvmctl/*.marker 2>/dev/null)"
 
 # Runner VM
-echo "Alive: $(mvm ssh rc-vm -u runner --cmd 'echo OK' 2>/dev/null || echo DEAD)"
-echo "KVM:   $(mvm ssh rc-vm -u runner --cmd 'test -c /dev/kvm && echo OK' 2>/dev/null)"
-echo "Bin:   $(mvm ssh rc-vm -u runner --cmd 'mvm --version' 2>/dev/null)"
-echo "Py:    $(mvm ssh rc-vm -u runner --cmd 'python3 -m pytest --version' 2>/dev/null | head -1)"
-echo "Imgs:  $(mvm ssh rc-vm -u runner --cmd 'mvm image ls --json | python3 -c \"import sys,json; print(len([i for i in json.load(sys.stdin) if i.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
-echo "Krnls: $(mvm ssh rc-vm -u runner --cmd 'mvm kernel ls --json | python3 -c \"import sys,json; print(len([k for k in json.load(sys.stdin) if k.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
+echo "Alive: $(mvm vm exec rc-vm --user runner --timeout 10 -- 'echo OK' 2>/dev/null || echo DEAD)"
+echo "KVM:   $(mvm vm exec rc-vm --user runner --timeout 10 -- 'test -c /dev/kvm && echo OK' 2>/dev/null)"
+echo "Bin:   $(mvm vm exec rc-vm --user runner --timeout 10 -- 'mvm --version' 2>/dev/null)"
+echo "Py:    $(mvm vm exec rc-vm --user runner --timeout 10 -- 'python3 -m pytest --version' 2>/dev/null | head -1)"
+echo "Imgs:  $(mvm vm exec rc-vm --user runner --timeout 30 -- 'mvm image ls --json | python3 -c \"import sys,json; print(len([i for i in json.load(sys.stdin) if i.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
+echo "Krnls: $(mvm vm exec rc-vm --user runner --timeout 30 -- 'mvm kernel ls --json | python3 -c \"import sys,json; print(len([k for k in json.load(sys.stdin) if k.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
 ```
