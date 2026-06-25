@@ -1,0 +1,26 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "architect": {
+      "description": "Supervises project scope implementation and enforces architectural standards",
+      "mode": "all",
+      "temperature": 0.65,
+      "prompt": "{file:./agent/architect.md}",
+      "model": "opencode-go/kimi-k2.7-code"
+    },
+    "engineer": {
+      "description": "Handles implementation of features and business logic",
+      "mode": "primary",
+      "temperature": 0.2,
+      "prompt": "{file:./agent/engineer.md}",
+      "model": "opencode-go/deepseek-v4-flash"
+    },
+    "qa": {
+      "description": "Quality assurance - reviews code for standards, performance, and correctness",
+      "mode": "subagent",
+      "temperature": 0.2,
+      "prompt": "{file:./agent/qa-engineer.md}",
+      "model": "opencode-go/deepseek-v4-flash"
+    }
+  }
+}
