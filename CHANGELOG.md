@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`mvm ssh --timeout`** and **`mvm vm exec --timeout`** are now **connect/probe timeouts only**. Once connected, commands run until completion or Ctrl-C instead of being killed after the timeout duration. See [ADR-0013](docs/adr/0013-user-facing-timeouts-are-connect-timeouts.md).
+
 ### Added
 
 #### CLI Commands (16 top-level groups, 65+ subcommands)

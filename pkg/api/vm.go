@@ -1630,12 +1630,17 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 		return nil, err
 	}
 	// Read probe timeout from config (defaults.vm.vsock_probe_timeout in constants.go).
+	// input.Timeout overrides the probe timeout when set (> 0). The command itself
+	// runs with no absolute timeout — only context cancellation (e.g. Ctrl-C) stops it.
 	probeTimeout, err := op.Services.Config.GetDuration(ctx, "defaults.vm", "vsock_probe_timeout")
 	if err != nil || probeTimeout <= 0 {
 		return nil, errs.New(
 			errs.CodeInternal,
 			"vsock_probe_timeout not configured — check defaults.vm.vsock_probe_timeout",
 		)
+	}
+	if input.Timeout > 0 {
+		probeTimeout = time.Duration(input.Timeout) * time.Second
 	}
 	client, err := op.newVsockClient(ctx, resolved.VsockItem, probeTimeout, resolved.VM.Name)
 	if err != nil {
@@ -1657,7 +1662,9 @@ func (op *Operation) VMExec(ctx context.Context, input inputs.VMExecInput) (*res
 	if user == "" {
 		user, _ = op.Services.Config.GetString(ctx, "defaults.vm", "vsock_user")
 	}
-	result, err := client.Exec(ctx, input.Command, user, input.Timeout, input.Env, input.NoSync)
+	// Pass 0 for command timeout — the probe timeout is handled by the client
+	// during connect; the command itself runs with no absolute timeout.
+	result, err := client.Exec(ctx, input.Command, user, 0, input.Env, input.NoSync)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeVsockExecFailed,
