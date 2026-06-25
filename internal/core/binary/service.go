@@ -110,7 +110,7 @@ func (s *Service) ListRemote(ctx context.Context, limit int) ([]model.VersionInf
 	}
 
 	sort.Slice(versions, func(i, j int) bool {
-		return version.SemverGreater(versions[i].Version, versions[j].Version)
+		return version.Compare(versions[i].Version, versions[j].Version) > 0
 	})
 
 	return versions, nil

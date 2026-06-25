@@ -331,7 +331,7 @@ func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem
 	}
 	// PEP 440 version sorting: newest first
 	sort.Slice(firecrackerBins, func(i, j int) bool {
-		return version.CompareVersions(firecrackerBins[i].Version, firecrackerBins[j].Version) > 0
+		return version.Compare(firecrackerBins[i].Version, firecrackerBins[j].Version) > 0
 	})
 	latest := firecrackerBins[0]
 	ctrl := binary.NewController(latest, op.Repos.Binary)

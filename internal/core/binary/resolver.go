@@ -126,7 +126,7 @@ func (r *Resolver) ByTypeLatest(ctx context.Context, typ string) (*model.BinaryI
 
 	// Sort by semver descending (newest first)
 	sort.Slice(matches, func(i, j int) bool {
-		return version.SemverGreater(matches[i].Version, matches[j].Version)
+		return version.Compare(matches[i].Version, matches[j].Version) > 0
 	})
 	enriched := r.enrich(ctx, matches)
 	return enriched[0], nil

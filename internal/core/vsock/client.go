@@ -374,7 +374,7 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 
 			// After a successful upgrade attempt, check if the new agent
 			// version is at least as new as the host binary.
-			if c.upgradeInProgress && !version.SemverGreater(hostVersion, agentVersion) {
+			if c.upgradeInProgress && version.Compare(hostVersion, agentVersion) <= 0 {
 				c.upgradeInProgress = false
 				if c.OnUpgradeCompleted != nil {
 					c.OnUpgradeCompleted(ctx, agentVersion)
@@ -385,7 +385,7 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 			}
 
 			// If the host binary is newer than the guest agent, trigger upgrade.
-			if version.SemverGreater(hostVersion, agentVersion) {
+			if version.Compare(hostVersion, agentVersion) > 0 {
 				conn.Close()
 				if c.upgradeInProgress {
 					return nil, fmt.Errorf("upgrade already in progress for VM %s", c.VmName)
