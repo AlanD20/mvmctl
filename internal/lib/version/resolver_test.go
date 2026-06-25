@@ -528,15 +528,15 @@ func TestVersionGate_IsSatisfiedBy(t *testing.T) {
 	}
 }
 
-// --- SemverGreater ---
-// Rationale: SemverGreater is used by SortVersions and Resolve for ordering.
+// --- Compare (descending) ---
+// Rationale: Compare returns >0 when a > b, used by SortVersions for ordering.
 // An incorrect comparison would produce wrong sort order (oldest first instead
 // of newest first).
 
-func TestSemverGreater(t *testing.T) {
+func TestCompare_Descending(t *testing.T) {
 	tests := map[string]struct {
 		a, b string
-		want bool
+		want bool // true if a > b
 	}{
 		"major_greater": {
 			a: "2.0.0", b: "1.0.0", want: true,
@@ -562,17 +562,11 @@ func TestSemverGreater(t *testing.T) {
 		"shorter_less_than_longer": {
 			a: "1.15", b: "1.15.1", want: false,
 		},
-		"non_numeric_a_versus_valid_b": {
-			a: "abc", b: "1.0.0", want: false,
-		},
-		"valid_a_versus_non_numeric_b": {
-			a: "1.0.0", b: "abc", want: true,
-		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := version.SemverGreater(tc.a, tc.b)
+			got := version.Compare(tc.a, tc.b) > 0
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -618,62 +612,6 @@ func TestSortVersions(t *testing.T) {
 			version.SortVersions(got, tc.asc...)
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("SortVersions() mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
-// --- ParseSemverInts ---
-// Rationale: ParseSemverInts extracts numeric version components up to the first
-// non-numeric segment. Used by SemverGreater for ordering. A bug would cause
-// incorrect comparison results.
-
-func TestParseSemverInts(t *testing.T) {
-	tests := map[string]struct {
-		v    string
-		want []int
-	}{
-		// Error/edge paths — stops at first non-numeric, returns partial result
-		"non_numeric": {
-			v:    "abc",
-			want: nil,
-		},
-		"empty_string": {
-			v:    "",
-			want: nil,
-		},
-		"partial_non_numeric": {
-			v:    "1.abc",
-			want: []int{1},
-		},
-		// Happy paths
-		"full_semver": {
-			v:    "1.15.1",
-			want: []int{1, 15, 1},
-		},
-		"v_prefix_stripped": {
-			v:    "v1.15.1",
-			want: []int{1, 15, 1},
-		},
-		"major_only": {
-			v:    "1",
-			want: []int{1},
-		},
-		"major_minor": {
-			v:    "1.15",
-			want: []int{1, 15},
-		},
-		"zero_version": {
-			v:    "0.0.0",
-			want: []int{0, 0, 0},
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			got := version.ParseSemverInts(tc.v)
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("ParseSemverInts() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}

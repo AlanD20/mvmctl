@@ -295,45 +295,16 @@ func (g *VersionGate) IsSatisfiedBy(version, minimum string) bool {
 	return isAtLeast(vParts, mParts)
 }
 
-// --- Semver comparison helpers ---
-
-// SemverGreater returns true if version a is semantically greater than version b.
-func SemverGreater(a, b string) bool {
-	va := ParseSemverInts(a)
-	vb := ParseSemverInts(b)
-	for i := 0; i < len(va) && i < len(vb); i++ {
-		if va[i] != vb[i] {
-			return va[i] > vb[i]
-		}
-	}
-	return len(va) > len(vb)
-}
-
 // SortVersions sorts a slice of version strings in descending order (newest
 // first). Pass asc=true for ascending order.
 func SortVersions(versions []string, asc ...bool) {
 	ascending := len(asc) > 0 && asc[0]
 	sort.Slice(versions, func(i, j int) bool {
 		if ascending {
-			return SemverGreater(versions[j], versions[i])
+			return Compare(versions[j], versions[i]) > 0
 		}
-		return SemverGreater(versions[i], versions[j])
+		return Compare(versions[i], versions[j]) > 0
 	})
-}
-
-// ParseSemverInts splits a version string into numeric components for comparison.
-func ParseSemverInts(v string) []int {
-	clean := strings.TrimPrefix(v, "v")
-	parts := strings.Split(clean, ".")
-	var nums []int
-	for _, p := range parts {
-		n, err := strconv.Atoi(p)
-		if err != nil {
-			break
-		}
-		nums = append(nums, n)
-	}
-	return nums
 }
 
 // --- Version Validation & Extraction ---
