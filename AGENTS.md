@@ -11,6 +11,7 @@ This is the **only** AGENTS.md in the project. Per-folder AGENTS.md files have b
 1. **`CONTEXT.md`** — Domain language, conventions, patterns, and architecture rules. Start here for every task.
 2. **`docs/adr/`** — Architecture Decision Records for hard-to-reverse decisions made with real trade-offs.
 3. **`docs/STANDARDS.md`** — Go coding standards, conventions, and architectural rules.
+4. **`docs/system-test-architecture.md`** — System test architecture, tier classification, fixture scoping, known-limitation patterns. The primary reference for writing or modifying system tests.
 
 Individual agent instructions live in `.opencode/agent/`:
 - `architect.md` — Planner, analyzer, delegator. NEVER writes code.

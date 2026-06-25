@@ -9,31 +9,40 @@ Structure (top-to-bottom):
   - Non-destructive / read-only classes
   - State-modifying but self-cleaning classes
   - Destructive classes (force-rm, VM-dependent operations, bridge deletion)
+
+Migrated from tests/e2e/network/test_network.py.
+
+VIOLATIONS REMOVED:
+  - 17+ calls to subprocess.run(["sudo", "nft", ...]) on HOST → run inside VM
+  - subprocess.run(["sudo", "ip", "link", ...]) on HOST → run inside VM
+  - subprocess.run(["sudo", "iptables", ...]) on HOST → run inside VM
+  - subprocess.run(["ip", "link", "show", ...]) on HOST → run inside VM
+  - subprocess.run(["ip", "route", "show", "default"]) on HOST → run inside VM
+  - subprocess.run(["ip", "addr", "show", ...]) on HOST → run inside VM
+  - All helpers now take runner_vm and execute inside the test VM
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import subprocess
 import uuid
 from typing import Any
 
 import pytest
 
-from tests.system.conftest import _run_mvm, _unique_subnet, ensure_vm_deps
+from tests.system.conftest import _guest_run, _run_mvm, _unique_subnet, ensure_vm_deps
 
 pytestmark = [
     pytest.mark.system,
     pytest.mark.requires_network,
     pytest.mark.slow,
-    pytest.mark.serial,
     pytest.mark.domain_network,
 ]
 
 
 # ============================================================================
-# Helpers
+# Helpers — ALL commands run INSIDE the test VM via _guest_run
 # ============================================================================
 
 
@@ -55,7 +64,7 @@ def _compute_bridge_name(name: str) -> str:
     return f"{prefix}{name_truncated}-{short_hash}"
 
 
-def _get_firewall_backend(mvm_binary: str) -> str:
+def _get_firewall_backend(runner_vm: str) -> str:
     """Determine the current firewall backend (nftables or iptables).
 
     Returns ``"nftables"`` as the default (the hardcoded default in
@@ -63,7 +72,7 @@ def _get_firewall_backend(mvm_binary: str) -> str:
     config command fails.
     """
     backend_result = _run_mvm(
-        mvm_binary,
+        runner_vm,
         "config",
         "get",
         "settings",
@@ -79,27 +88,26 @@ def _get_firewall_backend(mvm_binary: str) -> str:
     return "nftables"
 
 
-def _assert_bridge_exists(bridge: str) -> None:
-    """Assert a bridge interface exists via ``ip link show``."""
-    result = subprocess.run(
-        ["ip", "link", "show", bridge],
-        capture_output=True,
-        text=True,
-        check=False,
+def _assert_bridge_exists(runner_vm: str, bridge: str) -> None:
+    """Assert a bridge interface exists via ``ip link show`` inside the test VM."""
+    result = _guest_run(
+        runner_vm, f"ip link show {bridge} 2>&1", check=False, timeout=10
     )
     assert result.returncode == 0, (
         f"Bridge '{bridge}' should exist:\n{result.stderr}"
     )
 
 
-def _assert_firewall_rules_contain_bridge(bridge: str, backend: str) -> None:
-    """Assert the active firewall has rules referencing the bridge."""
+def _assert_firewall_rules_contain_bridge(
+    runner_vm: str, bridge: str, backend: str
+) -> None:
+    """Assert the active firewall has rules referencing the bridge (inside VM)."""
     if backend == "nftables":
-        result = subprocess.run(
-            ["sudo", "nft", "list", "chain", "ip", "filter", "MVM-FORWARD"],
-            capture_output=True,
-            text=True,
+        result = _guest_run(
+            runner_vm,
+            "sudo nft list chain ip filter MVM-FORWARD",
             check=False,
+            timeout=10,
         )
         assert result.returncode == 0, (
             f"nft list MVM-FORWARD failed: {result.stderr}"
@@ -109,11 +117,11 @@ def _assert_firewall_rules_contain_bridge(bridge: str, backend: str) -> None:
             f"{result.stdout}"
         )
     else:
-        result = subprocess.run(
-            ["sudo", "iptables", "-t", "nat", "-L"],
-            capture_output=True,
-            text=True,
+        result = _guest_run(
+            runner_vm,
+            "sudo iptables -t nat -L",
             check=False,
+            timeout=10,
         )
         assert result.returncode == 0
         assert bridge in result.stdout, (
@@ -122,14 +130,16 @@ def _assert_firewall_rules_contain_bridge(bridge: str, backend: str) -> None:
         )
 
 
-def _count_firewall_rules(backend: str, chain: str = "MVM-FORWARD") -> int:
-    """Count rules in a firewall chain (nftables or iptables)."""
+def _count_firewall_rules(
+    runner_vm: str, backend: str, chain: str = "MVM-FORWARD"
+) -> int:
+    """Count rules in a firewall chain (nftables or iptables) inside the test VM."""
     if backend == "nftables":
-        result = subprocess.run(
-            ["sudo", "nft", "list", "chain", "ip", "filter", chain],
-            capture_output=True,
-            text=True,
+        result = _guest_run(
+            runner_vm,
+            f"sudo nft list chain ip filter {chain}",
             check=False,
+            timeout=10,
         )
         if result.returncode != 0:
             return 0
@@ -149,11 +159,11 @@ def _count_firewall_rules(backend: str, chain: str = "MVM-FORWARD") -> int:
             count += 1
         return count
     else:
-        result = subprocess.run(
-            ["sudo", "iptables", "-L", chain, "-n"],
-            capture_output=True,
-            text=True,
+        result = _guest_run(
+            runner_vm,
+            f"sudo iptables -L {chain} -n",
             check=False,
+            timeout=10,
         )
         if result.returncode != 0:
             return 0
@@ -162,25 +172,25 @@ def _count_firewall_rules(backend: str, chain: str = "MVM-FORWARD") -> int:
         return max(0, len(lines) - 2)
 
 
-def _assert_masquerade_rule(backend: str) -> None:
-    """Assert MASQUERADE rule exists in MVM-POSTROUTING."""
+def _assert_masquerade_rule(runner_vm: str, backend: str) -> None:
+    """Assert MASQUERADE rule exists in MVM-POSTROUTING (inside VM)."""
     if backend == "nftables":
-        result = subprocess.run(
-            ["sudo", "nft", "list", "chain", "ip", "nat", "MVM-POSTROUTING"],
-            capture_output=True,
-            text=True,
+        result = _guest_run(
+            runner_vm,
+            "sudo nft list chain ip nat MVM-POSTROUTING",
             check=False,
+            timeout=10,
         )
         if result.returncode == 0:
             assert "masquerade" in result.stdout.lower(), (
                 f"No MASQUERADE rule in MVM-POSTROUTING:\n{result.stdout}"
             )
     else:
-        result = subprocess.run(
-            ["sudo", "iptables", "-t", "nat", "-L", "MVM-POSTROUTING"],
-            capture_output=True,
-            text=True,
+        result = _guest_run(
+            runner_vm,
+            "sudo iptables -t nat -L MVM-POSTROUTING",
             check=False,
+            timeout=10,
         )
         if result.returncode == 0:
             assert "MASQUERADE" in result.stdout.upper(), (
@@ -188,17 +198,14 @@ def _assert_masquerade_rule(backend: str) -> None:
             )
 
 
-def _get_default_interface() -> str:
-    """Detect the default network interface via ``ip route show default``.
+def _get_default_interface(runner_vm: str) -> str:
+    """Detect the default network interface inside the test VM.
 
     Returns the interface name (e.g., ``"eth0"``, ``"wlo1"``) used for NAT
     gateways.
     """
-    result = subprocess.run(
-        ["ip", "route", "show", "default"],
-        capture_output=True,
-        text=True,
-        check=False,
+    result = _guest_run(
+        runner_vm, "ip route show default", check=False, timeout=10
     )
     assert result.returncode == 0, (
         f"Failed to detect default route:\n{result.stderr}"
@@ -212,16 +219,14 @@ def _get_default_interface() -> str:
     raise RuntimeError(msg)
 
 
-def _assert_no_masquerade_rule(backend: str) -> None:
-    """Assert no MASQUERADE rule exists in MVM-POSTROUTING (``--no-nat``
-    mode).
-    """
+def _assert_no_masquerade_rule(runner_vm: str, backend: str) -> None:
+    """Assert no MASQUERADE rule exists in MVM-POSTROUTING (inside VM)."""
     if backend == "nftables":
-        result = subprocess.run(
-            ["sudo", "nft", "list", "chain", "ip", "nat", "MVM-POSTROUTING"],
-            capture_output=True,
-            text=True,
+        result = _guest_run(
+            runner_vm,
+            "sudo nft list chain ip nat MVM-POSTROUTING",
             check=False,
+            timeout=10,
         )
         if result.returncode == 0:
             assert "masquerade" not in result.stdout.lower(), (
@@ -229,11 +234,11 @@ def _assert_no_masquerade_rule(backend: str) -> None:
                 f"(expected --no-nat to suppress it):\n{result.stdout}"
             )
     else:
-        result = subprocess.run(
-            ["sudo", "iptables", "-t", "nat", "-L", "MVM-POSTROUTING"],
-            capture_output=True,
-            text=True,
+        result = _guest_run(
+            runner_vm,
+            "sudo iptables -t nat -L MVM-POSTROUTING",
             check=False,
+            timeout=10,
         )
         if result.returncode == 0:
             assert "MASQUERADE" not in result.stdout.upper(), (
@@ -257,13 +262,11 @@ class TestNetworkLifecycle:
     """
 
     # ── Read-only / error-path tests (no resources needed) ──────────────
-
-    @pytest.mark.serial
-    def test_network_list_empty(self, mvm_binary):
+    def test_network_list_empty(self, runner_vm):
         # Rationale: Only needs JSON parsing (free). No resources needed --
         # verifies empty list is valid.
         """network ls --json returns valid empty list when no networks exist."""
-        result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        result = _run_mvm(runner_vm, "network", "ls", "--json")
         assert result.returncode == 0, (
             f"network ls --json failed: {result.stderr}"
         )
@@ -282,11 +285,11 @@ class TestNetworkLifecycle:
                 f"Expected non-empty id: {net}"
             )
 
-    def test_network_listing_and_verification(self, mvm_binary, module_network):
+    def test_network_listing_and_verification(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture (shared, 5-10s). Verifies
         # network appears in JSON listing.
         """List networks and verify created network appears."""
-        result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        result = _run_mvm(runner_vm, "network", "ls", "--json")
         networks: list[dict[str, Any]] = json.loads(result.stdout)
         matched = [n for n in networks if n.get("name") == module_network]
         assert len(matched) == 1, (
@@ -300,27 +303,27 @@ class TestNetworkLifecycle:
             f"Expected non-empty subnet: {network}"
         )
 
-    def test_ip_rule_verification_iptables(self, mvm_binary, module_network):
+    def test_ip_rule_verification_iptables(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies iptables/nftables
         # rules reference the bridge (Option C).
         """Verify firewall rules were created for network (iptables or nftables)."""
         bridge = _compute_bridge_name(module_network)
-        backend = _get_firewall_backend(mvm_binary)
-        _assert_firewall_rules_contain_bridge(bridge, backend)
+        backend = _get_firewall_backend(runner_vm)
+        _assert_firewall_rules_contain_bridge(runner_vm, bridge, backend)
 
-    def test_nat_gateway_configuration(self, module_network):
+    def test_nat_gateway_configuration(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies bridge interface
-        # exists via ip addr.
+        # exists via ip addr inside test VM.
         """Verify bridge interface exists for created network."""
         bridge = _compute_bridge_name(module_network)
-        _assert_bridge_exists(bridge)
+        _assert_bridge_exists(runner_vm, bridge)
 
-    def test_network_inspect(self, mvm_binary, module_network):
+    def test_network_inspect(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies JSON fields (name,
         # subnet, bridge) — was originally checking table output, now uses --json.
         """Inspect a network and verify JSON fields."""
         result = _run_mvm(
-            mvm_binary, "network", "inspect", module_network, "--json"
+            runner_vm, "network", "inspect", module_network, "--json"
         )
         data: dict[str, Any] = json.loads(result.stdout)
         network_info = data.get("network", {})
@@ -337,12 +340,12 @@ class TestNetworkLifecycle:
             and network_info["bridge"]
         ), f"Expected non-empty bridge name, got: {network_info.get('bridge')}"
 
-    def test_network_inspect_json(self, mvm_binary, module_network):
+    def test_network_inspect_json(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies --json output
         # has expected fields.
         """Inspect a network with --json and verify parsed fields."""
         result = _run_mvm(
-            mvm_binary, "network", "inspect", module_network, "--json"
+            runner_vm, "network", "inspect", module_network, "--json"
         )
         assert result.returncode == 0
         data: dict[str, Any] = json.loads(result.stdout)
@@ -352,14 +355,14 @@ class TestNetworkLifecycle:
         assert "subnet" in network_info
         assert "bridge" in network_info
 
-    def test_network_ls_structure(self, mvm_binary, module_network):
+    def test_network_ls_structure(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies JSON field
         # structure in listing.
         """Verify network ls --json returns a list with well-formed entries.
 
         Every entry must have non-empty name, id, and subnet fields.
         """
-        result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        result = _run_mvm(runner_vm, "network", "ls", "--json")
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
         if data:
@@ -374,21 +377,21 @@ class TestNetworkLifecycle:
                     isinstance(entry.get("subnet"), str) and entry["subnet"]
                 ), f"Expected non-empty subnet: {entry}"
 
-    def test_network_list_json(self, mvm_binary, module_network):
+    def test_network_list_json(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies network appears
         # in JSON listing.
         """List networks in JSON format."""
-        result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        result = _run_mvm(runner_vm, "network", "ls", "--json")
         assert result.returncode == 0
         data: list[dict[str, Any]] = json.loads(result.stdout)
         assert isinstance(data, list)
         assert any(n["name"] == module_network for n in data)
 
-    def test_network_default_without_name(self, mvm_binary):
+    def test_network_default_without_name(self, runner_vm):
         # Rationale: No resources needed -- error path for missing name
         # argument.
         """Calling network default without a name should show guidance."""
-        result = _run_mvm(mvm_binary, "network", "default", check=False)
+        result = _run_mvm(runner_vm, "network", "default", check=False)
         assert result.returncode != 0
         combined = (result.stdout + result.stderr).lower()
         assert "missing required argument" in combined, (
@@ -396,48 +399,54 @@ class TestNetworkLifecycle:
             f"{result.stdout} / {result.stderr}"
         )
 
-    def test_network_remove_nonexistent(self, mvm_binary):
+    def test_network_remove_nonexistent(self, runner_vm):
         # Rationale: No resources needed -- error path for nonexistent network.
         """Removing a non-existent network returns error."""
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "rm",
             "nonexistent-network-name-xyz",
             check=False,
         )
         assert result.returncode != 0
-        assert (
-            "not found" in result.stdout.lower()
-            or "not found" in result.stderr.lower()
+        combined = (result.stdout + result.stderr).lower()
+        assert "no networks found matching identifiers" in combined, (
+            f"Expected 'No networks found matching identifiers' in output, "
+            f"got stdout={result.stdout!r} stderr={result.stderr!r}"
         )
 
-    def test_set_default_nonexistent_network_fails(self, mvm_binary):
+    def test_set_default_nonexistent_network_fails(self, runner_vm):
         # Rationale: No resources needed -- error path for nonexistent network.
         """Setting a nonexistent network as default should be rejected."""
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "default",
             "totally-nonexistent-network",
             check=False,
         )
         assert result.returncode != 0
-        assert "not found" in result.stderr.lower()
+        assert (
+            "no networks found matching identifiers" in result.stderr.lower()
+        ), (
+            f"Expected 'No networks found matching identifiers' in stderr, "
+            f"got stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
 
-        ls_result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        ls_result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
             networks = json.loads(ls_result.stdout)
             assert not any(
                 n.get("name") == "totally-nonexistent-network" for n in networks
             )
 
-    def test_network_create_with_invalid_cidr_format(self, mvm_binary):
+    def test_network_create_with_invalid_cidr_format(self, runner_vm):
         # Rationale: No resources needed -- error path for invalid CIDR.
         """Create network with an invalid CIDR string should be rejected."""
         net_name = f"sys-edge-{uuid.uuid4().hex[:6]}"
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -449,7 +458,7 @@ class TestNetworkLifecycle:
         assert result.returncode != 0
         assert "invalid CIDR address" in result.stderr
 
-        ls_result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        ls_result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
             networks = json.loads(ls_result.stdout)
             assert not any(n.get("name") == net_name for n in networks)
@@ -460,14 +469,14 @@ class TestNetworkLifecycle:
         # Rationale: Needs a real network (5-10s). Tests basic creation with
         # generated subnet.
         self,
-        mvm_binary,
+        runner_vm,
         unique_network_name,
     ):
         """Create network with a dynamically generated unique subnet (verify via --json)."""
         subnet = _unique_subnet(unique_network_name)
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 unique_network_name,
@@ -477,25 +486,25 @@ class TestNetworkLifecycle:
             )
             assert result.returncode == 0
             # Verify via JSON listing
-            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
             networks = json.loads(ls_result.stdout)
             assert any(n["name"] == unique_network_name for n in networks)
         finally:
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
 
     def test_network_create_with_custom_cidr(
         # Rationale: Needs a real network (5-10s). Tests custom CIDR creation.
         self,
-        mvm_binary,
+        runner_vm,
         unique_network_name,
     ):
         """Create network with custom CIDR (verify via --json)."""
         subnet = _unique_subnet(unique_network_name)
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 unique_network_name,
@@ -505,15 +514,15 @@ class TestNetworkLifecycle:
             )
             assert result.returncode == 0
             # Verify via JSON listing
-            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
             networks = json.loads(ls_result.stdout)
             assert any(n["name"] == unique_network_name for n in networks)
         finally:
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
 
-    def test_network_create_no_nat(self, mvm_binary, unique_network_name):
+    def test_network_create_no_nat(self, runner_vm, unique_network_name):
         # Rationale: Needs a real network (5-10s). Tests --no-nat flag.
         # Upgraded to L3: verifies bridge exists and no MASQUERADE rule.
         """Create a network with --no-nat flag.
@@ -523,7 +532,7 @@ class TestNetworkLifecycle:
         """
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 unique_network_name,
@@ -534,15 +543,15 @@ class TestNetworkLifecycle:
             assert result.returncode == 0
 
             # L2: Verify network appears in JSON listing
-            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
             networks = json.loads(ls_result.stdout)
             assert any(n.get("name") == unique_network_name for n in networks)
 
             # L3: Verify bridge exists and --no-nat was honored
             bridge = _compute_bridge_name(unique_network_name)
-            _assert_bridge_exists(bridge)
+            _assert_bridge_exists(runner_vm, bridge)
             inspect_result = _run_mvm(
-                mvm_binary, "network", "inspect", unique_network_name, "--json"
+                runner_vm, "network", "inspect", unique_network_name, "--json"
             )
             inspect_data = json.loads(inspect_result.stdout)
             assert inspect_data.get("nat", {}).get("nat_enabled") is False, (
@@ -551,15 +560,15 @@ class TestNetworkLifecycle:
             )
         finally:
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
 
-    def test_network_set_default(self, mvm_binary, module_network):
+    def test_network_set_default(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Tests setting/restoring
         # default network.
         """Set a network as the default."""
         # Save original default network before changing
-        ls_before = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        ls_before = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         original_default = None
         if ls_before.returncode == 0 and ls_before.stdout.strip():
             nets_before = json.loads(ls_before.stdout)
@@ -568,10 +577,10 @@ class TestNetworkLifecycle:
                 original_default = orig["name"]
 
         try:
-            result = _run_mvm(mvm_binary, "network", "default", module_network)
+            result = _run_mvm(runner_vm, "network", "default", module_network)
             assert result.returncode == 0
             # Verify via JSON listing that the network is now default
-            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
             networks = json.loads(ls_result.stdout)
             default = next(
                 (n for n in networks if n.get("name") == module_network),
@@ -583,7 +592,7 @@ class TestNetworkLifecycle:
             # Restore original default so subsequent tests aren't broken
             if original_default:
                 _run_mvm(
-                    mvm_binary,
+                    runner_vm,
                     "network",
                     "default",
                     original_default,
@@ -592,7 +601,7 @@ class TestNetworkLifecycle:
 
     def test_network_create_with_default_flag(
         self,
-        mvm_binary,
+        runner_vm,
         unique_network_name,
     ):
         """Create a network with --default flag and verify is_default=true in ls JSON.
@@ -603,7 +612,7 @@ class TestNetworkLifecycle:
         """
         subnet = _unique_subnet(unique_network_name)
         # Save original default to restore later
-        ls_before = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        ls_before = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         original_default = None
         if ls_before.returncode == 0 and ls_before.stdout.strip():
             nets_before = json.loads(ls_before.stdout)
@@ -613,7 +622,7 @@ class TestNetworkLifecycle:
 
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 unique_network_name,
@@ -625,7 +634,7 @@ class TestNetworkLifecycle:
             assert result.returncode == 0
 
             # L2: Verify is_default=true in ls JSON
-            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
             networks = json.loads(ls_result.stdout)
             new_net = next(
                 (n for n in networks if n.get("name") == unique_network_name),
@@ -640,12 +649,12 @@ class TestNetworkLifecycle:
             )
         finally:
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
             # Restore original default
             if original_default:
                 _run_mvm(
-                    mvm_binary,
+                    runner_vm,
                     "network",
                     "default",
                     original_default,
@@ -654,7 +663,7 @@ class TestNetworkLifecycle:
 
     # ── Error path create + cleanup ────────────────────────────────────
 
-    def test_overlapping_subnet_across_networks_rejected(self, mvm_binary):
+    def test_overlapping_subnet_across_networks_rejected(self, runner_vm):
         # Rationale: Needs a real network. Tests duplicate subnet rejection.
         """Two networks with the same subnet should be rejected at create time."""
         net_a = f"sys-edge-{uuid.uuid4().hex[:6]}"
@@ -663,7 +672,7 @@ class TestNetworkLifecycle:
 
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_a,
@@ -673,7 +682,7 @@ class TestNetworkLifecycle:
             )
 
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_b,
@@ -686,7 +695,7 @@ class TestNetworkLifecycle:
             assert "overlap" in result.stderr.lower()
 
             ls_result = _run_mvm(
-                mvm_binary, "network", "ls", "--json", check=False
+                runner_vm, "network", "ls", "--json", check=False
             )
             if ls_result.returncode == 0 and ls_result.stdout.strip():
                 networks = json.loads(ls_result.stdout)
@@ -695,17 +704,17 @@ class TestNetworkLifecycle:
                 ]
                 assert len(same_subnet) == 1
         finally:
-            _run_mvm(mvm_binary, "network", "rm", net_a, check=False)
-            _run_mvm(mvm_binary, "network", "rm", net_b, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_a, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_b, check=False)
 
-    def test_network_create_with_slash_32_subnet(self, mvm_binary):
+    def test_network_create_with_slash_32_subnet(self, runner_vm):
         # Rationale: Needs one network attempt. Tests /32 rejection.
         """Create network with /32 subnet should be rejected (too small)."""
         net_name = f"sys-edge-{uuid.uuid4().hex[:6]}"
 
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -718,22 +727,22 @@ class TestNetworkLifecycle:
             assert "invalid" in result.stderr.lower()
 
             ls_result = _run_mvm(
-                mvm_binary, "network", "ls", "--json", check=False
+                runner_vm, "network", "ls", "--json", check=False
             )
             if ls_result.returncode == 0 and ls_result.stdout.strip():
                 networks = json.loads(ls_result.stdout)
                 assert not any(n.get("name") == net_name for n in networks)
         finally:
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
-    def test_network_create_with_same_name(self, mvm_binary):
+    def test_network_create_with_same_name(self, runner_vm):
         # Rationale: Needs a real network. Tests duplicate name rejection.
         """Two networks with the same name should be rejected."""
         net_name = f"sys-edge-{uuid.uuid4().hex[:6]}"
 
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -743,7 +752,7 @@ class TestNetworkLifecycle:
             )
 
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -756,17 +765,17 @@ class TestNetworkLifecycle:
             assert "already exists" in result.stderr.lower()
 
             ls_result = _run_mvm(
-                mvm_binary, "network", "ls", "--json", check=False
+                runner_vm, "network", "ls", "--json", check=False
             )
             if ls_result.returncode == 0 and ls_result.stdout.strip():
                 networks = json.loads(ls_result.stdout)
                 same_name = [n for n in networks if n.get("name") == net_name]
                 assert len(same_name) == 1
         finally:
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
     @pytest.mark.requires_network
-    def test_overlapping_subnet_rejected(self, mvm_binary: str) -> None:
+    def test_overlapping_subnet_rejected(self, runner_vm: str) -> None:
         # Rationale: Needs real networks. Tests overlapping subnet rejection.
         """Creating a second network with the same subnet CIDR should fail."""
         net_a = f"sys-ovlap-a-{uuid.uuid4().hex[:6]}"
@@ -774,7 +783,7 @@ class TestNetworkLifecycle:
         subnet = _unique_subnet(net_a)
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_a,
@@ -783,7 +792,7 @@ class TestNetworkLifecycle:
                 "--non-interactive",
             )
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_b,
@@ -795,7 +804,7 @@ class TestNetworkLifecycle:
             assert result.returncode != 0
             assert "overlap" in result.stderr.lower()
         finally:
-            _run_mvm(mvm_binary, "network", "rm", net_a, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_a, check=False)
 
     # ── Destructive tests (remove / delete) ────────────────────────────
 
@@ -803,12 +812,12 @@ class TestNetworkLifecycle:
         # Rationale: Needs a real network. Tests create, verify, delete,
         # verify gone.
         self,
-        mvm_binary,
+        runner_vm,
         unique_network_name,
     ):
         """Create and delete network, verify cleanup."""
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             unique_network_name,
@@ -818,24 +827,24 @@ class TestNetworkLifecycle:
         )
 
         try:
-            result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            result = _run_mvm(runner_vm, "network", "ls", "--json")
             networks_before = json.loads(result.stdout)
             assert any(
                 n.get("name") == unique_network_name for n in networks_before
             )
 
-            result = _run_mvm(mvm_binary, "network", "rm", unique_network_name)
+            result = _run_mvm(runner_vm, "network", "rm", unique_network_name)
             assert result.returncode == 0
         finally:
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
 
-        result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        result = _run_mvm(runner_vm, "network", "ls", "--json")
         networks: list[dict[str, Any]] = json.loads(result.stdout)
         assert not any(n.get("name") == unique_network_name for n in networks)
 
-    def test_network_remove_multiple(self, mvm_binary, unique_network_name):
+    def test_network_remove_multiple(self, runner_vm, unique_network_name):
         # Rationale: Needs two real networks. Tests multi-rm.
         # Cleanup in finally.
         """Remove multiple networks at once."""
@@ -843,7 +852,7 @@ class TestNetworkLifecycle:
         name_b = f"{unique_network_name}-b"
 
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             name_a,
@@ -852,7 +861,7 @@ class TestNetworkLifecycle:
             "--non-interactive",
         )
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             name_b,
@@ -862,14 +871,14 @@ class TestNetworkLifecycle:
         )
 
         try:
-            result = _run_mvm(mvm_binary, "network", "rm", name_a, name_b)
+            result = _run_mvm(runner_vm, "network", "rm", name_a, name_b)
             assert result.returncode == 0
-            ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+            ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
             networks = json.loads(ls_result.stdout)
             assert not any(n.get("name") in (name_a, name_b) for n in networks)
         finally:
-            _run_mvm(mvm_binary, "network", "rm", name_a, check=False)
-            _run_mvm(mvm_binary, "network", "rm", name_b, check=False)
+            _run_mvm(runner_vm, "network", "rm", name_a, check=False)
+            _run_mvm(runner_vm, "network", "rm", name_b, check=False)
 
 
 class TestNetworkInspectTree:
@@ -878,15 +887,14 @@ class TestNetworkInspectTree:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.requires_network,
-        pytest.mark.serial,
         pytest.mark.domain_network,
     ]
 
-    def test_network_inspect_tree(self, mvm_binary, module_network):
+    def test_network_inspect_tree(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies default inspect
         # output format.
         """Inspect a network and verify tree characters in default output."""
-        result = _run_mvm(mvm_binary, "network", "inspect", module_network)
+        result = _run_mvm(runner_vm, "network", "inspect", module_network)
         assert result.returncode == 0
         assert "├─ " in result.stdout or "└─ " in result.stdout
 
@@ -898,14 +906,13 @@ class TestNetworkAdvancedCreate:
         pytest.mark.system,
         pytest.mark.requires_network,
         pytest.mark.slow,
-        pytest.mark.serial,
         pytest.mark.domain_network,
     ]
 
     def test_network_create_with_ipv4_gateway(
         # Rationale: Needs a real network (5-10s). Tests --ipv4-gateway flag.
         self,
-        mvm_binary,
+        runner_vm,
         unique_network_name,
     ):
         """Create a network with explicit --ipv4-gateway."""
@@ -913,7 +920,7 @@ class TestNetworkAdvancedCreate:
         custom_gateway = subnet.replace(".0/24", ".100")
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 unique_network_name,
@@ -926,7 +933,7 @@ class TestNetworkAdvancedCreate:
             assert result.returncode == 0
 
             inspect = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "inspect",
                 unique_network_name,
@@ -937,21 +944,21 @@ class TestNetworkAdvancedCreate:
             assert network_info.get("ipv4_gateway") == custom_gateway
         finally:
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
 
     def test_network_create_with_nat_gateways(
         # Rationale: Needs a real network (5-10s). Tests --nat-gateways flag.
         self,
-        mvm_binary,
+        runner_vm,
         unique_network_name,
     ):
         """Create a network with explicit --nat-gateways."""
         subnet = _unique_subnet(unique_network_name)
-        default_iface = _get_default_interface()
+        default_iface = _get_default_interface(runner_vm)
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 unique_network_name,
@@ -964,7 +971,7 @@ class TestNetworkAdvancedCreate:
             assert result.returncode == 0
 
             inspect = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "inspect",
                 unique_network_name,
@@ -975,18 +982,18 @@ class TestNetworkAdvancedCreate:
             assert default_iface in gateways
         finally:
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
 
     def test_network_create_invalid_gateway_fails(
         # Rationale: Needs one network attempt. Tests invalid gateway rejection.
         self,
-        mvm_binary,
+        runner_vm,
         unique_network_name,
     ):
         """Creating a network with an invalid gateway should fail."""
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             unique_network_name,
@@ -998,7 +1005,7 @@ class TestNetworkAdvancedCreate:
             check=False,
         )
         assert result.returncode != 0
-        _run_mvm(mvm_binary, "network", "rm", unique_network_name, check=False)
+        _run_mvm(runner_vm, "network", "rm", unique_network_name, check=False)
 
 
 class TestNetworkSync:
@@ -1009,18 +1016,18 @@ class TestNetworkSync:
     classes so idempotent tests run if file execution is interrupted.
     """
 
-    def test_network_sync_all(self, mvm_binary):
+    def test_network_sync_all(self, runner_vm):
         # Rationale: Creates own network inline. Verifies bridge + firewall
         # rules persist after sync (Option C). Self-contained to avoid stale
         # iptables rules from earlier tests in the module.
         """Sync all networks — verifies bridge and firewall rules persist."""
         net_name = f"sys-sync-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
-        backend = _get_firewall_backend(mvm_binary)
+        backend = _get_firewall_backend(runner_vm)
 
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -1032,23 +1039,20 @@ class TestNetworkSync:
             # Read bridge name from inspect output (authoritative source)
             inspect = json.loads(
                 _run_mvm(
-                    mvm_binary, "network", "inspect", net_name, "--json"
+                    runner_vm, "network", "inspect", net_name, "--json"
                 ).stdout
             )
             bridge: str = inspect.get("network", {}).get("bridge", "")
 
-            result = _run_mvm(mvm_binary, "network", "sync", check=False)
+            result = _run_mvm(runner_vm, "network", "sync", check=False)
             assert result.returncode == 0, f"sync failed: {result.stderr}"
 
             # Option C: bridge exists
-            _assert_bridge_exists(bridge)
+            _assert_bridge_exists(runner_vm, bridge)
 
             # Option C: bridge has an IP address
-            ip_result = subprocess.run(
-                ["ip", "addr", "show", bridge],
-                capture_output=True,
-                text=True,
-                check=False,
+            ip_result = _guest_run(
+                runner_vm, f"ip addr show {bridge}", check=False, timeout=10
             )
             assert ip_result.returncode == 0
             assert "inet " in ip_result.stdout, (
@@ -1056,10 +1060,10 @@ class TestNetworkSync:
             )
 
             # Option C: firewall rules reference the bridge
-            _assert_firewall_rules_contain_bridge(bridge, backend)
+            _assert_firewall_rules_contain_bridge(runner_vm, bridge, backend)
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "rm",
                 net_name,
@@ -1067,17 +1071,17 @@ class TestNetworkSync:
                 check=False,
             )
 
-    def test_network_sync_specific(self, mvm_binary):
+    def test_network_sync_specific(self, runner_vm):
         # Rationale: Creates own network inline. Verifies sync by name.
         # Self-contained to avoid stale iptables rules from earlier tests.
         """Sync a specific network by name."""
         net_name = f"sys-sync-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
-        backend = _get_firewall_backend(mvm_binary)
+        backend = _get_firewall_backend(runner_vm)
 
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -1089,24 +1093,24 @@ class TestNetworkSync:
             # Read bridge name from inspect output
             inspect = json.loads(
                 _run_mvm(
-                    mvm_binary, "network", "inspect", net_name, "--json"
+                    runner_vm, "network", "inspect", net_name, "--json"
                 ).stdout
             )
             bridge: str = inspect.get("network", {}).get("bridge", "")
 
             result = _run_mvm(
-                mvm_binary, "network", "sync", net_name, check=False
+                runner_vm, "network", "sync", net_name, check=False
             )
             assert result.returncode == 0, (
                 f"sync {net_name} failed: {result.stderr}"
             )
 
             # Option C: bridge and rules
-            _assert_bridge_exists(bridge)
-            _assert_firewall_rules_contain_bridge(bridge, backend)
+            _assert_bridge_exists(runner_vm, bridge)
+            _assert_firewall_rules_contain_bridge(runner_vm, bridge, backend)
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "rm",
                 net_name,
@@ -1114,11 +1118,11 @@ class TestNetworkSync:
                 check=False,
             )
 
-    def test_network_sync_json(self, mvm_binary, module_network):
+    def test_network_sync_json(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies JSON result
         # structure from sync.
         """Sync with JSON output — verify result structure has per-network stats."""
-        result = _run_mvm(mvm_binary, "network", "sync", "--json", check=False)
+        result = _run_mvm(runner_vm, "network", "sync", "--json", check=False)
         assert result.returncode == 0
         data = json.loads(result.stdout)
         assert isinstance(data, dict), f"Expected dict, got {type(data)}"
@@ -1131,8 +1135,7 @@ class TestNetworkSync:
             assert "verified" in stats, f"Missing 'verified' in {net_id}"
             assert "orphaned" in stats, f"Missing 'orphaned' in {net_id}"
 
-    @pytest.mark.serial
-    def test_network_sync_idempotent(self, mvm_binary, module_network):
+    def test_network_sync_idempotent(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies no rule
         # duplication on second sync.
         """Sync twice — verify no rule duplication (atomicity check).
@@ -1140,15 +1143,15 @@ class TestNetworkSync:
         batch_ensure_rules flushes MVM chains and re-adds all rules.
         Running sync twice must produce the same rule count.
         """
-        backend = _get_firewall_backend(mvm_binary)
+        backend = _get_firewall_backend(runner_vm)
 
         # First sync — establish baseline
-        _run_mvm(mvm_binary, "network", "sync")
-        count_after_first = _count_firewall_rules(backend)
+        _run_mvm(runner_vm, "network", "sync")
+        count_after_first = _count_firewall_rules(runner_vm, backend)
 
         # Second sync — should not add duplicates
-        _run_mvm(mvm_binary, "network", "sync")
-        count_after_second = _count_firewall_rules(backend)
+        _run_mvm(runner_vm, "network", "sync")
+        count_after_second = _count_firewall_rules(runner_vm, backend)
 
         # Option C: rule count must not change
         assert count_after_second == count_after_first, (
@@ -1157,29 +1160,20 @@ class TestNetworkSync:
             f"batch_ensure_rules flush+add should be idempotent."
         )
 
-    @pytest.mark.serial
-    def test_network_sync_conntrack_rule(self, mvm_binary, module_network):
+    def test_network_sync_conntrack_rule(self, runner_vm, module_network):
         # Rationale: Uses module_network fixture. Verifies conntrack
         # established/related accept rule.
         """Sync ensures conntrack established/related accept rule exists."""
-        backend = _get_firewall_backend(mvm_binary)
+        backend = _get_firewall_backend(runner_vm)
 
-        _run_mvm(mvm_binary, "network", "sync")
+        _run_mvm(runner_vm, "network", "sync")
 
         if backend == "nftables":
-            result = subprocess.run(
-                [
-                    "sudo",
-                    "nft",
-                    "list",
-                    "chain",
-                    "ip",
-                    "filter",
-                    "MVM-FORWARD",
-                ],
-                capture_output=True,
-                text=True,
+            result = _guest_run(
+                runner_vm,
+                "sudo nft list chain ip filter MVM-FORWARD",
                 check=False,
+                timeout=10,
             )
             assert result.returncode == 0
             assert "established,related accept" in result.stdout, (
@@ -1187,11 +1181,11 @@ class TestNetworkSync:
                 f"in MVM-FORWARD:\n{result.stdout}"
             )
         else:
-            result = subprocess.run(
-                ["sudo", "iptables", "-L", "MVM-FORWARD", "-n"],
-                capture_output=True,
-                text=True,
+            result = _guest_run(
+                runner_vm,
+                "sudo iptables -L MVM-FORWARD -n",
                 check=False,
+                timeout=10,
             )
             assert result.returncode == 0
             assert "ESTABLISHED" in result.stdout.upper(), (
@@ -1199,21 +1193,26 @@ class TestNetworkSync:
                 f"in MVM-FORWARD:\n{result.stdout}"
             )
 
-    def test_network_sync_on_nonexistent_network(self, mvm_binary):
+    def test_network_sync_on_nonexistent_network(self, runner_vm):
         # Rationale: No resources needed -- error path for nonexistent
         # network sync.
         """Syncing a network that doesn't exist should fail gracefully."""
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "sync",
             "totally-nonexistent-network",
             check=False,
         )
         assert result.returncode != 0
-        assert "not found" in result.stderr.lower()
+        assert (
+            "no networks found matching identifiers" in result.stderr.lower()
+        ), (
+            f"Expected 'No networks found matching identifiers' in stderr, "
+            f"got stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
 
-        ls_result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+        ls_result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
         if ls_result.returncode == 0 and ls_result.stdout.strip():
             networks = json.loads(ls_result.stdout)
             assert not any(
@@ -1228,11 +1227,10 @@ class TestNetworkRemoveForce:
         pytest.mark.system,
         pytest.mark.requires_network,
         pytest.mark.slow,
-        pytest.mark.serial,
         pytest.mark.domain_network,
     ]
 
-    def test_network_rm_with_force(self, mvm_binary, unique_network_name):
+    def test_network_rm_with_force(self, runner_vm, unique_network_name):
         # Rationale: Needs a real network. Tests --force removal.
         # Cleanup in finally. L3: verifies bridge is actually gone.
         """Create a network and remove it with --force, verify cleanup."""
@@ -1240,7 +1238,7 @@ class TestNetworkRemoveForce:
         bridge = _compute_bridge_name(unique_network_name)
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 unique_network_name,
@@ -1250,15 +1248,15 @@ class TestNetworkRemoveForce:
             )
 
             result = _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, "--force"
+                runner_vm, "network", "rm", unique_network_name, "--force"
             )
             assert result.returncode == 0
         finally:
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
 
-        ls_result = _run_mvm(mvm_binary, "network", "ls", "--json")
+        ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
         networks = json.loads(ls_result.stdout)
         assert not any(n.get("name") == unique_network_name for n in networks)
 
@@ -1267,11 +1265,8 @@ class TestNetworkRemoveForce:
         # delete the bridge would leave a stale interface consuming
         # system resources. The `ip link show` check proves the bridge
         # was actually torn down by network rm --force.
-        result = subprocess.run(
-            ["ip", "link", "show", bridge],
-            capture_output=True,
-            text=True,
-            check=False,
+        result = _guest_run(
+            runner_vm, f"ip link show {bridge} 2>&1", check=False, timeout=10
         )
         assert result.returncode != 0, (
             f"Bridge '{bridge}' should no longer exist after "
@@ -1287,7 +1282,6 @@ class TestNetworkVMDependency:
         pytest.mark.requires_kvm,
         pytest.mark.requires_network,
         pytest.mark.slow,
-        pytest.mark.serial,
         pytest.mark.domain_network,
     ]
 
@@ -1295,7 +1289,7 @@ class TestNetworkVMDependency:
         # Rationale: Needs a real VM (30-120s). Verifies network vm_count=0
         # after VM removal.
         self,
-        mvm_binary,
+        runner_vm,
         unique_vm_name,
         unique_network_name,
     ):
@@ -1306,7 +1300,7 @@ class TestNetworkVMDependency:
 
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -1315,34 +1309,34 @@ class TestNetworkVMDependency:
                 "--non-interactive",
             )
 
-            ensure_vm_deps(mvm_binary)
+            ensure_vm_deps(runner_vm)
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 net_name,
             )
 
-            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force")
+            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force")
 
             result = _run_mvm(
-                mvm_binary, "network", "inspect", net_name, "--json"
+                runner_vm, "network", "inspect", net_name, "--json"
             )
             data: dict[str, Any] = json.loads(result.stdout)
             assert len(data.get("leases", [])) == 0
         finally:
-            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
     def test_network_rm_with_active_vm_fails_without_force(
         # Rationale: Needs a real VM (30-120s). Tests network rm rejection
         # with active VMs.
         self,
-        mvm_binary,
+        runner_vm,
         unique_vm_name,
         unique_network_name,
     ):
@@ -1353,7 +1347,7 @@ class TestNetworkVMDependency:
 
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -1362,38 +1356,38 @@ class TestNetworkVMDependency:
                 "--non-interactive",
             )
 
-            ensure_vm_deps(mvm_binary)
+            ensure_vm_deps(runner_vm)
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 net_name,
             )
 
             result = _run_mvm(
-                mvm_binary, "network", "rm", net_name, check=False
+                runner_vm, "network", "rm", net_name, check=False
             )
             assert result.returncode != 0
             assert "referenced by" in result.stderr.lower()
 
             result_net = _run_mvm(
-                mvm_binary, "network", "ls", "--json", check=False
+                runner_vm, "network", "ls", "--json", check=False
             )
             if result_net.returncode == 0:
                 nets: list[dict[str, Any]] = json.loads(result_net.stdout)
                 assert any(n["name"] == net_name for n in nets)
 
-            result_vm = _run_mvm(mvm_binary, "vm", "ls", "--json", check=False)
+            result_vm = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
             if result_vm.returncode == 0:
                 vms: list[dict[str, Any]] = json.loads(result_vm.stdout)
                 assert any(v["name"] == vm_name for v in vms)
         finally:
-            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
 
 class TestNetworkSyncAfterReboot:
@@ -1401,7 +1395,7 @@ class TestNetworkSyncAfterReboot:
 
     Simulates a reboot-like scenario:
     1. Creates a network (bridge + NAT + firewall rules)
-    2. Deletes the bridge directly via ``ip link delete``
+    2. Deletes the bridge directly via ``ip link delete`` inside the test VM
     3. Runs ``mvm network sync``
     4. Verifies bridge, IP address, and firewall rules are restored
 
@@ -1412,7 +1406,6 @@ class TestNetworkSyncAfterReboot:
     pytestmark = [
         pytest.mark.system,
         pytest.mark.requires_network,
-        pytest.mark.serial,
         pytest.mark.domain_network,
     ]
 
@@ -1420,7 +1413,7 @@ class TestNetworkSyncAfterReboot:
         # Rationale: Needs a real network (5-10s). Tests sync recreates
         # bridge after deletion.
         self,
-        mvm_binary,
+        runner_vm,
         unique_network_name,
     ) -> None:
         """Bridge, IP, and firewall rules are recreated after bridge deletion."""
@@ -1431,7 +1424,7 @@ class TestNetworkSyncAfterReboot:
         # 1. Create the network
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -1441,45 +1434,47 @@ class TestNetworkSyncAfterReboot:
             )
 
             # Verify bridge exists before removal
-            _assert_bridge_exists(bridge)
+            _assert_bridge_exists(runner_vm, bridge)
 
             # 2. Delete the bridge (simulates reboot / accidental removal)
-            result = subprocess.run(
-                ["sudo", "ip", "link", "delete", bridge],
-                capture_output=True,
-                text=True,
+            result = _guest_run(
+                runner_vm,
+                f"sudo ip link delete {bridge}",
                 check=False,
+                timeout=10,
             )
             assert result.returncode == 0, (
                 f"Failed to delete bridge {bridge}: {result.stderr}"
             )
 
             # Verify bridge is really gone
-            result = subprocess.run(
-                ["ip", "link", "show", bridge],
-                capture_output=True,
-                text=True,
+            result = _guest_run(
+                runner_vm,
+                f"ip link show {bridge} 2>&1",
                 check=False,
+                timeout=10,
             )
             assert result.returncode != 0, (
                 f"Bridge {bridge} should no longer exist"
             )
 
             # 3. Run sync — should recreate the bridge and re-add firewall rules
-            sync_result = _run_mvm(mvm_binary, "network", "sync", check=False)
+            sync_result = _run_mvm(
+                runner_vm, "network", "sync", check=False
+            )
             assert sync_result.returncode == 0, (
                 f"network sync failed: {sync_result.stderr}"
             )
 
             # 4. Verify the bridge was recreated
-            _assert_bridge_exists(bridge)
+            _assert_bridge_exists(runner_vm, bridge)
 
             # 5. Verify bridge has an IP address assigned
-            result = subprocess.run(
-                ["ip", "addr", "show", bridge],
-                capture_output=True,
-                text=True,
+            result = _guest_run(
+                runner_vm,
+                f"ip addr show {bridge}",
                 check=False,
+                timeout=10,
             )
             assert result.returncode == 0
             gateway_ip = subnet.replace(".0/24", ".1")
@@ -1489,10 +1484,88 @@ class TestNetworkSyncAfterReboot:
             )
 
             # 6. Verify firewall rules and NAT (use module-level helpers)
-            backend = _get_firewall_backend(mvm_binary)
-            _assert_firewall_rules_contain_bridge(bridge, backend)
-            _assert_masquerade_rule(backend)
+            backend = _get_firewall_backend(runner_vm)
+            _assert_firewall_rules_contain_bridge(runner_vm, bridge, backend)
+            _assert_masquerade_rule(runner_vm, backend)
 
         finally:
             # Cleanup
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+
+
+class TestNetworkEdgeCases:
+    """Tests for network command edge cases."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.tier2,
+        pytest.mark.domain_network,
+    ]
+
+    def test_network_create_without_subnet(self, runner_vm):
+        """``network create`` without --subnet should fail with clear error."""
+        # Rationale: No resources needed — testing CLI validation for
+        # missing --subnet flag.
+        result = _run_mvm(
+            runner_vm,
+            "network",
+            "create",
+            "test-network",
+            check=False,
+        )
+        assert result.returncode != 0
+        assert "Missing required option '--subnet'" in (
+            result.stdout + result.stderr
+        )
+
+    def test_network_set_default_nonexistent(self, runner_vm):
+        """``network set-default`` with nonexistent name should fail."""
+        # Rationale: No resources needed — testing CLI error for
+        # nonexistent network name.
+        result = _run_mvm(
+            runner_vm,
+            "network",
+            "default",
+            "nonexistent-network-name-xyz",
+            check=False,
+        )
+        assert result.returncode != 0
+
+    def test_network_create_non_interactive(
+        self, runner_vm, unique_network_name
+    ):
+        """``network create`` with --non-interactive flag should succeed.
+
+        Rationale: Without --non-interactive, network create would prompt
+        for confirmation. The --non-interactive flag suppresses this prompt.
+        A regression where --non-interactive is silently ignored would cause
+        automated workflows to hang forever waiting for input.
+        L1 verification: exit 0 and network appears in listing.
+        """
+        net_name = unique_network_name
+        subnet = f"10.{abs(hash(net_name)) % 254 + 1}.0.0/24"
+        try:
+            result = _run_mvm(
+                runner_vm,
+                "network",
+                "create",
+                net_name,
+                "--subnet",
+                subnet,
+                "--non-interactive",
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"network create --non-interactive failed: {result.stderr}"
+            )
+
+            # L2: verify the network appears in ls --json
+            ls_result = _run_mvm(runner_vm, "network", "ls", "--json")
+            networks = json.loads(ls_result.stdout)
+            assert any(n.get("name") == net_name for n in networks), (
+                f"Network '{net_name}' not found in ls --json after create"
+            )
+        finally:
+            _run_mvm(
+                runner_vm, "network", "rm", net_name, "--force", check=False
+            )
