@@ -338,7 +338,19 @@ result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", tap, 
 exec.Command("iptables", ...) // NEVER
 ```
 
-The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeout`, `Input`, `Env`, `Privileged`, `Interactive`, `StartOnly`.
+The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeout`, `Input`, `Env`, `Privileged`, `Interactive`, `StartOnly`. `Timeout` is an absolute cap for operations that genuinely need one (downloads, builds, cleanup). User commands run until completion or context cancellation; pass `Timeout: 0` for those.
+
+### Timeout taxonomy
+
+| Type | Meaning | User-facing? | Examples |
+|---|---|---|---|
+| **Connect/probe timeout** | Time to establish connection / first response | Yes (`--timeout`) | `mvm ssh`, `mvm vm exec` |
+| **Idle timeout** | Max silence between bytes/events | Optional future flag | (not exposed today) |
+| **Absolute timeout** | Hard cap on total duration | No | HTTP downloads, builds, cleanup |
+| **Graceful shutdown timeout** | Time after SIGTERM before SIGKILL | No | Firecracker stop, relay shutdown |
+| **Service lifetime** | How long a background service runs | Yes (`--kill-after`) | `mvm run nocloudnet serve` |
+
+User-facing `--timeout` means **connect/probe timeout only**. Once the target is responsive, the operation runs unbounded. See [ADR-0013](docs/adr/0013-user-facing-timeouts-are-connect-timeouts.md).
 
 **Documented exceptions** -- code that directly uses `os/exec.Command` because `DefaultRunner.Run()` cannot fulfill the requirement:
 

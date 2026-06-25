@@ -2,6 +2,7 @@ package ssh_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/core/ssh"
+	"mvmctl/internal/lib/system"
+	"mvmctl/internal/testutil"
 )
 
 // --- Service.Connect — waitForSSH context cancellati ---
@@ -149,4 +152,27 @@ func TestStreamCommand_timeoutWhenPortClosed(t *testing.T) {
 	assert.Nil(t, ch)
 	assert.Contains(t, err.Error(), "timed out")
 	assert.InDelta(t, elapsed.Seconds(), 2.0, 0.5)
+}
+
+// --- Service.RunCommand — no runner timeout ---
+// Rationale: RunCommand's timeout is a connect/probe timeout only. Once the
+// command starts, it runs unbounded. The runner must not receive a timeout.
+
+func TestRunCommand_noRunnerTimeout(t *testing.T) {
+	svc := ssh.NewService("127.0.0.1", "root", "/dev/null", 500*time.Millisecond)
+
+	fake := &testutil.FakeRunner{}
+	original := system.DefaultRunner
+	system.DefaultRunner = fake
+	defer func() { system.DefaultRunner = original }()
+
+	_, err := svc.RunCommand(context.Background(), "sleep 5")
+
+	require.Len(t, fake.Calls, 1, "RunCommand must invoke the runner exactly once")
+	assert.Equal(t, time.Duration(0), fake.Calls[0].Opts.Timeout,
+		"RunCommand must not set a runner timeout on the command")
+	if err != nil {
+		assert.False(t, strings.Contains(err.Error(), "SSH command timed out"),
+			"RunCommand must not produce 'SSH command timed out' error")
+	}
 }

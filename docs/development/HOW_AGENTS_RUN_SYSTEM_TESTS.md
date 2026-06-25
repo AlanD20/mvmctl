@@ -328,7 +328,8 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
 ```
 
 Note: The `--timeout 300` is pytest's per-test timeout (some VM tests take 5+
-minutes). The `--timeout 600` on `mvm vm exec` is the vsock command timeout.
+minutes). The `--timeout 600` on `mvm vm exec` is the vsock agent connect/probe
+timeout; the pytest command itself runs until completion.
 
 ### 4.3 Run a Single Test File
 

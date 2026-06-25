@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
-	"strings"
 	"time"
 
 	"mvmctl/internal/lib/system"
@@ -25,7 +24,7 @@ type Service struct {
 	ip      string
 	user    string
 	keyPath string
-	timeout time.Duration // 0 = no ConnectTimeout flag
+	timeout time.Duration // connect/probe timeout; command execution is unbounded
 }
 
 // NewService creates a new SSHService with the given connection parameters.
@@ -93,18 +92,10 @@ func (s *Service) RunCommand(ctx context.Context, command string) (int, error) {
 		Check:   false,
 		Env:     map[string]string{"MVM_SSH_CONNECTION": "1"},
 	}
-	if s.timeout > 0 {
-		opts.Timeout = s.timeout
-	}
 	result, err := system.DefaultRunner.Run(ctx, sshArgs, opts)
 
 	if err != nil {
-		// Check timeout via error message.
-		if strings.Contains(err.Error(), "timed out") {
-			return -1, fmt.Errorf("SSH command timed out after %ds", int(s.timeout.Seconds()))
-		}
-
-		return -1, err
+		return -1, fmt.Errorf("SSH command failed: %w", err)
 	}
 
 	if !result.Success() {
@@ -132,21 +123,20 @@ func (s *Service) Connect(ctx context.Context, command string, execMode bool) (i
 	}
 
 	// Phase 1: Wait for SSH to become ready (probe with actual SSH command).
-	// s.timeout is the total budget for wait + command execution.
-	remaining, err := s.waitForSSH(ctx, s.timeout)
+	// s.timeout is the probe timeout — how long to wait for SSH to become reachable.
+	_, err := s.waitForSSH(ctx, s.timeout)
 	if err != nil {
 		return -1, err
 	}
 
-	// Phase 2: SSH is ready — run the actual command with the
-	// remaining timeout. Use RunCommand which respects s.timeout.
-	// Override opts.Timeout to remaining for the command itself.
+	// Phase 2: SSH is ready — run the actual command with no absolute timeout.
+	// The command runs until completion (or context cancellation).
 	sshArgs := s.BuildCommand(command)
 	opts := system.RunCmdOpts{
 		Capture: false,
 		Check:   false,
 		Env:     map[string]string{"MVM_SSH_CONNECTION": "1"},
-		Timeout: remaining,
+		Timeout: 0,
 	}
 	result, runErr := system.DefaultRunner.Run(ctx, sshArgs, opts)
 
@@ -165,18 +155,20 @@ func (s *Service) Connect(ctx context.Context, command string, execMode bool) (i
 // is unreachable or the command fails to start.
 func (s *Service) StreamCommand(ctx context.Context, command string) (<-chan system.StreamLine, error) {
 	// Phase 1: Wait for SSH to become ready (probe with actual SSH command).
-	remaining, err := s.waitForSSH(ctx, s.timeout)
+	// s.timeout is the probe timeout — how long to wait for SSH to become reachable.
+	_, err := s.waitForSSH(ctx, s.timeout)
 	if err != nil {
 		return nil, err
 	}
 
-	// Phase 2: Stream the command output.
+	// Phase 2: Stream the command output with no absolute timeout.
+	// The command runs until completion (or context cancellation).
 	sshArgs := s.BuildCommand(command)
 	opts := system.RunCmdOpts{
 		Capture: false,
 		Check:   false,
 		Env:     map[string]string{"MVM_SSH_CONNECTION": "1"},
-		Timeout: remaining,
+		Timeout: 0,
 	}
 	return system.DefaultRunner.Stream(ctx, sshArgs, opts)
 }
