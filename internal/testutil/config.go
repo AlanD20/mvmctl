@@ -11,15 +11,14 @@ import (
 )
 
 // ConfigRepo is an in-memory settings repository for testing.
-// Matches Python's mvmctl.core.config._repository.SettingsRepository exactly,
-// including JSON serialization/deserialization of values.
+// Stores values as JSON-encoded strings.
 type ConfigRepo struct {
 	mu   sync.RWMutex
 	data map[string]map[string]settingRow // category -> key -> row
 }
 
 type settingRow struct {
-	rawValue  string // JSON-encoded value (matches Python's json.dumps/json.loads)
+	rawValue  string // JSON-encoded value
 	updatedAt string
 }
 
@@ -28,7 +27,6 @@ func NewConfigRepo() *ConfigRepo {
 }
 
 // Get returns the parsed JSON value for a setting, or nil if not found.
-// Matches Python: json.loads(row["value"]).
 func (r *ConfigRepo) Get(_ context.Context, category, key string) (any, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -40,7 +38,7 @@ func (r *ConfigRepo) Get(_ context.Context, category, key string) (any, error) {
 	if !ok {
 		return nil, nil
 	}
-	// Match Python: return json.loads(row["value"])
+	// Return parsed value from JSON
 	if row.rawValue == "" {
 		return nil, nil
 	}
@@ -51,17 +49,17 @@ func (r *ConfigRepo) Get(_ context.Context, category, key string) (any, error) {
 	return val, nil
 }
 
-// Set stores a value as JSON. Matches Python: json.dumps(value).
+// Set stores a value as JSON.
 func (r *ConfigRepo) Set(_ context.Context, category, key string, value any) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.data[category]; !ok {
 		r.data[category] = make(map[string]settingRow)
 	}
-	// Match Python: json.dumps(value)
+	// Marshal to JSON
 	raw, err := json.Marshal(value)
 	if err != nil {
-		// Python would raise a JSONEncodeError through json.dumps
+		// Return marshalling error if JSON serialization fails
 		return err
 	}
 	r.data[category][key] = settingRow{
@@ -71,7 +69,7 @@ func (r *ConfigRepo) Set(_ context.Context, category, key string, value any) err
 	return nil
 }
 
-// Delete removes a setting. Returns true if a row was deleted. Matches Python: cursor.rowcount > 0.
+// Delete removes a setting. Returns true if a row was deleted.
 func (r *ConfigRepo) Delete(_ context.Context, category, key string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -125,7 +123,6 @@ func (r *ConfigRepo) Count(_ context.Context) (int, error) {
 
 // ListByCategory lists settings, optionally filtered by category.
 // Returns nested map: {category: {key: value}}.
-// Matches Python: ORDER BY category, key. Uses json.loads(value).
 func (r *ConfigRepo) ListByCategory(_ context.Context, category *string) (map[string]map[string]any, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -149,7 +146,7 @@ func (r *ConfigRepo) ListByCategory(_ context.Context, category *string) (map[st
 		return result, nil
 	}
 
-	// Collect all entries and sort by category, then key (Python: ORDER BY category, key)
+	// Collect all entries and sort by category, then key
 	type kv struct {
 		category string
 		key      string

@@ -13,18 +13,18 @@ import (
 var setupLoggingOnce sync.Once
 
 // SetupLogging configures the root slog logger with console-style format and
-// continuous file rotation. Mirrors Python's mvmctl.utils._io.setup_logging().
+// continuous file rotation.
 //
-// Python always creates a RotatingFileHandler at CacheUtils.get_log_path() with
-// maxBytes=10MB, backupCount=3, and level=DEBUG — regardless of the console level.
+// A rotating file handler is always created with maxBytes=10MB, backupCount=3,
+// and level=DEBUG — regardless of the console level.
 // The console handler respects the configured level (DEBUG/INFO/WARNING).
 // The file handler always logs at DEBUG level for persistent debugging without
 // requiring --debug flags.
 //
 // Priority (highest first):
-//  1. debug=true  → DEBUG level
-//  2. verbose=true → INFO level
-//  3. MVM_LOG_LEVEL env var → parsed level (default WARNING)
+// 1. debug=true  → DEBUG level
+// 2. verbose=true → INFO level
+// 3. MVM_LOG_LEVEL env var → parsed level (default WARNING)
 func SetupLogging(verbose, debug bool) {
 	setupLoggingOnce.Do(func() {
 		var level slog.Level

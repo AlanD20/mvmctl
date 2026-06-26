@@ -1,9 +1,8 @@
 package model
 
-// ── ConsoleRelay (interface) ──
+// --- ConsoleRelay (interface) ---
 
 // ConsoleRelay is the interface for console relay operations.
-// Matches the public API of Python's ConsoleRelayManager (now console.Relay).
 type ConsoleRelay interface {
 	IsRunning() bool
 	PID() (int, bool)
@@ -11,9 +10,9 @@ type ConsoleRelay interface {
 	Stop(force bool) bool
 }
 
-// ── ConsoleConnectionInfo ──
+// --- ConsoleConnectionInfo ---
 
-// ConsoleConnectionInfo matches Python's ConsoleConnectionInfo dataclass.
+// ConsoleConnectionInfo holds console connection parameters.
 type ConsoleConnectionInfo struct {
 	SocketPath string `json:"socket_path"`
 	VMName     string `json:"vm_name"`

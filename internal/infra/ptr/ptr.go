@@ -2,11 +2,9 @@
 //
 // This consolidates scattered strPtr, intPtr, boolPtr, safeDeref functions
 // that were duplicated across pkg/api/, internal/cli/, internal/core/.
-// Python has no direct equivalent — these are porting conveniences.
 package ptr
 
 // StrNonEmpty returns a pointer to s if s is non-empty, or nil if s is empty.
-// Matches Python's pattern of returning None for empty strings.
 func StrNonEmpty(s string) *string {
 	if s == "" {
 		return nil

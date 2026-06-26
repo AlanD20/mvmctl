@@ -1,3 +1,5 @@
+// Package vm provides VM lifecycle management (start/stop/pause/resume).
+// Layer: Core domain — never imports other core/* packages.
 package vm
 
 import (
@@ -8,8 +10,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ── Service ──
-// Matches Python's VMService class exactly.
+// --- Service ---
 
 // Service is a stateless VM operations coordinator.
 // Handles bulk operations and delegates single-VM operations to Controller.
@@ -24,53 +25,52 @@ func NewService(repo Repository) *Service {
 	}
 }
 
-// ── Single-VM operations ──
+// --- Single-VM operations ---
 
-// Stop stops a single VM. Matches Python's stop().
-func (s *Service) Stop(ctx context.Context, vm *model.VM, force bool) error {
+// Stop stops a single VM and cleans up its Firecracker process.
+func (s *Service) Stop(ctx context.Context, vm *model.VMItem, force bool) error {
 	c := NewController(vm, s.repo)
 	return c.Stop(ctx, force)
 }
 
-// Start starts a single VM. Matches Python's start().
-func (s *Service) Start(ctx context.Context, vm *model.VM) error {
+// Start boots a VM from its current state.
+func (s *Service) Start(ctx context.Context, vm *model.VMItem) error {
 	c := NewController(vm, s.repo)
 	return c.Start(ctx)
 }
 
-// Pause pauses a single VM. Matches Python's pause().
-func (s *Service) Pause(ctx context.Context, vm *model.VM) error {
+// Pause suspends VM execution via the Firecracker API.
+func (s *Service) Pause(ctx context.Context, vm *model.VMItem) error {
 	c := NewController(vm, s.repo)
 	return c.Pause(ctx)
 }
 
-// Resume resumes a single VM. Matches Python's resume().
-func (s *Service) Resume(ctx context.Context, vm *model.VM) error {
+// Resume continues execution of a paused VM.
+func (s *Service) Resume(ctx context.Context, vm *model.VMItem) error {
 	c := NewController(vm, s.repo)
 	return c.Resume(ctx)
 }
 
-// Reboot reboots a single VM. Matches Python's reboot().
-func (s *Service) Reboot(ctx context.Context, vm *model.VM, force bool) error {
+// Reboot restarts the VM by stopping and starting it.
+func (s *Service) Reboot(ctx context.Context, vm *model.VMItem, force bool) error {
 	c := NewController(vm, s.repo)
 	return c.Reboot(ctx, force)
 }
 
-// ── Bulk operations ──
-// These match Python's VMService stop_many, start_many, etc. exactly.
+// --- Bulk operations ---
 
-// StopMany stops multiple VMs. Matches Python's stop_many().
+// StopMany stops multiple VMs.
 func (s *Service) StopMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	force bool,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Stop(ctx, vm, force)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
@@ -79,17 +79,17 @@ func (s *Service) StopMany(
 	return toBulkResult(results)
 }
 
-// StartMany starts multiple VMs. Matches Python's start_many().
+// StartMany starts multiple VMs.
 func (s *Service) StartMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Start(ctx, vm)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
@@ -98,17 +98,17 @@ func (s *Service) StartMany(
 	return toBulkResult(results)
 }
 
-// PauseMany pauses multiple VMs. Matches Python's pause_many().
+// PauseMany pauses multiple VMs.
 func (s *Service) PauseMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Pause(ctx, vm)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
@@ -117,17 +117,17 @@ func (s *Service) PauseMany(
 	return toBulkResult(results)
 }
 
-// ResumeMany resumes multiple VMs. Matches Python's resume_many().
+// ResumeMany resumes multiple VMs.
 func (s *Service) ResumeMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Resume(ctx, vm)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {
@@ -136,18 +136,18 @@ func (s *Service) ResumeMany(
 	return toBulkResult(results)
 }
 
-// RebootMany reboots multiple VMs. Matches Python's reboot_many().
+// RebootMany reboots multiple VMs.
 func (s *Service) RebootMany(
 	ctx context.Context,
-	vms []*model.VM,
+	vms []*model.VMItem,
 	force bool,
 	parallelism bool,
 	maxWorkers int,
 ) *errs.BulkResult {
-	fn := func(_ context.Context, vm *model.VM) (*model.VM, error) {
+	fn := func(_ context.Context, vm *model.VMItem) (*model.VMItem, error) {
 		return vm, s.Reboot(ctx, vm, force)
 	}
-	var results []pool.Result[*model.VM]
+	var results []pool.Result[*model.VMItem]
 	if parallelism {
 		results = pool.Gather(ctx, maxWorkers, vms, fn)
 	} else {

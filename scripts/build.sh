@@ -56,44 +56,45 @@ resolve_version() {
   echo "0.0.0-dev"
 }
 
-# ─── Build guest agent (pre-compiled, gzip-compressed for embedding) ─────────
+# ─── Build guest agent (pre-compiled, zstd-compressed for embedding) ─────────
 # Cross-compiles the vsock guest agent for the target architecture, then
-# gzips it. The compressed binary is embedded via //go:embed, reducing the
-# mvm binary size by ~60% for the agent portion.
+# compresses it with zstd. The compressed binary is embedded via //go:embed,
+# reducing the mvm binary size by ~60% for the agent portion.
 build_agent() {
   local arch="$1"
   local agent_dir="internal/service/vsockagent"
   local agent_binary="agent-linux-${arch}"
-  local agent_gz="${agent_binary}.gz"
+  local agent_zst="${agent_binary}.zst"
 
   # Placeholder for //go:embed before building the agent binary.
-  touch "${agent_dir}/${agent_gz}"
+  touch "${agent_dir}/${agent_zst}"
 
   echo "  → Building guest agent (linux/${arch})..."
-  CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build \
+  CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build -a \
     -o "${agent_dir}/${agent_binary}" \
     -ldflags="-s -w -X '${LDFLAGS_VAR}=${version}'" \
     ./internal/service/vsockagent/cmd/
 
   # Compress for embedding — saves ~60% in embedded binary size.
   # Decompressed lazily at runtime on first AgentBinary() call.
+  # zstd gives ~10-15% better compression than gzip at level 19.
   echo "  → Compressing guest agent..."
-  gzip -9 -f "${agent_dir}/${agent_binary}"
+  zstd -19 -f -o "${agent_dir}/${agent_zst}" "${agent_dir}/${agent_binary}"
 }
 
 # ─── Clean up agent binaries ─────────────────────────────────────────────────
 cleanup_agent() {
   local arch="$1"
   rm -f "internal/service/vsockagent/agent-linux-${arch}" \
-        "internal/service/vsockagent/agent-linux-${arch}.gz"
+        "internal/service/vsockagent/agent-linux-${arch}.zst"
 }
 
-# ─── Build the binary ────────────────────────────────────────────────────────
-do_build() {
+# ─── Build for one architecture ──────────────────────────────────────────────
+do_build_one() {
   local mode="$1"
   local version="$2"
   local output="$3"
-  local arch="$4"
+  local goarch="$4"   # Go arch name: amd64 or arm64
 
   local ldflags="-X '${LDFLAGS_VAR}=${version}'"
   local buildargs=()
@@ -115,10 +116,10 @@ do_build() {
   buildargs+=("-ldflags=${ldflags}")
 
   # Step 1: Build guest agent binary for the target arch (needed for //go:embed)
-  build_agent "$arch"
-  trap "cleanup_agent $arch" EXIT
+  build_agent "$goarch"
+  trap "cleanup_agent $goarch" EXIT
 
-  echo "==> Building mvmctl ${mode} binary"
+  echo "==> Building mvmctl ${mode} binary (linux/${goarch})"
   echo "    version:  ${version}"
   echo "    output:   ${output}"
   echo "    ldflags:  ${ldflags}"
@@ -129,9 +130,30 @@ do_build() {
   # Ensure output directory exists (e.g. dist/)
   mkdir -p "$(dirname "${output}")"
 
-  CGO_ENABLED=0 go build "${buildargs[@]}" -o "${output}" ./cmd/mvm/
+  GOARCH="${goarch}" CGO_ENABLED=0 go build "${buildargs[@]}" -o "${output}" ./cmd/mvm/
 
   echo "    done:     $(ls -lh "${output}" | awk '{print $5}')"
+}
+
+# ─── Build the binary (single arch or all) ──────────────────────────────────
+do_build() {
+  local mode="$1"
+  local version="$2"
+  local output="$3"
+  local arch="$4"
+
+  if [[ "$arch" == "all" ]]; then
+    # Build for both amd64 and arm64.
+    local outdir
+    outdir="$(dirname "${output}")"
+    local outname
+    outname="$(basename "${output}")"
+
+    do_build_one "$mode" "$version" "${outdir}/${outname}" "amd64"
+    do_build_one "$mode" "$version" "${outdir}/${outname}-arm64" "arm64"
+  else
+    do_build_one "$mode" "$version" "$output" "$arch"
+  fi
 }
 
 # ─── Print resolved version ──────────────────────────────────────────────────
@@ -172,7 +194,7 @@ main() {
       ;;
     --arch)
       if [[ -z "${2:-}" ]]; then
-        echo "ERROR: --arch requires a value (amd64|arm64)" >&2
+        echo "ERROR: --arch requires a value (amd64|arm64|all)" >&2
         exit 1
       fi
       arch="$2"

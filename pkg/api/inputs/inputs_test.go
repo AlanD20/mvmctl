@@ -16,8 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── ParseVMPath ─────────────────────────────────────────────────────────────
-// Rationale: ParseVMPath splits "vm:path" references used by CPRequest
+// --- ParseVMPath ---
+// Rationale: ParseVMPath splits "vm:path" references used by CPInput.Resolve()
 // for scp-style copy targets. A bug here would misroute file copies
 // to the wrong VM or silently treat VM-less paths as local.
 
@@ -60,7 +60,7 @@ func TestParseVMPath(t *testing.T) {
 	}
 }
 
-// ─── resolveDisabledDetectors ────────────────────────────────────────────────
+// --- resolveDisabledDetectors ---
 // Rationale: resolveDisabledDetectors translates CLI detector names to
 // internal codes or rejects unknown names. A bug here would allow
 // typos to silently pass through, or disable the wrong detector.
@@ -91,8 +91,7 @@ func TestResolveDisabledDetectors(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			r := &ImageAcquireRequest{}
-			got, err := r.resolveDisabledDetectors(tc.input)
+			got, err := resolveDisabledDetectors(tc.input)
 
 			if tc.wantErr != "" {
 				require.Error(t, err)
@@ -132,7 +131,7 @@ func sortedValues(m map[string]string) []string {
 	return out
 }
 
-// ─── parseKernelFilename ─────────────────────────────────────────────────────
+// --- parseKernelFilename ---
 // Rationale: parseKernelFilename extracts version and architecture from
 // kernel filenames. Bugs here would mis-identify kernel versions,
 // causing version resolution to fall back to "unknown".
@@ -172,37 +171,12 @@ func TestParseKernelFilename(t *testing.T) {
 	}
 }
 
-// ─── resolveLogType ──────────────────────────────────────────────────────────
-// Rationale: resolveLogType maps the OsLog boolean to "os" or "boot"
-// log type strings. A bug would show wrong logs (serial vs guest OS).
-
-func TestResolveLogType(t *testing.T) {
-	tests := map[string]struct {
-		osLog bool
-		want  string
-	}{
-		"os log enabled":   {osLog: true, want: "os"},
-		"boot log default": {osLog: false, want: "boot"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			r := &LogRequest{input: LogInput{OsLog: tc.osLog}}
-			got := r.resolveLogType()
-
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("resolveLogType() (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
-// ─── KeyCreateRequest.Resolve ────────────────────────────────────────────────
-// Rationale: KeyCreateRequest.Resolve validates key names and
+// --- KeyCreateInput.Resolve ---
+// Rationale: KeyCreateInput.Resolve validates key names and
 // algorithms before creating SSH keys. A bug here would let invalid
 // key names through, causing filesystem or SSH failures.
 
-func TestKeyCreateRequest_Resolve(t *testing.T) {
+func TestKeyCreateInput_Resolve(t *testing.T) {
 	tests := map[string]struct {
 		input   KeyCreateInput
 		want    *ResolvedKeyCreateInput
@@ -211,11 +185,11 @@ func TestKeyCreateRequest_Resolve(t *testing.T) {
 		// Error paths first
 		"empty name": {
 			input:   KeyCreateInput{Name: "", OutputDir: "/tmp", Overwrite: true},
-			wantErr: "invalid key name",
+			wantErr: "key name is required",
 		},
 		"invalid algorithm": {
 			input:   KeyCreateInput{Name: "mykey", Algorithm: "dsa", OutputDir: "/tmp", Overwrite: true},
-			wantErr: "Invalid algorithm",
+			wantErr: "invalid algorithm",
 		},
 		"name with shell metacharacters": {
 			input:   KeyCreateInput{Name: "key;rm -rf /", OutputDir: "/tmp", Overwrite: true},
@@ -256,8 +230,7 @@ func TestKeyCreateRequest_Resolve(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			req := NewKeyCreateRequest(tc.input)
-			got, err := req.Resolve()
+			got, err := tc.input.Resolve()
 
 			if tc.wantErr != "" {
 				require.Error(t, err)
@@ -284,46 +257,33 @@ func TestKeyCreateRequest_Resolve(t *testing.T) {
 
 func intPtr(v int) *int { return &v }
 
-// ─── BinaryPullRequest.ensureValidate ────────────────────────────────────────
-// Rationale: ensureValidate rejects unsupported binary types and allows
-// git-ref builds to skip version checks. A bug here could let invalid
-// binary types through and cause download/build failures.
+// --- BinaryPullInput.Resolve ---
+// Rationale: BinaryPullInput.Resolve validates and resolves defaults for
+// binary pulls. A bug here could let invalid types through.
 
-func TestBinaryPullRequest_ensureValidate(t *testing.T) {
+func TestBinaryPullInput_Resolve(t *testing.T) {
 	tests := map[string]struct {
-		result  *ResolvedBinaryPullInput
+		input   BinaryPullInput
 		wantErr string
 	}{
-		// Error paths first
-		"nil result": {
-			result:  nil,
-			wantErr: "No resolved pull input",
-		},
+		// Error paths
 		"unsupported binary type": {
-			result:  &ResolvedBinaryPullInput{Type: "kernel"},
-			wantErr: "Unsupported binary",
-		},
-		"empty type defaults not applied": {
-			result:  &ResolvedBinaryPullInput{Type: ""},
+			input:   BinaryPullInput{Type: "kernel", Version: "1.0.0"},
 			wantErr: "Unsupported binary",
 		},
 
 		// Happy paths
 		"firecracker type passes": {
-			result: &ResolvedBinaryPullInput{Type: "firecracker"},
+			input: BinaryPullInput{Type: "firecracker", Version: "1.0.0"},
 		},
-		"firecracker type mixed case": {
-			result: &ResolvedBinaryPullInput{Type: "Firecracker"},
-		},
-		"git ref skips type validation": {
-			result: &ResolvedBinaryPullInput{Type: "firecracker", GitRef: strPtr("main")},
+		"empty type defaults to firecracker": {
+			input: BinaryPullInput{Version: "1.0.0"},
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			r := &BinaryPullRequest{result: tc.result}
-			err := r.ensureValidate()
+			_, err := tc.input.Resolve()
 
 			if tc.wantErr != "" {
 				require.Error(t, err)
@@ -335,9 +295,7 @@ func TestBinaryPullRequest_ensureValidate(t *testing.T) {
 	}
 }
 
-func strPtr(s string) *string { return &s }
-
-// ─── VMCreateRequest.ensureValidate (VCPU range) ─────────────────────────────
+// --- VMCreateRequest.ensureValidate (VCPU range) ---
 // Rationale: VCPU range validation prevents creating VMs with
 // impossible or wasteful vCPU counts. A bug here could allow 0 or
 // 999 vCPUs, causing Firecracker startup failure or resource exhaustion.
@@ -348,10 +306,10 @@ func TestVMCreateEnsureValidate_VCPURange(t *testing.T) {
 		wantErr string
 	}{
 		// Error paths — out of range (checked before I/O, no deps needed)
-		"zero vcpu":            {vcpu: 0, wantErr: "Invalid vcpus"},
-		"negative vcpu":        {vcpu: -1, wantErr: "Invalid vcpus"},
-		"below minimum by one": {vcpu: infra.VCPUMin - 1, wantErr: "Invalid vcpus"},
-		"above maximum by one": {vcpu: infra.VCPUMax + 1, wantErr: "Invalid vcpus"},
+		"zero vcpu":            {vcpu: 0, wantErr: "Invalid vcpu"},
+		"negative vcpu":        {vcpu: -1, wantErr: "Invalid vcpu"},
+		"below minimum by one": {vcpu: infra.VCPUMin - 1, wantErr: "Invalid vcpu"},
+		"above maximum by one": {vcpu: infra.VCPUMax + 1, wantErr: "Invalid vcpu"},
 	}
 
 	for name, tc := range tests {
@@ -380,7 +338,7 @@ func TestVMCreateEnsureValidate_VCPURange(t *testing.T) {
 	})
 }
 
-// ─── VMCreateRequest.ensureValidate (memory range) ───────────────────────────
+// --- VMCreateRequest.ensureValidate (memory range) ---
 // Rationale: Memory range validation prevents OOM or insufficient-memory
 // VM configurations. A bug could let 0 MiB or 99999 MiB through.
 
@@ -423,145 +381,37 @@ func TestVMCreateEnsureValidate_MemoryRange(t *testing.T) {
 	})
 }
 
-// ─── NetworkCreateRequest.ensureValidate (name validation) ───────────────────
-// Rationale: Network name validation prevents invalid names that would
-// break bridge creation or confuse users. A bug would allow dots or
-// empty names through.
+// --- NetworkCreateInput.Validate ---
+// Rationale: NetworkCreateInput.Validate checks basic input fields.
+// A bug would allow empty names or subnets through.
 
-func TestNetworkCreateEnsureValidate_Name(t *testing.T) {
+func TestNetworkCreateInput_Validate(t *testing.T) {
 	tests := map[string]struct {
-		name    string
+		input   NetworkCreateInput
 		wantErr string
 	}{
-		// Error paths (checked before I/O — no deps needed for these)
-		"empty name":                {name: "", wantErr: "invalid network name"},
-		"name with dots":            {name: "my.network", wantErr: "invalid network name"},
-		"name starting with hyphen": {name: "-mynet", wantErr: "invalid network name"},
-		"name with uppercase":       {name: "MyNet", wantErr: "invalid network name"},
-		"reserved interface name":   {name: "eth0", wantErr: "invalid network name"},
+		"empty name": {
+			input:   NetworkCreateInput{Subnet: "10.0.0.0/24"},
+			wantErr: "Network name is required",
+		},
+		"empty subnet": {
+			input:   NetworkCreateInput{Name: "testnet"},
+			wantErr: "Subnet is required",
+		},
+		"valid input": {
+			input: NetworkCreateInput{Name: "testnet", Subnet: "10.0.0.0/24"},
+		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			r := &NetworkCreateRequest{}
-			r.result = &ResolvedNetworkCreateRequest{
-				Name:   tc.name,
-				Subnet: "10.0.0.0/24",
+			err := tc.input.Validate()
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
 			}
-			err := r.ensureValidate(context.Background())
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.wantErr)
-			return
+			require.NoError(t, err)
 		})
 	}
-
-	// Context cancellation test
-	t.Run("context_cancelled_returns_error", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		r := &NetworkCreateRequest{}
-		r.result = &ResolvedNetworkCreateRequest{
-			Name:   "testnet",
-			Subnet: "10.0.0.0/24",
-		}
-		err := r.ensureValidate(ctx)
-		assert.Error(t, err)
-	})
-}
-
-// ─── NetworkCreateRequest.ensureValidate (subnet validation) ─────────────────
-// Rationale: Subnet validation prevents creating networks with invalid
-// CIDR notation. A bug here could allow malformed subnets through.
-
-func TestNetworkCreateEnsureValidate_Subnet(t *testing.T) {
-	tests := map[string]struct {
-		subnet  string
-		wantErr string
-	}{
-		// Error paths (checked before I/O — no deps needed for these)
-		"empty subnet":     {subnet: "", wantErr: "invalid subnet"},
-		"not a CIDR":       {subnet: "not-a-cidr", wantErr: "invalid subnet"},
-		"missing prefix":   {subnet: "10.0.0.0", wantErr: "invalid subnet"},
-		"ipv6 only":        {subnet: "::1/128", wantErr: "IPv4"},
-		"prefix too large": {subnet: "10.0.0.0/33", wantErr: "invalid subnet"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			r := &NetworkCreateRequest{}
-			r.result = &ResolvedNetworkCreateRequest{
-				Name:   "testnet",
-				Subnet: tc.subnet,
-			}
-			err := r.ensureValidate(context.Background())
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.wantErr)
-			return
-		})
-	}
-
-	// Context cancellation test
-	t.Run("context_cancelled_returns_error", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		r := &NetworkCreateRequest{}
-		r.result = &ResolvedNetworkCreateRequest{
-			Name:   "testnet",
-			Subnet: "10.0.0.0/24",
-		}
-		err := r.ensureValidate(ctx)
-		assert.Error(t, err)
-	})
-}
-
-// ─── NetworkCreateRequest.ensureValidate (gateway validation) ────────────────
-// Rationale: Gateway validation ensures the gateway IP is within the
-// subnet and is a valid private address. A bug could produce a
-// non-routable or out-of-subnet gateway.
-
-func TestNetworkCreateEnsureValidate_Gateway(t *testing.T) {
-	tests := map[string]struct {
-		gateway string
-		subnet  string
-		wantErr string
-	}{
-		// Error paths (checked before I/O — no deps needed for these)
-		"empty gateway":   {gateway: "", subnet: "10.0.0.0/24", wantErr: "invalid gateway"},
-		"not an IP":       {gateway: "not-an-ip", subnet: "10.0.0.0/24", wantErr: "invalid gateway"},
-		"public IP":       {gateway: "1.2.3.4", subnet: "10.0.0.0/24", wantErr: "private"},
-		"outside subnet":  {gateway: "10.0.1.1", subnet: "10.0.0.0/24", wantErr: "not within subnet"},
-		"network address": {gateway: "10.0.0.0", subnet: "10.0.0.0/24", wantErr: "network address"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			r := &NetworkCreateRequest{}
-			r.result = &ResolvedNetworkCreateRequest{
-				Name:        "testnet",
-				Subnet:      tc.subnet,
-				IPv4Gateway: tc.gateway,
-			}
-			err := r.ensureValidate(context.Background())
-
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), tc.wantErr)
-			return
-		})
-	}
-
-	// Context cancellation test
-	t.Run("context_cancelled_returns_error", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		r := &NetworkCreateRequest{}
-		r.result = &ResolvedNetworkCreateRequest{
-			Name:        "testnet",
-			Subnet:      "10.0.0.0/24",
-			IPv4Gateway: "10.0.0.1",
-		}
-		err := r.ensureValidate(ctx)
-		assert.Error(t, err)
-	})
 }

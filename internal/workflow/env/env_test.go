@@ -21,7 +21,7 @@ import (
 	"mvmctl/pkg/api"
 )
 
-// ─── Registry ─────────────────────────────────────────────────────────────────
+// --- Registry ---
 
 // Rationale: The Registry must contain all required step types so that
 // ResolveSpec can construct the correct steps from a YAML spec.
@@ -54,7 +54,7 @@ func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
 	})
 }
 
-// ─── FromSpec factory ─────────────────────────────────────────────────────────
+// --- FromSpec factory ---
 
 // Rationale: Each FromSpec factory must create a Step with the correct name
 // format "type:name" and correct Type() so that dependency resolution
@@ -148,7 +148,7 @@ func TestFromSpec_CopyStep_NameFormat(t *testing.T) {
 	assert.IsType(t, &envpkg.CopyStep{}, step)
 }
 
-// ─── FromState factory ─────────────────────────────────────────────────────────
+// --- FromState factory ---
 
 // Rationale: Each FromState factory must reconstruct a step from previously
 // persisted state. The resulting step must have the correct name, type,
@@ -270,7 +270,7 @@ func TestFromState_CopyStep_CorrectType(t *testing.T) {
 	assert.IsType(t, &envpkg.CopyStep{}, step)
 }
 
-// ─── ResolveSpec ──────────────────────────────────────────────────────────────
+// --- ResolveSpec ---
 
 // Rationale: ResolveSpec must read a YAML spec, validate it, and convert each
 // entry into a workflow.Step using the appropriate Registry factory. Invalid
@@ -533,7 +533,7 @@ key:
 	assert.Equal(t, "network:my-net", deps[0])
 }
 
-// ─── Helper Functions ──────────────────────────────────────────────────────────
+// --- Helper Functions ---
 
 // Rationale: FormatStepName produces a display name in "type:name" format
 // that is used as the canonical step identifier throughout the workflow engine.
@@ -602,7 +602,7 @@ func TestResolveWorkflowID_PrefixMatch(t *testing.T) {
 	assert.Equal(t, fullID, id)
 }
 
-// ─── SSH & Copy Steps ─────────────────────────────────────────────────────────
+// --- SSH & Copy Steps ---
 
 // Rationale: SSH step with a key reference should set SSHInput.Key correctly.
 func TestFromSpec_SSHStep_WithKey(t *testing.T) {
@@ -690,7 +690,7 @@ copy:
 	assert.Contains(t, copyStep.Dependencies(), "vm:my-vm")
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // writeSpec writes YAML content to a temp file and returns the path.
 func writeSpec(t *testing.T, content string) string {

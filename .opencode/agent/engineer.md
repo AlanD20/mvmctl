@@ -120,7 +120,7 @@ STEP 6: VERIFY — Run go build ./...; go vet ./...
 - Enricher wired once at startup with all repository interfaces.
 
 ### Validation
-- Lives in `pkg/api/inputs/` — `*Input` / `*Request` / `Resolved*` structs.
+- Lives in `pkg/api/inputs/` — `*Input` structs with `Validate()` / `Resolve()` (ADR-0011).
 - Caller validates, receiver trusts. Service/Controller never validate caller input.
 
 ### Constants and defaults

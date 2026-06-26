@@ -22,7 +22,7 @@ type MockHostAPI struct {
 	HostStatusCheckFunc           func(ctx context.Context) *results.HostStatusCheck
 	HostCleanFunc                 func(ctx context.Context) ([]string, error)
 	HostResetFunc                 func(ctx context.Context) ([]string, error)
-	HostGetRunningVMsFunc         func(ctx context.Context) ([]*model.VM, error)
+	HostGetRunningVMsFunc         func(ctx context.Context) ([]*model.VMItem, error)
 	HostIsInitializedFunc         func(ctx context.Context) bool
 	HostCheckReadinessFunc        func(ctx context.Context) *model.ProbeResult
 }
@@ -111,7 +111,7 @@ func (m *MockHostAPI) HostReset(ctx context.Context) ([]string, error) {
 	return nil, nil
 }
 
-func (m *MockHostAPI) HostGetRunningVMs(ctx context.Context) ([]*model.VM, error) {
+func (m *MockHostAPI) HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error) {
 	if m.HostGetRunningVMsFunc != nil {
 		return m.HostGetRunningVMsFunc(ctx)
 	}

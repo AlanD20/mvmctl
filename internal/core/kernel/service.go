@@ -1,3 +1,5 @@
+// Package kernel provides kernel binary download and management.
+// Layer: Core domain — never imports other core/* packages.
 package kernel
 
 import (
@@ -28,7 +30,7 @@ import (
 	"mvmctl/internal/assets"
 )
 
-// ── Service-layer types ──
+// --- Service-layer types ---
 
 type KernelPipelineResult struct {
 	ConfigResult *KernelConfigResult
@@ -101,7 +103,7 @@ func NewService(repo Repository, cacheDir string) *Service {
 	}
 }
 
-// ── Firecracker Kernel Download ──────────────────────────────────────────
+// --- Firecracker Kernel Download ---
 
 // FetchFirecrackerKernel downloads a pre-built Firecracker CI vmlinux.
 func (s *Service) FetchFirecrackerKernel(
@@ -211,7 +213,7 @@ func (s *Service) FetchFirecrackerKernel(
 	}, nil
 }
 
-// ── Official Kernel Build Pipeline ──────────────────────────────────────
+// --- Official Kernel Build Pipeline ---
 
 // BuildOfficialKernel builds an official kernel from source.
 func (s *Service) BuildOfficialKernel(
@@ -472,7 +474,7 @@ func (s *Service) fetchSHA256(ctx context.Context, sha256URL, filename string) (
 	return "", nil
 }
 
-// ── Kernel Listing ──────────────────────────────────────────────────────
+// --- Kernel Listing ---
 
 func (s *Service) ListAll(ctx context.Context, verify bool) ([]*model.KernelItem, error) {
 	kernels, err := s.repo.ListAll(ctx)
@@ -502,20 +504,28 @@ func (s *Service) List(ctx context.Context) ([]*model.KernelItem, error) {
 	return s.ListAll(ctx, true)
 }
 
-// ── Kernel Remove ───────────────────────────────────────────────────────
+// --- Kernel Remove ---
 
 func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bool) (*model.KernelItem, error) {
 	vms := kernel.VMs
 	hasVMs := len(vms) > 0
+	hasSnapshots := len(kernel.Snapshots) > 0
 
-	if hasVMs && !force {
-		var names []string
+	if (hasVMs || hasSnapshots) && !force {
+		var refs []string
 		for _, vm := range vms {
-			names = append(names, vm.Name)
+			refs = append(refs, vm.Name)
+		}
+		if hasSnapshots {
+			names := make([]string, len(kernel.Snapshots))
+			for i, s := range kernel.Snapshots {
+				names[i] = s.Name
+			}
+			refs = append(refs, fmt.Sprintf("%d snapshot(s): %s", len(kernel.Snapshots), strings.Join(names, ", ")))
 		}
 		return nil, errs.New(
 			errs.CodeKernelBuildFailed,
-			fmt.Sprintf("Kernel referenced by VMs: %s", strings.Join(names, ", ")),
+			fmt.Sprintf("Kernel referenced by: %s", strings.Join(refs, ", ")),
 		)
 	}
 
@@ -525,7 +535,7 @@ func (s *Service) Remove(ctx context.Context, kernel *model.KernelItem, force bo
 		}
 	}
 
-	if hasVMs {
+	if hasVMs || hasSnapshots {
 		return kernel, s.repo.SoftDelete(ctx, kernel.ID)
 	}
 	return kernel, s.repo.Delete(ctx, kernel.ID)
@@ -547,7 +557,7 @@ func (s *Service) RemoveMany(
 	return deleted, nil
 }
 
-// ── Spec Loading ────────────────────────────────────────────────────────
+// --- Spec Loading ---
 
 func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 	if s.specs != nil {
@@ -566,7 +576,7 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 	}
 
 	// Intermediate YAML struct matching the file format for clean unmarshal.
-	// Note: KernelSpec's yaml tag for KernelType is "kernel_type", but the
+	// NOTE: KernelSpec's yaml tag for KernelType is "kernel_type", but the
 	// kernels.yaml file uses "type". The specYAML struct matches the file.
 	type specYAML struct {
 		KernelType        string                         `yaml:"type"`
@@ -687,7 +697,7 @@ func (s *Service) GetSpecsFor(names []string, kernelType, version string) ([]*mo
 	return filtered, nil
 }
 
-// ── Build Pipeline ──────────────────────────────────────────────────────
+// --- Build Pipeline ---
 
 func (s *Service) buildTemplateVars(spec *model.KernelSpec, arch string) map[string]string {
 	majorMinor := majorMinorFromVersion(spec.Version)
@@ -929,7 +939,7 @@ func parseBuildWarnings(logData string) []string {
 	return warnings
 }
 
-// ── Download Pipeline ───────────────────────────────────────────────────
+// --- Download Pipeline ---
 
 func (s *Service) DownloadKernelSource(ctx context.Context, url, dest string, sha256 string) error {
 	if sha256 != "" {
@@ -946,15 +956,30 @@ func (s *Service) ExtractKernelTarball(ctx context.Context, tarball, extractDir 
 	if err != nil {
 		return "", err
 	}
+	// Find the most recently created linux-* directory (the one just extracted).
+	// Use the newest dir to avoid picking up stale directories from prior builds.
+	var newest string
+	var newestMod time.Time
 	for _, entry := range entries {
 		if entry.IsDir() && strings.HasPrefix(entry.Name(), "linux-") {
-			return filepath.Join(extractDir, entry.Name()), nil
+			fi, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			mod := fi.ModTime()
+			if newest == "" || mod.After(newestMod) {
+				newest = filepath.Join(extractDir, entry.Name())
+				newestMod = mod
+			}
 		}
+	}
+	if newest != "" {
+		return newest, nil
 	}
 	return "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("No linux-* directory found in kernel tarball"))
 }
 
-// ── Remote Version Listing ──────────────────────────────────────────────
+// --- Remote Version Listing ---
 
 func (s *Service) ListRemoteVersions(
 	ctx context.Context,
@@ -994,7 +1019,7 @@ func (s *Service) ListRemoteVersions(
 	return result
 }
 
-// ── Internal helpers ────────────────────────────────────────────────────
+// --- Internal helpers ---
 
 func (s *Service) downloadFCConfig(
 	ctx context.Context,
@@ -1099,7 +1124,7 @@ func (s *Service) applyConfigFragments(
 	return nil
 }
 
-// ── Caching helpers ────────────────────────────────────────────────────
+// --- Caching helpers ---
 
 func (s *Service) computeConfigHash(
 	spec *model.KernelSpec,
@@ -1166,7 +1191,7 @@ func tryCacheHit(outputPath, cacheMarker, cachedKernelPath string, useCache bool
 	return false
 }
 
-// ── Import Kernel ───────────────────────────────────────────────────────
+// --- Import Kernel ---
 
 func (s *Service) ImportKernel(
 	ctx context.Context,
@@ -1236,7 +1261,7 @@ func (s *Service) ImportKernel(
 	return kernelItem, nil
 }
 
-// ── Version Resolution ──────────────────────────────────────────────────
+// --- Version Resolution ---
 
 func (s *Service) ResolveVersion(
 	ctx context.Context,

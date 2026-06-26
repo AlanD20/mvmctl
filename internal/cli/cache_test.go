@@ -16,7 +16,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── NewCacheCmd ───────────────────────────────────────────────────────────
+// --- NewCacheCmd ---
 // Rationale: NewCacheCmd is the entry point for all cache CLI operations.
 // Missing subcommands silently disable cache management without error.
 
@@ -56,7 +56,7 @@ func TestNewCacheCmd(t *testing.T) {
 	})
 }
 
-// ─── Cache init (via cache init) ───────────────────────────────────────────
+// --- Cache init (via cache init) ---
 // Rationale: Cache init creates the cache directory structure. A broken init
 // command prevents all cache-backed operations from working.
 
@@ -110,7 +110,7 @@ func TestNewCacheInitCmd(t *testing.T) {
 	})
 }
 
-// ─── Cache prune (via cache prune) ─────────────────────────────────────────
+// --- Cache prune (via cache prune) ---
 // Rationale: Cache prune removes stale cache resources. A broken prune command
 // can leave orphaned resources consuming disk space, or fail to free space.
 
@@ -296,7 +296,7 @@ func TestNewCachePruneCmd(t *testing.T) {
 	})
 }
 
-// ─── resourceDisplayName / resourceDisplayNamePlural ───────────────────────
+// --- resourceDisplayName / resourceDisplayNamePlural ---
 // Rationale: Resource display names appear in all cache prune user messages.
 // Incorrect casing or pluralisation creates confusing output.
 

@@ -1,5 +1,4 @@
 // Package api provides the public orchestration layer for all operations.
-// Matches src/mvmctl/api/kernel_operations.py exactly.
 package api
 
 import (
@@ -7,11 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/crypto"
@@ -21,6 +15,10 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 // KernelAPI defines the public interface for kernel operations.
@@ -45,23 +43,19 @@ type KernelAPI interface {
 }
 
 // KernelPrune prunes unused kernels.
-// Matches Python's KernelOperation.prune() exactly.
-// Python's prune() calls KernelOperation.remove() through the full pipeline
-// (resolution, enrichment, VM reference checks) — Go matches this by calling
-// op.KernelRemove() instead of calling the service directly.
+// KernelPrune uses the full KernelRemove pipeline
+// (resolution, enrichment, VM reference checks) instead of calling the service directly.
 func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	allKernels, err := op.Repos.Kernel.ListAll(ctx)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list kernels: %v", err), err)
 	}
-
 	defaultItem, _ := op.Repos.Kernel.GetDefault(ctx)
 	var defaultID string
 	if defaultItem != nil {
 		defaultID = defaultItem.ID
 	}
-
-	// Get referenced kernel IDs from VMs (matches Python's vm_repo.list_all() + kernel_id check)
+	// Get kernel IDs referenced by VMs.
 	vms, _ := op.Repos.VM.ListAll(ctx)
 	referencedKernelIDs := make(map[string]bool)
 	for _, vm := range vms {
@@ -69,7 +63,6 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 			referencedKernelIDs[vm.KernelID] = true
 		}
 	}
-
 	var removed []string
 	for _, kernel := range allKernels {
 		if !includeAll {
@@ -80,10 +73,8 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 				continue
 			}
 		}
-
 		if !dryRun {
-			// Python: KernelOperation.remove(KernelInput(id=[kernel.id]), force=include_all)
-			// Go: call KernelRemove() through the full pipeline.
+			// Call KernelRemove through the full pipeline.
 			result := op.KernelRemove(ctx, inputs.KernelInput{Identifiers: []string{kernel.ID}, Force: includeAll})
 			if result.HasErrors() {
 				slog.Warn("Failed to remove kernel", "id", kernel.ID, "error", result.Errors()[0].Message)
@@ -92,17 +83,13 @@ func (op *Operation) KernelPrune(ctx context.Context, dryRun bool, includeAll bo
 		}
 		removed = append(removed, kernel.ID)
 	}
-
 	return removed, nil
 }
 
 // KernelPull downloads or builds a kernel with full pipeline.
-// Matches Python's KernelOperation.pull(inputs: KernelPullInput, *, on_progress=...) exactly.
 func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInput,
 	onProgress event.OnProgressCallback) (*model.KernelItem, error) {
-
 	kernelType := input.KernelType
-
 	// Determine CI version:
 	// For firecracker type, the user-specified version IS the CI version.
 	// Otherwise, use the default binary's CI version.
@@ -124,7 +111,6 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 			return nil, errs.WrapMsg(errs.CodeKernelPullFailed, err.Error(), err)
 		}
 	}
-
 	// Phase 1: Resolve version spec to concrete version.
 	// Skip when CI version came from user input — kernel version is auto-discovered from S3.
 	if !ciVersionFromInput {
@@ -151,10 +137,8 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		// Clear the version so it doesn't get used as kernel version
 		input.Version = ""
 	}
-
-	// Resolve through the Request pipeline (matches Python)
-	request := inputs.NewKernelPullRequest(input, op.Services.Config)
-	resolved, err := request.Resolve(ctx)
+	// Resolve through the Input pipeline
+	resolved, err := input.Resolve(ctx, op.Services.Config)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeKernelPullFailed,
@@ -162,7 +146,6 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 			err,
 		)
 	}
-
 	// Look up existing kernel for cleanup later (if rebuild produces different path)
 	var existing *model.KernelItem
 	if resolved.KernelType == "firecracker" {
@@ -170,8 +153,7 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 	} else if resolved.KernelType == "official" && resolved.Version != "" {
 		existing, _ = op.Repos.Kernel.GetByVersionAndType(ctx, resolved.Version, resolved.KernelType)
 	}
-
-	// Resolve spec via KernelService (matches Python)
+	// Resolve spec via KernelService
 	specs, err := op.Services.Kernel.GetSpecsFor(nil, resolved.KernelType, resolved.Version)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed,
@@ -191,15 +173,11 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		)
 	}
 	spec := specs[0]
-
 	var fetchResult *model.KernelPullResult
-
-	// ── Dispatch based on kernel type (matches Python exactly) ──
+	// --- Dispatch based on kernel type ---
 	switch resolved.KernelType {
 	case "firecracker":
-
 		emitProgress(onProgress, "download", "running", "Downloading Firecracker kernel...")
-
 		fetchResult, err = op.Services.Kernel.FetchFirecrackerKernel(
 			ctx,
 			spec,
@@ -215,16 +193,13 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 				err,
 			)
 		}
-
 		emitProgress(onProgress, "download", "complete", "Firecracker kernel download complete.")
 	case "official":
 		emitProgress(onProgress, "build", "running", "Building kernel (this may take a while)...")
-
 		var configPath *string
 		if resolved.KernelConfig != nil && *resolved.KernelConfig != "" {
 			configPath = resolved.KernelConfig
 		}
-
 		// Merge feature enforces from selected features.
 		featureEnforces := make(map[string]string, len(resolved.Features))
 		for _, name := range resolved.Features {
@@ -232,7 +207,6 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 				maps.Copy(featureEnforces, f.Enforce)
 			}
 		}
-
 		fetchResult, err = op.Services.Kernel.BuildOfficialKernel(ctx, spec, resolved.Arch, resolved.OutputDir,
 			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild,
 			configPath, featureEnforces,
@@ -240,7 +214,6 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		if err != nil {
 			return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Kernel build failed: %v", err), err)
 		}
-
 		emitProgress(onProgress, "build", "complete", "Kernel build complete.")
 	default:
 		return nil, errs.WrapMsg(
@@ -249,18 +222,15 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 			fmt.Errorf("unsupported kernel type: %s", resolved.KernelType),
 		)
 	}
-
-	// Generate kernel ID in the API layer (matches Python exactly)
+	// Generate kernel ID in the API layer
 	timestamp := time.Now().Format(time.RFC3339)
 	kernelID, err := crypto.KernelID(fetchResult.Path, fetchResult.Version, resolved.Arch)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to compute kernel ID: %v", err), err)
 	}
-
-	// Parse filename for base_name (matches Python)
+	// Parse filename for base_name
 	parsed := kernel.ParseFilename(filepath.Base(fetchResult.Path))
-
-	// Create KernelItem (matches Python exactly)
+	// Create KernelItem
 	kernelItem := &model.KernelItem{
 		ID:        kernelID,
 		Name:      filepath.Base(fetchResult.Path),
@@ -274,21 +244,18 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		CreatedAt: timestamp,
 		UpdatedAt: timestamp,
 	}
-
 	if err := op.Repos.Kernel.Upsert(ctx, kernelItem); err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to persist kernel: %v", err), err)
 	}
-
 	if resolved.SetDefault {
 		_ = op.Repos.Kernel.SetDefault(ctx, kernelItem.ID)
 	}
-
 	// Clean up old kernel file if ID changed and path is different
-	// Python compares old_path.resolve() != new_path before deleting.
+	// Compare resolved paths before deleting old.
 	if existing != nil && existing.ID != kernelItem.ID {
 		oldPath := existing.Path
 		newPath := kernelItem.Path
-		// Resolve both paths to compare actual filesystem locations (matching Python's .resolve())
+		// Resolve both paths to compare actual filesystem locations.
 		oldPathResolved, _ := filepath.EvalSymlinks(oldPath)
 		newPathResolved, _ := filepath.EvalSymlinks(newPath)
 		if oldPathResolved != newPathResolved && oldPathResolved != "" {
@@ -304,25 +271,16 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 			}
 		}
 	}
-
 	op.AuditLog.LogOperation("kernel.pull", map[string]any{
 		"id": kernelItem.ID, "type": kernelItem.Type,
 		"version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
-
 	return kernelItem, nil
 }
 
 // KernelImport imports a local vmlinux file as a kernel.
-// Matches Python's KernelOperation.import_() exactly — uses KernelImportRequest
-// resolution pipeline for input validation and default resolution before
-// calling service.import_kernel().
 func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImportInput) (*model.KernelItem, error) {
-	db := op.Connection.DB()
-
-	// Python: request = KernelImportRequest(inputs=inputs, db=db); resolved = request.resolve()
-	request := inputs.NewKernelImportRequest(input, db)
-	resolved, err := request.Resolve(ctx)
+	resolved, err := input.Resolve()
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeKernelImportFailed,
@@ -330,7 +288,6 @@ func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImport
 			err,
 		)
 	}
-
 	kernelItem, err := op.Services.Kernel.ImportKernel(
 		ctx,
 		resolved.Name,
@@ -342,23 +299,15 @@ func (op *Operation) KernelImport(ctx context.Context, input inputs.KernelImport
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelImportFailed, fmt.Sprintf("Kernel import failed: %v", err), err)
 	}
-
 	op.AuditLog.LogOperation("kernel.import", map[string]any{
 		"name": kernelItem.Name, "version": kernelItem.Version, "arch": kernelItem.Arch,
 	}, "")
-
 	return kernelItem, nil
 }
 
 // KernelRemove removes kernels by identifiers.
-// Matches Python's KernelOperation.remove() exactly — uses KernelRequest.resolve()
-// to resolve identifiers, then enriches with VM references.
-// Each kernel removal is wrapped in per-kernel error handling (matching Python's
-// try/except KernelError) and the method parameter force is combined with
-// resolved.Force (matching Python's force=force or resolved.force).
 func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput) *errs.BatchResult {
-	request := inputs.NewKernelRequest(input, op.Connection.DB(), op.Repos.Kernel)
-	resolved, err := request.Resolve(ctx)
+	kernels, err := input.Resolve(ctx, op.Repos.Kernel)
 	if err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
@@ -371,25 +320,27 @@ func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput)
 			},
 		}
 	}
-
 	items := make([]errs.OperationResult, 0)
-
-	// Batch-enrich with VM references (matches Python's Resolver(repo, include=["vm"]).enrich())
-	op.Enr.EnrichKernel(ctx, resolved.Kernels, "vm")
-
-	for _, kernel := range resolved.Kernels {
-
-		if !resolved.Force && len(kernel.VMs) > 0 {
+	// Enrich kernels with VM and snapshot references.
+	op.Enr.EnrichKernel(ctx, kernels, "vm", "snapshots")
+	for _, kernel := range kernels {
+		if !input.Force && (len(kernel.VMs) > 0 || len(kernel.Snapshots) > 0) {
+			var refs []string
+			if len(kernel.VMs) > 0 {
+				refs = append(refs, fmt.Sprintf("%d VM(s)", len(kernel.VMs)))
+			}
+			if len(kernel.Snapshots) > 0 {
+				refs = append(refs, fmt.Sprintf("%d snapshot(s)", len(kernel.Snapshots)))
+			}
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "kernel.in_use",
-				Message:   fmt.Sprintf("Kernel '%s' is in use by %d VM(s)", kernel.Name, len(kernel.VMs)),
-				Exception: fmt.Errorf("kernel in use by %d VMs", len(kernel.VMs)),
+				Message:   fmt.Sprintf("Kernel '%s' is in use by %s", kernel.Name, strings.Join(refs, ", ")),
+				Exception: fmt.Errorf("kernel in use by %s", strings.Join(refs, ", ")),
 			})
 			continue
 		}
-
-		if _, err := op.Services.Kernel.Remove(ctx, kernel, resolved.Force); err != nil {
+		if _, err := op.Services.Kernel.Remove(ctx, kernel, input.Force); err != nil {
 			items = append(items, errs.OperationResult{
 				Status:    "error",
 				Code:      "kernel.remove_failed",
@@ -399,11 +350,9 @@ func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput)
 			})
 			continue
 		}
-
 		op.AuditLog.LogOperation("kernel.remove", map[string]any{
 			"id": kernel.ID, "name": kernel.Name, "type": kernel.Type,
 		}, "")
-
 		items = append(items, errs.OperationResult{
 			Status:  "success",
 			Code:    "kernel.removed",
@@ -411,12 +360,10 @@ func (op *Operation) KernelRemove(ctx context.Context, input inputs.KernelInput)
 			Item:    kernel,
 		})
 	}
-
 	return &errs.BatchResult{Items: items}
 }
 
 // KernelList returns locally cached or remote kernel listing.
-// Matches Python's KernelOperation.list_all() exactly.
 // When remote=false, returns ([]*model.KernelItem, nil, error).
 // When remote=true, returns (nil, []model.VersionInfo, error).
 func (op *Operation) KernelList(
@@ -427,7 +374,6 @@ func (op *Operation) KernelList(
 ) ([]*model.KernelItem, []model.VersionInfo, error) {
 	if remote {
 		emitProgress(onProgress, "listing", "running", "Fetching remote kernel versions...")
-
 		specs, err := op.Services.Kernel.LoadSpecs()
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to load kernel specs: %w", err)
@@ -436,17 +382,14 @@ func (op *Operation) KernelList(
 		for _, spec := range specs {
 			allSpecs = append(allSpecs, spec)
 		}
-
 		cacheTTL := 0
 		if !noCache {
 			cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.kernel", "remote_list_cache_ttl")
 		}
-
 		resolvedCIVersion, err := op.resolveCIVersion(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-
 		remoteListLimit, _ := op.Services.Config.GetInt(ctx, "defaults.kernel", "remote_list_limit")
 		versionMap := op.Services.Kernel.ListRemoteVersions(
 			ctx,
@@ -460,7 +403,6 @@ func (op *Operation) KernelList(
 		for _, versions := range versionMap {
 			flattened = append(flattened, versions...)
 		}
-
 		local, _ := op.Repos.Kernel.ListAll(ctx)
 		localSet := make(map[string]bool, len(local))
 		for _, l := range local {
@@ -471,7 +413,6 @@ func (op *Operation) KernelList(
 				flattened[i].IsPresent = true
 			}
 		}
-
 		emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found %d remote kernel(s)", len(flattened)))
 		return nil, flattened, nil
 	}
@@ -480,29 +421,21 @@ func (op *Operation) KernelList(
 }
 
 // KernelGet returns a single kernel by identifier.
-// Matches Python's KernelOperation.get() exactly — uses KernelRequest.resolve()
-// internally for consistent resolution behavior.
 func (op *Operation) KernelGet(ctx context.Context, identifier string) (*model.KernelItem, error) {
 	kernelInput := inputs.KernelInput{
 		Identifiers: []string{identifier},
 	}
-
-	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
-	resolved, err := request.Resolve(ctx)
+	kernels, err := kernelInput.Resolve(ctx, op.Repos.Kernel)
 	if err != nil {
 		return nil, fmt.Errorf("kernel not found %q: %w", identifier, err)
 	}
-
-	if len(resolved.Kernels) != 1 {
-		// Python: raise KernelError(f"Expected exactly one kernel, got {len(resolved.kernels)}")
-		return nil, fmt.Errorf("expected exactly one kernel, got %d", len(resolved.Kernels))
+	if len(kernels) != 1 {
+		return nil, fmt.Errorf("expected exactly one kernel, got %d", len(kernels))
 	}
-
-	return resolved.Kernels[0], nil
+	return kernels[0], nil
 }
 
-// KernelInspect returns grouped dict of a kernel.
-// Matches Python's KernelOperation.inspect() exactly.
+// KernelInspect returns detailed kernel information.
 func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*results.KernelInspect, error) {
 	k, err := op.KernelGet(ctx, identifier)
 	if err != nil {
@@ -522,32 +455,22 @@ func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*res
 }
 
 // KernelSetDefault sets a kernel as default.
-// Matches Python's KernelOperation.set_default() exactly — uses KernelRequest.resolve()
-// for consistent identifier resolution, catches KernelError at top level.
 func (op *Operation) KernelSetDefault(ctx context.Context, identifier string) error {
 	kernelInput := inputs.KernelInput{
 		Identifiers: []string{identifier},
 	}
-
-	request := inputs.NewKernelRequest(kernelInput, op.Connection.DB(), op.Repos.Kernel)
-	resolved, err := request.Resolve(ctx)
+	kernels, err := kernelInput.Resolve(ctx, op.Repos.Kernel)
 	if err != nil {
 		return errs.NotFound(errs.CodeKernelNotFound, fmt.Sprintf("Kernel not found: %s", identifier))
 	}
-
-	if len(resolved.Kernels) != 1 {
+	if len(kernels) != 1 {
 		return errs.NotFound(errs.CodeKernelNotFound, fmt.Sprintf("Kernel not found: %s", identifier))
 	}
-
-	kItem := resolved.Kernels[0]
-
+	kItem := kernels[0]
 	ctrl := kernel.NewController(kItem, op.Repos.Kernel)
-
 	if err := ctrl.SetDefault(ctx); err != nil {
 		return errs.WrapMsg(errs.CodeKernelDefaultSetFailed, fmt.Sprintf("Failed to set default kernel: %v", err), err)
 	}
-
 	op.AuditLog.LogOperation("kernel.set_default", map[string]any{"name": kItem.Name}, "")
-
 	return nil
 }

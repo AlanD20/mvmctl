@@ -1,6 +1,6 @@
 package model
 
-// ── ProvisionerType ──
+// --- ProvisionerType ---
 
 // ProvisionerType identifies the image provisioner implementation.
 type ProvisionerType string

@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── NewNetworkCmd ────────────────────────────────────────────────────────────
+// --- NewNetworkCmd ---
 // Rationale: NewNetworkCmd is the entry point for all network CLI operations.
 // Missing subcommands silently disable network management without error.
 
@@ -67,7 +67,7 @@ func TestNewNetworkCmd(t *testing.T) {
 	})
 }
 
-// ─── network ls (via network ls) ─────────────────────────────────────────────
+// --- network ls (via network ls) ---
 // Rationale: Network listing shows users their configured networks. A broken
 // list command prevents users from seeing available networks for VM creation.
 
@@ -82,8 +82,8 @@ func TestNewNetworkListCmd(t *testing.T) {
 
 	t.Run("single_network_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockNetworkAPI{
-			NetworkListAllFunc: func(ctx context.Context) ([]*model.Network, error) {
-				return []*model.Network{
+			NetworkListAllFunc: func(ctx context.Context) ([]*model.NetworkItem, error) {
+				return []*model.NetworkItem{
 					{ID: "net-1", Name: "default", Subnet: "192.168.100.0/24"},
 				}, nil
 			},
@@ -96,8 +96,8 @@ func TestNewNetworkListCmd(t *testing.T) {
 
 	t.Run("multiple_networks_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockNetworkAPI{
-			NetworkListAllFunc: func(ctx context.Context) ([]*model.Network, error) {
-				return []*model.Network{
+			NetworkListAllFunc: func(ctx context.Context) ([]*model.NetworkItem, error) {
+				return []*model.NetworkItem{
 					{ID: "net-1", Name: "default", Subnet: "192.168.100.0/24"},
 					{ID: "net-2", Name: "dmz", Subnet: "10.0.0.0/24"},
 				}, nil
@@ -111,8 +111,8 @@ func TestNewNetworkListCmd(t *testing.T) {
 
 	t.Run("json_output_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockNetworkAPI{
-			NetworkListAllFunc: func(ctx context.Context) ([]*model.Network, error) {
-				return []*model.Network{
+			NetworkListAllFunc: func(ctx context.Context) ([]*model.NetworkItem, error) {
+				return []*model.NetworkItem{
 					{ID: "net-1", Name: "default", Subnet: "192.168.100.0/24"},
 				}, nil
 			},
@@ -126,7 +126,7 @@ func TestNewNetworkListCmd(t *testing.T) {
 
 	t.Run("api_error_returns_error", func(t *testing.T) {
 		mock := &testutil.MockNetworkAPI{
-			NetworkListAllFunc: func(ctx context.Context) ([]*model.Network, error) {
+			NetworkListAllFunc: func(ctx context.Context) ([]*model.NetworkItem, error) {
 				return nil, errors.New("database locked")
 			},
 		}
@@ -142,7 +142,7 @@ func TestNewNetworkListCmd(t *testing.T) {
 		cancel()
 		cancelled := false
 		mock := &testutil.MockNetworkAPI{
-			NetworkListAllFunc: func(ctx context.Context) ([]*model.Network, error) {
+			NetworkListAllFunc: func(ctx context.Context) ([]*model.NetworkItem, error) {
 				if ctx.Err() != nil {
 					cancelled = true
 				}
@@ -158,17 +158,17 @@ func TestNewNetworkListCmd(t *testing.T) {
 	})
 }
 
-// ─── network create (via network create) ──────────────────────────────────────
+// --- network create (via network create) ---
 // Rationale: Network create is how users add new networks. A broken create
 // command prevents users from setting up networking for their VMs.
 
 func TestNewNetworkCreateCmd(t *testing.T) {
 	t.Run("success_with_minimal_flags", func(t *testing.T) {
 		mock := &testutil.MockNetworkAPI{
-			NetworkCreateFunc: func(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error) {
+			NetworkCreateFunc: func(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
 				assert.Equal(t, "test-net", input.Name)
 				assert.Equal(t, "192.168.200.0/24", input.Subnet)
-				return &model.Network{ID: "net-1", Name: "test-net", Subnet: "192.168.200.0/24"}, nil
+				return &model.NetworkItem{ID: "net-1", Name: "test-net", Subnet: "192.168.200.0/24"}, nil
 			},
 		}
 		cmd := cli.NewNetworkCmd(mock, nil)
@@ -200,7 +200,7 @@ func TestNewNetworkCreateCmd(t *testing.T) {
 
 	t.Run("api_error_returns_error", func(t *testing.T) {
 		mock := &testutil.MockNetworkAPI{
-			NetworkCreateFunc: func(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error) {
+			NetworkCreateFunc: func(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
 				return nil, errors.New("bridge creation failed")
 			},
 		}
@@ -217,12 +217,12 @@ func TestNewNetworkCreateCmd(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		mock := &testutil.MockNetworkAPI{
-			NetworkCreateFunc: func(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error) {
+			NetworkCreateFunc: func(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error) {
 				select {
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				default:
-					return &model.Network{ID: "net-1", Name: "test-net"}, nil
+					return &model.NetworkItem{ID: "net-1", Name: "test-net"}, nil
 				}
 			},
 		}

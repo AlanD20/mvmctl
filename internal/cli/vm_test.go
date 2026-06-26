@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── NewVMCmd ──────────────────────────────────────────────────────────────
+// --- NewVMCmd ---
 // Rationale: Missing subcommands silently disable VM operations without error.
 // NewVMCmd is the entry point for all VM CLI operations. If a subcommand is
 // not registered, the user gets a "unknown command" error with no indication
@@ -39,8 +39,6 @@ func TestNewVMCmd(t *testing.T) {
 		{use: "reboot", hasAlias: false},
 		{use: "pause", hasAlias: false},
 		{use: "resume", hasAlias: false},
-		{use: "snapshot", hasAlias: false},
-		{use: "load", hasAlias: false},
 		{use: "inspect", hasAlias: false},
 		{use: "exec", hasAlias: false},
 		{use: "attach-volume", hasAlias: false},
@@ -78,7 +76,7 @@ func TestNewVMCmd(t *testing.T) {
 	})
 }
 
-// ─── vm ls (via vm ls) ─────────────────────────────────────────────────────
+// --- vm ls (via vm ls) ---
 // Rationale: VM listing is the primary user-facing output for VM operations.
 // A broken list command makes the CLI unusable — users cannot see their VMs
 // and cannot target them for lifecycle operations.
@@ -86,7 +84,7 @@ func TestNewVMCmd(t *testing.T) {
 func TestRunVMList(t *testing.T) {
 	t.Run("empty_list_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VM {
+			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
 				return nil
 			},
 		}
@@ -98,8 +96,8 @@ func TestRunVMList(t *testing.T) {
 
 	t.Run("single_vm_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VM {
-				return []*model.VM{{
+			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
+				return []*model.VMItem{{
 					ID: "vm-1", Name: "test-vm",
 					Status: model.VMStatusRunning,
 				}}
@@ -112,12 +110,12 @@ func TestRunVMList(t *testing.T) {
 	})
 
 	t.Run("multiple_vms_returns_no_error", func(t *testing.T) {
-		vms := []*model.VM{
+		vms := []*model.VMItem{
 			{ID: "vm-1", Name: "vm-one", Status: model.VMStatusRunning},
 			{ID: "vm-2", Name: "vm-two", Status: model.VMStatusStopped},
 		}
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VM {
+			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
 				return vms
 			},
 		}
@@ -129,8 +127,8 @@ func TestRunVMList(t *testing.T) {
 
 	t.Run("json_output_with_vms_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VM {
-				return []*model.VM{
+			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
+				return []*model.VMItem{
 					{ID: "vm-1", Name: "vm-one", Status: model.VMStatusRunning},
 				}
 			},
@@ -144,7 +142,7 @@ func TestRunVMList(t *testing.T) {
 
 	t.Run("json_output_with_nil_vms_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VM {
+			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
 				return nil
 			},
 		}
@@ -157,7 +155,7 @@ func TestRunVMList(t *testing.T) {
 
 	t.Run("long_output_returns_no_error", func(t *testing.T) {
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VM {
+			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
 				return nil
 			},
 		}
@@ -173,7 +171,7 @@ func TestRunVMList(t *testing.T) {
 		cancel()
 		cancelled := false
 		mock := &testutil.MockVMAPI{
-			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VM {
+			VMListFunc: func(ctx context.Context, statuses ...string) []*model.VMItem {
 				if ctx.Err() != nil {
 					cancelled = true
 				}
@@ -189,7 +187,7 @@ func TestRunVMList(t *testing.T) {
 	})
 }
 
-// ─── vm start (via vm start) ───────────────────────────────────────────────
+// --- vm start (via vm start) ---
 // Rationale: Start is the most common VM lifecycle operation. A broken start
 // leaves users with stopped VMs and no way to recover without manual
 // intervention. Both success and VM-not-found paths must work.
@@ -257,7 +255,7 @@ func TestRunVMStart(t *testing.T) {
 	})
 }
 
-// ─── vm stop (via vm stop) ────────────────────────────────────────────────
+// --- vm stop (via vm stop) ---
 // Rationale: Stop must gracefully handle already-stopped VMs. An idempotent
 // stop is critical for cleanup scripts that call stop before remove.
 

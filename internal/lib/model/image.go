@@ -1,8 +1,8 @@
 package model
 
-// ── ImageItem ──
+// --- ImageItem ---
 
-// ImageItem corresponds to Python's ImageItem dataclass exactly.
+// ImageItem represents a cached VM image.
 type ImageItem struct {
 	ID               string   `json:"id"                          db:"id"`
 	Type             string   `json:"type"                        db:"type"`
@@ -14,6 +14,7 @@ type ImageItem struct {
 	OriginalSize     int64    `json:"original_size"               db:"original_size"`
 	IsDefault        bool     `json:"is_default"                  db:"is_default"`
 	IsPresent        bool     `json:"is_present"                  db:"is_present"`
+	IsImported       bool     `json:"is_imported"                 db:"is_imported"`
 	PulledAt         string   `json:"pulled_at"                   db:"pulled_at"`
 	CreatedAt        string   `json:"created_at"                  db:"created_at"`
 	UpdatedAt        string   `json:"updated_at"                  db:"updated_at"`
@@ -26,12 +27,12 @@ type ImageItem struct {
 	DeletedAt        *string  `json:"deleted_at,omitempty"        db:"deleted_at"`
 
 	// Resolved relations
-	VMs []*VM `json:"vms,omitempty"`
+	VMs []*VMItem `json:"vms,omitempty"`
 }
 
-// ── ImageSpec ──
+// --- ImageSpec ---
 
-// ImageSpec corresponds to Python's ImageSpec dataclass.
+// ImageSpec defines an image in the YAML spec.
 type ImageSpec struct {
 	Type            string  `yaml:"type"`
 	Version         string  `yaml:"version"`

@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// ─── GetDefault ──────────────────────────────────────────────────────────────
+// --- GetDefault ---
 // Rationale: GetDefault is the primary config resolution path used by the entire
 // codebase. If it returns wrong defaults, VMs get wrong vCPU counts, networks
 // get wrong subnets, etc. — all without errors (silent misconfiguration).
@@ -57,7 +57,7 @@ func TestGetDefault(t *testing.T) {
 	})
 }
 
-// ─── EnvKey ──────────────────────────────────────────────────────────────────
+// --- EnvKey ---
 // Rationale: EnvKey constructs environment variable names used throughout the
 // codebase for config overrides. Wrong prefix would cause silent misconfiguration.
 
@@ -84,7 +84,7 @@ func TestEnvKey(t *testing.T) {
 	}
 }
 
-// ─── IsReservedName ──────────────────────────────────────────────────────────
+// --- IsReservedName ---
 // Rationale: IsReservedName prevents entity names from colliding with CLI
 // subcommands and built-in identifiers. Missing a reserved name would allow
 // creating a VM named "create" which breaks CLI routing.
@@ -149,7 +149,7 @@ func TestIsReservedName(t *testing.T) {
 	}
 }
 
-// ─── ContainsDangerousChars ──────────────────────────────────────────────────
+// --- ContainsDangerousChars ---
 // Rationale: Prevents shell injection and path traversal in user-supplied names.
 // Missing a dangerous character would be a security vulnerability.
 
@@ -192,7 +192,7 @@ func TestContainsDangerousChars(t *testing.T) {
 	}
 }
 
-// ─── SanitizeForLog ──────────────────────────────────────────────────────────
+// --- SanitizeForLog ---
 // Rationale: Prevents log injection attacks by removing control characters and
 // zero-width Unicode characters from log entries.
 
@@ -227,7 +227,7 @@ func TestSanitizeForLog(t *testing.T) {
 	}
 }
 
-// ─── FormatBytesHumanReadable ────────────────────────────────────────────────
+// --- FormatBytesHumanReadable ---
 // Rationale: Used in CLI output for disk sizes, memory sizes, and file sizes.
 // Wrong formatting would confuse users (e.g., "1024 B" instead of "1.0 KiB").
 
@@ -266,7 +266,7 @@ func TestFormatBytesHumanReadable(t *testing.T) {
 	}
 }
 
-// ─── HumanReadableDatetime ───────────────────────────────────────────────────
+// --- HumanReadableDatetime ---
 // Rationale: Formats ISO timestamps for CLI output. Wrong format or timezone
 // handling would confuse users about when resources were created.
 
@@ -296,7 +296,7 @@ func TestHumanReadableDatetime(t *testing.T) {
 	}
 }
 
-// ─── DeepMergeDict ───────────────────────────────────────────────────────────
+// --- DeepMergeDict ---
 // Rationale: DeepMergeDict merges nested config maps for VM creation (merging
 // user overrides into base config). Incorrect merging would cause config loss.
 
@@ -399,7 +399,7 @@ func TestDeepMergeDict(t *testing.T) {
 	})
 }
 
-// ─── NumCPU ──────────────────────────────────────────────────────────────────
+// --- NumCPU ---
 // Rationale: NumCPU wraps runtime.NumCPU(). While trivial, it must return at
 // least 1 on any valid system — zero would cause division-by-zero panics.
 
@@ -408,7 +408,7 @@ func TestNumCPU(t *testing.T) {
 	assert.GreaterOrEqual(t, n, 1, "NumCPU must return at least 1")
 }
 
-// ─── SafeInt ─────────────────────────────────────────────────────────────────
+// --- SafeInt ---
 // Rationale: SafeInt is used for type-safe numeric coercion in config parsing.
 // Incorrect conversion would cause silent misconfiguration.
 
@@ -440,7 +440,7 @@ func TestSafeInt(t *testing.T) {
 	}
 }
 
-// ─── Coerce ─────────────────────────────────────────────────────────────────────────────
+// --- Coerce ---
 // Rationale: Coerce is the central type conversion function used by config parsing.
 // Incorrect coercion would cause silent type mismatches, wrong defaults, or panics.
 
@@ -451,7 +451,7 @@ func TestCoerce(t *testing.T) {
 		want    any
 		wantErr string
 	}{
-		// ── Error paths ──
+		// --- Error paths ---
 		// target=bool: unsupported types
 		"bool/float64_error": {target: "bool", input: float64(3.14), wantErr: "cannot coerce float64 to bool"},
 		"bool/map_error":     {target: "bool", input: map[string]any{"a": 1}, wantErr: "cannot coerce"},
@@ -485,7 +485,7 @@ func TestCoerce(t *testing.T) {
 		// unknown target
 		"unknown_target": {target: "unknown", input: "x", wantErr: "unsupported expected type"},
 
-		// ── Happy paths ──
+		// --- Happy paths ---
 
 		// target=bool
 		"bool/true":           {target: "bool", input: true, want: true},
@@ -567,7 +567,7 @@ func TestCoerce(t *testing.T) {
 	}
 }
 
-// ─── CoerceBoolFields ───────────────────────────────────────────────────────────────────
+// --- CoerceBoolFields ---
 // Rationale: CoerceBoolFields normalises bool-typed fields in config maps.
 // Incorrect coercion would cause boolean fields to be silently misread
 // (e.g., "on" being treated as false, or 0 being treated as true).

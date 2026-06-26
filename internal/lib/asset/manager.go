@@ -9,15 +9,14 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// AssetFile represents a bundled asset file, matching Python's Traversable.
-// Provides read_text(), read_bytes(), and exists() methods matching
-// Python's importlib.resources.abc.Traversable interface.
+// AssetFile represents a bundled asset file accessible via embed.FS.
+// Provides ReadText, ReadBytes, Exists, IsFile, and Name methods.
 type AssetFile struct {
 	path string
 }
 
 // ReadText reads the file content as text.
-// Mirrors Python's Traversable.read_text().
+// ReadText reads the file content as text.
 func (f *AssetFile) ReadText() (string, error) {
 	data, err := assets.ReadFile(f.path)
 	if err != nil {
@@ -27,7 +26,7 @@ func (f *AssetFile) ReadText() (string, error) {
 }
 
 // ReadBytes reads the file content as bytes.
-// Mirrors Python's Traversable.read_bytes().
+// ReadBytes reads the file content as bytes.
 func (f *AssetFile) ReadBytes() ([]byte, error) {
 	data, err := assets.ReadFile(f.path)
 	if err != nil {
@@ -37,14 +36,14 @@ func (f *AssetFile) ReadBytes() ([]byte, error) {
 }
 
 // Exists returns true if the file exists in the embedded assets.
-// Mirrors Python's Traversable.exists().
+// Exists returns true if the file exists in the embedded assets.
 func (f *AssetFile) Exists() bool {
 	_, err := assets.Stat(f.path)
 	return err == nil
 }
 
 // IsFile returns true if the path is a file (not a directory).
-// Mirrors Python's Traversable.is_file().
+// IsFile returns true if the path is a file (not a directory).
 func (f *AssetFile) IsFile() bool {
 	fi, err := assets.Stat(f.path)
 	if err != nil {
@@ -54,23 +53,20 @@ func (f *AssetFile) IsFile() bool {
 }
 
 // Name returns the base name of the file.
-// Mirrors Python's Traversable.name.
+// Name returns the base name of the file.
 func (f *AssetFile) Name() string {
 	parts := strings.Split(f.path, "/")
 	return parts[len(parts)-1]
 }
 
 // Manager provides access to bundled package assets (templates, YAML configs, defaults).
-// Matches Python's AssetManager class exactly.
-//
 // Uses the embedded assets from the internal/assets package via embed.FS.
 type Manager struct {
 	base string
 }
 
-// New creates a new AssetManager and verifies assets are accessible.
-// Matches Python's AssetManager.__init__() which tries to access
-// importlib.resources.files(self._PACKAGE_ROOT) and raises BundledAssetError on failure.
+// New creates a new Manager and verifies assets are accessible.
+// Returns an error at first access if no embedded assets are found.
 func New() *Manager {
 	// Verify assets package is accessible by checking that
 	// at least one known asset file can be read.
@@ -85,7 +81,7 @@ func New() *Manager {
 	}
 	if !found {
 		// We still return a Manager — the error will happen at first access.
-		// But we keep the Python-style verification pattern.
+		// Verification found nothing, but Manager is still usable — error surfaces on first access.
 	}
 	return &Manager{base: "."}
 }
@@ -100,7 +96,7 @@ func New() *Manager {
 //
 //	file := manager.GetFile("templates", "config.yaml")
 //
-// Matches Python's AssetManager.get_file() which returns a Traversable.
+// Supports nested paths by passing multiple path components.
 func (m *Manager) GetFile(pathParts ...string) (*AssetFile, error) {
 	if len(pathParts) == 0 {
 		return nil, errs.New(errs.CodeBundledAssetError, "At least one path part is required")
@@ -110,7 +106,6 @@ func (m *Manager) GetFile(pathParts ...string) (*AssetFile, error) {
 }
 
 // ReadFile reads and returns the contents of a bundled asset file as text.
-// Matches Python's AssetManager.read_file().
 func (m *Manager) ReadFile(pathParts ...string) (string, error) {
 	if len(pathParts) == 0 {
 		return "", errs.New(errs.CodeBundledAssetError, "At least one path part is required")
@@ -125,7 +120,6 @@ func (m *Manager) ReadFile(pathParts ...string) (string, error) {
 }
 
 // ReadBytes reads and returns the contents of a bundled asset file as bytes.
-// Matches Python's AssetManager.read_bytes().
 func (m *Manager) ReadBytes(pathParts ...string) ([]byte, error) {
 	if len(pathParts) == 0 {
 		return nil, errs.New(errs.CodeBundledAssetError, "At least one path part is required")
@@ -140,7 +134,6 @@ func (m *Manager) ReadBytes(pathParts ...string) ([]byte, error) {
 }
 
 // FileExists checks if a bundled asset file (not a directory) exists.
-// Matches Python's AssetManager.file_exists().
 func (m *Manager) FileExists(pathParts ...string) bool {
 	if len(pathParts) == 0 {
 		return false
@@ -155,7 +148,6 @@ func (m *Manager) FileExists(pathParts ...string) bool {
 }
 
 // ListFiles lists all files in the assets root directory.
-// Matches Python's AssetManager.list_files().
 func (m *Manager) ListFiles() []string {
 	entries, err := assets.ReadDir(".")
 	if err != nil {
@@ -171,8 +163,7 @@ func (m *Manager) ListFiles() []string {
 	return files
 }
 
-// convertError maps embed.FS errors to the appropriate domain errors,
-// matching Python's BundledAssetNotFoundError and BundledAssetError patterns.
+// convertError maps embed.FS errors to the appropriate domain errors.
 func convertError(path string, err error) error {
 	if isFileNotFound(err) {
 		return errs.New(

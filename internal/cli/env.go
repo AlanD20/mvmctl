@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ── Columns for env list ──
+// --- Columns for env list ---
 
 var envListColumns = []common.ListingColumn{
 	{Header: "Workflow ID", Extract: func(v any) string { return common.Cli.FormatID(v.(env.ListSummary).WorkflowID) }},
@@ -57,6 +57,8 @@ destroy environments even after reboots.`,
 
 // newEnvApplyCmd creates the "env apply" subcommand.
 func newEnvApplyCmd(envAPI api.API) *cobra.Command {
+	var envFlags []string
+
 	cmd := &cobra.Command{
 		Use:     "apply [spec-path]",
 		Aliases: []string{"up"},
@@ -106,7 +108,16 @@ func newEnvApplyCmd(envAPI api.API) *cobra.Command {
 				}
 			}
 
-			if err := env.Apply(cmd.Context(), envAPI, specPath, onProgress); err != nil {
+			extraEnv := make(map[string]string, len(envFlags))
+			for _, f := range envFlags {
+				k, v, ok := strings.Cut(f, "=")
+				if !ok || k == "" {
+					return fmt.Errorf("invalid --env format: %q (expected KEY=VAL)", f)
+				}
+				extraEnv[k] = v
+			}
+
+			if err := env.Apply(cmd.Context(), envAPI, specPath, onProgress, extraEnv); err != nil {
 				return fmt.Errorf("env apply failed: %w", err)
 			}
 
@@ -114,6 +125,7 @@ func newEnvApplyCmd(envAPI api.API) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringSliceVar(&envFlags, "env", nil, "Set environment variables for exec steps (KEY=VAL, repeatable)")
 	return cmd
 }
 

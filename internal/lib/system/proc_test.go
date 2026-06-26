@@ -8,7 +8,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// ─── ParseProcStatusField ─────────────────────────────────────────────────────
+// --- ParseProcStatusField ---
 // Rationale: Must extract integer values from /proc/[pid]/status format.
 // Returns -1 for missing fields or unparseable values.
 

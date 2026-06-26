@@ -19,21 +19,21 @@ import (
 
 // networkColumns defines the local listing columns for networks.
 var networkColumns = []common.ListingColumn{
-	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.Network).IsDefault) }},
-	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.Network).ID) }},
+	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.NetworkItem).IsDefault) }},
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.NetworkItem).ID) }},
 	{Header: "Name", Extract: func(v any) string {
-		return common.Cli.FormatName(v.(*model.Network).Name, !v.(*model.Network).IsPresent)
+		return common.Cli.FormatName(v.(*model.NetworkItem).Name, !v.(*model.NetworkItem).IsPresent)
 	}},
-	{Header: "Subnet", Extract: func(v any) string { return v.(*model.Network).Subnet }},
+	{Header: "Subnet", Extract: func(v any) string { return v.(*model.NetworkItem).Subnet }},
 	{Header: "NAT", Extract: func(v any) string {
-		if v.(*model.Network).NATEnabled {
+		if v.(*model.NetworkItem).NATEnabled {
 			return "yes"
 		}
 		return "no"
 	}},
-	{Header: "Bridge", Extract: func(v any) string { return v.(*model.Network).Bridge }, LongOnly: true},
+	{Header: "Bridge", Extract: func(v any) string { return v.(*model.NetworkItem).Bridge }, LongOnly: true},
 	{Header: "VMs", Extract: func(v any) string {
-		l := v.(*model.Network).Leases
+		l := v.(*model.NetworkItem).Leases
 		if l != nil {
 			return fmt.Sprintf("%d", len(l))
 		}
@@ -41,7 +41,7 @@ var networkColumns = []common.ListingColumn{
 	}, LongOnly: true},
 	{
 		Header:  "Created",
-		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.Network).CreatedAt, "relative") },
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.NetworkItem).CreatedAt, "relative") },
 	},
 }
 
@@ -79,14 +79,14 @@ func newNetworkListCmd(networkAPI api.NetworkAPI, configAPI api.ConfigAPI) *cobr
 
 			if jsonOutput {
 				if nets == nil {
-					nets = []*model.Network{}
+					nets = []*model.NetworkItem{}
 				}
 				data, _ := json.MarshalIndent(nets, "", "  ")
 				fmt.Println(string(data))
 				return nil
 			}
 
-			// Resolve listing style from --long flag or DB config (matching Python's resolve_listing_style)
+			// Resolve listing style from --long flag or DB config
 			style := common.Cli.ResolveListingStyle(cmd.Context(), configAPI, longOutput)
 			common.RenderListing(nets, networkColumns, style)
 			return nil
@@ -119,7 +119,7 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 					return err
 				}
 			} else {
-				// Python raises typer.BadParameter — let Cobra handle the error
+				// Let Cobra handle the missing argument error
 				return fmt.Errorf("missing required argument: name")
 			}
 
@@ -185,7 +185,6 @@ func newNetworkCreateCmd(networkAPI api.NetworkAPI) *cobra.Command {
 }
 
 // resolveUserNATGateways prompts the user to select NAT gateway interfaces.
-// Matches Python's _resolve_user_nat_gateways() exactly.
 func resolveUserNATGateways(ctx context.Context) (string, error) {
 	interfaces, err := libnet.GetPhysicalInterfaces()
 	if err != nil {
@@ -313,7 +312,7 @@ func newNetworkSyncCmd(networkAPI api.NetworkAPI) *cobra.Command {
 				nameMap[n.ID] = n.Name
 			}
 
-			// Build table rows matching Python format
+			// Build table rows
 			rows := make([][]string, 0, len(results))
 			for nid, counts := range results {
 				shortID := common.Cli.FormatID(nid)

@@ -126,6 +126,20 @@ func BareStepName(stepName, stepType string) string {
 	return stepName
 }
 
+// MergeEnv merges the given environment variables into the exec step's input.
+// Existing keys are overwritten (CLI flags take precedence over spec defaults).
+func (s *ExecStep) MergeEnv(kv map[string]string) {
+	if len(kv) == 0 {
+		return
+	}
+	if s.input.Env == nil {
+		s.input.Env = make(map[string]string, len(kv))
+	}
+	for k, v := range kv {
+		s.input.Env[k] = v
+	}
+}
+
 // resolveDiffInput resolves specOrID to a spec file path and state directory.
 // If specOrID matches a workflow ID (exact or prefix), the spec path is read
 // from the saved state. Otherwise it's treated as a file path.

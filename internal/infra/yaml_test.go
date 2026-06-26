@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// ─── RequireString ───────────────────────────────────────────────────────────
+// --- RequireString ---
 // Rationale: RequireString is the primary YAML field extraction for required
 // fields. Missing fields or type mismatches must produce clear error messages
 // for debugging misconfigured YAML assets.
@@ -76,7 +76,7 @@ func TestRequireString(t *testing.T) {
 	}
 }
 
-// ─── OptionalString ─────────────────────────────────────────────────────────
+// --- OptionalString ---
 // Rationale: OptionalString extracts optional fields from YAML assets without
 // erroring on missing keys. Must return nil for absent/mismatched fields to
 // distinguish "not provided" from "empty string".
@@ -115,10 +115,9 @@ func TestOptionalString(t *testing.T) {
 	})
 }
 
-// ─── OptionalInt ─────────────────────────────────────────────────────────────
+// --- OptionalInt ---
 // Rationale: OptionalInt extracts optional integer fields from YAML.
-// Must accept bool (Python compat: isinstance(True, int) is True) but reject
-// float64 (isinstance(42.0, int) is False in Python).
+// Must accept bool (yaml.v3 decodes true/false as bool) but reject float64.
 
 func TestOptionalInt(t *testing.T) {
 	t.Run("found_int", func(t *testing.T) {
@@ -135,7 +134,7 @@ func TestOptionalInt(t *testing.T) {
 	})
 
 	t.Run("bool_true_becomes_1", func(t *testing.T) {
-		// Python compat: isinstance(True, int) is True → True == 1
+		// yaml.v3 decodes true/false as bool — accept as valid int
 		data := map[string]any{"count": true}
 		got := infra.OptionalInt(data, "count")
 		require.NotNil(t, got)
@@ -143,7 +142,7 @@ func TestOptionalInt(t *testing.T) {
 	})
 
 	t.Run("bool_false_becomes_0", func(t *testing.T) {
-		// Python compat: isinstance(False, int) is True → False == 0
+		// yaml.v3 decodes true/false as bool — accept as valid int
 		data := map[string]any{"count": false}
 		got := infra.OptionalInt(data, "count")
 		require.NotNil(t, got)
@@ -151,7 +150,7 @@ func TestOptionalInt(t *testing.T) {
 	})
 
 	t.Run("float64_returns_nil", func(t *testing.T) {
-		// Python compat: isinstance(42.0, int) is False
+		// float64 values rejected even if round (42.0 is not int)
 		data := map[string]any{"count": float64(42.0)}
 		got := infra.OptionalInt(data, "count")
 		assert.Nil(t, got)
@@ -171,7 +170,7 @@ func TestOptionalInt(t *testing.T) {
 	})
 }
 
-// ─── RequireStrList ──────────────────────────────────────────────────────────
+// --- RequireStrList ---
 // Rationale: RequireStrList extracts string list fields from YAML. Missing
 // keys default to empty list (not an error). Type mismatches must be caught.
 
@@ -236,7 +235,7 @@ func TestRequireStrList(t *testing.T) {
 	}
 }
 
-// ─── ParseSetValList ─────────────────────────────────────────────────────────
+// --- ParseSetValList ---
 // Rationale: ParseSetValList parses kernel config option/value pairs from YAML.
 // Two formats accepted: map entries {"option": "x", "value": "y"} and
 // two-element lists ["x", "y"]. Errors on invalid format.

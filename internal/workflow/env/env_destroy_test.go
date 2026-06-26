@@ -19,7 +19,7 @@ import (
 
 // NOTE: Tests in this file mutate the package-level Registry. Do NOT add t.Parallel().
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // replaceAndRestoreEntry replaces a Registry entry and registers cleanup to
 // restore its original value. If the key did not exist before (zero value),
@@ -114,7 +114,7 @@ func writeDestroyState(t *testing.T, wfID string, resources []model.AppliedResou
 	return stateDir
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// --- Tests ---
 
 // Rationale: A saved state with one resource must be destroyed without error.
 // After successful destroy, the workflow state directory must be removed.

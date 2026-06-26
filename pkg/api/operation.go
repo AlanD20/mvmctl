@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cache"
@@ -16,6 +17,7 @@ import (
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/core/key"
 	"mvmctl/internal/core/network"
+	"mvmctl/internal/core/snapshot"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/core/vsock"
@@ -44,17 +46,18 @@ type Operation struct {
 
 // Repos bundles all database repositories.
 type Repos struct {
-	VM      vm.Repository
-	Network network.Repository
-	Lease   network.LeaseRepository
-	Image   image.Repository
-	Kernel  kernel.Repository
-	Binary  binary.Repository
-	Key     key.Repository
-	Volume  volume.Repository
-	Host    host.Repository
-	Config  config.SettingsRepository
-	Vsock   vsock.Repository
+	VM       vm.Repository
+	Network  network.Repository
+	Lease    network.LeaseRepository
+	Image    image.Repository
+	Kernel   kernel.Repository
+	Binary   binary.Repository
+	Key      key.Repository
+	Volume   volume.Repository
+	Host     host.Repository
+	Config   config.SettingsRepository
+	Vsock    vsock.Repository
+	Snapshot snapshot.Repository
 }
 
 // Services bundles all domain services.
@@ -80,17 +83,18 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	sqlDB := conn.DB()
 
 	r := Repos{
-		VM:      vm.NewRepository(sqlDB),
-		Network: network.NewRepository(sqlDB),
-		Lease:   network.NewLeaseRepository(sqlDB),
-		Image:   image.NewRepository(sqlDB),
-		Kernel:  kernel.NewRepository(sqlDB),
-		Binary:  binary.NewRepository(sqlDB),
-		Key:     key.NewRepository(sqlDB),
-		Volume:  volume.NewRepository(sqlDB),
-		Host:    host.NewRepository(sqlDB),
-		Config:  config.NewRepository(sqlDB),
-		Vsock:   vsock.NewRepository(sqlDB),
+		VM:       vm.NewRepository(sqlDB),
+		Network:  network.NewRepository(sqlDB),
+		Lease:    network.NewLeaseRepository(sqlDB),
+		Image:    image.NewRepository(sqlDB),
+		Kernel:   kernel.NewRepository(sqlDB),
+		Binary:   binary.NewRepository(sqlDB),
+		Key:      key.NewRepository(sqlDB),
+		Volume:   volume.NewRepository(sqlDB),
+		Host:     host.NewRepository(sqlDB),
+		Config:   config.NewRepository(sqlDB),
+		Vsock:    vsock.NewRepository(sqlDB),
+		Snapshot: snapshot.NewRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
@@ -132,9 +136,19 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	}
 
 	return &Operation{
-		Connection:      conn,
-		CacheDir:        cacheDir,
-		Enr:             enricher.New(r.VM, r.Network, r.Lease, r.Image, r.Kernel, r.Binary, r.Volume, r.Vsock),
+		Connection: conn,
+		CacheDir:   cacheDir,
+		Enr: enricher.New(
+			r.VM,
+			r.Network,
+			r.Lease,
+			r.Image,
+			r.Kernel,
+			r.Binary,
+			r.Volume,
+			r.Vsock,
+			r.Snapshot,
+		),
 		Repos:           r,
 		Services:        s,
 		ProvisionerType: provisionerType,
@@ -171,4 +185,20 @@ func (op *Operation) resolveCIVersion(ctx context.Context) (string, error) {
 		return "", errs.New(errs.CodeBinaryNoCIVersion, "Installed firecracker binary has no CI version.")
 	}
 	return *defaultFC.CIVersion, nil
+}
+
+// vsockClient builds a vsock client for the given VM, returning nil and an
+// error if the vsock config is missing or the client cannot be created.
+// The error is returned only so callers can log a warning; a nil client means
+// guest-side vsock operations are unavailable for this VM.
+func (op *Operation) vsockClient(ctx context.Context, vm *model.VMItem) (*vsock.Client, error) {
+	cfg, err := op.Repos.Vsock.GetByVMID(ctx, vm.ID)
+	if err != nil || cfg == nil {
+		return nil, err
+	}
+	probeTimeout, err := op.Services.Config.GetDuration(ctx, "defaults.vm", "vsock_probe_timeout")
+	if err != nil || probeTimeout <= 0 {
+		probeTimeout = 5 * time.Second
+	}
+	return op.newVsockClient(ctx, cfg, probeTimeout, vm.Name)
 }

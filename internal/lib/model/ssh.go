@@ -2,7 +2,7 @@ package model
 
 import "time"
 
-// ── ConnectionInfo ──
+// --- ConnectionInfo ---
 
 // ConnectionInfo holds SSH connection parameters.
 type ConnectionInfo struct {

@@ -50,18 +50,20 @@ func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.VolumeItem, error) {
 func (r *sqliteRepo) Upsert(ctx context.Context, v *model.VolumeItem) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO volumes (
-			id, name, size_bytes, format, is_read_only, path, status, vm_id, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			id, name, size_bytes, format, is_read_only, is_shareable, path, status, vm_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			size_bytes = excluded.size_bytes,
 			format = excluded.format,
 			is_read_only = excluded.is_read_only,
+			is_shareable = excluded.is_shareable,
 			path = excluded.path,
 			status = excluded.status,
 			vm_id = excluded.vm_id,
 			updated_at = CURRENT_TIMESTAMP`,
 		v.ID, v.Name, v.SizeBytes, string(v.Format), infra.BoolToInt(v.IsReadOnly),
+		infra.BoolToInt(v.IsShareable),
 		v.Path, string(v.Status), v.VMID, v.CreatedAt, v.UpdatedAt,
 	)
 	return err

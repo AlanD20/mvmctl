@@ -11,8 +11,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// Provisioner matches Python's Provisioner in _provisioner.py.
-// Optimizes a root filesystem image — shrink, deblob, fix fstab.
+// Provisioner optimizes a root filesystem image — shrink, deblob, fix fstab.
 // deblob() and shrink() are declarative — they only set flags.
 // run() creates a fresh backend for each phase.
 type Provisioner struct {
@@ -25,9 +24,6 @@ type Provisioner struct {
 }
 
 // NewProvisioner creates a new Provisioner.
-// Matches Python's Provisioner.__init__() which takes:
-//
-//	image_path: Path, *, provisioner_type: provisioner.ProvisionerType, fs_type: str
 func NewProvisioner(
 	imagePath string,
 	provisionerType provisioner.ProvisionerType,
@@ -41,7 +37,6 @@ func NewProvisioner(
 }
 
 // createBackend creates a fresh backend for the current image.
-// Matches Python's ProvisionerBackend.get_image().
 func (p *Provisioner) createBackend(ctx context.Context) (provisioner.Backend, error) {
 	cacheDir, err := infra.GetCacheDir()
 	if err != nil {
@@ -57,12 +52,11 @@ func (p *Provisioner) createBackend(ctx context.Context) (provisioner.Backend, e
 	})
 }
 
-// -- builder methods (declarative) -------------------------------------------
+// --- builder methods (declarative) ---
 
 // DetectOS detects the OS type from the image using a fresh backend session.
 // Returns OS identifier (e.g. "ubuntu", "debian", "alpine").
-// Matches Python's Provisioner.detect_os() which lets errors propagate
-// to the caller (Service wraps it in try/except).
+// Errors propagate to the caller.
 func (p *Provisioner) DetectOS(ctx context.Context) (string, error) {
 	backend, err := p.createBackend(ctx)
 	if err != nil {
@@ -86,7 +80,7 @@ func (p *Provisioner) ConvertTo(targetFS string) {
 	p.convertTo = targetFS
 }
 
-// -- execution ---------------------------------------------------------------
+// --- execution ---
 
 // Run executes queued operations with the selected backend.
 // Phases run in order — conversion (Phase 0), deblob (Phase 1), shrink (Phase 2).
@@ -144,8 +138,6 @@ func (p *Provisioner) Run(ctx context.Context) (bool, error) {
 
 // ExtractViaBackend extracts a root partition from a raw disk image.
 // Uses the selected backend's ExtractPartition method.
-// Matches Python's _extract_via_backend() which catches RuntimeError and
-// re-raises as ImageError — keeping Go behavior identical.
 func ExtractViaBackend(
 	ctx context.Context,
 	rawPath, outputPath string,
@@ -153,9 +145,7 @@ func ExtractViaBackend(
 	disabledDetectors []string,
 	provisionerType provisioner.ProvisionerType,
 ) (result string, err error) {
-	// Wrap non-DomainError as ImageError — matching Python's:
-	// except RuntimeError as e:
-	//     raise ImageError(str(e)) from e
+	// Wrap non-DomainError as ImageError
 	defer func() {
 		if err != nil {
 			var de *errs.DomainError

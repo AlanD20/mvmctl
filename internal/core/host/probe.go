@@ -12,8 +12,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// ── Probe ──
-// Matches Python's HostProbe class — pre-flight checks for host readiness.
+// --- Probe ---
 type Probe struct{}
 
 func NewProbe() *Probe {
@@ -21,7 +20,6 @@ func NewProbe() *Probe {
 }
 
 // RunAll runs all pre-flight probes and returns aggregated result.
-// Matches Python's HostProbe.run_all().
 //
 // Takes detection results as input instead of re-reading system files —
 // detector.go is the single source of truth for all /proc data.
@@ -69,7 +67,6 @@ func (p *Probe) RunAll(
 }
 
 // checkVMHost checks KVM and VM host prerequisites using pre-detected data.
-// Matches Python's HostProbe.check_vm_host() exactly.
 // No file I/O — all data comes from detector.go models.
 func (p *Probe) checkVMHost(
 	hardware *model.HostHardware,
@@ -143,7 +140,6 @@ func (p *Probe) checkVMHost(
 	// Two paths to pass:
 	//   1. KVM built into kernel (/dev/kvm accessible, no module needed)
 	//   2. KVM loadable module listed in /proc/modules
-	// Matches Python behavior: Python's lsmod reads /proc/modules internally.
 	// When KVM is built-in (CONFIG_KVM_INTEL=y), /proc/modules won't list it
 	// but /dev/kvm is still fully functional — the probe accepts this.
 	kvmModuleOK := resources.DevKVMStatus == "ok" && hasVirt
@@ -199,7 +195,6 @@ func (p *Probe) checkVMHost(
 }
 
 // checkInitBinaries checks all binaries required for host initialization.
-// Matches Python's HostProbe.check_init_binaries().
 func (p *Probe) checkInitBinaries() []model.ProbeCheck {
 	var checks []model.ProbeCheck
 	for _, name := range infra.InitBinaries {
@@ -222,7 +217,6 @@ func (p *Probe) checkInitBinaries() []model.ProbeCheck {
 }
 
 // checkFirewallReadiness checks firewall backend availability and detect conflicts.
-// Matches Python's HostProbe.check_firewall_readiness().
 func (p *Probe) checkFirewallReadiness(ctx context.Context, resources *model.HostResources) []model.ProbeCheck {
 	var checks []model.ProbeCheck
 
@@ -266,7 +260,6 @@ func (p *Probe) checkFirewallReadiness(ctx context.Context, resources *model.Hos
 }
 
 // checkSystemResources checks system resource thresholds.
-// Matches Python's HostProbe.check_system_resources().
 func (p *Probe) checkSystemResources(
 	hardware *model.HostHardware,
 	limits *model.HostLimits,
@@ -315,10 +308,8 @@ func (p *Probe) checkSystemResources(
 }
 
 // detectIPTablesBackendConflict checks if both iptables-legacy and iptables-nft have active rules.
-// Matches Python's NetworkUtils.detect_iptables_backend_conflict() exactly,
 // including the initial iptables --version call.
 func detectIPTablesBackendConflict(ctx context.Context) bool {
-	// Python: run_cmd(["iptables", "--version"], check=False)
 	// This determines the current iptables backend (nft vs legacy).
 	// The diagnosis string is computed but discarded by the probe caller
 	// (has_conflict, _ = ...); the call itself is preserved for completeness.
@@ -329,7 +320,7 @@ func detectIPTablesBackendConflict(ctx context.Context) bool {
 	legacyActive := false
 	nftActive := false
 
-	// Check legacy: iptables-legacy -L -n -v (with privileged=True, matching Python)
+	// Check legacy: iptables-legacy -L -n -v (with privileged=True)
 	legacyResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables-legacy", "-L", "-n", "-v"},
 		system.RunCmdOpts{Check: false, Capture: true, Privileged: true})
 	if legacyResult.Success() {
@@ -344,7 +335,7 @@ func detectIPTablesBackendConflict(ctx context.Context) bool {
 		}
 	}
 
-	// Check nft: iptables -L -n -v (with privileged=True, matching Python)
+	// Check nft: iptables -L -n -v (with privileged=True)
 	nftResult, _ := system.DefaultRunner.Run(ctx, []string{"iptables", "-L", "-n", "-v"},
 		system.RunCmdOpts{Check: false, Capture: true, Privileged: true})
 	if nftResult.Success() {

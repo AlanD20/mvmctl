@@ -8,7 +8,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── nftBaseChainKey ───────────────────────────────────────────────────────────
+// --- nftBaseChainKey ---
 // Rationale: nftBaseChainKey produces the lookup key for base chain hook
 // definitions. Mismatched keys cause the tracker to skip base chain setup,
 // leaving the firewall in an incomplete state.
@@ -62,7 +62,7 @@ func TestNftBaseChainKey(t *testing.T) {
 	}
 }
 
-// ─── ruleToNftExpr ────────────────────────────────────────────────────────────
+// --- ruleToNftExpr ---
 // Rationale: ruleToNftExpr builds the nftables expression from a FirewallRule.
 // nftables is strict about L3 before L4 ordering and requires lowercase targets.
 // Wrong expressions are silently accepted by nft but don't match traffic.
@@ -89,7 +89,7 @@ func TestRuleToNftExpr(t *testing.T) {
 		modify func(*model.FirewallRule)
 		want   []string
 	}{
-		// ── Minimal / target ──
+		// --- Minimal / target ---
 		"minimal_accept": {
 			want: []string{"accept"},
 		},
@@ -110,7 +110,7 @@ func TestRuleToNftExpr(t *testing.T) {
 			want:   []string{"log"},
 		},
 
-		// ── Source / Destination (L3) ──
+		// --- Source / Destination (L3) ---
 		"source_specific": {
 			modify: func(r *model.FirewallRule) { r.Source = "10.0.0.0/24" },
 			want:   []string{"ip", "saddr", "10.0.0.0/24", "accept"},
@@ -127,7 +127,7 @@ func TestRuleToNftExpr(t *testing.T) {
 			want: []string{"ip", "saddr", "10.0.0.0/24", "ip", "daddr", "192.168.1.0/24", "accept"},
 		},
 
-		// ── Interfaces (with quoted format) ──
+		// --- Interfaces (with quoted format) ---
 		"in_interface_specific": {
 			modify: func(r *model.FirewallRule) { r.InInterface = "eth0" },
 			want:   []string{"iifname", `"eth0"`, "accept"},
@@ -144,7 +144,7 @@ func TestRuleToNftExpr(t *testing.T) {
 			want: []string{"iifname", `"eth0"`, "oifname", `"tap0"`, "accept"},
 		},
 
-		// ── Protocol standalone (no L4 ports) ──
+		// --- Protocol standalone (no L4 ports) ---
 		"protocol_tcp_no_ports": {
 			modify: func(r *model.FirewallRule) { r.Protocol = model.FirewallProtocolTCP },
 			want:   []string{"tcp", "accept"},
@@ -158,7 +158,7 @@ func TestRuleToNftExpr(t *testing.T) {
 			want:   []string{"icmp", "accept"},
 		},
 
-		// ── Protocol with L4 ports ──
+		// --- Protocol with L4 ports ---
 		"protocol_tcp_with_sport": {
 			modify: func(r *model.FirewallRule) {
 				r.Protocol = model.FirewallProtocolTCP
@@ -182,7 +182,7 @@ func TestRuleToNftExpr(t *testing.T) {
 			want: []string{"tcp", "sport", "1024", "tcp", "dport", "443", "accept"},
 		},
 
-		// ── Comment ──
+		// --- Comment ---
 		"comment_nil": {
 			want: []string{"accept"},
 		},
@@ -195,7 +195,7 @@ func TestRuleToNftExpr(t *testing.T) {
 			want:   []string{"accept", "comment", `"mvm:forward_out:test-net"`},
 		},
 
-		// ── Full expression (all fields) ──
+		// --- Full expression (all fields) ---
 		"all_fields": {
 			modify: func(r *model.FirewallRule) {
 				r.Protocol = model.FirewallProtocolTCP
@@ -220,7 +220,7 @@ func TestRuleToNftExpr(t *testing.T) {
 			},
 		},
 
-		// ── Ordering: L3 before L4 ──
+		// --- Ordering: L3 before L4 ---
 		"l3_before_l4_ordering": {
 			modify: func(r *model.FirewallRule) {
 				r.Protocol = model.FirewallProtocolTCP

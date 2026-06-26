@@ -7,7 +7,6 @@ import (
 )
 
 // LeaseResolver resolves network IP leases.
-// Matches src/mvmctl/core/network/_lease_resolver.py: LeaseResolver
 type LeaseResolver struct {
 	repo    LeaseRepository
 	include []string
@@ -20,12 +19,6 @@ func NewLeaseResolver(repo LeaseRepository, include []string) *LeaseResolver {
 }
 
 // enrich enriches leases with relations if include is set.
-// Matches Python's _enrich() method exactly. In Python:
-//
-//	if self._include and leases:
-//	    RelationEnricher().enrich(leases, self._include, self.RELATIONS)
-//
-// where RELATIONS is empty ({}), so this is a pass-through.
 // Enrichment of cross-domain relations is handled by the enricher package
 // (internal/enricher/) which is the only package authorised to import
 // across core/* domain boundaries. This method provides the extension point

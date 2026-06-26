@@ -1,4 +1,4 @@
-// Package cli — cache management commands, matching Python's cli/cache.py
+// Package cli — cache management commands
 package cli
 
 import (
@@ -35,9 +35,7 @@ func newCacheInitCmd(cacheAPI api.CacheAPI) *cobra.Command {
 		Use:   "init",
 		Short: "Initialize all cache resources",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Match Python: uses Rich Console spinner with on_progress callback.
-			// Python: console.status("", spinner="dots") with _on_progress(event) that
-			// calls status.update(f"[dim]{event.message}[/dim]") to update in-place.
+			// Uses progress callback for status updates during cache init.
 			prog := common.NewProgress()
 			prog.Start("Initializing cache...")
 
@@ -53,9 +51,7 @@ func newCacheInitCmd(cacheAPI api.CacheAPI) *cobra.Command {
 				return err
 			}
 
-			// Match Python: mvm_cli.success("Cache initialized successfully")
 			common.Cli.Success("Cache initialized successfully")
-			// Show initialized directories
 			for _, dir := range item.Directories {
 				common.Cli.Info(fmt.Sprintf("  %s", dir))
 			}
@@ -110,7 +106,6 @@ func resourceDisplayNamePlural(resource string) string {
 }
 
 // pruneResource handles pruning a specific resource type.
-// Matches Python's resource-specific blocks exactly.
 func pruneResource(
 	cacheAPI api.CacheAPI,
 	cmd *cobra.Command,
@@ -120,7 +115,6 @@ func pruneResource(
 	force bool,
 ) error {
 	if !force && !dryRun {
-		// Match Python: mvm_cli.warning("This will remove cached data for all VMs")
 		common.Cli.Warning(fmt.Sprintf("This will remove cached data for all %s", resourceDisplayNamePlural(resource)))
 		common.Cli.Info("")
 		confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Continue?", true)
@@ -177,9 +171,7 @@ func pruneResource(
 
 	if len(removed) > 0 {
 		if dryRun {
-			// Match Python: mvm_cli.info(f"[DRY RUN] Would prune {len(removed)} VM(s): {', '.join(removed)}")
 			if resource == "binary" {
-				// Python: f"[DRY RUN] Would prune {len(removed)} binaries: {', '.join(removed)}"
 				common.Cli.Info(
 					fmt.Sprintf("[DRY RUN] Would prune %d binaries: %s", len(removed), strings.Join(removed, ", ")),
 				)
@@ -195,11 +187,9 @@ func pruneResource(
 				)
 			}
 		} else {
-			// Match Python: mvm_cli.success(f"Pruned: {', '.join(removed)}")
 			common.Cli.Success(fmt.Sprintf("Pruned: %s", strings.Join(removed, ", ")))
 		}
 	} else {
-		// Match Python: lowercase, e.g. mvm_cli.info("No binaries to prune") — NOT title-case
 		plural := resourceDisplayNamePlural(resource)
 		common.Cli.Info(fmt.Sprintf("No %s to prune", plural))
 	}
@@ -209,7 +199,6 @@ func pruneResource(
 
 func pruneMisc(cacheAPI api.CacheAPI, cmd *cobra.Command, dryRun bool, force bool) error {
 	if !force && !dryRun {
-		// Match Python: mvm_cli.warning("This will remove cached data (appliance folder, warm images)")
 		common.Cli.Warning("This will remove cached data (appliance folder, warm images)")
 		common.Cli.Info("")
 		confirmed, pErr := common.Cli.PromptConfirm(cmd.Context(), "Continue?", true)
@@ -231,7 +220,6 @@ func pruneMisc(cacheAPI api.CacheAPI, cmd *cobra.Command, dryRun bool, force boo
 		return nil
 	}
 
-	// Match Python: if misc_result.get("appliance")
 	applianceRemoved, _ := miscMap["appliance"].(bool)
 	warmRemoved, _ := miscMap["warm_images"].(bool)
 
@@ -371,14 +359,12 @@ Examples:
 				if allResources {
 					return pruneAll(cacheAPI, cmd, dryRun, force)
 				}
-				// Match Python: mvm_cli.error("No resource specified. Use --all to prune all resource types.")
 				common.Cli.Error("No resource specified. Use --all to prune all resource types.")
 				common.Cli.Info("Valid resources: vm, network, image, kernel, binary, misc")
 				common.Cli.Info("Or use: mvm cache prune --all  # Prune all types")
 				return fmt.Errorf("no resource specified")
 			default:
-				// Python: elif resource is None or all_resources: — unknown resource with
-				// --all should prune all, matching Python behavior.
+				// Unknown resource with --all should prune all resources.
 				if allResources {
 					return pruneAll(cacheAPI, cmd, dryRun, force)
 				}
@@ -399,9 +385,7 @@ Examples:
 }
 
 // runCacheCleanWithSudo re-invokes "mvm cache clean" with sudo.
-// Matches Python: shutil.which(CLI_NAME) or sys.argv[0]; run_cmd(["sudo", mvm_bin, "cache", "clean"], ...)
 func runCacheCleanWithSudo(ctx context.Context) error {
-	// Match Python: shutil.which(CLI_NAME) or sys.argv[0]
 	mvmBin, err := exec.LookPath(infra.CLIName)
 	if err != nil {
 		mvmBin, err = os.Executable()
@@ -441,17 +425,14 @@ Examples:
   mvm cache clean --dry-run      # Preview what would be removed
   mvm cache clean --force        # Clean without confirmation`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Match Python: Check privileges early — before the destructive confirmation.
-			// Python: HostPrivilegeHelper.check_privileges("/usr/sbin/ip", "clean cache")
+			// Check privileges early — before the destructive confirmation.
 			if err := cacheAPI.CacheCheckPrivileges("/usr/sbin/ip", "clean cache"); err != nil {
 				if cacheAPI.CacheSessionHasGroup() {
 					// Group is active but something else is wrong (missing binary, etc.)
-					// Match Python: raise — re-raise the original exception without printing,
-					// let Cobra's root error handler display it (avoids double-printing).
+					// Return the original error — let Cobra's root error handler display it.
 					return err
 				}
 				// Session doesn't have the group — offer sudo
-				// Match Python: single confirm prompt: "Elevated privileges required. Run with sudo instead?"
 				sudoConfirmed, pErr := common.Cli.PromptConfirm(
 					cmd.Context(),
 					"Elevated privileges required. Run with sudo instead?",
@@ -538,8 +519,6 @@ Examples:
 					common.Cli.Info("Cache directory was already empty")
 				}
 			}
-			// Match Python: no fallback output when result is nil (no "Cache cleaned" message)
-
 			return nil
 		},
 	}

@@ -155,8 +155,8 @@ VM lifecycle management.
 | `mvm vm ls` | `--json, --long` | List all VMs |
 | `mvm vm ps` | `--json` | List running VMs (active processes) |
 | `mvm vm inspect` | `IDENTIFIER`, `--json` | Show detailed information about a VM |
-| `mvm vm snapshot` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE` | Snapshot VM memory and disk state |
-| `mvm vm load` | `IDENTIFIER`, `MEM_FILE`, `STATE_FILE`, `--resume` | Load VM from snapshot |
+| `mvm snapshot create` | `VM_IDENTIFIER`, `--name` | Create a snapshot of a running VM |
+| `mvm snapshot restore` | `SNAPSHOT_ID`, `NAME`, `--network`, `--resume`, `--count` | Restore a VM from a snapshot |
 | `mvm vm attach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Attach a volume to a VM (supports hotplug on Firecracker v1.16+ for running VMs) |
 | `mvm vm detach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Detach a volume from a VM (supports hot-unplug on Firecracker v1.16+ for running VMs) |
 

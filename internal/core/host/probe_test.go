@@ -9,7 +9,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
+// --- Helper ---
 
 // defaultHardware returns a HostHardware with all-green values.
 func defaultHardware() model.HostHardware {
@@ -57,7 +57,7 @@ func findCheck(t *testing.T, checks []model.ProbeCheck, name string) model.Probe
 	return model.ProbeCheck{}
 }
 
-// ─── checkVMHost ──────────────────────────────────────────────────────────────
+// --- checkVMHost ---
 // Rationale: Must detect and report all VM host prerequisites failures:
 // CPU virtualization, /dev/kvm state, /dev/net/tun, KVM module, kernel version,
 // nested virtualization. Each failure must produce a specific message and
@@ -293,7 +293,7 @@ func TestProbe_checkVMHost(t *testing.T) {
 	}
 }
 
-// ─── checkSystemResources ─────────────────────────────────────────────────────
+// --- checkSystemResources ---
 // Rationale: Must warn when swap is low relative to RAM (if RAM > 1024 MiB),
 // detect cloud-localds availability, and report hugepage configuration.
 
@@ -418,7 +418,7 @@ func TestProbe_checkSystemResources(t *testing.T) {
 	}
 }
 
-// ─── RunAll categorisation ────────────────────────────────────────────────────
+// --- RunAll categorisation ---
 // Rationale: RunAll routes checks to Critical/Warnings/Info based on Passed
 // and source function. VM host failures are Critical, swap/firewall are Warnings.
 
@@ -475,7 +475,7 @@ func TestProbe_RunAll_categorisation(t *testing.T) {
 	})
 }
 
-// ─── Edge cases ───────────────────────────────────────────────────────────────
+// --- Edge cases ---
 // Rationale: Boundary values for swap threshold, empty hardware/limits/resources.
 
 func TestProbe_EdgeCases(t *testing.T) {
@@ -518,7 +518,7 @@ func TestProbe_EdgeCases(t *testing.T) {
 	})
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 func boolPtr(v bool) *bool { return &v }
 

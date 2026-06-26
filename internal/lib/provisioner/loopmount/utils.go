@@ -12,7 +12,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// ── Partition table parsing (sfdisk + parted) ───────────────────────────────
+// --- Partition table parsing (sfdisk + parted) ---
 
 // sfdiskTable mirrors the JSON output of "sfdisk --json <image>".
 type sfdiskTable struct {
@@ -101,7 +101,7 @@ func parsePartitionsParted(ctx context.Context, rawPath string, partition int) *
 	return &parseResult{partitions: partitions, requestedPartition: partition}
 }
 
-// ── Post-extraction helpers ──────────────────────────────────────────────────
+// --- Post-extraction helpers ---
 
 // detectAndRenameFS detects filesystem type via blkid and renames output file.
 func detectAndRenameFS(ctx context.Context, outputPath string) string {

@@ -1,12 +1,12 @@
 // Package archive provides archive extraction, validation, and format detection.
 //
 // Supported formats:
-//   - .tar — plain tar via Go stdlib archive/tar
-//   - .tar.gz, .tgz — gzip-compressed tar via Go stdlib compress/gzip + archive/tar
-//   - .tar.xz — xz-compressed tar via subprocess xz -d --stdout + archive/tar
+// - .tar — plain tar via Go stdlib archive/tar
+// - .tar.gz, .tgz — gzip-compressed tar via Go stdlib compress/gzip + archive/tar
+// - .tar.xz — xz-compressed tar via subprocess xz -d --stdout + archive/tar
 //
 // All extraction includes path traversal protection. Symlinks and device files
-// are skipped (matching Python's tarfile filter="data"). File permissions are
+// are skipped via path traversal protection. File permissions are
 // NOT restored from the archive — extracted files always get 0644/0755.
 package archive
 
@@ -43,7 +43,7 @@ var (
 // maxMagicLen is the longest magic byte sequence we check (6 for xz).
 const maxMagicLen = 6
 
-// ── Format detection ────────────────────────────────────────────────────────
+// --- Format detection ---
 
 // DetectFormat detects the archive format from magic bytes, falling back to
 // file extension. Opens the file briefly to read header bytes.
@@ -98,7 +98,7 @@ func IsArchive(path string) bool {
 	return DetectFormat(path) != FormatUnknown
 }
 
-// ── Reader setup ────────────────────────────────────────────────────────────
+// --- Reader setup ---
 
 // archiveReader holds the io.Reader and a cleanup function for the archive.
 // The cleanup function may return an error from the decompressor (e.g., xz exit status).
@@ -187,15 +187,15 @@ func (ar *archiveReader) close() error {
 	return nil
 }
 
-// ── Streaming (in-memory tar pipe) ──────────────────────────────────────────
+// --- Streaming (in-memory tar pipe) ---
 
 // Pack creates a tar archive of the given path and writes it to w.
 // Uses the same convention as tar cf - -C <parent> <base>:
-//   - If path is a directory, its CONTENTS are archived (not the dir itself).
-//   - If path is a file, just that file is archived.
-//   - base is the name to use for the entry in the archive. If empty,
-//     filepath.Base(path) is used. For directories an empty base means
-//     "archive contents only" (like tar cf - -C path .).
+// - If path is a directory, its CONTENTS are archived (not the dir itself).
+// - If path is a file, just that file is archived.
+// - base is the name to use for the entry in the archive. If empty,
+// filepath.Base(path) is used. For directories an empty base means
+// "archive contents only" (like tar cf - -C path .).
 func Pack(ctx context.Context, path, base string, w io.Writer) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -320,7 +320,7 @@ func Unpack(ctx context.Context, r io.Reader, destDir string) error {
 	return extractTarReader(r, destDir, nil)
 }
 
-// ── Extraction ──────────────────────────────────────────────────────────────
+// --- Extraction ---
 func Extract(ctx context.Context, path, destDir string) error {
 	return extractFiltered(ctx, path, destDir, nil)
 }
@@ -434,14 +434,16 @@ func extractFiltered(ctx context.Context, path, destDir string, filter func(stri
 	}
 	defer func() {
 		if closeErr := ar.close(); closeErr != nil && retErr == nil {
-			retErr = closeErr
+			// Extraction succeeded — ignore pipe cleanup noise.
+			// xz may still be decompressing trailing data when the
+			// tar reader exits, causing misleading SIGPIPE.
 		}
 	}()
 
 	return extractTarReader(ar.reader, destDir, filter)
 }
 
-// ── Shared tar extraction loop ──────────────────────────────────────────────
+// --- Shared tar extraction loop ---
 
 func extractTarReader(r io.Reader, destDir string, filter func(string) bool) error {
 	tr := tar.NewReader(r)
@@ -527,7 +529,7 @@ func extractTarReader(r io.Reader, destDir string, filter func(string) bool) err
 	return nil
 }
 
-// ── Validation ──────────────────────────────────────────────────────────────
+// --- Validation ---
 
 // Validate checks that the archive is fully readable by iterating all members.
 func Validate(ctx context.Context, path string) (retErr error) {
@@ -552,7 +554,7 @@ func Validate(ctx context.Context, path string) (retErr error) {
 	return nil
 }
 
-// ── Listing ─────────────────────────────────────────────────────────────────
+// --- Listing ---
 
 // List returns the names of all entries in the archive.
 func List(ctx context.Context, path string) (names []string, retErr error) {

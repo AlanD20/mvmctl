@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/results"
 )
 
-// ─── MockInitAPI ───────────────────────────────────────────────────────────────
+// --- MockInitAPI ---
 // Rationale: MockInitAPI satisfies api.InitAPI for testing upper layers. Tests
 // verify default nil returns and custom function routing for InitRun.
 

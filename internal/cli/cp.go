@@ -12,7 +12,10 @@ import (
 )
 
 func NewCpCmd(cpAPI api.CPAPI) *cobra.Command {
-	var force bool
+	var (
+		force  bool
+		noSync bool
+	)
 
 	cmd := &cobra.Command{
 		Use:   "cp [sources...] [destination]",
@@ -52,7 +55,7 @@ Multiple sources require a directory destination (trailing "/").`,
 		Args:          cobra.ArbitraryArgs,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// ── Validation ──
+			// --- Validation ---
 			if len(args) < 2 {
 				return fmt.Errorf("at least two arguments required: one or more sources and a destination")
 			}
@@ -61,9 +64,10 @@ Multiple sources require a directory destination (trailing "/").`,
 				Sources: args[:len(args)-1],
 				Dest:    args[len(args)-1],
 				Force:   force,
+				NoSync:  noSync,
 			}
 
-			// ── Progress ──
+			// --- Progress ---
 			prog := common.NewProgress()
 			prog.Start("Copying...")
 
@@ -76,7 +80,7 @@ Multiple sources require a directory destination (trailing "/").`,
 
 			prog.Stop()
 
-			// ── Result handling ──
+			// --- Result handling ---
 			if cpErr != nil {
 				return cpErr
 			}
@@ -92,6 +96,8 @@ Multiple sources require a directory destination (trailing "/").`,
 	}
 
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing destination files")
+	cmd.Flags().
+		BoolVarP(&noSync, "no-sync", "", false, "Skip final sync() after transfer (faster but risks data loss on VM stop)")
 
 	return cmd
 }

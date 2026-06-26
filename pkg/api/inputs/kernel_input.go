@@ -3,13 +3,10 @@ package inputs
 import (
 	"context"
 	"fmt"
-	"strings"
-
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/errs"
-
-	"github.com/jmoiron/sqlx"
+	"strings"
 )
 
 // KernelInput is the raw input for identifying existing kernels.
@@ -18,80 +15,33 @@ type KernelInput struct {
 	Force       bool     `json:"force"`
 }
 
-// ResolvedKernelInput matches Python's ResolvedKernelInput (frozen dataclass).
-type ResolvedKernelInput struct {
-	Kernels []*model.KernelItem
-	Force   bool
-}
-
-// KernelRequest matches Python's KernelRequest.
-//
-// Resolve kernel identifiers to DB records and validate.
-type KernelRequest struct {
-	db       *sqlx.DB
-	input    KernelInput
-	result   *ResolvedKernelInput
-	resolver *kernel.Resolver
-}
-
-// NewKernelRequest creates a new KernelRequest.
-func NewKernelRequest(inputs KernelInput, db *sqlx.DB, kernelRepo kernel.Repository) *KernelRequest {
-	return &KernelRequest{
-		db:       db,
-		input:    inputs,
-		resolver: kernel.NewResolver(kernelRepo, nil),
+// Validate checks that the kernel input has valid identifiers.
+func (i *KernelInput) Validate() error {
+	if len(i.Identifiers) == 0 {
+		return fmt.Errorf("at least one kernel identifier is required")
 	}
-}
-
-// Result returns the resolved input, or nil if resolve() has not been called.
-
-// Resolve resolves kernel identifiers to KernelItem records.
-// Matches Python's KernelRequest.resolve().
-func (r *KernelRequest) Resolve(ctx context.Context) (*ResolvedKernelInput, error) {
-	if len(r.input.Identifiers) == 0 {
-		return nil, errs.NotFound(errs.CodeKernelNotFound, "No kernel identifiers provided")
-	}
-
-	// Validate identifier length — max 64 chars.
-	for _, ident := range r.input.Identifiers {
+	for _, ident := range i.Identifiers {
 		if len(ident) > 64 {
-			return nil, errs.New(
-				errs.CodeValidationFailed,
-				fmt.Sprintf("Kernel identifier too long: '%s' exceeds maximum length of 64 characters", ident),
-			)
+			return fmt.Errorf("kernel identifier too long: %q exceeds maximum length of 64 characters", ident)
 		}
 	}
-
-	result := r.resolver.ResolveMany(ctx, r.input.Identifiers)
-
-	if len(result.Errors) > 0 && len(result.Items) == 0 {
-		return nil, errs.NotFound(
-			errs.CodeKernelNotFound,
-			"Could not resolve any kernels: "+strings.Join(result.Errors, ", "),
-		)
-	}
-
-	r.result = &ResolvedKernelInput{
-		Kernels: result.Items,
-		Force:   r.input.Force,
-	}
-
-	// Validate
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-
-	return r.result, nil
+	return nil
 }
 
-func (r *KernelRequest) ensureValidate() error {
-	if r.result == nil {
-		return errs.New(errs.CodeKernelNotFound, "Failed to resolve necessary dependencies to validate")
+// Resolve resolves all identifiers in the input to KernelItem objects.
+// Delegates to kernel.Resolver.ResolveMany for batch resolution with
+// deduplication and error collection.
+func (i *KernelInput) Resolve(ctx context.Context, repo kernel.Repository) ([]*model.KernelItem, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
 	}
-
-	if len(r.result.Kernels) == 0 {
-		return errs.NotFound(errs.CodeKernelNotFound, "No kernels found matching identifiers")
+	resolver := kernel.NewResolver(repo, nil)
+	result := resolver.ResolveMany(ctx, i.Identifiers)
+	if len(result.Items) == 0 {
+		return nil, errs.NotFound(errs.CodeKernelNotFound, "No kernels found matching identifiers")
 	}
-
-	return nil
+	if len(result.Errors) > 0 {
+		return result.Items, fmt.Errorf("partial resolve failures: %s", strings.Join(result.Errors, "; "))
+	}
+	return result.Items, nil
 }

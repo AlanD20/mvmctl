@@ -1,3 +1,5 @@
+// Package console provides VM serial console output streaming.
+// Layer: Core domain — never imports other core/* packages.
 package console
 
 import (
@@ -15,9 +17,9 @@ import (
 // Controller manages the console lifecycle for a single VM.
 //
 // The Controller owns:
-//   - PTY pair creation/teardown (master → relay, slave → Firecracker)
-//   - Relay subprocess spawning/management (Start, Stop, IsRunning, GetPID)
-//   - Relay client connection (Connect, Disconnect)
+// - PTY pair creation/teardown (master → relay, slave → Firecracker)
+// - Relay subprocess spawning/management (Start, Stop, IsRunning, GetPID)
+// - Relay client connection (Connect, Disconnect)
 //
 // The API layer creates a Controller and calls these methods — it never
 // touches the service package directly.

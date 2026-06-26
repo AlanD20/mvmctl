@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/core/config"
 )
 
-// ─── GoTypeName ──────────────────────────────────────────────────────────────────────────
+// --- GoTypeName ---
 // Rationale: GoTypeName is used by InitSettings to store type metadata for config coercion.
 // Wrong type names would cause Coerce to silently coerce to wrong target types or fail.
 
@@ -68,7 +68,7 @@ func TestGoTypeName(t *testing.T) {
 	}
 }
 
-// ─── InitSettings ────────────────────────────────────────────────────────────────────────
+// --- InitSettings ---
 // Rationale: InitSettings populates OverridableSettings from infra.OverridableDefaults.
 // If it fails to run or produces wrong type mappings, all config coercion is broken.
 
@@ -116,7 +116,7 @@ func TestInitSettings(t *testing.T) {
 	})
 }
 
-// ─── GetExpectedType ─────────────────────────────────────────────────────────────────────
+// --- GetExpectedType ---
 // Rationale: GetExpectedType retrieves the expected type for a setting key.
 // Returning wrong types (including empty string) would cause config coercion
 // to target the wrong type or silently skip coercion.

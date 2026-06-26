@@ -7,7 +7,6 @@ import (
 )
 
 // Config holds all cloud-init provisioning parameters.
-// Matches Python's CloudInitConfig dataclass.
 type Config struct {
 	Mode model.CloudInitMode
 

@@ -71,6 +71,7 @@ Every step type supports these top-level fields:
 |-------|------|----------|-------------|
 | `name` | `string` | **Yes** | Step name. Becomes `"type:name"` identifier. |
 | `depends_on` | `[]string` | No | List of `"type:name"` dependencies. |
+| `env` | `map[string]string` | No | Environment variable overrides for `exec` and `ssh` commands. See each step type for details. |
 
 ---
 
@@ -260,15 +261,19 @@ re-runs on re-apply. Requires the VM to be created with vsock enabled (default).
 | `user` | `string` | Config default | User to run the command as. |
 | `timeout` | `int` | `0` | Command timeout in seconds. 0 = no timeout. |
 | `port` | `int` | `1024` | Vsock agent port override. |
+| `env` | `map[string]string` | `{}` | Environment variable overrides passed to the command inside the VM. |
 
 **Example:**
 ```yaml
 exec:
   - name: setup-app
     target: dev-vm
-    cmd: "curl -sS https://example.com/setup.sh | sh"
+    cmd: "./deploy.sh"
     user: root
     timeout: 30
+    env:
+      DEPLOY_ENV: staging
+      LOG_LEVEL: debug
     depends_on:
       - vm:dev-vm
 ```
@@ -286,6 +291,7 @@ Run a command on a VM via SSH. **Imperative** — always re-runs on re-apply.
 | `key` | `string` | VM/config default | Key name or file path. |
 | `cmd` | `string` | `""` | Command to execute. Empty = interactive shell. |
 | `timeout` | `int` | `0` | Connection timeout in seconds. |
+| `env` | `map[string]string` | `{}` | Environment variable overrides prepended to the command using `env K=V cmd`. |
 
 **Example:**
 ```yaml
@@ -294,6 +300,8 @@ ssh:
     target: dev-vm
     user: root
     cmd: "hostnamectl set-hostname my-dev-vm"
+    env:
+      ENVIRONMENT: production
     depends_on:
       - vm:dev-vm
 ```
@@ -435,6 +443,9 @@ exec:
     cmd: "curl -sS https://example.com/bootstrap.sh | sh"
     user: root
     timeout: 60
+    env:
+      APP_ENV: production
+      LOG_LEVEL: info
     depends_on:
       - vm:dev-vm
 

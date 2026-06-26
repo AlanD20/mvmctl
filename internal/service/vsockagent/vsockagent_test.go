@@ -44,7 +44,7 @@ func TestExecCommandContext_Sanity(t *testing.T) {
 // provided no behavioral coverage. New() is a trivial constructor with no
 // validation, no defaults, and no side effects worth testing.
 
-// ─── readFrame ────────────────────────────────────────────────────────────────
+// --- readFrame ---
 // Rationale: readFrame is the entry point for all host→agent communication.
 // A malformed frame must be rejected to prevent deserialisation attacks.
 // Every table includes at least one error/boundary case per review standard.
@@ -156,7 +156,7 @@ func TestReadFrame_InvalidJSON(t *testing.T) {
 	}
 }
 
-// ─── writeFrame ───────────────────────────────────────────────────────────────
+// --- writeFrame ---
 // Rationale: writeFrame serialises response frames for host consumption.
 // Must produce valid newline-delimited JSON. Every table includes at least
 // one error/boundary case per review standard.
@@ -232,7 +232,7 @@ func closedPipeWriter() io.Writer {
 	return pw
 }
 
-// ─── trimBOM ──────────────────────────────────────────────────────────────────
+// --- trimBOM ---
 // Rationale: trimBOM handles UTF-8 BOM bytes that may appear in Windows-origin
 // data. Must strip the BOM prefix and leave non-BOM data unchanged.
 
@@ -273,7 +273,7 @@ func TestTrimBOM(t *testing.T) {
 	}
 }
 
-// ─── Agent auth via handleConnection token check ─────────────────────────────
+// --- Agent auth via handleConnection token check ---
 // Rationale: Token-based auth protects the agent from unauthorised commands.
 // ping requests are exempt; exec and exec-tty requests require a matching
 // token. This test calls the actual production handleConnection via net.Pipe
@@ -326,7 +326,7 @@ func TestHandleConnection_Auth(t *testing.T) {
 
 			agent := New(9999, tc.agentToken)
 
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
 			var wg sync.WaitGroup
@@ -428,7 +428,7 @@ func runHandleExec(ctx context.Context, req *execRequest) *execResponse {
 	return &result
 }
 
-// ─── Context cancellation ────────────────────────────────────────────────────
+// --- Context cancellation ---
 // Rationale: The agent must respect context cancellation in the connection
 // handler. A cancelled context should cause handleExec to return an error.
 
@@ -452,7 +452,7 @@ func TestHandleExec_ContextCancelled(t *testing.T) {
 		"handleExec must return context cancellation error")
 }
 
-// ─── handleExec timeout ──────────────────────────────────────────────────────
+// --- handleExec timeout ---
 // Rationale: The timeout field in execRequest wraps the context with a timeout.
 // A cancelled base context combined with any positive timeout must propagate
 // cancellation to the command.
@@ -478,7 +478,7 @@ func TestHandleExec_Timeout(t *testing.T) {
 		"handleExec must return context cancellation error")
 }
 
-// ─── readFrame EOF ───────────────────────────────────────────────────────────
+// --- readFrame EOF ---
 // Rationale: readFrame must return an error on EOF so the connection handler
 // can cleanly exit its read loop. This validates the EOF-to-error path that
 // is the normal shutdown mechanism for the frame read loop.
@@ -491,7 +491,7 @@ func TestReadFrame_EOF(t *testing.T) {
 	return
 }
 
-// ─── handleExec success ────────────────────────────────────────────────────────
+// --- handleExec success ---
 // Rationale: handleExec is the core command execution path. Must capture stdout,
 // stderr, and duration_ms for valid commands.
 
@@ -533,7 +533,7 @@ func TestHandleExec_Success(t *testing.T) {
 	}
 }
 
-// ─── handleExec command failure ────────────────────────────────────────────────
+// --- handleExec command failure ---
 // Rationale: handleExec must return non-zero exit codes and capture stderr when
 // the command fails. This is the primary error reporting contract for commands.
 
@@ -543,7 +543,7 @@ func TestHandleExec_CommandFailure(t *testing.T) {
 		Type:    requestTypeExec,
 		Command: "sh -c 'exit 42'",
 	}
-	resp := runHandleExec(t.Context(), req)
+	resp := runHandleExec(context.Background(), req)
 
 	assert.Equal(t, responseTypeResult, resp.Type, "response type")
 	assert.Equal(t, 42, resp.Status, "exit code must match the command's exit code")
@@ -552,7 +552,7 @@ func TestHandleExec_CommandFailure(t *testing.T) {
 	assert.GreaterOrEqual(t, resp.DurationMs, 0, "duration_ms")
 }
 
-// ─── handleExec with env vars ──────────────────────────────────────────────────
+// --- handleExec with env vars ---
 // Rationale: Environment variable propagation is essential for commands that
 // depend on configuration (PATH, custom vars). Must pass through user-set vars.
 
@@ -563,7 +563,7 @@ func TestHandleExec_WithEnv(t *testing.T) {
 		Command: "echo $TEST_VAR",
 		Env:     map[string]string{"TEST_VAR": "env_value"},
 	}
-	resp := runHandleExec(t.Context(), req)
+	resp := runHandleExec(context.Background(), req)
 
 	assert.Equal(t, responseTypeResult, resp.Type, "response type")
 	assert.Equal(t, 0, resp.Status, "exit code")
@@ -571,7 +571,7 @@ func TestHandleExec_WithEnv(t *testing.T) {
 	assert.GreaterOrEqual(t, resp.DurationMs, 0, "duration_ms")
 }
 
-// ─── handleExec real timeout ───────────────────────────────────────────────────
+// --- handleExec real timeout ---
 // Rationale: The timeout field wraps the context with a deadline. A long-running
 // command exceeding the timeout must be killed and return status -1.
 
@@ -582,13 +582,109 @@ func TestHandleExec_RealTimeout(t *testing.T) {
 		Command: "sleep 5",
 		Timeout: 1,
 	}
-	resp := runHandleExec(t.Context(), req)
+	resp := runHandleExec(context.Background(), req)
 
 	assert.Equal(t, responseTypeResult, resp.Type, "response type")
 	assert.NotEqual(t, 0, resp.Status, "must return non-zero status on timeout — process was killed")
 }
 
-// ─── handleExec user switching ─────────────────────────────────────────────────
+// --- handleExec streaming output ---
+// Rationale: handleExec must stream stdout/stderr frames as the command
+// produces output, not buffer everything until the command exits. This test
+// proves that stdout frames arrive before the final result frame and that
+// the accumulated output is correct regardless of frame boundaries.
+
+func TestHandleExec_StreamingOutput(t *testing.T) {
+	host, guest := net.Pipe()
+	defer host.Close()
+	defer guest.Close()
+
+	// Produce multiple lines with small delays between them. This gives
+	// Go's internal pipe read goroutines a chance to read each line as a
+	// separate chunk, exercising the newline-based flush in streamingWriter.
+	req := &execRequest{
+		ID:      "stream-test",
+		Type:    requestTypeExec,
+		Command: `echo "line1"; sleep 0.05; echo "line2"; sleep 0.05; echo "line3"`,
+	}
+
+	go handleExec(context.Background(), req, guest)
+
+	dec := json.NewDecoder(host)
+
+	var stdout strings.Builder
+	var result execResponse
+	var frameCount int
+	reading := true
+	for reading {
+		var frame execResponse
+		require.NoError(t, dec.Decode(&frame))
+		frameCount++
+
+		switch frame.Type {
+		case responseTypeStdout:
+			stdout.WriteString(frame.Data)
+		case responseTypeResult:
+			result = frame
+			reading = false
+		default:
+			t.Fatalf("unexpected frame type: %s", frame.Type)
+		}
+	}
+
+	assert.Equal(t, 0, result.Status, "exit code")
+	assert.Equal(t, "line1\nline2\nline3\n", stdout.String(), "accumulated stdout")
+	assert.Greater(t, frameCount, 1, "must have at least stdout + result frames")
+	assert.Equal(t, responseTypeResult, result.Type, "last frame must be result")
+}
+
+// --- handleExec write error ---
+// Rationale: If the vsock connection breaks during command execution,
+// streamingWriter records the write error. handleExec must detect this,
+// send a Status:-1 result frame (best-effort), and return cleanly — not
+// hang or panic.
+
+func TestHandleExec_WriteError(t *testing.T) {
+	host, guest := net.Pipe()
+
+	req := &execRequest{
+		ID:      "write-err-test",
+		Type:    requestTypeExec,
+		Command: `echo "before"; sleep 0.2; echo "after"`,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		handleExec(context.Background(), req, guest)
+		close(done)
+	}()
+
+	// Read the first stdout frame ("before\n") — proves streaming works
+	// before the connection is closed.
+	dec := json.NewDecoder(host)
+	var frame execResponse
+	require.NoError(t, dec.Decode(&frame), "must receive first stdout frame")
+	assert.Equal(t, responseTypeStdout, frame.Type)
+	assert.Equal(t, "before\n", frame.Data)
+
+	// Close the host end to break the connection. Subsequent writes to
+	// guest (conn inside handleExec) will fail.
+	host.Close()
+
+	// handleExec must detect the write error and return cleanly.
+	select {
+	case <-done:
+		// Success — handleExec returned without hanging.
+	case <-time.After(5 * time.Second):
+		t.Fatal("handleExec did not return within 5s after write error")
+	}
+
+	// The error result frame was attempted best-effort on a broken
+	// connection, so we cannot assert its content. Clean exit is the
+	// assertion.
+}
+
+// --- handleExec user switching ---
 // Rationale: handleExec supports running commands as a different user via su.
 // Must verify that the process executes under the requested user identity.
 
@@ -609,14 +705,14 @@ func TestHandleExec_UserSwitch(t *testing.T) {
 		Command: "whoami",
 		User:    "nobody",
 	}
-	resp := runHandleExec(t.Context(), req)
+	resp := runHandleExec(context.Background(), req)
 
 	assert.Equal(t, responseTypeResult, resp.Type, "response type")
 	assert.Equal(t, 0, resp.Status, "exit code")
 	assert.Equal(t, "nobody\n", resp.Stdout, "must run as nobody user")
 }
 
-// ─── handleConnection exec dispatch ────────────────────────────────────────────
+// --- handleConnection exec dispatch ---
 // Rationale: handleConnection must dispatch exec requests through handleExec and
 // return the result (stdout, exit code, duration) back through the vsock
 // connection. This tests the full request→dispatch→response pipeline.
@@ -632,7 +728,7 @@ func TestHandleConnection_ExecDispatch(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		agent.handleConnection(t.Context(), guest)
+		agent.handleConnection(context.Background(), guest)
 	}()
 
 	// Send exec request with matching token.
@@ -679,7 +775,7 @@ doneReading:
 	wg.Wait()
 }
 
-// ─── handleConnection unknown request ──────────────────────────────────────────
+// --- handleConnection unknown request ---
 // Rationale: Unknown request types must return an error response. This prevents
 // clients from sending garbage or mistyped requests that could hang the agent.
 
@@ -694,7 +790,7 @@ func TestHandleConnection_UnknownRequest(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		agent.handleConnection(t.Context(), guest)
+		agent.handleConnection(context.Background(), guest)
 	}()
 
 	// Send unknown request type.
@@ -721,7 +817,7 @@ func TestHandleConnection_UnknownRequest(t *testing.T) {
 	wg.Wait()
 }
 
-// ─── handleConnection partial read ─────────────────────────────────────────────
+// --- handleConnection partial read ---
 // Rationale: A partial frame (incomplete JSON without newline) followed by
 // connection close must not panic or leak the handler goroutine. This validates
 // the readFrame error path that is the normal connection shutdown mechanism.
@@ -737,7 +833,7 @@ func TestHandleConnection_PartialRead(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		agent.handleConnection(t.Context(), guest)
+		agent.handleConnection(context.Background(), guest)
 	}()
 
 	// Write partial JSON frame — no newline, incomplete.
@@ -752,7 +848,7 @@ func TestHandleConnection_PartialRead(t *testing.T) {
 	// Reaching here without panic or timeout proves clean shutdown.
 }
 
-// ─── readFrame robustness ──────────────────────────────────────────────────────
+// --- readFrame robustness ---
 // Rationale: readFrame must handle large payloads without OOM and reject binary
 // data (null bytes, non-UTF8) with a clear parse error. This prevents
 // deserialisation attacks and resource exhaustion at the frame boundary.
@@ -799,7 +895,7 @@ func TestReadFrame_Robustness(t *testing.T) {
 	}
 }
 
-// ─── PTY bidirectional relay (slave raw mode) ────────────────────────────
+// --- PTY bidirectional relay (slave raw mode) ---
 // Rationale: Basic PTY relay test with the slave in raw mode. Data passes
 // through unchanged bidirectionally. This proves the io.Copy relay pattern
 // works for the simplest case.
@@ -821,7 +917,7 @@ func TestPTY_BidirectionalRelay_SlaveRaw(t *testing.T) {
 	defer func() { _ = term.Restore(int(slave.Fd()), rawState) }()
 
 	// Start cat on the slave side — it echoes stdin to stdout.
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(ctx, "cat")
 	cmd.Stdin = slave
@@ -856,7 +952,7 @@ func TestPTY_BidirectionalRelay_SlaveRaw(t *testing.T) {
 		"host must receive the exact data relayed through PTY and cat")
 }
 
-// ─── PTY bidirectional relay (master raw mode — handleTTY style) ─────────
+// --- PTY bidirectional relay (master raw mode) ---
 // Rationale: handleTTY calls term.MakeRaw(master) AFTER starting the shell.
 // The PTY master and slave SHARE a termios structure on Linux. MakeRaw on the
 // master disables ICANON, ECHO, ICRNL, ISIG, OPOST on the SHARED termios.
@@ -871,7 +967,7 @@ func TestPTY_BidirectionalRelay_MasterRaw(t *testing.T) {
 	defer slave.Close()
 
 	// Same order as handleTTY: start command FIRST, then MakeRaw(master).
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(ctx, "cat")
 	cmd.Stdin = slave
@@ -884,7 +980,7 @@ func TestPTY_BidirectionalRelay_MasterRaw(t *testing.T) {
 		_ = cmd.Wait()
 	}()
 
-	// ── handleTTY-style: MakeRaw on the master AFTER command starts ──
+	// --- handleTTY-style: MakeRaw on the master AFTER com ---
 	rawState, err := term.MakeRaw(int(master.Fd()))
 	if err != nil {
 		t.Skip("cannot set PTY master to raw mode:", err)
@@ -919,7 +1015,7 @@ func TestPTY_BidirectionalRelay_MasterRaw(t *testing.T) {
 	assert.Contains(t, got, "hello\n", "cat's echo must be received via relay")
 }
 
-// ─── PTY bidirectional relay with real /bin/sh -i ───────────────────────
+// --- PTY bidirectional relay with real /bin/sh -i ---
 // Rationale: handleTTY uses /bin/sh -i for the interactive shell. Must prove
 // the full relay chain works with the actual shell — not just cat. The shell
 // runs in cooked mode (ICANON on, ECHO on), which is the correct PTY config.
@@ -935,7 +1031,7 @@ func TestPTY_BidirectionalRelay_Shell(t *testing.T) {
 	defer slave.Close()
 
 	// Start /bin/sh -i on the slave, same as handleTTY.
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-i")
 	cmd.Stdin = slave
@@ -978,7 +1074,7 @@ func TestPTY_BidirectionalRelay_Shell(t *testing.T) {
 	// Reset deadline to zero (no deadline) for the real test.
 	host.SetReadDeadline(time.Time{})
 
-	// ── Test: send a command and verify the shell executes it ──
+	// --- Test: send a command and verify the shell execut ---
 	marker := "SHELL_TEST_OK_" + t.Name()
 	_, err = host.Write([]byte("echo " + marker + "\n"))
 	require.NoError(t, err)
@@ -1004,15 +1100,15 @@ func TestPTY_BidirectionalRelay_Shell(t *testing.T) {
 	t.Logf("shell output: %q", allOutput)
 }
 
-// ─── handleTTY full flow ──────────────────────────────────────────────────
+// --- handleTTY full flow ---
 // Rationale: handleTTY is the core interactive session handler. It opens a
 // PTY, starts /bin/sh -i, and relays bytes bidirectionally between the vsock
 // connection and the PTY master. Must prove that:
-//   - The shell receives input from the vsock connection
-//   - The shell's output is relayed back through the vsock connection
-//   - When the shell exits ("exit\n"), handleTTY returns cleanly
-//   - When the host disconnects (pipe close), handleTTY returns cleanly
-//   - No goroutines leak, no panic, no hang
+// - The shell receives input from the vsock connection
+// - The shell's output is relayed back through the vsock connection
+// - When the shell exits ("exit\n"), handleTTY returns cleanly
+// - When the host disconnects (pipe close), handleTTY returns cleanly
+// - No goroutines leak, no panic, no hang
 
 func TestHandleTTY_FullFlow(t *testing.T) {
 	if os.Geteuid() != 0 {
@@ -1028,7 +1124,7 @@ func TestHandleTTY_FullFlow(t *testing.T) {
 		Type: requestTypeExecTTY,
 	}
 
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	handleTTYDone := make(chan struct{})
@@ -1084,7 +1180,7 @@ func TestHandleTTY_FullFlow(t *testing.T) {
 	}
 }
 
-// ─── handleTTY host disconnect ─────────────────────────────────────────────
+// --- handleTTY host disconnect ---
 // Rationale: When the host disconnects (e.g., Ctrl+C on the client), the
 // vsock connection is closed. handleTTY must detect this, clean up the relay
 // goroutines, kill the shell, and return. No goroutines should leak.
@@ -1103,7 +1199,7 @@ func TestHandleTTY_HostDisconnect(t *testing.T) {
 		Type: requestTypeExecTTY,
 	}
 
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	handleTTYDone := make(chan struct{})
@@ -1127,7 +1223,7 @@ func TestHandleTTY_HostDisconnect(t *testing.T) {
 	}
 }
 
-// ─── handleTTY openPTY failure ────────────────────────────────────────────
+// --- handleTTY openPTY failure ---
 // Rationale: If openPTY fails (e.g., /dev/ptmx unavailable), handleTTY must
 // return cleanly without a panic or goroutine leak. This is the first error
 // path in handleTTY.
@@ -1136,29 +1232,25 @@ func TestHandleTTY_OpenPTYFailure(t *testing.T) {
 	// Temporarily move /dev/ptmx to simulate failure.
 	// We use os.Rename, but that requires root. Instead, use a chroot
 	// or simply skip if we can't simulate the failure.
-	//
 	// Alternative: modify openPTY to accept an injectable opener. For now,
 	// we test via execRequest with a dummy conn that will cause openPTY
 	// to error differently... Actually, openPTY always tries /dev/ptmx.
-	//
 	// This test is inherently platform-dependent. We verify the graceful
 	// path instead: handleTTY returns when openPTY fails, which we can
 	// test by making openPTY fail in a controlled way. But openPTY is
 	// not injectable.
-	//
 	// For coverage, we test that handleTTY does NOT panic when called
 	// with a valid conn and request — the PTY success case is covered
 	// by TestHandleTTY_FullFlow. The error path (openPTY failure) is
 	// a simple early return that depends on /dev/ptmx availability,
 	// which is guaranteed on any Linux system with devpts.
-	//
 	// If you need to test the error path, run in a container without
 	// devpts mounted:
-	//   docker run --rm -v $(pwd):/src -w /src golang:1.26 sh -c 'umount /dev/ptmx 2>/dev/null; go test -run TestHandleTTY_OpenPTYFailure'
+	// docker run --rm -v $(pwd):/src -w /src golang:1.26 sh -c 'umount /dev/ptmx 2>/dev/null; go test -run TestHandleTTY_OpenPTYFailure'
 	t.Log("openPTY failure path tested in containers without devpts; skipped by default")
 }
 
-// ─── handleConnection exec-tty dispatch ───────────────────────────────────
+// --- handleConnection exec-tty dispatch ---
 // Rationale: handleConnection must dispatch exec-tty requests by sending a
 // TTY acknowledgement and then handing off to handleTTY. This test verifies
 // the dispatch boundary: exec-tty request → TTY ack → handoff (then close
@@ -1175,7 +1267,7 @@ func TestHandleConnection_ExecTTYDispatch(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		agent.handleConnection(t.Context(), guest)
+		agent.handleConnection(context.Background(), guest)
 	}()
 
 	// Send exec-tty request.
@@ -1207,7 +1299,7 @@ func TestHandleConnection_ExecTTYDispatch(t *testing.T) {
 	wg.Wait()
 }
 
-// ─── AgentBinary decompression ────────────────────────────────────────────
+// --- AgentBinary decompression ---
 // Rationale: AgentBinary() lazily decompresses the embedded gzip binary on
 // first call. Must handle empty/corrupt embedded data gracefully (return nil,
 // no panic) and correctly decompress valid gzip content.
@@ -1241,7 +1333,7 @@ func TestAgentBinary_DecompressLogic(t *testing.T) {
 	assert.Equal(t, marker, string(data))
 }
 
-// ─── openPTY ───────────────────────────────────────────────────────────────────
+// --- openPTY ---
 // Rationale: PTY allocation is the foundation of interactive TTY sessions. Must
 // succeed on normal systems and fail gracefully when /dev/ptmx is unavailable.
 

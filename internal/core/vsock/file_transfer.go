@@ -1,6 +1,3 @@
-// Package vsock provides the vsock domain for guest agent communication.
-// File transfer implements a binary frame protocol for copying files
-// between the host and VM (and between VMs) over the vsock connection.
 package vsock
 
 import (
@@ -11,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,21 +65,22 @@ func expandSources(srcPaths []string) ([]fileEntry, error) {
 	return entries, nil
 }
 
-// ── FTCopyToVM (host → VM push) ─────────────────────────────────────────────
+// --- FTCopyToVM (host -> VM push) ---
 
 // FTCopyToVM copies files from the host to the VM using the binary frame protocol.
 // It connects to the guest agent, performs a JSON handshake, then switches to
 // binary frames to push each file.
 //
 // destPath determines the copy mode:
-//   - Trailing "/" or empty → directory mode: preserve source basename inside destPath
-//   - No trailing "/"       → file mode: use destPath as the exact destination filename.
-//     Multi-source with file mode returns an error.
+// - Trailing "/" or empty → directory mode: preserve source basename inside destPath
+// - No trailing "/"       → file mode: use destPath as the exact destination filename.
+// Multi-source with file mode returns an error.
 func (c *Client) FTCopyToVM(
 	ctx context.Context,
 	srcPaths []string,
 	destPath string,
 	overwrite bool,
+	noSync bool,
 	onProgress event.OnDownloadCallback,
 ) (*FTResult, error) {
 	conn, err := c.ensureAgent(ctx)
@@ -91,7 +90,7 @@ func (c *Client) FTCopyToVM(
 	}
 	defer conn.Close()
 
-	// ── JSON handshake ──
+	// --- JSON handshake ---
 	req := execRequest{
 		ID:    "1",
 		Type:  requestTypeFileTransfer,
@@ -111,7 +110,7 @@ func (c *Client) FTCopyToVM(
 		return nil, fmt.Errorf("unexpected handshake response type: %s", resp.Type)
 	}
 
-	// ── Switch to binary frames ──
+	// --- Switch to binary frames ---
 
 	// Validate: multiple sources require explicit directory mode (trailing /).
 	if !strings.HasSuffix(destPath, "/") && len(srcPaths) > 1 {
@@ -124,6 +123,7 @@ func (c *Client) FTCopyToVM(
 		Paths:     srcPaths,
 		Dest:      destPath,
 		Overwrite: overwrite,
+		NoSync:    noSync,
 	})
 	if err := vsockagent.WriteFTFrame(conn, vsockagent.FtPush, pushPayload); err != nil {
 		slog.Error("ft: write push frame", "error", err)
@@ -328,13 +328,18 @@ func (c *Client) FTCopyToVM(
 	return result, nil
 }
 
-// ── FTCopyFromVM (VM → host pull) ───────────────────────────────────────────
+// --- FTCopyFromVM (VM -> host pull) ---
 
-// FTCopyFromVM copies a file from the VM to the host using the binary frame protocol.
+// FTCopyFromVM copies a file or directory from the VM to the host using the
+// binary frame protocol.
 //
-// destPath determines the copy mode:
-//   - Trailing "/" or existing directory → directory mode: write to destPath/<source basename>
-//   - Otherwise                         → file mode: write to exact destPath
+// Directory mode is triggered when destPath ends with "/" or is an existing
+// directory, or when srcPath ends with "/" as an explicit hint. In directory
+// mode the guest agent streams one or more files and they are placed under
+// destPath using the relative path from the VM source.
+//
+// Single-file mode sends one META → accept → DATA/EOS → OK cycle, then reads
+// DONE. Directory mode sends N cycles (one per file) followed by DONE.
 func (c *Client) FTCopyFromVM(
 	ctx context.Context,
 	srcPath string,
@@ -349,7 +354,7 @@ func (c *Client) FTCopyFromVM(
 	}
 	defer conn.Close()
 
-	// ── JSON handshake ──
+	// --- JSON handshake ---
 	req := execRequest{
 		ID:    "1",
 		Type:  requestTypeFileTransfer,
@@ -369,46 +374,9 @@ func (c *Client) FTCopyFromVM(
 		return nil, fmt.Errorf("unexpected handshake response type: %s", resp.Type)
 	}
 
-	// ── Switch to binary frames ──
-
-	// Send PULL frame.
-	pullPayload, _ := json.Marshal(vsockagent.FtPullPayload{
-		Path:      srcPath,
-		Dest:      destPath,
-		Overwrite: overwrite,
-	})
-	if err := vsockagent.WriteFTFrame(conn, vsockagent.FtPull, pullPayload); err != nil {
-		slog.Error("ft: write pull frame", "error", err)
-		return nil, fmt.Errorf("write pull frame: %w", err)
-	}
-
-	// Read META frame from agent.
-	frameType, metaPayload, err := vsockagent.ReadFTFrame(conn)
-	if err != nil {
-		slog.Error("ft: read meta", "error", err)
-		return nil, fmt.Errorf("read meta frame: %w", err)
-	}
-	if frameType == vsockagent.FtError {
-		var errPayload vsockagent.FtErrorPayload
-		if json.Unmarshal(metaPayload, &errPayload) == nil {
-			return nil, fmt.Errorf("agent error: %s: %s", errPayload.Code, errPayload.Message)
-		}
-		return nil, fmt.Errorf("agent error response")
-	}
-	if frameType != vsockagent.FtMeta {
-		return nil, fmt.Errorf("expected meta frame, got 0x%02x", frameType)
-	}
-
-	var meta vsockagent.FtMetaPayload
-	if err := json.Unmarshal(metaPayload, &meta); err != nil {
-		return nil, fmt.Errorf("parse meta: %w", err)
-	}
-
-	slog.Debug("ft: pull meta", "path", meta.Path, "size", meta.Size, "mode", meta.Mode, "sha256", meta.SHA256)
-
-	// ── Determine copy mode from destination path ──
+	// --- Determine destination directory mode ---
 	// Directory mode: dest ends with "/" or is an existing directory.
-	// File mode:      dest has no trailing "/" and is not an existing directory.
+	// File mode: dest has no trailing "/" and is not an existing directory.
 	destIsDir := strings.HasSuffix(destPath, "/")
 	if !destIsDir {
 		if fi, stErr := os.Stat(destPath); stErr == nil && fi.IsDir() {
@@ -416,6 +384,102 @@ func (c *Client) FTCopyFromVM(
 		}
 	}
 
+	// Ask the agent to stream recursively when either the destination is a
+	// directory (so one or more files will land inside it) or the caller
+	// explicitly requested directory mode with a trailing slash on srcPath.
+	// The agent still stat()s the source and decides whether to walk it.
+	isRecursive := destIsDir || strings.HasSuffix(srcPath, "/")
+
+	// --- Switch to binary frames ---
+
+	// Send PULL frame.
+	pullPayload, _ := json.Marshal(vsockagent.FtPullPayload{
+		Path:      srcPath,
+		Dest:      destPath,
+		Overwrite: overwrite,
+		Recursive: isRecursive,
+	})
+	if err := vsockagent.WriteFTFrame(conn, vsockagent.FtPull, pullPayload); err != nil {
+		slog.Error("ft: write pull frame", "error", err)
+		return nil, fmt.Errorf("write pull frame: %w", err)
+	}
+
+	var totalFiles, fileErrors int
+	var totalBytes int64
+
+mainLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("pull cancelled: %w", ctx.Err())
+		default:
+		}
+
+		frameType, payload, err := vsockagent.ReadFTFrame(conn)
+		if err != nil {
+			slog.Error("ft: read frame", "error", err)
+			return nil, fmt.Errorf("read frame: %w", err)
+		}
+
+		switch frameType {
+		case vsockagent.FtDone:
+			// All files processed — return host-side bookkeeping.
+			break mainLoop
+
+		case vsockagent.FtError:
+			var errPayload vsockagent.FtErrorPayload
+			if json.Unmarshal(payload, &errPayload) == nil {
+				return nil, fmt.Errorf("agent error: %s: %s", errPayload.Code, errPayload.Message)
+			}
+			return nil, fmt.Errorf("agent error during pull")
+
+		case vsockagent.FtMeta:
+			// Process one file.
+			fileResult, fileErr := c.receivePullFile(ctx, conn, payload, destPath, destIsDir, overwrite, onProgress)
+			if fileErr != nil {
+				return nil, fileErr
+			}
+			totalFiles += fileResult.Files
+			totalBytes += fileResult.Bytes
+			fileErrors += fileResult.Errors
+
+		default:
+			return nil, fmt.Errorf("unexpected frame type during pull: 0x%02x", frameType)
+		}
+	}
+
+	result := &FTResult{
+		Files:  totalFiles,
+		Bytes:  totalBytes,
+		Errors: fileErrors,
+	}
+	slog.Info("ft: pull complete", "path", srcPath,
+		"files", result.Files, "bytes", result.Bytes, "errors", result.Errors)
+	return result, nil
+}
+
+// receivePullFile handles one META frame during a pull: resolves the
+// destination path, checks overwrite, sends accept, receives data frames,
+// verifies SHA-256, and sends OK. Returns an FTResult for the single file
+// (1 success or 1 error) or an error for connection-fatal failures.
+func (c *Client) receivePullFile(
+	ctx context.Context,
+	conn net.Conn,
+	metaPayload []byte,
+	destPath string,
+	destIsDir bool,
+	overwrite bool,
+	onProgress event.OnDownloadCallback,
+) (*FTResult, error) {
+	var meta vsockagent.FtMetaPayload
+	if err := json.Unmarshal(metaPayload, &meta); err != nil {
+		return nil, fmt.Errorf("parse meta: %w", err)
+	}
+
+	slog.Debug("ft: pull meta", "path", meta.Path, "size", meta.Size,
+		"mode", meta.Mode, "sha256", meta.SHA256)
+
+	// Resolve full destination path.
 	var fullDestPath string
 	if destIsDir {
 		fullDestPath = filepath.Join(destPath, meta.Path)
@@ -431,7 +495,7 @@ func (c *Client) FTCopyFromVM(
 				Message: fmt.Sprintf("file exists: %s", fullDestPath),
 			})
 			_ = vsockagent.WriteFTFrame(conn, vsockagent.FtError, errPayload)
-			return nil, fmt.Errorf("destination exists: %s", fullDestPath)
+			return &FTResult{Files: 0, Bytes: 0, Errors: 1}, nil
 		}
 	}
 
@@ -443,9 +507,8 @@ func (c *Client) FTCopyFromVM(
 	}
 
 	// Create destination directory if needed.
-	destDirPath := filepath.Dir(fullDestPath)
-	if err := os.MkdirAll(destDirPath, 0755); err != nil {
-		slog.Error("ft: mkdir dest", "path", destDirPath, "error", err)
+	if err := os.MkdirAll(filepath.Dir(fullDestPath), 0755); err != nil {
+		slog.Error("ft: mkdir dest", "path", filepath.Dir(fullDestPath), "error", err)
 		return nil, fmt.Errorf("create destination directory: %w", err)
 	}
 
@@ -455,20 +518,22 @@ func (c *Client) FTCopyFromVM(
 		slog.Error("ft: create dest file", "path", fullDestPath, "error", err)
 		return nil, fmt.Errorf("create destination file: %w", err)
 	}
-	defer f.Close()
 
 	// Receive frames in loop.
 	hasher := sha256.New()
-	var totalBytes int64
+	var fileBytes int64
+	hasError := false
 receiveLoop:
 	for {
 		select {
 		case <-ctx.Done():
+			f.Close()
 			return nil, fmt.Errorf("pull cancelled: %w", ctx.Err())
 		default:
 		}
 		frameType, chunk, err := vsockagent.ReadFTFrame(conn)
 		if err != nil {
+			f.Close()
 			slog.Error("ft: read data frame", "error", err)
 			return nil, fmt.Errorf("read data frame: %w", err)
 		}
@@ -481,11 +546,12 @@ receiveLoop:
 			}
 			n, writeErr := f.Write(chunk)
 			if writeErr != nil {
+				f.Close()
 				slog.Error("ft: write chunk", "error", writeErr)
 				return nil, fmt.Errorf("write file chunk: %w", writeErr)
 			}
 			hasher.Write(chunk[:n])
-			totalBytes += int64(n)
+			fileBytes += int64(n)
 
 		case vsockagent.FtProgress:
 			var prog vsockagent.FtProgressPayload
@@ -496,27 +562,43 @@ receiveLoop:
 			}
 
 		case vsockagent.FtError:
+			f.Close()
+			_ = os.Remove(fullDestPath) // clean up partial file
 			var errPayload vsockagent.FtErrorPayload
 			if json.Unmarshal(chunk, &errPayload) == nil {
-				return nil, fmt.Errorf("agent error: %s: %s", errPayload.Code, errPayload.Message)
+				slog.Warn("ft: agent error for file", "path", meta.Path,
+					"code", errPayload.Code, "message", errPayload.Message)
 			}
-			return nil, fmt.Errorf("agent error during pull")
+			hasError = true
+			break receiveLoop
 
 		default:
+			f.Close()
 			return nil, fmt.Errorf("unexpected frame type during pull: 0x%02x", frameType)
 		}
 	}
+
+	f.Close()
+
+	if hasError {
+		return &FTResult{Files: 0, Bytes: 0, Errors: 1}, nil
+	}
+
+	// fsync not needed here because the file is already closed.
+	// The guest agent's sync() handles the backing store.
 
 	// Verify SHA-256 against file meta.
 	localHash := hex.EncodeToString(hasher.Sum(nil))
 	if meta.SHA256 != "" && localHash != meta.SHA256 {
 		_ = os.Remove(fullDestPath) // clean up partial file
-		return nil, fmt.Errorf("SHA-256 mismatch: local=%s remote=%s", localHash, meta.SHA256)
+		return nil, fmt.Errorf("SHA-256 mismatch for %s: local=%s remote=%s",
+			meta.Path, localHash, meta.SHA256)
 	}
+
 	// Send OK back to agent.
 	okPayload, _ := json.Marshal(vsockagent.FtMetaPayload{
 		Path:   meta.Path,
-		Size:   totalBytes,
+		Size:   fileBytes,
 		SHA256: hex.EncodeToString(hasher.Sum(nil)),
 	})
 	if err := vsockagent.WriteFTFrame(conn, vsockagent.FtOK, okPayload); err != nil {
@@ -524,30 +606,17 @@ receiveLoop:
 		return nil, fmt.Errorf("write ok frame: %w", err)
 	}
 
-	// Read DONE from agent.
-	_, _, err = vsockagent.ReadFTFrame(conn)
-	if err != nil {
-		slog.Error("ft: read done", "error", err)
-		return nil, fmt.Errorf("read done frame: %w", err)
-	}
-
-	result := &FTResult{
-		Files:  1,
-		Bytes:  totalBytes,
-		Errors: 0,
-	}
-	slog.Info("ft: pull complete", "path", srcPath, "bytes", result.Bytes)
-	return result, nil
+	return &FTResult{Files: 1, Bytes: fileBytes, Errors: 0}, nil
 }
 
-// ── FTCopyVMToVM (VM → VM relay) ────────────────────────────────────────────
+// --- FTCopyVMToVM (VM -> VM relay) ---
 
 // FTCopyVMToVM copies a file from one VM to another via the host as a relay.
 // It connects to both VMs and relays binary frames between them.
 //
 // destPath determines the copy mode:
-//   - Trailing "/" or empty → directory mode: preserve source basename inside destPath
-//   - No trailing "/"       → file mode: use destPath as the exact destination filename
+// - Trailing "/" or empty → directory mode: preserve source basename inside destPath
+// - No trailing "/"       → file mode: use destPath as the exact destination filename
 func (c *Client) FTCopyVMToVM(
 	ctx context.Context,
 	srcPath string,
@@ -572,7 +641,7 @@ func (c *Client) FTCopyVMToVM(
 	}
 	defer dstConn.Close()
 
-	// ── JSON handshake for both ──
+	// --- JSON handshake for both ---
 	req := execRequest{ID: "1", Type: requestTypeFileTransfer, Token: c.item.Token}
 	if err := sendFrame(srcConn, req); err != nil {
 		return nil, fmt.Errorf("source handshake failed: %w", err)
@@ -591,7 +660,7 @@ func (c *Client) FTCopyVMToVM(
 		return nil, fmt.Errorf("dest handshake response failed: %w", err)
 	}
 
-	// ── Binary: send PULL to source, PUSH to dest ──
+	// --- Binary: send PULL to source, PUSH to dest ---
 
 	// Send PULL to source.
 	pullPayload, _ := json.Marshal(vsockagent.FtPullPayload{Path: srcPath, Overwrite: overwrite})

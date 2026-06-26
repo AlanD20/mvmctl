@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Controller: Pause state machine ─────────────────────────────────────────
+// --- Controller: Pause state machine ---
 // Rationale: Pause must reject invalid transitions with specific error messages
 // and be idempotent when already paused. Error paths cover starting, stopped,
 // stopping, error, and crashed states.
@@ -24,7 +24,7 @@ func TestController_Pause_stateTransitions(t *testing.T) {
 	repo := testutil.NewVMRepo()
 
 	t.Run("already_paused_is_noop", func(t *testing.T) {
-		m := &model.VM{ID: "vm-1", Name: "test", Status: model.VMStatusPaused}
+		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusPaused}
 		ctrl := vm.NewController(m, repo)
 		assert.NoError(t, ctrl.Pause(context.Background()))
 	})
@@ -73,7 +73,7 @@ func TestController_Pause_stateTransitions(t *testing.T) {
 	})
 }
 
-// ─── Controller: Resume state machine ────────────────────────────────────────
+// --- Controller: Resume state machine ---
 // Rationale: Resume must reject invalid transitions and be idempotent when
 // already running.
 
@@ -117,7 +117,7 @@ func TestController_Resume_stateTransitions(t *testing.T) {
 	})
 }
 
-// ─── Controller: Start state machine ─────────────────────────────────────────
+// --- Controller: Start state machine ---
 // Rationale: Start must reject invalid transitions and be idempotent when
 // already running.
 
@@ -159,7 +159,7 @@ func TestController_Start_stateTransitions(t *testing.T) {
 	})
 }
 
-// ─── Controller: Stop idempotency ───────────────────────────────────────────
+// --- Controller: Stop idempotency ---
 // Rationale: Stop on non-running VMs (pid=0) must return nil immediately
 // without touching the repo. This is the most common error path.
 
@@ -174,7 +174,7 @@ func TestController_Stop_idempotent(t *testing.T) {
 	} {
 		t.Run(string(status)+"_noop", func(t *testing.T) {
 			repo := testutil.NewVMRepo()
-			m := &model.VM{ID: "vm-1", Name: "test", Status: status, PID: 0}
+			m := &model.VMItem{ID: "vm-1", Name: "test", Status: status, PID: 0}
 			require.NoError(t, repo.Upsert(ctx, m))
 
 			ctrl := vm.NewController(m, repo)
@@ -189,7 +189,7 @@ func TestController_Stop_idempotent(t *testing.T) {
 	}
 }
 
-// ─── Controller: Snapshot state validation ───────────────────────────────────
+// --- Controller: Snapshot state validation ---
 // Rationale: Snapshot must reject invalid states with specific messages.
 
 func TestController_Snapshot_stateValidation(t *testing.T) {
@@ -230,7 +230,7 @@ func TestController_Snapshot_stateValidation(t *testing.T) {
 
 	t.Run("running_no_socket_rejected", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
-		m := &model.VM{ID: "vm-1", Name: "test", Status: model.VMStatusRunning, APISocketPath: ""}
+		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusRunning, APISocketPath: ""}
 		ctrl := vm.NewController(m, repo)
 		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
 		require.Error(t, err)
@@ -239,7 +239,7 @@ func TestController_Snapshot_stateValidation(t *testing.T) {
 
 	t.Run("paused_no_socket_rejected", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
-		m := &model.VM{ID: "vm-1", Name: "test", Status: model.VMStatusPaused, APISocketPath: ""}
+		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusPaused, APISocketPath: ""}
 		ctrl := vm.NewController(m, repo)
 		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
 		require.Error(t, err)
@@ -247,7 +247,7 @@ func TestController_Snapshot_stateValidation(t *testing.T) {
 	})
 }
 
-// ─── Service: Single-VM delegation ──────────────────────────────────────────
+// --- Service: Single-VM delegation ---
 // Rationale: Service.Stop/Start/Pause/Resume delegate to Controller.
 // Verified by checking state machine rules through Service.
 
@@ -256,7 +256,7 @@ func TestService_Stop(t *testing.T) {
 
 	t.Run("stopped_vm_is_noop", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
-		m := &model.VM{ID: "vm-1", Name: "test", Status: model.VMStatusStopped, PID: 0}
+		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusStopped, PID: 0}
 		require.NoError(t, repo.Upsert(ctx, m))
 
 		svc := vm.NewService(repo)
@@ -268,7 +268,7 @@ func TestService_Stop(t *testing.T) {
 
 	t.Run("running_pid_zero_is_gone_path", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
-		m := &model.VM{ID: "vm-1", Name: "test", Status: model.VMStatusRunning, PID: 0, APISocketPath: ""}
+		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusRunning, PID: 0, APISocketPath: ""}
 		require.NoError(t, repo.Upsert(ctx, m))
 
 		svc := vm.NewService(repo)
@@ -282,7 +282,7 @@ func TestService_Stop(t *testing.T) {
 
 	t.Run("context_cancelled_before_call", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
-		m := &model.VM{ID: "vm-1", Name: "test", Status: model.VMStatusStopped, PID: 0}
+		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusStopped, PID: 0}
 		require.NoError(t, repo.Upsert(ctx, m))
 
 		cancelCtx, cancel := context.WithCancel(ctx)
@@ -296,7 +296,7 @@ func TestService_Stop(t *testing.T) {
 	})
 }
 
-// ─── Service: Bulk operations ────────────────────────────────────────────────
+// --- Service: Bulk operations ---
 // Rationale: StopMany must process all VMs and collect errors.
 
 func TestService_StopMany(t *testing.T) {
@@ -304,7 +304,7 @@ func TestService_StopMany(t *testing.T) {
 
 	t.Run("all_already_stopped", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
-		vms := []*model.VM{
+		vms := []*model.VMItem{
 			{ID: "vm-1", Name: "a", Status: model.VMStatusStopped, PID: 0},
 			{ID: "vm-2", Name: "b", Status: model.VMStatusPaused, PID: 0},
 			{ID: "vm-3", Name: "c", Status: model.VMStatusError, PID: 0},
@@ -325,13 +325,13 @@ func TestService_StopMany(t *testing.T) {
 	t.Run("empty_list", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
 		svc := vm.NewService(repo)
-		result := svc.StopMany(ctx, []*model.VM{}, false, false, 0)
+		result := svc.StopMany(ctx, []*model.VMItem{}, false, false, 0)
 		assert.Empty(t, result.Items)
 	})
 
 	t.Run("with_parallelism", func(t *testing.T) {
 		repo := testutil.NewVMRepo()
-		vms := []*model.VM{
+		vms := []*model.VMItem{
 			{ID: "vm-1", Name: "a", Status: model.VMStatusStopped, PID: 0},
 			{ID: "vm-2", Name: "b", Status: model.VMStatusStopped, PID: 0},
 		}
@@ -348,13 +348,13 @@ func TestService_StopMany(t *testing.T) {
 	})
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // ctrlFor creates a Controller with a VM in the given status.
 // PID=0, no socket — ensures only state-machine paths are hit.
 func ctrlFor(status model.VMStatus) *vm.Controller {
 	repo := testutil.NewVMRepo()
-	m := &model.VM{
+	m := &model.VMItem{
 		ID:            "vm-1",
 		Name:          "test",
 		Status:        status,

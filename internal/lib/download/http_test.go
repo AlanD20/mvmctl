@@ -14,7 +14,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// ─── isRetryableError ────────────────────────────────────────────────────────
+// --- isRetryableError ---
 // Rationale: isRetryableError determines whether a download error should trigger
 // a retry. Context cancellations should never retry, while network, HTTP, and
 // filesystem errors are transient and worth retrying.
@@ -66,7 +66,7 @@ func TestIsRetryableError(t *testing.T) {
 	}
 }
 
-// ─── extractFilename ─────────────────────────────────────────────────────────
+// --- extractFilename ---
 // Rationale: extractFilename parses the last path segment from a URL and strips
 // query parameters. Used for determining local mirror filenames. Incorrect
 // parsing would cause mirror misses or wrong cache keys.
@@ -114,7 +114,7 @@ func TestExtractFilename(t *testing.T) {
 	}
 }
 
-// ─── HttpDiskCache.key ──────────────────────────────────────────────────────
+// --- HttpDiskCache.key ---
 // Rationale: key computes a SHA256 hex digest of the URL for use as a cache
 // filename. Deterministic, collision-resistant, and always non-empty.
 
@@ -144,7 +144,7 @@ func TestHttpDiskCacheKey(t *testing.T) {
 	})
 }
 
-// ─── HttpDiskCache.Path ──────────────────────────────────────────────────────
+// --- HttpDiskCache.Path ---
 // Rationale: Path returns the absolute filesystem path for a cached URL.
 // It joins the infra temp directory, the cache subdirectory, and the key.
 

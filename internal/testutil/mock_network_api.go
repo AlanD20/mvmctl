@@ -10,19 +10,21 @@ import (
 
 // MockNetworkAPI implements api.NetworkAPI for testing.
 type MockNetworkAPI struct {
-	NetworkCreateFunc               func(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error)
+	NetworkCreateFunc               func(ctx context.Context, input inputs.NetworkCreateInput) (*model.NetworkItem, error)
 	NetworkRemoveFunc               func(ctx context.Context, input inputs.NetworkInput, force bool) error
-	NetworkListAllFunc              func(ctx context.Context) ([]*model.Network, error)
-	NetworkGetFunc                  func(ctx context.Context, input inputs.NetworkInput) (*model.Network, error)
-	NetworkToJSONFunc               func(networks []*model.Network) []map[string]any
+	NetworkListAllFunc              func(ctx context.Context) ([]*model.NetworkItem, error)
+	NetworkGetFunc                  func(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error)
+	NetworkToJSONFunc               func(networks []*model.NetworkItem) []map[string]any
 	NetworkInspectFunc              func(ctx context.Context, input inputs.NetworkInput) (*results.NetworkInspect, error)
 	NetworkSetDefaultFunc           func(ctx context.Context, input inputs.NetworkInput) error
 	NetworkSyncFunc                 func(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error)
 	NetworkPruneFunc                func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	NetworkCreateDefaultNetworkFunc func(ctx context.Context) (*model.Network, error)
+	NetworkCreateDefaultNetworkFunc func(ctx context.Context) (*model.NetworkItem, error)
 }
 
-func (m *MockNetworkAPI) NetworkCreate(ctx context.Context, input inputs.NetworkCreateInput) (*model.Network, error) {
+func (m *MockNetworkAPI) NetworkCreate(
+	ctx context.Context, input inputs.NetworkCreateInput,
+) (*model.NetworkItem, error) {
 	if m.NetworkCreateFunc != nil {
 		return m.NetworkCreateFunc(ctx, input)
 	}
@@ -36,21 +38,21 @@ func (m *MockNetworkAPI) NetworkRemove(ctx context.Context, input inputs.Network
 	return nil
 }
 
-func (m *MockNetworkAPI) NetworkListAll(ctx context.Context) ([]*model.Network, error) {
+func (m *MockNetworkAPI) NetworkListAll(ctx context.Context) ([]*model.NetworkItem, error) {
 	if m.NetworkListAllFunc != nil {
 		return m.NetworkListAllFunc(ctx)
 	}
 	return nil, nil
 }
 
-func (m *MockNetworkAPI) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.Network, error) {
+func (m *MockNetworkAPI) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error) {
 	if m.NetworkGetFunc != nil {
 		return m.NetworkGetFunc(ctx, input)
 	}
 	return nil, nil
 }
 
-func (m *MockNetworkAPI) NetworkToJSON(networks []*model.Network) []map[string]any {
+func (m *MockNetworkAPI) NetworkToJSON(networks []*model.NetworkItem) []map[string]any {
 	if m.NetworkToJSONFunc != nil {
 		return m.NetworkToJSONFunc(networks)
 	}
@@ -91,7 +93,9 @@ func (m *MockNetworkAPI) NetworkPrune(ctx context.Context, dryRun bool, includeA
 	return nil, nil
 }
 
-func (m *MockNetworkAPI) NetworkCreateDefaultNetwork(ctx context.Context) (*model.Network, error) {
+func (m *MockNetworkAPI) NetworkCreateDefaultNetwork(
+	ctx context.Context,
+) (*model.NetworkItem, error) {
 	if m.NetworkCreateDefaultNetworkFunc != nil {
 		return m.NetworkCreateDefaultNetworkFunc(ctx)
 	}

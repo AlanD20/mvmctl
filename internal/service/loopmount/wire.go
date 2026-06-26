@@ -11,7 +11,7 @@ import (
 	"os"
 )
 
-// WireInput matches Python's process.py input format exactly.
+// WireInput is the JSON input format for wire protocol operations.
 type WireInput struct {
 	Image    string         `json:"image"`
 	Action   string         `json:"action"`
@@ -53,7 +53,7 @@ type WireResizeOp struct {
 	Headroom int    `json:"headroom,omitempty"`
 }
 
-// WireOutput matches Python's process.py output format exactly.
+// WireOutput is the JSON output format for wire protocol results.
 type WireOutput struct {
 	Status       string `json:"status"`
 	Error        string `json:"error,omitempty"`

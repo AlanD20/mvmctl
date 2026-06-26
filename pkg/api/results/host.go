@@ -2,7 +2,6 @@ package results
 
 import (
 	"maps"
-
 	"mvmctl/internal/lib/model"
 )
 
@@ -118,7 +117,7 @@ type HostStatusCheck struct {
 }
 
 // HostInfo is the structured response for host info/capacity queries.
-// Matches Python's HostInfo.to_dict() output.
+// output.
 type HostInfo struct {
 	DetectedAt     string            `json:"detected_at"`
 	Hostname       string            `json:"hostname"`
@@ -142,9 +141,7 @@ func BuildHostInfo(hi *model.HostInfo) *HostInfo {
 	if hi.State.DetectedAt != nil {
 		detectedAt = *hi.State.DetectedAt
 	}
-
 	modules := maps.Clone(hi.Resources.ModulesLoaded)
-
 	return &HostInfo{
 		DetectedAt: detectedAt,
 		Hostname:   hi.Hardware.Hostname,

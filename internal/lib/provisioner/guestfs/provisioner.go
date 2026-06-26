@@ -18,7 +18,7 @@ import (
 
 var pc = provcontent.Builder{}
 
-// ── ProvisioningConfig ───────────────────────────────────────────────────────
+// --- ProvisioningConfig ---
 
 // ProvisioningConfig describes an entire provisioning operation.
 // Pass to RunDeferred — no builder pattern, one shot, two guestfish sessions.
@@ -45,9 +45,7 @@ type ProvisioningConfig struct {
 	CustomOps        []provcontent.Operation // arbitrary FileOp/ChrootOp ops queued via ApplyOps
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// RunDeferred — one-shot provisioning, two guestfish sessions
-// ═════════════════════════════════════════════════════════════════════════════
+// --- RunDeferred -- one-shot, two guestfish sessions ---
 
 // RunDeferred executes all provisioning operations in a single guestfish session
 // (plus one pre-read session for root device detection).
@@ -140,9 +138,7 @@ func RunDeferred(ctx context.Context, cfg ProvisioningConfig) error {
 	return nil
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Script builder
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Script builder ---
 
 func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tmpDir string) ([]string, error) {
 	var cmds []string
@@ -172,34 +168,34 @@ func buildScript(cfg ProvisioningConfig, rootDevice string, needsResize bool, tm
 		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(injectDNSTmpl, dnsData{DNSServer: cfg.DNSServer})))
 	}
 
-	// Ensure user + SSH keys
-	if cfg.User != "" && len(cfg.SSHPubkeys) > 0 {
+	// Ensure user — unconditional when a non-empty user is specified.
+	// --user flag should always create the user, regardless of SSH keys.
+	if cfg.User != "" {
 		cmds = append(cmds, "# Ensure user")
 		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(ensureUserTmpl, userData{
 			User: cfg.User, UserUID: cfg.UserUID, UserGID: cfg.UserGID,
 		})))
 
-		cmds = append(cmds, "# Add SSH keys")
-		homeDir := "/root"
-		if cfg.User != "root" {
-			homeDir = "/home/" + cfg.User
+		// Add SSH keys only if provided
+		if len(cfg.SSHPubkeys) > 0 {
+			cmds = append(cmds, "# Add SSH keys")
+			homeDir := "/root"
+			if cfg.User != "root" {
+				homeDir = "/home/" + cfg.User
+			}
+			cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(addSSHKeysTmpl, sshKeysData{
+				User: cfg.User, Home: homeDir, Keys: cfg.SSHPubkeys,
+			})))
 		}
-		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(addSSHKeysTmpl, sshKeysData{
-			User: cfg.User, Home: homeDir, Keys: cfg.SSHPubkeys,
-		})))
 	}
 
 	// Generate host keys
-	if len(cfg.SSHPubkeys) > 0 {
-		cmds = append(cmds, "# Generate SSH host keys")
-		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(generateHostKeysTmpl, struct{}{})))
-	}
+	cmds = append(cmds, "# Generate SSH host keys")
+	cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(generateHostKeysTmpl, struct{}{})))
 
 	// Enable SSH
-	if len(cfg.SSHPubkeys) > 0 {
-		cmds = append(cmds, "# Enable SSH")
-		cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(enableSSHTmpl, struct{}{})))
-	}
+	cmds = append(cmds, "# Enable SSH")
+	cmds = append(cmds, fmt.Sprintf("sh %q", infra.ExecTemplate(enableSSHTmpl, struct{}{})))
 
 	// Upload SSH config files (sshd_config, first-boot installer, first-boot service)
 	// Moved here from deblob section — these are SSH infrastructure, not OS cleanup.
@@ -359,9 +355,7 @@ func buildFileOps(tmpDir string) []string {
 	return cmds
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Helpers
-// ═════════════════════════════════════════════════════════════════════════════
+// --- Helpers ---
 
 // detectRootDevice detects the root device by running guestfish list-filesystems.
 func detectRootDevice(ctx context.Context, rootfsPath string) (string, error) {

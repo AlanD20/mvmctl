@@ -5,7 +5,10 @@ package vsock
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -21,7 +24,7 @@ import (
 	"mvmctl/internal/service/vsockagent"
 )
 
-// ─── readFTFrame / writeFTFrame ─────────────────────────────────────────────
+// --- readFTFrame / writeFTFrame ---
 // Rationale: Binary framing is duplicated between this package and
 // vsockagent. A bug here corrupts every file transfer initiated by the host.
 
@@ -96,7 +99,7 @@ func TestReadFTFrame_Error(t *testing.T) {
 	})
 }
 
-// ─── Frame protocol exchange ───────────────────────────────────────────────
+// --- Frame protocol exchange ---
 // Rationale: The binary frame protocol must be symmetric — frames written
 // by writeFTFrame on one side must be readable by readFTFrame on the other.
 // This test proves the full protocol exchange (push → mkdir → meta → accept
@@ -232,7 +235,7 @@ func mustWriteFTFrame(t *testing.T, w io.Writer, typ byte, payload []byte) {
 	require.NoError(t, err)
 }
 
-// ─── expandSources ──────────────────────────────────────────────────────────
+// --- expandSources ---
 // Rationale: expandSources resolves user-provided source paths into a flat
 // list of {absPath, relativePath} entries. Bugs here skip files silently,
 // copy wrong paths, or produce unhelpful errors — corrupting file transfers.
@@ -350,4 +353,293 @@ func TestExpandSources(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- FTCopyFromVM: directory pull protocol exchange ---
+// Rationale: The host-side directory pull reads META/DONE frames in a loop.
+// This test simulates the guest agent sending multiple files via the protocol
+// and verifies the host-side frame-reading logic works correctly.
+
+func TestFTPullDirectoryProtocolExchange(t *testing.T) {
+	hostConn, guestConn := net.Pipe()
+	defer hostConn.Close()
+	defer guestConn.Close()
+
+	fileAContent := []byte("content of file A\n")
+	fileBContent := []byte("content of file B is different\n")
+
+	hashA := sha256.Sum256(fileAContent)
+	hashAHex := hex.EncodeToString(hashA[:])
+	hashB := sha256.Sum256(fileBContent)
+	hashBHex := hex.EncodeToString(hashB[:])
+
+	destDir := t.TempDir()
+
+	guestDone := make(chan struct{})
+	go func() {
+		defer close(guestDone)
+
+		// Guest side: reads PULL frame, sends META for file A,
+		// reads accept, streams data, reads OK, sends META for file B,
+		// reads accept, streams data, reads OK, sends DONE.
+		ft, pullPayload := mustReadFTFrame(t, guestConn)
+		require.Equal(t, vsockagent.FtPull, ft, "guest: expected FtPull")
+
+		var pull vsockagent.FtPullPayload
+		err := json.Unmarshal(pullPayload, &pull)
+		require.NoError(t, err)
+		require.True(t, pull.Recursive, "guest: expected Recursive=true")
+
+		// Send META for file A (path is relative to source dir).
+		metaA, _ := json.Marshal(vsockagent.FtMetaPayload{
+			Path:   "a.txt",
+			Size:   int64(len(fileAContent)),
+			Mode:   0644,
+			SHA256: hashAHex,
+		})
+		mustWriteFTFrame(t, guestConn, vsockagent.FtMeta, metaA)
+
+		// Read accept.
+		ft, acceptPayload := mustReadFTFrame(t, guestConn)
+		require.Equal(t, vsockagent.FtMeta, ft, "guest: expected FtMeta accept")
+		var accept vsockagent.FtMetaPayload
+		json.Unmarshal(acceptPayload, &accept)
+		require.True(t, accept.Accepted)
+
+		// Stream file A data + EOS.
+		mustWriteFTFrame(t, guestConn, vsockagent.FtData, fileAContent)
+		mustWriteFTFrame(t, guestConn, vsockagent.FtData, nil)
+
+		// Read OK.
+		ft, okPayload := mustReadFTFrame(t, guestConn)
+		require.Equal(t, vsockagent.FtOK, ft, "guest: expected FtOK")
+		var okMeta vsockagent.FtMetaPayload
+		json.Unmarshal(okPayload, &okMeta)
+		require.Equal(t, int64(len(fileAContent)), okMeta.Size)
+
+		// Send META for file B (path includes subdirectory).
+		metaB, _ := json.Marshal(vsockagent.FtMetaPayload{
+			Path:   "sub/b.txt",
+			Size:   int64(len(fileBContent)),
+			Mode:   0644,
+			SHA256: hashBHex,
+		})
+		mustWriteFTFrame(t, guestConn, vsockagent.FtMeta, metaB)
+
+		// Read accept.
+		ft, acceptPayload = mustReadFTFrame(t, guestConn)
+		require.Equal(t, vsockagent.FtMeta, ft, "guest: expected FtMeta accept")
+		json.Unmarshal(acceptPayload, &accept)
+		require.True(t, accept.Accepted)
+
+		// Stream file B data + EOS.
+		mustWriteFTFrame(t, guestConn, vsockagent.FtData, fileBContent)
+		mustWriteFTFrame(t, guestConn, vsockagent.FtData, nil)
+
+		// Read OK.
+		ft, okPayload = mustReadFTFrame(t, guestConn)
+		require.Equal(t, vsockagent.FtOK, ft, "guest: expected FtOK")
+		json.Unmarshal(okPayload, &okMeta)
+		require.Equal(t, int64(len(fileBContent)), okMeta.Size)
+
+		// Send DONE with summary.
+		donePayload, _ := json.Marshal(vsockagent.FtDonePayload{
+			Files:  2,
+			Bytes:  int64(len(fileAContent) + len(fileBContent)),
+			Errors: 0,
+		})
+		mustWriteFTFrame(t, guestConn, vsockagent.FtDone, donePayload)
+	}()
+
+	// Host side: sends PULL with Recursive=true, then reads META/DONE loop.
+	pullPayload, _ := json.Marshal(vsockagent.FtPullPayload{
+		Path:      "/remote/dir/",
+		Dest:      destDir + "/",
+		Overwrite: false,
+		Recursive: true,
+	})
+	mustWriteFTFrame(t, hostConn, vsockagent.FtPull, pullPayload)
+
+	// Process file A.
+	ft, metaPayload := mustReadFTFrame(t, hostConn)
+	require.Equal(t, vsockagent.FtMeta, ft, "host: expected FtMeta for file A")
+	var metaA vsockagent.FtMetaPayload
+	err := json.Unmarshal(metaPayload, &metaA)
+	require.NoError(t, err)
+	require.Equal(t, "a.txt", metaA.Path)
+
+	// Accept and receive.
+	acceptPayload, _ := json.Marshal(vsockagent.FtMetaPayload{Accepted: true})
+	mustWriteFTFrame(t, hostConn, vsockagent.FtMeta, acceptPayload)
+
+	// Receive data + EOS and write to disk.
+	destA := filepath.Join(destDir, "a.txt")
+	err = os.MkdirAll(filepath.Dir(destA), 0755)
+	require.NoError(t, err)
+
+	var receivedA bytes.Buffer
+	for {
+		ft, chunk := mustReadFTFrame(t, hostConn)
+		if ft == vsockagent.FtData && len(chunk) == 0 {
+			break
+		}
+		require.Equal(t, vsockagent.FtData, ft)
+		receivedA.Write(chunk)
+	}
+	require.Equal(t, string(fileAContent), receivedA.String())
+
+	err = os.WriteFile(destA, receivedA.Bytes(), os.FileMode(metaA.Mode))
+	require.NoError(t, err)
+
+	// Verify SHA-256 and send OK.
+	localHashA := sha256.Sum256(receivedA.Bytes())
+	require.Equal(t, hashAHex, hex.EncodeToString(localHashA[:]))
+
+	okPayload, _ := json.Marshal(vsockagent.FtMetaPayload{
+		Path:   metaA.Path,
+		Size:   int64(receivedA.Len()),
+		SHA256: hex.EncodeToString(localHashA[:]),
+	})
+	mustWriteFTFrame(t, hostConn, vsockagent.FtOK, okPayload)
+
+	// Process file B.
+	ft, metaPayload = mustReadFTFrame(t, hostConn)
+	require.Equal(t, vsockagent.FtMeta, ft, "host: expected FtMeta for file B")
+	var metaB vsockagent.FtMetaPayload
+	err = json.Unmarshal(metaPayload, &metaB)
+	require.NoError(t, err)
+	require.Equal(t, "sub/b.txt", metaB.Path)
+
+	// Accept and receive.
+	mustWriteFTFrame(t, hostConn, vsockagent.FtMeta, acceptPayload)
+
+	destB := filepath.Join(destDir, "sub", "b.txt")
+	err = os.MkdirAll(filepath.Dir(destB), 0755)
+	require.NoError(t, err)
+
+	var receivedB bytes.Buffer
+	for {
+		ft, chunk := mustReadFTFrame(t, hostConn)
+		if ft == vsockagent.FtData && len(chunk) == 0 {
+			break
+		}
+		require.Equal(t, vsockagent.FtData, ft)
+		receivedB.Write(chunk)
+	}
+	require.Equal(t, string(fileBContent), receivedB.String())
+
+	err = os.WriteFile(destB, receivedB.Bytes(), os.FileMode(metaB.Mode))
+	require.NoError(t, err)
+
+	localHashB := sha256.Sum256(receivedB.Bytes())
+	require.Equal(t, hashBHex, hex.EncodeToString(localHashB[:]))
+
+	okPayload, _ = json.Marshal(vsockagent.FtMetaPayload{
+		Path:   metaB.Path,
+		Size:   int64(receivedB.Len()),
+		SHA256: hex.EncodeToString(localHashB[:]),
+	})
+	mustWriteFTFrame(t, hostConn, vsockagent.FtOK, okPayload)
+
+	// Read DONE.
+	ft, donePayload := mustReadFTFrame(t, hostConn)
+	require.Equal(t, vsockagent.FtDone, ft, "host: expected FtDone")
+	var done vsockagent.FtDonePayload
+	json.Unmarshal(donePayload, &done)
+	require.Equal(t, 2, done.Files)
+	require.Equal(t, int64(len(fileAContent)+len(fileBContent)), done.Bytes)
+	require.Equal(t, 0, done.Errors)
+
+	// Verify the two files were written on disk.
+	writtenA, err := os.ReadFile(destA)
+	require.NoError(t, err, "file a.txt must exist at dest")
+	if diff := cmp.Diff(string(fileAContent), string(writtenA)); diff != "" {
+		t.Errorf("file a.txt mismatch (-want +got):\n%s", diff)
+	}
+
+	writtenB, err := os.ReadFile(destB)
+	require.NoError(t, err, "file sub/b.txt must exist at dest")
+	if diff := cmp.Diff(string(fileBContent), string(writtenB)); diff != "" {
+		t.Errorf("file sub/b.txt mismatch (-want +got):\n%s", diff)
+	}
+
+	select {
+	case <-guestDone:
+		// Protocol exchange completed.
+	case <-time.After(5 * time.Second):
+		t.Fatal("guest did not complete within 5s")
+	}
+
+	// Also verify that receivingPullFile correctly handles the "exists" case
+	// when overwrite=false and the file already exists.
+	t.Run("exists_rejection", func(t *testing.T) {
+		// Create a new pipe to test a fresh exchange.
+		hConn, gConn := net.Pipe()
+		defer hConn.Close()
+		defer gConn.Close()
+
+		gDone := make(chan struct{})
+		go func() {
+			defer close(gDone)
+			// Agent sends PULL with Recursive=true, then META for a file,
+			// then expects FtError (reject), then sends DONE.
+
+			ft, _ := mustReadFTFrame(t, gConn)
+			require.Equal(t, vsockagent.FtPull, ft)
+
+			metaPayload, _ := json.Marshal(vsockagent.FtMetaPayload{
+				Path:   "existing.txt",
+				Size:   5,
+				Mode:   0644,
+				SHA256: "",
+			})
+			mustWriteFTFrame(t, gConn, vsockagent.FtMeta, metaPayload)
+
+			// Expect FtError (reject).
+			ft, errPayload := mustReadFTFrame(t, gConn)
+			require.Equal(t, vsockagent.FtError, ft)
+
+			var errResp vsockagent.FtErrorPayload
+			json.Unmarshal(errPayload, &errResp)
+			require.Equal(t, "exists", errResp.Code)
+
+			// Send DONE to close the loop on host side.
+			donePayload, _ := json.Marshal(vsockagent.FtDonePayload{Files: 0, Bytes: 0, Errors: 1})
+			mustWriteFTFrame(t, gConn, vsockagent.FtDone, donePayload)
+		}()
+
+		// Create a file at the destination that will be rejected.
+		existingPath := filepath.Join(t.TempDir(), "existing.txt")
+		err := os.WriteFile(existingPath, []byte("original"), 0644)
+		require.NoError(t, err)
+
+		pullPayload, _ := json.Marshal(vsockagent.FtPullPayload{
+			Path:      "/remote/dir/",
+			Dest:      filepath.Dir(existingPath) + "/",
+			Overwrite: false,
+			Recursive: true,
+		})
+		mustWriteFTFrame(t, hConn, vsockagent.FtPull, pullPayload)
+
+		// Read META.
+		ft, _ := mustReadFTFrame(t, hConn)
+		require.Equal(t, vsockagent.FtMeta, ft)
+
+		// Send FtError (reject).
+		rejectPayload, _ := json.Marshal(vsockagent.FtErrorPayload{
+			Code:    "exists",
+			Message: fmt.Sprintf("file exists: %s", existingPath),
+		})
+		mustWriteFTFrame(t, hConn, vsockagent.FtError, rejectPayload)
+
+		// Read DONE.
+		ft, _ = mustReadFTFrame(t, hConn)
+		require.Equal(t, vsockagent.FtDone, ft)
+
+		select {
+		case <-gDone:
+		case <-time.After(5 * time.Second):
+			t.Fatal("guest did not complete within 5s")
+		}
+	})
 }

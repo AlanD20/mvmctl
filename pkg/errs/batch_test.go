@@ -11,7 +11,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── BulkResultItem.MarshalJSON ────────────────────────────────────────────
+// --- BulkResultItem.MarshalJSON ---
 // Rationale: BulkResultItem is serialized in bulk operation responses.
 // An incorrectly serialised error field breaks the client's ability to
 // distinguish between success and failure per item.

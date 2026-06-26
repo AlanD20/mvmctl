@@ -33,17 +33,17 @@ type VMItemInfo struct {
 
 // VMResourcesInfo groups VM resource allocation in an inspect response.
 type VMResourcesInfo struct {
-	VCPUs int `json:"vcpus"`
-	Mem   int `json:"mem"`
-	Disk  int `json:"disk"`
+	VCPU int `json:"vcpu"`
+	Mem  int `json:"mem"`
+	Disk int `json:"disk"`
 }
 
 // VMNetworkingInfo groups VM networking info in an inspect response.
 type VMNetworkingInfo struct {
-	IPv4      string         `json:"ipv4"`
-	MAC       string         `json:"mac"`
-	Network   *model.Network `json:"network,omitempty"`
-	TapDevice string         `json:"tap_device"`
+	IPv4      string             `json:"ipv4"`
+	MAC       string             `json:"mac"`
+	Network   *model.NetworkItem `json:"network,omitempty"`
+	TapDevice string             `json:"tap_device"`
 }
 
 // VMAssetsInfo groups VM asset references in an inspect response.

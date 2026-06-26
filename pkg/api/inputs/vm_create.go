@@ -4,13 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
-	"os"
-	"strconv"
-	"strings"
-	"syscall"
-	"time"
-
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/core/cloudinit"
 	"mvmctl/internal/core/config"
@@ -25,47 +18,54 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
+	"net"
+	"os"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 )
 
-// VMCreateInput matches Python's VMCreateInput dataclass exactly.
+// VMCreateInput specifies v m create input.
 type VMCreateInput struct {
 	// Required fields (no defaults)
 	Name    string   `json:"name"               yaml:"name"`
 	SSHKeys []string `json:"ssh_keys,omitempty" yaml:"ssh_keys,omitempty"`
-
 	// Optional fields with CLI-layer defaults resolved in Build()
-	VCPUCount             *int           `json:"vcpu,omitempty"                     yaml:"vcpu,omitempty"`
-	MemSizeMib            string         `json:"mem,omitempty"                      yaml:"mem,omitempty"`
-	User                  *string        `json:"user,omitempty"                     yaml:"user,omitempty"`
-	PCIEnabled            *bool          `json:"pci_enabled,omitempty"              yaml:"pci_enabled,omitempty"`
-	NestedVirt            *bool          `json:"nested_virt,omitempty"              yaml:"nested_virt,omitempty"`
-	CPUTemplate           string         `json:"cpu_template,omitempty"             yaml:"cpu_template,omitempty"` // file path to CPU template JSON
-	CPUConfig             map[string]any `json:"cpu_config,omitempty"               yaml:"cpu_config,omitempty"`
-	EnableConsole         *bool          `json:"console_enable,omitempty"           yaml:"console_enable,omitempty"`
-	EnableLogging         *bool          `json:"logging_enable,omitempty"           yaml:"logging_enable,omitempty"`
-	EnableMetrics         *bool          `json:"metrics_enable,omitempty"           yaml:"metrics_enable,omitempty"`
-	ImageID               *string        `json:"image,omitempty"                    yaml:"image,omitempty"`
-	KernelID              *string        `json:"kernel,omitempty"                   yaml:"kernel,omitempty"`
-	BinaryID              *string        `json:"binary,omitempty"                   yaml:"binary,omitempty"`
-	DiskSize              string         `json:"disk_size,omitempty"                yaml:"disk_size,omitempty"`
-	RequestedGuestIP      *string        `json:"guest_ip,omitempty"                 yaml:"guest_ip,omitempty"`
-	SkipCINetworkConfig   bool           `json:"skip_ci_network_config"             yaml:"skip_ci_network_config"`
-	BootArgs              string         `json:"boot_args,omitempty"                yaml:"boot_args,omitempty"`
-	LSMFlags              string         `json:"lsm_flags,omitempty"                yaml:"lsm_flags,omitempty"`
-	NetworkID             *string        `json:"network,omitempty"                  yaml:"network,omitempty"`
-	RequestedGuestMAC     *string        `json:"guest_mac,omitempty"                yaml:"guest_mac,omitempty"`
-	CustomCloudInitConfig *string        `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
-	CloudInitMode         *string        `json:"cloud_init_mode,omitempty"          yaml:"cloud_init_mode,omitempty"`
-	CloudInitISOPath      *string        `json:"cloud_init_iso_path,omitempty"      yaml:"cloud_init_iso_path,omitempty"`
-	KeepCloudInitISO      bool           `json:"keep_cloud_init_iso"                yaml:"keep_cloud_init_iso"`
-	NocloudNetPort        *int           `json:"nocloud_net_port,omitempty"         yaml:"nocloud_net_port,omitempty"`
-	NoConsole             bool           `json:"no_console"                         yaml:"no_console"` // inverse of EnableConsole, kept for CLI compat
-	SkipCleanup           bool           `json:"skip_cleanup"                       yaml:"skip_cleanup"`
-	SkipDeblob            bool           `json:"skip_deblob"                        yaml:"skip_deblob"`
-	Count                 *int           `json:"count,omitempty"                    yaml:"count,omitempty"`
-	Atomic                bool           `json:"atomic"                             yaml:"atomic"`
-	Volumes               []string       `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
-	VsockPort             *int           `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
+	VCPUCount  *int    `json:"vcpu,omitempty"        yaml:"vcpu,omitempty"`
+	MemSizeMib string  `json:"mem,omitempty"         yaml:"mem,omitempty"`
+	User       *string `json:"user,omitempty"        yaml:"user,omitempty"`
+	PCIEnabled *bool   `json:"pci_enabled,omitempty" yaml:"pci_enabled,omitempty"`
+	NestedVirt *bool   `json:"nested_virt,omitempty" yaml:"nested_virt,omitempty"`
+	// CPUTemplate is a file path to a CPU template JSON file.
+	CPUTemplate         string         `json:"cpu_template,omitempty"   yaml:"cpu_template,omitempty"`
+	CPUConfig           map[string]any `json:"cpu_config,omitempty"     yaml:"cpu_config,omitempty"`
+	EnableConsole       *bool          `json:"console_enable,omitempty" yaml:"console_enable,omitempty"`
+	EnableLogging       *bool          `json:"logging_enable,omitempty" yaml:"logging_enable,omitempty"`
+	EnableMetrics       *bool          `json:"metrics_enable,omitempty" yaml:"metrics_enable,omitempty"`
+	ImageID             *string        `json:"image,omitempty"          yaml:"image,omitempty"`
+	KernelID            *string        `json:"kernel,omitempty"         yaml:"kernel,omitempty"`
+	BinaryID            *string        `json:"binary,omitempty"         yaml:"binary,omitempty"`
+	DiskSize            string         `json:"disk_size,omitempty"      yaml:"disk_size,omitempty"`
+	RequestedGuestIP    *string        `json:"guest_ip,omitempty"       yaml:"guest_ip,omitempty"`
+	SkipCINetworkConfig bool           `json:"skip_ci_network_config"   yaml:"skip_ci_network_config"`
+	BootArgs            string         `json:"boot_args,omitempty"      yaml:"boot_args,omitempty"`
+	LSMFlags            string         `json:"lsm_flags,omitempty"      yaml:"lsm_flags,omitempty"`
+	NetworkID           *string        `json:"network,omitempty"        yaml:"network,omitempty"`
+	RequestedGuestMAC   *string        `json:"guest_mac,omitempty"      yaml:"guest_mac,omitempty"`
+	// CustomCloudInitConfig is a file path to a custom cloud-init user-data config.
+	CustomCloudInitConfig *string  `json:"custom_cloud_init_config,omitempty" yaml:"custom_cloud_init_config,omitempty"`
+	CloudInitMode         *string  `json:"cloud_init_mode,omitempty"          yaml:"cloud_init_mode,omitempty"`
+	CloudInitISOPath      *string  `json:"cloud_init_iso_path,omitempty"      yaml:"cloud_init_iso_path,omitempty"`
+	KeepCloudInitISO      bool     `json:"keep_cloud_init_iso"                yaml:"keep_cloud_init_iso"`
+	NocloudNetPort        *int     `json:"nocloud_net_port,omitempty"         yaml:"nocloud_net_port,omitempty"`
+	SkipCleanup           bool     `json:"skip_cleanup"                       yaml:"skip_cleanup"`
+	SkipDeblob            bool     `json:"skip_deblob"                        yaml:"skip_deblob"`
+	Count                 *int     `json:"count,omitempty"                    yaml:"count,omitempty"`
+	Atomic                bool     `json:"atomic"                             yaml:"atomic"`
+	Volumes               []string `json:"volumes,omitempty"                  yaml:"volumes,omitempty"`
+	VsockPort             *int     `json:"vsock_port,omitempty"               yaml:"vsock_port,omitempty"`
+	Writeback             *bool    `json:"writeback,omitempty"                yaml:"writeback,omitempty"`
 }
 
 // ResolvedVMCreateInput is the immutable output of VMCreateRequest.Resolve().
@@ -82,7 +82,7 @@ type ResolvedVMCreateInput struct {
 	UserUID             int
 	UserGID             int
 	GuestMACPrefix      string
-	Network             *model.Network
+	Network             *model.NetworkItem
 	Image               *model.ImageItem
 	Kernel              *model.KernelItem
 	Binary              *model.BinaryItem
@@ -101,7 +101,6 @@ type ResolvedVMCreateInput struct {
 	DiskSizeBytes       int64
 	DiskSizeMib         int
 	LSMFlags            string
-
 	// Firecracker
 	LogLevel              string
 	LogFilename           string
@@ -113,19 +112,16 @@ type ResolvedVMCreateInput struct {
 	ConsoleSocketFilename string
 	ConsolePIDFilename    string
 	VsockFilename         string
-
 	// Cloud-init
 	CloudInitISOName      string
 	NocloudPortRangeStart int
 	NocloudPortRangeEnd   int
 	NocloudMaxPortRetries int
-
 	RequestedGuestIP      *string
 	RequestedGuestMAC     *string
 	NocloudNetPort        *int
 	CustomCloudInitConfig *string
 	CloudInitISOPath      *string
-
 	// Pre-allocated nocloud server (shared across batch VMs).
 	// Set by VMCreate() before the batch loop; flows through CloneVMInput to each VM.
 	NoCloudURL       string
@@ -139,19 +135,18 @@ type ResolvedVMCreateInput struct {
 	Provisioner      model.ProvisionerType
 	ExtraDrives      []model.DriveConfig
 	Volumes          []*model.VolumeItem
-	VsockPort        int // vsock port (0 = disabled / no vsock)
+	VsockPort        int  // vsock port (0 = disabled / no vsock)
+	Writeback        bool // cache type override: when true, use "Writeback" for rootfs + volumes
 }
 
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.
-// Matches Python's src/mvmctl/api/inputs/_vm_create_input.py VMCreateRequest exactly.
 type VMCreateRequest struct {
 	input  VMCreateInput
 	vmID   string
 	vmDir  string
 	cfg    *config.Service
 	vmRepo vm.Repository
-
-	// Resolvers (created in constructor, matching Python's __init__)
+	// Resolvers (created in constructor)
 	imageResolver   *image.Resolver
 	kernelResolver  *kernel.Resolver
 	networkResolver *network.Resolver
@@ -162,7 +157,6 @@ type VMCreateRequest struct {
 }
 
 // NewVMCreateRequest creates a new VMCreateRequest with its own sub-resolvers.
-// Matches Python's VMCreateRequest.__init__() exactly.
 func NewVMCreateRequest(
 	vmID, vmDir string,
 	input VMCreateInput,
@@ -193,7 +187,6 @@ func NewVMCreateRequest(
 }
 
 // CloneVMInput returns a copy of the resolved result with per-VM fields replaced.
-// Matches Python's dataclasses.replace(resolved, name=name, vm_id=vm_id, vm_dir=vm_dir).
 func (r *VMCreateRequest) CloneVMInput(
 	resolved *ResolvedVMCreateInput,
 	name, vmID, vmDir string,
@@ -209,7 +202,6 @@ func (r *VMCreateRequest) CloneVMInput(
 }
 
 // resolveImage resolves the image from a selector or gets the default.
-// Matches Python's VMCreateRequest._resolve_image().
 func (r *VMCreateRequest) resolveImage(ctx context.Context, input *VMCreateInput) (*model.ImageItem, error) {
 	var img *model.ImageItem
 	var err error
@@ -224,14 +216,14 @@ func (r *VMCreateRequest) resolveImage(ctx context.Context, input *VMCreateInput
 	if img == nil {
 		return nil, errs.NotFound(
 			errs.CodeVMImageNotFound,
-			"No image specified and no default image set. Use 'mvm image pull <name>' then 'mvm image default <name>', or pass --image.",
+			"No image specified and no default image set. "+
+				"Use 'mvm image pull <name>' then 'mvm image default <name>', or pass --image.",
 		)
 	}
 	return img, nil
 }
 
 // resolveKernel resolves the kernel from a selector or gets the default.
-// Matches Python's VMCreateRequest._resolve_kernel().
 func (r *VMCreateRequest) resolveKernel(ctx context.Context, input *VMCreateInput) (*model.KernelItem, error) {
 	var krnl *model.KernelItem
 	var err error
@@ -246,16 +238,17 @@ func (r *VMCreateRequest) resolveKernel(ctx context.Context, input *VMCreateInpu
 	if krnl == nil {
 		return nil, errs.NotFound(
 			errs.CodeVMKernelNotFound,
-			"No kernel specified and no default kernel set. Use 'mvm kernel pull --type <firecracker|official>' then 'mvm kernel default <id>', or pass --kernel.",
+			"No kernel specified and no default kernel set. "+
+				"Use 'mvm kernel pull --type <firecracker|official>' "+
+				"then 'mvm kernel default <id>', or pass --kernel.",
 		)
 	}
 	return krnl, nil
 }
 
 // resolveNetwork resolves the network from a selector or gets the default.
-// Matches Python's VMCreateRequest._resolve_network().
-func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInput) (*model.Network, error) {
-	var netw *model.Network
+func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInput) (*model.NetworkItem, error) {
+	var netw *model.NetworkItem
 	var err error
 	if input.NetworkID == nil {
 		netw, err = r.networkResolver.GetDefault(ctx)
@@ -268,14 +261,14 @@ func (r *VMCreateRequest) resolveNetwork(ctx context.Context, input *VMCreateInp
 	if netw == nil {
 		return nil, errs.NotFound(
 			errs.CodeVMNetworkNotFound,
-			"No network specified and no default network set. Use 'mvm network create' then 'mvm network default <id>', or pass --network.",
+			"No network specified and no default network set. "+
+				"Use 'mvm network create' then 'mvm network default <id>', or pass --network.",
 		)
 	}
 	return netw, nil
 }
 
 // resolveBinary resolves the firecracker binary by ID or gets default.
-// Matches Python's VMCreateRequest._resolve_binary().
 func (r *VMCreateRequest) resolveBinary(ctx context.Context, input *VMCreateInput) (*model.BinaryItem, error) {
 	var fcBinary *model.BinaryItem
 	if input.BinaryID != nil && *input.BinaryID != "" {
@@ -301,7 +294,6 @@ func (r *VMCreateRequest) resolveBinary(ctx context.Context, input *VMCreateInpu
 }
 
 // resolveSSHKeys resolves SSH key names to key items.
-// Matches Python's VMCreateRequest._resolve_ssh_keys().
 func (r *VMCreateRequest) resolveSSHKeys(ctx context.Context, input *VMCreateInput) ([]*model.SSHKeyItem, error) {
 	if len(input.SSHKeys) == 0 {
 		defaults, err := r.keyResolver.GetDefaults(ctx)
@@ -321,7 +313,6 @@ func (r *VMCreateRequest) resolveSSHKeys(ctx context.Context, input *VMCreateInp
 }
 
 // resolveVolumes resolves volume names to VolumeItems.
-// Matches Python's VMCreateRequest._resolve_volumes().
 func (r *VMCreateRequest) resolveVolumes(ctx context.Context, input *VMCreateInput) ([]*model.VolumeItem, error) {
 	if len(input.Volumes) == 0 {
 		return nil, nil
@@ -334,7 +325,7 @@ func (r *VMCreateRequest) resolveVolumes(ctx context.Context, input *VMCreateInp
 }
 
 // resolveMemory resolves mem_size_mib from input or defaults to setting.
-// Matches Python's inline mem_size_mib resolution.
+// mem_size_mib resolution.
 func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInput) (int, error) {
 	if input.MemSizeMib == "" {
 		return r.cfg.GetInt(ctx, "defaults.vm", "mem_size_mib")
@@ -351,57 +342,54 @@ func (r *VMCreateRequest) resolveMemory(ctx context.Context, input *VMCreateInpu
 }
 
 // Resolve resolves all inputs to explicit values and validates.
-// Matches Python's VMCreateRequest.resolve() exactly.
 func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, error) {
 	input := &r.input
-
-	// Validate VM name early (matches Python: VMValidator.validate_name)
+	// Validate VM name early
 	if err := validators.VMName(input.Name); err != nil {
 		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid VM name: %s", err.Error()))
 	}
-
-	// Resolve image, kernel, network, binary, keys, volumes (matches Python's _resolve_* methods)
+	// Resolve image, kernel, network, binary, keys, volumes
 	img, err := r.resolveImage(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
 	krnl, err := r.resolveKernel(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
 	netw, err := r.resolveNetwork(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
 	fcBinary, err := r.resolveBinary(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
 	sshKeys, err := r.resolveSSHKeys(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
 	vols, err := r.resolveVolumes(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
-	extraDrives := volume.VolumesToDrives(vols)
-
-	// Validate and parse network subnet (matches Python: ipaddress.IPv4Network(network.subnet, strict=False))
+	// Resolve writeback from config, CLI flag overrides
+	writeback := false
+	if cfgVal, cfgErr := r.cfg.GetString(ctx, "defaults.firecracker", "drive_cache_type"); cfgErr == nil {
+		writeback = cfgVal == model.CacheTypeWriteback
+	}
+	if input.Writeback != nil {
+		writeback = *input.Writeback
+	}
+	extraDrives := volume.VolumesToDrives(vols, writeback)
+	// Validate and parse network subnet.
 	_, ipv4Net, parseErr := net.ParseCIDR(netw.Subnet)
 	if parseErr != nil {
 		return nil, errs.New(errs.CodeNetworkNotFound, fmt.Sprintf("Invalid network subnet: %s", netw.Subnet))
 	}
 	networkPrefixLen, _ := ipv4Net.Mask.Size()
 	networkNetmask := net.IP(ipv4Net.Mask).String()
-
-	// Resolve disk size (matches Python's inline disk_size resolution)
+	// Resolve disk size
 	var rootfsDiskSizeMib int
 	if input.DiskSize != "" {
 		bytes, err := disk.ParseDiskSizeToBytes(input.DiskSize)
@@ -413,29 +401,24 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		rootfsDiskSizeMib = img.MinRootfsSizeMiB
 	}
 	rootfsDiskSizeBytes := int64(rootfsDiskSizeMib) * disk.MebibyteBytes
-
-	// Resolve mem_size_mib (matches Python's inline mem_size_mib resolution)
+	// Resolve mem_size_mib
 	memMib, err := r.resolveMemory(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
-	// Resolve VCPU count (matches Python: self._inputs.vcpu_count if ... else SettingsService.resolve)
-
+	// Resolve VCPU count
 	// Validate explicitly set vcpu count before defaulting
 	if input.VCPUCount != nil && *input.VCPUCount <= 0 {
 		return nil, errs.New(errs.CodeVMCreateFailed,
-			"--vcpus must be a positive integer",
+			"--vcpu must be a positive integer",
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	vcpuCount, _ := r.cfg.GetInt(ctx, "defaults.vm", "vcpu_count")
 	if input.VCPUCount != nil && *input.VCPUCount > 0 {
 		vcpuCount = *input.VCPUCount
 	}
-
-	// Resolve cloud-init mode (matches Python's _resolve_cloud_init_mode)
+	// Resolve cloud-init mode
 	// Default to "off" when no explicit mode is set — the provisioner injects
 	// SSH keys directly into the rootfs regardless of cloud-init mode.
 	if input.CloudInitMode == nil && len(sshKeys) > 0 && input.CloudInitISOPath == nil {
@@ -447,14 +430,12 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		return nil, err
 	}
 	ciMode := ciResult.Mode
-
-	// Resolve nested_virt (matches Python: self._inputs.nested_virt if ... else SettingsService.resolve)
+	// Resolve nested_virt
 	nestedVirt, _ := r.cfg.GetBool(ctx, "defaults.vm", "nested_virt")
 	if input.NestedVirt != nil {
 		nestedVirt = *input.NestedVirt
 	}
-
-	// Resolve CPU config (matches Python's inline cpu_config resolution)
+	// Resolve CPU config
 	var cpuConfig map[string]any
 	if input.CPUConfig != nil {
 		cpuConfig = input.CPUConfig
@@ -493,60 +474,48 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 			)
 		}
 	}
-
 	pciEnabled, _ := r.cfg.GetBool(ctx, "defaults.vm", "pci_enabled")
 	if input.PCIEnabled != nil {
 		pciEnabled = *input.PCIEnabled
 	}
-
-	// Resolve boot_args (matches Python: boot_args or default + root=UUID)
+	// Resolve boot_args
 	bootArgs := input.BootArgs
 	if bootArgs == "" {
 		defaultBootArgs, _ := r.cfg.GetString(ctx, "defaults.vm", "boot_args")
 		bootArgs = defaultBootArgs + " root=UUID=" + img.FSUUID
 	}
-
-	// Resolve lsm_flags (matches Python: lsm_flags or default)
+	// Resolve lsm_flags
 	lsmFlags := input.LSMFlags
 	if lsmFlags == "" {
 		lsmFlags, _ = r.cfg.GetString(ctx, "defaults.vm", "lsm_flags")
 	}
-
-	// Resolve enable_console (matches Python)
+	// Resolve enable_console
 	enableConsole, _ := r.cfg.GetBool(ctx, "defaults.vm", "enable_console")
 	if input.EnableConsole != nil {
 		enableConsole = *input.EnableConsole
 	}
-	if input.NoConsole {
-		enableConsole = false
-	}
-
-	// Resolve enable_logging (matches Python)
+	// Resolve enable_logging
 	enableLogging, _ := r.cfg.GetBool(ctx, "defaults.vm", "enable_logging")
 	if input.EnableLogging != nil {
 		enableLogging = *input.EnableLogging
 	}
-
-	// Resolve enable_metrics (matches Python)
+	// Resolve enable_metrics
 	enableMetrics, _ := r.cfg.GetBool(ctx, "defaults.vm", "enable_metrics")
 	if input.EnableMetrics != nil {
 		enableMetrics = *input.EnableMetrics
 	}
-
-	// Resolve user (matches Python: self._inputs.user if ... else SettingsService.resolve)
+	// Resolve user
 	user, _ := r.cfg.GetString(ctx, "defaults.vm", "ssh_user")
 	if input.User != nil && *input.User != "" {
 		user = *input.User
 	}
-
-	// Resolve config defaults (matches Python's SettingsService.resolve calls)
+	// Resolve config defaults
 	dnsServer, _ := r.cfg.GetString(ctx, "defaults.vm", "dns_server")
 	rootUID, _ := r.cfg.GetInt(ctx, "defaults.vm", "root_uid")
 	rootGID, _ := r.cfg.GetInt(ctx, "defaults.vm", "root_gid")
 	userUID, _ := r.cfg.GetInt(ctx, "defaults.vm", "user_uid")
 	userGID, _ := r.cfg.GetInt(ctx, "defaults.vm", "user_gid")
 	guestMACPrefix, _ := r.cfg.GetString(ctx, "defaults.vm", "guest_mac_prefix")
-
 	logLevel, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_level")
 	logFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_filename")
 	serialOutputFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename")
@@ -557,21 +526,18 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	consoleSocketFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_socket_filename")
 	consolePIDFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_pid_filename")
 	vsockFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "vsock_filename")
-
 	ciIsoName, _ := r.cfg.GetString(ctx, "defaults.cloudinit", "iso_name")
 	nocloudPortStart, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_start")
 	nocloudPortEnd, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_end")
 	nocloudMaxRetries, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries")
 	nocloudKillAfter, _ := r.cfg.GetDuration(ctx, "defaults.cloudinit", "nocloud_kill_after")
-
 	vsockPort := 0
 	if r.input.VsockPort != nil && *r.input.VsockPort > 0 {
 		vsockPort = *r.input.VsockPort
 	} else {
 		vsockPort, _ = r.cfg.GetInt(ctx, "defaults.vm", "vsock_port")
 	}
-
-	// Build the resolved result (matches Python's ResolvedVMCreateInput construction)
+	// Build the resolved result
 	result := &ResolvedVMCreateInput{
 		Name:                  input.Name,
 		VMID:                  r.vmID,
@@ -614,7 +580,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		SSHKeys:               sshKeys,
 		Volumes:               vols,
 		ExtraDrives:           extraDrives,
-		// Firecracker defaults (matches Python's GetString calls)
+		// Firecracker defaults
 		LogLevel:              logLevel,
 		LogFilename:           logFilename,
 		SerialOutputFilename:  serialOutputFilename,
@@ -625,36 +591,32 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		ConsoleSocketFilename: consoleSocketFilename,
 		ConsolePIDFilename:    consolePIDFilename,
 		VsockFilename:         vsockFilename,
-		// Cloud-init defaults (matches Python's GetString calls)
+		// Cloud-init defaults
 		CloudInitISOName:      ciIsoName,
 		NocloudPortRangeStart: nocloudPortStart,
 		NocloudPortRangeEnd:   nocloudPortEnd,
 		NocloudMaxPortRetries: nocloudMaxRetries,
 		NoCloudKillAfter:      nocloudKillAfter,
 		VsockPort:             vsockPort,
+		Writeback:             writeback,
 	}
-
-	// Validate (matches Python's ensure_validate)
+	// Validate
 	if err := r.ensureValidate(ctx, result); err != nil {
 		return nil, err
 	}
-
 	return result, nil
 }
 
 // ensureValidate validates resolved dependencies and batch constraints.
-// Matches Python's VMCreateRequest.ensure_validate() exactly.
 func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVMCreateInput) error {
 	if result == nil {
 		return errs.New(errs.CodeVMCreateFailed, "Failed to resolve necessary dependencies to validate")
 	}
-
 	if result.RequestedGuestMAC != nil && *result.RequestedGuestMAC != "" {
 		if err := validators.MAC(*result.RequestedGuestMAC); err != nil {
 			return errs.New(errs.CodeValidationFailed, err.Error())
 		}
 	}
-
 	if result.RequestedGuestIP != nil && *result.RequestedGuestIP != "" && result.Network != nil {
 		if err := validators.IPv4Address(
 			*result.RequestedGuestIP,
@@ -666,14 +628,12 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			return errs.New(errs.CodeValidationFailed, err.Error())
 		}
 	}
-
 	if result.VCPUCount < infra.VCPUMin || result.VCPUCount > infra.VCPUMax {
 		return errs.New(errs.CodeVMCreateFailed,
-			fmt.Sprintf("Invalid vcpus=%d: must be between %d and %d", result.VCPUCount, infra.VCPUMin, infra.VCPUMax),
+			fmt.Sprintf("Invalid vcpu=%d: must be between %d and %d", result.VCPUCount, infra.VCPUMin, infra.VCPUMax),
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	if result.MemSizeMib < infra.MemMinMB || result.MemSizeMib > infra.MemMaxMB {
 		return errs.New(
 			errs.CodeVMCreateFailed,
@@ -686,7 +646,6 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	kernelPath := result.Kernel.Path
 	if _, err := os.Stat(kernelPath); os.IsNotExist(err) {
 		return errs.New(
@@ -695,7 +654,6 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	binPath := result.Binary.Path
 	if _, err := os.Stat(binPath); os.IsNotExist(err) {
 		return errs.New(
@@ -711,7 +669,6 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	if result.CustomCloudInitConfig != nil && *result.CustomCloudInitConfig != "" {
 		if _, err := os.Stat(*result.CustomCloudInitConfig); os.IsNotExist(err) {
 			return errs.New(
@@ -721,7 +678,6 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			)
 		}
 	}
-
 	if result.Image == nil || result.Image.MinRootfsSizeMiB == 0 {
 		imageRef := "<default>"
 		if r.input.ImageID != nil {
@@ -730,13 +686,14 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 		return errs.New(
 			errs.CodeVMCreateFailed,
 			fmt.Sprintf(
-				"Image %s is missing minimum_rootfs_size_mib. This image was created with an older version. Re-import the image: mvm image pull <slug> --force",
+				"Image %s is missing minimum_rootfs_size_mib. "+
+					"This image was created with an older version. "+
+					"Re-import the image: mvm image pull <slug> --force",
 				imageRef,
 			),
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	minRequiredBytes := int64(result.Image.MinRootfsSizeMiB) * disk.MebibyteBytes
 	if result.DiskSizeBytes < minRequiredBytes {
 		return errs.New(
@@ -748,7 +705,6 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
 	if result.BootArgs != "" {
 		for component := range strings.FieldsSeq(result.BootArgs) {
 			if err := validators.BootArgComponent(component, "boot_args"); err != nil {
@@ -756,14 +712,12 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			}
 		}
 	}
-
 	if result.LSMFlags != "" {
 		if err := validators.BootArgComponent(result.LSMFlags, "lsm_flags"); err != nil {
 			return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid lsm_flags: %s", err.Error()))
 		}
 	}
-
-	// Batch validation (matches Python's ensure_validate batch section)
+	// Batch validation
 	count := 1
 	if r.input.Count != nil {
 		count = *r.input.Count
@@ -771,8 +725,7 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 	if count < 1 {
 		return errs.New(errs.CodeVMCreateFailed, "--count must be at least 1", errs.WithClass(errs.ClassValidation))
 	}
-
-	// Check VM limit (matches Python's _execute_create limit check)
+	// Check VM limit
 	vmCount, err := r.vmRepo.Count(ctx)
 	if err != nil {
 		return errs.New(errs.CodeDatabaseError, fmt.Sprintf("Failed to count VMs: %s", err.Error()))
@@ -783,7 +736,6 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			fmt.Sprintf("VM limit reached (%d). Remove existing VMs before creating new ones.", maxVMs),
 		)
 	}
-
 	if count > 1 {
 		if r.input.RequestedGuestIP != nil {
 			return errs.New(
@@ -799,8 +751,7 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 				errs.WithClass(errs.ClassValidation),
 			)
 		}
-
-		// Check subnet capacity (matches Python: lease_repo.count_available)
+		// Check subnet capacity
 		if result.Network != nil {
 			available, availErr := r.leaseRepo.CountAvailable(ctx, result.Network.ID)
 			if availErr == nil && count > available {
@@ -810,8 +761,7 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 				)
 			}
 		}
-
-		// Check global VM limit for batch (matches Python: current + count > max_vms)
+		// Check global VM limit for batch
 		if vmCount+count > maxVMs {
 			return errs.New(
 				errs.CodeVMResourceExhausted,
@@ -824,6 +774,5 @@ func (r *VMCreateRequest) ensureValidate(ctx context.Context, result *ResolvedVM
 			)
 		}
 	}
-
 	return nil
 }

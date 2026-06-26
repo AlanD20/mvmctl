@@ -11,8 +11,7 @@ import (
 var knownMVMComms = [...]string{"firecracker"}
 
 // isMountPoint checks if a path is currently a mount point by comparing
-// device numbers (st_dev) of path and its parent — matching Python's
-// path.is_mount() behavior exactly.
+// device numbers (st_dev) of the path and its parent.
 func isMountPoint(path string) bool {
 	var st syscall.Stat_t
 	if err := syscall.Stat(path, &st); err != nil {

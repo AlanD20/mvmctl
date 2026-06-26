@@ -57,9 +57,13 @@ func (s *ExecStep) Apply(
 		return fmt.Errorf("%s: empty command", s.Name())
 	}
 
-	_, err := s.op.VMExec(ctx, s.input)
+	result, err := s.op.VMExec(ctx, s.input)
 	if err != nil {
 		return err
+	}
+
+	if result != nil && result.ExitCode != 0 {
+		return fmt.Errorf("%s: command exited with code %d", s.Name(), result.ExitCode)
 	}
 
 	// Print a blank line to visually separate from the step status line.

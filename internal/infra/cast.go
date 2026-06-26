@@ -84,8 +84,8 @@ func DerefOrNil[T any](p *T) any {
 }
 
 // ShlexQuote returns a shell-safe single-quoted version of s.
-// Matches Python's shlex.quote(): safe characters pass through, everything
-// else is wrapped in single quotes with embedded quotes escaped as '"'"'.
+// Safe characters pass through, everything else is wrapped in single quotes
+// with embedded quotes escaped as '"'"'.
 func ShlexQuote(s string) string {
 	if s == "" {
 		return "''"

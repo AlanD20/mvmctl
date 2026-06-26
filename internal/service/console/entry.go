@@ -76,25 +76,25 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	defer ptyFile.Close()
 
-	// ── Signal handling for graceful shutdown ──
+	// --- Signal handling ---
 	relayCtx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	// ── Open log file ──
+	// --- Open log file ---
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		return fmt.Errorf("cannot create log file %s: %w", logPath, err)
 	}
 	defer logFile.Close()
 
-	// ── Set up Unix socket ──
+	// --- Set up Unix socket ---
 	os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return fmt.Errorf("cannot listen on socket %s: %w", socketPath, err)
 	}
 
-	// ── Ensure socket/PID file cleanup on exit ──
+	// --- Ensure cleanup on exit ---
 	cleanup := func() {
 		listener.Close()
 		os.Remove(socketPath)
@@ -132,7 +132,7 @@ func runRelayIO(ctx context.Context, ptyFile *os.File, logFile *os.File, listene
 		ptyFile.Close()
 	}()
 
-	// PTY reader goroutine (unchanged).
+	// PTY reader goroutine.
 	readBuf := make([]byte, consoleReadBufferSize)
 	ptyCh := make(chan ptyRead, 256)
 	go func() {

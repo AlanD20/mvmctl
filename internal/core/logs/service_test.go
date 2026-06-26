@@ -16,7 +16,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Helpers ─────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // assertCode checks that err is a DomainError with the given code.
 func assertCode(t *testing.T, err error, code errs.Code) {
@@ -31,7 +31,7 @@ func assertCode(t *testing.T, err error, code errs.Code) {
 	}
 }
 
-// ─── TestReadLogLines ────────────────────────────────────────────────────
+// --- TestReadLogLines ---
 // Rationale: Covers circular buffer O(1) behavior, edge cases for zero/negative
 // lines, Windows line endings, nonexistent files, and the high-water-mark case.
 
@@ -119,7 +119,7 @@ func TestReadLogLines(t *testing.T) {
 		})
 	}
 
-	// ─── nonexistent_file ─────────────────────────────────────────────────
+	// --- nonexistent_file ---
 	// Rationale: os.Open failure must return a wrapped CodeInternal error.
 	t.Run("nonexistent_file", func(t *testing.T) {
 		filePath := filepath.Join(t.TempDir(), "does-not-exist.log")
@@ -132,7 +132,7 @@ func TestReadLogLines(t *testing.T) {
 	})
 }
 
-// ─── TestGetLogPath ──────────────────────────────────────────────────────
+// --- TestGetLogPath ---
 // Rationale: Validates VM log path resolution for both boot (serial console)
 // and os (firecracker log) types, including error paths for missing directories
 // and missing files.

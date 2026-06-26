@@ -10,7 +10,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── ParseDiskSize ──────────────────────────────────────────────────────────
+// --- ParseDiskSize ---
 // Rationale: Pure string-to-bytes parsing with IEC binary units.
 
 func TestParseDiskSize(t *testing.T) {
@@ -52,7 +52,7 @@ func TestParseDiskSize(t *testing.T) {
 	}
 }
 
-// ─── FormatDiskSize ─────────────────────────────────────────────────────────
+// --- FormatDiskSize ---
 // Rationale: Reverse of ParseDiskSize — bytes to human-readable string.
 
 func TestFormatDiskSize(t *testing.T) {
@@ -76,7 +76,7 @@ func TestFormatDiskSize(t *testing.T) {
 	}
 }
 
-// ─── FormatSectorsHumanReadable ─────────────────────────────────────────────
+// --- FormatSectorsHumanReadable ---
 // Rationale: Converts sector count + sector size to "X.X MiB/GiB".
 
 func TestFormatSectorsHumanReadable(t *testing.T) {
@@ -101,7 +101,7 @@ func TestFormatSectorsHumanReadable(t *testing.T) {
 	}
 }
 
-// ─── TypeCodeDetector.Score ─────────────────────────────────────────────────
+// --- TypeCodeDetector.Score ---
 // Rationale: Scores partitions by partition type GUID/hex code.
 
 func TestTypeCodeDetector_Score(t *testing.T) {
@@ -132,7 +132,7 @@ func TestTypeCodeDetector_Score(t *testing.T) {
 	}
 }
 
-// ─── LabelDetector.Score ────────────────────────────────────────────────────
+// --- LabelDetector.Score ---
 // Rationale: Scores partitions by label/name containing root or exclude keywords.
 
 func TestLabelDetector_Score(t *testing.T) {
@@ -164,7 +164,7 @@ func TestLabelDetector_Score(t *testing.T) {
 	}
 }
 
-// ─── SizeDetector.Score ─────────────────────────────────────────────────────
+// --- SizeDetector.Score ---
 // Rationale: Scores partitions by size relative to min root / too-small thresholds.
 
 func TestSizeDetector_Score(t *testing.T) {
@@ -220,7 +220,7 @@ func TestSizeDetector_Score(t *testing.T) {
 	}
 }
 
-// ─── FilesystemDetector.Score ───────────────────────────────────────────────
+// --- FilesystemDetector.Score ---
 // Rationale: Scores partitions by filesystem type.
 
 func TestFilesystemDetector_Score(t *testing.T) {
@@ -249,7 +249,7 @@ func TestFilesystemDetector_Score(t *testing.T) {
 	}
 }
 
-// ─── RootPartitionDetector.Detect ───────────────────────────────────────────
+// --- RootPartitionDetector.Detect ---
 // Rationale: Aggregates all detectors to find the root partition index.
 
 func TestRootPartitionDetector_Detect(t *testing.T) {
@@ -332,7 +332,7 @@ func TestRootPartitionDetector_Detect(t *testing.T) {
 	})
 }
 
-// ─── getDetectorScore / getDetectorWeight (tested via exported maps) ────────
+// --- getDetectorScore / getDetectorWeight (tested via  ---
 // Rationale: Verifies known and unknown keys return correct values.
 
 func TestGetDetectorScore(t *testing.T) {

@@ -1,3 +1,5 @@
+// Package logs provides structured log file management for VMs.
+// Layer: Core domain — never imports other core/* packages.
 package logs
 
 import (
@@ -16,7 +18,6 @@ import (
 const logFollowPollIntervalS = 0.3
 
 // Service provides stateless log file operations.
-// Matches Python's LogService exactly.
 type Service struct{}
 
 // NewService creates a new LogService.
@@ -25,15 +26,15 @@ func NewService() *Service {
 }
 
 // GetLogPath returns the full path to a VM's log file based on the log type.
-// Matches Python's LogService.get_log_path() exactly — validates that:
-//  1. VM directory exists (raises LogsError if not)
-//  2. Log file exists (raises LogsError if not)
+// Validates that:
+// 1. VM directory exists
+// 2. Log file exists
 //
 // logType: "boot" (serial console) or "os" (firecracker log).
 // logFilename: the firecracker log filename (for "os" type).
 // serialOutputFilename: the serial console output filename (for "boot" type).
 func (s *Service) GetLogPath(vmDir string, logType, logFilename, serialOutputFilename string) (string, error) {
-	// Validate VM directory exists (matches Python LogsError("VM directory not found at ..."))
+	// Validate VM directory exists
 	if _, err := os.Stat(vmDir); os.IsNotExist(err) {
 		return "", errs.New(errs.CodeValidationFailed, "VM directory not found at "+vmDir)
 	}
@@ -45,7 +46,7 @@ func (s *Service) GetLogPath(vmDir string, logType, logFilename, serialOutputFil
 		logFile = filepath.Join(vmDir, logFilename)
 	}
 
-	// Validate log file exists (matches Python LogsError("Log file not found for VM: ..."))
+	// Validate log file exists
 	if _, err := os.Stat(logFile); os.IsNotExist(err) {
 		return "", errs.New(errs.CodeValidationFailed, "log file not found for VM: "+logFile)
 	}
@@ -54,8 +55,7 @@ func (s *Service) GetLogPath(vmDir string, logType, logFilename, serialOutputFil
 }
 
 // ReadLogLines reads the last N lines from a log file.
-// Matches Python's LogService.read_log_lines() — uses O(1) circular buffer
-// (Python's deque(f, maxlen=lines) with modulo indexing).
+// Uses O(1) circular buffer with modulo indexing.
 func (s *Service) ReadLogLines(logFile string, lines int) ([]string, error) {
 	f, err := os.Open(logFile)
 	if err != nil {
@@ -70,22 +70,16 @@ func (s *Service) ReadLogLines(logFile string, lines int) ([]string, error) {
 		return []string{}, nil
 	}
 
-	// O(1) circular buffer: pre-allocated slice with modulo indexing,
-	// matching Python's deque(f, maxlen=lines).
-	//
-	// Use ReadString('\n') + TrimRight("\n") to match Python's
-	// rstrip("\n") behavior exactly: strips only trailing \n
-	// characters, preserving \r (Windows line endings).  Using
-	// bufio.Scanner.Text() would strip both \r\n, which differs
-	// from Python's rstrip("\n").
+	// O(1) circular buffer: pre-allocated slice with modulo indexing.
+	// Use ReadString('\n') + TrimRight("\n") to strip only trailing \n
+	// characters, preserving \r (Windows line endings).
 	buf := make([]string, lines)
 	count := 0
 	reader := bufio.NewReader(f)
 	for {
 		line, readErr := reader.ReadString('\n')
 		if len(line) > 0 {
-			// Strip trailing newline(s) matching Python's rstrip("\n").
-			// ReadString('\n') includes the delimiter, so we strip \n
+			// Strip trailing newline(s). ReadString('\n') includes the delimiter, so we strip \n
 			// but leave any \r in place (Windows-style line endings).
 			line = strings.TrimRight(line, "\n")
 			buf[count%lines] = line
@@ -113,15 +107,6 @@ func (s *Service) ReadLogLines(logFile string, lines int) ([]string, error) {
 // for errors (buffered with capacity 1). Spawns a goroutine that reads the file and
 // sends lines on the line channel until ctx is cancelled, EOF is reached, or an error
 // occurs. Both channels are closed when the goroutine exits.
-// Matches Python's LogService.follow_log() exactly — synchronous Generator[str] behavior
-// where each yield blocks until a new line is available:
-//
-//	while True:
-//	    line = f.readline()
-//	    if not line:
-//	        time.sleep(LOG_FOLLOW_POLL_INTERVAL_S)
-//	        continue
-//	    yield line.rstrip("\n")
 func (s *Service) FollowLogSync(ctx context.Context, logFile string) (<-chan string, <-chan error) {
 	lineCh := make(chan string, 10)
 	errCh := make(chan error, 1)
@@ -156,7 +141,6 @@ func (s *Service) FollowLogSync(ctx context.Context, logFile string) (<-chan str
 			line, readErr := reader.ReadString('\n')
 			if len(line) > 0 {
 				// ReadString includes the delimiter; strip trailing newline(s)
-				// matching Python's line.rstrip("\n")
 				line = strings.TrimRight(line, "\n")
 
 				select {
@@ -168,8 +152,7 @@ func (s *Service) FollowLogSync(ctx context.Context, logFile string) (<-chan str
 
 			if readErr != nil {
 				if readErr == io.EOF {
-					// No new data — sleep and retry,
-					// matching Python's time.sleep(LOG_FOLLOW_POLL_INTERVAL_S)
+					// No new data — sleep and retry
 					select {
 					case <-ctx.Done():
 						return
@@ -191,7 +174,6 @@ func (s *Service) FollowLogSync(ctx context.Context, logFile string) (<-chan str
 
 // FollowLog follows a log file in real-time (like tail -f).
 // Lines are sent to the provided channel. Closing the context cancels.
-// Matches Python's LogService.follow_log() exactly.
 func (s *Service) FollowLog(ctx context.Context, logFile string, lines chan<- string) error {
 	f, err := os.Open(logFile)
 	if err != nil {
@@ -211,7 +193,6 @@ func (s *Service) FollowLog(ctx context.Context, logFile string, lines chan<- st
 		line, readErr := reader.ReadString('\n')
 		if len(line) > 0 {
 			// ReadString includes the delimiter; strip trailing newline(s)
-			// matching Python's line.rstrip("\n")
 			line = strings.TrimRight(line, "\n")
 
 			select {
@@ -223,8 +204,7 @@ func (s *Service) FollowLog(ctx context.Context, logFile string, lines chan<- st
 
 		if readErr != nil {
 			if readErr == io.EOF {
-				// No new data — sleep and retry,
-				// matching Python's time.sleep(LOG_FOLLOW_POLL_INTERVAL_S)
+				// No new data — sleep and retry
 				select {
 				case <-ctx.Done():
 					return nil

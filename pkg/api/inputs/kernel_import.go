@@ -1,29 +1,17 @@
 package inputs
 
 import (
-	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"slices"
-	"strings"
-
-	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
-
-	"github.com/jmoiron/sqlx"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
-// KernelImportInput matches Python's KernelImportInput dataclass.
-//
-//	@dataclass
-//	class KernelImportInput:
-//	    name: str
-//	    path: Path
-//	    version: str | None = None
-//	    set_default: bool = False
+// KernelImportInput specifies kernel import input.
 type KernelImportInput struct {
 	Name       string  `json:"name"`
 	Path       string  `json:"path"`
@@ -31,15 +19,7 @@ type KernelImportInput struct {
 	SetDefault bool    `json:"set_default"`
 }
 
-// ResolvedKernelImportInput matches Python's ResolvedKernelImportInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedKernelImportInput:
-//	    name: str
-//	    path: Path
-//	    version: str
-//	    arch: str
-//	    set_default: bool = False
+// ResolvedKernelImportInput specifies resolved kernel import input.
 type ResolvedKernelImportInput struct {
 	Name       string
 	Path       string
@@ -48,30 +28,24 @@ type ResolvedKernelImportInput struct {
 	SetDefault bool
 }
 
-// KernelImportRequest matches Python's KernelImportRequest.
-//
-// Resolve and validate kernel import inputs.
-type KernelImportRequest struct {
-	db     *sqlx.DB
-	input  KernelImportInput
-	result *ResolvedKernelImportInput
-}
-
-// NewKernelImportRequest creates a new KernelImportRequest.
-func NewKernelImportRequest(inputs KernelImportInput, db *sqlx.DB) *KernelImportRequest {
-	return &KernelImportRequest{
-		db:    db,
-		input: inputs,
+// Validate checks that the kernel import input has required fields.
+func (i *KernelImportInput) Validate() error {
+	if i.Name == "" {
+		return fmt.Errorf("kernel name is required")
 	}
+	if i.Path == "" {
+		return fmt.Errorf("kernel path is required")
+	}
+	return nil
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-
-// Resolve resolves all input fields to concrete values and validates.
-// Matches Python's KernelImportRequest.resolve().
-func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImportInput, error) {
-	// Expand and resolve path — Python: Path(self._inputs.path).expanduser().resolve()
-	sourcePath, err := system.ExpandAndResolve(r.input.Path)
+// Resolve resolves and validates import inputs, returning a ResolvedKernelImportInput.
+func (i *KernelImportInput) Resolve() (*ResolvedKernelImportInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	// Expand and resolve the kernel source path.
+	sourcePath, err := system.ExpandAndResolve(i.Path)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeKernelBuildFailed,
@@ -80,10 +54,7 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
-	// Python: parsed = KernelService.parse_filename(source_path.name)
 	parsedVersion, parsedArch := parseKernelFilename(filepath.Base(sourcePath))
-
 	// Resolve arch — arch always matches the host machine, but can be
 	// extracted from the filename if present (e.g. "vmlinux-6.1-x86_64").
 	var arch string
@@ -92,75 +63,53 @@ func (r *KernelImportRequest) Resolve(ctx context.Context) (*ResolvedKernelImpor
 	} else {
 		arch = system.RuntimeArch()
 	}
-
-	// Resolve version — Python logic:
-	//   if self._inputs.version is not None → version = self._inputs.version
-	//   else → version = parsed.version if parsed.version != "-" else "unknown"
+	// Resolve version:
+	// Use user-specified version if provided; otherwise use parsed value,
+	// falling back to "unknown".
 	var version string
-	if r.input.Version != nil && *r.input.Version != "" {
-		version = *r.input.Version
+	if i.Version != nil && *i.Version != "" {
+		version = *i.Version
 	} else if parsedVersion != "" && parsedVersion != "-" {
 		version = parsedVersion
 	} else {
 		version = "unknown"
 	}
-
-	r.result = &ResolvedKernelImportInput{
-		Name:       r.input.Name,
+	result := &ResolvedKernelImportInput{
+		Name:       i.Name,
 		Path:       sourcePath,
 		Version:    version,
 		Arch:       arch,
-		SetDefault: r.input.SetDefault,
+		SetDefault: i.SetDefault,
 	}
-
-	// Validate
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
+	// 1. Path exists.
+	if _, err := os.Stat(result.Path); os.IsNotExist(err) {
+		return nil, errs.NotFound(errs.CodeKernelNotFound, fmt.Sprintf("Kernel file not found: %s", result.Path))
 	}
-
-	return r.result, nil
-}
-
-// ensureValidate matches Python's KernelImportRequest.ensure_validate() exactly.
-func (r *KernelImportRequest) ensureValidate() error {
-	if r.result == nil {
-		return errs.New(
-			errs.CodeKernelBuildFailed,
-			"Failed to resolve necessary dependencies to validate",
-			errs.WithClass(errs.ClassValidation),
-		)
-	}
-
-	// 1. Path exists — Python: if not self.result.path.exists()
-	if _, err := os.Stat(r.result.Path); os.IsNotExist(err) {
-		return errs.NotFound(errs.CodeKernelNotFound, fmt.Sprintf("Kernel file not found: %s", r.result.Path))
-	}
-
-	// 2. Path is non-empty — Python: if self.result.path.stat().st_size == 0
-	fi, err := os.Stat(r.result.Path)
+	// 2. Path is non-empty.
+	fi, err := os.Stat(result.Path)
 	if err == nil && fi.Size() == 0 {
-		return errs.New(errs.CodeKernelNotFound, fmt.Sprintf("Kernel file is empty: %s", r.result.Path))
+		return nil, errs.New(errs.CodeKernelNotFound, fmt.Sprintf("Kernel file is empty: %s", result.Path))
 	}
-
-	// 3. Arch is supported — Python: if self.result.arch not in FIRECRACKER_SUPPORTED_ARCH
-	if !slices.Contains(infra.FirecrackerSupportedArches, r.result.Arch) {
-		return errs.New(
+	// 3. Arch is supported.
+	if !firecracker.SupportsArch(result.Arch) {
+		return nil, errs.New(
 			errs.CodeKernelBuildFailed,
-			fmt.Sprintf("Unknown arch: %s. Valid: x86_64, amd64, aarch64, arm64", r.result.Arch),
+			fmt.Sprintf("Unknown arch: %s. Valid: x86_64, amd64, aarch64, arm64", result.Arch),
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-
-	// 4. Name is non-empty — Python: if not self.result.name
-	if r.result.Name == "" {
-		return errs.New(errs.CodeKernelBuildFailed, "Kernel name cannot be empty", errs.WithClass(errs.ClassValidation))
+	// 4. Name is non-empty.
+	if result.Name == "" {
+		return nil, errs.New(
+			errs.CodeKernelBuildFailed,
+			"Kernel name cannot be empty",
+			errs.WithClass(errs.ClassValidation),
+		)
 	}
-
-	return nil
+	return result, nil
 }
 
 // parseKernelFilename extracts version and arch from a kernel filename.
-// Python: KernelService.parse_filename()
 // Examples:
 //
 //	vmlinux-6.1.0-x86_64 -> version="6.1.0", arch="x86_64"
@@ -170,20 +119,17 @@ func parseKernelFilename(filename string) (ver, arch string) {
 	name := filename
 	ver = "-"
 	arch = "-"
-
-	// Step 1: Strip arch suffix from end (Python: for a in arches: if name.endswith(f"-{a}"))
-	for _, a := range infra.FirecrackerSupportedArches {
+	// Step 1: Strip arch suffix from the end.
+	for _, a := range firecracker.SupportedArches {
 		if strings.HasSuffix(name, "-"+a) {
 			arch = a
 			name = name[:len(name)-len(a)-1]
 			break
 		}
 	}
-
-	// Step 2: Strip version from end (Python: re.search(r"-v?(\d+(?:\.\d+)*)$", name))
+	// Step 2: Extract version from filename.
 	if v, ok := version.ExtractVersionFromFilename(name); ok {
 		ver = v
 	}
-
 	return
 }

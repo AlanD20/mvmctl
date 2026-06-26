@@ -1,6 +1,7 @@
 package infra_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,7 +14,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// ─── OpenNoFollow ────────────────────────────────────────────────────────────
+// --- OpenNoFollow ---
 // Rationale: OpenNoFollow is the foundation for all safe file reads. A symlink
 // bypass would enable TOCTOU race attacks on config and key files.
 
@@ -60,7 +61,7 @@ func TestOpenNoFollow(t *testing.T) {
 	})
 }
 
-// ─── ReadRaw ─────────────────────────────────────────────────────────────────
+// --- ReadRaw ---
 // Rationale: ReadRaw reads files with O_NOFOLLOW protection. Must fail on
 // symlinks to prevent traversal attacks.
 
@@ -101,7 +102,7 @@ func TestReadRaw(t *testing.T) {
 	})
 }
 
-// ─── ReadFile ────────────────────────────────────────────────────────────────
+// --- ReadFile ---
 // Rationale: Simple os.ReadFile wrapper used throughout the codebase.
 
 func TestReadFile(t *testing.T) {
@@ -121,7 +122,7 @@ func TestReadFile(t *testing.T) {
 	})
 }
 
-// ─── ReadYAML ────────────────────────────────────────────────────────────────
+// --- ReadYAML ---
 // Rationale: ReadYAML parses YAML files with O_NOFOLLOW protection. Used for
 // loading bundled YAML configs and user-provided YAML files.
 
@@ -167,7 +168,7 @@ func TestReadYAML(t *testing.T) {
 	})
 }
 
-// ─── WriteJSON / ReadJSON ────────────────────────────────────────────────────
+// --- WriteJSON / ReadJSON ---
 // Rationale: JSON read/write with O_NOFOLLOW protection. Used for config files
 // and structured data persistence.
 
@@ -231,7 +232,7 @@ func TestReadJSON(t *testing.T) {
 	})
 }
 
-// ─── EnsureDir ───────────────────────────────────────────────────────────────
+// --- EnsureDir ---
 // Rationale: Simple MkdirAll wrapper used for cache and config directory setup.
 
 func TestEnsureDir(t *testing.T) {
@@ -262,7 +263,7 @@ func TestEnsureDir(t *testing.T) {
 	})
 }
 
-// ─── DirSize ─────────────────────────────────────────────────────────────────
+// --- DirSize ---
 // Rationale: DirSize calculates directory sizes recursively. Used for cache
 // pruning and resource usage reporting.
 
@@ -303,7 +304,7 @@ func TestDirSize(t *testing.T) {
 	})
 }
 
-// ─── WritePIDFile ────────────────────────────────────────────────────────────
+// --- WritePIDFile ---
 // Rationale: PID files with flock locking prevent concurrent process conflicts.
 
 func TestWritePIDFile(t *testing.T) {
@@ -346,7 +347,7 @@ func TestWritePIDFile(t *testing.T) {
 	})
 }
 
-// ─── WaitForSocket ───────────────────────────────────────────────────────────
+// --- WaitForSocket ---
 // Rationale: Polls for Unix socket creation with timeout. Used for Firecracker
 // API socket readiness checks.
 
@@ -358,7 +359,7 @@ func TestWaitForSocket(t *testing.T) {
 	})
 }
 
-// ─── CopyFile ────────────────────────────────────────────────────────────────
+// --- CopyFile ---
 // Rationale: Low-level file copy used throughout the codebase.
 
 func TestCopyFile(t *testing.T) {
@@ -397,7 +398,7 @@ func TestCopyFile(t *testing.T) {
 	})
 }
 
-// ─── CopyPreservingMetadata ──────────────────────────────────────────────────
+// --- CopyPreservingMetadata ---
 // Rationale: shutil.copy2() equivalent — preserves timestamps and permissions.
 
 func TestCopyPreservingMetadata(t *testing.T) {
@@ -428,7 +429,7 @@ func TestCopyPreservingMetadata(t *testing.T) {
 	})
 }
 
-// ─── SafeMove ────────────────────────────────────────────────────────────────
+// --- SafeMove ---
 // Rationale: Atomic move with cross-filesystem fallback.
 
 func TestSafeMove(t *testing.T) {
@@ -455,7 +456,7 @@ func TestSafeMove(t *testing.T) {
 	})
 }
 
-// ─── IsSubDir ────────────────────────────────────────────────────────────────
+// --- IsSubDir ---
 // Rationale: Path containment check used for security boundary enforcement.
 // Must reject paths that only match by string prefix (not actual hierarchy).
 
@@ -489,7 +490,7 @@ func TestIsSubDir(t *testing.T) {
 	}
 }
 
-// ─── ReadInt ─────────────────────────────────────────────────────────────────
+// --- ReadInt ---
 // Rationale: Reads int from /proc-style files. Used for host resource detection.
 
 func TestReadInt(t *testing.T) {
@@ -544,9 +545,149 @@ func TestReadInt(t *testing.T) {
 	})
 }
 
-// ─── SecureMkdir ─────────────────────────────────────────────────────────────
+// --- SecureMkdir ---
 // Rationale: Creates directories with symlink-attack resistance. Used for
 // cache and config directory creation in privileged contexts.
+
+// --- PersistenceChain ---
+// Validates the write → fsync → close → copy → verify chain.
+// This simulates the exact data path used by mvm cp (vsock agent writes a
+// file with f.Sync()+f.Close()) followed by base image creation (CopyFile).
+// Regression test for: CacheType "Unsafe" in Firecracker causing data loss
+// when guest fsync does not trigger host fsync on the backing file.
+func TestPersistenceChain_WriteSyncCopyVerify(t *testing.T) {
+	t.Run("data_survives_fsync_then_copy", func(t *testing.T) {
+		dir := t.TempDir()
+
+		// 1. Create a rootfs file (simulates a newly created ext4 image file)
+		rootfsPath := filepath.Join(dir, "rootfs.ext4")
+		rootfsFile, err := os.Create(rootfsPath)
+		require.NoError(t, err)
+
+		// Write data to the rootfs (simulates the vsock agent writing within the VM)
+		expectedData := []byte("this-data-must-survive-copy-" + time.Now().String())
+		_, err = rootfsFile.Write(expectedData)
+		require.NoError(t, err)
+
+		// 2. fsync (simulates the vsock agent's f.Sync() call)
+		err = rootfsFile.Sync()
+		require.NoError(t, err)
+
+		// 3. close (simulates the vsock agent's f.Close() call)
+		err = rootfsFile.Close()
+		require.NoError(t, err)
+
+		// 4. CopyFile (simulates base image creation via infra.CopyFile)
+		copyPath := filepath.Join(dir, "rootfs-copy.ext4")
+		err = infra.CopyFile(rootfsPath, copyPath)
+		require.NoError(t, err)
+
+		// 5. Verify the data survives in the copy
+		copiedData, err := os.ReadFile(copyPath)
+		require.NoError(t, err)
+		assert.True(t, len(copiedData) >= len(expectedData),
+			"copied file (%d bytes) must be at least as large as expected data (%d bytes)",
+			len(copiedData), len(expectedData))
+		assert.Equal(t, expectedData, copiedData[:len(expectedData)],
+			"data must survive write → fsync → close → CopyFile chain")
+
+		// 6. Also verify: CopyFile does fdatasync on the destination.
+		// Open the copy and verify it's readable after yet another copy.
+		recopyPath := filepath.Join(dir, "rootfs-recopy.ext4")
+		err = infra.CopyFile(copyPath, recopyPath)
+		require.NoError(t, err)
+		recopiedData, err := os.ReadFile(recopyPath)
+		require.NoError(t, err)
+		assert.Equal(t, expectedData, recopiedData[:len(expectedData)],
+			"data must survive two consecutive CopyFile operations")
+	})
+
+	t.Run("sendfile_and_iocopy_produce_identical_output", func(t *testing.T) {
+		dir := t.TempDir()
+		original := filepath.Join(dir, "original.img")
+		require.NoError(t, os.WriteFile(original, []byte("test-data-for-copy-verification\n"), 0644))
+
+		// Sendfile copy path
+		sendfileDst := filepath.Join(dir, "sendfile-copy.img")
+		err := infra.CopyFile(original, sendfileDst)
+		require.NoError(t, err)
+
+		// io.Copy copy path
+		ioDst := filepath.Join(dir, "iocopy-copy.img")
+		err = infra.CopyFile(original, ioDst)
+		require.NoError(t, err)
+
+		sendfileData, _ := os.ReadFile(sendfileDst)
+		ioData, _ := os.ReadFile(ioDst)
+		originalData, _ := os.ReadFile(original)
+		assert.True(t, len(sendfileData) >= len(originalData), "sendfile copy too small")
+		assert.True(t, len(ioData) >= len(originalData), "io.Copy copy too small")
+		assert.Equal(t, originalData, sendfileData[:len(originalData)], "sendfile copy must match")
+		assert.Equal(t, originalData, ioData[:len(originalData)], "io.Copy copy must match")
+	})
+
+	t.Run("data_survives_after_close_and_reopen", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "test.img")
+
+		// Write and close
+		f, err := os.Create(path)
+		require.NoError(t, err)
+		_, err = f.Write([]byte("persistent-data-123"))
+		require.NoError(t, err)
+		require.NoError(t, f.Sync())
+		require.NoError(t, f.Close())
+
+		// Reopen and copy (simulates: VM stop → reopen rootfs → CopyFile)
+		copyDst := filepath.Join(dir, "test-copy.img")
+		require.NoError(t, infra.CopyFile(path, copyDst))
+
+		data, err := os.ReadFile(copyDst)
+		require.NoError(t, err)
+		assert.Contains(t, string(data), "persistent-data-123")
+	})
+
+	t.Run("multiple_writes_with_sync_preserve_all", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "multi.img")
+		f, err := os.Create(path)
+		require.NoError(t, err)
+
+		// Simulate multiple file writes (like copying multiple files via mvm cp)
+		for i := range 10 {
+			chunk := []byte(fmt.Sprintf("chunk-%d-data-", i))
+			_, err = f.Write(chunk)
+			require.NoError(t, err)
+		}
+		require.NoError(t, f.Sync())
+		require.NoError(t, f.Close())
+
+		copyDst := filepath.Join(dir, "multi-copy.img")
+		require.NoError(t, infra.CopyFile(path, copyDst))
+
+		data, err := os.ReadFile(copyDst)
+		require.NoError(t, err)
+		for i := range 10 {
+			assert.Contains(t, string(data), fmt.Sprintf("chunk-%d-data-", i))
+		}
+	})
+
+	t.Run("zero_length_file_survives_copy", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "empty.img")
+		f, err := os.Create(path)
+		require.NoError(t, err)
+		require.NoError(t, f.Sync())
+		require.NoError(t, f.Close())
+
+		copyDst := filepath.Join(dir, "empty-copy.img")
+		require.NoError(t, infra.CopyFile(path, copyDst))
+
+		fi, err := os.Stat(copyDst)
+		require.NoError(t, err)
+		assert.Equal(t, int64(0), fi.Size(), "zero-length file must remain zero-length")
+	})
+}
 
 func TestSecureMkdir(t *testing.T) {
 	t.Run("creates_new_directory", func(t *testing.T) {

@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
-	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/version"
 	"mvmctl/internal/service/vsockagent"
@@ -98,7 +98,13 @@ type ExecResult struct {
 // and the connection is closed — all in one shot.
 // stdout/stderr data is printed directly to the terminal as it arrives,
 // and also accumulated into the returned ExecResult.
-func (c *Client) Exec(ctx context.Context, command, user string, timeout int) (*ExecResult, error) {
+func (c *Client) Exec(
+	ctx context.Context,
+	command, user string,
+	timeout int,
+	env map[string]string,
+	noSync bool,
+) (*ExecResult, error) {
 	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
@@ -118,6 +124,8 @@ func (c *Client) Exec(ctx context.Context, command, user string, timeout int) (*
 		Token:   c.item.Token,
 		Timeout: timeout,
 		User:    user,
+		Env:     env,
+		NoSync:  noSync,
 	}
 
 	if err := sendFrame(conn, req); err != nil {
@@ -250,7 +258,7 @@ func (f *crFilter) Read(p []byte) (int, error) {
 // terminal (stdin/stdout). It returns when one direction completes (EOF or
 // error), triggering connection close to unblock the other direction.
 func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
-	// ── Bidirectional relay ──
+	// --- Bidirectional relay ---
 	//
 	// Two goroutines relay in both directions. The first one to finish
 	// (EOF or error) triggers connection close, which unblocks the other.
@@ -305,7 +313,9 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
-			infra.LogTiming("vsock_probe", c.VmName, c.item.VmID, elapsedMs,
+			timinglog.Log("vsock_probe", elapsedMs,
+				"vm_name", c.VmName,
+				"vm_id", c.item.VmID,
 				"attempts", attempts,
 				"error", "timeout",
 			)
@@ -328,10 +338,14 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 
 		if err == nil {
 			elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
-			infra.LogTiming("vsock_probe", c.VmName, c.item.VmID, elapsedMs,
+			timinglog.Log("vsock_probe", elapsedMs,
+				"vm_name", c.VmName,
+				"vm_id", c.item.VmID,
 				"attempts", attempts,
 			)
-			infra.LogTiming("vsock_dial", c.VmName, c.item.VmID, dialElapsed,
+			timinglog.Log("vsock_dial", dialElapsed,
+				"vm_name", c.VmName,
+				"vm_id", c.item.VmID,
 				"attempt", attempts,
 			)
 
@@ -360,7 +374,7 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 
 			// After a successful upgrade attempt, check if the new agent
 			// version is at least as new as the host binary.
-			if c.upgradeInProgress && !version.SemverGreater(hostVersion, agentVersion) {
+			if c.upgradeInProgress && version.Compare(hostVersion, agentVersion) <= 0 {
 				c.upgradeInProgress = false
 				if c.OnUpgradeCompleted != nil {
 					c.OnUpgradeCompleted(ctx, agentVersion)
@@ -371,7 +385,7 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 			}
 
 			// If the host binary is newer than the guest agent, trigger upgrade.
-			if version.SemverGreater(hostVersion, agentVersion) {
+			if version.Compare(hostVersion, agentVersion) > 0 {
 				conn.Close()
 				if c.upgradeInProgress {
 					return nil, fmt.Errorf("upgrade already in progress for VM %s", c.VmName)
@@ -405,7 +419,9 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 		}
 
 		// Log failed dial attempt timing
-		infra.LogTiming("vsock_dial", c.VmName, c.item.VmID, dialElapsed,
+		timinglog.Log("vsock_dial", dialElapsed,
+			"vm_name", c.VmName,
+			"vm_id", c.item.VmID,
 			"attempt", attempts,
 			"error", err.Error(),
 		)
@@ -417,6 +433,26 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 		case <-time.After(vsockProbeInterval):
 		}
 	}
+}
+
+// RescanPCI triggers a PCI bus rescan inside the guest so that devices
+// hotplugged by the VMM are discovered by the kernel.
+func (c *Client) RescanPCI(ctx context.Context) error {
+	_, err := c.Exec(ctx, "echo 1 > /sys/bus/pci/rescan", "root", 10, nil, false)
+	return err
+}
+
+// RemoveHotpluggedPCIDevice removes the last non-root virtio block device from
+// the guest PCI bus. This is required before the host asks Firecracker to
+// hot-unplug the corresponding drive.
+func (c *Client) RemoveHotpluggedPCIDevice(ctx context.Context) error {
+	cmd := "last_dev=$(ls /sys/block | grep '^vd[b-z]' | sort | tail -1); " +
+		"if [ -n \"$last_dev\" ]; then " +
+		"bdf=$(basename \"$(readlink -f /sys/block/$last_dev/device/..)\"); " +
+		"echo 1 > /sys/bus/pci/devices/$bdf/remove; " +
+		"fi"
+	_, err := c.Exec(ctx, cmd, "root", 10, nil, false)
+	return err
 }
 
 // Teardown removes the vsock UDS socket file if it exists.
@@ -496,7 +532,7 @@ func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
 		VmName:           c.VmName,
 		skipVersionCheck: true,
 	}
-	_, err := pushClient.FTCopyToVM(ctx, []string{tmpPath}, "/usr/bin/mvm-vsock-agent.new", true, nil)
+	_, err := pushClient.FTCopyToVM(ctx, []string{tmpPath}, "/usr/bin/mvm-vsock-agent.new", true, false, nil)
 	if err != nil {
 		return fmt.Errorf("push agent binary to VM: %w", err)
 	}
@@ -512,10 +548,10 @@ func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
 		VmName:           c.VmName,
 		skipVersionCheck: true,
 	}
-	_, err = execClient.Exec(ctx, upgradeShellCommand, "root", 30)
+	_, err = execClient.Exec(ctx, upgradeShellCommand, "root", 30, nil, false)
 	if err != nil {
 		// Try to restore from backup (if it exists)
-		_, restoreErr := execClient.Exec(ctx, restoreShellCommand, "root", 15)
+		_, restoreErr := execClient.Exec(ctx, restoreShellCommand, "root", 15, nil, false)
 		if restoreErr != nil {
 			slog.Error("failed to restore agent backup", "vm", c.VmName, "error", restoreErr)
 		}

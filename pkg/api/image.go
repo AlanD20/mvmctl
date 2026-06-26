@@ -1,5 +1,4 @@
 // Package api provides the public orchestration layer for all operations.
-// Matches src/mvmctl/api/image_operations.py exactly.
 package api
 
 import (
@@ -8,15 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
 	"mvmctl/internal/assets"
 	"mvmctl/internal/core/image"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
+	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/download"
 	"mvmctl/internal/lib/model"
@@ -24,6 +19,10 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 // ImageAPI defines the public interface for image operations.
@@ -59,21 +58,19 @@ type ImageAPI interface {
 }
 
 // ImagePrune prunes unused images.
-// Matches Python's ImageOperation.prune() exactly — queries Repository for
+// queries Repository for
 // referenced images instead of using img.VMs field.
 func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll bool) ([]string, error) {
 	allImages, err := op.Repos.Image.ListAll(ctx)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list images: %v", err), err)
 	}
-
 	defaultItem, _ := op.Repos.Image.GetDefault(ctx)
 	var defaultID string
 	if defaultItem != nil {
 		defaultID = defaultItem.ID
 	}
-
-	// Get referenced image IDs from VMs (matching Python's Repository.list_all() pattern)
+	// Get referenced image IDs from VMs pattern)
 	allVMs, _ := op.Repos.VM.ListAll(ctx)
 	referencedIDs := make(map[string]bool)
 	for _, vm := range allVMs {
@@ -81,7 +78,6 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 			referencedIDs[vm.ImageID] = true
 		}
 	}
-
 	var removed []string
 	for _, img := range allImages {
 		if !includeAll {
@@ -92,10 +88,8 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 				continue
 			}
 		}
-
 		if !dryRun {
-			// Matches Python: ImageOperation.remove(ImageInput(id=[image.id]), force=include_all)
-			// Uses the full remove pipeline (BatchResult, VM reference check, etc.)
+			// Calls ImageRemove through the full remove pipeline (BatchResult, VM reference, etc.)
 			result := op.ImageRemove(ctx, inputs.ImageInput{Identifiers: []string{img.ID}}, includeAll)
 			if result.HasErrors() {
 				for _, r := range result.Errors() {
@@ -106,30 +100,25 @@ func (op *Operation) ImagePrune(ctx context.Context, dryRun bool, includeAll boo
 		}
 		removed = append(removed, img.ID)
 	}
-
 	return removed, nil
 }
 
 // ImagePull downloads an image with full orchestration.
-// Matches Python's ImageOperation.pull() exactly.
 func (op *Operation) ImagePull(
 	ctx context.Context,
 	input inputs.ImagePullInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
-	// Resolve pull input via ImageAcquireRequest (arch, output dir, validation)
-	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
-	resolved, err := req.ResolvePull(ctx)
+	// Resolve pull input (arch, output dir, validation)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to resolve pull input: %v", err), err)
 	}
-
 	// Resolve cache TTL from settings
 	cacheTTL := 0
 	if !resolved.NoCache {
 		cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.image", "remote_list_cache_ttl")
 	}
-
 	// Load image types config from embedded assets
 	rawYAML, err := assets.ReadFile("images.yaml")
 	if err != nil {
@@ -143,7 +132,6 @@ func (op *Operation) ImagePull(
 			err,
 		)
 	}
-
 	// Determine CI version and ubuntu version:
 	// For firecracker-s3 types, the user-specified version IS the CI version.
 	// The ubuntu version is auto-discovered from the S3 listing.
@@ -170,7 +158,6 @@ func (op *Operation) ImagePull(
 			return nil, errs.WrapMsg(errs.CodeImagePullFailed, err.Error(), err)
 		}
 	}
-
 	// Resolve version spec (latest, partial, or exact) to concrete version
 	resolvedVersion, err := op.Services.Image.ResolveVersion(
 		ctx,
@@ -183,7 +170,6 @@ func (op *Operation) ImagePull(
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to resolve image version: %v", err), err)
 	}
-
 	specs, err := image.GetSpecsFor(
 		ctx,
 		[]string{resolved.Type},
@@ -207,6 +193,10 @@ func (op *Operation) ImagePull(
 		)
 	}
 	spec := specs[0]
+	tl := timinglog.Start("image_pull", "image_type", spec.Type, "image_version", spec.Version)
+	defer tl.Complete()
+
+	tl.Stage("resolve")
 
 	// Early return check
 	existing, _ := op.Repos.Image.GetByType(ctx, spec.Type)
@@ -224,13 +214,11 @@ func (op *Operation) ImagePull(
 
 	timestamp := time.Now().Format(time.RFC3339)
 	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
-
 	workDir, err := os.MkdirTemp(infra.GetTempDir(), "mvm-pull-*")
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Failed to create temp dir: %v", err), err)
 	}
 	defer os.RemoveAll(workDir)
-
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "download", Status: "running", Message: "Downloading image...",
@@ -249,13 +237,13 @@ func (op *Operation) ImagePull(
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImagePullFailed, fmt.Sprintf("Download failed: %v", err), err)
 	}
+	tl.Stage("download")
 
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "extract", Status: "running", Message: "Extracting image...",
 		})
 	}
-
 	extractedPath, err := op.Services.Image.ExtractImage(
 		ctx,
 		downloadPath,
@@ -267,19 +255,19 @@ func (op *Operation) ImagePull(
 		op.ProvisionerType,
 	)
 	if err != nil {
-		// Catch RootPartitionDetectionError and TieDetectedError (matching Python)
+		// Catch RootPartitionDetectionError and TieDetectedError
 		if isPartitionDetectionError(err) {
 			return nil, errs.WrapMsg(errs.CodeImageAcquireFailed, err.Error(), err)
 		}
 		return nil, errs.WrapMsg(errs.CodeImageCorrupt, fmt.Sprintf("Extraction failed: %v", err), err)
 	}
+	tl.Stage("extract")
 
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "optimize", Status: "running", Message: "Optimizing image...",
 		})
 	}
-
 	imageItem, _, err := op.Services.Image.OptimizeImage(
 		ctx,
 		extractedPath,
@@ -296,6 +284,9 @@ func (op *Operation) ImagePull(
 		}
 		return nil, errs.WrapMsg(errs.CodeImageCorrupt, fmt.Sprintf("Optimization failed: %v", err), err)
 	}
+	tl.Stage("optimize")
+
+	imageItem.IsImported = false
 
 	// Move compressed result to images dir
 	if imageItem.Path != "" {
@@ -323,16 +314,13 @@ func (op *Operation) ImagePull(
 			imageItem.Path = dst
 		}
 	}
-
 	os.Remove(downloadPath)
-
 	_ = op.Repos.Image.Upsert(ctx, imageItem)
 	if input.SetDefault {
 		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	} else if existing != nil && existing.IsDefault {
 		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	}
-
 	// Clean up old images
 	if existing != nil && existing.ID != imageItem.ID {
 		removed := op.Services.Image.RemoveImageFiles(existing)
@@ -341,26 +329,24 @@ func (op *Operation) ImagePull(
 			slog.Info("Cleaned up old image files", "count", len(removed), "type", spec.Type)
 		}
 	}
+	tl.Stage("finalize")
 
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "complete", Status: "complete", Message: "Image pull complete.",
 		})
 	}
-
 	return imageItem, nil
 }
 
 // ImageImport imports a local image file.
-// Matches Python's ImageOperation.import_() exactly.
 func (op *Operation) ImageImport(
 	ctx context.Context,
 	input inputs.ImageImportInput,
 	onProgress event.OnProgressCallback,
 ) (*model.ImageItem, error) {
-	// Resolve import input via ImageAcquireRequest (arch, format, validation)
-	req := inputs.NewImageAcquireRequest(input, op.Services.Config, op.Repos.Image)
-	resolved, err := req.ResolveImport(ctx)
+	// Resolve import input (arch, format, validation)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.Image, op.Repos.VM)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeImageImportFailed,
@@ -368,7 +354,6 @@ func (op *Operation) ImageImport(
 			err,
 		)
 	}
-
 	existing, _ := op.Repos.Image.GetByType(ctx, resolved.Type)
 	if !resolved.Force && existing != nil && existing.Path != "" {
 		if _, err := os.Stat(existing.Path); err == nil {
@@ -379,7 +364,6 @@ func (op *Operation) ImageImport(
 			return existing, nil
 		}
 	}
-
 	// Format detection warning
 	var importWarnings []string
 	if resolved.FormatDetected != "" && resolved.Format != resolved.FormatDetected {
@@ -392,25 +376,24 @@ func (op *Operation) ImageImport(
 			),
 		)
 	}
-
 	spec := &model.ImageSpec{
 		Type:    resolved.Type,
-		Version: "",
+		Version: resolved.Version,
 		Name:    resolved.Type,
 		Arch:    resolved.Arch,
 		Source:  *resolved.SourcePath,
 		Format:  resolved.Format,
 	}
+	tl := timinglog.Start("image_import", "image_type", resolved.Type)
+	defer tl.Complete()
 
 	timestamp := time.Now().Format(time.RFC3339)
 	imageID := crypto.ImageID(fmt.Sprintf("%s:%s", spec.Type, spec.Version), spec.Source, timestamp)
-
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "extract", Status: "running", Message: "Extracting image...",
 		})
 	}
-
 	extractedPath, err := op.Services.Image.ExtractImage(
 		ctx,
 		*resolved.SourcePath,
@@ -427,13 +410,13 @@ func (op *Operation) ImageImport(
 		}
 		return nil, errs.WrapMsg(errs.CodeImageImportFailed, fmt.Sprintf("Extraction failed: %v", err), err)
 	}
+	tl.Stage("extract")
 
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "optimize", Status: "running", Message: "Optimizing image...",
 		})
 	}
-
 	imageItem, _, err := op.Services.Image.OptimizeImage(
 		ctx,
 		extractedPath,
@@ -450,14 +433,15 @@ func (op *Operation) ImageImport(
 		}
 		return nil, errs.WrapMsg(errs.CodeImageImportFailed, fmt.Sprintf("Optimization failed: %v", err), err)
 	}
+	tl.Stage("optimize")
 
+	imageItem.IsImported = true
 	_ = op.Repos.Image.Upsert(ctx, imageItem)
 	if input.SetDefault {
 		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	} else if existing != nil && existing.IsDefault {
 		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	}
-
 	if existing != nil && existing.ID != imageItem.ID {
 		removed := op.Services.Image.RemoveImageFiles(existing)
 		_ = op.Repos.Image.SoftDelete(ctx, existing.ID)
@@ -465,19 +449,17 @@ func (op *Operation) ImageImport(
 			slog.Info("Cleaned up old image files", "count", len(removed), "id", imageItem.ID)
 		}
 	}
+	tl.Stage("finalize")
 
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "complete", Status: "complete", Message: "Image import complete.",
 		})
 	}
-
 	return imageItem, nil
 }
 
 // ImageWarm pre-decompresses images to ready pool for fast VM creation.
-// Matches Python's ImageOperation.warm() exactly.
-// Python: input can be None when all=True — Go handles with nil check.
 func (op *Operation) ImageWarm(
 	ctx context.Context,
 	input inputs.ImageInput,
@@ -485,7 +467,6 @@ func (op *Operation) ImageWarm(
 	onProgress event.OnProgressCallback,
 ) ([]string, error) {
 	var images []*model.ImageItem
-
 	if all {
 		var err error
 		images, err = op.Repos.Image.ListAll(ctx)
@@ -493,45 +474,40 @@ func (op *Operation) ImageWarm(
 			return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list images: %v", err), err)
 		}
 	} else {
-		request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
-		resolved, err := request.Resolve(ctx)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Image resolution failed: %v", err), err)
+		var resolveErr error
+		images, resolveErr = input.Resolve(ctx, op.Repos.Image)
+		if resolveErr != nil {
+			return nil, errs.WrapMsg(
+				errs.CodeImageNotFound,
+				fmt.Sprintf("Image resolution failed: %v", resolveErr),
+				resolveErr,
+			)
 		}
-		images = resolved.Images
 	}
-
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "warm", Status: "running", Message: "Warming images...",
 		})
 	}
-
 	warmed, err := op.Services.Image.EnsureCached(images)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeImageWarmFailed, fmt.Sprintf("Warming failed: %v", err), err)
 	}
-
 	if onProgress != nil {
 		onProgress(event.Progress{
 			Phase: "warm", Status: "complete", Message: "Warming complete.",
 		})
 	}
-
 	for _, path := range warmed {
 		slog.Info("Image warmed", "path", path)
 	}
-
 	return warmed, nil
 }
 
 // ImageRemove removes images by input.
-// Matches Python's ImageOperation.remove() exactly.
 func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, force bool) *errs.BatchResult {
 	results := make([]errs.OperationResult, 0)
-
-	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
-	resolved, err := request.Resolve(ctx)
+	images, err := input.Resolve(ctx, op.Repos.Image)
 	if err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
@@ -544,12 +520,8 @@ func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, f
 			},
 		}
 	}
-
-	images := resolved.Images
-
-	// Batch-enrich with VM references (matches Python's Resolver(repo, include=["vm"]).enrich())
+	// Batch-enrich with VM references
 	op.Enr.EnrichImage(ctx, images, "vm")
-
 	for _, img := range images {
 		if !force && len(img.VMs) > 0 {
 			results = append(results, errs.OperationResult{
@@ -560,7 +532,6 @@ func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, f
 			})
 			continue
 		}
-
 		if err := op.Services.Image.RemoveImage(ctx, img, force); err != nil {
 			results = append(results, errs.OperationResult{
 				Status:    "error",
@@ -570,22 +541,18 @@ func (op *Operation) ImageRemove(ctx context.Context, input inputs.ImageInput, f
 			})
 			continue
 		}
-
 		// Audit log AFTER successful removal
 		op.AuditLog.LogOperation("image.remove", map[string]any{"id": img.ID}, "")
-
 		results = append(results, errs.OperationResult{
 			Status: "success",
 			Code:   "image.removed",
 			Item:   img,
 		})
 	}
-
 	return &errs.BatchResult{Items: results}
 }
 
 // ImageListAll returns images.
-// Matches Python's ImageOperation.list_all() exactly.
 // When remote=false, returns ([]*model.ImageItem, nil, error).
 // When remote=true, returns (nil, []model.VersionInfo, error).
 // When type_filter is set and remote=true, only returns versions for that specific image type.
@@ -599,22 +566,18 @@ func (op *Operation) ImageListAll(
 ) ([]*model.ImageItem, []model.VersionInfo, error) {
 	if remote {
 		emitProgress(onProgress, "listing", "running", "Fetching remote images...")
-
 		// Resolve ci_version from default firecracker binary
 		resolvedCIVersion, err := op.resolveCIVersion(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-
 		// Resolve cache_ttl from settings
 		cacheTTL := 0
 		if !noCache {
 			cacheTTL, _ = op.Services.Config.GetInt(ctx, "defaults.image", "remote_list_cache_ttl")
 		}
-
 		// Arch always matches the host machine — not user-configurable
 		arch := system.RuntimeArch()
-
 		// Load image types config from embedded assets
 		rawYAML, err := assets.ReadFile("images.yaml")
 		if err != nil {
@@ -624,8 +587,7 @@ func (op *Operation) ImageListAll(
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse image types config: %w", err)
 		}
-
-		// Filter by type BEFORE resolving (matches Python's type_filter handling)
+		// Filter by type BEFORE resolving
 		if typeFilter != "" {
 			filtered := make([]download.ResolverConfig, 0)
 			for _, cfg := range imageTypesConfig {
@@ -638,14 +600,12 @@ func (op *Operation) ImageListAll(
 				return nil, []model.VersionInfo{}, nil
 			}
 		}
-
 		// Use ResolveVersions to get VersionInfo objects
 		versionMap := image.ResolveVersions(ctx, imageTypesConfig, arch, cacheTTL, resolvedCIVersion)
 		var versions []model.VersionInfo
 		for _, vs := range versionMap {
 			versions = append(versions, vs...)
 		}
-
 		// Mark locally cached images
 		local, _ := op.Repos.Image.ListAll(ctx)
 		localSet := make(map[string]bool, len(local))
@@ -657,32 +617,27 @@ func (op *Operation) ImageListAll(
 				versions[i].IsPresent = true
 			}
 		}
-
 		emitProgress(onProgress, "listing", "complete", fmt.Sprintf("Found %d remote image(s)", len(versions)))
 		return nil, versions, nil
 	}
-
 	// Local images from DB
 	items, err := op.Services.Image.ListAll(ctx, true, false)
 	return items, nil, err
 }
 
 // ImageGet returns a single image by ID prefix or type.
-// Matches Python's ImageOperation.get() exactly — uses ImageRequest for resolution.
 func (op *Operation) ImageGet(ctx context.Context, input inputs.ImageInput) (*model.ImageItem, error) {
-	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
-	resolved, err := request.Resolve(ctx)
+	images, err := input.Resolve(ctx, op.Repos.Image)
 	if err != nil {
 		return nil, err
 	}
-	if len(resolved.Images) > 1 {
+	if len(images) > 1 {
 		return nil, fmt.Errorf("expected exactly one image identifier")
 	}
-	return resolved.Images[0], nil
+	return images[0], nil
 }
 
 // ImageInspect returns grouped dict of an image.
-// Matches Python's ImageOperation.inspect() exactly.
 func (op *Operation) ImageInspect(ctx context.Context, input inputs.ImageInput) (*results.ImageInspect, error) {
 	img, err := op.ImageGet(ctx, input)
 	if err != nil {
@@ -710,27 +665,24 @@ func (op *Operation) ImageInspect(ctx context.Context, input inputs.ImageInput) 
 }
 
 // ImageSetDefault sets an image as default.
-// Matches Python's ImageOperation.set_default() exactly — uses ImageRequest for resolution.
 func (op *Operation) ImageSetDefault(ctx context.Context, input inputs.ImageInput) error {
-	request := inputs.NewImageRequest(input, op.Connection.DB(), op.Repos.Image)
-	resolved, err := request.Resolve(ctx)
+	images, err := input.Resolve(ctx, op.Repos.Image)
 	if err != nil {
 		return errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Image not found: %v", err), err)
 	}
-	if len(resolved.Images) > 1 {
+	if len(images) > 1 {
 		return errs.New(errs.CodeImageNotFound, "Expected exactly one image identifier")
 	}
-	img := resolved.Images[0]
+	img := images[0]
 	if err := op.Repos.Image.SetDefault(ctx, img.ID); err != nil {
 		return errs.WrapMsg(errs.CodeImageNotFound, fmt.Sprintf("Failed to set default: %v", err), err)
 	}
-
 	op.AuditLog.LogOperation("image.set_default", map[string]any{"id": img.ID}, "")
 	return nil
 }
 
 // isPartitionDetectionError checks if an error is a RootPartitionDetectionError
-// or TieDetectedError (matching Python's exception catching pattern).
+// or TieDetectedError.
 func isPartitionDetectionError(err error) bool {
 	var de *errs.DomainError
 	if !errors.As(err, &de) {

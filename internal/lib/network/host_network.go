@@ -10,7 +10,7 @@ import (
 )
 
 // FindNetworkByName finds a network by name from a list.
-func FindNetworkByName(networks []*model.Network, name string) *model.Network {
+func FindNetworkByName(networks []*model.NetworkItem, name string) *model.NetworkItem {
 	for _, n := range networks {
 		if n.Name == name {
 			return n

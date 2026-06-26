@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"mvmctl/internal/cli/common"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api"
@@ -19,26 +17,6 @@ import (
 
 	"github.com/spf13/cobra"
 )
-
-// imageImportExtensionOrder defines the priority order for auto-detecting
-// image format from filename extension. Must match Python's
-// IMAGE_IMPORT_FORMAT_MAP iteration order for backwards compatibility.
-var imageImportExtensionOrder = []string{
-	".qcow2",
-	".raw",
-	".img",
-	".ext4",
-	".ext3",
-	".ext2",
-	".btrfs",
-	".xfs",
-	".vhd",
-	".vhdx",
-	".tar",
-	".tar.gz",
-	".tar.xz",
-	".tgz",
-}
 
 // imageColumns defines the local listing columns for images.
 var imageColumns = []common.ListingColumn{
@@ -83,7 +61,7 @@ func NewImageCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Command 
 	return cmd
 }
 
-// ─── ls ──────────────────────────────────────────────────────────────────────
+// --- ls ---
 
 func newImageListCmd(imageAPI api.ImageAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var (
@@ -165,7 +143,7 @@ func printLocalImages(
 	common.RenderListing(images, imageColumns, style)
 }
 
-// ─── pull ────────────────────────────────────────────────────────────────────
+// --- pull ---
 
 func newImagePullCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
@@ -199,7 +177,7 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 				}
 			}
 
-			// Match Python: if image_type is None (not explicitly set), parse selector for type:version
+			// If --type is not explicitly set, parse selector for type:version
 			typeFlag := cmd.Flags().Lookup("type")
 			typeExplicitlySet := typeFlag != nil && typeFlag.Changed
 
@@ -258,14 +236,14 @@ The selector can be a type (e.g. "ubuntu") or type:version (e.g. "ubuntu:24.04")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Re-download even if exists")
 	cmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip cached version listing and fetch live from upstream")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default image after download")
-	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip shrink and compression, keep plain ext4")
+	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip OS cache cleanup (deblob)")
 	cmd.Flags().
 		StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
 
 	return cmd
 }
 
-// ─── rm ──────────────────────────────────────────────────────────────────────
+// --- rm ---
 
 func newImageRemoveCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var force bool
@@ -307,7 +285,7 @@ Examples:
 	return cmd
 }
 
-// ─── inspect ─────────────────────────────────────────────────────────────────
+// --- inspect ---
 
 func newImageInspectCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var jsonOutput bool
@@ -354,7 +332,7 @@ Examples:
 	return cmd
 }
 
-// ─── default ─────────────────────────────────────────────────────────────────
+// --- default ---
 
 func newImageDefaultCmd(imageAPI api.ImageAPI) *cobra.Command {
 	cmd := &cobra.Command{
@@ -376,7 +354,7 @@ func newImageDefaultCmd(imageAPI api.ImageAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── import ──────────────────────────────────────────────────────────────────
+// --- import ---
 
 func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
@@ -386,6 +364,7 @@ func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 		setDefault       bool
 		skipOptimization bool
 		disableDetector  string
+		version          string
 	)
 
 	cmd := &cobra.Command{
@@ -395,7 +374,8 @@ func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 
 Examples:
   mvm image import my-image /path/to/image.qcow2
-  mvm image import my-image /path/to/image.raw --format raw`,
+  mvm image import my-image /path/to/image.raw --format raw
+  mvm image import my-base-img:v1.0 vmtest --version v2.0`,
 		Args: cobra.ExactArgs(2),
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 			if len(args) == 0 {
@@ -407,14 +387,17 @@ Examples:
 			name := args[0]
 			sourcePath := args[1]
 
-			// Verify source exists
-			if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
-				return fmt.Errorf("source file not found: %s", sourcePath)
+			// Support name:version selector (--version overrides)
+			effectiveVersion := version
+			if !cmd.Flags().Changed("version") && strings.Contains(name, ":") {
+				idx := strings.LastIndex(name, ":")
+				effectiveVersion = name[idx+1:]
+				name = name[:idx]
 			}
 
 			var disabledDetectors []string
 			if disableDetector != "" {
-				for _, s := range strings.Split(disableDetector, ",") {
+				for s := range strings.SplitSeq(disableDetector, ",") {
 					s = strings.TrimSpace(s)
 					if s != "" {
 						disabledDetectors = append(disabledDetectors, s)
@@ -422,37 +405,11 @@ Examples:
 				}
 			}
 
-			// Auto-detect format from extension if not explicitly set.
-			// Matches Python: if format is None or format == "auto":
-			//   fname = source_path.name.lower()
-			//   format = next((fmt for ext, fmt in IMAGE_IMPORT_FORMAT_MAP.items() if fname.endswith(ext)), None)
-			formatFlag := cmd.Flags().Lookup("format")
-			formatExplicitlySet := formatFlag != nil && formatFlag.Changed
-			if !formatExplicitlySet || format == "auto" {
-				// Use the centralized format map for values but iterate in Python-compatible order.
-				fname := strings.ToLower(filepath.Base(sourcePath))
-				found := false
-				for _, ext := range imageImportExtensionOrder {
-					if strings.HasSuffix(fname, ext) {
-						if fmtVal, ok := infra.ImageImportFormatMap[ext]; ok {
-							format = fmtVal
-							found = true
-							break
-						}
-					}
-				}
-				if !found {
-					return fmt.Errorf(
-						"Cannot auto-detect format from '%s'. Use --format qcow2|raw|tar-rootfs.",
-						filepath.Base(sourcePath),
-					)
-				}
-			}
-
 			input := inputs.ImageImportInput{
 				Name:              name,
 				Format:            format,
 				SourcePath:        sourcePath,
+				Version:           effectiveVersion,
 				Partition:         rootPartition,
 				DisabledDetectors: disabledDetectors,
 				SkipOptimization:  skipOptimization,
@@ -490,14 +447,15 @@ Examples:
 	cmd.Flags().StringVar(&format, "format", "", "Image format: qcow2, raw, tar-rootfs, or auto")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite existing")
 	cmd.Flags().BoolVarP(&setDefault, "default", "d", false, "Set as default after import")
-	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", false, "Skip shrink and compression, keep plain ext4")
+	cmd.Flags().BoolVar(&skipOptimization, "skip-optimization", true, "Skip OS cache cleanup (deblob)")
 	cmd.Flags().
 		StringVar(&disableDetector, "disable-detector", "", "Comma-separated detectors to disable: type,label,size,filesystem,all")
+	cmd.Flags().StringVar(&version, "version", "", "Set image version (overrides name:ver format)")
 
 	return cmd
 }
 
-// ─── warm ────────────────────────────────────────────────────────────────────
+// --- warm ---
 
 func newImageWarmCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var (
@@ -530,9 +488,8 @@ Examples:
 				imageID = args[0]
 			}
 
-			// Match Python behavior:
-			//   if image_id is not None: warm specific image
-			//   else: warm all (defaults to all=True when no argument given)
+			// If image_id is provided, warm that specific image.
+			// Otherwise warm all images (defaults to all when no argument given).
 			prog := common.NewProgress()
 			prog.Start("Warming images...")
 			var paths []string
@@ -556,15 +513,13 @@ Examples:
 				return warmErr
 			}
 
-			// Match Python:  display_name = image_id or "all images"
 			displayName := imageID
 			if displayName == "" {
 				displayName = "all images"
 			}
 
 			for _, p := range paths {
-				// Match Python: size_str = mvm_cli.format_size(path.stat().st_size)
-				// Python would raise an exception if path.stat() fails — let error propagate.
+				// Let error propagate if path.Stat() fails.
 				info, err := os.Stat(p)
 				if err != nil {
 					prog.Stop()

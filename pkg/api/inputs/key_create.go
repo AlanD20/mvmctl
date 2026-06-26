@@ -2,16 +2,15 @@ package inputs
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
-
+	"mvmctl/internal/core/key"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
+	"os"
+	"path/filepath"
 )
 
 // KeyCreateInput holds options for key creation.
-// Matches Python's KeyCreateInput dataclass:
 type KeyCreateInput struct {
 	Name       string `json:"name"                 yaml:"name"`
 	Algorithm  string `json:"algorithm,omitempty"  yaml:"algorithm,omitempty"`
@@ -22,17 +21,7 @@ type KeyCreateInput struct {
 	SetDefault bool   `json:"default"              yaml:"default"`
 }
 
-// ResolvedKeyCreateInput matches Python's ResolvedKeyCreateInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedKeyCreateInput:
-//	    name: str
-//	    algorithm: str
-//	    bits: int | None
-//	    output_dir: string
-//	    comment: str
-//	    overwrite: bool
-//	    set_default: bool
+// ResolvedKeyCreateInput specifies resolved key create input.
 type ResolvedKeyCreateInput struct {
 	Name       string
 	Algorithm  string
@@ -43,91 +32,81 @@ type ResolvedKeyCreateInput struct {
 	SetDefault bool
 }
 
-// KeyCreateRequest matches Python's KeyCreateRequest.
-type KeyCreateRequest struct {
-	input  KeyCreateInput
-	result *ResolvedKeyCreateInput
-}
-
-// NewKeyCreateRequest creates a new KeyCreateRequest.
-func NewKeyCreateRequest(inputs KeyCreateInput) *KeyCreateRequest {
-	return &KeyCreateRequest{
-		input: inputs,
+// Validate checks that the key create input is valid.
+func (i *KeyCreateInput) Validate() error {
+	if i.Name == "" {
+		return fmt.Errorf("key name is required")
 	}
+	if i.Algorithm != "" {
+		if !key.ValidAlgorithms[i.Algorithm] {
+			return fmt.Errorf("invalid algorithm: '%s'. Valid choices: ed25519, rsa, ecdsa", i.Algorithm)
+		}
+	}
+	return nil
 }
 
 // Resolve resolves defaults and validates.
-// Matches Python's KeyCreateRequest.resolve().
-func (r *KeyCreateRequest) Resolve() (*ResolvedKeyCreateInput, error) {
+func (i *KeyCreateInput) Resolve() (*ResolvedKeyCreateInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
 	// Validate key name early — before any work
-	if err := validators.KeyName(r.input.Name); err != nil {
+	if err := validators.KeyName(i.Name); err != nil {
 		return nil, errs.New(errs.CodeValidationFailed, err.Error())
 	}
-
 	// Default algorithm
-	algorithm := r.input.Algorithm
+	algorithm := i.Algorithm
 	if algorithm == "" {
 		algorithm = "ed25519"
 	}
-
 	// Validate algorithm
-	validAlgorithms := map[string]bool{"ed25519": true, "rsa": true, "ecdsa": true}
-	if !validAlgorithms[algorithm] {
+	if !key.ValidAlgorithms[algorithm] {
 		return nil, errs.New(
 			errs.CodeValidationFailed,
 			fmt.Sprintf("Invalid algorithm: '%s'. Valid choices: ed25519, rsa, ecdsa", algorithm),
 		)
 	}
-
-	// Default comment (Python: f"{name}@{socket.gethostname()}")
-	comment := r.input.Comment
+	// Default comment
+	comment := i.Comment
 	if comment == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
 			hostname = "unknown"
 		}
-		comment = fmt.Sprintf("%s@%s", r.input.Name, hostname)
+		comment = fmt.Sprintf("%s@%s", i.Name, hostname)
 	}
-
 	// Default output_dir resolved via CacheUtils
-	outputDir := r.input.OutputDir
+	outputDir := i.OutputDir
 	if outputDir == "" {
 		outputDir = infra.GetKeysDir()
 	}
-
 	// File conflict validation (caller validates)
-	if !r.input.Overwrite {
-		if err := keyFilesExist(r.input.Name, outputDir); err != nil {
+	if !i.Overwrite {
+		if err := keyFilesExist(i.Name, outputDir); err != nil {
 			return nil, err
 		}
 	}
-
-	// Keep Bits as *int in the resolved output to match Python's
-	// ResolvedKeyCreateInput.bits: int | None. Zero means "not specified".
+	// Keep Bits as *int in the resolved output.
+	// Zero means "not specified".
 	var bits *int
-	if r.input.Bits != 0 {
-		bits = &r.input.Bits
+	if i.Bits != 0 {
+		bits = &i.Bits
 	}
-
-	r.result = &ResolvedKeyCreateInput{
-		Name:       r.input.Name,
+	return &ResolvedKeyCreateInput{
+		Name:       i.Name,
 		Algorithm:  algorithm,
 		Bits:       bits,
 		OutputDir:  outputDir,
 		Comment:    comment,
-		Overwrite:  r.input.Overwrite,
-		SetDefault: r.input.SetDefault,
-	}
-
-	return r.result, nil
+		Overwrite:  i.Overwrite,
+		SetDefault: i.SetDefault,
+	}, nil
 }
 
 // keyFilesExist checks if key files already exist on disk.
-// Matches Python's KeyCreateRequest._key_files_exist().
 func keyFilesExist(name, outputDir string) error {
 	privateKeyPath := filepath.Join(outputDir, name)
 	pubKeyPath := filepath.Join(outputDir, name+".pub")
-
 	if _, err := os.Stat(privateKeyPath); err == nil {
 		return errs.AlreadyExists(
 			errs.CodeKeyAlreadyExists,

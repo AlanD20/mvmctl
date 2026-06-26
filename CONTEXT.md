@@ -20,7 +20,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
   - [Speed-first principle](#speed-first-principle)
   - [Operation struct](#operation-struct)
   - [Direct repository calls in the API layer](#direct-repository-calls-in-the-api-layer)
-  - [Input/Input/Resolved triple (public-facing domains only)](#inputinputresolved-triple-public-facing-domains-only)
+  - [Input pattern (public-facing domains)](#input-pattern-public-facing-domains)
   - [SQLite schema overview](#sqlite-schema-overview)
   - [Layer compliance enforcement](#layer-compliance-enforcement)
   - [Public API boundary](#public-api-boundary)
@@ -51,7 +51,7 @@ Work that coordinates across multiple domains (e.g., VM creation orchestrates vm
 
 A struct bound to a single entity instance. Manages lifecycle state transitions for that entity (start, stop, pause, resume, snapshot). The litmus test: if the operation doesn't need a specific entity instance to exist, it doesn't belong in Controller. Controller communicates with the running entity's Firecracker API socket -- but that's a consequence of the entity-orientation, not the definition. Does NOT validate input. Does NOT orchestrate across domains. Does NOT handle CRUD creation or removal.
 
-Constructed with the entity + its Repository: `vm.NewController(vm *model.VM, repo Repository)`. NOT wired at startup -- created per-operation in the Service layer.
+Constructed with the entity + its Repository: `vm.NewController(vm *model.VMItem, repo Repository)`. NOT wired at startup -- created per-operation in the Service layer.
 
 *Example: `vm.NewController(vmItem, repo).Snapshot(ctx)` -- snapshots this specific VM. `network.NewService(repo, tracker).RemoveBridge(ctx, bridge)` -- removes a bridge, no single network entity needed.*
 
@@ -88,7 +88,7 @@ Cloud-init domain (`internal/core/cloudinit/`) is distinct from services -- it's
 
 A struct for entity resolution by identifier (name, ID prefix, IP, MAC to domain object). Pure resolution -- no enrichment. Enrichment is handled by the `internal/enricher/` package. Resolver delegates to Repository for DB queries.
 
-*Example: `vm.Resolver` has `ByID(ctx, id)`, `ByName(ctx, name)`, `ByIP(ctx, ip)`, `ResolveMany(ctx, identifiers)`. Returns `*model.VM` or `ResolveResult{VMs, Errors, ExitCode}`.*
+*Example: `vm.Resolver` has `ByID(ctx, id)`, `ByName(ctx, name)`, `ByIP(ctx, ip)`, `ResolveMany(ctx, identifiers)`. Returns `*model.VMItem` or `ResolveResult{VMs, Errors, ExitCode}`.*
 
 ### Enrichment pattern
 
@@ -118,7 +118,7 @@ The `Enricher` struct holds all repository interfaces and is wired once at start
 
 ### Validation (caller's responsibility)
 
-Checks that input is structurally valid: format, existence, cross-field constraints. Belongs in API layer (`pkg/api/inputs/` -- `*Input` or `*Request` structs). Does NOT belong in Service or Controller. The caller (API layer) is responsible for passing clean, validated data down.
+Checks that input is structurally valid: format, existence, cross-field constraints. Belongs in API layer (`pkg/api/inputs/` -- `*Input` structs with `Validate()`/`Resolve()`). Does NOT belong in Service or Controller. The caller (API layer) is responsible for passing clean, validated data down.
 
 **Why not validate at every layer:** mvmctl is a speed-first CLI. Redundant subprocess calls in defensive validation add 10-50ms latency each. Many checks duplicate what the operation naturally detects -- `bridge_exists()` called once to "validate" and again to branch execution. Validation in Service conflates concerns and slows operations. The caller-trusts-callee convention means Service receives clean data and executes without defensive checks. If a bug in API validation reaches Service, it's caught by testing at the API boundary.
 
@@ -146,19 +146,29 @@ The API layer may call a Repository directly (e.g., `op.Repos.VM.NamesExist(ctx,
 
 The rule: **user-facing input must go through the Request pipeline.** Internal cross-domain data lookups can call Repositories directly from the Operation method, but the result must be passed to Core Service classes (not queried from within Core).
 
-### Input/Input/Resolved triple (public-facing domains only)
+### Input pattern (public-facing domains)
 
-Every domain with public-facing input must follow this three-struct pattern in `pkg/api/inputs/`:
+Every domain with public-facing input uses a single `*Input` struct in `pkg/api/inputs/` with `Validate()` and `Resolve()` methods (ADR-0011). No `*Request` wrapper.
 
-1. **`*Input`** -- Raw CLI or external input. Thin struct with typed fields. Optional fields are `*T` -- no DB-backed defaults, no constants-backed defaults. The CLI layer resolves constants before creating this; the API layer resolves DB-backed defaults from `nil` in the Request.
+1. **`*Input`** -- Raw CLI or external input. Thin struct with typed fields. Optional fields are `*T` -- no DB-backed defaults, no constants-backed defaults. The CLI layer resolves constants before creating this; the API layer calls `Resolve()` to look up DB-backed defaults and validate.
 
-2. **`*Request`** -- Accepts the Input and dependencies (DB, repos, enricher). The `Resolve(ctx)` method looks up DB-backed records for any `nil` identifiers, resolves FK references, validates, and returns a Resolved struct.
+2. **`Validate() error`** -- Checks input fields. Called inside `Resolve()`, but callers may call it separately for early-exit patterns (e.g., batch removal).
 
-3. **`Resolved*`** -- Immutable output of Request.Resolve(). Every field is explicit and validated. No `nil` for required fields.
+3. **`Resolve(ctx, deps...) (result, error)`** -- Looks up DB records, resolves defaults, returns domain entities or a `Resolved*` struct (kept only when output shape differs from input).
 
-Mandatory for any domain that has public CLI commands or API endpoints.
+Examples:
 
-*Example: `VMInput{Identifiers, Force}` -> `VMRequest{db, input, resolver, enricher}.Resolve(ctx)` -> `ResolvedVMInput{VMs []*model.VM, Force bool}`.*
+```go
+// Simple lookup — returns domain entities directly
+vms, err := input.Resolve(ctx, op.Repos.VM)
+
+// Create with resolved defaults — returns Resolved* struct
+resolved, err := input.Resolve(ctx, op.Repos.Volume)
+
+// Multi-domain resolution — separate methods for each domain
+snap, _ := input.ResolveSnapshot(ctx, op.Repos.Snapshot)
+net, _ := input.ResolveNetwork(ctx, op.Repos.Network)
+```
 
 ### SQLite schema overview
 
@@ -252,7 +262,7 @@ The `FirewallTracker` also reads an `iptables_xtcomment` user setting that adds 
 
 ### Error handling
 
-A single `DomainError` type in `pkg/errs/` replaces Python's rich exception hierarchy. Every error has a `Code`, `Message`, `Op`, `Entity`, `Class`, `Err`, and optional `Details`. Codes are dot-separated: `vm.not_found`, `network.subnet.overlap`, `host.init.sudoers_failed`.
+A single `DomainError` type in `pkg/errs/` handles all error scenarios. Every error has a `Code`, `Message`, `Op`, `Entity`, `Class`, `Err`, and optional `Details`. Codes are dot-separated: `vm.not_found`, `network.subnet.overlap`, `host.init.sudoers_failed`.
 
 ```go
 // Creating errors
@@ -328,17 +338,28 @@ result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", tap, 
 exec.Command("iptables", ...) // NEVER
 ```
 
-The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeout`, `Input`, `Env`, `Privileged`, `Interactive`, `StartOnly`.
+The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeout`, `Input`, `Env`, `Privileged`, `Interactive`, `StartOnly`. `Timeout` is an absolute cap for operations that genuinely need one (downloads, builds, cleanup). User commands run until completion or context cancellation; pass `Timeout: 0` for those.
+
+### Timeout taxonomy
+
+| Type | Meaning | User-facing? | Examples |
+|---|---|---|---|
+| **Connect/probe timeout** | Time to establish connection / first response | Yes (`--timeout`) | `mvm ssh`, `mvm vm exec` |
+| **Idle timeout** | Max silence between bytes/events | Optional future flag | (not exposed today) |
+| **Absolute timeout** | Hard cap on total duration | No | HTTP downloads, builds, cleanup |
+| **Graceful shutdown timeout** | Time after SIGTERM before SIGKILL | No | Firecracker stop, relay shutdown |
+| **Service lifetime** | How long a background service runs | Yes (`--kill-after`) | `mvm run nocloudnet serve` |
+
+User-facing `--timeout` means **connect/probe timeout only**. Once the target is responsive, the operation runs unbounded. See [ADR-0013](docs/adr/0013-user-facing-timeouts-are-connect-timeouts.md).
 
 **Documented exceptions** -- code that directly uses `os/exec.Command` because `DefaultRunner.Run()` cannot fulfill the requirement:
 
 | Location | Why `DefaultRunner.Run()` doesn't work |
-|---|---|
+|---|---|---|
 | `internal/core/vm/firecracker.go` (Firecracker spawn) | Fine-grained control over stdin/stdout/stderr FD redirection and `Setsid` session management for the Firecracker child process |
 | `internal/core/ssh/cp.go` (tar-pipe transfer) | Pipes two child processes (tar + ssh) together via stdin/stdout |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
-| `internal/lib/system/runner.go` | Implementation of `DefaultRunner.Run()` / `DefaultRunner.Stream()` itself |
-| `internal/lib/system/spawn.go` | Implementation of `SpawnService` for service subprocess spawning |
+| `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of the subprocess abstraction layer (`DefaultRunner`, `RunInteractive`, `SpawnService`). These use raw `os/exec` because they ARE the abstraction boundary |
 
 Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The services themselves (console relay, nocloudnet server, loopmount entry point) do NOT use `os/exec` except for the provisioning engine noted above.
 
@@ -347,8 +368,8 @@ Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(
 ALL model types live in `internal/lib/model/` -- a single shared package. No domain imports anything outside the model package. Every type has `json:"name"` struct tags and `db:"column"` struct tags for sqlx scanning.
 
 Key types:
-- `model.VM` -- VM instance (was `VMInstanceItem` in Python)
-- `model.Network` -- network (was `NetworkItem`)
+- `model.VMItem` -- VM instance
+- `model.NetworkItem` -- network
 - `model.ImageItem` -- image record
 - `model.KernelItem` -- kernel record
 - `model.BinaryItem` -- binary record
@@ -391,44 +412,53 @@ Workers defaults to `min(runtime.NumCPU() * 2, len(items))` (minimum 1) when ≤
 
 ## Test types
 
-Two test types exist (no separate integration layer -- per PORTING_TO_GOLANG.md verdict #9):
+Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for the full specification.
 
-### Unit tests (Go `*_test.go`)
+### L0: Pure Function Tests (Go `*_test.go`)
 
-Go test files alongside source code in `internal/` and `pkg/`. Use interface mocks (`internal/testutil/` has in-memory repo implementations + `FakeRunner` for subprocess mocking). Run via `go test ./...`. Fast (~ms per test).
+Table-driven tests with `map[string]struct{...}` and `t.Run()`. No I/O, no DB, no subprocess. Pure input → output assertions. Runs in microseconds.
 
 ```bash
 go test ./...
 go test ./internal/core/vm/...
-go test -v ./internal/core/network/...
 ```
 
-### System tests (Python `tests/system/`)
+### L1: Hermetic Integration Tests (Go `*_test.go`)
 
-Python-based black-box CLI subprocess tests (no mocking, no imports from Go code). Operate against the compiled `mvm` binary. Verify actual business outcomes at the OS level: JSON state, filesystem state, process state. Run in `tests/system/`.
+Uses real I/O in controlled environments: in-memory SQLite (`:memory:` via `testutil.NewInMemoryDB`), `t.TempDir()` for filesystem, `FakeRunner` for subprocess calls that can't run in CI. No networking, no KVM, no sudo. Catches bugs earlier during `go test ./...`.
 
-**Execution strategy -- per-file, not as a single batch:**
 ```bash
-# Per-domain:
-MVM_BINARY=dist/mvm python3 scripts/run_tests.py --domain network
-
-# Per-file:
-MVM_BINARY=dist/mvm python3 scripts/run_tests.py --test tests/system/network/test_network.py
+go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 ```
 
-## System Tests
+### L2: Runner VM E2E Tests (Python `tests/e2e/`)
+
+**Ground truth.** Every user-facing feature must have an L2 test. Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM. No mocking of any kind. Operates against the compiled `mvm` binary. Verifies actual business outcomes at the OS level: JSON state, filesystem state, process state, iptables rules.
+
+```bash
+# Run inside the runner VM (disposable Firecracker VM with nested KVM)
+pytest tests/e2e/
+
+# Single file
+pytest tests/e2e/test_network.py --tb=short -q
+```
+
+## System Tests (L2 E2E)
+
+L2 tests are the **ground truth** — every user-facing feature must have one.
+They run inside a disposable Firecracker VM (runner VM) with nested KVM.
 
 ### Option C verification
-The thoroughness standard for system test assertions. Every system test verifies system state at the deepest practical level: JSON field assertions from `* ls --json`, file existence/symlink checks, process presence via `/proc`, iptables rule presence, and/or direct SQLite queries. A test that only checks `returncode == 0` is incomplete.
+The thoroughness standard for L2 test assertions. Every test verifies system state at the deepest practical level: JSON field assertions from `* ls --json`, file existence/symlink checks, process presence via `/proc`, iptables rule presence, and/or direct SQLite queries. A test that only checks `returncode == 0` is incomplete.
 
-### Gap matrix
-A cross-reference of every CLI subcommand and flag against its system test coverage. All gaps must be filled.
+### Gap matrix (no longer a separate file)
+Coverage is tracked by the quick-reference table in `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md`. Every CLI subcommand and flag is classified as L0, L1, or L2. All gaps must be filled before release.
 
 ### Edge case categories (8 categories)
 For every CLI flag, check all eight: happy path (with state verify), missing required args, invalid values, boundary values, JSON output format, confirmation prompts, non-existent resources, duplicate creation.
 
 ### Marker
-A `pytest.mark.*` annotation on a test class or function. System test markers include: `system` (always), `domain_<name>` (file-level filter), `serial` (modifies shared state -- prevent race conditions), `slow` (>30s), `requires_kvm` (needs /dev/kvm), `requires_network` (needs real bridges), `kernel_build` (build from source, excluded from default run), `host_reset` (host clean/reset with sudo, excluded from default run).
+A `pytest.mark.*` annotation on a test class or function. L2 test markers include: `system` (always), `e2e` (always for L2), `domain_<name>` (file-level filter), `serial` (modifies shared state -- prevent race conditions), `slow` (>30s), `requires_kvm` (needs /dev/kvm), `requires_network` (needs real bridges), `kernel_build` (build from source, excluded from default run), `host_reset` (host clean/reset with sudo, excluded from default run).
 
 ### Serial test
 A test marked `pytest.mark.serial` because it modifies shared system state (default image, default network, cached binaries, kernel defaults). Must not run in parallel.
@@ -440,10 +470,10 @@ A test that does not modify persistent state -- reads JSON, inspects resources, 
 A test that modifies persistent state -- removes a resource, changes a default, prunes cache. Defined at the END of their file. Every destructive test must restore removed state in a `finally` block.
 
 ### Kernel build marker (`pytest.mark.kernel_build`)
-Designates tests requiring kernel compilation from source. EXCLUDED from default system test runs. Invoke explicitly: `pytest -m kernel_build`.
+Designates tests requiring kernel compilation from source. EXCLUDED from default test runs. Invoke explicitly: `pytest -m kernel_build`.
 
 ### Host reset marker (`pytest.mark.host_reset`)
-Designates tests executing `host clean` or `host reset` with sudo. EXCLUDED from default system test runs. Invoke explicitly: `pytest -m host_reset`.
+Designates tests executing `host clean` or `host reset` with sudo. EXCLUDED from default test runs. Invoke explicitly: `pytest -m host_reset`.
 
 ### Tautological test
-A test that verifies something trivially true by construction. Forbidden in system tests.
+A test that verifies something trivially true by construction. Forbidden in L2 tests.

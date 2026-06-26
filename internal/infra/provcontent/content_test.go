@@ -12,7 +12,7 @@ import (
 	"mvmctl/internal/infra/provcontent"
 )
 
-// ─── SSHDConfig ─────────────────────────────────────────────────────────────
+// --- SSHDConfig ---
 // Rationale: SSHDConfig generates the sshd drop-in config. Wrong content means
 // SSH auth breaks — users get locked out of their microVMs.
 
@@ -70,7 +70,7 @@ func TestBuilder_SSHDConfig(t *testing.T) {
 	}
 }
 
-// ─── FirstBootInstaller ──────────────────────────────────────────────────────
+// --- FirstBootInstaller ---
 // Rationale: FirstBootInstaller returns a shell script that installs SSH on
 // first boot. Missing or malformed scripts mean VMs boot without SSH access.
 
@@ -85,7 +85,7 @@ func TestBuilder_FirstBootInstaller(t *testing.T) {
 	assert.Contains(t, got, "openssh", "must install SSH")
 }
 
-// ─── FirstBootService ────────────────────────────────────────────────────────
+// --- FirstBootService ---
 // Rationale: FirstBootService returns the systemd unit that triggers the
 // first-boot installer. Wrong unit means the installer never runs.
 
@@ -100,7 +100,7 @@ func TestBuilder_FirstBootService(t *testing.T) {
 	assert.Contains(t, got, "WantedBy=multi-user.target")
 }
 
-// ─── Hosts ───────────────────────────────────────────────────────────────────
+// --- Hosts ---
 // Rationale: Hosts generates /etc/hosts with the VM hostname at 127.0.1.1.
 // A misconfigured hosts file breaks hostname resolution and sudo.
 
@@ -147,7 +147,7 @@ func TestBuilder_Hosts(t *testing.T) {
 	}
 }
 
-// ─── BuildHostnameOps ────────────────────────────────────────────────────────
+// --- BuildHostnameOps ---
 // Rationale: BuildHostnameOps creates FileOps for /etc/hostname and /etc/hosts.
 // Wrong paths or modes mean hostname configuration fails silently.
 
@@ -224,7 +224,7 @@ func TestBuilder_BuildHostnameOps(t *testing.T) {
 	}
 }
 
-// ─── BuildDNSOps ─────────────────────────────────────────────────────────────
+// --- BuildDNSOps ---
 // Rationale: BuildDNSOps creates the resolv.conf FileOp. Wrong content means
 // VMs cannot resolve DNS names, breaking apt/apk/pacman on first boot.
 
@@ -273,7 +273,7 @@ func TestBuilder_BuildDNSOps(t *testing.T) {
 	}
 }
 
-// ─── BuildSSHOps ─────────────────────────────────────────────────────────────
+// --- BuildSSHOps ---
 // Rationale: BuildSSHOps injects SSH authorized_keys and ensures correct
 // ownership. Wrong chowns or missing useradd mean SSH pubkey auth fails.
 
@@ -288,10 +288,38 @@ func TestBuilder_BuildSSHOps(t *testing.T) {
 		pubkeys []string
 		want    []provcontent.Operation
 	}{
-		"empty_pubkeys_returns_empty": {
+		"empty_pubkeys_returns_ssh_infra": {
 			user:    "root",
 			pubkeys: nil,
-			want:    nil,
+			want: []provcontent.Operation{
+				provcontent.ChrootOp{Command: "chown root:root /root"},
+				// Static SSH infra (unconditional)
+				provcontent.FileOp{
+					Path: "/etc/ssh/sshd_config.d/mvm.conf",
+					Data: []byte(provcontent.Builder{}.SSHDConfig("root")),
+					Mode: 0644,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.FileOp{
+					Path: "/usr/local/bin/first-boot-ssh-installer.sh",
+					Data: []byte(provcontent.Builder{}.FirstBootInstaller()),
+					Mode: 0755,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.FileOp{
+					Path: "/etc/systemd/system/first-boot-ssh-installer.service",
+					Data: []byte(provcontent.Builder{}.FirstBootService()),
+					Mode: 0644,
+					UID:  0,
+					GID:  0,
+				},
+				provcontent.ChrootOp{Command: "command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A || true"},
+				provcontent.ChrootOp{Command: `if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
+fi`},
+			},
 		},
 		"root_user_with_pubkeys": {
 			user:    "root",
@@ -327,7 +355,7 @@ func TestBuilder_BuildSSHOps(t *testing.T) {
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.ChrootOp{Command: "ssh-keygen -A"},
+				provcontent.ChrootOp{Command: "command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A || true"},
 				provcontent.ChrootOp{Command: `if command -v systemctl >/dev/null 2>&1; then
   systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
 fi`},
@@ -344,6 +372,8 @@ fi`},
 					UID:  0,
 					GID:  0,
 				},
+				provcontent.ChrootOp{Command: "id testuser 2>/dev/null || useradd -m testuser"},
+				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser"},
 				provcontent.FileOp{
 					Path: "/home/testuser/.ssh/authorized_keys",
 					Data: keyData,
@@ -351,8 +381,6 @@ fi`},
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.ChrootOp{Command: "useradd -m testuser"},
-				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser/.ssh"},
 				provcontent.ChrootOp{Command: "chown testuser:testuser /home/testuser/.ssh/authorized_keys"},
 				// Static SSH infra (moved from BuildDeblobOps)
@@ -377,7 +405,7 @@ fi`},
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.ChrootOp{Command: "ssh-keygen -A"},
+				provcontent.ChrootOp{Command: "command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A || true"},
 				provcontent.ChrootOp{Command: `if command -v systemctl >/dev/null 2>&1; then
   systemctl enable sshd 2>/dev/null || systemctl enable ssh 2>/dev/null || true;
 fi`},
@@ -397,7 +425,7 @@ fi`},
 	}
 }
 
-// ─── SetupSudo ───────────────────────────────────────────────────────────────
+// --- SetupSudo ---
 // Rationale: SetupSudo fixes broken ownership in cloud images and creates a
 // passwordless sudoers drop-in. Wrong chowns break sudo entirely.
 
@@ -414,13 +442,13 @@ func TestBuilder_SetupSudo(t *testing.T) {
 				provcontent.ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
 				provcontent.ChrootOp{Command: "echo 'testuser ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/testuser"},
 				provcontent.ChrootOp{Command: "chmod 440 /etc/sudoers.d/testuser"},
-				provcontent.ChrootOp{Command: "chown root:root /etc/sudo.conf && \\\n" +
-					"chmod 0440 /etc/sudo.conf && \\\n" +
-					"chown root:root /etc/sudoers && \\\n" +
-					"chmod 0440 /etc/sudoers && \\\n" +
-					"chown root:root -R /etc/sudoers.d && \\\n" +
-					"chown root:root /usr/bin/sudo && \\\n" +
-					"chmod 4755 /usr/bin/sudo"},
+				provcontent.ChrootOp{
+					Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
+						"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
+						"chown root:root -R /etc/sudoers.d; \\\n" +
+						"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \\\n" +
+						"test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so",
+				},
 			},
 		},
 		"root_user": {
@@ -429,13 +457,13 @@ func TestBuilder_SetupSudo(t *testing.T) {
 				provcontent.ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
 				provcontent.ChrootOp{Command: "echo 'root ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/root"},
 				provcontent.ChrootOp{Command: "chmod 440 /etc/sudoers.d/root"},
-				provcontent.ChrootOp{Command: "chown root:root /etc/sudo.conf && \\\n" +
-					"chmod 0440 /etc/sudo.conf && \\\n" +
-					"chown root:root /etc/sudoers && \\\n" +
-					"chmod 0440 /etc/sudoers && \\\n" +
-					"chown root:root -R /etc/sudoers.d && \\\n" +
-					"chown root:root /usr/bin/sudo && \\\n" +
-					"chmod 4755 /usr/bin/sudo"},
+				provcontent.ChrootOp{
+					Command: "test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \\\n" +
+						"test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \\\n" +
+						"chown root:root -R /etc/sudoers.d; \\\n" +
+						"test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \\\n" +
+						"test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so",
+				},
 			},
 		},
 	}
@@ -452,7 +480,7 @@ func TestBuilder_SetupSudo(t *testing.T) {
 	}
 }
 
-// ─── BuildCloudInitDisableOps ────────────────────────────────────────────────
+// --- BuildCloudInitDisableOps ---
 // Rationale: BuildCloudInitDisableOps masks cloud-init to speed up boot.
 // Skipping cloud-init prevents 5+ seconds of unnecessary boot delay.
 
@@ -497,7 +525,7 @@ func TestBuilder_BuildCloudInitDisableOps(t *testing.T) {
 	}
 }
 
-// ─── BuildCloudInitInjectOps ─────────────────────────────────────────────────
+// --- BuildCloudInitInjectOps ---
 // Rationale: BuildCloudInitInjectOps injects a nocloud-net seed directory.
 // If the source dir doesn't exist, it must return nil to avoid build failures.
 
@@ -528,7 +556,7 @@ func TestBuilder_BuildCloudInitInjectOps(t *testing.T) {
 	})
 }
 
-// ─── BuildResizeOps ──────────────────────────────────────────────────────────
+// --- BuildResizeOps ---
 // Rationale: BuildResizeOps creates a grow operation. Wrong action means the
 // root filesystem is not expanded when the disk is larger than the image.
 
@@ -571,7 +599,7 @@ func TestBuilder_BuildResizeOps(t *testing.T) {
 	}
 }
 
-// ─── BuildShrinkOps ──────────────────────────────────────────────────────────
+// --- BuildShrinkOps ---
 // Rationale: BuildShrinkOps creates a shrink operation. Wrong action means the
 // filesystem grows instead of shrinking, potentially corrupting the image.
 
@@ -614,7 +642,7 @@ func TestBuilder_BuildShrinkOps(t *testing.T) {
 	}
 }
 
-// ─── BuildFixFstabOps ────────────────────────────────────────────────────────
+// --- BuildFixFstabOps ---
 // Rationale: BuildFixFstabOps comments out UUID/PARTUUID entries in /etc/fstab
 // that are invalid in Firecracker. Missing this step causes boot failures.
 
@@ -633,7 +661,7 @@ func TestBuilder_BuildFixFstabOps(t *testing.T) {
 	assert.Contains(t, op.Command, "UUID=")
 }
 
-// ─── BuildDeblobOps ──────────────────────────────────────────────────────────
+// --- BuildDeblobOps ---
 // Rationale: BuildDeblobOps removes OS package cache, disables unneeded
 // services, and injects SSH config. It is the most complex Builder method
 // with 6 OS-specific branches. Wrong branch selection means bloated images
@@ -901,7 +929,7 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 	}
 }
 
-// ─── BuildVsockAgentOps ────────────────────────────────────────────────────
+// --- BuildVsockAgentOps ---
 // Rationale: BuildVsockAgentOps generates the operations to embed the vsock
 // guest agent into the root filesystem. Wrong paths, modes, or systemd content
 // mean the agent won't start inside the VM, making Exec and Shell impossible.

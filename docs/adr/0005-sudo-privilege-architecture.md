@@ -65,7 +65,7 @@ This means:
 
 ## How System Tests Interact with Sudo
 
-When running `sg mvm -c 'pytest tests/system/...'`:
+When running `sg mvm -c 'pytest tests/e2e/'`:
 
 1. `sg mvm` sets the process primary GID to `mvm` (957)
 2. The pytest process inherits `mvm` as its primary group

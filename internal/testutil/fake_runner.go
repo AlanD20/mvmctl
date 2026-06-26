@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// ── FakeRunner ──────────────────────────────────────────────────────────────
+// --- FakeRunner ---
 
 // FakeRunner implements system.CommandRunner for testing.
 // Records all calls and returns canned results.
@@ -27,12 +27,13 @@ type FakeRunner struct {
 // FakeCall records a single invocation of Run or Stream.
 type FakeCall struct {
 	Args []string
+	Opts system.RunCmdOpts
 }
 
 // Run records the call and returns the stubbed result or error.
 func (f *FakeRunner) Run(ctx context.Context, args []string, opts system.RunCmdOpts) (*system.RunResult, error) {
 	f.mu.Lock()
-	f.Calls = append(f.Calls, FakeCall{Args: append([]string{}, args...)})
+	f.Calls = append(f.Calls, FakeCall{Args: append([]string{}, args...), Opts: opts})
 	f.mu.Unlock()
 	if f.StubRunErr != nil {
 		return f.StubRunResult, f.StubRunErr
@@ -49,12 +50,15 @@ func (f *FakeRunner) Stream(
 	args []string,
 	opts system.RunCmdOpts,
 ) (<-chan system.StreamLine, error) {
+	f.mu.Lock()
+	f.Calls = append(f.Calls, FakeCall{Args: append([]string{}, args...), Opts: opts})
+	f.mu.Unlock()
 	ch := make(chan system.StreamLine)
 	close(ch)
 	return ch, nil
 }
 
-// ── FakeOS ──────────────────────────────────────────────────────────────────
+// --- FakeOS ---
 
 // FakeOS implements system.OSProvider for testing.
 // Each method returns the corresponding field value.

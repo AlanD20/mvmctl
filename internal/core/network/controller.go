@@ -10,21 +10,20 @@ import (
 // Controller is the stateful network entity lifecycle manager.
 type Controller struct {
 	repo    Repository
-	network *model.Network
+	network *model.NetworkItem
 }
 
 // NewController creates a controller bound to a resolved network.
-func NewController(network *model.Network, repo Repository) *Controller {
+func NewController(network *model.NetworkItem, repo Repository) *Controller {
 	return &Controller{repo: repo, network: network}
 }
 
 // Get returns the resolved network entity.
-func (c *Controller) Get() *model.Network {
+func (c *Controller) Get() *model.NetworkItem {
 	return c.network
 }
 
 // SetDefault sets this network as the default.
-// Matches Python: calls self._repo.set_default(self._network.id)
 func (c *Controller) SetDefault(ctx context.Context) error {
 	if c.network == nil {
 		return errs.NotFound(errs.CodeNetworkNotFound, "no network entity loaded")

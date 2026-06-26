@@ -1,6 +1,6 @@
 package model
 
-// ── SSHKeyItem ──
+// --- SSHKeyItem ---
 
 // SSHKeyItem represents an SSH key record.
 type SSHKeyItem struct {

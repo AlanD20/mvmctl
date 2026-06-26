@@ -10,8 +10,7 @@ import (
 )
 
 // LeaseRepo is an in-memory lease repository for testing.
-// Matches Python's mvmctl.core.network._repository.LeaseRepository exactly,
-// including the count_available formula: total_hosts - gateway_count - lease_count.
+// Uses the formula: available = total_hosts - gateway_count - lease_count.
 //
 // To use CountAvailable correctly, call SetNetwork(subnetTotalHosts, hasGateway)
 // to match the subnet's usable host count. Defaults: subnetTotalHosts=254, hasGateway=true.
@@ -19,7 +18,7 @@ type LeaseRepo struct {
 	mu               sync.RWMutex
 	leases           []*model.NetworkLeaseItem
 	nextID           int64
-	subnetTotalHosts int  // total usable hosts in the subnet (from ipaddress.IPv4Network(network.subnet).hosts())
+	subnetTotalHosts int  // total usable hosts in the subnet
 	hasGateway       bool // whether the gateway is set
 }
 
@@ -33,7 +32,7 @@ func NewLeaseRepo() *LeaseRepo {
 }
 
 // SetNetwork configures the subnet parameters for CountAvailable calculations.
-// totalHosts should match len(list(ipaddress.IPv4Network(subnet, strict=False).hosts())).
+// totalHosts should match the subnet's usable host count.
 // hasGateway should be true if ipv4_gateway is set.
 func (r *LeaseRepo) SetNetwork(totalHosts int, hasGateway bool) {
 	r.mu.Lock()
@@ -157,7 +156,7 @@ func (r *LeaseRepo) Count(_ context.Context) (int, error) {
 }
 
 // CountAvailable returns the number of available IP addresses in the network.
-// Matches Python's exact formula: total_hosts - gateway_count - lease_count.
+// Formula: total_hosts - gateway_count - lease_count.
 func (r *LeaseRepo) CountAvailable(_ context.Context, networkID string) (int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -168,8 +167,8 @@ func (r *LeaseRepo) CountAvailable(_ context.Context, networkID string) (int, er
 			leaseCount++
 		}
 	}
-	// Python formula from count_available:
-	//   total_hosts = len(list(ipaddress.IPv4Network(subnet, strict=False).hosts()))
+	// Formula:
+	//   total_hosts = usable hosts in the subnet
 	//   gateway_count = 1 if gateway else 0
 	//   available = total_hosts - gateway_count - lease_count
 	gatewayCount := 0

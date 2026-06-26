@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── NewPrivilegeError ────────────────────────────────────────────────────────
+// --- NewPrivilegeError ---
 // Rationale: Must create a DomainError with CodePrivilegeRequired and structured
 // details. Keep as-is — purely data-formatting, no OS calls.
 
@@ -49,7 +49,7 @@ func TestNewPrivilegeError(t *testing.T) {
 	})
 }
 
-// ─── IsRoot ───────────────────────────────────────────────────────────────────
+// --- IsRoot ---
 // Rationale: Returns true when Geteuid() == 0.
 
 func TestIsRoot(t *testing.T) {
@@ -67,7 +67,7 @@ func TestIsRoot(t *testing.T) {
 	})
 }
 
-// ─── GroupExists ──────────────────────────────────────────────────────────────
+// --- GroupExists ---
 // Rationale: Returns true when LookupGroup succeeds.
 
 func TestGroupExists(t *testing.T) {
@@ -93,7 +93,7 @@ func TestGroupExists(t *testing.T) {
 	})
 }
 
-// ─── SessionHasGroup ──────────────────────────────────────────────────────────
+// --- SessionHasGroup ---
 // Rationale: Checks if any process GID matches the group.
 
 func TestSessionHasGroup(t *testing.T) {
@@ -152,7 +152,7 @@ func TestSessionHasGroup(t *testing.T) {
 	})
 }
 
-// ─── UserInGroup ──────────────────────────────────────────────────────────────
+// --- UserInGroup ---
 // Rationale: Checks NSS group membership. (GroupMembersViaNSS still calls
 // DefaultRunner — not mocked here. See runner_test.go for NSS faking.)
 
@@ -172,7 +172,7 @@ func TestUserInGroup(t *testing.T) {
 	})
 }
 
-// ─── IsProcessRunning ─────────────────────────────────────────────────────────
+// --- IsProcessRunning ---
 // Rationale: pid <= 0 returns false (fast path). Positive pid uses FindProcess.
 
 func TestIsProcessRunning(t *testing.T) {
@@ -201,7 +201,7 @@ func TestIsProcessRunning(t *testing.T) {
 	})
 }
 
-// ─── CheckPrivileges ──────────────────────────────────────────────────────────
+// --- CheckPrivileges ---
 // Rationale: 6 branches — binary missing, root bypass, group missing, user not
 // in group, session without group, all good.
 
@@ -316,7 +316,7 @@ func TestCheckPrivileges(t *testing.T) {
 	})
 }
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
+// --- Helper ---
 
 func assertCode(t *testing.T, err error, code errs.Code) {
 	t.Helper()

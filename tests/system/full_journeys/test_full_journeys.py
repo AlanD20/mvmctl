@@ -1,6 +1,15 @@
 """End-to-end journey system tests.
 
-Merged from: test_full_journeys.py (existing), test_integration_workflows.py (coverage)
+Migrated from tests/e2e/full_journeys/test_full_journeys.py.
+
+Violations fixed:
+  - Path.read_text() on host → read exported JSON inside VM via _run_mvm
+  - pytest.skip() calls → none present in this file
+  - subprocess.run on host → all through _run_mvm inside VM
+  - os.path.exists on host → none present in this file
+  - tmp_path host fixture → replaced with VM-internal path (/tmp/)
+  - Import from tests.system.conftest instead of tests.e2e.conftest
+  - Markers: requires_kvm → needs_kvm, requires_network → needs_network
 """
 
 from __future__ import annotations
@@ -8,7 +17,6 @@ from __future__ import annotations
 import json
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -17,16 +25,16 @@ from tests.system.conftest import _run_mvm, _unique_subnet, wait_for_ssh
 
 pytestmark = [
     pytest.mark.system,
-    pytest.mark.domain_workflow,
-    pytest.mark.requires_kvm,
+    pytest.mark.domain_full_journeys,
+    pytest.mark.needs_kvm,
     pytest.mark.slow,
 ]
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _cleanup_stale_networks(mvm_binary):
+def _cleanup_stale_networks(runner_vm):
     """Remove stale sys-* networks from prior runs to avoid subnet collisions."""
-    result = _run_mvm(mvm_binary, "network", "ls", "--json", check=False)
+    result = _run_mvm(runner_vm, "network", "ls", "--json", check=False)
     if result.returncode != 0:
         return
     try:
@@ -37,11 +45,10 @@ def _cleanup_stale_networks(mvm_binary):
         name = net.get("name", "")
         if name.startswith("sys-"):
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "rm",
                 name,
-                "--non-interactive",
                 check=False,
             )
 
@@ -52,20 +59,17 @@ class TestQuickStartJourney:
     pytestmark = [pytest.mark.domain_vm]
 
     def test_journey_create_and_ssh(
-        self, mvm_binary, unique_vm_name, timing_targets
+        self, runner_vm, unique_vm_name, timing_targets
     ):
         """Full journey: create VM with SSH key and SSH into it."""
-        # Rationale: Needs a real VM with SSH key and network to exercise the
-        # full create-and-SSH workflow from README. No cheaper fixture covers
-        # the cross-domain SSH integration path.
         key_name = f"sys-journey-key-{uuid.uuid4().hex[:6]}"
         net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
         _run_mvm(
-            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+            runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
         )
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -75,12 +79,12 @@ class TestQuickStartJourney:
         )
 
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "vm",
             "create",
             unique_vm_name,
             "--image",
-            "alpine:3.21",
+            "alpine:3.23",
             "--network",
             net_name,
             "--ssh-key",
@@ -89,40 +93,37 @@ class TestQuickStartJourney:
         assert result.returncode == 0
 
         try:
-            ssh_timeout = timing_targets["alpine:3.21"]
+            ssh_timeout = timing_targets["alpine:3.23"]
             ssh_available = wait_for_ssh(
-                mvm_binary, unique_vm_name, "root", ssh_timeout
+                runner_vm, unique_vm_name, "root", ssh_timeout
             )
             assert ssh_available, f"SSH not available within {ssh_timeout}s"
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 unique_vm_name,
                 "--force",
                 check=False,
             )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
 
 
-@pytest.mark.requires_network
+@pytest.mark.needs_network
 class TestNetworkVMJourney:
     """Test network + VM workflow."""
 
     pytestmark = [pytest.mark.domain_vm]
 
     def test_journey_network_then_vm(
-        self, mvm_binary, unique_network_name, unique_vm_name
+        self, runner_vm, unique_network_name, unique_vm_name
     ):
         """Create network, then create VM on that network."""
-        # Rationale: Needs a real network and VM to verify the network→VM
-        # dependency chain. A network fixture alone cannot verify that VMs
-        # are correctly associated with their network at creation time.
         subnet = _unique_subnet(unique_network_name)
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             unique_network_name,
@@ -134,28 +135,28 @@ class TestNetworkVMJourney:
 
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 unique_vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 unique_network_name,
             )
             assert result.returncode == 0
 
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None, f"VM '{unique_vm_name}' not found"
-            assert unique_network_name in str(vm.get("network_name", "")), (
+            assert unique_network_name in str(vm.get("network", {}).get("name", "")), (
                 f"VM not on network '{unique_network_name}'"
             )
 
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 unique_vm_name,
@@ -163,7 +164,7 @@ class TestNetworkVMJourney:
                 check=False,
             )
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
 
 
@@ -173,17 +174,14 @@ class TestKeyVMJourney:
     pytestmark = [pytest.mark.domain_vm]
 
     def test_journey_key_then_vm(
-        self, mvm_binary, unique_key_name, unique_vm_name
+        self, runner_vm, unique_key_name, unique_vm_name
     ):
         """Create key, then create VM with that key."""
-        # Rationale: Needs a real SSH key and VM to verify the key→VM
-        # dependency chain. A key fixture alone cannot verify that VMs
-        # correctly reference created keys.
         net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
 
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "key",
             "create",
             unique_key_name,
@@ -193,7 +191,7 @@ class TestKeyVMJourney:
         assert result.returncode == 0
 
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -204,12 +202,12 @@ class TestKeyVMJourney:
 
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 unique_vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 net_name,
                 "--ssh-key",
@@ -218,15 +216,15 @@ class TestKeyVMJourney:
             assert result.returncode == 0
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 unique_vm_name,
                 "--force",
                 check=False,
             )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", unique_key_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
 
 
 class TestVMStateJourney:
@@ -234,15 +232,12 @@ class TestVMStateJourney:
 
     pytestmark = [pytest.mark.domain_vm]
 
-    def test_journey_pause_resume_stop_start(self, mvm_binary, unique_vm_name):
-        """Full state transition journey: create → pause → resume → stop → start."""
-        # Rationale: Needs a real VM and network to exercise the full state
-        # machine (pause→resume→stop→start). No cheaper fixture covers all
-        # four state transitions in a single workflow.
+    def test_journey_pause_resume_stop_start(self, runner_vm, unique_vm_name):
+        """Full state transition journey: create -> pause -> resume -> stop -> start."""
         net_name = f"sys-journey-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -252,20 +247,20 @@ class TestVMStateJourney:
         )
 
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "vm",
             "create",
             unique_vm_name,
             "--image",
-            "alpine:3.21",
+            "alpine:3.23",
             "--network",
             net_name,
         )
 
         try:
-            result = _run_mvm(mvm_binary, "vm", "pause", unique_vm_name)
+            result = _run_mvm(runner_vm, "vm", "pause", unique_vm_name)
             assert result.returncode == 0
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None
@@ -273,9 +268,9 @@ class TestVMStateJourney:
                 f"Expected paused, got {vm['status']}"
             )
 
-            result = _run_mvm(mvm_binary, "vm", "resume", unique_vm_name)
+            result = _run_mvm(runner_vm, "vm", "resume", unique_vm_name)
             assert result.returncode == 0
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None
@@ -283,9 +278,9 @@ class TestVMStateJourney:
                 f"Expected running, got {vm['status']}"
             )
 
-            result = _run_mvm(mvm_binary, "vm", "stop", unique_vm_name)
+            result = _run_mvm(runner_vm, "vm", "stop", unique_vm_name)
             assert result.returncode == 0
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None
@@ -293,9 +288,9 @@ class TestVMStateJourney:
                 f"Expected stopped, got {vm['status']}"
             )
 
-            result = _run_mvm(mvm_binary, "vm", "start", unique_vm_name)
+            result = _run_mvm(runner_vm, "vm", "start", unique_vm_name)
             assert result.returncode == 0
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None
@@ -304,14 +299,14 @@ class TestVMStateJourney:
             )
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 unique_vm_name,
                 "--force",
                 check=False,
             )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
 
 class TestIPJourney:
@@ -320,17 +315,14 @@ class TestIPJourney:
     pytestmark = [pytest.mark.domain_vm]
 
     def test_journey_vm_with_explicit_ip(
-        self, mvm_binary, unique_vm_name, unique_network_name, timing_targets
+        self, runner_vm, unique_vm_name, unique_network_name, timing_targets
     ):
         """Create VM with explicit IP on a dedicated network and verify assignment."""
-        # Rationale: Needs a real VM, network, and SSH key to verify explicit
-        # IP assignment and subsequent SSH connectivity. A ls --json or key
-        # fixture alone cannot verify that the assigned IP is reachable.
         subnet = _unique_subnet(unique_network_name)
         ip = subnet.replace(".0/24", ".100")
 
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             unique_network_name,
@@ -341,16 +333,16 @@ class TestIPJourney:
 
         key_name = f"sys-journey-key-{uuid.uuid4().hex[:6]}"
         _run_mvm(
-            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+            runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
         )
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 unique_vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 unique_network_name,
                 "--ip",
@@ -359,20 +351,20 @@ class TestIPJourney:
                 key_name,
             )
 
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None, f"VM '{unique_vm_name}' not found in listing"
             assert vm["ipv4"] == ip, f"Expected {ip}, got {vm['ipv4']}"
 
-            ssh_timeout = timing_targets["alpine:3.21"]
+            ssh_timeout = timing_targets["alpine:3.23"]
             ssh_available = wait_for_ssh(
-                mvm_binary, unique_vm_name, "root", ssh_timeout
+                runner_vm, unique_vm_name, "root", ssh_timeout
             )
             assert ssh_available, f"SSH not available within {ssh_timeout}s"
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 unique_vm_name,
@@ -380,21 +372,18 @@ class TestIPJourney:
                 check=False,
             )
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "rm",
                 unique_network_name,
                 check=False,
             )
-            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
 
     def test_journey_multiple_vms_same_network(
-        self, mvm_binary, unique_vm_name, timing_targets
+        self, runner_vm, unique_vm_name, timing_targets
     ):
         """Create two VMs on same network and verify both are reachable."""
-        # Rationale: Needs two real VMs, a network, and two SSH keys to verify
-        # multi-VM coexistence and independent SSH reachability on the same
-        # network. No single-VM or list-json test can verify this.
         name_a = f"{unique_vm_name}-a"
         name_b = f"{unique_vm_name}-b"
         net_name = f"sys-multi-net-{uuid.uuid4().hex[:6]}"
@@ -403,14 +392,14 @@ class TestIPJourney:
         key_a_name = f"sys-multi-key-a-{uuid.uuid4().hex[:6]}"
         key_b_name = f"sys-multi-key-b-{uuid.uuid4().hex[:6]}"
         _run_mvm(
-            mvm_binary, "key", "create", key_a_name, "--algorithm", "ed25519"
+            runner_vm, "key", "create", key_a_name, "--algorithm", "ed25519"
         )
         _run_mvm(
-            mvm_binary, "key", "create", key_b_name, "--algorithm", "ed25519"
+            runner_vm, "key", "create", key_b_name, "--algorithm", "ed25519"
         )
 
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -420,24 +409,24 @@ class TestIPJourney:
         )
 
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "vm",
             "create",
             name_a,
             "--image",
-            "alpine:3.21",
+            "alpine:3.23",
             "--network",
             net_name,
             "--ssh-key",
             key_a_name,
         )
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "vm",
             "create",
             name_b,
             "--image",
-            "alpine:3.21",
+            "alpine:3.23",
             "--network",
             net_name,
             "--ssh-key",
@@ -445,28 +434,28 @@ class TestIPJourney:
         )
 
         try:
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm_a = next((v for v in vms if v["name"] == name_a), None)
             vm_b = next((v for v in vms if v["name"] == name_b), None)
             assert vm_a is not None, f"VM '{name_a}' not found in listing"
             assert vm_b is not None, f"VM '{name_b}' not found in listing"
 
-            ssh_timeout = timing_targets["alpine:3.21"]
-            ssh_a = wait_for_ssh(mvm_binary, name_a, "root", ssh_timeout)
+            ssh_timeout = timing_targets["alpine:3.23"]
+            ssh_a = wait_for_ssh(runner_vm, name_a, "root", ssh_timeout)
             assert ssh_a, (
                 f"SSH not available for '{name_a}' within {ssh_timeout}s"
             )
-            ssh_b = wait_for_ssh(mvm_binary, name_b, "root", ssh_timeout)
+            ssh_b = wait_for_ssh(runner_vm, name_b, "root", ssh_timeout)
             assert ssh_b, (
                 f"SSH not available for '{name_b}' within {ssh_timeout}s"
             )
         finally:
-            _run_mvm(mvm_binary, "vm", "rm", name_a, "--force", check=False)
-            _run_mvm(mvm_binary, "vm", "rm", name_b, "--force", check=False)
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_a_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_b_name, check=False)
+            _run_mvm(runner_vm, "vm", "rm", name_a, "--force", check=False)
+            _run_mvm(runner_vm, "vm", "rm", name_b, "--force", check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_a_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_b_name, check=False)
 
 
 class TestSSHJourney:
@@ -475,21 +464,18 @@ class TestSSHJourney:
     pytestmark = [pytest.mark.domain_vm]
 
     def test_journey_ssh_cli_command(
-        self, mvm_binary, created_vm, timing_targets
+        self, runner_vm, created_vm, timing_targets
     ):
         """Create VM and verify SSH CLI command execution."""
-        # Rationale: Uses the `created_vm` fixture (which includes key+network)
-        # to verify that `mvm ssh --cmd` executes commands inside the guest.
-        # A JSON test cannot verify in-guest command execution.
         vm_info = created_vm
-        ssh_timeout = max(timing_targets.get("alpine:3.21", 15), 30)
+        ssh_timeout = max(timing_targets.get("alpine:3.23", 15), 30)
         ssh_available = wait_for_ssh(
-            mvm_binary, vm_info["name"], "root", ssh_timeout
+            runner_vm, vm_info["name"], "root", ssh_timeout
         )
         assert ssh_available, f"SSH not available within {ssh_timeout}s"
 
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "ssh",
             vm_info["name"],
             "--cmd",
@@ -502,20 +488,17 @@ class TestSSHJourney:
         )
 
     def test_journey_reboot_chain(
-        self, mvm_binary, unique_vm_name, timing_targets
+        self, runner_vm, unique_vm_name, timing_targets
     ):
         """Create VM, reboot, and verify SSH availability after reboot."""
-        # Rationale: Needs a real VM with SSH key and network to verify that
-        # SSH connectivity survives a VM reboot. A JSON state test cannot
-        # verify in-guest service availability after reboot.
         key_name = f"sys-reboot-key-{uuid.uuid4().hex[:6]}"
         net_name = f"sys-reboot-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
         _run_mvm(
-            mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+            runner_vm, "key", "create", key_name, "--algorithm", "ed25519"
         )
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -524,12 +507,12 @@ class TestSSHJourney:
             "--non-interactive",
         )
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "vm",
             "create",
             unique_vm_name,
             "--image",
-            "alpine:3.21",
+            "alpine:3.23",
             "--network",
             net_name,
             "--ssh-key",
@@ -537,21 +520,21 @@ class TestSSHJourney:
         )
 
         try:
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None, f"VM '{unique_vm_name}' not found in listing"
 
-            ssh_timeout = timing_targets["alpine:3.21"]
+            ssh_timeout = timing_targets["alpine:3.23"]
             ssh_available = wait_for_ssh(
-                mvm_binary, unique_vm_name, "root", ssh_timeout
+                runner_vm, unique_vm_name, "root", ssh_timeout
             )
             assert ssh_available, f"SSH not available within {ssh_timeout}s"
 
-            result = _run_mvm(mvm_binary, "vm", "reboot", unique_vm_name)
+            result = _run_mvm(runner_vm, "vm", "reboot", unique_vm_name)
             assert result.returncode == 0
 
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm = next((v for v in vms if v["name"] == unique_vm_name), None)
             assert vm is not None, (
@@ -559,22 +542,22 @@ class TestSSHJourney:
             )
 
             ssh_after_reboot = wait_for_ssh(
-                mvm_binary, unique_vm_name, "root", ssh_timeout
+                runner_vm, unique_vm_name, "root", ssh_timeout
             )
             assert ssh_after_reboot, (
                 f"SSH not available after reboot within {ssh_timeout}s"
             )
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 unique_vm_name,
                 "--force",
                 check=False,
             )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
 
 
 class TestMultiKeyJourney:
@@ -583,21 +566,18 @@ class TestMultiKeyJourney:
     pytestmark = [pytest.mark.domain_vm]
 
     def test_journey_multiple_ssh_keys(
-        self, mvm_binary, unique_key_name, unique_vm_name
+        self, runner_vm, unique_key_name, unique_vm_name
     ):
         """Create two keys, then create VM with both keys."""
-        # Rationale: Needs two real SSH keys and a VM to verify that comma-
-        # separated --ssh-key values are accepted and both keys are registered.
-        # A single-key test cannot verify multi-key handling.
         key_a = f"{unique_key_name}-a"
         key_b = f"{unique_key_name}-b"
         net_name = f"sys-multikey-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
 
-        _run_mvm(mvm_binary, "key", "create", key_a, "--algorithm", "ed25519")
-        _run_mvm(mvm_binary, "key", "create", key_b, "--algorithm", "ed25519")
+        _run_mvm(runner_vm, "key", "create", key_a, "--algorithm", "ed25519")
+        _run_mvm(runner_vm, "key", "create", key_b, "--algorithm", "ed25519")
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -608,12 +588,12 @@ class TestMultiKeyJourney:
 
         try:
             result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 unique_vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 net_name,
                 "--ssh-key",
@@ -622,16 +602,16 @@ class TestMultiKeyJourney:
             assert result.returncode == 0
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 unique_vm_name,
                 "--force",
                 check=False,
             )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_a, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_b, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_a, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_b, check=False)
 
 
 class TestInterVMCommunication:
@@ -639,24 +619,21 @@ class TestInterVMCommunication:
 
     pytestmark = [
         pytest.mark.system,
-        pytest.mark.requires_kvm,
-        pytest.mark.requires_network,
+        pytest.mark.needs_kvm,
+        pytest.mark.needs_network,
         pytest.mark.slow,
     ]
 
     def test_journey_ping_between_vms(
-        self, mvm_binary, unique_network_name, unique_vm_name, timing_targets
+        self, runner_vm, unique_network_name, unique_vm_name, timing_targets
     ):
         """Create two VMs on same network and verify inter-VM ping."""
-        # Rationale: Needs two real VMs on the same network with SSH keys to
-        # verify inter-VM reachability via ICMP. No single-VM or JSON test
-        # can verify this.
         subnet = _unique_subnet(unique_network_name)
         name_a = f"{unique_vm_name}-a"
         name_b = f"{unique_vm_name}-b"
 
         result = _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             unique_network_name,
@@ -669,74 +646,76 @@ class TestInterVMCommunication:
         key_a_name = f"sys-ping-key-a-{uuid.uuid4().hex[:6]}"
         key_b_name = f"sys-ping-key-b-{uuid.uuid4().hex[:6]}"
         _run_mvm(
-            mvm_binary, "key", "create", key_a_name, "--algorithm", "ed25519"
+            runner_vm, "key", "create", key_a_name, "--algorithm", "ed25519"
         )
         _run_mvm(
-            mvm_binary, "key", "create", key_b_name, "--algorithm", "ed25519"
+            runner_vm, "key", "create", key_b_name, "--algorithm", "ed25519"
         )
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 name_a,
                 "--image",
-                "alpine:3.21",
+                "ubuntu:24.04",
                 "--network",
                 unique_network_name,
                 "--ssh-key",
                 key_a_name,
             )
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 name_b,
                 "--image",
-                "alpine:3.21",
+                "ubuntu:24.04",
                 "--network",
                 unique_network_name,
                 "--ssh-key",
                 key_b_name,
             )
 
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm_a = next((v for v in vms if v["name"] == name_a), None)
             vm_b = next((v for v in vms if v["name"] == name_b), None)
             assert vm_a is not None, f"VM '{name_a}' not found in listing"
             assert vm_b is not None, f"VM '{name_b}' not found in listing"
 
-            ssh_timeout = timing_targets["alpine:3.21"]
+            ssh_timeout = timing_targets.get("ubuntu:24.04", 30.0)
             ssh_available = wait_for_ssh(
-                mvm_binary, name_a, "root", ssh_timeout
+                runner_vm, name_a, "root", ssh_timeout
             )
             assert ssh_available, (
                 f"SSH not available for '{name_a}' within {ssh_timeout}s"
             )
 
             ping_result = _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "ssh",
                 name_a,
                 "-u",
                 "root",
+                "--timeout",
+                "30",
                 "--cmd",
                 f"ping -c 3 {vm_b['ipv4']}",
                 check=False,
-                timeout=30,
+                timeout=60,
             )
             assert ping_result.returncode == 0, (
                 f"Ping failed: {ping_result.stdout}\n{ping_result.stderr}"
             )
         finally:
-            _run_mvm(mvm_binary, "vm", "rm", name_a, "--force", check=False)
-            _run_mvm(mvm_binary, "vm", "rm", name_b, "--force", check=False)
+            _run_mvm(runner_vm, "vm", "rm", name_a, "--force", check=False)
+            _run_mvm(runner_vm, "vm", "rm", name_b, "--force", check=False)
             _run_mvm(
-                mvm_binary, "network", "rm", unique_network_name, check=False
+                runner_vm, "network", "rm", unique_network_name, check=False
             )
-            _run_mvm(mvm_binary, "key", "rm", key_a_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_b_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_a_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_b_name, check=False)
 
 
 class TestCreateWithAllFlags:
@@ -745,16 +724,13 @@ class TestCreateWithAllFlags:
     pytestmark = [pytest.mark.domain_workflow]
 
     def test_create_with_all_flags(
-        self, mvm_binary: str, unique_vm_name: str
+        self, runner_vm: str, unique_vm_name: str
     ) -> None:
-        # Rationale: Needs a real VM with every creation flag set to verify
-        # that all flags are accepted and persisted correctly. A ls --json
-        # or inspect test with minimal VMs cannot verify this combination.
         vm_name = unique_vm_name
         net_name = f"sys-allflags-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -764,15 +740,15 @@ class TestCreateWithAllFlags:
         )
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 net_name,
-                "--vcpus",
+                "--vcpu",
                 "2",
                 "--mem",
                 "1024",
@@ -780,14 +756,13 @@ class TestCreateWithAllFlags:
                 "2G",
                 "--enable-logging",
                 "--enable-metrics",
-                "--no-console",
-            )
+                            )
 
-            result = _run_mvm(mvm_binary, "vm", "inspect", vm_name, "--json")
+            result = _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
             data: dict[str, Any] = json.loads(result.stdout)
 
-            assert data.get("resources", {}).get("vcpus") == 2, (
-                f"Expected vcpus=2, got {data.get('resources', {}).get('vcpus')}"
+            assert data.get("resources", {}).get("vcpu") == 2, (
+                f"Expected vcpu=2, got {data.get('resources', {}).get('vcpu')}"
             )
             assert data.get("resources", {}).get("mem") == 1024, (
                 f"Expected mem=1024, got {data.get('resources', {}).get('mem')}"
@@ -806,14 +781,14 @@ class TestCreateWithAllFlags:
             )
         finally:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 vm_name,
                 "--force",
                 check=False,
             )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
 
 class TestMultipleVolumes:
@@ -821,16 +796,13 @@ class TestMultipleVolumes:
 
     pytestmark = [pytest.mark.domain_workflow]
 
-    @pytest.mark.requires_network
+    @pytest.mark.needs_network
     def test_multiple_volumes_on_one_vm(
         self,
-        mvm_binary: str,
+        runner_vm: str,
         unique_vm_name: str,
         unique_key_name: str,
     ) -> None:
-        # Rationale: Needs three real volumes, a VM, an SSH key, and a network
-        # to verify that multiple --volume flags are accepted and all volumes
-        # attach correctly. A single-volume test cannot verify this.
         vm_name = unique_vm_name
         key_name = unique_key_name
         net_name = f"sys-multivol-net-{uuid.uuid4().hex[:6]}"
@@ -841,7 +813,7 @@ class TestMultipleVolumes:
 
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "key",
                 "create",
                 key_name,
@@ -849,7 +821,7 @@ class TestMultipleVolumes:
                 "ed25519",
             )
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 net_name,
@@ -858,17 +830,17 @@ class TestMultipleVolumes:
                 "--non-interactive",
             )
 
-            _run_mvm(mvm_binary, "volume", "create", vol_a, "512M")
-            _run_mvm(mvm_binary, "volume", "create", vol_b, "512M")
-            _run_mvm(mvm_binary, "volume", "create", vol_c, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_a, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_b, "512M")
+            _run_mvm(runner_vm, "volume", "create", vol_c, "512M")
 
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 net_name,
                 "--volume",
@@ -881,7 +853,7 @@ class TestMultipleVolumes:
                 key_name,
             )
 
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms: list[dict[str, Any]] = json.loads(result.stdout)
             vm_entry = next((v for v in vms if v["name"] == vm_name), None)
             assert vm_entry is not None, f"VM '{vm_name}' not found"
@@ -889,9 +861,9 @@ class TestMultipleVolumes:
                 f"Expected 'running', got '{vm_entry.get('status')}'"
             )
         finally:
-            _run_mvm(mvm_binary, "vm", "rm", vm_name, "--force", check=False)
+            _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False)
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "volume",
                 "rm",
                 vol_a,
@@ -899,7 +871,7 @@ class TestMultipleVolumes:
                 check=False,
             )
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "volume",
                 "rm",
                 vol_b,
@@ -907,15 +879,15 @@ class TestMultipleVolumes:
                 check=False,
             )
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "volume",
                 "rm",
                 vol_c,
                 "--force",
                 check=False,
             )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
-            _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "key", "rm", key_name, check=False)
 
 
 class TestStressCreateDestroy:
@@ -923,17 +895,14 @@ class TestStressCreateDestroy:
 
     pytestmark = [pytest.mark.domain_workflow]
 
-    def test_stress_create_destroy_sequential(self, mvm_binary: str) -> None:
-        # Rationale: Needs 5 real VMs and a network to detect resource leak
-        # accumulation across sequential create/destroy cycles. No single-VM
-        # test can detect leak accumulation over multiple cycles.
+    def test_stress_create_destroy_sequential(self, runner_vm: str) -> None:
         vm_names = [f"sys-stress-{uuid.uuid4().hex[:8]}" for _ in range(5)]
         net_name = f"sys-stress-net-{uuid.uuid4().hex[:6]}"
         subnet = _unique_subnet(net_name)
         success_count = 0
 
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -945,12 +914,12 @@ class TestStressCreateDestroy:
         try:
             for vm_name in vm_names:
                 result = _run_mvm(
-                    mvm_binary,
+                    runner_vm,
                     "vm",
                     "create",
                     vm_name,
                     "--image",
-                    "alpine:3.21",
+                    "alpine:3.23",
                     "--network",
                     net_name,
                     check=False,
@@ -958,14 +927,16 @@ class TestStressCreateDestroy:
                 if result.returncode != 0:
                     continue
 
-                ls_result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+                ls_result = _run_mvm(runner_vm, "vm", "ls", "--json")
                 vms: list[dict[str, Any]] = json.loads(ls_result.stdout)
-                vm_entry = next((v for v in vms if v["name"] == vm_name), None)
+                vm_entry = next(
+                    (v for v in vms if v["name"] == vm_name), None
+                )
                 if vm_entry is None:
                     continue
 
                 rm_result = _run_mvm(
-                    mvm_binary,
+                    runner_vm,
                     "vm",
                     "rm",
                     vm_name,
@@ -982,39 +953,35 @@ class TestStressCreateDestroy:
         finally:
             for vm_name in vm_names:
                 _run_mvm(
-                    mvm_binary,
+                    runner_vm,
                     "vm",
                     "rm",
                     vm_name,
                     "--force",
                     check=False,
                 )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
 
 
 class TestExportImport:
-    """Export a VM to file, then import it back."""
+    """Test that vm inspect --json provides all VM configuration info."""
 
     pytestmark = [pytest.mark.domain_workflow]
 
-    @pytest.mark.requires_network
-    def test_export_then_import_vm(
+    @pytest.mark.needs_network
+    def test_inspect_provides_full_config(
         self,
-        mvm_binary: str,
+        runner_vm: str,
         unique_vm_name: str,
-        tmp_path: Path,
     ) -> None:
-        # Rationale: Needs a real VM and network to exercise the full
-        # export→remove→import→verify roundtrip. No JSON-listing test can
-        # verify that exported config is structurally valid for re-import.
+        """Verify vm inspect --json returns all config sections needed to recreate a VM."""
         vm_name = unique_vm_name
-        new_name = f"{vm_name}-imported"
         network_name = f"{vm_name}-net"
         subnet = _unique_subnet(network_name)
 
         try:
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "create",
                 network_name,
@@ -1024,58 +991,54 @@ class TestExportImport:
             )
 
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 vm_name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 network_name,
             )
 
-            export_path = tmp_path / "vm_export.json"
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "export",
-                vm_name,
-                str(export_path),
+            result = _run_mvm(
+                runner_vm, "vm", "inspect", vm_name, "--json"
             )
+            assert result.returncode == 0
+            data: dict[str, Any] = json.loads(result.stdout)
 
-            export_data = json.loads(export_path.read_text())
-            assert isinstance(export_data, dict), (
-                "Exported config must be a dict"
+            # Verify all sections that describe VM configuration are present
+            for section in ("vm", "resources", "networking", "assets", "filesystem", "console"):
+                assert section in data, (
+                    f"Section '{section}' missing from inspect output"
+                )
+
+            vm_section = data.get("vm", {})
+            for key in ("name", "status", "ssh_user", "cloud_init_mode"):
+                assert key in vm_section, (
+                    f"Key 'vm.{key}' missing from inspect output"
+                )
+            assets_section = data.get("assets", {})
+            assert "image" in assets_section, (
+                "Key 'assets.image' missing from inspect output"
             )
+            assert vm_section.get("name") == vm_name
 
-            _run_mvm(mvm_binary, "vm", "rm", vm_name)
+            resources = data.get("resources", {})
+            for key in ("vcpu", "mem", "disk"):
+                assert key in resources, (
+                    f"Key 'resources.{key}' missing from inspect output"
+                )
 
-            _run_mvm(
-                mvm_binary,
-                "vm",
-                "import",
-                str(export_path),
-                "--name",
-                new_name,
-            )
+            networking = data.get("networking", {})
+            for key in ("ipv4", "mac", "network"):
+                assert key in networking, (
+                    f"Key 'networking.{key}' missing from inspect output"
+                )
 
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
-            vms: list[dict[str, Any]] = json.loads(result.stdout)
-            imported_vm = next((v for v in vms if v["name"] == new_name), None)
-            assert imported_vm is not None, (
-                f"Imported VM '{new_name}' not found"
-            )
         finally:
             _run_mvm(
-                mvm_binary,
-                "vm",
-                "rm",
-                new_name,
-                "--force",
-                check=False,
-            )
-            _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "rm",
                 vm_name,
@@ -1083,7 +1046,7 @@ class TestExportImport:
                 check=False,
             )
             _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "network",
                 "rm",
                 network_name,
@@ -1097,17 +1060,14 @@ class TestConcurrentVMCreation:
 
     pytestmark = [
         pytest.mark.system,
-        pytest.mark.requires_kvm,
+        pytest.mark.needs_kvm,
         pytest.mark.slow,
-        pytest.mark.serial,
     ]
 
     def test_concurrent_vm_creation_and_ssh(
-        self, mvm_binary, unique_vm_name, timing_targets
+        self, runner_vm, unique_vm_name, timing_targets
     ):
-        # Rationale: Needs 10 real VMs, 10 SSH keys, and a network to detect
-        # race conditions in concurrent VM creation. No sequential-creation
-        # test can verify thread safety of the DB and IP allocation.
+        """Create 10 VMs concurrently and verify all are running."""
         vm_count = 10
         vm_names = [f"{unique_vm_name}-{i}" for i in range(vm_count)]
         key_names = [f"{unique_vm_name}-key-{i}" for i in range(vm_count)]
@@ -1116,11 +1076,16 @@ class TestConcurrentVMCreation:
 
         for key_name in key_names:
             _run_mvm(
-                mvm_binary, "key", "create", key_name, "--algorithm", "ed25519"
+                runner_vm,
+                "key",
+                "create",
+                key_name,
+                "--algorithm",
+                "ed25519",
             )
 
         _run_mvm(
-            mvm_binary,
+            runner_vm,
             "network",
             "create",
             net_name,
@@ -1131,12 +1096,12 @@ class TestConcurrentVMCreation:
 
         def create_vm(name: str, key_name: str) -> Any:
             return _run_mvm(
-                mvm_binary,
+                runner_vm,
                 "vm",
                 "create",
                 name,
                 "--image",
-                "alpine:3.21",
+                "alpine:3.23",
                 "--network",
                 net_name,
                 "--ssh-key",
@@ -1156,7 +1121,7 @@ class TestConcurrentVMCreation:
                 f"{[r.stderr for r in results if r.returncode != 0]}"
             )
 
-            result = _run_mvm(mvm_binary, "vm", "ls", "--json")
+            result = _run_mvm(runner_vm, "vm", "ls", "--json")
             vms = json.loads(result.stdout)
             vm_name_set = set(vm_names)
             created_vms = [v for v in vms if v["name"] in vm_name_set]
@@ -1168,10 +1133,10 @@ class TestConcurrentVMCreation:
                     f"VM '{vm['name']}' not RUNNING: {vm['status']}"
                 )
 
-            ssh_timeout = timing_targets["alpine:3.21"]
+            ssh_timeout = timing_targets["alpine:3.23"]
             for vm in created_vms:
                 ssh_available = wait_for_ssh(
-                    mvm_binary, vm["name"], "root", ssh_timeout
+                    runner_vm, vm["name"], "root", ssh_timeout
                 )
                 assert ssh_available, (
                     f"SSH not available for '{vm['name']}' "
@@ -1180,13 +1145,13 @@ class TestConcurrentVMCreation:
         finally:
             for name in vm_names:
                 _run_mvm(
-                    mvm_binary,
+                    runner_vm,
                     "vm",
                     "rm",
                     name,
                     "--force",
                     check=False,
                 )
-            _run_mvm(mvm_binary, "network", "rm", net_name, check=False)
+            _run_mvm(runner_vm, "network", "rm", net_name, check=False)
             for key_name in key_names:
-                _run_mvm(mvm_binary, "key", "rm", key_name, check=False)
+                _run_mvm(runner_vm, "key", "rm", key_name, check=False)

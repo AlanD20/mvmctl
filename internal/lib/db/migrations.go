@@ -114,12 +114,9 @@ func (d *Handle) takeSnapshot(version int) (string, error) {
 }
 
 // RunMigrationsCtx runs pending migrations against the database.
-// Mirrors Python's Database.migrate().
 //
-// Each migration SQL file is executed via ExecContext (matching Python's
-// conn.executescript()). No wrapping transaction is used — matching Python's
-// executescript semantics where each DDL/DML is auto-committed individually
-// (isolation_level=None / autocommit mode).
+// Each migration SQL file is executed via ExecContext. No wrapping transaction
+// is used — each statement auto-commits individually in SQLite's autocommit mode.
 //
 // Migration history is recorded in db_migrations table. Schema version is
 // managed by each migration SQL file via PRAGMA user_version.
@@ -128,7 +125,7 @@ func (d *Handle) takeSnapshot(version int) (string, error) {
 func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 	sqlDB := d.DB()
 
-	// Ensure the tracking table exists (Python's _ensure_migrations_table)
+	// Ensure the tracking table exists
 	if err := d.ensureMigrationsTable(ctx); err != nil {
 		return 0, fmt.Errorf("create migrations table: %w", err)
 	}
@@ -155,7 +152,7 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 			continue
 		}
 
-		// Take online snapshot before migration (for version > 1, matching Python)
+		// Take online snapshot before migration (for version > 1)
 		snapshotPath := ""
 		if f.version > 1 {
 			snapPath, snapErr := d.takeSnapshot(f.version)
@@ -165,9 +162,9 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 			snapshotPath = snapPath
 		}
 
-		// Execute the migration SQL via ExecContext (matching Python's executescript).
+		// Execute the migration SQL via ExecContext.
 		// No explicit transaction wrapping — each statement auto-commits individually
-		// in SQLite's autocommit mode (isolation_level=None equivalent).
+		// in SQLite's autocommit mode.
 		if _, err := sqlDB.ExecContext(ctx, f.sql); err != nil {
 			// Migration failed — restore the snapshot taken before it so the
 			// database is left in a clean pre-migration state rather than broken.
@@ -181,9 +178,8 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 				fmt.Sprintf("Migration %s (version %d) failed: %v", f.name, f.version, err))
 		}
 
-		// Record migration with ISO-8601 timestamp (matching Python's datetime.now().isoformat() — local time, microsecond precision).
+		// Record migration with ISO-8601 timestamp.
 		// Use Go's zero value (empty string) for missing snapshot path.
-		// The reader side handles both "" and "None" for backward compatibility.
 		appliedAt := time.Now().Format(time.RFC3339)
 		if _, err := sqlDB.ExecContext(ctx,
 			"INSERT INTO db_migrations (version, name, applied_at, snapshot_path) VALUES (?, ?, ?, ?)",
@@ -196,7 +192,6 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 		applied++
 	}
 
-	// Python's migrate() returns 0 with no message when nothing is pending.
 	return applied, nil
 }
 

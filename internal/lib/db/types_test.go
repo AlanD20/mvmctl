@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/lib/db"
 )
 
-// ─── StringSlice.Scan ───────────────────────────────────────────────────────
+// --- StringSlice.Scan ---
 // Rationale: Implements sql.Scanner for reading JSON arrays from TEXT columns.
 
 func TestStringSlice_Scan(t *testing.T) {
@@ -50,7 +50,7 @@ func TestStringSlice_Scan(t *testing.T) {
 	})
 }
 
-// ─── StringSlice.Value ──────────────────────────────────────────────────────
+// --- StringSlice.Value ---
 // Rationale: Implements driver.Valuer for writing StringSlice as JSON array TEXT.
 
 func TestStringSlice_Value(t *testing.T) {

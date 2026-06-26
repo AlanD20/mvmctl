@@ -9,7 +9,6 @@ import (
 )
 
 // sortByDotCount sorts relation paths by dot count (parents before children).
-// Matches Python's sorted(include, key=lambda p: p.count(".")).
 func sortByDotCount(paths []string) []string {
 	sorted := make([]string, len(paths))
 	copy(sorted, paths)

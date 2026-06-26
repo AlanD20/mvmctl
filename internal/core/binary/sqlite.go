@@ -105,7 +105,7 @@ func (r *sqliteRepo) DeleteByTypeAndVersion(ctx context.Context, typ, version st
 	return err
 }
 
-func (r *sqliteRepo) SetDefault(ctx context.Context, typ, version, path string) error {
+func (r *sqliteRepo) SetDefault(ctx context.Context, typ, id string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
@@ -118,7 +118,7 @@ func (r *sqliteRepo) SetDefault(ctx context.Context, typ, version, path string) 
 	}
 	_, err = tx.ExecContext(ctx,
 		`UPDATE binaries SET is_default = 1, updated_at = CURRENT_TIMESTAMP
-		WHERE type = ? AND version = ? AND deleted_at IS NULL`, typ, version)
+		WHERE id = ? AND deleted_at IS NULL`, id)
 	if err != nil {
 		return err
 	}

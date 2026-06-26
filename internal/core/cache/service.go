@@ -1,5 +1,4 @@
 // Package cache provides stateless cache cleanup operations — guestfs, appliance, warm images.
-// Matches src/mvmctl/core/cache/_service.py exactly.
 package cache
 
 import (
@@ -15,8 +14,6 @@ import (
 )
 
 // Service provides stateless cache cleanup operations.
-// Matches Python's CacheService exactly — all methods are the equivalent of
-// Python's @staticmethod methods (no instance state needed).
 // The cacheDir and tempDir fields are kept for delegation to operations that
 // require them for binary path resolution or temp directory scanning.
 type Service struct {
@@ -33,24 +30,6 @@ func NewService(cacheDir, tempDir string) *Service {
 }
 
 // ScanOrphanProcesses scans /proc for mvmctl-managed processes still running.
-// Matches Python's CacheService.scan_orphan_processes() exactly.
-//
-// Python structure:
-//
-//	try:
-//	    for entry in Path("/proc").iterdir():
-//	        if not entry.name.isdigit():
-//	            continue
-//	        try:
-//	            comm = (entry / "comm").read_text().strip()
-//	            if comm in _KNOWN_MVM_COMMS:
-//	                orphans.append({"pid": int(entry.name), "comm": comm})
-//	        except (OSError, PermissionError, ValueError):
-//	            continue
-//	except PermissionError:
-//	    logger.warning(
-//	        "Cannot scan /proc for orphan processes (permission denied)"
-//	    )
 func (s *Service) ScanOrphanProcesses(ctx context.Context) []map[string]any {
 	var orphans []map[string]any
 
@@ -146,7 +125,6 @@ func (s *Service) PruneWarmImages(ctx context.Context, dryRun bool) bool {
 }
 
 // CleanStaleProvisionMounts cleans stale provision mount directories in tempDir.
-// Matches Python's CacheService.clean_stale_provision_mounts() exactly.
 func (s *Service) CleanStaleProvisionMounts(ctx context.Context, dryRun bool) bool {
 	cleaned := false
 
@@ -166,7 +144,6 @@ func (s *Service) CleanStaleProvisionMounts(ctx context.Context, dryRun bool) bo
 		fullPath := filepath.Join(s.tempDir, entry.Name())
 
 		if !dryRun {
-			// Python: single try/except OSError wraps both unmount and rmdir.
 			// Both are attempted; if either fails, a single warning is logged.
 			var hadError bool
 			if isMountPoint(fullPath) {

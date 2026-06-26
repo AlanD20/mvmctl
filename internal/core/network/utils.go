@@ -13,17 +13,15 @@ import (
 )
 
 // SyncResult holds the result of a SyncIPTablesRules operation.
-// Matches the dict returned by Python's sync_iptables_rules().
 type SyncResult struct {
 	Added    int // Rules added to host iptables
 	Verified int // Rules already present in host iptables
 	Orphaned int // Host rules not tracked in DB
 }
 
-// ── Network utilities ──
+// --- Network utilities ---
 
 // ComputeBridgeAddress returns gateway IP with subnet prefix.
-// Matches Python's compute_bridge_address which raises ValueError on invalid subnet.
 func ComputeBridgeAddress(gateway, subnet string) (string, error) {
 	_, ipnet, err := net.ParseCIDR(subnet)
 	if err != nil {
@@ -34,7 +32,6 @@ func ComputeBridgeAddress(gateway, subnet string) (string, error) {
 }
 
 // ComputeBridgeName generates a 15-char bridge name from the network name.
-// Matches Python's NetworkUtils.compute_bridge_name().
 func ComputeBridgeName(networkName string) string {
 	raw := fmt.Sprintf("%s-%s", infra.CLIName, networkName)
 	if len(raw) <= 15 {
@@ -58,7 +55,6 @@ func sha256Hex(s string) string {
 }
 
 // GenerateMAC generates a MAC address with the given prefix.
-// Matches Python's generate_mac which uses 4 random bytes + uppercase.
 func GenerateMAC(macPrefix string) string {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
@@ -73,7 +69,6 @@ func GenerateMAC(macPrefix string) string {
 }
 
 // GenerateTAPName generates a TAP device name from network and VM names.
-// Matches Python's NetworkUtils.generate_tap_name().
 func GenerateTAPName(networkName, vmName string) string {
 	raw := fmt.Sprintf("%s-%s", networkName, vmName)
 	hash := sha256Hex(raw)[:11]

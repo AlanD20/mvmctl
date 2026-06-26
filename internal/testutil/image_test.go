@@ -81,7 +81,7 @@ func TestImageRepo_SoftDelete(t *testing.T) {
 	seedImg(t, repo, newImage("img-1", "del", "alpine"))
 	require.NoError(t, repo.SoftDelete(ctx, "img-1"))
 
-	// Get still returns soft-deleted items (matching Python's behavior)
+	// Get still returns soft-deleted items
 	got, _ := repo.Get(ctx, "img-1")
 	require.NotNil(t, got)
 	assert.False(t, got.IsPresent)

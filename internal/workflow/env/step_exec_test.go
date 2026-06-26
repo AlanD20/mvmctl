@@ -11,11 +11,14 @@ import (
 
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
+	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
+	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/results"
 )
 
-// ─── ExecStep.Apply ─────────────────────────────────────────────────────────
+// --- ExecStep.Apply ---
 // Rationale: ExecStep.Apply requires a real vsock connection via VMExec,
 // so we cannot test the happy path without a live VM. We test the nil-op
 // guard (R1: every error-returning function needs at least one error case).
@@ -26,7 +29,7 @@ func TestExecStep_Apply(t *testing.T) {
 		ctx     func() context.Context
 		wantErr string
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_rejected_at_construction": {
 			setupOp: func(_ *testing.T) api.API { return nil },
@@ -64,7 +67,91 @@ func TestExecStep_Apply(t *testing.T) {
 	}
 }
 
-// ─── ExecStep.Destroy ──────────────────────────────────────────────────────
+// --- ExecStep.Apply VMExec exit code ---
+// Rationale: ExecStep.Apply must fail when the remote command exits with a
+// non-zero code. A zero exit code succeeds and persists state. If VMExec
+// itself returns an error (e.g., vsock failure), Apply must propagate it.
+
+func TestExecStep_Apply_VMExec_ExitCode(t *testing.T) {
+	tests := map[string]struct {
+		vmExecFunc func(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
+		wantErr    string
+	}{
+		"exit_code_0_succeeds": {
+			vmExecFunc: func(_ context.Context, _ inputs.VMExecInput) (*results.VMExecResult, error) {
+				return &results.VMExecResult{ExitCode: 0}, nil
+			},
+		},
+		"exit_code_1_fails": {
+			vmExecFunc: func(_ context.Context, _ inputs.VMExecInput) (*results.VMExecResult, error) {
+				return &results.VMExecResult{ExitCode: 1}, nil
+			},
+			wantErr: "exited with code 1",
+		},
+		"exit_code_127_fails": {
+			vmExecFunc: func(_ context.Context, _ inputs.VMExecInput) (*results.VMExecResult, error) {
+				return &results.VMExecResult{ExitCode: 127}, nil
+			},
+			wantErr: "exited with code 127",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			op := &testutil.MockOperation{
+				MockVMAPI: testutil.MockVMAPI{
+					VMExecFunc: tc.vmExecFunc,
+				},
+			}
+			step, err := envpkg.Registry["exec"].FromSpec("exec", "run-cmd", map[string]any{
+				"name":   "run-cmd",
+				"target": "my-vm",
+				"user":   "root",
+				"cmd":    "some-command",
+			}, op)
+			require.NoError(t, err, "FromSpec must succeed")
+
+			state := workflow.NewSharedState()
+			writer, writes := recordingWriter()
+			err = step.Apply(context.Background(), state, model.ResourceState{}, writer, noopProgress)
+
+			if tc.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, *writes, 1, "state must be persisted on success")
+		})
+	}
+}
+
+func TestExecStep_Apply_VMExec_Error(t *testing.T) {
+	op := &testutil.MockOperation{
+		MockVMAPI: testutil.MockVMAPI{
+			VMExecFunc: func(_ context.Context, _ inputs.VMExecInput) (*results.VMExecResult, error) {
+				return nil, errors.New("vsock connection refused")
+			},
+		},
+	}
+	step, err := envpkg.Registry["exec"].FromSpec("exec", "run-cmd", map[string]any{
+		"name":   "run-cmd",
+		"target": "my-vm",
+		"user":   "root",
+		"cmd":    "some-command",
+	}, op)
+	require.NoError(t, err, "FromSpec must succeed")
+
+	state := workflow.NewSharedState()
+	writer, writes := recordingWriter()
+	err = step.Apply(context.Background(), state, model.ResourceState{}, writer, noopProgress)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "vsock connection refused")
+	assert.Len(t, *writes, 0, "state must not be persisted on transport error")
+}
+
+// --- ExecStep.Destroy ---
 // Rationale: Destroy is a no-op for Exec (commands are ephemeral), but it
 // must still handle nil op, write state, and recover saved state from the
 // parameter for workflow resumption after a crash.
@@ -79,7 +166,7 @@ func TestExecStep_Destroy(t *testing.T) {
 		wantCommand string
 		wantCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"context_cancelled_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return &api.Operation{} },
@@ -96,7 +183,7 @@ func TestExecStep_Destroy(t *testing.T) {
 			wantErr: "context canceled",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"noop_with_nil_saved_writes_empty_state": {
 			setupOp: func(_ *testing.T) *api.Operation {
@@ -168,7 +255,7 @@ func TestExecStep_Destroy(t *testing.T) {
 	}
 }
 
-// ─── ExecStep.Destroy write-failure propagation ─────────────────────────────
+// --- ExecStep.Destroy write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Destroy must propagate it
 // rather than silently swallowing the persistence failure.
 
@@ -195,7 +282,7 @@ func TestExecStep_Destroy_WriteFailure(t *testing.T) {
 		"Destroy must wrap write errors with context")
 }
 
-// ─── ExecStep.StateData ────────────────────────────────────────────────────
+// --- ExecStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision resources.
@@ -260,7 +347,7 @@ func TestExecStep_StateData(t *testing.T) {
 	}
 }
 
-// ─── ExecStep.Dependencies ────────────────────────────────────────────────
+// --- ExecStep.Dependencies ---
 // Rationale: Dependencies must round-trip through FromSpec so that the DAG
 // engine can correctly order Exec steps after their VM dependencies.
 
@@ -313,7 +400,7 @@ func TestExecStep_Dependencies(t *testing.T) {
 	}
 }
 
-// ─── ExecStep.SpecHash ─────────────────────────────────────────────────────
+// --- ExecStep.SpecHash ---
 // Rationale: SpecHash must be deterministic and non-empty for steps created
 // from specs, enabling drift detection. Different specs must produce different
 // hashes.

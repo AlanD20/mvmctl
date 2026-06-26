@@ -1,6 +1,6 @@
 # Next-Level Optimization: Sub-100ms VM Creation
 
-> **STATUS: Current — Go codebase.** This document describes forward-looking optimizations for the Go `mvmctl` implementation. It has been updated from the legacy Python version to reflect the Go codebase's current state and architecture.
+> **STATUS: Current — Go codebase.** This document describes forward-looking optimizations for the Go `mvmctl` implementation.
 >
 > **Goal:** Reduce VM creation from ~2-5s (typical) to <100ms for hot-pool VMs and <500ms for cold-start VMs, enabling high-density microVM operations.
 >
@@ -35,7 +35,7 @@ These are already implemented in the Go codebase:
 | Loop-mount backend (faster than guestfs, primary) ✅ | `internal/lib/provisioner/loopmount/` + `internal/service/loopmount/` | `docs/RUNTIME.md` |
 | Atomic firewall rule sync (nftables default, iptables fallback) ✅ | `internal/lib/firewall/` | [`network-sync-atomicity.md`](network-sync-atomicity.md) |
 | Firecracker snapshot/resume API (create_snapshot, load_snapshot) ✅ | `internal/core/vm/controller.go` | — |
-| Compiled binary (Go) — no Python startup overhead ✅ | `cmd/mvm/main.go` | — |
+| Compiled binary (Go) — no interpreter startup overhead ✅ | `cmd/mvm/main.go` | — |
 | Boot args builder with user overrides ✅ | `internal/core/vm/firecracker.go:bootArgsBuilder` | — |
 | Kernel building with custom configs ✅ | `internal/core/kernel/service.go` | — |
 
@@ -229,11 +229,11 @@ Additional safe params that could still be added: `audit=0`, `elevator=noop`.
 
 ## 5. Tier 4 — Low Impact / Micro-Otimizations (Not Applicable in Go)
 
-These optimizations from the Python era are **not applicable** to the Go codebase:
+These legacy optimizations are **not applicable** to the Go codebase:
 
 | Legacy Optimization | Why Not Applicable |
 |---|---|
-| Python import optimization (LazyMVMGroup) | Go compiles to a single binary — no import time cost |
+| Import optimization (LazyMVMGroup) | Go compiles to a single binary — no import time cost |
 | Nuitka compilation | Replaced by native Go compilation |
 | `__slots__` for dataclasses | Go structs are already compile-time fixed-layout |
 | `asyncio` for concurrent subprocess management | Go uses goroutines + `context.Context` natively |

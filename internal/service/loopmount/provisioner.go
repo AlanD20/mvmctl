@@ -8,6 +8,7 @@ package loopmount
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,7 +24,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// ── Public types (no interface{} in public API) ─────────────────────────
+// --- Public types ---
 
 // Op represents a single provisioning operation.
 type Op struct {
@@ -93,7 +94,7 @@ type Result struct {
 	NewSizeBytes int64  // new filesystem size (for convert_fs)
 }
 
-// ── Provisioner ─────────────────────────────────────────────────────────
+// --- Provisioner ---
 
 // Provisioner executes loop-mount provisioning operations directly
 // (no subprocess, no JSON protocol).
@@ -133,9 +134,7 @@ func (p *Provisioner) Execute(ctx context.Context, ops []Op) ([]Result, error) {
 	return results, nil
 }
 
-// =========================================================================
-// Private action handlers
-// =========================================================================
+// --- Private action handlers ---
 
 // doProvision handles the "provision" action — loop device setup, mount,
 // file writes, chroot commands, and resize.
@@ -166,13 +165,20 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		ps.debugLog(input.Debug, fmt.Sprintf("cleanup: mount_point=%q loop_dev=%q", mountPoint, ps.loopDev))
 		if mountPoint != "" {
 			CleanupMount(mountPoint)
+			// Final safety net: remove the temp directory even if unmount
+			// partially failed (e.g. already unmounted but rmdir was skipped).
+			// This cleans up stale mvm-provision-* dirs that accumulate when
+			// the provisioner subprocess is killed before deferred cleanup runs.
+			if err := os.Remove(mountPoint); err != nil && !os.IsNotExist(err) {
+				ps.debugLog(input.Debug, fmt.Sprintf("cleanup: failed to remove mount point %s: %v", mountPoint, err))
+			}
 			mountPoint = ""
 		}
 		detachLoopDevice(ctx, ps.loopDev)
 		ps.loopDev = ""
 	}()
 
-	// ── Pre-loop resize: grow (truncate file before mounting) ──
+	// --- Pre-loop resize: grow (truncate file before mounting) ---
 	if input.Resize != nil && input.Resize.Action == "grow" && input.Resize.Bytes > 0 {
 		ps.step = "resize"
 		ps.debugLog(input.Debug, fmt.Sprintf("truncating image to %d bytes", input.Resize.Bytes))
@@ -181,7 +187,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		}
 	}
 
-	// ── Debug: log system info ──
+	// --- Debug: log system info ---
 	if input.Debug {
 		ps.debugLog(input.Debug, fmt.Sprintf("uid=%d gid=%d euid=%d", os.Getuid(), os.Getgid(), os.Geteuid()))
 		ps.debugLog(input.Debug, fmt.Sprintf("image=%s fs_type_hint=%s", input.Image, input.FsType))
@@ -197,7 +203,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		}
 	}
 
-	// ── Loop device setup ──
+	// --- Loop device setup ---
 	ps.step = "loop"
 	ps.debugLog(input.Debug, "setting up loop device")
 	loopDev, err := setupLoopDevice(ctx, input.Image)
@@ -207,13 +213,13 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 	ps.loopDev = loopDev
 	ps.debugLog(input.Debug, fmt.Sprintf("loop device: %s", ps.loopDev))
 
-	// ── Root partition detection ──
+	// --- Root partition detection ---
 	ps.step = "partition"
 	ps.debugLog(input.Debug, "finding root partition")
 	rootPart = findRootPartition(ctx, ps.loopDev)
 	ps.debugLog(input.Debug, fmt.Sprintf("root partition: %s", rootPart))
 
-	// ── Filesystem type detection ──
+	// --- Filesystem type detection ---
 	ps.step = "detect_fs"
 	if input.FsType != "" {
 		detectedFSType = input.FsType
@@ -222,14 +228,14 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 	}
 	ps.debugLog(input.Debug, fmt.Sprintf("fs type: %s", detectedFSType))
 
-	// ── Mount ──
+	// --- Mount ---
 	ps.step = "mount"
 	mountPoint, err = mountImage(ctx, rootPart, detectedFSType)
 	if err != nil {
 		return Result{Status: "error", Error: err.Error(), Step: ps.step}
 	}
 
-	// ── Btrfs grow (after truncation, before chroot work — must be done while mounted) ──
+	// --- Btrfs grow (after truncation, before chroot work — must be done while mounted) ---
 	if input.Resize != nil && input.Resize.Action == "grow" && detectedFSType == "btrfs" {
 		ps.step = "resize"
 		ps.debugLog(input.Debug, "growing btrfs filesystem to fill device")
@@ -238,7 +244,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		}
 	}
 
-	// ── Write files ──
+	// --- Write files ---
 	for _, f := range input.Files {
 		ps.step = "write"
 		if err := writeFile(mountPoint, f, input.Debug, ps); err != nil {
@@ -247,12 +253,12 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		filesWritten++
 	}
 
-	// ── Flush any pending chroot commands before copy directory operations ──
+	// --- Flush any pending chroot commands before copy directory operations ---
 	if err := flushChroot(); err != nil {
 		return Result{Status: "error", Error: err.Error(), Step: ps.step}
 	}
 
-	// ── Copy directories ──
+	// --- Copy directories ---
 	for _, c := range input.CopyDirs {
 		ps.step = "copy_dir"
 		count, err := copyDirectory(mountPoint, c)
@@ -262,7 +268,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		filesWritten += count
 	}
 
-	// ── Chroot commands (buffered, then flushed in batches) ──
+	// --- Chroot commands (buffered, then flushed in batches) ---
 	commandsRun := 0
 	for _, cmdStr := range input.Commands {
 		ps.step = "chroot"
@@ -277,12 +283,12 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		commandsRun++
 	}
 
-	// ── Flush any remaining buffered chroot commands ──
+	// --- Flush any remaining buffered chroot commands ---
 	if err := flushChroot(); err != nil {
 		return Result{Status: "error", Error: err.Error(), Step: ps.step}
 	}
 
-	// ── Post-mount resize: shrink ──
+	// --- Post-mount resize: shrink ---
 	if input.Resize != nil && input.Resize.Action == "shrink" {
 		ps.step = "resize"
 		if detectedFSType == "btrfs" {
@@ -300,7 +306,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		}
 	}
 
-	// ── Post-mount resize: ext4 grow (btrfs already handled above) ──
+	// --- Post-mount resize: ext4 grow (btrfs already handled above) ---
 	if input.Resize != nil && input.Resize.Action == "grow" && detectedFSType != "btrfs" {
 		ps.step = "resize"
 		if err := growExt4(ctx, &mountPoint, rootPart); err != nil {
@@ -308,7 +314,7 @@ func (p *Provisioner) doProvision(ctx context.Context, input Op) Result {
 		}
 	}
 
-	// ── Post-detach truncation for shrink ──
+	// --- Post-detach truncation for shrink ---
 	if resizeNewBytes > 0 {
 		if err := truncateImage(input.Image, resizeNewBytes); err != nil {
 			slog.Warn("failed to truncate image after shrink", "path", input.Image, "error", err)
@@ -523,7 +529,7 @@ func (p *Provisioner) doConvertFS(ctx context.Context, input Op) Result {
 	}
 }
 
-// ── Helper functions ────────────────────────────────────────────────────
+// --- Helper functions ---
 
 // truncateImage truncates (or extends) the image file to the specified size.
 func truncateImage(path string, size int64) error {
@@ -585,13 +591,24 @@ func growBtrfs(ctx context.Context, mountPoint string) error {
 // Takes *string so it can clear mountPoint after successful umount, preventing
 // deferred cleanup from retrying an unmount on intermediate failure.
 func growExt4(ctx context.Context, mountPoint *string, rootPart string) error {
-	if _, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
-		return fmt.Errorf("umount failed: %v", err)
+	if output, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
+		return fmt.Errorf("umount failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	*mountPoint = "" // prevent deferred cleanup from retrying umount
 
-	if _, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
-		return fmt.Errorf("e2fsck: %v", err)
+	if output, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
+		// e2fsck exits with code 1 (errors corrected) or 2 (errors corrected,
+		// reboot recommended) as success — the filesystem was fixed.
+		// Code 4+ means actual unrecoverable errors.
+		// Without this check, any image with minor fixable inconsistencies
+		// (common in compressed/distributed ext4 images) would fail grow.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() <= 2 {
+			slog.Warn("e2fsck corrected filesystem errors",
+				"root_part", rootPart, "exit_code", exitErr.ExitCode())
+		} else {
+			return fmt.Errorf("e2fsck: %v: %s", err, strings.TrimSpace(string(output)))
+		}
 	}
 
 	var resizeOutBuf strings.Builder
@@ -610,13 +627,24 @@ func growExt4(ctx context.Context, mountPoint *string, rootPart string) error {
 // deferred cleanup from retrying an unmount on intermediate failure.
 // Returns the new filesystem size in bytes.
 func shrinkExt4(ctx context.Context, mountPoint *string, rootPart string, headroom int) (int64, error) {
-	if _, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
-		return 0, fmt.Errorf("umount failed: %v", err)
+	if output, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
+		return 0, fmt.Errorf("umount failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	*mountPoint = "" // prevent deferred cleanup from retrying umount
 
-	if _, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
-		return 0, fmt.Errorf("e2fsck: %v", err)
+	if output, err := exec.CommandContext(ctx, "e2fsck", "-f", "-y", rootPart).CombinedOutput(); err != nil {
+		// e2fsck exits with code 1 (errors corrected) or 2 (errors corrected,
+		// reboot recommended) as success — the filesystem was fixed.
+		// Code 4+ means actual unrecoverable errors.
+		// Without this check, any image with minor fixable inconsistencies
+		// (common in compressed/distributed ext4 images) would fail shrink.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() <= 2 {
+			slog.Warn("e2fsck corrected filesystem errors",
+				"root_part", rootPart, "exit_code", exitErr.ExitCode())
+		} else {
+			return 0, fmt.Errorf("e2fsck: %v: %s", err, strings.TrimSpace(string(output)))
+		}
 	}
 
 	if _, err := exec.CommandContext(ctx, "resize2fs", "-M", rootPart).CombinedOutput(); err != nil {
@@ -648,11 +676,9 @@ func detachLoopDevice(ctx context.Context, loopDev string) {
 	}
 }
 
-// =========================================================================
-// Constants
-// =========================================================================
+// --- Constants ---
 
-// Default shells for chroot — matches Python's _DEFAULT_SHELLS.
+// Default shells for chroot — tried in order until one is found.
 var defaultShells = []string{
 	"/bin/sh",
 	"/bin/bash",
@@ -664,7 +690,7 @@ var defaultShells = []string{
 	"/usr/bin/busybox",
 }
 
-// Linux filesystem types — matches Python's _LINUX_FS_TYPES.
+// Linux filesystem types recognized during partition scanning.
 var linuxFSTypes = map[string]bool{
 	"ext2":  true,
 	"ext3":  true,
@@ -672,15 +698,13 @@ var linuxFSTypes = map[string]bool{
 	"btrfs": true,
 }
 
-// Debug log file path — matches Python's _DEBUG_LOG_PATH.
+// Debug log file path for provisioning operations.
 const provisionDebugLogPath = "/tmp/mvm-provision-debug.log"
 
-// BATCH_SIZE — matches Python's Provisioner.BATCH_SIZE.
+// chrootBatchSize is the number of chroot commands to batch before flushing.
 const chrootBatchSize = 10
 
-// =========================================================================
-// provisionState — debug logging for provisioning operations
-// =========================================================================
+// --- provisionState ---
 
 type provisionState struct {
 	step    string
@@ -709,13 +733,13 @@ func (ps *provisionState) debugLog(debug bool, msg string) {
 	}
 }
 
-// findRootPartition scans partitions of loopDev for a Linux filesystem,
-// matching Python's _find_root_partition() logic:
+// findRootPartition scans partitions of loopDev for a Linux filesystem.
+// Selection priority:
 //
-//  1. No partitions → raw loop device
-//  2. Scan all partitions for Linux filesystems, collect with sizes
-//  3. Try p1, then p2 first
-//  4. Otherwise pick largest
+// 1. No partitions → raw loop device
+// 2. Scan all partitions for Linux filesystems, collect with sizes
+// 3. Try p1, then p2 first
+// 4. Otherwise pick largest
 func findRootPartition(ctx context.Context, loopDev string) string {
 	// List partitions
 	var partitions []string
@@ -819,45 +843,47 @@ func getFSByteSize(ctx context.Context, dev string) int64 {
 	return blockCount * blockSize
 }
 
-// writeFile writes a file inside the mount point, matching Python's _write_file().
-// Default mode is 0644 when not specified (matching Python's file_op.get("mode", 0o644)).
+// writeFile writes a file inside the mount point.
+// Default mode is 0644 when not specified.
 func writeFile(mountPoint string, f FileOp, debug bool, ps *provisionState) error {
 	fullPath := filepath.Join(mountPoint, strings.TrimLeft(f.Path, "/"))
 	ps.debugLog(debug, fmt.Sprintf("write: path=%s full=%s", f.Path, fullPath))
 
-	// Remove existing path if it exists (handles symlinks, sockets, FIFOs, hardlinks)
-	if _, err := os.Lstat(fullPath); err == nil {
-		ps.debugLog(debug, fmt.Sprintf("write: removing existing at %s", f.Path))
-		if err := os.Remove(fullPath); err != nil {
-			ps.debugLog(debug, fmt.Sprintf("write: failed to remove %s: %v", f.Path, err))
-			return fmt.Errorf("cannot remove existing path %s: %v", f.Path, err)
-		}
-	}
-
-	// Create parent directories
+	// Create parent directories first (needed regardless of the file type).
 	parent := filepath.Dir(fullPath)
 	if err := os.MkdirAll(parent, infra.DirPerm); err != nil {
 		return fmt.Errorf("mkdir %s: %v", parent, err)
 	}
 
-	// Data is raw bytes (already decoded from base64 in cmd/mvm bridge if coming from JSON)
-	// If Data is nil and Path is set, could be a zero-length write; proceed.
+	// Data is raw bytes (already decoded from base64 if coming from JSON wire protocol).
+	// If Data is nil and Path is set, this is a zero-length write; proceed.
 	data := f.Data
 	ps.debugLog(debug, fmt.Sprintf("write: writing %d bytes to %s", len(data), f.Path))
 
-	// Resolve mode: default 0644 when not specified (matching Python's file_op.get("mode", 0o644))
+	// Resolve mode: default 0644 when not specified.
 	mode := f.Mode
 	if mode == 0 {
 		mode = 0644
 	}
 
-	// Write file
+	// Try direct write first — os.WriteFile uses O_CREATE|O_WRONLY|O_TRUNC.
+	// In the common case (overwriting an existing regular file), O_TRUNC
+	// reuses the inode and avoids an unnecessary Remove+Create cycle.
+	// Only fall back to remove-and-retry when the path is a non-regular
+	// file (symlink, socket, FIFO) that os.WriteFile cannot truncate.
 	if err := os.WriteFile(fullPath, data, os.FileMode(mode)); err != nil {
-		return fmt.Errorf("write %s: %v", f.Path, err)
+		// Write failed — path is a symlink, directory, socket, FIFO, etc.
+		// Remove it first, then retry.
+		if rmErr := os.Remove(fullPath); rmErr != nil && !os.IsNotExist(rmErr) {
+			return fmt.Errorf("cannot remove existing path %s: %v", f.Path, rmErr)
+		}
+		if err := os.WriteFile(fullPath, data, os.FileMode(mode)); err != nil {
+			return fmt.Errorf("write %s: %v", f.Path, err)
+		}
 	}
 
-	// Set permissions (best effort — root in container may lack CAP_CHOWN)
-	// Matching Python's try/except OSError: pass with debug logging
+	// Set permissions and ownership. Best-effort: root in container may lack CAP_CHOWN.
+	// Log and continue on error.
 	if err := os.Chmod(fullPath, os.FileMode(mode)); err != nil {
 		ps.debugLog(debug, fmt.Sprintf("write: chmod failed for %s: %v", f.Path, err))
 	}
@@ -870,9 +896,9 @@ func writeFile(mountPoint string, f FileOp, debug bool, ps *provisionState) erro
 	return nil
 }
 
-// copyDirectory copies a directory tree into the mount point, matching Python's _copy_directory().
-// Uses 64KB chunks (matching Python's sf.read(65536)) instead of io.Copy.
-// Returns the number of files copied (Python returns int, not counting directories).
+// copyDirectory copies a directory tree into the mount point.
+// Uses 64KB chunks instead of io.Copy for consistent buffer sizing.
+// Returns the number of files copied (directories are not counted).
 func copyDirectory(mountPoint string, c CopyDirOp) (int, error) {
 	mode := c.Mode
 	if mode == 0 {
@@ -893,9 +919,8 @@ func copyDirectory(mountPoint string, c CopyDirOp) (int, error) {
 		dstPath := filepath.Join(mountPoint, strings.TrimLeft(c.Dst, "/"), relPath)
 
 		if info.IsDir() {
-			// Python's _copy_directory() only processes files, not directories.
-			// Parent directories are created implicitly via os.makedirs before each file.
-			// We still create them here to match behavior, but don't count them.
+			// Only files are counted; parent directories are created as needed
+			// but not included in the file count.
 			return os.MkdirAll(dstPath, os.FileMode(mode))
 		}
 
@@ -906,7 +931,7 @@ func copyDirectory(mountPoint string, c CopyDirOp) (int, error) {
 			}
 		}
 
-		// Copy file using 64KB chunks matching Python's sf.read(65536)
+		// Copy file using 64KB chunks.
 		srcFile, err := os.Open(srcPath)
 		if err != nil {
 			return err
@@ -943,7 +968,7 @@ func copyDirectory(mountPoint string, c CopyDirOp) (int, error) {
 			return copyErr
 		}
 
-		// Set mode — matching Python's try/except OSError: pass
+		// Set mode — best-effort, log on error.
 		if err := os.Chmod(dstPath, os.FileMode(mode)); err != nil {
 			slog.Debug("failed to set mode on copied file", "path", dstPath, "error", err)
 		}
@@ -955,9 +980,8 @@ func copyDirectory(mountPoint string, c CopyDirOp) (int, error) {
 }
 
 // runChrootCommands runs a command inside the chroot, trying each available shell.
-// Matches Python's _flush_chroot_buffer() logic.
 func runChrootCommands(ctx context.Context, mountPoint, command, customShell string) error {
-	// Ensure /dev/null exists in the chroot — matches Python's os.mknod(null_path, 0o666, os.makedev(1, 3)).
+	// Ensure /dev/null exists in the chroot.
 	nullPath := filepath.Join(mountPoint, "dev", "null")
 	if _, err := os.Stat(nullPath); os.IsNotExist(err) {
 		devDir := filepath.Dir(nullPath)
@@ -975,9 +999,8 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 		shells = []string{customShell}
 	}
 
-	// Copy entire host environment and override PATH — matching Python's os.environ.copy()
-	// then env["PATH"] = "...". Go's exec.Cmd.Env is a []string; duplicate keys have
-	// system-dependent behavior (last one wins on Linux), so we filter out existing PATH.
+	// Copy host environment and override PATH. Go's exec.Cmd.Env is a []string; duplicate keys have
+	// system-dependent behavior (last one wins on Linux), so we filter out existing PATH first.
 	env := os.Environ()
 	var cleanedEnv []string
 	for _, e := range env {
@@ -997,7 +1020,7 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 
 		shellBase := filepath.Base(shell)
 
-		// Matching Python's proc.communicate(timeout=60) — wrap in context with timeout.
+		// Wrap in context with 60s timeout to prevent hung chroot commands.
 		chrootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 
@@ -1009,7 +1032,7 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 		}
 		cmd.Env = env
 
-		// Python captures stdout and stderr separately via subprocess.PIPE — both captured
+		// Capture stdout and stderr separately for error reporting.
 		var stdoutBuf, stderrBuf strings.Builder
 		cmd.Stdout = &stdoutBuf
 		cmd.Stderr = &stderrBuf
@@ -1021,7 +1044,7 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 		if err == nil {
 			return nil
 		}
-		// Python: last_error = stderr.decode("utf-8", errors="replace")
+		// Capture stderr as the error message, truncating to 500 bytes.
 		stderrText := stderrBuf.String()
 		if len(stderrText) > 500 {
 			stderrText = stderrText[:500]
@@ -1029,7 +1052,7 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 		lastError = stderrText
 	}
 
-	// Python: raise RuntimeError(f"chroot failed (no working shell found): {last_error[:500]}")
+	// No working shell was found in the chroot. Report the last error.
 	if len(lastError) > 500 {
 		lastError = lastError[:500]
 	}
@@ -1038,9 +1061,9 @@ func runChrootCommands(ctx context.Context, mountPoint, command, customShell str
 
 // shrinkBtrfs shrinks a btrfs filesystem.
 // Returns the new device size and any error.
-// Matching Python's _shrink_btrfs() — raises error on failure or when targetBytes is unresolvable.
+// Returns an error on failure or when targetBytes is unresolvable.
 func shrinkBtrfs(ctx context.Context, mountPoint, rootPart string, targetBytes int64) (int64, error) {
-	// fstrim before shrink — matching Python (best-effort, log on error)
+	// fstrim before shrink — best-effort, log on error.
 	if err := exec.CommandContext(ctx, "fstrim", mountPoint).Run(); err != nil {
 		slog.Debug("fstrim before btrfs shrink failed", "mount", mountPoint, "error", err)
 	}
@@ -1079,7 +1102,7 @@ func calcBtrfsMinSize(ctx context.Context, mountPoint, rootPart string) int64 {
 		return currentSize
 	}
 
-	// Parse "Used:" line using regex matching Python's r"[\d.]+"
+	// Parse "Used:" line for the numeric value.
 	usedRe := regexp.MustCompile(`[\d.]+`)
 	var usedBytes int64
 	for line := range strings.SplitSeq(string(output), "\n") {
@@ -1119,8 +1142,8 @@ func getBtrfsDeviceSize(ctx context.Context, mountPoint string) int64 {
 	if err != nil {
 		return 0
 	}
-	// Parse line like:   devid    1 size 1.75GiB used 1.32GiB path /dev/loop0
-	// Using regex matching Python's r"size\s+([\d.]+)([kKmMgGtTbB])"
+	// Parse lines like:   devid    1 size 1.75GiB used 1.32GiB path /dev/loop0
+	// Extract the size value and unit with a regex.
 	sizeRe := regexp.MustCompile(`size\s+([\d.]+)\s*([kKmMgGtTbB])`)
 	for line := range strings.SplitSeq(string(output), "\n") {
 		if strings.Contains(line, "devid") && strings.Contains(line, "size") {
@@ -1151,8 +1174,6 @@ func getBtrfsDeviceSize(ctx context.Context, mountPoint string) int64 {
 
 // CleanupMount unmounts a mount point, kills orphan processes keeping it busy,
 // and removes the directory. Returns true if both umount and rmdir succeeded.
-// Matches Python's Provisioner._cleanup_mount() exactly, and the identical
-// cleanupMount function that was in cmd/mvm/provision.go.
 func CleanupMount(mountPoint string) bool {
 	resolvedMount, err := filepath.EvalSymlinks(mountPoint)
 	if err != nil {
@@ -1163,7 +1184,7 @@ func CleanupMount(mountPoint string) bool {
 	umount := exec.CommandContext(context.Background(), "umount", mountPoint)
 	if output, err := umount.CombinedOutput(); err == nil {
 		_ = output
-		// Success — remove empty directory (matches Python's os.rmdir() with try/except OSError: pass)
+		// Success — remove the now-empty mount point directory. Log on error.
 		if err := os.Remove(mountPoint); err != nil {
 			slog.Debug("failed to remove mount point after umount", "path", mountPoint, "error", err)
 		}
@@ -1182,7 +1203,7 @@ func CleanupMount(mountPoint string) bool {
 				continue
 			}
 			rootLink := filepath.Join("/proc", name, "root")
-			// Check if it's a symlink first — matching Python's os.path.islink()
+			// Check if it's a symlink first.
 			if linkInfo, lstatErr := os.Lstat(rootLink); lstatErr != nil || linkInfo.Mode()&os.ModeSymlink == 0 {
 				continue
 			}
@@ -1204,11 +1225,8 @@ func CleanupMount(mountPoint string) bool {
 	out, umountErr := umount.CombinedOutput()
 	_ = out
 
-	// Python: unmount_ok = result.returncode == 0
 	unmountOk := umountErr == nil
-	// Python: try os.rmdir(mount_point); except OSError: rmdir_ok = False
 	rmdirErr := os.Remove(mountPoint)
 	_ = rmdirErr
-	// Python: return unmount_ok and rmdir_ok
 	return unmountOk && rmdirErr == nil
 }

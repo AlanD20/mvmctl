@@ -80,7 +80,7 @@ By default, libguestfs forks a "recovery process" that monitors the appliance an
 
 ### 8. **--no-sync** (CLI Flag) ✅ IMPLEMENTED
 
-The `guestfishRun()` function always passes `--no-sync` to the guestfish CLI. This disables the default `sync()` call on handle close (equivalent to `set_autosync(false)` in the Python bindings). Since we explicitly call `sync` in the script at the end of provisioning, autosync is redundant.
+The `guestfishRun()` function always passes `--no-sync` to the guestfish CLI. This disables the default `sync()` call on handle close (equivalent to `set_autosync(false)` in the guestfish CLI / libguestfs API). Since we explicitly call `sync` in the script at the end of provisioning, autosync is redundant.
 
 **Implementation:** `internal/lib/provisioner/guestfs/base.go:114`
 ```go
@@ -112,25 +112,6 @@ for attempt := range 3 {
     // ... run guestfish ...
 }
 ```
-
-## Differences from Legacy Python Implementation
-
-The Go guestfs implementation differs from the legacy Python version in key ways:
-
-| Aspect | Python (legacy) | Go (current) |
-|---|---|---|
-| **Bindings** | Native Python `guestfs` module (`import guestfs`) | `guestfish` CLI subprocess |
-| **Handle lifecycle** | `with OptimizedGuestfs() as g:` context manager | `GuestfsHandle` struct with explicit methods |
-| **Backend config** | `os.environ["LIBGUESTFS_BACKEND"]="direct"` | Same env var in `initEnv()` |
-| **Memory** | `g.set_memsize(256)` | `LIBGUESTFS_MEMSIZE=256` env var |
-| **SMP** | `g.set_smp(1)` | `set-smp 1` stdin command |
-| **Recovery proc** | `g.set_recovery_proc(False)` | `set-recovery-proc false` stdin command |
-| **Autosync** | `g.set_autosync(False)` | `--no-sync` CLI flag |
-| **Network** | `g.set_network(False)` | Not needed — implied by env + no-net default |
-| **Add drive** | `g.add_drive_opts(..., format="raw", cachemode="writeback")` | `-a` flag + `--format` (cachemode not supported in guestfish 1.56.x) |
-| **Kernel detection** | `KernelDetector.find_best_kernel()` | Same, ported identically |
-| **Fixed appliance** | `build_appliance()` | `BuildAppliance()` — same logic |
-| **Retry** | 3 attempts, 0.5s backoff in `__enter__()` | 3 attempts, variable backoff in `guestfishRun()` |
 
 ## Provisioner: Builder Pattern
 

@@ -11,11 +11,11 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// AuditLog provides centralized audit logging matching Python's mvmctl.utils.auditlog.AuditLog.
+// AuditLog provides centralized audit logging.
 // Writes structured entries to a single {cacheDir}/audit.log file.
 //
 // Uses rotating.RotatingFileWriter under the hood, which provides continuous
-// 10MB rotation with 3 backups — matching Python's RotatingFileHandler behavior.
+// 10MB rotation with 3 backups.
 //
 // The file handle is managed entirely by RotatingFileWriter; AuditLog only
 // writes formatted entries through the io.Writer interface.
@@ -27,7 +27,7 @@ type AuditLog struct {
 // NewAuditLog creates a new AuditLog writing to infra.GetAuditLogPath().
 // The underlying RotatingFileWriter is created at construction time (opening
 // the file immediately). If the file cannot be opened, the writer is nil and
-// Log/LogOperation silently succeed (matching Python's NullHandler fallback).
+// Log/LogOperation silently succeed (no-op fallback).
 func NewAuditLog() *AuditLog {
 	path := infra.GetAuditLogPath()
 	writer, _ := rotating.NewRotatingFileWriter(path)
@@ -49,14 +49,8 @@ func detectUser() string {
 	return u
 }
 
-// Log appends a raw entry string with dual timestamps matching Python's
-// AuditLog output. Python's FileHandler formatter produces:
-//
-//	%(asctime)s UTC %(message)s
-//
-// Where datefmt="%Y-%m-%dT%H:%M:%S". The message itself contains another
-// timestamp: [YYYY-MM-DDTHH:MM:SSZ]. This replicates both so the output
-// matches Python exactly:
+// Log appends a raw entry string with dual timestamps. Each entry has a
+// leading UTC timestamp and a second timestamp in the message body:
 //
 //	2024-01-15T10:30:00 UTC [2024-01-15T10:30:00Z] user=root op=...
 func (l *AuditLog) Log(entry string) error {

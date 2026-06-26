@@ -19,13 +19,12 @@ func NewRepository(db *sqlx.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
-// Matches Python's "SELECT * FROM vm_instances" exactly.
 const vmBaseQuery = "SELECT * FROM vm_instances"
 
-// ── Basic CRUD ──
+// --- Basic CRUD ---
 
-func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.VM, error) {
-	var vm model.VM
+func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.VMItem, error) {
+	var vm model.VMItem
 	err := sqlx.GetContext(ctx, r.db, &vm, vmBaseQuery+" WHERE id = ?", id)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -33,8 +32,8 @@ func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.VM, error) {
 	return &vm, err
 }
 
-func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.VM, error) {
-	var vm model.VM
+func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.VMItem, error) {
+	var vm model.VMItem
 	err := sqlx.GetContext(ctx, r.db, &vm, vmBaseQuery+" WHERE name = ?", name)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -42,8 +41,8 @@ func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.VM, err
 	return &vm, err
 }
 
-func (r *sqliteRepo) FindByIP(ctx context.Context, ipv4 string) (*model.VM, error) {
-	var vm model.VM
+func (r *sqliteRepo) FindByIP(ctx context.Context, ipv4 string) (*model.VMItem, error) {
+	var vm model.VMItem
 	err := sqlx.GetContext(ctx, r.db, &vm, vmBaseQuery+" WHERE ipv4 = ?", ipv4)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -51,8 +50,8 @@ func (r *sqliteRepo) FindByIP(ctx context.Context, ipv4 string) (*model.VM, erro
 	return &vm, err
 }
 
-func (r *sqliteRepo) FindByMAC(ctx context.Context, mac string) (*model.VM, error) {
-	var vm model.VM
+func (r *sqliteRepo) FindByMAC(ctx context.Context, mac string) (*model.VMItem, error) {
+	var vm model.VMItem
 	err := sqlx.GetContext(ctx, r.db, &vm, vmBaseQuery+" WHERE mac = ?", mac)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -76,17 +75,17 @@ func (r *sqliteRepo) NamesExist(ctx context.Context, names []string) ([]string, 
 	return existingNames, nil
 }
 
-// ── Lookups ──
+// --- Lookups ---
 
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.VM, error) {
-	var rows []*model.VM
+func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.VMItem, error) {
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" WHERE id LIKE ?", prefix+"%"); err != nil {
 		return nil, fmt.Errorf("find vm by prefix: %w", err)
 	}
 	return rows, nil
 }
 
-// ── Counting ──
+// --- Counting ---
 
 func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 	var c int
@@ -112,15 +111,15 @@ func (r *sqliteRepo) CountByStatus(ctx context.Context, statuses ...string) (int
 	return c, nil
 }
 
-func (r *sqliteRepo) FindByNetworkID(ctx context.Context, networkID string) ([]*model.VM, error) {
-	var rows []*model.VM
+func (r *sqliteRepo) FindByNetworkID(ctx context.Context, networkID string) ([]*model.VMItem, error) {
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" WHERE network_id = ?", networkID); err != nil {
 		return nil, fmt.Errorf("find vms by network id: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) GetByNetworkIDs(ctx context.Context, networkIDs []string) ([]*model.VM, error) {
+func (r *sqliteRepo) GetByNetworkIDs(ctx context.Context, networkIDs []string) ([]*model.VMItem, error) {
 	if len(networkIDs) == 0 {
 		return nil, nil
 	}
@@ -129,22 +128,22 @@ func (r *sqliteRepo) GetByNetworkIDs(ctx context.Context, networkIDs []string) (
 		return nil, fmt.Errorf("get vms by network ids: %w", err)
 	}
 	query = r.db.Rebind(query)
-	var rows []*model.VM
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("get vms by network ids: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) FindByKernelID(ctx context.Context, kernelID string) ([]*model.VM, error) {
-	var rows []*model.VM
+func (r *sqliteRepo) FindByKernelID(ctx context.Context, kernelID string) ([]*model.VMItem, error) {
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" WHERE kernel_id = ?", kernelID); err != nil {
 		return nil, fmt.Errorf("find vms by kernel id: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) GetByKernelIDs(ctx context.Context, kernelIDs []string) ([]*model.VM, error) {
+func (r *sqliteRepo) GetByKernelIDs(ctx context.Context, kernelIDs []string) ([]*model.VMItem, error) {
 	if len(kernelIDs) == 0 {
 		return nil, nil
 	}
@@ -153,22 +152,22 @@ func (r *sqliteRepo) GetByKernelIDs(ctx context.Context, kernelIDs []string) ([]
 		return nil, fmt.Errorf("get vms by kernel ids: %w", err)
 	}
 	query = r.db.Rebind(query)
-	var rows []*model.VM
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("get vms by kernel ids: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) FindByBinaryID(ctx context.Context, binaryID string) ([]*model.VM, error) {
-	var rows []*model.VM
+func (r *sqliteRepo) FindByBinaryID(ctx context.Context, binaryID string) ([]*model.VMItem, error) {
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" WHERE binary_id = ?", binaryID); err != nil {
 		return nil, fmt.Errorf("find vms by binary id: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) GetByBinaryIDs(ctx context.Context, binaryIDs []string) ([]*model.VM, error) {
+func (r *sqliteRepo) GetByBinaryIDs(ctx context.Context, binaryIDs []string) ([]*model.VMItem, error) {
 	if len(binaryIDs) == 0 {
 		return nil, nil
 	}
@@ -177,14 +176,14 @@ func (r *sqliteRepo) GetByBinaryIDs(ctx context.Context, binaryIDs []string) ([]
 		return nil, fmt.Errorf("get vms by binary ids: %w", err)
 	}
 	query = r.db.Rebind(query)
-	var rows []*model.VM
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("get vms by binary ids: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) GetByImageIDs(ctx context.Context, imageIDs []string) ([]*model.VM, error) {
+func (r *sqliteRepo) GetByImageIDs(ctx context.Context, imageIDs []string) ([]*model.VMItem, error) {
 	if len(imageIDs) == 0 {
 		return nil, nil
 	}
@@ -193,15 +192,15 @@ func (r *sqliteRepo) GetByImageIDs(ctx context.Context, imageIDs []string) ([]*m
 		return nil, fmt.Errorf("get vms by image ids: %w", err)
 	}
 	query = r.db.Rebind(query)
-	var rows []*model.VM
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("get vms by image ids: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) FindByVolumeID(ctx context.Context, volumeID string) ([]*model.VM, error) {
-	var rows []*model.VM
+func (r *sqliteRepo) FindByVolumeID(ctx context.Context, volumeID string) ([]*model.VMItem, error) {
+	var rows []*model.VMItem
 	like := `%"` + volumeID + `"%`
 	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" WHERE volume_ids LIKE ?", like); err != nil {
 		return nil, fmt.Errorf("find vms by volume id: %w", err)
@@ -209,7 +208,7 @@ func (r *sqliteRepo) FindByVolumeID(ctx context.Context, volumeID string) ([]*mo
 	return rows, nil
 }
 
-func (r *sqliteRepo) FindByVolumeIDsBatch(ctx context.Context, volumeIDs []string) ([]*model.VM, error) {
+func (r *sqliteRepo) FindByVolumeIDsBatch(ctx context.Context, volumeIDs []string) ([]*model.VMItem, error) {
 	if len(volumeIDs) == 0 {
 		return nil, nil
 	}
@@ -220,15 +219,15 @@ func (r *sqliteRepo) FindByVolumeIDsBatch(ctx context.Context, volumeIDs []strin
 		args[i] = `%"` + vid + `"%`
 	}
 	query := "SELECT DISTINCT vm_instances.* FROM vm_instances WHERE " + strings.Join(patterns, " OR ")
-	var rows []*model.VM
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("find vms by volume ids batch: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) FindBySSHKeyID(ctx context.Context, keyID string) ([]*model.VM, error) {
-	var rows []*model.VM
+func (r *sqliteRepo) FindBySSHKeyID(ctx context.Context, keyID string) ([]*model.VMItem, error) {
+	var rows []*model.VMItem
 	like := `%"` + keyID + `"%`
 	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" WHERE ssh_keys LIKE ?", like); err != nil {
 		return nil, fmt.Errorf("find vms by ssh key id: %w", err)
@@ -236,15 +235,15 @@ func (r *sqliteRepo) FindBySSHKeyID(ctx context.Context, keyID string) ([]*model
 	return rows, nil
 }
 
-func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.VM, error) {
-	var rows []*model.VM
+func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.VMItem, error) {
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" ORDER BY created_at"); err != nil {
 		return nil, fmt.Errorf("list all vms: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*model.VM, error) {
+func (r *sqliteRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
 	if len(statuses) == 0 {
 		return r.ListAll(ctx)
 	}
@@ -253,14 +252,14 @@ func (r *sqliteRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*m
 		return nil, fmt.Errorf("list vms by status: %w", err)
 	}
 	query = r.db.Rebind(query)
-	var rows []*model.VM
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("list vms by status: %w", err)
 	}
 	return rows, nil
 }
 
-func (r *sqliteRepo) ListExcludingStatuses(ctx context.Context, excluded ...string) ([]*model.VM, error) {
+func (r *sqliteRepo) ListExcludingStatuses(ctx context.Context, excluded ...string) ([]*model.VMItem, error) {
 	if len(excluded) == 0 {
 		return r.ListAll(ctx)
 	}
@@ -269,18 +268,17 @@ func (r *sqliteRepo) ListExcludingStatuses(ctx context.Context, excluded ...stri
 		return nil, fmt.Errorf("list vms excluding statuses: %w", err)
 	}
 	query = r.db.Rebind(query)
-	var rows []*model.VM
+	var rows []*model.VMItem
 	if err := sqlx.SelectContext(ctx, r.db, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("list vms excluding statuses: %w", err)
 	}
 	return rows, nil
 }
 
-// ── Mutations ──
+// --- Mutations ---
 
-func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VM) error {
+func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 
-	// Python's exact UPSERT query with ALL columns and ON CONFLICT DO UPDATE
 	var err error
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO vm_instances (
@@ -380,7 +378,6 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VM) error {
 }
 
 func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.VMStatus) error {
-	// Python: "UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
 		"UPDATE vm_instances SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -391,7 +388,6 @@ func (r *sqliteRepo) UpdateStatus(ctx context.Context, id string, status model.V
 }
 
 func (r *sqliteRepo) UpdatePID(ctx context.Context, id string, pid *int) error {
-	// Python: "UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
 		"UPDATE vm_instances SET pid = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -402,7 +398,6 @@ func (r *sqliteRepo) UpdatePID(ctx context.Context, id string, pid *int) error {
 }
 
 func (r *sqliteRepo) UpdateProcessInfo(ctx context.Context, id string, pid *int, processStartTime *int64) error {
-	// Python: "UPDATE vm_instances SET pid = ?, process_start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
 		"UPDATE vm_instances SET pid = ?, process_start_time = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -414,7 +409,6 @@ func (r *sqliteRepo) UpdateProcessInfo(ctx context.Context, id string, pid *int,
 }
 
 func (r *sqliteRepo) UpdateExitCode(ctx context.Context, id string, exitCode int) error {
-	// Python: "UPDATE vm_instances SET exit_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
 	_, err := r.db.ExecContext(
 		ctx,
 		"UPDATE vm_instances SET exit_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -424,7 +418,7 @@ func (r *sqliteRepo) UpdateExitCode(ctx context.Context, id string, exitCode int
 	return err
 }
 
-// ── Deletion ──
+// --- Deletion ---
 
 func (r *sqliteRepo) Delete(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, "DELETE FROM vm_instances WHERE id = ?", id)

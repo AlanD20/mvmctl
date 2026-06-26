@@ -16,7 +16,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── MockCacheAPI ─────────────────────────────────────────────────────────────
+// --- MockCacheAPI ---
 // Rationale: MockCacheAPI satisfies api.CacheAPI for testing upper layers. With
 // 11 methods, tests verify default zero returns for each return shape and custom
 // function routing for representative methods.

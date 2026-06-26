@@ -1,6 +1,6 @@
 package model
 
-// ── VersionInfo ──
+// --- VersionInfo ---
 
 // VersionInfo represents a published version of a resource from an upstream provider.
 type VersionInfo struct {

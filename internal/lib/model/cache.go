@@ -1,6 +1,6 @@
 package model
 
-// ── PruneAllResult ──
+// --- PruneAllResult ---
 
 // PruneAllResult holds the result of a full cache prune across all resource types.
 type PruneAllResult struct {
@@ -9,7 +9,7 @@ type PruneAllResult struct {
 	HadRunningVMs bool
 }
 
-// ── CleanResult ──
+// --- CleanResult ---
 
 // CleanResult holds the result of a complete cache clean operation.
 type CleanResult struct {

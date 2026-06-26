@@ -1,5 +1,5 @@
 // Package common provides CLI display helpers — table rendering, JSON output,
-// error display, and the MVMCli singleton matching Python's “utils/cli.py:MVMCli“.
+// error display, and the MVMCli singleton.
 package common
 
 import (
@@ -25,7 +25,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Braille spinner (matching Python's Rich console.status) ──────────────────
+// --- Braille spinner ---
 
 var spinnerChars = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -35,7 +35,7 @@ type Progress struct {
 	done    chan struct{}
 	text    string
 	stopped bool
-	mu      sync.Mutex
+	mu      sync.Mutex // guards text and stopped state
 }
 
 // NewProgress creates a Braille-dots spinner that renders on stderr.
@@ -103,7 +103,7 @@ func (p *Progress) UpdateText(text string) {
 	}
 }
 
-// ─── Prettification patterns (matching Python _PRETTIFY_PATTERNS) ─────────────
+// --- Prettification patterns ---
 
 var prettifyPatterns = []struct {
 	re   *regexp.Regexp
@@ -148,9 +148,9 @@ func toTitle(s string) string {
 	return strings.Join(words, " ")
 }
 
-// ─── MVMCli singleton ─────────────────────────────────────────────────────────
+// --- MVMCli singleton ---
 
-// ─── TTY detection ───────────────────────────────────────────────────────────
+// --- TTY detection ---
 
 // isStdoutTTY returns true if stdout is a terminal (i.e. not piped).
 func isStdoutTTY() bool {
@@ -179,12 +179,11 @@ const (
 	AnsiReset  = "\033[0m"
 )
 
-// MVMCli is a centralized display output matching Python's MVMCli.
-// Python uses Rich Console which auto-applies markup when stdout is a TTY
-// and strips it when piped. Go uses ANSI escape codes with manual TTY checks.
+// MVMCli is a centralized display output handler.
+// Uses ANSI escape codes for TTY-aware color output (auto-strip when piped).
 type MVMCli struct{}
 
-// Cli is the module-level singleton matching Python's mvm_cli.
+// Cli is the module-level singleton for all display output.
 // All display output goes through this single instance.
 var Cli = &MVMCli{}
 
@@ -201,8 +200,8 @@ func (c *MVMCli) Error(message string) {
 	}
 }
 
-// Success prints a success message to stdout.
-// Matches Python's mvm_cli.success() — Rich: "[green]✓ {message}[/]"
+// Success prints a success message to stdout with a green checkmark.
+// TTY-aware: color is stripped when piped.
 func (c *MVMCli) Success(message string) {
 	if isStdoutTTY() {
 		fmt.Printf("%s✓ %s%s\n", AnsiGreen, message, AnsiReset)
@@ -211,13 +210,13 @@ func (c *MVMCli) Success(message string) {
 	}
 }
 
-// Warning prints a warning message to stderr.
-// Matches Python's mvm_cli.warning() — Rich: "[yellow]! {message}[/]"
 // Text prints a plain indented message with no color or decoration.
 func (c *MVMCli) Text(message string) {
 	fmt.Printf("  %s\n", message)
 }
 
+// Warning prints a warning message to stderr with a yellow indicator.
+// TTY-aware: color is stripped when piped.
 func (c *MVMCli) Warning(message string) {
 	if isStderrTTY() {
 		fmt.Fprintf(os.Stderr, "%s! %s%s\n", AnsiYellow, message, AnsiReset)
@@ -227,7 +226,7 @@ func (c *MVMCli) Warning(message string) {
 }
 
 // Info prints an info/dim message to stdout.
-// Matches Python's mvm_cli.info() — Rich: "[dim]  {message}[/]"
+// TTY-aware: dim style is stripped when piped.
 func (c *MVMCli) Info(message string) {
 	if isStdoutTTY() {
 		fmt.Printf("%s  %s%s\n", AnsiDim, message, AnsiReset)
@@ -237,7 +236,7 @@ func (c *MVMCli) Info(message string) {
 }
 
 // SectionHeader prints a bold section title.
-// Matches Python's mvm_cli.section_header() — Rich: "[bold]{title}[/]"
+// TTY-aware: bold style is stripped when piped.
 func (c *MVMCli) SectionHeader(title string) {
 	if isStdoutTTY() {
 		fmt.Printf("\n%s%s%s\n", AnsiBold, title, AnsiReset)
@@ -247,7 +246,6 @@ func (c *MVMCli) SectionHeader(title string) {
 }
 
 // InspectHeader prints an inspect-style header with underline.
-// Matches Python's mvm_cli.inspect_header() — Rich: "[bold]{full}[/]" + "==="
 func (c *MVMCli) InspectHeader(title, subtitle string) {
 	tty := isStdoutTTY()
 	if subtitle != "" {
@@ -280,8 +278,8 @@ func (c *MVMCli) KeyValue(key, value string, indent int, keyWidth int) {
 	fmt.Printf("%s%-*s %s\n", padding, keyWidth, key+":", value)
 }
 
-// Table prints a table using go-pretty, matching Python's Rich table with SIMPLE box style.
-// Uses no borders, no column separators, with a simple header separator made of ─ characters.
+// Table prints a table using go-pretty with SIMPLE box style.
+// Uses no borders, no column separators, with a simple header separator made of - characters.
 func (c *MVMCli) Table(columns []string, rows [][]string, title ...string) {
 	tw := table.NewWriter()
 
@@ -292,8 +290,8 @@ func (c *MVMCli) Table(columns []string, rows [][]string, title ...string) {
 	tw.Style().Options.SeparateHeader = true
 	tw.Style().Options.SeparateRows = false
 
-	// Use ─ for horizontal lines to match Rich's box.SIMPLE
-	tw.Style().Box.MiddleHorizontal = "─"
+	// Use - for horizontal lines (simple box style).
+	tw.Style().Box.MiddleHorizontal = "-"
 
 	if len(title) > 0 && title[0] != "" {
 		tw.SetTitle(title[0])
@@ -318,13 +316,13 @@ func (c *MVMCli) Table(columns []string, rows [][]string, title ...string) {
 	// Render with go-pretty's auto-column sizing
 	rendered := tw.Render()
 
-	// Print with leading space to match Python's default indentation
+	// Print with leading space for indentation
 	for _, line := range strings.Split(rendered, "\n") {
 		fmt.Println(" " + line)
 	}
 }
 
-// PrintDictTree prints a nested map/slice as a tree, matching Python's print_dict_tree.
+// PrintDictTree prints a nested map/slice as a tree.
 func (c *MVMCli) PrintDictTree(data any, title string) {
 	if title != "" {
 		fmt.Println(title)
@@ -426,7 +424,7 @@ func (c *MVMCli) formatLeafValue(key string, value any) string {
 	return fmt.Sprintf("%v", value)
 }
 
-// ─── Static helper functions matching MVMCli static methods ──────────────────
+// --- Static helper functions ---
 
 // Timestamp format aliases for parsing/displaying timestamps.
 // All formats use stdlib constants — no hardcoded format strings.
@@ -539,8 +537,7 @@ func (c *MVMCli) FormatMarker(isDefault bool) string {
 }
 
 // FormatName returns name with a missing indicator suffix if not present.
-// Uses ANSI red markup (only when stdout is a TTY) to match Python's
-// “[red]{name}[/]“ Rich formatting, which auto-strips when piped.
+// Uses ANSI red markup when stdout is a TTY; auto-strips when piped.
 func (c *MVMCli) FormatName(name string, isMissing bool) string {
 	if isMissing {
 		if fileInfo, _ := os.Stdout.Stat(); (fileInfo.Mode() & os.ModeCharDevice) != 0 {
@@ -552,7 +549,6 @@ func (c *MVMCli) FormatName(name string, isMissing bool) string {
 }
 
 // FormatEntityName returns a display-ready entity name.
-// Matches Python's cli.py FormatEntityName function.
 func (c *MVMCli) FormatEntityName(name string) string {
 	if name == "" {
 		return "-"
@@ -598,7 +594,8 @@ func (c *MVMCli) FormatJSON(v any) string {
 	return string(b)
 }
 
-// MarshalJSONDefaultStr marshals to JSON with Python's default=str semantics.
+// MarshalJSONDefaultStr marshals to JSON with fallback string conversion for
+// non-serializable values.
 // On marshalling error, recursively converts non-serializable values to strings.
 func MarshalJSONDefaultStr(v any) string {
 	b, err := json.MarshalIndent(v, "", "  ")
@@ -611,7 +608,6 @@ func MarshalJSONDefaultStr(v any) string {
 }
 
 // convertToStringsRecursive recursively converts non-serializable Go types to strings.
-// Handles the equivalent of Python's json.dumps(..., default=str).
 func convertToStringsRecursive(v any) any {
 	if v == nil {
 		return nil
@@ -637,12 +633,10 @@ func convertToStringsRecursive(v any) any {
 	}
 }
 
-// ─── Error display (matching Python's handle_errors + mvm_cli.error) ─────────
+// --- Error display ---
 
 // FormatError returns a clean, user-friendly error string suitable for
-// display to the user. Matches Python's mvm_cli.error() format:
-//
-//	"✗ Error: <message>"
+// display to the user in the format: "✗ Error: <message>"
 func (c *MVMCli) FormatError(err error) string {
 	if err == nil {
 		return ""
@@ -692,7 +686,7 @@ func (c *MVMCli) DisplayError(err error, verbose bool) string {
 	return fmt.Sprintf("ERROR: %v\n", err)
 }
 
-// ─── ListingColumn (matching Python's cli/_common.py) ─────────────────────────
+// --- ListingColumn ---
 
 // ListingColumn represents a column in a listing table.
 // The order of ListingColumn entries in the list determines both the
@@ -705,7 +699,6 @@ type ListingColumn struct {
 }
 
 // ResolveListingStyle resolves "short" or "long" from --long flag or user config.
-// Matches Python's resolve_listing_style() in cli/_common.py exactly.
 func (c *MVMCli) ResolveListingStyle(ctx context.Context, cfg api.ConfigAPI, longOutput bool) string {
 	if longOutput {
 		return "long"
@@ -722,7 +715,6 @@ func (c *MVMCli) ResolveListingStyle(ctx context.Context, cfg api.ConfigAPI, lon
 }
 
 // RenderListing builds and prints a listing table from column specs.
-// Matches Python's render_listing() in cli/_common.py.
 func RenderListing[T any](items []T, columns []ListingColumn, style string, title ...string) {
 	visible := columns
 	if style != "long" {
@@ -753,7 +745,7 @@ func RenderListing[T any](items []T, columns []ListingColumn, style string, titl
 	Cli.Table(headers, rows, tableTitle)
 }
 
-// ─── RenderVersionTree ─────────────────────────────────────────────────────────
+// --- RenderVersionTree ---
 
 // RenderVersionTree renders a grouped tree of version items (image ls -r, kernel ls -r).
 // Items are grouped by Type, sorted alphabetically, with a header row per type
@@ -817,10 +809,9 @@ func RenderVersionTree(versions []model.VersionInfo) {
 	Cli.Table([]string{"Type / Version", "Description"}, rows)
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 // CheckArg guards for empty positional arg.
-// Matches Python's MVMCli.check_name_arg() in utils/cli.py.
 // Returns the validated value or an error on empty string.
 func (c *MVMCli) CheckArg(cmd *cobra.Command, value string) (string, error) {
 	if value == "" {
@@ -830,7 +821,6 @@ func (c *MVMCli) CheckArg(cmd *cobra.Command, value string) (string, error) {
 }
 
 // PromptConfirm asks a yes/no question on stderr. Returns true for yes.
-// Matches Python's typer.confirm(text, default=True) behavior.
 // Shows [Y/n]: when defaultYes=true, [y/N]: when defaultYes=false.
 // Loops on invalid input until y/yes, n/no, or empty (which returns default).
 func (c *MVMCli) PromptConfirm(ctx context.Context, prompt string, defaultYes bool) (bool, error) {

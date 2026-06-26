@@ -14,7 +14,7 @@ import (
 	"mvmctl/pkg/api/results"
 )
 
-// ─── MockHostAPI ───────────────────────────────────────────────────────────────
+// --- MockHostAPI ---
 // Rationale: MockHostAPI implements api.HostAPI for testing. These tests verify
 // default zero-value returns and custom function routing.
 
@@ -108,9 +108,9 @@ func TestMockHostAPI_CustomFunc(t *testing.T) {
 	})
 
 	t.Run("HostGetRunningVMs_custom_func", func(t *testing.T) {
-		expected := []*model.VM{{ID: "vm-1", Name: "running-vm"}}
+		expected := []*model.VMItem{{ID: "vm-1", Name: "running-vm"}}
 		m := &testutil.MockHostAPI{
-			HostGetRunningVMsFunc: func(ctx context.Context) ([]*model.VM, error) {
+			HostGetRunningVMsFunc: func(ctx context.Context) ([]*model.VMItem, error) {
 				return expected, nil
 			},
 		}

@@ -11,7 +11,7 @@ import (
 	"mvmctl/internal/core/network"
 )
 
-// ─── ComputeBridgeAddress ────────────────────────────────────────────────────
+// --- ComputeBridgeAddress ---
 // Rationale: ComputeBridgeAddress validates the subnet CIDR and returns a
 // gateway+prefix pair used for bridge interface addressing.
 
@@ -76,7 +76,7 @@ func TestUtilsComputeBridgeAddress(t *testing.T) {
 	}
 }
 
-// ─── ComputeBridgeName ───────────────────────────────────────────────────────
+// --- ComputeBridgeName ---
 // Rationale: Bridge names are limited to 15 characters by Linux. Short names
 // pass through directly; long names are truncated and suffixed with a hash.
 
@@ -127,7 +127,7 @@ func TestComputeBridgeName_deterministic(t *testing.T) {
 	}
 }
 
-// ─── GenerateTAPName ─────────────────────────────────────────────────────────
+// --- GenerateTAPName ---
 // Rationale: TAP device names must be unique per (network, VM) pair to avoid
 // conflicts on the host bridge.
 
@@ -179,7 +179,7 @@ func TestGenerateTAPName_differentInputs(t *testing.T) {
 	}
 }
 
-// ─── GenerateMAC ─────────────────────────────────────────────────────────────
+// --- GenerateMAC ---
 // Rationale: GenerateMAC creates a random MAC address with the given OUI
 // prefix. We verify format constraints only — randomness is validated by the
 // crypto/rand source, not by unit tests.

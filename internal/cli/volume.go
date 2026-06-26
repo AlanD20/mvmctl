@@ -1,4 +1,4 @@
-// Package cli — volume management commands, matching Python's cli/volume.py
+// Package cli — volume management commands
 package cli
 
 import (
@@ -14,7 +14,6 @@ import (
 )
 
 // volumeColumns defines the listing columns for volumes.
-// Matches Python's _VOLUME_COLUMNS in cli/volume.py.
 var volumeColumns = []common.ListingColumn{
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VolumeItem).ID) }},
 	{Header: "Name", Extract: func(v any) string { return v.(*model.VolumeItem).Name }},
@@ -87,6 +86,7 @@ func newVolumeListCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.C
 func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	var format string
 	var readOnly bool
+	var shareable bool
 
 	cmd := &cobra.Command{
 		Use:   "create [name] [size]",
@@ -104,17 +104,21 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			if cmd.Flags().Changed("read-only") || cmd.Flags().Changed("readonly") {
 				readOnlyPtr = &readOnly
 			}
+			var shareablePtr *bool
+			if cmd.Flags().Changed("shareable") || cmd.Flags().Changed("s") {
+				shareablePtr = &shareable
+			}
 			input := inputs.VolumeCreateInput{
-				Name:     name,
-				Size:     sizeStr,
-				Format:   formatPtr,
-				ReadOnly: readOnlyPtr,
+				Name:      name,
+				Size:      sizeStr,
+				Format:    formatPtr,
+				ReadOnly:  readOnlyPtr,
+				Shareable: shareablePtr,
 			}
 			vol, err := volumeAPI.VolumeCreate(cmd.Context(), input)
 			if err != nil {
 				return err
 			}
-			// Match Python: mvm_cli.success(result.message)
 			common.Cli.Success(fmt.Sprintf("Volume '%s' created", name))
 			for _, col := range volumeColumns {
 				switch col.Header {
@@ -127,15 +131,20 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 				mode = "ro"
 			}
 			common.Cli.KeyValue("Mode", mode, 2, 12)
+			if vol.IsShareable {
+				common.Cli.KeyValue("Shareable", "yes", 2, 12)
+			}
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&format, "format", "", "Disk format: raw or qcow2 (default: raw)")
-	// Accept both --read-only and --readonly (matching Python's Typer alias)
+	// Accept both --read-only and --readonly as aliases
 	cmd.Flags().BoolVar(&readOnly, "read-only", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "readonly", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().BoolVar(&readOnly, "ro", false, "Mount volume as read-only (default: writable)")
+	cmd.Flags().
+		BoolVarP(&shareable, "shareable", "s", false, "Allow volume to be attached to multiple VMs (requires --read-only)")
 	return cmd
 }
 
@@ -150,8 +159,6 @@ func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 		ValidArgsFunction: completeVolumeNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			removeResult := volumeAPI.VolumeRemove(cmd.Context(), inputs.VolumeInput{Identifiers: args}, force)
-			// Match Python: for r in result.items: if r.is_ok: mvm_cli.success("Removed: {name}")
-			//              else: mvm_cli.error(r.message or "Remove failed: {name}")
 			for _, r := range removeResult.Items {
 				itemName := "unknown"
 				if r.Item != nil {
@@ -193,12 +200,10 @@ func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 
 			info, err := volumeAPI.VolumeInspect(cmd.Context(), inputs.VolumeInput{Identifiers: []string{identifier}})
 			if err != nil {
-				// Match Python: @handle_errors decorator — pass through actual error message
 				return err
 			}
 
 			if jsonOutput {
-				// Match Python's json.dumps(info, indent=2, default=str)
 				fmt.Println(common.MarshalJSONDefaultStr(info))
 				return nil
 			}
@@ -228,7 +233,6 @@ func newVolumeResizeCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			); err != nil {
 				return err
 			}
-			// Match Python: mvm_cli.success(result.message)
 			common.Cli.Success(fmt.Sprintf("Volume '%s' resized", identifier))
 			return nil
 		},

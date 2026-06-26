@@ -12,7 +12,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// ─── DecodeExitStatus ────────────────────────────────────────────────────────
+// --- DecodeExitStatus ---
 // Rationale: DecodeExitStatus converts raw wait status to conventional exit
 // codes. Used by CapturedExitCode and GracefulShutdown. Wrong decoding would
 // cause incorrect process lifecycle detection.
@@ -64,7 +64,7 @@ func signalStatus(sig syscall.Signal) syscall.WaitStatus {
 	return syscall.WaitStatus(sig & 0x7f)
 }
 
-// ─── IsProcessAlive ──────────────────────────────────────────────────────────
+// --- IsProcessAlive ---
 // Rationale: IsProcessAlive checks /proc/<pid>/stat for process existence and
 // state. Used throughout the codebase for lifecycle management. Must correctly
 // identify running processes and reject zombies/stopped processes.
@@ -101,7 +101,7 @@ func TestIsProcessAlive_correctStartTime(t *testing.T) {
 	assert.True(t, alive, "process with matching startTime should be alive")
 }
 
-// ─── GetProcessStartTime ─────────────────────────────────────────────────────
+// --- GetProcessStartTime ---
 
 func TestGetProcessStartTime(t *testing.T) {
 	t.Run("current_process_returns_non_nil", func(t *testing.T) {
@@ -116,7 +116,7 @@ func TestGetProcessStartTime(t *testing.T) {
 	})
 }
 
-// ─── HasAncestorWithCmdline ──────────────────────────────────────────────────
+// --- HasAncestorWithCmdline ---
 // Rationale: Walks the PPID chain through /proc. Used for mvm-provision
 // subprocess detection. Must correctly identify the running process's own
 // ancestor chain.

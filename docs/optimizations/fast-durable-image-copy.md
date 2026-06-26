@@ -128,9 +128,9 @@ The loopmount backend's `ExtractPartition()` uses a separate chain:
 cp --sparse=always  →  dd conv=sparse,fsync
 ```
 
-## Comparison with Python Legacy
+### Why sendfile(2) Over reflink
 
-The Go implementation **does not use** `cp --reflink=auto` (copy-on-write / reflink). The Python codebase used reflink as its primary copy mechanism, relying on btrfs/XFS CoW support. The Go codebase favors `sendfile(2)` instead because:
+The Go codebase uses `sendfile(2)` instead of `cp --reflink=auto` (copy-on-write / reflink) because:
 
 1. `sendfile(2)` works across **all** filesystems (tmpfs, ext4, XFS, btrfs, zfs) — not just CoW-capable ones.
 2. `sendfile(2)` is an in-kernel zero-copy operation — no userspace buffer, no context switch overhead per chunk.

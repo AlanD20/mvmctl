@@ -22,8 +22,8 @@ import (
 //
 // Env is merged into the current process environment (never replaces).
 // Interactive controls sudo mode:
-//   - true  → plain "sudo" (allows password prompt via TTY forwarding)
-//   - false → "sudo -n" (non-interactive, fails immediately if password required)
+// - true  → plain "sudo" (allows password prompt via TTY forwarding)
+// - false → "sudo -n" (non-interactive, fails immediately if password required)
 //
 // Default is false (non-interactive), suitable for automated operations.
 type RunCmdOpts struct {
@@ -44,14 +44,13 @@ const DefaultGracefulTimeout = 4 * time.Second
 // DefaultKillTimeout is the default timeout for SIGKILL shutdown.
 const DefaultKillTimeout = 5 * time.Second
 
-// signalExitCodeBase matches Python's CONST_SIGNAL_EXIT_CODE_BASE = 128.
 // POSIX convention: exit code = 128 + signal number for signal death.
 const signalExitCodeBase = 128
 
-// ── Static helpers ──
+// --- Static helpers ---
 
 // DecodeExitStatus decodes os.Waitpid() / syscall.Wait4 status into a
-// conventional exit code, matching Python's _decode_exit_status():
+// conventional exit code:
 //
 //	Normal exit code (0-255) or 128+signal for signal death.
 func DecodeExitStatus(wstatus syscall.WaitStatus) int {
@@ -105,7 +104,7 @@ func GetProcessStartTime(pid int) *int64 {
 	return &stat.StartTime
 }
 
-// ── Process lifecycle functions ──
+// --- Process lifecycle functions ---
 
 // IsProcessAlive checks if a process with the given PID is genuinely running
 // (not zombie, not dead, PID not reused).  Returns false for: dead, zombie,
@@ -242,9 +241,7 @@ func waitForExit(pid int, isChild bool, timeout time.Duration) *int {
 	return nil // timeout
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Process detection
-// ────────────────────────────────────────────────────────────────────
+// --- Process detection ---
 
 // HasAncestorWithCmdline walks the PPID chain for pid upward through /proc.
 // Returns true if any ancestor process has the given substrings in its
@@ -292,9 +289,7 @@ func HasAncestorWithCmdline(pid int, substr ...string) bool {
 	return false
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Subprocess execution
-// ────────────────────────────────────────────────────────────────────
+// --- Subprocess execution ---
 
 // RunResult holds command output.
 type RunResult struct {
@@ -335,7 +330,7 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 		return &RunResult{ExitCode: 1}, fmt.Errorf("no command specified")
 	}
 
-	// ── Build argument list, handling privileged mode ──
+	// --- Build argument list, handling privileged mode ---
 	cmdArgs := args
 	if opts.Privileged && !IsRoot() {
 		_ = requireMvmGroupMembership() // warn only
@@ -346,7 +341,7 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 		}
 	}
 
-	// ── Create timeout context if needed ──
+	// --- Create timeout context if needed ---
 	runCtx := ctx
 	var cancel context.CancelFunc
 	if opts.Timeout > 0 {
@@ -354,7 +349,7 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 		defer cancel()
 	}
 
-	// ── Build exec.Cmd ──
+	// --- Build exec.Cmd ---
 	cmd := exec.CommandContext(runCtx, cmdArgs[0], cmdArgs[1:]...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -369,14 +364,14 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 		cmd.Env = env
 	}
 
-	// ── Stdin ──
+	// --- Stdin ---
 	if opts.Input != "" {
 		cmd.Stdin = strings.NewReader(opts.Input)
 	} else if opts.Interactive && opts.Privileged && !IsRoot() {
 		cmd.Stdin = os.Stdin
 	}
 
-	// ── Stdout / Stderr ──
+	// --- Stdout / Stderr ---
 	var stdout, stderr strings.Builder
 	if opts.Capture {
 		cmd.Stdout = &stdout
@@ -386,7 +381,7 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 		cmd.Stderr = os.Stderr
 	}
 
-	// ── StartOnly (background / fire-and-forget) ──
+	// --- StartOnly (background / fire-and-forget) ---
 	if opts.StartOnly {
 		if err := cmd.Start(); err != nil {
 			return &RunResult{ExitCode: -1},
@@ -395,7 +390,7 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 		return &RunResult{ExitCode: 0}, nil
 	}
 
-	// ── Run and capture ──
+	// --- Run and capture ---
 	err := cmd.Run()
 
 	result := &RunResult{
@@ -408,7 +403,7 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 
 	if err != nil {
 		// 1. Timeout — must check BEFORE exit-error because CommandContext
-		//    kills the process on timeout, which also produces ExitError.
+		// kills the process on timeout, which also produces ExitError.
 		if opts.Timeout > 0 && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			result.ExitCode = -1
 			timeoutStr := strconv.FormatFloat(opts.Timeout.Seconds(), 'f', -1, 64)
@@ -467,7 +462,7 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts)
 		}
 	}
 
-	// ── Create a context that enforces the timeout ──
+	// --- Create a context that enforces the timeout ---
 	// NOTE: cancel is NOT deferred here. Stream returns the channel
 	// immediately. defer cancel() would cancel runCtx right away,
 	// killing the process with SIGKILL. Instead, cancel is called
@@ -483,6 +478,23 @@ func (r *RealRunner) Stream(ctx context.Context, args []string, opts RunCmdOpts)
 	cmd := exec.CommandContext(runCtx, cmdArgs[0], cmdArgs[1:]...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
+	}
+
+	// CRITICAL: Use a process group so context cancellation kills the entire
+	// process tree, not just the direct child. Without this, child processes
+	// (e.g. "sleep" inside "sh -c") inherit the stdout pipe fd and keep it
+	// open, causing bufio.Scanner to block forever on cancellation.
+	//
+	// When running through sudo we skip this — sudo manages its own process
+	// groups and we can't control the inner command's pgid.
+	if !opts.Privileged || IsRoot() {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			if cmd.Process == nil {
+				return nil
+			}
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
 	}
 
 	stdout, err := cmd.StdoutPipe()

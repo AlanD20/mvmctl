@@ -19,40 +19,40 @@ import (
 
 // vmColumns defines the local listing columns for VMs.
 var vmColumns = []common.ListingColumn{
-	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VM).ID) }},
-	{Header: "Name", Extract: func(v any) string { return v.(*model.VM).Name }},
-	{Header: "Status", Extract: func(v any) string { return string(v.(*model.VM).Status) }},
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.VMItem).ID) }},
+	{Header: "Name", Extract: func(v any) string { return v.(*model.VMItem).Name }},
+	{Header: "Status", Extract: func(v any) string { return string(v.(*model.VMItem).Status) }},
 	{Header: "Exit", Extract: func(v any) string {
-		ec := v.(*model.VM).ExitCode
+		ec := v.(*model.VMItem).ExitCode
 		if ec != nil {
 			return fmt.Sprintf("%d", *ec)
 		}
 		return "-"
 	}},
 	{Header: "IPv4", Extract: func(v any) string {
-		ip := v.(*model.VM).IPv4
+		ip := v.(*model.VMItem).IPv4
 		if ip == "" {
 			return "-"
 		}
 		return ip
 	}},
 	{Header: "Resources", Extract: func(v any) string {
-		vm := v.(*model.VM)
+		vm := v.(*model.VMItem)
 		return fmt.Sprintf("%d vCPU / %d MiB / %d MiB", vm.VCPUCount, vm.MemSizeMiB, vm.DiskSizeMiB)
 	}, LongOnly: true},
 	{
 		Header:   "Image",
-		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VM).ImageID) },
+		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VMItem).ImageID) },
 		LongOnly: true,
 	},
 	{
 		Header:   "Kernel",
-		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VM).KernelID) },
+		Extract:  func(v any) string { return common.Cli.FormatID(v.(*model.VMItem).KernelID) },
 		LongOnly: true,
 	},
 	{
 		Header:  "Created",
-		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VM).CreatedAt, "relative") },
+		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.VMItem).CreatedAt, "relative") },
 	},
 }
 
@@ -71,8 +71,6 @@ func NewVMCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd.AddCommand(newVMRebootCmd(vmAPI))
 	cmd.AddCommand(newVMPauseCmd(vmAPI))
 	cmd.AddCommand(newVMResumeCmd(vmAPI))
-	cmd.AddCommand(newVMSnapshotCmd(vmAPI))
-	cmd.AddCommand(newVMLoadCmd(vmAPI))
 	cmd.AddCommand(newVMInspectCmd(vmAPI))
 	cmd.AddCommand(newVMExecCmd(vmAPI))
 	cmd.AddCommand(newVMAttachVolumeCmd(vmAPI))
@@ -80,7 +78,7 @@ func NewVMCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── ls (list all VMs) ────────────────────────────────────────────────────────
+// --- ls (list all VMs) ---
 
 func newVMListCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
@@ -105,7 +103,7 @@ func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jso
 
 	if jsonOutput {
 		if vms == nil {
-			vms = []*model.VM{}
+			vms = []*model.VMItem{}
 		}
 		b, _ := json.MarshalIndent(vms, "", "  ")
 		fmt.Println(string(b))
@@ -117,7 +115,7 @@ func runVMList(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jso
 	return nil
 }
 
-// ─── ps (list running VMs) ────────────────────────────────────────────────────
+// --- ps (list running VMs) ---
 
 func newVMpsCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	var jsonOutput bool
@@ -135,12 +133,12 @@ func newVMpsCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 }
 
 func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonOutput bool) error {
-	// Server-side filtering matching Python's list_all(status=[...])
+	// Server-side filtering by status
 	vms := vmAPI.VMList(cmd.Context(), string(model.VMStatusStarting), string(model.VMStatusRunning))
 
 	if jsonOutput {
 		if vms == nil {
-			vms = []*model.VM{}
+			vms = []*model.VMItem{}
 		}
 		b, _ := json.MarshalIndent(vms, "", "  ")
 		fmt.Println(string(b))
@@ -157,13 +155,13 @@ func runVMps(vmAPI api.VMAPI, configAPI api.ConfigAPI, cmd *cobra.Command, jsonO
 	return nil
 }
 
-// ─── create ───────────────────────────────────────────────────────────────────
+// --- create ---
 
 func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	var (
 		image           string
 		kernel          string
-		vcpus           int
+		vcpu            int
 		mem             string
 		diskSize        string
 		ip              string
@@ -178,7 +176,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		nestedVirt      bool
 		noNestedVirt    bool
 		cpuTemplate     string
-		noConsole       bool
 		bootArgs        string
 		lsmFlags        string
 		enableLogging   bool
@@ -192,6 +189,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		force           bool
 		volume          []string
 		vsockPort       int
+		writeback       bool
 	)
 
 	cmd := &cobra.Command{
@@ -246,7 +244,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			input := inputs.VMCreateInput{
 				Name:        name,
 				SSHKeys:     sshKeyList,
-				NoConsole:   noConsole,
 				BootArgs:    bootArgs,
 				LSMFlags:    lsmFlags,
 				CPUTemplate: cpuTemplate,
@@ -258,14 +255,18 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 				Volumes:     volume,
 			}
 
+			if cmd.Flags().Changed("writeback") {
+				input.Writeback = infraptr.Ptr(writeback)
+			}
+
 			if cmd.Flags().Changed("image") {
 				input.ImageID = infraptr.Ptr(image)
 			}
 			if cmd.Flags().Changed("kernel") {
 				input.KernelID = infraptr.Ptr(kernel)
 			}
-			if cmd.Flags().Changed("vcpus") {
-				input.VCPUCount = infraptr.Ptr(vcpus)
+			if cmd.Flags().Changed("vcpu") {
+				input.VCPUCount = infraptr.Ptr(vcpu)
 			}
 			if cmd.Flags().Changed("ip") {
 				input.RequestedGuestIP = infraptr.Ptr(ip)
@@ -312,6 +313,9 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			if cmd.Flags().Changed("vsock-port") {
 				input.VsockPort = infraptr.Ptr(vsockPort)
 			}
+			if cmd.Flags().Changed("console") {
+				input.EnableConsole = infraptr.Ptr(true)
+			}
 
 			vms, err := vmAPI.VMCreate(cmd.Context(), input, func(e event.Progress) {
 				if e.Message != "" {
@@ -341,7 +345,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.Flags().
 		StringVar(&image, "image", "", "Image name, type:version (e.g. ubuntu:24.04), short ID, or path to .ext4 file")
 	cmd.Flags().StringVar(&kernel, "kernel", "", "Kernel short ID or path to vmlinux file")
-	cmd.Flags().IntVar(&vcpus, "vcpus", 0, "Number of vCPUs (default: from user config)")
+	cmd.Flags().IntVar(&vcpu, "vcpu", 0, "Number of vCPUs (default: from user config)")
 	cmd.Flags().StringVar(&mem, "mem", "", "Memory in MiB or GiB (e.g. 512M, 1G, 4096). Default: from user config")
 	cmd.Flags().
 		StringVarP(&diskSize, "disk-size", "s", "", "Rootfs disk size in MiB/GiB (e.g., 512M=512MiB, 1G=1GiB). Default from config.")
@@ -364,7 +368,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("nested-virt", "no-nested-virt")
 	cmd.Flags().
 		StringVar(&cpuTemplate, "cpu-template", "", "Path to CPU template JSON file (merged with nested-virt config if both set)")
-	cmd.Flags().BoolVar(&noConsole, "no-console", false, "Disable serial console")
+	cmd.Flags().Bool("console", false, "Enable serial console relay (default: disabled)")
 	cmd.Flags().StringVar(&bootArgs, "boot-args", "", "Kernel boot arguments (default: from defaults)")
 	cmd.Flags().
 		StringVar(&lsmFlags, "lsm-flags", "", "Linux Security Module flags for kernel cmdline (default: from user config)")
@@ -387,11 +391,12 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		BoolVar(&skipDeblob, "skip-deblob", false, "Skip debloat operations on rootfs (removes OS caches, cleans package manager caches)")
 	cmd.Flags().StringArrayVarP(&volume, "volume", "v", nil, "Attach volume(s) to the VM (can specify multiple times)")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation prompts")
+	cmd.Flags().BoolVar(&writeback, "writeback", false,
+		"Use writeback cache mode for drives (safe: guest fsync honored). "+
+			"Set defaults.firecracker.drive_cache_type in config for persistent default.")
 	cmd.Flags().IntVar(&vsockPort, "vsock-port", 0, "Vsock port for the guest agent (default: 1024)")
 	cmd.Flags().SetNormalizeFunc(func(f *pflag.FlagSet, name string) pflag.NormalizedName {
 		switch name {
-		case "cpus":
-			name = "vcpus"
 		case "memory":
 			name = "mem"
 		case "net":
@@ -403,7 +408,7 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── rm (remove) ─────────────────────────────────────────────────────────────
+// --- rm (remove) ---
 
 func newVMRemoveCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
@@ -424,18 +429,23 @@ func newVMRemoveCmd(vmAPI api.VMAPI) *cobra.Command {
 }
 
 func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, force bool) error {
+	// Show a spinner during graceful shutdown (up to 30s per VM).
+	prog := common.NewProgress()
+	prog.Start("Removing VM(s)...")
+	defer prog.Stop()
+
 	// Use batch API — pass all identifiers at once
 	removeResult := vmAPI.VMRemove(cmd.Context(), inputs.VMInput{Identifiers: identifiers, Force: force})
 	if removeResult.HasErrors() {
 		for _, r := range removeResult.Items {
 			if r.IsOK() {
-				vm, ok := r.Item.(*model.VM)
+				vm, ok := r.Item.(*model.VMItem)
 				if ok && vm != nil {
 					common.Cli.Success(fmt.Sprintf("Removed: %s", vm.Name))
 				}
 			} else {
 				itemName := "unknown"
-				if vm, ok := r.Item.(*model.VM); ok && vm != nil {
+				if vm, ok := r.Item.(*model.VMItem); ok && vm != nil {
 					itemName = vm.Name
 				}
 				msg := r.Message
@@ -449,7 +459,7 @@ func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, forc
 	}
 	names := make([]string, 0, len(removeResult.Items))
 	for _, r := range removeResult.Items {
-		if vm, ok := r.Item.(*model.VM); ok && vm != nil {
+		if vm, ok := r.Item.(*model.VMItem); ok && vm != nil {
 			names = append(names, vm.Name)
 		}
 	}
@@ -457,7 +467,7 @@ func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, forc
 	return nil
 }
 
-// ─── start ────────────────────────────────────────────────────────────────────
+// --- start ---
 
 func newVMStartCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -485,7 +495,7 @@ func newVMStartCmd(vmAPI api.VMAPI) *cobra.Command {
 	}
 }
 
-// ─── stop ─────────────────────────────────────────────────────────────────────
+// --- stop ---
 
 func newVMStopCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
@@ -518,7 +528,7 @@ func newVMStopCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── reboot ───────────────────────────────────────────────────────────────────
+// --- reboot ---
 
 func newVMRebootCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
@@ -551,7 +561,7 @@ func newVMRebootCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── pause ────────────────────────────────────────────────────────────────────
+// --- pause ---
 
 func newVMPauseCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -579,7 +589,7 @@ func newVMPauseCmd(vmAPI api.VMAPI) *cobra.Command {
 	}
 }
 
-// ─── resume ───────────────────────────────────────────────────────────────────
+// --- resume ---
 
 func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -607,81 +617,7 @@ func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	}
 }
 
-// ─── snapshot ─────────────────────────────────────────────────────────────────
-
-func newVMSnapshotCmd(vmAPI api.VMAPI) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:               "snapshot [id] [mem_file] [state_file]",
-		Short:             "Snapshot VM memory and disk state.",
-		Args:              cobra.ExactArgs(3),
-		ValidArgsFunction: completeVMThenFile,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			memFile := args[1]
-			stateFile := args[2]
-
-			if err := vmAPI.VMSnapshot(
-				cmd.Context(),
-				inputs.VMInput{Identifiers: []string{id}},
-				memFile,
-				stateFile,
-			); err != nil {
-				return fmt.Errorf("snapshot failed: %w", err)
-			}
-
-			common.Cli.Success(fmt.Sprintf("Snapshot saved: %s", id))
-			return nil
-		},
-	}
-
-	return cmd
-}
-
-// ─── load (from snapshot) ─────────────────────────────────────────────────────
-
-func newVMLoadCmd(vmAPI api.VMAPI) *cobra.Command {
-	var resume bool
-
-	cmd := &cobra.Command{
-		Use:   "load [id] [mem_file] [state_file]",
-		Short: "Load VM from snapshot.",
-		Long: `Load a VM from a snapshot.
-
-Arguments:
-  id          VM identifier (name, ID prefix, IP, or MAC)
-  mem_file    Path to memory state file
-  state_file  Path to VM state file
-
-Flags:
-  --resume    Resume VM after loading (default: leave paused)`,
-		Args:              cobra.ExactArgs(3),
-		ValidArgsFunction: completeVMThenFile,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			memFile := args[1]
-			stateFile := args[2]
-
-			if err := vmAPI.VMLoad(
-				cmd.Context(),
-				inputs.VMInput{Identifiers: []string{id}},
-				memFile,
-				stateFile,
-				resume,
-			); err != nil {
-				return err
-			}
-
-			// Match Python exactly: success message with no extra detail, no post-check.
-			common.Cli.Success(fmt.Sprintf("Snapshot loaded: %s", id))
-			return nil
-		},
-	}
-
-	cmd.Flags().BoolVar(&resume, "resume", false, "Resume VM after loading")
-	return cmd
-}
-
-// ─── inspect ──────────────────────────────────────────────────────────────────
+// --- inspect ---
 
 func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 	var jsonOutput bool
@@ -718,7 +654,7 @@ func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 	return cmd
 }
 
-// ─── attach-volume ────────────────────────────────────────────────────────────
+// --- attach-volume ---
 
 func newVMAttachVolumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -749,7 +685,7 @@ Arguments:
 	}
 }
 
-// ─── detach-volume ────────────────────────────────────────────────────────────
+// --- detach-volume ---
 
 func newVMDetachVolumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
@@ -780,7 +716,7 @@ Arguments:
 	}
 }
 
-// ─── exec ────────────────────────────────────────────────────────────────────
+// --- exec ---
 
 func newVMExecCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd := &cobra.Command{
@@ -805,6 +741,7 @@ Examples:
 			port, _ := c.Flags().GetInt("port")
 			timeout, _ := c.Flags().GetInt("timeout")
 			user, _ := c.Flags().GetString("user")
+			noSync, _ := c.Flags().GetBool("no-sync")
 
 			command := ""
 			if len(args) > 1 {
@@ -817,8 +754,8 @@ Examples:
 				Port:       port,
 				Timeout:    timeout,
 				User:       user,
+				NoSync:     noSync,
 			}
-
 			result, err := vmAPI.VMExec(c.Context(), input)
 			if err != nil {
 				return err
@@ -833,8 +770,9 @@ Examples:
 	}
 
 	cmd.Flags().IntP("port", "p", 1024, "Vsock port for the guest agent")
-	cmd.Flags().IntP("timeout", "t", 0, "Command timeout in seconds (0 = no timeout)")
+	cmd.Flags().IntP("timeout", "t", 0, "Vsock agent connect timeout in seconds")
 	cmd.Flags().StringP("user", "u", "", "User to run the command as (default: root)")
+	cmd.Flags().Bool("no-sync", false, "Skip final sync() after command (faster but risks data loss on VM stop)")
 
 	return cmd
 }

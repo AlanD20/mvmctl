@@ -1,10 +1,11 @@
 // Package api provides the public orchestration layer for all operations.
-// Matches src/mvmctl/api/ssh_operations.py exactly.
 package api
 
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"mvmctl/internal/core/ssh"
@@ -18,35 +19,23 @@ type SSHAPI interface {
 	SSHConnect(ctx context.Context, input inputs.SSHInput, onProgress event.OnProgressCallback) error
 }
 
-// SSHConnect opens SSH session or executes command on a VM.
-// Matches Python's SSHOperation.connect() exactly.
-// Python: returns OperationResult[int]; only MVMError is caught and wrapped
-// in OperationResult; other exceptions propagate.
-// Go: returns error. Non-MVMError errors are wrapped with code
-// "ssh.failed" as well (Go has no exceptions, so all errors are returned).
-//
+// SSHConnect opens an SSH session or executes a command on a VM.
+// Returns an error. Non-DomainError errors are wrapped with code
+// "ssh.failed".
 // When onProgress is non-nil and a command is provided, SSH output is
 // streamed line by line through the callback instead of being printed
 // directly to the terminal. This allows the CLI layer to control display.
 func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onProgress event.OnProgressCallback) error {
-	// Python: try:
-	//   request = SSHRequest(inputs, db); resolved = request.resolve()
-	//   ...
-	// except MVMError as e:
-	//   return OperationResult(status="error", code="ssh.failed", ...)
-	request := inputs.NewSSHRequest(input, op.Services.Config)
-	resolved, err := request.Resolve(ctx, op.Repos.VM, op.Repos.Key)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.VM, op.Repos.Key)
 	if err != nil {
-		return newSSHError(err)
+		return errs.WrapMsg(errs.CodeSSHError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 	}
-
-	// Audit log (matches Python: AuditLog.log("vm.ssh", changes={"ip": ..., "user": ...}))
+	// Audit log.
 	op.AuditLog.LogOperation("vm.ssh", map[string]any{
 		"ip":   resolved.TargetIP,
 		"user": resolved.User,
 	}, "")
-
-	// Create SSH service (matches Python: SSHService(ip=..., user=..., key_path=..., timeout=...))
+	// Create SSH service.
 	keyPath := ""
 	if resolved.Key != nil {
 		keyPath = *resolved.Key
@@ -56,22 +45,33 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onPr
 		timeout = time.Duration(*resolved.Timeout) * time.Second
 	}
 	svc := ssh.NewService(resolved.TargetIP, resolved.User, keyPath, timeout)
-
 	command := ""
 	if resolved.Cmd != nil {
 		command = *resolved.Cmd
 	}
-
+	// Prepend environment variables to the command using POSIX env utility.
+	if len(input.Env) > 0 {
+		var parts []string
+		keys := make([]string, 0, len(input.Env))
+		for k := range input.Env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%s=%s", k, input.Env[k]))
+		}
+		command = fmt.Sprintf("env %s %s", strings.Join(parts, " "), command)
+	}
 	// If onProgress is provided and we have a command, stream output line by line.
 	// Otherwise fall back to Connect (direct terminal pipe).
 	if onProgress != nil && command != "" {
 		ch, streamErr := svc.StreamCommand(ctx, command)
 		if streamErr != nil {
-			return newSSHError(streamErr)
+			return errs.WrapMsg(errs.CodeSSHError, streamErr.Error(), streamErr, errs.WithClass(errs.ClassInternal))
 		}
 		for line := range ch {
 			if line.Err != nil {
-				return newSSHError(line.Err)
+				return errs.WrapMsg(errs.CodeSSHError, line.Err.Error(), line.Err, errs.WithClass(errs.ClassInternal))
 			}
 			onProgress(event.Progress{
 				Phase:   "ssh",
@@ -81,21 +81,14 @@ func (op *Operation) SSHConnect(ctx context.Context, input inputs.SSHInput, onPr
 		}
 		return nil
 	}
-
-	// Connect (matches Python: service.connect(command=..., exec_mode=resolved.cmd is None))
+	// Connect.
 	exitCode, err := svc.Connect(ctx, command, resolved.Cmd == nil)
 	if err != nil {
-		return newSSHError(err)
+		return errs.WrapMsg(errs.CodeSSHError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 	}
-
 	if exitCode != 0 {
-		return newSSHError(fmt.Errorf("SSH command failed with exit code %d", exitCode))
+		exitErr := fmt.Errorf("SSH command failed with exit code %d", exitCode)
+		return errs.WrapMsg(errs.CodeSSHError, exitErr.Error(), exitErr, errs.WithClass(errs.ClassInternal))
 	}
-
 	return nil
-}
-
-// newSSHError wraps any error as a DomainError with "ssh.failed" code.
-func newSSHError(err error) error {
-	return errs.WrapMsg(errs.CodeSSHError, err.Error(), err, errs.WithClass(errs.ClassInternal))
 }

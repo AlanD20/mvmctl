@@ -14,7 +14,7 @@ import (
 
 var ctx = context.Background()
 
-// ─── CRUD ──────────────────────────────────────────────────────────────────
+// --- CRUD ---
 // Rationale: Repository CRUD is the foundation of vsock data access.
 // A bug in Upsert, GetByVMID, or DeleteByVMID would corrupt vsock state.
 
@@ -70,7 +70,7 @@ func TestVsockRepo_CRUD(t *testing.T) {
 	})
 }
 
-// ─── ListByVMIDs ───────────────────────────────────────────────────────────
+// --- ListByVMIDs ---
 // Rationale: ListByVMIDs is used by the enricher for batch vsock resolution.
 // An N+1 query bug there would cause slow enrichment with many VMs.
 
@@ -112,7 +112,7 @@ func TestVsockRepo_ListByVMIDs(t *testing.T) {
 	})
 }
 
-// ─── NotFound ──────────────────────────────────────────────────────────────
+// --- NotFound ---
 // Rationale: GetByVMID must return nil,nil for non-existent VM IDs.
 // Returning an error would break the resolver's not-found handling.
 
@@ -131,14 +131,14 @@ func TestVsockRepo_NotFound(t *testing.T) {
 	})
 }
 
-// ─── UpgradeLock ────────────────────────────────────────────────────────────
+// --- UpgradeLock ---
 // Rationale: Agent upgrade locking prevents concurrent upgrades of the vsock
 // agent. A bug here could cause race conditions during agent upgrades.
 
 func TestVsockRepo_UpgradeLock(t *testing.T) {
 	repo := testutil.NewVsockRepo()
 
-	// ─── Error paths first ───────────────────────────────────────────────
+	// --- Error paths first ---
 
 	t.Run("set_lock_already_held", func(t *testing.T) {
 		item := &model.VsockConfigItem{
@@ -168,7 +168,7 @@ func TestVsockRepo_UpgradeLock(t *testing.T) {
 		assert.Contains(t, err.Error(), "upgrade already in progress")
 	})
 
-	// ─── Happy paths ─────────────────────────────────────────────────────
+	// --- Happy paths ---
 
 	t.Run("set_lock_ok", func(t *testing.T) {
 		item := &model.VsockConfigItem{

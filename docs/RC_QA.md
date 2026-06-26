@@ -24,8 +24,7 @@ A release is **blocked** until ALL of the following pass:
 | Compile | `go build ./...` | Zero errors |
 | Vet | `go vet ./...` | Zero warnings |
 | Unit tests | `go test ./...` | All pass |
-| System tests | `python3 scripts/run_tests.py --domain <domain>` (per-domain) | All pass, zero skips on required tests |
-| Coverage gap matrix | `tests/system/COVERAGE_MATRIX.md` | Every CLI subcommand and flag has at least one test |
+| E2E tests | `pytest tests/e2e/` (inside runner VM) | All pass, zero skips on required tests |
 | Version check | `./scripts/build.sh release && ./dist/mvm --version` | Returns correct version (not `0.0.0-dev`) |
 | Smoke test | `./dist/mvm --help` | Shows all commands |
 
@@ -117,7 +116,7 @@ pip3 install pytest pytest-xdist
 mvm cp dist/mvm testrunner:~/.local/bin/mvm
 mvm ssh testrunner --cmd "chmod +x ~/.local/bin/mvm"
 
-# Clone test scripts (only tests/system/ and scripts/ needed)
+# Clone test scripts (only tests/e2e/ and scripts/ needed)
 # From the host:
 mvm cp ./scripts testrunner:~/mvmctl/scripts
 mvm cp ./tests testrunner:~/mvmctl/tests
@@ -145,46 +144,31 @@ mkdir -p "$MVM_ASSET_MIRROR"
 
 ## 3. Execution Strategy
 
-### 3.1 Per-Domain, Not Batch
+### 3.1 E2E Test Execution
 
-System tests are **stateful**. Running all tests as a single batch causes cross-file state pollution. Each domain runs independently:
+E2E tests run inside the disposable runner VM with nested KVM, providing
+full isolation. The runner VM is session-scoped — created once per test
+session, destroyed after. No cross-state pollution between sessions.
 
 ```bash
-# Run all domains (via the unified runner)
-python3 scripts/run_tests.py --domain vm
-python3 scripts/run_tests.py --domain network
-python3 scripts/run_tests.py --domain image
-python3 scripts/run_tests.py --domain kernel
-python3 scripts/run_tests.py --domain key
-python3 scripts/run_tests.py --domain volume
-python3 scripts/run_tests.py --domain host
-python3 scripts/run_tests.py --domain cache
-python3 scripts/run_tests.py --domain config
-python3 scripts/run_tests.py --domain console
-python3 scripts/run_tests.py --domain ssh
-python3 scripts/run_tests.py --domain cp
-python3 scripts/run_tests.py --domain logs
-python3 scripts/run_tests.py --domain init
-python3 scripts/run_tests.py --domain bin
-
-# Or a single domain
-python3 scripts/run_tests.py --domain network
+# Run the full e2e suite inside the runner VM
+pytest tests/e2e/
 
 # Or a single file
-python3 scripts/run_tests.py --test tests/system/network/test_network.py
+pytest tests/e2e/test_network.py --tb=short -q
 ```
 
 ### 3.2 Marker Filtering
 
 ```bash
 # Exclude kernel build tests (slow, optional)
-python3 scripts/run_tests.py --domain kernel -- -m "not kernel_build"
+pytest tests/e2e/ -m "not kernel_build"
 
 # Exclude host reset tests (destructive, requires sudo)
-python3 scripts/run_tests.py --domain host -- -m "not host_reset"
+pytest tests/e2e/ -m "not host_reset"
 
 # Run only serial tests
-python3 scripts/run_tests.py --domain vm -- -m serial
+pytest tests/e2e/ -m serial
 ```
 
 ### 3.3 Non-Destructive Before Destructive
@@ -202,8 +186,7 @@ For every release, collect and archive:
 | Go build output | `go build ./... 2>&1` | Zero compilation errors |
 | Go vet output | `go vet ./... 2>&1` | Zero static analysis warnings |
 | Go test output | `go test ./... 2>&1` | All unit tests pass |
-| System test results | `python3 scripts/run_tests.py --domain <d>` for each domain | All system tests pass |
-| Coverage matrix | `tests/system/COVERAGE_MATRIX.md` snapshot | Every command has test coverage |
+| E2E test results | `pytest tests/e2e/` inside runner VM | All e2e tests pass |
 | Version output | `./dist/mvm --version` | Correct version string |
 | Help output | `./dist/mvm --help` | All commands listed |
 | Benchmark results | `benchmarks/results.json` | Performance within thresholds |
@@ -223,13 +206,8 @@ go test ./... > release-evidence/vX.Y.Z/test.log 2>&1
 ./dist/mvm --help > release-evidence/vX.Y.Z/help.txt 2>&1
 sha256sum dist/mvm > release-evidence/vX.Y.Z/checksum.sha256
 
-# System test results (per-domain)
-for domain in vm network image kernel key volume host cache config console ssh cp logs init bin; do
-  python3 scripts/run_tests.py --domain $domain > release-evidence/vX.Y.Z/system-${domain}.log 2>&1
-done
-
-# Snapshot coverage matrix
-cp tests/system/COVERAGE_MATRIX.md release-evidence/vX.Y.Z/
+# E2E test results (single run inside runner VM)
+pytest tests/e2e/ --tb=short -q > release-evidence/vX.Y.Z/system-e2e.log 2>&1
 ```
 
 ---
@@ -277,15 +255,13 @@ A regression is **any** of the following:
 - [ ] `go build ./...` — zero errors
 - [ ] `go vet ./...` — zero warnings
 - [ ] `go test ./...` — all pass
-- [ ] System tests — all domains pass (see evidence archive)
-- [ ] Coverage matrix — zero gaps
+- [ ] E2E tests — all pass inside runner VM (see evidence archive)
 - [ ] `./dist/mvm --version` — returns vX.Y.Z
 - [ ] `./dist/mvm --help` — all commands present
 
 ### Evidence
 - [ ] Build log archived
-- [ ] Test log archived (per-domain)
-- [ ] Coverage matrix snapshot archived
+- [ ] E2E test log archived
 - [ ] Binary checksum archived
 - [ ] Benchmark results within thresholds
 
@@ -303,7 +279,7 @@ A regression is **any** of the following:
 ## Related Documents
 
 - [docs/development/SYSTEM_TEST_SETUP.md](development/SYSTEM_TEST_SETUP.md) — detailed environment setup
-- [tests/system/COVERAGE_MATRIX.md](../tests/system/COVERAGE_MATRIX.md) — per-command coverage tracking
+- [docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md](development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md) — three-level test architecture (L0/L1/L2)
 - [CONTEXT.md](../CONTEXT.md) — test types, Option C verification, markers
 - [.opencode/agent/qa-engineer.md](../.opencode/agent/qa-engineer.md) — QA agent instructions
 - [docs/REFERENCES.md](REFERENCES.md) — complete command reference

@@ -1,6 +1,6 @@
 package model
 
-// ── CloudInitMode ──
+// --- CloudInitMode ---
 
 // CloudInitMode represents cloud-init configuration mode.
 type CloudInitMode string
@@ -12,7 +12,7 @@ const (
 	CloudInitModeISO    CloudInitMode = "iso"
 )
 
-// ── CloudInitStatus ──
+// --- CloudInitStatus ---
 
 // CloudInitStatus represents cloud-init execution status.
 type CloudInitStatus string
@@ -24,14 +24,14 @@ const (
 	CloudInitStatusError   CloudInitStatus = "ERROR"
 )
 
-// ── Cloud-init lifecycle interfaces ──
+// --- Cloud-init lifecycle interfaces ---
 
 // CloudInitFirewallRule is a firewall rule created during cloud-init provisioning.
 type CloudInitFirewallRule interface {
 	Remove() error
 }
 
-// ── CloudInitResult ──
+// --- CloudInitResult ---
 
 // CloudInitResult holds the result of cloud-init provisioning.
 type CloudInitResult struct {

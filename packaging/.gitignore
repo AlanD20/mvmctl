@@ -8,3 +8,4 @@
 !.gitignore
 !*.install
 !*.patch
+!builder.yaml

@@ -10,8 +10,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// PrivilegeDetails carries structured metadata about a privilege failure,
-// matching Python's PrivilegeError rich `details` dict.
+// PrivilegeDetails carries structured metadata about a privilege failure.
 type PrivilegeDetails struct {
 	Message             string   `json:"message"`
 	MissingCapabilities []string `json:"missing_capabilities"`
@@ -32,7 +31,6 @@ func NewPrivilegeError(msg string, details *PrivilegeDetails) *errs.DomainError 
 
 // CheckPrivileges checks privileges; if lacking, returns an error with structured details.
 // This is a pure check — no console output.
-// Matches Python's HostPrivilegeHelper.check_privileges().
 func CheckPrivileges(binary string, operationDescription string) error {
 	opStr := ""
 	if operationDescription != "" {

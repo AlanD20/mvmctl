@@ -13,15 +13,14 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"gopkg.in/yaml.v3"
 )
 
-// ──────────────────────────────────────────────
-// Safe file I/O (symlink-attack resistant)
-// ──────────────────────────────────────────────
+// --- Safe file I/O (symlink-attack resistant) ---
 
 // OpenNoFollow opens a file with O_RDONLY | O_CLOEXEC | O_NOFOLLOW.
-// Mirrors Python's FsUtils._open_nofollow().
 func OpenNoFollow(path string) (*os.File, error) {
 	// O_NOFOLLOW is always available on Linux (Go target platform)
 	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0)
@@ -32,7 +31,6 @@ func OpenNoFollow(path string) (*os.File, error) {
 }
 
 // SecureMkdir creates a directory, refusing if it or any ancestor is a symlink.
-// Mirrors Python's FsUtils.secure_mkdir().
 func SecureMkdir(path, name string) error {
 	fi, err := os.Lstat(path)
 	if err == nil {
@@ -81,7 +79,6 @@ func WaitForSocket(path string, timeout time.Duration) error {
 }
 
 // WritePIDFile writes a PID to a file with flock-based exclusive locking.
-// Mirrors Python's FsUtils.write_pid_file().
 // The mode parameter defaults to 0600 if zero is passed.
 func WritePIDFile(path string, pid int, mode ...os.FileMode) error {
 	fileMode := os.FileMode(0600)
@@ -106,14 +103,11 @@ func WritePIDFile(path string, pid int, mode ...os.FileMode) error {
 	return nil
 }
 
-// ──────────────────────────────────────────────
-// Real user ID resolution (for sudo chown)
-// ──────────────────────────────────────────────
+// --- Real user ID resolution (for sudo chown) ---
 
 // GetRealUserIDs returns (uid, gid) of the real invoking user when running
 // under sudo. Returns nil if not running as root, or if SUDO_USER is not set
 // or cannot be resolved.
-// Mirrors Python's FsUtils.get_real_user_ids().
 func GetRealUserIDs() (uid, gid int, ok bool) {
 	if os.Getuid() != 0 {
 		return 0, 0, false
@@ -133,7 +127,6 @@ func GetRealUserIDs() (uid, gid int, ok bool) {
 
 // ChownToRealUser recursively chowns a path to the real invoking user when
 // running under sudo. Does nothing if not under sudo or if path doesn't exist.
-// Mirrors Python's FsUtils.chown_to_real_user().
 func ChownToRealUser(path string) {
 	uid, gid, ok := GetRealUserIDs()
 	if !ok {
@@ -155,12 +148,9 @@ func ChownToRealUser(path string) {
 	}
 }
 
-// ──────────────────────────────────────────────
-// Generic file I/O helpers
-// ──────────────────────────────────────────────
+// --- Generic file I/O helpers ---
 
 // ReadRaw reads the raw text content of a file with O_NOFOLLOW protection.
-// Mirrors Python's FsUtils.read_raw().
 func ReadRaw(path string) (string, error) {
 	f, err := OpenNoFollow(path)
 	if err != nil {
@@ -175,7 +165,6 @@ func ReadRaw(path string) (string, error) {
 }
 
 // ReadFile reads a file and returns its contents as a string.
-// Convenience wrapper matching Python's Path.read_text().
 func ReadFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -185,9 +174,7 @@ func ReadFile(path string) (string, error) {
 }
 
 // ReadYAML reads and parses a YAML file with O_NOFOLLOW protection.
-// Returns dict[str, Any] | list[Any], matching Python's FsUtils.read_yaml()
-// which returns dict[str, Any] | list[Any] (union, not just map).
-// Returns {} (empty map) for empty files.
+// Returns a map or list, not just a map. Returns {} (empty map) for empty files.
 func ReadYAML(path string) (any, error) {
 	f, err := OpenNoFollow(path)
 	if err != nil {
@@ -211,9 +198,7 @@ func ReadYAML(path string) (any, error) {
 	return result, nil
 }
 
-// ──────────────────────────────────────────────
-// Existing helpers (preserved from prior version)
-// ──────────────────────────────────────────────
+// --- Existing helpers ---
 
 // EnsureDir creates a directory and all parents with the given permissions.
 func EnsureDir(path string, perm os.FileMode) error {
@@ -221,7 +206,7 @@ func EnsureDir(path string, perm os.FileMode) error {
 }
 
 // DirSize returns the total size in bytes of all files within a directory tree.
-// Inaccessible files are silently skipped (matches Python's OSError pass).
+// Inaccessible files are silently skipped.
 func DirSize(path string) int64 {
 	var total int64
 	filepath.Walk(path, func(fp string, fi os.FileInfo, err error) error {
@@ -246,9 +231,7 @@ func WriteJSON(path string, v any) error {
 }
 
 // ReadJSON reads and unmarshals JSON from path into v.
-// Uses O_NOFOLLOW protection to prevent symlink attacks, matching Python's
-// _open_nofollow() usage. Error messages match Python's format:
-// "Failed to read JSON from {path}: {exc}".
+// Uses O_NOFOLLOW protection to prevent symlink attacks.
 func ReadJSON(path string, v any) error {
 	f, err := OpenNoFollow(path)
 	if err != nil {
@@ -261,13 +244,10 @@ func ReadJSON(path string, v any) error {
 	return nil
 }
 
-// ──────────────────────────────────────────────
-// Integer reading from /proc files (migrated from host domain — verdict #33)
-// ──────────────────────────────────────────────
+// --- Integer reading from /proc files ---
 
 // ReadInt reads an integer from the first whitespace-delimited field of a file.
 // If the file cannot be read or parsed, returns defaultVal.
-// Matches Python's HostDetector._read_int().
 func ReadInt(path string, defaultVal int) int {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -285,9 +265,8 @@ func ReadInt(path string, defaultVal int) int {
 	return val
 }
 
-// CopyPreservingMetadata copies a file preserving both permissions and timestamps,
-// matching Python's shutil.copy2() behavior. Uses io.Copy for streaming (no full
-// memory load) and is appropriate for large files.
+// CopyPreservingMetadata copies a file preserving both permissions and timestamps.
+// Uses io.Copy for streaming (no full memory load) and is appropriate for large files.
 func CopyPreservingMetadata(src, dst string) error {
 	s, err := os.Open(src)
 	if err != nil {
@@ -330,24 +309,73 @@ func SafeMove(src, dst string) error {
 	return os.Remove(src)
 }
 
-// CopyFile copies a file from src to dst.
+// copyViaSendfile copies srcPath to dstPath using sendfile(2) for in-kernel
+// zero-copy transfer. Works across different filesystem types.
+func copyViaSendfile(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open src for sendfile: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("open dst for sendfile: %w", err)
+	}
+	defer dst.Close()
+
+	const maxSend = 0x7ffff000
+	var offset int64
+	for {
+		n, err := unix.Sendfile(int(dst.Fd()), int(src.Fd()), &offset, maxSend)
+		if err != nil {
+			return fmt.Errorf("sendfile at offset %d: %w", offset, err)
+		}
+		if n == 0 {
+			break
+		}
+	}
+	return nil
+}
+
+// copyViaIO copies srcPath to dstPath using io.Copy with a 32KB buffer.
+// Always works as a userspace fallback.
+func copyViaIO(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open src for io.Copy: %w", err)
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return fmt.Errorf("open dst for io.Copy: %w", err)
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
+	return err
+}
+
+// CopyFile copies srcPath to dstPath using the optimized fallback chain:
+// sendfile(2) → io.Copy. Performs fdatasync after copy.
 func CopyFile(src, dst string) error {
-	s, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open source %s: %w", src, err)
+	if err := copyViaSendfile(src, dst); err != nil {
+		if ioErr := copyViaIO(src, dst); ioErr != nil {
+			return fmt.Errorf("all copy methods failed: sendfile=%v, io.Copy=%v", err, ioErr)
+		}
 	}
-	defer s.Close()
 
-	d, err := os.Create(dst)
+	// fdatasync — data integrity
+	f, err := os.Open(dst)
 	if err != nil {
-		return fmt.Errorf("create destination %s: %w", dst, err)
+		return fmt.Errorf("open for fdatasync: %w", err)
 	}
-	defer d.Close()
-
-	if _, err := io.Copy(d, s); err != nil {
-		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
+	if err := syscall.Fdatasync(int(f.Fd())); err != nil {
+		f.Close()
+		return fmt.Errorf("fdatasync failed: %w", err)
 	}
-	return d.Sync()
+	return f.Close()
 }
 
 // IsSubDir checks whether path is under parent using proper path hierarchy comparison.

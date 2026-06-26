@@ -4,8 +4,6 @@
 // to avoid circular imports: guestfs and loopmount packages import this for
 // Operation types and ProvisionerContent, while provisioner/backend.go imports
 // guestfs and loopmount directly.
-//
-// Mirrors Python's src/mvmctl/core/_shared/_provisioner/_content.py exactly.
 package provcontent
 
 import (
@@ -14,21 +12,17 @@ import (
 	"strings"
 )
 
-// =========================================================================
-// Operation types — pure data, no execution logic
-// Matches Python's dataclasses in _content.py exactly.
-// =========================================================================
+// --- Operation types -- pure data, no execution logic ---
 
-// FileOpDefaultMode is the default file permission mode matching Python's
-// FileOp(mode=0o644) default. Go zero-initializes int fields to 0, so
-// callers who create FileOp without setting Mode will get 0000 permissions
-// instead of 0644. Use this constant or NewFileOp() to ensure correct defaults.
+// FileOpDefaultMode is the default file permission mode (0644).
+// Go zero-initializes int fields to 0, so callers who create FileOp without
+// setting Mode will get 0000 permissions instead of 0644. Use this constant
+// or NewFileOp() to ensure correct defaults.
 const FileOpDefaultMode = 0644
 
 // FileOp represents writing a file inside the root filesystem.
-// Matches Python @dataclass FileOp.
 //
-// IMPORTANT: Go zero-initializes Mode to 0, NOT 0644 like Python's default.
+// IMPORTANT: Go zero-initializes Mode to 0, NOT 0644.
 // Always set Mode explicitly, use FileOpDefaultMode, or use NewFileOp().
 type FileOp struct {
 	Path string
@@ -39,13 +33,11 @@ type FileOp struct {
 }
 
 // ChrootOp represents running a shell command inside a chroot environment.
-// Matches Python @dataclass ChrootOp.
 type ChrootOp struct {
 	Command string
 }
 
 // CopyDirOp represents copying a directory tree into the root filesystem.
-// Matches Python @dataclass CopyDirOp.
 type CopyDirOp struct {
 	Src string
 	Dst string
@@ -60,13 +52,13 @@ const (
 )
 
 // ResizeOp represents resizing the root filesystem (grow or shrink).
-// Matches Python @dataclass ResizeOp.
 type ResizeOp struct {
-	Action ResizeAction
-	Bytes  int64
+	Action   ResizeAction
+	Bytes    int64
+	Headroom int // extra headroom in bytes after shrink-to-minimum
 }
 
-// Operation is a union type matching Python's "Operation = FileOp | ChrootOp | CopyDirOp | ResizeOp".
+// Operation is a union type: FileOp | ChrootOp | CopyDirOp | ResizeOp.
 type Operation interface {
 	operationMarker()
 }
@@ -76,11 +68,10 @@ func (ChrootOp) operationMarker()  {}
 func (CopyDirOp) operationMarker() {}
 func (ResizeOp) operationMarker()  {}
 
-// NewFileOp creates a FileOp with the default mode (0644) matching Python's
-// FileOp(mode=0o644) default, and uid=0, gid=0.
+// NewFileOp creates a FileOp with the default mode (0644) and uid=0, gid=0.
 //
 // This is the recommended way to create FileOp values — it ensures the mode
-// default matches Python behavior even if the caller forgets to set Mode.
+// default is set even if the caller forgets to set Mode.
 func NewFileOp(path string, data []byte) FileOp {
 	return FileOp{
 		Path: path,
@@ -91,13 +82,10 @@ func NewFileOp(path string, data []byte) FileOp {
 	}
 }
 
-// =========================================================================
-// Builder — shared provisioning content
-// Matches Python's ProvisionerContent class exactly.
+// --- Builder -- shared provisioning content ---
 //
-// - Raw content methods return plain strings/bytes (single source of truth).
-// - Builder methods wrap raw content into Operation types.
-// =========================================================================
+// Raw content methods return plain strings/bytes (single source of truth).
+// Builder methods wrap raw content into Operation types.
 
 type Builder struct{}
 
@@ -123,7 +111,6 @@ if command -v systemctl >/dev/null 2>&1; then
     snapd.socket \
     systemd-udev-settle.service \
     unattended-upgrades.service \
-    packagekit.service \
     man-db.timer \
     whoopsie.service \
     apport.service \
@@ -250,7 +237,6 @@ fi`
 )
 
 // SSHDConfig returns content for /etc/ssh/sshd_config.d/mvm.conf.
-// Matches Python's sshd_config() static method.
 func (Builder) SSHDConfig(user string) string {
 	lines := []string{
 		"PubkeyAuthentication yes",
@@ -270,30 +256,26 @@ func (Builder) SSHDConfig(user string) string {
 }
 
 // FirstBootInstaller returns content for /usr/local/bin/first-boot-ssh-installer.sh.
-// Matches Python's first_boot_installer() static method.
 func (Builder) FirstBootInstaller() string {
 	return firstBootInstallerScript + "\n"
 }
 
 // FirstBootService returns content for /etc/systemd/system/first-boot-ssh-installer.service.
-// Matches Python's first_boot_service() static method.
 func (Builder) FirstBootService() string {
 	return firstBootServiceScript + "\n"
 }
 
 // Hosts returns content for /etc/hosts with a 127.0.1.1 entry.
-// Matches Python's hosts() static method.
 func (Builder) Hosts(hostname string) string {
 	return fmt.Sprintf(hostsTemplate+"\n", hostname)
 }
 
 // BuildHostnameOps generates operations for setting hostname and /etc/hosts.
-// Matches Python's build_hostname_ops() classmethod.
 func (pc Builder) BuildHostnameOps(hostname string) []Operation {
 	return []Operation{
 		FileOp{
 			Path: "/etc/hostname",
-			Data: []byte(hostname), // Python: no trailing newline
+			Data: []byte(hostname), // no trailing newline
 			Mode: 0644,
 			UID:  0,
 			GID:  0,
@@ -309,7 +291,6 @@ func (pc Builder) BuildHostnameOps(hostname string) []Operation {
 }
 
 // BuildDNSOps generates operation for injecting DNS resolver.
-// Matches Python's build_dns_ops() classmethod.
 func (Builder) BuildDNSOps(dnsServer string) []Operation {
 	return []Operation{
 		FileOp{
@@ -323,23 +304,23 @@ func (Builder) BuildDNSOps(dnsServer string) []Operation {
 }
 
 // BuildSSHOps generates operations for SSH key injection and SSHD config.
-// Matches Python's build_ssh_ops() classmethod.
+// The user is created unconditionally when non-root. SSH keys are injected
+// only when sshPubkeys is non-empty.
 func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 	var ops []Operation
-	if len(sshPubkeys) == 0 {
-		return ops
+
+	if len(sshPubkeys) > 0 {
+		keyData := []byte(strings.Join(sshPubkeys, "\n") + "\n")
+
+		// Always inject into /root/.ssh/authorized_keys so root can always SSH in.
+		ops = append(ops, FileOp{
+			Path: "/root/.ssh/authorized_keys",
+			Data: keyData,
+			Mode: 0600,
+			UID:  0,
+			GID:  0,
+		})
 	}
-
-	keyData := []byte(strings.Join(sshPubkeys, "\n") + "\n")
-
-	// ALWAYS inject into /root/.ssh/authorized_keys
-	ops = append(ops, FileOp{
-		Path: "/root/.ssh/authorized_keys",
-		Data: keyData,
-		Mode: 0600,
-		UID:  0,
-		GID:  0,
-	})
 
 	if user == "root" {
 		// Fix /root ownership — some cloud images (e.g. Ubuntu cloud)
@@ -350,26 +331,35 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 	} else {
 		userHome := "/home/" + user
 
-		// ALSO inject into the non-root user's authorized_keys
-		ops = append(ops, FileOp{
-			Path: userHome + "/.ssh/authorized_keys",
-			Data: keyData,
-			Mode: 0600,
-			UID:  0,
-			GID:  0,
-		})
-
-		ops = append(ops, ChrootOp{Command: fmt.Sprintf("useradd -m %s", user)})
+		// Create the user unconditionally — --user flag should always work
+		// regardless of whether SSH keys are provided.
+		ops = append(ops, ChrootOp{Command: fmt.Sprintf("id %s 2>/dev/null || useradd -m %s", user, user)})
 		// Fix ownership: useradd -m creates home owned by root:root in chroot
 		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s", user, user, userHome)})
-		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh", user, user, userHome)})
-		ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)})
+
+		if len(sshPubkeys) > 0 {
+			keyData := []byte(strings.Join(sshPubkeys, "\n") + "\n")
+
+			// Inject keys into the non-root user's authorized_keys
+			ops = append(ops, FileOp{
+				Path: userHome + "/.ssh/authorized_keys",
+				Data: keyData,
+				Mode: 0600,
+				UID:  0,
+				GID:  0,
+			})
+			ops = append(ops, ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh", user, user, userHome)})
+			ops = append(
+				ops,
+				ChrootOp{Command: fmt.Sprintf("chown %s:%s %s/.ssh/authorized_keys", user, user, userHome)},
+			)
+		}
 	}
 
-	// ── Static SSH infrastructure (identical for every VM from this image) ──
+	// --- Static SSH infrastructure (identical for every VM from this image) ---
 	// These ops set up the SSH daemon config, first-boot installer, host keys,
-	// and service enablement. Moved here from BuildDeblobOps so they are always
-	// produced when SSH keys are injected, regardless of deblobbing.
+	// and service enablement. Unconditional — needed even without SSH keys
+	// because the user may inject keys later or use password auth.
 	ops = append(ops, FileOp{
 		Path: "/etc/ssh/sshd_config.d/mvm.conf",
 		Data: []byte(pc.SSHDConfig("root")),
@@ -391,7 +381,7 @@ func (pc Builder) BuildSSHOps(user string, sshPubkeys []string) []Operation {
 		UID:  0,
 		GID:  0,
 	})
-	ops = append(ops, ChrootOp{Command: "ssh-keygen -A"})
+	ops = append(ops, ChrootOp{Command: "command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A || true"})
 	ops = append(ops, ChrootOp{Command: enableSSHScript})
 
 	return ops
@@ -407,18 +397,15 @@ func (Builder) SetupSudo(user string) []Operation {
 		ChrootOp{Command: "mkdir -p /etc/sudoers.d"},
 		ChrootOp{Command: fmt.Sprintf("echo '%s ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/%s", user, user)},
 		ChrootOp{Command: fmt.Sprintf("chmod 440 /etc/sudoers.d/%s", user)},
-		ChrootOp{Command: `chown root:root /etc/sudo.conf && \
-chmod 0440 /etc/sudo.conf && \
-chown root:root /etc/sudoers && \
-chmod 0440 /etc/sudoers && \
-chown root:root -R /etc/sudoers.d && \
-chown root:root /usr/bin/sudo && \
-chmod 4755 /usr/bin/sudo`},
+		ChrootOp{Command: `test -f /etc/sudo.conf && chown root:root /etc/sudo.conf && chmod 0440 /etc/sudo.conf; \
+test -f /etc/sudoers && chown root:root /etc/sudoers && chmod 0440 /etc/sudoers; \
+chown root:root -R /etc/sudoers.d; \
+test -f /usr/bin/sudo && chown root:root /usr/bin/sudo && chmod 4755 /usr/bin/sudo; \
+test -f /usr/libexec/sudo/sudoers.so && chown root:root /usr/libexec/sudo/sudoers.so`},
 	}
 }
 
 // BuildCloudInitDisableOps generates operations to disable cloud-init.
-// Matches Python's build_cloud_init_disable_ops() classmethod.
 func (Builder) BuildCloudInitDisableOps() []Operation {
 	ops := []Operation{
 		FileOp{
@@ -464,8 +451,7 @@ func (Builder) BuildCloudInitDisableOps() []Operation {
 }
 
 // BuildCloudInitInjectOps generates operations to inject cloud-init seed directory.
-// Matches Python's build_cloud_init_inject_ops() classmethod — returns empty
-// list if the directory does not exist.
+// Returns empty list if the directory does not exist.
 func (Builder) BuildCloudInitInjectOps(cloudInitDir string) []Operation {
 	if _, err := os.Stat(cloudInitDir); os.IsNotExist(err) {
 		return nil
@@ -479,7 +465,6 @@ func (Builder) BuildCloudInitInjectOps(cloudInitDir string) []Operation {
 }
 
 // BuildResizeOps generates operation for filesystem resize (grow).
-// Matches Python's build_resize_ops() classmethod.
 func (Builder) BuildResizeOps(targetSizeBytes int64) []Operation {
 	return []Operation{
 		ResizeOp{
@@ -490,7 +475,6 @@ func (Builder) BuildResizeOps(targetSizeBytes int64) []Operation {
 }
 
 // BuildShrinkOps generates operation for filesystem shrink to minimum size.
-// Matches Python's build_shrink_ops() classmethod.
 func (Builder) BuildShrinkOps(limitBytes int64) []Operation {
 	return []Operation{
 		ResizeOp{
@@ -501,14 +485,13 @@ func (Builder) BuildShrinkOps(limitBytes int64) []Operation {
 }
 
 // BuildDeblobOps generates OS cache cleanup, SSH config, and cloud-init disable operations.
-// Matches Python's build_deblob_ops() classmethod (~320 lines).
 //
 // These operations run once at image import time — they are identical
 // for every VM from the same image.
 func (pc Builder) BuildDeblobOps(osType string) []Operation {
 	var ops []Operation
 
-	// ── Common cleanup (all distros) ──────────────────────────────
+	// --- Common cleanup (all distros) ---
 	ops = append(ops, ChrootOp{Command: "rm -rf /var/log/* /tmp/* /var/tmp/* 2>/dev/null || true"})
 	ops = append(
 		ops,
@@ -516,10 +499,10 @@ func (pc Builder) BuildDeblobOps(osType string) []Operation {
 	)
 	ops = append(ops, ChrootOp{Command: "find /var/log -type f -delete 2>/dev/null || true"})
 
-	// ── MicroVM boot optimizations (systemd) ──────────────────────────
+	// --- MicroVM boot optimizations (systemd) ---
 	ops = append(ops, ChrootOp{Command: maskServicesScript})
 
-	// ── OS-specific cache cleanup ─────────────────────────────────
+	// --- OS-specific cache cleanup ---
 	osLower := strings.ToLower(osType)
 	switch {
 	case osLower == "ubuntu" || osLower == "debian":
@@ -585,7 +568,7 @@ func (pc Builder) BuildDeblobOps(osType string) []Operation {
 		ops = append(ops, ChrootOp{Command: "rm -rf /var/cache/* 2>/dev/null || true"})
 	}
 
-	// ── Cloud-init disable (all distros) ──────────────────────────────
+	// --- Cloud-init disable (all distros) ---
 	ops = append(ops, FileOp{
 		Path: "/etc/cloud/cloud.cfg.d/99-disable-datasources.cfg",
 		Data: CloudInitDisableDatasource,
@@ -626,13 +609,11 @@ func (pc Builder) BuildDeblobOps(osType string) []Operation {
 // backends at VM creation time.
 //
 // Produces:
-//   - FileOp: /usr/bin/mvm-vsock-agent (agent binary, mode 0755)
-//   - FileOp: /var/run/mvm-vsock-agent.token (auth token, mode 0644)
-//   - FileOp: /etc/systemd/system/mvm-vsock-agent.service (systemd unit, mode 0644)
-//   - FileOp: /etc/init.d/mvm-vsock-agent (OpenRC init script, mode 0755)
-//   - ChrootOp: detect init system and enable agent
-//
-// Matches Python's build_vsock_agent_ops() classmethod.
+// - FileOp: /usr/bin/mvm-vsock-agent (agent binary, mode 0755)
+// - FileOp: /var/run/mvm-vsock-agent.token (auth token, mode 0644)
+// - FileOp: /etc/systemd/system/mvm-vsock-agent.service (systemd unit, mode 0644)
+// - FileOp: /etc/init.d/mvm-vsock-agent (OpenRC init script, mode 0755)
+// - ChrootOp: detect init system and enable agent
 func (Builder) BuildVsockAgentOps(agentBinary []byte, port int, token string) []Operation {
 	return []Operation{
 		FileOp{
@@ -703,7 +684,6 @@ fi
 }
 
 // BuildFixFstabOps generates operation to fix /etc/fstab for Firecracker.
-// Matches Python's build_fix_fstab_ops() classmethod.
 func (Builder) BuildFixFstabOps() []Operation {
 	return []Operation{
 		ChrootOp{Command: fixFstabScript},

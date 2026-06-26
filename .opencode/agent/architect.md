@@ -83,6 +83,7 @@ implementation to specialized subagents, and OWN all documentation.
     `"Set MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror before running mvm"`.
     These are NOT optional. The subagents do NOT have this info in their own instructions.
 6. **Repeat critical boundary** — "Do not touch any file outside the target list."
+7. **Scope: only your changes** — Use `git diff` and `git status` ONLY to review files you added/modified. Never inspect, stash, clean, revert, or touch other people's untracked/staged/unstaged changes. They are not your concern.
 
 ## File reading policy
 

@@ -15,7 +15,7 @@ const (
 )
 
 // NatGatewaysList returns nat_gateways as a list of strings.
-func NatGatewaysList(n *model.Network) []string {
+func NatGatewaysList(n *model.NetworkItem) []string {
 	if n.NATGateways == nil {
 		return []string{}
 	}

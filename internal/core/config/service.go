@@ -10,7 +10,6 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// Service matches the Python mvmctl.core.config._service.SettingsService.
 // Handles type coercion, cross-key constraint validation, and DB persistence.
 type Service struct {
 	repo        SettingsRepository
@@ -26,9 +25,6 @@ func NewService(repo SettingsRepository, constraints *ConstraintRegistry) *Servi
 }
 
 // Set coerces the value, validates constraints, and persists.
-// Matches Python: set() -> coerce + check_constraints + repo.set().
-//
-// Error message when key is not overridable matches Python exactly:
 //
 //	"'{category}.{key}' is not an overridable setting. Use 'mvm config ls' to see valid keys."
 func (s *Service) Set(ctx context.Context, category, key string, value any) error {
@@ -118,13 +114,11 @@ func (s *Service) GetDuration(ctx context.Context, category, key string) (time.D
 }
 
 // Delete removes a setting override. Returns true if a row was deleted.
-// Matches Python: delete() -> repo.delete().
 func (s *Service) Delete(ctx context.Context, category, key string) (bool, error) {
 	return s.repo.Delete(ctx, category, key)
 }
 
 // DeleteByCategory removes all overrides in a category after validating it exists.
-// Matches Python: validates category exists, then repo.delete_by_category().
 func (s *Service) DeleteByCategory(ctx context.Context, category string) (int, error) {
 	if _, ok := OverridableSettings[category]; !ok {
 		return 0, errs.New(errs.CodeConfigError,
@@ -134,23 +128,17 @@ func (s *Service) DeleteByCategory(ctx context.Context, category string) (int, e
 }
 
 // DeleteAll removes ALL user overrides.
-// Matches Python: delete_all() -> repo.delete_all().
 func (s *Service) DeleteAll(ctx context.Context) (int, error) {
 	return s.repo.DeleteAll(ctx)
 }
 
 // ListByCategory returns all keys in a category with type, default, and override info.
-// Matches Python: dict with "type", "default", "override" per key.
-// Python returns: {key: {"type": expected_type.__name__, "override": override, "default": default}}
-// Go matches this exactly with model.SettingInfo{Type, Default, Override}.
 func (s *Service) ListByCategory(ctx context.Context, category string) (map[string]model.SettingInfo, error) {
 	if _, ok := OverridableSettings[category]; !ok {
 		return nil, errs.New(errs.CodeConfigError,
 			"'"+category+"' is not a valid setting category. Use 'mvm config ls' to see valid categories.")
 	}
 
-	// Python: overrides = self._repo.list_by_category(category)
-	// Even with a category filter, Python returns {category: {key: value}} (nested).
 	cat := category
 	overrides, err := s.repo.ListByCategory(ctx, &cat)
 	if err != nil {
@@ -175,7 +163,6 @@ func (s *Service) ListByCategory(ctx context.Context, category string) (map[stri
 }
 
 // ListAll returns all overridable settings across all categories.
-// Matches Python: list_all() -> dict of {category: {key: {type, default, override}}}.
 func (s *Service) ListAll(ctx context.Context) (map[string]map[string]model.SettingInfo, error) {
 	overrides, err := s.repo.ListByCategory(ctx, nil)
 	if err != nil {
@@ -203,12 +190,9 @@ func (s *Service) ListAll(ctx context.Context) (map[string]map[string]model.Sett
 	return result, nil
 }
 
-// ---------------------------------------------------------------------------
 // Internal helpers
-// ---------------------------------------------------------------------------
 
 // checkConstraints validates cross-key constraints before writing.
-// Matches Python: _check_constraints(category, key, new_value).
 func (s *Service) checkConstraints(ctx context.Context, category, key string, newValue any) error {
 	constraints := s.constraints.Get(category, key)
 	if len(constraints) == 0 {
@@ -236,7 +220,6 @@ func (s *Service) checkConstraints(ctx context.Context, category, key string, ne
 
 // GetValue returns the effective value for a setting:
 // DB override (coerced) or hardcoded default.
-// Matches Python: _get_active_value(category, key).
 func (s *Service) GetValue(ctx context.Context, category, key string) (any, error) {
 	override, err := s.repo.Get(ctx, category, key)
 	if err != nil {
@@ -251,8 +234,7 @@ func (s *Service) GetValue(ctx context.Context, category, key string) (any, erro
 	}
 	def, gdErr := infra.GetDefault(category, key)
 	if gdErr != nil {
-		// Python: bare KeyError propagates through — no wrapping in MVMError.
-		// Go: propagate the plain error as-is, no DomainError wrapping.
+		// Propagate the plain error as-is, no DomainError wrapping.
 		return nil, gdErr
 	}
 	return def, nil

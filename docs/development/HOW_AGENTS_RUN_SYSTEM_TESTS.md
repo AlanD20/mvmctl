@@ -15,7 +15,7 @@ environment variables, and flags are intentional.
 
 1. [Prerequisite Check](#1-prerequisite-check)
 2. [Build the Binary](#2-build-the-binary)
-3. [Deploy the Environment](#3-deploy-the-environment)
+3. [Deploy + Snapshot the Environment](#3-deploy--snapshot-the-environment)
 4. [Run System Tests Inside the VM](#4-run-system-tests-inside-the-vm)
 5. [Interpret Results](#5-interpret-results)
 6. [Collect Release Evidence](#6-collect-release-evidence)
@@ -153,21 +153,13 @@ These are installed inside rc-vm by `rc-env.yaml` — you do NOT need them on th
 | Images (`alpine:3.21`, `ubuntu:24.04`) | Inside rc-vm `/mnt/` | `copy:copy alpine image`, `copy:copy ubuntu image` |
 | Firecracker binary | Inside rc-vm `/mnt/` | `copy:copy firecracker tarball` |
 | mvm binary | Inside rc-vm `/usr/bin/mvm` | `ssh:install mvm` step |
-| System tests | Inside rc-vm `~/tests/system/` | `copy:copy system tests` step |
+| E2E tests | Inside rc-vm `~/tests/e2e/` | `copy:copy e2e tests` step |
 
-### 1.6 Per-Domain Resource Requirements
+### 1.6 Resource Pre-Seeding (Inside rc-vm)
 
-Some domains need resources beyond the base prerequisites:
-
-| Domain | Required Resources | Why |
-|--------|-------------------|-----|
-| `vm` | 2 kernels, alpine + ubuntu images, default kernel set | Tests create VMs with different kernel/image combinations |
-| `invariants` | 2 kernels, default kernel set | Tests `at_most_one_default_kernel` needs ≥2 distinct kernels |
-| `images` | alpine + ubuntu images pulled | Tests pull/import operations |
-| `kernel` | firecracker kernel, default set | Tests kernel lifecycle |
-
-The conftest.py fixtures handle pulling resources on demand, but pre-pulling
-saves time. To manually ensure resources are ready:
+The e2e test suite needs assets (kernels, images, binaries) to be available
+inside rc-vm. The `rc-env.yaml` handles this automatically during deployment.
+To manually pre-seed assets inside rc-vm:
 
 ```bash
 # Inside rc-vm:
@@ -211,7 +203,7 @@ sudo operations. The runner script finds `dist/mvm` via auto-detection.
 
 ---
 
-## 3. Deploy the Environment (Host)
+## 3. Deploy + Snapshot the Environment (Host)
 
 ### 3.1 Initialize the Host
 
@@ -234,11 +226,29 @@ export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
 
 **What this does (in order):**
 1. Creates network (`rc-net`), SSH key (`rc-key`)
-2. Pulls/creates image (`ubuntu:noble`), kernel (`official:7.0.11`), binary (`firecracker 1.16.0`)
-3. Creates VM (`rc-vm`) with 6 vcpu, 4G mem, 25G disk, `nested_virt: true`
-4. Copies into the VM: mvm binary, firecracker tarball, kernel, alpine image, ubuntu image, system tests
-5. SSH into VM: installs packages (`qemu-utils`, `net-tools`, `python3`, `pytest`, ...)
-6. SSH into VM: installs `mvm` into `/usr/bin/mvm`, creates `/mnt/tmp`
+2. Creates VM (`rc-vm`) with 6 vcpu, 4G mem, 25G disk, `nested_virt: true`
+3. Copies into the VM: mvm binary, firecracker tarball, kernel `.vmlinux` + `.marker`, alpine image, ubuntu image, e2e tests
+4. Executes `install packages` — system deps inside the VM
+5. Executes `install guestfs kernel` — libguestfs compat kernel
+6. Executes `install mvm` — copies binary to `/usr/bin/mvm`
+7. **Executes `import cached assets`** — runs `kernel pull`/`image pull`/`bin pull`/`init` with `MVM_ASSET_MIRROR=/mnt` (all cache hits, zero network)
+8. **Executes `set mvm env vars`** — adds `MVM_ASSET_MIRROR=/mnt`/`MVM_TEMP_DIR=/mnt` to root's `.bashrc`
+
+### 3.3 Snapshot the Runner VM
+
+After `env apply` completes, snapshot the provisioned VM for instant restore on subsequent runs:
+
+```bash
+mvm snapshot create rc-vm --name rc-vm-snap
+```
+
+Now the VM can be restored and tests can run in ~5 seconds instead of waiting for provisioning.
+
+### 3.4 Restore from Snapshot (each test session)
+
+```bash
+mvm snapshot restore rc-vm-snap rc-vm --resume
+```
 
 ---
 
@@ -268,7 +278,7 @@ and related commands.
 │  │ rc-vm (outer VM)            │    │
 │  │  nested_virt: true              │    │
 │  │  Assets: /mnt/kernel, /mnt/*.vhd│    │
-│  │  Tests: ~/tests/system/         │    │
+│  │  Tests: ~/tests/e2e/            │    │
 │  │  mvm: /usr/bin/mvm              │    │
 │  │                                 │    │
 │  │  ┌───────────────────────────┐  │    │
@@ -290,15 +300,13 @@ and related commands.
 ~/.local/bin/mvm vm ls --json
 
 # Check mvm version inside the outer VM
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner --cmd 'mvm --version'
+~/.local/bin/mvm vm exec rc-vm --user runner --timeout 10 -- 'mvm --version'
 
 # Check tests and assets are present
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner --cmd 'ls ~/tests/system/ /mnt/'
+~/.local/bin/mvm vm exec rc-vm --user runner --timeout 10 -- 'ls ~/tests/e2e/ /mnt/'
 ```
 
-### 4.2 Run All Domains (Release Gate)
+### 4.2 Run All E2E Tests (Release Gate)
 
 **Critical environment variables inside rc-vm:**
 
@@ -308,48 +316,40 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
 | `MVM_BINARY` | `/usr/bin/mvm` | Tests use this to find the mvm binary |
 | `MVM_CACHE_DIR` | `$HOME/.cache/mvmctl` | Test framework sets this automatically via conftest.py |
 
-Run each domain as a non-interactive SSH command. The host sends one command,
-rc-vm executes the tests against nested VMs:
-
-```bash
-for domain in bin cache cli config console cp host \
-  images init invariants kernel keys logs \
-  network ssh vm; do
-  echo "=== Domain: $domain ==="
-  MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-    ~/.local/bin/mvm ssh rc-vm -u runner --timeout 600 --cmd \
-    "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
-    python3 -m pytest --timeout 300 \
-    tests/system/$domain/ --tb=short -q"
-  echo ""
-done
-```
-
-Note: The `--timeout 300` is pytest's per-test timeout (some VM tests take 5+
-minutes). The `--timeout 600` on `mvm ssh` is the SSH command timeout.
-
-### 4.3 Run a Single Domain
+Run the full e2e suite as a single non-interactive command. The host sends one command via vsock,
+rc-vm executes all tests against nested VMs:
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner --timeout 600 --cmd \
+  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
   "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
   python3 -m pytest --timeout 300 \
-  tests/system/vm/ --tb=short -q"
+  tests/e2e/ --tb=short -q"
+```
+
+Note: The `--timeout 300` is pytest's per-test timeout (some VM tests take 5+
+minutes). The `--timeout 600` on `mvm vm exec` is the vsock agent connect/probe
+timeout; the pytest command itself runs until completion.
+
+### 4.3 Run a Single Test File
+
+```bash
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
+  "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
+  python3 -m pytest --timeout 300 \
+  tests/e2e/network/test_network.py --tb=short -q"
 ```
 
 ### 4.4 Interactive Session (Debugging)
 
-SSH in interactively to debug failures:
+Open a shell inside rc-vm to debug failures:
 
 ```bash
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm ssh rc-vm -u runner
-
-# Inside rc-vm:
+mvm vm exec rc-vm --user runner
 cd ~
 MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
-  python3 -m pytest --timeout 300 -x tests/system/vm/ --tb=long
+  python3 -m pytest --timeout 300 -x tests/e2e/ --tb=long
 ```
 
 ### 4.5 Reset and Re-deploy
@@ -402,7 +402,7 @@ The runner prints a summary at the end:
   12 passed  0 failed  0 skipped  (3m12s)
 ```
 
-Each domain's results are saved to `.reports/system-test-results-latest.txt`:
+Results are saved to `.reports/system-test-results-latest.txt`:
 
 ```
 test_network.py: PASS
@@ -424,21 +424,6 @@ pass. A skip is treated as a release blocker — it means either:
 - The environment is missing a prerequisite (fix the environment)
 - The test is testing a feature that doesn't exist in the Go CLI (remove the test or add the feature)
 - The test's skip condition is too broad (tighten the condition)
-
-**Current RC status (all 16 domains):**
-```
-bin:    19 passed        kernel: 34 passed
-cache:  18 passed        keys:   26 passed
-cli:    46 passed        logs:   10 passed
-config: 12 passed        network: 41 passed
-console: 6 passed        ssh:    9 passed
-cp:     14 passed        vm:     148 passed
-host:   27 passed
-images: 43 passed
-init:   6 passed
-invariants: 27 passed
-```
-All domains: **0 failures, 0 skips.**
 
 Before signing off an RC, every test file must produce `X passed, 0 failed, 0 skipped`.
 
@@ -490,26 +475,18 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
   ~/.local/bin/mvm env apply rc-env.yaml \
   > release-evidence/vX.Y.Z/env-deploy.log 2>&1
 
-# System tests (inside rc-vm, per-domain, via SSH --cmd)
-for domain in bin cache cli config console cp host \
-  images init invariants kernel keys logs \
-  network ssh vm; do
-  echo "=== Domain: $domain ==="
-  MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-    ~/.local/bin/mvm ssh rc-vm -u runner --timeout 600 --cmd \
-    "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
-    python3 -m pytest --timeout 300 \
-    tests/system/$domain/ --tb=short -q" \
-    > release-evidence/vX.Y.Z/system-${domain}.log 2>&1
-done
+# System tests (inside rc-vm, single e2e run)
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
+  "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
+  python3 -m pytest --timeout 300 \
+  tests/e2e/ --tb=short -q" \
+  > release-evidence/vX.Y.Z/system-e2e.log 2>&1
 
 # Binary verification
 ~/.local/bin/mvm --version > release-evidence/vX.Y.Z/version.txt 2>&1
 ~/.local/bin/mvm --help > release-evidence/vX.Y.Z/help.txt 2>&1
 sha256sum dist/mvm > release-evidence/vX.Y.Z/checksum.sha256
-
-# Coverage matrix snapshot
-cp tests/system/COVERAGE_MATRIX.md release-evidence/vX.Y.Z/
 ```
 
 Each `.log` file must show zero failures. Any failure blocks the release.
@@ -521,5 +498,5 @@ Each `.log` file must show zero failures. Any failure blocks the release.
 - `docs/RC_QA.md` — Release gates and checklist (human-facing)
 - `docs/RELEASE.md` — Full release process (tagging, CI, AUR)
 - `docs/development/SYSTEM_TEST_SETUP.md` — Detailed environment setup
-- `tests/system/COVERAGE_MATRIX.md` — Per-command coverage tracking
+- `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` — Three-level test architecture (L0/L1/L2)
 - `.opencode/agent/qa-engineer.md` — QA agent instructions

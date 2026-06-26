@@ -13,7 +13,7 @@ import (
 	"mvmctl/internal/testutil"
 )
 
-// ─── MockConfigAPI ─────────────────────────────────────────────────────────────
+// --- MockConfigAPI ---
 // Rationale: MockConfigAPI satisfies api.ConfigAPI for testing upper layers.
 // Tests verify default zero returns and custom function routing for ConfigGet
 // and ConfigSet.

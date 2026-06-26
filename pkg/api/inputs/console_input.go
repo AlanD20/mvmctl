@@ -1,64 +1,38 @@
 package inputs
 
 import (
-	"context"
-
+	"fmt"
 	"mvmctl/internal/lib/model"
-
-	"github.com/jmoiron/sqlx"
 )
 
-// ConsoleInput matches Python's ConsoleInput dataclass.
-//
-//	@dataclass
-//	class ConsoleInput:
-//	    identifier: str
+// ConsoleInput specifies console input.
 type ConsoleInput struct {
 	Identifier string `json:"identifier"`
 }
 
-// ResolvedConsoleInput matches Python's ResolvedConsoleInput (frozen dataclass).
-//
-//	@dataclass(frozen=True)
-//	class ResolvedConsoleInput:
-//	    vm: VMInstanceItem
-//	    relay: ConsoleRelayManager
+// ResolvedConsoleInput specifies resolved console input.
 type ResolvedConsoleInput struct {
-	VM    *model.VM
+	VM    *model.VMItem
 	Relay model.ConsoleRelay
 }
 
-// ConsoleRequest matches Python's ConsoleRequest.
-//
-// Resolve the VM for console operations.
-type ConsoleRequest struct {
-	db     *sqlx.DB
-	input  ConsoleInput
-	result *ResolvedConsoleInput
-}
-
-// NewConsoleRequest creates a new ConsoleRequest.
-func NewConsoleRequest(inputs ConsoleInput, db *sqlx.DB) *ConsoleRequest {
-	return &ConsoleRequest{
-		db:    db,
-		input: inputs,
+// Validate checks that the console input has a VM identifier.
+func (i *ConsoleInput) Validate() error {
+	if i.Identifier == "" {
+		return fmt.Errorf("VM identifier is required for console operations")
 	}
+	return nil
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-
-// Resolve stores the resolved VM and relay in the request result.
-// Matches Python's ConsoleRequest.resolve().
+// Resolve stores the resolved VM and relay in the resolved input.
 // The relay is created by the caller (API layer) to avoid importing
 // internal/service/console from this package.
-func (r *ConsoleRequest) Resolve(
-	ctx context.Context,
-	vmEntity *model.VM,
-	relay model.ConsoleRelay,
-) (*ResolvedConsoleInput, error) {
-	r.result = &ResolvedConsoleInput{
+func (i *ConsoleInput) Resolve(vmEntity *model.VMItem, relay model.ConsoleRelay) (*ResolvedConsoleInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	return &ResolvedConsoleInput{
 		VM:    vmEntity,
 		Relay: relay,
-	}
-	return r.result, nil
+	}, nil
 }

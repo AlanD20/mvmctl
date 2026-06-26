@@ -86,7 +86,7 @@ These layers are VMM-agnostic and survive intact:
 | `internal/core/key/*` | SSH key management — VMM-agnostic |
 | `internal/core/cloudinit/*` | Cloud-init — VMM-agnostic |
 | `internal/core/volume/*` | Volume management — attach/detach abstracted through driver |
-| `pkg/api/inputs/*` | Input/Request/Resolved pipeline — VMM-agnostic |
+| `pkg/api/inputs/*` | Input Validate/Resolve pattern (ADR-0011) — VMM-agnostic |
 | `internal/cli/*` (except `vm.go` VMM selection) | Most CLI commands are VMM-agnostic |
 | All models except `firecracker.go` | `VM`, `Network`, etc. — VMM-agnostic |
 

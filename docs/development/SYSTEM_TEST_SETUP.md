@@ -1,470 +1,226 @@
-# System Test Setup
+# System Test Setup — Runner VM Architecture
 
-**Purpose:** Define the hardware, software, and configuration required to run
-the complete mvmctl system test suite with zero skips on a dedicated test machine.
+**Purpose:** Define how to set up the host machine and the runner VM for executing L2 (E2E) system tests.
 
-System tests (`tests/system/`) are black-box CLI subprocess tests that operate
-against real infrastructure — real kernels, images, bridges, iptables rules,
-and SQLite state. They are the **primary release gate**: a domain is not
-production-ready until its system tests pass on real hardware.
+> **See also:** [ADR-0012](../adr/0012-unified-test-architecture.md) for the architectural decisions.
+>
+> **See also:** [HOW_AGENTS_WRITE_SYSTEM_TESTS.md](HOW_AGENTS_WRITE_SYSTEM_TESTS.md) for the test writing guide.
+>
+> **See also:** [RC_QA.md](../RC_QA.md) for release qualification gates.
 
 ---
 
 ## Table of Contents
 
-1. [Hardware Requirements](#1-hardware-requirements)
-2. [Software Dependencies](#2-software-dependencies)
-3. [User & Group Setup](#3-user--group-setup)
-4. [Asset Mirror (Recommended)](#4-asset-mirror-recommended)
-5. [Running the Suite](#5-running-the-suite)
-6. [Verification Checklist](#6-verification-checklist)
-7. [Troubleshooting](#7-troubleshooting)
+1. [Architecture Overview](#1-architecture-overview)
+2. [Host Requirements](#2-host-requirements)
+3. [Runner VM Specification](#3-runner-vm-specification)
+4. [One-Time Setup](#4-one-time-setup)
+5. [Create the Runner VM (via rc-env.yaml)](#5-create-the-runner-vm-via-rc-envyaml)
+6. [Post-Provisioning: Wire Up Caches + DB](#6-post-provisioning-wire-up-caches--db)
+7. [Snapshot the Runner VM](#7-snapshot-the-runner-vm)
+8. [Running L2 Tests](#8-running-l2-tests)
+9. [Running L2 Tests in Parallel](#9-running-l2-tests-in-parallel)
+10. [Troubleshooting](#10-troubleshooting)
+11. [Verification Checklist](#11-verification-checklist)
 
 ---
 
-## 1. Hardware Requirements
+## 1. Architecture Overview
 
-| Component | Requirement | Verification |
-|-----------|-------------|--------------|
-| CPU | x86_64 with VMX/SVM extensions | `egrep -c '(vmx|svm)' /proc/cpuinfo` → > 0 |
-| RAM | 8 GB minimum (16 GB recommended) | `free -g` |
-| Disk | 20 GB free for assets (images, kernels, binaries) | `df -h ~/.cache/mvmctl` |
+L2 tests run inside a **disposable Firecracker VM** (the "runner VM") with nested KVM. The host manages the VM lifecycle via `mvm`. Tests create their own VMs inside the runner VM (triple nesting: host → runner VM → test VM).
+
+```
+Host (Go + KVM only)
+  │
+  ├── rc-env.yaml creates + provisions the runner VM
+  ├── Additional steps wire up caches + DB
+  ├── Snapshot for reuse
+  │
+  └── Tests run via: mvm vm exec rc-vm -- "pytest tests/e2e/..."
+```
+
+---
+
+## 2. Host Requirements
+
+| Component | Requirement | Check |
+|-----------|-------------|-------|
+| CPU | x86_64 with VMX/SVM | `grep -c '(vmx|svm)' /proc/cpuinfo` > 0 |
+| RAM | 8 GB min (16 GB rec.) | `free -g` |
+| Disk | 5 GB free for caches | `df -h ~/.cache/mvm-asset-mirror` |
 | KVM | `/dev/kvm` accessible | `test -c /dev/kvm && echo OK` |
-| Network | Outbound HTTP/HTTPS for asset downloads | `curl -sI https://example.com` |
-
----
-
-## 2. Software Dependencies
-
-### 2.1 System Packages
-
-Packages are provided for both **Debian/Ubuntu** (`apt-get`) and **Arch Linux** (`pacman`).
-
-<details>
-<summary><b>Debian / Ubuntu (apt-get)</b></summary>
+| Nested virt | `nested=Y` | `cat /sys/module/kvm_intel/parameters/nested` |
+| Go | 1.26+ | `go version` |
+| Network | Outbound HTTP/HTTPS (first run only) | `curl -sI https://example.com` |
 
 ```bash
-# Base tooling
-sudo apt-get install -y \
-  iproute2 iptables procps kmod sudo \
-  genisoimage cloud-image-utils \
-  squashfs-tools util-linux tar \
-  openssh-client coreutils curl
-
-# Image import tests (qcow2 conversion, ext4 formatting, compression)
-sudo apt-get install -y \
-  qemu-utils \
-  e2fsprogs \
-  zstd
-
-# Kernel build tests (optional — only if running kernel_build marker)
-sudo apt-get install -y \
-  build-essential \
-  linux-headers-$(uname -r)
-```
-</details>
-
-<details>
-<summary><b>Arch Linux (pacman)</b></summary>
-
-```bash
-# Base tooling
-sudo pacman -S --needed \
-  iproute2 iptables procps-ng kmod sudo \
-  libisoburn cloud-image-utils \
-  squashfs-tools util-linux tar \
-  openssh coreutils curl
-
-# Image import tests (qcow2 conversion, ext4 formatting, compression)
-sudo pacman -S --needed \
-  qemu-img \
-  e2fsprogs \
-  zstd
-
-# Kernel build tests (optional — only if running kernel_build marker)
-sudo pacman -S --needed \
-  base-devel \
-  linux-headers
-```
-</details>
-
-### 2.2 Runtime Dependencies
-
-| Dependency | Required By | Purpose | Verification |
-|---|---|---|---|
-| `qemu-img` | Image import tests | Convert raw ↔ qcow2 | `qemu-img --version` |
-| `mkfs.ext4` | Image import tests | Format ext4 filesystems | `mkfs.ext4 -V` |
-| `truncate` | Image import tests | Create sparse files | `truncate --version` |
-| `zstd` | Image decompression | Decompress `.zst` images | `zstd --version` |
-| `genisoimage` | Cloud-init ISO mode | Create cloud-init ISOs | `genisoimage --version` |
-| `ssh-keygen` | SSH key tests | Generate SSH keys | `ssh-keygen -A` (checks) |
-| `ip` (iproute2) | Network tests | Bridge, addr, link management | `ip link show` |
-| `nft` / `iptables` | Network tests | Firewall rule verification | `sudo nft --version` or `sudo iptables --version` |
-
-### 2.3 Python Toolchain (Host — for running tests on bare metal)
-
-```bash
-# Install uv (if not already present)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Sync project dependencies
-uv sync --group dev --group build
-```
-
-**For nested VM testing:** Python + pytest are installed inside the guest VM (see section 6). The host only needs Go to build the release binary.
-
----
-
-## 3. User & Group Setup
-
-```bash
-# Create mvm group (if not exists)
-sudo groupadd --force mvm
-
-# Add user to required groups
-sudo usermod -aG mvm $USER
-sudo usermod -aG kvm $USER
-sudo usermod -aG disk $USER        # /dev/loop* access for loop-mount
-
-# Log out and back in for group changes to take effect
-# Verify:
-groups
-# Should show: mvm kvm disk
-```
-
-### 3.1 One-Time Initialization
-
-```bash
-# Initialize mvmctl (creates DB, caches, iptables chains)
-# Use the built binary for proper sudo handling:
-sudo ~/.local/bin/mvm init
-
-# Verify initialization:
-mvm host status --json
-```
-
-### 3.2 Sudo Configuration
-
-The mvm application handles privilege escalation internally via `system.Run()`/
-`system.Stream()` on the `CommandRunner` interface. The following must be configured:
-
-```bash
-# Passwordless sudo for mvm group
-echo "%mvm ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/mvm
-sudo chmod 440 /etc/sudoers.d/mvm
+# Host only needs Go
+sudo apt-get install -y golang
 ```
 
 ---
 
-## 4. Asset Mirror (Recommended)
+## 3. Runner VM Specification
 
-An asset mirror caches downloaded kernels, images, and binaries so repeated
-test runs don't re-download large files (43 MB kernel, 203 MB Alpine image,
-220 MB Ubuntu image).
+The runner VM (named `rc-vm` per `rc-env.yaml`) is configured as:
+
+| Resource | Value |
+|----------|-------|
+| Image | `ubuntu:noble` |
+| Kernel | `official:7.0.11` with `kvm,nftables,tuntap` |
+| vCPU | 6 |
+| Memory | 4 GB |
+| Disk | 25 GB |
+| Nested virt | Enabled |
+| User | `runner` (has passwordless sudo) |
+
+---
+
+## 4. One-Time Setup
+
+These steps run ONCE on the host to populate the asset caches.
+
+### 4.1 Build the binary
 
 ```bash
-# Set up the mirror path
+./scripts/build.sh release
+cp dist/mvm ~/.local/bin/mvm
+```
+
+### 4.2 Ensure caches are populated
+
+If not already done, build the official kernel and pull assets:
+
+```bash
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
 mkdir -p "$MVM_ASSET_MIRROR"
 
-# Seed the mirror with commonly-used assets
-# (these will be pulled on first test run, then cached)
+# Build official kernel (30-120 min first time, cached in /tmp/mvmctl/ for subsequent runs)
+mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm
+
+# Pull remaining assets (cached in MVM_ASSET_MIRROR for subsequent runs)
+mvm image pull ubuntu:noble
+mvm kernel pull --type firecracker --version v1.15 --default
+mvm bin pull firecracker --version 1.16.0 --default
 ```
 
-The mirror is automatically populated by `scripts/run_tests.py` — assets
-downloaded during test runs are copied into the mirror. Subsequent runs use
-the local copy. The mirror lives **outside** `~/.cache/mvmctl/` so `cache
-clean --force` does not wipe it.
-
----
-
-## 5. Running the Suite
-
-### 5.1 Per-File Execution (Required)
-
-System tests are **stateful**. Running `pytest tests/system/` as a single batch
-causes cross-file state pollution (VMs, bridges, iptables). Each file MUST be
-run individually. See [RC_QA.md](../RC_QA.md) for the release qualification process.
-
-### 5.2 Using the Unified Test Runner
+After this, verify:
 
 ```bash
-# Run ALL system tests (per-domain)
-python3 scripts/run_tests.py --domain vm
-python3 scripts/run_tests.py --domain network
-# ... etc for each domain
-
-# Build binary first, then run all system tests
-./scripts/build.sh release
-python3 scripts/run_tests.py --domain vm
-
-# Run a specific domain
-python3 scripts/run_tests.py --domain vm
-
-# Run a single test file
-python3 scripts/run_tests.py --test tests/system/network/test_network.py
-
-# Re-run only previously failed tests
-python3 scripts/run_tests.py --failed-only
-```
-
-The script:
-1. Seeds the asset mirror at `~/.cache/mvm-asset-mirror/` if empty
-2. Runs each test file one by one with `-n 0` (serial)
-3. Saves results to `.reports/system-test-results-latest.txt`
-
-### 5.3 Marker-Based Filtering
-
-```bash
-# Exclude slow tests (>30s each)
-python3 scripts/run_tests.py --domain vm -- -m "not slow"
-
-# Run only kernel build tests (requires build tools)
-python3 scripts/run_tests.py --domain kernel -- -m kernel_build
-
-# Run only destructive host tests (requires explicit opt-in)
-python3 scripts/run_tests.py --domain host -- -m host_reset
-
-# Run everything except kernel builds
-python3 scripts/run_tests.py --domain kernel -- -m "not kernel_build"
-```
-
-### 5.4 Manual Per-File
-
-```bash
-python3 scripts/run_tests.py --test tests/system/network/test_network.py
-
-# Directly with pytest (fallback):
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror MVM_BINARY=dist/mvm \
-  python3 -m pytest tests/system/network/test_network.py -n 0
+ls /tmp/mvmctl/vmlinux-7.0.11*   # compiled kernel binary
+ls /tmp/mvmctl/*.marker           # build marker
+ls ~/.cache/mvm-asset-mirror/     # downloaded assets
 ```
 
 ---
 
-## 6. Running Inside a Firecracker VM (Nested Virtualization)
+## 5. Create the Runner VM (via rc-env.yaml)
 
-The system test suite can run inside a Firecracker microVM that itself has
-nested KVM enabled. This is useful for CI/CD isolation or testing in
-ephemeral environments.
-
-mvmctl supports nested virtualization via the `--nested-virt` flag on
-`mvm vm create`. When enabled, it:
-
-- Sends a `cpu-config` to Firecracker with `kvm_capabilities: []` (preserving
-  all default KVM capabilities including nested virt)
-- Adds `kvm-intel.nested=1` or `kvm-amd.nested=1` to the guest kernel boot args
-  (auto-detected from `host_state.cpu_vendor`)
-- Forces `pci_enabled=true` (required for nested virt)
-- Supports custom CPU templates via `--cpu-template PATH` which are deep-merged
-  with the nested_virt base configuration
-
-The global default is controlled by `defaults.vm.nested_virt = false` in the
-mvmctl config system (settable via `mvm config set defaults.vm nested_virt true`).
-
-### 6.1 Prerequisites
-
-| Requirement | Detail |
-|---|---|
-| Host CPU | Must support VMX (Intel) or SVM (AMD) — `egrep -c '(vmx\|svm)' /proc/cpuinfo` > 0 |
-| Host kernel | Must have `kvm_intel.nested=1` or `kvm_amd.nested=1` — check with `cat /sys/module/kvm_intel/parameters/nested` → should print `Y` |
-| Firecracker version | ≥ 1.5.0 (kvm_capabilities added in v1.5.0; we use v1.15.1) |
-| Guest kernel | Must have `CONFIG_KVM_INTEL` or `CONFIG_KVM_AMD` built in (our firecracker kernel includes these) |
-| Guest resources | At minimum 4 vCPUs and 4 GB RAM to run VMs inside the guest |
-
-### 6.2 Enable Nested Virtualization on the Host
+The [`rc-env.yaml`](../../rc-env.yaml) file handles everything: network, key, image, binary, kernel, VM creation, file copies, and package installation.
 
 ```bash
-# Check current state
-cat /sys/module/kvm_intel/parameters/nested   # Intel
-# or
-cat /sys/module/kvm_amd/parameters/nested      # AMD
-
-# If disabled, enable it (persistent: add to /etc/modprobe.d/kvm.conf):
-sudo modprobe -r kvm_intel
-sudo modprobe kvm_intel nested=1
-
-# Verify
-cat /sys/module/kvm_intel/parameters/nested   # should print Y
+mvm env apply rc-env.yaml
 ```
 
-### 6.3 Create the Firecracker Guest VM
-
-The guest VM needs to be configured with sufficient resources and KVM access.
-Use an Ubuntu or Alpine image with development tools pre-installed.
-
-#### Via mvmctl (recommended)
-
-```bash
-# 1. Create a network for the test runner VM
-mvm network create testrunner-net --subnet 10.77.0.0/24
-
-# 2. Create the test runner VM with ENOUGH resources and nested virt enabled
-#    --vcpus 4, --mem 4096 to give the guest room to spawn nested VMs
-#    --nested-virt enables KVM passthrough and adds kvm-intel.nested=1 to boot args
-mvm vm create testrunner \
-  --image ubuntu:24.04 \
-  --network testrunner-net \
-  --vcpus 4 \
-  --mem 4096 \
-  --disk-size 20G \
-  --ssh-key my-key \
-  --nested-virt
-
-# 3. Provision inside the guest
-mvm ssh testrunner -u ubuntu --cmd "
-  sudo apt-get update
-  sudo apt-get install -y iproute2 iptables procps kmod sudo \
-    genisoimage cloud-image-utils squashfs-tools util-linux tar \
-    openssh-client coreutils curl qemu-utils e2fsprogs zstd
-"
-
-# 4. Copy the pre-built release binary and test scripts into the guest
-mvm cp dist/mvm testrunner:~/.local/bin/mvm
-mvm cp ./scripts testrunner:~/mvmctl/scripts
-mvm cp ./tests testrunner:~/mvmctl/tests
-```
-
-To verify nested virtualization is working inside the Firecracker VM:
-
-```bash
-# Inside the guest, verify /dev/kvm is accessible
-test -c /dev/kvm && echo "KVM available"
-
-# Check the nested virt kernel param took effect
-cat /sys/module/kvm_intel/parameters/nested   # should print Y
-
-# Check CPU flags include vmx/svm
-grep -o 'vmx\|svm' /proc/cpuinfo | sort -u   # should show vmx or svm
-```
-
-#### Via Firecracker directly (advanced)
-
-```bash
-# Boot a Firecracker guest with nested KVM enabled.
-# The guest kernel must be booted with kvm-intel.nested=1
-# and the KVM capabilities must be set via PUT /cpu-config (NOT machine-config).
-
-# The cpu-config endpoint accepts:
-# {
-#   "kvm_capabilities": []     # preserve all default KVM capabilities
-# }
-#
-# An empty kvm_capabilities list means "do not remove any capabilities
-# from Firecracker's default check list". It does NOT grant full KVM
-# access — Firecracker's default capabilities already cover the essentials.
-# For nested virtualization, the guest kernel additionally needs:
-# - kvm-intel.nested=1 on the kernel cmdline (Intel)
-# - kvm-amd.nested=1 on the kernel cmdline (AMD)
-#
-# mvmctl handles both the cpu-config and the boot args automatically
-# when --nested-virt is used. This section is for manual/advanced use only.
-```
-
-### 6.4 Inside the Guest: Setup
-
-Once inside the guest VM, install dependencies and copy the pre-built binary:
-
-```bash
-# Add user to mvm group
-sudo groupadd --force mvm
-sudo usermod -aG mvm $USER
-
-# Initialize mvmctl (inside the guest — this creates iptables chains,
-# cache directories, and the SQLite database)
-sudo ~/.local/bin/mvm host init
-
-# Verify KVM is accessible inside the guest
-test -c /dev/kvm && echo "KVM available inside guest"
-
-# Verify nested virtualization works
-cat /sys/module/kvm_intel/parameters/nested   # should print Y
-```
-
-### 6.5 Running the Tests Inside the Guest
-
-```bash
-# Run system tests against the pre-built binary (no Go toolchain needed)
-python3 scripts/run_tests.py --domain vm
-```
-
-### 6.6 Resource Considerations
-
-| Resource | Minimum | Recommended | Why |
-|---|---|---|---|
-| Guest vCPUs | 4 | 8 | Each nested VM consumes 1-2 vCPUs |
-| Guest RAM | 4 GB | 8 GB | Each nested VM needs 256-1024 MB |
-| Guest disk | 20 GB | 40 GB | Assets (kernel, images) + build artifacts |
-| Host RAM | 16 GB | 32 GB | Host + guest + guest's VMs |
-
-### 6.7 Known Limitations
-
-- **Performance**: Running VMs inside VMs (L2 guests) is ~20-50% slower than
-  bare metal due to nested VM-exit overhead.
-- **Kernel build tests**: Building kernels inside a nested VM is extremely
-  slow (>30 min). Use `--kernel_build` marker to exclude these:
-  `python3 scripts/run_tests.py --domain kernel -- -m "not kernel_build"`.
-- **`/dev/kvm` ownership**: The guest user must have access to `/dev/kvm`.
-  If using a Firecracker guest, the device is owned by root:root by default.
-  Fix with `sudo chmod 666 /dev/kvm` or add udev rules.
-- **Assetc mirror**: Strongly recommended inside nested VMs to avoid
-  re-downloading assets on every test run. Set `MVM_ASSET_MIRROR` to a
-  host-mounted volume.
+This creates the VM `rc-vm` with:
+- Ubuntu Noble, official kernel 7.0.11 with features, 6 vCPU, 4 GB RAM, 25 GB disk, nested virt
+- `mvm` binary at `/usr/bin/mvm`
+- Test suite at `/home/runner/tests/`
+- Asset files (kernel `.vmlinux`, images, firecracker tarball) at `/mnt/`
+- System packages installed (qemu-utils, python3, pytest, build tools, etc.)
+- User `runner` with passwordless sudo + kvm group
 
 ---
 
-## 7. Verification Checklist
+## 6. Post-Provisioning: Import Assets + Init DB
 
-Run these commands to verify the test machine is ready:
+`rc-env.yaml` copies all assets into `/mnt/` inside the VM. The `import cached assets` exec step points `MVM_ASSET_MIRROR` and `MVM_TEMP_DIR` to `/mnt/`, runs `mvm kernel pull`/`image pull`/`bin pull`/`init`, then sets env vars in `.bashrc`. Everything is wired up by `mvm env apply rc-env.yaml`.
+
+---
+
+## 7. Snapshot the Runner VM
+
+Once provisioned, snapshot so subsequent test sessions restore instantly.
 
 ```bash
-# === Hardware ===
-echo "KVM:        $(test -c /dev/kvm && echo OK || echo MISSING)"
-echo "VMX/SVM:    $(egrep -c '(vmx|svm)' /proc/cpuinfo) cores"
-echo "Memory:     $(free -g | awk '/Mem:/{print $2}') GB"
+# Create snapshot
+mvm snapshot create rc-vm --name rc-vm-snap
+```
 
-# === Groups ===
-echo "Groups:     $(groups)"
-echo "mvm group:  $(getent group mvm >/dev/null && echo OK || echo MISSING)"
+### Restore from snapshot (for each test run)
 
-# === Tools ===
-for tool in qemu-img mkfs.ext4 truncate zstd genisoimage ssh-keygen ip nft; do
-  echo "$tool:      $(which $tool 2>/dev/null && echo OK || echo MISSING)"
-done
-
-# === Python ===
-echo "uv:         $(uv --version 2>/dev/null || echo MISSING)"
-
-# === mvm init ===
-echo "mvm init:   $(~/.local/bin/mvm host status --json 2>/dev/null | python3 -c 'import sys,json; d=json.load(sys.stdin); print("OK" if d.get("kvm_accessible") else "INITIALIZED")' 2>/dev/null || echo NOT INITIALIZED)"
-
-# === Binary ===
-echo "mvm binary: $(test -f ~/.local/bin/mvm && echo OK || echo MISSING)"
-echo "mvm version: $(~/.local/bin/mvm --version 2>/dev/null || echo MISSING)"
+```bash
+# Restore — replaces current rc-vm with snapshot copy, resumes it
+mvm snapshot restore rc-vm-snap rc-vm --resume
 ```
 
 ---
 
-## 8. Troubleshooting
+## 8. Running L2 Tests
+
+```bash
+# One file
+mvm vm exec rc-vm --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/e2e/volume/test_volume.py -xvs"
+
+# All L2 tests
+mvm vm exec rc-vm --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/e2e/ -x --junitxml=results.xml"
+
+# Collect results
+mvm cp rc-vm:/home/runner/tests/results.xml ./results.xml
+
+# L0/L1 fast pre-filter (on host, no VM needed)
+go test ./... -count=1
+```
+
+---
+
+## 9. Running L2 Tests in Parallel
+
+Multiple runner VMs from the same snapshot run different suites:
+
+```bash
+mvm vm exec rc-vm-1 --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/e2e/volume/ tests/e2e/network/ -x"
+mvm vm exec rc-vm-2 --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/e2e/vm/ -x"
+mvm vm exec rc-vm-3 --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/e2e/ --ignore=tests/e2e/volume/ --ignore=tests/e2e/network/ --ignore=tests/e2e/vm/ -x"
+```
+
+---
+
+## 10. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `iptables` errors in tests | Firewall not initialized | `sudo ~/.local/bin/mvm host init` |
-| VM creation hangs | Binary not compiled or missing | Build with `./scripts/build.sh release` |
-| `mvm` group errors | User not in group | `sudo usermod -aG mvm $USER` then log out/back in |
-| `/dev/loop*` permission denied | User not in `disk` group | `sudo usermod -aG disk $USER` |
-| Address already in use | Stale VMs from previous run | `mvm vm ls --json` then `mvm vm rm <name> --force` |
-| Kernel build >10 min | Full kernel compilation from source | Use `--keep-build-dir` for incremental builds, or use firecracker kernels (default) |
-| Skip ratio >10% on CI | Missing dependencies | Run verification checklist (section 7) |
-| `qemu-img` not found | qemu-utils not installed | Debian: `sudo apt-get install qemu-utils` Arch: `sudo pacman -S qemu-img` |
-| `mkfs.ext4` not found | e2fsprogs not installed | Debian: `sudo apt-get install e2fsprogs` Arch: `sudo pacman -S e2fsprogs` |
-| `zstd` decompress fails | zstd not installed | Debian: `sudo apt-get install zstd` Arch: `sudo pacman -S zstd` |
-| `cloud-localds` not found | Not installed | Debian: `sudo apt-get install cloud-image-utils` Arch: `sudo pacman -S cloud-utils` |
-| Network-dependent tests skip | No outbound HTTP access | Configure `MVM_ASSET_MIRROR` with pre-seeded assets |
+| `mvm env apply` fails | `mvmctl` not initialized | Run `mvm init --non-interactive --skip-host` first |
+| SSH not available after creation | Cloud-init still running | Check `mvm logs rc-vm --lines 50` |
+| Nested KVM missing inside VM | Host lacks `nested=1` | `cat /sys/module/kvm_intel/parameters/nested` → must be `Y` |
+| `kernel pull` downloads instead of cache hit | `.vmlinux` or `.marker` not in `/mnt/` | Re-run `mvm env apply` to re-copy assets |
+| `image pull` downloads instead of cache hit | Mirror not set to `/mnt/` | `MVM_ASSET_MIRROR=/mnt` must be set in the exec step |
+| Snapshot restore fails | Files corrupted | Rebuild: re-run `mvm env apply`, re-snapshot |
+| Test VM creation fails inside runner VM | Out of resources | Increase vcpu/mem/disk in `rc-env.yaml` |
 
 ---
 
-## Related Documents
+## 11. Verification Checklist
 
-- [RC_QA.md](../RC_QA.md) — release qualification gates and evidence requirements
-- [HOW_AGENTS_WRITE_TESTS.md](HOW_AGENTS_WRITE_TESTS.md) — scenario catalogs, test writing rules
-- [COVERAGE_MATRIX.md](../../tests/system/COVERAGE_MATRIX.md) — accountability matrix, current coverage status
+```bash
+# Host
+echo "KVM:   $(test -c /dev/kvm && echo OK)"
+echo "Nest:  $(cat /sys/module/kvm_intel/parameters/nested 2>/dev/null)"
+echo "mvm:   $(~/.local/bin/mvm --version 2>/dev/null)"
+echo "Krnl:  $(ls /tmp/mvmctl/vmlinux-7.0.11* 2>/dev/null)"
+echo "Mrkr:  $(ls /tmp/mvmctl/*.marker 2>/dev/null)"
+
+# Runner VM
+echo "Alive: $(mvm vm exec rc-vm --user runner --timeout 10 -- 'echo OK' 2>/dev/null || echo DEAD)"
+echo "KVM:   $(mvm vm exec rc-vm --user runner --timeout 10 -- 'test -c /dev/kvm && echo OK' 2>/dev/null)"
+echo "Bin:   $(mvm vm exec rc-vm --user runner --timeout 10 -- 'mvm --version' 2>/dev/null)"
+echo "Py:    $(mvm vm exec rc-vm --user runner --timeout 10 -- 'python3 -m pytest --version' 2>/dev/null | head -1)"
+echo "Imgs:  $(mvm vm exec rc-vm --user runner --timeout 30 -- 'mvm image ls --json | python3 -c \"import sys,json; print(len([i for i in json.load(sys.stdin) if i.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
+echo "Krnls: $(mvm vm exec rc-vm --user runner --timeout 30 -- 'mvm kernel ls --json | python3 -c \"import sys,json; print(len([k for k in json.load(sys.stdin) if k.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
+```

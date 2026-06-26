@@ -18,7 +18,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── Service.CreateDisk ──────────────────────────────────────────────────────
+// --- Service.CreateDisk ---
 // Rationale: Tests disk creation for raw and qcow2 formats, invalid format
 // rejection, and propagation of subprocess failures (context cancellation).
 
@@ -32,7 +32,7 @@ func TestService_CreateDisk(t *testing.T) {
 		errCode errs.Code
 		wantCmd string // first element of args expected in FakeRunner call
 	}{
-		// ── Error paths ──
+		// --- Error paths ---
 		"error/invalid_format_returns_error": {
 			vol: func(tmpDir string) *model.VolumeItem {
 				return &model.VolumeItem{
@@ -59,7 +59,7 @@ func TestService_CreateDisk(t *testing.T) {
 			wantErr: true,
 			errCode: errs.CodeVolumeError,
 		},
-		// ── Success paths ──
+		// --- Success paths ---
 		"creates_raw_volume_with_fallocate": {
 			vol: func(tmpDir string) *model.VolumeItem {
 				return &model.VolumeItem{
@@ -129,9 +129,9 @@ func TestService_CreateDisk(t *testing.T) {
 	}
 }
 
-// ─── Service.Remove ──────────────────────────────────────────────────────────
+// --- Service.Remove ---
 // Rationale: Tests volume removal from both the repository and filesystem,
-// and that nonexistent volumes are silently ignored (matching Python behaviour).
+// and that nonexistent volumes are silently ignored.
 
 func TestService_Remove(t *testing.T) {
 	ctx := context.Background()
@@ -141,7 +141,7 @@ func TestService_Remove(t *testing.T) {
 		upsertFirst bool
 		createFile  bool
 	}{
-		// ── Error paths (both succeed silently) ──
+		// --- Error paths (both succeed silently) ---
 		"nonexistent_volume_silently_ignored": {
 			vol: func(tmpDir string) *model.VolumeItem {
 				return &model.VolumeItem{
@@ -153,7 +153,7 @@ func TestService_Remove(t *testing.T) {
 			upsertFirst: false,
 			createFile:  false,
 		},
-		// ── Success paths ──
+		// --- Success paths ---
 		"removes_from_repo_and_disk": {
 			vol: func(tmpDir string) *model.VolumeItem {
 				return &model.VolumeItem{
@@ -202,7 +202,7 @@ func TestService_Remove(t *testing.T) {
 	}
 }
 
-// ─── Service.Remove (context cancellation) ────────────────────────────────────
+// --- Service.Remove (context cancellation) ---
 // Rationale: Remove silently discards all errors, including when the context is
 // cancelled. This test verifies that Remove returns nil and the repo is unchanged
 // when repo.Delete fails due to context cancellation.
@@ -253,7 +253,7 @@ func TestService_Remove_ContextCancellation(t *testing.T) {
 	assert.True(t, os.IsNotExist(statErr), "file should have been removed by os.Remove")
 }
 
-// ─── Service.ResizeDisk ──────────────────────────────────────────────────────
+// --- Service.ResizeDisk ---
 // Rationale: Tests raw and qcow2 resize operations, and error when the disk file
 // does not exist on the filesystem.
 
@@ -269,7 +269,7 @@ func TestService_ResizeDisk(t *testing.T) {
 		errCode    errs.Code
 		wantCmd    string
 	}{
-		// ── Error paths ──
+		// --- Error paths ---
 		"error/nonexistent_disk_file_returns_error": {
 			vol: func(tmpDir string) *model.VolumeItem {
 				return &model.VolumeItem{
@@ -300,7 +300,7 @@ func TestService_ResizeDisk(t *testing.T) {
 			wantErr:    true,
 			errCode:    errs.CodeVolumeError,
 		},
-		// ── Success paths ──
+		// --- Success paths ---
 		"raw_resize_with_fallocate": {
 			vol: func(tmpDir string) *model.VolumeItem {
 				return &model.VolumeItem{
@@ -381,7 +381,7 @@ func TestService_ResizeDisk(t *testing.T) {
 	}
 }
 
-// ─── Service.SetVolumesState ─────────────────────────────────────────────────
+// --- Service.SetVolumesState ---
 // Rationale: Tests state transitions for volume collections, including
 // validation that vm_id is required when attaching, empty lists are a no-op,
 // and attached volumes are properly detached when transitioning to available.
@@ -389,7 +389,7 @@ func TestService_ResizeDisk(t *testing.T) {
 func TestService_SetVolumesState(t *testing.T) {
 	ctx := context.Background()
 
-	// ── attached_without_vm_id_returns_error ──
+	// --- attached_without_vm_id_returns_error ---
 	// Rationale: The service must reject VolumeStatusAttached when vmID is nil.
 	t.Run("attached_without_vm_id_returns_error", func(t *testing.T) {
 		repo := testutil.NewVolumeRepo()
@@ -411,7 +411,7 @@ func TestService_SetVolumesState(t *testing.T) {
 		return
 	})
 
-	// ── empty_volumes_list_returns_nil ──
+	// --- empty_volumes_list_returns_nil ---
 	// Rationale: An empty volume list is a no-op and must return nil.
 	t.Run("empty_volumes_list_returns_nil", func(t *testing.T) {
 		repo := testutil.NewVolumeRepo()
@@ -421,7 +421,7 @@ func TestService_SetVolumesState(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	// ── attached_volume_transition_to_available ──
+	// --- attached_volume_transition_to_available ---
 	// Rationale: Attached volumes should be detached (status→available, vmID→nil)
 	// when SetVolumesState is called with VolumeStatusAvailable. Already-available
 	// volumes should be skipped.
@@ -471,7 +471,7 @@ func TestService_SetVolumesState(t *testing.T) {
 		assert.Equal(t, int64(2048), fromRepo2.SizeBytes)
 	})
 
-	// ── context_cancellation_during_attach ──
+	// --- context_cancellation_during_attach ---
 	// Rationale: When the context is cancelled, Controller.Attach/Detach should
 	// fail on repo.Upsert. SetVolumesState fire-and-forgets individual errors
 	// (logs a warning) and returns nil. The volumes should remain unchanged.

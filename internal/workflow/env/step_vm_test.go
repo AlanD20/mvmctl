@@ -19,7 +19,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── Test helpers ─────────────────────────────────────────────────────────────
+// --- Test helpers ---
 
 // ctxVMRepo wraps testutil.VMRepo to propagate context cancellation
 // from GetByName. The plain mock ignores context, so this wrapper is needed
@@ -30,7 +30,7 @@ type ctxVMRepo struct {
 
 var _ vm.Repository = (*ctxVMRepo)(nil)
 
-func (r *ctxVMRepo) GetByName(ctx context.Context, name string) (*model.VM, error) {
+func (r *ctxVMRepo) GetByName(ctx context.Context, name string) (*model.VMItem, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ type errorVMRepo struct {
 
 var _ vm.Repository = (*errorVMRepo)(nil)
 
-func (r *errorVMRepo) GetByName(_ context.Context, _ string) (*model.VM, error) {
+func (r *errorVMRepo) GetByName(_ context.Context, _ string) (*model.VMItem, error) {
 	return nil, r.getErr
 }
 
@@ -79,7 +79,7 @@ func newVMProgressRecorder() (event.OnProgressCallback, *[]event.Progress) {
 	}, &events
 }
 
-// ─── VMStep.Apply ─────────────────────────────────────────────────────────────
+// --- VMStep.Apply ---
 // Rationale: VMStep.Apply is the core provisioning path. A nil-op crash,
 // a missed context cancellation, or a database error swallowed as success
 // would all cause silent data loss or hung workflows.
@@ -94,7 +94,7 @@ func TestVMStep_Apply(t *testing.T) {
 		wantVMDir      string
 		wantWasCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return nil },
@@ -129,12 +129,12 @@ func TestVMStep_Apply(t *testing.T) {
 			wantErr: "check vm",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"already_exists_skips_creation_and_writes_state": {
 			setupOp: func(t *testing.T) *api.Operation {
 				repo := testutil.NewVMRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.VM{
+				require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
 					ID:         "vm-existing",
 					Name:       "test-vm",
 					RootfsPath: "/mnt/vms/vm-existing/rootfs.ext4",
@@ -148,7 +148,7 @@ func TestVMStep_Apply(t *testing.T) {
 		"already_exists_preserves_was_created_from_saved": {
 			setupOp: func(t *testing.T) *api.Operation {
 				repo := testutil.NewVMRepo()
-				require.NoError(t, repo.Upsert(context.Background(), &model.VM{
+				require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
 					ID:         "vm-preserved",
 					Name:       "test-vm",
 					RootfsPath: "/mnt/vms/vm-preserved/rootfs.ext4",
@@ -207,13 +207,13 @@ func TestVMStep_Apply(t *testing.T) {
 	}
 }
 
-// ─── VMStep.Apply write-failure propagation ──────────────────────────────────
+// --- VMStep.Apply write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Apply must propagate it
 // rather than silently swallowing the persistence failure.
 
 func TestVMStep_Apply_WriteFailure(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.VM{
+	require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
 		ID:         "vm-1",
 		Name:       "test-vm",
 		RootfsPath: "/mnt/vms/vm-1/rootfs.ext4",
@@ -236,13 +236,13 @@ func TestVMStep_Apply_WriteFailure(t *testing.T) {
 	return
 }
 
-// ─── VMStep.Apply progress events ────────────────────────────────────────────
+// --- VMStep.Apply progress events ---
 // Rationale: Progress events must fire for "checking if exists" and
 // "already exists, skipping" so the CLI can display step status.
 
 func TestVMStep_Apply_ProgressEvents(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.VM{
+	require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
 		ID:         "vm-1",
 		Name:       "test-vm",
 		RootfsPath: "/mnt/vms/vm-1/rootfs.ext4",
@@ -262,7 +262,7 @@ func TestVMStep_Apply_ProgressEvents(t *testing.T) {
 	assert.Equal(t, "already exists, skipping", (*events)[1].Message)
 }
 
-// ─── VMStep.Destroy ──────────────────────────────────────────────────────────
+// --- VMStep.Destroy ---
 // Rationale: Destroy handles nil op, skip when WasCreated=false, and state
 // recovery from persisted data. A nil-op crash or incorrect WasCreated
 // check would either panic or skip actual teardown.
@@ -275,14 +275,14 @@ func TestVMStep_Destroy(t *testing.T) {
 		wantVMID       string
 		wantWasCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return nil },
 			wantErr: "operation not initialized",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"was_created_false_skips_removal": {
 			setupOp: func(_ *testing.T) *api.Operation {
@@ -332,7 +332,7 @@ func TestVMStep_Destroy(t *testing.T) {
 	}
 }
 
-// ─── VMStep.Destroy write-failure propagation ────────────────────────────────
+// --- VMStep.Destroy write-failure propagation ---
 // Rationale: If the StateWriter returns an error during Destroy, it must
 // propagate rather than silently swallowing the persistence failure.
 
@@ -354,7 +354,7 @@ func TestVMStep_Destroy_WriteFailure(t *testing.T) {
 	return
 }
 
-// ─── VMStep.Destroy context cancellation ────────────────────────────────────
+// --- VMStep.Destroy context cancellation ---
 // Rationale: Destroy must propagate context cancellation rather than ignoring
 // a cancelled ctx and proceeding with teardown.
 
@@ -380,13 +380,13 @@ func TestVMStep_Destroy_ContextCancelled(t *testing.T) {
 		"Destroy must return context cancellation error")
 }
 
-// ─── VMStep.Destroy WasCreated=true exercises VMRemove ──────────────────────
+// --- VMStep.Destroy WasCreated=true exercises VMRemove ---
 // Rationale: When WasCreated=true, Destroy must call VMRemove to tear down
 // the actual VM. A missing WasCreated check would skip real teardown.
 
 func TestVMStep_Destroy_WasCreated(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.VM{
+	require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
 		ID:         "vm-to-remove",
 		Name:       "test-vm",
 		RootfsPath: "/mnt/vms/vm-to-remove/rootfs.ext4",
@@ -421,7 +421,7 @@ func TestVMStep_Destroy_WasCreated(t *testing.T) {
 		"Destroy with WasCreated=true must attempt VMRemove (panic or error)")
 }
 
-// ─── VMStep.StateData ────────────────────────────────────────────────────────
+// --- VMStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision resources.
@@ -480,7 +480,7 @@ func TestVMStep_StateData(t *testing.T) {
 	}
 }
 
-// ─── VMStep.Dependencies ─────────────────────────────────────────────────────
+// --- VMStep.Dependencies ---
 // Rationale: Dependencies must include explicit deps from the spec AND
 // implicit deps from input fields (network, key, image, kernel, binary).
 // Missing deps means the DAG scheduler won't wait for prerequisites.
@@ -543,7 +543,7 @@ func TestVMStep_Dependencies(t *testing.T) {
 	}
 }
 
-// ─── VMStep.Apply dependency resolution from SharedState ─────────────────────
+// --- VMStep.Apply dependency resolution from SharedSta ---
 // Rationale: When a VM step's dependencies (network, image, etc.) have
 // already applied, the VM step must read resolved IDs from SharedState
 // instead of using raw spec names. If it doesn't, the VM will be created
@@ -551,7 +551,7 @@ func TestVMStep_Dependencies(t *testing.T) {
 
 func TestVMStep_Apply_DependencyResolution(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	require.NoError(t, repo.Upsert(context.Background(), &model.VM{
+	require.NoError(t, repo.Upsert(context.Background(), &model.VMItem{
 		ID:         "vm-1",
 		Name:       "test-vm",
 		RootfsPath: "/mnt/vms/vm-1/rootfs.ext4",
@@ -592,7 +592,7 @@ func TestVMStep_Apply_DependencyResolution(t *testing.T) {
 	assert.Equal(t, "vm-1", vmState.VMID)
 }
 
-// ─── VMStep.SpecHash ─────────────────────────────────────────────────────────
+// --- VMStep.SpecHash ---
 // Rationale: SpecHash must be set for drift detection. If the hash is empty,
 // the workflow engine can't detect spec changes between runs.
 
@@ -605,14 +605,14 @@ func TestVMStep_SpecHash(t *testing.T) {
 	assert.Len(t, hash, 64, "SHA-256 hash must be 64 hex characters")
 }
 
-// ─── VMStep.Name and Type ────────────────────────────────────────────────────
+// --- VMStep.Name and Type ---
 // Rationale: Name format ("type:name") is the SharedState key contract used
 // by downstream steps for dependency resolution. The format is already verified
 // implicitly by TestVMStep_Apply (state.Get("vm:test-vm")) and
 // TestVMStep_Dependencies (dependency format "network:my-net"). A standalone
 // getter-only test would be tautological.
 
-// ─── FromSpec construction ───────────────────────────────────────────────────
+// --- FromSpec construction ---
 // Rationale: FromSpec must correctly parse spec fields into VMCreateInput,
 // including the special "key" → SSHKeys mapping and nil-pointer cleanup
 // for empty optional fields. The name-setting behavior is verified by
@@ -635,7 +635,7 @@ func TestVMStep_FromSpec_EmptyOptionalFieldsNil(t *testing.T) {
 	assert.Empty(t, deps, "empty optional fields must not produce dependencies")
 }
 
-// ─── FromState construction ──────────────────────────────────────────────────
+// --- FromState construction ---
 // Rationale: FromState must reconstruct a VMStep from previously persisted
 // state so that Destroy can recover the VM ID for teardown.
 

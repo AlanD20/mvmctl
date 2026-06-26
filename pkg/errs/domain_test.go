@@ -12,7 +12,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── New ───────────────────────────────────────────────────────────────────
+// --- New ---
 // Rationale: New is the primary DomainError constructor. Incorrect Class/Op
 // derivation leads to misclassification downstream (retry logic, HTTP status
 // mapping, user-facing messages).
@@ -193,7 +193,7 @@ func TestNew_Options(t *testing.T) {
 	})
 }
 
-// ─── Wrap ──────────────────────────────────────────────────────────────────
+// --- Wrap ---
 // Rationale: Wrap preserves the error chain and inherits Class from wrapped
 // DomainError. Incorrect inheritance breaks retry logic and classification.
 
@@ -233,7 +233,7 @@ func TestWrap(t *testing.T) {
 	})
 }
 
-// ─── WrapMsg ───────────────────────────────────────────────────────────────
+// --- WrapMsg ---
 // Rationale: WrapMsg separates the user-facing message from the root cause.
 // Wrong Class inheritance causes misclassification of wrapped errors.
 
@@ -266,7 +266,7 @@ func TestWrapMsg(t *testing.T) {
 	})
 }
 
-// ─── NotFound ──────────────────────────────────────────────────────────────
+// --- NotFound ---
 // Rationale: NotFound forces ClassValidation regardless of the code's default
 // Class. Without this, a retryable code used with NotFound would misclassify.
 
@@ -296,7 +296,7 @@ func TestNotFound(t *testing.T) {
 	})
 }
 
-// ─── AlreadyExists ─────────────────────────────────────────────────────────
+// --- AlreadyExists ---
 // Rationale: AlreadyExists forces ClassConflict regardless of the code's
 // default Class. Without this, conflict errors could be misclassified.
 
@@ -326,20 +326,20 @@ func TestAlreadyExists(t *testing.T) {
 	})
 }
 
-// ─── classForCode (indirect via New) ───────────────────────────────────────
+// --- classForCode (indirect via New) ---
 // Rationale: classForCode drives error classification. Wrong Class breaks
 // IsRetryable, IsNeedsInteraction, and HTTP status mapping.
 
 // Tested indirectly through TestNew — every row in TestNew verifies
 // auto-derived Class via the want.Class field.
 
-// ─── opForCode (indirect via New) ──────────────────────────────────────────
+// --- opForCode (indirect via New) ---
 // Rationale: opForCode sets the operation name. Wrong Op breaks logging
 // and error aggregation by domain.
 
 // Tested indirectly through TestNew — every row verifies auto-derived Op.
 
-// ─── AsType[T] ─────────────────────────────────────────────────────────────
+// --- AsType[T] ---
 // Rationale: AsType extracts a *DomainError from an error chain using
 // generics. A bug here breaks errors.As-based classification everywhere.
 
@@ -379,7 +379,7 @@ func TestAsType(t *testing.T) {
 	})
 }
 
-// ─── AsDomainError ─────────────────────────────────────────────────────────
+// --- AsDomainError ---
 // Rationale: AsDomainError is the non-generic extraction helper. Used by
 // IsNotFound, IsRetryable, IsNeedsInteraction.
 
@@ -410,11 +410,11 @@ func TestAsDomainError(t *testing.T) {
 	})
 }
 
-// ─── classFrom (indirect via Wrap/WrapMsg) ─────────────────────────────────
+// --- classFrom (indirect via Wrap/WrapMsg) ---
 // Rationale: classFrom extracts the Class from a wrapped *DomainError.
 // Tested indirectly through TestWrap and TestWrapMsg.
 
-// ─── IsNotFound ────────────────────────────────────────────────────────────
+// --- IsNotFound ---
 // Rationale: IsNotFound is used in API handlers to return 404 status codes.
 // Missing a code returns 500 instead of 404.
 
@@ -458,7 +458,7 @@ func TestIsNotFound(t *testing.T) {
 	})
 }
 
-// ─── IsRetryable ───────────────────────────────────────────────────────────
+// --- IsRetryable ---
 // Rationale: IsRetryable drives automatic retry loops. False negatives cause
 // permanent failures on transient errors; false positives cause infinite loops.
 
@@ -492,7 +492,7 @@ func TestIsRetryable(t *testing.T) {
 	})
 }
 
-// ─── IsNeedsInteraction ────────────────────────────────────────────────────
+// --- IsNeedsInteraction ---
 // Rationale: IsNeedsInteraction signals the CLI to prompt for sudo/input.
 // False negatives cause silent failures; false positives break automation.
 
@@ -516,7 +516,7 @@ func TestIsNeedsInteraction(t *testing.T) {
 	})
 }
 
-// ─── FormatExceptionDebug ──────────────────────────────────────────────────
+// --- FormatExceptionDebug ---
 // Rationale: FormatExceptionDebug is used in logs and error reports. Without
 // stack, it returns the error string. With stack, it includes a full trace.
 
@@ -535,7 +535,7 @@ func TestFormatExceptionDebug(t *testing.T) {
 	})
 }
 
-// ─── DomainError.Error ─────────────────────────────────────────────────────
+// --- DomainError.Error ---
 // Rationale: Error() is the standard error interface. If it returns something
 // other than Message, errors.As/Is and user display break.
 
@@ -544,7 +544,7 @@ func TestDomainError_Error(t *testing.T) {
 	assert.Equal(t, "user message", de.Error())
 }
 
-// ─── DomainError.Unwrap ────────────────────────────────────────────────────
+// --- DomainError.Unwrap ---
 // Rationale: Unwrap enables errors.Is/As chain walking. If it returns the
 // wrong error, the entire classification chain breaks.
 

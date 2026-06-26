@@ -20,8 +20,8 @@ func NewRepository(db *sqlx.DB) Repository {
 	return &sqliteRepo{db: db}
 }
 
-func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.Network, error) {
-	var n model.Network
+func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.NetworkItem, error) {
+	var n model.NetworkItem
 	err := r.db.GetContext(ctx, &n,
 		`SELECT * FROM networks WHERE id = ? AND deleted_at IS NULL`, id)
 	if err == sql.ErrNoRows {
@@ -30,8 +30,8 @@ func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.Network, error)
 	return &n, err
 }
 
-func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.Network, error) {
-	var n model.Network
+func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.NetworkItem, error) {
+	var n model.NetworkItem
 	err := r.db.GetContext(ctx, &n,
 		`SELECT * FROM networks WHERE name = ? AND deleted_at IS NULL`, name)
 	if err == sql.ErrNoRows {
@@ -40,19 +40,19 @@ func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.Network
 	return &n, err
 }
 
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.Network, error) {
-	var items []*model.Network
+func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.NetworkItem, error) {
+	var items []*model.NetworkItem
 	return items, r.db.SelectContext(ctx, &items,
 		`SELECT * FROM networks WHERE id LIKE ? AND deleted_at IS NULL`, prefix+"%")
 }
 
-func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.Network, error) {
-	var items []*model.Network
+func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.NetworkItem, error) {
+	var items []*model.NetworkItem
 	return items, r.db.SelectContext(ctx, &items,
 		`SELECT * FROM networks WHERE deleted_at IS NULL ORDER BY created_at`)
 }
 
-func (r *sqliteRepo) Upsert(ctx context.Context, n *model.Network) error {
+func (r *sqliteRepo) Upsert(ctx context.Context, n *model.NetworkItem) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO networks (
 			id, name, subnet, bridge, ipv4_gateway,
@@ -140,8 +140,8 @@ func (r *sqliteRepo) SetDefault(ctx context.Context, networkID string) error {
 	return tx.Commit()
 }
 
-func (r *sqliteRepo) GetDefault(ctx context.Context) (*model.Network, error) {
-	var n model.Network
+func (r *sqliteRepo) GetDefault(ctx context.Context) (*model.NetworkItem, error) {
+	var n model.NetworkItem
 	err := r.db.GetContext(ctx, &n,
 		`SELECT * FROM networks WHERE is_default = 1 AND deleted_at IS NULL LIMIT 1`)
 	if err == sql.ErrNoRows {

@@ -12,7 +12,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── MockLogAPI ───────────────────────────────────────────────────────────────
+// --- MockLogAPI ---
 // Rationale: MockLogAPI satisfies api.LogAPI for testing upper layers. Tests
 // verify default zero returns and custom function routing for LogStream.
 

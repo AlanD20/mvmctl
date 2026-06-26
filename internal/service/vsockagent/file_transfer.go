@@ -16,9 +16,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
-// ── Binary frame type constants ─────────────────────────────────────────────
+// --- Binary frame type constants ---
 // Single source of truth. Host side (internal/core/vsock) imports these as
 // vsockagent.FtPush, vsockagent.FtPull, etc.
 const (
@@ -34,7 +36,7 @@ const (
 	FtDone     byte = 0x60 // Transfer complete
 )
 
-// ── Binary frame helpers ────────────────────────────────────────────────────
+// --- Binary frame helpers ---
 
 // readFTFrame reads one binary frame from r. Returns frame type and payload.
 // Frame format: [4 bytes big-endian total_length][1 byte type][N bytes payload].
@@ -70,13 +72,14 @@ func WriteFTFrame(w io.Writer, frameType byte, payload []byte) error {
 	return nil
 }
 
-// ── Push/Pull JSON payload types ────────────────────────────────────────────
+// --- Push/Pull JSON payload types ---
 
 // FtPushPayload is the JSON payload for an FtPush frame from the host.
 type FtPushPayload struct {
 	Paths     []string `json:"paths"`
 	Dest      string   `json:"dest"`
 	Overwrite bool     `json:"overwrite"`
+	NoSync    bool     `json:"no_sync,omitempty"`
 }
 
 // FtPullPayload is the JSON payload for an FtPull frame from the host.
@@ -84,6 +87,7 @@ type FtPullPayload struct {
 	Path      string `json:"path"`
 	Dest      string `json:"dest"`
 	Overwrite bool   `json:"overwrite"`
+	Recursive bool   `json:"recursive,omitempty"`
 }
 
 // FtMetaPayload is the file metadata sent in an FtMeta frame.
@@ -117,7 +121,7 @@ type FtDonePayload struct {
 	Errors int   `json:"errors"`
 }
 
-// ── File transfer handler ───────────────────────────────────────────────────
+// --- File transfer handler ---
 
 // handleFileTransfer dispatches the first binary frame to push or pull handler.
 func handleFileTransfer(ctx context.Context, conn net.Conn, req *execRequest) {
@@ -142,7 +146,7 @@ func handleFileTransfer(ctx context.Context, conn net.Conn, req *execRequest) {
 	}
 }
 
-// ── Push handler (host uploads files to VM) ─────────────────────────────────
+// --- Push handler (host uploads files to VM) ---
 
 func handleFTPush(ctx context.Context, conn net.Conn, pushPayload []byte) {
 	var push FtPushPayload
@@ -155,7 +159,7 @@ func handleFTPush(ctx context.Context, conn net.Conn, pushPayload []byte) {
 
 	slog.Info("ft: push start", "paths", push.Paths, "dest", push.Dest, "overwrite", push.Overwrite)
 
-	// ── Determine mode via stat ──
+	// --- Determine mode via stat ---
 	// Directory mode: dest ends with "/" or is an existing directory.
 	// File mode:      dest has no trailing "/", does not exist, is not a directory.
 
@@ -281,13 +285,22 @@ mainLoop:
 		}
 
 		// Open destination file.
-		f, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(meta.Mode))
+		// Try without O_CREAT first to avoid fs.protected_regular=2 EACCES on
+		// Ubuntu 24.04 (kernel blocks O_CREAT for files owned by another user
+		// in sticky world-writable directories). Fall back to O_CREATE if the
+		// file does not exist.
+		f, err := os.OpenFile(destPath, os.O_WRONLY|os.O_TRUNC, 0)
 		if err != nil {
-			slog.Error("ft: create file", "path", destPath, "error", err)
-			errPayload, _ := json.Marshal(FtErrorPayload{Code: "create_failed", Message: err.Error()})
-			_ = WriteFTFrame(conn, FtError, errPayload)
-			fileErrors++
-			continue mainLoop
+			if os.IsNotExist(err) {
+				f, err = os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.FileMode(meta.Mode))
+			}
+			if err != nil {
+				slog.Error("ft: create file", "path", destPath, "error", err)
+				errPayload, _ := json.Marshal(FtErrorPayload{Code: "create_failed", Message: err.Error()})
+				_ = WriteFTFrame(conn, FtError, errPayload)
+				fileErrors++
+				continue mainLoop
+			}
 		}
 
 		// Send acceptance.
@@ -341,7 +354,14 @@ mainLoop:
 						return
 					}
 					fileSuccess++
-					_ = f.Close() // best-effort: file was written successfully, close error is non-fatal
+					// fsync before close to ensure data is on storage, not just page cache.
+					// Without this, data can be lost if Firecracker is killed before the kernel flushes.
+					if syncErr := f.Sync(); syncErr != nil {
+						f.Close()
+						slog.Error("ft: fsync failed", "path", destPath, "error", syncErr)
+						return
+					}
+					_ = f.Close()
 					slog.Debug("ft: eos received, sending ok, continuing mainLoop", "path", meta.Path, "fileBytes", fileBytes)
 					continue mainLoop
 				}
@@ -376,6 +396,17 @@ mainLoop:
 		}
 	}
 
+	// Sync filesystem to flush Firecracker's internal writeback cache.
+	// The per-file fsync only flushes through guest kernel → virtio-blk device,
+	// but does NOT flush Firecracker's host-side writeback cache. This sync()
+	// syscall triggers VIRTIO_BLK_T_FLUSH on the virtio-blk device, ensuring
+	// data reaches the backing file before we send DONE.
+	if !push.NoSync {
+		slog.Debug("ft: syncing filesystem before done")
+		unix.Sync()
+		slog.Debug("ft: sync complete")
+	}
+
 	// Send DONE back.
 	slog.Debug("ft: mainLoop done, sending done back",
 		"files", fileSuccess, "bytes", totalBytes, "errors", fileErrors)
@@ -393,7 +424,7 @@ mainLoop:
 		"bytes", totalBytes, "errors", fileErrors)
 }
 
-// ── Pull handler (host downloads files from VM) ─────────────────────────────
+// --- Pull handler (host downloads files from VM) ---
 
 func handleFTPull(ctx context.Context, conn net.Conn, pullPayload []byte) {
 	var pull FtPullPayload
@@ -404,9 +435,10 @@ func handleFTPull(ctx context.Context, conn net.Conn, pullPayload []byte) {
 		return
 	}
 
-	slog.Info("ft: pull start", "path", pull.Path, "dest", pull.Dest, "overwrite", pull.Overwrite)
+	slog.Info("ft: pull start", "path", pull.Path, "dest", pull.Dest,
+		"overwrite", pull.Overwrite, "recursive", pull.Recursive)
 
-	// Stat source file.
+	// Stat source.
 	fi, err := os.Stat(pull.Path)
 	if err != nil {
 		slog.Error("ft: stat source", "path", pull.Path, "error", err)
@@ -414,6 +446,22 @@ func handleFTPull(ctx context.Context, conn net.Conn, pullPayload []byte) {
 		_ = WriteFTFrame(conn, FtError, errPayload)
 		return
 	}
+
+	// Directory handling.
+	if fi.IsDir() {
+		if !pull.Recursive {
+			errPayload, _ := json.Marshal(FtErrorPayload{
+				Code:    "is_directory",
+				Message: fmt.Sprintf("'%s' is a directory; use recursive=true to pull", pull.Path),
+			})
+			_ = WriteFTFrame(conn, FtError, errPayload)
+			return
+		}
+		handleFTPullRecursive(ctx, conn, pull.Path)
+		return
+	}
+
+	// --- Single file pull (unchanged). ---
 
 	size := fi.Size()
 	mode := int(fi.Mode().Perm())
@@ -565,4 +613,180 @@ func handleFTPull(ctx context.Context, conn net.Conn, pullPayload []byte) {
 	}
 
 	slog.Info("ft: pull complete", "path", pull.Path, "bytes", sentBytes)
+}
+
+// handleFTPullRecursive streams every regular file under srcDir to the host.
+// For each file it sends META → waits for accept → streams DATA+EOS → reads
+// OK. After all files it sends a single DONE with the summary.
+func handleFTPullRecursive(ctx context.Context, conn net.Conn, srcDir string) {
+	srcDir = filepath.Clean(srcDir)
+	var totalFiles, totalErrors int
+	var totalBytes int64
+
+	walkErr := filepath.Walk(srcDir, func(path string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if fi.IsDir() {
+			return nil // skip directories
+		}
+		if !fi.Mode().IsRegular() {
+			return nil // skip non-regular files (devices, sockets, etc.)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		relPath, relErr := filepath.Rel(srcDir, path)
+		if relErr != nil {
+			slog.Error("ft: relative path", "path", path, "error", relErr)
+			totalErrors++
+			return nil
+		}
+
+		size := fi.Size()
+		mode := int(fi.Mode().Perm())
+
+		// Compute SHA-256.
+		hasher := sha256.New()
+		hashFile, err := os.Open(path)
+		if err != nil {
+			slog.Error("ft: open source for hash", "path", path, "error", err)
+			totalErrors++
+			return nil
+		}
+		_, copyErr := io.Copy(hasher, hashFile)
+		hashFile.Close()
+		if copyErr != nil {
+			slog.Error("ft: hash source", "path", path, "error", copyErr)
+			totalErrors++
+			return nil
+		}
+		hashHex := hex.EncodeToString(hasher.Sum(nil))
+
+		// Send META frame with relative path (no directory prefix duplication).
+		meta := FtMetaPayload{
+			Path:   relPath,
+			Size:   size,
+			Mode:   mode,
+			SHA256: hashHex,
+		}
+		metaPayload, _ := json.Marshal(meta)
+		if err := WriteFTFrame(conn, FtMeta, metaPayload); err != nil {
+			return fmt.Errorf("write meta: %w", err)
+		}
+
+		// Read acceptance from host.
+		frameType, _, err := ReadFTFrame(conn)
+		if err != nil {
+			return fmt.Errorf("read accept: %w", err)
+		}
+		if frameType == FtError {
+			slog.Warn("ft: host rejected file in recursive pull", "path", relPath)
+			totalErrors++
+			return nil
+		}
+		if frameType != FtMeta {
+			return fmt.Errorf("expected meta/accept frame, got 0x%02x", frameType)
+		}
+
+		// Open file for streaming.
+		f, err := os.Open(path)
+		if err != nil {
+			slog.Error("ft: open source for streaming", "path", path, "error", err)
+			totalErrors++
+			return nil
+		}
+
+		// Stream data in 256 KB chunks.
+		chunkSize := ftBufferSize
+		buf := make([]byte, chunkSize)
+		var sentBytes int64
+		for {
+			n, readErr := f.Read(buf)
+			if n > 0 {
+				if err := WriteFTFrame(conn, FtData, buf[:n]); err != nil {
+					f.Close()
+					return fmt.Errorf("write data: %w", err)
+				}
+				sentBytes += int64(n)
+
+				progPayload, _ := json.Marshal(FtProgressPayload{
+					Path:  relPath,
+					Bytes: sentBytes,
+					Total: size,
+				})
+				if err := WriteFTFrame(conn, FtProgress, progPayload); err != nil {
+					f.Close()
+					return fmt.Errorf("write progress: %w", err)
+				}
+			}
+			if readErr != nil {
+				f.Close()
+				if readErr == io.EOF {
+					break
+				}
+				slog.Error("ft: read source", "path", path, "error", readErr)
+				totalErrors++
+				return nil
+			}
+		}
+
+		// Send end-of-stream signal (empty DATA frame).
+		if err := WriteFTFrame(conn, FtData, nil); err != nil {
+			return fmt.Errorf("write eos: %w", err)
+		}
+
+		// Read OK from host.
+		frameType, okPayload, err := ReadFTFrame(conn)
+		if err != nil {
+			return fmt.Errorf("read ok: %w", err)
+		}
+		if frameType == FtError {
+			slog.Warn("ft: host reported error for file", "path", relPath)
+			totalErrors++
+			return nil
+		}
+		if frameType != FtOK {
+			return fmt.Errorf("expected ok frame, got 0x%02x", frameType)
+		}
+
+		// Verify host's returned SHA-256 matches what we sent.
+		var okMeta FtMetaPayload
+		if json.Unmarshal(okPayload, &okMeta) == nil {
+			if okMeta.SHA256 != "" && okMeta.SHA256 != hashHex {
+				slog.Error("ft: host sha256 mismatch",
+					"path", relPath, "expected", hashHex, "got", okMeta.SHA256)
+				totalErrors++
+				return nil
+			}
+		}
+
+		totalFiles++
+		totalBytes += sentBytes
+		return nil
+	})
+
+	if walkErr != nil {
+		slog.Error("ft: recursive pull walk error", "error", walkErr)
+		// Send a DONE with whatever we managed to transfer, so the host
+		// doesn't hang waiting for frames.
+	}
+
+	// Send DONE.
+	donePayload, _ := json.Marshal(FtDonePayload{
+		Files:  totalFiles,
+		Bytes:  totalBytes,
+		Errors: totalErrors,
+	})
+	if err := WriteFTFrame(conn, FtDone, donePayload); err != nil {
+		slog.Error("ft: write done after recursive pull", "error", err)
+		return
+	}
+
+	slog.Info("ft: pull recursive complete", "dir", srcDir,
+		"files", totalFiles, "bytes", totalBytes, "errors", totalErrors)
 }

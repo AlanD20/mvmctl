@@ -13,16 +13,16 @@ import (
 
 var ctx = context.Background()
 
-func seedVM(t *testing.T, repo *testutil.VMRepo, vm *model.VM) {
+func seedVM(t *testing.T, repo *testutil.VMRepo, vm *model.VMItem) {
 	t.Helper()
 	require.NoError(t, repo.Upsert(ctx, vm))
 }
 
-func newVM(id string, name string, status model.VMStatus) *model.VM {
-	return &model.VM{ID: id, Name: name, Status: status}
+func newVM(id string, name string, status model.VMStatus) *model.VMItem {
+	return &model.VMItem{ID: id, Name: name, Status: status}
 }
 
-// ─── CRUD ────────────────────────────────────────────────────────────────────
+// --- CRUD ---
 
 func TestVMRepo_Get(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -94,7 +94,7 @@ func TestVMRepo_Upsert(t *testing.T) {
 
 	t.Run("update_existing", func(t *testing.T) {
 		seedVM(t, repo, newVM("vm-2", "old", model.VMStatusRunning))
-		seedVM(t, repo, &model.VM{ID: "vm-2", Name: "updated", Status: model.VMStatusStopped})
+		seedVM(t, repo, &model.VMItem{ID: "vm-2", Name: "updated", Status: model.VMStatusStopped})
 
 		got, _ := repo.Get(ctx, "vm-2")
 		require.NotNil(t, got)
@@ -149,7 +149,7 @@ func TestVMRepo_DeleteMany(t *testing.T) {
 	})
 }
 
-// ─── Listing ─────────────────────────────────────────────────────────────────
+// --- Listing ---
 
 func TestVMRepo_ListAll(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -205,7 +205,7 @@ func TestVMRepo_ListExcludingStatuses(t *testing.T) {
 	})
 }
 
-// ─── Counting ────────────────────────────────────────────────────────────────
+// --- Counting ---
 
 func TestVMRepo_Count(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -242,13 +242,13 @@ func TestVMRepo_CountByStatus(t *testing.T) {
 	})
 }
 
-// ─── Lookups ─────────────────────────────────────────────────────────────────
+// --- Lookups ---
 
 func TestVMRepo_FindByPrefix(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "abc-1", Name: "a"})
-	seedVM(t, repo, &model.VM{ID: "abc-22", Name: "b"})
-	seedVM(t, repo, &model.VM{ID: "xyz-9", Name: "c"})
+	seedVM(t, repo, &model.VMItem{ID: "abc-1", Name: "a"})
+	seedVM(t, repo, &model.VMItem{ID: "abc-22", Name: "b"})
+	seedVM(t, repo, &model.VMItem{ID: "xyz-9", Name: "c"})
 
 	t.Run("matching_prefix", func(t *testing.T) {
 		got, err := repo.FindByPrefix(ctx, "abc")
@@ -265,7 +265,7 @@ func TestVMRepo_FindByPrefix(t *testing.T) {
 
 func TestVMRepo_FindByIP(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", IPv4: "10.0.0.1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", IPv4: "10.0.0.1"})
 
 	t.Run("found", func(t *testing.T) {
 		got, err := repo.FindByIP(ctx, "10.0.0.1")
@@ -283,7 +283,7 @@ func TestVMRepo_FindByIP(t *testing.T) {
 
 func TestVMRepo_FindByMAC(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", MAC: "02:fc:00:00:00:01"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", MAC: "02:fc:00:00:00:01"})
 
 	t.Run("found", func(t *testing.T) {
 		got, err := repo.FindByMAC(ctx, "02:fc:00:00:00:01")
@@ -299,13 +299,13 @@ func TestVMRepo_FindByMAC(t *testing.T) {
 	})
 }
 
-// ─── Foreign key lookups ─────────────────────────────────────────────────────
+// --- Foreign key lookups ---
 
 func TestVMRepo_FindByNetworkID(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", NetworkID: "net-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-2", NetworkID: "net-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-3", NetworkID: "net-2"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", NetworkID: "net-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", NetworkID: "net-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-3", NetworkID: "net-2"})
 
 	got, err := repo.FindByNetworkID(ctx, "net-1")
 	require.NoError(t, err)
@@ -314,8 +314,8 @@ func TestVMRepo_FindByNetworkID(t *testing.T) {
 
 func TestVMRepo_GetByNetworkIDs(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", NetworkID: "net-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-2", NetworkID: "net-2"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", NetworkID: "net-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", NetworkID: "net-2"})
 
 	got, err := repo.GetByNetworkIDs(ctx, []string{"net-1", "net-3"})
 	require.NoError(t, err)
@@ -325,9 +325,9 @@ func TestVMRepo_GetByNetworkIDs(t *testing.T) {
 
 func TestVMRepo_FindByKernelID(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", KernelID: "k-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-2", KernelID: "k-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-3", KernelID: "k-2"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", KernelID: "k-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", KernelID: "k-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-3", KernelID: "k-2"})
 
 	got, err := repo.FindByKernelID(ctx, "k-1")
 	require.NoError(t, err)
@@ -336,8 +336,8 @@ func TestVMRepo_FindByKernelID(t *testing.T) {
 
 func TestVMRepo_GetByKernelIDs(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", KernelID: "k-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-2", KernelID: "k-2"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", KernelID: "k-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", KernelID: "k-2"})
 
 	got, err := repo.GetByKernelIDs(ctx, []string{"k-1", "k-3"})
 	require.NoError(t, err)
@@ -346,8 +346,8 @@ func TestVMRepo_GetByKernelIDs(t *testing.T) {
 
 func TestVMRepo_FindByBinaryID(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", BinaryID: "b-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-2", BinaryID: "b-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", BinaryID: "b-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", BinaryID: "b-1"})
 
 	got, err := repo.FindByBinaryID(ctx, "b-1")
 	require.NoError(t, err)
@@ -356,8 +356,8 @@ func TestVMRepo_FindByBinaryID(t *testing.T) {
 
 func TestVMRepo_GetByBinaryIDs(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", BinaryID: "b-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-2", BinaryID: "b-2"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", BinaryID: "b-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", BinaryID: "b-2"})
 
 	got, err := repo.GetByBinaryIDs(ctx, []string{"b-1", "b-3"})
 	require.NoError(t, err)
@@ -366,8 +366,8 @@ func TestVMRepo_GetByBinaryIDs(t *testing.T) {
 
 func TestVMRepo_GetByImageIDs(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", ImageID: "img-1"})
-	seedVM(t, repo, &model.VM{ID: "vm-2", ImageID: "img-2"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", ImageID: "img-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", ImageID: "img-2"})
 
 	got, err := repo.GetByImageIDs(ctx, []string{"img-1", "img-3"})
 	require.NoError(t, err)
@@ -375,13 +375,13 @@ func TestVMRepo_GetByImageIDs(t *testing.T) {
 	assert.Equal(t, "vm-1", got[0].ID)
 }
 
-// ─── Volume lookups (JSON array fields) ──────────────────────────────────────
+// --- Volume lookups (JSON array fields) ---
 
 func TestVMRepo_FindByVolumeID(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", VolumeIDs: []string{"vol-1", "vol-2"}})
-	seedVM(t, repo, &model.VM{ID: "vm-2", VolumeIDs: []string{"vol-2"}})
-	seedVM(t, repo, &model.VM{ID: "vm-3"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", VolumeIDs: []string{"vol-1", "vol-2"}})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", VolumeIDs: []string{"vol-2"}})
+	seedVM(t, repo, &model.VMItem{ID: "vm-3"})
 
 	t.Run("found", func(t *testing.T) {
 		got, err := repo.FindByVolumeID(ctx, "vol-1")
@@ -399,8 +399,8 @@ func TestVMRepo_FindByVolumeID(t *testing.T) {
 
 func TestVMRepo_FindByVolumeIDsBatch(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", VolumeIDs: []string{"vol-1"}})
-	seedVM(t, repo, &model.VM{ID: "vm-2", VolumeIDs: []string{"vol-1", "vol-2"}})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", VolumeIDs: []string{"vol-1"}})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", VolumeIDs: []string{"vol-1", "vol-2"}})
 
 	t.Run("finds_matching", func(t *testing.T) {
 		got, err := repo.FindByVolumeIDsBatch(ctx, []string{"vol-1", "vol-3"})
@@ -415,12 +415,12 @@ func TestVMRepo_FindByVolumeIDsBatch(t *testing.T) {
 	})
 }
 
-// ─── SSH key lookups (JSON array fields) ────────────────────────────────────
+// --- SSH key lookups (JSON array fields) ---
 
 func TestVMRepo_FindBySSHKeyID(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", SSHKeys: []string{"key-1", "key-2"}})
-	seedVM(t, repo, &model.VM{ID: "vm-2", SSHKeys: []string{"key-2"}})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", SSHKeys: []string{"key-1", "key-2"}})
+	seedVM(t, repo, &model.VMItem{ID: "vm-2", SSHKeys: []string{"key-2"}})
 
 	t.Run("found", func(t *testing.T) {
 		got, err := repo.FindBySSHKeyID(ctx, "key-1")
@@ -436,7 +436,7 @@ func TestVMRepo_FindBySSHKeyID(t *testing.T) {
 	})
 }
 
-// ─── Mutations ───────────────────────────────────────────────────────────────
+// --- Mutations ---
 
 func TestVMRepo_UpdateStatus(t *testing.T) {
 	repo := testutil.NewVMRepo()
@@ -452,7 +452,7 @@ func TestVMRepo_UpdateStatus(t *testing.T) {
 
 func TestVMRepo_UpdatePID(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", PID: 0})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", PID: 0})
 
 	pid := 12345
 	err := repo.UpdatePID(ctx, "vm-1", &pid)
@@ -465,7 +465,7 @@ func TestVMRepo_UpdatePID(t *testing.T) {
 
 func TestVMRepo_UpdateProcessInfo(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1"})
 
 	pid := 999
 	var startTime int64 = 1000
@@ -481,7 +481,7 @@ func TestVMRepo_UpdateProcessInfo(t *testing.T) {
 
 func TestVMRepo_UpdateExitCode(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1"})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1"})
 
 	err := repo.UpdateExitCode(ctx, "vm-1", 137)
 	require.NoError(t, err)
@@ -492,13 +492,13 @@ func TestVMRepo_UpdateExitCode(t *testing.T) {
 	assert.Equal(t, 137, *got.ExitCode)
 }
 
-// ─── Concurrency safety ──────────────────────────────────────────────────────
+// --- Concurrency safety ---
 // Rationale: The in-memory repos use sync.RWMutex for thread safety.
 // These tests verify no data races under concurrent access (-race detects).
 
 func TestVMRepo_ConcurrencySafety(t *testing.T) {
 	repo := testutil.NewVMRepo()
-	seedVM(t, repo, &model.VM{ID: "vm-1", Name: "concurrent", Status: model.VMStatusRunning})
+	seedVM(t, repo, &model.VMItem{ID: "vm-1", Name: "concurrent", Status: model.VMStatusRunning})
 
 	t.Run("concurrent_read_write", func(t *testing.T) {
 		done := make(chan struct{})
@@ -509,13 +509,13 @@ func TestVMRepo_ConcurrencySafety(t *testing.T) {
 			close(done)
 		}()
 		for i := 0; i < 50; i++ {
-			repo.Upsert(ctx, &model.VM{ID: "vm-2", Name: "writer"})
+			repo.Upsert(ctx, &model.VMItem{ID: "vm-2", Name: "writer"})
 		}
 		<-done
 	})
 }
 
-// ─── Edge cases ──────────────────────────────────────────────────────────────
+// --- Edge cases ---
 
 func TestVMRepo_EmptyState(t *testing.T) {
 	repo := testutil.NewVMRepo()

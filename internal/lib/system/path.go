@@ -6,9 +6,8 @@ import (
 	"strings"
 )
 
-// ResolvePath resolves symlinks and returns absolute path, matching Python's
-// Path(path).resolve(). Falls back to filepath.Abs and then filepath.Clean
-// if EvalSymlinks fails.
+// ResolvePath resolves symlinks and returns the absolute path.
+// Falls back to filepath.Abs and then filepath.Clean if EvalSymlinks fails.
 func ResolvePath(path string) string {
 	resolved, err := filepath.EvalSymlinks(path)
 	if err == nil {
@@ -21,7 +20,7 @@ func ResolvePath(path string) string {
 	return filepath.Clean(abs)
 }
 
-// ExpandTilde expands ~ to the user's home directory, matching Python's Path.expanduser().
+// ExpandTilde expands ~ to the user's home directory.
 func ExpandTilde(path string) string {
 	if strings.HasPrefix(path, "~") {
 		home, err := os.UserHomeDir()
@@ -33,7 +32,7 @@ func ExpandTilde(path string) string {
 }
 
 // ExpandAndResolve expands ~ to home directory, resolves symlinks, and makes
-// path absolute — matching Python's Path.expanduser().resolve() semantics.
+// the path absolute.
 func ExpandAndResolve(path string) (string, error) {
 	if strings.HasPrefix(path, "~/") {
 		home, err := os.UserHomeDir()
@@ -48,7 +47,7 @@ func ExpandAndResolve(path string) (string, error) {
 		}
 		path = home
 	}
-	// filepath.EvalSymlinks resolves all symlinks in the path (matching Python's resolve())
+	// filepath.EvalSymlinks resolves all symlinks in the path
 	resolved, err := filepath.EvalSymlinks(path)
 	if err == nil {
 		return filepath.Abs(resolved)

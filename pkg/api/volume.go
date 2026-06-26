@@ -1,12 +1,10 @@
 // Package api provides the public orchestration layer for all operations.
-// Matches src/mvmctl/api/volume_operations.py exactly.
 package api
 
 import (
 	"context"
 	"fmt"
-	"time"
-
+	"log/slog"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
 	"mvmctl/internal/lib/crypto"
@@ -15,6 +13,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
+	"time"
 )
 
 // VolumeAPI defines the public interface for volume operations.
@@ -28,7 +27,6 @@ type VolumeAPI interface {
 }
 
 // VolumeListAll returns all volumes.
-// Matches Python's VolumeOperation.list_all() exactly.
 func (op *Operation) VolumeListAll(ctx context.Context) []*model.VolumeItem {
 	volumes, _ := op.Repos.Volume.ListAll(ctx)
 	if volumes == nil {
@@ -38,51 +36,38 @@ func (op *Operation) VolumeListAll(ctx context.Context) []*model.VolumeItem {
 }
 
 // VolumeCreate creates a new volume.
-// Matches Python's VolumeOperation.create() exactly — uses VolumeCreateRequest
-// resolution pipeline and HashGenerator.volume() for ID.
 func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreateInput) (*model.VolumeItem, error) {
-	req := inputs.NewVolumeCreateRequest(input, op.Connection.DB(), op.Repos.Volume)
-	resolved, err := req.Resolve(ctx)
+	resolved, err := input.Resolve(ctx, op.Repos.Volume)
 	if err != nil {
 		return nil, err
 	}
-
 	timestamp := time.Now().Format(time.RFC3339)
-
-	// Generate ID matching Python's HashGenerator.volume(name, timestamp) exactly
+	// Generate ID matching The HashGenerator.volume(name, timestamp) exactly
 	volumeID := crypto.VolumeID(resolved.Name, timestamp)
-
 	volumeItem := &model.VolumeItem{
-		ID:         volumeID,
-		Name:       resolved.Name,
-		SizeBytes:  resolved.SizeBytes,
-		Format:     resolved.Format,
-		IsReadOnly: resolved.IsReadOnly,
-		Path:       resolved.Path,
-		Status:     model.VolumeStatusAvailable,
-		CreatedAt:  timestamp,
-		UpdatedAt:  timestamp,
+		ID:          volumeID,
+		Name:        resolved.Name,
+		SizeBytes:   resolved.SizeBytes,
+		Format:      resolved.Format,
+		IsReadOnly:  resolved.IsReadOnly,
+		IsShareable: resolved.IsShareable,
+		Path:        resolved.Path,
+		Status:      model.VolumeStatusAvailable,
+		CreatedAt:   timestamp,
+		UpdatedAt:   timestamp,
 	}
-
 	if _, volErr := op.Services.Volume.CreateDisk(ctx, volumeItem); volErr != nil {
 		return nil, errs.WrapMsg(errs.CodeInternal, fmt.Sprintf("Failed to create volume: %v", volErr), volErr)
 	}
-
 	op.AuditLog.LogOperation("volume.create", map[string]any{"name": input.Name}, "")
-
 	return volumeItem, nil
 }
 
 // VolumeRemove removes volumes by name or ID.
-// Matches Python's VolumeOperation.remove() exactly — uses VolumeRequest resolution
-// with partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
+// Handles partial-match error reporting, VM volume_ids cleanup, and hot-unplug.
 func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput, force bool) *errs.BatchResult {
-	// Python: request = VolumeRequest(inputs=inputs, db=db)
-	//         try: resolved = request.resolve()
-	//         except VolumeNotFoundError as e: return BatchResult(items=[OperationResult(...)])
-	req := inputs.NewVolumeRequest(input, op.Connection.DB(), op.Repos.Volume)
-	resolved, err := req.Resolve(ctx)
-	if err != nil {
+	volumes, err := input.Resolve(ctx, op.Repos.Volume)
+	if err != nil && len(volumes) == 0 {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
 				{
@@ -94,20 +79,12 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			},
 		}
 	}
-
-	results := make([]errs.OperationResult, 0)
-
-	// Python: Surface partial-match errors from resolver
-	//         for error_msg in request.errors:
-	for _, errMsg := range req.Errors() {
-		results = append(results, errs.OperationResult{
-			Status:  "error",
-			Code:    "volume.not_found",
-			Message: errMsg,
-		})
+	// Log partial failures but continue with resolved volumes
+	if err != nil && len(volumes) > 0 {
+		slog.Warn("volume remove: partial resolve failures", "error", err)
 	}
-
-	if len(resolved.Volumes) == 0 && len(results) == 0 {
+	results := make([]errs.OperationResult, 0)
+	if len(volumes) == 0 && len(results) == 0 {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
 				{
@@ -118,12 +95,13 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			},
 		}
 	}
-
 	// Batch-enrich with VM references for VM attachment check
-	op.Enr.EnrichVolume(ctx, resolved.Volumes, "vm")
-
-	for _, vol := range resolved.Volumes {
-		if vol.Status == model.VolumeStatusAttached && !force {
+	op.Enr.EnrichVolume(ctx, volumes, "vm")
+	for _, vol := range volumes {
+		// Shareable read-only volumes are treated as not attached
+		// since we can't track individual VM attachments for them.
+		isEffectivelyAttached := vol.Status == model.VolumeStatusAttached && !(vol.IsShareable && vol.IsReadOnly)
+		if isEffectivelyAttached && !force {
 			results = append(results, errs.OperationResult{
 				Status:  "error",
 				Code:    "volume.remove_failed",
@@ -132,9 +110,8 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			})
 			continue
 		}
-
 		// When force-removing attached volume, clean up the VM's volume_ids reference,
-		// hot-unplug if running, and update config on disk (matching Python).
+		// hot-unplug if running, and update config on disk.
 		if vol.Status == model.VolumeStatusAttached && force && vol.VMID != nil {
 			vmItem, _ := op.Repos.VM.Get(ctx, *vol.VMID)
 			if vmItem != nil && vmItem.VolumeIDs != nil {
@@ -147,13 +124,10 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 				}
 				vmItem.VolumeIDs = newIDs
 				_ = op.Repos.VM.Upsert(ctx, vmItem)
-
-				// Python: try: ctrl.detach_volume(volume) except Exception: pass
 				vmCtrl := vm.NewController(vmItem, op.Repos.VM)
 				_ = vmCtrl.DetachVolume(ctx, vol.ID)
 			}
 		}
-
 		if err := op.Services.Volume.Remove(ctx, vol); err != nil {
 			results = append(results, errs.OperationResult{
 				Status:    "error",
@@ -164,9 +138,7 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			})
 			continue
 		}
-
 		op.AuditLog.LogOperation("volume.remove", map[string]any{"name": vol.Name}, "")
-
 		results = append(results, errs.OperationResult{
 			Status:  "success",
 			Code:    "volume.removed",
@@ -174,21 +146,18 @@ func (op *Operation) VolumeRemove(ctx context.Context, input inputs.VolumeInput,
 			Message: fmt.Sprintf("Volume '%s' removed", vol.Name),
 		})
 	}
-
 	return &errs.BatchResult{Items: results}
 }
 
 // VolumeInspect returns detailed volume info as a raw dictionary.
-// Matches Python's VolumeOperation.inspect() exactly — returns dict[str, Any]
+// returns dict[str, Any]
 // with volume metadata and disk information, not wrapped in OperationResult.
 func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput) (*results.VolumeInspect, error) {
 	vol, err := op.VolumeGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
-
 	diskInfo, _ := volume.GetDiskInfo(ctx, vol.Path)
-
 	vmName := ""
 	if vol.VMID != nil && *vol.VMID != "" {
 		vm, _ := op.Repos.VM.Get(ctx, *vol.VMID)
@@ -196,7 +165,6 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 			vmName = vm.Name
 		}
 	}
-
 	return &results.VolumeInspect{
 		Volume: results.VolumeItemInfo{
 			ID: vol.ID, Name: vol.Name, SizeBytes: vol.SizeBytes,
@@ -214,51 +182,33 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 }
 
 // VolumeResize resizes a volume.
-// Matches Python's VolumeOperation.resize() exactly — uses VolumeRequest resolution
-// for identifier lookup and separate size parsing.
 func (op *Operation) VolumeResize(ctx context.Context, input inputs.VolumeCreateInput) error {
-	// Python: vol_input = VolumeInput(identifiers=[inputs.name])
-	//         resolved_vol = VolumeRequest(inputs=vol_input, db=db).resolve()
-	//         volume = resolved_vol.volumes[0]
 	volInput := inputs.VolumeInput{Identifiers: []string{input.Name}}
-	req := inputs.NewVolumeRequest(volInput, op.Connection.DB(), op.Repos.Volume)
-	resolved, err := req.Resolve(ctx)
+	volumes, err := volInput.Resolve(ctx, op.Repos.Volume)
 	if err != nil {
 		return errs.WrapMsg(errs.CodeVolumeNotFound, err.Error(), err)
 	}
-
-	vol := resolved.Volumes[0]
-
-	// Python: size_bytes = DiskUtils.parse_disk_size_to_bytes(inputs.size)
+	vol := volumes[0]
 	sizeBytes, err := disk.ParseDiskSizeToBytes(input.Size)
 	if err != nil {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("Invalid size: %v", err))
 	}
-
 	_, err = op.Services.Volume.ResizeDisk(ctx, vol, sizeBytes)
 	if err != nil {
 		return errs.WrapMsg(errs.CodeVolumeResizeFailed, fmt.Sprintf("Failed to resize volume: %v", err), err)
 	}
-
 	op.AuditLog.LogOperation("volume.resize", map[string]any{"name": vol.Name}, "")
-
 	return nil
 }
 
 // VolumeGet returns a single volume by identifier.
-// Matches Python's VolumeOperation.get() exactly — uses VolumeRequest pipeline.
 func (op *Operation) VolumeGet(ctx context.Context, input inputs.VolumeInput) (*model.VolumeItem, error) {
-	// Python: resolved = VolumeRequest(inputs=inputs, db=Database()).resolve()
-	req := inputs.NewVolumeRequest(input, op.Connection.DB(), op.Repos.Volume)
-	resolved, err := req.Resolve(ctx)
+	volumes, err := input.Resolve(ctx, op.Repos.Volume)
 	if err != nil {
 		return nil, err
 	}
-
-	// Python: if len(resolved.volumes) > 1: raise VolumeNotFoundError(...)
-	if len(resolved.Volumes) > 1 {
+	if len(volumes) > 1 {
 		return nil, fmt.Errorf("Expected exactly one volume identifier")
 	}
-
-	return resolved.Volumes[0], nil
+	return volumes[0], nil
 }

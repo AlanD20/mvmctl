@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"golang.org/x/sync/errgroup"
+	"sync"
 
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
@@ -33,7 +32,7 @@ func NewPipeline(steps []Step) (*Pipeline, error) {
 	}, nil
 }
 
-// ── Execute options ──
+// --- Execute options ---
 
 type executeOptions struct {
 	onStepComplete func(ctx context.Context, step Step, stateData model.ResourceState) error
@@ -53,7 +52,7 @@ func WithOnStepComplete(cb func(ctx context.Context, step Step, stateData model.
 	}
 }
 
-// ── Execute ──
+// --- Execute ---
 
 // Execute runs all steps in topological order. Steps at the same level
 // are executed concurrently. For each step, Apply is called with the
@@ -99,38 +98,51 @@ func (p *Pipeline) Execute(
 		default:
 		}
 
-		// Concurrent level: run all steps in this level in parallel.
-		// errgroup cancels sibling goroutines on first error.
-		g, stepCtx := errgroup.WithContext(ctx)
+		// Run all steps in this level concurrently using a WaitGroup,
+		// NOT errgroup. errgroup cancels sibling contexts on first error,
+		// which is wrong for resource provisioning — if one VM creation
+		// fails, overlapping VMs should still be created. Collect errors
+		// and return the first one after all steps complete.
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		var firstErr error
 
 		for _, step := range level {
-			g.Go(func() error {
+			wg.Add(1)
+			go func(s Step) {
+				defer wg.Done()
+
 				var write StateWriter
 				if cfg.onStepComplete != nil {
 					write = func(ctx context.Context, data model.ResourceState) error {
-						return cfg.onStepComplete(ctx, step, data)
+						return cfg.onStepComplete(ctx, s, data)
 					}
 				}
 
-				emitProgress(onProgress, step.Name(), "running", "starting")
-				if err := step.Apply(stepCtx, state, savedByStep[step.Name()], write, onProgress); err != nil {
-					emitProgress(onProgress, step.Name(), "failed", err.Error())
-					return fmt.Errorf("step %q: %w", step.Name(), err)
+				emitProgress(onProgress, s.Name(), "running", "starting")
+				if err := s.Apply(ctx, state, savedByStep[s.Name()], write, onProgress); err != nil {
+					emitProgress(onProgress, s.Name(), "failed", err.Error())
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("step %q: %w", s.Name(), err)
+					}
+					mu.Unlock()
+					return
 				}
-				emitProgress(onProgress, step.Name(), "complete", "done")
-				return nil
-			})
+				emitProgress(onProgress, s.Name(), "complete", "done")
+			}(step)
 		}
 
-		if err := g.Wait(); err != nil {
-			return err
+		wg.Wait()
+		if firstErr != nil {
+			return firstErr
 		}
 	}
 
 	return nil
 }
 
-// ── Destroy options ──
+// --- Destroy options ---
 
 type destroyOptions struct {
 	onStepComplete func(ctx context.Context, step Step, stateData model.ResourceState) error
@@ -152,7 +164,7 @@ func WithDestroyOnStepComplete(
 	}
 }
 
-// ── Destroy ──
+// --- Destroy ---
 
 // Destroy runs the Destroy method on each step in reverse topological
 // order (deepest level first). This ensures that resources are torn down
@@ -202,35 +214,40 @@ func (p *Pipeline) Destroy(
 		}
 
 		// Concurrent destroy for the level.
-		// errgroup cancels sibling goroutines on first error within
-		// this level, but we continue to the next level regardless.
-		g, stepCtx := errgroup.WithContext(ctx)
+		// Use WaitGroup to avoid sibling cancellation on error.
+		var wg sync.WaitGroup
+		var mu sync.Mutex
 
 		for _, step := range level {
-			g.Go(func() error {
+			wg.Add(1)
+			go func(s Step) {
+				defer wg.Done()
+
 				var write StateWriter
 				if cfg.onStepComplete != nil {
 					write = func(ctx context.Context, data model.ResourceState) error {
-						return cfg.onStepComplete(ctx, step, data)
+						return cfg.onStepComplete(ctx, s, data)
 					}
 				}
 
-				saved := savedByStep[step.Name()]
-				emitProgress(onProgress, step.Name(), "running", "destroying")
-				if err := step.Destroy(stepCtx, saved.State, write, onProgress); err != nil {
-					emitProgress(onProgress, step.Name(), "failed", err.Error())
-					return fmt.Errorf("destroy step %q: %w", step.Name(), err)
+				saved := savedByStep[s.Name()]
+				emitProgress(onProgress, s.Name(), "running", "destroying")
+				if err := s.Destroy(ctx, saved.State, write, onProgress); err != nil {
+					emitProgress(onProgress, s.Name(), "failed", err.Error())
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("destroy step %q: %w", s.Name(), err)
+					}
+					mu.Unlock()
+					return
 				}
-				emitProgress(onProgress, step.Name(), "complete", "destroyed")
-				return nil
-			})
+				emitProgress(onProgress, s.Name(), "complete", "destroyed")
+			}(step)
 		}
 
-		if err := g.Wait(); err != nil {
-			slog.Warn("destroy step failed in concurrent level", "level", levelIdx, "error", err)
-			if firstErr == nil {
-				firstErr = err
-			}
+		wg.Wait()
+		if firstErr != nil {
+			slog.Warn("destroy step failed in concurrent level", "level", levelIdx, "error", firstErr)
 		}
 	}
 

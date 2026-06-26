@@ -16,7 +16,7 @@ import (
 // errSentinel is a reusable error for tests.
 var errSentinel = errors.New("expected error")
 
-// ─── Do ──────────────────────────────────────────────────────────────────────
+// --- Do ---
 // Rationale: Do is the core concurrent task executor. Must collect ALL errors,
 // respect context cancellation, bound concurrency, and not leak goroutines.
 
@@ -127,7 +127,7 @@ func TestDo_singleItem(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// ─── Gather ──────────────────────────────────────────────────────────────────
+// --- Gather ---
 // Rationale: Gather is the parallel transform executor. Must PRESERVE ORDER,
 // propagate errors per-item, respect cancellation, and bound concurrency.
 // Callers depend on results[i] corresponding to items[i].
@@ -222,7 +222,7 @@ func TestGather_largeInput(t *testing.T) {
 	assert.Equal(t, 1998, results[999].Value)
 }
 
-// ─── Seq ─────────────────────────────────────────────────────────────────────
+// --- Seq ---
 // Rationale: Seq is the sequential stop-on-first-error executor. Must process
 // items in order and stop immediately on first error.
 
@@ -278,7 +278,7 @@ func TestSeq_firstItemFails(t *testing.T) {
 	assert.ErrorIs(t, results[0].Err, errSentinel)
 }
 
-// ─── autoWorkers ─────────────────────────────────────────────────────────────
+// --- autoWorkers ---
 // Rationale: autoWorkers computes default worker count. Used by Do and Gather
 // when workers <= 0. Must return at least 1.
 
@@ -288,7 +288,7 @@ func TestAutoWorkers(t *testing.T) {
 	// Verified implicitly by Do_singleItem (workers=0 works with 1 item).
 }
 
-// ─── Concurrency safety (race detection) ────────────────────────────────────
+// --- Concurrency safety (race detection) ---
 // Rationale: Do, Gather, and Seq must be safe for concurrent access.
 // The -race flag in go test detects data races.
 
@@ -317,7 +317,7 @@ func TestConcurrencySafety(t *testing.T) {
 	})
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 func formatResult(n int) string {
 	return "val-" + itoa(n)

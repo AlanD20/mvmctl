@@ -10,7 +10,7 @@ import (
 	"mvmctl/internal/testutil"
 )
 
-// ─── NewLogsCmd ────────────────────────────────────────────────────────────
+// --- NewLogsCmd ---
 // Rationale: Logs is a leaf command wrapping LogAPI.LogStream. Verify the
 // command shell is created correctly with all expected flags registered.
 
@@ -47,7 +47,7 @@ func TestNewLogsCmd(t *testing.T) {
 	assert.Empty(t, cmd.Commands(), "logs should have no subcommands")
 }
 
-// ─── Logs no-args behavior ─────────────────────────────────────────────────
+// --- Logs no-args behavior ---
 // Rationale: Logs shows help with no args. A broken no-args handler would
 // produce an error instead of help, confusing users.
 

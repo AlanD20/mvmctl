@@ -13,7 +13,7 @@ import (
 	"mvmctl/internal/lib/system"
 )
 
-// ─── RealRunner.Stream ───────────────────────────────────────────────────────
+// --- RealRunner.Stream ---
 
 func TestStream_emptyArgs(t *testing.T) {
 	runner := &system.RealRunner{}

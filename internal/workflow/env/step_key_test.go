@@ -20,7 +20,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── Test helpers ─────────────────────────────────────────────────────────────
+// --- Test helpers ---
 
 // ctxKeyRepo wraps testutil.KeyRepo to propagate context cancellation
 // from GetByName. The plain mock ignores context, so this wrapper is needed
@@ -75,7 +75,7 @@ func newKeyOp(keyRepo key.Repository) *api.Operation {
 	}
 }
 
-// ─── KeyStep.Apply ────────────────────────────────────────────────────────────
+// --- KeyStep.Apply ---
 // Rationale: KeyStep.Apply is the core provisioning path. A nil-op crash,
 // a missed context cancellation, or a database error swallowed as success
 // would all cause silent data loss or hung workflows.
@@ -89,7 +89,7 @@ func TestKeyStep_Apply(t *testing.T) {
 		wantKeyID      string
 		wantWasCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return nil },
@@ -124,7 +124,7 @@ func TestKeyStep_Apply(t *testing.T) {
 			wantErr: "check key",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"key_exists_skips_and_writes_state": {
 			setupOp: func(t *testing.T) *api.Operation {
@@ -208,7 +208,7 @@ func TestKeyStep_Apply(t *testing.T) {
 	}
 }
 
-// ─── KeyStep.Apply write-failure propagation ──────────────────────────────────
+// --- KeyStep.Apply write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Apply must propagate it
 // rather than silently swallowing the persistence failure.
 
@@ -236,7 +236,7 @@ func TestKeyStep_Apply_WriteFailure(t *testing.T) {
 		"Apply must wrap write errors with context")
 }
 
-// ─── KeyStep.Destroy ─────────────────────────────────────────────────────────
+// --- KeyStep.Destroy ---
 // Rationale: Destroy is the teardown path for keys. A nil-op crash, a
 // WasCreated=false that still removes, or a silent KeyRemove failure would
 // all leave orphaned resources or destroy resources that should be kept.
@@ -249,7 +249,7 @@ func TestKeyStep_Destroy(t *testing.T) {
 		wantKeyID      string
 		wantWasCreated bool
 	}{
-		// ── Error paths FIRST ──────────────────────────────────────────
+		// --- Error paths FIRST ---
 
 		"nil_op_returns_error": {
 			setupOp: func(_ *testing.T) *api.Operation { return nil },
@@ -275,7 +275,7 @@ func TestKeyStep_Destroy(t *testing.T) {
 			wantErr: "db connection lost",
 		},
 
-		// ── Happy paths AFTER ──────────────────────────────────────────
+		// --- Happy paths AFTER ---
 
 		"saved_nil_and_spec_nil_writes_state_and_returns": {
 			setupOp: func(_ *testing.T) *api.Operation {
@@ -347,7 +347,7 @@ func TestKeyStep_Destroy(t *testing.T) {
 	}
 }
 
-// ─── KeyStep.Destroy context cancellation ────────────────────────────────────
+// --- KeyStep.Destroy context cancellation ---
 // Rationale: Destroy must propagate context cancellation so that long-running
 // teardown can be interrupted by signal handlers (R8).
 
@@ -380,7 +380,7 @@ func TestKeyStep_Destroy_ContextCancelled(t *testing.T) {
 	assert.Contains(t, err.Error(), "context canceled")
 }
 
-// ─── KeyStep.Destroy write-failure propagation ────────────────────────────────
+// --- KeyStep.Destroy write-failure propagation ---
 // Rationale: If the StateWriter returns an error, Destroy must propagate it
 // rather than silently swallowing the persistence failure.
 
@@ -401,7 +401,7 @@ func TestKeyStep_Destroy_WriteFailure(t *testing.T) {
 		"Destroy must wrap write errors with context")
 }
 
-// ─── KeyStep.StateData ───────────────────────────────────────────────────────
+// --- KeyStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
 // the next workflow run will lose state and re-provision resources.
@@ -459,7 +459,7 @@ func TestKeyStep_StateData(t *testing.T) {
 	}
 }
 
-// ─── KeyStep.StateData after Apply with existing key ─────────────────────────
+// --- KeyStep.StateData after Apply with existing key ---
 // Rationale: After Apply finds an existing key and skips creation, StateData
 // must reflect the actual key ID and correct WasCreated flag — not a stale
 // or zero-value state.
@@ -499,7 +499,7 @@ func TestKeyStep_StateData_AfterApply(t *testing.T) {
 		"SpecHash must be set for drift detection")
 }
 
-// ─── KeyStep.StateData after Destroy with WasCreated ─────────────────────────
+// --- KeyStep.StateData after Destroy with WasCreated ---
 // Rationale: After Destroy removes a key that WasCreated, StateData must
 // reflect the final state. The key ID must still be present (we don't clear
 // saved on destroy) and WasCreated must remain true (destroy doesn't rewrite history).
@@ -532,7 +532,7 @@ func TestKeyStep_StateData_AfterDestroy(t *testing.T) {
 		"WasCreated must remain true after destroy")
 }
 
-// ─── KeyStep.FromSpec name and type ──────────────────────────────────────────
+// --- KeyStep.FromSpec name and type ---
 // Rationale: FromSpec must produce a step with correct Name() and Type() so
 // that dependency resolution and registry lookups work correctly.
 
@@ -546,7 +546,7 @@ func TestKeyStep_FromSpec_NameAndType(t *testing.T) {
 	assert.IsType(t, &envpkg.KeyStep{}, step)
 }
 
-// ─── KeyStep.FromState recovery ──────────────────────────────────────────────
+// --- KeyStep.FromState recovery ---
 // Rationale: FromState must reconstruct a step from previously persisted
 // state. The resulting step must have correct name, type, and be usable
 // for Destroy without a preceding Apply.

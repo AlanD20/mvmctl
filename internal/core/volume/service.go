@@ -1,3 +1,5 @@
+// Package volume provides volume/disk image management for VMs.
+// Layer: Core domain — never imports other core/* packages.
 package volume
 
 import (
@@ -15,7 +17,6 @@ import (
 )
 
 // Service handles volume disk operations — creation, removal, resizing, and inspection.
-// Matches Python's VolumeService exactly.
 type Service struct {
 	repo Repository
 }
@@ -26,7 +27,6 @@ func NewService(repo Repository) *Service {
 }
 
 // CreateDisk creates a disk file on the filesystem and persists the volume record.
-// Matches Python's VolumeService.create_disk() exactly.
 func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model.VolumeItem, error) {
 	parentDir := filepath.Dir(vol.Path)
 	if err := os.MkdirAll(parentDir, os.ModePerm); err != nil {
@@ -41,7 +41,6 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 			system.RunCmdOpts{Check: true, Capture: true},
 		)
 		if err != nil {
-			// Python: raise VolumeError(f"fallocate failed: {e}") from e
 			return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("fallocate failed: %s", err.Error()))
 		}
 	case model.VolumeFormatQCOW2:
@@ -71,15 +70,10 @@ func (s *Service) CreateDisk(ctx context.Context, vol *model.VolumeItem) (*model
 	return vol, nil
 }
 
-// Remove deletes the disk file and its DB record.
-// Matches Python's VolumeService.remove() exactly.
-// Go must match: silently ignore ALL errors from repo.Delete and os.Remove.
-// Return nil always (matching Python's None return).
+// Remove deletes the disk file and its DB record. Always returns nil.
 func (s *Service) Remove(ctx context.Context, volume *model.VolumeItem) error {
-	// Python: self._repo.delete(volume.id) — silently ignores all failures
 	_ = s.repo.Delete(ctx, volume.ID)
 
-	// Python: if disk_path.exists(): disk_path.unlink(missing_ok=True)
 	if _, err := os.Stat(volume.Path); err == nil {
 		_ = os.Remove(volume.Path)
 	}
@@ -88,7 +82,6 @@ func (s *Service) Remove(ctx context.Context, volume *model.VolumeItem) error {
 }
 
 // ResizeDisk resizes a disk file and updates the DB record.
-// Matches Python's VolumeService.resize_disk() exactly.
 func (s *Service) ResizeDisk(
 	ctx context.Context,
 	vol *model.VolumeItem,
@@ -124,8 +117,7 @@ func (s *Service) ResizeDisk(
 		return nil, errs.New(errs.CodeVolumeError, fmt.Sprintf("Unsupported format: %s", vol.Format))
 	}
 
-	// Update volume fields — matches Python's resize_disk() which sets
-	// size_bytes and updated_at before upserting.
+	// Update volume fields before upserting.
 	vol.SizeBytes = newSizeBytes
 	vol.UpdatedAt = time.Now().Format(time.RFC3339)
 
@@ -137,10 +129,6 @@ func (s *Service) ResizeDisk(
 }
 
 // SetVolumesState updates the state of one or more volumes.
-// Matches Python's VolumeService.set_volumes_state() exactly.
-// Python: vm_id: str | None = None — defaults to None.
-// Python fire-and-forgets individual failures: logs a warning and continues.
-// Go must match — don't aggregate errors, just log warnings.
 func (s *Service) SetVolumesState(
 	ctx context.Context,
 	volumes []*model.VolumeItem,
@@ -159,9 +147,12 @@ func (s *Service) SetVolumesState(
 			)
 		}
 		for _, vol := range volumes {
+			// Shareable read-only volumes stay available — no status tracking needed.
+			if vol.IsShareable && vol.IsReadOnly {
+				continue
+			}
 			controller := &Controller{volume: vol, repo: s.repo}
 			if err := controller.Attach(ctx, *vmID); err != nil {
-				// Python: logger.warning("Failed to attach volume '%s': %s", vol.name, exc)
 				slog.Debug("Failed to attach volume", "name", vol.Name, "error", err)
 			}
 		}
@@ -172,7 +163,6 @@ func (s *Service) SetVolumesState(
 			}
 			controller := &Controller{volume: vol, repo: s.repo}
 			if err := controller.Detach(ctx); err != nil {
-				// Python: logger.warning("Failed to detach volume '%s': %s", vol.name, exc)
 				slog.Debug("Failed to detach volume", "name", vol.Name, "error", err)
 			}
 		}

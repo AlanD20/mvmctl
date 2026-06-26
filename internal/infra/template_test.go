@@ -11,7 +11,7 @@ import (
 	"mvmctl/internal/infra"
 )
 
-// ─── RenderTemplate ──────────────────────────────────────────────────────────
+// --- RenderTemplate ---
 // Rationale: RenderTemplate is used for cloud-init templates, config files,
 // and user-facing output formatting. Missing var detection prevents silent
 // generation of broken configs.
@@ -109,7 +109,7 @@ func TestRenderTemplate(t *testing.T) {
 	}
 }
 
-// ─── Dedent ──────────────────────────────────────────────────────────────────
+// --- Dedent ---
 // Rationale: Dedent is used for template strings and configuration text.
 // Incorrect dedentation would produce misaligned config files or template errors.
 
@@ -174,7 +174,7 @@ func TestDedent(t *testing.T) {
 	}
 }
 
-// ─── RenderOptionalTemplate ─────────────────────────────────────────────────
+// --- RenderOptionalTemplate ---
 // Rationale: Wraps RenderTemplate with nil-safe optional template handling.
 // Used in config fields that may or may not have template content.
 
@@ -203,7 +203,7 @@ func TestRenderOptionalTemplate(t *testing.T) {
 	})
 }
 
-// ─── ExecTemplate ────────────────────────────────────────────────────────────
+// --- ExecTemplate ---
 // Rationale: ExecTemplate executes Go text/template and panics on failure.
 // Used for critical template rendering where errors must be caught early.
 

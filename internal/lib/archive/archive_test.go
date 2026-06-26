@@ -7,7 +7,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// ─── formatFromExtension ─────────────────────────────────────────────────────
+// --- formatFromExtension ---
 // Rationale: formatFromExtension maps file extensions to archive formats.
 // Used as a fallback when magic-byte detection fails (e.g., file not found,
 // unreadable, or truncated). Case-insensitive matching ensures correct
@@ -90,7 +90,7 @@ func TestFormatFromExtension(t *testing.T) {
 	}
 }
 
-// ─── firstErr ────────────────────────────────────────────────────────────────
+// --- firstErr ---
 // Rationale: firstErr returns a if non-nil, otherwise b. Used to propagate
 // the first encountered error when collecting errors from sequential operations
 // (e.g., close/flush after write). Returning the wrong error would silently

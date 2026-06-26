@@ -13,7 +13,7 @@ import (
 	"mvmctl/pkg/api/inputs"
 )
 
-// ─── MockSSHAPI ───────────────────────────────────────────────────────────────
+// --- MockSSHAPI ---
 // Rationale: MockSSHAPI satisfies api.SSHAPI for testing upper layers.
 // SSHConnect is the only method; tests verify default return and custom routing.
 

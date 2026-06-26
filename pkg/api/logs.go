@@ -1,10 +1,8 @@
 // Package api provides the public orchestration layer for all operations.
-// Matches src/mvmctl/api/logs_operations.py exactly.
 package api
 
 import (
 	"context"
-
 	"mvmctl/internal/core/logs"
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/api/inputs"
@@ -17,55 +15,34 @@ type LogAPI interface {
 }
 
 // LogStream streams log lines for a VM synchronously via callback.
-// Matches Python's LogOperation.stream() -> Generator[str] exactly.
-//
-// Python:
-//
-//	for line in LogOperation.stream(inputs):
-//	    fmt.Println(line)
-//
-// Go equivalent:
+// Callers use:
 //
 //	op.LogStream(ctx, inputs, func(line string) error {
-//	    fmt.Println(line)
-//	    return nil
+//		fmt.Println(line)
+//		return nil
 //	})
 //
 // For "show" (non-follow): resolves input, reads lines from controller, invokes
 // callback for each line, then returns. Blocks the caller's goroutine — no
-// goroutine spawn necessary, matching Python's synchronous generator semantics.
-//
+// goroutine spawn necessary
 // For "follow": resolves input, reads from the channel returned by the controller's
 // FollowSync, invoking the callback for each line as it is received. Blocks until
 // the channel is closed (ctx cancelled or error occurs).
 func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callback func(string) error) error {
-	// Python: resolved = LogRequest(inputs=inputs).resolve()
-	//         controller = LogController(resolved.vm)
-	//         if resolved.follow:
-	//             yield from controller.follow(...)
-	//         else:
-	//             yield from controller.show(...)
-	req := inputs.NewLogRequest(input, op.Services.Config, op.Connection.DB())
-	resolved, err := req.Resolve(ctx, op.Repos.VM)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.VM)
 	if err != nil {
 		return err
 	}
-
 	// Create LogController bound to the resolved VM.
-	// Python: controller = LogController(resolved.vm)
-	// Python's LogController.__init__: self._hash = vm.id if vm.id else vm.name
 	vmDir := infra.GetVMDirByID(resolved.VM.ID)
 	controller := logs.NewController(resolved.VM.ID, vmDir, resolved.VM.Name)
-
 	if resolved.Follow {
-		// Python: yield from controller.follow(...)
 		// Synchronous: read from channels until they close.
 		// Create a cancelCtx so a callback error cancels the controller
 		// goroutine — without this, the goroutine leaks when the callback
 		// returns early (see Golang CodeReviewComments: Goroutine Lifetimes).
 		followCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
-
 		lineCh, errCh := controller.FollowSync(followCtx, resolved.LogType,
 			resolved.LogFilename, resolved.SerialOutputFilename)
 		for line := range lineCh {
@@ -79,8 +56,6 @@ func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callb
 		}
 		return nil
 	}
-
-	// Python: yield from controller.show(...)
 	lines, err := controller.Show(ctx, resolved.LogType, resolved.Lines,
 		resolved.LogFilename, resolved.SerialOutputFilename)
 	if err != nil {
@@ -97,40 +72,32 @@ func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callb
 // LogStreamChannel streams log lines for a VM via a channel.
 // Provides a goroutine+channel based version for callers that want asynchronous
 // channel-based consumption rather than synchronous callback iteration.
-//
 // Returns:
-//   - lineCh: receives log lines as they arrive
-//   - errCh: receives a single runtime error (buffered, cap 1), closed on clean exit
-//   - err: setup error (e.g., VM resolution failure), nil on success
-//
+// - lineCh: receives log lines as they arrive
+// - errCh: receives a single runtime error (buffered, cap 1), closed on clean exit
+// - err: setup error (e.g., VM resolution failure), nil on success
 // For "show": goroutine reads lines, sends them to channel, closes channels when done.
 // For "follow": goroutine follows the log file, sending lines as they arrive,
 // until ctx is cancelled.
-//
 // The caller must consume from lineCh until it is closed, then check errCh
 // for any runtime error.
 func (op *Operation) LogStreamChannel(
 	ctx context.Context,
 	input inputs.LogInput,
 ) (lineCh <-chan string, errCh <-chan error, err error) {
-	req := inputs.NewLogRequest(input, op.Services.Config, op.Connection.DB())
-	resolved, err := req.Resolve(ctx, op.Repos.VM)
+	resolved, err := input.Resolve(ctx, op.Services.Config, op.Repos.VM)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	// Create LogController bound to the resolved VM.
 	vmDir := infra.GetVMDirByID(resolved.VM.ID)
 	controller := logs.NewController(resolved.VM.ID, vmDir, resolved.VM.Name)
-
 	ch := make(chan string, 100)
 	ec := make(chan error, 1)
-
 	go func() {
 		defer close(ch)
 		defer close(ec)
 		if resolved.Follow {
-			// Python: yield from controller.follow(...)
 			if err := controller.Follow(ctx, resolved.LogType, ch,
 				resolved.LogFilename, resolved.SerialOutputFilename); err != nil {
 				select {
@@ -139,7 +106,6 @@ func (op *Operation) LogStreamChannel(
 				}
 			}
 		} else {
-			// Python: yield from controller.show(...)
 			lines, showErr := controller.Show(ctx, resolved.LogType, resolved.Lines,
 				resolved.LogFilename, resolved.SerialOutputFilename)
 			if showErr != nil {
@@ -158,6 +124,5 @@ func (op *Operation) LogStreamChannel(
 			}
 		}
 	}()
-
 	return ch, ec, nil
 }

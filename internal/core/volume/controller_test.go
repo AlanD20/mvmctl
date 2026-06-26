@@ -44,7 +44,7 @@ func (w *repoWrapper) Delete(ctx context.Context, id string) error {
 	return w.Repository.Delete(ctx, id)
 }
 
-// ─── Controller.Attach ───────────────────────────────────────────────────────
+// --- Controller.Attach ---
 // Rationale: Tests attaching a volume sets VolumeStatusAttached and the vmID
 // in the repository, and re-attaching with the same vmID is idempotent.
 // Error cases: Upsert failure is propagated; context cancellation is propagated.
@@ -60,7 +60,7 @@ func TestController_Attach(t *testing.T) {
 		upsertErr error // if non-nil, repo.Upsert returns this error
 		cancelCtx bool  // if true, use cancelled context
 	}{
-		// ── Error paths ──
+		// --- Error paths ---
 		"attach_fails_on_upsert_error": {
 			pre:       func(vol *model.VolumeItem) { vol.Status = model.VolumeStatusAvailable },
 			vmID:      "vm-123",
@@ -75,7 +75,7 @@ func TestController_Attach(t *testing.T) {
 			wantErr:   true,
 			cancelCtx: true,
 		},
-		// ── Success paths ──
+		// --- Success paths ---
 		"attaches_volume": {
 			pre:  func(vol *model.VolumeItem) { vol.Status = model.VolumeStatusAvailable },
 			vmID: "vm-123",
@@ -174,7 +174,7 @@ func TestController_Attach(t *testing.T) {
 	}
 }
 
-// ─── Controller.Detach ───────────────────────────────────────────────────────
+// --- Controller.Detach ---
 // Rationale: Tests detaching a volume sets VolumeStatusAvailable and clears
 // vmID in the repository. Detaching an already-available volume is idempotent.
 // Error cases: Upsert failure is propagated; context cancellation is propagated.
@@ -190,7 +190,7 @@ func TestController_Detach(t *testing.T) {
 		upsertErr error // if non-nil, repo.Upsert returns this error
 		cancelCtx bool  // if true, use cancelled context
 	}{
-		// ── Error paths ──
+		// --- Error paths ---
 		"detach_fails_on_upsert_error": {
 			pre:       func(vol *model.VolumeItem) { vol.Status = model.VolumeStatusAttached; vol.VMID = ptr.Ptr("vm-456") },
 			want:      model.VolumeStatusAttached, // unchanged
@@ -205,7 +205,7 @@ func TestController_Detach(t *testing.T) {
 			wantErr:   true,
 			cancelCtx: true,
 		},
-		// ── Success paths ──
+		// --- Success paths ---
 		"detaches_volume": {
 			pre:     func(vol *model.VolumeItem) { vol.Status = model.VolumeStatusAttached; vol.VMID = ptr.Ptr("vm-456") },
 			want:    model.VolumeStatusAvailable,

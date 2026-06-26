@@ -15,7 +15,7 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ─── MockVMAPI ─────────────────────────────────────────────────────────────────
+// --- MockVMAPI ---
 // Rationale: MockVMAPI implements api.VMAPI for testing. These tests verify the
 // mock's two behaviors: (1) when no function field is set, the method returns
 // nil/zero; (2) when a function field is set, the method routes to it and
@@ -49,9 +49,9 @@ func TestMockVMAPI_DefaultReturnsNil(t *testing.T) {
 
 func TestMockVMAPI_CustomFunc(t *testing.T) {
 	t.Run("VMCreate_custom_func", func(t *testing.T) {
-		expected := []*model.VM{{ID: "vm-1", Name: "test"}}
+		expected := []*model.VMItem{{ID: "vm-1", Name: "test"}}
 		m := &testutil.MockVMAPI{
-			VMCreateFunc: func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VM, error) {
+			VMCreateFunc: func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VMItem, error) {
 				return expected, nil
 			},
 		}

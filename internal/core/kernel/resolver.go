@@ -16,7 +16,6 @@ import (
 )
 
 // RELATIONS defines the cross-domain relations for kernel enrichment.
-// Matches Python's Resolver.RELATIONS.
 var RELATIONS = map[string]model.RelationSpec{
 	"vm": {
 		FKField:      "id",
@@ -28,7 +27,6 @@ var RELATIONS = map[string]model.RelationSpec{
 	},
 }
 
-// ResolveResult matches Python's ResolveResult dataclass.
 type ResolveResult struct {
 	Items    []*model.KernelItem
 	Errors   []string
@@ -39,7 +37,6 @@ type ResolveResult struct {
 // Set by the API layer during wiring to avoid circular imports.
 type EnrichFunc func(ctx context.Context, kernels []*model.KernelItem, include []string, relations map[string]model.RelationSpec)
 
-// Resolver matches Python's Resolver with all resolution methods.
 type Resolver struct {
 	repo       Repository
 	include    []string
@@ -47,7 +44,6 @@ type Resolver struct {
 }
 
 // NewResolver creates a new Resolver.
-// Matches Python's Resolver.__init__().
 func NewResolver(repo Repository, include []string) *Resolver {
 	return &Resolver{
 		repo:    repo,
@@ -67,7 +63,6 @@ func (r *Resolver) SetInclude(include []string) {
 }
 
 // Enrich enriches kernels with relations if include is set.
-// Matches Python's Resolver.enrich().
 func (r *Resolver) Enrich(ctx context.Context, kernels []*model.KernelItem) []*model.KernelItem {
 	if r.include != nil && len(kernels) > 0 && r.enrichFunc != nil {
 		r.enrichFunc(ctx, kernels, r.include, RELATIONS)
@@ -76,7 +71,6 @@ func (r *Resolver) Enrich(ctx context.Context, kernels []*model.KernelItem) []*m
 }
 
 // ByID resolves a kernel by ID prefix.
-// Matches Python's Resolver.by_id().
 func (r *Resolver) ByID(ctx context.Context, kernelID string) (*model.KernelItem, error) {
 	matches, err := r.repo.FindByPrefix(ctx, kernelID)
 	if err != nil {
@@ -101,7 +95,6 @@ func (r *Resolver) ByID(ctx context.Context, kernelID string) (*model.KernelItem
 }
 
 // ByVersionType resolves by version and type (both required).
-// Matches Python's Resolver.by_version_type().
 func (r *Resolver) ByVersionType(ctx context.Context, version, kernelType string) (*model.KernelItem, error) {
 	k, err := r.repo.GetByVersionAndType(ctx, version, kernelType)
 	if err != nil {
@@ -126,7 +119,6 @@ func (r *Resolver) ByNameVersion(ctx context.Context, name, ver string) (*model.
 }
 
 // ByType resolves by kernel type name.
-// Matches Python's Resolver.by_type().
 func (r *Resolver) ByType(ctx context.Context, typeStr string) (*model.KernelItem, error) {
 	k, err := r.repo.GetByType(ctx, typeStr)
 	if err != nil {
@@ -144,7 +136,6 @@ func (r *Resolver) ByType(ctx context.Context, typeStr string) (*model.KernelIte
 }
 
 // GetDefault resolves the default kernel, or nil if not set.
-// Matches Python's Resolver.get_default().
 func (r *Resolver) GetDefault(ctx context.Context) (*model.KernelItem, error) {
 	k, err := r.repo.GetDefault(ctx)
 	if err != nil {
@@ -158,7 +149,6 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.KernelItem, error) {
 }
 
 // Resolve resolves a kernel by ID prefix, "[type:]version" selector, or file path.
-// Matches Python's Resolver.resolve().
 func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem, error) {
 	// Try "name:version" selector format first (matches binary resolver pattern)
 	name, ver := version.ParseSelector(value)
@@ -167,7 +157,6 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 	}
 
 	// Fast-path: absolute path -> skip DB queries entirely.
-	// Python: path = Path(value).expanduser() — expand ~ before checking existence.
 	if strings.HasPrefix(value, "/") {
 		path := system.ExpandTilde(value)
 		if _, err := os.Stat(path); err == nil {
@@ -180,7 +169,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 		)
 	}
 
-	// Try by ID prefix without enrichment (matching Python's resolve flow)
+	// Try by ID prefix without enrichment
 	k, err := r.byIDRaw(ctx, value)
 	if err == nil && k != nil {
 		return r.Enrich(ctx, []*model.KernelItem{k})[0], nil
@@ -193,7 +182,6 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 	}
 
 	// Fallback: treat value as a filesystem path to a vmlinux binary.
-	// Python: path = Path(value); if path.exists() — does NOT expand ~ here.
 	if _, err := os.Stat(value); err == nil {
 		return r.ItemFromPath(value), nil
 	}
@@ -206,7 +194,6 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 }
 
 // ResolveMany resolves multiple kernel identifiers.
-// Matches Python's Resolver.resolve_many().
 func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
 	// Dedup input identifiers (e.g. duplicate CLI args) before processing.
 	uniqueIDs := infra.Dedup(identifiers)
@@ -242,10 +229,8 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 }
 
 // ItemFromPath constructs a KernelItem from an existing file path.
-// Matches Python's Resolver._item_from_path().
-// Python: pathlib.Path.expanduser().resolve() — expands ~ AND resolves symlinks.
 func (r *Resolver) ItemFromPath(path string) *model.KernelItem {
-	// Expand ~ AND resolve symlinks (matching Python's .expanduser().resolve())
+	// Expand ~ AND resolve symlinks
 	path = system.ExpandTilde(path)
 	if resolved, err := filepath.EvalSymlinks(path); err == nil {
 		path = resolved

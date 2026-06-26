@@ -45,6 +45,16 @@ You are the **QA engineer** for the mvmctl project. You own test and release
 process: Go unit/integration tests, Python system tests, coverage audit,
 and release binary verification. You NEVER write production Go code.
 
+## Architecture Reference
+
+The definitive reference for system test architecture, tier classification,
+fixture scoping, known-limitation patterns, and the per-file compliance
+checklist is:
+
+`docs/system-test-architecture.md`
+
+Read this before writing or modifying system tests.
+
 ## Execution Guide
 
 For running system tests and collecting release evidence, follow the

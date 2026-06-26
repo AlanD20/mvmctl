@@ -12,26 +12,22 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// Pre-compiled regexes — Python caches them at module level, so Go should too.
-// (Deviation fix: adds sync.Once compilation caching for all regex operations.)
+// Pre-compiled regexes — compiled at package init via regexp.MustCompile.
 var (
-	// Valid boot arg component pattern (Python: re.search(r"[\s;|&$`\\\"']", value))
+	// Valid boot arg component pattern matches shell metacharacters.
 	// Uses raw string with concatenation for the backtick, then adds \"'] literally.
-	// In raw strings `...`, \" is \ (write once) followed by " — correct for regex char class.
 	validBootArgComponentRegex = regexp.MustCompile(`[\s;|&$` + "`" + `\\\"']`)
-	// Valid UUID pattern (Python: uuid_pattern.match(...)) — anchored at START only.
-	// Python uses re.match() which anchors at the start, but does NOT anchor at the end.
-	// This means "valid-uuid-here-extra-chars" passes Python but would fail ^...$.
-	// We match Python's behavior exactly: start-only anchor.
+	// Valid UUID pattern — anchored at start only (not anchored at end).
+	// Deliberately lenient: extra trailing characters do not cause rejection.
 	validUUIDRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
-	// Valid interface/bridge name pattern (Python: re.match(r"^[a-z0-9_-]+$", ...))
+	// Valid interface/bridge name pattern — lowercase alphanumeric, hyphens, underscores.
 	validInterfaceNameRegex = regexp.MustCompile(`^[a-z0-9_-]+$`)
 )
 
-// ── Valid SSH username regex (Python: ^[a-z_][a-z0-9_-]*$) ──
+// --- Valid SSH username regex ---
 var validSSHUsernameRegex = regexp.MustCompile(`^[a-z_][a-z0-9_-]*$`)
 
-// ── MAC address strict regex ──
+// --- MAC address strict regex ---
 var ValidMACRegex = regexp.MustCompile(`^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$`)
 
 // ValidSemverRegex matches semver-like version strings (e.g. "1.15" or "1.15.0").
@@ -41,22 +37,18 @@ var ValidSemverRegex = regexp.MustCompile(`^\d+\.\d+(\.\d+)?$`)
 // Linux IFNAMSIZ limit for interface names
 const ifnamSiz = 15
 
-// ── Reserved interface names ──
+// --- Reserved interface names ---
 var ReservedInterfaces = map[string]bool{
 	"lo": true, "eth0": true, "eth1": true,
 	"wlan0": true, "virbr0": true, "docker0": true,
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Name validation (Python: CommonUtils.validate_entity_name)
-// ══════════════════════════════════════════════════════════════════════════════
+// --- Name validation ---
 
-// validNameRegex matches Python's ^[a-z0-9][a-z0-9._-]{0,62}$
 var validNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
 
 // EntityName validates any entity name (VM, network, image, kernel, key, binary).
-// Matches Python's CommonUtils.validate_entity_name().
-// Returns *errs.DomainError matching Python's MVMError pattern.
+// Returns *errs.DomainError on validation failure.
 func EntityName(name, entityType string, maxLength int) error {
 	if maxLength <= 0 {
 		maxLength = 63
@@ -113,17 +105,13 @@ func EntityName(name, entityType string, maxLength int) error {
 	return nil
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CIDR / IP / Port validation
-// ══════════════════════════════════════════════════════════════════════════════
+// --- CIDR / IP / Port validation ---
 
 func IsIPAddress(s string) bool {
 	return net.ParseIP(s) != nil
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// IPv4 address validation (matching Python's NetworkValidator.validate_ipv4_address)
-// ══════════════════════════════════════════════════════════════════════════════
+// --- IPv4 address validation ---
 
 func IPv4Address(ip string, fieldName string, requirePrivate bool, subnet string, gateway string) error {
 	if fieldName == "" {
@@ -178,29 +166,19 @@ func IPv4Address(ip string, fieldName string, requirePrivate bool, subnet string
 	return nil
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// KeyValidator (Python: KeyValidator)
-// ══════════════════════════════════════════════════════════════════════════════
+// --- Key validation ---
 
 func KeyName(name string) error {
 	return EntityName(name, "key", 63)
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// VolumeValidator (Python: VolumeValidator)
-// ══════════════════════════════════════════════════════════════════════════════
+// --- Volume validation ---
 
 func VolumeName(name string) error {
 	return EntityName(name, "volume", 63)
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CoerceBool helper
-// ══════════════════════════════════════════════════════════════════════════════
-
-// ══════════════════════════════════════════════════════════════════════════════
-// Network validation (Python: NetworkValidator)
-// ══════════════════════════════════════════════════════════════════════════════
+// --- Network validation ---
 
 func NetworkName(name string) error {
 	// Apply common entity name validation first (uses max_length=31 for networks)
@@ -260,8 +238,7 @@ func Subnet(subnet string) (string, error) {
 			subnet,
 		))
 	}
-	// Python uses strict=False in validate_subnet, so host bits are accepted.
-	// net.ParseCIDR already strips/zeroes host bits, so we just return the
+	// net.ParseCIDR strips/zeroes host bits, so we just return the
 	// normalized network address (e.g. "10.0.0.0/24" for "10.0.0.1/24").
 	return ipnet.String(), nil
 }
@@ -411,7 +388,6 @@ func ipCmp(a, b net.IP) int {
 }
 
 // cidrsOverlap returns true if two IPv4 CIDR ranges overlap.
-// Python's ipaddress.IPv4Network.overlaps() uses proper range comparison.
 func cidrsOverlap(a, b *net.IPNet) bool {
 	aFirst, aLast := networkRange(a)
 	bFirst, bLast := networkRange(b)
@@ -432,8 +408,7 @@ func SubnetNoOverlap(subnet string, existingSubnets []string) error {
 	if err != nil {
 		return errs.New(errs.CodeValidationFailed, fmt.Sprintf("invalid subnet: %v", err))
 	}
-	// Python uses strict=True in subnet overlap check, which rejects host bits.
-	// net.ParseCIDR strips host bits, so we must check if the input had host bits set.
+	// net.ParseCIDR strips host bits, so check if the input had host bits set separately.
 	// Parse the IP portion separately to compare with normalized network address.
 	parts := strings.SplitN(subnet, "/", 2)
 	inputIP := net.ParseIP(parts[0])
@@ -458,9 +433,7 @@ func SubnetNoOverlap(subnet string, existingSubnets []string) error {
 	return nil
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// VMValidator (Python: VMValidator)
-// ══════════════════════════════════════════════════════════════════════════════
+// --- VM validation ---
 
 func VMName(name string) error {
 	return EntityName(name, "VM", 63)
@@ -515,8 +488,7 @@ func BootArgs(bootArgs, rootUUID, guestIP string) []string {
 				}
 			}
 		}
-		// Also check root UUID format if present
-		// Python: uuid_pattern.match(root_uuid) — anchored at start only (no $).
+		// Root UUID check uses start-only anchor (not full match).
 		if strings.Contains(bootArgs, "root_uuid") && rootUUID != "" {
 			if !validUUIDRegex.MatchString(rootUUID) {
 				errors = append(errors, fmt.Sprintf("invalid root UUID format: %s", rootUUID))
@@ -526,12 +498,10 @@ func BootArgs(bootArgs, rootUUID, guestIP string) []string {
 	return errors
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// Port range parsing (migrated from host domain — verdict #33)
-// ══════════════════════════════════════════════════════════════════════════════
+// --- Port range parsing ---
 
 // ParsePortRange parses an "low,high" port range string.
-// On parse failure, returns a default range silently (matching Python's try/except pass).
+// On parse failure, returns a default range silently.
 // NOTE: There's a duplicate copy in pkg/api/host.go:1106 — if modifying, update both.
 func ParsePortRange(s string) [2]int {
 	var low, high int
@@ -555,7 +525,7 @@ func IsDigits(s string) bool {
 	return len(s) > 0
 }
 
-// ToInt coerces a value to int, matching Python's int() behavior.
+// ToInt coerces a value to int.
 // Returns an error if the value is not a numeric type or is nil.
 func ToInt(v any) (int, error) {
 	switch n := v.(type) {

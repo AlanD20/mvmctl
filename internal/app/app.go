@@ -10,6 +10,7 @@ import (
 
 	"mvmctl/internal/core/config"
 	"mvmctl/internal/infra"
+	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/db"
 	"mvmctl/internal/lib/download"
 	libversion "mvmctl/internal/lib/version"
@@ -31,7 +32,7 @@ func isDBSkipCommand(args []string) bool {
 	return false
 }
 
-// ── Initialize ────────────────────────────────────────────────────────────────
+// --- Initialize ---
 
 // Initialize sets up the application (cache dir, DB, migrations) and returns the
 // Operation API handle and a cleanup function. For "mvm run <service>" commands,
@@ -42,10 +43,8 @@ func Initialize(ctx context.Context) (op *api.Operation, cleanup func(), err err
 		return nil, nil, nil
 	}
 
-	// Logging and debug mode are set up later via cli/root.go's PersistentPreRunE,
-	// matching Python's app() which calls set_debug_mode(debug) and
-	// setup_logging(verbose, debug) inside the Click group callback — NOT at
-	// import time or before CLI wiring.
+	// Logging and debug mode are set up later via cli/root.go's PersistentPreRunE —
+	// NOT at import time or before CLI wiring.
 
 	cacheDir, err := infra.GetCacheDir()
 	if err != nil {
@@ -55,8 +54,7 @@ func Initialize(ctx context.Context) (op *api.Operation, cleanup func(), err err
 		os.Exit(1)
 	}
 
-	// Python: Check DB exists before non-exempt commands — matching app() callback.
-	// Python: if not CacheUtils.get_mvm_db_path().exists(): click.echo("Error: ...", err=True); ctx.exit(1)
+	// Check DB exists before non-exempt commands.
 	dbPath := filepath.Join(cacheDir, infra.MVMDBFilename)
 	if !isDBSkipCommand(os.Args) {
 		if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -87,12 +85,12 @@ func Initialize(ctx context.Context) (op *api.Operation, cleanup func(), err err
 		}
 	}
 
-	// Set HTTP User-Agent matching Python's HTTP_USER_AGENT = f"{CLI_NAME}/{_resolve_version()}".
+	// Set HTTP User-Agent.
 	download.SetUserAgent(libversion.GetVersion(ctx))
 
 	op = api.NewOperation(ctx, database, cacheDir)
 	config.InitSettings()
-	infra.SetTimingEnabled(os.Getenv("MVM_TIMING_ENABLED") == "1")
+	timinglog.SetTimingEnabled(os.Getenv("MVM_TIMING_ENABLED") == "1")
 
 	cleanupFunc := func() { database.Close() }
 

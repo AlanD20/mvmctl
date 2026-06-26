@@ -1,4 +1,4 @@
-// Package cli — VM log viewing commands, matching Python's cli/logs.py
+// Package cli — VM log viewing commands
 package cli
 
 import (
@@ -27,19 +27,19 @@ By default shows the boot log (serial console output).
 Use --os to show the Firecracker process log.`,
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Python: no_args_is_help=True — show help when no args given, not an error
+			// Show help when no args given, not an error
 			if len(args) == 0 {
 				return cmd.Help()
 			}
 			identifier := args[0]
 
-			// inputs.LogInput uses *int for Lines (nil = use default from config)
+			// LogInput uses *int for Lines (nil = use default from config)
 			var lines *int
 			if cmd.Flags().Changed("lines") {
 				lines = &rawLines
 			}
 
-			// inputs.LogInput uses *bool for Follow (nil = use default from config)
+			// LogInput uses *bool for Follow (nil = use default from config)
 			var followPtr *bool
 			if cmd.Flags().Changed("follow") {
 				followPtr = &follow
@@ -52,17 +52,14 @@ Use --os to show the Firecracker process log.`,
 				Follow:     followPtr,
 			}
 
-			// Python: for line in LogOperation.stream(inputs): print(line)
-			// Go:     LogOperation.Stream(ctx, input, func(line) { fmt.Println(line) })
+			// LogOperation.Stream(ctx, input, callback) — callback receives each line.
 			err := logsAPI.LogStream(cmd.Context(), input, func(line string) error {
 				fmt.Println(line)
 				return nil
 			})
 			if err != nil {
-				// Python: any exception propagates to @handle_errors which calls
-				// mvm_cli.error(str(e)) and exits 1. In Go, with SilenceErrors=true
-				// on the root command, the error is silently swallowed. We must
-				// print it before returning to match Python's behavior.
+				// With SilenceErrors=true on the root command, the error is silently
+				// swallowed. Print it before returning.
 				common.Cli.Error(err.Error())
 				return err
 			}

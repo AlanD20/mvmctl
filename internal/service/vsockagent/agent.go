@@ -59,13 +59,15 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 
 		wg.Go(func() {
-			defer wg.Done()
+			// NOTE: wg.Go() already handles wg.Add(1) before the goroutine
+			// and wg.Done() via defer after f() returns. Do NOT call
+			// defer wg.Done() here — that would double-decrement.
 			a.handleConnection(ctx, conn)
 		})
 	}
 }
 
-// ── vsock types ──────────────────────────────────────────────────────
+// --- vsock types ---
 
 // vsockListener implements net.Listener for AF_VSOCK sockets (Firecracker vsock).
 type vsockListener struct {

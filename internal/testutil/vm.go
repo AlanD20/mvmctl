@@ -11,14 +11,14 @@ import (
 // In-memory VM repository for testing.
 type VMRepo struct {
 	mu  sync.RWMutex
-	vms map[string]*model.VM
+	vms map[string]*model.VMItem
 }
 
 func NewVMRepo() *VMRepo {
-	return &VMRepo{vms: make(map[string]*model.VM)}
+	return &VMRepo{vms: make(map[string]*model.VMItem)}
 }
 
-func (r *VMRepo) Get(_ context.Context, id string) (*model.VM, error) {
+func (r *VMRepo) Get(_ context.Context, id string) (*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	v, ok := r.vms[id]
@@ -28,7 +28,7 @@ func (r *VMRepo) Get(_ context.Context, id string) (*model.VM, error) {
 	return v, nil
 }
 
-func (r *VMRepo) GetByName(_ context.Context, name string) (*model.VM, error) {
+func (r *VMRepo) GetByName(_ context.Context, name string) (*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, v := range r.vms {
@@ -54,7 +54,7 @@ func (r *VMRepo) NamesExist(_ context.Context, names []string) ([]string, error)
 	return result, nil
 }
 
-func (r *VMRepo) FindByIP(_ context.Context, ipv4 string) (*model.VM, error) {
+func (r *VMRepo) FindByIP(_ context.Context, ipv4 string) (*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, v := range r.vms {
@@ -65,7 +65,7 @@ func (r *VMRepo) FindByIP(_ context.Context, ipv4 string) (*model.VM, error) {
 	return nil, nil
 }
 
-func (r *VMRepo) FindByMAC(_ context.Context, mac string) (*model.VM, error) {
+func (r *VMRepo) FindByMAC(_ context.Context, mac string) (*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, v := range r.vms {
@@ -76,10 +76,10 @@ func (r *VMRepo) FindByMAC(_ context.Context, mac string) (*model.VM, error) {
 	return nil, nil
 }
 
-func (r *VMRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.VM, error) {
+func (r *VMRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if len(v.ID) >= len(prefix) && v.ID[:len(prefix)] == prefix {
 			result = append(result, v)
@@ -113,10 +113,10 @@ func (r *VMRepo) CountByStatus(_ context.Context, statuses ...string) (int, erro
 	return count, nil
 }
 
-func (r *VMRepo) FindByNetworkID(_ context.Context, networkID string) ([]*model.VM, error) {
+func (r *VMRepo) FindByNetworkID(_ context.Context, networkID string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if v.NetworkID == networkID {
 			result = append(result, v)
@@ -125,14 +125,14 @@ func (r *VMRepo) FindByNetworkID(_ context.Context, networkID string) ([]*model.
 	return result, nil
 }
 
-func (r *VMRepo) GetByNetworkIDs(_ context.Context, networkIDs []string) ([]*model.VM, error) {
+func (r *VMRepo) GetByNetworkIDs(_ context.Context, networkIDs []string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	set := make(map[string]bool)
 	for _, id := range networkIDs {
 		set[id] = true
 	}
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if set[v.NetworkID] {
 			result = append(result, v)
@@ -141,10 +141,10 @@ func (r *VMRepo) GetByNetworkIDs(_ context.Context, networkIDs []string) ([]*mod
 	return result, nil
 }
 
-func (r *VMRepo) FindByKernelID(_ context.Context, kernelID string) ([]*model.VM, error) {
+func (r *VMRepo) FindByKernelID(_ context.Context, kernelID string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if v.KernelID == kernelID {
 			result = append(result, v)
@@ -153,14 +153,14 @@ func (r *VMRepo) FindByKernelID(_ context.Context, kernelID string) ([]*model.VM
 	return result, nil
 }
 
-func (r *VMRepo) GetByKernelIDs(_ context.Context, kernelIDs []string) ([]*model.VM, error) {
+func (r *VMRepo) GetByKernelIDs(_ context.Context, kernelIDs []string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	set := make(map[string]bool)
 	for _, id := range kernelIDs {
 		set[id] = true
 	}
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if set[v.KernelID] {
 			result = append(result, v)
@@ -169,10 +169,10 @@ func (r *VMRepo) GetByKernelIDs(_ context.Context, kernelIDs []string) ([]*model
 	return result, nil
 }
 
-func (r *VMRepo) FindByBinaryID(_ context.Context, binaryID string) ([]*model.VM, error) {
+func (r *VMRepo) FindByBinaryID(_ context.Context, binaryID string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if v.BinaryID == binaryID {
 			result = append(result, v)
@@ -181,14 +181,14 @@ func (r *VMRepo) FindByBinaryID(_ context.Context, binaryID string) ([]*model.VM
 	return result, nil
 }
 
-func (r *VMRepo) GetByBinaryIDs(_ context.Context, binaryIDs []string) ([]*model.VM, error) {
+func (r *VMRepo) GetByBinaryIDs(_ context.Context, binaryIDs []string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	set := make(map[string]bool)
 	for _, id := range binaryIDs {
 		set[id] = true
 	}
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if set[v.BinaryID] {
 			result = append(result, v)
@@ -197,10 +197,10 @@ func (r *VMRepo) GetByBinaryIDs(_ context.Context, binaryIDs []string) ([]*model
 	return result, nil
 }
 
-func (r *VMRepo) FindByImageID(_ context.Context, imageID string) ([]*model.VM, error) {
+func (r *VMRepo) FindByImageID(_ context.Context, imageID string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if v.ImageID == imageID {
 			result = append(result, v)
@@ -209,14 +209,14 @@ func (r *VMRepo) FindByImageID(_ context.Context, imageID string) ([]*model.VM, 
 	return result, nil
 }
 
-func (r *VMRepo) GetByImageIDs(_ context.Context, imageIDs []string) ([]*model.VM, error) {
+func (r *VMRepo) GetByImageIDs(_ context.Context, imageIDs []string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	set := make(map[string]bool)
 	for _, id := range imageIDs {
 		set[id] = true
 	}
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if set[v.ImageID] {
 			result = append(result, v)
@@ -225,10 +225,10 @@ func (r *VMRepo) GetByImageIDs(_ context.Context, imageIDs []string) ([]*model.V
 	return result, nil
 }
 
-func (r *VMRepo) FindByVolumeID(_ context.Context, volumeID string) ([]*model.VM, error) {
+func (r *VMRepo) FindByVolumeID(_ context.Context, volumeID string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		for _, vid := range v.VolumeIDs {
 			if vid == volumeID {
@@ -240,7 +240,7 @@ func (r *VMRepo) FindByVolumeID(_ context.Context, volumeID string) ([]*model.VM
 	return result, nil
 }
 
-func (r *VMRepo) FindByVolumeIDsBatch(_ context.Context, volumeIDs []string) ([]*model.VM, error) {
+func (r *VMRepo) FindByVolumeIDsBatch(_ context.Context, volumeIDs []string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	set := make(map[string]bool)
@@ -248,7 +248,7 @@ func (r *VMRepo) FindByVolumeIDsBatch(_ context.Context, volumeIDs []string) ([]
 		set[vid] = true
 	}
 	seen := make(map[string]bool)
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		for _, vid := range v.VolumeIDs {
 			if set[vid] {
@@ -263,10 +263,10 @@ func (r *VMRepo) FindByVolumeIDsBatch(_ context.Context, volumeIDs []string) ([]
 	return result, nil
 }
 
-func (r *VMRepo) FindBySSHKeyID(_ context.Context, keyID string) ([]*model.VM, error) {
+func (r *VMRepo) FindBySSHKeyID(_ context.Context, keyID string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		for _, k := range v.SSHKeys {
 			if k == keyID {
@@ -278,17 +278,17 @@ func (r *VMRepo) FindBySSHKeyID(_ context.Context, keyID string) ([]*model.VM, e
 	return result, nil
 }
 
-func (r *VMRepo) ListAll(_ context.Context) ([]*model.VM, error) {
+func (r *VMRepo) ListAll(_ context.Context) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	result := make([]*model.VM, 0, len(r.vms))
+	result := make([]*model.VMItem, 0, len(r.vms))
 	for _, v := range r.vms {
 		result = append(result, v)
 	}
 	return result, nil
 }
 
-func (r *VMRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*model.VM, error) {
+func (r *VMRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if len(statuses) == 0 {
@@ -298,7 +298,7 @@ func (r *VMRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*model
 	for _, s := range statuses {
 		set[s] = true
 	}
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if set[string(v.Status)] {
 			result = append(result, v)
@@ -307,7 +307,7 @@ func (r *VMRepo) ListByStatus(ctx context.Context, statuses ...string) ([]*model
 	return result, nil
 }
 
-func (r *VMRepo) ListExcludingStatuses(ctx context.Context, excluded ...string) ([]*model.VM, error) {
+func (r *VMRepo) ListExcludingStatuses(ctx context.Context, excluded ...string) ([]*model.VMItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if len(excluded) == 0 {
@@ -317,7 +317,7 @@ func (r *VMRepo) ListExcludingStatuses(ctx context.Context, excluded ...string) 
 	for _, s := range excluded {
 		set[s] = true
 	}
-	var result []*model.VM
+	var result []*model.VMItem
 	for _, v := range r.vms {
 		if !set[string(v.Status)] {
 			result = append(result, v)
@@ -326,7 +326,7 @@ func (r *VMRepo) ListExcludingStatuses(ctx context.Context, excluded ...string) 
 	return result, nil
 }
 
-func (r *VMRepo) Upsert(_ context.Context, v *model.VM) error {
+func (r *VMRepo) Upsert(_ context.Context, v *model.VMItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.vms[v.ID] = v

@@ -1,3 +1,5 @@
+// Package binary provides Firecracker/jailer binary version management.
+// Layer: Core domain — never imports other core/* packages.
 package binary
 
 import (
@@ -6,7 +8,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// Controller matches Python's BinaryController.
+// Controller binds a resolved binary item to its repository for state management.
 type Controller struct {
 	binary *model.BinaryItem
 	repo   Repository
@@ -24,5 +26,5 @@ func (c *Controller) Get() *model.BinaryItem {
 
 // SetDefault sets this binary as default (clears others with same name).
 func (c *Controller) SetDefault(ctx context.Context) error {
-	return c.repo.SetDefault(ctx, c.binary.Type, c.binary.Version, c.binary.Path)
+	return c.repo.SetDefault(ctx, c.binary.Type, c.binary.ID)
 }

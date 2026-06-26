@@ -11,8 +11,8 @@ import (
 	"mvmctl/internal/testutil"
 )
 
-func newNetwork(id, name, subnet string) *model.Network {
-	return &model.Network{
+func newNetwork(id, name, subnet string) *model.NetworkItem {
+	return &model.NetworkItem{
 		ID:        id,
 		Name:      name,
 		Subnet:    subnet,
@@ -21,12 +21,12 @@ func newNetwork(id, name, subnet string) *model.Network {
 	}
 }
 
-func seedNet(t *testing.T, repo *testutil.NetworkRepo, n *model.Network) {
+func seedNet(t *testing.T, repo *testutil.NetworkRepo, n *model.NetworkItem) {
 	t.Helper()
 	require.NoError(t, repo.Upsert(ctx, n))
 }
 
-// ─── CRUD ────────────────────────────────────────────────────────────────────
+// --- CRUD ---
 
 func TestNetworkRepo_Get(t *testing.T) {
 	repo := testutil.NewNetworkRepo()
@@ -101,7 +101,7 @@ func TestNetworkRepo_HardDelete(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-// ─── Default tracking ────────────────────────────────────────────────────────
+// --- Default tracking ---
 
 func TestNetworkRepo_Default(t *testing.T) {
 	repo := testutil.NewNetworkRepo()
@@ -138,7 +138,7 @@ func TestNetworkRepo_Default(t *testing.T) {
 	})
 }
 
-// ─── Listing ─────────────────────────────────────────────────────────────────
+// --- Listing ---
 
 func TestNetworkRepo_ListAll(t *testing.T) {
 	repo := testutil.NewNetworkRepo()
@@ -179,7 +179,7 @@ func mustNetCount(repo *testutil.NetworkRepo) int {
 	return n
 }
 
-// ─── Mutations ───────────────────────────────────────────────────────────────
+// --- Mutations ---
 
 func TestNetworkRepo_UpdateBridgeActive(t *testing.T) {
 	repo := testutil.NewNetworkRepo()
@@ -205,7 +205,7 @@ func TestNetworkRepo_UpdateManyIsPresent(t *testing.T) {
 	assert.Nil(t, n1, "isPresent=false should make Get return nil")
 }
 
-// ─── Edge cases ──────────────────────────────────────────────────────────────
+// --- Edge cases ---
 
 func TestNetworkRepo_FindByPrefix(t *testing.T) {
 	repo := testutil.NewNetworkRepo()

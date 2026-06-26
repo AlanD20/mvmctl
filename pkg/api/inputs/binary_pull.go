@@ -1,17 +1,12 @@
 package inputs
 
 import (
-	"context"
-	"strings"
-
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/errs"
-
-	"github.com/jmoiron/sqlx"
+	"strings"
 )
 
-// BinaryPullInput is the raw input for pulling a firecracker binary.
-// Matches Python's BinaryPullInput dataclass exactly:
+// BinaryPullInput holds options for pulling a Firecracker binary.
 type BinaryPullInput struct {
 	Version          string  `json:"version"           yaml:"version"`
 	Type             string  `json:"type"              yaml:"type"`
@@ -20,7 +15,7 @@ type BinaryPullInput struct {
 	DownloadOverride bool    `json:"force"             yaml:"force"`
 }
 
-// ResolvedBinaryPullInput matches Python's ResolvedBinaryPullInput (frozen dataclass).
+// ResolvedBinaryPullInput specifies resolved binary pull input.
 type ResolvedBinaryPullInput struct {
 	Version          string
 	Type             string
@@ -30,73 +25,45 @@ type ResolvedBinaryPullInput struct {
 	DownloadOverride bool
 }
 
-// BinaryPullRequest matches Python's BinaryPullRequest.
-type BinaryPullRequest struct {
-	db     *sqlx.DB
-	input  BinaryPullInput
-	result *ResolvedBinaryPullInput
-}
-
-// NewBinaryPullRequest creates a new BinaryPullRequest.
-func NewBinaryPullRequest(inputs BinaryPullInput, db *sqlx.DB) *BinaryPullRequest {
-	return &BinaryPullRequest{
-		db:    db,
-		input: inputs,
+// Validate checks that the binary pull input is valid.
+func (i *BinaryPullInput) Validate() error {
+	if i.Type != "" && strings.ToLower(i.Type) != "firecracker" {
+		return errs.New(
+			errs.CodeBinaryPullFailed,
+			"Unsupported binary: '"+i.Type+"'. Only 'firecracker' is supported for download or build.",
+		)
 	}
+	return nil
 }
 
-// Result returns the resolved input, or nil if resolve() has not been called.
-
-// Resolve resolves and validates pull inputs.
-// Matches Python's BinaryPullRequest.resolve() exactly.
-func (r *BinaryPullRequest) Resolve(ctx context.Context) (*ResolvedBinaryPullInput, error) {
-	// Normalize version (strip 'v' prefix) — Python: version = self._inputs.version.removeprefix("v")
-	version := strings.TrimPrefix(r.input.Version, "v")
-
+// Resolve resolves and validates pull inputs, returning a ResolvedBinaryPullInput.
+func (i *BinaryPullInput) Resolve() (*ResolvedBinaryPullInput, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	// Normalize version (strip 'v' prefix).
+	version := strings.TrimPrefix(i.Version, "v")
 	// Version validation is handled by the service's ResolveVersion method,
 	// which accepts latest, partial (e.g. "1.15"), and exact (e.g. "1.15.1") specs.
 	// When git_ref is provided, version may be empty.
-
 	// Default type to "firecracker"
-	typ := r.input.Type
+	typ := i.Type
 	if typ == "" {
 		typ = "firecracker"
 	}
-
-	r.result = &ResolvedBinaryPullInput{
-		Version:          version,
-		Type:             typ,
-		GitRef:           r.input.GitRef,
-		SetDefault:       r.input.SetDefault,
-		BinDir:           infra.GetBinDir(),
-		DownloadOverride: r.input.DownloadOverride,
-	}
-
-	// Validate
-	if err := r.ensureValidate(); err != nil {
-		return nil, err
-	}
-
-	return r.result, nil
-}
-
-func (r *BinaryPullRequest) ensureValidate() error {
-	if r.result == nil {
-		return errs.New(errs.CodeBinaryNotFound, "No resolved pull input to validate")
-	}
-
-	// Validate binary type — only firecracker is supported for pull/build
-	if strings.ToLower(r.result.Type) != "firecracker" {
-		return errs.New(
-			errs.CodeBinaryNotFound,
-			"Unsupported binary: '"+r.result.Type+"'. Only 'firecracker' is supported for download or build.",
+	// Validate resolved type
+	if strings.ToLower(typ) != "firecracker" {
+		return nil, errs.New(
+			errs.CodeBinaryPullFailed,
+			"Unsupported binary: '"+typ+"'. Only 'firecracker' is supported for download or build.",
 		)
 	}
-
-	// Skip version check for git builds — version is determined after build
-	if r.result.GitRef != nil && *r.result.GitRef != "" {
-		return nil
-	}
-
-	return nil
+	return &ResolvedBinaryPullInput{
+		Version:          version,
+		Type:             typ,
+		GitRef:           i.GitRef,
+		SetDefault:       i.SetDefault,
+		BinDir:           infra.GetBinDir(),
+		DownloadOverride: i.DownloadOverride,
+	}, nil
 }
