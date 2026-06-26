@@ -252,7 +252,7 @@ func completeVolumeThenSize(cmd *cobra.Command, args []string, toComplete string
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
-// completeEnvDestroy completes with workflow state IDs or YAML/YML file paths.
+// completeEnvDestroy completes with workflow state IDs and YAML/YML file paths.
 func completeEnvDestroy(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
@@ -271,20 +271,9 @@ func completeEnvDestroy(cmd *cobra.Command, args []string, toComplete string) ([
 		}
 	}
 
-	// 2. YAML/YML files in current working directory
-	if cwd, err := os.Getwd(); err == nil {
-		if files, err := os.ReadDir(cwd); err == nil {
-			for _, f := range files {
-				if !f.IsDir() {
-					name := f.Name()
-					if (strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) &&
-						strings.HasPrefix(name, toComplete) && !slices.Contains(results, name) {
-						results = append(results, name)
-					}
-				}
-			}
-		}
-	}
+	// 2. File extensions for shell-level filtering — Cobra passes these to
+	//    the shell's _filedir, which limits file completion to YAML/YML files.
+	results = append(results, "yaml", "yml")
 
-	return results, cobra.ShellCompDirectiveNoFileComp
+	return results, cobra.ShellCompDirectiveFilterFileExt
 }

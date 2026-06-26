@@ -588,6 +588,102 @@ func TestHandleExec_RealTimeout(t *testing.T) {
 	assert.NotEqual(t, 0, resp.Status, "must return non-zero status on timeout — process was killed")
 }
 
+// --- handleExec streaming output ---
+// Rationale: handleExec must stream stdout/stderr frames as the command
+// produces output, not buffer everything until the command exits. This test
+// proves that stdout frames arrive before the final result frame and that
+// the accumulated output is correct regardless of frame boundaries.
+
+func TestHandleExec_StreamingOutput(t *testing.T) {
+	host, guest := net.Pipe()
+	defer host.Close()
+	defer guest.Close()
+
+	// Produce multiple lines with small delays between them. This gives
+	// Go's internal pipe read goroutines a chance to read each line as a
+	// separate chunk, exercising the newline-based flush in streamingWriter.
+	req := &execRequest{
+		ID:      "stream-test",
+		Type:    requestTypeExec,
+		Command: `echo "line1"; sleep 0.05; echo "line2"; sleep 0.05; echo "line3"`,
+	}
+
+	go handleExec(context.Background(), req, guest)
+
+	dec := json.NewDecoder(host)
+
+	var stdout strings.Builder
+	var result execResponse
+	var frameCount int
+	reading := true
+	for reading {
+		var frame execResponse
+		require.NoError(t, dec.Decode(&frame))
+		frameCount++
+
+		switch frame.Type {
+		case responseTypeStdout:
+			stdout.WriteString(frame.Data)
+		case responseTypeResult:
+			result = frame
+			reading = false
+		default:
+			t.Fatalf("unexpected frame type: %s", frame.Type)
+		}
+	}
+
+	assert.Equal(t, 0, result.Status, "exit code")
+	assert.Equal(t, "line1\nline2\nline3\n", stdout.String(), "accumulated stdout")
+	assert.Greater(t, frameCount, 1, "must have at least stdout + result frames")
+	assert.Equal(t, responseTypeResult, result.Type, "last frame must be result")
+}
+
+// --- handleExec write error ---
+// Rationale: If the vsock connection breaks during command execution,
+// streamingWriter records the write error. handleExec must detect this,
+// send a Status:-1 result frame (best-effort), and return cleanly — not
+// hang or panic.
+
+func TestHandleExec_WriteError(t *testing.T) {
+	host, guest := net.Pipe()
+
+	req := &execRequest{
+		ID:      "write-err-test",
+		Type:    requestTypeExec,
+		Command: `echo "before"; sleep 0.2; echo "after"`,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		handleExec(context.Background(), req, guest)
+		close(done)
+	}()
+
+	// Read the first stdout frame ("before\n") — proves streaming works
+	// before the connection is closed.
+	dec := json.NewDecoder(host)
+	var frame execResponse
+	require.NoError(t, dec.Decode(&frame), "must receive first stdout frame")
+	assert.Equal(t, responseTypeStdout, frame.Type)
+	assert.Equal(t, "before\n", frame.Data)
+
+	// Close the host end to break the connection. Subsequent writes to
+	// guest (conn inside handleExec) will fail.
+	host.Close()
+
+	// handleExec must detect the write error and return cleanly.
+	select {
+	case <-done:
+		// Success — handleExec returned without hanging.
+	case <-time.After(5 * time.Second):
+		t.Fatal("handleExec did not return within 5s after write error")
+	}
+
+	// The error result frame was attempted best-effort on a broken
+	// connection, so we cannot assert its content. Clean exit is the
+	// assertion.
+}
+
 // --- handleExec user switching ---
 // Rationale: handleExec supports running commands as a different user via su.
 // Must verify that the process executes under the requested user identity.

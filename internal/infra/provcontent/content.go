@@ -111,7 +111,6 @@ if command -v systemctl >/dev/null 2>&1; then
     snapd.socket \
     systemd-udev-settle.service \
     unattended-upgrades.service \
-    packagekit.service \
     man-db.timer \
     whoopsie.service \
     apport.service \

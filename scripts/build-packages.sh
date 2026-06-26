@@ -84,17 +84,47 @@ build_deb() {
   cp "${binary}" "${builddir}/dist/mvm"
   cp "${PROJECT_DIR}/docs/mvm.1" "${builddir}/docs/"
 
-  cd "${builddir}"
-  if [[ "${arch}" == "arm64" ]]; then
-    # dh_strip can't strip arm64 binaries on amd64 host
-    DEB_BUILD_OPTIONS=nostrip dpkg-buildpackage -us -uc -b 2>&1 | tail -3
-  else
-    dpkg-buildpackage -us -uc -b 2>&1 | tail -3
-  fi
-  cd "${PROJECT_DIR}"
-  mv "${builddir}/../mvmctl_"*.deb "${OUTPUT_DIR}/"
+  # Stage files for dpkg-deb. Using dpkg-deb instead of dpkg-buildpackage
+  # avoids cross-architecture issues when packaging an arm64 binary on an
+  # amd64 host (the usual case for the arm64 .deb build).
+  local staging="${builddir}/staging"
+  mkdir -p "${staging}/DEBIAN" "${staging}/usr/bin" "${staging}/usr/share/man/man1"
+  cp "${binary}" "${staging}/usr/bin/mvm"
+  chmod 755 "${staging}/usr/bin/mvm"
+  cp "${PROJECT_DIR}/docs/mvm.1" "${staging}/usr/share/man/man1/"
+  gzip -9 "${staging}/usr/share/man/man1/mvm.1"
+
+  # Generate a minimal DEBIAN/control. We use dpkg-deb instead of
+  # dpkg-buildpackage so the same amd64 host can package an arm64 binary
+  # without needing a full cross-build toolchain.
+  cat > "${staging}/DEBIAN/control" <<EOF
+Package: mvmctl
+Version: ${VERSION}-1
+Section: utils
+Priority: optional
+Architecture: ${pkgarch}
+Maintainer: AlanD20 <aland20@pm.me>
+Depends: iproute2, iptables, nftables, qemu-utils, openssh-client, e2fsprogs, util-linux, passwd, sudo, procps, kmod, tar
+Recommends: cloud-image-utils, libguestfs-tools | guestfs-tools
+Description: MicroVM Manager - Container speed, VM isolation
+ mvmctl is a production-grade CLI for managing microVMs on Linux.
+ It handles VM lifecycle: downloading kernels/images, networking, VM creation,
+ SSH access, log streaming, snapshots, and cleanup.
+ .
+ Features:
+  - Firecracker microVM orchestration
+  - Bridge/TAP networking with NAT
+  - SSH key management
+  - VM snapshots and state management
+  - Cloud-init integration
+  - Multiple kernel and image support
+EOF
+
+  dpkg-deb --root-owner-group --build "${staging}" \
+    "${OUTPUT_DIR}/mvmctl_${VERSION}-1_${pkgarch}.deb"
+
   rm -rf "${builddir}"
-  echo "    done: $(ls -lh "${OUTPUT_DIR}"/*"${pkgarch}.deb" | awk '{print $5}')"
+  echo "    done: $(ls -lh "${OUTPUT_DIR}"/mvmctl_*"${pkgarch}.deb" | awk '{print $5}')"
 }
 
 build_deb "amd64" "${PROJECT_DIR}/dist/mvm" "amd64"
@@ -143,27 +173,63 @@ echo "==> Building Arch .pkg.tar.zst..."
 if command -v docker &>/dev/null; then
   # Use the local PKGBUILD with file:// sources pointing to pre-built binaries
   # so makepkg doesn't try to download from GitHub (which may not have the release yet).
-  local pkgbuild="/tmp/arch-PKGBUILD-local"
+  pkgbuild="/tmp/arch-PKGBUILD-local"
   if [[ ! -f "$pkgbuild" ]]; then
-    echo "    WARNING: /tmp/arch-PKGBUILD-local not found — shipping PKGBUILD + binaries"
+    pkgbuild="/mnt/mvmctl/packaging/PKGBUILD"
+  fi
+  if [[ ! -f "$pkgbuild" ]]; then
+    echo "    WARNING: no local PKGBUILD found — shipping PKGBUILD + binaries"
     cp "${PROJECT_DIR}/packaging/PKGBUILD" "${OUTPUT_DIR}/"
     cp "${PROJECT_DIR}/dist/mvm" "${OUTPUT_DIR}/"
     cp "${PROJECT_DIR}/dist/mvm-arm64" "${OUTPUT_DIR}/"
-    return
+  else
+    docker run -i --rm -v "${PROJECT_DIR}:/work:Z" -v "${pkgbuild}:/tmp/PKGBUILD:Z" \
+      -e "VERSION=${VERSION}" \
+      archlinux:latest bash -s <<'DOCKEREOF'
+      set -euo pipefail
+      pacman -Syu --noconfirm base-devel sudo >/dev/null 2>&1
+      useradd -m build
+      echo 'build ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/build
+
+      # Generate a local PKGBUILD that uses the pre-built binaries in /work
+      # instead of downloading release assets from GitHub.
+      cat > /work/PKGBUILD <<'PKEOF'
+pkgname=mvmctl-bin
+pkgver=${VERSION}
+pkgrel=1
+pkgdesc="MicroVM Manager - Container speed, VM isolation"
+arch=('x86_64' 'aarch64')
+url="https://github.com/AlanD20/mvmctl"
+license=('MIT')
+depends=(
+  'iproute2' 'nftables' 'iptables'
+  'qemu-base'
+  'openssh'
+  'e2fsprogs' 'util-linux'
+  'kmod'
+  'sudo' 'shadow'
+  'tar'
+)
+provides=('mvmctl')
+conflicts=('mvmctl')
+source=("mvm" "mvm.1")
+sha256sums=('SKIP' 'SKIP')
+package() {
+    install -Dm755 "${srcdir}/mvm" "${pkgdir}/usr/bin/mvm"
+    install -Dm644 "${srcdir}/mvm.1" "${pkgdir}/usr/share/man/man1/mvm.1"
+    gzip -9 "${pkgdir}/usr/share/man/man1/mvm.1"
+}
+PKEOF
+
+      cp /work/dist/mvm /work/mvm
+      cp /work/docs/mvm.1 /work/mvm.1
+      chown -R build:build /work
+      cd /work
+      su build -c 'makepkg -f --noconfirm --nodeps' 2>&1 | tail -5
+      mv mvmctl-bin-*.pkg.tar.zst /work/dist/packages/ 2>/dev/null || true
+DOCKEREOF
+    echo "    done: $(ls -lh "${OUTPUT_DIR}"/*.pkg.tar.zst 2>/dev/null | awk '{print $5}')"
   fi
-  docker run --rm -v "${PROJECT_DIR}:/work:Z" -v "${pkgbuild}:/tmp/PKGBUILD:Z" \
-    archlinux:latest bash -c "
-    set -euo pipefail
-    pacman -Syu --noconfirm base-devel sudo >/dev/null 2>&1
-    useradd -m build
-    echo 'build ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/build
-    cp /tmp/PKGBUILD /work/PKGBUILD
-    chown -R build:build /work
-    cd /work
-    su build -c 'makepkg -f --noconfirm' 2>&1 | tail -5
-    mv mvmctl-bin-*.pkg.tar.zst /work/dist/packages/ 2>/dev/null || true
-  " 2>&1 | tail -5
-  echo "    done: $(ls -lh "${OUTPUT_DIR}"/*.pkg.tar.zst 2>/dev/null | awk '{print $5}')"
 elif command -v makepkg &>/dev/null; then
   # Native Arch host
   cp "${PROJECT_DIR}/packaging/PKGBUILD" "${OUTPUT_DIR}/"

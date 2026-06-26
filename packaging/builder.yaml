@@ -3,32 +3,30 @@ version: "1"
 # ─── Infrastructure ─────────────────────────────────────────────────────────
 
 network:
-  - name: net
-    subnet: "172.27.0.0/24"
+  - name: builder
+    subnet: "172.30.0.0/24"
     nat: true
-    default: true
 
 key:
   - name: builder
     algorithm: ed25519
-    default: true
     force: true
 
 image:
-  - name: ubuntu-noble
+  - name: ubuntu-builder
     type: ubuntu
     version: "24.04"
 
 kernel:
-  - name: default-kernel
+  - name: krnl-builder
     type: official
-    default: true
+    version: 7.0.11
+    features: nftables,tuntap,kvm,btrfs
 
 binary:
   - name: fc-binary
     type: firecracker
     version: "1.16.0"
-    default: true
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Single Ubuntu VM — runs the same build-packages.sh as CI
@@ -36,19 +34,19 @@ binary:
 
 vm:
   - name: pkg-builder
-    network: net
+    network: builder
     key: builder
-    image: ubuntu:noble
-    kernel: default-kernel
+    image: ubuntu-builder
+    kernel: krnl-builder
     binary: fc-binary
     disk_size: 8G
-    vcpu: 2
-    mem: 2G
+    vcpu: 4
+    mem: 3G
     depends_on:
-      - network:net
+      - network:builder
       - key:builder
-      - image:ubuntu-noble
-      - kernel:default-kernel
+      - image:ubuntu-builder
+      - kernel:krnl-builder
       - binary:fc-binary
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -60,20 +58,6 @@ vm:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 copy:
-  - name: copy-mvm-binary
-    src: ./dist/mvm
-    dest: pkg-builder:/mnt/mvmctl/dist/mvm
-    force: true
-    depends_on:
-      - vm:pkg-builder
-
-  - name: copy-mvm-arm64
-    src: ./dist/mvm-arm64
-    dest: pkg-builder:/mnt/mvmctl/dist/mvm-arm64
-    force: true
-    depends_on:
-      - vm:pkg-builder
-
   - name: copy-scripts
     src: ./scripts
     dest: pkg-builder:/mnt/mvmctl/
@@ -131,8 +115,8 @@ copy:
       - vm:pkg-builder
 
   - name: copy-pkgbuild
-    src: /tmp/arch-PKGBUILD-local
-    dest: pkg-builder:/mnt/mvmctl/packaging/PKGBUILD
+    src: ./packaging/PKGBUILD
+    dest: pkg-builder:/tmp/arch-PKGBUILD-local
     force: true
     depends_on:
       - vm:pkg-builder
@@ -141,8 +125,10 @@ exec:
   - name: build-all
     target: pkg-builder
     user: root
-    timeout: 900
+    timeout: 30
     cmd: |
+      export HOME=/root && \
+      export DEBIAN_FRONTEND=noninteractive && \
       apt-get update -qq && \
       apt-get install -y -qq debhelper build-essential rpm docker.io wget && \
       rm -rf /usr/local/go /usr/lib/go-1.22 && \
@@ -153,7 +139,7 @@ exec:
       ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt && \
       /usr/local/go/bin/go version && \
       docker pull archlinux:latest 2>&1 | tail -3 && \
-      cd /mnt/mvmctl && \
+      cd /mnt/mvmctl && chmod +x ./scripts/build-packages.sh && \
       PATH=/usr/local/go/bin:$PATH ./scripts/build-packages.sh --build-binaries --version 0.1.0
     depends_on:
       - copy:copy-scripts
@@ -162,10 +148,6 @@ exec:
       - copy:copy-gomod
       - copy:copy-gosum
       - copy:copy-pkgbuild
-      - copy:copy-mvm-binary
-      - copy:copy-mvm-arm64
-      - copy:copy-mvm-binary
-      - copy:copy-mvm-arm64
       - copy:copy-source
       - copy:copy-pkg
       - copy:copy-cmd
