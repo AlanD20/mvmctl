@@ -35,8 +35,8 @@ jobs:
 
       - name: Check line length (golines 120)
         run: |
-         golines --max-len=120 --list-files ./internal/ ./pkg/ ./cmd/ 2>&1 | \
-         grep . && echo "Line length violations found" && exit 1 || true
+          golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/ 2>&1 | \
+          grep . && echo "Line length violations found" && exit 1 || true
 
       - name: Generate embed placeholders
         run: go generate ./internal/service/vsockagent/...
