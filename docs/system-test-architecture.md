@@ -107,8 +107,8 @@ All T1/T2 runner VMs are Firecracker microVMs created with **Firecracker v1.16**
 | Tier | Runs inside VM | Shared volume | Nested KVM | Runner VM kernel | What's tested |
 |------|---------------|---------------|------------|-----------------|---------------|
 | **1** | Yes — `mvm vm exec -- pytest ...` | Yes (mounted at `/mnt`) | Not needed | `official:7.0.11` (nftables + tuntap + kvm) | Host-level CLI: help, config, init, cache, keys, invariants, bin, images, kernel, network, host, run |
-| **2** | Yes — `mvm vm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm) | VM lifecycle: volume, vm_lifecycle, ssh, cp, console, logs, full_journeys, env |
-| **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | vm_fresh_env, vm_nested_isolated, vm_snapshot_load, volume_hotplug, kernel_build |
+| **2** | Yes — `mvm vm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm) | VM lifecycle: volume, vm_lifecycle, ssh, cp, console, logs, full_journeys |
+| **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | vm_fresh_env, vm_nested_isolated, vm_snapshot_load, volume_hotplug, kernel_build, env |
 
 ---
 
@@ -206,8 +206,7 @@ mvm vm exec <vm-name> --user runner --timeout 600 -- \
 - `ssh/test_ssh.py`
 - `console/test_console.py`
 - `logs/test_logs.py`
-- `full_journeys/test_full_journeys.py`
-- `env/test_env.py`
+- `full_journeys/test_full_journeys.py` (Tier 3 — see note below)
 
 ### Runner VM Spec
 
@@ -253,6 +252,7 @@ mvm vm exec <vm-name> --user runner --timeout 120 -- \
 - `volume/test_volume_hotplug.py` — PCI hotplug (requires Firecracker dev-preview, does not work reliably nested).
 - `kernel/test_kernel.py` — kernel build tests (need full KVM host access).
 - `cp/test_cp.py` — vsock agent file copy (some paths reject nested virt).
+- `env/test_env.py` — env workflow apply/destroy/diff (creates resources via spec; running inside a runner VM would add unnecessary nesting for orchestration tests).
 
 > **Note:** `test_vm_nested_virt.py` was merged into `test_vm_fresh_env.py` in June 2026. The two files had ~80% overlap (both tested nested virt verification). The unique negative-case test (VM without `--nested-virt` flag) was kept; the rest was redundant.
 
@@ -425,7 +425,7 @@ tests/system/
 | console | 2 | `test_console.py` | Console output |
 | logs | 2 | `test_logs.py` | Log retrieval |
 | full_journeys | 2 | `test_full_journeys.py` | Multi-step scenarios |
-| env | 2 | `test_env.py` | Environment variables |
+| env | 3 | `test_env.py` | Environment workflow (apply/destroy/diff) — runs host-direct because creating VMs via env spec adds unnecessary nesting |
 | volume_hotplug | 3 | `test_volume_hotplug.py` | PCI hotplug (needs host KVM — FC dev-preview, broken nested) |
 | cp | 3 | `test_cp.py` | File copy to/from VMs (vsock agent path rejection nested) |
 | vm_nested_isolated | 3 | `test_vm_nested_isolated.py` | Host-only, triple-nested |
