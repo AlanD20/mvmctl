@@ -92,7 +92,6 @@ TIER2_DOMAINS: dict[str, list[str]] = {
     "console": ["tests/system/console/test_console.py"],
     "logs": ["tests/system/logs/test_logs.py"],
     "full_journeys": ["tests/system/full_journeys/test_full_journeys.py"],
-    "env": ["tests/system/env/test_env.py"],
     "nftables": ["tests/system/network/test_nftables.py"],
 }
 
@@ -107,6 +106,7 @@ TIER3_DOMAINS: dict[str, list[str]] = {
         "tests/system/volume/test_volume_hotplug.py",
     ],
     "cp": ["tests/system/cp/test_cp.py"],
+    "env": ["tests/system/env/test_env.py"],
 }
 
 # Tier classification for display
