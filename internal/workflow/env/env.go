@@ -36,6 +36,7 @@ func Apply(
 	op api.API,
 	specPath string,
 	onProgress event.OnProgressCallback,
+	extraEnv map[string]string,
 ) error {
 	// Resolve YAML spec into steps.
 	steps, err := ResolveSpec(ctx, specPath, op)
@@ -45,6 +46,14 @@ func Apply(
 			fmt.Sprintf("resolve env spec %s: %v", specPath, err),
 			err,
 		)
+	}
+
+	// Merge --env variables into exec steps. CLI values take precedence
+	// over any env: declared in the spec itself.
+	for i := range steps {
+		if es, ok := steps[i].(*ExecStep); ok {
+			es.MergeEnv(extraEnv)
+		}
 	}
 
 	if len(steps) == 0 {

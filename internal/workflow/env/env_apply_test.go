@@ -169,7 +169,7 @@ network:
 	specPath := writeApplySpec(t, specContent)
 	defer cleanupState(t, specPath)
 
-	err := Apply(context.Background(), nil, specPath, nil)
+	err := Apply(context.Background(), nil, specPath, nil, nil)
 	require.NoError(t, err)
 
 	state := readStateFile(t, specPath)
@@ -198,7 +198,7 @@ key:
 	specPath := writeApplySpec(t, specContent)
 	defer cleanupState(t, specPath)
 
-	err := Apply(context.Background(), nil, specPath, nil)
+	err := Apply(context.Background(), nil, specPath, nil, nil)
 	require.NoError(t, err)
 
 	state := readStateFile(t, specPath)
@@ -227,7 +227,7 @@ func TestApply_EmptySpec(t *testing.T) {
 	specContent := `version: "1"`
 	specPath := writeApplySpec(t, specContent)
 
-	err := Apply(context.Background(), nil, specPath, nil)
+	err := Apply(context.Background(), nil, specPath, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "env spec contains no resources")
 }
@@ -237,7 +237,7 @@ func TestApply_EmptySpec(t *testing.T) {
 func TestApply_SpecFileNotFound(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "nonexistent.yaml")
 
-	err := Apply(context.Background(), nil, specPath, nil)
+	err := Apply(context.Background(), nil, specPath, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resolve env spec")
 	assert.Contains(t, err.Error(), "not found")
@@ -250,7 +250,7 @@ func TestApply_InvalidYAML(t *testing.T) {
 network:
   - invalid_yaml: [`)
 
-	err := Apply(context.Background(), nil, specPath, nil)
+	err := Apply(context.Background(), nil, specPath, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "resolve env spec")
 }
@@ -270,10 +270,10 @@ key:
 	specPath := writeApplySpec(t, specContent)
 	defer cleanupState(t, specPath)
 
-	err := Apply(context.Background(), nil, specPath, nil)
+	err := Apply(context.Background(), nil, specPath, nil, nil)
 	require.NoError(t, err)
 
-	err = Apply(context.Background(), nil, specPath, nil)
+	err = Apply(context.Background(), nil, specPath, nil, nil)
 	require.NoError(t, err)
 
 	state := readStateFile(t, specPath)
@@ -302,7 +302,7 @@ network:
 	specPath := writeApplySpec(t, specContent)
 	defer cleanupState(t, specPath)
 
-	err := Apply(context.Background(), nil, specPath, nil)
+	err := Apply(context.Background(), nil, specPath, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "env apply")
 	assert.ErrorIs(t, err, applyErr)
@@ -331,7 +331,7 @@ network:
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := Apply(ctx, nil, specPath, nil)
+	err := Apply(ctx, nil, specPath, nil, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 
