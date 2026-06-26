@@ -8,4 +8,4 @@
 !.gitignore
 !*.install
 !*.patch
-!mvmctl.yaml
+!builder.yaml

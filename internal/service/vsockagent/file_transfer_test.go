@@ -169,6 +169,15 @@ func TestFTPullPayloadJSON(t *testing.T) {
 			},
 			want: `{"path":"/some/path","dest":"","overwrite":false}`,
 		},
+		"recursive_true": {
+			input: FtPullPayload{
+				Path:      "/some/path/",
+				Dest:      "/tmp/out",
+				Overwrite: false,
+				Recursive: true,
+			},
+			want: `{"path":"/some/path/","dest":"/tmp/out","overwrite":false,"recursive":true}`,
+		},
 	}
 
 	for name, tc := range tests {
@@ -1268,4 +1277,127 @@ func TestHandleFTPull_ContextCancelled(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("handleFTPull did not return within 5s after context cancellation")
 	}
+}
+
+// --- handleFTPull: directory handling ---
+
+func TestHandleFTPull_DirectoryNotRecursive(t *testing.T) {
+	srcDir := t.TempDir()
+
+	// Create a file inside the directory to confirm it's a valid dir.
+	err := os.WriteFile(filepath.Join(srcDir, "dummy.txt"), []byte("content"), 0644)
+	require.NoError(t, err)
+
+	pullPayload, err := json.Marshal(FtPullPayload{
+		Path:      srcDir,
+		Dest:      "/tmp",
+		Overwrite: false,
+		Recursive: false,
+	})
+	require.NoError(t, err)
+
+	runPullAgent(t, context.Background(), pullPayload, func(host *hostFrameHelper) {
+		ft, errPayload := host.readFrame()
+		assert.Equal(t, FtError, ft, "expected FtError for directory without recursive")
+		var errResp FtErrorPayload
+		json.Unmarshal(errPayload, &errResp)
+		assert.Equal(t, "is_directory", errResp.Code)
+	})
+}
+
+// pullFileFromAgent is the host-side helper for receiving one file during
+// a recursive directory pull. It reads META, sends acceptance, receives
+// data+EOS, and sends OK. Returns the received content.
+func pullFileFromAgent(t *testing.T, host *hostFrameHelper) []byte {
+	t.Helper()
+
+	// Read META.
+	ft, metaPayload := host.readFrame()
+	require.Equal(t, FtMeta, ft, "expected FtMeta with file info")
+	var meta FtMetaPayload
+	err := json.Unmarshal(metaPayload, &meta)
+	require.NoError(t, err)
+
+	// Send acceptance.
+	acceptPayload, _ := json.Marshal(FtMetaPayload{Accepted: true})
+	host.writeFrame(FtMeta, acceptPayload)
+
+	// Receive data frames + progress until EOS.
+	var received bytes.Buffer
+	for {
+		ft, chunk := host.readFrame()
+		switch ft {
+		case FtData:
+			if len(chunk) == 0 {
+				goto fileEOS
+			}
+			received.Write(chunk)
+		case FtProgress:
+			// informational
+		default:
+			t.Fatalf("unexpected frame type in data stream: 0x%02x", ft)
+		}
+	}
+fileEOS:
+
+	// Compute SHA-256 of received content and send OK.
+	h := sha256.New()
+	h.Write(received.Bytes())
+	receivedHash := hex.EncodeToString(h.Sum(nil))
+	okPayload, _ := json.Marshal(FtMetaPayload{
+		Path:   meta.Path,
+		Size:   int64(received.Len()),
+		SHA256: receivedHash,
+	})
+	host.writeFrame(FtOK, okPayload)
+
+	return received.Bytes()
+}
+
+func TestHandleFTPull_RecursiveDirectory(t *testing.T) {
+	srcDir := t.TempDir()
+
+	// Create two files in the source directory.
+	fileAContent := []byte("content of file A\n")
+	fileBContent := []byte("content of file B is different\n")
+	subDir := filepath.Join(srcDir, "sub")
+	err := os.Mkdir(subDir, 0755)
+	require.NoError(t, err)
+
+	err = os.WriteFile(filepath.Join(srcDir, "a.txt"), fileAContent, 0644)
+	require.NoError(t, err)
+	err = os.WriteFile(filepath.Join(subDir, "b.txt"), fileBContent, 0644)
+	require.NoError(t, err)
+
+	// Use trailing / to trigger directory mode on the host, but for the
+	// agent side we send the cleaned path with Recursive=true.
+	pullPayload, err := json.Marshal(FtPullPayload{
+		Path:      srcDir,
+		Dest:      "/tmp",
+		Overwrite: false,
+		Recursive: true,
+	})
+	require.NoError(t, err)
+
+	runPullAgent(t, context.Background(), pullPayload, func(host *hostFrameHelper) {
+		// Receive first file (a.txt).
+		gotA := pullFileFromAgent(t, host)
+		if diff := cmp.Diff(string(fileAContent), string(gotA)); diff != "" {
+			t.Errorf("file a.txt content mismatch (-want +got):\n%s", diff)
+		}
+
+		// Receive second file (sub/b.txt).
+		gotB := pullFileFromAgent(t, host)
+		if diff := cmp.Diff(string(fileBContent), string(gotB)); diff != "" {
+			t.Errorf("file sub/b.txt content mismatch (-want +got):\n%s", diff)
+		}
+
+		// Read DONE.
+		ft, donePayload := host.readFrame()
+		assert.Equal(t, FtDone, ft, "expected FtDone frame")
+		var done FtDonePayload
+		json.Unmarshal(donePayload, &done)
+		assert.Equal(t, 2, done.Files, "should have pulled 2 files")
+		assert.Equal(t, 0, done.Errors, "no errors expected")
+	})
 }
