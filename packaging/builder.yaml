@@ -126,6 +126,8 @@ exec:
     target: pkg-builder
     user: root
     timeout: 30
+    env:
+      VERSION: "0.1.0"
     cmd: |
       export HOME=/root && \
       export DEBIAN_FRONTEND=noninteractive && \
@@ -140,7 +142,7 @@ exec:
       /usr/local/go/bin/go version && \
       docker pull archlinux:latest 2>&1 | tail -3 && \
       cd /mnt/mvmctl && chmod +x ./scripts/build-packages.sh && \
-      PATH=/usr/local/go/bin:$PATH ./scripts/build-packages.sh --build-binaries --version 0.1.0
+      PATH=/usr/local/go/bin:$PATH ./scripts/build-packages.sh --build-binaries --version ${VERSION}
     depends_on:
       - copy:copy-scripts
       - copy:copy-packaging
