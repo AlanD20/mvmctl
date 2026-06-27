@@ -1,6 +1,6 @@
 """System test helpers — commands run INSIDE the test VM.
 
-All tests run inside a test VM via ``mvm vm exec -- python3 -m pytest``.
+All tests run inside a test VM via ``mvm exec -- python3 -m pytest``.
 The orchestrator (``scripts/run-system-tests.py``) sets ``MVM_TEST_VM`` to
 the VM name, and tests call ``mvm`` directly through ``_run_mvm()``.
 The ``vm_name`` parameter is accepted for API compatibility but ignored —

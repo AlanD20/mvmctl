@@ -19,7 +19,7 @@ import (
 )
 
 // --- ExecStep.Apply ---
-// Rationale: ExecStep.Apply requires a real vsock connection via VMExec,
+// Rationale: ExecStep.Apply requires a real vsock connection via Exec,
 // so we cannot test the happy path without a live VM. We test the nil-op
 // guard (R1: every error-returning function needs at least one error case).
 
@@ -67,30 +67,30 @@ func TestExecStep_Apply(t *testing.T) {
 	}
 }
 
-// --- ExecStep.Apply VMExec exit code ---
+// --- ExecStep.Apply Exec exit code ---
 // Rationale: ExecStep.Apply must fail when the remote command exits with a
-// non-zero code. A zero exit code succeeds and persists state. If VMExec
+// non-zero code. A zero exit code succeeds and persists state. If Exec
 // itself returns an error (e.g., vsock failure), Apply must propagate it.
 
-func TestExecStep_Apply_VMExec_ExitCode(t *testing.T) {
+func TestExecStep_Apply_Exec_ExitCode(t *testing.T) {
 	tests := map[string]struct {
-		vmExecFunc func(ctx context.Context, input inputs.VMExecInput) (*results.VMExecResult, error)
+		execFunc func(ctx context.Context, input inputs.ExecInput) (*results.ExecResult, error)
 		wantErr    string
 	}{
 		"exit_code_0_succeeds": {
-			vmExecFunc: func(_ context.Context, _ inputs.VMExecInput) (*results.VMExecResult, error) {
-				return &results.VMExecResult{ExitCode: 0}, nil
+			execFunc: func(_ context.Context, _ inputs.ExecInput) (*results.ExecResult, error) {
+				return &results.ExecResult{ExitCode: 0}, nil
 			},
 		},
 		"exit_code_1_fails": {
-			vmExecFunc: func(_ context.Context, _ inputs.VMExecInput) (*results.VMExecResult, error) {
-				return &results.VMExecResult{ExitCode: 1}, nil
+			execFunc: func(_ context.Context, _ inputs.ExecInput) (*results.ExecResult, error) {
+				return &results.ExecResult{ExitCode: 1}, nil
 			},
 			wantErr: "exited with code 1",
 		},
 		"exit_code_127_fails": {
-			vmExecFunc: func(_ context.Context, _ inputs.VMExecInput) (*results.VMExecResult, error) {
-				return &results.VMExecResult{ExitCode: 127}, nil
+			execFunc: func(_ context.Context, _ inputs.ExecInput) (*results.ExecResult, error) {
+				return &results.ExecResult{ExitCode: 127}, nil
 			},
 			wantErr: "exited with code 127",
 		},
@@ -99,8 +99,8 @@ func TestExecStep_Apply_VMExec_ExitCode(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			op := &testutil.MockOperation{
-				MockVMAPI: testutil.MockVMAPI{
-					VMExecFunc: tc.vmExecFunc,
+				MockExecAPI: testutil.MockExecAPI{
+					ExecFunc: tc.execFunc,
 				},
 			}
 			step, err := envpkg.Registry["exec"].FromSpec("exec", "run-cmd", map[string]any{
@@ -126,10 +126,10 @@ func TestExecStep_Apply_VMExec_ExitCode(t *testing.T) {
 	}
 }
 
-func TestExecStep_Apply_VMExec_Error(t *testing.T) {
+func TestExecStep_Apply_Exec_Error(t *testing.T) {
 	op := &testutil.MockOperation{
-		MockVMAPI: testutil.MockVMAPI{
-			VMExecFunc: func(_ context.Context, _ inputs.VMExecInput) (*results.VMExecResult, error) {
+		MockExecAPI: testutil.MockExecAPI{
+			ExecFunc: func(_ context.Context, _ inputs.ExecInput) (*results.ExecResult, error) {
 				return nil, errors.New("vsock connection refused")
 			},
 		},

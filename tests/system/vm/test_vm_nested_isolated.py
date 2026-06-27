@@ -115,7 +115,7 @@ def _wait_for_ssh_host(
     while _time.monotonic() - start < timeout:
         try:
             result = _run_mvm_host(
-                "vm", "exec", vm_name, "--user", user,
+                "exec", vm_name, "--user", user,
                 "--timeout", "10", "--", "exit",
                 check=False, timeout=15,
             )
@@ -273,7 +273,7 @@ def fenv_vm() -> Generator[tuple[str, str, str], None, None]:
             "/home/*/.cache/mvmctl/bin/mvm-provision",
         )
         _run_mvm_host(
-            "vm", "exec", vm_name, "--user", USER_ROOT, "--timeout", "30", "--",
+            "exec", vm_name, "--user", USER_ROOT, "--timeout", "30", "--",
             f"echo '{UNPRIVILEGED_USER} ALL=(ALL) NOPASSWD: "
             f"{','.join(PRIVILEGED_BINS)}' > "
             f"/etc/sudoers.d/{UNPRIVILEGED_USER}",
@@ -282,20 +282,20 @@ def fenv_vm() -> Generator[tuple[str, str, str], None, None]:
 
         # Phase 10: Apply pending migrations (base image may be behind current binary)
         _run_mvm_host(
-            "vm", "exec", vm_name, "--user", USER_ROOT, "--timeout", "30", "--",
+            "exec", vm_name, "--user", USER_ROOT, "--timeout", "30", "--",
             "mvm init --non-interactive",
             check=False, timeout=60,
         )
         # Also init for testuser so unprivileged read-only commands work
         _run_mvm_host(
-            "vm", "exec", vm_name, "--user", USER_ROOT, "--timeout", "60", "--",
+            "exec", vm_name, "--user", USER_ROOT, "--timeout", "60", "--",
             f"su - {UNPRIVILEGED_USER} -c 'mvm init --non-interactive --skip-network'",
             check=False, timeout=90,
         )
 
         # Phase 11: Copy mvm to testuser's home (tests reference /home/testuser/mvm)
         _run_mvm_host(
-            "vm", "exec", vm_name, "--user", USER_ROOT, "--timeout", "30", "--",
+            "exec", vm_name, "--user", USER_ROOT, "--timeout", "30", "--",
             f"cp /usr/local/bin/mvm /home/{UNPRIVILEGED_USER}/mvm && "
             f"chown {UNPRIVILEGED_USER}:{UNPRIVILEGED_USER} "
             f"/home/{UNPRIVILEGED_USER}/mvm",
@@ -304,7 +304,7 @@ def fenv_vm() -> Generator[tuple[str, str, str], None, None]:
 
         # Phase 12: Load KVM modules for nested VM testing
         _run_mvm_host(
-            "vm", "exec", vm_name, "--user", USER_ROOT, "--timeout", "30", "--",
+            "exec", vm_name, "--user", USER_ROOT, "--timeout", "30", "--",
             "modprobe kvm_intel 2>/dev/null "
             "|| modprobe kvm_amd 2>/dev/null || true",
             check=False, timeout=15,
@@ -360,14 +360,14 @@ def _guest_run(
     retries: int = 3,
     retry_delay: float = 2.0,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a command INSIDE the fenv guest via host mvm vm exec (vsock), with retries."""
+    """Run a command INSIDE the fenv guest via host mvm exec (vsock), with retries."""
     import time as _time
 
     last_error: Exception | None = None
     for attempt in range(retries):
         try:
             return _run_mvm_host(
-                "vm", "exec", vm_name,
+                "exec", vm_name,
                 "--user", user,
                 "--timeout", str(timeout),
                 "--",
@@ -387,7 +387,7 @@ def _guest_run(
     if last_error:
         raise last_error
     return _run_mvm_host(
-        "vm", "exec", vm_name,
+        "exec", vm_name,
         "--user", user,
         "--timeout", str(timeout),
         "--",

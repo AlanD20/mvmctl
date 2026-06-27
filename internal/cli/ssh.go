@@ -104,7 +104,7 @@ Examples:
 	cobraCmd.Flags().StringVarP(&userFlag, "user", "u", "", "SSH user (default: from user config)")
 	cobraCmd.Flags().StringVar(&key, "key", "", "SSH private key file or directory of keys")
 	cobraCmd.Flags().StringVarP(&cmdStr, "cmd", "c", "", "Command to execute")
-	cobraCmd.Flags().IntVarP(&timeout, "timeout", "t", 0, "SSH connection timeout in seconds")
+	cobraCmd.Flags().IntVarP(&timeout, "timeout", "t", 0, "SSH connect/probe timeout in seconds")
 
 	// Cobra/pflag intersperses flags and positional args by default.
 	// Make it explicit for SSH commands where flags may appear after positional args.

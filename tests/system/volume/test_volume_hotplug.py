@@ -48,7 +48,7 @@ pytestmark = [
 def _wait_for_vdb(runner_vm: str, vm_name: str, timeout: float = 10.0) -> bool:
     """Poll guest /proc/partitions via vsock exec until vdb appears or *timeout* expires.
 
-    Uses ``mvm vm exec`` (vsock agent) instead of ``mvm ssh`` because the
+    Uses ``mvm exec`` (vsock agent) instead of ``mvm ssh`` because the
     Alpine cloud image's SSHD configuration rejects publickey auth in nested
     virtualization (PAM + StrictModes). The vsock agent is always available.
     Uses ``cat /proc/partitions`` because Alpine lacks ``lsblk``.
@@ -56,7 +56,7 @@ def _wait_for_vdb(runner_vm: str, vm_name: str, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = _run_mvm(
-            runner_vm, "vm", "exec", vm_name, "--user", "root", "--timeout",
+            runner_vm, "exec", vm_name, "--user", "root", "--timeout",
             "10", "--", "cat /proc/partitions",
             check=False, timeout=15,
         )
@@ -73,7 +73,7 @@ def _wait_for_no_vdb(
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = _run_mvm(
-            runner_vm, "vm", "exec", vm_name, "--user", "root", "--timeout",
+            runner_vm, "exec", vm_name, "--user", "root", "--timeout",
             "10", "--", "cat /proc/partitions",
             check=False, timeout=15,
         )
@@ -121,8 +121,8 @@ def _require_firecracker_hotplug(runner_vm: str) -> None:
 
 
 def _count_virtio_block_devices(runner_vm: str, vm_name: str) -> int:
-    result = _run_mvm(
-        runner_vm, "vm", "exec", vm_name, "--",
+        result = _run_mvm(
+        runner_vm, "exec", vm_name, "--",
         "sh -c \"ls /sys/block | grep '^vd[b-z]' | wc -l\"",
         check=False, timeout=10,
     )
@@ -220,8 +220,8 @@ class TestVolumeHotplug:
             # -- Phase 2: Verify device in guest ---------------------------
             # Verify virtio driver is attached via sysfs
             driver_result = _run_mvm(
-                runner_vm, "vm", "exec", vm_name, "--",
-                "readlink /sys/block/vdb/device/driver",
+            runner_vm, "exec", vm_name, "--",
+            "readlink /sys/block/vdb/device/driver",
                 check=False, timeout=10,
             )
             assert driver_result.returncode == 0, (

@@ -11,6 +11,7 @@ type MockOperation struct {
 	MockBinaryAPI
 	MockHostAPI
 	MockConsoleAPI
+	MockExecAPI
 	MockSSHAPI
 	MockConfigAPI
 	MockCacheAPI
