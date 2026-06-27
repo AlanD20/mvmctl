@@ -697,7 +697,7 @@ class TestVolumeLifecycle:
                 net_name,
             )
             _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
-            _run_mvm(runner_vm, "vm", "attach-volume", vm_name, vol_name)
+            _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
             # State 2: attached — vm_id must be non-null and match VM id
             inspect = _run_mvm(
@@ -715,7 +715,7 @@ class TestVolumeLifecycle:
             assert vm_info is not None
             assert data["attachment"]["vm_id"] == vm_info["id"]
 
-            _run_mvm(runner_vm, "vm", "detach-volume", vm_name, vol_name)
+            _run_mvm(runner_vm, "volume", "detach", vm_name, vol_name)
 
             # State 3: available again — vm_id must be null, path still exists
             inspect = _run_mvm(
@@ -810,7 +810,7 @@ class TestVolumeAttachDetach:
 
             _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
 
-            _run_mvm(runner_vm, "vm", "detach-volume", vm_name, vol_name)
+            _run_mvm(runner_vm, "volume", "detach", vm_name, vol_name)
 
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
@@ -818,7 +818,7 @@ class TestVolumeAttachDetach:
             vol_data = json.loads(vol_result.stdout)
             assert vol_data.get("volume", {}).get("status") == "available"
 
-            _run_mvm(runner_vm, "vm", "attach-volume", vm_name, vol_name)
+            _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
@@ -899,7 +899,7 @@ class TestVolumeAttachDetach:
 
             _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
 
-            _run_mvm(runner_vm, "vm", "attach-volume", vm_name, vol_name)
+            _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
@@ -982,7 +982,7 @@ class TestVolumeAttachDetach:
 
             _run_mvm(runner_vm, "vm", "stop", vm_name, "--force")
 
-            _run_mvm(runner_vm, "vm", "detach-volume", vm_name, vol_name)
+            _run_mvm(runner_vm, "volume", "detach", vm_name, vol_name)
 
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
@@ -990,7 +990,7 @@ class TestVolumeAttachDetach:
             vol_data = json.loads(vol_result.stdout)
             assert vol_data.get("volume", {}).get("status") == "available"
 
-            _run_mvm(runner_vm, "vm", "attach-volume", vm_name, vol_name)
+            _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
@@ -1076,7 +1076,7 @@ class TestVolumeCrossVM:
             _run_mvm(runner_vm, "vm", "stop", vm_a, "--force")
             _run_mvm(runner_vm, "vm", "stop", vm_b, "--force")
 
-            _run_mvm(runner_vm, "vm", "attach-volume", vm_a, vol_name)
+            _run_mvm(runner_vm, "volume", "attach", vm_a, vol_name)
 
             vol_result = _run_mvm(
                 runner_vm, "volume", "inspect", vol_name, "--json"
@@ -1095,8 +1095,8 @@ class TestVolumeCrossVM:
 
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_b,
                 vol_name,
                 check=False,
@@ -1474,8 +1474,8 @@ class TestVolumeNegativeFailure:
 
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 "nonexistent-volume-name",
                 check=False,
@@ -1540,8 +1540,8 @@ class TestVolumeNegativeFailure:
 
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 "nonexistent-volume-name",
                 check=False,

@@ -17,7 +17,7 @@ Steps executed (in exact order):
    7. vm create fenv --vcpus 6 --mem 4g --nested-virt -s 8g
    8. vol create vol1 8g
    9. vm stop fenv
-  10. vm attach-volume fenv vol1
+   10. volume attach fenv vol1
   11. vm start fenv
   12. ssh fenv --cmd 'apt update && apt install -y qemu-utils net-tools && mkfs.ext4 /dev/vdb && mount /dev/vdb /mnt'
   13. cp dist/mvm fenv:/root
@@ -292,7 +292,7 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
         },
         "attach_volume": {
             "desc": f"Attach volume '{VOLUME_NAME}' to '{VM_NAME}'",
-            "args": ["vm", "attach-volume", VM_NAME, VOLUME_NAME],
+            "args": ["volume", "attach", VM_NAME, VOLUME_NAME],
             "timeout": 30,
         },
         "start_vm": {

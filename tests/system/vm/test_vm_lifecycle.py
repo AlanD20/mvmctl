@@ -2803,7 +2803,7 @@ class TestVMVolumeIntegration:
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force")
             result = _run_mvm(
-                runner_vm, "vm", "attach-volume", unique_vm_name, vol_name
+                runner_vm, "volume", "attach", unique_vm_name, vol_name
             )
             assert result.returncode == 0
             vol_inspect = _run_mvm(
@@ -2813,7 +2813,7 @@ class TestVMVolumeIntegration:
             vol_info = vol_data.get("volume") or {}
             assert vol_info.get("status") == "attached"
             result = _run_mvm(
-                runner_vm, "vm", "detach-volume", unique_vm_name, vol_name
+                runner_vm, "volume", "detach", unique_vm_name, vol_name
             )
             assert result.returncode == 0
             vol_inspect = _run_mvm(
@@ -2873,8 +2873,8 @@ class TestVMVolumeIntegration:
             )
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 unique_vm_name,
                 vol_name,
                 check=False,
@@ -2934,13 +2934,13 @@ class TestVMVolumeIntegration:
             )
             _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force")
             _run_mvm(
-                runner_vm, "vm", "attach-volume", unique_vm_name, vol_name
+                runner_vm, "volume", "attach", unique_vm_name, vol_name
             )
             _run_mvm(runner_vm, "vm", "start", unique_vm_name)
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 unique_vm_name,
                 vol_name,
                 check=False,

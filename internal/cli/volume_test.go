@@ -32,11 +32,13 @@ func TestNewVolumeCmd(t *testing.T) {
 		{use: "rm", hasAlias: true, alias: "remove"},
 		{use: "inspect", hasAlias: false},
 		{use: "resize", hasAlias: false},
+		{use: "attach", hasAlias: false},
+		{use: "detach", hasAlias: false},
 	}
 
 	assert.Equal(t, "volume", cmd.Use, "root command must be 'volume'")
 	assert.Equal(t, "Volume management", cmd.Short)
-	assert.Equal(t, "Manage persistent volumes — list, create, remove, inspect, resize.", cmd.Long)
+	assert.Equal(t, "Manage persistent volumes — list, create, remove, inspect, resize, attach, detach.", cmd.Long)
 	assert.Equal(t, []string{"vol"}, cmd.Aliases)
 
 	for _, sc := range expectedSubcommands {

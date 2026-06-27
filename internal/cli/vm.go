@@ -72,8 +72,6 @@ func NewVMCmd(vmAPI api.VMAPI, configAPI api.ConfigAPI) *cobra.Command {
 	cmd.AddCommand(newVMPauseCmd(vmAPI))
 	cmd.AddCommand(newVMResumeCmd(vmAPI))
 	cmd.AddCommand(newVMInspectCmd(vmAPI))
-	cmd.AddCommand(newVMAttachVolumeCmd(vmAPI))
-	cmd.AddCommand(newVMDetachVolumeCmd(vmAPI))
 	return cmd
 }
 
@@ -652,67 +650,3 @@ func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
 	return cmd
 }
-
-// --- attach-volume ---
-
-func newVMAttachVolumeCmd(vmAPI api.VMAPI) *cobra.Command {
-	return &cobra.Command{
-		Use:   "attach-volume [id] [volume_name]",
-		Short: "Attach a volume to a running VM.",
-		Long: `Attach a volume to a running VM via Firecracker drive hotplug.
-
-Arguments:
-  id           VM identifier (name, ID prefix, IP, or MAC)
-  volume_name  Name or ID of the volume to attach`,
-		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeVMThenVolume,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			volumeName := args[1]
-
-			if err := vmAPI.VMAttachVolume(
-				cmd.Context(),
-				inputs.VMInput{Identifiers: []string{id}},
-				volumeName,
-			); err != nil {
-				return fmt.Errorf("attach volume %q: %w", volumeName, err)
-			}
-
-			common.Cli.Success(fmt.Sprintf("Volume '%s' attached", volumeName))
-			return nil
-		},
-	}
-}
-
-// --- detach-volume ---
-
-func newVMDetachVolumeCmd(vmAPI api.VMAPI) *cobra.Command {
-	return &cobra.Command{
-		Use:   "detach-volume [id] [volume_name]",
-		Short: "Detach a volume from a running VM.",
-		Long: `Detach a volume from a running VM.
-
-Arguments:
-  id           VM identifier (name, ID prefix, IP, or MAC)
-  volume_name  Name or ID of the volume to detach`,
-		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeVMThenVolume,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			volumeName := args[1]
-
-			if err := vmAPI.VMDetachVolume(
-				cmd.Context(),
-				inputs.VMInput{Identifiers: []string{id}},
-				volumeName,
-			); err != nil {
-				return fmt.Errorf("detach volume %q: %w", volumeName, err)
-			}
-
-			common.Cli.Success(fmt.Sprintf("Volume '%s' detached", volumeName))
-			return nil
-		},
-	}
-}
-
-

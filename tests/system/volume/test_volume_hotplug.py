@@ -204,8 +204,8 @@ class TestVolumeHotplug:
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
             )
@@ -246,8 +246,8 @@ class TestVolumeHotplug:
         finally:
             _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
                 check=False,
@@ -280,8 +280,8 @@ class TestVolumeHotplug:
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
             )
@@ -380,8 +380,8 @@ class TestVolumeHotplug:
             )
             _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
                 check=False,
@@ -414,8 +414,8 @@ class TestVolumeHotplug:
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
             )
@@ -433,8 +433,8 @@ class TestVolumeHotplug:
             # -- Phase 2: Hot-unplug ---------------------------------------
             _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
             )
@@ -527,14 +527,14 @@ class TestVolumeHotplug:
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
                 check=False,
             )
             assert result.returncode != 0, (
-                f"Expected attach-volume to fail on no-PCI VM, "
+                f"Expected attach to fail on no-PCI VM, "
                 f"but got returncode {result.returncode}"
             )
             combined: str = (result.stdout + result.stderr).lower()
@@ -545,8 +545,8 @@ class TestVolumeHotplug:
         finally:
             _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
                 check=False,
@@ -592,8 +592,8 @@ class TestVolumeHotplug:
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
             )
@@ -606,8 +606,8 @@ class TestVolumeHotplug:
             # -- Phase 2: Hot-unplug ---------------------------------------
             _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
             )
@@ -632,8 +632,8 @@ class TestVolumeHotplug:
             # -- Phase 3: Re-attach the same volume -----------------------
             _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
             )
@@ -658,8 +658,8 @@ class TestVolumeHotplug:
         finally:
             _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
                 check=False,
@@ -734,14 +734,14 @@ class TestVolumeHotplugVersionGate:
             # Cold-attach to stopped VM must succeed
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
                 check=False,
             )
             assert result.returncode == 0, (
-                f"Cold attach-volume to stopped VM should succeed, "
+                f"Cold attach to stopped VM should succeed, "
                 f"got rc={result.returncode}: {result.stderr}"
             )
 
@@ -755,8 +755,8 @@ class TestVolumeHotplugVersionGate:
         finally:
             _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
                 check=False,
@@ -818,8 +818,8 @@ class TestVolumeHotplugVersionGate:
             # Cold-attach
             _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
             )
@@ -827,14 +827,14 @@ class TestVolumeHotplugVersionGate:
             # Cold-detach
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
                 check=False,
             )
             assert result.returncode == 0, (
-                f"Cold detach-volume from stopped VM should succeed, "
+                f"Cold detach from stopped VM should succeed, "
                 f"got rc={result.returncode}: {result.stderr}"
             )
 
@@ -903,8 +903,8 @@ class TestVolumeHotplugDestructive:
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
             )
@@ -963,8 +963,8 @@ class TestVolumeHotplugDestructive:
             _run_mvm(runner_vm, "volume", "create", vol_name, "512M")
             _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
             )
@@ -974,8 +974,8 @@ class TestVolumeHotplugDestructive:
             # -- Phase 2: Second attach must fail --------------------------
             result = _run_mvm(
                 runner_vm,
-                "vm",
-                "attach-volume",
+                "volume",
+                "attach",
                 vm_name,
                 vol_name,
                 check=False,
@@ -1005,8 +1005,8 @@ class TestVolumeHotplugDestructive:
         finally:
             _run_mvm(
                 runner_vm,
-                "vm",
-                "detach-volume",
+                "volume",
+                "detach",
                 vm_name,
                 vol_name,
                 check=False,
