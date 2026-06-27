@@ -1,8 +1,8 @@
 # Resource grouping (batch ID)
 
-> **STATUS: Current — not implemented (as documented).** No `group_id` field exists in `vm_instances` table.
+> **STATUS: ⏳ Pending — not implemented.** No `group_id` field exists in `vm_instances` table or schema. No `--group` flags on CLI commands. `--count` feature is implemented (see `Count` field in `VMCreateInput`) but batch grouping is not built on top of it.
 >
-> **Last verified:** 2026-06-10
+> **Last verified:** 2026-06-27
 
 **Phase:** Standalone — after `--count` feature is stable
 **Complexity:** Low

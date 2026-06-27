@@ -1,18 +1,19 @@
 # Two-Phase Validation with Caller-Trusts-Callee
 
-**Status:** accepted
+**Status:** Active
 **Date:** 2026-05-22
+**Last Updated:** 2026-06-19 (Go input pattern v2 per ADR-0011)
 
-Validation is split into two phases by layer. The API layer handles structural validation (format, existence, cross-field). Core Service/Controller classes do not validate caller input — they execute, detect state, and guard invariants. The trade-off favors speed over defensive duplication.
+Validation is split into two phases by layer. The API layer handles structural validation (format, existence, cross-field). Core Service/Controller packages do not validate caller input — they execute, detect state, and guard invariants. The trade-off favors speed over defensive duplication.
 
 ## Context
 
-mvmctl is a speed-first CLI. Every redundant subprocess call in a defensive validation check adds 10-50ms of latency. Many of these checks duplicate what the operation naturally detects — `bridge_exists()` is called once to "validate" and again to branch execution.
+mvmctl is a speed-first CLI. Every redundant subprocess call in a defensive validation check adds 10-50ms of latency. Many of these checks duplicate what the operation naturally detects — calling a bridge existence check once to "validate" and again to branch execution.
 
 The codebase had three problems:
 1. **Validation scattered across all layers** — Input, Service, and Controller all had overlapping checks.
 2. **Speed erosion** — redundant subprocess calls accumulated across operations.
-3. **Blurred responsibility** — Service classes mixed validation, state detection, and execution in the same methods.
+3. **Blurred responsibility** — Service packages mixed validation, state detection, and execution in the same methods.
 
 ## Decision
 
@@ -20,7 +21,7 @@ The codebase had three problems:
 - Format checks (CIDR syntax, name length, port ranges)
 - Existence/duplicate checks (does this ID/name exist?)
 - Cross-field constraints (cannot set X when Y is Z)
-- Lives in `*Input` structs in `pkg/api/inputs/` (see ADR-0011)
+- Implemented via `Validate()` and `Resolve()` methods on `*Input` structs in `pkg/api/inputs/` (see ADR-0011 for the v2 pattern). The `Resolve()` method calls `Validate()` internally; callers that need granular error reporting may call `Validate()` first, then `Resolve()`.
 
 **Phase 2 — Execution (Core layer, no validation):**
 - Service receives clean, validated data from the caller
@@ -33,6 +34,15 @@ The API layer is responsible for passing clean data down. Service and Controller
 
 **One narrow exception — invariant guards:**
 A Service may check preconditions before an irreversible action (e.g., "are TAPs still attached?" before NAT teardown). These guards protect against system-level damage, not invalid input. They are part of the operation, not validation.
+
+## Implementation
+
+The v1 pattern used a three-struct approach (`*Input` / `*Request` / `Resolved*`) where `Resolve()` lived on a `*Request` wrapper. This was collapsed in ADR-0011 (June 2026) into a single `*Input` struct with `Validate()` and `Resolve()` methods. The `Resolve()` signature varies by domain:
+
+- Simple lookups: `Resolve(ctx, repo) ([]*model.Entity, error)` — returns domain entities directly.
+- Complex create flows: `Resolve(ctx, cfg, repo...) (*ResolvedXxxInput, error)` — returns a structurally different `Resolved*` struct with defaults filled in.
+
+Cross-domain orchestration stays in the API layer (`pkg/api/`). Resolvers on Input structs take exactly one repo interface; branching and enrichment belong in API callers.
 
 ## Considered Options
 
@@ -50,4 +60,5 @@ A Service may check preconditions before an irreversible action (e.g., "are TAPs
 
 ## Related Decisions
 
+- ADR-0011: Input Pattern v2 — collapsed the `*Request` struct pattern into `Validate()`/`Resolve()` on `*Input` structs.
 - CONTEXT.md "Validation (caller's responsibility)" — the validation boundary is enforced by the layer separation.

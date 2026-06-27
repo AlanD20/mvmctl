@@ -1,6 +1,6 @@
 # Key Domain Multi-Default Architecture
 
-**Status:** accepted
+**Status:** Active
 **Date:** 2026-05-22
 
 The SSH key domain is the only entity in the project that supports multiple simultaneous defaults. All other domains (image, kernel, binary, network) enforce a singleton default — setting a new default atomically clears the old one.
@@ -21,5 +21,5 @@ A VM can be configured with multiple SSH keys. When the authorized_keys file is 
 ## Repository methods
 
 - `GetDefaults(ctx) ([]*model.SSHKeyItem, error)` — returns all keys with `is_default=1`
-- `SetDefault(ctx, name) error` — sets `is_default=1` for the named key (no transaction, does not clear others)
+- `SetDefault(ctx, id) error` — sets `is_default=1` for the given key ID (no transaction, does not clear others)
 - `ClearDefaults(ctx) error` — sets `is_default=0` for all keys

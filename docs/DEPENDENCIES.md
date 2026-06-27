@@ -35,6 +35,7 @@ checks for them automatically.
 | `sysctl` | Enabling IP forwarding | `procps` | `procps-ng` |
 | `ssh-keygen` | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 | `tar` | Extracting rootfs from tarballs | `tar` | `tar` |
+| `iptables` or `nft` | Firewall rule management (one of the two) | `iptables` or `nftables` | `iptables` or `nftables` |
 
 **Go toolchain:** The `mvm` binary is a single compiled Go binary. No runtime dependencies.
 
@@ -43,7 +44,7 @@ checks for them automatically.
 ## B. Firewall Backend (Choose One)
 
 mvmctl supports two firewall backends for NAT and forwarding rules. **nftables is the
-default** (`settings.firewall_backend: "nftables"`). Only one backend needs to be installed.
+default** (`settings.firewall_backend: "nftables"`). Only one backend needs to be installed (see §A).
 
 | Backend | Binary | Debian/Ubuntu | Arch | Notes |
 |---------|--------|---------------|------|-------|
@@ -74,6 +75,7 @@ These are required for pulling, importing, and converting VM images.
 | `du` | Disk usage reporting | `coreutils` | `coreutils` |
 | `chmod` | File permission changes (used across all domains) | `coreutils` | `coreutils` |
 | `unsquashfs` | Extracting SquashFS images | `squashfs-tools` | `squashfs-tools` |
+| `dumpe2fs` | Inspecting ext4 filesystem metadata (block count, inode count) | `e2fsprogs` | `e2fsprogs` |
 
 ---
 
@@ -136,7 +138,7 @@ mvm config set settings guestfs_enabled true
 | Arch | `sudo pacman -S libguestfs supermin` |
 
 > **Note:** The codebase uses the `guestfish` CLI tool as a subprocess — no cgo or Go bindings required.
-> `mvm init` checks for the `guestfish` binary and configures the sudoers entry for `supermin` automatically.
+> `mvm init` checks for the `guestfish` binary and configures the sudoers entry for it automatically.
 
 ---
 
@@ -193,16 +195,16 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 | `mvm network create` | `ip`, `iptables`/`nft` |
 | `mvm network rm` / `sync` | `ip`, `iptables`/`nft` |
 | `mvm image pull` | `qemu-img` (may trigger conversion) |
-| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs`, `du`, `chmod`, `dd` |
+| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `chmod`, `dd` |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
 | `mvm kernel pull --type firecracker` | (internal logic — download only) |
 | `mvm key` | `create` → `ssh-keygen`; `import/ls/rm/inspect/export/default` → internal only |
 | `mvm bin` | `pull/ls/rm/default` → internal only (downloads from GitHub API) |
-| `mvm vm create` | `firecracker` + `jailer`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
+| `mvm vm create` | `firecracker`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
 | `mvm vm start/stop/reboot/pause/resume` | `firecracker`, `ip`, `iptables`/`nft` |
 | `mvm vm rm` | `firecracker`, `ip`, `iptables`/`nft` |
-| `mvm vm snapshot/load` | internal (Firecracker API via Unix socket) |
-| `mvm vm attach-volume` / `detach-volume` | `firecracker` |
+| `mvm snapshot create/restore` | internal (Firecracker API via Unix socket) |
+| `mvm volume attach` / `detach` | `firecracker` |
 | `mvm volume` | `ls/inspect` → internal; `create/rm/resize` → `qemu-img` |
 | `mvm kernel import/ls/rm/default/inspect` | internal only |
 | `mvm cache init/prune/clean` | internal (filesystem + DB operations) |

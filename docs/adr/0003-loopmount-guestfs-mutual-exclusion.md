@@ -1,7 +1,8 @@
 # Provisioning Backend Mutual Exclusion — LoopMount vs GuestFS
 
-**Status:** accepted
+**Status:** Active
 **Date:** 2026-05-22
+**Last Updated:** 2026-06-20 (Go implementation complete)
 
 The project provides two independent provisioning backends for root filesystem operations (cloud-init injection, shrink, deblob, OS detection): **LoopMount** and **GuestFS**. These backends are **mutually exclusive** — a single VM or image operation uses exactly one backend, never a combination. The `guestfs_enabled` setting acts as a toggle selector, not a preference.
 
@@ -10,14 +11,13 @@ The project provides two independent provisioning backends for root filesystem o
 Only one backend is active for a given operation. The selection logic is:
 
 1. If `guestfs_enabled` (from user settings) is `true` → use **GuestFS**.
-2. Else if the loop-mount binary is available → use **LoopMount**.
-3. Else → raise an error: no provisioner available.
+2. Else → use **LoopMount**.
 
-This means `guestfs_enabled` is an **override**, not a fallback. When set to `true`, GuestFS is used even if the faster loop-mount binary is available. The setting is persisted in user settings and can be toggled via `mvm init` or `mvm config set settings guestfs_enabled true|false`.
+LoopMount is always available (it runs as the `mvm run provision` subprocess within the same binary, invoked via `system.SpawnService()` or directly via `runWireOp` in `internal/lib/provisioner/loopmount/backend.go`). There is no fallback chain — `guestfs_enabled` is an **override**, not a fallback. The setting is persisted in user settings and can be toggled via `mvm config set settings guestfs_enabled true|false`.
 
 ## Independence
 
-Both backends have separate code paths, separate dependencies, separate error handling, and separate test suites. They share `ProvisionerContent` builders (common data: cloud-init user-data templates, fstab content, etc.) but never share runtime state:
+Both backends have separate code paths, separate dependencies, separate error handling, and separate test suites. They share `ProvisionerContent` builders (common data: cloud-init user-data templates, fstab content, vsock agent injection, etc.) in `internal/infra/provcontent/` but never share runtime state:
 
 | Aspect | LoopMount | GuestFS |
 |--------|-----------|---------|
@@ -31,8 +31,8 @@ Both backends have separate code paths, separate dependencies, separate error ha
 ## No Mixing
 
 A VM or image is provisioned with a single backend from start to finish:
-- **VM creation**: The provisioner is selected once in `VMCreateRequest.Resolve()` and passed through the entire create pipeline.
-- **Image optimization**: The provisioner type is resolved inline in `ImageOperation.Pull()` and `ImageOperation.Import()` and used for both shrink and deblob.
+- **VM creation**: The provisioner type is resolved once at startup in `api.NewOperation()` (`pkg/api/operation.go`, line 131-136) by reading `settings.guestfs_enabled`. All callers use `op.ProvisionerType` directly.
+- **Image optimization**: The provisioner type flows through to image service methods via `provisioner.ProvisionerType` parameter.
 - **Cache operations**: GuestFS appliance cleanup runs independently of loop-mount state.
 
 Attempting to mix backends within a single operation is a bug.
@@ -47,7 +47,15 @@ The natural alternative would be a fallback chain: try loop-mount first, fall ba
 
 ## Resolution at Startup
 
-The provisioner type is resolved **once at startup** in `api.NewOperation()` by reading `settings.guestfs_enabled`. All callers use `op.ProvisionerType` directly. This eliminates repeated Config.Get calls for the same setting.
+The provisioner type is resolved **once at startup** in `api.NewOperation()` (`pkg/api/operation.go`, line 131-136) by reading `settings.guestfs_enabled`. All callers use `op.ProvisionerType` directly. This eliminates repeated Config.Get calls for the same setting.
+
+```go
+provisionerType := provisioner.ProvisionerLoopMount
+guestfsEnabled, _ := s.Config.GetBool(ctx, "settings", "guestfs_enabled")
+if guestfsEnabled {
+    provisionerType = provisioner.ProvisionerGuestFS
+}
+```
 
 ## Performance Benchmark (Wall-clock, Sequential)
 

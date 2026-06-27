@@ -4,7 +4,7 @@
 >
 > Implementation location: `internal/lib/provisioner/guestfs/`
 >
-> **Note:** The guestfs provisioning path is the **fallback backend** in mvmctl. The primary provisioning backend is the loop-mount subprocess (`mvm provision` via `LoopMountBackend`). Guestfs is used only when the loop-mount binary is unavailable or `guestfs_enabled` is set to `true` in config (`internal/infra/constants.go:122`).
+> **Note:** The guestfs provisioning path is the **fallback backend** in mvmctl. The primary provisioning backend is the loop-mount subprocess (`mvm provision` via `LoopMountBackend`). Guestfs is used only when the loop-mount binary is unavailable or `guestfs_enabled` is set to `true` in config (`internal/infra/constants.go`).
 
 ## Overview
 
@@ -18,7 +18,7 @@ The Go implementation uses `guestfish` CLI as a subprocess (Go has no native gue
 
 The libguestfs appliance uses the `direct` backend (QEMU/KVM directly) instead of libvirt. This eliminates libvirt IPC overhead and dependency resolution delays.
 
-**Implementation:** `internal/lib/provisioner/guestfs/base.go:81`
+**Implementation:** `initEnv()` at `internal/lib/provisioner/guestfs/base.go`
 ```go
 os.Setenv("LIBGUESTFS_BACKEND", "direct")
 ```
@@ -27,7 +27,7 @@ os.Setenv("LIBGUESTFS_BACKEND", "direct")
 
 The `LIBGUESTFS_CACHEDIR` environment variable is set to `/dev/shm` when available, reducing appliance load time by using tmpfs.
 
-**Implementation:** `internal/lib/provisioner/guestfs/base.go:83-84`
+**Implementation:** `initEnv()` at `internal/lib/provisioner/guestfs/base.go`
 ```go
 if _, err := os.Stat("/dev/shm"); err == nil {
     os.Setenv("LIBGUESTFS_CACHEDIR", "/dev/shm")
@@ -38,7 +38,7 @@ if _, err := os.Stat("/dev/shm"); err == nil {
 
 Memory allocation is reduced to 256MB, significantly faster than the default 500MB+ allocation. This is set via `LIBGUESTFS_MEMSIZE` env var instead of the `set_memsize()` API (which doesn't exist in guestfish 1.56.x as a CLI flag).
 
-**Implementation:** `internal/lib/provisioner/guestfs/base.go:82`
+**Implementation:** `initEnv()` at `internal/lib/provisioner/guestfs/base.go`
 ```go
 os.Setenv("LIBGUESTFS_MEMSIZE", "256")
 ```
@@ -52,14 +52,14 @@ Setting `QEMU_LOCKING=off` disables this locking mechanism. This is safe in mvmc
 - The ready pool image is effectively read-only after creation.
 - No concurrent writers or shared storage scenarios exist.
 
-**Implementation:** `internal/lib/provisioner/guestfs/base.go:86`
+**Implementation:** `initEnv()` at `internal/lib/provisioner/guestfs/base.go`
 ```go
 os.Setenv("QEMU_LOCKING", "off")
 ```
 
 ### 5. Kernel Detection for Appliance (Environment Variable) ✅ IMPLEMENTED
 
-`initEnv()` (`internal/lib/provisioner/guestfs/base.go:88-93`) uses `KernelDetector.FindBestKernel()` to select the optimal host kernel for the libguestfs appliance. The detector scans `/boot` for kernel images, uses the `file` command to extract version strings, and scores candidates based on virtio module availability and whether the kernel looks like a custom build. Kernels with more virtio drivers (critical for guestfs) are ranked higher. The selected kernel is passed to the appliance via `SUPERMIN_KERNEL` and `SUPERMIN_MODULES` environment variables.
+`initEnv()` in `internal/lib/provisioner/guestfs/base.go` uses `KernelDetector.FindBestKernel()` to select the optimal host kernel for the libguestfs appliance. The detector scans `/boot` for kernel images, uses the `file` command to extract version strings, and scores candidates based on virtio module availability and whether the kernel looks like a custom build. Kernels with more virtio drivers (critical for guestfs) are ranked higher. The selected kernel is passed to the appliance via `SUPERMIN_KERNEL` and `SUPERMIN_MODULES` environment variables.
 
 **Code reference:** `internal/lib/provisioner/guestfs/kernel_detector.go` — `KernelDetector.FindBestKernel()`.
 
@@ -67,7 +67,7 @@ os.Setenv("QEMU_LOCKING", "off")
 
 The appliance runs with a single vCPU, reducing hardware initialization time. This is implemented by prepending `set-smp 1` to the guestfish stdin script (guestfish 1.56.x does not support `--smp` as a CLI flag).
 
-**Implementation:** `internal/lib/provisioner/guestfs/base.go:147`
+**Implementation:** `guestfishRun()` at `internal/lib/provisioner/guestfs/base.go`
 ```go
 input = "set-smp 1\nset-recovery-proc false\nrun\n" + ...
 ```
@@ -76,22 +76,22 @@ input = "set-smp 1\nset-recovery-proc false\nrun\n" + ...
 
 By default, libguestfs forks a "recovery process" that monitors the appliance and kills the QEMU instance if the main process crashes. Disabling this saves a `fork()` and `exec()` call during `g.launch()`. Implemented via stdin command `set-recovery-proc false`.
 
-**Implementation:** `internal/lib/provisioner/guestfs/base.go:147` (same line as vCPU)
+**Implementation:** `guestfishRun()` at `internal/lib/provisioner/guestfs/base.go` (same line as vCPU)
 
 ### 8. **--no-sync** (CLI Flag) ✅ IMPLEMENTED
 
 The `guestfishRun()` function always passes `--no-sync` to the guestfish CLI. This disables the default `sync()` call on handle close (equivalent to `set_autosync(false)` in the guestfish CLI / libguestfs API). Since we explicitly call `sync` in the script at the end of provisioning, autosync is redundant.
 
-**Implementation:** `internal/lib/provisioner/guestfs/base.go:114`
+**Implementation:** `guestfishRun()` at `internal/lib/provisioner/guestfs/base.go`
 ```go
 allArgs = append(allArgs, "--no-sync")
 ```
 
 ### 9. Fixed Appliance (Build + Cache) ✅ IMPLEMENTED
 
-`BuildAppliance()` at `internal/lib/provisioner/guestfs/utils.go:47-137` builds the libguestfs fixed appliance during `mvm cache init`. It runs `libguestfs-make-fixed-appliance` if available on the system. If the tool is not installed, it silently skips the build (returns `nil`).
+`BuildAppliance()` at `internal/lib/provisioner/guestfs/utils.go` builds the libguestfs fixed appliance during `mvm cache init`. It runs `libguestfs-make-fixed-appliance` if available on the system. If the tool is not installed, it silently skips the build (returns `nil`).
 
-Before building, it calls `CleanStaleState()` (`utils.go:140-198`) to kill abandoned QEMU/guestfish processes, remove stale lock files, daemon sockets, and cached appliance directories that could cause the appliance build to hang.
+Before building, it calls `CleanStaleState()` in `utils.go` to kill abandoned QEMU/guestfish processes, remove stale lock files, daemon sockets, and cached appliance directories that could cause the appliance build to hang.
 
 **Code reference:** `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `CleanStaleState()`, `PruneAppliance()`, `EnsureAppliance()`.
 
@@ -99,7 +99,7 @@ Before building, it calls `CleanStaleState()` (`utils.go:140-198`) to kill aband
 
 The `guestfishRun()` function wraps the guestfish invocation in a retry loop with up to 3 attempts and 500ms × (attempt+1) backoff between retries. This handles transient QEMU launch failures (resource contention, kernel detection race) without aborting the entire provisioning operation.
 
-**Implementation:** `internal/lib/provisioner/guestfs/base.go:154-161`
+**Implementation:** `guestfishRun()` at `internal/lib/provisioner/guestfs/base.go`
 ```go
 for attempt := range 3 {
     if attempt > 0 {
@@ -137,16 +137,16 @@ The `RunDeferred()` function (`provisioner.go:52-135`) executes provisioning in 
 
 | # | Optimization | Status | Code Location |
 |---|---|---|---|
-| 1 | Direct backend (`LIBGUESTFS_BACKEND=direct`) | ✅ | `base.go:81` |
-| 2 | Appliance cache in RAM (`/dev/shm`) | ✅ | `base.go:83-84` |
-| 3 | Minimal memory (`LIBGUESTFS_MEMSIZE=256`) | ✅ | `base.go:82` |
-| 4 | QEMU lock disable (`QEMU_LOCKING=off`) | ✅ | `base.go:86` |
+| 1 | Direct backend (`LIBGUESTFS_BACKEND=direct`) | ✅ | `initEnv()` |
+| 2 | Appliance cache in RAM (`/dev/shm`) | ✅ | `initEnv()` |
+| 3 | Minimal memory (`LIBGUESTFS_MEMSIZE=256`) | ✅ | `initEnv()` |
+| 4 | QEMU lock disable (`QEMU_LOCKING=off`) | ✅ | `initEnv()` |
 | 5 | Kernel detection (`KernelDetector.FindBestKernel()`) | ✅ | `kernel_detector.go` |
-| 6 | Minimal vCPUs (`set-smp 1` stdin) | ✅ | `base.go:147` |
-| 7 | Disable recovery process (`set-recovery-proc false` stdin) | ✅ | `base.go:147` |
-| 8 | Disable autosync (`--no-sync` CLI flag) | ✅ | `base.go:114` |
-| 9 | Fixed appliance (`BuildAppliance()`) | ✅ | `utils.go:47-137` |
-| 10 | Retry logic (3 attempts, backoff) | ✅ | `base.go:154-161` |
+| 6 | Minimal vCPUs (`set-smp 1` stdin) | ✅ | `guestfishRun()` |
+| 7 | Disable recovery process (`set-recovery-proc false` stdin) | ✅ | `guestfishRun()` |
+| 8 | Disable autosync (`--no-sync` CLI flag) | ✅ | `guestfishRun()` |
+| 9 | Fixed appliance (`BuildAppliance()`) | ✅ | `BuildAppliance()` |
+| 10 | Retry logic (3 attempts, backoff) | ✅ | `guestfishRun()` |
 
 ## Related Files
 
@@ -157,5 +157,5 @@ The `RunDeferred()` function (`provisioner.go:52-135`) executes provisioning in 
 - `internal/lib/provisioner/guestfs/utils.go` — `BuildAppliance()`, `CleanStaleState()`, `PruneAppliance()`
 - `internal/lib/provisioner/guestfs/kernel_detector.go` — `KernelDetector`
 - `internal/lib/provisioner/backend.go` — Backend factory (guestfs vs loopmount selection)
-- `internal/infra/constants.go` — `guestfs_enabled` default (line 122)
+- `internal/infra/constants.go` — `guestfs_enabled` default
 - `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` — ADR for backend selection

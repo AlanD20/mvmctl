@@ -2,21 +2,22 @@
 
 > **STATUS: Current — active tracking document.** All status markers reflect the Go codebase.
 >
-> **Last verified:** 2026-06-10
+> **Last verified:** 2026-06-27
 
 ## Implementation Reviews
 
 - [ ] `mvm config set|get` must modify values from `internal/infra/constants.go`
-    - **🔶 PARTIAL** — `ConfigOperation` exists. Commands modify `OverridableDefaults` (49 settings). Stored in SQLite (via `SettingsService` + `SettingsRepository`), NOT config.json. Only `OverridableDefaults` subset, not ALL constants.
+    - **🔶 PARTIAL** — Settings implemented via `config.Service` + `SettingsRepository` (SQLite). Commands modify overridable settings derived from `infra.OverridableDefaults`, NOT config.json. Only the overridable subset is modifiable, not ALL constants.
 
 ## Core
 
 - [ ] repl-like guestfs filesystem access to rootfs
     - **❌ NOT IMPLEMENTED** — Guestfs exists but batch-provisioning only. No interactive rootfs CLI.
 - [x] reconcile VM from stopped state
-    - ✅ **IMPLEMENTED** — `VMOperation.Start()` handles stopped VMs via respawn flow.
+    - ✅ **IMPLEMENTED** — `Operation.VMStart()` handles stopped VMs via respawn flow.
 - [ ] add is_present checks for VMs
     - **❌ NOT IMPLEMENTED** — All other domains (images, kernels, binaries, networks, keys) have `is_present` field. `vm_instances` table does NOT have one. VM presence is inferred from process status.
+    - Note: volume domain also does NOT use `is_present` — volumes are storage entities managed by lifecycle, not file-presence. This is consistent design, not an omission.
 - [x] add --timeout for mvm ssh
     - ✅ **IMPLEMENTED** — `--timeout/-t` → `-o ConnectTimeout=N` in SSH args.
 - [x] proper exceptions per domain
@@ -27,19 +28,19 @@
 - [ ] fully isolated bridge networking for VMs
     - **❌ NOT IMPLEMENTED** — Plain bridge+TAP only. No VLANs, namespaces, ebtables, or isolation mode.
 - [x] constrain TAP FORWARD rules to bridge subnet
-    - ✅ **IMPLEMENTED** — `EnsureTAP()` uses bridge subnet for src/dst, matching `EnsureNAT()`.
+    - ✅ **IMPLEMENTED** — `AddTapFirewallRules()` via `NewTapForwardRules()` constrains FORWARD rules to bridge subnet, matching `EnsureNAT()`.
 
 ## Codebase Maintainability
 
 - [x] replace yaml_id references with internal id
     - ✅ **IMPLEMENTED** — Zero matches found. Clean: YAML slug → SHA256 hash.
 - [ ] centralize all tool usage (ip, iptables, etc.) in utility files
-    - **❌ (~25%)** — Read-only ip/iptables queries centralized in `internal/lib/network/`. Destructive ops + blkid/sfdisk/losetup/mount/visudo still scattered as direct subprocess calls across 6+ files.
+    - **❌ (~35%)** — Read-only ip/iptables queries centralized in `internal/lib/network/`. iptables rule management centralized in `internal/lib/firewall/`. blkid centralized in `internal/lib/system/block.go` (`DetectFilesystemType`, `DetectFilesystemUUID`). Destructive ops + sfdisk/losetup/mount/visudo still scattered as direct subprocess calls across 6+ files.
 
 ## CLI
 
 - [x] add confirmation to mvm cache prune including all sub commands
-    - ✅ **IMPLEMENTED** — All 6 prune subcommands prompt `common.Cli.PromptConfirm("Continue?", true)`. `--force/-f` bypasses.
+    - ✅ **IMPLEMENTED** — All prune subcommands prompt `common.Cli.PromptConfirm(ctx, "Continue?", true)`. `--force/-f` bypasses.
 - [ ] --debug propagates -v to subprocess tools
     - **❌ NOT IMPLEMENTED** — `--debug` sets Go slog level but zero propagation to ssh/ip/iptables subprocess calls.
 - [x] rename configure.py to init
@@ -57,7 +58,7 @@
 - [x] volume domain implementation
     - ✅ **IMPLEMENTED** — Volume domain is fully implemented:
         - `internal/core/volume/` with controller, repository, resolver, service, sqlite, utils
-        - `pkg/api/volume.go` with `VolumeOperation`
+        - `pkg/api/volume.go` with `Operation.Volume*` methods
         - `pkg/api/inputs/volume_input.go`
         - `internal/lib/model/volume.go` with `VolumeItem`, `VolumeStatus`
         - `internal/cli/volume.go` registered in root command

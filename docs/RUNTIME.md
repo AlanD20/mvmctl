@@ -13,7 +13,7 @@ mvmctl uses several backend systems for provisioning, infrastructure, and servic
 - [4. Firewall Backends](#4-firewall-backends)
 - [5. Selection Guide](#5-selection-guide)
 - [6. Performance Comparison](#6-performance-comparison)
-- [7. Binary Embedding & Build](#7-binary-embedding--build)
+- [7. Binary Build](#7-binary-build)
 - [8. Architecture Diagram](#8-architecture-diagram)
 
 ---
@@ -22,15 +22,17 @@ mvmctl uses several backend systems for provisioning, infrastructure, and servic
 
 Provisioning backends handle root filesystem operations: resizing, SSH key injection, hostname setup, DNS configuration, cloud-init disable/enable, and other rootfs modifications.
 
-### 1.1 Loop-Mount Backend (Primary, ~200ms)
+### 1.1 Loop-Mount Backend (Primary, ~2.3s)
 
-- **Type:** `model.ProvisionerTypeLoopMount`
+- **Type:** `model.ProvisionerLoopMount`
 - **Entry:** `mvm run provision` (compiled into the same `mvm` binary)
 - **Architecture:**
   ```
-  api.Operation.VMCreate() → vm.Service → provisioner.Run() → system.SpawnService("mvm", "run", "provision") → losetup/mount/chroot
+  api.Operation.VMCreate() → provisioner.NewBackend() → backend.Resize()/SetHostname()/...
+    → backend.Run() → runWireOp() → system.DefaultRunner.Run(["sudo", "mvm", "run", "provision"], stdin=JSON)
+    → losetup/mount/chroot → JSON results on stdout
   ```
-- **Speed:** ~1.2s average end-to-end creation (provisioning + Firecracker boot), ~2.8s to SSH-ready (benchmark data)
+- **Speed:** ~2.3s average end-to-end creation (provisioning + Firecracker boot), ~2.9s to VM-ready (benchmark data)
 - **Dependencies:** `losetup`, `mount`, `umount`, `blkid`, `blockdev`, `chroot`, `resize2fs`, `e2fsck`, `tune2fs`, `fstrim`, `btrfs`
 - **Sudo:** Requires passwordless sudo for `mvm-provision` (via `mvm host init`)
 - **Communication:** JSON operation list on stdin, JSON results on stdout
@@ -70,15 +72,15 @@ Provisioning backends handle root filesystem operations: resizing, SSH key injec
   - `internal/lib/provisioner/backend.go` — Backend interface
   - `internal/infra/provcontent/content.go` — Shared provisioning content builders
 
-### 1.2 GuestFS Backend (Opt-in, ~2600ms)
+### 1.2 GuestFS Backend (Opt-in, ~8.4s+)
 
 - **Type:** `model.ProvisionerTypeGuestFS`
 - **Binary:** libguestfs Go bindings + supermin QEMU appliance
 - **Architecture:**
   ```
-  api.Operation.VMCreate() → vm.Service → provisioner.Run() → guestfs.Backend → libguestfs (QEMU appliance)
+  api.Operation.VMCreate() → provisioner.NewBackend() → guestfs.Backend → libguestfs (QEMU appliance)
   ```
-- **Speed:** ~3.9s average end-to-end creation, ~5.8s to SSH-ready (benchmark data — exceeds 6s threshold on most images)
+- **Speed:** ~8.4s average end-to-end creation (alpine), ~10s+ for Ubuntu/Debian/Arch (benchmark data — exceeds 6s threshold on most images; 10s threshold used in benchmarks)
 - **Dependencies:** `libguestfs` (system package), `supermin`, `qemu`, libguestfs fixed appliance
 - **Sudo:** Requires passwordless sudo for `supermin`
 - **Used when:** GuestFS is enabled via the `guestfs_enabled` setting (opt-in). Loop-mount is the default when GuestFS is not enabled.
@@ -109,7 +111,11 @@ The provisioner backend is selected once at startup in `api.NewOperation()` by r
 
 ```go
 // In pkg/api/operation.go NewOperation():
-op.ProvisionerType = provisioner.ResolveProvisionerType(settings.GuestfsEnabled)
+provisionerType := provisioner.ProvisionerLoopMount
+guestfsEnabled, _ := s.Config.GetBool(ctx, "settings", "guestfs_enabled")
+if guestfsEnabled {
+    provisionerType = provisioner.ProvisionerGuestFS
+}
 ```
 
 All callers use `op.ProvisionerType` directly. The `Provisioner` struct in `internal/lib/provisioner/` wraps the backend with a unified interface.
@@ -149,7 +155,7 @@ Cloud-init provisioning has four modes (ordered from most to least integrated):
 
 ```
 api.Operation.VMCreate()
-  → cloudinit.Provisioner.Prepare()
+  → cloudinit.Provisioner.Provision()
     → Generate user-data, meta-data, network-config
     → cloudinit.Manager.WriteConfigFiles()
     → provisioner.InjectCloudInit(cloudInitDir)
@@ -161,7 +167,7 @@ api.Operation.VMCreate()
 
 ```
 api.Operation.VMCreate()
-  → cloudinit.Provisioner.Prepare()
+  → cloudinit.Provisioner.Provision()
     → Generate user-data, meta-data, network-config
     → cloudinit.Manager.WriteConfigFiles()
     → nocloudnet.Spawn(ctx, cfg)
@@ -177,7 +183,7 @@ api.Operation.VMCreate()
 
 ```
 api.Operation.VMCreate()
-  → cloudinit.Provisioner.Prepare()
+  → cloudinit.Provisioner.Provision()
     → Generate user-data, meta-data, network-config
     → cloudinit.Manager.WriteConfigFiles()
     → cloudinit.Manager.CreateSeedISO() (via cloud-localds subprocess)
@@ -189,7 +195,7 @@ api.Operation.VMCreate()
 
 ```
 api.Operation.VMCreate()
-  → cloudinit.Provisioner.Prepare()
+  → cloudinit.Provisioner.Provision()
     → Returns CloudInitResult{Mode: CloudInitModeOff}
     → provisioner.DisableCloudInit() called separately
       → Writes datasource block file + masks services in rootfs
@@ -212,14 +218,15 @@ invoked via `mvm run <service>` and spawned in the background via `system.SpawnS
 
 ### 3.1 Service Architecture
 
-All three services are compiled into the **single `mvm` binary** — no separate multidist
-binary. At runtime, `mvm run <service>` dispatches to the appropriate entry point:
+The `console`, `nocloudnet`, and `loopmount` services are compiled into the **single `mvm` binary** — no separate multidist binary. At runtime, `mvm run <service>` dispatches to the appropriate entry point:
 
 | Service | Entry Point | Runs As | Purpose |
 |---------|-------------|---------|---------|
 | `mvm run console relay` | `console.Run(ctx, cfg)` | user | PTY-to-socket relay for serial console |
 | `mvm run nocloudnet serve` | `nocloudnet.Run(ctx, cfg)` | user | HTTP server for cloud-init nocloud-net |
 | `mvm run provision` | `loopmount.Run(ctx, cfg)` | **root** (sudo) | Loop-mount rootfs provisioning |
+
+Additionally, `internal/service/vsockagent/` provides an **embedded guest agent binary** — cross-compiled and compressed into the `mvm` binary at build time, then injected into the VM via vsock at runtime. Unlike the three `mvm run` services, the vsock agent runs inside the Firecracker VM, not on the host.
 
 Each service follows a consistent three-function pattern:
 - **`Config`** struct — holds all configuration for the service.
@@ -228,7 +235,7 @@ Each service follows a consistent three-function pattern:
 
 ### 3.2 Console Relay
 
-- **Entry:** `mvm run console`
+- **Entry:** `mvm run console relay`
 - **Purpose:** PTY-to-socket relay for interactive serial console — reads from PTY master fd, forwards to both a Unix socket (for CLI attachment) and a log file
 - **Files:**
   - `internal/service/console/entry.go` — Config struct + `Run()` entry point
@@ -237,7 +244,7 @@ Each service follows a consistent three-function pattern:
   - `internal/service/console/client.go` — Console client for CLI attachment
 - **Architecture:**
   ```
-  console.Controller → console.Spawn(ctx, cfg) → system.SpawnService("mvm", "run", "console")
+  console.Controller → console.Spawn(ctx, cfg) → system.SpawnService("mvm", "run", "console", "relay")
                                                                     │
                                               PTY master fd ← → Unix socket ← → Client (CLI)
                                                                     │
@@ -251,7 +258,7 @@ Each service follows a consistent three-function pattern:
 
 ### 3.3 NoCloud Server
 
-- **Entry:** `mvm run nocloudnet`
+- **Entry:** `mvm run nocloudnet serve`
 - **Purpose:** HTTP server serving cloud-init meta-data/user-data/network-config to VMs
 - **Files:**
   - `internal/service/nocloudnet/entry.go` — Config struct + `Run()` entry point
@@ -283,25 +290,25 @@ Each service follows a consistent three-function pattern:
   - `internal/service/loopmount/wire.go` — JSON wire protocol types
 - **Architecture:**
   ```
-   vm.Service → provisioner.Run() → loopmount.Spawn(ctx, cfg, wireInput)
-                                                        │
-                                                 system.SpawnService("mvm", "run", "provision")
+   API layer (pkg/api/vm.go) → provisioner.NewBackend() (creates LoopMountBackend)
+     → backend.Resize() / SetHostname() / ... (queues operations)
+     → backend.Run() → runWireOp() → system.DefaultRunner.Run(["sudo", "mvm", "run", "provision"])
                                                         │
                                     JSON ops stdin → losetup/mount/chroot → JSON results stdout
   ```
 - **Communication:** Receives JSON operation list on stdin, writes JSON results to stdout
 - **Timeout:** 60 seconds per chroot command (hardcoded in `provisioner.go`)
 - **Sudo:** Requires passwordless sudo via `/etc/sudoers.d/mvm-provision` drop-in
-- **Speed:** ~1.2s average end-to-end (benchmark data)
+- **Speed:** ~2.3s average end-to-end (benchmark data)
 
 ### 3.5 Service Lifecycle
 
 | Phase | Action | Component |
 |-------|--------|-----------|
-| **Init** | `mvm host init` creates sudoers drop-in, iptables chains, cache dirs | `host.Service.Init()` |
-| **Create VM** | Start NoCloud server (net mode) or inject cloud-init (inject mode) | `nocloudnet.Spawn()` / `provisioner.InjectCloudInit()` |
-| **Create VM** | Start console relay (unless `--no-console`) | `console.Spawn()` |
-| **Runtime** | Provision rootfs via loop-mount or guestfs | `provisioner.Run()` (via `mvm run provision`) |
+| **Init** | `mvm host init` creates sudoers drop-in, default firewall chains, cache dirs | `host.Service.Init()` |
+| **Create VM** | Start NoCloud server (net mode) or inject cloud-init (inject mode) | `nocloudnet.Spawn()` / `backend.InjectCloudInit()` |
+| **Create VM** | Start console relay (unless `--console=false`) | `console.Spawn()` |
+| **Runtime** | Provision rootfs via loop-mount or guestfs | `backend.Run()` (queues ops → runs `mvm run provision` subprocess) |
 | **Remove VM** | Stop console relay + NoCloud server + clean firewall rules | `console.Stop()`, `nocloudnet.Stop()` |
 | **Cache prune** | Clean up stale PID files + orphan processes | `cache.Service.Prune()` |
 
@@ -324,12 +331,12 @@ A unified `FirewallTracker` in `internal/lib/firewall/tracker.go` delegates to t
 
 | Scenario | Recommended Backend | Rationale |
 |----------|-------------------|-----------|
-| Normal VM creation (default) | Loop-Mount provisioning + inject cloud-init | Fastest path (~1.2s creation, ~2.8s to SSH) |
-| No sudo for mvm-provision | GuestFS provisioning | Uses `guestfs_enabled` setting to opt-in (~3.9s creation) |
+| Normal VM creation (default) | Loop-Mount provisioning + inject cloud-init | Fastest path (~2.3s creation, ~2.9s to VM-ready) |
+| No sudo for mvm-provision | GuestFS provisioning | Uses `guestfs_enabled` setting to opt-in (~8.4s-10s creation) |
 | Minimal VM, no customization | Off mode cloud-init | Fastest boot, no provisioning at all |
 | Dynamic cloud-init needed | Net mode cloud-init | Config served over network, no rootfs modification |
 | Custom ISO required | ISO mode cloud-init | Use pre-built cloud-init ISO via `cloud-localds` |
-| Console access needed | Console Relay | Automatically started (disable with `--no-console`) |
+| Console access needed | Console Relay | Opt-in (enable with `--console`, disabled by default) |
 | Development environment | Loop-Mount (direct) | Uses `mvm` binary directly, no separate service binaries |
 | Image optimization | Loop-Mount partition extraction | ~500ms vs ~2000ms for guestfs extraction |
 
@@ -339,7 +346,7 @@ A unified `FirewallTracker` in `internal/lib/firewall/tracker.go` delegates to t
 
 Benchmark data from `benchmarks/results.json` (2026-06-16, sequential run, 5s threshold).
 
-Measured via `mvm vm exec -- echo ok` inside the VM — replaces the earlier
+Measured via `mvm exec -- echo ok` inside the VM — replaces the earlier
 SSH-based probe. All images use the loop-mount provisioning backend (the default).
 
 ### End-to-End VM Creation (create_s)
@@ -357,9 +364,9 @@ SSH-based probe. All images use the loop-mount provisioning backend (the default
 ### Notes
 
 - All six images passed within the 5s threshold in sequential mode.
-- Parallel execution (`--no-parallel`) can degrade boot times for resource-heavy
-  images (debian, archlinux) due to I/O contention on the host.
-- The probe now uses `echo ok` via `mvm vm exec` (vsock guest agent)
+- Parallel benchmark execution (use `--no-parallel` in `benchmarks/boot_time.py`)
+  avoids I/O contention on the host for resource-heavy images (debian, archlinux).
+- The probe now uses `echo ok` via `mvm exec` (vsock guest agent)
   instead of SSH — this measures end-to-end VM readiness (vsock agent responding).
 - **Console relay startup**: ~10ms (negligible, no separate benchmark)
 - **NoCloud server startup**: ~50ms (negligible, no separate benchmark)
@@ -374,8 +381,7 @@ The `mvm` binary is a standard Go binary that includes all services compiled in:
 go build -o dist/mvm ./cmd/mvm
 ```
 
-All three services (console relay, nocloud-net server, loopmount provisioner) are compiled
-into the same binary. No separate service binaries, no symlinks, no extraction step.
+The three `mvm run` services (console relay, nocloud-net server, loopmount provisioner) plus the vsock guest agent binary are all compiled into the same binary. No separate service binaries, no symlinks, no extraction step.
 
 ### Service Invocation
 
@@ -409,12 +415,14 @@ creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                           API Layer (pkg/api)                                │
 │  op.VMCreate(ctx, input)                                                    │
-│    ├── cloudinit.Provisioner.Prepare()  (prepare configs)                   │
-│    ├── provisioner.Run(ctx, provisionerType)  (select backend)              │
-│    │   ├── LoopMount → loopmount.Spawn() → system.SpawnService("provision")│
-│    │   │   └── losetup → mount → write files → chroot → resize → umount    │
-│    │   └── GuestFS   → guestfs.Backend → libguestfs (QEMU appliance)       │
-│    ├── console.Spawn()  (unless --no-console)                               │
+│    ├── cloudinit.Provisioner.Provision()  (prepare configs)                   │
+│    ├── provisioner.NewBackend(opts)  (select backend at startup)            │
+│    │   ├── LoopMount → backend.Resize()/SetHostname()/... → backend.Run()  │
+│    │   │   └── runWireOp() → DefaultRunner.Run(["mvm","run","provision"])  │
+│    │   │       → losetup → mount → write → chroot → resize → umount        │
+│    │   └── GuestFS   → backend.Resize()/SetHostname()/... → backend.Run()  │
+│    │       → guestfs.Backend → libguestfs (QEMU appliance)                 │
+│    ├── console.Spawn()  (if --console)                                      │
 │    └── nocloudnet.Spawn()  (if net mode)                                    │
 └───────────────────────────┬─────────────────────────────────────────────────┘
                             │
@@ -426,16 +434,18 @@ creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless 
 │  core/network/     Controller, Service, Repository, SQLite, Resolver        │
 │  core/volume/      Controller, Service, Repository, SQLite, Resolver        │
 │  core/cloudinit/   Provisioner, Manager, Config                             │
-│  core/image/       Controller, Service, Repository, SQLite, Resolver        │
+│  core/image/       Provisioner, Service, Repository, SQLite, Resolver       │
 │  core/kernel/      Controller, Service, Repository, SQLite, Resolver        │
 │  core/host/        Controller, Service, Repository, SQLite, Detector, Probe │
 │  core/config/      Service, Repository, SQLite, Constraints                 │
 │  core/console/     Controller                                               │
 │  core/logs/        Controller, Service                                      │
 │  core/cache/       Service                                                  │
-│  core/ssh/         Service, CP                                              │
+│  core/ssh/         Service                                                  │
 │  core/binary/      Controller, Service, Repository, SQLite, Resolver        │
 │  core/key/         Controller, Service, Repository, SQLite, Resolver        │
+│  core/vsock/       Client, Service, Repository, SQLite, Resolver            │
+│  core/snapshot/    Repository, SQLite, Resolver                             │
 └───────────────────────────┬─────────────────────────────────────────────────┘
                             │
                             ▼
@@ -445,6 +455,7 @@ creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless 
 │  All compiled into the single mvm binary                                    │
 │    ├── mvm run console relay    → console relay (PTY proxy)                 │
 │    ├── mvm run nocloudnet serve → nocloud-net HTTP server                   │
-│    └── mvm run provision        → loopmount provisioner (requires sudo)     │
+│    ├── mvm run provision        → loopmount provisioner (requires sudo)     │
+│    └── vsockagent               → embedded guest agent (injected into VM)   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```

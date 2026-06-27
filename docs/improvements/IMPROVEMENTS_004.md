@@ -1,8 +1,8 @@
 # --from-volume: Full-disk boot from a volume
 
-> **STATUS: Current — not implemented (as documented).** No `--from-volume` code exists in the Go codebase.
+> **STATUS: ⏳ Pending — not implemented.** No `--from-volume` code exists in the Go codebase. No `from_volume` field in `VMCreateInput` struct, no `--from-volume` flag on CLI. The volume domain (dependency) is complete, but the alternative VM creation path via volume has not been built.
 >
-> **Last verified:** 2026-06-10
+> **Last verified:** 2026-06-27
 
 **Phase:** After volume domain (✅ completed)
 **Complexity:** Medium

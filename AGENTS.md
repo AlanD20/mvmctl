@@ -13,15 +13,10 @@ This is the **only** AGENTS.md in the project. Per-folder AGENTS.md files have b
 3. **`docs/STANDARDS.md`** — Go coding standards, conventions, and architectural rules.
 4. **`docs/system-test-architecture.md`** — System test architecture, tier classification, fixture scoping, known-limitation patterns. The primary reference for writing or modifying system tests.
 
-Individual agent instructions live in `.opencode/agent/`:
-- `architect.md` — Planner, analyzer, delegator. NEVER writes code.
-- `engineer.md` — Go engineer. Writes and refactors Go code following idiomatic patterns. Handles porting and post-port refinement.
-- `qa-engineer.md` — QA engineer. Owns system tests, coverage audit, and release verification. Never writes production code.
-
-## Agent boundaries
+## Agent roles and responsibilities
 
 - **`engineer` agent**: Go engineer — handles all Go source code (`cmd/`, `internal/`, `pkg/`, `go.mod`, etc.). Owns L0 (pure function) and L1 (hermetic) Go tests — table-driven tests, in-memory repos, `FakeRunner`, `go test ./...`.
-- **`qa-engineer` agent**: QA engineer — owns all test and release processes. Owns L2 (Python runner VM) e2e tests in `tests/e2e/`, coverage audit, and release verification. Never writes production Go code.
+- **`qa-engineer` agent**: QA engineer — owns all test and release processes. Owns L2 (Python runner VM) system tests in `tests/system/`, coverage audit, and release verification. Never writes production Go code.
 - **`architect` agent**: Plans, analyzes, delegates. NEVER writes code. OWNS all documentation (CONTEXT.md, AGENTS.md, docs/, .opencode/). May spawn `explore` for research.
 
 ## CI standards (mirrors `.github/workflows/ci.yml`)
@@ -61,7 +56,7 @@ The architect MUST verify these before approving any implementation plan:
 - Core domains NEVER import other core/* packages. Only `internal/lib/model/` is shared across domains.
 - Controller = state management per entity (start/stop/pause/resume/snapshot). No remove(), no create().
 - Service does NOT validate caller input. Caller validates, receiver trusts.
-- ALL subprocess calls through `system.RunCmdOpts` / `system.RunCmd` — no raw `os/exec`. Documented exceptions (see CONTEXT.md "Subprocess invocation"): Firecracker spawn (pass_fds), kernel build (log streaming), tar-pipe in cp (two-child pipe chain), and service subprocesses (loopmount provisioner, console relay, nocloudnet server).
+- ALL subprocess calls through `system.DefaultRunner.Run()` / `system.DefaultRunner.Stream()` with `system.RunCmdOpts` — no raw `os/exec`. Documented exceptions (see CONTEXT.md "Subprocess invocation"): Firecracker spawn (FD redirection), SSH probe (connectivity detection), loopmount provisioner (chained losetup/mount/umount), vsock agent exec/pty (su/sh command execution), archive xz decompression (pipe-based), and the runner/spawn abstraction boundary itself (`runner.go`, `interactive_run.go`, `spawn.go`).
 - Context propagation: every repository method, every infrastructure function with side effects takes `ctx context.Context` as its first parameter.
 - The API layer (`pkg/api/`) is the SOLE orchestrator of multiple core domains.
 - Validation lives in API `pkg/api/inputs/` `*Input` structs with `Validate()`/`Resolve()`, not in Service/Controller.

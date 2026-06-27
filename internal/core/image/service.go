@@ -409,8 +409,8 @@ func (s *Service) ExtractImage(
 }
 
 // MaterializeTo performs fast durable copy from warm pool to destination.
-// Uses a fallback chain: sendfile(2) → io.Copy → dd, each trying the next
-// on failure. After copy, fdatasync ensures data integrity.
+// Uses a fallback chain: sendfile(2) → io.Copy in infra.CopyFile().
+// After copy, fdatasync ensures data integrity.
 func (s *Service) MaterializeTo(ctx context.Context, imageID, fsType, outputPath string) error {
 	cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", imageID, fsType))
 	if _, err := os.Stat(cachedPath); os.IsNotExist(err) {

@@ -2,9 +2,19 @@
 
 **Purpose:** Define how to set up the host machine and the runner VM for executing L2 (E2E) system tests.
 
+> **⚠️ Deprecation notice:**
+> This document describes the legacy **snapshot-based** approach using `rc-env.yaml` + `mvm snapshot`.
+> The current recommended approach uses the orchestrator-based system with per-domain VMs,
+> documented in [system-test-architecture.md](../system-test-architecture.md).
+> The `scripts/run-system-tests.py` orchestrator creates a custom base image, provisions
+> per-domain VMs from it, and runs tests in parallel. The `rc-env.yaml` path still works
+> for single-VM sessions but is no longer the primary execution method.
+
 > **See also:** [ADR-0012](../adr/0012-unified-test-architecture.md) for the architectural decisions.
 >
 > **See also:** [HOW_AGENTS_WRITE_SYSTEM_TESTS.md](HOW_AGENTS_WRITE_SYSTEM_TESTS.md) for the test writing guide.
+>
+> **See also:** [system-test-architecture.md](../system-test-architecture.md) for the orchestrator-based approach.
 >
 > **See also:** [RC_QA.md](../RC_QA.md) for release qualification gates.
 
@@ -37,7 +47,7 @@ Host (Go + KVM only)
   ├── Additional steps wire up caches + DB
   ├── Snapshot for reuse
   │
-  └── Tests run via: mvm vm exec rc-vm -- "pytest tests/e2e/..."
+  └── Tests run via: mvm exec rc-vm -- "pytest tests/system/..."
 ```
 
 ---
@@ -161,12 +171,12 @@ mvm snapshot restore rc-vm-snap rc-vm --resume
 
 ```bash
 # One file
-mvm vm exec rc-vm --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/e2e/volume/test_volume.py -xvs"
+mvm exec rc-vm --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/system/volume/test_volume.py -xvs"
 
 # All L2 tests
-mvm vm exec rc-vm --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/e2e/ -x --junitxml=results.xml"
+mvm exec rc-vm --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/system/ -x --junitxml=results.xml"
 
 # Collect results
 mvm cp rc-vm:/home/runner/tests/results.xml ./results.xml
@@ -182,12 +192,12 @@ go test ./... -count=1
 Multiple runner VMs from the same snapshot run different suites:
 
 ```bash
-mvm vm exec rc-vm-1 --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/e2e/volume/ tests/e2e/network/ -x"
-mvm vm exec rc-vm-2 --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/e2e/vm/ -x"
-mvm vm exec rc-vm-3 --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/e2e/ --ignore=tests/e2e/volume/ --ignore=tests/e2e/network/ --ignore=tests/e2e/vm/ -x"
+mvm exec rc-vm-1 --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/system/volume/ tests/system/network/ -x"
+mvm exec rc-vm-2 --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/system/vm/ -x"
+mvm exec rc-vm-3 --user runner --timeout 600 -- \
+  "cd ~ && python3 -m pytest tests/system/ --ignore=tests/system/volume/ --ignore=tests/system/network/ --ignore=tests/system/vm/ -x"
 ```
 
 ---
@@ -217,10 +227,10 @@ echo "Krnl:  $(ls /tmp/mvmctl/vmlinux-7.0.11* 2>/dev/null)"
 echo "Mrkr:  $(ls /tmp/mvmctl/*.marker 2>/dev/null)"
 
 # Runner VM
-echo "Alive: $(mvm vm exec rc-vm --user runner --timeout 10 -- 'echo OK' 2>/dev/null || echo DEAD)"
-echo "KVM:   $(mvm vm exec rc-vm --user runner --timeout 10 -- 'test -c /dev/kvm && echo OK' 2>/dev/null)"
-echo "Bin:   $(mvm vm exec rc-vm --user runner --timeout 10 -- 'mvm --version' 2>/dev/null)"
-echo "Py:    $(mvm vm exec rc-vm --user runner --timeout 10 -- 'python3 -m pytest --version' 2>/dev/null | head -1)"
-echo "Imgs:  $(mvm vm exec rc-vm --user runner --timeout 30 -- 'mvm image ls --json | python3 -c \"import sys,json; print(len([i for i in json.load(sys.stdin) if i.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
-echo "Krnls: $(mvm vm exec rc-vm --user runner --timeout 30 -- 'mvm kernel ls --json | python3 -c \"import sys,json; print(len([k for k in json.load(sys.stdin) if k.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
+echo "Alive: $(mvm exec rc-vm --user runner --timeout 10 -- 'echo OK' 2>/dev/null || echo DEAD)"
+echo "KVM:   $(mvm exec rc-vm --user runner --timeout 10 -- 'test -c /dev/kvm && echo OK' 2>/dev/null)"
+echo "Bin:   $(mvm exec rc-vm --user runner --timeout 10 -- 'mvm --version' 2>/dev/null)"
+echo "Py:    $(mvm exec rc-vm --user runner --timeout 10 -- 'python3 -m pytest --version' 2>/dev/null | head -1)"
+echo "Imgs:  $(mvm exec rc-vm --user runner --timeout 30 -- 'mvm image ls --json | python3 -c \"import sys,json; print(len([i for i in json.load(sys.stdin) if i.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
+echo "Krnls: $(mvm exec rc-vm --user runner --timeout 30 -- 'mvm kernel ls --json | python3 -c \"import sys,json; print(len([k for k in json.load(sys.stdin) if k.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
 ```

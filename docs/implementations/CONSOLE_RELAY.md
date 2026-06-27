@@ -56,10 +56,10 @@ and independent of terminal libraries (`x/term`, `signal`, etc.).
 ## Lifecycle
 
 1. **VM start:** The controller creates a PTY pair (master + slave), passes the
-   slave fd to Firecracker (as the serial console backend), and spawns the relay
-   subprocess with the master fd as an inherited file descriptor (fd 3). The
-   relay writes its PID file, creates a Unix listener socket, and enters the
-   I/O loop (`runRelayIO`).
+    slave fd to Firecracker (as the serial console backend), and spawns the relay
+    subprocess with the master fd as an inherited file descriptor (fd 3). The
+    parent writes a PID file after the subprocess starts. The relay
+    creates a Unix listener socket and enters the I/O loop (`runRelayIO`).
 
 2. **Attach:** The user runs `mvm console <vm>`. The CLI resolves the VM,
    verifies the relay is running, connects to the relay's Unix socket, sends

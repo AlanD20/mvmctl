@@ -29,12 +29,12 @@ These are already implemented in the Go codebase:
 | Optimization | Where | Doc |
 |---|---|---|
 | tmpfs ready pool (pre-decompress images) ✅ | `internal/core/image/service.go:EnsureCached()` | [`fast-durable-image-copy.md`](fast-durable-image-copy.md) |
-| sendfile(2) + io.Copy + dd sparse fallback + fdatasync ✅ | `internal/core/image/service.go:MaterializeTo()` | [`fast-durable-image-copy.md`](fast-durable-image-copy.md) |
+| sendfile(2) + io.Copy + fdatasync ✅ | `internal/core/image/service.go:MaterializeTo()` | [`fast-durable-image-copy.md`](fast-durable-image-copy.md) |
 | libguestfs: direct backend, minimal vCPU/mem, tmpfs cache, kernel detection ✅ | `internal/lib/provisioner/guestfs/base.go` | [`guestfs-boot.md`](guestfs-boot.md) |
 | Fixed appliance, disabled recovery/autosync, QEMU_LOCKING=off ✅ | `internal/lib/provisioner/guestfs/utils.go` | [`guestfs-boot.md`](guestfs-boot.md) |
 | Loop-mount backend (faster than guestfs, primary) ✅ | `internal/lib/provisioner/loopmount/` + `internal/service/loopmount/` | `docs/RUNTIME.md` |
 | Atomic firewall rule sync (nftables default, iptables fallback) ✅ | `internal/lib/firewall/` | [`network-sync-atomicity.md`](network-sync-atomicity.md) |
-| Firecracker snapshot/resume API (create_snapshot, load_snapshot) ✅ | `internal/core/vm/controller.go` | — |
+| Firecracker snapshot/resume API (SnapshotCreate, SnapshotRestore) ✅ | `internal/core/vm/controller.go` | — |
 | Compiled binary (Go) — no interpreter startup overhead ✅ | `cmd/mvm/main.go` | — |
 | Boot args builder with user overrides ✅ | `internal/core/vm/firecracker.go:bootArgsBuilder` | — |
 | Kernel building with custom configs ✅ | `internal/core/kernel/service.go` | — |
@@ -184,7 +184,7 @@ These are the optimizations that can **radically change** the performance profil
 
 **Status:** ✅ PARTIALLY IMPLEMENTED
 
-**Current boot args** (`internal/infra/constants.go:78`):
+**Current boot args** (`internal/infra/constants.go:77`):
 ```
 console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false
 ```
@@ -201,13 +201,13 @@ Additional safe params that could still be added: `audit=0`, `elevator=noop`.
 
 **What it is:** Use `sendfile(2)` for zero-copy kernel-mediated file transfers instead of userspace read+write.
 
-**Status:** ✅ IMPLEMENTED — `internal/core/image/utils.go:copyViaSendfile()` uses `unix.Sendfile()` as the primary copy mechanism in `MaterializeTo()`. Falls back to `io.Copy` and then `dd conv=sparse,fsync`.
+**Status:** ✅ IMPLEMENTED — `internal/infra/io.go:copyViaSendfile()` uses `unix.Sendfile()` as the primary copy mechanism in `MaterializeTo()`. Falls back to `io.Copy`. Both paths end with `fdatasync`.
 
 ### 4.3 nftables Migration ✅ IMPLEMENTED
 
 **What it is:** Replaces `iptables` commands with `nft` (nftables) commands.
 
-**Status:** ✅ IMPLEMENTED — `internal/lib/firewall/nftables.go` provides a full `NFTablesTracker` implementation (789 lines). `internal/lib/firewall/tracker.go` abstracts both backends as `FirewallTracker`. The default `firewall_backend` in config is `"nftables"`. nftables is the default; iptables is the fallback when the `xt_comment` kernel module is unavailable.
+**Status:** ✅ IMPLEMENTED — `internal/lib/firewall/nftables.go` provides a full `NFTablesTracker` implementation. `internal/lib/firewall/tracker.go` abstracts both backends as `FirewallTracker`. The default `firewall_backend` in config is `"nftables"`. nftables is the default; iptables is the legacy fallback configured via the `firewall_backend` setting.
 
 ### 4.4 Compiled Binary (Go) ✅ IMPLEMENTED
 
@@ -243,7 +243,7 @@ Instead, the Go equivalents are:
 
 | Go-Specific Micro-Optimization | Status |
 |---|---|
-| Connection pooling for Firecracker API client (`internal/core/vm/firecracker_client.go`) | ❌ Not done — single-use HTTP client per VM |
+| Connection pooling for Firecracker API client (`internal/lib/firecracker/client.go`) | ❌ Not done — single-use HTTP client per VM |
 | Event-driven VM state monitoring (vs polling) | ❌ Not done |
 | Memory ballooning (Firecracker API) | ❌ Not done |
 | CPU pinning (Firecracker machine config) | ❌ Not done |

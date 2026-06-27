@@ -9,12 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`mvm ssh --timeout`** and **`mvm vm exec --timeout`** are now **connect/probe timeouts only**. Once connected, commands run until completion or Ctrl-C instead of being killed after the timeout duration. See [ADR-0013](docs/adr/0013-user-facing-timeouts-are-connect-timeouts.md).
+- **`mvm ssh --timeout`** and **`mvm exec --timeout`** are now **connect/probe timeouts only**. Once connected, commands run until completion or Ctrl-C instead of being killed after the timeout duration. See [ADR-0013](docs/adr/0013-user-facing-timeouts-are-connect-timeouts.md).
 
 ### Added
 
-#### CLI Commands (16 top-level groups, 65+ subcommands)
-- **`mvm vm`** -- Full VM lifecycle: ls, ps, create, rm, start, stop, reboot, pause, resume, snapshot, load, inspect, attach-volume, detach-volume
+#### CLI Commands (18 top-level groups, 70+ subcommands)
+- **`mvm vm`** -- Full VM lifecycle: ls, ps, create, rm, start, stop, reboot, pause, resume, inspect
 - **`mvm console`** -- Interactive serial console access via PTY-over-Unix-socket relay with --state and --kill options
 - **`mvm host`** -- Host configuration: init (KVM, modules, sysctl, mvm group, sudoers), status, info, clean, reset
 - **`mvm network`** -- Named bridge networks with NAT: ls, default, create, rm, inspect, sync
@@ -24,21 +24,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`mvm kernel`** -- Kernel management: ls, inspect, pull, default, import, rm
 - **`mvm image`** -- Image management: ls, pull, default, rm, inspect, import, warm
 - **`mvm bin`** -- Firecracker binary management: ls, pull, rm, default
-- **`mvm cp`** -- Copy files between host and microVMs via tar-over-SSH
+- **`mvm exec`** -- Run commands inside VMs via vsock agent without SSH
+- **`mvm cp`** -- Copy files between host and microVMs via vsock binary frame protocol
 - **`mvm cache`** -- Cache lifecycle: init, prune (per-resource or all), clean
 - **`mvm logs`** -- Log streaming: boot logs (serial console) and Firecracker OS logs with --follow
 - **`mvm ssh`** -- SSH into VMs by name, ID, IP, or MAC with custom user, key, and connection timeout
-- **`mvm volume`** -- Persistent data disk management: create, rm, ls, inspect, resize
-- **`mvm env`** -- Environment workflow management: apply, ls, destroy
+- **`mvm volume`** -- Persistent data disk management: create, rm, ls, inspect, resize, attach, detach
+- **`mvm env`** -- Environment workflow management: apply, diff, ls, destroy
+- **`mvm snapshot`** -- Snapshot lifecycle: create, list, inspect, restore, remove
 
 #### Architecture
 - **Three-layer architecture** (CLI -> API -> Core) with strict import boundaries enforced by Go compiler
 - **Cobra CLI framework** with root command and subcommand hierarchy
-- **Controller / Service / Repository / Resolver** pattern across all 14 core domains
+- **Controller / Service / Repository / Resolver** pattern across 16 core domains (not all domains implement all four; simpler domains have fewer components)
 - **Input Validate/Resolve** pattern for type-safe, validated operations across 11 domains (ADR-0011)
 - **Provisioning backend abstraction** (LoopMount vs GuestFS) with mutual exclusion
 - **Firewall backend abstraction** (nftables vs iptables) with mutual exclusion
-- **SQLite database** (`internal/lib/db/migrations/`) with migration system for persistent state: images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings
+- **SQLite database** (`internal/lib/db/migrations/`) with migration system for persistent state (16 tables): images, kernels, binaries, volumes, networks, network_leases, vm_instances, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings, vm_vsock_config, snapshots, db_migrations
 - **Relation enrichment** system with batch loading to prevent N+1 queries
 - **Privilege delegation** model via `mvm` unix group and sudoers drop-in (no sudo for normal operations)
 - **Single error type** (`pkg/errs.DomainError`) with Code, Class, Message, Op, Entity, Details, Err
@@ -97,12 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Console relay** (`mvm run console relay`) -- PTY-to-Unix-socket bridge for interactive serial console without SSH
 - **nocloud-net server** (`mvm run nocloudnet serve`) -- Per-VM HTTP server for cloud-init datasource delivery
 - **Loop-mount provisioner** (`mvm run provision`) -- Rootfs provisioning for SSH key injection, hostname setup, DNS config, cloud-init disable, and filesystem resize
+- **Vsock guest agent** (embedded) -- Cross-compiled guest agent binary, zstd-compressed and embedded in the `mvm` binary, injected into VMs at runtime for vsock-based exec, file transfer, and console
 
 #### Developer Experience
 - **Go API** (`pkg/api/`) -- Operation struct with methods for each domain, sole cross-domain orchestrator
 - **Go toolchain** -- Standard `go build`, `go vet`, `go test`
 - **System test suite** -- Python-based black-box CLI tests in `tests/system/`
-- **Build scripts** (`scripts/`): build.sh, bump-version.py, common.py, fresh_env.py, post-release.py, run_tests.py, setup-test-environment.py
+- **Build scripts** (`scripts/`): build.sh, bump-version.py, common.py, fresh_env.py, post-release.py, run-system-tests.py, setup-test-environment.py
 
 #### Distribution
 - Single statically-linked Go binary (no runtime dependencies)
@@ -112,12 +115,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Distribution packages support
 
 #### Performance
-- VM creation ~1.2s average (loop-mount), ~3.9s (GuestFS) per benchmark data
-- SSH-ready ~2.8s average (loop-mount), ~5.8s (GuestFS) per benchmark data
+- VM creation ~2.3s average (loop-mount), ~3.9s (GuestFS) per benchmark data
+- VM-ready ~2.9s average (loop-mount), ~5.8s (GuestFS) per benchmark data
 - SQL-level computation (COUNT, WHERE IN) instead of fetch-all-then-filter
 
 #### Testing
-- Comprehensive test suite (2300+ tests)
+- Comprehensive test suite (~2500 tests: ~850 Go test functions + ~1185 Go subtests + ~520 Python system tests)
 - System tests run in nested VM with unprivileged user
 - Coverage matrix tracking every CLI subcommand and flag
 

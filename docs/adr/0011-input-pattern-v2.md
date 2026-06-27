@@ -1,6 +1,6 @@
 # Input Pattern v2: Collapse Request/Resolved into Input
 
-**Status:** accepted
+**Status:** Active
 **Date:** 2026-06-19
 
 ## Context
@@ -76,7 +76,7 @@ func (i *SnapshotInput) Resolve(ctx, repo) ([]*model.SnapshotItem, error) { ... 
 4. **No `Resolved*` struct unless the output shape differs** — for simple
    lookups, `Resolve()` returns domain entities directly. Keep `Resolved*`
    only when the output shape is structurally different (create flows with
-   resolved defaults, or bundles like `ResolvedVMExecInput`).
+    resolved defaults, or bundles like `ResolvedExecInput`).
 
 5. **No `*Request` struct** — the bundling of input + deps is unnecessary.
    Methods on Input take deps as parameters.
@@ -91,7 +91,7 @@ Only when the output type is structurally different from the input:
 | `SnapshotInput` | ❌ No | Returns `[]*model.SnapshotItem`. Shape matches input. |
 | `VMCreateInput` | ✅ Yes | Input has `*T` optionals; Resolved has concrete values. Dozens of config defaults resolved. |
 | `KernelPullInput` | ✅ Yes | Input has version/type; Resolved has full specs, download paths. |
-| `VMExecInput` | ✅ Yes | Resolved bundles VM + vsock config + resolved user. |
+| `ExecInput` | ✅ Yes | Resolved bundles VM + vsock config + resolved user. |
 
 ### Cross-domain resolution
 
@@ -136,7 +136,7 @@ When an input needs to resolve entities from multiple domains:
 
 ### Migration
 
-All 11 domains were migrated in a single session (June 2026):
+All 12 domains were migrated in a single session (June 2026):
 image, volume, key, log, binary, kernel, network, ssh, console, config, cp, vm.
 The `VMCreateRequest` struct in `vm_create.go` was kept — it uses a builder
 pattern (not the old triple) and is a separate concern.

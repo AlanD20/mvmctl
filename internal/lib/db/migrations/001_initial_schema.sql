@@ -1,6 +1,6 @@
 -- Migration: 001_initial_schema
 -- Version: 1
--- Description: Initial database schema with 11 tables (added snapshots)
+-- Description: Initial database schema with 15 tables (vm_instances, images, kernels, binaries, volumes, networks, network_leases, host_state, host_state_changes, iptables_rules, nftables_rules, ssh_keys, user_settings, vm_vsock_config, snapshots)
 -- Created: 2026-04-02
 
 -- IMAGES: OS image metadata

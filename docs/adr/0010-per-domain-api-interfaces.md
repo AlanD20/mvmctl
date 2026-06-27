@@ -1,13 +1,13 @@
 # Per-Domain API Interfaces (not One Monolithic Interface)
 
-**Status:** draft
+**Status:** Active
 **Date:** 2026-06-14
 
-The API layer (`pkg/api/`) is defined as multiple small Go interfaces — one per domain — rather than a single `API` interface with all 83 methods. A composite `API` interface embedding all domains is provided for consumers that need everything (TUI, advanced workflows).
+The API layer (`pkg/api/`) is defined as multiple small Go interfaces — one per domain — rather than a single `API` interface with all 131 methods. A composite `API` interface embedding all domains is provided for consumers that need everything (TUI, advanced workflows).
 
 ## Context
 
-`pkg/api/` exposes 83 orchestration methods on the `*Operation` struct across 15 domains (VM, Image, Network, Volume, Kernel, Key, Binary, Host, Console, SSH, Config, Cache, Log, CP, Init). Three consumer layers depend on it:
+`pkg/api/` exposes orchestration methods on the `*Operation` struct across 17 domains (VM, Image, Network, Volume, Kernel, Key, Binary, Host, Console, SSH, Exec, Config, Cache, Log, CP, Init, Snapshot). Three consumer layers depend on it:
 
 - **CLI** (`internal/cli/`) — one domain per command file
 - **TUI** (`internal/tui/`) — multiple domains per screen, all domains in the model
@@ -30,7 +30,7 @@ Define **one Go interface per domain** in `pkg/api/`. Each domain's interface li
 
 ### Option A: One Monolithic `API` Interface
 
-A single interface with all 83 methods. One mock with 83 function fields.
+A single interface with all ~131 methods. One mock with ~131 function fields.
 
 - **Test imports** — VM tests must import Image, Network, Host types even though they don't use them
 - **Mock maintenance** — adding one VM method adds a field to a mock that Image, Network, and Host tests also import
@@ -59,14 +59,14 @@ Keep referencing `*api.Operation` directly in all consumers.
 **Positive:**
 
 - CLI commands accept narrow interfaces showing their true dependencies
-- Tests use small, focused mocks per domain (10-15 functions, not 83)
-- The composite `API` means TUI still holds one type, not 15 separate interfaces
+- Tests use small, focused mocks per domain (10-15 functions, not ~131)
+- The composite `API` means TUI still holds one type, not 16 separate interfaces
 - Adding a new domain is additive — no existing interfaces or mocks change
 - Internal cross-calls within `Operation` are completely unaffected
 
 **Negative:**
 
-- More interfaces to manage (16 total: 15 domain + 1 composite)
+- More interfaces to manage (18 total: 17 domain + 1 composite)
 - CLI command signatures change from `*api.Operation` to `api.VMAPI` (mechanical migration)
 - Slightly more files in `internal/testutil/` (one mock file per domain)
 

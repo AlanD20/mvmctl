@@ -64,9 +64,6 @@ mvm kernel pull --type firecracker
 # Download for a specific CI version
 mvm kernel pull --type firecracker --version 1.12
 
-# Download for a different architecture
-mvm kernel pull --type firecracker --arch aarch64
-
 # Using the type:version shorthand (equivalent to --type firecracker --version 6.1)
 mvm kernel pull firecracker:6.1
 
@@ -141,8 +138,9 @@ Supported feature names:
 - `kvm` — Enable KVM paravirtualization options (required for Firecracker)
 - `nftables` — Enable nftables kernel support (required for nftables firewall backend)
 - `tuntap` — Enable TUN/TAP networking support (required for Firecracker network connectivity)
+- `btrfs` — Enable Btrfs filesystem support (required for Btrfs root filesystems)
 
-The `--type firecracker` kernel automatically includes the `kvm` feature when the VM has nested virtualization enabled.
+All kernel types (`firecracker` and `official`) automatically include the `kvm` feature in the input resolution layer when the VM has nested virtualization enabled, but features only affect `--type official` builds (pre-built `firecracker` kernels download ready-compiled binaries).
 
 ### Custom kernel config overlay
 
@@ -165,14 +163,14 @@ mvm kernel pull --type official \
 ```
 
 **Warning:** Enabling configs that conflict with Firecracker's microVM architecture
-(e.g., `CONFIG_PCI`, `CONFIG_ACPI`) may prevent VMs from booting.
+(e.g., `CONFIG_ACPI`) may prevent VMs from booting.
 
 ---
 
 ## Verifying Required Settings
 
-After building, `mvm` verifies that all required kernel settings are present. The required
-settings are defined under `required_settings` in `src/mvmctl/assets/kernels.yaml` for the `kernel-official` entry.
+After building, `mvm` verifies that all kernel settings from `default_configs` are present. The
+config entries are defined under `default_configs` in `internal/assets/kernels.yaml` for the `kernel-official` entry.
 
 If a required setting is missing, a warning is logged and the build continues (the
 `KernelConfigResult` has `success=False` but the pipeline does not abort). The missing
@@ -193,9 +191,8 @@ Register a pre-built vmlinux file you already have (from a custom build, third-p
 mvm kernel import my-custom-kernel ~/kernels/vmlinux-6.1-x86_64
 
 # Override auto-detected values explicitly
-mvm kernel import my-custom-kernel ~/kernels/vmlinux-custom \
-  --version 6.1 \
-  --arch arm64
+mvm kernel import my-custom-kernel ~/kernels/vmlinux-6.1-arm64 \
+  --version 6.1
 
 # Set as default immediately
 mvm kernel import my-custom-kernel ~/kernels/vmlinux-custom \
@@ -287,6 +284,7 @@ Common causes:
 | 6.1.x LTS | Supported | Long-term support, recommended for production |
 | 6.6.x LTS | Supported | Newer LTS, recommended for production |
 | 6.12.x LTS | Supported | Latest LTS |
+| 6.19.x | Supported | Default version (`6.19.9`), latest upstream stable at release time |
 
 > **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. Use `--version latest` to resolve the most recent version from the upstream directory listing. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
 

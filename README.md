@@ -10,14 +10,20 @@
 
 ## Why mvmctl?
 
-- ⚡ **Blazing fast** -- VMs boot in ~1 second (loop-mount) or ~4 seconds (guestfs), not minutes
+- ⚡ **Blazing fast** -- VMs boot in ~2-4 seconds (loop-mount) or ~9-14 seconds (guestfs), not minutes
 - 🔥 **Powered by Firecracker** -- AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
 - 🛡️ **Secure by default** -- Hardware-level isolation with KVM
-- 📦 **Single binary** -- One statically-linked Go binary, no runtime dependencies
-- 🖼️ **Works with your images** -- Ubuntu, Debian, Arch, Alpine, and more
+- 📦 **Single binary** -- One statically-linked Go binary with no language runtime dependencies (calls standard Linux utilities: ip, sudo, iptables/nftables, losetup, mount, etc.)
+- 🖼️ **Upstream images and create your own base image** -- Ubuntu, Debian, Arch, Alpine, and more
+- 🧩 **Volumes & persistence** -- Create, attach, resize, and detach persistent data disks. Survive VM lifecycles.
+- 🏗️ **Custom kernels** -- Download pre-built Firecracker kernels or build official kernels with custom features (`kvm`, `nftables`, ...)
 - ⌨️ **Simple CLI** -- One command to create, start, and SSH into a VM
 - 🖥️ **Console access** -- Interactive serial console without SSH (via `mvm console`)
-- 🚧 **Pre-production** -- Still under active development
+- 📋 **Environment as code** -- Provision full VM topologies from a YAML spec: networks, keys, images, kernels, VMs, and post-boot provisioning via `mvm env apply`
+- 🚀 **Vsock agent** -- Run commands inside VMs instantly via a lightweight embedded guest agent (via `mvm exec`), no SSH daemon required
+- 📁 **File transfer** -- Copy files between host and VMs over vsock with the built-in `mvm cp` command, no guest dependencies needed
+- 🎯 **Atomic batch creation** -- Spin up multiple VMs as a unit with `--count N --atomic`. All succeed or all roll back.
+- 🐳 **Container-like ergonomics** -- `mvm vm create myvm --image ubuntu:24.04 && mvm ssh myvm` feels like `docker run -it ubuntu bash`, but with real VM isolation.
 
 ```bash
 # Create and SSH into a VM in under 10 seconds
@@ -87,7 +93,7 @@ mvm --help
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
 ./scripts/build.sh release
-cp ./mvm ~/.local/bin/
+cp dist/mvm ~/.local/bin/mvm
 mvm --help
 ```
 
@@ -114,7 +120,7 @@ mvm image pull ubuntu:24.04 --default
 mvm key create test --default
 
 # Create and start a VM
-mvm vm create myvm --vcpus 2 --memory 2G --disk-size 20G
+mvm vm create myvm --vcpu 2 --mem 2G --disk-size 20G
 
 # Follow the boot log until SSH is ready (~30-60 s)
 mvm logs myvm --follow
@@ -133,8 +139,10 @@ mvm vm rm myvm
 
 ## Essential Commands
 
-> **Command Aliases:** `net` for `network`, `img` for `image`, and `vol` for `volume`.
-> E.g. `mvm net ls`, `mvm img pull ubuntu:24.04`, `mvm vol ls`.
+> **Command Aliases:** `net` for `network`, `img` for `image`, `vol` for `volume`, `ss` for `snapshot`, and `mvm bin` for `mvm binary`.
+> Environment workflow: `mvm env up` for `mvm env apply`, `mvm env down` for `mvm env destroy`.
+> Every `list` subcommand accepts `ls`; every `remove` accepts `rm`, `delete`, and `del`.
+> E.g. `mvm net ls`, `mvm img pull ubuntu:24.04`, `mvm vol ls`, `mvm bin ls`, `mvm ss ls`.
 
 ### VM Lifecycle
 
@@ -146,12 +154,13 @@ mvm vm create cluster --count 3 --atomic                # Batch-create 3 VMs
 mvm vm ls                                     # List all VMs
 mvm vm ps                                     # List running VMs (active processes)
 mvm ssh myvm                                  # SSH into a VM
+mvm exec myvm -- ls -la                      # Run a command inside the VM via vsock agent (faster than SSH)
 mvm console myvm                              # Console access (no SSH)
 mvm cp ./file.txt myvm:/root/                 # Copy files to/from a VM
 mvm vm rm myvm -f                             # Remove a VM
 ```
 
-Also includes: `mvm vm start`, `stop`, `reboot`, `pause`, `resume`, `snapshot`, `load`, `inspect`, `attach-volume`, `detach-volume`.
+Also includes: `mvm vm start`, `stop`, `reboot`, `pause`, `resume`, `inspect`. Volume attach/detach via `mvm volume attach`, `mvm volume detach`. For snapshot management, see the `mvm snapshot` command group.
 
 ### Network Management
 
@@ -188,6 +197,17 @@ mvm key create mykey --default              # Generate SSH key
 mvm key import mykey ./id_ed25519.pub      # Import existing public key
 mvm key inspect mykey                       # Inspect key details
 mvm key export mykey ./backup               # Export keypair to directory
+```
+
+### Snapshot Management
+
+```bash
+mvm snapshot create my-vm --name daily-backup      # Create a snapshot from a running VM
+mvm snapshot ls                                     # List all snapshots
+mvm snapshot restore daily-backup cloned-vm          # Restore a VM from a snapshot
+mvm snapshot restore daily-backup cloned-vm --resume # Restore and auto-start
+mvm snapshot rm daily-backup                         # Remove a snapshot
+mvm snapshot inspect daily-backup                    # Inspect snapshot details
 ```
 
 ### System Setup
@@ -290,6 +310,7 @@ Comprehensive documentation is available in the `docs/` directory:
 | [docs/REFERENCES.md](docs/REFERENCES.md) | **Complete command reference** -- all `mvm` commands, flags, and options. **Configuration** -- config files, environment variables, cache structure. **Cloud-Init** -- nocloud-net setup, security, modes |
 | [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions. Debug mode, permission fixes, network issues |
 | [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | System dependencies by category. Package names for Debian/Ubuntu/Arch |
+| [docs/RC_QA.md](docs/RC_QA.md) | Release qualification process, gates, evidence collection |
 | [docs/KERNEL.md](docs/KERNEL.md) | Building kernels for Firecracker (CI and official) |
 | [docs/RELEASE.md](docs/RELEASE.md) | Release process and distribution packages |
 | [docs/ASSETS_CONFIGURATIONS.md](docs/ASSETS_CONFIGURATIONS.md) | Bundled asset configurations: image specs, kernel specs, and runtime defaults |
@@ -308,7 +329,7 @@ Requires Go 1.26.3+. Produces a single statically-linked binary with no runtime 
 ```bash
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
-./scripts/build.sh
+./scripts/build.sh dev          # dev build → ./mvm
 ./mvm --version
 ```
 
@@ -317,6 +338,7 @@ cd mvmctl
 ```bash
 ./scripts/build.sh release
 cp dist/mvm ~/.local/bin/mvm
+mvm --help
 ```
 
 See [docs/RELEASE.md](docs/RELEASE.md) for detailed build and release instructions.
@@ -349,7 +371,7 @@ See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for complete troubleshoot
 Contributions are welcome! See [docs/STANDARDS.md](docs/STANDARDS.md) for Go coding standards and conventions.
 
 - Development setup: `git clone` + `./scripts/build.sh`
-- Running tests: `go test ./...` and `uv run scripts/run_tests.py`
+- Running tests: `go test ./...` and `python3 scripts/run-system-tests.py`
 - Build system: `./scripts/build.sh` (dev) or `./scripts/build.sh release --version X.Y.Z`
 
 ---

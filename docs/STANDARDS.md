@@ -34,16 +34,16 @@ Coding standards, conventions, and architectural rules for the mvmctl Go codebas
 
 | Path | Purpose | Import Rules |
 |------|---------|--------------|
-| `cmd/mvm/` | Binary entry point | Only imports `internal/app` |
-| `internal/app/` | Application initialization and DI wiring | Orchestrates `internal/lib/db`, `pkg/api` |
+| `cmd/mvm/` | Binary entry point | Imports `internal/app`, `internal/cli`, `internal/cli/common` |
+| `internal/app/` | Application initialization and DI wiring | Orchestrates `internal/lib/db`, `internal/lib/download`, `internal/lib/version`, `internal/infra`, `internal/core/config`, `pkg/api` |
 | `internal/cli/` | Cobra CLI commands and user-facing output | Imports `pkg/api`, `internal/cli/common`, `internal/infra`, `internal/lib/*` |
 | `internal/cli/common/` | Shared CLI helpers (tables, JSON output, prompts) | Imports `internal/infra`, `internal/lib/*` |
-| `internal/core/{domain}/` | Domain logic (vm, network, image, kernel, binary, key, host, volume, config, console, logs, cloudinit, cache, ssh) | Imports `internal/infra`, `internal/lib/*`. NEVER imports other `core/*` packages. |
+| `internal/core/{domain}/` | Domain logic (vm, network, image, kernel, binary, key, host, volume, config, console, logs, cloudinit, cache, ssh, snapshot, vsock) | Imports `internal/infra`, `internal/lib/*`. NEVER imports other `core/*` packages. |
 | `internal/enricher/` | Cross-domain enrichment (only package besides `pkg/api` that imports multiple core domains) | Imports `internal/core/*` |
-| `internal/service/` | Background subprocess services (console relay, nocloudnet server, loopmount provisioner) | Imports `internal/infra`, `internal/lib/*`. Never imports `pkg/api` or `internal/cli/`. |
-| `internal/workflow/env/` | Environment workflow orchestration (apply/destroy specs) | Imports `pkg/api`, `internal/infra`, `internal/lib/*`. Never imports `internal/core/` or `internal/enricher/` directly. |
-| `internal/infra/` | Generic leaf utilities (constants, io, template, yaml, cast, slice, pool, ptr, event, provcontent) | Imports ONLY stdlib and external deps. Never imports core, api, cli, or service. |
-| `internal/lib/` | Domain-adjacent leaf utilities (system, model, db, download, version, logging, crypto, firewall, provisioner, network, archive) | Imports ONLY stdlib and external deps. Never imports core, api, cli, or service. |
+| `internal/service/` | Background subprocess services (console relay, nocloudnet server, loopmount provisioner) plus embedded vsock guest agent (`vsockagent/`) | Imports `internal/infra`, `internal/lib/*`. Never imports `pkg/api` or `internal/cli/`. |
+| `internal/workflow/env/` | Environment workflow orchestration (apply/destroy specs) | Imports `pkg/api`, `internal/infra`, `internal/lib/*` (specifically `internal/lib/workflow`). Never imports `internal/core/` or `internal/enricher/` directly. |
+| `internal/infra/` | Generic leaf utilities (constants, io, template, yaml, cast, slice, pool, ptr, event, provcontent, timinglog, progress, vm) | Imports ONLY stdlib and external deps. Never imports core, api, cli, or service. |
+| `internal/lib/` | Domain-adjacent leaf utilities (system, model, db, download, version, logging, crypto, firewall, firecracker, provisioner, network, archive, asset, disk, validators, workflow) | Imports ONLY stdlib and external deps. Never imports core, api, cli, or service. |
 | `pkg/api/` | Public API orchestration layer | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
 | `pkg/api/inputs/` | Input Validate/Resolve structs (ADR-0011) | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
 | `pkg/errs/` | Domain error type and codes | Leaf package — no internal imports |
@@ -134,15 +134,15 @@ No nil checks on `op.Services.Config` or other required services in the API laye
 
 ## 5. Error Handling
 
-Single error type: `pkg/errs.DomainError` with fields `Code`, `Class`, `Message`, `Err`.
+Single error type: `pkg/errs.DomainError` with fields `Code`, `Class`, `Message`, `Err`, `Op`, `Entity`, `Details`.
 
 ```go
 // Creating errors
 errs.New(errs.CodeVMNotFound, "VM not found: my-vm")
 errs.Wrap(errs.CodeNetworkBridgeFailed, err)
-errs.WrapMsg(errs.CodeDownloadFailed, "Failed to fetch image", err)
+errs.WrapMsg(errs.CodeDownloadFailed, "failed to fetch image", err)
 errs.NotFound(errs.CodeVMNotFound, "my-vm")
-errs.AlreadyExists(errs.CodeVMExists, "my-vm")
+errs.AlreadyExists(errs.CodeVMAlreadyExists, "my-vm")
 
 // Checking errors
 var de *errs.DomainError
@@ -170,25 +170,29 @@ if errs.IsNotFound(err) { ... }
 
 ## 7. Subprocess Execution
 
-ONE canonical path: `system.RunCmd(ctx, args, system.RunCmdOpts{...})` in `internal/lib/system/runner.go`.
+ONE canonical path: `system.DefaultRunner.Run(ctx, args, system.RunCmdOpts{...})` or `system.DefaultRunner.Stream(ctx, args, system.RunCmdOpts{...})` in `internal/lib/system/runner.go`.
 
 ```go
 // Correct
-result, err := system.RunCmd(ctx, []string{"ip", "link", "set", tap, "down"}, system.RunCmdOpts{Privileged: true})
+result, err := system.DefaultRunner.Run(ctx, []string{"ip", "link", "set", tap, "down"}, system.RunCmdOpts{Privileged: true})
 
 // Forbidden
 exec.Command("iptables", ...) // NEVER
 ```
 
-Documented exceptions for direct `os/exec`:
+Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 
-| Location | Why RunCmd doesn't work |
-|----------|-------------------------|
+| Location | Why DefaultRunner doesn't work |
+|----------|-------------------------------|
 | `internal/core/vm/firecracker.go` | Needs `pass_fds` for VM API socket and log file descriptors |
-| `internal/core/ssh/cp.go` | Pipes two child processes (tar + ssh) via stdin/stdout |
+| `internal/core/ssh/utils.go` | SSH connectivity probe uses `exec.CommandContext` with short-lived probe context |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine with chained losetup/mount/umount/chroot |
-| `internal/lib/system/runner.go` | Implementation of `RunCmd` / `StreamCmd` itself |
-| `internal/lib/system/spawn.go` | Implementation of `SpawnService` for service subprocess spawning |
+| `internal/service/vsockagent/exec.go` | Guest agent command execution via `su`/`sh` with `exec.CommandContext` |
+| `internal/service/vsockagent/pty.go` | Guest agent PTY session via `su` with `exec.CommandContext` |
+| `internal/lib/archive/archive.go` | xz decompression via pipe-based `exec.CommandContext` |
+| `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of `DefaultRunner.Run()` / `Stream()` / `SpawnService` itself |
+
+**Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check. These files are not listed as exceptions above and do not violate the subprocess rule.
 
 Service subprocesses use `system.SpawnService(ctx, cfg)`.
 
@@ -236,7 +240,7 @@ pool.Gather[T,R](ctx, workers, items, fn) // parallel transform, returns []Resul
 pool.Seq[T,R](ctx, items, fn)             // sequential fail-fast, returns []Result[R]
 ```
 
-- Workers default to `runtime.NumCPU() * 2` when ≤ 0.
+- Workers default to `min((runtime.NumCPU() or 4) * 2, len(items))` (minimum 1) when ≤ 0.
 - All accept `context.Context` for cancellation.
 - Go maps require synchronization for concurrent access: `map[K]V + sync.Mutex` (or `sync.RWMutex` for read-heavy).
 - `sync.Map` is specialized for write-once/read-many — NOT a general replacement.
@@ -259,16 +263,16 @@ Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS
 - Example: `ParseDiskSize("1G") == 1073741824`
 
 ### L1: Hermetic Integration Tests (Go)
-- Uses real I/O in controlled environments: in-memory SQLite (`:memory:`), `t.TempDir()`, `FakeRunner` for subprocess calls that can't run in CI.
+- Uses real I/O in controlled environments: file-based SQLite, `t.TempDir()`, `FakeRunner` for subprocess calls that can't run in CI.
 - No networking, no KVM, no sudo.
 - Example: seed DB → call handler → verify JSON output via `cmp.Diff`.
 - Run via `go test ./...`.
 
-### L2: Runner VM E2E Tests (Python in `tests/e2e/`)
+### L2: Runner VM System Tests (Python in `tests/system/`)
 - Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM.
 - No mocking of any kind — the binary is real, the subprocesses are real.
 - **Ground truth:** A feature is not tested until it has an L2 test. L0/L1 are fast pre-filters, not replacements.
-- Run via `pytest tests/e2e/` inside the runner VM.
+- Run via `pytest tests/system/` inside the runner VM.
 
 ## 13. CLI Patterns
 
@@ -308,7 +312,7 @@ One file per domain: `internal/cli/vm.go` has all VM subcommands (create, start,
 - **`reflect`** — BANNED unless explicitly approved with an ADR. Use `errors.As`, type switches, interfaces, generics.
 - **`goto`** — BANNED in all Go code.
 - **`interface{}` / `any`** — BANNED for model fields and validators. ALLOWED with documentation for intentional sum-types (e.g., `OperationResult.Item`). REQUIRED by Go stdlib for `yaml.Unmarshal` / `json.Decoder.Decode`.
-- **`new(T)` for pointer types** — Use `&Type{}` or `ptr.To(val)` instead of `new(string)`, `new(bool)`, etc.
+- **`new(T)` for pointer types** — Use `&Type{}` or `ptr.Ptr(val)` instead of `new(string)`, `new(bool)`, etc.
 - **`_` prefix on struct fields** — Unused fields must be removed, not silenced.
 - **`init()` globals** — Everything wired explicitly in `app.Initialize()`.
 - **`log.Printf` / `fmt.Fprintf` below CLI** — Only `slog` in infra/core/api.
@@ -346,7 +350,7 @@ Cross-domain enrichment in `internal/enricher/`:
 - Explicit `switch/case` dispatch per relation type — NO reflect, NO string dispatch.
 - Enricher wired once at startup with all repository interfaces.
 - Called from API layer, not from core.
-- Enrichment methods belong in service layer (e.g., `svc.EnrichWithLeases(ctx, networks, leaseRepo)`), not in API layer.
+- Enrichment methods belong on the `*Enricher` struct (e.g., `enr.EnrichNetwork(ctx, networks, "leases")`), called from API layer, not from core.
 
 ## 16. Input Pattern v2
 
@@ -423,13 +427,14 @@ if net == nil { net = snap.Network }
 ## 17. Subprocess Services
 
 Long-running subprocess services in `internal/service/`:
-- `console/` — PTY relay goroutine
-- `nocloudnet/` — NoCloud HTTP metadata server goroutine
-- `loopmount/` — Loop-mount provisioner subprocess
+- `console/` — PTY relay goroutine (entry: `mvm run console relay`)
+- `nocloudnet/` — NoCloud HTTP metadata server goroutine (entry: `mvm run nocloudnet serve`)
+- `loopmount/` — Loop-mount provisioner subprocess (entry: `mvm run provision`)
+- `vsockagent/` — Embedded guest agent binary (cross-compiled, zstd-compressed, injected at runtime via vsock — no `mvm run` entry)
 
-Each follows: `Config` struct → `Run(ctx, cfg)` (blocking) → `Spawn(ctx, cfg, extraFiles...)` (background via `system.SpawnService`).
+Each subprocess service follows: `Config` struct → `Run(ctx, cfg)` (blocking) → `Spawn(ctx, cfg, extraFiles...)` (background via `system.SpawnService`).
 
-Compiled into the same `mvm` binary. Entry via `mvm run <service>`.
+All compiled into the same `mvm` binary.
 
 ## 18. Performance
 
@@ -439,7 +444,7 @@ Compiled into the same `mvm` binary. Entry via `mvm run <service>`.
 - Parallelize HTTP-bound config resolution per config using goroutines + `sync.WaitGroup` + `sync.Mutex`, sequential between phases.
 - No backend fallback: fail fast, let user fix root cause.
 - Provisioner type resolved once at startup, not per-call.
-- `Provisioner` struct created once, backend session created once per `Run()`.
+- `Backend` created per VM creation via `provisioner.NewBackend()`; operations queued and executed via `backend.Run()`.
 - No duplicate content generation: generate once, pass to both check and writer.
 
 ## 19. ID Generation
@@ -483,13 +488,13 @@ Rule: If a type requires a specific entity to construct, it's a Controller, not 
 
 | Layer | Imports from |
 |-------|-------------|
-| CLI | `pkg/api`, `internal/cli/common`, `internal/infra`, `internal/lib/*`, `internal/workflow/env` |
-| API | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/lib/*`, `internal/service/*` |
-| API inputs | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/lib/*` |
-| Core domain | `internal/infra`, `internal/lib/*` only |
-| Enricher | `internal/core/*`, `internal/lib/model`, `internal/infra/pool` |
+| CLI | `pkg/api`, `pkg/api/inputs`, `pkg/api/results`, `pkg/errs`, `internal/cli/common`, `internal/infra`, `internal/lib/*`, `internal/workflow/env`, `internal/service/*` (for `mvm run <service>`) |
+| API | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/infra/event`, `internal/lib/*`, `internal/assets`, `internal/service/*`, `pkg/errs`, `pkg/api/inputs`, `pkg/api/results` |
+| API inputs | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/lib/*`, `pkg/errs` |
+| Core domain | `internal/infra`, `internal/lib/*`, `internal/assets`, `internal/service/*` (for subprocess spawning) — no other core domains |
+| Enricher | `internal/core/*`, `internal/lib/model`, `pkg/errs` |
 | Service | `internal/infra`, `internal/lib/*` |
-| Workflow/env | `pkg/api`, `internal/infra`, `internal/lib/*`, `internal/workflow/*` |
+| Workflow/env | `pkg/api`, `pkg/api/inputs`, `pkg/api/results`, `internal/infra`, `internal/lib/*`, `internal/workflow/*` |
 | Infra/lib | stdlib, `github.com/jmoiron/sqlx`, external deps |
 
 ## 23. Shell Completion
@@ -562,7 +567,7 @@ Before declaring code complete:
 - [ ] Does `go vet ./...` pass?
 - [ ] Is `ctx context.Context` the first param in every method/side-effect function?
 - [ ] Did I avoid `reflect`, `goto`, `log.Printf`, `init()`, `os.Exit()` in handlers?
-- [ ] Did I avoid `new(T)` for pointer types? (use `&Type{}` or `ptr.To()`)
+- [ ] Did I avoid `new(T)` for pointer types? (use `&Type{}` or `ptr.Ptr()`)
 - [ ] Did I avoid `_ =` for discarded errors? (check or comment why ignored)
 - [ ] Do error messages start with lowercase? (Go convention)
 - [ ] Did I use `*T` for every nullable field where zero value has meaning?
@@ -576,7 +581,7 @@ Before declaring code complete:
 - [ ] Do table commands always show headers, even when empty?
 - [ ] Is `OverridableDefaults` imported from `internal/infra/constants.go`? (no duplicates)
 - [ ] Are utility functions in `utils.go` if they don't reference Service struct?
-- [ ] Did I use `system.RunCmd()` for all subprocess calls? (no raw `os/exec` except documented exceptions)
+- [ ] Did I use `system.DefaultRunner.Run()` for all subprocess calls? (no raw `os/exec` except documented exceptions)
 - [ ] Commenting checklist checked? (see §25.18)
 
 ## 25. Commenting Standards

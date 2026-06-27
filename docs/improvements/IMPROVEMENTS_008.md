@@ -1,8 +1,16 @@
 # Snapshot-Based Instant VM Cloning & Next-Level Optimizations
 
-> **STATUS: Design Document — not implemented.** Building blocks exist (`CreateSnapshot`/`LoadSnapshot` in `FirecrackerClient`, `Snapshot`/`LoadSnapshot` in `VMController`), but no snapshot domain, CLI commands, pool manager, or CoW rootfs.
+> **STATUS: Snapshot domain implemented (Phase 2).** 
+> | Phase | Status |
+> |-------|--------|
+> | Phase 1: Foundation (huge pages, cgroup v2, boot args) | ⚠️ Partial |
+> | Phase 2: Snapshot Domain (CRUD lifecycle) | ✅ Implemented |
+> | Phase 3: Clone from Snapshot (`vm create --snapshot`) | ❌ Not started |
+> | Phase 4: Hot-Standby Pool | ❌ Not started |
 >
-> **Last verified:** 2026-06-10
+> The snapshot domain (`internal/core/snapshot/`), CLI commands (`internal/cli/snapshot.go`), API layer (`pkg/api/snapshot.go`), and input validation (`pkg/api/inputs/snapshot.go`) are all implemented. The `SnapshotItem` model uses `SnapshotDir`, `MemoryFile`, `StateFile`, `RootfsFile`, `ImageID`, `ExtraConfig` (as `*SnapshotExtraConfig` struct). Firecracker snapshot/resume API is at `internal/lib/firecracker/client.go`. 
+>
+> **Last verified:** 2026-06-27
 
 **Phase:** Multi-phase — spans 3-4 milestones
 **Complexity:** Very High
@@ -30,7 +38,9 @@ When `PUT /snapshot/create` is called on a **paused** microVM, Firecracker produ
 - **Multiple processes can MAP_PRIVATE the same file simultaneously** — each gets independent COW
 - Loading the snapshot takes **~3-8ms** (just the mmap syscall + metadata), not the full RAM size
 
-### 1.2 Snapshot Domain (Not Implemented)
+### 1.2 Snapshot Domain (Original Design)
+
+> Note: This section documents the original design proposal. The actual implementation differs — see [docs/implementations/SNAPSHOT_DOMAIN.md](../implementations/SNAPSHOT_DOMAIN.md) for the current state.
 
 A new domain `snapshot` with full CRUD lifecycle.
 
@@ -54,12 +64,13 @@ type SnapshotItem struct {
 }
 ```
 
-**CLI Commands (Not Implemented):**
+**CLI Commands (Implemented):**
 ```
-mvm snapshot create <name> --vm <vm-id> [--leave-paused]
-mvm snapshot list [--json]
-mvm snapshot get <name> [--json]
-mvm snapshot rm <name> [--force]
+mvm snapshot create <vm> [--name <name>] [--pause]
+mvm snapshot ls [--json]
+mvm snapshot inspect <identifier> [--json]
+mvm snapshot rm <identifier...> [--force]
+mvm snapshot restore <identifier> <name> [--network <net>] [--resume]
 ```
 
 ### 1.3 `vm create --snapshot` (Not Implemented)
@@ -124,18 +135,17 @@ Use a **read-only base image** + **writable overlay** per VM. Zero copy, O(1) cr
 
 | Item | Status |
 |---|---|
-| Huge pages: add to `FirecrackerConfig` + host docs | ❌ |
-| cgroup v2 + `kvm.nx_huge_pages=never` docs | ❌ |
+| Huge pages: add to `FirecrackerConfig` + host docs | ⚠️ Partial — hugepage detection implemented in `internal/core/host/detector.go` (reads `/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages`), stored in `host_state` schema, but not added to `FirecrackerConfig` struct and no host docs written. |
+| cgroup v2 + `kvm.nx_huge_pages=never` docs | ⚠️ Partial — cgroup v2 detection in `internal/core/host/detector.go` (checks `/sys/fs/cgroup/cgroup.controllers`), stored in `host_state` schema, but docs not written. |
 | Kernel boot args: add safe params | ⚠️ Partial (basic args exist) |
 
-### Phase 2: Snapshot Domain (Weeks 2-3)
+### Phase 2: Snapshot Domain (Weeks 2-3) ✅ DONE
 
 | Item | Status |
 |---|---|
-| `SnapshotItem` model + `SnapshotRepository` | ❌ |
-| `snapshot create` (pause + snapshot API + rootfs copy) | ❌ (API methods exist, but no domain) |
-| `snapshot list / get / rm` | ❌ |
-| snapshot CLI commands | ❌ |
+| `SnapshotItem` model + `SnapshotRepository` | ✅ Implemented — `internal/lib/model/snapshot.go`, `internal/core/snapshot/repository.go` |
+| `snapshot create`, `snapshot list`, `snapshot inspect`, `snapshot restore`, `snapshot rm` | ✅ Implemented — full domain + CLI + API |
+| snapshot CLI commands | ✅ Implemented — `internal/cli/snapshot.go`: create, ls, inspect, restore, rm |
 
 ### Phase 3: Clone from Snapshot (Weeks 3-5) ❌
 

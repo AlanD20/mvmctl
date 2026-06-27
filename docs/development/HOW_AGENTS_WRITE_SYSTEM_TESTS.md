@@ -100,12 +100,11 @@ func TestParseDiskSize(t *testing.T) {
 
 ### Level 1: Hermetic Integration Tests (Go)
 
-**Scope:** Tests that use real I/O in a controlled environment — real SQLite (`:memory:`), real filesystem (`t.TempDir()`), `FakeRunner` for subprocess calls that can't run in CI. No network, no KVM, no sudo.
+**Scope:** Tests that use real I/O in a controlled environment — real SQLite (file-based, in t.TempDir()), real filesystem (`t.TempDir()`), `FakeRunner` for subprocess calls that can't run in CI. No network, no KVM, no sudo.
 
 ```go
 func TestVMList_JSONOutput(t *testing.T) {
-    db := testutil.NewInMemoryDB(t)  // :memory: sqlite + migrations
-    repo := db.NewVMRepo()           // real VMRepository backed by real SQLite
+    repo := testutil.NewVMRepo()     // in-memory map-backed repo (zero arg)
     ctx := context.Background()
     repo.Upsert(ctx, &model.VMItem{ID: "vm-1", Name: "test-vm", Status: "running"})
 
@@ -119,8 +118,8 @@ func TestVMList_JSONOutput(t *testing.T) {
 **Key principle:** No mocking of the code under test. `FakeRunner` is used only for subprocess calls that physically cannot run in CI (`firecracker`, `ssh-keygen`). Everything else — DB, filesystem, config — is real, redirected to temp directories.
 
 **What we add to make L1 work:**
-- `testutil.NewInMemoryDB()` — opens `:memory:` SQLite via `modernc.org/sqlite`, runs all migrations
-- `NewSQLiteRepo(db) → (VMRepo, NetworkRepo, ...)` — real repository implementations backed by real SQLite
+- `testutil.NewInMemoryDB(t)` — opens a file-based SQLite in `t.TempDir()`, runs all migrations
+- `testutil.NewVMRepo()`, `testutil.NewNetworkRepo()`, etc. — thread-safe in-memory repository implementations (backed by map, not SQLite)
 
 ### Level 2: Runner VM E2E Tests (Python)
 
@@ -177,7 +176,7 @@ Q2: Does the function under test have I/O side effects
 |----------|-------------|-------------------|---------|
 | `key create --algorithm ed25519` | Yes (`ssh-keygen`) | — | **L2** |
 | `network create --subnet 10.0.0.0/24` | Yes (`ip link`, `nft`) | — | **L2** |
-| `vm create --vcpus 4` | Yes (`firecracker`) | — | **L2** |
+| `vm create --vcpu 4` | Yes (`firecracker`) | — | **L2** |
 | `config set defaults.vm vcpu_count 4` | No | Yes (file write) | **L1** |
 | `network ls --json` (verify output fields) | No | Yes (DB query) | **L1** |
 | `--help` output structure | No | No | **L0** |
@@ -228,9 +227,9 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `key create --out` | **L2** | Real file I/O |
 | `key create --default` | **L2** | Real `ssh-keygen` subprocess |
 | `key create --force` (overwrite) | **L2** | Real `ssh-keygen` subprocess |
-| `key add <name> <pubkey>` | L1 | Temp dir file copy + DB storage |
-| `key add` duplicate | L1 | DB query |
-| `key add --force` | L1 | DB update |
+| `key import <name> <path>` | L1 | Temp dir file copy + DB storage |
+| `key import` duplicate | L1 | DB query |
+| `key import --force` | L1 | DB update |
 | `key ls` / `key ls --json` | L1 | DB query + JSON |
 | `key inspect` / `--json` / `--tree` | L1 | DB query |
 | `key rm <name>` | L1 | DB update |
@@ -248,14 +247,14 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | Scenario | Verdict | Why |
 |----------|---------|-----|
 | `vm create` basic | **L2** | Real Firecracker spawn |
-| `vm create --vcpus` | **L2** | Real Firecracker spawn |
+| `vm create --vcpu` | **L2** | Real Firecracker spawn |
 | `vm create --mem` | **L2** | Real Firecracker spawn |
 | `vm create --disk-size` | **L2** | Real Firecracker spawn |
 | `vm create --kernel` | **L2** | Real Firecracker spawn |
 | `vm create --boot-args` | **L2** | Real Firecracker spawn |
 | `vm create --ip` / `--mac` | **L2** | Real Firecracker spawn |
-| `vm create --no-console` | **L2** | Real Firecracker spawn |
-| `vm create --no-pci` / `--enable-pci` | **L2** | Real Firecracker spawn |
+| `vm create --console` | **L2** | Real Firecracker spawn |
+| `vm create --no-pci` | **L2** | Real Firecracker spawn |
 | `vm create --enable-logging` / `--enable-metrics` | **L2** | Verify files on disk |
 | `vm create --cloud-init-mode <mode>` | **L2** | Real Firecracker + cloud-init |
 | `vm create --nocloud-net-port` | **L2** | Real Firecracker + network |
@@ -264,7 +263,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `vm create --ssh-key` | **L2** | Real SSH key injection |
 | `vm create --nested-virt` | **L2** | Real KVM passthrough |
 | `vm create --cpu-template` | **L2** | Real Firecracker config |
-| `vm create --user-data` | **L2** | Real cloud-init |
+| `vm create --cloudinit-config` | **L2** | Real cloud-init |
 | `vm ls` / `vm ls --json` | L1 | DB query + JSON |
 | `vm ls --json` empty | L1 | DB query |
 | `vm ps` / `vm ps --json` | **L2** | Real process table |
@@ -274,12 +273,24 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `vm stop --force` | **L2** | Real process kill |
 | `vm rm` / `vm rm --force` | **L2** | Real process + file cleanup |
 | `vm rm <name1> <name2>` | **L2** | Multiple real process cleanup |
-| `snapshot create / restore` | **L2** | Real Firecracker snapshot API |
 | `vm export / import` | **L2** | Real file I/O |
-| `vm attach-volume / detach-volume` | **L2** | Real volume lifecycle |
 | Volume persists stop/start | **L2** | Real VM state machine |
 | Volume mountable in guest | **L2** | Real SSH + filesystem |
 | Crash recovery (kill firecracker PID) | **L2** | Real process management |
+
+### `mvm snapshot`
+
+| Scenario | Verdict | Why |
+|----------|---------|-----|
+| `snapshot create <vm>` (basic) | **L2** | Real Firecracker snapshot API |
+| `snapshot create <vm> --name` / `--pause` | **L2** | Real Firecracker snapshot API |
+| `snapshot ls` / `snapshot ls --json` | L1 | DB query + JSON |
+| `snapshot inspect` / `--json` / `--tree` | L1 | DB query + JSON |
+| `snapshot restore <vm>` (basic) | **L2** | Real Firecracker snapshot restore |
+| `snapshot restore <vm> --network` / `--resume` / `--count` | **L2** | Real Firecracker snapshot restore |
+| `snapshot rm <name>` / `snapshot rm --force` | **L2** | Real file deletion |
+| `snapshot rm <name1> <name2>` | **L2** | Real file deletion |
+| `snapshot rm` nonexistent | L1 | Error handling |
 
 ### `mvm network`
 
@@ -322,6 +333,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `volume rm` partial failure | **L2** | Real file deletion |
 | `volume resize` | **L2** | Real file resize |
 | `volume resize` shrink | **L2** | Real file resize |
+| `volume attach` / `volume detach` | **L2** | Real Firecracker API + VM lifecycle |
 | Invariants: available→attached→available | **L2** | Real VM attach/detach |
 | Volume hotplug / hotunplug | **L2** | Real Firecracker PCI hotplug |
 
@@ -332,7 +344,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `image pull <type>:<version>` | **L2** | Real HTTP download |
 | `image pull --force` / `--default` / `--skip-optimization` | **L2** | Real HTTP download |
 | `image pull` nonexistent | L1 | Error handling |
-| `image pull --disable-detector` / `--arch` / `--no-cache` | **L2** | Real HTTP download |
+| `image pull --disable-detector` / `--no-cache` | **L2** | Real HTTP download |
 | `image ls` / `image ls --json` | L1 | DB query + JSON |
 | `image ls --remote` | **L2** | Real network I/O |
 | `image inspect` / `--json` / `--tree` | L1 | DB query + JSON |
@@ -352,7 +364,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `kernel ls --remote` | **L2** | Real network I/O |
 | `kernel pull --type firecracker` | **L2** | Real HTTP download |
 | `kernel pull --type official` (build) | **L2** | Real build tools |
-| `kernel pull --arch` / `--jobs` / `--keep-build-dir` / `--clean-build` | **L2** | Real build tools |
+| `kernel pull --jobs` / `--keep-build-dir` / `--clean-build` | **L2** | Real build tools |
 | `kernel inspect` / `--json` / `--tree` | L1 | DB query + JSON |
 | `kernel default` | L1 | DB update |
 | `kernel rm` / `kernel rm --force` | **L2** | Real file deletion |
@@ -372,6 +384,18 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `bin rm` nonexistent | L1 | Error handling |
 | `bin default` / `bin default <nonexistent>` | L1 | DB update |
 | Service symlinks survive cache clean | **L2** | Real filesystem symlinks |
+
+### `mvm exec`
+
+| Scenario | Verdict | Why |
+|----------|---------|-----|
+| `exec <id> -- <cmd>` | **L2** | Real subprocess execution |
+| `exec <id>` (interactive shell via stdin) | **L2** | Real subprocess |
+| `exec` with `--port` | **L2** | Real port wiring |
+| `exec` with `--timeout` | L1 | Flag parsing |
+| `exec` with `--user` | **L2** | Real user context switch |
+| `exec` nonexistent VM | L1 | Error handling |
+| `exec` invalid port | L1 | Error handling |
 
 ### `mvm ssh`, `console`, `logs`, `cp`, `host`, `cache`
 
@@ -406,6 +430,28 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `cache clean --dry-run` | L1 | DB query |
 | `cache clean --force` | **L2** | Real DB + file deletion |
 
+### `mvm env`
+
+| Scenario | Verdict | Why |
+|----------|---------|-----|
+| `env apply <spec>` (basic) | **L2** | Real resource creation |
+| `env apply` re-apply | **L2** | Idempotency |
+| `env apply` nonexistent spec | L1 | Error handling |
+| `env apply` invalid YAML | L1 | Error handling |
+| `env ls` (empty, after apply, after destroy) | L1 | DB query |
+| `env diff` (no diff, drifted, new, removed) | **L2** | Real state comparison |
+| `env destroy` (by spec, by ID) | **L2** | Real resource destruction |
+| `env destroy` nonexistent | L1 | Error handling |
+| Full lifecycle apply→diff→destroy | **L2** | End-to-end |
+
+### `mvm run` (internal service subprocesses)
+
+| Scenario | Verdict | Why |
+|----------|---------|-----|
+| `run nocloudnet serve --help` | L1 | Cobra output |
+| `run console relay --help` | L1 | Cobra output |
+| `run provision --help` | L1 | Cobra output |
+
 ### Invariants, Cross-Resource, and Consistency
 
 | Scenario | Verdict | Why |
@@ -418,7 +464,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | CLI flag naming consistency (`--force` vs `--overwrite`) | L1 | Cobra help text parse |
 | Help output structure | L1 | Cobra output |
 | Error message: `vm rm nonexistent` → "not found" | L1 | Handler output |
-| Error message: `--vcpus 0` | L1 | Cobra validation |
+| Error message: `--vcpu 0` | L1 | Cobra validation |
 | Error message: `network create` without `--subnet` | L1 | Cobra validation |
 
 ---
@@ -432,9 +478,10 @@ Every L2 test runs **inside a disposable Firecracker VM** with nested KVM, not d
 ```
 Host (no mvm state at all)
 │
-└── Runner VM (ubuntu:24.04, official kernel with features, nested-virt)
-    ├── /root/mvm          ← built binary, copied in
-    ├── /root/tests/        ← test suite, copied in
+└── Runner VM (custom base image mvm-test-runner:<version>)
+    ├── /usr/local/bin/mvm          ← built binary, baked in
+    ├── /tests/system/              ← test suite, baked in
+    ├── /mnt/                       ← shared RO asset volume
     │
     └── pytest runs inside the VM
         ├── mvm vm create ...       ← creates REAL VMs (nested)
@@ -447,16 +494,13 @@ Host (no mvm state at all)
 
 ```
 1. Build mvm binary on host
-2. Create runner VM (ubuntu:24.04, official 7.0.11 kernel with kvm,nftables,tuntap features)
-3. Provision: copy mvm binary, install pytest, copy test suite
-4. SNAPSHOT the runner VM → reuse across test sessions
-5. For each test run:
-   a. From snapshot, restore runner VM
-   b. Execute pytest <test-file> via SSH
-   c. Collect JUnit XML results
-   d. Discard runner VM
-6. Destroy runner VM when done
+2. Create runner VM from custom base image (mvm-test-runner:<version>)
+3. Provision: mount shared asset volume, run mvm init, pull cache hits
+4. Execute pytest <test-file> directly inside the VM
+5. Destroy runner VM when done
 ```
+
+Runner VMs are created fresh per test session, not restored from snapshots. See `docs/system-test-architecture.md` for the complete architecture.
 
 ### Scoping Model
 
@@ -475,7 +519,7 @@ The runner VM snapshot includes pre-cached assets to eliminate network-dependent
 - Ubuntu 24.04 image (for nested virt tests)
 - Firecracker binary v1.15+ (for hotplug tests)
 - Firecracker kernel v1.15 (default)
-- Official kernel 7.0.11 with `kvm,nftables,tuntap` features (pre-built, cached)
+- Official kernel 7.0.11 with `kvm,nftables,tuntap,btrfs` features (pre-built, cached)
 
 ---
 
@@ -483,50 +527,58 @@ The runner VM snapshot includes pre-cached assets to eliminate network-dependent
 
 ### Fixture Pattern
 
-All L2 tests use a session-scoped `runner_vm` fixture that handles provisioning and teardown:
+All L2 tests use a session-scoped `runner_vm` fixture that reads the VM name from the orchestrator:
 
 ```python
-# tests/e2e/conftest.py
+# tests/system/conftest.py
 @pytest.fixture(scope="session")
-def runner_vm(mvm_binary):
-    """Create a disposable runner VM, provision it, yield, destroy."""
-    vm_name = create_runner_vm(
-        mvm_binary,
-        image="ubuntu:24.04",
-        kernel="official:7.0.11",
-        features="kvm,nftables,tuntap",
-        vcpus=4,
-        mem="4g",
-        disk="30g",
-        nested_virt=True,
-    )
-    copy_binary_into_vm(mvm_binary, vm_name)
-    copy_tests_into_vm(mvm_binary, vm_name)
-    install_pytest_in_vm(mvm_binary, vm_name)
-    yield vm_name
-    destroy_vm(mvm_binary, vm_name)
+def runner_vm() -> str:
+    """Return the test VM name, set by orchestrator via MVM_TEST_VM env var."""
+    return os.environ.get("MVM_TEST_VM", "t1-base")
 ```
 
-### SSH Helper
+The orchestrator (`scripts/run-system-tests.py`) creates and provisions the VM before
+running pytest, and destroys it after. The fixture just provides the VM name to
+tests so they can reference it when calling `_run_mvm(runner_vm, ...)`.
 
-Commands inside the runner VM are executed via SSH:
+### Test Timeout Policy: CLI flags vs subprocess timeouts
+
+**These are two distinct concerns — do not conflate them.**
+
+**CLI `--timeout` flags** (e.g., `mvm exec --timeout`, `mvm ssh --timeout`):
+
+These are **connect/probe timeouts** only (per ADR-0013). They control how long the CLI waits for the target to establish a connection. Default: **5s**, absolute max: **10s**. Once connected, the operation runs unbounded. See `CONTEXT.md` for the full taxonomy.
+
+**Subprocess timeouts in test infrastructure** (`timeout=` parameter of `_run_mvm()` / `_guest_run()`):
+
+These control how long `subprocess.run()` waits for the `mvm` command to complete. They are a **safety net**, not a performance floor. The defaults in `conftest.py` are generous:
 
 ```python
-def _guest_run(mvm_binary, vm_name, guest_cmd, *, check=True, timeout=30):
-    """Run a command inside the runner VM via mvm ssh.
-    
-    Returns subprocess.CompletedProcess.
-    """
-    return _run_mvm(
-        mvm_binary,
-        "ssh",
-        vm_name,
-        "--cmd",
-        guest_cmd,
-        check=check,
-        timeout=timeout,
+def _run_mvm(
+    vm_name: str, *args: str, check: bool = True, timeout: int = 60
+) -> subprocess.CompletedProcess[str]:
+    """Run an mvm command. vm_name is ignored — already inside test VM."""
+    cmd = ["mvm", *args]
+    result = subprocess.run(
+        cmd, capture_output=True, text=True,
+        timeout=timeout + 30,  # 90s total by default
+        env={**os.environ, "NO_COLOR": "1"},
     )
+    if check and result.returncode != 0:
+        raise RuntimeError(...)
+    return result
 ```
+
+Individual slow operations use explicit higher timeouts:
+
+| Operation | Subprocess timeout |
+|---|---|
+| `vm create` | 180s |
+| `vm rm --force` | 120s |
+| `image pull`, `kernel pull`, `bin pull` | 300s |
+| `network rm --force` | 60s |
+
+**When writing a test:** Do NOT add explicit `timeout=` to `_run_mvm()` calls unless the operation is known to be slow (pulls, VM create, rm). Let the default handle fast operations. The speed-first principle applies to the CLI `--timeout` flag, not to test subprocess timeouts.
 
 ### Test File Pattern
 
@@ -538,16 +590,16 @@ from __future__ import annotations
 import json
 import pytest
 
-from tests.e2e.conftest import _guest_run
+from tests.system.conftest import _run_mvm
 
-pytestmark = [pytest.mark.system, pytest.mark.e2e, pytest.mark.domain_volume]
+pytestmark = [pytest.mark.system, pytest.mark.domain_volume]
 
 
 class TestVolumeLifecycle:
     def test_volume_create(self, runner_vm):
         """Create a volume and verify size via --json."""
-        result = _guest_run(
-            runner_vm, "mvm volume create myvol 1G --json", timeout=30
+        result = _run_mvm(
+            runner_vm, "volume", "create", "myvol", "1G", "--json", timeout=30
         )
         data = json.loads(result.stdout)
         assert data["name"] == "myvol"
@@ -556,10 +608,10 @@ class TestVolumeLifecycle:
     
     def test_volume_rm(self, runner_vm):
         """Remove a volume and verify it is gone from listing."""
-        _guest_run(runner_vm, "mvm volume create myvol2 512M --json", timeout=30)
-        _guest_run(runner_vm, "mvm volume rm myvol2 --force", timeout=30)
+        _run_mvm(runner_vm, "volume", "create", "myvol2", "512M", "--json")
+        _run_mvm(runner_vm, "volume", "rm", "myvol2", "--force")
         
-        result = _guest_run(runner_vm, "mvm volume ls --json", timeout=30)
+        result = _run_mvm(runner_vm, "volume", "ls", "--json")
         volumes = json.loads(result.stdout)
         assert not any(v["name"] == "myvol2" for v in volumes)
 ```
@@ -585,8 +637,8 @@ L0 and L1 tests follow the patterns in [HOW_AGENTS_WRITE_UNIT_TESTS.md](HOW_AGEN
 - **L1:** Tests that use `t.TempDir()` for filesystem I/O, `testutil.NewInMemoryDB()` for DB operations, and `testutil.FakeRunner` for subprocess call verification.
 
 Key resources:
-- `testutil.NewInMemoryDB(t)` — opens `:memory:` SQLite, runs all migrations, returns a handle
-- `testutil.NewSQLiteRepo(db)` — creates real repository implementations backed by real SQLite
+- `testutil.NewInMemoryDB(t)` — opens file-based SQLite in t.TempDir(), runs all migrations, returns a handle
+- `testutil.NewVMRepo()` / `testutil.NewNetworkRepo()` (zero arguments) — in-memory repository implementations (backed by `map`, not SQLite)
 - `testutil.FakeRunner` — records subprocess calls for assertion (use for argument verification, NOT for behavior testing)
 - `t.TempDir()` — temp directory for any file I/O
 
@@ -600,7 +652,7 @@ This requires:
 
 1. **Exhaustive coverage:** Every CLI command, every flag, every output format, every error path is tested. The quick-reference table above is the catalog. If a flag or command is not listed, coverage is incomplete.
 
-2. **Deterministic execution:** Tests never skip, never flake, never depend on network availability or host hardware quirks. The runner VM starts from a pre-seeded snapshot. If a test cannot pass deterministically, fix the test — do not add `pytest.skip()`.
+2. **Deterministic execution:** Tests never skip, never flake, never depend on network availability or host hardware quirks. Runner VMs are created fresh from a custom base image with a shared read-only asset volume — no network-dependent pulls needed. If a test cannot pass deterministically, fix the test — do not add `pytest.skip()`.
 
 3. **Isolated state:** No test can see or corrupt another test's state. The runner VM is disposable — destroyed and recreated between sessions. Parallel workers each get their own VM.
 
@@ -615,8 +667,8 @@ The migration from the current architecture to the target architecture is increm
 ### Phase 0: Scaffold L0/L1 Infrastructure (Weeks 1-2)
 
 Add the building blocks for fast pre-filter tests:
-- `testutil.NewInMemoryDB()` — opens `:memory:` SQLite, runs all migrations
-- `testutil.NewSQLiteRepo(db)` — real repository implementations
+- `testutil.NewInMemoryDB()` — opens file-based SQLite in t.TempDir(), runs all migrations
+- `testutil.NewVMRepo()` / `testutil.NewNetworkRepo()` (zero arguments) — in-memory repository implementations
 - 3-5 representative L1 tests as patterns
 
 ### Phase 1: Add L0/L1 Pre-Filter Tests (Weeks 3-6)
@@ -631,8 +683,8 @@ Write L1 tests for scenarios that need NO subprocess calls. These run alongside 
 ### Phase 2: Runner VM Substrate (Weeks 7-9)
 
 Build the runner VM infrastructure:
-- `tests/e2e/conftest.py` with session-scoped `runner_vm` fixture
-- `_guest_run` helper promoted from `test_vm_nested_isolated.py`
+- `tests/system/conftest.py` with session-scoped `runner_vm` fixture
+- `_run_mvm` helper for direct subprocess calls (replaces old `_guest_run` vsock proxy)
 - Asset pre-seeding (images, kernels, binaries in the snapshot)
 - Migrate 2-3 representative test files to runner VM
 
@@ -641,15 +693,14 @@ Build the runner VM infrastructure:
 Every Python test runs inside the runner VM:
 - Migrate remaining 24 test files
 - Remove all per-domain conftest.py files
-- Rename `tests/system/` → `tests/e2e/`
 - Remove `zzz_destructive/`
 
 ### Phase 4: Clean Up (Week 13) ✅ COMPLETE
 
 Dead code deleted and docs consolidated:
-- Deleted `scripts/run_tests.py` domain-looping script (replaced by `pytest tests/e2e/`)
-- Deleted `COVERAGE_MATRIX.md` (replaced by generated coverage reports)
-- Deleted `tests/system/` entirely (all tests migrated to `tests/e2e/`)
+- Deleted `scripts/run_tests.py` domain-looping script (replaced by `pytest tests/system/`)
+- `COVERAGE_MATRIX.md` maintained in `tests/system/` as accountability document
+- Deleted the old per-domain Python test scripts (replaced by unified L0/L1/L2 test architecture)
 - Updated all related docs to reflect the three-level (L0/L1/L2) architecture
 
 ---
@@ -679,6 +730,6 @@ Dead code deleted and docs consolidated:
 [ ] L1/L0 tests: Do they follow HOW_AGENTS_WRITE_UNIT_TESTS.md patterns?
 [ ] Is every destructive test explicitly marked (not ordered by filename)?
 [ ] Does `go test ./...` pass? (checks L0/L1)
-[ ] Does `pytest tests/e2e/` pass inside the runner VM? (checks L2)
+[ ] Does `pytest tests/system/` pass inside the runner VM? (checks L2)
 [ ] Zero skipped tests? (skip = broken environment or incomplete test)
 ```

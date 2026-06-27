@@ -166,7 +166,7 @@ func TestRepo_CRUD(t *testing.T) {
     repo := testutil.NewVMRepo()  // or NewNetworkRepo(), NewImageRepo(), etc.
 
     t.Run("create_and_get", func(t *testing.T) {
-        vm := &model.VM{
+        vm := &model.VMItem{
             ID:     "vm-1",
             Name:   "test-vm",
             Status: model.VMStatusRunning,
@@ -201,9 +201,9 @@ func TestRepo_CountByStatus(t *testing.T) {
     repo := testutil.NewVMRepo()
 
     // Seed data
-    require.NoError(t, repo.Upsert(ctx, &model.VM{ID: "v1", Status: model.VMStatusRunning}))
-    require.NoError(t, repo.Upsert(ctx, &model.VM{ID: "v2", Status: model.VMStatusStopped}))
-    require.NoError(t, repo.Upsert(ctx, &model.VM{ID: "v3", Status: model.VMStatusRunning}))
+    require.NoError(t, repo.Upsert(ctx, &model.VMItem{ID: "v1", Status: model.VMStatusRunning}))
+    require.NoError(t, repo.Upsert(ctx, &model.VMItem{ID: "v2", Status: model.VMStatusStopped}))
+    require.NoError(t, repo.Upsert(ctx, &model.VMItem{ID: "v3", Status: model.VMStatusRunning}))
 
     t.Run("count_running", func(t *testing.T) {
         count, err := repo.CountByStatus(ctx, string(model.VMStatusRunning))
@@ -253,7 +253,7 @@ func TestService_Stop(t *testing.T) {
     svc := vm.NewService(repo, vm.WithRunner(runner))
 
     t.Run("stop_running_vm_succeeds", func(t *testing.T) {
-        vm := &model.VM{
+        vm := &model.VMItem{
             ID:     "vm-1",
             Name:   "running-vm",
             Status: model.VMStatusRunning,
@@ -271,7 +271,7 @@ func TestService_Stop(t *testing.T) {
     })
 
     t.Run("stop_already_stopped_vm_is_noop", func(t *testing.T) {
-        vm := &model.VM{
+        vm := &model.VMItem{
             ID:     "vm-2",
             Name:   "stopped-vm",
             Status: model.VMStatusStopped,
@@ -289,7 +289,7 @@ func TestService_Stop(t *testing.T) {
     })
 
     t.Run("stop_nonexistent_vm_errors", func(t *testing.T) {
-        vm := &model.VM{
+        vm := &model.VMItem{
             ID:     "vm-nonexistent",
             Name:   "ghost",
             Status: model.VMStatusRunning,

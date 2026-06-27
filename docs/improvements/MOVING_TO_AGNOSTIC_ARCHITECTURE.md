@@ -1,8 +1,8 @@
 # Moving to a VMM-Agnostic Architecture
 
-> **STATUS: Design Proposal — not implemented.** All 15 tracked components remain unstarted. Codebase is fully Firecracker-coupled.
+> **STATUS: Design Proposal — not implemented.** All 15 tracked components remain unstarted. Codebase is fully Firecracker-coupled. No `VMMDriver`, `VMMFactory`, or `vmm_type` field exists anywhere in the Go codebase. `FirecrackerGithubReleasesAPIURL` and `FirecrackerGithubDownloadURL` still hardcoded in `internal/infra/constants.go`. Controller directly imports `internal/lib/firecracker` (was `internal/core/vm/firecracker_client.go`, moved to `internal/lib/firecracker/client.go`). No `--vmm` CLI flags exist.
 >
-> **Last verified:** 2026-06-10
+> **Last verified:** 2026-06-27
 
 ## Implementation Status Summary
 
@@ -52,7 +52,7 @@ This coupling creates several problems:
 
 | File / Location | Coupling | What Needs to Change |
 |---|---|---|
-| `internal/core/vm/firecracker_client.go` | `FirecrackerClient` — HTTP-over-Unix-socket client for runtime control | Extract into `FirecrackerDriver`. |
+| `internal/lib/firecracker/client.go` (moved from `internal/core/vm/firecracker_client.go`) | `FirecrackerClient` — HTTP-over-Unix-socket client for runtime control | Extract into `FirecrackerDriver`. |
 | `internal/core/vm/firecracker.go` | `FirecrackerSpawner` — writes JSON config, launches with `--config-file` | Extract into `FirecrackerDriver`. |
 | `internal/lib/model/firecracker.go` | `FirecrackerConfig` struct — Firecracker-specific fields | Becomes internal to `FirecrackerDriver`. |
 | `internal/core/vm/controller.go` | Direct `FirecrackerClient` imports for pause/resume/start/snapshot | Controller accepts `VMMDriver` instead. |
