@@ -135,7 +135,7 @@ class TestHelpOutputShowsSubcommands:
         expected = {
             "create", "rm", "start", "stop", "reboot",
             "pause", "resume", "ls", "ps", "inspect",
-            "exec", "attach-volume", "detach-volume",
+            "exec",
         }
         for cmd in expected:
             assert cmd in help_text, (

@@ -347,7 +347,7 @@ class TestFreshEnvVM:
 
             _run_mvm(runner_vm, "vol", "create", vol_name, "8g")
 
-            _run_mvm(runner_vm, "vm", "attach-volume", vm_name, vol_name)
+            _run_mvm(runner_vm, "volume", "attach", vm_name, vol_name)
 
             _run_mvm(runner_vm, "vm", "start", vm_name)
 

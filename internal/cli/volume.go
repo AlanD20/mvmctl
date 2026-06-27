@@ -38,7 +38,7 @@ func NewVolumeCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.Comma
 		Use:     "volume",
 		Aliases: []string{"vol"},
 		Short:   "Volume management",
-		Long:    "Manage persistent volumes — list, create, remove, inspect, resize.",
+		Long:    "Manage persistent volumes — list, create, remove, inspect, resize, attach, detach.",
 	}
 
 	cmd.AddCommand(newVolumeListCmd(volumeAPI, configAPI))
@@ -46,6 +46,8 @@ func NewVolumeCmd(volumeAPI api.VolumeAPI, configAPI api.ConfigAPI) *cobra.Comma
 	cmd.AddCommand(newVolumeRemoveCmd(volumeAPI))
 	cmd.AddCommand(newVolumeInspectCmd(volumeAPI))
 	cmd.AddCommand(newVolumeResizeCmd(volumeAPI))
+	cmd.AddCommand(newVolumeAttachCmd(volumeAPI))
+	cmd.AddCommand(newVolumeDetachCmd(volumeAPI))
 
 	return cmd
 }
@@ -239,4 +241,62 @@ func newVolumeResizeCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	}
 
 	return cmd
+}
+
+func newVolumeAttachCmd(volumeAPI api.VolumeAPI) *cobra.Command {
+	return &cobra.Command{
+		Use:   "attach [vm_identifier] [volume_identifier]",
+		Short: "Attach a volume to a VM.",
+		Long: `Attach a volume to a running VM.
+
+Arguments:
+  vm_identifier      VM identifier (name, ID prefix, IP, or MAC)
+  volume_identifier  Name or ID of the volume to attach`,
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeVMThenVolume,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			volumeName := args[1]
+
+			input := inputs.VolumeInput{
+				VMIdentifier: id,
+				Identifiers:  []string{volumeName},
+			}
+			if err := volumeAPI.VolumeAttach(cmd.Context(), input); err != nil {
+				return fmt.Errorf("attach volume %q: %w", volumeName, err)
+			}
+
+			common.Cli.Success(fmt.Sprintf("Volume '%s' attached", volumeName))
+			return nil
+		},
+	}
+}
+
+func newVolumeDetachCmd(volumeAPI api.VolumeAPI) *cobra.Command {
+	return &cobra.Command{
+		Use:   "detach [vm_identifier] [volume_identifier]",
+		Short: "Detach a volume from a VM.",
+		Long: `Detach a volume from a running VM.
+
+Arguments:
+  vm_identifier      VM identifier (name, ID prefix, IP, or MAC)
+  volume_identifier  Name or ID of the volume to detach`,
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeVMThenVolume,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id := args[0]
+			volumeName := args[1]
+
+			input := inputs.VolumeInput{
+				VMIdentifier: id,
+				Identifiers:  []string{volumeName},
+			}
+			if err := volumeAPI.VolumeDetach(cmd.Context(), input); err != nil {
+				return fmt.Errorf("detach volume %q: %w", volumeName, err)
+			}
+
+			common.Cli.Success(fmt.Sprintf("Volume '%s' detached", volumeName))
+			return nil
+		},
+	}
 }
