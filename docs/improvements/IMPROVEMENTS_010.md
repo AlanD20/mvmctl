@@ -1,8 +1,8 @@
 # Per-VM Network Namespaces with Firecracker Jailer
 
-> **STATUS:** Design Document — not implemented.
+> **STATUS:** ⏳ Future — not implemented. No network namespace code, no jailer integration, no `NetNS` field in `FirecrackerConfig` model, no `--jailer`/`--namespace` CLI flags. The vsock agent exec approach (alternative described in §6) is the current method for snapshot restore networking.
 >
-> **Last verified:** 2026-06-19
+> **Last verified:** 2026-06-27
 
 **Phase:** Future
 **Complexity:** Very High

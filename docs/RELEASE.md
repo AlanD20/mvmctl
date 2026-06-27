@@ -25,8 +25,6 @@ This document covers how to release a new version of mvmctl from start to finish
 - **Go 1.26+** — local development and building
 - **Linux (KVM-capable host)** — tests and valid binary
 - **git** — tagging and pushing
-- **uv** — Python dependency management (for system tests only)
-
 ---
 
 ## Step 1: Verify Locally
@@ -47,11 +45,9 @@ go test ./...
 ./scripts/build.sh release
 cp dist/mvm ~/.local/bin/mvm
 
-# E2E tests (requires KVM, groups, assets inside runner VM)
-export MVM_BINARY=dist/mvm
+# System tests (requires KVM, groups, assets)
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
-# Run inside the disposable runner VM (Firecracker VM with nested KVM)
-pytest tests/e2e/
+python3 scripts/run-system-tests.py --all
 ```
 
 All five must pass. If system tests fail, investigate before proceeding.
@@ -71,20 +67,20 @@ test assets. See `python3 scripts/setup-test-environment.py --help` for options.
 
 ```bash
 # Bump version across all project files (requires version argument)
-python scripts/bump-version.py X.Y.Z
+python3 scripts/bump-version.py X.Y.Z
 
 # Preview changes first
-python scripts/bump-version.py X.Y.Z --dry-run
+python3 scripts/bump-version.py X.Y.Z --dry-run
 
 # Bump and auto-commit
-python scripts/bump-version.py X.Y.Z --commit
+python3 scripts/bump-version.py X.Y.Z --commit
 ```
 
 The script updates version strings in:
 - `internal/lib/version/info.go` — Go source version defaults
 - `packaging/PKGBUILD` — Arch Linux pkgver
 - `packaging/mvmctl.spec` — RPM spec Version + `%changelog` entry
-- `packaging/debian/changelog` — Debian changelog entry
+- `packaging/debian/changelog` — Debian changelog entry (created by bump-version.py if packaging/debian/ exists)
 - `docs/mvm.1` — Man page `.TH` header version
 - `CHANGELOG.md` — Moves `[Unreleased]` content to new version section
 
@@ -104,7 +100,7 @@ The build script (`scripts/build.sh`) is the canonical way to build. It supports
 
 | Mode | Command | Output | Use case |
 |------|---------|--------|----------|
-| Dev | `./scripts/build.sh` | `./mvm` | Local development (debuggable) |
+| Dev | `./scripts/build.sh dev` | `./mvm` | Local development (debuggable) |
 | Release | `./scripts/build.sh release` | `./dist/mvm` | Production release (stripped, PIE) |
 | Version | `./scripts/build.sh version` | stdout | Print resolved version |
 
@@ -188,10 +184,10 @@ After the GitHub release is published, update the AUR PKGBUILD checksums:
 
 ```bash
 # Preview changes
-python scripts/post-release.py --aur --dry-run
+python3 scripts/post-release.py --aur --dry-run
 
 # Update checksums and regenerate .SRCINFO
-python scripts/post-release.py --aur
+python3 scripts/post-release.py --aur
 ```
 
 Then push to AUR:
@@ -232,12 +228,12 @@ environment — identical to what CI runs:
 ./scripts/build.sh release --arch all
 
 # Provision VM, build all packages, retrieve artifacts
-mvm env apply packaging/mvmctl.yaml
+mvm env apply packaging/builder.yaml
 
 # Output: mvmctl_*.deb, mvmctl-*.rpm, mvmctl-bin-*.pkg.tar.zst
 ```
 
-The `packaging/mvmctl.yaml` spec creates a single Ubuntu 24.04 Firecracker VM,
+The `packaging/builder.yaml` spec creates a single Ubuntu 24.04 Firecracker VM,
 installs Go 1.26 + `debhelper` + `rpm` + Docker, and runs
 `build-packages.sh --build-binaries` inside it. The Arch `.pkg.tar.zst` is built
 in a Docker `archlinux:latest` container within the VM (same approach as CI).

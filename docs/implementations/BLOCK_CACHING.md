@@ -60,7 +60,7 @@ workloads.
 ## mvmctl vsock agent integration
 
 The vsock guest agent (`internal/service/vsockagent/`) automatically calls `unix.Sync()`
-after every `mvm vm exec` command and every `mvm cp` file transfer, unless `--no-sync` is
+after every `mvm exec` command and every `mvm cp` file transfer, unless `--no-sync` is
 passed.
 
 In **Writeback** mode (default), this ensures data reaches physical storage before the
@@ -81,7 +81,7 @@ this no-op, saving a small amount of overhead.
 
 ## CLI flags
 
-Both `mvm cp` and `mvm vm exec` support `--no-sync` to skip the automatic `unix.Sync()`
+Both `mvm cp` and `mvm exec` support `--no-sync` to skip the automatic `unix.Sync()`
 call:
 
 ```bash
@@ -89,7 +89,7 @@ call:
 mvm cp --no-sync ./file.txt my-vm:/path/
 
 # Skip sync after command
-mvm vm exec --no-sync my-vm -- echo quick
+mvm exec --no-sync my-vm -- echo quick
 ```
 
 Without `--no-sync`, the agent calls `unix.Sync()` automatically, which:
@@ -100,7 +100,7 @@ Without `--no-sync`, the agent calls `unix.Sync()` automatically, which:
 
 ## Manual sync
 
-If you're writing files inside the VM via methods other than `mvm cp` or `mvm vm exec`
+If you're writing files inside the VM via methods other than `mvm cp` or `mvm exec`
 (e.g., SSH, or directly from a process running inside the VM), you must sync manually
 before stopping the VM to avoid data loss. There are three levels, each stronger than the
 last:
@@ -151,8 +151,8 @@ If you have a shell script that writes files and then stops the VM:
 
 ```bash
 #!/bin/sh
-mvm vm exec my-vm -- /setup.sh
-mvm vm exec my-vm -- sync        # ensure data is on disk
+mvm exec my-vm -- /setup.sh
+mvm exec my-vm -- sync        # ensure data is on disk
 mvm vm stop my-vm
 ```
 

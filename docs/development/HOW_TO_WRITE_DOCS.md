@@ -146,7 +146,7 @@ The project has two distinct documentation audiences:
 
 | Category | Why | Where it goes instead |
 |----------|-----|----------------------|
-| Internal architecture | Three-layer design, domain structure, Controller/Service/Repository/Resolver | `CONTEXT.md`, `docs/PROJECT_ARCHITECTURE.md` |
+| Internal architecture | Three-layer design, domain structure, Controller/Service/Repository/Resolver | `CONTEXT.md` |
 | Build system | Go build flags, `go build`, dist/ layout | `docs/RELEASE.md`, `CONTEXT.md` |
 | Sudoers/sudo internals | `PRIVILEGED_BINARIES`, `sg mvm -c`, sudoers file contents | `docs/adr/0005-sudo-privilege-architecture.md` |
 | Provisioner backends | LoopMount vs GuestFS comparison, losetup/btrfs/chroot deps | `CONTEXT.md`, `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` |
@@ -208,7 +208,7 @@ Correct:
 mvm vm create myvm --image ubuntu:24.04
 ```
 
-Wrong: Lead with `mvm vm create myvm --image ubuntu:24.04 --vcpus 4 --mem 8192 --disk-size 50G --network isolated --ip 10.0.0.50 --ssh-key mykey`
+Wrong: Lead with `mvm vm create myvm --image ubuntu:24.04 --vcpu 4 --mem 8192 --disk-size 50G --network isolated --ip 10.0.0.50 --ssh-key mykey`
 
 ### Rule 6: If the CLI Handles It, Don't Document the Manual Way
 

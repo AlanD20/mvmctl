@@ -2,9 +2,20 @@
 
 ## Purpose
 
-This is the **authoritative execution plan** for running the mvmctl system test
-suite and qualifying a release. An AI agent can start from a fresh clone and
-follow this guide linearly without cross-referencing other docs.
+This is the **execution plan** for running the mvmctl system test suite and
+qualifying a release.
+
+The **recommended (and only actively maintained) workflow** is the
+**orchestrator-based** approach: `scripts/run-system-tests.py` creates per-domain
+VMs from a custom base image, runs tests in parallel, and destroys VMs.
+Documented in detail in [system-test-architecture.md](../system-test-architecture.md).
+
+> **Legacy snapshot-based** (`rc-env.yaml` + `mvm snapshot restore`) is
+> **deprecated** and documented only in `docs/development/SYSTEM_TEST_SETUP.md`.
+> Do not use it for new test sessions.
+
+An AI agent can start from a fresh clone and follow this guide linearly
+without cross-referencing other docs.
 
 **Do NOT deviate** from the commands below without approval. All paths,
 environment variables, and flags are intentional.
@@ -15,8 +26,8 @@ environment variables, and flags are intentional.
 
 1. [Prerequisite Check](#1-prerequisite-check)
 2. [Build the Binary](#2-build-the-binary)
-3. [Deploy + Snapshot the Environment](#3-deploy--snapshot-the-environment)
-4. [Run System Tests Inside the VM](#4-run-system-tests-inside-the-vm)
+3. [Prepare Shared Assets](#3-prepare-shared-assets)
+4. [Run System Tests via Orchestrator](#4-run-system-tests-via-orchestrator)
 5. [Interpret Results](#5-interpret-results)
 6. [Collect Release Evidence](#6-collect-release-evidence)
 7. [Reference](#7-reference)
@@ -79,11 +90,9 @@ guestfish -a /dev/null run
 ```
 Exit code 0 = success.
 
-**Note:** Even with guestfish working, the `test_create_guestfs_backend` test may
-fail due to a pre-existing bug in the Go guestfish invocation
-(`guestfish session failed: incorrect number of arguments`). The test was
-previously skipped (masking the bug). This is a separate issue from the supermin
-kernel problem documented above.
+**Note:** The `guestfish session failed: incorrect number of arguments` bug has been
+fixed — guestfish commands are passed via stdin instead of as CLI positional args.
+This issue is separate from the supermin kernel problem documented above.
 
 ### 1.1 Host: Hardware
 
@@ -139,49 +148,23 @@ If any tool is missing, **ask a human admin** to install it:
 - Debian/Ubuntu: `sudo apt-get install -y <package>`
 - Arch: `sudo pacman -S --needed <package>`
 
-See `docs/development/SYSTEM_TEST_SETUP.md` §2 for the package list.
+See `docs/DEPENDENCIES.md` for the per-distribution package list.
 
-### 1.5 rc-vm: Prerequisites (Automatic)
+### 1.5 Orchestrator Prerequisites (Automatic)
 
-These are installed inside rc-vm by `rc-env.yaml` — you do NOT need them on the host:
+The orchestrator (`scripts/run-system-tests.py`) handles all provisioning
+automatically — it creates runner VMs from a custom base image, mounts the
+shared asset volume, and runs pytest inside each VM. Assets (kernels, images,
+binaries) are pre-cached in `~/.cache/mvm-asset-mirror/` on the host.
 
-| Prerequisite | Where | Provided by |
-|---|---|---|---|
-| Python 3 + pytest | Inside rc-vm | `ssh:install packages` step in rc-env.yaml |
-| Kernel (`official:7.0.11`) | Inside rc-vm `/mnt/` | `copy:copy kernel` step |
-| Guestfs kernel (`linux-image-kvm`) | Inside rc-vm `/boot/` | `ssh:install guestfs kernel` step |
-| Images (`alpine:3.21`, `ubuntu:24.04`) | Inside rc-vm `/mnt/` | `copy:copy alpine image`, `copy:copy ubuntu image` |
-| Firecracker binary | Inside rc-vm `/mnt/` | `copy:copy firecracker tarball` |
-| mvm binary | Inside rc-vm `/usr/bin/mvm` | `ssh:install mvm` step |
-| E2E tests | Inside rc-vm `~/tests/e2e/` | `copy:copy e2e tests` step |
+The custom base image (`mvm-test-runner:<mvm-version>`) is built once during
+`--prepare` and contains:
+- The mvm binary at `/usr/local/bin/mvm`
+- System tests at `/tests/system/`
+- Python 3 + pytest
+- qemu-utils
 
-### 1.6 Resource Pre-Seeding (Inside rc-vm)
-
-The e2e test suite needs assets (kernels, images, binaries) to be available
-inside rc-vm. The `rc-env.yaml` handles this automatically during deployment.
-To manually pre-seed assets inside rc-vm:
-
-```bash
-# Inside rc-vm:
-MVM_CACHE_DIR=~/.cache/mvmctl MVM_BINARY=/usr/bin/mvm \
-  mvm kernel pull --type firecracker --version v1.15
-MVM_CACHE_DIR=~/.cache/mvmctl MVM_BINARY=/usr/bin/mvm \
-  mvm kernel pull --type firecracker --version v1.13
-MVM_CACHE_DIR=~/.cache/mvmctl MVM_BINARY=/usr/bin/mvm \
-  mvm kernel default $(MVM_CACHE_DIR=~/.cache/mvmctl MVM_BINARY=/usr/bin/mvm \
-    mvm kernel ls --json | python3 -c "import json,sys;print(json.load(sys.stdin)[-1]['id'][:6])")
-MVM_CACHE_DIR=~/.cache/mvmctl MVM_BINARY=/usr/bin/mvm \
-  mvm image pull alpine:3.21
-MVM_CACHE_DIR=~/.cache/mvmctl MVM_BINARY=/usr/bin/mvm \
-  mvm image pull ubuntu:24.04
-```
-
-`MVM_CACHE_DIR` MUST be set to the same path the test framework will use
-(`~/.cache/mvmctl`). The conftest.py monkeypatches `MVM_CACHE_DIR` to this
-value. If you init or pull resources without it, the DB will be at a different
-path and the tests will report "not initialized".
-
-No manual installation on the host is needed for any of the above.
+No manual installation on the host is needed beyond the tools in section 1.4.
 
 ---
 
@@ -203,167 +186,98 @@ sudo operations. The runner script finds `dist/mvm` via auto-detection.
 
 ---
 
-## 3. Deploy + Snapshot the Environment (Host)
+## 3. Prepare Shared Assets
 
-### 3.1 Initialize the Host
-
-One-time host setup (iptables, mvm group, directories):
+Before the orchestrator can run tests, shared assets must exist on the host.
+The orchestrator's `--prepare` mode handles this automatically:
 
 ```bash
-sudo ~/.local/bin/mvm host init
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  python3 scripts/run-system-tests.py --prepare
 ```
 
-### 3.2 Deploy the rc Environment
+This builds the custom base image (`mvm-test-runner:<version>`), creates the
+shared read-only `asset-mirror` volume, and runs smoke tests (create T1 smoke
+VM → mount volume → init → destroy; same for T2).
 
-This is the **only step the host performs**. After this, everything runs inside rc-vm.
+Run `--prepare` once after cloning or updating the mvm binary. Re-run when the
+binary version changes or when `tests/system/` content changes (or use `--push`
+at run time instead).
 
-```bash
-export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
+### 3.1 Rebuild
 
-# Deploy
-~/.local/bin/mvm env apply rc-env.yaml
-```
-
-**What this does (in order):**
-1. Creates network (`rc-net`), SSH key (`rc-key`)
-2. Creates VM (`rc-vm`) with 6 vcpu, 4G mem, 25G disk, `nested_virt: true`
-3. Copies into the VM: mvm binary, firecracker tarball, kernel `.vmlinux` + `.marker`, alpine image, ubuntu image, e2e tests
-4. Executes `install packages` — system deps inside the VM
-5. Executes `install guestfs kernel` — libguestfs compat kernel
-6. Executes `install mvm` — copies binary to `/usr/bin/mvm`
-7. **Executes `import cached assets`** — runs `kernel pull`/`image pull`/`bin pull`/`init` with `MVM_ASSET_MIRROR=/mnt` (all cache hits, zero network)
-8. **Executes `set mvm env vars`** — adds `MVM_ASSET_MIRROR=/mnt`/`MVM_TEMP_DIR=/mnt` to root's `.bashrc`
-
-### 3.3 Snapshot the Runner VM
-
-After `env apply` completes, snapshot the provisioned VM for instant restore on subsequent runs:
+To force rebuild of the shared volume, base image, and binary:
 
 ```bash
-mvm snapshot create rc-vm --name rc-vm-snap
-```
-
-Now the VM can be restored and tests can run in ~5 seconds instead of waiting for provisioning.
-
-### 3.4 Restore from Snapshot (each test session)
-
-```bash
-mvm snapshot restore rc-vm-snap rc-vm --resume
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  python3 scripts/run-system-tests.py --rebuild --all
 ```
 
 ---
 
-## 4. Run System Tests Inside rc-vm
+## 4. Run System Tests via Orchestrator
 
 **Architecture:**
-- **Host**: Only runs `env apply`. All assets (kernel, images, firecracker) are copied to rc-vm.
-- **rc-vm (outer VM)**: The test environment. **rc-vm is a full bare-metal-quality
-  host** — it has `nested_virt: true`, direct KVM access, its own iptables/nftables
-  stack, full Docker support, sudo, and can run any Linux software. There is no
-  artificial limitation. If the kernel supports it, rc-vm supports it.
-- **Nested VMs (test subjects)**: Created and destroyed by system tests inside
-  rc-vm. These are the actual microVMs being tested.
-
-**Sudo policy inside rc-vm:**
-The `runner` user has passwordless sudo (configured by the provisioner's `SetupSudo`).
-Sudo is available for genuine system operations (nftables, iptables, sysctl).
-The `~/.local/bin/mvm` binary is set up with sudoers access for `mvm host init`
-and related commands.
 
 ```
-┌─────────────────────────────────────────┐
-│ Host (your machine)                     │
-│  Only: mvm env apply rc-env.yaml          │
-│                                         │
-│  ┌─────────────────────────────────┐    │
-│  │ rc-vm (outer VM)            │    │
-│  │  nested_virt: true              │    │
-│  │  Assets: /mnt/kernel, /mnt/*.vhd│    │
-│  │  Tests: ~/tests/e2e/            │    │
-│  │  mvm: /usr/bin/mvm              │    │
-│  │                                 │    │
-│  │  ┌───────────────────────────┐  │    │
-│  │  │ nested-vm-1 (test VM)     │  │    │
-│  │  │  Created by pytest        │  │    │
-│  │  │  Destroyed after test     │  │    │
-│  │  └───────────────────────────┘  │    │
-│  │  ┌───────────────────────────┐  │    │
-│  │  │ nested-vm-2 (test VM)     │  │    │
-│  │  └───────────────────────────┘  │    │
-│  └─────────────────────────────────┘    │
-└─────────────────────────────────────────┘
+Host (your machine)
+│
+├── scripts/run-system-tests.py   ← orchestrator
+│
+├── TIER 1 — Per-domain VMs (custom base image + shared RO volume)
+│   ├── mvm vm create --image mvm-test-runner:<version> --volume asset-mirror
+│   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt mvm init
+│   ├── pytest tests/system/<domain>/    ← runs INSIDE the VM
+│   └── mvm vm rm --force
+│
+├── TIER 2 — Same as T1 + nested-virt
+│   ├── mvm vm create --nested-virt --volume asset-mirror
+│   ├── mount + init + kernel pull / image pull / bin pull (cache hits)
+│   ├── pytest tests/system/<domain>/    ← runs INSIDE the VM
+│   └── mvm vm rm --force
+│
+└── TIER 3 — Tests run directly on host
+    └── pytest tests/system/<domain>/
 ```
 
-### 4.1 Verify the Environment
-
-```bash
-# From the HOST — confirm rc-vm is running
-~/.local/bin/mvm vm ls --json
-
-# Check mvm version inside the outer VM
-~/.local/bin/mvm vm exec rc-vm --user runner --timeout 10 -- 'mvm --version'
-
-# Check tests and assets are present
-~/.local/bin/mvm vm exec rc-vm --user runner --timeout 10 -- 'ls ~/tests/e2e/ /mnt/'
-```
-
-### 4.2 Run All E2E Tests (Release Gate)
-
-**Critical environment variables inside rc-vm:**
-
-| Variable | Value | Why |
-|----------|-------|-----|
-| `MVM_ASSET_MIRROR` | `/mnt` | Assets (kernels, images, binaries) are stored at `/mnt/` |
-| `MVM_BINARY` | `/usr/bin/mvm` | Tests use this to find the mvm binary |
-| `MVM_CACHE_DIR` | `$HOME/.cache/mvmctl` | Test framework sets this automatically via conftest.py |
-
-Run the full e2e suite as a single non-interactive command. The host sends one command via vsock,
-rc-vm executes all tests against nested VMs:
+### 4.1 Run All Tests (Release Gate)
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
-  "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
-  python3 -m pytest --timeout 300 \
-  tests/e2e/ --tb=short -q"
+  python3 scripts/run-system-tests.py --all
 ```
 
-Note: The `--timeout 300` is pytest's per-test timeout (some VM tests take 5+
-minutes). The `--timeout 600` on `mvm vm exec` is the vsock agent connect/probe
-timeout; the pytest command itself runs until completion.
-
-### 4.3 Run a Single Test File
+### 4.2 Run Specific Domains
 
 ```bash
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
-  "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
-  python3 -m pytest --timeout 300 \
-  tests/e2e/network/test_network.py --tb=short -q"
+python3 scripts/run-system-tests.py cli network vm_fresh_env
 ```
 
-### 4.4 Interactive Session (Debugging)
-
-Open a shell inside rc-vm to debug failures:
+### 4.3 Run Specific Tiers
 
 ```bash
-mvm vm exec rc-vm --user runner
-cd ~
-MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
-  python3 -m pytest --timeout 300 -x tests/e2e/ --tb=long
+# Run only Tier 1 domains
+python3 scripts/run-system-tests.py --tier 1
+
+# Run only Tier 2 domains
+python3 scripts/run-system-tests.py --tier 2
+
+# Run Tier 1 then Tier 3
+python3 scripts/run-system-tests.py --tier 1,3
 ```
 
-### 4.5 Reset and Re-deploy
+### 4.4 Push Fresh Tests (No Rebuild)
 
-To start fresh:
+If `tests/system/` changed but the base image wasn't rebuilt, use `--push`:
 
 ```bash
-# Destroy everything
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm env destroy rc-env.yaml
+python3 scripts/run-system-tests.py cli --push
+```
 
-# Re-deploy
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm env apply rc-env.yaml
+### 4.5 Limit Parallel Workers
+
+```bash
+python3 scripts/run-system-tests.py --all --workers 2
 ```
 
 ### 4.6 Troubleshooting Guestfs / libguestfs
@@ -447,7 +361,7 @@ KVM) is a **release blocker** — fix the environment, not the code.
 | `bridge already exists` | Stale bridges from previous run | Clean up with `mvm network rm --force` |
 | `Text file busy` on service binary | Stale service processes | `killall -9 mvm-console-relay mvm-nocloud-server mvm-provision` |
 | `guestfish -a /dev/null run` fails | Supermin can't find a kernel | Install `linux-image-kvm` + `chmod 644 /boot/vmlinuz-*` |
-| `guestfish session failed: incorrect number of arguments` | Bug in Go guestfish invocation | Fixed: `sh -c` → `sh ""` (guestfish takes 1 arg) |
+| `guestfish session failed: incorrect number of arguments` | Bug in Go guestfish invocation | Fixed: guestfish commands passed via stdin instead of CLI args (guestfish 1.56.x treats all positional tokens as args to the first command) |
 | `pending migrations detected` | DB schema mismatch after binary update | `rm -f ~/.cache/mvmctl/mvmdb.db && mvm init --non-interactive --skip-host --skip-network` then re-pull resources |
 | `not initialized` after setup | MVM_CACHE_DIR mismatch between init and test run | Always use `MVM_CACHE_DIR=~/.cache/mvmctl` consistently |
 | `Text file busy` pulling binary | Conftest unconditionally pulled v1.15.1 while firecracker processes held the file | Fixed: removed unconditional pull from `_ensure_mvm_db` |
@@ -468,19 +382,14 @@ go build ./... > release-evidence/vX.Y.Z/build.log 2>&1
 go vet ./... > release-evidence/vX.Y.Z/vet.log 2>&1
 go test ./... > release-evidence/vX.Y.Z/test.log 2>&1
 
-# Deploy the rc environment
+# Prepare shared assets (build base image, shared volume)
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm env destroy rc-env.yaml > /dev/null 2>&1
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm env apply rc-env.yaml \
-  > release-evidence/vX.Y.Z/env-deploy.log 2>&1
+  python3 scripts/run-system-tests.py --prepare \
+  > release-evidence/vX.Y.Z/env-prepare.log 2>&1
 
-# System tests (inside rc-vm, single e2e run)
+# System tests (all tiers)
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  ~/.local/bin/mvm vm exec rc-vm --user runner --timeout 600 -- \
-  "cd ~ && MVM_ASSET_MIRROR=/mnt MVM_BINARY=/usr/bin/mvm \
-  python3 -m pytest --timeout 300 \
-  tests/e2e/ --tb=short -q" \
+  python3 scripts/run-system-tests.py --all \
   > release-evidence/vX.Y.Z/system-e2e.log 2>&1
 
 # Binary verification
@@ -495,8 +404,9 @@ Each `.log` file must show zero failures. Any failure blocks the release.
 
 ## 7. Reference
 
+- `docs/system-test-architecture.md` — Three-tier architecture (primary reference)
 - `docs/RC_QA.md` — Release gates and checklist (human-facing)
 - `docs/RELEASE.md` — Full release process (tagging, CI, AUR)
-- `docs/development/SYSTEM_TEST_SETUP.md` — Detailed environment setup
-- `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` — Three-level test architecture (L0/L1/L2)
+- `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` — How to write L0/L1/L2 tests
+- `docs/development/SYSTEM_TEST_SETUP.md` — Legacy snapshot-based setup (deprecated)
 - `.opencode/agent/qa-engineer.md` — QA agent instructions

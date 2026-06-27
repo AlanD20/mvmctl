@@ -236,10 +236,15 @@ mvm bin default <id>
 
 Run `mvm host init` first to set up the `mvm` group and sudoers configuration.
 
-All privileged commands (those requiring bridge/TAP/iptables changes) must be executed within the `mvm` group context. Use the `sg mvm -c` pattern:
+The `mvm host init` command sets up a sudoers drop-in so privileged operations work without manual `sudo`. After logging out and back in (to activate the `mvm` group membership), you can run all mvm commands directly:
 ```bash
-sg mvm -c 'mvm host init'
-sg mvm -c 'mvm network create mynet'
+mvm host init
+mvm network create mynet
+```
+
+If commands still fail with permission errors, verify your user is in the `mvm` group:
+```bash
+groups | grep mvm
 ```
 
 ---
@@ -300,7 +305,7 @@ The port range (8000-9000) may be exhausted. Check for stale servers:
 # List processes using nocloud ports
 sudo ss -tlnp | grep -E ':(8[0-9]{3}|9[0-9]{3})'
 # Kill any orphaned mvm processes
-pkill -f mvm-nocloud-server
+pkill -f "mvm run nocloudnet serve"
 ```
 
 ---
@@ -610,7 +615,7 @@ Volume lookup accepts full names or short ID prefixes (minimum 6 characters). If
 
 ```bash
 # Detach the volume from the VM first
-mvm vm detach-volume <vm-identifier> <volume-name>
+mvm volume detach <vm-identifier> <volume-name>
 
 # Then remove the volume
 mvm volume rm <volume-name>
@@ -648,7 +653,7 @@ mvm ssh <vm-name> --cmd "ps aux | grep dhcpcd | grep -v grep"
 
 ## `mvm cp` errors
 
-### CPError: Source path does not exist (`CPSourceNotFoundError`)
+### CPError: Source path does not exist
 
 **Symptom:** File copy fails with "Source path does not exist".
 
@@ -657,7 +662,7 @@ mvm ssh <vm-name> --cmd "ps aux | grep dhcpcd | grep -v grep"
 - For VM paths, check that `vm_name:/path` uses the correct VM name and path
 - Use absolute paths to avoid ambiguity
 
-### CPError: Destination file exists (`CPDestinationExistsError`)
+### CPError: Destination file exists
 
 **Symptom:** Copy fails with "Destination file exists" when the target already has a file.
 
@@ -670,7 +675,7 @@ mvm cp --force ./myfile.txt my-vm:/root/
 mvm ssh my-vm --cmd "rm /root/myfile.txt"
 ```
 
-### CPError: Destination path must be a directory (`CPDestinationNotDirectoryError`)
+### CPError: Destination path must be a directory
 
 **Symptom:** Host → VM copy fails with "Destination path must be a directory".
 

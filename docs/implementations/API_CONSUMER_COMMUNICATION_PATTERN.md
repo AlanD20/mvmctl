@@ -1,6 +1,6 @@
 > **STATUS: Current — fully accurate.** All patterns (OperationResult, BatchResult, NeedsInteraction, Progress) match the current codebase at `pkg/errs/result.go` and `internal/infra/event/event.go`.
 >
-> **Last verified:** 2026-06-10
+> **Last verified:** 2026-06-27
 
 # API-to-Consumer Communication Pattern
 
@@ -320,19 +320,20 @@ All domains are converted. The following table shows which patterns each API ope
 | Domain | File | Mutation methods return | Progress via |
 |--------|------|------------------------|--------------|
 | **Host** | `pkg/api/host.go` | `(any, error)` / `*errs.NeedsInteraction` | N/A |
-| **VM** | `pkg/api/vm.go` | `([]*model.VM, error)` / `*errs.BatchResult` | `onProgress` (create only) |
-| **Volume** | `pkg/api/volume.go` | `(*model.Volume, error)` / `*errs.BatchResult` | N/A |
-| **Network** | `pkg/api/network.go` | `(*model.Network, error)` / `*errs.NeedsInteraction` | N/A |
+| **VM** | `pkg/api/vm.go` | `([]*model.VMItem, error)` / `*errs.BatchResult` | `onProgress` (create only) |
+| **Volume** | `pkg/api/volume.go` | `(*model.VolumeItem, error)` / `*errs.BatchResult` | N/A |
+| **Network** | `pkg/api/network.go` | `(*model.NetworkItem, error)` / `error` | N/A |
 | **Image** | `pkg/api/image.go` | `(*model.ImageItem, error)` / `*errs.BatchResult` | `onProgress` (pull, import) |
 | **Kernel** | `pkg/api/kernel.go` | `(*model.KernelItem, error)` / `*errs.BatchResult` | `onProgress` (pull only) |
 | **Binary** | `pkg/api/binary.go` | `([]*model.BinaryItem, error)` / `*errs.BatchResult` | `FormatProgress` bridge |
 | **Key** | `pkg/api/key.go` | `(*model.KeyItem, error)` / `*errs.BatchResult` | N/A |
 | **Cache** | `pkg/api/cache.go` | `*errs.OperationResult` | `onProgress` (init only) |
-| **Config** | `pkg/api/config.go` | `(string, error)` | N/A |
+| **Config** | `pkg/api/config.go` | `(any, error)` | N/A |
 | **SSH** | `pkg/api/ssh.go` | `error` | N/A |
-| **CP** | `pkg/api/cp.go` | `(*responses.CPCopyResult, error)` | `OnDownloadCallback` (bytes-chunk callback) |
-| **Console** | `pkg/api/console.go` | `(*responses.ConsoleStateResult, error)` / `error` | N/A |
+| **CP** | `pkg/api/cp.go` | `(*results.CPCopyResult, error)` | `OnDownloadCallback` (bytes-chunk callback) |
+| **Console** | `pkg/api/console.go` | `(*results.ConsoleStateResult, error)` / `error` | N/A |
 | **Init** | `pkg/api/init.go` | `*InitResult` with `NeedsInteraction` | `onProgress` threaded to cache |
+| **Snapshot** | `pkg/api/snapshot.go` | `(*model.SnapshotItem, error)` / `[]*model.VMItem` / `*errs.BatchResult` | `onProgress` (create only) |
 
 ---
 
@@ -459,18 +460,18 @@ Every `code` value currently used in the codebase (defined in `pkg/errs/codes.go
 | `image.root_partition_detection` | error | Image | Root partition detection failed |
 | `image.tie_detected` | error | Image | Tie detected in partition selection |
 | `image.acquire_failed` | error | Image | Image acquire failed |
-| `image.warm.failed` | error | Image | Image warm failed |
+| `image.warm_failed` | error | Image | Image warm failed |
 | `kernel.not_found` | error | Kernel | Kernel not found |
 | `kernel.build.failed` | error | Kernel | Kernel build failed |
 | `kernel.config.failed` | error | Kernel | Kernel config failed |
-| `kernel.pull.failed` | error | Kernel | Kernel pull failed |
+| `kernel.pull_failed` | error | Kernel | Kernel pull failed |
 | `kernel.import.failed` | error | Kernel | Kernel import failed |
 | `kernel.default_set_failed` | error | Kernel | Failed to set default kernel |
 | `binary.not_found` | error | Binary | Binary not found |
 | `binary.already_exists` | error | Binary | Binary already exists |
 | `binary.version.gate` | error | Binary | Version gate |
 | `binary.error` | error | Binary | Binary error |
-| `binary.pull.failed` | error | Binary | Binary pull failed |
+| `binary.pull_failed` | error | Binary | Binary pull failed |
 | `binary.remove_failed` | error | Binary | Binary removal failed |
 | `binary.default_set_failed` | error | Binary | Failed to set default binary |
 | `binary.ensure_default_failed` | failure | Binary | Failed to ensure default binary |
@@ -538,3 +539,19 @@ Every `code` value currently used in the codebase (defined in `pkg/errs/codes.go
 | `http.error` | error | Common | HTTP error |
 | `config.error` | error | Common | Config error |
 | `cache.clean_failed` | error | Common | Cache clean failed |
+| `snapshot.not_found` | error | Snapshot | Snapshot not found |
+| `snapshot.already_exists` | error | Snapshot | Snapshot already exists |
+| `snapshot.create_failed` | failure | Snapshot | Snapshot creation failed |
+| `snapshot.restore_failed` | failure | Snapshot | Snapshot restore failed |
+| `snapshot.remove_failed` | failure | Snapshot | Snapshot removal failed |
+| `vsock.not_found` | error | Vsock | Vsock not found |
+| `vsock.connection_failed` | error | Vsock | Vsock connection failed |
+| `vsock.handshake_failed` | error | Vsock | Vsock handshake failed |
+| `vsock.agent_unreachable` | error | Vsock | Vsock agent unreachable |
+| `vsock.exec_failed` | error | Vsock | Vsock exec failed |
+| `vsock.upgrade_in_progress` | error | Vsock | Vsock upgrade in progress |
+| `bundled_asset.error` | failure | BundledAsset | Bundled asset error |
+| `bundled_asset.not_found` | error | BundledAsset | Bundled asset not found |
+| `network.error` | error | Network | Network error |
+| `key.error` | error | Key | Key error |
+| `version.resolve.failed` | error | Common | Version resolve failed |

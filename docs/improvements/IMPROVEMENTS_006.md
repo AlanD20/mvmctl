@@ -1,8 +1,8 @@
 # JSON output mode
 
-> **STATUS: Current — partially implemented.** Per-command `--json` flags exist on `inspect` commands, but there is NO global `--json` flag on the root CLI group.
+> **STATUS: 🔶 Partial — per-command `--json` flags exist on `inspect`, `ls`, `status`, and `info` commands (see `internal/cli/` for each domain). There is NO global `--json` flag on the root CLI group. Mutation commands (`create`, `remove`) lack `--json` output. The API layer already returns structured data; only the CLI renderer needs switching.
 >
-> **Last verified:** 2026-06-10
+> **Last verified:** 2026-06-27
 
 **Phase:** Standalone — orthogonal to all features
 **Complexity:** Low

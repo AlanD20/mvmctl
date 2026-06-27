@@ -68,8 +68,9 @@ operation after host deployment.
 
 ## Version Comparison
 
-Uses semantic versioning via `SemverGreater(host, agent)` from
-`internal/lib/version/resolver.go`. Only upgrades when host > agent —
+Uses semantic versioning via `version.Compare(hostVersion, agentVersion)` from
+`internal/lib/version/compare.go`. Returns a positive int when host > agent,
+negative when host < agent, and zero when equal. Only upgrades when host > agent —
 downgrades are never attempted (a future `mvm` binary might pin an older
 agent, but that's a separate concern handled by the comparison logic).
 
@@ -77,10 +78,11 @@ agent, but that's a separate concern handled by the comparison logic).
 injected via ldflags (`-X version.BuildVersion=...`) is what the host and
 agent binaries actually carry. The `VersionString()` method returns `"0.0.0"`
 as a default when `BuildVersion` is empty. The comparison function
-`ParseSemverInts` cannot parse git-style hashes (e.g.
-`"80bf5256-dirty"`) — it returns an empty slice, and `SemverGreater` treats
-empty slices as older than any valid semver. This means the host must always
-use `version.BuildVersion` (set via ldflags), not `version.VersionString()`.
+`version.Compare` handles git-style hashes (e.g.
+`"80bf5256-dirty"`) by splitting on `.` and comparing numerically where
+possible, falling back to string comparison for non-numeric segments. This
+means the host must always use `version.BuildVersion` (set via ldflags), not
+`version.VersionString()`.
 
 ## Upgrade Lock
 

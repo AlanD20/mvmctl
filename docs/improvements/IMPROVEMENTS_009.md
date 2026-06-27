@@ -1,20 +1,20 @@
 # Daemonless Production Readiness — Host Capacity Detection, Events & Admission Control
 
-> **STATUS: Design Document — partially implemented.**
+> **STATUS: Partially implemented (host detection ✅, everything else ❌).**
 >
 > | Section | Status |
 > |---------|--------|
-> | Host capacity detection (`mvm host info`) | ✅ Implemented — `internal/cli/host.go` backed by `HostOperation.Info()` |
-> | HostDetector utility module | ✅ Implemented — `internal/lib/host/detector.go` |
+> | Host capacity detection (`mvm host info`) | ✅ Implemented — `internal/cli/host.go` backed by `op.HostInfo()` |
+> | Host detection logic in `internal/core/host/detector.go` | ✅ Implemented — all detection via procfs + stdlib, zero subprocess calls |
 > | host_state schema extension | ✅ Implemented — `host_state` schema includes all capacity columns |
-> | Resource accounting table + admission control | ❌ Not implemented |
-> | Event log table + `mvm events` command | ❌ Not implemented |
-> | Rate-limited VM creation | ❌ Not implemented |
-> | `mvm host reconcile` for crash recovery | ❌ Not implemented |
-> | sysctl tuning in `mvm host init` | ❌ Not implemented |
-> | WAL checkpointing + backup rotation | ❌ Not implemented |
+> | Resource accounting table + admission control | ❌ Not implemented — no `resource_accounting` or `vm_resource_allocations` tables in schema |
+> | Event log table + `mvm events` command | ❌ Not implemented — no `event_log` table in schema, no events CLI command. Audit logging exists (`internal/lib/logging/audit.go`) but writes flat file, not queryable event table. |
+> | Rate-limited VM creation | ❌ Not implemented — no semaphore/concurrency limiter in VM creation pipeline |
+> | `mvm host reconcile` for crash recovery | ❌ Not implemented — no such CLI command exists |
+> | sysctl tuning in `mvm host init` | ⚠️ Partial — `EnableIPForward()` + `PersistSysctl()` write `net.ipv4.ip_forward=1`. No tier system or multi-sysctl profile. |
+> | WAL checkpointing + backup rotation | ❌ Not implemented — no periodic checkpoint or snapshot rotation logic |
 >
-> **Last verified:** 2026-06-10
+> **Last verified:** 2026-06-27
 
 ---
 
@@ -171,9 +171,11 @@ Idempotent. Safe to cron. Does NOT restart VMs or delete VM directories.
 
 ---
 
-## 7. sysctl Tuning in `mvm host init` (Not Implemented)
+## 7. sysctl Tuning in `mvm host init` (Partial — ip_forward only)
 
-Three tiers:
+Current implementation (`internal/core/host/service.go`): `EnableIPForward()` runs `sysctl -w net.ipv4.ip_forward=1`, `PersistSysctl()` writes to `/etc/sysctl.d/mvmctl.conf`. The multi-tier proposal below is not implemented.
+
+Three tiers (proposed, not implemented):
 
 ```bash
 mvm host init                      # Dev — no sysctl changes

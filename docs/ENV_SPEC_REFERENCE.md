@@ -84,7 +84,7 @@ Create a network for VMs to connect to.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `subnet` | `string` | **Required** | CIDR notation, e.g. `"172.27.0.0/24"`. |
-| `nat` | `bool` | `true` | Enable NAT for internet access. |
+| `nat_enabled` | `bool` | `true` | Enable NAT for internet access. |
 | `ipv4_gateway` | `string` | Auto-computed | Gateway IP. Auto-computed from subnet if omitted. |
 | `nat_gateways` | `[]string` | Auto-detected | Host interfaces for NAT. Auto-detected if empty. |
 | `default` | `bool` | `false` | Set as default network for VM creation. |
@@ -94,7 +94,7 @@ Create a network for VMs to connect to.
 network:
   - name: default
     subnet: "172.27.0.0/24"
-    nat: true
+    nat_enabled: true
     default: true
 ```
 
@@ -155,8 +155,8 @@ Download or build a kernel.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `type` | `string` | **Required** | Kernel type. Valid: `firecracker`, `official`. |
-| `version` | `string` | `""` | Version tag. For `firecracker` type, version is ignored. |
+| `type` | `string` | **Required** | Kernel type. Valid: `firecracker` (pre-built CI kernel), `official` (built from source). |
+| `version` | `string` | `""` | Version tag for the kernel (e.g. CI version like `1.15` for firecracker type, or kernel version like `6.19.9` for official type). |
 | `jobs` | `int` | CPU count | Build parallelism (official kernel only). |
 | `keep_build_dir` | `bool` | `false` | Keep build directory after build. |
 | `clean_build` | `bool` | `false` | Force clean build. |
@@ -226,6 +226,7 @@ Create a virtual machine.
 | `atomic` | `bool` | `false` | Atomic batch creation (all or nothing). |
 | `skip_cleanup` | `bool` | `false` | Skip cleanup on failure. |
 | `skip_deblob` | `bool` | `false` | Skip image deblobbing. |
+| `vsock_port` | `int` | Config default | Vsock port for guest agent communication. |
 
 **Example:**
 ```yaml
@@ -260,7 +261,7 @@ re-runs on re-apply. Requires the VM to be created with vsock enabled (default).
 | `cmd` | `string` | **Required** | Command to execute. Wrapped in `sh -c`. |
 | `user` | `string` | Config default | User to run the command as. |
 | `timeout` | `int` | `0` | Command timeout in seconds. 0 = no timeout. |
-| `port` | `int` | `1024` | Vsock agent port override. |
+| `port` | `int` | `0` | Vsock agent port override (0 = auto-assigned at runtime). |
 | `env` | `map[string]string` | `{}` | Environment variable overrides passed to the command inside the VM. |
 
 **Example:**
@@ -389,7 +390,7 @@ version: "1"
 network:
   - name: default
     subnet: "172.27.0.0/24"
-    nat: true
+    nat_enabled: true
     default: true
 
 key:
@@ -474,17 +475,14 @@ updated_at: "2026-06-12T10:05:00Z"
 resources:
   - name: "network:default"        # resource name
     type: "network"                 # resource type
+    depends_on: ["image:os-image"]  # explicit dependencies (optional)
     state:
-      spec:                         # full input spec from YAML
-        name: "default"
-        subnet: "172.27.0.0/24"
-        nat: true
-        default: true
-      output:                       # data produced by Apply
+      spec:                         # step state output (IDs, properties from the applied resource)
         network_id: "net-abc123"
+        subnet: "172.27.0.0/24"
       meta:
         was_created: true           # did we create this resource?
-        spec_hash: "a1b2c3..."      # hash for drift detection
+        spec_hash: "a1b2c3..."      # hash of input spec YAML for drift detection
 ```
 
 **Fields:**
@@ -493,12 +491,11 @@ resources:
 |-------|-------------|
 | `name` | Resource name (e.g. `"network:default"`) |
 | `type` | Resource type (e.g. `"network"`) |
-| `depends_on` | Explicit dependencies (optional) |
-| `state.spec` | Full input spec from YAML — enables drift detection |
-| `state.output` | Data produced by Apply (IDs, paths, etc.) |
+| `depends_on` | Explicit dependencies (top-level on each resource) |
+| `state.spec` | Step state output — IDs, properties, and configuration from the applied resource |
 | `state.meta.was_created` | `true` if we created the resource, `false` if pre-existing |
-| `state.meta.spec_hash` | SHA256 hash of input spec — compared on re-apply for drift detection |
+| `state.meta.spec_hash` | SHA256 hash of input spec YAML — compared on re-apply for drift detection |
 
-**Drift detection:** On `mvm env diff`, the engine hashes the current spec and compares against the saved `spec_hash`. If different, the resource is marked as drifted (shown in yellow).
+**Drift detection:** On `mvm env diff`, the engine compares each step's spec hash against the saved `spec_hash`. If different, the resource is marked as drifted (shown in yellow).
 
 **Crash resilience:** State is written after every successful step, not batched at the end. If `mvm env apply` crashes or fails partway, the state file already contains all completed steps. Re-running picks up where it left off — completed steps are skipped via existence checks. Same for `mvm env destroy` — if it fails partway, re-running destroys only the remaining resources.

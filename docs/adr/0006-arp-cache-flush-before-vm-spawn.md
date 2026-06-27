@@ -1,6 +1,6 @@
 # ARP Cache Flush Before VM Spawn: Stale Entries Inflate SSH Timing
 
-**Status:** accepted
+**Status:** Active
 **Date:** 2026-05-22
 
 The project flushes the bridge ARP cache (`ip neigh flush dev <bridge>`) after creating the TAP device and before spawning Firecracker. Without this flush, a new VM that reuses an IP address from a recently-removed VM inherits the host's stale ARP entry pointing to the old (now-dead) TAP. SSH connections route to the dead interface, hit TCP SYN timeouts (~3s), and retry — inflating perceived boot time by 5-10s.
@@ -17,11 +17,14 @@ Flush the bridge's ARP cache (`ip neigh flush dev <bridge>`) after the TAP devic
 
 ## Implementation
 
-The flush is a single `system.RunCmd` call in `internal/lib/network/network.go`:
+The flush is a single `DefaultRunner.Run` call in `internal/lib/network/network.go`:
 
 ```go
 func FlushARP(ctx context.Context, bridge string) {
-    system.RunCmd(ctx, []string{"ip", "neigh", "flush", "dev", bridge}, system.RunCmdOpts{Privileged: true})
+    ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+    defer cancel()
+    system.DefaultRunner.Run(ctx, []string{"ip", "neigh", "flush", "dev", bridge},
+        system.RunCmdOpts{Capture: true, Privileged: true, Check: false})
 }
 ```
 

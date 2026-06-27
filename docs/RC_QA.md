@@ -24,7 +24,7 @@ A release is **blocked** until ALL of the following pass:
 | Compile | `go build ./...` | Zero errors |
 | Vet | `go vet ./...` | Zero warnings |
 | Unit tests | `go test ./...` | All pass |
-| E2E tests | `pytest tests/e2e/` (inside runner VM) | All pass, zero skips on required tests |
+| System tests | `pytest tests/system/` (inside runner VM) | All pass, zero skips on required tests |
 | Version check | `./scripts/build.sh release && ./dist/mvm --version` | Returns correct version (not `0.0.0-dev`) |
 | Smoke test | `./dist/mvm --help` | Shows all commands |
 
@@ -80,7 +80,7 @@ mvm network create testrunner-net --subnet 10.77.0.0/24
 mvm vm create testrunner \
   --image ubuntu:24.04 \
   --network testrunner-net \
-  --vcpus 4 \
+  --vcpu 4 \
   --mem 4096 \
   --disk-size 20G \
   --nested-virt
@@ -109,14 +109,14 @@ sudo apt-get install -y \
   procps kmod openssh-client tar sudo passwd python3 python3-pip
 
 # Install pytest
-pip3 install pytest pytest-xdist
+pip3 install pytest pytest-timeout
 
 # Copy the pre-built release binary from the host (no Go needed in the guest)
 # From the host:
 mvm cp dist/mvm testrunner:~/.local/bin/mvm
 mvm ssh testrunner --cmd "chmod +x ~/.local/bin/mvm"
 
-# Clone test scripts (only tests/e2e/ and scripts/ needed)
+# Clone test scripts (only tests/system/ and scripts/ needed)
 # From the host:
 mvm cp ./scripts testrunner:~/mvmctl/scripts
 mvm cp ./tests testrunner:~/mvmctl/tests
@@ -144,31 +144,39 @@ mkdir -p "$MVM_ASSET_MIRROR"
 
 ## 3. Execution Strategy
 
-### 3.1 E2E Test Execution
+### 3.1 System Test Execution
 
-E2E tests run inside the disposable runner VM with nested KVM, providing
-full isolation. The runner VM is session-scoped — created once per test
-session, destroyed after. No cross-state pollution between sessions.
+System tests run inside a disposable Firecracker VM with nested KVM, providing
+full isolation. The orchestrator creates one VM per domain, runs tests via
+`mvm exec`, and destroys the VM after.
 
 ```bash
-# Run the full e2e suite inside the runner VM
-pytest tests/e2e/
+# Run the full suite (T1 + T2 + T3) using the orchestrator
+python3 scripts/run-system-tests.py --all
 
-# Or a single file
-pytest tests/e2e/test_network.py --tb=short -q
+# Run specific domains
+python3 scripts/run-system-tests.py cli network
+
+# Run specific tiers
+python3 scripts/run-system-tests.py --tier 1,2
+
+# Run a single file manually inside an existing runner VM
+mvm exec <runner-vm> --user runner --timeout 600 -- \
+  "cd / && MVM_ASSET_MIRROR=/mnt python3 -m pytest \
+   /tests/system/network/test_network.py --tb=short -q"
 ```
 
 ### 3.2 Marker Filtering
 
 ```bash
 # Exclude kernel build tests (slow, optional)
-pytest tests/e2e/ -m "not kernel_build"
+pytest tests/system/ -m "not kernel_build"
 
 # Exclude host reset tests (destructive, requires sudo)
-pytest tests/e2e/ -m "not host_reset"
+pytest tests/system/ -m "not host_reset"
 
-# Run only serial tests
-pytest tests/e2e/ -m serial
+# Run only destructive tests (run last, serial)
+pytest tests/system/ -m destructive
 ```
 
 ### 3.3 Non-Destructive Before Destructive
@@ -186,7 +194,7 @@ For every release, collect and archive:
 | Go build output | `go build ./... 2>&1` | Zero compilation errors |
 | Go vet output | `go vet ./... 2>&1` | Zero static analysis warnings |
 | Go test output | `go test ./... 2>&1` | All unit tests pass |
-| E2E test results | `pytest tests/e2e/` inside runner VM | All e2e tests pass |
+| System test results | `python3 scripts/run-system-tests.py --all` | All system tests pass |
 | Version output | `./dist/mvm --version` | Correct version string |
 | Help output | `./dist/mvm --help` | All commands listed |
 | Benchmark results | `benchmarks/results.json` | Performance within thresholds |
@@ -206,8 +214,8 @@ go test ./... > release-evidence/vX.Y.Z/test.log 2>&1
 ./dist/mvm --help > release-evidence/vX.Y.Z/help.txt 2>&1
 sha256sum dist/mvm > release-evidence/vX.Y.Z/checksum.sha256
 
-# E2E test results (single run inside runner VM)
-pytest tests/e2e/ --tb=short -q > release-evidence/vX.Y.Z/system-e2e.log 2>&1
+# System test results (full suite with orchestrator)
+python3 scripts/run-system-tests.py --all 2>&1 | tee release-evidence/vX.Y.Z/system-tests.log
 ```
 
 ---
@@ -278,9 +286,8 @@ A regression is **any** of the following:
 
 ## Related Documents
 
-- [docs/development/SYSTEM_TEST_SETUP.md](development/SYSTEM_TEST_SETUP.md) — detailed environment setup
-- [docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md](development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md) — three-level test architecture (L0/L1/L2)
-- [CONTEXT.md](../CONTEXT.md) — test types, Option C verification, markers
-- [.opencode/agent/qa-engineer.md](../.opencode/agent/qa-engineer.md) — QA agent instructions
-- [docs/REFERENCES.md](REFERENCES.md) — complete command reference
-- [docs/DEPENDENCIES.md](DEPENDENCIES.md) — system package requirements
+- [development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md](development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md) — three-level test architecture (L0/L1/L2)
+- [development/HOW_AGENTS_WRITE_UNIT_TESTS.md](development/HOW_AGENTS_WRITE_UNIT_TESTS.md) — L0/L1 unit test patterns
+- [system-test-architecture.md](system-test-architecture.md) — L2 test runner VM architecture
+- [CONTEXT.md](../CONTEXT.md) — domain language, architecture rules, test types
+- [RELEASE.md](RELEASE.md) — release process and checklist

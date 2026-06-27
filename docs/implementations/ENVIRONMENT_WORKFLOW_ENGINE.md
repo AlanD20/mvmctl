@@ -1,6 +1,6 @@
 # IMPROVEMENTS 011: Environment/Workflow Engine — Portable VM Specs
 
-**Status:** Design Draft  
+**Status:** Implemented  
 **Goal:** Replace brittle `vm export/import` with a generic environment workflow engine supporting declarative YAML specs, DAG-based parallel resource provisioning, and stateful destroy.
 
 ---
@@ -14,6 +14,7 @@ This design replaces export/import with a **workflow engine**:
 ```
 mvm env apply spec.yaml      → provisions everything, tracks state
 mvm env ls                    → list applied environments
+mvm env diff <spec-path>      → show what would change (spec vs state)
 mvm env destroy <id|path>    → tears down exactly what was provisioned
 ```
 
@@ -28,7 +29,7 @@ internal/cli/env.go        ← cobra commands → pkg/api.Operation
     |                           + directly calls env.Apply/Destroy/List
     |
 internal/workflow/env/     ← spec resolver, step implementations, Apply/Destroy/List
-    |  imports: pkg/api (calls *api.Operation directly — no interface)
+    |  imports: pkg/api (uses api.API composite interface)
     |  imports: internal/lib/workflow, internal/lib/model
     |  zero circular deps: never imported by pkg/api/
     |
@@ -39,11 +40,11 @@ internal/lib/workflow/     ← generic engine: DAG walker, state persistence, pr
 internal/lib/model/        ← ResourceMap, ResourceMeta, ResourceState, AppliedResource, WorkflowState
 ```
 
-### Key design decision: no Operation interface
+### Key design decision: API interface, not concrete Operation
 
 The `env` package is a pure consumer of the API layer — exactly like the CLI. It lives under `internal/` (not `pkg/api/`) so it can import `pkg/api/` without creating a circular dependency.
 
-Steps hold a `*api.Operation` reference directly. There is no `Operation` interface, no mock, no indirection. The `Operation` interface that previously lived in `pkg/api/env/operation.go` was deleted — it was only a circular dependency workaround.
+Steps hold an `api.API` reference (the composite interface from `pkg/api/interfaces.go`). This provides a defined contract without coupling to the concrete `*api.Operation` struct. Tests can use mock implementations of `api.API`.
 
 ### Registry keys: singular everywhere
 
@@ -92,7 +93,8 @@ type Step interface {
     // The write parameter is a StateWriter that the step calls after a
     // successful API operation to persist its state immediately — narrowing
     // the crash window to a single atomic file write.
-    Apply(ctx context.Context, state *SharedState, saved ResourceState, write StateWriter) error
+    // The onProgress callback reports granular progress events.
+    Apply(ctx context.Context, state *SharedState, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error
 
     // Destroy tears down the resource using data from the saved state.
     // Called in reverse topological order during env destroy.
@@ -100,12 +102,19 @@ type Step interface {
     // successful destroy to update the persisted state — removing the
     // resource from the state file so re-running destroy picks up from
     // remaining resources.
-    Destroy(ctx context.Context, saved ResourceState, write StateWriter) error
+    // The onProgress callback reports granular progress events.
+    Destroy(ctx context.Context, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error
 
     // StateData returns the full state to persist for this resource.
     // Contains the input spec, output data, and metadata.
     // This is passed back to Apply() and Destroy() during re-apply/destroy.
-    StateData() ResourceState
+    StateData() model.ResourceState
+
+    // SpecHash returns a content hash of the step's input specification.
+    // Used for drift detection: if the spec hash changes between apply runs,
+    // the resource is considered "drifted" and may need re-apply.
+    // Steps that don't support drift detection return an empty string.
+    SpecHash() string
 }
 ```
 
@@ -142,7 +151,7 @@ func NewPipeline(steps []Step) (*Pipeline, error)
 // preserve flags like WasCreated, and detect drift via SpecHash.
 // Pass nil or an empty slice for fresh executions.
 func (p *Pipeline) Execute(ctx context.Context, state *SharedState,
-    onProgress func(phase, status, msg string),
+    onProgress event.OnProgressCallback,
     savedResources []AppliedResource,
     opts ...ExecuteOption) error
 
@@ -150,7 +159,7 @@ func (p *Pipeline) Execute(ctx context.Context, state *SharedState,
 // The step decides internally what to do based on its saved state.
 func (p *Pipeline) Destroy(ctx context.Context,
     savedResources []AppliedResource,
-    onProgress func(phase, status, msg string),
+    onProgress event.OnProgressCallback,
     opts ...DestroyOption) error
 ```
 
@@ -163,7 +172,7 @@ func (p *Pipeline) Destroy(ctx context.Context,
 // The pipeline wraps this into a StateWriter (one per goroutine) and passes
 // it to each step's Apply method so the step can persist its state immediately.
 // Used by the env layer for per-step state persistence on Apply.
-func WithOnStepComplete(cb func(ctx context.Context, step Step, stateData ResourceState)) ExecuteOption
+func WithOnStepComplete(cb func(ctx context.Context, step Step, stateData model.ResourceState) error) ExecuteOption
 ```
 
 **Destroy options:**
@@ -175,7 +184,7 @@ func WithOnStepComplete(cb func(ctx context.Context, step Step, stateData Resour
 // The pipeline wraps this into a StateWriter (one per goroutine) and passes
 // it to each step's Destroy method so the step can persist its state immediately.
 // Used by the env layer to track which resources have been destroyed.
-func WithDestroyOnStepComplete(cb func(ctx context.Context, step Step, stateData ResourceState)) DestroyOption
+func WithDestroyOnStepComplete(cb func(ctx context.Context, step Step, stateData model.ResourceState) error) DestroyOption
 ```
 
 ### 3.4 DAG Resolver
@@ -370,8 +379,8 @@ A `mvm env clean` command can be added later to prune orphaned state directories
 // StepType is the same singular identifier returned by step.Type().
 type StepFactory struct {
     StepType  string
-    FromSpec  func(stepType, name string, spec ResourceMap, op *api.Operation) (workflow.Step, error)
-    FromState func(stepType, name string, saved ResourceState, deps []string, op *api.Operation) (workflow.Step, error)
+    FromSpec  func(stepType, name string, spec model.ResourceMap, op api.API) (workflow.Step, error)
+    FromState func(stepType, name string, saved model.ResourceState, deps []string, op api.API) (workflow.Step, error)
 }
 
 // Registry is a package-level map literal in factory.go.
@@ -386,16 +395,16 @@ var Registry = map[string]StepFactory{
     "binary":  {StepType: "binary",  FromSpec: newBinaryStepFromSpec,  FromState: newBinaryStepFromState},
     "vm":      {StepType: "vm",      FromSpec: newVMStepFromSpec,      FromState: newVMStepFromState},
     "ssh":     {StepType: "ssh",     FromSpec: newSSHStepFromSpec,     FromState: newSSHStepFromState},
-    "copy":    {StepType: "copy",    FromSpec: newCopyStepFromSpec,    FromState: newCopyStepFromState},
     "exec":    {StepType: "exec",    FromSpec: newExecStepFromSpec,    FromState: newExecStepFromState},
+    "copy":    {StepType: "copy",    FromSpec: newCopyStepFromSpec,    FromState: newCopyStepFromState},
 }
 ```
 
 Key points:
-- `op` parameter is `*api.Operation` (concrete type, not an interface)
+- `op` parameter is `api.API` (the composite interface, not the concrete `*api.Operation`)
 - Factory functions never call methods on `op` during construction — they only store the reference
-- This means tests can pass `nil` for `op` during step construction testing
-- No `Operation` interface exists — steps are coupled to the concrete `api.Operation` struct
+- This means tests can pass mocks implementing `api.API` for step construction testing
+- Steps are coupled to the `api.API` interface — not the concrete struct, but still a defined contract
 - Registry keys match StepType — direct lookup via `Registry[stepType]`, no bridge needed
 
 ### 5.2 Step Types
@@ -442,7 +451,7 @@ These are imperative steps with no existence check. Unlike DB-backed resources t
 
 **Exec — command execution via vsock:**
 
-The `exec` step runs a command inside a VM via the vsock guest agent (same mechanism as `mvm vm exec`). It is fully imperative — every apply re-executes the command regardless of prior state. The vsock agent must be enabled on the target VM (default). The `cmd` field is sent to the guest agent as-is; the agent wraps it in `sh -c <command>` internally.
+The `exec` step runs a command inside a VM via the vsock guest agent (same mechanism as `mvm exec`). It is fully imperative — every apply re-executes the command regardless of prior state. The vsock agent must be enabled on the target VM (default). The `cmd` field is sent to the guest agent as-is; the agent wraps it in `sh -c <command>` internally.
 
 **Copy `Dst` construction:**
 
@@ -490,8 +499,8 @@ The orchestration layer lives in `internal/workflow/env/env.go` as standalone fu
 // - Resolves spec → steps
 // - Builds pipeline, executes
 // - Persists state per-step so partial execution is always recoverable
-func Apply(ctx context.Context, op *api.Operation, specPath string,
-    onProgress event.OnProgressCallback) error
+func Apply(ctx context.Context, op api.API, specPath string,
+    onProgress event.OnProgressCallback, extraEnv map[string]string) error
 ```
 
 Apply flow:
@@ -512,7 +521,7 @@ Apply flow:
 // Destroy tears down all resources created by a previous Apply.
 // Reconstructs steps from saved state (no spec file needed).
 // Removes the state file after successful teardown.
-func Destroy(ctx context.Context, op *api.Operation, specOrID string,
+func Destroy(ctx context.Context, op api.API, specOrID string,
     onProgress event.OnProgressCallback) error
 ```
 
@@ -547,7 +556,7 @@ type ListSummary struct {
 
 ```go
 // Diff compares spec against saved state and shows what would change.
-func Diff(ctx context.Context, specPath string, stateDir string) (*DiffResult, error)
+func Diff(ctx context.Context, specOrID string) (*DiffResult, error)
 
 type DiffResult struct {
     New      []string `json:"new"`      // in spec, not in state → will create
@@ -658,7 +667,7 @@ ssh:                        # imperative — always re-run on re-apply
 
 exec:                       # imperative — always re-run on re-apply
   - name: setup-app
-    target: dev-vm          # yaml: "target" maps to VMExecInput.Identifier
+    target: dev-vm          # yaml: "target" maps to ExecInput.Identifier
     cmd: "curl -sS https://example.com/setup.sh | sh"  # yaml: "cmd"
     user: root              # yaml: "user"
     timeout: 30             # yaml: "timeout" in seconds
@@ -687,10 +696,10 @@ copy:                       # imperative — always re-run on re-apply
 | `BinaryPullInput` | `default` | `SetDefault` | |
 | `KeyCreateInput` | `force` | `Overwrite` | |
 | `SSHInput` | `target` | `Identifier` | |
-| `VMExecInput` | `target` | `Identifier` | Target VM name/ID |
-| `VMExecInput` | `cmd` | `Command` | Command to execute |
-| `VMExecInput` | `timeout` | `Timeout` | Command timeout in seconds (0 = no timeout) |
-| `VMExecInput` | `port` | `Port` | Vsock agent port (default: 1024) |
+| `ExecInput` | `target` | `Identifier` | Target VM name/ID |
+| `ExecInput` | `cmd` | `Command` | Command to execute |
+| `ExecInput` | `timeout` | `Timeout` | Command timeout in seconds (0 = no timeout) |
+| `ExecInput` | `port` | `Port` | Vsock agent port (default: 1024) |
 | `CPInput` | `src` | `Sources` | Single string auto-normalized to `[]string` |
 | `CPInput` | *(none)* | `Dst` | Built from `target` + `:` + `dst` in `FromSpec` |
 
@@ -727,7 +736,7 @@ internal/workflow/env/
     env.go               # Apply, Destroy, List, Diff (standalone functions)
     spec.go              # EnvSpec (dynamic Steps map via UnmarshalYAML), ResolveSpec
     factory.go           # StepFactory, Registry (singular keys, StepType matches key)
-    step_*.go            # Step implementations (8 types)
+    step_*.go            # Step implementations (9 types)
     utils.go             # FormatStepName, InferStepType, BareStepName,
                          # StateFromMap, StructToMap, extractDependsOn
     step_network.go      # NetworkStep
@@ -781,7 +790,7 @@ Note: `internal/lib/util/` has been removed entirely. `StateFromMap` and `Struct
 | All 9 step types (network, key, image, kernel, binary, vm, ssh, copy, exec) | ✅ |
 | Step reconstruction from state for spec-less destroy | ✅ |
 | YAML tags on all input types | ✅ |
-| No Operation interface — steps use *api.Operation directly | ✅ |
+| No Operation interface — steps use api.API composite interface | ✅ |
 | Env package moved to internal/ (consumer of API, like CLI) | ✅ |
 | `mvm env apply` CLI command | ✅ |
 | `mvm env ls` CLI command | ✅ |
@@ -795,7 +804,7 @@ Note: `internal/lib/util/` has been removed entirely. `StateFromMap` and `Struct
 ## 11. Build Plan (Recommended Order)
 
 1. **Engine**: `internal/lib/workflow/` — Step interface, DAG resolver, Pipeline, SharedState, state persistence. Test with mock steps.
-2. **Step implementations**: `internal/workflow/env/` — 8 step types, registry, spec resolver. Test each step in isolation.
+2. **Step implementations**: `internal/workflow/env/` — 9 step types, registry, spec resolver. Test each step in isolation.
 3. **Orchestration**: `internal/workflow/env/env.go` — `Apply`, `Destroy`, `List` standalone functions.
 4. **CLI**: `internal/cli/env.go` — cobra commands, output formatting.
 5. **System tests**: Write black-box tests for the full `apply → ls → destroy` cycle.

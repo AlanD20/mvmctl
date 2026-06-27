@@ -1,6 +1,4 @@
-> **STATUS: Current — fully accurate.** All paths, patterns, and architecture described match the current codebase. The loop-mount provisioner lives at `internal/service/loopmount/provisioner.go`, backend at `internal/lib/provisioner/loopmount/backend.go`, and wire protocol at `internal/service/loopmount/wire.go`.
->
-> **Last verified:** 2026-06-10
+> **STATUS: Current.** The loop-mount provisioner lives at `internal/service/loopmount/provisioner.go`, backend at `internal/lib/provisioner/loopmount/backend.go`, and wire protocol at `internal/service/loopmount/wire.go`.
 
 # Service Binaries & Loop-Mount Provisioner
 
@@ -113,8 +111,10 @@ This means:
 
 Every service entry point follows these rules:
 
-1. **Zero external dependencies** — stdlib only (`encoding/json`, `os`, `net`, `syscall`, etc.)
-2. **No mvmctl imports from service packages** — completely standalone (except `internal/service/loopmount/wire.go` which defines wire protocol types)
+1. **Minimal dependencies** — mostly stdlib (`encoding/json`, `os`, `net`, `syscall`, etc.).
+   The provisioner imports `mvmctl/internal/infra` for shared utilities; console relay imports `mvmctl/pkg/errs` for error types.
+2. **No upstream service imports** — service packages never import `pkg/api/` or other service packages.
+   Wire protocol types are shared via `internal/service/loopmount/wire.go`.
 3. **JSON on stdin/stdout** for structured communication (provisioner only; console relay and nocloud server use CLI args)
 4. **CLI argument interface** — Cobra flags for configuration
 5. **Compiled into main binary** — no separate build step
@@ -124,9 +124,9 @@ Every service entry point follows these rules:
 ### Source
 
 ```
-internal/service/loopmount/       ← subprocess entry point (stdlib only)
+internal/service/loopmount/       ← subprocess entry point
 ├── entry.go                      ← Run(ctx, Config) — reads JSON stdin, executes, writes JSON stdout
-├── provisioner.go                ← Provisioner.Execute() — core engine (1214 lines)
+├── provisioner.go                ← Provisioner.Execute() — core engine (1232 lines)
 ├── spawn.go                      ← Spawn() — programmatic subprocess launch
 └── wire.go                       ← WireInput/WireOutput — JSON protocol types
 
@@ -169,23 +169,34 @@ type Backend interface {
     SetHostname(ctx context.Context, hostname string) error
     InjectDNS(ctx context.Context, dnsServer string) error
     SetupSSH(ctx context.Context, user string, sshPubkeys []string) error
+    SetupSudo(ctx context.Context, user string) error
     DisableCloudInit(ctx context.Context) error
     InjectCloudInit(ctx context.Context, cloudInitDir string) error
     DetectOS(ctx context.Context) (string, error)
     Deblob(ctx context.Context, osType *string) error
     FixFstab(ctx context.Context) error
     Shrink(ctx context.Context) error
-    ExtractPartition(ctx, rawPath, outputPath string, partition int, disabledDetectors []string) (string, error)
+    ExtractPartition(ctx context.Context, rawPath, outputPath string, partition int, disabledDetectors []string) (string, error)
     ConvertTo(ctx context.Context, targetFS string) error
     Run(ctx context.Context) error
+    InjectVsockAgent(ctx context.Context, agentBinary []byte, port int, token string) error
 }
 
 func NewBackend(ctx context.Context, opts BackendOpts) (Backend, error) {
     switch opts.ProvisionerType {
     case ProvisionerLoopMount:
-        return loopmount.NewBackend(opts.RootfsPath, opts.FSType, opts.CacheDir)
+        return loopmount.NewLoopMountBackend(ctx, opts.RootfsPath, opts.FsType, opts.CacheDir), nil
     case ProvisionerGuestFS:
-        return guestfs.NewBackend(opts.RootfsPath, opts.FSType)
+        if err := guestfs.EnsureAppliance(opts.CacheDir); err != nil {
+            return nil, err
+        }
+        return guestfs.NewGuestfsBackend(
+            opts.RootfsPath,
+            opts.RootUID,
+            opts.RootGID,
+            opts.UserUID,
+            opts.UserGID,
+        ), nil
     default:
         return nil, fmt.Errorf("unknown provisioner type: %s", opts.ProvisionerType)
     }
@@ -194,7 +205,7 @@ func NewBackend(ctx context.Context, opts BackendOpts) (Backend, error) {
 
 | Current (guestfs) | New (loop) |
 |-------------------|------------|
-| `GuestfsBackend(rootfsPath, ...)` | `LoopMountBackend(rootfsPath, fsType, cacheDir)` |
+| `GuestfsBackend(rootfsPath, rootUID, rootGID, userUID, userGID)` | `LoopMountBackend(rootfsPath, fsType, cacheDir)` |
 | `.SetupSSH(user, pubkeys)` | `.SetupSSH(user, pubkeys)` — same API via shared content builders |
 | `.SetHostname(name)` | `.SetHostname(name)` |
 | `.InjectDNS(dnsServer)` | `.InjectDNS(dnsServer)` |
@@ -402,39 +413,40 @@ All steps wrapped in `defer` cleanup — `umount` and `losetup -d` run even on e
 
 The provisioner needs sudo. Console relay and nocloud server run as the user.
 
-In Go, sudo is handled automatically by `system.SpawnService()` when `Privileged: true`:
+In Go, sudo is handled by `Spawn()` which uses `system.SpawnService()` with `Privileged: true` — the
+`SpawnService` function prepends `sudo -n` automatically:
 
 ```go
-spawnCfg := system.SpawnConfig{
+cmd, err := system.SpawnService(ctx, system.SpawnConfig{
     Name:       "provision",
-    Args:       []string{"--input", "-"},
-    Stdin:      strings.NewReader(jsonInput),
-    Stdout:     &stdout,
-    Privileged: true, // auto-prepends sudo
-}
+    Privileged: true,
+    Stdin:      bytes.NewReader(data),
+    Stdout:     &stdoutBuf,
+    Stderr:     &stderrBuf,
+})
 ```
 
-The sudoers file is managed by `mvm host init` via `HostService._generate_sudoers_content()`. The provisioner binary path is resolved at runtime via `os.Executable()`.
+The sudoers file is managed by `mvm host init` via `HostService.generateSudoersContent()`. The provisioner binary path is resolved at runtime via `os.Executable()`.
 
 ## Changes Made
 
 | File | Change |
 |------|--------|
-| `internal/service/loopmount/entry.go` | **New** — subprocess entry: `Run(ctx, Config)` reads JSON stdin, executes, writes JSON stdout |
-| `internal/service/loopmount/provisioner.go` | **New** — core engine (1214 lines): `Provisioner.Execute()` dispatches to `doProvision()`, `doDetectOS()`, `doConvertFS()` |
-| `internal/service/loopmount/spawn.go` | **New** — `Spawn()` for programmatic subprocess launch |
-| `internal/service/loopmount/wire.go` | **New** — JSON wire protocol types (`WireInput`, `WireOutput`) |
-| `internal/lib/provisioner/loopmount/backend.go` | **New** — `LoopMountBackend` — builder pattern, queues ops, calls `runWireOp()` |
-| `internal/lib/provisioner/loopmount/partition.go` | **New** — Partition parsing types |
-| `internal/lib/provisioner/loopmount/utils.go` | **New** — sfdisk/parted parsers, `detectAndRenameFS()` |
-| `internal/lib/provisioner/backend.go` | **New** — `Backend` interface, `NewBackend()` factory, `BackendOpts` |
-| `internal/infra/provcontent/content.go` | **New** — Shared operation types (`FileOp`, `ChrootOp`, `CopyDirOp`, `ResizeOp`) and content builders |
-| `internal/lib/system/spawn.go` | **New** — `SpawnService()` — self-spawn subprocess infrastructure |
-| `internal/cli/service.go` | **New** — `mvm run` command tree with three subcommands |
-| `internal/service/console/entry.go` | **New** — Console relay subprocess entry |
-| `internal/service/console/spawn.go` | **New** — Console relay subprocess spawn |
-| `internal/service/nocloudnet/entry.go` | **New** — NoCloud-net subprocess entry |
-| `internal/service/nocloudnet/spawn.go` | **New** — NoCloud-net subprocess spawn |
+| `internal/service/loopmount/entry.go` | **Extant** — subprocess entry: `Run(ctx, Config)` reads JSON stdin, executes, writes JSON stdout |
+| `internal/service/loopmount/provisioner.go` | **Extant** — core engine (1232 lines): `Provisioner.Execute()` dispatches to `doProvision()`, `doDetectOS()`, `doConvertFS()` |
+| `internal/service/loopmount/spawn.go` | **Extant** — `Spawn()` for programmatic subprocess launch |
+| `internal/service/loopmount/wire.go` | **Extant** — JSON wire protocol types (`WireInput`, `WireOutput`) |
+| `internal/lib/provisioner/loopmount/backend.go` | **Extant** — `LoopMountBackend` — builder pattern, queues ops, calls `runWireOp()` |
+| `internal/lib/provisioner/loopmount/partition.go` | **Extant** — Partition parsing types |
+| `internal/lib/provisioner/loopmount/utils.go` | **Extant** — sfdisk/parted parsers, `detectAndRenameFS()` |
+| `internal/lib/provisioner/backend.go` | **Extant** — `Backend` interface, `NewBackend()` factory, `BackendOpts` |
+| `internal/infra/provcontent/content.go` | **Extant** — Shared operation types (`FileOp`, `ChrootOp`, `CopyDirOp`, `ResizeOp`) and content builders |
+| `internal/lib/system/spawn.go` | **Extant** — `SpawnService()` — self-spawn subprocess infrastructure |
+| `internal/cli/service.go` | **Extant** — `mvm run` command tree with three subcommands |
+| `internal/service/console/entry.go` | **Extant** — Console relay subprocess entry |
+| `internal/service/console/spawn.go` | **Extant** — Console relay subprocess spawn |
+| `internal/service/nocloudnet/entry.go` | **Extant** — NoCloud-net subprocess entry |
+| `internal/service/nocloudnet/spawn.go` | **Extant** — NoCloud-net subprocess spawn |
 | `pkg/api/operation.go` | Modified — resolves provisioner type at startup |
 | `pkg/api/vm.go` | Modified — uses `provisioner.NewBackend()` instead of direct guestfs |
 

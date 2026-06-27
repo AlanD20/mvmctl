@@ -1,6 +1,6 @@
 # Network Sync Atomicity — Zero-Downtime Firewall Rule Replacement
 
-> **STATUS: Current — fully accurate.** All mechanisms described below are implemented in `internal/lib/firewall/`. The nftables backend is the default (`firewall_backend: "nftables"` at `internal/infra/constants.go:123`); iptables is the legacy fallback. See also [ADR-0009](../adr/0009-firewall-backend-mutual-exclusion.md) (firewall backend mutual exclusion) and `internal/infra/constants.go` for defaults.
+> **STATUS: Current.** All mechanisms described below are implemented in `internal/lib/firewall/`. The nftables backend is the default (`firewall_backend: "nftables"` at `OverridableDefaults["settings"]["firewall_backend"]`); iptables is the legacy fallback. See also [ADR-0009](../adr/0009-firewall-backend-mutual-exclusion.md) (firewall backend mutual exclusion) and `internal/infra/constants.go` for defaults.
 
 ## Overview
 
@@ -10,13 +10,13 @@ Running it is a no-op when state is already consistent.
 
 ## How It Works — Three Phases
 
-`NetworkSync()` in `pkg/api/network.go:307-385` orchestrates three phases for each network:
+`NetworkSync()` in `pkg/api/network.go` orchestrates three phases for each network:
 
 ### Phase 1: Bridge Restoration (Post-Reboot Recovery)
 
 For each network, if the bridge interface does not exist on the host, it is recreated with its correct IP address, and NAT rules are re-applied. This handles the common case where a host reboot destroys all kernel networking state but leaves the database intact.
 
-**Code reference:** `pkg/api/network.go:329-350`
+**Code reference:** bridge restoration in `NetworkSync()` at `pkg/api/network.go`
 
 ```go
 if !libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge) {
@@ -33,7 +33,7 @@ if !libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge) {
 
 For every network, the `BridgeActive` field (originally named `is_present`) is reconciled against actual bridge existence in the kernel. This ensures that `mvm network ls` and downstream operations see accurate state.
 
-**Code reference:** `pkg/api/network.go:353-358`
+**Code reference:** `pkg/api/network.go:319-324`
 
 ```go
 bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge)
@@ -44,13 +44,13 @@ if bridgeActive != net.BridgeActive {
 
 ### Phase 3: Firewall Rule Sync
 
-The core sync logic lives in `SyncIPTablesRules()` at `internal/core/network/service.go:546-591`:
+The core sync logic lives in `SyncIPTablesRules()` at `internal/core/network/service.go`:
 
 1. **Fetch active DB rules** for the network via `s.firewallTracker.GetByNetworkID(network.ID, true)`.
 2. **Batch-ensure each rule** inside a `WithBatch()` context — all `EnsureRule` calls are queued and flushed atomically on context exit.
 3. **Count orphaned host rules** that reference this network but have no matching active DB record (informational only — orphans are not removed).
 
-**Code reference:** `internal/core/network/service.go:546-591`
+**Code reference:** `internal/core/network/service.go` — `SyncIPTablesRules()`
 
 ```go
 dbRules, err := s.firewallTracker.GetByNetworkID(ctx, network.ID, true)
@@ -84,7 +84,7 @@ When inside a batch context, `EnsureRule` appends to an internal slice. On conte
 3. **Adds all DB rules** as `add rule ip <table> <chain> <expr>` statements.
 4. **Pipes** the complete script to `nft -f -`.
 
-**Code reference:** `internal/lib/firewall/nftables.go:556-620`
+**Code reference:** `internal/lib/firewall/nftables.go` — `BatchEnsureRules()`
 
 ```go
 for chain, table := range nftChainToTable {
@@ -106,7 +106,7 @@ for i := range rules {
 nftScript := strings.Join(lines, "\n") + "\n"
 result, _ := system.DefaultRunner.Run(
     ctx, []string{"nft", "-f", "-"},
-    RunCmdOpts{Privileged: true, Capture: true, Check: true, Input: nftScript},
+    system.RunCmdOpts{Privileged: true, Capture: true, Check: true, Input: nftScript},
 )
 ```
 
@@ -133,7 +133,7 @@ COMMIT
 
 **Why this is atomic per table:** `iptables-restore` applies the entire input as a single kernel transaction. The kernel either commits all changes or rejects the entire batch. The `-n` flag prevents the default table flush behavior, ensuring only the specified MVM chains are modified.
 
-**Code reference:** `internal/lib/firewall/iptables.go` (lines 200+)
+**Code reference:** `internal/lib/firewall/iptables.go` — `buildRestoreInput()`
 
 ## Connection Safety
 
@@ -217,10 +217,10 @@ Both backends use atomic batch operations with comparable subprocess call counts
 ## Related Files
 
 - `internal/lib/firewall/tracker.go` — `FirewallTracker` dispatcher
-- `internal/lib/firewall/nftables.go` — `NFTablesTracker` (789 lines)
-- `internal/lib/firewall/iptables.go` — `IPTablesTracker` (920 lines)
-- `internal/core/network/service.go` — `SyncIPTablesRules()` (line 546)
-- `pkg/api/network.go` — `NetworkSync()` (line 307)
-- `internal/infra/constants.go` — `firewall_backend` default (line 123)
+- `internal/lib/firewall/nftables.go` — `NFTablesTracker`
+- `internal/lib/firewall/iptables.go` — `IPTablesTracker`
+- `internal/core/network/service.go` — `SyncIPTablesRules()`
+- `pkg/api/network.go` — `NetworkSync()`
+- `internal/infra/constants.go` — `firewall_backend` default
 - `docs/adr/0009-firewall-backend-mutual-exclusion.md` — ADR for firewall backend
 - `docs/RUNTIME.md` — Backend system documentation (firewall section)

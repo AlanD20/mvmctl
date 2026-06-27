@@ -1,6 +1,6 @@
 # Unified Test Architecture — Go Hermetic + Nested-VM E2E
 
-**Status:** draft  
+**Status:** Active  
 **Date:** 2026-06-20
 
 ## Context
@@ -21,7 +21,7 @@ The Python system tests (27 files, ~22,000 lines) suffer from seven structural p
 
 Per [ADR-0010](0010-per-domain-api-interfaces.md), the CLI layer accepts narrow `api.*API` interfaces. The `internal/testutil/` package provides in-memory repos, mock APIs, `FakeRunner`, and `FakeNetOps` — all Go-based, deterministic, and fast. These are currently only used for pure unit tests.
 
-Per [RC_QA.md](../RC_QA.md) §2.1, the project already documents running system tests inside a Firecracker VM with nested KVM. The `test_vm_nested_isolated.py` file proves this pattern works.
+The `test_vm_nested_isolated.py` file (in `tests/system/vm/`) proves this pattern works.
 
 ### The "Zero Blindside" Principle
 
@@ -85,12 +85,12 @@ Keep 22,000 lines with shared DB, pervasive skipping, and per-domain serial exec
 - Runner VM provisioning time (~60-120s first run, mitigated by snapshot/restore)
 - Runner VM resource overhead (~4 vCPU + 4 GB RAM + 20 GB disk per VM)
 - ~2,000 new Go test lines to maintain
-
 **Neutral:**
-- `tests/system/` → `tests/e2e/` — naming signals E2E tests requiring real infrastructure
+
 - Per-domain conftest.py files consolidated into one
-- `COVERAGE_MATRIX.md` replaced by `go test -coverprofile` + machine-readable L2 scenario manifest
-- `scripts/run_tests.py` domain-looping replaced by `pytest tests/e2e/`
+- `tests/system/` → `tests/e2e/` rename (pending — directory still at `tests/system/`)
+- `COVERAGE_MATRIX.md` replacement with `go test -coverprofile` + L2 scenario manifest (pending — `COVERAGE_MATRIX.md` still exists)
+- `scripts/run-system-tests.py` domain-looping replaced by `pytest tests/system/` (pending — CI still references `scripts/run_tests.py`)
 
 ## Related Documents
 
@@ -100,7 +100,7 @@ Keep 22,000 lines with shared DB, pervasive skipping, and per-domain serial exec
 | `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` | L0/L1/L2 definitions, decision tree, quick-reference table, runner VM fixture pattern, migration phases. |
 | `docs/development/HOW_AGENTS_WRITE_UNIT_TESTS.md` | L1 fast pre-filter tests (in-memory SQLite, temp dirs). |
 | `docs/development/HOW_AGENTS_RUN_SYSTEM_TESTS.md` | Execution plan for running system tests. |
-| `RC_QA.md` | Release gates: "L2 tests in runner VM". |
+| _(no RC_QA.md — this doc section moved into system-test-architecture.md)_ | Release gates: "L2 tests in runner VM" now in system-test-architecture.md. |
 | `STANDARDS.md` §12 | Three-level architecture description. |
 | `tests/system/COVERAGE_MATRIX.md` | Coverage tracking. |
 | `AGENTS.md` | `engineer` owns L0/L1 (Go), `qa-engineer` owns L2 (Python runner VM). |

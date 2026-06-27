@@ -27,7 +27,20 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
   - [CLI is the canonical interface](#cli-is-the-canonical-interface)
   - [Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)](#provisioner-backend-loopmount-vs-guestfs--mutual-exclusion)
   - [Firewall Backend (nftables vs iptables -- mutual exclusion)](#firewall-backend-nftables-vs-iptables--mutual-exclusion)
+- [Build output (REQUIRED)](#build-output-required)
+- [Asset mirror environment variable (OPTIONAL)](#asset-mirror-environment-variable-optional)
 - [Relationships](#relationships)
+  - [Error handling](#error-handling)
+  - [API result types](#api-result-types)
+  - [Error message format](#error-message-format)
+  - [Error codes format](#error-codes-format)
+  - [Coding style](#coding-style)
+  - [Subprocess invocation](#subprocess-invocation)
+  - [Timeout taxonomy](#timeout-taxonomy)
+  - [Timeout policy: CLI flags vs test infrastructure](#timeout-policy-cli-flags-vs-test-infrastructure)
+  - [Model types](#model-types)
+  - [Import conventions](#import-conventions)
+  - [Parallel execution](#parallel-execution)
 - [Test types](#test-types)
 - [System Tests](#system-tests)
 
@@ -35,7 +48,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
 
 ### Domain
 
-A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh) lives in `internal/core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` has a Service and utils, `ssh/` has a Service, a file-copy module, and utils, `console/` has only a Controller, `host/` has the full Controller/Service/Repository pattern plus a detector, probe, and utils, `config/` has constraints, a Service, a Repository, settings, and utils (no controller), `logs/` has controller + service, `cloudinit/` uses manager + provisioner plus config and utils). Domains do NOT import other domains.
+A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh, snapshot, vsock) lives in `internal/core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` has a Service and utils, `ssh/` has a Service and utils, `console/` has only a Controller, `host/` has the full Controller/Service/Repository pattern plus a detector, probe, and utils, `config/` has constraints, a Service, a Repository, settings, and utils (no controller), `logs/` has controller + service, `cloudinit/` uses manager + provisioner plus config and utils, `snapshot/` has repository, resolver, and SQLite (no controller/service), `vsock/` has agent, client, service, repository, resolver, file transfer, protocol, and SQLite). Domains do NOT import other domains.
 
 All model types are centralized in `internal/lib/model/` -- a single package with zero domain imports. Every domain and every layer imports from `model` directly. Model types are concrete structs with `db:"column"` and `json:"field"` tags for sqlx and JSON serialization.
 
@@ -71,14 +84,14 @@ The interface is defined in `repository.go`; the SQLite implementation is in `sq
 
 ### Service subprocess pattern (internal/service/)
 
-Long-running subprocess services (console relay, nocloud-net server, loopmount provisioner) live in `internal/service/{name}/`. These are compiled into the SAME `mvm` binary -- no separate multidist binary. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service.
+Long-running subprocess services (console relay, nocloud-net server, loopmount provisioner) live in `internal/service/{name}/`. These are compiled into the SAME `mvm` binary -- no separate multidist binary. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`vsockagent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
 
 Each service follows a consistent three-function pattern:
 - **`Config`** struct -- holds all configuration for the service.
 - **`Run(ctx, cfg)`** -- runs the service in the foreground (blocking).
 - **`Spawn(ctx, cfg, extraFiles...)`** -- launches the service as a background subprocess via `system.SpawnService()`.
 
-Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol).
+Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `vsockagent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
 
 The dependency direction is: `cli/` -> `services/`. Services never import `cli/` or `pkg/api/`.
 
@@ -92,7 +105,7 @@ A struct for entity resolution by identifier (name, ID prefix, IP, MAC to domain
 
 ### Enrichment pattern
 
-Cross-domain enrichment is handled by the `internal/enricher/` package -- the ONLY package (besides `pkg/api/`) that imports across multiple core domains. Uses explicit Go switch/case dispatch per relation (NO reflect, NO string dispatch, NO resolver registry).
+Cross-domain enrichment is handled by the `internal/enricher/` package -- the ONLY package that imports across multiple core/* packages (besides the API orchestrator `pkg/api/`). Uses explicit Go switch/case dispatch per relation (NO reflect, NO string dispatch, NO resolver registry).
 
 RelationSpec is defined in `internal/lib/model/relation.go`:
 - `FKField` -- field name on the source entity containing the FK value.
@@ -111,6 +124,7 @@ var VMRelations = map[string]model.RelationSpec{
     "network":        {FKField: "network_id", Resolver: "network", Method: "get_network", RelationName: "network"},
     "network.leases": {FKField: "network", Resolver: "network_lease", Method: "list_by_network_id_batch", RelationName: "leases", BatchMethod: "list_by_network_id_batch"},
     "volumes":        {FKField: "volume_ids", Resolver: "volume", Method: "", RelationName: "volumes", BatchMethod: "resolve_by_vm_volume_ids"},
+    "vsock":          {FKField: "id", Resolver: "vsock", Method: "get_by_vm_id", RelationName: "vsock", IsReverse: true},
 }
 ```
 
@@ -172,16 +186,16 @@ net, _ := input.ResolveNetwork(ctx, op.Repos.Network)
 
 ### SQLite schema overview
 
-Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/sqlx` with `modernc.org/sqlite` driver. PRAGMAs (foreign_keys=ON, journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000) set via DSN parameters in `db.Handle.openLazy()`. Connection pool has `SetMaxOpenConns(1)` and `SetMaxIdleConns(1)` for SQLite's single-writer semantics.
+Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/sqlx` with `modernc.org/sqlite` driver. PRAGMAs (foreign_keys=ON, journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, wal_autocheckpoint=1000, cache_size=-64000) set via DSN parameters in `db.Handle.openLazy()`. Connection pool has `SetMaxOpenConns(1)` and `SetMaxIdleConns(1)` for SQLite's single-writer semantics.
 
-Tables include: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`.
+Tables include: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`, `vm_vsock_config`, `snapshots`, `db_migrations` (16 tables).
 
 ### Layer compliance enforcement
 
 Architecture rules are enforced by the Go compiler (circular import errors prevent cross-domain imports in core) and code review. Key rules:
 - Core domains NEVER import other core/* packages -- enforced by Go compiler.
-- CLI imports from `pkg/api/`, `pkg/api/inputs`, `pkg/api/responses`, `pkg/errs`, `internal/cli/common/`, `internal/infra/`, `internal/lib/`, `internal/service/` -- enforced by code review.
-- API imports `internal/core/*` + `internal/enricher/` + `internal/infra/` + `internal/infra/event` + `internal/lib/*` + `internal/assets` + `pkg/errs` + `pkg/api/inputs` + `pkg/api/responses`.
+- CLI imports from `pkg/api/`, `pkg/api/inputs`, `pkg/api/results`, `pkg/errs`, `internal/cli/common/`, `internal/infra/`, `internal/lib/`, `internal/service/` -- enforced by code review.
+- API imports `internal/core/*` + `internal/enricher/` + `internal/infra/` + `internal/infra/event` + `internal/lib/*` + `internal/assets` + `internal/service/*` + `pkg/errs` + `pkg/api/inputs` + `pkg/api/results`.
 - `internal/infra/` and `internal/lib/` are LEAVES -- import NOTHING from core, api, cli, or service.
 - `internal/service/` MAY import from `internal/infra/` / `internal/lib/` but NOT from `pkg/api/` or `internal/cli/`.
 
@@ -203,9 +217,9 @@ A bare `go build -o ~/.local/bin/mvm ./cmd/mvm` works for dev but produces a
 binary without version info, symbol stripping, or PIE. **Never use it for
 release qualification.**
 
-### Asset mirror environment variable (REQUIRED)
+### Asset mirror environment variable (OPTIONAL)
 
-**The `MVM_ASSET_MIRROR` env var MUST be set before any `mvm` command.** Without it, asset downloads will fail.
+**The `MVM_ASSET_MIRROR` env var is optional.** When set, the downloader checks the mirror path first before fetching from the network. If the file exists in the mirror, it is copied locally (saving bandwidth). Successfully downloaded files are also auto-populated into the mirror for future use. Without it, downloads proceed normally from the original URLs.
 
 ```bash
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
@@ -220,7 +234,7 @@ The `mvm` CLI is the ONLY supported interface for all mvmctl operations. Do NOT 
 
 Built with `github.com/spf13/cobra`. Root command in `internal/cli/root.go`. Subcommands in `internal/cli/{domain}.go` -- monolithic files per domain (one file contains all subcommands for that domain).
 
-CLI aliases: Three commands have shorter aliases for faster typing: `mvm net` is an alias for `mvm network`, `mvm img` is an alias for `mvm image`, and `mvm vol` is an alias for `mvm volume`. Every `list` subcommand has both `ls` and `list`. Every `remove` subcommand has `rm`, `remove`, `delete`, and `del`.
+CLI aliases: Domain-level aliases for faster typing: `mvm net` for `mvm network`, `mvm img` for `mvm image`, `mvm vol` for `mvm volume`, `mvm bin` for `mvm binary`, and `mvm ss` for `mvm snapshot`. Environment workflow subcommands have shorter aliases: `mvm env up` for `mvm env apply` and `mvm env down` for `mvm env destroy`. Every `list` subcommand has both `ls` (Use) and `list` (Alias). Every `remove` subcommand has `rm` (Use), `remove`, `delete`, and `del` (Aliases).
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)
 
@@ -262,7 +276,7 @@ The `FirewallTracker` also reads an `iptables_xtcomment` user setting that adds 
 
 ### Error handling
 
-A single `DomainError` type in `pkg/errs/` handles all error scenarios. Every error has a `Code`, `Message`, `Op`, `Entity`, `Class`, `Err`, and optional `Details`. Codes are dot-separated: `vm.not_found`, `network.subnet.overlap`, `host.init.sudoers_failed`.
+A single `DomainError` type in `pkg/errs/` handles all error scenarios. Every error has a `Code`, `Message`, `Op`, `Entity`, `Class`, `Err`, and optional `Details`. Codes are dot-separated: `vm.not_found`, `network.subnet.overlap`, `host.init.sudoers.failed`.
 
 ```go
 // Creating errors
@@ -278,7 +292,7 @@ if errors.As(err, &de) {
 if errs.IsNotFound(err) { ... }
 ```
 
-Classes categorize errors semantically: `ClassValidation`, `ClassConflict`, `ClassRetryable`, `ClassInternal`, `ClassNeedsInteraction`.
+Classes categorize errors semantically: `ClassUnknown` (zero value / default), `ClassValidation`, `ClassConflict`, `ClassRetryable`, `ClassInternal`, `ClassNeedsInteraction`.
 
 **Logging pattern:**
 - **Log before return**: Every error return in Service/Controller has a preceding `slog.Error()` or `slog.Warn()` with operational context.
@@ -293,8 +307,9 @@ Logging uses Go standard `log/slog` throughout. Setup via `internal/lib/logging/
 The API layer returns typed responses:
 - **`errs.OperationResult`** -- Single operation result with `Status`, `Code`, `Message`, `Item`, `Exception`, `Metadata`, `Warnings`. JSON-serializable.
 - **`errs.BulkResult`** -- Collection of `BulkResultItem` from bulk operations.
+- **`errs.BatchResult`** -- Collection of `OperationResult` from batch operations (e.g., batch remove).
 - **`errs.NeedsInteraction`** -- Returned when the operation requires user action (e.g., sudo password prompt). Implements the `error` interface for (result, error) return types.
-- **`pkg/api/responses/`** -- Domain-specific inspect/list types for JSON serialization (e.g., `responses.VMInspect`, `responses.NetworkInspect`, `responses.HostInfo`).
+- **`pkg/api/results/`** -- Domain-specific inspect/list types for JSON serialization (e.g., `results.VMInspect`, `results.NetworkInspect`, `results.HostInfo`).
 
 ### Error message format
 
@@ -308,7 +323,7 @@ Dot-separated with domain prefix:
 ```
 network.subnet.overlap
 vm.create.binary_not_found
-host.init.sudoers_failed
+host.init.sudoers.failed
 ```
 
 ### Coding style
@@ -344,7 +359,7 @@ The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeou
 
 | Type | Meaning | User-facing? | Examples |
 |---|---|---|---|
-| **Connect/probe timeout** | Time to establish connection / first response | Yes (`--timeout`) | `mvm ssh`, `mvm vm exec` |
+| **Connect/probe timeout** | Time to establish connection / first response | Yes (`--timeout`) | `mvm ssh`, `mvm exec` |
 | **Idle timeout** | Max silence between bytes/events | Optional future flag | (not exposed today) |
 | **Absolute timeout** | Hard cap on total duration | No | HTTP downloads, builds, cleanup |
 | **Graceful shutdown timeout** | Time after SIGTERM before SIGKILL | No | Firecracker stop, relay shutdown |
@@ -352,14 +367,43 @@ The `RunCmdOpts` struct configures execution: `Check`, `Capture`, `Cwd`, `Timeou
 
 User-facing `--timeout` means **connect/probe timeout only**. Once the target is responsive, the operation runs unbounded. See [ADR-0013](docs/adr/0013-user-facing-timeouts-are-connect-timeouts.md).
 
-**Documented exceptions** -- code that directly uses `os/exec.Command` because `DefaultRunner.Run()` cannot fulfill the requirement:
+### Timeout policy: CLI flags vs test infrastructure
+
+**Two distinct concerns that are NOT the same thing.**
+
+**1. CLI `--timeout` flags (user-facing, e.g., `mvm exec --timeout`, `mvm ssh --timeout`)**
+
+These are **connect/probe timeouts** only (per ADR-0013). Default: **5 seconds**, absolute max: **10 seconds**. Once the target responds, the operation runs unbounded. This is the speed-first principle: if a connection can't be established in 10s, something is wrong.
+
+**2. Subprocess timeouts in test infrastructure (the `timeout=` parameter of `_run_mvm()` / `_guest_run()`)**
+
+These control how long `subprocess.run()` waits for an `mvm` command to complete. They are **NOT** the same as the CLI `--timeout` flag and have **different guidance**:
+
+| Operation | Typical duration | Test subprocess timeout |
+|---|---|---|
+| `vm ls --json`, `image ls --json` | <1s | Default (60s) |
+| `network create`, `key create` | 1-5s | Default (60s) |
+| `vm create` (cached image) | 3-10s | 180s |
+| `vm rm --force` | 2-8s | 120s |
+| `image pull`, `kernel pull`, `bin pull` | 10-120s | 300s |
+
+Default subprocess timeout (in `conftest.py`): **60 seconds** with **+30 second buffer** = **90s total**. Individual operations may specify higher explicit timeouts for slow I/O (pulls, nested VM creation, network-heavy ops).
+
+Rationale: subprocess timeouts are a **safety net**, not a performance floor. They prevent hung tests without imposing artificial limits on legitimate I/O. The speed-first principle applies to the CLI `--timeout` flag, NOT to test infrastructure subprocess timeouts.
+
+**Documented exceptions** -- code that directly uses `os/exec.Command` or `os/exec.CommandContext` because `DefaultRunner.Run()` cannot fulfill the requirement:
 
 | Location | Why `DefaultRunner.Run()` doesn't work |
 |---|---|---|
 | `internal/core/vm/firecracker.go` (Firecracker spawn) | Fine-grained control over stdin/stdout/stderr FD redirection and `Setsid` session management for the Firecracker child process |
-| `internal/core/ssh/cp.go` (tar-pipe transfer) | Pipes two child processes (tar + ssh) together via stdin/stdout |
+| `internal/core/ssh/utils.go` (SSH connectivity probe) | Uses `exec.CommandContext` with a short-lived probe context for SSH connectivity detection |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
+| `internal/service/vsockagent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |
+| `internal/service/vsockagent/pty.go` (PTY session) | Uses `exec.CommandContext` for `su` user switching to establish PTY sessions |
+| `internal/lib/archive/archive.go` (xz decompression) | Uses `exec.CommandContext` for `xz -d --stdout` pipe-based decompression |
 | `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of the subprocess abstraction layer (`DefaultRunner`, `RunInteractive`, `SpawnService`). These use raw `os/exec` because they ARE the abstraction boundary |
+
+**Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check that happens to use the `os/exec` package. These files are not listed as exceptions above and do not violate the subprocess rule. Key locations: `internal/core/host/detector.go`, `internal/core/host/probe.go`, `internal/core/network/service.go`, `internal/core/config/utils.go`, and others in `internal/lib/`, `internal/core/`, `internal/service/`.
 
 Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The services themselves (console relay, nocloudnet server, loopmount entry point) do NOT use `os/exec` except for the provisioning engine noted above.
 
@@ -390,8 +434,8 @@ JSON-serialized DB fields use `db.StringSlice` (for `[]string`) or custom `Scan`
 
 | Layer | Imports from | Example |
 |---|---|---|
-| **CLI** | `pkg/api`, `pkg/api/inputs`, `pkg/api/responses`, `pkg/errs`, `internal/cli/common`, `internal/infra`, `internal/lib/*`, `internal/service/*` (for `mvm run <service>` wiring) | `import "mvmctl/pkg/api"` |
-| **API** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/infra/event`, `internal/lib/*`, `internal/assets`, `pkg/errs`, `pkg/api/inputs`, `pkg/api/responses` | `import "mvmctl/internal/core/vm"` |
+| **CLI** | `pkg/api`, `pkg/api/inputs`, `pkg/api/results`, `pkg/errs`, `internal/cli/common`, `internal/infra`, `internal/lib/*`, `internal/service/*` (for `mvm run <service>` wiring) | `import "mvmctl/pkg/api"` |
+| **API** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/infra/event`, `internal/lib/*`, `internal/assets`, `pkg/errs`, `pkg/api/inputs`, `pkg/api/results` | `import "mvmctl/internal/core/vm"` |
 | **API inputs** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/lib/*` | `import "mvmctl/internal/lib/model"` |
 | **Core domain** | `internal/infra`, `internal/lib/*`, `internal/assets`, `internal/service/*` (for subprocess spawning) — no other core domains | `import "mvmctl/internal/lib/model"` |
 | **Infra/lib** | stdlib, `github.com/jmoiron/sqlx`, external deps | N/A -- leaf nodes |
@@ -408,7 +452,7 @@ Concurrent operations use `internal/infra/pool/`:
 - `pool.Gather[T,R](ctx, workers, items, fn)` -- parallel transform, returns `[]Result[R]`.
 - `pool.Seq[T,R](ctx, items, fn)` -- sequential fail-fast execution.
 
-Workers defaults to `min(runtime.NumCPU() * 2, len(items))` (minimum 1) when ≤ 0. All accept `context.Context` for cancellation.
+Workers defaults to `min((runtime.NumCPU() or 4) * 2, len(items))` (minimum 1) when ≤ 0. The CPU count falls back to 4 if `runtime.NumCPU()` returns less than 1. All accept `context.Context` for cancellation.
 
 ## Test types
 
@@ -431,16 +475,16 @@ Uses real I/O in controlled environments: in-memory SQLite (`:memory:` via `test
 go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 ```
 
-### L2: Runner VM E2E Tests (Python `tests/e2e/`)
+### L2: Runner VM System Tests (Python `tests/system/`)
 
 **Ground truth.** Every user-facing feature must have an L2 test. Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM. No mocking of any kind. Operates against the compiled `mvm` binary. Verifies actual business outcomes at the OS level: JSON state, filesystem state, process state, iptables rules.
 
 ```bash
 # Run inside the runner VM (disposable Firecracker VM with nested KVM)
-pytest tests/e2e/
+pytest tests/system/
 
 # Single file
-pytest tests/e2e/test_network.py --tb=short -q
+pytest tests/system/network/test_network.py --tb=short -q
 ```
 
 ## System Tests (L2 E2E)
@@ -458,10 +502,10 @@ Coverage is tracked by the quick-reference table in `docs/development/HOW_AGENTS
 For every CLI flag, check all eight: happy path (with state verify), missing required args, invalid values, boundary values, JSON output format, confirmation prompts, non-existent resources, duplicate creation.
 
 ### Marker
-A `pytest.mark.*` annotation on a test class or function. L2 test markers include: `system` (always), `e2e` (always for L2), `domain_<name>` (file-level filter), `serial` (modifies shared state -- prevent race conditions), `slow` (>30s), `requires_kvm` (needs /dev/kvm), `requires_network` (needs real bridges), `kernel_build` (build from source, excluded from default run), `host_reset` (host clean/reset with sudo, excluded from default run).
+A `pytest.mark.*` annotation on a test class or function. L2 test markers include: `system` (always), `domain_<name>` (file-level filter), `slow` (>30s), `requires_kvm` (needs /dev/kvm), `requires_network` (needs real bridges), `kernel_build` (build from source, excluded from default run), `host_reset` (host clean/reset with sudo, excluded from default run), `tier2` (requires nested virtualization), `tier3` (runs host-direct).
 
 ### Serial test
-A test marked `pytest.mark.serial` because it modifies shared system state (default image, default network, cached binaries, kernel defaults). Must not run in parallel.
+A test that modifies shared system state (default image, default network, cached binaries, kernel defaults) must not run in parallel. In the current architecture, serial execution is handled by tier and fixture scoping, not a marker.
 
 ### Non-destructive test
 A test that does not modify persistent state -- reads JSON, inspects resources, lists records. Runs FIRST in every file.

@@ -29,7 +29,7 @@ The asset YAML files are:
 ## images.yaml
 
 **Path:** `internal/assets/images.yaml`
-**Consumed by:** `mvm image pull`, `mvm image ls --remote`, `image.Service.GetSpecsFor()`, `image.Service.LoadImageTypesConfig()`
+**Consumed by:** `mvm image pull`, `mvm image ls --remote`, `image.GetSpecsFor()`, `image.LoadImageTypesConfig()`
 
 Defines the catalogue of image types available via `mvm image pull --type <type>`. Unlike a flat list of versioned images, this file defines **image type templates** with version resolvers. A specific version is selected at fetch time based on the upstream directory listing or explicit `--version` flag.
 
@@ -124,10 +124,10 @@ URL templates use `{placeholder}` syntax resolved at fetch time. Variables inclu
 |----------|--------|-------------|
 | `{version}` | CLI flag `--version` or version resolver | OS version (e.g. `24.04`, `12`) |
 | `{codename}` | Reverse lookup from `codename_mapping` | Upstream codename (e.g. `noble`, `bookworm`) |
-| `{arch}` | CLI flag `--arch` or detected host arch | Target architecture (mapped via `arch_mapping`) |
+| `{arch}` | Detected host architecture | Target architecture (mapped via `arch_mapping`) |
 | `{ci_version}` | Default firecracker CI version | Firecracker CI version (e.g. `v1.15`) |
 
-**Resolution flow** (`ImageService.construct_spec_from_type_config()`):
+**Resolution flow** (`ConstructSpecFromTypeConfig`):
 
 1. If `resolver` is `null` (single-source): version is always `"latest"`, templates render directly.
 2. If `resolver` is `http-dir` with explicit `--version`: builds URLs directly from templates (no HTTP fetch) if the type has no `file_discovery`. Otherwise fetches the directory listing.
@@ -196,15 +196,15 @@ kernel-official:
   output_name: <string>      # filename for the built vmlinux
   build_dir: <path>          # temporary directory used during compilation
   parallel_jobs: <int|null>  # build parallelism; null = use FALLBACK_KERNEL_BUILD_JOBS
-  enabled_configs:           # kernel options to enable (--enable)
-    - <CONFIG_OPTION>
-  disabled_configs:          # kernel options to disable (--disable)
-    - <CONFIG_OPTION>
-  set_val_configs:           # kernel options to set to a specific value (--set-val)
-    - option: <CONFIG_OPTION>
-      value: <string>
-  required_settings:         # settings that MUST be =y after build; missing ones trigger a prompt
-    - <CONFIG_OPTION=y>
+  default_configs:           # flat map of CONFIG_OPTION: value (y=enable, n=disable, string=set-val)
+    CONFIG_EXT4_FS: y
+    CONFIG_BLK_DEV_ZONED: n
+    CONFIG_SERIAL_8250_NR_UARTS: "4"
+  features:                  # named feature groups activatable via --features
+    <feature_name>:
+      desc: <string>
+      enforce:
+        CONFIG_OPTION: y
   options:                   # resolver-specific configuration
     version_discoveries:     # subdirectory patterns to scan on kernel.org
       - "v6.x"
@@ -225,10 +225,7 @@ kernel-firecracker:
   sha256_url: <url|null>
   config_fragments: []
   parallel_jobs: null
-  enabled_configs: []
-  disabled_configs: []
-  set_val_configs: []
-  required_settings: []
+  default_configs: {}
   options:                   # resolver-specific configuration
     s3_version_pattern: <regex> # regex for extracting version strings from S3 listing keys
 ```
@@ -248,16 +245,13 @@ kernel-firecracker:
 | `config_fragments` | Paths or URLs to additional kernel config files merged on top of the base config. |
 | `output_name` | Base filename for the compiled or downloaded `vmlinux` binary in the kernels cache. |
 | `build_dir` | Working directory for the kernel compilation. Cleaned up automatically unless `--keep-build-dir` is passed. |
-| `parallel_jobs` | `make -j` value. `null` defers to `defaults.kernel.build_jobs` (default: `0` = all available cores via `runtime.NumCPU()`). |
-| `enabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --enable`. |
-| `disabled_configs` | List of kernel `CONFIG_*` options passed to `scripts/config --disable`. |
-| `set_val_configs` | List of `{option, value}` pairs passed to `scripts/config --set-val`. |
-| `required_settings` | List of `CONFIG_OPTION=y` strings that must be present in `.config` after the build. |
+| `parallel_jobs` | `make -j` value. `null` defers to `defaults.kernel.build_jobs` (default: `nil`, which means all available cores). |
+| `default_configs` | Flat map of `CONFIG_OPTION: value` entries. Values of `y` enable the option, `n` disables it, and string values set it to a specific value (e.g. `"4"`). Passed to `scripts/config --enable/--disable/--set-val` during build. |
+| `features` | Named feature groups of kernel config options, loaded from the `features` key in `kernels.yaml`. Each feature has `desc` and `enforce` (a map of `CONFIG_OPTION: y` values to enforce). Activatable via `--features` on `mvm kernel pull`. |
 | `options.version_discoveries` | List of subdirectory patterns to scan on kernel.org (e.g. `v6.x`, `v7.x`) for version discovery. |
 | `options.file_pattern` | Filename prefix pattern for matching tarball entries (e.g. `linux-`). |
 | `options.file_suffix` | Filename suffix for matching tarball entries (e.g. `.tar.xz`). |
 | `options.s3_version_pattern` | Regex pattern for extracting version strings from S3 listing keys (`firecracker-s3` resolver only). |
-| `features` | `dict[str, KernelFeature]` | Named feature groups of kernel config options, loaded from the `features` key in `kernels.yaml`. Each feature has `desc`, `configs` (list of CONFIG options to enable), and `requires` (list of required settings). Activatable via `--features` on `mvm kernel pull`. |
 
 ---
 
@@ -273,13 +267,15 @@ values anywhere else in the codebase are a bug.
 ```
 defaults.vm:            Default vCPU count, RAM, SSH user, boot args, LSM flags, etc.
 defaults.network:       Default bridge name, CIDR, NAT enabled
-defaults.image:         Default architecture
+defaults.image:         Import format, remote listing limit and cache TTL
 defaults.kernel:        Default kernel version, architecture, build_jobs
 defaults.firecracker:   Log filenames, socket filenames, log level
 defaults.cloudinit:     ISO name, nocloud-net port range
 defaults.binary:        Remote version limit for bin ls
 settings:               General settings (guestfs_enabled, firewall_backend)
-settings.vm:            Log lines, log follow, max_vms
+settings.firewall:      iptables_xtcomment flag
+settings.vm:            Log lines, log follow, max_vms, ssh_timeout_sec
+defaults.volume:        Volume cache type
 ```
 
 Additional constants are defined as package-level variables for HTTP timeouts, URLs, file
@@ -290,8 +286,9 @@ permissions, and other fixed values.
 | Key | Default | Description |
 |-----|---------|-------------|
 | `version` | `6.19.9` | Default kernel version |
-| `arch` | `x86_64` | Default architecture |
-| `build_jobs` | `0` | Parallel compilation jobs (`0` = all available cores via `runtime.NumCPU()`) |
+| `build_jobs` | `nil` | Parallel compilation jobs (`nil` = all available cores) |
+| `remote_list_limit` | `5` | Max entries for remote version listing |
+| `remote_list_cache_ttl` | `14400` | Cache TTL for remote version listing (seconds) |
 
 ### Related constants
 
@@ -379,19 +376,19 @@ the constants relevant to asset management.
 | Access pattern | Config path | Description |
 |----------------|-------------|-------------|
 | `infra.GetDefault("defaults.kernel", "version")` | `defaults.kernel.version` | Default version for `mvm kernel pull --type official` |
-| `infra.GetDefault("defaults.kernel", "arch")` | `defaults.kernel.arch` | Default architecture for kernel operations |
-| `infra.GetDefault("defaults.image", "arch")` | `defaults.image.arch` | Default architecture for image operations |
+| `infra.GetDefault("defaults.kernel", "build_jobs")` | `defaults.kernel.build_jobs` | Parallel build jobs (nil = all cores) |
+| `infra.GetDefault("defaults.image", "import_format")` | `defaults.image.import_format` | Default import format for images |
 | `infra.DefaultFirecrackerCIVersion` | `constants.go` (VM constants section) | CI version used when config lookup fails |
 | `infra.SupportedImageExtensions` | `constants.go` (Image & rootfs processing) | File extensions scanned for cached images |
 | `infra.ImageImportFormatMap` | `constants.go` (Image & rootfs processing) | Extension → format auto-detection table |
-| `infra.HTTPTimeoutKernelDownload` | `constants.go` (HTTP / download) | Timeout for kernel tarball download |
-| `infra.HTTPTimeoutKernelConfig` | `constants.go` (HTTP / download) | Timeout for kernel config download |
-| `infra.HTTPTimeoutSHA256Fetch` | `constants.go` (HTTP / download) | Timeout for SHA-256 checksum fetch |
-| `infra.FirecrackerGitHubReleasesURL` | `constants.go` (HTTP / download) | GitHub API endpoint for Firecracker releases |
-| `infra.FirecrackerGitHubDownloadURL` | `constants.go` (HTTP / download) | Base URL for Firecracker release assets |
+| `infra.HTTPTimeoutKernelDownloadS` | `constants.go` (HTTP / download) | Timeout for kernel tarball download (seconds) |
+| `infra.HTTPTimeoutKernelConfigS` | `constants.go` (HTTP / download) | Timeout for kernel config download (seconds) |
+| `infra.HTTPTimeoutSha256FetchS` | `constants.go` (HTTP / download) | Timeout for SHA-256 checksum fetch (seconds) |
+| `infra.FirecrackerGithubReleasesAPIURL` | `constants.go` (HTTP / download) | GitHub API endpoint for Firecracker releases |
+| `infra.FirecrackerGithubDownloadURL` | `constants.go` (HTTP / download) | Base URL for Firecracker release assets |
 
-> **Note:** The kernel config lists (`enabled_configs`, `disabled_configs`, `set_val_configs`,
-> `required_settings`) are defined per-kernel in `kernels.yaml`, not as package-level constants.
+> **Note:** The kernel config map (`default_configs`) and feature groups (`features`)
+> are defined per-kernel in `kernels.yaml`, not as package-level constants.
 > Load them at runtime via `kernel.Service.GetSpecsFor()` or by reading `kernels.yaml`
 > through the embedded asset manager.
 

@@ -12,15 +12,18 @@ This document provides detailed reference for all `mvm` commands, configuration 
   - [mvm kernel](#mvm-kernel) — Kernel management
   - [mvm image](#mvm-image) — Image management
   - [mvm bin](#mvm-bin) — Binary management
-  - [mvm vm](#mvm-vm) — VM lifecycle
-  - [mvm console](#mvm-console) — VM console access
-  - [mvm network](#mvm-network) — Network management
-  - [mvm key](#mvm-key) — SSH key management
-  - [mvm config](#mvm-config) — Configuration management
-  - [mvm cache](#mvm-cache) — Cache management
-  - [mvm logs](#mvm-logs) — VM logs
-  - [mvm ssh](#mvm-ssh) — VM SSH access
-  - [mvm volume](#mvm-volume) — Persistent storage
+- [mvm vm](#mvm-vm) — VM lifecycle
+- [mvm snapshot](#mvm-snapshot) — Snapshot lifecycle
+- [mvm console](#mvm-console) — VM console access
+- [mvm network](#mvm-network) — Network management
+- [mvm key](#mvm-key) — SSH key management
+- [mvm config](#mvm-config) — Configuration management
+- [mvm cache](#mvm-cache) — Cache management
+- [mvm logs](#mvm-logs) — VM logs
+- [mvm exec](#mvm-exec) — Execute commands inside a VM
+- [mvm ssh](#mvm-ssh) — VM SSH access
+- [mvm volume](#mvm-volume) — Persistent storage
+- [mvm env](#mvm-env) — Environment workflow management
 - [Configuration](#configuration)
 - [Cloud-Init](#cloud-init)
 - [Environment Variables](#environment-variables)
@@ -29,6 +32,14 @@ This document provides detailed reference for all `mvm` commands, configuration 
 ---
 
 ## Command Reference
+
+**Root command flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--verbose` | Enable verbose output |
+| `--debug` | Enable debug mode |
+| `--version` | Show version and exit |
 
 ### `mvm init`
 
@@ -48,7 +59,7 @@ Host configuration. One-time, machine-global setup.
 
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm host init` | --- | Apply host configuration changes. Idempotent. Creates mvm group, sudoers drop-in, enables IP forwarding, creates default network. |
+| `mvm host init` | --- | Apply host configuration changes. Idempotent. Creates mvm group, sudoers drop-in, enables IP forwarding, creates firewall chains. Default network creation is handled separately by `mvm init` or `mvm network create`. |
 | `mvm host status` | `--json` | Show current host configuration state vs expected |
 | `mvm host info` | `--refresh, --json` | Show host hardware, limits, and VM capacity projection |
 | `mvm host clean` | `-f, --force` | Remove all networking config (bridges, TAPs, iptables). Does not touch sysctl/group. |
@@ -119,9 +130,10 @@ Image management.
 |------|-------------|---------|
 | `--format FORMAT` | Image format: qcow2, raw, tar-rootfs, or auto | auto |
 | `--root-partition N` | Root partition number (e.g. 1, 2) | auto-detect |
+| `--version VERSION` | Set image version (overrides name:ver format) | --- |
 | `--default` | Set as default after import | false |
 | `--force, -f` | Overwrite existing | false |
-| `--skip-optimization` | Skip shrink and compression, keep plain ext4 | false |
+| `--skip-optimization` | Skip OS cache cleanup (deblob), keep plain ext4 | true |
 | `--disable-detector NAME` | Comma-separated detectors to disable: type,label,size,filesystem,all | --- |
 
 ---
@@ -155,19 +167,15 @@ VM lifecycle management.
 | `mvm vm ls` | `--json, --long` | List all VMs |
 | `mvm vm ps` | `--json` | List running VMs (active processes) |
 | `mvm vm inspect` | `IDENTIFIER`, `--json` | Show detailed information about a VM |
-| `mvm snapshot create` | `VM_IDENTIFIER`, `--name` | Create a snapshot of a running VM |
-| `mvm snapshot restore` | `SNAPSHOT_ID`, `NAME`, `--network`, `--resume`, `--count` | Restore a VM from a snapshot |
-| `mvm vm attach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Attach a volume to a VM (supports hotplug on Firecracker v1.16+ for running VMs) |
-| `mvm vm detach-volume` | `IDENTIFIER`, `VOLUME_NAME` | Detach a volume from a VM (supports hot-unplug on Firecracker v1.16+ for running VMs) |
 
 **`vm create` flags:**
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `NAME` | VM name **(required, positional)** | --- |
-| `--image IMAGE` | Image name, short ID, or path to .ext4 file | auto-detected |
-| `--kernel KERNEL` | Kernel short ID or path to vmlinux | auto-detected |
-| `--vcpus, --cpus N` | vCPU count | from config |
+| `--image IMAGE` | Image name, type:version (e.g. ubuntu:24.04), short ID, or path to .ext4 file | auto-detected |
+| `--kernel KERNEL` | Kernel short ID or path to vmlinux file | auto-detected |
+| `--vcpu N` | vCPU count | from config |
 | `--mem, --memory N` | Memory in MiB | from config |
 | `--disk-size, -s SIZE` | Disk size (e.g., `512M`, `1G`) | from config |
 | `--ip ADDRESS` | Guest IP | auto-assigned |
@@ -177,6 +185,7 @@ VM lifecycle management.
 | `--ssh-key NAME_OR_PATH` | SSH public key (name from cache or file path) | default keys |
 | `--user USER` | Default SSH user | from config |
 | `--cloud-init-mode MODE` | `inject`, `iso`, `net`, `off` | `off` (no cloud-init) |
+| `--writeback` | Use writeback cache mode for drives (guest fsync honored) | false |
 | `--nocloud-net-port N` | Port for nocloud-net HTTP server (0=auto) | auto-assign |
 | `--cloudinit-config PATH` | Path to custom cloud-init config file | --- |
 | `--no-pci` | Disable PCI device support (opt-out) | from config |
@@ -186,12 +195,27 @@ VM lifecycle management.
 | `--enable-metrics/--no-enable-metrics` | Enable Firecracker metrics | from config |
 | `--lsm-flags FLAGS` | Linux Security Module kernel cmdline flags | from config |
 | `--boot-args ARGS` | Kernel boot arguments | from config |
-| `--no-console` | Disable serial console | false |
+| `--console` | Enable serial console relay | false |
+| `--vsock-port N` | Vsock port for the guest agent | 1024 |
 | `--skip-cleanup` | Keep resources on failure for debugging | false |
 | `--force, -f` | Skip confirmation prompts | false |
 | `--count, -c N` | Create N VMs in batch (base name keeps, subsequent get `-N` suffix) | 1 |
 | `--atomic` | All-or-nothing batch: roll back all VMs if any creation fails | false |
 | `--skip-deblob` | Skip debloat operations on rootfs (removes OS caches, cleans package manager caches) | false |
+
+---
+
+### `mvm snapshot` (alias: `ss`)
+
+Managed snapshot lifecycle. Create, list, inspect, restore, and remove snapshots.
+
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm snapshot create` | `VM_IDENTIFIER`, `--name`, `--pause` | Create a snapshot of a running VM |
+| `mvm snapshot ls` | `--json` | List all snapshots |
+| `mvm snapshot inspect` | `SNAPSHOT_ID`, `--json` | Show detailed information about a snapshot |
+| `mvm snapshot restore` | `SNAPSHOT_ID`, `NAME`, `--network`, `--resume`, `--count N` | Restore one or more VMs from a snapshot |
+| `mvm snapshot rm` | `SNAPSHOT_ID`, `--force, -f` | Remove a snapshot |
 
 ---
 
@@ -253,7 +277,7 @@ Configuration management.
 | `mvm config get CATEGORY [KEY]` | Get a configuration value |
 | `mvm config set CATEGORY KEY VALUE` | Set a configuration value |
 | `mvm config ls` | List all overridable settings and current values (alias: `list`) |
-| `mvm config reset [CATEGORY] [KEY] [--all, -a] [--force, -f]` | Reset overrides to defaults |
+| `mvm config reset [CATEGORY] [KEY]` | Reset overrides to defaults. Use `--all, -a` for global reset; `--force, -f` to skip confirmation |
 
 ---
 
@@ -275,7 +299,7 @@ Cache management.
 | `--dry-run` | Show what would be removed without actually removing |
 | `--force, -f` | Skip confirmation prompts |
 
-> **Note:** Omitting RESOURCE prunes all resource types. Each per-resource prune subcommand (`vm`, `network`, `image`, `kernel`, `binary`, `misc`) prompts for confirmation unless `--force` is passed.
+> **Note:** Omitting RESOURCE without `--all` produces an error: "No resource specified. Use --all to prune all resource types." You must pass `--all` to prune everything. Each per-resource prune subcommand (`vm`, `network`, `image`, `kernel`, `binary`, `misc`) prompts for confirmation unless `--force` is passed.
 
 **`cache clean` flags:**
 
@@ -323,7 +347,7 @@ VM SSH access.
 
 ### `mvm cp`
 
-Copy files between host and microVMs using tar-over-SSH.
+Copy files between host and microVMs using vsock binary frame protocol (no SSH, no guest dependencies).
 
 | Command | Description |
 |---------|-------------|
@@ -333,9 +357,8 @@ Copy files between host and microVMs using tar-over-SSH.
 |------|-------------|---------|
 | `SOURCE...` | Source path(s); use `vm_name:/path` for VM paths (positional, at least 2 args) | --- |
 | `DESTINATION` | Destination path; last positional arg (positional) | --- |
-| `--user, -u TEXT` | SSH user for VM connections | from config |
-| `--key PATH` | SSH private key path or registered key name | auto-detected |
 | `--force, -f` | Overwrite existing destination files | false |
+| `--no-sync` | Skip final sync() after transfer (faster but risks data loss on VM stop) | false |
 
 **Examples:**
 ```
@@ -354,6 +377,44 @@ mvm cp vm1:/data/file.txt vm2:/data/
 
 > **Note:** Destination must be a directory (end with `/`) for host → VM copies.
 > Multiple sources are only supported for host → VM direction.
+> The vsock binary frame protocol requires a running vsock agent inside the VM (injected during VM creation).
+
+---
+
+### `mvm exec`
+
+Execute a command inside a VM via the vsock guest agent. If no command is provided, starts an interactive shell session.
+
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm exec IDENTIFIER [-- <command>...]` | `--user, -u`, `--timeout, -t`, `--no-sync`, `--port, -p` | Execute a command or start an interactive shell |
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `IDENTIFIER` | VM name, ID, MAC, or IP (positional, required) | --- |
+| (positional args after `--`) | Command to execute (omit for interactive shell) | --- |
+| `--user, -u TEXT` | User to run the command as | root |
+| `--timeout, -t N` | Vsock agent connect/probe timeout in seconds | 0 (no timeout) |
+| `--no-sync` | Skip final sync() after command (faster but risks data loss on VM stop) | false |
+| `--port, -p N` | Vsock port for the guest agent | 1024 |
+
+**Examples:**
+```
+# Interactive shell
+mvm exec my-vm
+
+# Run a command
+mvm exec my-vm -- ls -la /etc
+
+# With timeout
+mvm exec my-vm --timeout 30 -- apt-get update
+
+# Specify port
+mvm exec my-vm --port 1025 -- /bin/bash
+
+# As a different user
+mvm exec my-vm --user ubuntu
+```
 
 ---
 
@@ -368,6 +429,8 @@ Persistent data disk management. Create, remove, list, inspect, and resize volum
 | `mvm volume ls` | `--json, --long` | List all volumes |
 | `mvm volume inspect` | `IDENTIFIER`, `--json` | Show detailed information about a volume |
 | `mvm volume resize` | `IDENTIFIER`, `SIZE` | Resize a volume |
+| `mvm volume attach` | `VM_ID`, `VOLUME_ID` | Attach a volume to a VM |
+| `mvm volume detach` | `VM_ID`, `VOLUME_ID` | Detach a volume from a VM |
 
 **`volume create` flags:**
 
@@ -377,6 +440,8 @@ Persistent data disk management. Create, remove, list, inspect, and resize volum
 | `SIZE` | Volume size, e.g. `10G`, `512M` **(required)** | --- |
 | `--format FORMAT` | Disk format: `raw` or `qcow2` | `raw` |
 | `--read-only, --readonly, --ro` | Mount volume as read-only | writable |
+| `--shareable, -s` | Allow volume to be attached to multiple VMs | false |
+| `--writeback` | Use writeback cache mode (guest fsync honored) | false |
 
 **`volume rm` flags:**
 
@@ -391,6 +456,21 @@ Persistent data disk management. Create, remove, list, inspect, and resize volum
 |------|-------------|---------|
 | `IDENTIFIER` | Volume name or ID prefix **(required)** | --- |
 | `--json` | Output as JSON | false |
+
+---
+
+### `mvm env`
+
+Environment workflow management. Define and provision full VM environments from a YAML spec.
+
+| Command | Description |
+|---------|-------------|
+| `mvm env apply [spec-path]` | Apply an environment spec (alias: `up`). Create or reconcile resources. Defaults to `mvmctl.yaml` or `mvmctl.yml`. Supports `--env KEY=VAL` for exec step overrides. |
+| `mvm env ls` | List applied environments (alias: `list`) |
+| `mvm env diff [spec-path]` | Show what would change (spec vs state) |
+| `mvm env destroy [wf-id\|path]` | Tear down exactly what was provisioned (alias: `down`) |
+
+See [ENV_SPEC_REFERENCE.md](ENV_SPEC_REFERENCE.md) for the full YAML spec reference and [docs/implementations/ENVIRONMENT_WORKFLOW_ENGINE.md](implementations/ENVIRONMENT_WORKFLOW_ENGINE.md) for implementation details.
 
 ---
 
@@ -409,7 +489,6 @@ Built-in fallbacks for kernel operations (defined in `internal/infra/constants.g
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `arch` | `x86_64` | Default architecture |
 | `version` | `6.19.9` | Default version for `--type official` |
 | `build_jobs` | `0` | Parallel build jobs (0 = all cores) |
 | `remote_list_limit` | `5` | Max remote versions to list per type |
@@ -469,6 +548,7 @@ The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `WARNING` |
 | `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
+| `MVM_WARM_POOL` | Warm image pool backend (`disk` for disk-backed, default is tmpfs) | (not set — tmpfs) |
 | `MVM_ESCALATED` | Set by sudo wrapper to indicate privilege escalation | `1` |
 | `MVM_TEMP_DIR` | Override temp directory for microVMs | `/tmp/mvmctl` |
 | `MVM_SUDO_RESTART` | Set internally when re-running with sudo for host init | (not set) |
@@ -497,6 +577,9 @@ The **canonical source of truth** is the SQLite database (`~/.cache/mvmctl/mvmdb
 │       └── cloud-init/
 ├── workflows/         # Workflow state persistence
 ├── nocloudnet/        # nocloud-net batch server dirs and logs
+├── snapshots/         # Snapshot files (mem, vmstate, disk)
+│   └── <snapshot-id>/
+├── logs/              # Application log files
 ├── firecracker-src/   # Firecracker git clone (for building from source)
 ├── mvmdb.db           # SQLite database (canonical asset state)
 ├── mvmctl.log         # Main application log

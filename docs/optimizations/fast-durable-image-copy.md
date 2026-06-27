@@ -1,6 +1,6 @@
 # Fast Durable Image Copy for microVMs
 
-> **STATUS: Current — fully accurate.** All three optimizations (sendfile(2), sparse dd fallback, fdatasync) are confirmed in `MaterializeTo()` in `internal/core/image/service.go`.
+> **STATUS: Current.** Two-level fallback (sendfile(2) → io.Copy) + fdatasync in `infra.CopyFile()` via `MaterializeTo()`. Sparse dd fallback (`CopyBytesDD`) exists in `internal/lib/system/block.go` and is used by the loopmount backend, but is NOT part of the `MaterializeTo()` chain.
 
 ## Overview
 
@@ -21,13 +21,13 @@ The warm pool images obtained from the cache are already stored on a tmpfs (`$TM
 
 ## The Solution ✅ IMPLEMENTED
 
-Three optimizations work together in `MaterializeTo()` (`internal/core/image/service.go:453-499`):
+Three optimizations work together in `MaterializeTo()` (`internal/core/image/service.go`), which delegates to `infra.CopyFile()` (`internal/infra/io.go`):
 
 ### 1. sendfile(2) Zero-Copy Transfer ✅ IMPLEMENTED
 
 [`sendfile(2)`](https://man7.org/linux/man-pages/man2/sendfile.2.html) copies data between file descriptors entirely in kernel space — no data is copied to userspace. The Go implementation uses `unix.Sendfile()` from `golang.org/x/sys/unix`.
 
-**Code reference:** `internal/core/image/utils.go:13-38` — `copyViaSendfile()`
+**Code reference:** `internal/infra/io.go` — `copyViaSendfile()`
 
 ```go
 const maxSend = 0x7ffff000
@@ -49,31 +49,17 @@ This is the **primary** copy path and succeeds in almost all cases since both so
 
 If `sendfile(2)` fails (e.g., the kernel or filesystem doesn't support it), the fallback is a standard `io.Copy` with Go's default 32KB buffer.
 
-**Code reference:** `internal/core/image/utils.go:42-56` — `copyViaIO()`
+**Code reference:** `internal/infra/io.go` — `copyViaIO()`
 
 ```go
 _, err = io.Copy(dst, src)
 ```
 
-### 3. dd with Sparse + fsync Fallback ✅ IMPLEMENTED
+### 3. fdatasync for Durability ✅ IMPLEMENTED
 
-If both `sendfile(2)` and `io.Copy` fail, the final fallback is `dd conv=sparse,fsync`. This uses `lseek(SEEK_HOLE/SEEK_DATA)` to detect zero-filled regions and skip writing them, then calls `fsync()` automatically at the end.
+After either copy method succeeds, `CopyFile()` opens the output file and calls `syscall.Fdatasync()` to flush file data and critical metadata (file size) to disk, skipping non-critical metadata (mtime/atime/ctime).
 
-**Code reference:** `internal/lib/system/block.go:10-23` — `CopyWithDD()`
-
-```go
-// conv=sparse,fsync — sparse-aware with built-in durability
-result, err := DefaultRunner.Run(ctx, []string{
-    "dd", fmt.Sprintf("if=%s", src), fmt.Sprintf("of=%s", dst),
-    "bs=1M", "conv=sparse,fsync", "status=none",
-}, RunCmdOpts{Check: true, Capture: true})
-```
-
-### 4. fdatasync for Durability ✅ IMPLEMENTED
-
-After any of the three copy methods succeeds, `MaterializeTo()` opens the output file and calls `syscall.Fdatasync()` to flush file data and critical metadata (file size) to disk, skipping non-critical metadata (mtime/atime/ctime).
-
-**Code reference:** `internal/core/image/service.go:485-496`
+**Code reference:** `internal/infra/io.go` (inside `CopyFile()`)
 
 ```go
 f, err := os.Open(outputPath)
@@ -97,7 +83,7 @@ For a VM rootfs image, the data must survive a crash. The file's mtime doesn't m
 
 The loopmount provisioner backend's `ExtractPartition()` uses `cp --sparse=always` when the input image is already a raw filesystem (detected via `blkid`). This copies the raw filesystem image while preserving holes, with a fallback to `dd conv=sparse,fsync`.
 
-**Code reference:** `internal/lib/provisioner/loopmount/backend.go:217-225`
+**Code reference:** `internal/lib/provisioner/loopmount/backend.go`
 
 ```go
 result, _ := system.DefaultRunner.Run(
@@ -114,19 +100,21 @@ if !result.Success() {
 
 ## Fallback Chain Summary
 
-The fallback chain in `MaterializeTo()` is:
+The fallback chain in `MaterializeTo()` (`→ infra.CopyFile()`) is:
 
 ```
-sendfile(2)  →  io.Copy  →  dd conv=sparse,fsync
+sendfile(2)  →  io.Copy
 ```
 
-All three paths end with `syscall.Fdatasync()` for data integrity.
+Both paths end with `syscall.Fdatasync()` for data integrity.
 
-The loopmount backend's `ExtractPartition()` uses a separate chain:
+The loopmount backend's `ExtractPartition()` uses a separate chain with its own dd fallback:
 
 ```
 cp --sparse=always  →  dd conv=sparse,fsync
 ```
+
+The `CopyBytesDD()` utility (`internal/lib/system/block.go`) is available for other callers that need a sparse-aware dd with built-in fsync, but it is NOT part of the `MaterializeTo()` chain.
 
 ### Why sendfile(2) Over reflink
 
@@ -143,7 +131,6 @@ The Go codebase uses `sendfile(2)` instead of `cp --reflink=auto` (copy-on-write
 |---|---|---|
 | tmpfs → ext4/XFS/btrfs | `sendfile(2)` + `fdatasync()` | Fastest (in-kernel zero-copy) |
 | sendfile fails → fallback | `io.Copy` (32KB buffer) | Medium (userspace buffer) |
-| Both fail → final fallback | `dd conv=sparse,fsync` | Slowest but handles edge cases |
 | Raw fs extraction (loopmount) | `cp --sparse=always` | Faster for sparse raw images |
 
 ## Why Not Pipelined sync_file_range()?
@@ -159,9 +146,9 @@ Only pursue this if profiling shows `fdatasync()` itself is measurably slow (>10
 
 ## Related Files
 
-- `internal/core/image/service.go` — `MaterializeTo()` (line 456), `EnsureCached()` (line 503)
-- `internal/core/image/utils.go` — `copyViaSendfile()`, `copyViaIO()`
-- `internal/lib/system/block.go` — `CopyWithDD()`, `CopyBytesDD()`
-- `internal/lib/provisioner/loopmount/backend.go` — `ExtractPartition()` (line 206)
-- `internal/infra/constants.go` — `GetWarmImagesDir()` (line 653)
-- `internal/infra/io.go` — `CopyPreservingMetadata()` (line 291)
+- `internal/core/image/service.go` — `MaterializeTo()`, `EnsureCached()`
+- `internal/infra/io.go` — `copyViaSendfile()`, `copyViaIO()`, `CopyFile()`
+- `internal/lib/system/block.go` — `CopyBytesDD()`
+- `internal/lib/provisioner/loopmount/backend.go` — `ExtractPartition()`
+- `internal/infra/constants.go` — `GetWarmImagesDir()`
+- `internal/infra/io.go` — `CopyPreservingMetadata()`

@@ -1,6 +1,6 @@
-> **STATUS: Draft — proposed design, not yet implemented.**
+> **STATUS: Implemented.** Per-domain Go interfaces in `pkg/api/interfaces.go` define the contract between mvmctl's orchestrator layer and its consumers (CLI, TUI, workflow engine).
 >
-> **Last updated:** 2026-06-14
+> **Last updated:** 2026-06-27
 
 # API Per-Domain Interfaces
 
@@ -70,21 +70,23 @@ Each domain in `pkg/api/` gets an interface in its existing file:
 
 | File | Interface | Methods |
 |------|-----------|---------|
-| `vm.go` | `VMAPI` | 15 |
+| `vm.go` | `VMAPI` | 11 |
 | `image.go` | `ImageAPI` | 9 |
 | `network.go` | `NetworkAPI` | 10 |
-| `volume.go` | `VolumeAPI` | 6 |
+| `volume.go` | `VolumeAPI` | 8 |
 | `kernel.go` | `KernelAPI` | 8 |
 | `key.go` | `KeyAPI` | 10 |
 | `binary.go` | `BinaryAPI` | 8 |
 | `host.go` | `HostAPI` | 15 |
 | `console.go` | `ConsoleAPI` | 4 |
+| `exec.go` | `ExecAPI` | 1 |
 | `ssh.go` | `SSHAPI` | 1 |
 | `config.go` | `ConfigAPI` | 4 |
-| `cache.go` | `CacheAPI` | 12 |
+| `cache.go` | `CacheAPI` | 11 |
 | `logs.go` | `LogAPI` | 2 |
 | `cp.go` | `CPAPI` | 1 |
 | `init.go` | `InitAPI` | 4 |
+| `snapshot.go` | `SnapshotAPI` | 5 |
 
 The composite `API` interface lives in `interfaces.go`:
 
@@ -99,12 +101,14 @@ type API interface {
     BinaryAPI
     HostAPI
     ConsoleAPI
+    ExecAPI
     SSHAPI
     ConfigAPI
     CacheAPI
     LogAPI
     CPAPI
     InitAPI
+    SnapshotAPI
 }
 ```
 
@@ -125,12 +129,12 @@ Per-domain mocks live in `internal/testutil/mock_<domain>_api.go`:
 
 ```go
 type MockVMAPI struct {
-    VMCreateFunc func(ctx, input, onProgress) ([]*model.VM, error)
+	VMCreateFunc func(ctx, input, onProgress) ([]*model.VMItem, error)
     VMRemoveFunc func(ctx, input) *errs.BatchResult
     // ...
 }
 
-func (m *MockVMAPI) VMCreate(ctx, input, onProgress) ([]*model.VM, error) {
+func (m *MockVMAPI) VMCreate(ctx, input, onProgress) ([]*model.VMItem, error) {
     if m.VMCreateFunc != nil { return m.VMCreateFunc(ctx, input, onProgress) }
     return nil, nil
 }

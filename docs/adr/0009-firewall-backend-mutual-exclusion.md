@@ -1,17 +1,17 @@
 # Firewall Backend Mutual Exclusion — nftables vs iptables
 
-**Status:** accepted
+**Status:** Active
 **Date:** 2026-05-22
 
 The project provides two independent firewall rule tracking backends: **nftables** (default) and **iptables** (legacy). These backends are **mutually exclusive** — a single session uses exactly one backend, never a combination. The `firewall_backend` setting acts as a toggle selector.
 
 ## Mutual Exclusion Rule
 
-Only one backend is active for a given session. The selection logic in `NewFirewallTracker()`:
+Only one backend is active for a given session. The caller resolves the `firewall_backend` setting from config and passes it as a `model.FirewallBackendType` to `NewFirewallTracker()`:
 
 1. Read the `firewall_backend` setting (from user settings / `OverridableDefaults`).
-2. If the value is `"nftables"` → use **NFTablesTracker**.
-3. Else → use **IPTablesTracker**.
+2. Map `"nftables"` to `model.FirewallBackendNFTables`, `"iptables"` to `model.FirewallBackendIPTables`.
+3. `NewFirewallTracker(backend, xtcommentAvail, db)` switches on the typed constant to construct **NFTablesTracker** or **IPTablesTracker**.
 
 The setting defaults to `"nftables"` in `internal/infra/constants.go` (`OverridableDefaults["settings"]["firewall_backend"] = "nftables"`). It can be changed via `mvm config set settings firewall_backend iptables`.
 

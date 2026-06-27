@@ -91,8 +91,8 @@ go test ./internal/core/vm/...           # Single domain
 cp dist/mvm ~/.local/bin/mvm             # copy for sudo operations
 export MVM_BINARY=dist/mvm
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
-python3 scripts/run_tests.py --domain <domain>
-python3 scripts/run_tests.py --test tests/path/to/test_file.py
+python3 scripts/run-system-tests.py --tier3-only <domain>
+python3 scripts/run-system-tests.py      # run all tiers
 ```
 
 Go tests are in `*_test.go` alongside source. System tests are Python in `tests/system/`.
@@ -104,8 +104,8 @@ System tests are expensive and stateful. Run per-file, never as a single batch:
 ```bash
 export MVM_BINARY=dist/mvm
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
-python3 scripts/run_tests.py --domain network
-python3 scripts/run_tests.py --test tests/system/network/test_network.py
+python3 scripts/run-system-tests.py --tier3-only network
+python3 scripts/run-system-tests.py --tier3-only
 ```
 
 ### Option C verification
