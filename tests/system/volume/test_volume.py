@@ -255,6 +255,34 @@ class TestVolumeLifecycle:
                 runner_vm, "volume", "rm", vol_name, "--force", check=False
             )
 
+    def test_volume_create_shareable(
+        self, runner_vm: str, unique_key_name: str
+    ) -> None:
+        # Rationale: Needs a real volume (1-3s). Verifies --shareable flag
+        # produces a shareable volume via ls --json inspection.
+        """Create a volume with --shareable and verify is_shareable via ls --json."""
+        vol_name = f"sys-vol-sh-{unique_key_name}"
+        try:
+            result = _run_mvm(
+                runner_vm,
+                "volume",
+                "create",
+                vol_name,
+                "512M",
+                "--shareable",
+            )
+            assert result.returncode == 0
+
+            ls_result = _run_mvm(runner_vm, "volume", "ls", "--json")
+            volumes = json.loads(ls_result.stdout)
+            matching = [v for v in volumes if v["name"] == vol_name]
+            assert len(matching) == 1
+            assert matching[0]["is_shareable"] is True
+        finally:
+            _run_mvm(
+                runner_vm, "volume", "rm", vol_name, "--force", check=False
+            )
+
     def test_volume_create_readonly_alias(
         self, runner_vm: str, unique_key_name: str
     ) -> None:

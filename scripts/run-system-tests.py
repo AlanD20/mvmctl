@@ -2,27 +2,31 @@
 """Run mvmctl system tests with per-domain VM isolation.
 
 Usage:
-  # Smoke-test the provisioning pipeline before running tests
+  # Smoke-test / build the provisioning pipeline
   MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \\
     python3 scripts/run-system-tests.py --prepare
 
   # Run all domains (T1 + T2 + T3)
   MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \\
-    python3 scripts/run-system-tests.py
+    python3 scripts/run-system-tests.py --all
 
   # Run specific domains
   python3 scripts/run-system-tests.py cli network vm_nested_virt
 
-  # Run only specific tiers
-  python3 scripts/run-system-tests.py --tier1-only
-  python3 scripts/run-system-tests.py --tier2-only
-  python3 scripts/run-system-tests.py --tier3-only
+  # Run specific tiers (comma-separated, executed in the given order)
+  python3 scripts/run-system-tests.py --tier 1
+  python3 scripts/run-system-tests.py --tier 2,1
+  python3 scripts/run-system-tests.py --tier 1,3
+  python3 scripts/run-system-tests.py --tier 3,2,1
+
+  # Rebuild shared assets and (optionally) run tests
+  python3 scripts/run-system-tests.py --rebuild --all
+  python3 scripts/run-system-tests.py --volume --image --prepare
+  python3 scripts/run-system-tests.py --volume
+  python3 scripts/run-system-tests.py --image
 
   # Limit parallel workers (default: 4)
-  python3 scripts/run-system-tests.py --workers 2
-
-  # Re-seed the shared asset volume even if it exists
-  python3 scripts/run-system-tests.py --rebuild
+  python3 scripts/run-system-tests.py --all --workers 2
 """
 
 from __future__ import annotations
@@ -88,6 +92,7 @@ TIER2_DOMAINS: dict[str, list[str]] = {
         "tests/system/volume/test_volume.py",
     ],
     "vm_lifecycle": ["tests/system/vm/test_vm_lifecycle.py"],
+    "vm_data_persistence": ["tests/system/vm/test_vm_data_persistence.py"],
     "ssh": ["tests/system/ssh/test_ssh.py"],
     "console": ["tests/system/console/test_console.py"],
     "logs": ["tests/system/logs/test_logs.py"],
@@ -97,10 +102,11 @@ TIER2_DOMAINS: dict[str, list[str]] = {
 
 # Tier 3: directly on host (no runner VM)
 TIER3_DOMAINS: dict[str, list[str]] = {
-    "vm_nested_virt": ["tests/system/vm/test_vm_fresh_env.py"],
-    "vm_nested_isolated": ["tests/system/vm/test_vm_nested_isolated.py"],
-    "vm_fresh_env": ["tests/system/vm/test_vm_fresh_env.py"],
-    "vm_snapshot_load": ["tests/system/vm/test_vm_snapshot_load.py"],
+    "nested_virt": ["tests/system/vm/test_vm_fresh_env.py"],
+    "nested_isolated": ["tests/system/vm/test_vm_nested_isolated.py"],
+    "fresh_env": ["tests/system/vm/test_vm_fresh_env.py"],
+    "snapshot_load": ["tests/system/vm/test_vm_snapshot_load.py"],
+    "snapshot_rootfs": ["tests/system/vm/test_vm_snapshot_rootfs_independence.py"],
     "kernel_build": ["tests/system/kernel/test_kernel.py"],
     "volume_hotplug": [
         "tests/system/volume/test_volume_hotplug.py",
@@ -118,6 +124,39 @@ for d in TIER2_DOMAINS:
 for d in TIER3_DOMAINS:
     TIER_LABELS[d] = 3
 
+
+def _parse_tier(value: str) -> list[int]:
+    """Parse a comma-separated tier list for argparse."""
+    if not value.strip():
+        raise argparse.ArgumentTypeError("--tier cannot be empty")
+    tiers: list[int] = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            tier = int(part)
+        except ValueError:
+            raise argparse.ArgumentTypeError(f"invalid tier value: {part!r}")
+        if tier not in (1, 2, 3):
+            raise argparse.ArgumentTypeError(f"tier must be 1, 2, or 3; got {tier}")
+        tiers.append(tier)
+    if not tiers:
+        raise argparse.ArgumentTypeError("--tier cannot be empty")
+    return tiers
+
+
+def _dedupe_adjacent(items: list[int]) -> list[int]:
+    """Remove adjacent duplicate integers while preserving first-seen order."""
+    result: list[int] = []
+    prev: int | None = None
+    for item in items:
+        if item != prev:
+            result.append(item)
+            prev = item
+    return result
+
+
 # ============================================================================
 # Helpers
 # ============================================================================
@@ -131,12 +170,14 @@ def mvm(
         cmd = ["mvm", *args]
     else:
         cmd = shlex.split(MVM_BINARY) + list(args)
+    env = {**os.environ, "NO_COLOR": "1"}
+    env.setdefault("MVM_ASSET_MIRROR", ASSET_MIRROR_HOST)
     result = subprocess.run(
         cmd,
         capture_output=capture,
         text=True,
         timeout=timeout,
-        env={**os.environ, "NO_COLOR": "1"},
+        env=env,
     )
     if not capture:
         # Stream output live so the user can see mirror vs HTTP download decision
@@ -159,6 +200,28 @@ def log(msg: str) -> None:
     print(f"[{ts}] {msg}", flush=True)
 
 
+def _build_mvm_binary() -> None:
+    """Build the mvm release binary and install it to ~/.local/bin/mvm."""
+    log("Building mvm binary...")
+    script_dir = Path(__file__).resolve().parent
+    repo_root = script_dir.parent
+    build_script = repo_root / "scripts" / "build.sh"
+    output_path = Path("~/.local/bin/mvm").expanduser()
+    result = subprocess.run(
+        [
+            str(build_script),
+            "release",
+            "--output",
+            str(output_path),
+        ],
+        cwd=str(repo_root),
+    )
+    if result.returncode != 0:
+        log("ERROR: mvm binary build failed")
+        sys.exit(1)
+    log("Build complete")
+
+
 def _run_pytest(
     test_files: list[str],
     *,
@@ -173,6 +236,7 @@ def _run_pytest(
         cmd.append("auto")
     cmd.extend(test_files)
     env = {**os.environ, "NO_COLOR": "1"}
+    env.setdefault("MVM_ASSET_MIRROR", ASSET_MIRROR_HOST)
     if extra_env:
         env.update(extra_env)
     result = subprocess.run(
@@ -215,6 +279,7 @@ def _create_and_seed_volume() -> None:
         SHARED_VOLUME_SIZE,
         "--shareable",
         "--read-only",
+        "--writeback",
         "--format",
         "raw",
         timeout=30,
@@ -399,13 +464,12 @@ def provision_t1(vm_name: str, mvm_version: str) -> None:
     # Running as root creates the cache dir with root ownership — test VMs inherit
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
     mvm(
-        "vm",
         "exec",
         vm_name,
         "--user",
         "runner",
         "--timeout",
-        "300",
+        "10",
         "--",
         "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
         "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
@@ -425,7 +489,7 @@ def _ensure_official_kernel_on_host(vm_name: str) -> None:
     )
     if check.returncode == 0:
         return
-    log(f"  official:7.0.11 not found — pulling (this may take a few minutes)...")
+    log("  official:7.0.11 not found — pulling (this may take a few minutes)...")
     # Acquire lock to prevent concurrent pulls
     import fcntl
 
@@ -494,13 +558,12 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
     log(f"  Initializing mvm inside '{vm_name}'...")
     mvm(
-        "vm",
         "exec",
         vm_name,
         "--user",
         "runner",
         "--timeout",
-        "60",
+        "10",
         "--",
         "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
         "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
@@ -509,50 +572,46 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
 
     log(f"  Registering assets in '{vm_name}' (cache hits)...")
     mvm(
-        "vm",
         "exec",
         vm_name,
         "--user",
         "runner",
         "--timeout",
-        "120",
+        "10",
         "--",
         "MVM_ASSET_MIRROR=/mnt mvm kernel pull --type firecracker "
         "--version v1.15 --default",
         timeout=150,
     )
     mvm(
-        "vm",
         "exec",
         vm_name,
         "--user",
         "runner",
         "--timeout",
-        "120",
+        "10",
         "--",
         "MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23",
         timeout=150,
     )
     mvm(
-        "vm",
         "exec",
         vm_name,
         "--user",
         "runner",
         "--timeout",
-        "300",
+        "10",
         "--",
         "MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu:noble",
         timeout=360,
     )
     mvm(
-        "vm",
         "exec",
         vm_name,
         "--user",
         "runner",
         "--timeout",
-        "120",
+        "10",
         "--",
         "MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker "
         "--version 1.16.0 --default --force",
@@ -608,6 +667,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
     mvm(
         "vm",
         "create",
+        "--writeback",
         BASE_VM_NAME,
         "--image",
         "ubuntu-minimal:noble",
@@ -631,13 +691,12 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         mvm("cp", MVM_BINARY, f"{BASE_VM_NAME}:/usr/local/bin/mvm", timeout=60)
         # Verify the binary transferred correctly
         verify = mvm(
-            "vm",
             "exec",
             BASE_VM_NAME,
             "--user",
             "runner",
             "--timeout",
-            "15",
+            "10",
             "--",
             "stat -c%s /usr/local/bin/mvm",
             timeout=20,
@@ -652,13 +711,12 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
 
         log(f"  Installing test dependencies in '{BASE_VM_NAME}'...")
         mvm(
-            "vm",
             "exec",
             BASE_VM_NAME,
             "--user",
             "runner",
             "--timeout",
-            "240",
+            "10",
             "--",
             "sudo apt-get update -qq && "
             "sudo apt-get install -y -qq "
@@ -671,26 +729,24 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         )
         log("  Installing Python test packages...")
         mvm(
-            "vm",
             "exec",
             BASE_VM_NAME,
             "--user",
             "runner",
             "--timeout",
-            "60",
+            "10",
             "--",
             "pip3 install pytest-timeout --break-system-packages --quiet 2>&1 | tail -3",
             timeout=90,
         )
         log("  Adding runner to required groups (mvm, kvm)...")
         mvm(
-            "vm",
             "exec",
             BASE_VM_NAME,
             "--user",
             "runner",
             "--timeout",
-            "15",
+            "10",
             "--",
             "sudo groupadd -f mvm && "
             "sudo usermod -aG mvm runner && "
@@ -699,13 +755,12 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         )
         log("  Changing ownership of /tests to runner user...")
         mvm(
-            "vm",
             "exec",
             BASE_VM_NAME,
             "--user",
             "runner",
             "--timeout",
-            "15",
+            "10",
             "--",
             "sudo chown -R runner:runner /tests",
             timeout=30,
@@ -718,22 +773,40 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         # Asset pulls are pre-baked into the base image so each test VM doesn't
         # re-pull them (saves ~3 min per T1 VM).
         mvm(
-            "vm",
             "exec",
             BASE_VM_NAME,
             "--user",
             "runner",
             "--timeout",
-            "600",
+            "10",
             "--",
             "sudo mkdir -p /mnt && "
             "sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive && "
-            "MVM_ASSET_MIRROR=/mnt mvm binary pull firecracker --default --force --version 1.16.0 && "
-            "MVM_ASSET_MIRROR=/mnt mvm kernel pull --type firecracker --version v1.15 --default && "
-            "MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23 && "
-            "MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu-minimal:24.04 && "
-            "MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu --version 24.04 && "
+            "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
+            timeout=180,
+            capture=False,
+        )
+
+        log(f"  Pulling assets into '{BASE_VM_NAME}' in parallel from mirror...")
+        # Asset pulls are pre-baked into the base image so each test VM doesn't
+        # re-pull them (saves ~3 min per T1 VM). Run them in parallel inside one
+        # exec; wait on each PID so any failure propagates to the exec exit code.
+        mvm(
+            "exec",
+            BASE_VM_NAME,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            "set -e && "
+            'pids="" && '
+            'MVM_ASSET_MIRROR=/mnt mvm binary pull firecracker --default --force --version 1.16.0 & pids="$pids $!" && '
+            'MVM_ASSET_MIRROR=/mnt mvm kernel pull --type firecracker --version v1.15 --default & pids="$pids $!" && '
+            'MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23 & pids="$pids $!" && '
+            'MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu-minimal:24.04 & pids="$pids $!" && '
+            'MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu --version 24.04 & pids="$pids $!" && '
+            'for pid in $pids; do wait "$pid" || exit $?; done && '
             "echo 'Verifying cached image integrity...' && "
             "for f in /home/runner/.cache/mvmctl/images/*.zst; do "
             'zstd -t "$f" || exit 1; '
@@ -786,7 +859,6 @@ def run_tier1_domain(
             mvm("cp", "-f", "tests/system", f"{vm_name}:/tests/", timeout=60)
             # Clear Python bytecode cache so updated .py files are used
             mvm(
-                "vm",
                 "exec",
                 vm_name,
                 "--user",
@@ -800,13 +872,12 @@ def run_tier1_domain(
             )
         log(f"  Running {domain} tests...")
         pytest_result = mvm(
-            "vm",
             "exec",
             vm_name,
             "--user",
             "runner",
             "--timeout",
-            "600",  # 10 minutes per test run (invariants may take >8 min)
+            "10",
             "--",
             f"cd / && MVM_ASSET_MIRROR=/mnt MVM_TEST_VM={vm_name} "
             f"python3 -m pytest {' '.join(f'/{f}' for f in test_files)} --tb=short -q",
@@ -842,7 +913,6 @@ def run_tier2_domain(
             mvm("cp", "-f", "tests/system", f"{vm_name}:/tests/", timeout=60)
             # Clear Python bytecode cache so updated .py files are used
             mvm(
-                "vm",
                 "exec",
                 vm_name,
                 "--user",
@@ -856,13 +926,12 @@ def run_tier2_domain(
             )
         log(f"  Running {domain} tests...")
         pytest_result = mvm(
-            "vm",
             "exec",
             vm_name,
             "--user",
             "runner",
             "--timeout",
-            "900",
+            "10",
             "--",
             f"cd / && MVM_ASSET_MIRROR=/mnt MVM_TEST_VM={vm_name} "
             f"python3 -m pytest {' '.join(f'/{f}' for f in test_files)} --tb=short -q",
@@ -879,7 +948,9 @@ def run_tier2_domain(
     return result
 
 
-def run_tier3_domain(domain: str, test_files: list[str]) -> dict[str, Any]:
+def run_tier3_domain(
+    domain: str, test_files: list[str], timeout: int = 600
+) -> dict[str, Any]:
     """Run one Tier 3 domain directly on the host."""
     result: dict[str, Any] = {
         "domain": domain,
@@ -887,9 +958,9 @@ def run_tier3_domain(domain: str, test_files: list[str]) -> dict[str, Any]:
         "passed": False,
         "output": "",
     }
-    log(f"  Running {domain} tests on host...")
+    log(f"  Running {domain} tests on host (timeout={timeout}s)...")
     try:
-        pytest_result = _run_pytest(test_files)
+        pytest_result = _run_pytest(test_files, timeout=timeout)
         result["passed"] = pytest_result.returncode == 0
         result["output"] = pytest_result.stdout + pytest_result.stderr
     except Exception as e:
@@ -1006,29 +1077,25 @@ def print_summary(all_results: list[dict[str, Any]]) -> None:
         sys.exit(1)
 
 
-def parse_args() -> argparse.Namespace:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run mvmctl system tests with per-domain VM isolation.",
     )
     parser.add_argument(
         "domains",
         nargs="*",
-        help="Specific domains to test (default: all).",
+        help="Specific domains to test.",
     )
     parser.add_argument(
-        "--tier1-only",
+        "--all",
         action="store_true",
-        help="Run only Tier 1 domains.",
+        help="Run all T1 + T2 + T3 domains.",
     )
     parser.add_argument(
-        "--tier2-only",
-        action="store_true",
-        help="Run only Tier 2 domains.",
-    )
-    parser.add_argument(
-        "--tier3-only",
-        action="store_true",
-        help="Run only Tier 3 domains.",
+        "--tier",
+        type=_parse_tier,
+        help="Comma-separated tier numbers to run (1, 2, 3). "
+        "Tiers are executed in the given order (e.g. 2,1).",
     )
     parser.add_argument(
         "--workers",
@@ -1039,7 +1106,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="Remove and recreate shared volume AND base image from scratch.",
+        help="Build the mvm binary, then rebuild the shared volume and custom "
+        "base image and run the provisioning smoke-test. After prepare the "
+        "script stops unless a test-running flag is also given.",
+    )
+    parser.add_argument(
+        "--volume",
+        action="store_true",
+        help="Rebuild only the shared asset volume (asset-mirror).",
+    )
+    parser.add_argument(
+        "--image",
+        action="store_true",
+        help="Rebuild the mvm binary, then rebuild only the custom base image "
+        "(mvm-test-runner:<version>). Ensures the shared asset volume exists first "
+        "because the builder VM attaches it.",
     )
     parser.add_argument(
         "--skip-volume-check",
@@ -1049,8 +1130,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prepare",
         action="store_true",
-        help="Build custom base image (mvm binary + tests + deps), smoke-test "
-        "T1 and T2 provisioning. Run before running test suites.",
+        help="Run the T1/T2 provisioning smoke-test / validator. Ensures the "
+        "shared volume and custom base image exist, rebuilding them only if "
+        "--volume or --image is also passed.",
     )
     parser.add_argument(
         "--push",
@@ -1058,14 +1140,21 @@ def parse_args() -> argparse.Namespace:
         help="Push test files into each VM before running (overrides baked-in tests). "
         "Use when modifying tests without rebuilding the base image.",
     )
-    return parser.parse_args()
+    return parser
 
 
-def run_prepare(*, rebuild: bool = False) -> None:
+def parse_args() -> argparse.Namespace:
+    return _build_parser().parse_args()
+
+
+def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) -> None:
     """Smoke-test the provisioning pipeline.
 
     Builds a custom base image from ubuntu-minimal:noble with all test
     dependencies pre-installed, then validates T1 and T2 provisioning.
+
+    Only forces a rebuild of the shared volume or base image when the
+    corresponding flag is True.
     """
     log("=== Prepare: provisioning pipeline ===")
 
@@ -1074,13 +1163,13 @@ def run_prepare(*, rebuild: bool = False) -> None:
     mvm_version = _get_mvm_version()
     log(f"      mvm version: {mvm_version}")
 
-    # --- Step 1: Ensure shared volume and network ---
-    log("[1/8] Checking shared volume and network...")
-    ensure_shared_volume(rebuild=rebuild)
+    # --- Step 2: Ensure shared volume and network ---
+    log("[2/8] Checking shared volume and network...")
+    ensure_shared_volume(rebuild=rebuild_volume)
     ensure_test_network()
 
-    # --- Step 2: Ensure kernel with nftables support ---
-    log("[2/8] Ensuring kernel with nftables support...")
+    # --- Step 3: Ensure kernel with nftables support ---
+    log("[3/8] Ensuring kernel with nftables support...")
     mvm(
         "kernel",
         "pull",
@@ -1091,13 +1180,13 @@ def run_prepare(*, rebuild: bool = False) -> None:
         timeout=900,
     )
 
-    # --- Step 3: Build custom base image ---
-    log("[3/8] Building custom base image...")
-    _build_base_image(mvm_version, rebuild=rebuild)
+    # --- Step 4: Build custom base image ---
+    log("[4/8] Building custom base image...")
+    _build_base_image(mvm_version, rebuild=rebuild_image)
 
-    # --- Step 4: Create T1 VM from custom image + volume ---
+    # --- Step 5: Create T1 VM from custom image + volume ---
     t1 = _unique_name("prep-t1")
-    log(f"[4/8] Creating T1 VM '{t1}' from {BASE_IMAGE_NAME}:{mvm_version} + volume...")
+    log(f"[5/8] Creating T1 VM '{t1}' from {BASE_IMAGE_NAME}:{mvm_version} + volume...")
     mvm(
         "vm",
         "create",
@@ -1122,13 +1211,12 @@ def run_prepare(*, rebuild: bool = False) -> None:
     try:
         log(f"      Running mvm init inside '{t1}'...")
         mvm(
-            "vm",
             "exec",
             t1,
             "--user",
             "runner",
             "--timeout",
-            "60",
+            "10",
             "--",
             "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
             "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
@@ -1140,7 +1228,7 @@ def run_prepare(*, rebuild: bool = False) -> None:
     # --- Step 5: Create T2 VM from custom image + shared volume ---
     t2 = _unique_name("prep-t2")
     log(
-        f"[5/8] Creating T2 VM '{t2}' from {BASE_IMAGE_NAME}:{mvm_version} + shared volume..."
+        f"[6/8] Creating T2 VM '{t2}' from {BASE_IMAGE_NAME}:{mvm_version} + shared volume..."
     )
     mvm(
         "vm",
@@ -1166,30 +1254,28 @@ def run_prepare(*, rebuild: bool = False) -> None:
         timeout=300,
     )
     try:
-        log(f"[6/8] Setting up '{t2}' (mount + init)...")
+        log(f"[7/8] Setting up '{t2}' (mount + init)...")
         mvm(
-            "vm",
             "exec",
             t2,
             "--user",
             "runner",
             "--timeout",
-            "120",
+            "10",
             "--",
             "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
             "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
             timeout=180,
         )
 
-        log(f"[7/8] Validating cache hit (pulling 1 asset)...")
+        log(f"[8/8] Validating cache hit (pulling 1 asset)...")
         result = mvm(
-            "vm",
             "exec",
             t2,
             "--user",
             "runner",
             "--timeout",
-            "120",
+            "10",
             "--",
             "MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23 2>&1 | head -5",
             timeout=150,
@@ -1218,27 +1304,19 @@ def run_prepare(*, rebuild: bool = False) -> None:
 
 
 def main() -> None:
-    args = parse_args()
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    test_flags = args.all or args.domains or args.tier
+    prep_flags = args.prepare or args.image or args.volume or args.rebuild
+
+    if not test_flags and not prep_flags:
+        parser.print_help()
+        sys.exit(0)
 
     # Handle --rebuild: build binary before anything else
     if args.rebuild:
-        log("Rebuilding mvm binary...")
-        script_dir = Path(__file__).resolve().parent
-        repo_root = script_dir.parent
-        build_script = repo_root / "scripts" / "build.sh"
-        result = subprocess.run(
-            [
-                str(build_script),
-                "release",
-                "--output",
-                str(Path(MVM_BINARY).expanduser()),
-            ],
-            cwd=str(repo_root),
-        )
-        if result.returncode != 0:
-            log("ERROR: Build failed")
-            sys.exit(1)
-        log("Build complete")
+        _build_mvm_binary()
 
     # Validate MVM_BINARY exists
     binary = shlex.split(MVM_BINARY)[0]
@@ -1247,17 +1325,39 @@ def main() -> None:
         log("Set MVM_BINARY or ensure 'mvm' is in PATH.")
         sys.exit(1)
 
-    # Handle --prepare (build base image + smoke test, then exit)
-    if args.prepare:
-        run_prepare(rebuild=args.rebuild)
+    # Handle prep actions.
+    # --rebuild implies --volume + --image + --prepare (in that order).
+    if args.rebuild:
+        run_prepare(rebuild_volume=True, rebuild_image=True)
+        if not test_flags:
+            return
+    elif args.prepare or args.image or args.volume:
+        rebuild_volume = args.volume
+        rebuild_image = args.image
+        if args.prepare:
+            run_prepare(rebuild_volume=rebuild_volume, rebuild_image=rebuild_image)
+        elif args.image:
+            _build_mvm_binary()
+            # The builder VM attaches the shared volume, so ensure it exists first.
+            ensure_shared_volume(rebuild=rebuild_volume)
+            ensure_test_network()
+            mvm_version = _get_mvm_version()
+            _build_base_image(mvm_version, rebuild=True)
+        elif args.volume:
+            ensure_shared_volume(rebuild=True)
+
+        if not test_flags:
+            return
+
+    if not test_flags:
         return
 
     # Detect mvm version for base image lookup
     mvm_version = _get_mvm_version()
 
-    # Ensure shared volume exists (unless skipped)
+    # Ensure shared volume/network exist unless skipped.
     if not args.skip_volume_check:
-        ensure_shared_volume(rebuild=args.rebuild)
+        ensure_shared_volume(rebuild=False)
         ensure_test_network()
 
     # Select domains
@@ -1289,15 +1389,20 @@ def main() -> None:
             elif t == 3:
                 tier3[d] = files
 
-    if args.tier2_only:
-        tier1 = {}
-        tier3 = {}
-    if args.tier1_only:
-        tier2 = {}
-        tier3 = {}
-    if args.tier3_only:
-        tier1 = {}
-        tier2 = {}
+    selected_order: list[int] = []
+    if args.tier:
+        selected_order = _dedupe_adjacent(args.tier)
+    elif args.all:
+        selected_order = [1, 2, 3]
+
+    if selected_order:
+        selected_set = set(selected_order)
+        if 1 not in selected_set:
+            tier1 = {}
+        if 2 not in selected_set:
+            tier2 = {}
+        if 3 not in selected_set:
+            tier3 = {}
 
     if not tier1 and not tier2 and not tier3:
         log("No domains selected. Use --help for options.")
@@ -1305,30 +1410,28 @@ def main() -> None:
 
     all_results: list[dict[str, Any]] = []
 
-    # Run T1 in parallel
-    if tier1:
-        results = run_domains(
-            tier1, 1, run_tier1_domain, args.workers, mvm_version, push=args.push
-        )
-        all_results.extend(results)
-
-    # Run T2 in parallel
-    if tier2:
-        results = run_domains(
-            tier2, 2, run_tier2_domain, args.workers, mvm_version, push=args.push
-        )
-        all_results.extend(results)
-
-    # Run T3 (sequential — destructive tests need ordering)
-    if tier3:
-        log(f"Tier 3: running {len(tier3)} domain(s) on host...")
-        for domain, files in sorted(tier3.items()):
-            result = run_tier3_domain(domain, files)
-            all_results.append(result)
-            status = "PASS" if result["passed"] else "FAIL"
-            log(f"  [{status}] {domain} (tier 3)")
-            if not result["passed"]:
-                _print_failure(domain, result)
+    run_order = selected_order if selected_order else [1, 2, 3]
+    for tier in run_order:
+        if tier == 1 and tier1:
+            results = run_domains(
+                tier1, 1, run_tier1_domain, args.workers, mvm_version, push=args.push
+            )
+            all_results.extend(results)
+        elif tier == 2 and tier2:
+            results = run_domains(
+                tier2, 2, run_tier2_domain, args.workers, mvm_version, push=args.push
+            )
+            all_results.extend(results)
+        elif tier == 3 and tier3:
+            log(f"Tier 3: running {len(tier3)} domain(s) on host...")
+            for domain, files in sorted(tier3.items()):
+                timeout = 1800 if domain == "kernel_build" else 600
+                result = run_tier3_domain(domain, files, timeout=timeout)
+                all_results.append(result)
+                status = "PASS" if result["passed"] else "FAIL"
+                log(f"  [{status}] {domain} (tier 3)")
+                if not result["passed"]:
+                    _print_failure(domain, result)
 
     print_summary(all_results)
 

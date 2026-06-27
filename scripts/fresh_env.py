@@ -14,7 +14,7 @@ Steps executed (in exact order):
    4. image pull ubuntu:noble --default
    5. kernel pull official:6.19.9 --default --features kvm,nftables,tuntap
    6. bin pull firecracker --git-ref main --default
-   7. vm create fenv --vcpus 6 --mem 4g --nested-virt -s 8g
+    7. vm create fenv --vcpu 6 --mem 4g --nested-virt -s 8g
    8. vol create vol1 8g
    9. vm stop fenv
    10. volume attach fenv vol1
@@ -200,7 +200,7 @@ def _build_chain_cmd(kernel_filename: str, image_filename: str) -> str:
         '&& echo "=== [7/8] mvm bin pull ===" '
         "&& MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker --version 1.15.1 --default --force"
         '&& echo "=== [8/8] mvm vm create ===" '
-        f"&& mvm vm create {NESTED_VM_NAME} --vcpus 2 --mem 512m --nested-virt -s 4g"
+        f"&& mvm vm create {NESTED_VM_NAME} --vcpu 2 --mem 512m --nested-virt -s 4g"
     )
 
 
@@ -270,7 +270,7 @@ def _build_base_steps() -> dict[str, dict[str, Any]]:
                 "vm",
                 "create",
                 VM_NAME,
-                "--vcpus",
+                "--vcpu",
                 "6",
                 "--mem",
                 "4g",

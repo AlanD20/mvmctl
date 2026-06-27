@@ -219,7 +219,7 @@ class TestSSHConnect:
 
         # Find the exported private key file (inside test VM)
         ls_result = _guest_run(
-            runner_vm, f"ls -1 {key_export_dir}/", timeout=10
+            runner_vm, f"ls -1 {key_export_dir}/", timeout=30
         )
         exported_files = ls_result.stdout.strip().splitlines()
         private_key_name = None

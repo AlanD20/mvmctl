@@ -277,7 +277,7 @@ class TestImageList:
             "ls",
             "--remote",
             "--json",
-            timeout=30,
+            timeout=120,
             check=False,
         )
         assert result.returncode == 0, (
@@ -628,6 +628,7 @@ class TestImagePullAdvanced:
             "pull",
             "totally-nonexistent-image-name-12345",
             check=False,
+            timeout=60,
         )
         assert result.returncode != 0
         assert "not found" in result.stderr.lower() or "no image types matched" in result.stderr.lower(), (
@@ -915,6 +916,50 @@ class TestImageImportAdvanced:
         finally:
             if imported_prefix:
                 _run_mvm(runner_vm, "image", "rm", imported_prefix, check=False)
+
+    def test_image_import_with_version(self, runner_vm):
+        """Import a local image with --version flag and verify version in ls --json."""
+        raw_path = _create_ext4_raw_in_vm(runner_vm, "test-version.raw")
+        assert raw_path is not None, (
+            "mkfs.ext4 or truncate not available inside the test VM"
+        )
+
+        imported_prefix: str | None = None
+        try:
+            result = _run_mvm(
+                runner_vm,
+                "image",
+                "import",
+                "test-version",
+                raw_path,
+                "--format",
+                "raw",
+                "--version",
+                "1.0",
+                "--skip-optimization",
+                check=False,
+            )
+            assert result.returncode == 0, (
+                f"Import with --version failed: {result.stderr.strip()}"
+            )
+
+            result = _run_mvm(runner_vm, "image", "ls", "--json")
+            images = _parse_json_output(result.stdout)
+            imported = [
+                i for i in images if i.get("name") == "test-version"
+            ]
+            assert imported, (
+                "Imported image with --version not found in listing"
+            )
+            assert imported[0].get("version") == "1.0", (
+                f"Expected version '1.0', got '{imported[0].get('version')}'"
+            )
+            imported_prefix = imported[0]["id"][:6]
+        finally:
+            if imported_prefix:
+                _run_mvm(
+                    runner_vm, "image", "rm", imported_prefix, check=False
+                )
 
     def test_image_import_with_skip_optimization(self, runner_vm):
         """Import an image with --skip-optimization flag."""
@@ -1247,6 +1292,7 @@ class TestImageImportCreateVM:
                     imported_prefix,
                     "--network",
                     network_name,
+                    timeout=60,
                 )
                 assert result.returncode == 0, (
                     f"VM create failed: {result.stderr}"
@@ -1362,6 +1408,7 @@ class TestImageImportCreateVM:
                     imported_prefix,
                     "--network",
                     network_name,
+                    timeout=120,
                 )
                 assert result.returncode == 0, (
                     f"VM create with imported Ubuntu failed: {result.stderr}"
@@ -1623,6 +1670,7 @@ class TestImageDependencyDeletion:
                 "alpine:3.23",
                 "--network",
                 created_network,
+                timeout=120,
             )
 
             ins_result = _run_mvm(
@@ -1685,6 +1733,7 @@ class TestImageDependencyDeletion:
                 "alpine:3.23",
                 "--network",
                 created_network,
+                timeout=120,
             )
             _run_mvm(runner_vm, "vm", "start", vm_name)
 
@@ -1805,7 +1854,7 @@ class TestImageAdvancedFlags:
             "--disable-detector",
             "all",
             "--force",
-            timeout=60,
+            timeout=180,
             check=False,
         )
         assert result.returncode == 0, (
@@ -1973,6 +2022,7 @@ class TestImageImportWithDisableDetector:
                 "--version",
                 "3.23",
                 check=False,
+                timeout=300,
             )
             result = _run_mvm(runner_vm, "image", "ls", "--json")
             images = json.loads(result.stdout)

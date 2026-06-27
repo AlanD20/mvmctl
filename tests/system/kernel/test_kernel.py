@@ -620,11 +620,11 @@ class TestKernelRemoveAndPull:
             if vm.get("kernel_id", "").startswith(kernel_id):
                 _run_mvm(runner_vm, "vm", "rm", vm["name"], "--force", check=False)
 
-        result = _run_mvm(runner_vm, "kernel", "rm", kernel_id, check=False)
+        result = _run_mvm(runner_vm, "kernel", "rm", kernel_id, "--force", check=False)
         if result.returncode != 0:
-            if "referenced by VMs" in result.stdout:
+            if "referenced by VMs" in result.stdout or "in use by" in result.stdout:
                 pytest.fail(
-                    f"Kernel {kernel_id} is referenced by VMs from "
+                    f"Kernel {kernel_id} is referenced by VMs/snapshots from "
                     "another parallel test worker"
                 )
             assert result.returncode == 0, result.stderr

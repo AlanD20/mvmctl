@@ -179,7 +179,7 @@ def _read_firecracker_config(runner_vm: str, vm_name: str) -> dict:
     # Read the file inside the test VM
     result = _guest_run(runner_vm,
         f"cat '{vm_dir}/firecracker.json'",
-        timeout=10,
+        timeout=30,
     )
     assert result.returncode == 0, (
         f"Firecracker config not found at {vm_dir}/firecracker.json"

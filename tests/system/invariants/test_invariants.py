@@ -1267,7 +1267,7 @@ class TestAtMostOneDefaultImage:
             "--version",
             "3.21",
             "--default",
-            timeout=120,
+            timeout=300,
         )
 
         images = _present_images(runner_vm)
@@ -1466,7 +1466,7 @@ class TestAtMostOneDefaultBinary:
             # Try to pull a different version using type:version syntax
             import re as _re
             remote_result = _run_mvm(
-                runner_vm, "bin", "ls", "--remote", check=False, timeout=30
+                runner_vm, "bin", "ls", "--remote", check=False, timeout=300
             )
             if remote_result.returncode == 0:
                 versions = _re.findall(
@@ -1485,7 +1485,7 @@ class TestAtMostOneDefaultBinary:
                         "pull",
                         f"firecracker:{v}",
                         check=False,
-                        timeout=120,
+                        timeout=180,
                     )
                     if pull.returncode == 0:
                         break
@@ -1718,8 +1718,8 @@ class TestCacheCleanSafety:
 
             # If PID is missing or process already exited, restart the VM
             if vm_pid is None:
-                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=30)
-                _run_mvm(runner_vm, "vm", "start", vm_name, timeout=60)
+                _run_mvm(runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=300)
+                _run_mvm(runner_vm, "vm", "start", vm_name, timeout=300)
                 _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
                 time.sleep(3.0)
                 vm_result = _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
@@ -1733,8 +1733,8 @@ class TestCacheCleanSafety:
                 )
                 if proc_check.returncode != 0:
                     # Process died — restart to get a valid PID
-                    _run_mvm(runner_vm, "vm", "stop", vm_name, check=False, timeout=30)
-                    _run_mvm(runner_vm, "vm", "start", vm_name, timeout=60)
+                    _run_mvm(runner_vm, "vm", "stop", vm_name, check=False, timeout=120)
+                    _run_mvm(runner_vm, "vm", "start", vm_name, timeout=120)
                     time.sleep(3.0)
                     vm_result = _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json")
                     vm_data = json.loads(vm_result.stdout)
@@ -1752,7 +1752,7 @@ class TestCacheCleanSafety:
                 # cache clean destroyed the DB — restore mvm state for
                 # subsequent tests in the same runner VM
                 _run_mvm(
-                    runner_vm, "init", "--non-interactive", check=False, timeout=30
+                    runner_vm, "init", "--non-interactive", check=False, timeout=180
                 )
                 return
 

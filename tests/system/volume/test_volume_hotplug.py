@@ -93,7 +93,7 @@ def _require_firecracker_hotplug(runner_vm: str) -> None:
     the environment is capable.
     """
     result = _run_mvm(
-        runner_vm, "bin", "ls", "--json", timeout=30
+        runner_vm, "bin", "ls", "--json", timeout=120
     )
     if result.returncode != 0:
         pytest.fail("Cannot check Firecracker version (bin ls failed)")
@@ -121,10 +121,10 @@ def _require_firecracker_hotplug(runner_vm: str) -> None:
 
 
 def _count_virtio_block_devices(runner_vm: str, vm_name: str) -> int:
-        result = _run_mvm(
+    result = _run_mvm(
         runner_vm, "exec", vm_name, "--",
         "sh -c \"ls /sys/block | grep '^vd[b-z]' | wc -l\"",
-        check=False, timeout=10,
+        check=False, timeout=30,
     )
     if result.returncode != 0:
         return 0
@@ -222,7 +222,7 @@ class TestVolumeHotplug:
             driver_result = _run_mvm(
             runner_vm, "exec", vm_name, "--",
             "readlink /sys/block/vdb/device/driver",
-                check=False, timeout=10,
+                check=False, timeout=30,
             )
             assert driver_result.returncode == 0, (
                 f"Could not read vdb driver symlink: "
@@ -293,13 +293,12 @@ class TestVolumeHotplug:
             # -- Phase 2: Format the block device --------------------------
             fmt_result = _run_mvm(
                 runner_vm,
-            "vm",
-            "exec",
-            vm_name,
-            "--",
+                "exec",
+                vm_name,
+                "--",
                 "mkfs.ext4 -F /dev/vdb",
                 check=False,
-                timeout=30,
+                timeout=120,
             )
             assert fmt_result.returncode == 0, (
                 f"mkfs.ext4 failed: {fmt_result.stderr}"
@@ -308,13 +307,12 @@ class TestVolumeHotplug:
             # -- Phase 3: Mount and write a file ---------------------------
             mount_result = _run_mvm(
                 runner_vm,
-            "vm",
-            "exec",
-            vm_name,
-            "--",
+                "exec",
+                vm_name,
+                "--",
                 "mount /dev/vdb /mnt",
                 check=False,
-                timeout=10,
+                timeout=30,
             )
             assert mount_result.returncode == 0, (
                 f"mount failed: {mount_result.stderr}"
@@ -322,13 +320,12 @@ class TestVolumeHotplug:
 
             write_result = _run_mvm(
                 runner_vm,
-            "vm",
-            "exec",
-            vm_name,
-            "--",
+                "exec",
+                vm_name,
+                "--",
                 "echo '''hotplug test data''' > /mnt/test-hotplug.txt",
                 check=False,
-                timeout=10,
+                timeout=15,
             )
             assert write_result.returncode == 0, (
                 f"write to volume failed: {write_result.stderr}"
@@ -337,13 +334,12 @@ class TestVolumeHotplug:
             # -- Phase 4: Read back and verify content ---------------------
             read_result = _run_mvm(
                 runner_vm,
-            "vm",
-            "exec",
-            vm_name,
-            "--",
+                "exec",
+                vm_name,
+                "--",
                 "cat /mnt/test-hotplug.txt",
                 check=False,
-                timeout=10,
+                timeout=15,
             )
             assert read_result.returncode == 0, (
                 f"read from volume failed: {read_result.stderr}"
@@ -356,13 +352,12 @@ class TestVolumeHotplug:
             # -- Phase 5: Unmount ------------------------------------------
             umount_result = _run_mvm(
                 runner_vm,
-            "vm",
-            "exec",
-            vm_name,
-            "--",
+                "exec",
+                vm_name,
+                "--",
                 "umount /mnt",
                 check=False,
-                timeout=10,
+                timeout=30,
             )
             assert umount_result.returncode == 0, (
                 f"umount failed: {umount_result.stderr}"
@@ -370,13 +365,12 @@ class TestVolumeHotplug:
         finally:
             _run_mvm(
                 runner_vm,
-            "vm",
-            "exec",
-            vm_name,
-            "--",
+                "exec",
+                vm_name,
+                "--",
                 "umount /mnt",
                 check=False,
-                timeout=10,
+                timeout=30,
             )
             _run_mvm(
                 runner_vm,

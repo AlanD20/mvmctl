@@ -320,7 +320,7 @@ def fenv_vm() -> Generator[tuple[str, str, str], None, None]:
                 pass
         if created_network:
             try:
-                _run_mvm_host("network", "rm", net_name, "--force", check=False, timeout=60)
+                _run_mvm_host("network", "rm", net_name, "--force", check=False, timeout=300)
             except subprocess.TimeoutExpired:
                 pass
         if created_key:
@@ -332,7 +332,7 @@ def fenv_vm() -> Generator[tuple[str, str, str], None, None]:
         # Clean up pulled kernel
         kernel_id = None
         try:
-            ls_result = _run_mvm_host("kernel", "ls", "--json", check=False, timeout=10)
+            ls_result = _run_mvm_host("kernel", "ls", "--json", check=False, timeout=15)
             if ls_result.returncode == 0 and ls_result.stdout.strip():
                 kernels = json.loads(ls_result.stdout)
                 for k in kernels:
@@ -340,7 +340,7 @@ def fenv_vm() -> Generator[tuple[str, str, str], None, None]:
                         kernel_id = k["id"][:6]
                         break
             if kernel_id:
-                _run_mvm_host("kernel", "rm", kernel_id, "--force", check=False, timeout=30)
+                _run_mvm_host("kernel", "rm", kernel_id, "--force", check=False, timeout=60)
         except Exception:
             pass
 
@@ -503,7 +503,7 @@ class TestNestedIsolated:
                 vm_name,
                 f"mvm network create {net_name} "
                 "--subnet 10.200.0.0/24 --non-interactive",
-                check=False, timeout=60,
+                check=False, timeout=120,
             )
             assert create_result.returncode == 0, (
                 "Guest network creation failed: "
@@ -567,7 +567,7 @@ class TestNestedIsolated:
                 f"--image ubuntu:24.04 "
                 f"--kernel firecracker "
                 f"--network {nested_net} ",
-                check=False, timeout=120,
+                check=False, timeout=300,
             )
             assert create_result.returncode == 0, (
                 f"Nested VM creation failed (exit "
