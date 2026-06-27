@@ -108,6 +108,9 @@ var OverridableDefaults = map[string]map[string]any{
 		"console_pid_filename":    "console.pid",
 		"vsock_filename":          "vsock.sock",
 	},
+	"defaults.volume": {
+		"cache_type": "Unsafe",
+	},
 	"defaults.cloudinit": {
 		"iso_name":                 "cloud-init.iso",
 		"nocloud_port_range_start": 8000,

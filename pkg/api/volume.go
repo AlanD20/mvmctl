@@ -44,6 +44,13 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 	if err != nil {
 		return nil, err
 	}
+
+	// Resolve cache type: explicit flag takes precedence, then config default.
+	cacheType := resolved.CacheType
+	if cacheType == "" {
+		cacheType, _ = op.Services.Config.GetString(ctx, "defaults.volume", "cache_type")
+	}
+
 	timestamp := time.Now().Format(time.RFC3339)
 	// Generate ID matching The HashGenerator.volume(name, timestamp) exactly
 	volumeID := crypto.VolumeID(resolved.Name, timestamp)
@@ -54,6 +61,7 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 		Format:      resolved.Format,
 		IsReadOnly:  resolved.IsReadOnly,
 		IsShareable: resolved.IsShareable,
+		CacheType:   cacheType,
 		Path:        resolved.Path,
 		Status:      model.VolumeStatusAvailable,
 		CreatedAt:   timestamp,
@@ -286,7 +294,7 @@ func (op *Operation) VolumeAttach(
 			PathOnHost:   vol.Path,
 			IsRootDevice: false,
 			IsReadOnly:   vol.IsReadOnly,
-			CacheType:    "Unsafe",
+			CacheType:    vol.CacheType,
 			IOEngine:     "Sync",
 		}); err != nil {
 			return errs.New(

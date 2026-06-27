@@ -35,6 +35,7 @@ type VolumeItem struct {
 	UpdatedAt   string       `json:"updated_at"      db:"updated_at"`
 	IsReadOnly  bool         `json:"is_read_only"    db:"is_read_only"`
 	IsShareable bool         `json:"is_shareable"    db:"is_shareable"`
+	CacheType   string       `json:"cache_type"      db:"cache_type"`
 
 	// Resolved relations
 	VMs []*VMItem `json:"vms,omitempty"`
