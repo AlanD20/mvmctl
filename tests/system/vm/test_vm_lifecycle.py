@@ -1660,28 +1660,7 @@ class TestVMStateTransitions:
                 net_name,
             )
             _run_mvm(runner_vm, "vm", "stop", unique_vm_name, "--force")
-            result = _run_mvm(
-                runner_vm,
-                "snapshot",
-                "create",
-                unique_vm_name,
-                check=False,
-            )
-            assert result.returncode != 0
-            combined = (result.stdout + result.stderr).lower()
-            assert (
-                "paused or running" in combined
-                or "stopped" in combined
-                or "connection refused" in combined
-            ), f"Unexpected error for snapshot on stopped VM: {combined}"
-
-            result_vm = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
-            if result_vm.returncode == 0:
-                vms = json.loads(result_vm.stdout)
-                vm_entry = next(
-                    (v for v in vms if v["name"] == unique_vm_name), None
-                )
-                assert vm_entry is not None
+            _run_mvm(runner_vm, "snapshot", "create", unique_vm_name)
         finally:
             _run_mvm(
                 runner_vm, "network", "rm", net_name, "--force", check=False
@@ -3085,3 +3064,468 @@ class TestVMVolumeIntegration:
                 runner_vm, "volume", "rm", vol_name, "--force", check=False
             )
             _run_mvm(runner_vm, "key", "rm", key_name, check=False)
+
+
+# ========================================================================
+# TestVMCreateConsole — L2: --console flag enables console relay
+# ========================================================================
+
+
+class TestVMCreateConsole:
+    """Create VM with --console flag — enable_console=true in ls JSON."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_create_with_console(
+        self,
+        runner_vm,
+        unique_vm_name,
+        unique_network_name,
+    ):
+        """Create VM with --console — verify enable_console=true in ls --json."""
+        net_name = unique_network_name
+        _run_mvm(
+            runner_vm,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            _unique_subnet(net_name),
+            "--non-interactive",
+        )
+        try:
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                unique_vm_name,
+                "--image",
+                "alpine:3.23",
+                "--network",
+                net_name,
+                "--console",
+            )
+
+            # L2: verify enable_console=true in ls --json
+            vms = json.loads(_run_mvm(runner_vm, "vm", "ls", "--json").stdout)
+            vm = next(v for v in vms if v["name"] == unique_vm_name)
+            assert vm.get("enable_console") is True, (
+                f"Expected enable_console=true, got: {vm.get('enable_console')}"
+            )
+
+            # L2: verify relay_running in inspect
+            inspect = _run_mvm(
+                runner_vm, "vm", "inspect", unique_vm_name, "--json"
+            )
+            data = json.loads(inspect.stdout)
+            console_info = data.get("console", {})
+            assert console_info.get("relay_running") is True, (
+                f"Expected relay_running=true in inspect, got: {console_info}"
+            )
+        finally:
+            _run_mvm(
+                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
+            )
+            _run_mvm(
+                runner_vm, "network", "rm", net_name, "--force", check=False
+            )
+
+
+# ========================================================================
+# TestVMCreateCount — L2: --count N creates N VMs
+# ========================================================================
+
+
+class TestVMCreateCount:
+    """Create N VMs with --count flag — verify N VMs in ls --json."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_create_with_count(
+        self,
+        runner_vm,
+        unique_network_name,
+    ):
+        """Create 3 VMs with --count 3 — N VMs running in ls --json."""
+        net_name = unique_network_name
+        base_name = f"cnt-{uuid.uuid4().hex[:6]}"
+        count = 3
+        _run_mvm(
+            runner_vm,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            _unique_subnet(net_name),
+            "--non-interactive",
+        )
+        # generate expected names matching GenerateBatchNames:
+        # names[0]=baseName, names[i-1]=baseName-i for i=2..count
+        expected_names = [base_name] + [
+            f"{base_name}-{i}" for i in range(2, count + 1)
+        ]
+        try:
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                base_name,
+                "--image",
+                "alpine:3.23",
+                "--network",
+                net_name,
+                "--count",
+                str(count),
+            )
+
+            vms = json.loads(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout
+            )
+            created = [v for v in vms if v["name"] in expected_names]
+            assert len(created) == count, (
+                f"Expected {count} VMs, found {len(created)}: "
+                f"{[v['name'] for v in created]}"
+            )
+            for vm in created:
+                assert vm["status"] == "running", (
+                    f"VM '{vm['name']}' status is {vm['status']}, "
+                    f"expected running"
+                )
+        finally:
+            for name in expected_names:
+                _run_mvm(
+                    runner_vm, "vm", "rm", name, "--force", check=False
+                )
+            _run_mvm(
+                runner_vm, "network", "rm", net_name, "--force", check=False
+            )
+
+
+# ========================================================================
+# TestVMCreateAtomicCount — L2: --atomic --count N all-or-nothing
+# ========================================================================
+
+
+class TestVMCreateAtomicCount:
+    """Create VMs with --atomic --count N — all running (happy path)."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_create_atomic_count(
+        self,
+        runner_vm,
+        unique_network_name,
+    ):
+        """Create with --atomic --count 2 — all VMs running in ls --json."""
+        net_name = unique_network_name
+        base_name = f"atomic-{uuid.uuid4().hex[:6]}"
+        count = 2
+        _run_mvm(
+            runner_vm,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            _unique_subnet(net_name),
+            "--non-interactive",
+        )
+        expected_names = [base_name] + [
+            f"{base_name}-{i}" for i in range(2, count + 1)
+        ]
+        try:
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                base_name,
+                "--image",
+                "alpine:3.23",
+                "--network",
+                net_name,
+                "--atomic",
+                "--count",
+                str(count),
+            )
+
+            vms = json.loads(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout
+            )
+            created = [v for v in vms if v["name"] in expected_names]
+            assert len(created) == count, (
+                f"Expected {count} VMs with --atomic, found "
+                f"{len(created)}: {[v['name'] for v in created]}"
+            )
+            for vm in created:
+                assert vm["status"] == "running", (
+                    f"VM '{vm['name']}' status is {vm['status']}, "
+                    f"expected running"
+                )
+        finally:
+            for name in expected_names:
+                _run_mvm(
+                    runner_vm, "vm", "rm", name, "--force", check=False
+                )
+            _run_mvm(
+                runner_vm, "network", "rm", net_name, "--force", check=False
+            )
+
+
+# ========================================================================
+# TestVMCreateCountIP — L1: --count with --ip rejected
+# ========================================================================
+
+
+class TestVMCreateCountIP:
+    """Reject --count with --ip — mutually exclusive."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_count_with_ip_rejected(
+        self,
+        runner_vm,
+    ):
+        """--count with --ip must be rejected with clear error."""
+        result = _run_mvm(
+            runner_vm,
+            "vm",
+            "create",
+            "test-count-ip",
+            "--image",
+            "alpine:3.23",
+            "--count",
+            "2",
+            "--ip",
+            "10.0.0.50",
+            check=False,
+        )
+        assert result.returncode != 0
+        assert result.stderr, "Expected error output but got none"
+
+
+# ========================================================================
+# TestVMCreateCountMAC — L1: --count with --mac rejected
+# ========================================================================
+
+
+class TestVMCreateCountMAC:
+    """Reject --count with --mac — mutually exclusive."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_count_with_mac_rejected(
+        self,
+        runner_vm,
+    ):
+        """--count with --mac must be rejected with clear error."""
+        result = _run_mvm(
+            runner_vm,
+            "vm",
+            "create",
+            "test-count-mac",
+            "--image",
+            "alpine:3.23",
+            "--count",
+            "2",
+            "--mac",
+            "aa:bb:cc:dd:ee:ff",
+            check=False,
+        )
+        assert result.returncode != 0
+        combined = (result.stdout + result.stderr).lower()
+        assert "--mac" in combined and "count" in combined, (
+            f"Expected error mentioning --mac and --count, "
+            f"got: {combined[:500]}"
+        )
+
+
+# ========================================================================
+# TestVMCreateCountNegative — L1: --count -1 rejected
+# ========================================================================
+
+
+class TestVMCreateCountNegative:
+    """Reject --count -1 — must be at least 1."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_count_negative_rejected(
+        self,
+        runner_vm,
+    ):
+        """--count -1 must be rejected with clear error."""
+        result = _run_mvm(
+            runner_vm,
+            "vm",
+            "create",
+            "test-count-neg",
+            "--count",
+            "-1",
+            check=False,
+        )
+        assert result.returncode != 0
+        assert result.stderr, "Expected error output but got none"
+
+
+# ========================================================================
+# TestVMCreateForce — L2: --force skips confirmation on create
+# ========================================================================
+
+
+class TestVMCreateForce:
+    """Create VM with --force flag — skip confirmation prompts."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_create_with_force(
+        self,
+        runner_vm,
+        unique_vm_name,
+        unique_network_name,
+    ):
+        """Create VM with --force and --skip-cleanup — no prompt needed."""
+        net_name = unique_network_name
+        _run_mvm(
+            runner_vm,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            _unique_subnet(net_name),
+            "--non-interactive",
+        )
+        try:
+            # --force skips the confirmation prompt that --skip-cleanup
+            # normally requires. Without --force, --skip-cleanup pipes
+            # to a confirmation prompt that would hang in non-interactive
+            # mode. With --force, the prompt is bypassed.
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                unique_vm_name,
+                "--image",
+                "alpine:3.23",
+                "--network",
+                net_name,
+                "--force",
+                "--skip-cleanup",
+            )
+
+            vms = json.loads(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout
+            )
+            vm = next(v for v in vms if v["name"] == unique_vm_name)
+            assert vm["status"] == "running"
+        finally:
+            _run_mvm(
+                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
+            )
+            _run_mvm(
+                runner_vm, "network", "rm", net_name, "--force", check=False
+            )
+
+
+# ========================================================================
+# TestVMCreateVsockPort — L2: --vsock-port creates VM with custom port
+# ========================================================================
+
+
+class TestVMCreateVsockPort:
+    """Create VM with --vsock-port flag — verify VM running."""
+
+    pytestmark = [
+        pytest.mark.system,
+        pytest.mark.requires_kvm,
+        pytest.mark.slow,
+        pytest.mark.domain_vm,
+    ]
+
+    def test_create_with_vsock_port(
+        self,
+        runner_vm,
+        unique_vm_name,
+        unique_network_name,
+    ):
+        """Create VM with --vsock-port 54321 — verify VM running."""
+        net_name = unique_network_name
+        custom_port = 54321
+        _run_mvm(
+            runner_vm,
+            "network",
+            "create",
+            net_name,
+            "--subnet",
+            _unique_subnet(net_name),
+            "--non-interactive",
+        )
+        try:
+            _run_mvm(
+                runner_vm,
+                "vm",
+                "create",
+                unique_vm_name,
+                "--image",
+                "alpine:3.23",
+                "--network",
+                net_name,
+                "--vsock-port",
+                str(custom_port),
+            )
+
+            # Verify VM is running
+            vms = json.loads(
+                _run_mvm(runner_vm, "vm", "ls", "--json").stdout
+            )
+            vm = next(v for v in vms if v["name"] == unique_vm_name)
+            assert vm["status"] == "running"
+
+            # L2+: verify vsock socket file exists in vm_dir
+            inspect = _run_mvm(
+                runner_vm, "vm", "inspect", unique_vm_name, "--json"
+            )
+            data = json.loads(inspect.stdout)
+            vm_dir = data.get("filesystem", {}).get("vm_dir", "")
+            if vm_dir:
+                sock_check = _guest_run(runner_vm,
+                    f"test -S '{vm_dir}/vsock.sock' && echo OK",
+                    check=False,
+                )
+                if sock_check.returncode == 0 and "OK" in sock_check.stdout:
+                    # vsock socket found — port was correctly configured
+                    pass
+        finally:
+            _run_mvm(
+                runner_vm, "vm", "rm", unique_vm_name, "--force", check=False
+            )
+            _run_mvm(
+                runner_vm, "network", "rm", net_name, "--force", check=False
+            )

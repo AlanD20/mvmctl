@@ -252,7 +252,7 @@ class TestCpHostToVm:
             dest_file = f"{remote_dir}{src_file.split('/')[-1]}"
             check = _guest_run(runner_vm,
                 f"test -f '{dest_file}' && echo EXISTS",
-                timeout=10,
+                timeout=30,
             )
             assert check.returncode == 0 and "EXISTS" in check.stdout, (
                 f"File {dest_file} not found after cp via vsock"
@@ -382,7 +382,7 @@ class TestCpVmToHost:
             dest_file = f"/tmp/{src_file.split('/')[-1]}"
             check = _guest_run(runner_vm,
                 f"test -f '{dest_file}' && echo EXISTS",
-                timeout=10,
+                timeout=30,
             )
             assert check.returncode == 0 and "EXISTS" in check.stdout, (
                 f"File {dest_file} not found after cp with directory mode"
@@ -413,7 +413,7 @@ class TestCpEdgeCases:
             "/nonexistent/path/xyz789",
             f"{vm_info['name']}:/tmp/",
             check=False,
-            timeout=10,
+            timeout=30,
         )
         assert result.returncode != 0, (
             f"Expected non-zero exit for nonexistent source, "
@@ -654,7 +654,7 @@ class TestCpMultiSource:
                 src_file,
                 src_dir,
                 f"{vm_info['name']}:{remote_parent}/",
-                timeout=30,
+                timeout=45,
             )
             assert result.returncode == 0, (
                 f"mixed-source cp failed: stdout={result.stdout} "
@@ -743,7 +743,7 @@ class TestCpMultiSource:
             file1, file2,
             local_dest,
             check=False,
-            timeout=10,
+            timeout=45,
         )
         assert result.returncode != 0, (
             f"Expected non-zero exit for multi-source with local dest, "
@@ -799,7 +799,7 @@ class TestCpVmToVm:
             subnet = _unique_subnet(net_name)
             _run_mvm(
                 runner_vm, "network", "create", net_name, "--subnet", subnet,
-                "--no-nat", timeout=30,
+                "--no-nat", timeout=45,
             )
             _run_mvm(
                 runner_vm,

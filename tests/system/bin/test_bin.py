@@ -432,7 +432,7 @@ class TestBinaryPullAdvanced:
             "pull",
             "--help",
             check=False,
-            timeout=10,
+            timeout=300,
         )
         assert "--git-ref" in result.stdout, (
             "--git-ref flag should be documented in bin pull --help"

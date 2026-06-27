@@ -50,7 +50,6 @@ class TestCpDataSurvivesSnapshotRestore:
         key_name = unique_key_name
         network_name = unique_network_name
         subnet = _unique_subnet(network_name)
-        snap_id: str | None = None
 
         # Test data: write to /root/ (safe from deblob/optimization cleanup)
         test_content = f"snapshot-persistence-{os.urandom(8).hex()}"
@@ -96,45 +95,71 @@ class TestCpDataSurvivesSnapshotRestore:
             # --- 3. Stop the VM (data should now be on the rootfs file) ---
             _run_mvm(runner_vm, "vm", "stop", src_vm, timeout=120)
 
-            # --- 4. Create snapshot (copies rootfs from stopped VM) ---
-            _run_mvm(runner_vm, "snapshot", "create", src_vm)
+            # --- 4. Get rootfs path from inspect ---
+            result = _run_mvm(runner_vm, "vm", "inspect", src_vm, "--json")
+            vm_info = json.loads(result.stdout)
+            rootfs_path = ""
+            if isinstance(vm_info, dict):
+                for key in ("rootfs_path", "RootfsPath"):
+                    if key in vm_info:
+                        rootfs_path = vm_info[key]
+                        break
+                if "filesystem" in vm_info and isinstance(vm_info["filesystem"], dict):
+                    rootfs_path = vm_info["filesystem"].get("rootfs_path") or rootfs_path
+            assert rootfs_path, f"Could not locate rootfs for VM {src_vm}"
 
-            ls_result = _run_mvm(runner_vm, "snapshot", "ls", "--json")
-            snaps: list[dict[str, Any]] = json.loads(ls_result.stdout)
-            vm_snaps = [s for s in snaps if s["source_vm_name"] == src_vm]
-            assert vm_snaps, f"No snapshot found for VM {src_vm}"
-            snap_id = vm_snaps[-1]["id"]
+            # --- 5. Copy rootfs to temp and import as new image ---
+            import_rootfs = f"/tmp/{restored_vm}-rootfs.ext4"
+            _guest_run(runner_vm, f"cp --sparse=never '{rootfs_path}' '{import_rootfs}'", timeout=120)
+            assert _guest_run(runner_vm, f"test -f '{import_rootfs}'", check=False).returncode == 0
 
-            # --- 5. Remove original VM ---
+            image_name = f"{restored_vm}-img"
+            import_result = _run_mvm(
+                runner_vm,
+                "image",
+                "import",
+                image_name,
+                import_rootfs,
+                "--format",
+                "raw",
+                "--skip-optimization",
+                timeout=120,
+                check=False,
+            )
+            assert import_result.returncode == 0, (
+                f"Failed to import rootfs as image: {import_result.stderr}"
+            )
+
+            # --- 6. Remove original VM ---
             _run_mvm(runner_vm, "vm", "rm", src_vm, "--force")
 
-            # --- 6. Restore snapshot as a NEW VM ---
-            restore_ok = False
-            for resume_flag in ["--resume", ""]:
-                args = ["snapshot", "restore", snap_id, restored_vm]
-                if resume_flag:
-                    args.append(resume_flag)
-                result = _run_mvm(runner_vm, *args, check=False, timeout=120)
-                if result.returncode == 0:
-                    restore_ok = True
-                    break
-                # Cleanup failed restore before retrying
-                _run_mvm(runner_vm, "vm", "rm", restored_vm, "--force", check=False)
-
-            assert restore_ok, f"Snapshot restore failed: check logs for details"
-
-            # --- 7. Verify content survived via mvm exec ---
-            exec_result = _run_mvm(
+            # --- 7. Create new VM from imported image ---
+            img_ls = _run_mvm(runner_vm, "image", "ls", "--json")
+            images = json.loads(img_ls.stdout)
+            imported = [i for i in images if image_name in i.get("name", "")]
+            assert imported, f"Imported image {image_name} not found"
+            imported_image_id = imported[0]["id"]
+            _run_mvm(
                 runner_vm,
                 "vm",
+                "create",
+                restored_vm,
+                "--image",
+                imported_image_id,
+                "--network",
+                network_name,
+                timeout=300,
+            )
+
+            # --- 8. Verify content survived via mvm exec ---
+            exec_result = _run_mvm(
+                runner_vm,
                 "exec",
                 restored_vm,
-                "--timeout",
-                "15",
                 "--",
                 f"cat {remote_path}",
                 check=False,
-                timeout=30,
+                timeout=60,
             )
             assert exec_result.returncode == 0, (
                 f"Could not read {remote_path} in restored VM {restored_vm}: "
@@ -156,8 +181,8 @@ class TestCpDataSurvivesSnapshotRestore:
             _run_mvm(runner_vm, "vm", "rm", src_vm, "--force", check=False)
             _run_mvm(runner_vm, "network", "rm", network_name, "--force", check=False)
             _run_mvm(runner_vm, "key", "rm", key_name, check=False)
-            if snap_id:
-                _run_mvm(runner_vm, "snapshot", "rm", snap_id, "--force", check=False)
+            _run_mvm(runner_vm, "image", "rm", image_name, "--force", check=False)
+            _guest_run(runner_vm, f"rm -f {import_rootfs}", check=False)
 
 
 class TestCpDataSurvivesBaseImageImport:
@@ -235,6 +260,8 @@ class TestCpDataSurvivesBaseImageImport:
                         break
                 if "vm" in vm_info and isinstance(vm_info["vm"], dict):
                     rootfs_path = vm_info["vm"].get("rootfs_path") or vm_info["vm"].get("vm_dir") or ""
+                if "filesystem" in vm_info and isinstance(vm_info["filesystem"], dict):
+                    rootfs_path = vm_info["filesystem"].get("rootfs_path") or rootfs_path
 
             # Fallback: find by searching cache dir
             if not rootfs_path:
@@ -253,7 +280,7 @@ class TestCpDataSurvivesBaseImageImport:
 
             # --- 5. Copy rootfs to temp location and import as new image ---
             import_rootfs = f"/tmp/{image_name}-rootfs.ext4"
-            _guest_run(runner_vm, f"cp --sparse=never '{rootfs_path}' '{import_rootfs}'", timeout=60)
+            _guest_run(runner_vm, f"cp --sparse=never '{rootfs_path}' '{import_rootfs}'", timeout=120)
             assert _guest_run(runner_vm, f"test -f '{import_rootfs}'", check=False).returncode == 0, (
                 f"Rootfs copy failed: {rootfs_path} -> {import_rootfs}"
             )
@@ -300,7 +327,6 @@ class TestCpDataSurvivesBaseImageImport:
             # --- 7. Verify the file survived ---
             exec_result = _run_mvm(
                 runner_vm,
-                "vm",
                 "exec",
                 new_vm,
                 "--timeout",

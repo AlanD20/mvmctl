@@ -276,6 +276,46 @@ class TestKeyLifecycle:
         finally:
             _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
 
+    def test_key_import_shows_fingerprint(self, runner_vm, unique_key_name):
+        """Import an existing SSH public key and verify fingerprint appears in ls --json.
+
+        ssh-keygen runs inside the test VM. Runs a key import, then checks
+        the ls --json output for a non-empty fingerprint field on the imported key.
+        """
+        key_tag = f"key-fp-{uuid.uuid4().hex[:6]}"
+        key_path = f"/tmp/{key_tag}"
+        _guest_run(
+            runner_vm,
+            f"ssh-keygen -t ed25519 -f {key_path} -N '' -q",
+        )
+        try:
+            result = _run_mvm(
+                runner_vm,
+                "key",
+                "import",
+                unique_key_name,
+                f"{key_path}.pub",
+            )
+            assert result.returncode == 0
+
+            result = _run_mvm(runner_vm, "key", "ls", "--json")
+            data = json.loads(result.stdout)
+            key_entry = next(
+                (k for k in data if k["name"] == unique_key_name), None
+            )
+            assert key_entry is not None, (
+                f"Imported key '{unique_key_name}' not found in listing"
+            )
+            assert "fingerprint" in key_entry, (
+                f"Expected 'fingerprint' field in key entry, "
+                f"got keys: {list(key_entry.keys())}"
+            )
+            assert key_entry["fingerprint"], (
+                f"Expected non-empty fingerprint, got '{key_entry['fingerprint']}'"
+            )
+        finally:
+            _run_mvm(runner_vm, "key", "rm", unique_key_name, check=False)
+
     def test_key_delete(self, runner_vm, unique_key_name):
         """Create and delete key, verify it's gone via ls --json."""
         _run_mvm(
