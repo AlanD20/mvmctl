@@ -362,3 +362,62 @@ func TestRegisterBuiltinConstraints(t *testing.T) {
 		assert.Empty(t, unreg2)
 	})
 }
+
+// --- TransformFunc ---
+
+func TestNormalizeCacheType(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   any
+		want    any
+		wantErr bool
+	}{
+		{name: "unsafe_lowercase", input: "unsafe", want: "Unsafe", wantErr: false},
+		{name: "unsafe_uppercase", input: "UNSAFE", want: "Unsafe", wantErr: false},
+		{name: "unsafe_mixed", input: "Unsafe", want: "Unsafe", wantErr: false},
+		{name: "writeback_lowercase", input: "writeback", want: "Writeback", wantErr: false},
+		{name: "writeback_uppercase", input: "WRITEBACK", want: "Writeback", wantErr: false},
+		{name: "writeback_mixed", input: "Writeback", want: "Writeback", wantErr: false},
+		{name: "empty_string", input: "", want: "Unsafe", wantErr: false},
+		{name: "invalid_value", input: "invalid", want: nil, wantErr: true},
+		{name: "nil_value", input: nil, want: "Unsafe", wantErr: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := config.NormalizeCacheType("cache_type", tc.input)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestRegisterTransform(t *testing.T) {
+	t.Parallel()
+	r := config.NewConstraintRegistry()
+
+	fn := func(key string, value any) (any, error) { return value, nil }
+	r.RegisterTransform("defaults.volume", []string{"cache_type"}, fn)
+
+	got := r.GetTransforms("defaults.volume", "cache_type")
+	require.Len(t, got, 1, "expected 1 transform for cache_type")
+
+	unreg := r.GetTransforms("defaults.volume", "nonexistent")
+	assert.Empty(t, unreg, "expected no transforms for unregistered key")
+}
+
+func TestRegisterTransformMultipleKeys(t *testing.T) {
+	t.Parallel()
+	r := config.NewConstraintRegistry()
+
+	fn := func(key string, value any) (any, error) { return value, nil }
+	r.RegisterTransform("defaults.volume", []string{"cache_type", "other_key"}, fn)
+
+	got1 := r.GetTransforms("defaults.volume", "cache_type")
+	got2 := r.GetTransforms("defaults.volume", "other_key")
+	assert.Len(t, got1, 1)
+	assert.Len(t, got2, 1)
+}

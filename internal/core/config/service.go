@@ -39,6 +39,14 @@ func (s *Service) Set(ctx context.Context, category, key string, value any) erro
 		return err
 	}
 
+	// Apply transforms (normalization, formatting, etc.)
+	for _, transform := range s.constraints.GetTransforms(category, key) {
+		coerced, err = transform(key, coerced)
+		if err != nil {
+			return err
+		}
+	}
+
 	if err := s.checkConstraints(ctx, category, key, coerced); err != nil {
 		return err
 	}

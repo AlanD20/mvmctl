@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"mvmctl/internal/cli/common"
+	infraptr "mvmctl/internal/infra/ptr"
 	"mvmctl/internal/lib/model"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
@@ -89,6 +90,7 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	var format string
 	var readOnly bool
 	var shareable bool
+	var writeback bool
 
 	cmd := &cobra.Command{
 		Use:   "create [name] [size]",
@@ -110,12 +112,17 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 			if cmd.Flags().Changed("shareable") || cmd.Flags().Changed("s") {
 				shareablePtr = &shareable
 			}
+			var writebackPtr *bool
+			if cmd.Flags().Changed("writeback") {
+				writebackPtr = infraptr.Ptr(writeback)
+			}
 			input := inputs.VolumeCreateInput{
 				Name:      name,
 				Size:      sizeStr,
 				Format:    formatPtr,
 				ReadOnly:  readOnlyPtr,
 				Shareable: shareablePtr,
+				Writeback: writebackPtr,
 			}
 			vol, err := volumeAPI.VolumeCreate(cmd.Context(), input)
 			if err != nil {
@@ -147,6 +154,9 @@ func newVolumeCreateCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	cmd.Flags().BoolVar(&readOnly, "ro", false, "Mount volume as read-only (default: writable)")
 	cmd.Flags().
 		BoolVarP(&shareable, "shareable", "s", false, "Allow volume to be attached to multiple VMs (requires --read-only)")
+	cmd.Flags().BoolVar(&writeback, "writeback", false,
+		"Use writeback cache mode for this volume (safe: guest fsync honored). "+
+			"Default is 'Unsafe' (fast, ignores guest fsync).")
 	return cmd
 }
 

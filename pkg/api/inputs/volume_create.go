@@ -18,6 +18,7 @@ type VolumeCreateInput struct {
 	Format    *string `json:"format,omitempty"`
 	ReadOnly  *bool   `json:"read_only,omitempty"`
 	Shareable *bool   `json:"shareable,omitempty"`
+	Writeback *bool   `json:"writeback,omitempty"`
 }
 
 // ResolvedVolumeCreateInput specifies resolved volume create input.
@@ -28,6 +29,7 @@ type ResolvedVolumeCreateInput struct {
 	Path        string
 	IsReadOnly  bool
 	IsShareable bool
+	CacheType   string
 }
 
 // Validate checks that the volume create input is valid.
@@ -78,6 +80,14 @@ func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository)
 	if i.Shareable != nil {
 		isShareable = *i.Shareable
 	}
+	var cacheType string
+	if i.Writeback != nil {
+		if *i.Writeback {
+			cacheType = model.CacheTypeWriteback
+		} else {
+			cacheType = model.CacheTypeUnsafe
+		}
+	}
 	result := &ResolvedVolumeCreateInput{
 		Name:        i.Name,
 		SizeBytes:   sizeBytes,
@@ -85,6 +95,7 @@ func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository)
 		Path:        path,
 		IsReadOnly:  isReadOnly,
 		IsShareable: isShareable,
+		CacheType:   cacheType,
 	}
 	// Validate volume name rules
 	if err := validators.VolumeName(result.Name); err != nil {
