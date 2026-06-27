@@ -13,6 +13,7 @@ type API interface {
 	BinaryAPI
 	HostAPI
 	ConsoleAPI
+	ExecAPI
 	SSHAPI
 	ConfigAPI
 	CacheAPI

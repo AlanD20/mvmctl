@@ -22,8 +22,8 @@ type Step interface {
 	// Name returns a unique identifier for this step within the pipeline.
 	Name() string
 
-	// Type returns the resource type for this step (e.g. "networks", "vms").
-	// This is the plural Registry key used to classify the step.
+	// Type returns the resource type for this step (e.g. "network", "vm").
+	// This is the singular step type identifier (e.g. "network", "vm", "key").
 	Type() string
 
 	// Dependencies returns the names of steps that must complete before

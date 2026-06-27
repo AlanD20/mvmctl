@@ -21,10 +21,10 @@ pytestmark = [
 def _exec_cmd(
     runner_vm: str, vm_name: str, command: str
 ):
-    """Run a command inside a nested VM via vsock (``mvm vm exec``)."""
+    """Run a command inside a nested VM via vsock (``mvm exec``)."""
     return _run_mvm(
         runner_vm,
-        "vm", "exec", vm_name,
+        "exec", vm_name,
         "--user", "runner",
         "--timeout", "30",
         "--",
@@ -829,7 +829,7 @@ class TestCpVmToVm:
             test_content = f"vm-to-vm test {uuid.uuid4().hex}"
             src_file = f"/tmp/vm_to_vm_test_{uuid.uuid4().hex[:8]}.txt"
             _run_mvm(
-                runner_vm, "vm", "exec", vm_a, "--user", "root", "--timeout", "30", "--",
+                runner_vm, "exec", vm_a, "--user", "root", "--timeout", "30", "--",
                 f"echo '{test_content}' > '{src_file}'",
                 check=False, timeout=45,
             )
@@ -848,14 +848,14 @@ class TestCpVmToVm:
 
             dest_file = f"{dest_path}{src_file.split('/')[-1]}"
             check = _run_mvm(
-                runner_vm, "vm", "exec", vm_b, "--user", "root", "--timeout", "30", "--",
+                runner_vm, "exec", vm_b, "--user", "root", "--timeout", "30", "--",
                 f"test -f '{dest_file}' && echo VM2_EXISTS",
                 check=False, timeout=45,
             )
             assert check.returncode == 0 and "VM2_EXISTS" in check.stdout
 
             content_check = _run_mvm(
-                runner_vm, "vm", "exec", vm_b, "--user", "root", "--timeout", "30", "--",
+                runner_vm, "exec", vm_b, "--user", "root", "--timeout", "30", "--",
                 f"cat '{dest_file}'",
                 check=False, timeout=45,
             )

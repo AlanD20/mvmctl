@@ -123,7 +123,7 @@ class TestCpDataSurvivesSnapshotRestore:
 
             assert restore_ok, f"Snapshot restore failed: check logs for details"
 
-            # --- 7. Verify content survived via mvm vm exec ---
+            # --- 7. Verify content survived via mvm exec ---
             exec_result = _run_mvm(
                 runner_vm,
                 "vm",

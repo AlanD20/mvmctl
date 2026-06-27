@@ -27,8 +27,8 @@ type ExecStep struct {
 	name     string
 	deps     []string
 	specHash string
-	input    inputs.VMExecInput
-	op       api.VMAPI
+	input    inputs.ExecInput
+	op       api.ExecAPI
 	saved    *ExecState
 	meta     model.ResourceMeta
 }
@@ -57,7 +57,7 @@ func (s *ExecStep) Apply(
 		return fmt.Errorf("%s: empty command", s.Name())
 	}
 
-	result, err := s.op.VMExec(ctx, s.input)
+	result, err := s.op.Exec(ctx, s.input)
 	if err != nil {
 		return err
 	}
@@ -124,7 +124,7 @@ func newExecStepFromSpec(
 	if err != nil {
 		return nil, err
 	}
-	var input inputs.VMExecInput
+	var input inputs.ExecInput
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		return nil, err
 	}
