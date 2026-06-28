@@ -79,7 +79,7 @@ if err := syscall.Fdatasync(int(f.Fd())); err != nil {
 
 For a VM rootfs image, the data must survive a crash. The file's mtime doesn't matter — `fdatasync()` is the correct, faster choice.
 
-### 5. cp --sparse=always (Loopmount Partition Extraction) ✅ IMPLEMENTED
+### 4. cp --sparse=always (Loopmount Partition Extraction) ✅ IMPLEMENTED
 
 The loopmount provisioner backend's `ExtractPartition()` uses `cp --sparse=always` when the input image is already a raw filesystem (detected via `blkid`). This copies the raw filesystem image while preserving holes, with a fallback to `dd conv=sparse,fsync`.
 

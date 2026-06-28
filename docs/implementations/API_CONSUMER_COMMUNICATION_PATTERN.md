@@ -1,22 +1,20 @@
-> **STATUS: Current — fully accurate.** All patterns (OperationResult, BatchResult, NeedsInteraction, Progress) match the current codebase at `pkg/errs/result.go` and `internal/infra/event/event.go`.
->
-> **Last verified:** 2026-06-27
-
 # API-to-Consumer Communication Pattern
 
-## Overview
+## Problem
 
-A standardized protocol for the mvmctl API layer to communicate **what happened**, **what is happening**, and **what is needed** to any consumer (CLI, TUI, GUI, headless) — without the API doing any I/O or output formatting itself.
+The mvmctl API layer needs to communicate three distinct types of information to any consumer (CLI, TUI, GUI, headless) without the API doing any I/O or output formatting itself: what happened after an operation, what is happening during an operation, and what is needed from the user mid-operation. Before this pattern, consumers had no standard way to distinguish success vs skip vs error, show progress for long-running operations, or handle mid-operation interruptions like sudo escalation.
 
-## The Three Concerns
+## Architecture
 
-| Concern | Timing | Mechanism | What Problem It Solves |
-|---------|--------|-----------|----------------------|
+Three independent mechanisms compose together to cover the full communication space:
+
+| Concern | Timing | Mechanism | Problem Solved |
+|---------|--------|-----------|----------------|
 | **"What happened?"** | After operation | `OperationResult` / `BatchResult` | CLI needs to know success vs skip vs error per item |
 | **"What is happening now?"** | During operation | `event.Progress` via optional callback | Rich UIs need spinner/progress bar updates |
 | **"I need something from you"** | Mid-operation interruption | `NeedsInteraction` as error return | Sudo escalation, confirmations, user input |
 
-These are **independent concerns** that compose together. A single API method can use all three:
+These are independent concerns that compose together. A single API method can use all three:
 
 ```go
 for {
@@ -33,7 +31,6 @@ for {
     if err != nil {
         return err
     }
-    // vms is the result — render it
     renderResult(vms)
     break
 }
@@ -46,8 +43,6 @@ for {
 Tells the consumer what happened **after** an operation completes. Used for every public API mutation method.
 
 ### Status Model
-
-Five statuses, distinguished by whether the consumer should be happy, informed, or alarmed:
 
 | Status | Meaning | Consumer Action | Example |
 |--------|---------|-----------------|---------|
@@ -100,9 +95,9 @@ func (b *BatchResult) Errors() []OperationResult { /* returns all failed items *
 func (b *BatchResult) HasErrors() bool           { /* true if any item has error/failure status */ }
 ```
 
-### Go-Specific: DomainError with Code + Class
+### DomainError with Code + Class
 
-Go has a parallel error path via `DomainError`:
+Parallel error path via `DomainError` in `pkg/errs/domain.go`:
 
 ```go
 type DomainError struct {
@@ -126,11 +121,11 @@ const (
 )
 ```
 
-Every `Code` maps to a `Class` via `codeClassMap` in `pkg/errs/domain.go`. The CLI's `common.HandleErrors()` dispatches on `Class` for rendering.
+Every `Code` maps to a `Class` via `codeClassMap`. The CLI's `common.HandleErrors()` dispatches on `Class` for rendering.
 
 ### Code Convention
 
-The `code` field MUST follow the convention `<domain>.<noun>.<verb>`:
+The `code` field follows the convention `<domain>.<noun>.<verb>`:
 
 ```go
 result := errs.OperationResult{
@@ -149,19 +144,17 @@ All `code` values are defined as constants in `pkg/errs/codes.go`.
 
 Optional callback for **long-running or multi-phase operations** so consumers can show spinners, progress bars, or phase transitions.
 
-### Which Operations Get Progress
+### Operations with Progress
 
-| Operation | Has progress? | Mechanism |
-|-----------|--------------|-----------|
-| `Operation.VMCreate` | Yes | `onProgress` callback — network → rootfs → firecracker |
-| `Operation.VMRemove` | No | Single subprocess call, fast (< 1s) |
-| `Operation.VMStart/Stop` | No | Single subprocess call, fast |
-| `Operation.CacheInitAll` | Yes | `onProgress` callback — appliance build phase |
-| `Operation.BinaryPull` | Yes | `FormatProgress` bridge (download has known content-length) |
-| `Operation.HostInit` | No | Individual fast subprocess calls |
-| `Operation.NetworkCreate` | No | Fast, single subprocess |
-| `Operation.ImagePull` | Yes | `onProgress` callback — extract → optimize phases |
-| `Operation.KernelPull` | Yes | `onProgress` callback — download → build phases |
+| Operation | Progress mechanism |
+|-----------|-------------------|
+| `Operation.VMCreate` | `onProgress` callback — network → rootfs → firecracker |
+| `Operation.CacheInitAll` | `onProgress` callback — appliance build phase |
+| `Operation.BinaryPull` | `FormatProgress` bridge (download has known content-length) |
+| `Operation.ImagePull` | `onProgress` callback — extract → optimize phases |
+| `Operation.KernelPull` | `onProgress` callback — download → build phases |
+
+Fast operations (VMRemove, VMStart/Stop, NetworkCreate, HostInit, etc.) do not emit progress.
 
 ### Struct Definition
 
@@ -195,30 +188,15 @@ func emitProgress(onProgress event.OnProgressCallback, phase, status, msg string
 }
 ```
 
-Or directly for structured progress:
-
-```go
-// pkg/api/image.go
-onProgress(event.Progress{Phase: "download", Status: "running", Message: "Downloading image..."})
-```
-
 ### Download Progress Bridge
 
-For downloads with known content-length, `FormatProgress` bridges byte-level progress to phase-level events:
+`FormatProgress` in `internal/infra/event/event.go` bridges byte-level download progress to phase-level events:
 
 ```go
-// internal/infra/event/event.go
 func FormatProgress(onProgress OnProgressCallback) OnDownloadCallback {
     // Returns an OnDownloadCallback that throttles and formats
     // byte-level progress into event.Progress events
 }
-```
-
-Usage:
-
-```go
-progressBridge := event.FormatProgress(onProgress)
-// Pass progressBridge to download function
 ```
 
 ### Consumer Patterns
@@ -247,9 +225,7 @@ vms, err := op.VMCreate(ctx, input, nil) // zero overhead
 
 When the API detects it cannot proceed without user input (sudo, confirmation, choice), it returns a `NeedsInteraction` error **instead of** a normal result. The consumer handles the interaction and calls the same API method again.
 
-### Why an error, not a return value
-
-In Go, `NeedsInteraction` implements the `error` interface so it flows naturally through `(T, error)` return types. The consumer checks via `errors.As()`. This is NOT an unexpected error — it is recognized control flow.
+`NeedsInteraction` implements the `error` interface so it flows naturally through `(T, error)` return types. The consumer checks via `errors.As()`.
 
 ### Struct Definition
 
@@ -267,8 +243,6 @@ func (n *NeedsInteraction) Error() string { return n.Message }
 ```
 
 ### Consumer Flow (Retry Pattern)
-
-Check with `errors.As()` — there is no `status` field on `NeedsInteraction`:
 
 ```go
 // internal/cli/init.go
@@ -289,17 +263,6 @@ The `dispatch` method switches on `interaction.Code`:
 - `"binary.confirm_download"` → prompts user, sets download version
 - `"guestfs.confirm_enable"` → prompts user, sets guestfs flag
 
-**In host init:**
-```go
-rawResult, err := op.HostInit(ctx, nil)
-if err != nil {
-    var ni *errs.NeedsInteraction
-    if errors.As(err, &ni) {
-        // Handle sudo escalation: prompt, re-exec with sudo
-    }
-}
-```
-
 ---
 
 ## Consumer Cheat Sheet
@@ -313,9 +276,7 @@ if err != nil {
 
 ---
 
-## Implementation Status
-
-All domains are converted. The following table shows which patterns each API operation uses.
+## Per-Domain API Operation Return Types
 
 | Domain | File | Mutation methods return | Progress via |
 |--------|------|------------------------|--------------|
@@ -353,7 +314,7 @@ All domains are converted. The following table shows which patterns each API ope
 
 ### Batch operations
 
-For operations that act on multiple items (remove several VMs, remove several kernels), use `BatchResult`:
+For operations that act on multiple items, use `BatchResult`:
 
 ```go
 results := make([]errs.OperationResult, 0)
@@ -378,28 +339,10 @@ for _, vm := range vms {
 return &errs.BatchResult{Items: results}
 ```
 
-### CLI consumer pattern for batches
-
-```go
-removeResult := op.VMRemove(ctx, inputs.VMInput{Identifiers: identifiers, Force: force})
-if removeResult.HasErrors() {
-    for _, r := range removeResult.Items {
-        if r.IsOK() {
-            common.Cli.Success(r.Message)
-        } else {
-            common.Cli.Error(r.Message)
-        }
-    }
-    return fmt.Errorf("one or more removals failed")
-}
-common.Cli.Success(fmt.Sprintf("Removed: %s", strings.Join(names, ", ")))
-```
-
 ### Do NOT
 
 - Do NOT `fmt.Println()` in the API layer — return `OperationResult` with a `Message`
 - Do NOT return `NeedsInteraction` for errors — use `DomainError` with appropriate `Code`
-- Do NOT use `NeedsInteraction` for errors — use `OperationResult{Status: "error"/"failure"}`
 - Do NOT pass `onProgress` for fast/simple operations — it adds unnecessary complexity
 
 ### Code Convention Summary
@@ -407,8 +350,7 @@ common.Cli.Success(fmt.Sprintf("Removed: %s", strings.Join(names, ", ")))
 - All mutation methods return `OperationResult` or `BatchResult` (or `(T, error)` with `DomainError`)
 - Read methods (get, list, inspect) return data directly or return `error`
 - All `OperationResult` use a `code` following `<domain>.<noun>.<verb>` convention
-- The `code` IS the audit log event name — no separate naming
-- `onProgress` is always `event.OnProgressCallback` (which is `func(event.Progress)`) — optional, nil means no progress
+- `onProgress` is always `event.OnProgressCallback`
 - Every emitted `Progress` uses the direct `if onProgress == nil { return }` check pattern (or `emitProgress` helper)
 
 ## Appendix: Master Code Table

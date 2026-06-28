@@ -3,6 +3,13 @@
 **Status:** Active
 **Date:** 2026-06-19
 
+**Table of Contents**
+
+- [Context](#context)
+- [Decision](#decision)
+- [Consequences](#consequences)
+- [Considered Options](#considered-options)
+
 ## Context
 
 Every public-facing domain in `pkg/api/inputs/` followed a three-struct pattern:

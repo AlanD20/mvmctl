@@ -5,6 +5,12 @@
 
 The SSH key domain is the only entity in the project that supports multiple simultaneous defaults. All other domains (image, kernel, binary, network) enforce a singleton default — setting a new default atomically clears the old one.
 
+**Table of Contents**
+
+- [What is different](#what-is-different)
+- [Why](#why)
+- [Repository methods](#repository-methods)
+
 ## What is different
 
 | Aspect | Other domains | Key domain |

@@ -5,14 +5,10 @@
 This is the **execution plan** for running the mvmctl system test suite and
 qualifying a release.
 
-The **recommended (and only actively maintained) workflow** is the
-**orchestrator-based** approach: `scripts/run-system-tests.py` creates per-domain
-VMs from a custom base image, runs tests in parallel, and destroys VMs.
-Documented in detail in [system-test-architecture.md](../system-test-architecture.md).
-
-> **Legacy snapshot-based** (`rc-env.yaml` + `mvm snapshot restore`) is
-> **deprecated** and documented only in `docs/development/SYSTEM_TEST_SETUP.md`.
-> Do not use it for new test sessions.
+The only workflow is the **orchestrator-based** approach:
+`scripts/run-system-tests.py` creates per-domain VMs from a custom base image,
+runs tests in parallel, and destroys VMs. Documented in detail in
+[system-test-architecture.md](../system-test-architecture.md).
 
 An AI agent can start from a fresh clone and follow this guide linearly
 without cross-referencing other docs.
@@ -37,26 +33,29 @@ environment variables, and flags are intentional.
 ## 1. Prerequisite Check
 
 **Two layers of prerequisites:**
-- **Host** (your machine): Must be able to run Firecracker and build mvm.
-- **rc-vm** (outer VM): Automatically provisioned by `rc-env.yaml` — you don't
-  need to install anything on the host beyond what's listed below.
+- **Host** (your machine): Must be able to run Firecracker, build mvm, and
+  communicate with runner VMs.
+- **Runner VMs**: Automatically created and provisioned by the orchestrator
+  (`scripts/run-system-tests.py`) from a custom base image — you don't need to
+  install anything inside them.
 
-### rc-vm is a Full Bare-Metal Host
+### Runner VMs Are Full Bare-Metal Hosts
 
-rc-vm is **not a limited container or lightweight sandbox**. It is a full
-Firecracker microVM with `nested_virt: true` and **direct KVM access** to the
-host CPU virtualization extensions. From the perspective of mvm and the system
-tests, rc-vm behaves **identically to bare metal**:
+Each runner VM is **not a limited container or lightweight sandbox**. It is a
+full Firecracker microVM with `nested_virt: true` and **direct KVM access** to
+the host CPU virtualization extensions. From the perspective of mvm and the
+system tests, each runner VM behaves **identically to bare metal**:
 
-- `/dev/kvm` is fully accessible — mvm creates and runs nested VMs inside rc-vm
-- `iptables`/`nftables` work — rc-vm has its own network stack with NAT
+- `/dev/kvm` is fully accessible — mvm creates and runs nested VMs inside the
+  runner VM
+- `iptables`/`nftables` work — each runner VM has its own network stack with NAT
 - `sudo`, `docker`, kernel module loading all work
 - The 7.0.11 kernel has everything compiled in (no modules needed)
-- Pipewire, tmpfs, overlayfs, btrfs, ext4 — all standard Linux facilities
+- tmpfs, overlayfs, btrfs, ext4 — all standard Linux facilities
 
 The only limitations are those imposed by the kernel itself (which is a standard
 upstream build with common features enabled). If Linux supports it and the
-kernel is compiled with it, rc-vm supports it.
+kernel is compiled with it, runner VMs support it.
 
 ### Special Case: libguestfs / Supermin
 
@@ -67,9 +66,9 @@ guestfish uses `supermin` to build a small appliance VM. Supermin needs:
 2. Kernel modules in `/lib/modules/<version>/`
 3. The kernel file must be world-readable (supermin runs as the `runner` user, not root)
 
-The rc-vm runs a custom kernel (7.0.11) loaded externally by Firecracker — there
-is no kernel package installed and `/boot/` is empty. Supermin cannot build its
-appliance without a kernel.
+The runner VMs run a custom kernel (7.0.11) loaded externally by Firecracker —
+there is no kernel package installed and `/boot/` is empty. Supermin cannot build
+its appliance without a kernel.
 
 **Fix:** Install `linux-image-kvm` (a lightweight kernel package for KVM guests)
 and fix permissions:
@@ -79,9 +78,9 @@ apt-get install -y linux-image-kvm
 chmod 644 /boot/vmlinuz-*
 ```
 
-The `rc-env.yaml` has a dedicated `install guestfs kernel` SSH step that does
-this. The dpkg trigger error about `initramfs-tools` / `packagekit.service` is
-cosmetic (can't run in a Firecracker VM) — the kernel files are placed correctly
+The base image builder (`_build_base_image` in `run-system-tests.py`) installs
+this package. The dpkg trigger error about `initramfs-tools` / `packagekit.service`
+is cosmetic (can't run in a Firecracker VM) — the kernel files are placed correctly
 and guestfish works.
 
 **Verify guestfish works:**
@@ -97,7 +96,7 @@ This issue is separate from the supermin kernel problem documented above.
 ### 1.1 Host: Hardware
 
 ```bash
-# KVM (required — host runs Firecracker for rc-vm)
+# KVM (required — host runs Firecracker for runner VMs)
 test -c /dev/kvm && echo "KVM: OK" || echo "KVM: MISSING"
 
 # Virtualization extensions
@@ -316,12 +315,15 @@ The runner prints a summary at the end:
   12 passed  0 failed  0 skipped  (3m12s)
 ```
 
-Results are saved to `.reports/system-test-results-latest.txt`:
+Results are printed to stdout at the end of the run:
 
 ```
-test_network.py: PASS
-test_nftables.py: PASS
+  [PASS] Tier 1 cli
+  [PASS] Tier 1 config
+  [FAIL] Tier 2 vm_lifecycle
 ```
+
+The runner prints a per-domain summary with PASS/FAIL status for each domain.
 
 ### 5.1 Pass / Fail / Skip Rules
 
@@ -408,5 +410,5 @@ Each `.log` file must show zero failures. Any failure blocks the release.
 - `docs/RC_QA.md` — Release gates and checklist (human-facing)
 - `docs/RELEASE.md` — Full release process (tagging, CI, AUR)
 - `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` — How to write L0/L1/L2 tests
-- `docs/development/SYSTEM_TEST_SETUP.md` — Legacy snapshot-based setup (deprecated)
+- `docs/development/SYSTEM_TEST_SETUP.md` — Host preparation and one-time setup
 - `.opencode/agent/qa-engineer.md` — QA agent instructions

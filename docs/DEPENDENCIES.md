@@ -1,26 +1,27 @@
 # mvmctl Dependencies
 
-This document lists all external binary and system-level dependencies required for `mvmctl`
-to function correctly, organized by necessity: what you always need vs what's only needed
-for specific features or chosen backends.
+All external binary and system-level dependencies required for mvmctl to function correctly, organized by necessity.
 
 ## Table of Contents
 
-- [Required (Every Install)](#a-required-every-install)
-- [Firewall Backend (Choose One)](#b-firewall-backend-choose-one)
-- [Image & Storage](#c-image--storage)
-- [Cloud-Init](#d-cloud-init)
-- [Image Provisioning Backend (Choose One)](#e-image-provisioning-backend-choose-one)
-- [Kernel Build (Optional)](#f-kernel-build-optional)
-- [Host System Requirements](#g-host-system-requirements)
-- [Command Dependency Map](#h-command-dependency-map)
+- [A. Required (Every Install)](#a-required-every-install)
+- [B. Firewall Backend (Choose One)](#b-firewall-backend-choose-one)
+- [C. Image & Storage](#c-image-storage)
+- [D. Cloud-Init](#d-cloud-init)
+- [E. Image Provisioning Backend (Choose One)](#e-image-provisioning-backend-choose-one)
+  - [E1. Loop-Mount (Default)](#e1-loop-mount-default)
+  - [E2. libguestfs (Alternative)](#e2-libguestfs-alternative)
+- [F. Kernel Build (Optional)](#f-kernel-build-optional)
+- [G. Host System Requirements](#g-host-system-requirements)
+  - [Kernel Modules](#kernel-modules)
+  - [Hardware](#hardware)
+- [H. Command Dependency Map](#h-command-dependency-map)
 
 ---
 
 ## A. Required (Every Install)
 
-These binaries must be present on the host for basic mvmctl operation. The `mvm init` wizard
-checks for them automatically.
+These binaries must be present on the host for basic mvmctl operation. The `mvm init` wizard checks for them automatically.
 
 | Binary | Purpose | Debian/Ubuntu | Arch |
 |--------|---------|---------------|------|
@@ -35,23 +36,22 @@ checks for them automatically.
 | `sysctl` | Enabling IP forwarding | `procps` | `procps-ng` |
 | `ssh-keygen` | Generating SSH keypairs for microVMs | `openssh-client` | `openssh` |
 | `tar` | Extracting rootfs from tarballs | `tar` | `tar` |
-| `iptables` or `nft` | Firewall rule management (one of the two) | `iptables` or `nftables` | `iptables` or `nftables` |
+| `iptables` or `nft` | Firewall rule management | `iptables` or `nftables` | `iptables` or `nftables` |
 
-**Go toolchain:** The `mvm` binary is a single compiled Go binary. No runtime dependencies.
+**Go toolchain:** The `mvm` binary is a single compiled Go binary. No runtime dependencies beyond the system packages listed.
 
 ---
 
 ## B. Firewall Backend (Choose One)
 
-mvmctl supports two firewall backends for NAT and forwarding rules. **nftables is the
-default** (`settings.firewall_backend: "nftables"`). Only one backend needs to be installed (see §A).
+mvmctl supports two firewall backends for NAT and forwarding rules. **nftables is the default** (`settings.firewall_backend: "nftables"`). Only one backend needs to be installed.
 
-| Backend | Binary | Debian/Ubuntu | Arch | Notes |
-|---------|--------|---------------|------|-------|
-| **nftables** (default) | `nft` | `nftables` | `nftables` | Modern, atomic batch, no legacy split |
-| iptables | `iptables` | `iptables` | `iptables` | Legacy; also needs `iptables-save` + `iptables-restore` for rule persistence |
+| Backend | Binary | Debian/Ubuntu | Arch |
+|---------|--------|---------------|------|
+| **nftables** (default) | `nft` | `nftables` | `nftables` |
+| **iptables** | `iptables` | `iptables` | `iptables` |
 
-**Switch backends at any time:**
+**Switch backends:**
 ```bash
 mvm config set settings firewall_backend nftables   # default
 mvm config set settings firewall_backend iptables
@@ -62,7 +62,7 @@ mvm network sync                                    # reload rules
 
 ## C. Image & Storage
 
-These are required for pulling, importing, and converting VM images.
+Required for pulling, importing, and converting VM images.
 
 | Binary | Purpose | Debian/Ubuntu | Arch |
 |--------|---------|---------------|------|
@@ -74,9 +74,9 @@ These are required for pulling, importing, and converting VM images.
 | `truncate` | Creating sparse files for new images | `coreutils` | `coreutils` |
 | `dd` | Raw block-level file copy | `coreutils` | `coreutils` |
 | `du` | Disk usage reporting | `coreutils` | `coreutils` |
-| `chmod` | File permission changes (used across all domains) | `coreutils` | `coreutils` |
+| `chmod` | File permission changes | `coreutils` | `coreutils` |
 | `unsquashfs` | Extracting SquashFS images | `squashfs-tools` | `squashfs-tools` |
-| `dumpe2fs` | Inspecting ext4 filesystem metadata (block count, inode count) | `e2fsprogs` | `e2fsprogs` |
+| `dumpe2fs` | Inspecting ext4 filesystem metadata | `e2fsprogs` | `e2fsprogs` |
 
 ---
 
@@ -84,25 +84,20 @@ These are required for pulling, importing, and converting VM images.
 
 Required when using cloud-init to configure VMs.
 
-| Binary | Purpose | Debian/Ubuntu | Arch | Required For |
-|--------|---------|---------------|------|-------------|
-| `cloud-localds` | Creating nocloud seed ISOs | `cloud-image-utils` | `cloud-utils` | ISO mode (`--cloud-init-mode iso`) |
-| `ssh-keygen` | Generating SSH keypairs | `openssh-client` | `openssh` | Already listed in §A |
+| Binary | Purpose | Debian/Ubuntu | Arch |
+|--------|---------|---------------|------|
+| `cloud-localds` | Creating nocloud seed ISOs | `cloud-image-utils` | `cloud-utils` |
+| `ssh-keygen` | Generating SSH keypairs | `openssh-client` | `openssh` (see §A) |
 
 ---
 
 ## E. Image Provisioning Backend (Choose One)
 
-Both `mvm vm create` (rootfs provisioning) and `mvm image pull`/`mvm image import`
-(image optimization — shrink, deblob, OS detection) use the same provisioning backend.
-**Loop-mount is the default and recommended** (~2.3s end-to-end creation, ~2.9s to VM-ready per benchmark data).
+Both `mvm vm create` (rootfs provisioning) and `mvm image pull`/`mvm image import` (image optimization — shrink, deblob, OS detection) use the same provisioning backend. **Loop-mount is the default and recommended**.
 
 ### E1. Loop-Mount (Default)
 
-The `mvm run provision` subcommand is a hidden CLI command built into the same `mvm` binary.
-It uses system tools directly — no runtime dependencies.
-
-**Installed by:** The `mvm` binary is a compiled Go binary — the `run provision` subcommand is built in at compile time. No extraction step needed.
+The `mvm run provision` subcommand is a built-in CLI subcommand compiled into the `mvm` binary. It uses system tools directly — no extra runtime dependencies beyond system packages.
 
 | Binary | Purpose | Debian/Ubuntu | Arch |
 |--------|---------|---------------|------|
@@ -118,19 +113,15 @@ It uses system tools directly — no runtime dependencies.
 | `fstrim` | Discard unused blocks before shrink | `util-linux` | `util-linux` |
 | `chroot` | Running commands inside the mounted rootfs | `coreutils` | `coreutils` |
 
-> Most binaries (`util-linux`, `e2fsprogs`) are already required by the image pipeline (§C).
-> Only `btrfs-progs` is unique to this path (and only needed for btrfs images).
+> Most binaries (`util-linux`, `e2fsprogs`) are already required by the image pipeline (§C). Only `btrfs-progs` is unique to this path (and only needed for btrfs images).
 
 ### E2. libguestfs (Alternative)
 
-libguestfs provides filesystem-agnostic rootfs access via a QEMU appliance.
-Slower (~3.9s creation, ~5.8s to SSH-ready per earlier benchmark data) but more capable OS detection. GuestFS is not tested in the current benchmark suite since loop-mount is the default. Enable with:
+libguestfs provides filesystem-agnostic rootfs access via a QEMU appliance. Enable with:
 
 ```bash
 mvm config set settings guestfs_enabled true
 ```
-
-**System packages:**
 
 | Distro | Command |
 |--------|---------|
@@ -138,14 +129,13 @@ mvm config set settings guestfs_enabled true
 | RHEL/Fedora | `sudo dnf install libguestfs libguestfs-tools supermin` |
 | Arch | `sudo pacman -S libguestfs supermin` |
 
-> **Note:** The codebase uses the `guestfish` CLI tool as a subprocess — no cgo or Go bindings required.
-> `mvm init` checks for the `guestfish` binary and configures the sudoers entry for it automatically.
+The codebase uses the `guestfish` CLI tool as a subprocess — no cgo or Go bindings required. `mvm init` checks for the `guestfish` binary and configures the sudoers entry for it automatically.
 
 ---
 
 ## F. Kernel Build (Optional)
 
-Only needed for `mvm kernel pull --type official --clean-build`.
+Only needed for `mvm kernel pull --type official --clean-build` (building the official kernel from source).
 
 | Binary | Debian/Ubuntu | Arch |
 |--------|---------------|------|
@@ -176,7 +166,7 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 | `kvm_intel` or `kvm_amd` | Vendor-specific KVM extensions |
 | `tun` | TAP networking |
 | `bridge` | Bridge networking (loaded on demand) |
-| `vhost_vsock` | Checked during host detection (loaded on demand) |
+| `vhost_vsock` | Vsock device support (loaded on demand) |
 | `nft_chain_nat` | nftables NAT support (loaded on demand) |
 
 ### Hardware
@@ -198,19 +188,21 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 | `mvm image pull` | `qemu-img` (may trigger conversion), `fakeroot` (tar-rootfs) |
 | `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `fakeroot` (tar-rootfs), `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `dd` |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
-| `mvm kernel pull --type firecracker` | (internal logic — download only) |
-| `mvm key` | `create` → `ssh-keygen`; `import/ls/rm/inspect/export/default` → internal only |
-| `mvm bin` | `pull/ls/rm/default` → internal only (downloads from GitHub API) |
+| `mvm kernel pull --type firecracker` | Download only (no build tools) |
+| `mvm key create` | `ssh-keygen` |
+| `mvm key import/ls/rm/inspect/export/default` | Internal only |
+| `mvm bin pull/ls/rm/default` | Internal only (downloads from GitHub API) |
 | `mvm vm create` | `firecracker`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
 | `mvm vm start/stop/reboot/pause/resume` | `firecracker`, `ip`, `iptables`/`nft` |
 | `mvm vm rm` | `firecracker`, `ip`, `iptables`/`nft` |
-| `mvm snapshot create/restore` | internal (Firecracker API via Unix socket) |
-| `mvm volume attach` / `detach` | `firecracker` |
-| `mvm volume` | `ls/inspect` → internal; `create/rm/resize` → `qemu-img` |
-| `mvm kernel import/ls/rm/default/inspect` | internal only |
-| `mvm cache init/prune/clean` | internal (filesystem + DB operations) |
-| `mvm config get/set/reset/list` | internal (DB operations) |
-| `mvm logs` | internal (file read) |
-| `mvm console` | internal (Unix socket PTY relay) |
-| `mvm ssh` | User's SSH client |
+| `mvm snapshot create/restore` | Internal (Firecracker API via Unix socket) |
+| `mvm volume attach/detach` | `firecracker` |
+| `mvm volume create/rm/resize` | `qemu-img` |
+| `mvm volume ls/inspect` | Internal only |
+| `mvm kernel import/ls/rm/default/inspect` | Internal only |
+| `mvm cache init/prune/clean` | Internal (filesystem + DB operations) |
+| `mvm config get/set/reset/list` | Internal (DB operations) |
+| `mvm logs` | Internal (file read) |
+| `mvm console` | Internal (Unix socket PTY relay) |
+| `mvm ssh` | User's SSH client (`ssh` binary) |
 | `mvm init` | `sudo`, `groupadd`, `usermod`, `visudo` |

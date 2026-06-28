@@ -15,6 +15,31 @@ removed, or when test coverage changes.
 | ⏭️ Skip | Test defined but always skips (broken setup) |
 | **?** | Needs investigation — coverage unclear |
 
+## Table of Contents
+
+- [Root CLI](#root-cli)
+- [mvm init](#mvm-init)
+- [mvm config](#mvm-config)
+- [mvm network](#mvm-network)
+- [mvm vm](#mvm-vm)
+- [mvm exec](#mvm-exec)
+- [mvm snapshot](#mvm-snapshot-alias-ss)
+- [mvm volume](#mvm-volume)
+- [mvm key](#mvm-key)
+- [mvm image](#mvm-image)
+- [mvm kernel](#mvm-kernel)
+- [mvm bin](#mvm-bin)
+- [mvm ssh](#mvm-ssh)
+- [mvm console](#mvm-console)
+- [mvm logs](#mvm-logs)
+- [mvm host](#mvm-host)
+- [mvm cache](#mvm-cache)
+- [mvm cp](#mvm-cp)
+- [mvm env](#mvm-env)
+- [mvm run](#mvm-run-internal-service-subprocesses)
+- [mvm full-journeys](#mvm-full-journeys-end-to-end-workflows)
+- [Summary Statistics](#summary-statistics)
+
 ---
 
 ## Root CLI

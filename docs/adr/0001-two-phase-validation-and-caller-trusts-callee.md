@@ -6,6 +6,15 @@
 
 Validation is split into two phases by layer. The API layer handles structural validation (format, existence, cross-field). Core Service/Controller packages do not validate caller input — they execute, detect state, and guard invariants. The trade-off favors speed over defensive duplication.
 
+**Table of Contents**
+
+- [Context](#context)
+- [Decision](#decision)
+- [Implementation](#implementation)
+- [Considered Options](#considered-options)
+- [Consequences](#consequences)
+- [Related Decisions](#related-decisions)
+
 ## Context
 
 mvmctl is a speed-first CLI. Every redundant subprocess call in a defensive validation check adds 10-50ms of latency. Many of these checks duplicate what the operation naturally detects — calling a bridge existence check once to "validate" and again to branch execution.

@@ -6,6 +6,16 @@
 
 The project provides two independent provisioning backends for root filesystem operations (cloud-init injection, shrink, deblob, OS detection): **LoopMount** and **GuestFS**. These backends are **mutually exclusive** — a single VM or image operation uses exactly one backend, never a combination. The `guestfs_enabled` setting acts as a toggle selector, not a preference.
 
+**Table of Contents**
+
+- [Mutual Exclusion Rule](#mutual-exclusion-rule)
+- [Independence](#independence)
+- [No Mixing](#no-mixing)
+- [Why Not a Fallback Chain](#why-not-a-fallback-chain)
+- [Resolution at Startup](#resolution-at-startup)
+- [Performance Benchmark](#performance-benchmark)
+- [Related Decisions](#related-decisions)
+
 ## Mutual Exclusion Rule
 
 Only one backend is active for a given operation. The selection logic is:

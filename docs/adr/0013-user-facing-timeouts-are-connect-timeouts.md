@@ -4,6 +4,13 @@
 **Date:** 2026-06-25  
 **Deciders:** architect + user
 
+**Table of Contents**
+
+- [Context](#context)
+- [Decision](#decision)
+- [Considered Options](#considered-options)
+- [Implementation Notes](#implementation-notes)
+
 ## Context
 
 `mvm ssh --cmd` and `mvm exec --timeout` were interpreted as **absolute command-duration limits**. A command such as

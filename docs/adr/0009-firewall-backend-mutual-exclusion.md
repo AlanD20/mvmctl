@@ -5,6 +5,14 @@
 
 The project provides two independent firewall rule tracking backends: **nftables** (default) and **iptables** (legacy). These backends are **mutually exclusive** — a single session uses exactly one backend, never a combination. The `firewall_backend` setting acts as a toggle selector.
 
+**Table of Contents**
+
+- [Mutual Exclusion Rule](#mutual-exclusion-rule)
+- [Independence](#independence)
+- [No Mixing](#no-mixing)
+- [Why Default to nftables](#why-default-to-nftables)
+- [Related Decisions](#related-decisions)
+
 ## Mutual Exclusion Rule
 
 Only one backend is active for a given session. The caller resolves the `firewall_backend` setting from config and passes it as a `model.FirewallBackendType` to `NewFirewallTracker()`:

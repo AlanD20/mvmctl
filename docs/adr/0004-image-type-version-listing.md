@@ -6,6 +6,14 @@
 
 Images are moving from a flat id-based catalog (`ubuntu-24.04`, `alpine-3.21`) to a type+version model where users pull by image type and optionally select a version: `mvm image pull ubuntu --version 24.04`. This avoids hardcoding slug naming conventions across the CLI and enables dynamic discovery of available versions from upstream providers.
 
+**Table of Contents**
+
+- [What changed](#what-changed)
+- [Why Not Per-Provider Resolvers](#why-not-per-provider-resolvers)
+- [Considered alternatives](#considered-alternatives)
+- [Consequences](#consequences)
+- [Related Decisions](#related-decisions)
+
 ## What changed
 
 - `images.yaml` (`internal/assets/images.yaml`) was restructured from a flat `images:` list to a grouped `image_types:` array. Each type defines a `versions_url`, a `resolver` (currently `http-dir` or `firecracker-s3`), and options for parsing directory listings (`codename_mapping`, `version_prefix`, `skip_patterns`).
@@ -50,4 +58,4 @@ Initially we considered a separate resolver class per provider (e.g., `UbuntuStr
 
 ## Related Decisions
 
-- `internal/lib/version/resolver.go` — The `version.ParseSpec()` and `version.Resolve()` functions handle version parsing and matching for all domains. These are consumed by the image service's `ResolveVersion()` method (`internal/core/image/service.go`, line 1303).
+- `internal/lib/version/resolver.go` — The `version.ParseSpec()` and `version.Resolve()` functions handle version parsing and matching for all domains. These are consumed by the image service's `ResolveVersion()` method (`internal/core/image/service.go`, line 1311).

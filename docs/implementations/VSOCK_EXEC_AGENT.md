@@ -1,427 +1,221 @@
-> **STATUS: Implemented.** Describes embedding a Go guest agent into the single `mvm` binary for vsock-based command execution and interactive shells, bypassing SSH.
-
 # Vsock Exec Agent — `mvm exec`
 
 ## Problem
 
-Currently, running commands inside a VM requires SSH:
-- SSH needs the networking stack to be up (~1-2s after boot)
-- SSH needs `sshd` running inside the guest
-- SSH key injection adds ~200ms to pre-boot provisioning
-- No interactive shell access before SSH is ready
+Running commands inside a Firecracker microVM normally requires SSH, which has several limitations. SSH needs the networking stack to be up (~1-2s after boot), requires `sshd` running inside the guest, and adds ~200ms of key injection overhead. There is no way to run commands or get a shell before SSH is ready, and no way to do structured command execution with exit code reporting without SSH. The vsock exec agent solves this by embedding a lightweight Go binary into the VM rootfs that listens on a vsock port for command execution and PTY shell sessions.
 
-For the `mvm env` workflow, the `exec:` step type already runs post-boot commands via vsock. But there's a gap: **no way to run commands or get a shell the instant the VM boots**, and no way to do it without a network dependency.
-
-## Solution
-
-A **Go guest agent** embedded into the `mvm` binary via `go:embed`, injected into the rootfs by both provisioner backends at VM creation time, listening on a vsock port for command execution and PTY shell sessions.
-
-### Architecture
+## Architecture
 
 ```
 mvm exec my-vm -- ls -la /etc
        │
        ▼
 ┌──────────────────────────────────┐
-│  API layer (pkg/api/exec.go)      │
-│  op.Exec(ctx, input)              │
-│    ├── vsock.NewClient(item, probeTimeout) │
-│    │   ├── dial Firecracker UDS   │
-│    │   ├── CONNECT handshake      │
-│    │   └── JSON frame exchange    │
-│    │                               │
-│  op.VMCreate(ctx, input)          │
-│    ├── provcontent.BuildVsockAgentOps()│
-│    ├── vsock section in JSON cfg  │
-│    └── vsockRepo.Upsert()         │
+│  API layer (pkg/api/exec.go)     │
+│  op.Exec(ctx, input)             │
+│    └── vsock.NewClient(item,...) │
+│        └── dial Firecracker UDS  │
+│        └── CONNECT handshake     │
+│        └── JSON frame exchange   │
+│                                  │
+│  op.VMCreate(ctx, input)         │
+│    └── provcontent.BuildVsockAgentOps()│
+│    └── vsock section in JSON cfg │
+│    └── vsockRepo.Upsert()        │
 └──────────┬───────────────────────┘
            │ AF_VSOCK (Firecracker virtio-vsock device)
            ▼
 ┌──────────────────────────────────┐
-│  Guest: mvm-vsock-agent           │
-│  • Embedded Go binary             │
-│  • Injected by loop-mount/guestfs │
-│  • Runs as systemd service        │
-│  • Listens on vsock port 1024     │
-│  • JSON protocol:                 │
-│    - exec (streaming stdout/      │
-│      stderr frames)               │
-│    - exec-tty (PTY shell)         │
-│    - ping (heartbeat)             │
+│  Guest: mvm-vsock-agent          │
+│  • Embedded Go binary            │
+│  • Injected by loop-mount/guestfs│
+│  • Runs as systemd/OpenRC service│
+│  • Listens on vsock port 1024    │
+│  • JSON protocol:                │
+│    - exec (streaming stdout/     │
+│      stderr frames)              │
+│    - exec-tty (PTY shell)        │
+│    - ping (heartbeat)            │
+│    - version (agent version)     │
+│    - file-transfer (binary frame)│
 └──────────────────────────────────┘
 ```
 
-## Domain Structure
+## Entry point
 
-```
-internal/
-├── core/
-│   └── vsock/                    ← vsock domain
-│       ├── client.go             ← NewClient(item), Exec/Shell/Teardown, ensureAgent, upgradeAgent
-│       ├── file_transfer.go      ← FTCopyToVM, FTCopyFromVM, FTCopyVMToVM (binary frame protocol)
-│       ├── repository.go         ← GetByVMID, Upsert, DeleteByVMID
-│       ├── sqlite.go             ← SQLite implementation
-│       ├── resolver.go           ← GetByVMID for enrichment
-│       ├── service.go            ← Service: AllocateCID, PersistConfig (intra-domain orchestration)
-│       ├── agent.go              ← AgentBinary() wrapper (delegates to vsockagent)
-│       └── protocol.go           ← dial UDS, CONNECT, JSON framing (unexported)
-├── service/
-│   └── vsockagent/               ← guest agent binary + go:embed
-│       ├── agent.go              ← Agent struct, Run(), vsock listener, vsockConn with SHUT_RDWR
-│       ├── protocol.go           ← JSON frame types, read/write helpers
-│       ├── exec.go               ← exec handler with streamingWriter (io.Writer)
-│       ├── pty.go                ← exec-tty handler: PTY relay, exit detection, 5s kill timer
-│       ├── cmdlistener.go        ← vsock connection dispatch: exec/tty/ping/version/file-transfer
-│       ├── file_transfer.go      ← binary frame handler: handleFTPush, handleFTPull
-│       ├── build_amd64.go        ← //go:embed agent-linux-amd64.zst (amd64 build tag)
-│       ├── build_arm64.go        ← //go:embed agent-linux-arm64.zst (arm64 build tag)
-│       └── cmd/
-│           └── main.go           ← standalone entry point
-└── infra/
-    └── provcontent/
-        └── content.go            ← add BuildVsockAgentOps() builder method
-```
+The agent is embedded into the VM rootfs at creation time. During `op.VMCreate()`, the API layer calls `provcontent.BuildVsockAgentOps()` in `internal/infra/provcontent/content.go`, which produces five operations: the agent binary at `/usr/bin/mvm-vsock-agent`, an auth token at `/var/run/mvm-vsock-agent.token`, a systemd unit at `/etc/systemd/system/mvm-vsock-agent.service`, an OpenRC init script at `/etc/init.d/mvm-vsock-agent`, and a chroot command to enable the agent in the detected init system. Both provisioner backends (loop-mount and guestfs) consume the same operation types.
 
-## Archived Decisions (Grill Session)
+The agent starts automatically when the VM boots. `Agent.Run()` in `internal/service/vsockagent/agent.go` creates a raw AF_VSOCK socket on the configured port, binds with `VMADDR_CID_ANY`, listens, and accepts connections in a loop — dispatching each to `handleConnection()`.
 
-| Decision | Resolution |
-|---|---|
-| **Subprocess?** | No — vsock exec is ephemeral (connection lives as long as CLI command). No background process needed. Console relay is long-lived; vsock exec is not. |
-| **Agent requires vm domain changes?** | No — agent is just FileOp + ChrootOp injected via provisioner. Same path as SSH keys. |
-| **Naming** | `vsock.Client` not `vsock.Controller` — no entity lifecycle state transitions. Matches the concept: protocol-level client that dials UDS, CONNECT handshake, JSON framing. |
-| **Protocol location** | Internal to `internal/core/vsock/` — not in `internal/lib/`. No other domain needs to dial vsock. |
-| **Model types** | `model.VsockConfigItem` (DB record), `model.VsockConfig` (Firecracker JSON). Follows `Item` suffix convention for DB-persisted entities. |
-| **DB table** | `vm_vsock_config` with `FOREIGN KEY (vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE` as safety net. Explicit `DeleteByVMID` for error-handling control. |
-| **CID allocation** | Random from range 3–4294967295. Retry on DB collision (unique constraint). No allocator service needed. |
-| **Port** | Configurable at VM creation via `--vsock-port` flag. Default 1024. |
-| **UDS path** | `<vm_dir>/vsock.sock` — consistent with console's `<vm_dir>/relay.sock`. Absolute, explicit. |
-| **Enrichment** | 1:1 reverse relation on VM. `VMRelations["vsock"]` in enricher — `vm.id → vsock_config.vm_id`. Resolver method `get_by_vm_id`. |
-| **Teardown** | `vsock.Client.Teardown()` — delete stale socket. DB record deleted explicitly in API layer during VM removal, with CASCADE as fallback. |
-| **Lifecycle** | vsock domain has no hooks in vm domain. API layer orchestrates setup in VMCreate, cleanup in VMRemove. |
-| **Firecracker version gate** | Not needed — vsock requires Firecracker v1.0+. Minimum supported version in mvmctl is above that. |
-| **Agent arch** | Matches host build arch. Build-tagged files (`build_amd64.go`, `build_arm64.go`) embed zstd-compressed binaries. `AgentBinary()` decompresses once via `sync.Once`. Build script cross-compiles both. |
-| **FirecrackerClient location** | Stays in `internal/core/vm/` — NOT moved to `internal/lib/firecracker/`. vsock domain doesn't need the HTTP client. |
-| **Vsock device config** | Via JSON config file only — vsock section in `FirecrackerVMConfig`. No `PUT /vsock` API call. Firecracker creates the device at boot. |
-| **Auth token** | Random UUID generated at VM creation, stored in `VsockConfigItem.Token`. Agent accepts via flag (`-token`) or file (`/var/run/mvm-vsock-agent.token`). `exec`/`exec-tty` require token; `ping` does not. |
-| **Agent binaries in git?** | No — built by `scripts/build.sh` before main binary. Not committed to the repo. `go build ./cmd/mvm` alone will fail without a prior agent build. |
-| **Exec protocol** | Streaming: agent sends `"stdout"`/`"stderr"` frames as chunks arrive from pipes, final `"result"` on completion. Host reads in a loop with single `json.Decoder`. |
-| **Vsock close reliability** | `vsockConn.Close()` calls `shutdown(fd, SHUT_RDWR)` before `close(fd)`. Raw `close(fd)` on virtio-vsock may race with socket teardown and leave host-side UDS open. |
-| **Exit hang workaround** | Agent scans input for `exit`/`logout` + Enter and arms a 5s kill timer. If shell hasn't exited by then, SIGKILL forces cleanup. |
+`mvm exec` from the host triggers `op.Exec()` in `pkg/api/exec.go`, which creates a `vsock.Client` via `vsock.NewClient()`, dials the Firecracker vsock UDS, performs the CONNECT handshake, and exchanges JSON frames with the agent.
 
-## VM Creation Sequence
+## Happy path
 
-```
-op.VMCreate():
+### 1. Agent injection at VM creation
 
-  1. Build provision ops:
-     provcontent.BuildVsockAgentOps(agentBinary, port)
-       ├── FileOp: /usr/bin/mvm-vsock-agent (agent binary, mode 0755)
-       ├── FileOp: /etc/systemd/system/mvm-vsock-agent.service
-        ├── FileOp: /etc/init.d/mvm-vsock-agent (OpenRC init script)
-        └── ChrootOp: detect init system → enable agent
+`provcontent.BuildVsockAgentOps()` generates:
+- `FileOp` at `/usr/bin/mvm-vsock-agent` with the compressed agent binary (mode 0755)
+- `FileOp` at `/var/run/mvm-vsock-agent.token` with a random UUID auth token (mode 0600)
+- `FileOp` at `/etc/systemd/system/mvm-vsock-agent.service` — systemd unit:
+  ```ini
+  [Unit]
+  Description=MVM VSock Agent
+  DefaultDependencies=no
 
-  2. Run provisioner (loop-mount or guestfs — both consume the same Operation types)
+  [Service]
+  Type=simple
+  ExecStart=/usr/bin/mvm-vsock-agent -port <port>
+  Restart=always
+  RestartSec=2
 
-  3. Create Firecracker config JSON (includes vsock section in config file)
+  [Install]
+  WantedBy=sysinit.target
+  ```
+- `FileOp` at `/etc/init.d/mvm-vsock-agent` — OpenRC init script:
+  ```sh
+  #!/sbin/openrc-run
 
-  4. Spawn Firecracker process (JSON config includes vsock section —
-     Firecracker reads it at boot and creates the virtio-vsock device automatically)
+  description="MVM VSock Agent"
 
-  5. Persist vsock config:
-     vsockRepo.Upsert(ctx, VsockConfigItem{
-         VmID:     vm.ID,
-         GuestCID: randomCID,
-         UDSPath:  absUdsPath,
-         Port:     port,
-         Token:    crypto.UUIDV4(),
-     })
+  command=/usr/bin/mvm-vsock-agent
+  command_args="-port <port>"
+  pidfile=/var/run/mvm-vsock-agent.pid
+  command_background=true
 
-  6. InstanceStart (via controller.Start)
-```
+  depend() {
+      need localmount
+  }
+  ```
+- `ChrootOp` that detects the init system and enables the agent:
+  ```sh
+  if command -v systemctl >/dev/null 2>&1; then
+      ln -sf /etc/systemd/system/mvm-vsock-agent.service \
+          /etc/systemd/system/multi-user.target.wants/mvm-vsock-agent.service
+  elif rc-update >/dev/null 2>&1; then
+      rc-update add mvm-vsock-agent default
+  fi
+  ```
 
-### Build agent ops lives in `provcontent`
+The vsock device is configured via the Firecracker JSON config file (`model.VsockConfig` with `guest_cid` and `uds_path`), written to disk before Firecracker starts. The vsock config is persisted to the `vm_vsock_config` database table via `vsockRepo.Upsert()`.
 
-Added as a `Builder` method in `internal/infra/provcontent/content.go` — consumed by both loop-mount and guestfs backends:
+### 2. Agent startup inside the guest
 
-```go
-func (Builder) BuildVsockAgentOps(agentBinary []byte, port int, token string) []Operation {
-    return []Operation{
-        FileOp{
-            Path: "/usr/bin/mvm-vsock-agent",
-            Data: agentBinary,
-            Mode: 0755,
-        },
-        FileOp{
-            Path: "/var/run/mvm-vsock-agent.token",
-            Data: []byte(token),
-            Mode: 0600,
-        },
-        FileOp{
-            Path: "/etc/systemd/system/mvm-vsock-agent.service",
-            Data: fmt.Appendf(nil, `[Unit]
-Description=MVM VSock Agent
-DefaultDependencies=no
+On VM boot, the init system starts `mvm-vsock-agent`. `Agent.Run()` creates a raw AF_VSOCK socket, sets `SO_REUSEADDR`, binds with `VMADDR_CID_ANY`, listens with backlog 10, and accepts connections. Each connection is handled in its own goroutine via `handleConnection()`.
 
-[Service]
-Type=simple
-ExecStart=/usr/bin/mvm-vsock-agent -port %d
-Restart=always
-RestartSec=2
+### 3. Host dial and handshake
 
-[Install]
-WantedBy=sysinit.target
-`, port),
-            Mode: 0644,
-        },
-        FileOp{
-            Path: "/etc/init.d/mvm-vsock-agent",
-            Data: fmt.Appendf(nil, `#!/sbin/openrc-run
+The host client calls `dialAndHandshake()` in `internal/core/vsock/protocol.go`, which:
+1. Dials the Firecracker UDS (`unix` socket at `<vm-dir>/vsock.sock`)
+2. Sends `CONNECT <port>\n` (port defaults to 1024)
+3. Reads the response — Firecracker responds with `OK <host-side-port>\n`, where the host-side port is dynamically assigned
+4. On success, clears the read deadline and returns the connection
 
-description="MVM VSock Agent"
+### 4. Command execution (one-shot)
 
-command=/usr/bin/mvm-vsock-agent
-command_args="-port %d"
-pidfile=/var/run/mvm-vsock-agent.pid
-command_background=true
+The `vsock.Client.Exec()` method sends a JSON frame with type `"exec"`, the command, and optional timeout/user/env. The agent's `handleExec()` in `internal/service/vsockagent/exec.go`:
+1. Creates an `exec.Cmd` — either `su - <user> -c <command>` for non-root users, or `sh -c <command>` for root
+2. Sets `cmd.Stdout` and `cmd.Stderr` to `streamingWriter` instances, which emit JSON frames ("stdout" / "stderr") as data arrives
+3. Starts the command, waits for completion, flushes remaining output
+4. Sends a `"result"` frame with exit code and duration
+5. Calls `unix.Sync()` unless `NoSync` is set, to flush Firecracker's writeback cache
 
-depend() {
-    need localmount
-}
-`, port),
-            Mode: 0755,
-        },
-        ChrootOp{
-            Command: `
-if command -v systemctl >/dev/null 2>&1; then
-    mkdir -p /etc/systemd/system/multi-user.target.wants 2>/dev/null || true
-    ln -sf /etc/systemd/system/mvm-vsock-agent.service /etc/systemd/system/multi-user.target.wants/mvm-vsock-agent.service 2>/dev/null || true
-elif rc-update >/dev/null 2>&1; then
-    rc-update add mvm-vsock-agent default
-else
-    echo "mvm: warning - unknown init system, mvm-vsock-agent not auto-enabled"
-fi
-`,
-        },
-    }
-}
-```
+The host reads frames in a loop, printing stdout/stderr to the terminal immediately and returning on the `result` frame.
 
-## Guest Agent Design
+### 5. Interactive shell (exec-tty)
 
-### Protocol
+The `vsock.Client.Shell()` method sends a JSON frame with type `"exec-tty"`. The agent's `handleTTY()` in `internal/service/vsockagent/pty.go`:
+1. Sends a `"tty"` acknowledgement frame
+2. Allocates a PTY pair
+3. Configures the slave termios with `ICRNL | ICANON | ECHO | ECHOE | ISIG | OPOST | ONLCR`
+4. Forks the shell on the slave side
+5. Relays bytes bidirectionally between the vsock connection and the PTY master
+6. Detects `"exit\n"` in the data flow and arms a 5-second kill timer — SIGKILL forces cleanup if the shell doesn't exit
 
-#### Firecracker vsock config
+The host switches to raw terminal mode and enters a bidirectional relay loop (`relayTTY`) with `\r` → `\n` conversion for raw terminal input.
 
-The vsock device is configured via the **Firecracker JSON config file** (not the runtime API). The JSON config is written to disk by `spawner.WriteToFile()` before Firecracker starts. Firecracker reads it at boot and creates the virtio-vsock device automatically — no separate PUT /vsock API call needed.
+### 6. Ping (heartbeat)
 
-```json
-{"vsock": {"guest_cid": 3, "uds_path": "/path/to/vm-dir/v.sock"}}
-```
+The host sends a JSON frame with type `"ping"`. The agent responds with `"pong"`. No authentication required.
 
-This is represented as `model.VsockConfig` in the `FirecrackerVMConfig.Vsock` field.
+## Agent binary embedding
 
-#### Host vsock handshake
+The agent binary is cross-compiled for `linux/amd64` and `linux/arm64`, zstd-compressed, and embedded via `//go:embed` in build-tagged files:
+- `internal/service/vsockagent/build_amd64.go` builds on `//go:build amd64`, embeds `agent-linux-amd64.zst`
+- `internal/service/vsockagent/build_arm64.go` builds on `//go:build arm64`, embeds `agent-linux-arm64.zst`
 
-After Firecracker creates the UDS, the host dials in using Firecracker's built-in CONNECT protocol:
+`AgentBinary()` decompresses once on first call via `sync.Once`, saving ~60% in embedded binary size.
 
-```
-Host → UDS: "CONNECT 1024\n"
-Host ← UDS: "OK <host-side-port>\n"    ← connection established, bytes now flow to guest agent
-                                         (host-side port is dynamically assigned by Firecracker,
-                                          not the same as the requested guest port)
-```
+Build script (`scripts/build.sh`):
+1. Cross-compiles the agent for both architectures
+2. Compresses with `zstd`
+3. Builds the host binary (embeds the compressed agent for the host's arch)
 
-Implemented in `protocol.go` — no user-visible configuration needed.
+## Auth token
 
-#### JSON exchange (guest agent protocol)
+Each VM gets a random UUID token at creation time, stored in `VsockConfigItem.Token`. The agent reads the token from `/var/run/mvm-vsock-agent.token` (written by `BuildVsockAgentOps()`). The `exec` and `exec-tty` requests include the token; `ping` does not. If the token doesn't match (checked via `subtle.ConstantTimeCompare`), the agent rejects with `{"error":"invalid auth token"}`.
 
-Simple framed JSON messages, one per line (`\n` delimiter):
+## Failure modes
 
-**Request:**
-```json
-{"id":"1","type":"exec","command":"ls -la /etc","timeout":10}
-{"id":"2","type":"exec-tty","command":"/bin/bash","env":{"TERM":"xterm-256color"}}
-{"id":"3","type":"ping"}
-```
+### Agent not reachable
 
-**Response (streaming exec):**
+The vsock client probes the agent with 20ms intervals up to `ProbeTimeout` (default 5s, configurable via `defaults.vm.vsock_probe_timeout`). If the agent doesn't respond, the error `vsock.agent_unreachable` is returned.
 
-The `exec` request type streams output as the command runs. Stdout and stderr are sent as separate frames, followed by a final `result` frame with the exit code:
+### CONNECT handshake failure
 
-```json
-{"id":"1","type":"stdout","data":"total 128\n"}
-{"id":"1","type":"stdout","data":"drwxr-xr-x 2 root root 4096 ...\n"}
-{"id":"1","type":"stderr","data":"warning: ...\n"}
-{"id":"1","type":"result","status":0,"duration_ms":15}
-```
+If Firecracker's vsock proxy doesn't respond to `CONNECT` within the timeout, or responds with something other than `OK ...`, the error `vsock.handshake_failed` is returned.
 
-The host reads frames in a loop, printing stdout/stderr to the terminal immediately and returning on the `result` frame. This provides real-time output for long-running commands like `apt update`.
+### Command timeout
 
-**Response (non-streaming exec-tty):**
+The `exec` request type supports a `timeout` field in seconds. The agent uses `context.WithTimeout` — if the command doesn't complete within the deadline, the context is cancelled, the process is killed, and a `result` frame with status -1 and error description is sent.
 
-The `exec-tty` request sends a single TTY acknowledgement frame, then switches to raw bidirectional byte relay over the same connection (no further JSON framing):
+### Exit hang workaround for exec-tty
 
-```json
-{"id":"2","type":"tty"}
-```
+When the user types `exit` + Enter, the PTY handler arms a 5-second kill timer. If the shell exits normally, `cmd.Wait()` returns and the connection closes cleanly. If the shell is stuck, the timer fires, kills the shell with SIGKILL, and force-closes the connection.
 
-**Ping:**
-```json
-{"id":"3","type":"pong"}
-```
+### Vsock close reliability
 
-#### Auth token
-
-Each VM gets a random UUID token at creation time, stored in `VsockConfigItem.Token`. The guest agent reads the token from **both** sources:
-- **File (primary):** `/var/run/mvm-vsock-agent.token` written by `BuildVsockAgentOps()`. Used by the systemd/OpenRC service at startup.
-- **Flag (debug):** `-token <value>` passed to the agent binary. Overrides the file when set. For debugging and manual agent runs only — the systemd unit does NOT use it.
-
-The `exec-tty` request includes the token:
-```json
-{"id":"2","type":"exec-tty","command":"/bin/bash","token":"abc-123","env":{"TERM":"xterm-256color"}}
-```
-
-If the token doesn't match, the agent rejects with `{"error":"invalid auth token"}`. The host CLI reads the token from the DB and includes it in every exec/exec-tty request. No `ping` auth needed — it's a heartbeat, not a privileged operation.
+`vsockConn.Close()` calls `shutdown(fd, SHUT_RDWR)` before `close(fd)`. A raw `close(fd)` on virtio-vsock may race with socket teardown and leave the host-side UDS connection open, causing the host's `conn.Read()` to block indefinitely. `shutdown(SHUT_RDWR)` ensures the VIRTIO_VSOCK_OP_SHUTDOWN packet is sent before the socket is freed.
 
 ### Error codes
 
-| Code | When |
-|------|------|
-| `vsock.not_found` | VM has no vsock config |
-| `vsock.connection_failed` | Can't dial Firecracker UDS |
-| `vsock.handshake_failed` | CONNECT response is not "OK" |
-| `vsock.agent_unreachable` | Agent doesn't respond to ping |
-| `vsock.exec_failed` | Agent returned error status |
+| Code | Class | When |
+|------|-------|------|
+| `vsock.not_found` | `ClassValidation` | VM has no vsock config |
+| `vsock.connection_failed` | `ClassInternal` | Cannot dial Firecracker UDS |
+| `vsock.handshake_failed` | `ClassInternal` | CONNECT response is not "OK" |
+| `vsock.agent_unreachable` | `ClassRetryable` | Agent does not respond to ping within probe timeout |
 
-### Agent structure
+## Key files
 
-```
-internal/service/vsockagent/
-├── agent.go        # Agent struct, Run(), vsock listener loop, vsockConn (Close uses SHUT_RDWR)
-│                   # vsockConn.Close() uses shutdown(SHUT_RDWR) before close(fd) — ensures
-│                   # VIRTIO_VSOCK_OP_SHUTDOWN is sent to Firecracker proxy, preventing host-side
-│                   # UDS from lingering open.
-├── protocol.go     # JSON frame types, read/write helpers, streaming type constants
-├── exec.go         # exec handler: streaming via streamingWriter (io.Writer), output frames sent
-│                   # as "stdout"/"stderr" types as chunks arrive, final "result" on completion.
-├── pty.go          # exec-tty handler: PTY + relay, inactivity kill switch (5s after "exit" sent)
-│                   # configurePTY sets ICRNL/ICANON/ECHO/ISIG on slave before shell start.
-│                   # On "exit\n" detection, a 5s kill timer force-kills the shell if cmd.Wait()
-│                   # doesn't return — prevents hangs when shell doesn't process exit.
-├── cmdlistener.go  # vsock listener loop (accept, spawn handler goroutine)
-├── build_amd64.go   //go:embed agent-linux-amd64.zst (amd64 build tag)
-└── build_arm64.go   //go:embed agent-linux-arm64.zst (arm64 build tag)
-```
+| File | Purpose |
+|------|---------|
+| `internal/service/vsockagent/agent.go` | `Agent` struct, `Run()`, vsock listener, `vsockConn` with `SHUT_RDWR` close |
+| `internal/service/vsockagent/protocol.go` | JSON frame types, `readFrame`/`writeFrame`, request/response type constants |
+| `internal/service/vsockagent/exec.go` | `handleExec()` — streaming command execution via `streamingWriter` |
+| `internal/service/vsockagent/pty.go` | `handleTTY()` — PTY shell, `configurePTY()` termios, exit detection + 5s kill timer |
+| `internal/service/vsockagent/cmdlistener.go` | `handleConnection()` — dispatch to exec/tty/ping/version/file-transfer |
+| `internal/service/vsockagent/file_transfer.go` | Binary frame protocol handler for push/pull/recursive pull |
+| `internal/service/vsockagent/build_amd64.go` | `//go:embed agent-linux-amd64.zst` (amd64 build tag) |
+| `internal/service/vsockagent/build_arm64.go` | `//go:embed agent-linux-arm64.zst` (arm64 build tag) |
+| `internal/service/vsockagent/cmd/main.go` | Standalone agent entry point |
+| `internal/core/vsock/client.go` | `Client` — `Exec()`, `Shell()`, `ensureAgent()`, `Teardown()` |
+| `internal/core/vsock/protocol.go` | `dialAndHandshake()`, JSON framing helpers |
+| `internal/core/vsock/file_transfer.go` | `FTCopyToVM()`, `FTCopyFromVM()`, `FTCopyVMToVM()` |
+| `internal/core/vsock/service.go` | `Service` — CID allocation, config persistence |
+| `internal/core/vsock/agent.go` | `AgentBinary()` — wrapper delegating to `vsockagent` |
+| `internal/infra/provcontent/content.go` | `BuildVsockAgentOps()` — generates injection operations |
+| `pkg/api/exec.go` | `op.Exec()` — API orchestration |
+| `internal/cli/exec.go` | `mvm exec` cobra command |
 
-**PTY handler** (`pty.go`) provides an interactive shell — no password authentication required. The agent runs as root inside the guest and can start any user's shell.
+## Design decisions
 
-1. Allocate a PTY pair
-2. Configure slave termios with `ICRNL | ICANON | ECHO | ECHOE | ISIG | OPOST | ONLCR` for proper interactive shell behavior across all kernel versions
-3. Fork `su - <user>` (or `su - root`) with slave as TTY
-4. Custom relay loops (not io.Copy) track data flow for "exit" command detection
-5. When user types `exit` + Enter, a 5-second kill timer arms. If the shell exits normally, `cmd.Wait()` returns and the connection closes cleanly. If the shell is stuck, the timer fires, kills the shell with SIGKILL, and force-closes the connection.
+**Embedded Go agent over socat or SSH.** A pure `socat` approach would avoid the custom agent binary but breaks on minimal images (Alpine needs `apk add socat`), provides no structured protocol, and cannot report exit codes. SSH over vsock ProxyCommand still requires SSH daemon + key setup and adds ~500ms connection overhead.
 
+**Agent injected via provisioner, not VM domain changes.** The agent is injected as FileOp + ChrootOp operations — the same mechanism used for SSH keys and cloud-init files. No VM domain changes are needed.
 
-### Embedding into the binary
+**Auth token via file, not flag.** The token is written to `/var/run/mvm-vsock-agent.token` by the provisioner, so the systemd unit doesn't need the token on the command line (avoiding `/proc` exposure). A `-token` flag exists for debugging but is not used by the init system.
 
-```go
-// internal/service/vsockagent/build_amd64.go  (//go:build amd64)
-// internal/service/vsockagent/build_arm64.go  (//go:build arm64)
-package vsockagent
-
-import _ "embed"
-
-//go:embed agent-linux-amd64.zst   // (or agent-linux-arm64.zst on arm64)
-var agentBinaryZST []byte
-
-// AgentBinary returns the decompressed agent binary, lazily decompressed
-// once via sync.Once on first call.
-func AgentBinary() []byte { ... }
-```
-
-The agent binary is **zstd-compressed** before embedding, saving ~60% in embedded binary size. Each architecture has its own build-tagged file. The `AgentBinary()` function decompresses once on first call using `sync.Once`.
-
-Build process (in `scripts/build.sh`):
-
-```bash
-# Step 1: Cross-compile agent for both supported architectures
-GOOS=linux GOARCH=amd64 go build \
-  -o internal/service/vsockagent/agent-linux-amd64 \
-  -ldflags="-s -w" \
-  ./internal/service/vsockagent/cmd/
-
-GOOS=linux GOARCH=arm64 go build \
-  -o internal/service/vsockagent/agent-linux-arm64 \
-  -ldflags="-s -w" \
-  ./internal/service/vsockagent/cmd/
-
-# Step 2: Compress with zstd
-zstd -f internal/service/vsockagent/agent-linux-amd64
-zstd -f internal/service/vsockagent/agent-linux-arm64
-
-# Step 3: Build host binary (embeds compressed agent for target arch)
-go build -o dist/mvm ./cmd/mvm
-```
-
-`scripts/build.sh` selects the correct embedded binary via build tags (the host's `GOARCH` determines which `build_*.go` file is compiled). The agent binary is ~3MB statically linked, compressed to ~1MB with zstd — negligible compared to the existing ~30MB `mvm` binary.
-
-## Host Client — `mvm exec`
-
-### CLI interface
-
-```bash
-# Run a command (captured output)
-mvm exec my-vm -- ls -la /etc
-
-# Interactive shell
-mvm exec my-vm
-
-# With timeout
-mvm exec my-vm --timeout 30 -- apt-get update
-
-# Specify vsock port
-mvm exec my-vm --port 1025 -- /bin/bash
-
-# Interactive shell as a different user
-mvm exec my-vm --user ubuntu
-
-# With custom port
-mvm exec my-vm --port 1025 -- /bin/bash
-```
-
-### Host-side client flow
-
-```
-1. Resolve VM → get vsock config from vsockRepo.GetByVMID(vmID)
-2. Dial Firecracker vsock UDS (cfg.UDSPath)
-3. Send "CONNECT <port>\n" handshake
-4. For one-shot exec:
-   a. Send JSON exec request (include `user` field if `--user` flag specified)
-   b. Streaming read loop using single json.Decoder:
-      - "stdout" frame → write to os.Stdout immediately, accumulate
-      - "stderr" frame → write to os.Stderr immediately, accumulate
-      - "result" frame → return with exit code + accumulated output
-5. For interactive shell:
-   a. Send JSON exec-tty request (include `user` field if `--user` flag specified)
-   b. Set terminal to raw mode
-   c. Bidirectional relay: stdin → vsock (with `\r` → `\n` conversion via crFilter), vsock → stdout
-```
-
-### Integration points
-
-| File | Change |
-|------|--------|
-| `internal/cli/exec.go` | New `mvm exec` cobra command (moved from `internal/cli/vm.go`). |
-| `pkg/api/exec.go` | New `op.Exec(ctx, input)` method (moved from `pkg/api/vm.go`). |
-| `pkg/api/inputs/exec_input.go` | `ExecInput{Identifier, Command, Port, Timeout, User, Env, NoSync}`. |
-| `internal/core/vsock/` | Client, Repository, SQLite, Resolver, protocol. `Exec()` uses streaming read loop with `json.Decoder`. `crFilter` converts `\r` → `\n` for raw terminal input. `relayTTY` bidirectional relay for interactive shells. |
-| `internal/service/vsockagent/` | Guest agent binary + go:embed. `exec.go` streams output via `streamingWriter` io.Writer (Stdout/Stderr fields). `pty.go` has PTY relay, exit command detection with 5s kill timer, and `configurePTY` for cross-kernel termios. `agent.go` uses `shutdown(SHUT_RDWR)` before `close(fd)` for reliable vsock close. |
-| `internal/infra/provcontent/content.go` | Add `BuildVsockAgentOps()`. |
-| `internal/enricher/enrich.go` | Add `VMRelations["vsock"]`. |
-| `scripts/build.sh` | Add agent cross-compile step. Add `--arch` flag. |
-| `internal/lib/db/migrations/` | New migration for `vm_vsock_config` table. |
-
-## Model & Schema
+## Model and schema
 
 ### `model.VsockConfigItem` (DB record)
 
@@ -429,7 +223,7 @@ mvm exec my-vm --port 1025 -- /bin/bash
 type VsockConfigItem struct {
     ID               string     `db:"id" json:"id"`
     VmID             string     `db:"vm_id" json:"vm_id"`
-    GuestCID         int        `db:"guest_cid" json:"guest_cid"`   // unique constraint
+    GuestCID         int        `db:"guest_cid" json:"guest_cid"`
     UDSPath          string     `db:"uds_path" json:"uds_path"`
     Port             int        `db:"port" json:"port"`
     Token            string     `db:"token" json:"token"`
@@ -448,40 +242,36 @@ type VsockConfig struct {
 }
 ```
 
+The vsock section is added to the Firecracker JSON config so the device is
+created when Firecracker reads the config at boot:
+
+```go
+type FirecrackerVMConfig struct {
+    // ... existing fields ...
+    Vsock *VsockConfig `json:"vsock,omitempty"`
+}
+```
+
 ### DB schema
 
-Add to existing `internal/lib/db/migrations/001_initial_schema.sql` — does NOT create a new migration file:
+The `vm_vsock_config` table is created in
+`internal/lib/db/migrations/001_initial_schema.sql`:
 
 ```sql
--- VSOCK_CONFIG: Per-VM vsock device and agent configuration
 CREATE TABLE vm_vsock_config (
     id TEXT PRIMARY KEY,
     vm_id TEXT NOT NULL UNIQUE,
     guest_cid INTEGER NOT NULL UNIQUE,
     uds_path TEXT NOT NULL,
-    port INTEGER NOT NULL,          -- no DEFAULT: caller provides the port
-    token TEXT NOT NULL,             -- random UUID, used for agent auth
-    agent_version TEXT NOT NULL DEFAULT '',  -- last known agent version
-    upgrading INTEGER NOT NULL DEFAULT 0,    -- boolean: upgrade in progress
-    upgrade_started_at TIMESTAMP NULL,       -- for stale lock detection
+    port INTEGER NOT NULL,
+    token TEXT NOT NULL,
+    agent_version TEXT NOT NULL DEFAULT '',
+    upgrading INTEGER NOT NULL DEFAULT 0,
+    upgrade_started_at TIMESTAMP NULL,
     FOREIGN KEY (vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_vsock_config_vm ON vm_vsock_config(vm_id);
 CREATE INDEX idx_vsock_config_cid ON vm_vsock_config(guest_cid);
-```
-
-No `enabled` column — presence of a record means vsock is configured. No `DEFAULT` on port — default (`1024`) is overridable at the API/CLI layer via `--vsock-port` flag, not in the schema.
-
-### `FirecrackerVMConfig` vsock field
-
-The vsock section is added to the Firecracker JSON config so the device is created automatically when Firecracker reads the config at boot. No separate API call needed.
-
-```go
-type FirecrackerVMConfig struct {
-    // ... existing fields ...
-
-    Vsock *VsockConfig `json:"vsock,omitempty"`  // model.VsockConfig — guest_cid + uds_path only
-}
 ```
 
 ### Enricher relation
@@ -489,7 +279,6 @@ type FirecrackerVMConfig struct {
 ```go
 var VMRelations = map[string]model.RelationSpec{
     // ... existing relations ...
-
     "vsock": {
         FKField: "id", Resolver: "vsock",
         Method: "get_by_vm_id", RelationName: "vsock",
@@ -498,26 +287,33 @@ var VMRelations = map[string]model.RelationSpec{
 }
 ```
 
-Enrichable via `mvm vm inspect --include vsock`.
+Enrichable in the CLI via `mvm vm inspect --include vsock`.
 
-## Alternatives Considered
+## Alternatives considered
 
 ### Pure `socat` approach
-Inject `socat` + a systemd unit instead of a custom agent. Simpler to implement but:
-- `socat` not present in minimal images (Alpine: need `apk add socat`)
-- No structured protocol — plain byte stream, can't multiplex commands
+
+Inject `socat` plus a systemd unit instead of a custom agent. Simpler to
+implement but:
+
+- `socat` is not present in minimal images (Alpine requires `apk add socat`)
+- No structured protocol — plain byte stream, cannot multiplex commands
 - No timeout control, no exit code reporting
 - Window resize requires additional hacks
 
 ### Extend SSH with vsock ProxyCommand
-Use `ssh -o ProxyCommand="socat UNIX-CONNECT:./v.sock STDIO"` with vsock as SSH transport. Proven pattern but:
-- Still requires SSH daemon + key setup in guest
-- SSH adds ~500ms connection overhead
-- Need SSH in the image (not always present)
+
+Use `ssh -o ProxyCommand="socat UNIX-CONNECT:./v.sock STDIO"` with vsock as
+SSH transport. This is a proven pattern but:
+
+- Still requires SSH daemon and key setup inside the guest
+- SSH adds ~500ms connection overhead per operation
+- SSH must be present in the image (not always the case on minimal builds)
 
 ### Use the serial console
-Already works via `mvm vm console my-vm`. But serial console is:
-- Single session (one client at a time)
+
+Already works via `mvm console my-vm`. But the serial console is:
+- Single session — one client at a time
 - No structured command output
 - No exit codes
 - No file transfer

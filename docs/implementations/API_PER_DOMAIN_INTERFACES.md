@@ -1,72 +1,56 @@
-> **STATUS: Implemented.** Per-domain Go interfaces in `pkg/api/interfaces.go` define the contract between mvmctl's orchestrator layer and its consumers (CLI, TUI, workflow engine).
->
-> **Last updated:** 2026-06-27
-
 # API Per-Domain Interfaces
 
-## Overview
+## Problem
 
-The `pkg/api/` package defines the **contract** between mvmctl's orchestrator layer and its consumers (CLI, TUI, workflow engine). This contract is formalised as **one Go interface per domain**, not one monolithic `API` interface.
+The `pkg/api/` package defines the contract between mvmctl's orchestrator layer and its consumers (CLI, TUI, workflow engine). Without per-domain interfaces, every consumer must import the entire `*api.Operation` struct — 80+ methods — even when it needs only VM operations. This creates large mock surface areas, unnecessary import coupling, and unclear dependencies. Per-domain interfaces give each consumer exactly the methods it needs.
 
-The interfaces sit at the **boundary** — they define what consumers can call, not how `*Operation` implements those calls internally.
+## Architecture
 
-## Why Per-Domain, Not One Big API
+Each domain in `pkg/api/` exposes a Go interface in its own file. Consumers declare only the interfaces they need. A composite `API` interface embeds all per-domain interfaces for consumers that need everything.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        Operation struct                           │
 │                                                                   │
+│  // Internal cross-calls are direct struct methods,               │
+│  // unaffected by the interfaces.                                │
 │  CachePruneAll() {                                                │
 │      ids, _ := op.VMPrune(...)          ← direct struct method   │
 │      ids, _ := op.NetworkPrune(...)     ← direct struct method   │
-│      ids, _ := op.ImagePrune(...)       ← direct struct method   │
 │  }                                                                │
 │                                                                   │
 │  VMPrune() { ... }                                                │
 │  NetworkPrune() { ... }                                           │
-│  ImagePrune() { ... }                                             │
 └──────────────────────────────────────────────────────────────────┘
-         │ implements VMAPI    │ implements NetworkAPI    │ implements ImageAPI
-         ▼                     ▼                         ▼
-    ┌──────────┐         ┌──────────────┐          ┌────────────┐
-    │  VMAPI   │         │  NetworkAPI  │          │  ImageAPI  │
-    └──────────┘         └──────────────┘          └────────────┘
-         ▲                     ▲                         ▲
-         │ accepts             │ accepts                  │ accepts
-    ┌──────────┐         ┌──────────────┐          ┌────────────┐
-    │cli/vm.go │         │tui/screen/   │          │workflow/   │
-    │          │         │network.go    │          │step_image  │
-    └──────────┘         └──────────────┘          └────────────┘
+         │ implements VMAPI    │ implements NetworkAPI    
+         ▼                     ▼                        
+    ┌──────────┐         ┌──────────────┐              
+    │  VMAPI   │         │  NetworkAPI  │              
+    └──────────┘         └──────────────┘              
+         ▲                     ▲                        
+         │ accepts             │ accepts                
+    ┌──────────┐         ┌──────────────┐              
+    │cli/vm.go │         │tui/screen/   │              
+    │          │         │network.go    │              
+    └──────────┘         └──────────────┘              
 
-    ┌──────────────────────────────────────────────────────────┐
-    │ Composite API (for TUI/model.go that needs everything):  │
-    │                                                          │
-    │  type API interface {                                    │
-    │      VMAPI                                               │
-    │      ImageAPI                                            │
-    │      NetworkAPI                                          │
-    │      // ... one line per domain                          │
-    │  }                                                       │
-    └──────────────────────────────────────────────────────────┘
+    ┌──────────────────────────────────────────────────┐
+    │ Composite API (for TUI/model.go):                │
+    │                                                  │
+    │  type API interface {                            │
+    │      VMAPI                                       │
+    │      ImageAPI                                    │
+    │      NetworkAPI                                  │
+    │      // ... one line per domain                  │
+    │  }                                               │
+    └──────────────────────────────────────────────────┘
 ```
 
-**Key insight:** `Operation`'s internal cross-calls (`op.VMPrune()` inside `CachePruneAll`) are **direct method calls on the same struct**. They are unaffected by the interfaces. The interfaces exist only at the boundary between the API layer and its consumers.
+**Key insight:** `Operation`'s internal cross-calls (`op.VMPrune()` inside `CachePruneAll`) are direct method calls on the same struct. They are unaffected by the interfaces. The interfaces exist only at the boundary between the API layer and its consumers.
 
-## What This Achieves
+## The interfaces
 
-| Concern | Per-Domain Interfaces | One Big `API` Interface |
-|---------|----------------------|------------------------|
-| **ISP compliance** | Consumer declares only the domain it needs | Consumer imports all 83 methods |
-| **Mock size** | ~10-15 function fields per domain mock | 83 function fields in a single mock |
-| **Test isolation** | `vm` tests don't import `ImageAPI` types | All tests import all types |
-| **CLI clarity** | `func run(op api.VMAPI)` says exactly what it needs | `func run(op api.API)` hides actual dependencies |
-| **Adding a domain** | New file, new interface, one line in composite | Append to single interface, all consumers recompile |
-| **TUI convenience** | Holds `api.API` composite (one type) | Holds `api.API` (one type) — same |
-| **Internal cross-calls** | Unaffected — `op.Method()` on the same struct | Unaffected — same |
-
-## The Interfaces
-
-Each domain in `pkg/api/` gets an interface in its existing file:
+Each domain in `pkg/api/` has an interface in its existing file:
 
 | File | Interface | Methods |
 |------|-----------|---------|
@@ -88,7 +72,11 @@ Each domain in `pkg/api/` gets an interface in its existing file:
 | `init.go` | `InitAPI` | 4 |
 | `snapshot.go` | `SnapshotAPI` | 5 |
 
-The composite `API` interface lives in `interfaces.go`:
+All interfaces are satisfied by `*Operation` with zero changes to the Operation struct itself.
+
+## The composite API interface
+
+Defined in `pkg/api/interfaces.go`:
 
 ```go
 type API interface {
@@ -112,24 +100,25 @@ type API interface {
 }
 ```
 
-`*Operation` already satisfies all of them — **zero changes to the Operation struct itself**.
+## What per-domain interfaces achieve
 
-## Consumer Migration Pattern
+| Concern | Per-Domain Interfaces | Single `API` Interface |
+|---------|----------------------|------------------------|
+| **ISP compliance** | Consumer declares only the domain it needs | Consumer imports all methods |
+| **Mock size** | ~10-15 function fields per domain mock | 80+ function fields in a single mock |
+| **Test isolation** | Domain tests don't import other domain types | All tests import all types |
+| **CLI clarity** | `func run(op api.VMAPI)` says exactly what it needs | `func run(op api.API)` hides actual dependencies |
+| **Adding a domain** | New file, new interface, one line in composite | Append to single interface, all consumers recompile |
+| **TUI convenience** | Holds `api.API` composite (one type) | Holds `api.API` (one type) — same |
+| **Internal cross-calls** | Unaffected — `op.Method()` on the same struct | Unaffected — same |
 
-Existing code uses `*api.Operation` everywhere. The interfaces enable a **gradual** migration:
-
-1. **Define interfaces** — `*Operation` satisfies them immediately. No breakage.
-2. **Create mocks** — `MockVMAPI`, `MockImageAPI`, etc. in `internal/testutil/`. Function-field pattern matching existing `FakeRunner`/`FakeNetOps` conventions.
-3. **Migrate consumers one at a time** — change `*api.Operation` to `api.VMAPI` in CLI's `vm.go`, test with `MockVMAPI`. No big-bang refactor.
-4. **TUI uses composite** — `Model.op` becomes `api.API`, `MockOperation` embeds per-domain mocks.
-
-## The Mock
+## The mock pattern
 
 Per-domain mocks live in `internal/testutil/mock_<domain>_api.go`:
 
 ```go
 type MockVMAPI struct {
-	VMCreateFunc func(ctx, input, onProgress) ([]*model.VMItem, error)
+    VMCreateFunc func(ctx, input, onProgress) ([]*model.VMItem, error)
     VMRemoveFunc func(ctx, input) *errs.BatchResult
     // ...
 }
@@ -140,6 +129,27 @@ func (m *MockVMAPI) VMCreate(ctx, input, onProgress) ([]*model.VMItem, error) {
 }
 ```
 
-Default return values are zero/nil. Tests set only the functions they need.
+Default return values are zero/nil. Tests set only the functions they need. `MockOperation` embeds all per-domain mocks and satisfies the composite `API` interface.
 
-`MockOperation` embeds all per-domain mocks and satisfies the composite `API` interface.
+## Key files
+
+| File | Purpose |
+|------|---------|
+| `pkg/api/interfaces.go` | Composite `API` interface embedding all per-domain interfaces |
+| `pkg/api/vm.go` | `VMAPI` interface (11 methods) + `Operation` implementation |
+| `pkg/api/image.go` | `ImageAPI` interface (9 methods) |
+| `pkg/api/network.go` | `NetworkAPI` interface (10 methods) |
+| `pkg/api/volume.go` | `VolumeAPI` interface (8 methods) |
+| `pkg/api/kernel.go` | `KernelAPI` interface (8 methods) |
+| `pkg/api/key.go` | `KeyAPI` interface (10 methods) |
+| `pkg/api/binary.go` | `BinaryAPI` interface (8 methods) |
+| `pkg/api/host.go` | `HostAPI` interface (15 methods) |
+| `pkg/api/console.go` | `ConsoleAPI` interface (4 methods) |
+| `pkg/api/exec.go` | `ExecAPI` interface (1 method) |
+| `pkg/api/ssh.go` | `SSHAPI` interface (1 method) |
+| `pkg/api/config.go` | `ConfigAPI` interface (4 methods) |
+| `pkg/api/cache.go` | `CacheAPI` interface (11 methods) |
+| `pkg/api/logs.go` | `LogAPI` interface (2 methods) |
+| `pkg/api/cp.go` | `CPAPI` interface (1 method) |
+| `pkg/api/init.go` | `InitAPI` interface (4 methods) |
+| `pkg/api/snapshot.go` | `SnapshotAPI` interface (5 methods) |

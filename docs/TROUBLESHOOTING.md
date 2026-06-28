@@ -653,18 +653,9 @@ mvm ssh <vm-name> --cmd "ps aux | grep dhcpcd | grep -v grep"
 
 ## `mvm cp` errors
 
-### CPError: Source path does not exist
+### CPError on copy failure
 
-**Symptom:** File copy fails with "Source path does not exist".
-
-**Solution:**
-- Verify the source file or directory exists on the local filesystem or VM
-- For VM paths, check that `vm_name:/path` uses the correct VM name and path
-- Use absolute paths to avoid ambiguity
-
-### CPError: Destination file exists
-
-**Symptom:** Copy fails with "Destination file exists" when the target already has a file.
+**Symptom:** `mvm cp` reports an error when the destination already has a file.
 
 **Solution:**
 ```bash
@@ -675,9 +666,9 @@ mvm cp --force ./myfile.txt my-vm:/root/
 mvm ssh my-vm --cmd "rm /root/myfile.txt"
 ```
 
-### CPError: Destination path must be a directory
+### CPError on missing destination directory
 
-**Symptom:** Host → VM copy fails with "Destination path must be a directory".
+**Symptom:** Host → VM copy fails when the destination path is not a directory.
 
 **Solution:**
 Ensure the destination ends with `/` for host → VM copies:
@@ -689,17 +680,17 @@ mvm cp ./myfile.txt my-vm:/root/
 mvm cp ./myfile.txt my-vm:/root/myfile.txt
 ```
 
-> The tar-pipe protocol used by `mvm cp` writes into a directory and cannot rename
+> The vsock binary frame protocol used by `mvm cp` writes into a directory and cannot rename
 > the output file. Always use a directory destination (ending with `/`) for host → VM copies.
 
-### CPError: VM not found or has no IP
+### CPError: VM not found or no vsock
 
-**Symptom:** Copy fails with "Could not resolve VM" or "VM has no IP address".
+**Symptom:** Copy fails with "Could not resolve VM" or "VM has no vsock configuration".
 
 **Solution:**
 - Verify the VM name is correct: `mvm vm ls`
-- Check the VM is running and has an IP assigned: `mvm vm inspect <name>`
-- The VM must be in RUNNING state with a valid IP for file copy to work
+- Check the VM is running and has vsock enabled: `mvm vm inspect <name>`
+- The VM must be in RUNNING state with a valid vsock configuration for file copy to work
 
 ---
 

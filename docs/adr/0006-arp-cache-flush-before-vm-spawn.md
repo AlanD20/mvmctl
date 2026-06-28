@@ -5,6 +5,13 @@
 
 The project flushes the bridge ARP cache (`ip neigh flush dev <bridge>`) after creating the TAP device and before spawning Firecracker. Without this flush, a new VM that reuses an IP address from a recently-removed VM inherits the host's stale ARP entry pointing to the old (now-dead) TAP. SSH connections route to the dead interface, hit TCP SYN timeouts (~3s), and retry — inflating perceived boot time by 5-10s.
 
+**Table of Contents**
+
+- [Context](#context)
+- [Decision](#decision)
+- [Implementation](#implementation)
+- [Considered alternatives](#considered-alternatives)
+
 ## Context
 
 The bridge network allocates IPs from a small subnet (172.31.99.0/24). When VMs are rapidly created and destroyed (e.g. during benchmarks or CI), a new VM frequently receives the same IP as its predecessor. The host's ARP cache still maps that IP to the old TAP's MAC. Since the old TAP no longer exists, TCP SYN packets to port 22 time out. The kernel eventually sends a new ARP request after the timeout, but this adds 3-8s to every SSH connection attempt — indistinguishable from a slow boot to monitoring tools.
