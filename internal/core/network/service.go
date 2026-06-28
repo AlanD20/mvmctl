@@ -555,53 +555,91 @@ func (s *Service) RemoveMany(ctx context.Context, networks []*model.NetworkItem,
 
 // --- Sync iptables rules ---
 
-// SyncIPTablesRules ensures all active DB firewall rules exist in host iptables
-// for the given network.
-// Returns counts of added, verified, and orphaned rules:
-// - added: rules that were created (command_executed was not None)
-// - verified: rules that already existed (command_executed is None)
-// - orphaned: host iptables rules referencing the network but absent from the DB
-func (s *Service) SyncIPTablesRules(ctx context.Context, network *model.NetworkItem) (*SyncResult, error) {
-	// 1. Get active DB rules for the network through the tracker.
-	var dbRules []*model.FirewallRule
-	if s.firewallTracker != nil {
-		var err error
-		dbRules, err = s.firewallTracker.GetByNetworkID(ctx, network.ID, true)
+// SyncIPTablesRulesBatch ensures all active DB firewall rules exist in the
+// kernel for all the given networks. Rules for ALL networks are applied in a
+// single batch to prevent one network's sync from wiping another's rules.
+//
+// Pre-checks kernel state via RuleExists before the batch so that added and
+// verified counts reflect actual kernel state, not DB state:
+//   - verified: rule already existed in the kernel before the batch
+//   - added:   rule was missing from the kernel and is now applied
+//   - orphaned: kernel rules referencing the network but absent from the DB
+//
+// Returns per-network SyncResult keyed by network.ID.
+func (s *Service) SyncIPTablesRulesBatch(
+	ctx context.Context,
+	networks []*model.NetworkItem,
+) (map[string]*SyncResult, error) {
+	if s.firewallTracker == nil {
+		results := make(map[string]*SyncResult, len(networks))
+		for _, net := range networks {
+			results[net.ID] = &SyncResult{}
+		}
+		return results, nil
+	}
+
+	// 1. Collect rules per network. Also pre-check kernel state for accurate
+	//    counting — we want added/verified to reflect kernel presence, not DB.
+	type netRules struct {
+		rules  []*model.FirewallRule
+		exists []bool // pre-batch kernel presence per rule, same index as rules
+	}
+	perNet := make(map[string]*netRules, len(networks))
+
+	// Track all rule pointers for the single batch call.
+	var allRules []model.FirewallRule
+
+	for _, net := range networks {
+		dbRules, err := s.firewallTracker.GetByNetworkID(ctx, net.ID, true)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("get rules for network '%s': %w", net.Name, err)
+		}
+		nr := &netRules{
+			rules:  dbRules,
+			exists: make([]bool, len(dbRules)),
+		}
+		for i, r := range dbRules {
+			nr.exists[i] = s.firewallTracker.RuleExists(ctx, r)
+			allRules = append(allRules, *r)
+		}
+		perNet[net.ID] = nr
+	}
+
+	// 2. Apply all rules in a single atomic batch.
+	if len(allRules) > 0 {
+		result := s.firewallTracker.BatchEnsureRules(ctx, allRules)
+		if !result.Success {
+			errMsg := ""
+			if result.ErrorMessage != nil {
+				errMsg = *result.ErrorMessage
+			}
+			return nil, fmt.Errorf("batch firewall rule sync failed: %s", errMsg)
 		}
 	}
 
-	added := 0
-	verified := 0
-
-	// 2. Use batch mode to queue ensure_rule calls and flush atomically.
-	if s.firewallTracker != nil && len(dbRules) > 0 {
-		s.WithBatch(ctx, func() {
-			for _, rule := range dbRules {
-				result := s.firewallTracker.EnsureRule(ctx, *rule, "")
-				if result.Success {
-					if result.CommandExecuted == nil {
-						verified++
-					} else {
-						added++
-					}
+	// 3. Build per-network results from pre-batch kernel state.
+	results := make(map[string]*SyncResult, len(networks))
+	for _, net := range networks {
+		added := 0
+		verified := 0
+		if nr, ok := perNet[net.ID]; ok {
+			for _, exists := range nr.exists {
+				if exists {
+					verified++
+				} else {
+					added++
 				}
 			}
-		})
+		}
+		orphaned := s.firewallTracker.CountOrphanedRules(ctx, net)
+		results[net.ID] = &SyncResult{
+			Added:    added,
+			Verified: verified,
+			Orphaned: orphaned,
+		}
 	}
 
-	// 3. Count orphaned rules
-	orphaned := 0
-	if s.firewallTracker != nil {
-		orphaned = s.firewallTracker.CountOrphanedRules(ctx, network)
-	}
-
-	return &SyncResult{
-		Added:    added,
-		Verified: verified,
-		Orphaned: orphaned,
-	}, nil
+	return results, nil
 }
 
 // --- Orphan cleanup ---

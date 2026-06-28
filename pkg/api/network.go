@@ -276,24 +276,40 @@ func (op *Operation) NetworkSetDefault(ctx context.Context, input inputs.Network
 
 // NetworkSync syncs firewall rules for one or more networks.
 func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput) (map[string]map[string]int, error) {
-	var networks []*model.NetworkItem
+	// 1. Resolve requested networks.
+	var requested []*model.NetworkItem
 	var err error
 	if len(input.Identifiers) > 0 {
-		networks, err = input.Resolve(ctx, op.Repos.Network)
+		requested, err = input.Resolve(ctx, op.Repos.Network)
 		if err != nil {
 			return nil, errs.WrapMsg(errs.CodeNetworkNotFound, err.Error(), err)
 		}
 	} else {
-		networks, err = op.Repos.Network.ListAll(ctx)
+		requested, err = op.Repos.Network.ListAll(ctx)
 		if err != nil {
 			return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list networks: %v", err), err)
 		}
 	}
-	results := make(map[string]map[string]int)
+
+	// 2. Build the set of all networks to sync. When syncing a specific subset,
+	//    we must include ALL DB networks in the batch rebuild so that
+	//    unrequested networks' firewall rules are preserved in the kernel.
+	//    Stats are returned only for the requested networks.
+	allNetworks := requested
+	if len(input.Identifiers) > 0 {
+		allNetworks, err = op.Repos.Network.ListAll(ctx)
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list all networks: %v", err), err)
+		}
+	}
+
+	// Capture batch results for stat extraction after the closure.
+	var batchResults map[string]*network.SyncResult
+
 	// Wrap the core sync logic in a NetworkError catch
 	syncErr := func() error {
 		// Step 1: Restore missing bridges (post-reboot recovery)
-		for _, net := range networks {
+		for _, net := range allNetworks {
 			if !libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge) {
 				bridgeAddr, calcErr := network.ComputeBridgeAddress(net.IPv4Gateway, net.Subnet)
 				if calcErr != nil {
@@ -316,32 +332,36 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 			}
 		}
 		// Step 2: Reconcile bridge state (DB vs kernel)
-		for _, net := range networks {
+		for _, net := range allNetworks {
 			bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge)
 			if bridgeActive != net.BridgeActive {
 				_ = op.Repos.Network.UpdateBridgeActive(ctx, net.ID, bridgeActive)
 			}
 		}
-		// Step 3: Sync firewall rules
-		for _, net := range networks {
-			r, err := op.Services.Network.SyncIPTablesRules(ctx, net)
-			if err != nil {
-				return fmt.Errorf("sync rules for network '%s': %w", net.Name, err)
-			}
-			result := map[string]int{"added": 0, "verified": 0, "orphaned": 0}
-			if r != nil {
-				result["added"] = r.Added
-				result["verified"] = r.Verified
-				result["orphaned"] = r.Orphaned
-			}
-			results[net.ID] = result
+		// Step 3: Sync firewall rules — all networks in a single batch
+		var syncErr2 error
+		batchResults, syncErr2 = op.Services.Network.SyncIPTablesRulesBatch(ctx, allNetworks)
+		if syncErr2 != nil {
+			return fmt.Errorf("sync firewall rules: %w", syncErr2)
 		}
-		// Step 4: Clean up orphaned bridges)
-		op.Services.Network.CleanupOrphanedBridges(ctx, networks)
+		// Step 4: Clean up orphaned bridges
+		op.Services.Network.CleanupOrphanedBridges(ctx, allNetworks)
 		return nil
 	}()
 	if syncErr != nil {
 		return nil, errs.WrapMsg(errs.CodeNetworkBridgeFailed, fmt.Sprintf("Network sync failed: %v", syncErr), syncErr)
+	}
+
+	// Build flat map for only the requested networks
+	results := make(map[string]map[string]int, len(requested))
+	for _, net := range requested {
+		if r, ok := batchResults[net.ID]; ok && r != nil {
+			results[net.ID] = map[string]int{
+				"added":    r.Added,
+				"verified": r.Verified,
+				"orphaned": r.Orphaned,
+			}
+		}
 	}
 	return results, nil
 }

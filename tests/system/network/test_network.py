@@ -247,6 +247,80 @@ def _assert_no_masquerade_rule(runner_vm: str, backend: str) -> None:
             )
 
 
+def _assert_masquerade_for_subnet(
+    runner_vm: str, subnet: str, backend: str
+) -> None:
+    """Assert MVM-POSTROUTING has a masquerade rule for ``subnet`` (inside VM)."""
+    if backend == "nftables":
+        result = _guest_run(
+            runner_vm,
+            "sudo nft list chain ip nat MVM-POSTROUTING",
+            check=False,
+            timeout=10,
+        )
+        assert result.returncode == 0, (
+            f"nft list MVM-POSTROUTING failed: {result.stderr}"
+        )
+        assert subnet in result.stdout, (
+            f"Subnet {subnet} not found in nftables MVM-POSTROUTING:\n"
+            f"{result.stdout}"
+        )
+        assert "masquerade" in result.stdout.lower(), (
+            "No masquerade rule in nftables MVM-POSTROUTING:\n"
+            f"{result.stdout}"
+        )
+    else:
+        result = _guest_run(
+            runner_vm,
+            "sudo iptables -t nat -L MVM-POSTROUTING -n",
+            check=False,
+            timeout=10,
+        )
+        assert result.returncode == 0, (
+            f"iptables list MVM-POSTROUTING failed: {result.stderr}"
+        )
+        assert subnet in result.stdout, (
+            f"Subnet {subnet} not found in iptables MVM-POSTROUTING:\n"
+            f"{result.stdout}"
+        )
+        assert "MASQUERADE" in result.stdout.upper(), (
+            "No MASQUERADE rule in iptables MVM-POSTROUTING:\n"
+            f"{result.stdout}"
+        )
+
+
+def _assert_network_firewall_rules(
+    runner_vm: str, net_name: str, subnet: str, backend: str
+) -> None:
+    """Assert bridge, FORWARD accept, and NAT rules exist for a network."""
+    bridge = _compute_bridge_name(net_name)
+    _assert_bridge_exists(runner_vm, bridge)
+    _assert_masquerade_for_subnet(runner_vm, subnet, backend)
+
+    # Option C: bridge accept rule in MVM-FORWARD
+    if backend == "nftables":
+        result = _guest_run(
+            runner_vm,
+            "sudo nft list chain ip filter MVM-FORWARD",
+            check=False,
+            timeout=10,
+        )
+    else:
+        result = _guest_run(
+            runner_vm,
+            "sudo iptables -L MVM-FORWARD -n",
+            check=False,
+            timeout=10,
+        )
+    assert result.returncode == 0, (
+        f"Listing MVM-FORWARD failed ({backend}): {result.stderr}"
+    )
+    assert bridge in result.stdout, (
+        f"Bridge '{bridge}' not found in MVM-FORWARD ({backend}):\n"
+        f"{result.stdout}"
+    )
+
+
 # ============================================================================
 # Tests
 # ============================================================================
@@ -1116,6 +1190,78 @@ class TestNetworkSync:
                 net_name,
                 "--force",
                 check=False,
+            )
+
+    def test_network_sync_preserves_all_networks(self, runner_vm):
+        # Rationale: Regression for cross-network wipe bug. Syncing all
+        # networks (or a specific one) must rebuild MVM chains from the union
+        # of all networks, not per-network. Option C verifies both bridges and
+        # both masquerade rules survive.
+        """Sync global and per-network must preserve every network's rules.
+
+        Regression: ``mvm network sync`` rebuilt MVM firewall chains per
+        network, so syncing all networks left only the last network's rules,
+        and syncing a specific network deleted other networks' rules. The fix
+        rebuilds chains from the union of all networks in one batch.
+        """
+        net_a = f"sys-sync-a-{uuid.uuid4().hex[:6]}"
+        net_b = f"sys-sync-b-{uuid.uuid4().hex[:6]}"
+        subnet_a = _unique_subnet(net_a)
+        subnet_b = _unique_subnet(net_b)
+        backend = _get_firewall_backend(runner_vm)
+
+        def _assert_both_networks() -> None:
+            _assert_network_firewall_rules(
+                runner_vm, net_a, subnet_a, backend
+            )
+            _assert_network_firewall_rules(
+                runner_vm, net_b, subnet_b, backend
+            )
+
+        try:
+            _run_mvm(
+                runner_vm,
+                "network",
+                "create",
+                net_a,
+                "--subnet",
+                subnet_a,
+                "--non-interactive",
+            )
+            _run_mvm(
+                runner_vm,
+                "network",
+                "create",
+                net_b,
+                "--subnet",
+                subnet_b,
+                "--non-interactive",
+            )
+
+            # Baseline: both networks have active firewall rules
+            _assert_both_networks()
+
+            # Global sync must preserve rules for ALL networks
+            result = _run_mvm(runner_vm, "network", "sync", check=False)
+            assert result.returncode == 0, (
+                f"global network sync failed: {result.stderr}"
+            )
+            _assert_both_networks()
+
+            # Specific sync must preserve rules for OTHER networks too
+            result = _run_mvm(
+                runner_vm, "network", "sync", net_a, check=False
+            )
+            assert result.returncode == 0, (
+                f"specific network sync {net_a} failed: {result.stderr}"
+            )
+            _assert_both_networks()
+        finally:
+            _run_mvm(
+                runner_vm, "network", "rm", net_a, "--force", check=False
+            )
+            _run_mvm(
+                runner_vm, "network", "rm", net_b, "--force", check=False
             )
 
     def test_network_sync_json(self, runner_vm, module_network):

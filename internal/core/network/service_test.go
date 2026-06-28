@@ -7,12 +7,15 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/core/network"
+	"mvmctl/internal/lib/firewall"
 	"mvmctl/internal/lib/model"
 	libnet "mvmctl/internal/lib/network"
+	"mvmctl/internal/lib/system"
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/errs"
 )
@@ -730,6 +733,157 @@ func TestService_RemoveStaleInterfaces(t *testing.T) {
 		assert.Equal(t, 2, len(removedTaps))
 		assert.Contains(t, summary[0], "Removed")
 	})
+}
+
+// --- Service.SyncIPTablesRulesBatch (nil tracker) ---
+// Rationale: Nil firewall tracker must return zero-filled results for all
+// networks (no error, no panic).
+
+func TestService_SyncIPTablesRulesBatch_nilTracker(t *testing.T) {
+	svc := network.NewService(testutil.NewNetworkRepo(), nil)
+
+	results, err := svc.SyncIPTablesRulesBatch(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Empty(t, results)
+
+	results, err = svc.SyncIPTablesRulesBatch(context.Background(), []*model.NetworkItem{
+		{ID: "n-1", Name: "alpha"},
+		{ID: "n-2", Name: "beta"},
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, 0, results["n-1"].Added)
+	assert.Equal(t, 0, results["n-1"].Verified)
+	assert.Equal(t, 0, results["n-1"].Orphaned)
+	assert.Equal(t, 0, results["n-2"].Added)
+	assert.Equal(t, 0, results["n-2"].Verified)
+	assert.Equal(t, 0, results["n-2"].Orphaned)
+}
+
+// --- Service.SyncIPTablesRulesBatch (with nftables tracker) ---
+// Rationale: With a real nftables-backed firewall tracker, rules from multiple
+// networks must be combined into a single batch application. Pre-batch kernel
+// checks determine added vs verified counts.
+
+// seedNftablesRule inserts a rule directly into nftables_rules for testing.
+func seedNftablesRule(t *testing.T, db *sqlx.DB, networkID, chain, ruleType, tableName,
+	protocol, source, destination, inIFace, outIFace, target string,
+	sport, dport int,
+) {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO nftables_rules (chain, rule_type, table_name, protocol,
+			source, destination, in_interface, out_interface, target,
+			sport, dport, network_id, created_at, is_active)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 1)`,
+		chain, ruleType, tableName, protocol, source, destination,
+		inIFace, outIFace, target, sport, dport, networkID,
+	)
+	require.NoError(t, err)
+}
+
+// seedNetworkInDB inserts a network directly into the networks table of the
+// same SQLite DB used by the firewall tracker, satisfying the FK constraint.
+func seedNetworkInDB(t *testing.T, db *sqlx.DB, id, name, subnet, bridge, gw string) {
+	t.Helper()
+	_, err := db.Exec(`
+		INSERT INTO networks (id, name, subnet, bridge, ipv4_gateway,
+			bridge_active, nat_enabled, is_default, is_present,
+			created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 0, 0, 0, 1, datetime('now'), datetime('now'))`,
+		id, name, subnet, bridge, gw,
+	)
+	require.NoError(t, err)
+}
+
+func TestService_SyncIPTablesRulesBatch_withTracker(t *testing.T) {
+	ctx := context.Background()
+
+	// Replace system runner with a FakeRunner so that nft commands are
+	// intercepted (return empty output = no kernel rules).
+	origRunner := system.DefaultRunner
+	t.Cleanup(func() { system.DefaultRunner = origRunner })
+
+	fakeRunner := &testutil.FakeRunner{}
+	system.DefaultRunner = fakeRunner
+
+	// Create in-memory DB with migrations.
+	db := testutil.NewInMemoryDB(t)
+	netRepo := testutil.NewNetworkRepo()
+
+	// Create a real nftables-backed firewall tracker.
+	fwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, db)
+	svc := network.NewService(netRepo, fwTracker)
+
+	// Seed two networks in BOTH the in-memory repo (used by Service for
+	// network lookups) and the SQLite DB (satisfies FK on nftables_rules).
+	net1 := &model.NetworkItem{
+		ID: "n-1", Name: "alpha", Subnet: "10.0.0.0/24",
+		Bridge: "mvm-alpha", IPv4Gateway: "10.0.0.1", IsPresent: true,
+		CreatedAt: "2024-01-01T00:00:00Z",
+	}
+	net2 := &model.NetworkItem{
+		ID: "n-2", Name: "beta", Subnet: "10.0.1.0/24",
+		Bridge: "mvm-beta", IPv4Gateway: "10.0.1.1", IsPresent: true,
+		CreatedAt: "2024-01-01T00:00:00Z",
+	}
+	require.NoError(t, netRepo.Upsert(ctx, net1))
+	require.NoError(t, netRepo.Upsert(ctx, net2))
+	seedNetworkInDB(t, db, "n-1", "alpha", "10.0.0.0/24", "mvm-alpha", "10.0.0.1")
+	seedNetworkInDB(t, db, "n-2", "beta", "10.0.1.0/24", "mvm-beta", "10.0.1.1")
+
+	// Seed firewall rules for both networks in the DB.
+	seedNftablesRule(t, db, "n-1", "MVM-POSTROUTING", "masquerade", "nat",
+		"all", "10.0.0.0/24", "0.0.0.0/0", "*", "eth0", "MASQUERADE", 0, 0)
+	seedNftablesRule(t, db, "n-1", "MVM-FORWARD", "forward_out", "filter",
+		"all", "10.0.0.0/24", "0.0.0.0/0", "mvm-alpha", "eth0", "ACCEPT", 0, 0)
+	seedNftablesRule(t, db, "n-2", "MVM-POSTROUTING", "masquerade", "nat",
+		"all", "10.0.1.0/24", "0.0.0.0/0", "*", "wlan0", "MASQUERADE", 0, 0)
+	seedNftablesRule(t, db, "n-2", "MVM-FORWARD", "forward_out", "filter",
+		"all", "10.0.1.0/24", "0.0.0.0/0", "mvm-beta", "wlan0", "ACCEPT", 0, 0)
+
+	// Sync batch of both networks.
+	results, err := svc.SyncIPTablesRulesBatch(ctx, []*model.NetworkItem{net1, net2})
+	require.NoError(t, err)
+
+	// Verify per-network results exist.
+	require.Contains(t, results, "n-1")
+	require.Contains(t, results, "n-2")
+
+	// With the FakeRunner returning empty nft output, RuleExists finds no
+	// kernel rules — so all are counted as "added".
+	r1 := results["n-1"]
+	assert.Equal(t, 2, r1.Added)
+	assert.Equal(t, 0, r1.Verified)
+
+	r2 := results["n-2"]
+	assert.Equal(t, 2, r2.Added)
+	assert.Equal(t, 0, r2.Verified)
+
+	// Verify that BatchEnsureRules was called once (single nft -f - command).
+	var nftInputCalls int
+	for _, call := range fakeRunner.Calls {
+		if len(call.Args) >= 3 && call.Args[0] == "nft" && call.Args[1] == "-f" {
+			nftInputCalls++
+		}
+	}
+	assert.Equal(t, 1, nftInputCalls, "all networks' rules must be applied in a single nft batch")
+}
+
+func TestService_SyncIPTablesRulesBatch_emptyNetworks(t *testing.T) {
+	ctx := context.Background()
+
+	origRunner := system.DefaultRunner
+	t.Cleanup(func() { system.DefaultRunner = origRunner })
+	system.DefaultRunner = &testutil.FakeRunner{}
+
+	db := testutil.NewInMemoryDB(t)
+	fwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, db)
+	svc := network.NewService(testutil.NewNetworkRepo(), fwTracker)
+
+	results, err := svc.SyncIPTablesRulesBatch(ctx, nil)
+	require.NoError(t, err)
+	assert.Empty(t, results)
 }
 
 // --- Service.ListAll with verify=true ---
