@@ -1027,6 +1027,16 @@ func (s *Service) handleSquashfs(ctx context.Context, inputPath, finalPath, mini
 func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, minimumRootfsMib string) error {
 	t0 := time.Now()
 
+	session, err := system.NewFakerootSession()
+	if err != nil {
+		return errs.New(errs.CodeImageError, "tar-rootfs format requires fakeroot: "+err.Error())
+	}
+	defer func() {
+		if cerr := session.Cleanup(); cerr != nil {
+			slog.Warn("failed to clean up fakeroot state", "error", cerr)
+		}
+	}()
+
 	tmpDir, err := os.MkdirTemp(infra.GetTempDir(), "tar-extract-*")
 	if err != nil {
 		return fmt.Errorf("create temp dir: %w", err)
@@ -1036,8 +1046,10 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	t1 := time.Now()
 	slog.Info("Extracting tar...", "tmp_dir", tmpDir)
 
-	tarResult, tarErr := system.DefaultRunner.Run(ctx, []string{"tar", "-xf", tarPath, "-C", tmpDir,
-		"--exclude=dev/*", "--no-same-owner", "--no-same-permissions"}, system.RunCmdOpts{Check: true, Capture: true})
+	tarResult, tarErr := system.DefaultRunner.Run(ctx,
+		session.Command("tar", "-xf", tarPath, "-C", tmpDir,
+			"--exclude=dev/*", "--same-owner", "--same-permissions"),
+		system.RunCmdOpts{Check: true, Capture: true})
 	tarCombined := tarResult.Stdout + tarResult.Stderr
 	if tarErr != nil {
 		return fmt.Errorf("tar extract failed: %s: %w", tarCombined, tarErr)
@@ -1045,13 +1057,9 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	t2 := time.Now()
 	slog.Debug("tar extract", "elapsed_seconds", t2.Sub(t1).Seconds())
 
-	_, _ = system.DefaultRunner.Run(
-		ctx,
-		[]string{"chmod", "-R", "u+rwx", tmpDir},
-		system.RunCmdOpts{Capture: false, Check: false},
-	)
-	t3 := time.Now()
-	slog.Debug("chmod", "elapsed_seconds", t3.Sub(t2).Seconds())
+	// chmod -R u+rwx is intentionally removed. Fakeroot preserves the
+	// tarball's ownership and permissions via --same-owner --same-permissions,
+	// so the chmod workaround is no longer needed.
 
 	duResult, _ := system.DefaultRunner.Run(
 		ctx,
@@ -1074,7 +1082,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 	}
 	actualBytes, _ := strconv.ParseInt(fields[0], 10, 64)
 	t4 := time.Now()
-	slog.Debug("du", "elapsed_seconds", t4.Sub(t3).Seconds(), "size_bytes", actualBytes)
+	slog.Debug("du", "elapsed_seconds", t4.Sub(t2).Seconds(), "size_bytes", actualBytes)
 
 	var rawSizeMB int
 	if minimumRootfsMib == "dynamic" {
@@ -1116,7 +1124,7 @@ func (s *Service) createExt4FromTar(ctx context.Context, tarPath, outputPath, mi
 
 	mkfsResult, mkfsErr := system.DefaultRunner.Run(
 		ctx,
-		[]string{"mkfs.ext4", "-d", tmpDir, "-F", outputPath},
+		session.Command("mkfs.ext4", "-d", tmpDir, "-L", "", outputPath),
 		system.RunCmdOpts{Check: true, Capture: true},
 	)
 	mkfsCombined := mkfsResult.Stdout + mkfsResult.Stderr
