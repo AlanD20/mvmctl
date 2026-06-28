@@ -435,32 +435,51 @@ func (s *Service) EnsureCached(images []*model.ImageItem) ([]string, error) {
 	var results []string
 	for _, image := range images {
 		cachedPath := filepath.Join(infra.GetWarmImagesDir(), fmt.Sprintf("%s.%s", image.ID, image.FSType))
+		lockPath := cachedPath + ".lock"
 
-		if _, err := os.Stat(cachedPath); err == nil {
-			slog.Debug("Found image in cache", "path", cachedPath)
-			results = append(results, cachedPath)
-			continue
+		release, err := infra.AcquireExclusiveFileLock(lockPath)
+		if err != nil {
+			return nil, err
 		}
 
-		if image.CompressedFormat == nil || *image.CompressedFormat == "" {
-			slog.Debug("Copying uncompressed image to cache", "path", filepath.Base(cachedPath))
-			if err := infra.CopyFile(image.Path, cachedPath); err != nil {
-				return nil, fmt.Errorf("copy to cache: %w", err)
-			}
+		// Double-checked locking: re-check after acquiring exclusive lock.
+		if _, err := os.Stat(cachedPath); err == nil {
+			slog.Debug("Found image in cache", "path", cachedPath)
+			release()
 		} else {
-			fmt_ := *image.CompressedFormat
-			suffix := "." + fmt_
-			if strings.HasPrefix(fmt_, ".") {
-				suffix = fmt_
-			}
-			compressedPath := image.Path
-			ext := filepath.Ext(compressedPath)
-			compressedPath = compressedPath[:len(compressedPath)-len(ext)] + suffix
+			tmpPath := cachedPath + ".tmp"
 
-			slog.Debug("Decompressing to cache", "path", filepath.Base(cachedPath))
-			if err := s.decompress(compressedPath, cachedPath, fmt_); err != nil {
-				return nil, err
+			if image.CompressedFormat == nil || *image.CompressedFormat == "" {
+				slog.Debug("Copying uncompressed image to cache", "path", filepath.Base(cachedPath))
+				if err := infra.CopyFile(image.Path, tmpPath); err != nil {
+					release()
+					return nil, fmt.Errorf("copy to cache: %w", err)
+				}
+			} else {
+				fmt_ := *image.CompressedFormat
+				suffix := "." + fmt_
+				if strings.HasPrefix(fmt_, ".") {
+					suffix = fmt_
+				}
+				compressedPath := image.Path
+				ext := filepath.Ext(compressedPath)
+				compressedPath = compressedPath[:len(compressedPath)-len(ext)] + suffix
+
+				slog.Debug("Decompressing to cache", "path", filepath.Base(cachedPath))
+				if err := s.decompress(compressedPath, tmpPath, fmt_); err != nil {
+					release()
+					return nil, err
+				}
 			}
+
+			// Atomic rename ensures other waiters see a complete file.
+			if err := os.Rename(tmpPath, cachedPath); err != nil {
+				os.Remove(tmpPath) // best-effort cleanup
+				release()
+				return nil, fmt.Errorf("rename to cached path: %w", err)
+			}
+
+			release()
 		}
 
 		results = append(results, cachedPath)
