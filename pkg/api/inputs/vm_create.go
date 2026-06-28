@@ -381,7 +381,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if input.Writeback != nil {
 		writeback = *input.Writeback
 	}
-	extraDrives := volume.VolumesToDrives(vols, writeback)
+	extraDrives := volume.VolumesToDrives(vols)
 	// Validate and parse network subnet.
 	_, ipv4Net, parseErr := net.ParseCIDR(netw.Subnet)
 	if parseErr != nil {

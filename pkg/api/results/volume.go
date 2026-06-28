@@ -7,6 +7,7 @@ type VolumeItemInfo struct {
 	SizeBytes  int64  `json:"size_bytes"`
 	Format     string `json:"format"`
 	IsReadOnly bool   `json:"is_read_only"`
+	CacheType  string `json:"cache_type"`
 	Path       string `json:"path"`
 	Status     string `json:"status"`
 }

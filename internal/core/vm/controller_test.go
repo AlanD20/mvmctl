@@ -183,36 +183,11 @@ func TestController_Snapshot_stateValidationTable(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctrl := newController(tc.status, 0, tc.socketPath)
-			err := ctrl.Snapshot(context.Background(), "/tmp/mem", "/tmp/state")
-
-			if tc.wantErr != "" {
-				require.Error(t, err)
-				assertDomainError(t, err, errs.CodeVMStateInvalid, tc.wantErr)
-				return
-			}
-			assert.NoError(t, err)
-		})
-	}
-}
-
-// --- LoadSnapshot state validation ---
-// Rationale: LoadSnapshot checks APISocketPath before any I/O. Unlike other
-// lifecycle methods, it does not check c.vm.Status — only the socket path.
-
-func TestController_LoadSnapshot_stateValidation(t *testing.T) {
-	tests := map[string]struct {
-		socketPath string
-		wantErr    string
-	}{
-		// Error path
-		"missing_socket": {socketPath: "", wantErr: "Socket not found"},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			// Status does not matter — LoadSnapshot only checks socket
-			ctrl := newController(model.VMStatusRunning, 0, tc.socketPath)
-			err := ctrl.LoadSnapshot(context.Background(), "/tmp/mem", "/tmp/state", false)
+			err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
+				MemFile:   "/tmp/mem",
+				StateFile: "/tmp/state",
+				PauseOnly: false,
+			})
 
 			if tc.wantErr != "" {
 				require.Error(t, err)
@@ -301,16 +276,11 @@ func TestController_ContextCancellation(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		ctrl := newController(model.VMStatusRunning, 0, "")
-		err := ctrl.Snapshot(ctx, "/mem", "/state")
-		require.Error(t, err, "socket check must happen before context check")
-		assertDomainError(t, err, errs.CodeVMStateInvalid, "Socket not found")
-	})
-
-	t.Run("LoadSnapshot_missingSocket", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		ctrl := newController(model.VMStatusRunning, 0, "")
-		err := ctrl.LoadSnapshot(ctx, "/mem", "/state", false)
+		err := ctrl.SnapshotCreate(ctx, model.SnapshotCreateConfig{
+			MemFile:   "/mem",
+			StateFile: "/state",
+			PauseOnly: false,
+		})
 		require.Error(t, err, "socket check must happen before context check")
 		assertDomainError(t, err, errs.CodeVMStateInvalid, "Socket not found")
 	})

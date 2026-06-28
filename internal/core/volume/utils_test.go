@@ -20,13 +20,13 @@ import (
 func TestVolumesToDrives(t *testing.T) {
 	t.Run("nil_volume_skipped", func(t *testing.T) {
 		vols := []*model.VolumeItem{nil, {ID: "v1", Path: "/dev/vda"}}
-		got := VolumesToDrives(vols, false)
+		got := VolumesToDrives(vols)
 		assert.Len(t, got, 1)
 		assert.Equal(t, "v1", got[0].DriveID)
 	})
 
 	t.Run("empty_list_returns_empty", func(t *testing.T) {
-		got := VolumesToDrives(nil, false)
+		got := VolumesToDrives(nil)
 		assert.Empty(t, got)
 	})
 
@@ -35,7 +35,7 @@ func TestVolumesToDrives(t *testing.T) {
 			ID:   "root",
 			Path: "/dev/vda",
 		}}
-		got := VolumesToDrives(vols, false)
+		got := VolumesToDrives(vols)
 		require.Len(t, got, 1)
 		want := []model.DriveConfig{{
 			DriveID:      "root",
@@ -48,12 +48,13 @@ func TestVolumesToDrives(t *testing.T) {
 		assert.Empty(t, cmp.Diff(want, got))
 	})
 
-	t.Run("writeback_flag_uses_writeback_cache", func(t *testing.T) {
+	t.Run("volume_cache_type_is_respected", func(t *testing.T) {
 		vols := []*model.VolumeItem{{
-			ID:   "safe-vol",
-			Path: "/dev/vdx",
+			ID:        "safe-vol",
+			Path:      "/dev/vdx",
+			CacheType: "Writeback",
 		}}
-		got := VolumesToDrives(vols, true)
+		got := VolumesToDrives(vols)
 		require.Len(t, got, 1)
 		want := []model.DriveConfig{{
 			DriveID:      "safe-vol",
@@ -72,7 +73,7 @@ func TestVolumesToDrives(t *testing.T) {
 			Path:       "/dev/vdb",
 			IsReadOnly: true,
 		}}
-		got := VolumesToDrives(vols, false)
+		got := VolumesToDrives(vols)
 		require.Len(t, got, 1)
 		assert.True(t, got[0].IsReadOnly)
 	})
@@ -83,7 +84,7 @@ func TestVolumesToDrives(t *testing.T) {
 			{ID: "b", Path: "/dev/vdb"},
 			{ID: "c", Path: "/dev/vdc"},
 		}
-		got := VolumesToDrives(vols, false)
+		got := VolumesToDrives(vols)
 		require.Len(t, got, 3)
 		assert.Equal(t, "a", got[0].DriveID)
 		assert.Equal(t, "b", got[1].DriveID)

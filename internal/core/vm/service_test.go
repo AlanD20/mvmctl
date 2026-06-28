@@ -195,35 +195,45 @@ func TestController_Stop_idempotent(t *testing.T) {
 func TestController_Snapshot_stateValidation(t *testing.T) {
 	t.Run("starting_rejected", func(t *testing.T) {
 		ctrl := ctrlFor(model.VMStatusStarting)
-		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
+		err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
+			MemFile: "/mem", StateFile: "/state", PauseOnly: false,
+		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "still starting")
 	})
 
 	t.Run("stopped_rejected", func(t *testing.T) {
 		ctrl := ctrlFor(model.VMStatusStopped)
-		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
+		err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
+			MemFile: "/mem", StateFile: "/state", PauseOnly: false,
+		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "stopped")
 	})
 
 	t.Run("stopping_rejected", func(t *testing.T) {
 		ctrl := ctrlFor(model.VMStatusStopping)
-		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
+		err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
+			MemFile: "/mem", StateFile: "/state", PauseOnly: false,
+		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "shutting down")
 	})
 
 	t.Run("error_rejected", func(t *testing.T) {
 		ctrl := ctrlFor(model.VMStatusError)
-		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
+		err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
+			MemFile: "/mem", StateFile: "/state", PauseOnly: false,
+		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "error")
 	})
 
 	t.Run("crashed_rejected", func(t *testing.T) {
 		ctrl := ctrlFor(model.VMStatusCrashed)
-		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
+		err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
+			MemFile: "/mem", StateFile: "/state", PauseOnly: false,
+		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "crashed")
 	})
@@ -232,7 +242,9 @@ func TestController_Snapshot_stateValidation(t *testing.T) {
 		repo := testutil.NewVMRepo()
 		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusRunning, APISocketPath: ""}
 		ctrl := vm.NewController(m, repo)
-		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
+		err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
+			MemFile: "/mem", StateFile: "/state", PauseOnly: false,
+		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Socket not found")
 	})
@@ -241,7 +253,9 @@ func TestController_Snapshot_stateValidation(t *testing.T) {
 		repo := testutil.NewVMRepo()
 		m := &model.VMItem{ID: "vm-1", Name: "test", Status: model.VMStatusPaused, APISocketPath: ""}
 		ctrl := vm.NewController(m, repo)
-		err := ctrl.Snapshot(context.Background(), "/mem", "/state")
+		err := ctrl.SnapshotCreate(context.Background(), model.SnapshotCreateConfig{
+			MemFile: "/mem", StateFile: "/state", PauseOnly: false,
+		})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "Socket not found")
 	})

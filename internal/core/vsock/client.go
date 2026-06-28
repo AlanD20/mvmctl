@@ -310,14 +310,20 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 	attempts := 0
 
 	for {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
+		if time.Until(deadline) <= 0 {
 			elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
 			timinglog.Log("vsock_probe", elapsedMs,
 				"vm_name", c.VmName,
 				"vm_id", c.item.VmID,
 				"attempts", attempts,
 				"error", "timeout",
+			)
+			slog.Debug("vsock probe timeout",
+				"vm_id", c.item.VmID,
+				"uds_path", c.item.UDSPath,
+				"port", c.item.Port,
+				"attempts", attempts,
+				"timeout", c.ProbeTimeout,
 			)
 			return nil, errs.New(
 				errs.CodeVsockConnectionFailed,
@@ -331,9 +337,19 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 
 		attempts++
 
+		// Per-attempt debug logging
+		remaining := time.Until(deadline)
+		slog.Debug("vsock probe attempt",
+			"vm_id", c.item.VmID,
+			"uds_path", c.item.UDSPath,
+			"port", c.item.Port,
+			"attempt", attempts,
+			"remaining", remaining,
+		)
+
 		// Per-attempt timing: wrap dialAndHandshake with vsock_dial
 		dialStart := time.Now()
-		conn, err := dialAndHandshake(ctx, c.item.UDSPath, c.item.Port)
+		conn, err := dialAndHandshake(ctx, c.item.UDSPath, c.item.Port, attempts)
 		dialElapsed := float64(time.Since(dialStart).Microseconds()) / 1000.0
 
 		if err == nil {
@@ -501,7 +517,7 @@ func (c *Client) probeVersion(ctx context.Context, conn net.Conn) (string, error
 // No version probe or upgrade check. Used by upgradeAgent to avoid
 // circular calls back into ensureAgent.
 func (c *Client) dialRaw(ctx context.Context) (net.Conn, error) {
-	return dialAndHandshake(ctx, c.item.UDSPath, c.item.Port)
+	return dialAndHandshake(ctx, c.item.UDSPath, c.item.Port, 0)
 }
 
 // upgradeAgent upgrades the guest agent inside the VM to the version

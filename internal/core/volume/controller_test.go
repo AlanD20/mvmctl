@@ -86,6 +86,14 @@ func TestController_Attach(t *testing.T) {
 			vmID: "vm-123",
 			want: model.VolumeStatusAttached,
 		},
+		"attach_preserves_cache_type": {
+			pre: func(vol *model.VolumeItem) {
+				vol.Status = model.VolumeStatusAvailable
+				vol.CacheType = model.CacheTypeUnsafe
+			},
+			vmID: "vm-789",
+			want: model.VolumeStatusAttached,
+		},
 	}
 
 	for name, tc := range tests {
@@ -168,6 +176,7 @@ func TestController_Attach(t *testing.T) {
 				CreatedAt:  vol.CreatedAt,
 				UpdatedAt:  vol.UpdatedAt,
 				IsReadOnly: vol.IsReadOnly,
+				CacheType:  vol.CacheType,
 			}
 			assert.Empty(t, cmp.Diff(want, fromRepo))
 		})
@@ -213,6 +222,15 @@ func TestController_Detach(t *testing.T) {
 		},
 		"detach_available_volume_succeeds": {
 			pre:     func(vol *model.VolumeItem) { vol.Status = model.VolumeStatusAvailable; vol.VMID = nil },
+			want:    model.VolumeStatusAvailable,
+			wantNil: true,
+		},
+		"detach_preserves_cache_type": {
+			pre: func(vol *model.VolumeItem) {
+				vol.Status = model.VolumeStatusAttached
+				vol.VMID = ptr.Ptr("vm-456")
+				vol.CacheType = model.CacheTypeWriteback
+			},
 			want:    model.VolumeStatusAvailable,
 			wantNil: true,
 		},
@@ -299,6 +317,7 @@ func TestController_Detach(t *testing.T) {
 				CreatedAt:  vol.CreatedAt,
 				UpdatedAt:  vol.UpdatedAt,
 				IsReadOnly: vol.IsReadOnly,
+				CacheType:  vol.CacheType,
 			}
 			assert.Empty(t, cmp.Diff(want, fromRepo))
 		})

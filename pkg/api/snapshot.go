@@ -7,18 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/crypto"
-	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
 	libnet "mvmctl/internal/lib/network"
-	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
@@ -110,59 +108,33 @@ func (op *Operation) SnapshotCreate(
 			fmt.Sprintf("failed to copy rootfs from %s: %v", vmItem.RootfsPath, err), err)
 	}
 
-	// 6. Firecracker API operations
+	// Create phantom symlink so the vmstate captures a snapshot-local path
+	// instead of the source VM's path. The symlink initially points to the
+	// snapshot's own rootfs copy.
+	phantomPath := filepath.Join(snapDir, "phantom-rootfs.ext4")
+	if err := os.Symlink(rootfsFile, phantomPath); err != nil {
+		cleanup = true
+		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
+			fmt.Sprintf("failed to create phantom symlink: %v", err), err)
+	}
+
+	// 6. Firecracker API operations (pause + snapshot + optionally resume)
 	memFile := filepath.Join(snapDir, "memory")
 	stateFile := filepath.Join(snapDir, "vmstate")
-	wasRunning := vmItem.Status == model.VMStatusRunning
 
-	if vmItem.APISocketPath != "" {
-		client := firecracker.NewClient(vmItem.APISocketPath)
-		defer client.Close()
-
-		// 6a. Pause VM if running
-		if wasRunning {
-			emitProgress(onProgress, "pause", "running", "Pausing VM...")
-			if err := client.PauseVM(ctx); err != nil {
-				cleanup = true
-				return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
-					fmt.Sprintf("failed to pause VM '%s': %v", vmItem.Name, err), err)
-			}
-			if err := op.Repos.VM.UpdateStatus(ctx, vmItem.ID, model.VMStatusPaused); err != nil {
-				slog.Error("failed to update VM status to paused", "vm", vmItem.Name, "error", err)
-			}
-			vmItem.Status = model.VMStatusPaused
-		}
-
-		// 6b. Create snapshot
+	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
 		emitProgress(onProgress, "snapshot", "running", "Creating Firecracker snapshot...")
-		if _, err := client.CreateSnapshot(ctx, memFile, stateFile); err != nil {
-			// If we paused the VM, try to resume it before returning
-			if wasRunning {
-				if resumeErr := client.ResumeVM(ctx); resumeErr != nil {
-					slog.Error("failed to resume VM after snapshot failure",
-						"vm", vmItem.Name, "error", resumeErr)
-				}
-				if statusErr := op.Repos.VM.UpdateStatus(ctx, vmItem.ID, model.VMStatusRunning); statusErr != nil {
-					slog.Error("failed to update VM status to running after snapshot failure",
-						"vm", vmItem.Name, "error", statusErr)
-				}
-			}
+		ctrl := vm.NewController(vmItem, op.Repos.VM)
+		if err := ctrl.SnapshotCreate(ctx, model.SnapshotCreateConfig{
+			MemFile:           memFile,
+			StateFile:         stateFile,
+			PauseOnly:         input.Pause,
+			PhantomRootfsPath: phantomPath,
+			RootfsPath:        vmItem.RootfsPath,
+		}); err != nil {
 			cleanup = true
 			return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
 				fmt.Sprintf("failed to create snapshot for VM '%s': %v", vmItem.Name, err), err)
-		}
-
-		// 6c. Resume VM if not --pause
-		if wasRunning && !input.Pause {
-			emitProgress(onProgress, "resume", "running", "Resuming VM...")
-			if err := client.ResumeVM(ctx); err != nil {
-				slog.Error("failed to resume VM after snapshot",
-					"vm", vmItem.Name, "error", err)
-			}
-			if err := op.Repos.VM.UpdateStatus(ctx, vmItem.ID, model.VMStatusRunning); err != nil {
-				slog.Error("failed to update VM status to running", "vm", vmItem.Name, "error", err)
-			}
-			vmItem.Status = model.VMStatusRunning
 		}
 	} else {
 		// No API socket — snapshot from stopped VM (just copy rootfs)
@@ -178,24 +150,21 @@ func (op *Operation) SnapshotCreate(
 	}
 
 	// 8. Build extra config from VM boot settings
-	var extraConfig *model.SnapshotExtraConfig
-	if vmItem.BootArgs != "" || vmItem.LSMFlags != "" || vmItem.CPUConfig != nil || vmItem.Vsock != nil {
-		extraConfig = &model.SnapshotExtraConfig{
-			BootArgs:      vmItem.BootArgs,
-			LSMFlags:      vmItem.LSMFlags,
-			PCIEnabled:    vmItem.PCIEnabled,
-			NestedVirt:    vmItem.NestedVirt,
-			Console:       vmItem.EnableConsole,
-			EnableLogging: vmItem.EnableLogging,
-			EnableMetrics: vmItem.EnableMetrics,
-			LogLevel:      vmItem.LogLevel,
-			CPUConfig:     vmItem.CPUConfig,
-		}
-		if vmItem.Vsock != nil {
-			extraConfig.VsockPort = vmItem.Vsock.Port
-			extraConfig.VsockCID = vmItem.Vsock.GuestCID
-			extraConfig.VsockToken = vmItem.Vsock.Token
-		}
+	extraConfig := &model.SnapshotExtraConfig{
+		BootArgs:      vmItem.BootArgs,
+		LSMFlags:      vmItem.LSMFlags,
+		PCIEnabled:    vmItem.PCIEnabled,
+		NestedVirt:    vmItem.NestedVirt,
+		Console:       vmItem.EnableConsole,
+		EnableLogging: vmItem.EnableLogging,
+		EnableMetrics: vmItem.EnableMetrics,
+		LogLevel:      vmItem.LogLevel,
+		CPUConfig:     vmItem.CPUConfig,
+	}
+	if vmItem.Vsock != nil {
+		extraConfig.VsockPort = vmItem.Vsock.Port
+		extraConfig.VsockCID = vmItem.Vsock.GuestCID
+		extraConfig.VsockToken = vmItem.Vsock.Token
 	}
 
 	// 9. Build metadata from enriched VM
@@ -268,13 +237,16 @@ func (op *Operation) SnapshotRestore(
 	}
 
 	// 2. Enrich snapshot with relations
+	// Skip "network" when an explicit --network override is provided —
+	// it will be resolved separately in step 3.
+	enrichRelations := []string{"image", "kernel", "binary"}
+	if input.Network == nil || *input.Network == "" {
+		enrichRelations = append(enrichRelations, "network")
+	}
 	if err := op.Enr.EnrichSnapshot(
 		ctx,
 		[]*model.SnapshotItem{snap},
-		"image",
-		"kernel",
-		"network",
-		"binary",
+		enrichRelations...,
 	); err != nil {
 		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
 			"failed to enrich snapshot with relations", err)
@@ -357,23 +329,9 @@ func (op *Operation) SnapshotRestore(
 		}
 	})
 
-	// 7. Resolve rootfs suffix from image
-	rootfsSuffix := "ext4"
-	if snap.ImageID != "" {
-		img, imgErr := op.Repos.Image.Get(ctx, snap.ImageID)
-		if imgErr != nil {
-			return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
-				fmt.Sprintf("failed to resolve image %s: %v", snap.ImageID, imgErr), imgErr)
-		}
-		if img == nil {
-			return nil, errs.New(errs.CodeSnapshotRestoreFailed,
-				fmt.Sprintf("image %s referenced by snapshot not found", snap.ImageID))
-		}
-		rootfsSuffix = img.FSType
-	}
-
-	// 8. Create VMs
+	// 7. Create VMs
 	var createdVMs []*model.VMItem
+	var restoreErrors []error
 	for i, name := range names {
 		createdAt := time.Now()
 		vmID := crypto.VMID(name, createdAt.Format(time.RFC3339))
@@ -444,7 +402,7 @@ func (op *Operation) SnapshotRestore(
 			MemSizeMiB:   snap.MemSizeMiB,
 			DiskSizeMiB:  snap.DiskSizeMiB,
 			RootfsPath:   rootfsPath,
-			RootfsSuffix: rootfsSuffix,
+			RootfsSuffix: snap.Image.FSType,
 			ImageID:      snap.ImageID,
 			CreatedAt:    createdAt.Format(time.RFC3339),
 			UpdatedAt:    createdAt.Format(time.RFC3339),
@@ -479,85 +437,43 @@ func (op *Operation) SnapshotRestore(
 			slog.Warn("Failed to enrich restored VM", "vm", name, "error", err)
 		}
 
-		// Set image fallback by re-fetching from enriched kernel
-		if snap.Kernel != nil {
-			vmItem.Kernel = snap.Kernel
-		}
-		if snap.Binary != nil {
-			vmItem.Binary = snap.Binary
-		}
-		vmItem.Network = networkItem
-
 		// --- Vsock setup for restored VM ---
-		// Use the same port and token from the snapshot (matches the frozen
-		// guest agent). Allocate a fresh CID to avoid conflicts with the
-		// source VM (which is still running with the original CID).
-		// Only the UDS path changes (new VM directory).
+		// The agent binary, init scripts, and token are already on the
+		// rootfs (ext4 filesystem, preserved in snapshot). Firecracker
+		// auto-updates the guest CID on resume via vsock transport reset.
+		// We only need a fresh CID (the source VM still holds the old one)
+		// and the new UDS path for the restored VM's directory.
 		if snap.ExtraConfig != nil && snap.ExtraConfig.VsockPort > 0 && vmItem.RootfsPath != "" {
 			vsockFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "vsock_filename")
 			vsockUDSPath := filepath.Join(vmDir, vsockFilename)
 
-			// Allocate fresh CID — the snapshot's CID is already in use
-			// by the source VM (t2-base) which is still running.
-			vsockCID, cidErr := op.Services.Vsock.AllocateCID()
-			if cidErr != nil {
-				slog.Error("Failed to allocate vsock CID for restored VM",
-					"vm", name, "error", cidErr)
-			} else {
-				// Re-inject vsock agent into the copied rootfs with the
-				// saved token, so host and guest stay in sync.
-				if agentBin := vsock.AgentBinary(); len(agentBin) > 0 {
-					rootUID, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "root_uid")
-					rootGID, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "root_gid")
-					userUID, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "user_uid")
-					userGID, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "user_gid")
+			// Use the snapshot's original CID — Firecracker preserves the guest
+			// CID from the vmstate (vsock_override only changes the UDS path).
+			// Allocating a new CID would cause a mismatch with what the host
+			// backend actually has. Different Firecracker processes have their
+			// own CID namespaces, so no conflict with the source VM.
+			vsockCID := snap.ExtraConfig.VsockCID
 
-					backend, beErr := provisioner.NewBackend(ctx, provisioner.BackendOpts{
-						RootfsPath:      vmItem.RootfsPath,
-						FsType:          rootfsSuffix,
-						CacheDir:        op.CacheDir,
-						ProvisionerType: provisioner.ProvisionerType(op.ProvisionerType),
-						RootUID:         rootUID,
-						RootGID:         rootGID,
-						UserUID:         userUID,
-						UserGID:         userGID,
-					})
-					if beErr != nil {
-						slog.Error("Failed to create provisioner backend for vsock injection",
-							"vm", name, "error", beErr)
-					} else {
-						if injErr := backend.InjectVsockAgent(
-							ctx,
-							agentBin,
-							snap.ExtraConfig.VsockPort,
-							snap.ExtraConfig.VsockToken,
-						); injErr != nil {
-							slog.Error("Failed to inject vsock agent into restored rootfs",
-								"vm", name, "error", injErr)
-						} else if runErr := backend.Run(
-							ctx,
-						); runErr != nil {
-							slog.Error("Failed to run provisioner for vsock agent injection",
-								"vm", name, "error", runErr)
-						}
-					}
-				}
+			if persistErr := op.Services.Vsock.PersistConfig(
+				ctx, vsockCID, vmID, name, vsockUDSPath,
+				snap.ExtraConfig.VsockPort, snap.ExtraConfig.VsockToken,
+			); persistErr != nil {
+				return nil, errs.WrapMsg(
+					errs.CodeSnapshotRestoreFailed,
+					fmt.Sprintf(
+						"failed to persist vsock config for restored VM '%s': %v",
+						name,
+						persistErr,
+					),
+					persistErr,
+				)
+			}
 
-				// Persist vsock config with fresh CID but same port + token.
-				if persistErr := op.Services.Vsock.PersistConfig(
-					ctx, vsockCID, vmID, name, vsockUDSPath,
-					snap.ExtraConfig.VsockPort, snap.ExtraConfig.VsockToken,
-				); persistErr != nil {
-					slog.Error("Failed to persist vsock config for restored VM",
-						"vm", name, "error", persistErr)
-				} else {
-					vmItem.Vsock = &model.VsockConfigItem{
-						GuestCID: vsockCID,
-						UDSPath:  vsockUDSPath,
-						Port:     snap.ExtraConfig.VsockPort,
-						Token:    snap.ExtraConfig.VsockToken,
-					}
-				}
+			vmItem.Vsock = &model.VsockConfigItem{
+				GuestCID: vsockCID,
+				UDSPath:  vsockUDSPath,
+				Port:     snap.ExtraConfig.VsockPort,
+				Token:    snap.ExtraConfig.VsockToken,
 			}
 		}
 
@@ -584,75 +500,90 @@ func (op *Operation) SnapshotRestore(
 				"vm", name, "error", err)
 			// best-effort: mark as errored in DB so user can inspect
 			_ = op.Repos.VM.UpdateStatus(ctx, vmItem.ID, model.VMStatusError)
+			restoreErrors = append(restoreErrors,
+				fmt.Errorf("vm '%s': respawn failed: %w", name, err))
 			createdVMs = append(createdVMs, vmItem)
 			continue
 		}
 
-		// Re-read updated VM from DB
+		// Re-read updated VM from DB to pick up PID/ProcessStartTime
+		// that vmRespawnFirecracker wrote via UpdateProcessInfo.
+		// NOTE: vmItem.Vsock is NOT stored in vm_instances table (no db tag),
+		// so we must save and restore it across the re-read.
 		updated, getErr := op.Repos.VM.Get(ctx, vmItem.ID)
 		if getErr == nil && updated != nil {
+			updated.Vsock = vmItem.Vsock
 			vmItem = updated
 		}
 
 		// Load snapshot via Firecracker API
-		if vmItem.APISocketPath != "" {
-			fcClient := firecracker.NewClient(vmItem.APISocketPath)
-
-			// The snapshot's vmstate file hardcodes the ORIGINAL VM's
-			// rootfs path. We created a copy at vmItem.RootfsPath (new VM
-			// directory), but Firecracker will look for the rootfs at the
-			// old path. Create a symlink from old → new so the snapshot
-			// can find the rootfs file.
-			oldVMDir := infra.GetVMDirByID(snap.SourceVMID)
-			oldRootfsPath := filepath.Join(oldVMDir, filepath.Base(vmItem.RootfsPath))
-			if _, statErr := os.Stat(oldRootfsPath); os.IsNotExist(statErr) {
-				if mkdirErr := os.MkdirAll(oldVMDir, 0755); mkdirErr == nil {
-					if symlinkErr := os.Symlink(vmItem.RootfsPath, oldRootfsPath); symlinkErr != nil {
-						slog.Warn(
-							"failed to create rootfs symlink for snapshot restore",
-							"vm",
-							name,
-							"from",
-							oldRootfsPath,
-							"to",
-							vmItem.RootfsPath,
-							"error",
-							symlinkErr,
-						)
-					} else {
-						defer os.RemoveAll(oldVMDir)
-					}
-				}
+		// Only attempt API load when the snapshot has actual memory/state files.
+		snapHasState := snap.MemoryFile != "" && snap.StateFile != ""
+		if snapHasState {
+			if _, err := os.Stat(snap.MemoryFile); err != nil {
+				snapHasState = false
+			} else if _, err := os.Stat(snap.StateFile); err != nil {
+				snapHasState = false
+			}
+		}
+		if vmItem.APISocketPath != "" && snapHasState {
+			// Acquire lock on snapshot dir to serialize concurrent restores
+			// from the same snapshot (prevents phantom symlink races).
+			lockPath := filepath.Join(snap.SnapshotDir, ".restore.lock")
+			lockFile, lkErr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+			if lkErr == nil {
+				_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX)
 			}
 
-			if _, loadErr := fcClient.LoadSnapshot(ctx, snap.MemoryFile, snap.StateFile, input.Resume); loadErr != nil {
-				slog.Error("failed to load snapshot for VM", "vm", name, "error", loadErr)
-				// best-effort: mark as errored in DB so user can inspect
+			// Point phantom symlink to this restore's rootfs copy so
+			// LoadSnapshot finds the correct backing file at the vmstate path.
+			phantomPath := filepath.Join(snap.SnapshotDir, "phantom-rootfs.ext4")
+			if err := os.Remove(phantomPath); err != nil && !os.IsNotExist(err) {
+				if lockFile != nil {
+					_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+					lockFile.Close()
+				}
+				return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
+					fmt.Sprintf("failed to remove old phantom symlink: %v", err), err)
+			}
+			if err := os.Symlink(vmItem.RootfsPath, phantomPath); err != nil {
+				if lockFile != nil {
+					_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+					lockFile.Close()
+				}
+				return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
+					fmt.Sprintf("failed to create phantom symlink: %v", err), err)
+			}
+
+			ctrl := vm.NewController(vmItem, op.Repos.VM)
+			vsockUDSPath := ""
+			if vmItem.Vsock != nil {
+				vsockUDSPath = vmItem.Vsock.UDSPath
+			}
+			if err := ctrl.SnapshotRestore(ctx, model.SnapshotRestoreConfig{
+				MemFile:          snap.MemoryFile,
+				StateFile:        snap.StateFile,
+				Resume:           input.Resume,
+				NetworkOverrides: map[string]string{"eth0": vmItem.TapDevice},
+				VsockUDSPath:     vsockUDSPath,
+				RootfsPath:       vmItem.RootfsPath,
+			}); err != nil {
+				if lockFile != nil {
+					_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+					lockFile.Close()
+				}
+				slog.Error("failed to load snapshot for VM", "vm", name, "error", err)
 				_ = op.Repos.VM.UpdateStatus(ctx, vmItem.ID, model.VMStatusError)
-				fcClient.Close()
+				restoreErrors = append(restoreErrors,
+					fmt.Errorf("vm '%s': load snapshot failed: %w", name, err))
 				createdVMs = append(createdVMs, vmItem)
 				continue
 			}
 
-			// Reconfigure vsock device with the new CID and UDS path.
-			// Snapshot mode doesn't pass --config-file, so the vsock
-			// section from firecracker.json is ignored by Firecracker.
-			// The device must be configured via the API after loading.
-			if vmItem.Vsock != nil && vmItem.Vsock.GuestCID > 0 && vmItem.Vsock.UDSPath != "" {
-				if vsockErr := fcClient.PutVsock(ctx, vmItem.Vsock.GuestCID, vmItem.Vsock.UDSPath); vsockErr != nil {
-					slog.Warn("Failed to reconfigure vsock device after snapshot load",
-						"vm", name, "error", vsockErr)
-				}
+			if lockFile != nil {
+				_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+				lockFile.Close()
 			}
-
-			fcClient.Close()
-		}
-
-		// Update status based on --resume
-		if input.Resume {
-			// best-effort: update status in DB, non-fatal if it fails
-			_ = op.Repos.VM.UpdateStatus(ctx, vmItem.ID, model.VMStatusRunning)
-			vmItem.Status = model.VMStatusRunning
 		}
 
 		op.AuditLog.LogOperation("snapshot.restore",
@@ -660,6 +591,15 @@ func (op *Operation) SnapshotRestore(
 		createdVMs = append(createdVMs, vmItem)
 	}
 
+	if len(restoreErrors) > 0 {
+		msgs := make([]string, len(restoreErrors))
+		for i, e := range restoreErrors {
+			msgs[i] = e.Error()
+		}
+		return createdVMs, errs.New(errs.CodeSnapshotRestoreFailed,
+			fmt.Sprintf("snapshot restore completed with %d error(s): %s",
+				len(restoreErrors), strings.Join(msgs, "; ")))
+	}
 	return createdVMs, nil
 }
 

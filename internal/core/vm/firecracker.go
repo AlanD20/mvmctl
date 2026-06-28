@@ -154,8 +154,8 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	// CRITICAL: WaitForSocket only checks that the socket file exists (bind() completed).
 	// Firecracker may crash between bind() and listen(), leaving a zombie socket file
 	// that reports ECONNREFUSED on connect. We must Dial to verify it's actually listening.
-	// Nested KVM environments may take longer to initialize (2s might not be enough).
-	for range 40 {
+	// Nested KVM environments may take longer to initialize (4s might not be enough).
+	for range 150 {
 		if infra.WaitForSocket(s.APISocketPath, 100*time.Millisecond) == nil {
 			// Socket file exists — verify it's accepting connections.
 			if conn, dialErr := net.DialTimeout("unix", s.APISocketPath, 50*time.Millisecond); dialErr == nil {
@@ -180,7 +180,7 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	// Final verification: socket must exist AND accept connections.
 	if _, err := os.Stat(s.APISocketPath); os.IsNotExist(err) {
 		return errs.New(errs.CodeFirecrackerSpawnError,
-			"firecracker API socket not available after 2s")
+			"firecracker API socket not available after 4s")
 	}
 	if conn, dialErr := net.DialTimeout("unix", s.APISocketPath, 200*time.Millisecond); dialErr != nil {
 		return errs.New(errs.CodeFirecrackerSpawnError,
