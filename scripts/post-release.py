@@ -13,6 +13,7 @@ Usage:
 import argparse
 import hashlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -107,7 +108,8 @@ def regenerate_srcinfo(root: Path) -> None:
 
 def update_aur(version: str, root: Path, dry_run: bool) -> None:
     """Download release artifacts and update AUR PKGBUILD checksums."""
-    pkgbuild_path = root / "packaging" / "PKGBUILD"
+    pkgbuild_dir = root / "packaging"
+    pkgbuild_path = pkgbuild_dir / "PKGBUILD"
     if not pkgbuild_path.exists():
         print_fail(f"packaging/PKGBUILD not found at {pkgbuild_path}")
         sys.exit(1)
@@ -125,6 +127,7 @@ def update_aur(version: str, root: Path, dry_run: bool) -> None:
         print_info(f"{manpage_url}")
         print_info("Would update sha256sums in packaging/PKGBUILD")
         print_info("Would regenerate packaging/.SRCINFO")
+        print_info("Would copy PKGBUILD and .SRCINFO to ../mvmctl-bin/")
         print_banner("Dry run complete. No files were modified.")
         return
 
@@ -178,6 +181,19 @@ def update_aur(version: str, root: Path, dry_run: bool) -> None:
 
             regenerate_srcinfo(root)
 
+            # Copy PKGBUILD and .SRCINFO to ../mvmctl-bin AUR repo
+            aur_repo_dir = root.parent / "mvmctl-bin"
+            if aur_repo_dir.is_dir():
+                aur_pkgbuild = aur_repo_dir / "PKGBUILD"
+                aur_srcinfo = aur_repo_dir / ".SRCINFO"
+                shutil.copy2(pkgbuild_path, aur_pkgbuild)
+                shutil.copy2(pkgbuild_dir / ".SRCINFO", aur_srcinfo)
+                print_success(f"mvmctl-bin/: copied PKGBUILD and .SRCINFO")
+            else:
+                print_warn(
+                    f"mvmctl-bin/ not found at {aur_repo_dir}, skipping copy"
+                )
+
     except Exception as e:
         print_fail(f"Failed to update checksums: {e}")
         print_info(
@@ -188,9 +204,13 @@ def update_aur(version: str, root: Path, dry_run: bool) -> None:
     print_banner("PKGBUILD updated with checksums and .SRCINFO regenerated!")
     print_info("Next steps for AUR:")
     print_info("  1. Review changes: git diff packaging/")
-    print_info(f"  2. Commit: git commit -am 'aur: update to v{version}'")
-    print_info("  3. Push to AUR:")
+    print_info(f"  2. Commit and push packaging/ to AUR:")
     print_info("     cd packaging")
+    print_info("     git commit -am 'aur: update to v{version}'")
+    print_info("     git push aur master")
+    print_info(f"  3. Commit and push ../mvmctl-bin/ to AUR:")
+    print_info("     cd ../mvmctl-bin")
+    print_info("     git commit -am 'aur: update to v{version}'")
     print_info("     git push aur master")
 
 

@@ -173,15 +173,12 @@ echo "==> Building Arch .pkg.tar.zst..."
 if command -v docker &>/dev/null; then
   # Use the local PKGBUILD with file:// sources pointing to pre-built binaries
   # so makepkg doesn't try to download from GitHub (which may not have the release yet).
-  pkgbuild="/tmp/arch-PKGBUILD-local"
-  if [[ ! -f "$pkgbuild" ]]; then
-    pkgbuild="/mnt/mvmctl/packaging/PKGBUILD"
-  fi
+  pkgbuild="${PROJECT_DIR}/packaging/PKGBUILD"
   if [[ ! -f "$pkgbuild" ]]; then
     echo "    WARNING: no local PKGBUILD found — shipping PKGBUILD + binaries"
-    cp "${PROJECT_DIR}/packaging/PKGBUILD" "${OUTPUT_DIR}/"
-    cp "${PROJECT_DIR}/dist/mvm" "${OUTPUT_DIR}/"
-    cp "${PROJECT_DIR}/dist/mvm-arm64" "${OUTPUT_DIR}/"
+    cp "${PROJECT_DIR}/packaging/PKGBUILD" "${OUTPUT_DIR}/" 2>/dev/null || true
+    cp "${PROJECT_DIR}/dist/mvm" "${OUTPUT_DIR}/" 2>/dev/null || true
+    cp "${PROJECT_DIR}/dist/mvm-arm64" "${OUTPUT_DIR}/" 2>/dev/null || true
   else
     docker run -i --rm -v "${PROJECT_DIR}:/work:Z" -v "${pkgbuild}:/tmp/PKGBUILD:Z" \
       -e "VERSION=${VERSION}" \

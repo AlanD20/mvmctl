@@ -69,11 +69,11 @@ mvm ssh myvm
 
   Ubuntu/Debian:
   ```bash
-  sudo apt-get install -y iproute2 iptables nftables qemu-utils e2fsprogs util-linux procps kmod openssh-client tar sudo passwd
+  sudo apt-get install -y iproute2 iptables nftables qemu-utils e2fsprogs util-linux procps kmod openssh-client tar sudo passwd fakeroot
   ```
   Arch Linux:
   ```bash
-  sudo pacman -S --needed iproute2 iptables nftables qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow
+  sudo pacman -S --needed iproute2 iptables nftables qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow fakeroot
   ```
   Optional (for ISO cloud-init mode only): `cloud-image-utils` (Ubuntu/Debian) or `cloud-utils` (Arch)
 - **Root access (one-time):** run `mvm host init` once to create the `mvm` group and a sudoers drop-in; normal `mvm` commands require no `sudo` after that
