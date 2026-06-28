@@ -15,7 +15,7 @@ import (
 )
 
 // VolumesToDrives converts volume items to Firecracker drive configurations.
-// Each volume's own CacheType is used; if unset it defaults to Unsafe.
+// Each volume's CacheType is passed through verbatim; no default is applied.
 func VolumesToDrives(vols []*model.VolumeItem) []model.DriveConfig {
 	drives := make([]model.DriveConfig, 0, len(vols))
 	for _, vol := range vols {

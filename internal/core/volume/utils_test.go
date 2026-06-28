@@ -30,7 +30,7 @@ func TestVolumesToDrives(t *testing.T) {
 		assert.Empty(t, got)
 	})
 
-	t.Run("default_cache_type_is_unsafe", func(t *testing.T) {
+	t.Run("empty_cache_type_produces_empty_cache_type", func(t *testing.T) {
 		vols := []*model.VolumeItem{{
 			ID:   "root",
 			Path: "/dev/vda",
@@ -42,7 +42,7 @@ func TestVolumesToDrives(t *testing.T) {
 			PathOnHost:   "/dev/vda",
 			IsRootDevice: false,
 			IsReadOnly:   false,
-			CacheType:    "Unsafe",
+			CacheType:    "",
 			IOEngine:     "Sync",
 		}}
 		assert.Empty(t, cmp.Diff(want, got))
