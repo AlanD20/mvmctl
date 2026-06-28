@@ -31,3 +31,24 @@ type SnapshotItem struct {
 	Network *NetworkItem `json:"network,omitempty"`
 	Binary  *BinaryItem  `json:"binary,omitempty"`
 }
+
+// SnapshotCreateConfig collects all external parameters for creating a snapshot.
+// Passed from the API layer to the controller.
+type SnapshotCreateConfig struct {
+	MemFile           string
+	StateFile         string
+	PauseOnly         bool
+	PhantomRootfsPath string // empty = skip PATCH drive during snapshot
+	RootfsPath        string // original path to restore after snapshot
+}
+
+// SnapshotRestoreConfig collects all external parameters for restoring a snapshot.
+// Passed from the API layer to the controller.
+type SnapshotRestoreConfig struct {
+	MemFile          string
+	StateFile        string
+	Resume           bool
+	NetworkOverrides map[string]string // iface_id → host_dev_name (TAP)
+	VsockUDSPath     string            // vsock_override UDS path (empty if none)
+	RootfsPath       string            // rootfs path for post-Load PATCH
+}

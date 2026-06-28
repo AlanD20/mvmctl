@@ -160,16 +160,35 @@ func (fc *Client) CreateSnapshot(ctx context.Context, memPath, snapshotPath stri
 }
 
 // LoadSnapshot loads a VM from snapshot via PUT /snapshot/load.
+// networkOverrides maps guest interface IDs to host TAP device names.
+// vsockOverride sets the vsock UDS path (empty if no override needed).
+// Firecracker's vmstate hardcodes the original TAP name and vsock UDS path;
+// these overrides allow using different resources for the restored VM.
 func (fc *Client) LoadSnapshot(
 	ctx context.Context,
 	memPath, snapshotPath string,
 	resume bool,
+	networkOverrides map[string]string,
+	vsockOverride string,
 ) (bool, error) {
 	slog.Debug("Loading snapshot...")
 	body := map[string]any{
 		"mem_file_path": memPath,
 		"snapshot_path": snapshotPath,
 		"resume_vm":     resume,
+	}
+	if len(networkOverrides) > 0 {
+		overrides := make([]map[string]string, 0, len(networkOverrides))
+		for ifaceID, hostDev := range networkOverrides {
+			overrides = append(overrides, map[string]string{
+				"iface_id":      ifaceID,
+				"host_dev_name": hostDev,
+			})
+		}
+		body["network_overrides"] = overrides
+	}
+	if vsockOverride != "" {
+		body["vsock_override"] = map[string]string{"uds_path": vsockOverride}
 	}
 	status, raw, err := fc.request(ctx, "PUT", "/snapshot/load", body)
 	if err != nil {
@@ -347,6 +366,28 @@ func (fc *Client) PatchDrive(ctx context.Context, driveID string) error {
 		return nil
 	}
 	msg := fmt.Sprintf("failed to detach drive: %d", status)
+	if len(raw) > 0 {
+		msg += fmt.Sprintf(" response: %s", string(raw))
+	}
+	return errs.New(errs.CodeFirecrackerClientError, msg)
+}
+
+// UpdateDrivePath updates the host path of an existing drive on a running VM.
+// Uses PATCH /drives/{drive_id} (post-boot only). This is used after LoadSnapshot
+// to redirect the rootfs to the new VM's copy instead of the original VM's path.
+func (fc *Client) UpdateDrivePath(ctx context.Context, driveID, pathOnHost string) error {
+	body := map[string]any{
+		"drive_id":     driveID,
+		"path_on_host": pathOnHost,
+	}
+	status, raw, err := fc.request(ctx, "PATCH", "/drives/"+driveID, body)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusOK || status == http.StatusNoContent {
+		return nil
+	}
+	msg := fmt.Sprintf("failed to update drive path: %d", status)
 	if len(raw) > 0 {
 		msg += fmt.Sprintf(" response: %s", string(raw))
 	}

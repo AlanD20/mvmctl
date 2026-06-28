@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"time"
 
@@ -57,7 +58,13 @@ type execResponse struct {
 
 // dialAndHandshake connects to the Firecracker vsock UDS and performs the
 // CONNECT handshake. Returns an open connection on success.
-func dialAndHandshake(ctx context.Context, udsPath string, port int) (net.Conn, error) {
+func dialAndHandshake(ctx context.Context, udsPath string, port int, attemptNum int) (net.Conn, error) {
+	slog.Debug("vsock dial attempt",
+		"uds_path", udsPath,
+		"port", port,
+		"attempt", attemptNum,
+	)
+
 	d := net.Dialer{Timeout: constConnectTimeout}
 	conn, err := d.DialContext(ctx, "unix", udsPath)
 	if err != nil {
@@ -70,6 +77,14 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int) (net.Conn, 
 		conn.Close()
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
 			"failed to write CONNECT handshake", err)
+	}
+
+	// Set per-attempt read timeout to prevent blocking on a half-open
+	// connection (Firecracker accepts UDS connect but never responds).
+	if err := conn.SetReadDeadline(time.Now().Add(constConnectTimeout)); err != nil {
+		conn.Close()
+		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
+			"failed to set read deadline", err)
 	}
 
 	// Read response with context awareness: launch a goroutine and select
@@ -88,6 +103,12 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int) (net.Conn, 
 	case res := <-resCh:
 		if res.err != nil {
 			conn.Close()
+			slog.Debug("vsock handshake read failed",
+				"uds_path", udsPath,
+				"port", port,
+				"attempt", attemptNum,
+				"error", res.err,
+			)
 			return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
 				"failed to read CONNECT response", res.err)
 		}
@@ -101,9 +122,23 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int) (net.Conn, 
 			if len(got) > 0 && got[len(got)-1] == '\n' {
 				got = got[:len(got)-1]
 			}
+			slog.Debug("vsock handshake failed",
+				"uds_path", udsPath,
+				"port", port,
+				"attempt", attemptNum,
+				"response", got,
+			)
 			return nil, errs.New(errs.CodeVsockHandshakeFailed,
 				fmt.Sprintf("handshake failed: got %q, expected \"OK ...\"", got))
 		}
+		// Clear read deadline so the caller's own deadline governs later reads.
+		_ = conn.SetReadDeadline(time.Time{})
+		slog.Debug("vsock handshake succeeded",
+			"uds_path", udsPath,
+			"port", port,
+			"attempt", attemptNum,
+			"response", trimTrailingNewline(res.resp),
+		)
 		return conn, nil
 
 	case <-ctx.Done():
@@ -111,6 +146,14 @@ func dialAndHandshake(ctx context.Context, udsPath string, port int) (net.Conn, 
 		return nil, errs.WrapMsg(errs.CodeVsockHandshakeFailed,
 			"handshake cancelled by context", ctx.Err())
 	}
+}
+
+// trimTrailingNewline removes a single trailing newline from s.
+func trimTrailingNewline(s string) string {
+	if len(s) > 0 && s[len(s)-1] == '\n' {
+		return s[:len(s)-1]
+	}
+	return s
 }
 
 // --- JSON framing helpers ---

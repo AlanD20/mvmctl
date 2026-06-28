@@ -180,7 +180,7 @@ func (op *Operation) VolumeInspect(ctx context.Context, input inputs.VolumeInput
 		Volume: results.VolumeItemInfo{
 			ID: vol.ID, Name: vol.Name, SizeBytes: vol.SizeBytes,
 			Format: string(vol.Format), IsReadOnly: vol.IsReadOnly,
-			Path: vol.Path, Status: string(vol.Status),
+			CacheType: vol.CacheType, Path: vol.Path, Status: string(vol.Status),
 		},
 		Attachment: results.VolumeAttachmentInfo{
 			VMID: vol.VMID, VMName: vmName,

@@ -332,10 +332,10 @@ func (c *Controller) Reboot(ctx context.Context, force bool) error {
 	return c.Start(ctx)
 }
 
-// --- Snapshot ---
-// Uses named return (err) so the defer can propagate non-DomainError from the
-// resume path.
-func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err error) {
+// --- SnapshotCreate ---
+// Creates a Firecracker snapshot. If pauseOnly is true and the VM was running,
+// it stays paused after the snapshot. If pauseOnly is false, the VM is resumed.
+func (c *Controller) SnapshotCreate(ctx context.Context, cfg model.SnapshotCreateConfig) (err error) {
 	name := c.vm.Name
 
 	// Validate state — snapshot requires RUNNING or PAUSED
@@ -361,19 +361,17 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 			fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", name))
 	}
 
-	// APISocketPath is already a full path from DB
 	apiSocket := c.vm.APISocketPath
 	client := firecracker.NewClient(apiSocket)
 	wasRunning := c.vm.Status == model.VMStatusRunning
 
 	defer func() {
-		// Resume if we paused it.
-		if wasRunning {
+		// Resume if we paused it and caller didn't want pause-only.
+		if wasRunning && !cfg.PauseOnly {
 			if resumeErr := client.ResumeVM(ctx); resumeErr != nil {
 				if _, ok := errs.AsType[*errs.DomainError](resumeErr); ok {
 					slog.Warn("Failed to resume VM after snapshot — leaving in paused state", "name", name)
 				} else {
-					// Non-DomainError propagates to the caller.
 					err = resumeErr
 				}
 			} else if updateErr := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); updateErr != nil {
@@ -394,38 +392,72 @@ func (c *Controller) Snapshot(ctx context.Context, memOut, stateOut string) (err
 		if err := client.PauseVM(ctx); err != nil {
 			return err
 		}
-		// If update fails, the error propagates through finally (resume + close).
 		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusPaused); err != nil {
 			return err
 		}
 		c.vm.Status = model.VMStatusPaused
 	}
 
-	_, snapshotErr := client.CreateSnapshot(ctx, memOut, stateOut)
+	// PATCH drive to phantom path so the vmstate captures a snapshot-local
+	// path instead of the source VM's path.
+	if cfg.PhantomRootfsPath != "" {
+		if patchErr := client.UpdateDrivePath(ctx, "rootfs", cfg.PhantomRootfsPath); patchErr != nil {
+			return errs.WrapMsg(errs.CodeSnapshotCreateFailed,
+				fmt.Sprintf("failed to patch drive to phantom path: %v", patchErr), patchErr)
+		}
+	}
+
+	// Defer: restore original drive path after snapshot (runs before resume defer).
+	if cfg.PhantomRootfsPath != "" {
+		defer func() {
+			if restoreErr := client.UpdateDrivePath(ctx, "rootfs", cfg.RootfsPath); restoreErr != nil {
+				slog.Warn("Failed to restore drive path after snapshot",
+					"vm", name, "error", restoreErr)
+			}
+		}()
+	}
+
+	_, snapshotErr := client.CreateSnapshot(ctx, cfg.MemFile, cfg.StateFile)
 	if snapshotErr != nil {
 		return snapshotErr
 	}
 	return nil
 }
 
-// --- LoadSnapshot ---
-func (c *Controller) LoadSnapshot(ctx context.Context, memIn, stateIn string, resumeAfter bool) error {
+// --- SnapshotRestore ---
+// Loads a snapshot into Firecracker (must already be spawned in snapshot mode
+// with a ready API socket). Handles: LoadSnapshot with network override,
+// vsock reconfiguration, and status update.
+func (c *Controller) SnapshotRestore(ctx context.Context, cfg model.SnapshotRestoreConfig) error {
 	if c.vm.APISocketPath == "" {
 		return errs.New(errs.CodeVMStateInvalid,
-			fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", c.vm.Name))
+			fmt.Sprintf("Socket not found for VM '%s'. Firecracker must be spawned before loading snapshot", c.vm.Name))
 	}
 
-	// APISocketPath is already a full path from DB
-	apiSocket := c.vm.APISocketPath
-	client := firecracker.NewClient(apiSocket)
+	client := firecracker.NewClient(c.vm.APISocketPath)
 	defer client.Close()
 
-	if _, err := client.LoadSnapshot(ctx, memIn, stateIn, resumeAfter); err != nil {
+	// Map the VM's TAP device to eth0 via network_overrides so Firecracker
+	// doesn't look for the original TAP name from the snapshot vmstate.
+	if _, err := client.LoadSnapshot(
+		ctx,
+		cfg.MemFile,
+		cfg.StateFile,
+		cfg.Resume,
+		cfg.NetworkOverrides,
+		cfg.VsockUDSPath,
+	); err != nil {
 		return err
 	}
 
-	// Update status based on whether VM was resumed.
-	if resumeAfter {
+	// NOTE: No PutVsock call needed here. vsock_override in LoadSnapshot
+	// already sets the correct host-side UDS path. The guest CID is preserved
+	// from the vmstate and matches what the guest agent uses. PutVsock is
+	// pre-boot only — calling it on a resumed VM would fail or reset the
+	// vsock device, breaking the guest agent's existing connection.
+
+	// Update status
+	if cfg.Resume {
 		if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusRunning); err != nil {
 			return err
 		}

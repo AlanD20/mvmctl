@@ -75,7 +75,7 @@ func TestExecStep_Apply(t *testing.T) {
 func TestExecStep_Apply_Exec_ExitCode(t *testing.T) {
 	tests := map[string]struct {
 		execFunc func(ctx context.Context, input inputs.ExecInput) (*results.ExecResult, error)
-		wantErr    string
+		wantErr  string
 	}{
 		"exit_code_0_succeeds": {
 			execFunc: func(_ context.Context, _ inputs.ExecInput) (*results.ExecResult, error) {

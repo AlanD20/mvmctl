@@ -35,6 +35,7 @@ func (c *Controller) Attach(ctx context.Context, vmID string) error {
 		UpdatedAt:   c.volume.UpdatedAt,
 		IsReadOnly:  c.volume.IsReadOnly,
 		IsShareable: c.volume.IsShareable,
+		CacheType:   c.volume.CacheType,
 	}
 	if err := c.repo.Upsert(ctx, updated); err != nil {
 		return err
@@ -61,6 +62,7 @@ func (c *Controller) Detach(ctx context.Context) error {
 		UpdatedAt:   c.volume.UpdatedAt,
 		IsReadOnly:  c.volume.IsReadOnly,
 		IsShareable: c.volume.IsShareable,
+		CacheType:   c.volume.CacheType,
 	}
 	if err := c.repo.Upsert(ctx, updated); err != nil {
 		return err

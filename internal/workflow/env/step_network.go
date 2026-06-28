@@ -181,11 +181,9 @@ func newNetworkStepFromSpec(
 	}
 	input.Name = name
 
-	// Canonical spec key is "nat". The "nat_enabled" key is accepted but
-	// deprecated — selecting both with different values is undefined.
-	input.NATEnabled = true // default to true
-	if _, exists := spec["nat"]; exists {
-		input.NATEnabled = spec.GetBool("nat")
+	input.NATEnabled = true
+	if _, exists := spec["nat_enabled"]; exists {
+		input.NATEnabled = spec.GetBool("nat_enabled")
 	}
 
 	return &NetworkStep{

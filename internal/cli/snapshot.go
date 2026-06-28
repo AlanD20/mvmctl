@@ -170,6 +170,7 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 	var (
 		network string
 		resume  bool
+		count   int
 	)
 
 	cmd := &cobra.Command{
@@ -185,10 +186,15 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 				return fmt.Errorf("privilege check failed: %w", err)
 			}
 
+			effectiveCount := count
+			if !cmd.Flags().Changed("count") {
+				effectiveCount = 1
+			}
+
 			input := inputs.SnapshotRestoreInput{
 				SnapshotID: snapshotID,
 				Name:       vmName,
-				Count:      1, // Count is available on the input struct for programmatic use
+				Count:      effectiveCount,
 				Resume:     resume,
 			}
 			if cmd.Flags().Changed("network") {
@@ -215,6 +221,7 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 
 	cmd.Flags().StringVar(&network, "network", "", "Network to use (defaults to snapshot's original network)")
 	cmd.Flags().BoolVar(&resume, "resume", false, "Resume VM after loading snapshot")
+	cmd.Flags().IntVar(&count, "count", 1, "Number of VMs to restore from the snapshot")
 	return cmd
 }
 

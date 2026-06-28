@@ -12,17 +12,17 @@ import (
 
 // MockVMAPI implements api.VMAPI for testing.
 type MockVMAPI struct {
-	VMCreateFunc       func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VMItem, error)
-	VMRemoveFunc       func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMPruneFunc        func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
-	VMListFunc         func(ctx context.Context, statuses ...string) []*model.VMItem
-	VMGetFunc          func(ctx context.Context, input inputs.VMInput) (*model.VMItem, error)
-	VMInspectFunc      func(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error)
-	VMStartFunc        func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMStopFunc         func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMRebootFunc       func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMPauseFunc        func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
-	VMResumeFunc       func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMCreateFunc  func(ctx context.Context, input inputs.VMCreateInput, onProgress event.OnProgressCallback) ([]*model.VMItem, error)
+	VMRemoveFunc  func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMPruneFunc   func(ctx context.Context, dryRun bool, includeAll bool) ([]string, error)
+	VMListFunc    func(ctx context.Context, statuses ...string) []*model.VMItem
+	VMGetFunc     func(ctx context.Context, input inputs.VMInput) (*model.VMItem, error)
+	VMInspectFunc func(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error)
+	VMStartFunc   func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMStopFunc    func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMRebootFunc  func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMPauseFunc   func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
+	VMResumeFunc  func(ctx context.Context, input inputs.VMInput) *errs.BatchResult
 }
 
 func (m *MockVMAPI) VMCreate(

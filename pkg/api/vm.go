@@ -1195,7 +1195,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	}
 	// --- Attach volumes (extra drives) ---
 	if len(v.Volumes) > 0 {
-		fcConfig.ExtraDrives = volume.VolumesToDrives(v.Volumes, false)
+		fcConfig.ExtraDrives = volume.VolumesToDrives(v.Volumes)
 	}
 	// --- Console relay setup (before spawn) ---
 	var consoleController *console.Controller
