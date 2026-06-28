@@ -68,6 +68,7 @@ These are required for pulling, importing, and converting VM images.
 |--------|---------|---------------|------|
 | `qemu-img` | Image conversion and resize | `qemu-utils` | `qemu-img` |
 | `mkfs.ext4` | Formatting extracted rootfs images | `e2fsprogs` | `e2fsprogs` |
+| `fakeroot` | Preserving tarball ownership during tar-rootfs extraction | `fakeroot` | `fakeroot` |
 | `blkid` | Detecting root partitions and UUIDs | `util-linux` | `util-linux` |
 | `sfdisk` | Partition table manipulation | `util-linux` | `util-linux` |
 | `truncate` | Creating sparse files for new images | `coreutils` | `coreutils` |
@@ -194,8 +195,8 @@ Only needed for `mvm kernel pull --type official --clean-build`.
 | `mvm host reset` | `sudo`, `groupdel`, `sysctl` |
 | `mvm network create` | `ip`, `iptables`/`nft` |
 | `mvm network rm` / `sync` | `ip`, `iptables`/`nft` |
-| `mvm image pull` | `qemu-img` (may trigger conversion) |
-| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `chmod`, `dd` |
+| `mvm image pull` | `qemu-img` (may trigger conversion), `fakeroot` (tar-rootfs) |
+| `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `fakeroot` (tar-rootfs), `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `dd` |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
 | `mvm kernel pull --type firecracker` | (internal logic — download only) |
 | `mvm key` | `create` → `ssh-keygen`; `import/ls/rm/inspect/export/default` → internal only |

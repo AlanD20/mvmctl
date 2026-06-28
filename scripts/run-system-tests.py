@@ -720,7 +720,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "--",
             "sudo apt-get update -qq && "
             "sudo apt-get install -y -qq "
-            "python3-pytest qemu-utils nftables iptables zstd htop "
+            "python3-pytest qemu-utils fakeroot nftables iptables zstd htop "
             "build-essential bc bison flex libncurses-dev "
             "libssl-dev libelf-dev git curl dwarves "
             "cloud-image-utils && "

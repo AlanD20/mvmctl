@@ -54,6 +54,7 @@ UBUNTU_DEBIAN_PACKAGES = [
     # Image and cloud-init tools
     "genisoimage",
     "qemu-utils",
+    "fakeroot",
     "cloud-image-utils",
     "e2fsprogs",
     "squashfs-tools",

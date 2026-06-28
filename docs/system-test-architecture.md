@@ -76,7 +76,7 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 1. Create builder VM from ubuntu-minimal:noble
 2. mvm cp mvm-binary → /usr/local/bin/mvm
 3. mvm cp tests/system/ → /tests/
-4. apt-get install python3-pytest qemu-utils
+4. apt-get install python3-pytest qemu-utils fakeroot
 5. apt-get clean
 6. mvm vm stop (graceful stop)
 7. mvm image import mvm-test-runner:<version> <builder-vm> --default
@@ -91,6 +91,7 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 | System tests | `/tests/system/<domain>/` | All `tests/system/` files |
 | python3-pytest | System package | Test runner |
 | qemu-utils | System package | Volume/disk operations in T2 tests |
+| fakeroot | System package | Preserving tarball ownership when pulling tar-rootfs images inside the runner VM |
 
 ### Caching
 

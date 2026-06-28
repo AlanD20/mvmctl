@@ -1,19 +1,24 @@
 package image
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
 )
 
 // fakeRepo is a minimal in-memory implementation of Repository for tests that
@@ -176,4 +181,101 @@ func TestEnsureCached_ConcurrentUncompressed(t *testing.T) {
 		require.Equal(t, first, p, "all goroutines should return the same cached path (goroutine %d)", i)
 	}
 	assertCachedFile(t, first, rawData)
+}
+
+// writeRootfsTar writes a minimal rootfs tarball containing a root-owned
+// symlink and a root-owned regular file. Ownership is set to uid/gid 0 so
+// the test can verify that createExt4FromTar preserves it.
+func writeRootfsTar(t *testing.T, path string) {
+	t.Helper()
+
+	f, err := os.Create(path)
+	require.NoError(t, err, "create tarball")
+	defer f.Close()
+
+	tw := tar.NewWriter(f)
+	defer tw.Close()
+
+	now := time.Now()
+
+	hdr := &tar.Header{
+		Name:     "bin",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "usr/bin",
+		Mode:     0777,
+		Uid:      0,
+		Gid:      0,
+		ModTime:  now,
+	}
+	require.NoError(t, tw.WriteHeader(hdr), "write /bin symlink header")
+
+	hdr = &tar.Header{
+		Name:     "etc/foo",
+		Typeflag: tar.TypeReg,
+		Mode:     0644,
+		Uid:      0,
+		Gid:      0,
+		Size:     int64(len("foo content\n")),
+		ModTime:  now,
+	}
+	require.NoError(t, tw.WriteHeader(hdr), "write /etc/foo header")
+	_, err = tw.Write([]byte("foo content\n"))
+	require.NoError(t, err, "write /etc/foo content")
+	require.NoError(t, tw.Close(), "close tar writer")
+	require.NoError(t, f.Close(), "close tarball")
+}
+
+// debugfsStat returns a map of the "User" and "Group" fields from debugfs stat
+// output for the given path inside the ext4 image.
+func debugfsStat(t *testing.T, imagePath, inodePath string) map[string]string {
+	t.Helper()
+
+	result, err := system.DefaultRunner.Run(
+		context.Background(),
+		[]string{"debugfs", "-R", fmt.Sprintf("stat %s", inodePath), imagePath},
+		system.RunCmdOpts{Check: true, Capture: true},
+	)
+	require.NoError(t, err, "debugfs stat %s failed: %s", inodePath, result.Stdout+result.Stderr)
+
+	re := regexp.MustCompile(`(User|Group):\s+(\d+)`)
+	matches := re.FindAllStringSubmatch(result.Stdout, -1)
+
+	m := make(map[string]string)
+	for _, match := range matches {
+		m[match[1]] = match[2]
+	}
+	return m
+}
+
+// TestCreateExt4FromTar_PreservesOwnership verifies that the fakeroot-based
+// tar-to-ext4 conversion keeps root ownership (uid/gid 0) on files and
+// symlinks, rather than silently mapping them to the invoking user.
+func TestCreateExt4FromTar_PreservesOwnership(t *testing.T) {
+	setupHermeticCache(t)
+	ctx := context.Background()
+
+	if _, err := exec.LookPath("debugfs"); err != nil {
+		t.Skip("debugfs not found in PATH")
+	}
+
+	tmp := t.TempDir()
+	tarPath := filepath.Join(tmp, "rootfs.tar")
+	outputPath := filepath.Join(tmp, "rootfs.img")
+
+	writeRootfsTar(t, tarPath)
+
+	s := NewService(fakeRepo{})
+	require.NoError(t, s.createExt4FromTar(ctx, tarPath, outputPath, "dynamic"))
+
+	info, err := os.Stat(outputPath)
+	require.NoError(t, err, "output ext4 image should exist")
+	require.Positive(t, info.Size(), "output ext4 image should not be empty")
+
+	binStat := debugfsStat(t, outputPath, "/bin")
+	require.Equal(t, "0", binStat["User"], "/bin owner uid should be 0")
+	require.Equal(t, "0", binStat["Group"], "/bin owner gid should be 0")
+
+	fooStat := debugfsStat(t, outputPath, "/etc/foo")
+	require.Equal(t, "0", fooStat["User"], "/etc/foo owner uid should be 0")
+	require.Equal(t, "0", fooStat["Group"], "/etc/foo owner gid should be 0")
 }

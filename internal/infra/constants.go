@@ -695,6 +695,14 @@ func GetWarmImagesDir() string {
 	return path
 }
 
+func GetFakerootStateDir() string {
+	path := filepath.Join(GetTempDir(), "fakeroot")
+	if err := ensureDirAndChown(path); err != nil {
+		slog.Warn("failed to create fakeroot state directory", "path", path, "error", err)
+	}
+	return path
+}
+
 // GetNoCloudNetDir returns the base cache directory for nocloud-net batch servers.
 func GetNoCloudNetDir() string {
 	cacheDir, err := GetCacheDir()

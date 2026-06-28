@@ -104,7 +104,7 @@ Section: utils
 Priority: optional
 Architecture: ${pkgarch}
 Maintainer: AlanD20 <aland20@pm.me>
-Depends: iproute2, iptables, nftables, qemu-utils, openssh-client, e2fsprogs, util-linux, passwd, sudo, procps, kmod, tar
+Depends: iproute2, iptables, nftables, qemu-utils, openssh-client, e2fsprogs, util-linux, passwd, sudo, procps, kmod, tar, fakeroot
 Recommends: cloud-image-utils, libguestfs-tools | guestfs-tools
 Description: MicroVM Manager - Container speed, VM isolation
  mvmctl is a production-grade CLI for managing microVMs on Linux.
