@@ -224,9 +224,13 @@ PKEOF
       cd /work
       su build -c 'makepkg -f --noconfirm --nodeps' 2>&1 | tail -5
       mv mvmctl-bin-*.pkg.tar.zst /work/dist/packages/ 2>/dev/null || true
+      # Restore write permission on output dir (chown made it owned by UID 1000,
+      # runner can't chmod it back — do it here as root inside the container)
+      chmod 777 /work/dist/packages
 DOCKEREOF
     echo "    done: $(ls -lh "${OUTPUT_DIR}"/*.pkg.tar.zst 2>/dev/null | awk '{print $5}')"
   fi
+
 elif command -v makepkg &>/dev/null; then
   # Native Arch host
   cp "${PROJECT_DIR}/packaging/PKGBUILD" "${OUTPUT_DIR}/"
@@ -239,13 +243,17 @@ else
   cp "${PROJECT_DIR}/dist/mvm-arm64" "${OUTPUT_DIR}/"
 fi
 
+# Copy standalone binaries alongside packages (for dist/packages/* upload)
+cp "${PROJECT_DIR}/dist/mvm" "${OUTPUT_DIR}/" 2>/dev/null || true
+cp "${PROJECT_DIR}/dist/mvm-arm64" "${OUTPUT_DIR}/" 2>/dev/null || true
+
 # ─── Checksums ──────────────────────────────────────────────────────────────
 
 echo ""
 echo "==> Generating checksums..."
 cd "${OUTPUT_DIR}"
 sha256sum ./*.deb ./*.rpm ./*.pkg.tar.zst ./PKGBUILD 2>/dev/null > checksums.sha256 || true
-cat checksums.sha256
+cat checksums.sha256 2>/dev/null || true
 
 # ─── Summary ────────────────────────────────────────────────────────────────
 

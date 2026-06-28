@@ -1,4 +1,4 @@
-.TH MVM 1 "May 2026" "mvmctl 0.1.0" "User Commands"
+.TH MVM 1 "June 2026" "mvm 0.1.0" "User Commands"
 .SH NAME
 mvm \- MicroVM Manager - Container speed, VM isolation
 .SH SYNOPSIS
@@ -17,10 +17,22 @@ for
 .BR img
 for
 .BR image ,
-and
 .BR vol
 for
-.BR volume .
+.BR volume ,
+.BR bin
+for
+.BR binary ,
+.BR ss
+for
+.BR snapshot ,
+.BR "env up"
+for
+.BR "env apply" ,
+and
+.BR "env down"
+for
+.BR "env destroy" .
 .SH OPTIONS
 .TP
 .BR \-\-verbose
@@ -39,6 +51,29 @@ Show this help message and exit.
 .TP
 .BR vm\ create
 Create and start a new Firecracker VM.
+.RS
+.PP
+.B \-\-image
+OS image (e.g. ubuntu:24.04).
+.PP
+.B \-\-kernel
+Kernel to use.
+.PP
+.B \-\-vcpu
+Number of vCPUs (default: 1).
+.PP
+.B \-\-mem
+Memory size (e.g. 2G, default: 512M).
+.PP
+.B \-\-disk-size
+Root disk size (e.g. 20G).
+.PP
+.B \-\-network
+Network to attach to.
+.PP
+.B \-\-count
+Create multiple VMs atomically.
+.RE
 .TP
 .BR vm\ rm
 Stop and remove VMs by short ID or name.
@@ -48,12 +83,6 @@ List running and stopped VMs.
 .TP
 .BR vm\ ps
 List running VMs (active processes).
-.TP
-.BR vm\ snapshot
-Snapshot VM memory and disk state.
-.TP
-.BR vm\ load
-Load VM from snapshot.
 .TP
 .BR vm\ inspect
 Show detailed information about a VM.
@@ -72,12 +101,6 @@ Resume one or more paused VMs.
 .TP
 .BR vm\ reboot
 Reboot one or more VMs.
-.TP
-.BR volume\ attach
-Attach a volume to a VM.
-.TP
-.BR volume\ detach
-Detach a volume from a VM.
 .SS Host Configuration
 .TP
 .BR host\ init
@@ -164,6 +187,12 @@ Show detailed information about a volume.
 .TP
 .BR volume\ resize
 Resize an existing volume.
+.TP
+.BR volume\ attach
+Attach a volume to a running VM.
+.TP
+.BR volume\ detach
+Detach a volume from a VM.
 .SS Network Management
 .TP
 .BR network\ create
@@ -205,6 +234,22 @@ Show detailed information about a key.
 .TP
 .BR key\ export
 Export a key to ~/.ssh or a custom directory.
+.SS Snapshot Management
+.TP
+.BR snapshot\ create
+Snapshot a running VM.
+.TP
+.BR snapshot\ ls
+List all snapshots.
+.TP
+.BR snapshot\ inspect
+Show detailed information about a snapshot.
+.TP
+.BR snapshot\ restore
+Restore a VM from a snapshot.
+.TP
+.BR snapshot\ rm
+Remove one or more snapshots.
 .SS Cache Management
 .TP
 .BR cache\ init
@@ -231,17 +276,42 @@ Kill any existing console connection to the VM.
 .BR config
 Configuration management (get, set, ls, reset).
 .TP
-.BR cp
-Copy files between host and microVMs.
-.TP
 .BR env
-Environment workflow management (apply, ls, destroy).
+Environment workflow management (apply, ls, diff, destroy).
 .TP
 .BR init
 Initialize mvm (guided setup wizard).
 .TP
 .BR ssh
 VM SSH access.
+.RS
+.PP
+.B \-\-user
+SSH remote user (default: root).
+.PP
+.B \-\-key
+Path to SSH key to use.
+.PP
+.B \-\-cmd
+Run a command and exit instead of opening a session.
+.PP
+.B \-\-timeout
+Connect/probe timeout (default: 5s, max: 10s).
+.RE
+.TP
+.BR exec
+Execute commands inside a VM via vsock agent (faster than SSH).
+.RS
+.PP
+.B \-\-port
+Vsock port (default: 1024).
+.PP
+.B \-\-timeout
+Connect/probe timeout (default: 5s).
+.PP
+.B \-\-user
+Remote user (default: root).
+.RE
 .TP
 .BR logs
 VM log management.
@@ -252,7 +322,27 @@ Show Firecracker OS log instead of boot log.
 .PP
 .B \-\-follow
 Follow log output in real-time (tail -f style).
+.PP
+.B \-\-lines
+Number of lines to show (default: 50).
 .RE
+.TP
+.BR cp
+Copy files between host and VM.
+.RS
+.PP
+.B \-\-force
+Overwrite existing files.
+.PP
+.B \-\-no-sync
+Skip cache sync before copying.
+.RE
+.TP
+.BR version
+Show the mvm version and build information.
+.TP
+.BR completion
+Generate shell completion script (bash, zsh, fish, or powershell).
 .TP
 .BR help
 Show help for mvm or a subcommand.
@@ -288,6 +378,9 @@ Set log level (DEBUG, INFO, WARNING, ERROR, default: WARNING).
 .TP
 .BR MVM_ASSET_MIRROR
 Local mirror directory for downloaded assets (default: not set).
+.TP
+.BR MVM_WARM_POOL
+Set to "disk" to use disk-based warm pool (default: tmpfs).
 .TP
 .BR MVM_TEMP_DIR
 Override temp directory (default: /tmp/mvmctl).

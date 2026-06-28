@@ -28,7 +28,7 @@ var versionCached string
 
 // VersionString returns the current base version string.
 // Defaults to "0.0.0". Override via SetBuildVersion.
-var versionString = "0.0.0"
+var versionString = "0.1.0"
 
 // SetBuildVersion sets the build version from app startup.
 // Called from app.Run() via download.SetUserAgent().

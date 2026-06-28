@@ -19,6 +19,9 @@ jobs:
           go-version: "1.26"
           cache: true
 
+      - name: Generate embed placeholders
+        run: go generate ./internal/service/vsockagent/...
+
       - name: Test
         run: |
           go mod tidy && git diff --exit-code
