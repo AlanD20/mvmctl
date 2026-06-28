@@ -24,6 +24,7 @@ type mockTracker struct {
 	ensureChainCalls  int
 	flushChainCalls   int
 	orphanedCalls     int
+	ruleExistsCalls   int
 
 	stubEnsureRule  model.FirewallRuleResult
 	stubRemoveRule  model.FirewallRuleResult
@@ -32,6 +33,7 @@ type mockTracker struct {
 	stubChain       bool
 	stubFlush       bool
 	stubOrphaned    int
+	stubRuleExists  bool
 }
 
 type ensureRuleCall struct {
@@ -103,6 +105,13 @@ func (m *mockTracker) CountOrphanedRules(_ context.Context, _ *model.NetworkItem
 	defer m.mu.Unlock()
 	m.orphanedCalls++
 	return m.stubOrphaned
+}
+
+func (m *mockTracker) RuleExists(_ context.Context, _ *model.FirewallRule) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ruleExistsCalls++
+	return m.stubRuleExists
 }
 
 type mockRepo struct {
@@ -215,6 +224,16 @@ func TestTracker_CountOrphanedRules_delegates(t *testing.T) {
 	n := ft.CountOrphanedRules(ctx, &model.NetworkItem{ID: "n-1"})
 	assert.Equal(t, 3, n)
 	assert.Equal(t, 1, mb.orphanedCalls)
+}
+
+func TestTracker_RuleExists_delegates(t *testing.T) {
+	mb := &mockTracker{stubRuleExists: true}
+	ft := &FirewallTracker{backend: mb}
+	ctx := context.Background()
+
+	exists := ft.RuleExists(ctx, &model.FirewallRule{NetworkID: "n-1"})
+	assert.True(t, exists)
+	assert.Equal(t, 1, mb.ruleExistsCalls)
 }
 
 func TestTracker_GetByNetworkID_delegates(t *testing.T) {

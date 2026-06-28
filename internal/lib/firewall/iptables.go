@@ -218,6 +218,18 @@ func (t *IPTablesTracker) buildRestoreInput(rules []*model.FirewallRule, table s
 	return strings.Join(lines, "\n")
 }
 
+// --- RuleExists: kernel presence check ---
+
+func (t *IPTablesTracker) RuleExists(ctx context.Context, rule *model.FirewallRule) bool {
+	checkArgs := t.buildIptablesArgs(rule, ActionCheck)
+	result, _ := system.DefaultRunner.Run(
+		ctx,
+		checkArgs,
+		system.RunCmdOpts{Privileged: true, Capture: true, Check: false},
+	)
+	return result.Success()
+}
+
 // --- Ensure rule ---
 
 func (t *IPTablesTracker) EnsureRule(

@@ -376,6 +376,12 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 	return expr
 }
 
+// --- RuleExists: kernel presence check ---
+
+func (t *NFTablesTracker) RuleExists(ctx context.Context, rule *model.FirewallRule) bool {
+	return t.findRuleHandle(ctx, rule) != nil
+}
+
 // --- Ensure rule ---
 
 func (t *NFTablesTracker) EnsureRule(

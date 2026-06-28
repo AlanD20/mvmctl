@@ -26,6 +26,7 @@ type Tracker interface {
 	) bool
 	FlushChain(ctx context.Context, chainName model.FirewallChain, table model.FirewallTable) bool
 	CountOrphanedRules(ctx context.Context, network *model.NetworkItem) int
+	RuleExists(ctx context.Context, rule *model.FirewallRule) bool
 }
 
 // firewallRuleRepo is the interface both rule repository backends implement.
@@ -117,6 +118,10 @@ func (ft *FirewallTracker) BatchRemoveRules(ctx context.Context, rules []model.F
 
 func (ft *FirewallTracker) CountOrphanedRules(ctx context.Context, network *model.NetworkItem) int {
 	return ft.backend.CountOrphanedRules(ctx, network)
+}
+
+func (ft *FirewallTracker) RuleExists(ctx context.Context, rule *model.FirewallRule) bool {
+	return ft.backend.RuleExists(ctx, rule)
 }
 
 // --- Chain lifecycle ---
