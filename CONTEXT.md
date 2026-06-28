@@ -48,9 +48,21 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
 
 ### Domain
 
-A business capability with isolated logic. Each domain (vm, network, image, kernel, binary, key, host, config, cache, volume, console, logs, cloudinit, ssh, snapshot, vsock) lives in `internal/core/{domain}/`. Data-heavy domains follow the Controller / Service / Repository / Resolver pattern; simpler domains may have fewer files (e.g., `cache/` has a Service and utils, `ssh/` has a Service and utils, `console/` has only a Controller, `host/` has the full Controller/Service/Repository pattern plus a detector, probe, and utils, `config/` has constraints, a Service, a Repository, settings, and utils (no controller), `logs/` has controller + service, `cloudinit/` uses manager + provisioner plus config and utils, `snapshot/` has repository, resolver, and SQLite (no controller/service), `vsock/` has agent, client, service, repository, resolver, file transfer, protocol, and SQLite). Domains do NOT import other domains.
+A domain is a self-contained business capability with its own logic, data model, and test suite. Each domain lives in a directory under `internal/core/` named after the capability — for example, `internal/core/vm/` for VM lifecycle, `internal/core/network/` for networking, and `internal/core/image/` for image management. The project currently has sixteen domains covering everything from SSH keys to snapshots.
 
-All model types are centralized in `internal/lib/model/` -- a single package with zero domain imports. Every domain and every layer imports from `model` directly. Model types are concrete structs with `db:"column"` and `json:"field"` tags for sqlx and JSON serialization.
+Domains are strictly isolated from each other. A domain in `internal/core/vm/` can never import from `internal/core/network/` or any other domain package. The Go compiler enforces this isolation through circular import detection: if a domain tried to import another domain, the compiler would produce an import cycle error. This means each domain can be tested, modified, and replaced independently without affecting the rest of the system.
+
+What unifies the domains is the shared model layer at `internal/lib/model/`. Every domain imports its types — concrete structs with `db:"column"` and `json:"field"` tags for SQL and JSON serialization — from this single package. No domain defines its own model types. The model package contains 21 files covering VM instances, networks, images, kernels, binaries, volumes, SSH keys, leases, firewall rules, console info, Firecracker config, cloud-init modes, provisioner types, relation specs, VM status, operation status, and workflow state.
+
+Not every domain follows the same internal structure. The pattern varies by complexity:
+- **Controller/Service/Repository/Resolver**: vm, network, image, kernel, key, volume, host
+- **Controller + Repository**: snapshot (resolver included)
+- **Controller only**: console
+- **Service only**: cache, ssh
+- **Service + Repository**: config (includes constraints registry)
+- **Controller + Service**: logs
+- **Manager + Provisioner**: cloudinit
+- **Agent + client + service + repository + resolver**: vsock
 
 ### Intra-domain orchestration
 
@@ -78,24 +90,24 @@ Constructed with repos/options only: `network.NewService(repo Repository, tracke
 
 ### Repository
 
-An interface (defined in `repository.go`) for database CRUD operations. ALL SQL queries live here -- single SQLite implementation in `sqlite.go`. Uses `github.com/jmoiron/sqlx` for struct scanning (`StructScan`, `GetContext`, `SelectContext`). Uses SQL-level computation (COUNT, WHERE IN), never fetch-all-then-filter. Every method takes `ctx context.Context` as its first parameter. JSON-serialized fields (VM's SSHKeys, VolumeIDs, CPUConfig) use intermediate scan structs + `toVM()` conversion method.
+A per-domain interface for database CRUD operations. Each domain defines its own `Repository` interface in its `repository.go` file. ALL SQL queries live in the sole concrete implementation (`sqlite.go` per domain), using `github.com/jmoiron/sqlx` for struct scanning. Every method takes `ctx context.Context` as its first parameter. SQL-level computation (COUNT, WHERE IN) is preferred over fetch-all-then-filter patterns. JSON-serialized fields (VM's SSH keys, volume IDs, CPU config) use intermediate scan structs with conversion methods.
 
-The interface is defined in `repository.go`; the SQLite implementation is in `sqlite.go`. Constructor: `NewRepository(db *sqlx.DB) Repository`.
+Constructor pattern: `NewRepository(db *sqlx.DB) Repository`.
 
 ### Service subprocess pattern (internal/service/)
 
-Long-running subprocess services (console relay, nocloud-net server, loopmount provisioner) live in `internal/service/{name}/`. These are compiled into the SAME `mvm` binary -- no separate multidist binary. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`vsockagent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
+Long-running subprocess services (console relay, nocloud-net server, loopmount provisioner) live in `internal/service/{name}/`. These are compiled into the same `mvm` binary — no separate binaries. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`vsockagent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
 
 Each service follows a consistent three-function pattern:
-- **`Config`** struct -- holds all configuration for the service.
-- **`Run(ctx, cfg)`** -- runs the service in the foreground (blocking).
-- **`Spawn(ctx, cfg, extraFiles...)`** -- launches the service as a background subprocess via `system.SpawnService()`.
+- **`Config`** struct — holds all configuration for the service.
+- **`Run(ctx, cfg)`** — runs the service in the foreground (blocking).
+- **`Spawn(ctx, cfg, extraParams...)`** — launches the service as a background subprocess via `system.SpawnService()`. The context parameter is typically `nil` (background/nil) for daemon services (console relay, nocloud-net server) and a real context for synchronous services (loopmount provisioning). Extra parameters carry service-specific data: `console.Spawn()` passes a PTY file descriptor, `nocloudnet.Spawn()` passes the config only, `loopmount.Spawn()` passes a wire protocol input struct.
 
 Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `vsockagent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
 
-The dependency direction is: `cli/` -> `services/`. Services never import `cli/` or `pkg/api/`.
+Dependency direction: `cli/` -> `services/`. Services never import `cli/` or `pkg/api/`.
 
-Cloud-init domain (`internal/core/cloudinit/`) is distinct from services -- it's a core domain that handles cloud-init config generation, not a subprocess.
+Cloud-init domain (`internal/core/cloudinit/`) is distinct from services — it is a core domain that handles cloud-init config generation, not a subprocess.
 
 ### Resolver
 
@@ -438,7 +450,7 @@ JSON-serialized DB fields use `db.StringSlice` (for `[]string`) or custom `Scan`
 | **API** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/infra/event`, `internal/lib/*`, `internal/assets`, `pkg/errs`, `pkg/api/inputs`, `pkg/api/results` | `import "mvmctl/internal/core/vm"` |
 | **API inputs** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/lib/*` | `import "mvmctl/internal/lib/model"` |
 | **Core domain** | `internal/infra`, `internal/lib/*`, `internal/assets`, `internal/service/*` (for subprocess spawning) — no other core domains | `import "mvmctl/internal/lib/model"` |
-| **Infra/lib** | stdlib, `github.com/jmoiron/sqlx`, external deps | N/A -- leaf nodes |
+| **Infra/lib** | stdlib, `github.com/jmoiron/sqlx`, `pkg/errs`, `internal/assets`, other `internal/lib/*` sub-packages, external deps | N/A -- leaf nodes that never import core, api, cli, or service |
 
 Key conventions:
 - Import aliases like `Xcore` are forbidden. Use bare package names.

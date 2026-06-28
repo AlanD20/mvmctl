@@ -1,22 +1,12 @@
-# System Test Setup — Runner VM Architecture
+# System Test Setup — Host Preparation
 
-**Purpose:** Define how to set up the host machine and the runner VM for executing L2 (E2E) system tests.
+**Purpose:** Define the steps to prepare a host machine for running L2 system tests
+using the orchestrator-based approach.
 
-> **⚠️ Deprecation notice:**
-> This document describes the legacy **snapshot-based** approach using `rc-env.yaml` + `mvm snapshot`.
-> The current recommended approach uses the orchestrator-based system with per-domain VMs,
-> documented in [system-test-architecture.md](../system-test-architecture.md).
-> The `scripts/run-system-tests.py` orchestrator creates a custom base image, provisions
-> per-domain VMs from it, and runs tests in parallel. The `rc-env.yaml` path still works
-> for single-VM sessions but is no longer the primary execution method.
-
-> **See also:** [ADR-0012](../adr/0012-unified-test-architecture.md) for the architectural decisions.
->
-> **See also:** [HOW_AGENTS_WRITE_SYSTEM_TESTS.md](HOW_AGENTS_WRITE_SYSTEM_TESTS.md) for the test writing guide.
->
-> **See also:** [system-test-architecture.md](../system-test-architecture.md) for the orchestrator-based approach.
->
-> **See also:** [RC_QA.md](../RC_QA.md) for release qualification gates.
+**See also:**
+- [system-test-architecture.md](../system-test-architecture.md) — three-tier architecture, shared volume, per-domain VMs
+- [HOW_AGENTS_RUN_SYSTEM_TESTS.md](HOW_AGENTS_RUN_SYSTEM_TESTS.md) — step-by-step execution guide
+- [HOW_AGENTS_WRITE_SYSTEM_TESTS.md](HOW_AGENTS_WRITE_SYSTEM_TESTS.md) — how to write L0/L1/L2 tests
 
 ---
 
@@ -24,213 +14,218 @@
 
 1. [Architecture Overview](#1-architecture-overview)
 2. [Host Requirements](#2-host-requirements)
-3. [Runner VM Specification](#3-runner-vm-specification)
-4. [One-Time Setup](#4-one-time-setup)
-5. [Create the Runner VM (via rc-env.yaml)](#5-create-the-runner-vm-via-rc-envyaml)
-6. [Post-Provisioning: Wire Up Caches + DB](#6-post-provisioning-wire-up-caches--db)
-7. [Snapshot the Runner VM](#7-snapshot-the-runner-vm)
-8. [Running L2 Tests](#8-running-l2-tests)
-9. [Running L2 Tests in Parallel](#9-running-l2-tests-in-parallel)
-10. [Troubleshooting](#10-troubleshooting)
-11. [Verification Checklist](#11-verification-checklist)
+3. [One-Time Setup](#3-one-time-setup)
+4. [Orchestrator Prepare Mode](#4-orchestrator-prepare-mode)
+5. [Verification Checklist](#5-verification-checklist)
+6. [Troubleshooting](#6-troubleshooting)
 
 ---
 
 ## 1. Architecture Overview
 
-L2 tests run inside a **disposable Firecracker VM** (the "runner VM") with nested KVM. The host manages the VM lifecycle via `mvm`. Tests create their own VMs inside the runner VM (triple nesting: host → runner VM → test VM).
+System tests run inside **disposable Firecracker VMs** (the "runner VMs") created
+and destroyed by `scripts/run-system-tests.py`. The orchestrator:
+
+1. Builds a custom base image (`mvm-test-runner:<version>`) containing the mvm
+   binary and system tests.
+2. Creates per-domain runner VMs from that image, attaches a shared read-only
+   volume with cached assets, and runs `pytest` inside each VM.
+3. Destroys all VMs after the test session.
 
 ```
 Host (Go + KVM only)
-  │
-  ├── rc-env.yaml creates + provisions the runner VM
-  ├── Additional steps wire up caches + DB
-  ├── Snapshot for reuse
-  │
-  └── Tests run via: mvm exec rc-vm -- "pytest tests/system/..."
+│
+├── scripts/run-system-tests.py   ← orchestrator
+│
+├── TIER 1 — Per-domain VMs (host-level CLI tests)
+│   ├── mvm vm create --image mvm-test-runner:<version> --volume asset-mirror
+│   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt mvm init
+│   ├── pytest tests/system/<domain>/    ← runs INSIDE the VM
+│   └── mvm vm rm --force
+│
+├── TIER 2 — Same as T1 + nested-virt
+│   ├── mvm vm create --nested-virt --volume asset-mirror
+│   ├── mount + init + kernel pull / image pull / bin pull (cache hits)
+│   ├── pytest tests/system/<domain>/    ← runs INSIDE the VM
+│   └── mvm vm rm --force
+│
+└── TIER 3 — Tests run directly on host (no runner VM)
+    └── pytest tests/system/<domain>/
 ```
 
 ---
 
 ## 2. Host Requirements
 
-| Component | Requirement | Check |
-|-----------|-------------|-------|
-| CPU | x86_64 with VMX/SVM | `grep -c '(vmx|svm)' /proc/cpuinfo` > 0 |
-| RAM | 8 GB min (16 GB rec.) | `free -g` |
-| Disk | 5 GB free for caches | `df -h ~/.cache/mvm-asset-mirror` |
-| KVM | `/dev/kvm` accessible | `test -c /dev/kvm && echo OK` |
-| Nested virt | `nested=Y` | `cat /sys/module/kvm_intel/parameters/nested` |
-| Go | 1.26+ | `go version` |
-| Network | Outbound HTTP/HTTPS (first run only) | `curl -sI https://example.com` |
+### Hardware
 
-```bash
-# Host only needs Go
-sudo apt-get install -y golang
+| Component | Requirement | Verification Command |
+|-----------|-------------|----------------------|
+| CPU | x86_64 with VMX/SVM | `grep -c '(vmx\|svm)' /proc/cpuinfo` — expected: > 0 |
+| RAM | 8 GB minimum (16 GB recommended) | `free -g` |
+| Disk | 20 GB free for caches and volumes | `df -h ~/.cache/mvmctl` |
+| KVM | `/dev/kvm` accessible | `test -c /dev/kvm && echo OK` |
+| Nested virt | `nested=Y` (for Tier 2 runner VMs) | `cat /sys/module/kvm_intel/parameters/nested` |
+
+### Software
+
+| Tool | Required For | Verification |
+|------|-------------|--------------|
+| Go 1.26.3+ | Building the mvm binary | `go version` |
+| qemu-img | Volume operations | `which qemu-img` |
+| mkfs.ext4 | Shared volume creation | `which mkfs.ext4` |
+| truncate (coreutils) | Sparse file operations | `which truncate` |
+| zstd | Image decompression | `which zstd` |
+| genisoimage | Cloud-init ISO creation | `which genisoimage` |
+| ssh-keygen | Key generation in tests | `which ssh-keygen` |
+| ip | Network management | `which ip` |
+| nft | Firewall management | `which nft` |
+
+### Groups
+
+```
+groups
+# Expected: kvm mvm disk (all three)
+```
+
+If a group is missing, ask a human admin:
+```
+sudo usermod -aG <group> $USER && newgrp <group>
 ```
 
 ---
 
-## 3. Runner VM Specification
+## 3. One-Time Setup
 
-The runner VM (named `rc-vm` per `rc-env.yaml`) is configured as:
-
-| Resource | Value |
-|----------|-------|
-| Image | `ubuntu:noble` |
-| Kernel | `official:7.0.11` with `kvm,nftables,tuntap` |
-| vCPU | 6 |
-| Memory | 4 GB |
-| Disk | 25 GB |
-| Nested virt | Enabled |
-| User | `runner` (has passwordless sudo) |
-
----
-
-## 4. One-Time Setup
-
-These steps run ONCE on the host to populate the asset caches.
-
-### 4.1 Build the binary
+### 3.1 Build the binary
 
 ```bash
 ./scripts/build.sh release
+
+# Verify it exists and is executable
+test -x dist/mvm && echo "binary: OK ($(dist/mvm --version 2>/dev/null))"
+
+# Copy to path that system tests expect
 cp dist/mvm ~/.local/bin/mvm
 ```
 
-### 4.2 Ensure caches are populated
+### 3.2 Populate the asset mirror
 
-If not already done, build the official kernel and pull assets:
+Set up the local asset mirror cache. This directory is the source of truth for
+the shared test volume:
 
 ```bash
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
 mkdir -p "$MVM_ASSET_MIRROR"
 
-# Build official kernel (30-120 min first time, cached in /tmp/mvmctl/ for subsequent runs)
-mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm
+# Pull the official kernel used by runner VMs
+mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs --default
 
-# Pull remaining assets (cached in MVM_ASSET_MIRROR for subsequent runs)
+# Pull remaining assets
+mvm image pull alpine:3.23
 mvm image pull ubuntu:noble
 mvm kernel pull --type firecracker --version v1.15 --default
 mvm bin pull firecracker --version 1.16.0 --default
 ```
 
-After this, verify:
+**What a cache hit looks like:** On subsequent runs, each pull command prints
+messages about reading from the local mirror at `MVM_ASSET_MIRROR` instead of
+downloading from the internet.
+
+**Troubleshooting:** If a pull downloads from the internet instead of using the
+local mirror, verify `MVM_ASSET_MIRROR` is set and the mirror directory contains
+the expected files:
 
 ```bash
-ls /tmp/mvmctl/vmlinux-7.0.11*   # compiled kernel binary
-ls /tmp/mvmctl/*.marker           # build marker
-ls ~/.cache/mvm-asset-mirror/     # downloaded assets
+ls ~/.cache/mvm-asset-mirror/
+# Expected: vmlinux files, image files, firecracker tarballs
 ```
 
 ---
 
-## 5. Create the Runner VM (via rc-env.yaml)
+## 4. Orchestrator Prepare Mode
 
-The [`rc-env.yaml`](../../rc-env.yaml) file handles everything: network, key, image, binary, kernel, VM creation, file copies, and package installation.
+The orchestrator's `--prepare` flag handles all provisioning automatically:
 
 ```bash
-mvm env apply rc-env.yaml
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  python3 scripts/run-system-tests.py --prepare
 ```
 
-This creates the VM `rc-vm` with:
-- Ubuntu Noble, official kernel 7.0.11 with features, 6 vCPU, 4 GB RAM, 25 GB disk, nested virt
-- `mvm` binary at `/usr/bin/mvm`
-- Test suite at `/home/runner/tests/`
-- Asset files (kernel `.vmlinux`, images, firecracker tarball) at `/mnt/`
-- System packages installed (qemu-utils, python3, pytest, build tools, etc.)
-- User `runner` with passwordless sudo + kvm group
+This does the following:
 
----
+1. **Detects the mvm version** from `mvm --version`
+2. **Creates the shared volume** (`asset-mirror`, 6 GB, raw format, shareable, read-only)
+3. **Populates the volume** with the contents of `~/.cache/mvm-asset-mirror/` via loop mount (requires sudo)
+4. **Creates the test network** (`sys-test-net`, subnet `10.88.0.0/24`)
+5. **Builds the custom base image** (`mvm-test-runner:<version>`) — creates a builder VM from `ubuntu-minimal:noble`, installs test dependencies (Python 3, pytest, qemu-utils, etc.), copies the mvm binary and test suite, then imports the rootfs as a custom image
+6. **Smoke-tests T1 provisioning** — creates a T1 VM from the base image, mounts the shared volume, runs `mvm init`, then destroys the VM
+7. **Smoke-tests T2 provisioning** — creates a T2 VM with nested virt, mounts the volume, runs `mvm init`, pulls a cache-hit asset, then destroys the VM
 
-## 6. Post-Provisioning: Import Assets + Init DB
+**What success looks like:** The final lines of the output show:
 
-`rc-env.yaml` copies all assets into `/mnt/` inside the VM. The `import cached assets` exec step points `MVM_ASSET_MIRROR` and `MVM_TEMP_DIR` to `/mnt/`, runs `mvm kernel pull`/`image pull`/`bin pull`/`init`, then sets env vars in `.bashrc`. Everything is wired up by `mvm env apply rc-env.yaml`.
-
----
-
-## 7. Snapshot the Runner VM
-
-Once provisioned, snapshot so subsequent test sessions restore instantly.
-
-```bash
-# Create snapshot
-mvm snapshot create rc-vm --name rc-vm-snap
+```
+=== Prepare: ALL STEPS PASSED ===
+  Base image: mvm-test-runner:<version>
+  T1: '<name>' — created, binary copied, init completed
+  T2: '<name>' — created, volume attached, cache hit verified
+  Volume status: available
+  Environment is ready for running tests.
 ```
 
-### Restore from snapshot (for each test run)
+**Run `--prepare` once** after cloning or updating the mvm binary. Re-run when
+the binary version changes or when `tests/system/` content changes.
+
+### Rebuild flags
+
+| Flag | What it rebuilds |
+|------|-----------------|
+| `--rebuild` | Binary, shared volume, and base image (full reset) |
+| `--volume` | Shared asset volume only |
+| `--image` | Custom base image only |
 
 ```bash
-# Restore — replaces current rc-vm with snapshot copy, resumes it
-mvm snapshot restore rc-vm-snap rc-vm --resume
-```
-
----
-
-## 8. Running L2 Tests
-
-```bash
-# One file
-mvm exec rc-vm --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/system/volume/test_volume.py -xvs"
-
-# All L2 tests
-mvm exec rc-vm --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/system/ -x --junitxml=results.xml"
-
-# Collect results
-mvm cp rc-vm:/home/runner/tests/results.xml ./results.xml
-
-# L0/L1 fast pre-filter (on host, no VM needed)
-go test ./... -count=1
+# Full rebuild
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  python3 scripts/run-system-tests.py --rebuild --all
 ```
 
 ---
 
-## 9. Running L2 Tests in Parallel
+## 5. Verification Checklist
 
-Multiple runner VMs from the same snapshot run different suites:
+Run these commands to verify the host is ready:
 
 ```bash
-mvm exec rc-vm-1 --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/system/volume/ tests/system/network/ -x"
-mvm exec rc-vm-2 --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/system/vm/ -x"
-mvm exec rc-vm-3 --user runner --timeout 600 -- \
-  "cd ~ && python3 -m pytest tests/system/ --ignore=tests/system/volume/ --ignore=tests/system/network/ --ignore=tests/system/vm/ -x"
+# Host checks
+echo "KVM:   $(test -c /dev/kvm && echo OK || echo MISSING)"
+echo "Nest:  $(cat /sys/module/kvm_intel/parameters/nested 2>/dev/null || echo N/A)"
+echo "mvm:   $(~/.local/bin/mvm --version 2>/dev/null)"
+
+# Asset mirror
+ls ~/.cache/mvm-asset-mirror/ | head -10
+
+# Shared volume
+mvm volume inspect asset-mirror --json 2>/dev/null && echo "Volume: OK" || echo "Volume: MISSING — run --prepare"
+
+# Custom base image
+mvm image inspect mvm-test-runner:$(~/.local/bin/mvm --version 2>/dev/null | awk '{print $2}') --json 2>/dev/null && echo "Base image: OK" || echo "Base image: MISSING — run --prepare"
+
+# Test network
+mvm network inspect sys-test-net --json 2>/dev/null && echo "Network: OK" || echo "Network: MISSING — run --prepare"
 ```
 
 ---
 
-## 10. Troubleshooting
+## 6. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `mvm env apply` fails | `mvmctl` not initialized | Run `mvm init --non-interactive --skip-host` first |
-| SSH not available after creation | Cloud-init still running | Check `mvm logs rc-vm --lines 50` |
-| Nested KVM missing inside VM | Host lacks `nested=1` | `cat /sys/module/kvm_intel/parameters/nested` → must be `Y` |
-| `kernel pull` downloads instead of cache hit | `.vmlinux` or `.marker` not in `/mnt/` | Re-run `mvm env apply` to re-copy assets |
-| `image pull` downloads instead of cache hit | Mirror not set to `/mnt/` | `MVM_ASSET_MIRROR=/mnt` must be set in the exec step |
-| Snapshot restore fails | Files corrupted | Rebuild: re-run `mvm env apply`, re-snapshot |
-| Test VM creation fails inside runner VM | Out of resources | Increase vcpu/mem/disk in `rc-env.yaml` |
-
----
-
-## 11. Verification Checklist
-
-```bash
-# Host
-echo "KVM:   $(test -c /dev/kvm && echo OK)"
-echo "Nest:  $(cat /sys/module/kvm_intel/parameters/nested 2>/dev/null)"
-echo "mvm:   $(~/.local/bin/mvm --version 2>/dev/null)"
-echo "Krnl:  $(ls /tmp/mvmctl/vmlinux-7.0.11* 2>/dev/null)"
-echo "Mrkr:  $(ls /tmp/mvmctl/*.marker 2>/dev/null)"
-
-# Runner VM
-echo "Alive: $(mvm exec rc-vm --user runner --timeout 10 -- 'echo OK' 2>/dev/null || echo DEAD)"
-echo "KVM:   $(mvm exec rc-vm --user runner --timeout 10 -- 'test -c /dev/kvm && echo OK' 2>/dev/null)"
-echo "Bin:   $(mvm exec rc-vm --user runner --timeout 10 -- 'mvm --version' 2>/dev/null)"
-echo "Py:    $(mvm exec rc-vm --user runner --timeout 10 -- 'python3 -m pytest --version' 2>/dev/null | head -1)"
-echo "Imgs:  $(mvm exec rc-vm --user runner --timeout 30 -- 'mvm image ls --json | python3 -c \"import sys,json; print(len([i for i in json.load(sys.stdin) if i.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
-echo "Krnls: $(mvm exec rc-vm --user runner --timeout 30 -- 'mvm kernel ls --json | python3 -c \"import sys,json; print(len([k for k in json.load(sys.stdin) if k.get(\\\"is_present\\\")]))\"' 2>/dev/null)"
-```
+| `mvm: command not found` | Binary not built or not in PATH | Run `./scripts/build.sh release && cp dist/mvm ~/.local/bin/mvm` |
+| Shared volume creation fails | `mvmctl` not initialized | Run `mvm init --non-interactive --skip-host` first |
+| Base image build fails | Builder VM cannot install packages | Check network connectivity and `mvm exec` works inside builder VM |
+| Cache hit downloads from network | Mirror not set or empty | Verify `MVM_ASSET_MIRROR` points to populated directory |
+| `--prepare` smoke test fails | Missing assets in mirror | Run asset pulls from section 3.2 |
+| T2 VM creation fails inside runner VM | Out of resources | Adjust runner VM specs in `provision_t2()` inside `run-system-tests.py` |
+| Nested KVM missing inside VM | Host lacks `nested=1` | `cat /sys/module/kvm_intel/parameters/nested` — must be `Y` |
+| Permission denied on cache dir | `mvm init` run as root | Destroy and recreate the VM ensuring init runs as `runner` user |

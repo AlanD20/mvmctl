@@ -263,13 +263,13 @@ A regression is **any** of the following:
 - [ ] `go build ./...` — zero errors
 - [ ] `go vet ./...` — zero warnings
 - [ ] `go test ./...` — all pass
-- [ ] E2E tests — all pass inside runner VM (see evidence archive)
+- [ ] System tests — all pass inside runner VM (see evidence archive)
 - [ ] `./dist/mvm --version` — returns vX.Y.Z
 - [ ] `./dist/mvm --help` — all commands present
 
 ### Evidence
 - [ ] Build log archived
-- [ ] E2E test log archived
+- [ ] System test log archived
 - [ ] Binary checksum archived
 - [ ] Benchmark results within thresholds
 

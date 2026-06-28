@@ -3,6 +3,14 @@
 **Status:** Active  
 **Date:** 2026-06-20
 
+**Table of Contents**
+
+- [Context](#context)
+- [Decision](#decision)
+- [Considered Options](#considered-options)
+- [Consequences](#consequences)
+- [Related Documents](#related-documents)
+
 ## Context
 
 ### The problem

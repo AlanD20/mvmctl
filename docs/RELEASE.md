@@ -22,7 +22,7 @@ This document covers how to release a new version of mvmctl from start to finish
 
 ## Prerequisites
 
-- **Go 1.26+** — local development and building
+- **Go 1.26.3+** — local development and building (check with `go version`)
 - **Linux (KVM-capable host)** — tests and valid binary
 - **git** — tagging and pushing
 ---

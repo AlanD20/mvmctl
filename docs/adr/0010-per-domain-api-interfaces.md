@@ -5,6 +5,13 @@
 
 The API layer (`pkg/api/`) is defined as multiple small Go interfaces — one per domain — rather than a single `API` interface with all 131 methods. A composite `API` interface embedding all domains is provided for consumers that need everything (TUI, advanced workflows).
 
+**Table of Contents**
+
+- [Context](#context)
+- [Decision](#decision)
+- [Considered Options](#considered-options)
+- [Consequences](#consequences)
+
 ## Context
 
 `pkg/api/` exposes orchestration methods on the `*Operation` struct across 17 domains (VM, Image, Network, Volume, Kernel, Key, Binary, Host, Console, SSH, Exec, Config, Cache, Log, CP, Init, Snapshot). Three consumer layers depend on it:

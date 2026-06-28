@@ -42,14 +42,14 @@ Coding standards, conventions, and architectural rules for the mvmctl Go codebas
 | `internal/enricher/` | Cross-domain enrichment (only package besides `pkg/api` that imports multiple core domains) | Imports `internal/core/*` |
 | `internal/service/` | Background subprocess services (console relay, nocloudnet server, loopmount provisioner) plus embedded vsock guest agent (`vsockagent/`) | Imports `internal/infra`, `internal/lib/*`. Never imports `pkg/api` or `internal/cli/`. |
 | `internal/workflow/env/` | Environment workflow orchestration (apply/destroy specs) | Imports `pkg/api`, `internal/infra`, `internal/lib/*` (specifically `internal/lib/workflow`). Never imports `internal/core/` or `internal/enricher/` directly. |
-| `internal/infra/` | Generic leaf utilities (constants, io, template, yaml, cast, slice, pool, ptr, event, provcontent, timinglog, progress, vm) | Imports ONLY stdlib and external deps. Never imports core, api, cli, or service. |
-| `internal/lib/` | Domain-adjacent leaf utilities (system, model, db, download, version, logging, crypto, firewall, firecracker, provisioner, network, archive, asset, disk, validators, workflow) | Imports ONLY stdlib and external deps. Never imports core, api, cli, or service. |
+| `internal/infra/` | Generic leaf utilities (constants, io, template, yaml, cast, slice, pool, ptr, event, provcontent, timinglog, progress, vm) | Imports stdlib, external deps, and `pkg/errs`. Never imports core, api, cli, or service. |
+| `internal/lib/` | Domain-adjacent leaf utilities (system, model, db, download, version, logging, crypto, firewall, firecracker, provisioner, network, archive, asset, disk, validators, workflow) | Imports stdlib, external deps, and `pkg/errs`. Never imports core, api, or cli. Exception: `internal/lib/provisioner/loopmount/` imports `internal/service/loopmount` for subprocess communication. |
 | `pkg/api/` | Public API orchestration layer | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
 | `pkg/api/inputs/` | Input Validate/Resolve structs (ADR-0011) | Imports `internal/core/*`, `internal/enricher/`, `internal/infra`, `internal/lib/*` |
 | `pkg/errs/` | Domain error type and codes | Leaf package — no internal imports |
 | `internal/testutil/` | In-memory repo implementations, `FakeRunner`, and per-domain API mocks for tests | Imports `internal/lib/*`, `internal/infra/event`, `pkg/api/*`, `pkg/errs` |
 
-**Key rule:** `internal/infra/` and `internal/lib/` are LEAF dependencies. They import nothing from `core/`, `api/`, `cli/`, or `service/`. Everything else imports them.
+**Key rule:** `internal/infra/` and `internal/lib/` are LEAF dependencies. They import nothing from `core/`, `api/`, `cli/`, or `service/` (with one exception: `internal/lib/provisioner/loopmount/` imports `internal/service/loopmount`). Everything else imports them. Both packages may import `pkg/errs` as an additional leaf dependency.
 
 ## 2. Layer Architecture
 
@@ -69,8 +69,7 @@ Three-layer flow: **CLI → API → Core**
 - Holds all repositories, services, and enricher
 - Validation lives in `pkg/api/inputs/` — `*Input` structs with `Validate()` / `Resolve()` (ADR-0011)
 - Returns typed responses with JSON struct tags
-- Handles `--json` flag by `json.MarshalIndent`-ing typed response structs directly
-- No `ToJSON()` methods on API operations
+- Handles `--json` flag by `json.MarshalIndent`-ing typed response structs directly (or via `NetworkToJSON` for network-specific field mapping)
 
 ### Core Layer (`internal/core/{domain}/`)
 - Strictly isolated domains — NEVER import other core domains
@@ -96,7 +95,7 @@ Three-layer flow: **CLI → API → Core**
 - Performs state detection (checking current system state to branch execution)
 - Guards invariants that protect against system damage
 - Does NOT validate caller input
-- Constructor takes repos/options only: `network.NewService(repo Repository, tracker firewall.Tracker)`
+- Constructor takes repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker)`
 - Wired once at startup in `app.Initialize()`
 - Service methods that don't reference the Service struct live in `utils.go`
 
@@ -454,6 +453,8 @@ All entity IDs use `internal/lib/crypto/` package-level functions:
 ```go
 crypto.ImageID(...)
 crypto.VMID(...)
+crypto.SnapshotID(...)
+crypto.VolumeID(...)
 crypto.ShortenID(...)
 crypto.UUIDV4()
 ```
@@ -495,7 +496,7 @@ Rule: If a type requires a specific entity to construct, it's a Controller, not 
 | Enricher | `internal/core/*`, `internal/lib/model`, `pkg/errs` |
 | Service | `internal/infra`, `internal/lib/*` |
 | Workflow/env | `pkg/api`, `pkg/api/inputs`, `pkg/api/results`, `internal/infra`, `internal/lib/*`, `internal/workflow/*` |
-| Infra/lib | stdlib, `github.com/jmoiron/sqlx`, external deps |
+| Infra/lib | stdlib, `github.com/jmoiron/sqlx`, `pkg/errs`, external deps — with the exception of `internal/lib/provisioner/loopmount/` which also imports `internal/service/loopmount` |
 
 ## 23. Shell Completion
 

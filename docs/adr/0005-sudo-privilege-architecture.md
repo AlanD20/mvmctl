@@ -6,6 +6,17 @@
 
 The project uses a **tightly scoped, group-based sudo model** where members of a dedicated Unix group (`mvm`) can execute specific privileged commands via `sudo` without a password prompt. This avoids running the entire CLI as root while still allowing VM creation (loop-mount), network management (ip/iptables/nft), kernel module loading (modprobe), and sysctl configuration.
 
+**Table of Contents**
+
+- [The Group Activation Mechanism](#the-group-activation-mechanism)
+- [The Actual Sudoers File](#the-actual-sudoers-file)
+- [How VM Creation Works Without losetup in Sudoers](#how-vm-creation-works-without-losetup-in-sudoers)
+- [How System Tests Interact with Sudo](#how-system-tests-interact-with-sudo)
+- [Why Not Run Everything as Root](#why-not-run-everything-as-root)
+- [Why a Group-Based Model](#why-a-group-based-model)
+- [Consequences](#consequences)
+- [Related Decisions](#related-decisions)
+
 ## The Group Activation Mechanism
 
 `sg mvm` (switch group) changes the **primary GID** of the current process to the `mvm` group. This is visible in `id` output:

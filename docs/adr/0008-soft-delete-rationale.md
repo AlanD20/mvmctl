@@ -3,6 +3,12 @@
 **Status:** Active
 **Date:** 2026-05-22
 
+**Table of Contents**
+
+- [Where soft-delete is used](#where-soft-delete-is-used)
+- [Where it is NOT used](#where-it-is-not-used)
+- [Rule](#rule)
+
 ## Where soft-delete is used
 
 The following repositories implement soft-delete (setting `deleted_at` timestamp + filtering by `deleted_at IS NULL`):

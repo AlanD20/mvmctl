@@ -4,26 +4,26 @@
 
 [![CI](https://github.com/AlanD20/mvmctl/actions/workflows/ci.yml/badge.svg)](https://github.com/AlanD20/mvmctl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Go 1.26](https://img.shields.io/badge/go-1.26-blue)](https://go.dev/)
+[![Go 1.26.3](https://img.shields.io/badge/go-1.26.3-blue)](https://go.dev/)
 
 **mvmctl** is the modern way to run microVMs -- get the startup speed of containers with the security and isolation of traditional VMs. Built for developers who need lightweight, fast-booting virtual machines without the overhead.
 
 ## Why mvmctl?
 
-- ⚡ **Blazing fast** -- VMs boot in ~2-4 seconds (loop-mount) or ~9-14 seconds (guestfs), not minutes
-- 🔥 **Powered by Firecracker** -- AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
-- 🛡️ **Secure by default** -- Hardware-level isolation with KVM
-- 📦 **Single binary** -- One statically-linked Go binary with no language runtime dependencies (calls standard Linux utilities: ip, sudo, iptables/nftables, losetup, mount, etc.)
-- 🖼️ **Upstream images and create your own base image** -- Ubuntu, Debian, Arch, Alpine, and more
-- 🧩 **Volumes & persistence** -- Create, attach, resize, and detach persistent data disks. Survive VM lifecycles.
-- 🏗️ **Custom kernels** -- Download pre-built Firecracker kernels or build official kernels with custom features (`kvm`, `nftables`, ...)
-- ⌨️ **Simple CLI** -- One command to create, start, and SSH into a VM
-- 🖥️ **Console access** -- Interactive serial console without SSH (via `mvm console`)
-- 📋 **Environment as code** -- Provision full VM topologies from a YAML spec: networks, keys, images, kernels, VMs, and post-boot provisioning via `mvm env apply`
-- 🚀 **Vsock agent** -- Run commands inside VMs instantly via a lightweight embedded guest agent (via `mvm exec`), no SSH daemon required
-- 📁 **File transfer** -- Copy files between host and VMs over vsock with the built-in `mvm cp` command, no guest dependencies needed
-- 🎯 **Atomic batch creation** -- Spin up multiple VMs as a unit with `--count N --atomic`. All succeed or all roll back.
-- 🐳 **Container-like ergonomics** -- `mvm vm create myvm --image ubuntu:24.04 && mvm ssh myvm` feels like `docker run -it ubuntu bash`, but with real VM isolation.
+- **Fast boot times** -- VMs boot in 2-4 seconds (loop-mount) or 9-14 seconds (guestfs), so you iterate at container speed with VM-grade isolation.
+- **Powered by Firecracker** -- AWS's battle-tested microVM technology, the engine behind Lambda and Fargate.
+- **Secure by default** -- Hardware-level isolation with KVM.
+- **Single binary** -- One statically-linked Go binary with no language runtime dependencies. Calls standard Linux utilities (ip, sudo, iptables/nftables, losetup, mount).
+- **Image support** -- Ready-to-use images for Ubuntu, Debian, Arch, Alpine, and more. Import your own base images.
+- **Volumes & persistence** -- Create, attach, resize, and detach persistent data disks that survive VM lifecycles.
+- **Custom kernels** -- Download pre-built Firecracker kernels or build official kernels with custom features (KVM, nftables).
+- **Simple CLI** -- One command to create, start, and SSH into a VM.
+- **Console access** -- Interactive serial console without SSH via `mvm console`.
+- **Environment as code** -- Provision full VM topologies from a YAML spec: networks, keys, images, kernels, VMs, and post-boot provisioning via `mvm env apply`.
+- **Vsock agent** -- Run commands inside VMs instantly via a lightweight embedded guest agent (`mvm exec`), no SSH daemon required.
+- **File transfer** -- Copy files between host and VM over vsock with `mvm cp`, no guest dependencies needed.
+- **Atomic batch creation** -- Spin up multiple VMs as a unit with `--count N --atomic`. All succeed or all roll back.
+- **Container-like ergonomics** -- `mvm vm create myvm --image ubuntu:24.04 && mvm ssh myvm` works like `docker run -it ubuntu bash`, but with real VM isolation.
 
 ```bash
 # Create and SSH into a VM in under 10 seconds
@@ -35,12 +35,22 @@ mvm ssh myvm
 
 ## Table of Contents
 
+- [Why mvmctl?](#why-mvmctl)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
 - [Essential Commands](#essential-commands)
+  - [VM Lifecycle](#vm-lifecycle)
+  - [Network Management](#network-management)
+  - [Resource Management](#resource-management)
+  - [Snapshot Management](#snapshot-management)
+  - [System Setup](#system-setup)
+  - [Environment Management](#environment-management)
+  - [Configuration](#configuration)
 - [Documentation](#documentation)
 - [Building from Source](#building-from-source)
+  - [Dev build](#dev-build)
+  - [Release build](#release-build)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)

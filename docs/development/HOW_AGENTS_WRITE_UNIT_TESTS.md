@@ -2,14 +2,9 @@
 
 ## Purpose
 
-This is a **specification**, not a tutorial. It defines:
-
-- The **exact patterns** every Go unit test must follow
-- The **forbidden patterns** that produce worthless tests
-- The **verification checklist** before submitting any test code
-
-Agents do NOT invent test structure. They replicate the patterns below
-verbatim. Any deviation must be flagged and approved.
+This guide defines the patterns every Go unit test in this project must follow.
+Follow these patterns exactly — do not invent new test structure. If you need a
+pattern not covered here, flag it for approval before deviating.
 
 ## Table of Contents
 
@@ -829,14 +824,14 @@ import (
     "mvmctl/internal/testutil"
 )
 
-// ─── <FunctionName> ────────────────────────────────────────────────
+// --- <FunctionName> ---
 // Rationale: <one line explaining why these tests matter>
 
 func Test<FunctionName>(t *testing.T) {
     // ... table or subtest structure
 }
 
-// ─── <NextFunction> ─────────────────────────────────────────────────
+// --- <NextFunction> ---
 // Rationale: <one line>
 
 func Test<NextFunction>(t *testing.T) {
@@ -845,7 +840,7 @@ func Test<NextFunction>(t *testing.T) {
 ```
 
 **Rules:**
-- Section comments use `// ───` with em-dash borders (80 chars wide)
+- Section comments use `// ---` with plain ASCII dashes (≤ 60 chars including `// `)
 - Every test function has a `// Rationale:` comment explaining why this
   test exists and what real bug it prevents
 - Test functions are ordered by dependency (foundation first, consumers later)

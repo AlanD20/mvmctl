@@ -1,28 +1,10 @@
-> **STATUS: Current.** The loop-mount provisioner lives at `internal/service/loopmount/provisioner.go`, backend at `internal/lib/provisioner/loopmount/backend.go`, and wire protocol at `internal/service/loopmount/wire.go`.
-
 # Service Binaries & Loop-Mount Provisioner
 
 ## Problem
 
-All service subprocesses need to run as separate processes (for privilege isolation, PTY FD passing, etc.). We use a **self-spawning pattern**: the single `mvm` binary re-executes itself with a `mvm run <service>` subcommand.
+Root filesystem provisioning for Firecracker VMs (SSH key injection, hostname setup, DNS config, cloud-init disable, filesystem resize) previously required a guestfs session, which launched a QEMU process taking ~2600ms. This guestfs launch overhead was the primary bottleneck in `vm create`. The loop-mount provisioner replaces guestfs with a direct kernel loop device approach that completes in ~200ms, saving ~2400ms per VM creation.
 
-## Solution
-
-The `mvm` binary contains all three service entry points as Cobra subcommands under `mvm run`. When a service needs to run as a subprocess, `system.SpawnService()` calls `os.Executable()` to get the current binary path, then runs `<mvm-binary> run <service> [args]`.
-
-### Why this matters for performance
-
-The `vm create` command previously spent ~2600ms inside a guestfs session doing SSH key injection, hostname setup, DNS config, cloud-init disable, and filesystem resize. This guestfs launch overhead is the #1 bottleneck. Replacing it with a ~200ms loop-mount binary saves ~2400ms per `vm create`.
-
-## Services
-
-All 3 services are subcommands of the same `mvm` binary. No separate compilation, no embedding, no extraction needed.
-
-| Service | Subcommand | Runs as | Purpose |
-|---------|-----------|---------|---------|
-| **console_relay** | `mvm run console relay` | user | PTY-to-Unix-socket relay for serial console |
-| **nocloud_server** | `mvm run nocloudnet serve` | user | HTTP server for cloud-init nocloud-net |
-| **provisioner** | `mvm run provision` | **root** (sudo) | Loop mount provisioning (SSH, DNS, grow/shrink) |
+All service subprocesses (console relay, nocloud-net HTTP server, provisioner) run as separate processes for privilege isolation and PTY FD passing. They use a self-spawning pattern: the single `mvm` binary re-executes itself with a `mvm run <service>` subcommand.
 
 ## Architecture
 
@@ -53,174 +35,66 @@ All 3 services are subcommands of the same `mvm` binary. No separate compilation
    PTY↔socket relay     HTTP metadata server   JSON stdin/stdout
 ```
 
-## Self-Spawning Pattern
+### Self-Spawning Pattern
 
-Every service uses the same spawn infrastructure:
+`system.SpawnService()` in `internal/lib/system/spawn.go` gets the current binary path via `os.Executable()`, then runs `<mvm-binary> run <service> [args]`. If `Privileged: true`, it prepends `sudo -n`. `ExtraFiles` are passed starting at fd 3 (after stdin/stdout/stderr).
 
-```go
-// internal/lib/system/spawn.go
+| Service | Subcommand | Runs as | Purpose |
+|---------|-----------|---------|---------|
+| **console_relay** | `mvm run console relay` | user | PTY-to-Unix-socket relay for serial console |
+| **nocloud_server** | `mvm run nocloudnet serve` | user | HTTP server for cloud-init nocloud-net |
+| **provisioner** | `mvm run provision` | **root** (sudo) | Loop mount provisioning (files, commands, resize) |
 
-type SpawnConfig struct {
-    Name       string     // must match "mvm run <name>" Cobra command
-    ExtraFiles []*os.File // FDs starting at 3 (for PTY pass-through)
-    Privileged bool       // runs via sudo when true
-    Stdin      io.Reader
-    Stdout     io.Writer
-    Stderr     io.Writer
-    Args       []string   // additional args to "mvm run <name>"
-}
+## Entry point
 
-func SpawnService(ctx context.Context, cfg SpawnConfig) (*exec.Cmd, error) {
-    exe, err := os.Executable()
-    if err != nil {
-        return nil, err
-    }
+The provisioner is triggered by the API layer during `vm create`. In `pkg/api/operation.go`, the provisioner type is resolved once at startup: loop-mount by default, guestfs if `settings.guestfs_enabled` is true. The caller constructs a `Backend` via `provisioner.NewBackend()` in `internal/lib/provisioner/backend.go`, which returns a `LoopMountBackend` or `GuestfsBackend`.
 
-    args := []string{"run", cfg.Name}
-    args = append(args, cfg.Args...)
+The `LoopMountBackend` queues operations (files, commands, resize) via its builder methods, then calls `Run()` which marshals the operations to JSON and spawns the subprocess via `internal/service/loopmount/spawn.go`. The subprocess entry point is `Run()` in `internal/service/loopmount/entry.go`.
 
-    cmd := exec.CommandContext(ctx, exe, args...)
-    cmd.ExtraFiles = cfg.ExtraFiles
-    cmd.Stdin = cfg.Stdin
-    cmd.Stdout = cfg.Stdout
-    cmd.Stderr = cfg.Stderr
-    cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+For the console relay and nocloud server, `system.SpawnService()` is called directly from their respective `spawn.go` files — they do not go through the provisioner backend.
 
-    if cfg.Privileged && os.Getuid() != 0 {
-        // Prepend sudo
-        sudoArgs := append([]string{"-n", exe}, args...)
-        cmd = exec.CommandContext(ctx, "sudo", sudoArgs...)
-        cmd.ExtraFiles = cfg.ExtraFiles
-        cmd.Stdin = cfg.Stdin
-        cmd.Stdout = cfg.Stdout
-        cmd.Stderr = cfg.Stderr
-        cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-    }
+## Happy path
 
-    return cmd, cmd.Start()
-}
-```
+### 1. Queue operations
 
-This means:
-- **No separate binaries** — single binary, multiple entry points
-- **No embedding/extraction** — no `//go:embed` for service binaries
-- **No binary-first fallback** — mutual exclusion, not preference
-- **Privilege escalation** — `Privileged: true` auto-prepends `sudo`
+The `LoopMountBackend` in `internal/lib/provisioner/loopmount/backend.go` provides builder methods: `SetupSSH()`, `SetHostname()`, `InjectDNS()`, `DisableCloudInit()`, `InjectCloudInit()`, `Resize()`, `InjectVsockAgent()`. Each method validates its arguments and appends an operation to an internal queue.
 
-## Service Binary Contract
+### 2. Marshal and spawn
 
-Every service entry point follows these rules:
+`LoopMountBackend.Run()` converts queued operations to a `WireInput` struct and calls `Spawn()` in `internal/service/loopmount/spawn.go`. `Spawn()` marshals the `WireInput` to JSON, calls `system.SpawnService()` with `Name: "provision"` and `Privileged: true`, pipes the JSON to the subprocess's stdin, and captures stdout.
 
-1. **Minimal dependencies** — mostly stdlib (`encoding/json`, `os`, `net`, `syscall`, etc.).
-   The provisioner imports `mvmctl/internal/infra` for shared utilities; console relay imports `mvmctl/pkg/errs` for error types.
-2. **No upstream service imports** — service packages never import `pkg/api/` or other service packages.
-   Wire protocol types are shared via `internal/service/loopmount/wire.go`.
-3. **JSON on stdin/stdout** for structured communication (provisioner only; console relay and nocloud server use CLI args)
-4. **CLI argument interface** — Cobra flags for configuration
-5. **Compiled into main binary** — no separate build step
+### 3. Subprocess execution
 
-## Provisioner Details
+The subprocess entry `loopmount.Run()` in `internal/service/loopmount/entry.go` reads JSON from stdin, parses it as `WireInput`, converts it to the internal `Op` type, and calls `Provisioner.Execute()`. The provisioner in `internal/service/loopmount/provisioner.go` executes the binary flow:
 
-### Source
+1. `losetup -f -P --show <image>` — set up loop device with partition scanning
+2. Detect root partition — scans `/dev/loopNp1..p16` for Linux filesystems, picks the largest on tie, falls back to p1 then raw device
+3. Detect filesystem type via `blkid` (fallback: ext4 or input hint)
+4. `mount <root_partition> <mount_point>`
+5. Write all files from `ops["files"]` with base64 decode, correct mode/uid/gid
+6. Copy all directories from `ops["copy_dirs"]` from host to guest (recursive)
+7. `chroot <mount_point> sh -c <cmd>` for each command in `ops["commands"]`
+8. If resize.grow: truncate file, for ext4: `e2fsck -f -y + resize2fs`, for btrfs: `btrfs filesystem resize max /mnt`
+9. If resize.shrink: `e2fsck -f -y + resize2fs -M`, `losetup -d` + truncate
+10. `umount <mount_point>` and `losetup -d <loop_dev>`
+11. Write JSON result to stdout
 
-```
-internal/service/loopmount/       ← subprocess entry point
-├── entry.go                      ← Run(ctx, Config) — reads JSON stdin, executes, writes JSON stdout
-├── provisioner.go                ← Provisioner.Execute() — core engine (1232 lines)
-├── spawn.go                      ← Spawn() — programmatic subprocess launch
-└── wire.go                       ← WireInput/WireOutput — JSON protocol types
+All steps are wrapped in `defer` cleanup — `umount` and `losetup -d` run even on error.
 
-internal/lib/provisioner/loopmount/ ← caller-side backend
-├── backend.go                    ← LoopMountBackend — builder pattern, queues ops, calls runWireOp()
-├── partition.go                  ← Partition parsing types
-└── utils.go                      ← sfdisk/parted parsers, detectAndRenameFS()
+### 4. Result parsing
 
-internal/lib/provisioner/         ← Public abstraction (used by API)
-├── backend.go                    ← Backend interface, NewBackend() factory, BackendOpts
-└── guestfs/                      ← GuestFS backend (alternative)
-    ├── backend.go
-    ├── provisioner.go
-    ├── base.go
-    └── utils.go
+`Spawn()` parses the subprocess's stdout as `WireOutput`. On success, it returns the result. On error (status "error"), it returns an error with the step and message from the output.
 
-internal/infra/provcontent/       ← Shared operation types
-└── content.go                    ← FileOp, ChrootOp, CopyDirOp, ResizeOp, content builders
-```
+## Wire protocol
 
-### How the provisioner is selected
+The provisioner communicates via JSON on stdin/stdout. The protocol types are defined in `internal/service/loopmount/wire.go`.
 
-The loop-mount vs guestfs decision is made once at startup in `pkg/api/operation.go`:
-
-```go
-provisionerType := provisioner.ProvisionerLoopMount
-guestfsEnabled, _ := s.Config.GetBool(ctx, "settings", "guestfs_enabled")
-if guestfsEnabled {
-    provisionerType = provisioner.ProvisionerGuestFS
-}
-```
-
-`provisioner.NewBackend()` is a factory that constructs the correct backend based on this type:
-
-```go
-// internal/lib/provisioner/backend.go
-
-type Backend interface {
-    Resize(ctx context.Context, targetSizeBytes int64) error
-    SetHostname(ctx context.Context, hostname string) error
-    InjectDNS(ctx context.Context, dnsServer string) error
-    SetupSSH(ctx context.Context, user string, sshPubkeys []string) error
-    SetupSudo(ctx context.Context, user string) error
-    DisableCloudInit(ctx context.Context) error
-    InjectCloudInit(ctx context.Context, cloudInitDir string) error
-    DetectOS(ctx context.Context) (string, error)
-    Deblob(ctx context.Context, osType *string) error
-    FixFstab(ctx context.Context) error
-    Shrink(ctx context.Context) error
-    ExtractPartition(ctx context.Context, rawPath, outputPath string, partition int, disabledDetectors []string) (string, error)
-    ConvertTo(ctx context.Context, targetFS string) error
-    Run(ctx context.Context) error
-    InjectVsockAgent(ctx context.Context, agentBinary []byte, port int, token string) error
-}
-
-func NewBackend(ctx context.Context, opts BackendOpts) (Backend, error) {
-    switch opts.ProvisionerType {
-    case ProvisionerLoopMount:
-        return loopmount.NewLoopMountBackend(ctx, opts.RootfsPath, opts.FsType, opts.CacheDir), nil
-    case ProvisionerGuestFS:
-        if err := guestfs.EnsureAppliance(opts.CacheDir); err != nil {
-            return nil, err
-        }
-        return guestfs.NewGuestfsBackend(
-            opts.RootfsPath,
-            opts.RootUID,
-            opts.RootGID,
-            opts.UserUID,
-            opts.UserGID,
-        ), nil
-    default:
-        return nil, fmt.Errorf("unknown provisioner type: %s", opts.ProvisionerType)
-    }
-}
-```
-
-| Current (guestfs) | New (loop) |
-|-------------------|------------|
-| `GuestfsBackend(rootfsPath, rootUID, rootGID, userUID, userGID)` | `LoopMountBackend(rootfsPath, fsType, cacheDir)` |
-| `.SetupSSH(user, pubkeys)` | `.SetupSSH(user, pubkeys)` — same API via shared content builders |
-| `.SetHostname(name)` | `.SetHostname(name)` |
-| `.InjectDNS(dnsServer)` | `.InjectDNS(dnsServer)` |
-| `.DisableCloudInit()` | `.DisableCloudInit()` |
-| `.InjectCloudInit(dir)` | `.InjectCloudInit(cloudInitDir)` |
-| `.Resize(bytes)` | `.Resize(targetSizeBytes)` |
-| `.Run()` → **2600ms** QEMU launch | `.Run()` → **~200ms** loop mount + operations |
-
-### JSON Protocol (stdin → stdout)
-
-**Input:**
+### Input format
 
 ```json
 {
   "image": "/path/to/rootfs.img",
+  "action": "provision",
   "fs_type": "ext4",
   "operations": {
     "files": [
@@ -230,234 +104,116 @@ func NewBackend(ctx context.Context, opts BackendOpts) (Backend, error) {
         "mode": 644,
         "uid": 0,
         "gid": 0
-      },
-      {
-        "path": "/root/.ssh/authorized_keys",
-        "data": "<base64>",
-        "mode": 600,
-        "uid": 0,
-        "gid": 0
       }
     ],
     "copy_dirs": [
-      {
-        "src": "/tmp/cloud-init-dir",
-        "dst": "/var/lib/cloud/seed/nocloud-net"
-      }
+      {"src": "/tmp/cloud-init-dir", "dst": "/var/lib/cloud/seed/nocloud-net"}
     ],
-    "commands": [
-      "useradd -m myuser",
-      "ssh-keygen -A",
-      "systemctl enable sshd"
-    ],
-    "resize": {
-      "action": "grow",
-      "bytes": 8589934592
-    }
+    "commands": ["useradd -m myuser", "systemctl enable sshd"],
+    "resize": {"action": "grow", "bytes": 8589934592}
   }
 }
 ```
 
-The binary also supports `detect_os` and `convert_fs` actions:
+The `"action"` field supports `"provision"`, `"detect_os"`, and `"convert_fs"`.
 
-```json
-{
-  "image": "/path/to/rootfs.img",
-  "action": "detect_os",
-  "fs_type": "ext4"
-}
-```
-
-```json
-{
-  "image": "/path/to/rootfs.img",
-  "action": "convert_fs",
-  "fs_type": "ext4",
-  "target_fs": "btrfs"
-}
-```
-
-**Output (success):**
+### Output format
 
 ```json
 {"status": "ok", "files_written": 5, "commands_run": 3}
 ```
 
-**Output (error):**
+On error:
 
 ```json
 {"status": "error", "error": "Failed to mount: No such file or directory", "step": "mount"}
 ```
 
-The binary exits with code 0 on success, 1 on error.
+### Wire types
 
-### Wire Protocol Types
+| Type | Fields | Purpose |
+|------|--------|---------|
+| `WireInput` | Image, Action, FsType, Debug, TargetFS, Shell, Ops | Input envelope |
+| `WireOperations` | Files, CopyDirs, Commands, Resize | Operation container |
+| `WireFileOp` | Path, Data (base64), Mode, UID, GID | File write operation |
+| `WireCopyDirOp` | Src, Dst, Mode | Directory copy operation |
+| `WireResizeOp` | Action (grow/shrink), Bytes, Headroom | Resize operation |
+| `WireOutput` | Status, Error, Step, FilesWritten, CommandsRun, OsType, Note, NewFSType, NewSizeBytes | Result envelope |
 
-Defined in `internal/service/loopmount/wire.go`:
+## Provisioner backend selection
 
-```go
-type WireInput struct {
-    Image    string         `json:"image"`
-    Action   string         `json:"action"`           // "provision", "detect_os", "convert_fs"
-    FsType   string         `json:"fs_type,omitempty"`
-    Debug    bool           `json:"debug,omitempty"`
-    TargetFS string         `json:"target_fs,omitempty"`
-    Shell    string         `json:"shell,omitempty"`
-    Ops      WireOperations `json:"operations"`
-}
+`provisioner.NewBackend()` uses a factory pattern to select `LoopMountBackend` or `GuestfsBackend` based on a `ProvisionerType` enum. The type is determined by the API layer based on the config setting `settings.guestfs_enabled`. Loop-mount is the default. There is no fallback chain — if loopmount fails, it does not fall back to guestfs.
 
-type WireOperations struct {
-    Files    []WireFileOp    `json:"files,omitempty"`
-    CopyDirs []WireCopyDirOp `json:"copy_dirs,omitempty"`
-    Commands []string        `json:"commands,omitempty"`
-    Resize   *WireResizeOp   `json:"resize,omitempty"`
-}
+## Performance
 
-type WireFileOp struct {
-    Path string `json:"path"`
-    Data string `json:"data"`        // base64-encoded content
-    Mode int    `json:"mode,omitempty"`
-    UID  int    `json:"uid,omitempty"`
-    GID  int    `json:"gid,omitempty"`
-}
+| Operation | Loop | Speedup vs guestfs |
+|-----------|------|--------------------|
+| Provision (SSH + DNS + hostname + user) | ~100ms | ~26x |
+| Grow (e.g., 3GB → 8GB) | ~50ms | ~20x |
+| Shrink | ~200ms | ~15x |
+| **Total impact on `vm create`** | **~200ms added** | net **~2400ms saved** |
 
-type WireCopyDirOp struct {
-    Src  string `json:"src"`
-    Dst  string `json:"dst"`
-    Mode int    `json:"mode,omitempty"`
-}
+## Sudoers
 
-type WireResizeOp struct {
-    Action   string `json:"action"`    // "grow" or "shrink"
-    Bytes    int64  `json:"bytes,omitempty"`
-    Headroom int    `json:"headroom,omitempty"`
-}
+The provisioner runs as root via sudo. `Spawn()` sets `Privileged: true`, and `system.SpawnService()` prepends `sudo -n`. The sudoers file is managed by `mvm host init` via `HostService.generateSudoersContent()`. The provisioner binary path is resolved at runtime via `os.Executable()`.
 
-type WireOutput struct {
-    Status       string `json:"status"`
-    Error        string `json:"error,omitempty"`
-    Step         string `json:"step,omitempty"`
-    FilesWritten int    `json:"files_written,omitempty"`
-    CommandsRun  int    `json:"commands_run,omitempty"`
-    OsType       string `json:"os_type,omitempty"`
-    Note         string `json:"note,omitempty"`
-    NewFSType    string `json:"new_fs_type,omitempty"`
-    NewSizeBytes int64  `json:"new_size_bytes,omitempty"`
-}
-```
+## Failure modes
 
-### Binary Flow
+### Loop device exhaustion
 
-```
-1. losetup -f -P --show <image>       # Set up loop with partition scanning
-2. Detect root partition:
-   - Scans /dev/loopNp1..p16 for Linux filesystems (ext4, btrfs, xfs)
-   - Tries p1, p2 in order first
-   - If multiple Linux filesystems found, picks the largest by device size
-   - Falls back to p1, then to raw loop device for raw filesystem images
-3. Detect filesystem type via blkid (fallback: ext4, or use fs_type hint from input)
-4. mount <root_part> <mount_point>
-5. Write all ops["files"] with base64 decode, correct mode/uid/gid
-6. Copy all ops["copy_dirs"] from host src to guest dst (recursive os.walk)
-7. chroot <mount_point> sh -c <cmd> for each ops["commands"]
-8. if resize.grow:
-     - truncate file to target size (before loop setup)
-     - for non-btrfs: unmount, e2fsck -f -y + resize2fs
-     - for btrfs: btrfs filesystem resize max /mnt (while mounted)
-9. if resize.shrink:
-     - e2fsck -f -y + resize2fs -M  (ext4, capture new size)
-     - btrfs filesystem resize ...  (btrfs)
-     - umount + losetup -d + truncate file to new size
-10. umount <mount_point>
-11. losetup -d <loop_dev>
-12. Output JSON result
-```
+Linux defaults to 256 loop devices. If all are in use, `losetup` fails. The provisioner returns an error at the mount step. Future fallback to guestfs is possible but not implemented.
 
-All steps wrapped in `defer` cleanup — `umount` and `losetup -d` run even on error.
+### Orphaned mounts on crash
 
-### Operations Supported
+The binary always calls `umount` and `losetup -d` in `defer` cleanup handlers. Even on error, the cleanup runs before exit.
 
-| Operation | ext4 | btrfs |
-|-----------|------|-------|
-| Write files | Yes | Yes |
-| Copy directories | Yes | Yes |
-| Chroot commands | Yes | Yes |
-| Grow | `e2fsck -f` → `resize2fs` | `btrfs filesystem resize max /mnt` |
-| Shrink | `e2fsck -f` → `resize2fs -M` → truncate | `btrfs filesystem resize` → truncate |
-| Symlinks | via chroot `ln -sf` | via chroot `ln -sf` |
-| File deletion | via chroot `rm` | via chroot `rm` |
-| Convert FS | via `convert_fs` action | via `convert_fs` action |
+### No-cloud server port conflict
 
-**btrfs subvolume note:** Archlinux images use a `@` subvolume. When the image was created by the mvmctl pipeline, `@` is the default subvolume, so a plain `mount -o loop` exposes it at the mount root. For non-default subvolumes, an optional `--subvol` flag can be added to the provisioner binary in the future. Guestfs abstracts this away; the binary makes the same assumption as the image build pipeline.
+The nocloud-net server scans for a free port in the range 8000-9000 before spawning.
 
-**`systemctl enable` in chroot note:** Commands like `systemctl enable sshd` work correctly in a chroot environment. `systemctl enable` only creates symlinks in `/etc/systemd/system/` — it does not require a running systemd daemon. Similarly, `useradd -m` creates passwd/shadow entries and a home directory without needing systemd's user manager.
+### Binary version mismatch
 
-### Performance
+All services are compiled into the same binary — there is no version mismatch risk across services.
 
-| Operation | guestfs | loop | Speedup |
-|-----------|---------|------|---------|
-| Provision (SSH + DNS + hostname + user) | ~2600ms | ~100ms | **26x** |
-| Grow (e.g., 3GB → 8GB) | ~1000ms | ~50ms | **20x** |
-| Shrink | ~3000ms | ~200ms | **15x** |
-| **Total impact on `vm create`** | ~2600ms removed | **~200ms added** | net **~2400ms saved** |
+### `systemctl enable` in chroot
 
-### Backend Selection
+Commands like `systemctl enable sshd` work correctly in a chroot because `systemctl enable` only creates symlinks in `/etc/systemd/system/` — it does not require a running systemd daemon.
 
-`provisioner.NewBackend()` uses a factory pattern to select `LoopMountBackend` or `GuestfsBackend` based on a `ProvisionerType` enum. The type is determined by the caller (API layer) based on:
-- Config setting `settings.guestfs_enabled` — if true, use GUESTFS
-- Else — use LOOP_MOUNT (default)
+### btrfs non-default subvolume
 
-**No fallback chain:** Mutual exclusion, not preference. If loopmount fails, it does NOT fall back to guestfs.
+Archlinux images use a `@` subvolume. When the image was created by the mvmctl pipeline, `@` is the default subvolume, so a plain `mount -o loop` exposes it at the mount root. For non-default subvolumes, an optional `--subvol` flag is available for future use.
 
-## Sudoers (provisioner only)
+### Root partition detection failures
 
-The provisioner needs sudo. Console relay and nocloud server run as the user.
+The provisioner scans `/dev/loopNp1..p16` for Linux filesystems. It tries p1 and p2 first, picks the largest on tie, and falls back to the raw loop device for raw filesystem images. If no filesystem is detected, the operation fails with a clear error.
 
-In Go, sudo is handled by `Spawn()` which uses `system.SpawnService()` with `Privileged: true` — the
-`SpawnService` function prepends `sudo -n` automatically:
+## Key files
 
-```go
-cmd, err := system.SpawnService(ctx, system.SpawnConfig{
-    Name:       "provision",
-    Privileged: true,
-    Stdin:      bytes.NewReader(data),
-    Stdout:     &stdoutBuf,
-    Stderr:     &stderrBuf,
-})
-```
+| File | Purpose |
+|------|---------|
+| `internal/service/loopmount/entry.go` | Subprocess entry: `Run()` reads JSON stdin, executes, writes JSON stdout |
+| `internal/service/loopmount/provisioner.go` | `Provisioner.Execute()` — core engine dispatching to `doProvision()`, `doDetectOS()`, `doConvertFS()` |
+| `internal/service/loopmount/spawn.go` | `Spawn()` — programmatic subprocess launch, JSON stdin/stdout |
+| `internal/service/loopmount/wire.go` | JSON wire protocol types (`WireInput`, `WireOutput`) |
+| `internal/lib/provisioner/loopmount/backend.go` | `LoopMountBackend` — builder pattern, queues ops, calls `runWireOp()` |
+| `internal/lib/provisioner/loopmount/partition.go` | Partition parsing types |
+| `internal/lib/provisioner/loopmount/utils.go` | sfdisk/parted parsers, `detectAndRenameFS()` |
+| `internal/lib/provisioner/backend.go` | `Backend` interface, `NewBackend()` factory |
+| `internal/infra/provcontent/content.go` | Shared operation types (`FileOp`, `ChrootOp`, `CopyDirOp`, `ResizeOp`) |
+| `internal/lib/system/spawn.go` | `SpawnService()` — self-spawn subprocess infrastructure |
+| `internal/cli/service.go` | `mvm run` command tree with subcommands |
+| `internal/service/console/entry.go` | Console relay subprocess entry |
+| `internal/service/console/spawn.go` | Console relay subprocess spawn |
+| `internal/service/nocloudnet/entry.go` | NoCloud-net subprocess entry |
+| `internal/service/nocloudnet/spawn.go` | NoCloud-net subprocess spawn |
+| `pkg/api/operation.go` | Provisioner type resolution at startup |
 
-The sudoers file is managed by `mvm host init` via `HostService.generateSudoersContent()`. The provisioner binary path is resolved at runtime via `os.Executable()`.
+## Design decisions
 
-## Changes Made
+**Self-spawning single binary over separate binaries.** All services are subcommands of the same `mvm` binary. No separate compilation, no embedding, no extraction needed. This eliminates version mismatch between the host binary and service binaries.
 
-| File | Change |
-|------|--------|
-| `internal/service/loopmount/entry.go` | **Extant** — subprocess entry: `Run(ctx, Config)` reads JSON stdin, executes, writes JSON stdout |
-| `internal/service/loopmount/provisioner.go` | **Extant** — core engine (1232 lines): `Provisioner.Execute()` dispatches to `doProvision()`, `doDetectOS()`, `doConvertFS()` |
-| `internal/service/loopmount/spawn.go` | **Extant** — `Spawn()` for programmatic subprocess launch |
-| `internal/service/loopmount/wire.go` | **Extant** — JSON wire protocol types (`WireInput`, `WireOutput`) |
-| `internal/lib/provisioner/loopmount/backend.go` | **Extant** — `LoopMountBackend` — builder pattern, queues ops, calls `runWireOp()` |
-| `internal/lib/provisioner/loopmount/partition.go` | **Extant** — Partition parsing types |
-| `internal/lib/provisioner/loopmount/utils.go` | **Extant** — sfdisk/parted parsers, `detectAndRenameFS()` |
-| `internal/lib/provisioner/backend.go` | **Extant** — `Backend` interface, `NewBackend()` factory, `BackendOpts` |
-| `internal/infra/provcontent/content.go` | **Extant** — Shared operation types (`FileOp`, `ChrootOp`, `CopyDirOp`, `ResizeOp`) and content builders |
-| `internal/lib/system/spawn.go` | **Extant** — `SpawnService()` — self-spawn subprocess infrastructure |
-| `internal/cli/service.go` | **Extant** — `mvm run` command tree with three subcommands |
-| `internal/service/console/entry.go` | **Extant** — Console relay subprocess entry |
-| `internal/service/console/spawn.go` | **Extant** — Console relay subprocess spawn |
-| `internal/service/nocloudnet/entry.go` | **Extant** — NoCloud-net subprocess entry |
-| `internal/service/nocloudnet/spawn.go` | **Extant** — NoCloud-net subprocess spawn |
-| `pkg/api/operation.go` | Modified — resolves provisioner type at startup |
-| `pkg/api/vm.go` | Modified — uses `provisioner.NewBackend()` instead of direct guestfs |
+**JSON stdin/stdout over CLI arguments for the provisioner.** The provisioner handles complex nested data (files with base64 content, directory copies, resize parameters) that doesn't fit in CLI flags. JSON provides a structured interface. Console relay and nocloud server use CLI flags because their configuration is flat.
 
-## Risks
+**Loop-mount over guestfs as default.** Loop-mount is ~26x faster for provisioning (~100ms vs ~2600ms). Guestfs remains available as a configurable alternative for images that require its QEMU-based approach.
 
-| Risk | Mitigation |
-|------|-----------|
-| Loop device exhaustion | Fall back to guestfs. Linux default is 256 loop devices. |
-| Orphaned mounts on crash | Binary always `umount` + `losetup -d` in `defer`. |
-| nocloud-server port conflict | Manager scans ports 8000-9000 (already implemented). |
-| Binary version mismatch | Single binary — always in sync. |
-| sudoers file management | Written by `sudo mvm host init`. Remove via `sudo rm /etc/sudoers.d/mvm-provision`. |
-| btrfs non-default subvolume | Current assumption: `@` is default subvolume. Future: add `--subvol` flag to binary. |
-| `systemctl enable` in chroot | Works correctly — only creates symlinks, no systemd daemon needed. |
+**No fallback chain.** If loop-mount fails, the operation fails immediately. Mutual exclusion avoids silent degradation where a fallback might succeed with different semantics.

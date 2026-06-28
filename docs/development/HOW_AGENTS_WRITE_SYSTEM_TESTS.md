@@ -513,13 +513,14 @@ The runner VM is created ONCE per test session (session-scoped pytest fixture). 
 
 ### Asset Pre-Seeding
 
-The runner VM snapshot includes pre-cached assets to eliminate network-dependent skips:
+The custom base image and shared volume contain pre-cached assets to eliminate
+network-dependent skips:
 
-- Alpine image (for fast VM creation)
+- Alpine 3.23 image (for fast VM creation)
 - Ubuntu 24.04 image (for nested virt tests)
-- Firecracker binary v1.15+ (for hotplug tests)
+- Firecracker binary 1.16.0 (for hotplug tests)
 - Firecracker kernel v1.15 (default)
-- Official kernel 7.0.11 with `kvm,nftables,tuntap,btrfs` features (pre-built, cached)
+- Official kernel 7.0.11 with `kvm,nftables,tuntap,btrfs` features (pre-built, cached in asset mirror)
 
 ---
 
@@ -634,7 +635,7 @@ L2 tests do NOT mock anything. The binary is real. The subprocesses are real. Th
 L0 and L1 tests follow the patterns in [HOW_AGENTS_WRITE_UNIT_TESTS.md](HOW_AGENTS_WRITE_UNIT_TESTS.md):
 
 - **L0:** Table-driven tests with `map[string]struct{...}` and `t.Run()`. No I/O. Pure function assertions.
-- **L1:** Tests that use `t.TempDir()` for filesystem I/O, `testutil.NewInMemoryDB()` for DB operations, and `testutil.FakeRunner` for subprocess call verification.
+- **L1:** Tests that use `t.TempDir()` for filesystem I/O, `testutil.NewInMemoryDB(t)` for DB operations, and `testutil.FakeRunner` for subprocess call verification.
 
 Key resources:
 - `testutil.NewInMemoryDB(t)` — opens file-based SQLite in t.TempDir(), runs all migrations, returns a handle
@@ -667,7 +668,7 @@ The migration from the current architecture to the target architecture is increm
 ### Phase 0: Scaffold L0/L1 Infrastructure (Weeks 1-2)
 
 Add the building blocks for fast pre-filter tests:
-- `testutil.NewInMemoryDB()` — opens file-based SQLite in t.TempDir(), runs all migrations
+- `testutil.NewInMemoryDB(t)` — opens file-based SQLite in `t.TempDir()`, runs all migrations
 - `testutil.NewVMRepo()` / `testutil.NewNetworkRepo()` (zero arguments) — in-memory repository implementations
 - 3-5 representative L1 tests as patterns
 

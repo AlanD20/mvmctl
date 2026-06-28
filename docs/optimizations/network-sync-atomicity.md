@@ -33,7 +33,7 @@ if !libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge) {
 
 For every network, the `BridgeActive` field (originally named `is_present`) is reconciled against actual bridge existence in the kernel. This ensures that `mvm network ls` and downstream operations see accurate state.
 
-**Code reference:** `pkg/api/network.go:319-324`
+**Code reference:** `NetworkSync()` at `pkg/api/network.go:278-324`
 
 ```go
 bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, net.Bridge)
@@ -44,36 +44,30 @@ if bridgeActive != net.BridgeActive {
 
 ### Phase 3: Firewall Rule Sync
 
-The core sync logic lives in `SyncIPTablesRules()` at `internal/core/network/service.go`:
+The core sync logic lives in `SyncIPTablesRulesBatch()` at `internal/core/network/service.go`:
 
-1. **Fetch active DB rules** for the network via `s.firewallTracker.GetByNetworkID(network.ID, true)`.
-2. **Batch-ensure each rule** inside a `WithBatch()` context — all `EnsureRule` calls are queued and flushed atomically on context exit.
-3. **Count orphaned host rules** that reference this network but have no matching active DB record (informational only — orphans are not removed).
+1. **Collect active DB rules for all networks** that will participate in the rebuild. If the caller requested specific networks, every DB network is still included so that unrequested networks' rules are preserved in the kernel. Stats are returned only for the requested networks.
+2. **Pre-check kernel presence** for each rule via `s.firewallTracker.RuleExists()` so that `added` and `verified` reflect actual kernel state, not just DB state.
+3. **Batch-ensure all rules** in a single `BatchEnsureRules()` call — all active rules for all networks are queued and flushed atomically.
+4. **Count orphaned host rules** per network that reference the network but have no matching active DB record (informational only — orphans are not removed).
 
-**Code reference:** `internal/core/network/service.go` — `SyncIPTablesRules()`
+**Code reference:** `internal/core/network/service.go` — `SyncIPTablesRulesBatch()`
 
 ```go
-dbRules, err := s.firewallTracker.GetByNetworkID(ctx, network.ID, true)
-if s.firewallTracker != nil && len(dbRules) > 0 {
-    s.WithBatch(ctx, func() {
-        for _, rule := range dbRules {
-            result := s.firewallTracker.EnsureRule(ctx, *rule, "")
-            if result.Success {
-                if result.CommandExecuted == nil {
-                    verified++
-                } else {
-                    added++
-                }
-            }
-        }
-    })
+for _, net := range networks {
+    dbRules, err := s.firewallTracker.GetByNetworkID(ctx, net.ID, true)
+    // ...
+    for i, r := range dbRules {
+        exists[i] = s.firewallTracker.RuleExists(ctx, r)
+        allRules = append(allRules, *r)
+    }
 }
-orphaned = s.firewallTracker.CountOrphanedRules(ctx, network)
+result := s.firewallTracker.BatchEnsureRules(ctx, allRules)
 ```
 
 ## Backend-Specific Atomicity Mechanisms
 
-The `FirewallTracker` at `internal/lib/firewall/tracker.go` dispatches to one of two backends. The batch context (`WithBatch()`) queues `EnsureRule` calls and flushes to the backend on context exit.
+The `FirewallTracker` at `internal/lib/firewall/tracker.go` dispatches to one of two backends. During sync, `SyncIPTablesRulesBatch()` builds the union of all active DB rules and invokes `BatchEnsureRules()` once per sync invocation. The backend flushes the MVM chains and rebuilds them from that complete rule set.
 
 ### nftables (default) — Atomic Batch via `nft -f -`
 
@@ -184,42 +178,41 @@ Orphans are counted and logged but **never removed**. The replacement-style flus
 
 ## Subprocess Cost
 
-`mvm network sync` minimizes subprocess invocations by batching all firewall rules into a single atomic call per network.
+`mvm network sync` minimizes subprocess invocations by batching all firewall rules into a single atomic call per sync invocation, regardless of how many networks are being synced.
 
-### nftables (~62 calls for 20 networks)
+### nftables
 
-| Operation | Calls per network | Total (20 networks) |
-|---|---|---|
-| Bridge check (`ip link show`) | 1 | 20 |
-| `nft -f -` batch (all rules in one call) | 1 | 20 |
-| Orphan scan per chain (`nft -a list chain`) | 3 | 60 |
-| **External DNS test** (if using traffic rules) | Optional | Optional |
-| **Total subprocess calls** | **~3.1** | **~62** |
+| Operation | Count per sync invocation |
+|---|---|
+| Bridge check (`ip link show`) | 1 per network |
+| Kernel presence check (`nft -a list chain`) | 1 per rule via `RuleExists()` |
+| `nft -f -` batch (all rules in one call) | 1 |
+| Orphan scan per chain (`nft -a list chain`) | 3 |
 
-The nftables backend avoids per-rule subprocess calls by queuing rules in the `WithBatch()` context and issuing a single `nft -f -` for all rules. The orphan scan uses 3 `nft -a list chain` calls to enumerate all rules in the three MVM chains and cross-reference them against DB records in Go.
+The nftables backend issues a single `nft -f -` that covers every active rule across all networks. `RuleExists()` checks each rule against the kernel before the batch so that added/verified counts are accurate.
 
-### iptables (~62-82 calls for 20 networks)
+### iptables
 
-| Operation | Calls per network | Total (20 networks) |
-|---|---|---|
-| Bridge check (`ip link show`) | 1 | 20 |
-| `iptables-restore -n` batch (filter table) | 1 | 20 |
-| `iptables-restore -n` batch (nat table, if any nat rules) | 0-1 | 0-20 |
-| Orphan scan (`iptables-save`) | 1 | 20 |
-| **Total subprocess calls** | **~3-4** | **~62-82** |
+| Operation | Count per sync invocation |
+|---|---|
+| Bridge check (`ip link show`) | 1 per network |
+| Kernel presence check (`iptables -C`) | 1 per rule via `RuleExists()` |
+| `iptables-restore -n` batch (filter table) | 1 |
+| `iptables-restore -n` batch (nat table, if any nat rules) | 1 |
+| Orphan scan (`iptables-save`) | 1 per network |
 
-The iptables backend uses `iptables-restore -n` per table, so the number of subprocess calls is **constant per network** regardless of how many rules need to be added.
+The iptables backend uses `iptables-restore -n` once per table with the complete rule set, so the actual firewall application is constant regardless of rule count.
 
 ### Key Insight
 
-Both backends use atomic batch operations with comparable subprocess call counts for the sync operation (~62 calls for nftables vs ~62-82 for iptables for 20 networks). The number of subprocess calls is **constant per network** for both backends — `nft -f -` (nftables) and `iptables-restore -n` (iptables) each cover all rules in one atomic transaction per table.
+Firewall rule application is now a single atomic transaction per sync invocation. The dominant per-rule cost is the `RuleExists()` kernel pre-check, which keeps added/verified counts honest at the expense of one chain-list/check per rule.
 
 ## Related Files
 
 - `internal/lib/firewall/tracker.go` — `FirewallTracker` dispatcher
 - `internal/lib/firewall/nftables.go` — `NFTablesTracker`
 - `internal/lib/firewall/iptables.go` — `IPTablesTracker`
-- `internal/core/network/service.go` — `SyncIPTablesRules()`
+- `internal/core/network/service.go` — `SyncIPTablesRulesBatch()`
 - `pkg/api/network.go` — `NetworkSync()`
 - `internal/infra/constants.go` — `firewall_backend` default
 - `docs/adr/0009-firewall-backend-mutual-exclusion.md` — ADR for firewall backend

@@ -1,8 +1,6 @@
 # System Test Architecture — Three-Tier, Domain-Isolated VM Execution
 
 **Status:** Active — primary reference for system test patterns  
-**Last updated:** 2026-06-28  
-**Supersedes:** The snapshot-based approach (abandoned due to TAP name conflicts without per-VM network namespaces).  
 **See also:** [ADR-0012: Unified Test Architecture](adr/0012-unified-test-architecture.md) (L0/L1/L2 language-boundary decision), [HOW_AGENTS_WRITE_SYSTEM_TESTS.md](development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md) (how-to writing guide), [COVERAGE_MATRIX.md](../tests/system/COVERAGE_MATRIX.md) (coverage tracking).
 
 ---
@@ -25,7 +23,6 @@
 14. [Guest-Side Test Patterns](#14-guest-side-test-patterns)
 15. [Per-File Compliance Checklist](#15-per-file-compliance-checklist)
 16. [Parallelism Model](#16-parallelism-model)
-17. [Migration Phases](#17-migration-phases)
 
 ---
 
@@ -258,8 +255,6 @@ mvm exec <vm-name> --user runner --timeout 120 -- \
 - `kernel/test_kernel.py` — kernel build tests (need full KVM host access).
 - `cp/test_cp.py` — vsock agent file copy (some paths reject nested virt).
 - `env/test_env.py` — env workflow apply/destroy/diff (creates resources via spec; running inside a runner VM would add unnecessary nesting for orchestration tests).
-
-> **Note:** `test_vm_nested_virt.py` was merged into `test_vm_fresh_env.py` in June 2026. The two files had ~80% overlap (both tested nested virt verification). The unique negative-case test (VM without `--nested-virt` flag) was kept; the rest was redundant.
 
 ### Why These Run on the Host
 
@@ -541,7 +536,7 @@ When a hotplug or PCI device operation fails, the recommended investigation flow
 
 1. **Reproduce manually** — create the VM, attach/detach, collect `/proc/partitions`, guest `dmesg`, and Firecracker logs.
 2. **Isolate the layer** — does the failure happen at the Firecracker API level (HTTP 400/500) or the guest kernel level (driver probe fails)?
-3. **Document the finding** — update PENDING_FAILURES.md or add an xfail marker with the precise error signature.
+3. **Document the finding** — add an xfail marker with the precise error signature, or file a GitHub issue.
 4. **Fix or work around** — either fix the product code, or document the limitation and xfail the test.
 
 ---
@@ -586,28 +581,4 @@ Every test file in `tests/system/` MUST:
 
 ---
 
-## 17. Migration Phases
 
-### Phase A — Done ✅
-- `--shareable` volume flag implemented in mvmctl.
-- Custom base image system (`--prepare` → `mvm image import`).
-- `scripts/run-system-tests.py` orchestrator with `--push`, `--rebuild`.
-- Tier 1/2/3 classification with shared volume on all tiers.
-- vsock agent `fsync` fix (prevents file corruption on VM stop).
-
-### Phase B — Done ✅
-- Fix `test_cli.py` to call `mvm` directly instead of using proxy.
-- Fix all Tier 1/2 tests to work inside the VM (direct `subprocess.run`).
-- Remove `_guest_run` vsock proxy from conftest (simplify to direct execution).
-- ✅ Consolidate `test_vm_nested_virt.py` into `test_vm_fresh_env.py` (80% overlap, kept unique negative-case test).
-- ✅ Update all T3 tests to use kernel `official:7.0.11` (was `6.19.9` in some files).
-- ✅ Add kernel cleanup in `test_vm_nested_isolated.py` fixture to avoid leaking kernel records on host.
-- ✅ Volume hotplug: PCI rescan on attach, sysfs-based PCI removal on detach, post-detach rescan, function-scoped fixture, xfail for Firecracker re-attach limitation.
-- ✅ `--tier` flag added (replaced `--tier1-only`/`--tier2-only`/`--tier3-only`).
-- ✅ Verify all domains pass.
-
-### Phase C — Cleanup (Complete ✅)
-- ✅ `tests/e2e/` deleted entirely.
-- ✅ `requires_firecracker_116` pytest marker registered in `pytest.ini`.
-- ✅ Stale PENDING_FAILURES entries removed (resolved or xfail).
-- ✅ This document promoted from DRAFT to active reference, cross-references updated in ADR 0012, AGENTS.md, and qa-engineer.md.

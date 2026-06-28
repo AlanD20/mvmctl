@@ -7,6 +7,15 @@
 
 The `mvm` project is distributed as a single compiled Go binary with no runtime dependencies. The binary contains both the CLI entry point and all background service subprocesses (console relay, nocloudnet server, loopmount provisioner) via subcommand dispatch (`mvm run <service>`). This replaces the previous Python Nuitka build which produced two separate binaries (`mvm` and `mvm-services`) with multidist symlink dispatch.
 
+**Table of Contents**
+
+- [Decision](#decision)
+- [Architecture](#architecture)
+- [Why Go](#why-go)
+- [Why Not Python](#why-not-python)
+- [Consequences](#consequences)
+- [Related Decisions](#related-decisions)
+
 ## Decision
 
 | Aspect | Selection | Rationale |

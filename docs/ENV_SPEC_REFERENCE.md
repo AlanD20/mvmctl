@@ -2,7 +2,25 @@
 
 Complete reference for the `mvm env` workflow engine YAML spec format.
 
-For the full implementation details, see [docs/implementations/ENVIRONMENT_WORKFLOW_ENGINE.md](implementations/ENVIRONMENT_WORKFLOW_ENGINE.md).
+## Table of Contents
+
+- [Commands](#commands)
+- [Spec Structure](#spec-structure)
+- [Common Fields](#common-fields)
+- [Step Types](#step-types)
+  - [network](#network)
+  - [key](#key)
+  - [image](#image)
+  - [kernel](#kernel)
+  - [binary](#binary)
+  - [vm](#vm)
+  - [exec](#exec)
+  - [ssh](#ssh)
+  - [copy](#copy)
+- [Dependencies](#dependencies)
+- [Destroy Behavior](#destroy-behavior)
+- [Full Example](#full-example)
+- [State File](#state-file)
 
 ---
 
@@ -59,7 +77,7 @@ copy:
     # ... fields
 ```
 
-**All identifiers are singular** — YAML keys, step types, `depends_on`, step names.
+**All identifiers are singular** — YAML keys, step types, `depends_on`, and step names use singular form.
 
 ---
 
@@ -71,7 +89,7 @@ Every step type supports these top-level fields:
 |-------|------|----------|-------------|
 | `name` | `string` | **Yes** | Step name. Becomes `"type:name"` identifier. |
 | `depends_on` | `[]string` | No | List of `"type:name"` dependencies. |
-| `env` | `map[string]string` | No | Environment variable overrides for `exec` and `ssh` commands. See each step type for details. |
+| `env` | `map[string]string` | No | Environment variable overrides for `exec` and `ssh` commands. |
 
 ---
 
@@ -81,13 +99,14 @@ Every step type supports these top-level fields:
 
 Create a network for VMs to connect to.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `subnet` | `string` | **Required** | CIDR notation, e.g. `"172.27.0.0/24"`. |
-| `nat_enabled` | `bool` | `true` | Enable NAT for internet access. |
-| `ipv4_gateway` | `string` | Auto-computed | Gateway IP. Auto-computed from subnet if omitted. |
-| `nat_gateways` | `[]string` | Auto-detected | Host interfaces for NAT. Auto-detected if empty. |
-| `default` | `bool` | `false` | Set as default network for VM creation. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"network:name"`. |
+| `subnet` | `string` | **Yes** | — | CIDR notation, e.g. `"172.27.0.0/24"`. |
+| `nat_enabled` | `bool` | No | `true` | Enable NAT for internet access. |
+| `ipv4_gateway` | `string` | No | auto-computed | Gateway IP. Auto-computed from subnet if omitted. |
+| `nat_gateways` | `[]string` | No | auto-detected | Host interfaces for NAT. Auto-detected if empty. |
+| `default` | `bool` | No | `false` | Set as default network for VM creation. |
 
 **Example:**
 ```yaml
@@ -104,13 +123,14 @@ network:
 
 Generate or import an SSH key pair.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `algorithm` | `string` | `"ed25519"` | Key algorithm. Valid: `ed25519`, `rsa`, `ecdsa`. |
-| `bits` | `int` | `0` (auto) | Key bits. 0 means algorithm default. |
-| `comment` | `string` | `"{name}@{hostname}"` | Key comment. |
-| `force` | `bool` | `false` | Overwrite existing key files. |
-| `default` | `bool` | `false` | Set as default key for VM creation. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"key:name"`. |
+| `algorithm` | `string` | No | `"ed25519"` | Key algorithm. Valid values: `ed25519`, `rsa`, `ecdsa`. |
+| `bits` | `int` | No | `0` (auto) | Key bits in RSA. `0` means algorithm default (e.g. 4096 for RSA). |
+| `comment` | `string` | No | `"{name}@{hostname}"` | Key comment. |
+| `force` | `bool` | No | `false` | Overwrite existing key files. |
+| `default` | `bool` | No | `false` | Set as default key for VM creation. |
 
 **Example:**
 ```yaml
@@ -128,16 +148,17 @@ key:
 
 Download an OS image.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `type` | `string` | **Required** | Image type/slug, e.g. `"ubuntu"`, `"alpine"`. |
-| `version` | `string` | `""` | Version tag, e.g. `"24.04"`, `"3.21"`. |
-| `force` | `bool` | `false` | Force re-pull even if exists. |
-| `default` | `bool` | `false` | Set as default image. |
-| `no_cache` | `bool` | `false` | Skip cache layer. |
-| `partition` | `int` | `0` (auto) | Partition index. 0 = auto-detect. |
-| `skip_optimization` | `bool` | `false` | Skip image optimization. |
-| `disabled_detectors` | `[]string` | `[]` | Disable detection methods. Valid: `type`, `label`, `size`, `filesystem`, `all`. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"image:name"`. |
+| `type` | `string` | **Yes** | — | Image type/slug, e.g. `"ubuntu"`, `"alpine"`, `"debian"`. |
+| `version` | `string` | No | `""` (latest) | Version tag, e.g. `"24.04"`, `"3.21"`. |
+| `force` | `bool` | No | `false` | Force re-pull even if exists. |
+| `default` | `bool` | No | `false` | Set as default image. |
+| `no_cache` | `bool` | No | `false` | Skip cache layer. |
+| `partition` | `int` | No | `0` (auto) | Partition index. `0` = auto-detect. |
+| `skip_optimization` | `bool` | No | `false` | Skip image optimization. |
+| `disabled_detectors` | `[]string` | No | `[]` | Disable detection methods. Valid values: `type`, `label`, `size`, `filesystem`, `all`. |
 
 **Example:**
 ```yaml
@@ -153,16 +174,17 @@ image:
 
 Download or build a kernel.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `type` | `string` | **Required** | Kernel type. Valid: `firecracker` (pre-built CI kernel), `official` (built from source). |
-| `version` | `string` | `""` | Version tag for the kernel (e.g. CI version like `1.15` for firecracker type, or kernel version like `6.19.9` for official type). |
-| `jobs` | `int` | CPU count | Build parallelism (official kernel only). |
-| `keep_build_dir` | `bool` | `false` | Keep build directory after build. |
-| `clean_build` | `bool` | `false` | Force clean build. |
-| `kernel_config` | `string` | `""` | Path to custom kernel config file. |
-| `default` | `bool` | `false` | Set as default kernel. |
-| `features` | `string` | `""` | Comma-separated features, e.g. `"kvm,nftables,tuntap"`. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"kernel:name"`. |
+| `type` | `string` | **Yes** | — | Kernel type. Valid values: `firecracker` (pre-built CI kernel), `official` (built from source). |
+| `version` | `string` | No | `""` (latest) | Version tag (e.g. CI version like `1.15` for firecracker, kernel version like `6.19.9` for official). |
+| `jobs` | `int` | No | CPU count | Build parallelism (official kernel only). |
+| `keep_build_dir` | `bool` | No | `false` | Keep build directory after build. |
+| `clean_build` | `bool` | No | `false` | Force clean build (skip cache). |
+| `kernel_config` | `string` | No | `""` | Path to custom kernel config file. |
+| `default` | `bool` | No | `false` | Set as default kernel. |
+| `features` | `string` | No | `""` | Comma-separated features, e.g. `"kvm,nftables,tuntap"`. |
 
 **Example:**
 ```yaml
@@ -177,13 +199,14 @@ kernel:
 
 Download Firecracker binaries.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `type` | `string` | `"firecracker"` | Binary type. Only `firecracker` supported. |
-| `version` | `string` | **Required** | Version tag, e.g. `"1.15.0"`. |
-| `git_ref` | `string` | `""` | Build from git ref instead of downloading. |
-| `default` | `bool` | `false` | Set as default binary. |
-| `force` | `bool` | `false` | Force re-download. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"binary:name"`. |
+| `type` | `string` | No | `"firecracker"` | Binary type. Valid values: `firecracker`. |
+| `version` | `string` | **Yes** | — | Version tag, e.g. `"1.15.0"`. |
+| `git_ref` | `string` | No | `""` | Build from git ref instead of downloading. |
+| `default` | `bool` | No | `false` | Set as default binary. |
+| `force` | `bool` | No | `false` | Force re-download. |
 
 **Example:**
 ```yaml
@@ -200,33 +223,34 @@ binary:
 
 Create a virtual machine.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `network` | `string` | Default network | Network name/ID. |
-| `key` | `string` | Default key | Single SSH key name (convenience). |
-| `ssh_keys` | `[]string` | `[]` | List of SSH key names. |
-| `image` | `string` | Default image | Image name/ID. |
-| `kernel` | `string` | Default kernel | Kernel name/ID. |
-| `binary` | `string` | Default binary | Binary name/ID. |
-| `vcpu` | `int` | Config default | vCPU count. |
-| `mem` | `string` | Config default | Memory size. Supports `"512M"`, `"1G"`, or MiB int. |
-| `disk_size` | `string` | Config default | Disk size. Supports `"20G"`, `"512M"`, etc. |
-| `user` | `string` | Config default | SSH user for the VM. |
-| `pci_enabled` | `bool` | Config default | Enable PCI passthrough. |
-| `nested_virt` | `bool` | Config default | Enable nested virtualization. |
-| `cpu_template` | `string` | `""` | Path to CPU template JSON file. |
-| `console_enable` | `bool` | Config default | Enable serial console. |
-| `logging_enable` | `bool` | Config default | Enable Firecracker logging. |
-| `metrics_enable` | `bool` | Config default | Enable Firecracker metrics. |
-| `guest_ip` | `string` | `""` | Request specific guest IP. |
-| `guest_mac` | `string` | `""` | Request specific MAC address. |
-| `boot_args` | `string` | Config default | Custom kernel boot args. |
-| `volumes` | `[]string` | `[]` | Volume names to attach. |
-| `count` | `int` | `1` | Batch count for creating multiple VMs. |
-| `atomic` | `bool` | `false` | Atomic batch creation (all or nothing). |
-| `skip_cleanup` | `bool` | `false` | Skip cleanup on failure. |
-| `skip_deblob` | `bool` | `false` | Skip image deblobbing. |
-| `vsock_port` | `int` | Config default | Vsock port for guest agent communication. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"vm:name"`. |
+| `network` | `string` | No | Default network | Network name/ID (step reference resolves to ID). |
+| `key` | `string` | No | Default key | Single SSH key name (convenience shorthand for `ssh_keys`). |
+| `ssh_keys` | `[]string` | No | `[]` | List of SSH key names. |
+| `image` | `string` | No | Default image | Image name/ID (step reference resolves to ID). |
+| `kernel` | `string` | No | Default kernel | Kernel name/ID (step reference resolves to ID). |
+| `binary` | `string` | No | Default binary | Binary name/ID (step reference resolves to ID). |
+| `vcpu` | `int` | No | Config default | vCPU count. Range: 1-32. |
+| `mem` | `string` | No | Config default | Memory size. Supports `"512M"`, `"1G"`, or bare MiB int (e.g. `2048`). |
+| `disk_size` | `string` | No | Config default (min from image) | Disk size. Supports `"20G"`, `"512M"`, etc. |
+| `user` | `string` | No | Config default | SSH user for the VM. |
+| `pci_enabled` | `bool` | No | Config default | Enable PCI support. |
+| `nested_virt` | `bool` | No | Config default | Enable nested virtualization (requires PCI). |
+| `cpu_template` | `string` | No | `""` | Path to CPU template JSON file. |
+| `console_enable` | `bool` | No | Config default | Enable serial console. |
+| `logging_enable` | `bool` | No | Config default | Enable Firecracker logging. |
+| `metrics_enable` | `bool` | No | Config default | Enable Firecracker metrics. |
+| `guest_ip` | `string` | No | `""` | Request specific guest IP. |
+| `guest_mac` | `string` | No | `""` | Request specific MAC address. |
+| `boot_args` | `string` | No | Config default | Custom kernel boot args. |
+| `volumes` | `[]string` | No | `[]` | Volume names to attach. |
+| `count` | `int` | No | `1` | Batch count for creating multiple VMs. |
+| `atomic` | `bool` | No | `false` | Atomic batch creation (all or nothing). |
+| `skip_cleanup` | `bool` | No | `false` | Skip cleanup on failure. |
+| `skip_deblob` | `bool` | No | `false` | Skip image deblobbing. |
+| `vsock_port` | `int` | No | Config default | Vsock port for guest agent communication. Default: `1024`. |
 
 **Example:**
 ```yaml
@@ -252,17 +276,17 @@ vm:
 
 ### `exec`
 
-Run a command inside a VM via the vsock guest agent. **Imperative** — always
-re-runs on re-apply. Requires the VM to be created with vsock enabled (default).
+Run a command inside a VM via the vsock guest agent. **Imperative** — always re-runs on re-apply.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `target` | `string` | **Required** | VM name, ID prefix, IP, or MAC address. |
-| `cmd` | `string` | **Required** | Command to execute. Wrapped in `sh -c`. |
-| `user` | `string` | Config default | User to run the command as. |
-| `timeout` | `int` | `0` | Command timeout in seconds. 0 = no timeout. |
-| `port` | `int` | `0` | Vsock agent port override (0 = auto-assigned at runtime). |
-| `env` | `map[string]string` | `{}` | Environment variable overrides passed to the command inside the VM. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"exec:name"`. |
+| `target` | `string` | **Yes** | — | VM name, ID prefix, IP, or MAC address. |
+| `cmd` | `string` | **Yes** | — | Command to execute. Wrapped in `sh -c` by the agent. |
+| `user` | `string` | No | Config default | User to run the command as. |
+| `timeout` | `int` | No | `0` | Command timeout in seconds. `0` = no timeout. |
+| `port` | `int` | No | `0` | Vsock agent port override. `0` = auto-assigned at runtime (default 1024). |
+| `env` | `map[string]string` | No | `{}` | Environment variable overrides passed to the command inside the VM. |
 
 **Example:**
 ```yaml
@@ -274,7 +298,6 @@ exec:
     timeout: 30
     env:
       DEPLOY_ENV: staging
-      LOG_LEVEL: debug
     depends_on:
       - vm:dev-vm
 ```
@@ -285,14 +308,15 @@ exec:
 
 Run a command on a VM via SSH. **Imperative** — always re-runs on re-apply.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `target` | `string` | **Required** | VM name, ID prefix, IP, or MAC address. |
-| `user` | `string` | VM/config default | SSH user. |
-| `key` | `string` | VM/config default | Key name or file path. |
-| `cmd` | `string` | `""` | Command to execute. Empty = interactive shell. |
-| `timeout` | `int` | `0` | Connection timeout in seconds. |
-| `env` | `map[string]string` | `{}` | Environment variable overrides prepended to the command using `env K=V cmd`. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"ssh:name"`. |
+| `target` | `string` | **Yes** | — | VM name, ID prefix, IP, or MAC address. |
+| `user` | `string` | No | VM/config default | SSH user. |
+| `key` | `string` | No | VM/config default | Key name or file path. |
+| `cmd` | `string` | No | `""` | Command to execute. Empty = interactive shell. |
+| `timeout` | `int` | No | `0` | Connection timeout in seconds. |
+| `env` | `map[string]string` | No | `{}` | Environment variable overrides prepended to the command using `env K=V cmd`. |
 
 **Example:**
 ```yaml
@@ -301,8 +325,6 @@ ssh:
     target: dev-vm
     user: root
     cmd: "hostnamectl set-hostname my-dev-vm"
-    env:
-      ENVIRONMENT: production
     depends_on:
       - vm:dev-vm
 ```
@@ -313,13 +335,14 @@ ssh:
 
 Copy files between host and VM via vsock binary frame protocol. **Imperative** — always re-runs on re-apply.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `src` | `string \| []string` | **Required** | Source path(s). Single string auto-normalized to list. |
-| `dest` | `string` | **Required** | Destination in `"vm-name:/remote/path"` format. |
-| `force` | `bool` | `false` | Force overwrite existing files. |
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"copy:name"`. |
+| `src` | `string \| []string` | **Yes** | — | Source path(s). Single string auto-normalized to `[]string{"path"}`. |
+| `dest` | `string` | **Yes** | — | Destination in `"vm-name:/remote/path"` format. |
+| `force` | `bool` | No | `false` | Force overwrite existing files. |
 
-**Destination rules** (handled by agent via `os.Stat`):
+**Destination rules:**
 - Trailing `/` on dest → directory mode (preserves source filename)
 - Existing directory → directory mode (preserves source filename)
 - Non-existent or file → file mode (uses exact dest path)
@@ -364,7 +387,7 @@ Steps within the same level run in parallel.
 
 ## Destroy Behavior
 
-`mvm env destroy` runs each step's `Destroy()` method in reverse dependency order. What happens depends on the **step type**:
+`mvm env destroy` runs each step's `Destroy()` method in reverse dependency order. Behavior depends on step type:
 
 | Step Type | Behavior on Destroy | Rationale |
 |-----------|---------------------|-----------|
@@ -374,11 +397,11 @@ Steps within the same level run in parallel.
 | `image` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
 | `kernel` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to rebuild/re-download, shared across environments |
 | `binary` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
-| `ssh` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran inside the VM) |
-| `exec` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran inside the VM via vsock) |
-| `copy` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (file was already transferred) |
+| `ssh` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran) |
+| `exec` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran via vsock) |
+| `copy` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (file already transferred) |
 
-**Why image/kernel/binary are preserved:** These are _downloaded assets_ cached for reuse across multiple environments. Deleting them on destroy would force a re-download on the next `env apply`, which is slow and unnecessary. They are only removed when explicitly deleted via `mvm image rm`, `mvm kernel rm`, or `mvm binary rm`.
+**Why image/kernel/binary are preserved:** These are downloaded assets cached for reuse across multiple environments. Deleting them on destroy would force a re-download on the next `env apply`. They are only removed when explicitly deleted via `mvm image rm`, `mvm kernel rm`, or `mvm binary rm`.
 
 ---
 
@@ -446,7 +469,6 @@ exec:
     timeout: 60
     env:
       APP_ENV: production
-      LOG_LEVEL: info
     depends_on:
       - vm:dev-vm
 
@@ -473,16 +495,16 @@ schema_version: "1.0"
 created_at: "2026-06-12T10:00:00Z"
 updated_at: "2026-06-12T10:05:00Z"
 resources:
-  - name: "network:default"        # resource name
-    type: "network"                 # resource type
-    depends_on: ["image:os-image"]  # explicit dependencies (optional)
+  - name: "network:default"
+    type: "network"
+    depends_on: ["image:os-image"]
     state:
-      spec:                         # step state output (IDs, properties from the applied resource)
+      spec:
         network_id: "net-abc123"
         subnet: "172.27.0.0/24"
       meta:
-        was_created: true           # did we create this resource?
-        spec_hash: "a1b2c3..."      # hash of input spec YAML for drift detection
+        was_created: true
+        spec_hash: "a1b2c3..."
 ```
 
 **Fields:**
@@ -491,11 +513,11 @@ resources:
 |-------|-------------|
 | `name` | Resource name (e.g. `"network:default"`) |
 | `type` | Resource type (e.g. `"network"`) |
-| `depends_on` | Explicit dependencies (top-level on each resource) |
+| `depends_on` | Explicit dependencies |
 | `state.spec` | Step state output — IDs, properties, and configuration from the applied resource |
-| `state.meta.was_created` | `true` if we created the resource, `false` if pre-existing |
+| `state.meta.was_created` | `true` if created by the workflow, `false` if pre-existing |
 | `state.meta.spec_hash` | SHA256 hash of input spec YAML — compared on re-apply for drift detection |
 
 **Drift detection:** On `mvm env diff`, the engine compares each step's spec hash against the saved `spec_hash`. If different, the resource is marked as drifted (shown in yellow).
 
-**Crash resilience:** State is written after every successful step, not batched at the end. If `mvm env apply` crashes or fails partway, the state file already contains all completed steps. Re-running picks up where it left off — completed steps are skipped via existence checks. Same for `mvm env destroy` — if it fails partway, re-running destroys only the remaining resources.
+**Crash resilience:** State is written after every successful step, not batched at the end. If `mvm env apply` crashes partway, the state file already contains all completed steps. Re-running picks up where it left off — completed steps are skipped via existence checks. Same for `mvm env destroy`.
