@@ -78,6 +78,28 @@ func WaitForSocket(path string, timeout time.Duration) error {
 	return fmt.Errorf("socket %s did not appear within %v", path, timeout)
 }
 
+// AcquireExclusiveFileLock opens/creates lockPath, acquires an exclusive
+// flock, and returns a release function that unlocks and closes the fd.
+// Safe for concurrent access from multiple processes on the same host
+// (flock(2) semantics). The caller must call release() when done, typically
+// via defer. On failure, release is nil and err is non-nil.
+func AcquireExclusiveFileLock(lockPath string) (release func(), err error) {
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("open lock file: %w", err)
+	}
+
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("acquire lock: %w", err)
+	}
+
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
+}
+
 // WritePIDFile writes a PID to a file with flock-based exclusive locking.
 // The mode parameter defaults to 0600 if zero is passed.
 func WritePIDFile(path string, pid int, mode ...os.FileMode) error {
