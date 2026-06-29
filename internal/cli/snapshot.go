@@ -55,7 +55,7 @@ func newSnapshotCreateCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:               "create <vm>",
+		Use:               "create [vm-selector]",
 		Short:             "Snapshot a running VM.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeVMNames,
@@ -137,7 +137,7 @@ func newSnapshotInspectCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "inspect <identifier>",
+		Use:               "inspect [selector]",
 		Short:             "Show details of a single snapshot.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeSnapshotIDs,
@@ -174,7 +174,7 @@ func newSnapshotRestoreCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:               "restore <identifier> <name>",
+		Use:               "restore [selector] [name]",
 		Short:             "Restore a VM from a snapshot.",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeSnapshotThenName,
@@ -231,7 +231,7 @@ func newSnapshotRemoveCmd(snapshotAPI api.SnapshotAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm [identifier ...]",
+		Use:               "rm [selector ...]",
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove snapshots.",
 		Long:              "Remove one or more snapshots by name or ID prefix.",

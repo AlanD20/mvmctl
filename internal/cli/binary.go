@@ -236,7 +236,7 @@ func newBinaryRemoveCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm [identifiers...]",
+		Use:               "rm [selectors...]",
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more binaries. Use --version to remove by version pair.",
 		Args:              cobra.ArbitraryArgs,
@@ -286,7 +286,7 @@ func newBinaryRemoveCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 
 func newBinaryDefaultCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 	return &cobra.Command{
-		Use:               "default [identifier]",
+		Use:               "default [selector]",
 		Short:             "Set a binary as the active default",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeBinaryVersions,

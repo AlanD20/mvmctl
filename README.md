@@ -6,51 +6,34 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Go 1.26.3](https://img.shields.io/badge/go-1.26.3-blue)](https://go.dev/)
 
-**mvmctl** is the modern way to run microVMs -- get the startup speed of containers with the security and isolation of traditional VMs. Built for developers who need lightweight, fast-booting virtual machines without the overhead.
+**mvmctl** is a CLI tool for running lightweight VMs — fast enough to replace containers for development, isolated enough to trust with real workloads. Built on [Firecracker](https://github.com/firecracker-microvm/firecracker), the same microVM technology that powers AWS Lambda and Fargate.
 
-## Why mvmctl?
+Think "Docker for VMs" — one command to create, start, and connect.
 
-- **Fast boot times** -- VMs boot in 2-4 seconds (loop-mount) or 9-14 seconds (guestfs), so you iterate at container speed with VM-grade isolation.
-- **Powered by Firecracker** -- AWS's battle-tested microVM technology, the engine behind Lambda and Fargate.
-- **Secure by default** -- Hardware-level isolation with KVM.
-- **Single binary** -- One statically-linked Go binary with no language runtime dependencies. Calls standard Linux utilities (ip, sudo, iptables/nftables, losetup, mount).
-- **Image support** -- Ready-to-use images for Ubuntu, Debian, Arch, Alpine, and more. Import your own base images.
-- **Volumes & persistence** -- Create, attach, resize, and detach persistent data disks that survive VM lifecycles.
-- **Custom kernels** -- Download pre-built Firecracker kernels or build official kernels with custom features (KVM, nftables).
-- **Simple CLI** -- One command to create, start, and SSH into a VM.
-- **Console access** -- Interactive serial console without SSH via `mvm console`.
-- **Environment as code** -- Provision full VM topologies from a YAML spec: networks, keys, images, kernels, VMs, and post-boot provisioning via `mvm env apply`.
-- **Vsock agent** -- Run commands inside VMs instantly via a lightweight embedded guest agent (`mvm exec`), no SSH daemon required.
-- **File transfer** -- Copy files between host and VM over vsock with `mvm cp`, no guest dependencies needed.
-- **Atomic batch creation** -- Spin up multiple VMs as a unit with `--count N --atomic`. All succeed or all roll back.
-- **Container-like ergonomics** -- `mvm vm create myvm --image ubuntu:24.04 && mvm ssh myvm` works like `docker run -it ubuntu bash`, but with real VM isolation.
-
-```bash
-# Create and SSH into a VM in under 10 seconds
-mvm vm create myvm --image ubuntu:24.04
-mvm ssh myvm
-```
+- ⚡ **Fast boot times** — VMs boot in 2-4 seconds (loop-mount) or 9-14 seconds (guestfs), so you iterate at container speed with VM-grade isolation
+- 🔥 **Powered by Firecracker** — AWS's battle-tested microVM technology, the engine behind Lambda and Fargate
+- 🛡️ **Secure by default** — hardware-level isolation with KVM
+- 📦 **Single binary** — one statically-linked Go binary with no language runtime dependencies. Calls standard Linux utilities (ip, sudo, iptables/nftables, losetup, mount)
+- 🖼️ **Image support** — ready-to-use images for Ubuntu, Debian, Arch, Alpine, and more. Import your own base images
+- 💾 **Volumes & persistence** — create, attach, resize, and detach persistent data disks that survive VM lifecycles
+- ⚙️ **Custom kernels** — download pre-built Firecracker kernels or build official kernels with custom features (KVM, nftables)
+- 🎯 **Simple CLI** — one command to create, start, and SSH into a VM
+- 🖥️ **Console access** — interactive serial console without SSH via `mvm console`
+- 📋 **Environment as code** — provision full VM topologies from a YAML spec: networks, keys, images, kernels, VMs, and post-boot provisioning via `mvm env apply`
+- 🔌 **Vsock agent** — run commands inside VMs instantly via a lightweight embedded guest agent (`mvm exec`), no SSH daemon required
+- 📁 **File transfer** — copy files between host and VM over vsock with `mvm cp`, no guest dependencies needed
+- 🧩 **Atomic batch creation** — spin up multiple VMs as a unit with `--count N --atomic`. All succeed or all roll back
+- 🐳 **Container-like ergonomics** — `mvm vm create myvm --image ubuntu:24.04 && mvm ssh myvm` works like `docker run -it ubuntu bash`, but with real VM isolation
 
 ---
 
 ## Table of Contents
 
-- [Why mvmctl?](#why-mvmctl)
 - [Prerequisites](#prerequisites)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
-- [Essential Commands](#essential-commands)
-  - [VM Lifecycle](#vm-lifecycle)
-  - [Network Management](#network-management)
-  - [Resource Management](#resource-management)
-  - [Snapshot Management](#snapshot-management)
-  - [System Setup](#system-setup)
-  - [Environment Management](#environment-management)
-  - [Configuration](#configuration)
+- [Common Tasks](#common-tasks)
 - [Documentation](#documentation)
-- [Building from Source](#building-from-source)
-  - [Dev build](#dev-build)
-  - [Release build](#release-build)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
 - [License](#license)
@@ -59,8 +42,7 @@ mvm ssh myvm
 
 ## Prerequisites
 
-- **Linux** (x86_64 or aarch64) -- Firecracker only runs on Linux
-- **KVM access** (`/dev/kvm`):
+- **Linux** (x86_64 or aarch64) with KVM access (`/dev/kvm`):
   ```bash
   sudo usermod -aG kvm $USER
   # Log out and back in
@@ -85,13 +67,12 @@ mvm ssh myvm
 
 ### 1. Download prebuilt binary (recommended)
 
-No Go required:
+You may head over to [Releases](https://github.com/AlanD20/mvmctl/releases) page to get the desired package for your distro or you may simply get the static and standalone binary itself:
 
 ```bash
-curl -L -o mvm https://github.com/AlanD20/mvmctl/releases/latest/download/mvm
-chmod +x mvm
 mkdir -p ~/.local/bin
-mv mvm ~/.local/bin/
+curl -L -o ~/.local/bin/mvm https://github.com/AlanD20/mvmctl/releases/latest/download/mvm
+chmod +x ~/.local/bin/mvm
 mvm --help
 ```
 
@@ -102,287 +83,80 @@ mvm --help
 ```bash
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
-./scripts/build.sh release
-cp dist/mvm ~/.local/bin/mvm
+./scripts/build.sh release --output ~/.local/bin/mvm
 mvm --help
 ```
+
+See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference with all flags, options, and selectors.
 
 ---
 
 ## Quick Start
 
-The easiest way to get started is with the interactive setup wizard. `mvm init` handles host configuration and cache setup. System packages must still be installed separately (see [Prerequisites](#prerequisites) above). After that, download a kernel and OS image, create an SSH key, then finally create your first VM:
-
 ```bash
-# Interactive setup -- guides you through everything
-# Handles privilege escalation automatically when prompted
+# 1. One-time system setup (interactive, handles sudo)
 mvm init
 
-# First time setup requires logging out then logging back in to ensure your user is in the `mvm` group
-
-# Download the Firecracker kernel
+# 2. Log out and back in, then download a kernel and image
 mvm kernel pull --type firecracker --default
-
-# Download an OS image
 mvm image pull ubuntu:24.04 --default
 
-# Create a key and set it as default in one step
-mvm key create test --default
-
-# Create and start a VM
-mvm vm create myvm --vcpu 2 --mem 2G --disk-size 20G
-
-# Follow the boot log until SSH is ready (~30-60 s)
-mvm logs myvm --follow
-
-# SSH in
-mvm ssh myvm
-
-# List running VMs
-mvm vm ls
-
-# Remove the VM when done
-mvm vm rm myvm
+# 3. Create and connect to a VM
+mvm vm create myvm --image ubuntu:24.04 --vcpu 2 --mem 2G --disk-size 20G
+mvm exec myvm                    # vsock agent — no SSH needed
 ```
+
+That's it. When you're done: `mvm vm rm myvm`.
 
 ---
 
-## Essential Commands
+## Common Tasks
 
-> **Command Aliases:** `net` for `network`, `img` for `image`, `vol` for `volume`, `ss` for `snapshot`, and `mvm bin` for `mvm binary`.
-> Environment workflow: `mvm env up` for `mvm env apply`, `mvm env down` for `mvm env destroy`.
-> Every `list` subcommand accepts `ls`; every `remove` accepts `rm`, `delete`, and `del`.
-> E.g. `mvm net ls`, `mvm img pull ubuntu:24.04`, `mvm vol ls`, `mvm bin ls`, `mvm ss ls`.
+| Task | Command | Learn more |
+|------|---------|-----------|
+| Create a VM | `mvm vm create myvm --image ubuntu:24.04` | [REFERENCES.md](docs/REFERENCES.md#mvm-vm) |
+| Run a command inside a VM | `mvm exec myvm -- ls -la` | [REFERENCES.md](docs/REFERENCES.md#mvm-exec) |
+| Copy files to/from a VM | `mvm cp ./file.txt myvm:/root/` | [REFERENCES.md](docs/REFERENCES.md#mvm-cp) |
+| SSH into a VM | `mvm ssh myvm` | [REFERENCES.md](docs/REFERENCES.md#mvm-ssh) |
+| List running VMs | `mvm vm ps` | [REFERENCES.md](docs/REFERENCES.md#mvm-vm) |
+| Download an image | `mvm image pull ubuntu:24.04` | [REFERENCES.md](docs/REFERENCES.md#mvm-image) |
+| Create a network | `mvm network create mynet --subnet 10.0.0.0/24` | [REFERENCES.md](docs/REFERENCES.md#mvm-network) |
+| Create a snapshot | `mvm snapshot create myvm --name daily` | [REFERENCES.md](docs/REFERENCES.md#mvm-snapshot) |
+| Provision from YAML | `mvm env apply my-env.yaml` | [ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) |
+| Configure settings | `mvm config set defaults.vm vcpu_count 4` | [REFERENCES.md](docs/REFERENCES.md#mvm-config) |
 
-### VM Lifecycle
-
-```bash
-mvm vm create myvm --image ubuntu:24.04                 # Create and start a VM
-mvm vm create myvm --image ubuntu:24.04 --nested-virt --cpu-template ./t2.json --volume data  # VM with nested virt, CPU template, and volume
-mvm vm create myvm --image ubuntu:24.04 --skip-deblob --skip-cleanup  # VM with debug flags (skip optimization / cleanup on failure)
-mvm vm create cluster --count 3 --atomic                # Batch-create 3 VMs
-mvm vm ls                                     # List all VMs
-mvm vm ps                                     # List running VMs (active processes)
-mvm ssh myvm                                  # SSH into a VM
-mvm exec myvm -- ls -la                      # Run a command inside the VM via vsock agent (faster than SSH)
-mvm console myvm                              # Console access (no SSH)
-mvm cp ./file.txt myvm:/root/                 # Copy files to/from a VM
-mvm vm rm myvm -f                             # Remove a VM
-```
-
-Also includes: `mvm vm start`, `stop`, `reboot`, `pause`, `resume`, `inspect`. Volume attach/detach via `mvm volume attach`, `mvm volume detach`. For snapshot management, see the `mvm snapshot` command group.
-
-### Network Management
-
-```bash
-mvm network ls                                    # List all networks
-mvm network create my-net --subnet 192.168.100.0/24  # Create a named network
-mvm network rm my-net                             # Remove a network
-mvm network default my-net                        # Set as default for VM creation
-mvm network inspect my-net                        # Inspect network details
-```
-
-### Resource Management
-
-```bash
-mvm volume create data 10G                   # Create persistent data disk
-mvm volume create data 10G --read-only       # Create read-only persistent data disk
-mvm volume ls                                # List volumes
-mvm volume inspect data                      # Inspect volume details
-mvm volume resize data 20G                   # Resize a volume
-mvm image pull ubuntu:24.04                 # Download an OS image
-mvm image ls                                # List available images
-mvm image inspect ubuntu:24.04              # Inspect image details
-mvm image import my-name ./myimage.qcow2            # Import local image file
-mvm image warm ubuntu:24.04                 # Pre-decompress image to ready pool
-mvm kernel pull --type firecracker           # Download Firecracker kernel
-mvm kernel pull official:6.19.9 --features kvm,nftables --config ./my-fragment.config  # Build official kernel with features
-mvm kernel pull official:6.19.9 --jobs 4 --keep-build-dir --clean-build  # Official kernel build with parallel jobs
-mvm kernel inspect <kernel>                  # Inspect kernel details
-mvm kernel import my-kernel ./vmlinux                  # Register a vmlinux file
-mvm bin pull firecracker --version 1.15.0               # Download Firecracker + jailer binaries
-mvm bin pull firecracker --git-ref my-branch             # Build from source at a git ref
-mvm bin default firecracker                              # Set default binary
-mvm key create mykey --default              # Generate SSH key
-mvm key import mykey ./id_ed25519.pub      # Import existing public key
-mvm key inspect mykey                       # Inspect key details
-mvm key export mykey ./backup               # Export keypair to directory
-```
-
-### Snapshot Management
-
-```bash
-mvm snapshot create my-vm --name daily-backup      # Create a snapshot from a running VM
-mvm snapshot ls                                     # List all snapshots
-mvm snapshot restore daily-backup cloned-vm          # Restore a VM from a snapshot
-mvm snapshot restore daily-backup cloned-vm --resume # Restore and auto-start
-mvm snapshot rm daily-backup                         # Remove a snapshot
-mvm snapshot inspect daily-backup                    # Inspect snapshot details
-```
-
-### System Setup
-
-```bash
-mvm host init    # One-time host setup (KVM, networking)
-mvm host info    # Show host hardware, limits, VM capacity projection
-mvm host status  # Show current host configuration state
-mvm host clean   # Remove networking config
-mvm host reset   # Full rollback of all host changes
-mvm cache init   # Initialize all cache resources
-mvm cache prune  # Clean up stale cache
-mvm cache clean  # Nuclear option for cache cleanup
-```
-
-### Environment Management
-
-Define your entire VM environment in a single YAML file — network, keys, images, kernels, binaries, VMs, and post-boot provisioning:
-
-```yaml
-# my-env.yaml
-version: "1"
-
-network:
-  - name: mynet
-    subnet: "10.20.0.0/24"
-
-key:
-  - name: main-key
-    algorithm: ed25519
-
-image:
-  - name: os
-    type: alpine
-    version: "3.21"
-
-kernel:
-  - name: fc-kernel
-    type: firecracker
-
-binary:
-  - name: fc
-    version: "1.15.0"
-
-vm:
-  - name: dev-vm
-    image: os
-    kernel: fc-kernel
-    binary: fc
-    network: mynet
-    key: main-key
-    vcpu: 2
-    mem: 2048
-    disk_size: 20G
-
-ssh:
-  - name: setup
-    target: dev-vm
-    cmd: "hostnamectl set-hostname my-dev-vm"
-    depends_on:
-      - vm:dev-vm
-```
-
-```bash
-# Provision everything: network → key → image → kernel → binary → VM → SSH
-mvm env apply my-env.yaml
-
-# See what would change (new, removed, drifted)
-mvm env diff my-env.yaml
-
-# List applied environments
-mvm env ls
-
-# Tear it all down (reverse order)
-mvm env destroy my-env.yaml
-```
-
-See [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) for the full YAML spec reference.
-
-### Configuration
-
-```bash
-mvm config get defaults.vm vcpu_count             # Get a config value
-mvm config set defaults.vm vcpu_count 4           # Set a config value
-mvm config reset defaults.vm vcpu_count           # Reset a config value to default
-mvm config ls                                   # List all overridable settings
-```
-
-See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference with all flags and options.
+> **Aliases:** `net` for `network`, `img` for `image`, `vol` for `volume`, `ss` for `snapshot`, `mvm bin` for `mvm binary`. Every `list` accepts `ls`; every `remove` accepts `rm`, `delete`, `del`.
 
 ---
 
 ## Documentation
 
-Comprehensive documentation is available in the `docs/` directory:
-
-| Document | Description |
-|----------|-------------|
-| [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) | **Environment spec reference** -- all YAML fields, types, and examples for `mvm env` |
-| [docs/REFERENCES.md](docs/REFERENCES.md) | **Complete command reference** -- all `mvm` commands, flags, and options. **Configuration** -- config files, environment variables, cache structure. **Cloud-Init** -- nocloud-net setup, security, modes |
-| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions. Debug mode, permission fixes, network issues |
-| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | System dependencies by category. Package names for Debian/Ubuntu/Arch |
-| [docs/RC_QA.md](docs/RC_QA.md) | Release qualification process, gates, evidence collection |
-| [docs/KERNEL.md](docs/KERNEL.md) | Building kernels for Firecracker (CI and official) |
-| [docs/RELEASE.md](docs/RELEASE.md) | Release process and distribution packages |
-| [docs/ASSETS_CONFIGURATIONS.md](docs/ASSETS_CONFIGURATIONS.md) | Bundled asset configurations: image specs, kernel specs, and runtime defaults |
-| [docs/STANDARDS.md](docs/STANDARDS.md) | Go coding standards, conventions, and architectural rules |
-| [docs/RUNTIME.md](docs/RUNTIME.md) | Runtime internals: provisioning backends, service architecture, and firewall backend |
-| [docs/implementations/ENVIRONMENT_WORKFLOW_ENGINE.md](docs/implementations/ENVIRONMENT_WORKFLOW_ENGINE.md) | **Workflow engine internals** -- architecture, DAG resolution, state persistence, design decisions |
-
----
-
-## Building from Source
-
-Requires Go 1.26.3+. Produces a single statically-linked binary with no runtime dependencies.
-
-### Dev build
-
-```bash
-git clone https://github.com/AlanD20/mvmctl
-cd mvmctl
-./scripts/build.sh dev          # dev build → ./mvm
-./mvm --version
-```
-
-### Release build
-
-```bash
-./scripts/build.sh release
-cp dist/mvm ~/.local/bin/mvm
-mvm --help
-```
-
-See [docs/RELEASE.md](docs/RELEASE.md) for detailed build and release instructions.
+| Document | What you'll find |
+|----------|-----------------|
+| [docs/REFERENCES.md](docs/REFERENCES.md) | Complete command reference, selectors, config, env vars, cloud-init |
+| [docs/ENV_SPEC_REFERENCE.md](docs/ENV_SPEC_REFERENCE.md) | Full YAML spec for `mvm env` — all fields, types, examples |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues, firewall problems, nocloud-net failures |
+| [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) | System dependencies by distro package names |
+| [docs/KERNEL.md](docs/KERNEL.md) | Building kernels for Firecracker |
+| [docs/RUNTIME.md](docs/RUNTIME.md) | Runtime internals: provisioning backends, firewall |
 
 ---
 
 ## Troubleshooting
 
-Common issues and quick fixes:
-
 | Issue | Solution |
 |-------|----------|
-| **Permission denied: /dev/kvm** | If missing: `sudo modprobe kvm && sudo modprobe kvm_intel` (or `kvm_amd`). If unreadable: `sudo usermod -aG kvm $USER` then log out/back in |
-| **Bridge not found** | Run `mvm host init` once |
-| **VM won't boot / SSH times out** | Cloud-init takes 30-60s on first boot. Watch with `mvm logs myvm --follow` |
-| **Kernel not found** | `mvm kernel pull --type firecracker` |
-| **Image not found** | `mvm image pull ubuntu:24.04` |
+| **Permission denied: /dev/kvm** | Missing: `sudo modprobe kvm && sudo modprobe kvm_intel` (or `kvm_amd`). Unreadable: `sudo usermod -aG kvm $USER`, log out/back in |
+| **VM won't boot / SSH times out** | Cloud-init takes 30-60s. Watch with `mvm logs myvm --follow` |
 | **nocloud-net server failed** | Port range exhausted. Check: `sudo ss -tlnp \| grep -E ':(8[0-9]{3}\|9[0-9]{3})'` |
 
-See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for complete troubleshooting guide including:
-- Debug mode
-- Console relay issues
-- Network permission problems
-- Cache corruption fixes
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the full guide.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! See [docs/STANDARDS.md](docs/STANDARDS.md) for Go coding standards and conventions.
-
-- Development setup: `git clone` + `./scripts/build.sh`
-- Running tests: `go test ./...` and `python3 scripts/run-system-tests.py`
-- Build system: `./scripts/build.sh` (dev) or `./scripts/build.sh release --version X.Y.Z`
+See [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md) for the full guide: development setup, project structure, running tests, commit conventions, and the PR process.
 
 ---
 

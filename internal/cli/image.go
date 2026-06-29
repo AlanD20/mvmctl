@@ -249,10 +249,10 @@ func newImageRemoveCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:     "rm [ids...]",
+		Use:     "rm [selectors...]",
 		Aliases: []string{"remove", "delete", "del"},
-		Short:   "Remove cached images by ID prefix.",
-		Long: `Remove cached images by ID prefix.
+		Short:   "Remove cached images by selector.",
+		Long: `Remove cached images by selector.
 
 Examples:
   mvm image rm abc123
@@ -291,7 +291,7 @@ func newImageInspectCmd(imageAPI api.ImageAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:   "inspect [id]",
+		Use:   "inspect [selector]",
 		Short: "Show detailed information about an image.",
 		Long: `Show detailed information about an image.
 
@@ -336,7 +336,7 @@ Examples:
 
 func newImageDefaultCmd(imageAPI api.ImageAPI) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "default [id]",
+		Use:               "default [selector]",
 		Short:             "Set the default image for VM creation.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeImageIDs,
@@ -368,7 +368,7 @@ func newImageImportCmd(imageAPI api.ImageAPI) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "import [name] [path]",
+		Use:   "import [name] [path|vm-selector]",
 		Short: "Import a local image file (qcow2, raw, tar-rootfs). The first argument is a display name.",
 		Long: `Import a local image file. The first argument is a display name, the second is the file path.
 
@@ -463,7 +463,7 @@ func newImageWarmCmd(imageAPI api.ImageAPI) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "warm [id]",
+		Use:   "warm [selector]",
 		Short: "Pre-decompress image to ready pool for fast VM creation.",
 		Long: `Pre-decompress image to ready pool for fast VM creation.
 

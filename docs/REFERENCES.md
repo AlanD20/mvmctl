@@ -7,11 +7,12 @@ This document provides detailed reference for all `mvm` commands, configuration 
 ## Table of Contents
 
 - [Command Reference](#command-reference)
-  - [mvm init](#mvm-init)
-  - [mvm host](#mvm-host)
-  - [mvm kernel](#mvm-kernel)
-  - [mvm image](#mvm-image)
-  - [mvm bin](#mvm-bin)
+- [Selectors](#selectors)
+- [mvm init](#mvm-init)
+- [mvm host](#mvm-host)
+- [mvm kernel](#mvm-kernel)
+- [mvm image](#mvm-image)
+- [mvm bin](#mvm-bin)
 - [mvm vm](#mvm-vm)
 - [mvm snapshot](#mvm-snapshot)
 - [mvm console](#mvm-console)
@@ -43,6 +44,41 @@ This document provides detailed reference for all `mvm` commands, configuration 
 | `--verbose` | persistent | Enable verbose output |
 | `--debug` | persistent | Enable debug mode |
 | `--version` | root | Show version and exit |
+
+### Selectors
+
+Resource commands (`inspect`, `rm`, `pull`, etc.) accept **selectors** — flexible
+identifiers that the system resolves to a specific resource. Each resource domain
+defines its own set of selectors, tried in priority order. The general resolution
+pattern is:
+
+1. Try the highest-priority selector.
+2. If it matches exactly one resource, return it.
+3. If not found, fall through to the next priority.
+4. On any other error (DB error, ambiguous match), propagate immediately.
+
+| Domain | Selectors (tried in priority order) |
+|--------|-------------------------------------|
+| **kernel** | `type:version` → absolute path → ID prefix → type name → relative path |
+| **image** | `type:version` → type name → display name → ID prefix |
+| **binary** | `type:version` → ID prefix → type name |
+| **vm** | Name → IP address → MAC address → ID prefix |
+| **network** | Name → ID prefix |
+| **volume** | Name → ID prefix |
+| **key** | Name → fingerprint prefix → `.pub` file path |
+| **snapshot** | Name → ID prefix |
+
+**Notes:**
+- **ID prefix** — Every resource is assigned a unique SHA-based ID at creation time.
+  Any unique prefix resolves to the resource (minimum length enforced by the DB).
+- **VM IP/MAC** — If the input contains `.`, it is treated as an IP lookup. If it
+  contains `:`, it is treated as a MAC lookup. Both fail immediately on mismatch
+  (no fallthrough to ID prefix).
+- **Key fingerprint** — The resolver tries both bare input and `SHA256:`-prefixed
+  variants for fingerprint matching.
+- **`type:version` shorthand** — The colon-separated format works for kernel, image,
+  and binary resources. The type portion alone resolves to the latest version.
+- Each resource section below documents its specific selectors with usage examples.
 
 ### `mvm init`
 
@@ -78,14 +114,24 @@ Host configuration commands for one-time, machine-global setup.
 
 Kernel management — list, pull, remove, inspect, set default, and import kernels.
 
+#### Selectors
+
+The kernel resolver tries selectors in priority order:
+
+1. **`type:version`** — e.g. `official:6.19.9`, `firecracker:v1.15`
+2. **Absolute path** — path starting with `/` that exists on disk, e.g. `/home/user/vmlinux`
+3. **ID prefix** — unique prefix of the kernel SHA ID
+4. **Type name** — matches the kernel type (resolves to latest version), e.g. `official`
+5. **Relative path** — path relative to CWD that exists on disk, e.g. `./vmlinux-custom`
+
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm kernel ls` | `--json`, `-r, --remote`, `--no-cache`, `--long` | List cached kernels (or available remote kernels with `--remote`) |
 | `mvm kernel pull` | `[type:version]`, `--type`, `--version`, `--default, -d`, `--jobs`, `--keep-build-dir`, `--clean-build`, `--config`, `--features` | Pull or build a kernel. Supports `type:version` shorthand (e.g. `official:6.19.9`) |
 | `mvm kernel import` | `NAME`, `PATH`, `--version`, `--default, -d` | Register a vmlinux file as a kernel in the database |
-| `mvm kernel default` | `KERNEL_ID` | Set a kernel as the default |
-| `mvm kernel rm` | `[IDENTIFIERS]...`, `-f, --force` | Remove one or more kernels |
-| `mvm kernel inspect` | `PREFIX`, `--json` | Show detailed information about a kernel |
+| `mvm kernel default` | `SELECTOR` | Set a kernel as the default |
+| `mvm kernel rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more kernels |
+| `mvm kernel inspect` | `SELECTOR`, `--json` | Show detailed information about a kernel |
 
 **`pull` flags:**
 
@@ -118,15 +164,24 @@ mvm kernel pull --type official --version 6.19.9 --config /path/to/config.fragme
 
 Image management — download, list, inspect, import, and manage VM images.
 
+#### Selectors
+
+The image resolver tries selectors in priority order:
+
+1. **`type:version`** — e.g. `ubuntu:24.04`, `alpine:3.21`
+2. **Type name** — matches the image type (resolves to latest version), e.g. `ubuntu`
+3. **Display name** — matches the display name, e.g. `Ubuntu 24.04 LTS`
+4. **ID prefix** — unique prefix of the image SHA ID
+
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm image ls` | `--json`, `-r, --remote`, `--no-cache`, `--type`, `--long` | List cached images (or available remote images with `--remote`) |
-| `mvm image pull` | `[SELECTOR]`, `--type`, `--version`, `--force, -f`, `--no-cache`, `--default, -d`, `--skip-optimization`, `--disable-detector` | Download an image by type:version (e.g. `ubuntu:24.04`), ID, or type |
+| `mvm image pull` | `[SELECTOR]`, `--type`, `--version`, `--force, -f`, `--no-cache`, `--default, -d`, `--skip-optimization`, `--disable-detector` | Download an image by selector |
 | `mvm image import` | `NAME`, `PATH`, `--format`, `--root-partition`, `--default, -d`, `--force, -f`, `--skip-optimization`, `--disable-detector` | Import a local image file (qcow2, raw, tar-rootfs) |
-| `mvm image default` | `PREFIX` | Set the default image for VM creation |
-| `mvm image rm` | `PREFIXES...`, `--force, -f` | Remove cached images by ID prefix |
-| `mvm image warm` | `[IMAGE]`, `--all, -a` | Pre-decompress image to ready pool for fast VM creation (warms all images if IMAGE omitted) |
-| `mvm image inspect` | `PREFIX`, `--json` | Show detailed information about an image |
+| `mvm image default` | `SELECTOR` | Set the default image for VM creation |
+| `mvm image rm` | `[SELECTORS]...`, `--force, -f` | Remove cached images by selector |
+| `mvm image warm` | `[SELECTOR]`, `--all, -a` | Pre-decompress image to ready pool for fast VM creation (warms all images if omitted) |
+| `mvm image inspect` | `SELECTOR`, `--json` | Show detailed information about an image |
 
 **`pull` flags:**
 
@@ -169,12 +224,20 @@ mvm image import my-image /path/to/image.qcow2
 
 Firecracker binary management — download, list, and remove Firecracker and jailer binaries.
 
+#### Selectors
+
+The binary resolver tries selectors in priority order:
+
+1. **`type:version`** — e.g. `firecracker:1.15.0`
+2. **ID prefix** — unique prefix of the binary SHA ID
+3. **Type name** — matches the binary type (resolves to latest semver), e.g. `firecracker`
+
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm bin ls` | `-r, --remote`, `--limit`, `--json`, `--long` | List local (and optionally remote) Firecracker versions |
 | `mvm bin pull` | `[SELECTOR]`, `--version`, `--git-ref`, `--default, -d`, `--force, -f` | Download a Firecracker version or build from source |
-| `mvm bin default` | `BINARY_ID` | Set a binary as the active default |
-| `mvm bin rm` | `[IDENTIFIERS]...`, `--version`, `-f, --force` | Remove one or more binaries, or use `--version` to remove a version pair |
+| `mvm bin default` | `SELECTOR` | Set a binary as the active default |
+| `mvm bin rm` | `[SELECTORS]...`, `--version`, `-f, --force` | Remove one or more binaries, or use `--version` to remove a version pair |
 
 ```
 # List local and remote versions
@@ -193,18 +256,27 @@ mvm bin pull firecracker --git-ref v1.15.0
 
 VM lifecycle management — create, start, stop, reboot, pause, resume, remove, list, and inspect VMs.
 
+#### Selectors
+
+The VM resolver tries selectors in priority order:
+
+1. **Name** — exact VM name, e.g. `my-vm`, `test-runner`
+2. **IP address** — input contains `.`, e.g. `10.88.0.5` (fails immediately on mismatch, no fallthrough)
+3. **MAC address** — input contains `:`, e.g. `06:00:ac:10:88:05` (fails immediately on mismatch, no fallthrough)
+4. **ID prefix** — unique prefix of the VM SHA ID
+
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm vm create` | `NAME [flags]` | Create and start a new Firecracker microVM |
-| `mvm vm start` | `[IDENTIFIERS]...` | Start one or more stopped VMs |
-| `mvm vm stop` | `[IDENTIFIERS]...`, `-f, --force` | Stop one or more running VMs |
-| `mvm vm reboot` | `[IDENTIFIERS]...`, `-f, --force` | Reboot one or more VMs |
-| `mvm vm pause` | `[IDENTIFIERS]...` | Pause one or more running VMs |
-| `mvm vm resume` | `[IDENTIFIERS]...` | Resume one or more paused VMs |
-| `mvm vm rm` | `[NAMES]...`, `-f, --force` | Remove one or more VMs |
+| `mvm vm start` | `[SELECTORS]...` | Start one or more stopped VMs |
+| `mvm vm stop` | `[SELECTORS]...`, `-f, --force` | Stop one or more running VMs |
+| `mvm vm reboot` | `[SELECTORS]...`, `-f, --force` | Reboot one or more VMs |
+| `mvm vm pause` | `[SELECTORS]...` | Pause one or more running VMs |
+| `mvm vm resume` | `[SELECTORS]...` | Resume one or more paused VMs |
+| `mvm vm rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more VMs |
 | `mvm vm ls` | `--json`, `--long` | List all VMs |
 | `mvm vm ps` | `--json` | List running VMs (active processes) |
-| `mvm vm inspect` | `IDENTIFIER`, `--json` | Show detailed information about a VM |
+| `mvm vm inspect` | `SELECTOR`, `--json` | Show detailed information about a VM |
 
 **`vm create` flags:**
 
@@ -261,27 +333,35 @@ mvm vm create cluster-node --count 3
 
 Create, list, inspect, restore, and remove VM snapshots.
 
+#### Selectors
+
+The snapshot resolver tries selectors in priority order:
+
+1. **Name** — exact snapshot name, e.g. `daily-backup`
+2. **ID prefix** — unique prefix of the snapshot SHA ID
+
 | Command | Flags | Description |
 |---------|-------|-------------|
-| `mvm snapshot create` | `VM_IDENTIFIER`, `--name`, `--pause` | Snapshot a running VM |
+| `mvm snapshot create` | `VM_SELECTOR`, `--name`, `--pause` | Snapshot a running VM |
 | `mvm snapshot ls` | `--json` | List all snapshots |
-| `mvm snapshot inspect` | `SNAPSHOT_ID`, `--json` | Show detailed information about a snapshot |
-| `mvm snapshot restore` | `SNAPSHOT_ID`, `NAME`, `--network`, `--resume`, `--count N` | Restore one or more VMs from a snapshot |
-| `mvm snapshot rm` | `SNAPSHOT_ID`, `--force, -f` | Remove a snapshot |
+| `mvm snapshot inspect` | `SELECTOR`, `--json` | Show detailed information about a snapshot |
+| `mvm snapshot restore` | `SELECTOR`, `NAME`, `--network`, `--resume`, `--count N` | Restore one or more VMs from a snapshot |
+| `mvm snapshot rm` | `SELECTOR`, `--force, -f` | Remove a snapshot |
 
 ---
 
 ### `mvm console`
 
 VM serial console access without SSH. Uses a PTY relay subprocess.
+Accepts VM selectors (see [mvm vm](#mvm-vm) for resolution order).
 
 ```
-mvm console IDENTIFIER [flags]
+mvm console VM_SELECTOR [flags]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `IDENTIFIER` | VM name, ID, IP, or MAC address (positional, required) |
+| `VM_SELECTOR` | VM name, ID, IP, or MAC address (positional, required) |
 | `--state` | Show console relay state without attaching |
 | `--kill` | Kill the console relay process |
 
@@ -293,14 +373,21 @@ Press `Ctrl+X` then `D` to detach from an active console session.
 
 Named bridge network management.
 
+#### Selectors
+
+The network resolver tries selectors in priority order:
+
+1. **Name** — exact network name, e.g. `sys-test-net`, `default`
+2. **ID prefix** — unique prefix of the network SHA ID
+
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--nat-gateways`, `--non-interactive`, `--default, -d` | Create a named bridge network |
-| `mvm network rm` | `[NAMES]...`, `-f, --force` | Remove one or more networks by name |
+| `mvm network rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more networks |
 | `mvm network ls` | `--json, --long` | List all networks |
-| `mvm network inspect` | `[NAME]`, `--json` | Show network details and IP leases |
-| `mvm network default` | `[NAME]` | Set a network as the default for VM creation |
-| `mvm network sync` | `[NAMES]...`, `--json` | Sync firewall rules between database and host |
+| `mvm network inspect` | `[SELECTOR]`, `--json` | Show network details and IP leases |
+| `mvm network default` | `[SELECTOR]` | Set a network as the default for VM creation |
+| `mvm network sync` | `[SELECTORS]...`, `--json` | Sync firewall rules between database and host |
 
 ---
 
@@ -308,15 +395,23 @@ Named bridge network management.
 
 SSH key management.
 
+#### Selectors
+
+The key resolver tries selectors in priority order:
+
+1. **Name** — exact key name, e.g. `mykey`, `builder-key`
+2. **Fingerprint prefix** — unique prefix of the SHA256 fingerprint (bare input and `SHA256:`-prefixed variants are both tried)
+3. **`.pub` file path** — path to a `.pub` file on disk, e.g. `./id_ed25519.pub`
+
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm key ls` | `--json, --long` | List all SSH keys |
 | `mvm key import` | `NAME`, `PATH`, `--default, -d`, `-f, --force` | Import an existing public key to the cache |
 | `mvm key create` | `NAME`, `--algorithm, -a`, `--bits`, `--comment`, `--out`, `--default, -d`, `-f, --force` | Generate a new SSH keypair |
-| `mvm key rm` | `[NAMES]...`, `-f, --force` | Remove one or more SSH keys |
-| `mvm key inspect` | `[NAME]`, `--json` | Inspect an SSH key |
-| `mvm key default` | `[NAMES]...`, `--clear` | Set default SSH keys, or clear with `--clear` |
-| `mvm key export` | `[NAME]`, `[PATH]`, `-f, --force` | Export a keypair to a directory |
+| `mvm key rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more SSH keys |
+| `mvm key inspect` | `[SELECTOR]`, `--json` | Inspect an SSH key |
+| `mvm key default` | `[SELECTORS]...`, `--clear` | Set default SSH keys, or clear with `--clear` |
+| `mvm key export` | `[SELECTOR]`, `[PATH]`, `-f, --force` | Export a keypair to a directory |
 
 ---
 
@@ -365,14 +460,15 @@ Omit `RESOURCE` to get an error unless `--all` is passed. Each per-resource prun
 ### `mvm logs`
 
 View VM logs.
+Accepts VM selectors (see [mvm vm](#mvm-vm) for resolution order).
 
 ```
-mvm logs IDENTIFIER [flags]
+mvm logs VM_SELECTOR [flags]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `IDENTIFIER` | VM name, ID, IP, or MAC address (positional, required) |
+| `VM_SELECTOR` | VM name, ID, IP, or MAC address (positional, required) |
 | `--os` | Show Firecracker OS log instead of boot log |
 | `--lines, -n N` | Number of log lines to show |
 | `--follow, -f` | Follow log output in real-time |
@@ -382,14 +478,15 @@ mvm logs IDENTIFIER [flags]
 ### `mvm exec`
 
 Execute a command inside a VM via the vsock guest agent. If no command is provided, starts an interactive shell session.
+Accepts VM selectors (see [mvm vm](#mvm-vm) for resolution order).
 
 ```
-mvm exec IDENTIFIER [-- <command>...] [flags]
+mvm exec [VM_SELECTOR] [-- <command>...] [flags]
 ```
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `IDENTIFIER` | VM name, ID, MAC, or IP (positional, required) | — |
+| `VM_SELECTOR` | VM name, ID, MAC, or IP (positional, required) | — |
 | (args after `--`) | Command to execute (omit for interactive shell) | — |
 | `--user, -u TEXT` | User to run the command as | `root` |
 | `--timeout, -t N` | Vsock agent connect/probe timeout in seconds | `0` (no timeout) |
@@ -417,14 +514,15 @@ mvm exec my-vm --user ubuntu
 ### `mvm ssh`
 
 Open an SSH session into a VM, or execute a command.
+Accepts VM selectors (see [mvm vm](#mvm-vm) for resolution order).
 
 ```
-mvm ssh IDENTIFIER [flags]
+mvm ssh VM_SELECTOR [flags]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `IDENTIFIER` | VM name, ID prefix, IP, or MAC address (positional, required) |
+| `VM_SELECTOR` | VM name, ID prefix, IP, or MAC address (positional, required) |
 | `--user, -u USER` | SSH user (default: from user config) |
 | `--key PATH` | SSH private key file or directory of keys |
 | `--cmd, -c CMD` | Command to execute |
@@ -466,15 +564,22 @@ mvm cp vm1:/data/file.txt vm2:/data/
 
 Persistent data disk management.
 
+#### Selectors
+
+The volume resolver tries selectors in priority order:
+
+1. **Name** — exact volume name, e.g. `data`, `asset-mirror`
+2. **ID prefix** — unique prefix of the volume SHA ID
+
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm volume create` | `NAME`, `SIZE`, `--format` | Create a new persistent volume |
-| `mvm volume rm` | `[IDENTIFIERS]...`, `-f, --force` | Remove one or more volumes |
+| `mvm volume rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more volumes |
 | `mvm volume ls` | `--json, --long` | List all volumes |
-| `mvm volume inspect` | `IDENTIFIER`, `--json` | Show detailed information about a volume |
-| `mvm volume resize` | `IDENTIFIER`, `SIZE` | Resize a volume |
-| `mvm volume attach` | `VM_ID`, `VOLUME_ID` | Attach a volume to a VM |
-| `mvm volume detach` | `VM_ID`, `VOLUME_ID` | Detach a volume from a VM |
+| `mvm volume inspect` | `SELECTOR`, `--json` | Show detailed information about a volume |
+| `mvm volume resize` | `SELECTOR`, `SIZE` | Resize a volume |
+| `mvm volume attach` | `VM_SELECTOR`, `VOLUME_SELECTOR` | Attach a volume to a VM |
+| `mvm volume detach` | `VM_SELECTOR`, `VOLUME_SELECTOR` | Detach a volume from a VM |
 
 **`volume create` flags:**
 

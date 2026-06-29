@@ -45,21 +45,13 @@ go test ./...
 ./scripts/build.sh release
 cp dist/mvm ~/.local/bin/mvm
 
-# System tests (requires KVM, groups, assets)
-export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
 python3 scripts/run-system-tests.py --all
 ```
 
 All five must pass. If system tests fail, investigate before proceeding.
 
-To set up a test environment from scratch:
-
-```bash
-sudo python3 scripts/setup-test-environment.py
-```
-
-This installs system packages, configures KVM, sets up mvmctl, and pre-downloads
-test assets. See `python3 scripts/setup-test-environment.py --help` for options.
+See [RC_QA.md](RC_QA.md) for test environment setup, the orchestrator script
+reference, and tier execution details.
 
 ---
 
@@ -186,14 +178,15 @@ After the GitHub release is published, update the AUR PKGBUILD checksums:
 # Preview changes
 python3 scripts/post-release.py --aur --dry-run
 
-# Update checksums and regenerate .SRCINFO
+# Update checksums, regenerate .SRCINFO, copy to ../mvmctl-bin/
 python3 scripts/post-release.py --aur
 ```
 
-Then push to AUR:
+Then commit and push the AUR repo:
 
 ```bash
-cd packaging
+cd ../mvmctl-bin
+git commit -am 'aur: update to vX.Y.Z'
 git push aur master
 ```
 
@@ -201,13 +194,39 @@ git push aur master
 
 ## Local Package Builds
 
-### Option A: Direct (any Linux)
+### Option A: Self-hosted (recommended — mvmctl + Firecracker VMs)
+
+Uses mvmctl's own Firecracker VMs to build everything in an isolated Ubuntu 24.04
+environment — identical to what CI runs. No host build tools required.
+
+```bash
+# One command: provisions VM, builds binaries, builds all packages, retrieves artifacts
+mvm env apply packaging/builder.yaml
+
+# Output lands in dist/packages/
+ls dist/packages/
+```
+
+The [`packaging/builder.yaml`](packaging/builder.yaml) spec creates a single
+Ubuntu 24.04 Firecracker VM, installs Go 1.26 + `debhelper` + `rpm` + Docker,
+copies the project source, runs `build-packages.sh --build-binaries` inside it,
+then retrieves the artifacts. The Arch `.pkg.tar.zst` is built in a Docker
+`archlinux:latest` container within the VM (same approach as CI).
+
+This is useful for:
+- Testing the exact CI environment locally
+- Building packages without installing build tools on the host
+- Reproducing release artifacts in an isolated VM
+
+### Option B: Direct (any Linux)
+
+Requires build tools installed on the host.
 
 ```bash
 # Full build from source (cross-compiles both arches)
 ./scripts/build-packages.sh --build-binaries --version X.Y.Z
 
-# Or build packages from existing binaries
+# Or build packages from existing binaries (skip Go build)
 ./scripts/build-packages.sh --version X.Y.Z
 
 # Output goes to dist/packages/
@@ -217,31 +236,6 @@ Requirements:
 - **Debian packages**: `sudo apt-get install debhelper build-essential`
 - **RPM packages**: `sudo apt-get install rpm` (Ubuntu) or `sudo dnf install rpm-build` (Fedora)
 - **Arch packages**: build on Arch Linux with `base-devel`, or use the PKGBUILD
-
-### Option B: Self-hosted (mvmctl + Firecracker VMs)
-
-Uses mvmctl's own Firecracker VMs to build everything in an isolated Ubuntu 24.04
-environment — identical to what CI runs:
-
-```bash
-# Build both arch binaries first
-./scripts/build.sh release --arch all
-
-# Provision VM, build all packages, retrieve artifacts
-mvm env apply packaging/builder.yaml
-
-# Output: mvmctl_*.deb, mvmctl-*.rpm, mvmctl-bin-*.pkg.tar.zst
-```
-
-The `packaging/builder.yaml` spec creates a single Ubuntu 24.04 Firecracker VM,
-installs Go 1.26 + `debhelper` + `rpm` + Docker, and runs
-`build-packages.sh --build-binaries` inside it. The Arch `.pkg.tar.zst` is built
-in a Docker `archlinux:latest` container within the VM (same approach as CI).
-
-This is useful for:
-- Testing the exact CI environment locally
-- Building packages without installing build tools on the host
-- Reproducing release artifacts in an isolated VM
 
 ---
 

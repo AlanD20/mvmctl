@@ -56,7 +56,7 @@ utilities (`losetup`, `mount`, `umount`, `blkid`, `resize2fs`, `chroot`).
 **Flow:**
 
 ```
-pkg/api/operation.go: VMCreate()
+pkg/api/vm.go: VMCreate()
   → provisioner.NewBackend(opts)      # Creates LoopMountBackend
     → backend.Resize() / SetHostname() / ...  # Queues operations
     → backend.Run()
@@ -100,23 +100,24 @@ that `e2fsck` cannot repair.
 
 ### 1.2 GuestFS Backend (Opt-in)
 
-The GuestFS backend uses `libguestfs` Go bindings to manipulate the root filesystem
-through a QEMU appliance. It exists for environments where loop-mount is impractical:
-systems without sudo access, or images requiring advanced filesystem features.
+The GuestFS backend uses the `guestfish` CLI tool (from `libguestfs`) as a subprocess
+to manipulate the root filesystem through a QEMU appliance. It exists for environments
+where loop-mount is impractical: systems without sudo access, or images requiring
+advanced filesystem features.
 
 **Flow:**
 
 ```
-pkg/api/operation.go: VMCreate()
+pkg/api/vm.go: VMCreate()
   → provisioner.NewBackend(opts)
     → guestfs.EnsureAppliance(cacheDir)   # Build or verify cached appliance
-    → NewGuestfsBackend(rootfsPath, uid, gid)
-      → libguestfs API → QEMU appliance microVM
+    → NewGuestfsBackend(rootfsPath, rootUID, rootGID, userUID, userGID)
+      → guestfish CLI → QEMU appliance microVM
 ```
 
 The guestfs backend launches a small QEMU microVM that mounts the target filesystem
-and exposes `libguestfs` API methods. Operations are called directly via Go API calls,
-not through a JSON subprocess protocol.
+and exposes `libguestfs` operations. Operations are performed via `guestfish` CLI
+subprocess invocations, not through a JSON subprocess protocol.
 
 **Key differences from loop-mount:**
 - OS detection reads `/etc/os-release` via guestfs `ReadFile()` instead of `chroot`
@@ -128,7 +129,7 @@ not through a JSON subprocess protocol.
 **Appliance lifecycle:**
 - Built once by `guestfs.BuildAppliance()` via `libguestfs-make-fixed-appliance`
 - Cached at `~/.cache/mvmctl/appliance/` (kernel, initrd, root files)
-- `guestfs.KernelDetector.FindBestKernel()` selects a kernel with virtio drivers
+- `guestfs.KernelDetector.FindBestKernel()` or `FindBestKernel()` selects a kernel with virtio drivers
 - Stale state cleanup handles orphaned QEMU processes, lock files, daemon sockets
 - Pruned by `mvm cache prune misc` calling `guestfs.PruneAppliance()`
 

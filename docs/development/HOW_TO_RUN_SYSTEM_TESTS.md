@@ -1,20 +1,14 @@
-# How Agents Run System Tests
+# How to Run System Tests
 
-## Purpose
-
-This is the **execution plan** for running the mvmctl system test suite and
-qualifying a release.
+This guide covers everything needed to run the mvmctl system test suite:
+from a fresh clone to a passing test run. Follow it linearly — each section
+builds on the previous one.
 
 The only workflow is the **orchestrator-based** approach:
-`scripts/run-system-tests.py` creates per-domain VMs from a custom base image,
-runs tests in parallel, and destroys VMs. Documented in detail in
+[`scripts/run-system-tests.py`](../../scripts/run-system-tests.py) creates
+per-domain VMs from a custom base image, runs tests in parallel, and destroys
+VMs. The three-tier architecture is documented in
 [system-test-architecture.md](../system-test-architecture.md).
-
-An AI agent can start from a fresh clone and follow this guide linearly
-without cross-referencing other docs.
-
-**Do NOT deviate** from the commands below without approval. All paths,
-environment variables, and flags are intentional.
 
 ---
 
@@ -59,39 +53,9 @@ kernel is compiled with it, runner VMs support it.
 
 ### Special Case: libguestfs / Supermin
 
-The `test_create_guestfs_backend` test requires guestfish (libguestfs) to work.
-guestfish uses `supermin` to build a small appliance VM. Supermin needs:
-
-1. A kernel in `/boot/` with a parseable version (e.g., `vmlinuz-6.8.0-124-generic`)
-2. Kernel modules in `/lib/modules/<version>/`
-3. The kernel file must be world-readable (supermin runs as the `runner` user, not root)
-
-The runner VMs run a custom kernel (7.0.11) loaded externally by Firecracker —
-there is no kernel package installed and `/boot/` is empty. Supermin cannot build
-its appliance without a kernel.
-
-**Fix:** Install `linux-image-kvm` (a lightweight kernel package for KVM guests)
-and fix permissions:
-
-```bash
-apt-get install -y linux-image-kvm
-chmod 644 /boot/vmlinuz-*
-```
-
-The base image builder (`_build_base_image` in `run-system-tests.py`) installs
-this package. The dpkg trigger error about `initramfs-tools` / `packagekit.service`
-is cosmetic (can't run in a Firecracker VM) — the kernel files are placed correctly
-and guestfish works.
-
-**Verify guestfish works:**
-```bash
-guestfish -a /dev/null run
-```
-Exit code 0 = success.
-
-**Note:** The `guestfish session failed: incorrect number of arguments` bug has been
-fixed — guestfish commands are passed via stdin instead of as CLI positional args.
-This issue is separate from the supermin kernel problem documented above.
+The `guestfish` tool (libguestfs) is not used by system tests in the Go codebase.
+No guestfish-specific tests exist. This section is retained only for reference if
+libguestfs-based features are re-added in the future.
 
 ### 1.1 Host: Hardware
 
@@ -160,8 +124,10 @@ The custom base image (`mvm-test-runner:<mvm-version>`) is built once during
 `--prepare` and contains:
 - The mvm binary at `/usr/local/bin/mvm`
 - System tests at `/tests/system/`
-- Python 3 + pytest
-- qemu-utils
+- Python 3 + pytest + pytest-timeout
+- qemu-utils, fakeroot, nftables, iptables, zstd
+- cloud-image-utils (for `--cloud-init-mode iso` tests)
+- build-essential, bc, bison, flex, libncurses-dev, libssl-dev, libelf-dev, git, curl, dwarves (for `kernel_build` tests)
 
 No manual installation on the host is needed beyond the tools in section 1.4.
 
@@ -180,15 +146,36 @@ test -x dist/mvm && echo "binary: OK ($(dist/mvm --version 2>/dev/null))"
 cp dist/mvm ~/.local/bin/mvm
 ```
 
-**IMPORTANT**: The binary at `~/.local/bin/mvm` is what system tests use for
-sudo operations. The runner script finds `dist/mvm` via auto-detection.
+**IMPORTANT**: The binary at `~/.local/bin/mvm` is the default location the
+orchestrator looks for (via `MVM_BINARY` env var, defaulting to
+`~/.local/bin/mvm`). Set `MVM_BINARY` to point to a different path if needed.
 
 ---
 
 ## 3. Prepare Shared Assets
 
 Before the orchestrator can run tests, shared assets must exist on the host.
-The orchestrator's `--prepare` mode handles this automatically:
+The orchestrator's `--prepare` mode handles this automatically, but you can
+optionally pre-seed the asset mirror to speed up the first run:
+
+### 3.1 (Optional) Pre-Seed the Asset Mirror
+
+```bash
+export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
+mkdir -p "$MVM_ASSET_MIRROR"
+
+# Pull the kernel and assets that the orchestrator will need
+mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs --default
+mvm image pull alpine:3.23
+mvm image pull ubuntu:noble
+mvm kernel pull --type firecracker --version v1.15 --default
+mvm bin pull firecracker --version 1.16.0 --default
+```
+
+These pulls populate the local mirror directory. On subsequent runs, each pull
+reads from the mirror instead of downloading.
+
+### 3.2 Run `--prepare`
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
@@ -203,13 +190,44 @@ Run `--prepare` once after cloning or updating the mvm binary. Re-run when the
 binary version changes or when `tests/system/` content changes (or use `--push`
 at run time instead).
 
-### 3.1 Rebuild
+### 3.3 Rebuild
 
 To force rebuild of the shared volume, base image, and binary:
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
   python3 scripts/run-system-tests.py --rebuild --all
+```
+
+### 3.4 Verification Checklist
+
+Run these to confirm the host is ready for tests:
+
+```bash
+# Host checks
+echo "KVM:   $(test -c /dev/kvm && echo OK || echo MISSING)"
+echo "Nest:  $(cat /sys/module/kvm_intel/parameters/nested 2>/dev/null || echo N/A)"
+echo "mvm:   $(~/.local/bin/mvm --version 2>/dev/null)"
+
+# Asset mirror has content
+ls ~/.cache/mvm-asset-mirror/ | head -10
+
+# Shared volume exists
+mvm volume inspect asset-mirror --json 2>/dev/null \
+  && echo "Volume: OK" \
+  || echo "Volume: MISSING — run --prepare"
+
+# Custom base image exists
+mvm image inspect \
+  mvm-test-runner:$(~/.local/bin/mvm --version 2>/dev/null | awk '{print $2}') \
+  --json 2>/dev/null \
+  && echo "Base image: OK" \
+  || echo "Base image: MISSING — run --prepare"
+
+# Test network exists
+mvm network inspect sys-test-net --json 2>/dev/null \
+  && echo "Network: OK" \
+  || echo "Network: MISSING — run --prepare"
 ```
 
 ---
@@ -279,32 +297,20 @@ python3 scripts/run-system-tests.py cli --push
 python3 scripts/run-system-tests.py --all --workers 2
 ```
 
-### 4.6 Troubleshooting Guestfs / libguestfs
+### 4.6 Orchestrator Flags Reference
 
-If the guestfish probe fails (`guestfish -a /dev/null run`), verify:
-
-```bash
-# 1. Kernel exists in /boot
-ls /boot/vmlinuz-*
-
-# 2. Kernel modules exist
-ls /lib/modules/*/
-
-# 3. Kernel is world-readable
-ls -la /boot/vmlinuz-*  # should be 644 (rw-r--r--)
-
-# 4. Debug supermin
-LIBGUESTFS_DEBUG=1 guestfish -a /dev/null run 2>&1 | tail -20
-
-# 5. Reinstall if missing
-sudo apt-get install -y linux-image-kvm
-sudo chmod 644 /boot/vmlinuz-*
-```
-
-Common errors:
-- `"cannot parse filename"` — kernel filename doesn't match `vmlinuz-<version>` pattern
-- `"no modpath"` — kernel found but modules are missing in `/lib/modules/<version>/`
-- `"Permission denied"` on `/boot/vmlinuz-*` — file is 600 root-only; `chmod 644`
+| Flag | Default | Description |
+|------|---------|-------------|
+| _domains_ (positional) | — | Specific domains to test (e.g., `cli network nested_virt`) |
+| `--all` | `false` | Run all T1 + T2 + T3 domains |
+| `--tier` | — | Comma-separated tier numbers; executed in given order (e.g., `--tier 1,3`) |
+| `--workers` | `4` | Maximum parallel VMs |
+| `--rebuild` | `false` | Build binary + rebuild shared volume + rebuild base image + run prepare |
+| `--volume` | `false` | Rebuild only the shared asset volume (`asset-mirror`) |
+| `--image` | `false` | Build binary + ensure shared volume exists + rebuild the custom base image (`mvm-test-runner:<version>`) |
+| `--prepare` | `false` | Validate provisioning pipeline (ensure shared volume + base image exist, build from scratch if missing, run T1/T2 smoke tests) |
+| `--push` | `false` | Push test files into each VM before running (overrides baked-in tests) |
+| `--skip-volume-check` | `false` | Skip shared volume existence check (assume it exists) |
 
 ---
 
@@ -362,11 +368,7 @@ KVM) is a **release blocker** — fix the environment, not the code.
 | VM creation hangs | Binary not built or missing | Re-run `./scripts/build.sh release` |
 | `bridge already exists` | Stale bridges from previous run | Clean up with `mvm network rm --force` |
 | `Text file busy` on service binary | Stale service processes | `killall -9 mvm-console-relay mvm-nocloud-server mvm-provision` |
-| `guestfish -a /dev/null run` fails | Supermin can't find a kernel | Install `linux-image-kvm` + `chmod 644 /boot/vmlinuz-*` |
-| `guestfish session failed: incorrect number of arguments` | Bug in Go guestfish invocation | Fixed: guestfish commands passed via stdin instead of CLI args (guestfish 1.56.x treats all positional tokens as args to the first command) |
 | `pending migrations detected` | DB schema mismatch after binary update | `rm -f ~/.cache/mvmctl/mvmdb.db && mvm init --non-interactive --skip-host --skip-network` then re-pull resources |
-| `not initialized` after setup | MVM_CACHE_DIR mismatch between init and test run | Always use `MVM_CACHE_DIR=~/.cache/mvmctl` consistently |
-| `Text file busy` pulling binary | Conftest unconditionally pulled v1.15.1 while firecracker processes held the file | Fixed: removed unconditional pull from `_ensure_mvm_db` |
 | All tests skip with "KVM not available" | KVM not accessible | Check `/dev/kvm` permissions, user groups |
 | High skip ratio (>10%) | Missing dependencies | Run the prerequisite check (section 1) |
 
@@ -374,41 +376,12 @@ KVM) is a **release blocker** — fix the environment, not the code.
 
 ## 6. Collect Release Evidence
 
-Before signing off a release, collect and archive evidence:
-
-```bash
-mkdir -p release-evidence/vX.Y.Z
-
-# Build + unit gates
-go build ./... > release-evidence/vX.Y.Z/build.log 2>&1
-go vet ./... > release-evidence/vX.Y.Z/vet.log 2>&1
-go test ./... > release-evidence/vX.Y.Z/test.log 2>&1
-
-# Prepare shared assets (build base image, shared volume)
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  python3 scripts/run-system-tests.py --prepare \
-  > release-evidence/vX.Y.Z/env-prepare.log 2>&1
-
-# System tests (all tiers)
-MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  python3 scripts/run-system-tests.py --all \
-  > release-evidence/vX.Y.Z/system-e2e.log 2>&1
-
-# Binary verification
-~/.local/bin/mvm --version > release-evidence/vX.Y.Z/version.txt 2>&1
-~/.local/bin/mvm --help > release-evidence/vX.Y.Z/help.txt 2>&1
-sha256sum dist/mvm > release-evidence/vX.Y.Z/checksum.sha256
-```
-
-Each `.log` file must show zero failures. Any failure blocks the release.
+See [docs/RC_QA.md](../RC_QA.md) §4 for the evidence collection checklist and archive procedure.
 
 ---
 
 ## 7. Reference
 
-- `docs/system-test-architecture.md` — Three-tier architecture (primary reference)
-- `docs/RC_QA.md` — Release gates and checklist (human-facing)
-- `docs/RELEASE.md` — Full release process (tagging, CI, AUR)
-- `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` — How to write L0/L1/L2 tests
-- `docs/development/SYSTEM_TEST_SETUP.md` — Host preparation and one-time setup
-- `.opencode/agent/qa-engineer.md` — QA agent instructions
+- [docs/system-test-architecture.md](../system-test-architecture.md) — Three-tier architecture (primary reference)
+- [docs/RC_QA.md](../RC_QA.md) — Release gates, evidence collection, regression criteria
+- [docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md](HOW_AGENTS_WRITE_SYSTEM_TESTS.md) — How to write L0/L1/L2 tests

@@ -411,7 +411,7 @@ func newVMRemoveCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm [identifiers...]",
+		Use:               "rm [selectors...]",
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more VMs.",
 		Args:              cobra.MinimumNArgs(1),
@@ -468,7 +468,7 @@ func runVMRemove(vmAPI api.VMAPI, cmd *cobra.Command, identifiers []string, forc
 
 func newVMStartCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
-		Use:               "start [identifiers...]",
+		Use:               "start [selectors...]",
 		Short:             "Start one or more stopped VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
@@ -498,7 +498,7 @@ func newVMStopCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "stop [identifiers...]",
+		Use:               "stop [selectors...]",
 		Short:             "Stop one or more running VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
@@ -531,7 +531,7 @@ func newVMRebootCmd(vmAPI api.VMAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "reboot [identifiers...]",
+		Use:               "reboot [selectors...]",
 		Short:             "Reboot one or more VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
@@ -562,7 +562,7 @@ func newVMRebootCmd(vmAPI api.VMAPI) *cobra.Command {
 
 func newVMPauseCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
-		Use:               "pause [identifiers...]",
+		Use:               "pause [selectors...]",
 		Short:             "Pause one or more running VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
@@ -590,7 +590,7 @@ func newVMPauseCmd(vmAPI api.VMAPI) *cobra.Command {
 
 func newVMResumeCmd(vmAPI api.VMAPI) *cobra.Command {
 	return &cobra.Command{
-		Use:               "resume [identifiers...]",
+		Use:               "resume [selectors...]",
 		Short:             "Resume one or more paused VMs.",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeVMNames,
@@ -620,7 +620,7 @@ func newVMInspectCmd(vmAPI api.VMAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "inspect [id]",
+		Use:               "inspect [selector]",
 		Short:             "Show detailed information about a VM.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeVMNames,

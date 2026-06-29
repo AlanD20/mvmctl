@@ -13,7 +13,7 @@ import (
 
 func NewExecCmd(execAPI api.ExecAPI) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "exec <identifier> [-- <command>...]",
+		Use:   "exec [vm-selector] [-- <command>...]",
 		Short: "Execute a command inside a VM via vsock agent",
 		Long: `Execute a command inside a VM via the vsock guest agent.
 

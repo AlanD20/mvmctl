@@ -17,7 +17,7 @@ func NewConsoleCmd(consoleAPI api.ConsoleAPI) *cobra.Command {
 	var kill bool
 
 	cmd := &cobra.Command{
-		Use:   "console [vm-name]",
+		Use:   "console [vm-selector]",
 		Short: "VM console access",
 		Long: `Attach to a VM console.
 

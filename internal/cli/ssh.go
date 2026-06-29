@@ -52,7 +52,7 @@ func NewSSHCmd(sshAPI api.SSHAPI) *cobra.Command {
 	var timeout int
 
 	cobraCmd := &cobra.Command{
-		Use:   "ssh [vm-name]",
+		Use:   "ssh [vm-selector]",
 		Short: "VM SSH access",
 		Long: `Open an SSH session into a VM.
 

@@ -24,7 +24,7 @@ A release is **blocked** until ALL of the following pass:
 | Compile | `go build ./...` | Zero errors |
 | Vet | `go vet ./...` | Zero warnings |
 | Unit tests | `go test ./...` | All pass |
-| System tests | `pytest tests/system/` (inside runner VM) | All pass, zero skips on required tests |
+| System tests | `python3 scripts/run-system-tests.py --all` | All pass, zero skips on required tests |
 | Version check | `./scripts/build.sh release && ./dist/mvm --version` | Returns correct version (not `0.0.0-dev`) |
 | Smoke test | `./dist/mvm --help` | Shows all commands |
 
@@ -43,102 +43,16 @@ System tests run inside a Firecracker VM with nested KVM enabled. This provides:
 - **Real hardware simulation** — nested KVM exercises the same code paths as bare metal
 - **Unprivileged user** — tests run as a normal user, not root, matching real-world usage
 
-### 2.2 Host Requirements
+### 2.2 Running System Tests
 
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| CPU | x86_64 with VMX/SVM | 8+ cores |
-| RAM | 16 GB | 32 GB |
-| Disk | 40 GB free | 80 GB free |
-| KVM | `/dev/kvm` accessible | Nested virt enabled |
-| Network | Outbound HTTP/HTTPS | Asset mirror pre-seeded |
+See [docs/development/HOW_TO_RUN_SYSTEM_TESTS.md](development/HOW_TO_RUN_SYSTEM_TESTS.md)
+for the full walkthrough: host prerequisites, building the binary, setting up the
+asset mirror, running the orchestrator (`--prepare`, `--all`, `--tier`, `--push`),
+interpreting results, and troubleshooting common failures.
 
-### 2.3 Nested VM Setup
-
-```bash
-# 1. Enable nested virtualization on the host (Intel)
-sudo modprobe -r kvm_intel
-sudo modprobe kvm_intel nested=1
-cat /sys/module/kvm_intel/parameters/nested   # should print Y
-
-# For AMD:
-# sudo modprobe -r kvm_amd
-# sudo modprobe kvm_amd nested=1
-# cat /sys/module/kvm_amd/parameters/nested
-
-# 2. Build the mvm binary
-./scripts/build.sh release
-cp dist/mvm ~/.local/bin/mvm
-
-# 3. Initialize mvmctl on the host
-sudo ~/.local/bin/mvm host init
-
-# 4. Create a network for the test runner VM
-mvm network create testrunner-net --subnet 10.77.0.0/24
-
-# 5. Create the test runner VM with nested virt
-mvm vm create testrunner \
-  --image ubuntu:24.04 \
-  --network testrunner-net \
-  --vcpu 4 \
-  --mem 4096 \
-  --disk-size 20G \
-  --nested-virt
-
-# 6. Wait for SSH
-mvm logs testrunner --follow
-mvm ssh testrunner
-```
-
-### 2.4 Unprivileged User Setup (Inside Guest)
-
-```bash
-# Inside the guest VM:
-
-# Create an unprivileged test user
-sudo useradd -m -s /bin/bash testrunner
-sudo usermod -aG kvm testrunner
-
-# Ensure /dev/kvm is accessible
-sudo chmod 666 /dev/kvm
-
-# Install system packages (as root)
-sudo apt-get update
-sudo apt-get install -y \
-  iproute2 iptables nftables qemu-utils e2fsprogs util-linux \
-  procps kmod openssh-client tar sudo passwd python3 python3-pip
-
-# Install pytest
-pip3 install pytest pytest-timeout
-
-# Copy the pre-built release binary from the host (no Go needed in the guest)
-# From the host:
-mvm cp dist/mvm testrunner:~/.local/bin/mvm
-mvm ssh testrunner --cmd "chmod +x ~/.local/bin/mvm"
-
-# Clone test scripts (only tests/system/ and scripts/ needed)
-# From the host:
-mvm cp ./scripts testrunner:~/mvmctl/scripts
-mvm cp ./tests testrunner:~/mvmctl/tests
-
-# Initialize mvmctl (requires sudo for host init only)
-mvm ssh testrunner --cmd "sudo ~/.local/bin/mvm host init"
-
-# Verify
-mvm ssh testrunner --cmd "mvm host status --json"
-mvm ssh testrunner --cmd "test -c /dev/kvm && echo KVM available"
-```
-
-### 2.5 Asset Mirror (Inside Guest)
-
-Pre-seed the asset mirror to avoid re-downloading on every run:
-
-```bash
-# On the host, copy assets to a shared volume
-# Or set MVM_ASSET_MIRROR to a host-mounted path
-export MVM_ASSET_MIRROR=/mnt/shared/mvm-asset-mirror
-mkdir -p "$MVM_ASSET_MIRROR"
-```
+The orchestrator script flags are documented there. For the architecture overview
+(three tiers, base image, shared volume), see
+[docs/system-test-architecture.md](system-test-architecture.md).
 
 ---
 
@@ -146,21 +60,28 @@ mkdir -p "$MVM_ASSET_MIRROR"
 
 ### 3.1 System Test Execution
 
-System tests run inside a disposable Firecracker VM with nested KVM, providing
+System tests run inside disposable Firecracker VMs with nested KVM, providing
 full isolation. The orchestrator creates one VM per domain, runs tests via
 `mvm exec`, and destroys the VM after.
 
+Tests are organized into three tiers:
+
+- **Tier 1** — Host-level CLI operations (no nested virt needed). Each domain
+  gets a VM from the custom base image with the shared volume attached.
+- **Tier 2** — VM creation and interaction (nested virt required). Same VM
+  model as T1 but with additional asset pre-registration.
+- **Tier 3** — Runs directly on the host. Includes nested virt tests, kernel
+  builds, snapshot operations, and environment validation.
+
+Tiers execute in order (T1 → T2 → T3). A failure in an earlier tier does not
+block later tiers.
+
+See [system-test-architecture.md](system-test-architecture.md) for the full
+architecture overview, file layout, and per-domain classification.
+
+For manual ad-hoc testing inside a runner VM:
+
 ```bash
-# Run the full suite (T1 + T2 + T3) using the orchestrator
-python3 scripts/run-system-tests.py --all
-
-# Run specific domains
-python3 scripts/run-system-tests.py cli network
-
-# Run specific tiers
-python3 scripts/run-system-tests.py --tier 1,2
-
-# Run a single file manually inside an existing runner VM
 mvm exec <runner-vm> --user runner --timeout 600 -- \
   "cd / && MVM_ASSET_MIRROR=/mnt python3 -m pytest \
    /tests/system/network/test_network.py --tb=short -q"

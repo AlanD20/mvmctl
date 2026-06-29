@@ -164,7 +164,7 @@ func newVolumeRemoveCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm [identifiers...]",
+		Use:               "rm [selectors...]",
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more volumes",
 		Args:              cobra.MinimumNArgs(1),
@@ -203,7 +203,7 @@ func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "inspect [identifier]",
+		Use:               "inspect [selector]",
 		Short:             "Show detailed information about a volume",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeVolumeNames,
@@ -231,7 +231,7 @@ func newVolumeInspectCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 
 func newVolumeResizeCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "resize [identifier] [size]",
+		Use:               "resize [selector] [size]",
 		Short:             "Resize a volume",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeVolumeThenSize,
@@ -255,13 +255,13 @@ func newVolumeResizeCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 
 func newVolumeAttachCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	return &cobra.Command{
-		Use:   "attach [vm_identifier] [volume_identifier]",
+		Use:   "attach [vm-selector] [volume-selector]",
 		Short: "Attach a volume to a VM.",
 		Long: `Attach a volume to a running VM.
 
 Arguments:
-  vm_identifier      VM identifier (name, ID prefix, IP, or MAC)
-  volume_identifier  Name or ID of the volume to attach`,
+  vm-selector        VM selector (name, ID prefix, IP, or MAC)
+  volume-selector    Name or ID of the volume to attach`,
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeVMThenVolume,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -284,13 +284,13 @@ Arguments:
 
 func newVolumeDetachCmd(volumeAPI api.VolumeAPI) *cobra.Command {
 	return &cobra.Command{
-		Use:   "detach [vm_identifier] [volume_identifier]",
+		Use:   "detach [vm-selector] [volume-selector]",
 		Short: "Detach a volume from a VM.",
 		Long: `Detach a volume from a running VM.
 
 Arguments:
-  vm_identifier      VM identifier (name, ID prefix, IP, or MAC)
-  volume_identifier  Name or ID of the volume to detach`,
+  vm-selector        VM selector (name, ID prefix, IP, or MAC)
+  volume-selector    Name or ID of the volume to detach`,
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeVMThenVolume,
 		RunE: func(cmd *cobra.Command, args []string) error {

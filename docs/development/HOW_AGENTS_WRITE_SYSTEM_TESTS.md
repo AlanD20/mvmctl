@@ -413,9 +413,9 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `logs <vm>` / `--os` / `--lines` / `--follow` | **L2** | Real Firecracker output |
 | `logs` by IP | **L2** | Real IP resolution |
 |---|---|---|
-| `cp` host↔VM (file, dir, multi-source) | **L2** | Real SSH + tar pipe |
-| `cp` VM→host (file, dir) | **L2** | Real SSH + tar pipe |
-| `cp` VM→VM | **L2** | Real SSH + tar pipe |
+| `cp` host↔VM (file, dir, multi-source) | **L2** | Real vsock binary frame protocol |
+| `cp` VM→host (file, dir) | **L2** | Real vsock binary frame protocol |
+| `cp` VM→VM | **L2** | Real vsock binary frame protocol (two vsock transfers) |
 | `cp` nonexistent source | **L2** | Real error handling |
 | `cp --force` / without `--force` | **L2** | Real overwrite behavior |
 |---|---|---|
@@ -518,9 +518,16 @@ network-dependent skips:
 
 - Alpine 3.23 image (for fast VM creation)
 - Ubuntu 24.04 image (for nested virt tests)
+- Ubuntu minimal 24.04 image (minimal base for builder VM)
 - Firecracker binary 1.16.0 (for hotplug tests)
 - Firecracker kernel v1.15 (default)
-- Official kernel 7.0.11 with `kvm,nftables,tuntap,btrfs` features (pre-built, cached in asset mirror)
+
+The official kernel 7.0.11 is **not pre-baked** into the base image — it is
+pulled on demand by the orchestrator (or pre-seeded in the host asset mirror)
+via `mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs`.
+The shared asset volume contains the asset mirror contents, which includes
+pre-downloaded kernels, images, and binaries if the host mirror was populated
+before `--prepare`.
 
 ---
 

@@ -73,11 +73,15 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 1. Create builder VM from ubuntu-minimal:noble
 2. mvm cp mvm-binary → /usr/local/bin/mvm
 3. mvm cp tests/system/ → /tests/
-4. apt-get install python3-pytest qemu-utils fakeroot
-5. apt-get clean
-6. mvm vm stop (graceful stop)
-7. mvm image import mvm-test-runner:<version> <builder-vm> --default
-8. Destroy builder VM
+4. apt-get install python3-pytest qemu-utils fakeroot nftables iptables zstd htop build-essential bc bison flex libncurses-dev libssl-dev libelf-dev git curl dwarves cloud-image-utils
+5. pip3 install pytest-timeout
+6. Add runner to mvm, kvm groups
+7. chown -R runner:runner /tests
+8. Mount shared volume, mvm init, pull assets (images, kernels, binaries) from mirror
+9. apt-get clean
+10. mvm vm stop (graceful stop)
+11. mvm image import mvm-test-runner:<version> <builder-vm> --default --skip-optimization
+12. Destroy builder VM
 ```
 
 ### Contents
@@ -86,9 +90,12 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 |------|-------------------|---------|
 | mvm binary | `/usr/local/bin/mvm` | The exact version being tested |
 | System tests | `/tests/system/<domain>/` | All `tests/system/` files |
-| python3-pytest | System package | Test runner |
+| python3-pytest, pytest-timeout (pip) | Test runners | Test runner and timeout plugin |
 | qemu-utils | System package | Volume/disk operations in T2 tests |
 | fakeroot | System package | Preserving tarball ownership when pulling tar-rootfs images inside the runner VM |
+| nftables, iptables | System packages | Firewall management in the runner VM |
+| build-essential, bc, bison, flex, libncurses-dev, libssl-dev, libelf-dev, git, curl, dwarves | System packages | Kernel compilation in Tier 3 `kernel_build` tests |
+| cloud-image-utils | System package | Cloud-init ISO generation for `--cloud-init-mode iso` tests |
 
 ### Caching
 
@@ -105,8 +112,8 @@ All T1/T2 runner VMs are Firecracker microVMs created with **Firecracker v1.16**
 | Tier | Runs inside VM | Shared volume | Nested KVM | Runner VM kernel | What's tested |
 |------|---------------|---------------|------------|-----------------|---------------|
 | **1** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Not needed | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | Host-level CLI: help, config, init, cache, keys, invariants, bin, images, kernel, network, host, run |
-| **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, ssh, console, logs, full_journeys, nftables |
-| **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | vm_fresh_env, vm_nested_isolated, vm_snapshot_load, volume_hotplug, cp, kernel_build, env |
+| **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, ssh, console, exec, logs, full_journeys, nftables |
+| **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | vm_fresh_env, vm_nested_isolated, vm_snapshot_load, vm_snapshot_rootfs, volume_hotplug, cp, kernel_build, env |
 
 ---
 
@@ -117,12 +124,13 @@ All T1/T2 runner VMs are Firecracker microVMs created with **Firecracker v1.16**
 The host asset mirror (`~/.cache/mvm-asset-mirror/`) is the source of truth. A shareable read-only volume is created once and reused across all test runs.
 
 ```bash
-mvm volume create asset-mirror 6G --shareable --read-only --format raw
+mvm volume create asset-mirror 6G --shareable --read-only --writeback --format raw
 # Populated via sudo loop mount:
-sudo mkfs.ext4 <volume_path>
+sudo mkfs.ext4 -F <volume_path>
 sudo mount -o loop <volume_path> /mnt/.mvm-asset-populate
 sudo cp -r ~/.cache/mvm-asset-mirror/* /mnt/.mvm-asset-populate/
-sudo umount
+sudo chmod -R a+rX /mnt/.mvm-asset-populate
+sudo umount /mnt/.mvm-asset-populate
 ```
 
 ### Volume Semantics
@@ -156,8 +164,8 @@ Because `asset-mirror` has `IsShareable=true` and `IsReadOnly=true`:
 - `invariants/test_invariants.py`
 - `bin/test_bin.py`
 - `images/test_images.py`
-- `kernel/test_kernel.py`, `kernel/test_kernel_import.py`
-- `network/test_network.py`, `network/test_nftables.py`
+- `kernel/test_kernel_import.py`
+- `network/test_network.py`
 - `host/test_host.py`
 - `run/test_run.py`
 
@@ -203,6 +211,7 @@ mvm exec <vm-name> --user runner --timeout 600 -- \
 - `vm/test_vm_lifecycle.py`
 - `ssh/test_ssh.py`
 - `console/test_console.py`
+- `exec/test_exec.py`
 - `logs/test_logs.py`
 - `full_journeys/test_full_journeys.py` (Tier 2)
 - `vm/test_vm_data_persistence.py`
@@ -250,6 +259,7 @@ mvm exec <vm-name> --user runner --timeout 120 -- \
 - `vm/test_vm_fresh_env.py` — full fresh-environment pipeline + nested virt negative case (consolidated from former `test_vm_nested_virt.py`).
 - `vm/test_vm_nested_isolated.py` — triple-nested VM tests.
 - `vm/test_vm_snapshot_load.py` — snapshot lifecycle.
+- `vm/test_vm_snapshot_rootfs_independence.py` — restored VM rootfs is independent of source VM.
 - `vm/test_vm_snapshot_rootfs_independence.py` — restored VM rootfs is independent of source VM.
 - `volume/test_volume_hotplug.py` — PCI hotplug (requires Firecracker dev-preview, does not work reliably nested).
 - `kernel/test_kernel.py` — kernel build tests (need full KVM host access).
@@ -360,6 +370,9 @@ python3 scripts/run-system-tests.py --tier 2,1
 4. Print summary: X passed, Y failed, Z total
 ```
 
+See [RC_QA.md](RC_QA.md) for the full flags reference, setup workflow, and
+execution examples used during release qualification.
+
 ---
 
 ## 10. File Layout
@@ -392,6 +405,7 @@ tests/system/
 ├── ssh/test_ssh.py          ← TIER 2
 ├── cp/test_cp.py            ← TIER 3 (vsock agent path rejection nested)
 ├── console/test_console.py  ← TIER 2
+├── exec/test_exec.py        ← TIER 2 (requires nested virt, module-scoped VM)
 ├── logs/test_logs.py        ← TIER 2
 ├── full_journeys/test_full_journeys.py  ← TIER 2
 ├── env/test_env.py          ← TIER 3
@@ -428,6 +442,7 @@ tests/system/
 | vm_lifecycle | 2 | `test_vm_lifecycle.py` | VM create/start/stop/pause |
 | ssh | 2 | `test_ssh.py` | SSH into VMs |
 | console | 2 | `test_console.py` | Console output |
+| exec | 2 | `test_exec.py` | Vsock agent command execution — uses module-scoped VM, needs nested virt |
 | logs | 2 | `test_logs.py` | Log retrieval |
 | full_journeys | 2 | `test_full_journeys.py` | Multi-step scenarios |
 | env | 3 | `test_env.py` | Environment workflow (apply/destroy/diff) — runs host-direct because creating VMs via env spec adds unnecessary nesting |
@@ -438,7 +453,8 @@ tests/system/
 | vm_fresh_env | 3 | `test_vm_fresh_env.py` | Host-only. Includes negative-case test from former `test_vm_nested_virt.py`. |
 | vm_snapshot_load | 3 | `test_vm_snapshot_load.py` | Host-only |
 | vm_snapshot_rootfs_independence | 3 | `test_vm_snapshot_rootfs_independence.py` | Host-only — verifies restored VM rootfs is independent of source and other restored VMs |
-| kernel_build | 3 | `test_kernel.py` | Mixed-tier file: basic ops (Tier 1), pull-advanced-flags class (Tier 2), kernel build (Tier 3 — needs full KVM host access) |
+| nested_virt | 3 | `test_vm_fresh_env.py` | Host-only nested virt negative-case tests (same file as vm_fresh_env) |
+| kernel_build | 3 | `test_kernel.py` | Kernel build tests — needs full KVM host access (Tier 3 only) |
 
 ---
 

@@ -288,4 +288,4 @@ Common causes:
 
 > **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. Use `--version latest` to resolve the most recent version from the upstream directory listing. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
 
-*See also: [ASSETS_CONFIGURATIONS.md](ASSETS_CONFIGURATIONS.md) for the kernel YAML config reference and [Firecracker official documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md).*
+*See also: [RESOURCE_MANAGEMENTS.md](RESOURCE_MANAGEMENTS.md) for the kernel YAML config reference and [Firecracker official documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md).*

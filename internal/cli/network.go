@@ -212,7 +212,7 @@ func newNetworkRemoveCmd(networkAPI api.NetworkAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm [names...]",
+		Use:               "rm [selectors...]",
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more networks by name.",
 		Args:              cobra.ArbitraryArgs,
@@ -243,7 +243,7 @@ func newNetworkInspectCmd(networkAPI api.NetworkAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "inspect [name]",
+		Use:               "inspect [selector]",
 		Short:             "Show detailed information about a network.",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: completeNetworkNames,
@@ -283,7 +283,7 @@ func newNetworkSyncCmd(networkAPI api.NetworkAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "sync [names...]",
+		Use:               "sync [selectors...]",
 		Short:             "Sync iptables rules between database and host.",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeNetworkNames,
@@ -340,7 +340,7 @@ func newNetworkSyncCmd(networkAPI api.NetworkAPI) *cobra.Command {
 
 func newNetworkDefaultCmd(networkAPI api.NetworkAPI) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "default [name]",
+		Use:   "default [selector]",
 		Short: "Set a network as the default for VM creation.",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

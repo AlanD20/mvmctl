@@ -79,8 +79,8 @@ These are the optimizations that can **radically change** the performance profil
 **Bottleneck addressed:** Kernel boot + init system (500-2000ms)
 
 **Feasibility:** Medium
-- ✅ `create_snapshot()` and `load_snapshot()` already exist in `VMController` (`internal/core/vm/controller.go`)
-- ✅ `model.VMState.PAUSED` already exists in the model
+- ✅ `SnapshotCreate()` and `SnapshotRestore()` already exist in `VMController` (`internal/core/vm/controller.go`)
+- ✅ `model.VMStatusPaused` already exists in the model
 - ✅ The Firecracker API `PUT /snapshot/create` and `PUT /snapshot/load` are already implemented
 - ❌ Need: golden VM builder, snapshot storage, per-clone reconfiguration
 - ❌ Need: per-VM uniqueness handling (MAC, IP, hostname, SSH keys)

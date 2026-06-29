@@ -103,15 +103,16 @@ Three new methods on the vsock repository:
 
 Uses `version.Compare()` from `internal/lib/version/compare.go`. Returns a positive int when host > agent, negative when host < agent, zero when equal. Only upgrades when host > agent — downgrades are never attempted.
 
-The version is injected via ldflags (`-X mvmctl/internal/lib/version.BuildVersion=...`). The `VersionString()` method returns `"0.0.0"` as a default when `BuildVersion` is empty. The comparison handles git-style hashes with `.` delimiters.
+The version is injected via ldflags (`-X mvmctl/internal/lib/version.BuildVersion=...`). When `BuildVersion` is empty, the host client code uses `"0.0.0"` as the fallback for version comparison. The comparison handles git-style hashes with `.` delimiters.
 
-**Critical edge case: `BuildVersion` vs `VersionString`.** The version injected
+**Critical edge case: `BuildVersion` vs local fallback.** The version injected
 via ldflags (`-X mvmctl/internal/lib/version.BuildVersion=<version>`) is what
-the host and agent binaries actually carry. `VersionString()` returns `"0.0.0"`
-as a default when `BuildVersion` is empty. The comparison function
-`ParseSemverInts` cannot parse git-style hashes (e.g., `"80bf5256-dirty"`) —
-it returns an empty slice, and `SemverGreater` treats empty slices as older
-than any valid semver. This means the host must always use
+the host and agent binaries actually carry. When `BuildVersion` is empty,
+the host client's `ensureAgent` uses `"0.0.0"` as a local fallback
+(`defaultVersion` in `internal/core/vsock/client.go`). The comparison function
+`version.Compare` handles standard semver strings; for non-standard version
+strings the comparison result defaults to treating the host as newer, which
+triggers an upgrade attempt. This means the host must always use
 `version.BuildVersion` (set via ldflags), not `version.VersionString()`.
 
 ## Failure modes
@@ -146,7 +147,7 @@ If the upgrade shell command fails (binary not found, permission denied, etc.), 
 | `internal/lib/version/compare.go` | `version.Compare()` — semver-style comparison |
 | `internal/service/vsockagent/cmdlistener.go` | Agent-side: handles `"version"` request type, responds with embedded version |
 | `internal/service/vsockagent/agent.go` | Agent's `vsockConn.Close()` uses `SHUT_RDWR` for reliable vsock shutdown |
-| `pkg/api/operation.go` | `newVsockClient()` helper — loads config, checks locks, constructs client with callbacks |
+| `pkg/api/cp.go` | `newVsockClient()` helper — loads config, checks locks, constructs client with callbacks |
 | `pkg/errs/codes.go` | `CodeVsockUpgradeInProgress` — concurrent upgrade rejection error |
 
 ## Agent-side changes
@@ -192,7 +193,7 @@ the upgrade flow.
 
 ## API layer integration
 
-The API layer (`pkg/api/cp.go`, `pkg/api/exec.go`) uses a helper
+The API layer (`pkg/api/cp.go`, `pkg/api/exec.go`, `pkg/api/operation.go`) uses a helper
 `newVsockClient` that:
 
 1. Loads the vsock config from the DB.

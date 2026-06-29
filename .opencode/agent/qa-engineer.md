@@ -60,7 +60,7 @@ Read this before writing or modifying system tests.
 For running system tests and collecting release evidence, follow the
 **linear step-by-step guide** (not this one — it is the authoritative plan):
 
-`docs/development/HOW_AGENTS_RUN_SYSTEM_TESTS.md`
+`docs/development/HOW_TO_RUN_SYSTEM_TESTS.md`
 
 Start there for any QA or release task.
 
@@ -78,7 +78,7 @@ Start there for any QA or release task.
 
 **Prerequisite check:** Before running system tests, verify hardware (KVM,
 RAM, disk), groups (kvm, mvm, disk), and system tools. See `docs/development/
-HOW_AGENTS_RUN_SYSTEM_TESTS.md §1` for the exact commands.
+HOW_TO_RUN_SYSTEM_TESTS.md §1` for the exact commands.
 
 ```bash
 go build ./...

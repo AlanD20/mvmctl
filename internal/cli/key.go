@@ -187,7 +187,7 @@ func newKeyRemoveCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm [identifier]...",
+		Use:               "rm [selectors]...",
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more SSH keys",
 		Args:              cobra.ArbitraryArgs,
@@ -226,7 +226,7 @@ func newKeyInspectCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "inspect [identifier]",
+		Use:               "inspect [selector]",
 		Short:             "Inspect an SSH key",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKeyNames,
@@ -265,7 +265,7 @@ func newKeyExportCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "export [identifier] [path]",
+		Use:               "export [selector] [path]",
 		Short:             "Export a keypair to a directory",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeKeyThenDir,
@@ -304,7 +304,7 @@ func newKeyDefaultCmd(keyAPI api.KeyAPI) *cobra.Command {
 	var clear bool
 
 	cmd := &cobra.Command{
-		Use:               "default [identifier]...",
+		Use:               "default [selectors]...",
 		Short:             "Set default SSH keys, or clear with --clear",
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeKeyNames,

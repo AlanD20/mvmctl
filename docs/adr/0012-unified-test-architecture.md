@@ -107,7 +107,7 @@ Keep 22,000 lines with shared DB, pervasive skipping, and per-domain serial exec
 | `docs/system-test-architecture.md` | **Primary implementation reference** — Three-tier orchestration, provisioning flow, fixture scoping, known-limitation patterns, per-file compliance checklist. Supersedes `DRAFT-system-test-architecture.md`. |
 | `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` | L0/L1/L2 definitions, decision tree, quick-reference table, runner VM fixture pattern, migration phases. |
 | `docs/development/HOW_AGENTS_WRITE_UNIT_TESTS.md` | L1 fast pre-filter tests (in-memory SQLite, temp dirs). |
-| `docs/development/HOW_AGENTS_RUN_SYSTEM_TESTS.md` | Execution plan for running system tests. |
+| `docs/development/HOW_TO_RUN_SYSTEM_TESTS.md` | Execution plan for running system tests. |
 | _(no RC_QA.md — this doc section moved into system-test-architecture.md)_ | Release gates: "L2 tests in runner VM" now in system-test-architecture.md. |
 | `STANDARDS.md` §12 | Three-level architecture description. |
 | `tests/system/COVERAGE_MATRIX.md` | Coverage tracking. |

@@ -7,26 +7,19 @@ Common issues and solutions when using `mvm`.
 - [Permission denied: /dev/kvm](#permission-denied-devkvm)
 - [Mixed Firewall Backend](#mixed-firewall-backend)
 - [Firewall rules lost after reboot](#firewall-rules-lost-after-reboot)
-- [Bridge `<prefix>-net` not found / No such device](#bridge-prefix-net-not-found-no-such-device)
-- [Kernel not found](#kernel-not-found)
 - [VM won't boot / SSH times out](#vm-wont-boot-ssh-times-out)
 - [VM won't start / Firecracker exits immediately](#vm-wont-start-firecracker-exits-immediately)
-- [Image not found](#image-not-found)
-- [Firecracker binary not found](#firecracker-binary-not-found)
-- [host init has not been run](#host-init-has-not-been-run)
 - [Undoing host init — host clean vs host reset](#undoing-host-init-host-clean-vs-host-reset)
 - [NoCloud-net server failed to start](#nocloud-net-server-failed-to-start)
 - [VM can't fetch cloud-init data via nocloud-net](#vm-cant-fetch-cloud-init-data-via-nocloud-net)
-- [Cloud-init seems slow](#cloud-init-seems-slow)
 - [Console relay not working](#console-relay-not-working)
-- [Network creation fails with permission denied](#network-creation-fails-with-permission-denied)
 - [IP address exhaustion (no available IPs)](#ip-address-exhaustion-no-available-ips)
 - [Cache corruption or stale state](#cache-corruption-or-stale-state)
 - [Out of disk space for images or VMs](#out-of-disk-space-for-images-or-vms)
 - [libguestfs / mvm cache init hangs forever](#libguestfs-mvm-cache-init-hangs-forever)
-- [Volume not found](#volume-not-found)
 - [Cannot remove volume attached to a VM](#cannot-remove-volume-attached-to-a-vm)
-- [Debug mode](#debug-mode)
+- [VM boots slowly (SSH takes longer than 6-7 seconds)](#vm-boots-slowly-ssh-takes-longer-than-6-7-seconds)
+- [`mvm cp` errors](#mvm-cp-errors)
 
 ---
 
@@ -118,42 +111,18 @@ This restores all NAT, forwarding, and nocloud-net rules to the active firewall 
 
 ---
 
-## Bridge `<prefix>-net` not found / No such device
-
-**Problem:** Network bridge doesn't exist when creating a VM.
-
-**Solution:**
-
-Run `mvm host init` once; the bridge is auto-created with the name `<cli_name>-<network_name>` (default is `mvm-net`).
-
-To see the default bridge name:
-```bash
-mvm network ls
-```
-
----
-
-## Kernel not found
-
-**Problem:** No kernel available for VM creation.
-
-**Solution:**
-```bash
-mvm kernel pull --type firecracker
-```
-
----
-
 ## VM won't boot / SSH times out
 
 **Problem:** VM appears to hang during boot.
 
 **Solution:**
 
-Cloud-init runs on first boot and takes 30–60 seconds. Follow the console log:
+Cloud-init runs on first boot and takes 30–60 seconds regardless of the delivery method. Follow the console log to watch progress:
 ```bash
 mvm logs myvm --follow
 ```
+
+Look for cloud-init status messages like `Cloud-init v. X.X.X running modules...` to confirm it's working.
 
 If it never reaches a `login:` prompt, check the Firecracker process log:
 ```bash
@@ -200,51 +169,6 @@ ls -la ~/.cache/mvmctl/vms/*/firecracker.api.socket
 ```bash
 file $(mvm kernel ls --json | jq -r '.[0].path')
 mvm bin ls
-```
-
----
-
-## Image not found
-
-**Problem:** The image ID you specified isn't available.
-
-**Solution:**
-```bash
-mvm image pull ubuntu:24.04
-mvm image ls   # should appear
-```
-
----
-
-## Firecracker binary not found
-
-**Problem:** No Firecracker binary available.
-
-**Solution:**
-```bash
-mvm bin pull firecracker --version 1.15.0
-mvm bin default <id>
-```
-
----
-
-## host init has not been run
-
-**Problem:** Privilege setup incomplete.
-
-**Solution:**
-
-Run `mvm host init` first to set up the `mvm` group and sudoers configuration.
-
-The `mvm host init` command sets up a sudoers drop-in so privileged operations work without manual `sudo`. After logging out and back in (to activate the `mvm` group membership), you can run all mvm commands directly:
-```bash
-mvm host init
-mvm network create mynet
-```
-
-If commands still fail with permission errors, verify your user is in the `mvm` group:
-```bash
-groups | grep mvm
 ```
 
 ---
@@ -345,21 +269,6 @@ curl -v http://172.27.0.1:<port>/
 
 ---
 
-## Cloud-init seems slow
-
-**Problem:** First boot takes longer than expected.
-
-**Solution:**
-
-This is normal. Cloud-init takes 30-60 seconds on first boot regardless of the delivery method. To monitor progress:
-```bash
-mvm logs myvm --follow
-```
-
-Look for cloud-init status messages like `Cloud-init v. X.X.X running modules...`
-
----
-
 ## Console relay not working
 
 **Problem:** Can't attach to VM console.
@@ -375,24 +284,6 @@ If not running, try restarting it:
 ```bash
 mvm console myvm --kill
 mvm console myvm
-```
-
----
-
-## Network creation fails with permission denied
-
-**Problem:** Can't create networks without sudo.
-
-**Solution:**
-
-Make sure you've run `mvm host init` and are in the `mvm` group:
-```bash
-# Check group membership
-groups | grep mvm
-
-# If not in group, add yourself
-sudo usermod -aG mvm $USER
-# Log out and back in
 ```
 
 ---
@@ -592,21 +483,6 @@ libguestfs-make-fixed-appliance ~/.cache/mvmctl/appliance
 
 ---
 
-## Volume not found
-
-**Problem:** `mvm volume inspect` or `mvm volume resize` returns "Volume not found".
-
-**Solution:**
-
-```bash
-mvm volume ls   # List all volumes to see available names and ID prefixes
-mvm volume inspect <name-or-prefix>   # Use the name or first 6+ chars of the ID
-```
-
-Volume lookup accepts full names or short ID prefixes (minimum 6 characters). If the prefix is ambiguous (matches multiple volumes), the command will report an error.
-
----
-
 ## Cannot remove volume attached to a VM
 
 **Problem:** `mvm volume rm` fails because the volume is attached to a running VM.
@@ -671,17 +547,22 @@ mvm ssh my-vm --cmd "rm /root/myfile.txt"
 **Symptom:** Host → VM copy fails when the destination path is not a directory.
 
 **Solution:**
-Ensure the destination ends with `/` for host → VM copies:
+
+For single-source copies, the destination is treated as a directory if it ends with `/` or if the remote path already exists as a directory. For multiple sources, the destination must end with `/`:
 ```bash
-# ✅ Correct — destination ends with /
+# Single source — directory mode (preserves source filename, trailing / optional)
 mvm cp ./myfile.txt my-vm:/root/
 
-# ❌ Wrong
-mvm cp ./myfile.txt my-vm:/root/myfile.txt
+# Single source — file mode (writes to exact path, no trailing /)
+mvm cp ./myfile.txt my-vm:/root/custom-name.txt
+
+# Multiple sources — destination must end with /
+mvm cp ./a.txt ./b.txt my-vm:/dst/
 ```
 
-> The vsock binary frame protocol used by `mvm cp` writes into a directory and cannot rename
-> the output file. Always use a directory destination (ending with `/`) for host → VM copies.
+> For multi-source copies the destination **must** end with `/` — this is enforced
+> on the host side. For single-source copies, the guest agent stats the destination
+> and switches to directory mode if the path exists as a directory or ends with `/`.
 
 ### CPError: VM not found or no vsock
 
@@ -691,25 +572,6 @@ mvm cp ./myfile.txt my-vm:/root/myfile.txt
 - Verify the VM name is correct: `mvm vm ls`
 - Check the VM is running and has vsock enabled: `mvm vm inspect <name>`
 - The VM must be in RUNNING state with a valid vsock configuration for file copy to work
-
----
-
-## Debug mode
-
-For more detailed error output, use the built-in CLI flags or the environment variable:
-
-```bash
-# Use the --debug flag (sets log level to DEBUG)
-mvm --debug vm create myvm --image ubuntu:24.04
-
-# Use the --verbose flag (sets log level to INFO)
-mvm --verbose vm create myvm --image ubuntu:24.04
-
-# Use the log level environment variable
-MVM_LOG_LEVEL=DEBUG mvm vm create myvm --image ubuntu:24.04
-```
-
-The `--debug` flag has highest priority, followed by `--verbose`, then `MVM_LOG_LEVEL`. All commands support the `--debug` and `--verbose` flags.
 
 ---
 

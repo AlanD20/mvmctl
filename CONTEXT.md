@@ -55,8 +55,10 @@ Domains are strictly isolated from each other. A domain in `internal/core/vm/` c
 What unifies the domains is the shared model layer at `internal/lib/model/`. Every domain imports its types — concrete structs with `db:"column"` and `json:"field"` tags for SQL and JSON serialization — from this single package. No domain defines its own model types. The model package contains 21 files covering VM instances, networks, images, kernels, binaries, volumes, SSH keys, leases, firewall rules, console info, Firecracker config, cloud-init modes, provisioner types, relation specs, VM status, operation status, and workflow state.
 
 Not every domain follows the same internal structure. The pattern varies by complexity:
-- **Controller/Service/Repository/Resolver**: vm, network, image, kernel, key, volume, host
-- **Controller + Repository**: snapshot (resolver included)
+- **Controller/Service/Repository/Resolver**: vm, network, kernel, key, volume
+- **Provisioner/Service/Repository/Resolver**: image
+- **Controller/Service/Repository**: host
+- **Repository + Resolver**: snapshot
 - **Controller only**: console
 - **Service only**: cache, ssh
 - **Service + Repository**: config (includes constraints registry)
@@ -208,7 +210,7 @@ Architecture rules are enforced by the Go compiler (circular import errors preve
 - Core domains NEVER import other core/* packages -- enforced by Go compiler.
 - CLI imports from `pkg/api/`, `pkg/api/inputs`, `pkg/api/results`, `pkg/errs`, `internal/cli/common/`, `internal/infra/`, `internal/lib/`, `internal/service/` -- enforced by code review.
 - API imports `internal/core/*` + `internal/enricher/` + `internal/infra/` + `internal/infra/event` + `internal/lib/*` + `internal/assets` + `internal/service/*` + `pkg/errs` + `pkg/api/inputs` + `pkg/api/results`.
-- `internal/infra/` and `internal/lib/` are LEAVES -- import NOTHING from core, api, cli, or service.
+- `internal/infra/` and `internal/lib/` are LEAVES -- import NOTHING from core, api, or cli. Exception: `internal/lib/provisioner/loopmount/backend.go` imports `internal/service/loopmount` for wire-protocol types used to spawn the loopmount provisioner subprocess.
 - `internal/service/` MAY import from `internal/infra/` / `internal/lib/` but NOT from `pkg/api/` or `internal/cli/`.
 
 ### Public API boundary
@@ -415,7 +417,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 | `internal/lib/archive/archive.go` (xz decompression) | Uses `exec.CommandContext` for `xz -d --stdout` pipe-based decompression |
 | `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of the subprocess abstraction layer (`DefaultRunner`, `RunInteractive`, `SpawnService`). These use raw `os/exec` because they ARE the abstraction boundary |
 
-**Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check that happens to use the `os/exec` package. These files are not listed as exceptions above and do not violate the subprocess rule. Key locations: `internal/core/host/detector.go`, `internal/core/host/probe.go`, `internal/core/network/service.go`, `internal/core/config/utils.go`, and others in `internal/lib/`, `internal/core/`, `internal/service/`.
+**Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check that happens to use the `os/exec` package. These files are not listed as exceptions above and do not violate the subprocess rule. Key locations: `internal/core/host/detector.go`, `internal/core/host/probe.go`, `internal/core/host/utils.go`, `internal/core/ssh/service.go`, `internal/core/key/utils.go`, `internal/core/image/service.go`, and others in `internal/lib/`, `internal/core/`, `internal/service/`.
 
 Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The services themselves (console relay, nocloudnet server, loopmount entry point) do NOT use `os/exec` except for the provisioning engine noted above.
 
@@ -448,9 +450,9 @@ JSON-serialized DB fields use `db.StringSlice` (for `[]string`) or custom `Scan`
 |---|---|---|
 | **CLI** | `pkg/api`, `pkg/api/inputs`, `pkg/api/results`, `pkg/errs`, `internal/cli/common`, `internal/infra`, `internal/lib/*`, `internal/service/*` (for `mvm run <service>` wiring) | `import "mvmctl/pkg/api"` |
 | **API** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/infra/event`, `internal/lib/*`, `internal/assets`, `pkg/errs`, `pkg/api/inputs`, `pkg/api/results` | `import "mvmctl/internal/core/vm"` |
-| **API inputs** | `internal/core/{domain}`, `internal/enricher`, `internal/infra`, `internal/lib/*` | `import "mvmctl/internal/lib/model"` |
+| **API inputs** | `internal/core/{domain}`, `internal/infra`, `internal/lib/*` | `import "mvmctl/internal/lib/model"` |
 | **Core domain** | `internal/infra`, `internal/lib/*`, `internal/assets`, `internal/service/*` (for subprocess spawning) — no other core domains | `import "mvmctl/internal/lib/model"` |
-| **Infra/lib** | stdlib, `github.com/jmoiron/sqlx`, `pkg/errs`, `internal/assets`, other `internal/lib/*` sub-packages, external deps | N/A -- leaf nodes that never import core, api, cli, or service |
+| **Infra/lib** | stdlib, `github.com/jmoiron/sqlx`, `pkg/errs`, `internal/assets`, `internal/infra`, other `internal/lib/*` sub-packages, external deps. Exception: `internal/lib/provisioner/loopmount/` imports `internal/service/loopmount` for wire-protocol types. | N/A -- leaf nodes that never import core, api, or cli |
 
 Key conventions:
 - Import aliases like `Xcore` are forbidden. Use bare package names.

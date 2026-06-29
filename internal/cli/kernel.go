@@ -226,7 +226,7 @@ func newKernelRemoveCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	var force bool
 
 	cmd := &cobra.Command{
-		Use:               "rm [identifiers...]",
+		Use:               "rm [selectors...]",
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more kernels",
 		ValidArgsFunction: completeKernelIDs,
@@ -266,7 +266,7 @@ func newKernelInspectCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
-		Use:               "inspect [prefix]",
+		Use:               "inspect [selector]",
 		Short:             "Show detailed information about a kernel",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKernelIDs,
@@ -300,7 +300,7 @@ func newKernelInspectCmd(kernelAPI api.KernelAPI) *cobra.Command {
 
 func newKernelDefaultCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "default [kernel-id]",
+		Use:               "default [selector]",
 		Short:             "Set a kernel as the default",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKernelIDs,
