@@ -177,7 +177,7 @@ The image resolver tries selectors in priority order:
 |---------|-------|-------------|
 | `mvm image ls` | `--json`, `-r, --remote`, `--no-cache`, `--type`, `--long` | List cached images (or available remote images with `--remote`) |
 | `mvm image pull` | `[SELECTOR]`, `--type`, `--version`, `--force, -f`, `--no-cache`, `--default, -d`, `--skip-optimization`, `--disable-detector` | Download an image by selector |
-| `mvm image import` | `NAME`, `PATH`, `--format`, `--root-partition`, `--default, -d`, `--force, -f`, `--skip-optimization`, `--disable-detector` | Import a local image file (qcow2, raw, tar-rootfs) |
+| `mvm image import` | `NAME`, `VM_SELECTOR` or `PATH`, `--format`, `--root-partition`, `--default, -d`, `--force, -f`, `--skip-optimization`, `--disable-detector` | Import a local image file or create a base image from a VM's rootfs |
 | `mvm image default` | `SELECTOR` | Set the default image for VM creation |
 | `mvm image rm` | `[SELECTORS]...`, `--force, -f` | Remove cached images by selector |
 | `mvm image warm` | `[SELECTOR]`, `--all, -a` | Pre-decompress image to ready pool for fast VM creation (warms all images if omitted) |
@@ -216,6 +216,7 @@ mvm image pull ubuntu:24.04
 
 # Import a local qcow2 image
 mvm image import my-image /path/to/image.qcow2
+mvm image import base-img my-vm
 ```
 
 ---
@@ -557,6 +558,10 @@ mvm cp my-vm:/var/log/syslog ./syslog
 # Copy between VMs
 mvm cp vm1:/data/file.txt vm2:/data/
 ```
+
+**Notes:**
+- Symlinks are followed: a symlink to a file or directory is copied as the target's content under the symlink's name.
+- Broken symlinks and special files (sockets, FIFOs, devices) inside a copied directory are skipped with a warning.
 
 ---
 

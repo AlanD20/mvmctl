@@ -14,15 +14,23 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/service/vsockagent"
 )
+
+// mkfifo creates a named pipe (FIFO) at path for testing non-regular file handling.
+func mkfifo(t *testing.T, path string, mode uint32) {
+	t.Helper()
+	require.NoError(t, unix.Mkfifo(path, mode), "mkfifo %s", path)
+}
 
 // --- readFTFrame / writeFTFrame ---
 // Rationale: Binary framing is duplicated between this package and
@@ -311,6 +319,102 @@ func TestExpandSources(t *testing.T) {
 				return []string{f1, sub}, []fileEntry{
 					{absPath: f1, relativePath: "root.txt"},
 					{absPath: f2, relativePath: filepath.Join(subBase, "nested.py")},
+				}
+			},
+		},
+		"broken_symlink_inside_directory": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				base := filepath.Base(dir)
+				a := filepath.Join(dir, "a.txt")
+				require.NoError(t, os.WriteFile(a, []byte("a"), 0644))
+				broken := filepath.Join(dir, "broken")
+				require.NoError(t, os.Symlink("/nonexistent-target-xyz", broken))
+				// Only a.txt should appear; broken symlink is skipped.
+				return []string{dir}, []fileEntry{
+					{absPath: a, relativePath: filepath.Join(base, "a.txt")},
+				}
+			},
+		},
+		"symlink_to_directory": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				base := filepath.Base(dir)
+				// Target subdirectory with a file.
+				target := filepath.Join(dir, "realdir_target")
+				require.NoError(t, os.Mkdir(target, 0755))
+				f := filepath.Join(target, "nested.txt")
+				require.NoError(t, os.WriteFile(f, []byte("nested"), 0644))
+				// Symlink pointing to that directory.
+				link := filepath.Join(dir, "mylink")
+				require.NoError(t, os.Symlink(target, link))
+				// With a per-branch ancestry stack, sibling symlinks are NOT
+				// cycles. Both the physical path AND the symlink path are
+				// followed because they are siblings, not descendants of each
+				// other. The test expects both entries.
+				return []string{dir}, []fileEntry{
+					{
+						absPath:      f,
+						relativePath: filepath.Join(base, "realdir_target/nested.txt"),
+					},
+					{
+						absPath:      filepath.Join(link, "nested.txt"),
+						relativePath: filepath.Join(base, "mylink/nested.txt"),
+					},
+				}
+			},
+		},
+		"symlink_to_already_walked_directory": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				base := filepath.Base(dir)
+				// Create a real directory with a file.
+				realDir := filepath.Join(dir, "realdir")
+				require.NoError(t, os.Mkdir(realDir, 0755))
+				f := filepath.Join(realDir, "file.txt")
+				require.NoError(t, os.WriteFile(f, []byte("content"), 0644))
+				// Create a sibling symlink that also points to realdir.
+				link := filepath.Join(dir, "alink")
+				require.NoError(t, os.Symlink("realdir", link))
+				// With a per-branch stack, the sibling symlink is NOT a
+				// cycle — both realdir/file.txt and alink/file.txt appear.
+				return []string{dir}, []fileEntry{
+					{absPath: f, relativePath: filepath.Join(base, "realdir/file.txt")},
+					{absPath: filepath.Join(link, "file.txt"), relativePath: filepath.Join(base, "alink/file.txt")},
+				}
+			},
+		},
+		"symlink_cycle": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				base := filepath.Base(dir)
+				// Create two directories and a regular file.
+				aDir := filepath.Join(dir, "a")
+				bDir := filepath.Join(dir, "b")
+				require.NoError(t, os.Mkdir(aDir, 0755))
+				require.NoError(t, os.Mkdir(bDir, 0755))
+				reg := filepath.Join(dir, "real.txt")
+				require.NoError(t, os.WriteFile(reg, []byte("real"), 0644))
+				// a/link -> ../b  and  b/link -> ../a  create a cycle.
+				require.NoError(t, os.Symlink("../b", filepath.Join(aDir, "link_to_b")))
+				require.NoError(t, os.Symlink("../a", filepath.Join(bDir, "link_to_a")))
+				// Only the regular file should be returned; the cycle is detected.
+				return []string{dir}, []fileEntry{
+					{absPath: reg, relativePath: filepath.Join(base, "real.txt")},
+				}
+			},
+		},
+		"non_regular_file_inside_directory": {
+			setup: func(t *testing.T) ([]string, []fileEntry) {
+				dir := t.TempDir()
+				base := filepath.Base(dir)
+				reg := filepath.Join(dir, "regular.txt")
+				require.NoError(t, os.WriteFile(reg, []byte("content"), 0644))
+				// Create a FIFO (named pipe) — a non-regular file.
+				fifo := filepath.Join(dir, "myfifo")
+				mkfifo(t, fifo, 0644)
+				return []string{dir}, []fileEntry{
+					{absPath: reg, relativePath: filepath.Join(base, "regular.txt")},
 				}
 			},
 		},
@@ -642,4 +746,89 @@ func TestFTPullDirectoryProtocolExchange(t *testing.T) {
 			t.Fatal("guest did not complete within 5s")
 		}
 	})
+}
+
+// TestFTPushDirSourceAutoSlash verifies that when copying a single directory
+// source to a destination without a trailing slash, the host appends "/" to
+// force directory mode on the agent. Without this, the agent treats the dest
+// as a regular file path and every file tries to create the same path.
+func TestFTPushDirSourceAutoSlash(t *testing.T) {
+	srcDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "a.txt"), []byte("a"), 0644))
+
+	hostConn, guestConn := net.Pipe()
+	defer hostConn.Close()
+	defer guestConn.Close()
+
+	guestDone := make(chan struct{})
+	go func() {
+		defer close(guestDone)
+
+		// Guest reads Push frame and verifies Dest ends with "/".
+		ft, payload := mustReadFTFrame(t, guestConn)
+		require.Equal(t, vsockagent.FtPush, ft)
+		var push vsockagent.FtPushPayload
+		require.NoError(t, json.Unmarshal(payload, &push))
+		assert.True(t, strings.HasSuffix(push.Dest, "/"),
+			"Dest %q should end with / for single directory source", push.Dest)
+
+		// Send Mkdir ack to unblock host.
+		mustWriteFTFrame(t, guestConn, vsockagent.FtMkdir, []byte(`{"path":"/dest/"}`))
+
+		// Reject every Meta to drain the protocol without streaming files.
+		for {
+			ft, _, err := vsockagent.ReadFTFrame(guestConn)
+			if err != nil {
+				return
+			}
+			if ft == vsockagent.FtDone {
+				mustWriteFTFrame(t, guestConn, vsockagent.FtDone, nil)
+				return
+			}
+			if ft == vsockagent.FtMeta {
+				errPayload, _ := json.Marshal(vsockagent.FtErrorPayload{Code: "test", Message: "test"})
+				mustWriteFTFrame(t, guestConn, vsockagent.FtError, errPayload)
+			}
+		}
+	}()
+
+	// Simulate what FTCopyToVM does: single dir source, no trailing slash on dest.
+	srcPaths := []string{srcDir}
+	destPath := "/dest"
+	if len(srcPaths) == 1 && !strings.HasSuffix(destPath, "/") {
+		if fi, stErr := os.Stat(srcPaths[0]); stErr == nil && fi.IsDir() {
+			destPath += "/"
+		}
+	}
+
+	// Send push frame with the (potentially modified) destPath.
+	pushPayload, _ := json.Marshal(vsockagent.FtPushPayload{
+		Paths: srcPaths, Dest: destPath, Overwrite: false,
+	})
+	mustWriteFTFrame(t, hostConn, vsockagent.FtPush, pushPayload)
+	ft, _ := mustReadFTFrame(t, hostConn) // Mkdir ack
+	require.Equal(t, vsockagent.FtMkdir, ft)
+
+	// Expand sources and reject each file so the protocol completes.
+	entries, err := ExpandSources(srcPaths)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		meta, _ := json.Marshal(vsockagent.FtMetaPayload{
+			Path: entry.relativePath, Size: 1, Mode: 0644,
+		})
+		mustWriteFTFrame(t, hostConn, vsockagent.FtMeta, meta)
+		ft, _ := mustReadFTFrame(t, hostConn)
+		require.Equal(t, vsockagent.FtError, ft)
+	}
+
+	// Send Done.
+	mustWriteFTFrame(t, hostConn, vsockagent.FtDone, nil)
+	ft, _ = mustReadFTFrame(t, hostConn) // Done echo
+	require.Equal(t, vsockagent.FtDone, ft)
+
+	select {
+	case <-guestDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
 }

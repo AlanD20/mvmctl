@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"mvmctl/internal/infra/event"
@@ -32,36 +33,154 @@ type fileEntry struct {
 
 // expandSources walks each source path. Regular files are added as-is
 // (relativePath = basename). Directories are walked recursively; each file
-// gets a relativePath rooted at the directory. Symlinks are followed.
+// gets a relativePath rooted at the directory parent.
+//
+// Symlinks are followed: symlinks to regular files copy the target content
+// under the symlink's logical name; symlinks to directories recursively walk
+// the target contents, preserving the symlink's name in the logical path.
+// Broken symlinks and non-regular files (sockets, FIFOs, devices) are skipped
+// with a warning. Symlink cycles are detected via a per-branch stack of
+// resolved physical directory paths.
 func expandSources(srcPaths []string) ([]fileEntry, error) {
 	var entries []fileEntry
 	for _, src := range srcPaths {
-		fi, err := os.Stat(src)
+		fi, err := os.Lstat(src)
 		if err != nil {
 			return nil, fmt.Errorf("source not found: %s", src)
 		}
+
+		// Handle top-level symlink source.
+		if fi.Mode()&os.ModeSymlink != 0 {
+			tfi, err := os.Stat(src)
+			if err != nil {
+				slog.Warn("ft: skipping broken symlink source", "path", src)
+				continue
+			}
+			if tfi.IsDir() {
+				// Symlink to directory: walk contents through symlink path.
+				baseDir := filepath.Dir(src)
+				sub, err := walkWithSymlinks(baseDir, src, nil)
+				if err != nil {
+					return nil, fmt.Errorf("walk source %s: %w", src, err)
+				}
+				entries = append(entries, sub...)
+			} else if tfi.Mode().IsRegular() {
+				entries = append(entries, fileEntry{absPath: src, relativePath: filepath.Base(src)})
+			} else {
+				slog.Warn("ft: skipping non-regular symlink source", "path", src, "mode", tfi.Mode())
+			}
+			continue
+		}
+
 		if !fi.IsDir() {
 			entries = append(entries, fileEntry{absPath: src, relativePath: filepath.Base(src)})
 			continue
 		}
-		// Walk directory
-		base := filepath.Clean(src)
-		err = filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() {
-				return nil // skip directories themselves (parents created by files)
-			}
-			rel, _ := filepath.Rel(base, path)
-			rel = filepath.Join(filepath.Base(base), rel)
-			entries = append(entries, fileEntry{absPath: path, relativePath: rel})
-			return nil
-		})
+
+		// Regular directory — walk with symlink awareness.
+		baseDir := filepath.Dir(src)
+		sub, err := walkWithSymlinks(baseDir, filepath.Clean(src), nil)
 		if err != nil {
 			return nil, fmt.Errorf("walk source %s: %w", src, err)
 		}
+		entries = append(entries, sub...)
 	}
+	return entries, nil
+}
+
+// walkWithSymlinks recursively walks a directory tree, handling symlinks
+// according to the policy described in expandSources.
+//
+// baseDir is the directory containing the root of the walk (used for relative
+// path computation — the same role as filepath.Dir of the original source).
+// currentDir is the directory being walked right now.
+// stack is a per-branch ancestry chain of resolved physical directory paths.
+// A symlink that resolves to a path already in the stack is a cycle and is
+// skipped. Sibling symlinks pointing to the same target are not cycles and
+// are followed normally. Callers pass nil at the root.
+func walkWithSymlinks(baseDir, currentDir string, stack []string) ([]fileEntry, error) {
+	// Resolve to physical path for cycle detection.
+	realPath, err := filepath.EvalSymlinks(currentDir)
+	if err != nil {
+		slog.Warn("ft: cannot resolve directory, skipping", "path", currentDir, "error", err)
+		return nil, nil
+	}
+	if slices.Contains(stack, realPath) {
+		slog.Warn("ft: symlink cycle detected, skipping", "path", currentDir)
+		return nil, nil
+	}
+
+	// Build child stack (copy-on-write to preserve parent's slice).
+	childStack := make([]string, len(stack), len(stack)+1)
+	copy(childStack, stack)
+	childStack = append(childStack, realPath)
+
+	var entries []fileEntry
+
+	f, err := os.Open(currentDir)
+	if err != nil {
+		return nil, fmt.Errorf("open directory %s: %w", currentDir, err)
+	}
+	defer f.Close()
+
+	names, err := f.Readdirnames(-1)
+	if err != nil {
+		return nil, fmt.Errorf("read directory %s: %w", currentDir, err)
+	}
+
+	for _, name := range names {
+		path := filepath.Join(currentDir, name)
+
+		lfi, err := os.Lstat(path)
+		if err != nil {
+			slog.Warn("ft: cannot lstat entry, skipping", "path", path, "error", err)
+			continue
+		}
+
+		// Handle symlinks explicitly.
+		if lfi.Mode()&os.ModeSymlink != 0 {
+			tfi, err := os.Stat(path)
+			if err != nil {
+				slog.Warn("ft: skipping broken symlink", "path", path)
+				continue
+			}
+			if tfi.IsDir() {
+				// Symlink to directory: walk target contents with symlink name as prefix.
+				sub, err := walkWithSymlinks(baseDir, path, childStack)
+				if err != nil {
+					return nil, err
+				}
+				entries = append(entries, sub...)
+			} else if tfi.Mode().IsRegular() {
+				rel, _ := filepath.Rel(baseDir, path)
+				entries = append(entries, fileEntry{absPath: path, relativePath: rel})
+			} else {
+				slog.Warn("ft: skipping non-regular symlink target", "path", path, "mode", tfi.Mode())
+			}
+			continue
+		}
+
+		// Regular directory.
+		if lfi.IsDir() {
+			sub, err := walkWithSymlinks(baseDir, path, childStack)
+			if err != nil {
+				return nil, err
+			}
+			entries = append(entries, sub...)
+			continue
+		}
+
+		// Regular file.
+		if lfi.Mode().IsRegular() {
+			rel, _ := filepath.Rel(baseDir, path)
+			entries = append(entries, fileEntry{absPath: path, relativePath: rel})
+			continue
+		}
+
+		// Non-regular file (socket, FIFO, device, etc.).
+		slog.Warn("ft: skipping non-regular file", "path", path, "mode", lfi.Mode())
+	}
+
 	return entries, nil
 }
 
@@ -117,6 +236,15 @@ func (c *Client) FTCopyToVM(
 		return nil, fmt.Errorf("multiple sources require a directory destination (trailing /)")
 	}
 
+	// Single directory source: auto-detect and force directory mode on dest.
+	// Without this, a command like "mvm cp ./kubernetes node-a:/root/k8s" sends
+	// /root/k8s (no trailing /) and the agent treats it as a regular file path.
+	if len(srcPaths) == 1 && !strings.HasSuffix(destPath, "/") {
+		if fi, stErr := os.Stat(srcPaths[0]); stErr == nil && fi.IsDir() {
+			destPath += "/"
+		}
+	}
+
 	// Send PUSH frame with raw dest path. The agent will stat the path
 	// and decide whether to treat it as directory or file mode.
 	pushPayload, _ := json.Marshal(vsockagent.FtPushPayload{
@@ -158,7 +286,9 @@ func (c *Client) FTCopyToVM(
 
 		fi, err := os.Stat(entry.absPath)
 		if err != nil {
-			return nil, fmt.Errorf("source not found: %s", entry.absPath)
+			slog.Warn("ft: source vanished between walk and read, skipping", "path", entry.absPath, "error", err)
+			fileErrors++
+			continue
 		}
 
 		fileSize := fi.Size()

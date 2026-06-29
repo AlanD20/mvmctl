@@ -609,8 +609,8 @@ flag exists. If the CLI has `--default`, use it — don't show `mvm key create
 test` followed by `mvm key default test`. Two commands equal two chances for
 the user to get it wrong.
 
-Correct: `mvm key create test --default`
-Wrong: `mvm key create test` then `mvm key default test`
+Correct: `mvm key create my-key --default`
+Wrong: `mvm key create my-key` then `mvm key default my-key`
 
 This applies everywhere: `--default`, `--force`, `--json`.
 

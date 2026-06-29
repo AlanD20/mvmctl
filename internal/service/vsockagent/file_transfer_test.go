@@ -1307,8 +1307,8 @@ func TestHandleFTPull_DirectoryNotRecursive(t *testing.T) {
 
 // pullFileFromAgent is the host-side helper for receiving one file during
 // a recursive directory pull. It reads META, sends acceptance, receives
-// data+EOS, and sends OK. Returns the received content.
-func pullFileFromAgent(t *testing.T, host *hostFrameHelper) []byte {
+// data+EOS, and sends OK. Returns the relative path and the received content.
+func pullFileFromAgent(t *testing.T, host *hostFrameHelper) (relPath string, content []byte) {
 	t.Helper()
 
 	// Read META.
@@ -1351,7 +1351,120 @@ fileEOS:
 	})
 	host.writeFrame(FtOK, okPayload)
 
-	return received.Bytes()
+	return meta.Path, received.Bytes()
+}
+
+func TestHandleFTPull_RecursiveWithSymlinks(t *testing.T) {
+	srcDir := t.TempDir()
+
+	// Regular file.
+	fileAReg := filepath.Join(srcDir, "regular.txt")
+	fileAContent := []byte("regular file content\n")
+	err := os.WriteFile(fileAReg, fileAContent, 0644)
+	require.NoError(t, err)
+
+	// Symlink to regular file — target is OUTSIDE srcDir so it's not
+	// collected as a separate entry.
+	outsideDir := t.TempDir()
+	fileBLink := filepath.Join(srcDir, "file_link.txt")
+	fileBContent := []byte("content behind a symlink\n")
+	fileBTarget := filepath.Join(outsideDir, "the_target.txt")
+	require.NoError(t, os.WriteFile(fileBTarget, fileBContent, 0644))
+	require.NoError(t, os.Symlink(fileBTarget, fileBLink))
+
+	// Symlink to directory — target is OUTSIDE srcDir.
+	outsideDir2 := t.TempDir()
+	dirTarget := filepath.Join(outsideDir2, "the_dir_target")
+	require.NoError(t, os.Mkdir(dirTarget, 0755))
+	fileCInside := filepath.Join(dirTarget, "inside.txt")
+	fileCContent := []byte("inside a dir symlink\n")
+	require.NoError(t, os.WriteFile(fileCInside, fileCContent, 0644))
+	dirLink := filepath.Join(srcDir, "dir_link")
+	require.NoError(t, os.Symlink(dirTarget, dirLink))
+
+	// Broken symlink.
+	broken := filepath.Join(srcDir, "broken_link")
+	require.NoError(t, os.Symlink("/nonexistent-target-xyz", broken))
+
+	pullPayload, err := json.Marshal(FtPullPayload{
+		Path:      srcDir,
+		Dest:      "/tmp",
+		Overwrite: false,
+		Recursive: true,
+	})
+	require.NoError(t, err)
+
+	runPullAgent(t, context.Background(), pullPayload, func(host *hostFrameHelper) {
+		// Receive files (order is filesystem-dependent). Collect by path.
+		files := make(map[string][]byte, 3)
+		for i := 0; i < 3; i++ {
+			rel, data := pullFileFromAgent(t, host)
+			files[rel] = data
+		}
+
+		if diff := cmp.Diff(string(fileAContent), string(files["regular.txt"])); diff != "" {
+			t.Errorf("regular.txt content mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(string(fileBContent), string(files["file_link.txt"])); diff != "" {
+			t.Errorf("file_link.txt content mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(string(fileCContent), string(files["dir_link/inside.txt"])); diff != "" {
+			t.Errorf("dir_link/inside.txt content mismatch (-want +got):\n%s", diff)
+		}
+
+		// Read DONE. The broken symlink should be silently skipped.
+		ft, donePayload := host.readFrame()
+		assert.Equal(t, FtDone, ft, "expected FtDone frame")
+		var done FtDonePayload
+		json.Unmarshal(donePayload, &done)
+		assert.Equal(t, 3, done.Files, "should have pulled 3 files (regular, file symlink, dir symlink content)")
+		assert.Equal(t, 0, done.Errors, "no errors expected; broken symlink is skipped silently")
+	})
+}
+
+func TestHandleFTPull_RecursiveSiblingSymlink(t *testing.T) {
+	srcDir := t.TempDir()
+
+	// Real subdirectory with a file.
+	realDir := filepath.Join(srcDir, "sub_real")
+	require.NoError(t, os.Mkdir(realDir, 0755))
+	fileRealContent := []byte("real dir content\n")
+	require.NoError(t, os.WriteFile(filepath.Join(realDir, "inner.txt"), fileRealContent, 0644))
+
+	// Sibling symlink pointing to the same real directory.
+	linkDir := filepath.Join(srcDir, "sub_link")
+	require.NoError(t, os.Symlink("sub_real", linkDir))
+
+	pullPayload, err := json.Marshal(FtPullPayload{
+		Path:      srcDir,
+		Dest:      "/tmp",
+		Overwrite: false,
+		Recursive: true,
+	})
+	require.NoError(t, err)
+
+	runPullAgent(t, context.Background(), pullPayload, func(host *hostFrameHelper) {
+		files := make(map[string][]byte, 2)
+		for i := 0; i < 2; i++ {
+			rel, data := pullFileFromAgent(t, host)
+			files[rel] = data
+		}
+
+		// Both the physical path and the sibling symlink should be streamed.
+		if diff := cmp.Diff(string(fileRealContent), string(files["sub_real/inner.txt"])); diff != "" {
+			t.Errorf("sub_real/inner.txt content mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(string(fileRealContent), string(files["sub_link/inner.txt"])); diff != "" {
+			t.Errorf("sub_link/inner.txt content mismatch (-want +got):\n%s", diff)
+		}
+
+		ft, donePayload := host.readFrame()
+		assert.Equal(t, FtDone, ft, "expected FtDone frame")
+		var done FtDonePayload
+		json.Unmarshal(donePayload, &done)
+		assert.Equal(t, 2, done.Files, "should have pulled 2 files (physical + symlink paths)")
+		assert.Equal(t, 0, done.Errors, "no errors expected")
+	})
 }
 
 func TestHandleFTPull_RecursiveDirectory(t *testing.T) {
@@ -1380,15 +1493,17 @@ func TestHandleFTPull_RecursiveDirectory(t *testing.T) {
 	require.NoError(t, err)
 
 	runPullAgent(t, context.Background(), pullPayload, func(host *hostFrameHelper) {
-		// Receive first file (a.txt).
-		gotA := pullFileFromAgent(t, host)
-		if diff := cmp.Diff(string(fileAContent), string(gotA)); diff != "" {
-			t.Errorf("file a.txt content mismatch (-want +got):\n%s", diff)
+		// Receive files (order is filesystem-dependent).
+		files := make(map[string][]byte, 2)
+		for i := 0; i < 2; i++ {
+			rel, data := pullFileFromAgent(t, host)
+			files[rel] = data
 		}
 
-		// Receive second file (sub/b.txt).
-		gotB := pullFileFromAgent(t, host)
-		if diff := cmp.Diff(string(fileBContent), string(gotB)); diff != "" {
+		if diff := cmp.Diff(string(fileAContent), string(files["a.txt"])); diff != "" {
+			t.Errorf("file a.txt content mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(string(fileBContent), string(files["sub/b.txt"])); diff != "" {
 			t.Errorf("file sub/b.txt content mismatch (-want +got):\n%s", diff)
 		}
 

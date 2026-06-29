@@ -162,7 +162,7 @@ Both sides verify integrity:
 
 ### Host → VM push
 
-1. `expandSources()` resolves source paths — regular files get `filepath.Base` as relative path, directories are walked recursively via `filepath.Walk`
+1. `expandSources()` resolves source paths — regular files get `filepath.Base` as relative path, directories are walked recursively via a symlink-aware walker
 2. Host connects to the VM's vsock agent, sends JSON handshake requesting `"file-transfer"`
 3. Host sends binary frame `FtPush` with paths and destination
 4. Agent determines destination mode via `os.Stat`: trailing `/` or existing directory means directory mode (join with source filename), otherwise file mode
@@ -183,7 +183,7 @@ Both sides verify integrity:
 
 ### Recursive directory pull
 
-When `FtPull` has `Recursive: true` and the source is a directory, the agent calls `filepath.Walk` on the source directory and streams each regular file individually using the same META/DATA/OK protocol. Subdirectories are skipped (their structure is preserved through file paths via `filepath.Rel` on the agent and `os.MkdirAll` on the host).
+When `FtPull` has `Recursive: true` and the source is a directory, the agent walks the source directory using the same symlink-aware logic as the host and streams each regular file individually using the same META/DATA/OK protocol. Subdirectories are descended into, symlinks to directories are followed, broken symlinks and non-regular files are skipped. The directory structure is preserved through file paths via `filepath.Rel` on the agent and `os.MkdirAll` on the host).
 
 ## Buffer size and throughput
 
@@ -250,6 +250,22 @@ The sender sends `FtMeta` with `size:0`, followed immediately by an empty
 No special-case handling needed — the protocol handles it naturally because
 an empty `FtData` means end-of-stream regardless of file size.
 
+### Symlinks and special files
+
+Symlinks are followed, not preserved as symlinks. A symlink to a regular file
+is transferred as the target file's content under the symlink's logical path.
+A symlink to a directory is recursively walked; files inside appear under the
+symlink's path, not the physical target's path.
+
+Broken symlinks and non-regular files (sockets, FIFOs, character/block
+devices) are skipped with a log warning. The transfer continues and reports
+success for the files that were copied.
+
+Symlink cycles are detected by tracking the resolved physical path of every
+directory on the current traversal branch. If a symlink target resolves to a
+directory already on that branch stack, it is skipped. Sibling symlinks that
+point to the same physical directory are not cycles and are followed normally.
+
 ### Overwrite behavior
 
 Controlled by the `overwrite` field in `FtPush`/`FtPull`:
@@ -287,14 +303,20 @@ Source directories are auto-detected and expanded transparently — no `-r`
 flag needed:
 1. `expandSources()` calls `os.Stat` on each source path
 2. Regular files get `filepath.Base` as the relative path
-3. Directories are walked via `filepath.Walk`, each file gets a
-   `relativePath` relative to the source root
+3. Directories are walked recursively using a symlink-aware walker. Each file
+   gets a `relativePath` relative to the source root.
 4. Files in subdirectories carry their full relative path
    (e.g., `sub/dir/file.txt`)
 5. The agent's `os.MkdirAll` creates parent directories as needed
 
 Files inside a directory are streamed one at a time. Empty directories are
 skipped (parent directories are created when files land in them).
+
+Symlinks are followed: a symlink to a regular file is copied as the target's
+content under the symlink's name, and a symlink to a directory is descended
+into, preserving the symlink's logical path. Broken symlinks and non-regular
+files (sockets, FIFOs, devices) are skipped with a warning and the transfer
+continues.
 
 ### Partial transfer recovery
 
