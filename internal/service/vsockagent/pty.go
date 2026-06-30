@@ -1,7 +1,9 @@
 package vsockagent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -71,6 +73,16 @@ func handleTTY(ctx context.Context, conn net.Conn, req *execRequest) {
 	}
 
 	configurePTY(slave)
+
+	// Set initial PTY window size from the host terminal dimensions.
+	if req.Rows > 0 && req.Cols > 0 {
+		ws := &unix.Winsize{Row: uint16(req.Rows), Col: uint16(req.Cols)}
+		if err := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, ws); err != nil {
+			slog.Debug("tty: failed to set initial PTY size", "error", err)
+		} else {
+			slog.Debug("tty: set initial PTY size", "rows", req.Rows, "cols", req.Cols)
+		}
+	}
 
 	if err := cmd.Start(); err != nil {
 		slog.Error("failed to start shell", "error", err)
@@ -165,32 +177,72 @@ func handleTTY(ctx context.Context, conn net.Conn, req *execRequest) {
 	})
 
 	// vsock connection → PTY master: forward host input to shell.
-	// Custom loop instead of io.Copy so we can detect "exit" commands.
+	// Custom loop instead of io.Copy so we can detect "exit" commands
+	// and runtime resize (SIGWINCH) JSON frames from the host.
+	// Host-side resize frames are newline-terminated JSON that may be
+	// interleaved with raw stdin bytes in the same TCP/vsock read.
 	slog.Debug("tty: main goroutine — starting host input relay")
 	relayErr := error(nil)
 	relayBuf := make([]byte, 32*1024)
+	var pending []byte
 	var partialLine []byte
 	for {
 		n, err := conn.Read(relayBuf)
 		if n > 0 {
-			// Scan for \n (line terminators) and check if a complete
-			// line matches exit/logout — enables auto-kill on stuck shells.
-			for i := 0; i < n; i++ {
-				b := relayBuf[i]
-				if b == '\n' {
-					line := strings.TrimSpace(string(partialLine))
-					partialLine = partialLine[:0]
-					if line == "exit" || strings.HasPrefix(line, "exit ") || line == "logout" {
-						slog.Debug("tty: exit command detected, starting 5s kill timer")
-						exitTimer.Reset(5 * time.Second)
-					}
-				} else {
-					partialLine = append(partialLine, b)
+			pending = append(pending, relayBuf[:n]...)
+
+			// Phase 1: scan complete newline-terminated lines from the
+			// front of the buffer and remove any that are resize frames.
+			// This handles the case where the host's relayTTY goroutine
+			// sends a JSON resize frame that arrives in the same read as
+			// (or immediately after) raw stdin bytes.
+			for {
+				nlIdx := bytes.IndexByte(pending, '\n')
+				if nlIdx < 0 {
+					break // no complete line yet
 				}
-			}
-			if _, werr := master.Write(relayBuf[:n]); werr != nil {
-				relayErr = werr
+				line := pending[:nlIdx]
+				if rows, cols, ok := isResizeFrame(line); ok {
+					// Resize frame: apply to both master and slave PTY,
+					// then drop from the buffer entirely.
+					ws := &unix.Winsize{Row: uint16(rows), Col: uint16(cols)}
+					if ioctlErr := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, ws); ioctlErr != nil {
+						slog.Debug("tty: resize: master TIOCSWINSZ failed", "error", ioctlErr)
+					}
+					if ioctlErr := unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, ws); ioctlErr != nil {
+						slog.Debug("tty: resize: slave TIOCSWINSZ failed", "error", ioctlErr)
+					}
+					slog.Debug("tty: PTY resized via line scanner", "rows", rows, "cols", cols)
+					// Remove this line (including \n) from pending.
+					n := copy(pending, pending[nlIdx+1:])
+					pending = pending[:n]
+					continue
+				}
+				// Not a resize: stop scanning. This line (and everything
+				// after) is regular PTY data — write it as-is.
 				break
+			}
+
+			// Phase 2: write remaining bytes to PTY with exit detection.
+			if len(pending) > 0 {
+				for i := 0; i < len(pending); i++ {
+					b := pending[i]
+					if b == '\n' {
+						line := strings.TrimSpace(string(partialLine))
+						partialLine = partialLine[:0]
+						if line == "exit" || strings.HasPrefix(line, "exit ") || line == "logout" {
+							slog.Debug("tty: exit command detected, starting 5s kill timer")
+							exitTimer.Reset(5 * time.Second)
+						}
+					} else {
+						partialLine = append(partialLine, b)
+					}
+				}
+				if _, werr := master.Write(pending); werr != nil {
+					relayErr = werr
+					break
+				}
+				pending = pending[:0]
 			}
 		}
 		if err != nil {
@@ -291,4 +343,26 @@ func grantpt(f *os.File) error {
 // unlockpt unlocks the slave PTY so it can be opened.
 func unlockpt(f *os.File) error {
 	return unix.IoctlSetPointerInt(int(f.Fd()), unix.TIOCSPTLCK, 0)
+}
+
+// isResizeFrame checks whether data is a JSON resize frame from the host.
+// The host sends these on SIGWINCH as a newline-terminated JSON payload
+// embedded in the raw PTY relay stream. They are detected by their leading
+// '{' and the "type":"resize" field.
+func isResizeFrame(data []byte) (rows, cols int, ok bool) {
+	if len(data) == 0 || data[0] != '{' {
+		return 0, 0, false
+	}
+	var frame struct {
+		Type string `json:"type"`
+		Rows int    `json:"rows"`
+		Cols int    `json:"cols"`
+	}
+	if err := json.Unmarshal(data, &frame); err != nil {
+		return 0, 0, false
+	}
+	if frame.Type != "resize" {
+		return 0, 0, false
+	}
+	return frame.Rows, frame.Cols, true
 }

@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -182,15 +184,22 @@ func (c *Client) Shell(ctx context.Context, user string) error {
 	}
 	defer conn.Close()
 
+	rows, cols, _ := term.GetSize(int(os.Stdin.Fd()))
+
 	req := execRequest{
 		ID:    "1",
 		Type:  "exec-tty",
 		Token: c.item.Token,
 		User:  user,
+		Rows:  rows,
+		Cols:  cols,
 		Env: map[string]string{
 			"TERM": os.Getenv("TERM"),
 		},
 	}
+
+	slog.Debug("tty: opening shell with initial window size",
+		"rows", req.Rows, "cols", req.Cols)
 
 	if err := sendFrame(conn, req); err != nil {
 		slog.Error("vsock send exec-tty request failed", "vm_id", c.item.VmID, "error", err)
@@ -257,7 +266,47 @@ func (f *crFilter) Read(p []byte) (int, error) {
 // relayTTY performs bidirectional relay between a vsock connection and the
 // terminal (stdin/stdout). It returns when one direction completes (EOF or
 // error), triggering connection close to unblock the other direction.
+// SIGWINCH signals are forwarded to the guest agent as resize JSON frames
+// on the same connection.
 func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
+	// --- SIGWINCH forwarding ---
+	//
+	// Subscribe to terminal resize events and send JSON resize frames
+	// to the guest agent. The agent receives these in its raw relay loop
+	// and updates the PTY window size via TIOCSWINSZ.
+	winchCh := make(chan os.Signal, 1)
+	signal.Notify(winchCh, syscall.SIGWINCH)
+	defer signal.Stop(winchCh)
+
+	resizeDone := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-winchCh:
+				rows, cols, err := term.GetSize(int(os.Stdin.Fd()))
+				if err != nil {
+					slog.Debug("tty: resize: term.GetSize failed", "error", err)
+					continue
+				}
+				resizeReq := execRequest{
+					Type: "resize",
+					Rows: rows,
+					Cols: cols,
+				}
+				slog.Debug("tty: forwarding resize", "rows", rows, "cols", cols)
+				// sendFrame writes JSON + newline to conn. net.Conn.Write
+				// is safe for concurrent use with other writers on the
+				// same socket.
+				if err := sendFrame(conn, resizeReq); err != nil {
+					slog.Debug("tty: resize send failed (connection may be closed)", "error", err)
+					return
+				}
+			case <-resizeDone:
+				return
+			}
+		}
+	}()
+
 	// --- Bidirectional relay ---
 	//
 	// Two goroutines relay in both directions. The first one to finish
@@ -289,6 +338,10 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 	// Drain the other goroutine's error (typically nil on EOF).
 	secondErr := <-errChan
 	slog.Debug("tty: second relay direction drained", "error", secondErr)
+
+	// Stop the resize goroutine.
+	signal.Stop(winchCh)
+	close(resizeDone)
 
 	return nil
 }

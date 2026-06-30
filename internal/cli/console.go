@@ -30,6 +30,7 @@ Use --state to show the console relay state without attaching.
 Use --kill to stop the console relay.`,
 		// "mvm console" with no args prints help text instead of an error.
 		Args:              cobra.MaximumNArgs(1),
+		SilenceErrors:     true,
 		ValidArgsFunction: completeVMNames,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Simulate no_args_is_help=True: show help when no arguments given.
@@ -57,9 +58,6 @@ Use --kill to stop the console relay.`,
 func showConsoleState(consoleAPI api.ConsoleAPI, ctx context.Context, identifier string) error {
 	state, err := consoleAPI.ConsoleGetState(ctx, identifier)
 	if err != nil {
-		// Print the error and return it (SilenceErrors on the root
-		// command prevents Cobra from double-printing).
-		common.Cli.Error(err.Error())
 		return err
 	}
 
@@ -83,7 +81,6 @@ func showConsoleState(consoleAPI api.ConsoleAPI, ctx context.Context, identifier
 func killConsoleRelay(consoleAPI api.ConsoleAPI, ctx context.Context, identifier string) error {
 	err := consoleAPI.ConsoleKill(ctx, identifier)
 	if err != nil {
-		common.Cli.Error(err.Error())
 		return err
 	}
 
@@ -94,8 +91,6 @@ func killConsoleRelay(consoleAPI api.ConsoleAPI, ctx context.Context, identifier
 func attachToConsole(consoleAPI api.ConsoleAPI, cmd *cobra.Command, identifier string) error {
 	info, err := consoleAPI.ConsoleGetConnectionInfo(cmd.Context(), identifier)
 	if err != nil {
-		// Print the error and return it.
-		common.Cli.Error(err.Error())
 		return err
 	}
 
@@ -105,9 +100,6 @@ func attachToConsole(consoleAPI api.ConsoleAPI, cmd *cobra.Command, identifier s
 	err = consoleAPI.ConsoleAttachConsole(cmd.Context(), info.SocketPath, os.Stdin, os.Stdout)
 	if err == nil {
 		common.Cli.Info("\nDetached from console")
-	} else {
-		// InteractiveAttach returns errors — print and pass them through.
-		common.Cli.Error(err.Error())
 	}
 	return err
 }

@@ -13,6 +13,7 @@ const (
 	requestTypeExecTTY = "exec-tty"
 	requestTypePing    = "ping"
 	requestTypeVersion = "version"
+	requestTypeResize  = "resize"
 )
 
 // execResponse type constants.
@@ -36,13 +37,15 @@ const (
 // execRequest is a JSON frame received from the host agent.
 type execRequest struct {
 	ID      string            `json:"id"`
-	Type    string            `json:"type"`              // "exec", "exec-tty", "ping"
+	Type    string            `json:"type"`              // "exec", "exec-tty", "ping", "resize"
 	Command string            `json:"command,omitempty"` // shell command for exec/exec-tty
 	Token   string            `json:"token,omitempty"`   // auth token
 	Timeout int               `json:"timeout,omitempty"` // timeout in seconds
 	User    string            `json:"user,omitempty"`    // run as this user
 	Env     map[string]string `json:"env,omitempty"`     // extra environment variables
 	NoSync  bool              `json:"no_sync,omitempty"` // skip sync() after command
+	Rows    int               `json:"rows,omitempty"`    // terminal rows (exec-tty / resize)
+	Cols    int               `json:"cols,omitempty"`    // terminal columns
 }
 
 // execResponse is a JSON frame sent back to the host agent.

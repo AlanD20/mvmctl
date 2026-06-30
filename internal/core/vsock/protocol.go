@@ -40,6 +40,8 @@ type execRequest struct {
 	User    string            `json:"user,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	NoSync  bool              `json:"no_sync,omitempty"`
+	Rows    int               `json:"rows,omitempty"`
+	Cols    int               `json:"cols,omitempty"`
 }
 
 // execResponse is the JSON frame received from the guest agent.
