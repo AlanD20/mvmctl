@@ -191,37 +191,23 @@ func handleTTY(ctx context.Context, conn net.Conn, req *execRequest) {
 		if n > 0 {
 			pending = append(pending, relayBuf[:n]...)
 
-			// Phase 1: scan complete newline-terminated lines from the
-			// front of the buffer and remove any that are resize frames.
-			// This handles the case where the host's relayTTY goroutine
-			// sends a JSON resize frame that arrives in the same read as
-			// (or immediately after) raw stdin bytes.
-			for {
-				nlIdx := bytes.IndexByte(pending, '\n')
-				if nlIdx < 0 {
-					break // no complete line yet
+			// Phase 1: extract all resize frames from the buffer, removing
+			// them and retaining the remaining PTY data. This scans the
+			// entire buffer rather than stopping at the first non-resize
+			// line, so frames that arrive mixed with stdin bytes (e.g.
+			// "hello\n{...resize...}\n") are correctly detected.
+			remaining, resizeRows, resizeCols, resized := extractResizeFrames(pending)
+			if resized {
+				ws := &unix.Winsize{Row: uint16(resizeRows), Col: uint16(resizeCols)}
+				if ioctlErr := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, ws); ioctlErr != nil {
+					slog.Debug("tty: resize: master TIOCSWINSZ failed", "error", ioctlErr)
 				}
-				line := pending[:nlIdx]
-				if rows, cols, ok := isResizeFrame(line); ok {
-					// Resize frame: apply to both master and slave PTY,
-					// then drop from the buffer entirely.
-					ws := &unix.Winsize{Row: uint16(rows), Col: uint16(cols)}
-					if ioctlErr := unix.IoctlSetWinsize(int(master.Fd()), unix.TIOCSWINSZ, ws); ioctlErr != nil {
-						slog.Debug("tty: resize: master TIOCSWINSZ failed", "error", ioctlErr)
-					}
-					if ioctlErr := unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, ws); ioctlErr != nil {
-						slog.Debug("tty: resize: slave TIOCSWINSZ failed", "error", ioctlErr)
-					}
-					slog.Debug("tty: PTY resized via line scanner", "rows", rows, "cols", cols)
-					// Remove this line (including \n) from pending.
-					n := copy(pending, pending[nlIdx+1:])
-					pending = pending[:n]
-					continue
+				if ioctlErr := unix.IoctlSetWinsize(int(slave.Fd()), unix.TIOCSWINSZ, ws); ioctlErr != nil {
+					slog.Debug("tty: resize: slave TIOCSWINSZ failed", "error", ioctlErr)
 				}
-				// Not a resize: stop scanning. This line (and everything
-				// after) is regular PTY data — write it as-is.
-				break
+				slog.Debug("tty: PTY resized via line scanner", "rows", resizeRows, "cols", resizeCols)
 			}
+			pending = remaining
 
 			// Phase 2: write remaining bytes to PTY with exit detection.
 			if len(pending) > 0 {
@@ -365,4 +351,39 @@ func isResizeFrame(data []byte) (rows, cols int, ok bool) {
 		return 0, 0, false
 	}
 	return frame.Rows, frame.Cols, true
+}
+
+// extractResizeFrames scans the entire pending buffer for newline-terminated
+// resize frames, removes them from the buffer, and returns the remaining bytes
+// along with the most recent resize dimensions. If no resize frame is found,
+// the buffer is returned unchanged and resized is false.
+//
+// This scans the whole buffer rather than stopping at the first non-resize
+// line, which is critical for handling the case where the host's relayTTY
+// goroutine sends a resize frame mixed with regular stdin bytes (e.g.
+// "hello\n{...resize...}\n"). The original front-only scan missed frames
+// that appeared after non-resize bytes.
+func extractResizeFrames(pending []byte) (remaining []byte, rows, cols int, resized bool) {
+	remaining = make([]byte, 0, len(pending))
+	cursor := 0
+	for cursor < len(pending) {
+		nlIdx := bytes.IndexByte(pending[cursor:], '\n')
+		if nlIdx < 0 {
+			// No more complete lines; keep the trailing partial data.
+			remaining = append(remaining, pending[cursor:]...)
+			break
+		}
+		line := pending[cursor : cursor+nlIdx]
+		if r, c, ok := isResizeFrame(line); ok {
+			// Resize frame — drop it from the output and track dimensions.
+			rows, cols = r, c
+			resized = true
+			cursor += nlIdx + 1 // skip the line + newline
+			continue
+		}
+		// Regular line — keep it including the newline.
+		remaining = append(remaining, pending[cursor:cursor+nlIdx+1]...)
+		cursor += nlIdx + 1
+	}
+	return remaining, rows, cols, resized
 }

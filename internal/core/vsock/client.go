@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,6 +24,10 @@ import (
 	"mvmctl/internal/service/vsockagent"
 	"mvmctl/pkg/errs"
 )
+
+// termGetSize is a mockable variable for term.GetSize.
+// Tests can set this to control terminal size detection.
+var termGetSize = term.GetSize
 
 const (
 	// defaultVersion is the fallback version string used when BuildVersion
@@ -72,6 +77,11 @@ type Client struct {
 
 	// Internal: bypasses version probe (used by upgradeAgent to avoid circular calls).
 	skipVersionCheck bool
+
+	// dialFn is the function used to establish a vsock connection.
+	// If nil, dialAndHandshake is used. Tests can set this to return
+	// mock connections without booting a real VM.
+	dialFn func(ctx context.Context, udsPath string, port int, attemptNum int) (net.Conn, error)
 
 	// OnUpgradeStarted is called before the upgrade begins.
 	// The callback should set the DB upgrade lock and log the event.
@@ -184,6 +194,21 @@ func (c *Client) Exec(
 	}
 }
 
+// getTerminalSize tries to obtain the terminal size from stdin, stdout,
+// and stderr in order, returning the first successful result.
+// Returns ok=false if no terminal size could be determined (all three fds
+// are non-terminal or unavailable).
+func getTerminalSize() (rows, cols int, ok bool) {
+	for _, fd := range []int{int(os.Stdin.Fd()), int(os.Stdout.Fd()), int(os.Stderr.Fd())} {
+		w, h, err := termGetSize(fd)
+		if err == nil && w > 0 && h > 0 {
+			// term.GetSize returns (width, height) = (cols, rows).
+			return h, w, true
+		}
+	}
+	return 0, 0, false
+}
+
 // Shell opens an interactive PTY shell session inside the VM.
 // It sets the local terminal to raw mode and performs bidirectional
 // relay: local stdin → vsock, vsock → local stdout.
@@ -197,7 +222,12 @@ func (c *Client) Shell(ctx context.Context, user string) error {
 	}
 	defer conn.Close()
 
-	rows, cols, _ := term.GetSize(int(os.Stdin.Fd()))
+	rows, cols, ok := getTerminalSize()
+	if !ok {
+		// If no terminal size is available (all fds are non-TTY), use
+		// sensible defaults so the shell has a usable window size.
+		rows, cols = 24, 80
+	}
 
 	req := execRequest{
 		ID:    "1",
@@ -230,8 +260,26 @@ func (c *Client) Shell(ctx context.Context, user string) error {
 		return errs.New(errs.CodeVsockExecFailed,
 			fmt.Sprintf("agent error: %s", resp.Error))
 	}
-	slog.Debug("tty: TTY ack received, starting relay")
-	// agent sent TTY ack — proceed to relay
+	slog.Debug("tty: TTY ack received, sending initial resize frame")
+
+	// Send an initial resize frame after the TTY ack to guarantee the PTY
+	// window size is applied. The exec-tty request carries the dimensions,
+	// but some agent versions may not honour the initial request — this
+	// explicit resize frame is processed by the agent's frame scanner
+	// (extractResizeFrames/TIOCSWINSZ) which always applies the size.
+	if rows > 0 && cols > 0 {
+		resizeReq := execRequest{
+			Type: "resize",
+			Rows: rows,
+			Cols: cols,
+		}
+		slog.Debug("tty: sending initial resize frame",
+			"rows", rows, "cols", cols)
+		if err := sendFrame(conn, resizeReq); err != nil {
+			slog.Error("tty: failed to send initial resize frame", "error", err)
+			return errs.WrapMsg(errs.CodeVsockExecFailed, "failed to send initial resize frame", err)
+		}
+	}
 
 	// Set terminal to raw mode
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -276,6 +324,29 @@ func (f *crFilter) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// lockedWriteConn wraps a net.Conn with a sync.Mutex that callers can
+// acquire explicitly to make a sequence of writes atomic. The Write method
+// does NOT lock — use lockedWriter (for individual Write atomicity) or
+// lock the mutex manually around a multi-write sequence (e.g. sendFrame).
+type lockedWriteConn struct {
+	net.Conn
+	mu sync.Mutex
+}
+
+// lockedWriter is an io.Writer that serialises each Write call through the
+// parent lockedWriteConn's mutex. This prevents interleaving of bytes from
+// concurrent writers (e.g. stdin data and resize frames) at the application
+// framing level.
+type lockedWriter struct {
+	lc *lockedWriteConn
+}
+
+func (w lockedWriter) Write(b []byte) (int, error) {
+	w.lc.mu.Lock()
+	defer w.lc.mu.Unlock()
+	return w.lc.Conn.Write(b)
+}
+
 // relayTTY performs bidirectional relay between a vsock connection and the
 // terminal (stdin/stdout). It returns when one direction completes (EOF or
 // error), triggering connection close to unblock the other direction.
@@ -287,6 +358,10 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 	// Subscribe to terminal resize events and send JSON resize frames
 	// to the guest agent. The agent receives these in its raw relay loop
 	// and updates the PTY window size via TIOCSWINSZ.
+	// Wrap conn in a locked writer so stdin and resize frames cannot
+	// interleave at the application framing level.
+	lw := &lockedWriteConn{Conn: conn}
+
 	winchCh := make(chan os.Signal, 1)
 	signal.Notify(winchCh, syscall.SIGWINCH)
 	defer signal.Stop(winchCh)
@@ -296,9 +371,9 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 		for {
 			select {
 			case <-winchCh:
-				rows, cols, err := term.GetSize(int(os.Stdin.Fd()))
-				if err != nil {
-					slog.Debug("tty: resize: term.GetSize failed", "error", err)
+				rows, cols, ok := getTerminalSize()
+				if !ok {
+					slog.Debug("tty: resize: getTerminalSize failed, skipping resize")
 					continue
 				}
 				resizeReq := execRequest{
@@ -307,10 +382,10 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 					Cols: cols,
 				}
 				slog.Debug("tty: forwarding resize", "rows", rows, "cols", cols)
-				// sendFrame writes JSON + newline to conn. net.Conn.Write
-				// is safe for concurrent use with other writers on the
-				// same socket.
-				if err := sendFrame(conn, resizeReq); err != nil {
+				lw.mu.Lock()
+				err := sendFrame(lw, resizeReq)
+				lw.mu.Unlock()
+				if err != nil {
 					slog.Debug("tty: resize send failed (connection may be closed)", "error", err)
 					return
 				}
@@ -327,9 +402,10 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 	errChan := make(chan error, 2)
 
 	// stdin → vsock (with \r → \n conversion)
+	// Writes go through lockedWriter to prevent interleaving with resize frames.
 	go func() {
 		slog.Debug("tty: relay goroutine (stdin→conn) starting")
-		_, err := io.Copy(conn, &crFilter{rd: stdin})
+		_, err := io.Copy(lockedWriter{lc: lw}, &crFilter{rd: stdin})
 		slog.Debug("tty: stdin→conn relay ended", "error", err)
 		errChan <- err
 	}()
@@ -415,7 +491,11 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 
 		// Per-attempt timing: wrap dialAndHandshake with vsock_dial
 		dialStart := time.Now()
-		conn, err := dialAndHandshake(ctx, c.item.UDSPath, c.item.Port, attempts)
+		dialFn := c.dialFn
+		if dialFn == nil {
+			dialFn = dialAndHandshake
+		}
+		conn, err := dialFn(ctx, c.item.UDSPath, c.item.Port, attempts)
 		dialElapsed := float64(time.Since(dialStart).Microseconds()) / 1000.0
 
 		if err == nil {
