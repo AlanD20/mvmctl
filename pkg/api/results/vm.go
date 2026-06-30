@@ -1,6 +1,10 @@
 package results
 
-import "mvmctl/internal/lib/model"
+import (
+	"time"
+
+	"mvmctl/internal/lib/model"
+)
 
 // VMVolume is a volume entry in the VM inspect response.
 type VMVolume struct {
@@ -69,6 +73,18 @@ type VMConsoleInfo struct {
 	RelaySocketPath *string `json:"relay_socket_path"`
 }
 
+// VMVsockInfo groups vsock agent info in an inspect response.
+// Token is intentionally excluded to avoid leaking the auth secret.
+type VMVsockInfo struct {
+	ID               string     `json:"id"`
+	GuestCID         int        `json:"guest_cid"`
+	UDSPath          string     `json:"uds_path"`
+	Port             int        `json:"port"`
+	AgentVersion     string     `json:"agent_version"`
+	Upgrading        bool       `json:"upgrading"`
+	UpgradeStartedAt *time.Time `json:"upgrade_started_at,omitempty"`
+}
+
 // VMInspect is the structured response for VM inspection.
 type VMInspect struct {
 	VM         VMItemInfo       `json:"vm"`
@@ -78,4 +94,5 @@ type VMInspect struct {
 	Filesystem VMFilesystemInfo `json:"filesystem"`
 	Console    VMConsoleInfo    `json:"console"`
 	Volumes    []VMVolume       `json:"volumes"`
+	Vsock      *VMVsockInfo     `json:"vsock,omitempty"`
 }

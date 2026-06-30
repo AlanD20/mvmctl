@@ -77,6 +77,12 @@ type Client struct {
 	// OnUpgradeCompleted is called after the upgrade succeeds and the
 	// retry loop confirms the new agent version is running.
 	OnUpgradeCompleted func(ctx context.Context, newVersion string)
+
+	// OnVersionKnown is called when the probed agent version is current
+	// (no upgrade needed). It receives the version string from the guest
+	// agent. Used by the API layer to persist the version to the DB
+	// when it differs from the initial config value.
+	OnVersionKnown func(ctx context.Context, version string)
 }
 
 const vsockProbeInterval = 20 * time.Millisecond
@@ -484,6 +490,9 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 
 			// Agent version is current — use this connection.
 			c.AgentVersion = agentVersion
+			if c.OnVersionKnown != nil {
+				c.OnVersionKnown(ctx, agentVersion)
+			}
 			return conn, nil
 		}
 

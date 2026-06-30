@@ -929,7 +929,7 @@ func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM
 		return nil, err
 	}
 	// Enrich VM with relations
-	op.Enr.EnrichVM(ctx, []*model.VMItem{vm}, "kernel", "image", "binary", "network", "network.leases", "volumes")
+	op.Enr.EnrichVM(ctx, []*model.VMItem{vm}, "kernel", "image", "binary", "network", "volumes")
 	return vm, nil
 }
 
@@ -941,7 +941,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 	}
 	// Enrich all relations at once instead of manual repo calls.
 	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vm},
-		"kernel", "image", "binary", "network", "network.leases", "volumes",
+		"kernel", "image", "binary", "network", "volumes", "vsock",
 	); err != nil {
 		return nil, err
 	}
@@ -1000,7 +1000,25 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 			RelaySocketPath: vm.RelaySocketPath,
 		},
 		Volumes: volumes,
+		Vsock:   vsockToInspectInfo(vm.Vsock),
 	}, nil
+}
+
+// vsockToInspectInfo converts a model.VsockConfigItem to a results.VMVsockInfo,
+// intentionally dropping the Token field to avoid leaking the auth secret.
+func vsockToInspectInfo(v *model.VsockConfigItem) *results.VMVsockInfo {
+	if v == nil {
+		return nil
+	}
+	return &results.VMVsockInfo{
+		ID:               v.ID,
+		GuestCID:         v.GuestCID,
+		UDSPath:          v.UDSPath,
+		Port:             v.Port,
+		AgentVersion:     v.AgentVersion,
+		Upgrading:        v.Upgrading,
+		UpgradeStartedAt: v.UpgradeStartedAt,
+	}
 }
 
 // --- Start / Stop / Reboot / Pause / Resume ---

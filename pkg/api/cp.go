@@ -191,5 +191,12 @@ func (op *Operation) newVsockClient(
 			slog.Warn("failed to persist agent version", "vm", vmName, "error", err)
 		}
 	}
+	client.OnVersionKnown = func(ctx context.Context, version string) {
+		if version != cfg.AgentVersion {
+			if err := op.Repos.Vsock.UpdateAgentVersion(ctx, cfg.VmID, version); err != nil {
+				slog.Warn("failed to persist agent version", "vm", vmName, "error", err)
+			}
+		}
+	}
 	return client, nil
 }

@@ -10,6 +10,7 @@ import (
 
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/version"
 )
 
 // maxGuestCID is the maximum valid Firecracker guest CID (2^32 - 1).
@@ -49,13 +50,19 @@ func (s *Service) PersistConfig(
 ) error {
 	const maxCIDRetries = 5
 
+	agentVersion := version.BuildVersion
+	if agentVersion == "" {
+		agentVersion = "0.0.0"
+	}
+
 	item := &model.VsockConfigItem{
-		ID:       crypto.VMID(vmName, time.Now().Format(time.RFC3339)),
-		VmID:     vmID,
-		GuestCID: cid,
-		UDSPath:  udsPath,
-		Port:     port,
-		Token:    token,
+		ID:           crypto.VMID(vmName, time.Now().Format(time.RFC3339)),
+		VmID:         vmID,
+		GuestCID:     cid,
+		UDSPath:      udsPath,
+		Port:         port,
+		Token:        token,
+		AgentVersion: agentVersion,
 	}
 
 	for attempt := range maxCIDRetries {
