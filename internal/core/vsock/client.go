@@ -3,6 +3,7 @@ package vsock
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,13 +30,15 @@ const (
 	defaultVersion = "0.0.0"
 
 	// upgradeShellCommand replaces the running agent binary and restarts the
-	// agent service after a 2-second delay. The delay allows the exec
-	// response frame to be sent before the old agent is killed.
-	upgradeShellCommand = `cp /usr/bin/mvm-vsock-agent /usr/bin/mvm-vsock-agent.bak 2>/dev/null || true; mv /usr/bin/mvm-vsock-agent.new /usr/bin/mvm-vsock-agent && chmod 0755 /usr/bin/mvm-vsock-agent && ( sleep 2 && systemctl restart mvm-vsock-agent ) &`
+	// agent service after a 2-second delay in a fully detached background
+	// process (nohup). The delay allows the exec response frame to be sent
+	// before the old agent is killed. Supports both systemd and OpenRC.
+	upgradeShellCommand = `cp /usr/bin/mvm-vsock-agent /usr/bin/mvm-vsock-agent.bak 2>/dev/null || true; mv /usr/bin/mvm-vsock-agent.new /usr/bin/mvm-vsock-agent && chmod 0755 /usr/bin/mvm-vsock-agent && nohup sh -c 'sleep 2; if command -v systemctl >/dev/null 2>&1; then systemctl restart mvm-vsock-agent; else rc-service mvm-vsock-agent restart; fi' >/dev/null 2>&1 </dev/null &`
 
 	// restoreShellCommand restores the previous agent binary from backup and
 	// restarts the service. Used as a rollback if the upgrade exec fails.
-	restoreShellCommand = `test -f /usr/bin/mvm-vsock-agent.bak && cp /usr/bin/mvm-vsock-agent.bak /usr/bin/mvm-vsock-agent && ( sleep 1 && systemctl restart mvm-vsock-agent ) &; true`
+	// Uses nohup to fully detach the restart. Supports both systemd and OpenRC.
+	restoreShellCommand = `test -f /usr/bin/mvm-vsock-agent.bak && cp /usr/bin/mvm-vsock-agent.bak /usr/bin/mvm-vsock-agent && nohup sh -c 'sleep 1; if command -v systemctl >/dev/null 2>&1; then systemctl restart mvm-vsock-agent; else rc-service mvm-vsock-agent restart; fi' >/dev/null 2>&1 </dev/null &`
 )
 
 // Client is a per-VM vsock protocol client for communicating with the
@@ -83,6 +86,10 @@ type Client struct {
 	// agent. Used by the API layer to persist the version to the DB
 	// when it differs from the initial config value.
 	OnVersionKnown func(ctx context.Context, version string)
+
+	// OnUpgradeFailed is called when an upgrade attempt fails.
+	// The callback should clear the DB upgrade lock and log the event.
+	OnUpgradeFailed func(ctx context.Context, err error)
 }
 
 const vsockProbeInterval = 20 * time.Millisecond
@@ -471,6 +478,9 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 				}
 				if upgradeErr := c.upgradeAgent(ctx, agentVersion); upgradeErr != nil {
 					c.upgradeInProgress = false
+					if c.OnUpgradeFailed != nil {
+						c.OnUpgradeFailed(ctx, upgradeErr)
+					}
 					return nil, fmt.Errorf("agent upgrade failed: %w", upgradeErr)
 				}
 				// Wait for agent to restart before retrying the dial loop.
@@ -542,6 +552,71 @@ func (c *Client) Teardown(_ context.Context) error {
 		}
 	}
 	return nil
+}
+
+// upgradeExec sends a raw exec command for agent upgrade purposes.
+// Unlike the public Exec method, this helper treats io.EOF during response
+// reading as success because the upgrade command restarts the agent, which
+// may close the connection before a result frame is sent.
+// It returns an error only if a result frame explicitly indicates failure.
+// The method dials a fresh connection (via dialRaw) — independent of the
+// caller's connection.
+func (c *Client) upgradeExec(ctx context.Context, command, user string, timeout int) error {
+	conn, err := c.dialRaw(ctx)
+	if err != nil {
+		return fmt.Errorf("dial for upgrade exec: %w", err)
+	}
+	defer conn.Close()
+
+	// Apply deadline from context if set.
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	req := execRequest{
+		ID:      "upgrade:1",
+		Type:    "exec",
+		Command: command,
+		Token:   c.item.Token,
+		Timeout: timeout,
+		User:    user,
+	}
+
+	if err := sendFrame(conn, req); err != nil {
+		return fmt.Errorf("send upgrade exec request: %w", err)
+	}
+
+	// Read frames until result or EOF.
+	// EOF is treated as success because the upgrade command restarts the
+	// agent, which may close the connection before a result frame is sent.
+	dec := json.NewDecoder(conn)
+	for {
+		var resp execResponse
+		if err := dec.Decode(&resp); err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+				// Agent restarted — command succeeded.
+				return nil
+			}
+			return fmt.Errorf("read upgrade exec response: %w", err)
+		}
+
+		switch resp.Type {
+		case "stdout", "stderr":
+			if resp.Data != "" {
+				slog.Debug("upgrade exec output", "vm_id", c.item.VmID, "type", resp.Type, "data", resp.Data)
+			}
+		case "result":
+			if resp.Error != "" {
+				return fmt.Errorf("upgrade exec failed: %s", resp.Error)
+			}
+			if resp.Status != 0 {
+				return fmt.Errorf("upgrade exec exited with code %d", resp.Status)
+			}
+			return nil
+		default:
+			slog.Debug("upgrade exec ignoring frame", "type", resp.Type)
+		}
+	}
 }
 
 // probeVersion sends a version request to the guest agent over an established
@@ -620,16 +695,12 @@ func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
 	// was transferred correctly. No need to exec-verify it.
 	// Backup is best-effort (may not exist on first upgrade).
 	// The chain continues even if cp fails.
-	execClient := &Client{
-		item:             c.item,
-		ProbeTimeout:     c.ProbeTimeout,
-		VmName:           c.VmName,
-		skipVersionCheck: true,
-	}
-	_, err = execClient.Exec(ctx, upgradeShellCommand, "root", 30, nil, false)
+	// upgradeExec handles the case where the connection drops mid-response
+	// (agent restarted) by treating EOF as success.
+	err = c.upgradeExec(ctx, upgradeShellCommand, "root", 30)
 	if err != nil {
 		// Try to restore from backup (if it exists)
-		_, restoreErr := execClient.Exec(ctx, restoreShellCommand, "root", 15, nil, false)
+		restoreErr := c.upgradeExec(ctx, restoreShellCommand, "root", 15)
 		if restoreErr != nil {
 			slog.Error("failed to restore agent backup", "vm", c.VmName, "error", restoreErr)
 		}

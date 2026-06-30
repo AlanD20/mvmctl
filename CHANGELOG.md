@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm console`
 - Fixed duplicate error messages when the console relay is not running.
 
+#### vsock agent upgrade
+- Fixed a deadlock where `systemctl restart mvm-vsock-agent` waited for the agent to stop while the agent was waiting for the upgrade command to finish, causing a 30s timeout and a confusing EOF error.
+- Fixed a shell syntax error in the restore/rollback command (`&;`).
+- Upgrade and restore commands now detach the service restart with `nohup` and support both systemd and OpenRC.
+- The DB upgrade lock is now cleared immediately when an upgrade fails, instead of forcing a 60s wait.
+
 ## [0.1.0] - 2026-06-28
 
 ### Added

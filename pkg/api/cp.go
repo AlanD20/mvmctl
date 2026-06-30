@@ -191,6 +191,12 @@ func (op *Operation) newVsockClient(
 			slog.Warn("failed to persist agent version", "vm", vmName, "error", err)
 		}
 	}
+	client.OnUpgradeFailed = func(ctx context.Context, err error) {
+		slog.Warn("vsock agent upgrade failed — clearing stale lock", "vm", vmName, "error", err)
+		if clearErr := op.Repos.Vsock.ClearUpgradeLock(ctx, cfg.VmID); clearErr != nil {
+			slog.Warn("failed to clear upgrade lock after failed upgrade", "vm", vmName, "error", clearErr)
+		}
+	}
 	client.OnVersionKnown = func(ctx context.Context, version string) {
 		if version != cfg.AgentVersion {
 			if err := op.Repos.Vsock.UpdateAgentVersion(ctx, cfg.VmID, version); err != nil {
