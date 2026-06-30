@@ -33,6 +33,7 @@ kernel-official:
     CONFIG_NET: y
     CONFIG_INET: y
     CONFIG_IPV6: y
+    CONFIG_NETFILTER_XT_MATCH_COMMENT: y
     # KVM guest optimisations
     CONFIG_KVM_GUEST: y
     CONFIG_PARAVIRT: y
