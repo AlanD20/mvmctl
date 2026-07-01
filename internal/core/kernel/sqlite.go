@@ -66,8 +66,8 @@ func (r *sqliteRepo) Upsert(ctx context.Context, k *model.KernelItem) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO kernels (
 			id, name, base_name, version, arch, type, path,
-			is_default, is_present, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			is_default, is_present, created_at, updated_at, deleted_at, features
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			base_name = excluded.base_name,
@@ -78,10 +78,11 @@ func (r *sqliteRepo) Upsert(ctx context.Context, k *model.KernelItem) error {
 			is_default = excluded.is_default,
 			is_present = excluded.is_present,
 			updated_at = CURRENT_TIMESTAMP,
-			deleted_at = excluded.deleted_at`,
+			deleted_at = excluded.deleted_at,
+			features = excluded.features`,
 		k.ID, k.Name, k.BaseName, k.Version, k.Arch, k.Type, k.Path,
 		infra.BoolToInt(k.IsDefault), infra.BoolToInt(k.IsPresent),
-		k.CreatedAt, k.UpdatedAt, k.DeletedAt,
+		k.CreatedAt, k.UpdatedAt, k.DeletedAt, k.Features,
 	)
 	return err
 }

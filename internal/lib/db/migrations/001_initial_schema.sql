@@ -45,7 +45,8 @@ CREATE TABLE kernels (
     is_present INTEGER DEFAULT 0 NOT NULL,  -- Boolean: 0=file missing, 1=file exists
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    deleted_at TIMESTAMP NULL
+    deleted_at TIMESTAMP NULL,
+    features TEXT NULL
 );
 CREATE INDEX idx_kernels_name ON kernels(name);
 CREATE INDEX idx_kernels_version ON kernels(version);

@@ -1,5 +1,7 @@
 package model
 
+import "mvmctl/internal/lib/db"
+
 // --- KernelItem ---
 
 // KernelItem represents a cached kernel.
@@ -16,6 +18,8 @@ type KernelItem struct {
 	CreatedAt string  `json:"created_at"           db:"created_at"`
 	UpdatedAt string  `json:"updated_at"           db:"updated_at"`
 	DeletedAt *string `json:"deleted_at,omitempty" db:"deleted_at"`
+
+	Features db.StringSlice `json:"features,omitempty" db:"features"`
 
 	// Resolved relations
 	VMs       []*VMItem       `json:"vms,omitempty"`

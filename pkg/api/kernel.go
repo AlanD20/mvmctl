@@ -9,6 +9,7 @@ import (
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/crypto"
+	"mvmctl/internal/lib/db"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
@@ -254,6 +255,11 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		CreatedAt: timestamp,
 		UpdatedAt: timestamp,
 	}
+	// Persist resolved feature list for official kernel builds only;
+	// firecracker pulls and imports remain NULL.
+	if resolved.KernelType == "official" && len(resolved.Features) > 0 {
+		kernelItem.Features = db.StringSlice(resolved.Features)
+	}
 	if err := op.Repos.Kernel.Upsert(ctx, kernelItem); err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to persist kernel: %v", err), err)
 	}
@@ -456,6 +462,7 @@ func (op *Operation) KernelInspect(ctx context.Context, identifier string) (*res
 			ID: k.ID, Name: k.Name, BaseName: k.BaseName,
 			Version: k.Version, Arch: k.Arch, Type: k.Type,
 			IsDefault: k.IsDefault, IsPresent: k.IsPresent,
+			Features: k.Features,
 		},
 		Storage: results.KernelStorageInfo{Path: k.Path},
 		Timestamps: results.KernelTimestampsInfo{

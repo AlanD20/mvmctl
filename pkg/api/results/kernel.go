@@ -2,14 +2,15 @@ package results
 
 // KernelItemInfo groups kernel metadata in an inspect response.
 type KernelItemInfo struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	BaseName  string `json:"base_name"`
-	Version   string `json:"version"`
-	Arch      string `json:"arch"`
-	Type      string `json:"type"`
-	IsDefault bool   `json:"is_default"`
-	IsPresent bool   `json:"is_present"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	BaseName  string   `json:"base_name"`
+	Version   string   `json:"version"`
+	Arch      string   `json:"arch"`
+	Type      string   `json:"type"`
+	IsDefault bool     `json:"is_default"`
+	IsPresent bool     `json:"is_present"`
+	Features  []string `json:"features,omitempty"`
 }
 
 // KernelStorageInfo groups kernel storage info in an inspect response.

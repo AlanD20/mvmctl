@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm kernel pull`
 - `--features` now accepts `all` or `*` as a wildcard to enable every feature defined in the selected kernel spec.
 - Feature names are now validated against the spec's `features` map instead of a hardcoded list.
+- Enabled features are persisted and shown in `mvm kernel inspect`.
 
 ### Changed
 
