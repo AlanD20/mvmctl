@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed deduplication that silently skipped importing a different version of the same type.
 - Image name is now automatically set to `type version` on import.
 - Success output now shows the source path or VM name instead of the internal cached path.
+
+#### `mvm cp`
 - Recursive directory copies now follow symlinks and skip broken symlinks, non-regular files, and symlink cycles instead of aborting.
 - Single-directory copies to a destination without a trailing slash (e.g. `mvm cp ./my-dir vm:/path/to/dest`) now create the destination as a directory.
 
