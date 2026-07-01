@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Feature names are now validated against the spec's `features` map instead of a hardcoded list.
 - Enabled features are persisted and shown in `mvm kernel inspect`.
 
+#### `mvm image ls`
+- Now shows the `Version` column in the default listing.
+
 ### Changed
 
 #### `kernels.yaml`
@@ -27,7 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-#### `mvm cp`
+#### `mvm image import`
+- Fixed deduplication that silently skipped importing a different version of the same type.
+- Image name is now automatically set to `type version` on import.
+- Success output now shows the source path or VM name instead of the internal cached path.
 - Recursive directory copies now follow symlinks and skip broken symlinks, non-regular files, and symlink cycles instead of aborting.
 - Single-directory copies to a destination without a trailing slash (e.g. `mvm cp ./my-dir vm:/path/to/dest`) now create the destination as a directory.
 

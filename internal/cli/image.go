@@ -25,6 +25,7 @@ var imageColumns = []common.ListingColumn{
 	{Header: "Name", Extract: func(v any) string {
 		return common.Cli.FormatName(v.(*model.ImageItem).Name, !v.(*model.ImageItem).IsPresent)
 	}},
+	{Header: "Version", Extract: func(v any) string { return v.(*model.ImageItem).Version }},
 	{Header: "Type", Extract: func(v any) string { return v.(*model.ImageItem).Type }},
 	{Header: "Arch", Extract: func(v any) string { return v.(*model.ImageItem).Arch }, LongOnly: true},
 	{Header: "FS Type", Extract: func(v any) string { return v.(*model.ImageItem).FSType }, LongOnly: true},
@@ -431,12 +432,12 @@ Examples:
 			if img == nil {
 				return fmt.Errorf("import failed: no image returned")
 			}
-			common.Cli.Success(fmt.Sprintf("Imported: %s", img.Path))
-			common.Cli.Info(fmt.Sprintf("  Name: %s", name))
+			common.Cli.Success(fmt.Sprintf("Imported: %s", sourcePath))
+			common.Cli.Info(fmt.Sprintf("  Name: %s", img.Name))
 			common.Cli.Info(fmt.Sprintf("  ID:   %s", common.Cli.FormatID(img.ID)))
 
 			if setDefault {
-				common.Cli.Success(fmt.Sprintf("Default image set to: %s", name))
+				common.Cli.Success(fmt.Sprintf("Default image set to: %s", img.Name))
 			}
 
 			return nil

@@ -354,7 +354,7 @@ func (op *Operation) ImageImport(
 			err,
 		)
 	}
-	existing, _ := op.Repos.Image.GetByType(ctx, resolved.Type)
+	existing, _ := op.Repos.Image.GetByVersionAndType(ctx, resolved.Version, resolved.Type)
 	if !resolved.Force && existing != nil && existing.Path != "" {
 		if _, err := os.Stat(existing.Path); err == nil {
 			slog.Info("Image already exists", "path", existing.Path)
@@ -379,10 +379,14 @@ func (op *Operation) ImageImport(
 	spec := &model.ImageSpec{
 		Type:    resolved.Type,
 		Version: resolved.Version,
-		Name:    resolved.Type,
 		Arch:    resolved.Arch,
 		Source:  *resolved.SourcePath,
 		Format:  resolved.Format,
+	}
+	if resolved.Version != "" {
+		spec.Name = resolved.Type + " " + resolved.Version
+	} else {
+		spec.Name = resolved.Type
 	}
 	tl := timinglog.Start("image_import", "image_type", resolved.Type)
 	defer tl.Complete()
