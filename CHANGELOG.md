@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### `kernels.yaml`
-- Renamed `config_url_template` to `base_config_url_template` to clarify that it provides the base kernel `.config`. The old name is still accepted as a deprecated fallback.
+- Renamed `config_url_template` to `base_config_url_template` to clarify that it provides the base kernel `.config`.
 - Removed the redundant duplicate URL from `config_fragments` in the bundled `kernel-official` spec.
 
 ### Fixed

@@ -6,9 +6,8 @@ kernel-official:
   source: https://cdn.kernel.org/pub/linux/kernel/v{series}.x/linux-{version}.tar.xz
   sha256: null
   sha256_url: "https://cdn.kernel.org/pub/linux/kernel/v{series}.x/sha256sums.asc"
-  config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config"
-  config_fragments:
-    - https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config
+  base_config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-6.1.config"
+  config_fragments: []
   output_name: vmlinux-official
   build_dir: /tmp/mvmctl/kernel-build
   parallel_jobs: null
@@ -87,7 +86,7 @@ kernel-firecracker:
   source: "https://s3.amazonaws.com/spec.ccfc.min"
   resolver: firecracker-s3
   list_url_template: "http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/{ci_version}/{arch}/vmlinux-{version}&list-type=2"
-  config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-{version}.config"
+  base_config_url_template: "https://raw.githubusercontent.com/firecracker-microvm/firecracker/main/resources/guest_configs/microvm-kernel-ci-{arch}-{version}.config"
   output_name: vmlinux-firecracker
   build_dir: /tmp/mvmctl/kernel-build
   sha256: null

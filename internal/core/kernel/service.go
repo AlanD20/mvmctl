@@ -579,24 +579,24 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 	// NOTE: KernelSpec's yaml tag for KernelType is "kernel_type", but the
 	// kernels.yaml file uses "type". The specYAML struct matches the file.
 	type specYAML struct {
-		KernelType        string                         `yaml:"type"`
-		Version           string                         `yaml:"version"`
-		Source            string                         `yaml:"source"`
-		OutputName        string                         `yaml:"output_name"`
-		BuildDir          string                         `yaml:"build_dir"`
-		ListURLTemplate   *string                        `yaml:"list_url_template,omitempty"`
-		ConfigURLTemplate *string                        `yaml:"config_url_template,omitempty"`
-		SHA256            string                         `yaml:"sha256,omitempty"`
-		SHA256URL         string                         `yaml:"sha256_url,omitempty"`
-		ConfigFragments   []string                       `yaml:"config_fragments"`
-		ParallelJobs      *int                           `yaml:"parallel_jobs,omitempty"`
-		DefaultConfigs    map[string]string              `yaml:"default_configs"`
-		Resolver          *string                        `yaml:"resolver,omitempty"`
-		VersionsURL       *string                        `yaml:"versions_url,omitempty"`
-		FilePattern       *string                        `yaml:"file_pattern,omitempty"`
-		FileSuffix        *string                        `yaml:"file_suffix,omitempty"`
-		Options           map[string]any                 `yaml:"options,omitempty"`
-		Features          map[string]model.KernelFeature `yaml:"features,omitempty"`
+		KernelType            string                         `yaml:"type"`
+		Version               string                         `yaml:"version"`
+		Source                string                         `yaml:"source"`
+		OutputName            string                         `yaml:"output_name"`
+		BuildDir              string                         `yaml:"build_dir"`
+		ListURLTemplate       *string                        `yaml:"list_url_template,omitempty"`
+		BaseConfigURLTemplate *string                        `yaml:"base_config_url_template,omitempty"`
+		SHA256                string                         `yaml:"sha256,omitempty"`
+		SHA256URL             string                         `yaml:"sha256_url,omitempty"`
+		ConfigFragments       []string                       `yaml:"config_fragments"`
+		ParallelJobs          *int                           `yaml:"parallel_jobs,omitempty"`
+		DefaultConfigs        map[string]string              `yaml:"default_configs"`
+		Resolver              *string                        `yaml:"resolver,omitempty"`
+		VersionsURL           *string                        `yaml:"versions_url,omitempty"`
+		FilePattern           *string                        `yaml:"file_pattern,omitempty"`
+		FileSuffix            *string                        `yaml:"file_suffix,omitempty"`
+		Options               map[string]any                 `yaml:"options,omitempty"`
+		Features              map[string]model.KernelFeature `yaml:"features,omitempty"`
 	}
 
 	specs := make(map[string]*model.KernelSpec, len(raw))
@@ -611,25 +611,25 @@ func (s *Service) LoadSpecs() (map[string]*model.KernelSpec, error) {
 		}
 
 		specs[name] = &model.KernelSpec{
-			Name:              name,
-			KernelType:        sy.KernelType,
-			Version:           sy.Version,
-			Source:            sy.Source,
-			OutputName:        sy.OutputName,
-			BuildDir:          sy.BuildDir,
-			ListURLTemplate:   sy.ListURLTemplate,
-			ConfigURLTemplate: sy.ConfigURLTemplate,
-			SHA256:            sy.SHA256,
-			SHA256URL:         sy.SHA256URL,
-			ConfigFragments:   sy.ConfigFragments,
-			ParallelJobs:      sy.ParallelJobs,
-			DefaultConfigs:    sy.DefaultConfigs,
-			Resolver:          sy.Resolver,
-			VersionsURL:       sy.VersionsURL,
-			FilePattern:       sy.FilePattern,
-			FileSuffix:        sy.FileSuffix,
-			Options:           sy.Options,
-			Features:          sy.Features,
+			Name:                  name,
+			KernelType:            sy.KernelType,
+			Version:               sy.Version,
+			Source:                sy.Source,
+			OutputName:            sy.OutputName,
+			BuildDir:              sy.BuildDir,
+			ListURLTemplate:       sy.ListURLTemplate,
+			BaseConfigURLTemplate: sy.BaseConfigURLTemplate,
+			SHA256:                sy.SHA256,
+			SHA256URL:             sy.SHA256URL,
+			ConfigFragments:       sy.ConfigFragments,
+			ParallelJobs:          sy.ParallelJobs,
+			DefaultConfigs:        sy.DefaultConfigs,
+			Resolver:              sy.Resolver,
+			VersionsURL:           sy.VersionsURL,
+			FilePattern:           sy.FilePattern,
+			FileSuffix:            sy.FileSuffix,
+			Options:               sy.Options,
+			Features:              sy.Features,
 		}
 	}
 
@@ -1027,13 +1027,13 @@ func (s *Service) downloadFCConfig(
 	spec *model.KernelSpec,
 	vars map[string]string,
 ) error {
-	if spec.ConfigURLTemplate == nil || *spec.ConfigURLTemplate == "" {
+	if spec.BaseConfigURLTemplate == nil || *spec.BaseConfigURLTemplate == "" {
 		return errs.New(
 			errs.CodeKernelBuildFailed,
-			fmt.Sprintf("Missing 'config_url_template' in kernels.yaml for %s", spec.Name),
+			fmt.Sprintf("Missing 'base_config_url_template' in kernels.yaml for %s", spec.Name),
 		)
 	}
-	url, err := infra.RenderTemplate(*spec.ConfigURLTemplate, vars)
+	url, err := infra.RenderTemplate(*spec.BaseConfigURLTemplate, vars)
 	if err != nil {
 		return errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf("Failed to render config URL template: %s", err))
 	}
