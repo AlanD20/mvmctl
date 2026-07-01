@@ -1,6 +1,7 @@
 package provcontent_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -102,9 +103,8 @@ func TestBuilder_FirstBootService(t *testing.T) {
 
 // --- Hosts ---
 // Rationale: Hosts generates /etc/hosts with the VM hostname at 127.0.1.1.
-// A misconfigured hosts file breaks hostname resolution and sudo.
 
-func TestBuilder_Hosts(t *testing.T) {
+func TestBuilder_HostsAppend(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -113,46 +113,42 @@ func TestBuilder_Hosts(t *testing.T) {
 	}{
 		"simple_hostname": {
 			hostname: "my-vm",
-			want: "127.0.0.1\tlocalhost\n" +
-				"127.0.1.1\tmy-vm\n" +
-				"\n" +
-				"::1\tlocalhost ip6-localhost ip6-loopback\n" +
-				"fe00::0\tip6-localnet\n" +
-				"ff00::0\tip6-mcastprefix\n" +
-				"ff02::1\tip6-allnodes\n" +
-				"ff02::2\tip6-allrouters\n",
+			want:     `test -f /etc/hosts && sed -i '/^127\.0\.1\.1/d' /etc/hosts; printf '127.0.1.1\tmy-vm\n' >> /etc/hosts`,
 		},
 		"empty_hostname": {
 			hostname: "",
-			want: "127.0.0.1\tlocalhost\n" +
-				"127.0.1.1\t\n" +
-				"\n" +
-				"::1\tlocalhost ip6-localhost ip6-loopback\n" +
-				"fe00::0\tip6-localnet\n" +
-				"ff00::0\tip6-mcastprefix\n" +
-				"ff02::1\tip6-allnodes\n" +
-				"ff02::2\tip6-allrouters\n",
+			want:     `test -f /etc/hosts && sed -i '/^127\.0\.1\.1/d' /etc/hosts; printf '127.0.1.1\t\n' >> /etc/hosts`,
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			var b provcontent.Builder
-			got := b.Hosts(tc.hostname)
-
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("Hosts() mismatch (-want +got):\n%s", diff)
+			ops := b.BuildHostnameOps(tc.hostname)
+			if len(ops) < 2 {
+				t.Fatal("expected at least 2 operations")
+			}
+			chrootOp, ok := ops[1].(provcontent.ChrootOp)
+			if !ok {
+				t.Fatal("expected second operation to be ChrootOp")
+			}
+			if diff := cmp.Diff(tc.want, chrootOp.Command); diff != "" {
+				t.Errorf("ChrootOp command mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
 }
 
 // --- BuildHostnameOps ---
-// Rationale: BuildHostnameOps creates FileOps for /etc/hostname and /etc/hosts.
+// Rationale: BuildHostnameOps creates FileOp for /etc/hostname and ChrootOp for /etc/hosts.
 // Wrong paths or modes mean hostname configuration fails silently.
 
 func TestBuilder_BuildHostnameOps(t *testing.T) {
 	t.Parallel()
+
+	hostnameCmd := func(hostname string) string {
+		return fmt.Sprintf(`test -f /etc/hosts && sed -i '/^127\.0\.1\.1/d' /etc/hosts; printf '127.0.1.1\t%s\n' >> /etc/hosts`, hostname)
+	}
 
 	tests := map[string]struct {
 		hostname string
@@ -168,19 +164,8 @@ func TestBuilder_BuildHostnameOps(t *testing.T) {
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.FileOp{
-					Path: "/etc/hosts",
-					Data: []byte("127.0.0.1\tlocalhost\n" +
-						"127.0.1.1\tmy-vm\n" +
-						"\n" +
-						"::1\tlocalhost ip6-localhost ip6-loopback\n" +
-						"fe00::0\tip6-localnet\n" +
-						"ff00::0\tip6-mcastprefix\n" +
-						"ff02::1\tip6-allnodes\n" +
-						"ff02::2\tip6-allrouters\n"),
-					Mode: 0644,
-					UID:  0,
-					GID:  0,
+				provcontent.ChrootOp{
+					Command: hostnameCmd("my-vm"),
 				},
 			},
 		},
@@ -194,19 +179,8 @@ func TestBuilder_BuildHostnameOps(t *testing.T) {
 					UID:  0,
 					GID:  0,
 				},
-				provcontent.FileOp{
-					Path: "/etc/hosts",
-					Data: []byte("127.0.0.1\tlocalhost\n" +
-						"127.0.1.1\t\n" +
-						"\n" +
-						"::1\tlocalhost ip6-localhost ip6-loopback\n" +
-						"fe00::0\tip6-localnet\n" +
-						"ff00::0\tip6-mcastprefix\n" +
-						"ff02::1\tip6-allnodes\n" +
-						"ff02::2\tip6-allrouters\n"),
-					Mode: 0644,
-					UID:  0,
-					GID:  0,
+				provcontent.ChrootOp{
+					Command: hostnameCmd(""),
 				},
 			},
 		},

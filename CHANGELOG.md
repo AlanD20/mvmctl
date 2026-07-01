@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### `mvm vm create`
+- `/etc/hosts` is now appended to instead of fully overwritten during provisioning, preserving entries from the base image.
+
 #### `mvm image import`
 - Fixed deduplication that silently skipped importing a different version of the same type.
 - Image name is now automatically set to `type version` on import.

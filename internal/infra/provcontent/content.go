@@ -172,15 +172,6 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target`
 
-	hostsTemplate = `127.0.0.1	localhost
-127.0.1.1	%s
-
-::1	localhost ip6-localhost ip6-loopback
-fe00::0	ip6-localnet
-ff00::0	ip6-mcastprefix
-ff02::1	ip6-allnodes
-ff02::2	ip6-allrouters`
-
 	alpineDhcpcdScript = `grep -qs '^denyinterfaces eth0' /etc/dhcpcd.conf 2>/dev/null || echo 'denyinterfaces eth0' >> /etc/dhcpcd.conf
 sed -i 's/iface eth0 inet dhcp/iface eth0 inet manual/' /etc/network/interfaces`
 
@@ -265,11 +256,6 @@ func (Builder) FirstBootService() string {
 	return firstBootServiceScript + "\n"
 }
 
-// Hosts returns content for /etc/hosts with a 127.0.1.1 entry.
-func (Builder) Hosts(hostname string) string {
-	return fmt.Sprintf(hostsTemplate+"\n", hostname)
-}
-
 // BuildHostnameOps generates operations for setting hostname and /etc/hosts.
 func (pc Builder) BuildHostnameOps(hostname string) []Operation {
 	return []Operation{
@@ -280,12 +266,12 @@ func (pc Builder) BuildHostnameOps(hostname string) []Operation {
 			UID:  0,
 			GID:  0,
 		},
-		FileOp{
-			Path: "/etc/hosts",
-			Data: []byte(pc.Hosts(hostname)),
-			Mode: 0644,
-			UID:  0,
-			GID:  0,
+		ChrootOp{
+			Command: fmt.Sprintf(
+				`test -f /etc/hosts && sed -i '/^127\.0\.1\.1/d' /etc/hosts` +
+					`; printf '127.0.1.1\t%s\n' >> /etc/hosts`,
+				hostname,
+			),
 		},
 	}
 }
