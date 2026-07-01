@@ -75,6 +75,9 @@ kernel-official:
     containers:
       desc: "Container runtime core (containerd/runc/kubelet)"
       enforce:
+        # Expose running kernel config via /proc/config.gz
+        CONFIG_IKCONFIG: y
+        CONFIG_IKCONFIG_PROC: y
         CONFIG_NAMESPACES: y
         CONFIG_NET_NS: y
         CONFIG_PID_NS: y
