@@ -321,6 +321,7 @@ Run a command inside a VM via the vsock guest agent. **Imperative** — always r
 | `timeout` | `int` | No | `0` | Command timeout in seconds. `0` = no timeout. |
 | `port` | `int` | No | `0` | Vsock agent port override. `0` = auto-assigned at runtime (default 1024). |
 | `env` | `map[string]string` | No | `{}` | Environment variable overrides passed to the command inside the VM. |
+| `ignore_errors` | `bool` | No | `false` | Continue workflow if the command exits with non-zero code. |
 
 **Example:**
 ```yaml
@@ -351,6 +352,7 @@ Run a command on a VM via SSH. **Imperative** — always re-runs on re-apply.
 | `cmd` | `string` | No | `""` | Command to execute. Empty = interactive shell. |
 | `timeout` | `int` | No | `0` | Connection timeout in seconds. |
 | `env` | `map[string]string` | No | `{}` | Environment variable overrides prepended to the command using `env K=V cmd`. |
+| `ignore_errors` | `bool` | No | `false` | Continue workflow if the command exits with non-zero code. |
 
 **Example:**
 ```yaml

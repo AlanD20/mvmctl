@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm completion`
 - Removed PowerShell completion support.
 
+#### `mvm env`
+- Exec/SSH steps now support `ignore_errors: true` to continue on non-zero exit codes.
+
 #### `mvm image ls`
 - Now shows the `Version` column in the default listing.
 

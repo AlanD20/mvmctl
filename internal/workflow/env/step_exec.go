@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"gopkg.in/yaml.v3"
 
@@ -23,14 +24,15 @@ type ExecState struct {
 // ExecStep implements workflow.Step for running commands inside VMs via vsock.
 // Destroy is a no-op because exec commands are ephemeral.
 type ExecStep struct {
-	stepType string
-	name     string
-	deps     []string
-	specHash string
-	input    inputs.ExecInput
-	op       api.ExecAPI
-	saved    *ExecState
-	meta     model.ResourceMeta
+	stepType     string
+	name         string
+	deps         []string
+	specHash     string
+	input        inputs.ExecInput
+	op           api.ExecAPI
+	ignoreErrors bool
+	saved        *ExecState
+	meta         model.ResourceMeta
 }
 
 func (s *ExecStep) Type() string { return s.stepType }
@@ -63,7 +65,12 @@ func (s *ExecStep) Apply(
 	}
 
 	if result != nil && result.ExitCode != 0 {
-		return fmt.Errorf("%s: command exited with code %d", s.Name(), result.ExitCode)
+		if s.ignoreErrors {
+			slog.Warn("command exited with non-zero code, continuing (ignore_errors=true)",
+				"step", s.Name(), "exit_code", result.ExitCode)
+		} else {
+			return fmt.Errorf("%s: command exited with code %d", s.Name(), result.ExitCode)
+		}
 	}
 
 	// Print a blank line to visually separate from the step status line.
@@ -129,12 +136,13 @@ func newExecStepFromSpec(
 		return nil, err
 	}
 	return &ExecStep{
-		stepType: stepType,
-		name:     name,
-		deps:     extractDependsOn(spec),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:     stepType,
+		name:         name,
+		deps:         extractDependsOn(spec),
+		specHash:     crypto.SHA256(data),
+		input:        input,
+		op:           op,
+		ignoreErrors: spec.GetBool("ignore_errors"),
 	}, nil
 }
 
