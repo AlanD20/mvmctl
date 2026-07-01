@@ -354,6 +354,16 @@ func (op *Operation) ImageImport(
 			err,
 		)
 	}
+	// Sync source VM filesystem before copying rootfs (best-effort)
+	if resolved.SourceVM != nil && resolved.SourceVM.Status == model.VMStatusRunning {
+		slog.Debug("Syncing filesystem on source VM before import", "vm", resolved.SourceVM.Name)
+		if client, err := op.vsockClient(ctx, resolved.SourceVM); err == nil {
+			_, _ = client.Exec(ctx, "sync", "root", 30, nil, false)
+			client.Teardown(ctx)
+		} else {
+			slog.Warn("Failed to connect to VM for sync before import", "vm", resolved.SourceVM.Name, "error", err)
+		}
+	}
 	existing, _ := op.Repos.Image.GetByVersionAndType(ctx, resolved.Version, resolved.Type)
 	if !resolved.Force && existing != nil && existing.Path != "" {
 		if _, err := os.Stat(existing.Path); err == nil {

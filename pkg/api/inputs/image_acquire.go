@@ -14,6 +14,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/firecracker"
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
@@ -140,11 +141,13 @@ func (i *ImageImportInput) Resolve(
 
 	// --- 1. Try VM resolution first — VM name supersedes local path ---
 	source := i.Source
+	var resolvedVM *model.VMItem
 	if vmRepo != nil {
 		vmResolver := vm.NewResolver(vmRepo)
 		vmItem, vmErr := vmResolver.Resolve(ctx, source)
 		if vmErr == nil && vmItem != nil {
 			source = vmItem.RootfsPath
+			resolvedVM = vmItem
 			i.Format = "raw"          // force raw for VM rootfs
 			i.SkipOptimization = true // skip deblob for VM imports
 			slog.Debug("Importing from VM", "vm", vmItem.Name, "rootfs", source)
@@ -203,6 +206,7 @@ func (i *ImageImportInput) Resolve(
 		SkipOptimization:  i.SkipOptimization,
 		FormatDetected:    detected,
 		IsImported:        true,
+		SourceVM:          resolvedVM,
 	}
 	if result.Arch == "" {
 		return nil, errs.New(errs.CodeImageImportFailed, "arch is required", errs.WithClass(errs.ClassValidation))
@@ -233,6 +237,7 @@ type ResolvedImageAcquireInput struct {
 	SkipOptimization  bool
 	IsImported        bool
 	DisabledDetectors []string
+	SourceVM          *model.VMItem
 }
 
 // resolveDisabledDetectors resolves disabled detector names to internal codes.
