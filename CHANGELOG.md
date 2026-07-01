@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed `config_url_template` to `base_config_url_template` to clarify that it provides the base kernel `.config`.
 - Removed the redundant duplicate URL from `config_fragments` in the bundled `kernel-official` spec.
 - Added `CONFIG_IKCONFIG` and `CONFIG_IKCONFIG_PROC` to the `containers` feature enforce map.
+- Added `CONFIG_NF_CONNTRACK` to the `iptables` feature enforce map.
 
 ### Fixed
 
