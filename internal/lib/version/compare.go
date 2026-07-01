@@ -32,6 +32,13 @@ func Compare(a, b string) int {
 	case bPre == "":
 		return -1
 	default:
+		// Strip git describe metadata (-g<hash> and -dirty) so that
+		// versions with the same tag distance compare as equal.
+		aPre = stripGitMeta(aPre)
+		bPre = stripGitMeta(bPre)
+		if aPre == bPre {
+			return 0
+		}
 		return comparePreReleaseParts(aPre, bPre)
 	}
 }
@@ -133,6 +140,39 @@ func comparePrefix(a, b string) int {
 		}
 	}
 	return aRank - bRank
+}
+
+// stripGitMeta removes git describe metadata from a pre-release string.
+// It strips trailing -g<hexhash> and -dirty suffixes so that versions
+// with the same tag distance compare as equal, regardless of the commit hash.
+//
+// Examples:
+//
+//	"9-g8482c4b2"       → "9"
+//	"9-g8482c4b2-dirty" → "9"
+//	"alpha.1"            → "alpha.1"
+func stripGitMeta(pre string) string {
+	pre = strings.TrimSuffix(pre, "-dirty")
+	if idx := strings.LastIndex(pre, "-g"); idx >= 0 {
+		suffix := pre[idx+2:]
+		if isHex(suffix) {
+			pre = pre[:idx]
+		}
+	}
+	return pre
+}
+
+// isHex returns true if s is a non-empty string of hexadecimal digits.
+func isHex(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // IsAtLeast checks if ver >= minVersion.

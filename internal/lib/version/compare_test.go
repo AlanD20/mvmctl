@@ -167,6 +167,19 @@ func TestCompare(t *testing.T) {
 
 		// Dotted pre-release with mixed numeric/alpha segments
 		{"dotted_mixed_segments", "1.0.0-1.dev", "1.0.0-1.alpha", -1},
+
+		// Git describe metadata: same tag distance, different hashes → equal
+		{"same_distance_diff_hash", "0.1.0-9-g8482c4b2", "0.1.0-9-g0aa22ec0", 0},
+		// Git describe: larger distance → greater
+		{"larger_distance", "0.1.0-10-gdeadbeef", "0.1.0-9-gcafebabe", 1},
+		// Git describe: smaller distance → less
+		{"smaller_distance", "0.1.0-9-gcafebabe", "0.1.0-10-gdeadbeef", -1},
+		// Git describe: dirty vs non-dirty, same distance → equal
+		{"dirty_equal", "0.1.0-9-g8482c4b2-dirty", "0.1.0-9-g0aa22ec0", 0},
+		// Git describe: non-dirty vs dirty, same distance → equal (reverse)
+		{"dirty_equal_rev", "0.1.0-9-g0aa22ec0", "0.1.0-9-g8482c4b2-dirty", 0},
+		// Git describe: dirty vs clean, same hash → equal
+		{"dirty_vs_clean_same_hash", "0.1.0-9-g8482c4b2-dirty", "0.1.0-9-g8482c4b2", 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

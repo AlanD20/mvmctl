@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed a shell syntax error in the restore/rollback command (`&;`).
 - Upgrade and restore commands now detach the service restart with `nohup` and support both systemd and OpenRC.
 - The DB upgrade lock is now cleared immediately when an upgrade fails, instead of forcing a 60s wait.
+- Fixed version comparison for git-describe strings (`0.1.0-9-g<hash>`) so that random hex hashes are not compared lexicographically; only the tag distance is used for ordering.
 
 ## [0.1.0] - 2026-06-28
 
