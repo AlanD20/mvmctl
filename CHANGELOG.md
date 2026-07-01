@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm image import`
 - Renamed `source_path` to `source` in the input struct (breaking — no backward compat).
 
+#### `mvm completion`
+- Removed PowerShell completion support.
+
 #### `mvm image ls`
 - Now shows the `Version` column in the default listing.
 

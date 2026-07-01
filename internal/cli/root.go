@@ -219,7 +219,7 @@ func newVersionCmd() *cobra.Command {
 // Uses Cobra's built-in completion generators instead of hardcoded scripts.
 func newCompletionCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "completion [bash|zsh|fish|powershell]",
+		Use:   "completion [bash|zsh|fish]",
 		Short: "Generate shell completion script",
 		Long: fmt.Sprintf(`Generate shell completion script for %[1]s.
 
@@ -233,13 +233,9 @@ For zsh, place the output in a file on your fpath:
 
 For fish:
 
-    %[1]s completion fish > ~/.config/fish/completions/%[1]s.fish
-
-For PowerShell:
-
-    %[1]s completion powershell | Out-String | Invoke-Expression`, infra.CLIName),
+    %[1]s completion fish > ~/.config/fish/completions/%[1]s.fish`, infra.CLIName),
 		Args:      cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
-		ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
+		ValidArgs: []string{"bash", "zsh", "fish"},
 		RunE: func(c *cobra.Command, args []string) error {
 			shell := args[0]
 			rootCmd := c.Root()
@@ -259,10 +255,8 @@ For PowerShell:
 				fmt.Fprintf(os.Stdout, "    __mvm_get_completions (commandline -opc) (commandline -t)\n")
 				fmt.Fprintf(os.Stdout, "end\n")
 				return nil
-			case "powershell":
-				return rootCmd.GenPowerShellCompletion(os.Stdout)
 			default:
-				return fmt.Errorf("unsupported shell: %s (supported: bash, zsh, fish, powershell)", shell)
+				return fmt.Errorf("unsupported shell: %s (supported: bash, zsh, fish)", shell)
 			}
 		},
 	}
