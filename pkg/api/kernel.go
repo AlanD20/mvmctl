@@ -239,7 +239,13 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to compute kernel ID: %v", err), err)
 	}
-	// Parse filename for base_name
+	// Rename file to content-addressed kernel ID
+	kernelDir := filepath.Dir(fetchResult.Path)
+	kernelPath := filepath.Join(kernelDir, kernelID)
+	if err := os.Rename(fetchResult.Path, kernelPath); err != nil {
+		return nil, errs.WrapMsg(errs.CodeKernelPullFailed, fmt.Sprintf("Failed to rename kernel file: %v", err), err)
+	}
+	// Parse filename for base_name (use original filename before rename)
 	parsed := kernel.ParseFilename(filepath.Base(fetchResult.Path))
 	// Create KernelItem
 	kernelItem := &model.KernelItem{
@@ -249,7 +255,7 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		Version:   fetchResult.Version,
 		Arch:      resolved.Arch,
 		Type:      resolved.KernelType,
-		Path:      fetchResult.Path,
+		Path:      kernelPath,
 		IsDefault: false,
 		IsPresent: true,
 		CreatedAt: timestamp,

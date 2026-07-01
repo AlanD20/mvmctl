@@ -1231,6 +1231,12 @@ func (s *Service) ImportKernel(
 		return nil, fmt.Errorf("compute kernel ID: %w", err)
 	}
 
+	// Rename file to content-addressed kernel ID
+	kernelPath := filepath.Join(kernelsDir, kernelID)
+	if err := os.Rename(destPath, kernelPath); err != nil {
+		return nil, fmt.Errorf("rename kernel file: %w", err)
+	}
+
 	now := time.Now().Format(time.RFC3339)
 
 	kernelItem := &model.KernelItem{
@@ -1240,7 +1246,7 @@ func (s *Service) ImportKernel(
 		Version:   version,
 		Arch:      arch,
 		Type:      "custom",
-		Path:      destPath,
+		Path:      kernelPath,
 		IsDefault: setDefault,
 		IsPresent: true,
 		CreatedAt: now,
