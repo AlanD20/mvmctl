@@ -52,6 +52,10 @@ image:
   - name: <step-name>
     # ... fields
 
+image_import:
+  - name: <step-name>
+    # ... fields
+
 kernel:
   - name: <step-name>
     # ... fields
@@ -170,6 +174,35 @@ image:
 
 ---
 
+### `image_import`
+
+Import a local image file or copy a VM's rootfs into the image cache.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `name` | `string` | **Yes** | — | Step name. Becomes `"image_import:name"`. |
+| `source` | `string` | **Yes** | — | Source path to a raw image (`.raw`/`.img`), qcow2, tar-rootfs archive (`.tar`/`.tar.gz`/`.tar.xz`/`.tgz`), or a VM selector (name or ID). |
+| `format` | `string` | No | `""` (auto) | Image format override: `"raw"`, `"qcow2"`, `"tar"`. |
+| `version` | `string` | No | `""` | Version tag for the imported image. |
+| `force` | `bool` | No | `false` | Overwrite existing image with the same name. |
+| `default` | `bool` | No | `false` | Set as default image. |
+| `skip_optimization` | `bool` | No | `false` | Skip filesystem optimization. |
+| `disabled_detectors` | `[]string` | No | `[]` | Disable specific detectors. |
+
+**Example:**
+```yaml
+image_import:
+  - name: my-custom-image
+    source: /path/to/image.raw
+    format: raw
+    default: true
+
+  - name: from-vm
+    source: my-running-vm
+```
+
+---
+
 ### `kernel`
 
 Download or build a kernel.
@@ -251,6 +284,7 @@ Create a virtual machine.
 | `skip_cleanup` | `bool` | No | `false` | Skip cleanup on failure. |
 | `skip_deblob` | `bool` | No | `false` | Skip image deblobbing. |
 | `vsock_port` | `int` | No | Config default | Vsock port for guest agent communication. Default: `1024`. |
+| `writeback` | `bool` | No | Config default | Use writeback cache mode for drives (guest fsync honored). |
 
 **Example:**
 ```yaml
@@ -395,6 +429,7 @@ Steps within the same level run in parallel.
 | `key` | **Deleted** — SSH key files removed from disk, DB record removed | Created per-environment |
 | `vm` | **Deleted** — Firecracker process killed, console relay shut down, TAP device removed, IP lease released, volumes detached, VM directory + DB record deleted | Full lifecycle teardown |
 | `image` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
+| `image_import` | **Preserved** — files stay in cache, DB record kept | Asset — imported image is reusable across environments |
 | `kernel` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to rebuild/re-download, shared across environments |
 | `binary` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
 | `ssh` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran) |
