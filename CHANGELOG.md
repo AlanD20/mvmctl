@@ -17,7 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--features` now accepts `all` or `*` as a wildcard to enable every feature defined in the selected kernel spec.
 - Feature names are now validated against the spec's `features` map instead of a hardcoded list.
 - Enabled features are persisted and shown in `mvm kernel inspect`.
-- Kernel files are now stored with their content-addressed ID as the filename instead of `name-version-arch`.
+- Kernel files are now stored with their content-addressed ID as the filename.
+
+#### `mvm env`
+- New `image_import` step type for importing local images and VM rootfs in environment specs.
+
+#### `mvm image import`
+- Renamed `source_path` to `source` in the input struct (breaking — no backward compat).
 
 #### `mvm image ls`
 - Now shows the `Version` column in the default listing.
@@ -29,10 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the redundant duplicate URL from `config_fragments` in the bundled `kernel-official` spec.
 - Added `CONFIG_IKCONFIG` and `CONFIG_IKCONFIG_PROC` to the `containers` feature enforce map.
 - Added `CONFIG_NF_CONNTRACK` to the `iptables` feature enforce map.
-
-#### `mvm kernel import`
-- Kernel files are now stored with their content-addressed ID as the filename instead of `name-version-arch`.
-
 ### Fixed
 
 #### `mvm vm create`

@@ -100,15 +100,15 @@ func (i *ImagePullInput) Resolve(
 
 // ImageImportInput holds options for importing a local image file.
 type ImageImportInput struct {
-	Name              string   `json:"name"`
-	SourcePath        string   `json:"source_path"`
-	Force             bool     `json:"force"`
-	Format            string   `json:"format,omitempty"`
-	SetDefault        bool     `json:"set_default"`
-	Version           string   `json:"version,omitempty"`
-	Partition         int      `json:"partition,omitempty"`
-	SkipOptimization  bool     `json:"skip_optimization"`
-	DisabledDetectors []string `json:"disabled_detectors,omitempty"`
+	Name              string   `json:"name"                          yaml:"name"`
+	Source            string   `json:"source"                        yaml:"source"`
+	Force             bool     `json:"force"                         yaml:"force"`
+	Format            string   `json:"format,omitempty"              yaml:"format,omitempty"`
+	SetDefault        bool     `json:"set_default"                   yaml:"set_default"`
+	Version           string   `json:"version,omitempty"             yaml:"version,omitempty"`
+	Partition         int      `json:"partition,omitempty"           yaml:"partition,omitempty"`
+	SkipOptimization  bool     `json:"skip_optimization"             yaml:"skip_optimization"`
+	DisabledDetectors []string `json:"disabled_detectors,omitempty"  yaml:"disabled_detectors,omitempty"`
 }
 
 // Validate checks that the image import input is valid.
@@ -116,8 +116,8 @@ func (i *ImageImportInput) Validate() error {
 	if i.Name == "" {
 		return fmt.Errorf("image name is required")
 	}
-	if i.SourcePath == "" {
-		return fmt.Errorf("source path is required")
+	if i.Source == "" {
+		return fmt.Errorf("source is required")
 	}
 	if i.Partition < 0 {
 		return fmt.Errorf("partition cannot be negative")
@@ -139,23 +139,23 @@ func (i *ImageImportInput) Resolve(
 	}
 
 	// --- 1. Try VM resolution first — VM name supersedes local path ---
-	sourcePath := i.SourcePath
+	source := i.Source
 	if vmRepo != nil {
 		vmResolver := vm.NewResolver(vmRepo)
-		vmItem, vmErr := vmResolver.Resolve(ctx, sourcePath)
+		vmItem, vmErr := vmResolver.Resolve(ctx, source)
 		if vmErr == nil && vmItem != nil {
-			sourcePath = vmItem.RootfsPath
+			source = vmItem.RootfsPath
 			i.Format = "raw"          // force raw for VM rootfs
 			i.SkipOptimization = true // skip deblob for VM imports
-			slog.Debug("Importing from VM", "vm", vmItem.Name, "rootfs", sourcePath)
+			slog.Debug("Importing from VM", "vm", vmItem.Name, "rootfs", source)
 		}
 	}
 
 	// --- 2. If NOT a VM, validate source file exists ---
-	if sourcePath == i.SourcePath { // still original = not resolved as VM
-		if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+	if source == i.Source { // still original = not resolved as VM
+		if _, err := os.Stat(source); os.IsNotExist(err) {
 			return nil, errs.New(errs.CodeImageImportFailed,
-				fmt.Sprintf("source file not found: %s", sourcePath))
+				fmt.Sprintf("source not found: %s", source))
 		}
 	}
 
@@ -173,7 +173,7 @@ func (i *ImageImportInput) Resolve(
 	}
 	// Extension-based auto-detect
 	if format == "" {
-		fname := strings.ToLower(filepath.Base(sourcePath))
+		fname := strings.ToLower(filepath.Base(source))
 		for _, ext := range infra.ImageImportExtensionOrder {
 			if strings.HasSuffix(fname, ext) {
 				if fmtVal, ok := infra.ImageImportFormatMap[ext]; ok {
@@ -184,7 +184,7 @@ func (i *ImageImportInput) Resolve(
 		}
 	}
 	// Magic-byte fallback detection
-	detected := disk.DetectImageFormat(sourcePath)
+	detected := disk.DetectImageFormat(source)
 	if detected != "" && format == "" {
 		format = detected
 	}
@@ -193,7 +193,7 @@ func (i *ImageImportInput) Resolve(
 		Name:              &i.Name,
 		Version:           i.Version,
 		Arch:              arch,
-		SourcePath:        &sourcePath,
+		Source:            &source,
 		Format:            format,
 		OutputDir:         infra.GetImagesDir(),
 		DisabledDetectors: disabled,
@@ -222,7 +222,7 @@ type ResolvedImageAcquireInput struct {
 	Arch              string
 	OutputDir         string
 	Name              *string
-	SourcePath        *string
+	Source            *string
 	Version           string // resolved version; "" means latest
 	NoCache           bool
 	Force             bool

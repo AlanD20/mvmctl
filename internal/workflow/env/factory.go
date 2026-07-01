@@ -77,4 +77,9 @@ var Registry = map[string]StepFactory{
 		FromSpec:  newCopyStepFromSpec,
 		FromState: newCopyStepFromState,
 	},
+	"image_import": {
+		StepType:  "image_import",
+		FromSpec:  newImageImportStepFromSpec,
+		FromState: newImageImportStepFromState,
+	},
 }

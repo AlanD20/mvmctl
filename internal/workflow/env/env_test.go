@@ -28,15 +28,16 @@ import (
 
 func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
 	expectedTypes := map[string]struct{}{
-		"network": {},
-		"key":     {},
-		"image":   {},
-		"kernel":  {},
-		"binary":  {},
-		"vm":      {},
-		"ssh":     {},
-		"exec":    {},
-		"copy":    {},
+		"network":      {},
+		"key":          {},
+		"image":        {},
+		"image_import": {},
+		"kernel":       {},
+		"binary":       {},
+		"vm":           {},
+		"ssh":          {},
+		"exec":         {},
+		"copy":         {},
 	}
 
 	for typ := range expectedTypes {

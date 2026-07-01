@@ -386,7 +386,7 @@ Examples:
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			sourcePath := args[1]
+			source := args[1]
 
 			// Support name:version selector (--version overrides)
 			effectiveVersion := version
@@ -409,7 +409,7 @@ Examples:
 			input := inputs.ImageImportInput{
 				Name:              name,
 				Format:            format,
-				SourcePath:        sourcePath,
+				Source:            source,
 				Version:           effectiveVersion,
 				Partition:         rootPartition,
 				DisabledDetectors: disabledDetectors,
@@ -432,7 +432,7 @@ Examples:
 			if img == nil {
 				return fmt.Errorf("import failed: no image returned")
 			}
-			common.Cli.Success(fmt.Sprintf("Imported: %s", sourcePath))
+			common.Cli.Success(fmt.Sprintf("Imported: %s", source))
 			common.Cli.Info(fmt.Sprintf("  Name: %s", img.Name))
 			common.Cli.Info(fmt.Sprintf("  ID:   %s", common.Cli.FormatID(img.ID)))
 

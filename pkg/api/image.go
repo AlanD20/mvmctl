@@ -380,7 +380,7 @@ func (op *Operation) ImageImport(
 		Type:    resolved.Type,
 		Version: resolved.Version,
 		Arch:    resolved.Arch,
-		Source:  *resolved.SourcePath,
+		Source:  *resolved.Source,
 		Format:  resolved.Format,
 	}
 	if resolved.Version != "" {
@@ -400,7 +400,7 @@ func (op *Operation) ImageImport(
 	}
 	extractedPath, err := op.Services.Image.ExtractImage(
 		ctx,
-		*resolved.SourcePath,
+		*resolved.Source,
 		imageID,
 		infra.GetImagesDir(),
 		resolved.Format,
