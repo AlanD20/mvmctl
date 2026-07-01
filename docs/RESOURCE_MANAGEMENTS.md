@@ -196,7 +196,7 @@ kernel-official:
   source: <url>
   sha256: <hex|null>
   sha256_url: <url|null>
-  config_url_template: <url>
+  base_config_url_template: <url>
   config_fragments:
     - <path_or_url>
   output_name: <string>
@@ -222,7 +222,7 @@ kernel-firecracker:
   resolver: firecracker-s3
   source: <url>
   list_url_template: <url>
-  config_url_template: <url>
+  base_config_url_template: <url>
   output_name: <string>
   build_dir: <path>
   sha256: <hex|null>
@@ -244,7 +244,8 @@ kernel-firecracker:
 | `versions_url` | URL template for listing available kernel versions (`http-dir` resolver only). |
 | `source` | Tarball download URL or S3 base URL. |
 | `list_url_template` | S3 listing URL template for Firecracker CI kernels. Placeholders: `{ci_version}`, `{arch}`, `{version}`. |
-| `config_url_template` | URL template to download the base `.config` file. |
+| `base_config_url_template` | URL template to download the base `.config` file. |
+| `config_url_template` | **Deprecated.** Use `base_config_url_template`. If `base_config_url_template` is unset, this is used as a fallback. |
 | `sha256` / `sha256_url` | Same semantics as images.yaml SHA-256. |
 | `config_fragments` | Paths or URLs to additional kernel config files merged on top of the base config. |
 | `output_name` | Base filename for the compiled or downloaded `vmlinux` binary in the kernels cache. |

@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Now shows the vsock agent configuration (guest CID, UDS path, port, agent version, and upgrade state) when a VM has a vsock record. The auth token and redundant `vm_id` are intentionally omitted, and `agent_version` is persisted at VM creation and corrected on first agent contact.
 - The `networking.network` block no longer includes the network's full DHCP lease list.
 
+### Changed
+
+#### `kernels.yaml`
+- Renamed `config_url_template` to `base_config_url_template` to clarify that it provides the base kernel `.config`. The old name is still accepted as a deprecated fallback.
+- Removed the redundant duplicate URL from `config_fragments` in the bundled `kernel-official` spec.
+
 ### Fixed
 
 #### `mvm cp`
