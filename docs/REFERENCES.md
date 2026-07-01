@@ -145,7 +145,7 @@ The kernel resolver tries selectors in priority order:
 | `--keep-build-dir` | Keep build directory (official only) | `false` |
 | `--clean-build` | Skip cache and force clean build (official only) | `false` |
 | `--config PATH` | Custom kernel config file to apply as a fragment | — |
-| `--features TEXT` | Comma-separated kernel features (e.g. `kvm`, `nftables`, `tuntap`, `btrfs`) | — |
+| `--features TEXT` | Comma-separated kernel features (e.g. `kvm`, `nftables`, `tuntap`, `btrfs`). Use `all` or `*` to enable every feature defined in the selected kernel spec. | — |
 
 ```
 # List available remote kernel versions

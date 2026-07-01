@@ -251,7 +251,7 @@ kernel-firecracker:
 | `build_dir` | Working directory for kernel compilation. Cleaned up automatically unless `--keep-build-dir` is passed. |
 | `parallel_jobs` | `make -j` value. `null` defers to `defaults.kernel.build_jobs` (default: `nil`, meaning all available cores). |
 | `default_configs` | Flat map of `CONFIG_OPTION: value` entries. `y` enables the option, `n` disables it, string values set the option to a specific value (e.g. `"4"`). Passed to `scripts/config` during build. |
-| `features` | Named feature groups of kernel config options. Each feature has `desc` and `enforce` (a map of `CONFIG_OPTION: y` values). Activatable via `--features` on `mvm kernel pull`. |
+| `features` | Named feature groups of kernel config options. Each feature has `desc` and `enforce` (a map of `CONFIG_OPTION: y` values). Activatable via `--features` on `mvm kernel pull`. Use `all` or `*` to enable every feature in the spec. |
 | `options.version_discoveries` | List of subdirectory patterns to scan on kernel.org (e.g. `v6.x`, `v7.x`) for version discovery. |
 | `options.file_pattern` | Filename prefix pattern for matching tarball entries (e.g. `linux-`). |
 | `options.file_suffix` | Filename suffix for matching tarball entries (e.g. `.tar.xz`). |

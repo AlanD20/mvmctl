@@ -132,13 +132,14 @@ mvm kernel pull --type official --features kvm
 
 # Enable multiple features (comma-separated)
 mvm kernel pull --type official --features kvm,nftables
+
+# Enable every feature defined in kernels.yaml
+mvm kernel pull --type official --features all
+# or
+mvm kernel pull --type official --features '*'
 ```
 
-Supported feature names:
-- `kvm` — Enable KVM paravirtualization options (required for Firecracker)
-- `nftables` — Enable nftables kernel support (required for nftables firewall backend)
-- `tuntap` — Enable TUN/TAP networking support (required for Firecracker network connectivity)
-- `btrfs` — Enable Btrfs filesystem support (required for Btrfs root filesystems)
+Feature names are defined per-kernel in `internal/assets/kernels.yaml` under the `features:` map. The available names depend on the selected kernel spec. Use `--features all` (or `--features '*'`) to enable every feature in the spec at once.
 
 All kernel types (`firecracker` and `official`) automatically include the `kvm` feature in the input resolution layer when the VM has nested virtualization enabled, but features only affect `--type official` builds (pre-built `firecracker` kernels download ready-compiled binaries).
 

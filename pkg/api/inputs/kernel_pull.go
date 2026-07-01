@@ -7,12 +7,14 @@ import (
 	"mvmctl/internal/core/kernel"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/firecracker"
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
 	"mvmctl/pkg/errs"
 	"os"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 )
 
@@ -174,22 +176,55 @@ func (i *KernelPullInput) Resolve(ctx context.Context, cfg *config.Service) (*Re
 			errs.WithClass(errs.ClassValidation),
 		)
 	}
-	// Validate feature names (only for official builds) —
-	if result.KernelType == "official" && len(result.Features) > 0 {
-		valid := kernel.KernelValidFeatures
-		var invalid []string
-		for _, f := range result.Features {
-			if !valid[f] {
-				invalid = append(invalid, f)
+	return result, nil
+}
+
+// ResolveFeatures expands wildcards and validates feature names against the spec.
+// If "all" or "*" is in the requested list, it's replaced with all sorted keys from specFeatures.
+// Each feature name is validated against specFeatures; unknown names return an error.
+// The result is deduplicated while preserving the original order.
+func ResolveFeatures(requested []string, specFeatures map[string]model.KernelFeature) ([]string, error) {
+	if len(requested) == 0 {
+		return nil, nil
+	}
+
+	var result []string
+	seen := make(map[string]bool)
+
+	for _, f := range requested {
+		if f == "all" || f == "*" {
+			// Expand wildcard: add all spec feature names, sorted for determinism
+			names := make([]string, 0, len(specFeatures))
+			for name := range specFeatures {
+				names = append(names, name)
 			}
-		}
-		if len(invalid) > 0 {
-			msg := fmt.Sprintf(
-				"Unknown kernel features: %s. Valid features: kvm, nftables, tuntap, btrfs",
-				strings.Join(invalid, ", "),
-			)
-			return nil, errs.New(errs.CodeKernelBuildFailed, msg, errs.WithClass(errs.ClassValidation))
+			sort.Strings(names)
+			for _, name := range names {
+				if !seen[name] {
+					result = append(result, name)
+					seen[name] = true
+				}
+			}
+		} else {
+			if seen[f] {
+				continue
+			}
+			if _, ok := specFeatures[f]; !ok {
+				valid := make([]string, 0, len(specFeatures))
+				for name := range specFeatures {
+					valid = append(valid, name)
+				}
+				sort.Strings(valid)
+				return nil, errs.New(
+					errs.CodeKernelBuildFailed,
+					fmt.Sprintf("unknown kernel feature: %q. Valid features: %s", f, strings.Join(valid, ", ")),
+					errs.WithClass(errs.ClassValidation),
+				)
+			}
+			result = append(result, f)
+			seen[f] = true
 		}
 	}
+
 	return result, nil
 }

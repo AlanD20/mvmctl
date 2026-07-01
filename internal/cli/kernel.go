@@ -217,7 +217,7 @@ Examples:
 	cmd.Flags().BoolVar(&keepBuildDir, "keep-build-dir", false, "Keep build directory (official only)")
 	cmd.Flags().BoolVar(&cleanBuild, "clean-build", false, "Skip cache (official only)")
 	cmd.Flags().StringVar(&kernelConfig, "config", "", "Custom kernel config file to apply as a fragment")
-	cmd.Flags().StringVar(&features, "features", "", "Comma-separated kernel features (kvm, nftables, tuntap, btrfs)")
+	cmd.Flags().StringVar(&features, "features", "", "Comma-separated features (all/*): kvm, nftables, tuntap, btrfs")
 
 	return cmd
 }

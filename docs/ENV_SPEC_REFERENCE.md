@@ -184,7 +184,7 @@ Download or build a kernel.
 | `clean_build` | `bool` | No | `false` | Force clean build (skip cache). |
 | `kernel_config` | `string` | No | `""` | Path to custom kernel config file. |
 | `default` | `bool` | No | `false` | Set as default kernel. |
-| `features` | `string` | No | `""` | Comma-separated features, e.g. `"kvm,nftables,tuntap"`. |
+| `features` | `string` | No | `""` | Comma-separated features, e.g. `"kvm,nftables,tuntap"`. Use `"all"` or `"*"` to enable every feature in the selected kernel spec. |
 
 **Example:**
 ```yaml

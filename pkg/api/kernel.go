@@ -173,6 +173,16 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 		)
 	}
 	spec := specs[0]
+	// Resolve features — expand wildcards, validate against spec
+	resolvedFeatures, err := inputs.ResolveFeatures(resolved.Features, spec.Features)
+	if err != nil {
+		return nil, errs.WrapMsg(
+			errs.CodeKernelPullFailed,
+			fmt.Sprintf("Feature resolution failed: %v", err),
+			err,
+		)
+	}
+	resolved.Features = resolvedFeatures
 	var fetchResult *model.KernelPullResult
 	// --- Dispatch based on kernel type ---
 	switch resolved.KernelType {

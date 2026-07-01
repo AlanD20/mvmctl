@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Now shows the vsock agent configuration (guest CID, UDS path, port, agent version, and upgrade state) when a VM has a vsock record. The auth token and redundant `vm_id` are intentionally omitted, and `agent_version` is persisted at VM creation and corrected on first agent contact.
 - The `networking.network` block no longer includes the network's full DHCP lease list.
 
+#### `mvm kernel pull`
+- `--features` now accepts `all` or `*` as a wildcard to enable every feature defined in the selected kernel spec.
+- Feature names are now validated against the spec's `features` map instead of a hardcoded list.
+
 ### Changed
 
 #### `kernels.yaml`
