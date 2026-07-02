@@ -46,6 +46,7 @@ func noopFactory(stepType string) StepFactory {
 				stepType,
 				stepName,
 				nil,
+				nil,
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					if write != nil {
 						return write(ctx, model.ResourceState{
@@ -69,6 +70,7 @@ func noopFactory(stepType string) StepFactory {
 				stepType,
 				stepName,
 				deps,
+				nil,
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					return nil
 				},
@@ -94,6 +96,7 @@ func errFactory(stepType string, applyErr error) StepFactory {
 				stepType,
 				stepName,
 				nil,
+				nil,
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					return applyErr
 				},
@@ -111,6 +114,7 @@ func errFactory(stepType string, applyErr error) StepFactory {
 				stepType,
 				stepName,
 				deps,
+				nil,
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					return nil
 				},

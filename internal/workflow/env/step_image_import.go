@@ -28,6 +28,7 @@ type ImageImportStep struct {
 	stepType string
 	name     string
 	deps     []string
+	removes  []string
 	specHash string
 	input    inputs.ImageImportInput
 	op       api.ImageAPI
@@ -41,7 +42,8 @@ func (s *ImageImportStep) Name() string { return FormatStepName(s.stepType, s.na
 
 func (s *ImageImportStep) Dependencies() []string { return s.deps }
 
-func (s *ImageImportStep) SpecHash() string { return s.specHash }
+func (s *ImageImportStep) SpecHash() string  { return s.specHash }
+func (s *ImageImportStep) Removes() []string { return s.removes }
 
 func (s *ImageImportStep) Apply(
 	ctx context.Context,
@@ -180,7 +182,8 @@ func newImageImportStepFromSpec(
 	return &ImageImportStep{
 		stepType: stepType,
 		name:     name,
-		deps:     extractDependsOn(spec),
+		deps:     spec.GetStringList("depends_on"),
+		removes:  spec.GetStringList("removes"),
 		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,

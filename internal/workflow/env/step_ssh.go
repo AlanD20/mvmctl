@@ -26,6 +26,7 @@ type SSHStep struct {
 	stepType string
 	name     string
 	deps     []string
+	removes  []string
 	specHash string
 	input    inputs.SSHInput
 	op       api.SSHAPI
@@ -39,7 +40,8 @@ func (s *SSHStep) Name() string { return FormatStepName(s.stepType, s.name) }
 
 func (s *SSHStep) Dependencies() []string { return s.deps }
 
-func (s *SSHStep) SpecHash() string { return s.specHash }
+func (s *SSHStep) SpecHash() string  { return s.specHash }
+func (s *SSHStep) Removes() []string { return s.removes }
 
 func (s *SSHStep) Apply(
 	ctx context.Context,
@@ -122,7 +124,8 @@ func newSSHStepFromSpec(
 	return &SSHStep{
 		stepType: stepType,
 		name:     name,
-		deps:     extractDependsOn(spec),
+		deps:     spec.GetStringList("depends_on"),
+		removes:  spec.GetStringList("removes"),
 		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,

@@ -52,6 +52,7 @@ func noopDestroyFactory(stepType string) StepFactory {
 				stepType,
 				stepName,
 				deps,
+				nil,
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					return nil
 				},
@@ -80,6 +81,7 @@ func errDestroyFactory(stepType string, destroyErr error) StepFactory {
 				stepType,
 				stepName,
 				deps,
+				nil,
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					return nil
 				},
@@ -255,6 +257,7 @@ func TestDestroy_VerifyStateFileAfterSingleDestroy(t *testing.T) {
 				stepType,
 				stepName,
 				deps,
+				nil,
 				func(ctx context.Context, state *workflow.SharedState, saved model.ResourceState, write workflow.StateWriter, onProgress event.OnProgressCallback) error {
 					return nil
 				},

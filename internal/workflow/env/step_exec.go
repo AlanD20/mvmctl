@@ -27,6 +27,7 @@ type ExecStep struct {
 	stepType     string
 	name         string
 	deps         []string
+	removes      []string
 	specHash     string
 	input        inputs.ExecInput
 	op           api.ExecAPI
@@ -41,7 +42,8 @@ func (s *ExecStep) Name() string { return FormatStepName(s.stepType, s.name) }
 
 func (s *ExecStep) Dependencies() []string { return s.deps }
 
-func (s *ExecStep) SpecHash() string { return s.specHash }
+func (s *ExecStep) SpecHash() string  { return s.specHash }
+func (s *ExecStep) Removes() []string { return s.removes }
 
 func (s *ExecStep) Apply(
 	ctx context.Context,
@@ -138,7 +140,8 @@ func newExecStepFromSpec(
 	return &ExecStep{
 		stepType:     stepType,
 		name:         name,
-		deps:         extractDependsOn(spec),
+		deps:         spec.GetStringList("depends_on"),
+		removes:      spec.GetStringList("removes"),
 		specHash:     crypto.SHA256(data),
 		input:        input,
 		op:           op,

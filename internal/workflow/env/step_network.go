@@ -27,6 +27,7 @@ type NetworkStep struct {
 	stepType string
 	name     string
 	deps     []string
+	removes  []string
 	specHash string
 	input    inputs.NetworkCreateInput
 	op       api.NetworkAPI
@@ -40,7 +41,8 @@ func (s *NetworkStep) Name() string { return FormatStepName(s.stepType, s.name) 
 
 func (s *NetworkStep) Dependencies() []string { return s.deps }
 
-func (s *NetworkStep) SpecHash() string { return s.specHash }
+func (s *NetworkStep) SpecHash() string  { return s.specHash }
+func (s *NetworkStep) Removes() []string { return s.removes }
 
 func (s *NetworkStep) Apply(
 	ctx context.Context,
@@ -189,7 +191,8 @@ func newNetworkStepFromSpec(
 	return &NetworkStep{
 		stepType: stepType,
 		name:     name,
-		deps:     extractDependsOn(spec),
+		deps:     spec.GetStringList("depends_on"),
+		removes:  spec.GetStringList("removes"),
 		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,

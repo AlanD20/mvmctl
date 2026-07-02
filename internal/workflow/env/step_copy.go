@@ -27,6 +27,7 @@ type CopyStep struct {
 	stepType string
 	name     string
 	deps     []string
+	removes  []string
 	specHash string
 	input    inputs.CPInput
 	op       api.CPAPI
@@ -40,7 +41,8 @@ func (s *CopyStep) Name() string { return FormatStepName(s.stepType, s.name) }
 
 func (s *CopyStep) Dependencies() []string { return s.deps }
 
-func (s *CopyStep) SpecHash() string { return s.specHash }
+func (s *CopyStep) SpecHash() string  { return s.specHash }
+func (s *CopyStep) Removes() []string { return s.removes }
 
 func (s *CopyStep) Apply(
 	ctx context.Context,
@@ -132,7 +134,8 @@ func newCopyStepFromSpec(
 	return &CopyStep{
 		stepType: stepType,
 		name:     name,
-		deps:     extractDependsOn(spec),
+		deps:     spec.GetStringList("depends_on"),
+		removes:  spec.GetStringList("removes"),
 		specHash: crypto.SHA256(specData),
 		input:    input,
 		op:       op,

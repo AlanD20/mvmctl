@@ -27,6 +27,7 @@ type KernelStep struct {
 	stepType string
 	name     string
 	deps     []string
+	removes  []string
 	specHash string
 	input    inputs.KernelPullInput
 	op       api.KernelAPI
@@ -40,7 +41,8 @@ func (s *KernelStep) Name() string { return FormatStepName(s.stepType, s.name) }
 
 func (s *KernelStep) Dependencies() []string { return s.deps }
 
-func (s *KernelStep) SpecHash() string { return s.specHash }
+func (s *KernelStep) SpecHash() string  { return s.specHash }
+func (s *KernelStep) Removes() []string { return s.removes }
 
 func (s *KernelStep) Apply(
 	ctx context.Context,
@@ -174,7 +176,8 @@ func newKernelStepFromSpec(
 	return &KernelStep{
 		stepType: stepType,
 		name:     name,
-		deps:     extractDependsOn(spec),
+		deps:     spec.GetStringList("depends_on"),
+		removes:  spec.GetStringList("removes"),
 		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,

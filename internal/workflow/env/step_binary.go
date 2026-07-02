@@ -27,6 +27,7 @@ type BinaryStep struct {
 	stepType string
 	name     string
 	deps     []string
+	removes  []string
 	specHash string
 	input    inputs.BinaryPullInput
 	op       api.BinaryAPI
@@ -40,7 +41,8 @@ func (s *BinaryStep) Name() string { return FormatStepName(s.stepType, s.name) }
 
 func (s *BinaryStep) Dependencies() []string { return s.deps }
 
-func (s *BinaryStep) SpecHash() string { return s.specHash }
+func (s *BinaryStep) SpecHash() string  { return s.specHash }
+func (s *BinaryStep) Removes() []string { return s.removes }
 
 func (s *BinaryStep) Apply(
 	ctx context.Context,
@@ -181,7 +183,8 @@ func newBinaryStepFromSpec(
 	return &BinaryStep{
 		stepType: stepType,
 		name:     name,
-		deps:     extractDependsOn(spec),
+		deps:     spec.GetStringList("depends_on"),
+		removes:  spec.GetStringList("removes"),
 		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,

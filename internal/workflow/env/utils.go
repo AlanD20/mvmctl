@@ -15,27 +15,6 @@ import (
 	"mvmctl/internal/lib/workflow"
 )
 
-// extractDependsOn reads the "depends_on" field from a spec entry and
-// returns it as a []string of full step names (e.g. "network:my-net").
-// Returns nil if the field is missing or not a list of strings.
-func extractDependsOn(spec model.ResourceMap) []string {
-	v, ok := spec["depends_on"]
-	if !ok {
-		return nil
-	}
-	raw, ok := v.([]any)
-	if !ok {
-		return nil
-	}
-	deps := make([]string, 0, len(raw))
-	for _, item := range raw {
-		if s, ok := item.(string); ok {
-			deps = append(deps, s)
-		}
-	}
-	return deps
-}
-
 // InferStepType extracts the step type from a full step name.
 // For steps named "type:name", returns "type". Falls back to "unknown".
 // This is the canonical function; extractStepType in the api package delegates to it.

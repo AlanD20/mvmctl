@@ -93,6 +93,7 @@ Every step type supports these top-level fields:
 |-------|------|----------|-------------|
 | `name` | `string` | **Yes** | Step name. Becomes `"type:name"` identifier. |
 | `depends_on` | `[]string` | No | List of `"type:name"` dependencies. |
+| `removes` | `[]string` | No | List of `"type:name"` resources to destroy after this step succeeds. |
 | `env` | `map[string]string` | No | Environment variable overrides for `exec` and `ssh` commands. |
 
 ---
@@ -199,6 +200,11 @@ image_import:
 
   - name: from-vm
     source: my-running-vm
+
+  - name: capture-base
+    source: builder
+    deps: [exec:setup-builder]
+    removes: [vm:builder]     # ← builder VM destroyed after import
 ```
 
 ---
@@ -402,6 +408,19 @@ Steps can declare dependencies on other steps using `depends_on`. The engine use
 
 **Format:** `"type:name"` — singular type prefix + step name.
 
+Steps can also declare resources to clean up after they complete using `removes`:
+
+```yaml
+image_import:
+  - name: capture-base
+    source: builder
+    removes: [vm:builder]
+```
+
+The `removes` field lists `"type:name"` resources to destroy immediately after this step's `Apply()` succeeds — before downstream steps run. This frees resources mid-pipeline (e.g., tearing down a builder VM after its rootfs is captured).
+
+**Relationship:** `depends_on` = "need this first", `removes` = "now clean this up". Same level, opposite direction.
+
 ```yaml
 vm:
   - name: dev-vm
@@ -439,6 +458,19 @@ Steps within the same level run in parallel.
 | `copy` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (file already transferred) |
 
 **Why image/kernel/binary are preserved:** These are downloaded assets cached for reuse across multiple environments. Deleting them on destroy would force a re-download on the next `env apply`. They are only removed when explicitly deleted via `mvm image rm`, `mvm kernel rm`, or `mvm binary rm`.
+
+### Mid-pipeline removals (`removes` field)
+
+The `removes` field declared on any step destroys resources **immediately after that step completes** — not during `env destroy`. This is useful for freeing resources mid-pipeline:
+
+```yaml
+image_import:
+  - name: capture-base
+    source: builder
+    removes: [vm:builder]
+```
+
+The builder VM is torn down right after its rootfs is captured, before downstream steps start. Removals use the same API calls as destroy but run at the applying step's position in the DAG, not at the end. Failure to remove is non-fatal (logged as a warning).
 
 ---
 

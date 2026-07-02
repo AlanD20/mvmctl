@@ -29,6 +29,7 @@ type VMStep struct {
 	stepType string
 	name     string
 	deps     []string
+	removes  []string
 	specHash string
 	input    inputs.VMCreateInput
 	op       api.VMAPI
@@ -49,7 +50,8 @@ func (s *VMStep) Dependencies() []string {
 	return deps
 }
 
-func (s *VMStep) SpecHash() string { return s.specHash }
+func (s *VMStep) SpecHash() string  { return s.specHash }
+func (s *VMStep) Removes() []string { return s.removes }
 
 func (s *VMStep) Apply(
 	ctx context.Context,
@@ -273,7 +275,8 @@ func newVMStepFromSpec(
 	return &VMStep{
 		stepType: stepType,
 		name:     name,
-		deps:     extractDependsOn(spec),
+		deps:     spec.GetStringList("depends_on"),
+		removes:  spec.GetStringList("removes"),
 		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,

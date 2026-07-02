@@ -54,6 +54,29 @@ func (r ResourceMap) GetInt(key string) int {
 	return i
 }
 
+// GetStringList safely extracts a list of strings from the spec.
+// Returns nil if the key is missing or not a []any with string items.
+func (r ResourceMap) GetStringList(key string) []string {
+	if r == nil {
+		return nil
+	}
+	v, ok := r[key]
+	if !ok {
+		return nil
+	}
+	raw, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if s, ok := item.(string); ok {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 // ResourceMeta is workflow metadata per resource.
 type ResourceMeta struct {
 	WasCreated bool   `yaml:"was_created"`

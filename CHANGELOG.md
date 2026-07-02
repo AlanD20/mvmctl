@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### `mvm env`
 - New `image_import` step type for importing local images and VM rootfs in environment specs.
+- Exec/SSH steps now support `ignore_errors: true` to continue on non-zero exit codes.
+- `image_import` destroy now removes the imported image from the database and disk.
+- All steps now support `removes` field to destroy resources mid-pipeline after the step completes.
 
 #### `mvm image import`
 - Renamed `source_path` to `source` in the input struct (breaking — no backward compat).
@@ -37,9 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm completion`
 - Removed PowerShell completion support.
 
-#### `mvm env`
-- Exec/SSH steps now support `ignore_errors: true` to continue on non-zero exit codes.
-- `image_import` destroy now removes the imported image from the database and disk.
+#### `mvm network inspect`
+- Now shows active firewall rules per network.
 
 #### `mvm image ls`
 - Now shows the `Version` column in the default listing.

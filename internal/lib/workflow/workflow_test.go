@@ -40,6 +40,7 @@ func (s *mockStep) Name() string           { return s.name }
 func (s *mockStep) Type() string           { return s.stepType }
 func (s *mockStep) Dependencies() []string { return s.deps }
 func (s *mockStep) SpecHash() string       { return s.specHash }
+func (s *mockStep) Removes() []string      { return nil }
 
 func (s *mockStep) Apply(
 	ctx context.Context,

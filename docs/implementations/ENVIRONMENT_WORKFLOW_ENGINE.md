@@ -337,7 +337,7 @@ Destroy reconstructs steps from the saved state file — the original spec file 
 | `internal/workflow/env/spec.go` | `EnvSpec`, `UnmarshalYAML()`, `ResolveSpec()` |
 | `internal/workflow/env/factory.go` | `StepFactory`, `Registry` (9 step types) |
 | `internal/workflow/env/step_*.go` | Step implementations: network, key, image, kernel, binary, vm, ssh, copy, exec |
-| `internal/workflow/env/utils.go` | `FormatStepName()`, `BareStepName()`, `StateFromMap()`, `extractDependsOn()` |
+| `internal/workflow/env/utils.go` | `FormatStepName()`, `BareStepName()`, `StateFromMap()`, `InferStepType()` |
 | `internal/cli/env.go` | Cobra commands: `apply`, `ls`, `diff`, `destroy` |
 
 ## Design decisions
@@ -353,3 +353,24 @@ Destroy reconstructs steps from the saved state file — the original spec file 
 **No init() calls.** The Registry is a package-level map literal with all step types visible in one place. No side effects during initialization.
 
 **Imperative steps always re-run.** SSH, copy, and exec steps have no existence check. They always execute on apply. Destroy is a no-op for all three.
+
+### Step removals (`removes` field)
+
+Every step can declare a `removes` field — a list of `"type:name"` resources to destroy after the step's `Apply()` succeeds:
+
+```yaml
+image_import:
+  - name: capture-base
+    source: builder
+    removes: [vm:builder]
+```
+
+After `capture-base` finishes importing, `vm:builder` is destroyed immediately — before downstream steps start. This frees resources mid-pipeline instead of waiting for the final destroy phase.
+
+**Why per-step, not global:** Timing matters. The builder VM might hold RAM and disk that a downstream `vm:final` needs. A global cleanup block at the end can't express this ordering. Placing `removes` on the step that creates the need for cleanup makes the intent explicit and keeps the lifecycle declaration with the consumer, not the resource being destroyed.
+
+**Why not on the removed resource:** Putting `lifespan: [image_import:capture-base]` on the VM couples it to downstream consumers it shouldn't know about. The consumer declaring `removes` is more natural — it's the step that creates the need for cleanup.
+
+**Pattern relationship:** `depends_on` is "need this first", `removes` is "now clean this up". Same level, same logic, opposite direction.
+
+**Dispatch:** The cleanup iterates each step's `removes` after the pipeline succeeds. The resource type prefix (`vm:`, `image:`, etc.) determines which API method to call via a switch/case on `InferStepType()`. Failures are best-effort — logged as warnings, never propagated.

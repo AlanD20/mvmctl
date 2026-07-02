@@ -73,6 +73,10 @@ type Step interface {
 	// apply runs, the resource is considered "drifted" and may need re-apply.
 	// Steps that don't support drift detection return an empty string.
 	SpecHash() string
+
+	// Removes returns the names of resources to destroy after this step
+	// completes successfully. Returns nil for steps that don't declare removes.
+	Removes() []string
 }
 
 // StepFunc is an adapter that creates a Step from individual function
@@ -81,6 +85,7 @@ type StepFunc struct {
 	stepType    string
 	name        string
 	deps        []string
+	removes     []string
 	specHash    string
 	applyFn     func(ctx context.Context, state *SharedState, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error
 	destroyFn   func(ctx context.Context, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error
@@ -92,6 +97,7 @@ func NewStepFunc(
 	stepType string,
 	name string,
 	deps []string,
+	removes []string,
 	apply func(ctx context.Context, state *SharedState, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error,
 	destroy func(ctx context.Context, saved model.ResourceState, write StateWriter, onProgress event.OnProgressCallback) error,
 	stateData func() model.ResourceState,
@@ -100,6 +106,7 @@ func NewStepFunc(
 		stepType:    stepType,
 		name:        name,
 		deps:        deps,
+		removes:     removes,
 		applyFn:     apply,
 		destroyFn:   destroy,
 		stateDataFn: stateData,
@@ -109,6 +116,7 @@ func NewStepFunc(
 func (s *StepFunc) Name() string           { return s.name }
 func (s *StepFunc) Type() string           { return s.stepType }
 func (s *StepFunc) Dependencies() []string { return s.deps }
+func (s *StepFunc) Removes() []string      { return s.removes }
 
 func (s *StepFunc) Apply(
 	ctx context.Context,

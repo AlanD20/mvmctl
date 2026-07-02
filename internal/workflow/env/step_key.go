@@ -26,6 +26,7 @@ type KeyStep struct {
 	stepType string
 	name     string
 	deps     []string
+	removes  []string
 	specHash string
 	input    inputs.KeyCreateInput
 	op       api.KeyAPI
@@ -39,7 +40,8 @@ func (s *KeyStep) Name() string { return FormatStepName(s.stepType, s.name) }
 
 func (s *KeyStep) Dependencies() []string { return s.deps }
 
-func (s *KeyStep) SpecHash() string { return s.specHash }
+func (s *KeyStep) SpecHash() string  { return s.specHash }
+func (s *KeyStep) Removes() []string { return s.removes }
 
 func (s *KeyStep) Apply(
 	ctx context.Context,
@@ -184,7 +186,8 @@ func newKeyStepFromSpec(
 	return &KeyStep{
 		stepType: stepType,
 		name:     name,
-		deps:     extractDependsOn(spec),
+		deps:     spec.GetStringList("depends_on"),
+		removes:  spec.GetStringList("removes"),
 		specHash: crypto.SHA256(data),
 		input:    input,
 		op:       op,
