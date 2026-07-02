@@ -190,7 +190,9 @@ func (s *Service) FetchFirecrackerKernel(
 	}
 	if expectedSHA256 == "" && !intentionalNoChecksum {
 		return nil, errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
-			"Checksum required for Firecracker CI kernel download: %s", downloadURL))
+			"Checksum required for kernel download: %s. "+
+				"The download server may be temporarily unavailable (HTTP 503/404). "+
+				"Check your network or try again later.", downloadURL))
 	}
 
 	slog.Info("Downloading Firecracker CI kernel", "url", downloadURL)
@@ -433,13 +435,17 @@ func (s *Service) resolveSourceURL(
 			filename := fmt.Sprintf(KernelTarballPattern, version)
 			if sha, err := s.fetchSHA256(ctx, resolvedSHA256URL, filename); err == nil && sha != "" {
 				resolvedSHA256 = sha
+			} else if err != nil {
+				slog.Warn("failed to fetch kernel checksum", "url", resolvedSHA256URL, "error", err)
 			}
 		}
 	}
 
 	if resolvedSHA256 == "" && !intentionalNoChecksum {
 		return resolvedSourceURL, "", errs.New(errs.CodeKernelBuildFailed, fmt.Sprintf(
-			"Checksum required for kernel source download: %s", resolvedSourceURL))
+			"Checksum required for kernel source download: %s. "+
+				"The download server may be temporarily unavailable (HTTP 503/404). "+
+				"Check your network or try again later.", resolvedSourceURL))
 	}
 
 	return resolvedSourceURL, resolvedSHA256, nil

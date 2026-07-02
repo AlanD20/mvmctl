@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm network inspect`
 - Now shows active firewall rules per network.
 
+#### `mvm kernel pull`
+- Friendlier error messages when checksum server is temporarily unavailable.
+
 #### `mvm image ls`
 - Now shows the `Version` column in the default listing.
 
