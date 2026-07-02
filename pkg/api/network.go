@@ -229,6 +229,13 @@ func (op *Operation) NetworkInspect(
 			leaseList = append(leaseList, l)
 		}
 	}
+	// Load firewall rules
+	var ruleList []*model.FirewallRule
+	if ft := op.Services.Network.FirewallTracker(); ft != nil {
+		if rules, err := ft.GetByNetworkID(ctx, updated.ID, true); err == nil {
+			ruleList = rules
+		}
+	}
 	return &results.NetworkInspect{
 		Network: results.NetworkItemInfo{
 			ID: updated.ID, Name: updated.Name, Subnet: updated.Subnet,
@@ -246,6 +253,7 @@ func (op *Operation) NetworkInspect(
 			NATGateways: network.NatGatewaysList(updated),
 		},
 		Leases: leaseList,
+		Rules:  ruleList,
 	}, nil
 }
 
