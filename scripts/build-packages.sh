@@ -252,7 +252,7 @@ cp "${PROJECT_DIR}/dist/mvm-arm64" "${OUTPUT_DIR}/" 2>/dev/null || true
 echo ""
 echo "==> Generating checksums..."
 cd "${OUTPUT_DIR}"
-sha256sum ./*.deb ./*.rpm ./*.pkg.tar.zst ./PKGBUILD 2>/dev/null > checksums.sha256 || true
+sha256sum ./*.deb ./*.rpm ./*.pkg.tar.zst ./PKGBUILD ./mvm ./mvm-arm64 2>/dev/null > checksums.sha256 || true
 cat checksums.sha256 2>/dev/null || true
 
 # ─── Summary ────────────────────────────────────────────────────────────────
