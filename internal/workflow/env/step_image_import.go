@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"gopkg.in/yaml.v3"
 
@@ -116,7 +117,19 @@ func (s *ImageImportStep) Destroy(
 		s.saved = StateFromMap[ImageImportState](saved.Spec)
 		s.meta = saved.Meta
 	}
-	// Images persist in the database — no teardown needed.
+
+	// Remove the imported image if we have its ID.
+	if s.saved != nil && s.saved.ImageID != "" {
+		onProgress(event.Progress{Phase: s.Name(), Status: "removing", Message: "removing imported image"})
+		result := s.op.ImageRemove(ctx, inputs.ImageInput{
+			Identifiers: []string{s.saved.ImageID},
+		}, true)
+		if result != nil && len(result.Items) > 0 && result.Items[0].Status == "error" {
+			slog.Warn("failed to remove image on destroy",
+				"image_id", s.saved.ImageID, "error", result.Items[0].Exception)
+		}
+	}
+
 	if err := write(ctx, s.StateData()); err != nil {
 		return fmt.Errorf("persist step state after destroy: %w", err)
 	}
