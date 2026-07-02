@@ -450,7 +450,7 @@ Steps within the same level run in parallel.
 | `key` | **Deleted** — SSH key files removed from disk, DB record removed | Created per-environment |
 | `vm` | **Deleted** — Firecracker process killed, console relay shut down, TAP device removed, IP lease released, volumes detached, VM directory + DB record deleted | Full lifecycle teardown |
 | `image` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
-| `image_import` | **Preserved** — files stay in cache, DB record kept | Asset — imported image is reusable across environments |
+| `image_import` | **Deleted** — image file removed from disk, DB record deleted | Imported image is removed on destroy; explicit cache asset otherwise |
 | `kernel` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to rebuild/re-download, shared across environments |
 | `binary` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
 | `ssh` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran) |
