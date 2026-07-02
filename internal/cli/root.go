@@ -88,10 +88,11 @@ func NewRootCmd(op *api.Operation) *cobra.Command {
 		},
 	})
 
-	// Infrastructure subcommands: version, completion, run
+	// Infrastructure subcommands: version, completion, run, self-update
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newCompletionCmd())
 	cmd.AddCommand(newRunCmd())
+	cmd.AddCommand(NewSelfUpdateCmd(op))
 
 	// Store API reference for shell completion
 	opRef = op
@@ -183,7 +184,7 @@ func shouldSkipPreRun(c *cobra.Command) bool {
 	for cc := c; cc != nil; cc = cc.Parent() {
 		if cc.Name() == "help" || cc.Name() == "version" || cc.Name() == "init" ||
 			cc.Name() == "completion" || cc.Name() == "host" || cc.Name() == "cache" ||
-			cc.Name() == "run" || cc.Name() == "tui" {
+			cc.Name() == "run" || cc.Name() == "tui" || cc.Name() == "self-update" {
 			return true
 		}
 	}

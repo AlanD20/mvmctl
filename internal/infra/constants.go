@@ -21,6 +21,12 @@ const BootstrapName = "mvmctl"
 // CLIName is the canonical CLI name. A compiled Go binary has one name.
 const CLIName = "mvm"
 
+// MvmctlGitHubRepo is the GitHub repository for mvmctl self-update.
+const MvmctlGitHubRepo = "AlanD20/mvmctl"
+
+// FirecrackerGitHubRepo is the GitHub repository for Firecracker releases.
+const FirecrackerGitHubRepo = "firecracker-microvm/firecracker"
+
 // ProjectNameDefault is the compile-time constant default for the project name.
 const ProjectNameDefault = "mvmctl"
 
@@ -331,7 +337,6 @@ const DefaultSysctlConfPath = "/etc/sysctl.d/mvmctl.conf"
 const DefaultLibguestfsSeedDir = "/var/lib/cloud/seed/nocloud"
 
 // --- Firecracker GitHub ---
-const FirecrackerGithubReleasesAPIURL = "https://api.github.com/repos/firecracker-microvm/firecracker/releases"
 const FirecrackerGithubDownloadURL = "https://github.com/firecracker-microvm/firecracker/releases/download"
 const FirecrackerGitRepoURL = "https://github.com/firecracker-microvm/firecracker.git"
 

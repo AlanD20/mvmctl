@@ -147,7 +147,8 @@ func TestBuilder_BuildHostnameOps(t *testing.T) {
 	t.Parallel()
 
 	hostnameCmd := func(hostname string) string {
-		return fmt.Sprintf(`test -f /etc/hosts && sed -i '/^127\.0\.1\.1/d' /etc/hosts; printf '127.0.1.1\t%s\n' >> /etc/hosts`, hostname)
+		return fmt.Sprintf(`test -f /etc/hosts && sed -i '/^127\.0\.1\.1/d' /etc/hosts`+
+			`; printf '127.0.1.1\t%s\n' >> /etc/hosts`, hostname)
 	}
 
 	tests := map[string]struct {

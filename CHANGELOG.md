@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Renamed `source_path` to `source` in the input struct (breaking — no backward compat).
 - Now runs `sync` on running source VMs via vsock before importing their rootfs.
 
+#### `mvm self-update`
+- New command to check for and apply updates from GitHub releases.
+- `mvm self-update check` — compare current version against latest release.
+- `mvm self-update apply` — download, verify SHA256, and atomic binary swap.
+- `mvm self-update` — check + apply if newer.
+- Supports `--force` to re-install same version.
+- Refactored GitHub release fetching into reusable `download.Remote` struct.
+
 #### `mvm completion`
 - Removed PowerShell completion support.
 

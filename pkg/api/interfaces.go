@@ -21,4 +21,5 @@ type API interface {
 	CPAPI
 	InitAPI
 	SnapshotAPI
+	UpdateAPI
 }

@@ -1,14 +1,9 @@
 package binary
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"mvmctl/internal/lib/download"
-	"mvmctl/pkg/errs"
 )
 
 func TestNormalizeVersion(t *testing.T) {
@@ -49,52 +44,6 @@ func TestCIVersion(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
-}
-
-func TestMapGitHubAPIError(t *testing.T) {
-	t.Run("http_403", func(t *testing.T) {
-		err := download.HttpError{StatusCode: 403}
-		got := mapGitHubAPIError(err)
-		require.Error(t, got)
-		var de *errs.DomainError
-		if errors.As(got, &de) {
-			assert.Equal(t, errs.CodeDownloadFailed, de.Code)
-			assert.Contains(t, de.Message, "rate limit exceeded")
-		}
-	})
-
-	t.Run("http_401", func(t *testing.T) {
-		err := download.HttpError{StatusCode: 401}
-		got := mapGitHubAPIError(err)
-		require.Error(t, got)
-		var de *errs.DomainError
-		if errors.As(got, &de) {
-			assert.Equal(t, errs.CodeDownloadFailed, de.Code)
-			assert.Contains(t, de.Message, "authentication failed")
-		}
-	})
-
-	t.Run("generic_error", func(t *testing.T) {
-		err := errors.New("connection refused")
-		got := mapGitHubAPIError(err)
-		require.Error(t, got)
-		var de *errs.DomainError
-		if errors.As(got, &de) {
-			assert.Equal(t, errs.CodeDownloadFailed, de.Code)
-			assert.Contains(t, de.Message, "connection refused")
-		}
-	})
-
-	t.Run("other_http_error", func(t *testing.T) {
-		err := download.HttpError{StatusCode: 500}
-		got := mapGitHubAPIError(err)
-		require.Error(t, got)
-		var de *errs.DomainError
-		if errors.As(got, &de) {
-			assert.Equal(t, errs.CodeDownloadFailed, de.Code)
-			assert.Contains(t, de.Message, "500")
-		}
-	})
 }
 
 func TestRustTargetTriple(t *testing.T) {

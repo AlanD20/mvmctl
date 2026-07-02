@@ -1,12 +1,9 @@
 package binary
 
 import (
-	"errors"
-	"fmt"
 	"runtime"
 	"strings"
 
-	"mvmctl/internal/lib/download"
 	"mvmctl/pkg/errs"
 )
 
@@ -24,11 +21,6 @@ func rustTargetTriple() string {
 }
 
 // --- Version helpers ---
-
-// githubRelease models a single release entry from the GitHub API.
-type githubRelease struct {
-	TagName string `json:"tag_name"`
-}
 
 // NormalizeVersion strips 'v' prefix from version.
 func NormalizeVersion(version string) string {
@@ -48,30 +40,4 @@ func CIVersion(version string) string {
 
 func binaryError(code errs.Code, msg string) *errs.DomainError {
 	return errs.New(code, msg)
-}
-
-// mapGitHubAPIError converts a GitHub API error into a BinaryError.
-func mapGitHubAPIError(err error) error {
-	var httpErr download.HttpError
-	if errors.As(err, &httpErr) {
-		switch httpErr.StatusCode {
-		case 403:
-			return binaryError(errs.CodeDownloadFailed,
-				"Failed to fetch Firecracker releases from GitHub: "+
-					"rate limit exceeded (HTTP 403). "+
-					"Either wait for the rate limit to reset, or set a "+
-					"GitHub token via the GITHUB_TOKEN environment variable "+
-					"to increase your rate limit.",
-			)
-		case 401:
-			return binaryError(errs.CodeDownloadFailed,
-				"Failed to fetch Firecracker releases from GitHub: "+
-					"authentication failed (HTTP 401). "+
-					"Set a valid GitHub token via GITHUB_TOKEN.",
-			)
-		}
-	}
-	return binaryError(errs.CodeDownloadFailed,
-		fmt.Sprintf("Failed to fetch Firecracker releases from GitHub: %s", err),
-	)
 }

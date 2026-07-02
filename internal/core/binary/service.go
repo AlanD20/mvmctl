@@ -2,7 +2,6 @@ package binary
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -81,21 +80,11 @@ func (s *Service) GetDefaultFirecracker(ctx context.Context) (*model.BinaryItem,
 
 // ListRemote fetches Firecracker release versions from GitHub.
 func (s *Service) ListRemote(ctx context.Context, limit int) ([]model.VersionInfo, error) {
-	url := fmt.Sprintf("%s?per_page=%d", infra.FirecrackerGithubReleasesAPIURL, limit)
-
-	raw, err := s.dl.GetContent(ctx, download.RequestOpts{
-		URL: url, Timeout: 30,
-		Headers:  map[string]string{"Accept": "application/json"},
-		UseCache: true, CacheTTLSeconds: 300,
-	})
+	gh := download.NewGitHub(infra.FirecrackerGitHubRepo)
+	releases, err := gh.ListReleases(ctx, limit)
 	if err != nil {
-		return nil, mapGitHubAPIError(err)
-	}
-
-	var releases []githubRelease
-	if err := json.Unmarshal([]byte(raw), &releases); err != nil {
 		return nil, binaryError(errs.CodeDownloadFailed,
-			fmt.Sprintf("Unexpected response from GitHub: %v", err))
+			fmt.Sprintf("Failed to fetch Firecracker releases from GitHub: %v", err))
 	}
 
 	versions := make([]model.VersionInfo, 0, len(releases))

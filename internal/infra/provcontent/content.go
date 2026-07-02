@@ -268,7 +268,7 @@ func (pc Builder) BuildHostnameOps(hostname string) []Operation {
 		},
 		ChrootOp{
 			Command: fmt.Sprintf(
-				`test -f /etc/hosts && sed -i '/^127\.0\.1\.1/d' /etc/hosts` +
+				`test -f /etc/hosts && sed -i '/^127\.0\.1\.1/d' /etc/hosts`+
 					`; printf '127.0.1.1\t%s\n' >> /etc/hosts`,
 				hostname,
 			),

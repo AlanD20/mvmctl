@@ -20,3 +20,10 @@ type CPCopyResult struct {
 	Bytes   int64  `json:"bytes"`
 	Message string `json:"message"`
 }
+
+// UpdateCheckResult is the typed result of a self-update version check.
+type UpdateCheckResult struct {
+	CurrentVersion string `json:"current_version"`
+	LatestVersion  string `json:"latest_version"`
+	HasUpdate      bool   `json:"has_update"`
+}
