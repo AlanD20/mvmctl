@@ -64,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+#### `mvm vm create`
+- Renamed `--no-enable-logging` → `--disable-logging`, `--no-enable-metrics` → `--disable-metrics`. Added `--deny-remote-exec` (mutually exclusive with `--allow-remote-exec`).
+
 #### `kernels.yaml`
 - Renamed `config_url_template` to `base_config_url_template` to clarify that it provides the base kernel `.config`.
 - Removed the redundant duplicate URL from `config_fragments` in the bundled `kernel-official` spec.

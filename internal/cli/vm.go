@@ -172,14 +172,15 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		noPCI           bool
 		nestedVirt      bool
 		noNestedVirt    bool
-		allowRemoteExec bool
-		cpuTemplate     string
-		bootArgs        string
-		lsmFlags        string
-		enableLogging   bool
-		noEnableLogging bool
-		enableMetrics   bool
-		noEnableMetrics bool
+		allowRemoteExec  bool
+		denyRemoteExec   bool
+		cpuTemplate      string
+		bootArgs         string
+		lsmFlags         string
+		enableLogging    bool
+		disableLogging   bool
+		enableMetrics    bool
+		disableMetrics   bool
 		count           int
 		atomic          bool
 		skipCleanup     bool
@@ -297,15 +298,17 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			}
 			if cmd.Flags().Changed("allow-remote-exec") {
 				input.AllowRemoteExec = infraptr.Ptr(allowRemoteExec)
+			} else if cmd.Flags().Changed("deny-remote-exec") {
+				input.AllowRemoteExec = infraptr.Ptr(false)
 			}
 			if cmd.Flags().Changed("enable-logging") {
 				input.EnableLogging = infraptr.Ptr(enableLogging)
-			} else if cmd.Flags().Changed("no-enable-logging") {
+			} else if cmd.Flags().Changed("disable-logging") {
 				input.EnableLogging = infraptr.Ptr(false)
 			}
 			if cmd.Flags().Changed("enable-metrics") {
 				input.EnableMetrics = infraptr.Ptr(enableMetrics)
-			} else if cmd.Flags().Changed("no-enable-metrics") {
+			} else if cmd.Flags().Changed("disable-metrics") {
 				input.EnableMetrics = infraptr.Ptr(false)
 			}
 			if cmd.Flags().Changed("no-pci") {
@@ -369,6 +372,8 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("nested-virt", "no-nested-virt")
 	cmd.Flags().BoolVar(&allowRemoteExec, "allow-remote-exec", false,
 		"Allow this VM to send and receive remote exec commands (default: false)")
+	cmd.Flags().BoolVar(&denyRemoteExec, "deny-remote-exec", false, "Deny remote exec on this VM")
+	cmd.MarkFlagsMutuallyExclusive("allow-remote-exec", "deny-remote-exec")
 	cmd.Flags().
 		StringVar(&cpuTemplate, "cpu-template", "", "Path to CPU template JSON file (merged with nested-virt config if both set)")
 	cmd.Flags().Bool("console", false, "Enable serial console relay (default: disabled)")
@@ -377,14 +382,12 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		StringVar(&lsmFlags, "lsm-flags", "", "Linux Security Module flags for kernel cmdline (default: from user config)")
 	cmd.Flags().
 		BoolVar(&enableLogging, "enable-logging", false, "Enable Firecracker logging (default: from user config)")
-	cmd.Flags().BoolVar(&noEnableLogging, "no-enable-logging", false, "Disable Firecracker logging")
-	cmd.Flags().MarkHidden("no-enable-logging")
-	cmd.MarkFlagsMutuallyExclusive("enable-logging", "no-enable-logging")
+	cmd.Flags().BoolVar(&disableLogging, "disable-logging", false, "Disable Firecracker logging")
+	cmd.MarkFlagsMutuallyExclusive("enable-logging", "disable-logging")
 	cmd.Flags().
 		BoolVar(&enableMetrics, "enable-metrics", false, "Enable Firecracker metrics (default: from user config)")
-	cmd.Flags().BoolVar(&noEnableMetrics, "no-enable-metrics", false, "Disable Firecracker metrics")
-	cmd.Flags().MarkHidden("no-enable-metrics")
-	cmd.MarkFlagsMutuallyExclusive("enable-metrics", "no-enable-metrics")
+	cmd.Flags().BoolVar(&disableMetrics, "disable-metrics", false, "Disable Firecracker metrics")
+	cmd.MarkFlagsMutuallyExclusive("enable-metrics", "disable-metrics")
 	cmd.Flags().IntVarP(&count, "count", "c", 1, "Number of VMs to create (default: 1)")
 	cmd.Flags().
 		BoolVar(&atomic, "atomic", false, "If any VM fails, remove all successfully-created VMs (all-or-nothing)")
