@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Feature names are now validated against the spec's `features` map instead of a hardcoded list.
 - Enabled features are persisted and shown in `mvm kernel inspect`.
 - Kernel files are now stored with their content-addressed ID as the filename.
+- New `--skip-checksum` flag to bypass SHA256 verification when the checksum server is unavailable.
 
 #### `mvm env`
 - New `image_import` step type for importing local images and VM rootfs in environment specs.

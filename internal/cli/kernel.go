@@ -124,6 +124,7 @@ func newKernelPullCmd(kernelAPI api.KernelAPI) *cobra.Command {
 	var cleanBuild bool
 	var kernelConfig string
 	var features string
+	var skipChecksum bool
 
 	cmd := &cobra.Command{
 		Use:               "pull [type:version]",
@@ -188,6 +189,7 @@ Examples:
 				KernelConfig: kernelConfig,
 				SetDefault:   setDefault,
 				Features:     featureStr,
+				SkipChecksum: skipChecksum,
 			}
 
 			kernelItem, err := kernelAPI.KernelPull(cmd.Context(), kernelInput, func(e event.Progress) {
@@ -218,6 +220,7 @@ Examples:
 	cmd.Flags().BoolVar(&cleanBuild, "clean-build", false, "Skip cache (official only)")
 	cmd.Flags().StringVar(&kernelConfig, "config", "", "Custom kernel config file to apply as a fragment")
 	cmd.Flags().StringVar(&features, "features", "", "Comma-separated features (all/*): kvm, nftables, tuntap, btrfs")
+	cmd.Flags().BoolVar(&skipChecksum, "skip-checksum", false, "Skip SHA256 checksum verification")
 
 	return cmd
 }

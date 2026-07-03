@@ -31,6 +31,7 @@ type KernelPullInput struct {
 	KernelConfig string `json:"kernel_config,omitempty" yaml:"kernel_config,omitempty"`
 	SetDefault   bool   `json:"default"                 yaml:"default"`
 	Features     string `json:"features"                yaml:"features"`
+	SkipChecksum bool   `json:"skip_checksum,omitempty"`
 }
 
 // ResolvedKernelPullRequest specifies resolved kernel pull request.
@@ -45,6 +46,7 @@ type ResolvedKernelPullRequest struct {
 	KernelConfig *string
 	Version      string
 	Features     []string
+	SkipChecksum bool
 }
 
 // Validate checks that the kernel pull input has valid fields.
@@ -143,6 +145,7 @@ func (i *KernelPullInput) Resolve(ctx context.Context, cfg *config.Service) (*Re
 		KernelConfig: kernelConfig,
 		SetDefault:   i.SetDefault,
 		Features:     featuresList,
+		SkipChecksum: i.SkipChecksum,
 	}
 	// Validate architecture
 	if !firecracker.SupportsArch(result.Arch) {

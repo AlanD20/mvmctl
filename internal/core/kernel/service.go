@@ -66,6 +66,7 @@ type BuildConfig struct {
 	OnProgress     event.OnProgressCallback
 	// Configs from selected features to enforce on top of spec.DefaultConfigs.
 	// Keys are kernel config options (CONFIG_FOO); values are "y", "n", or a number.
+	SkipChecksum    bool
 	FeatureEnforces map[string]string
 }
 
@@ -225,6 +226,7 @@ func (s *Service) BuildOfficialKernel(
 	jobs int,
 	keepBuildDir bool,
 	useCache bool,
+	skipChecksum bool,
 	userConfigPath *string,
 	featureEnforces map[string]string,
 	onDownload event.OnDownloadCallback,
@@ -246,6 +248,7 @@ func (s *Service) BuildOfficialKernel(
 		KeepBuildDir:    keepBuildDir,
 		UserConfigPath:  userConfigPath,
 		UseCache:        useCache,
+		SkipChecksum:    skipChecksum,
 		OnDownload:      onDownload,
 		OnProgress:      onProgress,
 		FeatureEnforces: featureEnforces,
@@ -299,6 +302,7 @@ func (s *Service) buildFromSource(ctx context.Context, cfg BuildConfig) (*Kernel
 		cfg.Version,
 		cfg.Arch,
 		cfg.SHA256,
+		cfg.SkipChecksum,
 		cfg.OnProgress,
 	)
 	if err != nil {
@@ -400,6 +404,7 @@ func (s *Service) resolveSourceURL(
 	ctx context.Context,
 	spec *model.KernelSpec,
 	version, arch, sha256 string,
+	skipChecksum bool,
 	onProgress event.OnProgressCallback,
 ) (string, string, error) {
 	major := ""
@@ -421,7 +426,7 @@ func (s *Service) resolveSourceURL(
 		)
 	}
 
-	intentionalNoChecksum := spec.SHA256 == "" && spec.SHA256URL == ""
+	intentionalNoChecksum := skipChecksum || (spec.SHA256 == "" && spec.SHA256URL == "")
 	resolvedSHA256 := sha256
 
 	if resolvedSHA256 == "" && !intentionalNoChecksum {

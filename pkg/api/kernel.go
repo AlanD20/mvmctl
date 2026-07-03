@@ -219,7 +219,7 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 			}
 		}
 		fetchResult, err = op.Services.Kernel.BuildOfficialKernel(ctx, spec, resolved.Arch, resolved.OutputDir,
-			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild,
+			resolved.Jobs, resolved.KeepBuildDir, !resolved.CleanBuild, resolved.SkipChecksum,
 			configPath, featureEnforces,
 			event.FormatProgress(onProgress), onProgress)
 		if err != nil {
