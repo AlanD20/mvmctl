@@ -14,59 +14,14 @@ import (
 )
 
 // EnvSpec is the top-level YAML structure for an environment spec file.
-// The Registry map defines which top-level keys are valid step types —
-// any key not in Registry (other than "version" or "ephemeral") is silently ignored.
+// Known top-level fields (version, ephemeral) are decoded by YAML struct tags.
+// All remaining top-level keys (network, vm, copy, etc.) go into Steps via
+// the inline tag. resolveSpecV1 filters Steps against Registry, so unknown
+// keys are silently ignored.
 type EnvSpec struct {
 	Version   string                         `yaml:"version"`
 	Ephemeral bool                           `yaml:"ephemeral"`
-	Steps     map[string][]model.ResourceMap `yaml:"-"` // populated by UnmarshalYAML
-}
-
-// UnmarshalYAML decodes a YAML mapping into EnvSpec. The "version" key is
-// decoded explicitly; all remaining keys that match an entry in Registry are
-// decoded as []model.ResourceMap and stored in Steps.
-func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error {
-	if value.Kind != yaml.MappingNode {
-		return fmt.Errorf("env spec must be a mapping")
-	}
-
-	s.Steps = make(map[string][]model.ResourceMap)
-
-	for i := 0; i < len(value.Content); i += 2 {
-		keyNode := value.Content[i]
-		valNode := value.Content[i+1]
-
-		var key string
-		if err := keyNode.Decode(&key); err != nil {
-			return fmt.Errorf("env spec: invalid key: %v", err)
-		}
-
-		if key == "version" {
-			if err := valNode.Decode(&s.Version); err != nil {
-				return fmt.Errorf("env spec: invalid version: %v", err)
-			}
-			continue
-		}
-
-		if key == "ephemeral" {
-			if err := valNode.Decode(&s.Ephemeral); err != nil {
-				return fmt.Errorf("env spec: invalid ephemeral: %v", err)
-			}
-			continue
-		}
-
-		if _, ok := Registry[key]; !ok {
-			continue // silently skip unknown keys
-		}
-
-		var specs []model.ResourceMap
-		if err := valNode.Decode(&specs); err != nil {
-			return fmt.Errorf("env spec %q: %v", key, err)
-		}
-		s.Steps[key] = append(s.Steps[key], specs...)
-	}
-
-	return nil
+	Steps     map[string][]model.ResourceMap `yaml:",inline"`
 }
 
 // ResolveSpec reads a YAML spec file, validates it, and converts each
