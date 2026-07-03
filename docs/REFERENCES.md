@@ -300,10 +300,10 @@ The VM resolver tries selectors in priority order:
 | `--nocloud-net-port N` | Port for nocloud-net HTTP server (0 = auto) | auto-assign |
 | `--cloudinit-config PATH` | Path to custom cloud-init config file | — |
 | `--no-pci` | Disable PCI device support | from config |
-| `--nested-virt` / `--no-nested-virt` | Enable/disable nested virtualization (requires PCI) | from config |
+| `--nested-virt` / `--disable-nested-virt` | Enable/disable nested virtualization (requires PCI) | from config |
 | `--cpu-template PATH` | Path to CPU template JSON file | — |
-| `--enable-logging` / `--no-enable-logging` | Enable/disable Firecracker logging | from config |
-| `--enable-metrics` / `--no-enable-metrics` | Enable/disable Firecracker metrics | from config |
+| `--enable-logging` / `--disable-logging` | Enable/disable Firecracker logging | from config |
+| `--enable-metrics` / `--disable-metrics` | Enable/disable Firecracker metrics | from config |
 | `--lsm-flags FLAGS` | Linux Security Module kernel cmdline flags | from config |
 | `--boot-args ARGS` | Kernel boot arguments | from config |
 | `--console` | Enable serial console relay | `false` |
@@ -314,7 +314,7 @@ The VM resolver tries selectors in priority order:
 | `--count, -c N` | Create N VMs in batch | `1` |
 | `--atomic` | All-or-nothing batch: roll back all VMs if any creation fails | `false` |
 | `--skip-deblob` | Skip debloat operations on rootfs | `false` |
-| `--allow-remote-exec` / `--no-allow-remote-exec` | Allow inter-VM remote execution via vsock relay | from config |
+| `--allow-remote-exec` / `--deny-remote-exec` | Allow/deny inter-VM remote execution via vsock relay | from config |
 
 **Examples:**
 
