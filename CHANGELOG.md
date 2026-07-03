@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exec/SSH steps now support `ignore_errors: true` to continue on non-zero exit codes.
 - `image_import` destroy now removes the imported image from the database and disk.
 - All steps now support `removes` field to destroy resources mid-pipeline after the step completes.
+- New top-level `ephemeral: true` field — auto-runs `env destroy` after successful apply. Zero cleanup overhead. See `docs/ENV_SPEC_REFERENCE.md`.
 
 #### `mvm image import`
 - Renamed `source_path` to `source` in the input struct (breaking — no backward compat).

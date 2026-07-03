@@ -78,7 +78,7 @@ network:
 	specPath := writeSpec(t, specContent)
 
 	// Resolve spec to get the actual hash produced by FromSpec.
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 	require.Len(t, steps, 1)
 	specHash := steps[0].SpecHash()
@@ -114,7 +114,7 @@ network:
 `
 	specPath := writeSpec(t, specContent)
 
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 	require.Len(t, steps, 1)
 	stepName := steps[0].Name()
@@ -165,7 +165,7 @@ network:
 `
 	specPath := writeSpec(t, specContent)
 
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 	require.Len(t, steps, 1)
 	stepName := steps[0].Name()
@@ -209,7 +209,7 @@ image:
 	specPath := writeSpec(t, specContent)
 
 	// Resolve spec to get actual hashes.
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 
 	specHashes := make(map[string]string, len(steps))

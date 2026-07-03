@@ -40,7 +40,7 @@ func Apply(
 	extraEnv map[string]string,
 ) error {
 	// Resolve YAML spec into steps.
-	steps, err := ResolveSpec(ctx, specPath, op)
+	spec, steps, err := ResolveSpec(ctx, specPath, op)
 	if err != nil {
 		return errs.WrapMsg(
 			errs.CodeInternal,
@@ -116,10 +116,23 @@ func Apply(
 		if pErr := workflow.WriteWorkflowState(stateDir, wfState); pErr != nil {
 			slog.Debug("failed to persist workflow state", "wf_id", wfID, "step", step.Name(), "error", pErr)
 			return fmt.Errorf("persist workflow state after step %q: %w", step.Name(), pErr)
-		}
-		slog.Debug("workflow state persisted after step", "wf_id", wfID, "step", step.Name(), "dir", stateDir)
-		return nil
 	}
+
+	// Ephemeral: destroy everything and remove state after successful apply.
+	if spec.Ephemeral {
+		slog.Info("ephemeral spec — destroying resources after successful apply", "spec", specPath)
+		if err := Destroy(ctx, op, specPath, onProgress); err != nil {
+			return errs.WrapMsg(
+				errs.CodeInternal,
+				fmt.Sprintf("ephemeral destroy failed after apply: %v", err),
+				err,
+			)
+		}
+		slog.Info("ephemeral spec destroyed", "spec", specPath)
+	}
+
+	return nil
+}
 
 	err = pipeline.Execute(ctx, state, onProgress, prevResources, workflow.WithOnStepComplete(onStepComplete))
 
@@ -447,7 +460,7 @@ func Diff(ctx context.Context, specOrID string) (*DiffResult, error) {
 	specPath, stateDir := resolveDiffInput(specOrID)
 
 	// Resolve spec step names and hashes.
-	steps, err := ResolveSpec(ctx, specPath, nil)
+	_, steps, err := ResolveSpec(ctx, specPath, nil)
 	if err != nil {
 		return nil, err
 	}

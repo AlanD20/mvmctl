@@ -40,6 +40,7 @@ mvm env destroy <wf-id|path>  # Tear down exactly what was provisioned
 
 ```yaml
 version: "1"
+ephemeral: false   # optional, default false
 
 network:
   - name: <step-name>
@@ -83,6 +84,13 @@ copy:
 ```
 
 **All identifiers are singular** — YAML keys, step types, `depends_on`, and step names use singular form.
+
+### Top-Level Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `version` | `string` | — | **Required.** Spec format version. Currently only `"1"`. |
+| `ephemeral` | `bool` | `false` | If `true`, the workflow automatically runs `mvm env destroy` after a successful apply, tearing down all resources and removing the state record. Useful for CI/CD pipelines that extract artifacts and clean up (see [Destroy Behavior](#destroy-behavior)). |
 
 ---
 
@@ -472,6 +480,30 @@ image_import:
 ```
 
 The builder VM is torn down right after its rootfs is captured, before downstream steps start. Removals use the same API calls as destroy but run at the applying step's position in the DAG, not at the end. Failure to remove is non-fatal (logged as a warning).
+
+### Ephemeral specs (`ephemeral: true`)
+
+When `ephemeral: true` is set at the top level, the workflow engine automatically runs `mvm env destroy` after a successful apply. This tears down all resources and removes the workflow state record. It's equivalent to running `mvm env apply` followed immediately by `mvm env destroy`.
+
+Ephemeral specs are useful for CI/CD pipelines that provision a VM, extract build artifacts, and want zero cleanup burden — the `removes` field handles mid-pipeline cleanup, and `ephemeral: true` handles final teardown + state removal.
+
+```yaml
+version: "1"
+ephemeral: true
+
+# ... resources ...
+
+copy:
+  - name: retrieve-artifacts
+    src: vm:builder:/output/
+    dest: ./dist
+    removes:
+      - vm:builder
+      - network:builder
+      - key:builder
+```
+
+In this example, `removes` frees the VM/network/key mid-pipeline, and `ephemeral` removes the workflow state so `mvm env ls` stays clean.
 
 ---
 

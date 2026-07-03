@@ -309,7 +309,7 @@ vm:
 `
 	specPath := writeSpec(t, specContent)
 
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 	require.Len(t, steps, 6)
 
@@ -362,7 +362,7 @@ vm:
 `
 	specPath := writeSpec(t, specContent)
 
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 	require.Len(t, steps, 6)
 
@@ -386,7 +386,7 @@ func TestResolveSpec_EmptySpecFile(t *testing.T) {
 	specContent := `version: "1"`
 	specPath := writeSpec(t, specContent)
 
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 	assert.Len(t, steps, 0)
 }
@@ -401,7 +401,7 @@ network:
 `
 	specPath := writeSpec(t, specContent)
 
-	_, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, _, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "version")
 }
@@ -412,7 +412,7 @@ func TestResolveSpec_SpecFileNotFound(t *testing.T) {
 	dir := t.TempDir()
 	missingPath := filepath.Join(dir, "nonexistent.yaml")
 
-	_, err := envpkg.ResolveSpec(context.Background(), missingPath, nil)
+	_, _, err := envpkg.ResolveSpec(context.Background(), missingPath, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -421,7 +421,7 @@ func TestResolveSpec_SpecFileNotFound(t *testing.T) {
 // contains invalid YAML, not silently return partial results.
 func TestResolveSpec_InvalidYAML(t *testing.T) {
 	specPath := writeSpec(t, "version: \"1\"\nnetwork:\n  - invalid_yaml: [")
-	_, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, _, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.Error(t, err)
 }
 
@@ -439,7 +439,7 @@ network:
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // immediately cancel
 
-	_, err := envpkg.ResolveSpec(ctx, specPath, nil)
+	_, _, err := envpkg.ResolveSpec(ctx, specPath, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
@@ -460,7 +460,7 @@ network:
 `
 	specPath := writeSpec(t, specContent)
 
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 	assert.Len(t, steps, 0, "no steps should be created when the type is not in Registry")
 }
@@ -490,7 +490,7 @@ network:
 `
 	specPath := writeSpec(t, specContent)
 
-	_, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, _, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, errFactory)
 }
@@ -510,7 +510,7 @@ key:
       - network:my-net
 `
 	specPath := writeSpec(t, specContent)
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, nil)
 	require.NoError(t, err)
 	require.Len(t, steps, 2)
 
@@ -669,7 +669,7 @@ copy:
       - vm:my-vm
 `
 	specPath := writeSpec(t, specContent)
-	steps, err := envpkg.ResolveSpec(context.Background(), specPath, &api.Operation{})
+	_, steps, err := envpkg.ResolveSpec(context.Background(), specPath, &api.Operation{})
 	require.NoError(t, err)
 	require.Len(t, steps, 5)
 

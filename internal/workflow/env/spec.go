@@ -15,10 +15,11 @@ import (
 
 // EnvSpec is the top-level YAML structure for an environment spec file.
 // The Registry map defines which top-level keys are valid step types —
-// any key not in Registry (other than "version") is silently ignored.
+// any key not in Registry (other than "version" or "ephemeral") is silently ignored.
 type EnvSpec struct {
-	Version string                         `yaml:"version"`
-	Steps   map[string][]model.ResourceMap `yaml:"-"` // populated by UnmarshalYAML
+	Version   string                         `yaml:"version"`
+	Ephemeral bool                           `yaml:"ephemeral"`
+	Steps     map[string][]model.ResourceMap `yaml:"-"` // populated by UnmarshalYAML
 }
 
 // UnmarshalYAML decodes a YAML mapping into EnvSpec. The "version" key is
@@ -47,6 +48,13 @@ func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error {
 			continue
 		}
 
+		if key == "ephemeral" {
+			if err := valNode.Decode(&s.Ephemeral); err != nil {
+				return fmt.Errorf("env spec: invalid ephemeral: %v", err)
+			}
+			continue
+		}
+
 		if _, ok := Registry[key]; !ok {
 			continue // silently skip unknown keys
 		}
@@ -63,7 +71,7 @@ func (s *EnvSpec) UnmarshalYAML(value *yaml.Node) error {
 
 // ResolveSpec reads a YAML spec file, validates it, and converts each
 // entry into a workflow.Step using the appropriate factory from Registry.
-func ResolveSpec(ctx context.Context, specPath string, op api.API) ([]workflow.Step, error) {
+func ResolveSpec(ctx context.Context, specPath string, op api.API) (*EnvSpec, []workflow.Step, error) {
 	// Ensure op is non-nil — the factory constructors now reject nil op.
 	// Diff/Resolve create steps only for Name/SpecHash/Dependencies access,
 	// none of which require a real API connection.
@@ -72,7 +80,7 @@ func ResolveSpec(ctx context.Context, specPath string, op api.API) ([]workflow.S
 	}
 
 	if err := ctx.Err(); err != nil {
-		return nil, errs.WrapMsg(
+		return nil, nil, errs.WrapMsg(
 			errs.CodeInternal,
 			fmt.Sprintf("resolve env spec %s: %v", specPath, err),
 			err,
@@ -82,9 +90,9 @@ func ResolveSpec(ctx context.Context, specPath string, op api.API) ([]workflow.S
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("env spec file not found: %s", specPath))
+			return nil, nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("env spec file not found: %s", specPath))
 		}
-		return nil, errs.WrapMsg(
+		return nil, nil, errs.WrapMsg(
 			errs.CodeInternal,
 			fmt.Sprintf("read env spec %s: %v", specPath, err),
 			err,
@@ -93,11 +101,11 @@ func ResolveSpec(ctx context.Context, specPath string, op api.API) ([]workflow.S
 
 	var spec EnvSpec
 	if err := yaml.Unmarshal(data, &spec); err != nil {
-		return nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("env spec validation: invalid YAML: %v", err))
+		return nil, nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("env spec validation: invalid YAML: %v", err))
 	}
 
 	if spec.Version == "" {
-		return nil, errs.New(errs.CodeValidationFailed, "env spec version is required")
+		return nil, nil, errs.New(errs.CodeValidationFailed, "env spec version is required")
 	}
 
 	var steps []workflow.Step
@@ -107,14 +115,14 @@ func ResolveSpec(ctx context.Context, specPath string, op api.API) ([]workflow.S
 	case "1":
 		steps, resolveErr = resolveSpecV1(spec, op)
 	default:
-		return nil, errs.New(errs.CodeValidationFailed,
+		return nil, nil, errs.New(errs.CodeValidationFailed,
 			fmt.Sprintf("unsupported env spec version: %q (supported: \"1\")", spec.Version))
 	}
 	if resolveErr != nil {
-		return nil, resolveErr
+		return nil, nil, resolveErr
 	}
 
-	return steps, nil
+	return &spec, steps, nil
 }
 
 func resolveSpecV1(spec EnvSpec, op api.API) ([]workflow.Step, error) {
