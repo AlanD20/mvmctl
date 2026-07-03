@@ -1,4 +1,4 @@
-// Package cli — "mvm exec" command — execute commands inside VMs via vsock agent
+// Package cli — "mvm exec" command — execute commands inside VMs via agent
 package cli
 
 import (
@@ -14,12 +14,12 @@ import (
 func NewExecCmd(execAPI api.ExecAPI) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "exec [vm-selector] [-- <command>...]",
-		Short: "Execute a command inside a VM via vsock agent",
+		Short: "Execute a command inside a VM via agent",
 		Long: `Execute a command inside a VM via the vsock guest agent.
 
 If no command is provided, starts an interactive shell session.
 
-The vsock agent is injected at VM creation time.
+The agent is injected at VM creation time.
 
 Examples:
   mvm exec my-vm                  # interactive shell

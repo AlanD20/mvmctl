@@ -612,12 +612,12 @@ func (op *Operation) vmBuilderExecute(
 			builder.vsockToken = crypto.UUIDV4()
 			builder.vsockUDSPath = filepath.Join(builder.vmDir, resolved.VsockFilename)
 			if agentBin := vsock.AgentBinary(); len(agentBin) > 0 {
-				if err := backend.InjectVsockAgent(ctx, agentBin, builder.vsockPort, builder.vsockToken); err != nil {
-					provisionErr = fmt.Errorf("inject vsock agent: %w", err)
+				if err := backend.InjectAgent(ctx, agentBin, builder.vsockPort, builder.vsockToken); err != nil {
+					provisionErr = fmt.Errorf("inject agent: %w", err)
 					return
 				}
 			} else {
-				slog.Warn("vsock agent binary not available, skipping agent injection",
+				slog.Warn("agent binary not available, skipping agent injection",
 					"vm", resolved.Name)
 			}
 		}

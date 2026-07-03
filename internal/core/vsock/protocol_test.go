@@ -25,10 +25,10 @@ import (
 // internally calls dialAndHandshake → sendFrame → readFrame. A local mock
 // UDS server simulates the guest agent's CONNECT handshake and JSON framing.
 
-// startMockVsockAgent starts a Unix socket server that mimics the vsock
+// startMockAgent starts a Unix socket server that mimics the vsock
 // guest agent for the CONNECT handshake and optionally responds to exec
 // requests with the given result.
-func startMockVsockAgent(t *testing.T, handshakeOK bool, execResult *vsock.ExecResult) (string, int) {
+func startMockAgent(t *testing.T, handshakeOK bool, execResult *vsock.ExecResult) (string, int) {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -138,7 +138,7 @@ func startMockVsockAgent(t *testing.T, handshakeOK bool, execResult *vsock.ExecR
 // communication. A failure here makes all Exec/Shell calls fail.
 
 func TestClient_DialAndHandshake_Success(t *testing.T) {
-	sockPath, port := startMockVsockAgent(t, true, &vsock.ExecResult{
+	sockPath, port := startMockAgent(t, true, &vsock.ExecResult{
 		Stdout:   "hello\n",
 		Stderr:   "",
 		ExitCode: 0,
@@ -163,7 +163,7 @@ func TestClient_DialAndHandshake_Success(t *testing.T) {
 // must fail with an appropriate handshake error.
 
 func TestClient_DialAndHandshake_BadResponse(t *testing.T) {
-	sockPath, port := startMockVsockAgent(t, false, nil)
+	sockPath, port := startMockAgent(t, false, nil)
 
 	client := vsock.NewClient(&model.VsockConfigItem{
 		VmID:    "vm-1",

@@ -139,7 +139,7 @@ the task is incomplete. Reject the result and re-spawn with explicit instruction
 
 The architect MUST verify these before approving any implementation plan:
 
-1. **Patterns cross-check** — Read the EXISTING interface/pattern the proposal touches. Does the new method match the naming and shape of existing methods? (e.g., `Backend.SetupSSH(ctx, user, keys)` → new method should be `InjectVsockAgent(ctx, binary, port, token)`, not `ApplyOps(ctx, ops)`)
+1. **Patterns cross-check** — Read the EXISTING interface/pattern the proposal touches. Does the new method match the naming and shape of existing methods? (e.g., `Backend.SetupSSH(ctx, user, keys)` → new method should be `InjectAgent(ctx, binary, port, token)`, not `ApplyOps(ctx, ops)`)
 2. **Analogous precedent** — Find 2-3 existing code paths that solve the same KIND of problem. If the existing Backend methods are all named typed methods, a generic `[]Operation` passthrough is a red flag.
 3. **Layer check** — Does the proposed code belong in the layer it's placed in? (e.g., CID retry loops belong in `internal/core/*/service.go`, not in `pkg/api/*.go`)
 4. **Reject generic extension points** — "This is extensible for future use" is a smell. Prefer typed named methods that describe exactly what they do. Add new methods when new needs arise, not generic hooks.

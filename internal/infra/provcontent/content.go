@@ -590,41 +590,41 @@ func (pc Builder) BuildDeblobOps(osType string) []Operation {
 	return ops
 }
 
-// BuildVsockAgentOps generates operations for embedding the vsock guest agent
+// BuildAgentOps generates operations for embedding the vsock guest agent
 // into the root filesystem. Used by both loop-mount and guestfs provisioner
 // backends at VM creation time.
 //
 // Produces:
-// - FileOp: /usr/bin/mvm-vsock-agent (agent binary, mode 0755)
-// - FileOp: /var/run/mvm-vsock-agent.token (auth token, mode 0644)
-// - FileOp: /etc/systemd/system/mvm-vsock-agent.service (systemd unit, mode 0644)
-// - FileOp: /etc/init.d/mvm-vsock-agent (OpenRC init script, mode 0755)
+// - FileOp: /usr/bin/mvm-agent (agent binary, mode 0755)
+// - FileOp: /var/run/mvm-agent.token (auth token, mode 0644)
+// - FileOp: /etc/systemd/system/mvm-agent.service (systemd unit, mode 0644)
+// - FileOp: /etc/init.d/mvm-agent (OpenRC init script, mode 0755)
 // - ChrootOp: detect init system and enable agent
-func (Builder) BuildVsockAgentOps(agentBinary []byte, port int, token string) []Operation {
+func (Builder) BuildAgentOps(agentBinary []byte, port int, token string) []Operation {
 	return []Operation{
 		FileOp{
-			Path: "/usr/bin/mvm-vsock-agent",
+			Path: "/usr/bin/mvm-agent",
 			Data: agentBinary,
 			Mode: 0755,
 			UID:  0,
 			GID:  0,
 		},
 		FileOp{
-			Path: "/var/run/mvm-vsock-agent.token",
+			Path: "/var/run/mvm-agent.token",
 			Data: []byte(token),
 			Mode: 0600,
 			UID:  0,
 			GID:  0,
 		},
 		FileOp{
-			Path: "/etc/systemd/system/mvm-vsock-agent.service",
+			Path: "/etc/systemd/system/mvm-agent.service",
 			Data: fmt.Appendf(nil, `[Unit]
-Description=MVM VSock Agent
+Description=MVM Agent
 DefaultDependencies=no
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/mvm-vsock-agent -port %d
+ExecStart=/usr/bin/mvm-agent -port %d
 Restart=always
 RestartSec=2
 
@@ -636,14 +636,14 @@ WantedBy=sysinit.target
 			GID:  0,
 		},
 		FileOp{
-			Path: "/etc/init.d/mvm-vsock-agent",
+			Path: "/etc/init.d/mvm-agent",
 			Data: fmt.Appendf(nil, `#!/sbin/openrc-run
 
-description="MVM VSock Agent"
+description="MVM Agent"
 
-command=/usr/bin/mvm-vsock-agent
+command=/usr/bin/mvm-agent
 command_args="-port %d"
-pidfile=/var/run/mvm-vsock-agent.pid
+pidfile=/var/run/mvm-agent.pid
 command_background=true
 
 depend() {
@@ -658,11 +658,11 @@ depend() {
 			Command: `
 	if command -v systemctl >/dev/null 2>&1; then
     mkdir -p /etc/systemd/system/multi-user.target.wants 2>/dev/null || true
-    ln -sf /etc/systemd/system/mvm-vsock-agent.service /etc/systemd/system/multi-user.target.wants/mvm-vsock-agent.service 2>/dev/null || true
+    ln -sf /etc/systemd/system/mvm-agent.service /etc/systemd/system/multi-user.target.wants/mvm-agent.service 2>/dev/null || true
 elif rc-update >/dev/null 2>&1; then
-    rc-update add mvm-vsock-agent default
+    rc-update add mvm-agent default
 else
-    echo "mvm: warning - unknown init system, mvm-vsock-agent not auto-enabled"
+    echo "mvm: warning - unknown init system, mvm-agent not auto-enabled"
 fi
 `,
 		},

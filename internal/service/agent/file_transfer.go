@@ -1,7 +1,7 @@
-// Package vsockagent — guest agent inside the Firecracker microVM.
+// Package agent — guest agent inside the Firecracker microVM.
 // File transfer via binary frame protocol over the same vsock connection
 // after the initial JSON handshake.
-package vsockagent
+package agent
 
 import (
 	"context"
@@ -23,7 +23,7 @@ import (
 
 // --- Binary frame type constants ---
 // Single source of truth. Host side (internal/core/vsock) imports these as
-// vsockagent.FtPush, vsockagent.FtPull, etc.
+// agent.FtPush, agent.FtPull, etc.
 const (
 	FtPush     byte = 0x10 // Push request (host→VM)
 	FtPull     byte = 0x11 // Pull request (VM→host)

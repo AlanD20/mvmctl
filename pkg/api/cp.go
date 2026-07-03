@@ -184,13 +184,13 @@ func (op *Operation) newVsockClient(
 	}
 	client.OnHostFrame = handler.Handle
 	client.OnUpgradeStarted = func(ctx context.Context, fromVersion, toVersion string) {
-		slog.Info("upgrading vsock agent", "vm", vmName, "from", fromVersion, "to", toVersion)
+		slog.Info("upgrading agent", "vm", vmName, "from", fromVersion, "to", toVersion)
 		if err := op.Repos.Vsock.SetUpgradeLock(ctx, cfg.VmID); err != nil {
 			slog.Warn("failed to set upgrade lock", "vm", vmName, "error", err)
 		}
 	}
 	client.OnUpgradeCompleted = func(ctx context.Context, newVersion string) {
-		slog.Info("vsock agent upgrade complete", "vm", vmName, "version", newVersion)
+		slog.Info("agent upgrade complete", "vm", vmName, "version", newVersion)
 		if err := op.Repos.Vsock.ClearUpgradeLock(ctx, cfg.VmID); err != nil {
 			slog.Warn("failed to clear upgrade lock", "vm", vmName, "error", err)
 		}
@@ -199,7 +199,7 @@ func (op *Operation) newVsockClient(
 		}
 	}
 	client.OnUpgradeFailed = func(ctx context.Context, err error) {
-		slog.Warn("vsock agent upgrade failed — clearing stale lock", "vm", vmName, "error", err)
+		slog.Warn("agent upgrade failed — clearing stale lock", "vm", vmName, "error", err)
 		if clearErr := op.Repos.Vsock.ClearUpgradeLock(ctx, cfg.VmID); clearErr != nil {
 			slog.Warn("failed to clear upgrade lock after failed upgrade", "vm", vmName, "error", clearErr)
 		}

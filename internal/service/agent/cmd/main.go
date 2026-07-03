@@ -1,4 +1,4 @@
-// Command vsockagent is the guest agent binary that runs inside the Firecracker VM.
+// Command agent is the guest agent binary that runs inside the Firecracker VM.
 // It listens on a vsock port and accepts JSON commands from the host.
 package main
 
@@ -13,15 +13,15 @@ import (
 	"strings"
 
 	"mvmctl/internal/lib/version"
-	"mvmctl/internal/service/vsockagent"
+	"mvmctl/internal/service/agent"
 )
 
 func main() {
 	port := flag.Int("port", 1024, "vsock port to listen on")
 	token := flag.String("token", "", "auth token (overrides -token-file)")
-	tokenFile := flag.String("token-file", "/var/run/mvm-vsock-agent.token", "path to auth token file")
+	tokenFile := flag.String("token-file", "/var/run/mvm-agent.token", "path to auth token file")
 	versionFlag := flag.Bool("version", false, "print version and exit")
-	localSocket := flag.String("local-socket", "/var/run/mvm-vsock-agent.sock",
+	localSocket := flag.String("local-socket", "/var/run/mvm-agent.sock",
 		"path to the daemon's local Unix socket (used by 'remote' subcommand)")
 	flag.Parse()
 
@@ -54,7 +54,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 	defer stop()
 
-	agent := vsockagent.New(*port, resolvedToken, *localSocket)
+	agent := agent.New(*port, resolvedToken, *localSocket)
 	slog.Info("starting guest agent", "port", *port, "auth", resolvedToken != "")
 
 	if err := agent.Run(ctx); err != nil {

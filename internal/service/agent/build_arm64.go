@@ -1,8 +1,8 @@
-//go:build amd64
+//go:build arm64
 
-//go:generate touch agent-linux-amd64.zst
+//go:generate touch agent-linux-arm64.zst
 
-package vsockagent
+package agent
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ import (
 // Pre-compiled guest agent binary for the host architecture (zstd-compressed).
 // Built by scripts/build.sh and embedded at compile time.
 //
-//go:embed agent-linux-amd64.zst
+//go:embed agent-linux-arm64.zst
 var agentBinaryZST []byte
 
 var (
@@ -35,13 +35,13 @@ func AgentBinary() []byte {
 		}
 		r, err := zstd.NewReader(bytes.NewReader(agentBinaryZST))
 		if err != nil {
-			slog.Error("vsockagent: failed to create zstd reader", "error", err)
+			slog.Error("agent: failed to create zstd reader", "error", err)
 			return
 		}
 		defer r.Close()
 		data, err := io.ReadAll(r)
 		if err != nil {
-			slog.Error("vsockagent: failed to decompress agent binary", "error", err)
+			slog.Error("agent: failed to decompress agent binary", "error", err)
 			return
 		}
 		agentBinaryData = data

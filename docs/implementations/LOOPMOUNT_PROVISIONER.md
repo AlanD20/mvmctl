@@ -57,7 +57,7 @@ For the console relay and nocloud server, `system.SpawnService()` is called dire
 
 ### 1. Queue operations
 
-The `LoopMountBackend` in `internal/lib/provisioner/loopmount/backend.go` provides builder methods: `SetupSSH()`, `SetHostname()`, `InjectDNS()`, `DisableCloudInit()`, `InjectCloudInit()`, `Resize()`, `InjectVsockAgent()`. Each method validates its arguments and appends an operation to an internal queue.
+The `LoopMountBackend` in `internal/lib/provisioner/loopmount/backend.go` provides builder methods: `SetupSSH()`, `SetHostname()`, `InjectDNS()`, `DisableCloudInit()`, `InjectCloudInit()`, `Resize()`, `InjectAgent()`. Each method validates its arguments and appends an operation to an internal queue.
 
 ### 2. Marshal and spawn
 

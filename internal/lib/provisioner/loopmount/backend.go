@@ -141,9 +141,9 @@ func (b *LoopMountBackend) Shrink(ctx context.Context) error {
 	return b.Resize(ctx, 0)
 }
 
-// InjectVsockAgent queues the vsock guest agent files into the rootfs.
-func (b *LoopMountBackend) InjectVsockAgent(_ context.Context, agentBinary []byte, port int, token string) error {
-	ops := provcontent.Builder{}.BuildVsockAgentOps(agentBinary, port, token)
+// InjectAgent queues the vsock guest agent files into the rootfs.
+func (b *LoopMountBackend) InjectAgent(_ context.Context, agentBinary []byte, port int, token string) error {
+	ops := provcontent.Builder{}.BuildAgentOps(agentBinary, port, token)
 	b.ops = append(b.ops, ops...)
 	return nil
 }

@@ -1,4 +1,4 @@
-package vsockagent
+package agent
 
 import (
 	"context"
@@ -25,11 +25,11 @@ type Agent struct {
 
 // New creates a new Agent with the given configuration.
 // localSocket is the path to the local Unix socket for in-VM IPC
-// (e.g., /var/run/mvm-vsock-agent.sock). If empty, defaults to
-// /var/run/mvm-vsock-agent.sock.
+// (e.g., /var/run/mvm-agent.sock). If empty, defaults to
+// /var/run/mvm-agent.sock.
 func New(port int, token string, localSocket string) *Agent {
 	if localSocket == "" {
-		localSocket = "/var/run/mvm-vsock-agent.sock"
+		localSocket = "/var/run/mvm-agent.sock"
 	}
 	return &Agent{
 		port:        port,

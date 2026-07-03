@@ -20,7 +20,7 @@ jobs:
           cache: true
 
       - name: Generate embed placeholders
-        run: go generate ./internal/service/vsockagent/...
+        run: go generate ./internal/service/agent/...
 
       - name: Test
         run: |

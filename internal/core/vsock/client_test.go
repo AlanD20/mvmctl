@@ -96,7 +96,7 @@ func TestTeardown_ContextCancelled(t *testing.T) {
 
 // --- RescanPCI ---
 // Rationale: RescanPCI triggers a PCI bus rescan inside the guest. The method
-// delegates to Exec, which requires a reachable vsock agent. These tests verify
+// delegates to Exec, which requires a reachable agent. These tests verify
 // the method is callable and returns the expected error when no agent is available.
 
 func TestRescanPCI_ReturnsErrorOnNoAgent(t *testing.T) {
@@ -111,7 +111,7 @@ func TestRescanPCI_ReturnsErrorOnNoAgent(t *testing.T) {
 // --- RemoveHotpluggedPCIDevice ---
 // Rationale: RemoveHotpluggedPCIDevice removes the last non-root virtio block
 // device from the guest PCI bus. Like RescanPCI, it delegates to Exec and
-// requires a reachable vsock agent.
+// requires a reachable agent.
 
 func TestRemoveHotpluggedPCIDevice_ReturnsErrorOnNoAgent(t *testing.T) {
 	client := vsock.NewClient(&model.VsockConfigItem{

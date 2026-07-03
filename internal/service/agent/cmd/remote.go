@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"mvmctl/internal/service/vsockagent"
+	"mvmctl/internal/service/agent"
 )
 
 // remoteFrame is the wire format for response frames from the guest agent daemon.
@@ -24,7 +24,7 @@ type remoteFrame struct {
 // relay response frames to stdout/stderr. Returns the exit code.
 func runRemoteSubcommand(socketPath string, args []string) int {
 	if len(args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: mvm-vsock-agent remote <destination> -- <command>\n")
+		fmt.Fprintf(os.Stderr, "usage: mvm-agent remote <destination> -- <command>\n")
 		return 1
 	}
 
@@ -51,7 +51,7 @@ func runRemoteSubcommand(socketPath string, args []string) int {
 	defer conn.Close()
 
 	// Send the remote_vm request.
-	req := vsockagent.RemoteVMRequest{
+	req := agent.RemoteVMRequest{
 		Destination: destination,
 		Command:     command,
 	}

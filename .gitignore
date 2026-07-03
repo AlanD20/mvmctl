@@ -56,7 +56,7 @@ vmlinux
 vmlinux-*
 
 # Guest agent binaries (compiled at build time by scripts/build.sh, never committed)
-internal/service/vsockagent/agent-linux-*
+internal/service/agent/agent-linux-*
 
 # Kernel build dir
 kernel-build/

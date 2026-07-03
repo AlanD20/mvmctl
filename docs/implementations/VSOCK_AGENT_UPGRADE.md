@@ -62,13 +62,13 @@ If the host version is greater than the agent version:
 
 1. **Set upgrade lock**: The `OnUpgradeStarted` callback is invoked, which sets `upgrading=1` in the `vm_vsock_config` table. The SQL UPDATE is conditional on `upgrading=0` — if another process beat us, zero rows are affected and the operation is rejected.
 
-2. **Push new binary**: `upgradeAgent()` writes the embedded binary to a temp file on the host, then uses `FTCopyToVM()` (with `skipVersionCheck=true` to avoid circular calls) to transfer it to `/usr/bin/mvm-vsock-agent.new` inside the VM.
+2. **Push new binary**: `upgradeAgent()` writes the embedded binary to a temp file on the host, then uses `FTCopyToVM()` (with `skipVersionCheck=true` to avoid circular calls) to transfer it to `/usr/bin/mvm-agent.new` inside the VM.
 
 3. **Replace and restart**: The client executes the upgrade shell command on the agent:
    ```
-   cp /usr/bin/mvm-vsock-agent /usr/bin/mvm-vsock-agent.bak 2>/dev/null || true;
-   mv /usr/bin/mvm-vsock-agent.new /usr/bin/mvm-vsock-agent && chmod 0755 /usr/bin/mvm-vsock-agent &&
-   ( sleep 2 && systemctl restart mvm-vsock-agent ) &
+   cp /usr/bin/mvm-agent /usr/bin/mvm-agent.bak 2>/dev/null || true;
+   mv /usr/bin/mvm-agent.new /usr/bin/mvm-agent && chmod 0755 /usr/bin/mvm-agent &&
+   ( sleep 2 && systemctl restart mvm-agent ) &
    ```
 
    The 2-second delay is critical: it allows the exec response frame to be sent before the old agent is killed. Without the delay, the host would see a connection error instead of a clean success.
@@ -145,8 +145,8 @@ If the upgrade shell command fails (binary not found, permission denied, etc.), 
 | `internal/core/vsock/protocol.go` | `requestTypeVersion`, `responseTypeVersion` constants |
 | `internal/core/vsock/repository.go` | `SetUpgradeLock()`, `ClearUpgradeLock()`, `UpdateAgentVersion()` |
 | `internal/lib/version/compare.go` | `version.Compare()` — semver-style comparison |
-| `internal/service/vsockagent/cmdlistener.go` | Agent-side: handles `"version"` request type, responds with embedded version |
-| `internal/service/vsockagent/agent.go` | Agent's `vsockConn.Close()` uses `SHUT_RDWR` for reliable vsock shutdown |
+| `internal/service/agent/cmdlistener.go` | Agent-side: handles `"version"` request type, responds with embedded version |
+| `internal/service/agent/agent.go` | Agent's `vsockConn.Close()` uses `SHUT_RDWR` for reliable vsock shutdown |
 | `pkg/api/cp.go` | `newVsockClient()` helper — loads config, checks locks, constructs client with callbacks |
 | `pkg/errs/codes.go` | `CodeVsockUpgradeInProgress` — concurrent upgrade rejection error |
 

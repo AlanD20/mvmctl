@@ -1,7 +1,7 @@
-// Package vsockagent tests internal (unexported) functions directly because
+// Package agent tests internal (unexported) functions directly because
 // readFTFrame, writeFTFrame, handleFTPush, handleFTPull, and all ft*Payload
 // types are unexported. Testing them directly is the only viable approach.
-package vsockagent
+package agent
 
 import (
 	"bytes"

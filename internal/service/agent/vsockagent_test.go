@@ -1,7 +1,7 @@
-// Package vsockagent tests internal (unexported) functions directly because
+// Package agent tests internal (unexported) functions directly because
 // readFrame, writeFrame, trimBOM, and handleExec are not exposed through any
 // exported API. Testing them directly is the only viable approach.
-package vsockagent
+package agent
 
 import (
 	"bytes"

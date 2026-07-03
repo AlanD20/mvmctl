@@ -62,7 +62,7 @@ resolve_version() {
 # reducing the mvm binary size by ~60% for the agent portion.
 build_agent() {
   local arch="$1"
-  local agent_dir="internal/service/vsockagent"
+  local agent_dir="internal/service/agent"
   local agent_binary="agent-linux-${arch}"
   local agent_zst="${agent_binary}.zst"
 
@@ -73,7 +73,7 @@ build_agent() {
   CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build -a \
     -o "${agent_dir}/${agent_binary}" \
     -ldflags="-s -w -X '${LDFLAGS_VAR}=${version}'" \
-    ./internal/service/vsockagent/cmd/
+    ./internal/service/agent/cmd/
 
   # Compress for embedding — saves ~60% in embedded binary size.
   # Decompressed lazily at runtime on first AgentBinary() call.
@@ -85,8 +85,8 @@ build_agent() {
 # ─── Clean up agent binaries ─────────────────────────────────────────────────
 cleanup_agent() {
   local arch="$1"
-  rm -f "internal/service/vsockagent/agent-linux-${arch}" \
-        "internal/service/vsockagent/agent-linux-${arch}.zst"
+  rm -f "internal/service/agent/agent-linux-${arch}" \
+        "internal/service/agent/agent-linux-${arch}.zst"
 }
 
 # ─── Build for one architecture ──────────────────────────────────────────────

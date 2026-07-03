@@ -276,7 +276,7 @@ provisioning step.
 
 Service backends are long-running subprocesses compiled into the same `mvm` binary.
 Each is invoked via `mvm run <service>` and spawned in the background by the core
-layer via `system.SpawnService()`. The `vsockagent` is a special case — it runs
+layer via `system.SpawnService()`. The `agent` is a special case — it runs
 inside the guest VM, not on the host.
 
 ### 3.1 Service Architecture
@@ -289,7 +289,7 @@ No separate service binaries, no symlinks, no extraction step.
 | `mvm run console relay` | `console.Run(ctx, cfg)` | user | PTY-to-socket relay for serial console |
 | `mvm run nocloudnet serve` | `nocloudnet.Run(ctx, cfg)` | user | HTTP server for cloud-init nocloud-net |
 | `mvm run provision` | `loopmount.Run(ctx, cfg)` | **root** (sudo) | Loop-mount rootfs provisioning |
-| `vsockagent/` (embedded) | Guest agent binary | root (in-VM) | Command execution and file transfer inside the guest |
+| `agent/` (embedded) | Guest agent binary | root (in-VM) | Command execution and file transfer inside the guest |
 
 The vsock agent is cross-compiled at build time, zstd-compressed, embedded via
 `//go:embed`, and injected into the VM at runtime through the vsock device. This
@@ -579,6 +579,6 @@ creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless 
 │    ├── mvm run console relay    → console relay (PTY proxy)                 │
 │    ├── mvm run nocloudnet serve → nocloud-net HTTP server                   │
 │    ├── mvm run provision        → loopmount provisioner (requires sudo)     │
-│    └── vsockagent               → embedded guest agent (injected into VM)   │
+│    └── agent               → embedded guest agent (injected into VM)   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```

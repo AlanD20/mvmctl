@@ -1,6 +1,6 @@
-// Package vsockagent tests handleLocalConn, which accepts a local UDS connection
+// Package agent tests handleLocalConn, which accepts a local UDS connection
 // and relays remote exec requests/responses through the vsock connection.
-package vsockagent
+package agent
 
 import (
 	"encoding/json"
@@ -367,11 +367,11 @@ func TestHandleLocalConn_VsockDisconnectMidRelay(t *testing.T) {
 
 // --- TestAgentNew (local socket param) ---
 // Rationale: New() accepts a localSocket parameter and defaults to
-// /var/run/mvm-vsock-agent.sock when empty.
+// /var/run/mvm-agent.sock when empty.
 
 func TestAgentNew_LocalSocketDefault(t *testing.T) {
 	a := New(9999, "token", "")
-	assert.Equal(t, "/var/run/mvm-vsock-agent.sock", a.localSocket)
+	assert.Equal(t, "/var/run/mvm-agent.sock", a.localSocket)
 }
 
 func TestAgentNew_LocalSocketCustom(t *testing.T) {

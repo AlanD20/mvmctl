@@ -98,9 +98,9 @@ func (b *GuestfsBackend) FixFstab(ctx context.Context) error {
 	return nil
 }
 
-// InjectVsockAgent builds and queues the vsock guest agent files into the rootfs.
-func (b *GuestfsBackend) InjectVsockAgent(_ context.Context, agentBinary []byte, port int, token string) error {
-	ops := provcontent.Builder{}.BuildVsockAgentOps(agentBinary, port, token)
+// InjectAgent builds and queues the vsock guest agent files into the rootfs.
+func (b *GuestfsBackend) InjectAgent(_ context.Context, agentBinary []byte, port int, token string) error {
+	ops := provcontent.Builder{}.BuildAgentOps(agentBinary, port, token)
 	b.customOps = append(b.customOps, ops...)
 	return nil
 }

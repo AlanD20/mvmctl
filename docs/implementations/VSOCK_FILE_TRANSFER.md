@@ -39,7 +39,7 @@ VM for `mvm exec`, so no additional guest-side dependencies are needed.
 
 File transfer is initiated from the CLI via `internal/cli/cp.go`, which calls `op.CPCopy()` in `pkg/api/cp.go`. The API layer resolves the source and destination, creates a `vsock.Client`, and calls `FTCopyToVM()` or `FTCopyFromVM()` in `internal/core/vsock/file_transfer.go`.
 
-Inside the guest, the vsock agent's `handleConnection()` in `cmdlistener.go` receives the `"file-transfer"` request type, sends a `"ft-ready"` acknowledgement, then calls `handleFileTransfer()` in `internal/service/vsockagent/file_transfer.go`.
+Inside the guest, the vsock agent's `handleConnection()` in `cmdlistener.go` receives the `"file-transfer"` request type, sends a `"ft-ready"` acknowledgement, then calls `handleFileTransfer()` in `internal/service/agent/file_transfer.go`.
 
 ## Protocol design
 
@@ -331,7 +331,7 @@ files/chunks) — not mid-chunk, since vsock does not support
 The file transfer implementation lives in the **vsock domain**:
 - **Transport**: vsock (AF_UNIX ↔ Firecracker ↔ AF_VSOCK)
 - **Protocol**: binary frames over vsock
-- **Agent handler**: `internal/service/vsockagent/file_transfer.go`
+- **Agent handler**: `internal/service/agent/file_transfer.go`
 - **Host client**: `internal/core/vsock/file_transfer.go` — methods on
   `*vsock.Client`
 - **API/CLI**: `pkg/api/cp.go` and `internal/cli/cp.go` delegate to vsock
@@ -363,9 +363,9 @@ If multiple source files are specified but the destination is not a directory an
 
 | File | Purpose |
 |------|---------|
-| `internal/service/vsockagent/file_transfer.go` | Agent-side handler: `handleFTPush()`, `handleFTPull()`, binary frame helpers, SHA-256 verification |
-| `internal/service/vsockagent/protocol.go` | Constants: request types (`requestTypeFileTransfer`), buffer size (`ftBufferSize = 262144`) |
-| `internal/service/vsockagent/cmdlistener.go` | Dispatch: `"file-transfer"` request → `sendFrame(ft-ready)` → `handleFileTransfer()` |
+| `internal/service/agent/file_transfer.go` | Agent-side handler: `handleFTPush()`, `handleFTPull()`, binary frame helpers, SHA-256 verification |
+| `internal/service/agent/protocol.go` | Constants: request types (`requestTypeFileTransfer`), buffer size (`ftBufferSize = 262144`) |
+| `internal/service/agent/cmdlistener.go` | Dispatch: `"file-transfer"` request → `sendFrame(ft-ready)` → `handleFileTransfer()` |
 | `internal/core/vsock/file_transfer.go` | Host client: `FTCopyToVM()`, `FTCopyFromVM()`, `FTCopyVMToVM()`, `expandSources()` |
 | `internal/core/vsock/client.go` | Base vsock `Client` with `ensureAgent()`, `Exec()`, `Shell()` |
 | `internal/core/vsock/protocol.go` | vsock protocol constants: `ftBufferSize`, `requestTypeFileTransfer` |

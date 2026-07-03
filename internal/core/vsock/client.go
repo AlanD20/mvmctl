@@ -21,7 +21,7 @@ import (
 	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/version"
-	"mvmctl/internal/service/vsockagent"
+	"mvmctl/internal/service/agent"
 	"mvmctl/pkg/errs"
 )
 
@@ -38,12 +38,12 @@ const (
 	// agent service after a 2-second delay in a fully detached background
 	// process (nohup). The delay allows the exec response frame to be sent
 	// before the old agent is killed. Supports both systemd and OpenRC.
-	upgradeShellCommand = `cp /usr/bin/mvm-vsock-agent /usr/bin/mvm-vsock-agent.bak 2>/dev/null || true; mv /usr/bin/mvm-vsock-agent.new /usr/bin/mvm-vsock-agent && chmod 0755 /usr/bin/mvm-vsock-agent && nohup sh -c 'sleep 2; if command -v systemctl >/dev/null 2>&1; then systemctl restart mvm-vsock-agent; else rc-service mvm-vsock-agent restart; fi' >/dev/null 2>&1 </dev/null &`
+	upgradeShellCommand = `cp /usr/bin/mvm-agent /usr/bin/mvm-agent.bak 2>/dev/null || true; mv /usr/bin/mvm-agent.new /usr/bin/mvm-agent && chmod 0755 /usr/bin/mvm-agent && nohup sh -c 'sleep 2; if command -v systemctl >/dev/null 2>&1; then systemctl restart mvm-agent; else rc-service mvm-agent restart; fi' >/dev/null 2>&1 </dev/null &`
 
 	// restoreShellCommand restores the previous agent binary from backup and
 	// restarts the service. Used as a rollback if the upgrade exec fails.
 	// Uses nohup to fully detach the restart. Supports both systemd and OpenRC.
-	restoreShellCommand = `test -f /usr/bin/mvm-vsock-agent.bak && cp /usr/bin/mvm-vsock-agent.bak /usr/bin/mvm-vsock-agent && nohup sh -c 'sleep 1; if command -v systemctl >/dev/null 2>&1; then systemctl restart mvm-vsock-agent; else rc-service mvm-vsock-agent restart; fi' >/dev/null 2>&1 </dev/null &`
+	restoreShellCommand = `test -f /usr/bin/mvm-agent.bak && cp /usr/bin/mvm-agent.bak /usr/bin/mvm-agent && nohup sh -c 'sleep 1; if command -v systemctl >/dev/null 2>&1; then systemctl restart mvm-agent; else rc-service mvm-agent restart; fi' >/dev/null 2>&1 </dev/null &`
 )
 
 // Client is a per-VM vsock protocol client for communicating with the
@@ -461,7 +461,7 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 	if c.ProbeTimeout <= 0 {
 		return nil, errs.New(errs.CodeVsockConnectionFailed,
-			"vsock agent probe timeout not set — API layer must set ProbeTimeout from config")
+			"agent probe timeout not set — API layer must set ProbeTimeout from config")
 	}
 
 	start := time.Now()
@@ -487,7 +487,7 @@ func (c *Client) ensureAgent(ctx context.Context) (net.Conn, error) {
 			return nil, errs.New(
 				errs.CodeVsockConnectionFailed,
 				fmt.Sprintf(
-					"vsock agent did not become reachable within %v after %d attempt(s)",
+					"agent did not become reachable within %v after %d attempt(s)",
 					c.ProbeTimeout,
 					attempts,
 				),
@@ -762,10 +762,10 @@ func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
 	if hostVer == "" {
 		hostVer = defaultVersion
 	}
-	slog.Info("upgrading vsock agent", "vm", c.VmName, "from", oldVersion, "to", hostVer)
+	slog.Info("upgrading agent", "vm", c.VmName, "from", oldVersion, "to", hostVer)
 
 	// Step 1: Write embedded binary to temp file on host
-	embedded := vsockagent.AgentBinary()
+	embedded := agent.AgentBinary()
 	if len(embedded) == 0 {
 		return fmt.Errorf("embedded agent binary is empty — check build process")
 	}
@@ -782,7 +782,7 @@ func (c *Client) upgradeAgent(ctx context.Context, oldVersion string) error {
 		VmName:           c.VmName,
 		skipVersionCheck: true,
 	}
-	_, err := pushClient.FTCopyToVM(ctx, []string{tmpPath}, "/usr/bin/mvm-vsock-agent.new", true, false, nil)
+	_, err := pushClient.FTCopyToVM(ctx, []string{tmpPath}, "/usr/bin/mvm-agent.new", true, false, nil)
 	if err != nil {
 		return fmt.Errorf("push agent binary to VM: %w", err)
 	}

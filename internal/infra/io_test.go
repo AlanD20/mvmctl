@@ -551,7 +551,7 @@ func TestReadInt(t *testing.T) {
 
 // --- PersistenceChain ---
 // Validates the write → fsync → close → copy → verify chain.
-// This simulates the exact data path used by mvm cp (vsock agent writes a
+// This simulates the exact data path used by mvm cp (agent writes a
 // file with f.Sync()+f.Close()) followed by base image creation (CopyFile).
 // Regression test for: CacheType "Unsafe" in Firecracker causing data loss
 // when guest fsync does not trigger host fsync on the backing file.
@@ -564,16 +564,16 @@ func TestPersistenceChain_WriteSyncCopyVerify(t *testing.T) {
 		rootfsFile, err := os.Create(rootfsPath)
 		require.NoError(t, err)
 
-		// Write data to the rootfs (simulates the vsock agent writing within the VM)
+		// Write data to the rootfs (simulates the agent writing within the VM)
 		expectedData := []byte("this-data-must-survive-copy-" + time.Now().String())
 		_, err = rootfsFile.Write(expectedData)
 		require.NoError(t, err)
 
-		// 2. fsync (simulates the vsock agent's f.Sync() call)
+		// 2. fsync (simulates the agent's f.Sync() call)
 		err = rootfsFile.Sync()
 		require.NoError(t, err)
 
-		// 3. close (simulates the vsock agent's f.Close() call)
+		// 3. close (simulates the agent's f.Close() call)
 		err = rootfsFile.Close()
 		require.NoError(t, err)
 

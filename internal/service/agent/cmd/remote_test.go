@@ -18,7 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"mvmctl/internal/service/vsockagent"
+	"mvmctl/internal/service/agent"
 )
 
 func init() {
@@ -46,7 +46,7 @@ func startMockDaemonListener(t *testing.T, respFrames []remoteFrame) string {
 		defer conn.Close()
 
 		// Read the RemoteVMRequest (one JSON line)
-		var req vsockagent.RemoteVMRequest
+		var req agent.RemoteVMRequest
 		if err := json.NewDecoder(conn).Decode(&req); err != nil {
 			return
 		}
@@ -582,7 +582,7 @@ func TestRunRemoteSubcommand_ParsesArgsCorrectly(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
 
-	var capturedReq vsockagent.RemoteVMRequest
+	var capturedReq agent.RemoteVMRequest
 	var reqMu sync.Mutex
 
 	go func() {
@@ -592,7 +592,7 @@ func TestRunRemoteSubcommand_ParsesArgsCorrectly(t *testing.T) {
 		}
 		defer conn.Close()
 
-		var req vsockagent.RemoteVMRequest
+		var req agent.RemoteVMRequest
 		if err := json.NewDecoder(conn).Decode(&req); err != nil {
 			return
 		}

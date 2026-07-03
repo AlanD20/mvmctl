@@ -15,15 +15,15 @@ VM A needs to run a command inside VM B without SSH. The existing `mvm exec` ope
 User runs:
 
 ```
-mvm exec vm-a -- mvm-vsock-agent remote vm-b -- ls -la
+mvm exec vm-a -- mvm-agent remote vm-b -- ls -la
 ```
 
 | Step | Location | What happens |
 |------|----------|-------------|
-| 1 | Host `mvm` | Opens vsock to VM A, sends `{"type":"exec","command":"mvm-vsock-agent remote vm-b -- ls -la"}` |
+| 1 | Host `mvm` | Opens vsock to VM A, sends `{"type":"exec","command":"mvm-agent remote vm-b -- ls -la"}` |
 | 2 | Guest agent daemon (VM A) | `handleConnection` reads exec frame → `handleExec` runs |
-| 3 | Guest agent daemon (VM A) | `handleExec` calls `exec.Command("sh", "-c", "mvm-vsock-agent remote vm-b -- ls -la")`, blocks on `cmd.Wait()` |
-| 4 | Child process (VM A) | `mvm-vsock-agent remote` CLI connects to daemon's local Unix socket at `/var/run/mvm-vsock-agent.sock` |
+| 3 | Guest agent daemon (VM A) | `handleExec` calls `exec.Command("sh", "-c", "mvm-agent remote vm-b -- ls -la")`, blocks on `cmd.Wait()` |
+| 4 | Child process (VM A) | `mvm-agent remote` CLI connects to daemon's local Unix socket at `/var/run/mvm-agent.sock` |
 | 5 | Guest agent daemon (VM A) | Background goroutine `handleLocalConn` reads JSON frame from local socket |
 | 6 | Guest agent daemon (VM A) | Locks `connMu`, writes `{"type":"remote_vm","data":"{\"destination\":\"vm-b\",\"command\":\"ls -la\"}"}` to the **same vsock connection** |
 | 7 | Host `mvm` | `Client.Exec()` read loop receives the frame, `resp.Type == "remote_vm"` |
@@ -68,7 +68,7 @@ The `Data` field of a `"remote_vm"` request from guest contains JSON-encoded par
 
 ### Protocol constants
 
-Both the guest agent (`internal/service/vsockagent/protocol.go`) and the host vsock package (`internal/core/vsock/protocol.go`) define the same `"remote_vm"` frame type constant.
+Both the guest agent (`internal/service/agent/protocol.go`) and the host vsock package (`internal/core/vsock/protocol.go`) define the same `"remote_vm"` frame type constant.
 
 ### Exported protocol primitives
 
@@ -115,7 +115,7 @@ The guest agent daemon runs two listeners concurrently:
 │  │ (existing)       │  │ socket listener│  │
 │  │ port 1024        │  │ (new)          │  │
 │  │                  │  │ /var/run/      │  │
-│  │                  │  │ mvm-vsock-agent│  │
+│  │                  │  │ mvm-agent│  │
 │  │                  │  │ .sock          │  │
 │  └────────┬─────────┘  └───────┬────────┘  │
 │           │                    │            │
@@ -137,10 +137,10 @@ The guest agent daemon runs two listeners concurrently:
 
 ### Guest agent CLI subcommand
 
-`mvm-vsock-agent remote <destination> -- <command>` is a one-shot CLI mode:
+`mvm-agent remote <destination> -- <command>` is a one-shot CLI mode:
 
 ```bash
-mvm-vsock-agent remote vm-b -- ls -la
+mvm-agent remote vm-b -- ls -la
 ```
 
 When the daemon binary is invoked with `remote` as the first argument, it connects to the daemon's local Unix socket, sends the `remote_vm` request, relays frames to stdout/stderr in real time, and exits with the remote exit code.
@@ -186,13 +186,13 @@ In `pkg/api/cp.go`, `newVsockClient()` creates a Handler instance and assigns it
 |------|------|--------|
 | 1 | `internal/lib/db/migrations/001_initial_schema.sql` | Add `remote_exec INTEGER DEFAULT 0 NOT NULL` to `vm_instances` CREATE TABLE |
 | 2 | `internal/lib/model/vm.go` | Add `RemoteExec bool` field to `VMItem` |
-| 3 | `internal/service/vsockagent/protocol.go` | Add `RemoteVMRequest` and `RemoteVMResponse` structs, `responseTypeRemoteVM` constant |
+| 3 | `internal/service/agent/protocol.go` | Add `RemoteVMRequest` and `RemoteVMResponse` structs, `responseTypeRemoteVM` constant |
 | 4 | `internal/core/vsock/protocol.go` | Add `ResponseTypeRemoteVM` constant. Export `SendFrame`, `ReadFrame`, `DialVM`. Add unexported `readFrameRaw`. |
 | 5 | `internal/core/vsock/client.go` | Add `OnHostFrame func(ctx, sourceVMID, conn, type, data)` to `Client`. In `Exec()` read loop, call it in `default:` case. Remove `VmRepo`, `VsockRepo`, `handleRemoteVM`. |
-| 6 | `internal/service/vsockagent/agent.go` | Add `localSocket`, `activeConn`, `activeConnMu` to `Agent`. Start local UDS listener in `Run()`. Set/clear `activeConn` in `handleConnection()`. |
-| 7 | `internal/service/vsockagent/local.go` (new) | `handleLocalConn()` — reads `RemoteVMRequest` from local socket, writes to vsock via `activeConn`, reads response frames, forwards to local socket |
-| 8 | `internal/service/vsockagent/cmd/main.go` | Detect `remote` subcommand via `flag.NArg()` check. |
-| 9 | `internal/service/vsockagent/cmd/remote.go` (new) | `runRemoteSubcommand()` — connects to daemon local socket, sends request, relays response frames to stdout/stderr via `json.NewDecoder` |
+| 6 | `internal/service/agent/agent.go` | Add `localSocket`, `activeConn`, `activeConnMu` to `Agent`. Start local UDS listener in `Run()`. Set/clear `activeConn` in `handleConnection()`. |
+| 7 | `internal/service/agent/local.go` (new) | `handleLocalConn()` — reads `RemoteVMRequest` from local socket, writes to vsock via `activeConn`, reads response frames, forwards to local socket |
+| 8 | `internal/service/agent/cmd/main.go` | Detect `remote` subcommand via `flag.NArg()` check. |
+| 9 | `internal/service/agent/cmd/remote.go` (new) | `runRemoteSubcommand()` — connects to daemon local socket, sends request, relays response frames to stdout/stderr via `json.NewDecoder` |
 | 10 | **`internal/vsockhandler/handler.go` (new)** | `Handler` struct with `VMResolver`/`VsockRepo`. `Handle(ctx, sourceVMID, conn, type, data)` switch. `handleRemoteVM()` with auth checks and streaming relay. |
 | 11 | `pkg/api/inputs/vm_create.go` | Add `AllowRemoteExec *bool` to `VMCreateInput`, `AllowRemoteExec bool` to `ResolvedVMCreateInput`. Resolve with config default. |
 | 12 | `internal/cli/vm.go` | Add `--allow-remote-exec` flag to `mvm vm create` |
@@ -235,5 +235,5 @@ The resolution in `Resolve()` follows the existing pattern used by `enable_conso
 | Feature | Relation |
 |---|---|
 | `mvm exec` | Host → VM. Remote exec reuses the exec read loop and vsock connection. Shares `client.Exec()`. |
-| Guest agent local socket | New. `/var/run/mvm-vsock-agent.sock` for in-VM IPC to the daemon. |
+| Guest agent local socket | New. `/var/run/mvm-agent.sock` for in-VM IPC to the daemon. |
 | Console relay | Different mechanism (AF_UNIX relay), but similar relay architecture. |

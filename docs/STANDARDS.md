@@ -40,7 +40,7 @@ Coding standards, conventions, and architectural rules for the mvmctl Go codebas
 | `internal/cli/common/` | Shared CLI helpers (tables, JSON output, prompts) | Imports `internal/infra`, `internal/lib/*` |
 | `internal/core/{domain}/` | Domain logic (vm, network, image, kernel, binary, key, host, volume, config, console, logs, cloudinit, cache, ssh, snapshot, vsock) | Imports `internal/infra`, `internal/lib/*`. NEVER imports other `core/*` packages. |
 | `internal/enricher/` | Cross-domain enrichment (only package besides `pkg/api` that imports multiple core domains) | Imports `internal/core/*` |
-| `internal/service/` | Background subprocess services (console relay, nocloudnet server, loopmount provisioner) plus embedded vsock guest agent (`vsockagent/`) | Imports `internal/infra`, `internal/lib/*`. Never imports `pkg/api` or `internal/cli/`. |
+| `internal/service/` | Background subprocess services (console relay, nocloudnet server, loopmount provisioner) plus embedded vsock guest agent (`agent/`) | Imports `internal/infra`, `internal/lib/*`. Never imports `pkg/api` or `internal/cli/`. |
 | `internal/workflow/env/` | Environment workflow orchestration (apply/destroy specs) | Imports `pkg/api`, `internal/infra`, `internal/lib/*` (specifically `internal/lib/workflow`). Never imports `internal/core/` or `internal/enricher/` directly. |
 | `internal/infra/` | Generic leaf utilities (constants, io, template, yaml, cast, slice, pool, ptr, event, provcontent, timinglog, progress, vm) | Imports stdlib, external deps, and `pkg/errs`. Never imports core, api, cli, or service. |
 | `internal/lib/` | Domain-adjacent leaf utilities (system, model, db, download, version, logging, crypto, firewall, firecracker, provisioner, network, archive, asset, disk, validators, workflow) | Imports stdlib, external deps, and `pkg/errs`. Never imports core, api, or cli. Exception: `internal/lib/provisioner/loopmount/` imports `internal/service/loopmount` for subprocess communication. |
@@ -186,8 +186,8 @@ Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 | `internal/core/vm/firecracker.go` | Needs `pass_fds` for VM API socket and log file descriptors |
 | `internal/core/ssh/utils.go` | SSH connectivity probe uses `exec.CommandContext` with short-lived probe context |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine with chained losetup/mount/umount/chroot |
-| `internal/service/vsockagent/exec.go` | Guest agent command execution via `su`/`sh` with `exec.CommandContext` |
-| `internal/service/vsockagent/pty.go` | Guest agent PTY session via `su` with `exec.CommandContext` |
+| `internal/service/agent/exec.go` | Guest agent command execution via `su`/`sh` with `exec.CommandContext` |
+| `internal/service/agent/pty.go` | Guest agent PTY session via `su` with `exec.CommandContext` |
 | `internal/lib/archive/archive.go` | xz decompression via pipe-based `exec.CommandContext` |
 | `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of `DefaultRunner.Run()` / `Stream()` / `SpawnService` itself |
 
@@ -429,7 +429,7 @@ Long-running subprocess services in `internal/service/`:
 - `console/` — PTY relay goroutine (entry: `mvm run console relay`)
 - `nocloudnet/` — NoCloud HTTP metadata server goroutine (entry: `mvm run nocloudnet serve`)
 - `loopmount/` — Loop-mount provisioner subprocess (entry: `mvm run provision`)
-- `vsockagent/` — Embedded guest agent binary (cross-compiled, zstd-compressed, injected at runtime via vsock — no `mvm run` entry)
+- `agent/` — Embedded guest agent binary (cross-compiled, zstd-compressed, injected at runtime via vsock — no `mvm run` entry)
 
 Each subprocess service follows: `Config` struct → `Run(ctx, cfg)` (blocking) → `Spawn(ctx, cfg, extraFiles...)` (background via `system.SpawnService`).
 

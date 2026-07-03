@@ -28,7 +28,7 @@ The CI pipeline enforces them; deviating locally means the PR fails.
 2. **Format** — `test -z "$(gofmt -l .)"` (gofmt compliance, entire tree)
 3. **Line length** — `golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/`
    (120-char limit on Go source)
-4. **Generate** — `go generate ./internal/service/vsockagent/...` (embed placeholders)
+4. **Generate** — `go generate ./internal/service/agent/...` (embed placeholders)
 5. **Vet** — `go vet ./...` (zero static-analysis warnings)
 6. **Test** — `go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic`
 
@@ -36,7 +36,7 @@ The CI pipeline enforces them; deviating locally means the PR fails.
 go mod tidy && git diff --exit-code
 test -z "$(gofmt -l .)"
 golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/ 2>&1 | grep . && echo "violations found" && exit 1 || true
-go generate ./internal/service/vsockagent/...
+go generate ./internal/service/agent/...
 go vet ./...
 go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 ```
@@ -45,7 +45,7 @@ go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
 The architect MUST verify these before approving any implementation plan:
 
-1. **Patterns cross-check** — Read the EXISTING interface/pattern the proposal touches. Does the new method match the naming and shape of existing methods? (e.g., `Backend.SetupSSH(ctx, user, keys)` → new method should be `InjectVsockAgent(ctx, binary, port, token)`, not `ApplyOps(ctx, ops)`)
+1. **Patterns cross-check** — Read the EXISTING interface/pattern the proposal touches. Does the new method match the naming and shape of existing methods? (e.g., `Backend.SetupSSH(ctx, user, keys)` → new method should be `InjectAgent(ctx, binary, port, token)`, not `ApplyOps(ctx, ops)`)
 2. **Analogous precedent** — Find 2-3 existing code paths that solve the same KIND of problem. If the existing Backend methods are all named typed methods, a generic `[]Operation` passthrough is a red flag.
 3. **Layer check** — Does the proposed code belong in the layer it's placed in? (e.g., CID retry loops belong in `internal/core/*/service.go`, not in `pkg/api/*.go`)
 4. **Reject generic extension points** — "This is extensible for future use" is a smell. Prefer typed named methods that describe exactly what they do. Add new methods when new needs arise, not generic hooks.

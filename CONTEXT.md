@@ -98,14 +98,14 @@ Constructor pattern: `NewRepository(db *sqlx.DB) Repository`.
 
 ### Service subprocess pattern (internal/service/)
 
-Long-running subprocess services (console relay, nocloud-net server, loopmount provisioner) live in `internal/service/{name}/`. These are compiled into the same `mvm` binary — no separate binaries. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`vsockagent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
+Long-running subprocess services (console relay, nocloud-net server, loopmount provisioner) live in `internal/service/{name}/`. These are compiled into the same `mvm` binary — no separate binaries. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`agent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
 
 Each service follows a consistent three-function pattern:
 - **`Config`** struct — holds all configuration for the service.
 - **`Run(ctx, cfg)`** — runs the service in the foreground (blocking).
 - **`Spawn(ctx, cfg, extraParams...)`** — launches the service as a background subprocess via `system.SpawnService()`. The context parameter is typically `nil` (background/nil) for daemon services (console relay, nocloud-net server) and a real context for synchronous services (loopmount provisioning). Extra parameters carry service-specific data: `console.Spawn()` passes a PTY file descriptor, `nocloudnet.Spawn()` passes the config only, `loopmount.Spawn()` passes a wire protocol input struct.
 
-Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `vsockagent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
+Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `agent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
 
 Dependency direction: `cli/` -> `services/`. Services never import `cli/` or `pkg/api/`.
 
@@ -412,8 +412,8 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 | `internal/core/vm/firecracker.go` (Firecracker spawn) | Fine-grained control over stdin/stdout/stderr FD redirection and `Setsid` session management for the Firecracker child process |
 | `internal/core/ssh/utils.go` (SSH connectivity probe) | Uses `exec.CommandContext` with a short-lived probe context for SSH connectivity detection |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
-| `internal/service/vsockagent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |
-| `internal/service/vsockagent/pty.go` (PTY session) | Uses `exec.CommandContext` for `su` user switching to establish PTY sessions |
+| `internal/service/agent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |
+| `internal/service/agent/pty.go` (PTY session) | Uses `exec.CommandContext` for `su` user switching to establish PTY sessions |
 | `internal/lib/archive/archive.go` (xz decompression) | Uses `exec.CommandContext` for `xz -d --stdout` pipe-based decompression |
 | `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of the subprocess abstraction layer (`DefaultRunner`, `RunInteractive`, `SpawnService`). These use raw `os/exec` because they ARE the abstraction boundary |
 

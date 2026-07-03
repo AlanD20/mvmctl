@@ -44,7 +44,7 @@ Guest sync() → VIRTIO_BLK_T_FLUSH → ⛔ ignored by Firecracker → data stay
 
 ## Vsock agent sync integration
 
-The vsock guest agent automatically calls `unix.Sync()` after every `mvm exec` command (in `internal/service/vsockagent/exec.go`) and after every `mvm cp` file transfer (in `internal/service/vsockagent/file_transfer.go`), unless `--no-sync` is passed.
+The vsock guest agent automatically calls `unix.Sync()` after every `mvm exec` command (in `internal/service/agent/exec.go`) and after every `mvm cp` file transfer (in `internal/service/agent/file_transfer.go`), unless `--no-sync` is passed.
 
 In **Writeback** mode (default), this ensures data reaches physical storage before the operation is considered complete. This prevents data loss when the VM is stopped immediately after a write-heavy operation.
 
@@ -124,8 +124,8 @@ Without the explicit `sync`, files written by `/setup.sh` could be lost in Firec
 
 | File | Purpose |
 |------|---------|
-| `internal/service/vsockagent/exec.go` | `handleExec()` — calls `unix.Sync()` after command execution |
-| `internal/service/vsockagent/file_transfer.go` | `handleFTPush()` — calls `unix.Sync()` after file transfer |
+| `internal/service/agent/exec.go` | `handleExec()` — calls `unix.Sync()` after command execution |
+| `internal/service/agent/file_transfer.go` | `handleFTPush()` — calls `unix.Sync()` after file transfer |
 
 ## References
 

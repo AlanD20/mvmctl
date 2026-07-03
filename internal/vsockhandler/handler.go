@@ -15,7 +15,7 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/service/vsockagent"
+	"mvmctl/internal/service/agent"
 	"mvmctl/pkg/errs"
 )
 
@@ -57,7 +57,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 	// 1. Check source VM exists and has remote_exec enabled.
 	sourceVM, err := h.VMResolver.Resolve(ctx, sourceVMID)
 	if err != nil {
-		_ = vsock.SendFrame(sourceConn, vsockagent.RemoteVMResponse{
+		_ = vsock.SendFrame(sourceConn, agent.RemoteVMResponse{
 			Type: vsock.ResponseTypeRemoteVM, Status: 1, Error: "source VM not found",
 		})
 		return errs.WrapMsg(errs.CodeVMNotFound,
@@ -65,7 +65,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 	}
 	if !sourceVM.RemoteExec {
 		slog.Warn("remote exec: source VM not authorized", "source_vm", sourceVM.Name)
-		_ = vsock.SendFrame(sourceConn, vsockagent.RemoteVMResponse{
+		_ = vsock.SendFrame(sourceConn, agent.RemoteVMResponse{
 			Type:   vsock.ResponseTypeRemoteVM,
 			Status: 1,
 			Error:  fmt.Sprintf("source VM '%s' is not authorized for remote exec", sourceVM.Name),
@@ -75,11 +75,11 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 	}
 
 	// 2. Parse the remote exec request from the frame data.
-	var req vsockagent.RemoteVMRequest
+	var req agent.RemoteVMRequest
 	if err := json.Unmarshal([]byte(data), &req); err != nil {
 		_ = vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{
+			agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: 1,
 				Error:  "invalid remote exec request",
@@ -91,7 +91,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 	if req.Destination == "" || req.Command == "" {
 		vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{
+			agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: 1,
 				Error:  "destination and command are required",
@@ -112,7 +112,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 	if err != nil {
 		vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{
+			agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: 1,
 				Error:  fmt.Sprintf("target VM '%s' not found", req.Destination),
@@ -127,7 +127,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 		slog.Warn("remote exec: target VM not authorized", "target_vm", targetVM.Name)
 		vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{
+			agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: 1,
 				Error:  "target VM is not authorized for remote exec",
@@ -142,7 +142,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 		slog.Warn("remote exec: target VM not running", "target_vm", targetVM.Name, "status", targetVM.Status)
 		vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{Type: vsock.ResponseTypeRemoteVM, Status: 1, Error: "target VM is not running"},
+			agent.RemoteVMResponse{Type: vsock.ResponseTypeRemoteVM, Status: 1, Error: "target VM is not running"},
 		)
 		return errs.New(errs.CodeVMNotRunning,
 			"remote exec: target VM '"+targetVM.Name+"' is not running")
@@ -153,7 +153,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 	if err != nil {
 		_ = vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{
+			agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: 1,
 				Error:  "target VM has no vsock configuration",
@@ -165,7 +165,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 	if targetVsock == nil {
 		_ = vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{
+			agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: 1,
 				Error:  "target VM has no vsock configuration",
@@ -182,7 +182,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 			"target_vm", targetVM.Name, "error", err)
 		vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{
+			agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: 1,
 				Error:  "failed to connect to target VM",
@@ -207,7 +207,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 			"target_vm", targetVM.Name, "error", err)
 		vsock.SendFrame(
 			sourceConn,
-			vsockagent.RemoteVMResponse{
+			agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: 1,
 				Error:  "failed to execute command on target VM",
@@ -228,7 +228,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 				"target_vm", targetVM.Name, "error", err)
 			vsock.SendFrame(
 				sourceConn,
-				vsockagent.RemoteVMResponse{
+				agent.RemoteVMResponse{
 					Type:   vsock.ResponseTypeRemoteVM,
 					Status: 1,
 					Error:  "connection to target VM lost",
@@ -261,7 +261,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 			if f.Error != "" {
 				vsock.SendFrame(
 					sourceConn,
-					vsockagent.RemoteVMResponse{Type: vsock.ResponseTypeRemoteVM, Status: 1, Error: f.Error},
+					agent.RemoteVMResponse{Type: vsock.ResponseTypeRemoteVM, Status: 1, Error: f.Error},
 				)
 				return errs.New(errs.CodeVsockExecFailed,
 					"remote exec: target error: "+f.Error)
@@ -269,7 +269,7 @@ func (h *Handler) handleRemoteVM(ctx context.Context, sourceVMID string, sourceC
 			exitCode = f.Status
 
 			// Send final remote_vm frame to source with the exit code.
-			vsock.SendFrame(sourceConn, vsockagent.RemoteVMResponse{Type: vsock.ResponseTypeRemoteVM, Status: exitCode})
+			vsock.SendFrame(sourceConn, agent.RemoteVMResponse{Type: vsock.ResponseTypeRemoteVM, Status: exitCode})
 
 			slog.Info("remote exec completed",
 				"target_vm", targetVM.Name,

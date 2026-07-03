@@ -19,14 +19,14 @@ mvm exec my-vm -- ls -la /etc
 │        └── JSON frame exchange   │
 │                                  │
 │  op.VMCreate(ctx, input)         │
-│    └── provcontent.BuildVsockAgentOps()│
+│    └── provcontent.BuildAgentOps()│
 │    └── vsock section in JSON cfg │
 │    └── vsockRepo.Upsert()        │
 └──────────┬───────────────────────┘
            │ AF_VSOCK (Firecracker virtio-vsock device)
            ▼
 ┌──────────────────────────────────┐
-│  Guest: mvm-vsock-agent          │
+│  Guest: mvm-agent          │
 │  • Embedded Go binary            │
 │  • Injected by loop-mount/guestfs│
 │  • Runs as systemd/OpenRC service│
@@ -43,9 +43,9 @@ mvm exec my-vm -- ls -la /etc
 
 ## Entry point
 
-The agent is embedded into the VM rootfs at creation time. During `op.VMCreate()`, the API layer calls `provcontent.BuildVsockAgentOps()` in `internal/infra/provcontent/content.go`, which produces five operations: the agent binary at `/usr/bin/mvm-vsock-agent`, an auth token at `/var/run/mvm-vsock-agent.token`, a systemd unit at `/etc/systemd/system/mvm-vsock-agent.service`, an OpenRC init script at `/etc/init.d/mvm-vsock-agent`, and a chroot command to enable the agent in the detected init system. Both provisioner backends (loop-mount and guestfs) consume the same operation types.
+The agent is embedded into the VM rootfs at creation time. During `op.VMCreate()`, the API layer calls `provcontent.BuildAgentOps()` in `internal/infra/provcontent/content.go`, which produces five operations: the agent binary at `/usr/bin/mvm-agent`, an auth token at `/var/run/mvm-agent.token`, a systemd unit at `/etc/systemd/system/mvm-agent.service`, an OpenRC init script at `/etc/init.d/mvm-agent`, and a chroot command to enable the agent in the detected init system. Both provisioner backends (loop-mount and guestfs) consume the same operation types.
 
-The agent starts automatically when the VM boots. `Agent.Run()` in `internal/service/vsockagent/agent.go` creates a raw AF_VSOCK socket on the configured port, binds with `VMADDR_CID_ANY`, listens, and accepts connections in a loop — dispatching each to `handleConnection()`.
+The agent starts automatically when the VM boots. `Agent.Run()` in `internal/service/agent/agent.go` creates a raw AF_VSOCK socket on the configured port, binds with `VMADDR_CID_ANY`, listens, and accepts connections in a loop — dispatching each to `handleConnection()`.
 
 `mvm exec` from the host triggers `op.Exec()` in `pkg/api/exec.go`, which creates a `vsock.Client` via `vsock.NewClient()`, dials the Firecracker vsock UDS, performs the CONNECT handshake, and exchanges JSON frames with the agent.
 
@@ -53,10 +53,10 @@ The agent starts automatically when the VM boots. `Agent.Run()` in `internal/ser
 
 ### 1. Agent injection at VM creation
 
-`provcontent.BuildVsockAgentOps()` generates:
-- `FileOp` at `/usr/bin/mvm-vsock-agent` with the compressed agent binary (mode 0755)
-- `FileOp` at `/var/run/mvm-vsock-agent.token` with a random UUID auth token (mode 0600)
-- `FileOp` at `/etc/systemd/system/mvm-vsock-agent.service` — systemd unit:
+`provcontent.BuildAgentOps()` generates:
+- `FileOp` at `/usr/bin/mvm-agent` with the compressed agent binary (mode 0755)
+- `FileOp` at `/var/run/mvm-agent.token` with a random UUID auth token (mode 0600)
+- `FileOp` at `/etc/systemd/system/mvm-agent.service` — systemd unit:
   ```ini
   [Unit]
   Description=MVM VSock Agent
@@ -64,22 +64,22 @@ The agent starts automatically when the VM boots. `Agent.Run()` in `internal/ser
 
   [Service]
   Type=simple
-  ExecStart=/usr/bin/mvm-vsock-agent -port <port>
+  ExecStart=/usr/bin/mvm-agent -port <port>
   Restart=always
   RestartSec=2
 
   [Install]
   WantedBy=sysinit.target
   ```
-- `FileOp` at `/etc/init.d/mvm-vsock-agent` — OpenRC init script:
+- `FileOp` at `/etc/init.d/mvm-agent` — OpenRC init script:
   ```sh
   #!/sbin/openrc-run
 
   description="MVM VSock Agent"
 
-  command=/usr/bin/mvm-vsock-agent
+  command=/usr/bin/mvm-agent
   command_args="-port <port>"
-  pidfile=/var/run/mvm-vsock-agent.pid
+  pidfile=/var/run/mvm-agent.pid
   command_background=true
 
   depend() {
@@ -89,10 +89,10 @@ The agent starts automatically when the VM boots. `Agent.Run()` in `internal/ser
 - `ChrootOp` that detects the init system and enables the agent:
   ```sh
   if command -v systemctl >/dev/null 2>&1; then
-      ln -sf /etc/systemd/system/mvm-vsock-agent.service \
-          /etc/systemd/system/multi-user.target.wants/mvm-vsock-agent.service
+      ln -sf /etc/systemd/system/mvm-agent.service \
+          /etc/systemd/system/multi-user.target.wants/mvm-agent.service
   elif rc-update >/dev/null 2>&1; then
-      rc-update add mvm-vsock-agent default
+      rc-update add mvm-agent default
   fi
   ```
 
@@ -100,7 +100,7 @@ The vsock device is configured via the Firecracker JSON config file (`model.Vsoc
 
 ### 2. Agent startup inside the guest
 
-On VM boot, the init system starts `mvm-vsock-agent`. `Agent.Run()` creates a raw AF_VSOCK socket, sets `SO_REUSEADDR`, binds with `VMADDR_CID_ANY`, listens with backlog 10, and accepts connections. Each connection is handled in its own goroutine via `handleConnection()`.
+On VM boot, the init system starts `mvm-agent`. `Agent.Run()` creates a raw AF_VSOCK socket, sets `SO_REUSEADDR`, binds with `VMADDR_CID_ANY`, listens with backlog 10, and accepts connections. Each connection is handled in its own goroutine via `handleConnection()`.
 
 ### 3. Host dial and handshake
 
@@ -112,7 +112,7 @@ The host client calls `dialAndHandshake()` in `internal/core/vsock/protocol.go`,
 
 ### 4. Command execution (one-shot)
 
-The `vsock.Client.Exec()` method sends a JSON frame with type `"exec"`, the command, and optional timeout/user/env. The agent's `handleExec()` in `internal/service/vsockagent/exec.go`:
+The `vsock.Client.Exec()` method sends a JSON frame with type `"exec"`, the command, and optional timeout/user/env. The agent's `handleExec()` in `internal/service/agent/exec.go`:
 1. Creates an `exec.Cmd` — either `su - <user> -c <command>` for non-root users, or `sh -c <command>` for root
 2. Sets `cmd.Stdout` and `cmd.Stderr` to `streamingWriter` instances, which emit JSON frames ("stdout" / "stderr") as data arrives
 3. Starts the command, waits for completion, flushes remaining output
@@ -123,7 +123,7 @@ The host reads frames in a loop, printing stdout/stderr to the terminal immediat
 
 ### 5. Interactive shell (exec-tty)
 
-The `vsock.Client.Shell()` method sends a JSON frame with type `"exec-tty"`. The agent's `handleTTY()` in `internal/service/vsockagent/pty.go`:
+The `vsock.Client.Shell()` method sends a JSON frame with type `"exec-tty"`. The agent's `handleTTY()` in `internal/service/agent/pty.go`:
 1. Sends a `"tty"` acknowledgement frame
 2. Allocates a PTY pair
 3. Configures the slave termios with `ICRNL | ICANON | ECHO | ECHOE | ISIG | OPOST | ONLCR`
@@ -140,8 +140,8 @@ The host sends a JSON frame with type `"ping"`. The agent responds with `"pong"`
 ## Agent binary embedding
 
 The agent binary is cross-compiled for `linux/amd64` and `linux/arm64`, zstd-compressed, and embedded via `//go:embed` in build-tagged files:
-- `internal/service/vsockagent/build_amd64.go` builds on `//go:build amd64`, embeds `agent-linux-amd64.zst`
-- `internal/service/vsockagent/build_arm64.go` builds on `//go:build arm64`, embeds `agent-linux-arm64.zst`
+- `internal/service/agent/build_amd64.go` builds on `//go:build amd64`, embeds `agent-linux-amd64.zst`
+- `internal/service/agent/build_arm64.go` builds on `//go:build arm64`, embeds `agent-linux-arm64.zst`
 
 `AgentBinary()` decompresses once on first call via `sync.Once`, saving ~60% in embedded binary size.
 
@@ -152,7 +152,7 @@ Build script (`scripts/build.sh`):
 
 ## Auth token
 
-Each VM gets a random UUID token at creation time, stored in `VsockConfigItem.Token`. The agent reads the token from `/var/run/mvm-vsock-agent.token` (written by `BuildVsockAgentOps()`). The `exec` and `exec-tty` requests include the token; `ping` does not. If the token doesn't match (checked via `subtle.ConstantTimeCompare`), the agent rejects with `{"error":"invalid auth token"}`.
+Each VM gets a random UUID token at creation time, stored in `VsockConfigItem.Token`. The agent reads the token from `/var/run/mvm-agent.token` (written by `BuildAgentOps()`). The `exec` and `exec-tty` requests include the token; `ping` does not. If the token doesn't match (checked via `subtle.ConstantTimeCompare`), the agent rejects with `{"error":"invalid auth token"}`.
 
 ## Failure modes
 
@@ -189,21 +189,21 @@ When the user types `exit` + Enter, the PTY handler arms a 5-second kill timer. 
 
 | File | Purpose |
 |------|---------|
-| `internal/service/vsockagent/agent.go` | `Agent` struct, `Run()`, vsock listener, `vsockConn` with `SHUT_RDWR` close |
-| `internal/service/vsockagent/protocol.go` | JSON frame types, `readFrame`/`writeFrame`, request/response type constants |
-| `internal/service/vsockagent/exec.go` | `handleExec()` — streaming command execution via `streamingWriter` |
-| `internal/service/vsockagent/pty.go` | `handleTTY()` — PTY shell, `configurePTY()` termios, exit detection + 5s kill timer |
-| `internal/service/vsockagent/cmdlistener.go` | `handleConnection()` — dispatch to exec/tty/ping/version/file-transfer |
-| `internal/service/vsockagent/file_transfer.go` | Binary frame protocol handler for push/pull/recursive pull |
-| `internal/service/vsockagent/build_amd64.go` | `//go:embed agent-linux-amd64.zst` (amd64 build tag) |
-| `internal/service/vsockagent/build_arm64.go` | `//go:embed agent-linux-arm64.zst` (arm64 build tag) |
-| `internal/service/vsockagent/cmd/main.go` | Standalone agent entry point |
+| `internal/service/agent/agent.go` | `Agent` struct, `Run()`, vsock listener, `vsockConn` with `SHUT_RDWR` close |
+| `internal/service/agent/protocol.go` | JSON frame types, `readFrame`/`writeFrame`, request/response type constants |
+| `internal/service/agent/exec.go` | `handleExec()` — streaming command execution via `streamingWriter` |
+| `internal/service/agent/pty.go` | `handleTTY()` — PTY shell, `configurePTY()` termios, exit detection + 5s kill timer |
+| `internal/service/agent/cmdlistener.go` | `handleConnection()` — dispatch to exec/tty/ping/version/file-transfer |
+| `internal/service/agent/file_transfer.go` | Binary frame protocol handler for push/pull/recursive pull |
+| `internal/service/agent/build_amd64.go` | `//go:embed agent-linux-amd64.zst` (amd64 build tag) |
+| `internal/service/agent/build_arm64.go` | `//go:embed agent-linux-arm64.zst` (arm64 build tag) |
+| `internal/service/agent/cmd/main.go` | Standalone agent entry point |
 | `internal/core/vsock/client.go` | `Client` — `Exec()`, `Shell()`, `ensureAgent()`, `Teardown()` |
 | `internal/core/vsock/protocol.go` | `dialAndHandshake()`, JSON framing helpers |
 | `internal/core/vsock/file_transfer.go` | `FTCopyToVM()`, `FTCopyFromVM()`, `FTCopyVMToVM()` |
 | `internal/core/vsock/service.go` | `Service` — CID allocation, config persistence |
 | `internal/core/vsock/agent.go` | `AgentBinary()` — wrapper delegating to `vsockagent` |
-| `internal/infra/provcontent/content.go` | `BuildVsockAgentOps()` — generates injection operations |
+| `internal/infra/provcontent/content.go` | `BuildAgentOps()` — generates injection operations |
 | `pkg/api/exec.go` | `op.Exec()` — API orchestration |
 | `internal/cli/exec.go` | `mvm exec` cobra command |
 
@@ -213,7 +213,7 @@ When the user types `exit` + Enter, the PTY handler arms a 5-second kill timer. 
 
 **Agent injected via provisioner, not VM domain changes.** The agent is injected as FileOp + ChrootOp operations — the same mechanism used for SSH keys and cloud-init files. No VM domain changes are needed.
 
-**Auth token via file, not flag.** The token is written to `/var/run/mvm-vsock-agent.token` by the provisioner, so the systemd unit doesn't need the token on the command line (avoiding `/proc` exposure). A `-token` flag exists for debugging but is not used by the init system.
+**Auth token via file, not flag.** The token is written to `/var/run/mvm-agent.token` by the provisioner, so the systemd unit doesn't need the token on the command line (avoiding `/proc` exposure). A `-token` flag exists for debugging but is not used by the init system.
 
 ## Model and schema
 

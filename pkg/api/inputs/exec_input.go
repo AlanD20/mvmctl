@@ -77,7 +77,7 @@ func (i *ExecInput) Resolve(
 	if vsockItem == nil {
 		return nil, errs.New(
 			errs.CodeVsockNotFound,
-			fmt.Sprintf("vm '%s' has no vsock agent configured. Create with --vsock-port to enable.", vmItem.Name),
+			fmt.Sprintf("vm '%s' has no agent configured. Create with --vsock-port to enable.", vmItem.Name),
 			errs.WithClass(errs.ClassValidation),
 		)
 	}

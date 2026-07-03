@@ -21,7 +21,7 @@ import (
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/service/vsockagent"
+	"mvmctl/internal/service/agent"
 	"mvmctl/internal/vsockhandler"
 	"mvmctl/pkg/errs"
 )
@@ -274,7 +274,7 @@ type mockTargetFrame struct {
 }
 
 // startMockTargetServer starts a Unix socket that mimics the target VM's
-// vsock agent. It performs the CONNECT handshake, reads the exec frame,
+// agent. It performs the CONNECT handshake, reads the exec frame,
 // and sends the given response frames. Returns the socket path and port.
 func startMockTargetServer(t *testing.T, respFrames []mockTargetFrame) (string, int) {
 	t.Helper()
@@ -328,9 +328,9 @@ func startMockTargetServer(t *testing.T, respFrames []mockTargetFrame) (string, 
 }
 
 // readSourceFrame reads one JSON frame from sourceConn and returns it.
-func readSourceFrame(t *testing.T, conn net.Conn) vsockagent.RemoteVMResponse {
+func readSourceFrame(t *testing.T, conn net.Conn) agent.RemoteVMResponse {
 	t.Helper()
-	var resp vsockagent.RemoteVMResponse
+	var resp agent.RemoteVMResponse
 	require.NoError(t, json.NewDecoder(conn).Decode(&resp))
 	return resp
 }
@@ -340,7 +340,7 @@ func readSourceFrame(t *testing.T, conn net.Conn) vsockagent.RemoteVMResponse {
 func readSourceFramesUntilRemoteVM(
 	t *testing.T,
 	conn net.Conn,
-) (stdout []string, stderr []string, final vsockagent.RemoteVMResponse) {
+) (stdout []string, stderr []string, final agent.RemoteVMResponse) {
 	t.Helper()
 	dec := json.NewDecoder(conn)
 	for {
@@ -358,7 +358,7 @@ func readSourceFramesUntilRemoteVM(
 		case vsock.ResponseTypeRemoteVM:
 			status, _ := raw["status"].(float64)
 			errMsg, _ := raw["error"].(string)
-			final = vsockagent.RemoteVMResponse{
+			final = agent.RemoteVMResponse{
 				Type:   vsock.ResponseTypeRemoteVM,
 				Status: int(status),
 				Error:  errMsg,

@@ -68,6 +68,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm vm create`
 - Renamed `--no-enable-logging` → `--disable-logging`, `--no-enable-metrics` → `--disable-metrics`. Added `--deny-remote-exec` (mutually exclusive with `--allow-remote-exec`).
 
+#### Guest agent: `mvm-vsock-agent` renamed to `mvm-agent`
+- Package directory moved from `internal/service/vsockagent/` to `internal/service/agent/`.
+- In-VM binary: `/usr/bin/mvm-vsock-agent` → `/usr/bin/mvm-agent`.
+- In-VM socket: `/var/run/mvm-vsock-agent.sock` → `/var/run/mvm-agent.sock`.
+- Auth token: `/var/run/mvm-vsock-agent.token` → `/var/run/mvm-agent.token`.
+- Systemd unit: `mvm-vsock-agent.service` → `mvm-agent.service`.
+- OpenRC init: `/etc/init.d/mvm-vsock-agent` → `/etc/init.d/mvm-agent`.
+- Go interface: `InjectVsockAgent()` → `InjectAgent()`, `BuildVsockAgentOps()` → `BuildAgentOps()`, error code `CodeVsockAgentUnreachable` → `CodeAgentUnreachable`.
+- No backward compatibility — old paths will not work.
+
 #### `kernels.yaml`
 - Renamed `config_url_template` to `base_config_url_template` to clarify that it provides the base kernel `.config`.
 - Removed the redundant duplicate URL from `config_fragments` in the bundled `kernel-official` spec.

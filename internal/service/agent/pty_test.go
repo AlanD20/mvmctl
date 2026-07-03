@@ -1,6 +1,6 @@
-// Package vsockagent tests internal (unexported) functions directly.
+// Package agent tests internal (unexported) functions directly.
 // extractResizeFrames is unexported, so it must be tested in this package.
-package vsockagent
+package agent
 
 import (
 	"context"

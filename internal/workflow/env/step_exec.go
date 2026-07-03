@@ -56,7 +56,7 @@ func (s *ExecStep) Apply(
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "running command"})
 
 	// Command is sent to the guest agent as-is — the agent wraps it in
-	// sh -c <command> internally (see vsockagent.handleExec).
+	// sh -c <command> internally (see agent.handleExec).
 	if s.input.Command == "" {
 		return fmt.Errorf("%s: empty command", s.Name())
 	}

@@ -904,12 +904,12 @@ func TestBuilder_BuildDeblobOps(t *testing.T) {
 	}
 }
 
-// --- BuildVsockAgentOps ---
-// Rationale: BuildVsockAgentOps generates the operations to embed the vsock
+// --- BuildAgentOps ---
+// Rationale: BuildAgentOps generates the operations to embed the vsock
 // guest agent into the root filesystem. Wrong paths, modes, or systemd content
 // mean the agent won't start inside the VM, making Exec and Shell impossible.
 
-func TestBuilder_BuildVsockAgentOps(t *testing.T) {
+func TestBuilder_BuildAgentOps(t *testing.T) {
 	t.Parallel()
 
 	agentBinary := []byte("#!/bin/sh\necho mock-agent\n")
@@ -917,43 +917,43 @@ func TestBuilder_BuildVsockAgentOps(t *testing.T) {
 	token := "test-auth-token"
 
 	var b provcontent.Builder
-	ops := b.BuildVsockAgentOps(agentBinary, port, token)
+	ops := b.BuildAgentOps(agentBinary, port, token)
 
-	require.Len(t, ops, 5, "BuildVsockAgentOps must return 5 operations")
+	require.Len(t, ops, 5, "BuildAgentOps must return 5 operations")
 
-	// ops[0]: Agent binary at /usr/bin/mvm-vsock-agent
+	// ops[0]: Agent binary at /usr/bin/mvm-agent
 	op0, ok0 := ops[0].(provcontent.FileOp)
 	require.True(t, ok0, "ops[0] must be FileOp")
-	assert.Equal(t, "/usr/bin/mvm-vsock-agent", op0.Path)
+	assert.Equal(t, "/usr/bin/mvm-agent", op0.Path)
 	assert.Equal(t, 0755, op0.Mode, "agent binary must be executable")
 	if diff := cmp.Diff(agentBinary, op0.Data); diff != "" {
-		t.Errorf("BuildVsockAgentOps() agent binary mismatch (-want +got):\n%s", diff)
+		t.Errorf("BuildAgentOps() agent binary mismatch (-want +got):\n%s", diff)
 	}
 
-	// ops[1]: Auth token at /var/run/mvm-vsock-agent.token
+	// ops[1]: Auth token at /var/run/mvm-agent.token
 	op1, ok1 := ops[1].(provcontent.FileOp)
 	require.True(t, ok1, "ops[1] must be FileOp")
-	assert.Equal(t, "/var/run/mvm-vsock-agent.token", op1.Path)
+	assert.Equal(t, "/var/run/mvm-agent.token", op1.Path)
 	assert.Equal(t, 0600, op1.Mode, "token file mode must be 0600")
 	assert.Equal(t, token, string(op1.Data), "token file content must match")
 
-	// ops[2]: Systemd unit at /etc/systemd/system/mvm-vsock-agent.service
+	// ops[2]: Systemd unit at /etc/systemd/system/mvm-agent.service
 	op2, ok2 := ops[2].(provcontent.FileOp)
 	require.True(t, ok2, "ops[2] must be FileOp")
-	assert.Equal(t, "/etc/systemd/system/mvm-vsock-agent.service", op2.Path)
+	assert.Equal(t, "/etc/systemd/system/mvm-agent.service", op2.Path)
 	assert.Equal(t, 0644, op2.Mode)
 
 	unitContent := string(op2.Data)
 	assert.Contains(t, unitContent, "Description=MVM VSock Agent")
-	assert.Contains(t, unitContent, "/usr/bin/mvm-vsock-agent -port 1024")
+	assert.Contains(t, unitContent, "/usr/bin/mvm-agent -port 1024")
 	assert.NotContains(t, unitContent, "-token", "ExecStart must not expose the token flag")
 	assert.NotContains(t, unitContent, "After=", "systemd unit must not have After=")
 	assert.NotContains(t, unitContent, "Requires=", "systemd unit must not have Requires=")
 
-	// ops[3]: OpenRC init script at /etc/init.d/mvm-vsock-agent
+	// ops[3]: OpenRC init script at /etc/init.d/mvm-agent
 	op3, ok3 := ops[3].(provcontent.FileOp)
 	require.True(t, ok3, "ops[3] must be FileOp")
-	assert.Equal(t, "/etc/init.d/mvm-vsock-agent", op3.Path)
+	assert.Equal(t, "/etc/init.d/mvm-agent", op3.Path)
 	assert.Equal(t, 0755, op3.Mode, "init script must be executable")
 
 	initContent := string(op3.Data)
@@ -964,7 +964,7 @@ func TestBuilder_BuildVsockAgentOps(t *testing.T) {
 	// ops[4]: Enable command (ChrootOp)
 	op4, ok4 := ops[4].(provcontent.ChrootOp)
 	require.True(t, ok4, "ops[4] must be ChrootOp")
-	assert.Contains(t, op4.Command, "ln -sf /etc/systemd/system/mvm-vsock-agent.service")
-	assert.Contains(t, op4.Command, "rc-update add mvm-vsock-agent default")
+	assert.Contains(t, op4.Command, "ln -sf /etc/systemd/system/mvm-agent.service")
+	assert.Contains(t, op4.Command, "rc-update add mvm-agent default")
 	assert.Contains(t, op4.Command, "unknown init system")
 }

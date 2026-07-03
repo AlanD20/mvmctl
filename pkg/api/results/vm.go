@@ -73,7 +73,7 @@ type VMConsoleInfo struct {
 	RelaySocketPath *string `json:"relay_socket_path"`
 }
 
-// VMVsockInfo groups vsock agent info in an inspect response.
+// VMVsockInfo groups agent info in an inspect response.
 // Token is intentionally excluded to avoid leaking the auth secret.
 type VMVsockInfo struct {
 	ID               string     `json:"id"`
