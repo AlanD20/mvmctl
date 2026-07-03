@@ -32,6 +32,26 @@ func NewPipeline(steps []Step) (*Pipeline, error) {
 	}, nil
 }
 
+// NewDestroyPipeline creates a Pipeline for destroy operations, skipping
+// dependency validation. Missing dependencies (e.g. from resources already
+// removed by mid-pipeline removes) are silently ignored. The pipeline is
+// built in reverse topological order based on remaining dependencies.
+func NewDestroyPipeline(steps []Step, existingNames map[string]bool) (*Pipeline, error) {
+	// Filter out dependencies that point to resources no longer in state.
+	cleaned := make([]Step, len(steps))
+	for i, s := range steps {
+		deps := s.Dependencies()
+		filtered := make([]string, 0, len(deps))
+		for _, d := range deps {
+			if existingNames[d] {
+				filtered = append(filtered, d)
+			}
+		}
+		cleaned[i] = &stepFuncWrapper{Step: s, deps: filtered}
+	}
+	return NewPipeline(cleaned)
+}
+
 // --- Execute options ---
 
 type executeOptions struct {
@@ -271,3 +291,12 @@ func emitProgress(onProgress event.OnProgressCallback, phase, status, msg string
 	}
 	onProgress(event.Progress{Phase: phase, Status: status, Message: msg})
 }
+
+// stepDepOverride wraps a Step, overriding Dependencies() with a custom list.
+// Used by NewDestroyPipeline to filter out stale dependencies.
+type stepDepOverride struct {
+	Step
+	deps []string
+}
+
+func (w *stepDepOverride) Dependencies() []string { return w.deps }

@@ -140,7 +140,7 @@ func (op *Operation) KeyRemove(ctx context.Context, input inputs.KeyInput, force
 	keys, err := input.Resolve(ctx, op.Repos.Key)
 	if err != nil {
 		return &errs.BatchResult{Items: []errs.OperationResult{{
-			Status: "error", Code: "key.remove_failed", Message: err.Error(),
+			Status: "error", Code: "key.remove_failed", Message: err.Error(), Exception: err,
 		}}}
 	}
 	results := make([]errs.OperationResult, 0)

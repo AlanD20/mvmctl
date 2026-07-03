@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `image_import` destroy now removes the imported image from the database and disk.
 - All steps now support `removes` field to destroy resources mid-pipeline after the step completes.
 - New top-level `ephemeral: true` field — auto-runs `env destroy` after successful apply. Zero cleanup overhead. See `docs/ENV_SPEC_REFERENCE.md`.
+- `removes` now updates the workflow state after destroying each resource, so a subsequent `env destroy` doesn't try to tear down already-removed resources.
+- `NetworkStep.Destroy` and `KeyStep.Destroy` now treat "not found" as success — already-deleted resources during destroy no longer abort the process.
 
 #### `mvm image import`
 - Renamed `source_path` to `source` in the input struct (breaking — no backward compat).

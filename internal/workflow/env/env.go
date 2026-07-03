@@ -145,100 +145,111 @@ func Apply(
 	}
 
 	// Handle step removals — destroy resources listed in removes.
+	// After each successful removal, update the workflow state so
+	// a subsequent Destroy doesn't try to tear down already-removed resources.
 	for _, step := range steps {
 		for _, target := range step.Removes() {
 			stepType := InferStepType(target)
 			name := BareStepName(target, stepType)
+			var removeErr error
 			switch stepType {
 			case "vm":
 				result := op.VMRemove(ctx, inputs.VMInput{Identifiers: []string{name}})
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
-							slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", r.ToError())
+							removeErr = r.ToError()
 						}
 					}
-				} else {
-					slog.Info("resource removed after step", "step", step.Name(), "target", target)
 				}
 			case "image", "image_import":
 				result := op.ImageRemove(ctx, inputs.ImageInput{Identifiers: []string{name}}, true)
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
-							slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", r.ToError())
+							removeErr = r.ToError()
 						}
 					}
-				} else {
-					slog.Info("resource removed after step", "step", step.Name(), "target", target)
 				}
 			case "network":
-				if err := op.NetworkRemove(
+				removeErr = op.NetworkRemove(
 					ctx,
 					inputs.NetworkInput{Identifiers: []string{name}, Force: true},
 					true,
-				); err != nil {
-					slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", err)
-				} else {
-					slog.Info("resource removed after step", "step", step.Name(), "target", target)
-				}
+				)
 			case "volume":
 				result := op.VolumeRemove(ctx, inputs.VolumeInput{Identifiers: []string{name}}, true)
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
-							slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", r.ToError())
+							removeErr = r.ToError()
 						}
 					}
-				} else {
-					slog.Info("resource removed after step", "step", step.Name(), "target", target)
 				}
 			case "key":
 				result := op.KeyRemove(ctx, inputs.KeyInput{Identifiers: []string{name}}, true)
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
-							slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", r.ToError())
+							removeErr = r.ToError()
 						}
 					}
-				} else {
-					slog.Info("resource removed after step", "step", step.Name(), "target", target)
 				}
 			case "kernel":
 				result := op.KernelRemove(ctx, inputs.KernelInput{Identifiers: []string{name}})
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
-							slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", r.ToError())
+							removeErr = r.ToError()
 						}
 					}
-				} else {
-					slog.Info("resource removed after step", "step", step.Name(), "target", target)
 				}
 			case "binary":
 				result := op.BinaryRemove(ctx, inputs.BinaryInput{Identifiers: []string{name}}, true)
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
-							slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", r.ToError())
+							removeErr = r.ToError()
 						}
 					}
-				} else {
-					slog.Info("resource removed after step", "step", step.Name(), "target", target)
 				}
 			case "snapshot":
 				result := op.SnapshotRemove(ctx, inputs.SnapshotInput{Identifiers: []string{name}})
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
-							slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", r.ToError())
+							removeErr = r.ToError()
 						}
 					}
-				} else {
-					slog.Info("resource removed after step", "step", step.Name(), "target", target)
 				}
 			default:
 				slog.Warn("unsupported resource type for removal in env workflow", "type", stepType, "target", target)
+			}
+			if removeErr != nil {
+				slog.Warn("cleanup remove failed", "type", stepType, "target", target, "error", removeErr)
+			} else {
+				slog.Info("resource removed after step", "step", step.Name(), "target", target)
+				// Update workflow state to reflect the removal.
+				mu.Lock()
+				filtered := make([]model.AppliedResource, 0, len(resources))
+				for _, r := range resources {
+					if r.Name != target {
+						filtered = append(filtered, r)
+					}
+				}
+				resources = filtered
+				wfState := &model.WorkflowState{
+					WorkflowID:    wfID,
+					SpecPath:      specPath,
+					SchemaVersion: envStateSchemaVersion,
+					CreatedAt:     createdAt,
+					UpdatedAt:     infra.Now(),
+					Resources:     resources,
+				}
+				if pErr := workflow.WriteWorkflowState(stateDir, wfState); pErr != nil {
+					slog.Debug("failed to persist workflow state after removal", "wf_id", wfID, "target", target, "error", pErr)
+				}
+				mu.Unlock()
 			}
 		}
 	}
@@ -279,6 +290,7 @@ func Destroy(
 
 	// Reconstruct steps from saved resources.
 	var steps []workflow.Step
+	stepNames := make(map[string]bool)
 	for _, res := range wfState.Resources {
 		factory, ok := Registry[res.Type]
 		if !ok {
@@ -297,14 +309,18 @@ func Destroy(
 			)
 		}
 		steps = append(steps, step)
+		stepNames[res.Name] = true
 	}
 
 	if len(steps) == 0 {
 		return errs.New(errs.CodeValidationFailed, "no reconstructable steps in saved state")
 	}
 
-	// Build the pipeline and destroy.
-	pipeline, err := workflow.NewPipeline(steps)
+	// Build the destroy pipeline without dep validation.
+	// Destroy is best-effort — resources may have been removed by mid-pipeline
+	// removes, leaving stale deps in the state. We skip missing deps rather
+	// than aborting.
+	pipeline, err := workflow.NewDestroyPipeline(steps, stepNames)
 	if err != nil {
 		return errs.WrapMsg(
 			errs.CodeInternal,

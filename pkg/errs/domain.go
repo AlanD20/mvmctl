@@ -587,8 +587,9 @@ func classFrom(err error) Class {
 // --- Check helpers ---
 
 // IsNotFound checks if an error is a "not found" domain error.
+// Walks the error chain to see through wrapping errors like WrapMsg.
 func IsNotFound(err error) bool {
-	if de := AsDomainError(err); de != nil {
+	for de := AsDomainError(err); de != nil; de = AsDomainError(de.Err) {
 		switch de.Code {
 		case CodeVMNotFound, CodeNetworkNotFound, CodeImageNotFound,
 			CodeKernelNotFound, CodeBinaryNotFound, CodeVolumeNotFound,

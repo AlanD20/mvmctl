@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"gopkg.in/yaml.v3"
 
@@ -131,6 +132,13 @@ func (s *NetworkStep) Destroy(
 		Identifiers: []string{s.saved.NetworkID},
 		Force:       true,
 	}, true); err != nil {
+		if errs.IsNotFound(err) {
+			slog.Debug("network already removed, skipping destroy", "network", s.saved.NetworkID)
+			if err := write(ctx, s.StateData()); err != nil {
+				return fmt.Errorf("persist step state after destroy skip: %w", err)
+			}
+			return nil
+		}
 		return err
 	}
 

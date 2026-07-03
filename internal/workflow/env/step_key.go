@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"gopkg.in/yaml.v3"
 
@@ -129,7 +130,15 @@ func (s *KeyStep) Destroy(
 	if result.HasErrors() {
 		for _, r := range result.Errors() {
 			if r.ToError() != nil {
-				return r.ToError()
+				err := r.ToError()
+				if errs.IsNotFound(err) {
+					slog.Debug("key already removed, skipping destroy", "key", s.saved.KeyID)
+					if err := write(ctx, s.StateData()); err != nil {
+						return fmt.Errorf("persist step state after destroy skip: %w", err)
+					}
+					return nil
+				}
+				return err
 			}
 		}
 	}
