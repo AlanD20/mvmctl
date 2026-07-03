@@ -32,11 +32,12 @@ type VMCreateInput struct {
 	Name    string   `json:"name"               yaml:"name"`
 	SSHKeys []string `json:"ssh_keys,omitempty" yaml:"ssh_keys,omitempty"`
 	// Optional fields with CLI-layer defaults resolved in Build()
-	VCPUCount  *int    `json:"vcpu,omitempty"        yaml:"vcpu,omitempty"`
-	MemSizeMib string  `json:"mem,omitempty"         yaml:"mem,omitempty"`
-	User       *string `json:"user,omitempty"        yaml:"user,omitempty"`
-	PCIEnabled *bool   `json:"pci_enabled,omitempty" yaml:"pci_enabled,omitempty"`
-	NestedVirt *bool   `json:"nested_virt,omitempty" yaml:"nested_virt,omitempty"`
+	VCPUCount       *int    `json:"vcpu,omitempty"        yaml:"vcpu,omitempty"`
+	MemSizeMib      string  `json:"mem,omitempty"         yaml:"mem,omitempty"`
+	User            *string `json:"user,omitempty"        yaml:"user,omitempty"`
+	PCIEnabled      *bool   `json:"pci_enabled,omitempty"      yaml:"pci_enabled,omitempty"`
+	NestedVirt      *bool   `json:"nested_virt,omitempty"      yaml:"nested_virt,omitempty"`
+	AllowRemoteExec *bool   `json:"allow_remote_exec,omitempty" yaml:"allow_remote_exec,omitempty"`
 	// CPUTemplate is a file path to a CPU template JSON file.
 	CPUTemplate         string         `json:"cpu_template,omitempty"   yaml:"cpu_template,omitempty"`
 	CPUConfig           map[string]any `json:"cpu_config,omitempty"     yaml:"cpu_config,omitempty"`
@@ -91,6 +92,7 @@ type ResolvedVMCreateInput struct {
 	SkipCINetworkConfig bool
 	PCIEnabled          bool
 	NestedVirt          bool
+	AllowRemoteExec     bool
 	EnableConsole       bool
 	EnableLogging       bool
 	EnableMetrics       bool
@@ -435,6 +437,11 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if input.NestedVirt != nil {
 		nestedVirt = *input.NestedVirt
 	}
+	// Resolve allow_remote_exec
+	allowRemoteExec, _ := r.cfg.GetBool(ctx, "defaults.vm", "allow_remote_exec")
+	if input.AllowRemoteExec != nil {
+		allowRemoteExec = *input.AllowRemoteExec
+	}
 	// Resolve CPU config
 	var cpuConfig map[string]any
 	if input.CPUConfig != nil {
@@ -560,6 +567,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		SkipCINetworkConfig:   input.SkipCINetworkConfig,
 		PCIEnabled:            pciEnabled,
 		NestedVirt:            nestedVirt,
+		AllowRemoteExec:       allowRemoteExec,
 		CPUConfig:             infra.MapToStruct[model.CpuConfig](cpuConfig),
 		EnableConsole:         enableConsole,
 		EnableLogging:         enableLogging,

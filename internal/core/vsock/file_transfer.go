@@ -215,13 +215,13 @@ func (c *Client) FTCopyToVM(
 		Type:  requestTypeFileTransfer,
 		Token: c.item.Token,
 	}
-	if err := sendFrame(conn, req); err != nil {
+	if err := SendFrame(conn, req); err != nil {
 		slog.Error("ft: send handshake failed", "vm_id", c.item.VmID, "error", err)
 		return nil, fmt.Errorf("send handshake failed: %w", err)
 	}
 
 	var resp execResponse
-	if err := readFrame(conn, &resp); err != nil {
+	if err := readFrameRaw(conn, &resp); err != nil {
 		slog.Error("ft: read handshake response failed", "vm_id", c.item.VmID, "error", err)
 		return nil, fmt.Errorf("read handshake response failed: %w", err)
 	}
@@ -490,13 +490,13 @@ func (c *Client) FTCopyFromVM(
 		Type:  requestTypeFileTransfer,
 		Token: c.item.Token,
 	}
-	if err := sendFrame(conn, req); err != nil {
+	if err := SendFrame(conn, req); err != nil {
 		slog.Error("ft: send handshake failed", "vm_id", c.item.VmID, "error", err)
 		return nil, fmt.Errorf("send handshake failed: %w", err)
 	}
 
 	var resp execResponse
-	if err := readFrame(conn, &resp); err != nil {
+	if err := readFrameRaw(conn, &resp); err != nil {
 		slog.Error("ft: read handshake response failed", "vm_id", c.item.VmID, "error", err)
 		return nil, fmt.Errorf("read handshake response failed: %w", err)
 	}
@@ -773,20 +773,20 @@ func (c *Client) FTCopyVMToVM(
 
 	// --- JSON handshake for both ---
 	req := execRequest{ID: "1", Type: requestTypeFileTransfer, Token: c.item.Token}
-	if err := sendFrame(srcConn, req); err != nil {
+	if err := SendFrame(srcConn, req); err != nil {
 		return nil, fmt.Errorf("source handshake failed: %w", err)
 	}
 	var srcResp execResponse
-	if err := readFrame(srcConn, &srcResp); err != nil || srcResp.Type != responseTypeFTReady {
+	if err := readFrameRaw(srcConn, &srcResp); err != nil || srcResp.Type != responseTypeFTReady {
 		return nil, fmt.Errorf("source handshake response failed: %w", err)
 	}
 
 	dstReq := execRequest{ID: "1", Type: requestTypeFileTransfer, Token: destClient.item.Token}
-	if err := sendFrame(dstConn, dstReq); err != nil {
+	if err := SendFrame(dstConn, dstReq); err != nil {
 		return nil, fmt.Errorf("dest handshake failed: %w", err)
 	}
 	var dstResp execResponse
-	if err := readFrame(dstConn, &dstResp); err != nil || dstResp.Type != responseTypeFTReady {
+	if err := readFrameRaw(dstConn, &dstResp); err != nil || dstResp.Type != responseTypeFTReady {
 		return nil, fmt.Errorf("dest handshake response failed: %w", err)
 	}
 

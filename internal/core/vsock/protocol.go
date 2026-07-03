@@ -44,10 +44,13 @@ type execRequest struct {
 	Cols    int               `json:"cols,omitempty"`
 }
 
+// ResponseTypeRemoteVM is the frame type for guest-initiated remote VM execution requests.
+const ResponseTypeRemoteVM = "remote_vm"
+
 // execResponse is the JSON frame received from the guest agent.
 type execResponse struct {
 	ID         string `json:"id"`
-	Type       string `json:"type"` // "result", "tty", "pong", "stdout", "stderr"
+	Type       string `json:"type"` // "result", "tty", "pong", "stdout", "stderr", "remote_vm"
 	Status     int    `json:"status,omitempty"`
 	Data       string `json:"data,omitempty"`
 	Stdout     string `json:"stdout,omitempty"`
@@ -158,15 +161,35 @@ func trimTrailingNewline(s string) string {
 	return s
 }
 
-// --- JSON framing helpers ---
+// --- Exported protocol primitives ---
 
-// sendFrame marshals v as JSON and writes it to conn followed by a newline.
-func sendFrame(conn net.Conn, v any) error {
+// SendFrame marshals v as JSON and writes it to conn followed by a newline.
+func SendFrame(conn net.Conn, v any) error {
 	return json.NewEncoder(conn).Encode(v)
 }
 
-// readFrame reads a newline-delimited JSON message from conn and unmarshals
-// it into v.
-func readFrame(conn net.Conn, v any) error {
+// ReadFrame reads one newline-delimited JSON frame from conn and returns the
+// frame's type string and raw data bytes. Designed for external consumers like
+// ReadFrame reads one newline-delimited JSON frame from conn and returns
+// the frame type and raw data bytes. External consumers use this to
+// dispatch on frame type without importing internal wire types.
+func ReadFrame(conn net.Conn) (frameType string, data []byte, err error) {
+	var resp execResponse
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		return "", nil, err
+	}
+	return resp.Type, []byte(resp.Data), nil
+}
+
+// readFrameRaw is an unexported helper that reads a JSON frame and
+// unmarshals it directly into v. Internal callers use this when they
+// need typed access to the full frame (e.g. execRequest, execResponse).
+func readFrameRaw(conn net.Conn, v any) error {
 	return json.NewDecoder(conn).Decode(v)
+}
+
+// DialVM connects to a VM's vsock via UDS + CONNECT handshake.
+// Returns an open connection that is ready to send/receive JSON frames.
+func DialVM(ctx context.Context, udsPath string, port int) (net.Conn, error) {
+	return dialAndHandshake(ctx, udsPath, port, 1)
 }

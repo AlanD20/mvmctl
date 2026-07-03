@@ -21,6 +21,8 @@ func main() {
 	token := flag.String("token", "", "auth token (overrides -token-file)")
 	tokenFile := flag.String("token-file", "/var/run/mvm-vsock-agent.token", "path to auth token file")
 	versionFlag := flag.Bool("version", false, "print version and exit")
+	localSocket := flag.String("local-socket", "/var/run/mvm-vsock-agent.sock",
+		"path to the daemon's local Unix socket (used by 'remote' subcommand)")
 	flag.Parse()
 
 	// Propagate ldflags-set BuildVersion into VersionString().
@@ -29,6 +31,11 @@ func main() {
 	if *versionFlag {
 		fmt.Println(version.VersionString())
 		os.Exit(0)
+	}
+
+	// Check for subcommand mode: "remote" as first non-flag argument.
+	if flag.NArg() > 0 && flag.Arg(0) == "remote" {
+		os.Exit(runRemoteSubcommand(*localSocket, flag.Args()[1:]))
 	}
 
 	// Token resolution order:
@@ -47,7 +54,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, os.Kill)
 	defer stop()
 
-	agent := vsockagent.New(*port, resolvedToken)
+	agent := vsockagent.New(*port, resolvedToken, *localSocket)
 	slog.Info("starting guest agent", "port", *port, "auth", resolvedToken != "")
 
 	if err := agent.Run(ctx); err != nil {

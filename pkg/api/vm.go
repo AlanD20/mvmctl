@@ -1560,6 +1560,7 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		RootfsSuffix:     c.resolved.Image.FSType,
 		PCIEnabled:       c.resolved.PCIEnabled,
 		NestedVirt:       c.resolved.NestedVirt,
+		RemoteExec:       c.resolved.AllowRemoteExec,
 		EnableLogging:    c.resolved.EnableLogging,
 		EnableMetrics:    c.resolved.EnableMetrics,
 		EnableConsole:    c.resolved.EnableConsole,

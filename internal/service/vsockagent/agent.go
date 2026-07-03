@@ -14,57 +14,105 @@ import (
 
 // Agent manages the vsock listener and dispatches incoming connections.
 type Agent struct {
-	port  int
-	token string
+	port         int
+	token        string
+	localSocket  string
+	activeConn   net.Conn
+	activeConnMu sync.Mutex
+	connMu       sync.Mutex // serializes writes to vsock conn between streamingWriter and handleLocalConn
+	readMu       sync.Mutex // serializes reads from vsock conn between handleConnection and handleLocalConn
 }
 
 // New creates a new Agent with the given configuration.
-func New(port int, token string) *Agent {
+// localSocket is the path to the local Unix socket for in-VM IPC
+// (e.g., /var/run/mvm-vsock-agent.sock). If empty, defaults to
+// /var/run/mvm-vsock-agent.sock.
+func New(port int, token string, localSocket string) *Agent {
+	if localSocket == "" {
+		localSocket = "/var/run/mvm-vsock-agent.sock"
+	}
 	return &Agent{
-		port:  port,
-		token: token,
+		port:        port,
+		token:       token,
+		localSocket: localSocket,
 	}
 }
 
-// Run starts the vsock listener and accepts connections until ctx is cancelled.
-// This is a blocking call. It returns nil on clean shutdown.
+// Run starts the vsock listener and local UDS listener, accepting connections
+// until ctx is cancelled. This is a blocking call. It returns nil on clean
+// shutdown.
 func (a *Agent) Run(ctx context.Context) error {
-	listener, err := listenVsock(a.port)
+	vsockListener, err := listenVsock(a.port)
 	if err != nil {
 		return fmt.Errorf("cannot listen on vsock port %d: %w", a.port, err)
 	}
 
-	slog.Info("guest agent started", "port", a.port)
+	// Clean up stale local socket file before listening.
+	if err := os.Remove(a.localSocket); err != nil && !os.IsNotExist(err) {
+		slog.Warn("failed to remove stale local socket", "path", a.localSocket, "error", err)
+	}
 
-	// Close listener when context is cancelled so Accept() unblocks.
+	localListener, err := net.Listen("unix", a.localSocket)
+	if err != nil {
+		vsockListener.Close()
+		return fmt.Errorf("cannot listen on local socket %s: %w", a.localSocket, err)
+	}
+
+	slog.Info("guest agent started", "port", a.port, "local_socket", a.localSocket)
+
+	// Close listeners when context is cancelled so Accept() unblocks.
 	go func() {
 		<-ctx.Done()
-		slog.Info("shutting down vsock listener")
-		listener.Close()
+		slog.Info("shutting down listeners")
+		vsockListener.Close()
+		localListener.Close()
 	}()
 
 	var wg sync.WaitGroup
 
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			// If context is done, this is a clean shutdown — not an error.
-			if ctx.Err() != nil {
-				wg.Wait()
-				return nil
+	// Vsock acceptor goroutine.
+	wg.Go(func() {
+		for {
+			conn, err := vsockListener.Accept()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				slog.Error("vsock accept failed", "error", err)
+				time.Sleep(time.Second)
+				continue
 			}
-			slog.Error("accept failed", "error", err)
-			time.Sleep(time.Second)
-			continue
-		}
 
-		wg.Go(func() {
-			// NOTE: wg.Go() already handles wg.Add(1) before the goroutine
-			// and wg.Done() via defer after f() returns. Do NOT call
-			// defer wg.Done() here — that would double-decrement.
-			a.handleConnection(ctx, conn)
-		})
-	}
+			wg.Go(func() {
+				a.handleConnection(ctx, conn)
+			})
+		}
+	})
+
+	// Local UDS acceptor goroutine.
+	wg.Go(func() {
+		for {
+			conn, err := localListener.Accept()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				slog.Error("local accept failed", "error", err)
+				time.Sleep(time.Second)
+				continue
+			}
+
+			wg.Go(func() {
+				a.handleLocalConn(conn)
+			})
+		}
+	})
+
+	// Block until context is cancelled, then wait for all goroutines.
+	<-ctx.Done()
+	slog.Info("shutting down agent")
+	wg.Wait()
+	return nil
 }
 
 // --- vsock types ---

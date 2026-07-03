@@ -18,13 +18,19 @@ const (
 
 // execResponse type constants.
 const (
-	responseTypeResult  = "result"
-	responseTypeTTY     = "tty"
-	responseTypePong    = "pong"
-	responseTypeVersion = "version"
-	responseTypeError   = "error"
-	responseTypeStdout  = "stdout"
-	responseTypeStderr  = "stderr"
+	responseTypeResult   = "result"
+	responseTypeTTY      = "tty"
+	responseTypePong     = "pong"
+	responseTypeVersion  = "version"
+	responseTypeError    = "error"
+	responseTypeStdout   = "stdout"
+	responseTypeStderr   = "stderr"
+	responseTypeRemoteVM = "remote_vm"
+)
+
+// execRequest type constants (additional).
+const (
+	requestTypeRemoteVM = "remote_vm"
 )
 
 // File-transfer request/response types.
@@ -58,6 +64,24 @@ type execResponse struct {
 	Stderr     string `json:"stderr,omitempty"`
 	DurationMs int    `json:"duration_ms,omitempty"`
 	Error      string `json:"error,omitempty"`
+}
+
+// RemoteVMRequest is the JSON payload for a "remote_vm" request from the guest
+// to the host. Sent via local socket from the CLI subcommand to the daemon,
+// then relayed through the vsock connection to the host.
+type RemoteVMRequest struct {
+	Destination string `json:"destination"`
+	Command     string `json:"command"`
+	User        string `json:"user,omitempty"`
+	Timeout     int    `json:"timeout,omitempty"`
+}
+
+// RemoteVMResponse is the JSON response for a "remote_vm" operation, sent by
+// the host back to the guest agent through the vsock connection.
+type RemoteVMResponse struct {
+	Type   string `json:"type"`
+	Status int    `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
 }
 
 // readFrame reads one newline-delimited JSON request from r.

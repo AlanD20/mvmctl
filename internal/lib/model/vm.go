@@ -44,6 +44,7 @@ type VMItem struct {
 	RootfsSuffix  string   `json:"rootfs_suffix"   db:"rootfs_suffix"`
 	PCIEnabled    bool     `json:"pci_enabled"     db:"pci_enabled"`
 	NestedVirt    bool     `json:"nested_virt"     db:"nested_virt"`
+	RemoteExec    bool     `json:"remote_exec"     db:"remote_exec"`
 	EnableLogging bool     `json:"enable_logging"  db:"enable_logging"`
 	EnableMetrics bool     `json:"enable_metrics"  db:"enable_metrics"`
 	EnableConsole bool     `json:"enable_console"  db:"enable_console"`

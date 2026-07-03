@@ -72,6 +72,13 @@ type Client struct {
 	// AgentVersion is set by ensureAgent after a successful version probe.
 	AgentVersion string
 
+	// OnHostFrame is called when the Exec() read loop receives a frame that
+	// is not "stdout", "stderr", or "result". These are guest-initiated frames
+	// that the host must process (e.g., "remote_vm"). If nil, the frame is
+	// silently logged and ignored.
+	// sourceVMID is the VM ID of the client that received the frame.
+	OnHostFrame func(ctx context.Context, sourceVMID string, conn net.Conn, frameType string, data string) error
+
 	// Internal: set during upgrade, cleared on successful retry.
 	upgradeInProgress bool
 
@@ -153,7 +160,7 @@ func (c *Client) Exec(
 		NoSync:  noSync,
 	}
 
-	if err := sendFrame(conn, req); err != nil {
+	if err := SendFrame(conn, req); err != nil {
 		slog.Error("vsock send exec request failed", "vm_id", c.item.VmID, "error", err)
 		return nil, errs.WrapMsg(errs.CodeVsockExecFailed, "failed to send exec request", err)
 	}
@@ -189,7 +196,17 @@ func (c *Client) Exec(
 			result.ExitCode = resp.Status
 			return &result, nil
 		default:
-			slog.Warn("vsock unknown exec response type", "type", resp.Type)
+			// Defensive check — stdout/stderr should be caught above.
+			if resp.Type == "stdout" || resp.Type == "stderr" {
+				break
+			}
+			if c.OnHostFrame != nil {
+				if err := c.OnHostFrame(ctx, c.item.VmID, conn, resp.Type, resp.Data); err != nil {
+					return nil, err
+				}
+			} else {
+				slog.Warn("vsock unknown exec response type", "type", resp.Type)
+			}
 		}
 	}
 }
@@ -244,7 +261,7 @@ func (c *Client) Shell(ctx context.Context, user string) error {
 	slog.Debug("tty: opening shell with initial window size",
 		"rows", req.Rows, "cols", req.Cols)
 
-	if err := sendFrame(conn, req); err != nil {
+	if err := SendFrame(conn, req); err != nil {
 		slog.Error("vsock send exec-tty request failed", "vm_id", c.item.VmID, "error", err)
 		return errs.WrapMsg(errs.CodeVsockExecFailed, "failed to send exec-tty request", err)
 	}
@@ -253,7 +270,7 @@ func (c *Client) Shell(ctx context.Context, user string) error {
 	// before entering raw relay mode on an exec-tty request.
 	slog.Debug("tty: reading TTY ack")
 	var resp execResponse
-	if err := readFrame(conn, &resp); err != nil {
+	if err := readFrameRaw(conn, &resp); err != nil {
 		return errs.WrapMsg(errs.CodeVsockExecFailed, "failed to read TTY ack", err)
 	}
 	if resp.Error != "" {
@@ -275,7 +292,7 @@ func (c *Client) Shell(ctx context.Context, user string) error {
 		}
 		slog.Debug("tty: sending initial resize frame",
 			"rows", rows, "cols", cols)
-		if err := sendFrame(conn, resizeReq); err != nil {
+		if err := SendFrame(conn, resizeReq); err != nil {
 			slog.Error("tty: failed to send initial resize frame", "error", err)
 			return errs.WrapMsg(errs.CodeVsockExecFailed, "failed to send initial resize frame", err)
 		}
@@ -383,7 +400,7 @@ func relayTTY(conn net.Conn, stdin io.ReadCloser, stdout io.Writer) error {
 				}
 				slog.Debug("tty: forwarding resize", "rows", rows, "cols", cols)
 				lw.mu.Lock()
-				err := sendFrame(lw, resizeReq)
+				err := SendFrame(lw, resizeReq)
 				lw.mu.Unlock()
 				if err != nil {
 					slog.Debug("tty: resize send failed (connection may be closed)", "error", err)
@@ -662,7 +679,7 @@ func (c *Client) upgradeExec(ctx context.Context, command, user string, timeout 
 		User:    user,
 	}
 
-	if err := sendFrame(conn, req); err != nil {
+	if err := SendFrame(conn, req); err != nil {
 		return fmt.Errorf("send upgrade exec request: %w", err)
 	}
 
@@ -708,11 +725,11 @@ func (c *Client) probeVersion(ctx context.Context, conn net.Conn) (string, error
 		Type:  requestTypeVersion,
 		Token: c.item.Token,
 	}
-	if err := sendFrame(conn, req); err != nil {
+	if err := SendFrame(conn, req); err != nil {
 		return "", fmt.Errorf("send version request: %w", err)
 	}
 	var resp execResponse
-	if err := readFrame(conn, &resp); err != nil {
+	if err := readFrameRaw(conn, &resp); err != nil {
 		return "", fmt.Errorf("read version response: %w", err)
 	}
 	if resp.Type != responseTypeVersion {

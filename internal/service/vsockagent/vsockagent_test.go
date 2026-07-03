@@ -324,7 +324,7 @@ func TestHandleConnection_Auth(t *testing.T) {
 			defer host.Close()
 			defer guest.Close()
 
-			agent := New(9999, tc.agentToken)
+			agent := New(9999, tc.agentToken, "")
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -394,7 +394,7 @@ func runHandleExec(ctx context.Context, req *execRequest) *execResponse {
 
 	errCh := make(chan error, 1)
 	go func() {
-		handleExec(ctx, req, guest)
+		handleExec(ctx, req, guest, &sync.Mutex{})
 		guest.Close()
 		close(errCh)
 	}()
@@ -608,7 +608,7 @@ func TestHandleExec_StreamingOutput(t *testing.T) {
 		Command: `echo "line1"; sleep 0.05; echo "line2"; sleep 0.05; echo "line3"`,
 	}
 
-	go handleExec(context.Background(), req, guest)
+	go handleExec(context.Background(), req, guest, &sync.Mutex{})
 
 	dec := json.NewDecoder(host)
 
@@ -655,7 +655,7 @@ func TestHandleExec_WriteError(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		handleExec(context.Background(), req, guest)
+		handleExec(context.Background(), req, guest, &sync.Mutex{})
 		close(done)
 	}()
 
@@ -722,7 +722,7 @@ func TestHandleConnection_ExecDispatch(t *testing.T) {
 	defer host.Close()
 	defer guest.Close()
 
-	agent := New(9999, "test-token")
+	agent := New(9999, "test-token", "")
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -784,7 +784,7 @@ func TestHandleConnection_UnknownRequest(t *testing.T) {
 	defer host.Close()
 	defer guest.Close()
 
-	agent := New(9999, "")
+	agent := New(9999, "", "")
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -827,7 +827,7 @@ func TestHandleConnection_PartialRead(t *testing.T) {
 	defer host.Close()
 	defer guest.Close()
 
-	agent := New(9999, "")
+	agent := New(9999, "", "")
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -1261,7 +1261,7 @@ func TestHandleConnection_ExecTTYDispatch(t *testing.T) {
 	defer host.Close()
 	defer guest.Close()
 
-	agent := New(9999, "")
+	agent := New(9999, "", "")
 
 	var wg sync.WaitGroup
 	wg.Add(1)

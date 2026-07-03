@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -341,7 +342,7 @@ func TestShell_SendsInitialTerminalSize(t *testing.T) {
 
 	// Read the exec-tty request from the agent side.
 	var req execRequest
-	require.NoError(t, readFrame(agentConn, &req), "should read exec-tty frame")
+	require.NoError(t, readFrameRaw(agentConn, &req), "should read exec-tty frame")
 	assert.Equal(t, "exec-tty", req.Type)
 	assert.Equal(t, 24, req.Rows, "Rows must be height (24), not width")
 	assert.Equal(t, 80, req.Cols, "Cols must be width (80), not height")
@@ -385,17 +386,17 @@ func TestShell_SendsResizeFrameAfterAck(t *testing.T) {
 
 	// Step 1: Read exec-tty request.
 	var req execRequest
-	require.NoError(t, readFrame(agentConn, &req), "should read exec-tty frame")
+	require.NoError(t, readFrameRaw(agentConn, &req), "should read exec-tty frame")
 	assert.Equal(t, "exec-tty", req.Type)
 	assert.Equal(t, 42, req.Rows)
 	assert.Equal(t, 100, req.Cols)
 
 	// Step 2: Send TTY ack (as the agent would).
-	require.NoError(t, sendFrame(agentConn, execResponse{Type: "tty"}))
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "tty"}))
 
 	// Step 3: Read the resize frame that Shell sends after receiving the ack.
 	var resizeReq execRequest
-	require.NoError(t, readFrame(agentConn, &resizeReq), "should read resize frame after TTY ack")
+	require.NoError(t, readFrameRaw(agentConn, &resizeReq), "should read resize frame after TTY ack")
 	assert.Equal(t, "resize", resizeReq.Type,
 		"frame after TTY ack must be a resize frame, not %q", resizeReq.Type)
 	assert.Equal(t, 42, resizeReq.Rows, "resize rows must match terminal height")
@@ -404,4 +405,214 @@ func TestShell_SendsResizeFrameAfterAck(t *testing.T) {
 	// Cleanup: close agent side to unblock Shell.
 	agentConn.Close()
 	<-errCh
+}
+
+// --- OnHostFrame callback ---
+// Rationale: OnHostFrame is called by Exec() when it receives a frame that
+// is not "stdout", "stderr", or "result". These are guest-initiated frames
+// that the host must process. Tests use dialFn to inject a mock connection.
+
+func TestOnHostFrame_CalledForUnknownFrameType(t *testing.T) {
+	clientConn, agentConn := net.Pipe()
+	t.Cleanup(func() { clientConn.Close() })
+	t.Cleanup(func() { agentConn.Close() })
+
+	var callbackCalled bool
+	var gotFrameType string
+	var gotData string
+
+	c := &Client{
+		item: &model.VsockConfigItem{
+			VmID: "test-vm", UDSPath: "/tmp/test.sock", Port: 1024, Token: "test-token",
+		},
+		ProbeTimeout:     time.Minute,
+		skipVersionCheck: true,
+		dialFn:           mockDialFn(t, clientConn),
+		OnHostFrame: func(ctx context.Context, sourceVMID string, conn net.Conn, frameType string, data string) error {
+			callbackCalled = true
+			gotFrameType = frameType
+			gotData = data
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Exec(context.Background(), "echo hello", "root", 5, nil, false)
+		errCh <- err
+	}()
+
+	// Read the exec request from agent side (skip it)
+	var req execRequest
+	require.NoError(t, readFrameRaw(agentConn, &req))
+	assert.Equal(t, "exec", req.Type)
+
+	// Send a custom frame that Exec doesn't recognize
+	require.NoError(
+		t,
+		SendFrame(agentConn, execResponse{Type: "remote_vm", Data: `{"destination":"target","command":"ls"}`}),
+	)
+
+	// Now send the result frame so Exec completes
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "result", Status: 0}))
+
+	err := <-errCh
+	require.NoError(t, err)
+
+	assert.True(t, callbackCalled, "OnHostFrame must be called for unknown frame types")
+	assert.Equal(t, "remote_vm", gotFrameType)
+	assert.Equal(t, `{"destination":"target","command":"ls"}`, gotData)
+}
+
+func TestOnHostFrame_ErrorReturnedFromExec(t *testing.T) {
+	clientConn, agentConn := net.Pipe()
+	t.Cleanup(func() { clientConn.Close() })
+	t.Cleanup(func() { agentConn.Close() })
+
+	c := &Client{
+		item: &model.VsockConfigItem{
+			VmID: "test-vm", UDSPath: "/tmp/test.sock", Port: 1024, Token: "test-token",
+		},
+		ProbeTimeout:     time.Minute,
+		skipVersionCheck: true,
+		dialFn:           mockDialFn(t, clientConn),
+		OnHostFrame: func(ctx context.Context, sourceVMID string, conn net.Conn, frameType string, data string) error {
+			return fmt.Errorf("host frame rejected: %s", frameType)
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Exec(context.Background(), "echo hello", "root", 5, nil, false)
+		errCh <- err
+	}()
+
+	// Read the exec request
+	var req execRequest
+	require.NoError(t, readFrameRaw(agentConn, &req))
+
+	// Send a remote_vm frame that will trigger the callback
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "remote_vm", Data: "{}"}))
+
+	err := <-errCh
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "host frame rejected")
+}
+
+func TestOnHostFrame_NilSilentlyIgnoresUnknownFrames(t *testing.T) {
+	clientConn, agentConn := net.Pipe()
+	t.Cleanup(func() { clientConn.Close() })
+	t.Cleanup(func() { agentConn.Close() })
+
+	c := &Client{
+		item: &model.VsockConfigItem{
+			VmID: "test-vm", UDSPath: "/tmp/test.sock", Port: 1024, Token: "test-token",
+		},
+		ProbeTimeout:     time.Minute,
+		skipVersionCheck: true,
+		dialFn:           mockDialFn(t, clientConn),
+		OnHostFrame:      nil, // no callback
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Exec(context.Background(), "echo hello", "root", 5, nil, false)
+		errCh <- err
+	}()
+
+	// Read the exec request
+	var req execRequest
+	require.NoError(t, readFrameRaw(agentConn, &req))
+
+	// Send a custom frame (no Op callback to process it)
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "remote_vm", Data: "{}"}))
+
+	// The frame should be logged and ignored; send result to complete.
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "result", Status: 0}))
+
+	err := <-errCh
+	require.NoError(t, err, "Exec must succeed when OnHostFrame is nil (unknown frames are ignored)")
+}
+
+func TestOnHostFrame_MultipleUnknownFrames(t *testing.T) {
+	clientConn, agentConn := net.Pipe()
+	t.Cleanup(func() { clientConn.Close() })
+	t.Cleanup(func() { agentConn.Close() })
+
+	var callCount int
+	var frameTypes []string
+
+	c := &Client{
+		item: &model.VsockConfigItem{
+			VmID: "test-vm", UDSPath: "/tmp/test.sock", Port: 1024, Token: "test-token",
+		},
+		ProbeTimeout:     time.Minute,
+		skipVersionCheck: true,
+		dialFn:           mockDialFn(t, clientConn),
+		OnHostFrame: func(ctx context.Context, sourceVMID string, conn net.Conn, frameType string, data string) error {
+			callCount++
+			frameTypes = append(frameTypes, frameType)
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Exec(context.Background(), "cat", "root", 5, nil, false)
+		errCh <- err
+	}()
+
+	var req execRequest
+	require.NoError(t, readFrameRaw(agentConn, &req))
+
+	// Send multiple custom frames before result
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "remote_vm", Data: "first"}))
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "custom_type", Data: "second"}))
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "result", Status: 0}))
+
+	err := <-errCh
+	require.NoError(t, err)
+
+	assert.Equal(t, 2, callCount, "OnHostFrame must be called for each unknown frame")
+	assert.Equal(t, []string{"remote_vm", "custom_type"}, frameTypes)
+}
+
+func TestOnHostFrame_OnHostFrameMidStdoutFrames(t *testing.T) {
+	clientConn, agentConn := net.Pipe()
+	t.Cleanup(func() { clientConn.Close() })
+	t.Cleanup(func() { agentConn.Close() })
+
+	var callbackCalled bool
+	c := &Client{
+		item: &model.VsockConfigItem{
+			VmID: "test-vm", UDSPath: "/tmp/test.sock", Port: 1024, Token: "test-token",
+		},
+		ProbeTimeout:     time.Minute,
+		skipVersionCheck: true,
+		dialFn:           mockDialFn(t, clientConn),
+		OnHostFrame: func(ctx context.Context, sourceVMID string, conn net.Conn, frameType string, data string) error {
+			callbackCalled = true
+			assert.Equal(t, "remote_vm", frameType)
+			return nil
+		},
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := c.Exec(context.Background(), "echo hello", "root", 5, nil, false)
+		errCh <- err
+	}()
+
+	var req execRequest
+	require.NoError(t, readFrameRaw(agentConn, &req))
+
+	// Send stdout, then remote_vm, then result to verify ordering
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "stdout", Data: "before\n"}))
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "remote_vm", Data: "{}"}))
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "stdout", Data: "after\n"}))
+	require.NoError(t, SendFrame(agentConn, execResponse{Type: "result", Status: 0}))
+
+	execErr := <-errCh
+	require.NoError(t, execErr)
+	assert.True(t, callbackCalled, "OnHostFrame must be called even when interleaved with stdout frames")
 }

@@ -18,9 +18,12 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
 	for {
+		// Serialize reads with handleLocalConn to prevent two goroutines
+		// reading from the same vsock conn concurrently.
+		a.readMu.Lock()
 		req, err := readFrame(conn)
+		a.readMu.Unlock()
 		if err != nil {
-			// Connection closed or unrecoverable error — stop handling.
 			return
 		}
 
@@ -29,23 +32,35 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 		if req.Type != requestTypePing && a.token != "" &&
 			subtle.ConstantTimeCompare([]byte(req.Token), []byte(a.token)) != 1 {
 			slog.Warn("auth rejected", "id", req.ID, "type", req.Type)
-			_ = writeFrame(conn, &execResponse{ // best-effort: connection may be closed already
-				ID:    req.ID,
-				Type:  responseTypeError,
-				Error: "invalid auth token",
+			a.connMu.Lock()
+			_ = writeFrame(conn, &execResponse{
+				ID: req.ID, Type: responseTypeError, Error: "invalid auth token",
 			})
+			a.connMu.Unlock()
 			continue
+		}
+
+		// For TTY sessions, don't register activeConn so handleLocalConn
+		// can't write JSON into a raw binary stream.
+		if req.Type == requestTypeExec {
+			a.activeConnMu.Lock()
+			a.activeConn = conn
+			a.activeConnMu.Unlock()
 		}
 
 		switch req.Type {
 		case requestTypeExec:
-			handleExec(ctx, req, conn)
+			handleExec(ctx, req, conn, &a.connMu)
+			a.activeConnMu.Lock()
+			if a.activeConn == conn {
+				a.activeConn = nil
+			}
+			a.activeConnMu.Unlock()
 
 		case requestTypeExecTTY:
 			// Send TTY acknowledgement before switching to raw relay.
 			if err := writeFrame(conn, &execResponse{
-				ID:   req.ID,
-				Type: responseTypeTTY,
+				ID: req.ID, Type: responseTypeTTY,
 			}); err != nil {
 				slog.Error("write TTY ack", "id", req.ID, "error", err)
 				return
@@ -55,10 +70,12 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 			return
 
 		case requestTypePing:
-			if err := writeFrame(conn, &execResponse{
-				ID:   req.ID,
-				Type: responseTypePong,
-			}); err != nil {
+			a.connMu.Lock()
+			err = writeFrame(conn, &execResponse{
+				ID: req.ID, Type: responseTypePong,
+			})
+			a.connMu.Unlock()
+			if err != nil {
 				slog.Error("write pong", "id", req.ID, "error", err)
 				return
 			}
@@ -68,11 +85,12 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 			data, _ := json.Marshal(map[string]string{
 				"agent_version": agentVersion,
 			})
-			if err := writeFrame(conn, &execResponse{
-				ID:   req.ID,
-				Type: responseTypeVersion,
-				Data: string(data),
-			}); err != nil {
+			a.connMu.Lock()
+			err = writeFrame(conn, &execResponse{
+				ID: req.ID, Type: responseTypeVersion, Data: string(data),
+			})
+			a.connMu.Unlock()
+			if err != nil {
 				slog.Error("write version response", "id", req.ID, "error", err)
 				return
 			}
@@ -80,9 +98,7 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 		case requestTypeFileTransfer:
 			ackPayload := fmt.Sprintf(`{"buf":%d}`, ftBufferSize)
 			if err := writeFrame(conn, &execResponse{
-				ID:   req.ID,
-				Type: responseTypeFTReady,
-				Data: ackPayload,
+				ID: req.ID, Type: responseTypeFTReady, Data: ackPayload,
 			}); err != nil {
 				slog.Error("ft: write ready ack", "id", req.ID, "error", err)
 				return
@@ -92,11 +108,11 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 
 		default:
 			slog.Warn("unknown request type", "id", req.ID, "type", req.Type)
-			_ = writeFrame(conn, &execResponse{ // best-effort: connection may be closed already
-				ID:    req.ID,
-				Type:  responseTypeError,
-				Error: "unknown request type: " + req.Type,
+			a.connMu.Lock()
+			_ = writeFrame(conn, &execResponse{
+				ID: req.ID, Type: responseTypeError, Error: "unknown request type: " + req.Type,
 			})
+			a.connMu.Unlock()
 		}
 	}
 }

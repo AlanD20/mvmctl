@@ -152,6 +152,11 @@ const (
 	CodeVsockAgentUnreachable  Code = "vsock.agent_unreachable"
 	CodeVsockExecFailed        Code = "vsock.exec_failed"
 	CodeVsockUpgradeInProgress Code = "vsock.upgrade_in_progress"
+	CodeVsockConfigNotFound    Code = "vsock.config.not_found"
+
+	// --- Remote exec domain ---
+	CodeUnauthorized Code = "auth.unauthorized"
+	CodeVMNotRunning Code = "vm.not_running"
 
 	// --- BundledAsset domain ---
 	CodeBundledAssetError    Code = "bundled_asset.error"

@@ -153,7 +153,7 @@ func (w *streamingWriter) Flush() {
 // pipe read goroutine (started internally by os/exec) might not be scheduled
 // before the child process exits under extreme CPU starvation, causing
 // (0, io.EOF) to be returned — i.e., no data captured and no frame sent.
-func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
+func handleExec(ctx context.Context, req *execRequest, conn net.Conn, connMu *sync.Mutex) {
 	start := time.Now()
 
 	if req.Timeout > 0 {
@@ -174,7 +174,6 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 	// They implement io.Writer, so Go's os/exec internally creates pipes
 	// and reads them in goroutines — the same race-free mechanism as
 	// bytes.Buffer, but with live frame emission.
-	connMu := &sync.Mutex{}
 	stdoutW := &streamingWriter{
 		conn: conn, connMu: connMu, id: req.ID, typ: "stdout",
 	}
@@ -194,9 +193,11 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 
 	if err := cmd.Start(); err != nil {
 		slog.Error("command start failed", "id", req.ID, "error", err)
+		connMu.Lock()
 		_ = writeFrame(conn, &execResponse{
 			ID: req.ID, Type: responseTypeResult, Status: -1, Error: err.Error(),
 		})
+		connMu.Unlock()
 		return
 	}
 
@@ -209,9 +210,11 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 		} else {
 			// Timeout or system error.
 			slog.Error("command execution failed", "id", req.ID, "error", err)
+			connMu.Lock()
 			_ = writeFrame(conn, &execResponse{
 				ID: req.ID, Type: responseTypeResult, Status: -1, Error: err.Error(),
 			})
+			connMu.Unlock()
 			return
 		}
 	}
@@ -224,16 +227,20 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 	// code because a broken connection invalidates the result.
 	if writeErr := stdoutW.Err(); writeErr != nil {
 		slog.Error("stdout write error", "id", req.ID, "error", writeErr)
+		connMu.Lock()
 		_ = writeFrame(conn, &execResponse{
 			ID: req.ID, Type: responseTypeResult, Status: -1, Error: writeErr.Error(),
 		})
+		connMu.Unlock()
 		return
 	}
 	if writeErr := stderrW.Err(); writeErr != nil {
 		slog.Error("stderr write error", "id", req.ID, "error", writeErr)
+		connMu.Lock()
 		_ = writeFrame(conn, &execResponse{
 			ID: req.ID, Type: responseTypeResult, Status: -1, Error: writeErr.Error(),
 		})
+		connMu.Unlock()
 		return
 	}
 
@@ -252,10 +259,12 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn) {
 		"duration_ms", elapsed.Milliseconds(),
 	)
 
+	connMu.Lock()
 	_ = writeFrame(conn, &execResponse{
 		ID:         req.ID,
 		Type:       responseTypeResult,
 		Status:     exitCode,
 		DurationMs: int(elapsed.Milliseconds()),
 	})
+	connMu.Unlock()
 }
