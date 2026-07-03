@@ -314,6 +314,7 @@ The VM resolver tries selectors in priority order:
 | `--count, -c N` | Create N VMs in batch | `1` |
 | `--atomic` | All-or-nothing batch: roll back all VMs if any creation fails | `false` |
 | `--skip-deblob` | Skip debloat operations on rootfs | `false` |
+| `--allow-remote-exec` / `--no-allow-remote-exec` | Allow inter-VM remote execution via vsock relay | from config |
 
 **Examples:**
 
