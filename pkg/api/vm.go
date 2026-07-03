@@ -973,8 +973,10 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 			SSHKeys: vm.SSHKeys, SSHUser: vm.SSHUser,
 			CloudInitMode:  vm.CloudInitMode,
 			NocloudNetPort: vm.NocloudNetPort, NocloudNetPID: vm.NocloudNetPID,
-			PCIEnabled: vm.PCIEnabled, EnableConsole: vm.EnableConsole,
+			PCIEnabled: vm.PCIEnabled, NestedVirt: vm.NestedVirt,
+			EnableConsole: vm.EnableConsole,
 			EnableLogging: vm.EnableLogging, EnableMetrics: vm.EnableMetrics,
+			AllowRemoteExec: vm.RemoteExec,
 			CreatedAt: vm.CreatedAt, UpdatedAt: vm.UpdatedAt,
 		},
 		Resources: results.VMResourcesInfo{

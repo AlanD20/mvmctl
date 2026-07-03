@@ -47,7 +47,7 @@ func NewDestroyPipeline(steps []Step, existingNames map[string]bool) (*Pipeline,
 				filtered = append(filtered, d)
 			}
 		}
-		cleaned[i] = &stepFuncWrapper{Step: s, deps: filtered}
+		cleaned[i] = &stepDepOverride{Step: s, deps: filtered}
 	}
 	return NewPipeline(cleaned)
 }

@@ -28,9 +28,11 @@ type VMItemInfo struct {
 	NocloudNetPort *int     `json:"nocloud_net_port"`
 	NocloudNetPID  *int     `json:"nocloud_net_pid"`
 	PCIEnabled     bool     `json:"pci_enabled"`
+	NestedVirt     bool     `json:"nested_virt"`
 	EnableConsole  bool     `json:"enable_console"`
 	EnableLogging  bool     `json:"enable_logging"`
 	EnableMetrics  bool     `json:"enable_metrics"`
+	AllowRemoteExec bool    `json:"allow_remote_exec"`
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
 }

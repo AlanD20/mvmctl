@@ -602,3 +602,4 @@ class TestEnvHelp:
         """``mvm env diff --help`` must show Usage."""
         result = _run_mvm_host("env", "diff", "--help", timeout=30)
         assert "Usage:" in result.stdout
+
