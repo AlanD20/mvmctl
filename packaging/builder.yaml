@@ -159,5 +159,9 @@ copy:
     src: pkg-builder:/mnt/mvmctl/dist/packages/
     dest: ./dist/packages
     force: true
+    removes:
+      - vm:pkg-builder
+      - network:builder
+      - key:builder
     depends_on:
       - exec:build-all

@@ -172,15 +172,15 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		noPCI           bool
 		nestedVirt      bool
 		noNestedVirt    bool
-		allowRemoteExec  bool
-		denyRemoteExec   bool
-		cpuTemplate      string
-		bootArgs         string
-		lsmFlags         string
-		enableLogging    bool
-		disableLogging   bool
-		enableMetrics    bool
-		disableMetrics   bool
+		allowRemoteExec bool
+		denyRemoteExec  bool
+		cpuTemplate     string
+		bootArgs        string
+		lsmFlags        string
+		enableLogging   bool
+		disableLogging  bool
+		enableMetrics   bool
+		disableMetrics  bool
 		count           int
 		atomic          bool
 		skipCleanup     bool

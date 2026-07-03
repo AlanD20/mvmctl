@@ -1,5 +1,5 @@
 Name:           mvmctl
-Version:        0.1.0
+Version:        %{version}
 Release:        1%{?dist}
 Summary:        MicroVM Manager - Container speed, VM isolation
 

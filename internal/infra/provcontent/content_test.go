@@ -944,7 +944,7 @@ func TestBuilder_BuildAgentOps(t *testing.T) {
 	assert.Equal(t, 0644, op2.Mode)
 
 	unitContent := string(op2.Data)
-	assert.Contains(t, unitContent, "Description=MVM VSock Agent")
+	assert.Contains(t, unitContent, "Description=MVM Agent")
 	assert.Contains(t, unitContent, "/usr/bin/mvm-agent -port 1024")
 	assert.NotContains(t, unitContent, "-token", "ExecStart must not expose the token flag")
 	assert.NotContains(t, unitContent, "After=", "systemd unit must not have After=")

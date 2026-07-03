@@ -157,6 +157,7 @@ build_rpm() {
 
   rpmbuild -bb --target "${target}" \
     --define "_topdir ${builddir}" \
+    --define "version ${VERSION}" \
     "${builddir}/SPECS/mvmctl.spec" 2>&1 | tail -3
   cp "${builddir}/RPMS/${arch}/"*.rpm "${OUTPUT_DIR}/"
   rm -rf "${builddir}"

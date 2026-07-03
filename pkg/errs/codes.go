@@ -149,7 +149,7 @@ const (
 	CodeVsockNotFound          Code = "vsock.not_found"
 	CodeVsockConnectionFailed  Code = "vsock.connection_failed"
 	CodeVsockHandshakeFailed   Code = "vsock.handshake_failed"
-	CodeAgentUnreachable  Code = "agent.unreachable"
+	CodeAgentUnreachable       Code = "agent.unreachable"
 	CodeVsockExecFailed        Code = "vsock.exec_failed"
 	CodeVsockUpgradeInProgress Code = "vsock.upgrade_in_progress"
 	CodeVsockConfigNotFound    Code = "vsock.config.not_found"
