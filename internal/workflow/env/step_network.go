@@ -121,7 +121,23 @@ func (s *NetworkStep) Destroy(
 		s.meta = saved.Meta
 	}
 
-	if s.saved == nil || !s.meta.WasCreated {
+	// Determine whether to attempt removal.
+	shouldRemove := s.meta.WasCreated
+	if !shouldRemove && s.saved != nil && s.saved.NetworkID != "" {
+		// WasCreated=false means the network pre-existed at apply time.
+		// But it may have been soft-deleted by another spec's destroy
+		// while VMs still referenced it — now it's an orphan. Check
+		// whether it's soft-deleted and clean it up if so.
+		existing, err := s.op.NetworkGet(ctx, inputs.NetworkInput{
+			Identifiers:    []string{s.saved.NetworkID},
+			IncludeDeleted: true,
+		})
+		if err == nil && existing != nil && !existing.IsPresent {
+			shouldRemove = true
+		}
+	}
+
+	if s.saved == nil || !shouldRemove {
 		if err := write(ctx, s.StateData()); err != nil {
 			return fmt.Errorf("persist step state after destroy skip: %w", err)
 		}

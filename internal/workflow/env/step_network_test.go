@@ -4,17 +4,20 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"mvmctl/internal/core/network"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/internal/testutil"
 	envpkg "mvmctl/internal/workflow/env"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
+	"mvmctl/pkg/api/results"
 )
 
 // --- Test helpers ---
@@ -410,6 +413,124 @@ func TestNetworkStep_Destroy_NetworkInputParams(t *testing.T) {
 		"NetworkRemove must be called with Force: true")
 }
 
+// --- NetworkStep.Destroy soft-deleted orphan cleanup ---
+// Rationale: When two specs share a network, one spec's destroy may
+// soft-delete the network (because the other spec's VMs still use it).
+// When the last spec destroys, WasCreated=false so the existing logic
+// skips removal — but the network is a soft-deleted orphan that should
+// be cleaned up. Destroy now checks IsPresent and removes if soft-deleted.
+
+func TestNetworkStep_Destroy_SoftDeletedOrphan(t *testing.T) {
+	var capturedInput inputs.NetworkInput
+	networkGetCalled := false
+	mockAPI := &testutil.MockNetworkAPI{
+		NetworkGetFunc: func(_ context.Context, input inputs.NetworkInput) (*model.NetworkItem, error) {
+			networkGetCalled = true
+			assert.True(t, input.IncludeDeleted,
+				"NetworkGet must be called with IncludeDeleted: true to find soft-deleted network")
+			return &model.NetworkItem{
+				ID:        "net-orphan",
+				Name:      "shared-net",
+				IsPresent: false,
+			}, nil
+		},
+		NetworkRemoveFunc: func(_ context.Context, input inputs.NetworkInput, _ bool) error {
+			capturedInput = input
+			return nil
+		},
+	}
+
+	step := newNetworkStep(t, mockAPI)
+
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"network_id": "net-orphan",
+			"subnet":     "10.0.0.0/24",
+		},
+		Meta: model.ResourceMeta{WasCreated: false},
+	}
+
+	writer, writes := recordingWriter()
+	err := step.Destroy(context.Background(), saved, writer, noopProgress)
+	require.NoError(t, err)
+	require.Len(t, *writes, 1, "state must be written exactly once")
+
+	assert.True(t, networkGetCalled, "NetworkGet must be called to check soft-delete status")
+	assert.Equal(t, []string{"net-orphan"}, capturedInput.Identifiers,
+		"NetworkRemove must be called with the orphan's network ID")
+	assert.True(t, capturedInput.IncludeDeleted,
+		"NetworkRemove must be called with IncludeDeleted: true")
+}
+
+func TestNetworkStep_Destroy_SkipActivePreExisting(t *testing.T) {
+	networkGetCalled := false
+	networkRemoveCalled := false
+	mockAPI := &testutil.MockNetworkAPI{
+		NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.NetworkItem, error) {
+			networkGetCalled = true
+			return &model.NetworkItem{
+				ID:        "net-active",
+				Name:      "shared-net",
+				IsPresent: true,
+			}, nil
+		},
+		NetworkRemoveFunc: func(_ context.Context, _ inputs.NetworkInput, _ bool) error {
+			networkRemoveCalled = true
+			return nil
+		},
+	}
+
+	step := newNetworkStep(t, mockAPI)
+
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"network_id": "net-active",
+			"subnet":     "10.0.0.0/24",
+		},
+		Meta: model.ResourceMeta{WasCreated: false},
+	}
+
+	writer, writes := recordingWriter()
+	err := step.Destroy(context.Background(), saved, writer, noopProgress)
+	require.NoError(t, err)
+	require.Len(t, *writes, 1, "state must be written exactly once")
+
+	assert.True(t, networkGetCalled, "NetworkGet must be called to check soft-delete status")
+	assert.False(t, networkRemoveCalled,
+		"NetworkRemove must NOT be called for an active pre-existing network")
+}
+
+func TestNetworkStep_Destroy_SkipNotFoundPreExisting(t *testing.T) {
+	networkRemoveCalled := false
+	mockAPI := &testutil.MockNetworkAPI{
+		NetworkGetFunc: func(_ context.Context, _ inputs.NetworkInput) (*model.NetworkItem, error) {
+			return nil, errors.New("not found")
+		},
+		NetworkRemoveFunc: func(_ context.Context, _ inputs.NetworkInput, _ bool) error {
+			networkRemoveCalled = true
+			return nil
+		},
+	}
+
+	step := newNetworkStep(t, mockAPI)
+
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"network_id": "net-gone",
+			"subnet":     "10.0.0.0/24",
+		},
+		Meta: model.ResourceMeta{WasCreated: false},
+	}
+
+	writer, writes := recordingWriter()
+	err := step.Destroy(context.Background(), saved, writer, noopProgress)
+	require.NoError(t, err)
+	require.Len(t, *writes, 1, "state must be written exactly once")
+
+	assert.False(t, networkRemoveCalled,
+		"NetworkRemove must NOT be called when the pre-existing network is not found")
+}
+
 // --- NetworkStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
@@ -551,6 +672,140 @@ func TestFromSpec_NetworkStep_SpecHashDeterminism(t *testing.T) {
 
 	assert.Equal(t, step1.SpecHash(), step2.SpecHash(),
 		"identical specs must produce identical hashes")
+}
+
+// repoNetworkAPI implements api.NetworkAPI backed by a real network.Repository
+// for testing DB-level hard-delete behavior without system operations.
+// Only NetworkGet and NetworkRemove are implemented; the rest return errors.
+type repoNetworkAPI struct {
+	repo network.Repository
+}
+
+func (a *repoNetworkAPI) NetworkCreate(_ context.Context, _ inputs.NetworkCreateInput) (*model.NetworkItem, error) {
+	return nil, errors.New("not implemented in test wrapper")
+}
+
+func (a *repoNetworkAPI) NetworkRemove(ctx context.Context, input inputs.NetworkInput, _ bool) error {
+	networks, err := input.Resolve(ctx, a.repo)
+	if err != nil {
+		return err
+	}
+	for _, net := range networks {
+		if err := a.repo.Delete(ctx, net.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *repoNetworkAPI) NetworkListAll(_ context.Context) ([]*model.NetworkItem, error) {
+	return nil, errors.New("not implemented in test wrapper")
+}
+
+func (a *repoNetworkAPI) NetworkGet(ctx context.Context, input inputs.NetworkInput) (*model.NetworkItem, error) {
+	networks, err := input.Resolve(ctx, a.repo)
+	if err != nil {
+		return nil, err
+	}
+	if len(networks) == 0 {
+		return nil, errors.New("network not found")
+	}
+	return networks[0], nil
+}
+
+func (a *repoNetworkAPI) NetworkToJSON(_ []*model.NetworkItem) []map[string]any {
+	return nil
+}
+
+func (a *repoNetworkAPI) NetworkInspect(_ context.Context, _ inputs.NetworkInput) (*results.NetworkInspect, error) {
+	return nil, errors.New("not implemented in test wrapper")
+}
+
+func (a *repoNetworkAPI) NetworkSetDefault(_ context.Context, _ inputs.NetworkInput) error {
+	return errors.New("not implemented in test wrapper")
+}
+
+func (a *repoNetworkAPI) NetworkSync(_ context.Context, _ inputs.NetworkInput) (map[string]map[string]int, error) {
+	return nil, errors.New("not implemented in test wrapper")
+}
+
+func (a *repoNetworkAPI) NetworkPrune(_ context.Context, _ bool, _ bool) ([]string, error) {
+	return nil, errors.New("not implemented in test wrapper")
+}
+
+func (a *repoNetworkAPI) NetworkCreateDefaultNetwork(_ context.Context) (*model.NetworkItem, error) {
+	return nil, errors.New("not implemented in test wrapper")
+}
+
+// --- NetworkStep.Destroy hard-delete of soft-deleted orphan ---
+// Rationale: When two specs share a network, one spec's destroy may
+// soft-delete the network (because the other spec's VMs still use it).
+// When the last spec destroys, WasCreated=false so the existing skip logic
+// would normally skip — but the network is a soft-deleted orphan that
+// should be hard-deleted. This test proves the destruction actually
+// removes the record from the SQLite database entirely.
+//
+// Contrast with TestNetworkStep_Destroy_SoftDeletedOrphan (above), which
+// tests the step logic using mocks. This test uses a real SQLite database
+// and real repository to verify the hard-delete actually propagates to
+// the DB layer.
+
+func TestNetworkStep_Destroy_HardDeletesSoftDeleted(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewInMemoryDB(t)
+	repo := network.NewRepository(db)
+
+	// 1. Create an active network.
+	now := time.Now().Format(time.RFC3339)
+	networkID := "net-hard-delete"
+	n := &model.NetworkItem{
+		ID:        networkID,
+		Name:      "test-net",
+		Subnet:    "10.0.0.0/24",
+		Bridge:    "mvm-br0",
+		IsPresent: true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	require.NoError(t, repo.Upsert(ctx, n))
+
+	// 2. Soft-delete it — simulate another spec's destroy leaving an orphan.
+	require.NoError(t, repo.SoftDelete(ctx, networkID))
+	require.NoError(t, repo.UpdateManyIsPresent(ctx, []string{networkID}, false))
+
+	// Prove the soft-deleted record still exists in the DB.
+	items, err := repo.FindByPrefix(ctx, networkID, true)
+	require.NoError(t, err)
+	require.Len(t, items, 1, "soft-deleted network must still exist in DB")
+	require.NotNil(t, items[0].DeletedAt, "soft-deleted network must have deleted_at set")
+	require.False(t, items[0].IsPresent, "soft-deleted network must have is_present=false")
+
+	// 3. Create a real API wrapper and a NetworkStep with WasCreated=false.
+	realAPI := &repoNetworkAPI{repo: repo}
+	step := envpkg.NewNetworkStep(realAPI, "test-net", inputs.NetworkCreateInput{
+		Name: "test-net", Subnet: "10.0.0.0/24",
+	})
+
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"network_id": networkID,
+			"subnet":     "10.0.0.0/24",
+		},
+		Meta: model.ResourceMeta{WasCreated: false},
+	}
+
+	writer, writes := recordingWriter()
+
+	// 4. Call Destroy — the step should detect the soft-deleted orphan
+	//    and issue a NetworkRemove, which hard-deletes from the DB.
+	err = step.Destroy(ctx, saved, writer, noopProgress)
+	require.NoError(t, err)
+	require.Len(t, *writes, 1, "state must be written exactly once")
+
+	// 5. Verify hard-delete — even with includeDeleted=true, no rows returned.
+	items, err = repo.FindByPrefix(ctx, networkID, true)
+	require.NoError(t, err)
+	require.Len(t, items, 0, "soft-deleted network must be hard-deleted from DB")
 }
 
 // --- NetworkStep.FromState state recovery ---
