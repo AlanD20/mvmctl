@@ -27,12 +27,15 @@ Complete reference for the `mvm env` workflow engine YAML spec format.
 ## Commands
 
 ```bash
-mvm env apply <spec-path>                 # Provision everything in the spec
+mvm env apply <spec-path>                 # Provision everything in the spec (local file or remote URL)
 mvm env apply <spec-path> --env KEY=VAL   # With extra env vars for exec steps (repeatable)
+mvm env apply https://example.com/team-env.yaml  # Apply from remote URL
 mvm env ls                    # List applied environments
 mvm env diff <spec-path>      # Show what would change (spec vs state)
 mvm env destroy <wf-id|path>  # Tear down exactly what was provisioned
 ```
+
+**Remote URLs:** `spec-path` accepts `https://` and `http://` URLs in addition to local file paths. The spec is fetched over HTTP and parsed identically. Workflow IDs are derived from the URL string, so re-applying or destroying by the same URL resolves to the same workflow state.
 
 ---
 

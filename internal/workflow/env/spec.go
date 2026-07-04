@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
+	"mvmctl/internal/lib/download"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/pkg/api"
@@ -42,7 +44,15 @@ func ResolveSpec(ctx context.Context, specPath string, op api.API) (*EnvSpec, []
 		)
 	}
 
-	data, err := os.ReadFile(specPath)
+	var (
+		data []byte
+		err  error
+	)
+	if strings.HasPrefix(specPath, "http://") || strings.HasPrefix(specPath, "https://") {
+		data, err = download.New().GetBody(ctx, specPath)
+	} else {
+		data, err = os.ReadFile(specPath)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil, errs.New(errs.CodeValidationFailed, fmt.Sprintf("env spec file not found: %s", specPath))

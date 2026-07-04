@@ -30,8 +30,9 @@ The `env` package lives under `internal/` (not `pkg/api/`) so it can import `pkg
 
 Users invoke the workflow engine via `internal/cli/env.go`, which provides four commands:
 
-- `mvm env apply <spec-path>` — provisions everything in the spec
+- `mvm env apply <spec-path>` — provisions everything in the spec (local file or remote URL)
 - `mvm env apply <spec-path> --env KEY=VAL` — with extra env vars for exec steps (repeatable)
+- `mvm env apply https://example.com/team-env.yaml` — apply from remote URL
 - `mvm env ls` — lists applied environments
 - `mvm env diff <spec-path>` — shows what would change (spec vs state)
 - `mvm env destroy <wf-id|path>` — tears down exactly what was provisioned
@@ -341,6 +342,51 @@ Destroy reconstructs steps from the saved state file — the original spec file 
 | `internal/workflow/env/step_*.go` | Step implementations: network, key, image, kernel, binary, vm, ssh, copy, exec |
 | `internal/workflow/env/utils.go` | `FormatStepName()`, `BareStepName()`, `StateFromMap()`, `InferStepType()` |
 | `internal/cli/env.go` | Cobra commands: `apply`, `ls`, `diff`, `destroy` |
+
+## Remote URL spec support
+
+`mvm env apply`, `diff`, and `destroy` accept a remote URL (`https://` or `http://`) instead of a local file path. The spec is fetched over HTTP and parsed identically to a local file.
+
+### How it works
+
+**Detection in `ResolveSpec`** (`internal/workflow/env/spec.go`):
+- Before `os.ReadFile`, check `strings.HasPrefix(specPath, "http://") || strings.HasPrefix(specPath, "https://")`
+- For URLs: `download.New().GetBody(ctx, specPath)` → returns `[]byte` → `yaml.Unmarshal`
+- For file paths: `os.ReadFile` — unchanged
+
+**Detection in CLI** (`internal/cli/env.go`):
+- The `os.Stat(specPath)` guard in `newEnvApplyCmd` is skipped for URLs
+- `env diff` and `env destroy` have no file-existence checks — they pass through directly
+
+### What just works without changes
+
+| Concern | Why |
+|---|---|
+| **Workflow ID** | `crypto.WorkflowID(url)` hashes the URL string. `filepath.Abs` returns an error for URLs; `WorkflowID` falls back to the raw string. Deterministic per URL. |
+| **Workflow ID resolution** | `ResolveWorkflowID` treats anything with `/` or `.` as a path (URL has both) and calls `crypto.WorkflowID`. Re-apply and destroy resolve correctly. |
+| **State persistence** | `SpecPath` stores the URL — shown in `env ls`, used as-is on re-apply. |
+| **`env diff`** | No CLI-level `os.Stat` — benefits from `ResolveSpec` fix directly. |
+| **`env destroy`** | `CheckArg` doesn't check file existence. `ResolveWorkflowID` hashes the URL → finds the state → destroys. |
+| **All step factories** | They only consume parsed YAML. Source format is invisible downstream. |
+| **Existing tests** | All tests pass file paths to `ResolveSpec` — they hit the `os.ReadFile` branch. Zero changes needed. |
+
+### Why `download.New().GetBody()`
+
+- Already used in `kernel/service.go` for fetching kernel config fragments — no new dependency
+- One-shot HTTP GET — no disk caching (avoids stale spec), no retry (transient failure → user re-runs)
+- Consistent error wrapping: `errs.DomainError` with `CodeDownloadFailed`
+- No signature change to `ResolveSpec` — downloader is created inline, not DI'd (the downloader is stateless for `GetBody`)
+
+### Edge cases
+
+| Case | Behavior |
+|---|---|
+| **URL returns 404** | `GetBody` returns `"Failed to fetch {url}: HTTP 404"` |
+| **URL DNS failure** | Timeout/DNS error wrapped in `CodeDownloadFailed` |
+| **URL returns non-YAML** | `yaml.Unmarshal` returns `"env spec validation: invalid YAML: ..."` |
+| **Re-apply** | State stores URL as `SpecPath`. `WorkflowID(url)` → same ID → finds state → re-fetches → drift detection via `SpecHash` |
+| **Destroy by URL** | `mvm env destroy https://...` → `ResolveWorkflowID` hashes URL → finds state → destroys |
+| **No args (default discovery)** | Only looks for local `mvmctl.yaml` / `mvmctl.yml` — unchanged |
 
 ## Design decisions
 

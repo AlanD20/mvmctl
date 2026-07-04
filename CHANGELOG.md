@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `image_import` step type for importing local images and VM rootfs in environment specs.
 - Exec/SSH steps now support `ignore_errors: true` to continue on non-zero exit codes.
 - `image_import` destroy is a no-op — imported images persist in the database and on disk.
+- `env apply` now accepts a remote URL (`https://` or `http://`) in place of a spec file path. The spec is fetched over HTTP and parsed identically to a local file. `env diff` and `env destroy` also support URLs.
 - `image_import` apply now always delegates to the API layer, enabling `force: true` to re-import and replace existing images.
 - All steps now support `removes` field to destroy resources mid-pipeline after the step completes.
 - New top-level `ephemeral: true` field — auto-runs `env destroy` after successful apply. Zero cleanup overhead. See `docs/ENV_SPEC_REFERENCE.md`.

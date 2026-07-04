@@ -93,9 +93,11 @@ func newEnvApplyCmd(envAPI api.API) *cobra.Command {
 				}
 			}
 
-			// Verify the spec file exists.
-			if _, err := os.Stat(specPath); os.IsNotExist(err) {
-				return fmt.Errorf("spec file not found: %s", specPath)
+			// Verify the spec file exists (skip for remote URLs).
+			if !strings.HasPrefix(specPath, "http://") && !strings.HasPrefix(specPath, "https://") {
+				if _, err := os.Stat(specPath); os.IsNotExist(err) {
+					return fmt.Errorf("spec file not found: %s", specPath)
+				}
 			}
 
 			onProgress := func(e event.Progress) {

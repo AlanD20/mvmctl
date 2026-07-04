@@ -6,6 +6,8 @@ package env_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -532,6 +534,61 @@ key:
 	deps := keyStep.Dependencies()
 	require.Len(t, deps, 1)
 	assert.Equal(t, "network:my-net", deps[0])
+}
+
+// --- URL-based ResolveSpec ---
+
+// Rationale: ResolveSpec must fetch a YAML spec from an http:// or https:// URL
+// using download.GetBody and parse it identically to a file-based spec.
+func TestResolveSpec_ValidURL(t *testing.T) {
+	t.Parallel()
+
+	specYAML := `version: "1"
+network:
+  - name: my-net
+    subnet: 10.0.0.0/24
+`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(specYAML))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, steps, err := envpkg.ResolveSpec(context.Background(), srv.URL, nil)
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	assert.Equal(t, "network:my-net", steps[0].Name())
+}
+
+// Rationale: ResolveSpec must propagate HTTP-level errors (e.g., 404) as Go
+// errors, not silently fall back to a file read or return partial results.
+func TestResolveSpec_URL_Returns404(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	_, _, err := envpkg.ResolveSpec(context.Background(), srv.URL, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "HTTP 404")
+}
+
+// Rationale: ResolveSpec must reject a valid HTTP response that contains
+// invalid YAML with an unmarshal error, just as it does for file-based specs.
+func TestResolveSpec_URL_ReturnsInvalidYAML(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("invalid_yaml: ["))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, _, err := envpkg.ResolveSpec(context.Background(), srv.URL, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid YAML")
 }
 
 // --- Helper Functions ---
