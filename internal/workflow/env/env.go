@@ -116,23 +116,9 @@ func Apply(
 		if pErr := workflow.WriteWorkflowState(stateDir, wfState); pErr != nil {
 			slog.Debug("failed to persist workflow state", "wf_id", wfID, "step", step.Name(), "error", pErr)
 			return fmt.Errorf("persist workflow state after step %q: %w", step.Name(), pErr)
-	}
-
-	// Ephemeral: destroy everything and remove state after successful apply.
-	if spec.Ephemeral {
-		slog.Info("ephemeral spec — destroying resources after successful apply", "spec", specPath)
-		if err := Destroy(ctx, op, specPath, onProgress); err != nil {
-			return errs.WrapMsg(
-				errs.CodeInternal,
-				fmt.Sprintf("ephemeral destroy failed after apply: %v", err),
-				err,
-			)
 		}
-		slog.Info("ephemeral spec destroyed", "spec", specPath)
+		return nil
 	}
-
-	return nil
-}
 
 	err = pipeline.Execute(ctx, state, onProgress, prevResources, workflow.WithOnStepComplete(onStepComplete))
 
@@ -252,6 +238,19 @@ func Apply(
 				mu.Unlock()
 			}
 		}
+	}
+
+	// Ephemeral: destroy everything and remove state after successful apply.
+	if spec.Ephemeral {
+		slog.Info("ephemeral spec — destroying resources after successful apply", "spec", specPath)
+		if err := Destroy(ctx, op, specPath, onProgress); err != nil {
+			return errs.WrapMsg(
+				errs.CodeInternal,
+				fmt.Sprintf("ephemeral destroy failed after apply: %v", err),
+				err,
+			)
+		}
+		slog.Info("ephemeral spec destroyed", "spec", specPath)
 	}
 
 	return nil
