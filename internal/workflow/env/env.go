@@ -149,7 +149,7 @@ func Apply(
 					}
 				}
 			case "image", "image_import":
-				result := op.ImageRemove(ctx, inputs.ImageInput{Identifiers: []string{name}}, true)
+				result := op.ImageRemove(ctx, inputs.ImageInput{Identifiers: []string{name}, IncludeDeleted: true}, true)
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
@@ -160,7 +160,7 @@ func Apply(
 			case "network":
 				removeErr = op.NetworkRemove(
 					ctx,
-					inputs.NetworkInput{Identifiers: []string{name}, Force: true},
+					inputs.NetworkInput{Identifiers: []string{name}, Force: true, IncludeDeleted: true},
 					true,
 				)
 			case "volume":
@@ -182,7 +182,7 @@ func Apply(
 					}
 				}
 			case "kernel":
-				result := op.KernelRemove(ctx, inputs.KernelInput{Identifiers: []string{name}})
+				result := op.KernelRemove(ctx, inputs.KernelInput{Identifiers: []string{name}, IncludeDeleted: true})
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
@@ -191,7 +191,7 @@ func Apply(
 					}
 				}
 			case "binary":
-				result := op.BinaryRemove(ctx, inputs.BinaryInput{Identifiers: []string{name}}, true)
+				result := op.BinaryRemove(ctx, inputs.BinaryInput{Identifiers: []string{name}, IncludeDeleted: true}, true)
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {

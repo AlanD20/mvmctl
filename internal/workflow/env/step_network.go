@@ -129,8 +129,9 @@ func (s *NetworkStep) Destroy(
 	}
 
 	if err := s.op.NetworkRemove(ctx, inputs.NetworkInput{
-		Identifiers: []string{s.saved.NetworkID},
-		Force:       true,
+		Identifiers:    []string{s.saved.NetworkID},
+		Force:          true,
+		IncludeDeleted: true,
 	}, true); err != nil {
 		if errs.IsNotFound(err) {
 			slog.Debug("network already removed, skipping destroy", "network", s.saved.NetworkID)

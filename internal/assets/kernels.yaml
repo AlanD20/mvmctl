@@ -42,6 +42,8 @@ kernel-official:
     CONFIG_MEMCG: y
     # PCI (required for some upstream kernels)
     CONFIG_PCI: y
+    CONFIG_CRYPTO_SHA1: y
+    CONFIG_CRYPTO_USER_API_HASH: y
     # Disabled
     CONFIG_BLK_DEV_ZONED: n
     CONFIG_VIRTIO_BLK_F_SECURE_ERASE: n
@@ -109,6 +111,28 @@ kernel-official:
         CONFIG_NF_CONNTRACK: y
         CONFIG_NETFILTER_XTABLES: y
         CONFIG_NETFILTER_XT_MATCH_COMMENT: y
+        CONFIG_NETFILTER_XT_MATCH_STATISTIC: y
+        CONFIG_NETFILTER_XT_MATCH_MULTIPORT: y
+        CONFIG_NETFILTER_XT_MATCH_RECENT: y
+        CONFIG_NETFILTER_XT_MATCH_LENGTH: y
+        CONFIG_NETFILTER_XT_MATCH_LIMIT: y
+        CONFIG_NETFILTER_XT_MATCH_DSCP: y
+        CONFIG_NETFILTER_XT_MATCH_OWNER: y
+        CONFIG_NETFILTER_XT_MATCH_CGROUP: y
+        CONFIG_NETFILTER_XT_MATCH_IPVS: y
+        CONFIG_NETFILTER_XT_MATCH_STRING: y
+        CONFIG_NETFILTER_XT_MATCH_BPF: y
+        CONFIG_NETFILTER_XT_MATCH_HELPER: y
+        CONFIG_NETFILTER_XT_MATCH_QUOTA: y
+        CONFIG_NETFILTER_XT_MATCH_PKTTYPE: y
+        # Targets
+        CONFIG_NETFILTER_XT_TARGET_LOG: y
+        CONFIG_NETFILTER_XT_TARGET_NFLOG: y
+        CONFIG_NETFILTER_XT_TARGET_TCPMSS: y
+        CONFIG_NETFILTER_XT_TARGET_DSCP: y
+        CONFIG_NETFILTER_XT_TARGET_CLASSIFY: y
+        CONFIG_NETFILTER_XT_TARGET_CHECKSUM: y
+        CONFIG_NETFILTER_XT_TARGET_TRACE: y
         CONFIG_NETFILTER_XT_MATCH_CONNTRACK: y
         CONFIG_NETFILTER_XT_MATCH_STATE: y
         CONFIG_NETFILTER_XT_TARGET_REDIRECT: y
@@ -128,6 +152,7 @@ kernel-official:
         CONFIG_IP_NF_TARGET_MASQUERADE: y
         CONFIG_BRIDGE_NETFILTER: y
         CONFIG_NETFILTER_NETLINK: y
+
     cni-bridge:
       desc: "CNI bridge / overlay networking"
       enforce:
@@ -138,6 +163,8 @@ kernel-official:
         CONFIG_VLAN_8021Q: y
         CONFIG_DUMMY: y
         CONFIG_VXLAN: y
+        CONFIG_GENEVE: y
+        CONFIG_FIB_RULES: y
     ebpf:
       desc: "eBPF / BTF (Cilium, bpftool)"
       enforce:
@@ -145,6 +172,11 @@ kernel-official:
         CONFIG_BPF_SYSCALL: y
         CONFIG_BPF_JIT: y
         CONFIG_DEBUG_INFO_BTF: y
+        CONFIG_BPF_EVENTS: y
+        CONFIG_PERF_EVENTS: y
+        CONFIG_NET_CLS_BPF: y
+        CONFIG_NET_CLS_ACT: y
+        CONFIG_NET_SCH_INGRESS: y
     storage:
       desc: "Filesystems for persistent volumes"
       enforce:
@@ -154,6 +186,16 @@ kernel-official:
         CONFIG_BTRFS_FS: y
         CONFIG_BTRFS_FS_POSIX_ACL: y
         CONFIG_BLK_DEV_NVME: y
+    fqdn-proxy:
+      desc: "L7 / FQDN policy proxy (TPROXY, xt_socket)"
+      enforce:
+        CONFIG_NETFILTER_XT_TARGET_TPROXY: y
+        CONFIG_NETFILTER_XT_TARGET_CT: y
+        CONFIG_NETFILTER_XT_MATCH_SOCKET: y
+    bandwidth:
+      desc: "Bandwidth manager (FQ packet scheduler)"
+      enforce:
+        CONFIG_NET_SCH_FQ: y
   options:
     version_discoveries:
       - "v6.x"

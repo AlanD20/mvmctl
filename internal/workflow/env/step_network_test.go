@@ -369,6 +369,47 @@ func TestNetworkStep_Destroy_WriteFailure(t *testing.T) {
 	return
 }
 
+// --- NetworkStep.Destroy NetworkInput parameters ---
+// Rationale: Destroy must pass IncludeDeleted: true and Force: true in the
+// NetworkInput to NetworkRemove. The IncludeDeleted flag was the subject of a
+// recent bug fix; without it, network removal would silently skip already-deleted
+// networks and prevent proper cleanup during workflow teardown.
+
+func TestNetworkStep_Destroy_NetworkInputParams(t *testing.T) {
+	var capturedInput inputs.NetworkInput
+	mockAPI := &testutil.MockNetworkAPI{
+		NetworkRemoveFunc: func(_ context.Context, input inputs.NetworkInput, _ bool) error {
+			capturedInput = input
+			return nil
+		},
+	}
+
+	step := newNetworkStep(t, mockAPI)
+
+	saved := model.ResourceState{
+		Spec: model.ResourceMap{
+			"network_id": "net-destroy-test",
+			"subnet":     "10.0.0.0/24",
+		},
+		Meta: model.ResourceMeta{WasCreated: true},
+	}
+
+	writer, writes := recordingWriter()
+	err := step.Destroy(context.Background(), saved, writer, noopProgress)
+	require.NoError(t, err)
+
+	// Destroy always writes state.
+	require.Len(t, *writes, 1, "state must be written exactly once")
+
+	// Verify the NetworkInput passed to NetworkRemove.
+	assert.Equal(t, []string{"net-destroy-test"}, capturedInput.Identifiers,
+		"NetworkRemove must be called with the correct network ID")
+	assert.True(t, capturedInput.IncludeDeleted,
+		"NetworkRemove must be called with IncludeDeleted: true")
+	assert.True(t, capturedInput.Force,
+		"NetworkRemove must be called with Force: true")
+}
+
 // --- NetworkStep.StateData ---
 // Rationale: StateData is the serialization contract between Apply/Destroy
 // and the workflow persistence layer. If it returns wrong keys or drops meta,
