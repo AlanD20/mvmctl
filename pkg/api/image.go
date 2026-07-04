@@ -458,7 +458,13 @@ func (op *Operation) ImageImport(
 	}
 	if existing != nil && existing.ID != imageItem.ID {
 		removed := op.Services.Image.RemoveImageFiles(existing)
-		_ = op.Repos.Image.SoftDelete(ctx, existing.ID)
+		// Hard-delete when no VMs reference the old image, soft-delete otherwise.
+		vms, vmErr := op.Repos.VM.GetByImageIDs(ctx, []string{existing.ID})
+		if vmErr == nil && len(vms) == 0 {
+			_ = op.Repos.Image.Delete(ctx, existing.ID)
+		} else {
+			_ = op.Repos.Image.SoftDelete(ctx, existing.ID)
+		}
 		if len(removed) > 0 {
 			slog.Info("Cleaned up old image files", "count", len(removed), "id", imageItem.ID)
 		}
