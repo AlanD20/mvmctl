@@ -146,6 +146,7 @@ The kernel resolver tries selectors in priority order:
 | `--clean-build` | Skip cache and force clean build (official only) | `false` |
 | `--config PATH` | Custom kernel config file to apply as a fragment | — |
 | `--features TEXT` | Comma-separated kernel features (e.g. `kvm`, `nftables`, `tuntap`, `btrfs`). Use `all` or `*` to enable every feature defined in the selected kernel spec. | — |
+| `--skip-checksum` | Skip SHA256 checksum verification | `false` |
 
 ```
 # List available remote kernel versions
