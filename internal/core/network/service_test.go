@@ -914,10 +914,12 @@ func TestService_ListAll_verify(t *testing.T) {
 		require.NoError(t, err)
 		// Both networks are listed; the one with missing bridge is marked not present
 		assert.Len(t, got, 2)
-		assert.Equal(t, "n-1", got[0].ID)
-		assert.True(t, got[0].IsPresent)
-		assert.Equal(t, "n-2", got[1].ID)
-		assert.False(t, got[1].IsPresent)
+		byID := map[string]*model.NetworkItem{}
+		for i := range got {
+			byID[got[i].ID] = got[i]
+		}
+		assert.True(t, byID["n-1"].IsPresent, "n-1 has alive bridge")
+		assert.False(t, byID["n-2"].IsPresent, "n-2 has missing bridge")
 	})
 
 	t.Run("no_missing_bridges_passthrough", func(t *testing.T) {
