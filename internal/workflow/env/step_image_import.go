@@ -13,7 +13,6 @@ import (
 	"mvmctl/internal/lib/workflow"
 	"mvmctl/pkg/api"
 	"mvmctl/pkg/api/inputs"
-	"mvmctl/pkg/errs"
 )
 
 // ImageImportState is the persisted state for an image import step.
@@ -53,34 +52,6 @@ func (s *ImageImportStep) Apply(
 ) error {
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
-	}
-
-	// Recover WasCreated from saved meta.
-	wasCreated := saved.Meta.WasCreated
-
-	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "checking if exists"})
-	existing, err := s.op.ImageGet(ctx, inputs.ImageInput{Identifiers: []string{s.input.Name}})
-	if err != nil && !errs.IsNotFound(err) {
-		return errs.WrapMsg(
-			errs.CodeDatabaseError,
-			fmt.Sprintf("check image name %q: %v", s.input.Name, err),
-			err,
-		)
-	}
-	if existing != nil {
-		onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "already exists, skipping"})
-		s.saved = &ImageImportState{
-			ImageID: existing.ID,
-		}
-		s.meta = model.ResourceMeta{
-			WasCreated: wasCreated,
-			SpecHash:   s.specHash,
-		}
-		state.Set(s.Name(), s.saved)
-		if err := write(ctx, s.StateData()); err != nil {
-			return fmt.Errorf("persist step state after skip: %w", err)
-		}
-		return nil
 	}
 
 	onProgress(event.Progress{Phase: s.Name(), Status: "running", Message: "importing image"})
