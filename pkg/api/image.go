@@ -265,7 +265,7 @@ func (op *Operation) ImagePull(
 
 	if onProgress != nil {
 		onProgress(event.Progress{
-			Phase: "optimize", Status: "running", Message: "Optimizing image...",
+			Phase: "optimize", Status: "running", Message: "Debloating and shrinking filesystem...",
 		})
 	}
 	imageItem, _, err := op.Services.Image.OptimizeImage(
@@ -428,7 +428,7 @@ func (op *Operation) ImageImport(
 
 	if onProgress != nil {
 		onProgress(event.Progress{
-			Phase: "optimize", Status: "running", Message: "Optimizing image...",
+			Phase: "optimize", Status: "running", Message: "Debloating and shrinking filesystem...",
 		})
 	}
 	imageItem, _, err := op.Services.Image.OptimizeImage(
