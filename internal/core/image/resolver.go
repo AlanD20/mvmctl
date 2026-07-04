@@ -65,8 +65,8 @@ func (r *Resolver) SetInclude(include []string) {
 }
 
 // ByID resolves by full ID.
-func (r *Resolver) ByID(ctx context.Context, imageID string) (*model.ImageItem, error) {
-	matches, err := r.repo.FindByPrefix(ctx, imageID)
+func (r *Resolver) ByID(ctx context.Context, imageID string, includeDeleted ...bool) (*model.ImageItem, error) {
+	matches, err := r.repo.FindByPrefix(ctx, imageID, includeDeleted...)
 	if err != nil {
 		return nil, fmt.Errorf("resolve image by ID: %w", err)
 	}
@@ -119,8 +119,8 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.ImageItem, error) {
 }
 
 // ByName resolves by display name.
-func (r *Resolver) ByName(ctx context.Context, name string) (*model.ImageItem, error) {
-	dbImage, err := r.repo.GetByName(ctx, name)
+func (r *Resolver) ByName(ctx context.Context, name string, includeDeleted ...bool) (*model.ImageItem, error) {
+	dbImage, err := r.repo.GetByName(ctx, name, includeDeleted...)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func isImageNotFoundError(err error) bool {
 // Resolve resolves image by type:version, type, display name, or ID prefix.
 // Only ImageNotFoundError causes fallthrough to the next resolution method
 // — all other errors propagate immediately.
-func (r *Resolver) Resolve(ctx context.Context, value string) (*model.ImageItem, error) {
+func (r *Resolver) Resolve(ctx context.Context, value string, includeDeleted ...bool) (*model.ImageItem, error) {
 	// Try "type:version" selector format first using the shared version parser.
 	name, ver := version.ParseSelector(value)
 	if name != "" && ver != "" {
@@ -166,7 +166,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.ImageItem,
 		return nil, err
 	}
 
-	image, err = r.ByName(ctx, value)
+	image, err = r.ByName(ctx, value, includeDeleted...)
 	if err == nil {
 		return image, nil
 	}
@@ -174,11 +174,11 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.ImageItem,
 		return nil, err
 	}
 
-	return r.ByID(ctx, value)
+	return r.ByID(ctx, value, includeDeleted...)
 }
 
 // ResolveMany resolves multiple image identifiers.
-func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string, includeDeleted ...bool) *ResolveResult {
 	// Dedup input identifiers (e.g. duplicate CLI args) before processing.
 	uniqueIDs := infra.Dedup(identifiers)
 
@@ -187,7 +187,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 	resolvedIDs := make(map[string]bool)
 
 	for _, identifier := range uniqueIDs {
-		item, err := r.Resolve(ctx, identifier)
+		item, err := r.Resolve(ctx, identifier, includeDeleted...)
 		if err != nil {
 			errorsList = append(errorsList, err.Error())
 			continue

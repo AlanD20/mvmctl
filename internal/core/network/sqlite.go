@@ -30,26 +30,36 @@ func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.NetworkItem, er
 	return &n, err
 }
 
-func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.NetworkItem, error) {
+func (r *sqliteRepo) GetByName(ctx context.Context, name string, includeDeleted ...bool) (*model.NetworkItem, error) {
+	query := `SELECT * FROM networks WHERE name = ?`
+	if len(includeDeleted) == 0 || !includeDeleted[0] {
+		query += ` AND deleted_at IS NULL`
+	}
 	var n model.NetworkItem
-	err := r.db.GetContext(ctx, &n,
-		`SELECT * FROM networks WHERE name = ? AND deleted_at IS NULL`, name)
+	err := r.db.GetContext(ctx, &n, query, name)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return &n, err
 }
 
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.NetworkItem, error) {
+func (r *sqliteRepo) FindByPrefix(
+	ctx context.Context,
+	prefix string,
+	includeDeleted ...bool,
+) ([]*model.NetworkItem, error) {
+	query := `SELECT * FROM networks WHERE id LIKE ?`
+	if len(includeDeleted) == 0 || !includeDeleted[0] {
+		query += ` AND deleted_at IS NULL`
+	}
 	var items []*model.NetworkItem
-	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM networks WHERE id LIKE ? AND deleted_at IS NULL`, prefix+"%")
+	return items, r.db.SelectContext(ctx, &items, query, prefix+"%")
 }
 
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.NetworkItem, error) {
 	var items []*model.NetworkItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM networks WHERE deleted_at IS NULL ORDER BY created_at`)
+		`SELECT * FROM networks ORDER BY created_at`)
 }
 
 func (r *sqliteRepo) Upsert(ctx context.Context, n *model.NetworkItem) error {

@@ -78,8 +78,8 @@ func (r *Resolver) enrich(ctx context.Context, binaries []*model.BinaryItem) []*
 }
 
 // ByID resolves a binary by ID prefix.
-func (r *Resolver) ByID(ctx context.Context, binaryID string) (*model.BinaryItem, error) {
-	matches, err := r.repo.FindByPrefix(ctx, binaryID)
+func (r *Resolver) ByID(ctx context.Context, binaryID string, includeDeleted ...bool) (*model.BinaryItem, error) {
+	matches, err := r.repo.FindByPrefix(ctx, binaryID, includeDeleted...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (r *Resolver) GetDefault(ctx context.Context, typ string) (*model.BinaryIte
 }
 
 // Resolve resolves a binary by ID prefix or name (latest version).
-func (r *Resolver) Resolve(ctx context.Context, value string) (*model.BinaryItem, error) {
+func (r *Resolver) Resolve(ctx context.Context, value string, includeDeleted ...bool) (*model.BinaryItem, error) {
 	// Try "type:version" selector format first
 	typ, ver := version.ParseSelector(value)
 	if typ != "" && ver != "" {
@@ -154,7 +154,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.BinaryItem
 	}
 
 	// Try by ID first
-	b, err := r.ByID(ctx, value)
+	b, err := r.ByID(ctx, value, includeDeleted...)
 	if err == nil {
 		return b, nil
 	}
@@ -167,7 +167,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.BinaryItem
 }
 
 // ResolveMany resolves multiple binary identifiers.
-func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string, includeDeleted ...bool) *ResolveResult {
 	// Dedup input identifiers (e.g. duplicate CLI args) before processing.
 	uniqueIDs := infra.Dedup(identifiers)
 
@@ -176,7 +176,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 	resolvedIDs := make(map[string]bool)
 
 	for _, identifier := range uniqueIDs {
-		item, err := r.Resolve(ctx, identifier)
+		item, err := r.Resolve(ctx, identifier, includeDeleted...)
 		if err != nil {
 			var de *errs.DomainError
 			if errors.As(err, &de) && de.Code == errs.CodeBinaryNotFound {

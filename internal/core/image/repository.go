@@ -11,13 +11,14 @@ type Repository interface {
 	// Get returns an image by its full 64-char ID, or nil if not found.
 	Get(ctx context.Context, imageID string) (*model.ImageItem, error)
 	// FindByPrefix returns all images whose ID starts with prefix.
-	FindByPrefix(ctx context.Context, prefix string) ([]*model.ImageItem, error)
+	FindByPrefix(ctx context.Context, prefix string, includeDeleted ...bool) ([]*model.ImageItem, error)
 	// GetByType returns an image by its type, preferring the default, or nil.
 	GetByType(ctx context.Context, imgType string) (*model.ImageItem, error)
 	// GetByVersionAndType returns an image by version and type, or nil.
 	GetByVersionAndType(ctx context.Context, version, imgType string) (*model.ImageItem, error)
 	// GetByName returns an image by its display name, or nil.
-	GetByName(ctx context.Context, name string) (*model.ImageItem, error)
+	// When includeDeleted is true, soft-deleted images are also returned.
+	GetByName(ctx context.Context, name string, includeDeleted ...bool) (*model.ImageItem, error)
 	// Count returns total count of all non-deleted images.
 	Count(ctx context.Context) (int, error)
 	// ListAll returns all non-deleted images ordered by created_at.

@@ -110,7 +110,7 @@ func TestNewCacheInitCmd(t *testing.T) {
 	})
 }
 
-// --- Cache prune (via cache prune) ---
+// --- Cache prune ---
 // Rationale: Cache prune removes stale cache resources. A broken prune command
 // can leave orphaned resources consuming disk space, or fail to free space.
 

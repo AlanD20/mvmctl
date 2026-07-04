@@ -150,7 +150,7 @@ func TestNetworkRepo_ListAll(t *testing.T) {
 	assert.Len(t, got, 2)
 }
 
-func TestNetworkRepo_ListAll_excludesSoftDeleted(t *testing.T) {
+func TestNetworkRepo_ListAll_includesSoftDeleted(t *testing.T) {
 	repo := testutil.NewNetworkRepo()
 	seedNet(t, repo, newNetwork("n-1", "alive", "10.0.0.0/24"))
 	seedNet(t, repo, newNetwork("n-2", "dead", "10.0.1.0/24"))
@@ -158,8 +158,11 @@ func TestNetworkRepo_ListAll_excludesSoftDeleted(t *testing.T) {
 
 	got, err := repo.ListAll(ctx)
 	require.NoError(t, err)
-	assert.Len(t, got, 1)
-	assert.Equal(t, "alive", got[0].Name)
+	// ListAll includes soft-deleted items; both are returned
+	assert.Len(t, got, 2)
+	names := []string{got[0].Name, got[1].Name}
+	assert.Contains(t, names, "alive")
+	assert.Contains(t, names, "dead")
 }
 
 func TestNetworkRepo_Count(t *testing.T) {

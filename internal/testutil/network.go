@@ -39,25 +39,33 @@ func (r *NetworkRepo) Get(_ context.Context, id string) (*model.NetworkItem, err
 	return n, nil
 }
 
-// GetByName returns a network by name. Returns nil if soft-deleted.
-func (r *NetworkRepo) GetByName(_ context.Context, name string) (*model.NetworkItem, error) {
+// GetByName returns a network by name. When includeDeleted is true, soft-deleted
+// networks are also returned.
+func (r *NetworkRepo) GetByName(_ context.Context, name string, includeDeleted ...bool) (*model.NetworkItem, error) {
+	checkDeleted := len(includeDeleted) == 0 || !includeDeleted[0]
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, n := range r.networks {
-		if n.Name == name && r.isNotDeleted(n) {
+		if n.Name == name && (!checkDeleted || r.isNotDeleted(n)) {
 			return n, nil
 		}
 	}
 	return nil, nil
 }
 
-// FindByPrefix returns all non-deleted networks whose ID starts with prefix.
-func (r *NetworkRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.NetworkItem, error) {
+// FindByPrefix returns networks whose ID starts with prefix.
+// When includeDeleted is true, soft-deleted networks are also returned.
+func (r *NetworkRepo) FindByPrefix(
+	_ context.Context,
+	prefix string,
+	includeDeleted ...bool,
+) ([]*model.NetworkItem, error) {
+	checkDeleted := len(includeDeleted) == 0 || !includeDeleted[0]
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.NetworkItem
 	for _, n := range r.networks {
-		if r.isNotDeleted(n) && len(n.ID) >= len(prefix) && n.ID[:len(prefix)] == prefix {
+		if (!checkDeleted || r.isNotDeleted(n)) && len(n.ID) >= len(prefix) && n.ID[:len(prefix)] == prefix {
 			result = append(result, n)
 		}
 	}
@@ -80,15 +88,13 @@ func (r *NetworkRepo) Count(_ context.Context) (int, error) {
 	return count, nil
 }
 
-// ListAll returns all non-deleted networks ordered by created_at.
+// ListAll returns all networks ordered by created_at.
 func (r *NetworkRepo) ListAll(_ context.Context) ([]*model.NetworkItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.NetworkItem
 	for _, n := range r.networks {
-		if r.isNotDeleted(n) {
-			result = append(result, n)
-		}
+		result = append(result, n)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].CreatedAt < result[j].CreatedAt

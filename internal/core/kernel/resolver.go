@@ -71,8 +71,8 @@ func (r *Resolver) Enrich(ctx context.Context, kernels []*model.KernelItem) []*m
 }
 
 // ByID resolves a kernel by ID prefix.
-func (r *Resolver) ByID(ctx context.Context, kernelID string) (*model.KernelItem, error) {
-	matches, err := r.repo.FindByPrefix(ctx, kernelID)
+func (r *Resolver) ByID(ctx context.Context, kernelID string, includeDeleted ...bool) (*model.KernelItem, error) {
+	matches, err := r.repo.FindByPrefix(ctx, kernelID, includeDeleted...)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +149,7 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.KernelItem, error) {
 }
 
 // Resolve resolves a kernel by ID prefix, "[type:]version" selector, or file path.
-func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem, error) {
+func (r *Resolver) Resolve(ctx context.Context, value string, includeDeleted ...bool) (*model.KernelItem, error) {
 	// Try "name:version" selector format first (matches binary resolver pattern)
 	name, ver := version.ParseSelector(value)
 	if name != "" && ver != "" {
@@ -169,10 +169,13 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 		)
 	}
 
-	// Try by ID prefix without enrichment
-	k, err := r.byIDRaw(ctx, value)
-	if err == nil && k != nil {
-		return r.Enrich(ctx, []*model.KernelItem{k})[0], nil
+	// Try by ID prefix
+	k, err := r.ByID(ctx, value, includeDeleted...)
+	if err == nil {
+		return k, nil
+	}
+	if !errs.IsNotFound(err) {
+		return nil, err
 	}
 
 	// Try by type
@@ -194,7 +197,7 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.KernelItem
 }
 
 // ResolveMany resolves multiple kernel identifiers.
-func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *ResolveResult {
+func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string, includeDeleted ...bool) *ResolveResult {
 	// Dedup input identifiers (e.g. duplicate CLI args) before processing.
 	uniqueIDs := infra.Dedup(identifiers)
 
@@ -203,7 +206,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) *Resol
 	resolvedIDs := make(map[string]bool)
 
 	for _, identifier := range uniqueIDs {
-		item, err := r.Resolve(ctx, identifier)
+		item, err := r.Resolve(ctx, identifier, includeDeleted...)
 		if err != nil {
 			errors = append(errors, err.Error())
 		} else if !resolvedIDs[item.ID] {
@@ -255,21 +258,3 @@ func (r *Resolver) ItemFromPath(path string) *model.KernelItem {
 	}
 }
 
-// byIDRaw resolves by ID prefix without enrichment.
-func (r *Resolver) byIDRaw(ctx context.Context, kernelID string) (*model.KernelItem, error) {
-	matches, err := r.repo.FindByPrefix(ctx, kernelID)
-	if err != nil {
-		return nil, err
-	}
-	if len(matches) == 0 {
-		return nil, nil
-	}
-	if len(matches) > 1 {
-		return nil, errs.New(
-			errs.CodeKernelNotFound,
-			fmt.Sprintf("Kernel ID is ambiguous: '%s'", kernelID),
-			errs.WithClass(errs.ClassInternal),
-		)
-	}
-	return matches[0], nil
-}

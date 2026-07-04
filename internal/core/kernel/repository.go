@@ -10,7 +10,7 @@ type Repository interface {
 	// Get returns a kernel by its full 64-char ID, or nil if not found.
 	Get(ctx context.Context, id string) (*model.KernelItem, error)
 	// FindByPrefix returns all kernels whose ID starts with prefix.
-	FindByPrefix(ctx context.Context, prefix string) ([]*model.KernelItem, error)
+	FindByPrefix(ctx context.Context, prefix string, includeDeleted ...bool) ([]*model.KernelItem, error)
 	// Count returns total count of all non-deleted kernels.
 	Count(ctx context.Context) (int, error)
 	// ListAll returns all non-deleted kernels ordered by created_at.
@@ -26,7 +26,8 @@ type Repository interface {
 	// GetDefault returns the default kernel, or nil if not set.
 	GetDefault(ctx context.Context) (*model.KernelItem, error)
 	// GetByName returns a kernel by its name, or nil.
-	GetByName(ctx context.Context, name string) (*model.KernelItem, error)
+	// When includeDeleted is true, soft-deleted kernels are also returned.
+	GetByName(ctx context.Context, name string, includeDeleted ...bool) (*model.KernelItem, error)
 	// GetByType returns a kernel by its type, or nil.
 	GetByType(ctx context.Context, kernelType string) (*model.KernelItem, error)
 	// GetByVersionAndType returns a kernel by version and type, or nil.

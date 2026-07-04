@@ -23,7 +23,12 @@ var imageColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.ImageItem).IsDefault) }},
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.ImageItem).ID) }},
 	{Header: "Name", Extract: func(v any) string {
-		return common.Cli.FormatName(v.(*model.ImageItem).Name, !v.(*model.ImageItem).IsPresent)
+		item := v.(*model.ImageItem)
+		name := item.Name
+		if item.DeletedAt != nil {
+			name += " [x]"
+		}
+		return common.Cli.FormatName(name, item.DeletedAt != nil)
 	}},
 	{Header: "Version", Extract: func(v any) string { return v.(*model.ImageItem).Version }},
 	{Header: "Type", Extract: func(v any) string { return v.(*model.ImageItem).Type }},
@@ -261,7 +266,7 @@ Examples:
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeImageIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result := imageAPI.ImageRemove(cmd.Context(), inputs.ImageInput{Identifiers: args}, force)
+			result := imageAPI.ImageRemove(cmd.Context(), inputs.ImageInput{Identifiers: args, IncludeDeleted: true}, force)
 			for _, r := range result.Items {
 				itemID := "unknown"
 				if r.Item != nil {

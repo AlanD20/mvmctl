@@ -30,22 +30,32 @@ func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.KernelItem, err
 	return &k, err
 }
 
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.KernelItem, error) {
+func (r *sqliteRepo) FindByPrefix(
+	ctx context.Context,
+	prefix string,
+	includeDeleted ...bool,
+) ([]*model.KernelItem, error) {
+	query := `SELECT * FROM kernels WHERE id LIKE ?`
+	if len(includeDeleted) == 0 || !includeDeleted[0] {
+		query += ` AND deleted_at IS NULL`
+	}
 	var items []*model.KernelItem
-	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM kernels WHERE id LIKE ? AND deleted_at IS NULL `, prefix+"%")
+	return items, r.db.SelectContext(ctx, &items, query, prefix+"%")
 }
 
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.KernelItem, error) {
 	var items []*model.KernelItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM kernels WHERE deleted_at IS NULL ORDER BY created_at`)
+		`SELECT * FROM kernels ORDER BY created_at`)
 }
 
-func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.KernelItem, error) {
+func (r *sqliteRepo) GetByName(ctx context.Context, name string, includeDeleted ...bool) (*model.KernelItem, error) {
+	query := `SELECT * FROM kernels WHERE name = ?`
+	if len(includeDeleted) == 0 || !includeDeleted[0] {
+		query += ` AND deleted_at IS NULL`
+	}
 	var k model.KernelItem
-	err := r.db.GetContext(ctx, &k,
-		`SELECT * FROM kernels WHERE name = ? AND deleted_at IS NULL `, name)
+	err := r.db.GetContext(ctx, &k, query, name)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

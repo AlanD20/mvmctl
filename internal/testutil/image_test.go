@@ -87,9 +87,9 @@ func TestImageRepo_SoftDelete(t *testing.T) {
 	assert.False(t, got.IsPresent)
 	assert.NotNil(t, got.DeletedAt)
 
-	// But ListAll filters them out
+	// ListAll includes soft-deleted items
 	list, _ := repo.ListAll(ctx)
-	assert.Empty(t, list)
+	assert.Len(t, list, 1)
 }
 
 func TestImageRepo_EmptyState(t *testing.T) {

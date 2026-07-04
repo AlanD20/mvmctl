@@ -11,7 +11,7 @@ type Repository interface {
 	// Get returns a binary by its full 64-char ID, or nil if not found.
 	Get(ctx context.Context, id string) (*model.BinaryItem, error)
 	// FindByPrefix returns all binaries whose ID starts with prefix.
-	FindByPrefix(ctx context.Context, prefix string) ([]*model.BinaryItem, error)
+	FindByPrefix(ctx context.Context, prefix string, includeDeleted ...bool) ([]*model.BinaryItem, error)
 	// ListAll returns all non-deleted binaries ordered by created_at.
 	ListAll(ctx context.Context) ([]*model.BinaryItem, error)
 	// ListByType returns all binaries with a given type.

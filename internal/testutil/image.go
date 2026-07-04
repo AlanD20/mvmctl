@@ -38,12 +38,14 @@ func (r *ImageRepo) Get(_ context.Context, id string) (*model.ImageItem, error) 
 }
 
 // FindByPrefix returns images whose ID starts with prefix.
-func (r *ImageRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.ImageItem, error) {
+// When includeDeleted is true, soft-deleted images are also returned.
+func (r *ImageRepo) FindByPrefix(_ context.Context, prefix string, includeDeleted ...bool) ([]*model.ImageItem, error) {
+	checkDeleted := len(includeDeleted) == 0 || !includeDeleted[0]
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.ImageItem
 	for _, img := range r.images {
-		if r.isNotDeleted(img) && len(img.ID) >= len(prefix) && img.ID[:len(prefix)] == prefix {
+		if (!checkDeleted || r.isNotDeleted(img)) && len(img.ID) >= len(prefix) && img.ID[:len(prefix)] == prefix {
 			result = append(result, img)
 		}
 	}
@@ -88,27 +90,27 @@ func (r *ImageRepo) GetByVersionAndType(_ context.Context, version, imgType stri
 	return nil, nil
 }
 
-// GetByName returns an image by name.
-func (r *ImageRepo) GetByName(_ context.Context, name string) (*model.ImageItem, error) {
+// GetByName returns an image by name. When includeDeleted is true, soft-deleted
+// images are also returned.
+func (r *ImageRepo) GetByName(_ context.Context, name string, includeDeleted ...bool) (*model.ImageItem, error) {
+	checkDeleted := len(includeDeleted) == 0 || !includeDeleted[0]
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, img := range r.images {
-		if img.Name == name && r.isNotDeleted(img) {
+		if img.Name == name && (!checkDeleted || r.isNotDeleted(img)) {
 			return img, nil
 		}
 	}
 	return nil, nil
 }
 
-// ListAll returns all non-deleted images ordered by created_at.
+// ListAll returns all images ordered by created_at.
 func (r *ImageRepo) ListAll(_ context.Context) ([]*model.ImageItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.ImageItem
 	for _, img := range r.images {
-		if img.DeletedAt == nil {
-			result = append(result, img)
-		}
+		result = append(result, img)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].CreatedAt < result[j].CreatedAt

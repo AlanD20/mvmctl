@@ -28,10 +28,17 @@ func (r *sqliteRepo) Get(ctx context.Context, imageID string) (*model.ImageItem,
 	return &img, err
 }
 
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.ImageItem, error) {
+func (r *sqliteRepo) FindByPrefix(
+	ctx context.Context,
+	prefix string,
+	includeDeleted ...bool,
+) ([]*model.ImageItem, error) {
+	query := `SELECT * FROM images WHERE id LIKE ?`
+	if len(includeDeleted) == 0 || !includeDeleted[0] {
+		query += ` AND deleted_at IS NULL`
+	}
 	var items []*model.ImageItem
-	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM images WHERE id LIKE ? AND deleted_at IS NULL `, prefix+"%")
+	return items, r.db.SelectContext(ctx, &items, query, prefix+"%")
 }
 
 func (r *sqliteRepo) GetByType(ctx context.Context, imgType string) (*model.ImageItem, error) {
@@ -63,10 +70,13 @@ func (r *sqliteRepo) GetByVersionAndType(ctx context.Context, version, imgType s
 	return &img, err
 }
 
-func (r *sqliteRepo) GetByName(ctx context.Context, name string) (*model.ImageItem, error) {
+func (r *sqliteRepo) GetByName(ctx context.Context, name string, includeDeleted ...bool) (*model.ImageItem, error) {
+	query := `SELECT * FROM images WHERE name = ?`
+	if len(includeDeleted) == 0 || !includeDeleted[0] {
+		query += ` AND deleted_at IS NULL`
+	}
 	var img model.ImageItem
-	err := r.db.GetContext(ctx, &img,
-		`SELECT * FROM images WHERE name = ? AND deleted_at IS NULL `, name)
+	err := r.db.GetContext(ctx, &img, query, name)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -81,7 +91,7 @@ func (r *sqliteRepo) Count(ctx context.Context) (int, error) {
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.ImageItem, error) {
 	var items []*model.ImageItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM images WHERE deleted_at IS NULL ORDER BY created_at`)
+		`SELECT * FROM images ORDER BY created_at`)
 }
 
 func (r *sqliteRepo) Upsert(ctx context.Context, img *model.ImageItem) error {

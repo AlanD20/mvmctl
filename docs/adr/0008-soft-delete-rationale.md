@@ -1,22 +1,27 @@
 # Soft-Delete Rationale: When It Applies
 
 **Status:** Active
-**Date:** 2026-05-22
+**Date:** 2026-07-03
 
 **Table of Contents**
 
 - [Where soft-delete is used](#where-soft-delete-is-used)
 - [Where it is NOT used](#where-it-is-not-used)
 - [Rule](#rule)
+- [Visibility and cleanup](#visibility-and-cleanup)
 
 ## Where soft-delete is used
 
-The following repositories implement soft-delete (setting `deleted_at` timestamp + filtering by `deleted_at IS NULL`):
+The following repositories implement soft-delete (setting `deleted_at` timestamp):
 
 - `image.Repository`
 - `kernel.Repository`
 - `binary.Repository`
 - `network.Repository`
+
+Soft-delete is triggered when `--force` is used to remove a resource that is
+still referenced by VMs or snapshots. Instead of hard-deleting (which would
+orphan the references), the row is marked with `deleted_at` and `is_present = 0`.
 
 ## Where it is NOT used
 
@@ -33,3 +38,16 @@ Soft-delete is used for **downloadable/cacheable assets** that can be re-fetched
 1. **Runtime state** (VMs) — lifecycle is process-bound
 2. **Local data** (volumes, keys) — files on disk with no remote source
 3. **Configuration** (settings, host state) — singleton or key-value
+
+## Visibility and cleanup
+
+Soft-deleted resources are **visible in listings** with a `[x]` suffix in
+red, so operators can see orphaned state. Previously these were hidden behind
+`WHERE deleted_at IS NULL` in `ListAll` queries.
+
+Cleanup options:
+- **`mvm cache prune --all`** — removes all unused resources including orphaned
+  soft-deleted records. Already handles networks; kernel/image/binary follow the
+  same pattern.
+- **`mvm net|image|kernel|bin rm <name>`** — the CLI sets `IncludeDeleted: true` on the
+  input, so the resolver includes soft-deleted resources and hard-deletes the orphan.

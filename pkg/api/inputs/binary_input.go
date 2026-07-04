@@ -10,8 +10,9 @@ import (
 
 // BinaryInput specifies binary input.
 type BinaryInput struct {
-	Identifiers []string `json:"identifiers,omitempty"`
-	Version     *string  `json:"version,omitempty"`
+	Identifiers    []string `json:"identifiers,omitempty"`
+	Version        *string  `json:"version,omitempty"`
+	IncludeDeleted bool     `json:"include_deleted"`
 }
 
 // Validate checks that the binary input has valid identifiers.
@@ -35,7 +36,7 @@ func (i *BinaryInput) Resolve(ctx context.Context, repo binary.Repository) ([]*m
 		return nil, err
 	}
 	resolver := binary.NewResolver(repo)
-	result := resolver.ResolveMany(ctx, i.Identifiers)
+	result := resolver.ResolveMany(ctx, i.Identifiers, i.IncludeDeleted)
 	if result == nil || len(result.Items) == 0 {
 		return nil, errs.NotFound(errs.CodeBinaryNotFound, "No binary identifiers provided or could be resolved")
 	}

@@ -22,7 +22,12 @@ var networkColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.NetworkItem).IsDefault) }},
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.NetworkItem).ID) }},
 	{Header: "Name", Extract: func(v any) string {
-		return common.Cli.FormatName(v.(*model.NetworkItem).Name, !v.(*model.NetworkItem).IsPresent)
+		item := v.(*model.NetworkItem)
+		name := item.Name
+		if item.DeletedAt != nil {
+			name += " [x]"
+		}
+		return common.Cli.FormatName(name, item.DeletedAt != nil)
 	}},
 	{Header: "Subnet", Extract: func(v any) string { return v.(*model.NetworkItem).Subnet }},
 	{Header: "NAT", Extract: func(v any) string {
@@ -222,7 +227,7 @@ func newNetworkRemoveCmd(networkAPI api.NetworkAPI) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			err := networkAPI.NetworkRemove(cmd.Context(), inputs.NetworkInput{Identifiers: args}, force)
+			err := networkAPI.NetworkRemove(cmd.Context(), inputs.NetworkInput{Identifiers: args, IncludeDeleted: true}, force)
 			if err != nil {
 				return fmt.Errorf("remove failed: %w", err)
 			}

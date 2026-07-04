@@ -11,8 +11,9 @@ import (
 
 // KernelInput is the raw input for identifying existing kernels.
 type KernelInput struct {
-	Identifiers []string `json:"identifiers"`
-	Force       bool     `json:"force"`
+	Identifiers    []string `json:"identifiers"`
+	Force          bool     `json:"force"`
+	IncludeDeleted bool     `json:"include_deleted"`
 }
 
 // Validate checks that the kernel input has valid identifiers.
@@ -36,7 +37,7 @@ func (i *KernelInput) Resolve(ctx context.Context, repo kernel.Repository) ([]*m
 		return nil, err
 	}
 	resolver := kernel.NewResolver(repo, nil)
-	result := resolver.ResolveMany(ctx, i.Identifiers)
+	result := resolver.ResolveMany(ctx, i.Identifiers, i.IncludeDeleted)
 	if len(result.Items) == 0 {
 		return nil, errs.NotFound(errs.CodeKernelNotFound, "No kernels found matching identifiers")
 	}

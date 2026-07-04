@@ -29,6 +29,12 @@ var binaryColumns = []common.ListingColumn{
 		}
 		return fv
 	}, LongOnly: true},
+	{Header: "Status", Extract: func(v any) string {
+		if v.(*model.BinaryItem).DeletedAt != nil {
+			return "[x]"
+		}
+		return ""
+	}, LongOnly: true},
 	{
 		Header:  "Created",
 		Extract: func(v any) string { return common.Cli.FormatTimestamp(v.(*model.BinaryItem).CreatedAt, "relative") },
@@ -254,7 +260,7 @@ func newBinaryRemoveCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			batchResult := binaryAPI.BinaryRemove(cmd.Context(), inputs.BinaryInput{Identifiers: args}, force)
+			batchResult := binaryAPI.BinaryRemove(cmd.Context(), inputs.BinaryInput{Identifiers: args, IncludeDeleted: true}, force)
 			for _, r := range batchResult.Items {
 				if r.Status == "success" {
 					msg := r.Message

@@ -10,7 +10,8 @@ import (
 
 // ImageInput is the raw input for identifying existing images.
 type ImageInput struct {
-	Identifiers []string `json:"identifiers"`
+	Identifiers    []string `json:"identifiers"`
+	IncludeDeleted bool     `json:"include_deleted"`
 }
 
 // Validate checks that the image input has valid identifiers.
@@ -34,7 +35,7 @@ func (i *ImageInput) Resolve(ctx context.Context, repo image.Repository) ([]*mod
 		return nil, err
 	}
 	resolver := image.NewResolver(repo)
-	result := resolver.ResolveMany(ctx, i.Identifiers)
+	result := resolver.ResolveMany(ctx, i.Identifiers, i.IncludeDeleted)
 	if result == nil || len(result.Items) == 0 {
 		return nil, errs.NotFound(errs.CodeImageNotFound, "No images found matching identifiers")
 	}

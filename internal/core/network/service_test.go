@@ -912,9 +912,12 @@ func TestService_ListAll_verify(t *testing.T) {
 		svc := network.NewService(netRepo, nil)
 		got, err := svc.ListAll(ctx, true)
 		require.NoError(t, err)
-		// The alive network should still be listed, gone should not
-		assert.Len(t, got, 1)
+		// Both networks are listed; the one with missing bridge is marked not present
+		assert.Len(t, got, 2)
 		assert.Equal(t, "n-1", got[0].ID)
+		assert.True(t, got[0].IsPresent)
+		assert.Equal(t, "n-2", got[1].ID)
+		assert.False(t, got[1].IsPresent)
 	})
 
 	t.Run("no_missing_bridges_passthrough", func(t *testing.T) {

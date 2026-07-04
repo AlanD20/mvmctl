@@ -30,16 +30,23 @@ func (r *sqliteRepo) Get(ctx context.Context, id string) (*model.BinaryItem, err
 	return &b, err
 }
 
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.BinaryItem, error) {
+func (r *sqliteRepo) FindByPrefix(
+	ctx context.Context,
+	prefix string,
+	includeDeleted ...bool,
+) ([]*model.BinaryItem, error) {
+	query := `SELECT * FROM binaries WHERE id LIKE ?`
+	if len(includeDeleted) == 0 || !includeDeleted[0] {
+		query += ` AND deleted_at IS NULL`
+	}
 	var items []*model.BinaryItem
-	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM binaries WHERE id LIKE ? AND deleted_at IS NULL `, prefix+"%")
+	return items, r.db.SelectContext(ctx, &items, query, prefix+"%")
 }
 
 func (r *sqliteRepo) ListAll(ctx context.Context) ([]*model.BinaryItem, error) {
 	var items []*model.BinaryItem
 	return items, r.db.SelectContext(ctx, &items,
-		`SELECT * FROM binaries WHERE deleted_at IS NULL ORDER BY created_at`)
+		`SELECT * FROM binaries ORDER BY created_at`)
 }
 
 func (r *sqliteRepo) ListByType(ctx context.Context, typ string) ([]*model.BinaryItem, error) {

@@ -38,13 +38,19 @@ func (r *BinaryRepo) Get(_ context.Context, id string) (*model.BinaryItem, error
 	return b, nil
 }
 
-// FindByPrefix returns all non-deleted binaries whose ID starts with prefix.
-func (r *BinaryRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.BinaryItem, error) {
+// FindByPrefix returns binaries whose ID starts with prefix.
+// When includeDeleted is true, soft-deleted binaries are also returned.
+func (r *BinaryRepo) FindByPrefix(
+	_ context.Context,
+	prefix string,
+	includeDeleted ...bool,
+) ([]*model.BinaryItem, error) {
+	checkDeleted := len(includeDeleted) == 0 || !includeDeleted[0]
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.BinaryItem
 	for _, b := range r.binaries {
-		if r.isNotDeleted(b) && len(b.ID) >= len(prefix) && b.ID[:len(prefix)] == prefix {
+		if (!checkDeleted || r.isNotDeleted(b)) && len(b.ID) >= len(prefix) && b.ID[:len(prefix)] == prefix {
 			result = append(result, b)
 		}
 	}
@@ -54,15 +60,13 @@ func (r *BinaryRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.Bi
 	return result, nil
 }
 
-// ListAll returns all non-deleted binaries ordered by created_at.
+// ListAll returns all binaries ordered by created_at.
 func (r *BinaryRepo) ListAll(_ context.Context) ([]*model.BinaryItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.BinaryItem
 	for _, b := range r.binaries {
-		if b.DeletedAt == nil {
-			result = append(result, b)
-		}
+		result = append(result, b)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].CreatedAt < result[j].CreatedAt

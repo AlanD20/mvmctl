@@ -21,7 +21,12 @@ var kernelColumns = []common.ListingColumn{
 	{Header: "", Extract: func(v any) string { return common.Cli.FormatMarker(v.(*model.KernelItem).IsDefault) }},
 	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*model.KernelItem).ID) }},
 	{Header: "Name", Extract: func(v any) string {
-		return common.Cli.FormatName(v.(*model.KernelItem).BaseName, !v.(*model.KernelItem).IsPresent)
+		item := v.(*model.KernelItem)
+		name := item.BaseName
+		if item.DeletedAt != nil {
+			name += " [x]"
+		}
+		return common.Cli.FormatName(name, item.DeletedAt != nil)
 	}},
 	{Header: "Version", Extract: func(v any) string { return v.(*model.KernelItem).Version }},
 	{Header: "Type", Extract: func(v any) string { return v.(*model.KernelItem).Type }},
@@ -237,7 +242,7 @@ func newKernelRemoveCmd(kernelAPI api.KernelAPI) *cobra.Command {
 			if len(args) == 0 {
 				return fmt.Errorf("usage error")
 			}
-			result := kernelAPI.KernelRemove(cmd.Context(), inputs.KernelInput{Identifiers: args, Force: force})
+			result := kernelAPI.KernelRemove(cmd.Context(), inputs.KernelInput{Identifiers: args, Force: force, IncludeDeleted: true})
 			for _, item := range result.Items {
 				if item.IsOK() {
 					msg := item.Message

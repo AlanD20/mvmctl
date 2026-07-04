@@ -58,8 +58,8 @@ func (r *Resolver) EnrichWithRelations(ctx context.Context, networks []*model.Ne
 	return r.enrich(ctx, networks)
 }
 
-func (r *Resolver) ByID(ctx context.Context, networkID string) (*model.NetworkItem, error) {
-	matches, err := r.repo.FindByPrefix(ctx, networkID)
+func (r *Resolver) ByID(ctx context.Context, networkID string, includeDeleted ...bool) (*model.NetworkItem, error) {
+	matches, err := r.repo.FindByPrefix(ctx, networkID, includeDeleted...)
 	if err != nil {
 		return nil, err
 	}
@@ -73,8 +73,8 @@ func (r *Resolver) ByID(ctx context.Context, networkID string) (*model.NetworkIt
 	return r.enrich(ctx, matches)[0], nil
 }
 
-func (r *Resolver) ByName(ctx context.Context, name string) (*model.NetworkItem, error) {
-	network, err := r.repo.GetByName(ctx, name)
+func (r *Resolver) ByName(ctx context.Context, name string, includeDeleted ...bool) (*model.NetworkItem, error) {
+	network, err := r.repo.GetByName(ctx, name, includeDeleted...)
 	if err != nil {
 		return nil, err
 	}
@@ -95,17 +95,17 @@ func (r *Resolver) GetDefault(ctx context.Context) (*model.NetworkItem, error) {
 	return r.enrich(ctx, []*model.NetworkItem{network})[0], nil
 }
 
-func (r *Resolver) Resolve(ctx context.Context, value string) (*model.NetworkItem, error) {
+func (r *Resolver) Resolve(ctx context.Context, value string, includeDeleted ...bool) (*model.NetworkItem, error) {
 	// Try by name first, then by ID prefix
 	// from by_name — any other error (DB error, etc.) propagates immediately.
-	network, err := r.ByName(ctx, value)
+	network, err := r.ByName(ctx, value, includeDeleted...)
 	if err == nil {
 		return network, nil
 	}
 	if !errs.IsNotFound(err) {
 		return nil, err // propagate non-not-found errors
 	}
-	network, err2 := r.ByID(ctx, value)
+	network, err2 := r.ByID(ctx, value, includeDeleted...)
 	if err2 == nil {
 		return network, nil
 	}
@@ -113,7 +113,11 @@ func (r *Resolver) Resolve(ctx context.Context, value string) (*model.NetworkIte
 	return nil, err2
 }
 
-func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*ResolveResult, error) {
+func (r *Resolver) ResolveMany(
+	ctx context.Context,
+	identifiers []string,
+	includeDeleted ...bool,
+) (*ResolveResult, error) {
 	uniqueIDs := infra.Dedup(identifiers)
 
 	var items []*model.NetworkItem
@@ -121,7 +125,7 @@ func (r *Resolver) ResolveMany(ctx context.Context, identifiers []string) (*Reso
 	resolvedIDs := make(map[string]bool)
 
 	for _, identifier := range uniqueIDs {
-		item, err := r.Resolve(ctx, identifier)
+		item, err := r.Resolve(ctx, identifier, includeDeleted...)
 		if err != nil {
 			errorsList = append(errorsList, err.Error())
 			continue

@@ -92,6 +92,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm env spec parsing`
 - Replaced custom `UnmarshalYAML` with `yaml:",inline"` on `Steps` map for automatic parsing.
 
+#### `mvm net / image / kernel / bin rm`
+- `rm` on a soft-deleted resource (orphan) now hard-deletes it instead of returning "not found". The resolver chain now threads `includeDeleted` from input → resolver → repo, so remove operations can resolve orphaned resources.
+
+### Changed
+
+#### Listing visibility for soft-deleted resources
+- Networks, images, kernels, and binaries with `deleted_at` set are now shown in listings with a `[x]` suffix in red, instead of being hidden.
+- Binaries show a `Status` column in long mode (`--long`) indicating "deleted".
+- `ListAll` SQL no longer filters `WHERE deleted_at IS NULL` — returns all records.
+- `GetByName` and `FindByPrefix` accept an optional `includeDeleted` parameter (default `false`). Resolvers thread this through so individual operations can opt in to resolving deleted resources.
+
+
 ### Fixed
 
 #### `mvm vm create`

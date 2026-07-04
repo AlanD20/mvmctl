@@ -11,8 +11,8 @@ import (
 // Repository — database operations for networks.
 type Repository interface {
 	Get(ctx context.Context, networkID string) (*model.NetworkItem, error)
-	GetByName(ctx context.Context, name string) (*model.NetworkItem, error)
-	FindByPrefix(ctx context.Context, prefix string) ([]*model.NetworkItem, error)
+	GetByName(ctx context.Context, name string, includeDeleted ...bool) (*model.NetworkItem, error)
+	FindByPrefix(ctx context.Context, prefix string, includeDeleted ...bool) ([]*model.NetworkItem, error)
 	Count(ctx context.Context) (int, error)
 	ListAll(ctx context.Context) ([]*model.NetworkItem, error)
 	Upsert(ctx context.Context, network *model.NetworkItem) error

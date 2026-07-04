@@ -27,14 +27,16 @@ import (
 type fakeRepo struct{}
 
 func (fakeRepo) Get(_ context.Context, _ string) (*model.ImageItem, error) { return nil, nil }
-func (fakeRepo) FindByPrefix(_ context.Context, _ string) ([]*model.ImageItem, error) {
+func (fakeRepo) FindByPrefix(_ context.Context, _ string, _ ...bool) ([]*model.ImageItem, error) {
 	return nil, nil
 }
 func (fakeRepo) GetByType(_ context.Context, _ string) (*model.ImageItem, error) { return nil, nil }
 func (fakeRepo) GetByVersionAndType(_ context.Context, _, _ string) (*model.ImageItem, error) {
 	return nil, nil
 }
-func (fakeRepo) GetByName(_ context.Context, _ string) (*model.ImageItem, error) { return nil, nil }
+func (fakeRepo) GetByName(_ context.Context, _ string, _ ...bool) (*model.ImageItem, error) {
+	return nil, nil
+}
 func (fakeRepo) Count(_ context.Context) (int, error)                            { return 0, nil }
 func (fakeRepo) ListAll(_ context.Context) ([]*model.ImageItem, error)           { return nil, nil }
 func (fakeRepo) Upsert(_ context.Context, _ *model.ImageItem) error              { return nil }

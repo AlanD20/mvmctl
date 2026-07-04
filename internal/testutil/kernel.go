@@ -37,13 +37,19 @@ func (r *KernelRepo) Get(_ context.Context, id string) (*model.KernelItem, error
 	return k, nil
 }
 
-// FindByPrefix returns all non-deleted kernels whose ID starts with prefix.
-func (r *KernelRepo) FindByPrefix(_ context.Context, prefix string) ([]*model.KernelItem, error) {
+// FindByPrefix returns kernels whose ID starts with prefix.
+// When includeDeleted is true, soft-deleted kernels are also returned.
+func (r *KernelRepo) FindByPrefix(
+	_ context.Context,
+	prefix string,
+	includeDeleted ...bool,
+) ([]*model.KernelItem, error) {
+	checkDeleted := len(includeDeleted) == 0 || !includeDeleted[0]
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.KernelItem
 	for _, k := range r.kernels {
-		if r.isNotDeleted(k) && len(k.ID) >= len(prefix) && k.ID[:len(prefix)] == prefix {
+		if (!checkDeleted || r.isNotDeleted(k)) && len(k.ID) >= len(prefix) && k.ID[:len(prefix)] == prefix {
 			result = append(result, k)
 		}
 	}
@@ -66,15 +72,13 @@ func (r *KernelRepo) Count(_ context.Context) (int, error) {
 	return count, nil
 }
 
-// ListAll returns all non-deleted kernels ordered by created_at.
+// ListAll returns all kernels ordered by created_at.
 func (r *KernelRepo) ListAll(_ context.Context) ([]*model.KernelItem, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var result []*model.KernelItem
 	for _, k := range r.kernels {
-		if k.DeletedAt == nil {
-			result = append(result, k)
-		}
+		result = append(result, k)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].CreatedAt < result[j].CreatedAt
@@ -137,12 +141,14 @@ func (r *KernelRepo) GetDefault(_ context.Context) (*model.KernelItem, error) {
 	return nil, nil
 }
 
-// GetByName returns a kernel by name.
-func (r *KernelRepo) GetByName(_ context.Context, name string) (*model.KernelItem, error) {
+// GetByName returns a kernel by name. When includeDeleted is true, soft-deleted
+// kernels are also returned.
+func (r *KernelRepo) GetByName(_ context.Context, name string, includeDeleted ...bool) (*model.KernelItem, error) {
+	checkDeleted := len(includeDeleted) == 0 || !includeDeleted[0]
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, k := range r.kernels {
-		if k.Name == name && r.isNotDeleted(k) {
+		if k.Name == name && (!checkDeleted || r.isNotDeleted(k)) {
 			return k, nil
 		}
 	}

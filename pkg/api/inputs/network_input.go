@@ -11,8 +11,9 @@ import (
 
 // NetworkInput is the raw input for identifying existing networks.
 type NetworkInput struct {
-	Identifiers []string `json:"identifiers"`
-	Force       bool     `json:"force"`
+	Identifiers    []string `json:"identifiers"`
+	Force          bool     `json:"force"`
+	IncludeDeleted bool     `json:"include_deleted"`
 }
 
 // Validate checks that the network input has valid identifiers.
@@ -31,7 +32,7 @@ func (i *NetworkInput) Resolve(ctx context.Context, repo network.Repository) ([]
 		return nil, err
 	}
 	resolver := network.NewResolver(repo, []string{"leases"})
-	result, err := resolver.ResolveMany(ctx, i.Identifiers)
+	result, err := resolver.ResolveMany(ctx, i.Identifiers, i.IncludeDeleted)
 	if err != nil {
 		return nil, errs.New(errs.CodeNetworkNotFound, err.Error())
 	}
