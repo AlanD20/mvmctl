@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm env`
 - New `image_import` step type for importing local images and VM rootfs in environment specs.
 - Exec/SSH steps now support `ignore_errors: true` to continue on non-zero exit codes.
-- `image_import` destroy now removes the imported image from the database and disk.
+- `image_import` destroy is a no-op — imported images persist in the database and on disk.
 - All steps now support `removes` field to destroy resources mid-pipeline after the step completes.
 - New top-level `ephemeral: true` field — auto-runs `env destroy` after successful apply. Zero cleanup overhead. See `docs/ENV_SPEC_REFERENCE.md`.
 - `removes` now updates the workflow state after destroying each resource, so a subsequent `env destroy` doesn't try to tear down already-removed resources.

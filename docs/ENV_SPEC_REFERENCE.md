@@ -459,14 +459,14 @@ Steps within the same level run in parallel.
 | `key` | **Deleted** — SSH key files removed from disk, DB record removed | Created per-environment |
 | `vm` | **Deleted** — Firecracker process killed, console relay shut down, TAP device removed, IP lease released, volumes detached, VM directory + DB record deleted | Full lifecycle teardown |
 | `image` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
-| `image_import` | **Deleted** — image file removed from disk, DB record deleted | Imported image is removed on destroy; explicit cache asset otherwise |
+| `image_import` | **Preserved** — files stay in cache, DB record kept | Asset — imported once, reused across environments |
 | `kernel` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to rebuild/re-download, shared across environments |
 | `binary` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
 | `ssh` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran) |
 | `exec` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran via vsock) |
 | `copy` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (file already transferred) |
 
-**Why image/kernel/binary are preserved:** These are downloaded assets cached for reuse across multiple environments. Deleting them on destroy would force a re-download on the next `env apply`. They are only removed when explicitly deleted via `mvm image rm`, `mvm kernel rm`, or `mvm binary rm`.
+**Why image/image_import/kernel/binary are preserved:** These are assets cached for reuse across multiple environments (either downloaded or imported). Deleting them on destroy would force a re-fetch on the next `env apply`. They are only removed when explicitly deleted via `mvm image rm`, `mvm kernel rm`, or `mvm binary rm`.
 
 ### Mid-pipeline removals (`removes` field)
 
