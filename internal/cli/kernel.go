@@ -242,7 +242,10 @@ func newKernelRemoveCmd(kernelAPI api.KernelAPI) *cobra.Command {
 			if len(args) == 0 {
 				return fmt.Errorf("usage error")
 			}
-			result := kernelAPI.KernelRemove(cmd.Context(), inputs.KernelInput{Identifiers: args, Force: force, IncludeDeleted: true})
+			result := kernelAPI.KernelRemove(
+				cmd.Context(),
+				inputs.KernelInput{Identifiers: args, Force: force, IncludeDeleted: true},
+			)
 			for _, item := range result.Items {
 				if item.IsOK() {
 					msg := item.Message

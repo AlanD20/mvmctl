@@ -266,7 +266,11 @@ Examples:
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeImageIDs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result := imageAPI.ImageRemove(cmd.Context(), inputs.ImageInput{Identifiers: args, IncludeDeleted: true}, force)
+			result := imageAPI.ImageRemove(
+				cmd.Context(),
+				inputs.ImageInput{Identifiers: args, IncludeDeleted: true},
+				force,
+			)
 			for _, r := range result.Items {
 				itemID := "unknown"
 				if r.Item != nil {

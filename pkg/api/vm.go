@@ -977,7 +977,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 			EnableConsole: vm.EnableConsole,
 			EnableLogging: vm.EnableLogging, EnableMetrics: vm.EnableMetrics,
 			AllowRemoteExec: vm.RemoteExec,
-			CreatedAt: vm.CreatedAt, UpdatedAt: vm.UpdatedAt,
+			CreatedAt:       vm.CreatedAt, UpdatedAt: vm.UpdatedAt,
 		},
 		Resources: results.VMResourcesInfo{
 			VCPU: vm.VCPUCount, Mem: vm.MemSizeMiB, Disk: vm.DiskSizeMiB,

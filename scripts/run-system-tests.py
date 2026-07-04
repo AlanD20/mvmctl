@@ -1176,7 +1176,7 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
         "official:7.0.11",
         "--default",
         "--features",
-        "nftables,tuntap,kvm,btrfs",
+        "all",
         timeout=900,
     )
 
@@ -1282,7 +1282,7 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
             check=False,
         )
         if "Downloading image" in result.stdout or "Downloading image" in result.stderr:
-            log(f"  Cache hit confirmed: asset pulled from local mirror")
+            log("  Cache hit confirmed: asset pulled from local mirror")
         else:
             log(f"  Pull output: {result.stdout[:200] if result.stdout else '(empty)'}")
 

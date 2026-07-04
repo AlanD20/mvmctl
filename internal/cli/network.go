@@ -227,7 +227,11 @@ func newNetworkRemoveCmd(networkAPI api.NetworkAPI) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			err := networkAPI.NetworkRemove(cmd.Context(), inputs.NetworkInput{Identifiers: args, IncludeDeleted: true}, force)
+			err := networkAPI.NetworkRemove(
+				cmd.Context(),
+				inputs.NetworkInput{Identifiers: args, IncludeDeleted: true},
+				force,
+			)
 			if err != nil {
 				return fmt.Errorf("remove failed: %w", err)
 			}

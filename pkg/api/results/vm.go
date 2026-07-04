@@ -17,24 +17,24 @@ type VMVolume struct {
 
 // VMItemInfo groups VM metadata in an inspect response.
 type VMItemInfo struct {
-	Name           string   `json:"name"`
-	ID             string   `json:"id"`
-	Status         string   `json:"status"`
-	PID            int      `json:"pid"`
-	ExitCode       *int     `json:"exit_code"`
-	SSHKeys        []string `json:"ssh_keys"`
-	SSHUser        *string  `json:"ssh_user"`
-	CloudInitMode  string   `json:"cloud_init_mode"`
-	NocloudNetPort *int     `json:"nocloud_net_port"`
-	NocloudNetPID  *int     `json:"nocloud_net_pid"`
-	PCIEnabled     bool     `json:"pci_enabled"`
-	NestedVirt     bool     `json:"nested_virt"`
-	EnableConsole  bool     `json:"enable_console"`
-	EnableLogging  bool     `json:"enable_logging"`
-	EnableMetrics  bool     `json:"enable_metrics"`
-	AllowRemoteExec bool    `json:"allow_remote_exec"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
+	Name            string   `json:"name"`
+	ID              string   `json:"id"`
+	Status          string   `json:"status"`
+	PID             int      `json:"pid"`
+	ExitCode        *int     `json:"exit_code"`
+	SSHKeys         []string `json:"ssh_keys"`
+	SSHUser         *string  `json:"ssh_user"`
+	CloudInitMode   string   `json:"cloud_init_mode"`
+	NocloudNetPort  *int     `json:"nocloud_net_port"`
+	NocloudNetPID   *int     `json:"nocloud_net_pid"`
+	PCIEnabled      bool     `json:"pci_enabled"`
+	NestedVirt      bool     `json:"nested_virt"`
+	EnableConsole   bool     `json:"enable_console"`
+	EnableLogging   bool     `json:"enable_logging"`
+	EnableMetrics   bool     `json:"enable_metrics"`
+	AllowRemoteExec bool     `json:"allow_remote_exec"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
 }
 
 // VMResourcesInfo groups VM resource allocation in an inspect response.

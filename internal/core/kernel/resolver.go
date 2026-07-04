@@ -257,4 +257,3 @@ func (r *Resolver) ItemFromPath(path string) *model.KernelItem {
 		UpdatedAt: now,
 	}
 }
-

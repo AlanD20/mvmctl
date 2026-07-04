@@ -233,7 +233,12 @@ func Apply(
 					Resources:     resources,
 				}
 				if pErr := workflow.WriteWorkflowState(stateDir, wfState); pErr != nil {
-					slog.Debug("failed to persist workflow state after removal", "wf_id", wfID, "target", target, "error", pErr)
+					slog.Debug(
+						"failed to persist workflow state after removal",
+						"wf_id", wfID,
+						"target", target,
+						"error", pErr,
+					)
 				}
 				mu.Unlock()
 			}

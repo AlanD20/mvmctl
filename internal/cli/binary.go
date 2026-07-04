@@ -260,7 +260,11 @@ func newBinaryRemoveCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 				return fmt.Errorf("usage error")
 			}
 
-			batchResult := binaryAPI.BinaryRemove(cmd.Context(), inputs.BinaryInput{Identifiers: args, IncludeDeleted: true}, force)
+			batchResult := binaryAPI.BinaryRemove(
+				cmd.Context(),
+				inputs.BinaryInput{Identifiers: args, IncludeDeleted: true},
+				force,
+			)
 			for _, r := range batchResult.Items {
 				if r.Status == "success" {
 					msg := r.Message
