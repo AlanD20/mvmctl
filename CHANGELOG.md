@@ -108,6 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### `mvm env`
+- `env destroy` completion now shows workflow IDs from saved state alongside file paths (was previously blocked by `FilterFileExt` directive).
+
 #### `mvm vm create`
 - `/etc/hosts` is now appended to instead of fully overwritten during provisioning, preserving entries from the base image.
 

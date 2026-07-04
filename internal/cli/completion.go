@@ -271,9 +271,5 @@ func completeEnvDestroy(cmd *cobra.Command, args []string, toComplete string) ([
 		}
 	}
 
-	// 2. File extensions for shell-level filtering — Cobra passes these to
-	//    the shell's _filedir, which limits file completion to YAML/YML files.
-	results = append(results, "yaml", "yml")
-
-	return results, cobra.ShellCompDirectiveFilterFileExt
+	return results, cobra.ShellCompDirectiveDefault
 }
