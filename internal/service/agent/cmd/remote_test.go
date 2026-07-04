@@ -387,7 +387,11 @@ func TestRunRemoteSubcommand_MalformedResponse(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		// Send malformed JSON
+		// Read the request first (real daemon behavior), then send malformed JSON.
+		// Without this read, the goroutine closes the connection before
+		// runRemoteSubcommand can send its request, causing "broken pipe".
+		var req agent.RemoteVMRequest
+		_ = json.NewDecoder(conn).Decode(&req) //nolint: errcheck
 		_, _ = conn.Write([]byte("not valid json\n"))
 	}()
 
