@@ -1,0 +1,12 @@
+#!/bin/bash
+set -e
+
+if [ ! -f /etc/kubernetes/admin.conf ]; then
+  echo "controller-1 not initialized"
+  exit 1
+fi
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+kubeadm token create --print-join-command > /srv/k8s/join-worker
+
+echo "worker token updated"

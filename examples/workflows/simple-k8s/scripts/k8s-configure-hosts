@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+
+HOSTNAME="${1}"
+shift
+
+if [ -n "$HOSTNAME" ]; then
+  hostnamectl set-hostname "$HOSTNAME" 2>/dev/null || true
+fi
+
+for entry in "$@"; do
+  grep -q "$entry" /etc/hosts 2>/dev/null || echo "$entry" >> /etc/hosts
+done

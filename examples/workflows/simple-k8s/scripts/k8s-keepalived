@@ -1,0 +1,48 @@
+#!/bin/bash
+set -e
+
+VIP="${3:-10.10.0.100}"
+INTERFACE="${4:-eth0}"
+PASSWORD="${5:-k8s-vip}"
+
+# Auto-detect role from hostname
+HOSTNAME=$(hostname)
+NUM=$(echo "$HOSTNAME" | sed 's/.*[^0-9]//' | grep -E '^[0-9]+$' || echo "1")
+PRIORITY=$((100 - (NUM - 1) * 10))
+if [ "$PRIORITY" -lt 1 ]; then PRIORITY=1; fi
+if [ "$NUM" = "1" ]; then ROLE="MASTER"; else ROLE="BACKUP"; fi
+
+mkdir -p /etc/keepalived
+
+cat > /etc/keepalived/keepalived.conf <<EOF
+vrrp_script chk_kubelet {
+    script "/usr/bin/systemctl is-active kubelet"
+    interval 2
+    fall 2
+    rise 2
+    weight -20
+}
+
+vrrp_instance VI_1 {
+    state $ROLE
+    interface $INTERFACE
+    virtual_router_id 51
+    priority $PRIORITY
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass $PASSWORD
+    }
+    virtual_ipaddress {
+        $VIP/16
+    }
+    track_script {
+        chk_kubelet
+    }
+}
+EOF
+
+systemctl enable keepalived 2>/dev/null || true
+systemctl restart keepalived 2>/dev/null || true
+
+echo "keepalived configured: $ROLE (priority $PRIORITY), VIP $VIP"

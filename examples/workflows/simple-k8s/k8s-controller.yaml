@@ -1,0 +1,107 @@
+version: "1"
+
+network:
+  - name: k8s
+    subnet: "10.10.0.0/16"
+    nat_enabled: true
+
+key:
+  - name: k8s-key
+    algorithm: ed25519
+
+kernel:
+  - name: full-kernel
+    type: official
+    version: "7.0.11"
+    features: "all"
+
+binary:
+  - name: fc-binary
+    type: firecracker
+    version: "1.16.0"
+
+vm:
+  - name: controller-1
+    network: k8s
+    guest_ip: 10.10.0.10
+    key: k8s-key
+    image: k8s-base
+    kernel: full-kernel
+    binary: fc-binary
+    vcpu: 2
+    mem: 2G
+    disk_size: 8G
+    writeback: true
+    allow_remote_exec: true
+    depends_on:
+      - network:k8s
+      - key:k8s-key
+      - kernel:full-kernel
+      - binary:fc-binary
+
+  - name: controller-2
+    network: k8s
+    guest_ip: 10.10.0.11
+    key: k8s-key
+    image: k8s-base
+    kernel: full-kernel
+    binary: fc-binary
+    vcpu: 2
+    mem: 2G
+    disk_size: 8G
+    writeback: true
+    allow_remote_exec: true
+    depends_on:
+      - network:k8s
+      - key:k8s-key
+      - kernel:full-kernel
+      - binary:fc-binary
+
+exec:
+  - name: keepalived-c1
+    target: controller-1
+    cmd: |
+      hostnamectl set-hostname controller-1 2>/dev/null || true
+      k8s-keepalived
+    depends_on:
+      - vm:controller-1
+
+  - name: init
+    target: controller-1
+    cmd: |
+      timeout 240 k8s-controller-primary 10.10.0.100
+    depends_on:
+      - exec:keepalived-c1
+
+  - name: join-c2
+    target: controller-2
+    cmd: |
+      hostnamectl set-hostname controller-2 2>/dev/null || true
+      timeout 120 k8s-join controller-1 join-controller
+    depends_on:
+      - exec:init
+
+  - name: keepalived-c2
+    target: controller-2
+    cmd: |
+      hostnamectl set-hostname controller-2 2>/dev/null || true
+      k8s-keepalived
+    depends_on:
+      - exec:join-c2
+
+  - name: cilium
+    target: controller-1
+    cmd: |
+      kubectl get ns cilium >/dev/null 2>&1 && exit 0
+      export KUBECONFIG=/etc/kubernetes/admin.conf
+      CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+      curl -L --remote-name-all https://github.com/cilium/cilium-cli/releases/download/$CILIUM_CLI_VERSION/cilium-linux-amd64.tar.gz{,.sha256sum}
+      sha256sum --check cilium-linux-amd64.tar.gz.sha256sum
+      tar xzf cilium-linux-amd64.tar.gz -C /usr/local/bin
+      rm cilium-linux-amd64.tar.gz cilium-linux-amd64.tar.gz.sha256sum
+      cilium install --set k8sServiceHost=10.10.0.100 --set k8sServicePort=6443 --set routingMode=tunnel --set tunnelProtocol=vxlan --set kubeProxyReplacement=true --set cluster.name=k8s --set cluster.id=1
+      kubectl -n kube-system delete daemonset kube-proxy --ignore-not-found
+      kubectl -n kube-system delete daemonset kube-vip --ignore-not-found
+      kubectl -n kube-system delete configmap kube-proxy --ignore-not-found
+    depends_on:
+      - exec:join-c2

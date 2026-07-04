@@ -1,0 +1,39 @@
+#!/bin/bash
+set -e
+
+CTRL_IP="${1:-10.10.0.10}"
+
+for i in $(seq 1 30); do
+  if [ -S /var/run/containerd/containerd.sock ]; then break; fi
+  sleep 2
+done
+
+if [ -f /etc/kubernetes/admin.conf ]; then
+  echo "already initialized"
+  exit 0
+fi
+
+kubeadm init --control-plane-endpoint="$CTRL_IP" --pod-network-cidr=10.10.0.0/16
+mkdir -p /root/.kube
+cp /etc/kubernetes/admin.conf /root/.kube/config
+
+mkdir -p /srv/k8s
+
+export KUBECONFIG=/etc/kubernetes/admin.conf
+for i in $(seq 1 30); do
+  if kubectl --request-timeout=2 get nodes &>/dev/null; then break; fi
+  sleep 2
+done
+CERT_KEY=$(timeout 15 kubeadm init phase upload-certs --upload-certs 2>&1 | grep -A1 'Using certificate key' | tail -1 | xargs || true)
+if [ -z "$CERT_KEY" ]; then
+  CERT_KEY=$(kubectl get secret -n kube-system kubeadm-certs -o jsonpath='{.data.certificate-key}' 2>/dev/null | base64 -d || true)
+fi
+if [ -z "$CERT_KEY" ]; then
+  CERT_KEY=$(openssl rand -hex 32)
+fi
+TOKEN=$(kubeadm token create)
+HASH=$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 | cut -d' ' -f2)
+echo "kubeadm join $CTRL_IP:6443 --token $TOKEN --discovery-token-ca-cert-hash sha256:$HASH --control-plane --certificate-key $CERT_KEY" > /srv/k8s/join-controller
+kubeadm token create --print-join-command > /srv/k8s/join-worker
+
+echo "cluster initialized"
