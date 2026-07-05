@@ -421,6 +421,12 @@ func (c *MVMCli) formatLeafValue(key string, value any) string {
 			return formatted
 		}
 	}
+	// float64 values from JSON round-trip can be large whole numbers that
+	// fmt.Sprintf("%v") renders in scientific notation. Format them as
+	// plain integers instead.
+	if f, ok := value.(float64); ok && f == float64(int64(f)) {
+		return fmt.Sprintf("%d", int64(f))
+	}
 	return fmt.Sprintf("%v", value)
 }
 

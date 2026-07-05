@@ -592,7 +592,12 @@ func growBtrfs(ctx context.Context, mountPoint string) error {
 // deferred cleanup from retrying an unmount on intermediate failure.
 func growExt4(ctx context.Context, mountPoint *string, rootPart string) error {
 	if output, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
-		return fmt.Errorf("umount failed: %w: %s", err, strings.TrimSpace(string(output)))
+		// First umount attempt failed — the mount may be temporarily busy
+		// (a zombie chroot child, systemd mount monitor, etc.). Fall through
+		// to CleanupMount which scans /proc, kills orphan processes, and retries.
+		if !CleanupMount(*mountPoint) {
+			return fmt.Errorf("umount failed: %w: %s", err, strings.TrimSpace(string(output)))
+		}
 	}
 	*mountPoint = "" // prevent deferred cleanup from retrying umount
 
@@ -628,7 +633,12 @@ func growExt4(ctx context.Context, mountPoint *string, rootPart string) error {
 // Returns the new filesystem size in bytes.
 func shrinkExt4(ctx context.Context, mountPoint *string, rootPart string, headroom int) (int64, error) {
 	if output, err := exec.CommandContext(ctx, "umount", *mountPoint).CombinedOutput(); err != nil {
-		return 0, fmt.Errorf("umount failed: %w: %s", err, strings.TrimSpace(string(output)))
+		// First umount attempt failed — the mount may be temporarily busy
+		// (a zombie chroot child, systemd mount monitor, etc.). Fall through
+		// to CleanupMount which scans /proc, kills orphan processes, and retries.
+		if !CleanupMount(*mountPoint) {
+			return 0, fmt.Errorf("umount failed: %w: %s", err, strings.TrimSpace(string(output)))
+		}
 	}
 	*mountPoint = "" // prevent deferred cleanup from retrying umount
 
