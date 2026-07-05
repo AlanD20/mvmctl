@@ -18,12 +18,63 @@ import (
 // EnvSpec is the top-level YAML structure for an environment spec file.
 // Known top-level fields (version, ephemeral) are decoded by YAML struct tags.
 // All remaining top-level keys (network, vm, copy, etc.) go into Steps via
-// the inline tag. resolveSpecV1 filters Steps against Registry, so unknown
-// keys are silently ignored.
+// the inline tag. Each type section is a map from step name to its params.
+//
+// Example:
+//
+//	version: "1"
+//	network:
+//	  default:
+//	    subnet: "172.27.0.0/24"
+//	vm:
+//	  dev-vm:
+//	    network: "@network:default"
+//	    depends_on: ["@network:default"]
 type EnvSpec struct {
-	Version   string                         `yaml:"version"`
-	Ephemeral bool                           `yaml:"ephemeral"`
-	Steps     map[string][]model.ResourceMap `yaml:",inline"`
+	Version   string                                  `yaml:"version"`
+	Ephemeral bool                                    `yaml:"ephemeral"`
+	Steps     map[string]map[string]model.ResourceMap `yaml:",inline"`
+}
+
+// stripRefPrefix strips the "@" sigil from a single value. In v2 format,
+// all cross-resource references use "@type:name" (e.g. "@network:default").
+// This normalizes them to "type:name" for internal use. Dependencies and
+// removals keep the full "type:name" format; step reference fields (network,
+// key, image, etc.) are further reduced to bare names by stripBareName.
+func stripRefPrefix(v any) any {
+	switch val := v.(type) {
+	case string:
+		return strings.TrimPrefix(val, "@")
+	case []any:
+		for i, item := range val {
+			if s, ok := item.(string); ok {
+				val[i] = strings.TrimPrefix(s, "@")
+			}
+		}
+		return val
+	}
+	return v
+}
+
+// stripSpecRefs applies stripRefPrefix to every value in a ResourceMap.
+// This is called on each entry in resolveSpecV1 so factories never see the
+// "@" sigil — they work with bare "type:name" references throughout.
+func stripSpecRefs(spec model.ResourceMap) {
+	for k, v := range spec {
+		spec[k] = stripRefPrefix(v)
+	}
+}
+
+// stripBareName reduces a "type:name" string to just the bare name.
+// For values without a colon, returns as-is. This is used by step factories
+// to normalize "@type:name" references (stripped of "@" by stripSpecRefs)
+// to the bare step name expected by downstream resolvers.
+func stripBareName(s string) string {
+	_, after, found := strings.Cut(s, ":")
+	if found && after != "" {
+		return after
+	}
+	return s
 }
 
 // ResolveSpec reads a YAML spec file, validates it, and converts each
@@ -98,11 +149,15 @@ func resolveSpecV1(spec EnvSpec, op api.API) ([]workflow.Step, error) {
 		if len(entries) == 0 {
 			continue
 		}
-		for _, entry := range entries {
-			name, ok := entry["name"].(string)
-			if !ok || name == "" {
-				return nil, fmt.Errorf("env spec %q entry missing required 'name' field", resourceKey)
+		for name, entry := range entries {
+			if name == "" {
+				return nil, fmt.Errorf("env spec %q entry has empty name key", resourceKey)
 			}
+			// Strip the "@" sigil prefix from all string values in the entry.
+			// In v2 format, cross-resource references use "@type:name" (e.g.
+			// "@network:default", "@key:main-key"). Internally the system
+			// uses "type:name" without the sigil.
+			stripSpecRefs(entry)
 			step, err := factory.FromSpec(factory.StepType, name, entry, op)
 			if err != nil {
 				return nil, err

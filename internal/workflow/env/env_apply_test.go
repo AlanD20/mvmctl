@@ -167,7 +167,7 @@ func TestApply_Success(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  - name: test-net
+  test-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeApplySpec(t, specContent)
@@ -195,9 +195,9 @@ func TestApply_MultipleSteps(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  - name: test-net
+  test-net:
 key:
-  - name: my-key
+  my-key:
 `
 	specPath := writeApplySpec(t, specContent)
 	defer cleanupState(t, specPath)
@@ -267,9 +267,9 @@ func TestApply_Reapply(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  - name: test-net
+  test-net:
 key:
-  - name: my-key
+  my-key:
 `
 	specPath := writeApplySpec(t, specContent)
 	defer cleanupState(t, specPath)
@@ -300,7 +300,7 @@ func TestApply_StepFails(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  - name: test-net
+  test-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeApplySpec(t, specContent)
@@ -326,7 +326,7 @@ func TestApply_ContextCancellation(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  - name: test-net
+  test-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeApplySpec(t, specContent)

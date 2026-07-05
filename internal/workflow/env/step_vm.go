@@ -248,6 +248,15 @@ func newVMStepFromSpec(
 		return nil, errors.New("operation not initialized")
 	}
 
+	// Strip "type:" prefix from step reference fields so downstream resolvers
+	// receive bare step names. The spec may have "network: "@network:default""
+	// which becomes "network:default" after stripSpecRefs, then "default" here.
+	for _, ref := range []string{"network", "key", "image", "kernel", "binary"} {
+		if s, ok := spec[ref].(string); ok {
+			spec[ref] = stripBareName(s)
+		}
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
@@ -257,7 +266,10 @@ func newVMStepFromSpec(
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		return nil, err
 	}
-	input.Name = name
+	// Resource name: spec "name" overrides step name.
+	if input.Name == "" {
+		input.Name = name
+	}
 
 	// spec uses "key" as a single string but VMCreateInput stores SSHKeys as []string
 	if key := spec.GetString("key"); key != "" && len(input.SSHKeys) == 0 {

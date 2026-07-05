@@ -129,6 +129,12 @@ func newExecStepFromSpec(
 	if op == nil {
 		return nil, errors.New("operation not initialized")
 	}
+
+	// Strip "type:" prefix from step reference fields.
+	if s, ok := spec["target"].(string); ok {
+		spec["target"] = stripBareName(s)
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err

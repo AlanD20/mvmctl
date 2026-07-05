@@ -64,7 +64,7 @@ func TestRegistry_ContainsAllExpectedTypes(t *testing.T) {
 // and registry lookups work correctly.
 
 func TestFromSpec_NetworkStep_NameFormat(t *testing.T) {
-	spec := map[string]any{"name": "my-net", "subnet": "10.0.0.0/24"}
+	spec := map[string]any{"subnet": "10.0.0.0/24"}
 	dummyOp := &api.Operation{}
 
 	step, err := envpkg.Registry["network"].FromSpec("network", "my-net", spec, dummyOp)
@@ -75,7 +75,7 @@ func TestFromSpec_NetworkStep_NameFormat(t *testing.T) {
 }
 
 func TestFromSpec_KeyStep_NameFormat(t *testing.T) {
-	spec := map[string]any{"name": "my-key"}
+	spec := map[string]any{}
 	dummyOp := &api.Operation{}
 	step, err := envpkg.Registry["key"].FromSpec("key", "my-key", spec, dummyOp)
 	require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestFromSpec_KeyStep_NameFormat(t *testing.T) {
 }
 
 func TestFromSpec_ImageStep_NameFormat(t *testing.T) {
-	spec := map[string]any{"name": "alpine", "type": "alpine", "version": "3.21"}
+	spec := map[string]any{"type": "alpine", "version": "3.21"}
 	dummyOp := &api.Operation{}
 	step, err := envpkg.Registry["image"].FromSpec("image", "alpine", spec, dummyOp)
 	require.NoError(t, err)
@@ -95,7 +95,7 @@ func TestFromSpec_ImageStep_NameFormat(t *testing.T) {
 }
 
 func TestFromSpec_KernelStep_NameFormat(t *testing.T) {
-	spec := map[string]any{"name": "fc-kernel", "type": "firecracker", "version": "1.15.1"}
+	spec := map[string]any{"type": "firecracker", "version": "1.15.1"}
 	dummyOp := &api.Operation{}
 	step, err := envpkg.Registry["kernel"].FromSpec("kernel", "fc-kernel", spec, dummyOp)
 	require.NoError(t, err)
@@ -116,7 +116,7 @@ func TestFromSpec_BinaryStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_VMStep_NameFormat(t *testing.T) {
 	spec := map[string]any{
-		"name": "my-vm", "network": "my-net", "key": "my-key",
+		"network": "my-net", "key": "my-key",
 		"image": "alpine", "kernel": "fc-kernel", "binary": "firecracker",
 	}
 	dummyOp := &api.Operation{}
@@ -128,7 +128,7 @@ func TestFromSpec_VMStep_NameFormat(t *testing.T) {
 }
 
 func TestFromSpec_SSHStep_NameFormat(t *testing.T) {
-	spec := map[string]any{"name": "install-qemu", "target": "rc-vm", "user": "root", "cmd": "apt update"}
+	spec := map[string]any{"target": "rc-vm", "user": "root", "cmd": "apt update"}
 	step, err := envpkg.Registry["ssh"].FromSpec("ssh", "install-qemu", spec, &api.Operation{})
 	require.NoError(t, err)
 	assert.Equal(t, "ssh:install-qemu", step.Name())
@@ -138,7 +138,6 @@ func TestFromSpec_SSHStep_NameFormat(t *testing.T) {
 
 func TestFromSpec_CopyStep_NameFormat(t *testing.T) {
 	spec := map[string]any{
-		"name":   "copy-binary",
 		"target": "rc-vm",
 		"user":   "root",
 		"src":    "./mvm",
@@ -283,23 +282,23 @@ func TestResolveSpec_ValidSpecReturnsAllSteps(t *testing.T) {
 	specContent := `
 version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 key:
-  - name: my-key
+  my-key:
 image:
-  - name: alpine
+  alpine:
     type: alpine
     version: "3.21"
 kernel:
-  - name: fc-kernel
+  fc-kernel:
     type: firecracker
     version: 1.15.1
 binary:
-  - name: firecracker
+  firecracker:
     version: 1.15.1
 vm:
-  - name: my-vm
+  my-vm:
     network: my-net
     key: my-key
     image: alpine
@@ -339,23 +338,23 @@ func TestResolveSpec_VMStepHasDependencies(t *testing.T) {
 	specContent := `
 version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 key:
-  - name: my-key
+  my-key:
 image:
-  - name: alpine
+  alpine:
     type: alpine
     version: "3.21"
 kernel:
-  - name: fc-kernel
+  fc-kernel:
     type: firecracker
     version: 1.15.1
 binary:
-  - name: firecracker
+  firecracker:
     version: 1.15.1
 vm:
-  - name: full-vm
+  full-vm:
     network: my-net
     key: my-key
     image: alpine
@@ -398,7 +397,7 @@ func TestResolveSpec_EmptySpecFile(t *testing.T) {
 func TestResolveSpec_MissingVersion(t *testing.T) {
 	specContent := `
 network:
-  - name: test
+  test:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -433,7 +432,7 @@ func TestResolveSpec_InvalidYAML(t *testing.T) {
 func TestResolveSpec_ContextCancellation(t *testing.T) {
 	specContent := `version: "1"
 network:
-  - name: my-net
+  test:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -457,7 +456,7 @@ func TestResolveSpec_UnknownStepType(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  - name: test
+  test:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -487,7 +486,7 @@ func TestResolveSpec_FactoryFromSpecError(t *testing.T) {
 
 	specContent := `version: "1"
 network:
-  - name: test
+  test:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -504,10 +503,10 @@ func TestResolveSpec_ExplicitDependsOn(t *testing.T) {
 	specContent := `
 version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 key:
-  - name: my-key
+  my-key:
     depends_on:
       - network:my-net
 `
@@ -545,7 +544,7 @@ func TestResolveSpec_ValidURL(t *testing.T) {
 
 	specYAML := `version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 `
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -665,7 +664,6 @@ func TestResolveWorkflowID_PrefixMatch(t *testing.T) {
 // Rationale: SSH step with a key reference should set SSHInput.Key correctly.
 func TestFromSpec_SSHStep_WithKey(t *testing.T) {
 	spec := map[string]any{
-		"name":   "install-qemu",
 		"target": "rc-vm",
 		"user":   "root",
 		"key":    "rc-key",
@@ -682,7 +680,6 @@ func TestFromSpec_SSHStep_WithKey(t *testing.T) {
 // build a valid CPInput with Sources=[src] and Dst=target:dst.
 func TestFromSpec_CopyStep_BuildsDst(t *testing.T) {
 	spec := map[string]any{
-		"name":   "copy-binary",
 		"target": "rc-vm",
 		"user":   "root",
 		"src":    "./mvm",
@@ -701,23 +698,23 @@ func TestResolveSpec_WithSSHAndCopy(t *testing.T) {
 	specContent := `
 version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 key:
-  - name: my-key
+  my-key:
 vm:
-  - name: my-vm
+  my-vm:
     network: my-net
     key: my-key
 ssh:
-  - name: run-update
+  run-update:
     target: my-vm
     user: root
     cmd: apt update
     depends_on:
       - vm:my-vm
 copy:
-  - name: copy-binary
+  copy-binary:
     target: my-vm
     user: root
     src: ./mvm

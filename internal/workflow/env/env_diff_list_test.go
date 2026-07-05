@@ -26,7 +26,7 @@ import (
 func TestDiff_NewResources(t *testing.T) {
 	specContent := `version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -72,7 +72,7 @@ func TestDiff_RemovedResources(t *testing.T) {
 func TestDiff_ExistingUnchanged(t *testing.T) {
 	specContent := `version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -109,7 +109,7 @@ network:
 func TestDiff_DriftedResources(t *testing.T) {
 	specContent := `version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -160,7 +160,7 @@ func TestDiff_EmptySpecNoState(t *testing.T) {
 func TestDiff_StateSpecHashEmpty(t *testing.T) {
 	specContent := `version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)
@@ -196,13 +196,13 @@ network:
 func TestDiff_MixedResult(t *testing.T) {
 	specContent := `version: "1"
 network:
-  - name: net-existing
+  net-existing:
     subnet: 10.0.0.0/24
 key:
-  - name: key-drifted
+  key-drifted:
     algorithm: ed25519
 image:
-  - name: img-new
+  img-new:
     type: alpine
     version: "3.21"
 `
@@ -276,7 +276,7 @@ func TestDiff_SpecFileNotFound(t *testing.T) {
 func TestDiff_ContextCancelled(t *testing.T) {
 	specContent := `version: "1"
 network:
-  - name: my-net
+  my-net:
     subnet: 10.0.0.0/24
 `
 	specPath := writeSpec(t, specContent)

@@ -4,109 +4,114 @@ Complete reference for the `mvm env` workflow engine YAML spec format.
 
 ## Table of Contents
 
-- [Commands](#commands)
-- [Spec Structure](#spec-structure)
-- [Common Fields](#common-fields)
+- [Overview](#overview)
+- [Syntax](#syntax)
 - [Step Types](#step-types)
   - [network](#network)
   - [key](#key)
   - [image](#image)
+  - [image_import](#image_import)
   - [kernel](#kernel)
   - [binary](#binary)
   - [vm](#vm)
   - [exec](#exec)
   - [ssh](#ssh)
   - [copy](#copy)
-- [Dependencies](#dependencies)
+- [References](#references)
 - [Destroy Behavior](#destroy-behavior)
 - [Full Example](#full-example)
 - [State File](#state-file)
 
 ---
 
-## Commands
+## Overview
 
-```bash
-mvm env apply <spec-path>                 # Provision everything in the spec (local file or remote URL)
-mvm env apply <spec-path> --env KEY=VAL   # With extra env vars for exec steps (repeatable)
-mvm env apply https://example.com/team-env.yaml  # Apply from remote URL
-mvm env ls                    # List applied environments
-mvm env diff <spec-path>      # Show what would change (spec vs state)
-mvm env destroy <wf-id|path>  # Tear down exactly what was provisioned
-```
+An env spec is a YAML file that describes an environment — networks, SSH keys, images, kernels, binaries, VMs, and the commands that configure them. Running `mvm env apply spec.yaml` provisions everything in dependency order.
 
-**Remote URLs:** `spec-path` accepts `https://` and `http://` URLs in addition to local file paths. The spec is fetched over HTTP and parsed identically. Workflow IDs are derived from the URL string, so re-applying or destroying by the same URL resolves to the same workflow state.
-
----
-
-## Spec Structure
+The format uses **typed top-level sections** (one per step type) with **map keys as step names**:
 
 ```yaml
 version: "1"
-ephemeral: false   # optional, default false
+ephemeral: false
 
 network:
-  - name: <step-name>
-    # ... fields
-
-key:
-  - name: <step-name>
-    # ... fields
-
-image:
-  - name: <step-name>
-    # ... fields
-
-image_import:
-  - name: <step-name>
-    # ... fields
-
-kernel:
-  - name: <step-name>
-    # ... fields
-
-binary:
-  - name: <step-name>
-    # ... fields
-
-vm:
-  - name: <step-name>
-    # ... fields
-
-ssh:
-  - name: <step-name>
-    # ... fields
-
-exec:
-  - name: <step-name>
-    # ... fields
-
-copy:
-  - name: <step-name>
-    # ... fields
+  my-net:
+    subnet: "172.27.0.0/24"
 ```
 
-**All identifiers are singular** — YAML keys, step types, `depends_on`, and step names use singular form.
+The map key (`my-net`) IS the step name — used in `depends_on`, `removes`, and the state file. An optional `name` field inside the params overrides the resource name (e.g., the bridge name for a network, the VM name, the key name).
 
-### Top-Level Fields
+Cross-step references use the **`@type:name`** format:
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `version` | `string` | — | **Required.** Spec format version. Currently only `"1"`. |
-| `ephemeral` | `bool` | `false` | If `true`, the workflow automatically runs `mvm env destroy` after a successful apply, tearing down all resources and removing the state record. Useful for CI/CD pipelines that extract artifacts and clean up (see [Destroy Behavior](#destroy-behavior)). |
+```yaml
+vm:
+  dev-vm:
+    network: "@network:my-net"
+    depends_on:
+      - "@network:my-net"
+```
+
+The `@` sigil makes references visually distinct from literal values.
 
 ---
 
-## Common Fields
+## Top-Level Fields
 
-Every step type supports these top-level fields:
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `version` | `string` | — | **Required.** Currently only `"1"`. |
+| `ephemeral` | `bool` | `false` | Auto-run `env destroy` after successful apply. |
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `name` | `string` | **Yes** | Step name. Becomes `"type:name"` identifier. |
-| `depends_on` | `[]string` | No | List of `"type:name"` dependencies. |
-| `removes` | `[]string` | No | List of `"type:name"` resources to destroy after this step succeeds. |
-| `env` | `map[string]string` | No | Environment variable overrides for `exec` and `ssh` commands. |
+---
+
+## Syntax
+
+```yaml
+version: "1"
+
+network:
+  <name>:               # ← map key = step name
+    subnet: ...          # ← step-specific fields
+
+key:
+  <name>:
+    algorithm: ...
+```
+
+**Every step type section is a map from step name to its params.** No list dashes. An optional `name` field inside the params overrides the resource name (see Common fields below).
+
+### Common fields
+
+Every step supports these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Resource name override. Defaults to the step name (map key). |
+| `depends_on` | `[]string` | List of `"@type:name"` dependencies. |
+| `removes` | `[]string` | List of `"@type:name"` resources to destroy after this step succeeds. |
+
+---
+
+## References
+
+Cross-resource references use the `@type:name` format:
+
+```yaml
+depends_on:
+  - "@network:default"
+  - "@key:main-key"
+  - "@image:os-image"
+
+vm:
+  dev-vm:
+    network: "@network:default"
+    key: "@key:main-key"
+    image: "@image:os-image"
+```
+
+The `@` prefix distinguishes references from literal string values. The type prefix (`network`, `key`, `image`, etc.) disambiguates steps with the same name under different types.
+
+**Bare names:** Reference fields like `network`, `key`, `image`, `kernel`, `binary`, and `target` accept bare step names (without `@` or `type:`) for convenience. However, `depends_on` and `removes` entries must use the full `@type:name` format because the engine matches them against step identifiers in the DAG.
 
 ---
 
@@ -118,17 +123,16 @@ Create a network for VMs to connect to.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"network:name"`. |
 | `subnet` | `string` | **Yes** | — | CIDR notation, e.g. `"172.27.0.0/24"`. |
 | `nat_enabled` | `bool` | No | `true` | Enable NAT for internet access. |
-| `ipv4_gateway` | `string` | No | auto-computed | Gateway IP. Auto-computed from subnet if omitted. |
-| `nat_gateways` | `[]string` | No | auto-detected | Host interfaces for NAT. Auto-detected if empty. |
-| `default` | `bool` | No | `false` | Set as default network for VM creation. |
+| `ipv4_gateway` | `string` | No | auto-computed | Gateway IP. |
+| `nat_gateways` | `[]string` | No | auto-detected | Host interfaces for NAT. |
+| `default` | `bool` | No | `false` | Set as default network. |
 
 **Example:**
 ```yaml
 network:
-  - name: default
+  default:
     subnet: "172.27.0.0/24"
     nat_enabled: true
     default: true
@@ -142,20 +146,17 @@ Generate or import an SSH key pair.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"key:name"`. |
-| `algorithm` | `string` | No | `"ed25519"` | Key algorithm. Valid values: `ed25519`, `rsa`, `ecdsa`. |
-| `bits` | `int` | No | `0` (auto) | Key bits in RSA. `0` means algorithm default (e.g. 4096 for RSA). |
+| `algorithm` | `string` | No | `"ed25519"` | Key algorithm. Valid: `ed25519`, `rsa`, `ecdsa`. |
+| `bits` | `int` | No | `0` (auto) | Key bits (for RSA). |
 | `comment` | `string` | No | `"{name}@{hostname}"` | Key comment. |
 | `force` | `bool` | No | `false` | Overwrite existing key files. |
-| `default` | `bool` | No | `false` | Set as default key for VM creation. |
+| `default` | `bool` | No | `false` | Set as default key. |
 
 **Example:**
 ```yaml
 key:
-  - name: main-key
+  main-key:
     algorithm: ed25519
-    bits: 256
-    comment: "my-key"
     default: true
 ```
 
@@ -167,37 +168,35 @@ Download an OS image.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"image:name"`. |
 | `type` | `string` | **Yes** | — | Image type/slug, e.g. `"ubuntu"`, `"alpine"`, `"debian"`. |
 | `version` | `string` | No | `""` (latest) | Version tag, e.g. `"24.04"`, `"3.21"`. |
 | `force` | `bool` | No | `false` | Force re-pull even if exists. |
 | `default` | `bool` | No | `false` | Set as default image. |
 | `no_cache` | `bool` | No | `false` | Skip cache layer. |
-| `partition` | `int` | No | `0` (auto) | Partition index. `0` = auto-detect. |
+| `partition` | `int` | No | `0` (auto) | Partition index. |
 | `skip_optimization` | `bool` | No | `false` | Skip image optimization. |
-| `disabled_detectors` | `[]string` | No | `[]` | Disable detection methods. Valid values: `type`, `label`, `size`, `filesystem`, `all`. |
+| `disabled_detectors` | `[]string` | No | `[]` | Disable detection methods. |
 
 **Example:**
 ```yaml
 image:
-  - name: os-image
+  os-image:
     type: alpine
-    version: "3.21"
+    version: "3.23"
 ```
 
 ---
 
 ### `image_import`
 
-Import a local image file or copy a VM's rootfs into the image cache.
+Import a local image file or copy a VM's rootfs.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"image_import:name"`. |
-| `source` | `string` | **Yes** | — | Source path to a raw image (`.raw`/`.img`), qcow2, tar-rootfs archive (`.tar`/`.tar.gz`/`.tar.xz`/`.tgz`), or a VM selector (name or ID). |
-| `format` | `string` | No | `""` (auto) | Image format override: `"raw"`, `"qcow2"`, `"tar"`. |
+| `source` | `string` | **Yes** | — | File path, or `"@vm:<name>"` to import a VM's rootfs. |
+| `format` | `string` | No | `""` (auto) | Format override: `raw`, `qcow2`, `tar`. |
 | `version` | `string` | No | `""` | Version tag for the imported image. |
-| `force` | `bool` | No | `false` | Overwrite existing image with the same name. |
+| `force` | `bool` | No | `false` | Overwrite existing image. |
 | `default` | `bool` | No | `false` | Set as default image. |
 | `skip_optimization` | `bool` | No | `false` | Skip filesystem optimization. |
 | `disabled_detectors` | `[]string` | No | `[]` | Disable specific detectors. |
@@ -205,18 +204,10 @@ Import a local image file or copy a VM's rootfs into the image cache.
 **Example:**
 ```yaml
 image_import:
-  - name: my-custom-image
-    source: /path/to/image.raw
-    format: raw
-    default: true
-
-  - name: from-vm
-    source: my-running-vm
-
-  - name: capture-base
-    source: builder
-    deps: [exec:setup-builder]
-    removes: [vm:builder]     # ← builder VM destroyed after import
+  capture-base:
+    source: "@vm:builder"
+    removes:
+      - "@vm:builder"
 ```
 
 ---
@@ -227,20 +218,19 @@ Download or build a kernel.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"kernel:name"`. |
-| `type` | `string` | **Yes** | — | Kernel type. Valid values: `firecracker` (pre-built CI kernel), `official` (built from source). |
-| `version` | `string` | No | `""` (latest) | Version tag (e.g. CI version like `1.15` for firecracker, kernel version like `6.19.9` for official). |
-| `jobs` | `int` | No | CPU count | Build parallelism (official kernel only). |
-| `keep_build_dir` | `bool` | No | `false` | Keep build directory after build. |
-| `clean_build` | `bool` | No | `false` | Force clean build (skip cache). |
+| `type` | `string` | **Yes** | — | Kernel type: `firecracker` (pre-built) or `official` (build from source). |
+| `version` | `string` | No | `""` (latest) | Version tag. |
+| `jobs` | `int` | No | CPU count | Build parallelism (official only). |
+| `keep_build_dir` | `bool` | No | `false` | Keep build directory. |
+| `clean_build` | `bool` | No | `false` | Force clean build. |
 | `kernel_config` | `string` | No | `""` | Path to custom kernel config file. |
 | `default` | `bool` | No | `false` | Set as default kernel. |
-| `features` | `string` | No | `""` | Comma-separated features, e.g. `"kvm,nftables,tuntap"`. Use `"all"` or `"*"` to enable every feature in the selected kernel spec. |
+| `features` | `string` | No | `""` | Comma-separated features, e.g. `"kvm,nftables"`. Use `"all"` or `"*"` to enable all features. |
 
 **Example:**
 ```yaml
 kernel:
-  - name: default-kernel
+  fc-kernel:
     type: firecracker
 ```
 
@@ -252,9 +242,8 @@ Download Firecracker binaries.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"binary:name"`. |
-| `type` | `string` | No | `"firecracker"` | Binary type. Valid values: `firecracker`. |
-| `version` | `string` | **Yes** | — | Version tag, e.g. `"1.15.0"`. |
+| `type` | `string` | No | `"firecracker"` | Binary type. |
+| `version` | `string` | **Yes** | — | Version tag, e.g. `"1.16.0"`. |
 | `git_ref` | `string` | No | `""` | Build from git ref instead of downloading. |
 | `default` | `bool` | No | `false` | Set as default binary. |
 | `force` | `bool` | No | `false` | Force re-download. |
@@ -262,9 +251,8 @@ Download Firecracker binaries.
 **Example:**
 ```yaml
 binary:
-  - name: fc-binary
-    type: firecracker
-    version: "1.15.0"
+  fc-bin:
+    version: "1.16.0"
     default: true
 ```
 
@@ -276,237 +264,187 @@ Create a virtual machine.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"vm:name"`. |
-| `network` | `string` | No | Default network | Network name/ID (step reference resolves to ID). |
-| `key` | `string` | No | Default key | Single SSH key name (convenience shorthand for `ssh_keys`). |
-| `ssh_keys` | `[]string` | No | `[]` | List of SSH key names. |
-| `image` | `string` | No | Default image | Image name/ID (step reference resolves to ID). |
-| `kernel` | `string` | No | Default kernel | Kernel name/ID (step reference resolves to ID). |
-| `binary` | `string` | No | Default binary | Binary name/ID (step reference resolves to ID). |
+| `network` | `string` | No | Default network | Network step reference. |
+| `key` | `string` | No | Default key | SSH key step reference (shorthand for `ssh_keys`). |
+| `ssh_keys` | `[]string` | No | `[]` | List of SSH key step references. |
+| `image` | `string` | No | Default image | Image step reference. |
+| `kernel` | `string` | No | Default kernel | Kernel step reference. |
+| `binary` | `string` | No | Default binary | Binary step reference. |
 | `vcpu` | `int` | No | Config default | vCPU count. Range: 1-32. |
-| `mem` | `string` | No | Config default | Memory size. Supports `"512M"`, `"1G"`, or bare MiB int (e.g. `2048`). |
-| `disk_size` | `string` | No | Config default (min from image) | Disk size. Supports `"20G"`, `"512M"`, etc. |
-| `user` | `string` | No | Config default | SSH user for the VM. |
-| `pci_enabled` | `bool` | No | Config default | Enable PCI support. |
-| `nested_virt` | `bool` | No | Config default | Enable nested virtualization (requires PCI). |
-| `cpu_template` | `string` | No | `""` | Path to CPU template JSON file. |
+| `mem` | `string` | No | Config default | Memory, e.g. `"512M"`, `"1G"`, or bare MiB int. |
+| `disk_size` | `string` | No | Config default | Disk size, e.g. `"10G"`, `"512M"`. |
+| `user` | `string` | No | Config default | SSH user. |
+| `pci_enabled` | `bool` | No | Config default | Enable PCI. |
+| `nested_virt` | `bool` | No | Config default | Enable nested virt (requires PCI). |
+| `cpu_template` | `string` | No | `""` | Path to CPU template JSON. |
 | `console_enable` | `bool` | No | Config default | Enable serial console. |
-| `logging_enable` | `bool` | No | Config default | Enable Firecracker logging. |
-| `metrics_enable` | `bool` | No | Config default | Enable Firecracker metrics. |
+| `logging_enable` | `bool` | No | Config default | Enable logging. |
+| `metrics_enable` | `bool` | No | Config default | Enable metrics. |
 | `guest_ip` | `string` | No | `""` | Request specific guest IP. |
-| `guest_mac` | `string` | No | `""` | Request specific MAC address. |
+| `guest_mac` | `string` | No | `""` | Request specific MAC. |
 | `boot_args` | `string` | No | Config default | Custom kernel boot args. |
-| `volumes` | `[]string` | No | `[]` | Volume names to attach. |
-| `count` | `int` | No | `1` | Batch count for creating multiple VMs. |
-| `atomic` | `bool` | No | `false` | Atomic batch creation (all or nothing). |
+| `volumes` | `[]string` | No | `[]` | Volume step references to attach. |
+| `count` | `int` | No | `1` | Batch count. |
+| `atomic` | `bool` | No | `false` | Atomic batch (all or nothing). |
 | `skip_cleanup` | `bool` | No | `false` | Skip cleanup on failure. |
 | `skip_deblob` | `bool` | No | `false` | Skip image deblobbing. |
-| `vsock_port` | `int` | No | Config default | Vsock port for guest agent communication. Default: `1024`. |
-| `writeback` | `bool` | No | Config default | Use writeback cache mode for drives (guest fsync honored). |
+| `vsock_port` | `int` | No | Config default | Vsock port. Default: `1024`. |
+| `writeback` | `bool` | No | Config default | Writeback cache mode. |
 
 **Example:**
 ```yaml
 vm:
-  - name: dev-vm
-    network: default
-    key: main-key
-    image: os-image
-    kernel: default-kernel
-    binary: fc-binary
+  dev-vm:
+    network: "@network:default"
+    key: "@key:main-key"
+    image: "@image:os-image"
+    kernel: "@kernel:fc-kernel"
+    binary: "@binary:fc-bin"
     vcpu: 2
     mem: 2048
-    disk_size: 10G
+    disk_size: "10G"
     depends_on:
-      - network:default
-      - key:main-key
-      - image:os-image
-      - kernel:default-kernel
-      - binary:fc-binary
+      - "@network:default"
+      - "@key:main-key"
+      - "@image:os-image"
+      - "@kernel:fc-kernel"
+      - "@binary:fc-bin"
 ```
 
 ---
 
 ### `exec`
 
-Run a command inside a VM via the vsock guest agent. **Imperative** — always re-runs on re-apply.
+Run a command inside a VM via vsock agent.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"exec:name"`. |
-| `target` | `string` | **Yes** | — | VM name, ID prefix, IP, or MAC address. |
-| `cmd` | `string` | **Yes** | — | Command to execute. Wrapped in `sh -c` by the agent. |
-| `user` | `string` | No | Config default | User to run the command as. |
-| `timeout` | `int` | No | `0` | Command timeout in seconds. `0` = no timeout. |
-| `port` | `int` | No | `0` | Vsock agent port override. `0` = auto-assigned at runtime (default 1024). |
-| `env` | `map[string]string` | No | `{}` | Environment variable overrides passed to the command inside the VM. |
-| `ignore_errors` | `bool` | No | `false` | Continue workflow if the command exits with non-zero code. |
+| `target` | `string` | **Yes** | — | VM name, ID, IP, or MAC. |
+| `cmd` | `string` | **Yes** | — | Command to execute. |
+| `user` | `string` | No | Config default | User to run as. |
+| `timeout` | `int` | No | `0` (no timeout) | Command timeout in seconds. |
+| `port` | `int` | No | `0` (auto) | Vsock port override. |
+| `env` | `map[string]string` | No | `{}` | Environment variables. |
+| `ignore_errors` | `bool` | No | `false` | Continue on non-zero exit. |
 
 **Example:**
 ```yaml
 exec:
-  - name: setup-app
+  setup-app:
     target: dev-vm
     cmd: "./deploy.sh"
     user: root
     timeout: 30
-    env:
-      DEPLOY_ENV: staging
     depends_on:
-      - vm:dev-vm
+      - "@vm:dev-vm"
 ```
 
 ---
 
 ### `ssh`
 
-Run a command on a VM via SSH. **Imperative** — always re-runs on re-apply.
+Run a command on a VM via SSH.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"ssh:name"`. |
-| `target` | `string` | **Yes** | — | VM name, ID prefix, IP, or MAC address. |
-| `user` | `string` | No | VM/config default | SSH user. |
-| `key` | `string` | No | VM/config default | Key name or file path. |
-| `cmd` | `string` | No | `""` | Command to execute. Empty = interactive shell. |
-| `timeout` | `int` | No | `0` | Connection timeout in seconds. |
-| `env` | `map[string]string` | No | `{}` | Environment variable overrides prepended to the command using `env K=V cmd`. |
-| `ignore_errors` | `bool` | No | `false` | Continue workflow if the command exits with non-zero code. |
+| `target` | `string` | **Yes** | — | VM name, ID, IP, or MAC. |
+| `user` | `string` | No | Config default | SSH user. |
+| `key` | `string` | No | Config default | Key step reference or file path. |
+| `cmd` | `string` | No | `""` | Command. Empty = interactive shell. |
+| `timeout` | `int` | No | `0` | Timeout in seconds. |
+| `env` | `map[string]string` | No | `{}` | Environment variables. |
+| `ignore_errors` | `bool` | No | `false` | Continue on non-zero exit. |
 
 **Example:**
 ```yaml
 ssh:
-  - name: setup-hostname
+  verify:
     target: dev-vm
     user: root
-    cmd: "hostnamectl set-hostname my-dev-vm"
+    cmd: "uname -a"
     depends_on:
-      - vm:dev-vm
+      - "@vm:dev-vm"
 ```
 
 ---
 
 ### `copy`
 
-Copy files between host and VM via vsock binary frame protocol. **Imperative** — always re-runs on re-apply.
+Copy files between host and VM via vsock.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `name` | `string` | **Yes** | — | Step name. Becomes `"copy:name"`. |
-| `src` | `string \| []string` | **Yes** | — | Source path(s). Single string auto-normalized to `[]string{"path"}`. |
+| `src` | `string \| []string` | **Yes** | — | Source path(s). Single string auto-normalized to list. |
 | `dest` | `string` | **Yes** | — | Destination in `"vm-name:/remote/path"` format. |
-| `force` | `bool` | No | `false` | Force overwrite existing files. |
-
-**Destination rules:**
-- Trailing `/` on dest → directory mode (preserves source filename)
-- Existing directory → directory mode (preserves source filename)
-- Non-existent or file → file mode (uses exact dest path)
+| `force` | `bool` | No | `false` | Force overwrite. |
 
 **Example:**
 ```yaml
 copy:
-  - name: deploy-binary
+  deploy-bin:
     src: ./mvm
-    dest: dev-vm:/opt/bin/mvm
+    dest: "dev-vm:/opt/bin/mvm"
     force: true
     depends_on:
-      - vm:dev-vm
+      - "@vm:dev-vm"
 ```
-
----
-
-## Dependencies
-
-Steps can declare dependencies on other steps using `depends_on`. The engine uses these to build a DAG and execute steps in the correct order.
-
-**Format:** `"type:name"` — singular type prefix + step name.
-
-Steps can also declare resources to clean up after they complete using `removes`:
-
-```yaml
-image_import:
-  - name: capture-base
-    source: builder
-    removes: [vm:builder]
-```
-
-The `removes` field lists `"type:name"` resources to destroy immediately after this step's `Apply()` succeeds — before downstream steps run. This frees resources mid-pipeline (e.g., tearing down a builder VM after its rootfs is captured).
-
-**Relationship:** `depends_on` = "need this first", `removes` = "now clean this up". Same level, opposite direction.
-
-```yaml
-vm:
-  - name: dev-vm
-    depends_on:
-      - network:default
-      - key:main-key
-      - image:os-image
-```
-
-**Inferred dependencies:** The VM step automatically infers dependencies from reference fields (`network`, `key`, `image`, `kernel`, `binary`). Explicit `depends_on` entries are deduplicated against inferred ones.
-
-**Execution order:**
-- **Apply:** Level 0 (no deps) → Level 1 → Level 2 → ...
-- **Destroy:** Reverse order (Level N → ... → Level 0)
-
-Steps within the same level run in parallel.
 
 ---
 
 ## Destroy Behavior
 
-`mvm env destroy` runs each step's `Destroy()` method in reverse dependency order. Behavior depends on step type:
+`mvm env destroy` runs each step's `Destroy()` in reverse dependency order:
 
-| Step Type | Behavior on Destroy | Rationale |
-|-----------|---------------------|-----------|
-| `network` | **Deleted** — iptables NAT rules removed, bridge/tap interfaces deleted, DB record removed | Runtime network state — must be torn down |
-| `key` | **Deleted** — SSH key files removed from disk, DB record removed | Created per-environment |
-| `vm` | **Deleted** — Firecracker process killed, console relay shut down, TAP device removed, IP lease released, volumes detached, VM directory + DB record deleted | Full lifecycle teardown |
-| `image` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
-| `image_import` | **Preserved** — files stay in cache, DB record kept | Asset — imported once, reused across environments |
-| `kernel` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to rebuild/re-download, shared across environments |
-| `binary` | **Preserved** — files stay in cache, DB record kept | Asset — expensive to re-download, shared across environments |
-| `ssh` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran) |
-| `exec` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (command already ran via vsock) |
-| `copy` | **No-op** — no persistent resources to clean up | Ephemeral side-effect (file already transferred) |
+| Step Type | Destroy Behavior |
+|-----------|-----------------|
+| `network` | Deleted — bridge, NAT rules, DB record |
+| `key` | Deleted — key files, DB record |
+| `vm` | Deleted — Firecracker process, console relay, TAP, volumes, DB record |
+| `image` | Preserved — cached asset, not destroyed |
+| `image_import` | Preserved — cached asset, not destroyed |
+| `kernel` | Preserved — cached asset, not destroyed |
+| `binary` | Preserved — cached asset, not destroyed |
+| `ssh` | No-op — ephemeral side-effect |
+| `exec` | No-op — ephemeral side-effect |
+| `copy` | No-op — ephemeral side-effect |
 
-**Why image/image_import/kernel/binary are preserved:** These are assets cached for reuse across multiple environments (either downloaded or imported). Deleting them on destroy would force a re-fetch on the next `env apply`. They are only removed when explicitly deleted via `mvm image rm`, `mvm kernel rm`, or `mvm binary rm`.
+### Mid-pipeline removals (`removes`)
 
-### Mid-pipeline removals (`removes` field)
-
-The `removes` field declared on any step destroys resources **immediately after that step completes** — not during `env destroy`. This is useful for freeing resources mid-pipeline:
+The `removes` field destroys resources immediately after a step completes — useful for freeing builder VMs mid-pipeline:
 
 ```yaml
 image_import:
-  - name: capture-base
-    source: builder
-    removes: [vm:builder]
+  capture-base:
+    source: "@vm:builder"
+    removes:
+      - "@vm:builder"
 ```
-
-The builder VM is torn down right after its rootfs is captured, before downstream steps start. Removals use the same API calls as destroy but run at the applying step's position in the DAG, not at the end. Failure to remove is non-fatal (logged as a warning).
 
 ### Ephemeral specs (`ephemeral: true`)
 
-When `ephemeral: true` is set at the top level, the workflow engine automatically runs `mvm env destroy` after a successful apply. This tears down all resources and removes the workflow state record. It's equivalent to running `mvm env apply` followed immediately by `mvm env destroy`.
-
-Ephemeral specs are useful for CI/CD pipelines that provision a VM, extract build artifacts, and want zero cleanup burden — the `removes` field handles mid-pipeline cleanup, and `ephemeral: true` handles final teardown + state removal.
+Auto-runs `env destroy` after successful apply:
 
 ```yaml
 version: "1"
 ephemeral: true
 
-# ... resources ...
+vm:
+  builder:
+    image: "@image:os-image"
+    ...
+
+exec:
+  build-artifact:
+    target: builder
+    cmd: "make build"
 
 copy:
-  - name: retrieve-artifacts
-    src: vm:builder:/output/
-    dest: ./dist
+  retrieve:
+    dest: ./dist/
+    src: "builder:/output/artifact.tar.gz"
     removes:
-      - vm:builder
-      - network:builder
-      - key:builder
+      - "@vm:builder"
 ```
-
-In this example, `removes` frees the VM/network/key mid-pipeline, and `ephemeral` removes the workflow state so `mvm env ls` stays clean.
 
 ---
 
@@ -516,113 +454,85 @@ In this example, `removes` frees the VM/network/key mid-pipeline, and `ephemeral
 version: "1"
 
 network:
-  - name: default
+  default:
     subnet: "172.27.0.0/24"
     nat_enabled: true
     default: true
 
 key:
-  - name: main-key
+  main-key:
     algorithm: ed25519
     default: true
 
 image:
-  - name: os-image
+  os-image:
     type: alpine
-    version: "3.21"
+    version: "3.23"
 
 kernel:
-  - name: default-kernel
+  fc-kernel:
     type: firecracker
 
 binary:
-  - name: fc-binary
-    type: firecracker
-    version: "1.15.0"
+  fc-bin:
+    version: "1.16.0"
     default: true
 
 vm:
-  - name: dev-vm
-    network: default
-    key: main-key
-    image: os-image
-    kernel: default-kernel
-    binary: fc-binary
+  dev-vm:
+    network: "@network:default"
+    key: "@key:main-key"
+    image: "@image:os-image"
+    kernel: "@kernel:fc-kernel"
+    binary: "@binary:fc-bin"
     vcpu: 2
     mem: 2048
-    disk_size: 10G
     depends_on:
-      - network:default
-      - key:main-key
-      - image:os-image
-      - kernel:default-kernel
-      - binary:fc-binary
-
-ssh:
-  - name: setup-hostname
-    target: dev-vm
-    user: root
-    cmd: "hostnamectl set-hostname my-dev-vm"
-    depends_on:
-      - vm:dev-vm
+      - "@network:default"
+      - "@key:main-key"
+      - "@image:os-image"
+      - "@kernel:fc-kernel"
+      - "@binary:fc-bin"
 
 exec:
-  - name: bootstrap-app
+  bootstrap:
     target: dev-vm
     cmd: "curl -sS https://example.com/bootstrap.sh | sh"
-    user: root
-    timeout: 60
-    env:
-      APP_ENV: production
     depends_on:
-      - vm:dev-vm
-
-copy:
-  - name: deploy-binary
-    src: ./mvm
-    dest: dev-vm:/opt/bin/mvm
-    depends_on:
-      - vm:dev-vm
+      - "@vm:dev-vm"
 ```
 
 ---
 
 ## State File
 
-After running `mvm env apply`, the engine persists the full state to `~/.cache/mvmctl/workflows/<workflow-id>/state.yaml`.
-
-**Structure:**
+After `mvm env apply`, state is persisted to `~/.cache/mvmctl/workflows/<wf-id>/state.yaml`:
 
 ```yaml
 workflow_id: "ec729934a8fb9c67"
 spec_path: "./my-env.yaml"
 schema_version: "1.0"
-created_at: "2026-06-12T10:00:00Z"
-updated_at: "2026-06-12T10:05:00Z"
+created_at: "2026-07-05T10:00:00Z"
+updated_at: "2026-07-05T10:05:00Z"
 resources:
   - name: "network:default"
     type: "network"
-    depends_on: ["image:os-image"]
+    depends_on: []
     state:
       spec:
         network_id: "net-abc123"
-        subnet: "172.27.0.0/24"
       meta:
         was_created: true
         spec_hash: "a1b2c3..."
 ```
 
-**Fields:**
-
 | Field | Description |
 |-------|-------------|
-| `name` | Resource name (e.g. `"network:default"`) |
-| `type` | Resource type (e.g. `"network"`) |
+| `name` | Internal name (`type:name` format, no `@` sigil) |
+| `type` | Resource type |
 | `depends_on` | Explicit dependencies |
-| `state.spec` | Step state output — IDs, properties, and configuration from the applied resource |
-| `state.meta.was_created` | `true` if created by the workflow, `false` if pre-existing |
-| `state.meta.spec_hash` | SHA256 hash of input spec YAML — compared on re-apply for drift detection |
+| `state.spec` | Step state output |
+| `state.meta.was_created` | `true` if created by workflow |
+| `state.meta.spec_hash` | Hash of input spec YAML for drift detection |
 
-**Drift detection:** On `mvm env diff`, the engine compares each step's spec hash against the saved `spec_hash`. If different, the resource is marked as drifted (shown in yellow).
-
-**Crash resilience:** State is written after every successful step, not batched at the end. If `mvm env apply` crashes partway, the state file already contains all completed steps. Re-running picks up where it left off — completed steps are skipped via existence checks. Same for `mvm env destroy`.
+State is written after every successful step (crash-resilient). Re-running picks up where it left off.

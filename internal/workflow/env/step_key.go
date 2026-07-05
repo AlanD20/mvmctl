@@ -190,7 +190,10 @@ func newKeyStepFromSpec(
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		return nil, err
 	}
-	input.Name = name
+	// Resource name: spec "name" overrides step name.
+	if input.Name == "" {
+		input.Name = name
+	}
 
 	return &KeyStep{
 		stepType: stepType,

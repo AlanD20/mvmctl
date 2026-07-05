@@ -106,6 +106,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GetByName` and `FindByPrefix` accept an optional `includeDeleted` parameter (default `false`). Resolvers thread this through so individual operations can opt in to resolving deleted resources.
 
 
+### Changed
+
+#### Env spec format [Major]
+- Spec format redesigned for clarity and consistency. Step sections are now maps (key = step name) instead of lists with a `name` field. An optional `name` field inside the params overrides the resource name (e.g., the bridge name for a network, the VM name). Cross-resource references use `@type:name` format (e.g., `"@network:default"`) with the `@` sigil making references visually distinct from literal values. Both `depends_on` and reference fields (`network`, `key`, `image`, `kernel`, `binary`) accept the new format. Backward compat for bare names is preserved.
+
+  **Before:**
+  ```yaml
+  network:
+    - name: default
+      subnet: "172.27.0.0/24"
+  vm:
+    - name: dev-vm
+      network: default
+      depends_on:
+        - network:default
+  ```
+
+  **After:**
+  ```yaml
+  network:
+    default:
+      subnet: "172.27.0.0/24"
+  vm:
+    dev-vm:
+      network: "@network:default"
+      depends_on:
+        - "@network:default"
+  ```
+
 ### Fixed
 
 #### `mvm kernel`

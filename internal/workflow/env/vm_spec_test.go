@@ -17,7 +17,7 @@ func TestVMAllowRemoteExecFullSpec(t *testing.T) {
 	yamlData := []byte(`
 version: "1"
 vm:
-  - name: controller-1
+  controller-1:
     vcpu: 2
     network: k8s
     key: main-key
@@ -25,7 +25,7 @@ vm:
     kernel: custom-kernel
     binary: fc-binary
     allow_remote_exec: true
-  - name: controller-2
+  controller-2:
     vcpu: 2
     network: k8s
     key: main-key
@@ -45,24 +45,26 @@ vm:
 		t.Fatalf("expected 2 VMs, got %d", len(vms))
 	}
 
-	for i, name := range []string{"controller-1", "controller-2"} {
-		vm := vms[i]
-		if vm["name"] != name {
-			t.Errorf("vm[%d].name = %v, want %s", i, vm["name"], name)
-		}
+	for _, name := range []string{"controller-1", "controller-2"} {
+		vm := vms[name]
 		if vm["allow_remote_exec"] != true {
-			t.Errorf("vm[%d].allow_remote_exec = %v (type %T), want true",
-				i, vm["allow_remote_exec"], vm["allow_remote_exec"])
+			t.Errorf("vm %q allow_remote_exec = %v (type %T), want true",
+				name, vm["allow_remote_exec"], vm["allow_remote_exec"])
 		}
 
 		// Same round-trip as newVMStepFromSpec
 		data, err := yaml.Marshal(vm)
 		if err != nil {
-			t.Fatalf("marshal vm[%d]: %v", i, err)
+			t.Fatalf("marshal vm %q: %v", name, err)
 		}
 		var input inputs.VMCreateInput
 		if err := yaml.Unmarshal(data, &input); err != nil {
-			t.Fatalf("unmarshal vm[%d] into VMCreateInput: %v", i, err)
+			t.Fatalf("unmarshal vm %q into VMCreateInput: %v", name, err)
+		}
+		// The spec no longer has a "name" field (name is the map key).
+		// VMCreateInput.Name is set by the factory from the name param.
+		if input.Name != "" {
+			t.Errorf("VMCreateInput.Name = %q, want empty (set by factory)", input.Name)
 		}
 		if input.AllowRemoteExec == nil || *input.AllowRemoteExec != true {
 			t.Errorf("VMCreateInput.AllowRemoteExec for %s = %v, want true",
@@ -75,7 +77,6 @@ vm:
 // produces a step whose Apply input has AllowRemoteExec set correctly.
 func TestVMStepFromSpec_PreservesAllowRemoteExec(t *testing.T) {
 	spec := model.ResourceMap{
-		"name":              "controller-1",
 		"vcpu":              2,
 		"network":           "k8s",
 		"key":               "main-key",

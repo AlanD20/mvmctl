@@ -130,6 +130,11 @@ func newImageImportStepFromSpec(
 		return nil, errors.New("operation not initialized")
 	}
 
+	// Strip "type:" prefix from VM step reference in "source" field.
+	if s, ok := spec["source"].(string); ok {
+		spec["source"] = stripBareName(s)
+	}
+
 	data, err := yaml.Marshal(spec)
 	if err != nil {
 		return nil, err
