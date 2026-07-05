@@ -40,38 +40,62 @@ jobs:
       - name: Smoke test
         run: ./dist/mvm --version
 
+      - name: Build release body
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+
+          # Write install instructions
+          cat > /tmp/release-body.md << EOF
+          ## mvmctl $TAG
+
+          ### Debian/Ubuntu (.deb)
+          - \`mvmctl_${TAG}_amd64.deb\` — x86_64
+          - \`mvmctl_${TAG}_arm64.deb\` — ARM64
+
+          ### Fedora/RHEL (.rpm)
+          - \`mvmctl-${TAG}-1.x86_64.rpm\` — x86_64
+          - \`mvmctl-${TAG}-1.aarch64.rpm\` — ARM64
+
+          ### Arch Linux
+          - \`mvmctl-bin-${TAG}-1-x86_64.pkg.tar.zst\` — x86_64
+          - Also available on AUR as \`mvmctl-bin\`
+
+          ### Standalone binaries
+          - \`mvm\` — x86_64
+          - \`mvm-arm64\` — ARM64
+
+          ### Install
+          \`\`\`bash
+          # Debian/Ubuntu
+          sudo dpkg -i mvmctl_*_amd64.deb
+
+          # Fedora/RHEL
+          sudo dnf install mvmctl-*.x86_64.rpm
+
+          # Arch
+          sudo pacman -U mvmctl-bin-*.pkg.tar.zst
+          \`\`\`
+          EOF
+
+          # Extract changelog section for this version
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { found=1; print; next }
+            /^## \[/ && found { exit }
+            found { print }
+          ' CHANGELOG.md > /tmp/changelog-body.md
+
+          # Combine: changelog first, then install instructions
+          if [ -s /tmp/changelog-body.md ]; then
+            cat /tmp/changelog-body.md /tmp/release-body.md > /tmp/combined-body.md
+          else
+            cp /tmp/release-body.md /tmp/combined-body.md
+          fi
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/packages/*
           name: ${{ github.ref_name }}
-          body: |
-            ## mvmctl ${{ github.ref_name }}
-
-            ### Debian/Ubuntu (.deb)
-            - `mvmctl_${{ github.ref_name }}_amd64.deb` — x86_64
-            - `mvmctl_${{ github.ref_name }}_arm64.deb` — ARM64
-
-            ### Fedora/RHEL (.rpm)
-            - `mvmctl-${{ github.ref_name }}-1.x86_64.rpm` — x86_64
-            - `mvmctl-${{ github.ref_name }}-1.aarch64.rpm` — ARM64
-
-            ### Arch Linux
-            - `mvmctl-bin-${{ github.ref_name }}-1-x86_64.pkg.tar.zst` — x86_64
-            - Also available on AUR as `mvmctl-bin`
-
-            ### Standalone binaries
-            - `mvm` — x86_64
-            - `mvm-arm64` — ARM64
-
-            ### Install
-            ```bash
-            # Debian/Ubuntu
-            sudo dpkg -i mvmctl_*_amd64.deb
-
-            # Fedora/RHEL
-            sudo dnf install mvmctl-*.x86_64.rpm
-
-            # Arch
-            sudo pacman -U mvmctl-bin-*.pkg.tar.zst
-            ```
+          body_path: /tmp/combined-body.md
