@@ -1060,7 +1060,7 @@ class TestVMConfigOptions:
         unique_vm_name,
         config_options_network,
     ):
-        """Create VM with --no-enable-logging."""
+        """Create VM with --disable-logging."""
         net_name = config_options_network
         try:
             _run_mvm(
@@ -1070,7 +1070,7 @@ class TestVMConfigOptions:
                 unique_vm_name,
                 "--image",
                 "alpine:3.23",
-                "--no-enable-logging",
+                "--disable-logging",
                 "--network",
                 net_name,
             )
@@ -1131,7 +1131,7 @@ class TestVMConfigOptions:
         unique_vm_name,
         config_options_network,
     ):
-        """Create VM with --no-enable-metrics."""
+        """Create VM with --disable-metrics."""
         net_name = config_options_network
         try:
             _run_mvm(
@@ -1141,7 +1141,7 @@ class TestVMConfigOptions:
                 unique_vm_name,
                 "--image",
                 "alpine:3.23",
-                "--no-enable-metrics",
+                "--disable-metrics",
                 "--network",
                 net_name,
             )

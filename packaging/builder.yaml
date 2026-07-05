@@ -133,7 +133,7 @@ exec:
       export HOME=/root && \
       export DEBIAN_FRONTEND=noninteractive && \
       apt-get update -qq && \
-      apt-get install -y -qq debhelper build-essential rpm docker.io wget && \
+      apt-get install -y -qq debhelper build-essential rpm docker.io wget zstd && \
       rm -rf /usr/local/go /usr/lib/go-1.22 && \
       apt-get remove -y -qq golang-go golang-1.22-go && \
       wget -q https://go.dev/dl/go1.26.4.linux-amd64.tar.gz -O /tmp/go.tar.gz && \

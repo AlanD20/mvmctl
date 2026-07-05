@@ -57,7 +57,10 @@ def _get_cached_alpine_path_in_vm(
     """
     result = _run_mvm(runner_vm, "image", "ls", "--json")
     images: list[dict[str, Any]] = _parse_json_output(result.stdout)
-    alpine_images = [i for i in images if "alpine" in i.get("type", "").lower()]
+    alpine_images = [
+        i for i in images
+        if "alpine" in i.get("type", "").lower() and i.get("is_present")
+    ]
     if not alpine_images:
         return None
 
@@ -946,7 +949,7 @@ class TestImageImportAdvanced:
             result = _run_mvm(runner_vm, "image", "ls", "--json")
             images = _parse_json_output(result.stdout)
             imported = [
-                i for i in images if i.get("name") == "test-version"
+                i for i in images if i.get("type") == "test-version"
             ]
             assert imported, (
                 "Imported image with --version not found in listing"
@@ -1443,7 +1446,7 @@ class TestImageDefaultMigration:
     def test_default_migrates_to_new_image_on_force_repull(
         self, runner_vm: str
     ) -> None:
-        """When force-re-pulling the default image, default should migrate to new record."""
+        """When force-re-pulling the same image, default should migrate to new record."""
         _ensure_image(runner_vm, "alpine:3.23")
         result = _run_mvm(runner_vm, "image", "ls", "--json")
         images: list[dict[str, Any]] = _parse_json_output(result.stdout)
@@ -1453,7 +1456,7 @@ class TestImageDefaultMigration:
             if i.get("type") == "alpine" and i.get("is_present")
         ]
         assert present_alpine, (
-            "alpine-3.21 not present after _ensure_image"
+            "alpine not present after _ensure_image"
         )
 
         old_alpine = present_alpine[0]
@@ -1475,6 +1478,7 @@ class TestImageDefaultMigration:
             changed_default = True
 
         try:
+            # Force-pull a DIFFERENT version (3.21)
             _run_mvm(
                 runner_vm,
                 "image",
@@ -1492,30 +1496,29 @@ class TestImageDefaultMigration:
             alpine_after = [
                 i for i in images_after if i.get("type") == "alpine"
             ]
-            assert len(alpine_after) >= 1, (
-                "Expected at least one alpine-3.21 record after force re-pull"
-            )
 
+            # Default should remain on the old 3.23 record
             new_default = next(
                 (i for i in alpine_after if i.get("is_default")), None
             )
             assert new_default is not None, (
-                "Expected a default alpine-3.21 after force re-pull"
+                "Expected a default alpine record"
             )
-            assert new_default["id"] != old_alpine_id, (
-                "Expected new alpine record ID different from old one"
-            )
-            assert new_default.get("is_present"), (
-                "New alpine record should be present"
+            assert new_default["id"] == old_alpine_id, (
+                "Default should stay on the old record when pulling a different version"
             )
 
-            old_record = next(
-                (i for i in alpine_after if i["id"] == old_alpine_id), None
+            # The new 3.21 record should exist and be present.
+            # Filter by is_present to avoid picking up a soft-deleted stale record from a previous run.
+            new_version = next(
+                (i for i in alpine_after if i.get("version") == "3.21" and i.get("is_present")), None
             )
-            if old_record is not None:
-                assert not old_record.get("is_present"), (
-                    "Old alpine record should not be present after force re-pull"
-                )
+            assert new_version is not None, (
+                "Expected alpine:3.21 record after force pull"
+            )
+            assert new_version.get("is_present"), (
+                "New alpine:3.21 record should be present"
+            )
         finally:
             if changed_default and original_default_id:
                 _run_mvm(

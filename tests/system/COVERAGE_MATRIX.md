@@ -152,9 +152,9 @@ removed, or when test coverage changes.
 | `vm create` default (PCI enabled) | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L3 — pci_enabled=true AND VM boots successfully. No `--no-pci` flag passed. |
 | `vm create` with `--no-pci` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 — pci_enabled=false |
 | `vm create` with `--enable-logging` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L3: firecracker.log file exists in vm_dir and is non-empty |
-| `vm create` with `--no-enable-logging` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 |
+| `vm create` with `--disable-logging` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 |
 | `vm create` with `--enable-metrics` | ✅ Deep | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L3: firecracker.metrics file exists in vm_dir and is non-empty |
-| `vm create` with `--no-enable-metrics` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 |
+| `vm create` with `--disable-metrics` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMConfigOptions` | L2 |
 | `vm create` with `--cloudinit-config` | 🟡 Partial | `vm/test_vm_lifecycle.py` | `TestVMCloudInit` | L1/L2 for most modes, L3 for cloudinit-config script (checks seed dir via SSH). DNS test skips often. |
 | `vm create` with `--cloud-init-mode inject` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCloudInit` | L2 — status=running only |
 | `vm create` with `--cloud-init-mode iso` | ⚡ Shallow | `vm/test_vm_lifecycle.py` | `TestVMCloudInitModes` | L2 — status=running |
