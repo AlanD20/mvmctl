@@ -175,9 +175,9 @@ func TestNetworkStep_Apply(t *testing.T) {
 			written := (*writes)[0]
 
 			// Verify the written state contains the correct network data.
-			assert.Equal(t, tc.wantNetworkID, written.Spec["network_id"],
+			assert.Equal(t, tc.wantNetworkID, written.Output["network_id"],
 				"written state must reference the correct network ID")
-			assert.Equal(t, tc.wantSubnet, written.Spec["subnet"],
+			assert.Equal(t, tc.wantSubnet, written.Output["subnet"],
 				"written state must reference the correct subnet")
 			assert.Equal(t, tc.wantWasCreated, written.Meta.WasCreated,
 				"WasCreated must be preserved from saved meta")
@@ -343,7 +343,7 @@ func TestNetworkStep_Destroy(t *testing.T) {
 			written := (*writes)[0]
 
 			if tc.wantNetworkID != "" {
-				assert.Equal(t, tc.wantNetworkID, written.Spec["network_id"],
+				assert.Equal(t, tc.wantNetworkID, written.Output["network_id"],
 					"destroyed state must reference the recovered network ID")
 				assert.Equal(t, tc.wantWasCreated, written.Meta.WasCreated)
 			}
@@ -552,8 +552,8 @@ func TestNetworkStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"network_id": "net-123", "subnet": "10.0.0.0/24"},
 			savedMeta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"network_id": "net-123", "subnet": "10.0.0.0/24"},
-				Meta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
+				Output: model.ResourceMap{"network_id": "net-123", "subnet": "10.0.0.0/24"},
+				Meta:   model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			},
 		},
 	}
@@ -845,9 +845,9 @@ func TestFromState_NetworkStep_StateRecovery(t *testing.T) {
 			require.NoError(t, err)
 
 			got := step.StateData()
-			assert.Equal(t, tc.wantNetworkID, got.Spec["network_id"],
+			assert.Equal(t, tc.wantNetworkID, got.Output["network_id"],
 				"recovered state must contain correct network_id")
-			assert.Equal(t, tc.wantSubnet, got.Spec["subnet"],
+			assert.Equal(t, tc.wantSubnet, got.Output["subnet"],
 				"recovered state must contain correct subnet")
 			assert.Equal(t, tc.wantWasCreated, got.Meta.WasCreated,
 				"recovered meta must preserve WasCreated")

@@ -204,8 +204,9 @@ func TestBinaryStep_Apply(t *testing.T) {
 			// Verify the full written state matches expectations.
 			// SpecHash is verified separately (must be non-empty for drift detection).
 			want := model.ResourceState{
-				Spec: model.ResourceMap{"binary_id": tc.wantBinaryID},
-				Meta: model.ResourceMeta{WasCreated: tc.wantWasCreated},
+				Spec:   model.ResourceMap{"type": "firecracker", "version": "1.15.1"},
+				Output: model.ResourceMap{"binary_id": tc.wantBinaryID},
+				Meta:   model.ResourceMeta{WasCreated: tc.wantWasCreated},
 			}
 			if diff := cmp.Diff(want, written, cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash")); diff != "" {
 				t.Errorf("written state mismatch (-want +got):\n%s", diff)
@@ -320,7 +321,8 @@ func TestBinaryStep_Destroy(t *testing.T) {
 				Meta: model.ResourceMeta{WasCreated: tc.wantWasCreated},
 			}
 			if tc.wantBinaryID != "" {
-				want.Spec = model.ResourceMap{"binary_id": tc.wantBinaryID}
+				want.Spec = model.ResourceMap{"type": "firecracker", "version": "1.15.1"}
+				want.Output = model.ResourceMap{"binary_id": tc.wantBinaryID}
 			}
 			if diff := cmp.Diff(
 				want,
@@ -355,8 +357,8 @@ func TestBinaryStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"binary_id": "bin-123"},
 			savedMeta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"binary_id": "bin-123"},
-				Meta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
+				Output: model.ResourceMap{"binary_id": "bin-123"},
+				Meta:   model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			},
 		},
 	}

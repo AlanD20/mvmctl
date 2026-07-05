@@ -23,15 +23,16 @@ type ImageImportState struct {
 // ImageImportStep implements workflow.Step for importing local images.
 // Destroy is a no-op because images persist in the database.
 type ImageImportStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.ImageImportInput
-	op       api.ImageAPI
-	saved    *ImageImportState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.ImageImportInput
+	inputSpec model.ResourceMap
+	op        api.ImageAPI
+	saved     *ImageImportState
+	meta      model.ResourceMeta
 }
 
 func (s *ImageImportStep) Type() string { return s.stepType }
@@ -85,8 +86,13 @@ func (s *ImageImportStep) Destroy(
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[ImageImportState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[ImageImportState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[ImageImportState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 
@@ -103,8 +109,9 @@ func (s *ImageImportStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -145,13 +152,14 @@ func newImageImportStepFromSpec(
 		return nil, err
 	}
 	return &ImageImportStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(data),
+		input:     input,
+		inputSpec: spec,
+		op:        op,
 	}, nil
 }
 
@@ -166,7 +174,13 @@ func newImageImportStepFromState(
 		return nil, errors.New("operation not initialized")
 	}
 
-	is := StateFromMap[ImageImportState](saved.Spec)
+	var is *ImageImportState
+	if saved.Output != nil {
+		is = StateFromMap[ImageImportState](saved.Output)
+	}
+	if is == nil && saved.Spec != nil {
+		is = StateFromMap[ImageImportState](saved.Spec)
+	}
 	return &ImageImportStep{
 		stepType: stepType,
 		name:     name,

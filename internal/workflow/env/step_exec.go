@@ -30,6 +30,7 @@ type ExecStep struct {
 	removes      []string
 	specHash     string
 	input        inputs.ExecInput
+	inputSpec    model.ResourceMap
 	op           api.ExecAPI
 	ignoreErrors bool
 	saved        *ExecState
@@ -99,8 +100,13 @@ func (s *ExecStep) Destroy(
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[ExecState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[ExecState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[ExecState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 	// Exec commands are ephemeral — no teardown needed.
@@ -115,8 +121,9 @@ func (s *ExecStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -150,6 +157,7 @@ func newExecStepFromSpec(
 		removes:      spec.GetStringList("removes"),
 		specHash:     crypto.SHA256(data),
 		input:        input,
+		inputSpec:    spec,
 		op:           op,
 		ignoreErrors: spec.GetBool("ignore_errors"),
 	}, nil
@@ -165,7 +173,13 @@ func newExecStepFromState(
 	if op == nil {
 		return nil, errors.New("operation not initialized")
 	}
-	ss := StateFromMap[ExecState](saved.Spec)
+	var ss *ExecState
+	if saved.Output != nil {
+		ss = StateFromMap[ExecState](saved.Output)
+	}
+	if ss == nil && saved.Spec != nil {
+		ss = StateFromMap[ExecState](saved.Spec)
+	}
 	return &ExecStep{
 		stepType: stepType,
 		name:     name,

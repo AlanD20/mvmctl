@@ -520,6 +520,8 @@ resources:
     depends_on: []
     state:
       spec:
+        subnet: "172.27.0.0/24"
+      output:
         network_id: "net-abc123"
       meta:
         was_created: true
@@ -531,7 +533,8 @@ resources:
 | `name` | Internal name (`type:name` format, no `@` sigil) |
 | `type` | Resource type |
 | `depends_on` | Explicit dependencies |
-| `state.spec` | Step state output |
+| `state.spec` | Input spec fields from the YAML |
+| `state.output` | Created resource state (IDs, properties) |
 | `state.meta.was_created` | `true` if created by workflow |
 | `state.meta.spec_hash` | Hash of input spec YAML for drift detection |
 

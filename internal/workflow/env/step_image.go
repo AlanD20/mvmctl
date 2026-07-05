@@ -24,15 +24,16 @@ type ImageState struct {
 // ImageStep implements workflow.Step for pulling images.
 // Destroy is a no-op because images persist in the database.
 type ImageStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.ImagePullInput
-	op       api.ImageAPI
-	saved    *ImageState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.ImagePullInput
+	inputSpec model.ResourceMap
+	op        api.ImageAPI
+	saved     *ImageState
+	meta      model.ResourceMeta
 }
 
 func (s *ImageStep) Type() string { return s.stepType }
@@ -114,8 +115,13 @@ func (s *ImageStep) Destroy(
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[ImageState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[ImageState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[ImageState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 	// Images persist in the database — no teardown needed.
@@ -130,8 +136,9 @@ func (s *ImageStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -167,13 +174,14 @@ func newImageStepFromSpec(
 		return nil, err
 	}
 	return &ImageStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(data),
+		input:     input,
+		inputSpec: spec,
+		op:        op,
 	}, nil
 }
 
@@ -188,7 +196,13 @@ func newImageStepFromState(
 		return nil, errors.New("operation not initialized")
 	}
 
-	is := StateFromMap[ImageState](saved.Spec)
+	var is *ImageState
+	if saved.Output != nil {
+		is = StateFromMap[ImageState](saved.Output)
+	}
+	if is == nil && saved.Spec != nil {
+		is = StateFromMap[ImageState](saved.Spec)
+	}
 	return &ImageStep{
 		stepType: stepType,
 		name:     name,

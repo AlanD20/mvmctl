@@ -25,15 +25,16 @@ type NetworkState struct {
 
 // NetworkStep implements workflow.Step for creating and destroying networks.
 type NetworkStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.NetworkCreateInput
-	op       api.NetworkAPI
-	saved    *NetworkState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.NetworkCreateInput
+	inputSpec model.ResourceMap
+	op        api.NetworkAPI
+	saved     *NetworkState
+	meta      model.ResourceMeta
 }
 
 func (s *NetworkStep) Type() string { return s.stepType }
@@ -116,8 +117,13 @@ func (s *NetworkStep) Destroy(
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[NetworkState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[NetworkState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[NetworkState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 
@@ -170,8 +176,9 @@ func (s *NetworkStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -217,13 +224,14 @@ func newNetworkStepFromSpec(
 	}
 
 	return &NetworkStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(data),
+		input:     input,
+		inputSpec: spec,
+		op:        op,
 	}, nil
 }
 
@@ -238,7 +246,13 @@ func newNetworkStepFromState(
 		return nil, errors.New("operation not initialized")
 	}
 
-	ns := StateFromMap[NetworkState](saved.Spec)
+	var ns *NetworkState
+	if saved.Output != nil {
+		ns = StateFromMap[NetworkState](saved.Output)
+	}
+	if ns == nil && saved.Spec != nil {
+		ns = StateFromMap[NetworkState](saved.Spec)
+	}
 	return &NetworkStep{
 		stepType: stepType,
 		name:     name,

@@ -24,15 +24,16 @@ type BinaryState struct {
 // BinaryStep implements workflow.Step for pulling binaries (firecracker, jailer).
 // Destroy is a no-op because binaries persist in the database.
 type BinaryStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.BinaryPullInput
-	op       api.BinaryAPI
-	saved    *BinaryState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.BinaryPullInput
+	inputSpec model.ResourceMap
+	op        api.BinaryAPI
+	saved     *BinaryState
+	meta      model.ResourceMeta
 }
 
 func (s *BinaryStep) Type() string { return s.stepType }
@@ -127,8 +128,13 @@ func (s *BinaryStep) Destroy(
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[BinaryState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[BinaryState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[BinaryState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 	// Binaries persist in the database — no teardown needed.
@@ -143,8 +149,9 @@ func (s *BinaryStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -181,13 +188,14 @@ func newBinaryStepFromSpec(
 	}
 
 	return &BinaryStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(data),
+		input:     input,
+		inputSpec: spec,
+		op:        op,
 	}, nil
 }
 
@@ -202,7 +210,13 @@ func newBinaryStepFromState(
 		return nil, errors.New("operation not initialized")
 	}
 
-	bs := StateFromMap[BinaryState](saved.Spec)
+	var bs *BinaryState
+	if saved.Output != nil {
+		bs = StateFromMap[BinaryState](saved.Output)
+	}
+	if bs == nil && saved.Spec != nil {
+		bs = StateFromMap[BinaryState](saved.Spec)
+	}
 	return &BinaryStep{
 		stepType: stepType,
 		name:     name,

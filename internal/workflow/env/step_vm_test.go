@@ -187,9 +187,9 @@ func TestVMStep_Apply(t *testing.T) {
 			written := (*writes)[0]
 
 			// Verify the written state contains the correct VM ID and dir.
-			assert.Equal(t, tc.wantVMID, written.Spec["vm_id"],
+			assert.Equal(t, tc.wantVMID, written.Output["vm_id"],
 				"written state must reference the existing VM ID")
-			assert.Equal(t, tc.wantVMDir, written.Spec["vm_dir"],
+			assert.Equal(t, tc.wantVMDir, written.Output["vm_dir"],
 				"written state must reference the existing VM rootfs path")
 			assert.Equal(t, tc.wantWasCreated, written.Meta.WasCreated,
 				"WasCreated must be preserved from saved meta")
@@ -324,7 +324,7 @@ func TestVMStep_Destroy(t *testing.T) {
 			written := (*writes)[0]
 
 			if tc.wantVMID != "" {
-				assert.Equal(t, tc.wantVMID, written.Spec["vm_id"],
+				assert.Equal(t, tc.wantVMID, written.Output["vm_id"],
 					"destroyed state must reference the recovered VM ID")
 			}
 			assert.Equal(t, tc.wantWasCreated, written.Meta.WasCreated)
@@ -447,7 +447,7 @@ func TestVMStep_StateData(t *testing.T) {
 			},
 			savedMeta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{
+				Output: model.ResourceMap{
 					"vm_id":        "vm-123",
 					"vm_dir":       "/mnt/vms/vm-123",
 					"nocloud_port": 8080,

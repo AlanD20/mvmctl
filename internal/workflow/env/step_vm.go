@@ -26,15 +26,16 @@ type VMState struct {
 
 // VMStep implements workflow.Step for creating VMs via the API layer.
 type VMStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.VMCreateInput
-	op       api.VMAPI
-	saved    *VMState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.VMCreateInput
+	inputSpec model.ResourceMap
+	op        api.VMAPI
+	saved     *VMState
+	meta      model.ResourceMeta
 }
 
 func (s *VMStep) Type() string { return s.stepType }
@@ -179,8 +180,13 @@ func (s *VMStep) Destroy(
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[VMState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[VMState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[VMState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 
@@ -233,8 +239,9 @@ func (s *VMStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -285,13 +292,14 @@ func newVMStepFromSpec(
 	}
 
 	return &VMStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(data),
+		input:     input,
+		inputSpec: spec,
+		op:        op,
 	}, nil
 }
 
@@ -319,7 +327,13 @@ func newVMStepFromState(
 		return nil, errors.New("operation not initialized")
 	}
 
-	vs := StateFromMap[VMState](saved.Spec)
+	var vs *VMState
+	if saved.Output != nil {
+		vs = StateFromMap[VMState](saved.Output)
+	}
+	if vs == nil && saved.Spec != nil {
+		vs = StateFromMap[VMState](saved.Spec)
+	}
 	return &VMStep{
 		stepType: stepType,
 		name:     name,

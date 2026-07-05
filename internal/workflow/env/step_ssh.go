@@ -23,15 +23,16 @@ type SSHState struct {
 // SSHStep implements workflow.Step for running SSH commands on VMs.
 // Destroy is a no-op because SSH commands are ephemeral.
 type SSHStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.SSHInput
-	op       api.SSHAPI
-	saved    *SSHState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.SSHInput
+	inputSpec model.ResourceMap
+	op        api.SSHAPI
+	saved     *SSHState
+	meta      model.ResourceMeta
 }
 
 func (s *SSHStep) Type() string { return s.stepType }
@@ -83,8 +84,13 @@ func (s *SSHStep) Destroy(
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[SSHState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[SSHState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[SSHState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 	// SSH commands are ephemeral — no teardown needed.
@@ -99,8 +105,9 @@ func (s *SSHStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -130,13 +137,14 @@ func newSSHStepFromSpec(
 		return nil, err
 	}
 	return &SSHStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(data),
+		input:     input,
+		inputSpec: spec,
+		op:        op,
 	}, nil
 }
 
@@ -150,7 +158,13 @@ func newSSHStepFromState(
 	if op == nil {
 		return nil, errors.New("operation not initialized")
 	}
-	ss := StateFromMap[SSHState](saved.Spec)
+	var ss *SSHState
+	if saved.Output != nil {
+		ss = StateFromMap[SSHState](saved.Output)
+	}
+	if ss == nil && saved.Spec != nil {
+		ss = StateFromMap[SSHState](saved.Spec)
+	}
 	return &SSHStep{
 		stepType: stepType,
 		name:     name,

@@ -192,7 +192,7 @@ func TestCopyStep_Destroy(t *testing.T) {
 			written := (*writes)[0]
 
 			if tc.wantSource != "" {
-				assert.Equal(t, tc.wantSource, written.Spec["source"],
+				assert.Equal(t, tc.wantSource, written.Output["source"],
 					"destroyed state must reference the recovered source")
 				assert.Equal(t, tc.wantWasCreated, written.Meta.WasCreated)
 			}
@@ -243,8 +243,8 @@ func TestCopyStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"source": "./mvm"},
 			savedMeta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"source": "./mvm"},
-				Meta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
+				Output: model.ResourceMap{"source": "./mvm"},
+				Meta:   model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			},
 		},
 	}
@@ -344,8 +344,8 @@ func TestFromState_CopyStep_PreservesMeta(t *testing.T) {
 
 	got := step.StateData()
 	want := model.ResourceState{
-		Spec: model.ResourceMap{"source": "./mvm"},
-		Meta: model.ResourceMeta{WasCreated: true, SpecHash: "deadbeef"},
+		Output: model.ResourceMap{"source": "./mvm"},
+		Meta:   model.ResourceMeta{WasCreated: true, SpecHash: "deadbeef"},
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("StateData() mismatch (-want +got):\n%s", diff)

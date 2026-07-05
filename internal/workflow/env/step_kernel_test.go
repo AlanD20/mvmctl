@@ -129,8 +129,8 @@ func TestKernelStep_Apply(t *testing.T) {
 			ctx:          context.Background,
 			wantKernelID: "krnl-existing",
 			wantState: model.ResourceState{
-				Spec: model.ResourceMap{"kernel_id": "krnl-existing"},
-				Meta: model.ResourceMeta{WasCreated: false},
+				Output: model.ResourceMap{"kernel_id": "krnl-existing"},
+				Meta:   model.ResourceMeta{WasCreated: false},
 			},
 		},
 		"kernel_exists_preserves_was_created_from_saved": {
@@ -151,8 +151,8 @@ func TestKernelStep_Apply(t *testing.T) {
 			},
 			wantKernelID: "krnl-preserved",
 			wantState: model.ResourceState{
-				Spec: model.ResourceMap{"kernel_id": "krnl-preserved"},
-				Meta: model.ResourceMeta{WasCreated: true},
+				Output: model.ResourceMap{"kernel_id": "krnl-preserved"},
+				Meta:   model.ResourceMeta{WasCreated: true},
 			},
 		},
 	}
@@ -249,8 +249,8 @@ func TestKernelStep_Destroy(t *testing.T) {
 				Meta: model.ResourceMeta{WasCreated: true},
 			},
 			wantState: model.ResourceState{
-				Spec: model.ResourceMap{"kernel_id": "krnl-456"},
-				Meta: model.ResourceMeta{WasCreated: true},
+				Output: model.ResourceMap{"kernel_id": "krnl-456"},
+				Meta:   model.ResourceMeta{WasCreated: true},
 			},
 		},
 	}
@@ -308,8 +308,8 @@ func TestKernelStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"kernel_id": ""},
 			savedMeta: model.ResourceMeta{},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"kernel_id": ""},
-				Meta: model.ResourceMeta{},
+				Output: model.ResourceMap{"kernel_id": ""},
+				Meta:   model.ResourceMeta{},
 			},
 		},
 		"with_saved_returns_correct_state": {
@@ -317,8 +317,8 @@ func TestKernelStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"kernel_id": "krnl-123"},
 			savedMeta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"kernel_id": "krnl-123"},
-				Meta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
+				Output: model.ResourceMap{"kernel_id": "krnl-123"},
+				Meta:   model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			},
 		},
 	}

@@ -183,7 +183,8 @@ func TestKeyStep_Apply(t *testing.T) {
 
 			// Verify written state matches expected ResourceState.
 			wantState := model.ResourceState{
-				Spec: model.ResourceMap{"key_id": tc.wantKeyID},
+				Spec:   model.ResourceMap{"name": "my-key"},
+				Output: model.ResourceMap{"key_id": tc.wantKeyID},
 				Meta: model.ResourceMeta{
 					WasCreated: tc.wantWasCreated,
 				},
@@ -337,7 +338,8 @@ func TestKeyStep_Destroy(t *testing.T) {
 			// Verify written state matches expected ResourceState.
 			wantState := model.ResourceState{}
 			if tc.wantKeyID != "" {
-				wantState.Spec = model.ResourceMap{"key_id": tc.wantKeyID}
+				wantState.Spec = model.ResourceMap{"name": "my-key"}
+				wantState.Output = model.ResourceMap{"key_id": tc.wantKeyID}
 				wantState.Meta = model.ResourceMeta{WasCreated: tc.wantWasCreated}
 			}
 			if diff := cmp.Diff(wantState, written); diff != "" {
@@ -422,8 +424,8 @@ func TestKeyStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"key_id": ""},
 			savedMeta: model.ResourceMeta{},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"key_id": ""},
-				Meta: model.ResourceMeta{},
+				Output: model.ResourceMap{"key_id": ""},
+				Meta:   model.ResourceMeta{},
 			},
 		},
 		"with_saved_returns_correct_state": {
@@ -431,8 +433,8 @@ func TestKeyStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"key_id": "key-123"},
 			savedMeta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"key_id": "key-123"},
-				Meta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
+				Output: model.ResourceMap{"key_id": "key-123"},
+				Meta:   model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			},
 		},
 	}
@@ -489,8 +491,9 @@ func TestKeyStep_StateData_AfterApply(t *testing.T) {
 	got := step.StateData()
 
 	want := model.ResourceState{
-		Spec: model.ResourceMap{"key_id": "key-abc"},
-		Meta: model.ResourceMeta{WasCreated: false},
+		Spec:   model.ResourceMap{"name": "my-key"},
+		Output: model.ResourceMap{"key_id": "key-abc"},
+		Meta:   model.ResourceMeta{WasCreated: false},
 	}
 	if diff := cmp.Diff(want, got, cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash")); diff != "" {
 		t.Errorf("StateData() after Apply mismatch (-want +got):\n%s", diff)
@@ -526,7 +529,7 @@ func TestKeyStep_StateData_AfterDestroy(t *testing.T) {
 	require.NoError(t, err)
 
 	got := step.StateData()
-	assert.Equal(t, "key-del", got.Spec["key_id"],
+	assert.Equal(t, "key-del", got.Output["key_id"],
 		"StateData must retain key ID after destroy")
 	assert.True(t, got.Meta.WasCreated,
 		"WasCreated must remain true after destroy")

@@ -24,15 +24,16 @@ type CPState struct {
 // CopyStep implements workflow.Step for copying files to/from VMs.
 // Destroy is a no-op because file copies are ephemeral.
 type CopyStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.CPInput
-	op       api.CPAPI
-	saved    *CPState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.CPInput
+	inputSpec model.ResourceMap
+	op        api.CPAPI
+	saved     *CPState
+	meta      model.ResourceMeta
 }
 
 func (s *CopyStep) Type() string { return s.stepType }
@@ -83,8 +84,13 @@ func (s *CopyStep) Destroy(
 	write workflow.StateWriter,
 	onProgress event.OnProgressCallback,
 ) error {
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[CPState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[CPState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[CPState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 	// File copies are ephemeral — no teardown needed.
@@ -99,8 +105,9 @@ func (s *CopyStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -132,13 +139,14 @@ func newCopyStepFromSpec(
 	// Hash the original spec (not normalized) for drift detection.
 	specData, _ := yaml.Marshal(spec)
 	return &CopyStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(specData),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(specData),
+		input:     input,
+		inputSpec: norm,
+		op:        op,
 	}, nil
 }
 
@@ -152,7 +160,13 @@ func newCopyStepFromState(
 	if op == nil {
 		return nil, errors.New("operation not initialized")
 	}
-	cs := StateFromMap[CPState](saved.Spec)
+	var cs *CPState
+	if saved.Output != nil {
+		cs = StateFromMap[CPState](saved.Output)
+	}
+	if cs == nil && saved.Spec != nil {
+		cs = StateFromMap[CPState](saved.Spec)
+	}
 	return &CopyStep{
 		stepType: stepType,
 		name:     name,

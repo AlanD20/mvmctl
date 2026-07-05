@@ -192,8 +192,8 @@ func TestImageStep_Apply(t *testing.T) {
 			// Verify the full written state matches expectations.
 			// SpecHash is verified separately (must be non-empty for drift detection).
 			want := model.ResourceState{
-				Spec: model.ResourceMap{"image_id": tc.wantImageID},
-				Meta: model.ResourceMeta{WasCreated: tc.wantWasCreated},
+				Output: model.ResourceMap{"image_id": tc.wantImageID},
+				Meta:   model.ResourceMeta{WasCreated: tc.wantWasCreated},
 			}
 			if diff := cmp.Diff(want, written, cmpopts.IgnoreFields(model.ResourceMeta{}, "SpecHash")); diff != "" {
 				t.Errorf("written state mismatch (-want +got):\n%s", diff)
@@ -293,7 +293,7 @@ func TestImageStep_Destroy(t *testing.T) {
 				Meta: model.ResourceMeta{WasCreated: tc.wantWasCreated},
 			}
 			if tc.wantImageID != "" {
-				want.Spec = model.ResourceMap{"image_id": tc.wantImageID}
+				want.Output = model.ResourceMap{"image_id": tc.wantImageID}
 			}
 			if diff := cmp.Diff(
 				want,
@@ -328,8 +328,8 @@ func TestImageStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"image_id": "img-123"},
 			savedMeta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"image_id": "img-123"},
-				Meta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
+				Output: model.ResourceMap{"image_id": "img-123"},
+				Meta:   model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			},
 		},
 	}

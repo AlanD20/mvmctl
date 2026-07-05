@@ -247,7 +247,7 @@ func TestExecStep_Destroy(t *testing.T) {
 			written := (*writes)[0]
 
 			if tc.wantCommand != "" || tc.wantCreated {
-				assert.Equal(t, tc.wantCommand, written.Spec["command"],
+				assert.Equal(t, tc.wantCommand, written.Output["command"],
 					"destroyed state must reference the recovered command")
 				assert.Equal(t, tc.wantCreated, written.Meta.WasCreated)
 			}
@@ -303,8 +303,8 @@ func TestExecStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"command": "apt update"},
 			savedMeta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"command": "apt update"},
-				Meta: model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
+				Output: model.ResourceMap{"command": "apt update"},
+				Meta:   model.ResourceMeta{WasCreated: true, SpecHash: "abc123"},
 			},
 		},
 		"empty_command_preserved": {
@@ -312,8 +312,8 @@ func TestExecStep_StateData(t *testing.T) {
 			savedSpec: model.ResourceMap{"command": ""},
 			savedMeta: model.ResourceMeta{WasCreated: true},
 			want: model.ResourceState{
-				Spec: model.ResourceMap{"command": ""},
-				Meta: model.ResourceMeta{WasCreated: true},
+				Output: model.ResourceMap{"command": ""},
+				Meta:   model.ResourceMeta{WasCreated: true},
 			},
 		},
 	}

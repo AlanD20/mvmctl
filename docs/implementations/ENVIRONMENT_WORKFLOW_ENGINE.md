@@ -76,6 +76,11 @@ Thread-safe shared context across all steps. Steps read from and write to it for
 
 State is persisted to `~/.cache/mvmctl/workflows/<wf-id>/state.yaml` **per-step**, immediately after each successful API operation, not batched at the end. This narrows the crash window to a single atomic file write.
 
+Each resource entry stores three fields under `state`:
+- `spec` — the input spec fields from the YAML (what the user configured)
+- `output` — the created resource state (IDs, properties returned by the API)
+- `meta` — metadata (was_created, spec_hash for drift detection)
+
 ```yaml
 workflow_id: "ec729934a8fb9c67"
 spec_path: "./my-env.yaml"
@@ -87,8 +92,9 @@ resources:
     type: "network"
     state:
       spec:
-        network_id: "net-abc123"
         subnet: "172.27.0.0/24"
+      output:
+        network_id: "net-abc123"
       meta:
         was_created: true
         spec_hash: "a1b2c3d4..."
@@ -97,6 +103,9 @@ resources:
     depends_on: ["network:default"]
     state:
       spec:
+        vcpu: 2
+        mem: 2048
+      output:
         vm_id: "vm-xyz789"
       meta:
         was_created: true

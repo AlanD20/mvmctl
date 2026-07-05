@@ -24,15 +24,16 @@ type KeyState struct {
 
 // KeyStep implements workflow.Step for creating SSH key pairs.
 type KeyStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.KeyCreateInput
-	op       api.KeyAPI
-	saved    *KeyState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.KeyCreateInput
+	inputSpec model.ResourceMap
+	op        api.KeyAPI
+	saved     *KeyState
+	meta      model.ResourceMeta
 }
 
 func (s *KeyStep) Type() string { return s.stepType }
@@ -112,8 +113,13 @@ func (s *KeyStep) Destroy(
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[KeyState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[KeyState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[KeyState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 
@@ -154,8 +160,9 @@ func (s *KeyStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -196,13 +203,14 @@ func newKeyStepFromSpec(
 	}
 
 	return &KeyStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(data),
+		input:     input,
+		inputSpec: spec,
+		op:        op,
 	}, nil
 }
 
@@ -217,7 +225,13 @@ func newKeyStepFromState(
 		return nil, errors.New("operation not initialized")
 	}
 
-	ks := StateFromMap[KeyState](saved.Spec)
+	var ks *KeyState
+	if saved.Output != nil {
+		ks = StateFromMap[KeyState](saved.Output)
+	}
+	if ks == nil && saved.Spec != nil {
+		ks = StateFromMap[KeyState](saved.Spec)
+	}
 	return &KeyStep{
 		stepType: stepType,
 		name:     name,

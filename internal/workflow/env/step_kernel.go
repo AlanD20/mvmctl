@@ -24,15 +24,16 @@ type KernelState struct {
 // KernelStep implements workflow.Step for pulling kernels.
 // Destroy is a no-op because kernels persist in the database.
 type KernelStep struct {
-	stepType string
-	name     string
-	deps     []string
-	removes  []string
-	specHash string
-	input    inputs.KernelPullInput
-	op       api.KernelAPI
-	saved    *KernelState
-	meta     model.ResourceMeta
+	stepType  string
+	name      string
+	deps      []string
+	removes   []string
+	specHash  string
+	input     inputs.KernelPullInput
+	inputSpec model.ResourceMap
+	op        api.KernelAPI
+	saved     *KernelState
+	meta      model.ResourceMeta
 }
 
 func (s *KernelStep) Type() string { return s.stepType }
@@ -114,8 +115,13 @@ func (s *KernelStep) Destroy(
 	if s.op == nil {
 		return fmt.Errorf("%s: operation not initialized (nil op)", s.Name())
 	}
-	if s.saved == nil && saved.Spec != nil {
-		s.saved = StateFromMap[KernelState](saved.Spec)
+	if s.saved == nil {
+		if saved.Output != nil {
+			s.saved = StateFromMap[KernelState](saved.Output)
+		}
+		if s.saved == nil && saved.Spec != nil {
+			s.saved = StateFromMap[KernelState](saved.Spec)
+		}
 		s.meta = saved.Meta
 	}
 	// Kernels persist in the database — no teardown needed.
@@ -130,8 +136,9 @@ func (s *KernelStep) StateData() model.ResourceState {
 		return model.ResourceState{}
 	}
 	return model.ResourceState{
-		Spec: StructToMap(s.saved),
-		Meta: s.meta,
+		Spec:   s.inputSpec,
+		Output: StructToMap(s.saved),
+		Meta:   s.meta,
 	}
 }
 
@@ -174,13 +181,14 @@ func newKernelStepFromSpec(
 	}
 
 	return &KernelStep{
-		stepType: stepType,
-		name:     name,
-		deps:     spec.GetStringList("depends_on"),
-		removes:  spec.GetStringList("removes"),
-		specHash: crypto.SHA256(data),
-		input:    input,
-		op:       op,
+		stepType:  stepType,
+		name:      name,
+		deps:      spec.GetStringList("depends_on"),
+		removes:   spec.GetStringList("removes"),
+		specHash:  crypto.SHA256(data),
+		input:     input,
+		inputSpec: spec,
+		op:        op,
 	}, nil
 }
 
@@ -195,7 +203,13 @@ func newKernelStepFromState(
 		return nil, errors.New("operation not initialized")
 	}
 
-	ks := StateFromMap[KernelState](saved.Spec)
+	var ks *KernelState
+	if saved.Output != nil {
+		ks = StateFromMap[KernelState](saved.Output)
+	}
+	if ks == nil && saved.Spec != nil {
+		ks = StateFromMap[KernelState](saved.Spec)
+	}
 	return &KernelStep{
 		stepType: stepType,
 		name:     name,
