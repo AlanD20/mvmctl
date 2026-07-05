@@ -147,11 +147,11 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 			err,
 		)
 	}
-	// Look up existing kernel for cleanup later (if rebuild produces different path)
+	// Look up existing kernel for cleanup later (if rebuild produces different path).
+	// For firecracker kernels, the version isn't known until after fetch, so lookup
+	// is deferred to after the switch block where version is available.
 	var existing *model.KernelItem
-	if resolved.KernelType == "firecracker" {
-		existing, _ = op.Repos.Kernel.GetByType(ctx, resolved.KernelType)
-	} else if resolved.KernelType == "official" && resolved.Version != "" {
+	if resolved.KernelType == "official" && resolved.Version != "" {
 		existing, _ = op.Repos.Kernel.GetByVersionAndType(ctx, resolved.Version, resolved.KernelType)
 	}
 	// Resolve spec via KernelService
@@ -205,6 +205,10 @@ func (op *Operation) KernelPull(ctx context.Context, input inputs.KernelPullInpu
 			)
 		}
 		emitProgress(onProgress, "download", "complete", "Firecracker kernel download complete.")
+		// Now the version is known — lookup by version+type for correct cleanup.
+		if fetchResult.Version != "" {
+			existing, _ = op.Repos.Kernel.GetByVersionAndType(ctx, fetchResult.Version, resolved.KernelType)
+		}
 	case "official":
 		emitProgress(onProgress, "build", "running", "Building kernel (this may take a while)...")
 		var configPath *string

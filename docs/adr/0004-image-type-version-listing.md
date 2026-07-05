@@ -56,6 +56,22 @@ Initially we considered a separate resolver class per provider (e.g., `UbuntuStr
 - `model.VersionInfo` is the canonical representation of a downloadable image. Both `ImageSpec` (the config-backed model, used for image type definitions in YAML) and `VersionInfo` (returned by version resolvers) remain in active, coexisting use — the planned phase-out of `ImageSpec` has not been completed.
 - Alpine needs a secondary fetch to discover the full patch version from the `releases/cloud/` directory listing (the directory is `v3.21` but filenames contain `3.21.4`). This is handled transparently inside `HttpDirVersionResolver`.
 
+## Cleanup must be version-scoped
+
+The `ImagePull` and `KernelPull` operations have a cleanup step that removes old files when a new pull produces a different ID. The existing image is looked up before the new pull starts so the old file can be deleted afterward.
+
+**Bug discovered 2026-07-05:** The lookup was using `GetByType(type)` which returns the most recent image of ANY version. Pulling `alpine:3.21` could match `alpine:3.23` as the "existing" image, causing 3.23's files to be deleted and its `is_present` flag to be set to false — even though 3.23 is a completely different image. This caused stale soft-deleted entries to accumulate, and downstream operations (`image default`, `image warm --all`) would pick soft-deleted entries and fail.
+
+**Fix:** All cleanup lookups use `GetByVersionAndType(version, type)` instead of `GetByType(type)`. This ensures cleanup only touches images of the exact same version being pulled. For firecracker kernels (where version is discovered during fetch, not known upfront), the lookup is deferred to after the fetch completes.
+
+**Resources checked for the same bug:**
+- `ImagePull` — fixed (was `GetByType`, now `GetByVersionAndType`)
+- `ImageImport` — already correct (used `GetByVersionAndType`)
+- `BinaryPull` — correct (uses `GetByTypeAndVersion`, no cleanup)
+- `KernelPull` (official) — already correct (used `GetByVersionAndType`)
+- `KernelPull` (firecracker) — fixed (was `GetByType` before version known, now deferred after fetch)
+- `NetworkCreate`, `KeyCreate`, `VMCreate` — no version-blind lookup pattern
+
 ## Related Decisions
 
 - `internal/lib/version/resolver.go` — The `version.ParseSpec()` and `version.Resolve()` functions handle version parsing and matching for all domains. These are consumed by the image service's `ResolveVersion()` method (`internal/core/image/service.go`, line 1311).

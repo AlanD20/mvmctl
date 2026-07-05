@@ -198,9 +198,9 @@ func (op *Operation) ImagePull(
 
 	tl.Stage("resolve")
 
-	// Early return check
-	existing, _ := op.Repos.Image.GetByType(ctx, spec.Type)
-	if !input.Force && existing != nil && existing.Version == spec.Version {
+	// Early return check — look up by exact type + version, not just type.
+	existing, _ := op.Repos.Image.GetByVersionAndType(ctx, spec.Version, spec.Type)
+	if !input.Force && existing != nil {
 		if existing.Path != "" {
 			if _, err := os.Stat(existing.Path); err == nil {
 				slog.Info("Image already exists", "path", existing.Path)
@@ -321,7 +321,7 @@ func (op *Operation) ImagePull(
 	} else if existing != nil && existing.IsDefault {
 		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	}
-	// Clean up old images
+	// Clean up old entry of the same version (existing is already looked up by version+type).
 	if existing != nil && existing.ID != imageItem.ID {
 		removed := op.Services.Image.RemoveImageFiles(existing)
 		_ = op.Repos.Image.SoftDelete(ctx, existing.ID)
@@ -456,7 +456,8 @@ func (op *Operation) ImageImport(
 	} else if existing != nil && existing.IsDefault {
 		_ = op.Repos.Image.SetDefault(ctx, imageItem.ID)
 	}
-	if existing != nil && existing.ID != imageItem.ID {
+	// Clean up old image files of the same version.
+	if existing != nil && existing.Version == imageItem.Version && existing.ID != imageItem.ID {
 		removed := op.Services.Image.RemoveImageFiles(existing)
 		// Hard-delete when no VMs reference the old image, soft-delete otherwise.
 		vms, vmErr := op.Repos.VM.GetByImageIDs(ctx, []string{existing.ID})
