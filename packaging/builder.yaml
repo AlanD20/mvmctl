@@ -4,28 +4,28 @@ ephemeral: true
 # ─── Infrastructure ─────────────────────────────────────────────────────────
 
 network:
-  - name: builder
+  builder:
     subnet: "172.30.0.0/24"
     nat: true
 
 key:
-  - name: builder
+  builder:
     algorithm: ed25519
     force: true
 
 image:
-  - name: ubuntu-builder
+  ubuntu-builder:
     type: ubuntu
     version: "24.04"
 
 kernel:
-  - name: krnl-builder
+  krnl-builder:
     type: official
     version: 7.0.11
     features: nftables,tuntap,kvm,btrfs
 
 binary:
-  - name: fc-binary
+  fc-binary:
     type: firecracker
     version: "1.16.0"
 
@@ -34,21 +34,21 @@ binary:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 vm:
-  - name: pkg-builder
-    network: builder
-    key: builder
-    image: ubuntu-builder
-    kernel: krnl-builder
-    binary: fc-binary
+  pkg-builder:
+    network: "@network:builder"
+    key: "@key:builder"
+    image: "@image:ubuntu-builder"
+    kernel: "@kernel:krnl-builder"
+    binary: "@binary:fc-binary"
     disk_size: 8G
     vcpu: 4
     mem: 3G
     depends_on:
-      - network:builder
-      - key:builder
-      - image:ubuntu-builder
-      - kernel:krnl-builder
-      - binary:fc-binary
+      - "@network:builder"
+      - "@key:builder"
+      - "@image:ubuntu-builder"
+      - "@kernel:krnl-builder"
+      - "@binary:fc-binary"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Copy the entire project into the VM, then run the same script CI uses
@@ -59,72 +59,72 @@ vm:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 copy:
-  - name: copy-scripts
+  copy-scripts:
     src: ./scripts
     dest: pkg-builder:/mnt/mvmctl/
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
-  - name: copy-packaging
+  copy-packaging:
     src: ./packaging
     dest: pkg-builder:/mnt/mvmctl/
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
-  - name: copy-docs
+  copy-docs:
     src: ./docs
     dest: pkg-builder:/mnt/mvmctl/
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
-  - name: copy-source
+  copy-source:
     src: ./internal
     dest: pkg-builder:/mnt/mvmctl/
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
-  - name: copy-pkg
+  copy-pkg:
     src: ./pkg
     dest: pkg-builder:/mnt/mvmctl/
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
-  - name: copy-cmd
+  copy-cmd:
     src: ./cmd
     dest: pkg-builder:/mnt/mvmctl/
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
-  - name: copy-gomod
+  copy-gomod:
     src: ./go.mod
     dest: pkg-builder:/mnt/mvmctl/go.mod
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
-  - name: copy-gosum
+  copy-gosum:
     src: ./go.sum
     dest: pkg-builder:/mnt/mvmctl/go.sum
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
-  - name: copy-pkgbuild
+  copy-pkgbuild:
     src: ./packaging/PKGBUILD
     dest: pkg-builder:/tmp/arch-PKGBUILD-local
     force: true
     depends_on:
-      - vm:pkg-builder
+      - "@vm:pkg-builder"
 
 exec:
-  - name: build-all
-    target: pkg-builder
+  build-all:
+    target: "@vm:pkg-builder"
     user: root
     timeout: 30
     env:
@@ -145,20 +145,20 @@ exec:
       cd /mnt/mvmctl && chmod +x ./scripts/build-packages.sh && \
       PATH=/usr/local/go/bin:$PATH ./scripts/build-packages.sh --build-binaries --version ${VERSION}
     depends_on:
-      - copy:copy-scripts
-      - copy:copy-packaging
-      - copy:copy-docs
-      - copy:copy-gomod
-      - copy:copy-gosum
-      - copy:copy-pkgbuild
-      - copy:copy-source
-      - copy:copy-pkg
-      - copy:copy-cmd
+      - "@copy:copy-scripts"
+      - "@copy:copy-packaging"
+      - "@copy:copy-docs"
+      - "@copy:copy-gomod"
+      - "@copy:copy-gosum"
+      - "@copy:copy-pkgbuild"
+      - "@copy:copy-source"
+      - "@copy:copy-pkg"
+      - "@copy:copy-cmd"
 
 copy:
-  - name: retrieve-all
+  retrieve-all:
     src: pkg-builder:/mnt/mvmctl/dist/packages/
     dest: ./dist/packages
     force: true
     depends_on:
-      - exec:build-all
+      - "@exec:build-all"
