@@ -149,7 +149,11 @@ func Apply(
 					}
 				}
 			case "image", "image_import":
-				result := op.ImageRemove(ctx, inputs.ImageInput{Identifiers: []string{name}, IncludeDeleted: true}, true)
+				result := op.ImageRemove(
+					ctx,
+					inputs.ImageInput{Identifiers: []string{name}, IncludeDeleted: true},
+					true,
+				)
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
@@ -191,7 +195,11 @@ func Apply(
 					}
 				}
 			case "binary":
-				result := op.BinaryRemove(ctx, inputs.BinaryInput{Identifiers: []string{name}, IncludeDeleted: true}, true)
+				result := op.BinaryRemove(
+					ctx,
+					inputs.BinaryInput{Identifiers: []string{name}, IncludeDeleted: true},
+					true,
+				)
 				if result.HasErrors() {
 					for _, r := range result.Errors() {
 						if r.ToError() != nil {
