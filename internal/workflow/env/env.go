@@ -122,6 +122,19 @@ func Apply(
 
 	err = pipeline.Execute(ctx, state, onProgress, prevResources, workflow.WithOnStepComplete(onStepComplete))
 
+	// Ephemeral: destroy everything and remove state.
+	// Runs regardless of success/failure — ensures cleanup on partial failure.
+	if spec.Ephemeral {
+		defer func() {
+			slog.Info("ephemeral spec — destroying resources", "spec", specPath)
+			if dErr := Destroy(ctx, op, specPath, onProgress); dErr != nil {
+				slog.Warn("ephemeral destroy failed", "spec", specPath, "error", dErr)
+			} else {
+				slog.Info("ephemeral spec destroyed", "spec", specPath)
+			}
+		}()
+	}
+
 	if err != nil {
 		return errs.WrapMsg(
 			errs.CodeInternal,
@@ -251,19 +264,6 @@ func Apply(
 				mu.Unlock()
 			}
 		}
-	}
-
-	// Ephemeral: destroy everything and remove state after successful apply.
-	if spec.Ephemeral {
-		slog.Info("ephemeral spec — destroying resources after successful apply", "spec", specPath)
-		if err := Destroy(ctx, op, specPath, onProgress); err != nil {
-			return errs.WrapMsg(
-				errs.CodeInternal,
-				fmt.Sprintf("ephemeral destroy failed after apply: %v", err),
-				err,
-			)
-		}
-		slog.Info("ephemeral spec destroyed", "spec", specPath)
 	}
 
 	return nil
