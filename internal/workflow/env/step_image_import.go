@@ -151,6 +151,10 @@ func newImageImportStepFromSpec(
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		return nil, err
 	}
+	// Resource name: spec "name" overrides step name.
+	if input.Name == "" {
+		input.Name = name
+	}
 	return &ImageImportStep{
 		stepType:  stepType,
 		name:      name,
