@@ -60,7 +60,7 @@ The `@` sigil makes references visually distinct from literal values.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `version` | `string` | — | **Required.** Currently only `"1"`. |
-| `ephemeral` | `bool` | `false` | Auto-run `env destroy` after successful apply. |
+| `ephemeral` | `bool` | `false` | Auto-run `env destroy` after apply completes (success or failure), removing all resources and the state record. |
 
 ---
 
