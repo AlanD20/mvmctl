@@ -388,7 +388,7 @@ The network resolver tries selectors in priority order:
 | `mvm network create` | `[NAME]`, `--subnet`, `--ipv4-gateway`, `--no-nat`, `--nat-gateways`, `--non-interactive`, `--default, -d` | Create a named bridge network |
 | `mvm network rm` | `[SELECTORS]...`, `-f, --force` | Remove one or more networks |
 | `mvm network ls` | `--json, --long` | List all networks |
-| `mvm network inspect` | `[SELECTOR]`, `--json` | Show network details and IP leases |
+| `mvm network inspect` | `[SELECTOR]`, `--json` | Show network details, IP leases, and active firewall rules |
 | `mvm network default` | `[SELECTOR]` | Set a network as the default for VM creation |
 | `mvm network sync` | `[SELECTORS]...`, `--json` | Sync firewall rules between database and host |
 
@@ -598,6 +598,20 @@ The volume resolver tries selectors in priority order:
 | `--read-only`, `--readonly`, `--ro` | Mount volume as read-only | writable |
 | `--shareable, -s` | Allow volume to be attached to multiple VMs | `false` |
 | `--writeback` | Use writeback cache mode | `false` |
+
+---
+
+### `mvm self-update`
+
+Check for and apply binary updates from GitHub Releases.
+
+| Command | Description |
+|---------|-------------|
+| `mvm self-update` | Check + apply if newer |
+| `mvm self-update check` | Check only, print available version |
+| `mvm self-update apply` | Force apply (even if same version). `--force` to re-install |
+
+Downloads the latest release matching the host architecture, verifies SHA256 checksum, then atomically swaps the binary.
 
 ---
 

@@ -422,7 +422,7 @@ image_import:
 
 ### Ephemeral specs (`ephemeral: true`)
 
-Auto-runs `env destroy` after successful apply:
+Auto-runs `env destroy` after apply completes (success or failure):
 
 ```yaml
 version: "1"

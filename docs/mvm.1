@@ -73,6 +73,9 @@ Network to attach to.
 .PP
 .B \-\-count
 Create multiple VMs atomically.
+.PP
+.B \-\-allow-remote-exec
+Allow inter-VM remote execution via vsock relay (default: disabled).
 .RE
 .TP
 .BR vm\ rm
@@ -341,8 +344,12 @@ Skip cache sync before copying.
 .BR version
 Show the mvm version and build information.
 .TP
+.BR self-update
+Check for and apply binary updates from GitHub Releases.
+.RE
+.TP
 .BR completion
-Generate shell completion script (bash, zsh, fish, or powershell).
+Generate shell completion script (bash, zsh, or fish).
 .TP
 .BR help
 Show help for mvm or a subcommand.
@@ -402,7 +409,7 @@ SQLite database (canonical store for images, kernels, binaries, VMs, networks, k
 One-time host setup:
 .RS
 .nf
-$ sudo mvm host init
+$ mvm init
 # Log out and back in, or run: newgrp mvm
 .fi
 .RE
@@ -455,7 +462,7 @@ KVM access (/dev/kvm) - add user to kvm group
 System packages: iproute2, iptables/nftables, qemu-utils, e2fsprogs, util-linux, openssh-client, tar, procps, kmod, sudo, passwd, fakeroot
 .SH NOTES
 .IP \(bu 2
-After \fBsudo mvm host init\fR, normal mvm commands require no sudo.
+After \fBmvm init\fR, normal mvm commands require no sudo.
 .IP \(bu 2
 Cache is stored at ~/.cache/mvmctl/ by default.
 .IP \(bu 2
