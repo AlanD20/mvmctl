@@ -42,6 +42,120 @@ gzip -9 %{buildroot}/usr/share/man/man1/mvm.1
 %{_mandir}/man1/mvm.1.gz
 
 %changelog
+* Fri Jul 10 2026 AlanD20 <aland20@pm.me> - 0.2.0-1
+- New --allow-remote-exec flag. When set, the VM can both issue and accept remote exec commands to/from other flagged VMs. Configurable via defaults.vm.allow_remote_exec (default false).
+- Guest agent (mvm-vsock-agent) now has a remote <destination> -- <command> subcommand that connects to the daemon's local Unix socket and requests execution on another VM.
+- Guest agent daemon opens a local Unix socket (/var/run/mvm-vsock-agent.sock) for in-VM IPC. The daemon forwards remote_vm frames through the existing host→guest vsock connection.
+- Host-side Client.Exec() read loop dispatches unknown frame types to OnHostFrame callback when set.
+- New internal/vsockhandler/ package receives guest-initiated frames, resolves target VMs, checks RemoteExec on both source and target, and performs a streaming relay (frame-by-frame, no buffering) via exported vsock.SendFrame/vsock.ReadFrame/vsock.DialVM.
+- Protocol primitives in internal/core/vsock/protocol.go exported: SendFrame, ReadFrame (returns type + data bytes), DialVM. Internal readFrameRaw helper for typed reads.
+- RemoteVMRequest and RemoteVMResponse types defined in internal/service/vsockagent/protocol.go.
+- Both source and target VM must have remote_exec = true. Source is checked before parsing the request payload.
+- Error codes added: CodeUnauthorized, CodeVMNotRunning, CodeVsockConfigNotFound.
+- Now shows the vsock agent configuration (guest CID, UDS path, port, agent version, and upgrade state) when a VM has a vsock record. The auth token and redundant vm_id are intentionally omitted, and agent_version is persisted at VM creation and corrected on first agent contact.
+- The networking.network block no longer includes the network's full DHCP lease list.
+- Now shows allow_remote_exec and nested_virt flags.
+- features now accepts all or  as a wildcard to enable every feature defined in the selected kernel spec.
+- Feature names are now validated against the spec's features map instead of a hardcoded list.
+- Enabled features are persisted and shown in mvm kernel inspect.
+- Kernel files are now stored with their content-addressed ID as the filename.
+- New --skip-checksum flag to bypass SHA256 verification when the checksum server is unavailable.
+- New image_import step type for importing local images and VM rootfs in environment specs.
+- Exec/SSH steps now support ignore_errors: true to continue on non-zero exit codes.
+- image_import destroy is a no-op — imported images persist in the database and on disk.
+- env apply now accepts a remote URL (https:// or http://) in place of a spec file path. The spec is fetched over HTTP and parsed identically to a local file. env diff and env destroy also support URLs.
+- image_import apply now always delegates to the API layer, enabling force: true to re-import and replace existing images.
+- All steps now support removes field to destroy resources mid-pipeline after the step completes.
+- New top-level ephemeral: true field — auto-runs env destroy on pipeline completion (success or failure). Zero cleanup overhead. See docs/ENV_SPEC_REFERENCE.md.
+- removes now updates the workflow state after destroying each resource, so a subsequent env destroy doesn't try to tear down already-removed resources.
+- NetworkStep.Destroy and KeyStep.Destroy now treat "not found" as success — already-deleted resources during destroy no longer abort the process.
+- Renamed source_path to source in the input struct (breaking — no backward compat).
+- Now runs sync on running source VMs via vsock before importing their rootfs.
+- New command to check for and apply updates from GitHub releases.
+- mvm self-update check — compare current version against latest release.
+- mvm self-update apply — download, verify SHA256, and atomic binary swap.
+- mvm self-update — check + apply if newer.
+- Supports --force to re-install same version.
+- Refactored GitHub release fetching into reusable download.Remote struct.
+- Removed PowerShell completion support.
+- Now shows active firewall rules per network.
+- Friendlier error messages when checksum server is temporarily unavailable.
+- Now shows the Version column in the default listing.
+- Renamed --no-enable-logging → --disable-logging, --no-enable-metrics → --disable-metrics. Added --deny-remote-exec (mutually exclusive with --allow-remote-exec).
+- Package directory moved from internal/service/vsockagent/ to internal/service/agent/.
+- In-VM binary: /usr/bin/mvm-vsock-agent → /usr/bin/mvm-agent.
+- In-VM socket: /var/run/mvm-vsock-agent.sock → /var/run/mvm-agent.sock.
+- Auth token: /var/run/mvm-vsock-agent.token → /var/run/mvm-agent.token.
+- Systemd unit: mvm-vsock-agent.service → mvm-agent.service.
+- OpenRC init: /etc/init.d/mvm-vsock-agent → /etc/init.d/mvm-agent.
+- Go interface: InjectVsockAgent() → InjectAgent(), BuildVsockAgentOps() → BuildAgentOps(), error code CodeVsockAgentUnreachable → CodeAgentUnreachable.
+- No backward compatibility — old paths will not work.
+- Renamed config_url_template to base_config_url_template to clarify that it provides the base kernel .config.
+- Removed the redundant duplicate URL from config_fragments in the bundled kernel-official spec.
+- Added CONFIG_IKCONFIG and CONFIG_IKCONFIG_PROC to the containers feature enforce map.
+- Added CONFIG_NF_CONNTRACK to the iptables feature enforce map.
+- Added CONFIG_NETFILTER_XT_TARGET_CT, CONFIG_IP_SET, CONFIG_IP_SET_HASH_IP, CONFIG_IP_SET_HASH_NET, and CONFIG_VXLAN to the iptables feature enforce map.
+- Replaced custom UnmarshalYAML with yaml:",inline" on Steps map for automatic parsing.
+- rm on a soft-deleted resource (orphan) now hard-deletes it instead of returning "not found". The resolver chain now threads includeDeleted from input → resolver → repo, so remove operations can resolve orphaned resources.
+- Networks, images, kernels, and binaries with deleted_at set are now shown in listings with a [x] suffix in red, instead of being hidden.
+- Binaries show a Status column in long mode (--long) indicating "deleted".
+- ListAll SQL no longer filters WHERE deleted_at IS NULL — returns all records.
+- GetByName and FindByPrefix accept an optional includeDeleted parameter (default false). Resolvers thread this through so individual operations can opt in to resolving deleted resources.
+- Spec format redesigned for clarity and consistency. Step sections are now maps (key = step name) instead of lists with a name field. An optional name field inside the params overrides the resource name (e.g., the bridge name for a network, the VM name). Cross-resource references use @type:name format (e.g., "@network:default") with the @ sigil making references visually distinct from literal values. Both depends_on and reference fields (network, key, image, kernel, binary) accept the new format. Backward compat for bare names is preserved.
+- Before:
+- yaml
+- network:
+- name: default
+- subnet: "172.27.0.0/24"
+- vm:
+- name: dev-vm
+- network: default
+- depends_on:
+- network:default
+- 
+- After:
+- yaml
+- network:
+- default:
+- subnet: "172.27.0.0/24"
+- vm:
+- dev-vm:
+- network: "@network:default"
+- depends_on:
+- "@network:default"
+- 
+- Fixed version-blind cleanup that could delete a different version's files. Pulling alpine:3.21 no longer soft-deletes alpine:3.23 and removes its cached file. The lookup now uses GetByVersionAndType instead of GetByType, ensuring cleanup only touches the same version being pulled. Same fix applied to firecracker kernels.
+- Fixed state file structure: state.spec now stores the input spec fields (what the user configured), and state.output stores the created resource state (IDs, properties). Previously output was incorrectly stored in state.spec and state.output was never populated.
+- New fqdn-proxy feature set with CONFIG_NETFILTER_XT_TARGET_TPROXY, CONFIG_NETFILTER_XT_TARGET_CT, and CONFIG_NETFILTER_XT_MATCH_SOCKET.
+- New bandwidth feature set with CONFIG_NET_SCH_FQ (Fair Queuing packet scheduler).
+- Added eBPF/BTF features: CONFIG_BPF_EVENTS, CONFIG_PERF_EVENTS, CONFIG_NET_CLS_BPF, CONFIG_NET_CLS_ACT, CONFIG_NET_SCH_INGRESS.
+- Added CNI overlay features: CONFIG_GENEVE, CONFIG_FIB_RULES.
+- Added crypto features: CONFIG_CRYPTO_SHA1, CONFIG_CRYPTO_USER_API_HASH.
+- New iscsi-target feature set with CONFIG_CONFIGFS_FS, CONFIG_TARGET_CORE, CONFIG_ISCSI_TARGET, CONFIG_ISCSI_TCP, CONFIG_SCSI_ISCSI_ATTRS, CONFIG_BLK_DEV_SD, CONFIG_SCSI_CONSTANTS (required by Longhorn block storage).
+- New ebpf-cni feature set with eBPF/BTF + tunneling + iptables + L7 proxy + connection tracking configs (required by Cilium, Hubble, kube-proxy replacement).
+- env destroy completion now shows workflow IDs from saved state alongside file paths (was previously blocked by FilterFileExt directive).
+- env destroy and removes mid-pipeline cleanup now pass IncludeDeleted: true for network, image, kernel, and binary removes, so soft-deleted resources are properly hard-deleted instead of left orphaned.
+- Fixed "target is busy" flakiness during image shrink/grow: when the first umount fails, shrinkExt4 and growExt4 now fall through to CleanupMount (which scans /proc, kills orphan processes, and retries) before returning an error.
+- Fixed scientific notation display for large numbers in tree dict output. Whole-number float64 values are now formatted as plain integers (e.g., 3.827e+03 → 3826).
+- /etc/hosts is now appended to instead of fully overwritten during provisioning, preserving entries from the base image.
+- Fixed deduplication that silently skipped importing a different version of the same type.
+- Image name is now automatically set to type version on import.
+- Success output now shows the source path or VM name instead of the internal cached path.
+- Recursive directory copies now follow symlinks and skip broken symlinks, non-regular files, and symlink cycles instead of aborting.
+- Single-directory copies to a destination without a trailing slash (e.g. mvm cp ./my-dir vm:/path/to/dest) now create the destination as a directory.
+- Fixed --allow-remote-exec flag being silently ignored — remote_exec column was missing from the SQL upsert.
+- Force import now hard-deletes the old DB record when no VMs reference it (instead of always soft-deleting).
+- Progress message during image optimize changed to "Debloating and shrinking filesystem..." for clarity.
+- Interactive shell sessions now forward the host terminal size and SIGWINCH resize events to the guest PTY, so TUI apps (vim, htop, etc.) draw correctly when the terminal or tmux pane is resized.
+- Fixed resize frame handling in the guest agent so that SIGWINCH frames interleaved with stdin bytes are applied instead of being written to the shell as literal input.
+- Fixed host-side concurrent writes to the vsock connection, which could split JSON resize frames and corrupt the byte stream seen by the guest agent.
+- Fixed duplicate error messages when the console relay is not running.
+- Fixed a deadlock where systemctl restart mvm-vsock-agent waited for the agent to stop while the agent was waiting for the upgrade command to finish, causing a 30s timeout and a confusing EOF error.
+- Fixed a shell syntax error in the restore/rollback command (&;).
+- Upgrade and restore commands now detach the service restart with nohup and support both systemd and OpenRC.
+- The DB upgrade lock is now cleared immediately when an upgrade fails, instead of forcing a 60s wait.
+- Fixed version comparison for git-describe strings (0.1.0-9-g<hash>) so that random hex hashes are not compared lexicographically; only the tag distance is used for ordering.
+
 * Sun Jun 28 2026 AlanD20 <aland20@pm.me> - 0.1.0-1
 - mvm vm -- Full VM lifecycle: ls, ps, create, rm, start, stop, reboot, pause, resume, inspect
 - mvm console -- Interactive serial console access via PTY-over-Unix-socket relay with --state and --kill options

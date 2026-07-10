@@ -28,7 +28,7 @@ var versionCached string
 
 // VersionString returns the current base version string.
 // Defaults to "0.0.0". Override via SetBuildVersion.
-var versionString = "0.1.0"
+var versionString = "0.2.0"
 
 // SetBuildVersion sets the build version from app startup.
 // Called from app.Run() via download.SetUserAgent().
@@ -109,7 +109,7 @@ func FormatVersion(ctx context.Context, chosenVersion string) string {
 		return chosenVersion
 	}
 
-	version := "0.1.0"
+	version := "0.2.0"
 
 	gitInfo := GetGitVersionInfo(ctx)
 	if gitInfo != "" {
@@ -132,7 +132,7 @@ func GetVersion(ctx context.Context) string {
 		}
 
 		gitInfo := GetGitVersionInfo(ctx)
-		version := "0.1.0"
+		version := "0.2.0"
 
 		if gitInfo != "" {
 			if strings.HasPrefix(gitInfo, "git+") {

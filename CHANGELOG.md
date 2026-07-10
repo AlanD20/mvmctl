@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-10
+
 ### Added
 
 #### `mvm vm create`
@@ -191,7 +193,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Upgrade and restore commands now detach the service restart with `nohup` and support both systemd and OpenRC.
 - The DB upgrade lock is now cleared immediately when an upgrade fails, instead of forcing a 60s wait.
 - Fixed version comparison for git-describe strings (`0.1.0-9-g<hash>`) so that random hex hashes are not compared lexicographically; only the tag distance is used for ordering.
-
 ## [0.1.0] - 2026-06-28
 
 ### Added
@@ -307,5 +308,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System tests run in nested VM with unprivileged user
 - Coverage matrix tracking every CLI subcommand and flag
 
-[Unreleased]: https://github.com/AlanD20/mvmctl/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/AlanD20/mvmctl/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/AlanD20/mvmctl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/AlanD20/mvmctl/releases/tag/v0.1.0

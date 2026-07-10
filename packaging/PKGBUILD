@@ -1,6 +1,6 @@
 # Maintainer: AlanD20 <aland20@pm.me>
 pkgname=mvmctl-bin
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="MicroVM Manager - Container speed, VM isolation"
 arch=('x86_64' 'aarch64')
