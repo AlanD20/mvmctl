@@ -125,6 +125,7 @@ def update_rpm_spec(root: Path, new_version: str, dry_run: bool) -> None:
 
     content = file_path.read_text()
     old_version = re.search(r"^Version:\s+([0-9.]+)", content, re.M)
+    version_macro = re.search(r"^Version:\s+(%\{[^}]+\})", content, re.M)
 
     if old_version:
         old = old_version.group(1)
@@ -135,6 +136,8 @@ def update_rpm_spec(root: Path, new_version: str, dry_run: bool) -> None:
         if not dry_run:
             file_path.write_text(new_content)
         print(f"  packaging/mvmctl.spec: {old} \u2192 {base_version}")
+    elif version_macro:
+        print(f"  packaging/mvmctl.spec: {version_macro.group(1)} (macro, resolved at build time)")
     else:
         print(f"  \u26a0\ufe0f  packaging/mvmctl.spec: Version not found")
 
