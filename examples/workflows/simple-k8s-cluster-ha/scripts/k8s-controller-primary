@@ -13,7 +13,7 @@ if [ -f /etc/kubernetes/admin.conf ]; then
   exit 0
 fi
 
-kubeadm init --control-plane-endpoint="$CTRL_IP" --pod-network-cidr=10.10.0.0/16
+kubeadm init --control-plane-endpoint="$CTRL_IP" --pod-network-cidr=10.200.0.0/16
 mkdir -p /root/.kube
 cp /etc/kubernetes/admin.conf /root/.kube/config
 
