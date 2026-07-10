@@ -303,6 +303,9 @@ def update_root_changelog(root: Path, new_version: str, dry_run: bool, changelog
 
     if changelog_content:
         new_version_section = f"## [{new_version}] - {date_str}\n\n{changelog_content}"
+        # Strip old unreleased content from after_section to avoid duplication.
+        if after_section.startswith(changelog_content):
+            after_section = after_section[len(changelog_content):].lstrip("\n")
         print(f"  CHANGELOG.md: moved unreleased changes to v{new_version}")
     else:
         new_version_section = f"## [{new_version}] - {date_str}\n\n### Added\n- (Add changes here)\n\n### Changed\n- (Add changes here)\n\n"

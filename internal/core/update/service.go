@@ -164,7 +164,7 @@ func verifyChecksum(checksumContent, binaryPath, assetName string) error {
 			continue
 		}
 		parts := strings.Fields(line)
-		if len(parts) >= 2 && parts[1] == assetName {
+		if len(parts) >= 2 && strings.TrimPrefix(parts[1], "./") == assetName {
 			if parts[0] == hexHash {
 				return nil
 			}
