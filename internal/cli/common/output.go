@@ -421,6 +421,13 @@ func (c *MVMCli) formatLeafValue(key string, value any) string {
 			return formatted
 		}
 	}
+	// Human-readable byte sizes for keys ending in _size (in tree output).
+	if strings.HasSuffix(key, "_size") {
+		if f, ok := value.(float64); ok {
+			return c.FormatSize(int64(f))
+		}
+	}
+
 	// float64 values from JSON round-trip can be large whole numbers that
 	// fmt.Sprintf("%v") renders in scientific notation. Format them as
 	// plain integers instead.

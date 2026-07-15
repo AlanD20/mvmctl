@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+#### `mvm image inspect`
+- Ambiguous ID prefix now reports `"Image ID is ambiguous"` instead of `"No images found"`.
+
+#### `mvm inspect` (all — vm, image, network, key, etc.)
+- Byte-size fields (`_size` keys) in tree output are now human-readable (e.g., `8589934592` → `8.0 GiB`).
+
 ## [0.2.0] - 2026-07-10
 
 ### Added

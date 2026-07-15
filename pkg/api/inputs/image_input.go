@@ -37,6 +37,9 @@ func (i *ImageInput) Resolve(ctx context.Context, repo image.Repository) ([]*mod
 	resolver := image.NewResolver(repo)
 	result := resolver.ResolveMany(ctx, i.Identifiers, i.IncludeDeleted)
 	if result == nil || len(result.Items) == 0 {
+		if len(result.Errors) > 0 {
+			return nil, errs.NotFound(errs.CodeImageNotFound, result.Errors[0])
+		}
 		return nil, errs.NotFound(errs.CodeImageNotFound, "No images found matching identifiers")
 	}
 	return result.Items, nil
