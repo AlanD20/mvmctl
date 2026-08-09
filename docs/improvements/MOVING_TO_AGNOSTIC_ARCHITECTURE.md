@@ -319,7 +319,7 @@ func (f *VMMFactory) CreateDriver(vmmType VMMType, vm *model.VM, repo vm.Reposit
 | **PCIe** | ❌ (limited PCI) | ✅ | ✅ |
 | **Boot speed** | Very fast | Fast | Slower (BIOS/EFI) |
 | **Memory overhead** | ~5MB per VM | ~15-30MB per VM | ~30-100MB per VM |
-| **Process isolation** | Single process (+optional jailer) | Process-per-device (minijail) | Single process (+optional) |
+| **Process isolation** | Canonical Firecracker Jailer | Process-per-device (minijail) | Single process (+optional) |
 | **Architectures** | x86_64, aarch64 | x86_64, aarch64, riscv64 | x86_64, aarch64, riscv64, arm, mips, ppc, s390x |
 
 ---

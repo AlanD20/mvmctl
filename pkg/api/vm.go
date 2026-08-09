@@ -102,6 +102,12 @@ func (op *Operation) VMCreate(
 	if err != nil {
 		return nil, err
 	}
+	pair, err := op.Services.Binary.ResolvePair(ctx, sharedResolved.Binary)
+	if err != nil {
+		return nil, err
+	}
+	sharedResolved.Binary = pair.Firecracker
+	sharedResolved.Jailer = pair.Jailer
 	sharedResolved.Provisioner = model.ProvisionerType(op.ProvisionerType)
 	// Network bridge setup (shared across all VMs in the batch, done once).
 	bridgeAddr, calcErr := network.ComputeBridgeAddress(
@@ -680,7 +686,7 @@ func (op *Operation) vmBuilderExecute(
 			fcConfig.RelayClientFD = &ptyFD
 		}
 		// Spawn Firecracker
-		if err := spawner.Spawn(); err != nil {
+		if err := spawner.Spawn(ctx); err != nil {
 			fcErr = fmt.Errorf("failed to spawn Firecracker: %w", err)
 			return
 		}
@@ -738,7 +744,7 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 	// Firecracker: stop firecracker process
 	if builder.wasCreated("firecracker") && builder.fcManager != nil {
 		fcSpawner := vm.NewFirecrackerSpawner(builder.fcManager)
-		fcSpawner.Cleanup()
+		fcSpawner.Cleanup(ctx)
 	}
 	// VM directory: remove all created files
 	if builder.wasCreated("vm_dir") && builder.vmDir != "" {
@@ -1047,7 +1053,7 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 	for _, vmLocal := range vms {
 		// If VM is stopped, respawn Firecracker process
 		if vmLocal.Status == model.VMStatusStopped {
-			if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
+			if err := op.vmRespawnFirecracker(ctx, vmLocal, false, ""); err != nil {
 				results = append(results, errs.OperationResult{
 					Status: "error", Code: "vm.start_failed",
 					Message:   fmt.Sprintf("start '%s': %v", vmLocal.Name, err),
@@ -1116,7 +1122,12 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 	}
 	return &errs.BatchResult{Items: results}
 }
-func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, snapshotMode bool) error {
+func (op *Operation) vmRespawnFirecracker(
+	ctx context.Context,
+	v *model.VMItem,
+	snapshotMode bool,
+	snapshotDir string,
+) error {
 	vmDir := infra.GetVMDirByID(v.ID)
 	// Network info is required — the VM record must have it pre-loaded.
 	if v.Network == nil {
@@ -1124,6 +1135,14 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	}
 	if v.Binary == nil || v.Binary.Path == "" {
 		return fmt.Errorf("binary info is required for VM respawn")
+	}
+	pair, err := op.Services.Binary.ResolvePair(ctx, v.Binary)
+	if err != nil {
+		return err
+	}
+	if v.JailerBinaryID != "" && pair.Jailer.ID != v.JailerBinaryID {
+		return errs.New(errs.CodeBinaryPairInvalid,
+			fmt.Sprintf("persisted Jailer does not match Firecracker version %s", v.Binary.Version))
 	}
 	if v.KernelID == "" || v.Kernel == nil || v.Kernel.Path == "" {
 		return fmt.Errorf("kernel info is required for VM respawn")
@@ -1181,6 +1200,8 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 		VMDir:          vmDir,
 		RootfsPath:     v.RootfsPath,
 		BinaryPath:     v.Binary.Path,
+		JailerPath:     pair.Jailer.Path,
+		BinaryVersion:  pair.Firecracker.Version,
 		KernelPath:     v.Kernel.Path,
 		VCPUCount:      v.VCPUCount,
 		MemSizeMiB:     v.MemSizeMiB,
@@ -1196,6 +1217,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 		BootArgs:       v.BootArgs,
 		LSMFlags:       v.LSMFlags,
 		SnapshotMode:   snapshotMode,
+		SnapshotDir:    snapshotDir,
 		ImageFSUUID:    v.Image.FSUUID,
 		ImageFSType:    v.Image.FSType,
 		// Full paths from DB (field names match DB column names)
@@ -1234,7 +1256,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	if err := spawner.WriteToFile(); err != nil {
 		return fmt.Errorf("write firecracker config: %w", err)
 	}
-	if err := spawner.Spawn(); err != nil {
+	if err := spawner.Spawn(ctx); err != nil {
 		slog.Warn("Failed to respawn Firecracker", "vm", v.Name, "error", err)
 		return err
 	}
@@ -1298,7 +1320,7 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 		controller := vm.NewController(vmLocal, repo)
 		controller.Stop(ctx, input.Force)
 		// After stop, respawn a fresh firecracker process
-		if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
+		if err := op.vmRespawnFirecracker(ctx, vmLocal, false, ""); err != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.reboot_failed",
 				Message:   fmt.Sprintf("reboot '%s': %v", vmLocal.Name, err),
@@ -1476,6 +1498,8 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		VMDir:           c.vmDir,
 		RootfsPath:      c.rootfsPath,
 		BinaryPath:      c.resolved.Binary.Path,
+		JailerPath:      c.resolved.Jailer.Path,
+		BinaryVersion:   c.resolved.Binary.Version,
 		KernelPath:      c.resolved.Kernel.Path,
 		VCPUCount:       c.resolved.VCPUCount,
 		MemSizeMiB:      c.resolved.MemSizeMib,
@@ -1552,6 +1576,7 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		ImageID:          c.resolved.Image.ID,
 		KernelID:         c.resolved.Kernel.ID,
 		BinaryID:         c.resolved.Binary.ID,
+		JailerBinaryID:   c.resolved.Jailer.ID,
 		VCPUCount:        c.resolved.VCPUCount,
 		MemSizeMiB:       c.resolved.MemSizeMib,
 		DiskSizeMiB:      c.resolved.DiskSizeMib,

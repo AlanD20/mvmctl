@@ -153,9 +153,45 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 			},
 		}
 	}
+	paired := make([]*model.BinaryItem, 0, len(binaries)*2)
+	seen := make(map[string]bool)
+	for _, item := range binaries {
+		firecracker, fcErr := op.Repos.Binary.GetByTypeAndVersion(ctx, "firecracker", item.Version)
+		jailer, jailerErr := op.Repos.Binary.GetByTypeAndVersion(ctx, "jailer", item.Version)
+		if fcErr != nil || jailerErr != nil || firecracker == nil || jailer == nil {
+			return &errs.BatchResult{Items: []errs.OperationResult{{
+				Status: "error", Code: string(errs.CodeBinaryPairInvalid),
+				Message: fmt.Sprintf("exact Firecracker/Jailer pair is incomplete for version %s", item.Version),
+			}}}
+		}
+		for _, member := range []*model.BinaryItem{firecracker, jailer} {
+			if !seen[member.ID] {
+				seen[member.ID] = true
+				paired = append(paired, member)
+			}
+		}
+	}
+	binaries = paired
 	// Enrich binaries with VM and snapshot references.
 	enriched := binaries
 	op.Enr.EnrichBinary(ctx, enriched, "vm", "snapshots")
+	if !force {
+		for _, bin := range enriched {
+			if len(bin.VMs) > 0 || len(bin.Snapshots) > 0 {
+				return &errs.BatchResult{Items: []errs.OperationResult{
+					{
+						Status: "error",
+						Code:   string(errs.CodeBinaryRemoveFailed),
+						Item:   bin,
+						Message: fmt.Sprintf(
+							"cannot remove Firecracker/Jailer pair %s while it is referenced",
+							bin.Version,
+						),
+					},
+				}}
+			}
+		}
+	}
 	items := make([]errs.OperationResult, 0)
 	for _, bin := range enriched {
 		// svc.Remove returns (*BinaryItem, error)
@@ -202,16 +238,9 @@ func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, 
 	if len(binariesToRemove) == 0 {
 		return errs.New(errs.CodeBinaryNotFound, fmt.Sprintf("No binaries found for version %s", normalized))
 	}
-	// Batch-enrich with VM references.
-	for _, bin := range binariesToRemove {
-		if bin.VMs == nil {
-			vms, err := op.Repos.VM.FindByBinaryID(ctx, bin.ID)
-			if err == nil && len(vms) > 0 {
-				for _, vm := range vms {
-					bin.VMs = append(bin.VMs, vm)
-				}
-			}
-		}
+	if err := op.Enr.EnrichBinary(ctx, binariesToRemove, "vm", "snapshots"); err != nil {
+		return errs.WrapMsg(errs.CodeBinaryRemoveFailed,
+			fmt.Sprintf("failed to resolve binary pair references: %v", err), err)
 	}
 	for _, bin := range binariesToRemove {
 		if _, err := op.Services.Binary.Remove(ctx, bin, force); err != nil {

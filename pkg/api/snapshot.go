@@ -494,7 +494,7 @@ func (op *Operation) SnapshotRestore(
 		_ = op.Repos.VM.Upsert(ctx, vmItem)
 
 		// Respawn Firecracker in snapshot mode (stays paused)
-		if err := op.vmRespawnFirecracker(ctx, vmItem, true); err != nil {
+		if err := op.vmRespawnFirecracker(ctx, vmItem, true, snap.SnapshotDir); err != nil {
 			// Don't rollback — VM record exists, just log error
 			slog.Error("Failed to respawn Firecracker for snapshot restore",
 				"vm", name, "error", err)
@@ -546,7 +546,7 @@ func (op *Operation) SnapshotRestore(
 				return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
 					fmt.Sprintf("failed to remove old phantom symlink: %v", err), err)
 			}
-			if err := os.Symlink(vmItem.RootfsPath, phantomPath); err != nil {
+			if err := os.Symlink("/rootfs", phantomPath); err != nil {
 				if lockFile != nil {
 					_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 					lockFile.Close()
@@ -618,6 +618,13 @@ func (op *Operation) cleanupRestoredVM(ctx context.Context, v *model.VMItem) {
 	if vmDir != "" {
 		_ = os.RemoveAll(vmDir) // cleanup
 	}
+}
+
+func jailedRuntimePathForAPI(hostPath string) string {
+	if hostPath == "" {
+		return ""
+	}
+	return filepath.Join("/run/mvm", filepath.Base(hostPath))
 }
 
 // --- SnapshotList ---

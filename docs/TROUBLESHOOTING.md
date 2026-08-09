@@ -145,7 +145,12 @@ mvm logs myvm --os
 
 **Common causes:**
 
-**1. Missing or broken jailer.** Firecracker requires the `jailer` binary alongside it. If the binary was fetched with `mvm bin pull`, it should be bundled, but manual installs may miss it.
+**1. Missing, mismatched, or untrusted Jailer pair.** VM launch requires the exact checksum-verified Firecracker/Jailer release pair in the root-owned trusted store. Re-pull the selected release; source-built or manually copied binaries cannot launch jailed VMs:
+
+```bash
+mvm bin ls --long
+mvm bin pull <version> --force
+```
 
 **2. Kernel file is not readable by Firecracker.** Verify the kernel exists and the path is correct:
 ```bash

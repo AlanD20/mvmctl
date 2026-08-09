@@ -87,6 +87,7 @@ type ResolvedVMCreateInput struct {
 	Image               *model.ImageItem
 	Kernel              *model.KernelItem
 	Binary              *model.BinaryItem
+	Jailer              *model.BinaryItem
 	NetworkPrefixLen    int
 	CloudInitMode       model.CloudInitMode
 	SkipCINetworkConfig bool

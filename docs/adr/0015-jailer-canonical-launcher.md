@@ -6,7 +6,7 @@
 
 ## Context
 
-mvmctl downloads both Firecracker and Jailer from the same release but currently launches Firecracker directly. Direct launch preserves console file descriptors and simple PID tracking, but it omits Firecracker's recommended production process containment: chroot, privilege drop, namespace isolation, cgroup placement, and process resource limits.
+mvmctl originally downloaded both Firecracker and Jailer but launched Firecracker directly. Direct launch preserved console file descriptors and simple PID tracking while omitting Firecracker's recommended production process containment.
 
 Firecracker's production guidance states that Jailer and Firecracker must have matching versions and that all trusted executable and chroot paths must not be writable by unprivileged users. Jailer requires elevated permissions to prepare the jail and cgroups, while mvmctl's established contract is that users invoke the CLI without root and privileged work is delegated internally through the constrained service-subprocess pattern.
 
@@ -21,17 +21,16 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - The existing VM-domain spawner remains the caller-facing seam and owns jailed path translation, process tracking, socket probing, and cleanup.
 - Root-requiring setup is encapsulated in a privileged `mvm run` subprocess, following the loopmount precedent. Users continue to invoke `mvm` without sudo.
 - Executable and chroot paths trusted by Jailer are root-owned and not writable by the invoking user. The ordinary per-user mvmctl database and cache model remains unchanged.
-- Jailer uses cgroup v2 and receives typed resource limits derived from the persisted VM resource specification. Raw cgroup key/value input is not public.
-- Launch fails closed if required cgroup controllers are unavailable or post-spawn verification does not match requested limits.
+- Typed cgroup-v2 resource enforcement will extend this canonical launch path in a separate change. Raw cgroup key/value input will not be public.
 - Jailer does not daemonize initially, preserving serial-console standard descriptors. New PID and network namespaces are deferred until their lifecycle and TAP implications are designed separately.
-- VM resources are exposed inside the jail through validated paths without duplicating large rootfs and volume files. Mount and cgroup cleanup is idempotent across failed starts, stop, remove, and host recovery.
+- VM resources are exposed inside the jail through validated paths without duplicating large rootfs and volume files. Mount cleanup is idempotent across failed starts, stop, remove, and host recovery.
 
 ## Consequences
 
 **Benefits:**
 
-- Every VM receives Firecracker's supported chroot, privilege-drop, and cgroup containment path.
-- CPU, memory, swap, PID, and applicable I/O constraints become enforceable host limits rather than advisory guest configuration.
+- Every VM receives Firecracker's supported chroot and privilege-drop path.
+- The canonical Jailer path provides the required seam for follow-up cgroup-v2 enforcement.
 - One canonical launch path avoids a permanent direct-versus-jailed behavior matrix.
 - VM create, start, reboot, and snapshot restore share the same security properties.
 
@@ -42,7 +41,7 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - Jailer adds fixed launch overhead and depends on the number of host mount points; benchmarks must track the regression budget.
 - Memory cgroup limits require measured VMM headroom above guest-visible RAM.
 - Network namespace isolation remains future work because the current TAP belongs to a host bridge.
-- Hosts must rerun initialization when trusted launch assets or cgroup-v2 prerequisites are introduced.
+- Release pairs are reinstalled into the trusted store by `mvm bin pull`; cgroup-v2 prerequisites are introduced separately.
 
 ## Related Decisions
 

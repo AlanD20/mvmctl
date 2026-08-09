@@ -281,7 +281,7 @@ inside the guest VM, not on the host.
 
 ### 3.1 Service Architecture
 
-Three foreground services and one embedded guest agent share the same binary.
+Four foreground services and one embedded guest agent share the same binary.
 No separate service binaries, no symlinks, no extraction step.
 
 | Service | Entry Point | Runs As | Purpose |
@@ -289,6 +289,7 @@ No separate service binaries, no symlinks, no extraction step.
 | `mvm run console relay` | `console.Run(ctx, cfg)` | user | PTY-to-socket relay for serial console |
 | `mvm run nocloudnet serve` | `nocloudnet.Run(ctx, cfg)` | user | HTTP server for cloud-init nocloud-net |
 | `mvm run provision` | `loopmount.Run(ctx, cfg)` | **root** (sudo) | Loop-mount rootfs provisioning |
+| `mvm run jailer` | `jailer.Run(ctx, cfg)` | **root** (sudo) | Trusted release installation, jail setup, and Firecracker launch |
 | `agent/` (embedded) | Guest agent binary | root (in-VM) | Command execution and file transfer inside the guest |
 
 The vsock agent is cross-compiled at build time, zstd-compressed, embedded via
@@ -404,7 +405,24 @@ API layer → provisioner.NewBackend() → LoopMountBackend
 raw block device operations. The JSON protocol ensures no state leaks between
 invocations.
 
-### 3.5 Service Lifecycle
+### 3.5 Firecracker Jailer Service
+
+Jailer is the only VM launch path. `mvm bin pull` streams the checksum-verified Firecracker release archive to the privileged installer, which atomically installs the exact Firecracker/Jailer pair under `/var/lib/mvmctl/binaries/<version>/`. VM launch then exposes only that VM's required resources inside `/var/lib/mvmctl/jailer/firecracker/<vm-id>/root/` and execs the trusted Jailer binary.
+
+Jailer does not daemonize, so the serial-console descriptors remain attached. The service derives the non-root Firecracker UID/GID from the sudo caller, translates Firecracker configuration paths into the jail, and records the actual Firecracker PID. Stop, remove, reboot, hotplug, and snapshot operations reconcile the corresponding jail mounts.
+
+There is no direct-Firecracker fallback. Jailer cgroup-v2 resource tuning and network namespaces are separate follow-up work.
+
+**Key files:**
+
+| File | Purpose |
+|------|---------|
+| `internal/service/jailer/entry.go` | Validates privileged operations, installs trusted pairs, mounts resources, and execs Jailer |
+| `internal/service/jailer/spawn.go` | Typed normal-user calls into the privileged service |
+| `internal/core/vm/jailer.go` | Per-VM manifest generation and host-to-jail path translation |
+| `internal/core/vm/firecracker.go` | Firecracker configuration and caller-facing spawn lifecycle |
+
+### 3.6 Service Lifecycle
 
 | Phase | Action | Component |
 |-------|--------|-----------|
@@ -412,6 +430,7 @@ invocations.
 | **Create VM** | Provision rootfs via loop-mount or guestfs | `backend.Run()` |
 | **Create VM** | Start NoCloud server (net mode) or inject cloud-init (inject mode) | `nocloudnet.Spawn()` / `backend.InjectCloudInit()` |
 | **Create VM** | Start console relay (when `--console` is set) | `console.Spawn()` |
+| **Create/start/restore VM** | Launch exact Firecracker/Jailer pair in per-VM jail | `jailer.Launch()` |
 | **Remove VM** | Stop console relay + NoCloud server + clean firewall rules | `console.Stop()`, `nocloudnet.Stop()` |
 | **Cache prune** | Clean up stale PID files + orphan processes | `cache.Service.Prune()` |
 

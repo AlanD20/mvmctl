@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Canonical Firecracker Jailer launch
+- VM create, start, reboot, and snapshot restore now require an exact Firecracker/Jailer release pair and run through a root-owned Jailer chroot with no direct-launch fallback.
+- Trusted release pairs are installed from the checksum-verified archive; each jail exposes only that VM's kernel, rootfs, volumes, runtime files, and selected snapshot.
+
 ### Fixed
 
 #### `mvm image inspect`

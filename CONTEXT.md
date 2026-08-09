@@ -98,14 +98,14 @@ Constructor pattern: `NewRepository(db *sqlx.DB) Repository`.
 
 ### Service subprocess pattern (internal/service/)
 
-Long-running subprocess services (console relay, nocloud-net server, loopmount provisioner) live in `internal/service/{name}/`. These are compiled into the same `mvm` binary — no separate binaries. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`agent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
+Long-running and privileged subprocess services (console relay, nocloud-net server, loopmount provisioner, Jailer launcher) live in `internal/service/{name}/`. These are compiled into the same `mvm` binary — no separate service binaries. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`agent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
 
 Each service follows a consistent three-function pattern:
 - **`Config`** struct — holds all configuration for the service.
 - **`Run(ctx, cfg)`** — runs the service in the foreground (blocking).
 - **`Spawn(ctx, cfg, extraParams...)`** — launches the service as a background subprocess via `system.SpawnService()`. The context parameter is typically `nil` (background/nil) for daemon services (console relay, nocloud-net server) and a real context for synchronous services (loopmount provisioning). Extra parameters carry service-specific data: `console.Spawn()` passes a PTY file descriptor, `nocloudnet.Spawn()` passes the config only, `loopmount.Spawn()` passes a wire protocol input struct.
 
-Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `agent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
+Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `jailer/` (trusted release installation, per-VM jail setup, and privileged Jailer exec), `agent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
 
 Dependency direction: `cli/` -> `services/`. Services never import `cli/` or `pkg/api/`.
 
@@ -409,7 +409,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 
 | Location | Why `DefaultRunner.Run()` doesn't work |
 |---|---|---|
-| `internal/core/vm/firecracker.go` (Firecracker spawn) | Fine-grained control over stdin/stdout/stderr FD redirection and `Setsid` session management for the Firecracker child process |
+| `internal/service/jailer/entry.go` (Jailer exec) | Privileged chroot setup ends with `syscall.Exec` so Jailer inherits console stdin/stdout/stderr and becomes the managed Firecracker process |
 | `internal/core/ssh/utils.go` (SSH connectivity probe) | Uses `exec.CommandContext` with a short-lived probe context for SSH connectivity detection |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
 | `internal/service/agent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |
@@ -419,7 +419,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 
 **Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check that happens to use the `os/exec` package. These files are not listed as exceptions above and do not violate the subprocess rule. Key locations: `internal/core/host/detector.go`, `internal/core/host/probe.go`, `internal/core/host/utils.go`, `internal/core/ssh/service.go`, `internal/core/key/utils.go`, `internal/core/image/service.go`, and others in `internal/lib/`, `internal/core/`, `internal/service/`.
 
-Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The services themselves (console relay, nocloudnet server, loopmount entry point) do NOT use `os/exec` except for the provisioning engine noted above.
+Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The Jailer service uses the documented `syscall.Exec` exception after validating trusted executables and per-VM resource paths; other services do not execute arbitrary child commands except the documented provisioning engine.
 
 ### Model types
 

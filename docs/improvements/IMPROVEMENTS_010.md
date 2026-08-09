@@ -1,6 +1,6 @@
 # Per-VM Network Namespaces with Firecracker Jailer
 
-> **STATUS:** ⏳ Future — not implemented. No network namespace code, no jailer integration, no `NetNS` field in `FirecrackerConfig` model, no `--jailer`/`--namespace` CLI flags. The vsock agent exec approach (alternative described in §6) is the current method for snapshot restore networking.
+> **STATUS:** ⏳ Network namespaces remain future work. Canonical Jailer launch, chroot, privilege drop, trusted release pairs, and jailed snapshot paths are implemented; `--netns`, veth topology, and a `NetNS` model remain unimplemented.
 >
 > **Last verified:** 2026-06-27
 
@@ -64,7 +64,7 @@ Currently, mvmctl spawns Firecracker directly:
 cmd = exec.Command(firecracker, "--api-sock", socketPath, ...)
 ```
 
-No jailer, no namespace.
+Jailer is now canonical, but it joins the host network namespace. The namespace-specific topology below remains a proposal.
 
 ### 3.2 Spawn via Jailer with `--netns`
 

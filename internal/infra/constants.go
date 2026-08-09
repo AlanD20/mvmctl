@@ -46,6 +46,15 @@ const MVMUnixGroup = CLIName
 
 const MVMDBFilename = "mvmdb.db"
 
+// TrustedBinaryRoot contains root-owned Firecracker release pairs used by Jailer.
+const TrustedBinaryRoot = "/var/lib/mvmctl/binaries"
+
+// JailerChrootBase is the fixed root-owned base directory for per-VM jails.
+const JailerChrootBase = "/var/lib/mvmctl/jailer"
+
+// JailerManifestFilename is the fixed per-VM launch manifest name.
+const JailerManifestFilename = "jailer-launch.json"
+
 const MVMForwardChain = "MVM-FORWARD"
 
 const MVMPostroutingChain = "MVM-POSTROUTING"

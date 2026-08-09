@@ -587,6 +587,7 @@ removed, or when test coverage changes.
 | `run nocloudnet serve --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
 | `run console relay --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
 | `run provision --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
+| `run jailer` | ✅ Deep | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2 — indirectly verifies privileged install, launch, cleanup, and no fallback |
 
 > Internal service subprocesses are tested indirectly through VM operations (console relay, nocloudnet HTTP, volume provisioning).
 
@@ -609,6 +610,7 @@ removed, or when test coverage changes.
 | Stress create/destroy | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestStressCreateDestroy` | L2: 5 sequential create→destroy cycles |
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
 | Concurrent VM creation | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | L3: 10 concurrent VMs, all running via ls --json, SSH into each |
+| Canonical Jailer lifecycle | ✅ Deep | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2: trusted pair, non-root jailed process, lifecycle, volume, snapshot, fail-closed |
 
 ---
 

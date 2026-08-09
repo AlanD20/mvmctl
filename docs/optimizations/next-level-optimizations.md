@@ -215,13 +215,13 @@ Additional safe params that could still be added: `audit=0`, `elevator=noop`.
 
 **Status:** ✅ IMPLEMENTED — `cmd/mvm/main.go` produces `mvm` via `go build`. No interpreter startup overhead, no import time cost, immediate command execution.
 
-### 4.5 os.posix_spawn() for Firecracker Subprocess ⏳ NOT IMPLEMENTED
+### 4.5 Lower-Level Jailer Process Spawn ⏳ NOT IMPLEMENTED
 
-**What it would be (Go equivalent):** Use `syscall.ForkExec()` or `os.StartProcess()` with pre-configured file descriptors instead of `exec.Command()` for Firecracker process creation.
+**What it would be:** Replace the current `system.SpawnService()` handoff to the privileged Jailer service with a lower-level process primitive while preserving sudo, console descriptors, PID tracking, and the trusted-path contract.
 
-**Current approach:** Uses `system.RunCmd` / `system.RunCmdOpts` (wrapping `exec.Command`) in the Firecracker spawner (`internal/core/vm/firecracker.go`). The spawner uses `SysProcAttr.Pdeathsig` for process lifecycle management.
+**Current approach:** `internal/core/vm/firecracker.go` launches the privileged `mvm run jailer` service through `system.SpawnService()`. The service validates the per-VM manifest and uses `syscall.Exec` to hand off to the trusted Jailer/Firecracker pair without daemonization.
 
-**Feasibility:** Low impact — Go's `os/exec` is already efficient for process spawning. The overhead is negligible compared to QEMU/Firecracker boot time.
+**Feasibility:** Low impact. Jail setup and mount traversal dominate the process-spawn wrapper cost, so optimize only after Jailer launch benchmarks identify this handoff as material.
 
 ### 4.6 Pre-Allocated Resource Pools (General) ⏳ NOT IMPLEMENTED
 

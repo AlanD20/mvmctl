@@ -161,7 +161,14 @@ func (r *sqliteRepo) GetByKernelIDs(ctx context.Context, kernelIDs []string) ([]
 
 func (r *sqliteRepo) FindByBinaryID(ctx context.Context, binaryID string) ([]*model.VMItem, error) {
 	var rows []*model.VMItem
-	if err := sqlx.SelectContext(ctx, r.db, &rows, vmBaseQuery+" WHERE binary_id = ?", binaryID); err != nil {
+	if err := sqlx.SelectContext(
+		ctx,
+		r.db,
+		&rows,
+		vmBaseQuery+" WHERE binary_id = ? OR jailer_binary_id = ?",
+		binaryID,
+		binaryID,
+	); err != nil {
 		return nil, fmt.Errorf("find vms by binary id: %w", err)
 	}
 	return rows, nil
@@ -171,7 +178,11 @@ func (r *sqliteRepo) GetByBinaryIDs(ctx context.Context, binaryIDs []string) ([]
 	if len(binaryIDs) == 0 {
 		return nil, nil
 	}
-	query, args, err := sqlx.In(vmBaseQuery+" WHERE binary_id IN (?)", binaryIDs)
+	query, args, err := sqlx.In(
+		vmBaseQuery+" WHERE binary_id IN (?) OR jailer_binary_id IN (?)",
+		binaryIDs,
+		binaryIDs,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("get vms by binary ids: %w", err)
 	}
@@ -283,7 +294,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 	_, err = r.db.ExecContext(ctx, `
 		INSERT INTO vm_instances (
 			id, name, status, pid, process_start_time, ipv4, mac, network_id, tap_device,
-			image_id, kernel_id, binary_id, api_socket_path,
+			image_id, kernel_id, binary_id, jailer_binary_id, api_socket_path,
 			relay_socket_path, config_path, cloud_init_mode,
 			nocloud_net_port, nocloud_net_pid, relay_pid,
 			exit_code, vcpu_count, mem_size_mib, disk_size_mib,
@@ -293,7 +304,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			ssh_keys, ssh_user,
 			created_at, updated_at,
 			log_path, serial_output_path, lsm_flags, boot_args, volume_ids, cpu_config
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			status = excluded.status,
@@ -306,6 +317,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			image_id = excluded.image_id,
 			kernel_id = excluded.kernel_id,
 			binary_id = excluded.binary_id,
+			jailer_binary_id = excluded.jailer_binary_id,
 			api_socket_path = excluded.api_socket_path,
 			relay_socket_path = excluded.relay_socket_path,
 			config_path = excluded.config_path,
@@ -347,6 +359,7 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 		vm.ImageID,
 		vm.KernelID,
 		vm.BinaryID,
+		vm.JailerBinaryID,
 		vm.APISocketPath,
 		vm.RelaySocketPath,
 		vm.ConfigPath,

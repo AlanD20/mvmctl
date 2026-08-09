@@ -232,8 +232,10 @@ type FirecrackerConfig struct {
 	RootfsPath string `json:"rootfs_path"`
 
 	// Binary / kernel
-	BinaryPath string `json:"binary_path"`
-	KernelPath string `json:"kernel_path"`
+	BinaryPath    string `json:"binary_path"`
+	JailerPath    string `json:"jailer_path"`
+	BinaryVersion string `json:"binary_version"`
+	KernelPath    string `json:"kernel_path"`
 
 	// Machine
 	VCPUCount  int `json:"vcpu_count"`
@@ -284,8 +286,9 @@ type FirecrackerConfig struct {
 	ExtraDrives []DriveConfig `json:"extra_drives,omitempty"`
 
 	// Spawn behavior
-	RelayClientFD *int `json:"relay_client_fd,omitempty"`
-	SnapshotMode  bool `json:"snapshot_mode"`
+	RelayClientFD *int   `json:"relay_client_fd,omitempty"`
+	SnapshotMode  bool   `json:"snapshot_mode"`
+	SnapshotDir   string `json:"snapshot_dir,omitempty"`
 
 	// Cache type
 	// When true, rootfs + volumes use "Writeback" cache (safe, guest fsync honored).

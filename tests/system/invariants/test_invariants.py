@@ -154,6 +154,28 @@ class TestInvariants:
 
     pytestmark = [pytest.mark.system, pytest.mark.domain_invariant]
 
+    def test_every_vm_references_an_exact_firecracker_jailer_pair(
+        self, runner_vm: str
+    ) -> None:
+        """Persisted launcher IDs must resolve to present equal-version pair members."""
+        vms: list[dict[str, Any]] = json.loads(
+            _run_mvm(runner_vm, "vm", "ls", "--json").stdout
+        )
+        binaries: list[dict[str, Any]] = json.loads(
+            _run_mvm(runner_vm, "bin", "ls", "--json").stdout
+        )
+        by_id = {item["id"]: item for item in binaries}
+        for vm in vms:
+            firecracker = by_id.get(vm.get("binary_id"))
+            jailer = by_id.get(vm.get("jailer_binary_id"))
+            assert firecracker is not None, f"VM {vm['name']} has no Firecracker record"
+            assert jailer is not None, f"VM {vm['name']} has no Jailer record"
+            assert firecracker.get("type") == "firecracker"
+            assert jailer.get("type") == "jailer"
+            assert firecracker.get("version") == jailer.get("version")
+            assert firecracker.get("is_present") is True
+            assert jailer.get("is_present") is True
+
     def test_no_dangling_volume_references(self, runner_vm: str) -> None:
         """Every volume.vm_id must correspond to an existing VM."""
         vol_result = _run_mvm(runner_vm, "volume", "ls", "--json")

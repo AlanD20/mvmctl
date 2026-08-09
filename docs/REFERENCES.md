@@ -224,7 +224,7 @@ mvm image import base-img my-vm
 
 ### `mvm bin`
 
-Firecracker binary management — download, list, and remove Firecracker and jailer binaries.
+Firecracker runtime management — download, list, and remove exact Firecracker/Jailer release pairs. Release downloads are checksum-verified and installed into the root-owned trusted store used by VM launch. Source-built pairs may be listed but cannot launch jailed VMs.
 
 #### Selectors
 
@@ -721,7 +721,7 @@ The security model applies to the net cloud-init mode only:
 
 ```
 ~/.cache/mvmctl/
-├── bin/                  # Firecracker + jailer binaries
+├── bin/                  # Source-build and non-launch binary workspace
 ├── kernels/              # vmlinux kernel images
 ├── images/               # Root filesystem images (.ext4, .btrfs, .img, .raw, .ext4.zst, .btrfs.zst)
 ├── volumes/              # Persistent disk volume files
@@ -748,4 +748,12 @@ The security model applies to the net cloud-init mode only:
 ├── timing.log            # Performance/timing log
 ├── audit.log             # Rotating operation log (10MB, 3 backups)
 └── ...
+```
+
+Canonical launch assets and jail state are outside the user cache:
+
+```text
+/var/lib/mvmctl/
+├── binaries/<version>/   # Root-owned exact Firecracker/Jailer release pair
+└── jailer/firecracker/<vm-id>/root/  # Per-VM jail and bind mounts
 ```

@@ -35,6 +35,7 @@ type SnapshotItem struct {
 // SnapshotCreateConfig collects all external parameters for creating a snapshot.
 // Passed from the API layer to the controller.
 type SnapshotCreateConfig struct {
+	SnapshotDir       string
 	MemFile           string
 	StateFile         string
 	PauseOnly         bool

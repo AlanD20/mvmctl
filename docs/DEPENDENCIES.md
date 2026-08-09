@@ -174,6 +174,10 @@ Only needed for `mvm kernel pull --type official --clean-build` (building the of
 - **Virtualization**: VT-x (Intel) or AMD-V must be enabled in BIOS/UEFI.
 - **Permissions**: The user must be in the `mvm` group (created by `mvm host init`).
 
+### Firecracker Jailer
+
+`mvm bin pull` downloads and checksum-verifies a matching Firecracker/Jailer release pair. The privileged Jailer service installs the pair into the root-owned trusted store; users do not install or invoke Jailer directly. Source-built pairs remain untrusted and cannot launch production VMs.
+
 ---
 
 ## H. Command Dependency Map
@@ -191,10 +195,10 @@ Only needed for `mvm kernel pull --type official --clean-build` (building the of
 | `mvm kernel pull --type firecracker` | Download only (no build tools) |
 | `mvm key create` | `ssh-keygen` |
 | `mvm key import/ls/rm/inspect/export/default` | Internal only |
-| `mvm bin pull/ls/rm/default` | Internal only (downloads from GitHub API) |
-| `mvm vm create` | `firecracker`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
-| `mvm vm start/stop/reboot/pause/resume` | `firecracker`, `ip`, `iptables`/`nft` |
-| `mvm vm rm` | `firecracker`, `ip`, `iptables`/`nft` |
+| `mvm bin pull/ls/rm/default` | Internal downloads plus privileged `mvm run jailer install/remove-release` |
+| `mvm vm create` | trusted `jailer` + `firecracker`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
+| `mvm vm start/stop/reboot/pause/resume` | trusted `jailer` + `firecracker`, `ip`, `iptables`/`nft` |
+| `mvm vm rm` | `mvm run jailer cleanup`, `ip`, `iptables`/`nft` |
 | `mvm snapshot create/restore` | Internal (Firecracker API via Unix socket) |
 | `mvm volume attach/detach` | `firecracker` |
 | `mvm volume create/rm/resize` | `qemu-img` |

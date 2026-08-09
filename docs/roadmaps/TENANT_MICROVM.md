@@ -28,7 +28,7 @@ Direct inbound ports are not required when the workload VM runs an outbound tunn
 | Same-network communication | Works through one bridge; intentionally unfiltered | None for the environment trust-zone model |
 | Cross-network routing | Host forwarding and ACCEPT policy permit it | Persist explicit service allows and default-deny other managed inter-network traffic |
 | VM-to-host traffic | INPUT remains open except for explicit NoCloud allow rules | Preserve required host services, then deny other traffic from managed VM networks |
-| Firecracker launch | Firecracker and Jailer are downloaded together; Firecracker is launched directly | Make Jailer the canonical launch path |
+| Firecracker launch | Canonical Jailer launch and exact trusted release pairing implemented; L2 execution remains pending | Add cgroup-v2 resource enforcement and complete runner verification |
 | Host resource enforcement | Guest vCPU and RAM are configured; no Jailer cgroup limits are applied | Apply and verify typed cgroup-v2 limits through Jailer |
 | IP identity | Explicit IP assignment and collision-safe IPAM exist | Policies bind to network/VM IDs and resolve current addressing during reconciliation |
 | Persistent storage | Volumes and snapshots exist | External orchestration supplies application-consistent backup and restore procedures |

@@ -711,10 +711,10 @@ class TestBinaryStoppedVMDeletion:
         pytest.mark.domain_bin,
     ]
 
-    def test_delete_binary_used_by_stopped_vm_does_not_error(
+    def test_delete_binary_used_by_stopped_vm_is_rejected(
         self, runner_vm: str, unique_vm_name: str, module_network: str
     ) -> None:
-        """Binary rm allows deleting binaries referenced by stopped VMs."""
+        """Neither member of a persisted launch pair can be removed while referenced."""
         vm_name = unique_vm_name
         ensure_vm_deps(runner_vm)
 
@@ -747,14 +747,14 @@ class TestBinaryStoppedVMDeletion:
             binary_id_prefix = default_bin["id"][:6]
 
             result = _run_mvm(runner_vm, "bin", "rm", binary_id_prefix, check=False)
-            assert result.returncode in (0, 1)
+            assert result.returncode != 0
+            combined = (result.stdout + result.stderr).lower()
+            assert "referenced by" in combined
 
-            if result.returncode == 0:
-                bin_ls = _run_mvm(runner_vm, "bin", "ls", "--json", check=False)
-                if bin_ls.returncode == 0 and bin_ls.stdout.strip():
-                    bins_after: list[dict[str, Any]] = json.loads(bin_ls.stdout)
-                    bin_ids = [b.get("id", "")[:6] for b in bins_after]
-                    assert binary_id_prefix not in bin_ids
+            bin_ls = _run_mvm(runner_vm, "bin", "ls", "--json")
+            bins_after: list[dict[str, Any]] = json.loads(bin_ls.stdout)
+            bin_ids = [b.get("id", "")[:6] for b in bins_after]
+            assert binary_id_prefix in bin_ids
             vm_ls = _run_mvm(runner_vm, "vm", "ls", "--json", check=False)
             if vm_ls.returncode == 0 and vm_ls.stdout.strip():
                 vms: list[dict[str, Any]] = json.loads(vm_ls.stdout)

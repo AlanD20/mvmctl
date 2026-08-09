@@ -183,7 +183,7 @@ Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 
 | Location | Why DefaultRunner doesn't work |
 |----------|-------------------------------|
-| `internal/core/vm/firecracker.go` | Needs `pass_fds` for VM API socket and log file descriptors |
+| `internal/service/jailer/entry.go` | Privileged Jailer handoff uses `syscall.Exec` to preserve console stdio and process identity after chroot setup |
 | `internal/core/ssh/utils.go` | SSH connectivity probe uses `exec.CommandContext` with short-lived probe context |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine with chained losetup/mount/umount/chroot |
 | `internal/service/agent/exec.go` | Guest agent command execution via `su`/`sh` with `exec.CommandContext` |

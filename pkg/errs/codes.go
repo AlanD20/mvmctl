@@ -62,15 +62,18 @@ const (
 	CodeKernelDefaultSetFailed Code = "kernel.default_set_failed"
 
 	// --- Binary domain ---
-	CodeBinaryNotFound            Code = "binary.not_found"
-	CodeBinaryAlreadyExists       Code = "binary.already_exists"
-	CodeBinaryVersionGate         Code = "binary.version.gate"
-	CodeBinaryError               Code = "binary.error"
-	CodeBinaryPullFailed          Code = "binary.pull_failed"
-	CodeBinaryRemoveFailed        Code = "binary.remove_failed"
-	CodeBinaryDefaultSetFailed    Code = "binary.default_set_failed"
-	CodeBinaryEnsureDefaultFailed Code = "binary.ensure_default_failed"
-	CodeBinaryNoCIVersion         Code = "binary.no_ci_version"
+	CodeBinaryNotFound             Code = "binary.not_found"
+	CodeBinaryAlreadyExists        Code = "binary.already_exists"
+	CodeBinaryVersionGate          Code = "binary.version.gate"
+	CodeBinaryError                Code = "binary.error"
+	CodeBinaryPullFailed           Code = "binary.pull_failed"
+	CodeBinaryRemoveFailed         Code = "binary.remove_failed"
+	CodeBinaryDefaultSetFailed     Code = "binary.default_set_failed"
+	CodeBinaryEnsureDefaultFailed  Code = "binary.ensure_default_failed"
+	CodeBinaryNoCIVersion          Code = "binary.no_ci_version"
+	CodeBinaryPairInvalid          Code = "binary.pair.invalid"
+	CodeBinaryUntrusted            Code = "binary.untrusted"
+	CodeBinaryTrustedInstallFailed Code = "binary.trusted_install.failed"
 
 	// --- Volume domain ---
 	CodeVolumeNotFound      Code = "volume.not_found"
