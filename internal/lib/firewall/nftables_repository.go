@@ -11,7 +11,7 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-const nftablesColumns = `id, chain AS chain_name, rule_type, table_name, protocol, source, destination, in_interface, out_interface, target, sport, dport, network_id, comment_tag, command_string, created_at, last_verified_at, is_active`
+const nftablesColumns = `id, chain AS chain_name, rule_type, table_name, protocol, source, destination, in_interface, out_interface, target, sport, dport, dport_end, network_id, service_access_policy_id, comment_tag, command_string, created_at, last_verified_at, is_active`
 
 type NFTablesRuleRepository struct {
 	db *sqlx.DB
@@ -135,13 +135,13 @@ func (r *NFTablesRuleRepository) Insert(ctx context.Context, rule *model.Firewal
 	result, err := r.db.ExecContext(ctx, `
 		INSERT INTO nftables_rules (
 			chain, rule_type, table_name, protocol, source, destination,
-			in_interface, out_interface, target, sport, dport,
-			network_id, comment_tag, command_string, created_at, is_active
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			in_interface, out_interface, target, sport, dport, dport_end,
+			network_id, service_access_policy_id, comment_tag, command_string, created_at, is_active
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, string(rule.ChainName), string(rule.RuleType), string(rule.TableName),
 		string(rule.Protocol), rule.Source, rule.Destination,
 		rule.InInterface, rule.OutInterface, string(rule.Target),
-		rule.SPort, rule.DPort, rule.NetworkID,
+		rule.SPort, rule.DPort, rule.DPortEnd, rule.NetworkID, infra.DerefOrNil(rule.PolicyID),
 		infra.DerefOrNil(rule.CommentTag), infra.DerefOrNil(rule.CommandString),
 		*createdAt, isActive,
 	)
@@ -196,10 +196,11 @@ func (r *NFTablesRuleRepository) FindAndUpsertRules(
 	}
 	var newRules []*model.FirewallRule
 	for _, rule := range rules {
-		existing, err := r.FindByAttributes(ctx,
+		existing, err := r.findByAttributes(ctx,
 			rule.TableName, rule.ChainName, rule.RuleType, rule.NetworkID,
 			rule.Protocol, rule.Source, rule.Destination, rule.InInterface,
 			rule.OutInterface, rule.SPort, rule.DPort,
+			rule.DPortEnd, rule.PolicyID,
 		)
 		if err != nil {
 			return nil, err
@@ -224,18 +225,63 @@ func (r *NFTablesRuleRepository) FindByAttributes(
 	protocol model.FirewallProtocol, source, destination string,
 	inInterface, outInterface string, sport, dport int,
 ) (*model.FirewallRule, error) {
+	return r.findByAttributes(ctx, tableName, chainName, ruleType, networkID, protocol,
+		source, destination, inInterface, outInterface, sport, dport, 0, nil)
+}
+
+func (r *NFTablesRuleRepository) findByAttributes(
+	ctx context.Context,
+	tableName model.FirewallTable, chainName model.FirewallChain,
+	ruleType model.FirewallRuleType, networkID string,
+	protocol model.FirewallProtocol, source, destination string,
+	inInterface, outInterface string, sport, dport, dportEnd int, policyID *string,
+) (*model.FirewallRule, error) {
 	var rule model.FirewallRule
 	err := r.db.GetContext(ctx, &rule, `SELECT `+nftablesColumns+` FROM nftables_rules
 		WHERE chain = ? AND rule_type = ? AND table_name = ?
 		AND network_id = ? AND protocol = ? AND source = ?
 		AND destination = ? AND in_interface = ? AND out_interface = ?
-		AND sport = ? AND dport = ? AND is_active = 1`,
+		AND sport = ? AND dport = ? AND dport_end = ?
+		AND service_access_policy_id IS ? AND is_active = 1`,
 		string(chainName), string(ruleType), string(tableName),
 		networkID, string(protocol), source, destination,
-		inInterface, outInterface, sport, dport,
+		inInterface, outInterface, sport, dport, dportEnd, infra.DerefOrNil(policyID),
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return &rule, err
+}
+
+func (r *NFTablesRuleRepository) ReplacePolicyRules(
+	ctx context.Context,
+	rules []model.FirewallRule,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `DELETE FROM nftables_rules WHERE rule_type IN (?, ?, ?)`,
+		string(model.FirewallRuleTypePolicyAllow), string(model.FirewallRuleTypeRoutedDrop),
+		string(model.FirewallRuleTypeHostInputDrop))
+	if err != nil {
+		return err
+	}
+	for i := range rules {
+		rule := rules[i]
+		_, err = tx.ExecContext(ctx, `INSERT INTO nftables_rules (
+			chain, rule_type, table_name, protocol, source, destination, in_interface,
+			out_interface, target, sport, dport, dport_end, network_id,
+			service_access_policy_id, comment_tag, command_string, created_at, is_active
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 1)`,
+			string(rule.ChainName), string(rule.RuleType), string(rule.TableName), string(rule.Protocol),
+			rule.Source, rule.Destination, rule.InInterface, rule.OutInterface, string(rule.Target),
+			rule.SPort, rule.DPort, rule.DPortEnd, rule.NetworkID, infra.DerefOrNil(rule.PolicyID),
+			infra.DerefOrNil(rule.CommentTag), infra.DerefOrNil(rule.CommandString))
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

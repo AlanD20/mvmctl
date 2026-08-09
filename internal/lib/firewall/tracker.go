@@ -2,6 +2,7 @@ package firewall
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"github.com/jmoiron/sqlx"
@@ -38,6 +39,11 @@ type firewallRuleRepo interface {
 		iface string,
 		activeOnly bool,
 	) ([]*model.FirewallRule, error)
+}
+
+type policyFirewallRuleRepo interface {
+	ListAllActive(ctx context.Context) ([]*model.FirewallRule, error)
+	ReplacePolicyRules(ctx context.Context, rules []model.FirewallRule) error
 }
 
 // --- FirewallTracker (dispatcher) ---
@@ -106,6 +112,41 @@ func (ft *FirewallTracker) EnsureRule(
 
 func (ft *FirewallTracker) BatchEnsureRules(ctx context.Context, rules []model.FirewallRule) model.FirewallRuleResult {
 	return ft.backend.BatchEnsureRules(ctx, rules)
+}
+
+// ReconcilePolicyRules atomically rebuilds kernel rules with freshly compiled policy rules.
+func (ft *FirewallTracker) ReconcilePolicyRules(
+	ctx context.Context,
+	policyRules []model.FirewallRule,
+) model.FirewallRuleResult {
+	policyRepo, ok := ft.firewallRepo.(policyFirewallRuleRepo)
+	if !ok {
+		message := "firewall repository does not support policy reconciliation"
+		return model.FirewallRuleResult{Success: false, ErrorMessage: &message}
+	}
+	if err := policyRepo.ReplacePolicyRules(ctx, policyRules); err != nil {
+		message := err.Error()
+		return model.FirewallRuleResult{Success: false, ErrorMessage: &message}
+	}
+	activeRules, err := policyRepo.ListAllActive(ctx)
+	if err != nil {
+		message := err.Error()
+		return model.FirewallRuleResult{Success: false, ErrorMessage: &message}
+	}
+	allRules := make([]model.FirewallRule, 0, len(activeRules))
+	for _, rule := range activeRules {
+		allRules = append(allRules, *rule)
+	}
+	return ft.backend.BatchEnsureRules(ctx, allRules)
+}
+
+// ReplacePolicyRules commits desired derived policy rows without applying kernel state.
+func (ft *FirewallTracker) ReplacePolicyRules(ctx context.Context, policyRules []model.FirewallRule) error {
+	policyRepo, ok := ft.firewallRepo.(policyFirewallRuleRepo)
+	if !ok {
+		return fmt.Errorf("firewall repository does not support policy reconciliation")
+	}
+	return policyRepo.ReplacePolicyRules(ctx, policyRules)
 }
 
 func (ft *FirewallTracker) RemoveRule(ctx context.Context, rule model.FirewallRule) model.FirewallRuleResult {

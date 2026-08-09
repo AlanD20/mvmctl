@@ -30,6 +30,8 @@ const (
 	FirewallChainMVMForward      FirewallChain = "MVM-FORWARD"
 	FirewallChainMVMPostrouting  FirewallChain = "MVM-POSTROUTING"
 	FirewallChainMVMNocloudNetIn FirewallChain = "MVM-NOCLOUDNET-INPUT"
+	FirewallChainMVMRoutedPolicy FirewallChain = "MVM-ROUTED-POLICY"
+	FirewallChainMVMHostInput    FirewallChain = "MVM-HOST-INPUT"
 )
 
 // FirewallRuleType categorises firewall rules.
@@ -40,6 +42,9 @@ const (
 	FirewallRuleTypeForwardIn       FirewallRuleType = "forward_in"
 	FirewallRuleTypeForwardOut      FirewallRuleType = "forward_out"
 	FirewallRuleTypeNocloudNetInput FirewallRuleType = "nocloudnet_input"
+	FirewallRuleTypePolicyAllow     FirewallRuleType = "service_access_allow"
+	FirewallRuleTypeRoutedDrop      FirewallRuleType = "routed_managed_drop"
+	FirewallRuleTypeHostInputDrop   FirewallRuleType = "host_managed_drop"
 )
 
 // FirewallProtocol specifies the IP protocol.
@@ -70,6 +75,8 @@ type FirewallWildcard string
 const (
 	FirewallWildcardAnyCIDR      FirewallWildcard = "0.0.0.0/0"
 	FirewallWildcardAnyInterface FirewallWildcard = "*"
+	// FirewallWildcardManagedInterface is an internal derived-rule marker expanded by firewall backends.
+	FirewallWildcardManagedInterface FirewallWildcard = "@mvmctl-managed"
 )
 
 // FirewallPortAny is the sentinel value meaning "any port".
@@ -127,6 +134,7 @@ type FirewallRule struct {
 	Target       FirewallTarget   `json:"target"        db:"target"`
 	SPort        int              `json:"sport"         db:"sport"`
 	DPort        int              `json:"dport"         db:"dport"`
+	DPortEnd     int              `json:"dport_end"     db:"dport_end"`
 	NetworkID    string           `json:"network_id"    db:"network_id"`
 	IsActive     bool             `json:"is_active"     db:"is_active"`
 
@@ -136,13 +144,19 @@ type FirewallRule struct {
 	CommandString  *string `json:"command_string,omitempty"   db:"command_string"`
 	CreatedAt      *string `json:"created_at,omitempty"       db:"created_at"`
 	LastVerifiedAt *string `json:"last_verified_at,omitempty" db:"last_verified_at"`
+	PolicyID       *string `json:"policy_id,omitempty"        db:"service_access_policy_id"`
 }
 
 // Key builds a dedup key from a rule's identifying fields.
 func (r FirewallRule) Key() string {
-	return fmt.Sprintf("%s:%s:%s:%s:%s:%d:%d",
-		r.TableName, r.ChainName, r.RuleType,
-		r.Source, r.OutInterface, r.SPort, r.DPort)
+	policyID := ""
+	if r.PolicyID != nil {
+		policyID = *r.PolicyID
+	}
+	return fmt.Sprintf("%s:%s:%s:%s:%s:%s:%s:%s:%s:%d:%d:%d:%s:%s",
+		r.TableName, r.ChainName, r.RuleType, r.Protocol, r.Source, r.Destination,
+		r.InInterface, r.OutInterface, r.Target, r.SPort, r.DPort, r.DPortEnd,
+		r.NetworkID, policyID)
 }
 
 // NewTapForwardRules returns the two FORWARD rules needed for a TAP device:

@@ -438,8 +438,8 @@ There is no direct-Firecracker fallback. Every launch requires cgroup v2 with th
 
 ## 4. Firewall Backends
 
-Firewall backends manage NAT rules, forwarding rules, and per-VM access control
-for nocloud-net servers. Two backends are available, selected by the
+Firewall backends manage NAT rules, forwarding rules, routed service-access
+policies, and per-VM access control for nocloud-net servers. Two backends are available, selected by the
 `firewall_backend` setting in the database (default: `nftables`).
 
 A **`FirewallTracker`** in `internal/lib/firewall/tracker.go` provides a unified
@@ -454,11 +454,21 @@ resolves the actual backend setting, it replaces the tracker via
 | **nftables** | Yes (`firewall_backend: nftables`) | `tracker.go`, `nftables.go`, `nftables_repository.go` |
 | **iptables** | Opt-in (`firewall_backend: iptables`) | `tracker.go`, `iptables.go`, `iptables_repository.go` |
 
-Both backends manage the same three chain types: `MVM-FORWARD` (ip filter),
-`MVM-POSTROUTING` (ip nat), and `MVM-NOCLOUDNET-INPUT` (ip filter). The nftables
+Both backends manage five chain types: `MVM-FORWARD` (ip filter),
+`MVM-POSTROUTING` (ip nat), `MVM-NOCLOUDNET-INPUT` (ip filter),
+`MVM-ROUTED-POLICY` (ip filter), and `MVM-HOST-INPUT` (ip filter). The nftables
 backend adds jump rules at position 0 of the built-in chains, using non-hook
 chains so that `accept` verdicts are terminal within the mvm table — matching
 the behavior users expect from iptables.
+
+Service-access intent stores a source network ID, exact destination VM ID,
+TCP or UDP, and a destination port or bounded range. The API resolves current
+network, bridge, VM, and IP state; the network domain compiles backend-neutral
+derived rules. Reconciliation commits desired rows before atomically rebuilding
+the active backend. `MVM-ROUTED-POLICY` orders established replies, exact allows,
+then managed-bridge default deny. `MVM-NOCLOUDNET-INPUT` precedes
+`MVM-HOST-INPUT`, which permits established replies and denies other traffic
+from managed bridges. Internet egress does not match the managed-output drop.
 
 **Why two backends?** Different Linux distributions ship with different firewall
 defaults. Some use nftables natively; others use iptables or iptables-legacy.

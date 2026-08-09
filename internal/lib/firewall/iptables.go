@@ -20,6 +20,8 @@ var chainToTable = map[model.FirewallChain]string{
 	model.FirewallChainMVMForward:      "filter",
 	model.FirewallChainMVMPostrouting:  "nat",
 	model.FirewallChainMVMNocloudNetIn: "filter",
+	model.FirewallChainMVMRoutedPolicy: "filter",
+	model.FirewallChainMVMHostInput:    "filter",
 }
 
 // --- IPTablesTracker ---
@@ -55,12 +57,55 @@ func (t *IPTablesTracker) Initialize(ctx context.Context) {
 		jumpFrom string
 	}
 	chains := []chainDef{
-		{model.FirewallChainMVMForward, model.FirewallTableFilter, "FORWARD"},
+		{model.FirewallChainMVMForward, model.FirewallTableFilter, ""},
 		{model.FirewallChainMVMPostrouting, model.FirewallTableNat, "POSTROUTING"},
-		{model.FirewallChainMVMNocloudNetIn, model.FirewallTableFilter, "INPUT"},
+		{model.FirewallChainMVMNocloudNetIn, model.FirewallTableFilter, ""},
+		{model.FirewallChainMVMRoutedPolicy, model.FirewallTableFilter, ""},
+		{model.FirewallChainMVMHostInput, model.FirewallTableFilter, ""},
 	}
 	for _, c := range chains {
 		t.EnsureChain(ctx, c.chain, c.table, c.jumpFrom, 1)
+	}
+	// Inserting the lower-priority jump first leaves policy enforcement at position one.
+	t.EnsureJumpRule(ctx, "FORWARD", string(model.FirewallChainMVMForward), model.FirewallTableFilter, 1)
+	t.EnsureJumpRule(ctx, "FORWARD", string(model.FirewallChainMVMRoutedPolicy), model.FirewallTableFilter, 1)
+	t.EnsureJumpRule(ctx, "INPUT", string(model.FirewallChainMVMHostInput), model.FirewallTableFilter, 2)
+	t.EnsureJumpRule(ctx, "INPUT", string(model.FirewallChainMVMNocloudNetIn), model.FirewallTableFilter, 1)
+	t.ensureJumpPrecedes(ctx, "FORWARD",
+		string(model.FirewallChainMVMRoutedPolicy), string(model.FirewallChainMVMForward))
+	t.ensureJumpPrecedes(ctx, "INPUT",
+		string(model.FirewallChainMVMNocloudNetIn), string(model.FirewallChainMVMHostInput))
+}
+
+func (t *IPTablesTracker) ensureJumpPrecedes(ctx context.Context, chain, firstTarget, secondTarget string) {
+	result, _ := system.DefaultRunner.Run(ctx,
+		[]string{"iptables", "-t", "filter", "-S", chain},
+		system.RunCmdOpts{Privileged: true, Capture: true, Check: false},
+	)
+	if !result.Success() {
+		return
+	}
+	firstRule := fmt.Sprintf("-A %s -j %s", chain, firstTarget)
+	secondRule := fmt.Sprintf("-A %s -j %s", chain, secondTarget)
+	firstIndex := strings.Index(result.Stdout, firstRule)
+	secondIndex := strings.Index(result.Stdout, secondRule)
+	if firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex {
+		return
+	}
+	deleteResult, _ := system.DefaultRunner.Run(ctx,
+		[]string{"iptables", "-t", "filter", "-D", chain, "-j", firstTarget},
+		system.RunCmdOpts{Privileged: true, Capture: true, Check: true},
+	)
+	if !deleteResult.Success() {
+		slog.Error("Failed to reorder iptables jump rule", "chain", chain, "target", firstTarget)
+		return
+	}
+	insertResult, _ := system.DefaultRunner.Run(ctx,
+		[]string{"iptables", "-t", "filter", "-I", chain, "1", "-j", firstTarget},
+		system.RunCmdOpts{Privileged: true, Capture: true, Check: true},
+	)
+	if !insertResult.Success() {
+		slog.Error("Failed to restore iptables jump rule after reorder", "chain", chain, "target", firstTarget)
 	}
 }
 
@@ -114,12 +159,20 @@ func (t *IPTablesTracker) buildIptablesArgs(rule *model.FirewallRule, action Rul
 
 	// Input interface
 	if rule.InInterface != string(model.FirewallWildcardAnyInterface) {
-		args = append(args, "-i", rule.InInterface)
+		iface := rule.InInterface
+		if iface == string(model.FirewallWildcardManagedInterface) {
+			iface = infra.CLIName + "-+"
+		}
+		args = append(args, "-i", iface)
 	}
 
 	// Output interface
 	if rule.OutInterface != string(model.FirewallWildcardAnyInterface) {
-		args = append(args, "-o", rule.OutInterface)
+		iface := rule.OutInterface
+		if iface == string(model.FirewallWildcardManagedInterface) {
+			iface = infra.CLIName + "-+"
+		}
+		args = append(args, "-o", iface)
 	}
 
 	// Source port
@@ -129,7 +182,11 @@ func (t *IPTablesTracker) buildIptablesArgs(rule *model.FirewallRule, action Rul
 
 	// Destination port
 	if rule.DPort != model.FirewallPortAny {
-		args = append(args, "--dport", strconv.Itoa(rule.DPort))
+		port := strconv.Itoa(rule.DPort)
+		if rule.DPortEnd > rule.DPort {
+			port += ":" + strconv.Itoa(rule.DPortEnd)
+		}
+		args = append(args, "--dport", port)
 	}
 
 	// Target
@@ -161,11 +218,19 @@ func (t *IPTablesTracker) buildRestoreLine(rule *model.FirewallRule) string {
 	}
 
 	if rule.InInterface != string(model.FirewallWildcardAnyInterface) {
-		parts = append(parts, "-i", rule.InInterface)
+		iface := rule.InInterface
+		if iface == string(model.FirewallWildcardManagedInterface) {
+			iface = infra.CLIName + "-+"
+		}
+		parts = append(parts, "-i", iface)
 	}
 
 	if rule.OutInterface != string(model.FirewallWildcardAnyInterface) {
-		parts = append(parts, "-o", rule.OutInterface)
+		iface := rule.OutInterface
+		if iface == string(model.FirewallWildcardManagedInterface) {
+			iface = infra.CLIName + "-+"
+		}
+		parts = append(parts, "-o", iface)
 	}
 
 	if rule.SPort != model.FirewallPortAny {
@@ -173,7 +238,11 @@ func (t *IPTablesTracker) buildRestoreLine(rule *model.FirewallRule) string {
 	}
 
 	if rule.DPort != model.FirewallPortAny {
-		parts = append(parts, "--dport", strconv.Itoa(rule.DPort))
+		port := strconv.Itoa(rule.DPort)
+		if rule.DPortEnd > rule.DPort {
+			port += ":" + strconv.Itoa(rule.DPortEnd)
+		}
+		parts = append(parts, "--dport", port)
 	}
 
 	parts = append(parts, "-j", string(rule.Target))
@@ -264,7 +333,7 @@ func (t *IPTablesTracker) EnsureRule(
 	r.CommandString = &cmdStr
 
 	// Check if rule exists in database
-	existingDBRule, err := t.repo.FindByAttributes(ctx,
+	existingDBRule, err := t.repo.findByAttributes(ctx,
 		r.TableName,
 		r.ChainName,
 		r.RuleType,
@@ -276,6 +345,8 @@ func (t *IPTablesTracker) EnsureRule(
 		r.OutInterface,
 		r.SPort,
 		r.DPort,
+		r.DPortEnd,
+		r.PolicyID,
 	)
 	if err != nil {
 		slog.Warn("Error querying iptables rule in DB", "error", err)
@@ -368,7 +439,7 @@ func (t *IPTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 
 	// Find the rule in database first to get its comment_tag
 	if dbRuleID == nil {
-		existing, err := t.repo.FindByAttributes(ctx,
+		existing, err := t.repo.findByAttributes(ctx,
 			rule.TableName,
 			rule.ChainName,
 			rule.RuleType,
@@ -380,6 +451,8 @@ func (t *IPTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 			rule.OutInterface,
 			rule.SPort,
 			rule.DPort,
+			rule.DPortEnd,
+			rule.PolicyID,
 		)
 		if err == nil && existing != nil {
 			dbRuleID = existing.ID
@@ -541,35 +614,31 @@ func (t *IPTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 		}
 	}
 
-	if len(filterRules) > 0 {
-		restoreInput := t.buildRestoreInput(filterRules, "filter")
-		result, _ := system.DefaultRunner.Run(
-			ctx,
-			[]string{"iptables-restore", "-n"},
-			system.RunCmdOpts{Privileged: true, Capture: true, Check: true, Input: restoreInput},
-		)
-		if !result.Success() {
-			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
-			return model.FirewallRuleResult{
-				Success:      false,
-				ErrorMessage: &errMsg,
-			}
+	restoreInput := t.buildRestoreInput(filterRules, "filter")
+	result, _ := system.DefaultRunner.Run(
+		ctx,
+		[]string{"iptables-restore", "-n"},
+		system.RunCmdOpts{Privileged: true, Capture: true, Check: true, Input: restoreInput},
+	)
+	if !result.Success() {
+		errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
+		return model.FirewallRuleResult{
+			Success:      false,
+			ErrorMessage: &errMsg,
 		}
 	}
 
-	if len(natRules) > 0 {
-		restoreInput := t.buildRestoreInput(natRules, "nat")
-		result, _ := system.DefaultRunner.Run(
-			ctx,
-			[]string{"iptables-restore", "-n"},
-			system.RunCmdOpts{Privileged: true, Capture: true, Check: true, Input: restoreInput},
-		)
-		if !result.Success() {
-			errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
-			return model.FirewallRuleResult{
-				Success:      false,
-				ErrorMessage: &errMsg,
-			}
+	restoreInput = t.buildRestoreInput(natRules, "nat")
+	result, _ = system.DefaultRunner.Run(
+		ctx,
+		[]string{"iptables-restore", "-n"},
+		system.RunCmdOpts{Privileged: true, Capture: true, Check: true, Input: restoreInput},
+	)
+	if !result.Success() {
+		errMsg := fmt.Sprintf("command iptables-restore -n failed (exit %d): %s", result.ExitCode, result.Stderr)
+		return model.FirewallRuleResult{
+			Success:      false,
+			ErrorMessage: &errMsg,
 		}
 	}
 
@@ -777,6 +846,8 @@ func (t *IPTablesTracker) Teardown(ctx context.Context) {
 		{model.FirewallChainMVMForward, model.FirewallTableFilter, "FORWARD"},
 		{model.FirewallChainMVMPostrouting, model.FirewallTableNat, "POSTROUTING"},
 		{model.FirewallChainMVMNocloudNetIn, model.FirewallTableFilter, "INPUT"},
+		{model.FirewallChainMVMRoutedPolicy, model.FirewallTableFilter, "FORWARD"},
+		{model.FirewallChainMVMHostInput, model.FirewallTableFilter, "INPUT"},
 	}
 	for _, c := range chains {
 		chainName := string(c.chain)

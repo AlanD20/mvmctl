@@ -58,6 +58,7 @@ type Repos struct {
 	Config   config.SettingsRepository
 	Vsock    vsock.Repository
 	Snapshot snapshot.Repository
+	Policy   network.ServiceAccessPolicyRepository
 }
 
 // Services bundles all domain services.
@@ -95,6 +96,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Config:   config.NewRepository(sqlDB),
 		Vsock:    vsock.NewRepository(sqlDB),
 		Snapshot: snapshot.NewRepository(sqlDB),
+		Policy:   network.NewServiceAccessPolicyRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
@@ -104,7 +106,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
 
 	s := Services{
-		Network: network.NewService(r.Network, defaultFwTracker),
+		Network: network.NewService(r.Network, defaultFwTracker, r.Policy),
 		Image:   image.NewService(r.Image),
 		Kernel:  kernel.NewService(r.Kernel, cacheDir),
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),

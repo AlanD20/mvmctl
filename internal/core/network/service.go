@@ -17,6 +17,7 @@ import (
 // Service manages network interfaces, bridges, TAP devices, and NAT/firewall rules.
 type Service struct {
 	repo            Repository
+	policyRepo      ServiceAccessPolicyRepository
 	firewallTracker *firewall.FirewallTracker
 }
 
@@ -24,8 +25,12 @@ type Service struct {
 // to use for firewall operations. If nil, all firewall operations are skipped
 // (used for cleanup contexts). Callers can replace the tracker later via
 // SetFirewallTracker (e.g., after HostInit resolves the firewall backend).
-func NewService(repo Repository, tracker *firewall.FirewallTracker) *Service {
-	return &Service{repo: repo, firewallTracker: tracker}
+func NewService(
+	repo Repository,
+	tracker *firewall.FirewallTracker,
+	policyRepo ServiceAccessPolicyRepository,
+) *Service {
+	return &Service{repo: repo, firewallTracker: tracker, policyRepo: policyRepo}
 }
 
 // SetFirewallTracker replaces the firewall tracker.
@@ -539,9 +544,17 @@ func (s *Service) Remove(ctx context.Context, network *model.NetworkItem, force 
 	}
 
 	if hasVMs || hasSnapshots {
-		return s.repo.SoftDelete(ctx, network.ID)
+		if err := s.repo.SoftDelete(ctx, network.ID); err != nil {
+			slog.Error("Failed to soft-delete network", "network_id", network.ID, "error", err)
+			return err
+		}
+		return nil
 	}
-	return s.repo.Delete(ctx, network.ID)
+	if err := s.repo.Delete(ctx, network.ID); err != nil {
+		slog.Error("Failed to delete network", "network_id", network.ID, "error", err)
+		return err
+	}
+	return nil
 }
 
 func (s *Service) RemoveMany(ctx context.Context, networks []*model.NetworkItem, force bool) error {
@@ -569,6 +582,7 @@ func (s *Service) RemoveMany(ctx context.Context, networks []*model.NetworkItem,
 func (s *Service) SyncIPTablesRulesBatch(
 	ctx context.Context,
 	networks []*model.NetworkItem,
+	policies []*model.ResolvedServiceAccessPolicy,
 ) (map[string]*SyncResult, error) {
 	if s.firewallTracker == nil {
 		results := make(map[string]*SyncResult, len(networks))
@@ -576,6 +590,12 @@ func (s *Service) SyncIPTablesRulesBatch(
 			results[net.ID] = &SyncResult{}
 		}
 		return results, nil
+	}
+	policyRules := CompileServiceAccessPolicyRules(policies, networks)
+	if err := s.firewallTracker.ReplacePolicyRules(ctx, policyRules); err != nil {
+		slog.Error("Failed to commit desired service-access policy rules", "error", err)
+		return nil, errs.WrapMsg(errs.CodePolicySyncFailed,
+			"failed to commit desired service-access policy rules", err)
 	}
 
 	// 1. Collect rules per network. Also pre-check kernel state for accurate
@@ -605,16 +625,15 @@ func (s *Service) SyncIPTablesRulesBatch(
 		perNet[net.ID] = nr
 	}
 
-	// 2. Apply all rules in a single atomic batch.
-	if len(allRules) > 0 {
-		result := s.firewallTracker.BatchEnsureRules(ctx, allRules)
-		if !result.Success {
-			errMsg := ""
-			if result.ErrorMessage != nil {
-				errMsg = *result.ErrorMessage
-			}
-			return nil, fmt.Errorf("batch firewall rule sync failed: %s", errMsg)
+	// 2. Apply all rules in a single atomic batch. An empty desired set still
+	// flushes managed chains so removed policies cannot survive in the kernel.
+	result := s.firewallTracker.BatchEnsureRules(ctx, allRules)
+	if !result.Success {
+		errMsg := ""
+		if result.ErrorMessage != nil {
+			errMsg = *result.ErrorMessage
 		}
+		return nil, fmt.Errorf("batch firewall rule sync failed: %s", errMsg)
 	}
 
 	// 3. Build per-network results from pre-batch kernel state.

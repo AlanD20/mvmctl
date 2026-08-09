@@ -312,6 +312,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `network rm <name1> <name2>` | **L2** | Multiple bridge cleanup |
 | `network default` / `network default <nonexistent>` | L1 | DB update |
 | `network sync` / `network sync --json` | **L2** | Real bridge + firewall recreation |
+| `policy create/ls/inspect/rm/sync` | **L2** | Cross-network connectivity, exact destination/port allow, host/default deny, backend parity |
 | Sync after bridge deletion | **L2** | Real bridge deletion + recovery |
 
 ### `mvm volume`

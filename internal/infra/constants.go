@@ -70,6 +70,10 @@ const MVMPostroutingChain = "MVM-POSTROUTING"
 
 const MVMNocloudNetInputChain = "MVM-NOCLOUDNET-INPUT"
 
+const MVMRoutedPolicyChain = "MVM-ROUTED-POLICY"
+
+const MVMHostInputChain = "MVM-HOST-INPUT"
+
 func SudoersDropInPath() string {
 	return fmt.Sprintf("/etc/sudoers.d/%s", CLIName)
 }

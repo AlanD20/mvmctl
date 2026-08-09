@@ -80,13 +80,13 @@ A struct bound to a single entity instance. Manages lifecycle state transitions 
 
 Constructed with the entity + its Repository: `vm.NewController(vm *model.VMItem, repo Repository)`. NOT wired at startup -- created per-operation in the Service layer.
 
-*Example: `vm.NewController(vmItem, repo).Snapshot(ctx)` -- snapshots this specific VM. `network.NewService(repo, tracker).RemoveBridge(ctx, bridge)` -- removes a bridge, no single network entity needed.*
+*Example: `vm.NewController(vmItem, repo).Snapshot(ctx)` -- snapshots this specific VM. `network.NewService(repo, tracker, policyRepo).RemoveBridge(ctx, bridge)` -- removes a bridge, no single network entity needed.*
 
 ### Service (stateless, intra-domain)
 
 A struct for stateless intra-domain operations. Handles infrastructure operations (bridges, TAPs, NAT, subprocesses, file/disk operations). Performs state detection (checking current system state as part of an operation -- "does this bridge exist?" to branch execution). Guards invariants that protect against system damage. Does NOT validate caller input. Does NOT manage state for a single entity -- Service operates on infrastructure, not on a bound instance.
 
-Constructed with repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker)`. Wired once at startup in `app.Initialize()`.
+Constructed with repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker, policyRepo ServiceAccessPolicyRepository)`. Wired once at startup in `app.Initialize()`.
 
 *Litmus test: if the operation would work the same way without a specific entity instance, it's Service. If it needs to communicate with a running entity's Firecracker API socket, it belongs in Controller. If it sequences multiple infrastructure steps (teardown NAT -> remove bridge -> delete DB record), it's intra-domain orchestration in Service.*
 

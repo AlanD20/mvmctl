@@ -123,6 +123,17 @@ var codeClassMap = map[Code]Class{
 	CodeNetworkDefaultSetFailed:    ClassInternal,
 	CodeNetworkDefaultCreateFailed: ClassInternal,
 
+	CodePolicyNotFound:        ClassValidation,
+	CodePolicyAmbiguous:       ClassValidation,
+	CodePolicyAlreadyExists:   ClassConflict,
+	CodePolicyProtocolInvalid: ClassValidation,
+	CodePolicyPortInvalid:     ClassValidation,
+	CodePolicySameNetwork:     ClassValidation,
+	CodePolicyCreateFailed:    ClassInternal,
+	CodePolicyListFailed:      ClassInternal,
+	CodePolicyRemoveFailed:    ClassInternal,
+	CodePolicySyncFailed:      ClassInternal,
+
 	// --- Image domain ---
 	CodeImageNotFound:           ClassValidation,
 	CodeImageAlreadyExists:      ClassConflict,
@@ -300,6 +311,17 @@ var codeOpMap = map[Code]string{
 	CodeNetworkRemoveFailed:        "network",
 	CodeNetworkDefaultSetFailed:    "network",
 	CodeNetworkDefaultCreateFailed: "network",
+
+	CodePolicyNotFound:        "policy",
+	CodePolicyAmbiguous:       "policy",
+	CodePolicyAlreadyExists:   "policy",
+	CodePolicyProtocolInvalid: "policy",
+	CodePolicyPortInvalid:     "policy",
+	CodePolicySameNetwork:     "policy",
+	CodePolicyCreateFailed:    "policy",
+	CodePolicyListFailed:      "policy",
+	CodePolicyRemoveFailed:    "policy",
+	CodePolicySyncFailed:      "policy",
 
 	CodeImageNotFound:           "image",
 	CodeImageAlreadyExists:      "image",
@@ -605,7 +627,7 @@ func IsNotFound(err error) bool {
 			CodeKernelNotFound, CodeBinaryNotFound, CodeVolumeNotFound,
 			CodeKeyNotFound, CodeCPSourceNotFound, CodeBundledAssetNotFound,
 			CodeFirecrackerSocketNotFound, CodeLoopMountBinaryNotFound,
-			CodeCPVMNotFound, CodeSnapshotNotFound:
+			CodeCPVMNotFound, CodeSnapshotNotFound, CodePolicyNotFound:
 			return true
 		}
 	}

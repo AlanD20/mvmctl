@@ -17,6 +17,7 @@ This document provides detailed reference for all `mvm` commands, configuration 
 - [mvm snapshot](#mvm-snapshot)
 - [mvm console](#mvm-console)
 - [mvm network](#mvm-network)
+- [mvm policy](#mvm-policy)
 - [mvm key](#mvm-key)
 - [mvm config](#mvm-config)
 - [mvm cache](#mvm-cache)
@@ -391,6 +392,22 @@ The network resolver tries selectors in priority order:
 | `mvm network inspect` | `[SELECTOR]`, `--json` | Show network details, IP leases, and active firewall rules |
 | `mvm network default` | `[SELECTOR]` | Set a network as the default for VM creation |
 | `mvm network sync` | `[SELECTORS]...`, `--json` | Sync firewall rules between database and host |
+
+---
+
+### `mvm policy`
+
+Persisted routed access from one source network to one exact destination VM service. Same-network policies are rejected because same-bridge filtering is not implemented.
+
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm policy create` | `SOURCE_NETWORK DESTINATION_VM tcp\|udp PORT\|START-END` | Allow one routed destination service or bounded port range |
+| `mvm policy ls` | `--json` | List policies with current resource names |
+| `mvm policy inspect` | `POLICY_ID`, `--json` | Inspect one policy by exact ID or unambiguous prefix |
+| `mvm policy rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more policies and reconcile immediately |
+| `mvm policy sync` | `--json` | Resolve current identities and atomically reconcile policy rules |
+
+Policies default-deny other routed traffic between managed networks. NoCloud and established replies precede managed VM-to-host default deny; internet egress remains available.
 
 ---
 

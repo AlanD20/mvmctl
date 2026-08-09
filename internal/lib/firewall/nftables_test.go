@@ -173,6 +173,20 @@ func TestRuleToNftExpr(t *testing.T) {
 			},
 			want: []string{"udp", "dport", "53", "accept"},
 		},
+		"protocol_tcp_with_dport_range": {
+			modify: func(r *model.FirewallRule) {
+				r.Protocol = model.FirewallProtocolTCP
+				r.DPort = 8000
+				r.DPortEnd = 8010
+			},
+			want: []string{"tcp", "dport", "8000-8010", "accept"},
+		},
+		"managed_output_interface": {
+			modify: func(r *model.FirewallRule) {
+				r.OutInterface = string(model.FirewallWildcardManagedInterface)
+			},
+			want: []string{"oifname", `"mvm-*"`, "accept"},
+		},
 		"protocol_tcp_with_both_ports": {
 			modify: func(r *model.FirewallRule) {
 				r.Protocol = model.FirewallProtocolTCP

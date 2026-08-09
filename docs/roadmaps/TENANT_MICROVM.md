@@ -26,8 +26,8 @@ Direct inbound ports are not required when the workload VM runs an outbound tunn
 | Capability | Current state | Required change |
 |---|---|---|
 | Same-network communication | Works through one bridge; intentionally unfiltered | None for the environment trust-zone model |
-| Cross-network routing | Host forwarding and ACCEPT policy permit it | Persist explicit service allows and default-deny other managed inter-network traffic |
-| VM-to-host traffic | INPUT remains open except for explicit NoCloud allow rules | Preserve required host services, then deny other traffic from managed VM networks |
+| Cross-network routing | Typed source-network → destination-VM service policies and managed-network default deny are implemented for nftables and iptables; L2 execution remains pending | Complete prepared-runner verification and benchmark reconciliation at scale |
+| VM-to-host traffic | Managed-network INPUT is default-deny after established replies and NoCloud | Add a typed host-service operation only when a concrete host service must be exposed |
 | Firecracker launch | Canonical Jailer launch, exact trusted release pairing, and cgroup-v2 enforcement implemented; L2 execution remains pending | Complete prepared-runner verification |
 | Host resource enforcement | Typed CPU, memory, swap, and PID limits are persisted, applied through Jailer, verified after launch, and shown by inspect | Measure VMM headroom under L2 workloads and add I/O limits after stable backing-device resolution exists |
 | IP identity | Explicit IP assignment and collision-safe IPAM exist | Policies bind to network/VM IDs and resolve current addressing during reconciliation |
@@ -58,7 +58,7 @@ Direct inbound ports are not required when the workload VM runs an outbound tunn
 
 **Exit:** implementation and hermetic coverage are complete. Prepared-runner L2 execution must still prove that every normally launched VM has verified constraints and that stop/remove clears its leaf cgroup.
 
-### M3 — Routed service-access policies
+### M3 — Routed service-access policies (implemented; L2 execution pending)
 
 - Persist source-network → destination-VM → protocol/port intent in the network domain.
 - Resolve cross-domain identities in the API layer.
@@ -67,7 +67,7 @@ Direct inbound ports are not required when the workload VM runs an outbound tunn
 - Restrict VM-to-host INPUT while preserving NoCloud and explicitly approved host services.
 - Reconcile desired rules after reboot, UFW reload, resource deletion, and `network sync`.
 
-**Exit:** an environment network can reach an exact shared service port, cannot reach other ports or managed networks, retains internet egress, and cannot reach unauthorized host services.
+**Exit:** implementation and hermetic coverage are complete for both firewall backends. Prepared-runner L2 execution must still prove that an environment network can reach an exact shared service port, cannot reach other ports or managed networks, retains internet egress, and cannot reach unauthorized host services.
 
 ### M4 — Workload proof and recovery
 
@@ -91,7 +91,7 @@ Direct inbound ports are not required when the workload VM runs an outbound tunn
 
 The highest-value mvmctl additions are infrastructure diagnostics, not project orchestration:
 
-1. Policy list, inspect, remove, sync, and connectivity-check commands.
+1. Policy create, list, inspect, remove, and sync commands. A dedicated connectivity-check command remains optional.
 2. VM inspection showing Jailer pair, jail path, cgroup enforcement, and current usage.
 3. Host readiness output for Jailer, trusted binaries, cgroup v2, KVM, and required controllers.
 4. Desired-versus-installed firewall rule diagnostics.

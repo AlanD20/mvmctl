@@ -203,6 +203,24 @@ func TestBuildIptablesArgs(t *testing.T) {
 				return append(b, "-p", "udp", "--dport", "53", "-j", "ACCEPT")
 			},
 		},
+		"destination_port_range": {
+			modify: func(r *model.FirewallRule) {
+				r.Protocol = model.FirewallProtocolTCP
+				r.DPort = 8000
+				r.DPortEnd = 8010
+			},
+			action: ActionAppend,
+			appendFn: func(b []string) []string {
+				return append(b, "-p", "tcp", "--dport", "8000:8010", "-j", "ACCEPT")
+			},
+		},
+		"managed_output_interface": {
+			modify: func(r *model.FirewallRule) {
+				r.OutInterface = string(model.FirewallWildcardManagedInterface)
+			},
+			action:   ActionAppend,
+			appendFn: func(b []string) []string { return append(b, "-o", "mvm-+", "-j", "ACCEPT") },
+		},
 
 		// --- Target variations ---
 		"target_drop": {
@@ -394,6 +412,20 @@ func TestBuildRestoreLine(t *testing.T) {
 			},
 			want: "-A MVM-FORWARD -p udp --dport 53 -j ACCEPT",
 		},
+		"destination_port_range": {
+			modify: func(r *model.FirewallRule) {
+				r.Protocol = model.FirewallProtocolUDP
+				r.DPort = 5000
+				r.DPortEnd = 5005
+			},
+			want: "-A MVM-FORWARD -p udp --dport 5000:5005 -j ACCEPT",
+		},
+		"managed_output_interface": {
+			modify: func(r *model.FirewallRule) {
+				r.OutInterface = string(model.FirewallWildcardManagedInterface)
+			},
+			want: "-A MVM-FORWARD -o mvm-+ -j ACCEPT",
+		},
 		"target_drop": {
 			modify: func(r *model.FirewallRule) { r.Target = model.FirewallTargetDrop },
 			want:   "-A MVM-FORWARD -j DROP",
@@ -496,6 +528,20 @@ func TestBuildRestoreInput(t *testing.T) {
 				SPort:        model.FirewallPortAny,
 				DPort:        model.FirewallPortAny,
 			},
+			{
+				TableName: model.FirewallTableFilter, ChainName: model.FirewallChainMVMRoutedPolicy,
+				RuleType: model.FirewallRuleTypePolicyAllow, Protocol: model.FirewallProtocolTCP,
+				Source: string(model.FirewallWildcardAnyCIDR), Destination: "10.1.0.2",
+				InInterface: "mvm-source", OutInterface: "mvm-destination", Target: model.FirewallTargetAccept,
+				SPort: model.FirewallPortAny, DPort: 443, DPortEnd: 443,
+			},
+			{
+				TableName: model.FirewallTableFilter, ChainName: model.FirewallChainMVMRoutedPolicy,
+				RuleType: model.FirewallRuleTypeRoutedDrop, Protocol: model.FirewallProtocolAll,
+				Source: string(model.FirewallWildcardAnyCIDR), Destination: string(model.FirewallWildcardAnyCIDR),
+				InInterface: "mvm-source", OutInterface: "mvm-+", Target: model.FirewallTargetDrop,
+				SPort: model.FirewallPortAny, DPort: model.FirewallPortAny,
+			},
 		}
 
 		result := tracker.buildRestoreInput(rules, "filter")
@@ -515,6 +561,14 @@ func TestBuildRestoreInput(t *testing.T) {
 
 		// Rule line (hardcoded — not recomputed from buildRestoreLine to avoid tautology)
 		assert.Contains(t, result, "-A MVM-FORWARD -p tcp -s 10.0.0.0/24 -o tap0 -j ACCEPT")
+		conntrack := strings.Index(result,
+			"-A MVM-ROUTED-POLICY -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT")
+		allow := strings.Index(result,
+			"-A MVM-ROUTED-POLICY -p tcp -d 10.1.0.2 -i mvm-source -o mvm-destination --dport 443 -j ACCEPT")
+		drop := strings.Index(result, "-A MVM-ROUTED-POLICY -i mvm-source -o mvm-+ -j DROP")
+		assert.GreaterOrEqual(t, conntrack, 0)
+		assert.Greater(t, allow, conntrack, "connection-state acceptance must precede policy allows")
+		assert.Greater(t, drop, allow, "policy allows must precede routed drops")
 	})
 
 	t.Run("nat_table_no_rules", func(t *testing.T) {

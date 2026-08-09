@@ -215,6 +215,22 @@ Set a network as the default for VM creation.
 .TP
 .BR network\ sync
 Sync firewall rules between database and host.
+.SS Routed Service-Access Policies
+.TP
+.BR policy\ create " SOURCE_NETWORK DESTINATION_VM tcp|udp PORT|START-END"
+Allow routed access to one exact destination VM service.
+.TP
+.BR policy\ ls
+List persisted service-access policies. Use --json for structured output.
+.TP
+.BR policy\ inspect " POLICY_ID"
+Show one policy by exact ID or unambiguous prefix.
+.TP
+.BR policy\ rm " POLICY_IDS..."
+Remove policies and reconcile firewall state. Use -f to skip confirmation.
+.TP
+.BR policy\ sync
+Resolve current resource identities and atomically reconcile policy rules.
 .SS SSH Key Management
 .TP
 .BR key\ ls

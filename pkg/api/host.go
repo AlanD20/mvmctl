@@ -138,6 +138,10 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 	if err != nil {
 		return nil, errs.New(errs.CodeHostInitFailed, err.Error())
 	}
+	if err := op.reconcileServiceAccessPolicies(ctx); err != nil {
+		return nil, errs.WrapMsg(errs.CodeHostInitFailed,
+			"failed to replay service-access policies during host initialization", err)
+	}
 	// --- Finalize ---
 	now := time.Now().Format(time.RFC3339)
 	if err := hostCtrl.MarkInitialized(ctx, now); err != nil {

@@ -112,7 +112,7 @@ All T1/T2 runner VMs are Firecracker microVMs created with **Firecracker v1.16**
 | Tier | Runs inside VM | Shared volume | Nested KVM | Runner VM kernel | What's tested |
 |------|---------------|---------------|------------|-----------------|---------------|
 | **1** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Not needed | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | Host-level CLI: help, config, init, cache, keys, invariants, bin, images, kernel, network, host, run |
-| **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, Jailer/cgroups, ssh, console, exec, logs, full_journeys, nftables |
+| **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, Jailer/cgroups, routed policies, ssh, console, exec, logs, full_journeys, nftables |
 | **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | vm_fresh_env, vm_nested_isolated, vm_snapshot_load, vm_snapshot_rootfs, volume_hotplug, cp, kernel_build, env |
 
 ---
@@ -436,6 +436,7 @@ tests/system/
 | kernel | 1 | `test_kernel_import.py` | Kernel import — Tier 1 |
 | network | 1 | `test_network.py` | Network creation (TestNetworkEdgeCases class marked `tier2`) |
 | nftables | 2 | `test_nftables.py` | Nftables firewall backend and atomic rule sync — needs nested virt |
+| policies | 2 | `test_policies.py` | Routed service-access allow/default-deny behavior for nftables and iptables — needs nested virt |
 | host | 1 | `test_host.py` | Host info/status |
 | run | 1 | `test_run.py` | Service subprocesses |
 | volume | 2 | `test_volume.py` | Volume lifecycle |
@@ -597,4 +598,3 @@ Every test file in `tests/system/` MUST:
 | **Limits** | `--workers N` flag controls max parallel VMs. Default: 4. |
 
 ---
-

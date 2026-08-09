@@ -6,7 +6,7 @@
 
 ## Context
 
-mvmctl networks are independent Linux bridges and subnets. VMs on one bridge communicate directly at layer 2, while traffic between bridges is routed by the host because IPv4 forwarding is enabled. The managed firewall currently permits outbound NAT and installs no default deny between mvmctl bridges. A workload network can therefore reach a shared-infrastructure network unless the host firewall blocks it.
+mvmctl networks are independent Linux bridges and subnets. VMs on one bridge communicate directly at layer 2, while traffic between bridges is routed by the host because IPv4 forwarding is enabled. Before this decision was implemented, the managed firewall permitted outbound NAT and installed no default deny between mvmctl bridges.
 
 Project orchestration remains outside mvmctl. The infrastructure requirement is narrower: permit a source mvmctl network to reach one exact destination VM service, such as TCP port 5432 on a shared PostgreSQL VM, while denying other routed traffic between managed networks. The policy must survive VM restarts and firewall reconciliation without exposing raw nftables or iptables syntax.
 
@@ -25,6 +25,8 @@ mvmctl will persist a typed **service-access policy** identified by source netwo
 - Future same-network VM-to-VM policies will add a typed source-VM operation and compile to nftables bridge-family rules. Existing policies, commands, and stored records will not change.
 - No raw firewall-rule editor, generic selector registry, or silent backend fallback will be introduced.
 
+The implemented IP-family compiler uses `MVM-ROUTED-POLICY` and `MVM-HOST-INPUT`. Both backends place connection-state handling first, explicit service allows next, and an internally derived terminal drop last. Managed-interface matching is semantic in persisted derived state and expands to the backend's interface-prefix syntax only when rules are rendered. The initial host exception set contains NoCloud; additional host services require a future typed operation rather than raw INPUT rules.
+
 ## Consequences
 
 **Benefits:**
@@ -40,6 +42,7 @@ mvmctl will persist a typed **service-access policy** identified by source netwo
 - Rule ordering becomes a correctness requirement. Service allows and connection-state handling must always precede default deny.
 - Removing or recreating a VM or network invalidates identity-bound policies; policies do not silently attach to replacement resources.
 - VM-to-host restrictions require careful NoCloud and host-service system tests.
+- The initial host-input policy permits NoCloud and established replies but no user-defined host services.
 - Same-network filtering remains open until the bridge-family compiler is implemented. When implemented, that compiler will require nftables; routed policies retain iptables parity.
 
 ## Related Decisions

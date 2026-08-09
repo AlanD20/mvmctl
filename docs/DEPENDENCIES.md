@@ -189,6 +189,7 @@ Only needed for `mvm kernel pull --type official --clean-build` (building the of
 | `mvm host reset` | `sudo`, `groupdel`, `sysctl` |
 | `mvm network create` | `ip`, `iptables`/`nft` |
 | `mvm network rm` / `sync` | `ip`, `iptables`/`nft` |
+| `mvm policy create/rm/sync` | `iptables`/`nft` |
 | `mvm image pull` | `qemu-img` (may trigger conversion), `fakeroot` (tar-rootfs) |
 | `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `fakeroot` (tar-rootfs), `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `dd` |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |

@@ -868,6 +868,20 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 		// Delete from DB
 		if err := repo.Delete(ctx, vmLocal.ID); err != nil {
 			slog.Warn("failed to delete VM from DB", "vm", vmLocal.Name, "error", err)
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodeDatabaseError), Item: vmLocal,
+				Message: fmt.Sprintf("failed to delete VM '%s': %v", vmLocal.Name, err), Exception: err,
+			})
+			continue
+		}
+		if err := op.reconcileServiceAccessPolicies(ctx); err != nil {
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodePolicySyncFailed), Item: vmLocal,
+				Message: fmt.Sprintf("failed to reconcile service-access policies after removing VM '%s': %v",
+					vmLocal.Name, err),
+				Exception: err,
+			})
+			continue
 		}
 		if vmDir != "" {
 			os.RemoveAll(vmDir)

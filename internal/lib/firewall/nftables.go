@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 )
@@ -17,6 +18,8 @@ var nftChainToTable = map[model.FirewallChain]string{
 	model.FirewallChainMVMForward:      "filter",
 	model.FirewallChainMVMPostrouting:  "nat",
 	model.FirewallChainMVMNocloudNetIn: "filter",
+	model.FirewallChainMVMRoutedPolicy: "filter",
+	model.FirewallChainMVMHostInput:    "filter",
 }
 
 // Jump rule definitions: (family, table, builtin_chain, target_chain).
@@ -27,7 +30,9 @@ var nftJumpRules = []struct {
 	target  string
 }{
 	{"ip", "filter", "FORWARD", string(model.FirewallChainMVMForward)},
+	{"ip", "filter", "FORWARD", string(model.FirewallChainMVMRoutedPolicy)},
 	{"ip", "nat", "POSTROUTING", string(model.FirewallChainMVMPostrouting)},
+	{"ip", "filter", "INPUT", string(model.FirewallChainMVMHostInput)},
 	{"ip", "filter", "INPUT", string(model.FirewallChainMVMNocloudNetIn)},
 }
 
@@ -74,6 +79,41 @@ func (t *NFTablesTracker) jumpRuleExists(ctx context.Context, family, table, bui
 		return false
 	}
 	return strings.Contains(result.Stdout, fmt.Sprintf("jump %s", targetChain))
+}
+
+func (t *NFTablesTracker) ensureJumpPrecedes(
+	ctx context.Context,
+	family, table, builtinChain, firstTarget, secondTarget string,
+) {
+	result, _ := system.DefaultRunner.Run(ctx,
+		[]string{"nft", "list", "chain", family, table, builtinChain},
+		system.RunCmdOpts{Privileged: true, Capture: true, Check: false},
+	)
+	if !result.Success() {
+		return
+	}
+	firstIndex := strings.Index(result.Stdout, "jump "+firstTarget)
+	secondIndex := strings.Index(result.Stdout, "jump "+secondTarget)
+	if firstIndex >= 0 && secondIndex >= 0 && firstIndex < secondIndex {
+		return
+	}
+	handle := t.findJumpRuleHandle(ctx, family, table, builtinChain, firstTarget)
+	if handle == nil {
+		return
+	}
+	deleteResult, _ := system.DefaultRunner.Run(ctx, []string{
+		"nft", "delete", "rule", family, table, builtinChain, "handle", strconv.Itoa(*handle),
+	}, system.RunCmdOpts{Privileged: true, Capture: true, Check: true})
+	if !deleteResult.Success() {
+		slog.Error("Failed to reorder nftables jump rule", "chain", builtinChain, "target", firstTarget)
+		return
+	}
+	insertResult, _ := system.DefaultRunner.Run(ctx, []string{
+		"nft", "insert", "rule", family, table, builtinChain, "jump", firstTarget,
+	}, system.RunCmdOpts{Privileged: true, Capture: true, Check: true})
+	if !insertResult.Success() {
+		slog.Error("Failed to restore nftables jump rule after reorder", "chain", builtinChain, "target", firstTarget)
+	}
 }
 
 // --- Find jump rule handle ---
@@ -218,6 +258,10 @@ func (t *NFTablesTracker) Initialize(ctx context.Context) {
 			"table", jr.table,
 		)
 	}
+	t.ensureJumpPrecedes(ctx, "ip", "filter", "FORWARD",
+		string(model.FirewallChainMVMRoutedPolicy), string(model.FirewallChainMVMForward))
+	t.ensureJumpPrecedes(ctx, "ip", "filter", "INPUT",
+		string(model.FirewallChainMVMNocloudNetIn), string(model.FirewallChainMVMHostInput))
 }
 
 // --- Ensure chain ---
@@ -340,12 +384,20 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 
 	// Input interface (double-quoted for nftables)
 	if rule.InInterface != string(model.FirewallWildcardAnyInterface) {
-		expr = append(expr, "iifname", fmt.Sprintf(`"%s"`, rule.InInterface))
+		iface := rule.InInterface
+		if iface == string(model.FirewallWildcardManagedInterface) {
+			iface = infra.CLIName + "-*"
+		}
+		expr = append(expr, "iifname", fmt.Sprintf(`"%s"`, iface))
 	}
 
 	// Output interface
 	if rule.OutInterface != string(model.FirewallWildcardAnyInterface) {
-		expr = append(expr, "oifname", fmt.Sprintf(`"%s"`, rule.OutInterface))
+		iface := rule.OutInterface
+		if iface == string(model.FirewallWildcardManagedInterface) {
+			iface = infra.CLIName + "-*"
+		}
+		expr = append(expr, "oifname", fmt.Sprintf(`"%s"`, iface))
 	}
 
 	// Protocol — standalone when no L4 port matches follow
@@ -361,7 +413,11 @@ func (t *NFTablesTracker) ruleToNftExpr(rule *model.FirewallRule) []string {
 
 	// Destination port (L4)
 	if rule.DPort != model.FirewallPortAny {
-		expr = append(expr, string(rule.Protocol), "dport", strconv.Itoa(rule.DPort))
+		port := strconv.Itoa(rule.DPort)
+		if rule.DPortEnd > rule.DPort {
+			port += "-" + strconv.Itoa(rule.DPortEnd)
+		}
+		expr = append(expr, string(rule.Protocol), "dport", port)
 	}
 
 	// Target (lowercase for nftables)
@@ -392,7 +448,7 @@ func (t *NFTablesTracker) EnsureRule(
 	nftExpr := t.ruleToNftExpr(&rule)
 
 	// Check if rule exists in database
-	existingDBRule, err := t.repo.FindByAttributes(ctx,
+	existingDBRule, err := t.repo.findByAttributes(ctx,
 		rule.TableName,
 		rule.ChainName,
 		rule.RuleType,
@@ -404,6 +460,8 @@ func (t *NFTablesTracker) EnsureRule(
 		rule.OutInterface,
 		rule.SPort,
 		rule.DPort,
+		rule.DPortEnd,
+		rule.PolicyID,
 	)
 	if err != nil {
 		errMsg := fmt.Sprintf("Failed to query existing nftables rule: %v", err)
@@ -476,7 +534,7 @@ func (t *NFTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 	// Try to find the rule in the database first
 	dbRule := &rule
 	if rule.ID == nil {
-		existing, err := t.repo.FindByAttributes(ctx,
+		existing, err := t.repo.findByAttributes(ctx,
 			rule.TableName,
 			rule.ChainName,
 			rule.RuleType,
@@ -488,6 +546,8 @@ func (t *NFTablesTracker) RemoveRule(ctx context.Context, rule model.FirewallRul
 			rule.OutInterface,
 			rule.SPort,
 			rule.DPort,
+			rule.DPortEnd,
+			rule.PolicyID,
 		)
 		if err == nil && existing != nil {
 			dbRule = existing
@@ -548,7 +608,7 @@ func (t *NFTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 	}
 	lines = append(lines, "")
 
-	// 2. Conntrack rule first — preserves established connections
+	// 2. Conntrack rule first — preserves established connections.
 	for chain, table := range nftChainToTable {
 		if table == "filter" {
 			lines = append(lines,
@@ -556,15 +616,6 @@ func (t *NFTablesTracker) BatchEnsureRules(ctx context.Context, rules []model.Fi
 					table, string(chain)))
 		}
 	}
-	lines = append(lines, "")
-
-	// Also add individual conntrack rules for FORWARD and NOCLOUDNET-INPUT
-	lines = append(lines,
-		fmt.Sprintf("add rule ip filter %s ct state established,related accept",
-			string(model.FirewallChainMVMForward)))
-	lines = append(lines,
-		fmt.Sprintf("add rule ip filter %s ct state established,related accept",
-			string(model.FirewallChainMVMNocloudNetIn)))
 	lines = append(lines, "")
 
 	// 3. Add all batch rules
@@ -685,6 +736,8 @@ func (t *NFTablesTracker) CountOrphanedRules(ctx context.Context, network *model
 		{model.FirewallChainMVMForward, "filter"},
 		{model.FirewallChainMVMPostrouting, "nat"},
 		{model.FirewallChainMVMNocloudNetIn, "filter"},
+		{model.FirewallChainMVMRoutedPolicy, "filter"},
+		{model.FirewallChainMVMHostInput, "filter"},
 	}
 
 	commentRe := regexp.MustCompile(`comment\s+"([^"]+)"`)

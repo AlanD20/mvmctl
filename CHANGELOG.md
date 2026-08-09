@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Enforced VM resource envelopes
 - Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.
 
+#### Routed service-access policies
+- `mvm policy` now persists exact network-to-VM TCP/UDP allows while both firewall backends default-deny other managed cross-network and VM-to-host traffic without blocking NoCloud, established replies, or internet egress.
+
 ### Fixed
 
 #### `mvm image inspect`

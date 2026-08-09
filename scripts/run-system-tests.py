@@ -102,6 +102,7 @@ TIER2_DOMAINS: dict[str, list[str]] = {
     "logs": ["tests/system/logs/test_logs.py"],
     "full_journeys": ["tests/system/full_journeys/test_full_journeys.py"],
     "nftables": ["tests/system/network/test_nftables.py"],
+    "policies": ["tests/system/network/test_policies.py"],
 }
 
 # Tier 3: directly on host (no runner VM)

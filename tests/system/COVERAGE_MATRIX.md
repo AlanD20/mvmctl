@@ -125,6 +125,7 @@ removed, or when test coverage changes.
 | `network rm` rejects with active VM | ✅ Deep | `network/test_network.py` | `TestNetworkVMDependency` | L3: rm fails without --force when VM uses network; inspect shows VM count |
 | nftables firewall backend | ✅ Deep | `network/test_nftables.py` | `TestNFTablesFirewallBackend` | L3: set nftables backend, create VM, SSH, ping, verify nftables rules, cleanup, reset to iptables |
 | nftables atomic rule sync | ✅ Deep | `network/test_nftables.py` | `TestAtomicRuleSync` | L3: batch_ensure_rules idempotent, conntrack rule present, rule count stable, MASQUERADE persists |
+| Routed service-access policies | ✅ Deep | `network/test_policies.py` | `test_routed_service_access_policy_specification` | L2: nftables and iptables default deny, exact VM/port-range allow, NoCloud precedence, host deny, internet egress, sync recovery, and deletion invalidation |
 
 ---
 

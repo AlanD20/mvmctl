@@ -95,7 +95,7 @@ Three-layer flow: **CLI → API → Core**
 - Performs state detection (checking current system state to branch execution)
 - Guards invariants that protect against system damage
 - Does NOT validate caller input
-- Constructor takes repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker)`
+- Constructor takes repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker, policyRepo ServiceAccessPolicyRepository)`
 - Wired once at startup in `app.Initialize()`
 - Service methods that don't reference the Service struct live in `utils.go`
 
