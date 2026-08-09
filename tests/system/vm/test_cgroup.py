@@ -110,7 +110,7 @@ class TestVMCgroupEnvelope:
             assert vm is not None and vm["status"] == "running"
             vm_id = vm["id"]
             pid = int(vm["pid"])
-            relative = f"/mvmctl/firecracker/{vm_id}"
+            relative = f"/mvmctl/{vm_id}"
             leaf = f"/sys/fs/cgroup{relative}"
 
             membership = _read(runner_vm, f"/proc/{pid}/cgroup").splitlines()
@@ -175,7 +175,7 @@ class TestVMCgroupEnvelope:
                 runner_vm, "vm", "rm", vm_name, "--force", check=False, timeout=120
             )
             if vm_id:
-                leaf = f"/sys/fs/cgroup/mvmctl/firecracker/{vm_id}"
+                leaf = f"/sys/fs/cgroup/mvmctl/{vm_id}"
                 assert _guest_run(
                     runner_vm, f"test ! -e {shlex.quote(leaf)}", check=False
                 ).returncode == 0

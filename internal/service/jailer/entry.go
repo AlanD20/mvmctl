@@ -696,7 +696,6 @@ func cgroupPath(vmID string) string {
 	return filepath.Join(
 		infra.CgroupV2Root,
 		infra.JailerCgroupParent,
-		infra.JailerCgroupExecutable,
 		vmID,
 	)
 }

@@ -116,7 +116,7 @@ func removeVolume(ctx context.Context, vmID, driveID string) error {
 
 // CgroupPath returns the fixed cgroup-v2 path for one canonical Jailer launch.
 func CgroupPath(vmID string) string {
-	return filepath.Join(infra.CgroupV2Root, infra.JailerCgroupParent, infra.JailerCgroupExecutable, vmID)
+	return filepath.Join(infra.CgroupV2Root, infra.JailerCgroupParent, vmID)
 }
 
 // InspectCgroup reads typed enforcement and usage state for one VM.
@@ -284,7 +284,7 @@ func processInCgroup(pid int, vmID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	expected := "/" + filepath.Join(infra.JailerCgroupParent, infra.JailerCgroupExecutable, vmID)
+	expected := "/" + filepath.Join(infra.JailerCgroupParent, vmID)
 	for line := range strings.SplitSeq(string(data), "\n") {
 		if strings.HasPrefix(line, "0::") && strings.TrimPrefix(line, "0::") == expected {
 			return true, nil

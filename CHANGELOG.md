@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### `mvm inspect` (all — vm, image, network, key, etc.)
 - Byte-size fields (`_size` keys) in tree output are now human-readable (e.g., `8589934592` → `8.0 GiB`).
 
+#### Jailed VM cgroup verification
+- VM create no longer fails when Jailer places the cgroup at `/sys/fs/cgroup/mvmctl/<vm-id>`; the check previously expected an intermediate `firecracker/` component that Jailer v1.16 does not create.
+- Stop and remove now clean the VM's actual leaf cgroup instead of leaving stale ones behind.
+
 ## [0.2.0] - 2026-07-10
 
 ### Added

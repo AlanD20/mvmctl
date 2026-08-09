@@ -55,9 +55,6 @@ const JailerChrootBase = "/var/lib/mvmctl/jailer"
 // JailerCgroupParent is the fixed cgroup-v2 subtree used by canonical Jailer launches.
 const JailerCgroupParent = "mvmctl"
 
-// JailerCgroupExecutable is Jailer's fixed executable-name component in the cgroup path.
-const JailerCgroupExecutable = "firecracker"
-
 // CgroupV2Root is the unified Linux cgroup-v2 mount point required by VM launches.
 const CgroupV2Root = "/sys/fs/cgroup"
 

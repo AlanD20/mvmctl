@@ -213,7 +213,7 @@ func TestValidateCgroupLimitsRejectsAbsentAndInvalidEnvelopes(t *testing.T) {
 
 func TestEnsureCgroupEmptyRefusesPopulatedAndAcceptsAbsentState(t *testing.T) {
 	path := t.TempDir()
-	base := filepath.Join(infra.CgroupV2Root, infra.JailerCgroupParent, infra.JailerCgroupExecutable)
+	base := filepath.Join(infra.CgroupV2Root, infra.JailerCgroupParent)
 	vmID, err := filepath.Rel(base, path)
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Clean(path), cgroupPath(vmID))
