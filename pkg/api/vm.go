@@ -812,10 +812,19 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 		controller.Stop(ctx, input.Force)
 		// Defense-in-depth: force-kill
 		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
-			proc, err := os.FindProcess(vmLocal.PID)
-			if err == nil {
-				_ = proc.Kill()
-			}
+			system.GracefulShutdown(system.ShutdownConfig{
+				Pid: vmLocal.PID, IsChild: false, GracefulTimeout: 100 * time.Millisecond,
+				KillTimeout: 100 * time.Millisecond, ExpectedStartTime: vmLocal.ProcessStartTime,
+			})
+		}
+		if err := vm.CleanupJail(ctx, vmLocal.ID); err != nil {
+			slog.Error("failed to clean VM jail and cgroup during removal", "vm", vmLocal.Name, "error", err)
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodeVMCgroupCleanupFailed),
+				Item: vmLocal, Message: fmt.Sprintf("failed to clean resources for VM '%s': %v", vmLocal.Name, err),
+				Exception: err,
+			})
+			continue
 		}
 		// Console relay, TAP, IP lease cleanup
 		if vmLocal.RelayPID != nil {
@@ -941,23 +950,23 @@ func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM
 
 // Inspect returns detailed VM info with enriched data.
 func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error) {
-	vm, err := op.VMGet(ctx, input)
+	vmItem, err := op.VMGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 	// Enrich all relations at once instead of manual repo calls.
-	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vm},
+	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vmItem},
 		"kernel", "image", "binary", "network", "volumes", "vsock",
 	); err != nil {
 		return nil, err
 	}
-	relayRunning := vm.RelayPID != nil && system.IsProcessRunning(*vm.RelayPID)
-	vmDir := infra.GetVMDirByID(vm.ID)
+	relayRunning := vmItem.RelayPID != nil && system.IsProcessRunning(*vmItem.RelayPID)
+	vmDir := infra.GetVMDirByID(vmItem.ID)
 	// Volumes (enriched vm.Volumes or fallback to manual lookup).
 	volumes := make([]results.VMVolume, 0)
-	srcVols := vm.Volumes
-	if len(srcVols) == 0 && len(vm.VolumeIDs) > 0 {
-		vols, err := op.Repos.Volume.FindByIDs(ctx, vm.VolumeIDs)
+	srcVols := vmItem.Volumes
+	if len(srcVols) == 0 && len(vmItem.VolumeIDs) > 0 {
+		vols, err := op.Repos.Volume.FindByIDs(ctx, vmItem.VolumeIDs)
 		if err == nil {
 			srcVols = vols
 		}
@@ -968,47 +977,62 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 			Format: string(v.Format), Status: string(v.Status),
 		})
 	}
-	configPath := &vm.ConfigPath
-	if vm.ConfigPath == "" {
+	configPath := &vmItem.ConfigPath
+	if vmItem.ConfigPath == "" {
 		configPath = nil
+	}
+	if vmItem.CgroupLimits.PolicyVersion == 0 {
+		vmItem.CgroupLimits = op.resolveVMCgroupLimits(ctx, vmItem.VCPUCount, vmItem.MemSizeMiB)
+	}
+	cgroupState := model.VMCgroupState{
+		Path: vm.CgroupPath(vmItem.ID), Requested: vmItem.CgroupLimits, Status: model.VMCgroupEnforcementInactive,
+	}
+	if vmItem.PID > 0 && system.IsProcessAlive(vmItem.PID, vmItem.ProcessStartTime) {
+		observed, inspectErr := vm.InspectCgroup(ctx, vmItem.ID, vmItem.PID, vmItem.CgroupLimits)
+		if inspectErr != nil {
+			cgroupState.Status = model.VMCgroupEnforcementUnavailable
+			cgroupState.Mismatches = []string{inspectErr.Error()}
+		} else {
+			cgroupState = *observed
+		}
 	}
 	return &results.VMInspect{
 		VM: results.VMItemInfo{
-			Name: vm.Name, ID: vm.ID, Status: string(vm.Status),
-			PID: vm.PID, ExitCode: vm.ExitCode,
-			SSHKeys: vm.SSHKeys, SSHUser: vm.SSHUser,
-			CloudInitMode:  vm.CloudInitMode,
-			NocloudNetPort: vm.NocloudNetPort, NocloudNetPID: vm.NocloudNetPID,
-			PCIEnabled: vm.PCIEnabled, NestedVirt: vm.NestedVirt,
-			EnableConsole: vm.EnableConsole,
-			EnableLogging: vm.EnableLogging, EnableMetrics: vm.EnableMetrics,
-			AllowRemoteExec: vm.RemoteExec,
-			CreatedAt:       vm.CreatedAt, UpdatedAt: vm.UpdatedAt,
+			Name: vmItem.Name, ID: vmItem.ID, Status: string(vmItem.Status),
+			PID: vmItem.PID, ExitCode: vmItem.ExitCode,
+			SSHKeys: vmItem.SSHKeys, SSHUser: vmItem.SSHUser,
+			CloudInitMode:  vmItem.CloudInitMode,
+			NocloudNetPort: vmItem.NocloudNetPort, NocloudNetPID: vmItem.NocloudNetPID,
+			PCIEnabled: vmItem.PCIEnabled, NestedVirt: vmItem.NestedVirt,
+			EnableConsole: vmItem.EnableConsole,
+			EnableLogging: vmItem.EnableLogging, EnableMetrics: vmItem.EnableMetrics,
+			AllowRemoteExec: vmItem.RemoteExec,
+			CreatedAt:       vmItem.CreatedAt, UpdatedAt: vmItem.UpdatedAt,
 		},
 		Resources: results.VMResourcesInfo{
-			VCPU: vm.VCPUCount, Mem: vm.MemSizeMiB, Disk: vm.DiskSizeMiB,
+			VCPU: vmItem.VCPUCount, Mem: vmItem.MemSizeMiB, Disk: vmItem.DiskSizeMiB, Cgroup: cgroupState,
 		},
 		Networking: results.VMNetworkingInfo{
-			IPv4: vm.IPv4, MAC: vm.MAC,
-			Network: vm.Network, TapDevice: vm.TapDevice,
+			IPv4: vmItem.IPv4, MAC: vmItem.MAC,
+			Network: vmItem.Network, TapDevice: vmItem.TapDevice,
 		},
 		Assets: results.VMAssetsInfo{
-			Image:  vm.Image,
-			Kernel: vm.Kernel,
-			Binary: vm.Binary,
+			Image:  vmItem.Image,
+			Kernel: vmItem.Kernel,
+			Binary: vmItem.Binary,
 		},
 		Filesystem: results.VMFilesystemInfo{
-			VMDir: vmDir, RootfsPath: vm.RootfsPath,
+			VMDir: vmDir, RootfsPath: vmItem.RootfsPath,
 			ConfigPath:       configPath,
-			LogPath:          vm.LogPath,
-			SerialOutputPath: vm.SerialOutputPath,
+			LogPath:          vmItem.LogPath,
+			SerialOutputPath: vmItem.SerialOutputPath,
 		},
 		Console: results.VMConsoleInfo{
-			RelayRunning: relayRunning, RelayPID: vm.RelayPID,
-			RelaySocketPath: vm.RelaySocketPath,
+			RelayRunning: relayRunning, RelayPID: vmItem.RelayPID,
+			RelaySocketPath: vmItem.RelaySocketPath,
 		},
 		Volumes: volumes,
-		Vsock:   vsockToInspectInfo(vm.Vsock),
+		Vsock:   vsockToInspectInfo(vmItem.Vsock),
 	}, nil
 }
 
@@ -1108,10 +1132,18 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 		controller.Stop(ctx, input.Force)
 		// Defense-in-depth: force-kill if stop() silently left the Firecracker process alive
 		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
-			proc, _ := os.FindProcess(vmLocal.PID)
-			if proc != nil {
-				_ = proc.Kill()
-			}
+			system.GracefulShutdown(system.ShutdownConfig{
+				Pid: vmLocal.PID, IsChild: false, GracefulTimeout: 100 * time.Millisecond,
+				KillTimeout: 100 * time.Millisecond, ExpectedStartTime: vmLocal.ProcessStartTime,
+			})
+		}
+		if err := vm.CleanupJail(ctx, vmLocal.ID); err != nil {
+			slog.Error("failed to clean VM jail and cgroup after stop", "vm", vmLocal.Name, "error", err)
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodeVMCgroupCleanupFailed),
+				Item: vmLocal, Message: fmt.Sprintf("stop '%s': cleanup failed: %v", vmLocal.Name, err), Exception: err,
+			})
+			continue
 		}
 		op.AuditLog.LogOperation("vm.stop", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 		results = append(results, errs.OperationResult{
@@ -1128,6 +1160,12 @@ func (op *Operation) vmRespawnFirecracker(
 	snapshotMode bool,
 	snapshotDir string,
 ) error {
+	if v.CgroupLimits.PolicyVersion == 0 {
+		v.CgroupLimits = op.resolveVMCgroupLimits(ctx, v.VCPUCount, v.MemSizeMiB)
+		if err := op.Repos.VM.Upsert(ctx, v); err != nil {
+			return fmt.Errorf("persist migrated VM cgroup limits: %w", err)
+		}
+	}
 	vmDir := infra.GetVMDirByID(v.ID)
 	// Network info is required — the VM record must have it pre-loaded.
 	if v.Network == nil {
@@ -1205,6 +1243,7 @@ func (op *Operation) vmRespawnFirecracker(
 		KernelPath:     v.Kernel.Path,
 		VCPUCount:      v.VCPUCount,
 		MemSizeMiB:     v.MemSizeMiB,
+		CgroupLimits:   v.CgroupLimits,
 		GuestIP:        v.IPv4,
 		GuestMAC:       v.MAC,
 		TapName:        v.TapDevice,
@@ -1291,6 +1330,19 @@ func (op *Operation) vmRespawnFirecracker(
 	v.ProcessStartTime = pst
 	v.Status = newStatus
 	return nil
+}
+
+func (op *Operation) resolveVMCgroupLimits(ctx context.Context, vcpuCount, memoryMiB int) model.VMCgroupLimits {
+	headroomMiB, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
+	cpuWeight, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
+	pidsMax, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
+	swapMaxBytes, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+	return model.NewVMCgroupLimits(vcpuCount, memoryMiB, model.VMCgroupPolicy{
+		VMMHeadroomMiB: int64(headroomMiB),
+		CPUWeight:      int64(cpuWeight),
+		PIDsMax:        int64(pidsMax),
+		SwapMaxBytes:   int64(swapMaxBytes),
+	})
 }
 
 // --- Reboot / Pause / Resume ---
@@ -1503,6 +1555,7 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		KernelPath:      c.resolved.Kernel.Path,
 		VCPUCount:       c.resolved.VCPUCount,
 		MemSizeMiB:      c.resolved.MemSizeMib,
+		CgroupLimits:    c.resolved.CgroupLimits,
 		GuestIP:         c.guestIP,
 		GuestMAC:        c.guestMAC,
 		TapName:         c.tapName,
@@ -1579,6 +1632,7 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		JailerBinaryID:   c.resolved.Jailer.ID,
 		VCPUCount:        c.resolved.VCPUCount,
 		MemSizeMiB:       c.resolved.MemSizeMib,
+		CgroupLimits:     c.resolved.CgroupLimits,
 		DiskSizeMiB:      c.resolved.DiskSizeMib,
 		APISocketPath:    filepath.Join(c.vmDir, c.resolved.APISocketFilename),
 		ConfigPath:       filepath.Join(c.vmDir, c.resolved.ConfigFilename),

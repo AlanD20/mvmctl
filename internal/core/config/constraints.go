@@ -114,6 +114,32 @@ func validateMACPrefix(key string, resolve ResolveFn) error {
 	return nil
 }
 
+func validateCgroupDefaults(key string, resolve ResolveFn) error {
+	valueRaw, err := resolve(key)
+	if err != nil {
+		return err
+	}
+	value, err := validators.ToInt(valueRaw)
+	if err != nil {
+		return err
+	}
+	switch key {
+	case "cgroup_vmm_headroom_mib", "cgroup_swap_max_bytes":
+		if value < 0 {
+			return errs.New(errs.CodeConfigError, fmt.Sprintf("%s must be non-negative", key))
+		}
+	case "cgroup_cpu_weight":
+		if value < 1 || value > 10000 {
+			return errs.New(errs.CodeConfigError, "cgroup_cpu_weight must be between 1 and 10000")
+		}
+	case "cgroup_pids_max":
+		if value < 1 {
+			return errs.New(errs.CodeConfigError, "cgroup_pids_max must be positive")
+		}
+	}
+	return nil
+}
+
 // NormalizeCacheType normalizes cache_type values: first letter uppercase, rest lowercase.
 func NormalizeCacheType(key string, value any) (any, error) {
 	if value == nil {
@@ -143,6 +169,12 @@ func RegisterBuiltinConstraints(r *ConstraintRegistry) {
 		[]string{"guest_mac_prefix"},
 		validateMACPrefix,
 	)
+	r.Register("defaults.vm", []string{
+		"cgroup_vmm_headroom_mib",
+		"cgroup_cpu_weight",
+		"cgroup_pids_max",
+		"cgroup_swap_max_bytes",
+	}, validateCgroupDefaults)
 
 	r.RegisterTransform("defaults.volume", []string{"cache_type"}, NormalizeCacheType)
 }

@@ -198,6 +198,10 @@ func (s *FirecrackerSpawner) Spawn(ctx context.Context) (retErr error) {
 	}
 	s.PID = &pid
 	s.ProcessStartTime = system.GetProcessStartTime(pid)
+	if err := VerifyCgroup(ctx, s.vmID(), pid, s.config.CgroupLimits); err != nil {
+		slog.Error("failed to verify VM cgroup enforcement", "vm_id", s.vmID(), "pid", pid, "error", err)
+		return err
+	}
 
 	if err := infra.WritePIDFile(s.pidPath, pid); err != nil {
 		slog.Warn("Failed to write PID file", "path", s.pidPath, "error", err)

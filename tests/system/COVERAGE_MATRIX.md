@@ -611,6 +611,7 @@ removed, or when test coverage changes.
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
 | Concurrent VM creation | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | L3: 10 concurrent VMs, all running via ls --json, SSH into each |
 | Canonical Jailer lifecycle | ✅ Deep | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2: trusted pair, non-root jailed process, lifecycle, volume, snapshot, fail-closed |
+| Typed cgroup-v2 envelope | ✅ Deep | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | L2: exact membership and limits, inspect state, snapshot preservation, stop/start/remove cleanup, prerequisite fail-closed |
 
 ---
 

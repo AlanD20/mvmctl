@@ -30,6 +30,8 @@ func defaultLimits() model.HostLimits {
 		KernelMinimumMet:    true,
 		NestedVirtAvailable: true,
 		HugepageCount2MB:    0, // no hugepages by default
+		CgroupVersion:       2,
+		CgroupControllers:   []string{"cpu", "memory", "pids"},
 	}
 }
 
@@ -288,6 +290,46 @@ func TestProbe_checkVMHost(t *testing.T) {
 			if tt.wantNestedOK != nil {
 				check := findCheckByResult(t, result, "nested_virtualization")
 				assert.Equal(t, *tt.wantNestedOK, check.Passed, "nested_virtualization")
+			}
+		})
+	}
+}
+
+func TestProbe_CgroupV2RequiresAllResourceControllers(t *testing.T) {
+	tests := map[string]struct {
+		version     int
+		controllers []string
+		wantPassed  bool
+		wantMissing string
+	}{
+		"all_required": {
+			version: 2, controllers: []string{"io", "pids", "memory", "cpu"}, wantPassed: true,
+		},
+		"cgroup_v1": {
+			version: 1, controllers: []string{"cpu", "memory", "pids"}, wantPassed: false,
+		},
+		"missing_cpu": {
+			version: 2, controllers: []string{"memory", "pids"}, wantPassed: false, wantMissing: "cpu",
+		},
+		"missing_memory": {
+			version: 2, controllers: []string{"cpu", "pids"}, wantPassed: false, wantMissing: "memory",
+		},
+		"missing_pids": {
+			version: 2, controllers: []string{"cpu", "memory"}, wantPassed: false, wantMissing: "pids",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			limits := defaultLimits()
+			limits.CgroupVersion = tc.version
+			limits.CgroupControllers = tc.controllers
+			result := host.NewProbe().RunAll(
+				t.Context(), ptr(defaultHardware()), &limits, ptr(defaultResources()),
+			)
+			check := findCheckByResult(t, result, "cgroup_v2")
+			assert.Equal(t, tc.wantPassed, check.Passed)
+			if tc.wantMissing != "" {
+				assert.Contains(t, check.Details, tc.wantMissing)
 			}
 		})
 	}

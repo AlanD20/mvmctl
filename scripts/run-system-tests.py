@@ -93,6 +93,10 @@ TIER2_DOMAINS: dict[str, list[str]] = {
     ],
     "vm_lifecycle": ["tests/system/vm/test_vm_lifecycle.py"],
     "vm_data_persistence": ["tests/system/vm/test_vm_data_persistence.py"],
+    "jailer": [
+        "tests/system/vm/test_jailer.py",
+        "tests/system/vm/test_cgroup.py",
+    ],
     "ssh": ["tests/system/ssh/test_ssh.py"],
     "console": ["tests/system/console/test_console.py"],
     "logs": ["tests/system/logs/test_logs.py"],

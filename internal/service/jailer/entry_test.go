@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/model"
 )
 
 const (
@@ -175,6 +176,56 @@ func TestJailRootIsDeterministic(t *testing.T) {
 	assert.Equal(t, first, second)
 }
 
+func TestValidateCgroupLimitsRejectsAbsentAndInvalidEnvelopes(t *testing.T) {
+	valid := model.NewVMCgroupLimits(2, 512, model.VMCgroupPolicy{
+		VMMHeadroomMiB: 128, CPUWeight: 100, PIDsMax: 256, SwapMaxBytes: 0,
+	})
+	tests := map[string]struct {
+		mutate func(*model.VMCgroupLimits)
+		valid  bool
+	}{
+		"valid":                {valid: true},
+		"absent":               {mutate: func(l *model.VMCgroupLimits) { *l = model.VMCgroupLimits{} }},
+		"zero_cpu_quota":       {mutate: func(l *model.VMCgroupLimits) { l.CPUQuotaMicros = 0 }},
+		"zero_cpu_period":      {mutate: func(l *model.VMCgroupLimits) { l.CPUPeriodMicros = 0 }},
+		"weight_below_minimum": {mutate: func(l *model.VMCgroupLimits) { l.CPUWeight = 0 }},
+		"weight_above_maximum": {mutate: func(l *model.VMCgroupLimits) { l.CPUWeight = 10001 }},
+		"zero_memory_high":     {mutate: func(l *model.VMCgroupLimits) { l.MemoryHighBytes = 0 }},
+		"high_above_max":       {mutate: func(l *model.VMCgroupLimits) { l.MemoryHighBytes = l.MemoryMaxBytes + 1 }},
+		"negative_swap":        {mutate: func(l *model.VMCgroupLimits) { l.SwapMaxBytes = -1 }},
+		"zero_pid_cap":         {mutate: func(l *model.VMCgroupLimits) { l.PIDsMax = 0 }},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			limits := valid
+			if tc.mutate != nil {
+				tc.mutate(&limits)
+			}
+			err := validateCgroupLimits(limits)
+			if tc.valid {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestEnsureCgroupEmptyRefusesPopulatedAndAcceptsAbsentState(t *testing.T) {
+	path := t.TempDir()
+	base := filepath.Join(infra.CgroupV2Root, infra.JailerCgroupParent, infra.JailerCgroupExecutable)
+	vmID, err := filepath.Rel(base, path)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Clean(path), cgroupPath(vmID))
+
+	require.NoError(t, os.WriteFile(filepath.Join(path, "cgroup.procs"), []byte("123\n"), 0600))
+	err = ensureCgroupEmpty(vmID)
+	require.ErrorContains(t, err, "contains live processes")
+
+	require.NoError(t, os.Remove(filepath.Join(path, "cgroup.procs")))
+	require.NoError(t, ensureCgroupEmpty(vmID))
+}
+
 // Rationale: User-owned or symlinked executables must never satisfy the
 // root-owned, non-user-writable trusted executable contract.
 func TestValidateTrustedExecutableRejectsUntrustedPaths(t *testing.T) {
@@ -257,6 +308,12 @@ func newManagedFixture(t *testing.T) *managedFixture {
 		ISOPath: filepath.Join(vmDir, "cloud-init.iso"), SnapshotDir: snapshotDir,
 		Volumes:   []VolumeMount{{DriveID: testResourceID, HostPath: filepath.Join(volumesRoot, "volume.raw")}},
 		APISocket: filepath.Join(vmDir, "firecracker.socket"),
+		CgroupLimits: func() *model.VMCgroupLimits {
+			limits := model.NewVMCgroupLimits(2, 512, model.VMCgroupPolicy{
+				VMMHeadroomMiB: 128, CPUWeight: 100, PIDsMax: 256, SwapMaxBytes: 0,
+			})
+			return &limits
+		}(),
 	}
 	fixture.writeManifest(t)
 	return fixture

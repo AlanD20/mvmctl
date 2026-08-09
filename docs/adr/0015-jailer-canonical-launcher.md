@@ -21,7 +21,7 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - The existing VM-domain spawner remains the caller-facing seam and owns jailed path translation, process tracking, socket probing, and cleanup.
 - Root-requiring setup is encapsulated in a privileged `mvm run` subprocess, following the loopmount precedent. Users continue to invoke `mvm` without sudo.
 - Executable and chroot paths trusted by Jailer are root-owned and not writable by the invoking user. The ordinary per-user mvmctl database and cache model remains unchanged.
-- Typed cgroup-v2 resource enforcement will extend this canonical launch path in a separate change. Raw cgroup key/value input will not be public.
+- Every launch requires cgroup v2 with the CPU, memory, and PID controllers. mvmctl persists a typed resource envelope, derives fixed Jailer arguments internally, and fails the launch if post-start membership or values differ. Raw cgroup key/value input is not public.
 - Jailer does not daemonize initially, preserving serial-console standard descriptors. New PID and network namespaces are deferred until their lifecycle and TAP implications are designed separately.
 - VM resources are exposed inside the jail through validated paths without duplicating large rootfs and volume files. Mount cleanup is idempotent across failed starts, stop, remove, and host recovery.
 
@@ -30,7 +30,7 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 **Benefits:**
 
 - Every VM receives Firecracker's supported chroot and privilege-drop path.
-- The canonical Jailer path provides the required seam for follow-up cgroup-v2 enforcement.
+- The canonical Jailer path enforces one finite cgroup-v2 envelope for every VM lifecycle path.
 - One canonical launch path avoids a permanent direct-versus-jailed behavior matrix.
 - VM create, start, reboot, and snapshot restore share the same security properties.
 
@@ -39,9 +39,9 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - Existing host paths in Firecracker configuration must be translated into jail-visible paths while host controllers retain corresponding socket and artifact locations.
 - Console, vsock, snapshots, hotplug volumes, PID handling, and partial-failure cleanup require full parity testing.
 - Jailer adds fixed launch overhead and depends on the number of host mount points; benchmarks must track the regression budget.
-- Memory cgroup limits require measured VMM headroom above guest-visible RAM.
+- The initial memory maximum is guest-visible RAM plus a configurable 128 MiB VMM headroom; versioned L2 measurements must validate or revise that conservative default.
 - Network namespace isolation remains future work because the current TAP belongs to a host bridge.
-- Release pairs are reinstalled into the trusted store by `mvm bin pull`; cgroup-v2 prerequisites are introduced separately.
+- Release pairs are reinstalled into the trusted store by `mvm bin pull`; hosts without cgroup v2 and the CPU, memory, and PID controllers cannot launch VMs.
 
 ## Related Decisions
 

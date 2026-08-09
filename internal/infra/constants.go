@@ -52,6 +52,15 @@ const TrustedBinaryRoot = "/var/lib/mvmctl/binaries"
 // JailerChrootBase is the fixed root-owned base directory for per-VM jails.
 const JailerChrootBase = "/var/lib/mvmctl/jailer"
 
+// JailerCgroupParent is the fixed cgroup-v2 subtree used by canonical Jailer launches.
+const JailerCgroupParent = "mvmctl"
+
+// JailerCgroupExecutable is Jailer's fixed executable-name component in the cgroup path.
+const JailerCgroupExecutable = "firecracker"
+
+// CgroupV2Root is the unified Linux cgroup-v2 mount point required by VM launches.
+const CgroupV2Root = "/sys/fs/cgroup"
+
 // JailerManifestFilename is the fixed per-VM launch manifest name.
 const JailerManifestFilename = "jailer-launch.json"
 
@@ -74,27 +83,31 @@ var OverridableDefaults = map[string]map[string]any{
 		"ssh_timeout_sec": 10,
 	},
 	"defaults.vm": {
-		"vcpu_count":          1,
-		"mem_size_mib":        512,
-		"ssh_user":            "root",
-		"user_password":       "password",
-		"dns_server":          "1.1.1.1",
-		"root_uid":            0,
-		"root_gid":            0,
-		"user_uid":            1000,
-		"user_gid":            1000,
-		"pci_enabled":         true,
-		"nested_virt":         false,
-		"enable_logging":      true,
-		"enable_metrics":      false,
-		"enable_console":      false,
-		"lsm_flags":           "landlock,lockdown,yama,integrity,selinux,bpf",
-		"boot_args":           "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false",
-		"guest_mac_prefix":    "02:FC",
-		"vsock_port":          1024,
-		"allow_remote_exec":   false,
-		"vsock_user":          "root",
-		"vsock_probe_timeout": 5,
+		"vcpu_count":              1,
+		"mem_size_mib":            512,
+		"ssh_user":                "root",
+		"user_password":           "password",
+		"dns_server":              "1.1.1.1",
+		"root_uid":                0,
+		"root_gid":                0,
+		"user_uid":                1000,
+		"user_gid":                1000,
+		"pci_enabled":             true,
+		"nested_virt":             false,
+		"enable_logging":          true,
+		"enable_metrics":          false,
+		"enable_console":          false,
+		"lsm_flags":               "landlock,lockdown,yama,integrity,selinux,bpf",
+		"boot_args":               "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false",
+		"guest_mac_prefix":        "02:FC",
+		"vsock_port":              1024,
+		"allow_remote_exec":       false,
+		"vsock_user":              "root",
+		"vsock_probe_timeout":     5,
+		"cgroup_vmm_headroom_mib": 128,
+		"cgroup_cpu_weight":       100,
+		"cgroup_pids_max":         256,
+		"cgroup_swap_max_bytes":   0,
 	},
 	"defaults.network": {
 		"name":        "net",

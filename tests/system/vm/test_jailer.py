@@ -154,6 +154,13 @@ class TestCanonicalJailerLaunch:
         volume_name = f"sys-jailer-vol-{uuid.uuid4().hex[:6]}"
         snapshot_id: str | None = None
         try:
+            source_inspect = json.loads(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout
+            )
+            source_cgroup = source_inspect["resources"]["cgroup"]
+            assert source_cgroup["status"] == "enforced"
+            source_limits = source_cgroup["requested"]
+
             _run_mvm(runner_vm, "volume", "create", volume_name, "64M")
             _run_mvm(runner_vm, "vm", "stop", vm_name)
             _run_mvm(runner_vm, "volume", "attach", vm_name, volume_name)
@@ -190,6 +197,13 @@ class TestCanonicalJailerLaunch:
             assert restored.returncode == 0, restored.stderr
             restored_vm = _vm_entry(runner_vm, vm_name)
             assert restored_vm["status"] == "running"
+            restored_inspect = json.loads(
+                _run_mvm(runner_vm, "vm", "inspect", vm_name, "--json").stdout
+            )
+            restored_cgroup = restored_inspect["resources"]["cgroup"]
+            assert restored_cgroup["status"] == "enforced"
+            assert restored_cgroup["requested"] == source_limits
+            assert restored_cgroup["actual"] == source_limits
             assert _guest_run(
                 runner_vm, f"test -d {shlex.quote(_jail_root(restored_vm['id']))}",
                 check=False,

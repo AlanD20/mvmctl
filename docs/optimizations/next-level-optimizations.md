@@ -132,9 +132,9 @@ These are the optimizations that can **radically change** the performance profil
 
 **Estimated impact:** High — up to 50% boot time reduction
 
-### 3.2 cgroup v2 + `favordynmods` + `kvm.nx_huge_pages=never` ⏳ NOT IMPLEMENTED
+### 3.2 cgroup v2 + `favordynmods` + `kvm.nx_huge_pages=never` ⚠️ PARTIAL
 
-**What it is:** Three related kernel-level optimizations that dramatically affect Firecracker startup time, especially snapshot restore.
+**What it is:** Three related kernel-level mechanisms that affect Firecracker startup time, especially snapshot restore. Typed cgroup-v2 resource enforcement is implemented through Jailer; `favordynmods` and `kvm.nx_huge_pages=never` performance tuning remain unimplemented.
 
 **Bottleneck addressed:** KVM + cgroup overhead (8.5ms for snapshot restore)
 

@@ -52,7 +52,10 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 	// Errors must propagate to caller — NOT absorbed.
 	if c.vm.Status != model.VMStatusRunning && c.vm.Status != model.VMStatusStarting {
 		if pid > 0 && system.IsProcessAlive(pid, c.vm.ProcessStartTime) {
-			system.KillProcess(pid)
+			system.GracefulShutdown(system.ShutdownConfig{
+				Pid: pid, IsChild: false, GracefulTimeout: 100 * time.Millisecond,
+				KillTimeout: 100 * time.Millisecond, ExpectedStartTime: c.vm.ProcessStartTime,
+			})
 			if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
 				return err
 			}

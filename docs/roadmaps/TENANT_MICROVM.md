@@ -28,8 +28,8 @@ Direct inbound ports are not required when the workload VM runs an outbound tunn
 | Same-network communication | Works through one bridge; intentionally unfiltered | None for the environment trust-zone model |
 | Cross-network routing | Host forwarding and ACCEPT policy permit it | Persist explicit service allows and default-deny other managed inter-network traffic |
 | VM-to-host traffic | INPUT remains open except for explicit NoCloud allow rules | Preserve required host services, then deny other traffic from managed VM networks |
-| Firecracker launch | Canonical Jailer launch and exact trusted release pairing implemented; L2 execution remains pending | Add cgroup-v2 resource enforcement and complete runner verification |
-| Host resource enforcement | Guest vCPU and RAM are configured; no Jailer cgroup limits are applied | Apply and verify typed cgroup-v2 limits through Jailer |
+| Firecracker launch | Canonical Jailer launch, exact trusted release pairing, and cgroup-v2 enforcement implemented; L2 execution remains pending | Complete prepared-runner verification |
+| Host resource enforcement | Typed CPU, memory, swap, and PID limits are persisted, applied through Jailer, verified after launch, and shown by inspect | Measure VMM headroom under L2 workloads and add I/O limits after stable backing-device resolution exists |
 | IP identity | Explicit IP assignment and collision-safe IPAM exist | Policies bind to network/VM IDs and resolve current addressing during reconciliation |
 | Persistent storage | Volumes and snapshots exist | External orchestration supplies application-consistent backup and restore procedures |
 | Docker workload | Guest images and kernels are customizable | Validate a versioned Docker-capable image/kernel template |
@@ -47,16 +47,16 @@ Direct inbound ports are not required when the workload VM runs an outbound tunn
 
 **Exit:** create, start, stop, reboot, console, exec, cp, volumes, and snapshot restore have L2 parity under Jailer, with no direct-launch fallback.
 
-### M2 — Enforced resource envelope
+### M2 — Enforced resource envelope (implemented; L2 execution pending)
 
 - Require cgroup v2 and the necessary controllers during host readiness checks.
-- Persist typed CPU, memory, swap, PID, and applicable I/O limits with each VM.
+- Persist typed CPU, memory, swap, and PID limits with each VM. Defer I/O limits until backing devices can be resolved stably.
 - Derive Jailer cgroup arguments internally; do not expose raw cgroup files or values.
-- Measure Firecracker host-memory overhead before selecting the default memory headroom.
+- Use a conservative configurable 128 MiB VMM headroom initially; replace it only with versioned L2 measurements.
 - Verify actual cgroup membership and values after launch; fail closed on mismatch.
 - Surface requested, actual, and current resource state in VM inspection.
 
-**Exit:** every normally launched VM has verified cgroup-v2 constraints and cleanup removes its cgroup.
+**Exit:** implementation and hermetic coverage are complete. Prepared-runner L2 execution must still prove that every normally launched VM has verified constraints and that stop/remove clears its leaf cgroup.
 
 ### M3 — Routed service-access policies
 

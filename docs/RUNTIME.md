@@ -409,9 +409,9 @@ invocations.
 
 Jailer is the only VM launch path. `mvm bin pull` streams the checksum-verified Firecracker release archive to the privileged installer, which atomically installs the exact Firecracker/Jailer pair under `/var/lib/mvmctl/binaries/<version>/`. VM launch then exposes only that VM's required resources inside `/var/lib/mvmctl/jailer/firecracker/<vm-id>/root/` and execs the trusted Jailer binary.
 
-Jailer does not daemonize, so the serial-console descriptors remain attached. The service derives the non-root Firecracker UID/GID from the sudo caller, translates Firecracker configuration paths into the jail, and records the actual Firecracker PID. Stop, remove, reboot, hotplug, and snapshot operations reconcile the corresponding jail mounts.
+Jailer does not daemonize, so the serial-console descriptors remain attached. The service derives the non-root Firecracker UID/GID from the sudo caller, translates Firecracker configuration paths into the jail, and records the actual Firecracker PID. Stop, remove, reboot, hotplug, and snapshot operations reconcile the corresponding jail mounts and cgroup.
 
-There is no direct-Firecracker fallback. Jailer cgroup-v2 resource tuning and network namespaces are separate follow-up work.
+There is no direct-Firecracker fallback. Every launch requires cgroup v2 with the CPU, memory, and PID controllers and creates `/sys/fs/cgroup/mvmctl/firecracker/<vm-id>`. mvmctl persists typed CPU, memory, swap, and PID limits, passes only internally derived Jailer arguments, and verifies exact membership and values after launch. Verification failure terminates the VM. `mvm vm inspect` reports requested limits, observed limits, usage, mismatches, and enforcement status. Network namespaces remain separate follow-up work.
 
 **Key files:**
 

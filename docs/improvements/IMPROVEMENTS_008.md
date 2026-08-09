@@ -136,7 +136,7 @@ Use a **read-only base image** + **writable overlay** per VM. Zero copy, O(1) cr
 | Item | Status |
 |---|---|
 | Huge pages: add to `FirecrackerConfig` + host docs | ⚠️ Partial — hugepage detection implemented in `internal/core/host/detector.go` (reads `/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages`), stored in `host_state` schema, but not added to `FirecrackerConfig` struct and no host docs written. |
-| cgroup v2 + `kvm.nx_huge_pages=never` docs | ⚠️ Partial — cgroup v2 detection in `internal/core/host/detector.go` (checks `/sys/fs/cgroup/cgroup.controllers`), stored in `host_state` schema, but docs not written. |
+| cgroup v2 + `kvm.nx_huge_pages=never` docs | ⚠️ Partial — typed per-VM cgroup-v2 enforcement and host controller detection are implemented and documented; the separate `kvm.nx_huge_pages=never` host tuning remains unimplemented. |
 | Kernel boot args: add safe params | ⚠️ Partial (basic args exist) |
 
 ### Phase 2: Snapshot Domain (Weeks 2-3) ✅ DONE

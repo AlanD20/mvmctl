@@ -46,7 +46,7 @@ func TestMigration002_BackfillsJailerBinaryID(t *testing.T) {
 
 	applied, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 1, applied)
+	assert.Equal(t, 2, applied)
 
 	rows := map[string]string{}
 	dbRows, err := database.QueryContext(ctx, "SELECT id, jailer_binary_id FROM vm_instances ORDER BY id")
@@ -67,9 +67,47 @@ func TestMigration002_BackfillsJailerBinaryID(t *testing.T) {
 
 	var schemaVersion int
 	require.NoError(t, database.GetContext(ctx, &schemaVersion, "PRAGMA user_version"))
-	assert.Equal(t, 2, schemaVersion)
+	assert.Equal(t, 3, schemaVersion)
 	var indexCount int
 	require.NoError(t, database.GetContext(ctx, &indexCount,
 		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_vm_instances_jailer_binary'"))
 	assert.Equal(t, 1, indexCount)
+}
+
+func TestMigration003_AddsTypedVMCgroupLimitsDefault(t *testing.T) {
+	ctx := context.Background()
+	handle := db.New(filepath.Join(t.TempDir(), "migration-003.db"))
+	t.Cleanup(func() { require.NoError(t, handle.Close()) })
+	database := handle.DB()
+	_, err := database.ExecContext(ctx, `
+		CREATE TABLE vm_instances (
+			id TEXT PRIMARY KEY,
+			vcpu_count INTEGER NOT NULL,
+			mem_size_mib INTEGER NOT NULL
+		);
+		INSERT INTO vm_instances (id, vcpu_count, mem_size_mib) VALUES ('legacy-vm', 1, 512);
+		PRAGMA user_version = 2;
+	`)
+	require.NoError(t, err)
+
+	applied, err := handle.RunMigrationsCtx(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, applied)
+
+	var encoded string
+	require.NoError(t, database.GetContext(ctx, &encoded,
+		"SELECT cgroup_limits FROM vm_instances WHERE id = 'legacy-vm'"))
+	assert.JSONEq(t, `{
+		"policy_version": 0,
+		"cpu_quota_micros": 100000,
+		"cpu_period_micros": 100000,
+		"cpu_weight": 100,
+		"memory_high_bytes": 671088640,
+		"memory_max_bytes": 671088640,
+		"swap_max_bytes": 0,
+		"pids_max": 256
+	}`, encoded)
+	var schemaVersion int
+	require.NoError(t, database.GetContext(ctx, &schemaVersion, "PRAGMA user_version"))
+	assert.Equal(t, 3, schemaVersion)
 }

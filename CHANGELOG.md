@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - VM create, start, reboot, and snapshot restore now require an exact Firecracker/Jailer release pair and run through a root-owned Jailer chroot with no direct-launch fallback.
 - Trusted release pairs are installed from the checksum-verified archive; each jail exposes only that VM's kernel, rootfs, volumes, runtime files, and selected snapshot.
 
+#### Enforced VM resource envelopes
+- Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.
+
 ### Fixed
 
 #### `mvm image inspect`

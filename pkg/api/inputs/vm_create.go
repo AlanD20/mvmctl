@@ -140,6 +140,7 @@ type ResolvedVMCreateInput struct {
 	Volumes          []*model.VolumeItem
 	VsockPort        int  // vsock port (0 = disabled / no vsock)
 	Writeback        bool // cache type override: when true, use "Writeback" for rootfs + volumes
+	CgroupLimits     model.VMCgroupLimits
 }
 
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.
@@ -421,6 +422,16 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if input.VCPUCount != nil && *input.VCPUCount > 0 {
 		vcpuCount = *input.VCPUCount
 	}
+	cgroupHeadroomMiB, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
+	cgroupCPUWeight, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
+	cgroupPIDsMax, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
+	cgroupSwapMaxBytes, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+	cgroupLimits := model.NewVMCgroupLimits(vcpuCount, memMib, model.VMCgroupPolicy{
+		VMMHeadroomMiB: int64(cgroupHeadroomMiB),
+		CPUWeight:      int64(cgroupCPUWeight),
+		PIDsMax:        int64(cgroupPIDsMax),
+		SwapMaxBytes:   int64(cgroupSwapMaxBytes),
+	})
 	// Resolve cloud-init mode
 	// Default to "off" when no explicit mode is set — the provisioner injects
 	// SSH keys directly into the rootfs regardless of cloud-init mode.
@@ -608,6 +619,7 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		NoCloudKillAfter:      nocloudKillAfter,
 		VsockPort:             vsockPort,
 		Writeback:             writeback,
+		CgroupLimits:          cgroupLimits,
 	}
 	// Validate
 	if err := r.ensureValidate(ctx, result); err != nil {

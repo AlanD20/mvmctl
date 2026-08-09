@@ -160,6 +160,7 @@ func (op *Operation) SnapshotCreate(
 		EnableMetrics: vmItem.EnableMetrics,
 		LogLevel:      vmItem.LogLevel,
 		CPUConfig:     vmItem.CPUConfig,
+		CgroupLimits:  vmItem.CgroupLimits,
 	}
 	if vmItem.Vsock != nil {
 		extraConfig.VsockPort = vmItem.Vsock.Port
@@ -420,6 +421,10 @@ func (op *Operation) SnapshotRestore(
 			vmItem.EnableLogging = cfg.EnableLogging
 			vmItem.EnableMetrics = cfg.EnableMetrics
 			vmItem.LogLevel = cfg.LogLevel
+			vmItem.CgroupLimits = cfg.CgroupLimits
+		}
+		if vmItem.CgroupLimits.PolicyVersion == 0 {
+			vmItem.CgroupLimits = op.resolveVMCgroupLimits(ctx, vmItem.VCPUCount, vmItem.MemSizeMiB)
 		}
 
 		// Persist VM record

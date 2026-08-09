@@ -24,6 +24,9 @@ func TestRepository_PersistsJailerBinaryID(t *testing.T) {
 		ImageID: "image-id", KernelID: "kernel-id", BinaryID: "firecracker-id", JailerBinaryID: "jailer-id",
 		APISocketPath: "/tmp/api.socket", ConfigPath: "/tmp/config.json", CloudInitMode: "off",
 		VCPUCount: 2, MemSizeMiB: 512, DiskSizeMiB: 1024, RootfsPath: "/tmp/rootfs", RootfsSuffix: ".ext4",
+		CgroupLimits: model.NewVMCgroupLimits(2, 512, model.VMCgroupPolicy{
+			VMMHeadroomMiB: 128, CPUWeight: 100, PIDsMax: 256, SwapMaxBytes: 0,
+		}),
 		CreatedAt: "2026-08-09T00:00:00Z", UpdatedAt: "2026-08-09T00:00:00Z",
 	}
 
@@ -33,6 +36,16 @@ func TestRepository_PersistsJailerBinaryID(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, "firecracker-id", got.BinaryID)
 	assert.Equal(t, "jailer-id", got.JailerBinaryID)
+	assert.Equal(t, item.CgroupLimits, got.CgroupLimits)
+
+	item.CgroupLimits = model.NewVMCgroupLimits(4, 1024, model.VMCgroupPolicy{
+		VMMHeadroomMiB: 64, CPUWeight: 500, PIDsMax: 512, SwapMaxBytes: 4096,
+	})
+	require.NoError(t, repo.Upsert(ctx, item))
+	updated, err := repo.Get(ctx, item.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, item.CgroupLimits, updated.CgroupLimits)
 
 	byJailer, err := repo.FindByBinaryID(ctx, "jailer-id")
 	require.NoError(t, err)

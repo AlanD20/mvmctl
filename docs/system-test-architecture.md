@@ -112,7 +112,7 @@ All T1/T2 runner VMs are Firecracker microVMs created with **Firecracker v1.16**
 | Tier | Runs inside VM | Shared volume | Nested KVM | Runner VM kernel | What's tested |
 |------|---------------|---------------|------------|-----------------|---------------|
 | **1** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Not needed | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | Host-level CLI: help, config, init, cache, keys, invariants, bin, images, kernel, network, host, run |
-| **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, ssh, console, exec, logs, full_journeys, nftables |
+| **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, Jailer/cgroups, ssh, console, exec, logs, full_journeys, nftables |
 | **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | vm_fresh_env, vm_nested_isolated, vm_snapshot_load, vm_snapshot_rootfs, volume_hotplug, cp, kernel_build, env |
 
 ---
@@ -440,6 +440,7 @@ tests/system/
 | run | 1 | `test_run.py` | Service subprocesses |
 | volume | 2 | `test_volume.py` | Volume lifecycle |
 | vm_lifecycle | 2 | `test_vm_lifecycle.py` | VM create/start/stop/pause |
+| jailer | 2 | `test_jailer.py`, `test_cgroup.py` | Canonical Jailer containment and cgroup-v2 enforcement — needs nested virt |
 | ssh | 2 | `test_ssh.py` | SSH into VMs |
 | console | 2 | `test_console.py` | Console output |
 | exec | 2 | `test_exec.py` | Vsock agent command execution — uses module-scoped VM, needs nested virt |
@@ -596,5 +597,4 @@ Every test file in `tests/system/` MUST:
 | **Limits** | `--workers N` flag controls max parallel VMs. Default: 4. |
 
 ---
-
 

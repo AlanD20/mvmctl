@@ -269,7 +269,7 @@ This map is the single authoritative source for all built-in defaults. Hardcoded
 
 | Category path | Description |
 |---------------|-------------|
-| `defaults.vm` | Default vCPU count, RAM, SSH user, boot args, LSM flags, PCI, nested virt, logging, console, vsock port |
+| `defaults.vm` | Default vCPU count, RAM, SSH user, boot args, LSM flags, PCI, nested virt, logging, console, vsock port, and typed cgroup policy inputs |
 | `defaults.network` | Default bridge name, CIDR, NAT enabled |
 | `defaults.image` | Import format, remote listing limit and cache TTL |
 | `defaults.kernel` | Default kernel version, build jobs, remote listing limit and cache TTL |
@@ -281,6 +281,19 @@ This map is the single authoritative source for all built-in defaults. Hardcoded
 | `settings.firewall` | iptables_xtcomment flag |
 | `settings.vm` | log_lines, log_follow, max_vms, ssh_timeout_sec |
 | `cli` | Listing style (default: `short`) |
+
+### `defaults.vm` cgroup policy
+
+These settings derive the persisted envelope when a VM is created. Existing and snapshot-restored VMs retain their persisted limits.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `cgroup_vmm_headroom_mib` | `128` | Host-memory allowance added to guest-visible RAM for `memory.high` and `memory.max` |
+| `cgroup_cpu_weight` | `100` | cgroup-v2 CPU weight; accepted range is 1–10000 |
+| `cgroup_pids_max` | `256` | Maximum processes in the VM's cgroup |
+| `cgroup_swap_max_bytes` | `0` | Maximum cgroup swap usage in bytes; zero disables swap |
+
+CPU quota is the VM's vCPU count multiplied by a fixed 100000 µs period. Raw cgroup file names and arbitrary controller values are not configuration interfaces.
 
 ### `defaults.kernel`
 

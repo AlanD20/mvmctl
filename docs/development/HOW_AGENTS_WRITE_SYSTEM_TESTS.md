@@ -255,7 +255,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `vm create --ip` / `--mac` | **L2** | Real Firecracker spawn |
 | `vm create --console` | **L2** | Real Firecracker spawn |
 | `vm create --no-pci` | **L2** | Real Firecracker spawn |
-| canonical Jailer launch and cleanup | **L2** | Real chroot, trusted pair, lifecycle, volume, and snapshot behavior |
+| canonical Jailer launch, cgroup enforcement, and cleanup | **L2** | Real chroot, trusted pair, cgroup membership and values, lifecycle, volume, and snapshot behavior |
 | `vm create --enable-logging` / `--enable-metrics` | **L2** | Verify files on disk |
 | `vm create --cloud-init-mode <mode>` | **L2** | Real Firecracker + cloud-init |
 | `vm create --nocloud-net-port` | **L2** | Real Firecracker + network |

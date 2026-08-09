@@ -38,6 +38,7 @@ func TestFirecrackerSpawner_WriteJailerManifestSelectsOnlyVMResources(t *testing
 			DriveID: testDriveID, HostPath: config.ExtraDrives[0].PathOnHost, ReadOnly: true,
 		}},
 		APISocket: config.APISocketPath, PCIEnabled: true, SnapshotMode: true,
+		CgroupLimits: &config.CgroupLimits,
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("LaunchManifest mismatch (-want +got):\n%s", diff)
@@ -48,7 +49,7 @@ func TestFirecrackerSpawner_WriteJailerManifestSelectsOnlyVMResources(t *testing
 		"vm_id": true, "vm_dir": true, "version": true, "config_path": true,
 		"pid_path": true, "kernel_path": true, "rootfs_path": true, "iso_path": true,
 		"snapshot_dir": true, "volumes": true, "api_socket": true,
-		"pci_enabled": true, "snapshot_mode": true,
+		"pci_enabled": true, "snapshot_mode": true, "cgroup_limits": true,
 	}
 	gotKeys := make(map[string]bool, len(raw))
 	for key := range raw {
@@ -57,6 +58,101 @@ func TestFirecrackerSpawner_WriteJailerManifestSelectsOnlyVMResources(t *testing
 	if diff := cmp.Diff(wantKeys, gotKeys); diff != "" {
 		t.Errorf("manifest field set mismatch (-want +got):\n%s", diff)
 	}
+}
+
+func TestFirecrackerSpawner_WriteJailerManifestOmitsAbsentCgroupLimits(t *testing.T) {
+	vmDir := t.TempDir()
+	config := jailerTestConfig(vmDir)
+	config.CgroupLimits = model.VMCgroupLimits{}
+	require.NoError(t, NewFirecrackerSpawner(config).writeJailerManifest())
+
+	data, err := os.ReadFile(filepath.Join(vmDir, infra.JailerManifestFilename))
+	require.NoError(t, err)
+	var manifest jailer.LaunchManifest
+	require.NoError(t, json.Unmarshal(data, &manifest))
+	assert.Nil(t, manifest.CgroupLimits)
+}
+
+func TestCgroupStateParsingAndExactMismatchReporting(t *testing.T) {
+	path := t.TempDir()
+	files := map[string]string{
+		"cpu.max":             "200000 100000\n",
+		"cpu.weight":          "100\n",
+		"memory.high":         "671088640\n",
+		"memory.max":          "671088640\n",
+		"memory.swap.max":     "0\n",
+		"pids.max":            "256\n",
+		"cpu.stat":            "usage_usec 12345\nuser_usec 10000\n",
+		"memory.current":      "4096\n",
+		"memory.swap.current": "0\n",
+		"pids.current":        "3\n",
+		"cgroup.procs":        "12\n123\n",
+	}
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(path, name), []byte(content), 0600))
+	}
+
+	limits, err := readCgroupLimits(path)
+	require.NoError(t, err)
+	assert.Equal(t, int64(200000), limits.CPUQuotaMicros)
+	assert.Equal(t, int64(671088640), limits.MemoryMaxBytes)
+	assert.Zero(t, limits.SwapMaxBytes)
+	usage, err := readCgroupUsage(path)
+	require.NoError(t, err)
+	assert.Equal(t, model.VMCgroupUsage{
+		CPUUsageMicros: 12345, MemoryBytes: 4096, SwapBytes: 0, PIDsCurrent: 3,
+	}, usage)
+	contains, err := cgroupContainsProcess(path, 12)
+	require.NoError(t, err)
+	assert.True(t, contains)
+	contains, err = cgroupContainsProcess(path, 2)
+	require.NoError(t, err)
+	assert.False(t, contains, "PID matching must compare complete fields")
+
+	requested := limits
+	requested.PolicyVersion = 1
+	actual := limits
+	actual.CPUQuotaMicros++
+	actual.CPUWeight++
+	actual.MemoryHighBytes++
+	actual.MemoryMaxBytes++
+	actual.SwapMaxBytes++
+	actual.PIDsMax++
+	assert.Equal(t, []string{
+		"CPU quota", "CPU weight", "memory high", "memory maximum", "swap maximum", "PID maximum",
+	}, cgroupLimitMismatches(requested, actual))
+}
+
+func TestCgroupStateRejectsUnlimitedControllerValues(t *testing.T) {
+	path := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(path, "cpu.max"), []byte("max 100000\n"), 0600))
+	_, err := readCgroupLimits(path)
+	require.ErrorContains(t, err, "finite CPU maximum")
+
+	require.NoError(t, os.WriteFile(filepath.Join(path, "value"), []byte("max\n"), 0600))
+	_, err = readCgroupInt(path, "value")
+	require.ErrorContains(t, err, "unlimited")
+}
+
+func TestInspectCgroupInactiveAndUnavailable(t *testing.T) {
+	requested := model.NewVMCgroupLimits(1, 512, model.VMCgroupPolicy{
+		VMMHeadroomMiB: 128, CPUWeight: 100, PIDsMax: 256, SwapMaxBytes: 0,
+	})
+	inactive, err := InspectCgroup(t.Context(), testDriveID[:32], 0, requested)
+	require.NoError(t, err)
+	assert.Equal(t, model.VMCgroupEnforcementInactive, inactive.Status)
+	assert.Equal(t, requested, inactive.Requested)
+	assert.Nil(t, inactive.Actual)
+
+	_, err = InspectCgroup(t.Context(), "ffffffffffffffffffffffffffffffff", os.Getpid(), requested)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "VM cgroup is unavailable")
+}
+
+func TestProcessCgroupMembershipRequiresExactUnifiedPath(t *testing.T) {
+	inExpected, err := processInCgroup(os.Getpid(), "definitely-not-the-current-cgroup")
+	require.NoError(t, err)
+	assert.False(t, inExpected)
 }
 
 func TestFirecrackerSpawner_WriteToFileUsesJailedPathsWithoutMutatingHostConfig(t *testing.T) {
@@ -127,6 +223,9 @@ func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 		JailerPath: "/var/lib/mvmctl/binaries/1.16.0/jailer", BinaryVersion: "1.16.0",
 		KernelPath: filepath.Join(filepath.Dir(vmDir), "kernels", "vmlinux"),
 		VCPUCount:  2, MemSizeMiB: 512, GuestIP: "10.0.0.2", GuestMAC: "02:00:00:00:00:02",
+		CgroupLimits: model.NewVMCgroupLimits(2, 512, model.VMCgroupPolicy{
+			VMMHeadroomMiB: 128, CPUWeight: 100, PIDsMax: 256, SwapMaxBytes: 0,
+		}),
 		TapName: "tap-test", NetworkGateway: "10.0.0.1", NetworkNetmask: "255.255.255.0",
 		PCIEnabled: true, ImageFSUUID: "11111111-2222-3333-4444-555555555555", ImageFSType: "ext4",
 		EnableLogging: true, EnableMetrics: true, LogLevel: "Info",

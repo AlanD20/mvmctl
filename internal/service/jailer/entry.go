@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/archive"
+	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 )
 
@@ -191,11 +193,20 @@ func launch(cfg Config) error {
 	if err != nil {
 		return err
 	}
+	if manifest.CgroupLimits == nil {
+		return fmt.Errorf("cgroup limits are required for jailed launch")
+	}
+	if err := validateCgroupLimits(*manifest.CgroupLimits); err != nil {
+		return err
+	}
 	if err := ensureTrustedDirectoryChain(infra.JailerChrootBase); err != nil {
 		return fmt.Errorf("prepare Jailer chroot base: %w", err)
 	}
 	if err := cleanup(manifest.VMID); err != nil {
 		return err
+	}
+	if err := prepareCgroupV2(); err != nil {
+		return fmt.Errorf("prepare cgroup-v2 resource enforcement: %w", err)
 	}
 	jailRoot := jailRoot(manifest.VMID)
 	if err := ensureTrustedDirectoryChain(jailRoot); err != nil {
@@ -252,6 +263,15 @@ func launch(cfg Config) error {
 		"--uid", strconv.Itoa(uid),
 		"--gid", strconv.Itoa(gid),
 		"--chroot-base-dir", infra.JailerChrootBase,
+		"--cgroup-version", "2",
+		"--parent-cgroup", infra.JailerCgroupParent,
+		"--cgroup", fmt.Sprintf("cpu.max=%d %d", manifest.CgroupLimits.CPUQuotaMicros,
+			manifest.CgroupLimits.CPUPeriodMicros),
+		"--cgroup", fmt.Sprintf("cpu.weight=%d", manifest.CgroupLimits.CPUWeight),
+		"--cgroup", fmt.Sprintf("memory.high=%d", manifest.CgroupLimits.MemoryHighBytes),
+		"--cgroup", fmt.Sprintf("memory.max=%d", manifest.CgroupLimits.MemoryMaxBytes),
+		"--cgroup", fmt.Sprintf("memory.swap.max=%d", manifest.CgroupLimits.SwapMaxBytes),
+		"--cgroup", fmt.Sprintf("pids.max=%d", manifest.CgroupLimits.PIDsMax),
 		"--",
 		"--api-sock", "/run/mvm/" + filepath.Base(manifest.APISocket),
 	}
@@ -559,33 +579,126 @@ func cleanup(vmID string) error {
 		return fmt.Errorf("invalid VM ID for jail cleanup")
 	}
 	root := jailRoot(vmID)
-	if _, err := os.Lstat(infra.JailerChrootBase); os.IsNotExist(err) {
-		return nil
+	if err := ensureCgroupEmpty(vmID); err != nil {
+		return err
 	}
-	if err := validateTrustedDirectoryChain(infra.JailerChrootBase); err != nil {
-		return fmt.Errorf("validate Jailer chroot base before cleanup: %w", err)
-	}
-	data, err := os.ReadFile("/proc/self/mountinfo")
-	if err == nil {
-		var targets []string
-		for line := range strings.SplitSeq(string(data), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) > 4 && (fields[4] == root || strings.HasPrefix(fields[4], root+"/")) {
-				targets = append(targets, fields[4])
+	if _, err := os.Lstat(infra.JailerChrootBase); err == nil {
+		if err := validateTrustedDirectoryChain(infra.JailerChrootBase); err != nil {
+			return fmt.Errorf("validate Jailer chroot base before cleanup: %w", err)
+		}
+		data, readErr := os.ReadFile("/proc/self/mountinfo")
+		if readErr == nil {
+			var targets []string
+			for line := range strings.SplitSeq(string(data), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) > 4 && (fields[4] == root || strings.HasPrefix(fields[4], root+"/")) {
+					targets = append(targets, fields[4])
+				}
+			}
+			sort.Slice(targets, func(i, j int) bool { return len(targets[i]) > len(targets[j]) })
+			for _, target := range targets {
+				err := syscall.Unmount(target, syscall.MNT_DETACH)
+				if err != nil && err != syscall.EINVAL && err != syscall.ENOENT {
+					return fmt.Errorf("unmount jail resource %s: %w", target, err)
+				}
 			}
 		}
-		sort.Slice(targets, func(i, j int) bool { return len(targets[i]) > len(targets[j]) })
-		for _, target := range targets {
-			err := syscall.Unmount(target, syscall.MNT_DETACH)
-			if err != nil && err != syscall.EINVAL && err != syscall.ENOENT {
-				return fmt.Errorf("unmount jail resource %s: %w", target, err)
-			}
+		if err := os.RemoveAll(filepath.Dir(root)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove jail: %w", err)
 		}
 	}
-	if err := os.RemoveAll(filepath.Dir(root)); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove jail: %w", err)
+	if err := removeCgroup(vmID); err != nil {
+		return err
 	}
 	return nil
+}
+
+func validateCgroupLimits(limits model.VMCgroupLimits) error {
+	if limits.CPUQuotaMicros <= 0 || limits.CPUPeriodMicros <= 0 {
+		return fmt.Errorf("invalid CPU cgroup limit")
+	}
+	if limits.CPUWeight < 1 || limits.CPUWeight > 10000 {
+		return fmt.Errorf("invalid CPU cgroup weight")
+	}
+	if limits.MemoryHighBytes <= 0 || limits.MemoryMaxBytes <= 0 ||
+		limits.MemoryHighBytes > limits.MemoryMaxBytes {
+		return fmt.Errorf("invalid memory cgroup limit")
+	}
+	if limits.SwapMaxBytes < 0 || limits.PIDsMax <= 0 {
+		return fmt.Errorf("invalid swap or PID cgroup limit")
+	}
+	return nil
+}
+
+func prepareCgroupV2() error {
+	controllersPath := filepath.Join(infra.CgroupV2Root, "cgroup.controllers")
+	controllers, err := os.ReadFile(controllersPath)
+	if err != nil {
+		return fmt.Errorf("unified cgroup v2 is required: %w", err)
+	}
+	required := []string{"cpu", "memory", "pids"}
+	available := strings.Fields(string(controllers))
+	for _, controller := range required {
+		if !slices.Contains(available, controller) {
+			return fmt.Errorf("required cgroup-v2 controller is unavailable: %s", controller)
+		}
+	}
+	if err := enableCgroupControllers(infra.CgroupV2Root, required); err != nil {
+		return err
+	}
+	parent := filepath.Join(infra.CgroupV2Root, infra.JailerCgroupParent)
+	if err := os.Mkdir(parent, 0755); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("create fixed cgroup parent: %w", err)
+	}
+	if err := enableCgroupControllers(parent, required); err != nil {
+		return err
+	}
+	return nil
+}
+
+func enableCgroupControllers(path string, controllers []string) error {
+	controlPath := filepath.Join(path, "cgroup.subtree_control")
+	for _, controller := range controllers {
+		if err := os.WriteFile(controlPath, []byte("+"+controller), 0644); err != nil {
+			return fmt.Errorf("enable %s controller in %s: %w", controller, path, err)
+		}
+	}
+	return nil
+}
+
+func removeCgroup(vmID string) error {
+	path := cgroupPath(vmID)
+	if err := ensureCgroupEmpty(vmID); err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove empty VM cgroup: %w", err)
+	}
+	return nil
+}
+
+func ensureCgroupEmpty(vmID string) error {
+	path := cgroupPath(vmID)
+	procs, err := os.ReadFile(filepath.Join(path, "cgroup.procs"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read VM cgroup processes before cleanup: %w", err)
+	}
+	if strings.TrimSpace(string(procs)) != "" {
+		return fmt.Errorf("refusing to remove VM cgroup while it contains live processes")
+	}
+	return nil
+}
+
+func cgroupPath(vmID string) string {
+	return filepath.Join(
+		infra.CgroupV2Root,
+		infra.JailerCgroupParent,
+		infra.JailerCgroupExecutable,
+		vmID,
+	)
 }
 
 func removeRelease(version string) error {
