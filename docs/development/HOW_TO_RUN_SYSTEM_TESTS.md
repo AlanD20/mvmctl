@@ -129,7 +129,8 @@ The custom base image (`mvm-test-runner:<mvm-version>`) is built once during
 - cloud-image-utils (for `--cloud-init-mode iso` tests)
 - build-essential, bc, bison, flex, libncurses-dev, libssl-dev, libelf-dev, git, curl, dwarves (for `kernel_build` tests)
 
-No manual installation on the host is needed beyond the tools in section 1.4.
+The orchestrator installs runner-VM contents automatically. The host still requires the release candidate to be
+installed and initialized once as shown in section 2 so host-side privileged operations use the same root-owned image.
 
 ---
 
@@ -142,13 +143,16 @@ No manual installation on the host is needed beyond the tools in section 1.4.
 # Verify it exists and is executable
 test -x dist/mvm && echo "binary: OK ($(dist/mvm --version 2>/dev/null))"
 
-# Copy to ~/.local/bin (for sudo operations — this path has sudoers access)
-cp dist/mvm ~/.local/bin/mvm
+# Install the exact release candidate as the root-owned system executable
+sudo ./dist/mvm host install-system
+sudo /usr/local/bin/mvm host init
+export MVM_BINARY=/usr/local/bin/mvm
 ```
 
-**IMPORTANT**: The binary at `~/.local/bin/mvm` is the default location the
-orchestrator looks for (via `MVM_BINARY` env var, defaulting to
-`~/.local/bin/mvm`). Set `MVM_BINARY` to point to a different path if needed.
+**IMPORTANT**: User-owned binaries are never sudo targets. Set `MVM_BINARY=/usr/local/bin/mvm` when running the
+orchestrator so its host-side privileged subprocesses use the same immutable system image that is copied into runner
+VMs. The orchestrator's historical default remains a staging-path fallback and must not be used for privilege-boundary
+release qualification.
 
 ---
 
@@ -207,7 +211,7 @@ Run these to confirm the host is ready for tests:
 # Host checks
 echo "KVM:   $(test -c /dev/kvm && echo OK || echo MISSING)"
 echo "Nest:  $(cat /sys/module/kvm_intel/parameters/nested 2>/dev/null || echo N/A)"
-echo "mvm:   $(~/.local/bin/mvm --version 2>/dev/null)"
+echo "mvm:   $(/usr/local/bin/mvm --version 2>/dev/null)"
 
 # Asset mirror has content
 ls ~/.cache/mvm-asset-mirror/ | head -10
@@ -219,7 +223,7 @@ mvm volume inspect asset-mirror --json 2>/dev/null \
 
 # Custom base image exists
 mvm image inspect \
-  mvm-test-runner:$(~/.local/bin/mvm --version 2>/dev/null | awk '{print $2}') \
+  mvm-test-runner:$(/usr/local/bin/mvm --version 2>/dev/null | awk '{print $2}') \
   --json 2>/dev/null \
   && echo "Base image: OK" \
   || echo "Base image: MISSING — run --prepare"
@@ -364,7 +368,7 @@ KVM) is a **release blocker** — fix the environment, not the code.
 
 | Symptom | Likely Cause | Fix |
 |---------|-------------|-----|
-| `iptables` errors | `mvm host init` not run | Run `sudo ~/.local/bin/mvm host init` |
+| `iptables` errors | `mvm host init` not run | Run `sudo /usr/local/bin/mvm host init` |
 | VM creation hangs | Binary not built or missing | Re-run `./scripts/build.sh release` |
 | `bridge already exists` | Stale bridges from previous run | Clean up with `mvm network rm --force` |
 | `Text file busy` on service binary | Stale service processes | `killall -9 mvm-console-relay mvm-nocloud-server mvm-provision` |

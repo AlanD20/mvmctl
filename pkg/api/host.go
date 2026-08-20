@@ -26,6 +26,7 @@ import (
 
 // HostAPI defines the public interface for host operations.
 type HostAPI interface {
+	HostInstallSystemBinary(ctx context.Context) (bool, error)
 	HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error)
 	HostGetState(ctx context.Context) (*model.HostStateItem, error)
 	HostDetectResources(ctx context.Context) (*model.HostResources, error)
@@ -41,6 +42,12 @@ type HostAPI interface {
 	HostGetRunningVMs(ctx context.Context) ([]*model.VMItem, error)
 	HostIsInitialized(ctx context.Context) bool
 	HostCheckReadiness(ctx context.Context) *model.ProbeResult
+}
+
+// HostInstallSystemBinary explicitly installs or upgrades the administrator-owned
+// system image. It intentionally performs no host database or configuration work.
+func (op *Operation) HostInstallSystemBinary(ctx context.Context) (bool, error) {
+	return op.hostSystemBinaryInstaller.InstallSystemBinary(ctx)
 }
 
 // HostInit initializes host configuration.
@@ -72,10 +79,6 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 			},
 		}, nil
 	}
-	// Ensure DB schema exists before any DB writes.
-	if op.Connection != nil {
-		_, _ = op.Connection.RunMigrationsCtx(ctx)
-	}
 	if !system.IsRoot() {
 		hasGroup := system.SessionHasGroup()
 		return &errs.NeedsInteraction{
@@ -88,6 +91,11 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 				"session_has_group": hasGroup,
 			},
 		}, nil
+	}
+	// Ensure DB schema exists before host-state writes. Sudoers is reconciled
+	// later, after fallible read-only probes and before host mutations.
+	if op.Connection != nil {
+		_, _ = op.Connection.RunMigrationsCtx(ctx)
 	}
 	// --- Pre-flight probes ---
 	// Run detection first, then probe against the detected state (verdict #53).
@@ -136,6 +144,9 @@ func (op *Operation) HostInit(ctx context.Context, onProgress event.OnProgressCa
 	// --- Setup host environment ---
 	allChanges, err := op.hostInitSetupEnvironment(ctx, sessionID, hostCtrl, fwBackend)
 	if err != nil {
+		if errs.AsDomainError(err) != nil {
+			return nil, err
+		}
 		return nil, errs.New(errs.CodeHostInitFailed, err.Error())
 	}
 	if err := op.reconcileServiceAccessPolicies(ctx); err != nil {
@@ -172,8 +183,30 @@ func (op *Operation) hostInitSetupEnvironment(
 	hostCtrl *host.Controller,
 	fwBackend string,
 ) ([]*model.HostStateChangeItem, error) {
-	allChanges := make([]*model.HostStateChangeItem, 0)
-	dbChanges := make([]*model.HostStateChangeItem, 0)
+	username, err := system.CurrentUsername()
+	if err != nil {
+		return nil, err
+	}
+	sudoersConfigured, err := op.hostSudoersConfigurer.ConfigureSudoers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	initialChanges := make([]*model.HostStateChangeItem, 0, 1)
+	if sudoersConfigured {
+		initialChanges = append(initialChanges, &model.HostStateChangeItem{
+			SessionID:     "",
+			InitTimestamp: "",
+			Setting:       "sudoers_dropin",
+			Mechanism:     "file_create",
+			AppliedValue:  infra.SudoersDropInPath(),
+			Reverted:      false,
+			ChangeOrder:   0,
+			CreatedAt:     "",
+			OriginalValue: nil,
+		})
+	}
+	allChanges := append([]*model.HostStateChangeItem(nil), initialChanges...)
+	dbChanges := append([]*model.HostStateChangeItem(nil), initialChanges...)
 	// --- Group setup ---
 	groupCreated, _ := host.CreateGroup(ctx, infra.MVMUnixGroup)
 	if groupCreated {
@@ -185,32 +218,11 @@ func (op *Operation) hostInitSetupEnvironment(
 		dbChanges = append(dbChanges, change)
 		allChanges = append(allChanges, change)
 	}
-	username, err := system.CurrentUsername()
-	if err != nil {
-		return allChanges, err
-	}
 	userAdded, _ := host.AddUserToGroup(ctx, username, infra.MVMUnixGroup)
 	if userAdded {
 		change := &model.HostStateChangeItem{
 			SessionID: "", Setting: fmt.Sprintf("group_member:%s", username),
 			Mechanism: "usermod", AppliedValue: fmt.Sprintf("%s:%s", username, infra.MVMUnixGroup),
-			InitTimestamp: "", OriginalValue: nil, Reverted: false, ChangeOrder: 0, CreatedAt: "",
-		}
-		dbChanges = append(dbChanges, change)
-		allChanges = append(allChanges, change)
-	}
-	// --- Sudoers setup ---
-	sudoersPath := infra.SudoersDropInPath()
-	sudoersContent := host.GenerateSudoersContent(infra.MVMUnixGroup)
-	sudoersStale := true
-	if data, err := os.ReadFile(sudoersPath); err == nil {
-		sudoersStale = string(data) != sudoersContent
-	}
-	if sudoersStale {
-		_ = host.WriteSudoers(ctx, sudoersPath, sudoersContent)
-		change := &model.HostStateChangeItem{
-			SessionID: "", Setting: "sudoers_dropin",
-			Mechanism: "file_create", AppliedValue: sudoersPath,
 			InitTimestamp: "", OriginalValue: nil, Reverted: false, ChangeOrder: 0, CreatedAt: "",
 		}
 		dbChanges = append(dbChanges, change)
@@ -249,7 +261,7 @@ func (op *Operation) hostInitSetupEnvironment(
 			slog.Warn("Could not update host state", "error", err)
 		}
 	}
-	if sudoersStale {
+	if sudoersConfigured {
 		if err := op.Repos.Host.UpdateComponent(ctx, "sudoers_configured", true); err != nil {
 			slog.Warn("Could not update host state", "error", err)
 		}

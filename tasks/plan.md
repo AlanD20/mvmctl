@@ -287,9 +287,11 @@ go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
 1. Preserve the current base/head commit IDs and all unrelated dirty work before changing history.
 2. Add forward-only migrations for exact-pair fields and uniqueness. Never rewrite an already-applied user DB in place.
-3. `mvm host init` detects the insecure legacy sudoers rule, installs the release artifact atomically as root-owned
-   `/usr/local/bin/mvm`, validates the new sudoers rule with `visudo`, then replaces the old rule. On failure it keeps the
-   previous configuration and reports the unsafe state.
+3. In an authenticated administrator session, remove the insecure project-managed legacy sudoers rule, then run the
+   trusted release artifact's exact `host install-system` route. Installation is atomic at root-owned
+   `/usr/local/bin/mvm` and is deliberately separate from `host init`. After all callers use typed privileged actions,
+   `sudo /usr/local/bin/mvm host init` validates the marker-only policy with `visudo` and atomically replaces the old
+   rule. On failure it keeps the previous configuration and reports the unsafe state.
 4. An unsupported privileged protocol refuses the operation and prints the explicit administrator upgrade command.
 5. Existing VMs with an unambiguous exact pair are backfilled. Ambiguous/unmatched VMs remain stopped and return a
    migration error; they are never launched with an arbitrary pair.

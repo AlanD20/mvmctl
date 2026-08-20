@@ -74,3 +74,58 @@ func TestRun_RoutesOrdinaryArgumentsToNormalCLI(t *testing.T) {
 	assert.Zero(t, privilegedCalls)
 	assert.Equal(t, 1, normalCalls)
 }
+
+func TestRun_RoutesSystemInstallBeforeNormalInitialization(t *testing.T) {
+	sentinel := errors.New("system install sentinel")
+	installCalls := 0
+	normalCalls := 0
+
+	exitCode := run(context.Background(), []string{"host", "install-system"}, nil, entrypoints{
+		systemInstall: func(_ context.Context, args []string) error {
+			installCalls++
+			assert.Equal(t, []string{"host", "install-system"}, args)
+			return sentinel
+		},
+		normal: func() int {
+			normalCalls++
+			return 0
+		},
+	})
+
+	assert.Equal(t, 1, exitCode)
+	assert.Equal(t, 1, installCalls)
+	assert.Zero(t, normalCalls, "app.Initialize and Cobra must be unreachable")
+}
+
+func TestRun_RoutesMalformedSystemInstallWithoutNormalFallthrough(t *testing.T) {
+	tests := [][]string{
+		{"host", "install-system", "unexpected"},
+		{"--debug", "host", "install-system", "--force"},
+		{"--debug", "false", "host", "install-system"},
+		{"host", "--unknown", "value", "install-system"},
+		{"host", "--", "install-system"},
+		{"--debug", "false", "false", "host", "install-system"},
+	}
+
+	for _, args := range tests {
+		t.Run(strings.Join(args, "_"), func(t *testing.T) {
+			installCalls := 0
+			normalCalls := 0
+			exitCode := run(context.Background(), args, nil, entrypoints{
+				systemInstall: func(_ context.Context, got []string) error {
+					installCalls++
+					assert.Equal(t, args, got)
+					return errors.New("malformed")
+				},
+				normal: func() int {
+					normalCalls++
+					return 0
+				},
+			})
+
+			assert.Equal(t, 1, exitCode)
+			assert.Equal(t, 1, installCalls)
+			assert.Zero(t, normalCalls)
+		})
+	}
+}

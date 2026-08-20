@@ -42,6 +42,17 @@ type Operation struct {
 	Services        Services
 	ProvisionerType provisioner.ProvisionerType
 	AuditLog        *logging.AuditLog
+
+	hostSystemBinaryInstaller hostSystemBinaryInstaller
+	hostSudoersConfigurer     hostSudoersConfigurer
+}
+
+type hostSystemBinaryInstaller interface {
+	InstallSystemBinary(ctx context.Context) (bool, error)
+}
+
+type hostSudoersConfigurer interface {
+	ConfigureSudoers(ctx context.Context) (bool, error)
 }
 
 // Repos bundles all database repositories.
@@ -151,10 +162,12 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 			r.Vsock,
 			r.Snapshot,
 		),
-		Repos:           r,
-		Services:        s,
-		ProvisionerType: provisionerType,
-		AuditLog:        logging.NewAuditLog(),
+		Repos:                     r,
+		Services:                  s,
+		ProvisionerType:           provisionerType,
+		AuditLog:                  logging.NewAuditLog(),
+		hostSystemBinaryInstaller: s.Host,
+		hostSudoersConfigurer:     s.Host,
 	}
 }
 

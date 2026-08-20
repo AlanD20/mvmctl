@@ -13,7 +13,6 @@ import (
 
 const (
 	markerPrefix    = "__mvm_privileged_v"
-	protocolVersion = "1"
 	maxActionBytes  = 64
 	maxRequestBytes = 64 * 1024
 	maxJSONDepth    = 32
@@ -23,7 +22,7 @@ const (
 )
 
 // Marker selects the current internal privileged protocol before normal CLI initialization.
-const Marker = markerPrefix + protocolVersion
+const Marker = infra.PrivilegedProtocolMarker
 
 type invocation struct {
 	action string

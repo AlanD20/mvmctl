@@ -10,6 +10,7 @@ import (
 
 // MockHostAPI implements api.HostAPI for testing.
 type MockHostAPI struct {
+	HostInstallSystemBinaryFunc   func(ctx context.Context) (bool, error)
 	HostInitFunc                  func(ctx context.Context, onProgress event.OnProgressCallback) (any, error)
 	HostGetStateFunc              func(ctx context.Context) (*model.HostStateItem, error)
 	HostDetectResourcesFunc       func(ctx context.Context) (*model.HostResources, error)
@@ -25,6 +26,13 @@ type MockHostAPI struct {
 	HostGetRunningVMsFunc         func(ctx context.Context) ([]*model.VMItem, error)
 	HostIsInitializedFunc         func(ctx context.Context) bool
 	HostCheckReadinessFunc        func(ctx context.Context) *model.ProbeResult
+}
+
+func (m *MockHostAPI) HostInstallSystemBinary(ctx context.Context) (bool, error) {
+	if m.HostInstallSystemBinaryFunc != nil {
+		return m.HostInstallSystemBinaryFunc(ctx)
+	}
+	return false, nil
 }
 
 func (m *MockHostAPI) HostInit(ctx context.Context, onProgress event.OnProgressCallback) (any, error) {

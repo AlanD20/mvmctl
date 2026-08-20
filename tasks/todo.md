@@ -63,14 +63,14 @@ typed operation catalog. Supersede the conflicting portions of ADR-0002, ADR-000
 initialization.
 
 **Acceptance criteria:**
-- [ ] `/usr/local/bin/mvm` is installed as `root:root`, mode `0755`, under a root-owned non-writable directory chain.
-- [ ] Installation is temporary-file + fsync + rename and refuses symlinked targets.
-- [ ] A normal user update cannot replace the system binary; unsupported privileged protocol fails closed with an
+- [x] `/usr/local/bin/mvm` is installed as `root:root`, mode `0755`, under a root-owned non-writable directory chain.
+- [x] Installation is temporary-file + fsync + rename and refuses symlinked targets.
+- [x] A normal user update cannot replace the system binary; unsupported privileged protocol fails closed with an
   administrator upgrade instruction.
 
 **Verification:**
-- [ ] L1 install tests cover ownership, modes, symlink target, partial write, and version mismatch.
-- [ ] Focused Go tests for system installation, early dispatch, and host initialization pass.
+- [x] L1 install and early-protocol tests cover ownership, modes, symlink target, partial write, and version mismatch.
+- [x] Focused Go tests for system installation, early dispatch, and host initialization pass.
 
 **Dependencies:** Task 1
 **Files likely touched:** `cmd/mvm/main.go`, `internal/core/host/utils.go`, `internal/core/host/utils_test.go`,

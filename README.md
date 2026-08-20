@@ -58,7 +58,7 @@ Think "Docker for VMs" — one command to create, start, and connect.
   sudo pacman -S --needed iproute2 iptables nftables qemu-img e2fsprogs util-linux procps-ng kmod openssh tar sudo shadow fakeroot
   ```
   Optional (for ISO cloud-init mode only): `cloud-image-utils` (Ubuntu/Debian) or `cloud-utils` (Arch)
-- **Root access (one-time):** run `mvm host init` once to create the `mvm` group and a sudoers drop-in; normal `mvm` commands require no `sudo` after that
+- **Root access (one-time):** install the trusted artifact at `/usr/local/bin/mvm`, then run `host init`; normal commands run without `sudo` after setup
 - **Environment variables:** Configure runtime behavior via `MVM_*` variables. See [docs/REFERENCES.md](docs/REFERENCES.md#environment-variables) for the full list.
 
 ---
@@ -70,21 +70,25 @@ Think "Docker for VMs" — one command to create, start, and connect.
 You may head over to [Releases](https://github.com/AlanD20/mvmctl/releases) page to get the desired package for your distro or you may simply get the static and standalone binary itself:
 
 ```bash
-mkdir -p ~/.local/bin
-curl -L -o ~/.local/bin/mvm https://github.com/AlanD20/mvmctl/releases/latest/download/mvm
-chmod +x ~/.local/bin/mvm
-mvm --help
+curl -L -o ./mvm https://github.com/AlanD20/mvmctl/releases/latest/download/mvm
+chmod +x ./mvm
+sudo ./mvm host install-system
+sudo /usr/local/bin/mvm host init
+/usr/local/bin/mvm --help
 ```
 
-> Make sure `~/.local/bin` is in your `$PATH`. Most modern Linux distros include it by default.
+> `/usr/local/bin/mvm` is the single installed executable. It is root-owned; normal use is unprivileged. Keep a
+> downloaded candidate user-owned and use its `host install-system` command for future administrator-approved upgrades.
 
 ### 2. Build from source
 
 ```bash
 git clone https://github.com/AlanD20/mvmctl
 cd mvmctl
-./scripts/build.sh release --output ~/.local/bin/mvm
-mvm --help
+./scripts/build.sh release
+sudo ./dist/mvm host install-system
+sudo /usr/local/bin/mvm host init
+/usr/local/bin/mvm --help
 ```
 
 See [docs/REFERENCES.md](docs/REFERENCES.md) for the complete command reference with all flags, options, and selectors.

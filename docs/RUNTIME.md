@@ -530,10 +530,13 @@ SSH-based probe. All images use the loop-mount provisioning backend (the default
 The `mvm` binary is a standard Go binary that includes all services compiled in:
 
 ```bash
-go build -o dist/mvm ./cmd/mvm
+./scripts/build.sh release
+sudo ./dist/mvm host install-system
 ```
 
-The three `mvm run` services (console relay, nocloud-net server, loopmount provisioner) plus the vsock guest agent binary are all compiled into the same binary. No separate service binaries, no symlinks, no extraction step.
+The release artifact and the root-owned `/usr/local/bin/mvm` installation are the same single executable. Background
+services and the vsock guest agent are compiled into it; there is no separate privileged helper, service binary,
+symlink, or extraction step. User-owned development artifacts are not sudo targets.
 
 ### Service Invocation
 
@@ -550,8 +553,9 @@ Services are spawned in the background by the core layer via `system.SpawnServic
 
 ### Sudoers
 
-Only `mvm run provision` requires passwordless sudo. Managed by `mvm host init` which
-creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless sudo.
+During the privilege-boundary migration, `mvm host init` targets only root-owned `/usr/local/bin/mvm` but still retains
+the legacy raw-tool and public-service grants needed by unmigrated callers. Task 9 removes those grants and leaves only
+the versioned early privileged marker. See ADR-0016; the transitional policy is not the final security model.
 
 ---
 

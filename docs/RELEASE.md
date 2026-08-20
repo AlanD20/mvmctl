@@ -43,9 +43,10 @@ go test ./...
 
 # Build release binary for system tests
 ./scripts/build.sh release
-cp dist/mvm ~/.local/bin/mvm
+sudo ./dist/mvm host install-system
+sudo /usr/local/bin/mvm host init
 
-python3 scripts/run-system-tests.py --all
+MVM_BINARY=/usr/local/bin/mvm python3 scripts/run-system-tests.py --all
 ```
 
 All five must pass. If system tests fail, investigate before proceeding.

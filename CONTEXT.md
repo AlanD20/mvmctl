@@ -217,19 +217,35 @@ Architecture rules are enforced by the Go compiler (circular import errors preve
 
 The `pkg/api` package IS the stable, curated public interface for all consumers -- CLI, future TUI/GUI, and external scripts. The `api.Operation` struct exposes all domain operations as methods. The `pkg/api/inputs` package exposes all Input types. The `internal/core` package is an implementation detail.
 
-### Build output (REQUIRED)
+### Build and system-install contract (REQUIRED)
 
-**The `mvm` binary MUST be built to `~/.local/bin/mvm`.** This path has passwordless sudo privileges via the mvmctl sudoers rules, so subcommands requiring privilege escalation run without password prompts.
+The release script produces the candidate artifact at `dist/mvm`. A development artifact may live in the worktree or
+under `~/.local/bin`, but a user-owned path is **never** a sudo target.
 
-For **release testing / RC QA / system tests**, always use the release build script:
+The canonical host installation is `/usr/local/bin/mvm`, owned by `root:root` with mode `0755` under a root-owned,
+non-writable directory chain. Install or upgrade it through the candidate artifact's exact early bootstrap route:
+
 ```bash
-./scripts/build.sh release          # produces dist/mvm
-cp dist/mvm ~/.local/bin/mvm        # copy for sudo operations
+./scripts/build.sh release
+sudo ./dist/mvm host install-system
+sudo /usr/local/bin/mvm host init
 ```
 
-A bare `go build -o ~/.local/bin/mvm ./cmd/mvm` works for dev but produces a
-binary without version info, symbol stripping, or PIE. **Never use it for
-release qualification.**
+`host install-system` executes before ordinary application initialization. It does not read `MVM_CACHE_DIR`, user
+configuration, the user database, Cobra, or plugins, and it replaces its environment with fixed root-safe values before
+installation. If an old managed sudoers file still authorizes a user-owned binary, remove that legacy file from an
+authenticated administrator session before running the bootstrap command; the installer refuses unrecognized active
+syntax rather than guessing how sudo authenticated the process.
+
+Normal users run `/usr/local/bin/mvm` without sudo. The `mvm` group is the authorization role for the final constrained
+passwordless privileged protocol; it never makes a development artifact trusted. During Tasks 2-8, the generated policy
+still contains transitional raw-tool grants and `/usr/local/bin/mvm *` for callers that have not migrated. That policy is
+not the final security boundary and must not ship as marker-only until Task 9 removes those grants. A system-installed
+executable cannot replace itself through `mvm self-update`; an administrator installs the newly downloaded trusted
+artifact with `host install-system`.
+
+For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
+release version metadata, symbol stripping, and PIE settings and must not be used for release qualification.
 
 ### Asset mirror environment variable (OPTIONAL)
 

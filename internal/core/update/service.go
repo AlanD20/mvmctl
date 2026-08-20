@@ -15,17 +15,20 @@ import (
 	"mvmctl/internal/lib/version"
 
 	"mvmctl/internal/infra"
+	"mvmctl/pkg/errs"
 )
 
 // Service handles checking for and applying updates to the mvm binary.
 type Service struct {
-	gh *download.Remote
+	gh         *download.Remote
+	executable func() (string, error)
 }
 
 // NewService creates a new update Service for the mvmctl GitHub repo.
 func NewService() *Service {
 	return &Service{
-		gh: download.NewGitHub(infra.MvmctlGitHubRepo),
+		gh:         download.NewGitHub(infra.MvmctlGitHubRepo),
+		executable: os.Executable,
 	}
 }
 
@@ -57,6 +60,27 @@ func (s *Service) Check(ctx context.Context) (*CheckResult, error) {
 
 // Apply downloads and installs the latest version.
 func (s *Service) Apply(ctx context.Context, force bool) error {
+	currentPath, err := s.executable()
+	if err != nil {
+		return errs.WrapMsg(
+			errs.CodeValidationFailed,
+			"detect current binary path: "+err.Error(),
+			err,
+			errs.WithClass(errs.ClassInternal),
+		)
+	}
+	if filepath.Clean(currentPath) == infra.SystemBinaryPath {
+		return errs.New(
+			errs.CodeValidationFailed,
+			fmt.Sprintf(
+				"self-update cannot replace the system installation at %s; an administrator must run the new "+
+					"trusted artifact through 'sudo <new-mvm-binary> host install-system'",
+				infra.SystemBinaryPath,
+			),
+			errs.WithClass(errs.ClassValidation),
+		)
+	}
+
 	rel, err := s.gh.LatestRelease(ctx)
 	if err != nil {
 		return fmt.Errorf("apply update: %w", err)
@@ -88,12 +112,6 @@ func (s *Service) Apply(ctx context.Context, force bool) error {
 
 	if binaryAsset == nil {
 		return fmt.Errorf("no binary asset found for %s (assets: %d)", assetName, len(rel.Assets))
-	}
-
-	// Get current binary path
-	currentPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("detect current binary path: %w", err)
 	}
 
 	// Ensure directory is writable

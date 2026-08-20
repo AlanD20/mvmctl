@@ -184,6 +184,7 @@ Only needed for `mvm kernel pull --type official --clean-build` (building the of
 
 | Command | External Binaries Invoked |
 |---------|--------------------------|
+| `mvm host install-system` | No external command; exact early root bootstrap uses descriptor-relative filesystem operations |
 | `mvm host init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `lsmod`, `iptables`/`nft`, `modprobe` |
 | `mvm host clean` | `sudo`, `ip`, `iptables`/`nft` |
 | `mvm host reset` | `sudo`, `groupdel`, `sysctl` |

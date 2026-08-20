@@ -1,6 +1,6 @@
 # Root-Owned Single-Binary Privileged Dispatch
 
-**Status:** Accepted — implementation pending
+**Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
@@ -39,6 +39,25 @@ is an explicit administrator action; a normal user update cannot overwrite it.
 
 Development builds may exist elsewhere, but they are never sudo targets. A development build that needs privileged
 operations calls the compatible system installation and fails closed on a privileged-protocol mismatch.
+
+### Administrator bootstrap and upgrade
+
+System installation is selected by the exact `host install-system` command before `app.Initialize()`, Cobra, signal
+setup, user configuration, the user database, cache resolution, logging configuration, or service construction. The
+bootstrap route clears the inherited environment, installs only fixed root-safe values, and then atomically copies the
+running image to `/usr/local/bin/mvm`. Flags and extra arguments are rejected inside the same reserved route and cannot
+fall through to the ordinary CLI.
+
+The installer cannot prove whether an already-root process reached it through password-authenticated administrator sudo
+or a legacy passwordless rule. It therefore inspects the project-managed sudoers drop-in before touching the executable
+and refuses unrecognized active syntax. During migration, an administrator removes the insecure legacy managed rule in
+an authenticated root session, runs `sudo <trusted-mvm-binary> host install-system`, and then runs
+`sudo /usr/local/bin/mvm host init`. Installation is not an implicit side effect of `host init`.
+
+Replacing the executable is descriptor-relative, no-follow, temporary-file plus file fsync plus rename plus directory
+fsync. Failures after rename report that replacement occurred and whether directory durability is uncertain. A normal
+`self-update` may update a user-owned artifact, but it refuses to overwrite the system installation and prints the
+administrator bootstrap instruction.
 
 ### Early privileged dispatch
 
@@ -237,9 +256,11 @@ short-lived dispatcher model.
 ADR-0005 remains the description of the currently implemented legacy policy until this ADR's release gate passes. The
 replacement sequence is:
 
-1. Add early privileged dispatch and negative tests while the new path is unreachable from sudoers.
+1. Add early privileged dispatch, the exact administrator bootstrap route, and negative tests while the final marker-only
+   path is unreachable from sudoers.
 2. Migrate every privileged service/tool call to a typed operation.
-3. Install the root-owned system binary and atomically replace the sudoers drop-in after `visudo` validation.
+3. In an authenticated administrator session, remove the insecure managed legacy rule, install the trusted artifact as
+   the root-owned system binary, and atomically activate the marker-only sudoers drop-in after `visudo` validation.
 4. Run upgrade, rollback, privilege-abuse, multi-user, path-race, PID-reuse, crash-recovery, Jailer, cgroup, snapshot,
    hotplug, and firewall L2 tests.
 5. Mark ADR-0005 superseded, update all current-behavior documentation, and only then describe the new boundary as active.

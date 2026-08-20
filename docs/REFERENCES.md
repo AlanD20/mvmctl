@@ -103,6 +103,7 @@ Host configuration commands for one-time, machine-global setup.
 
 | Command | Flags | Description |
 |---------|-------|-------------|
+| `mvm host install-system` | — | Administrator-only early bootstrap. Atomically installs the running trusted artifact as root-owned `/usr/local/bin/mvm` without loading user cache, configuration, database, or Cobra state. |
 | `mvm host init` | — | Apply host configuration changes. Idempotent. Creates the `mvm` group, sudoers drop-in, enables IP forwarding, creates firewall chains, and snapshots initial state for rollback. |
 | `mvm host status` | `--json` | Show current host configuration state vs expected |
 | `mvm host info` | `--refresh`, `--json` | Show host hardware, limits, and VM capacity projection |
@@ -624,11 +625,13 @@ Check for and apply binary updates from GitHub Releases.
 
 | Command | Description |
 |---------|-------------|
-| `mvm self-update` | Check + apply if newer |
+| `mvm self-update` | Check + apply if newer for a user-owned artifact; the system installation requires administrator bootstrap |
 | `mvm self-update check` | Check only, print available version |
-| `mvm self-update apply` | Force apply (even if same version). `--force` to re-install |
+| `mvm self-update apply` | Apply to a user-owned artifact. `--force` re-installs the same version |
 
-Downloads the latest release matching the host architecture, verifies SHA256 checksum, then atomically swaps the binary.
+For a user-owned artifact, downloads the latest release matching the host architecture, verifies its SHA256 checksum,
+and atomically swaps that artifact. Apply refuses canonical `/usr/local/bin/mvm`; install a newly downloaded trusted
+artifact with `sudo <new-mvm-binary> host install-system`. `check` remains available from the system installation.
 
 ---
 

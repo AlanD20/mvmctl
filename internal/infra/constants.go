@@ -24,6 +24,9 @@ const CLIName = "mvm"
 // SystemBinaryPath is the canonical root-owned executable used for privileged dispatch.
 const SystemBinaryPath = "/usr/local/bin/mvm"
 
+// PrivilegedProtocolMarker selects the current fixed internal privileged protocol.
+const PrivilegedProtocolMarker = "__mvm_privileged_v1"
+
 // MvmctlGitHubRepo is the GitHub repository for mvmctl self-update.
 const MvmctlGitHubRepo = "AlanD20/mvmctl"
 
