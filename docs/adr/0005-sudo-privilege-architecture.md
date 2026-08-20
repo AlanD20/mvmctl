@@ -4,6 +4,10 @@
 **Date:** 2026-05-22
 **Last Updated:** 2026-06-20 (Go implementation complete)
 
+> **Replacement accepted, implementation pending:** ADR-0016 replaces this user-owned wildcard sudo design with one
+> root-owned system installation and an early typed privileged dispatcher. This ADR continues to describe the current
+> implementation until ADR-0016's migration and L2 release gate pass.
+
 The project uses a **tightly scoped, group-based sudo model** where members of a dedicated Unix group (`mvm`) can execute specific privileged commands via `sudo` without a password prompt. This avoids running the entire CLI as root while still allowing VM creation (loop-mount), network management (ip/iptables/nft), kernel module loading (modprobe), and sysctl configuration.
 
 **Table of Contents**

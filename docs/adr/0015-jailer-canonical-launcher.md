@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Date:** 2026-08-09
-**See also:** [Project Hosting with MicroVMs](../roadmaps/TENANT_MICROVM.md), [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md)
+**See also:** [Project Hosting with MicroVMs](../roadmaps/TENANT_MICROVM.md), [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md), [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
 ## Context
 
