@@ -2,37 +2,32 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
 
-	"mvmctl/internal/app"
-	"mvmctl/internal/cli"
-	"mvmctl/internal/cli/common"
+	"mvmctl/internal/service/privileged"
 )
 
+type entrypoints struct {
+	privileged func(context.Context, []string, io.Reader) error
+	normal     func() int
+}
+
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	os.Exit(run(context.Background(), os.Args[1:], os.Stdin, entrypoints{
+		privileged: privileged.Run,
+		normal:     runCLI,
+	}))
+}
 
-	op, cleanup, err := app.Initialize(ctx)
-	if err != nil {
-		slog.Error("initialization failed", "error", err)
-		os.Exit(1)
-	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	// Execute CLI
-	rootCmd := cli.NewRootCmd(op)
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
-		// Delegate ALL error handling to the single shared handler in helpers.go.
-		// HandleErrors returns nil for non-fatal errors (BrokenPipe), non-nil for
-		// everything else. Exit with code 1 so Go respects the error exit convention.
-		if common.HandleErrors(func() error { return err })() != nil {
-			os.Exit(1)
+func run(ctx context.Context, args []string, input io.Reader, entries entrypoints) int {
+	if privileged.IsInvocation(args) {
+		if err := entries.privileged(ctx, args, input); err != nil {
+			slog.Error("privileged request failed", "error", err)
+			return 1
 		}
+		return 0
 	}
+	return entries.normal()
 }

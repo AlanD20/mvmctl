@@ -57,6 +57,10 @@ func TestGetDefault(t *testing.T) {
 	})
 }
 
+func TestSystemBinaryPath(t *testing.T) {
+	assert.Equal(t, "/usr/local/bin/mvm", infra.SystemBinaryPath)
+}
+
 // --- EnvKey ---
 // Rationale: EnvKey constructs environment variable names used throughout the
 // codebase for config overrides. Wrong prefix would cause silent misconfiguration.

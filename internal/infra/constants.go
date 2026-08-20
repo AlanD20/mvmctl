@@ -21,6 +21,9 @@ const BootstrapName = "mvmctl"
 // CLIName is the canonical CLI name. A compiled Go binary has one name.
 const CLIName = "mvm"
 
+// SystemBinaryPath is the canonical root-owned executable used for privileged dispatch.
+const SystemBinaryPath = "/usr/local/bin/mvm"
+
 // MvmctlGitHubRepo is the GitHub repository for mvmctl self-update.
 const MvmctlGitHubRepo = "AlanD20/mvmctl"
 
