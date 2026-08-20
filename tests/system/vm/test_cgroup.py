@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import re
 import shlex
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Iterator
 
 import pytest
 
@@ -24,6 +26,105 @@ pytestmark = [
     pytest.mark.slow,
 ]
 
+_CGROUP_CONFIG_OVERRIDES = {
+    "cgroup_vmm_headroom_mib": "128",
+    "cgroup_cpu_weight": "100",
+    "cgroup_pids_max": "256",
+    "cgroup_swap_max_bytes": "0",
+}
+
+
+@dataclass(frozen=True)
+class _ConfigOverride:
+    exists: bool
+    value: str
+
+
+def _read_cgroup_config_overrides(
+    runner_vm: str,
+) -> dict[str, _ConfigOverride]:
+    """Capture each cgroup setting's exact integer override, if present."""
+    listing = _run_mvm(
+        runner_vm, "config", "get", "defaults.vm"
+    ).stdout
+    snapshots: dict[str, _ConfigOverride] = {}
+    for key in _CGROUP_CONFIG_OVERRIDES:
+        match = re.search(
+            rf"^\s*{re.escape(key)} = (?P<effective>-?\d+) "
+            r"\((?P<source>override|default): (?P<stored>-?\d+), "
+            r"type: int\)$",
+            listing,
+            flags=re.MULTILINE,
+        )
+        assert match is not None, (
+            f"could not capture defaults.vm.{key} override state from "
+            "the config category listing"
+        )
+        assert match.group("effective") == match.group("stored"), (
+            f"defaults.vm.{key} effective and stored values disagree in: "
+            f"{match.group(0)!r}"
+        )
+        is_override = match.group("source") == "override"
+        snapshots[key] = _ConfigOverride(
+            exists=is_override,
+            value=match.group("stored"),
+        )
+    return snapshots
+
+
+@pytest.fixture
+def cgroup_config_overrides(runner_vm: str) -> Iterator[None]:
+    """Apply cgroup test overrides and restore the exact prior state."""
+    originals = _read_cgroup_config_overrides(runner_vm)
+    modified: list[str] = []
+    try:
+        for key, value in _CGROUP_CONFIG_OVERRIDES.items():
+            modified.append(key)
+            _run_mvm(
+                runner_vm, "config", "set", "defaults.vm", key, value
+            )
+        yield
+    finally:
+        failures: list[str] = []
+        for key in modified:
+            original = originals[key]
+            # Collect each result so one failure cannot skip the remaining keys.
+            if original.exists:
+                result = _run_mvm(
+                    runner_vm,
+                    "config",
+                    "set",
+                    "defaults.vm",
+                    key,
+                    original.value,
+                    check=False,
+                )
+            else:
+                result = _run_mvm(
+                    runner_vm,
+                    "config",
+                    "reset",
+                    "defaults.vm",
+                    key,
+                    check=False,
+                )
+            if result.returncode != 0:
+                failures.append(
+                    f"defaults.vm.{key}: rc={result.returncode}, "
+                    f"stdout={result.stdout!r}, stderr={result.stderr!r}"
+                )
+
+        restored = _read_cgroup_config_overrides(runner_vm)
+        for key in modified:
+            if restored[key] != originals[key]:
+                failures.append(
+                    f"defaults.vm.{key}: expected {originals[key]!r}, "
+                    f"got {restored[key]!r}"
+                )
+        assert not failures, "cgroup config restoration failed:\n" + "\n".join(
+            failures
+        )
+
 
 def _vm_entry(runner_vm: str, vm_name: str) -> dict[str, Any] | None:
     entries: list[dict[str, Any]] = json.loads(
@@ -37,16 +138,13 @@ def _read(runner_vm: str, path: str) -> str:
 
 
 class TestVMCgroupEnvelope:
-    def test_running_vm_envelope_and_lifecycle_cleanup(self, runner_vm: str) -> None:
+    def test_running_vm_envelope_and_lifecycle_cleanup(
+        self,
+        runner_vm: str,
+        cgroup_config_overrides: None,
+    ) -> None:
         vm_name = f"sys-cgroup-{uuid.uuid4().hex[:8]}"
         net_name = f"sys-cgroup-net-{uuid.uuid4().hex[:6]}"
-        config_keys = {
-            "cgroup_vmm_headroom_mib": "128",
-            "cgroup_cpu_weight": "100",
-            "cgroup_pids_max": "256",
-            "cgroup_swap_max_bytes": "0",
-        }
-        originals: dict[str, str | None] = {}
         vm_id = ""
         ensure_vm_deps(runner_vm)
         controller_probe = _guest_run(
@@ -68,19 +166,6 @@ class TestVMCgroupEnvelope:
             "--non-interactive",
         )
         try:
-            for key, value in config_keys.items():
-                current = _run_mvm(
-                    runner_vm, "config", "get", "defaults.vm", key, check=False
-                )
-                originals[key] = (
-                    current.stdout.strip()
-                    if current.returncode == 0 and current.stdout.strip()
-                    else None
-                )
-                _run_mvm(
-                    runner_vm, "config", "set", "defaults.vm", key, value
-                )
-
             created = _run_mvm(
                 runner_vm,
                 "vm",
@@ -182,23 +267,3 @@ class TestVMCgroupEnvelope:
             _run_mvm(
                 runner_vm, "network", "rm", net_name, "--force", check=False
             )
-            for key, value in originals.items():
-                if value is None:
-                    _run_mvm(
-                        runner_vm,
-                        "config",
-                        "reset",
-                        "defaults.vm",
-                        key,
-                        check=False,
-                    )
-                else:
-                    _run_mvm(
-                        runner_vm,
-                        "config",
-                        "set",
-                        "defaults.vm",
-                        key,
-                        value,
-                        check=False,
-                    )
