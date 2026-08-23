@@ -1487,6 +1487,15 @@ def print_summary(all_results: list[dict[str, Any]]) -> None:
         sys.exit(1)
 
 
+def _selection_requests_tier3(args: argparse.Namespace) -> bool:
+    """Return whether any requested selector names host-direct Tier 3 work."""
+    return (
+        args.all
+        or (args.tier is not None and 3 in args.tier)
+        or any(domain in TIER3_DOMAINS for domain in args.domains)
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run mvmctl system tests with per-domain VM isolation.",
@@ -1500,6 +1509,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         help="Run all T1 + T2 + T3 domains.",
+    )
+    parser.add_argument(
+        "--host-direct",
+        action="store_true",
+        help="Acknowledge that selected Tier 3 tests run directly on and may "
+        "mutate the outer host. Required for --all, --tier including 3, or "
+        "a Tier 3 domain.",
     )
     parser.add_argument(
         "--tier",
@@ -1702,6 +1718,12 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
 def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
+
+    if _selection_requests_tier3(args) and not args.host_direct:
+        parser.error(
+            "Tier 3 tests run directly on and may mutate the outer host; "
+            "pass --host-direct to acknowledge this"
+        )
 
     if args.candidate_version is not None and not args.rebuild:
         parser.error("--candidate-version requires --rebuild")

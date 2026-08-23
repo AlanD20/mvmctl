@@ -41,6 +41,101 @@ def test_default_outer_controller_is_the_canonical_system_binary(
     assert module.MVM_BINARY == "/usr/local/bin/mvm"
 
 
+def test_tier3_selection_detection_covers_all_request_forms(
+    orchestrator: ModuleType,
+) -> None:
+    parser = orchestrator._build_parser()
+    selections = [
+        ["--all"],
+        ["--tier", "3"],
+        ["--tier", "2,3,1"],
+        *[[domain] for domain in orchestrator.TIER3_DOMAINS],
+    ]
+
+    for selection in selections:
+        args = parser.parse_args(selection)
+        assert orchestrator._selection_requests_tier3(args), selection
+
+
+def test_t1_t2_and_unknown_selections_do_not_require_host_direct(
+    orchestrator: ModuleType,
+) -> None:
+    parser = orchestrator._build_parser()
+    selections = [
+        ["--tier", "1"],
+        ["--tier", "1,2"],
+        [next(iter(orchestrator.TIER1_DOMAINS))],
+        [next(iter(orchestrator.TIER2_DOMAINS))],
+        ["unknown-domain"],
+    ]
+
+    for selection in selections:
+        args = parser.parse_args(selection)
+        assert not orchestrator._selection_requests_tier3(args), selection
+
+
+def test_host_direct_help_is_an_acknowledgment_not_a_clean_host_guarantee(
+    orchestrator: ModuleType,
+) -> None:
+    parser = orchestrator._build_parser()
+    args = parser.parse_args(["--host-direct", "--all"])
+    help_text = parser.format_help().lower()
+
+    assert args.host_direct is True
+    assert "acknowledge" in help_text
+    assert "guarantee" not in help_text
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["--all", "--rebuild", "--candidate-version", "0.3.0"],
+        ["--tier", "3"],
+        ["env"],
+    ],
+    ids=["all", "tier", "positional-domain"],
+)
+def test_tier3_without_host_direct_is_rejected_before_any_side_effect(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selection: list[str],
+) -> None:
+    calls: list[str] = []
+
+    def unexpected(name: str):
+        def fail(*_args: object, **_kwargs: object) -> None:
+            calls.append(name)
+            raise AssertionError(f"{name} must not run before host-direct consent")
+
+        return fail
+
+    for helper in (
+        "_resolve_candidate_build_version",
+        "_build_mvm_binary",
+        "_require_distinct_candidate_controller",
+        "_get_mvm_version",
+        "run_prepare",
+        "ensure_shared_volume",
+        "ensure_test_network",
+    ):
+        monkeypatch.setattr(orchestrator, helper, unexpected(helper))
+    monkeypatch.setattr(
+        orchestrator.sys,
+        "argv",
+        ["run-system-tests.py", *selection],
+    )
+
+    with pytest.raises(SystemExit) as captured:
+        orchestrator.main()
+
+    assert captured.value.code == 2
+    assert calls == []
+    error = capsys.readouterr().err.lower()
+    assert "--host-direct" in error
+    assert "acknowledge" in error
+
+
 def test_guest_product_commands_use_the_exact_installed_cli(
     orchestrator: ModuleType,
 ) -> None:
