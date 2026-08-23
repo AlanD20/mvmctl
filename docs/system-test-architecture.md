@@ -58,7 +58,8 @@ Host (your machine)
 |----------|-----------|
 | **Custom base image** | A single `mvm-test-runner:<candidate-version>` image is built during `--prepare`. The release candidate is installed through `host install-system`; the image also contains the system tests and OS dependencies. Built once, cached by candidate version. |
 | **Tests run inside the VM** | The orchestrator runs `mvm exec -- python3 -m pytest ...` inside the test VM. Tests invoke the exact installed `/usr/local/bin/mvm` via `subprocess.run` — no PATH substitution or vsock proxy. |
-| **`conftest.py` is simple** | `_run_mvm` is a thin wrapper around `subprocess.run(["/usr/local/bin/mvm", *args])`. The `runner_vm` fixture gets the VM name from `MVM_TEST_VM` (set by the orchestrator). |
+| **Machine-checked outcomes** | Each T1/T2/T3 pytest process writes one strict, bounded, schema-versioned report. The orchestrator requires non-empty collection, matching exit status, every selected item passed, and zero failure/error/collection-error/deselection/skip/XFAIL/XPASS counts. |
+| **`conftest.py` is runner-local** | `_run_mvm` stays a thin wrapper around exact `/usr/local/bin/mvm`; fixtures operate inside the runner, and an opt-in hook emits the bounded outcome report requested by the orchestrator. |
 | **Shared RO volume on all tiers** | The `asset-mirror` volume is attached to every VM (T1 and T2). Mounting is cheap — `--shareable --read-only` means no per-VM state. |
 | **`--push` flag** | Overrides baked-in tests by copying `tests/system/` fresh into the VM. Useful during test development without rebuilding the base image. |
 | **Controller/candidate qualification** | T1/T2 use a separate installed outer controller and candidate installed only inside disposable runners. Tier 3 is host-direct; release mode therefore requires exact content/version identity between the candidate and root-owned `/usr/local/bin/mvm` before resource preparation. |
@@ -406,12 +407,19 @@ python3 scripts/run-system-tests.py --tier 2,1
      d. T1 + T2 in parallel (ThreadPoolExecutor):
           Create VM from the candidate-qualified base image → mount volume → pinned mvm init →
           [--push: mvm cp tests/system] →
-           mvm exec -- python3 -m pytest ... →
+          mvm exec -- python3 -m pytest ... → retrieve/strictly validate bounded outcome report →
+          checked report cleanup →
           destroy VM
      e. T3 sequentially on the dedicated clean qualification host:
-          pytest tests/system/<domain>/
+          pytest tests/system/<domain>/ → strictly validate private local outcome report → checked cleanup
 5. Print summary: X passed, Y failed, Z total
 ```
+
+The pytest hook is inactive outside orchestrated runs. When enabled, it records selected items separately from collection
+errors and deselections and classifies setup/teardown failures as errors. T1/T2 retrieve at most 4,097 bytes from the
+fixed per-runner report path before checked deletion. T3 uses a private temporary directory and no-follow bounded local
+read. A missing, malformed, duplicate/case-colliding, unknown-field, oversized, inconsistent, or uncleared report fails
+the domain even if pytest returned zero; the failure output retains pytest stdout/stderr and the exact validation reason.
 
 See [RC_QA.md](RC_QA.md) for the full flags reference, setup workflow, and
 execution examples used during release qualification.
@@ -422,7 +430,7 @@ execution examples used during release qualification.
 
 ```
 tests/system/
-├── conftest.py              ← _run_mvm helper (direct subprocess, no vsock proxy)
+├── conftest.py              ← _run_mvm helper plus opt-in exact outcome report
 ├── pytest.ini               ← Markers
 ├── __init__.py
 │

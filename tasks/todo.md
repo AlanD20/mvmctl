@@ -352,8 +352,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Make cleanup and post-domain absence checks part of the domain result; preserve both primary and cleanup failures,
   and never advance tiers while a timed-out worker can still mutate state.
 - [x] Reject unknown, duplicate, mixed, zero-domain, and empty-file domain selections before probes or mutation.
-- [ ] Parse pytest outcomes and require non-empty collection with zero skips, XFAIL, or XPASS; omitted domains fail
-  instead of producing release evidence.
+- [x] Parse strict bounded pytest outcomes for T1/T2/T3 and require non-empty collection, matching exit status, every
+  selected item passed, and zero errors, collection errors, deselections, skips, XFAIL, or XPASS; missing/malformed
+  reports and cleanup failures fail the domain while preserving pytest output and the reason.
 - [x] Ensure the full matrix selects every required domain exactly once, including `exec`, and does not run
   `test_vm_fresh_env.py` twice under aliases.
 - [ ] Make mirror validation reject pull errors and HTTP fallback; only a verified local-mirror read is a cache hit.

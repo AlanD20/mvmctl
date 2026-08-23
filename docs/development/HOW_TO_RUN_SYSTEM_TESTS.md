@@ -373,7 +373,7 @@ duplicate alias cannot produce release evidence.
 
 The runner prints a summary at the end:
 ```
-  12 passed  0 failed  0 skipped  (3m12s)
+  RESULTS: 12 passed, 0 failed, 12 total
 ```
 
 Results are printed to stdout at the end of the run:
@@ -390,9 +390,8 @@ The runner prints a per-domain summary with PASS/FAIL status for each domain.
 
 | Status | Meaning | Release Gate |
 |--------|---------|--------------|
-| **PASS** | All tests in file passed | ✓ |
-| **FAIL** | At least one test failed | ✗ — must fix before release |
-| **SKIP** | All tests skipped (prerequisite missing) | ⚠ — investigate why |
+| **PASS** | The bounded report proves non-empty collection and every selected item passed | ✓ |
+| **FAIL** | A test/outcome failed or exact machine-readable evidence was unavailable | ✗ — must fix before release |
 
 ### 5.1a Release Candidate (RC) Zero-Tolerance Policy
 
@@ -402,10 +401,11 @@ pass. A skip is treated as a release blocker — it means either:
 - The test is testing a feature that doesn't exist in the Go CLI (remove the test or add the feature)
 - The test's skip condition is too broad (tighten the condition)
 
-Before signing off an RC, every test file must produce `X passed, 0 failed, 0 skipped`.
-The current orchestrator's final domain summary does not independently count
-pytest skips/xfails/xpasses. Until it does, QA must inspect and archive every
-per-domain pytest summary; `[PASS]` at the domain level alone is insufficient.
+Before signing off an RC, each domain must produce one strict outcome report with non-empty collection, matching pytest
+and report exit status, every selected item passed, and zero failures, errors, collection errors, deselections, skips,
+XFAIL, or XPASS. The orchestrator enforces this for T1/T2 inside runner VMs and T3 in a private local report. Missing,
+malformed, duplicate-field, oversized, inconsistent, or uncleared reports turn the domain into `FAIL` and retain pytest
+output plus the validation reason. A printed `[PASS]` therefore includes this machine-evidence gate.
 
 ### 5.2 What a Skip Means
 

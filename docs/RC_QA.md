@@ -195,9 +195,10 @@ MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
   2>&1 | tee "$evidence_dir/system-tests.log"
 ```
 
-Until the orchestrator records skip/xfail counts in its final summary, QA must inspect every archived per-domain pytest
-summary and record that it contains zero skipped, xfailed, or xpassed cases. A domain-level `PASS` alone is not sufficient
-release evidence.
+The orchestrator accepts a domain-level `PASS` only after validating a strict bounded pytest outcome report: collection
+is non-empty, process/report exit status matches, every selected item passed, and failures, errors, collection errors,
+deselections, skips, XFAIL, and XPASS are all zero. Missing, malformed, duplicate-field, oversized, inconsistent, or
+uncleared reports fail the domain and preserve pytest output plus the validation reason in the archived log.
 
 ---
 
@@ -249,7 +250,7 @@ A regression is **any** of the following:
 - [ ] `go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic` — all pass
 - [ ] `./scripts/build.sh release --version X.Y.Z --output dist/mvm` — exact candidate built
 - [ ] Dedicated clean qualification host/outer VM — candidate installed at exact `/usr/local/bin/mvm`
-- [ ] System tests — every required T1/T2/T3 case passes; archived summaries show zero skips/xfails/xpasses
+- [ ] System tests — every required T1/T2/T3 domain passes strict machine outcome validation
 - [ ] `/usr/local/bin/mvm --version` — returns exact `mvm X.Y.Z`
 - [ ] `/usr/local/bin/mvm --help` — all commands present
 
@@ -257,7 +258,7 @@ A regression is **any** of the following:
 - [ ] Build log archived
 - [ ] Tidy, format, line-length, generate, vet, and Go-test logs archived
 - [ ] System test log archived
-- [ ] Per-domain skip/xfail audit archived
+- [ ] System-test log archives the strict per-domain outcome gate and every failure reason
 - [ ] Binary checksum archived
 - [ ] Benchmark results within thresholds
 
