@@ -65,6 +65,26 @@ def _assert_selection_rejected_before_side_effects(
     assert expected_error in capsys.readouterr().err
 
 
+def _configure_test_registry(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    repo_root: Path,
+    tier1: dict[str, list[str]],
+    tier2: dict[str, list[str]] | None = None,
+    tier3: dict[str, list[str]] | None = None,
+) -> None:
+    monkeypatch.setattr(orchestrator, "_REPO_ROOT", repo_root)
+    monkeypatch.setattr(orchestrator, "TIER1_DOMAINS", tier1)
+    monkeypatch.setattr(orchestrator, "TIER2_DOMAINS", tier2 or {})
+    monkeypatch.setattr(orchestrator, "TIER3_DOMAINS", tier3 or {})
+
+
+def _write_system_test(repo_root: Path, relative_path: str) -> None:
+    test_file = repo_root / relative_path
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_registered():\n    pass\n", encoding="utf-8")
+
+
 def test_default_outer_controller_is_the_canonical_system_binary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -80,6 +100,199 @@ def test_default_outer_controller_is_the_canonical_system_binary(
     spec.loader.exec_module(module)
 
     assert module.MVM_BINARY == "/usr/local/bin/mvm"
+
+
+def test_registry_uses_exec_tier2_and_one_canonical_fresh_env_domain(
+    orchestrator: ModuleType,
+) -> None:
+    assert orchestrator.TIER2_DOMAINS["exec"] == [
+        "tests/system/exec/test_exec.py"
+    ]
+    assert orchestrator.TIER3_DOMAINS["fresh_env"] == [
+        "tests/system/vm/test_vm_fresh_env.py"
+    ]
+    assert "nested_virt" not in orchestrator.TIER3_DOMAINS
+
+
+def test_duplicate_registry_domain_is_rejected_before_any_probe_or_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    orchestrator.TIER2_DOMAINS["cli"] = ["tests/system/cli/test_cli.py"]
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        [],
+        "duplicate system-test domains: cli",
+    )
+
+
+def test_empty_registry_domains_are_rejected_in_deterministic_order(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    orchestrator.TIER1_DOMAINS["cli"].clear()
+    orchestrator.TIER2_DOMAINS["volume"].clear()
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        [],
+        "empty system-test domains: cli, volume",
+    )
+
+
+def test_duplicate_registered_file_is_rejected_before_any_probe_or_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    registered = "tests/system/cli/test_cli.py"
+    _write_system_test(tmp_path, registered)
+    _configure_test_registry(
+        orchestrator,
+        monkeypatch,
+        tmp_path,
+        {"cli": [registered]},
+        {"cli_alias": [registered]},
+    )
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        [],
+        f"duplicate registered system-test files: {registered}",
+    )
+
+
+@pytest.mark.parametrize(
+    "registered",
+    [
+        "tests/system/cli/helper.py",
+        "outside/test_escape.py",
+        "/tmp/test_absolute.py",
+        "tests/system/cli/../cli/test_cli.py",
+        "tests/system/../../outside/test_escape.py",
+    ],
+    ids=["non-test", "out-of-tree", "absolute", "non-canonical", "escaping"],
+)
+def test_invalid_registered_paths_are_rejected_before_any_probe_or_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    registered: str,
+) -> None:
+    if not Path(registered).is_absolute():
+        _write_system_test(tmp_path, registered)
+    _configure_test_registry(
+        orchestrator,
+        monkeypatch,
+        tmp_path,
+        {"invalid": [registered]},
+    )
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        [],
+        f"invalid system-test paths: {registered}",
+    )
+
+
+def test_missing_registered_files_are_rejected_in_deterministic_order(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    missing = [
+        "tests/system/zeta/test_zeta.py",
+        "tests/system/alpha/test_alpha.py",
+    ]
+    _configure_test_registry(
+        orchestrator,
+        monkeypatch,
+        tmp_path,
+        {"missing": missing},
+    )
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        [],
+        "missing system-test files: "
+        "tests/system/alpha/test_alpha.py, tests/system/zeta/test_zeta.py",
+    )
+
+
+@pytest.mark.parametrize("kind", ["directory", "symlink"])
+def test_non_regular_registered_files_are_rejected_before_any_probe(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    kind: str,
+) -> None:
+    registered = "tests/system/cli/test_cli.py"
+    registered_path = tmp_path / registered
+    registered_path.parent.mkdir(parents=True)
+    if kind == "directory":
+        registered_path.mkdir()
+    else:
+        target = tmp_path / "real_test.py"
+        target.write_text("def test_real():\n    pass\n", encoding="utf-8")
+        registered_path.symlink_to(target)
+    _configure_test_registry(
+        orchestrator,
+        monkeypatch,
+        tmp_path,
+        {"invalid": [registered]},
+    )
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        [],
+        f"non-regular system-test files: {registered}",
+    )
+
+
+def test_unregistered_system_tests_are_rejected_in_deterministic_order(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    registered = "tests/system/cli/test_cli.py"
+    _write_system_test(tmp_path, registered)
+    _write_system_test(tmp_path, "tests/system/zeta/test_zeta.py")
+    _write_system_test(tmp_path, "tests/system/alpha/test_alpha.py")
+    _configure_test_registry(
+        orchestrator,
+        monkeypatch,
+        tmp_path,
+        {"cli": [registered]},
+    )
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        [],
+        "unregistered system-test files: "
+        "tests/system/alpha/test_alpha.py, tests/system/zeta/test_zeta.py",
+    )
 
 
 def test_tier3_selection_detection_covers_all_request_forms(
@@ -199,48 +412,13 @@ def test_unique_tier_selection_preserves_requested_order(
     assert args.tier == [2, 1, 3]
 
 
-@pytest.mark.parametrize(
-    ("selection", "empty_domains", "expected_empty"),
-    [
-        (["cli"], ("cli",), "cli"),
-        (["cli", "config"], ("cli",), "cli"),
-        (["--tier", "2"], ("volume",), "volume"),
-        (["--tier", "2"], ("volume", "ssh"), "ssh, volume"),
-        (["--all"], ("env",), "env"),
-    ],
-    ids=["domain", "mixed-domains", "tier", "tier-multiple", "all"],
-)
-def test_empty_domain_registrations_are_rejected_before_any_probe_or_mutation(
-    orchestrator: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    selection: list[str],
-    empty_domains: tuple[str, ...],
-    expected_empty: str,
-) -> None:
-    domains = {
-        **orchestrator.TIER1_DOMAINS,
-        **orchestrator.TIER2_DOMAINS,
-        **orchestrator.TIER3_DOMAINS,
-    }
-    for domain in empty_domains:
-        domains[domain].clear()
-
-    _assert_selection_rejected_before_side_effects(
-        orchestrator,
-        monkeypatch,
-        capsys,
-        selection,
-        f"selected domains have no test files: {expected_empty}",
-    )
-
-
 def test_selection_with_no_registered_domains_is_rejected_before_any_probe(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(orchestrator, "TIER2_DOMAINS", {})
+    _configure_test_registry(orchestrator, monkeypatch, tmp_path, {})
 
     _assert_selection_rejected_before_side_effects(
         orchestrator,

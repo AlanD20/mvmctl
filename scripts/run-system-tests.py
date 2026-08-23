@@ -11,7 +11,7 @@ Usage:
     python3 scripts/run-system-tests.py --all --host-direct
 
   # Run specific domains
-  python3 scripts/run-system-tests.py cli network vm_nested_virt
+  python3 scripts/run-system-tests.py cli network exec
 
   # Run specific tiers (comma-separated, executed in the given order)
   python3 scripts/run-system-tests.py --tier 1
@@ -142,6 +142,7 @@ TIER2_DOMAINS: dict[str, list[str]] = {
         "tests/system/vm/test_jailer.py",
         "tests/system/vm/test_cgroup.py",
     ],
+    "exec": ["tests/system/exec/test_exec.py"],
     "ssh": ["tests/system/ssh/test_ssh.py"],
     "console": ["tests/system/console/test_console.py"],
     "logs": ["tests/system/logs/test_logs.py"],
@@ -152,7 +153,6 @@ TIER2_DOMAINS: dict[str, list[str]] = {
 
 # Tier 3: directly on host (no runner VM)
 TIER3_DOMAINS: dict[str, list[str]] = {
-    "nested_virt": ["tests/system/vm/test_vm_fresh_env.py"],
     "nested_isolated": ["tests/system/vm/test_vm_nested_isolated.py"],
     "fresh_env": ["tests/system/vm/test_vm_fresh_env.py"],
     "snapshot_load": ["tests/system/vm/test_vm_snapshot_load.py"],
@@ -1526,6 +1526,103 @@ def _validate_release_qualification_args(
         )
 
 
+def _validate_system_test_registry(parser: argparse.ArgumentParser) -> None:
+    """Reject an ambiguous or incomplete system-test domain registry."""
+    seen: set[str] = set()
+    duplicate_domains: set[str] = set()
+    empty_domains: list[str] = []
+    registered_files: list[str] = []
+    for domains in (TIER1_DOMAINS, TIER2_DOMAINS, TIER3_DOMAINS):
+        for domain, test_files in domains.items():
+            if domain in seen:
+                duplicate_domains.add(domain)
+            seen.add(domain)
+            if not test_files:
+                empty_domains.append(domain)
+            registered_files.extend(test_files)
+    if duplicate_domains:
+        parser.error(
+            "duplicate system-test domains: "
+            f"{', '.join(sorted(duplicate_domains))}"
+        )
+    if empty_domains:
+        parser.error(
+            "empty system-test domains: "
+            f"{', '.join(sorted(empty_domains))}"
+        )
+    duplicate_files = sorted(
+        {
+            test_file
+            for test_file in registered_files
+            if registered_files.count(test_file) > 1
+        }
+    )
+    if duplicate_files:
+        parser.error(
+            "duplicate registered system-test files: "
+            f"{', '.join(duplicate_files)}"
+        )
+    invalid_paths: list[str] = []
+    for registered_file in registered_files:
+        relative_path = Path(registered_file)
+        parts = relative_path.parts
+        canonical = (
+            not relative_path.is_absolute()
+            and relative_path.as_posix() == registered_file
+            and ".." not in parts
+        )
+        system_test = (
+            len(parts) >= 3
+            and parts[:2] == ("tests", "system")
+            and relative_path.name.startswith("test_")
+            and relative_path.suffix == ".py"
+        )
+        if not canonical or not system_test:
+            invalid_paths.append(registered_file)
+    if invalid_paths:
+        parser.error(
+            "invalid system-test paths: "
+            f"{', '.join(sorted(invalid_paths))}"
+        )
+    repo_root = _REPO_ROOT.resolve()
+    missing_files: list[str] = []
+    non_regular_files: list[str] = []
+    for registered_file in registered_files:
+        test_file = repo_root / registered_file
+        try:
+            file_mode = test_file.lstat().st_mode
+        except FileNotFoundError:
+            missing_files.append(registered_file)
+            continue
+        except OSError:
+            non_regular_files.append(registered_file)
+            continue
+        if not stat.S_ISREG(file_mode) or test_file.resolve() != test_file:
+            non_regular_files.append(registered_file)
+    if missing_files:
+        parser.error(
+            "missing system-test files: "
+            f"{', '.join(sorted(missing_files))}"
+        )
+    if non_regular_files:
+        parser.error(
+            "non-regular system-test files: "
+            f"{', '.join(sorted(non_regular_files))}"
+        )
+    system_test_root = repo_root / "tests" / "system"
+    discovered_files = {
+        test_file.relative_to(repo_root).as_posix()
+        for test_file in system_test_root.rglob("test_*.py")
+        if test_file.is_file()
+    }
+    unregistered_files = sorted(discovered_files - set(registered_files))
+    if unregistered_files:
+        parser.error(
+            "unregistered system-test files: "
+            f"{', '.join(unregistered_files)}"
+        )
+
+
 def _validate_test_selection_args(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
@@ -1833,6 +1930,7 @@ def main() -> None:
     args = parser.parse_args()
 
     _validate_release_qualification_args(parser, args)
+    _validate_system_test_registry(parser)
     _validate_test_selection_args(parser, args)
 
     if _selection_requests_tier3(args) and not args.host_direct:
