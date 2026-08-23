@@ -119,7 +119,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	s := Services{
 		Network: network.NewService(r.Network, defaultFwTracker, r.Policy),
 		Image:   image.NewService(r.Image),
-		Kernel:  kernel.NewService(r.Kernel, cacheDir),
+		Kernel:  kernel.NewService(r.Kernel, filepath.Join(cacheDir, "kernels")),
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
 		Key:     key.NewService(r.Key, infra.GetKeysDir()),
 		Host:    host.NewService(r.Host),
