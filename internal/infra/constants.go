@@ -58,6 +58,12 @@ const TrustedBinaryRoot = "/var/lib/mvmctl/binaries"
 // JailerChrootBase is the fixed root-owned base directory for per-VM jails.
 const JailerChrootBase = "/var/lib/mvmctl/jailer"
 
+// JailerInstanceRoot contains persistent root-owned VM authority records.
+const JailerInstanceRoot = "/var/lib/mvmctl/instances"
+
+// JailerRuntimeRoot contains ephemeral root-owned locks and launch state.
+const JailerRuntimeRoot = "/run/mvmctl"
+
 // JailerCgroupParent is the fixed cgroup-v2 subtree used by canonical Jailer launches.
 const JailerCgroupParent = "mvmctl"
 

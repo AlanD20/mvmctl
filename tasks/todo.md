@@ -64,47 +64,47 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 ### Task 4: Add private root-owned VM instance authority
 
 **Owner:** engineer
-**Status:** Ready for implementation
+**Status:** Complete
 **Dependencies:** Tasks 1 and 3
 
 **Interface:**
 
-- [ ] Implement private `RegisterLaunch(ctx, caller, registration) (*launchLease, error)`.
-- [ ] Implement private `LockRegistered(ctx, caller, vmID) (*registeredLease, error)`.
-- [ ] Implement private `BeginCleanup(ctx, caller, vmID) (*cleanupLease, error)`.
-- [ ] Implement context-first `cleanupLease.Complete(ctx)` and checked lease release.
-- [ ] Implement private `LockUnreferencedRelease(ctx, release) (*releaseLease, error)`.
-- [ ] Expose no generic storage, callbacks, raw paths, actions, or state strings.
+- [x] Implement private `RegisterLaunch(ctx, caller, registration) (*launchLease, error)`.
+- [x] Implement private `LockRegistered(ctx, caller, vmID) (*registeredLease, error)`.
+- [x] Implement private `BeginCleanup(ctx, caller, vmID) (*cleanupLease, error)`.
+- [x] Implement context-first `cleanupLease.Complete(ctx)` and checked lease release.
+- [x] Implement private `LockUnreferencedRelease(ctx, release) (*releaseLease, error)`.
+- [x] Expose no generic storage, callbacks, raw paths, actions, or state strings.
 
 **Authority and lifecycle:**
 
-- [ ] Persist strict versioned records under `/var/lib/mvmctl/instances/<uid>/<vm-id>.json`.
-- [ ] Store only owner UID, VM ID, lifecycle, exact release identity, process identity, cgroup path, and cleanup generation.
-- [ ] Implement `absent|cleaned -> registered -> cleaning -> cleaned`; failed cleanup remains recoverable.
-- [ ] Keep a `cleaned` ownership tombstone; foreign UIDs never acquire the VM ID.
-- [ ] Establish the global VM-ID claim while holding the global index lock and scanning pinned numeric UID directories.
-- [ ] Reject foreign, duplicate, corrupt, unreadable, unsafe, or inconsistent records without disclosing the owner UID.
+- [x] Persist strict versioned records under `/var/lib/mvmctl/instances/<uid>/<vm-id>.json`.
+- [x] Store only owner UID, VM ID, lifecycle, exact release identity, process identity, cgroup path, and cleanup generation.
+- [x] Implement `absent|cleaned -> registered -> cleaning -> cleaned`; failed cleanup remains recoverable.
+- [x] Keep a `cleaned` ownership tombstone; foreign UIDs never acquire the VM ID.
+- [x] Establish the global VM-ID claim while holding the global index lock and scanning pinned numeric UID directories.
+- [x] Reject foreign, duplicate, corrupt, unreadable, unsafe, or inconsistent records without disclosing the owner UID.
 
 **Filesystem and locking:**
 
-- [ ] Use descriptor-relative no-follow traversal and retain required root/record/lock FDs.
-- [ ] Verify root ownership, exact file types, and non-writable ancestors.
-- [ ] Use exact `0700` managed directories and `0600` record/lock files.
-- [ ] Implement the Task 4 lock prefix: release -> index -> VM.
-- [ ] Use cancellable nonblocking flock retry; never unlink lock files.
-- [ ] Atomically replace records using exclusive temp, bounded write, ownership/mode, fsync, renameat, and directory fsync.
-- [ ] Return `record_replaced` / `durability_uncertain` DomainError details for post-rename failure.
+- [x] Use descriptor-relative no-follow traversal and retain required root/record/lock FDs.
+- [x] Verify root ownership, exact file types, and non-writable ancestors.
+- [x] Use exact `0700` managed directories and `0600` record/lock files.
+- [x] Implement the Task 4 lock prefix: release -> index -> VM.
+- [x] Use cancellable nonblocking flock retry; never unlink lock files.
+- [x] Atomically replace records using exclusive temp, bounded write, ownership/mode, fsync, renameat, and directory fsync.
+- [x] Return `record_replaced` / `durability_uncertain` DomainError details for post-rename failure.
 
 **TDD and verification:**
 
-- [ ] RED/GREEN strict codec and pure lifecycle-transition tests.
-- [ ] RED/GREEN descriptor store, atomic-write, and context-aware lock tests.
-- [ ] RED/GREEN typed authority behavior and release-reference tests.
-- [ ] Real concurrent two-UID first-launch race proves exactly one durable owner.
-- [ ] Tests cover every unsafe ancestor, symlink level, owner/mode/type mismatch, EEXIST race, partial I/O, fsync/close/
+- [x] RED/GREEN strict codec and pure lifecycle-transition tests.
+- [x] RED/GREEN descriptor store, atomic-write, and context-aware lock tests.
+- [x] RED/GREEN typed authority behavior and release-reference tests.
+- [x] Real concurrent two-UID first-launch race proves exactly one durable owner.
+- [x] Tests cover every unsafe ancestor, symlink level, owner/mode/type mismatch, EEXIST race, partial I/O, fsync/close/
   rename failure, cancellation, stale lock reuse, corrupt record, and temp cleanup.
-- [ ] Focused race test, format, golines, vet, and Go tests pass.
-- [ ] Architect reviews actual interface, state schema, lock order, imports, and error details before commit.
+- [x] Focused race test, format, golines, vet, and Go tests pass.
+- [x] Architect reviews actual interface, state schema, lock order, imports, and error details before commit.
 
 **Expected files:** fixed root constants; private instance types, codec, descriptor store, lock, authority, and focused tests
 under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, or network changes.

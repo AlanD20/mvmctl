@@ -28,6 +28,8 @@ continue without silently deleting it.
 - Early reserved privileged dispatch before Cobra and ordinary application initialization.
 - Strict bounded request parsing, sudo caller identity, group authorization, environment sanitization, and executable
   identity verification.
+- Private root-owned VM ownership/lifecycle records with strict codecs, descriptor-relative atomic storage, exact
+  release references, global VM-ID claims, and release/index/VM locking.
 - ADR-0016 for the single-binary privilege boundary.
 
 The action switch is intentionally still empty and the sudoers policy remains transitional. The routed policy, dual

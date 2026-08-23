@@ -8,9 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - Unreleased
 
 > **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
-> service-access policy, root-owned system installer, and early privileged-dispatch foundation described below are
-> implemented. The mandatory per-VM network namespace, nftables-only `traffic` policy, exact VM-to-VM `exec` policy,
-> final marker-only sudo policy, and remaining typed privileged operations are not implemented yet; see
+> service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
+> authority substrate described below are implemented. The mandatory per-VM network namespace, nftables-only `traffic`
+> policy, exact VM-to-VM `exec` policy, final marker-only sudo policy, and remaining typed privileged operations are not
+> implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
 
 ### Added
@@ -45,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   device/inode verification against the root-owned `/usr/local/bin/mvm` image.
 - Added ADR-0016, which defines the single-binary privilege boundary, trusted state layout, typed operation catalog,
   clean-install constraints, and fail-closed system-binary replacement behavior.
+
+#### Root-owned VM authority substrate
+- Added a private typed VM authority under `internal/service/jailer` with durable owner-bound `registered`, `cleaning`,
+  and `cleaned` records beneath `/var/lib/mvmctl/instances/<uid>` and persistent ownership tombstones.
+- Added descriptor-relative, no-follow traversal; strict bounded record decoding; atomic durable replacement; persistent
+  root-owned locks; and the fixed `release -> global index -> VM` lock order.
+- Global VM-ID claims now fail closed on foreign, duplicate, corrupt, unreadable, or inconsistent authority records, and
+  trusted release removal can acquire a lease only when no active authority record references the exact release.
+- This substrate is private and not yet wired into public VM lifecycle operations; that integration remains a release
+  blocker below.
 
 ### Changed
 
@@ -102,8 +113,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The following items are release blockers and are intentionally not described above as completed behavior:
 
-- Bind every privileged VM action to a root-owned global VM-ID ownership claim, lifecycle record, exact process identity,
-  and per-VM lock.
+- Wire every privileged VM action to the implemented root-owned global VM-ID ownership claim, lifecycle record, exact
+  process identity, and per-VM lock.
 - Add root-owned managed-network identity and global capacity authority; user SQLite state must not authorize host-global
   namespace, link, firewall, process, mount, cgroup, or admission decisions.
 - Replace path-validation-then-reopen behavior with descriptor-pinned managed-resource access and private mount namespaces.
