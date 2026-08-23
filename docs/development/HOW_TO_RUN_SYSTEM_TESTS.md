@@ -197,8 +197,11 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
   python3 scripts/run-system-tests.py --volume
 ```
 
-Do not expect the read-only guest copy to self-heal. It can detect a checksum mismatch and use an HTTP fallback for that
-run, but it cannot persist the replacement. Repair the writable host mirror and reseed the volume instead.
+Do not expect the read-only guest copy to self-heal. The downloader can detect a checksum mismatch and attempt its fixed
+HTTP source, but the system-test runner rejects that fallback and any HTTP-downloaded mirror auto-population. Each
+builder artifact pull must report an explicit local-mirror read; the runner captures and re-emits bounded pull output so
+the failure remains diagnosable. Repair the writable host mirror and reseed the volume instead. Small checksum/version
+metadata requests may still use their fixed upstream sources and are not treated as artifact fallback.
 
 ### 3.2 Run `--prepare`
 

@@ -111,6 +111,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mkfs.ext4 -d`; the runner no longer loop-mounts and copies the mirror with raw sudo on the host.
 - Builder asset pulls run sequentially with bounded connect/operation timeouts so image extraction cannot exhaust the
   constrained nested builder through concurrent pulls.
+- Builder pulls capture and re-emit bounded diagnostics, require explicit local-mirror artifact-read evidence, and fail
+  qualification on pull errors, checksum fallback, or HTTP-downloaded mirror auto-population. Fixed checksum/version
+  metadata may still use its upstream source.
 - Missing or stale `asset-mirror` database records are rebuilt only when the recorded backing path is the exact managed
   test-volume path; unexpected paths fail closed without mutation.
 

@@ -83,6 +83,9 @@ lookup, or aliasing the candidate to the controller does not qualify the install
 
 The builder's unprivileged initialization pins Firecracker 1.16.0 through
 `mvm init --non-interactive --binary-version 1.16.0`; it must not resolve a moving latest release during qualification.
+Every builder artifact pull must also report an explicit local-mirror read. A pull error, checksum fallback, or
+HTTP-downloaded mirror auto-population fails qualification; bounded stdout/stderr remains in the evidence log. Fixed
+checksum/version metadata may still use its upstream source.
 
 Tier 3 is different: those tests run directly on the outer host and may create or destroy host resources. The runner
 rejects Tier 3 and `--all` before any work unless `--host-direct` acknowledges that mutation. For release evidence,

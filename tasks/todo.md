@@ -357,7 +357,7 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   reports and cleanup failures fail the domain while preserving pytest output and the reason.
 - [x] Ensure the full matrix selects every required domain exactly once, including `exec`, and does not run
   `test_vm_fresh_env.py` twice under aliases.
-- [ ] Make mirror validation reject pull errors and HTTP fallback; only a verified local-mirror read is a cache hit.
+- [x] Make mirror validation reject pull errors and HTTP fallback; only a verified local-mirror read is a cache hit.
 - [ ] Run the complete T1/T2/T3 matrix plus clean-host installation and reboot/reconciliation qualification.
 - [ ] Update `tests/system/COVERAGE_MATRIX.md` and attach commands/results to the release report.
 

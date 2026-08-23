@@ -263,8 +263,9 @@ mvm <subcommand>
 This variable directs the local asset cache for downloaded kernel images, root filesystems, and firmware blobs.
 Checksum/version metadata may still be fetched from the fixed upstream origin. The system-test `asset-mirror` volume is
 a point-in-time, read-only copy of this directory: after repairing or adding a host mirror object, rebuild that volume
-before running QA. A stale object inside the read-only copy can be detected and bypassed, but it cannot persist its own
-replacement.
+before running QA. Although the downloader can detect a stale object and try its fixed upstream source, the release
+runner rejects that fallback and any mirror auto-population as invalid qualification evidence. Builder pulls pass only
+when each artifact reports an explicit local-mirror read; checksum/version metadata may still use upstream.
 
 ### CLI is the canonical interface
 

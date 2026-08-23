@@ -133,10 +133,11 @@ once and reused across all test runs. The orchestrator accepts only the exact ca
 `${MVM_CACHE_DIR:-~/.cache/mvmctl}/volumes/asset-mirror.raw` backing path. Missing stale records are rebuilt; an
 unexpected path fails closed without mutation.
 
-This volume is a point-in-time copy, not a writable cache. A checksum mismatch may make a guest fall back to the
-upstream URL, but the guest cannot persist the corrected object into the read-only volume. Repair the writable host
-mirror first, then use `--volume` to recreate the shared copy. Checksum/version metadata may still be fetched upstream
-even when the large artifact is served locally.
+This volume is a point-in-time copy, not a writable cache. The product downloader can fall back to the fixed upstream
+URL after a checksum mismatch, but the system-test runner treats that fallback and HTTP-downloaded mirror
+auto-population as qualification failures. Every builder artifact pull must emit explicit local-mirror-read evidence;
+its bounded captured output is retained for diagnosis. Repair the writable host mirror, then use `--volume` to recreate
+the shared copy. Checksum/version metadata may still be fetched upstream even when the large artifact is served locally.
 
 ```bash
 mvm volume create asset-mirror 6G --shareable --read-only --writeback --format raw
