@@ -63,21 +63,25 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 - [x] Unsupported versions fail closed.
 - [x] Strict bounded JSON rejects unknown, duplicate, case-fold duplicate, trailing, oversized, and malformed input.
 - [x] Caller identity, active `mvm` group, environment, and system executable are verified before dispatch.
+- [ ] Add a strict versioned response envelope that preserves `DomainError` code, class, entity, and partial-state
+  details across the privileged subprocess boundary.
 - [ ] Keep the action switch closed until each capability has its own typed handler and abuse tests.
 
 ### Task 4: Add private root-owned VM instance authority
 
 **Owner:** engineer
-**Status:** Complete
+**Status:** Foundation implemented; prepared release-slot correction in progress
 **Dependencies:** Tasks 1 and 3
 
 **Interface:**
 
-- [x] Implement private `RegisterLaunch(ctx, caller, registration) (*launchLease, error)`.
+- [ ] Implement private `lockReleaseSlot(ctx, slot) (*releaseSlotLease, error)` before release identity resolution.
+- [ ] Implement private `releaseSlotLease.registerLaunch(ctx, caller, registration) (*launchLease, error)` with
+  ownership transfer only after durable registration.
 - [x] Implement private `LockRegistered(ctx, caller, vmID) (*registeredLease, error)`.
 - [x] Implement private `BeginCleanup(ctx, caller, vmID) (*cleanupLease, error)`.
 - [x] Implement context-first `cleanupLease.Complete(ctx)` and checked lease release.
-- [x] Implement private `LockUnreferencedRelease(ctx, release) (*releaseLease, error)`.
+- [ ] Implement private `releaseSlotLease.requireUnreferenced(ctx, release)` for exact-identity removal/replacement.
 - [x] Expose no generic storage, callbacks, raw paths, actions, or state strings.
 
 **Authority and lifecycle:**
@@ -111,6 +115,7 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 - [x] Architect reviews actual interface, state schema, lock order, imports, and error details before commit.
 - [x] Key the release lock by canonical `(version, architecture)` store slot rather than binary hashes; prove two
   different identities for one slot serialize.
+- [ ] Prove the slot lock is held before manifest/hash resolution and a mismatched identity writes no record.
 
 **Expected files:** fixed root constants; private instance types, codec, descriptor store, lock, authority, and focused tests
 under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, or network changes.
@@ -151,8 +156,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Store exact releases under `/var/lib/mvmctl/binaries/<architecture>/<version>` with fixed Firecracker, Jailer,
   and strict root-owned manifest leaves.
 - [ ] Privileged code constructs the fixed official release/checksum locations from validated version and architecture.
-- [ ] Caller-provided archive bytes are not their own authority.
+- [ ] Root downloads the checksum and archive through a dedicated bounded HTTPS-only source with proxies and the general
+  user asset mirror disabled; caller-provided paths, checksums, URLs, and archive bytes are not authority.
 - [ ] Bounded extraction rejects traversal, links, devices, duplicates, unexpected members, and size/count overflow.
+- [ ] Validate the complete reviewed upstream member allowlist while extracting only Firecracker and Jailer; validate
+  their ELF class/machine without executing downloaded code.
 - [ ] Exact Firecracker/Jailer bytes and a root manifest install atomically and durably.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.

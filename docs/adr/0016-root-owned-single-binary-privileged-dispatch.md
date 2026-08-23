@@ -84,6 +84,11 @@ The sudoers entry may contain a wildcard after the reserved marker because opera
 can reach only the early dispatcher. It cannot select the public CLI. The dispatcher remains the authoritative
 allowlist, and every handler performs exact argument-count and type checks before side effects.
 
+Synchronous actions return one bounded, versioned response envelope on their control channel. Success payloads are
+action-specific. Failures preserve the original `DomainError` code, class, entity, and bounded partial-state details so
+the normal-user client can make safe retry and recovery decisions. Logs and subprocess exit status are diagnostic only;
+they never replace the structured result or turn a malformed/missing response into a generic successful operation.
+
 ### Authorization roles
 
 The root-owned executable establishes code integrity. The `mvm` Unix group remains the authorization role for
@@ -156,14 +161,17 @@ and system-damage invariants. These are receiver trust-boundary checks, not dupl
 
 ### Release trust
 
-The caller may supply archive bytes for caching and progress, but it cannot supply their authority. Privileged release
-code constructs the permitted Firecracker release URL from a strictly validated version and architecture and obtains the
-expected checksum independently from the fixed official origin or root-owned signed metadata.
+The caller supplies only a validated release version and architecture. Privileged release code constructs the permitted
+Firecracker release and checksum URLs and downloads both independently from the fixed official origin with a dedicated,
+bounded HTTPS-only client. It disables proxies and does not consult caller configuration, the general download cache, or
+`MVM_ASSET_MIRROR`. Caller-provided paths, URLs, checksums, and archive bytes are never release authority.
 
-Extraction occurs in a root-owned temporary directory with bounded input, exact member names, and rejection of path
-traversal, symlinks, hardlinks, devices, duplicate members, unexpected members, and size/count overflow. The exact
-Firecracker/Jailer pair and a root-owned release manifest are fsynced and atomically renamed into the trusted store. A
-referenced release cannot be force-replaced.
+Extraction occurs in a root-owned temporary directory with bounded compressed/decompressed input, a reviewed allowlist
+for the complete upstream archive layout, and rejection of path traversal, symlinks, hardlinks, devices, sparse files,
+duplicates, unexpected members, and size/count overflow. Only the exact Firecracker/Jailer pair is extracted. Their ELF
+class and machine must match the selected architecture without executing downloaded code. The pair and strict root-owned
+release manifest are fsynced and atomically renamed into the trusted store. A referenced release cannot be
+force-replaced.
 
 If upstream provides a stable verifiable signature or provenance mechanism, mvmctl should adopt it. Until then, the
 fixed HTTPS origin and independently fetched checksum are an explicit supply-chain limitation, not a signature claim.
@@ -191,9 +199,10 @@ the privileged effect and rollback are complete.
 Privileged-visible basenames are canonical and derived by the receiver. Volume storage is keyed by volume ID rather
 than user-visible name; the VM rootfs uses fixed `rootfs.img`; kernel and image names use their canonical IDs plus only
 enumerated representations; cloud-init, Firecracker runtime, and snapshot leaves use compile-time fixed names. The user
-database may describe a resource, but it cannot choose the basename root will open. The intentional
-snapshot phantom-rootfs link is managed only by a typed descriptor-relative snapshot operation and is never followed as
-an input resource.
+database may describe a resource, but it cannot choose the basename root will open. Snapshot create exposes the snapshot
+read-write and writes its fixed `rootfs.img`, `memory`, and `vmstate` leaves. Restore exposes the snapshot read-only and
+overlays the new VM's pinned `/rootfs` at `/snapshot/rootfs.img` inside that VM's private mount namespace; no persistent
+phantom-rootfs symlink is created.
 
 The v0.3 canonical privileged-visible layout is:
 
@@ -220,6 +229,11 @@ supplementary groups, expected cgroup membership, mount-namespace identity, and 
 exact release. Mutating operations require a pidfd, use `pidfd_send_signal`, and wait through that pidfd; a host without
 the required pidfd support fails capability admission instead of falling back to a racy raw PID signal. PID reuse fails
 closed. The receiver enforces its compiled group-drop policy and never permits a retained root supplementary group.
+
+Release launch preparation acquires the `(version, architecture)` release-slot lock before resolving the root manifest.
+The prepared value retains the verified manifest, pinned release directory, and pinned Firecracker/Jailer descriptors.
+It supplies the full release identity to instance registration itself, then transfers the release lock into the launch
+lease only after the owner-bound record is durable. The unprivileged caller never supplies executable hashes.
 
 The launch path starts a blocked child in a new private mount namespace. Before the child can perform any externally
 mutable effect, the parent pins its pidfd and namespace descriptor, records the complete identity, and retains the launch

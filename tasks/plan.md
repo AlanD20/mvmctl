@@ -74,11 +74,21 @@ The first implementation slice is private to `internal/service/jailer`. It uses 
 operations:
 
 ```go
-func (a *instanceAuthority) RegisterLaunch(
+func (a *instanceAuthority) lockReleaseSlot(
+    ctx context.Context,
+    slot releaseSlot,
+) (*releaseSlotLease, error)
+
+func (l *releaseSlotLease) registerLaunch(
     ctx context.Context,
     caller instanceCaller,
     registration launchRegistration,
 ) (*launchLease, error)
+
+func (l *releaseSlotLease) requireUnreferenced(
+    ctx context.Context,
+    release releaseIdentity,
+) error
 
 func (a *instanceAuthority) LockRegistered(
     ctx context.Context,
@@ -94,15 +104,10 @@ func (a *instanceAuthority) BeginCleanup(
 
 func (l *cleanupLease) Complete(ctx context.Context) error
 
-func (a *instanceAuthority) LockUnreferencedRelease(
-    ctx context.Context,
-    release releaseIdentity,
-) (*releaseLease, error)
-
 func (l *launchLease) Release(ctx context.Context) error
 func (l *registeredLease) Release(ctx context.Context) error
 func (l *cleanupLease) Release(ctx context.Context) error
-func (l *releaseLease) Release(ctx context.Context) error
+func (l *releaseSlotLease) Release(ctx context.Context) error
 ```
 
 Each lease retains its pinned directory and lock descriptors and provides a checked context-first release operation.
@@ -111,8 +116,8 @@ There is no public `Get`, `Put`, `Delete`, `Run`, raw path, arbitrary state stri
 The durable lifecycle is intentionally small:
 
 ```text
-absent  ── RegisterLaunch ──> registered
-cleaned ── RegisterLaunch ──> registered
+absent  ── registerLaunch ──> registered
+cleaned ── registerLaunch ──> registered
 registered ─ BeginCleanup ──> cleaning
 cleaning ─── BeginCleanup ──> cleaning
 cleaning ───── Complete ─────> cleaned
@@ -133,12 +138,16 @@ Operations may acquire a suffix or subset but never an earlier class while holdi
 are established by descriptor-enumerating all numeric UID record directories while holding the index lock. A foreign,
 duplicate, corrupt, unreadable, or inconsistent claim fails closed. Lock files are never unlinked.
 
-Release locks are keyed by the canonical store slot `(version, architecture)`, not by caller-observed binary hashes.
-Reference matching remains against the full release identity. Competing identities for one store slot must therefore
-serialize before install, replace, remove, launch, or reference inspection.
+Release locks are keyed by the canonical store slot `(version, architecture)`, not by caller-observed binary hashes, and
+are acquired before root manifest resolution. Reference matching remains against the full release identity. Competing
+identities for one store slot must therefore serialize before install, replace, remove, launch, or reference inspection.
 
-`RegisterLaunch` establishes the durable record before the first network or launch effect and returns with the VM lock
-held. A later typed network step may therefore acquire only the later network lock while retaining that launch lease.
+Task 6 acquires the release-slot lease before it reads a manifest or computes a launch identity. Its prepared launch
+value retains that lease together with the verified manifest and pinned Firecracker/Jailer descriptors. Only that value
+may call `releaseSlotLease.registerLaunch`; it supplies the exact release identity from the root-owned manifest rather
+than accepting hashes from the normal user process. Registration then acquires the index and VM locks, establishes the
+durable record before the first network or launch effect, and transfers the held release lock into the returned launch
+lease. A mismatch or registration failure performs no external effect and leaves a checked, releasable slot lease.
 Task 4 owns release, index, and VM locking; it does not import network code or predeclare a network implementation.
 
 The mount-namespace launch seam uses a blocked child: the child creates its private namespace and waits on an inherited
@@ -153,6 +162,26 @@ Atomic record replacement uses a random exclusive temporary file, bounded writes
 `fsync`, checked close, `renameat`, and parent-directory `fsync`. Pre-rename failure preserves the old record.
 Post-rename failure returns details that distinguish `record_replaced` and `durability_uncertain`; the caller starts
 no VM effects after such an error.
+
+### Trusted release authority
+
+Task 6 adds a private `releaseAuthority` in `internal/service/jailer`. Its public privileged request contains only a
+validated release version, architecture, and explicit replacement intent. Root constructs the fixed official checksum
+and archive URLs, downloads both through a dedicated bounded HTTPS-only client with proxies and the user asset mirror
+disabled, verifies the archive before parsing it, validates the reviewed complete upstream member allowlist, and
+extracts only Firecracker and Jailer. Caller paths, URLs, checksums, and archive bytes are prohibited.
+
+The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
+The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,release.json}`. Binaries are
+validated as ELF for the selected architecture without execution. Descriptor-relative atomic install, exchange, and
+removal use only fixed leaves and preserve an old complete release or expose a new complete release, never a partial
+pair. Post-commit errors report `release_installed`, `release_replaced`, `release_removed`, `durability_uncertain`, and
+`retired_release_retained` details without replacing the primary error identity.
+
+Launch uses a private prepared value that owns the release-slot lease, verified manifest, pinned release directory, and
+pinned executable descriptors. It alone supplies release hashes to instance registration. The privileged transport must
+return a strict versioned response envelope before release install/remove is wired, because generic subprocess errors
+cannot preserve the partial-state details required for safe retries.
 
 ### Network topology and policy
 
