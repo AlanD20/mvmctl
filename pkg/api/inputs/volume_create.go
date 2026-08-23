@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"mvmctl/internal/core/volume"
-	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
@@ -26,7 +25,6 @@ type ResolvedVolumeCreateInput struct {
 	Name        string
 	SizeBytes   int64
 	Format      model.VolumeFormat
-	Path        string
 	IsReadOnly  bool
 	IsShareable bool
 	CacheType   string
@@ -71,7 +69,6 @@ func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository)
 			fmt.Sprintf("Unsupported format: %s. Use 'raw' or 'qcow2'.", format),
 		)
 	}
-	path := infra.GetVolumePath(i.Name, string(format))
 	isReadOnly := false
 	if i.ReadOnly != nil {
 		isReadOnly = *i.ReadOnly
@@ -92,7 +89,6 @@ func (i *VolumeCreateInput) Resolve(ctx context.Context, repo volume.Repository)
 		Name:        i.Name,
 		SizeBytes:   sizeBytes,
 		Format:      format,
-		Path:        path,
 		IsReadOnly:  isReadOnly,
 		IsShareable: isShareable,
 		CacheType:   cacheType,

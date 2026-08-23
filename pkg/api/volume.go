@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"mvmctl/internal/core/vm"
 	"mvmctl/internal/core/volume"
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/model"
@@ -62,7 +63,7 @@ func (op *Operation) VolumeCreate(ctx context.Context, input inputs.VolumeCreate
 		IsReadOnly:  resolved.IsReadOnly,
 		IsShareable: resolved.IsShareable,
 		CacheType:   cacheType,
-		Path:        resolved.Path,
+		Path:        infra.GetVolumePath(volumeID, string(resolved.Format)),
 		Status:      model.VolumeStatusAvailable,
 		CreatedAt:   timestamp,
 		UpdatedAt:   timestamp,
