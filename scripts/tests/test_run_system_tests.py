@@ -5,6 +5,7 @@ import ast
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1173,19 +1174,28 @@ def test_builder_assets_are_pulled_in_separate_sequential_execs(
 
     def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
         calls.append((args, kwargs))
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="pull completed\n",
+            stderr="INFO: root: Using local mirror for download url=https://example.test\n",
+        )
 
     monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
 
     orchestrator._pull_builder_assets("base-img-builder")
 
     expected_pull_commands = [
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull "
+        "MVM_ASSET_MIRROR=/mnt MVM_LOG_LEVEL=INFO "
+        "/usr/local/bin/mvm kernel pull "
         "--type firecracker --version v1.15 --default",
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23",
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull "
+        "MVM_ASSET_MIRROR=/mnt MVM_LOG_LEVEL=INFO "
+        "/usr/local/bin/mvm image pull alpine:3.23",
+        "MVM_ASSET_MIRROR=/mnt MVM_LOG_LEVEL=INFO "
+        "/usr/local/bin/mvm image pull "
         "ubuntu-minimal:24.04",
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu "
+        "MVM_ASSET_MIRROR=/mnt MVM_LOG_LEVEL=INFO "
+        "/usr/local/bin/mvm image pull ubuntu "
         "--version 24.04",
     ]
     pull_calls = calls[:-1]
@@ -1204,7 +1214,8 @@ def test_builder_assets_are_pulled_in_separate_sequential_execs(
         )
         assert " & " not in args[-1]
         assert "pids=" not in args[-1]
-        assert kwargs["capture"] is False
+        assert kwargs["capture"] is True
+        assert kwargs["check"] is False
         assert kwargs["timeout"] == 600
 
     verify_args, verify_kwargs = calls[-1]
@@ -1213,31 +1224,245 @@ def test_builder_assets_are_pulled_in_separate_sequential_execs(
     assert verify_kwargs == {"timeout": 180, "capture": False}
 
 
-def test_builder_asset_pull_preserves_first_streamed_failure(
+def test_builder_asset_pull_keeps_dynamic_vm_name_outside_guest_shell(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    calls: list[tuple[str, ...]] = []
+    hostile_vm_name = "builder; touch /tmp/runner-command-injection"
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="",
+            stderr="INFO: root: Using local mirror for download url=https://example.test\n",
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    orchestrator._pull_builder_assets(hostile_vm_name)
+
+    for args in calls[:-1]:
+        assert args[1] == hostile_vm_name
+        assert hostile_vm_name not in args[-1]
+        command_tokens = shlex.split(args[-1])
+        assert command_tokens[:3] == [
+            "MVM_ASSET_MIRROR=/mnt",
+            "MVM_LOG_LEVEL=INFO",
+            "/usr/local/bin/mvm",
+        ]
+        assert args[-1] == shlex.join(command_tokens)
+
+
+def test_builder_asset_pull_rejects_missing_local_mirror_evidence(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="pull completed\n",
+            stderr="",
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    with pytest.raises(
+        RuntimeError,
+        match="did not prove a local mirror artifact read",
+    ):
+        orchestrator._pull_builder_assets("base-img-builder")
+
+
+@pytest.mark.parametrize(
+    "forbidden_marker",
+    [
+        "Mirror checksum mismatch, falling back to HTTP download",
+        "Copied to asset mirror",
+    ],
+)
+def test_builder_asset_pull_rejects_http_fallback_or_autopopulation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    forbidden_marker: str,
+) -> None:
     commands: list[str] = []
-    original_failure = RuntimeError(
-        "mvm command failed: streamed ubuntu-minimal pull; rc: 23; "
-        "stderr: (streamed; not captured)"
-    )
 
     def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         commands.append(args[-1])
-        if "ubuntu-minimal:24.04" in args[-1]:
-            raise original_failure
-        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="pull completed\n",
+            stderr=(
+                "INFO: root: Using local mirror for download url=https://example.test\n"
+                f"WARNING: root: {forbidden_marker} url=https://example.test\n"
+            ),
+        )
 
     monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
 
     with pytest.raises(RuntimeError) as captured:
         orchestrator._pull_builder_assets("base-img-builder")
 
-    assert captured.value is original_failure
+    assert forbidden_marker in str(captured.value)
+    assert len(commands) == 1
+
+
+def test_builder_asset_pull_prints_bounded_captured_output(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    huge_stdout = "stdout-start\n" + ("s" * 50_000) + "\nstdout-end\n"
+    huge_stderr = (
+        "stderr-start\n"
+        + ("e" * 50_000)
+        + "\nINFO: root: Using local mirror for download url=https://example.test\n"
+        + "stderr-end\n"
+    )
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=huge_stdout,
+            stderr=huge_stderr,
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    orchestrator._pull_builder_assets("base-img-builder")
+
+    output = capsys.readouterr().out
+    assert "stdout-start" in output
+    assert "stderr-end" in output
+    assert "builder pull output truncated" in output
+    assert len(output) < 40_000
+
+
+@pytest.mark.parametrize(
+    ("returncode", "expected_error"),
+    [
+        (23, "builder asset pull failed for Firecracker kernel: rc=23"),
+        (0, "did not prove a local mirror artifact read"),
+    ],
+)
+def test_builder_asset_pull_handles_missing_captured_streams(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    returncode: int,
+    expected_error: str,
+) -> None:
+    commands: list[str] = []
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(args[-1])
+        return subprocess.CompletedProcess(
+            args,
+            returncode,
+            stdout=None,
+            stderr=None,
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    with pytest.raises(RuntimeError, match=expected_error):
+        orchestrator._pull_builder_assets("base-img-builder")
+
+    assert len(commands) == 1
+    assert "(no captured output)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr"),
+    [
+        ("Using local mirror for download\n", None),
+        (None, "Using local mirror for download\n"),
+    ],
+)
+def test_builder_asset_pull_accepts_mirror_evidence_with_one_missing_stream(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str | None,
+    stderr: str | None,
+) -> None:
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    orchestrator._pull_builder_assets("base-img-builder")
+
+
+def test_builder_asset_pull_preserves_nonzero_failure_output(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args,
+            17,
+            stdout="partial pull progress\n",
+            stderr="download process terminated\n",
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    with pytest.raises(RuntimeError, match="rc=17"):
+        orchestrator._pull_builder_assets("base-img-builder")
+
+    output = capsys.readouterr().out
+    assert "partial pull progress" in output
+    assert "download process terminated" in output
+
+
+def test_builder_asset_pull_stops_after_first_nonzero_result(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        if "ubuntu-minimal:24.04" in args[-1]:
+            return subprocess.CompletedProcess(
+                args,
+                23,
+                stdout="partial ubuntu-minimal progress\n",
+                stderr="ubuntu-minimal download failed\n",
+            )
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="",
+            stderr="INFO: root: Using local mirror for download url=https://example.test\n",
+        )
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    with pytest.raises(RuntimeError, match="rc=23"):
+        orchestrator._pull_builder_assets("base-img-builder")
+
+    commands = [args[-1] for args, _kwargs in calls]
     assert commands[-1].endswith("image pull ubuntu-minimal:24.04")
+    assert calls[-1][1] == {"timeout": 600, "capture": True, "check": False}
     assert not any("--version 24.04" in command for command in commands)
     assert not any("Verifying cached image integrity" in command for command in commands)
+    output = capsys.readouterr().out
+    assert "partial ubuntu-minimal progress" in output
+    assert "ubuntu-minimal download failed" in output
 
 
 def test_build_base_image_cleans_builder_when_asset_pull_fails(

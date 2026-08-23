@@ -77,6 +77,14 @@ MVM_CANDIDATE_BINARY = str(
 SHARED_VOLUME_NAME = "asset-mirror"
 SHARED_VOLUME_SIZE = "6G"
 TEST_NETWORK_NAME = "sys-test-net"
+# These markers qualify DownloadFile artifact bytes. Fixed checksum metadata
+# fetched through GetBody may still use its configured upstream origin.
+LOCAL_MIRROR_READ_MARKER = "Using local mirror for download"
+FORBIDDEN_BUILDER_PULL_MARKERS = (
+    "Mirror checksum mismatch, falling back to HTTP download",
+    "Copied to asset mirror",
+)
+BUILDER_PULL_OUTPUT_LIMIT = 8 * 1024
 
 # Custom base image built during --prepare
 BASE_IMAGE_NAME = "mvm-test-runner"
@@ -1019,33 +1027,64 @@ def destroy_vm(vm_name: str) -> None:
     mvm("vm", "rm", vm_name, "--force", timeout=60, check=False)
 
 
+def _bounded_builder_pull_output(
+    result: subprocess.CompletedProcess[str],
+) -> str:
+    """Render captured pull output without flooding the qualification log."""
+    sections = []
+    if result.stdout:
+        sections.append(f"[stdout]\n{result.stdout.rstrip()}")
+    if result.stderr:
+        sections.append(f"[stderr]\n{result.stderr.rstrip()}")
+    output = "\n".join(sections) or "(no captured output)"
+    if len(output) <= BUILDER_PULL_OUTPUT_LIMIT:
+        return output
+
+    marker = "\n... builder pull output truncated ...\n"
+    remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
+    head = remaining // 2
+    return f"{output[:head]}{marker}{output[-(remaining - head):]}"
+
+
 def _pull_builder_assets(vm_name: str) -> None:
-    """Pull base-image assets serially so each streamed exec stays bounded."""
+    """Pull base-image assets serially and require local-mirror evidence."""
     pulls = (
         (
             "Firecracker kernel",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull "
-            "--type firecracker --version v1.15 --default",
+            (
+                "kernel",
+                "pull",
+                "--type",
+                "firecracker",
+                "--version",
+                "v1.15",
+                "--default",
+            ),
         ),
         (
             "Alpine image",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull "
-            "alpine:3.23",
+            ("image", "pull", "alpine:3.23"),
         ),
         (
             "Ubuntu Minimal image",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull "
-            "ubuntu-minimal:24.04",
+            ("image", "pull", "ubuntu-minimal:24.04"),
         ),
         (
             "Ubuntu image",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu "
-            "--version 24.04",
+            ("image", "pull", "ubuntu", "--version", "24.04"),
         ),
     )
-    for label, command in pulls:
+    for label, pull_args in pulls:
         log(f"  Pulling {label} into '{vm_name}'...")
-        mvm(
+        command = shlex.join(
+            (
+                "MVM_ASSET_MIRROR=/mnt",
+                "MVM_LOG_LEVEL=INFO",
+                "/usr/local/bin/mvm",
+                *pull_args,
+            )
+        )
+        result = mvm(
             "exec",
             vm_name,
             "--user",
@@ -1055,8 +1094,27 @@ def _pull_builder_assets(vm_name: str) -> None:
             "--",
             command,
             timeout=600,
-            capture=False,
+            capture=True,
+            check=False,
         )
+        output = f"{result.stdout or ''}\n{result.stderr or ''}"
+        bounded_output = _bounded_builder_pull_output(result)
+        print(f"  {label} output:\n{bounded_output}", flush=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"builder asset pull failed for {label}: rc={result.returncode}"
+            )
+        for forbidden_marker in FORBIDDEN_BUILDER_PULL_MARKERS:
+            if forbidden_marker in output:
+                raise RuntimeError(
+                    f"builder asset pull for {label} reported forbidden mirror "
+                    f"event: {forbidden_marker}"
+                )
+        if LOCAL_MIRROR_READ_MARKER not in output:
+            raise RuntimeError(
+                f"builder asset pull for {label} did not prove a local mirror "
+                "artifact read"
+            )
 
     log(f"  Verifying cached image integrity in '{vm_name}'...")
     mvm(
