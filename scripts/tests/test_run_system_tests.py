@@ -58,6 +58,69 @@ def test_guest_product_commands_use_the_exact_installed_cli(
     assert unqualified == []
 
 
+def test_all_guest_user_initialization_uses_the_pinned_firecracker_version(
+    orchestrator: ModuleType,
+) -> None:
+    tree = ast.parse(Path(orchestrator.__file__).read_text(encoding="utf-8"))
+    init_commands = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and "/usr/local/bin/mvm init" in node.value
+    ]
+    init_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_initialize_runner_user"
+    ]
+
+    assert init_commands == [orchestrator.RUNNER_USER_INIT_COMMAND]
+    assert len(init_calls) == 5
+    assert orchestrator.RUNNER_USER_INIT_COMMAND == (
+        "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive "
+        "--binary-version 1.16.0"
+    )
+
+
+def test_runner_user_initialization_uses_the_exact_installed_cli(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    orchestrator._initialize_runner_user(
+        "base-img-builder",
+        timeout=180,
+        capture=False,
+    )
+
+    assert calls == [
+        (
+            (
+                "exec",
+                "base-img-builder",
+                "--user",
+                "runner",
+                "--timeout",
+                "10",
+                "--",
+                orchestrator.RUNNER_USER_INIT_COMMAND,
+            ),
+            {"timeout": 180, "capture": False},
+        )
+    ]
+
+
 def test_streamed_mvm_failure_preserves_command_and_rc_when_output_is_none(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -104,8 +167,6 @@ def test_builder_assets_are_pulled_in_separate_sequential_execs(
     orchestrator._pull_builder_assets("base-img-builder")
 
     expected_pull_commands = [
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm binary pull firecracker "
-        "--default --force --version 1.16.0",
         "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull "
         "--type firecracker --version v1.15 --default",
         "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23",
@@ -116,7 +177,8 @@ def test_builder_assets_are_pulled_in_separate_sequential_execs(
     ]
     pull_calls = calls[:-1]
     assert [args[-1] for args, _kwargs in pull_calls] == expected_pull_commands
-    assert len(pull_calls) == 5
+    assert len(pull_calls) == 4
+    assert not any("binary pull firecracker" in args[-1] for args, _ in calls)
     for args, kwargs in pull_calls:
         assert args[:-1] == (
             "exec",
@@ -184,8 +246,23 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
         return subprocess.CompletedProcess(args, 0, stdout=stdout, stderr="")
 
     original_failure = RuntimeError("asset pull failed")
+    initialization_order: list[str] = []
+
+    def record_host_init(_vm_name: str) -> None:
+        initialization_order.append("host-init")
+
+    def record_runner_init(
+        _vm_name: str,
+        *,
+        timeout: int,
+        capture: bool = True,
+    ) -> None:
+        assert timeout == 180
+        assert capture is False
+        initialization_order.append("runner-init-1.16.0")
 
     def fail_asset_pull(_vm_name: str) -> None:
+        initialization_order.append("asset-pulls")
         raise original_failure
 
     monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
@@ -193,14 +270,20 @@ def test_build_base_image_cleans_builder_when_asset_pull_fails(
         orchestrator, "_install_system_binary_in_runner", lambda _vm_name: None
     )
     monkeypatch.setattr(
-        orchestrator, "_initialize_system_binary_in_runner", lambda _vm_name: None
+        orchestrator, "_initialize_system_binary_in_runner", record_host_init
     )
+    monkeypatch.setattr(orchestrator, "_initialize_runner_user", record_runner_init)
     monkeypatch.setattr(orchestrator, "_pull_builder_assets", fail_asset_pull)
 
     with pytest.raises(RuntimeError) as captured:
         orchestrator._build_base_image("0.3.0-test", rebuild=True)
 
     assert captured.value is original_failure
+    assert initialization_order == [
+        "host-init",
+        "runner-init-1.16.0",
+        "asset-pulls",
+    ]
     builder_removals = [
         args
         for args in calls

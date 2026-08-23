@@ -75,6 +75,11 @@ BASE_IMAGE_NAME = "mvm-test-runner"
 RUNNER_SYSTEM_CANDIDATE_DIR = "/opt/mvmctl-test"
 RUNNER_SYSTEM_CANDIDATE = f"{RUNNER_SYSTEM_CANDIDATE_DIR}/mvm-candidate"
 RUNNER_SYSTEM_UPLOAD = "/home/runner/.mvm-system-candidate.upload"
+RUNNER_USER_INIT_COMMAND = (
+    "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
+    "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive "
+    "--binary-version 1.16.0"
+)
 
 # Base VM used to build the custom image
 BASE_VM_NAME = "base-img-builder"
@@ -788,6 +793,27 @@ def _initialize_system_binary_in_runner(vm_name: str) -> None:
     )
 
 
+def _initialize_runner_user(
+    vm_name: str,
+    *,
+    timeout: int,
+    capture: bool = True,
+) -> None:
+    """Initialize runner-owned state with the release-pinned Firecracker pair."""
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        RUNNER_USER_INIT_COMMAND,
+        timeout=timeout,
+        capture=capture,
+    )
+
+
 def _ensure_builder_key() -> None:
     """Create the builder SSH key if it doesn't exist yet."""
     check = mvm("key", "inspect", BUILDER_KEY_NAME, check=False, timeout=10)
@@ -840,18 +866,7 @@ def provision_t1(vm_name: str, mvm_version: str) -> None:
     # CRITICAL: mvm init MUST run as the unprivileged user (runner), NOT via sudo.
     # Running as root creates the cache dir with root ownership — test VMs inherit
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
-    mvm(
-        "exec",
-        vm_name,
-        "--user",
-        "runner",
-        "--timeout",
-        "10",
-        "--",
-        "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive",
-        timeout=360,
-    )
+    _initialize_runner_user(vm_name, timeout=360)
 
 
 def _ensure_official_kernel_on_host(vm_name: str) -> None:
@@ -936,18 +951,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
     # Running as root creates the cache dir with root ownership — test VMs inherit
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
     log(f"  Initializing mvm inside '{vm_name}'...")
-    mvm(
-        "exec",
-        vm_name,
-        "--user",
-        "runner",
-        "--timeout",
-        "10",
-        "--",
-        "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive",
-        timeout=180,
-    )
+    _initialize_runner_user(vm_name, timeout=180)
 
     log(f"  Registering assets in '{vm_name}' (cache hits)...")
     mvm(
@@ -1006,11 +1010,6 @@ def destroy_vm(vm_name: str) -> None:
 def _pull_builder_assets(vm_name: str) -> None:
     """Pull base-image assets serially so each streamed exec stays bounded."""
     pulls = (
-        (
-            "Firecracker binary",
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm binary pull "
-            "firecracker --default --force --version 1.16.0",
-        ),
         (
             "Firecracker kernel",
             "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull "
@@ -1219,20 +1218,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         # need /home/runner/.cache/mvmctl owned by runner. Permission denied = broken.
         # Asset pulls are pre-baked into the base image so each test VM doesn't
         # re-pull them (saves ~3 min per T1 VM).
-        mvm(
-            "exec",
-            BASE_VM_NAME,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && "
-            "sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive",
-            timeout=180,
-            capture=False,
-        )
+        _initialize_runner_user(BASE_VM_NAME, timeout=180, capture=False)
 
         # Asset pulls are pre-baked into the base image so each test VM doesn't
         # re-pull them (saves ~3 min per T1 VM). Keep each pull in its own exec:
@@ -1641,18 +1627,7 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
     )
     try:
         log(f"      Running mvm init inside '{t1}'...")
-        mvm(
-            "exec",
-            t1,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive",
-            timeout=90,
-        )
+        _initialize_runner_user(t1, timeout=90)
     finally:
         destroy_vm(t1)
 
@@ -1686,18 +1661,7 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
     )
     try:
         log(f"[7/8] Setting up '{t2}' (mount + init)...")
-        mvm(
-            "exec",
-            t2,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive",
-            timeout=180,
-        )
+        _initialize_runner_user(t2, timeout=180)
 
         log(f"[8/8] Validating cache hit (pulling 1 asset)...")
         result = mvm(
