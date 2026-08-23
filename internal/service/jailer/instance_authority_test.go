@@ -236,39 +236,54 @@ func TestInstanceAuthorityReleaseReferenceLeaseBlocksLaunch(t *testing.T) {
 func TestInstanceAuthorityReleaseLeaseSerializesCanonicalStoreSlot(t *testing.T) {
 	t.Parallel()
 
-	authority, _ := newTestInstanceAuthority(t)
+	root := prepareInstanceAuthorityTestRoot(t)
+	deps := realInstanceAuthorityDeps()
+	realWaitLock := deps.waitLock
+	contentionObserved := make(chan struct{})
+	retryLock := make(chan struct{})
+	var contentionOnce sync.Once
+	deps.waitLock = func(ctx context.Context) error {
+		contentionOnce.Do(func() { close(contentionObserved) })
+		select {
+		case <-retryLock:
+			return realWaitLock(ctx)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
 	held, err := authority.LockUnreferencedRelease(
 		context.Background(),
 		testLaunchRegistration().release,
 	)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, held.Release(context.Background())) })
+	t.Cleanup(func() {
+		if held != nil {
+			require.NoError(t, held.Release(context.Background()))
+		}
+	})
 
 	type result struct {
 		lease *releaseLease
 		err   error
 	}
-	started := make(chan struct{})
 	resultCh := make(chan result, 1)
 	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	go func() {
-		close(started)
 		lease, lockErr := authority.LockUnreferencedRelease(waitCtx, testAlternateReleaseIdentity())
 		resultCh <- result{lease: lease, err: lockErr}
 	}()
-	<-started
 
 	select {
-	case early := <-resultCh:
-		if early.lease != nil {
-			require.NoError(t, early.lease.Release(context.Background()))
-		}
-		require.Failf(t, "release lock returned early", "error: %v", early.err)
-	case <-time.After(30 * time.Millisecond):
+	case <-contentionObserved:
+	case <-waitCtx.Done():
+		require.Failf(t, "release lock contention was not observed", "error: %v", waitCtx.Err())
 	}
 
 	require.NoError(t, held.Release(context.Background()))
+	held = nil
+	close(retryLock)
 	select {
 	case acquired := <-resultCh:
 		require.NoError(t, acquired.err)
