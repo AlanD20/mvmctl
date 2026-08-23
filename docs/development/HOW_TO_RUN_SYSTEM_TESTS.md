@@ -363,7 +363,9 @@ python3 scripts/run-system-tests.py --host-direct --all --workers 2
 | `--skip-volume-check` | `false` | Skip shared volume existence check (assume it exists) |
 
 Choose exactly one test selector: positional domains, `--tier`, or `--all`. Unknown names, repeated domains/tiers, and
-selected domains with no registered test files fail before binary probes, builds, or resource mutation.
+selected domains with no registered test files fail before binary probes, builds, or resource mutation. The runner also
+requires every canonical regular `tests/system/**/test_*.py` file to be registered exactly once, so an omitted file or
+duplicate alias cannot produce release evidence.
 
 ---
 

@@ -119,7 +119,7 @@ All T1/T2 runner VMs are Firecracker microVMs created with **Firecracker v1.16**
 |------|---------------|---------------|------------|-----------------|---------------|
 | **1** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Not needed | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | Host-level CLI: help, config, init, cache, keys, invariants, bin, images, kernel, network, host, run |
 | **2** | Yes — `mvm exec -- pytest ...` | Yes (mounted at `/mnt`) | Yes | `official:7.0.11` (nftables + tuntap + kvm + btrfs) | VM lifecycle: volume, vm_lifecycle, vm_data_persistence, Jailer/cgroups, routed policies, ssh, console, exec, logs, full_journeys, nftables |
-| **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | vm_fresh_env, vm_nested_isolated, vm_snapshot_load, vm_snapshot_rootfs, volume_hotplug, cp, kernel_build, env |
+| **3** | No — runs directly on host | Host mirror | Yes (host KVM) | N/A (host-direct) | fresh_env, nested_isolated, snapshot_load, snapshot_rootfs, volume_hotplug, cp, kernel_build, env |
 
 ---
 
@@ -221,12 +221,16 @@ mvm exec <vm-name> --user runner --timeout 600 -- \
 ### Domains
 - `volume/test_volume.py`
 - `vm/test_vm_lifecycle.py`
+- `vm/test_vm_data_persistence.py`
+- `vm/test_jailer.py`
+- `vm/test_cgroup.py`
 - `ssh/test_ssh.py`
 - `console/test_console.py`
 - `exec/test_exec.py`
 - `logs/test_logs.py`
 - `full_journeys/test_full_journeys.py` (Tier 2)
-- `vm/test_vm_data_persistence.py`
+- `network/test_nftables.py`
+- `network/test_policies.py`
 
 ### Runner VM Spec
 
@@ -492,11 +496,10 @@ tests/system/
 | volume_hotplug | 3 | `test_volume_hotplug.py` | PCI hotplug (needs host KVM — FC dev-preview, broken nested) |
 | cp | 3 | `test_cp.py` | File copy to/from VMs (vsock agent path rejection nested) |
 | vm_data_persistence | 2 | `test_vm_data_persistence.py` | Data persistence after snapshot/restore — uses runner VM + nested KVM |
-| vm_nested_isolated | 3 | `test_vm_nested_isolated.py` | Host-only, triple-nested |
-| vm_fresh_env | 3 | `test_vm_fresh_env.py` | Host-only. Includes negative-case test from former `test_vm_nested_virt.py`. |
-| vm_snapshot_load | 3 | `test_vm_snapshot_load.py` | Host-only |
-| vm_snapshot_rootfs_independence | 3 | `test_vm_snapshot_rootfs_independence.py` | Host-only — verifies restored VM rootfs is independent of source and other restored VMs |
-| nested_virt | 3 | `test_vm_fresh_env.py` | Host-only nested virt negative-case tests (same file as vm_fresh_env) |
+| nested_isolated | 3 | `test_vm_nested_isolated.py` | Host-only, triple-nested |
+| fresh_env | 3 | `test_vm_fresh_env.py` | Host-only. Includes the negative case from former `test_vm_nested_virt.py`. |
+| snapshot_load | 3 | `test_vm_snapshot_load.py` | Host-only |
+| snapshot_rootfs | 3 | `test_vm_snapshot_rootfs_independence.py` | Host-only — verifies restored VM rootfs is independent of source and other restored VMs |
 | kernel_build | 3 | `test_kernel.py` | Kernel build tests — needs full KVM host access (Tier 3 only) |
 
 ---

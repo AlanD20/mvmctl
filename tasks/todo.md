@@ -126,6 +126,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   to re-pin the same identity.
 - [ ] Land canonical producer names before descriptor pinning:
   - [x] ID-based `volumes/<volume-id>.<raw|qcow2>` storage.
+  - [x] Content-addressed `kernels/<kernel-id>` storage with receiver-owned staging; kernel pull inputs cannot select an
+    output directory, name, or path.
   - [ ] Fixed `rootfs.img`, cloud-init, Firecracker, console, and vsock VM leaves.
   - [ ] Fixed snapshot leaves and a managed ID-scoped image-provisioning staging subtree.
 - [ ] Define operation-specific non-empty/maximum-size and access-mode policies before coding; a caller- or DB-provided
@@ -337,7 +339,7 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [x] Reject unknown, duplicate, mixed, zero-domain, and empty-file domain selections before probes or mutation.
 - [ ] Parse pytest outcomes and require non-empty collection with zero skips, XFAIL, or XPASS; omitted domains fail
   instead of producing release evidence.
-- [ ] Ensure the full matrix selects every required domain exactly once, including `exec`, and does not run
+- [x] Ensure the full matrix selects every required domain exactly once, including `exec`, and does not run
   `test_vm_fresh_env.py` twice under aliases.
 - [ ] Make mirror validation reject pull errors and HTTP fallback; only a verified local-mirror read is a cache hit.
 - [ ] Run the complete T1/T2/T3 matrix plus clean-host installation and reboot/reconciliation qualification.

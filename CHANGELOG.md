@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build, and byte/version identity with exact root-owned `/usr/local/bin/mvm` before host resource preparation.
 - The runner rejects unknown, repeated, mixed, zero-domain, or empty-file test selections before binary probes, builds,
   or resource mutation instead of warning and returning successful but incomplete evidence.
+- The runner now validates its complete registry before any work: domain names and test files are unique, registrations
+  are non-empty canonical regular files under `tests/system/`, and every discovered system-test file is registered
+  exactly once. The missing Tier 2 `exec` registration is included and the duplicate Tier 3 `fresh_env` alias is gone.
 
 #### Deterministic initialization
 - Added `mvm init --binary-version <version>` to request an exact Firecracker/Jailer pair when no local pair exists.
@@ -109,6 +112,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Managed storage identity
 - Newly created volume backing files are named from the immutable 64-character volume ID rather than the user-visible
   display name. Raw and qcow2 formats remain explicit suffixes; database paths are derived metadata, not root authority.
+- Kernel download, build, and import now stage files under the kernel service's configured managed directory and install
+  final artifacts as `kernels/<kernel-id>`. Import identity is computed from the receiver-owned staged bytes, so a
+  caller-controlled display name or a source-file replacement cannot select or escape the managed destination.
 
 #### Network isolation
 - Traffic routed between different managed networks is now denied unless an explicit typed service-access policy permits
@@ -135,6 +141,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must create explicit `mvm policy` entries for required TCP or UDP services.
 - Scripts that expect `mvm self-update apply` to replace `/usr/local/bin/mvm` must switch to the administrator bootstrap
   flow. Self-update remains available for user-owned candidate artifacts.
+- API consumers can no longer set `output_dir`, `name`, or `output_path` on `KernelPullInput`; managed kernel placement
+  is receiver-owned. The public CLI did not expose equivalent flags.
 
 ### Fixed
 

@@ -540,6 +540,11 @@ release build, and exact root-owned `/usr/local/bin/mvm` content/version identit
 and binary gate does not yet prove that every Tier 3 resource is newly owned or that every teardown succeeded: do not
 invoke Tier 3 or `--all` on a host with pre-existing mvmctl state until the remaining Task 17 cleanup gates land.
 
+Before any probe, build, or resource mutation, the runner also validates the system-test registry itself. Domain names
+and test files must be unique, registrations must be non-empty canonical regular files under `tests/system/`, and the
+registered set must equal the discovered `tests/system/**/test_*.py` set. A missing or duplicate domain therefore cannot
+silently produce incomplete release evidence.
+
 ```bash
 # Run inside the runner VM (disposable Firecracker VM with nested KVM)
 pytest tests/system/
