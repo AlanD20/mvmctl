@@ -50,12 +50,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Root-owned VM authority substrate
 - Added a private typed VM authority under `internal/service/jailer` with durable owner-bound `registered`, `cleaning`,
   and `cleaned` records beneath `/var/lib/mvmctl/instances/<uid>` and persistent ownership tombstones.
-- Added descriptor-relative, no-follow traversal; strict bounded record decoding; atomic durable replacement; persistent
-  root-owned locks; and the fixed `release -> global index -> VM` lock order.
+- Added descriptor-relative, no-follow traversal; strict bounded record decoding; atomic durable replacement; reusable
+  root-owned runtime locks; and the fixed `release -> global index -> VM` lock order.
+- The private release-removal lease now locks the planned canonical architecture/version store slot, so conflicting
+  identities for one future slot cannot race under different hash-derived locks when Task 6 wires the new store.
 - Global VM-ID claims now fail closed on foreign, duplicate, corrupt, unreadable, or inconsistent authority records, and
   trusted release removal can acquire a lease only when no active authority record references the exact release.
 - This substrate is private and not yet wired into public VM lifecycle operations; that integration remains a release
   blocker below.
+
+#### Installed release-candidate qualification
+- For T1/T2, the Python system-test runner now treats `MVM_BINARY` as a distinct compatible outer controller and
+  `MVM_CANDIDATE_BINARY` as the artifact under test. It rejects path, symlink, and hard-link aliases between them and
+  never replaces the controller while building or provisioning a runner. Tier 3 remains a separate host-direct gate
+  that is allowed only on a clean disposable qualification host.
+- Runner images stage the candidate outside the canonical path, invoke the real `host install-system` administrator
+  route, initialize through exact `/usr/local/bin/mvm`, and use that installed path for T1/T2 assertions.
+- Added 10 L2 installer cases covering canonical metadata and content, safe ancestors, idempotence, malformed and
+  unprivileged invocation, symlink and read-only-target failures, invoking-user ownership after privileged init,
+  self-update refusal, restoration, and cleanup.
+- The focused `system_install` domain passed inside a disposable nested-virt runner using `0.3.0-rc.1`; the outer host
+  controller remained byte-for-byte unchanged.
+- Tier 3 and `--all` now require explicit pre-mutation `--host-direct` consent. The dedicated
+  `--release-qualification` gate additionally requires an unfiltered full matrix, a fresh explicit-version release
+  build, and byte/version identity with exact root-owned `/usr/local/bin/mvm` before host resource preparation.
+- The runner rejects unknown, repeated, mixed, zero-domain, or empty-file test selections before binary probes, builds,
+  or resource mutation instead of warning and returning successful but incomplete evidence.
+
+#### Deterministic initialization
+- Added `mvm init --binary-version <version>` to request an exact Firecracker/Jailer pair when no local pair exists.
+  The explicit selection survives the administrator host-init interaction; existing local/default behavior is
+  unchanged.
 
 ### Changed
 
@@ -73,6 +98,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - During development, the generated sudoers policy targets `/usr/local/bin/mvm` instead of a user-owned executable.
   Its wildcard and raw-tool grants remain transitional and are not the final `0.3.0` security boundary.
 
+#### System-test asset preparation
+- Shared runner assets are seeded from `MVM_ASSET_MIRROR` with descriptor-pinned, no-follow access and
+  `mkfs.ext4 -d`; the runner no longer loop-mounts and copies the mirror with raw sudo on the host.
+- Builder asset pulls run sequentially with bounded connect/operation timeouts so image extraction cannot exhaust the
+  constrained nested builder through concurrent pulls.
+- Missing or stale `asset-mirror` database records are rebuilt only when the recorded backing path is the exact managed
+  test-volume path; unexpected paths fail closed without mutation.
+
+#### Managed storage identity
+- Newly created volume backing files are named from the immutable 64-character volume ID rather than the user-visible
+  display name. Raw and qcow2 formats remain explicit suffixes; database paths are derived metadata, not root authority.
+
 #### Network isolation
 - Traffic routed between different managed networks is now denied unless an explicit typed service-access policy permits
   the destination VM protocol and port. Same-network bridge traffic remains unchanged.
@@ -85,7 +122,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Jailer directories, cgroups, TAP devices, firewall state, policy rows, or remote-exec flags. Initialization must refuse
   ambiguous legacy runtime state rather than silently adopting or deleting it.
 - Operators must stop and remove the old installation, retain any desired user artifacts separately, clean legacy host
-  runtime state through the documented administrator procedure, and recreate VMs and policies under v0.3.0.
+  runtime state, and recreate VMs and policies under v0.3.0. The exact fail-closed administrator cleanup procedure is
+  still a release blocker and must be documented after `host reset`/cleanup hardening lands; operators must not improvise
+  raw cleanup from this development changelog.
 - The new administrator-controlled system installation is mandatory. A user-owned `~/.local/bin/mvm` is no longer a
   valid final sudo target.
 - The system binary and an invoking user binary must support the same privileged protocol version. Version mismatch stops
@@ -109,6 +148,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - VM create no longer fails when Jailer places the cgroup at `/sys/fs/cgroup/mvmctl/<vm-id>`; the check previously expected an intermediate `firecracker/` component that Jailer v1.16 does not create.
 - Stop and remove now clean the VM's actual leaf cgroup instead of leaving stale ones behind.
 
+#### Privileged initialization ownership
+- `sudo mvm host init` now resolves a complete, internally consistent sudo identity before creating invoking-user cache
+  or configuration directories. It rejects partial/spoofed identity and sudo-time path overrides before mutation.
+- Invoking-user directories are created component by component with descriptor-relative no-follow operations; only
+  newly created directories receive the invoking UID/GID, while unsafe existing paths and replacement races fail closed.
+
 ### Security work still pending
 
 The following items are release blockers and are intentionally not described above as completed behavior:
@@ -129,10 +174,15 @@ The following items are release blockers and are intentionally not described abo
   favor of exact directional, non-root, resource-bounded VM-to-VM `exec` policies.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the
   root-owned system binary.
+- Separate administrator host state from invoking-user initialization, replace the generic `HostInit` result with a
+  typed contract, and propagate every host mutation/state-write failure instead of reporting partial setup as success.
 - Make launch, abort, cleanup, reconciliation, snapshots, live volumes, cgroups, and firewall policy crash-consistent and
   fail closed under ownership, PID-reuse, path-race, and partial-failure conditions.
 - Complete adversarial L1 coverage, Python `tests/system/` clean-install/fault qualification, leak audits, full CI, and
   the final documentation accuracy review. Go tests support but do not replace CLI-level L2 release signoff.
+- Finish Tier 3 clean-host inventory and ownership-safe cleanup; unify every host-direct CLI call, preserve pre-existing
+  resources, surface every teardown failure, and reject skips/xfails/omitted domains before accepting full `--all`
+  release evidence.
 
 ## [0.2.0] - 2026-07-10
 

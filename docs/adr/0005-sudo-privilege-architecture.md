@@ -112,7 +112,7 @@ When running `sg mvm -c 'pytest tests/system/'`:
 
 - **Principle of least privilege (target).** The CLI runs as a normal user for HTTP downloads, file I/O, SQLite queries,
   and non-privileged operations. The transitional raw-tool and public-CLI grants remain broader than the named effects
-  accepted by ADR-0016 and are removed only at Task 9.
+  accepted by ADR-0016 and are removed only at Task 14, after Tasks 8–13 migrate every caller.
 - **Known transitional exposure.** Root ownership prevents replacement of the authorized executable, but
   `/usr/local/bin/mvm *` still exposes broad public argument handling as root. A compromise of the ordinary CLI process
   must be treated as potentially reaching that authority until typed callers and the marker-only policy replace it.

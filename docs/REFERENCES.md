@@ -94,6 +94,7 @@ mvm init [flags]
 | `--non-interactive` | Use defaults, skip all prompts | `false` |
 | `--skip-host` | Skip host init step | `false` |
 | `--skip-network` | Skip default network creation | `false` |
+| `--binary-version <version>` | Download this exact Firecracker version when no local pair exists | empty (interactive choice or latest in non-interactive mode) |
 
 ---
 

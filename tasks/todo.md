@@ -35,15 +35,19 @@ This checklist implements `tasks/plan.md`. Go production and L0/L1 work belongs 
 ### Task 2: Verify the implemented system installer through Python
 
 **Owner:** qa-engineer
-**Status:** In progress
+**Status:** Complete
 **Dependencies:** Implemented system installer
 
-- [ ] Add an installed-release-candidate fixture that stages the candidate outside `/usr/local/bin`.
-- [ ] Invoke `sudo <candidate> host install-system` and then `sudo /usr/local/bin/mvm host init`.
-- [ ] Prove canonical path, root ownership, exact mode, safe ancestors, hash equality, and atomic replacement.
-- [ ] Prove malformed install invocation, symlink target, partial failure, and system self-update refusal.
-- [ ] Register the focused Python domain in the orchestrator and coverage matrix.
-- [ ] Run collection and the focused domain on the prepared runner.
+- [x] Add an installed-release-candidate fixture that stages the candidate outside `/usr/local/bin`.
+- [x] Invoke `sudo <candidate> host install-system` and then `sudo /usr/local/bin/mvm host init`.
+- [x] Prove canonical path, root ownership, exact mode, safe ancestors, hash equality, and atomic replacement.
+- [x] Prove malformed install invocation, symlink target, partial failure, and system self-update refusal.
+- [x] Register the focused Python domain in the orchestrator and coverage matrix.
+- [x] Run collection and the focused domain on the prepared runner.
+
+Qualification evidence: the candidate `0.3.0-rc.1` was installed and exercised only inside disposable nested-virt
+runner VMs. The focused `system_install` domain passed all 10 cases on 2026-08-23. The outer host controller remained
+byte-for-byte unchanged, and the pre-existing user VM was not modified.
 
 The final marker-only sudoers assertion is deferred until Task 14; current sudoers remains transitional.
 
@@ -105,6 +109,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
   rename failure, cancellation, stale lock reuse, corrupt record, and temp cleanup.
 - [x] Focused race test, format, golines, vet, and Go tests pass.
 - [x] Architect reviews actual interface, state schema, lock order, imports, and error details before commit.
+- [x] Key the release lock by canonical `(version, architecture)` store slot rather than binary hashes; prove two
+  different identities for one slot serialize.
 
 **Expected files:** fixed root constants; private instance types, codec, descriptor store, lock, authority, and focused tests
 under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, or network changes.
@@ -114,17 +120,34 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 **Owner:** engineer
 **Dependencies:** Task 4
 
+- [ ] Preserve custom `MVM_CACHE_DIR` through one typed managed-cache locator; pin it from `/`, verify caller ownership,
+  safe components/mode/mount topology, and reject every raw effect path.
+- [ ] Bind the pinned cache device/inode/mount identity into the root-owned instance record and require later operations
+  to re-pin the same identity.
+- [ ] Land canonical producer names before descriptor pinning:
+  - [x] ID-based `volumes/<volume-id>.<raw|qcow2>` storage.
+  - [ ] Fixed `rootfs.img`, cloud-init, Firecracker, console, and vsock VM leaves.
+  - [ ] Fixed snapshot leaves and a managed ID-scoped image-provisioning staging subtree.
+- [ ] Define operation-specific non-empty/maximum-size and access-mode policies before coding; a caller- or DB-provided
+  expected size is an equality check, not authorization for an unbounded resource.
 - [ ] Open user cache/VM/image/kernel/volume/snapshot resources once with beneath/no-symlink/no-magic-link resolution.
 - [ ] Verify caller ownership, file type, fixed basenames, size, and allowed access mode on pinned descriptors.
 - [ ] Never validate a path and later reopen it by pathname.
-- [ ] Return DomainError partial-state details for close/fsync/cleanup failures.
+- [ ] Keep leases private to the owning service package, expose no generic FD/path accessor, and release retained
+  descriptors in reverse order with checked `context.WithoutCancel` cleanup.
+- [ ] Return DomainError partial-state details for close/fsync/cleanup failures without replacing the primary code,
+  class, entity, or details.
 - [ ] Race tests continuously replace every user-owned ancestor and leaf with symlinks/renames.
+- [ ] Task 7 consumes same-package Jailer leases; Task 13 consumes a separate private loopmount image lease. Neither
+  consumer may reconstruct or accept `/proc/self/fd` paths from the request.
 
 ### Task 6: Implement independent trusted release authority
 
 **Owner:** engineer
-**Dependencies:** Tasks 4 and 5
+**Dependencies:** Task 4
 
+- [ ] Store exact releases under `/var/lib/mvmctl/binaries/<architecture>/<version>` with fixed Firecracker, Jailer,
+  and strict root-owned manifest leaves.
 - [ ] Privileged code constructs the fixed official release/checksum locations from validated version and architecture.
 - [ ] Caller-provided archive bytes are not their own authority.
 - [ ] Bounded extraction rejects traversal, links, devices, duplicates, unexpected members, and size/count overflow.
@@ -135,13 +158,24 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 ### Task 7: Add private mount and process identity primitives
 
 **Owner:** engineer
-**Dependencies:** Tasks 4 and 5
+**Foundation dependency:** Task 4
+**Full acceptance dependencies:** Tasks 5, 6, and 8
 
-- [ ] Unshare a private mount namespace before launch mounts and mark propagation private.
-- [ ] Verify PID, start ticks, cgroup, owner, release, and namespace inode before signal or setns.
-- [ ] Use pidfd when available and fail closed on PID reuse.
+- [ ] Extend the strict instance record once with owner GID, host boot ID, mount-namespace device/inode, and Task 5's
+  pinned cache identity; bump the schema version and reject old/partial records.
+- [ ] Launch a blocked child in a private mount namespace, pin its pidfd and namespace FD, persist the complete record
+  before externally mutable effects, mark propagation private, then release the child only after named mounts succeed.
+- [ ] Verify PID, boot ID, start ticks, all UID/GID identities, supplementary groups, exact cgroup, namespace inode,
+  process liveness, and pinned executable hash against the Task 6 release manifest before signal or `setns`.
+- [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, wait through the pidfd,
+  and fail host capability admission instead of falling back to raw PID signaling.
+- [ ] Reopen and pin `/proc/<pid>/ns/mnt` for each verified live operation; do not persist a mount-namespace handle that
+  would retain mounts after process exit.
+- [ ] Lock the OS thread for `setns`, pin/restore/verify the original host namespace, and terminate the short-lived
+  privileged process if restoration fails rather than returning a contaminated thread to the Go runtime.
 - [ ] Live snapshot/volume operations enter only the verified VM mount namespace.
-- [ ] Cleanup never recursively traverses a tree that may contain a mount.
+- [ ] Cleanup parses and verifies mount state, unmounts only receiver-derived fixed leaves, requires cgroup emptiness,
+  and removes a descriptor-relative allowlist bottom-up; never recursively traverse a tree that may contain a mount.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
 
 ## Phase 2: Final Jailer and networking paths
@@ -226,6 +260,19 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
 - [ ] Remove public `mvm run provision` and arbitrary unmount behavior.
 - [ ] Move required module/sysctl/host mutations behind exact compiled allowlists.
+- [ ] Keep `host init`, `host reset`, group membership, and sudoers changes as explicit administrator operations; do not
+  route authorization-boundary changes through the passwordless operator dispatcher.
+- [ ] Replace `HostInit`'s `any` / `map[string]any` result with one typed result and one consistent interaction channel.
+- [ ] Make administrator host setup/reset fail closed on every mutation and state-write error; remove ignored group,
+  sysctl, KVM, firewall, repository, and ownership-repair failures.
+- [ ] Dispatch administrator `host init` / `host reset` before ordinary application initialization, with a fixed
+  allowlisted environment; never open user SQLite or honor user-controlled cache/config/temp roots first.
+- [ ] Make `host clean` and `host reset` fail closed when running-VM discovery, network discovery, teardown, or restore
+  fails; never interpret an unreadable inventory as an empty one.
+- [ ] Make the init coordinator propagate sudo, dispatch, network-sync, cache, guestfs, binary, and state-write
+  failures; success/readiness must require every non-skipped required step.
+- [ ] Store the administrator mutation journal in root-owned state and never let user SQLite or a recursive cache
+  `chown` authorize or steer a root host mutation.
 - [ ] Move any remaining bridge/link/firewall caller to the typed privileged modules.
 - [ ] Repository search finds no unauthorized raw sudo callsite.
 - [ ] L1 abuse tests cover arbitrary path, PID, mount, module, sysctl, network, and shell/argv attempts.
@@ -279,6 +326,20 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Use constrained users with only the product’s intended `mvm` privilege.
 - [ ] Fix exact configuration restoration and make all teardown failures visible.
 - [ ] Run each relevant domain twice and assert zero leaked resources.
+- [x] Require explicit host-direct consent before selecting Tier 3 or `--all`, and validate it before any runner
+  mutation; developer-host iterative runs are limited to T1/T2.
+- [x] Require an explicit release-qualification mode with exact root-owned `/usr/local/bin/mvm`, safe ancestors, and
+  descriptor-pinned candidate/controller version and SHA-256 identity before any host resource preparation.
+- [ ] Refuse Tier 3 release evidence when the dedicated outer host has pre-existing active VMs, then verify every
+  selected resource belongs to the qualification run before cleanup.
+- [ ] Make cleanup and post-domain absence checks part of the domain result; preserve both primary and cleanup failures,
+  and never advance tiers while a timed-out worker can still mutate state.
+- [x] Reject unknown, duplicate, mixed, zero-domain, and empty-file domain selections before probes or mutation.
+- [ ] Parse pytest outcomes and require non-empty collection with zero skips, XFAIL, or XPASS; omitted domains fail
+  instead of producing release evidence.
+- [ ] Ensure the full matrix selects every required domain exactly once, including `exec`, and does not run
+  `test_vm_fresh_env.py` twice under aliases.
+- [ ] Make mirror validation reject pull errors and HTTP fallback; only a verified local-mirror read is a cache hit.
 - [ ] Run the complete T1/T2/T3 matrix plus clean-host installation and reboot/reconciliation qualification.
 - [ ] Update `tests/system/COVERAGE_MATRIX.md` and attach commands/results to the release report.
 

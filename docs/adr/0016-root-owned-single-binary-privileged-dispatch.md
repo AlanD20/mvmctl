@@ -130,7 +130,7 @@ application architecture:
 | Package/file | Responsibility | Must not do |
 |---|---|---|
 | `cmd/mvm/main.go` | Detect the reserved marker and enter privileged dispatch before normal initialization | Parse domain requests, perform side effects, initialize the public CLI |
-| `internal/service/privileged/` | Versioned envelope, bounded parsing, invoking identity, executable verification, and fixed action dispatch | Import `pkg/api`, `internal/cli`, or any `internal/core/*`; expose generic command execution |
+| `internal/service/privileged/` | Versioned envelope, bounded parsing, invoking identity, executable verification, and fixed action dispatch | Import `pkg/api`, `internal/cli`, or any `internal/core/*`; expose generic command execution or raw effect paths |
 | `internal/service/jailer/` | Typed release, launch, namespace mount, cgroup, process, and cleanup handlers plus normal-user client calls | Orchestrate other core domains or trust user paths after validation |
 | `internal/service/loopmount/` | Existing typed provisioning protocol and confined rootfs operations | Accept arbitrary host roots or unrelated unmount/PID targets |
 | `internal/service/network/` | Typed root-side bridge, TAP, address, route, and neighbor mutations | Accept raw `ip` argv or own network business orchestration |
@@ -174,23 +174,71 @@ Privileged code treats the normal CLI, arguments, environment, database, cache, 
 untrusted. Managed filesystem objects are opened once through descriptor-relative no-symlink resolution and retained as
 pinned descriptors through each operation. Validation followed by pathname reopen is prohibited.
 
-Every privileged VM operation is serialized by a root-owned per-VM lock and authorized by a minimal root-owned instance
-record. Process actions verify PID, start time, expected cgroup membership, owner, and exact release; pidfds are used when
-available. PID reuse fails closed.
+`MVM_CACHE_DIR` remains the user-selected location for persistent user state and large VM artifacts. The privileged
+protocol may carry exactly one typed managed-cache locator; it is a namespace locator, not authority for an individual
+effect. The receiver requires one canonical absolute path, rejects dot components, NULs, symlinks, magic links, unsafe
+owners/modes, and unsupported mount topology, and pins the directory before resolving any resource. All subsequent
+inputs are typed IDs, closed format enums, and presence/access intent. A request never supplies a kernel, rootfs,
+snapshot, volume, config, PID, socket, log, mount-target, or temporary-file path.
 
-The launch path creates a private mount namespace before resource mounts and Jailer execution. Live snapshot and volume
-operations enter only the verified registered VM's mount namespace. Cleanup never recursively traverses a tree that may
-contain a mount.
+This exception is deliberately narrower than a generic path interface. Dropping custom cache roots would break the
+documented large-filesystem use case, while a persistent root-owned path registry would still need safe pathname
+resolution after reboot. Instead, each live instance record binds the pinned cache root's stable identity (device,
+inode, and mount identity where available). A later operation fails closed if it cannot re-pin the same cache identity.
+Descendants are opened relative to that pinned root with beneath/no-symlink/no-magic-link resolution and retained until
+the privileged effect and rollback are complete.
+
+Privileged-visible basenames are canonical and derived by the receiver. Volume storage is keyed by volume ID rather
+than user-visible name; the VM rootfs uses fixed `rootfs.img`; kernel and image names use their canonical IDs plus only
+enumerated representations; cloud-init, Firecracker runtime, and snapshot leaves use compile-time fixed names. The user
+database may describe a resource, but it cannot choose the basename root will open. The intentional
+snapshot phantom-rootfs link is managed only by a typed descriptor-relative snapshot operation and is never followed as
+an input resource.
+
+The v0.3 canonical privileged-visible layout is:
+
+| Resource | Relative to the pinned managed cache root |
+|---|---|
+| VM directory | `vms/<vm-id>/` |
+| VM rootfs | `vms/<vm-id>/rootfs.img` |
+| Cloud-init ISO | `vms/<vm-id>/cloud-init.iso` |
+| Firecracker runtime | Fixed `firecracker.json`, `firecracker.api.socket`, `firecracker.pid`, `firecracker.log`, `firecracker.console.log`, and `firecracker.metrics` leaves |
+| Console/vsock runtime | Fixed `console.sock`, `console.pid`, and `vsock.sock` leaves |
+| Volume | `volumes/<volume-id>.<raw|qcow2>` |
+| Kernel | `kernels/<kernel-id>` |
+| Snapshot | `snapshots/<snapshot-id>/{rootfs.img,memory,vmstate}` |
+| Durable image | `images/<image-id>.zst` |
+| Image staging | `images/staging/<image-id>/{source.raw,rootfs.img}` |
+
+Warm-cache files are unprivileged accelerators and never root authority. Existing database path columns may remain as
+derived display/local metadata during the clean break, but privileged handlers reconstruct these names from typed
+identities and never authorize a path from SQLite.
+
+Every privileged VM operation is serialized by a root-owned per-VM lock and authorized by a minimal root-owned instance
+record. Process actions verify host boot ID, PID, start ticks, every real/effective/saved/filesystem UID and GID,
+supplementary groups, expected cgroup membership, mount-namespace identity, and the pinned executable hash against the
+exact release. Mutating operations require a pidfd, use `pidfd_send_signal`, and wait through that pidfd; a host without
+the required pidfd support fails capability admission instead of falling back to a racy raw PID signal. PID reuse fails
+closed. The receiver enforces its compiled group-drop policy and never permits a retained root supplementary group.
+
+The launch path starts a blocked child in a new private mount namespace. Before the child can perform any externally
+mutable effect, the parent pins its pidfd and namespace descriptor, records the complete identity, and retains the launch
+lease. The parent then enters that namespace, makes mount propagation private, mounts descriptor-pinned resources, and
+releases the child to exec the exact Jailer/Firecracker pair. Process and namespace allocation for a blocked child are
+not considered an externally mutable launch effect; mounts, cgroup changes, links, and executable handoff are. Live
+snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only that
+namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain every
+mount after process exit. Cleanup never recursively traverses a tree that may contain a mount.
 
 State is split by authority and lifetime:
 
 | State | Location | Ownership/lifetime |
 |---|---|---|
 | User DB and VM artifacts | Existing `MVM_CACHE_DIR`, normally `~/.cache/mvmctl` | User-owned, persistent |
-| Trusted release pairs and manifests | `/var/lib/mvmctl/binaries` | Root-owned, persistent |
+| Trusted release pairs and manifests | `/var/lib/mvmctl/binaries/<architecture>/<version>` | Root-owned, persistent |
 | Privileged instance ownership/release records | `/var/lib/mvmctl/instances/<uid>` | Root-owned, persistent, minimal |
 | Jailer chroot directories | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
-| Per-VM locks and launch handshakes | `/run/mvmctl/<uid>` | Root-owned, ephemeral |
+| Per-VM locks and launch handshakes | `/run/mvmctl/<uid>` | Root-owned, ephemeral; no persistent mount-namespace handles |
 | Cgroups | `/sys/fs/cgroup/mvmctl/<vm-id>` | Kernel runtime state |
 | `/run/mvm` | Inside the jail | Jail-visible bind mount, not host canonical state |
 
@@ -199,9 +247,10 @@ Moving durable user state out of `~/.cache/mvmctl` is a separate XDG migration d
 
 ### Failure and reconciliation contract
 
-A root-owned instance record exists before the first privileged launch side effect. Every post-spawn failure retains a
-live lifecycle handle and invokes a typed abort that verifies identity, terminates the process, checks cgroup emptiness,
-and cleans namespace/chroot/instance state in order.
+A root-owned instance record exists before the first externally mutable privileged launch side effect. A blocked
+private-namespace child may exist first only while an inherited private handshake makes external mutation impossible.
+Every post-spawn failure retains a live lifecycle handle and invokes a typed abort that verifies identity, terminates
+the process through its pidfd, checks cgroup emptiness, and cleans namespace/chroot/instance state in order.
 
 Startup and pre-launch reconciliation compare root instance records, processes, cgroups, and chroot directories. They do
 not trust the user database as root authorization. Operations are idempotent and either converge to a known state or

@@ -35,14 +35,16 @@ Host (your machine)
 │
 ├── TIER 1 — One VM per domain from custom base image + shared volume
 │   ├── mvm vm create --image mvm-test-runner:<version> --volume asset-mirror
-│   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt mvm init --non-interactive
+│   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init \
+│   │   --non-interactive --binary-version 1.16.0
 │   ├── pytest tests/system/<domain>/        ← runs INSIDE the VM
 │   └── mvm vm rm --force
 │
 ├── TIER 2 — Same as T1 + nested-virt + kernel for Firecracker-in-VM tests
 │   ├── mvm vm create --image mvm-test-runner:<version> --nested-virt --volume asset-mirror
-│   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt mvm init --non-interactive
-│   ├── MVM_ASSET_MIRROR=/mnt mvm kernel pull / image pull / bin pull (cache hits)
+│   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init \
+│   │   --non-interactive --binary-version 1.16.0
+│   ├── MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull / image pull / bin pull (cache hits)
 │   ├── pytest tests/system/<domain>/        ← runs INSIDE the VM
 │   └── mvm vm rm --force
 │
@@ -54,12 +56,13 @@ Host (your machine)
 
 | Decision | Rationale |
 |----------|-----------|
-| **Custom base image** | A single `mvm-test-runner:<mvm-version>` image is built during `--prepare`. Contains mvm binary, system tests, and all OS deps (`python3-pytest`, `qemu-utils`). Built once, cached by version. |
-| **Tests run inside the VM** | The orchestrator runs `mvm exec -- python3 -m pytest ...` inside the test VM. Tests call `mvm` directly via `subprocess.run` — no vsock proxy. |
-| **`conftest.py` is simple** | `_run_mvm` is a thin wrapper around `subprocess.run(["mvm", *args])`. The `runner_vm` fixture gets the VM name from `MVM_TEST_VM` env var (set by the orchestrator). |
+| **Custom base image** | A single `mvm-test-runner:<candidate-version>` image is built during `--prepare`. The release candidate is installed through `host install-system`; the image also contains the system tests and OS dependencies. Built once, cached by candidate version. |
+| **Tests run inside the VM** | The orchestrator runs `mvm exec -- python3 -m pytest ...` inside the test VM. Tests invoke the exact installed `/usr/local/bin/mvm` via `subprocess.run` — no PATH substitution or vsock proxy. |
+| **`conftest.py` is simple** | `_run_mvm` is a thin wrapper around `subprocess.run(["/usr/local/bin/mvm", *args])`. The `runner_vm` fixture gets the VM name from `MVM_TEST_VM` (set by the orchestrator). |
 | **Shared RO volume on all tiers** | The `asset-mirror` volume is attached to every VM (T1 and T2). Mounting is cheap — `--shareable --read-only` means no per-VM state. |
 | **`--push` flag** | Overrides baked-in tests by copying `tests/system/` fresh into the VM. Useful during test development without rebuilding the base image. |
-| **`--rebuild` flag** | Forces rebuild of the mvm binary, shared volume, and custom base image. Removes volume and image first, then recreates from scratch. |
+| **Controller/candidate qualification** | T1/T2 use a separate installed outer controller and candidate installed only inside disposable runners. Tier 3 is host-direct; release mode therefore requires exact content/version identity between the candidate and root-owned `/usr/local/bin/mvm` before resource preparation. |
+| **`--rebuild` flag** | Builds only `MVM_CANDIDATE_BINARY`, then rebuilds the shared volume and candidate-versioned custom base image. It never replaces `MVM_BINARY`. |
 
 ---
 
@@ -71,13 +74,14 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 
 ```
 1. Create builder VM from ubuntu-minimal:noble
-2. mvm cp mvm-binary → /usr/local/bin/mvm
+2. Stage the release candidate outside `/usr/local/bin` and run `sudo <candidate> host install-system`
 3. mvm cp tests/system/ → /tests/
 4. apt-get install python3-pytest qemu-utils fakeroot nftables iptables zstd htop build-essential bc bison flex libncurses-dev libssl-dev libelf-dev git curl dwarves cloud-image-utils
 5. pip3 install pytest-timeout
 6. Add runner to mvm, kvm groups
-7. chown -R runner:runner /tests
-8. Mount shared volume, mvm init, pull assets (images, kernels, binaries) from mirror
+7. Initialize through exact `sudo /usr/local/bin/mvm host init`; chown `/tests` to runner
+8. Mount the shared volume, run unprivileged `/usr/local/bin/mvm init --binary-version 1.16.0`, then pull remaining
+   images and kernels through the same exact installed binary
 9. apt-get clean
 10. mvm vm stop (graceful stop)
 11. mvm image import mvm-test-runner:<version> <builder-vm> --default --skip-optimization
@@ -88,7 +92,8 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 
 | Item | Location in image | Purpose |
 |------|-------------------|---------|
-| mvm binary | `/usr/local/bin/mvm` | The exact version being tested |
+| installed mvm binary | `/usr/local/bin/mvm` | The release candidate installed through the administrator bootstrap route |
+| staged release candidate | `/opt/mvmctl-test/mvm-candidate` | Root-owned source used only to exercise `host install-system`; tests do not use it as the CLI |
 | System tests | `/tests/system/<domain>/` | All `tests/system/` files |
 | python3-pytest, pytest-timeout (pip) | Test runners | Test runner and timeout plugin |
 | qemu-utils | System package | Volume/disk operations in T2 tests |
@@ -99,7 +104,8 @@ The custom base image `mvm-test-runner:<mvm-version>` is built once and cached:
 
 ### Caching
 
-- Rebuilt only when the mvm version changes (version string from `mvm --version`).
+- Rebuilt only when the candidate version changes (an isolated version probe executes `MVM_CANDIDATE_BINARY`, never
+  the outer controller).
 - `--rebuild` forces rebuild (removes image first, then recreates).
 - Image is versioned as `mvm-test-runner:<mvm-version>` — multiple versions can coexist.
 
@@ -121,16 +127,21 @@ All T1/T2 runner VMs are Firecracker microVMs created with **Firecracker v1.16**
 
 ### Creating the Volume (`--prepare` or `ensure_shared_volume`)
 
-The host asset mirror (`~/.cache/mvm-asset-mirror/`) is the source of truth. A shareable read-only volume is created once and reused across all test runs.
+The host asset mirror (`~/.cache/mvm-asset-mirror/`) is the source of truth. A shareable read-only volume is created
+once and reused across all test runs. The orchestrator accepts only the exact canonical
+`${MVM_CACHE_DIR:-~/.cache/mvmctl}/volumes/asset-mirror.raw` backing path. Missing stale records are rebuilt; an
+unexpected path fails closed without mutation.
+
+This volume is a point-in-time copy, not a writable cache. A checksum mismatch may make a guest fall back to the
+upstream URL, but the guest cannot persist the corrected object into the read-only volume. Repair the writable host
+mirror first, then use `--volume` to recreate the shared copy. Checksum/version metadata may still be fetched upstream
+even when the large artifact is served locally.
 
 ```bash
 mvm volume create asset-mirror 6G --shareable --read-only --writeback --format raw
-# Populated via sudo loop mount:
-sudo mkfs.ext4 -F <volume_path>
-sudo mount -o loop <volume_path> /mnt/.mvm-asset-populate
-sudo cp -r ~/.cache/mvm-asset-mirror/* /mnt/.mvm-asset-populate/
-sudo chmod -R a+rX /mnt/.mvm-asset-populate
-sudo umount /mnt/.mvm-asset-populate
+# Populated without sudo or a host mount. The runner pins the canonical regular
+# file with component-by-component O_NOFOLLOW traversal and passes that fd:
+mkfs.ext4 -F -d ~/.cache/mvm-asset-mirror /proc/self/fd/<pinned-volume-fd>
 ```
 
 ### Volume Semantics
@@ -191,7 +202,8 @@ mvm vm create <vm-name> --image mvm-test-runner:<version> \
 
 mvm exec <vm-name> --user runner --timeout 60 -- \
   "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && \
-   MVM_ASSET_MIRROR=/mnt mvm init --non-interactive"
+   MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive \
+   --binary-version 1.16.0"
 ```
 
 ### Test Execution
@@ -242,13 +254,13 @@ After init, asset pulls are cache hits against the shared volume:
 
 ```bash
 mvm exec <vm-name> --user runner --timeout 120 -- \
-  "MVM_ASSET_MIRROR=/mnt mvm kernel pull --type firecracker --version v1.15 --default"
+  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull --type firecracker --version v1.15 --default"
 mvm exec <vm-name> --user runner --timeout 120 -- \
-  "MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23"
+  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23"
 mvm exec <vm-name> --user runner --timeout 120 -- \
-  "MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu:noble"
+  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu:noble"
 mvm exec <vm-name> --user runner --timeout 120 -- \
-  "MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker --version 1.16.0 --default --force"
+  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull firecracker --version 1.16.0 --default --force"
 ```
 
 ---
@@ -259,7 +271,6 @@ mvm exec <vm-name> --user runner --timeout 120 -- \
 - `vm/test_vm_fresh_env.py` — full fresh-environment pipeline + nested virt negative case (consolidated from former `test_vm_nested_virt.py`).
 - `vm/test_vm_nested_isolated.py` — triple-nested VM tests.
 - `vm/test_vm_snapshot_load.py` — snapshot lifecycle.
-- `vm/test_vm_snapshot_rootfs_independence.py` — restored VM rootfs is independent of source VM.
 - `vm/test_vm_snapshot_rootfs_independence.py` — restored VM rootfs is independent of source VM.
 - `volume/test_volume_hotplug.py` — PCI hotplug (requires Firecracker dev-preview, does not work reliably nested).
 - `kernel/test_kernel.py` — kernel build tests (need full KVM host access).
@@ -275,6 +286,15 @@ These tests **create VMs as part of their own logic**. Running them inside a run
 
 ### Execution
 
+Tier 3 runs on the outer host and may create or destroy host VMs, kernels,
+images, networks, and volumes. The orchestrator rejects Tier 3 before work
+unless `--host-direct` acknowledges outer-host mutation. Release mode also
+requires an unfiltered full matrix, explicit-version rebuild, safe canonical
+system-binary metadata, and candidate/controller content and version identity.
+Run it only on a dedicated clean qualification host or disposable outer VM
+after `host install-system`. The remaining Task 17 inventory/cleanup work still
+blocks safe evidence on a workstation with pre-existing mvmctl resources.
+
 ```bash
 # Run directly on the host
 cd tests/system
@@ -286,7 +306,8 @@ MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
 
 ## 8. How Tests Call `mvm`
 
-Since tests run INSIDE the VM (Tier 1/2), they call `mvm` directly.
+Since tests run inside the VM (Tier 1/2), they invoke the exact installed system binary directly. PATH lookup is not
+release evidence because it could select a developer or stale binary.
 
 ### Inside the test VM
 
@@ -294,7 +315,9 @@ Since tests run INSIDE the VM (Tier 1/2), they call `mvm` directly.
 import subprocess
 
 def test_help():
-    result = subprocess.run(["mvm", "help"], capture_output=True, text=True)
+    result = subprocess.run(
+        ["/usr/local/bin/mvm", "help"], capture_output=True, text=True
+    )
     assert result.returncode == 0
     assert "Usage:" in result.stdout
 ```
@@ -307,8 +330,8 @@ The conftest provides `_run_mvm` as a convenience wrapper:
 def _run_mvm(
     vm_name: str, *args: str, check: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
-    """Run an mvm command. vm_name is ignored — already inside test VM."""
-    cmd = ["mvm", *args]
+    """Run the installed mvm CLI. vm_name is ignored inside the test VM."""
+    cmd = ["/usr/local/bin/mvm", *args]
     return subprocess.run(
         cmd, capture_output=True, text=True,
         timeout=timeout + 30,
@@ -316,7 +339,10 @@ def _run_mvm(
     )
 ```
 
-The `vm_name` parameter is accepted for compatibility but NOT used — since we're already inside the target VM, all commands run locally. The orchestrator sets `MVM_TEST_VM` to the VM name for test introspection if needed.
+The `vm_name` parameter is retained by the shared helper but is not used because commands already run inside the target
+VM. The orchestrator sets `MVM_TEST_VM` to the VM name for test introspection if needed. The outer orchestrator may use
+the requested release-candidate artifact, but every T1/T2 assertion runs the artifact installed at
+`/usr/local/bin/mvm`.
 
 ---
 
@@ -327,14 +353,25 @@ The `vm_name` parameter is accepted for compatibility but NOT used — since we'
 ```bash
 # Build base image + smoke test
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
   python3 scripts/run-system-tests.py --prepare
 
-# Run all domains (T1 + T2 + T3)
+# Run all domains only on a dedicated clean qualification host/outer VM
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  python3 scripts/run-system-tests.py --all
+  MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
+  python3 scripts/run-system-tests.py --host-direct --all
+
+# Release qualification on a dedicated clean qualification host/outer VM
+MVM_BINARY=/usr/local/bin/mvm \
+  MVM_CANDIDATE_BINARY=./dist/mvm \
+  MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  python3 scripts/run-system-tests.py \
+  --release-qualification --host-direct --rebuild \
+  --candidate-version 0.3.0-rc.1 --all
 
 # Run specific domains
-python3 scripts/run-system-tests.py cli network vm_fresh_env
+python3 scripts/run-system-tests.py cli network
+python3 scripts/run-system-tests.py --host-direct fresh_env
 
 # Push fresh test files (no rebuild needed)
 python3 scripts/run-system-tests.py cli --push
@@ -342,32 +379,34 @@ python3 scripts/run-system-tests.py cli --push
 # Run only specific tiers
 python3 scripts/run-system-tests.py --tier 1
 python3 scripts/run-system-tests.py --tier 2
-python3 scripts/run-system-tests.py --tier 3
+python3 scripts/run-system-tests.py --host-direct --tier 3
 python3 scripts/run-system-tests.py --tier 2,1
 ```
 
 ### Script Flow
 
 ```
-1. Parse args
-2. --prepare mode:
-     a. Get mvm version
+1. Parse args and reject Tier 3 without `--host-direct` before any work
+2. In `--release-qualification`, require the unfiltered full-matrix flags, rebuild the explicit-version candidate, and
+   verify exact candidate/controller metadata, descriptors, SHA-256, and strict version before resource preparation
+3. --prepare mode:
+     a. Probe the candidate version in isolated cache/config/temp directories
      b. Ensure shared volume + network
-     c. Build custom base image mvm-test-runner:<version> (or skip if cached)
+     c. Install the staged candidate through `host install-system`, then build the custom base image (or skip if cached)
      d. Create T1 smoke VM → mount volume → mvm init → destroy
      e. Create T2 smoke VM → mount volume → mvm init → pull cache hit → destroy
-3. Normal run mode:
-     a. Detect mvm version
+4. Normal run mode:
+     a. Detect the candidate version without invoking the outer controller
      b. Ensure shared volume + network
      c. Select domains based on args/tier flags
      d. T1 + T2 in parallel (ThreadPoolExecutor):
-          Create VM → mount volume → mvm init →
+          Create VM from the candidate-qualified base image → mount volume → pinned mvm init →
           [--push: mvm cp tests/system] →
            mvm exec -- python3 -m pytest ... →
           destroy VM
-     e. T3 sequentially on host:
+     e. T3 sequentially on the dedicated clean qualification host:
           pytest tests/system/<domain>/
-4. Print summary: X passed, Y failed, Z total
+5. Print summary: X passed, Y failed, Z total
 ```
 
 See [RC_QA.md](RC_QA.md) for the full flags reference, setup workflow, and
@@ -397,6 +436,7 @@ tests/system/
 ├── kernel/test_kernel.py    ← TIER 1/2/3 mixed (basic ops TIER 1, pull-advanced-class TIER 2, kernel build classes TIER 3)
 ├── kernel/test_kernel_import.py   ← TIER 1
 ├── host/test_host.py        ← TIER 1
+├── host/test_system_install.py ← TIER 1 (installed release-candidate contract)
 ├── run/test_run.py          ← TIER 1
 │
 ├── volume/test_volume.py    ← TIER 2 (needs nested virt)
@@ -438,6 +478,7 @@ tests/system/
 | nftables | 2 | `test_nftables.py` | Nftables firewall backend and atomic rule sync — needs nested virt |
 | policies | 2 | `test_policies.py` | Routed service-access allow/default-deny behavior for nftables and iptables — needs nested virt |
 | host | 1 | `test_host.py` | Host info/status |
+| system_install | 1 | `test_system_install.py` | Root-owned system install path, metadata, routing, and failure safety |
 | run | 1 | `test_run.py` | Service subprocesses |
 | volume | 2 | `test_volume.py` | Volume lifecycle |
 | vm_lifecycle | 2 | `test_vm_lifecycle.py` | VM create/start/stop/pause |
@@ -498,7 +539,8 @@ def test_hotplug_re_attach_after_hot_unplug(self, ...):
 
 1. **Only xfail when the limitation is in a downstream dependency** (Firecracker, kernel, guest OS). Never xfail for bugs in mvmctl's own code.
 2. **Always document the exact failure reason** so the marker can be removed when the dependency is fixed.
-3. **An `xfail` is NOT a skip** — the test still runs and collects result data. If the test unexpectedly passes, `XPASS` alerts the team to remove the marker.
+3. **An `xfail` is not silent** — the test still runs and collects result data. However, both XFAIL and XPASS block RC
+   sign-off until the limitation is resolved or removed from the release requirements.
 4. **No `pytest.skip()`** — conditional skipping is banned because it hides regressions. Use `xfail` to document known failures or restructure the test to expect the known error.
 
 ---
@@ -563,9 +605,11 @@ When a hotplug or PCI device operation fails, the recommended investigation flow
 
 Every test file in `tests/system/` MUST:
 
-1. **Tests call `mvm` directly** — Use `subprocess.run(["mvm", ...])` or `_run_mvm(...)`. No vsock proxy, no `mvm exec` nesting.
+1. **Tests call the installed CLI directly** — Use `_run_mvm(...)` or exact
+   `subprocess.run(["/usr/local/bin/mvm", ...])`. No PATH lookup, vsock proxy, or `mvm exec` nesting.
 
-2. **Tier 3: Direct host calls allowed** — Tests that create VMs or check host state run directly on the host.
+2. **Tier 3: Direct qualification-host calls only** — Tests that create VMs or check host state run directly on a
+   dedicated clean qualification host or disposable outer VM, never a developer workstation with pre-existing state.
 
 3. **No `os.path.exists` on VM filesystem paths** — Those paths are inside the VM (Tier 1/2). Tier 3 tests may check host paths.
 

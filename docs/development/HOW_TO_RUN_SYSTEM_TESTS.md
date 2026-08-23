@@ -33,12 +33,14 @@ VMs. The three-tier architecture is documented in
   (`scripts/run-system-tests.py`) from a custom base image — you don't need to
   install anything inside them.
 
-### Runner VMs Are Full Bare-Metal Hosts
+### Runner VMs Exercise Real Linux and Nested KVM
 
 Each runner VM is **not a limited container or lightweight sandbox**. It is a
 full Firecracker microVM with `nested_virt: true` and **direct KVM access** to
-the host CPU virtualization extensions. From the perspective of mvm and the
-system tests, each runner VM behaves **identically to bare metal**:
+the host CPU virtualization extensions. This exercises real kernel, KVM,
+networking, filesystem, and privilege paths, but it is not identical to bare
+metal: device exposure, kernel configuration, nesting depth, timing, and
+resource limits still differ.
 
 - `/dev/kvm` is fully accessible — mvm creates and runs nested VMs inside the
   runner VM
@@ -47,9 +49,9 @@ system tests, each runner VM behaves **identically to bare metal**:
 - The 7.0.11 kernel has everything compiled in (no modules needed)
 - tmpfs, overlayfs, btrfs, ext4 — all standard Linux facilities
 
-The only limitations are those imposed by the kernel itself (which is a standard
-upstream build with common features enabled). If Linux supports it and the
-kernel is compiled with it, runner VMs support it.
+Tier 3 exists for cases that cannot be qualified reliably under nesting. Those
+tests run directly on the outer host and therefore require a dedicated clean
+qualification host or disposable outer VM.
 
 ### Special Case: libguestfs / Supermin
 
@@ -88,16 +90,16 @@ go version
 
 ```bash
 groups
-# Expected: kvm mvm disk (all three)
+# Expected after `mvm host init`: kvm mvm
 
 # Verify each explicitly:
 getent group kvm >/dev/null && echo "kvm group: OK" || echo "kvm group: MISSING"
 getent group mvm >/dev/null && echo "mvm group: OK" || echo "mvm group: MISSING"
-getent group disk >/dev/null && echo "disk group: OK" || echo "disk group: MISSING"
 ```
 
-If missing, **ask a human admin** to add you:
-`sudo usermod -aG <group> $USER && newgrp <group>`
+`mvm host init` is responsible for creating the `mvm` group and adding the invoking user; verify the result instead of
+assuming a partial setup succeeded. If `kvm` is missing, ask a human administrator to grant KVM access, then start a new
+login session; do not add the `disk` group for mvmctl.
 
 ### 1.4 Host: System Tools
 
@@ -115,74 +117,94 @@ See `docs/DEPENDENCIES.md` for the per-distribution package list.
 
 ### 1.5 Orchestrator Prerequisites (Automatic)
 
-The orchestrator (`scripts/run-system-tests.py`) handles all provisioning
-automatically — it creates runner VMs from a custom base image, mounts the
-shared asset volume, and runs pytest inside each VM. Assets (kernels, images,
-binaries) are pre-cached in `~/.cache/mvm-asset-mirror/` on the host.
+The orchestrator (`scripts/run-system-tests.py`) handles runner provisioning:
+it creates VMs from a custom base image, mounts the shared asset volume, and
+runs pytest inside each VM. Release qualification requires a populated writable
+host mirror at `MVM_ASSET_MIRROR` (normally `~/.cache/mvm-asset-mirror/`). The
+orchestrator copies that point-in-time content into the read-only QA volume; it
+does not download missing assets into or repair the host mirror.
 
-The custom base image (`mvm-test-runner:<mvm-version>`) is built once during
+The custom base image (`mvm-test-runner:<candidate-version>`) is built once during
 `--prepare` and contains:
-- The mvm binary at `/usr/local/bin/mvm`
+- The release candidate installed at `/usr/local/bin/mvm` through `host install-system`
 - System tests at `/tests/system/`
 - Python 3 + pytest + pytest-timeout
 - qemu-utils, fakeroot, nftables, iptables, zstd
 - cloud-image-utils (for `--cloud-init-mode iso` tests)
 - build-essential, bc, bison, flex, libncurses-dev, libssl-dev, libelf-dev, git, curl, dwarves (for `kernel_build` tests)
 
-The orchestrator installs runner-VM contents automatically. The host still requires the release candidate to be
-installed and initialized once as shown in section 2 so host-side privileged operations use the same root-owned image.
+The orchestrator installs runner-VM contents automatically. The host needs an existing installed controller for outer
+resource management, but that controller is not the artifact under test and must not be overwritten by the candidate.
 
 ---
 
 ## 2. Build the Binary
 
 ```bash
-# Build the release binary
-./scripts/build.sh release
+# Untagged RC builds must carry their intended identity explicitly
+./scripts/build.sh release --version 0.3.0-rc.1 --output dist/mvm
 
 # Verify it exists and is executable
 test -x dist/mvm && echo "binary: OK ($(dist/mvm --version 2>/dev/null))"
 
-# Install the exact release candidate as the root-owned system executable
-sudo ./dist/mvm host install-system
-sudo /usr/local/bin/mvm host init
+# Select an existing installed controller and keep the release artifact separate
 export MVM_BINARY=/usr/local/bin/mvm
+export MVM_CANDIDATE_BINARY=./dist/mvm
 ```
 
-**IMPORTANT**: User-owned binaries are never sudo targets. Set `MVM_BINARY=/usr/local/bin/mvm` when running the
-orchestrator so its host-side privileged subprocesses use the same immutable system image that is copied into runner
-VMs. The orchestrator's historical default remains a staging-path fallback and must not be used for privilege-boundary
-release qualification.
+**IMPORTANT**: `MVM_BINARY` only manages disposable outer resources. `MVM_CANDIDATE_BINARY` is installed through the
+administrator route only inside runner VMs. The orchestrator rejects aliases and `--rebuild` writes only the candidate.
+Use the separate clean-host installation gate in `docs/RC_QA.md` to qualify the final host transition.
+
+Do not omit `--version` for an untagged RC. The build script otherwise uses `git describe`, which can inherit the
+previous release tag and give the new candidate and runner image the wrong version identity.
 
 ---
 
 ## 3. Prepare Shared Assets
 
-Before the orchestrator can run tests, shared assets must exist on the host.
-The orchestrator's `--prepare` mode handles this automatically, but you can
-optionally pre-seed the asset mirror to speed up the first run:
+Before the orchestrator can run release tests, the required shared assets must
+exist and pass their upstream checksum validation in the writable host mirror.
+Local focused tests may populate this mirror lazily, but an empty or stale
+mirror is not acceptable release evidence.
 
-### 3.1 (Optional) Pre-Seed the Asset Mirror
+### 3.1 Prepare the Host Asset Mirror
 
 ```bash
 export MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror
 mkdir -p "$MVM_ASSET_MIRROR"
 
 # Pull the kernel and assets that the orchestrator will need
-mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs --default
-mvm image pull alpine:3.23
-mvm image pull ubuntu:noble
-mvm kernel pull --type firecracker --version v1.15 --default
-mvm bin pull firecracker --version 1.16.0 --default
+"$MVM_BINARY" kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs --default
+"$MVM_BINARY" image pull alpine:3.23 --force
+"$MVM_BINARY" image pull ubuntu-minimal:24.04 --force
+"$MVM_BINARY" image pull ubuntu --version 24.04 --force
+"$MVM_BINARY" kernel pull --type firecracker --version v1.15 --default
+"$MVM_BINARY" bin pull firecracker --version 1.16.0 --default --force
+"$MVM_BINARY" bin pull firecracker --version 1.16.1 --force
 ```
 
 These pulls populate the local mirror directory. On subsequent runs, each pull
-reads from the mirror instead of downloading.
+reads the large object from the mirror instead of downloading it again. Small checksum/version metadata requests still
+go to the fixed upstream source so cached content can be verified.
+
+The shared `asset-mirror` volume is a point-in-time, read-only copy. If a pull replaces a stale host object or adds a
+missing one, rebuild the QA volume before continuing:
+
+```bash
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
+  python3 scripts/run-system-tests.py --volume
+```
+
+Do not expect the read-only guest copy to self-heal. It can detect a checksum mismatch and use an HTTP fallback for that
+run, but it cannot persist the replacement. Repair the writable host mirror and reseed the volume instead.
 
 ### 3.2 Run `--prepare`
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+  MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
   python3 scripts/run-system-tests.py --prepare
 ```
 
@@ -200,8 +222,14 @@ To force rebuild of the shared volume, base image, and binary:
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  python3 scripts/run-system-tests.py --rebuild --all
+  MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
+  python3 scripts/run-system-tests.py \
+  --release-qualification --host-direct --rebuild \
+  --candidate-version 0.3.0-rc.1 --all
 ```
+
+`--rebuild` requires `--candidate-version` unless `HEAD` is one clean checkout with exactly one valid release tag. This
+prevents a release branch from inheriting the previous tag through `git describe`.
 
 ### 3.4 Verification Checklist
 
@@ -211,25 +239,26 @@ Run these to confirm the host is ready for tests:
 # Host checks
 echo "KVM:   $(test -c /dev/kvm && echo OK || echo MISSING)"
 echo "Nest:  $(cat /sys/module/kvm_intel/parameters/nested 2>/dev/null || echo N/A)"
-echo "mvm:   $(/usr/local/bin/mvm --version 2>/dev/null)"
+echo "controller: $(/usr/local/bin/mvm --version 2>/dev/null)"
+echo "candidate:  $(./dist/mvm --version 2>/dev/null)"
 
 # Asset mirror has content
 ls ~/.cache/mvm-asset-mirror/ | head -10
 
 # Shared volume exists
-mvm volume inspect asset-mirror --json 2>/dev/null \
+"$MVM_BINARY" volume inspect asset-mirror --json 2>/dev/null \
   && echo "Volume: OK" \
   || echo "Volume: MISSING — run --prepare"
 
 # Custom base image exists
-mvm image inspect \
-  mvm-test-runner:$(/usr/local/bin/mvm --version 2>/dev/null | awk '{print $2}') \
+"$MVM_BINARY" image inspect \
+  mvm-test-runner:$(./dist/mvm --version 2>/dev/null | awk '{print $2}') \
   --json 2>/dev/null \
   && echo "Base image: OK" \
   || echo "Base image: MISSING — run --prepare"
 
 # Test network exists
-mvm network inspect sys-test-net --json 2>/dev/null \
+"$MVM_BINARY" network inspect sys-test-net --json 2>/dev/null \
   && echo "Network: OK" \
   || echo "Network: MISSING — run --prepare"
 ```
@@ -247,13 +276,14 @@ Host (your machine)
 │
 ├── TIER 1 — Per-domain VMs (custom base image + shared RO volume)
 │   ├── mvm vm create --image mvm-test-runner:<version> --volume asset-mirror
-│   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt mvm init
+│   ├── mount /dev/vdb /mnt && MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init \
+│   │   --non-interactive --binary-version 1.16.0
 │   ├── pytest tests/system/<domain>/    ← runs INSIDE the VM
 │   └── mvm vm rm --force
 │
 ├── TIER 2 — Same as T1 + nested-virt
 │   ├── mvm vm create --nested-virt --volume asset-mirror
-│   ├── mount + init + kernel pull / image pull / bin pull (cache hits)
+│   ├── mount + pinned init + kernel pull / image pull / bin pull (cache hits)
 │   ├── pytest tests/system/<domain>/    ← runs INSIDE the VM
 │   └── mvm vm rm --force
 │
@@ -261,17 +291,30 @@ Host (your machine)
     └── pytest tests/system/<domain>/
 ```
 
-### 4.1 Run All Tests (Release Gate)
+### 4.1 Run All Tests (Release Gate Only)
+
+`--all` includes Tier 3 and may create or destroy outer-host resources. The
+runner requires `--host-direct` before any work. For release evidence,
+`--release-qualification` also requires an unfiltered full matrix, an
+explicit-version rebuild, and exact candidate/controller binary identity before
+resource preparation. Run it only on a dedicated clean qualification host or
+disposable outer VM where the candidate is installed at `/usr/local/bin/mvm`.
+On a workstation with state that must be preserved, use focused T1/T2 domains or
+`--tier 1,2`: consent does not prove ownership-safe cleanup.
 
 ```bash
 MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
-  python3 scripts/run-system-tests.py --all
+  MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
+  python3 scripts/run-system-tests.py \
+  --release-qualification --host-direct --rebuild \
+  --candidate-version 0.3.0-rc.1 --all
 ```
 
 ### 4.2 Run Specific Domains
 
 ```bash
-python3 scripts/run-system-tests.py cli network vm_fresh_env
+python3 scripts/run-system-tests.py cli network
+python3 scripts/run-system-tests.py --host-direct fresh_env
 ```
 
 ### 4.3 Run Specific Tiers
@@ -284,7 +327,7 @@ python3 scripts/run-system-tests.py --tier 1
 python3 scripts/run-system-tests.py --tier 2
 
 # Run Tier 1 then Tier 3
-python3 scripts/run-system-tests.py --tier 1,3
+python3 scripts/run-system-tests.py --host-direct --tier 1,3
 ```
 
 ### 4.4 Push Fresh Tests (No Rebuild)
@@ -298,23 +341,29 @@ python3 scripts/run-system-tests.py cli --push
 ### 4.5 Limit Parallel Workers
 
 ```bash
-python3 scripts/run-system-tests.py --all --workers 2
+python3 scripts/run-system-tests.py --host-direct --all --workers 2
 ```
 
 ### 4.6 Orchestrator Flags Reference
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| _domains_ (positional) | — | Specific domains to test (e.g., `cli network nested_virt`) |
-| `--all` | `false` | Run all T1 + T2 + T3 domains |
+| _domains_ (positional) | — | Specific domains to test (e.g., `cli network`) |
+| `--all` | `false` | Run all T1 + T2 + host-direct T3 domains; dedicated clean qualification host only |
+| `--host-direct` | `false` | Required acknowledgment before selecting any Tier 3 domain or `--all`; does not guarantee isolation or safe cleanup |
+| `--release-qualification` | `false` | Require the unfiltered full-matrix release identity gate; requires `--all --host-direct --rebuild --candidate-version` |
 | `--tier` | — | Comma-separated tier numbers; executed in given order (e.g., `--tier 1,3`) |
 | `--workers` | `4` | Maximum parallel VMs |
-| `--rebuild` | `false` | Build binary + rebuild shared volume + rebuild base image + run prepare |
+| `--rebuild` | `false` | Build only `MVM_CANDIDATE_BINARY`, rebuild shared volume/base image, and run prepare; never replace `MVM_BINARY` |
+| `--candidate-version` | — | Exact `X.Y.Z` candidate identity for `--rebuild`; required unless `HEAD` is one clean, exact release tag |
 | `--volume` | `false` | Rebuild only the shared asset volume (`asset-mirror`) |
-| `--image` | `false` | Build binary + ensure shared volume exists + rebuild the custom base image (`mvm-test-runner:<version>`) |
+| `--image` | `false` | Ensure the shared volume exists and rebuild the custom base image from the existing candidate |
 | `--prepare` | `false` | Validate provisioning pipeline (ensure shared volume + base image exist, build from scratch if missing, run T1/T2 smoke tests) |
 | `--push` | `false` | Push test files into each VM before running (overrides baked-in tests) |
 | `--skip-volume-check` | `false` | Skip shared volume existence check (assume it exists) |
+
+Choose exactly one test selector: positional domains, `--tier`, or `--all`. Unknown names, repeated domains/tiers, and
+selected domains with no registered test files fail before binary probes, builds, or resource mutation.
 
 ---
 
@@ -352,6 +401,9 @@ pass. A skip is treated as a release blocker — it means either:
 - The test's skip condition is too broad (tighten the condition)
 
 Before signing off an RC, every test file must produce `X passed, 0 failed, 0 skipped`.
+The current orchestrator's final domain summary does not independently count
+pytest skips/xfails/xpasses. Until it does, QA must inspect and archive every
+per-domain pytest summary; `[PASS]` at the domain level alone is insufficient.
 
 ### 5.2 What a Skip Means
 
@@ -371,8 +423,8 @@ KVM) is a **release blocker** — fix the environment, not the code.
 | `iptables` errors | `mvm host init` not run | Run `sudo /usr/local/bin/mvm host init` |
 | VM creation hangs | Binary not built or missing | Re-run `./scripts/build.sh release` |
 | `bridge already exists` | Stale bridges from previous run | Clean up with `mvm network rm --force` |
-| `Text file busy` on service binary | Stale service processes | `killall -9 mvm-console-relay mvm-nocloud-server mvm-provision` |
-| `pending migrations detected` | DB schema mismatch after binary update | `rm -f ~/.cache/mvmctl/mvmdb.db && mvm init --non-interactive --skip-host --skip-network` then re-pull resources |
+| `Text file busy` on service binary | Stale disposable runner or base image | Destroy the affected runner through the outer controller and rebuild the base image; do not kill host processes by basename |
+| `pending migrations detected` | Stale disposable runner/base image built with a different schema | Rebuild the candidate runner image with `--image --prepare`; do not delete a workstation database as test cleanup |
 | All tests skip with "KVM not available" | KVM not accessible | Check `/dev/kvm` permissions, user groups |
 | High skip ratio (>10%) | Missing dependencies | Run the prerequisite check (section 1) |
 

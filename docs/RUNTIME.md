@@ -554,8 +554,9 @@ Services are spawned in the background by the core layer via `system.SpawnServic
 ### Sudoers
 
 During the privilege-boundary migration, `mvm host init` targets only root-owned `/usr/local/bin/mvm` but still retains
-the legacy raw-tool and public-service grants needed by unmigrated callers. Task 9 removes those grants and leaves only
-the versioned early privileged marker. See ADR-0016; the transitional policy is not the final security model.
+the legacy raw-tool and public-service grants needed by unmigrated callers. Task 14 removes those grants, after Tasks
+8–13 migrate every caller, and leaves only the versioned early privileged marker. See ADR-0016; the transitional policy
+is not the final security model.
 
 ---
 

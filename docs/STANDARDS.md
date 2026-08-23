@@ -270,6 +270,8 @@ Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS
 ### L2: Runner VM System Tests (Python in `tests/system/`)
 - Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM.
 - No mocking of any kind — the binary is real, the subprocesses are real.
+- Install the release candidate through `host install-system`; T1/T2 tests invoke exact `/usr/local/bin/mvm`.
+- Directly copying a binary onto the canonical path or relying on PATH lookup does not qualify the installer or release.
 - **Ground truth:** A feature is not tested until it has an L2 test. L0/L1 are fast pre-filters, not replacements.
 - Run via `pytest tests/system/` inside the runner VM.
 

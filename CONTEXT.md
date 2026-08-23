@@ -223,29 +223,33 @@ The release script produces the candidate artifact at `dist/mvm`. A development 
 under `~/.local/bin`, but a user-owned path is **never** a sudo target.
 
 The canonical host installation is `/usr/local/bin/mvm`, owned by `root:root` with mode `0755` under a root-owned,
-non-writable directory chain. Install or upgrade it through the candidate artifact's exact early bootstrap route:
+non-writable directory chain. Install or replace it through the candidate artifact's exact early bootstrap route:
 
 ```bash
-./scripts/build.sh release
+./scripts/build.sh release --version 0.3.0-rc.1 --output dist/mvm
 sudo ./dist/mvm host install-system
 sudo /usr/local/bin/mvm host init
 ```
 
 `host install-system` executes before ordinary application initialization. It does not read `MVM_CACHE_DIR`, user
 configuration, the user database, Cobra, or plugins, and it replaces its environment with fixed root-safe values before
-installation. If an old managed sudoers file still authorizes a user-owned binary, remove that legacy file from an
-authenticated administrator session before running the bootstrap command; the installer refuses unrecognized active
-syntax rather than guessing how sudo authenticated the process.
+installation. v0.3.0 is a clean installation: it does not convert, adopt, or preserve old user/runtime state. Remove an
+old managed sudoers file and clean the old installation from an authenticated administrator session before running the
+bootstrap command; the installer refuses unrecognized active syntax rather than guessing how sudo authenticated the
+process. The exact fail-closed cleanup procedure remains a v0.3.0 release blocker until administrator reset/cleanup is
+hardened; this architecture rule is not permission to improvise raw host cleanup.
 
 Normal users run `/usr/local/bin/mvm` without sudo. The `mvm` group is the authorization role for the final constrained
-passwordless privileged protocol; it never makes a development artifact trusted. During Tasks 2-8, the generated policy
-still contains transitional raw-tool grants and `/usr/local/bin/mvm *` for callers that have not migrated. That policy is
-not the final security boundary and must not ship as marker-only until Task 9 removes those grants. A system-installed
-executable cannot replace itself through `mvm self-update`; an administrator installs the newly downloaded trusted
-artifact with `host install-system`.
+passwordless privileged protocol; it never makes a development artifact trusted. During v0.3 development, the generated
+policy still contains transitional raw-tool grants and `/usr/local/bin/mvm *` for callers not yet converted to typed
+dispatch. That policy is not the final security boundary. The marker-only policy lands only after every supported
+privileged caller uses the typed dispatcher. A system-installed executable cannot replace itself through
+`mvm self-update`; an administrator installs the newly downloaded trusted artifact with `host install-system`.
 
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
-release version metadata, symbol stripping, and PIE settings and must not be used for release qualification.
+release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
+untagged RC build must pass the intended version explicitly. Otherwise `git describe` can inherit the previous release
+tag and produce a candidate with the wrong identity.
 
 ### Asset mirror environment variable (OPTIONAL)
 
@@ -257,6 +261,10 @@ mvm <subcommand>
 ```
 
 This variable directs the local asset cache for downloaded kernel images, root filesystems, and firmware blobs.
+Checksum/version metadata may still be fetched from the fixed upstream origin. The system-test `asset-mirror` volume is
+a point-in-time, read-only copy of this directory: after repairing or adding a host mirror object, rebuild that volume
+before running QA. A stale object inside the read-only copy can be detected and bypassed, but it cannot persist its own
+replacement.
 
 ### CLI is the canonical interface
 
@@ -507,7 +515,30 @@ go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
 ### L2: Runner VM System Tests (Python `tests/system/`)
 
-**Ground truth.** Every user-facing feature must have an L2 test. Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM. No mocking of any kind. Operates against the compiled `mvm` binary. Verifies actual business outcomes at the OS level: JSON state, filesystem state, process state, iptables rules.
+**Ground truth.** Every user-facing feature must have an L2 test. Real binary, real subprocess, real infrastructure inside
+a disposable Firecracker VM with nested KVM. No mocking of any kind. The release candidate is installed through
+`host install-system`, and T1/T2 tests invoke exact `/usr/local/bin/mvm`; a directly copied or PATH-selected developer
+binary is not release evidence. Tests verify actual outcomes at the OS level: JSON, files, processes, cgroups,
+namespaces, links, mounts, sockets, and nftables state as applicable.
+
+The outer host controller and the artifact under test are deliberately separate. `MVM_BINARY` names an already
+installed controller used only to create, inspect, copy to, and destroy disposable runner VMs.
+`MVM_CANDIDATE_BINARY` names the release artifact (default `dist/mvm`) installed only inside those VMs. The runner
+image tag comes from an isolated `MVM_CANDIDATE_BINARY --version` probe. Building or testing a candidate must never
+replace `MVM_BINARY`.
+
+Runner initialization requests exact Firecracker 1.16.0 with
+`/usr/local/bin/mvm init --non-interactive --binary-version 1.16.0` when no local pair exists. This avoids a moving
+`latest` dependency while preserving existing local/default selection on already-prepared images.
+
+This controller/candidate isolation applies only to T1/T2 runner VMs. Tier 3 is host-direct and may mutate outer-host
+VMs, kernels, images, networks, and volumes. It is allowed only on a clean disposable qualification host where the
+candidate has been explicitly installed as exact `/usr/local/bin/mvm`; it is not an iterative developer-host test mode.
+The runner rejects Tier 3 or `--all` before any work unless `--host-direct` explicitly acknowledges outer-host mutation.
+Its stricter `--release-qualification` mode requires an unfiltered `--all`, `--host-direct`, a fresh explicit-version
+release build, and exact root-owned `/usr/local/bin/mvm` content/version identity before resource mutation. This consent
+and binary gate does not yet prove that every Tier 3 resource is newly owned or that every teardown succeeded: do not
+invoke Tier 3 or `--all` on a host with pre-existing mvmctl state until the remaining Task 17 cleanup gates land.
 
 ```bash
 # Run inside the runner VM (disposable Firecracker VM with nested KVM)

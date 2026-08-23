@@ -43,11 +43,11 @@ firewall backends, host-global TAP topology, public `mvm run jailer` / `mvm run 
 | State | Location | Authority |
 |---|---|---|
 | User configuration, SQLite DB, and VM artifacts | Existing `MVM_CACHE_DIR` | Untrusted for root authorization |
-| Trusted Firecracker/Jailer pairs | `/var/lib/mvmctl/binaries` | Root-owned persistent |
+| Trusted Firecracker/Jailer pairs | `/var/lib/mvmctl/binaries/<architecture>/<version>` | Root-owned persistent |
 | VM ownership/lifecycle records | `/var/lib/mvmctl/instances/<uid>` | Root-owned persistent |
 | Network ownership/topology records | `/var/lib/mvmctl/networks/<uid>` | Root-owned persistent |
 | Global capacity allocations | `/var/lib/mvmctl/allocations` | Root-owned persistent |
-| Locks, launch handshakes, namespace handles | `/run/mvmctl` | Root-owned ephemeral |
+| Locks and launch handshakes | `/run/mvmctl` | Root-owned ephemeral; no persistent mount-namespace handles |
 | Jailer chroots | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
 | Cgroups | `/sys/fs/cgroup/mvmctl/<vm-id>` | Kernel runtime state |
 
@@ -57,7 +57,9 @@ Durable user state does not move wholesale to `/run` or `/var/run`. XDG state se
 
 - `cmd/mvm/main.go` only recognizes early modes and routes them.
 - `internal/service/privileged/` owns the envelope, authenticated caller, executable verification, and fixed action
-  switch. It imports no API or core domain and exposes no raw command/argv/path interface.
+  switch. It imports no API or core domain and exposes no raw command/argv/effect-path interface. One typed managed-cache
+  locator may identify the caller's persistent namespace; every effect below it is selected by typed IDs and fixed
+  receiver-derived basenames.
 - Capability modules under `internal/service/{jailer,network,firewall,loopmount,host}/` own typed privileged effects.
 - `pkg/api/` remains the sole orchestrator of multiple core domains.
 - Core domains never import sibling `internal/core/*` packages.
@@ -117,7 +119,8 @@ cleaning ───── Complete ─────> cleaned
 ```
 
 `registered` means launch identity is durable; it does not claim the process is healthy. Process health is derived by
-verifying PID, start ticks, cgroup membership, release, and namespace identity. Failed cleanup remains `cleaning`.
+verifying host boot ID, PID, start ticks, all UID/GID identities and supplementary groups, cgroup membership, pinned
+mount-namespace identity, and the executable hash against the exact release. Failed cleanup remains `cleaning`.
 `cleaned` is a persistent ownership tombstone and may be relaunched only by the same UID.
 
 The global lock order is:
@@ -130,9 +133,21 @@ Operations may acquire a suffix or subset but never an earlier class while holdi
 are established by descriptor-enumerating all numeric UID record directories while holding the index lock. A foreign,
 duplicate, corrupt, unreadable, or inconsistent claim fails closed. Lock files are never unlinked.
 
+Release locks are keyed by the canonical store slot `(version, architecture)`, not by caller-observed binary hashes.
+Reference matching remains against the full release identity. Competing identities for one store slot must therefore
+serialize before install, replace, remove, launch, or reference inspection.
+
 `RegisterLaunch` establishes the durable record before the first network or launch effect and returns with the VM lock
 held. A later typed network step may therefore acquire only the later network lock while retaining that launch lease.
 Task 4 owns release, index, and VM locking; it does not import network code or predeclare a network implementation.
+
+The mount-namespace launch seam uses a blocked child: the child creates its private namespace and waits on an inherited
+private handshake without performing external mutation. The parent pins the pidfd and namespace descriptor, persists
+the complete launch identity, then enters the namespace, marks propagation private, mounts named resources, and releases
+the child to exec. Here, "first launch effect" means the first externally mutable effect; allocating the blocked process
+and namespace is preparation. Mutating process operations require pidfds and never fall back to `kill(pid)`. Live mount
+operations reopen and verify `/proc/<pid>/ns/mnt`; a persistent mount-namespace handle is prohibited because it would
+retain the namespace's mounts after process exit.
 
 Atomic record replacement uses a random exclusive temporary file, bounded writes, root ownership and exact modes, file
 `fsync`, checked close, `renameat`, and parent-directory `fsync`. Pre-rename failure preserves the old record.
