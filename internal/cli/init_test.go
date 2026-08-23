@@ -76,7 +76,9 @@ func TestInitCommandForwardsBinaryVersion(t *testing.T) {
 			wantVersion: "1.15.2",
 		},
 		"non_interactive": {
-			args:               []string{"--non-interactive", "--skip-host", "--skip-network", "--binary-version", "latest"},
+			args: []string{
+				"--non-interactive", "--skip-host", "--skip-network", "--binary-version", "latest",
+			},
 			wantVersion:        "latest",
 			wantNonInteractive: true,
 		},
