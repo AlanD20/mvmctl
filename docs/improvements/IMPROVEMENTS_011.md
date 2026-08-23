@@ -1,6 +1,8 @@
 # CNI Network Backend
 
-> **STATUS: Design Proposal — not implemented.** Current network stack uses raw TAP devices + Linux bridges + nftables/iptables firewall. No CNI support exists.
+> **STATUS: Rejected for v0.3.0.** [ADR-0017](../adr/0017-per-vm-network-namespaces-and-typed-policies.md)
+> selects one built-in, typed namespace topology and rejects optional root-executed CNI plugin chains. This document is
+> retained as historical research and must not be used as an implementation plan.
 >
 > **Last verified:** 2026-07-08
 

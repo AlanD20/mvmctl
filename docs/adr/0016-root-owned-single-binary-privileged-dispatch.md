@@ -40,7 +40,7 @@ is an explicit administrator action; a normal user update cannot overwrite it.
 Development builds may exist elsewhere, but they are never sudo targets. A development build that needs privileged
 operations calls the compatible system installation and fails closed on a privileged-protocol mismatch.
 
-### Administrator bootstrap and upgrade
+### Administrator bootstrap and system-binary replacement
 
 System installation is selected by the exact `host install-system` command before `app.Initialize()`, Cobra, signal
 setup, user configuration, the user database, cache resolution, logging configuration, or service construction. The
@@ -49,10 +49,15 @@ running image to `/usr/local/bin/mvm`. Flags and extra arguments are rejected in
 fall through to the ordinary CLI.
 
 The installer cannot prove whether an already-root process reached it through password-authenticated administrator sudo
-or a legacy passwordless rule. It therefore inspects the project-managed sudoers drop-in before touching the executable
-and refuses unrecognized active syntax. During migration, an administrator removes the insecure legacy managed rule in
-an authenticated root session, runs `sudo <trusted-mvm-binary> host install-system`, and then runs
-`sudo /usr/local/bin/mvm host init`. Installation is not an implicit side effect of `host init`.
+or an unintended passwordless rule. It therefore inspects the project-managed sudoers drop-in before touching the
+executable and refuses unrecognized active syntax. On a clean host, an administrator runs
+`sudo <trusted-mvm-binary> host install-system` and then runs `sudo /usr/local/bin/mvm host init`. Installation is not an
+implicit side effect of `host init`.
+
+v0.3.0 does not use this installer to convert, adopt, or preserve a pre-v0.3 installation. Operators must remove the old
+managed sudoers rule and clean the old runtime/state layout in an authenticated administrator session before installing
+v0.3.0. Later replacement of an already-v0.3-compatible system binary remains an explicit administrator action and
+must fail closed when the privileged protocol is incompatible.
 
 Replacing the executable is descriptor-relative, no-follow, temporary-file plus file fsync plus rename plus directory
 fsync. Failures after rename report that replacement occurred and whether directory durability is uncertain. A normal
@@ -89,7 +94,7 @@ commands. The sudoers drop-in grants only the reserved privileged entry point of
 does not grant the public CLI or raw `ip`, `iptables`, `iptables-restore`, `iptables-save`, `nft`, `modprobe`, or `sysctl`
 commands.
 
-`host init`, system-binary installation/upgrades, group membership changes, sudoers changes, and `host reset` modify the
+`host init`, system-binary installation/replacement, group membership changes, sudoers changes, and `host reset` modify the
 authorization boundary itself. They remain explicit administrator operations under the administrator's normal sudo
 policy and are not exposed through the `mvm` group's passwordless dispatcher.
 
@@ -243,27 +248,28 @@ short-lived dispatcher model.
 
 **Costs and limitations:**
 
-- Installation and upgrades require an explicit administrator step.
+- Installation and system-binary replacement require an explicit administrator step.
 - Development binaries cannot perform privileged work unless a compatible system binary is installed.
-- All existing raw privileged callsites must migrate to typed operations before the old sudoers policy is removed.
+- All raw privileged callsites must be replaced by typed operations before the final sudoers policy is enabled.
 - The single executable contains more code than a dedicated helper, so early dispatch and import-graph isolation require
   strict tests and review.
 - Multi-user ownership, crash recovery, release verification, namespace mounts, and firewall atomicity add implementation
   and L2 testing cost.
 
-## Migration and Release Gate
+## Clean Installation and Release Gate
 
-ADR-0005 remains the description of the currently implemented legacy policy until this ADR's release gate passes. The
-replacement sequence is:
+ADR-0005 remains a historical description of the pre-v0.3 policy. v0.3.0 provides no compatibility or automated
+migration path for that policy, its user state, or its runtime resources. The implementation and release sequence is:
 
 1. Add early privileged dispatch, the exact administrator bootstrap route, and negative tests while the final marker-only
    path is unreachable from sudoers.
-2. Migrate every privileged service/tool call to a typed operation.
-3. In an authenticated administrator session, remove the insecure managed legacy rule, install the trusted artifact as
-   the root-owned system binary, and atomically activate the marker-only sudoers drop-in after `visudo` validation.
-4. Run upgrade, rollback, privilege-abuse, multi-user, path-race, PID-reuse, crash-recovery, Jailer, cgroup, snapshot,
-   hotplug, and firewall L2 tests.
-5. Mark ADR-0005 superseded, update all current-behavior documentation, and only then describe the new boundary as active.
+2. Replace every supported privileged service/tool call with a typed operation.
+3. On a clean host, install the trusted artifact as the root-owned system binary and atomically activate only the
+   marker-scoped sudoers drop-in after `visudo` validation.
+4. Run installation, replacement, privilege-abuse, multi-user, path-race, PID-reuse, crash-recovery, Jailer, cgroup,
+   snapshot, hotplug, and firewall L2 tests through the installed binary.
+5. Mark ADR-0005 superseded for v0.3.0, update all current-behavior documentation, and only then describe the new
+   boundary as active.
 
 No implementation phase is complete while documentation describes a different executable path, sudo policy, state
 location, lifecycle guarantee, or known limitation.
@@ -271,6 +277,6 @@ location, lifecycle guarantee, or known limitation.
 ## Related Decisions
 
 - ADR-0002: One release artifact and one installed executable remain the product contract.
-- ADR-0005: Legacy group-based wildcard sudo policy; superseded only after this migration's release gate.
+- ADR-0005: Pre-v0.3 group-based wildcard sudo policy; superseded when the v0.3.0 release gate passes.
 - ADR-0012: Root boundary, namespace, cgroup, and recovery behavior require L2 verification.
 - ADR-0015: Jailer remains canonical; its privilege-boundary and cleanup requirements are refined here.

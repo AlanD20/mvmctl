@@ -5,19 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - Unreleased
+
+> **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
+> service-access policy, root-owned system installer, and early privileged-dispatch foundation described below are
+> implemented. The mandatory per-VM network namespace, nftables-only `traffic` policy, exact VM-to-VM `exec` policy,
+> final marker-only sudo policy, and remaining typed privileged operations are not implemented yet; see
+> **Security work still pending** before treating this version as release-ready.
 
 ### Added
 
 #### Canonical Firecracker Jailer launch
 - VM create, start, reboot, and snapshot restore now require an exact Firecracker/Jailer release pair and run through a root-owned Jailer chroot with no direct-launch fallback.
-- Trusted release pairs are installed from the checksum-verified archive; each jail exposes only that VM's kernel, rootfs, volumes, runtime files, and selected snapshot.
+- Release pairs are installed from a checksum-checked archive; each jail exposes only that VM's kernel, rootfs, volumes,
+  runtime files, and selected snapshot. Independent privileged release verification remains a release blocker below.
 
 #### Enforced VM resource envelopes
 - Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.
 
 #### Routed service-access policies
 - `mvm policy` now persists exact network-to-VM TCP/UDP allows while both firewall backends default-deny other managed cross-network and VM-to-host traffic without blocking NoCloud, established replies, or internet egress.
+
+#### Root-owned single-binary installation
+- Added the exact administrator bootstrap command `sudo <trusted-mvm-binary> host install-system`, which installs the
+  same `mvm` artifact at `/usr/local/bin/mvm` as `root:root` mode `0755`.
+- System installation uses descriptor-relative, no-symlink traversal; an exclusive temporary file; complete-copy and
+  ownership verification; file and directory `fsync`; and atomic rename.
+- `host install-system` is dispatched before ordinary application initialization and ignores user cache, configuration,
+  database, logging, and environment overrides.
+- `host init` now verifies the canonical system binary before reconciling the managed sudoers drop-in. System installation
+  is deliberately separate from host initialization.
+
+#### Privileged-dispatch foundation
+- Added the reserved, versioned privileged entry point to the root-owned `mvm` binary. Selection occurs before Cobra or
+  normal CLI initialization and malformed reserved invocations fail closed instead of falling through.
+- Added strict bounded JSON parsing with unknown, duplicate, case-colliding, trailing, oversized, and structurally invalid
+  input rejection.
+- Added authenticated sudo identity and current `mvm` group checks, fixed root environment sanitization, and executable
+  device/inode verification against the root-owned `/usr/local/bin/mvm` image.
+- Added ADR-0016, which defines the single-binary privilege boundary, trusted state layout, typed operation catalog,
+  clean-install constraints, and fail-closed system-binary replacement behavior.
+
+### Changed
+
+#### VM launch and release identity
+- VM create, start, reboot, and snapshot restore no longer fall back to launching Firecracker directly when Jailer setup
+  fails.
+- VM and snapshot state now carry the exact Firecracker/Jailer pair needed by jailed launch paths.
+- Trusted release installation and Jailer launch are internal services compiled into the single `mvm` artifact.
+
+#### Host setup and updates
+- Initial setup is now two explicit administrator actions: install the trusted system image, then run
+  `sudo /usr/local/bin/mvm host init`.
+- A system-installed `/usr/local/bin/mvm` refuses in-place `self-update apply`. Administrators replace it by running
+  `host install-system` from the newly downloaded trusted artifact.
+- During development, the generated sudoers policy targets `/usr/local/bin/mvm` instead of a user-owned executable.
+  Its wildcard and raw-tool grants remain transitional and are not the final `0.3.0` security boundary.
+
+#### Network isolation
+- Traffic routed between different managed networks is now denied unless an explicit typed service-access policy permits
+  the destination VM protocol and port. Same-network bridge traffic remains unchanged.
+- VM-to-host traffic is limited to established replies and required managed services such as NoCloud; internet egress
+  remains available.
+
+### Breaking changes
+
+- v0.3.0 requires a clean installation. It does not migrate, backfill, adopt, or preserve legacy databases, running VMs,
+  Jailer directories, cgroups, TAP devices, firewall state, policy rows, or remote-exec flags. Initialization must refuse
+  ambiguous legacy runtime state rather than silently adopting or deleting it.
+- Operators must stop and remove the old installation, retain any desired user artifacts separately, clean legacy host
+  runtime state through the documented administrator procedure, and recreate VMs and policies under v0.3.0.
+- The new administrator-controlled system installation is mandatory. A user-owned `~/.local/bin/mvm` is no longer a
+  valid final sudo target.
+- The system binary and an invoking user binary must support the same privileged protocol version. Version mismatch stops
+  before side effects and requires an administrator-approved system-binary replacement.
+- Jailed VM launch requires cgroup v2, the required controllers, and an exact Firecracker/Jailer release pair. Hosts that
+  previously relied on direct Firecracker fallback no longer start VMs through that fallback.
+- Cross-network VM traffic that previously worked without an allow rule is denied after policy reconciliation. Operators
+  must create explicit `mvm policy` entries for required TCP or UDP services.
+- Scripts that expect `mvm self-update apply` to replace `/usr/local/bin/mvm` must switch to the administrator bootstrap
+  flow. Self-update remains available for user-owned candidate artifacts.
 
 ### Fixed
 
@@ -30,6 +97,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Jailed VM cgroup verification
 - VM create no longer fails when Jailer places the cgroup at `/sys/fs/cgroup/mvmctl/<vm-id>`; the check previously expected an intermediate `firecracker/` component that Jailer v1.16 does not create.
 - Stop and remove now clean the VM's actual leaf cgroup instead of leaving stale ones behind.
+
+### Security work still pending
+
+The following items are release blockers and are intentionally not described above as completed behavior:
+
+- Bind every privileged VM action to a root-owned global VM-ID ownership claim, lifecycle record, exact process identity,
+  and per-VM lock.
+- Add root-owned managed-network identity and global capacity authority; user SQLite state must not authorize host-global
+  namespace, link, firewall, process, mount, cgroup, or admission decisions.
+- Replace path-validation-then-reopen behavior with descriptor-pinned managed-resource access and private mount namespaces.
+- Independently verify and atomically install trusted Firecracker/Jailer releases inside the privileged boundary.
+- Migrate Jailer, loopmount, network, firewall, and supported host mutations to distinct typed privileged actions; remove
+  the public root `mvm run jailer` and `mvm run provision` entry points.
+- Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
+  creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
+- Remove the iptables backend and backend selector; apply one atomic nftables generation that default-denies both
+  same-network and cross-network VM traffic while preserving required system traffic and internet egress.
+- Replace routed `ServiceAccessPolicy` with typed `traffic` policies and remove the `allow_remote_exec` trust mesh in
+  favor of exact directional, non-root, resource-bounded VM-to-VM `exec` policies.
+- Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the
+  root-owned system binary.
+- Make launch, abort, cleanup, reconciliation, snapshots, live volumes, cgroups, and firewall policy crash-consistent and
+  fail closed under ownership, PID-reuse, path-race, and partial-failure conditions.
+- Complete adversarial L1 coverage, Python `tests/system/` clean-install/fault qualification, leak audits, full CI, and
+  the final documentation accuracy review. Go tests support but do not replace CLI-level L2 release signoff.
 
 ## [0.2.0] - 2026-07-10
 
@@ -333,6 +425,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System tests run in nested VM with unprivileged user
 - Coverage matrix tracking every CLI subcommand and flag
 
-[Unreleased]: https://github.com/AlanD20/mvmctl/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/AlanD20/mvmctl/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/AlanD20/mvmctl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/AlanD20/mvmctl/releases/tag/v0.1.0

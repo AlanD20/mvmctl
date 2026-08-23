@@ -1,10 +1,12 @@
 # Per-VM Network Namespaces with Firecracker Jailer
 
-> **STATUS:** ⏳ Network namespaces remain future work. Canonical Jailer launch, chroot, privilege drop, trusted release pairs, and jailed snapshot paths are implemented; `--netns`, veth topology, and a `NetNS` model remain unimplemented.
+> **STATUS:** Superseded as an implementation proposal by
+> [ADR-0017](../adr/0017-per-vm-network-namespaces-and-typed-policies.md). Mandatory per-VM namespaces are a v0.3.0
+> release blocker, but the optional, raw-iptables, duplicate-IP topology below is not the approved implementation.
 >
 > **Last verified:** 2026-06-27
 
-**Phase:** Future
+**Phase:** Historical proposal — do not implement directly
 **Complexity:** Very High
 **Depends on:** Firecracker jailer binary, kernel netns support
 

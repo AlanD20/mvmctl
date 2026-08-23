@@ -1,8 +1,12 @@
 # Routed Service-Access Policies
 
-**Status:** Active
+**Status:** Superseded for v0.3.0 by
+[ADR-0017: Per-VM Network Namespaces and Typed Connectivity Policies](0017-per-vm-network-namespaces-and-typed-policies.md)
 **Date:** 2026-08-09
 **See also:** [Project Hosting with MicroVMs](../roadmaps/TENANT_MICROVM.md), [ADR-0009: Firewall Backend Mutual Exclusion](0009-firewall-backend-mutual-exclusion.md)
+
+> This ADR remains the description of the currently implemented transitional routed-only policy. v0.3.0 replaces it
+> with mandatory per-VM namespaces, same- and cross-network default deny, and typed `traffic` and `exec` policies.
 
 ## Context
 
