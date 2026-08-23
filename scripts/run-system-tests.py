@@ -44,7 +44,7 @@ import sys
 import tempfile
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -1636,6 +1636,34 @@ def run_tier3_domain(
 # ============================================================================
 
 
+def _timed_out_domain_result(
+    future: Future[dict[str, Any]],
+    domain: str,
+    tier: int,
+    timeout: int,
+) -> dict[str, Any]:
+    """Build one failed result after the timed-out worker is contained."""
+    output = [f"Domain timed out after {timeout}s"]
+    if future.cancelled():
+        output.append("Worker was canceled before it started")
+    else:
+        try:
+            late_result = future.result()
+        except Exception as exc:
+            output.append(f"Late worker error: {exc}")
+        else:
+            late_output = str(late_result.get("output", "")).rstrip()
+            if late_output:
+                output.append(f"Late worker output:\n{late_output}")
+
+    return {
+        "domain": domain,
+        "tier": tier,
+        "passed": False,
+        "output": "\n".join(output),
+    }
+
+
 def run_domains(
     domains: dict[str, list[str]],
     tier: int,
@@ -1652,6 +1680,7 @@ def run_domains(
     results: list[dict[str, Any]] = []
     # Overall timeout per domain: 15 minutes.
     domain_timeout = 900
+    timed_out: dict[Future[dict[str, Any]], str] = {}
 
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
@@ -1669,21 +1698,15 @@ def run_domains(
                 return_when=concurrent.futures.FIRST_COMPLETED,
             )
             if not done:
-                # Timeout reached — no futures completed within domain_timeout
+                # Running threads cannot be force-canceled safely. Cancel work
+                # that has not started, then join active workers before moving on.
                 log(
-                    f"  [TIMEOUT] {len(remaining)} domain(s) timed out after {domain_timeout}s — moving on"
+                    f"  [TIMEOUT] {len(remaining)} domain(s) timed out after "
+                    f"{domain_timeout}s — containing workers before continuing"
                 )
                 for future in remaining:
-                    domain = future_map[future]
-                    results.append(
-                        {
-                            "domain": domain,
-                            "tier": tier,
-                            "passed": False,
-                            "output": f"Domain timed out after {domain_timeout}s",
-                        }
-                    )
-                    log(f"  [TIMEOUT] {domain}")
+                    future.cancel()
+                    timed_out[future] = future_map[future]
                 break
             for future in done:
                 domain = future_map[future]
@@ -1705,8 +1728,18 @@ def run_domains(
                     )
                     log(f"  [ERROR] {domain}: {e}")
     finally:
-        # Don't wait for timed-out threads — they'll be daemon-killed on exit
-        pool.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=True, cancel_futures=True)
+
+    for future, domain in sorted(timed_out.items(), key=lambda item: item[1]):
+        domain_result = _timed_out_domain_result(
+            future,
+            domain,
+            tier,
+            domain_timeout,
+        )
+        results.append(domain_result)
+        log(f"  [TIMEOUT] {domain}")
+        _print_failure(domain, domain_result)
 
     return results
 

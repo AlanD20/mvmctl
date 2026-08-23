@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import concurrent.futures
 import importlib.util
 import json
 import os
@@ -9,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 
@@ -1311,6 +1313,143 @@ def test_remote_domain_preserves_primary_failure_when_destruction_fails(
         f"provision:{vm_name}:0.3.0",
         f"pytest:{vm_name}:{660 if tier == 1 else 960}",
         f"destroy:{vm_name}",
+    ]
+
+
+def test_timed_out_parallel_worker_is_joined_and_late_failures_are_preserved(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    worker_finished = threading.Event()
+    timeout_reported = threading.Event()
+    started_domains: list[str] = []
+
+    def runner(
+        domain: str,
+        _test_files: list[str],
+        _mvm_version: str,
+        _push: bool,
+    ) -> dict[str, object]:
+        started_domains.append(domain)
+        worker_started.set()
+        assert release_worker.wait(timeout=2)
+        worker_finished.set()
+        return {
+            "domain": domain,
+            "tier": 1,
+            "passed": False,
+            "output": (
+                "late primary pytest failure\n"
+                "runner VM destruction failed: late cleanup refusal"
+            ),
+        }
+
+    def force_timeout(
+        futures: set[concurrent.futures.Future[dict[str, object]]],
+        *,
+        timeout: int,
+        return_when: str,
+    ) -> tuple[set[concurrent.futures.Future[dict[str, object]]], set[concurrent.futures.Future[dict[str, object]]]]:
+        assert timeout == 900
+        assert return_when == concurrent.futures.FIRST_COMPLETED
+        assert worker_started.wait(timeout=2)
+        return set(), set(futures)
+
+    def capture_log(message: str) -> None:
+        if "[TIMEOUT]" in message:
+            timeout_reported.set()
+
+    monkeypatch.setattr(concurrent.futures, "wait", force_timeout)
+    monkeypatch.setattr(orchestrator, "log", capture_log)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as caller_pool:
+        invocation = caller_pool.submit(
+            orchestrator.run_domains,
+            {"slow": ["slow.py"], "queued": ["queued.py"]},
+            1,
+            runner,
+            1,
+            "0.3.0",
+        )
+        assert timeout_reported.wait(timeout=2)
+        assert worker_finished.is_set() is False
+        release_worker.set()
+        results = invocation.result(timeout=2)
+
+    assert worker_finished.is_set() is True
+    assert started_domains == ["slow"]
+    by_domain = {result["domain"]: result for result in results}
+    assert set(by_domain) == {"queued", "slow"}
+    assert by_domain["slow"]["passed"] is False
+    assert "Domain timed out after 900s" in by_domain["slow"]["output"]
+    assert "late primary pytest failure" in by_domain["slow"]["output"]
+    assert "runner VM destruction failed: late cleanup refusal" in by_domain["slow"]["output"]
+    assert by_domain["queued"]["passed"] is False
+    assert "Domain timed out after 900s" in by_domain["queued"]["output"]
+    assert "canceled before it started" in by_domain["queued"]["output"]
+
+
+def test_timed_out_parallel_worker_preserves_late_exception(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    timeout_reported = threading.Event()
+
+    def runner(
+        _domain: str,
+        _test_files: list[str],
+        _mvm_version: str,
+        _push: bool,
+    ) -> dict[str, object]:
+        worker_started.set()
+        assert release_worker.wait(timeout=2)
+        raise RuntimeError("late worker exception")
+
+    def force_timeout(
+        futures: set[concurrent.futures.Future[dict[str, object]]],
+        *,
+        timeout: int,
+        return_when: str,
+    ) -> tuple[set[concurrent.futures.Future[dict[str, object]]], set[concurrent.futures.Future[dict[str, object]]]]:
+        assert timeout == 900
+        assert return_when == concurrent.futures.FIRST_COMPLETED
+        assert worker_started.wait(timeout=2)
+        return set(), set(futures)
+
+    def capture_log(message: str) -> None:
+        if "[TIMEOUT]" in message:
+            timeout_reported.set()
+
+    monkeypatch.setattr(concurrent.futures, "wait", force_timeout)
+    monkeypatch.setattr(orchestrator, "log", capture_log)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as caller_pool:
+        invocation = caller_pool.submit(
+            orchestrator.run_domains,
+            {"slow": ["slow.py"]},
+            1,
+            runner,
+            1,
+            "0.3.0",
+        )
+        assert timeout_reported.wait(timeout=2)
+        release_worker.set()
+        results = invocation.result(timeout=2)
+
+    assert results == [
+        {
+            "domain": "slow",
+            "tier": 1,
+            "passed": False,
+            "output": (
+                "Domain timed out after 900s\n"
+                "Late worker error: late worker exception"
+            ),
+        }
     ]
 
 
