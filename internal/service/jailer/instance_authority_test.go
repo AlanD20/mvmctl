@@ -233,6 +233,52 @@ func TestInstanceAuthorityReleaseReferenceLeaseBlocksLaunch(t *testing.T) {
 	require.NoError(t, releaseLease.Release(context.Background()))
 }
 
+func TestInstanceAuthorityReleaseLeaseSerializesCanonicalStoreSlot(t *testing.T) {
+	t.Parallel()
+
+	authority, _ := newTestInstanceAuthority(t)
+	held, err := authority.LockUnreferencedRelease(
+		context.Background(),
+		testLaunchRegistration().release,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, held.Release(context.Background())) })
+
+	type result struct {
+		lease *releaseLease
+		err   error
+	}
+	started := make(chan struct{})
+	resultCh := make(chan result, 1)
+	waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	go func() {
+		close(started)
+		lease, lockErr := authority.LockUnreferencedRelease(waitCtx, testAlternateReleaseIdentity())
+		resultCh <- result{lease: lease, err: lockErr}
+	}()
+	<-started
+
+	select {
+	case early := <-resultCh:
+		if early.lease != nil {
+			require.NoError(t, early.lease.Release(context.Background()))
+		}
+		require.Failf(t, "release lock returned early", "error: %v", early.err)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	require.NoError(t, held.Release(context.Background()))
+	select {
+	case acquired := <-resultCh:
+		require.NoError(t, acquired.err)
+		require.NotNil(t, acquired.lease)
+		require.NoError(t, acquired.lease.Release(context.Background()))
+	case <-waitCtx.Done():
+		require.Failf(t, "release lock remained blocked", "error: %v", waitCtx.Err())
+	}
+}
+
 func TestInstanceAuthorityReleaseLeaseRejectsCorruptAuthorityRecord(t *testing.T) {
 	t.Parallel()
 

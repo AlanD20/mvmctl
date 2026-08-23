@@ -155,8 +155,7 @@ func verifyInstanceRegularFile(
 }
 
 func releaseLockName(release releaseIdentity) string {
-	canonical := release.version + "\x00" + release.architecture + "\x00" +
-		release.firecrackerSHA256 + "\x00" + release.jailerSHA256
+	canonical := release.version + "\x00" + release.architecture
 	digest := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(digest[:]) + ".lock"
 }
