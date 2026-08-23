@@ -1166,6 +1166,154 @@ def test_remote_domain_preserves_pytest_output_and_checked_cleanup_failure(
     assert destroyed == [vm_name]
 
 
+def test_destroy_vm_requires_success(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    orchestrator.destroy_vm("t1-cli-fixed")
+
+    assert calls == [
+        (
+            ("vm", "rm", "t1-cli-fixed", "--force"),
+            {"timeout": 60, "check": True},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("runner_name", "provision_name", "tier"),
+    [
+        ("run_tier1_domain", "provision_t1", 1),
+        ("run_tier2_domain", "provision_t2", 2),
+    ],
+    ids=["tier1", "tier2"],
+)
+def test_remote_domain_destruction_failure_overrides_success(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    runner_name: str,
+    provision_name: str,
+    tier: int,
+) -> None:
+    vm_name = f"t{tier}-cli-fixed"
+    events: list[str] = []
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda _prefix: vm_name)
+    monkeypatch.setattr(
+        orchestrator,
+        provision_name,
+        lambda provisioned, version: events.append(
+            f"provision:{provisioned}:{version}"
+        ),
+    )
+
+    def fake_pytest(
+        tested_vm: str,
+        _test_files: list[str],
+        *,
+        timeout: int,
+    ) -> tuple[subprocess.CompletedProcess[str], None]:
+        events.append(f"pytest:{tested_vm}:{timeout}")
+        return (
+            subprocess.CompletedProcess(
+                ["pytest"],
+                0,
+                stdout="useful pytest stdout\n",
+                stderr="",
+            ),
+            None,
+        )
+
+    def fail_destroy(destroyed: str) -> None:
+        events.append(f"destroy:{destroyed}")
+        raise RuntimeError("synthetic runner destruction refusal")
+
+    monkeypatch.setattr(orchestrator, "_run_remote_pytest", fake_pytest)
+    monkeypatch.setattr(orchestrator, "destroy_vm", fail_destroy)
+
+    result = getattr(orchestrator, runner_name)(
+        "cli",
+        ["tests/system/cli/test_cli.py"],
+        "0.3.0",
+    )
+
+    assert result["passed"] is False
+    assert "useful pytest stdout" in result["output"]
+    assert "runner VM destruction failed" in result["output"]
+    assert "synthetic runner destruction refusal" in result["output"]
+    assert events == [
+        f"provision:{vm_name}:0.3.0",
+        f"pytest:{vm_name}:{660 if tier == 1 else 960}",
+        f"destroy:{vm_name}",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("runner_name", "provision_name", "tier"),
+    [
+        ("run_tier1_domain", "provision_t1", 1),
+        ("run_tier2_domain", "provision_t2", 2),
+    ],
+    ids=["tier1", "tier2"],
+)
+def test_remote_domain_preserves_primary_failure_when_destruction_fails(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    runner_name: str,
+    provision_name: str,
+    tier: int,
+) -> None:
+    vm_name = f"t{tier}-cli-fixed"
+    events: list[str] = []
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda _prefix: vm_name)
+    monkeypatch.setattr(
+        orchestrator,
+        provision_name,
+        lambda provisioned, version: events.append(
+            f"provision:{provisioned}:{version}"
+        ),
+    )
+
+    def fail_pytest(
+        tested_vm: str,
+        _test_files: list[str],
+        *,
+        timeout: int,
+    ) -> tuple[subprocess.CompletedProcess[str], str | None]:
+        events.append(f"pytest:{tested_vm}:{timeout}")
+        raise RuntimeError("synthetic primary pytest failure")
+
+    def fail_destroy(destroyed: str) -> None:
+        events.append(f"destroy:{destroyed}")
+        raise RuntimeError("synthetic runner destruction refusal")
+
+    monkeypatch.setattr(orchestrator, "_run_remote_pytest", fail_pytest)
+    monkeypatch.setattr(orchestrator, "destroy_vm", fail_destroy)
+
+    result = getattr(orchestrator, runner_name)(
+        "cli",
+        ["tests/system/cli/test_cli.py"],
+        "0.3.0",
+    )
+
+    assert result["passed"] is False
+    assert "synthetic primary pytest failure" in result["output"]
+    assert "runner VM destruction failed" in result["output"]
+    assert "synthetic runner destruction refusal" in result["output"]
+    assert events == [
+        f"provision:{vm_name}:0.3.0",
+        f"pytest:{vm_name}:{660 if tier == 1 else 960}",
+        f"destroy:{vm_name}",
+    ]
+
+
 def test_builder_assets_are_pulled_in_separate_sequential_execs(
     orchestrator: ModuleType,
     monkeypatch: pytest.MonkeyPatch,

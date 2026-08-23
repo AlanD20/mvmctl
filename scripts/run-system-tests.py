@@ -1022,9 +1022,27 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
     )
 
 
-def destroy_vm(vm_name: str) -> None:
+def destroy_vm(vm_name: str, *, check: bool = True) -> None:
     """Destroy a runner VM."""
-    mvm("vm", "rm", vm_name, "--force", timeout=60, check=False)
+    mvm("vm", "rm", vm_name, "--force", timeout=60, check=check)
+
+
+def _record_runner_destruction(
+    result: dict[str, Any],
+    vm_name: str,
+) -> None:
+    """Make mandatory runner destruction part of the domain result."""
+    try:
+        destroy_vm(vm_name)
+    except Exception as exc:
+        result["passed"] = False
+        cleanup_failure = f"runner VM destruction failed for {vm_name}: {exc}"
+        primary_output = result["output"].rstrip()
+        result["output"] = (
+            f"{primary_output}\n{cleanup_failure}"
+            if primary_output
+            else cleanup_failure
+        )
 
 
 def _bounded_builder_pull_output(
@@ -1172,7 +1190,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             return img_tag
 
     # Clean up any leftover builder VM from a previous aborted run
-    destroy_vm(BASE_VM_NAME)
+    destroy_vm(BASE_VM_NAME, check=False)
 
     log(f"  Creating builder VM '{BASE_VM_NAME}'...")
     mvm(
@@ -1532,7 +1550,7 @@ def run_tier1_domain(
     except Exception as e:
         result["output"] = str(e)
     finally:
-        destroy_vm(vm_name)
+        _record_runner_destruction(result, vm_name)
 
     return result
 
@@ -1581,7 +1599,7 @@ def run_tier2_domain(
     except Exception as e:
         result["output"] = str(e)
     finally:
-        destroy_vm(vm_name)
+        _record_runner_destruction(result, vm_name)
 
     return result
 
