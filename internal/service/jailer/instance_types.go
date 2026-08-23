@@ -30,6 +30,11 @@ type instanceCaller struct {
 	uid uint32
 }
 
+type releaseSlot struct {
+	version      string
+	architecture string
+}
+
 type releaseIdentity struct {
 	version           string
 	architecture      string
@@ -203,11 +208,8 @@ func validateInstanceRecord(record instanceRecord) error {
 }
 
 func validateReleaseIdentityValue(release releaseIdentity) error {
-	if !versionPattern.MatchString(release.version) || strings.Contains(release.version, "..") {
-		return fmt.Errorf("instance authority release version is invalid")
-	}
-	if release.architecture != "x86_64" && release.architecture != "aarch64" {
-		return fmt.Errorf("instance authority release architecture is invalid")
+	if err := validateReleaseSlotValue(releaseSlotForIdentity(release)); err != nil {
+		return err
 	}
 	if !authorityHashPattern.MatchString(release.firecrackerSHA256) ||
 		!authorityHashPattern.MatchString(release.jailerSHA256) {
@@ -217,6 +219,20 @@ func validateReleaseIdentityValue(release releaseIdentity) error {
 		)
 	}
 	return nil
+}
+
+func validateReleaseSlotValue(slot releaseSlot) error {
+	if !versionPattern.MatchString(slot.version) || strings.Contains(slot.version, "..") {
+		return fmt.Errorf("instance authority release version is invalid")
+	}
+	if slot.architecture != "x86_64" && slot.architecture != "aarch64" {
+		return fmt.Errorf("instance authority release architecture is invalid")
+	}
+	return nil
+}
+
+func releaseSlotForIdentity(release releaseIdentity) releaseSlot {
+	return releaseSlot{version: release.version, architecture: release.architecture}
 }
 
 func validateProcessIdentityValue(vmID string, process processIdentity) error {

@@ -17,9 +17,21 @@ func TestReleaseLockNameUsesCanonicalStoreSlot(t *testing.T) {
 	differentArchitecture := release
 	differentArchitecture.architecture = "aarch64"
 
-	assert.Equal(t, releaseLockName(release), releaseLockName(sameSlot))
-	assert.NotEqual(t, releaseLockName(release), releaseLockName(differentVersion))
-	assert.NotEqual(t, releaseLockName(release), releaseLockName(differentArchitecture))
+	assert.Equal(
+		t,
+		releaseLockName(releaseSlotForIdentity(release)),
+		releaseLockName(releaseSlotForIdentity(sameSlot)),
+	)
+	assert.NotEqual(
+		t,
+		releaseLockName(releaseSlotForIdentity(release)),
+		releaseLockName(releaseSlotForIdentity(differentVersion)),
+	)
+	assert.NotEqual(
+		t,
+		releaseLockName(releaseSlotForIdentity(release)),
+		releaseLockName(releaseSlotForIdentity(differentArchitecture)),
+	)
 }
 
 func testAlternateReleaseIdentity() releaseIdentity {

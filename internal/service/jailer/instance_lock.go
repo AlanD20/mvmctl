@@ -21,11 +21,11 @@ func (roots *instanceAuthorityRoots) acquireIndexLock(ctx context.Context) (*aut
 	return acquireAuthorityLock(ctx, roots.deps, roots.policy, roots.runtimeFD, "index.lock", "global index")
 }
 
-func (roots *instanceAuthorityRoots) acquireReleaseLock(
+func (roots *instanceAuthorityRoots) acquireReleaseSlotLock(
 	ctx context.Context,
-	release releaseIdentity,
+	slot releaseSlot,
 ) (*authorityLock, error) {
-	if err := validateReleaseIdentityValue(release); err != nil {
+	if err := validateReleaseSlotValue(slot); err != nil {
 		return nil, instanceValidationError(err.Error())
 	}
 	return acquireAuthorityLock(
@@ -33,7 +33,7 @@ func (roots *instanceAuthorityRoots) acquireReleaseLock(
 		roots.deps,
 		roots.policy,
 		roots.releasesFD,
-		releaseLockName(release),
+		releaseLockName(slot),
 		"release",
 	)
 }
@@ -154,8 +154,8 @@ func verifyInstanceRegularFile(
 	return nil
 }
 
-func releaseLockName(release releaseIdentity) string {
-	canonical := release.version + "\x00" + release.architecture
+func releaseLockName(slot releaseSlot) string {
+	canonical := slot.version + "\x00" + slot.architecture
 	digest := sha256.Sum256([]byte(canonical))
 	return hex.EncodeToString(digest[:]) + ".lock"
 }

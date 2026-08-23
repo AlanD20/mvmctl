@@ -34,9 +34,10 @@ type cleanupLease struct {
 	record      instanceRecord
 }
 
-type releaseLease struct {
+type releaseSlotLease struct {
 	roots       *instanceAuthorityRoots
 	releaseLock *authorityLock
+	slot        releaseSlot
 }
 
 type lockedInstance struct {
@@ -57,22 +58,60 @@ func newInstanceAuthorityWithPolicy(
 	return &instanceAuthority{deps: deps, policy: policy}
 }
 
-func (authority *instanceAuthority) RegisterLaunch(
+func (authority *instanceAuthority) lockReleaseSlot(
+	ctx context.Context,
+	slot releaseSlot,
+) (_ *releaseSlotLease, returnErr error) {
+	if err := validateReleaseSlotValue(slot); err != nil {
+		return nil, instanceValidationError(err.Error())
+	}
+	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy)
+	if err != nil {
+		return nil, err
+	}
+	var releaseLock *authorityLock
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		returnErr = releaseInstanceOperationResources(
+			ctx,
+			returnErr,
+			nil,
+			nil,
+			releaseLock,
+			nil,
+			roots,
+		)
+	}()
+	releaseLock, err = roots.acquireReleaseSlotLock(ctx, slot)
+	if err != nil {
+		return nil, err
+	}
+	lease := &releaseSlotLease{roots: roots, releaseLock: releaseLock, slot: slot}
+	roots = nil
+	releaseLock = nil
+	return lease, nil
+}
+
+func (lease *releaseSlotLease) registerLaunch(
 	ctx context.Context,
 	caller instanceCaller,
 	registration launchRegistration,
 ) (_ *launchLease, returnErr error) {
+	if lease == nil || lease.roots == nil || lease.releaseLock == nil || lease.releaseLock.fd < 0 {
+		return nil, instanceStateError(registration.vmID, "release slot lease is not active")
+	}
 	if err := validateInstanceCaller(caller); err != nil {
 		return nil, err
 	}
 	if err := validateLaunchRegistration(registration); err != nil {
 		return nil, err
 	}
-	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy)
-	if err != nil {
-		return nil, err
+	if releaseSlotForIdentity(registration.release) != lease.slot {
+		return nil, instanceValidationError("launch release identity does not match held release slot")
 	}
-	var releaseLock, indexLock, vmLock *authorityLock
+	var indexLock, vmLock *authorityLock
 	var directories *instanceUIDDirectories
 	defer func() {
 		if returnErr == nil {
@@ -83,26 +122,22 @@ func (authority *instanceAuthority) RegisterLaunch(
 			returnErr,
 			vmLock,
 			indexLock,
-			releaseLock,
+			nil,
 			directories,
-			roots,
+			nil,
 		)
 	}()
 
-	releaseLock, err = roots.acquireReleaseLock(ctx, registration.release)
+	indexLock, err := lease.roots.acquireIndexLock(ctx)
 	if err != nil {
 		return nil, err
 	}
-	indexLock, err = roots.acquireIndexLock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	location, err := roots.findInstance(ctx, registration.vmID)
+	location, err := lease.roots.findInstance(ctx, registration.vmID)
 	if err != nil {
 		return nil, err
 	}
 	if location != nil && location.uid != caller.uid {
-		if closeErr := authority.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
+		if closeErr := lease.roots.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
 			return nil, appendInstanceOperationError(
 				unauthorizedInstanceError(registration.vmID),
 				"close foreign instance authority directory",
@@ -113,12 +148,12 @@ func (authority *instanceAuthority) RegisterLaunch(
 	}
 	var existing *instanceRecord
 	if location == nil {
-		directories, err = roots.openUIDDirectories(ctx, caller.uid)
+		directories, err = lease.roots.openUIDDirectories(ctx, caller.uid)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		directories, err = roots.openRuntimeForLocation(ctx, location)
+		directories, err = lease.roots.openRuntimeForLocation(ctx, location)
 		if err != nil {
 			return nil, err
 		}
@@ -149,18 +184,64 @@ func (authority *instanceAuthority) RegisterLaunch(
 		return nil, annotateInstanceRecordReplacement(err, false)
 	}
 	indexLock = nil
-	lease := &launchLease{
-		roots:       roots,
+	launch := &launchLease{
+		roots:       lease.roots,
 		directories: directories,
-		releaseLock: releaseLock,
+		releaseLock: lease.releaseLock,
 		vmLock:      vmLock,
 		record:      record,
 	}
-	roots = nil
+	lease.roots = nil
+	lease.releaseLock = nil
 	directories = nil
-	releaseLock = nil
 	vmLock = nil
-	return lease, nil
+	return launch, nil
+}
+
+func (lease *releaseSlotLease) requireUnreferenced(
+	ctx context.Context,
+	release releaseIdentity,
+) (returnErr error) {
+	if lease == nil || lease.roots == nil || lease.releaseLock == nil || lease.releaseLock.fd < 0 {
+		return instanceStateError("", "release slot lease is not active")
+	}
+	if err := validateReleaseIdentityValue(release); err != nil {
+		return instanceValidationError(err.Error())
+	}
+	if releaseSlotForIdentity(release) != lease.slot {
+		return instanceValidationError("release identity does not match held release slot")
+	}
+	var indexLock *authorityLock
+	defer func() {
+		if indexLock != nil {
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"release global index lock",
+				indexLock.Release(context.WithoutCancel(ctx)),
+			)
+		}
+	}()
+	indexLock, err := lease.roots.acquireIndexLock(ctx)
+	if err != nil {
+		return err
+	}
+	referenced, err := lease.roots.releaseIsReferenced(ctx, release)
+	if err != nil {
+		return err
+	}
+	if referenced {
+		return errs.New(
+			errs.CodeVMStateInvalid,
+			"release is referenced by active privileged VM authority",
+			errs.WithClass(errs.ClassConflict),
+		)
+	}
+	if err := indexLock.Release(ctx); err != nil {
+		indexLock = nil
+		return err
+	}
+	indexLock = nil
+	return nil
 }
 
 func (authority *instanceAuthority) LockRegistered(
@@ -241,62 +322,6 @@ func (lease *cleanupLease) Complete(ctx context.Context) error {
 	}
 	lease.record = updated
 	return nil
-}
-
-func (authority *instanceAuthority) LockUnreferencedRelease(
-	ctx context.Context,
-	release releaseIdentity,
-) (_ *releaseLease, returnErr error) {
-	if err := validateReleaseIdentityValue(release); err != nil {
-		return nil, instanceValidationError(err.Error())
-	}
-	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy)
-	if err != nil {
-		return nil, err
-	}
-	var releaseLock, indexLock *authorityLock
-	defer func() {
-		if returnErr == nil {
-			return
-		}
-		returnErr = releaseInstanceOperationResources(
-			ctx,
-			returnErr,
-			nil,
-			indexLock,
-			releaseLock,
-			nil,
-			roots,
-		)
-	}()
-	releaseLock, err = roots.acquireReleaseLock(ctx, release)
-	if err != nil {
-		return nil, err
-	}
-	indexLock, err = roots.acquireIndexLock(ctx)
-	if err != nil {
-		return nil, err
-	}
-	referenced, err := roots.releaseIsReferenced(ctx, release)
-	if err != nil {
-		return nil, err
-	}
-	if referenced {
-		return nil, errs.New(
-			errs.CodeVMStateInvalid,
-			"release is referenced by active privileged VM authority",
-			errs.WithClass(errs.ClassConflict),
-		)
-	}
-	if err := indexLock.Release(ctx); err != nil {
-		indexLock = nil
-		return nil, err
-	}
-	indexLock = nil
-	lease := &releaseLease{roots: roots, releaseLock: releaseLock}
-	roots = nil
-	releaseLock = nil
-	return lease, nil
 }
 
 func (authority *instanceAuthority) lockOwnedInstance(
@@ -431,7 +456,7 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 	return err
 }
 
-func (lease *releaseLease) Release(ctx context.Context) error {
+func (lease *releaseSlotLease) Release(ctx context.Context) error {
 	if lease == nil {
 		return nil
 	}
