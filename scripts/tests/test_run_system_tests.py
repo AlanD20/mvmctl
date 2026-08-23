@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ast
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -83,6 +84,24 @@ def _write_system_test(repo_root: Path, relative_path: str) -> None:
     test_file = repo_root / relative_path
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text("def test_registered():\n    pass\n", encoding="utf-8")
+
+
+def _complete_pytest_outcome_report(collected: int = 1) -> bytes:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "collected": collected,
+            "passed": collected,
+            "failed": 0,
+            "errors": 0,
+            "collection_errors": 0,
+            "deselected": 0,
+            "skipped": 0,
+            "xfailed": 0,
+            "xpassed": 0,
+            "exit_status": 0,
+        }
+    ).encode()
 
 
 def test_default_outer_controller_is_the_canonical_system_binary(
@@ -816,6 +835,334 @@ def test_streamed_mvm_failure_preserves_command_and_rc_when_output_is_none(
     ) in message
     assert "rc: 23" in message
     assert "stderr: (streamed; not captured)" in message
+
+
+def test_tier3_domain_requires_complete_local_pytest_outcomes(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    report_directories: list[Path] = []
+
+    def fake_pytest(
+        test_files: list[str],
+        *,
+        timeout: int,
+        extra_env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        assert test_files == ["tests/system/env/test_env.py"]
+        assert timeout == 600
+        report_path = Path(extra_env[orchestrator.PYTEST_OUTCOME_REPORT_ENV])
+        report_directories.append(report_path.parent)
+        report_path.write_bytes(_complete_pytest_outcome_report(collected=2))
+        return subprocess.CompletedProcess(
+            ["pytest"],
+            0,
+            stdout="pytest stdout\n",
+            stderr="pytest stderr\n",
+        )
+
+    monkeypatch.setattr(orchestrator, "_run_pytest", fake_pytest)
+
+    result = orchestrator.run_tier3_domain(
+        "env",
+        ["tests/system/env/test_env.py"],
+    )
+
+    assert result == {
+        "domain": "env",
+        "tier": 3,
+        "passed": True,
+        "output": "pytest stdout\npytest stderr\n",
+    }
+    assert len(report_directories) == 1
+    assert report_directories[0].name.startswith("mvmctl-pytest-env-")
+    assert not report_directories[0].exists()
+
+
+@pytest.mark.parametrize(
+    ("report_payload", "expected_reason"),
+    [
+        (None, "outcome report is missing"),
+        (b"{", "malformed JSON"),
+        (
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "collected": 1,
+                    "passed": 0,
+                    "failed": 0,
+                    "errors": 0,
+                    "collection_errors": 0,
+                    "deselected": 0,
+                    "skipped": 1,
+                    "xfailed": 0,
+                    "xpassed": 0,
+                    "exit_status": 0,
+                }
+            ).encode(),
+            "skipped=1",
+        ),
+    ],
+    ids=["missing", "corrupt", "skip"],
+)
+def test_tier3_domain_preserves_pytest_output_and_report_failure_reason(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    report_payload: bytes | None,
+    expected_reason: str,
+) -> None:
+    report_directories: list[Path] = []
+
+    def fake_pytest(
+        _test_files: list[str],
+        *,
+        timeout: int,
+        extra_env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 600
+        report_path = Path(extra_env[orchestrator.PYTEST_OUTCOME_REPORT_ENV])
+        report_directories.append(report_path.parent)
+        if report_payload is not None:
+            report_path.write_bytes(report_payload)
+        return subprocess.CompletedProcess(
+            ["pytest"],
+            0,
+            stdout="useful pytest stdout\n",
+            stderr="useful pytest stderr\n",
+        )
+
+    monkeypatch.setattr(orchestrator, "_run_pytest", fake_pytest)
+
+    result = orchestrator.run_tier3_domain(
+        "env",
+        ["tests/system/env/test_env.py"],
+    )
+
+    assert result["passed"] is False
+    assert "useful pytest stdout" in result["output"]
+    assert "useful pytest stderr" in result["output"]
+    assert "pytest outcome validation failed" in result["output"]
+    assert expected_reason in result["output"]
+    assert len(report_directories) == 1
+    assert not report_directories[0].exists()
+
+
+def test_tier3_domain_preserves_pytest_output_when_report_cleanup_fails(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    report_directory = tmp_path / "mvmctl-pytest-env-fixed"
+    report_directory.mkdir()
+
+    class FailingTemporaryDirectory:
+        name = str(report_directory)
+
+        def __init__(self, *, prefix: str) -> None:
+            assert prefix == "mvmctl-pytest-env-"
+
+        def cleanup(self) -> None:
+            raise OSError("synthetic local cleanup refusal")
+
+    def fake_pytest(
+        _test_files: list[str],
+        *,
+        timeout: int,
+        extra_env: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        assert timeout == 600
+        Path(extra_env[orchestrator.PYTEST_OUTCOME_REPORT_ENV]).write_bytes(
+            _complete_pytest_outcome_report()
+        )
+        return subprocess.CompletedProcess(
+            ["pytest"],
+            0,
+            stdout="useful pytest stdout\n",
+            stderr="useful pytest stderr\n",
+        )
+
+    monkeypatch.setattr(
+        orchestrator.tempfile,
+        "TemporaryDirectory",
+        FailingTemporaryDirectory,
+    )
+    monkeypatch.setattr(orchestrator, "_run_pytest", fake_pytest)
+
+    result = orchestrator.run_tier3_domain(
+        "env",
+        ["tests/system/env/test_env.py"],
+    )
+
+    assert result["passed"] is False
+    assert "useful pytest stdout" in result["output"]
+    assert "useful pytest stderr" in result["output"]
+    assert "local outcome report cleanup failed" in result["output"]
+    assert "synthetic local cleanup refusal" in result["output"]
+
+
+@pytest.mark.parametrize(
+    ("runner_name", "provision_name", "tier", "pytest_timeout"),
+    [
+        ("run_tier1_domain", "provision_t1", 1, 660),
+        ("run_tier2_domain", "provision_t2", 2, 960),
+    ],
+    ids=["tier1", "tier2"],
+)
+def test_remote_domains_require_retrieved_complete_pytest_outcomes(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    runner_name: str,
+    provision_name: str,
+    tier: int,
+    pytest_timeout: int,
+) -> None:
+    vm_name = f"t{tier}-cli-fixed"
+    events: list[str] = []
+    calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda _prefix: vm_name)
+    monkeypatch.setattr(
+        orchestrator,
+        provision_name,
+        lambda provisioned, version: events.append(
+            f"provision:{provisioned}:{version}"
+        ),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "destroy_vm",
+        lambda destroyed: events.append(f"destroy:{destroyed}"),
+    )
+
+    def fake_mvm(*args: str, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((args, kwargs))
+        command = args[-1]
+        if "python3 -m pytest" in command:
+            events.append("pytest")
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout="pytest stdout\n",
+                stderr="pytest stderr\n",
+            )
+        if command.startswith("head -c "):
+            events.append("retrieve")
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout=_complete_pytest_outcome_report().decode(),
+                stderr="",
+            )
+        if command.startswith("rm -f -- "):
+            events.append("cleanup")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected mvm call: {args}")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    runner = getattr(orchestrator, runner_name)
+    result = runner(
+        "cli",
+        ["tests/system/cli/test_cli.py"],
+        "0.3.0",
+    )
+
+    assert result == {
+        "domain": "cli",
+        "tier": tier,
+        "passed": True,
+        "output": "pytest stdout\npytest stderr\n",
+    }
+    report_path = f"/tmp/mvmctl-pytest-outcomes-{vm_name}.json"
+    pytest_args, pytest_kwargs = calls[0]
+    assert pytest_args[:2] == ("exec", vm_name)
+    assert f"MVM_PYTEST_OUTCOME_REPORT={report_path}" in pytest_args[-1]
+    assert "/tests/system/cli/test_cli.py" in pytest_args[-1]
+    assert pytest_kwargs["timeout"] == pytest_timeout
+    retrieve_args, retrieve_kwargs = calls[1]
+    assert retrieve_args[-1] == f"head -c 4097 -- {report_path}"
+    assert retrieve_kwargs["check"] is False
+    cleanup_args, cleanup_kwargs = calls[2]
+    assert cleanup_args[-1] == (
+        f"rm -f -- {report_path} && test ! -e {report_path}"
+    )
+    assert cleanup_kwargs["check"] is True
+    assert events == [
+        f"provision:{vm_name}:0.3.0",
+        "pytest",
+        "retrieve",
+        "cleanup",
+        f"destroy:{vm_name}",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("report_payload", "retrieve_rc", "cleanup_fails", "expected_reason"),
+    [
+        ("", 1, False, "outcome report is missing"),
+        ("{", 0, False, "malformed JSON"),
+        (
+            _complete_pytest_outcome_report().decode(),
+            0,
+            True,
+            "remote outcome report cleanup failed",
+        ),
+    ],
+    ids=["missing", "corrupt", "cleanup"],
+)
+def test_remote_domain_preserves_pytest_output_and_checked_cleanup_failure(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    report_payload: str,
+    retrieve_rc: int,
+    cleanup_fails: bool,
+    expected_reason: str,
+) -> None:
+    vm_name = "t1-cli-fixed"
+    destroyed: list[str] = []
+    monkeypatch.setattr(orchestrator, "_unique_name", lambda _prefix: vm_name)
+    monkeypatch.setattr(
+        orchestrator,
+        "provision_t1",
+        lambda _vm_name, _version: None,
+    )
+    monkeypatch.setattr(orchestrator, "destroy_vm", destroyed.append)
+
+    def fake_mvm(*args: str, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        command = args[-1]
+        if "python3 -m pytest" in command:
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout="useful pytest stdout\n",
+                stderr="useful pytest stderr\n",
+            )
+        if command.startswith("head -c "):
+            return subprocess.CompletedProcess(
+                args,
+                retrieve_rc,
+                stdout=report_payload,
+                stderr=None if retrieve_rc else "",
+            )
+        if command.startswith("rm -f -- "):
+            if cleanup_fails:
+                raise RuntimeError("synthetic cleanup refusal")
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        raise AssertionError(f"unexpected mvm call: {args}")
+
+    monkeypatch.setattr(orchestrator, "mvm", fake_mvm)
+
+    result = orchestrator.run_tier1_domain(
+        "cli",
+        ["tests/system/cli/test_cli.py"],
+        "0.3.0",
+    )
+
+    assert result["passed"] is False
+    assert "useful pytest stdout" in result["output"]
+    assert "useful pytest stderr" in result["output"]
+    assert "pytest outcome validation failed" in result["output"]
+    assert expected_reason in result["output"]
+    assert destroyed == [vm_name]
 
 
 def test_builder_assets_are_pulled_in_separate_sequential_execs(

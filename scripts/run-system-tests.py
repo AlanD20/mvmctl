@@ -52,6 +52,12 @@ from system_test_release import (
     validate_release_build_paths,
     verify_release_binary_identity,
 )
+from system_test_outcomes import (
+    MAX_PYTEST_OUTCOME_REPORT_BYTES,
+    PYTEST_OUTCOME_REPORT_ENV,
+    read_pytest_outcome_report,
+    require_complete_pytest_outcomes,
+)
 
 # ============================================================================
 # Configuration
@@ -1256,6 +1262,174 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
 # ============================================================================
 
 
+def _remote_pytest_report_path(vm_name: str) -> str:
+    """Return one fixed report receiver derived from the unique runner VM."""
+    if re.fullmatch(r"[A-Za-z0-9_-]+", vm_name) is None:
+        raise RuntimeError(f"unsafe runner VM name for outcome report: {vm_name!r}")
+    return f"/tmp/mvmctl-pytest-outcomes-{vm_name}.json"
+
+
+def _remote_pytest_command(
+    vm_name: str,
+    test_files: list[str],
+    report_path: str,
+) -> str:
+    pytest_command = shlex.join(
+        [
+            "python3",
+            "-m",
+            "pytest",
+            *(f"/{test_file}" for test_file in test_files),
+            "--tb=short",
+            "-q",
+        ]
+    )
+    environment = " ".join(
+        (
+            "MVM_ASSET_MIRROR=/mnt",
+            f"MVM_TEST_VM={shlex.quote(vm_name)}",
+            f"{PYTEST_OUTCOME_REPORT_ENV}={shlex.quote(report_path)}",
+        )
+    )
+    return f"cd / && {environment} {pytest_command}"
+
+
+def _run_remote_pytest(
+    vm_name: str,
+    test_files: list[str],
+    *,
+    timeout: int,
+) -> tuple[subprocess.CompletedProcess[str], str | None]:
+    """Run pytest in a runner VM and validate its bounded outcome report."""
+    report_path = _remote_pytest_report_path(vm_name)
+    pytest_result: subprocess.CompletedProcess[str] | None = None
+    validation_failures: list[str] = []
+    execution_error: Exception | None = None
+    try:
+        pytest_result = mvm(
+            "exec",
+            vm_name,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            _remote_pytest_command(vm_name, test_files, report_path),
+            check=False,
+            timeout=timeout,
+        )
+        retrieve_result = mvm(
+            "exec",
+            vm_name,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            f"head -c {MAX_PYTEST_OUTCOME_REPORT_BYTES + 1} -- "
+            f"{shlex.quote(report_path)}",
+            check=False,
+            timeout=30,
+        )
+        if retrieve_result.returncode != 0:
+            detail = (retrieve_result.stderr or "").strip() or "report read failed"
+            raise RuntimeError(
+                f"remote pytest outcome report is missing: {detail}"
+            )
+        require_complete_pytest_outcomes(
+            retrieve_result.stdout.encode(),
+            process_returncode=pytest_result.returncode,
+        )
+    except Exception as exc:
+        execution_error = exc
+    finally:
+        try:
+            mvm(
+                "exec",
+                vm_name,
+                "--user",
+                "runner",
+                "--timeout",
+                "10",
+                "--",
+                f"rm -f -- {shlex.quote(report_path)} && "
+                f"test ! -e {shlex.quote(report_path)}",
+                check=True,
+                timeout=30,
+            )
+        except Exception as exc:
+            validation_failures.append(
+                f"remote outcome report cleanup failed: {exc}"
+            )
+
+    if pytest_result is None:
+        if execution_error is not None:
+            validation_failures.insert(0, str(execution_error))
+        raise RuntimeError("; ".join(validation_failures))
+    if execution_error is not None:
+        validation_failures.insert(0, str(execution_error))
+    reason = "; ".join(validation_failures) or None
+    return pytest_result, reason
+
+
+def _pytest_result_output(
+    pytest_result: subprocess.CompletedProcess[str],
+    validation_failure: str | None,
+) -> str:
+    output = (pytest_result.stdout or "") + (pytest_result.stderr or "")
+    if validation_failure is not None:
+        output += (
+            "\npytest outcome validation failed: "
+            f"{validation_failure}\n"
+        )
+    return output
+
+
+def _run_local_pytest(
+    domain: str,
+    test_files: list[str],
+    *,
+    timeout: int,
+) -> tuple[subprocess.CompletedProcess[str], str | None]:
+    """Run host-direct pytest with a private report and checked cleanup."""
+    report_directory = tempfile.TemporaryDirectory(
+        prefix=f"mvmctl-pytest-{domain}-"
+    )
+    report_path = Path(report_directory.name) / "outcomes.json"
+    pytest_result: subprocess.CompletedProcess[str] | None = None
+    validation_failures: list[str] = []
+    execution_error: Exception | None = None
+    try:
+        pytest_result = _run_pytest(
+            test_files,
+            timeout=timeout,
+            extra_env={PYTEST_OUTCOME_REPORT_ENV: str(report_path)},
+        )
+        payload = read_pytest_outcome_report(report_path)
+        require_complete_pytest_outcomes(
+            payload,
+            process_returncode=pytest_result.returncode,
+        )
+    except Exception as exc:
+        execution_error = exc
+    finally:
+        try:
+            report_directory.cleanup()
+        except Exception as exc:
+            validation_failures.append(
+                f"local outcome report cleanup failed: {exc}"
+            )
+
+    if pytest_result is None:
+        if execution_error is not None:
+            validation_failures.insert(0, str(execution_error))
+        raise RuntimeError("; ".join(validation_failures))
+    if execution_error is not None:
+        validation_failures.insert(0, str(execution_error))
+    reason = "; ".join(validation_failures) or None
+    return pytest_result, reason
+
+
 def run_tier1_domain(
     domain: str, test_files: list[str], mvm_version: str, push: bool = False
 ) -> dict[str, Any]:
@@ -1287,21 +1461,16 @@ def run_tier1_domain(
                 timeout=30,
             )
         log(f"  Running {domain} tests...")
-        pytest_result = mvm(
-            "exec",
+        pytest_result, validation_failure = _run_remote_pytest(
             vm_name,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            f"cd / && MVM_ASSET_MIRROR=/mnt MVM_TEST_VM={vm_name} "
-            f"python3 -m pytest {' '.join(f'/{f}' for f in test_files)} --tb=short -q",
-            check=False,
+            test_files,
             timeout=660,
         )
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
     except Exception as e:
         result["output"] = str(e)
     finally:
@@ -1341,21 +1510,16 @@ def run_tier2_domain(
                 timeout=30,
             )
         log(f"  Running {domain} tests...")
-        pytest_result = mvm(
-            "exec",
+        pytest_result, validation_failure = _run_remote_pytest(
             vm_name,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            f"cd / && MVM_ASSET_MIRROR=/mnt MVM_TEST_VM={vm_name} "
-            f"python3 -m pytest {' '.join(f'/{f}' for f in test_files)} --tb=short -q",
-            check=False,
+            test_files,
             timeout=960,
         )
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
     except Exception as e:
         result["output"] = str(e)
     finally:
@@ -1376,9 +1540,16 @@ def run_tier3_domain(
     }
     log(f"  Running {domain} tests on host (timeout={timeout}s)...")
     try:
-        pytest_result = _run_pytest(test_files, timeout=timeout)
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        pytest_result, validation_failure = _run_local_pytest(
+            domain,
+            test_files,
+            timeout=timeout,
+        )
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
     except Exception as e:
         result["output"] = str(e)
     return result
