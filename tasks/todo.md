@@ -63,10 +63,13 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 - [x] Unsupported versions fail closed.
 - [x] Strict bounded JSON rejects unknown, duplicate, case-fold duplicate, trailing, oversized, and malformed input.
 - [x] Caller identity, active `mvm` group, environment, and system executable are verified before dispatch.
-- [ ] Add a strict versioned request/response codec with 64 KiB frames, duplicate/unknown/depth rejection, matching
-  actions, typed results, and bounded `DomainError` code/class/entity/partial-state detail preservation.
-- [ ] Add the fd-0 Unix socketpair control runner with concurrent upload/response, request and response half-close/EOF,
-  CLOEXEC, cancellation, timeout, bounds, early-rejection handling, and `FakeRunner` support.
+- [x] Add a strict versioned request/response codec with 64 KiB frames, duplicate/unknown/depth rejection, matching
+  actions, typed read-only success/error outcomes separated from protocol failures, and bounded `DomainError`
+  code/class/entity/partial-state detail preservation.
+- [ ] Add the fd-0 Unix socketpair control transport with fixed `/usr/bin/sudo -n -- /usr/local/bin/mvm` invocation,
+  concurrent upload/response, request and response half-close/actual EOF, CLOEXEC, cancellation, bounded reaping and
+  buffers, early-rejection handling, private process dependencies, and a dedicated fake exchanger; do not extend
+  `CommandRunner`, `RunCmdOpts`, `SpawnConfig`, or `FakeRunner`.
 - [ ] Return `process_started: true` and `outcome_unknown: true` for every started process without one valid final
   response; stdout, stderr, and generic subprocess text are never action authority.
 - [ ] Keep the action switch closed until each capability has its own typed handler and abuse tests.
@@ -139,7 +142,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] ID-based `volumes/<volume-id>.<raw|qcow2>` storage.
   - [x] Content-addressed `kernels/<kernel-id>` storage with receiver-owned staging; kernel pull inputs cannot select an
     output directory, name, or path.
-  - [ ] Fixed `rootfs.img`, cloud-init, Firecracker, console, and vsock VM leaves.
+  - [ ] Fixed persistent `rootfs.img`, cloud-init, Firecracker configuration, log, console-log, and optional metrics
+    leaves; outputs are caller-owned `0600` one-link regular files truncated only after durable launch registration.
+  - [ ] Fixed ephemeral API/vsock/console sockets and PID mirrors beneath
+    `/run/mvmctl/runtime/<uid>/<vm-id>`; the root-controlled parent and pinned caller-owned VM directory replace the
+    whole-cache-VM-directory bind.
   - [ ] Fixed snapshot leaves and a managed ID-scoped image-provisioning staging subtree.
 - [ ] Define operation-specific non-empty/maximum-size and access-mode policies before coding; a caller- or DB-provided
   expected size is an equality check, not authorization for an unbounded resource.
@@ -180,8 +187,12 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 
 - [ ] Extend the strict instance record once with owner GID, host boot ID, mount-namespace device/inode, and Task 5's
   pinned cache identity; bump the schema version and reject old/partial records.
-- [ ] Launch a blocked child in a private mount namespace, pin its pidfd and namespace FD, persist the complete record
-  before externally mutable effects, mark propagation private, then release the child only after named mounts succeed.
+- [ ] Launch a blocked Firecracker child in a private mount namespace and an optional blocked dropped-caller console
+  relay in the host mount namespace; pin their pidfds and the Firecracker namespace FD, persist the complete record
+  before externally mutable effects, create/truncate fixed outputs, mark propagation private, mount the pinned runtime
+  directory and individual persistent resources, publish display-only PID mirrors, then release Firecracker only after
+  named mounts and relay readiness succeed. The relay receives inherited descriptors and never reopens a caller path or
+  retains the VM namespace.
 - [ ] Verify PID, boot ID, start ticks, all UID/GID identities, supplementary groups, exact cgroup, namespace inode,
   process liveness, and pinned executable hash against the Task 6 release manifest before signal or `setns`.
 - [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, wait through the pidfd,
@@ -191,8 +202,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Lock the OS thread for `setns`, pin/restore/verify the original host namespace, and terminate the short-lived
   privileged process if restoration fails rather than returning a contaminated thread to the Go runtime.
 - [ ] Live snapshot/volume operations enter only the verified VM mount namespace.
-- [ ] Cleanup parses and verifies mount state, unmounts only receiver-derived fixed leaves, requires cgroup emptiness,
-  and removes a descriptor-relative allowlist bottom-up; never recursively traverse a tree that may contain a mount.
+- [ ] Cleanup parses and verifies mount state, reaps the pidfd-verified relay, unmounts only receiver-derived fixed
+  leaves, requires cgroup emptiness, unlinks only the five runtime leaves, and removes descriptor-relative allowlisted
+  directories bottom-up only when empty; never recursively traverse a caller-writable tree or one containing a mount.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
 
 ## Phase 2: Final Jailer and networking paths

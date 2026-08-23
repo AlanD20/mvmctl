@@ -246,6 +246,14 @@ dispatch. That policy is not the final security boundary. The marker-only policy
 privileged caller uses the typed dispatcher. A system-installed executable cannot replace itself through
 `mvm self-update`; an administrator installs the newly downloaded trusted artifact with `host install-system`.
 
+The v0.3 privileged target splits state by authority and lifetime. Durable ownership and release records live beneath
+`/var/lib/mvmctl`; root-only locks and launch handshakes will live beneath `/run/mvmctl/authority/<uid>`. API, vsock, and
+console sockets plus display-only PID mirrors will use a separate pinned caller-owned VM directory beneath
+`/run/mvmctl/runtime/<uid>/<vm-id>`. Persistent configuration, disks, logs, console logs, and optional metrics remain in
+the caller's managed cache. Final privileged code must never mount the whole cache VM directory, trust a runtime leaf as
+authority, or signal a PID read from a PID mirror. ADR-0016 defines the exact ownership, modes, launch ordering, and
+cleanup contract; `tasks/todo.md` records implementation status.
+
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
 untagged RC build must pass the intended version explicitly. Otherwise `git describe` can inherit the previous release

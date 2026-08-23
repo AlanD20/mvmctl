@@ -97,6 +97,15 @@ while the socketpair permits the client to upload a bounded release archive and 
 Root requires descriptor 0 to be an `AF_UNIX` `SOCK_STREAM` socket and requires its Linux `SO_PEERCRED` UID/GID to match
 the authenticated sudo caller. The peer PID is positive and audit-only; it is not an authorization identity.
 
+The transport always executes exactly
+`/usr/bin/sudo -n -- /usr/local/bin/mvm __mvm_privileged_v1 <fixed-action>`. It never uses `PATH`, `os.Executable`, the
+current user binary, a caller-supplied executable/argv/environment/cwd/timeout, or a root-EUID bypass; the receiver
+requires authenticated non-root sudo identity. `internal/lib/system` provides one concrete transport rather than
+extending the generic command runner. Each capability package owns a minimal private `Exchange` interface and named
+typed public methods; no public generic privileged call/action/decoder hook is introduced. Hermetic tests inject private
+process dependencies and use a dedicated fake exchanger without extending `CommandRunner`, `RunCmdOpts`, `SpawnConfig`,
+or the existing `FakeRunner`.
+
 Each request starts with fixed `MVMREQ01` magic, a network-order 32-bit JSON-header length, and a network-order 64-bit
 payload length. The strict header is at most 64 KiB and contains schema version 1, the action repeated from argv, and the
 action-specific body. The repeated action must match. Only release install may carry a payload: either zero bytes or an
@@ -112,9 +121,17 @@ result or error. Error envelopes carry code, stable string class, message, opera
 they never serialize wrapped causes, stacks, stderr, or arbitrary Go values. Wire details permit only bounded booleans,
 strings, signed integers, and string arrays. Unsupported details are omitted visibly. Root half-closes the control
 socket's write side after the complete frame, so the client can validate response EOF independently of process exit. An
-error response delivered after all effects and cleanup exits successfully at the process layer. A start failure has
-known no-effect status; any started process with a missing, malformed, truncated, mismatched, oversized, or non-EOF
-response returns `CodeProcessError` with `process_started: true` and `outcome_unknown: true`.
+error response delivered after all effects and cleanup exits successfully at the process layer. The codec returns a
+decoded success/error outcome separately from protocol failure, so a valid root `DomainError` cannot be mistaken for a
+malformed frame. A start failure has known no-effect status; any started process with a missing, malformed, truncated,
+mismatched, oversized, or non-EOF response returns `CodeProcessError` with `process_started: true` and
+`outcome_unknown: true`.
+
+The transport returns bounded raw response bytes only together with an explicit indication that actual socket EOF was
+observed; copying a complete-looking prefix into an in-memory reader cannot fabricate authority. The named capability
+client decodes an EOF-qualified response with a non-cancelled context and lets either a valid success or valid remote
+`DomainError` win over upload `EPIPE`, non-zero exit, or later reap diagnostics. Without one valid envelope, a pre-start
+failure reports `process_started: false, outcome_unknown: false`; every post-start failure reports both values as true.
 
 ### Authorization roles
 
@@ -233,20 +250,55 @@ read-write and writes its fixed `rootfs.img`, `memory`, and `vmstate` leaves. Re
 overlays the new VM's pinned `/rootfs` at `/snapshot/rootfs.img` inside that VM's private mount namespace; no persistent
 phantom-rootfs symlink is created.
 
-The v0.3 canonical privileged-visible layout is:
+The v0.3 canonical persistent layout is:
 
 | Resource | Relative to the pinned managed cache root |
 |---|---|
 | VM directory | `vms/<vm-id>/` |
 | VM rootfs | `vms/<vm-id>/rootfs.img` |
 | Cloud-init ISO | `vms/<vm-id>/cloud-init.iso` |
-| Firecracker runtime | Fixed `firecracker.json`, `firecracker.api.socket`, `firecracker.pid`, `firecracker.log`, `firecracker.console.log`, and `firecracker.metrics` leaves |
-| Console/vsock runtime | Fixed `console.sock`, `console.pid`, and `vsock.sock` leaves |
+| Firecracker configuration | `vms/<vm-id>/firecracker.json` |
+| Persistent VM outputs | Fixed `vms/<vm-id>/firecracker.log`, `firecracker.console.log`, and optional `firecracker.metrics` regular-file leaves |
 | Volume | `volumes/<volume-id>.<raw|qcow2>` |
 | Kernel | `kernels/<kernel-id>` |
 | Snapshot | `snapshots/<snapshot-id>/{rootfs.img,memory,vmstate}` |
 | Durable image | `images/<image-id>.zst` |
 | Image staging | `images/staging/<image-id>/{source.raw,rootfs.img}` |
+
+Sockets and PID mirrors are not persistent cache artifacts. Their host layout is fixed beneath the root-controlled
+ephemeral runtime tree:
+
+```text
+/run/mvmctl/                         root:root 0711
+├── authority/                       root:root 0700
+│   └── <uid>/                       root:root 0700
+└── runtime/                         root:root 0711
+    └── <uid>/                       root:root 0711
+        └── <vm-id>/                 caller-uid:caller-gid 0700
+            ├── firecracker.api.socket
+            ├── vsock.sock
+            ├── console.sock
+            ├── firecracker.pid
+            └── console.pid
+```
+
+The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
+directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and
+retains the descriptor through mount and rollback. The dropped VM process uses umask `0077`. Socket leaves must be
+caller-owned sockets with no world access; PID leaves are caller-owned `0600` positive-decimal display mirrors capped
+at 32 bytes. Privileged process control never trusts a PID mirror.
+
+The caller can mutate leaves inside its runtime directory, so root treats the directory only as a fixed output area,
+never as authority. It is mounted as a directory at `/run/mvm/runtime` inside the private mount namespace so sockets
+created after child release remain visible. The user-owned cache VM directory is never mounted wholesale. Persistent
+configuration and output files are opened and verified individually, then mounted or inherited through their pinned
+descriptors.
+
+The three persistent output leaves are caller-owned `0600` regular files with one link. A launch truncates each enabled
+output exactly once, only after the root launch record is durable, and retains the files after stop or crash for
+inspection. `firecracker.metrics` is created only when metrics are enabled. Direct Firecracker writes do not provide a
+truthful hard live-size cap; v0.3 therefore promises bounded readers and one-launch retention, not live rotation. A
+future hard cap requires a separately designed and supervised FIFO output collector.
 
 Warm-cache files are unprivileged accelerators and never root authority. Existing database path columns may remain as
 derived display/local metadata during the clean break, but privileged handlers reconstruct these names from typed
@@ -264,14 +316,22 @@ The prepared value retains the verified manifest, pinned release directory, and 
 It supplies the full release identity to instance registration itself, then transfers the release lock into the launch
 lease only after the owner-bound record is durable. The unprivileged caller never supplies executable hashes.
 
-The launch path starts a blocked child in a new private mount namespace. Before the child can perform any externally
-mutable effect, the parent pins its pidfd and namespace descriptor, records the complete identity, and retains the launch
-lease. The parent then enters that namespace, makes mount propagation private, mounts descriptor-pinned resources, and
-releases the child to exec the exact Jailer/Firecracker pair. Process and namespace allocation for a blocked child are
-not considered an externally mutable launch effect; mounts, cgroup changes, links, and executable handoff are. Live
-snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only that
-namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain every
-mount after process exit. Cleanup never recursively traverses a tree that may contain a mount.
+The launch path starts a blocked Firecracker child in a new private mount namespace and, when enabled, a blocked console
+relay as the dropped caller in the host mount namespace. Before either child can perform an externally mutable effect,
+the parent pins each pidfd and the Firecracker namespace descriptor, records the complete identity, and retains the
+launch lease. Root then creates/truncates the fixed output slots and runtime directory, makes Firecracker mount
+propagation private, installs named mounts, publishes the non-authoritative PID mirrors, releases and verifies the relay,
+and only then releases Firecracker to exec the exact Jailer/Firecracker pair. The relay receives only inherited PTY,
+pinned log, and pinned runtime-directory descriptors; it never reopens a caller path or joins and retains the VM mount
+namespace. Process and namespace allocation for a blocked child are not considered an externally mutable launch effect;
+mounts, output creation/truncation, cgroup changes, links, and executable handoff are.
+
+Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
+that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain
+every mount after process exit. Cleanup stops and reaps the verified relay, unmounts named resources in reverse order,
+unlinks only the five fixed runtime leaves, and removes the runtime directory only when empty. It preserves persistent
+outputs and never recursively traverses a caller-writable tree or a tree that may contain a mount. Unexpected runtime
+entries leave a bounded recoverable cleanup record instead of authorizing recursive deletion.
 
 State is split by authority and lifetime:
 
@@ -281,9 +341,10 @@ State is split by authority and lifetime:
 | Trusted release pairs and manifests | `/var/lib/mvmctl/binaries/<architecture>/<version>` | Root-owned, persistent |
 | Privileged instance ownership/release records | `/var/lib/mvmctl/instances/<uid>` | Root-owned, persistent, minimal |
 | Jailer chroot directories | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
-| Per-VM locks and launch handshakes | `/run/mvmctl/<uid>` | Root-owned, ephemeral; no persistent mount-namespace handles |
+| Per-VM locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700`, ephemeral; no persistent mount-namespace handles |
+| VM sockets and PID mirrors | `/run/mvmctl/runtime/<uid>/<vm-id>` | Root-controlled parent, caller-owned `0700` VM directory, ephemeral and non-authoritative |
 | Cgroups | `/sys/fs/cgroup/mvmctl/<vm-id>` | Kernel runtime state |
-| `/run/mvm` | Inside the jail | Jail-visible bind mount, not host canonical state |
+| `/run/mvm` and `/run/mvm/runtime` | Inside the jail | Individually pinned persistent leaves plus the pinned ephemeral runtime directory; not host authority |
 
 Moving durable user state out of `~/.cache/mvmctl` is a separate XDG migration decision. Full state must not move to
 `/run` or `/var/run`.

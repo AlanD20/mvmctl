@@ -47,9 +47,10 @@ the veth pair, a local bridge, and the Firecracker TAP. Interface names, namespa
 the invoking UID and immutable resource IDs; callers cannot provide raw interface names, namespace paths, `ip` argv, or
 netns commands.
 
-Namespace handles and locks are ephemeral root-owned state under `/run/mvmctl/<uid>/`. Persistent minimal VM and network
-ownership records remain under `/var/lib/mvmctl/`. The user database stores desired logical configuration but never
-authorizes a root namespace, device, bridge, route, or firewall mutation.
+Namespace handles and locks are ephemeral root-owned state under `/run/mvmctl/authority/<uid>/`. VM-created sockets and
+display-only PID mirrors use the separate non-authoritative `/run/mvmctl/runtime/<uid>/<vm-id>/` tree defined by
+ADR-0016. Persistent minimal VM and network ownership records remain under `/var/lib/mvmctl/`. The user database stores
+desired logical configuration but never authorizes a root namespace, device, bridge, route, or firewall mutation.
 
 The privileged launch transaction must:
 

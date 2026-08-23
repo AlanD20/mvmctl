@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   normal CLI initialization and malformed reserved invocations fail closed instead of falling through.
 - Added strict bounded JSON parsing with unknown, duplicate, case-colliding, trailing, oversized, and structurally invalid
   input rejection.
+- Added the version-1 `MVMREQ01`/`MVMRES01` codec with 64 KiB JSON frames, receiver-bounded payload declarations,
+  exact action/schema matching, read-only typed success/error outcomes distinct from protocol failures, and bounded
+  `DomainError` normalization that omits wrapped causes and sensitive process-output details.
 - Added authenticated sudo identity and current `mvm` group checks, fixed root environment sanitization, and executable
   device/inode verification against the root-owned `/usr/local/bin/mvm` image.
 - Added ADR-0016, which defines the single-binary privilege boundary, trusted state layout, typed operation catalog,
@@ -179,6 +182,9 @@ The following items are release blockers and are intentionally not described abo
 - Add root-owned managed-network identity and global capacity authority; user SQLite state must not authorize host-global
   namespace, link, firewall, process, mount, cgroup, or admission decisions.
 - Replace path-validation-then-reopen behavior with descriptor-pinned managed-resource access and private mount namespaces.
+- Split root-only locks/handshakes beneath `/run/mvmctl/authority` from caller-owned socket/PID output directories beneath
+  `/run/mvmctl/runtime`; stop mounting the whole cache VM directory. Pin persistent config/output leaves individually,
+  truncate enabled `0600` log/console/metrics files only after durable launch registration, and retain them after stop.
 - Independently verify and atomically install trusted Firecracker/Jailer releases inside the privileged boundary.
 - Migrate Jailer, loopmount, network, firewall, and supported host mutations to distinct typed privileged actions; remove
   the public root `mvm run jailer` and `mvm run provision` entry points.

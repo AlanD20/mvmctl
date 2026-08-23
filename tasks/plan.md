@@ -28,6 +28,8 @@ continue without silently deleting it.
 - Early reserved privileged dispatch before Cobra and ordinary application initialization.
 - Strict bounded request parsing, sudo caller identity, group authorization, environment sanitization, and executable
   identity verification.
+- Strict version-1 length-framed request/response codec with matching actions, read-only typed outcomes distinct from
+  protocol failures, and bounded safe `DomainError` preservation.
 - Private root-owned VM ownership/lifecycle records with strict codecs, descriptor-relative atomic storage, exact
   release references, global VM-ID claims, and release/index/VM locking.
 - ADR-0016 for the single-binary privilege boundary.
@@ -47,7 +49,8 @@ firewall backends, host-global TAP topology, public `mvm run jailer` / `mvm run 
 | VM ownership/lifecycle records | `/var/lib/mvmctl/instances/<uid>` | Root-owned persistent |
 | Network ownership/topology records | `/var/lib/mvmctl/networks/<uid>` | Root-owned persistent |
 | Global capacity allocations | `/var/lib/mvmctl/allocations` | Root-owned persistent |
-| Locks and launch handshakes | `/run/mvmctl` | Root-owned ephemeral; no persistent mount-namespace handles |
+| Locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700` ephemeral; no persistent mount-namespace handles |
+| VM sockets and PID mirrors | `/run/mvmctl/runtime/<uid>/<vm-id>` | Root-controlled parent, caller-owned `0700` VM directory; ephemeral and non-authoritative |
 | Jailer chroots | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
 | Cgroups | `/sys/fs/cgroup/mvmctl/<vm-id>` | Kernel runtime state |
 
@@ -80,6 +83,12 @@ runner owns concurrent upload/response I/O so an early root rejection cannot dea
 Root requires an `AF_UNIX` `SOCK_STREAM` descriptor and Linux `SO_PEERCRED` UID/GID equal to the authenticated sudo
 caller. The positive peer PID is recorded only for audit and never substitutes for typed receiver authorization.
 
+The concrete transport always runs
+`/usr/bin/sudo -n -- /usr/local/bin/mvm __mvm_privileged_v1 <fixed-action>`. It exposes no executable, argv, environment,
+cwd, timeout, callback, decoder, or extra-FD option, never uses `PATH`/`os.Executable`, and never bypasses sudo for a root
+caller. It remains separate from `CommandRunner`, `RunCmdOpts`, `SpawnConfig`, and `FakeRunner`; capability packages use
+private minimal exchanger interfaces and a dedicated fake in tests.
+
 Requests use fixed `MVMREQ01` magic, a 32-bit network-order JSON-header length capped at 64 KiB, a 64-bit network-order
 payload length, the strict schema-version-1 header, and the exact optional payload. The header repeats the fixed argv
 action and must match it. Only typed release install accepts a payload: zero bytes or at most 128 MiB. The caller
@@ -88,9 +97,13 @@ zero-payload effects, but may respond to pre-effect authentication/header failur
 Responses use `MVMRES01`, a 32-bit length capped at 64 KiB, and one strict matching-action success/result or
 error/`DomainError` envelope. A delivered envelope is the final effect record even if process reaping later reports an
 anomaly; root half-closes its socket write side after the complete frame so response EOF does not depend on process exit.
-No domain effect or fallible outcome check is allowed after the response. Missing, malformed, truncated, mismatched,
-oversized, or non-EOF responses from a started process report
-`process_started: true` and `outcome_unknown: true`; stderr and exit text are never parsed as authority.
+The codec exposes a read-only decoded success/error outcome separately from protocol failure, so callers cannot confuse a
+valid root `DomainError` with an untrusted malformed frame. The transport reports whether actual socket EOF was observed;
+in-memory EOF over copied bytes cannot promote a response. A capability client decodes EOF-qualified bytes with a
+non-cancelled context and lets a valid success or valid remote error win over upload `EPIPE`, exit, or later reap
+diagnostics. No domain effect or fallible outcome check is allowed after the response. Missing, malformed, truncated,
+mismatched, oversized, or non-EOF responses from a started process report `process_started: true` and
+`outcome_unknown: true`; a pre-start failure reports both false. Stderr and exit text are never parsed as authority.
 
 ### VM authority interface
 
@@ -174,13 +187,26 @@ durable record before the first network or launch effect, and transfers the held
 lease. A mismatch or registration failure performs no external effect and leaves a checked, releasable slot lease.
 Task 4 owns release, index, and VM locking; it does not import network code or predeclare a network implementation.
 
-The mount-namespace launch seam uses a blocked child: the child creates its private namespace and waits on an inherited
-private handshake without performing external mutation. The parent pins the pidfd and namespace descriptor, persists
-the complete launch identity, then enters the namespace, marks propagation private, mounts named resources, and releases
-the child to exec. Here, "first launch effect" means the first externally mutable effect; allocating the blocked process
-and namespace is preparation. Mutating process operations require pidfds and never fall back to `kill(pid)`. Live mount
+The mount-namespace launch seam uses a blocked Firecracker child in a private mount namespace and, when enabled, a
+blocked console relay running as the dropped caller in the host mount namespace. The parent pins both pidfds and the
+Firecracker namespace descriptor, persists the complete launch identity, and only then creates/truncates fixed
+persistent outputs and creates the per-VM runtime directory. It enters the Firecracker namespace, marks propagation
+private, mounts the runtime directory at `/run/mvm/runtime` and each persistent resource through its pinned descriptor,
+publishes display-only PID mirrors, releases and verifies the relay, and releases Firecracker to exec. The relay receives
+only inherited PTY, pinned log, and pinned runtime-directory descriptors; it never reopens a caller path or retains the
+VM namespace. Here, "first launch effect" means the first externally mutable effect; allocating blocked processes and
+the namespace is preparation. Mutating process operations require pidfds and never fall back to `kill(pid)`. Live mount
 operations reopen and verify `/proc/<pid>/ns/mnt`; a persistent mount-namespace handle is prohibited because it would
 retain the namespace's mounts after process exit.
+
+The persistent VM outputs are fixed caller-owned `0600` one-link regular files: `firecracker.log`,
+`firecracker.console.log`, and, when enabled, `firecracker.metrics`. They are truncated once per launch after durable
+registration and retained after stop or crash. Direct Firecracker output supports bounded readers and one-launch
+retention but not a truthful hard live-size cap; such a cap would require a separately supervised FIFO collector. API,
+vsock, and console sockets plus the two PID mirrors are fixed ephemeral leaves beneath
+`/run/mvmctl/runtime/<uid>/<vm-id>`. Root retains the directory descriptor through setup and rollback but never treats
+its caller-writable contents as authority. The cache VM directory is never mounted wholesale. Cleanup unlinks only the
+fixed runtime leaves and removes the directory only when empty; it never recursively deletes caller-writable contents.
 
 Atomic record replacement uses a random exclusive temporary file, bounded writes, root ownership and exact modes, file
 `fsync`, checked close, `renameat`, and parent-directory `fsync`. Pre-rename failure preserves the old record.
