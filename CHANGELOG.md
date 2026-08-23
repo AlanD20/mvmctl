@@ -87,6 +87,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   non-empty, the process/report exit statuses match, every selected item passed, and failures, errors, collection errors,
   deselections, skips, XFAIL, and XPASS are all zero. Missing, malformed, duplicate-field, oversized reports and report
   cleanup failures fail the domain while preserving pytest output and the validation reason.
+- The system-test coverage matrix now recounts its 431 current CLI rows and separates transitional/legacy coverage from
+  the still-missing v0.3 root-authority, namespace, nftables, traffic, exec-policy, reconciliation, and zero-leak release
+  evidence. A legacy `Deep` row is no longer presented as clean-break security signoff.
 
 #### Deterministic initialization
 - Added `mvm init --binary-version <version>` to request an exact Firecracker/Jailer pair when no local pair exists.
