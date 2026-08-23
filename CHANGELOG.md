@@ -52,8 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `cleaned` records beneath `/var/lib/mvmctl/instances/<uid>` and persistent ownership tombstones.
 - Added descriptor-relative, no-follow traversal; strict bounded record decoding; atomic durable replacement; reusable
   root-owned runtime locks; and the fixed `release -> global index -> VM` lock order.
-- The private release-removal lease now locks the planned canonical architecture/version store slot, so conflicting
-  identities for one future slot cannot race under different hash-derived locks when Task 6 wires the new store.
+- Prepared release leases now lock the canonical architecture/version store slot before identity resolution. Launch
+  registration transfers that same lease only after durable authority state; removal/replacement retains it while
+  checking exact references. Competing identities cannot race through different hash-derived locks.
 - Global VM-ID claims now fail closed on foreign, duplicate, corrupt, unreadable, or inconsistent authority records, and
   trusted release removal can acquire a lease only when no active authority record references the exact release.
 - This substrate is private and not yet wired into public VM lifecycle operations; that integration remains a release

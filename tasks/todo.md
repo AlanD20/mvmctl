@@ -63,25 +63,29 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 - [x] Unsupported versions fail closed.
 - [x] Strict bounded JSON rejects unknown, duplicate, case-fold duplicate, trailing, oversized, and malformed input.
 - [x] Caller identity, active `mvm` group, environment, and system executable are verified before dispatch.
-- [ ] Add a strict versioned response envelope that preserves `DomainError` code, class, entity, and partial-state
-  details across the privileged subprocess boundary.
+- [ ] Add a strict versioned request/response codec with 64 KiB frames, duplicate/unknown/depth rejection, matching
+  actions, typed results, and bounded `DomainError` code/class/entity/partial-state detail preservation.
+- [ ] Add the fd-0 Unix socketpair control runner with concurrent upload/response, exact EOF, CLOEXEC, cancellation,
+  timeout, response/stderr bounds, early-rejection handling, and `FakeRunner` support.
+- [ ] Return `process_started: true` and `outcome_unknown: true` for every started process without one valid final
+  response; stdout, stderr, and generic subprocess text are never action authority.
 - [ ] Keep the action switch closed until each capability has its own typed handler and abuse tests.
 
 ### Task 4: Add private root-owned VM instance authority
 
 **Owner:** engineer
-**Status:** Foundation implemented; prepared release-slot correction in progress
+**Status:** Complete; Tasks 6 and 8 consume the prepared authority lease
 **Dependencies:** Tasks 1 and 3
 
 **Interface:**
 
-- [ ] Implement private `lockReleaseSlot(ctx, slot) (*releaseSlotLease, error)` before release identity resolution.
-- [ ] Implement private `releaseSlotLease.registerLaunch(ctx, caller, registration) (*launchLease, error)` with
+- [x] Implement private `lockReleaseSlot(ctx, slot) (*releaseSlotLease, error)` before release identity resolution.
+- [x] Implement private `releaseSlotLease.registerLaunch(ctx, caller, registration) (*launchLease, error)` with
   ownership transfer only after durable registration.
 - [x] Implement private `LockRegistered(ctx, caller, vmID) (*registeredLease, error)`.
 - [x] Implement private `BeginCleanup(ctx, caller, vmID) (*cleanupLease, error)`.
 - [x] Implement context-first `cleanupLease.Complete(ctx)` and checked lease release.
-- [ ] Implement private `releaseSlotLease.requireUnreferenced(ctx, release)` for exact-identity removal/replacement.
+- [x] Implement private `releaseSlotLease.requireUnreferenced(ctx, release)` for exact-identity removal/replacement.
 - [x] Expose no generic storage, callbacks, raw paths, actions, or state strings.
 
 **Authority and lifecycle:**
@@ -115,7 +119,9 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 - [x] Architect reviews actual interface, state schema, lock order, imports, and error details before commit.
 - [x] Key the release lock by canonical `(version, architecture)` store slot rather than binary hashes; prove two
   different identities for one slot serialize.
-- [ ] Prove the slot lock is held before manifest/hash resolution and a mismatched identity writes no record.
+- [x] Prove competing identities serialize on the slot, transfer occurs only after durable registration, pre-transfer
+  failures retain a releasable lease, and a mismatched slot writes no record or acquires index/VM locks.
+- [ ] Task 6 proves this lease is acquired before root manifest/hash resolution and supplies only the manifest identity.
 
 **Expected files:** fixed root constants; private instance types, codec, descriptor store, lock, authority, and focused tests
 under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, or network changes.
@@ -156,8 +162,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Store exact releases under `/var/lib/mvmctl/binaries/<architecture>/<version>` with fixed Firecracker, Jailer,
   and strict root-owned manifest leaves.
 - [ ] Privileged code constructs the fixed official release/checksum locations from validated version and architecture.
-- [ ] Root downloads the checksum and archive through a dedicated bounded HTTPS-only source with proxies and the general
-  user asset mirror disabled; caller-provided paths, checksums, URLs, and archive bytes are not authority.
+- [ ] Root obtains the checksum independently through a dedicated bounded HTTPS-only source with proxies disabled. It
+  may consume an exact-length bounded archive stream supplied by the unprivileged client for mirror efficiency, but it
+  accepts no caller path, URL, or checksum and never opens or trusts the user asset mirror as authority.
 - [ ] Bounded extraction rejects traversal, links, devices, duplicates, unexpected members, and size/count overflow.
 - [ ] Validate the complete reviewed upstream member allowlist while extracting only Firecracker and Jailer; validate
   their ELF class/machine without executing downloaded code.

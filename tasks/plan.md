@@ -60,6 +60,9 @@ Durable user state does not move wholesale to `/run` or `/var/run`. XDG state se
   switch. It imports no API or core domain and exposes no raw command/argv/effect-path interface. One typed managed-cache
   locator may identify the caller's persistent namespace; every effect below it is selected by typed IDs and fixed
   receiver-derived basenames.
+- `internal/lib/privilegedwire/` owns only the strict length-framed request/response codec and bounded `DomainError`
+  normalization. `internal/lib/system/` owns the fd-0 socketpair subprocess transport. Neither package exposes a generic
+  privileged effect or action dispatcher.
 - Capability modules under `internal/service/{jailer,network,firewall,loopmount,host}/` own typed privileged effects.
 - `pkg/api/` remains the sole orchestrator of multiple core domains.
 - Core domains never import sibling `internal/core/*` packages.
@@ -67,6 +70,26 @@ Durable user state does not move wholesale to `/run` or `/var/run`. XDG state se
 - Every side-effecting function takes `context.Context` first and returns `pkg/errs.DomainError`.
 - Each new capability uses named typed methods matching existing service conventions. No generic backend, operation,
   selector registry, callback-under-lock, raw firewall expression, raw cgroup key, or raw netns action is permitted.
+
+### Privileged control transport
+
+The normal and root processes communicate over one full-duplex Unix stream socket duplicated onto the privileged
+process's file descriptor 0 through `sudo -n`. The root process marks it close-on-exec immediately. Standard output and
+standard error remain outside the authority channel, and launch/console traffic uses a separate typed relay. The system
+runner owns concurrent upload/response I/O so an early root rejection cannot deadlock behind a large archive write.
+Root requires an `AF_UNIX` `SOCK_STREAM` descriptor and Linux `SO_PEERCRED` UID/GID equal to the authenticated sudo
+caller. The positive peer PID is recorded only for audit and never substitutes for typed receiver authorization.
+
+Requests use fixed `MVMREQ01` magic, a 32-bit network-order JSON-header length capped at 64 KiB, a 64-bit network-order
+payload length, the strict schema-version-1 header, and the exact optional payload. The header repeats the fixed argv
+action and must match it. Only typed release install accepts a payload: zero bytes or at most 128 MiB. The caller
+half-closes after the declared bytes. Root requires exact length and EOF before payload-dependent effects and before all
+zero-payload effects, but may respond to pre-effect authentication/header failure without draining a claimed payload.
+Responses use `MVMRES01`, a 32-bit length capped at 64 KiB, and one strict matching-action success/result or
+error/`DomainError` envelope. A delivered envelope is the final effect record even if process reaping later reports an
+anomaly; no domain effect or fallible outcome check is allowed after the response. Missing, malformed, truncated,
+mismatched, or oversized responses from a started process report
+`process_started: true` and `outcome_unknown: true`; stderr and exit text are never parsed as authority.
 
 ### VM authority interface
 
@@ -167,9 +190,12 @@ no VM effects after such an error.
 
 Task 6 adds a private `releaseAuthority` in `internal/service/jailer`. Its public privileged request contains only a
 validated release version, architecture, and explicit replacement intent. Root constructs the fixed official checksum
-and archive URLs, downloads both through a dedicated bounded HTTPS-only client with proxies and the user asset mirror
-disabled, verifies the archive before parsing it, validates the reviewed complete upstream member allowlist, and
-extracts only Firecracker and Jailer. Caller paths, URLs, checksums, and archive bytes are prohibited.
+and archive URLs and obtains the checksum independently through a dedicated bounded HTTPS-only client with proxies
+disabled. For mirror efficiency, the normal-user client may stream an exact-length bounded archive body through the
+typed install transport; root hashes it against the independently fetched checksum before parsing it. If no body is
+supplied, root may fetch the fixed archive itself. Root never opens a caller path or accepts a caller URL or checksum,
+and `MVM_ASSET_MIRROR` supplies bytes rather than authority. Extraction validates the reviewed complete upstream member
+allowlist and extracts only Firecracker and Jailer.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,release.json}`. Binaries are

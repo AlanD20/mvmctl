@@ -89,6 +89,32 @@ action-specific. Failures preserve the original `DomainError` code, class, entit
 the normal-user client can make safe retry and recovery decisions. Logs and subprocess exit status are diagnostic only;
 they never replace the structured result or turn a malformed/missing response into a generic successful operation.
 
+The control channel is one full-duplex Unix stream socket duplicated onto file descriptor 0 across `sudo -n`. File
+descriptor 0 is control-only and is marked close-on-exec before any handler can launch a descendant. Standard output and
+standard error are never parsed as authority. VM console input/output must use a separate typed relay owned by the launch
+implementation; it cannot reuse the control channel. Using descriptor 0 avoids sudo policy for inherited descriptors,
+while the socketpair permits the client to upload a bounded release archive and receive an early rejection concurrently.
+Root requires descriptor 0 to be an `AF_UNIX` `SOCK_STREAM` socket and requires its Linux `SO_PEERCRED` UID/GID to match
+the authenticated sudo caller. The peer PID is positive and audit-only; it is not an authorization identity.
+
+Each request starts with fixed `MVMREQ01` magic, a network-order 32-bit JSON-header length, and a network-order 64-bit
+payload length. The strict header is at most 64 KiB and contains schema version 1, the action repeated from argv, and the
+action-specific body. The repeated action must match. Only release install may carry a payload: either zero bytes or an
+exact stream of at most 128 MiB. The caller half-closes its write side after the declared bytes, and root requires EOF so
+truncation or trailing bytes fail closed before any payload-dependent effect. Zero-payload operations likewise require
+EOF before effects. Authentication, framing, and header failures may return an early error without draining an advertised
+payload; the concurrent client treats the resulting uploader `EPIPE` as expected once it has a valid response. Root
+applies bounded header and archive deadlines and reads no second request.
+
+Each response starts with fixed `MVMRES01` magic and a network-order 32-bit JSON length followed by at most 64 KiB of
+strict schema-version-1 JSON. It contains the matching action, a closed `success` or `error` status, and exactly one typed
+result or error. Error envelopes carry code, stable string class, message, operation, entity, and normalized details;
+they never serialize wrapped causes, stacks, stderr, or arbitrary Go values. Wire details permit only bounded booleans,
+strings, signed integers, and string arrays. Unsupported details are omitted visibly. An error response delivered after
+all effects and cleanup exits successfully at the process layer. A start failure has known no-effect status; any started
+process with a missing, malformed, truncated, mismatched, or oversized response returns `CodeProcessError` with
+`process_started: true` and `outcome_unknown: true`.
+
 ### Authorization roles
 
 The root-owned executable establishes code integrity. The `mvm` Unix group remains the authorization role for
@@ -161,10 +187,12 @@ and system-damage invariants. These are receiver trust-boundary checks, not dupl
 
 ### Release trust
 
-The caller supplies only a validated release version and architecture. Privileged release code constructs the permitted
-Firecracker release and checksum URLs and downloads both independently from the fixed official origin with a dedicated,
-bounded HTTPS-only client. It disables proxies and does not consult caller configuration, the general download cache, or
-`MVM_ASSET_MIRROR`. Caller-provided paths, URLs, checksums, and archive bytes are never release authority.
+The caller supplies a validated release version and architecture and may stream an exact-length bounded archive body for
+cache efficiency. Privileged release code constructs the permitted Firecracker release and checksum URLs and obtains the
+checksum independently from the fixed official origin with a dedicated bounded HTTPS-only client and proxies disabled.
+It hashes the complete archive body against that checksum before parsing it. If no body is supplied, root may fetch the
+fixed archive itself. Root never opens a caller path or accepts a caller URL or checksum. The normal-user client may read
+`MVM_ASSET_MIRROR`, but those streamed bytes are transport, never release authority.
 
 Extraction occurs in a root-owned temporary directory with bounded compressed/decompressed input, a reviewed allowlist
 for the complete upstream archive layout, and rejection of path traversal, symlinks, hardlinks, devices, sparse files,
