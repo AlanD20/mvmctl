@@ -21,6 +21,9 @@ from typing import Any, Generator
 import pytest
 
 
+SYSTEM_MVM_BINARY = "/usr/local/bin/mvm"
+
+
 # ============================================================================
 # Runner VM name (from orchestrator)
 # ============================================================================
@@ -72,8 +75,8 @@ def _guest_run(
 def _run_mvm(
     vm_name: str, *args: str, check: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
-    """Run an mvm command. vm_name is ignored — we're already inside the test VM."""
-    cmd = ["mvm", *args]
+    """Run the installed mvm CLI. vm_name is ignored inside the test VM."""
+    cmd = [SYSTEM_MVM_BINARY, *args]
     result = subprocess.run(
         cmd,
         capture_output=True,

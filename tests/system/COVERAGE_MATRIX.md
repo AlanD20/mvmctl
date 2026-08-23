@@ -18,6 +18,7 @@ removed, or when test coverage changes.
 ## Table of Contents
 
 - [Root CLI](#root-cli)
+- [mvm self-update](#mvm-self-update)
 - [mvm init](#mvm-init)
 - [mvm config](#mvm-config)
 - [mvm network](#mvm-network)
@@ -53,6 +54,17 @@ removed, or when test coverage changes.
 | `help` (consistency) | ⚡ Shallow | `cli/test_cli.py` | `TestHelpOutputConsistentFormat`, `TestHelpSubcommandShowsCorrectly`, `TestHelpOutputShowsSubcommands` | Check: Usage:, Commands:, --help in every group, subcommands listed |
 | `version` (command) | ⚡ Shallow | `cli/test_cli.py` | `TestHelpCommand` | L1: stdout has version-like content with digits |
 | `completion bash\|zsh\|fish\|powershell` | ⚡ Shallow | `cli/test_cli.py` | `TestHelpCommand` | L1: stdout contains shell completion definitions |
+
+---
+
+## `mvm self-update`
+
+| Command/Flag | Status | Test File | Test Class(es) | Notes |
+|---|---|---|---|---|
+| `self-update` (user-owned artifact) | 🔴 Missing | — | — | Success/update behavior for a user-owned executable is not covered at L2. |
+| `self-update check` | 🔴 Missing | — | — | Release-check output is not covered at L2. |
+| `self-update apply` (user-owned artifact) | 🔴 Missing | — | — | Successful replacement of a user-owned executable is not covered at L2. |
+| `self-update apply --force` (system installation) | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 seeds the existing HTTP cache with a newer release, invokes exact `/usr/local/bin/mvm`, verifies refusal before update download, and proves the system-binary hash is unchanged. The cache entry is restored or removed exactly. |
 
 ---
 
@@ -507,7 +519,11 @@ removed, or when test coverage changes.
 | `host clean` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostCleanSafety` | L1 |
 | `host reset --force` | ⚡ Shallow | `host/test_host.py` | `TestHostCleanDestructive` | L1 — exit 0, non-empty stdout. Marked host_reset (excluded from default runs) |
 | `host reset` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostResetSafety` | L1 |
-| `host init` | 🟡 Partial | `host/test_host.py` | `TestHostInit` | Non-sudo path verified; sudo path requires host_reset marker |
+| `host install-system` | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | The Python runner stages the RC, invokes the real administrator installer, and then all `_run_mvm` calls use exact `/usr/local/bin/mvm`. L2 verifies root ownership, mode, trusted ancestors, content hash, no temporary sibling, and idempotence. |
+| `host install-system` rejection cases | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 verifies unprivileged and malformed invocations preserve the target, and an existing target symlink is rejected without changing its destination. Symlink-test restoration is mandatory and asserted. |
+| `host install-system` pre-rename failure | ✅ Deep | `host/test_system_install.py`, `internal/core/host/system_binary_test.go` | `TestSystemBinaryInstall`, `TestInstallSystemBinary_PreRenameFailuresPreserveTarget` | L1 covers each injected pre-rename stage. L2 bind-remounts `/usr/local/bin` read-only, invokes the exact staged candidate, verifies the public failure and unchanged canonical metadata/hash, then requires rw remount, unmount, no mount leak, and executable restoration. |
+| `host install-system` remaining partial failures | ⚡ Shallow | `internal/core/host/system_binary_test.go`, `pkg/api/host_system_binary_test.go` | `TestInstallSystemBinary_PreRenameFailuresPreserveTarget`, `TestInstallSystemBinary_ReportsPostRenameAndCleanupFailures`, `TestHostInstallSystemBinary_PreservesPartialSuccess` | L1 deterministically covers write/metadata/fsync/close/rename failures, cleanup failure, and post-rename durability reporting. No safe deterministic public-boundary L2 injection exists for those individual stages; uncontrolled disk filling, timing kills, and production test hooks are explicitly rejected. |
+| `host init` | 🟡 Partial | `host/test_system_install.py`, `host/test_host.py` | `TestSystemBinaryInstall`, `TestHostInit` | L2 invokes exact `sudo /usr/local/bin/mvm host init` in a runner that already has the `mvm` group and membership. It proves happy-path sudoers reconciliation and invoking-user cache/config ownership. Task 13 gaps: group creation/membership, root-owned journal, rollback, and fail-closed mutation errors. |
 
 ---
 
@@ -621,6 +637,7 @@ removed, or when test coverage changes.
 | Category | Total Scenarios | ✅ Deep | ⚡ Shallow | 🔴 Missing | ⏭️ Skip |
 |----------|----------------|---------|-------------|-------------|----------|
 | Root CLI | 8 | 0 | 8 | 0 | 0 |
+| self-update | 4 | 1 | 0 | 3 | 0 |
 | init | 5 | 0 | 5 | 0 | 0 |
 | config | 12 | 0 | 12 | 0 | 0 |
 | network | 34 | 13 | 19 | 0 | 0 |
@@ -635,21 +652,23 @@ removed, or when test coverage changes.
 | ssh | 6 | 4 | 2 | 0 | 0 |
 | console | 6 | 0 | 6 | 0 | 0 |
 | logs | 9 | 0 | 9 | 0 | 0 |
-| host | 11 | 3 | 7 | 0 | 1 |
+| host | 15 | 7 | 7 | 0 | 1 |
 | cache | 13 | 3 | 6 | 0 | 1 |
 | cp | 12 | 7 | 5 | 0 | 0 |
 | env | 22 | 9 | 13 | 0 | 0 |
 | run | 3 | 0 | 3 | 0 | 0 |
 | full-journeys | 13 | 5 | 8 | 0 | 0 |
-| **Total** | **431** | **72** | **292** | **1** | **47** |
+| **Total** | **439** | **77** | **292** | **4** | **47** |
 
 **Coverage health:**
-- ✅ Deep (L3): 72/431 = 16.7%
-- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 292/431 = 67.7%
-- 🔴 Missing: **1/431 = 0.2%** — `image inspect --tree` does not exist as a CLI command
-- ⏭️ Skip-prone: 47/431 = 10.9%
+- ✅ Deep (L3): 77/439 = 17.5%
+- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 292/439 = 66.5%
+- 🔴 Missing: **4/439 = 0.9%** — three user-owned `self-update` success/check paths plus the phantom
+  `image inspect --tree` entry
+- ⏭️ Skip-prone: 47/439 = 10.7%
 
-**CLI gaps: all resolved.** The only remaining `🔴 Missing` entry is `image inspect --tree`, which is a phantom command — the CLI has no `--tree` flag for `image inspect`. All 21 real gaps are now covered with system tests.
+**Current real CLI gap:** successful user-owned `self-update` check/apply behavior remains unqualified at L2. The
+`image inspect --tree` missing entry is a phantom command because the CLI has no such flag.
 
 ---
 
