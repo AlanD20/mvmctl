@@ -1526,6 +1526,82 @@ def _validate_release_qualification_args(
         )
 
 
+def _validate_test_selection_args(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    """Reject test selections that cannot resolve to known test domains."""
+    tier_domains = {
+        1: TIER1_DOMAINS,
+        2: TIER2_DOMAINS,
+        3: TIER3_DOMAINS,
+    }
+    domains_by_name = {
+        **TIER1_DOMAINS,
+        **TIER2_DOMAINS,
+        **TIER3_DOMAINS,
+    }
+    unknown = list(
+        dict.fromkeys(
+            domain for domain in args.domains if domain not in domains_by_name
+        )
+    )
+    if unknown:
+        parser.error(f"unknown domains: {', '.join(unknown)}")
+    selectors = sum((bool(args.domains), args.tier is not None, args.all))
+    if selectors > 1:
+        parser.error(
+            "choose exactly one test selector: positional domains, --tier, or --all"
+        )
+    duplicate_domains = list(
+        dict.fromkeys(
+            domain
+            for index, domain in enumerate(args.domains)
+            if domain in args.domains[:index]
+        )
+    )
+    if duplicate_domains:
+        parser.error(f"duplicate domains: {', '.join(duplicate_domains)}")
+    tiers = args.tier or []
+    duplicate_tiers = list(
+        dict.fromkeys(
+            tier
+            for index, tier in enumerate(tiers)
+            if tier in tiers[:index]
+        )
+    )
+    if duplicate_tiers:
+        parser.error(
+            f"duplicate tiers: {', '.join(str(tier) for tier in duplicate_tiers)}"
+        )
+
+    if args.domains:
+        selected_domains = list(args.domains)
+    elif args.tier is not None:
+        selected_domains = [
+            domain
+            for tier in args.tier
+            for domain in tier_domains[tier]
+        ]
+    elif args.all:
+        selected_domains = [
+            domain
+            for domains in tier_domains.values()
+            for domain in domains
+        ]
+    else:
+        return
+    if not selected_domains:
+        parser.error("test selection resolves to zero tests")
+    empty_domains = sorted(
+        domain for domain in selected_domains if not domains_by_name[domain]
+    )
+    if empty_domains:
+        parser.error(
+            f"selected domains have no test files: {', '.join(empty_domains)}"
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run mvmctl system tests with per-domain VM isolation.",
@@ -1757,6 +1833,7 @@ def main() -> None:
     args = parser.parse_args()
 
     _validate_release_qualification_args(parser, args)
+    _validate_test_selection_args(parser, args)
 
     if _selection_requests_tier3(args) and not args.host_direct:
         parser.error(

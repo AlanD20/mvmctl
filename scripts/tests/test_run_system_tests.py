@@ -26,6 +26,45 @@ def orchestrator(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
+def _assert_selection_rejected_before_side_effects(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selection: list[str],
+    expected_error: str,
+) -> None:
+    calls: list[str] = []
+
+    def unexpected(name: str):
+        def fail(*_args: object, **_kwargs: object) -> None:
+            calls.append(name)
+            raise AssertionError(f"{name} must not run for an invalid selection")
+
+        return fail
+
+    for helper in (
+        "validate_release_build_paths",
+        "_resolve_candidate_build_version",
+        "_build_mvm_binary",
+        "verify_release_binary_identity",
+        "_require_distinct_candidate_controller",
+        "_get_mvm_version",
+        "run_prepare",
+        "ensure_shared_volume",
+        "ensure_test_network",
+    ):
+        monkeypatch.setattr(orchestrator, helper, unexpected(helper), raising=False)
+    monkeypatch.setattr(orchestrator.shutil, "which", unexpected("which"))
+    monkeypatch.setattr(orchestrator.sys, "argv", ["run-system-tests.py", *selection])
+
+    with pytest.raises(SystemExit) as captured:
+        orchestrator.main()
+
+    assert captured.value.code == 2
+    assert calls == []
+    assert expected_error in capsys.readouterr().err
+
+
 def test_default_outer_controller_is_the_canonical_system_binary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -59,7 +98,7 @@ def test_tier3_selection_detection_covers_all_request_forms(
         assert orchestrator._selection_requests_tier3(args), selection
 
 
-def test_t1_t2_and_unknown_selections_do_not_require_host_direct(
+def test_t1_t2_and_unknown_names_do_not_imply_tier3_host_direct(
     orchestrator: ModuleType,
 ) -> None:
     parser = orchestrator._build_parser()
@@ -74,6 +113,182 @@ def test_t1_t2_and_unknown_selections_do_not_require_host_direct(
     for selection in selections:
         args = parser.parse_args(selection)
         assert not orchestrator._selection_requests_tier3(args), selection
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["not-a-domain", "also-unknown"],
+        ["not-a-domain", "also-unknown", "--tier", "1"],
+    ],
+    ids=["domains-only", "with-tier"],
+)
+def test_unknown_domains_are_rejected_before_any_probe_or_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selection: list[str],
+) -> None:
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        selection,
+        "unknown domains: not-a-domain, also-unknown",
+    )
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["--all", "cli"],
+        ["--all", "--tier", "1"],
+        ["cli", "--tier", "1"],
+    ],
+    ids=["all-and-domains", "all-and-tier", "domains-and-tier"],
+)
+def test_ambiguous_test_selectors_are_rejected_before_any_probe_or_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selection: list[str],
+) -> None:
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        selection,
+        "choose exactly one test selector: positional domains, --tier, or --all",
+    )
+
+
+@pytest.mark.parametrize(
+    ("selection", "expected_error"),
+    [
+        (["cli", "cli"], "duplicate domains: cli"),
+        (["cli", "config", "cli"], "duplicate domains: cli"),
+        (["--tier", "1,1"], "duplicate tiers: 1"),
+        (["--tier", "1,2,1"], "duplicate tiers: 1"),
+    ],
+    ids=["adjacent-domains", "nonadjacent-domains", "adjacent-tiers", "nonadjacent-tiers"],
+)
+def test_duplicate_test_selectors_are_rejected_before_any_probe_or_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selection: list[str],
+    expected_error: str,
+) -> None:
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        selection,
+        expected_error,
+    )
+
+
+def test_unique_tier_selection_preserves_requested_order(
+    orchestrator: ModuleType,
+) -> None:
+    parser = orchestrator._build_parser()
+    args = parser.parse_args(["--tier", "2,1,3"])
+
+    orchestrator._validate_test_selection_args(parser, args)
+
+    assert args.tier == [2, 1, 3]
+
+
+@pytest.mark.parametrize(
+    ("selection", "empty_domains", "expected_empty"),
+    [
+        (["cli"], ("cli",), "cli"),
+        (["cli", "config"], ("cli",), "cli"),
+        (["--tier", "2"], ("volume",), "volume"),
+        (["--tier", "2"], ("volume", "ssh"), "ssh, volume"),
+        (["--all"], ("env",), "env"),
+    ],
+    ids=["domain", "mixed-domains", "tier", "tier-multiple", "all"],
+)
+def test_empty_domain_registrations_are_rejected_before_any_probe_or_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selection: list[str],
+    empty_domains: tuple[str, ...],
+    expected_empty: str,
+) -> None:
+    domains = {
+        **orchestrator.TIER1_DOMAINS,
+        **orchestrator.TIER2_DOMAINS,
+        **orchestrator.TIER3_DOMAINS,
+    }
+    for domain in empty_domains:
+        domains[domain].clear()
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        selection,
+        f"selected domains have no test files: {expected_empty}",
+    )
+
+
+def test_selection_with_no_registered_domains_is_rejected_before_any_probe(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(orchestrator, "TIER2_DOMAINS", {})
+
+    _assert_selection_rejected_before_side_effects(
+        orchestrator,
+        monkeypatch,
+        capsys,
+        ["--tier", "2"],
+        "test selection resolves to zero tests",
+    )
+
+
+def test_no_arguments_print_help_and_exit_without_any_probe(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        orchestrator.shutil,
+        "which",
+        lambda *_args, **_kwargs: pytest.fail("no-args help must not probe binaries"),
+    )
+    monkeypatch.setattr(orchestrator.sys, "argv", ["run-system-tests.py"])
+
+    with pytest.raises(SystemExit) as captured:
+        orchestrator.main()
+
+    assert captured.value.code == 0
+    assert "usage:" in capsys.readouterr().out.lower()
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["--prepare"],
+        ["--volume"],
+        ["--image"],
+        ["--volume", "--image", "--prepare"],
+        ["--rebuild", "--candidate-version", "0.3.0"],
+    ],
+    ids=["prepare", "volume", "image", "combined", "rebuild"],
+)
+def test_preparation_only_modes_do_not_require_a_test_selector(
+    orchestrator: ModuleType,
+    selection: list[str],
+) -> None:
+    parser = orchestrator._build_parser()
+    args = parser.parse_args(selection)
+
+    orchestrator._validate_test_selection_args(parser, args)
 
 
 def test_host_direct_help_is_an_acknowledgment_not_a_clean_host_guarantee(
