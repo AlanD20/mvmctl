@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -500,25 +501,15 @@ var (
 
 func GetCacheDir() (string, error) {
 	cacheDirOnce.Do(func() {
-		override, ok := EnvGet("CACHE_DIR")
-		if ok && override != "" {
-			var resolved string
-			resolved, cacheDirErr = filepath.Abs(override)
-			if cacheDirErr != nil {
-				cacheDirErr = fmt.Errorf("invalid cache dir path: %w", cacheDirErr)
-				return
-			}
-			// Ensure the directory exists with proper permissions.
-			if err := ensureDirAndChown(resolved); err != nil {
-				cacheDirErr = fmt.Errorf("create cache dir: %w", err)
-				return
-			}
-			cacheDirVal = resolved
-			return
-		}
-		path := filepath.Join(GetRealHome(), ".cache", ProjectName)
-		if err := ensureDirAndChown(path); err != nil {
-			cacheDirErr = fmt.Errorf("create default cache dir: %w", err)
+		override, _ := EnvGet("CACHE_DIR")
+		path, err := resolveUserDir(
+			context.Background(),
+			defaultUserCacheDir,
+			override,
+			realDefaultUserDirDeps(),
+		)
+		if err != nil {
+			cacheDirErr = fmt.Errorf("create cache dir: %w", err)
 			return
 		}
 		cacheDirVal = path
@@ -527,21 +518,15 @@ func GetCacheDir() (string, error) {
 }
 
 func GetConfigDir() (string, error) {
-	override, ok := EnvGet("CONFIG_DIR")
-	if ok && override != "" {
-		resolved, err := filepath.Abs(override)
-		if err != nil {
-			return "", fmt.Errorf("invalid config dir path: %w", err)
-		}
-		// Ensure the directory exists with proper permissions.
-		if err := ensureDirAndChown(resolved); err != nil {
-			return "", fmt.Errorf("create config dir: %w", err)
-		}
-		return resolved, nil
-	}
-	path := filepath.Join(GetRealHome(), ".config", ProjectName)
-	if err := ensureDirAndChown(path); err != nil {
-		return "", fmt.Errorf("create default config dir: %w", err)
+	override, _ := EnvGet("CONFIG_DIR")
+	path, err := resolveUserDir(
+		context.Background(),
+		defaultUserConfigDir,
+		override,
+		realDefaultUserDirDeps(),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create config dir: %w", err)
 	}
 	return path, nil
 }
