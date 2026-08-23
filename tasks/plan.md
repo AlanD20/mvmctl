@@ -87,8 +87,9 @@ half-closes after the declared bytes. Root requires exact length and EOF before 
 zero-payload effects, but may respond to pre-effect authentication/header failure without draining a claimed payload.
 Responses use `MVMRES01`, a 32-bit length capped at 64 KiB, and one strict matching-action success/result or
 error/`DomainError` envelope. A delivered envelope is the final effect record even if process reaping later reports an
-anomaly; no domain effect or fallible outcome check is allowed after the response. Missing, malformed, truncated,
-mismatched, or oversized responses from a started process report
+anomaly; root half-closes its socket write side after the complete frame so response EOF does not depend on process exit.
+No domain effect or fallible outcome check is allowed after the response. Missing, malformed, truncated, mismatched,
+oversized, or non-EOF responses from a started process report
 `process_started: true` and `outcome_unknown: true`; stderr and exit text are never parsed as authority.
 
 ### VM authority interface

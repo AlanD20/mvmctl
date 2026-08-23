@@ -65,8 +65,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 - [x] Caller identity, active `mvm` group, environment, and system executable are verified before dispatch.
 - [ ] Add a strict versioned request/response codec with 64 KiB frames, duplicate/unknown/depth rejection, matching
   actions, typed results, and bounded `DomainError` code/class/entity/partial-state detail preservation.
-- [ ] Add the fd-0 Unix socketpair control runner with concurrent upload/response, exact EOF, CLOEXEC, cancellation,
-  timeout, response/stderr bounds, early-rejection handling, and `FakeRunner` support.
+- [ ] Add the fd-0 Unix socketpair control runner with concurrent upload/response, request and response half-close/EOF,
+  CLOEXEC, cancellation, timeout, bounds, early-rejection handling, and `FakeRunner` support.
 - [ ] Return `process_started: true` and `outcome_unknown: true` for every started process without one valid final
   response; stdout, stderr, and generic subprocess text are never action authority.
 - [ ] Keep the action switch closed until each capability has its own typed handler and abuse tests.

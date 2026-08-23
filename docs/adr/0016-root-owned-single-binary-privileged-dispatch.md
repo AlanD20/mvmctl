@@ -110,10 +110,11 @@ Each response starts with fixed `MVMRES01` magic and a network-order 32-bit JSON
 strict schema-version-1 JSON. It contains the matching action, a closed `success` or `error` status, and exactly one typed
 result or error. Error envelopes carry code, stable string class, message, operation, entity, and normalized details;
 they never serialize wrapped causes, stacks, stderr, or arbitrary Go values. Wire details permit only bounded booleans,
-strings, signed integers, and string arrays. Unsupported details are omitted visibly. An error response delivered after
-all effects and cleanup exits successfully at the process layer. A start failure has known no-effect status; any started
-process with a missing, malformed, truncated, mismatched, or oversized response returns `CodeProcessError` with
-`process_started: true` and `outcome_unknown: true`.
+strings, signed integers, and string arrays. Unsupported details are omitted visibly. Root half-closes the control
+socket's write side after the complete frame, so the client can validate response EOF independently of process exit. An
+error response delivered after all effects and cleanup exits successfully at the process layer. A start failure has
+known no-effect status; any started process with a missing, malformed, truncated, mismatched, oversized, or non-EOF
+response returns `CodeProcessError` with `process_started: true` and `outcome_unknown: true`.
 
 ### Authorization roles
 
