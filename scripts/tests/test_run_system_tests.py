@@ -14,8 +14,9 @@ import pytest
 
 
 @pytest.fixture
-def orchestrator() -> ModuleType:
+def orchestrator(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     script = Path(__file__).parents[1] / "run-system-tests.py"
+    monkeypatch.syspath_prepend(str(script.parent))
     module_name = "mvmctl_run_system_tests"
     spec = importlib.util.spec_from_file_location(module_name, script)
     assert spec is not None and spec.loader is not None
@@ -30,6 +31,7 @@ def test_default_outer_controller_is_the_canonical_system_binary(
 ) -> None:
     monkeypatch.delenv("MVM_BINARY", raising=False)
     script = Path(__file__).parents[1] / "run-system-tests.py"
+    monkeypatch.syspath_prepend(str(script.parent))
     module_name = "mvmctl_run_system_tests_default_controller"
     spec = importlib.util.spec_from_file_location(module_name, script)
     assert spec is not None and spec.loader is not None
@@ -134,6 +136,182 @@ def test_tier3_without_host_direct_is_rejected_before_any_side_effect(
     error = capsys.readouterr().err.lower()
     assert "--host-direct" in error
     assert "acknowledge" in error
+
+
+@pytest.mark.parametrize(
+    "selection",
+    [
+        ["--release-qualification", "--host-direct", "--rebuild", "--candidate-version", "0.3.0"],
+        ["--release-qualification", "--all", "--rebuild", "--candidate-version", "0.3.0"],
+        ["--release-qualification", "--all", "--host-direct", "--candidate-version", "0.3.0"],
+        ["--release-qualification", "--all", "--host-direct", "--rebuild"],
+        [
+            "--release-qualification",
+            "--all",
+            "--host-direct",
+            "--rebuild",
+            "--candidate-version",
+            "0.3.0",
+            "env",
+        ],
+        [
+            "--release-qualification",
+            "--all",
+            "--host-direct",
+            "--rebuild",
+            "--candidate-version",
+            "0.3.0",
+            "--tier",
+            "1,2,3",
+        ],
+        [
+            "--release-qualification",
+            "--all",
+            "--host-direct",
+            "--rebuild",
+            "--candidate-version",
+            "0.3.0",
+            "--skip-volume-check",
+        ],
+    ],
+    ids=[
+        "missing-all",
+        "missing-host-direct",
+        "missing-rebuild",
+        "missing-version",
+        "positional-domain",
+        "tier-filter",
+        "skip-volume-check",
+    ],
+)
+def test_invalid_release_qualification_is_rejected_before_any_probe_or_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    selection: list[str],
+) -> None:
+    calls: list[str] = []
+
+    def unexpected(name: str):
+        def fail(*_args: object, **_kwargs: object) -> None:
+            calls.append(name)
+            raise AssertionError(f"{name} must not run for an invalid release mode")
+
+        return fail
+
+    for helper in (
+        "validate_release_build_paths",
+        "_resolve_candidate_build_version",
+        "_build_mvm_binary",
+        "verify_release_binary_identity",
+        "_require_distinct_candidate_controller",
+        "_get_mvm_version",
+        "run_prepare",
+        "ensure_shared_volume",
+        "ensure_test_network",
+    ):
+        monkeypatch.setattr(orchestrator, helper, unexpected(helper), raising=False)
+    monkeypatch.setattr(
+        orchestrator.sys,
+        "argv",
+        ["run-system-tests.py", *selection],
+    )
+
+    with pytest.raises(SystemExit) as captured:
+        orchestrator.main()
+
+    assert captured.value.code == 2
+    assert calls == []
+    assert "--release-qualification requires" in capsys.readouterr().err
+
+
+def test_release_qualification_parser_accepts_only_the_full_acknowledged_gate(
+    orchestrator: ModuleType,
+) -> None:
+    parser = orchestrator._build_parser()
+    args = parser.parse_args(
+        [
+            "--release-qualification",
+            "--all",
+            "--host-direct",
+            "--rebuild",
+            "--candidate-version",
+            "0.3.0-rc.1",
+        ]
+    )
+
+    orchestrator._validate_release_qualification_args(parser, args)
+
+    assert args.release_qualification is True
+    assert args.candidate_version == "0.3.0-rc.1"
+    assert "release binary identity" in parser.format_help().lower()
+
+
+def test_release_identity_runs_after_build_and_before_host_resource_mutation(
+    orchestrator: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events: list[str] = []
+
+    monkeypatch.setattr(
+        orchestrator.sys,
+        "argv",
+        [
+            "run-system-tests.py",
+            "--release-qualification",
+            "--all",
+            "--host-direct",
+            "--rebuild",
+            "--candidate-version",
+            "0.3.0",
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "validate_release_build_paths",
+        lambda **_kwargs: events.append("path-configuration"),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_resolve_candidate_build_version",
+        lambda version: events.append(f"resolve-{version}") or version,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_mvm_binary",
+        lambda version: events.append(f"build-{version}"),
+    )
+
+    def fail_identity(**kwargs: object) -> None:
+        events.append(f"identity-{kwargs['requested_version']}")
+        raise RuntimeError("release identity mismatch")
+
+    monkeypatch.setattr(
+        orchestrator,
+        "verify_release_binary_identity",
+        fail_identity,
+        raising=False,
+    )
+
+    def unexpected_mutation(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("host/resource mutation must follow identity validation")
+
+    for helper in ("run_prepare", "ensure_shared_volume", "ensure_test_network"):
+        monkeypatch.setattr(orchestrator, helper, unexpected_mutation)
+
+    with pytest.raises(SystemExit) as captured:
+        orchestrator.main()
+
+    assert captured.value.code == 1
+    assert events == [
+        "path-configuration",
+        "resolve-0.3.0",
+        "build-0.3.0",
+        "identity-0.3.0",
+    ]
+    assert "release identity mismatch" in capsys.readouterr().out
 
 
 def test_guest_product_commands_use_the_exact_installed_cli(

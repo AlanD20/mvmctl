@@ -8,7 +8,7 @@ Usage:
 
   # Run all domains (T1 + T2 + T3)
   MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \\
-    python3 scripts/run-system-tests.py --all
+    python3 scripts/run-system-tests.py --all --host-direct
 
   # Run specific domains
   python3 scripts/run-system-tests.py cli network vm_nested_virt
@@ -16,17 +16,18 @@ Usage:
   # Run specific tiers (comma-separated, executed in the given order)
   python3 scripts/run-system-tests.py --tier 1
   python3 scripts/run-system-tests.py --tier 2,1
-  python3 scripts/run-system-tests.py --tier 1,3
-  python3 scripts/run-system-tests.py --tier 3,2,1
+  python3 scripts/run-system-tests.py --tier 1,3 --host-direct
+  python3 scripts/run-system-tests.py --tier 3,2,1 --host-direct
 
-  # Rebuild shared assets and (optionally) run tests
-  python3 scripts/run-system-tests.py --rebuild --all
+  # Rebuild and qualify an explicit release candidate
+  python3 scripts/run-system-tests.py --release-qualification --all \\
+    --host-direct --rebuild --candidate-version 0.3.0
   python3 scripts/run-system-tests.py --volume --image --prepare
   python3 scripts/run-system-tests.py --volume
   python3 scripts/run-system-tests.py --image
 
   # Limit parallel workers (default: 4)
-  python3 scripts/run-system-tests.py --all --workers 2
+  python3 scripts/run-system-tests.py --all --host-direct --workers 2
 """
 
 from __future__ import annotations
@@ -46,6 +47,11 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+
+from system_test_release import (
+    validate_release_build_paths,
+    verify_release_binary_identity,
+)
 
 # ============================================================================
 # Configuration
@@ -87,7 +93,6 @@ BASE_VM_DISK = "12G"
 
 # SSH key for provisioning runner user in builder & test VMs
 BUILDER_KEY_NAME = "builder-key"
-
 _SEMVER_CORE_NUMBER = r"(?:0|[1-9][0-9]*)"
 _SEMVER_PRERELEASE_ID = (
     r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
@@ -103,6 +108,7 @@ _CANDIDATE_VERSION_PATTERN = re.compile(
 
 class _UnsafeVolumeBackingPath(RuntimeError):
     """The volume record points outside the one runner-managed backing path."""
+
 
 # Tier 1: shared volume, host-level CLI operations (no nested virt needed)
 TIER1_DOMAINS: dict[str, list[str]] = {
@@ -1496,6 +1502,30 @@ def _selection_requests_tier3(args: argparse.Namespace) -> bool:
     )
 
 
+def _validate_release_qualification_args(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    """Reject incomplete or narrowed release qualification before any work."""
+    if not args.release_qualification:
+        return
+    valid = (
+        args.all
+        and args.host_direct
+        and args.rebuild
+        and args.candidate_version is not None
+        and not args.domains
+        and args.tier is None
+        and not args.skip_volume_check
+    )
+    if not valid:
+        parser.error(
+            "--release-qualification requires --all --host-direct --rebuild "
+            "and an explicit --candidate-version; positional domains, --tier, "
+            "and --skip-volume-check are not allowed"
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run mvmctl system tests with per-domain VM isolation.",
@@ -1516,6 +1546,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Acknowledge that selected Tier 3 tests run directly on and may "
         "mutate the outer host. Required for --all, --tier including 3, or "
         "a Tier 3 domain.",
+    )
+    parser.add_argument(
+        "--release-qualification",
+        action="store_true",
+        help="Run the full release binary identity gate before host-direct "
+        "qualification. Requires --all --host-direct --rebuild and an "
+        "explicit --candidate-version.",
     )
     parser.add_argument(
         "--tier",
@@ -1719,6 +1756,8 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
+    _validate_release_qualification_args(parser, args)
+
     if _selection_requests_tier3(args) and not args.host_direct:
         parser.error(
             "Tier 3 tests run directly on and may mutate the outer host; "
@@ -1735,6 +1774,17 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
+    if args.release_qualification:
+        try:
+            validate_release_build_paths(
+                controller_command=MVM_BINARY,
+                configured_candidate=MVM_CANDIDATE_CONFIGURED,
+                candidate=Path(MVM_CANDIDATE_BINARY),
+            )
+        except RuntimeError as exc:
+            log(f"ERROR: {exc}")
+            sys.exit(1)
+
     # Handle --rebuild: build the distinct release candidate before anything else.
     if args.rebuild:
         try:
@@ -1742,6 +1792,18 @@ def main() -> None:
                 args.candidate_version
             )
             _build_mvm_binary(candidate_version)
+        except RuntimeError as exc:
+            log(f"ERROR: {exc}")
+            sys.exit(1)
+
+    if args.release_qualification:
+        try:
+            verify_release_binary_identity(
+                controller_command=MVM_BINARY,
+                configured_candidate=MVM_CANDIDATE_CONFIGURED,
+                candidate=Path(MVM_CANDIDATE_BINARY),
+                requested_version=args.candidate_version,
+            )
         except RuntimeError as exc:
             log(f"ERROR: {exc}")
             sys.exit(1)
