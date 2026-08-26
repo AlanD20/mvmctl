@@ -261,6 +261,33 @@ The public policy families are:
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly.
 
+### Daemonless status reconciliation and relaunch parity
+
+`mvm vm ls`, `mvm vm ps`, and `mvm vm inspect` must report observed runtime state rather than replaying a stale SQLite
+status. Before status filtering or rendering, the API obtains a bounded batch observation from the root VM authority.
+The receiver verifies boot ID and the complete recorded process identity. A host reboot therefore classifies every old
+process identity as non-live without waiting for a VM, Firecracker API, SSH, or agent timeout. The user database may be
+updated after the authoritative observation, but it never decides whether a privileged process is live. A boot-ID
+mismatch projects `stopped`; a missing or mismatched process in the current boot projects `crashed`. The list API must
+return an error when authority cannot complete the observation, not silently return stale rows.
+
+This is a local metadata operation, not a heartbeat. The implementation must not start one sudo process, open one
+control connection, or launch one goroutine per VM. L1 benchmarks cover 1,000 authority records and set a regression
+budget from the reviewed baseline. L2 proves correctness after a real host reboot. Guest readiness remains an explicit
+probe performed by commands such as `mvm exec` and `mvm ssh`, not by list output.
+
+All relaunch paths use one complete typed relaunch state. Start, reboot, and snapshot restore must load the persisted
+vsock relation when present and distinguish a valid absence from a repository failure. The root launch request contains
+only the validated CID and derives the fixed runtime UDS leaf. The normal process retains the agent port and token for
+later agent client probes. Receiver-owned cleanup removes a stale fixed socket only after process authority proves no
+live instance owns it. L1 verifies the generated Firecracker config. L2 runs `mvm exec` after stop/start, reboot, host
+reboot plus start, and snapshot restore.
+
+The 2026-08-26 read-only reproduction isolated the current defect: `VMStart` and `VMReboot` omit the `vsock` relation,
+while `vmRespawnFirecracker` emits a vsock device only when `VMItem.Vsock` is populated. The restarted Firecracker config
+therefore had no vsock entry, its old host UDS remained stale, and the active guest agent had no host endpoint. This
+evidence defines the regression test. It is not approval for a best-effort one-line enrichment patch.
+
 ## Dependency Order
 
 ```text

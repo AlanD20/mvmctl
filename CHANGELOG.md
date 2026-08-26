@@ -203,6 +203,9 @@ The following items are release blockers and are intentionally not described abo
   typed contract, and propagate every host mutation/state-write failure instead of reporting partial setup as success.
 - Make launch, abort, cleanup, reconciliation, snapshots, live volumes, cgroups, and firewall policy crash-consistent and
   fail closed under ownership, PID-reuse, path-race, and partial-failure conditions.
+- Reconcile `mvm vm ls`, `mvm vm ps`, and `mvm vm inspect` against root-owned process identity after host reboot instead
+  of reporting stale SQLite status. Preserve the configured vsock device across start, reboot, and snapshot restore so
+  host-to-guest `mvm exec` remains available after every supported relaunch path.
 - Complete adversarial L1 coverage, Python `tests/system/` clean-install/fault qualification, leak audits, full CI, and
   the final documentation accuracy review. Go tests support but do not replace CLI-level L2 release signoff.
 - Finish Tier 3 clean-host inventory and ownership-safe cleanup; unify every host-direct CLI call, preserve pre-existing

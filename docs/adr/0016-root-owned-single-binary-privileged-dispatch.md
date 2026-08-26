@@ -360,6 +360,21 @@ Startup and pre-launch reconciliation compare root instance records, processes, 
 not trust the user database as root authorization. Operations are idempotent and either converge to a known state or
 return a precise error without deleting potentially mounted user data.
 
+Read-side status is also reconciled. Before `mvm vm ls`, `mvm vm ps`, or `mvm vm inspect` filters or renders a status,
+the normal process obtains a bounded, typed batch observation from root authority. Root verifies the recorded host boot
+ID, PID, start ticks, process credentials, cgroup, namespace, and executable identity. A host boot-ID mismatch proves the
+old process identity is not live without contacting the guest. The read path never opens one sudo process per VM and
+never dials the Firecracker API or guest agent as a liveness tick. It may update the user database as a projection only
+after it receives a complete authoritative result; SQLite remains non-authoritative. A boot-ID mismatch projects
+`stopped`; a missing or mismatched process during the same boot projects `crashed`. Failure to obtain an authoritative
+observation fails the read instead of returning stale status.
+
+Every create, start, reboot, and snapshot-restore path prepares the same complete typed relaunch state. If the VM has a
+persisted vsock configuration, the root launch request includes only its validated CID; root derives the fixed runtime
+UDS leaf. The normal process retains the agent port and token for the post-launch client probe instead of exposing them
+to root. A repository failure aborts launch instead of silently omitting the device. Root removes an old fixed vsock
+socket only after authority proves that no live registered process owns it.
+
 ## Alternatives Considered
 
 ### Separate privileged helper binary

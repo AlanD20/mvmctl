@@ -324,12 +324,24 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,
   chroots, mounts, and nftables generations.
+- [ ] Reconcile observed runtime status before `mvm vm ls`, `mvm vm ps`, and `mvm vm inspect` filter or render. Use a
+  bounded typed root-authority batch, make a host boot-ID mismatch immediately non-live, update SQLite only as a
+  `stopped` projection, classify a same-boot missing/mismatched process as `crashed`, and never perform a per-VM sudo,
+  Firecracker API, SSH, or guest-agent liveness tick. Change the list API to return an error rather than stale rows when
+  authority cannot complete the observation.
+- [ ] Benchmark 1,000 authority records in L1 and enforce the reviewed regression budget without one goroutine, process,
+  or control connection per VM.
 - [ ] Add root-owned global capacity reservation so separate CLI processes and users cannot over-admit the host.
 - [ ] Make create/start/stop/remove/reboot/snapshot/restore/volume paths transactionally abortable and retryable.
+- [ ] Build one complete typed relaunch state for create/start/reboot/snapshot restore. Preserve a configured vsock CID,
+  let root derive the fixed runtime UDS leaf, retain agent port/token only in the normal process, distinguish valid
+  absence from lookup failure, and clean an old fixed socket only after verified process absence.
 - [ ] Preserve exact release identity and jail-visible paths across snapshot restore and live hotplug.
 - [ ] Harden cgroup readiness, membership, values, and process-aware cleanup.
 - [ ] Remove process-local semaphore admission and user-DB-as-root-authority designs.
 - [ ] L1/L2 fault injection covers kill at every effect stage, reboot, PID reuse, partial cleanup, and repeated reconcile.
+- [ ] L1 proves relaunch emits the vsock device and L2 proves `mvm exec` after stop/start, reboot, host reboot plus start,
+  and snapshot restore. L2 also proves `ls`/`ps` stop reporting stale running state after a host reboot.
 
 ### Task 16: Complete global structured JSON output
 
@@ -371,6 +383,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   `test_vm_fresh_env.py` twice under aliases.
 - [x] Make mirror validation reject pull errors and HTTP fallback; only a verified local-mirror read is a cache hit.
 - [ ] Run the complete T1/T2/T3 matrix plus clean-host installation and reboot/reconciliation qualification.
+- [ ] Add the installed-CLI reboot lifecycle journey: stale `running` state is reconciled before list filtering, then
+  stop/start and reboot both restore SSH and host-to-guest `mvm exec` without a daemon or leaked vsock socket.
 - [ ] Update `tests/system/COVERAGE_MATRIX.md` and attach commands/results to the release report.
 
 ### Task 18: Run repository CI in exact order
