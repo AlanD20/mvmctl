@@ -11,8 +11,10 @@ This file is the source of truth for active project work. Read only the referenc
 1. Read `CONTEXT.md` for domain language, architecture, state, privilege, or lifecycle work.
 2. Read the applicable record in `docs/adr/` before changing a recorded decision.
 3. Read `docs/STANDARDS.md` before writing or reviewing Go code.
-4. Read `docs/system-test-architecture.md` before writing or changing system tests.
-5. Read `docs/development/HOW_TO_RUN_SYSTEM_TESTS.md` before executing system tests or release qualification.
+4. Read `docs/development/HOW_AGENTS_WRITE_UNIT_TESTS.md` before writing or changing Go tests.
+5. Read `docs/system-test-architecture.md` and `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` before writing or
+   changing system tests.
+6. Read `docs/development/HOW_TO_RUN_SYSTEM_TESTS.md` before executing system tests or release qualification.
 
 The `AGENTS.md` files under `legacy/` describe archived implementations. They apply only while inspecting that archived
 code and never override this file for active work.

@@ -1,5 +1,8 @@
 # How Agents Write System Tests
 
+This is the authoring guide for L0, L1, and L2 scenarios. The execution-tier architecture, fixture scope, runner
+protocol, and known limitations live in [system-test-architecture.md](../system-test-architecture.md).
+
 > **See also:** [ADR-0012](../adr/0012-unified-test-architecture.md) for the architectural decisions and rationale behind this document.
 >
 > **See also:** [HOW_AGENTS_WRITE_UNIT_TESTS.md](HOW_AGENTS_WRITE_UNIT_TESTS.md) for L0/L1 test patterns (table-driven tests, in-memory repos, FakeRunner, in-memory SQLite).
@@ -23,7 +26,7 @@
 
 ## Purpose
 
-This document is a **specification and how-to reference** for writing and classifying tests at all three levels. It defines:
+This document explains how to write and classify tests at all three levels. It defines:
 
 - **L0** (pure function Go tests) — when to write them, what they prove
 - **L1** (hermetic Go tests) — when to use in-memory SQLite, temp dirs, `FakeRunner`

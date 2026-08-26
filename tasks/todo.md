@@ -392,6 +392,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 **Owner:** engineer and qa-engineer
 **Dependencies:** Tasks 3-17
 
+- [ ] Add a deterministic CI architecture check that rejects production imports between sibling `internal/core/*`
+  domains. The check must distinguish a package importing itself from one domain importing another.
 - [ ] `go mod tidy && git diff --exit-code`
 - [ ] `test -z "$(gofmt -l .)"`
 - [ ] `golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/`

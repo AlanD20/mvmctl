@@ -48,11 +48,20 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
 
 ### Domain
 
-A domain is a self-contained business capability with its own logic, data model, and test suite. Each domain lives in a directory under `internal/core/` named after the capability — for example, `internal/core/vm/` for VM lifecycle, `internal/core/network/` for networking, and `internal/core/image/` for image management. The project currently has sixteen domains covering everything from SSH keys to snapshots.
+A domain is a self-contained business capability with its own logic, data model, and test suite. Each active domain is an
+immediate directory under `internal/core/`. For example, `internal/core/vm/` owns VM lifecycle,
+`internal/core/network/` owns networking, and `internal/core/image/` owns image management. Inspect `internal/core/`
+instead of copying a domain count into documentation.
 
-Domains are strictly isolated from each other. A domain in `internal/core/vm/` can never import from `internal/core/network/` or any other domain package. The Go compiler enforces this isolation through circular import detection: if a domain tried to import another domain, the compiler would produce an import cycle error. This means each domain can be tested, modified, and replaced independently without affecting the rest of the system.
+Domains are strictly isolated from each other. A domain in `internal/core/vm/` cannot import
+`internal/core/network/` or another sibling domain. The Go compiler rejects import cycles, but it does not reject every
+one-way sibling import. Code review currently enforces the broader rule. `tasks/todo.md` tracks a deterministic CI check
+for this boundary.
 
-What unifies the domains is the shared model layer at `internal/lib/model/`. Every domain imports its types — concrete structs with `db:"column"` and `json:"field"` tags for SQL and JSON serialization — from this single package. No domain defines its own model types. The model package contains 21 files covering VM instances, networks, images, kernels, binaries, volumes, SSH keys, leases, firewall rules, console info, Firecracker config, cloud-init modes, provisioner types, relation specs, VM status, operation status, and workflow state.
+The shared model layer at `internal/lib/model/` unifies the domains. It contains concrete structs with `db:"column"`
+and `json:"field"` tags for SQL and JSON serialization. Core domains use these shared types instead of defining
+cross-domain model packages. Inspect the package for the current model inventory instead of copying a file count into
+documentation.
 
 Not every domain follows the same internal structure. The pattern varies by complexity:
 - **Controller/Service/Repository/Resolver**: vm, network, kernel, key, volume
@@ -60,7 +69,7 @@ Not every domain follows the same internal structure. The pattern varies by comp
 - **Controller/Service/Repository**: host
 - **Repository + Resolver**: snapshot
 - **Controller only**: console
-- **Service only**: cache, ssh
+- **Service only**: cache, ssh, update
 - **Service + Repository**: config (includes constraints registry)
 - **Controller + Service**: logs
 - **Manager + Provisioner**: cloudinit
@@ -202,12 +211,16 @@ net, _ := input.ResolveNetwork(ctx, op.Repos.Network)
 
 Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/sqlx` with `modernc.org/sqlite` driver. PRAGMAs (foreign_keys=ON, journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, wal_autocheckpoint=1000, cache_size=-64000) set via DSN parameters in `db.Handle.openLazy()`. Connection pool has `SetMaxOpenConns(1)` and `SetMaxIdleConns(1)` for SQLite's single-writer semantics.
 
-Tables include: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`, `vm_vsock_config`, `snapshots`, `db_migrations` (16 tables).
+Tables include `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`,
+`host_state_changes`, `service_access_policies`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`,
+`vm_vsock_config`, `snapshots`, and `db_migrations`. Read `internal/lib/db/migrations/` for the current schema.
 
 ### Layer compliance enforcement
 
-Architecture rules are enforced by the Go compiler (circular import errors prevent cross-domain imports in core) and code review. Key rules:
-- Core domains NEVER import other core/* packages -- enforced by Go compiler.
+The Go compiler enforces type safety and rejects import cycles. Code review enforces project-specific dependency rules
+that are stricter than Go's import rules. Task 18 in `tasks/todo.md` tracks machine enforcement for sibling core-domain
+imports. Key rules:
+- Core domains never import other `internal/core/*` packages.
 - CLI imports from `pkg/api/`, `pkg/api/inputs`, `pkg/api/results`, `pkg/errs`, `internal/cli/common/`, `internal/infra/`, `internal/lib/`, `internal/service/` -- enforced by code review.
 - API imports `internal/core/*` + `internal/enricher/` + `internal/infra/` + `internal/infra/event` + `internal/lib/*` + `internal/assets` + `internal/service/*` + `pkg/errs` + `pkg/api/inputs` + `pkg/api/results`.
 - `internal/infra/` and `internal/lib/` are LEAVES -- import NOTHING from core, api, or cli. Exception: `internal/lib/provisioner/loopmount/backend.go` imports `internal/service/loopmount` for wire-protocol types used to spawn the loopmount provisioner subprocess.
@@ -503,7 +516,9 @@ Workers defaults to `min((runtime.NumCPU() or 4) * 2, len(items))` (minimum 1) w
 
 ## Test types
 
-Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for the full specification.
+The test architecture uses L0, L1, and L2 test levels plus T1, T2, and T3 system-test execution tiers. Read
+`docs/system-test-architecture.md` for the architecture and `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for
+authoring guidance.
 
 ### L0: Pure Function Tests (Go `*_test.go`)
 
@@ -570,8 +585,10 @@ They run inside a disposable Firecracker VM (runner VM) with nested KVM.
 ### Option C verification
 The thoroughness standard for L2 test assertions. Every test verifies system state at the deepest practical level: JSON field assertions from `* ls --json`, file existence/symlink checks, process presence via `/proc`, iptables rule presence, and/or direct SQLite queries. A test that only checks `returncode == 0` is incomplete.
 
-### Gap matrix (no longer a separate file)
-Coverage is tracked by the quick-reference table in `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md`. Every CLI subcommand and flag is classified as L0, L1, or L2. All gaps must be filled before release.
+### Coverage matrix
+`tests/system/COVERAGE_MATRIX.md` tracks command and flag coverage. The authoring guide explains how to classify a
+scenario as L0, L1, or L2. Release qualification requires the matrix and executable registry to agree with the selected
+system-test suite.
 
 ### Edge case categories (8 categories)
 For every CLI flag, check all eight: happy path (with state verify), missing required args, invalid values, boundary values, JSON output format, confirmation prompts, non-existent resources, duplicate creation.
