@@ -16,10 +16,6 @@ const (
 	trustedReleaseManifestSchemaVersion = uint32(1)
 	maxTrustedReleaseManifestBytes      = 4 * 1024
 	trustedReleaseManifestJSONMaxDepth  = 1
-	trustedReleaseExecutableMinBytes    = uint64(
-		trustedReleaseELFHeaderBytes + trustedReleaseELFProgramHeaderSize,
-	)
-	trustedReleaseExecutableMaxBytes = uint64(64 * 1024 * 1024)
 )
 
 type trustedReleaseExecutableDigest [sha256.Size]byte

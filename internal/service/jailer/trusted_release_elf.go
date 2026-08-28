@@ -11,16 +11,27 @@ const (
 	trustedReleaseELFHeaderBytes       = 64
 	trustedReleaseELFProgramHeaderSize = 56
 	trustedReleaseELFMaxProgramHeaders = 64
+	trustedReleaseExecutableMinBytes   = uint64(
+		trustedReleaseELFHeaderBytes + trustedReleaseELFProgramHeaderSize,
+	)
+	trustedReleaseExecutableMaxBytes = uint64(64 * 1024 * 1024)
 )
 
 // CRITICAL: This parser admits only the bounded header shape reviewed in ADR-0016. It never lets untrusted ELF counts
 // drive allocation and never loads or executes the candidate bytes.
-func validateTrustedReleaseELFHeader(raw []byte, source trustedReleaseSource) error {
+func validateTrustedReleaseELFHeader(
+	raw []byte,
+	sizeBytes uint64,
+	source trustedReleaseSource,
+) error {
 	if err := validateTrustedReleaseSource(source); err != nil {
 		return err
 	}
 	if len(raw) != trustedReleaseELFHeaderBytes {
 		return trustedReleaseELFError("trusted release ELF header has invalid length")
+	}
+	if sizeBytes < trustedReleaseExecutableMinBytes || sizeBytes > trustedReleaseExecutableMaxBytes {
+		return trustedReleaseELFError("trusted release executable size is outside the admitted range")
 	}
 	if raw[0] != 0x7f || raw[1] != 'E' || raw[2] != 'L' || raw[3] != 'F' {
 		return trustedReleaseELFError("trusted release executable has invalid ELF magic")
@@ -56,7 +67,8 @@ func validateTrustedReleaseELFHeader(raw []byte, source trustedReleaseSource) er
 	if binary.LittleEndian.Uint64(raw[24:32]) == 0 {
 		return trustedReleaseELFError("trusted release executable has no ELF entry point")
 	}
-	if binary.LittleEndian.Uint64(raw[32:40]) != trustedReleaseELFHeaderBytes {
+	programHeaderOffset := binary.LittleEndian.Uint64(raw[32:40])
+	if programHeaderOffset != trustedReleaseELFHeaderBytes {
 		return trustedReleaseELFError("trusted release executable has unexpected program-header offset")
 	}
 	if binary.LittleEndian.Uint16(raw[52:54]) != trustedReleaseELFHeaderBytes {
@@ -68,6 +80,11 @@ func validateTrustedReleaseELFHeader(raw []byte, source trustedReleaseSource) er
 	programHeaderCount := binary.LittleEndian.Uint16(raw[56:58])
 	if programHeaderCount == 0 || programHeaderCount > trustedReleaseELFMaxProgramHeaders {
 		return trustedReleaseELFError("trusted release executable has unsupported program-header count")
+	}
+	programHeaderEnd := programHeaderOffset +
+		uint64(trustedReleaseELFProgramHeaderSize)*uint64(programHeaderCount)
+	if sizeBytes < programHeaderEnd {
+		return trustedReleaseELFError("trusted release executable has a truncated program-header table")
 	}
 	return nil
 }

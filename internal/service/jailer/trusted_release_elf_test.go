@@ -32,7 +32,7 @@ func TestValidateTrustedReleaseELFHeaderAcceptsSelectedArchitecture(t *testing.T
 			header := auditedTrustedReleaseELFHeader()
 			header[18] = tc.machineLow
 
-			assert.NoError(t, validateTrustedReleaseELFHeader(header, source))
+			assert.NoError(t, validateTrustedReleaseELFHeader(header, 3_527_456, source))
 		})
 	}
 }
@@ -79,11 +79,61 @@ func TestValidateTrustedReleaseELFHeaderRejectsUntrustedShape(t *testing.T) {
 			t.Parallel()
 
 			header := tc.mutate(auditedTrustedReleaseELFHeader())
-			err := validateTrustedReleaseELFHeader(header, source)
+			err := validateTrustedReleaseELFHeader(header, 3_527_456, source)
 			require.Error(t, err)
 			domainErr := errs.AsDomainError(err)
 			require.NotNil(t, domainErr)
 			assert.Equal(t, errs.CodeBinaryUntrusted, domainErr.Code)
+		})
+	}
+}
+
+// Rationale: Header fields are not meaningful admission bounds unless the complete declared program-header table fits
+// within the separately measured file. These cases prove the exact inclusive file-size and table-extent boundaries.
+func TestValidateTrustedReleaseELFHeaderBindsActualFileSize(t *testing.T) {
+	t.Parallel()
+
+	source, err := newTrustedReleaseSource(releaseSlot{version: "1.16.1", architecture: "x86_64"})
+	require.NoError(t, err)
+
+	tests := map[string]struct {
+		sizeBytes uint64
+		mutate    func([]byte)
+		wantErr   bool
+	}{
+		"below executable minimum": {sizeBytes: 119, wantErr: true},
+		"above executable maximum": {sizeBytes: 64*1024*1024 + 1, wantErr: true},
+		// CONTRACT: audited header has e_phoff=64, e_phentsize=56, e_phnum=10; table end is byte 624.
+		"truncated audited table": {sizeBytes: 623, wantErr: true},
+		"exact audited table":     {sizeBytes: 624},
+		// CONTRACT: maximum admitted e_phnum=64; table end is 64 + (56 * 64) = byte 3648.
+		"truncated maximum table": {
+			sizeBytes: 3647,
+			mutate:    func(header []byte) { header[56] = 64 },
+			wantErr:   true,
+		},
+		"exact maximum table": {
+			sizeBytes: 3648,
+			mutate:    func(header []byte) { header[56] = 64 },
+		},
+		"exact executable maximum": {sizeBytes: 64 * 1024 * 1024},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			header := auditedTrustedReleaseELFHeader()
+			if tc.mutate != nil {
+				tc.mutate(header)
+			}
+			err := validateTrustedReleaseELFHeader(header, tc.sizeBytes, source)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, errs.CodeBinaryUntrusted, errs.AsDomainError(err).Code)
+				return
+			}
+			assert.NoError(t, err)
 		})
 	}
 }
@@ -95,7 +145,7 @@ func TestValidateTrustedReleaseELFHeaderRejectsForgedSource(t *testing.T) {
 	require.NoError(t, err)
 	source.archiveRoot = "attacker-controlled"
 
-	err = validateTrustedReleaseELFHeader(auditedTrustedReleaseELFHeader(), source)
+	err = validateTrustedReleaseELFHeader(auditedTrustedReleaseELFHeader(), 3_527_456, source)
 	require.Error(t, err)
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
