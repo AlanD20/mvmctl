@@ -225,6 +225,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Pin and validate the fixed root/architecture/version directory chain without following links or reopening paths.
   - [x] Read `manifest.json` once through the pinned slot; verify exact metadata, bounded bytes, stable descriptor
     identity, strict decoding, and exact slot equality.
+  - [ ] Pin and verify the fixed `firecracker` and `jailer` leaves through the retained slot descriptor: exact metadata
+    and manifest size, bounded positioned full-file hashing, closed ELF admission, pre/post-read stability, unchanged
+    offsets, exact descriptor retention, cancellation, and checked reverse cleanup.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.
 
