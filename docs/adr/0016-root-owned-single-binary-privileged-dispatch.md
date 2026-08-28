@@ -284,6 +284,15 @@ Decoding rejects unknown, missing, duplicate, case-conflicting, trailing, wrongl
 values. The executable hashes in a successfully decoded manifest are the sole source of the release identity supplied
 to instance registration; the unprivileged request never supplies them.
 
+Trusted-store traversal starts at a pinned `/` descriptor and opens every fixed component with `O_NOFOLLOW` relative to
+its retained parent. `/`, `/var`, and `/var/lib` must be root-owned directories without group or world write access.
+Managed `/var/lib/mvmctl`, `binaries`, architecture, and version directories are exactly `root:root` mode `0700`.
+`firecracker` and `jailer` are one-link root-owned regular files of mode `0755`; `manifest.json` is a one-link
+root-owned regular file of mode `0600`. A missing architecture or version directory is an ordinary binary-not-found
+result. Once the version directory exists, a missing or unsafe fixed leaf is an incomplete/corrupt trusted release and
+fails as `binary.untrusted`, never as an absent release. Reads retain the version-directory descriptor, open each leaf
+once, compare pre/post-read descriptor identity and metadata, and do not reconstruct a pathname.
+
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
 dedicated checksum authority independently fetches the derived sidecar with the closed transport policy above and
