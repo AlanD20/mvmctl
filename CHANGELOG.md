@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
-> authority substrate described below are implemented. The mandatory per-VM network namespace, nftables-only `traffic`
-> policy, exact VM-to-VM `exec` policy, final marker-only sudo policy, and remaining typed privileged operations are not
-> implemented yet; see
+> authority and managed-cache pinning substrates described below are implemented. The mandatory per-VM network
+> namespace, nftables-only `traffic` policy, exact VM-to-VM `exec` policy, final marker-only sudo policy, and remaining
+> typed privileged operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
 
 ### Added
@@ -67,6 +67,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trusted release removal can acquire a lease only when no active authority record references the exact release.
 - This substrate is private and not yet wired into public VM lifecycle operations; that integration remains a release
   blocker below.
+
+#### Descriptor-pinned managed-cache substrate
+
+- Added a private typed `MVM_CACHE_DIR` locator and lease under `internal/service/jailer`. Root opens the fixed
+  filesystem root once, traverses canonical components with beneath/no-symlink/no-magic-link `openat2`, and retains the
+  complete descriptor chain.
+- Caller ownership and safe modes use synchronized metadata. Cache identity records device, inode, and a typed unique,
+  legacy, or unavailable mount ID; later re-pin rejects any mismatch.
+- The final cache root accepts ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS. FUSE, network,
+  overlay/stacked, and automount cache roots fail closed. Ancestor mounts are constrained by descriptor traversal,
+  owner/mode, and automount checks without unnecessarily requiring the cache filesystem allowlist.
+- This is a private foundation only. The privileged request, root-owned instance record, individual resource leaves,
+  and public VM lifecycle are not wired to it yet and remain release blockers below.
 
 #### Installed release-candidate qualification
 - For T1/T2, the Python system-test runner now treats `MVM_BINARY` as a distinct compatible outer controller and
@@ -175,6 +188,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is receiver-owned. The public CLI did not expose equivalent flags.
 - Firecracker/cloud-init/console filename settings are removed. Existing `rootfs.<filesystem>`, alternate snapshot leaf,
   or custom runtime filename layouts are not adopted; clean-install VMs and snapshots use the fixed v0.3 names.
+- Custom `MVM_CACHE_DIR` remains supported, but the final v0.3 privileged path requires its resource-bearing
+  filesystem to be ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS. FUSE, remote, overlay/stacked, and
+  automount cache roots are intentionally unsupported.
 
 ### Fixed
 
@@ -202,7 +218,8 @@ The following items are release blockers and are intentionally not described abo
   process identity, and per-VM lock.
 - Add root-owned managed-network identity and global capacity authority; user SQLite state must not authorize host-global
   namespace, link, firewall, process, mount, cgroup, or admission decisions.
-- Replace path-validation-then-reopen behavior with descriptor-pinned managed-resource access and private mount namespaces.
+- Finish wiring the implemented managed-cache pinning foundation to the privileged protocol and instance record, then
+  add descriptor-pinned operation-specific resources and private mount namespaces.
 - Split root-only locks/handshakes beneath `/run/mvmctl/authority` from caller-owned socket/PID output directories beneath
   `/run/mvmctl/runtime`; stop mounting the whole cache VM directory. Pin persistent config/output leaves individually,
   truncate enabled `0600` log/console/metrics files only after durable launch registration, and retain them after stop.

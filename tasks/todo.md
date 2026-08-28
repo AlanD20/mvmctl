@@ -139,6 +139,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 
 - [ ] Preserve custom `MVM_CACHE_DIR` through one typed managed-cache locator; pin it from `/`, verify caller ownership,
   safe components/mode/mount topology, and reject every raw effect path.
+  - [x] Add the private canonical locator and descriptor lease: component-wise `openat2`, synchronized ownership/mode/
+    identity inspection, a closed local-filesystem policy on the final cache root, unique/legacy/unavailable mount-ID
+    typing, identity-checked re-pin, and checked reverse cleanup.
+  - [ ] Carry the locator through the privileged request, remove the transitional raw effect paths, and bind the lease
+    to operation-specific resource descriptors. The private foundation is not yet a production handler.
 - [ ] Bind the pinned cache device/inode/mount identity into the root-owned instance record and require later operations
   to re-pin the same identity.
 - [ ] Land canonical producer names before descriptor pinning:

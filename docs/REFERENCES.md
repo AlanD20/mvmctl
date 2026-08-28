@@ -727,7 +727,7 @@ The security model applies to the net cloud-init mode only:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MVM_CACHE_DIR` | Override cache directory | `~/.cache/mvmctl` |
+| `MVM_CACHE_DIR` | Override the managed cache directory | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) | `WARN` |
 | `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
@@ -780,6 +780,10 @@ The security model applies to the net cloud-init mode only:
 The VM and snapshot leaf names above are compiled and are not configurable. `MVM_CACHE_DIR` still selects the managed
 cache root. API/vsock/console sockets and PID mirrors remain in the VM cache directory in the transitional Jailer path;
 v0.3 release work will move them to `/run/mvmctl/runtime/<uid>/<vm-id>` and stop mounting the whole VM directory.
+
+The v0.3 privileged path accepts a managed cache root on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS.
+FUSE, remote, overlay/stacked, and automount cache roots are unsupported. The descriptor-pinned cache foundation is
+implemented, but privileged lifecycle wiring remains release work tracked in `tasks/todo.md`.
 
 Canonical launch assets and jail state are outside the user cache:
 

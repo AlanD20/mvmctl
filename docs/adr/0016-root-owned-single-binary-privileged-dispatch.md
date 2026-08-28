@@ -235,6 +235,17 @@ owners/modes, and unsupported mount topology, and pins the directory before reso
 inputs are typed IDs, closed format enums, and presence/access intent. A request never supplies a kernel, rootfs,
 snapshot, volume, config, PID, socket, log, mount-target, or temporary-file path.
 
+The resource-bearing cache root must use a kernel-backed local filesystem from this closed set: ext2/ext3/ext4, XFS,
+Btrfs, F2FS, bcachefs, tmpfs, or ZFS. FUSE, remote filesystems, overlay or other stacked filesystems, and automount cache
+roots are rejected. The filesystem allowlist applies to the final pinned cache root, not `/` or unrelated ancestor
+mounts. Every ancestor is still opened descriptor-relatively and checked for safe ownership, mode, and automount
+topology. Bind, idmapped, shared, or private views of an approved underlying filesystem remain supported because their
+authority comes from retained descriptors and exact identity checks, not the pathname or propagation mode.
+
+Identity inspection requests synchronized `statx` metadata. It prefers `STATX_MNT_ID_UNIQUE`, records the identity kind,
+and falls back to ordinary mount ID or explicit unavailability on older kernels. A later comparison includes the kind so
+ordinary and unique mount identities are never treated as interchangeable.
+
 This exception is deliberately narrower than a generic path interface. Dropping custom cache roots would break the
 documented large-filesystem use case, while a persistent root-owned path registry would still need safe pathname
 resolution after reboot. Instead, each live instance record binds the pinned cache root's stable identity (device,

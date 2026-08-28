@@ -33,6 +33,9 @@ continue without silently deleting it.
   protocol failures, and bounded safe `DomainError` preservation.
 - Private root-owned VM ownership/lifecycle records with strict codecs, descriptor-relative atomic storage, exact
   release references, global VM-ID claims, and release/index/VM locking.
+- Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
+  owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
+  It is not yet carried by a privileged action or bound into the instance record.
 - ADR-0016 for the single-binary privilege boundary.
 
 The action switch is intentionally still empty and the sudoers policy remains transitional. The routed policy, dual

@@ -174,6 +174,12 @@ Only needed for `mvm kernel pull --type official --clean-build` (building the of
 - **Virtualization**: VT-x (Intel) or AMD-V must be enabled in BIOS/UEFI.
 - **Permissions**: The user must be in the `mvm` group (created by `mvm host init`).
 
+### Managed Cache Storage
+
+For v0.3 privileged operations, `MVM_CACHE_DIR` must reside on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or
+ZFS. FUSE, remote, overlay/stacked, and automount cache roots are unsupported. Custom local paths remain supported and
+are pinned independently of unrelated ancestor filesystems.
+
 ### Firecracker Jailer
 
 `mvm bin pull` downloads and checksum-verifies a matching Firecracker/Jailer release pair. The privileged Jailer service installs the pair into the root-owned trusted store; users do not install or invoke Jailer directly. Source-built pairs remain untrusted and cannot launch production VMs.
