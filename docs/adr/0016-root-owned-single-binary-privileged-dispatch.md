@@ -335,8 +335,10 @@ then opens the two fixed executable leaves nonblocking, verifies their exact met
 closed ELF policy, read bounds, and pre/post-read stability, and retains the same descriptors at offset zero. The private
 release authority now acquires the release-slot lease before those reads and returns one prepared value owning the lease,
 pinned store chain, manifest-derived identity, and verified descriptors with checked reverse cleanup. These foundations
-are not yet wired to the privileged request or legacy installer. Bounded archive transport and extraction, the complete
-member allowlist, manifest writing, and atomic trusted-store installation remain Task 6 work.
+are not yet wired to the privileged request or legacy installer. The write-side store foundation also creates or opens
+only the fixed managed `mvmctl/binaries` base through pinned ancestors, corrects metadata only on directories it created,
+and durably syncs each newly observed child and parent. Bounded archive staging and extraction, the complete member
+allowlist, architecture/version creation, manifest writing, and atomic trusted-store installation remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
