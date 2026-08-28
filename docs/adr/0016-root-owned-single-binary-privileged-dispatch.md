@@ -287,9 +287,11 @@ Implementation note (2026-08-29): the private Jailer service derives the exact s
 dedicated checksum authority independently fetches the derived sidecar with the closed transport policy above and
 returns a typed archive digest only after exact grammar validation. Forged private source values fail before a request,
 and response cleanup preserves the primary `DomainError` metadata. The private ELF admission parser validates the
-bounded header shape and selected architecture without loading or executing candidate bytes. These foundations are not
-yet wired to the privileged request or legacy installer. Bounded archive transport and extraction, the complete member
-allowlist, manifest persistence, and atomic trusted-store installation remain Task 6 work.
+bounded header shape and selected architecture without loading or executing candidate bytes. The private manifest codec
+enforces the closed schema, record and executable bounds, typed digests, and manifest-derived instance release identity.
+These foundations are not yet wired to the privileged request or legacy installer. Bounded archive transport and
+extraction, the complete member allowlist, manifest persistence, and atomic trusted-store installation remain Task 6
+work.
 
 ### Paths, process identity, and runtime state
 
