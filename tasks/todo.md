@@ -56,7 +56,7 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 ### Task 3: Complete the early privileged protocol foundation
 
 **Owner:** engineer
-**Status:** Foundation implemented; action catalog pending later tasks
+**Status:** Codec and transport implemented; capability clients and action catalog pending later tasks
 **Dependencies:** Task 1
 
 - [x] Reserved marker selected before Cobra and application initialization.
@@ -66,12 +66,15 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 - [x] Add a strict versioned request/response codec with 64 KiB frames, duplicate/unknown/depth rejection, matching
   actions, typed read-only success/error outcomes separated from protocol failures, and bounded `DomainError`
   code/class/entity/partial-state detail preservation.
-- [ ] Add the fd-0 Unix socketpair control transport with fixed `/usr/bin/sudo -n -- /usr/local/bin/mvm` invocation,
+- [x] Add the fd-0 Unix socketpair control transport with fixed `/usr/bin/sudo -n -- /usr/local/bin/mvm` invocation,
   concurrent upload/response, request and response half-close/actual EOF, CLOEXEC, cancellation, bounded reaping and
-  buffers, early-rejection handling, private process dependencies, and a dedicated fake exchanger; do not extend
-  `CommandRunner`, `RunCmdOpts`, `SpawnConfig`, or `FakeRunner`.
-- [ ] Return `process_started: true` and `outcome_unknown: true` for every started process without one valid final
-  response; stdout, stderr, and generic subprocess text are never action authority.
+  buffers, early-rejection handling, and private process dependencies; do not extend `CommandRunner`, `RunCmdOpts`,
+  `SpawnConfig`, or `FakeRunner`.
+- [x] Transport failures distinguish pre-start failures from started, outcome-unknown failures; stdout, stderr, and
+  generic subprocess text are diagnostic only and never response authority.
+- [ ] Give each capability package a private minimal `Exchange` interface and dedicated fake when its first client is
+  added. The client must decode only EOF-qualified responses, report malformed or missing final responses as started
+  and outcome-unknown, and let a valid typed result win over upload, exit, or bounded-reaping diagnostics.
 - [ ] Keep the action switch closed until each capability has its own typed handler and abuse tests.
 
 ### Task 4: Add private root-owned VM instance authority

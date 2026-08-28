@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the version-1 `MVMREQ01`/`MVMRES01` codec with 64 KiB JSON frames, receiver-bounded payload declarations,
   exact action/schema matching, read-only typed success/error outcomes distinct from protocol failures, and bounded
   `DomainError` normalization that omits wrapped causes and sensitive process-output details.
+- Added the fixed fd-0 Unix socketpair client transport for
+  `/usr/bin/sudo -n -- /usr/local/bin/mvm __mvm_privileged_v1 <fixed-action>`. It uses close-on-exec endpoints,
+  concurrent bounded upload and response handling, actual peer EOF, early-response upload interruption, cancellation,
+  bounded diagnostics, and bounded process reaping without extending the generic command runner. Capability-specific
+  clients and actions are still release blockers below.
 - Added authenticated sudo identity and current `mvm` group checks, fixed root environment sanitization, and executable
   device/inode verification against the root-owned `/usr/local/bin/mvm` image.
 - Added ADR-0016, which defines the single-binary privilege boundary, trusted state layout, typed operation catalog,
