@@ -344,8 +344,10 @@ release authority now acquires the release-slot lease before those reads and ret
 pinned store chain, manifest-derived identity, and verified descriptors with checked reverse cleanup. These foundations
 are not yet wired to the privileged request or legacy installer. The write-side store foundation also creates or opens
 only the fixed managed `mvmctl/binaries` base through pinned ancestors, corrects metadata only on directories it created,
-and durably syncs each newly observed child and parent. Bounded archive staging and extraction, the complete member
-allowlist, architecture/version creation, manifest writing, and atomic trusted-store installation remain Task 6 work.
+and durably syncs each newly observed child and parent. It can now create and retain the fixed anonymous archive stage
+described above, including fail-closed metadata admission, cancellation-independent cleanup, and cleanup-error
+preservation. Bounded streaming and digest verification, extraction, the complete member allowlist,
+architecture/version creation, manifest writing, and atomic trusted-store installation remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
