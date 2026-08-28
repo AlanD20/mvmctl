@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
-> authority and managed-cache pinning substrates described below are implemented. The mandatory per-VM network
+> authority, managed-cache pinning, and base launch-resource pinning substrates described below are implemented. The
+> mandatory per-VM network
 > namespace, nftables-only `traffic` policy, exact VM-to-VM `exec` policy, final marker-only sudo policy, and remaining
 > typed privileged operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
@@ -68,7 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This substrate is private and not yet wired into public VM lifecycle operations; that integration remains a release
   blocker below.
 
-#### Descriptor-pinned managed-cache substrate
+#### Descriptor-pinned managed-cache and base launch-resource substrates
 
 - Added a private typed `MVM_CACHE_DIR` locator and lease under `internal/service/jailer`. Root opens the fixed
   filesystem root once, traverses canonical components with beneath/no-symlink/no-magic-link `openat2`, and retains the
@@ -78,8 +79,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The final cache root accepts ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS. FUSE, network,
   overlay/stacked, and automount cache roots fail closed. Ancestor mounts are constrained by descriptor traversal,
   owner/mode, and automount checks without unnecessarily requiring the cache filesystem allowlist.
-- This is a private foundation only. The privileged request, root-owned instance record, individual resource leaves,
-  and public VM lifecycle are not wired to it yet and remain release blockers below.
+- Added a private typed base launch-resource lease for the fixed VM rootfs, Firecracker configuration, kernel, and
+  optional cloud-init ISO. It opens every component relative to the pinned cache with beneath/no-symlink/no-magic-link/
+  no-cross-mount resolution and never reopens an admitted resource by pathname.
+- Base launch admission verifies caller ownership, regular-file type, exactly one hard link, resource-specific owner
+  access, safe modes, synchronized stable metadata, and hard size limits: rootfs 128 MiB through 16 TiB, configuration
+  1 byte through 1 MiB, kernel 1 byte through 1 GiB, and cloud-init ISO 1 byte through 256 MiB. The bounded expected
+  rootfs size is an equality check, not authority to raise the receiver limit.
+- Successful admission transfers the complete cache and resource descriptor chain into one private lease. Rejection
+  leaves the cache lease reusable; release and failure cleanup attempt every retained descriptor in reverse order with
+  an uncancelled context and preserve primary `DomainError` metadata on cleanup failure.
+- These are private foundations only. The privileged request, cache identity in the root-owned instance record,
+  Firecracker configuration consumption, mount-namespace consumer, remaining resource classes, and public VM lifecycle
+  are not wired yet and remain release blockers below.
 
 #### Installed release-candidate qualification
 - For T1/T2, the Python system-test runner now treats `MVM_BINARY` as a distinct compatible outer controller and
@@ -218,8 +230,10 @@ The following items are release blockers and are intentionally not described abo
   process identity, and per-VM lock.
 - Add root-owned managed-network identity and global capacity authority; user SQLite state must not authorize host-global
   namespace, link, firewall, process, mount, cgroup, or admission decisions.
-- Finish wiring the implemented managed-cache pinning foundation to the privileged protocol and instance record, then
-  add descriptor-pinned operation-specific resources and private mount namespaces.
+- Carry the managed-cache locator and base launch selection through the privileged protocol, bind the cache identity in
+  the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
+  private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
+  outputs, and image provisioning.
 - Split root-only locks/handshakes beneath `/run/mvmctl/authority` from caller-owned socket/PID output directories beneath
   `/run/mvmctl/runtime`; stop mounting the whole cache VM directory. Pin persistent config/output leaves individually,
   truncate enabled `0600` log/console/metrics files only after durable launch registration, and retain them after stop.

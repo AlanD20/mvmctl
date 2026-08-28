@@ -294,6 +294,14 @@ image provisioning each require their own closed policy before their descriptors
 In particular, a QCOW2 file's physical length is not its virtual capacity, so a future volume policy cannot treat
 `statx` size as QCOW2 capacity or invoke an unrestricted image tool as root to compensate.
 
+Implementation note (2026-08-29): the private Jailer service now implements this base launch selection and resource
+lease. It derives the fixed components from typed IDs, opens them relative to the pinned cache descriptor with the
+required no-cross-mount resolution, performs synchronized ownership/type/link/mode/size admission, and transfers the
+complete descriptor chain into checked reverse cleanup. The privileged request does not yet carry the cache locator and
+base selection, the root-owned instance record does not bind the cache identity, and the mount-namespace launch path
+does not consume the root-side lease. The lease is not yet responsible for parsing and constraining the Firecracker
+configuration contents. Snapshot, volume, output, and image-provisioning policies remain pending.
+
 Sockets and PID mirrors are not persistent cache artifacts. Their host layout is fixed beneath the root-controlled
 ephemeral runtime tree:
 

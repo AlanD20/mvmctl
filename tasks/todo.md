@@ -142,8 +142,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Add the private canonical locator and descriptor lease: component-wise `openat2`, synchronized ownership/mode/
     identity inspection, a closed local-filesystem policy on the final cache root, unique/legacy/unavailable mount-ID
     typing, identity-checked re-pin, and checked reverse cleanup.
-  - [ ] Carry the locator through the privileged request, remove the transitional raw effect paths, and bind the lease
-    to operation-specific resource descriptors. The private foundation is not yet a production handler.
+  - [ ] Carry the locator and closed base launch selection through the privileged request, remove the transitional raw
+    effect paths, and consume the private base launch-resource lease. The private foundation is not yet a production
+    handler.
 - [ ] Bind the pinned cache device/inode/mount identity into the root-owned instance record and require later operations
   to re-pin the same identity.
 - [ ] Land canonical producer names before descriptor pinning:
@@ -171,14 +172,21 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [ ] Define snapshot restore memory/state, volume count/format/capacity, writable snapshot creation, persistent output,
     and image-provisioning policies in their owning increments. QCOW2 physical length must not be confused with virtual
     capacity or inspected by an unrestricted root subprocess.
-- [ ] Open user cache/VM/image/kernel/volume/snapshot resources once with beneath/no-symlink/no-magic-link resolution.
-- [ ] Verify caller ownership, file type, fixed basenames, size, and allowed access mode on pinned descriptors.
-- [ ] Never validate a path and later reopen it by pathname.
-- [ ] Keep leases private to the owning service package, expose no generic FD/path accessor, and release retained
-  descriptors in reverse order with checked `context.WithoutCancel` cleanup.
-- [ ] Return DomainError partial-state details for close/fsync/cleanup failures without replacing the primary code,
-  class, entity, or details.
-- [ ] Race tests continuously replace every user-owned ancestor and leaf with symlinks/renames.
+- [x] Implement the private base launch-resource lease for fixed `vms/<vm-id>/rootfs.img`,
+  `vms/<vm-id>/firecracker.json`, optional `vms/<vm-id>/cloud-init.iso`, and `kernels/<kernel-id>`: component traversal
+  beneath the pinned cache, `NO_XDEV`, synchronized ownership/type/link/mode/size checks, descriptor transfer, reverse
+  uncancelled cleanup, primary `DomainError` preservation, and policy-valid continuous replacement races. This lease is
+  intentionally not wired to a privileged action or launch.
+- [ ] Extend open-once beneath/no-symlink/no-magic-link traversal to snapshot, volume, output, and image-provisioning
+  resources under their separately defined policies.
+- [ ] Verify the remaining resource classes' caller ownership, file type, fixed basenames, size/capacity, and allowed
+  access mode on pinned descriptors.
+- [ ] Ensure every remaining resource consumer uses its admitted descriptor without pathname reopen.
+- [ ] Keep future resource leases private to the owning service package, expose no generic FD/path accessor, and release
+  retained descriptors in reverse order with checked `context.WithoutCancel` cleanup.
+- [ ] Preserve primary `DomainError` code, class, entity, and details for close/fsync/cleanup failures in every remaining
+  resource lease.
+- [ ] Add policy-valid continuous symlink/rename replacement races for every remaining user-owned ancestor and leaf.
 - [ ] Task 7 consumes same-package Jailer leases; Task 13 consumes a separate private loopmount image lease. Neither
   consumer may reconstruct or accept `/proc/self/fd` paths from the request.
 

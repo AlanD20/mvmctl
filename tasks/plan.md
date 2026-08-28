@@ -35,7 +35,11 @@ continue without silently deleting it.
   release references, global VM-ID claims, and release/index/VM locking.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
-  It is not yet carried by a privileged action or bound into the instance record.
+- Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional
+  cloud-init leaves, with descriptor-relative no-cross-mount opening, synchronized admission checks, descriptor
+  transfer, and checked reverse cleanup.
+  The locator and base selection are not yet carried by a privileged action, cache identity is not bound into the
+  instance record, and the root-side leases are not consumed by launch.
 - ADR-0016 for the single-binary privilege boundary.
 
 The action switch is intentionally still empty and the sudoers policy remains transitional. The routed policy, dual
