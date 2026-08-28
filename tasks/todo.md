@@ -217,7 +217,7 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Freeze the exact bounded ELF64 header-admission policy for x86_64 and aarch64.
   - [x] Implement and verify the private ELF header validator: exact source identity and 64-byte header length, closed
     identity/type/machine/program-header policy, no untrusted allocation, and no executable loading or execution.
-  - [ ] Bind ELF admission to the bounded actual file size and reject a truncated declared program-header table.
+  - [x] Bind ELF admission to the bounded actual file size and reject a truncated declared program-header table.
 - [ ] Exact Firecracker/Jailer bytes and a root manifest install atomically and durably.
   - [x] Freeze the strict schema-v1 manifest contract, 4 KiB record bound, typed SHA-256 fields, and 120-byte through
     64 MiB executable-size policy; the fixed store leaf is `manifest.json`.
