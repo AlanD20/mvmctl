@@ -193,8 +193,9 @@ The following items are release blockers and are intentionally not described abo
   the public root `mvm run jailer` and `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
-- Remove the iptables backend and backend selector; apply one atomic nftables generation that default-denies both
-  same-network and cross-network VM traffic while preserving required system traffic and internet egress.
+- Remove the iptables backend, backend selector, and production `nft` CLI subprocess/parser. Apply one atomic generation
+  directly through a reviewed, pinned `github.com/google/nftables` version that default-denies both same-network and
+  cross-network VM traffic while preserving required system traffic and internet egress.
 - Replace routed `ServiceAccessPolicy` with typed `traffic` policies and remove the `allow_remote_exec` trust mesh in
   favor of exact directional, non-root, resource-bounded VM-to-VM `exec` policies.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the

@@ -26,7 +26,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
   - [Public API boundary](#public-api-boundary)
   - [CLI is the canonical interface](#cli-is-the-canonical-interface)
   - [Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)](#provisioner-backend-loopmount-vs-guestfs--mutual-exclusion)
-  - [Firewall Backend (nftables vs iptables -- mutual exclusion)](#firewall-backend-nftables-vs-iptables--mutual-exclusion)
+  - [Firewall backend transition](#firewall-backend-transition)
 - [Build output (REQUIRED)](#build-output-required)
 - [Asset mirror environment variable (OPTIONAL)](#asset-mirror-environment-variable-optional)
 - [Relationships](#relationships)
@@ -309,9 +309,11 @@ Provisioner type resolved ONCE at startup in `api.NewOperation()` by reading `se
 
 **Why no fallback chain:** A fallback (try loop-mount, fall back to guestfs) was rejected because: (1) if a user enables GuestFS, they expect GuestFS behavior -- silent fallback to loop-mount violates least surprise; (2) each backend has different sudoers requirements -- mixing them in one session increases the privilege surface; (3) each backend has independent test suites -- a fallback chain requires testing all combinations; (4) an earlier version incorrectly described GuestFS as a "fallback," which caused regression bugs where a stale `guestfs_enabled=true` silently selected the slow backend.
 
-### Firewall Backend (nftables vs iptables -- mutual exclusion)
+### Firewall backend transition
 
-Two independent firewall backends -- **nftables** (default) and **iptables** (legacy) -- selected by the `firewall_backend` setting. Exactly one is active per session.
+The transitional implementation has two independent firewall backends -- **nftables** (default) and **iptables**
+(legacy) -- selected by the `firewall_backend` setting. Exactly one is active per session. This describes existing code,
+not the accepted v0.3.0 target.
 
 - **nftables** (default): Uses `internal/lib/firewall/nftables.go` -- atomic `nft -f -` batch files.
 - **iptables** (legacy): Uses `internal/lib/firewall/iptables.go` -- per-rule `iptables` calls.
@@ -323,6 +325,13 @@ Selection logic in `firewall.NewFirewallTracker(backend, xtcommentAvail, db)`. B
 **UFW compatibility:** The nftables backend uses non-hook chains inside the system `ip filter` and `ip nat` tables, with jump rules inserted at position 0 of built-in chains (FORWARD, POSTROUTING, INPUT). This ensures MVM rules evaluate before UFW's. When UFW reloads (`ufw reload`), it flushes built-in chains and removes MVM's jump rules -- these are re-created lazily on the next `mvm network` or `mvm vm create` operation. The iptables backend has the same limitation.
 
 The `FirewallTracker` also reads an `iptables_xtcomment` user setting that adds comment tags to iptables rules for easier identification.
+
+ADR-0017 defines the clean-break v0.3.0 replacement. It removes iptables, the backend selector, backend-specific
+repositories, and the production `nft` CLI path. The root-owned `internal/service/firewall/` adapter will accept only
+mvmctl-owned typed intent and use a reviewed, pinned `github.com/google/nftables` version to program the kernel directly
+in one complete transaction. Library and netlink types stay private to that adapter; there is no CLI fallback. Kernel
+nftables, bridge-family, connection-tracking, NAT, and privilege capabilities remain host requirements. A disposable QA
+runner may use the `nft` CLI only as an independent read-only oracle.
 
 ## Relationships
 

@@ -11,8 +11,9 @@ Release v0.3.0 as a clean installation with one unprivileged public CLI and one 
 authority, and fail closed under multi-user, path-race, process-reuse, partial-failure, and crash conditions.
 
 Firecracker must always run through Jailer with cgroup v2 and one network namespace per VM. nftables becomes the only
-firewall backend. Managed traffic is default-deny for both same-network and cross-network VMs. IP connectivity and
-VM-to-VM vsock execution use separate typed `traffic` and `exec` policies.
+firewall backend and is programmed directly through a reviewed, pinned `github.com/google/nftables` version rather than
+the `nft` CLI. Managed traffic is default-deny for both same-network and cross-network VMs. IP connectivity and VM-to-VM
+vsock execution use separate typed `traffic` and `exec` policies.
 
 The release does not migrate, adopt, backfill, or preserve legacy databases, runtime state, policies, remote-exec flags,
 Jailer directories, cgroups, TAP devices, or firewall rules. It detects ambiguous legacy host state and refuses to
@@ -253,6 +254,18 @@ Namespace paths and interface names are derived from UID and immutable IDs. The 
 down, installs the complete nftables generation and anti-spoofing rules, then brings links up and passes a pinned
 namespace handle to Jailer.
 
+The root-side adapter lives in `internal/service/firewall/` and receives only mvmctl-owned typed intent. It uses a
+reviewed, pinned `github.com/google/nftables` version to submit one complete generation through one `Conn.Flush` call.
+Neither its types nor `github.com/mdlayher/netlink` types cross the privileged wire or enter the network domain. The
+latter may remain a transitive dependency only; mvmctl does not maintain a second low-level netlink adapter.
+
+Production does not execute or parse the `nft` CLI, use `libnftnl`, depend on `nftables.service`, or retain a CLI
+fallback. Host readiness probes kernel capabilities directly. The `nft` CLI may be present in disposable QA runners as
+an independent read-only state oracle, never as a production dependency or sudo target. Before integration, a focused
+compatibility spike must prove every expression and family required by ADR-0017, atomic invalid-batch failure,
+namespace-scoped connections, structured inspection, cancellation/deadline behavior, and a representative 1,000-VM
+generation within a reviewed performance budget.
+
 The public policy families are:
 
 - `mvm policy traffic`: TCP/UDP from a source network or exact source VM to an exact destination VM port/range.
@@ -304,7 +317,7 @@ root VM authority + descriptor-safe root records/locks
 typed Jailer lifecycle actions + remove public legacy Jailer service
     |
     v
-root network authority --> per-VM netns/veth/TAP --> nftables-only generation
+root network authority --> per-VM netns/veth/TAP --> direct Go nftables generation
     |                                               |
     |                                               v
     |                                    traffic policy replacement
@@ -366,7 +379,8 @@ Required staged Python gates:
 3. **Jailer/cgroup/mount (T2/T3):** canonical launch, exact pair, namespace visibility, snapshot/volume parity,
    PID-reuse and kill-stage recovery.
 4. **Network/traffic (T2):** netns membership, topology ownership, spoof denial, same/cross default deny, exact allows,
-   host restrictions, egress, atomic failure, reboot reconciliation, and nftables-only host readiness.
+   host restrictions, egress, atomic failure, reboot reconciliation, direct-kernel host readiness, and an independent
+   read-only nftables-state oracle.
 5. **Exec (T2):** same/cross/no-network behavior, directionality, missing policy, non-root target, source identity,
    timeout/output/frame/concurrency bounds, command redaction, and target cleanup.
 6. **Clean release (T2 plus clean host):** clean-install refusal of legacy state, full user journeys, repeated fault
@@ -409,6 +423,7 @@ The user has approved:
 - removal of raw sudo and the legacy public privileged services;
 - mandatory per-VM network namespaces;
 - nftables-only enforcement and removal of iptables;
+- direct kernel nftables programming through a reviewed, pinned Go module with no production CLI fallback;
 - same-network and cross-network default deny;
 - typed `traffic` and `exec` policies;
 - removal of `allow_remote_exec`;

@@ -245,13 +245,23 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 **Owner:** engineer
 **Dependencies:** Tasks 3 and 9
 
-- [ ] Add typed privileged nftables generation/application; caller cannot pass syntax, files, includes, or commands.
+- [ ] Run a focused compatibility spike against a reviewed, pinned `github.com/google/nftables` version. Prove every
+  required bridge/IP/NAT expression, structured inspection, namespace-scoped connections, cancellation/deadlines,
+  atomic invalid-batch failure, and a representative 1,000-VM generation within a reviewed budget.
+- [ ] Add typed privileged nftables generation/application under `internal/service/firewall/`; caller cannot pass syntax,
+  files, includes, commands, or library/netlink types across the privileged wire.
+- [ ] Keep `github.com/mdlayher/netlink` transitive only; do not add a second low-level adapter or a production CLI
+  fallback.
 - [ ] Install bridge-family anti-spoofing and same-network filtering.
 - [ ] Install routed, VM-to-host, established reply, required system service, egress, and NAT rules.
-- [ ] Apply complete generations atomically before links become usable.
+- [ ] Apply each complete generation with one `Conn.Flush` transaction before links become usable.
 - [ ] Propagate every initialization, parent-chain, ordering, and batch failure.
-- [ ] Remove iptables renderer/repository/tests, backend enum/selector/config, raw sudo rule, and documentation.
-- [ ] Host readiness requires nftables bridge-family support.
+- [ ] Remove iptables renderer/repository/tests, backend enum/selector/config, production `nft` subprocess/parser, raw
+  sudo rule, and obsolete documentation; do not require `libnftnl` or `nftables.service` at runtime.
+- [ ] Probe required kernel nftables, bridge-family, connection-tracking, and NAT capabilities directly rather than
+  using executable lookup, `nft --version`, or parsed CLI diagnostics.
+- [ ] L1 proves typed compilation, atomic failure, cancellation, reconciliation, and scale. L2 may use the `nft` CLI only
+  as an independent read-only oracle and proves the installed product has no production CLI dependency.
 
 ### Task 11: Replace service-access policy with typed traffic policies
 
