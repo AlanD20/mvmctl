@@ -222,6 +222,28 @@ force-replaced.
 If upstream provides a stable verifiable signature or provenance mechanism, mvmctl should adopt it. Until then, the
 fixed HTTPS origin and independently fetched checksum are an explicit supply-chain limitation, not a signature claim.
 
+The receiver derives the source identity from the canonical release slot; none of these values are request fields. The
+naming follows Firecracker's
+[official binary-installation contract](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md#getting-a-firecracker-binary).
+For version `<version>` without a leading `v` and architecture `<architecture>` in `x86_64|aarch64`, the fixed
+derivation is:
+
+| Value | Receiver-derived form |
+|---|---|
+| Official origin | `https://github.com/firecracker-microvm/firecracker/releases/download` |
+| Release tag | `v<version>` |
+| Archive | `firecracker-v<version>-<architecture>.tgz` |
+| Checksum sidecar | `firecracker-v<version>-<architecture>.tgz.sha256.txt` |
+| Archive root | `release-v<version>-<architecture>` |
+| Firecracker member | `release-v<version>-<architecture>/firecracker-v<version>-<architecture>` |
+| Jailer member | `release-v<version>-<architecture>/jailer-v<version>-<architecture>` |
+| Trusted-store leaves | `firecracker`, `jailer`, and `manifest.json` |
+
+This table freezes source construction and the two extracted member identities. It does not claim that those are the
+only members in the upstream archive: Task 6 separately records and enforces the complete reviewed upstream allowlist
+before extraction is accepted. A packaging change must update the reviewed contract and tests; it must not fall back to
+basename matching, caller-selected member names, or permissive extraction.
+
 ### Paths, process identity, and runtime state
 
 Privileged code treats the normal CLI, arguments, environment, database, cache, manifests, and downloaded content as
