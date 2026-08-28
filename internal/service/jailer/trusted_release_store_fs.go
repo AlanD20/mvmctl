@@ -19,12 +19,16 @@ const (
 )
 
 type trustedReleaseStoreDeps struct {
-	open   func(context.Context, string, int, uint32) (int, error)
-	openAt func(context.Context, int, string, int, uint32) (int, error)
-	fstat  func(context.Context, int, *unix.Stat_t) error
-	read   func(context.Context, int, []byte) (int, error)
-	pread  func(context.Context, int, []byte, int64) (int, error)
-	close  func(context.Context, int) error
+	open    func(context.Context, string, int, uint32) (int, error)
+	openAt  func(context.Context, int, string, int, uint32) (int, error)
+	mkdirAt func(context.Context, int, string, uint32) error
+	fstat   func(context.Context, int, *unix.Stat_t) error
+	fchown  func(context.Context, int, int, int) error
+	fchmod  func(context.Context, int, uint32) error
+	read    func(context.Context, int, []byte) (int, error)
+	pread   func(context.Context, int, []byte, int64) (int, error)
+	fsync   func(context.Context, int) error
+	close   func(context.Context, int) error
 }
 
 type trustedReleaseStorePolicy struct {
@@ -58,6 +62,15 @@ func openTrustedReleaseStoreForRead(
 	ctx context.Context,
 	deps trustedReleaseStoreDeps,
 	policy trustedReleaseStorePolicy,
+) (_ *trustedReleaseStore, returnErr error) {
+	return openTrustedReleaseStore(ctx, deps, policy, false)
+}
+
+func openTrustedReleaseStore(
+	ctx context.Context,
+	deps trustedReleaseStoreDeps,
+	policy trustedReleaseStorePolicy,
+	allowCreateManaged bool,
 ) (_ *trustedReleaseStore, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, trustedReleaseStoreError("open trusted release store", err)
@@ -93,17 +106,20 @@ func openTrustedReleaseStoreForRead(
 
 	parentFD := rootFD
 	for index, name := range components {
-		if err := ctx.Err(); err != nil {
-			return nil, trustedReleaseStoreError("open trusted release store component", err)
-		}
-		fd, openErr := deps.openAt(ctx, parentFD, name, trustedReleaseStoreDirectoryFlags, 0)
+		managed := index >= 2
+		fd, openErr := openTrustedReleaseStoreComponent(
+			ctx,
+			deps,
+			parentFD,
+			name,
+			policy,
+			managed,
+			allowCreateManaged && managed,
+		)
 		if openErr != nil {
-			return nil, classifyTrustedReleaseStoreOpenError(name, openErr, index >= 2)
+			return nil, openErr
 		}
 		retained = append(retained, fd)
-		if err := verifyTrustedReleaseStoreDirectory(ctx, deps, fd, name, policy, index >= 2); err != nil {
-			return nil, err
-		}
 		parentFD = fd
 	}
 
@@ -115,6 +131,105 @@ func openTrustedReleaseStoreForRead(
 	}
 	retained = nil
 	return store, nil
+}
+
+func openTrustedReleaseStoreComponent(
+	ctx context.Context,
+	deps trustedReleaseStoreDeps,
+	parentFD int,
+	name string,
+	policy trustedReleaseStorePolicy,
+	managed bool,
+	allowCreate bool,
+) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return -1, trustedReleaseStoreError("open trusted release store component "+name, err)
+	}
+	fd, err := deps.openAt(ctx, parentFD, name, trustedReleaseStoreDirectoryFlags, 0)
+	if err == nil {
+		if verifyErr := verifyTrustedReleaseStoreDirectory(ctx, deps, fd, name, policy, managed); verifyErr != nil {
+			return -1, closeRejectedTrustedReleaseStoreDirectory(ctx, deps, fd, name, verifyErr)
+		}
+		return fd, nil
+	}
+	if !errors.Is(err, unix.ENOENT) || !allowCreate {
+		return -1, classifyTrustedReleaseStoreOpenError(name, err, managed)
+	}
+
+	mkdirErr := deps.mkdirAt(ctx, parentFD, name, trustedReleaseStoreDirectoryMode)
+	created := mkdirErr == nil
+	if mkdirErr != nil && !errors.Is(mkdirErr, unix.EEXIST) {
+		return -1, trustedReleaseStoreError("create trusted release store directory "+name, mkdirErr)
+	}
+	if err := ctx.Err(); err != nil {
+		return -1, trustedReleaseStoreError("open created trusted release store directory "+name, err)
+	}
+	openedFD, err := deps.openAt(ctx, parentFD, name, trustedReleaseStoreDirectoryFlags, 0)
+	if err != nil {
+		if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+			return -1, trustedReleaseStoreUntrusted(
+				"created trusted release store directory "+name+" is unsafe",
+				err,
+			)
+		}
+		return -1, trustedReleaseStoreError("open created trusted release store directory "+name, err)
+	}
+	if created {
+		if err := deps.fchown(ctx, openedFD, int(policy.expectedUID), int(policy.expectedGID)); err != nil {
+			return -1, closeRejectedTrustedReleaseStoreDirectory(
+				ctx,
+				deps,
+				openedFD,
+				name,
+				trustedReleaseStoreError("set trusted release store directory owner "+name, err),
+			)
+		}
+		if err := deps.fchmod(ctx, openedFD, trustedReleaseStoreDirectoryMode); err != nil {
+			return -1, closeRejectedTrustedReleaseStoreDirectory(
+				ctx,
+				deps,
+				openedFD,
+				name,
+				trustedReleaseStoreError("set trusted release store directory mode "+name, err),
+			)
+		}
+	}
+	if err := verifyTrustedReleaseStoreDirectory(ctx, deps, openedFD, name, policy, true); err != nil {
+		return -1, closeRejectedTrustedReleaseStoreDirectory(ctx, deps, openedFD, name, err)
+	}
+	if err := deps.fsync(ctx, openedFD); err != nil {
+		return -1, closeRejectedTrustedReleaseStoreDirectory(
+			ctx,
+			deps,
+			openedFD,
+			name,
+			trustedReleaseStoreError("sync created trusted release store directory "+name, err),
+		)
+	}
+	if err := deps.fsync(ctx, parentFD); err != nil {
+		return -1, closeRejectedTrustedReleaseStoreDirectory(
+			ctx,
+			deps,
+			openedFD,
+			name,
+			trustedReleaseStoreError("sync parent of trusted release store directory "+name, err),
+		)
+	}
+	return openedFD, nil
+}
+
+func closeRejectedTrustedReleaseStoreDirectory(
+	ctx context.Context,
+	deps trustedReleaseStoreDeps,
+	fd int,
+	name string,
+	primary error,
+) error {
+	return appendTrustedReleaseStoreError(
+		primary,
+		"close rejected trusted release store directory "+name,
+		deps.close(context.WithoutCancel(ctx), fd),
+	)
 }
 
 func (store *trustedReleaseStore) openInstalledSlot(
@@ -346,14 +461,26 @@ func realTrustedReleaseStoreDeps() trustedReleaseStoreDeps {
 		openAt: func(_ context.Context, parentFD int, name string, flags int, mode uint32) (int, error) {
 			return unix.Openat(parentFD, name, flags, mode)
 		},
+		mkdirAt: func(_ context.Context, parentFD int, name string, mode uint32) error {
+			return unix.Mkdirat(parentFD, name, mode)
+		},
 		fstat: func(_ context.Context, fd int, stat *unix.Stat_t) error {
 			return unix.Fstat(fd, stat)
+		},
+		fchown: func(_ context.Context, fd, uid, gid int) error {
+			return unix.Fchown(fd, uid, gid)
+		},
+		fchmod: func(_ context.Context, fd int, mode uint32) error {
+			return unix.Fchmod(fd, mode)
 		},
 		read: func(_ context.Context, fd int, value []byte) (int, error) {
 			return unix.Read(fd, value)
 		},
 		pread: func(_ context.Context, fd int, value []byte, offset int64) (int, error) {
 			return unix.Pread(fd, value, offset)
+		},
+		fsync: func(_ context.Context, fd int) error {
+			return unix.Fsync(fd)
 		},
 		close: func(_ context.Context, fd int) error {
 			return unix.Close(fd)
