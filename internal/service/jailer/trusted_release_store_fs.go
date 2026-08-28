@@ -23,6 +23,7 @@ type trustedReleaseStoreDeps struct {
 	openAt func(context.Context, int, string, int, uint32) (int, error)
 	fstat  func(context.Context, int, *unix.Stat_t) error
 	read   func(context.Context, int, []byte) (int, error)
+	pread  func(context.Context, int, []byte, int64) (int, error)
 	close  func(context.Context, int) error
 }
 
@@ -350,6 +351,9 @@ func realTrustedReleaseStoreDeps() trustedReleaseStoreDeps {
 		},
 		read: func(_ context.Context, fd int, value []byte) (int, error) {
 			return unix.Read(fd, value)
+		},
+		pread: func(_ context.Context, fd int, value []byte, offset int64) (int, error) {
+			return unix.Pread(fd, value, offset)
 		},
 		close: func(_ context.Context, fd int) error {
 			return unix.Close(fd)

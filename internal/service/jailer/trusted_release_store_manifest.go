@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	trustedReleaseStoreReadFlags    = unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	trustedReleaseStoreReadFlags    = unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
 	trustedReleaseStoreManifestMode = uint32(0600)
 )
 

@@ -63,6 +63,9 @@ func TestTrustedReleaseDirectoryRejectsUnsafeOrCorruptManifest(t *testing.T) {
 		"directory": func(t *testing.T, fixture *trustedReleaseStoreFixture) {
 			require.NoError(t, os.Mkdir(filepath.Join(fixture.slotPath, trustedReleaseManifestLeaf), 0600))
 		},
+		"FIFO": func(t *testing.T, fixture *trustedReleaseStoreFixture) {
+			require.NoError(t, unix.Mkfifo(filepath.Join(fixture.slotPath, trustedReleaseManifestLeaf), 0600))
+		},
 		"wrong mode": func(t *testing.T, fixture *trustedReleaseStoreFixture) {
 			writeTrustedReleaseManifestFile(t, fixture.slotPath, testTrustedReleaseManifest(fixture.slot))
 			require.NoError(t, os.Chmod(filepath.Join(fixture.slotPath, trustedReleaseManifestLeaf), 0644))
