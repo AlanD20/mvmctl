@@ -222,8 +222,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Freeze the strict schema-v1 manifest contract, 4 KiB record bound, typed SHA-256 fields, and 120-byte through
     64 MiB executable-size policy; the fixed store leaf is `manifest.json`.
   - [x] Implement and verify the private manifest codec and release-identity derivation.
-  - [ ] Pin and validate the fixed root/architecture/version directory chain without following links or reopening paths.
-  - [ ] Read `manifest.json` once through the pinned slot; verify exact metadata, bounded bytes, stable descriptor
+  - [x] Pin and validate the fixed root/architecture/version directory chain without following links or reopening paths.
+  - [x] Read `manifest.json` once through the pinned slot; verify exact metadata, bounded bytes, stable descriptor
     identity, strict decoding, and exact slot equality.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.

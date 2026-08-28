@@ -301,9 +301,11 @@ and response cleanup preserves the primary `DomainError` metadata. The private E
 bounded header shape, selected architecture, exact bounded file size, and complete program-header-table extent without
 loading or executing candidate bytes. The private manifest codec enforces the closed schema, record and executable
 bounds, typed digests, and manifest-derived instance release identity.
-These foundations are not yet wired to the privileged request or legacy installer. Bounded archive transport and
-extraction, the complete member allowlist, manifest persistence, and atomic trusted-store installation remain Task 6
-work.
+The private read-side store foundation pins and validates the fixed root/architecture/version directory chain, then
+reads `manifest.json` once through the retained slot descriptor with stable metadata and exact slot verification. These
+foundations are not yet wired to the privileged request or legacy installer. Bounded archive transport and extraction,
+the complete member allowlist, manifest writing, executable verification/pinning, and atomic trusted-store installation
+remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
