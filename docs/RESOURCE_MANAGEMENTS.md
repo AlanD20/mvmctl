@@ -263,7 +263,8 @@ kernel-firecracker:
 
 **Location:** `internal/infra/constants.go` — `OverridableDefaults` map
 
-This map is the single authoritative source for all built-in defaults. Hardcoded values anywhere else in the codebase are a bug.
+This map is the authoritative source for user-configurable built-in defaults. Security-sensitive managed artifact
+basenames are compile-time constants in the same file and intentionally do not appear in `OverridableDefaults`.
 
 ### Structure overview
 
@@ -273,8 +274,8 @@ This map is the single authoritative source for all built-in defaults. Hardcoded
 | `defaults.network` | Default bridge name, CIDR, NAT enabled |
 | `defaults.image` | Import format, remote listing limit and cache TTL |
 | `defaults.kernel` | Default kernel version, build jobs, remote listing limit and cache TTL |
-| `defaults.firecracker` | Log filenames, socket filenames, log level, PID filenames |
-| `defaults.cloudinit` | ISO name, nocloud-net port range, max retries, kill-after duration |
+| `defaults.firecracker` | Firecracker log level |
+| `defaults.cloudinit` | nocloud-net port range, max retries, kill-after duration |
 | `defaults.binary` | Remote version limit |
 | `defaults.volume` | Cache type (default: `Unsafe`) |
 | `settings` | General settings: guestfs_enabled, firewall_backend |

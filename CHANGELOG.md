@@ -134,6 +134,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Kernel download, build, and import now stage files under the kernel service's configured managed directory and install
   final artifacts as `kernels/<kernel-id>`. Import identity is computed from the receiver-owned staged bytes, so a
   caller-controlled display name or a source-file replacement cannot select or escape the managed destination.
+- VM artifacts now use a compile-time filename vocabulary: `rootfs.img`, `cloud-init.iso`, `firecracker.json`,
+  `firecracker.log`, `firecracker.console.log`, optional `firecracker.metrics`, and fixed API/vsock/console socket and
+  PID basenames. VM filesystem type no longer changes the managed rootfs leaf.
+- Custom cloud-init ISO paths remain accepted as source data, but the ISO is copied into the VM's fixed
+  `cloud-init.iso` leaf before launch. Internal console-relay filename flags and filename settings were removed.
+- VM relaunch reconstructs rootfs, configuration, output, metrics, API, PID, and vsock paths from the managed VM
+  directory instead of treating SQLite path columns as launch authority. The transitional privileged Jailer also
+  rejects alternate manifest basenames and constructs its Firecracker API/config arguments from the compiled names.
+- Snapshots now produce and restore `rootfs.img`, `memory`, and `vmstate`. Restore and removal derive the snapshot
+  directory and leaves from the validated 64-character lowercase snapshot ID rather than stored file-path columns.
+  The temporary `phantom-rootfs.img` mechanism remains until the private mount-namespace overlay lands.
 
 #### Network isolation
 - Traffic routed between different managed networks is now denied unless an explicit typed service-access policy permits
@@ -162,6 +173,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flow. Self-update remains available for user-owned candidate artifacts.
 - API consumers can no longer set `output_dir`, `name`, or `output_path` on `KernelPullInput`; managed kernel placement
   is receiver-owned. The public CLI did not expose equivalent flags.
+- Firecracker/cloud-init/console filename settings are removed. Existing `rootfs.<filesystem>`, alternate snapshot leaf,
+  or custom runtime filename layouts are not adopted; clean-install VMs and snapshots use the fixed v0.3 names.
 
 ### Fixed
 
@@ -193,6 +206,9 @@ The following items are release blockers and are intentionally not described abo
 - Split root-only locks/handshakes beneath `/run/mvmctl/authority` from caller-owned socket/PID output directories beneath
   `/run/mvmctl/runtime`; stop mounting the whole cache VM directory. Pin persistent config/output leaves individually,
   truncate enabled `0600` log/console/metrics files only after durable launch registration, and retain them after stop.
+- Treat the current fixed-name Jailer checks as transitional defense-in-depth only: Firecracker still reads a
+  caller-writable configuration from the whole mounted VM directory. The final receiver must consume pinned individual
+  resources and derive/verify every jail-visible path after durable registration.
 - Independently verify and atomically install trusted Firecracker/Jailer releases inside the privileged boundary.
 - Migrate Jailer, loopmount, network, firewall, and supported host mutations to distinct typed privileged actions; remove
   the public root `mvm run jailer` and `mvm run provision` entry points.

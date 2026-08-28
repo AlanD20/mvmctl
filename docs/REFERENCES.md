@@ -748,20 +748,26 @@ The security model applies to the net cloud-init mode only:
 ├── volumes/              # Persistent disk volume files
 ├── vms/                  # Per-VM state
 │   └── <vm-sha>/         # VM directories named by SHA256 hash
-│       ├── rootfs.ext4 (or rootfs.btrfs, rootfs.xfs)
+│       ├── rootfs.img
+│       ├── cloud-init.iso            # ISO mode only
 │       ├── firecracker.json
 │       ├── firecracker.log
 │       ├── firecracker.console.log
+│       ├── firecracker.metrics       # Metrics enabled only
 │       ├── firecracker.pid
 │       ├── firecracker.api.socket
-│       ├── firecracker.metrics
+│       ├── vsock.sock                # Vsock enabled only
 │       ├── console.sock
 │       ├── console.pid
-│       └── cloud-init/
+│       └── cloud-init/               # Generated seed inputs
 ├── workflows/            # Workflow state persistence
 ├── nocloudnet/           # nocloud-net batch server dirs and logs
 ├── snapshots/            # Snapshot files (mem, vmstate, disk)
 │   └── <snapshot-id>/
+│       ├── rootfs.img
+│       ├── memory
+│       ├── vmstate
+│       └── phantom-rootfs.img        # Transitional until private namespace overlay
 ├── logs/                 # Application log files
 ├── firecracker-src/      # Firecracker git clone (for building from source)
 ├── mvmdb.db              # SQLite database (canonical asset state)
@@ -770,6 +776,10 @@ The security model applies to the net cloud-init mode only:
 ├── audit.log             # Rotating operation log (10MB, 3 backups)
 └── ...
 ```
+
+The VM and snapshot leaf names above are compiled and are not configurable. `MVM_CACHE_DIR` still selects the managed
+cache root. API/vsock/console sockets and PID mirrors remain in the VM cache directory in the transitional Jailer path;
+v0.3 release work will move them to `/run/mvmctl/runtime/<uid>/<vm-id>` and stop mounting the whole VM directory.
 
 Canonical launch assets and jail state are outside the user cache:
 

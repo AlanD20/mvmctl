@@ -145,12 +145,19 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] ID-based `volumes/<volume-id>.<raw|qcow2>` storage.
   - [x] Content-addressed `kernels/<kernel-id>` storage with receiver-owned staging; kernel pull inputs cannot select an
     output directory, name, or path.
-  - [ ] Fixed persistent `rootfs.img`, cloud-init, Firecracker configuration, log, console-log, and optional metrics
-    leaves; outputs are caller-owned `0600` one-link regular files truncated only after durable launch registration.
-  - [ ] Fixed ephemeral API/vsock/console sockets and PID mirrors beneath
-    `/run/mvmctl/runtime/<uid>/<vm-id>`; the root-controlled parent and pinned caller-owned VM directory replace the
-    whole-cache-VM-directory bind.
-  - [ ] Fixed snapshot leaves and a managed ID-scoped image-provisioning staging subtree.
+  - [x] Freeze persistent VM producer basenames as `rootfs.img`, `cloud-init.iso`, `firecracker.json`,
+    `firecracker.log`, `firecracker.console.log`, and optional `firecracker.metrics`; copy custom cloud-init ISO sources
+    into the fixed managed leaf, rebuild relaunch paths instead of trusting SQLite path columns, and reject alternate
+    manifest basenames in the transitional Jailer receiver.
+  - [ ] Make persistent outputs caller-owned `0600` one-link regular files and truncate them only after durable launch
+    registration. The current launch still creates/truncates outputs before registration.
+  - [x] Freeze API/vsock/console socket and PID mirror basenames and remove their filename configuration/relay flags.
+  - [ ] Relocate those ephemeral leaves beneath `/run/mvmctl/runtime/<uid>/<vm-id>`; the root-controlled parent and
+    pinned caller-owned VM directory must replace the current whole-cache-VM-directory bind.
+  - [x] Freeze snapshot producer/restore leaves as `rootfs.img`, `memory`, and `vmstate`; derive restore and remove paths
+    from the validated snapshot ID rather than SQLite file-path columns.
+  - [ ] Remove the transitional `phantom-rootfs.img` symlink through the Task 7 namespace overlay and add the managed
+    ID-scoped image-provisioning staging subtree.
 - [ ] Define operation-specific non-empty/maximum-size and access-mode policies before coding; a caller- or DB-provided
   expected size is an equality check, not authorization for an unbounded resource.
 - [ ] Open user cache/VM/image/kernel/volume/snapshot resources once with beneath/no-symlink/no-magic-link resolution.
