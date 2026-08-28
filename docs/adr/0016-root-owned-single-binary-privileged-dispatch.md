@@ -324,9 +324,11 @@ bounds, typed digests, and manifest-derived instance release identity.
 The private read-side store foundation pins and validates the fixed root/architecture/version directory chain, then
 reads `manifest.json` once through the retained slot descriptor with stable metadata and exact slot verification. It
 then opens the two fixed executable leaves nonblocking, verifies their exact metadata, manifest sizes and full hashes,
-closed ELF policy, read bounds, and pre/post-read stability, and retains the same descriptors at offset zero. These
-foundations are not yet wired to the privileged request or legacy installer. Bounded archive transport and extraction,
-the complete member allowlist, manifest writing, and atomic trusted-store installation remain Task 6 work.
+closed ELF policy, read bounds, and pre/post-read stability, and retains the same descriptors at offset zero. The private
+release authority now acquires the release-slot lease before those reads and returns one prepared value owning the lease,
+pinned store chain, manifest-derived identity, and verified descriptors with checked reverse cleanup. These foundations
+are not yet wired to the privileged request or legacy installer. Bounded archive transport and extraction, the complete
+member allowlist, manifest writing, and atomic trusted-store installation remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 

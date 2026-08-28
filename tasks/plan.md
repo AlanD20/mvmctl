@@ -244,6 +244,14 @@ pinned executable descriptors. It alone supplies release hashes to instance regi
 return a strict versioned response envelope before release install/remove is wired, because generic subprocess errors
 cannot preserve the partial-state details required for safe retries.
 
+```go
+func (a *releaseAuthority) prepareInstalled(ctx context.Context, slot releaseSlot) (*preparedRelease, error)
+func (p *preparedRelease) Release(ctx context.Context) error
+```
+
+Preparation and checked release are implemented first. The later launch slice adds only the typed ownership transfer
+that it actually needs; it does not expose raw descriptors, paths, caller-supplied hashes, or a generic operation hook.
+
 ### Network topology and policy
 
 ADR-0017 is the authoritative design:
