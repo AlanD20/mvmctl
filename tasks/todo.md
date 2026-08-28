@@ -218,6 +218,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Implement and verify the private ELF header validator: exact source identity and 64-byte header length, closed
     identity/type/machine/program-header policy, no untrusted allocation, and no executable loading or execution.
 - [ ] Exact Firecracker/Jailer bytes and a root manifest install atomically and durably.
+  - [x] Freeze the strict schema-v1 manifest contract, 4 KiB record bound, typed SHA-256 fields, and 120-byte through
+    64 MiB executable-size policy; the fixed store leaf is `manifest.json`.
+  - [ ] Implement and verify the private manifest codec and release-identity derivation.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.
 

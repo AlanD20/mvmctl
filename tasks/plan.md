@@ -233,7 +233,7 @@ and `MVM_ASSET_MIRROR` supplies bytes rather than authority. Extraction validate
 allowlist and extracts only Firecracker and Jailer.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
-The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,release.json}`. Binaries are
+The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are
 validated as ELF for the selected architecture without execution. Descriptor-relative atomic install, exchange, and
 removal use only fixed leaves and preserve an old complete release or expose a new complete release, never a partial
 pair. Post-commit errors report `release_installed`, `release_replaced`, `release_removed`, `durability_uncertain`, and

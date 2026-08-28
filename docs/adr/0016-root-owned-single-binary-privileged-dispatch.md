@@ -259,6 +259,29 @@ The response must be HTTP 200 and no more than 256 bytes whether or not it decla
 is exactly `<64 lowercase hexadecimal characters><two ASCII spaces><derived archive name><LF>`. Missing or additional
 lines, CRLF, alternate filenames, uppercase digests, GNU binary markers, and other whitespace are rejected.
 
+The fixed `manifest.json` leaf uses schema version 1 and is at most 4 KiB. Its closed JSON schema contains exactly the
+canonical release slot, the archive SHA-256 digest, and separate Firecracker and Jailer objects containing a SHA-256
+digest and `size_bytes`. All digests are exactly 64 lowercase hexadecimal characters. Each executable size is between
+120 bytes (one complete ELF64 header and one program header) and 64 MiB. The current mirrored x86_64 releases use no
+more than 3,527,456 bytes for either selected executable, so the upper bound leaves substantial growth room while
+preventing a corrupt root manifest from authorizing an unbounded verification pass. An upstream executable exceeding
+the bound fails closed until the policy is reviewed; the bound is architecture-neutral and does not substitute for the
+still-required aarch64 archive-member audit.
+
+```json
+{
+  "schema_version": 1,
+  "release": {"version": "1.16.1", "architecture": "x86_64"},
+  "archive_sha256": "<lowercase-sha256>",
+  "firecracker": {"sha256": "<lowercase-sha256>", "size_bytes": 3527456},
+  "jailer": {"sha256": "<lowercase-sha256>", "size_bytes": 2181264}
+}
+```
+
+Decoding rejects unknown, missing, duplicate, case-conflicting, trailing, wrongly typed, oversized, or out-of-policy
+values. The executable hashes in a successfully decoded manifest are the sole source of the release identity supplied
+to instance registration; the unprivileged request never supplies them.
+
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
 dedicated checksum authority independently fetches the derived sidecar with the closed transport policy above and
