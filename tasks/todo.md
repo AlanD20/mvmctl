@@ -205,6 +205,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Root obtains the checksum independently through a dedicated bounded HTTPS-only source with proxies disabled. It
   may consume an exact-length bounded archive stream supplied by the unprivileged client for mirror efficiency, but it
   accepts no caller path, URL, or checksum and never opens or trusts the user asset mirror as authority.
+  - [x] Freeze the one-request timeout, transport, redirect, status, body-size, and exact checksum-sidecar grammar
+    policy. The ordinary downloader and its proxy/cache/retry behavior are outside this trust boundary.
+  - [ ] Implement and verify the private checksum authority and typed archive digest.
 - [ ] Bounded extraction rejects traversal, links, devices, duplicates, unexpected members, and size/count overflow.
 - [ ] Validate the complete reviewed upstream member allowlist while extracting only Firecracker and Jailer; validate
   their ELF class/machine without executing downloaded code.

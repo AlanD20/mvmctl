@@ -244,6 +244,15 @@ only members in the upstream archive: Task 6 separately records and enforces the
 before extraction is accepted. A packaging change must update the reviewed contract and tests; it must not fall back to
 basename matching, caller-selected member names, or permissive extraction.
 
+Checksum authority uses a dedicated client rather than the ordinary downloader. It performs one retrieval attempt of
+the derived sidecar URL with a 15-second total deadline, 5-second dial/TLS/header timeouts, a 16 KiB response-header
+limit, transport compression disabled, TLS 1.2 or newer, no proxy function, no response cache, and at most one redirect.
+That redirect must remain HTTPS, contain no user information or fragment, and target exactly
+`release-assets.githubusercontent.com`.
+The response must be HTTP 200 and no more than 256 bytes whether or not it declares a content length. The accepted body
+is exactly `<64 lowercase hexadecimal characters><two ASCII spaces><derived archive name><LF>`. Missing or additional
+lines, CRLF, alternate filenames, uppercase digests, GNU binary markers, and other whitespace are rejected.
+
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. It is not
 yet wired to the privileged request or legacy installer. Independent checksum retrieval, bounded archive transport and
