@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"mvmctl/internal/infra"
+	"mvmctl/pkg/errs"
 )
 
 const (
@@ -51,4 +52,15 @@ func newTrustedReleaseSource(slot releaseSlot) (trustedReleaseSource, error) {
 		firecrackerMember: archiveRoot + "/" + firecrackerName,
 		jailerMember:      archiveRoot + "/" + jailerName,
 	}, nil
+}
+
+func validateTrustedReleaseSource(source trustedReleaseSource) error {
+	expected, err := newTrustedReleaseSource(source.slot)
+	if err != nil || source != expected {
+		return errs.New(
+			errs.CodeBinaryUntrusted,
+			"trusted release source identity is inconsistent",
+		)
+	}
+	return nil
 }
