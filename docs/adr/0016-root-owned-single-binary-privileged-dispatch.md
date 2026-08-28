@@ -254,10 +254,12 @@ is exactly `<64 lowercase hexadecimal characters><two ASCII spaces><derived arch
 lines, CRLF, alternate filenames, uppercase digests, GNU binary markers, and other whitespace are rejected.
 
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
-`(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. It is not
-yet wired to the privileged request or legacy installer. Independent checksum retrieval, bounded archive transport and
-extraction, the complete member allowlist, ELF validation, manifest persistence, and atomic trusted-store installation
-remain Task 6 work.
+`(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
+dedicated checksum authority independently fetches the derived sidecar with the closed transport policy above and
+returns a typed archive digest only after exact grammar validation. Forged private source values fail before a request,
+and response cleanup preserves the primary `DomainError` metadata. These foundations are not yet wired to the
+privileged request or legacy installer. Bounded archive transport and extraction, the complete member allowlist, ELF
+validation, manifest persistence, and atomic trusted-store installation remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 

@@ -207,7 +207,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   accepts no caller path, URL, or checksum and never opens or trusts the user asset mirror as authority.
   - [x] Freeze the one-request timeout, transport, redirect, status, body-size, and exact checksum-sidecar grammar
     policy. The ordinary downloader and its proxy/cache/retry behavior are outside this trust boundary.
-  - [ ] Implement and verify the private checksum authority and typed archive digest.
+  - [x] Implement and verify the private checksum authority and typed archive digest: source-integrity revalidation,
+    proxy-free bounded HTTPS, one closed redirect, exact status/body/grammar checks, cancellation, and checked cleanup.
 - [ ] Bounded extraction rejects traversal, links, devices, duplicates, unexpected members, and size/count overflow.
 - [ ] Validate the complete reviewed upstream member allowlist while extracting only Firecracker and Jailer; validate
   their ELF class/machine without executing downloaded code.
