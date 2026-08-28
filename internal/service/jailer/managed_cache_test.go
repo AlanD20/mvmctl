@@ -94,6 +94,7 @@ func TestPinManagedCacheRetainsDescriptorIdentity(t *testing.T) {
 	require.NotNil(t, lease)
 	t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
 	require.NotEmpty(t, lease.retained)
+	assert.Equal(t, fixture.caller.uid, lease.ownerUID)
 	assert.NotZero(t, lease.identity.inode)
 	assert.NotZero(t, lease.identity.deviceMajor|lease.identity.deviceMinor)
 

@@ -62,6 +62,7 @@ type managedCacheDeps struct {
 type managedCacheLease struct {
 	deps     managedCacheDeps
 	cacheFD  int
+	ownerUID uint32
 	identity managedCacheIdentity
 	retained []int
 }
@@ -184,6 +185,7 @@ func pinManagedCache(
 	lease := &managedCacheLease{
 		deps:     deps,
 		cacheFD:  parentFD,
+		ownerUID: caller.uid,
 		identity: identity,
 		retained: retained,
 	}
@@ -386,6 +388,8 @@ func (lease *managedCacheLease) Release(ctx context.Context) error {
 	err := closeManagedCacheFDs(ctx, lease.deps, lease.retained)
 	lease.retained = nil
 	lease.cacheFD = -1
+	lease.ownerUID = 0
+	lease.identity = managedCacheIdentity{}
 	if err != nil {
 		return managedCacheCleanupError("release managed cache descriptors", err)
 	}
