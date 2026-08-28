@@ -293,16 +293,17 @@ result. Once the version directory exists, a missing or unsafe fixed leaf is an 
 fails as `binary.untrusted`, never as an absent release. Reads retain the version-directory descriptor, open each leaf
 once, compare pre/post-read descriptor identity and metadata, and do not reconstruct a pathname.
 
-Executable admission opens the fixed `firecracker` and `jailer` leaves with `O_NOFOLLOW` relative to that retained
-version-directory descriptor. It requires each descriptor to identify a one-link `root:root` regular file of exact mode
-`0755`, with a size equal to its manifest entry and within the hard executable bound. Verification uses bounded
-positioned reads from offset zero with a fixed 32 KiB buffer: it hashes exactly the declared bytes, captures the first
-64 bytes for the closed ELF policy, and probes the next byte so truncation and growth fail closed. Positioned reads
-leave the descriptor offset unchanged. A second descriptor stat must match device, inode, type and mode, link count,
-owner and group, size, modification time, and change time from the first stat. The service retains those same verified
-descriptors for the later launch handoff; it never validates one pathname and executes a reopened pathname. Failure to
-admit `jailer` closes an already admitted `firecracker`, and cleanup preserves the primary domain error while reporting
-any close failure.
+Executable admission opens the fixed `firecracker` and `jailer` leaves with `O_NOFOLLOW|O_NONBLOCK` relative to that
+retained version-directory descriptor. The nonblocking open prevents an unsafe special-file leaf from stalling root
+before type admission. Each descriptor must identify a one-link `root:root` regular file of exact mode `0755`, with a
+size equal to its manifest entry and within the hard executable bound. Verification uses bounded positioned reads from
+offset zero with a fixed 32 KiB buffer: it hashes exactly the declared bytes, captures the first 64 bytes for the closed
+ELF policy, and probes the next byte so truncation and growth fail closed. Positioned reads leave the descriptor offset
+unchanged. A second descriptor stat must match device, inode, type and mode, link count, owner and group, size,
+modification time, and change time from the first stat. The service retains those same verified descriptors for the
+later launch handoff; it never validates one pathname and executes a reopened pathname. Failure to admit `jailer`
+closes an already admitted `firecracker`, and cleanup preserves the primary domain error while reporting any close
+failure.
 
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
@@ -313,10 +314,11 @@ bounded header shape, selected architecture, exact bounded file size, and comple
 loading or executing candidate bytes. The private manifest codec enforces the closed schema, record and executable
 bounds, typed digests, and manifest-derived instance release identity.
 The private read-side store foundation pins and validates the fixed root/architecture/version directory chain, then
-reads `manifest.json` once through the retained slot descriptor with stable metadata and exact slot verification. These
+reads `manifest.json` once through the retained slot descriptor with stable metadata and exact slot verification. It
+then opens the two fixed executable leaves nonblocking, verifies their exact metadata, manifest sizes and full hashes,
+closed ELF policy, read bounds, and pre/post-read stability, and retains the same descriptors at offset zero. These
 foundations are not yet wired to the privileged request or legacy installer. Bounded archive transport and extraction,
-the complete member allowlist, manifest writing, executable verification/pinning, and atomic trusted-store installation
-remain Task 6 work.
+the complete member allowlist, manifest writing, and atomic trusted-store installation remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
