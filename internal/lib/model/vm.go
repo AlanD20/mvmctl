@@ -64,20 +64,8 @@ type VMItem struct {
 	SerialOutputPath *string `json:"serial_output_path,omitempty" db:"serial_output_path"`
 	LSMFlags         string  `json:"lsm_flags"                    db:"lsm_flags"`
 	BootArgs         string  `json:"boot_args"                    db:"boot_args"`
-	// NOTE: These fields are NOT stored in the database. They are runtime
-	// configuration values resolved from defaults/input at VM creation time.
-	// The *Path fields in migration 001 (config_path, log_path, etc.) store
-	// the resolved full paths in the DB; these *Filename fields are the
-	// basenames used to construct those paths and are ephemeral.
-	LogLevel              string `json:"log_level"`
-	LogFilename           string `json:"log_filename"`
-	SerialOutputFilename  string `json:"serial_output_filename"`
-	MetricsFilename       string `json:"metrics_filename"`
-	APISocketFilename     string `json:"api_socket_filename"`
-	PIDFilename           string `json:"pid_filename"`
-	ConfigFilename        string `json:"config_filename"`
-	ConsolePIDFilename    string `json:"console_pid_filename"`
-	ConsoleSocketFilename string `json:"console_socket_filename"`
+	// LogLevel is runtime configuration and is not stored in the database.
+	LogLevel string `json:"log_level"`
 
 	// JSON-serialized in DB fields (TEXT columns, scanned directly via
 	// db.StringSlice / CpuConfig.Scan)

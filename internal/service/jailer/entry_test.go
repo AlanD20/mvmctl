@@ -31,6 +31,40 @@ func TestLoadManifest_AcceptsExactManagedResources(t *testing.T) {
 	}
 }
 
+// Rationale: containment is not authority to select a privileged-visible
+// basename. The receiver must accept only its compiled per-VM leaf names.
+func TestLoadManifest_RejectsNonCanonicalVMResourceLeaves(t *testing.T) {
+	tests := map[string]func(*testing.T, *managedFixture){
+		"config": func(t *testing.T, fixture *managedFixture) {
+			fixture.manifest.ConfigPath = fixture.writeVMFile(t, "alternate.json")
+		},
+		"rootfs": func(t *testing.T, fixture *managedFixture) {
+			fixture.manifest.RootfsPath = fixture.writeVMFile(t, "alternate.img")
+		},
+		"cloud_init": func(t *testing.T, fixture *managedFixture) {
+			fixture.manifest.ISOPath = fixture.writeVMFile(t, "alternate.iso")
+		},
+		"pid": func(_ *testing.T, fixture *managedFixture) {
+			fixture.manifest.PIDPath = filepath.Join(fixture.vmDir, "alternate.pid")
+		},
+		"api_socket": func(_ *testing.T, fixture *managedFixture) {
+			fixture.manifest.APISocket = filepath.Join(fixture.vmDir, "alternate.socket")
+		},
+	}
+
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedFixture(t)
+			mutate(t, fixture)
+			fixture.writeManifest(t)
+
+			manifest, err := loadManifest(testVMID, fixture.vmDir)
+			require.ErrorContains(t, err, "non-canonical managed VM resource path")
+			assert.Nil(t, manifest)
+		})
+	}
+}
+
 // Rationale: The privileged service must not treat an attacker-controlled path
 // as managed merely because its immediate parent has a managed collection name.
 func TestLoadManifest_RejectsArbitraryCollectionPaths(t *testing.T) {
@@ -291,11 +325,11 @@ func newManagedFixture(t *testing.T) *managedFixture {
 	snapshotDir := filepath.Join(snapshotsRoot, testResourceID)
 	require.NoError(t, os.Mkdir(snapshotDir, 0700))
 	files := map[string]string{
-		filepath.Join(vmDir, "config.json"):      "{}",
-		filepath.Join(vmDir, "rootfs.ext4"):      "rootfs",
-		filepath.Join(vmDir, "cloud-init.iso"):   "iso",
-		filepath.Join(kernelsRoot, "vmlinux"):    "kernel",
-		filepath.Join(volumesRoot, "volume.raw"): "volume",
+		filepath.Join(vmDir, infra.VMFirecrackerConfigFilename): "{}",
+		filepath.Join(vmDir, infra.VMRootfsFilename):            "rootfs",
+		filepath.Join(vmDir, infra.VMCloudInitISOFilename):      "iso",
+		filepath.Join(kernelsRoot, "vmlinux"):                   "kernel",
+		filepath.Join(volumesRoot, "volume.raw"):                "volume",
 	}
 	for path, content := range files {
 		require.NoError(t, os.WriteFile(path, []byte(content), 0600))
@@ -303,11 +337,13 @@ func newManagedFixture(t *testing.T) *managedFixture {
 	fixture := &managedFixture{vmDir: vmDir}
 	fixture.manifest = LaunchManifest{
 		VMID: testVMID, VMDir: vmDir, Version: "1.16.0",
-		ConfigPath: filepath.Join(vmDir, "config.json"), PIDPath: filepath.Join(vmDir, "firecracker.pid"),
-		KernelPath: filepath.Join(kernelsRoot, "vmlinux"), RootfsPath: filepath.Join(vmDir, "rootfs.ext4"),
-		ISOPath: filepath.Join(vmDir, "cloud-init.iso"), SnapshotDir: snapshotDir,
+		ConfigPath: filepath.Join(vmDir, infra.VMFirecrackerConfigFilename),
+		PIDPath:    filepath.Join(vmDir, infra.VMFirecrackerPIDFilename),
+		KernelPath: filepath.Join(kernelsRoot, "vmlinux"),
+		RootfsPath: filepath.Join(vmDir, infra.VMRootfsFilename),
+		ISOPath:    filepath.Join(vmDir, infra.VMCloudInitISOFilename), SnapshotDir: snapshotDir,
 		Volumes:   []VolumeMount{{DriveID: testResourceID, HostPath: filepath.Join(volumesRoot, "volume.raw")}},
-		APISocket: filepath.Join(vmDir, "firecracker.socket"),
+		APISocket: filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename),
 		CgroupLimits: func() *model.VMCgroupLimits {
 			limits := model.NewVMCgroupLimits(2, 512, model.VMCgroupPolicy{
 				VMMHeadroomMiB: 128, CPUWeight: 100, PIDsMax: 256, SwapMaxBytes: 0,
@@ -324,4 +360,11 @@ func (f *managedFixture) writeManifest(t *testing.T) {
 	data, err := json.Marshal(f.manifest)
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(f.vmDir, infra.JailerManifestFilename), data, 0600))
+}
+
+func (f *managedFixture) writeVMFile(t *testing.T, name string) string {
+	t.Helper()
+	path := filepath.Join(f.vmDir, name)
+	require.NoError(t, os.WriteFile(path, []byte("alternate"), 0600))
+	return path
 }

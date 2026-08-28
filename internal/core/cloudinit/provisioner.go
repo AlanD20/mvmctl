@@ -176,21 +176,43 @@ func (p *Provisioner) provisionNet(ctx context.Context) (*model.CloudInitResult,
 func (p *Provisioner) provisionISO(ctx context.Context) (*model.CloudInitResult, error) {
 	// Check for pre-existing custom ISO path
 	if p.config.CloudInitISOPath != nil {
-		isoPath := *p.config.CloudInitISOPath
-		if _, err := os.Stat(isoPath); os.IsNotExist(err) {
+		sourcePath := *p.config.CloudInitISOPath
+		sourceInfo, err := os.Stat(sourcePath)
+		if os.IsNotExist(err) {
 			return nil, errs.New(errs.CodeCloudInitISOModeFailed,
-				fmt.Sprintf("Custom cloud-init ISO not found: %s", isoPath),
+				fmt.Sprintf("custom cloud-init ISO not found: %s", sourcePath),
+			)
+		}
+		if err != nil {
+			return nil, errs.New(
+				errs.CodeCloudInitISOModeFailed,
+				fmt.Sprintf("inspect custom cloud-init ISO: %s", err),
+			)
+		}
+
+		isoPath := filepath.Join(p.config.VMDir, infra.VMCloudInitISOFilename)
+		if destinationInfo, statErr := os.Stat(isoPath); statErr == nil && os.SameFile(sourceInfo, destinationInfo) {
+			return &model.CloudInitResult{
+				Mode:            model.CloudInitModeISO,
+				ISOPath:         &isoPath,
+				NocloudNetRules: []model.FirewallRule{},
+			}, nil
+		}
+		if err := infra.CopyFile(sourcePath, isoPath); err != nil {
+			return nil, errs.New(
+				errs.CodeCloudInitISOModeFailed,
+				fmt.Sprintf("copy custom cloud-init ISO to managed path: %s", err),
 			)
 		}
 		return &model.CloudInitResult{
 			Mode:            model.CloudInitModeISO,
-			ISOPath:         p.config.CloudInitISOPath,
+			ISOPath:         &isoPath,
 			NocloudNetRules: []model.FirewallRule{},
 		}, nil
 	}
 
 	// Generate ISO from seed directory
-	isoPath := filepath.Join(p.config.VMDir, p.config.CloudInitISOName)
+	isoPath := filepath.Join(p.config.VMDir, infra.VMCloudInitISOFilename)
 	if err := p.manager.CreateSeedISO(ctx, p.config.CloudInitDir, isoPath); err != nil {
 		return nil, errs.New(errs.CodeCloudInitISOModeFailed,
 			fmt.Sprintf("Failed to create cloud-init ISO: %s", err),

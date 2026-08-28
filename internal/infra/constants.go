@@ -74,6 +74,37 @@ const CgroupV2Root = "/sys/fs/cgroup"
 // JailerManifestFilename is the fixed per-VM launch manifest name.
 const JailerManifestFilename = "jailer-launch.json"
 
+const (
+	// VMRootfsFilename is the fixed managed VM root filesystem leaf.
+	VMRootfsFilename = "rootfs.img"
+	// VMCloudInitISOFilename is the fixed managed VM cloud-init ISO leaf.
+	VMCloudInitISOFilename = "cloud-init.iso"
+	// VMFirecrackerConfigFilename is the fixed managed Firecracker configuration leaf.
+	VMFirecrackerConfigFilename = "firecracker.json"
+	// VMFirecrackerLogFilename is the fixed managed Firecracker log leaf.
+	VMFirecrackerLogFilename = "firecracker.log"
+	// VMFirecrackerConsoleLogFilename is the fixed managed Firecracker console log leaf.
+	VMFirecrackerConsoleLogFilename = "firecracker.console.log"
+	// VMFirecrackerMetricsFilename is the fixed managed Firecracker metrics leaf.
+	VMFirecrackerMetricsFilename = "firecracker.metrics"
+	// VMFirecrackerAPISocketFilename is the fixed Firecracker API socket leaf.
+	VMFirecrackerAPISocketFilename = "firecracker.api.socket"
+	// VMVsockSocketFilename is the fixed Firecracker vsock host socket leaf.
+	VMVsockSocketFilename = "vsock.sock"
+	// VMConsoleSocketFilename is the fixed console relay socket leaf.
+	VMConsoleSocketFilename = "console.sock"
+	// VMFirecrackerPIDFilename is the fixed display-only Firecracker PID leaf.
+	VMFirecrackerPIDFilename = "firecracker.pid"
+	// VMConsolePIDFilename is the fixed display-only console relay PID leaf.
+	VMConsolePIDFilename = "console.pid"
+	// SnapshotRootfsFilename is the fixed managed snapshot root filesystem leaf.
+	SnapshotRootfsFilename = "rootfs.img"
+	// SnapshotMemoryFilename is the fixed managed snapshot memory leaf.
+	SnapshotMemoryFilename = "memory"
+	// SnapshotStateFilename is the fixed managed snapshot state leaf.
+	SnapshotStateFilename = "vmstate"
+)
+
 const MVMForwardChain = "MVM-FORWARD"
 
 const MVMPostroutingChain = "MVM-POSTROUTING"
@@ -140,22 +171,12 @@ var OverridableDefaults = map[string]map[string]any{
 		"remote_list_cache_ttl": 14400,
 	},
 	"defaults.firecracker": {
-		"log_level":               "Debug",
-		"log_filename":            "firecracker.log",
-		"serial_output_filename":  "firecracker.console.log",
-		"metrics_filename":        "firecracker.metrics",
-		"api_socket_filename":     "firecracker.api.socket",
-		"pid_filename":            "firecracker.pid",
-		"config_filename":         "firecracker.json",
-		"console_socket_filename": "console.sock",
-		"console_pid_filename":    "console.pid",
-		"vsock_filename":          "vsock.sock",
+		"log_level": "Debug",
 	},
 	"defaults.volume": {
 		"cache_type": "Unsafe",
 	},
 	"defaults.cloudinit": {
-		"iso_name":                 "cloud-init.iso",
 		"nocloud_port_range_start": 8000,
 		"nocloud_port_range_end":   9000,
 		"nocloud_max_port_retries": 100,

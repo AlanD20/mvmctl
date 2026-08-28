@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -100,7 +101,7 @@ func (op *Operation) SnapshotCreate(
 	}()
 
 	// 5. Copy rootfs
-	rootfsFile := filepath.Join(snapDir, "rootfs.ext4")
+	rootfsFile := filepath.Join(snapDir, infra.SnapshotRootfsFilename)
 	emitProgress(onProgress, "rootfs", "running", "Copying root filesystem...")
 	if err := infra.CopyFile(vmItem.RootfsPath, rootfsFile); err != nil {
 		cleanup = true
@@ -111,7 +112,7 @@ func (op *Operation) SnapshotCreate(
 	// Create phantom symlink so the vmstate captures a snapshot-local path
 	// instead of the source VM's path. The symlink initially points to the
 	// snapshot's own rootfs copy.
-	phantomPath := filepath.Join(snapDir, "phantom-rootfs.ext4")
+	phantomPath := filepath.Join(snapDir, "phantom-rootfs.img")
 	if err := os.Symlink(rootfsFile, phantomPath); err != nil {
 		cleanup = true
 		return nil, errs.WrapMsg(errs.CodeSnapshotCreateFailed,
@@ -119,8 +120,8 @@ func (op *Operation) SnapshotCreate(
 	}
 
 	// 6. Firecracker API operations (pause + snapshot + optionally resume)
-	memFile := filepath.Join(snapDir, "memory")
-	stateFile := filepath.Join(snapDir, "vmstate")
+	memFile := filepath.Join(snapDir, infra.SnapshotMemoryFilename)
+	stateFile := filepath.Join(snapDir, infra.SnapshotStateFilename)
 
 	if vmItem.Status == model.VMStatusRunning || vmItem.Status == model.VMStatusPaused {
 		emitProgress(onProgress, "snapshot", "running", "Creating Firecracker snapshot...")
@@ -236,6 +237,14 @@ func (op *Operation) SnapshotRestore(
 		return nil, errs.WrapMsg(errs.CodeSnapshotRestoreFailed,
 			fmt.Sprintf("snapshot not found: %s", input.SnapshotID), err)
 	}
+	snapshotPaths, err := resolveManagedSnapshotArtifacts(op.CacheDir, snap.ID)
+	if err != nil {
+		return nil, errs.WrapMsg(
+			errs.CodeSnapshotRestoreFailed,
+			"snapshot metadata has an invalid managed identity",
+			err,
+		)
+	}
 
 	// 2. Enrich snapshot with relations
 	// Skip "network" when an explicit --network override is provided —
@@ -349,8 +358,8 @@ func (op *Operation) SnapshotRestore(
 		}
 
 		// Copy rootfs from snapshot
-		rootfsPath := filepath.Join(vmDir, "rootfs.ext4")
-		if err := infra.CopyFile(snap.RootfsFile, rootfsPath); err != nil {
+		rootfsPath := filepath.Join(vmDir, infra.VMRootfsFilename)
+		if err := infra.CopyFile(snapshotPaths.rootfs, rootfsPath); err != nil {
 			for _, cvm := range createdVMs {
 				op.cleanupRestoredVM(ctx, cvm)
 			}
@@ -449,8 +458,7 @@ func (op *Operation) SnapshotRestore(
 		// We only need a fresh CID (the source VM still holds the old one)
 		// and the new UDS path for the restored VM's directory.
 		if snap.ExtraConfig != nil && snap.ExtraConfig.VsockPort > 0 && vmItem.RootfsPath != "" {
-			vsockFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "vsock_filename")
-			vsockUDSPath := filepath.Join(vmDir, vsockFilename)
+			vsockUDSPath := filepath.Join(vmDir, infra.VMVsockSocketFilename)
 
 			// Use the snapshot's original CID — Firecracker preserves the guest
 			// CID from the vmstate (vsock_override only changes the UDS path).
@@ -483,14 +491,10 @@ func (op *Operation) SnapshotRestore(
 		}
 
 		// Set file paths for the new VM's directory
-		configFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "config_filename")
-		apiSocketFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "api_socket_filename")
-		logFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_filename")
-		serialOutputFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "serial_output_filename")
-		vmItem.ConfigPath = filepath.Join(vmDir, configFilename)
-		vmItem.APISocketPath = filepath.Join(vmDir, apiSocketFilename)
-		logPath := filepath.Join(vmDir, logFilename)
-		serialPath := filepath.Join(vmDir, serialOutputFilename)
+		vmItem.ConfigPath = filepath.Join(vmDir, infra.VMFirecrackerConfigFilename)
+		vmItem.APISocketPath = filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename)
+		logPath := filepath.Join(vmDir, infra.VMFirecrackerLogFilename)
+		serialPath := filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename)
 		vmItem.LogPath = &logPath
 		vmItem.SerialOutputPath = &serialPath
 
@@ -499,7 +503,7 @@ func (op *Operation) SnapshotRestore(
 		_ = op.Repos.VM.Upsert(ctx, vmItem)
 
 		// Respawn Firecracker in snapshot mode (stays paused)
-		if err := op.vmRespawnFirecracker(ctx, vmItem, true, snap.SnapshotDir); err != nil {
+		if err := op.vmRespawnFirecracker(ctx, vmItem, true, snapshotPaths.dir); err != nil {
 			// Don't rollback — VM record exists, just log error
 			slog.Error("Failed to respawn Firecracker for snapshot restore",
 				"vm", name, "error", err)
@@ -523,18 +527,18 @@ func (op *Operation) SnapshotRestore(
 
 		// Load snapshot via Firecracker API
 		// Only attempt API load when the snapshot has actual memory/state files.
-		snapHasState := snap.MemoryFile != "" && snap.StateFile != ""
+		snapHasState := true
 		if snapHasState {
-			if _, err := os.Stat(snap.MemoryFile); err != nil {
+			if _, err := os.Stat(snapshotPaths.memory); err != nil {
 				snapHasState = false
-			} else if _, err := os.Stat(snap.StateFile); err != nil {
+			} else if _, err := os.Stat(snapshotPaths.state); err != nil {
 				snapHasState = false
 			}
 		}
 		if vmItem.APISocketPath != "" && snapHasState {
 			// Acquire lock on snapshot dir to serialize concurrent restores
 			// from the same snapshot (prevents phantom symlink races).
-			lockPath := filepath.Join(snap.SnapshotDir, ".restore.lock")
+			lockPath := filepath.Join(snapshotPaths.dir, ".restore.lock")
 			lockFile, lkErr := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
 			if lkErr == nil {
 				_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX)
@@ -542,7 +546,7 @@ func (op *Operation) SnapshotRestore(
 
 			// Point phantom symlink to this restore's rootfs copy so
 			// LoadSnapshot finds the correct backing file at the vmstate path.
-			phantomPath := filepath.Join(snap.SnapshotDir, "phantom-rootfs.ext4")
+			phantomPath := filepath.Join(snapshotPaths.dir, "phantom-rootfs.img")
 			if err := os.Remove(phantomPath); err != nil && !os.IsNotExist(err) {
 				if lockFile != nil {
 					_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
@@ -566,8 +570,8 @@ func (op *Operation) SnapshotRestore(
 				vsockUDSPath = vmItem.Vsock.UDSPath
 			}
 			if err := ctrl.SnapshotRestore(ctx, model.SnapshotRestoreConfig{
-				MemFile:          snap.MemoryFile,
-				StateFile:        snap.StateFile,
+				MemFile:          snapshotPaths.memory,
+				StateFile:        snapshotPaths.state,
 				Resume:           input.Resume,
 				NetworkOverrides: map[string]string{"eth0": vmItem.TapDevice},
 				VsockUDSPath:     vsockUDSPath,
@@ -606,6 +610,32 @@ func (op *Operation) SnapshotRestore(
 				len(restoreErrors), strings.Join(msgs, "; ")))
 	}
 	return createdVMs, nil
+}
+
+type managedSnapshotArtifacts struct {
+	dir    string
+	rootfs string
+	memory string
+	state  string
+}
+
+// resolveManagedSnapshotArtifacts derives the closed snapshot layout from the
+// trusted cache root and snapshot identity. Stored file paths are descriptive
+// metadata and cannot select restore inputs.
+func resolveManagedSnapshotArtifacts(cacheDir, snapshotID string) (*managedSnapshotArtifacts, error) {
+	if len(snapshotID) != 64 || snapshotID != strings.ToLower(snapshotID) {
+		return nil, fmt.Errorf("invalid snapshot identity")
+	}
+	if _, err := hex.DecodeString(snapshotID); err != nil {
+		return nil, fmt.Errorf("invalid snapshot identity: %w", err)
+	}
+	dir := filepath.Join(cacheDir, "snapshots", snapshotID)
+	return &managedSnapshotArtifacts{
+		dir:    dir,
+		rootfs: filepath.Join(dir, infra.SnapshotRootfsFilename),
+		memory: filepath.Join(dir, infra.SnapshotMemoryFilename),
+		state:  filepath.Join(dir, infra.SnapshotStateFilename),
+	}, nil
 }
 
 // cleanupRestoredVM cleans up a VM created during snapshot restore on failure.
@@ -710,12 +740,19 @@ func (op *Operation) SnapshotRemove(ctx context.Context, input inputs.SnapshotIn
 	}
 
 	for _, snap := range snapshots {
-		// Remove files on disk
-		if snap.SnapshotDir != "" {
-			if err := os.RemoveAll(snap.SnapshotDir); err != nil {
-				slog.Warn("failed to remove snapshot directory",
-					"dir", snap.SnapshotDir, "error", err)
-			}
+		paths, err := resolveManagedSnapshotArtifacts(op.CacheDir, snap.ID)
+		if err != nil {
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodeSnapshotRemoveFailed),
+				Item: snap, Message: fmt.Sprintf("invalid managed snapshot identity: %v", err),
+			})
+			continue
+		}
+
+		// Remove only the ID-derived managed snapshot directory. Stored paths
+		// are display metadata and cannot select a deletion target.
+		if err := os.RemoveAll(paths.dir); err != nil {
+			slog.Warn("failed to remove snapshot directory", "dir", paths.dir, "error", err)
 		}
 
 		// Remove from DB

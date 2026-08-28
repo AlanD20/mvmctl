@@ -105,18 +105,8 @@ type ResolvedVMCreateInput struct {
 	DiskSizeMib         int
 	LSMFlags            string
 	// Firecracker
-	LogLevel              string
-	LogFilename           string
-	SerialOutputFilename  string
-	MetricsFilename       string
-	APISocketFilename     string
-	PIDFilename           string
-	ConfigFilename        string
-	ConsoleSocketFilename string
-	ConsolePIDFilename    string
-	VsockFilename         string
+	LogLevel string
 	// Cloud-init
-	CloudInitISOName      string
 	NocloudPortRangeStart int
 	NocloudPortRangeEnd   int
 	NocloudMaxPortRetries int
@@ -536,16 +526,6 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	userGID, _ := r.cfg.GetInt(ctx, "defaults.vm", "user_gid")
 	guestMACPrefix, _ := r.cfg.GetString(ctx, "defaults.vm", "guest_mac_prefix")
 	logLevel, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_level")
-	logFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_filename")
-	serialOutputFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename")
-	metricsFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "metrics_filename")
-	apiSocketFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "api_socket_filename")
-	pidFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "pid_filename")
-	configFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "config_filename")
-	consoleSocketFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_socket_filename")
-	consolePIDFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_pid_filename")
-	vsockFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "vsock_filename")
-	ciIsoName, _ := r.cfg.GetString(ctx, "defaults.cloudinit", "iso_name")
 	nocloudPortStart, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_start")
 	nocloudPortEnd, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_end")
 	nocloudMaxRetries, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries")
@@ -601,18 +581,8 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		Volumes:               vols,
 		ExtraDrives:           extraDrives,
 		// Firecracker defaults
-		LogLevel:              logLevel,
-		LogFilename:           logFilename,
-		SerialOutputFilename:  serialOutputFilename,
-		MetricsFilename:       metricsFilename,
-		APISocketFilename:     apiSocketFilename,
-		PIDFilename:           pidFilename,
-		ConfigFilename:        configFilename,
-		ConsoleSocketFilename: consoleSocketFilename,
-		ConsolePIDFilename:    consolePIDFilename,
-		VsockFilename:         vsockFilename,
+		LogLevel: logLevel,
 		// Cloud-init defaults
-		CloudInitISOName:      ciIsoName,
 		NocloudPortRangeStart: nocloudPortStart,
 		NocloudPortRangeEnd:   nocloudPortEnd,
 		NocloudMaxPortRetries: nocloudMaxRetries,

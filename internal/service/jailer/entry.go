@@ -222,7 +222,12 @@ func launch(cfg Config) error {
 		return err
 	}
 	if manifest.ISOPath != "" {
-		if err := mountResource(manifest.ISOPath, filepath.Join(jailRoot, "cloud-init.iso"), true, false); err != nil {
+		if err := mountResource(
+			manifest.ISOPath,
+			filepath.Join(jailRoot, infra.VMCloudInitISOFilename),
+			true,
+			false,
+		); err != nil {
 			return err
 		}
 	}
@@ -273,13 +278,13 @@ func launch(cfg Config) error {
 		"--cgroup", fmt.Sprintf("memory.swap.max=%d", manifest.CgroupLimits.SwapMaxBytes),
 		"--cgroup", fmt.Sprintf("pids.max=%d", manifest.CgroupLimits.PIDsMax),
 		"--",
-		"--api-sock", "/run/mvm/" + filepath.Base(manifest.APISocket),
+		"--api-sock", "/run/mvm/" + infra.VMFirecrackerAPISocketFilename,
 	}
 	if manifest.PCIEnabled {
 		args = append(args, "--enable-pci")
 	}
 	if !manifest.SnapshotMode {
-		args = append(args, "--config-file", "/run/mvm/"+filepath.Base(manifest.ConfigPath))
+		args = append(args, "--config-file", "/run/mvm/"+infra.VMFirecrackerConfigFilename)
 	}
 	return syscall.Exec(jailerPath, args, os.Environ())
 }
@@ -320,6 +325,9 @@ func loadManifest(vmID, vmDir string) (*LaunchManifest, error) {
 	if !versionPattern.MatchString(manifest.Version) {
 		return nil, fmt.Errorf("invalid jailed launch version")
 	}
+	if err := validateCanonicalManifestVMResources(&manifest, paths.vmDir); err != nil {
+		return nil, err
+	}
 	if err := validateManagedFile(manifestPath, paths.vmDir, paths.uid, true); err != nil {
 		return nil, fmt.Errorf("invalid managed launch manifest: %w", err)
 	}
@@ -355,6 +363,37 @@ func loadManifest(vmID, vmDir string) (*LaunchManifest, error) {
 		}
 	}
 	return &manifest, nil
+}
+
+func validateCanonicalManifestVMResources(manifest *LaunchManifest, vmDir string) error {
+	type resourcePath struct {
+		name string
+		got  string
+		want string
+	}
+	resources := []resourcePath{
+		{
+			name: "configuration",
+			got:  manifest.ConfigPath,
+			want: filepath.Join(vmDir, infra.VMFirecrackerConfigFilename),
+		},
+		{name: "rootfs", got: manifest.RootfsPath, want: filepath.Join(vmDir, infra.VMRootfsFilename)},
+		{name: "PID", got: manifest.PIDPath, want: filepath.Join(vmDir, infra.VMFirecrackerPIDFilename)},
+		{name: "API socket", got: manifest.APISocket, want: filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename)},
+	}
+	if manifest.ISOPath != "" {
+		resources = append(resources, resourcePath{
+			name: "cloud-init ISO",
+			got:  manifest.ISOPath,
+			want: filepath.Join(vmDir, infra.VMCloudInitISOFilename),
+		})
+	}
+	for _, resource := range resources {
+		if resource.got != resource.want {
+			return fmt.Errorf("non-canonical managed VM resource path for %s", resource.name)
+		}
+	}
+	return nil
 }
 
 func resolveManagedPaths(vmID, vmDir string) (*managedPaths, error) {

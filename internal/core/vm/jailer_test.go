@@ -216,9 +216,9 @@ func TestJailedPathCalculation(t *testing.T) {
 
 func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 	cloudInitMode := model.CloudInitModeISO
-	isoPath := filepath.Join(vmDir, "cloud-init.iso")
+	isoPath := filepath.Join(vmDir, infra.VMCloudInitISOFilename)
 	return &model.FirecrackerConfig{
-		VMDir: vmDir, RootfsPath: filepath.Join(vmDir, "rootfs.ext4"),
+		VMDir: vmDir, RootfsPath: filepath.Join(vmDir, infra.VMRootfsFilename),
 		BinaryPath: "/var/lib/mvmctl/binaries/1.16.0/firecracker",
 		JailerPath: "/var/lib/mvmctl/binaries/1.16.0/jailer", BinaryVersion: "1.16.0",
 		KernelPath: filepath.Join(filepath.Dir(vmDir), "kernels", "vmlinux"),
@@ -229,17 +229,19 @@ func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 		TapName: "tap-test", NetworkGateway: "10.0.0.1", NetworkNetmask: "255.255.255.0",
 		PCIEnabled: true, ImageFSUUID: "11111111-2222-3333-4444-555555555555", ImageFSType: "ext4",
 		EnableLogging: true, EnableMetrics: true, LogLevel: "Info",
-		LogPath: filepath.Join(vmDir, "firecracker.log"), MetricsPath: filepath.Join(vmDir, "metrics.fifo"),
-		SerialOutputPath: filepath.Join(vmDir, "serial.log"),
-		APISocketPath:    filepath.Join(vmDir, "api.socket"), PIDPath: filepath.Join(vmDir, "firecracker.pid"),
-		ConfigPath: filepath.Join(vmDir, "config.json"), CloudInitMode: &cloudInitMode,
+		LogPath:          filepath.Join(vmDir, infra.VMFirecrackerLogFilename),
+		MetricsPath:      filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename),
+		SerialOutputPath: filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename),
+		APISocketPath:    filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename),
+		PIDPath:          filepath.Join(vmDir, infra.VMFirecrackerPIDFilename),
+		ConfigPath:       filepath.Join(vmDir, infra.VMFirecrackerConfigFilename), CloudInitMode: &cloudInitMode,
 		CloudInitISOPath: &isoPath,
 		ExtraDrives: []model.DriveConfig{{
 			DriveID: testDriveID, PathOnHost: filepath.Join(filepath.Dir(vmDir), "volumes", "selected.raw"),
 			IsReadOnly: true, CacheType: model.CacheTypeUnsafe, IOEngine: "Sync",
 		}},
 		SnapshotMode: true, SnapshotDir: filepath.Join(filepath.Dir(vmDir), "snapshots", testDriveID),
-		Vsock:     &model.VsockConfig{GuestCID: 42, UDSPath: filepath.Join(vmDir, "vsock.socket")},
+		Vsock:     &model.VsockConfig{GuestCID: 42, UDSPath: filepath.Join(vmDir, infra.VMVsockSocketFilename)},
 		CPUVendor: ptr.Ptr("Intel"),
 	}
 }

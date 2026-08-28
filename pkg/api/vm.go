@@ -366,7 +366,7 @@ func (op *Operation) vmBuilderExecute(
 		return fmt.Errorf("failed to resolve necessary dependencies")
 	}
 	// Validate socket path before any expensive operations (cloud-init, resize, etc.).
-	if apiSocketPath := filepath.Join(builder.vmDir, resolved.APISocketFilename); len(apiSocketPath) >= 108 {
+	if apiSocketPath := filepath.Join(builder.vmDir, infra.VMFirecrackerAPISocketFilename); len(apiSocketPath) >= 108 {
 		return fmt.Errorf(
 			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). "+
 				"This is a system limit for Unix domain sockets. Path: %s",
@@ -521,7 +521,6 @@ func (op *Operation) vmBuilderExecute(
 				NocloudNetPort:        resolved.NocloudNetPort,
 				CloudInitISOPath:      resolved.CloudInitISOPath,
 				KeepCloudInitISO:      resolved.KeepCloudInitISO,
-				CloudInitISOName:      resolved.CloudInitISOName,
 				NocloudPortRangeStart: resolved.NocloudPortRangeStart,
 				NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
 				NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
@@ -570,7 +569,6 @@ func (op *Operation) vmBuilderExecute(
 				NocloudNetPort:        resolved.NocloudNetPort,
 				CloudInitISOPath:      resolved.CloudInitISOPath,
 				KeepCloudInitISO:      resolved.KeepCloudInitISO,
-				CloudInitISOName:      resolved.CloudInitISOName,
 				NocloudPortRangeStart: resolved.NocloudPortRangeStart,
 				NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
 				NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
@@ -616,7 +614,7 @@ func (op *Operation) vmBuilderExecute(
 		if resolved.VsockPort > 0 {
 			builder.vsockPort = resolved.VsockPort
 			builder.vsockToken = crypto.UUIDV4()
-			builder.vsockUDSPath = filepath.Join(builder.vmDir, resolved.VsockFilename)
+			builder.vsockUDSPath = filepath.Join(builder.vmDir, infra.VMVsockSocketFilename)
 			if agentBin := vsock.AgentBinary(); len(agentBin) > 0 {
 				if err := backend.InjectAgent(ctx, agentBin, builder.vsockPort, builder.vsockToken); err != nil {
 					provisionErr = fmt.Errorf("inject agent: %w", err)
@@ -675,8 +673,7 @@ func (op *Operation) vmBuilderExecute(
 		firecrackerReady = true
 		// Console relay setup (before spawn)
 		if resolved.EnableConsole {
-			consoleCtrl := console.NewController(builder.vmID, builder.vmDir, builder.name,
-				resolved.ConsolePIDFilename, resolved.ConsoleSocketFilename)
+			consoleCtrl := console.NewController(builder.vmID, builder.vmDir, builder.name)
 			ptyFD, ptyErr := consoleCtrl.CreatePTY()
 			if ptyErr != nil {
 				fcErr = fmt.Errorf("console PTY creation failed: %w", ptyErr)
@@ -1199,8 +1196,9 @@ func (op *Operation) vmRespawnFirecracker(
 	if v.KernelID == "" || v.Kernel == nil || v.Kernel.Path == "" {
 		return fmt.Errorf("kernel info is required for VM respawn")
 	}
-	if v.RootfsPath == "" {
-		return fmt.Errorf("rootfs path is required for VM respawn")
+	managedRootfsPath := filepath.Join(vmDir, infra.VMRootfsFilename)
+	if _, err := os.Stat(managedRootfsPath); err != nil {
+		return fmt.Errorf("managed VM rootfs is unavailable: %w", err)
 	}
 	if v.ImageID != "" && v.Image == nil {
 		return fmt.Errorf("image info is required for VM respawn")
@@ -1247,56 +1245,11 @@ func (op *Operation) vmRespawnFirecracker(
 		libnet.FlushARP(ctx, v.Network.Bridge)
 	}
 	logLevel, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_level")
-	fcPIDFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "pid_filename")
-	fcConfig := &model.FirecrackerConfig{
-		VMDir:          vmDir,
-		RootfsPath:     v.RootfsPath,
-		BinaryPath:     v.Binary.Path,
-		JailerPath:     pair.Jailer.Path,
-		BinaryVersion:  pair.Firecracker.Version,
-		KernelPath:     v.Kernel.Path,
-		VCPUCount:      v.VCPUCount,
-		MemSizeMiB:     v.MemSizeMiB,
-		CgroupLimits:   v.CgroupLimits,
-		GuestIP:        v.IPv4,
-		GuestMAC:       v.MAC,
-		TapName:        v.TapDevice,
-		NetworkGateway: v.Network.IPv4Gateway,
-		PCIEnabled:     v.PCIEnabled,
-		NestedVirt:     v.NestedVirt,
-		EnableConsole:  v.EnableConsole,
-		EnableLogging:  v.EnableLogging,
-		EnableMetrics:  v.EnableMetrics,
-		BootArgs:       v.BootArgs,
-		LSMFlags:       v.LSMFlags,
-		SnapshotMode:   snapshotMode,
-		SnapshotDir:    snapshotDir,
-		ImageFSUUID:    v.Image.FSUUID,
-		ImageFSType:    v.Image.FSType,
-		// Full paths from DB (field names match DB column names)
-		ConfigPath:       v.ConfigPath,
-		APISocketPath:    v.APISocketPath,
-		LogPath:          infra.DerefOrZero(v.LogPath),
-		SerialOutputPath: infra.DerefOrZero(v.SerialOutputPath),
-		LogLevel:         logLevel,
-		PIDPath:          filepath.Join(vmDir, fcPIDFilename),
-	}
-	// --- Vsock config ---
-	if v.Vsock != nil {
-		fcConfig.Vsock = &model.VsockConfig{
-			GuestCID: v.Vsock.GuestCID,
-			UDSPath:  v.Vsock.UDSPath,
-		}
-	}
-	// --- Attach volumes (extra drives) ---
-	if len(v.Volumes) > 0 {
-		fcConfig.ExtraDrives = volume.VolumesToDrives(v.Volumes)
-	}
+	fcConfig := buildRespawnFirecrackerConfig(v, pair, vmDir, snapshotMode, snapshotDir, logLevel)
 	// --- Console relay setup (before spawn) ---
 	var consoleController *console.Controller
 	if v.EnableConsole {
-		consoleController = console.NewController(v.ID, vmDir, v.Name,
-			v.ConsolePIDFilename, v.ConsoleSocketFilename)
+		consoleController = console.NewController(v.ID, vmDir, v.Name)
 		ptyFD, ptyErr := consoleController.CreatePTY()
 		if ptyErr != nil {
 			slog.Warn("Console PTY creation failed during respawn", "vm", v.Name, "error", ptyErr)
@@ -1344,6 +1297,61 @@ func (op *Operation) vmRespawnFirecracker(
 	v.ProcessStartTime = pst
 	v.Status = newStatus
 	return nil
+}
+
+// buildRespawnFirecrackerConfig reconstructs launch paths from the managed VM
+// directory. Persisted path columns are descriptive metadata, never authority.
+func buildRespawnFirecrackerConfig(
+	v *model.VMItem,
+	pair *model.BinaryPair,
+	vmDir string,
+	snapshotMode bool,
+	snapshotDir string,
+	logLevel string,
+) *model.FirecrackerConfig {
+	config := &model.FirecrackerConfig{
+		VMDir:            vmDir,
+		RootfsPath:       filepath.Join(vmDir, infra.VMRootfsFilename),
+		BinaryPath:       v.Binary.Path,
+		JailerPath:       pair.Jailer.Path,
+		BinaryVersion:    pair.Firecracker.Version,
+		KernelPath:       v.Kernel.Path,
+		VCPUCount:        v.VCPUCount,
+		MemSizeMiB:       v.MemSizeMiB,
+		CgroupLimits:     v.CgroupLimits,
+		GuestIP:          v.IPv4,
+		GuestMAC:         v.MAC,
+		TapName:          v.TapDevice,
+		NetworkGateway:   v.Network.IPv4Gateway,
+		PCIEnabled:       v.PCIEnabled,
+		NestedVirt:       v.NestedVirt,
+		EnableConsole:    v.EnableConsole,
+		EnableLogging:    v.EnableLogging,
+		EnableMetrics:    v.EnableMetrics,
+		BootArgs:         v.BootArgs,
+		LSMFlags:         v.LSMFlags,
+		SnapshotMode:     snapshotMode,
+		SnapshotDir:      snapshotDir,
+		ImageFSUUID:      v.Image.FSUUID,
+		ImageFSType:      v.Image.FSType,
+		ConfigPath:       filepath.Join(vmDir, infra.VMFirecrackerConfigFilename),
+		APISocketPath:    filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename),
+		LogPath:          filepath.Join(vmDir, infra.VMFirecrackerLogFilename),
+		SerialOutputPath: filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename),
+		MetricsPath:      filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename),
+		LogLevel:         logLevel,
+		PIDPath:          filepath.Join(vmDir, infra.VMFirecrackerPIDFilename),
+	}
+	if v.Vsock != nil {
+		config.Vsock = &model.VsockConfig{
+			GuestCID: v.Vsock.GuestCID,
+			UDSPath:  filepath.Join(vmDir, infra.VMVsockSocketFilename),
+		}
+	}
+	if len(v.Volumes) > 0 {
+		config.ExtraDrives = volume.VolumesToDrives(v.Volumes)
+	}
+	return config
 }
 
 func (op *Operation) resolveVMCgroupLimits(ctx context.Context, vcpuCount, memoryMiB int) model.VMCgroupLimits {
@@ -1525,7 +1533,7 @@ func (c *VMCreateBuilder) cloneImage(
 	if fsType == "" {
 		return fmt.Errorf("fsType is required")
 	}
-	vmRootfsPath := filepath.Join(c.vmDir, "rootfs."+fsType)
+	vmRootfsPath := filepath.Join(c.vmDir, infra.VMRootfsFilename)
 	if _, err := imageSvc.EnsureCached([]*model.ImageItem{resolved.Image}); err != nil {
 		return fmt.Errorf("ensure cached image: %w", err)
 	}
@@ -1590,14 +1598,13 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		LogLevel:        c.resolved.LogLevel,
 		ExtraDrives:     c.resolved.ExtraDrives,
 		Writeback:       c.resolved.Writeback,
-		// Full paths constructed from VMDir + resolved filenames.
-		// Field names match DB column names for respawn compatibility.
-		ConfigPath:       filepath.Join(c.vmDir, c.resolved.ConfigFilename),
-		APISocketPath:    filepath.Join(c.vmDir, c.resolved.APISocketFilename),
-		LogPath:          filepath.Join(c.vmDir, c.resolved.LogFilename),
-		SerialOutputPath: filepath.Join(c.vmDir, c.resolved.SerialOutputFilename),
-		MetricsPath:      filepath.Join(c.vmDir, c.resolved.MetricsFilename),
-		PIDPath:          filepath.Join(c.vmDir, c.resolved.PIDFilename),
+		// Fixed managed paths; field names match DB columns used during respawn.
+		ConfigPath:       filepath.Join(c.vmDir, infra.VMFirecrackerConfigFilename),
+		APISocketPath:    filepath.Join(c.vmDir, infra.VMFirecrackerAPISocketFilename),
+		LogPath:          filepath.Join(c.vmDir, infra.VMFirecrackerLogFilename),
+		SerialOutputPath: filepath.Join(c.vmDir, infra.VMFirecrackerConsoleLogFilename),
+		MetricsPath:      filepath.Join(c.vmDir, infra.VMFirecrackerMetricsFilename),
+		PIDPath:          filepath.Join(c.vmDir, infra.VMFirecrackerPIDFilename),
 	}
 	// Cloud-init info from result (isoPath, nocloudURL)
 	if c.cloudInitResult != nil {
@@ -1628,8 +1635,8 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		return nil
 	}
 	now := time.Now().Format(time.RFC3339)
-	logPath := filepath.Join(c.vmDir, c.resolved.LogFilename)
-	serialPath := filepath.Join(c.vmDir, c.resolved.SerialOutputFilename)
+	logPath := filepath.Join(c.vmDir, infra.VMFirecrackerLogFilename)
+	serialPath := filepath.Join(c.vmDir, infra.VMFirecrackerConsoleLogFilename)
 	vm := &model.VMItem{
 		ID:               c.vmID,
 		Name:             c.resolved.Name,
@@ -1648,8 +1655,8 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		MemSizeMiB:       c.resolved.MemSizeMib,
 		CgroupLimits:     c.resolved.CgroupLimits,
 		DiskSizeMiB:      c.resolved.DiskSizeMib,
-		APISocketPath:    filepath.Join(c.vmDir, c.resolved.APISocketFilename),
-		ConfigPath:       filepath.Join(c.vmDir, c.resolved.ConfigFilename),
+		APISocketPath:    filepath.Join(c.vmDir, infra.VMFirecrackerAPISocketFilename),
+		ConfigPath:       filepath.Join(c.vmDir, infra.VMFirecrackerConfigFilename),
 		CloudInitMode:    string(c.resolved.CloudInitMode),
 		RootfsPath:       c.rootfsPath,
 		RootfsSuffix:     c.resolved.Image.FSType,
