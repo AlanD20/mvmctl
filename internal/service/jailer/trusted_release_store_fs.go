@@ -22,6 +22,7 @@ type trustedReleaseStoreDeps struct {
 	open   func(context.Context, string, int, uint32) (int, error)
 	openAt func(context.Context, int, string, int, uint32) (int, error)
 	fstat  func(context.Context, int, *unix.Stat_t) error
+	read   func(context.Context, int, []byte) (int, error)
 	close  func(context.Context, int) error
 }
 
@@ -346,6 +347,9 @@ func realTrustedReleaseStoreDeps() trustedReleaseStoreDeps {
 		},
 		fstat: func(_ context.Context, fd int, stat *unix.Stat_t) error {
 			return unix.Fstat(fd, stat)
+		},
+		read: func(_ context.Context, fd int, value []byte) (int, error) {
+			return unix.Read(fd, value)
 		},
 		close: func(_ context.Context, fd int) error {
 			return unix.Close(fd)
