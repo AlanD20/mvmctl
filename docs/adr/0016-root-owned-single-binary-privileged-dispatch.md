@@ -276,6 +276,24 @@ The v0.3 canonical persistent layout is:
 | Durable image | `images/<image-id>.zst` |
 | Image staging | `images/staging/<image-id>/{source.raw,rootfs.img}` |
 
+Base VM launch admission uses a closed receiver policy before any descriptor is handed to the launch implementation.
+The request supplies only the VM ID, kernel ID, cloud-init presence, and the expected rootfs size. Root derives every
+component and opens it below the pinned cache descriptor with beneath/no-symlink/no-magic-link/no-cross-mount
+resolution. The base resource limits are:
+
+| Resource | Required size | Access and mode policy |
+|---|---:|---|
+| VM rootfs | 128 MiB through 16 TiB, exactly equal to the bounded expected size | Caller-owned, one-link regular file; owner read/write; no group/world write, execute, or special bits |
+| Firecracker configuration | 1 byte through 1 MiB | Caller-owned, one-link regular file; owner read; no group/world write, execute, or special bits |
+| Kernel | 1 byte through 1 GiB | Caller-owned, one-link regular file; owner read; execute bits permitted; no group/world write or special bits |
+| Cloud-init ISO | 1 byte through 256 MiB | Caller-owned, one-link regular file; owner read; no group/world write, execute, or special bits |
+
+The expected rootfs size is an equality check inside the receiver's hard range; it never raises the hard maximum. These
+checks authorize only the base launch set. Snapshot restore, volume attachment, snapshot creation, output creation, and
+image provisioning each require their own closed policy before their descriptors can join a launch or mutation lease.
+In particular, a QCOW2 file's physical length is not its virtual capacity, so a future volume policy cannot treat
+`statx` size as QCOW2 capacity or invoke an unrestricted image tool as root to compensate.
+
 Sockets and PID mirrors are not persistent cache artifacts. Their host layout is fixed beneath the root-controlled
 ephemeral runtime tree:
 

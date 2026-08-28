@@ -165,6 +165,12 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     ID-scoped image-provisioning staging subtree.
 - [ ] Define operation-specific non-empty/maximum-size and access-mode policies before coding; a caller- or DB-provided
   expected size is an equality check, not authorization for an unbounded resource.
+  - [x] Define base VM launch admission: rootfs 128 MiB through 16 TiB with exact bounded size equality, config 1 byte
+    through 1 MiB, kernel 1 byte through 1 GiB, and optional cloud-init ISO 1 byte through 256 MiB. All are caller-owned,
+    one-link regular files with resource-specific owner access and no group/world write or special bits.
+  - [ ] Define snapshot restore memory/state, volume count/format/capacity, writable snapshot creation, persistent output,
+    and image-provisioning policies in their owning increments. QCOW2 physical length must not be confused with virtual
+    capacity or inspected by an unrestricted root subprocess.
 - [ ] Open user cache/VM/image/kernel/volume/snapshot resources once with beneath/no-symlink/no-magic-link resolution.
 - [ ] Verify caller ownership, file type, fixed basenames, size, and allowed access mode on pinned descriptors.
 - [ ] Never validate a path and later reopen it by pathname.
