@@ -301,6 +301,13 @@ observed component is admitted, both that directory and its parent are fsynced b
 replacement, unsafe metadata, cancellation, and durability failures close all acquired descriptors in reverse order and
 fail closed. This foundation creates no architecture/version slot and writes no archive or executable bytes.
 
+Archive staging uses an anonymous regular file created on the pinned trusted-store filesystem with
+`O_TMPFILE|O_EXCL|O_RDWR|O_CLOEXEC` relative to the `binaries` descriptor. It has no pathname and cannot later be linked
+into the namespace. The descriptor must be `root:root`, exact mode `0600`, link count zero, and initially empty before it
+can receive bytes. A filesystem without these anonymous-file semantics fails closed; there is no fallback to `/tmp`, a
+visible random pathname, a replayable second stream, or a large in-memory archive. The stage is a private checked lease
+and is not itself an installed release or executable authority.
+
 Executable admission opens the fixed `firecracker` and `jailer` leaves with `O_NOFOLLOW|O_NONBLOCK` relative to that
 retained version-directory descriptor. The nonblocking open prevents an unsafe special-file leaf from stalling root
 before type admission. Each descriptor must identify a one-link `root:root` regular file of exact mode `0755`, with a
