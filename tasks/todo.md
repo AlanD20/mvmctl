@@ -215,7 +215,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [ ] Complete the architecture-specific member audit. The existing asset mirror proves the 24-member x86_64 layout
     across v1.10.1 and v1.14.2-v1.16.1, but contains no aarch64 archive; do not infer its allowlist from x86_64.
   - [x] Freeze the exact bounded ELF64 header-admission policy for x86_64 and aarch64.
-  - [ ] Implement and verify the private ELF header validator.
+  - [x] Implement and verify the private ELF header validator: exact source identity and 64-byte header length, closed
+    identity/type/machine/program-header policy, no untrusted allocation, and no executable loading or execution.
 - [ ] Exact Firecracker/Jailer bytes and a root manifest install atomically and durably.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.
