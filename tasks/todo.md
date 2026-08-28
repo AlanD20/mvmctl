@@ -219,6 +219,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     identity/type/machine/program-header policy, no untrusted allocation, and no executable loading or execution.
   - [x] Bind ELF admission to the bounded actual file size and reject a truncated declared program-header table.
 - [ ] Exact Firecracker/Jailer bytes and a root manifest install atomically and durably.
+  - [ ] Create or open only the fixed write-side `mvmctl/binaries` store components relative to pinned safe ancestors;
+    enforce exact root ownership/mode and fsync newly observed child and parent directories before staging bytes.
   - [x] Freeze the strict schema-v1 manifest contract, 4 KiB record bound, typed SHA-256 fields, and 120-byte through
     64 MiB executable-size policy; the fixed store leaf is `manifest.json`.
   - [x] Implement and verify the private manifest codec and release-identity derivation.

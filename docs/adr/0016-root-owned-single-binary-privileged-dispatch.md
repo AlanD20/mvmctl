@@ -293,6 +293,14 @@ result. Once the version directory exists, a missing or unsafe fixed leaf is an 
 fails as `binary.untrusted`, never as an absent release. Reads retain the version-directory descriptor, open each leaf
 once, compare pre/post-read descriptor identity and metadata, and do not reconstruct a pathname.
 
+Write-side store preparation never creates `/`, `/var`, or `/var/lib`. It may create only the fixed `mvmctl` and
+`binaries` components relative to their already pinned parents, using mode `0700`, followed by descriptor-based owner,
+group, type, and exact-mode verification. A component created by this call is explicitly set to `root:root 0700`; an
+`EEXIST` result is treated as a concurrent creation and is verified without changing its metadata. After a newly
+observed component is admitted, both that directory and its parent are fsynced before traversal continues. Symlink,
+replacement, unsafe metadata, cancellation, and durability failures close all acquired descriptors in reverse order and
+fail closed. This foundation creates no architecture/version slot and writes no archive or executable bytes.
+
 Executable admission opens the fixed `firecracker` and `jailer` leaves with `O_NOFOLLOW|O_NONBLOCK` relative to that
 retained version-directory descriptor. The nonblocking open prevents an unsafe special-file leaf from stalling root
 before type admission. Each descriptor must identify a one-link `root:root` regular file of exact mode `0755`, with a
