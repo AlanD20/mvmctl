@@ -308,6 +308,14 @@ can receive bytes. A filesystem without these anonymous-file semantics fails clo
 visible random pathname, a replayable second stream, or a large in-memory archive. The stage is a private checked lease
 and is not itself an installed release or executable authority.
 
+Caller-supplied archive admission is a single-use transition on that stage. The declared body is 1 byte through
+128 MiB; zero bytes select the separate root-fetch path and never represent an empty archive. Admission uses a fixed
+32 KiB buffer and monotonically positioned writes so the descriptor offset remains zero. It consumes exactly the
+declared bytes, hashes those same bytes once, and requires stream EOF with a one-byte probe; truncation, trailing data,
+or disagreement with the independently fetched digest fails as untrusted input. Acceptance requires file `fsync`,
+stable descriptor identity, exact post-write size and metadata, and an unchanged zero offset. Once stream consumption
+starts, any failure poisons the stage and only checked release remains valid; failed bytes cannot be retried or parsed.
+
 Executable admission opens the fixed `firecracker` and `jailer` leaves with `O_NOFOLLOW|O_NONBLOCK` relative to that
 retained version-directory descriptor. The nonblocking open prevents an unsafe special-file leaf from stalling root
 before type admission. Each descriptor must identify a one-link `root:root` regular file of exact mode `0755`, with a
