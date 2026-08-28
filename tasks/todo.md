@@ -200,7 +200,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Privileged code constructs the fixed official release/checksum locations from validated version and architecture.
   - [x] Freeze the official origin, tag, archive, checksum-sidecar, archive-root, exact Firecracker/Jailer member, and
     trusted-store leaf derivation. No derived value is accepted from the caller.
-  - [ ] Implement and verify the private typed source derivation.
+  - [x] Implement and verify the private typed source derivation for both architectures and canonical prerelease tags;
+    reject non-canonical or path-like slots before constructing any source value.
 - [ ] Root obtains the checksum independently through a dedicated bounded HTTPS-only source with proxies disabled. It
   may consume an exact-length bounded archive stream supplied by the unprivileged client for mirror efficiency, but it
   accepts no caller path, URL, or checksum and never opens or trusts the user asset mirror as authority.

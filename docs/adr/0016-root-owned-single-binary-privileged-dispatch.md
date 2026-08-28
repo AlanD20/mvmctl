@@ -244,6 +244,12 @@ only members in the upstream archive: Task 6 separately records and enforces the
 before extraction is accepted. A packaging change must update the reviewed contract and tests; it must not fall back to
 basename matching, caller-selected member names, or permissive extraction.
 
+Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
+`(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. It is not
+yet wired to the privileged request or legacy installer. Independent checksum retrieval, bounded archive transport and
+extraction, the complete member allowlist, ELF validation, manifest persistence, and atomic trusted-store installation
+remain Task 6 work.
+
 ### Paths, process identity, and runtime state
 
 Privileged code treats the normal CLI, arguments, environment, database, cache, manifests, and downloaded content as
