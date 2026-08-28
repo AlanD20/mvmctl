@@ -305,6 +305,14 @@ later launch handoff; it never validates one pathname and executes a reopened pa
 closes an already admitted `firecracker`, and cleanup preserves the primary domain error while reporting any close
 failure.
 
+Installed-release preparation acquires the canonical release-slot lease before opening the trusted store or resolving
+`manifest.json`. One private prepared value then owns that lease, the pinned store and version directory, the verified
+manifest-derived release identity, and the exact admitted executable descriptors. Preparation failure releases acquired
+resources in strict reverse order; successful release closes executables, version traversal, store traversal, and only
+then the release-slot lease. Cleanup always uses a cancellation-independent context and preserves the primary domain
+error while joining cleanup diagnostics. This slice exposes only preparation and checked release. Launch registration
+remains deferred until the process-identity work can transfer the release lease and executable ownership together.
+
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
 dedicated checksum authority independently fetches the derived sidecar with the closed transport policy above and

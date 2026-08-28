@@ -228,6 +228,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Pin and verify the fixed `firecracker` and `jailer` leaves through the retained slot descriptor: exact metadata
     and manifest size, bounded positioned full-file hashing, closed ELF admission, pre/post-read stability, unchanged
     offsets, exact descriptor retention, cancellation, and checked reverse cleanup.
+  - [ ] Compose the release-slot lease, pinned store and version directory, verified manifest identity, and exact
+    executable descriptors into one private prepared installed-release lease with strict reverse checked cleanup.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.
 
