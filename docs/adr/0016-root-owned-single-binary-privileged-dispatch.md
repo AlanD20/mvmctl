@@ -222,8 +222,10 @@ force-replaced.
 ELF admission reads exactly the first 64 bytes of each extracted binary and performs no executable handoff. It requires
 the ELF magic, ELF64 class, little-endian encoding, current ident/object versions, System V ABI version 0 with zero ident
 padding, `ET_DYN`, a non-zero entry point, a 64-byte ELF header, program headers beginning at byte 64 with 56-byte
-entries, and 1 through 64 program headers. The machine is exactly `EM_X86_64` (62) for `x86_64` or `EM_AARCH64` (183)
-for `aarch64`. A future upstream format change fails closed until this reviewed policy and its tests are updated.
+entries, and 1 through 64 program headers. Admission also receives the exact full-file size, enforces the 120-byte
+through 64 MiB executable policy, and requires the complete declared program-header table to fit within that size. The
+machine is exactly `EM_X86_64` (62) for `x86_64` or `EM_AARCH64` (183) for `aarch64`. A future upstream format change
+fails closed until this reviewed policy and its tests are updated.
 
 If upstream provides a stable verifiable signature or provenance mechanism, mvmctl should adopt it. Until then, the
 fixed HTTPS origin and independently fetched checksum are an explicit supply-chain limitation, not a signature claim.
