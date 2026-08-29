@@ -76,7 +76,9 @@ type vmLaunchLease struct {
 	lock     *vmLockCapability
 }
 
-// NetworkLocker acquires the final lock class for one root-owned managed network.
+// NetworkLocker acquires the final lock class for one root-owned managed network. A non-nil lock returned with an
+// error remains held—for example, when acquisition succeeds but record verification fails—and transfers release
+// responsibility to the caller.
 type NetworkLocker interface {
 	LockNetwork(ctx context.Context, key networkKey) (NetworkLock, error)
 }

@@ -19,6 +19,8 @@ const (
 	testNetworkID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
+// Rationale: Root-side topology admission must reject caller-shaped identifiers before acquiring authority locks or
+// constructing host resource names.
 func TestNewTopologyKeyRejectsUntrustedIdentityShapes(t *testing.T) {
 	tests := map[string]struct {
 		ownerUID    uint32
@@ -53,10 +55,15 @@ func TestNewTopologyKeyRejectsUntrustedIdentityShapes(t *testing.T) {
 	}
 }
 
+// Rationale: These names are a shared security contract for the topology, authority, and firewall stages. A bridge is
+// network-bound while namespace-local links are VM-bound, so neither may accidentally inherit the other's identity.
 func TestDeriveTopologyNamesIsStableAndIdentityBound(t *testing.T) {
 	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
 
 	got := deriveTopologyNames(key)
+	// CONTRACT: Each suffix is the first 12 lowercase hexadecimal characters of SHA-256 over the literal NUL-separated
+	// identity: owner+network+"managed-bridge" for mvb, and owner+VM+role for mvh/mvn/mvl/mvt. These vectors were
+	// derived from those byte strings independently of deriveTopologyNames.
 	want := topologyNames{
 		namespaceHandle: namespaceHandlePath(
 			"/run/mvmctl/authority/1000/netns/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -135,7 +142,8 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 	assert.False(t, fixture.lock.released, "network lock must span later firewall and launch integration")
 	assert.False(t, fixture.pin.released, "namespace pin must span later Jailer integration")
 
-	topology := preparation.Topology()
+	topology, err := preparation.Topology()
+	require.NoError(t, err)
 	wantTopology := Topology{
 		key:           fixture.key,
 		handle:        fixture.pin.handle,
@@ -229,8 +237,13 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 		t.Errorf("prepared topology cleanup mismatch (-want +got):\n%s", diff)
 	}
 	assert.Equal(t, topologyPreparationCleaned, preparation.state)
+	// Rationale: Cleanup revokes the authority represented by the topology. Returning the prior record here would let a
+	// later firewall or Jailer stage act on identities whose locks and namespace pin are gone.
+	assertTopologyUnavailable(t, preparation)
 }
 
+// Rationale: The network lock is later in the global lock order. A caller must not reach it with a forgeable or
+// inactive VM-lock claim.
 func TestServicePrepareRequiresVMLockBeforeNetworkLock(t *testing.T) {
 	fixture := newTopologyFixture(t)
 	fixture.launch.lock = nil
@@ -250,6 +263,79 @@ func TestServicePrepareRequiresVMLockBeforeNetworkLock(t *testing.T) {
 	assert.Empty(t, *fixture.events)
 }
 
+// Rationale: A locker may acquire the kernel/authority lock and then fail while inspecting its record. The returned
+// lock remains owned and must be released without cancellation while the acquisition error remains primary.
+func TestServicePrepareReleasesLockReturnedWithError(t *testing.T) {
+	tests := map[string]struct {
+		cancelDuringLock bool
+		wantError        error
+	}{
+		"ordinary_error": {
+			wantError: errors.New("injected lock verification failure"),
+		},
+		"caller_cancelled_during_lock": {
+			cancelDuringLock: true,
+			wantError:        context.Canceled,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			var ctx context.Context = context.Background()
+			config := fakeNetworkLockerConfig{lockError: tc.wantError}
+			if tc.cancelDuringLock {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				config = fakeNetworkLockerConfig{cancel: cancel}
+			}
+			fixture := newTopologyFixtureWithLocker(t, config)
+
+			preparation, err := fixture.service.prepare(ctx, fixture.launch, fixture.key.NetworkID())
+
+			require.Error(t, err)
+			assert.Nil(t, preparation)
+			assert.ErrorIs(t, err, tc.wantError)
+			assert.True(t, fixture.lock.released)
+			assert.False(t, fixture.lock.releaseSawCancellation)
+			assert.False(t, fixture.pin.released)
+			if diff := cmp.Diff(
+				[]string{"lock_network", "release_network_lock"},
+				*fixture.events,
+			); diff != "" {
+				t.Errorf("lock error cleanup order mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// Rationale: If releasing a lock returned with an acquisition error also fails, the exact lock must remain in a
+// recovery preparation and the error must explicitly require cleanup without losing either failure.
+func TestServicePrepareRetainsLockWhenLockErrorCleanupFails(t *testing.T) {
+	lockErr := errors.New("injected lock verification failure")
+	releaseErr := errors.New("injected network lock release failure")
+	fixture := newTopologyFixtureWithLocker(t, fakeNetworkLockerConfig{lockError: lockErr})
+	fixture.lock.releaseError = releaseErr
+
+	preparation, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
+
+	require.Error(t, err)
+	require.NotNil(t, preparation)
+	assert.ErrorIs(t, err, lockErr)
+	assert.ErrorIs(t, err, releaseErr)
+	de := errs.AsDomainError(err)
+	require.NotNil(t, de)
+	assert.Equal(t, true, de.Details["cleanup_required"])
+	assert.False(t, fixture.lock.released)
+	assertTopologyUnavailable(t, preparation)
+
+	fixture.lock.releaseError = nil
+	require.NoError(t, preparation.Cleanup(context.Background()))
+	assert.True(t, fixture.lock.released)
+	assertTopologyUnavailable(t, preparation)
+}
+
+// Rationale: Every successful prefix is privileged state. Failure at any following step must unwind that exact prefix
+// in reverse order before releasing authority.
 func TestServicePrepareRollsBackEveryCompletedPrefix(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -378,7 +464,8 @@ func TestServicePrepareRollsBackMutationThenError(t *testing.T) {
 }
 
 // Rationale: A rollback failure must retain the exact lock, namespace pin, and remaining identity so cleanup can be
-// retried without rediscovering or trusting mutable host names.
+// retried without rediscovering or trusting mutable host names, but partial identity must remain unavailable to later
+// authority stages.
 func TestServicePrepareReturnsRecoveryPreparationWhenRollbackFails(t *testing.T) {
 	fixture := newTopologyFixture(t)
 	fixture.effects.failAt = "attach_host_veth"
@@ -393,6 +480,7 @@ func TestServicePrepareReturnsRecoveryPreparationWhenRollbackFails(t *testing.T)
 	assert.Equal(t, true, de.Details["cleanup_required"])
 	assert.False(t, fixture.lock.released)
 	assert.False(t, fixture.pin.released)
+	assertTopologyUnavailable(t, preparation)
 	if diff := cmp.Diff([]string{"delete_veth_pair"}, fixture.effects.deleteEvents); diff != "" {
 		t.Errorf("failed rollback prefix mismatch (-want +got):\n%s", diff)
 	}
@@ -414,6 +502,8 @@ func TestServicePrepareReturnsRecoveryPreparationWhenRollbackFails(t *testing.T)
 	}
 }
 
+// Rationale: Cleanup progress is durable within the retained preparation. A retry must resume at the failed step and
+// never repeat already-completed destructive effects.
 func TestTopologyPreparationCleanupRetriesOnlyTheFailedSuffix(t *testing.T) {
 	fixture := newTopologyFixture(t)
 	preparation, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
@@ -470,6 +560,8 @@ func TestServicePrepareRollbackSurvivesCallerCancellation(t *testing.T) {
 	assert.True(t, fixture.lock.released)
 }
 
+// Rationale: Root adapters are trusted code but their returned kernel identities are still verified before a topology
+// can become authority for firewall or Jailer stages.
 func TestServicePrepareRejectsUnpinnedOrMismatchedEffectIdentity(t *testing.T) {
 	tests := map[string]func(*topologyFixture){
 		"namespace_handle_not_root_owned": func(f *topologyFixture) {
@@ -530,13 +622,21 @@ type topologyFixture struct {
 	events  *[]string
 	launch  *vmLaunchLease
 	lock    *fakeNetworkLock
-	locker  *fakeNetworkLocker
 	pin     *fakeNamespacePin
 	effects *fakeTopologyEffects
 	service *service
 }
 
+// newTopologyFixture constructs one valid owner-bound topology with a shared event log. Every fake identity is pinned
+// independently from the service output so tests can detect name, namespace, and rollback regressions.
 func newTopologyFixture(t *testing.T) *topologyFixture {
+	t.Helper()
+	return newTopologyFixtureWithLocker(t, fakeNetworkLockerConfig{})
+}
+
+// newTopologyFixtureWithLocker constructs the same valid topology while injecting only lock-acquisition behavior
+// needed by acquisition/cleanup regressions.
+func newTopologyFixtureWithLocker(t *testing.T, config fakeNetworkLockerConfig) *topologyFixture {
 	t.Helper()
 	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
 	names := deriveTopologyNames(key)
@@ -559,7 +659,12 @@ func newTopologyFixture(t *testing.T) *topologyFixture {
 		},
 		events: &events,
 	}
-	locker := &fakeNetworkLocker{lock: lock, events: &events}
+	locker := &fakeNetworkLocker{
+		lock:      lock,
+		events:    &events,
+		lockError: config.lockError,
+		cancel:    config.cancel,
+	}
 	effects := &fakeTopologyEffects{
 		pin:            pin,
 		vmNamespace:    vmNamespace,
@@ -572,11 +677,15 @@ func newTopologyFixture(t *testing.T) *topologyFixture {
 		key: key, events: &events,
 		launch:  &vmLaunchLease{ownerUID: key.OwnerUID(), vmID: key.VMID(), lock: &vmLockCapability{}},
 		lock:    lock,
-		locker:  locker,
 		pin:     pin,
 		effects: effects,
 		service: service,
 	}
+}
+
+type fakeNetworkLockerConfig struct {
+	lockError error
+	cancel    context.CancelFunc
 }
 
 func mustTopologyKey(t *testing.T, ownerUID uint32, vmID, networkID string) topologyKey {
@@ -586,36 +695,75 @@ func mustTopologyKey(t *testing.T, ownerUID uint32, vmID, networkID string) topo
 	return key
 }
 
+// assertTopologyUnavailable verifies that non-prepared lifecycle states return no usable authority identity and a
+// structured network-domain failure.
+func assertTopologyUnavailable(t *testing.T, preparation *topologyPreparation) {
+	t.Helper()
+	topology, err := preparation.Topology()
+	require.Error(t, err)
+	de := errs.AsDomainError(err)
+	require.NotNil(t, de)
+	assert.Equal(t, errs.CodeNetworkError, de.Code)
+	if diff := cmp.Diff(
+		Topology{},
+		topology,
+		cmp.AllowUnexported(
+			Topology{},
+			topologyKey{},
+			namespaceHandle{},
+			namespaceIdentity{},
+			linkIdentity{},
+			vethPairIdentity{},
+		),
+	); diff != "" {
+		t.Errorf("unavailable topology must be zero (-want +got):\n%s", diff)
+	}
+}
+
 type fakeNetworkLocker struct {
-	lock   *fakeNetworkLock
-	events *[]string
+	lock      *fakeNetworkLock
+	events    *[]string
+	lockError error
+	cancel    context.CancelFunc
 }
 
 func (locker *fakeNetworkLocker) LockNetwork(
-	_ context.Context,
+	ctx context.Context,
 	key networkKey,
 ) (NetworkLock, error) {
 	*locker.events = append(*locker.events, "lock_network")
 	if key != locker.lock.key {
 		return nil, errors.New("unexpected network lock key")
 	}
-	return locker.lock, nil
+	if locker.cancel != nil {
+		locker.cancel()
+		return locker.lock, ctx.Err()
+	}
+	return locker.lock, locker.lockError
 }
 
 type fakeNetworkLock struct {
-	key      networkKey
-	bridge   linkIdentity
-	released bool
-	events   *[]string
+	key                    networkKey
+	bridge                 linkIdentity
+	released               bool
+	releaseSawCancellation bool
+	releaseError           error
+	events                 *[]string
 }
 
 func (lock *fakeNetworkLock) Key() networkKey             { return lock.key }
 func (lock *fakeNetworkLock) ManagedBridge() linkIdentity { return lock.bridge }
-func (lock *fakeNetworkLock) Release(_ context.Context) error {
+func (lock *fakeNetworkLock) Release(ctx context.Context) error {
 	if lock.released {
 		return nil
 	}
+	if ctx.Err() != nil {
+		lock.releaseSawCancellation = true
+	}
 	*lock.events = append(*lock.events, "release_network_lock")
+	if lock.releaseError != nil {
+		return lock.releaseError
+	}
 	lock.released = true
 	return nil
 }
