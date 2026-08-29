@@ -12,8 +12,12 @@ const (
 )
 
 type trustedReleaseArchiveStage struct {
-	deps trustedReleaseStoreDeps
-	fd   int
+	deps          trustedReleaseStoreDeps
+	policy        trustedReleaseStorePolicy
+	fd            int
+	state         trustedReleaseArchiveStageState
+	sizeBytes     uint64
+	archiveDigest trustedReleaseArchiveDigest
 }
 
 // CRITICAL: The stage is anonymous, unlinkable, and created on the pinned trusted-store filesystem. No path is
@@ -52,7 +56,17 @@ func (lease *trustedReleaseStoreWriteLease) createArchiveStage(
 	if err := ctx.Err(); err != nil {
 		return nil, trustedReleaseStoreError("inspect trusted release archive stage", err)
 	}
-	if err := verifyTrustedReleaseArchiveStage(ctx, lease.store, fd, false); err != nil {
+	if _, err := inspectTrustedReleaseArchiveStage(
+		ctx,
+		lease.store.deps,
+		lease.store.policy,
+		fd,
+		0,
+		false,
+	); err != nil {
+		return nil, err
+	}
+	if err := requireTrustedReleaseArchiveStageZeroOffset(ctx, lease.store.deps, fd); err != nil {
 		return nil, err
 	}
 	if err := lease.store.deps.fchown(
@@ -66,32 +80,70 @@ func (lease *trustedReleaseStoreWriteLease) createArchiveStage(
 	if err := lease.store.deps.fchmod(ctx, fd, trustedReleaseArchiveStageMode); err != nil {
 		return nil, trustedReleaseStoreError("set trusted release archive stage mode", err)
 	}
-	if err := verifyTrustedReleaseArchiveStage(ctx, lease.store, fd, true); err != nil {
+	if _, err := inspectTrustedReleaseArchiveStage(
+		ctx,
+		lease.store.deps,
+		lease.store.policy,
+		fd,
+		0,
+		true,
+	); err != nil {
 		return nil, err
 	}
 
-	return &trustedReleaseArchiveStage{deps: lease.store.deps, fd: fd}, nil
+	return &trustedReleaseArchiveStage{
+		deps:   lease.store.deps,
+		policy: lease.store.policy,
+		fd:     fd,
+		state:  trustedReleaseArchiveStageEmpty,
+	}, nil
 }
 
-func verifyTrustedReleaseArchiveStage(
+func inspectTrustedReleaseArchiveStage(
 	ctx context.Context,
-	store *trustedReleaseStore,
+	deps trustedReleaseStoreDeps,
+	policy trustedReleaseStorePolicy,
 	fd int,
+	expectedSize uint64,
 	requireIdentity bool,
-) error {
+) (unix.Stat_t, error) {
 	if err := ctx.Err(); err != nil {
-		return trustedReleaseStoreError("inspect trusted release archive stage", err)
+		return unix.Stat_t{}, trustedReleaseStoreError("inspect trusted release archive stage", err)
 	}
 	var stat unix.Stat_t
-	if err := store.deps.fstat(ctx, fd, &stat); err != nil {
-		return trustedReleaseStoreError("inspect trusted release archive stage", err)
+	if err := deps.fstat(ctx, fd, &stat); err != nil {
+		return unix.Stat_t{}, trustedReleaseStoreError("inspect trusted release archive stage", err)
 	}
-	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 0 || stat.Size != 0 {
-		return trustedReleaseStoreError("trusted release archive stage has unsafe filesystem metadata", nil)
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 0 || stat.Size < 0 || uint64(stat.Size) != expectedSize {
+		return unix.Stat_t{}, trustedReleaseStoreError(
+			"trusted release archive stage has unsafe filesystem metadata or size",
+			nil,
+		)
 	}
-	if requireIdentity && (stat.Uid != store.policy.expectedUID || stat.Gid != store.policy.expectedGID ||
+	if requireIdentity && (stat.Uid != policy.expectedUID || stat.Gid != policy.expectedGID ||
 		stat.Mode&07777 != trustedReleaseArchiveStageMode) {
-		return trustedReleaseStoreError("trusted release archive stage has unexpected owner or mode", nil)
+		return unix.Stat_t{}, trustedReleaseStoreError(
+			"trusted release archive stage has unexpected owner or mode",
+			nil,
+		)
+	}
+	return stat, nil
+}
+
+func requireTrustedReleaseArchiveStageZeroOffset(
+	ctx context.Context,
+	deps trustedReleaseStoreDeps,
+	fd int,
+) error {
+	if err := ctx.Err(); err != nil {
+		return trustedReleaseStoreError("inspect trusted release archive stage offset", err)
+	}
+	offset, err := deps.seek(ctx, fd, 0, unix.SEEK_CUR)
+	if err != nil {
+		return trustedReleaseStoreError("inspect trusted release archive stage offset", err)
+	}
+	if offset != 0 {
+		return trustedReleaseStoreError("trusted release archive stage offset is not zero", nil)
 	}
 	return nil
 }
@@ -102,6 +154,9 @@ func (stage *trustedReleaseArchiveStage) Release(ctx context.Context) error {
 	}
 	err := stage.deps.close(context.WithoutCancel(ctx), stage.fd)
 	stage.fd = -1
+	stage.state = trustedReleaseArchiveStageFailed
+	stage.sizeBytes = 0
+	stage.archiveDigest = trustedReleaseArchiveDigest{}
 	if err != nil {
 		return trustedReleaseStoreError("release trusted release archive stage", err)
 	}

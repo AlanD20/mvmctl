@@ -129,6 +129,9 @@ func TestTrustedReleaseArchiveStageRejectsSetupFailures(t *testing.T) {
 		"fstat": func(deps *trustedReleaseStoreDeps) {
 			deps.fstat = func(context.Context, int, *unix.Stat_t) error { return unix.EIO }
 		},
+		"seek": func(deps *trustedReleaseStoreDeps) {
+			deps.seek = func(context.Context, int, int64, int) (int64, error) { return -1, unix.EIO }
+		},
 	}
 	for name, inject := range tests {
 		t.Run(name, func(t *testing.T) {

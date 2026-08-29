@@ -27,6 +27,8 @@ type trustedReleaseStoreDeps struct {
 	fchmod  func(context.Context, int, uint32) error
 	read    func(context.Context, int, []byte) (int, error)
 	pread   func(context.Context, int, []byte, int64) (int, error)
+	pwrite  func(context.Context, int, []byte, int64) (int, error)
+	seek    func(context.Context, int, int64, int) (int64, error)
 	fsync   func(context.Context, int) error
 	close   func(context.Context, int) error
 }
@@ -478,6 +480,12 @@ func realTrustedReleaseStoreDeps() trustedReleaseStoreDeps {
 		},
 		pread: func(_ context.Context, fd int, value []byte, offset int64) (int, error) {
 			return unix.Pread(fd, value, offset)
+		},
+		pwrite: func(_ context.Context, fd int, value []byte, offset int64) (int, error) {
+			return unix.Pwrite(fd, value, offset)
+		},
+		seek: func(_ context.Context, fd int, offset int64, whence int) (int64, error) {
+			return unix.Seek(fd, offset, whence)
 		},
 		fsync: func(_ context.Context, fd int) error {
 			return unix.Fsync(fd)
