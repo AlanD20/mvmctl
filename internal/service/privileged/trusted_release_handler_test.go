@@ -692,20 +692,181 @@ func TestTrustedReleaseHandlerResponseTransportFailureIsNotDoubleFramed(t *testi
 
 }
 
-func TestRun_TrustedReleaseActionsRemainUnknownWithoutReading(t *testing.T) {
-	for _, action := range []string{jailer.TrustedReleaseInstallAction, jailer.TrustedReleaseRemoveAction} {
-		t.Run(action, func(t *testing.T) {
+func TestRun_RoutesExactTrustedReleaseActions(t *testing.T) {
+	installRequest := validTrustedReleaseInstallRequest()
+	installResult := validTrustedReleaseInstallResult(installRequest, jailer.TrustedReleaseInstalled)
+	removeRequest := jailer.TrustedReleaseRemoveRequest{Slot: installRequest.Slot}
+	removeResult := jailer.TrustedReleaseRemoveResult{Removed: true}
+
+	t.Run("install", func(t *testing.T) {
+		endpoint := newReceiverEndpoint()
+		endpoint.input = *bytes.NewReader(encodeTrustedReleaseRequest(
+			t,
+			jailer.TrustedReleaseInstallAction,
+			installRequest,
+			nil,
+		))
+		installCalls := 0
+		removeCalls := 0
+		runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+		runtime.control = trustedReleaseControlDeps(t, endpoint)
+		runtime.trustedRelease = trustedReleaseHandlerEffects{
+			install: func(
+				ctx context.Context,
+				gotRequest jailer.TrustedReleaseInstallRequest,
+				payload io.Reader,
+				payloadLength uint64,
+			) (jailer.TrustedReleaseInstallResult, error) {
+				installCalls++
+				assert.Same(t, t.Context(), ctx)
+				if diff := cmp.Diff(installRequest, gotRequest); diff != "" {
+					t.Errorf("install request mismatch (-want +got):\n%s", diff)
+				}
+				assert.Nil(t, payload)
+				assert.Zero(t, payloadLength)
+				return installResult, nil
+			},
+			remove: func(
+				context.Context,
+				jailer.TrustedReleaseRemoveRequest,
+			) (jailer.TrustedReleaseRemoveResult, error) {
+				removeCalls++
+				return jailer.TrustedReleaseRemoveResult{}, nil
+			},
+		}
+
+		err := run(t.Context(), []string{Marker, jailer.TrustedReleaseInstallAction}, endpoint, runtime)
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, installCalls)
+		assert.Zero(t, removeCalls)
+		response, decodeErr := privilegedwire.DecodeResponse[jailer.TrustedReleaseInstallResult](
+			context.Background(),
+			bytes.NewReader(endpoint.output.Bytes()),
+			jailer.TrustedReleaseInstallAction,
+		)
+		require.NoError(t, decodeErr)
+		assert.Nil(t, response.OperationError())
+		if diff := cmp.Diff(installResult, response.Result()); diff != "" {
+			t.Errorf("install response mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("remove", func(t *testing.T) {
+		endpoint := newReceiverEndpoint()
+		endpoint.input = *bytes.NewReader(encodeTrustedReleaseRequest(
+			t,
+			jailer.TrustedReleaseRemoveAction,
+			removeRequest,
+			nil,
+		))
+		installCalls := 0
+		removeCalls := 0
+		runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+		runtime.control = trustedReleaseControlDeps(t, endpoint)
+		runtime.trustedRelease = trustedReleaseHandlerEffects{
+			install: func(
+				context.Context,
+				jailer.TrustedReleaseInstallRequest,
+				io.Reader,
+				uint64,
+			) (jailer.TrustedReleaseInstallResult, error) {
+				installCalls++
+				return jailer.TrustedReleaseInstallResult{}, nil
+			},
+			remove: func(
+				ctx context.Context,
+				gotRequest jailer.TrustedReleaseRemoveRequest,
+			) (jailer.TrustedReleaseRemoveResult, error) {
+				removeCalls++
+				assert.Same(t, t.Context(), ctx)
+				if diff := cmp.Diff(removeRequest, gotRequest); diff != "" {
+					t.Errorf("remove request mismatch (-want +got):\n%s", diff)
+				}
+				return removeResult, nil
+			},
+		}
+
+		err := run(t.Context(), []string{Marker, jailer.TrustedReleaseRemoveAction}, endpoint, runtime)
+
+		require.NoError(t, err)
+		assert.Zero(t, installCalls)
+		assert.Equal(t, 1, removeCalls)
+		response, decodeErr := privilegedwire.DecodeResponse[jailer.TrustedReleaseRemoveResult](
+			context.Background(),
+			bytes.NewReader(endpoint.output.Bytes()),
+			jailer.TrustedReleaseRemoveAction,
+		)
+		require.NoError(t, decodeErr)
+		assert.Nil(t, response.OperationError())
+		if diff := cmp.Diff(removeResult, response.Result()); diff != "" {
+			t.Errorf("remove response mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+// Rationale: A release handler owns its response transaction after exact action routing. If response delivery fails,
+// outer dispatch must return that failure without attempting a second error frame on the same control socket.
+func TestRun_TrustedReleaseResponseFailureIsNotDoubleFramed(t *testing.T) {
+	installRequest := validTrustedReleaseInstallRequest()
+	sentinel := errors.New("write sentinel")
+	tests := map[string]struct {
+		action  string
+		frame   []byte
+		effects trustedReleaseHandlerEffects
+	}{
+		"install": {
+			action: jailer.TrustedReleaseInstallAction,
+			frame: encodeTrustedReleaseRequest(
+				t,
+				jailer.TrustedReleaseInstallAction,
+				installRequest,
+				nil,
+			),
+			effects: trustedReleaseHandlerEffects{install: func(
+				context.Context,
+				jailer.TrustedReleaseInstallRequest,
+				io.Reader,
+				uint64,
+			) (jailer.TrustedReleaseInstallResult, error) {
+				return validTrustedReleaseInstallResult(installRequest, jailer.TrustedReleaseInstalled), nil
+			}},
+		},
+		"remove": {
+			action: jailer.TrustedReleaseRemoveAction,
+			frame: encodeTrustedReleaseRequest(
+				t,
+				jailer.TrustedReleaseRemoveAction,
+				jailer.TrustedReleaseRemoveRequest{Slot: installRequest.Slot},
+				nil,
+			),
+			effects: trustedReleaseHandlerEffects{remove: func(
+				context.Context,
+				jailer.TrustedReleaseRemoveRequest,
+			) (jailer.TrustedReleaseRemoveResult, error) {
+				return jailer.TrustedReleaseRemoveResult{Removed: true}, nil
+			}},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
 			endpoint := newReceiverEndpoint()
-			endpoint.input = *bytes.NewReader([]byte("must-not-be-read"))
+			endpoint.input = *bytes.NewReader(tc.frame)
+			endpoint.writeFunc = func(value []byte) (int, error) {
+				endpoint.output.Write(value[:1])
+				return 1, sentinel
+			}
 			runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
 			runtime.control = trustedReleaseControlDeps(t, endpoint)
+			runtime.trustedRelease = tc.effects
 
-			err := run(t.Context(), []string{Marker, action}, endpoint, runtime)
+			err := run(t.Context(), []string{Marker, tc.action}, endpoint, runtime)
 
-			require.NoError(t, err)
-			operationErr := decodeReceiverError(t, endpoint.output.Bytes(), action)
-			assert.ErrorContains(t, operationErr, "unknown privileged action")
-			assert.Zero(t, endpoint.readCalls)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, sentinel)
+			assert.Equal(t, 1, endpoint.writeCalls)
+			assert.LessOrEqual(t, bytes.Count(endpoint.output.Bytes(), []byte("MVMRES01")), 1)
 		})
 	}
 }

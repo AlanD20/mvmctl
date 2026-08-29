@@ -3,6 +3,7 @@ package jailer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -150,6 +151,51 @@ func TestTrustedReleaseClientRetainsRejectedPayloadOwnership(t *testing.T) {
 	}
 }
 
+// Rationale: Once public input admission succeeds, the client owns the payload even if no exchanger can accept it or
+// request framing stops on cancellation. Those failures must release the payload exactly once and retain close errors.
+func TestTrustedReleaseClientClosesTransferredPayloadOnPreExchangeFailure(t *testing.T) {
+	closeErr := errors.New("payload close sentinel")
+
+	t.Run("inactive_client", func(t *testing.T) {
+		payload := &trustedReleaseClientPayload{closeErr: closeErr}
+		var client *TrustedReleaseClient
+
+		result, err := client.Install(
+			t.Context(),
+			trustedReleaseClientInstallRequest(),
+			payload,
+			1,
+		)
+
+		assert.Zero(t, result)
+		assertTrustedReleaseUnknownOutcome(t, err, false)
+		assert.ErrorIs(t, err, closeErr)
+		assert.Equal(t, int32(1), payload.closeCount.Load())
+	})
+
+	t.Run("cancelled_request_encoding", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		payload := &trustedReleaseClientPayload{closeErr: closeErr}
+		exchange := &fakeTrustedReleaseExchange{}
+		client := newTrustedReleaseClient(exchange)
+
+		result, err := client.Install(
+			ctx,
+			trustedReleaseClientInstallRequest(),
+			payload,
+			1,
+		)
+
+		assert.Zero(t, result)
+		assertTrustedReleaseUnknownOutcome(t, err, false)
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.ErrorIs(t, err, closeErr)
+		assert.Equal(t, int32(1), payload.closeCount.Load())
+		assert.Zero(t, exchange.calls)
+	})
+}
+
 func TestTrustedReleaseClientUsesEOFQualifiedResponseAfterCallerCancellation(t *testing.T) {
 	request := trustedReleaseClientInstallRequest()
 	result := trustedReleaseClientInstallResult(request, TrustedReleaseUnchanged)
@@ -256,6 +302,7 @@ func TestTrustedReleaseClientRejectsInvalidSuccessSemantics(t *testing.T) {
 }
 
 func TestTrustedReleaseClientClassifiesMissingOrMalformedResponseByStartState(t *testing.T) {
+	request := TrustedReleaseRemoveRequest{Slot: trustedReleaseClientInstallRequest().Slot}
 	tests := map[string]struct {
 		outcome trustedReleaseExchangeOutcome
 		started bool
@@ -263,6 +310,16 @@ func TestTrustedReleaseClientClassifiesMissingOrMalformedResponseByStartState(t 
 		"pre_start_missing": {
 			outcome: trustedReleaseExchangeOutcome{
 				diagnostic: errs.New(errs.CodeProcessError, "sudo start failed"),
+			},
+		},
+		"pre_start_response_eof": {
+			outcome: trustedReleaseExchangeOutcome{
+				response: encodeTrustedReleaseClientSuccess(
+					t,
+					TrustedReleaseRemoveAction,
+					TrustedReleaseRemoveResult{Removed: true},
+				),
+				responseEOF: true,
 			},
 		},
 		"post_start_missing": {
@@ -293,9 +350,7 @@ func TestTrustedReleaseClientClassifiesMissingOrMalformedResponseByStartState(t 
 		t.Run(name, func(t *testing.T) {
 			client := newTrustedReleaseClient(&fakeTrustedReleaseExchange{outcome: test.outcome})
 
-			result, err := client.Remove(t.Context(), TrustedReleaseRemoveRequest{
-				Slot: trustedReleaseClientInstallRequest().Slot,
-			})
+			result, err := client.Remove(t.Context(), request)
 
 			assert.Zero(t, result)
 			assertTrustedReleaseUnknownOutcome(t, err, test.started)

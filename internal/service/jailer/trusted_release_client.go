@@ -145,19 +145,18 @@ func exchangeTrustedRelease[Request any, Result any](
 ) (Result, error) {
 	var zero Result
 	if client == nil || client.exchange == nil {
-		return zero, errs.New(
-			errs.CodeProcessError,
-			"trusted release client is not active",
-			errs.WithClass(errs.ClassInternal),
-			errs.WithDetails(map[string]any{
-				"process_started": false,
-				"outcome_unknown": false,
-			}),
+		return zero, trustedReleaseClientPreExchangeError(
+			payload,
+			errs.New(
+				errs.CodeProcessError,
+				"trusted release client is not active",
+				errs.WithClass(errs.ClassInternal),
+			),
 		)
 	}
 	var frame bytes.Buffer
 	if err := privilegedwire.EncodeRequest(ctx, &frame, action, body, payloadLength); err != nil {
-		return zero, err
+		return zero, trustedReleaseClientPreExchangeError(payload, err)
 	}
 	outcome := client.exchange.Exchange(ctx, trustedReleaseExchangeRequest{
 		action:        action,
@@ -199,6 +198,14 @@ func exchangeTrustedRelease[Request any, Result any](
 		)
 	}
 	return result, nil
+}
+
+func trustedReleaseClientPreExchangeError(payload io.ReadCloser, cause error) *errs.DomainError {
+	var closeErr error
+	if payload != nil {
+		closeErr = payload.Close()
+	}
+	return trustedReleaseClientTransportError(false, errors.Join(cause, closeErr))
 }
 
 func trustedReleaseClientTransportError(started bool, cause error) *errs.DomainError {
