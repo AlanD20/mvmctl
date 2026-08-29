@@ -40,24 +40,23 @@ func run(ctx context.Context, args []string, endpoint controlEndpoint, deps runt
 	if err != nil {
 		return err
 	}
-	responseDeadline := boundedResponseDeadline(ctx, deps.control.now())
 	peer, err := admitControlEndpoint(ctx, endpoint, deps.control)
 	if err != nil {
 		return err
 	}
 	caller, err := invokingIdentity(deps.identity)
 	if err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, responseDeadline, deps.control)
+		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	if err := authenticateControlPeer(caller, peer); err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, responseDeadline, deps.control)
+		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	if err := sanitizeEnvironment(deps.environment); err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, responseDeadline, deps.control)
+		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	pinnedExecutable, err := verifySystemExecutable(deps.executable)
 	if err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, responseDeadline, deps.control)
+		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	defer func() {
 		if err := pinnedExecutable.close(); err != nil {
@@ -65,10 +64,10 @@ func run(ctx context.Context, args []string, endpoint controlEndpoint, deps runt
 		}
 	}()
 	if err := authorizeCaller(caller, deps.authorization); err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, responseDeadline, deps.control)
+		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	if err := dispatch(ctx, request, caller); err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, responseDeadline, deps.control)
+		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	return nil
 }

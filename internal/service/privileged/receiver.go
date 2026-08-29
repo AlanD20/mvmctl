@@ -18,31 +18,19 @@ import (
 const responseWriteTimeout = 5 * time.Second
 
 type controlEndpoint interface {
-	io.Reader
 	io.Writer
 	Fd() uintptr
-	SetReadDeadline(time.Time) error
 	SetWriteDeadline(time.Time) error
 }
 
 type stdinControlEndpoint struct {
 	file          *os.File
 	fd            uintptr
-	readDeadline  time.Time
 	writeDeadline time.Time
 }
 
 func newStdinControlEndpoint(file *os.File) controlEndpoint {
 	return &stdinControlEndpoint{file: file, fd: file.Fd()}
-}
-
-func (endpoint *stdinControlEndpoint) Read(target []byte) (int, error) {
-	if !endpoint.readDeadline.IsZero() {
-		if err := setSocketDeadline(endpoint.fd, unix.SO_RCVTIMEO, endpoint.readDeadline); err != nil {
-			return 0, err
-		}
-	}
-	return endpoint.file.Read(target)
 }
 
 func (endpoint *stdinControlEndpoint) Write(value []byte) (int, error) {
@@ -54,14 +42,6 @@ func (endpoint *stdinControlEndpoint) Write(value []byte) (int, error) {
 
 func (endpoint *stdinControlEndpoint) Fd() uintptr {
 	return endpoint.fd
-}
-
-func (endpoint *stdinControlEndpoint) SetReadDeadline(deadline time.Time) error {
-	if err := setSocketDeadline(endpoint.fd, unix.SO_RCVTIMEO, deadline); err != nil {
-		return err
-	}
-	endpoint.readDeadline = deadline
-	return nil
 }
 
 func (endpoint *stdinControlEndpoint) SetWriteDeadline(deadline time.Time) error {
@@ -79,6 +59,8 @@ type controlDeps struct {
 	socketDomain          func(context.Context, int) (int, error)
 	socketType            func(context.Context, int) (int, error)
 	peerCredentials       func(context.Context, int) (*unix.Ucred, error)
+	recvmsg               func(context.Context, int, []byte, int) (int, error)
+	poll                  func(context.Context, []unix.PollFd, int) (int, error)
 	shutdownWrite         func(context.Context, int) error
 	now                   func() time.Time
 }
@@ -185,9 +167,9 @@ func deliverOperationError(
 	endpoint controlEndpoint,
 	action string,
 	operationErr error,
-	deadline time.Time,
 	deps controlDeps,
 ) error {
+	deadline := boundedResponseDeadline(ctx, deps.now())
 	finalContext, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 	defer cancel()
 	if err := endpoint.SetWriteDeadline(deadline); err != nil {
@@ -199,6 +181,29 @@ func deliverOperationError(
 	}
 	if err := deps.shutdownWrite(finalContext, int(endpoint.Fd())); err != nil {
 		return responseTransportError(operationErr, err, true)
+	}
+	return nil
+}
+
+func deliverOperationSuccess[T any](
+	ctx context.Context,
+	endpoint controlEndpoint,
+	action string,
+	result T,
+	deps controlDeps,
+) error {
+	deadline := boundedResponseDeadline(ctx, deps.now())
+	responseContext, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+	defer cancel()
+	if err := endpoint.SetWriteDeadline(deadline); err != nil {
+		return responseTransportError(nil, err, false)
+	}
+	writer := &responseStartWriter{writer: endpoint}
+	if err := privilegedwire.EncodeSuccess(responseContext, writer, action, result); err != nil {
+		return responseTransportError(nil, err, writer.started)
+	}
+	if err := deps.shutdownWrite(responseContext, int(endpoint.Fd())); err != nil {
+		return responseTransportError(nil, err, true)
 	}
 	return nil
 }
@@ -224,7 +229,7 @@ func boundedResponseDeadline(ctx context.Context, now time.Time) time.Time {
 func responseTransportError(operationErr, transportErr error, responseStarted bool) error {
 	return errs.WrapMsg(
 		errs.CodeProcessError,
-		"deliver privileged error response",
+		"deliver privileged response",
 		errors.Join(operationErr, transportErr),
 		errs.WithClass(errs.ClassInternal),
 		errs.WithDetails(map[string]any{"response_started": responseStarted}),
@@ -238,20 +243,6 @@ func controlAdmissionSystemError(message string, cause error) error {
 		cause,
 		errs.WithClass(errs.ClassInternal),
 	)
-}
-
-func setSocketDeadline(fd uintptr, option int, deadline time.Time) error {
-	// CRITICAL: Calling os.File.Fd disables the file's runtime-poller read deadlines.
-	// SO_RCVTIMEO preserves the absolute read bound while borrowing fd 0 without closing it.
-	remaining := time.Until(deadline)
-	if remaining <= 0 {
-		return os.ErrDeadlineExceeded
-	}
-	timeout := unix.NsecToTimeval(remaining.Nanoseconds())
-	if timeout.Sec == 0 && timeout.Usec == 0 {
-		timeout.Usec = 1
-	}
-	return unix.SetsockoptTimeval(int(fd), unix.SOL_SOCKET, option, &timeout)
 }
 
 func sendResponseUntil(fd uintptr, value []byte, deadline time.Time) (int, error) {
@@ -351,6 +342,13 @@ func realControlDeps() controlDeps {
 		},
 		peerCredentials: func(_ context.Context, fd int) (*unix.Ucred, error) {
 			return unix.GetsockoptUcred(fd, unix.SOL_SOCKET, unix.SO_PEERCRED)
+		},
+		recvmsg: func(_ context.Context, fd int, target []byte, flags int) (int, error) {
+			count, _, _, _, err := unix.Recvmsg(fd, target, nil, flags)
+			return count, err
+		},
+		poll: func(_ context.Context, pollFDs []unix.PollFd, timeoutMillis int) (int, error) {
+			return unix.Poll(pollFDs, timeoutMillis)
 		},
 		shutdownWrite: func(ctx context.Context, fd int) error {
 			if err := ctx.Err(); err != nil {
