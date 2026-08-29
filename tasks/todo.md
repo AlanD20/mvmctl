@@ -209,7 +209,10 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     policy. The ordinary downloader and its proxy/cache/retry behavior are outside this trust boundary.
   - [x] Implement and verify the private checksum authority and typed archive digest: source-integrity revalidation,
     proxy-free bounded HTTPS, one closed redirect, exact status/body/grammar checks, cancellation, and checked cleanup.
-- [ ] Bounded extraction rejects traversal, links, devices, duplicates, unexpected members, and size/count overflow.
+- [x] Implement the strict bounded gzip/PAX/GNU-tar parser: reject traversal, links, devices, sparse files, duplicates,
+  unexpected or missing members, malformed headers and metadata, concatenated/trailing input, and size/count overflow;
+  route only exact Firecracker/Jailer bytes through the private selected-writer seam.
+  - [x] Validate the parser against all eight mirrored x86_64 release archives.
 - [ ] Validate the complete reviewed upstream member allowlist while extracting only Firecracker and Jailer; validate
   their ELF class/machine without executing downloaded code.
   - [x] Freeze the exact audited x86_64 contract for versions 1.10.1, 1.14.2, 1.14.3, 1.14.4, 1.15.0, 1.15.1,
@@ -222,6 +225,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Implement and verify the private ELF header validator: exact source identity and 64-byte header length, closed
     identity/type/machine/program-header policy, no untrusted allocation, and no executable loading or execution.
   - [x] Bind ELF admission to the bounded actual file size and reject a truncated declared program-header table.
+  - [ ] Back the parser's selected-writer seam with concrete anonymous root-owned executable staging descriptors; bind
+    each complete selected file's exact size and digest to ELF admission, then finalize it without publishing a path.
 - [ ] Exact Firecracker/Jailer bytes and a root manifest install atomically and durably.
   - [x] Create or open only the fixed write-side `mvmctl/binaries` store components relative to pinned safe ancestors;
     enforce exact root ownership/mode and fsync newly observed child and parent directories before staging bytes.

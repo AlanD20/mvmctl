@@ -407,8 +407,13 @@ preservation. That stage now admits one bounded exact-length caller stream with 
 independent-digest verification, fsync, stable identity and metadata, zero offset, and permanent poisoning after any
 started failure. The exact audited x86_64 archive versions, complete 24-member allowlists, raw gzip/PAX/tar structure,
 metadata grammar, and extraction bounds are now frozen above; aarch64 remains fail-closed pending its own archive audit.
-The parser and bounded extraction, root-origin archive fetching, architecture/version creation, manifest writing, and
-atomic trusted-store installation remain Task 6 work.
+The strict bounded gzip/PAX/GNU-tar parser now enforces that closed contract, routes bytes only for the exact
+Firecracker/Jailer members through its private selected-writer seam, retains the anonymous archive descriptor at offset
+zero, and poisons the stage after any started failure. Mirror-backed validation passed for all eight audited x86_64
+release archives listed above. The selected-writer seam does not yet own concrete anonymous selected-executable staging
+descriptors. Binding each complete selected executable's size and digest to ELF admission, finalizing those descriptors,
+root-origin archive fetching, architecture/version creation, manifest writing, and atomic trusted-store publication
+remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 

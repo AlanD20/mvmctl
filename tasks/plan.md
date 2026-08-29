@@ -243,9 +243,12 @@ field, overflow, concatenated gzip member, and trailing byte. Archive metadata i
 support for `aarch64` does not imply archive support; aarch64 extraction remains fail-closed until its own archive audit
 is recorded.
 
-Only the two selected executables enter private root-owned staging descriptors, and nothing is published until the
-complete archive and both ELF files validate. This contract and the x86_64 member audit are complete; the parser,
-extraction, aarch64 audit, and atomic publication are still implementation work.
+Only the two selected executables may enter private root-owned staging descriptors, and nothing may be published until
+the complete archive and both ELF files validate. The strict bounded gzip/PAX/GNU-tar parser and its private
+selected-writer seam are implemented and have been validated against all eight mirrored x86_64 release archives. That
+writer seam is not yet backed by concrete anonymous selected-executable staging descriptors. Binding each complete
+selected file's digest and size to ELF admission, finalizing those descriptors, the aarch64 audit, and atomic
+publication remain implementation work.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are
