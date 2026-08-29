@@ -30,8 +30,9 @@ agents. It governs delegation and integration; `AGENTS.md`, `CONTEXT.md`, accept
 An agent is useful only when its live handle and repository evidence agree. Acceptable evidence is a new scoped diff,
 commit, test result, reproduced blocker, or decision-changing review finding.
 
-- Inspect the live agent tree and its assigned worktree together. A name in a summary or old agent list is not a live
-  worker.
+- Inspect the live agent tree and its assigned worktree together. Agent listings can omit a still-running worker.
+  Before reassigning an existing worktree, explicitly stop or interrupt every previously named owner and confirm its
+  prior status; when that cannot be confirmed, give the replacement a fresh worktree.
 - A writer with no new evidence and no confirmed live command receives one concise status request. If the next check
   is still unchanged, stop it and reuse the slot for a non-overlapping dependency.
 - Stop an agent immediately when it duplicates another owner, edits outside its assignment, repeats an unchanged
@@ -71,9 +72,10 @@ After context compaction or leadership handoff:
 1. Re-read `AGENTS.md` and this file.
 2. Read the active entries in `tasks/plan.md` and `tasks/todo.md`, then inspect the current branch, log, status, and
    worktree list.
-3. Query live agent handles. Treat every summarized worker as stopped unless the live tree proves otherwise.
-4. For each live writer, inspect its current diff or commit and confirm exclusive ownership before sending follow-up
-   work. For each running command, resume its existing handle.
+3. Query live agent handles and reconcile them with every named writer in the compacted summary. An absent handle is
+   inconclusive: explicitly stop or interrupt the previous owner before reusing its worktree.
+4. For each remaining live writer, inspect its current diff or commit and confirm exclusive ownership before sending
+   follow-up work. For each running command, resume its existing handle.
 5. State the next integration checkpoint and continue from repository evidence. Do not recreate completed work or
    start a broad audit merely because conversational detail was compacted.
 
