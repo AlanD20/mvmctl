@@ -165,6 +165,12 @@ func exchangeTrustedRelease[Request any, Result any](
 		payloadLength: payloadLength,
 		payload:       payload,
 	})
+	if outcome.responseEOF && !outcome.started {
+		return zero, trustedReleaseClientTransportError(
+			false,
+			errors.Join(errors.New("privileged response arrived before process start"), outcome.diagnostic),
+		)
+	}
 	if !outcome.responseEOF {
 		return zero, trustedReleaseClientTransportError(
 			outcome.started,
