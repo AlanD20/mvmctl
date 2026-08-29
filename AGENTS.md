@@ -15,6 +15,8 @@ This file is the source of truth for active project work. Read only the referenc
 5. Read `docs/system-test-architecture.md` and `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` before writing or
    changing system tests.
 6. Read `docs/development/HOW_TO_RUN_SYSTEM_TESTS.md` before executing system tests or release qualification.
+7. Read `docs/development/PARALLEL_AGENT_WORKFLOW.md` before spawning, resuming, monitoring, or integrating parallel
+   agent work.
 
 The `AGENTS.md` files under `legacy/` describe archived implementations. They apply only while inspecting that archived
 code and never override this file for active work.
