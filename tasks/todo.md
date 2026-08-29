@@ -253,8 +253,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [ ] Create the architecture/version slot, stage and write the strict manifest, and publish or replace the complete
     three-file release descriptor-relatively and atomically; the anonymous executable stages remain unpublished until
     this transition succeeds.
-    - [ ] Create and durably verify the fixed architecture directory; admit and safely remove only slot-scoped reserved
-      candidate/retired directories with fixed-leaf cleanup and no recursive fallback.
+    - [x] Create and durably verify the fixed architecture directory under the exact active slot lease; admit every
+      matching exact-name candidate before deletion, fail closed on unsafe state, and safely remove only fixed leaves
+      with cancellation-independent resumable cleanup and ordered directory fsyncs, never recursive fallback.
     - [ ] Link the finalized anonymous executables and strict manifest into one root-owned candidate directory, fsync
       every file and directory, and re-admit the complete candidate through the installed-release verifier.
     - [ ] Implement idempotent exact-manifest detection and absent publication with descriptor-relative

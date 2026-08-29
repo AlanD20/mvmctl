@@ -250,8 +250,11 @@ writer seam now owns concrete anonymous root-owned Firecracker/Jailer descriptor
 writes; finalization binds exact size and full-file SHA-256 to closed ELF admission, applies exact mode `0755`, fsyncs
 both files, and re-verifies final identity, metadata, and zero offset. Unit and fault tests cover the lifecycle, and the
 complete path has passed against all eight cached audited x86_64 archives. Both stages remain anonymous and unpublished.
-The aarch64 audit, root-origin fetch, architecture/version slot and manifest staging/writing, and descriptor-relative
-atomic publication or replacement remain implementation work.
+The fixed architecture-directory and recovery slice is implemented under the exact active release-slot lease. It
+admits every matching reserved candidate before deletion, fails closed on malformed or unsafe state, and uses
+cancellation-independent, resumable fixed-leaf cleanup with candidate and architecture directory fsyncs after the
+corresponding namespace mutations. The aarch64 audit, root-origin fetch, version-directory publication, manifest
+staging/writing, and descriptor-relative atomic publication or replacement remain implementation work.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are

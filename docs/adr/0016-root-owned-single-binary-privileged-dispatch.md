@@ -417,13 +417,19 @@ architecture directory again. Failure before the old directory is removed adds `
 does not disturb the new installed release. Failure of the final architecture fsync adds `durability_uncertain=true`.
 Cancellation after commit follows the same state-reporting and cancellation-independent cleanup rules.
 
-Before staging a new candidate, recovery under the release-slot lease scans only names with that slot's exact reserved
-prefix. It opens each without following links and removes it only when it is an exact managed directory containing a
-subset of the three fixed leaves, each a root-owned regular file with its fixed mode, one hard link, and bounded size.
-Recovery unlinks only those fixed leaves and removes the now-empty directory; it never recursively removes content.
-Any unexpected entry, type, owner, mode, link count, size, or unreadable state fails closed and leaves the directory for
-operator inspection. This covers both pre-commit candidate remnants and post-exchange retired directories without
-treating arbitrary architecture-directory entries as disposable.
+Before staging a new candidate, recovery under the same active release-slot lease scans only names with that slot's
+exact reserved prefix. It requires the complete reserved-name grammar, opens each matching directory and leaf without
+following links, and admits every matching candidate before the first unlink. A removable candidate is an exact
+managed directory containing a subset of the three fixed leaves, each a root-owned regular file with its fixed mode,
+one hard link, and bounded size. Any malformed matching name, unexpected entry, type, owner, mode, link count, size, or
+unreadable state fails closed before cleanup and leaves every candidate for operator inspection.
+
+Once cleanup begins it is cancellation-independent and resumable. For each admitted candidate, recovery unlinks only
+the fixed leaves in a deterministic order, fsyncs the candidate directory, removes the now-empty directory, and fsyncs
+the architecture directory. A final architecture-directory fsync also runs when no candidate remains, allowing a
+retry to confirm a prior removal whose final durability report failed. Recovery never recursively removes content.
+This covers both pre-commit candidate remnants and post-exchange retired directories without treating arbitrary
+architecture-directory entries as disposable.
 
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
@@ -456,8 +462,12 @@ Finalization binds each complete file's exact size and full-file SHA-256 digest 
 changes both admitted files to exact mode `0755`, fsyncs them, and re-verifies final descriptor identity, metadata, and
 zero offset. Unit and fault tests cover this lifecycle, and the complete staging, extraction, and finalization path has
 also passed against all eight cached audited x86_64 archives. Both executable stages remain anonymous and unpublished.
-Root-origin archive fetching, architecture/version slot creation, manifest staging and writing, and descriptor-relative
-atomic publication or replacement remain Task 6 work.
+The write side now creates and pins the fixed architecture directory only while the exact active release-slot lease is
+held, durably admitting that directory before use. Slot-scoped recovery enforces the complete reserved candidate-name
+grammar and fail-closed directory/leaf metadata policy, admits all matching candidates before deletion, and performs
+only cancellation-independent, resumable fixed-leaf cleanup with the durability order specified above. Root-origin
+archive fetching, version-directory publication, manifest staging and writing, and descriptor-relative atomic
+publication or replacement remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
