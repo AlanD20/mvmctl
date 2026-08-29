@@ -28,37 +28,28 @@ func TestReleaseAuthorityPreparesInstalledReleaseUnderSlotLease(t *testing.T) {
 	require.NoError(t, err)
 	if diff := cmp.Diff(
 		fixture.release.manifest,
-		prepared.manifest,
+		prepared.admission.manifest,
 		cmp.AllowUnexported(trustedReleaseManifest{}, releaseSlot{}, trustedReleaseExecutable{}),
 	); diff != "" {
 		t.Errorf("prepared manifest mismatch (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(wantIdentity, prepared.identity, cmp.AllowUnexported(releaseIdentity{})); diff != "" {
+	if diff := cmp.Diff(wantIdentity, prepared.admission.identity, cmp.AllowUnexported(releaseIdentity{})); diff != "" {
 		t.Errorf("prepared release identity mismatch (-want +got):\n%s", diff)
 	}
 	assert.NotNil(t, prepared.slotLease)
 	assert.NotNil(t, prepared.store)
 	assert.NotNil(t, prepared.directory)
-	assert.NotNil(t, prepared.executables)
-	assert.GreaterOrEqual(t, prepared.executables.firecrackerFD, 0)
-	assert.GreaterOrEqual(t, prepared.executables.jailerFD, 0)
+	assert.NotNil(t, prepared.admission)
+	assert.NotNil(t, prepared.admission.executables)
+	assert.GreaterOrEqual(t, prepared.admission.executables.firecrackerFD, 0)
+	assert.GreaterOrEqual(t, prepared.admission.executables.jailerFD, 0)
 
 	require.NoError(t, prepared.Release(t.Context()))
 	require.NoError(t, prepared.Release(t.Context()))
 	assert.Nil(t, prepared.slotLease)
 	assert.Nil(t, prepared.store)
 	assert.Nil(t, prepared.directory)
-	assert.Nil(t, prepared.executables)
-	if diff := cmp.Diff(
-		trustedReleaseManifest{},
-		prepared.manifest,
-		cmp.AllowUnexported(trustedReleaseManifest{}, releaseSlot{}, trustedReleaseExecutable{}),
-	); diff != "" {
-		t.Errorf("released manifest was not cleared (-want +got):\n%s", diff)
-	}
-	if diff := cmp.Diff(releaseIdentity{}, prepared.identity, cmp.AllowUnexported(releaseIdentity{})); diff != "" {
-		t.Errorf("released identity was not cleared (-want +got):\n%s", diff)
-	}
+	assert.Nil(t, prepared.admission)
 	assertPreparedReleaseSlotReacquirable(t, fixture.instances, fixture.release.store.slot)
 }
 
@@ -270,8 +261,8 @@ func TestPreparedReleaseContinuesCleanupAfterExecutableCloseFailure(t *testing.T
 	fixture := newPreparedReleaseFixture(t)
 	prepared, err := fixture.authority().prepareInstalled(t.Context(), fixture.release.store.slot)
 	require.NoError(t, err)
-	realClose := prepared.executables.deps.close
-	prepared.executables.deps.close = func(ctx context.Context, fd int) error {
+	realClose := prepared.admission.executables.deps.close
+	prepared.admission.executables.deps.close = func(ctx context.Context, fd int) error {
 		return errors.Join(realClose(ctx, fd), unix.EIO)
 	}
 
@@ -282,7 +273,7 @@ func TestPreparedReleaseContinuesCleanupAfterExecutableCloseFailure(t *testing.T
 	assert.Nil(t, prepared.slotLease)
 	assert.Nil(t, prepared.store)
 	assert.Nil(t, prepared.directory)
-	assert.Nil(t, prepared.executables)
+	assert.Nil(t, prepared.admission)
 	assertPreparedReleaseSlotReacquirable(t, fixture.instances, fixture.release.store.slot)
 }
 

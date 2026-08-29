@@ -14,12 +14,10 @@ type releaseAuthority struct {
 }
 
 type preparedRelease struct {
-	slotLease   *releaseSlotLease
-	store       *trustedReleaseStore
-	directory   *trustedReleaseDirectory
-	manifest    trustedReleaseManifest
-	identity    releaseIdentity
-	executables *trustedReleaseExecutables
+	slotLease *releaseSlotLease
+	store     *trustedReleaseStore
+	directory *trustedReleaseDirectory
+	admission *trustedReleaseDirectoryAdmission
 }
 
 func newReleaseAuthority() *releaseAuthority {
@@ -61,7 +59,7 @@ func (authority *releaseAuthority) prepareInstalled(
 	var slotLease *releaseSlotLease
 	var store *trustedReleaseStore
 	var directory *trustedReleaseDirectory
-	var executables *trustedReleaseExecutables
+	var admission *trustedReleaseDirectoryAdmission
 	defer func() {
 		if returnErr == nil {
 			return
@@ -69,7 +67,7 @@ func (authority *releaseAuthority) prepareInstalled(
 		returnErr = releasePreparedReleaseResources(
 			ctx,
 			returnErr,
-			executables,
+			admission,
 			directory,
 			store,
 			slotLease,
@@ -90,31 +88,21 @@ func (authority *releaseAuthority) prepareInstalled(
 	if err != nil {
 		return nil, err
 	}
-	manifest, err := directory.readManifest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	executables, err = directory.openExecutables(ctx, manifest)
-	if err != nil {
-		return nil, err
-	}
-	identity, err := manifest.releaseIdentity()
+	admission, err = directory.admit(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	prepared := &preparedRelease{
-		slotLease:   slotLease,
-		store:       store,
-		directory:   directory,
-		manifest:    manifest,
-		identity:    identity,
-		executables: executables,
+		slotLease: slotLease,
+		store:     store,
+		directory: directory,
+		admission: admission,
 	}
 	slotLease = nil
 	store = nil
 	directory = nil
-	executables = nil
+	admission = nil
 	return prepared, nil
 }
 
@@ -125,25 +113,23 @@ func (prepared *preparedRelease) Release(ctx context.Context) error {
 	err := releasePreparedReleaseResources(
 		ctx,
 		nil,
-		prepared.executables,
+		prepared.admission,
 		prepared.directory,
 		prepared.store,
 		prepared.slotLease,
 		"release prepared trusted release",
 	)
-	prepared.executables = nil
+	prepared.admission = nil
 	prepared.directory = nil
 	prepared.store = nil
 	prepared.slotLease = nil
-	prepared.manifest = trustedReleaseManifest{}
-	prepared.identity = releaseIdentity{}
 	return err
 }
 
 func releasePreparedReleaseResources(
 	ctx context.Context,
 	primary error,
-	executables *trustedReleaseExecutables,
+	admission *trustedReleaseDirectoryAdmission,
 	directory *trustedReleaseDirectory,
 	store *trustedReleaseStore,
 	slotLease *releaseSlotLease,
@@ -151,11 +137,11 @@ func releasePreparedReleaseResources(
 ) error {
 	cleanupCtx := context.WithoutCancel(ctx)
 	result := primary
-	if executables != nil {
+	if admission != nil {
 		result = appendPreparedReleaseError(
 			result,
-			description+" executable descriptors",
-			executables.Release(cleanupCtx),
+			description+" directory admission",
+			admission.Release(cleanupCtx),
 		)
 	}
 	if directory != nil {
