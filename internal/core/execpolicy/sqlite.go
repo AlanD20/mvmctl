@@ -14,45 +14,48 @@ type sqliteRepo struct{ db *sqlx.DB }
 // NewRepository creates the SQLite execution-policy repository.
 func NewRepository(db *sqlx.DB) Repository { return &sqliteRepo{db: db} }
 
-func (r *sqliteRepo) Create(ctx context.Context, policy *model.ExecPolicy) error {
+func (r *sqliteRepo) Create(ctx context.Context, intent *model.ExecAllowIntent) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO exec_policies
 		(id, source_vm_id, destination_vm_id, target_user, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, policy.ID, policy.SourceVMID, policy.DestinationVMID,
-		policy.TargetUser, policy.CreatedAt, policy.UpdatedAt)
+		VALUES (?, ?, ?, ?, ?, ?)`, intent.ID, intent.SourceVMID, intent.DestinationVMID,
+		intent.TargetUser, intent.CreatedAt, intent.UpdatedAt)
 	return err
 }
 
-func (r *sqliteRepo) Get(ctx context.Context, policyID string) (*model.ExecPolicy, error) {
-	var policy model.ExecPolicy
-	err := r.db.GetContext(ctx, &policy, `SELECT * FROM exec_policies WHERE id = ?`, policyID)
+func (r *sqliteRepo) Get(ctx context.Context, intentID string) (*model.ExecAllowIntent, error) {
+	var intent model.ExecAllowIntent
+	err := r.db.GetContext(ctx, &intent, `SELECT * FROM exec_policies WHERE id = ?`, intentID)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return &policy, err
+	return &intent, err
 }
 
-func (r *sqliteRepo) GetByIdentity(ctx context.Context, identity *model.ExecPolicy) (*model.ExecPolicy, error) {
-	var policy model.ExecPolicy
-	err := r.db.GetContext(ctx, &policy, `SELECT * FROM exec_policies
+func (r *sqliteRepo) GetByIdentity(
+	ctx context.Context,
+	identity *model.ExecAllowIntent,
+) (*model.ExecAllowIntent, error) {
+	var intent model.ExecAllowIntent
+	err := r.db.GetContext(ctx, &intent, `SELECT * FROM exec_policies
 		WHERE source_vm_id = ? AND destination_vm_id = ? AND target_user = ?`,
 		identity.SourceVMID, identity.DestinationVMID, identity.TargetUser)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return &policy, err
+	return &intent, err
 }
 
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.ExecPolicy, error) {
-	var policies []*model.ExecPolicy
-	err := r.db.SelectContext(ctx, &policies,
+func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.ExecAllowIntent, error) {
+	var intents []*model.ExecAllowIntent
+	err := r.db.SelectContext(ctx, &intents,
 		`SELECT * FROM exec_policies WHERE id LIKE ? ORDER BY created_at, id`, prefix+"%")
-	return policies, err
+	return intents, err
 }
 
-func (r *sqliteRepo) List(ctx context.Context) ([]*model.ExecPolicy, error) {
-	var policies []*model.ExecPolicy
-	err := r.db.SelectContext(ctx, &policies, `SELECT * FROM exec_policies ORDER BY created_at, id`)
-	return policies, err
+func (r *sqliteRepo) List(ctx context.Context) ([]*model.ExecAllowIntent, error) {
+	var intents []*model.ExecAllowIntent
+	err := r.db.SelectContext(ctx, &intents, `SELECT * FROM exec_policies ORDER BY created_at, id`)
+	return intents, err
 }
 
 func (r *sqliteRepo) DeleteMany(ctx context.Context, policyIDs []string) error {
@@ -67,7 +70,10 @@ func (r *sqliteRepo) DeleteMany(ctx context.Context, policyIDs []string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		// Rollback after Commit returns sql.ErrTxDone; the operation result is authoritative.
+		_ = tx.Rollback()
+	}()
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(query), args...); err != nil {
 		return err
 	}

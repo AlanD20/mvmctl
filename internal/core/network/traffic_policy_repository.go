@@ -6,31 +6,26 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// NetworkTrafficPolicyRepository persists network-source traffic intent.
-type NetworkTrafficPolicyRepository interface {
-	Create(ctx context.Context, policy *model.NetworkTrafficPolicy) error
-	Get(ctx context.Context, policyID string) (*model.NetworkTrafficPolicy, error)
-	GetByIdentity(ctx context.Context, policy *model.NetworkTrafficPolicy) (*model.NetworkTrafficPolicy, error)
-	FindByPrefix(ctx context.Context, prefix string) ([]*model.NetworkTrafficPolicy, error)
-	List(ctx context.Context) ([]*model.NetworkTrafficPolicy, error)
-	DeleteMany(ctx context.Context, policyIDs []string) error
-	DeleteByVM(ctx context.Context, vmID string) error
-	DeleteByNetwork(ctx context.Context, networkID string) error
-}
+// TrafficPolicyRepository persists the two closed traffic allow-intent forms.
+// InvalidateByVM spans both tables so callers cannot observe partial invalidation.
+type TrafficPolicyRepository interface {
+	CreateFromNetwork(ctx context.Context, intent *model.NetworkTrafficAllowIntent) error
+	GetFromNetwork(ctx context.Context, intentID string) (*model.NetworkTrafficAllowIntent, error)
+	GetNetworkByIdentity(
+		ctx context.Context,
+		intent *model.NetworkTrafficAllowIntent,
+	) (*model.NetworkTrafficAllowIntent, error)
+	FindNetworksByPrefix(ctx context.Context, prefix string) ([]*model.NetworkTrafficAllowIntent, error)
+	ListFromNetworks(ctx context.Context) ([]*model.NetworkTrafficAllowIntent, error)
+	DeleteFromNetworks(ctx context.Context, intentIDs []string) error
 
-// VMTrafficPolicyRepository persists exact-VM-source traffic intent.
-type VMTrafficPolicyRepository interface {
-	Create(ctx context.Context, policy *model.VMTrafficPolicy) error
-	Get(ctx context.Context, policyID string) (*model.VMTrafficPolicy, error)
-	GetByIdentity(ctx context.Context, policy *model.VMTrafficPolicy) (*model.VMTrafficPolicy, error)
-	FindByPrefix(ctx context.Context, prefix string) ([]*model.VMTrafficPolicy, error)
-	List(ctx context.Context) ([]*model.VMTrafficPolicy, error)
-	DeleteMany(ctx context.Context, policyIDs []string) error
-	DeleteByVM(ctx context.Context, vmID string) error
-}
+	CreateFromVM(ctx context.Context, intent *model.VMTrafficAllowIntent) error
+	GetFromVM(ctx context.Context, intentID string) (*model.VMTrafficAllowIntent, error)
+	GetVMByIdentity(ctx context.Context, intent *model.VMTrafficAllowIntent) (*model.VMTrafficAllowIntent, error)
+	FindVMsByPrefix(ctx context.Context, prefix string) ([]*model.VMTrafficAllowIntent, error)
+	ListFromVMs(ctx context.Context) ([]*model.VMTrafficAllowIntent, error)
+	DeleteFromVMs(ctx context.Context, intentIDs []string) error
 
-// TrafficPolicyRepositories keeps the two closed source forms separate.
-type TrafficPolicyRepositories struct {
-	FromNetwork NetworkTrafficPolicyRepository
-	FromVM      VMTrafficPolicyRepository
+	InvalidateByVM(ctx context.Context, vmID string) error
+	InvalidateByNetwork(ctx context.Context, networkID string) error
 }

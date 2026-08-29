@@ -39,16 +39,17 @@ const (
 	CodeNetworkDefaultCreateFailed Code = "network.default_created_failed"
 
 	// --- Policy domain ---
-	CodePolicyNotFound        Code = "policy.not_found"
-	CodePolicyAmbiguous       Code = "policy.ambiguous"
-	CodePolicyAlreadyExists   Code = "policy.already_exists"
-	CodePolicyProtocolInvalid Code = "policy.protocol.invalid"
-	CodePolicyPortInvalid     Code = "policy.port.invalid"
-	CodePolicySameNetwork     Code = "policy.same_network"
-	CodePolicyCreateFailed    Code = "policy.create.failed"
-	CodePolicyListFailed      Code = "policy.list.failed"
-	CodePolicyRemoveFailed    Code = "policy.remove.failed"
-	CodePolicySyncFailed      Code = "policy.sync.failed"
+	CodePolicyNotFound            Code = "policy.not_found"
+	CodePolicyAmbiguous           Code = "policy.ambiguous"
+	CodePolicyAlreadyExists       Code = "policy.already_exists"
+	CodePolicyProtocolInvalid     Code = "policy.protocol.invalid"
+	CodePolicyPortInvalid         Code = "policy.port.invalid"
+	CodePolicySameNetwork         Code = "policy.same_network"
+	CodePolicyCreateFailed        Code = "policy.create.failed"
+	CodePolicyListFailed          Code = "policy.list.failed"
+	CodePolicyRemoveFailed        Code = "policy.remove.failed"
+	CodePolicySyncFailed          Code = "policy.sync.failed"
+	CodePolicyExecAuthorizeFailed Code = "policy.exec.authorize.failed"
 
 	// --- Image domain ---
 	CodeImageNotFound           Code = "image.not_found"

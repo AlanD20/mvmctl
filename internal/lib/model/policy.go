@@ -10,8 +10,9 @@ const (
 	TrafficProtocolUDP TrafficProtocol = "udp"
 )
 
-// NetworkTrafficPolicy grants traffic from one managed network to one exact VM.
-type NetworkTrafficPolicy struct {
+// NetworkTrafficAllowIntent stores a grant from one managed network to one exact VM.
+// It is desired policy state, not a compiled firewall rule or applied generation.
+type NetworkTrafficAllowIntent struct {
 	ID                   string          `json:"id"                     db:"id"`
 	SourceNetworkID      string          `json:"source_network_id"      db:"source_network_id"`
 	DestinationVMID      string          `json:"destination_vm_id"      db:"destination_vm_id"`
@@ -22,8 +23,9 @@ type NetworkTrafficPolicy struct {
 	UpdatedAt            string          `json:"updated_at"             db:"updated_at"`
 }
 
-// VMTrafficPolicy grants traffic from one exact VM to another exact VM.
-type VMTrafficPolicy struct {
+// VMTrafficAllowIntent stores a grant from one exact VM to another exact VM.
+// It is desired policy state, not a compiled firewall rule or applied generation.
+type VMTrafficAllowIntent struct {
 	ID                   string          `json:"id"                     db:"id"`
 	SourceVMID           string          `json:"source_vm_id"           db:"source_vm_id"`
 	DestinationVMID      string          `json:"destination_vm_id"      db:"destination_vm_id"`
@@ -34,8 +36,8 @@ type VMTrafficPolicy struct {
 	UpdatedAt            string          `json:"updated_at"             db:"updated_at"`
 }
 
-// ExecPolicy grants directional VM-to-VM execution as one exact non-root user.
-type ExecPolicy struct {
+// ExecAllowIntent stores a directional VM-to-VM execution grant for one exact non-root user.
+type ExecAllowIntent struct {
 	ID              string `json:"id"                db:"id"`
 	SourceVMID      string `json:"source_vm_id"      db:"source_vm_id"`
 	DestinationVMID string `json:"destination_vm_id" db:"destination_vm_id"`

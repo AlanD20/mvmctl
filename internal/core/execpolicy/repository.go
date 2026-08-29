@@ -8,13 +8,13 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-// Repository persists exact directional execution policies.
+// Repository persists exact directional execution allow intent.
 type Repository interface {
-	Create(ctx context.Context, policy *model.ExecPolicy) error
-	Get(ctx context.Context, policyID string) (*model.ExecPolicy, error)
-	GetByIdentity(ctx context.Context, policy *model.ExecPolicy) (*model.ExecPolicy, error)
-	FindByPrefix(ctx context.Context, prefix string) ([]*model.ExecPolicy, error)
-	List(ctx context.Context) ([]*model.ExecPolicy, error)
+	Create(ctx context.Context, intent *model.ExecAllowIntent) error
+	Get(ctx context.Context, intentID string) (*model.ExecAllowIntent, error)
+	GetByIdentity(ctx context.Context, intent *model.ExecAllowIntent) (*model.ExecAllowIntent, error)
+	FindByPrefix(ctx context.Context, prefix string) ([]*model.ExecAllowIntent, error)
+	List(ctx context.Context) ([]*model.ExecAllowIntent, error)
 	DeleteMany(ctx context.Context, policyIDs []string) error
 	DeleteByVM(ctx context.Context, vmID string) error
 	Allows(ctx context.Context, sourceVMID, destinationVMID, targetUser string) (bool, error)

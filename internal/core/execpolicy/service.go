@@ -14,32 +14,32 @@ type Service struct{ repo Repository }
 // NewService creates an execution-policy service.
 func NewService(repo Repository) *Service { return &Service{repo: repo} }
 
-// Create persists trusted execution-policy intent.
-func (s *Service) Create(ctx context.Context, policy *model.ExecPolicy) error {
-	existing, err := s.repo.GetByIdentity(ctx, policy)
+// Create persists trusted execution-policy allow intent.
+func (s *Service) Create(ctx context.Context, intent *model.ExecAllowIntent) error {
+	existing, err := s.repo.GetByIdentity(ctx, intent)
 	if err != nil {
-		slog.Error("failed to check execution policy", "policy", policy.ID, "error", err)
+		slog.Error("failed to check execution policy allow intent", "policy", intent.ID, "error", err)
 		return errs.WrapMsg(errs.CodePolicyCreateFailed, "failed to check execution policy", err)
 	}
 	if existing != nil {
 		return errs.AlreadyExists(errs.CodePolicyAlreadyExists, "execution policy already exists",
 			errs.WithEntity(existing.ID))
 	}
-	if err := s.repo.Create(ctx, policy); err != nil {
-		slog.Error("failed to persist execution policy", "policy", policy.ID, "error", err)
+	if err := s.repo.Create(ctx, intent); err != nil {
+		slog.Error("failed to persist execution policy allow intent", "policy", intent.ID, "error", err)
 		return errs.WrapMsg(errs.CodePolicyCreateFailed, "failed to persist execution policy", err)
 	}
 	return nil
 }
 
-// Intents returns all execution-policy intent for the host relay adapter.
-func (s *Service) Intents(ctx context.Context) ([]*model.ExecPolicy, error) {
-	policies, err := s.repo.List(ctx)
+// AllowIntents returns all persisted execution grants without applying relay authorization state.
+func (s *Service) AllowIntents(ctx context.Context) ([]*model.ExecAllowIntent, error) {
+	intents, err := s.repo.List(ctx)
 	if err != nil {
 		slog.Error("failed to list execution policy intents", "error", err)
 		return nil, errs.WrapMsg(errs.CodePolicyListFailed, "failed to list execution policy intents", err)
 	}
-	return policies, nil
+	return intents, nil
 }
 
 // Allows reports whether the exact directional identity and target user are granted.
@@ -53,7 +53,7 @@ func (s *Service) Allows(
 	if err != nil {
 		slog.Error("failed to authorize execution policy", "source_vm", sourceVMID,
 			"destination_vm", destinationVMID, "target_user", targetUser, "error", err)
-		return false, errs.WrapMsg(errs.CodePolicyListFailed, "failed to authorize execution policy", err)
+		return false, errs.WrapMsg(errs.CodePolicyExecAuthorizeFailed, "failed to authorize execution policy", err)
 	}
 	return allowed, nil
 }

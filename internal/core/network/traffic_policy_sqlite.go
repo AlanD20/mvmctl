@@ -9,46 +9,43 @@ import (
 	"mvmctl/internal/lib/model"
 )
 
-type networkTrafficPolicySQLiteRepo struct{ db *sqlx.DB }
-type vmTrafficPolicySQLiteRepo struct{ db *sqlx.DB }
+type trafficPolicySQLiteRepo struct{ db *sqlx.DB }
 
-// NewNetworkTrafficPolicyRepository creates the SQLite network-source policy repository.
-func NewNetworkTrafficPolicyRepository(db *sqlx.DB) NetworkTrafficPolicyRepository {
-	return &networkTrafficPolicySQLiteRepo{db: db}
+// NewTrafficPolicyRepository creates the SQLite traffic allow-intent repository.
+func NewTrafficPolicyRepository(db *sqlx.DB) TrafficPolicyRepository {
+	return &trafficPolicySQLiteRepo{db: db}
 }
 
-// NewVMTrafficPolicyRepository creates the SQLite exact-VM-source policy repository.
-func NewVMTrafficPolicyRepository(db *sqlx.DB) VMTrafficPolicyRepository {
-	return &vmTrafficPolicySQLiteRepo{db: db}
-}
-
-func (r *networkTrafficPolicySQLiteRepo) Create(ctx context.Context, policy *model.NetworkTrafficPolicy) error {
+func (r *trafficPolicySQLiteRepo) CreateFromNetwork(
+	ctx context.Context,
+	intent *model.NetworkTrafficAllowIntent,
+) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO network_traffic_policies
 		(id, source_network_id, destination_vm_id, protocol, destination_port_start,
 		 destination_port_end, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		policy.ID, policy.SourceNetworkID, policy.DestinationVMID, string(policy.Protocol),
-		policy.DestinationPortStart, policy.DestinationPortEnd, policy.CreatedAt, policy.UpdatedAt)
+		intent.ID, intent.SourceNetworkID, intent.DestinationVMID, string(intent.Protocol),
+		intent.DestinationPortStart, intent.DestinationPortEnd, intent.CreatedAt, intent.UpdatedAt)
 	return err
 }
 
-func (r *networkTrafficPolicySQLiteRepo) Get(
+func (r *trafficPolicySQLiteRepo) GetFromNetwork(
 	ctx context.Context,
-	policyID string,
-) (*model.NetworkTrafficPolicy, error) {
-	var policy model.NetworkTrafficPolicy
-	err := r.db.GetContext(ctx, &policy, `SELECT * FROM network_traffic_policies WHERE id = ?`, policyID)
+	intentID string,
+) (*model.NetworkTrafficAllowIntent, error) {
+	var intent model.NetworkTrafficAllowIntent
+	err := r.db.GetContext(ctx, &intent, `SELECT * FROM network_traffic_policies WHERE id = ?`, intentID)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return &policy, err
+	return &intent, err
 }
 
-func (r *networkTrafficPolicySQLiteRepo) GetByIdentity(
+func (r *trafficPolicySQLiteRepo) GetNetworkByIdentity(
 	ctx context.Context,
-	identity *model.NetworkTrafficPolicy,
-) (*model.NetworkTrafficPolicy, error) {
-	var policy model.NetworkTrafficPolicy
-	err := r.db.GetContext(ctx, &policy, `SELECT * FROM network_traffic_policies
+	identity *model.NetworkTrafficAllowIntent,
+) (*model.NetworkTrafficAllowIntent, error) {
+	var intent model.NetworkTrafficAllowIntent
+	err := r.db.GetContext(ctx, &intent, `SELECT * FROM network_traffic_policies
 		WHERE source_network_id = ? AND destination_vm_id = ? AND protocol = ?
 		AND destination_port_start = ? AND destination_port_end = ?`,
 		identity.SourceNetworkID, identity.DestinationVMID, string(identity.Protocol),
@@ -56,64 +53,58 @@ func (r *networkTrafficPolicySQLiteRepo) GetByIdentity(
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return &policy, err
+	return &intent, err
 }
 
-func (r *networkTrafficPolicySQLiteRepo) FindByPrefix(
+func (r *trafficPolicySQLiteRepo) FindNetworksByPrefix(
 	ctx context.Context,
 	prefix string,
-) ([]*model.NetworkTrafficPolicy, error) {
-	var policies []*model.NetworkTrafficPolicy
-	err := r.db.SelectContext(ctx, &policies,
+) ([]*model.NetworkTrafficAllowIntent, error) {
+	var intents []*model.NetworkTrafficAllowIntent
+	err := r.db.SelectContext(ctx, &intents,
 		`SELECT * FROM network_traffic_policies WHERE id LIKE ? ORDER BY created_at, id`, prefix+"%")
-	return policies, err
+	return intents, err
 }
 
-func (r *networkTrafficPolicySQLiteRepo) List(ctx context.Context) ([]*model.NetworkTrafficPolicy, error) {
-	var policies []*model.NetworkTrafficPolicy
-	err := r.db.SelectContext(ctx, &policies,
-		`SELECT * FROM network_traffic_policies ORDER BY created_at, id`)
-	return policies, err
+func (r *trafficPolicySQLiteRepo) ListFromNetworks(
+	ctx context.Context,
+) ([]*model.NetworkTrafficAllowIntent, error) {
+	var intents []*model.NetworkTrafficAllowIntent
+	err := r.db.SelectContext(ctx, &intents, `SELECT * FROM network_traffic_policies ORDER BY created_at, id`)
+	return intents, err
 }
 
-func (r *networkTrafficPolicySQLiteRepo) DeleteMany(ctx context.Context, policyIDs []string) error {
-	return deleteTrafficPolicies(ctx, r.db, "network_traffic_policies", policyIDs)
+func (r *trafficPolicySQLiteRepo) DeleteFromNetworks(ctx context.Context, intentIDs []string) error {
+	return deleteTrafficPolicyAllowIntents(ctx, r.db, `DELETE FROM network_traffic_policies WHERE id IN (?)`, intentIDs)
 }
 
-func (r *networkTrafficPolicySQLiteRepo) DeleteByVM(ctx context.Context, vmID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM network_traffic_policies WHERE destination_vm_id = ?`, vmID)
-	return err
-}
-
-func (r *networkTrafficPolicySQLiteRepo) DeleteByNetwork(ctx context.Context, networkID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM network_traffic_policies WHERE source_network_id = ?`, networkID)
-	return err
-}
-
-func (r *vmTrafficPolicySQLiteRepo) Create(ctx context.Context, policy *model.VMTrafficPolicy) error {
+func (r *trafficPolicySQLiteRepo) CreateFromVM(ctx context.Context, intent *model.VMTrafficAllowIntent) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO vm_traffic_policies
 		(id, source_vm_id, destination_vm_id, protocol, destination_port_start,
 		 destination_port_end, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		policy.ID, policy.SourceVMID, policy.DestinationVMID, string(policy.Protocol),
-		policy.DestinationPortStart, policy.DestinationPortEnd, policy.CreatedAt, policy.UpdatedAt)
+		intent.ID, intent.SourceVMID, intent.DestinationVMID, string(intent.Protocol),
+		intent.DestinationPortStart, intent.DestinationPortEnd, intent.CreatedAt, intent.UpdatedAt)
 	return err
 }
 
-func (r *vmTrafficPolicySQLiteRepo) Get(ctx context.Context, policyID string) (*model.VMTrafficPolicy, error) {
-	var policy model.VMTrafficPolicy
-	err := r.db.GetContext(ctx, &policy, `SELECT * FROM vm_traffic_policies WHERE id = ?`, policyID)
+func (r *trafficPolicySQLiteRepo) GetFromVM(
+	ctx context.Context,
+	intentID string,
+) (*model.VMTrafficAllowIntent, error) {
+	var intent model.VMTrafficAllowIntent
+	err := r.db.GetContext(ctx, &intent, `SELECT * FROM vm_traffic_policies WHERE id = ?`, intentID)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return &policy, err
+	return &intent, err
 }
 
-func (r *vmTrafficPolicySQLiteRepo) GetByIdentity(
+func (r *trafficPolicySQLiteRepo) GetVMByIdentity(
 	ctx context.Context,
-	identity *model.VMTrafficPolicy,
-) (*model.VMTrafficPolicy, error) {
-	var policy model.VMTrafficPolicy
-	err := r.db.GetContext(ctx, &policy, `SELECT * FROM vm_traffic_policies
+	identity *model.VMTrafficAllowIntent,
+) (*model.VMTrafficAllowIntent, error) {
+	var intent model.VMTrafficAllowIntent
+	err := r.db.GetContext(ctx, &intent, `SELECT * FROM vm_traffic_policies
 		WHERE source_vm_id = ? AND destination_vm_id = ? AND protocol = ?
 		AND destination_port_start = ? AND destination_port_end = ?`,
 		identity.SourceVMID, identity.DestinationVMID, string(identity.Protocol),
@@ -121,49 +112,77 @@ func (r *vmTrafficPolicySQLiteRepo) GetByIdentity(
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
-	return &policy, err
+	return &intent, err
 }
 
-func (r *vmTrafficPolicySQLiteRepo) FindByPrefix(
+func (r *trafficPolicySQLiteRepo) FindVMsByPrefix(
 	ctx context.Context,
 	prefix string,
-) ([]*model.VMTrafficPolicy, error) {
-	var policies []*model.VMTrafficPolicy
-	err := r.db.SelectContext(ctx, &policies,
+) ([]*model.VMTrafficAllowIntent, error) {
+	var intents []*model.VMTrafficAllowIntent
+	err := r.db.SelectContext(ctx, &intents,
 		`SELECT * FROM vm_traffic_policies WHERE id LIKE ? ORDER BY created_at, id`, prefix+"%")
-	return policies, err
+	return intents, err
 }
 
-func (r *vmTrafficPolicySQLiteRepo) List(ctx context.Context) ([]*model.VMTrafficPolicy, error) {
-	var policies []*model.VMTrafficPolicy
-	err := r.db.SelectContext(ctx, &policies, `SELECT * FROM vm_traffic_policies ORDER BY created_at, id`)
-	return policies, err
+func (r *trafficPolicySQLiteRepo) ListFromVMs(ctx context.Context) ([]*model.VMTrafficAllowIntent, error) {
+	var intents []*model.VMTrafficAllowIntent
+	err := r.db.SelectContext(ctx, &intents, `SELECT * FROM vm_traffic_policies ORDER BY created_at, id`)
+	return intents, err
 }
 
-func (r *vmTrafficPolicySQLiteRepo) DeleteMany(ctx context.Context, policyIDs []string) error {
-	return deleteTrafficPolicies(ctx, r.db, "vm_traffic_policies", policyIDs)
+func (r *trafficPolicySQLiteRepo) DeleteFromVMs(ctx context.Context, intentIDs []string) error {
+	return deleteTrafficPolicyAllowIntents(ctx, r.db, `DELETE FROM vm_traffic_policies WHERE id IN (?)`, intentIDs)
 }
 
-func (r *vmTrafficPolicySQLiteRepo) DeleteByVM(ctx context.Context, vmID string) error {
+func (r *trafficPolicySQLiteRepo) InvalidateByVM(ctx context.Context, vmID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// Rollback after Commit returns sql.ErrTxDone; the operation result is authoritative.
+		_ = tx.Rollback()
+	}()
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM network_traffic_policies WHERE destination_vm_id = ?`, vmID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM vm_traffic_policies WHERE source_vm_id = ? OR destination_vm_id = ?`, vmID, vmID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *trafficPolicySQLiteRepo) InvalidateByNetwork(ctx context.Context, networkID string) error {
 	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM vm_traffic_policies WHERE source_vm_id = ? OR destination_vm_id = ?`, vmID, vmID)
+		`DELETE FROM network_traffic_policies WHERE source_network_id = ?`, networkID)
 	return err
 }
 
-func deleteTrafficPolicies(ctx context.Context, db *sqlx.DB, table string, policyIDs []string) error {
-	if len(policyIDs) == 0 {
+func deleteTrafficPolicyAllowIntents(
+	ctx context.Context,
+	database *sqlx.DB,
+	statement string,
+	intentIDs []string,
+) error {
+	if len(intentIDs) == 0 {
 		return nil
 	}
-	query, args, err := sqlx.In(`DELETE FROM `+table+` WHERE id IN (?)`, policyIDs)
+	query, args, err := sqlx.In(statement, intentIDs)
 	if err != nil {
 		return err
 	}
-	tx, err := db.BeginTxx(ctx, nil)
+	tx, err := database.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, db.Rebind(query), args...); err != nil {
+	defer func() {
+		// Rollback after Commit returns sql.ErrTxDone; the operation result is authoritative.
+		_ = tx.Rollback()
+	}()
+	if _, err := tx.ExecContext(ctx, database.Rebind(query), args...); err != nil {
 		return err
 	}
 	return tx.Commit()
