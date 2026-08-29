@@ -311,10 +311,11 @@ is exactly `<64 lowercase hexadecimal characters><two ASCII spaces><derived arch
 lines, CRLF, alternate filenames, uppercase digests, GNU binary markers, and other whitespace are rejected.
 
 Zero-payload install uses a separate root-origin archive client. It revalidates the complete receiver-derived source
-before constructing the request and performs exactly one HTTPS GET of the derived archive URL. Its dedicated transport
-uses TLS 1.2 or newer, no proxy, cache, retry, compression, or keepalive path, at most one live connection, 5-second
-dial, TLS-handshake, and response-header timeouts, a 16 KiB response-header limit, and an exact five-minute total
-deadline. It applies only fixed `Accept: application/octet-stream`, `Accept-Encoding: identity`,
+before constructing the request and performs one retrieval attempt and redirect chain: one initial HTTPS GET plus at
+most one redirect GET, with no retry. Its dedicated transport uses TLS 1.2 or newer, no proxy, cache, compression, or
+keepalive path, at most one live connection, 5-second dial, TLS-handshake, and response-header timeouts, a 16 KiB
+response-header limit, and a fixed five-minute maximum further bounded by the caller context and its deadline. It
+applies only fixed `Accept: application/octet-stream`, `Accept-Encoding: identity`,
 `Cache-Control: no-store`, and `User-Agent: mvmctl-trusted-release/1` headers.
 
 At most one redirect is accepted. The redirect must remain HTTPS and target the exact host
@@ -322,9 +323,11 @@ At most one redirect is accepted. The redirect must remain HTTPS and target the 
 permitted because GitHub derives it; none of its fields become mvmctl authority. The redirected request is stripped of
 all inherited headers and receives only the same fixed safe headers, with no authorization or cookie header.
 
-The archive response must be HTTP 200 and declare one valid `Content-Length` from 1 byte through 128 MiB. A missing,
-chunked, malformed, conflicting, zero, negative, or out-of-range length is rejected before the anonymous archive stage
-is mutated. The checked response body is streamed exactly once and directly into the already-created root-owned
+The archive response must be HTTP 200 and expose one effective validated `Content-Length` from 1 byte through 128 MiB
+after Go `net/http` processing. `net/http` rejects malformed or conflicting duplicates and deduplicates identical
+duplicates; mvmctl rejects a missing or chunked length, any still-exposed multiple values, and any zero, negative, or
+out-of-range effective value before the anonymous archive stage is mutated. No raw HTTP parser is required. The
+checked response body is streamed exactly once and directly into the already-created root-owned
 anonymous stage. The existing exact-length positioned-write, digest, EOF-probe, file-fsync, stable-metadata, and
 zero-offset admission compares those bytes with the independently fetched checksum. Once stage receive begins, any
 stream, digest, EOF, fsync, or stable-metadata failure poisons that stage, so only checked `Release` remains valid. A

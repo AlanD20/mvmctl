@@ -287,15 +287,19 @@ privileged wiring.
 - [x] 1. Freeze the zero-payload root-fetch and atomic-removal contracts in ADR-0016 and the release plan. Review the
   documentation diff, paths, links, line length, stale wording, and completed-checkbox set without claiming either
   behavior is implemented or changing the changelog.
-- [ ] 2. Implement the private zero-payload root-origin archive fetch. Revalidate the receiver-derived source, perform
-  one HTTPS GET with TLS 1.2+, no proxy/cache/retry/compression/keepalive, and at most one live connection. Apply
-  5-second phase timeouts, 16 KiB headers, and an exact five-minute deadline. Permit at most one redirect to exact
-  no-port `release-assets.githubusercontent.com`, reapply only fixed safe headers, require HTTP 200 and mandatory valid
-  1-byte-through-128-MiB `Content-Length` before stage mutation, and stream once into existing exact-length/digest/EOF/
-  fsync admission with no path, memory, replay, ordinary downloader, or root mirror access. Poison the stage after any
-  started receive failure and after a body-close failure following otherwise successful receive, leaving only checked
-  `Release` valid. Hermetic L1 must cover every source, request, redirect, header, status, length, stream, timeout,
-  cancellation, digest, stage-state, and body-close edge. Run focused format, golines, vet, tests, and race tests.
+- [ ] 2. Implement the private zero-payload root-origin archive fetch. Revalidate the receiver-derived source and use
+  one retrieval attempt and redirect chain: one initial HTTPS GET plus at most one redirect GET, with no retry. Use
+  TLS 1.2+, no proxy/cache/compression/keepalive, at most one live connection, 5-second phase timeouts, 16 KiB headers,
+  and a fixed five-minute maximum further bounded by the caller context/deadline. Restrict the redirect to exact no-port
+  `release-assets.githubusercontent.com` and reapply only fixed safe headers. Require HTTP 200 and one effective
+  validated 1-byte-through-128-MiB `Content-Length` after Go `net/http` processing before stage mutation: rely on
+  `net/http` to reject malformed/conflicting duplicates and deduplicate identical duplicates, and reject missing or
+  chunked length or any still-exposed multiple values without a raw HTTP parser. Stream once into
+  exact-length/digest/EOF/fsync admission with no path, memory, replay, ordinary downloader, or root mirror access.
+  Any started receive failure or body-close failure after an otherwise successful receive poisons the stage, leaving
+  only checked `Release` valid. Hermetic L1 must cover source, request, redirect, header, status, length, stream,
+  timeout, cancellation, digest, stage-state, and body-close edges. Run focused format, golines, vet, tests, and race
+  tests.
 - [ ] 3. Compose one private end-to-end install method from source/checksum authority, caller-stream or root-fetch
   archive admission, strict extraction/finalization, candidate assembly, and absent publication or explicit
   replacement. Preserve primary `DomainError` and commit details through checked reverse cleanup. L1 covers both body

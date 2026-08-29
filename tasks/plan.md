@@ -233,13 +233,16 @@ the separate closed transport contract in ADR-0016. Root never opens a caller pa
 and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority. Extraction validates the reviewed
 complete upstream member allowlist and extracts only Firecracker and Jailer.
 
-The zero-payload root fetch revalidates the receiver-derived source before a one-attempt HTTPS GET. Its dedicated
-TLS-1.2-or-newer transport has no proxy, cache, retry, compression, or keepalive path and permits one live connection.
-It applies 5-second dial/TLS/header timeouts, a 16 KiB header limit, and an exact five-minute total deadline. At most
-one HTTPS redirect may target exact host `release-assets.githubusercontent.com` without a port, user information, or
-fragment. The opaque signed query is allowed, but only the fixed safe headers are reapplied; no authorization or cookie
-is carried. HTTP 200 and a mandatory valid `Content-Length` from 1 byte through 128 MiB are required before stage
-mutation.
+The zero-payload root fetch revalidates the receiver-derived source before one retrieval attempt and redirect chain:
+one initial HTTPS GET plus at most one redirect GET, with no retry. Its dedicated TLS-1.2-or-newer transport has no
+proxy, cache, compression, or keepalive path and permits one live connection. It applies 5-second dial/TLS/header
+timeouts, a 16 KiB header limit, and a fixed five-minute maximum further bounded by the caller context and its
+deadline. The redirect may target only exact host `release-assets.githubusercontent.com` without a port, user
+information, or fragment. The opaque signed query is allowed, but only the fixed safe headers are reapplied; no
+authorization or cookie is carried. HTTP 200 and one effective validated `Content-Length` from 1 byte through 128 MiB
+after Go `net/http` processing are required before stage mutation. `net/http` rejects malformed or conflicting
+duplicates and deduplicates identical duplicates; mvmctl rejects missing or chunked length and any still-exposed
+multiple values. No raw HTTP parser is required.
 The response is streamed once into the existing anonymous archive stage and admitted through its exact-length
 positioned-write, independent-digest, EOF, fsync, stable-metadata, and zero-offset checks. Any failure after receive
 starts poisons the stage. A body-close failure after an otherwise successful receive also poisons it, so only checked
