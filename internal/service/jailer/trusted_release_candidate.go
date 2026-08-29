@@ -18,6 +18,7 @@ type trustedReleaseCandidateState uint8
 
 const (
 	trustedReleaseCandidateReady trustedReleaseCandidateState = iota
+	trustedReleaseCandidateInstalled
 	trustedReleaseCandidateReleased
 )
 
@@ -142,7 +143,7 @@ func (architecture *trustedReleaseArchitectureWriteLease) stageCandidate(
 	if err := architecture.deps.fsync(ctx, architecture.fd); err != nil {
 		return nil, trustedReleaseStoreError("sync trusted release architecture before candidate admission", err)
 	}
-	if err := candidate.requireExactLeaves(ctx); err != nil {
+	if err := candidate.directory.requireExactLeaves(ctx); err != nil {
 		return nil, err
 	}
 	candidate.admission, err = candidate.directory.admit(ctx)
@@ -371,16 +372,19 @@ func (candidate *trustedReleaseCandidate) verifyLinkedLeaf(
 	return nil
 }
 
-func (candidate *trustedReleaseCandidate) requireExactLeaves(ctx context.Context) error {
-	names, err := candidate.directory.deps.readDirNames(ctx, candidate.directory.slotFD)
+func (directory *trustedReleaseDirectory) requireExactLeaves(ctx context.Context) error {
+	if directory == nil || directory.slotFD < 0 || len(directory.retained) == 0 {
+		return trustedReleaseStoreError("trusted release directory is not active for exact-leaf admission", nil)
+	}
+	names, err := directory.deps.readDirNames(ctx, directory.slotFD)
 	if err != nil {
-		return trustedReleaseStoreError("enumerate complete trusted release candidate", err)
+		return trustedReleaseStoreError("enumerate complete trusted release directory", err)
 	}
 	sort.Strings(names)
 	want := []string{trustedReleaseFirecrackerLeaf, trustedReleaseJailerLeaf, trustedReleaseManifestLeaf}
 	sort.Strings(want)
 	if !slices.Equal(names, want) {
-		return trustedReleaseStoreUntrusted("trusted release candidate does not contain exactly the fixed leaves", nil)
+		return trustedReleaseStoreUntrusted("trusted release directory does not contain exactly the fixed leaves", nil)
 	}
 	return nil
 }
@@ -395,10 +399,50 @@ func takeTrustedReleaseArchitectureWriteLease(
 }
 
 func (candidate *trustedReleaseCandidate) Release(ctx context.Context) error {
-	if candidate == nil || candidate.state == trustedReleaseCandidateReleased {
+	if candidate == nil {
 		return nil
 	}
-	return candidate.discard(context.WithoutCancel(ctx), true, nil)
+	switch candidate.state {
+	case trustedReleaseCandidateReady:
+		return candidate.discard(context.WithoutCancel(ctx), true, nil)
+	case trustedReleaseCandidateInstalled:
+		return candidate.closeInstalled(context.WithoutCancel(ctx), nil)
+	case trustedReleaseCandidateReleased:
+		return nil
+	default:
+		return trustedReleaseStoreError("trusted release candidate has an invalid release state", nil)
+	}
+}
+
+func (candidate *trustedReleaseCandidate) closeInstalled(ctx context.Context, primary error) error {
+	cleanupCtx := context.WithoutCancel(ctx)
+	result := primary
+	if candidate.admission != nil {
+		result = appendTrustedReleaseStoreError(
+			result,
+			"release installed trusted release candidate admission",
+			candidate.admission.Release(cleanupCtx),
+		)
+		candidate.admission = nil
+	}
+	if candidate.directory != nil {
+		result = appendTrustedReleaseStoreError(
+			result,
+			"close installed trusted release candidate directory",
+			candidate.directory.Release(cleanupCtx),
+		)
+		candidate.directory = nil
+	}
+	if candidate.architecture != nil {
+		result = appendTrustedReleaseStoreError(
+			result,
+			"close installed trusted release candidate architecture",
+			candidate.architecture.Release(cleanupCtx),
+		)
+		candidate.architecture = nil
+	}
+	candidate.clearAuthority()
+	return result
 }
 
 func (candidate *trustedReleaseCandidate) discard(
@@ -431,6 +475,17 @@ func (candidate *trustedReleaseCandidate) discard(
 		}
 		if err := candidate.directory.deps.fsync(cleanupCtx, candidate.directory.slotFD); err != nil {
 			result = appendTrustedReleaseStoreError(result, "sync discarded trusted release candidate directory", err)
+			removeDirectory = false
+		}
+	}
+	if removeDirectory && candidate.directoryIdentity.Ino != 0 && candidate.architecture != nil &&
+		candidate.architecture.fd >= 0 {
+		if err := candidate.verifyReservedNameBinding(cleanupCtx); err != nil {
+			result = appendTrustedReleaseStoreError(
+				result,
+				"verify discarded trusted release candidate name binding",
+				err,
+			)
 			removeDirectory = false
 		}
 	}
@@ -469,11 +524,15 @@ func (candidate *trustedReleaseCandidate) discard(
 		)
 		candidate.architecture = nil
 	}
+	candidate.clearAuthority()
+	return result
+}
+
+func (candidate *trustedReleaseCandidate) clearAuthority() {
 	candidate.name = ""
 	candidate.directoryIdentity = unix.Stat_t{}
 	candidate.canonicalManifest = nil
 	candidate.state = trustedReleaseCandidateReleased
-	return result
 }
 
 func randomTrustedReleaseCandidateName(ctx context.Context, slot releaseSlot) (string, error) {

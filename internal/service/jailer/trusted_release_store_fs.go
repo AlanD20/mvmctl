@@ -19,22 +19,23 @@ const (
 )
 
 type trustedReleaseStoreDeps struct {
-	open              func(context.Context, string, int, uint32) (int, error)
-	openAt            func(context.Context, int, string, int, uint32) (int, error)
-	mkdirAt           func(context.Context, int, string, uint32) error
-	fstat             func(context.Context, int, *unix.Stat_t) error
-	fchown            func(context.Context, int, int, int) error
-	fchmod            func(context.Context, int, uint32) error
-	read              func(context.Context, int, []byte) (int, error)
-	pread             func(context.Context, int, []byte, int64) (int, error)
-	pwrite            func(context.Context, int, []byte, int64) (int, error)
-	seek              func(context.Context, int, int64, int) (int64, error)
-	fsync             func(context.Context, int) error
-	close             func(context.Context, int) error
-	unlinkAt          func(context.Context, int, string, int) error
-	readDirNames      func(context.Context, int) ([]string, error)
-	candidateName     func(context.Context, releaseSlot) (string, error)
-	linkAnonymousLeaf func(context.Context, int, int, string) error
+	open                     func(context.Context, string, int, uint32) (int, error)
+	openAt                   func(context.Context, int, string, int, uint32) (int, error)
+	mkdirAt                  func(context.Context, int, string, uint32) error
+	fstat                    func(context.Context, int, *unix.Stat_t) error
+	fchown                   func(context.Context, int, int, int) error
+	fchmod                   func(context.Context, int, uint32) error
+	read                     func(context.Context, int, []byte) (int, error)
+	pread                    func(context.Context, int, []byte, int64) (int, error)
+	pwrite                   func(context.Context, int, []byte, int64) (int, error)
+	seek                     func(context.Context, int, int64, int) (int64, error)
+	fsync                    func(context.Context, int) error
+	close                    func(context.Context, int) error
+	unlinkAt                 func(context.Context, int, string, int) error
+	readDirNames             func(context.Context, int) ([]string, error)
+	candidateName            func(context.Context, releaseSlot) (string, error)
+	linkAnonymousLeaf        func(context.Context, int, int, string) error
+	renameCandidateNoReplace func(context.Context, int, string, string) error
 }
 
 type trustedReleaseStorePolicy struct {
@@ -500,8 +501,9 @@ func realTrustedReleaseStoreDeps() trustedReleaseStoreDeps {
 		unlinkAt: func(_ context.Context, parentFD int, name string, flags int) error {
 			return unix.Unlinkat(parentFD, name, flags)
 		},
-		readDirNames:      readTrustedReleaseDirectoryNames,
-		candidateName:     randomTrustedReleaseCandidateName,
-		linkAnonymousLeaf: linkAnonymousTrustedReleaseLeaf,
+		readDirNames:             readTrustedReleaseDirectoryNames,
+		candidateName:            randomTrustedReleaseCandidateName,
+		linkAnonymousLeaf:        linkAnonymousTrustedReleaseLeaf,
+		renameCandidateNoReplace: renameTrustedReleaseCandidateNoReplace,
 	}
 }
