@@ -22,6 +22,8 @@ const (
 	managedVMConfigMemfdName     = "mvm-firecracker-config"
 	managedVMConfigMemfdMode     = uint32(0444)
 	managedVMConfigMemfdFlags    = unix.MFD_CLOEXEC | unix.MFD_ALLOW_SEALING
+	managedVMPersistentMountPath = "/run/mvm"
+	managedVMRuntimeMountPath    = managedVMPersistentMountPath + "/runtime"
 	managedVMConfigRequiredSeals = unix.F_SEAL_SEAL | unix.F_SEAL_SHRINK | unix.F_SEAL_GROW |
 		unix.F_SEAL_WRITE | unix.F_SEAL_FUTURE_WRITE
 	managedVMConfigRequiredStat = managedVMResourceRequiredFileStat | unix.STATX_GID | unix.STATX_MTIME |
@@ -251,18 +253,18 @@ func buildManagedFirecrackerConfig(intent vmFirecrackerLaunchIntent) managedFire
 	}
 	if intent.enableLogging {
 		config.Logger = &managedFirecrackerLogger{
-			LogPath: "/run/mvm/" + infra.VMFirecrackerLogFilename, Level: intent.logLevel,
+			LogPath: managedVMPersistentMountPath + "/" + infra.VMFirecrackerLogFilename, Level: intent.logLevel,
 			ShowLevel: true, ShowLogOrigin: true,
 		}
 	}
 	if intent.enableMetrics {
 		config.Metrics = &managedFirecrackerMetrics{
-			MetricsPath: "/run/mvm/" + infra.VMFirecrackerMetricsFilename,
+			MetricsPath: managedVMPersistentMountPath + "/" + infra.VMFirecrackerMetricsFilename,
 		}
 	}
 	if intent.vsockCID != nil {
 		config.Vsock = &managedFirecrackerVsock{
-			GuestCID: *intent.vsockCID, UDSPath: "/run/mvm/" + infra.VMVsockSocketFilename,
+			GuestCID: *intent.vsockCID, UDSPath: managedVMRuntimeMountPath + "/" + infra.VMVsockSocketFilename,
 		}
 	}
 	return config
