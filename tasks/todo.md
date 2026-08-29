@@ -261,12 +261,16 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
       then the candidate and architecture directories; close every writable descriptor; and re-admit the complete
       candidate through the installed-release verifier. Cover discard, recovery, cancellation, and partial-failure
       edges.
-    - [ ] Implement idempotent exact-manifest detection and absent publication with descriptor-relative
-      `renameat2(RENAME_NOREPLACE)`, including post-commit state and durability details.
+    - [x] Require exact three-leaf shared admission before idempotent canonical-manifest comparison; conflict on a
+      different complete release and fail closed on unsafe state; publish an absent slot with descriptor-relative
+      `renameat2(RENAME_NOREPLACE)` and no fallback; transition to installed before parent fsync and close-only cleanup;
+      report `release_installed`/`durability_uncertain`; and cover pre-commit, commit, parent-fsync, close,
+      cancellation, and reserved-name binding faults.
     - [ ] Implement explicit replacement only after complete old-release admission and unreferenced-identity proof;
       commit with `renameat2(RENAME_EXCHANGE)` and retire only fixed old leaves after the first parent fsync.
-    - [ ] Add L1 crash/failure injection for every pre-commit, commit, parent-fsync, retirement, and final-fsync edge;
-      verify one complete old/new release plus exact partial-state details, never a partial installed directory.
+    - [ ] Complete the replacement/exchange fault matrix for reference-scan, commit, parent-fsync, retirement, and final
+      fsync edges; verify one complete old/new release plus exact partial-state details, never a partial installed
+      directory.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.
 

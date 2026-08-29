@@ -258,9 +258,15 @@ canonical manifest is positioned-written and fsynced in an anonymous root-owned 
 the finalized anonymous Firecracker/Jailer pair into one exact root-owned mode-`0700` reserved candidate using only
 `AT_EMPTY_PATH`. The linked files, candidate directory, and architecture directory are fsynced in that order; every
 writable descriptor is checked closed before exact shared re-admission. Candidate discard, recovery, cancellation, and
-partial-failure edges have fault-injection coverage. This is still an unpublished candidate: the aarch64 audit,
-root-origin fetch, caller/privileged-transport wiring, canonical version publication, idempotent exact-manifest
-handling, `RENAME_NOREPLACE`, and replacement/exchange remain implementation work.
+partial-failure edges have fault-injection coverage. Private absent-only publication is now implemented. An existing
+canonical version must contain exactly the three fixed leaves and pass shared strict manifest, full-file hash, and ELF
+admission before an identical canonical manifest returns unchanged; a different complete release conflicts, and unsafe
+or corrupt state fails closed. An absent slot commits with descriptor-relative `renameat2(RENAME_NOREPLACE)` and no
+fallback. The candidate becomes installed before the post-commit parent fsync and close-only cleanup; later errors
+report `release_installed` and, for parent-fsync failure, `durability_uncertain`. Fault injection covers absent-path
+pre-commit, commit, parent-fsync, close, cancellation, and reserved-name binding edges. This remains a private, unwired
+substrate. The aarch64 audit, root-origin fetch, caller/privileged-transport wiring, replacement/exchange with an exact
+reference scan, retirement, and the remaining replacement/final-fsync fault matrix remain implementation work.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are

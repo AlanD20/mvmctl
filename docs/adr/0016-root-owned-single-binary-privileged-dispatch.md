@@ -399,10 +399,12 @@ are fsynced in that order before commit. Every writable staging descriptor is ch
 three-leaf candidate is re-admitted through its retained directory descriptor by the same manifest/executable read path
 used for installed releases.
 
-An exact canonical-manifest match at the installed slot is idempotent and reports unchanged even when replacement was
-requested. It does not scan instance references because the release authority bytes and identity do not change. A
-different existing release may be replaced only when the request explicitly authorizes replacement, the current
-manifest and both executable leaves pass complete installed-release admission, and
+An existing canonical version directory must contain exactly the three fixed leaves and pass the shared strict
+manifest, full-file hash, and ELF admission before its canonical manifest may be compared with a candidate. An exact
+canonical-manifest match is idempotent and reports unchanged even when replacement was requested. It does not scan
+instance references because the release authority bytes and identity do not change. A different existing release may
+be replaced only when the request explicitly authorizes replacement, the current manifest and both executable leaves
+pass complete installed-release admission, and
 `requireUnreferenced(current.releaseIdentity())` succeeds while the slot lease remains held. An unreadable, incomplete,
 or corrupt installed slot always fails closed; replacement is not a repair bypass.
 
@@ -412,7 +414,9 @@ the old complete version directory to the reserved candidate name. Lack of eithe
 failure; there is no plain-rename, copy, per-file, or other non-atomic fallback. Successful rename/exchange is the
 observable commit point. Any later error preserves the primary `DomainError` and adds `release_installed=true` or
 `release_replaced=true`. Failure to fsync the architecture directory after that commit also adds
-`durability_uncertain=true`; code never attempts to roll back a visible committed release.
+`durability_uncertain=true`; code never attempts to roll back a visible committed release. The successful absent rename
+transitions the candidate capability to installed state before the post-commit parent fsync, and all later cleanup is
+close-only so it cannot unlink canonical release leaves.
 
 After a replacement commit and successful architecture-directory fsync, retirement unlinks only the three fixed leaves
 through the retained old-directory descriptor, fsyncs that directory, removes the reserved directory, and fsyncs the
@@ -475,9 +479,17 @@ the linked files are fsynced first, followed by the candidate directory and then
 writable descriptors are checked closed; and the complete exact candidate is re-admitted through the shared
 installed-release verifier. The production linker uses only `AT_EMPTY_PATH`. Fault injection covers candidate creation,
 linking, metadata checks, fsyncs, checked writable-stage closure, re-admission, discard, recovery, cancellation, and
-partial failures. This capability creates no canonical version directory and publishes no installed release.
-Root-origin archive fetching, the aarch64 archive audit, caller/privileged-transport wiring, canonical version
-publication, idempotent exact-manifest handling, `RENAME_NOREPLACE`, and replacement/exchange remain Task 6 work.
+partial failures. Candidate assembly itself creates no canonical version directory. The separate private absent-only
+publication transition is now implemented. An existing canonical version must have exactly the three fixed
+leaves and pass the shared strict manifest, full-file hash, and ELF admission before an identical canonical manifest
+returns unchanged; a different complete release conflicts, and unsafe or corrupt state fails closed. An absent slot
+commits only through descriptor-relative `renameat2(RENAME_NOREPLACE)` with no fallback. Rename success changes the
+candidate to installed state before the cancellation-independent parent fsync and close-only cleanup. Post-commit
+errors report `release_installed=true`; a failed parent fsync also reports `durability_uncertain=true`. L1 fault tests
+cover absent-path pre-commit admission, commit failure and collision, parent fsync, descriptor close, cancellation, and
+reserved-name binding edges. This private path is not wired to callers or the privileged transport. Root-origin archive
+fetching, the aarch64 archive audit, replacement/exchange with an exact reference scan, old-release retirement, and the
+remaining replacement/final-fsync fault matrix remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 

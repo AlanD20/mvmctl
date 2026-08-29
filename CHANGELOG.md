@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
-> authority, managed-cache pinning, and base launch-resource pinning substrates described below are implemented. The
-> mandatory per-VM network
+> and trusted-release authorities, managed-cache pinning, and base launch-resource pinning substrates described below
+> are implemented. The mandatory per-VM network
 > namespace, nftables-only `traffic` policy, exact VM-to-VM `exec` policy, final marker-only sudo policy, and remaining
 > typed privileged operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
@@ -68,6 +68,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trusted release removal can acquire a lease only when no active authority record references the exact release.
 - This substrate is private and not yet wired into public VM lifecycle operations; that integration remains a release
   blocker below.
+
+#### Private trusted-release authority substrate
+
+- Added root-owned, descriptor-pinned trusted-release admission with fixed source derivation, independently checked
+  digests, a closed parser for the audited x86_64 archives, strict manifest decoding, full-file hashing, and ELF checks.
+- Firecracker, Jailer, and the manifest are staged anonymously, assembled into one recoverable exact candidate, and
+  durably published into an absent canonical version slot with descriptor-relative `renameat2(RENAME_NOREPLACE)`.
+  Existing versions return unchanged only after complete shared admission and an identical canonical manifest; a
+  different complete release conflicts, while unsafe or corrupt state fails closed.
+- This authority remains private and unwired. Root-origin fetch, the aarch64 archive audit, typed caller/privileged
+  transport integration, and explicit replacement/exchange with reference checks and old-release retirement are still
+  release blockers.
 
 #### Descriptor-pinned managed-cache and base launch-resource substrates
 
@@ -240,7 +252,9 @@ The following items are release blockers and are intentionally not described abo
 - Treat the current fixed-name Jailer checks as transitional defense-in-depth only: Firecracker still reads a
   caller-writable configuration from the whole mounted VM directory. The final receiver must consume pinned individual
   resources and derive/verify every jail-visible path after durable registration.
-- Independently verify and atomically install trusted Firecracker/Jailer releases inside the privileged boundary.
+- Wire the private trusted-release authority through typed privileged install/remove operations; complete root-origin
+  fetch, the aarch64 archive audit, and explicit replacement/exchange with reference checks and old-release retirement.
+  The implemented absent-only substrate is not yet reachable from public `mvm bin` operations.
 - Migrate Jailer, loopmount, network, firewall, and supported host mutations to distinct typed privileged actions; remove
   the public root `mvm run jailer` and `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
