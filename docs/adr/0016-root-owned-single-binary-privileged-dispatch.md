@@ -614,9 +614,12 @@ directory descriptor, fsyncs the retired directory, rechecks its reserved-name b
 architecture directory again. Post-commit errors preserve the primary `DomainError` and report
 `release_replaced=true`, plus `durability_uncertain=true` or `retired_release_retained=true` where applicable. L1 tests
 cover reference and corrupt-authority rejection, both binding races, cancellation boundaries, exchange syscall errors,
-both parent fsyncs, every fixed retirement step, cleanup, recovery, and combined-error metadata. This private path is
-not wired to callers or the privileged transport. Private end-to-end install composition, the aarch64 archive audit,
-typed privileged install/removal integration, actual release removal, and L2 release qualification remain Task 6 work.
+both parent fsyncs, every fixed retirement step, cleanup, recovery, and combined-error metadata. Private end-to-end
+install composition now selects caller-stream or root-fetch admission, independently resolves checksum authority,
+assembles and publishes the exact candidate, and returns a closed outcome with fully re-admitted manifest metadata.
+Precommit failure returns a zero result, while committed results survive post-commit cleanup errors. This private path
+is not wired to callers or the privileged transport. The aarch64 archive audit, typed privileged install/removal
+integration, actual release removal, and L2 release qualification remain Task 6 work.
 The strict wire codec and caller socketpair process transport, including concurrent upload/response, EOF qualification,
 half-close, and bounded reaping, are implemented. Receiver-side fd-0 type and peer authentication, independent
 `CLOEXEC`, one-request framing/EOF and response half-close, and closed install/remove handlers remain pending.

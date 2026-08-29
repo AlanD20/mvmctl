@@ -253,7 +253,7 @@ starts poisons the stage. A body-close failure after an otherwise successful rec
 memory copy, replay, ordinary downloader, or root asset-mirror access.
 
 The private fetch and anonymous-stage admission are implemented with hermetic L1 coverage. Private end-to-end install
-composition and typed privileged, API, and CLI wiring remain pending.
+composition is also implemented; typed privileged, API, and CLI wiring remain pending.
 
 The frozen v0.3 extraction contract accepts only audited x86_64 archives for `1.10.1`, `1.14.2`, `1.14.3`, `1.14.4`,
 `1.15.0`, `1.15.1`, `1.16.0`, and `1.16.1`. Each must contain the exact order-independent 24-member set recorded in
@@ -295,7 +295,10 @@ then rechecks the reserved-name binding, removes that directory, and fsyncs the 
 errors preserve the primary `DomainError` and report the committed state, uncertain durability, and retained old
 release precisely. Fault injection covers referenced-release and corrupt-authority rejection, name-binding races,
 cancellation boundaries, commit syscalls, both parent fsyncs, every retirement step, cleanup, recovery, and combined
-error metadata. This remains a private, unwired substrate. Private end-to-end install composition, the aarch64 audit,
+error metadata. The private end-to-end method composes independent checksum authority, caller-stream or root-fetch
+archive admission, strict extraction/finalization, candidate assembly, and absent/identical/replacement selection. It
+returns only a closed outcome and fully re-admitted manifest metadata, preserves committed results through post-commit
+errors, and returns a zero result for precommit failure. This remains a private, unwired substrate. The aarch64 audit,
 caller/privileged-transport wiring, actual release removal, L2 qualification, and remaining release integration work
 are still pending.
 
@@ -385,7 +388,7 @@ func (p *preparedRelease) Release(ctx context.Context) error
 Preparation and checked release are implemented first. The later launch slice adds only the typed ownership transfer
 that it actually needs; it does not expose raw descriptors, paths, caller-supplied hashes, or a generic operation hook.
 
-The trusted-release work proceeds in this order. Steps 1 and 2 are complete; steps 3 through 9 remain an acceptance
+The trusted-release work proceeds in this order. Steps 1 through 3 are complete; steps 4 through 9 remain an acceptance
 plan and are not implemented:
 
 1. **Freeze the fetch and removal contracts.** ADR-0016 and the task ledger must record the exact trust inputs, commit

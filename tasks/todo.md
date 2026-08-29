@@ -211,7 +211,7 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Implement and verify the private checksum authority and typed archive digest: source-integrity revalidation,
     proxy-free bounded HTTPS over fresh HTTP/1 with HTTP/2 disabled, one closed redirect, exact status/body/grammar
     checks, cancellation, and checked cleanup.
-  - [ ] Compose the implemented zero-payload root-origin archive fetch into private end-to-end release installation
+  - [x] Compose the implemented zero-payload root-origin archive fetch into private end-to-end release installation
     without relaxing source, transport, stream, or staging policy.
 - [x] Implement the strict bounded gzip/PAX/GNU-tar parser: reject traversal, links, devices, sparse files, duplicates,
   unexpected or missing members, malformed headers and metadata, concatenated/trailing input, and size/count overflow;
@@ -283,7 +283,7 @@ privileged wiring.
   cancellation, syscall, fsync, and cleanup failure, each canonical slot contains one complete three-file release or is
   absent, never a partial release.
 
-**Ordered remaining Task 6 slices:**
+**Ordered Task 6 slices:**
 
 - [x] 1. Freeze the zero-payload root-fetch and atomic-removal contracts in ADR-0016 and the release plan. Review the
   documentation diff, paths, links, line length, stale wording, and completed-checkbox set without claiming either
@@ -302,7 +302,7 @@ privileged wiring.
   only checked `Release` valid. Hermetic L1 must cover source, request, redirect, header, status, length, stream,
   timeout, cancellation, digest, stage-state, and body-close edges. Run focused format, golines, vet, tests, and race
   tests.
-- [ ] 3. Compose one private end-to-end install method from source/checksum authority, caller-stream or root-fetch
+- [x] 3. Compose one private end-to-end install method from source/checksum authority, caller-stream or root-fetch
   archive admission, strict extraction/finalization, and candidate assembly. Treat `allow replacement` as permission,
   not replace-only: an absent slot installs, an identical complete release remains unchanged, and a differing complete
   release replaces only with permission and exact reference proof. Return a closed `installed`, `replaced`, or
