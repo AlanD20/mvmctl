@@ -338,12 +338,22 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
     unlink/`rmdir` edge, exact error classification, combined metadata, close-only release, and crash/retry. Canonical
     remains a complete three-file release or absent. A future `--force` bypasses only a local untrusted-SQLite warning
     and is never sent to root.
-- [ ] 5. Build the receiver foundation over the implemented caller transport and strict wire codec. Require fd 0
-  `AF_UNIX`/`SOCK_STREAM`, authenticate `SO_PEERCRED` against the sudo caller, set `CLOEXEC`, read one framed request
-  through payload and EOF, write one framed response, and half-close the write side. Then add closed install/remove
-  values and handlers with exact action and payload policy. Abuse-test descriptor type, peer mismatch, framing/EOF,
-  response half-close, unknown/extra fields, action mismatch, payload on removal, and early rejection. Do not reopen
-  resolved caller upload/response-EOF/reap behavior; keep the action catalog closed until capability completion.
+- [ ] 5. Build the receiver foundation over the implemented caller transport and strict wire codec in two audit-friendly
+  substeps. The fixed five-second request-header read deadline, five-minute install archive-payload read deadline, and
+  five-second response-write deadline each use an earlier current context deadline when one exists. Final error
+  delivery may use `context.WithoutCancel` only with the absolute deadline established before cancellation was detached.
+  These limits are non-configurable security policy. Neither substep reopens resolved caller upload/response-EOF/reap
+  behavior.
+  - [ ] 5a. Admit fd 0 as `AF_UNIX`/`SOCK_STREAM`, set and verify `CLOEXEC`, authenticate `SO_PEERCRED` against the sudo
+    caller, return bounded early framed errors for a matching version-1 action, and half-close the response write side.
+    Remove the obsolete standalone EOF-delimited JSON decoder. Fault-test descriptor identity/type, CLOEXEC ordering,
+    peer mismatch, early rejection without request draining, response deadline/write/half-close, and cleanup.
+  - [ ] 5b. Add unregistered closed install/remove request and result values plus directly tested typed handlers.
+    Enforce exact action matching and the fixed header deadline. Install alone accepts zero or one declared bounded
+    payload and requires its exact EOF under the five-minute payload deadline; remove rejects payload and requires EOF
+    before effects. Abuse-test unknown/extra fields, action mismatch, truncation, trailing bytes, payload on removal,
+    handler errors, and the fixed response deadline. Keep the action switch closed until step 6 completes the typed
+    client capability.
 - [ ] 6. Add Jailer's private minimal `Exchange`, dedicated fake, named typed install/remove client methods, and exact
   action registrations. Use the existing EOF-qualified response authority and remote-result precedence over
   uploader/exit/reap diagnostics; capability tests confirm those resolved semantics, preserve partial-state details,

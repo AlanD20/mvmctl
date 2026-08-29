@@ -102,16 +102,22 @@ payload length, the strict schema-version-1 header, and the exact optional paylo
 action and must match it. Only typed release install accepts a payload: zero bytes or at most 128 MiB. The caller
 half-closes after the declared bytes. Root requires exact length and EOF before payload-dependent effects and before all
 zero-payload effects, but may respond to pre-effect authentication/header failure without draining a claimed payload.
+The request-header read deadline is a fixed five seconds; the install archive-payload read deadline is a fixed five
+minutes.
 Responses use `MVMRES01`, a 32-bit length capped at 64 KiB, and one strict matching-action success/result or
-error/`DomainError` envelope. A delivered envelope is the final effect record even if process reaping later reports an
-anomaly; root half-closes its socket write side after the complete frame so response EOF does not depend on process exit.
-The codec exposes a read-only decoded success/error outcome separately from protocol failure, so callers cannot confuse a
-valid root `DomainError` with an untrusted malformed frame. The transport reports whether actual socket EOF was observed;
-in-memory EOF over copied bytes cannot promote a response. A capability client decodes EOF-qualified bytes with a
-non-cancelled context and lets a valid success or valid remote error win over upload `EPIPE`, exit, or later reap
-diagnostics. No domain effect or fallible outcome check is allowed after the response. Missing, malformed, truncated,
-mismatched, oversized, or non-EOF responses from a started process report `process_started: true` and
-`outcome_unknown: true`; a pre-start failure reports both false. Stderr and exit text are never parsed as authority.
+error/`DomainError` envelope under a fixed five-second response-write deadline. Each receiver deadline uses the earlier
+current context deadline when one exists. Final error delivery may use `context.WithoutCancel`, but retains the absolute
+deadline established before cancellation was detached. These are compiled, non-configurable security policy.
+
+A delivered envelope is the final effect record even if process reaping later reports an anomaly; root half-closes its
+socket write side after the complete frame, so response EOF does not depend on process exit. The codec exposes a
+read-only decoded success/error outcome separately from protocol failure, so callers cannot confuse a valid root
+`DomainError` with an untrusted malformed frame. The transport reports whether actual socket EOF was observed; in-memory
+EOF over copied bytes cannot promote a response. A capability client decodes EOF-qualified bytes with a non-cancelled
+context and lets a valid success or valid remote error win over upload `EPIPE`, exit, or later reap diagnostics. No
+domain effect or fallible outcome check is allowed after the response. Missing, malformed, truncated, mismatched,
+oversized, or non-EOF responses from a started process report `process_started: true` and `outcome_unknown: true`; a
+pre-start failure reports both false. Stderr and exit text are never parsed as authority.
 
 ### VM authority interface
 
@@ -423,12 +429,20 @@ plan and are not implemented:
    non-retryable error, binding-race, syscall, fsync, cleanup, combined-error, and crash/retry L1 matrix. It must also
    prove that every canonical slot is one complete three-file release or absent.
 5. **Add the receiver transport foundation.** Build on the implemented caller process transport and strict wire codec.
-   The receiver requires fd 0 to be `AF_UNIX`/`SOCK_STREAM`, authenticates `SO_PEERCRED` against the sudo caller, sets
-   `CLOEXEC`, reads one framed request through declared payload and EOF, writes one framed response, and half-closes its
-   write side. Then add closed install/remove request values and handlers with exact payload policy and action matching.
-   Receiver tests cover descriptor type, peer mismatch, framing/EOF, response half-close, unknown or extra fields,
-   action mismatch, payload on removal, and early rejection. The already-resolved caller upload, response-EOF, and reap
-   behavior is not reopened, and the action catalog remains closed until the release capability is complete.
+   Land it as two separately reviewable substeps without opening the action catalog:
+   - **5a. Admit and answer on fd 0.** Require fd 0 to be `AF_UNIX`/`SOCK_STREAM`, set and verify `CLOEXEC`,
+     authenticate `SO_PEERCRED` against the sudo caller, return bounded early framed errors when a matching version-1
+     action exists, and half-close the response write side. Remove the obsolete standalone EOF-delimited JSON request
+     decoder in this substep. Tests cover descriptor identity/type, CLOEXEC ordering/faults, peer mismatch, early
+     rejection, response framing/deadline/half-close, and the absence of request draining for rejected actions.
+   - **5b. Add closed release wire values and handlers without registration.** Add exact install/remove request and
+     result values plus directly tested typed handlers. The five-second header deadline, five-minute install-payload
+     deadline, five-second response deadline, earlier-context rule, action match, exact declared length, and EOF are
+     receiver invariants. Install alone accepts zero or bounded archive payload; remove rejects payload and requires EOF
+     before effects. Unknown/extra fields, mismatched actions, truncation, trailing bytes, payload on removal, and
+     handler errors are abuse-tested. The action switch remains closed until step 6 completes the named typed client
+     capability.
+   The already-resolved caller upload, response-EOF, and reap behavior is not reopened in either substep.
 6. **Add typed client methods and actions.** Give Jailer one private minimal `Exchange` interface, named install/remove
    methods, a dedicated fake, and exact privileged action registrations. The client uses the existing EOF-qualified
    response authority and remote-result precedence over upload/reap diagnostics. Capability tests confirm those resolved

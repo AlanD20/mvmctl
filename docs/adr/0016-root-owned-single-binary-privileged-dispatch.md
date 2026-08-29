@@ -112,8 +112,10 @@ action-specific body. The repeated action must match. Only release install may c
 exact stream of at most 128 MiB. The caller half-closes its write side after the declared bytes, and root requires EOF so
 truncation or trailing bytes fail closed before any payload-dependent effect. Zero-payload operations likewise require
 EOF before effects. Authentication, framing, and header failures may return an early error without draining an advertised
-payload; the concurrent client treats the resulting uploader `EPIPE` as expected once it has a valid response. Root
-applies bounded header and archive deadlines and reads no second request.
+payload; the concurrent client treats the resulting uploader `EPIPE` as expected once it has a valid response. The
+request-header read deadline is a fixed five seconds, and the release-install archive-payload read deadline is a fixed
+five minutes. Each uses the earlier current context deadline when one exists. These are non-configurable security
+policy; the receiver reads no second request and does not accept a caller-selected timeout.
 
 Each response starts with fixed `MVMRES01` magic and a network-order 32-bit JSON length followed by at most 64 KiB of
 strict schema-version-1 JSON. It contains the matching action, a closed `success` or `error` status, and exactly one typed
@@ -127,11 +129,24 @@ malformed frame. A start failure has known no-effect status; any started process
 mismatched, oversized, or non-EOF response returns `CodeProcessError` with `process_started: true` and
 `outcome_unknown: true`.
 
+Every response write has a fixed five-second deadline and uses the earlier current context deadline when one exists.
+Final error-envelope delivery may use `context.WithoutCancel` after operation cleanup, but it retains the absolute
+deadline established before cancellation was detached; it never gains a fresh or unbounded interval. The request-header,
+archive-payload, and response-write limits are compiled, non-configurable security policy.
+
 The transport returns bounded raw response bytes only together with an explicit indication that actual socket EOF was
 observed; copying a complete-looking prefix into an in-memory reader cannot fabricate authority. The named capability
 client decodes an EOF-qualified response with a non-cancelled context and lets either a valid success or valid remote
 `DomainError` win over upload `EPIPE`, non-zero exit, or later reap diagnostics. Without one valid envelope, a pre-start
 failure reports `process_started: false, outcome_unknown: false`; every post-start failure reports both values as true.
+
+Receiver integration lands in two audit-friendly increments before any release action is registered. The first admits
+only fd 0, sets and verifies close-on-exec, validates `AF_UNIX`/`SOCK_STREAM` and `SO_PEERCRED`, emits bounded early
+error envelopes when a matching version-1 action is available, half-closes the response write side, and removes the
+obsolete standalone EOF-delimited JSON decoder. The second adds closed, typed trusted-release install/remove request
+and result values plus directly tested handlers. Install alone may consume its declared payload and must require its
+exact EOF; remove requires zero payload and EOF before effects. These handlers remain unregistered, and the central
+action switch stays closed, until the named Jailer client capability and its response-authority tests are complete.
 
 ### Authorization roles
 
