@@ -267,6 +267,11 @@ the caller's managed cache. Final privileged code must never mount the whole cac
 authority, or signal a PID read from a PID mirror. ADR-0016 defines the exact ownership, modes, launch ordering, and
 cleanup contract; `tasks/todo.md` records implementation status.
 
+The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
+requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`
+sealed memfd. This is not active runtime protection yet: the typed privileged launch and descriptor-only mount consumer
+remain pending, so current public launches still use the transitional configuration path.
+
 For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
 release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
 untagged RC build must pass the intended version explicitly. Otherwise `git describe` can inherit the previous release

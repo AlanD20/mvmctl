@@ -783,7 +783,8 @@ v0.3 release work will move them to `/run/mvmctl/runtime/<uid>/<vm-id>` and stop
 
 The v0.3 privileged path accepts a managed cache root on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS.
 FUSE, remote, overlay/stacked, and automount cache roots are unsupported. The descriptor-pinned cache foundation is
-implemented, but privileged lifecycle wiring remains release work tracked in `tasks/todo.md`.
+implemented. Its private base-resource preparation also replaces admitted caller configuration bytes with a root-built
+sealed memfd, but privileged launch and descriptor-only mount wiring remain release work tracked in `tasks/todo.md`.
 
 Canonical launch assets and jail state are outside the user cache:
 

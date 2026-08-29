@@ -852,9 +852,12 @@ The v0.3 canonical persistent layout is:
 | Image staging | `images/staging/<image-id>/{source.raw,rootfs.img}` |
 
 Base VM launch admission uses a closed receiver policy before any descriptor is handed to the launch implementation.
-The request supplies only the VM ID, kernel ID, cloud-init presence, and the expected rootfs size. Root derives every
-component and opens it below the pinned cache descriptor with beneath/no-symlink/no-magic-link/no-cross-mount
-resolution. The base resource limits are:
+The typed selection binds the VM ID, kernel ID, expected rootfs size, and a closed Firecracker launch intent. That
+intent contains boot arguments, vCPU and memory values, SMT and dirty-page state, rootfs cache mode, guest MAC,
+topology-derived TAP identity, cloud-init presence, logger and metrics presence, optional CPU configuration, and an
+optional vsock CID. It contains no paths. Root derives every component and jail-visible path, then opens each resource
+below the pinned cache descriptor with beneath/no-symlink/no-magic-link/no-cross-mount resolution. The base resource
+limits are:
 
 | Resource | Required size | Access and mode policy |
 |---|---:|---|
@@ -869,13 +872,24 @@ image provisioning each require their own closed policy before their descriptors
 In particular, a QCOW2 file's physical length is not its virtual capacity, so a future volume policy cannot treat
 `statx` size as QCOW2 capacity or invoke an unrestricted image tool as root to compensate.
 
-Implementation note (2026-08-29): the private Jailer service now implements this base launch selection and resource
-lease. It derives the fixed components from typed IDs, opens them relative to the pinned cache descriptor with the
-required no-cross-mount resolution, performs synchronized ownership/type/link/mode/size admission, and transfers the
-complete descriptor chain into checked reverse cleanup. The privileged request does not yet carry the cache locator and
-base selection, the root-owned instance record does not bind the cache identity, and the mount-namespace launch path
-does not consume the root-side lease. The lease is not yet responsible for parsing and constraining the Firecracker
-configuration contents. Snapshot, volume, output, and image-provisioning policies remain pending.
+The caller-owned `firecracker.json` is admission evidence, not launch authority. Immediately before allocation or
+reading, root repeats synchronized metadata inspection and enforces the 1-byte-through-1-MiB bound. It uses positioned
+reads, an EOF growth probe, cancellation checks, and pre/post device, inode, type, mode, owner, group, link, size,
+mtime, and ctime equality. Strict closed JSON must be semantically identical to the complete root-built intent. Caller
+bytes are then discarded and the source descriptor is closed before root creates the authoritative configuration.
+
+Root writes its canonical bytes to a fresh `MFD_CLOEXEC|MFD_ALLOW_SEALING` memfd, sets root ownership and mode `0444`,
+and verifies exact metadata, zero offset, byte-for-byte readback, and all of `F_SEAL_SEAL`, `F_SEAL_SHRINK`,
+`F_SEAL_GROW`, `F_SEAL_WRITE`, and `F_SEAL_FUTURE_WRITE`. The retained private capability contains only its descriptor
+and checked close operation. It exposes no path, raw bytes, generic syscall surface, or public descriptor accessor. The
+mount transaction must consume that capability descriptor directly and apply read-only, nosuid, nodev, and noexec mount
+attributes; pathname reopening or `/proc/self/fd` reconstruction is prohibited.
+
+Implementation note (2026-08-30): the private Jailer service implements the base launch selection, resource lease, and
+sealed configuration authority described above. It transfers the remaining descriptor chain and the sealed capability
+into checked reverse cleanup. The privileged request does not yet carry the cache locator and base selection, the
+root-owned instance record does not bind the cache identity, and the mount-namespace launch path does not consume the
+root-side lease or sealed configuration. Snapshot, volume, output, and image-provisioning policies remain pending.
 
 Sockets and PID mirrors are not persistent cache artifacts. Their host layout is fixed beneath the root-controlled
 ephemeral runtime tree:

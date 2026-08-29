@@ -178,6 +178,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   beneath the pinned cache, `NO_XDEV`, synchronized ownership/type/link/mode/size checks, descriptor transfer, reverse
   uncancelled cleanup, primary `DomainError` preservation, and policy-valid continuous replacement races. This lease is
   intentionally not wired to a privileged action or launch.
+- [x] Make caller `firecracker.json` admission-only evidence: repeat the 1-byte-through-1-MiB bound before allocation,
+  require stable positioned reads and strict semantic equality with root-built typed launch intent, consume the source
+  descriptor, and retain only a root-owned `0444` fully sealed memfd with verified readback and checked cleanup.
+- [ ] Consume the sealed configuration through Task 7's descriptor-only mount transaction. The private capability has
+  no live privileged action or launch consumer yet, and current public launches remain transitional.
 - [ ] Extend open-once beneath/no-symlink/no-magic-link traversal to snapshot, volume, output, and image-provisioning
   resources under their separately defined policies.
 - [ ] Verify the remaining resource classes' caller ownership, file type, fixed basenames, size/capacity, and allowed
@@ -409,9 +414,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 - [ ] Launch a blocked Firecracker child in a private mount namespace and an optional blocked dropped-caller console
   relay in the host mount namespace; pin their pidfds and the Firecracker namespace FD, persist the complete record
   before externally mutable effects, create/truncate fixed outputs, mark propagation private, mount the pinned runtime
-  directory and individual persistent resources, publish display-only PID mirrors, then release Firecracker only after
-  named mounts and relay readiness succeed. The relay receives inherited descriptors and never reopens a caller path or
-  retains the VM namespace.
+  directory and individual persistent resources, including the sealed root-built Firecracker configuration, publish
+  display-only PID mirrors, then release Firecracker only after named mounts and relay readiness succeed. The relay
+  receives inherited descriptors and never reopens a caller path or retains the VM namespace.
 - [ ] Verify PID, boot ID, start ticks, all UID/GID identities, supplementary groups, exact cgroup, namespace inode,
   process liveness, and pinned executable hash against the Task 6 release manifest before signal or `setns`.
 - [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, wait through the pidfd,

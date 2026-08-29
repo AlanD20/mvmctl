@@ -37,9 +37,10 @@ continue without silently deleting it.
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional
   cloud-init leaves, with descriptor-relative no-cross-mount opening, synchronized admission checks, descriptor
-  transfer, and checked reverse cleanup.
+  transfer, and checked reverse cleanup. Caller configuration is strict admission evidence for root-built typed intent;
+  only a root-owned `0444` sealed memfd survives successful preparation.
   The locator and base selection are not yet carried by a privileged action, cache identity is not bound into the
-  instance record, and the root-side leases are not consumed by launch.
+  instance record, and the root-side leases and sealed configuration are not consumed by launch.
 - Typed SQLite allow-intent foundations for source-network and exact-source-VM traffic grants plus directional,
   exact-user VM-to-VM execution grants. Their repositories enforce exact identities, foreign keys, duplicate
   constraints, and atomic cross-table VM invalidation. Public inputs, enforcement compilation, relay authorization,
