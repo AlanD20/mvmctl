@@ -407,6 +407,7 @@ func (stages *trustedReleaseSelectedExecutableStages) makeExecutable(
 	if final.Dev != stage.identity.Dev || final.Ino != stage.identity.Ino {
 		return trustedReleaseStoreError("trusted release "+stage.name+" stage identity changed while finalizing", nil)
 	}
+	stage.identity = final
 	return requireTrustedReleaseSelectedStageZeroOffset(ctx, stages.deps, stage)
 }
 
