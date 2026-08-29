@@ -37,9 +37,10 @@ func newTrustedReleaseChecksumAuthority() *trustedReleaseChecksumAuthority {
 		KeepAlive: -1,
 	}
 	transport := &http.Transport{
-		Proxy:                  nil,
-		DialContext:            dialer.DialContext,
-		ForceAttemptHTTP2:      true,
+		Proxy:       nil,
+		DialContext: dialer.DialContext,
+		// CRITICAL: Go's HTTP/2 transport internally retries some bodyless requests. HTTP/1 preserves the no-retry rule.
+		ForceAttemptHTTP2:      false,
 		MaxConnsPerHost:        1,
 		DisableKeepAlives:      true,
 		DisableCompression:     true,
