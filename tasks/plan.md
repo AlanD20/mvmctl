@@ -224,14 +224,16 @@ no VM effects after such an error.
 ### Trusted release authority
 
 Task 6 adds a private `releaseAuthority` in `internal/service/jailer`. Its later install request contains only a
-validated release version, architecture, and explicit replacement intent; removal carries only the same validated
-slot. Root constructs the fixed official checksum and archive URLs and obtains the checksum independently through a
-dedicated bounded HTTPS-only client with proxies disabled. For mirror efficiency, the normal-user client may stream an
-exact-length bounded archive body through the typed install transport; root hashes it against the independently fetched
-checksum before parsing it. A zero-payload install instead makes one receiver-derived root-origin archive request under
-the separate closed transport contract in ADR-0016. Root never opens a caller path or accepts a caller URL or checksum,
-and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority. Extraction validates the reviewed
-complete upstream member allowlist and extracts only Firecracker and Jailer.
+validated release version, architecture, and `allow replacement` permission; removal carries only the same validated
+slot. Replacement permission is not a replace-only mode. Root constructs the fixed official checksum and archive URLs
+and obtains the checksum independently through a dedicated bounded HTTPS-only client with proxies disabled. The
+implemented checksum client disables HTTP/2 and uses fresh HTTP/1 connections because Go's HTTP/2 transport may retry
+bodyless GETs internally and violate the one-retrieval-attempt contract. For mirror efficiency, the normal-user client
+may stream an exact-length bounded archive body through the typed install transport; root hashes it against the
+independently fetched checksum before parsing it. A zero-payload install instead makes one receiver-derived root-origin
+archive request under the separate closed transport contract in ADR-0016. Root never opens a caller path or accepts a
+caller URL or checksum, and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority. Extraction
+validates the reviewed complete upstream member allowlist and extracts only Firecracker and Jailer.
 
 The implemented zero-payload root fetch revalidates the receiver-derived source before one retrieval attempt and
 redirect chain: one initial HTTPS GET plus at most one redirect GET, with no retry. It disables HTTP/2 and uses fresh
@@ -311,12 +313,22 @@ admits only a subset of the three fixed safe leaves, and performs fixed-leaf unl
 removal. Empty verified architecture directories may remain. The finalized executable stages and strict manifest are
 linked into the candidate, fsynced, and re-admitted as one complete release before commit.
 
-An exact canonical-manifest match is an idempotent unchanged result regardless of replacement intent. A differing
-installed release requires explicit replacement, complete admission of the old release, and an unreferenced old full
-identity; corrupt state fails closed. Absent install uses descriptor-relative `renameat2(RENAME_NOREPLACE)`, replacement
-uses `renameat2(RENAME_EXCHANGE)`, and neither has a non-atomic fallback. Rename/exchange success is the observable
-commit point. Subsequent errors annotate the committed state and durability; replacement retirement removes only the
-old fixed leaves and reserved directory after the first parent fsync and never rolls back the new release.
+`allow replacement` is permission rather than a replace-only mode: an absent slot installs normally, an exact
+canonical-manifest match returns unchanged, and a differing complete release is exchanged only with permission after
+complete old-release admission and exact unreferenced-identity proof. Corrupt state fails closed. Absent install uses
+descriptor-relative `renameat2(RENAME_NOREPLACE)`, replacement uses `renameat2(RENAME_EXCHANGE)`, and neither has a
+non-atomic fallback. Rename/exchange success is the observable commit point. Subsequent errors annotate the committed
+state and durability; replacement retirement removes only the old fixed leaves and reserved directory after the first
+parent fsync and never rolls back the new release.
+
+The private result contains a closed `installed`, `replaced`, or `unchanged` outcome and the exact release slot, archive
+digest, and executable digests and sizes from full shared re-admission. The strict manifest is the single metadata
+source; no redundant stored identity is required, and identity may be derived when needed. A precommit error returns a
+zero result. A committed installed/replaced result and metadata remain available alongside any postcommit error.
+Unchanged and its metadata become authoritative only after candidate-transaction cleanup completes; an earlier
+candidate cleanup failure returns a zero result and requires retry. A later outer slot-lease release failure retains
+unchanged and its manifest metadata alongside the error. The normal-user process consumes this result rather than
+reopening the root-owned mode-`0700` store.
 
 Removal is private and deliberately deeper than its implementation details:
 
@@ -387,10 +399,17 @@ plan and are not implemented:
    no pre-admission mutation.
 3. **Compose private end-to-end install.** One private release-authority method selects caller-stream or root-fetch
    input, independently fetches checksum authority, admits the anonymous archive, extracts and finalizes both
-   executables, assembles the strict candidate, and performs absent publication or explicit replacement. Acceptance
-   requires checked reverse cleanup and preservation of the first `DomainError` and commit details at every boundary,
-   with no wire, CLI, API, mirror-path, or legacy-downloader dependency. L1 covers both body modes, idempotency,
-   replacement intent, every stage handoff, cancellation, and cleanup fault.
+   executables, assembles the strict candidate, and applies `allow replacement` as permission: absent installs,
+   identical complete releases remain unchanged, and differing complete releases require permission plus exact
+   reference proof. Acceptance requires a closed outcome and exact fully re-admitted manifest-derived metadata, with a
+   zero result on precommit failure, committed installed/replaced result plus metadata alongside postcommit error, and
+   unchanged plus metadata only after successful candidate cleanup. Candidate cleanup failure before unchanged
+   completion requires retry; a later outer slot-lease release failure retains unchanged plus metadata alongside the
+   error. Preserve the first `DomainError` and commit details through checked reverse cleanup. The manifest is the
+   single metadata source; derive identity when needed, add no redundant stored identity, and never reopen the
+   root-owned mode-`0700` store from the normal process. L1 covers both body modes, all intent/canonical-state
+   outcomes, exact result metadata, every handoff, commit boundary, cancellation, and cleanup fault. Add no wire, CLI,
+   API, mirror-path, or legacy-downloader dependency.
 4. **Implement private removal and recovery correction.** Add only `releaseAuthority.removeInstalled(ctx, slot)` under
    the exact lease, canonical admission before recovery, no-replace commit, eight-attempt bound, close-only state,
    fixed-leaf retirement, and error classification above. In the same slice, bind recovery names to admitted directory

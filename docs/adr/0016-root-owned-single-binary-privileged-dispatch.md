@@ -304,6 +304,8 @@ have passed the closed ELF policy.
 Checksum authority uses a dedicated client rather than the ordinary downloader. It performs one retrieval attempt of
 the derived sidecar URL with a 15-second total deadline, 5-second dial/TLS/header timeouts, a 16 KiB response-header
 limit, transport compression disabled, TLS 1.2 or newer, no proxy function, no response cache, and at most one redirect.
+The client disables HTTP/2 and uses fresh HTTP/1 connections because Go's HTTP/2 transport may internally retry
+bodyless GETs, which would violate the one-retrieval-attempt contract.
 That redirect must remain HTTPS, contain no user information or fragment, and target exactly
 `release-assets.githubusercontent.com`.
 The response must be HTTP 200 and no more than 256 bytes whether or not it declares a content length. The accepted body
@@ -426,14 +428,25 @@ are fsynced in that order before commit. Every writable staging descriptor is ch
 three-leaf candidate is re-admitted through its retained directory descriptor by the same manifest/executable read path
 used for installed releases.
 
-An existing canonical version directory must contain exactly the three fixed leaves and pass the shared strict
-manifest, full-file hash, and ELF admission before its canonical manifest may be compared with a candidate. An exact
-canonical-manifest match is idempotent and reports unchanged even when replacement was requested. It does not scan
-instance references because the release authority bytes and identity do not change. A different existing release may
-be replaced only when the request explicitly authorizes replacement, the current manifest and both executable leaves
-pass complete installed-release admission, and
+An install's `allow replacement` intent is permission, not a replace-only mode. An absent canonical slot installs
+normally with or without that permission. An existing canonical version directory must contain exactly the three fixed
+leaves and pass the shared strict manifest, full-file hash, and ELF admission before its canonical manifest may be
+compared with a candidate. An exact canonical-manifest match is idempotent and reports unchanged with or without
+replacement permission. It does not scan instance references because the release authority bytes and identity do not
+change. A different existing release may be replaced only when the request explicitly allows replacement, the current
+manifest and both executable leaves pass complete installed-release admission, and
 `requireUnreferenced(current.releaseIdentity())` succeeds while the slot lease remains held. An unreadable, incomplete,
 or corrupt installed slot always fails closed; replacement is not a repair bypass.
+
+The private install result has one closed outcome: `installed`, `replaced`, or `unchanged`. It also carries the exact
+release slot, archive digest, and executable digests and sizes from the fully re-admitted strict manifest. The manifest
+metadata is the single source; the contract requires no redundant stored identity, and identity may be derived when
+needed. The normal-user process consumes returned metadata and never reopens the root-owned mode-`0700` store.
+
+Any precommit error returns a zero result. After an absent-install or replacement commit, the corresponding outcome and
+metadata remain returned with any postcommit error. An unchanged result becomes authoritative only after the transaction
+and its candidate cleanup complete; a candidate cleanup failure before that point returns a zero result and requires
+retry. A later outer slot-lease release failure retains `unchanged` and its manifest metadata alongside the error.
 
 An absent install commits with descriptor-relative `renameat2(RENAME_NOREPLACE)` from the reserved candidate name to
 the canonical version leaf. A replacement commits with descriptor-relative `renameat2(RENAME_EXCHANGE)`, which moves

@@ -209,7 +209,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Freeze the one-request timeout, transport, redirect, status, body-size, and exact checksum-sidecar grammar
     policy. The ordinary downloader and its proxy/cache/retry behavior are outside this trust boundary.
   - [x] Implement and verify the private checksum authority and typed archive digest: source-integrity revalidation,
-    proxy-free bounded HTTPS, one closed redirect, exact status/body/grammar checks, cancellation, and checked cleanup.
+    proxy-free bounded HTTPS over fresh HTTP/1 with HTTP/2 disabled, one closed redirect, exact status/body/grammar
+    checks, cancellation, and checked cleanup.
   - [ ] Compose the implemented zero-payload root-origin archive fetch into private end-to-end release installation
     without relaxing source, transport, stream, or staging policy.
 - [x] Implement the strict bounded gzip/PAX/GNU-tar parser: reject traversal, links, devices, sparse files, duplicates,
@@ -302,10 +303,18 @@ privileged wiring.
   timeout, cancellation, digest, stage-state, and body-close edges. Run focused format, golines, vet, tests, and race
   tests.
 - [ ] 3. Compose one private end-to-end install method from source/checksum authority, caller-stream or root-fetch
-  archive admission, strict extraction/finalization, candidate assembly, and absent publication or explicit
-  replacement. Preserve primary `DomainError` and commit details through checked reverse cleanup. L1 covers both body
-  modes, idempotency, intent, every handoff, cancellation, and cleanup fault; add no transport, CLI, API, path, mirror,
-  or legacy-downloader dependency.
+  archive admission, strict extraction/finalization, and candidate assembly. Treat `allow replacement` as permission,
+  not replace-only: an absent slot installs, an identical complete release remains unchanged, and a differing complete
+  release replaces only with permission and exact reference proof. Return a closed `installed`, `replaced`, or
+  `unchanged` outcome plus exact fully re-admitted manifest-derived metadata. Precommit error returns a zero result;
+  installed/replaced outcome and metadata remain with postcommit error; unchanged and metadata are retained only after
+  candidate cleanup completes, while an earlier candidate cleanup failure returns zero and requires retry. A later outer
+  slot-lease release failure retains unchanged and metadata alongside the error. Preserve primary `DomainError` and
+  commit details through checked reverse cleanup. Keep the manifest as the single metadata source, derive identity when
+  needed without redundant storage, and never reopen the root-owned mode-`0700` store from the normal process. L1 covers
+  both body modes, both permission values across absent/identical/differing canonical states, exact results, every
+  handoff and commit boundary, cancellation, and cleanup fault. Add no transport, CLI, API, path, mirror, or
+  legacy-downloader dependency.
 - [ ] 4. Implement only `releaseAuthority.removeInstalled(ctx, slot) (removed bool, err error)`: acquire and retain the
   slot lease before existing-only traversal. Return unchanged for safe store/architecture absence. Within an existing
   architecture, inspect canonical first: if safely absent, recover then return unchanged without reference scan; if

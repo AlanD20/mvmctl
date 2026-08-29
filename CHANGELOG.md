@@ -230,6 +230,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Trusted release checksum authority
+
+- Disabled HTTP/2 for the private checksum client and retained its no-reuse policy, so each sidecar request uses a fresh
+  HTTP/1 connection. This prevents Go's HTTP/2 transport from retrying a bodyless GET and preserves the implemented
+  one-retrieval-attempt contract; private end-to-end install composition remains pending.
+
 #### `mvm image inspect`
 - Ambiguous ID prefix now reports `"Image ID is ambiguous"` instead of `"No images found"`.
 
