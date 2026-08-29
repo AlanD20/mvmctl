@@ -121,6 +121,9 @@ func TestTrustedReleaseSelectedStagesExtractAndFinalizeBothExecutables(t *testin
 	if diff := cmp.Diff(wantManifest, manifest, manifestOptions); diff != "" {
 		t.Errorf("finalized trusted release manifest mismatch (-want +got):\n%s", diff)
 	}
+	if diff := cmp.Diff(wantManifest, selected.manifest, manifestOptions); diff != "" {
+		t.Errorf("retained trusted release manifest mismatch (-want +got):\n%s", diff)
+	}
 	require.NoError(t, validateTrustedReleaseManifest(manifest))
 
 	assertTrustedReleaseSelectedStageBytes(t, selected.firecracker.fd, firecracker)
@@ -206,6 +209,7 @@ func TestTrustedReleaseSelectedStagesRejectEitherInvalidELFBeforeExecutableMode(
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeBinaryUntrusted, errs.AsDomainError(err).Code)
 			assert.Equal(t, trustedReleaseSelectedStagesFailed, selected.state)
+			assertEmptyTrustedReleaseManifest(t, selected.manifest)
 			for _, fd := range []int{selected.firecracker.fd, selected.jailer.fd} {
 				var stat unix.Stat_t
 				require.NoError(t, unix.Fstat(fd, &stat))
@@ -266,6 +270,7 @@ func TestTrustedReleaseSelectedStagesRejectWriteFailuresAndOffsets(t *testing.T)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeBinaryTrustedInstallFailed, errs.AsDomainError(err).Code)
 			assert.Equal(t, trustedReleaseSelectedStagesFailed, selected.state)
+			assertEmptyTrustedReleaseManifest(t, selected.manifest)
 			if test.want != nil {
 				assert.ErrorIs(t, err, test.want)
 			}
@@ -334,6 +339,7 @@ func TestTrustedReleaseSelectedStagesRejectFinalizationFailuresWithoutPublicatio
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeBinaryTrustedInstallFailed, errs.AsDomainError(err).Code)
 			assert.Equal(t, trustedReleaseSelectedStagesFailed, selected.state)
+			assertEmptyTrustedReleaseManifest(t, selected.manifest)
 			if test.want != nil {
 				assert.ErrorIs(t, err, test.want)
 			}
@@ -469,6 +475,13 @@ func TestTrustedReleaseSelectedStagesReleaseClosesBothInReverseWithUncanceledCle
 	if diff := cmp.Diff(trustedReleaseArchiveDigest{}, selected.archiveDigest); diff != "" {
 		t.Errorf("released selected-stage archive digest mismatch (-want +got):\n%s", diff)
 	}
+	if diff := cmp.Diff(
+		trustedReleaseManifest{},
+		selected.manifest,
+		cmp.AllowUnexported(trustedReleaseManifest{}, releaseSlot{}, trustedReleaseExecutable{}),
+	); diff != "" {
+		t.Errorf("released selected-stage manifest mismatch (-want +got):\n%s", diff)
+	}
 	if diff := cmp.Diff(unix.Stat_t{}, selected.firecracker.identity); diff != "" {
 		t.Errorf("released Firecracker identity mismatch (-want +got):\n%s", diff)
 	}
@@ -529,6 +542,18 @@ func setTrustedReleaseSelectedArchiveBytesForTest(
 		case trustedReleaseArchiveJailer:
 			fixture.members[index].data = slices.Clone(jailer)
 		}
+	}
+}
+
+func assertEmptyTrustedReleaseManifest(t *testing.T, manifest trustedReleaseManifest) {
+	t.Helper()
+
+	if diff := cmp.Diff(
+		trustedReleaseManifest{},
+		manifest,
+		cmp.AllowUnexported(trustedReleaseManifest{}, releaseSlot{}, trustedReleaseExecutable{}),
+	); diff != "" {
+		t.Errorf("failed selected stages retained manifest authority (-want +got):\n%s", diff)
 	}
 }
 

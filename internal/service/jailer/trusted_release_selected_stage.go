@@ -30,6 +30,7 @@ type trustedReleaseSelectedExecutableStages struct {
 	firecracker   *trustedReleaseSelectedExecutableStage
 	jailer        *trustedReleaseSelectedExecutableStage
 	archiveDigest trustedReleaseArchiveDigest
+	manifest      trustedReleaseManifest
 	state         trustedReleaseSelectedStagesState
 }
 
@@ -312,6 +313,7 @@ func (stages *trustedReleaseSelectedExecutableStages) finalize(
 	if err := validateTrustedReleaseManifest(manifest); err != nil {
 		return trustedReleaseManifest{}, err
 	}
+	stages.manifest = manifest
 	stages.state = trustedReleaseSelectedStagesFinalized
 	return manifest, nil
 }
@@ -497,6 +499,7 @@ func (stages *trustedReleaseSelectedExecutableStages) Release(ctx context.Contex
 		stages.jailer.identity = unix.Stat_t{}
 	}
 	stages.archiveDigest = trustedReleaseArchiveDigest{}
+	stages.manifest = trustedReleaseManifest{}
 	stages.state = trustedReleaseSelectedStagesFailed
 	if err != nil {
 		return trustedReleaseStoreError("release trusted release selected executable stages", err)
