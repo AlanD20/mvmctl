@@ -9,9 +9,9 @@ agents. It governs delegation and integration; `AGENTS.md`, `CONTEXT.md`, accept
 1. Inspect the main worktree, branch, recent commits, active plan, dirty files, worktrees, and live agent handles.
    Completion criterion: every proposed assignment has a current dependency, an exclusive owner, and a concrete
    output that advances the active goal.
-2. Assign independent work only. Use one writer in a shared worktree or one isolated worktree per concurrent writer.
-   Read-only reviewers may inspect a stable commit while a writer owns later uncommitted changes. Completion criterion:
-   no two writers own overlapping files or the same effect boundary.
+2. Assign independent work only. Use one writer in a shared worktree or one persistent isolated worktree per concurrent
+   writer. Read-only reviewers may inspect a stable commit while a writer owns later uncommitted changes. Completion
+   criterion: no two writers own overlapping files or the same effect boundary.
 3. Give each agent a bounded work packet containing the worktree, fixed commit or scope, required project references,
    exact deliverable, prohibited side effects, verification gate, and stop condition. Completion criterion: the packet
    can be accepted or rejected from repository evidence without relying on the agent's narrative.
@@ -50,6 +50,17 @@ loop. Broad CI waits for a coherent integration checkpoint.
 
 Never rerun an unchanged failing command. Change the hypothesis, command, code, or environment first. A quota,
 missing generated asset, sandbox denial, or expired observation is evidence to classify, not a reason to spin.
+
+## Worktree durability
+
+Create agent worktrees under a persistent project-owned location such as ignored `dist/worktrees/`. Use `/tmp` only for
+disposable work that has no unique changes. A worktree commit is durable in the main repository object database;
+unstaged, staged, and untracked files are not.
+
+When inheriting a live `/tmp` worktree, preserve its unique state under ignored `dist/agent-snapshots/` before a long
+command or ownership handoff. Capture tracked and staged binary patches separately, archive every untracked file, and
+verify that the patches parse and the archives list the expected paths. Commit a coherent verified chunk promptly;
+snapshots are crash recovery, not integration evidence.
 
 ## Integration sign-off
 
