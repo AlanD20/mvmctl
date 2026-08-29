@@ -34,11 +34,8 @@ func (stage *trustedReleaseArchiveStage) receive(
 	declaredBytes uint64,
 	expectedDigest trustedReleaseArchiveDigest,
 ) error {
-	if stage == nil || stage.fd < 0 {
-		return trustedReleaseStoreError("trusted release archive stage is not active", nil)
-	}
-	if stage.state != trustedReleaseArchiveStageEmpty {
-		return trustedReleaseStoreError("trusted release archive stage is not empty", nil)
+	if err := stage.requireEmptyForReceive(); err != nil {
+		return err
 	}
 	if declaredBytes == 0 || declaredBytes > trustedReleaseArchiveMaxBytes {
 		return trustedReleaseStoreUntrusted("trusted release archive stream size is outside policy", nil)
@@ -101,6 +98,25 @@ func (stage *trustedReleaseArchiveStage) receive(
 	stage.archiveDigest = digest
 	stage.state = trustedReleaseArchiveStageReady
 	return nil
+}
+
+func (stage *trustedReleaseArchiveStage) requireEmptyForReceive() error {
+	if stage == nil || stage.fd < 0 {
+		return trustedReleaseStoreError("trusted release archive stage is not active", nil)
+	}
+	if stage.state != trustedReleaseArchiveStageEmpty {
+		return trustedReleaseStoreError("trusted release archive stage is not empty", nil)
+	}
+	return nil
+}
+
+func (stage *trustedReleaseArchiveStage) poisonReadyAfterReceive() {
+	if stage == nil || stage.state != trustedReleaseArchiveStageReady {
+		return
+	}
+	stage.state = trustedReleaseArchiveStageFailed
+	stage.sizeBytes = 0
+	stage.archiveDigest = trustedReleaseArchiveDigest{}
 }
 
 func (stage *trustedReleaseArchiveStage) writeAndHashArchive(
