@@ -22,6 +22,7 @@ const (
 
 	managedVMResourceDirectoryOpenFlags = unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	managedVMResourceFileOpenFlags      = unix.O_PATH | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	managedVMConfigOpenFlags            = unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	managedVMResourceResolveFlags       = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS |
 		unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
 	managedVMResourceStatxFlags = unix.AT_EMPTY_PATH | unix.AT_NO_AUTOMOUNT | unix.AT_SYMLINK_NOFOLLOW |
@@ -47,18 +48,18 @@ type vmLaunchResourceSpec struct {
 	vmID                vmResourceID
 	kernelID            kernelResourceID
 	expectedRootfsBytes uint64
-	cloudInit           cloudInitPresence
+	firecracker         vmFirecrackerLaunchIntent
 }
 
 type vmLaunchResourceLease struct {
-	deps          managedCacheDeps
-	cacheIdentity managedCacheIdentity
-	ownerUID      uint32
-	rootfsFD      int
-	configFD      int
-	kernelFD      int
-	cloudInitFD   int
-	retained      []int
+	deps           managedCacheDeps
+	cacheIdentity  managedCacheIdentity
+	ownerUID       uint32
+	rootfsFD       int
+	kernelFD       int
+	cloudInitFD    int
+	preparedConfig *preparedFirecrackerConfig
+	retained       []int
 }
 
 type managedVMRegularFilePolicy struct {
@@ -74,13 +75,13 @@ func newVMLaunchResourceSpec(
 	vmID string,
 	kernelID string,
 	expectedRootfsBytes uint64,
-	cloudInit cloudInitPresence,
+	firecracker vmFirecrackerLaunchIntent,
 ) (vmLaunchResourceSpec, error) {
 	spec := vmLaunchResourceSpec{
 		vmID:                vmResourceID(vmID),
 		kernelID:            kernelResourceID(kernelID),
 		expectedRootfsBytes: expectedRootfsBytes,
-		cloudInit:           cloudInit,
+		firecracker:         cloneVMFirecrackerLaunchIntent(firecracker),
 	}
 	if err := validateVMLaunchResourceSpec(spec); err != nil {
 		return vmLaunchResourceSpec{}, err
@@ -103,12 +104,7 @@ func validateVMLaunchResourceSpec(spec vmLaunchResourceSpec) error {
 		spec.expectedRootfsBytes > managedVMRootfsMaxBytes {
 		return managedVMResourceValidationError("managed VM rootfs size is outside the supported range")
 	}
-	switch spec.cloudInit {
-	case cloudInitAbsent, cloudInitPresent:
-		return nil
-	default:
-		return managedVMResourceValidationError("managed cloud-init presence is invalid")
-	}
+	return validateVMFirecrackerLaunchIntent(spec.firecracker)
 }
 
 func (cache *managedCacheLease) pinVMLaunchResources(
@@ -125,15 +121,39 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 		return nil, managedVMResourceAtomicError("pin managed VM launch resources", err)
 	}
 
-	opened := make([]int, 0, 7)
+	openedBeforeConfig := make([]int, 0, 3)
+	openedAfterConfig := make([]int, 0, 3)
+	configSourceFD := -1
+	var preparedConfig *preparedFirecrackerConfig
 	defer func() {
 		if returnErr == nil {
 			return
 		}
-		if closeErr := closeManagedCacheFDs(ctx, cache.deps, opened); closeErr != nil {
+		if preparedConfig != nil {
 			returnErr = appendManagedVMResourceCleanupError(
 				returnErr,
-				"close rejected managed VM launch resources",
+				"release rejected sealed Firecracker configuration",
+				preparedConfig.Release(context.WithoutCancel(ctx)),
+			)
+		}
+		if closeErr := closeManagedCacheFDs(ctx, cache.deps, openedAfterConfig); closeErr != nil {
+			returnErr = appendManagedVMResourceCleanupError(
+				returnErr,
+				"close rejected later managed VM launch resources",
+				closeErr,
+			)
+		}
+		if configSourceFD >= 0 {
+			returnErr = appendManagedVMResourceCleanupError(
+				returnErr,
+				"close rejected managed Firecracker configuration source",
+				cache.configDeps.close(context.WithoutCancel(ctx), configSourceFD),
+			)
+		}
+		if closeErr := closeManagedCacheFDs(ctx, cache.deps, openedBeforeConfig); closeErr != nil {
+			returnErr = appendManagedVMResourceCleanupError(
+				returnErr,
+				"close rejected earlier managed VM launch resources",
 				closeErr,
 			)
 		}
@@ -143,7 +163,7 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	if err != nil {
 		return nil, err
 	}
-	opened = append(opened, vmsFD)
+	openedBeforeConfig = append(openedBeforeConfig, vmsFD)
 	vmFD, err := openManagedVMResourceDirectory(
 		ctx,
 		cache.deps,
@@ -155,7 +175,7 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	if err != nil {
 		return nil, err
 	}
-	opened = append(opened, vmFD)
+	openedBeforeConfig = append(openedBeforeConfig, vmFD)
 
 	rootfsFD, err := openManagedVMResourceFile(
 		ctx,
@@ -174,12 +194,13 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	if err != nil {
 		return nil, err
 	}
-	opened = append(opened, rootfsFD)
-	configFD, err := openManagedVMResourceFile(
+	openedBeforeConfig = append(openedBeforeConfig, rootfsFD)
+	configFD, err := openManagedVMResourceFileWithFlags(
 		ctx,
 		cache.deps,
 		vmFD,
 		infra.VMFirecrackerConfigFilename,
+		managedVMConfigOpenFlags,
 		managedVMRegularFilePolicy{
 			name:              "Firecracker configuration",
 			minimumBytes:      managedVMConfigMinBytes,
@@ -191,10 +212,10 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	if err != nil {
 		return nil, err
 	}
-	opened = append(opened, configFD)
+	configSourceFD = configFD
 
 	cloudInitFD := -1
-	if spec.cloudInit == cloudInitPresent {
+	if spec.firecracker.cloudInit == cloudInitPresent {
 		cloudInitFD, err = openManagedVMResourceFile(
 			ctx,
 			cache.deps,
@@ -211,7 +232,7 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 		if err != nil {
 			return nil, err
 		}
-		opened = append(opened, cloudInitFD)
+		openedAfterConfig = append(openedAfterConfig, cloudInitFD)
 	}
 
 	kernelsFD, err := openManagedVMResourceDirectory(
@@ -225,7 +246,7 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	if err != nil {
 		return nil, err
 	}
-	opened = append(opened, kernelsFD)
+	openedAfterConfig = append(openedAfterConfig, kernelsFD)
 	kernelFD, err := openManagedVMResourceFile(
 		ctx,
 		cache.deps,
@@ -243,32 +264,49 @@ func (cache *managedCacheLease) pinVMLaunchResources(
 	if err != nil {
 		return nil, err
 	}
-	opened = append(opened, kernelFD)
+	openedAfterConfig = append(openedAfterConfig, kernelFD)
 
-	retained := make([]int, 0, len(cache.retained)+len(opened))
+	consumedConfigFD := configSourceFD
+	configSourceFD = -1
+	preparedConfig, err = prepareManagedFirecrackerConfig(
+		ctx,
+		cache.configDeps,
+		consumedConfigFD,
+		spec.firecracker,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	retained := make([]int, 0, len(cache.retained)+len(openedBeforeConfig)+len(openedAfterConfig))
 	retained = append(retained, cache.retained...)
-	retained = append(retained, opened...)
+	retained = append(retained, openedBeforeConfig...)
+	retained = append(retained, openedAfterConfig...)
 	lease := &vmLaunchResourceLease{
-		deps:          cache.deps,
-		cacheIdentity: cache.identity,
-		ownerUID:      cache.ownerUID,
-		rootfsFD:      rootfsFD,
-		configFD:      configFD,
-		kernelFD:      kernelFD,
-		cloudInitFD:   cloudInitFD,
-		retained:      retained,
+		deps:           cache.deps,
+		cacheIdentity:  cache.identity,
+		ownerUID:       cache.ownerUID,
+		rootfsFD:       rootfsFD,
+		kernelFD:       kernelFD,
+		cloudInitFD:    cloudInitFD,
+		preparedConfig: preparedConfig,
+		retained:       retained,
 	}
 	cache.retained = nil
 	cache.cacheFD = -1
 	cache.ownerUID = 0
 	cache.identity = managedCacheIdentity{}
-	opened = nil
+	cache.configDeps = managedFirecrackerConfigDeps{}
+	openedBeforeConfig = nil
+	openedAfterConfig = nil
+	preparedConfig = nil
 	return lease, nil
 }
 
 func validateActiveManagedCacheLease(cache *managedCacheLease) error {
 	if cache == nil || cache.cacheFD < 0 || cache.ownerUID == 0 || len(cache.retained) == 0 ||
-		cache.deps.openAt2 == nil || cache.deps.statx == nil || cache.deps.close == nil {
+		cache.deps.openAt2 == nil || cache.deps.statx == nil || cache.deps.close == nil ||
+		cache.configDeps.close == nil {
 		return managedVMResourceAtomicError("managed cache lease is not active", nil)
 	}
 	return nil
@@ -303,12 +341,32 @@ func openManagedVMResourceFile(
 	policy managedVMRegularFilePolicy,
 	ownerUID uint32,
 ) (int, error) {
-	fd, err := openManagedVMResourceComponent(
+	return openManagedVMResourceFileWithFlags(
 		ctx,
 		deps,
 		parentFD,
 		component,
 		managedVMResourceFileOpenFlags,
+		policy,
+		ownerUID,
+	)
+}
+
+func openManagedVMResourceFileWithFlags(
+	ctx context.Context,
+	deps managedCacheDeps,
+	parentFD int,
+	component string,
+	flags int,
+	policy managedVMRegularFilePolicy,
+	ownerUID uint32,
+) (int, error) {
+	fd, err := openManagedVMResourceComponent(
+		ctx,
+		deps,
+		parentFD,
+		component,
+		flags,
 		policy.name,
 	)
 	if err != nil {
@@ -447,19 +505,29 @@ func classifyManagedVMResourceOpenError(name string, cause error) error {
 }
 
 func (lease *vmLaunchResourceLease) Release(ctx context.Context) error {
-	if lease == nil || len(lease.retained) == 0 {
+	if lease == nil || (len(lease.retained) == 0 && lease.preparedConfig == nil) {
 		return nil
 	}
-	err := closeManagedCacheFDs(ctx, lease.deps, lease.retained)
+	var result error
+	if lease.preparedConfig != nil {
+		result = lease.preparedConfig.Release(context.WithoutCancel(ctx))
+	}
+	if closeErr := closeManagedCacheFDs(ctx, lease.deps, lease.retained); closeErr != nil {
+		result = appendManagedVMResourceCleanupError(
+			result,
+			"release managed VM launch resource descriptors",
+			closeErr,
+		)
+	}
 	lease.retained = nil
 	lease.cacheIdentity = managedCacheIdentity{}
 	lease.ownerUID = 0
 	lease.rootfsFD = -1
-	lease.configFD = -1
 	lease.kernelFD = -1
 	lease.cloudInitFD = -1
-	if err != nil {
-		return managedVMResourceCleanupError("release managed VM launch resource descriptors", err)
+	lease.preparedConfig = nil
+	if result != nil {
+		return result
 	}
 	return nil
 }
@@ -469,7 +537,7 @@ func appendManagedVMResourceCleanupError(primary error, message string, cause er
 		return primary
 	}
 	if primary == nil {
-		return cause
+		return managedVMResourceCleanupError(message, cause)
 	}
 	if domainErr := errs.AsDomainError(primary); domainErr != nil {
 		domainErr.Message += "; " + message + ": " + cause.Error()

@@ -60,11 +60,12 @@ type managedCacheDeps struct {
 }
 
 type managedCacheLease struct {
-	deps     managedCacheDeps
-	cacheFD  int
-	ownerUID uint32
-	identity managedCacheIdentity
-	retained []int
+	deps       managedCacheDeps
+	configDeps managedFirecrackerConfigDeps
+	cacheFD    int
+	ownerUID   uint32
+	identity   managedCacheIdentity
+	retained   []int
 }
 
 type managedCacheComponentRole uint8
@@ -183,11 +184,12 @@ func pinManagedCache(
 	}
 
 	lease := &managedCacheLease{
-		deps:     deps,
-		cacheFD:  parentFD,
-		ownerUID: caller.uid,
-		identity: identity,
-		retained: retained,
+		deps:       deps,
+		configDeps: realManagedFirecrackerConfigDeps(),
+		cacheFD:    parentFD,
+		ownerUID:   caller.uid,
+		identity:   identity,
+		retained:   retained,
 	}
 	retained = nil
 	return lease, nil
@@ -390,6 +392,7 @@ func (lease *managedCacheLease) Release(ctx context.Context) error {
 	lease.cacheFD = -1
 	lease.ownerUID = 0
 	lease.identity = managedCacheIdentity{}
+	lease.configDeps = managedFirecrackerConfigDeps{}
 	if err != nil {
 		return managedCacheCleanupError("release managed cache descriptors", err)
 	}

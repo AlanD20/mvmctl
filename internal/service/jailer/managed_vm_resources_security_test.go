@@ -1,6 +1,7 @@
 package jailer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -156,6 +157,20 @@ func TestPinVMLaunchResourcesRejectsUnsafeBaseResourceMetadata(t *testing.T) {
 			name: "configuration missing owner read",
 			mutate: func(t *testing.T, f managedVMLaunchResourceFixture) {
 				require.NoError(t, os.Chmod(f.configPath, 0200))
+				realOpenAt2 := f.cacheLease.deps.openAt2
+				f.cacheLease.deps.openAt2 = func(
+					ctx context.Context,
+					parentFD int,
+					name string,
+					how *unix.OpenHow,
+				) (int, error) {
+					if name == infra.VMFirecrackerConfigFilename {
+						probe := *how
+						probe.Flags = uint64(managedVMResourceFileOpenFlags)
+						return realOpenAt2(ctx, parentFD, name, &probe)
+					}
+					return realOpenAt2(ctx, parentFD, name, how)
+				}
 			},
 			wantMessage: "required owner access",
 		},
@@ -276,7 +291,23 @@ func TestPinVMLaunchResourcesRejectsUnsafeBaseResourceMetadata(t *testing.T) {
 			name:        "rootfs above hard maximum",
 			rootfsBytes: testManagedRootfsMaxBytes,
 			mutate: func(t *testing.T, f managedVMLaunchResourceFixture) {
-				require.NoError(t, os.Truncate(f.rootfsPath, int64(testManagedRootfsMaxBytes+1)))
+				rootfsInode := inodeForManagedCacheTestPath(t, f.rootfsPath)
+				realStatx := f.cacheLease.deps.statx
+				f.cacheLease.deps.statx = func(
+					ctx context.Context,
+					fd int,
+					flags int,
+					mask int,
+					stat *unix.Statx_t,
+				) error {
+					if err := realStatx(ctx, fd, flags, mask, stat); err != nil {
+						return err
+					}
+					if stat.Ino == rootfsInode {
+						stat.Size = testManagedRootfsMaxBytes + 1
+					}
+					return nil
+				}
 			},
 			wantMessage: "size is outside",
 		},
@@ -318,7 +349,7 @@ func TestPinVMLaunchResourcesAcceptsIndependentSizeBoundaries(t *testing.T) {
 		{
 			name:      "minimum sizes",
 			rootfs:    int64(testManagedRootfsMinBytes),
-			config:    1,
+			config:    0,
 			kernel:    1,
 			cloudInit: 1,
 		},
@@ -336,8 +367,36 @@ func TestPinVMLaunchResourcesAcceptsIndependentSizeBoundaries(t *testing.T) {
 			t.Parallel()
 
 			fixture := prepareManagedVMLaunchResourceFixture(t, cloudInitPresent)
-			require.NoError(t, os.Truncate(fixture.rootfsPath, tc.rootfs))
-			require.NoError(t, os.Truncate(fixture.configPath, tc.config))
+			if tc.rootfs == int64(testManagedRootfsMinBytes) {
+				require.NoError(t, os.Truncate(fixture.rootfsPath, tc.rootfs))
+			} else {
+				rootfsInode := inodeForManagedCacheTestPath(t, fixture.rootfsPath)
+				realStatx := fixture.cacheLease.deps.statx
+				fixture.cacheLease.deps.statx = func(
+					ctx context.Context,
+					fd int,
+					flags int,
+					mask int,
+					stat *unix.Statx_t,
+				) error {
+					if err := realStatx(ctx, fd, flags, mask, stat); err != nil {
+						return err
+					}
+					if stat.Ino == rootfsInode {
+						stat.Size = uint64(tc.rootfs)
+					}
+					return nil
+				}
+			}
+			config := mustMarshalManagedFirecrackerConfig(
+				t,
+				buildManagedFirecrackerConfig(testVMFirecrackerLaunchIntent(cloudInitPresent)),
+			)
+			if tc.config != 0 {
+				require.GreaterOrEqual(t, tc.config, int64(len(config)))
+				config = append(config, bytes.Repeat([]byte(" "), int(tc.config)-len(config))...)
+			}
+			require.NoError(t, os.WriteFile(fixture.configPath, config, 0600))
 			require.NoError(t, os.Truncate(fixture.kernelPath, tc.kernel))
 			require.NoError(t, os.Truncate(fixture.cloudInitPath, tc.cloudInit))
 			lease, err := fixture.cacheLease.pinVMLaunchResources(
@@ -482,7 +541,8 @@ func TestPinVMLaunchResourcesLeavesCacheLeaseReusableAfterRejection(t *testing.T
 	requireManagedVMResourceDomainErrorCode(t, err, errs.CodeValidationFailed)
 	assert.NotEmpty(t, fixture.cacheLease.retained)
 
-	require.NoError(t, os.WriteFile(fixture.configPath, []byte("{}"), 0600))
+	config := buildManagedFirecrackerConfig(testVMFirecrackerLaunchIntent(cloudInitAbsent))
+	require.NoError(t, os.WriteFile(fixture.configPath, mustMarshalManagedFirecrackerConfig(t, config), 0600))
 	lease, err = fixture.cacheLease.pinVMLaunchResources(context.Background(), spec)
 	registerManagedVMResourceLeaseCleanup(t, lease)
 	require.NoError(t, err)
@@ -530,12 +590,20 @@ func TestVMLaunchResourceLeaseReleasesEveryDescriptorInReverseWithoutCancellatio
 		}
 		return fd, err
 	}
-
 	cacheLease, err := pinManagedCache(context.Background(), deps, cache.policy, cache.caller, cache.locator)
 	require.NoError(t, err)
 	require.NotNil(t, cacheLease)
 	t.Cleanup(func() { require.NoError(t, cacheLease.Release(context.Background())) })
 	prepareManagedVMResourceOwnershipForTest(cacheLease, cache.caller.uid)
+	prepareManagedFirecrackerRootDepsForUnprivilegedTest(&cacheLease.configDeps)
+	realMemfdCreate := cacheLease.configDeps.memfdCreate
+	cacheLease.configDeps.memfdCreate = func(ctx context.Context, name string, flags int) (int, error) {
+		fd, createErr := realMemfdCreate(ctx, name, flags)
+		if createErr == nil {
+			opened = append(opened, fd)
+		}
+		return fd, createErr
+	}
 	lease, err := cacheLease.pinVMLaunchResources(
 		context.Background(),
 		mustManagedVMLaunchResourceSpec(t, cloudInitPresent, testManagedRootfsMinBytes),
@@ -551,14 +619,15 @@ func TestVMLaunchResourceLeaseReleasesEveryDescriptorInReverseWithoutCancellatio
 		closed = append(closed, fd)
 		return realClose(ctx, fd)
 	}
+	lease.preparedConfig.close = lease.deps.close
+	wantClosed := []int{lease.preparedConfig.fd}
+	for index := len(lease.retained) - 1; index >= 0; index-- {
+		wantClosed = append(wantClosed, lease.retained[index])
+	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
 	require.NoError(t, lease.Release(cancelled))
 
-	wantClosed := make([]int, len(opened))
-	for index := range opened {
-		wantClosed[index] = opened[len(opened)-1-index]
-	}
 	if diff := cmp.Diff(wantClosed, closed); diff != "" {
 		t.Errorf("managed VM resource close order mismatch (-want +got):\n%s", diff)
 	}
@@ -580,7 +649,8 @@ func TestVMLaunchResourceLeaseReportsCloseFailureAfterClosingAllDescriptors(t *t
 	require.NoError(t, err)
 	require.NotNil(t, lease)
 
-	failedFD := lease.configFD
+	require.NotNil(t, lease.preparedConfig)
+	failedFD := lease.preparedConfig.fd
 	realClose := lease.deps.close
 	var closeCalls int
 	lease.deps.close = func(ctx context.Context, fd int) error {
@@ -591,7 +661,8 @@ func TestVMLaunchResourceLeaseReportsCloseFailureAfterClosingAllDescriptors(t *t
 		}
 		return closeErr
 	}
-	wantCloseCalls := len(lease.retained)
+	lease.preparedConfig.close = lease.deps.close
+	wantCloseCalls := len(lease.retained) + 1
 	err = lease.Release(context.Background())
 	require.Error(t, err)
 	domainErr := errs.AsDomainError(err)
@@ -747,7 +818,6 @@ func TestPinVMLaunchResourcesResistsContinuousSymlinkReplacementAtEveryFixedLeve
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := prepareManagedVMLaunchResourceFixture(t, cloudInitPresent)
 			rootfsInode := inodeForManagedCacheTestPath(t, fixture.rootfsPath)
-			configInode := inodeForManagedCacheTestPath(t, fixture.configPath)
 			kernelInode := inodeForManagedCacheTestPath(t, fixture.kernelPath)
 			cloudInitInode := inodeForManagedCacheTestPath(t, fixture.cloudInitPath)
 
@@ -816,7 +886,10 @@ func TestPinVMLaunchResourcesResistsContinuousSymlinkReplacementAtEveryFixedLeve
 				}
 				require.NotNil(t, lease)
 				assertManagedDescriptorInode(t, lease.rootfsFD, rootfsInode)
-				assertManagedDescriptorInode(t, lease.configFD, configInode)
+				require.NotNil(t, lease.preparedConfig)
+				var configStat unix.Stat_t
+				require.NoError(t, unix.Fstat(lease.preparedConfig.fd, &configStat))
+				assert.Zero(t, configStat.Nlink)
 				assertManagedDescriptorInode(t, lease.kernelFD, kernelInode)
 				assertManagedDescriptorInode(t, lease.cloudInitFD, cloudInitInode)
 				require.NoError(t, lease.Release(context.Background()))
@@ -844,7 +917,8 @@ func prepareManagedVMResourceRaceAttacker(t *testing.T, path string, kind manage
 		require.NoError(t, os.WriteFile(path, nil, 0600))
 		require.NoError(t, os.Truncate(path, int64(testManagedRootfsMinBytes)))
 	case managedVMRaceConfig:
-		require.NoError(t, os.WriteFile(path, []byte("{}"), 0600))
+		config := buildManagedFirecrackerConfig(testVMFirecrackerLaunchIntent(cloudInitPresent))
+		require.NoError(t, os.WriteFile(path, mustMarshalManagedFirecrackerConfig(t, config), 0600))
 	case managedVMRaceCloudInit:
 		require.NoError(t, os.WriteFile(path, []byte("iso"), 0600))
 	case managedVMRaceKernelStore:
@@ -864,7 +938,12 @@ func prepareManagedVMResourceRaceAttackerVMDirectory(t *testing.T, path string) 
 	rootfs := filepath.Join(path, infra.VMRootfsFilename)
 	require.NoError(t, os.WriteFile(rootfs, nil, 0600))
 	require.NoError(t, os.Truncate(rootfs, int64(testManagedRootfsMinBytes)))
-	require.NoError(t, os.WriteFile(filepath.Join(path, infra.VMFirecrackerConfigFilename), []byte("{}"), 0600))
+	config := buildManagedFirecrackerConfig(testVMFirecrackerLaunchIntent(cloudInitPresent))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(path, infra.VMFirecrackerConfigFilename),
+		mustMarshalManagedFirecrackerConfig(t, config),
+		0600,
+	))
 	require.NoError(t, os.WriteFile(filepath.Join(path, infra.VMCloudInitISOFilename), []byte("iso"), 0600))
 }
 
@@ -892,7 +971,12 @@ func mustManagedVMLaunchResourceSpec(
 ) vmLaunchResourceSpec {
 	t.Helper()
 
-	spec, err := newVMLaunchResourceSpec(testManagedVMID, testManagedKernelID, rootfsBytes, cloudInit)
+	spec, err := newVMLaunchResourceSpec(
+		testManagedVMID,
+		testManagedKernelID,
+		rootfsBytes,
+		testVMFirecrackerLaunchIntent(cloudInit),
+	)
 	require.NoError(t, err)
 	return spec
 }

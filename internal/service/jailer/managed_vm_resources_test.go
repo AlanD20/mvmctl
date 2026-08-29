@@ -45,7 +45,7 @@ func TestNewVMLaunchResourceSpecAcceptsClosedBaseSelection(t *testing.T) {
 				testManagedVMID,
 				testManagedKernelID,
 				tc.rootfs,
-				tc.cloudInit,
+				testVMFirecrackerLaunchIntent(tc.cloudInit),
 			)
 			require.NoError(t, err)
 
@@ -53,13 +53,41 @@ func TestNewVMLaunchResourceSpecAcceptsClosedBaseSelection(t *testing.T) {
 				vmID:                vmResourceID(testManagedVMID),
 				kernelID:            kernelResourceID(testManagedKernelID),
 				expectedRootfsBytes: tc.rootfs,
-				cloudInit:           tc.cloudInit,
+				firecracker:         testVMFirecrackerLaunchIntent(tc.cloudInit),
 			}
-			if diff := cmp.Diff(want, got, cmp.AllowUnexported(vmLaunchResourceSpec{})); diff != "" {
+			if diff := cmp.Diff(
+				want,
+				got,
+				cmp.AllowUnexported(
+					vmLaunchResourceSpec{},
+					vmFirecrackerLaunchIntent{},
+					vmFirecrackerTapIdentity{},
+				),
+			); diff != "" {
 				t.Errorf("newVMLaunchResourceSpec() mismatch (-want +got):\n%s", diff)
 			}
 		})
 	}
+}
+
+func TestNewVMLaunchResourceSpecOwnsMutableIntentValues(t *testing.T) {
+	t.Parallel()
+
+	intent := testVMFirecrackerLaunchIntent(cloudInitAbsent)
+	originalCID := *intent.vsockCID
+	originalCapability := intent.cpuConfig.KvmCapabilities[0]
+	spec, err := newVMLaunchResourceSpec(
+		testManagedVMID,
+		testManagedKernelID,
+		testManagedRootfsMinBytes,
+		intent,
+	)
+	require.NoError(t, err)
+
+	*intent.vsockCID++
+	intent.cpuConfig.KvmCapabilities[0] = "forged"
+	assert.Equal(t, originalCID, *spec.firecracker.vsockCID)
+	assert.Equal(t, originalCapability, spec.firecracker.cpuConfig.KvmCapabilities[0])
 }
 
 func TestNewVMLaunchResourceSpecRejectsInvalidSelection(t *testing.T) {
@@ -151,7 +179,12 @@ func TestNewVMLaunchResourceSpecRejectsInvalidSelection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := newVMLaunchResourceSpec(tc.vmID, tc.kernelID, tc.rootfs, tc.cloudInit)
+			_, err := newVMLaunchResourceSpec(
+				tc.vmID,
+				tc.kernelID,
+				tc.rootfs,
+				testVMFirecrackerLaunchIntent(tc.cloudInit),
+			)
 			require.Error(t, err)
 			domainErr := errs.AsDomainError(err)
 			require.NotNil(t, domainErr)
@@ -170,13 +203,13 @@ func TestValidateVMLaunchResourceSpecRejectsForgedValues(t *testing.T) {
 			vmID:                vmResourceID(strings.Repeat("g", 32)),
 			kernelID:            kernelResourceID(testManagedKernelID),
 			expectedRootfsBytes: testManagedRootfsMinBytes,
-			cloudInit:           cloudInitAbsent,
+			firecracker:         testVMFirecrackerLaunchIntent(cloudInitAbsent),
 		},
 		"forged kernel ID": {
 			vmID:                vmResourceID(testManagedVMID),
 			kernelID:            kernelResourceID(strings.Repeat("g", 64)),
 			expectedRootfsBytes: testManagedRootfsMinBytes,
-			cloudInit:           cloudInitAbsent,
+			firecracker:         testVMFirecrackerLaunchIntent(cloudInitAbsent),
 		},
 	}
 
@@ -246,12 +279,23 @@ func TestPinVMLaunchResourcesPinsFixedBaseLeaves(t *testing.T) {
 				observedStats = append(observedStats, observedStatx{Flags: flags, Mask: mask})
 				return realStatx(ctx, fd, flags, mask, stat)
 			}
+			realConfigStatx := fixture.cacheLease.configDeps.statx
+			fixture.cacheLease.configDeps.statx = func(
+				ctx context.Context,
+				fd int,
+				flags int,
+				mask int,
+				stat *unix.Statx_t,
+			) error {
+				observedStats = append(observedStats, observedStatx{Flags: flags, Mask: mask})
+				return realConfigStatx(ctx, fd, flags, mask, stat)
+			}
 
 			spec, err := newVMLaunchResourceSpec(
 				testManagedVMID,
 				testManagedKernelID,
 				testManagedRootfsMinBytes,
-				tc.cloudInit,
+				testVMFirecrackerLaunchIntent(tc.cloudInit),
 			)
 			require.NoError(t, err)
 			lease, err := fixture.cacheLease.pinVMLaunchResources(context.Background(), spec)
@@ -272,7 +316,11 @@ func TestPinVMLaunchResourcesPinsFixedBaseLeaves(t *testing.T) {
 				{Name: "vms", Flags: directoryFlags, Resolve: resolveFlags},
 				{Name: testManagedVMID, Flags: directoryFlags, Resolve: resolveFlags},
 				{Name: infra.VMRootfsFilename, Flags: fileFlags, Resolve: resolveFlags},
-				{Name: infra.VMFirecrackerConfigFilename, Flags: fileFlags, Resolve: resolveFlags},
+				{
+					Name:    infra.VMFirecrackerConfigFilename,
+					Flags:   uint64(managedVMConfigOpenFlags),
+					Resolve: resolveFlags,
+				},
 			}
 			if tc.cloudInit == cloudInitPresent {
 				wantObserved = append(wantObserved, observedOpen{
@@ -293,7 +341,7 @@ func TestPinVMLaunchResourcesPinsFixedBaseLeaves(t *testing.T) {
 				assert.Equal(t, unix.STATX_BASIC_STATS, observedStat.Mask)
 				assert.Zero(t, observedStat.Flags&unix.AT_STATX_DONT_SYNC)
 			}
-			assert.Len(t, observedStats, len(wantObserved))
+			assert.Len(t, observedStats, len(wantObserved)+2)
 
 			assert.Equal(t, fixture.cache.caller.uid, lease.ownerUID)
 			if diff := cmp.Diff(
@@ -304,7 +352,10 @@ func TestPinVMLaunchResourcesPinsFixedBaseLeaves(t *testing.T) {
 				t.Errorf("managed cache identity transfer mismatch (-want +got):\n%s", diff)
 			}
 			assertManagedDescriptorMatchesPath(t, lease.rootfsFD, fixture.rootfsPath)
-			assertManagedDescriptorMatchesPath(t, lease.configFD, fixture.configPath)
+			require.NotNil(t, lease.preparedConfig)
+			var preparedStat unix.Stat_t
+			require.NoError(t, unix.Fstat(lease.preparedConfig.fd, &preparedStat))
+			assert.Zero(t, preparedStat.Nlink)
 			assertManagedDescriptorMatchesPath(t, lease.kernelFD, fixture.kernelPath)
 			if tc.cloudInit == cloudInitPresent {
 				assertManagedDescriptorMatchesPath(t, lease.cloudInitFD, fixture.cloudInitPath)
@@ -355,6 +406,7 @@ func prepareManagedVMLaunchResourceFixture(
 	require.NotNil(t, cacheLease)
 	t.Cleanup(func() { require.NoError(t, cacheLease.Release(context.Background())) })
 	prepareManagedVMResourceOwnershipForTest(cacheLease, cache.caller.uid)
+	prepareManagedFirecrackerRootDepsForUnprivilegedTest(&cacheLease.configDeps)
 	fixture.cacheLease = cacheLease
 	return fixture
 }
@@ -375,7 +427,8 @@ func createManagedVMLaunchResourceFiles(
 	require.NoError(t, os.WriteFile(rootfsPath, nil, 0600))
 	require.NoError(t, os.Truncate(rootfsPath, int64(testManagedRootfsMinBytes)))
 	configPath := filepath.Join(vmDir, infra.VMFirecrackerConfigFilename)
-	require.NoError(t, os.WriteFile(configPath, []byte("{}"), 0600))
+	config := buildManagedFirecrackerConfig(testVMFirecrackerLaunchIntent(cloudInit))
+	require.NoError(t, os.WriteFile(configPath, mustMarshalManagedFirecrackerConfig(t, config), 0600))
 	kernelPath := filepath.Join(kernelDir, testManagedKernelID)
 	require.NoError(t, os.WriteFile(kernelPath, []byte("kernel"), 0700))
 	cloudInitPath := filepath.Join(vmDir, infra.VMCloudInitISOFilename)
