@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 > **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
-> and trusted-release authorities, managed-cache pinning, and base launch-resource pinning substrates described below
-> are implemented. The mandatory per-VM network
+> and trusted-release authorities, managed-cache pinning, base launch-resource pinning, and typed traffic/exec policy
+> persistence foundations described below are implemented. The mandatory per-VM network
 > namespace, nftables-only `traffic` policy, exact VM-to-VM `exec` policy, final marker-only sudo policy, and remaining
 > typed privileged operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Routed service-access policies
 - `mvm policy` now persists exact network-to-VM TCP/UDP allows while both firewall backends default-deny other managed cross-network and VM-to-host traffic without blocking NoCloud, established replies, or internet egress.
+
+#### Typed traffic and execution policy foundations
+- Added separate SQLite allow-intent models and repositories for source-network traffic, exact source-VM traffic, and
+  directional exact-user VM-to-VM execution grants. Schema constraints bind immutable identities, TCP/UDP port ranges,
+  non-root target users, duplicate rejection, and foreign-key cleanup.
+- VM invalidation removes both typed traffic families in one transaction, and execution authorization failures use a
+  dedicated structured error code. These foundations are not yet exposed through the final public policy commands or
+  connected to nftables/vsock enforcement; the transitional routed policy remains active until that atomic cutover.
 
 #### Root-owned single-binary installation
 - Added the exact administrator bootstrap command `sudo <trusted-mvm-binary> host install-system`, which installs the
@@ -316,8 +324,9 @@ The following items are release blockers and are intentionally not described abo
 - Remove the iptables backend, backend selector, and production `nft` CLI subprocess/parser. Apply one atomic generation
   directly through a reviewed, pinned `github.com/google/nftables` version that default-denies both same-network and
   cross-network VM traffic while preserving required system traffic and internet egress.
-- Replace routed `ServiceAccessPolicy` with typed `traffic` policies and remove the `allow_remote_exec` trust mesh in
-  favor of exact directional, non-root, resource-bounded VM-to-VM `exec` policies.
+- Complete the public API, CLI, nftables compiler, and vsock relay cutover from routed `ServiceAccessPolicy` and the
+  `allow_remote_exec` trust mesh to the implemented typed traffic/exec persistence foundations; then remove the
+  transitional tables, flags, and paths atomically.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the
   root-owned system binary.
 - Separate administrator host state from invoking-user initialization, replace the generic `HostInit` result with a

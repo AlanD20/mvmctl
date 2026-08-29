@@ -487,6 +487,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Owner:** engineer
 **Dependencies:** Task 10
 
+- [x] Add the typed SQLite allow-intent foundation for source-network and exact-source-VM grants, including immutable
+  identity fields, TCP/UDP and port-range constraints, foreign-key cascades, duplicate rejection, and one atomic
+  cross-table VM invalidation transaction. This foundation is not yet a public or enforced policy path.
 - [ ] Remove `ServiceAccessPolicy`, routed-only CLI/API/schema/compiler, and same-network rejection.
 - [ ] Add separate typed source-network and source-VM traffic input/resolution methods under `mvm policy traffic`.
 - [ ] Persist immutable source/destination identities, TCP/UDP, and exact port/range only.
@@ -500,6 +503,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Owner:** engineer
 **Dependencies:** Tasks 4, 8, and 9
 
+- [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
+  authorization lookup, duplicate/foreign-key constraints, and a dedicated authorization failure code. Relay
+  authentication, public inputs, and enforcement are not wired yet.
 - [ ] Remove `allow_remote_exec` from schema, model, config, CLI, environment specs, results, tests, and docs.
 - [ ] Add directional exact source-VM -> target-VM -> non-root-user `mvm policy exec` intent.
 - [ ] Refactor the relay so it no longer imports multiple core domains; API resolves shared identities.

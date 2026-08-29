@@ -40,11 +40,15 @@ continue without silently deleting it.
   transfer, and checked reverse cleanup.
   The locator and base selection are not yet carried by a privileged action, cache identity is not bound into the
   instance record, and the root-side leases are not consumed by launch.
+- Typed SQLite allow-intent foundations for source-network and exact-source-VM traffic grants plus directional,
+  exact-user VM-to-VM execution grants. Their repositories enforce exact identities, foreign keys, duplicate
+  constraints, and atomic cross-table VM invalidation. Public inputs, enforcement compilation, relay authorization,
+  and the clean-break removal of the transitional policy path remain pending.
 - ADR-0016 for the single-binary privilege boundary.
 
-The action switch is intentionally still empty and the sudoers policy remains transitional. The routed policy, dual
-firewall backends, host-global TAP topology, public `mvm run jailer` / `mvm run provision` services, and
-`allow_remote_exec` trust mesh must not survive the final release.
+Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
+remains transitional. The routed policy, dual firewall backends, host-global TAP topology, public `mvm run jailer` /
+`mvm run provision` services, and `allow_remote_exec` trust mesh must not survive the final release.
 
 ## Approved Architecture
 
