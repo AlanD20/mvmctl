@@ -6,26 +6,40 @@ import (
 	"log/slog"
 	"os"
 
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
 type runtimeDeps struct {
-	identity      identityDeps
-	environment   environmentDeps
-	executable    executableDeps
-	authorization authorizationDeps
-	control       controlDeps
+	identity       identityDeps
+	environment    environmentDeps
+	executable     executableDeps
+	authorization  authorizationDeps
+	control        controlDeps
+	trustedRelease trustedReleaseHandlerEffects
 }
+
+type dispatchDisposition uint8
+
+const (
+	dispatchUnhandled dispatchDisposition = iota
+	dispatchHandled
+)
 
 // Run validates and routes one privileged protocol invocation.
 // CRITICAL: This entry point accepts only the reserved versioned marker and fixed action switch.
 func Run(ctx context.Context, args []string) error {
+	trustedRelease := jailer.NewTrustedReleaseServer()
 	return run(ctx, args, newStdinControlEndpoint(os.Stdin), runtimeDeps{
 		identity:      realIdentityDeps(),
 		environment:   realEnvironmentDeps(),
 		executable:    realExecutableDeps(),
 		authorization: realAuthorizationDeps(),
 		control:       realControlDeps(),
+		trustedRelease: trustedReleaseHandlerEffects{
+			install: trustedRelease.Install,
+			remove:  trustedRelease.Remove,
+		},
 	})
 }
 
@@ -66,18 +80,26 @@ func run(ctx context.Context, args []string, endpoint controlEndpoint, deps runt
 	if err := authorizeCaller(caller, deps.authorization); err != nil {
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
-	if err := dispatch(ctx, request, caller); err != nil {
+	disposition, err := dispatch(ctx, request, endpoint, deps)
+	if err != nil && disposition == dispatchUnhandled {
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
-	return nil
+	return err
 }
 
-func dispatch(_ context.Context, request invocation, _ callerIdentity) error {
-	// The action switch intentionally starts empty. Capability-specific typed
-	// handlers are added only as their migrations land and receive abuse tests.
+func dispatch(
+	ctx context.Context,
+	request invocation,
+	endpoint controlEndpoint,
+	deps runtimeDeps,
+) (dispatchDisposition, error) {
 	switch request.action {
+	case jailer.TrustedReleaseInstallAction:
+		return dispatchHandled, handleTrustedReleaseInstall(ctx, endpoint, deps.trustedRelease, deps.control)
+	case jailer.TrustedReleaseRemoveAction:
+		return dispatchHandled, handleTrustedReleaseRemove(ctx, endpoint, deps.trustedRelease, deps.control)
 	default:
-		return errs.New(
+		return dispatchUnhandled, errs.New(
 			errs.CodeValidationFailed,
 			fmt.Sprintf("unknown privileged action %q", request.action),
 		)
