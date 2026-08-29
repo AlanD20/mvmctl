@@ -78,6 +78,9 @@ func TestMigration004FromValidV3Schema(t *testing.T) {
 	}
 	for _, index := range []string{
 		"idx_service_access_policies_source", "idx_service_access_policies_destination_vm",
+		"idx_network_traffic_source", "idx_network_traffic_destination",
+		"idx_vm_traffic_source", "idx_vm_traffic_destination",
+		"idx_exec_policy_source", "idx_exec_policy_destination",
 		"idx_iptables_rules_policy", "idx_iptables_rules_unique_active",
 		"idx_nftables_rules_policy", "idx_nftables_rules_unique_active",
 	} {
@@ -91,4 +94,72 @@ func TestMigration004FromValidV3Schema(t *testing.T) {
 		(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
 		VALUES ('bad','source','missing','icmp',0,65536)`)
 	require.Error(t, err, "protocol, port, and foreign-key constraints must reject invalid intent")
+}
+
+func TestMigration004TypedPolicyConstraints(t *testing.T) {
+	ctx := t.Context()
+	handle := migratePolicyFixtureToV3(t)
+	database := handle.DB()
+	_, err := database.ExecContext(ctx, `
+		INSERT INTO networks
+			(id,name,subnet,bridge,ipv4_gateway,bridge_active,nat_enabled,is_default,is_present)
+		VALUES ('net-a','net-a','10.1.0.0/24','mvm-a','10.1.0.1',1,1,0,1);
+		INSERT INTO images
+			(id,type,version,name,arch,path,fs_type,original_size,minimum_rootfs_size_mib,pulled_at,is_present)
+		VALUES ('image','alpine','1','image','x86_64','/image','ext4',1,1,CURRENT_TIMESTAMP,1);
+		INSERT INTO kernels (id,name,base_name,version,arch,type,path,is_present)
+		VALUES ('kernel','kernel','kernel','1','x86_64','firecracker','/kernel',1);
+		INSERT INTO binaries (id,type,version,full_version,path,is_present)
+		VALUES ('firecracker','firecracker','1','1','/firecracker',1);
+		INSERT INTO vm_instances
+			(id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,
+			 api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,
+			 rootfs_path,rootfs_suffix,pci_enabled,nested_virt,remote_exec,lsm_flags,
+			 enable_logging,enable_metrics,enable_console,boot_args)
+		VALUES
+			('vm-a','vm-a','stopped',0,'10.1.0.2','02:00:00:00:00:01','net-a','tap-a',
+			 'image','kernel','firecracker','/api-a','/config-a','inject',1,128,64,'/root-a','',
+			 0,0,0,'',0,0,0,''),
+			('vm-b','vm-b','stopped',0,'10.1.0.3','02:00:00:00:00:02','net-a','tap-b',
+			 'image','kernel','firecracker','/api-b','/config-b','inject',1,128,64,'/root-b','',
+			 0,0,0,'',0,0,0,'');
+	`)
+	require.NoError(t, err)
+	_, err = handle.RunMigrationsCtx(ctx)
+	require.NoError(t, err)
+
+	tests := map[string]string{
+		"network source missing": `INSERT INTO network_traffic_policies
+			(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('p','missing','vm-b','tcp',443,443)`,
+		"network protocol invalid": `INSERT INTO network_traffic_policies
+			(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('p','net-a','vm-b','icmp',443,443)`,
+		"network port invalid": `INSERT INTO network_traffic_policies
+			(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('p','net-a','vm-b','tcp',5000,4999)`,
+		"VM self grant": `INSERT INTO vm_traffic_policies
+			(id,source_vm_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('p','vm-a','vm-a','tcp',443,443)`,
+		"VM destination missing": `INSERT INTO vm_traffic_policies
+			(id,source_vm_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('p','vm-a','missing','tcp',443,443)`,
+		"exec self grant": `INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('p','vm-a','vm-a','app')`,
+		"exec root user": `INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('p','vm-a','vm-b','root')`,
+		"exec empty user": `INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('p','vm-a','vm-b','')`,
+		"exec user too long": `INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user)
+			VALUES ('p','vm-a','vm-b','this-user-name-is-longer-than-32-characters')`,
+		"exec source missing": `INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('p','missing','vm-b','app')`,
+	}
+	for name, statement := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := database.ExecContext(ctx, statement)
+			assert.Error(t, err)
+		})
+	}
 }

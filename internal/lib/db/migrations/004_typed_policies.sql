@@ -1,8 +1,28 @@
 -- Migration: 004_typed_policies
 -- Version: 4
--- Description: Closed traffic and VM-to-VM execution policy intent
+-- Description: Closed traffic and VM-to-VM execution allow intent
 
 PRAGMA foreign_keys = OFF;
+
+-- Transitional internal dependency: the currently wired v0.3 development
+-- path keeps using this table until its API, compiler, and firewall consumers
+-- move atomically to the typed tables below. This is not a release migration
+-- or a compatibility promise for pre-v0.3 installations.
+CREATE TABLE service_access_policies (
+    id TEXT PRIMARY KEY,
+    source_network_id TEXT NOT NULL,
+    destination_vm_id TEXT NOT NULL,
+    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
+    destination_port_start INTEGER NOT NULL CHECK(destination_port_start BETWEEN 1 AND 65535),
+    destination_port_end INTEGER NOT NULL CHECK(destination_port_end BETWEEN destination_port_start AND 65535),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    FOREIGN KEY (source_network_id) REFERENCES networks(id) ON DELETE CASCADE,
+    FOREIGN KEY (destination_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    UNIQUE(source_network_id, destination_vm_id, protocol, destination_port_start, destination_port_end)
+);
+CREATE INDEX idx_service_access_policies_source ON service_access_policies(source_network_id);
+CREATE INDEX idx_service_access_policies_destination_vm ON service_access_policies(destination_vm_id);
 
 CREATE TABLE network_traffic_policies (
     id TEXT PRIMARY KEY,
@@ -77,7 +97,8 @@ CREATE TABLE iptables_rules (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     last_verified_at TIMESTAMP NULL,
     is_active INTEGER DEFAULT 1 NOT NULL CHECK(is_active IN (0, 1)),
-    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
+    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE,
+    FOREIGN KEY (service_access_policy_id) REFERENCES service_access_policies(id) ON DELETE CASCADE
 );
 INSERT INTO iptables_rules (
     id, table_name, chain_name, rule_type, protocol, source, destination, in_interface,
@@ -125,7 +146,8 @@ CREATE TABLE nftables_rules (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     last_verified_at TIMESTAMP NULL,
     is_active INTEGER DEFAULT 1 NOT NULL CHECK(is_active IN (0, 1)),
-    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
+    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE,
+    FOREIGN KEY (service_access_policy_id) REFERENCES service_access_policies(id) ON DELETE CASCADE
 );
 INSERT INTO nftables_rules (
     id, chain, rule_type, table_name, protocol, source, destination, in_interface,
