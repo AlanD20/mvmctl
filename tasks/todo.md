@@ -56,8 +56,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 ### Task 3: Complete the early privileged protocol foundation
 
 **Owner:** engineer
-**Status:** Codec and caller process transport implemented; receiver foundation, capability clients, and action catalog
-pending later tasks
+**Status:** Codec, caller process transport, and fd-0 receiver admission implemented; release handlers, capability
+clients, and action catalog pending later tasks
 **Dependencies:** Task 1
 
 - [x] Reserved marker selected before Cobra and application initialization.
@@ -344,10 +344,16 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   delivery may use `context.WithoutCancel` only with the absolute deadline established before cancellation was detached.
   These limits are non-configurable security policy. Neither substep reopens resolved caller upload/response-EOF/reap
   behavior.
-  - [ ] 5a. Admit fd 0 as `AF_UNIX`/`SOCK_STREAM`, set and verify `CLOEXEC`, authenticate `SO_PEERCRED` against the sudo
-    caller, return bounded early framed errors for a matching version-1 action, and half-close the response write side.
-    Remove the obsolete standalone EOF-delimited JSON decoder. Fault-test descriptor identity/type, CLOEXEC ordering,
-    peer mismatch, early rejection without request draining, response deadline/write/half-close, and cleanup.
+  - [x] 5a. The production entry owns fd 0 directly. Admit it only as a blocking `AF_UNIX`/`SOCK_STREAM`, set and verify
+    `CLOEXEC` and require a positive peer PID from `SO_PEERCRED`. Match its UID/GID to the sudo caller and enforce the
+    same exact action grammar in caller and receiver. Only structurally admitted channels receive bounded early framed
+    errors. Complete the frame before `SHUT_WR`; do not drain a rejected closed action. Use raw
+    `SendmsgN(MSG_DONTWAIT|MSG_NOSIGNAL)` with bounded
+    absolute-deadline `POLLOUT` waits so a duplicate descriptor's later status-flag mutation cannot bypass the response
+    deadline. Remove the obsolete standalone EOF-delimited JSON decoder. L1 faults and real socketpair tests cover
+    descriptor identity/type/status, CLOEXEC ordering, peer mismatch, early rejection, deadline/write/half-close,
+    process-independent EOF, status mutation, cancellation, and cleanup. Independent audit findings were corrected
+    before commit.
   - [ ] 5b. Add unregistered closed install/remove request and result values plus directly tested typed handlers.
     Enforce exact action matching and the fixed header deadline. Install alone accepts zero or one declared bounded
     payload and requires its exact EOF under the five-minute payload deadline; remove rejects payload and requires EOF

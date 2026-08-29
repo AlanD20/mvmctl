@@ -95,7 +95,8 @@ standard error are never parsed as authority. VM console input/output must use a
 implementation; it cannot reuse the control channel. Using descriptor 0 avoids sudo policy for inherited descriptors,
 while the socketpair permits the client to upload a bounded release archive and receive an early rejection concurrently.
 Root requires descriptor 0 to be an `AF_UNIX` `SOCK_STREAM` socket and requires its Linux `SO_PEERCRED` UID/GID to match
-the authenticated sudo caller. The peer PID is positive and audit-only; it is not an authorization identity.
+the authenticated sudo caller. The peer PID is positive and audit-only; it is not an authorization identity. The
+production receiver owns `os.Stdin` directly and accepts no alternate reader or descriptor from its entry point.
 
 The transport always executes exactly
 `/usr/bin/sudo -n -- /usr/local/bin/mvm __mvm_privileged_v1 <fixed-action>`. It never uses `PATH`, `os.Executable`, the
@@ -108,14 +109,16 @@ or the existing `FakeRunner`.
 
 Each request starts with fixed `MVMREQ01` magic, a network-order 32-bit JSON-header length, and a network-order 64-bit
 payload length. The strict header is at most 64 KiB and contains schema version 1, the action repeated from argv, and the
-action-specific body. The repeated action must match. Only release install may carry a payload: either zero bytes or an
-exact stream of at most 128 MiB. The caller half-closes its write side after the declared bytes, and root requires EOF so
-truncation or trailing bytes fail closed before any payload-dependent effect. Zero-payload operations likewise require
-EOF before effects. Authentication, framing, and header failures may return an early error without draining an advertised
-payload; the concurrent client treats the resulting uploader `EPIPE` as expected once it has a valid response. The
-request-header read deadline is a fixed five seconds, and the release-install archive-payload read deadline is a fixed
-five minutes. Each uses the earlier current context deadline when one exists. These are non-configurable security
-policy; the receiver reads no second request and does not accept a caller-selected timeout.
+action-specific body. The action is 1 through 64 ASCII bytes, starts with an ASCII alphanumeric byte, and thereafter
+contains only ASCII alphanumeric bytes, `.`, `_`, or `-`; the caller and receiver enforce the same grammar. The repeated
+action must match. Only release install may carry a payload: either zero bytes or an exact stream of at most 128 MiB.
+The caller half-closes its write side after the declared bytes, and root requires EOF so truncation or trailing bytes
+fail closed before any payload-dependent effect. Zero-payload operations likewise require EOF before effects.
+Authentication, framing, and header failures may return an early error without draining an advertised payload; the
+concurrent client treats the resulting uploader `EPIPE` as expected once it has a valid response. The request-header
+read deadline is a fixed five seconds, and the release-install archive-payload read deadline is a fixed five minutes.
+Each uses the earlier current context deadline when one exists. These are non-configurable security policy; the
+receiver reads no second request and does not accept a caller-selected timeout.
 
 Each response starts with fixed `MVMRES01` magic and a network-order 32-bit JSON length followed by at most 64 KiB of
 strict schema-version-1 JSON. It contains the matching action, a closed `success` or `error` status, and exactly one typed
@@ -134,19 +137,26 @@ Final error-envelope delivery may use `context.WithoutCancel` after operation cl
 deadline established before cancellation was detached; it never gains a fresh or unbounded interval. The request-header,
 archive-payload, and response-write limits are compiled, non-configurable security policy.
 
+The receiver rejects an initially nonblocking fd 0. Response writes do not depend on mutable shared file-status flags:
+they use raw `SendmsgN` with `MSG_DONTWAIT|MSG_NOSIGNAL` and bounded `POLLOUT` waits against the already-established
+absolute deadline. A duplicate descriptor changing `O_NONBLOCK` after admission therefore cannot bypass the deadline,
+turn a full peer buffer into an immediate unclassified failure, or deliver `SIGPIPE` to the root process.
+
 The transport returns bounded raw response bytes only together with an explicit indication that actual socket EOF was
 observed; copying a complete-looking prefix into an in-memory reader cannot fabricate authority. The named capability
 client decodes an EOF-qualified response with a non-cancelled context and lets either a valid success or valid remote
 `DomainError` win over upload `EPIPE`, non-zero exit, or later reap diagnostics. Without one valid envelope, a pre-start
 failure reports `process_started: false, outcome_unknown: false`; every post-start failure reports both values as true.
 
-Receiver integration lands in two audit-friendly increments before any release action is registered. The first admits
-only fd 0, sets and verifies close-on-exec, validates `AF_UNIX`/`SOCK_STREAM` and `SO_PEERCRED`, emits bounded early
-error envelopes when a matching version-1 action is available, half-closes the response write side, and removes the
-obsolete standalone EOF-delimited JSON decoder. The second adds closed, typed trusted-release install/remove request
-and result values plus directly tested handlers. Install alone may consume its declared payload and must require its
-exact EOF; remove requires zero payload and EOF before effects. These handlers remain unregistered, and the central
-action switch stays closed, until the named Jailer client capability and its response-authority tests are complete.
+Receiver integration lands in two audit-friendly increments before any release action is registered. The implemented
+first increment admits only fd 0, sets and verifies close-on-exec, validates blocking `AF_UNIX`/`SOCK_STREAM` and
+`SO_PEERCRED`, emits bounded early error envelopes only after structural channel admission and when a valid version-1
+argv action is available, completes the response frame before `SHUT_WR`, and removes the obsolete standalone
+EOF-delimited JSON decoder. A rejected closed action is not drained. The pending second increment adds closed, typed
+trusted-release install/remove request and result values plus directly tested handlers. Install alone may consume its
+declared payload and must require its exact EOF; remove requires zero payload and EOF before effects. These handlers
+remain unregistered, and the central action switch stays closed, until the named Jailer client capability and its
+response-authority tests are complete.
 
 ### Authorization roles
 
@@ -640,8 +650,21 @@ post-commit details. Recovery now rechecks each reserved directory's device/inod
 before `rmdir`. This private path is not wired to callers or the privileged transport. The aarch64 archive audit, typed
 privileged install/removal integration, and L2 release qualification remain Task 6 work.
 The strict wire codec and caller socketpair process transport, including concurrent upload/response, EOF qualification,
-half-close, and bounded reaping, are implemented. Receiver-side fd-0 type and peer authentication, independent
-`CLOEXEC`, one-request framing/EOF and response half-close, and closed install/remove handlers remain pending.
+half-close, and bounded reaping, are implemented. Receiver increment 5a is also implemented: the production entry owns
+fd 0 directly; admission sets and rechecks `CLOEXEC`, rejects initial `O_NONBLOCK`, verifies
+`AF_UNIX`/`SOCK_STREAM` and a positive peer PID from `SO_PEERCRED`, and matches the peer UID/GID to the authenticated
+sudo caller before environment sanitization, executable verification, group authorization, or action dispatch.
+Structurally admitted failures receive one matching bounded error frame
+under the fixed absolute response deadline, followed by `SHUT_WR`; malformed invocation or channel admission receives no
+frame, and closed actions are rejected without reading request bytes. Raw nonblocking `SendmsgN` plus bounded `POLLOUT`
+keeps response delivery deadline-safe even if a duplicate descriptor later mutates shared status flags. The caller and
+receiver now share the exact closed action grammar, and the obsolete standalone EOF-delimited JSON decoder is removed.
+L1 fault tests cover admission and ordering, grammar parity, peer mismatch, framed-error failures, deadlines,
+cancellation, no-drain behavior, and cleanup. Real socketpair tests prove kernel peer authentication and response EOF
+while the receiver process remains alive, plus the status-flag mutation deadline case. Independent audit findings on
+initial blocking-mode validation, post-admission status-flag mutation-safe response deadlines, caller/receiver grammar
+parity, and process-independent EOF proof were corrected before commit. Closed install/remove wire values and handlers
+remain pending in increment 5b; the action switch is still empty.
 
 ### Paths, process identity, and runtime state
 

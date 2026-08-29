@@ -89,7 +89,8 @@ process's file descriptor 0 through `sudo -n`. The root process marks it close-o
 standard error remain outside the authority channel, and launch/console traffic uses a separate typed relay. The system
 runner owns concurrent upload/response I/O so an early root rejection cannot deadlock behind a large archive write.
 Root requires an `AF_UNIX` `SOCK_STREAM` descriptor and Linux `SO_PEERCRED` UID/GID equal to the authenticated sudo
-caller. The positive peer PID is recorded only for audit and never substitutes for typed receiver authorization.
+caller. The positive peer PID is recorded only for audit and never substitutes for typed receiver authorization. The
+production receiver owns `os.Stdin` directly and accepts no alternate reader from the privileged entry point.
 
 The concrete transport always runs
 `/usr/bin/sudo -n -- /usr/local/bin/mvm __mvm_privileged_v1 <fixed-action>`. It exposes no executable, argv, environment,
@@ -99,11 +100,12 @@ private minimal exchanger interfaces and a dedicated fake in tests.
 
 Requests use fixed `MVMREQ01` magic, a 32-bit network-order JSON-header length capped at 64 KiB, a 64-bit network-order
 payload length, the strict schema-version-1 header, and the exact optional payload. The header repeats the fixed argv
-action and must match it. Only typed release install accepts a payload: zero bytes or at most 128 MiB. The caller
-half-closes after the declared bytes. Root requires exact length and EOF before payload-dependent effects and before all
-zero-payload effects, but may respond to pre-effect authentication/header failure without draining a claimed payload.
-The request-header read deadline is a fixed five seconds; the install archive-payload read deadline is a fixed five
-minutes.
+action and must match it. An action is 1 through 64 ASCII bytes, starts with an ASCII alphanumeric byte, and thereafter
+contains only ASCII alphanumeric bytes, `.`, `_`, or `-`; caller and receiver enforce the same grammar. Only typed
+release install accepts a payload: zero bytes or at most 128 MiB. The caller half-closes after the declared bytes. Root
+requires exact length and EOF before payload-dependent effects and before all zero-payload effects, but may respond to
+pre-effect authentication/header failure without draining a claimed payload. The request-header read deadline is a
+fixed five seconds; the install archive-payload read deadline is a fixed five minutes.
 Responses use `MVMRES01`, a 32-bit length capped at 64 KiB, and one strict matching-action success/result or
 error/`DomainError` envelope under a fixed five-second response-write deadline. Each receiver deadline uses the earlier
 current context deadline when one exists. Final error delivery may use `context.WithoutCancel`, but retains the absolute
@@ -118,6 +120,13 @@ context and lets a valid success or valid remote error win over upload `EPIPE`, 
 domain effect or fallible outcome check is allowed after the response. Missing, malformed, truncated, mismatched,
 oversized, or non-EOF responses from a started process report `process_started: true` and `outcome_unknown: true`; a
 pre-start failure reports both false. Stderr and exit text are never parsed as authority.
+
+The implemented receiver rejects an initially nonblocking fd 0. Its response path uses raw `SendmsgN` with
+`MSG_DONTWAIT|MSG_NOSIGNAL` and bounded `POLLOUT` waits against the established absolute deadline. This preserves the
+deadline and suppresses `SIGPIPE` even when a duplicate descriptor mutates shared `O_NONBLOCK` state after admission.
+Only structurally admitted channels with a valid version-1 action receive an early framed error. The complete frame is
+written before `SHUT_WR`; malformed invocation and admission failures are unframed, and rejected closed actions are not
+drained.
 
 ### VM authority interface
 
@@ -397,8 +406,8 @@ func (p *preparedRelease) Release(ctx context.Context) error
 Preparation and checked release are implemented first. The later launch slice adds only the typed ownership transfer
 that it actually needs; it does not expose raw descriptors, paths, caller-supplied hashes, or a generic operation hook.
 
-The trusted-release work proceeds in this order. Steps 1 through 4 are complete; steps 5 through 9 remain an acceptance
-plan and are not implemented:
+The trusted-release work proceeds in this order. Steps 1 through 4 and receiver substep 5a are complete. Substep 5b and
+steps 6 through 9 remain an acceptance plan and are not implemented:
 
 1. **Freeze the fetch and removal contracts.** ADR-0016 and the task ledger must record the exact trust inputs, commit
    points, crash states, error details, and prohibited fallbacks. Acceptance is a documentation diff review with no
@@ -430,11 +439,16 @@ plan and are not implemented:
    prove that every canonical slot is one complete three-file release or absent.
 5. **Add the receiver transport foundation.** Build on the implemented caller process transport and strict wire codec.
    Land it as two separately reviewable substeps without opening the action catalog:
-   - **5a. Admit and answer on fd 0.** Require fd 0 to be `AF_UNIX`/`SOCK_STREAM`, set and verify `CLOEXEC`,
-     authenticate `SO_PEERCRED` against the sudo caller, return bounded early framed errors when a matching version-1
-     action exists, and half-close the response write side. Remove the obsolete standalone EOF-delimited JSON request
-     decoder in this substep. Tests cover descriptor identity/type, CLOEXEC ordering/faults, peer mismatch, early
-     rejection, response framing/deadline/half-close, and the absence of request draining for rejected actions.
+   - **5a. Admit and answer on fd 0 — implemented.** The production entry owns fd 0, requires blocking
+     `AF_UNIX`/`SOCK_STREAM`, sets and verifies `CLOEXEC`, requires a positive peer PID from `SO_PEERCRED`, matches its
+     UID/GID to the sudo caller, and uses the exact shared action grammar. Only structurally admitted channels receive
+     bounded early framed errors.
+     Raw `SendmsgN(MSG_DONTWAIT|MSG_NOSIGNAL)` with absolute-deadline `POLLOUT` waits remains safe after shared
+     status-flag mutation; the full frame precedes `SHUT_WR`. Closed actions are not drained, and the obsolete
+     standalone EOF-delimited JSON decoder is removed. L1 fault tests and real socketpair tests cover ordering,
+     admission, peer mismatch, deadline/write/half-close failures, cancellation, no-drain behavior,
+     process-independent EOF, cleanup, and status-flag mutation. Independent audit findings were corrected before
+     commit.
    - **5b. Add closed release wire values and handlers without registration.** Add exact install/remove request and
      result values plus directly tested typed handlers. The five-second header deadline, five-minute install-payload
      deadline, five-second response deadline, earlier-context rule, action match, exact declared length, and EOF are

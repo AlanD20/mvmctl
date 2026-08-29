@@ -51,6 +51,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   concurrent bounded upload and response handling, actual peer EOF, early-response upload interruption, cancellation,
   bounded diagnostics, and bounded process reaping without extending the generic command runner. Capability-specific
   clients and actions are still release blockers below.
+- Added root-side fd-0 receiver admission. The production entry owns `os.Stdin` directly, sets and verifies `CLOEXEC`,
+  rejects initially nonblocking or non-`AF_UNIX`/`SOCK_STREAM` descriptors, requires a positive `SO_PEERCRED` PID, and
+  matches the peer UID/GID to the authenticated sudo caller before environment sanitization, executable verification,
+  group authorization, or action dispatch.
+- Caller and receiver now share one exact action grammar: 1 through 64 ASCII bytes, an alphanumeric first byte, then
+  only alphanumeric bytes, `.`, `_`, or `-`. Malformed invocation and structural channel-admission failures remain
+  unframed; after admission, failures return one bounded matching `MVMRES01` error without draining a rejected action.
+- Root writes the complete response before `SHUT_WR` with raw `SendmsgN(MSG_DONTWAIT|MSG_NOSIGNAL)` and bounded
+  `POLLOUT` waits against the fixed absolute response deadline. This remains deadline-safe if a duplicate descriptor
+  later changes shared `O_NONBLOCK` state and makes response EOF observable independently of process exit.
+- Removed the obsolete standalone EOF-delimited privileged JSON decoder. The strict length-framed codec is now the only
+  request framing foundation; trusted-release request values and handlers remain unregistered and the action switch is
+  still closed.
 - Added authenticated sudo identity and current `mvm` group checks, fixed root environment sanitization, and executable
   device/inode verification against the root-owned `/usr/local/bin/mvm` image.
 - Added ADR-0016, which defines the single-binary privilege boundary, trusted state layout, typed operation catalog,
