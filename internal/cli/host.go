@@ -90,6 +90,7 @@ func NewHostCmd(hostAPI api.HostAPI) *cobra.Command {
 Requires root privileges for most operations. Run with: sudo mvm host <command>`,
 	}
 
+	cmd.AddCommand(newHostInstallSystemCmd(hostAPI))
 	cmd.AddCommand(newHostInitCmd(hostAPI))
 	cmd.AddCommand(newHostStatusCmd(hostAPI))
 	cmd.AddCommand(newHostInfoCmd(hostAPI))
@@ -97,6 +98,50 @@ Requires root privileges for most operations. Run with: sudo mvm host <command>`
 	cmd.AddCommand(newHostResetCmd(hostAPI))
 
 	return cmd
+}
+
+func newHostInstallSystemCmd(hostAPI api.HostAPI) *cobra.Command {
+	return &cobra.Command{
+		Use:   "install-system",
+		Short: "Install or upgrade the trusted system mvm binary",
+		Long: fmt.Sprintf(`Install or upgrade the trusted system mvm binary at %s.
+
+This is an explicit administrator bootstrap operation. Run the trusted
+artifact you intend to install with sudo:
+
+  sudo <trusted-mvm-binary> host install-system`, infra.SystemBinaryPath),
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			changed, err := hostAPI.HostInstallSystemBinary(cmd.Context())
+			if err != nil {
+				if changed {
+					common.Cli.Warning(systemInstallPartialWarning(err))
+				}
+				return err
+			}
+			if !changed {
+				common.Cli.Info(fmt.Sprintf("System binary already current at %s.", infra.SystemBinaryPath))
+				return nil
+			}
+			common.Cli.Success(fmt.Sprintf("Installed trusted system binary at %s.", infra.SystemBinaryPath))
+			return nil
+		},
+	}
+}
+
+func systemInstallPartialWarning(err error) string {
+	if domainErr := errs.AsDomainError(err); domainErr != nil {
+		if durabilityUncertain, _ := domainErr.Details["durability_uncertain"].(bool); durabilityUncertain {
+			return fmt.Sprintf(
+				"System binary was replaced at %s, but directory durability could not be confirmed.",
+				infra.SystemBinaryPath,
+			)
+		}
+	}
+	return fmt.Sprintf(
+		"System binary was replaced at %s, but final completion checks failed.",
+		infra.SystemBinaryPath,
+	)
 }
 
 func newHostInitCmd(hostAPI api.HostAPI) *cobra.Command {

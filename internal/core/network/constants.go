@@ -12,6 +12,8 @@ const (
 	FirewallChainMVMForward      = model.FirewallChain(infra.MVMForwardChain)
 	FirewallChainMVMPostrouting  = model.FirewallChain(infra.MVMPostroutingChain)
 	FirewallChainMVMNocloudNetIn = model.FirewallChain(infra.MVMNocloudNetInputChain)
+	FirewallChainMVMRoutedPolicy = model.FirewallChain(infra.MVMRoutedPolicyChain)
+	FirewallChainMVMHostInput    = model.FirewallChain(infra.MVMHostInputChain)
 )
 
 // NatGatewaysList returns nat_gateways as a list of strings.

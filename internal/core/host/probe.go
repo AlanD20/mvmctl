@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -175,6 +176,27 @@ func (p *Probe) checkVMHost(
 		Message: kernelMsg,
 		Details: kernelDetails,
 	})
+
+	if limits.CgroupVersion != 0 {
+		cgroupV2Ready := limits.CgroupVersion == 2
+		missingControllers := make([]string, 0, 3)
+		for _, controller := range []string{"cpu", "memory", "pids"} {
+			if !slices.Contains(limits.CgroupControllers, controller) {
+				missingControllers = append(missingControllers, controller)
+			}
+		}
+		cgroupV2Ready = cgroupV2Ready && len(missingControllers) == 0
+		cgroupMessage := "cgroup v2 resource controllers are available"
+		cgroupDetails := ""
+		if !cgroupV2Ready {
+			cgroupMessage = "cgroup v2 resource enforcement is unavailable"
+			cgroupDetails = fmt.Sprintf("Required controllers: cpu, memory, pids; missing: %s",
+				strings.Join(missingControllers, ", "))
+		}
+		checks = append(checks, model.ProbeCheck{
+			Name: "cgroup_v2", Passed: cgroupV2Ready, Message: cgroupMessage, Details: cgroupDetails,
+		})
+	}
 
 	// --- Nested virtualization ---
 	nestedVirt := limits.NestedVirtAvailable

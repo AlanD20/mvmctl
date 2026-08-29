@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This guide defines the patterns every Go unit test in this project must follow.
-Follow these patterns exactly — do not invent new test structure. If you need a
-pattern not covered here, flag it for approval before deviating.
+This guide defines the default patterns for Go tests in this project. Apply each
+rule when its condition matches. Use a different idiomatic structure when the
+test contract needs it, and explain the choice in the review.
 
 ## Table of Contents
 
@@ -14,12 +14,12 @@ pattern not covered here, flag it for approval before deviating.
 4. [Pattern 2: Repository via In-Memory Mock](#4-pattern-2-repository-via-in-memory-mock)
 5. [Pattern 3: Service with Subprocess Mock](#5-pattern-3-service-with-subprocess-mock)
 6. [Pattern 4: Error-Path-First Table](#6-pattern-4-error-path-first-table)
-7. [Iron Rules (Violation = Rejected)](#7-iron-rules-violation--rejected)
+7. [Test review rules](#7-test-review-rules)
 8. [What to Assert — And What NOT to Assert](#8-what-to-assert--and-what-not-to-assert)
 9. [How to Derive Expected Values — The Three-Source Rule](#8a-how-to-derive-expected-values--the-three-source-rule)
 10. [File Structure Template](#9-file-structure-template)
 11. [Verification Checklist](#10-verification-checklist)
-12. [Mandatory Blind Adversarial Review](#11-mandatory-blind-adversarial-review)
+12. [Risk-based adversarial review](#11-risk-based-adversarial-review)
 13. [Appendix: Examples of Worthless Tests (DO NOT WRITE THESE)](#appendix-examples-of-worthless-tests-do-not-write-these)
 14. [Appendix: Example of a GOOD Trustworthy Test](#appendix-example-of-a-good-trustworthy-test)
 
@@ -27,18 +27,18 @@ pattern not covered here, flag it for approval before deviating.
 
 ## 1. The Foundation — What Makes a Test Trustworthy
 
-A test is **trustworthy** if ALL three are true:
+A test is trustworthy when these properties apply:
 
 1. **RED-GREEN**: If the behavior is wrong, the test fails. If the behavior is
    correct, the test passes. There is no third state.
 
-2. **SURVIVAL**: If you delete the function body and return zero values, the
-   test MUST fail. If the test still passes, it's worthless — delete it.
+2. **REGRESSION SENSITIVITY**: A change that violates the tested contract makes
+   the test fail. Do not require unrelated rows to fail for one synthetic stub.
 
 3. **DIFF**: When the test fails, the output shows EXACTLY what field differs
    and what the expected vs actual values are. Not just "not equal".
 
-These three properties are non-negotiable. Every test is reviewed against them.
+Review each test against the behavior it claims to protect.
 
 ---
 
@@ -60,10 +60,10 @@ These three properties are non-negotiable. Every test is reviewed against them.
 | `FakeRunner` | `testutil/fake_runner.go` | Mock `CommandRunner` for subprocess-dependent tests |
 | `VMRepo`, `NetworkRepo`, ... | `testutil/*.go` | In-memory repository mocks for each domain |
 
-### Import pattern for every test file
+### Default import pattern
 
 ```go
-package vm_test  // external test package (black-box — tests public API only)
+package vm_test  // external test package for public behavior
 
 import (
     "context"
@@ -79,8 +79,9 @@ import (
 )
 ```
 
-**RULE:** Always use external test packages (`package vm_test`, not `package vm`).
-This ensures you test the public API, not unexported internals.
+Prefer an external test package when the contract is public. Use the internal
+package when the test must cover an unexported parser, state machine, or other
+package invariant. Do not export production symbols only to make a test external.
 
 ---
 
@@ -134,14 +135,13 @@ func TestMyFunc(t *testing.T) {
 
 **Key rules for this pattern:**
 
-- `map[string]struct{...}` — NOT a slice. Map iteration order is randomized,
-  which detects tests that accidentally depend on global state ordering.
-- `t.Run(name, ...)` — NEVER loop directly with `for`. Each case must be a
+- Use `map[string]struct{...}` when case order must not matter. Use a named
+  slice when deterministic order makes the contract or failure easier to read.
+- Use `t.Run(name, ...)` for named table cases. Each case becomes a
   subtest so failures are independent and `-run` filtering works.
 - Error assertion BEFORE output assertion. If an error was expected, `return`
   immediately after asserting it.
-- `cmp.Diff` for every output comparison. Never use `assert.Equal(t, want, got)`
-  without diff (see Iron Rule #3).
+- Use `cmp.Diff` for structural output comparisons. See review rule R3.
 
 ---
 
@@ -362,13 +362,12 @@ only success cases and forgetting errors.
 
 ---
 
-## 7. Iron Rules (Violation = Rejected)
+## 7. Test review rules
 
-### R1: Every table must have at least one error/invalid case
+### R1: Cover applicable error and boundary behavior
 
-If a function returns `error`, you MUST test at least one path where it errors.
-No "happy path only" tables. A function that never errors shouldn't return
-`error`.
+If the contract defines an observable error or boundary, cover it. Do not add an
+invented invalid case to a function that cannot reject its input.
 
 ### R2: No tautological assertions
 
@@ -427,13 +426,17 @@ you're testing that your mock wiring is correct — nothing else. Assert on the
 Exception: asserting `runner.Calls` is empty is acceptable to prove a NOOP
 (operation was correctly skipped).
 
-### R7: Every cleanup path must be tested
+### R7: Test cleanup that can leak state
 
-If a function creates temporary resources, ensure you test what happens on
-cleanup failure. At minimum, verify the cleanup runs. A function that leaks
-resources on error paths is a bug.
+If a function owns temporary resources, test the cleanup paths that can leak or
+leave authority behind. Pure functions and read-only operations have no cleanup
+requirement.
 
-### R8: Context cancellation must be tested on any function that takes context
+### R8: Test cancellation when the function owns cancellable work
+
+A `context.Context` parameter alone does not require a cancellation test. Add
+one when the function blocks, retries, or owns side effects that cancellation
+must stop.
 
 ```go
 t.Run("context_cancelled", func(t *testing.T) {
@@ -480,8 +483,9 @@ by running the function under test and copying its output, the test is
 circular. It will pass even if the function is buggy, because the
 expected value was derived from the same buggy code.
 
-DETECTION: If you remove the function body and return a zero value,
-would the test fail? Yes? Good. But there's a more subtle variant:
+A zero-value implementation can expose an assertion that never observes the
+result, but it cannot prove that the expected value is independent. Consider
+this subtler variant:
 
 ```
 // SUBTLE CIRCULAR: setup() returns both (input, want) and the agent
@@ -498,11 +502,9 @@ func setup(t *testing.T) ([]string, []fileEntry) {
 }
 ```
 
-This test would pass with buggy code because the expected value WAS
-the buggy output. The SURVIVAL check ("delete function body → fail?")
-passes because zero values don't match `"a.txt"`. But the test is
-still worthless — it only proves the function is consistent with
-itself.
+This test passes because the expected value came from the buggy output. A
+zero-value probe also fails, but that does not make the expectation correct.
+The test proves only that the function is consistent with itself.
 
 PREVENTION: Ask THREE questions before every expected value:
 
@@ -513,9 +515,8 @@ PREVENTION: Ask THREE questions before every expected value:
    the function?** If yes, compute it inline. If no, your test is
    under-specified (you don't know what correct behavior looks like).
 
-3. **Does a contract comment explain why this value is correct?**
-   If a reviewer can't tell why `"a.txt"` is the expected value
-   (vs `"tests/a.txt"` or `"./a.txt"`), add a contract comment.
+3. **Can a reviewer tell why this value is correct?** If the derivation is not
+   obvious from the test input and name, add a contract comment.
 
 PRACTICE: Prefer computing expected values from test inputs rather
 than hardcoding them:
@@ -532,65 +533,22 @@ This is harder for the agent to get wrong because the contract rule
 is written down and the expected value is computed by a different
 expression than the function under test.
 
-### R0: Mandatory SURVIVAL — every test must fail when the function is gutted
+### R11: Every primary assertion must detect a contract regression
 
-The SURVIVAL property from Section 1 is non-negotiable.
+Mentally replace the behavior under test with a plausible wrong implementation.
+The primary assertion must fail. A zero-value stub is one useful probe, but it
+is not a universal quality test. Some valid contracts return zero values for
+valid inputs.
 
-Take the function under test, delete its body, and return zero values
-(zero, nil, empty struct, empty slice). If ANY test case still passes,
-that test case is worthless and must be removed or rewritten before the
-test file can be committed.
+A test is weak when its assertion ignores the returned value, repeats a value
+created by setup, or checks only a count when item content is the contract.
+Strengthen or remove that assertion.
 
-This applies to EVERY table row and EVERY subtest — not just the test
-function as a whole. A table with 5 rows where 4 survive the gutted
-function is still defective.
+### R12: Read back persistence contracts
 
-```
-FORBIDDEN:
-    // Function:  func Sum(a, b int) int { return a + b }
-    // Test row:  {a: 1, b: 2, want: 3}
-    // Gutted:    func Sum(a, b int) int { return 0 }
-    //
-    // SURVIVAL: 0 != 3 → PASS (dies on gutted function) ✓
-
-    // Function:  func GetName(u *User) string { return u.Name }
-    // Test row:  {input: &User{Name: "alice"}, want: "alice"}
-    // Gutted:    func GetName(u *User) string { var s string; return s }
-    //
-    // SURVIVAL: "" != "alice" → PASS (dies on gutted function) ✓
-
-    // Function:  func Validate(s string) error
-    // Test row:  {input: "", wantErr: "empty"}
-    // Gutted:    func Validate(s string) error { return nil }
-    //
-    // SURVIVAL: nil != error → PASS (dies on gutted function) ✓
-
-WORTHLESS (survives gutted function):
-    // Function:  func Exists(path string) bool { return fileExists(path) }
-    // Test row:  {input: "/tmp/exists.txt", want: true}
-    // Gutted:    func Exists(path string) bool { return true }
-    //
-    // SURVIVAL: true == true → FAIL (test passes with gutted function)
-    // The test doesn't prove Exists works — it just proves that
-    // returning true is accepted. Gutting to `return false` would
-    // fix survival but expose that no real file check happens.
-
-    // Function:  func ToUpper(s string) string { return strings.ToUpper(s) }
-    // Test row:  {input: "a", want: "A"}
-    // But the test uses `assert.Equal(t, want, want)` — tautology.
-    // Gutted function returns "" — but the assertion compares want
-    // to want, not to got. Test never fails.
-```
-
-DETECTION: Before submitting, mentally inline each assertion. Replace
-the function body with `return zero`. If the assertion passes, delete
-the test or strengthen the assertion until it fails.
-
-### R11: The Mirror Test — every write must be read back
-
-If the function under test writes, creates, or mutates data, the test
-must read back the result and verify it byte-for-byte or field-for-field.
-"Error is nil" or "file exists" is NOT sufficient verification.
+If the contract promises durable content or state, read it back through an
+independent path and compare the meaningful payload. A mutation whose contract
+is only an emitted call or returned value can use that observable result.
 
 ```
 FORBIDDEN — only checks error, never reads the written file:
@@ -624,15 +582,15 @@ REQUIRED — Mirror Test:
     }
 ```
 
-READ THE WHOLE PAYLOAD. Not just metadata (exists, size, mode).
-Not just error. Read the actual bytes or retrieve the actual entity
-and compare every field.
+Read the bytes or fields promised by the persistence contract. Existence or a
+nil error alone does not prove stored content.
 
-### R12: Assert every output field
+### R13: Assert every field in the tested contract
 
-If the function returns a struct, map, slice, or multi-value output,
-every meaningful field must be explicitly asserted. A field that isn't
-asserted is a field that can be wrong without detection.
+For a struct, map, slice, or multi-value result, assert each field that belongs
+to the behavior named by the test. Use a full structural comparison when the
+whole value is the contract. Do not make a focused test brittle by asserting
+unrelated fields.
 
 ```
 GOOD (every field checked):
@@ -695,7 +653,7 @@ EXCEPTION EXAMPLE:
 | Exact mock call arguments | Tests implementation, not behavior |
 | String the test constructed | Tautology — proves nothing |
 | Line numbers in errors | Brittle — change with file edits |
-| Internal/private functions | External test package enforces this |
+| Private implementation details in public-contract tests | Assert through the package contract instead |
 | Order of map iteration | Undefined by Go spec |
 | Timestamps or durations | Flaky — use `assert.WithinRange` or don't assert |
 | Count without content | `assert.Len(t, items, 3)` doesn't verify WHICH items are there |
@@ -712,7 +670,7 @@ wrong thing. The test runs, the code runs, they match — but both are wrong.
 This happens when the agent derives expected values from the function's
 output instead of from the function's contract.
 
-Every expected value must come from EXACTLY ONE of three sources:
+Every expected value must come from one or more independent sources:
 
 | Source | What it means | Example |
 |--------|---------------|---------|
@@ -766,9 +724,8 @@ the test fails.
 
 ### The LITERAL rule
 
-If the expected value is a hardcoded literal in the test body (not
-computed from inputs), the test MUST explain in a comment what
-contract rule that literal satisfies:
+If a hardcoded expected value is not self-explanatory from the test name and
+input, add a comment that names the contract rule it satisfies:
 
 ```
 GOOD (contract documented):
@@ -786,15 +743,11 @@ BAD (no rationale):
     // copied from the function output? The reviewer cannot tell.
 ```
 
-### The SURVIVAL check for expected values
+### Assertion sensitivity
 
-In addition to the test-level SURVIVAL check ("would deleting the
-function body fail this test?"), apply SURVIVAL to EACH expected value:
-
-Take the expected value, replace it with a clearly wrong value, and
-mentally check: would the test fail? If the answer is "maybe not"
-(e.g., because the assertion is on length, not content, or because
-the other fields would still match), the assertion is too weak.
+Replace an expected value with a clearly wrong value and check whether the test
+would fail. If it might still pass because the assertion checks only a count or
+an unrelated field, strengthen the assertion.
 
 ### Independence test
 
@@ -806,10 +759,10 @@ expected value is implementation-derived and must be replaced.
 
 ## 9. File Structure Template
 
-Every test file follows this exact structure:
+Use this structure when it fits the package:
 
 ```go
-package <domain>_test  // external test package
+package <domain>_test  // default for a public package contract
 
 import (
     "context"
@@ -839,180 +792,73 @@ func Test<NextFunction>(t *testing.T) {
 }
 ```
 
-**Rules:**
-- Section comments use `// ---` with plain ASCII dashes (≤ 60 chars including `// `)
-- Every test function has a `// Rationale:` comment explaining why this
-  test exists and what real bug it prevents
-- Test functions are ordered by dependency (foundation first, consumers later)
-- Each file tests ONE Go file from the source package (file name match)
+Keep related tests together and order them so setup helpers appear before their
+consumers. Add a rationale comment only when the contract or regression is not
+clear from the test name and assertions. A test file may cover several source
+files when they implement one package-level behavior.
 
 ---
 
-## 10. Verification Checklist
+## 10. Verification checklist
 
-Before submitting ANY test file, verify every item:
+Before submitting a Go test change, verify the applicable items:
 
-```
-[ ] Does every test function have at least one error/invalid case?
-[ ] Is every assertion on BEHAVIOR, not implementation (mock calls)?
-[ ] Would deleting the production function body make this test fail?
-    (Try it mentally — if not, the test is worthless)
-[ ] Does every cmp.Diff call use the (-want +got) format string?
-[ ] Does every table use map[string]struct{...} with t.Run()?
-[ ] Does every error case return immediately after asserting the error?
-[ ] Is `require` used for setup and `assert` for test logic?
-[ ] Are there zero tautological assertions (echoing inputs)?
-[ ] Does the test use external package (_test suffix)?
-[ ] Does go test ./... compile cleanly?
-[ ] Does go test -race ./... pass with no data races?
-[ ] Is every expected value independently derivable from the function's
-    contract without running the function? (Not copied from its output)
-[ ] Does every hardcoded expected literal have a CONTRACT comment
-    explaining WHY that value is correct?
-[ ] SURVIVAL: Would replacing the function body with `return zero`
-    make this test fail? (Every row, every subtest.)
-[ ] Mirror Test: Does every write/create/mutate read back the payload
-    and compare byte-for-byte or field-for-field?
-[ ] Are ALL fields of every returned struct/slice/map asserted? Any
-    unasserted fields documented with a reason?
+```text
+[ ] The test names the behavior or regression it protects.
+[ ] Primary assertions observe behavior, durable state, or a documented emitted call.
+[ ] Expected values come from the contract or an independent computation.
+[ ] A plausible wrong implementation makes each primary assertion fail.
+[ ] Error and boundary cases cover the contract without invented inputs.
+[ ] Named table cases use t.Run.
+[ ] Structural comparisons show a useful (-want +got) diff.
+[ ] Setup failures stop the test before later assertions run.
+[ ] Persistence contracts read back the meaningful payload.
+[ ] Cancellation, cleanup, and race cases exist when the function owns those risks.
+[ ] The chosen external or internal test package matches the boundary under test.
+[ ] The smallest affected go test command passes.
+[ ] go test -race passes for changed concurrent code.
 ```
 
 ---
 
-## 11. Mandatory Blind Adversarial Review
+## 11. Risk-based adversarial review
 
-Every test file MUST pass a blind adversarial review before submission. The
-review is performed by a SEPARATE agent instance that has ZERO knowledge of
-what the test is supposed to do or what bug it was written to catch.
+Routine, focused Go test changes require the author to run the checklist and the
+smallest affected `go test` command. They do not require a second agent.
 
-### Why blind review is mandatory
+Require independent adversarial review when the test change covers any of these
+areas:
 
-If the reviewer knows "this test is for `ToInt`", they will subconsciously
-confirm that the test looks correct — even if the assertion is tautological,
-the edge cases are missing, or the expected value is wrong. A blind reviewer
-with no context can only judge what the code ACTUALLY does, not what it was
-INTENDED to do.
+- privileged dispatch, caller identity, path safety, or authorization
+- concurrency, locking, cancellation, crash recovery, or partial failure
+- strict codecs, parsers, protocol limits, or untrusted input
+- process identity, cgroups, namespaces, mounts, firewall policy, or cleanup
+- release qualification or a broad change that becomes the only proof for several
+  production paths
 
-### The blind review protocol
+Give the reviewer the contract, the production files, the test diff, and the
+failure that the tests must detect. A blind reviewer is not the default. Hiding
+intent can also hide the contract that distinguishes a valid assertion from a
+plausible but wrong one.
 
-**Step 1: Generate the diff.**
+The reviewer checks these points:
 
-Before spawning the reviewer, the writer agent records the current state:
+1. Each primary assertion fails for a plausible contract regression.
+2. Expected values come from the contract or an independent computation.
+3. Error, cancellation, cleanup, and boundary cases match the behavior under test.
+4. Structural comparisons reveal the field that differs.
+5. Persistence tests read back the meaningful payload through an independent path.
+6. Mock-call assertions remain secondary unless the emitted call is the contract.
+7. The focused test command, `go vet` scope, and `go test -race` scope match the
+   risk.
 
-```bash
-git rev-parse HEAD   # save baseline SHA
-```
+Use pstack `interrogate` or another independent reviewer when available. Treat
+findings as claims to verify against the contract. Fix valid findings and record a
+specific reason for rejecting invalid ones. Re-run the focused checks after every
+accepted fix.
 
-Then makes ALL changes. After the last edit, run:
-
-```bash
-git diff <BASELINE_SHA>   # diff against the commit before any changes
-```
-
-Do NOT use plain `git diff` (which compares against HEAD — if previous changes
-were committed, HEAD already includes them and the reviewer won't see them).
-
-**Step 2: Spawn a reviewer with NO context.**
-
-The writer agent spawns a `general` subagent with this EXACT prompt (do NOT
-modify it):
-
-```
-You are a BLIND adversarial code reviewer. You do NOT know what the author
-intended to fix or test. You judge only what the code ACTUALLY does.
-
-Review this git diff of Go test files against the following rules.
-The rules are non-negotiable — if ANY rule is violated, report FAIL with
-the exact file:line and the rule violated.
-
-RULES:
-1. Every table must have at least one error/invalid/boundary case.
-2. No tautological assertions (asserting something the test just constructed).
-3. cmp.Diff must be used for all structural comparisons (structs, slices, maps).
-4. require.* for setup, assert.* for test logic.
-5. After asserting an expected error, the test must RETURN immediately.
-6. Primary assertion must be on BEHAVIOR (return value, state change),
-   not on mock wiring (mock.Calls).
-7. Must use `t.Run(name, ...)` for every row — no flat loops.
-8. Context cancellation must be tested if the function takes context.Context.
-9. Every cleanup or error path must be tested.
-10. The test file MUST compile with `go vet` and pass `go test -race`.
-11. Expected values must be derivable from the function's contract, not
-    its implementation. If a hardcoded literal is used as the expected
-    value, the test must include a comment explaining what contract rule
-    produces that value. A test that passes only because the expected
-    value matches the current implementation (not an independent spec)
-    is circular and must be rejected.
-12. SURVIVAL: If the function body were replaced with `return zero` /
-    `return nil`, the test MUST fail. If any assertion survives a gutted
-    function body, that assertion is redundant or tautological.
-13. Mirror Test: Every write/create/mutate must be followed by a read-back
-    that verifies the payload byte-for-byte. Checking only error or
-    existence is insufficient.
-14. Every field of a returned struct, slice element, or map value must be
-    explicitly asserted unless documented as non-deterministic or derived.
-
-Report:
-- PASS: no issues found
-- FAIL: [rule X violated] [file:line] — explain what's wrong
-
-Read every changed file in full to verify context. Do NOT assume anything
-about what the author intended.
-```
-
-**Step 3: The reviewer reads changed files, not just the diff.**
-
-The prompt MUST instruct the reviewer to read every changed file in full.
-A diff alone can hide context (e.g., a test that constructs a value and then
-asserts it's the same — the diff shows the assertion but not the construction).
-
-**Step 4: Fix ALL violations — no debt accumulation.**
-
-If the reviewer reports FAIL, the writer agent fixes EVERY violation. The fix
-must REPLACE the offending code, not ADD a band-aid on top. Examples:
-
-```
-WRONG (adds a patch on top of buggy code):
-    if diff := cmp.Diff(want, got); diff != "" {
-        t.Errorf("mismatch: %s", diff)  // wrong format string
-    }
-    // ADDED: sorry, let me also add the proper format
-    t.Logf("for debugging: want=%v got=%v", want, got)
-
-RIGHT (replaces the buggy line entirely):
-    if diff := cmp.Diff(want, got); diff != "" {
-        t.Errorf("(-want +got):\n%s", diff)  // correct format string
-    }
-```
-
-After fixing, re-run steps 1-3 (re-diff, re-review) until the reviewer
-reports PASS. Loop until clean.
-
-**Step 5: Writer reports the reviewer's verdict to the user.**
-
-```
-Tests written for: internal/core/vm/service_test.go
-Blind review verdict: PASS
-Changes: 1 file, +187 lines
-All 10 rules verified.
-```
-
-### Why debt accumulation is forbidden
-
-Agents often fix a violation by ADDING code that compensates for the buggy
-code, rather than REPLACING the buggy code with correct code. This creates
-test debt: the file becomes longer, harder to read, and the original bug
-remains dormant. The blind review catches this because the reviewer sees
-both the old and new code, and if the old code is still present, the
-violation is still there.
-
-### Enforcement
-
-This step is NOT optional. Any test file submitted without a blind adversarial
-review report is considered UNREVIEWED and MUST be rejected in code review.
-The reviewing engineer checks that the report exists and that the reviewer
-agent was given the EXACT prompt above (no modifications that could bias the
-result).
+Report the reviewed files, the reviewer verdict, accepted findings, rejected
+findings with reasons, and the commands that passed.
 
 ---
 
@@ -1085,7 +931,7 @@ func TestToInt(t *testing.T) {
 
 Why this is trustworthy:
 1. **RED-GREEN**: If ToInt returns wrong value, assertion fails
-2. **SURVIVAL**: If ToInt unconditionally returns 0, every non-zero test fails
+2. **REGRESSION SENSITIVITY**: An unconditional zero result fails the non-zero cases
 3. **DIFF**: `cmp.Diff` shows exact value mismatch with `(-want +got)` format
 4. **EDGE CASES**: nil, non-numeric string, bool, zero value — all tested
 5. **NO TAUTOLOGY**: Input values are different from expected outputs

@@ -26,7 +26,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
   - [Public API boundary](#public-api-boundary)
   - [CLI is the canonical interface](#cli-is-the-canonical-interface)
   - [Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)](#provisioner-backend-loopmount-vs-guestfs--mutual-exclusion)
-  - [Firewall Backend (nftables vs iptables -- mutual exclusion)](#firewall-backend-nftables-vs-iptables--mutual-exclusion)
+  - [Firewall backend transition](#firewall-backend-transition)
 - [Build output (REQUIRED)](#build-output-required)
 - [Asset mirror environment variable (OPTIONAL)](#asset-mirror-environment-variable-optional)
 - [Relationships](#relationships)
@@ -48,11 +48,20 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
 
 ### Domain
 
-A domain is a self-contained business capability with its own logic, data model, and test suite. Each domain lives in a directory under `internal/core/` named after the capability — for example, `internal/core/vm/` for VM lifecycle, `internal/core/network/` for networking, and `internal/core/image/` for image management. The project currently has sixteen domains covering everything from SSH keys to snapshots.
+A domain is a self-contained business capability with its own logic, data model, and test suite. Each active domain is an
+immediate directory under `internal/core/`. For example, `internal/core/vm/` owns VM lifecycle,
+`internal/core/network/` owns networking, and `internal/core/image/` owns image management. Inspect `internal/core/`
+instead of copying a domain count into documentation.
 
-Domains are strictly isolated from each other. A domain in `internal/core/vm/` can never import from `internal/core/network/` or any other domain package. The Go compiler enforces this isolation through circular import detection: if a domain tried to import another domain, the compiler would produce an import cycle error. This means each domain can be tested, modified, and replaced independently without affecting the rest of the system.
+Domains are strictly isolated from each other. A domain in `internal/core/vm/` cannot import
+`internal/core/network/` or another sibling domain. The Go compiler rejects import cycles, but it does not reject every
+one-way sibling import. Code review currently enforces the broader rule. `tasks/todo.md` tracks a deterministic CI check
+for this boundary.
 
-What unifies the domains is the shared model layer at `internal/lib/model/`. Every domain imports its types — concrete structs with `db:"column"` and `json:"field"` tags for SQL and JSON serialization — from this single package. No domain defines its own model types. The model package contains 21 files covering VM instances, networks, images, kernels, binaries, volumes, SSH keys, leases, firewall rules, console info, Firecracker config, cloud-init modes, provisioner types, relation specs, VM status, operation status, and workflow state.
+The shared model layer at `internal/lib/model/` unifies the domains. It contains concrete structs with `db:"column"`
+and `json:"field"` tags for SQL and JSON serialization. Core domains use these shared types instead of defining
+cross-domain model packages. Inspect the package for the current model inventory instead of copying a file count into
+documentation.
 
 Not every domain follows the same internal structure. The pattern varies by complexity:
 - **Controller/Service/Repository/Resolver**: vm, network, kernel, key, volume
@@ -60,7 +69,7 @@ Not every domain follows the same internal structure. The pattern varies by comp
 - **Controller/Service/Repository**: host
 - **Repository + Resolver**: snapshot
 - **Controller only**: console
-- **Service only**: cache, ssh
+- **Service only**: cache, ssh, update
 - **Service + Repository**: config (includes constraints registry)
 - **Controller + Service**: logs
 - **Manager + Provisioner**: cloudinit
@@ -80,13 +89,13 @@ A struct bound to a single entity instance. Manages lifecycle state transitions 
 
 Constructed with the entity + its Repository: `vm.NewController(vm *model.VMItem, repo Repository)`. NOT wired at startup -- created per-operation in the Service layer.
 
-*Example: `vm.NewController(vmItem, repo).Snapshot(ctx)` -- snapshots this specific VM. `network.NewService(repo, tracker).RemoveBridge(ctx, bridge)` -- removes a bridge, no single network entity needed.*
+*Example: `vm.NewController(vmItem, repo).Snapshot(ctx)` -- snapshots this specific VM. `network.NewService(repo, tracker, policyRepo).RemoveBridge(ctx, bridge)` -- removes a bridge, no single network entity needed.*
 
 ### Service (stateless, intra-domain)
 
 A struct for stateless intra-domain operations. Handles infrastructure operations (bridges, TAPs, NAT, subprocesses, file/disk operations). Performs state detection (checking current system state as part of an operation -- "does this bridge exist?" to branch execution). Guards invariants that protect against system damage. Does NOT validate caller input. Does NOT manage state for a single entity -- Service operates on infrastructure, not on a bound instance.
 
-Constructed with repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker)`. Wired once at startup in `app.Initialize()`.
+Constructed with repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker, policyRepo ServiceAccessPolicyRepository)`. Wired once at startup in `app.Initialize()`.
 
 *Litmus test: if the operation would work the same way without a specific entity instance, it's Service. If it needs to communicate with a running entity's Firecracker API socket, it belongs in Controller. If it sequences multiple infrastructure steps (teardown NAT -> remove bridge -> delete DB record), it's intra-domain orchestration in Service.*
 
@@ -98,14 +107,14 @@ Constructor pattern: `NewRepository(db *sqlx.DB) Repository`.
 
 ### Service subprocess pattern (internal/service/)
 
-Long-running subprocess services (console relay, nocloud-net server, loopmount provisioner) live in `internal/service/{name}/`. These are compiled into the same `mvm` binary — no separate binaries. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`agent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
+Long-running and privileged subprocess services (console relay, nocloud-net server, loopmount provisioner, Jailer launcher) live in `internal/service/{name}/`. These are compiled into the same `mvm` binary — no separate service binaries. The CLI layer has an `mvm run <service>` subcommand that serves as the entry point for each service. An additional embedded service (`agent/`) provides a cross-compiled guest agent binary that is compressed and embedded into the `mvm` binary at build time, then injected into the VM at runtime.
 
 Each service follows a consistent three-function pattern:
 - **`Config`** struct — holds all configuration for the service.
 - **`Run(ctx, cfg)`** — runs the service in the foreground (blocking).
 - **`Spawn(ctx, cfg, extraParams...)`** — launches the service as a background subprocess via `system.SpawnService()`. The context parameter is typically `nil` (background/nil) for daemon services (console relay, nocloud-net server) and a real context for synchronous services (loopmount provisioning). Extra parameters carry service-specific data: `console.Spawn()` passes a PTY file descriptor, `nocloudnet.Spawn()` passes the config only, `loopmount.Spawn()` passes a wire protocol input struct.
 
-Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `agent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
+Services in `internal/service/`: `console/` (console relay PTY proxy), `nocloudnet/` (NoCloud HTTP metadata server), `loopmount/` (loop-mount provisioner wire protocol), `jailer/` (trusted release installation, per-VM jail setup, and privileged Jailer exec), `agent/` (embedded guest agent binary — cross-compiled, compressed, and injected into the VM at runtime via vsock).
 
 Dependency direction: `cli/` -> `services/`. Services never import `cli/` or `pkg/api/`.
 
@@ -202,12 +211,16 @@ net, _ := input.ResolveNetwork(ctx, op.Repos.Network)
 
 Defined in `internal/lib/db/migrations/*.sql`. Accessed via `github.com/jmoiron/sqlx` with `modernc.org/sqlite` driver. PRAGMAs (foreign_keys=ON, journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, wal_autocheckpoint=1000, cache_size=-64000) set via DSN parameters in `db.Handle.openLazy()`. Connection pool has `SetMaxOpenConns(1)` and `SetMaxIdleConns(1)` for SQLite's single-writer semantics.
 
-Tables include: `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`, `host_state_changes`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`, `vm_vsock_config`, `snapshots`, `db_migrations` (16 tables).
+Tables include `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_leases`, `vm_instances`, `host_state`,
+`host_state_changes`, `service_access_policies`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`,
+`vm_vsock_config`, `snapshots`, and `db_migrations`. Read `internal/lib/db/migrations/` for the current schema.
 
 ### Layer compliance enforcement
 
-Architecture rules are enforced by the Go compiler (circular import errors prevent cross-domain imports in core) and code review. Key rules:
-- Core domains NEVER import other core/* packages -- enforced by Go compiler.
+The Go compiler enforces type safety and rejects import cycles. Code review enforces project-specific dependency rules
+that are stricter than Go's import rules. Task 18 in `tasks/todo.md` tracks machine enforcement for sibling core-domain
+imports. Key rules:
+- Core domains never import other `internal/core/*` packages.
 - CLI imports from `pkg/api/`, `pkg/api/inputs`, `pkg/api/results`, `pkg/errs`, `internal/cli/common/`, `internal/infra/`, `internal/lib/`, `internal/service/` -- enforced by code review.
 - API imports `internal/core/*` + `internal/enricher/` + `internal/infra/` + `internal/infra/event` + `internal/lib/*` + `internal/assets` + `internal/service/*` + `pkg/errs` + `pkg/api/inputs` + `pkg/api/results`.
 - `internal/infra/` and `internal/lib/` are LEAVES -- import NOTHING from core, api, or cli. Exception: `internal/lib/provisioner/loopmount/backend.go` imports `internal/service/loopmount` for wire-protocol types used to spawn the loopmount provisioner subprocess.
@@ -217,19 +230,47 @@ Architecture rules are enforced by the Go compiler (circular import errors preve
 
 The `pkg/api` package IS the stable, curated public interface for all consumers -- CLI, future TUI/GUI, and external scripts. The `api.Operation` struct exposes all domain operations as methods. The `pkg/api/inputs` package exposes all Input types. The `internal/core` package is an implementation detail.
 
-### Build output (REQUIRED)
+### Build and system-install contract (REQUIRED)
 
-**The `mvm` binary MUST be built to `~/.local/bin/mvm`.** This path has passwordless sudo privileges via the mvmctl sudoers rules, so subcommands requiring privilege escalation run without password prompts.
+The release script produces the candidate artifact at `dist/mvm`. A development artifact may live in the worktree or
+under `~/.local/bin`, but a user-owned path is **never** a sudo target.
 
-For **release testing / RC QA / system tests**, always use the release build script:
+The canonical host installation is `/usr/local/bin/mvm`, owned by `root:root` with mode `0755` under a root-owned,
+non-writable directory chain. Install or replace it through the candidate artifact's exact early bootstrap route:
+
 ```bash
-./scripts/build.sh release          # produces dist/mvm
-cp dist/mvm ~/.local/bin/mvm        # copy for sudo operations
+./scripts/build.sh release --version 0.3.0-rc.1 --output dist/mvm
+sudo ./dist/mvm host install-system
+sudo /usr/local/bin/mvm host init
 ```
 
-A bare `go build -o ~/.local/bin/mvm ./cmd/mvm` works for dev but produces a
-binary without version info, symbol stripping, or PIE. **Never use it for
-release qualification.**
+`host install-system` executes before ordinary application initialization. It does not read `MVM_CACHE_DIR`, user
+configuration, the user database, Cobra, or plugins, and it replaces its environment with fixed root-safe values before
+installation. v0.3.0 is a clean installation: it does not convert, adopt, or preserve old user/runtime state. Remove an
+old managed sudoers file and clean the old installation from an authenticated administrator session before running the
+bootstrap command; the installer refuses unrecognized active syntax rather than guessing how sudo authenticated the
+process. The exact fail-closed cleanup procedure remains a v0.3.0 release blocker until administrator reset/cleanup is
+hardened; this architecture rule is not permission to improvise raw host cleanup.
+
+Normal users run `/usr/local/bin/mvm` without sudo. The `mvm` group is the authorization role for the final constrained
+passwordless privileged protocol; it never makes a development artifact trusted. During v0.3 development, the generated
+policy still contains transitional raw-tool grants and `/usr/local/bin/mvm *` for callers not yet converted to typed
+dispatch. That policy is not the final security boundary. The marker-only policy lands only after every supported
+privileged caller uses the typed dispatcher. A system-installed executable cannot replace itself through
+`mvm self-update`; an administrator installs the newly downloaded trusted artifact with `host install-system`.
+
+The v0.3 privileged target splits state by authority and lifetime. Durable ownership and release records live beneath
+`/var/lib/mvmctl`; root-only locks and launch handshakes will live beneath `/run/mvmctl/authority/<uid>`. API, vsock, and
+console sockets plus display-only PID mirrors will use a separate pinned caller-owned VM directory beneath
+`/run/mvmctl/runtime/<uid>/<vm-id>`. Persistent configuration, disks, logs, console logs, and optional metrics remain in
+the caller's managed cache. Final privileged code must never mount the whole cache VM directory, trust a runtime leaf as
+authority, or signal a PID read from a PID mirror. ADR-0016 defines the exact ownership, modes, launch ordering, and
+cleanup contract; `tasks/todo.md` records implementation status.
+
+For **release testing / RC QA / system tests**, always use `./scripts/build.sh release`; a bare `go build` lacks the
+release version metadata, symbol stripping, and PIE settings and must not be used for release qualification. An
+untagged RC build must pass the intended version explicitly. Otherwise `git describe` can inherit the previous release
+tag and produce a candidate with the wrong identity.
 
 ### Asset mirror environment variable (OPTIONAL)
 
@@ -241,6 +282,11 @@ mvm <subcommand>
 ```
 
 This variable directs the local asset cache for downloaded kernel images, root filesystems, and firmware blobs.
+Checksum/version metadata may still be fetched from the fixed upstream origin. The system-test `asset-mirror` volume is
+a point-in-time, read-only copy of this directory: after repairing or adding a host mirror object, rebuild that volume
+before running QA. Although the downloader can detect a stale object and try its fixed upstream source, the release
+runner rejects that fallback and any mirror auto-population as invalid qualification evidence. Builder pulls pass only
+when each artifact reports an explicit local-mirror read; checksum/version metadata may still use upstream.
 
 ### CLI is the canonical interface
 
@@ -263,9 +309,11 @@ Provisioner type resolved ONCE at startup in `api.NewOperation()` by reading `se
 
 **Why no fallback chain:** A fallback (try loop-mount, fall back to guestfs) was rejected because: (1) if a user enables GuestFS, they expect GuestFS behavior -- silent fallback to loop-mount violates least surprise; (2) each backend has different sudoers requirements -- mixing them in one session increases the privilege surface; (3) each backend has independent test suites -- a fallback chain requires testing all combinations; (4) an earlier version incorrectly described GuestFS as a "fallback," which caused regression bugs where a stale `guestfs_enabled=true` silently selected the slow backend.
 
-### Firewall Backend (nftables vs iptables -- mutual exclusion)
+### Firewall backend transition
 
-Two independent firewall backends -- **nftables** (default) and **iptables** (legacy) -- selected by the `firewall_backend` setting. Exactly one is active per session.
+The transitional implementation has two independent firewall backends -- **nftables** (default) and **iptables**
+(legacy) -- selected by the `firewall_backend` setting. Exactly one is active per session. This describes existing code,
+not the accepted v0.3.0 target.
 
 - **nftables** (default): Uses `internal/lib/firewall/nftables.go` -- atomic `nft -f -` batch files.
 - **iptables** (legacy): Uses `internal/lib/firewall/iptables.go` -- per-rule `iptables` calls.
@@ -277,6 +325,13 @@ Selection logic in `firewall.NewFirewallTracker(backend, xtcommentAvail, db)`. B
 **UFW compatibility:** The nftables backend uses non-hook chains inside the system `ip filter` and `ip nat` tables, with jump rules inserted at position 0 of built-in chains (FORWARD, POSTROUTING, INPUT). This ensures MVM rules evaluate before UFW's. When UFW reloads (`ufw reload`), it flushes built-in chains and removes MVM's jump rules -- these are re-created lazily on the next `mvm network` or `mvm vm create` operation. The iptables backend has the same limitation.
 
 The `FirewallTracker` also reads an `iptables_xtcomment` user setting that adds comment tags to iptables rules for easier identification.
+
+ADR-0017 defines the clean-break v0.3.0 replacement. It removes iptables, the backend selector, backend-specific
+repositories, and the production `nft` CLI path. The root-owned `internal/service/firewall/` adapter will accept only
+mvmctl-owned typed intent and use a reviewed, pinned `github.com/google/nftables` version to program the kernel directly
+in one complete transaction. Library and netlink types stay private to that adapter; there is no CLI fallback. Kernel
+nftables, bridge-family, connection-tracking, NAT, and privilege capabilities remain host requirements. A disposable QA
+runner may use the `nft` CLI only as an independent read-only oracle.
 
 ## Relationships
 
@@ -409,7 +464,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 
 | Location | Why `DefaultRunner.Run()` doesn't work |
 |---|---|---|
-| `internal/core/vm/firecracker.go` (Firecracker spawn) | Fine-grained control over stdin/stdout/stderr FD redirection and `Setsid` session management for the Firecracker child process |
+| `internal/service/jailer/entry.go` (Jailer exec) | Privileged chroot setup ends with `syscall.Exec` so Jailer inherits console stdin/stdout/stderr and becomes the managed Firecracker process |
 | `internal/core/ssh/utils.go` (SSH connectivity probe) | Uses `exec.CommandContext` with a short-lived probe context for SSH connectivity detection |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
 | `internal/service/agent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |
@@ -419,7 +474,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 
 **Binary lookup carve-out:** Utility files across the codebase use `exec.LookPath()` (not `exec.Command`/`exec.CommandContext`) solely to check whether a system binary exists before calling it through `DefaultRunner.Run()`. This is NOT a subprocess execution — it's a filesystem existence check that happens to use the `os/exec` package. These files are not listed as exceptions above and do not violate the subprocess rule. Key locations: `internal/core/host/detector.go`, `internal/core/host/probe.go`, `internal/core/host/utils.go`, `internal/core/ssh/service.go`, `internal/core/key/utils.go`, `internal/core/image/service.go`, and others in `internal/lib/`, `internal/core/`, `internal/service/`.
 
-Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The services themselves (console relay, nocloudnet server, loopmount entry point) do NOT use `os/exec` except for the provisioning engine noted above.
+Services running as subprocesses (`mvm run <service>`) use `system.SpawnService(ctx, cfg)` which resolves the executable, optionally prepends `sudo`, and manages process groups. The Jailer service uses the documented `syscall.Exec` exception after validating trusted executables and per-VM resource paths; other services do not execute arbitrary child commands except the documented provisioning engine.
 
 ### Model types
 
@@ -470,7 +525,9 @@ Workers defaults to `min((runtime.NumCPU() or 4) * 2, len(items))` (minimum 1) w
 
 ## Test types
 
-Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for the full specification.
+The test architecture uses L0, L1, and L2 test levels plus T1, T2, and T3 system-test execution tiers. Read
+`docs/system-test-architecture.md` for the architecture and `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for
+authoring guidance.
 
 ### L0: Pure Function Tests (Go `*_test.go`)
 
@@ -491,7 +548,35 @@ go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
 ### L2: Runner VM System Tests (Python `tests/system/`)
 
-**Ground truth.** Every user-facing feature must have an L2 test. Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM. No mocking of any kind. Operates against the compiled `mvm` binary. Verifies actual business outcomes at the OS level: JSON state, filesystem state, process state, iptables rules.
+**Ground truth.** Every user-facing feature must have an L2 test. Real binary, real subprocess, real infrastructure inside
+a disposable Firecracker VM with nested KVM. No mocking of any kind. The release candidate is installed through
+`host install-system`, and T1/T2 tests invoke exact `/usr/local/bin/mvm`; a directly copied or PATH-selected developer
+binary is not release evidence. Tests verify actual outcomes at the OS level: JSON, files, processes, cgroups,
+namespaces, links, mounts, sockets, and nftables state as applicable.
+
+The outer host controller and the artifact under test are deliberately separate. `MVM_BINARY` names an already
+installed controller used only to create, inspect, copy to, and destroy disposable runner VMs.
+`MVM_CANDIDATE_BINARY` names the release artifact (default `dist/mvm`) installed only inside those VMs. The runner
+image tag comes from an isolated `MVM_CANDIDATE_BINARY --version` probe. Building or testing a candidate must never
+replace `MVM_BINARY`.
+
+Runner initialization requests exact Firecracker 1.16.0 with
+`/usr/local/bin/mvm init --non-interactive --binary-version 1.16.0` when no local pair exists. This avoids a moving
+`latest` dependency while preserving existing local/default selection on already-prepared images.
+
+This controller/candidate isolation applies only to T1/T2 runner VMs. Tier 3 is host-direct and may mutate outer-host
+VMs, kernels, images, networks, and volumes. It is allowed only on a clean disposable qualification host where the
+candidate has been explicitly installed as exact `/usr/local/bin/mvm`; it is not an iterative developer-host test mode.
+The runner rejects Tier 3 or `--all` before any work unless `--host-direct` explicitly acknowledges outer-host mutation.
+Its stricter `--release-qualification` mode requires an unfiltered `--all`, `--host-direct`, a fresh explicit-version
+release build, and exact root-owned `/usr/local/bin/mvm` content/version identity before resource mutation. This consent
+and binary gate does not yet prove that every Tier 3 resource is newly owned or that every teardown succeeded: do not
+invoke Tier 3 or `--all` on a host with pre-existing mvmctl state until the remaining Task 17 cleanup gates land.
+
+Before any probe, build, or resource mutation, the runner also validates the system-test registry itself. Domain names
+and test files must be unique, registrations must be non-empty canonical regular files under `tests/system/`, and the
+registered set must equal the discovered `tests/system/**/test_*.py` set. A missing or duplicate domain therefore cannot
+silently produce incomplete release evidence.
 
 ```bash
 # Run inside the runner VM (disposable Firecracker VM with nested KVM)
@@ -509,8 +594,10 @@ They run inside a disposable Firecracker VM (runner VM) with nested KVM.
 ### Option C verification
 The thoroughness standard for L2 test assertions. Every test verifies system state at the deepest practical level: JSON field assertions from `* ls --json`, file existence/symlink checks, process presence via `/proc`, iptables rule presence, and/or direct SQLite queries. A test that only checks `returncode == 0` is incomplete.
 
-### Gap matrix (no longer a separate file)
-Coverage is tracked by the quick-reference table in `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md`. Every CLI subcommand and flag is classified as L0, L1, or L2. All gaps must be filled before release.
+### Coverage matrix
+`tests/system/COVERAGE_MATRIX.md` tracks command and flag coverage. The authoring guide explains how to classify a
+scenario as L0, L1, or L2. Release qualification requires the matrix and executable registry to agree with the selected
+system-test suite.
 
 ### Edge case categories (8 categories)
 For every CLI flag, check all eight: happy path (with state verify), missing required args, invalid values, boundary values, JSON output format, confirmation prompts, non-existent resources, duplicate creation.

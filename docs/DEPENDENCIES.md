@@ -174,27 +174,39 @@ Only needed for `mvm kernel pull --type official --clean-build` (building the of
 - **Virtualization**: VT-x (Intel) or AMD-V must be enabled in BIOS/UEFI.
 - **Permissions**: The user must be in the `mvm` group (created by `mvm host init`).
 
+### Managed Cache Storage
+
+For v0.3 privileged operations, `MVM_CACHE_DIR` must reside on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or
+ZFS. FUSE, remote, overlay/stacked, and automount cache roots are unsupported. Custom local paths remain supported and
+are pinned independently of unrelated ancestor filesystems.
+
+### Firecracker Jailer
+
+`mvm bin pull` downloads and checksum-verifies a matching Firecracker/Jailer release pair. The privileged Jailer service installs the pair into the root-owned trusted store; users do not install or invoke Jailer directly. Source-built pairs remain untrusted and cannot launch production VMs.
+
 ---
 
 ## H. Command Dependency Map
 
 | Command | External Binaries Invoked |
 |---------|--------------------------|
+| `mvm host install-system` | No external command; exact early root bootstrap uses descriptor-relative filesystem operations |
 | `mvm host init` | `sudo`, `groupadd`, `usermod`, `visudo`, `sysctl`, `lsmod`, `iptables`/`nft`, `modprobe` |
 | `mvm host clean` | `sudo`, `ip`, `iptables`/`nft` |
 | `mvm host reset` | `sudo`, `groupdel`, `sysctl` |
 | `mvm network create` | `ip`, `iptables`/`nft` |
 | `mvm network rm` / `sync` | `ip`, `iptables`/`nft` |
+| `mvm policy create/rm/sync` | `iptables`/`nft` |
 | `mvm image pull` | `qemu-img` (may trigger conversion), `fakeroot` (tar-rootfs) |
 | `mvm image import` | `qemu-img`, `sfdisk`, `blkid`, `mount`, `umount`, `tar`, `fakeroot` (tar-rootfs), `truncate`, `mkfs.ext4`, `unsquashfs`, `dumpe2fs`, `du`, `dd` |
 | `mvm kernel pull --type official` | `make`, `gcc`, `ld`, `flex`, `bison`, `bc`, `pahole`, `git`, `curl`, `pkg-config` |
 | `mvm kernel pull --type firecracker` | Download only (no build tools) |
 | `mvm key create` | `ssh-keygen` |
 | `mvm key import/ls/rm/inspect/export/default` | Internal only |
-| `mvm bin pull/ls/rm/default` | Internal only (downloads from GitHub API) |
-| `mvm vm create` | `firecracker`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
-| `mvm vm start/stop/reboot/pause/resume` | `firecracker`, `ip`, `iptables`/`nft` |
-| `mvm vm rm` | `firecracker`, `ip`, `iptables`/`nft` |
+| `mvm bin pull/ls/rm/default` | Internal downloads plus privileged `mvm run jailer install/remove-release` |
+| `mvm vm create` | trusted `jailer` + `firecracker`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
+| `mvm vm start/stop/reboot/pause/resume` | trusted `jailer` + `firecracker`, `ip`, `iptables`/`nft` |
+| `mvm vm rm` | `mvm run jailer cleanup`, `ip`, `iptables`/`nft` |
 | `mvm snapshot create/restore` | Internal (Firecracker API via Unix socket) |
 | `mvm volume attach/detach` | `firecracker` |
 | `mvm volume create/rm/resize` | `qemu-img` |

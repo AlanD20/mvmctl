@@ -42,6 +42,17 @@ type Operation struct {
 	Services        Services
 	ProvisionerType provisioner.ProvisionerType
 	AuditLog        *logging.AuditLog
+
+	hostSystemBinaryInstaller hostSystemBinaryInstaller
+	hostSudoersConfigurer     hostSudoersConfigurer
+}
+
+type hostSystemBinaryInstaller interface {
+	InstallSystemBinary(ctx context.Context) (bool, error)
+}
+
+type hostSudoersConfigurer interface {
+	ConfigureSudoers(ctx context.Context) (bool, error)
 }
 
 // Repos bundles all database repositories.
@@ -58,6 +69,7 @@ type Repos struct {
 	Config   config.SettingsRepository
 	Vsock    vsock.Repository
 	Snapshot snapshot.Repository
+	Policy   network.ServiceAccessPolicyRepository
 }
 
 // Services bundles all domain services.
@@ -95,6 +107,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Config:   config.NewRepository(sqlDB),
 		Vsock:    vsock.NewRepository(sqlDB),
 		Snapshot: snapshot.NewRepository(sqlDB),
+		Policy:   network.NewServiceAccessPolicyRepository(sqlDB),
 	}
 	configReg := config.NewConstraintRegistry()
 	config.RegisterBuiltinConstraints(configReg)
@@ -104,9 +117,9 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 	defaultFwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, sqlDB)
 
 	s := Services{
-		Network: network.NewService(r.Network, defaultFwTracker),
+		Network: network.NewService(r.Network, defaultFwTracker, r.Policy),
 		Image:   image.NewService(r.Image),
-		Kernel:  kernel.NewService(r.Kernel, cacheDir),
+		Kernel:  kernel.NewService(r.Kernel, filepath.Join(cacheDir, "kernels")),
 		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
 		Key:     key.NewService(r.Key, infra.GetKeysDir()),
 		Host:    host.NewService(r.Host),
@@ -149,10 +162,12 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 			r.Vsock,
 			r.Snapshot,
 		),
-		Repos:           r,
-		Services:        s,
-		ProvisionerType: provisionerType,
-		AuditLog:        logging.NewAuditLog(),
+		Repos:                     r,
+		Services:                  s,
+		ProvisionerType:           provisionerType,
+		AuditLog:                  logging.NewAuditLog(),
+		hostSystemBinaryInstaller: s.Host,
+		hostSudoersConfigurer:     s.Host,
 	}
 }
 

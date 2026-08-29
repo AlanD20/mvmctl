@@ -111,8 +111,8 @@ func (op *Operation) resolveConsole(ctx context.Context, identifier string) (*in
 	vmEntity := vms[0]
 	// Create relay manager.
 	vmDir := infra.GetVMDirByID(vmEntity.ID)
-	pidPath := filepath.Join(vmDir, console.DefaultConsolePIDFilename)
-	socketPath := filepath.Join(vmDir, console.DefaultConsoleSocketFilename)
+	pidPath := filepath.Join(vmDir, infra.VMConsolePIDFilename)
+	socketPath := filepath.Join(vmDir, infra.VMConsoleSocketFilename)
 	relay := console.NewRelay(vmEntity.Name, pidPath, socketPath)
 	return rawInput.Resolve(vmEntity, relay)
 }

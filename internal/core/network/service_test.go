@@ -349,7 +349,7 @@ func TestService_EnrichWithLeases(t *testing.T) {
 
 	t.Run("attaches_leases_to_networks", func(t *testing.T) {
 		leaseRepo := testutil.NewLeaseRepo()
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 
 		net1 := newNet("n-1", "alpha", "10.0.0.0/24", "10.0.0.1")
 		net2 := newNet("n-2", "beta", "10.0.1.0/24", "10.0.1.1")
@@ -373,7 +373,7 @@ func TestService_EnrichWithLeases(t *testing.T) {
 
 	t.Run("empty_networks_no_crash", func(t *testing.T) {
 		leaseRepo := testutil.NewLeaseRepo()
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 
 		err := svc.EnrichWithLeases(ctx, []*model.NetworkItem{}, leaseRepo)
 		require.NoError(t, err)
@@ -381,7 +381,7 @@ func TestService_EnrichWithLeases(t *testing.T) {
 
 	t.Run("network_with_no_leases_gets_empty_slice", func(t *testing.T) {
 		leaseRepo := testutil.NewLeaseRepo()
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 
 		net := newNet("n-1", "alpha", "10.0.0.0/24", "10.0.0.1")
 		err := svc.EnrichWithLeases(ctx, []*model.NetworkItem{net}, leaseRepo)
@@ -398,7 +398,7 @@ func TestService_EnrichWithLeases(t *testing.T) {
 func TestService_ListAll_noVerify(t *testing.T) {
 	ctx := context.Background()
 	netRepo := testutil.NewNetworkRepo()
-	svc := network.NewService(netRepo, nil)
+	svc := network.NewService(netRepo, nil, nil)
 
 	n1 := newNet("n-1", "alpha", "10.0.0.0/24", "10.0.0.1")
 	n2 := newNet("n-2", "beta", "10.0.1.0/24", "10.0.1.1")
@@ -414,7 +414,7 @@ func TestService_ListAll_noVerify(t *testing.T) {
 // Rationale: When firewall tracker is nil, these must be no-ops (not panic).
 
 func TestService_TrackerNilIsNoop(t *testing.T) {
-	svc := network.NewService(testutil.NewNetworkRepo(), nil)
+	svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 
 	assert.Nil(t, svc.FirewallTracker())
 
@@ -449,7 +449,7 @@ func TestService_EnsureBridge(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.EnsureBridge(ctx, "mvm-br0", "10.0.0.1/24")
 		require.NoError(t, err)
 		require.Len(t, ran, 3)
@@ -472,7 +472,7 @@ func TestService_EnsureBridge(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.EnsureBridge(ctx, "mvm-br0", "10.0.0.1/24")
 		require.NoError(t, err)
 		// Reconcile adds subnet then sets link up
@@ -495,7 +495,7 @@ func TestService_EnsureBridge(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.EnsureBridge(ctx, "mvm-br0", "10.0.0.1/24")
 		require.NoError(t, err)
 		// Only one command (link set up) since subnet already present
@@ -514,7 +514,7 @@ func TestService_EnsureBridge(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.EnsureBridge(ctx, "mvm-br0", "10.0.0.1/24")
 		require.Error(t, err)
 	})
@@ -548,7 +548,7 @@ func TestService_RemoveBridge(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.RemoveBridge(ctx, "mvm-br0", "net-1")
 		require.NoError(t, err)
 		assert.Equal(t, []string{"tap-1", "tap-2"}, removedTaps)
@@ -577,7 +577,7 @@ func TestService_EnsureTap(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.EnsureTapDevice(ctx, "tap-test", "mvm-br0")
 		require.NoError(t, err)
 		require.Len(t, ran, 3)
@@ -600,7 +600,7 @@ func TestService_EnsureTap(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.EnsureTapDevice(ctx, "tap-test", "mvm-br0")
 		require.NoError(t, err)
 		assert.Empty(t, ran, "no ip commands when TAP already on correct bridge")
@@ -620,7 +620,7 @@ func TestService_EnsureTap(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.EnsureTapDevice(ctx, "tap-test", "mvm-br0")
 		require.NoError(t, err)
 		require.Len(t, ran, 3)
@@ -650,7 +650,7 @@ func TestService_RemoveTap(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.RemoveTap(ctx, "tap-test", "mvm-br0", "net-1")
 		require.NoError(t, err)
 		assert.Equal(t, "tap-test", removedTap)
@@ -664,7 +664,7 @@ func TestService_RemoveTap(t *testing.T) {
 			TapExistsFn: func(_ context.Context, _ string) bool { return false },
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		err := svc.RemoveTap(ctx, "nonexistent", "", "net-1")
 		require.NoError(t, err)
 	})
@@ -697,7 +697,7 @@ func TestService_CleanupOrphanedBridges(t *testing.T) {
 		n.Bridge = "mvm-alpha"
 		require.NoError(t, netRepo.Upsert(ctx, n))
 
-		svc := network.NewService(netRepo, nil)
+		svc := network.NewService(netRepo, nil, nil)
 		count := svc.CleanupOrphanedBridges(ctx, []*model.NetworkItem{n})
 		assert.Equal(t, 1, count)
 		assert.Equal(t, []string{"mvm-bravo"}, removedBridges)
@@ -728,7 +728,7 @@ func TestService_RemoveStaleInterfaces(t *testing.T) {
 			},
 		}
 
-		svc := network.NewService(testutil.NewNetworkRepo(), nil)
+		svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 		summary := svc.RemoveStaleInterfaces(ctx, "mvm-stale")
 		assert.Equal(t, 2, len(removedTaps))
 		assert.Contains(t, summary[0], "Removed")
@@ -740,16 +740,16 @@ func TestService_RemoveStaleInterfaces(t *testing.T) {
 // networks (no error, no panic).
 
 func TestService_SyncIPTablesRulesBatch_nilTracker(t *testing.T) {
-	svc := network.NewService(testutil.NewNetworkRepo(), nil)
+	svc := network.NewService(testutil.NewNetworkRepo(), nil, nil)
 
-	results, err := svc.SyncIPTablesRulesBatch(context.Background(), nil)
+	results, err := svc.SyncIPTablesRulesBatch(context.Background(), nil, nil)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 
 	results, err = svc.SyncIPTablesRulesBatch(context.Background(), []*model.NetworkItem{
 		{ID: "n-1", Name: "alpha"},
 		{ID: "n-2", Name: "beta"},
-	})
+	}, nil)
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 	assert.Equal(t, 0, results["n-1"].Added)
@@ -813,7 +813,7 @@ func TestService_SyncIPTablesRulesBatch_withTracker(t *testing.T) {
 
 	// Create a real nftables-backed firewall tracker.
 	fwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, db)
-	svc := network.NewService(netRepo, fwTracker)
+	svc := network.NewService(netRepo, fwTracker, nil)
 
 	// Seed two networks in BOTH the in-memory repo (used by Service for
 	// network lookups) and the SQLite DB (satisfies FK on nftables_rules).
@@ -843,7 +843,7 @@ func TestService_SyncIPTablesRulesBatch_withTracker(t *testing.T) {
 		"all", "10.0.1.0/24", "0.0.0.0/0", "mvm-beta", "wlan0", "ACCEPT", 0, 0)
 
 	// Sync batch of both networks.
-	results, err := svc.SyncIPTablesRulesBatch(ctx, []*model.NetworkItem{net1, net2})
+	results, err := svc.SyncIPTablesRulesBatch(ctx, []*model.NetworkItem{net1, net2}, nil)
 	require.NoError(t, err)
 
 	// Verify per-network results exist.
@@ -853,11 +853,11 @@ func TestService_SyncIPTablesRulesBatch_withTracker(t *testing.T) {
 	// With the FakeRunner returning empty nft output, RuleExists finds no
 	// kernel rules — so all are counted as "added".
 	r1 := results["n-1"]
-	assert.Equal(t, 2, r1.Added)
+	assert.Equal(t, 4, r1.Added)
 	assert.Equal(t, 0, r1.Verified)
 
 	r2 := results["n-2"]
-	assert.Equal(t, 2, r2.Added)
+	assert.Equal(t, 4, r2.Added)
 	assert.Equal(t, 0, r2.Verified)
 
 	// Verify that BatchEnsureRules was called once (single nft -f - command).
@@ -879,9 +879,9 @@ func TestService_SyncIPTablesRulesBatch_emptyNetworks(t *testing.T) {
 
 	db := testutil.NewInMemoryDB(t)
 	fwTracker := firewall.NewFirewallTracker(model.FirewallBackendNFTables, true, db)
-	svc := network.NewService(testutil.NewNetworkRepo(), fwTracker)
+	svc := network.NewService(testutil.NewNetworkRepo(), fwTracker, nil)
 
-	results, err := svc.SyncIPTablesRulesBatch(ctx, nil)
+	results, err := svc.SyncIPTablesRulesBatch(ctx, nil, nil)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 }
@@ -909,7 +909,7 @@ func TestService_ListAll_verify(t *testing.T) {
 		require.NoError(t, netRepo.Upsert(ctx, n1))
 		require.NoError(t, netRepo.Upsert(ctx, n2))
 
-		svc := network.NewService(netRepo, nil)
+		svc := network.NewService(netRepo, nil, nil)
 		got, err := svc.ListAll(ctx, true)
 		require.NoError(t, err)
 		// Both networks are listed; the one with missing bridge is marked not present
@@ -934,7 +934,7 @@ func TestService_ListAll_verify(t *testing.T) {
 		n.Bridge = "mvm-alpha"
 		require.NoError(t, netRepo.Upsert(ctx, n))
 
-		svc := network.NewService(netRepo, nil)
+		svc := network.NewService(netRepo, nil, nil)
 		got, err := svc.ListAll(ctx, true)
 		require.NoError(t, err)
 		assert.Len(t, got, 1)

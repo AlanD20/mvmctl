@@ -1,5 +1,8 @@
 # How Agents Write System Tests
 
+This is the authoring guide for L0, L1, and L2 scenarios. The execution-tier architecture, fixture scope, runner
+protocol, and known limitations live in [system-test-architecture.md](../system-test-architecture.md).
+
 > **See also:** [ADR-0012](../adr/0012-unified-test-architecture.md) for the architectural decisions and rationale behind this document.
 >
 > **See also:** [HOW_AGENTS_WRITE_UNIT_TESTS.md](HOW_AGENTS_WRITE_UNIT_TESTS.md) for L0/L1 test patterns (table-driven tests, in-memory repos, FakeRunner, in-memory SQLite).
@@ -23,7 +26,7 @@
 
 ## Purpose
 
-This document is a **specification and how-to reference** for writing and classifying tests at all three levels. It defines:
+This document explains how to write and classify tests at all three levels. It defines:
 
 - **L0** (pure function Go tests) — when to write them, what they prove
 - **L1** (hermetic Go tests) — when to use in-memory SQLite, temp dirs, `FakeRunner`
@@ -255,6 +258,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `vm create --ip` / `--mac` | **L2** | Real Firecracker spawn |
 | `vm create --console` | **L2** | Real Firecracker spawn |
 | `vm create --no-pci` | **L2** | Real Firecracker spawn |
+| canonical Jailer launch, cgroup enforcement, and cleanup | **L2** | Real chroot, trusted pair, cgroup membership and values, lifecycle, volume, and snapshot behavior |
 | `vm create --enable-logging` / `--enable-metrics` | **L2** | Verify files on disk |
 | `vm create --cloud-init-mode <mode>` | **L2** | Real Firecracker + cloud-init |
 | `vm create --nocloud-net-port` | **L2** | Real Firecracker + network |
@@ -311,6 +315,7 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 | `network rm <name1> <name2>` | **L2** | Multiple bridge cleanup |
 | `network default` / `network default <nonexistent>` | L1 | DB update |
 | `network sync` / `network sync --json` | **L2** | Real bridge + firewall recreation |
+| `policy create/ls/inspect/rm/sync` | **L2** | Cross-network connectivity, exact destination/port allow, host/default deny, backend parity |
 | Sync after bridge deletion | **L2** | Real bridge deletion + recovery |
 
 ### `mvm volume`
@@ -476,10 +481,11 @@ Every CLI command and flag that a user can invoke must be tested. This table cla
 Every L2 test runs **inside a disposable Firecracker VM** with nested KVM, not directly on the host:
 
 ```
-Host (no mvm state at all)
+Outer host (only controller-owned disposable test resources)
 │
 └── Runner VM (custom base image mvm-test-runner:<version>)
-    ├── /usr/local/bin/mvm          ← built binary, baked in
+    ├── /opt/mvmctl-test/mvm-candidate ← root-owned staged release candidate
+    ├── /usr/local/bin/mvm          ← installed through host install-system
     ├── /tests/system/              ← test suite, baked in
     ├── /mnt/                       ← shared RO asset volume
     │
@@ -493,9 +499,11 @@ Host (no mvm state at all)
 ### Runner VM Lifecycle
 
 ```
-1. Build mvm binary on host
-2. Create runner VM from custom base image (mvm-test-runner:<version>)
-3. Provision: mount shared asset volume, run mvm init, pull cache hits
+1. Build `MVM_CANDIDATE_BINARY` on the host without replacing the installed `MVM_BINARY` controller
+2. Derive the image tag from an isolated candidate version probe and create a runner VM from that image
+3. Stage the candidate in the runner, invoke `host install-system`, initialize through exact
+   `/usr/local/bin/mvm`, mount the shared volume, run unprivileged
+   `/usr/local/bin/mvm init --binary-version 1.16.0`, and pull cache hits through that same installed path
 4. Execute pytest <test-file> directly inside the VM
 5. Destroy runner VM when done
 ```
@@ -524,7 +532,7 @@ network-dependent skips:
 
 The official kernel 7.0.11 is **not pre-baked** into the base image — it is
 pulled on demand by the orchestrator (or pre-seeded in the host asset mirror)
-via `mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs`.
+via `/usr/local/bin/mvm kernel pull official:7.0.11 --features nftables,tuntap,kvm,btrfs`.
 The shared asset volume contains the asset mirror contents, which includes
 pre-downloaded kernels, images, and binaries if the host mirror was populated
 before `--prepare`.
@@ -549,6 +557,11 @@ The orchestrator (`scripts/run-system-tests.py`) creates and provisions the VM b
 running pytest, and destroys it after. The fixture just provides the VM name to
 tests so they can reference it when calling `_run_mvm(runner_vm, ...)`.
 
+`_run_mvm` always executes exact `/usr/local/bin/mvm`. Do not change it back to PATH lookup and do not copy a candidate
+directly onto that path; doing either would bypass the administrator installation path that the L2 suite qualifies.
+On the outer host, `MVM_BINARY` is only the resource controller and `MVM_CANDIDATE_BINARY` is the artifact under test;
+the orchestrator rejects path, symlink, and hard-link aliases between them.
+
 ### Test Timeout Policy: CLI flags vs subprocess timeouts
 
 **These are two distinct concerns — do not conflate them.**
@@ -565,8 +578,8 @@ These control how long `subprocess.run()` waits for the `mvm` command to complet
 def _run_mvm(
     vm_name: str, *args: str, check: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
-    """Run an mvm command. vm_name is ignored — already inside test VM."""
-    cmd = ["mvm", *args]
+    """Run the installed mvm CLI. vm_name is ignored inside the test VM."""
+    cmd = ["/usr/local/bin/mvm", *args]
     result = subprocess.run(
         cmd, capture_output=True, text=True,
         timeout=timeout + 30,  # 90s total by default

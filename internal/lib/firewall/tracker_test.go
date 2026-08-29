@@ -19,6 +19,7 @@ type mockTracker struct {
 	teardownCalls     int
 	ensureRuleResults []ensureRuleCall
 	batchEnsureCalls  int
+	batchEnsureRules  []model.FirewallRule
 	removeRuleCalls   int
 	batchRemoveCalls  int
 	ensureChainCalls  int
@@ -59,10 +60,11 @@ func (m *mockTracker) EnsureRule(_ context.Context, rule model.FirewallRule, lab
 	return m.stubEnsureRule
 }
 
-func (m *mockTracker) BatchEnsureRules(_ context.Context, _ []model.FirewallRule) model.FirewallRuleResult {
+func (m *mockTracker) BatchEnsureRules(_ context.Context, rules []model.FirewallRule) model.FirewallRuleResult {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.batchEnsureCalls++
+	m.batchEnsureRules = append([]model.FirewallRule(nil), rules...)
 	return m.stubBatchEnsure
 }
 
@@ -120,8 +122,19 @@ type mockRepo struct {
 	getByNetworkIDCalls   int
 	getByNetworkIDIFCalls int
 
-	stubRules []*model.FirewallRule
-	stubErr   error
+	stubRules  []*model.FirewallRule
+	stubErr    error
+	replaced   []model.FirewallRule
+	replaceErr error
+}
+
+func (m *mockRepo) ListAllActive(context.Context) ([]*model.FirewallRule, error) {
+	return m.stubRules, m.stubErr
+}
+
+func (m *mockRepo) ReplacePolicyRules(_ context.Context, rules []model.FirewallRule) error {
+	m.replaced = append([]model.FirewallRule(nil), rules...)
+	return m.replaceErr
 }
 
 func (m *mockRepo) GetByNetworkID(_ context.Context, _ string, _ bool) ([]*model.FirewallRule, error) {
@@ -333,6 +346,41 @@ func TestTracker_EnsureRule_inBatchMode_queuesRule(t *testing.T) {
 	assert.True(t, result.Success)
 	assert.Len(t, ft.batchRules, 1, "rule should be queued")
 	assert.Equal(t, 0, len(mb.ensureRuleResults), "backend should not be called")
+}
+
+func TestTracker_ReconcilePolicyRulesReplacesRowsBeforeKernelApply(t *testing.T) {
+	ctx := context.Background()
+	desired := []model.FirewallRule{{NetworkID: "new", RuleType: model.FirewallRuleTypePolicyAllow}}
+	active := []*model.FirewallRule{{NetworkID: "new", RuleType: model.FirewallRuleTypePolicyAllow}}
+	repo := &mockRepo{stubRules: active}
+	backend := &mockTracker{stubBatchEnsure: model.FirewallRuleResult{Success: true}}
+	tracker := &FirewallTracker{firewallRepo: repo, backend: backend}
+
+	result := tracker.ReconcilePolicyRules(ctx, desired)
+	assert.True(t, result.Success)
+	assert.Equal(t, desired, repo.replaced)
+	assert.Equal(t, []model.FirewallRule{*active[0]}, backend.batchEnsureRules)
+}
+
+func TestTracker_ReconcilePolicyRulesReplacementFailurePreventsKernelApply(t *testing.T) {
+	repo := &mockRepo{replaceErr: assert.AnError}
+	backend := &mockTracker{}
+	tracker := &FirewallTracker{firewallRepo: repo, backend: backend}
+
+	result := tracker.ReconcilePolicyRules(context.Background(), nil)
+	assert.False(t, result.Success)
+	assert.Zero(t, backend.batchEnsureCalls)
+}
+
+func TestTracker_ReconcilePolicyRulesEmptyStateStillFlushesKernel(t *testing.T) {
+	repo := &mockRepo{}
+	backend := &mockTracker{stubBatchEnsure: model.FirewallRuleResult{Success: true}}
+	tracker := &FirewallTracker{firewallRepo: repo, backend: backend}
+
+	result := tracker.ReconcilePolicyRules(context.Background(), nil)
+	assert.True(t, result.Success)
+	assert.Equal(t, 1, backend.batchEnsureCalls)
+	assert.Empty(t, backend.batchEnsureRules)
 }
 
 // --- Nil backend guard ---

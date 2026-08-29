@@ -20,18 +20,28 @@ func NewInitCmd(initAPI api.InitAPI, hostAPI api.HostAPI) *cobra.Command {
 	var nonInteractive bool
 	var skipHost bool
 	var skipNetwork bool
+	var binaryVersion string
 
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: fmt.Sprintf("Initialize %s", infra.CLIName),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInitWizard(cmd.Context(), initAPI, hostAPI, nonInteractive, skipHost, skipNetwork)
+			return runInitWizard(
+				cmd.Context(),
+				initAPI,
+				hostAPI,
+				nonInteractive,
+				skipHost,
+				skipNetwork,
+				binaryVersion,
+			)
 		},
 	}
 
 	cmd.Flags().BoolVar(&nonInteractive, "non-interactive", false, "Use defaults, skip prompts")
 	cmd.Flags().BoolVar(&skipHost, "skip-host", false, "Skip host init step")
 	cmd.Flags().BoolVar(&skipNetwork, "skip-network", false, "Skip default network creation")
+	cmd.Flags().StringVar(&binaryVersion, "binary-version", "", "Firecracker version to download when none is local")
 
 	return cmd
 }
@@ -42,11 +52,20 @@ func runInitWizard(
 	initAPI api.InitAPI,
 	hostAPI api.HostAPI,
 	nonInteractive, skipHost, skipNetwork bool,
+	binaryVersion string,
 ) error {
 	common.Cli.Info("")
 	common.Cli.Info(fmt.Sprintf("%s init — first-time setup", infra.CLIName))
 	common.Cli.Info(strings.Repeat("-", 40))
-	result, err := handleInteractiveFlow(ctx, initAPI, hostAPI, nonInteractive, skipHost, skipNetwork)
+	result, err := handleInteractiveFlow(
+		ctx,
+		initAPI,
+		hostAPI,
+		nonInteractive,
+		skipHost,
+		skipNetwork,
+		binaryVersion,
+	)
 	if err != nil {
 		return err
 	}
@@ -229,7 +248,6 @@ func (s *initState) handleSudoRequired(ctx context.Context, interaction *errs.Ne
 	hostStateAfter := s.hostAPI.HostStatusCheck(ctx)
 	s.hostSetupMsg = composeHostSetupMessage(hostStateBefore, hostStateAfter)
 	s.sudoCompleted = true
-	s.downloadVersion = ""
 	return nil
 }
 
@@ -281,13 +299,15 @@ func handleInteractiveFlow(
 	initAPI api.InitAPI,
 	hostAPI api.HostAPI,
 	nonInteractive, skipHost, skipNetwork bool,
+	binaryVersion string,
 ) (*results.InitResult, error) {
 	state := &initState{
-		initAPI:        initAPI,
-		hostAPI:        hostAPI,
-		nonInteractive: nonInteractive,
-		skipHost:       skipHost,
-		skipNetwork:    skipNetwork,
+		initAPI:         initAPI,
+		hostAPI:         hostAPI,
+		nonInteractive:  nonInteractive,
+		skipHost:        skipHost,
+		skipNetwork:     skipNetwork,
+		downloadVersion: binaryVersion,
 	}
 
 	// Always return the last result even on early exit.

@@ -1,7 +1,11 @@
 # Firewall Backend Mutual Exclusion — nftables vs iptables
 
-**Status:** Active
+**Status:** Superseded for v0.3.0 by
+[ADR-0017: Per-VM Network Namespaces and Typed Connectivity Policies](0017-per-vm-network-namespaces-and-typed-policies.md)
 **Date:** 2026-05-22
+
+> This ADR remains the description of the currently implemented transitional dual-backend behavior. v0.3.0 removes
+> iptables and the backend selector after the nftables-only path and its L2 qualification are complete.
 
 The project provides two independent firewall rule tracking backends: **nftables** (default) and **iptables** (legacy). These backends are **mutually exclusive** — a single session uses exactly one backend, never a combination. The `firewall_backend` setting acts as a toggle selector.
 

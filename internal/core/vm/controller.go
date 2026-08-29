@@ -35,6 +35,13 @@ func NewController(vm *model.VMItem, repo Repository) *Controller {
 //
 // First two code paths (non-running, process-gone) let errors propagate.
 func (c *Controller) Stop(ctx context.Context, force bool) error {
+	if c.vm.JailerBinaryID != "" {
+		defer func() {
+			if err := CleanupJail(context.Background(), c.vm.ID); err != nil {
+				slog.Warn("failed to clean VM jail after stop", "vm", c.vm.Name, "error", err)
+			}
+		}()
+	}
 	pid := c.vm.PID
 
 	// --- Non-running VMs: idempotent + orphan cleanup ---
@@ -45,7 +52,10 @@ func (c *Controller) Stop(ctx context.Context, force bool) error {
 	// Errors must propagate to caller — NOT absorbed.
 	if c.vm.Status != model.VMStatusRunning && c.vm.Status != model.VMStatusStarting {
 		if pid > 0 && system.IsProcessAlive(pid, c.vm.ProcessStartTime) {
-			system.KillProcess(pid)
+			system.GracefulShutdown(system.ShutdownConfig{
+				Pid: pid, IsChild: false, GracefulTimeout: 100 * time.Millisecond,
+				KillTimeout: 100 * time.Millisecond, ExpectedStartTime: c.vm.ProcessStartTime,
+			})
 			if err := c.repo.UpdateStatus(ctx, c.vm.ID, model.VMStatusStopped); err != nil {
 				return err
 			}
@@ -107,7 +117,7 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) e
 		if ctrlErr == nil && wasCtrlAltDel {
 			exitCode = system.GracefulShutdown(system.ShutdownConfig{
 				Pid:               pid,
-				IsChild:           true,
+				IsChild:           false,
 				PreSignalHook:     func() bool { return false },
 				GracefulTimeout:   2 * time.Second,
 				KillTimeout:       100 * time.Millisecond,
@@ -119,7 +129,7 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) e
 		if exitCode == nil {
 			exitCode = system.GracefulShutdown(system.ShutdownConfig{
 				Pid:               pid,
-				IsChild:           true,
+				IsChild:           false,
 				GracefulTimeout:   2 * time.Second,
 				KillTimeout:       1 * time.Millisecond,
 				ExpectedStartTime: c.vm.ProcessStartTime,
@@ -134,7 +144,7 @@ func (c *Controller) shutdownProcess(ctx context.Context, force bool, pid int) e
 		// should die within milliseconds.
 		exitCode = system.GracefulShutdown(system.ShutdownConfig{
 			Pid:               pid,
-			IsChild:           true,
+			IsChild:           false,
 			GracefulTimeout:   100 * time.Millisecond,
 			KillTimeout:       100 * time.Millisecond,
 			ExpectedStartTime: c.vm.ProcessStartTime,
@@ -337,7 +347,6 @@ func (c *Controller) Reboot(ctx context.Context, force bool) error {
 // it stays paused after the snapshot. If pauseOnly is false, the VM is resumed.
 func (c *Controller) SnapshotCreate(ctx context.Context, cfg model.SnapshotCreateConfig) (err error) {
 	name := c.vm.Name
-
 	// Validate state — snapshot requires RUNNING or PAUSED
 	if c.vm.Status == model.VMStatusStarting {
 		return errs.New(errs.CodeVMStateInvalid,
@@ -359,6 +368,13 @@ func (c *Controller) SnapshotCreate(ctx context.Context, cfg model.SnapshotCreat
 	if c.vm.APISocketPath == "" {
 		return errs.New(errs.CodeVMStateInvalid,
 			fmt.Sprintf("Socket not found for VM '%s'. Must be running with --enable-api-socket", name))
+	}
+	if cfg.SnapshotDir != "" {
+		if err := ExposeSnapshot(ctx, c.vm.ID, cfg.SnapshotDir); err != nil {
+			slog.Error("failed to expose snapshot directory inside VM jail", "vm", name, "error", err)
+			return errs.WrapMsg(errs.CodeSnapshotCreateFailed,
+				"failed to expose snapshot directory inside VM jail", err)
+		}
 	}
 
 	apiSocket := c.vm.APISocketPath
@@ -478,11 +494,23 @@ func (c *Controller) AttachVolume(ctx context.Context, driveConfig model.DriveCo
 	apiSocket := c.vm.APISocketPath
 	configPath := c.vm.ConfigPath
 
+	if c.vm.JailerBinaryID != "" {
+		if err := exposeVolume(ctx, c.vm.ID, driveConfig); err != nil {
+			slog.Error("failed to expose volume inside VM jail", "vm", c.vm.Name, "error", err)
+			return err
+		}
+		driveConfig.PathOnHost = jailedVolumePath(driveConfig.DriveID)
+	}
 	// Hotplug into the running Firecracker process
 	client := firecracker.NewClient(apiSocket)
 	err := client.PutDrive(ctx, driveConfig)
 	client.Close()
 	if err != nil {
+		if c.vm.JailerBinaryID != "" {
+			if cleanupErr := removeVolume(context.Background(), c.vm.ID, driveConfig.DriveID); cleanupErr != nil {
+				slog.Warn("failed to remove volume mount after hotplug failure", "vm", c.vm.Name, "error", cleanupErr)
+			}
+		}
 		return err
 	}
 
@@ -515,6 +543,12 @@ func (c *Controller) DetachVolume(ctx context.Context, driveID string) error {
 	configMgr := NewFirecrackerConfigManager(configPath)
 	if _, err := configMgr.RemoveDrive(driveID); err != nil {
 		return err
+	}
+	if c.vm.JailerBinaryID != "" {
+		if err := removeVolume(ctx, c.vm.ID, driveID); err != nil {
+			slog.Error("failed to remove volume from VM jail", "vm", c.vm.Name, "drive_id", driveID, "error", err)
+			return err
+		}
 	}
 
 	slog.Info("Detached volume", "drive_id", driveID, "vm", c.vm.Name)

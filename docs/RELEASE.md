@@ -32,23 +32,35 @@ This document covers how to release a new version of mvmctl from start to finish
 Run the full CI gate:
 
 ```bash
-# Compile
-go build ./...
-
-# Vet
+# Exact CI gates
+go mod tidy && git diff --exit-code
+test -z "$(gofmt -l .)"
+test -z "$(golines --max-len=120 --no-reformat-tags --list-files \
+  ./internal/ ./pkg/ ./cmd/)"
+go generate ./internal/service/agent/...
+git diff --exit-code
 go vet ./...
+go test ./... -count=1 -coverprofile=coverage.out -covermode=atomic
 
-# Unit tests
-go test ./...
+# Build the release candidate with an explicit identity
+./scripts/build.sh release --version X.Y.Z --output dist/mvm
 
-# Build release binary for system tests
-./scripts/build.sh release
-cp dist/mvm ~/.local/bin/mvm
+# The remaining commands mutate the outer host. Run them only on a dedicated
+# clean qualification host or disposable outer VM.
+sudo ./dist/mvm host install-system
+sudo /usr/local/bin/mvm host init
 
-python3 scripts/run-system-tests.py --all
+MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \
+MVM_BINARY=/usr/local/bin/mvm MVM_CANDIDATE_BINARY=./dist/mvm \
+  python3 scripts/run-system-tests.py \
+  --release-qualification --host-direct --rebuild \
+  --candidate-version X.Y.Z --all
 ```
 
-All five must pass. If system tests fail, investigate before proceeding.
+Every gate and every collected test must pass with zero skips/xfails/xpasses. If
+system tests fail or omit a required case, investigate before proceeding. Do not
+run the host-direct Tier 3 suite on a workstation with pre-existing mvmctl state.
+`--host-direct` is explicit consent, not proof that cleanup is ownership-safe.
 
 See [RC_QA.md](RC_QA.md) for test environment setup, the orchestrator script
 reference, and tier execution details.

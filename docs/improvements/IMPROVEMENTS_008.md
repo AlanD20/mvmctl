@@ -1,6 +1,6 @@
 # Snapshot-Based Instant VM Cloning & Next-Level Optimizations
 
-> **STATUS: Snapshot domain implemented (Phase 2).** 
+> **STATUS: Snapshot domain implemented (Phase 2), v0.3 hardening incomplete.**
 > | Phase | Status |
 > |-------|--------|
 > | Phase 1: Foundation (huge pages, cgroup v2, boot args) | ⚠️ Partial |
@@ -10,7 +10,10 @@
 >
 > The snapshot domain (`internal/core/snapshot/`), CLI commands (`internal/cli/snapshot.go`), API layer (`pkg/api/snapshot.go`), and input validation (`pkg/api/inputs/snapshot.go`) are all implemented. The `SnapshotItem` model uses `SnapshotDir`, `MemoryFile`, `StateFile`, `RootfsFile`, `ImageID`, `ExtraConfig` (as `*SnapshotExtraConfig` struct). Firecracker snapshot/resume API is at `internal/lib/firecracker/client.go`. 
 >
-> **Last verified:** 2026-06-27
+> Fixed artifact naming is implemented. Crash-consistent capture, descriptor-pinned resources, and the private
+> mount-namespace rootfs overlay remain release work under ADR-0016.
+>
+> **Last verified:** 2026-08-28
 
 **Phase:** Multi-phase — spans 3-4 milestones
 **Complexity:** Very High
@@ -26,15 +29,18 @@ When `PUT /snapshot/create` is called on a **paused** microVM, Firecracker produ
 
 ```
 /home/user/.cache/mvmctl/snapshots/my-snapshot/
-├── vm.mem           ← Raw dump of ALL guest RAM pages
-├── vm.vmstate       ← Serde bitcode binary format (vCPU state, device state)
-├── rootfs.ext4      ← Frozen rootfs image at snapshot time
-└── metadata.json    ← Origin, kernel, image, timestamps
+├── memory           ← Raw dump of ALL guest RAM pages
+├── vmstate          ← Serde bitcode binary format (vCPU state, device state)
+└── rootfs.img       ← Fixed managed rootfs leaf; filesystem type is metadata
 ```
+
+Snapshot identity and origin metadata are stored in SQLite. The current implementation also carries the transitional
+`phantom-rootfs.img` symlink documented in
+[SNAPSHOT_DOMAIN.md](../implementations/SNAPSHOT_DOMAIN.md); ADR-0016 removes it through a private namespace overlay.
 
 **The mmap secret (MAP_PRIVATE):**
 - Pages are NOT read eagerly — they're demand-paged (loaded on first access)
-- The original `vm.mem` file is **never modified** — writes go to anonymous COW pages
+- The original `memory` file is **never modified** — writes go to anonymous COW pages
 - **Multiple processes can MAP_PRIVATE the same file simultaneously** — each gets independent COW
 - Loading the snapshot takes **~3-8ms** (just the mmap syscall + metadata), not the full RAM size
 
@@ -136,7 +142,7 @@ Use a **read-only base image** + **writable overlay** per VM. Zero copy, O(1) cr
 | Item | Status |
 |---|---|
 | Huge pages: add to `FirecrackerConfig` + host docs | ⚠️ Partial — hugepage detection implemented in `internal/core/host/detector.go` (reads `/sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages`), stored in `host_state` schema, but not added to `FirecrackerConfig` struct and no host docs written. |
-| cgroup v2 + `kvm.nx_huge_pages=never` docs | ⚠️ Partial — cgroup v2 detection in `internal/core/host/detector.go` (checks `/sys/fs/cgroup/cgroup.controllers`), stored in `host_state` schema, but docs not written. |
+| cgroup v2 + `kvm.nx_huge_pages=never` docs | ⚠️ Partial — typed per-VM cgroup-v2 enforcement and host controller detection are implemented and documented; the separate `kvm.nx_huge_pages=never` host tuning remains unimplemented. |
 | Kernel boot args: add safe params | ⚠️ Partial (basic args exist) |
 
 ### Phase 2: Snapshot Domain (Weeks 2-3) ✅ DONE

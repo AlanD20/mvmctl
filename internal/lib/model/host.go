@@ -82,18 +82,19 @@ type HostHardware struct {
 
 // HostLimits holds detected host kernel limits.
 type HostLimits struct {
-	PIDMax              int    `json:"pid_max"`
-	FDMax               int    `json:"fd_max"`
-	ConntrackMax        int    `json:"conntrack_max"`
-	TAPDevicesMax       int    `json:"tap_devices_max"`
-	IPLocalPortRange    [2]int `json:"ip_local_port_range"`
-	NestedVirtAvailable bool   `json:"nested_virt_available"`
-	EPTAvailable        bool   `json:"ept_available"`
-	HugepageCount2MB    int    `json:"hugepage_count_2mb"`
-	KSMDisabled         bool   `json:"ksm_disabled"`
-	CgroupVersion       int    `json:"cgroup_version"`
-	SwapTotalMiB        int    `json:"swap_total_mib"`
-	KernelMinimumMet    bool   `json:"kernel_minimum_met"`
+	PIDMax              int      `json:"pid_max"`
+	FDMax               int      `json:"fd_max"`
+	ConntrackMax        int      `json:"conntrack_max"`
+	TAPDevicesMax       int      `json:"tap_devices_max"`
+	IPLocalPortRange    [2]int   `json:"ip_local_port_range"`
+	NestedVirtAvailable bool     `json:"nested_virt_available"`
+	EPTAvailable        bool     `json:"ept_available"`
+	HugepageCount2MB    int      `json:"hugepage_count_2mb"`
+	KSMDisabled         bool     `json:"ksm_disabled"`
+	CgroupVersion       int      `json:"cgroup_version"`
+	CgroupControllers   []string `json:"cgroup_controllers" db:"-"`
+	SwapTotalMiB        int      `json:"swap_total_mib"`
+	KernelMinimumMet    bool     `json:"kernel_minimum_met"`
 }
 
 // --- HostResources ---

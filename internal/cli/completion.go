@@ -34,6 +34,42 @@ func completeNetworkNames(cmd *cobra.Command, args []string, toComplete string) 
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completePolicyIDs completes service-access policy IDs.
+func completePolicyIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if opRef == nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	policies, err := opRef.PolicyList(cmd.Context())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var results []string
+	for _, policy := range policies {
+		short := crypto.Truncate(policy.ID, 12)
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
+			results = append(results, short)
+		}
+	}
+	return results, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completePolicyCreate completes source network, destination VM, and protocol positionally.
+func completePolicyCreate(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	switch len(args) {
+	case 0:
+		return completeNetworkNames(cmd, args, toComplete)
+	case 1:
+		return completeVMNames(cmd, args, toComplete)
+	case 2:
+		protocols := []string{"tcp", "udp"}
+		return slices.DeleteFunc(protocols, func(protocol string) bool {
+			return !strings.HasPrefix(protocol, toComplete)
+		}), cobra.ShellCompDirectiveNoFileComp
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 // completeImageIDs completes with local image types and short IDs.
 func completeImageIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if opRef == nil {

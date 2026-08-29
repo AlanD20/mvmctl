@@ -44,7 +44,7 @@ func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callb
 		followCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		lineCh, errCh := controller.FollowSync(followCtx, resolved.LogType,
-			resolved.LogFilename, resolved.SerialOutputFilename)
+			infra.VMFirecrackerLogFilename, infra.VMFirecrackerConsoleLogFilename)
 		for line := range lineCh {
 			if cbErr := callback(line); cbErr != nil {
 				cancel()
@@ -57,7 +57,7 @@ func (op *Operation) LogStream(ctx context.Context, input inputs.LogInput, callb
 		return nil
 	}
 	lines, err := controller.Show(ctx, resolved.LogType, resolved.Lines,
-		resolved.LogFilename, resolved.SerialOutputFilename)
+		infra.VMFirecrackerLogFilename, infra.VMFirecrackerConsoleLogFilename)
 	if err != nil {
 		return err
 	}
@@ -99,7 +99,7 @@ func (op *Operation) LogStreamChannel(
 		defer close(ec)
 		if resolved.Follow {
 			if err := controller.Follow(ctx, resolved.LogType, ch,
-				resolved.LogFilename, resolved.SerialOutputFilename); err != nil {
+				infra.VMFirecrackerLogFilename, infra.VMFirecrackerConsoleLogFilename); err != nil {
 				select {
 				case ec <- err:
 				case <-ctx.Done():
@@ -107,7 +107,7 @@ func (op *Operation) LogStreamChannel(
 			}
 		} else {
 			lines, showErr := controller.Show(ctx, resolved.LogType, resolved.Lines,
-				resolved.LogFilename, resolved.SerialOutputFilename)
+				infra.VMFirecrackerLogFilename, infra.VMFirecrackerConsoleLogFilename)
 			if showErr != nil {
 				select {
 				case ec <- showErr:

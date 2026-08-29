@@ -1,13 +1,15 @@
 package vm
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
+	jailersvc "mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -59,28 +62,36 @@ func NewFirecrackerSpawner(config *model.FirecrackerConfig) *FirecrackerSpawner 
 
 // Spawn starts a Firecracker process.
 //
-// Polls for the API socket to become available (up to 2s, every 0.1s) and
+// Polls for the API socket to become available for 150 bounded 100ms intervals and
 // exits early as soon as the socket appears. If the process dies before the
 // socket is created, raises immediately.
-func (s *FirecrackerSpawner) Spawn() (retErr error) {
+func (s *FirecrackerSpawner) Spawn(ctx context.Context) (retErr error) {
 	// Cleanup any opened FDs on failure.
 	// On success, FDs are either closed explicitly (CloseFilePointers)
 	// or transferred to the child process via Stdin/Stdout.
 	var relayFile *os.File
-	var cmd *exec.Cmd
+	var launchProcess *os.Process
 	started := false
 
 	defer func() {
 		if retErr != nil {
+			safeToCleanup := true
 			if started {
-				// Process was spawned but something failed — kill it.
-				cmd.Process.Kill()
-				cmd.Process.Wait()
+				var terminateErr error
+				safeToCleanup, terminateErr = s.terminateFailedSpawn(launchProcess)
+				if terminateErr != nil {
+					retErr = errors.Join(retErr, terminateErr)
+				}
 			}
 			if relayFile != nil {
 				relayFile.Close()
 			}
-			s.Cleanup()
+			if safeToCleanup {
+				s.Cleanup(context.Background())
+			} else {
+				s.CloseFilePointers()
+				slog.Error("preserving VM jail because failed process termination was not verified", "vm_id", s.vmID())
+			}
 		}
 	}()
 
@@ -89,6 +100,9 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 		if err := os.Remove(s.APISocketPath); err != nil {
 			return fmt.Errorf("remove stale api socket %s: %w", s.APISocketPath, err)
 		}
+	}
+	if err := os.Remove(s.pidPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale pid file %s: %w", s.pidPath, err)
 	}
 
 	var fcStdin *os.File
@@ -117,28 +131,11 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 		return err
 	}
 
-	fcCmd := []string{
-		s.config.BinaryPath,
-		"--api-sock",
-		s.APISocketPath,
+	if err := s.writeJailerManifest(); err != nil {
+		return err
 	}
-	if s.config.PCIEnabled {
-		fcCmd = append(fcCmd, "--enable-pci")
-	}
-	if !s.config.SnapshotMode {
-		fcCmd = append(fcCmd, "--config-file", s.configPath)
-	}
-
-	cmd = exec.Command(fcCmd[0], fcCmd[1:]...)
-	cmd.Stdin = fcStdin
-	cmd.Stdout = fcStdout
-	cmd.Stderr = s.fcLogFP
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
-	cmd.Env = append(os.Environ(), infra.MVMBackgroundServiceEnv)
-
-	if err := cmd.Start(); err != nil {
+	launchProcess, err = jailersvc.Launch(ctx, s.vmID(), s.config.VMDir, fcStdin, fcStdout, s.fcLogFP)
+	if err != nil {
 		return err
 	}
 	started = true
@@ -149,12 +146,12 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 		relayFile = nil
 	}
 
-	// Wait for Firecracker to initialize (poll up to 4s, exit early on socket).
+	// Wait for Firecracker to initialize (150 bounded 100ms polls, approximately 15s total).
 	// Interleave liveness checks so a crashed process is caught early.
 	// CRITICAL: WaitForSocket only checks that the socket file exists (bind() completed).
 	// Firecracker may crash between bind() and listen(), leaving a zombie socket file
 	// that reports ECONNREFUSED on connect. We must Dial to verify it's actually listening.
-	// Nested KVM environments may take longer to initialize (4s might not be enough).
+	// Nested KVM environments can consume most of this bounded readiness window.
 	for range 150 {
 		if infra.WaitForSocket(s.APISocketPath, 100*time.Millisecond) == nil {
 			// Socket file exists — verify it's accepting connections.
@@ -166,34 +163,45 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 			// Fall through to liveness check.
 		}
 
-		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
-			ps, waitErr := cmd.Process.Wait()
-			exitCode := -1
-			if waitErr == nil && ps != nil {
-				exitCode = ps.ExitCode()
-			}
+		if err := launchProcess.Signal(syscall.Signal(0)); err != nil {
 			return errs.New(errs.CodeFirecrackerSpawnError,
-				fmt.Sprintf("firecracker process exited immediately with code %d", exitCode))
+				"jailer process exited before the Firecracker API became ready")
 		}
 	}
 
 	// Final verification: socket must exist AND accept connections.
 	if _, err := os.Stat(s.APISocketPath); os.IsNotExist(err) {
 		return errs.New(errs.CodeFirecrackerSpawnError,
-			"firecracker API socket not available after 4s")
+			"firecracker API socket not available after the bounded readiness wait")
 	}
 	if conn, dialErr := net.DialTimeout("unix", s.APISocketPath, 200*time.Millisecond); dialErr != nil {
-		return errs.New(errs.CodeFirecrackerSpawnError,
-			fmt.Sprintf("firecracker API socket not accepting connections after 4s: %v", dialErr))
+		return errs.New(
+			errs.CodeFirecrackerSpawnError,
+			fmt.Sprintf(
+				"firecracker API socket not accepting connections after the bounded readiness wait: %v",
+				dialErr,
+			),
+		)
 	} else {
 		conn.Close()
 	}
 
 	s.CloseFilePointers()
 
-	pid := cmd.Process.Pid
+	pidData, err := os.ReadFile(s.pidPath)
+	if err != nil {
+		return errs.WrapMsg(errs.CodeFirecrackerSpawnError, "jailed Firecracker PID was not recorded", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if err != nil || pid <= 0 {
+		return errs.New(errs.CodeFirecrackerSpawnError, "jailed Firecracker PID is invalid")
+	}
 	s.PID = &pid
 	s.ProcessStartTime = system.GetProcessStartTime(pid)
+	if err := VerifyCgroup(ctx, s.vmID(), pid, s.config.CgroupLimits); err != nil {
+		slog.Error("failed to verify VM cgroup enforcement", "vm_id", s.vmID(), "pid", pid, "error", err)
+		return err
+	}
 
 	if err := infra.WritePIDFile(s.pidPath, pid); err != nil {
 		slog.Warn("Failed to write PID file", "path", s.pidPath, "error", err)
@@ -202,11 +210,109 @@ func (s *FirecrackerSpawner) Spawn() (retErr error) {
 	return nil
 }
 
+func (s *FirecrackerSpawner) terminateFailedSpawn(launcher *os.Process) (bool, error) {
+	actualPID, startTime, pidKnown, pidErr := s.failedSpawnProcessInfo()
+	var terminationErr error
+	if pidErr != nil {
+		terminationErr = pidErr
+	}
+	if pidKnown {
+		if err := terminateProcessWithStartTime(actualPID, startTime); err != nil {
+			terminationErr = errors.Join(terminationErr, err)
+		}
+	}
+
+	if killErr := launcher.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+		terminationErr = errors.Join(terminationErr, fmt.Errorf("kill outer Jailer launcher: %w", killErr))
+	}
+	if err := waitForLauncher(launcher, 2*time.Second); err != nil {
+		terminationErr = errors.Join(terminationErr, err)
+	}
+
+	if pidKnown && system.IsProcessAlive(actualPID, startTime) {
+		terminationErr = errors.Join(terminationErr,
+			fmt.Errorf("jailed process %d remained alive after failed-spawn termination", actualPID))
+		return false, terminationErr
+	}
+	if pidErr != nil {
+		return false, terminationErr
+	}
+	return true, terminationErr
+}
+
+func (s *FirecrackerSpawner) failedSpawnProcessInfo() (int, *int64, bool, error) {
+	pidData, err := os.ReadFile(s.pidPath)
+	if os.IsNotExist(err) {
+		return 0, nil, false, nil
+	}
+	if err != nil {
+		return 0, nil, false, fmt.Errorf("read jailed process PID during failed spawn: %w", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if err != nil || pid <= 0 {
+		return 0, nil, false, fmt.Errorf("jailed process PID is invalid during failed spawn")
+	}
+	return pid, system.GetProcessStartTime(pid), true, nil
+}
+
+func terminateProcessWithStartTime(pid int, startTime *int64) error {
+	if !system.IsProcessAlive(pid, startTime) {
+		return nil
+	}
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("terminate jailed process %d: %w", pid, err)
+	}
+	if waitForProcessExit(pid, startTime, 2*time.Second) {
+		return nil
+	}
+	if !system.IsProcessAlive(pid, startTime) {
+		return nil
+	}
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("kill jailed process %d: %w", pid, err)
+	}
+	if !waitForProcessExit(pid, startTime, time.Second) {
+		return fmt.Errorf("jailed process %d survived SIGKILL", pid)
+	}
+	return nil
+}
+
+func waitForProcessExit(pid int, startTime *int64, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !system.IsProcessAlive(pid, startTime) {
+			return true
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return !system.IsProcessAlive(pid, startTime)
+}
+
+func waitForLauncher(launcher *os.Process, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		_, err := launcher.Wait()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("reap outer Jailer launcher: %w", err)
+		}
+		return nil
+	case <-time.After(timeout):
+		return fmt.Errorf("timed out reaping outer Jailer launcher")
+	}
+}
+
 // --- Cleanup ---
 
 // Cleanup performs cleanup of all created resources.
-func (s *FirecrackerSpawner) Cleanup() {
+func (s *FirecrackerSpawner) Cleanup(ctx context.Context) {
 	s.CloseFilePointers()
+	if err := CleanupJail(ctx, s.vmID()); err != nil {
+		slog.Warn("failed to clean VM jail", "vm_id", s.vmID(), "error", err)
+	}
 }
 
 // --- Generate ---
@@ -270,7 +376,7 @@ func (s *FirecrackerSpawner) WriteToFile() error {
 	if err := os.MkdirAll(dir, infra.DirPerm); err != nil {
 		return err
 	}
-	data, err := json.Marshal(config)
+	data, err := json.Marshal(translateConfigForJail(config))
 	if err != nil {
 		return err
 	}
@@ -303,7 +409,6 @@ func (s *FirecrackerSpawner) buildDrivesConfig() []model.DriveConfig {
 	// Resolve rootfs path to absolute path
 	rootfsAbs, err := filepath.Abs(s.config.RootfsPath)
 	if err != nil {
-		// Fallback to original if Abs fails (should not happen in practice)
 		rootfsAbs = s.config.RootfsPath
 	}
 	cacheType := model.CacheTypeUnsafe

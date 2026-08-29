@@ -16,9 +16,117 @@ import shlex
 import subprocess
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Generator
 
 import pytest
+
+
+SYSTEM_MVM_BINARY = "/usr/local/bin/mvm"
+PYTEST_OUTCOME_REPORT_ENV = "MVM_PYTEST_OUTCOME_REPORT"
+PYTEST_OUTCOME_SCHEMA_VERSION = 1
+_OUTCOME_REPORTS: dict[str, dict[str, Any]] = {}
+_OUTCOME_COLLECTION_ERRORS = 0
+_OUTCOME_DESELECTED = 0
+
+
+def _outcome_reporting_enabled() -> bool:
+    return bool(os.environ.get(PYTEST_OUTCOME_REPORT_ENV))
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Reset outcome state only for orchestrated qualification runs."""
+    del session
+    global _OUTCOME_COLLECTION_ERRORS, _OUTCOME_DESELECTED
+    if _outcome_reporting_enabled():
+        _OUTCOME_REPORTS.clear()
+        _OUTCOME_COLLECTION_ERRORS = 0
+        _OUTCOME_DESELECTED = 0
+
+
+def pytest_collectreport(report: pytest.CollectReport) -> None:
+    """Count collection failures separately from collected test items."""
+    global _OUTCOME_COLLECTION_ERRORS
+    if _outcome_reporting_enabled() and report.failed:
+        _OUTCOME_COLLECTION_ERRORS += 1
+
+
+def pytest_deselected(items: list[pytest.Item]) -> None:
+    """Record tests removed from the selected qualification matrix."""
+    global _OUTCOME_DESELECTED
+    if _outcome_reporting_enabled():
+        _OUTCOME_DESELECTED += len(items)
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """Retain each test phase so one final outcome can be classified."""
+    if _outcome_reporting_enabled():
+        _OUTCOME_REPORTS.setdefault(report.nodeid, {})[report.when] = report
+
+
+def _classify_test_outcome(nodeid: str) -> str:
+    phase_reports = _OUTCOME_REPORTS.get(nodeid, {})
+    setup_report = phase_reports.get("setup")
+    call_report = phase_reports.get("call")
+    teardown_report = phase_reports.get("teardown")
+
+    for phase_report in (setup_report, teardown_report):
+        if phase_report is not None and phase_report.failed:
+            return "errors"
+    for phase_report in (setup_report, call_report, teardown_report):
+        if phase_report is not None and hasattr(phase_report, "wasxfail"):
+            return "xfailed" if phase_report.skipped else "xpassed"
+    for phase_report in (setup_report, call_report, teardown_report):
+        if phase_report is not None and phase_report.skipped:
+            return "skipped"
+    if call_report is None:
+        return "errors"
+    if call_report.failed:
+        return "failed"
+    if call_report.passed:
+        return "passed"
+    return "errors"
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Write the bounded machine-readable qualification report."""
+    configured_path = os.environ.get(PYTEST_OUTCOME_REPORT_ENV)
+    if not configured_path:
+        return
+
+    outcomes = {
+        "passed": 0,
+        "failed": 0,
+        "errors": 0,
+        "collection_errors": _OUTCOME_COLLECTION_ERRORS,
+        "deselected": _OUTCOME_DESELECTED,
+        "skipped": 0,
+        "xfailed": 0,
+        "xpassed": 0,
+    }
+    for item in session.items:
+        outcomes[_classify_test_outcome(item.nodeid)] += 1
+
+    report = {
+        "schema_version": PYTEST_OUTCOME_SCHEMA_VERSION,
+        "collected": len(session.items),
+        **outcomes,
+        "exit_status": int(exitstatus),
+    }
+    report_path = Path(configured_path)
+    if not report_path.is_absolute():
+        raise pytest.UsageError(
+            f"{PYTEST_OUTCOME_REPORT_ENV} must be an absolute path"
+        )
+    encoded = json.dumps(report, sort_keys=True, separators=(",", ":"))
+    temporary_path = report_path.with_name(
+        f".{report_path.name}.{os.getpid()}.tmp"
+    )
+    with temporary_path.open("x", encoding="utf-8") as report_file:
+        report_file.write(encoded)
+        report_file.flush()
+        os.fsync(report_file.fileno())
+    os.replace(temporary_path, report_path)
 
 
 # ============================================================================
@@ -72,8 +180,8 @@ def _guest_run(
 def _run_mvm(
     vm_name: str, *args: str, check: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
-    """Run an mvm command. vm_name is ignored — we're already inside the test VM."""
-    cmd = ["mvm", *args]
+    """Run the installed mvm CLI. vm_name is ignored inside the test VM."""
+    cmd = [SYSTEM_MVM_BINARY, *args]
     result = subprocess.run(
         cmd,
         capture_output=True,

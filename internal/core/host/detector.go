@@ -326,8 +326,11 @@ func DetectLimits() *model.HostLimits {
 
 	// Cgroup version
 	cgroupVersion := 1
-	if _, err := os.Stat("/sys/fs/cgroup/cgroup.controllers"); err == nil {
+	var cgroupControllers []string
+	if controllers, err := os.ReadFile(filepath.Join(infra.CgroupV2Root, "cgroup.controllers")); err == nil {
 		cgroupVersion = 2
+		cgroupControllers = strings.Fields(string(controllers))
+		slices.Sort(cgroupControllers)
 	}
 
 	// Swap total
@@ -348,6 +351,7 @@ func DetectLimits() *model.HostLimits {
 		HugepageCount2MB:    hugepageCount2MB,
 		KSMDisabled:         ksmDisabled,
 		CgroupVersion:       cgroupVersion,
+		CgroupControllers:   cgroupControllers,
 		SwapTotalMiB:        swapTotalMiB,
 		KernelMinimumMet:    kernelMinimumMet,
 	}

@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Date:** 2026-05-22
-**Last Updated:** 2026-06-20 (final Go implementation)
+**Last Updated:** 2026-08-20 (root-owned single-binary boundary foundation)
 **Supersedes:** The previous Python Nuitka two-binaries build (legacy/ directory)
 
 The `mvm` project is distributed as a single compiled Go binary with no runtime dependencies. The binary contains both the CLI entry point and all background service subprocesses (console relay, nocloudnet server, loopmount provisioner) via subcommand dispatch (`mvm run <service>`). This replaces the previous Python Nuitka build which produced two separate binaries (`mvm` and `mvm-services`) with multidist symlink dispatch.
@@ -31,28 +31,19 @@ The `mvm` project is distributed as a single compiled Go binary with no runtime 
 
 ```go
 func main() {
-    ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-    defer stop()
-
-    op, cleanup, err := app.Initialize(ctx)
-    if err != nil {
-        slog.Error("initialization failed", "error", err)
-        os.Exit(1)
-    }
-    if cleanup != nil {
-        defer cleanup()
-    }
-
-    rootCmd := cli.NewRootCmd(op)
-    if err := rootCmd.ExecuteContext(ctx); err != nil {
-        if common.HandleErrors(func() error { return err })() != nil {
-            os.Exit(1)
-        }
-    }
+    os.Exit(run(context.Background(), os.Args[1:], os.Stdin, entrypoints{
+        privileged:    privileged.Run,
+        systemInstall: app.RunHostInstallSystemBinary,
+        normal:        runCLI,
+    }))
 }
 ```
 
-Services are not dispatched via a manual check in main; instead, Cobra subcommands registered in `internal/cli/service.go` handle `mvm run <service>`.
+`run` recognizes only the reserved versioned privileged protocol and the exact administrator `host install-system`
+bootstrap before ordinary initialization. Both selectors fail closed and cannot enter the public CLI. All ordinary
+commands then enter `runCLI`, which establishes signals, calls `app.Initialize()`, and executes Cobra. Public background
+services remain Cobra subcommands registered in `internal/cli/service.go`; typed privileged actions progressively replace
+the root-requiring public service routes under ADR-0016.
 
 ### Service Subcommands
 
@@ -88,11 +79,13 @@ The previous Python implementation (preserved in `legacy/`) used Nuitka to compi
 - **Single binary**: Users download and install one file. No symlinks, no multidist dispatch.
 - **No build-time dependency tracking**: Go's static compilation eliminates the need for explicit module inclusion lists.
 - **Service spawning**: `system.SpawnService()` (`internal/lib/system/spawn.go`) launches the same binary with different subcommand arguments — no separate binary path resolution.
-- **Sudoers simplicity**: The sudoers file only needs the `mvm` binary path, not a separate `mvm-services` path.
+- **Sudoers simplicity**: The final sudoers policy needs only the versioned early entry point of root-owned
+  `/usr/local/bin/mvm`, not a separate `mvm-services` or helper executable.
 - **Build speed**: `go build` is significantly faster than Nuitka compilation (seconds vs minutes).
 - **Cross-compilation**: `GOOS=linux GOARCH=amd64 go build` produces a target binary without requiring the target toolchain.
 
 ## Related Decisions
 
 - ADR-0003: Provisioning backend mutual exclusion — the `mvm run provision` subcommand is the loop-mount entry point.
+- ADR-0016: Root-owned system installation, early privileged dispatch, and typed privilege migration.
 - CONTEXT.md "Provisioner Backend" — mount/umount consolidated in `mvm run provision` subcommand.

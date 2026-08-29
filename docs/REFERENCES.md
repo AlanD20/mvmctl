@@ -17,6 +17,7 @@ This document provides detailed reference for all `mvm` commands, configuration 
 - [mvm snapshot](#mvm-snapshot)
 - [mvm console](#mvm-console)
 - [mvm network](#mvm-network)
+- [mvm policy](#mvm-policy)
 - [mvm key](#mvm-key)
 - [mvm config](#mvm-config)
 - [mvm cache](#mvm-cache)
@@ -93,6 +94,7 @@ mvm init [flags]
 | `--non-interactive` | Use defaults, skip all prompts | `false` |
 | `--skip-host` | Skip host init step | `false` |
 | `--skip-network` | Skip default network creation | `false` |
+| `--binary-version <version>` | Download this exact Firecracker version when no local pair exists | empty (interactive choice or latest in non-interactive mode) |
 
 ---
 
@@ -102,6 +104,7 @@ Host configuration commands for one-time, machine-global setup.
 
 | Command | Flags | Description |
 |---------|-------|-------------|
+| `mvm host install-system` | — | Administrator-only early bootstrap. Atomically installs the running trusted artifact as root-owned `/usr/local/bin/mvm` without loading user cache, configuration, database, or Cobra state. |
 | `mvm host init` | — | Apply host configuration changes. Idempotent. Creates the `mvm` group, sudoers drop-in, enables IP forwarding, creates firewall chains, and snapshots initial state for rollback. |
 | `mvm host status` | `--json` | Show current host configuration state vs expected |
 | `mvm host info` | `--refresh`, `--json` | Show host hardware, limits, and VM capacity projection |
@@ -224,7 +227,7 @@ mvm image import base-img my-vm
 
 ### `mvm bin`
 
-Firecracker binary management — download, list, and remove Firecracker and jailer binaries.
+Firecracker runtime management — download, list, and remove exact Firecracker/Jailer release pairs. Release downloads are checksum-verified and installed into the root-owned trusted store used by VM launch. Source-built pairs may be listed but cannot launch jailed VMs.
 
 #### Selectors
 
@@ -391,6 +394,22 @@ The network resolver tries selectors in priority order:
 | `mvm network inspect` | `[SELECTOR]`, `--json` | Show network details, IP leases, and active firewall rules |
 | `mvm network default` | `[SELECTOR]` | Set a network as the default for VM creation |
 | `mvm network sync` | `[SELECTORS]...`, `--json` | Sync firewall rules between database and host |
+
+---
+
+### `mvm policy`
+
+Persisted routed access from one source network to one exact destination VM service. Same-network policies are rejected because same-bridge filtering is not implemented.
+
+| Command | Flags | Description |
+|---------|-------|-------------|
+| `mvm policy create` | `SOURCE_NETWORK DESTINATION_VM tcp\|udp PORT\|START-END` | Allow one routed destination service or bounded port range |
+| `mvm policy ls` | `--json` | List policies with current resource names |
+| `mvm policy inspect` | `POLICY_ID`, `--json` | Inspect one policy by exact ID or unambiguous prefix |
+| `mvm policy rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more policies and reconcile immediately |
+| `mvm policy sync` | `--json` | Resolve current identities and atomically reconcile policy rules |
+
+Policies default-deny other routed traffic between managed networks. NoCloud and established replies precede managed VM-to-host default deny; internet egress remains available.
 
 ---
 
@@ -607,11 +626,13 @@ Check for and apply binary updates from GitHub Releases.
 
 | Command | Description |
 |---------|-------------|
-| `mvm self-update` | Check + apply if newer |
+| `mvm self-update` | Check + apply if newer for a user-owned artifact; the system installation requires administrator bootstrap |
 | `mvm self-update check` | Check only, print available version |
-| `mvm self-update apply` | Force apply (even if same version). `--force` to re-install |
+| `mvm self-update apply` | Apply to a user-owned artifact. `--force` re-installs the same version |
 
-Downloads the latest release matching the host architecture, verifies SHA256 checksum, then atomically swaps the binary.
+For a user-owned artifact, downloads the latest release matching the host architecture, verifies its SHA256 checksum,
+and atomically swaps that artifact. Apply refuses canonical `/usr/local/bin/mvm`; install a newly downloaded trusted
+artifact with `sudo <new-mvm-binary> host install-system`. `check` remains available from the system installation.
 
 ---
 
@@ -706,7 +727,7 @@ The security model applies to the net cloud-init mode only:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MVM_CACHE_DIR` | Override cache directory | `~/.cache/mvmctl` |
+| `MVM_CACHE_DIR` | Override the managed cache directory | `~/.cache/mvmctl` |
 | `MVM_CONFIG_DIR` | Override config directory | `~/.config/mvmctl` |
 | `MVM_LOG_LEVEL` | Set log verbosity (`DEBUG`, `INFO`, `WARN`, `ERROR`) | `WARN` |
 | `MVM_ASSET_MIRROR` | Local mirror directory for downloaded assets | (not set) |
@@ -721,26 +742,32 @@ The security model applies to the net cloud-init mode only:
 
 ```
 ~/.cache/mvmctl/
-├── bin/                  # Firecracker + jailer binaries
+├── bin/                  # Source-build and non-launch binary workspace
 ├── kernels/              # vmlinux kernel images
 ├── images/               # Root filesystem images (.ext4, .btrfs, .img, .raw, .ext4.zst, .btrfs.zst)
 ├── volumes/              # Persistent disk volume files
 ├── vms/                  # Per-VM state
 │   └── <vm-sha>/         # VM directories named by SHA256 hash
-│       ├── rootfs.ext4 (or rootfs.btrfs, rootfs.xfs)
+│       ├── rootfs.img
+│       ├── cloud-init.iso            # ISO mode only
 │       ├── firecracker.json
 │       ├── firecracker.log
 │       ├── firecracker.console.log
+│       ├── firecracker.metrics       # Metrics enabled only
 │       ├── firecracker.pid
 │       ├── firecracker.api.socket
-│       ├── firecracker.metrics
+│       ├── vsock.sock                # Vsock enabled only
 │       ├── console.sock
 │       ├── console.pid
-│       └── cloud-init/
+│       └── cloud-init/               # Generated seed inputs
 ├── workflows/            # Workflow state persistence
 ├── nocloudnet/           # nocloud-net batch server dirs and logs
 ├── snapshots/            # Snapshot files (mem, vmstate, disk)
 │   └── <snapshot-id>/
+│       ├── rootfs.img
+│       ├── memory
+│       ├── vmstate
+│       └── phantom-rootfs.img        # Transitional until private namespace overlay
 ├── logs/                 # Application log files
 ├── firecracker-src/      # Firecracker git clone (for building from source)
 ├── mvmdb.db              # SQLite database (canonical asset state)
@@ -748,4 +775,20 @@ The security model applies to the net cloud-init mode only:
 ├── timing.log            # Performance/timing log
 ├── audit.log             # Rotating operation log (10MB, 3 backups)
 └── ...
+```
+
+The VM and snapshot leaf names above are compiled and are not configurable. `MVM_CACHE_DIR` still selects the managed
+cache root. API/vsock/console sockets and PID mirrors remain in the VM cache directory in the transitional Jailer path;
+v0.3 release work will move them to `/run/mvmctl/runtime/<uid>/<vm-id>` and stop mounting the whole VM directory.
+
+The v0.3 privileged path accepts a managed cache root on ext2/ext3/ext4, XFS, Btrfs, F2FS, bcachefs, tmpfs, or ZFS.
+FUSE, remote, overlay/stacked, and automount cache roots are unsupported. The descriptor-pinned cache foundation is
+implemented, but privileged lifecycle wiring remains release work tracked in `tasks/todo.md`.
+
+Canonical launch assets and jail state are outside the user cache:
+
+```text
+/var/lib/mvmctl/
+├── binaries/<version>/   # Root-owned exact Firecracker/Jailer release pair
+└── jailer/firecracker/<vm-id>/root/  # Per-VM jail and bind mounts
 ```

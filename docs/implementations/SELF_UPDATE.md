@@ -39,16 +39,16 @@ func (r *Remote) Release(ctx context.Context, tag string) (*Release, error)
 ```
 mvm self-update apply
   │
-  ├── 1. Detect current binary path via os.Executable()
-  ├── 2. Check write permission on the directory
-  ├── 3. Fetch latest release from GitHub API
-  ├── 4. Compare tag vs current BuildVersion (semver)
-  ├── 5. Find matching asset for arch (mvm / mvm-arm64)
+  ├── 1. CLI checks the latest release and compares BuildVersion
+  ├── 2. Apply detects the current binary path via os.Executable()
+  ├── 3. Reject canonical /usr/local/bin/mvm with the administrator install instruction
+  ├── 4. Fetch the release for the apply operation
+  ├── 5. Find the matching asset for arch (mvm / mvm-arm64)
   ├── 6. Download checksums.sha256
-  ├── 7. Download binary to temp file alongside current binary
+  ├── 7. Download the binary to a temp file beside the user-owned artifact
   ├── 8. Verify SHA256 against checksums.sha256
   ├── 9. os.Rename(temp, current_path)
-  ├── 10. Restore permissions (executable bit, ownership)
+  ├── 10. Restore executable permissions
   └── 11. Print success
 ```
 
@@ -56,7 +56,8 @@ mvm self-update apply
 
 ### 1. Binary in a root-owned path
 
-`os.Rename` fails if the current binary is in `/usr/bin/mvm` (package install) and the user isn't root. Fall back to printing manual install instructions with the download URL. Do not attempt sudo.
+Package-managed `/usr/bin/mvm` remains owned by the package manager. A non-root apply fails when it cannot write the
+target directory; self-update never attempts sudo. Use the package manager for these installations.
 
 ### 2. Daemon child processes running (console relay, nocloud-net)
 
@@ -72,11 +73,16 @@ Delete temp file, print error with checksum details. Never rename on mismatch.
 
 ### 5. Permission restoration after rename
 
-After rename, set `os.Chmod(newPath, 0755)` to ensure the binary stays executable. Sudoers references the path, not the inode — no change needed there.
+After rename, set `os.Chmod(newPath, 0755)` so the user-owned artifact stays executable. Sudoers never authorizes that
+path; the privileged target is the separate root-owned system installation.
 
 ### 6. Root-owned binary
 
-Self-update only works for user-installed binaries (e.g. `~/.local/bin/mvm`). For package-managed installs (`/usr/bin/mvm`), print a message directing the user to use the package manager.
+Self-update only replaces user-owned artifacts. The apply service rejects canonical root-owned `/usr/local/bin/mvm`
+before its own release request and directs an administrator to run the new trusted artifact through
+`sudo <new-mvm-binary> host install-system`. The public `self-update` and `self-update apply` commands perform their
+initial update check first, so they may contact the release service before apply returns that instruction.
+Package-managed `/usr/bin/mvm` installations continue to use their package manager.
 
 ### 7. Same version reinstall
 

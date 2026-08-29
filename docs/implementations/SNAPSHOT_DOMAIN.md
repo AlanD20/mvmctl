@@ -1,18 +1,65 @@
 # Snapshot Functionality
 
+This document explains how mvmctl creates, restores, persists, and removes Firecracker snapshots, including the
+transitional behavior that must be replaced before v0.3 release signoff.
+
+## Table of Contents
+
+- [Problem](#problem)
+- [Architecture](#architecture)
+  - [Key characteristics](#key-characteristics)
+- [Entry point](#entry-point)
+- [Happy path: Snapshot create](#happy-path-snapshot-create)
+  - [1. Resolve and enrich](#1-resolve-and-enrich)
+  - [2. Generate snapshot ID](#2-generate-snapshot-id)
+  - [3. Create snapshot directory](#3-create-snapshot-directory)
+  - [4. Copy rootfs](#4-copy-rootfs)
+  - [5. Create phantom symlink](#5-create-phantom-symlink)
+  - [6. Pause VM and patch drive path](#6-pause-vm-and-patch-drive-path)
+  - [7. Create snapshot](#7-create-snapshot)
+  - [8. Restore original drive path and resume](#8-restore-original-drive-path-and-resume)
+  - [9. Insert DB record](#9-insert-db-record)
+- [Happy path: Snapshot restore](#happy-path-snapshot-restore)
+  - [1. Resolve snapshot](#1-resolve-snapshot)
+  - [2. Load metadata](#2-load-metadata)
+  - [3. Derive managed artifacts](#3-derive-managed-artifacts)
+  - [4. For each VM to restore](#4-for-each-vm-to-restore)
+  - [Phantom symlink](#phantom-symlink)
+  - [Concurrent restore safety](#concurrent-restore-safety)
+  - [Vsock override](#vsock-override)
+  - [Network identity](#network-identity)
+- [DB schema](#db-schema)
+- [Snapshot config structs](#snapshot-config-structs)
+- [Failure modes](#failure-modes)
+  - [Firecracker constraints on restore](#firecracker-constraints-on-restore)
+  - [Partial failure on create](#partial-failure-on-create)
+  - [Stale restore lock](#stale-restore-lock)
+  - [Snapshot removal does not affect VMs](#snapshot-removal-does-not-affect-vms)
+  - [Reference counting for delete protection](#reference-counting-for-delete-protection)
+- [Key files](#key-files)
+- [Design decisions](#design-decisions)
+
 ## Problem
 
 Firecracker snapshots are a raw API passthrough. Without a managed snapshot domain, there is no way to list available snapshots, track which VM a snapshot came from, or restore a snapshot into a new VM with proper network identity. The user must specify raw file paths for memory and state dumps with no directory management, no rootfs tracking, and no metadata persistence.
 
 ## Architecture
 
-The snapshot domain has its own DB table (`snapshots`), cache directory (`~/.cache/mvm/snapshots/<id>/`), CLI commands, and API layer. Snapshots are managed entities — captured atomically, stored in a known location, restorable by name.
+The snapshot domain has its own DB table (`snapshots`), cache directory (`~/.cache/mvmctl/snapshots/<id>/`), CLI
+commands, and API layer. Snapshots are managed entities stored in a known location and restorable by name. Failed
+creates remove the partial directory and do not retain a DB row; running-VM disk/memory crash consistency is still
+pending as described below.
 
 ### Key characteristics
 
-- **No Controller** — snapshots are immutable after creation, so no state machine is needed. The repository handles DB CRUD, and filesystem operations are handled directly by the API layer.
-- **Self-contained domain** — the snapshot domain imports `internal/lib/firecracker` to call Pause/CreateSnapshot/Resume/LoadSnapshot directly. No cross-core package imports.
-- **Orchestration in API layer** — the API layer's `Operation` methods coordinate VM pausing, rootfs copying, network allocation, and Firecracker spawn. This matches the existing pattern where the API layer orchestrates multiple domains.
+- **No snapshot Controller** — the public snapshot lifecycle has no mutable state machine. The repository handles DB
+  CRUD, while the API layer coordinates filesystem and VM operations. The current restore path does temporarily mutate
+  `.restore.lock` and `phantom-rootfs.img`; Task 7 removes that transitional mechanism.
+- **Self-contained core domain** — `internal/core/snapshot/` owns repository and resolution behavior and does not import
+  another core domain.
+- **Orchestration in API layer** — the API layer coordinates VM pausing, rootfs copying, network allocation, Jailer
+  launch, and snapshot API calls through the VM controller. This matches the rule that only `pkg/api/` orchestrates
+  multiple core domains.
 
 ## Entry point
 
@@ -24,7 +71,9 @@ Snapshot operations are triggered from the CLI commands in `internal/cli/snapsho
 - `mvm snapshot inspect <id>` — calls `op.SnapshotInspect()`
 - `mvm snapshot rm <id>` — calls `op.SnapshotRemove()`
 
-The API layer orchestrates all cross-domain operations (VM pause/resume, rootfs copy, network allocation, Firecracker spawn). The snapshot repository in `internal/core/snapshot/` handles DB CRUD. There is no service layer — snapshots are immutable after creation.
+The API layer orchestrates all cross-domain operations (VM pause/resume, rootfs copy, network allocation, and
+Firecracker spawn). The snapshot repository in `internal/core/snapshot/` handles DB CRUD and resolution. There is no
+snapshot service layer.
 
 ## Happy path: Snapshot create
 
@@ -38,15 +87,20 @@ A deterministic snapshot ID is generated via `crypto.SnapshotID(sourceVMID, time
 
 ### 3. Create snapshot directory
 
-The snapshot cache directory is created at `~/.cache/mvm/snapshots/<id>/`.
+The snapshot cache directory is created at `~/.cache/mvmctl/snapshots/<id>/` (or beneath `MVM_CACHE_DIR`).
 
 ### 4. Copy rootfs
 
-The source VM's rootfs is copied to `snapDir/rootfs.ext4` via `infra.CopyFile()` (file-level copy with sparse support). This gives a point-in-time consistent rootfs — the source VM continues running, so referencing the original path risks inconsistency.
+The source VM's rootfs is copied to the fixed `snapDir/rootfs.img` leaf via `infra.CopyFile()`. The leaf name is
+independent of the guest filesystem type. The current implementation performs this copy before pausing a running VM;
+it therefore does not yet guarantee a crash-consistent disk/memory pair. Snapshot crash consistency remains a v0.3
+release blocker.
 
 ### 5. Create phantom symlink
 
-A symlink `snapDir/phantom-rootfs.ext4` → `rootfs.ext4` is created. This symlink is critical for making snapshots independent of the source VM's rootfs path.
+A transitional symlink `snapDir/phantom-rootfs.img` → `rootfs.img` is created so the captured vmstate can refer to a
+snapshot-local backing path. ADR-0016 requires Task 7 to replace this persistent symlink with a private mount-namespace
+overlay before v0.3 release signoff.
 
 ### 6. Pause VM and patch drive path
 
@@ -76,26 +130,31 @@ The snapshot is resolved by ID (supports prefix matching, errors on ambiguity).
 
 Snapshot metadata is loaded from the DB, including kernel/network/binary IDs.
 
-### 3. For each VM to restore
+### 3. Derive managed artifacts
+
+Before creating a VM, restore validates the stored snapshot ID as exactly 64 lowercase hexadecimal characters and
+derives `snapshots/<id>/{rootfs.img,memory,vmstate}` from the configured cache root. Stored path columns are display
+metadata and do not select restore or removal targets.
+
+### 4. For each VM to restore
 
 For each clone (controlled by `--count`, default 1):
 
-1. Generate new VM ID
-2. Copy `snapDir/rootfs.ext4` → `vms/<new-id>/rootfs.ext4`
-3. Acquire exclusive flock on `snapDir/.restore.lock` (serializes concurrent restores from the same snapshot)
-4. Replace `snapDir/phantom-rootfs.ext4` → symlink → new VM's rootfs
-5. Create VM record with Stopped status, wired kernel/binary/network
-6. Create VM directory and Firecracker config
-7. Spawn Firecracker in snapshot mode
-8. Call `firecracker.LoadSnapshot()` with mem/state paths, network overrides, and vsock override
-9. Release flock on `.restore.lock`
+1. Generate the new VM ID and copy `snapDir/rootfs.img` to `vms/<new-id>/rootfs.img`.
+2. Allocate the network lease/TAP and persist the stopped VM record with its kernel, image, binary, and network identity.
+3. Derive the VM's fixed Firecracker/vsock paths and spawn Firecracker in snapshot mode.
+4. Acquire an exclusive flock on `snapDir/.restore.lock` (serializes concurrent restores from the same snapshot).
+5. Replace `snapDir/phantom-rootfs.img` with a symlink to the restored VM's jailed `/rootfs` mount.
+6. Call `firecracker.LoadSnapshot()` with the fixed memory/state paths, network overrides, and vsock override.
+7. Release the flock on `.restore.lock`.
 
 ### Phantom symlink
 
 The phantom symlink makes snapshots independent of the source VM:
 
-- **During create**: PATCH the running VM's drive to point to the symlink before taking the snapshot. The vmstate captures the snapshot-local symlink path.
-- **During restore**: Replace the symlink to point to the new VM's rootfs copy. LoadSnapshot follows the symlink and finds the correct backing file.
+- **During create**: PATCH the running VM's drive to point to `phantom-rootfs.img` before taking the snapshot. The
+  vmstate captures that snapshot-local path.
+- **During restore**: replace the symlink so the jailed load resolves the restored VM's `/rootfs` mount.
 
 Firecracker's `PUT /snapshot/load` does not support a block-device-path override — the backing file path recorded in the vmstate is used directly. The phantom symlink works around this constraint.
 
@@ -105,7 +164,8 @@ The `.restore.lock` file serializes concurrent `mvm snapshot restore` invocation
 
 ### Vsock override
 
-Firecracker's `PUT /snapshot/load` supports `vsock_override` to change the vsock UDS path at load time. Without it, the vmstate's recorded UDS path would collide with the source VM's socket. The vsock guest CID is set via a separate `PUT /vsock` call after LoadSnapshot.
+Firecracker's `PUT /snapshot/load` supports `vsock_override` to change the host UDS path at load time. The snapshot's
+guest CID is preserved; the implementation does not issue a separate post-load `PUT /vsock`.
 
 ### Network identity
 
@@ -121,10 +181,10 @@ The `snapshots` table (in `001_initial_schema.sql`) stores:
 | `name` | TEXT | User-provided name (defaults to `<source-vm>-<timestamp>`) |
 | `source_vm_id` | TEXT | Source VM ID |
 | `source_vm_name` | TEXT | Source VM name (denormalized for display) |
-| `snapshot_dir` | TEXT | Absolute path to `cache/snapshots/<id>/` |
-| `memory_file` | TEXT | Path to memory dump file within snapshot dir |
-| `state_file` | TEXT | Path to vmstate file within snapshot dir |
-| `rootfs_file` | TEXT | Path to rootfs copy within snapshot dir |
+| `snapshot_dir` | TEXT | Derived display path to `cache/snapshots/<id>/` |
+| `memory_file` | TEXT | Derived display path to the fixed `memory` leaf |
+| `state_file` | TEXT | Derived display path to the fixed `vmstate` leaf |
+| `rootfs_file` | TEXT | Derived display path to the fixed `rootfs.img` leaf |
 | `kernel_id` | TEXT | Kernel ID used at snapshot time |
 | `network_id` | TEXT | Network ID used at snapshot time |
 | `binary_id` | TEXT | Firecracker binary ID used at snapshot time |
@@ -194,20 +254,24 @@ Before deleting a kernel, network, or binary, the API layer checks `snapshotRepo
 | `internal/core/snapshot/resolver.go` | Entity resolution by identifier |
 | `internal/lib/model/snapshot.go` | `SnapshotItem`, `SnapshotCreateConfig`, `SnapshotRestoreConfig` |
 | `pkg/api/snapshot.go` | API orchestration: `SnapshotCreate()`, `SnapshotRestore()`, `SnapshotList()`, `SnapshotInspect()`, `SnapshotRemove()` |
-| `pkg/api/inputs/snapshot_input.go` | Input structs: `SnapshotCreateInput`, `SnapshotRestoreInput`, `SnapshotInput` |
+| `pkg/api/inputs/snapshot.go` | Input structs: `SnapshotCreateInput`, `SnapshotRestoreInput`, `SnapshotInput` |
 | `internal/lib/firecracker/client.go` | Firecracker HTTP client: `PauseVM()`, `CreateSnapshot()`, `ResumeVM()`, `LoadSnapshot()` |
 | `internal/cli/snapshot.go` | Cobra commands: `mvm snapshot create\|ls\|inspect\|restore\|rm` |
 
 ## Design decisions
 
-**No Controller — snapshots are immutable.** Snapshots have no state machine (they cannot be modified after creation). A Controller adds complexity for no benefit. The API layer handles orchestration directly.
+**No snapshot Controller.** Snapshot metadata has no public state machine. The API layer handles orchestration directly;
+the transitional restore lock/symlink mutation is an implementation mechanism scheduled for removal by Task 7.
 
 **Phantom symlink over source VM rootfs reference.** The phantom symlink makes the snapshot self-contained and restorable without the source VM. During restore, the symlink is updated to point to the new VM's rootfs copy. The `flock` serializes the update + LoadSnapshot window.
 
 **DB over filesystem for config storage.** The Firecracker boot config is stored in the `extra_config` DB column rather than as a `config.json` file. The enricher enriches it at restore time. This avoids file management complexity.
 
-**`infra.CopyFile()` for rootfs copy.** Uses file-level copy with sparse support. A new subprocess call is unnecessary for this operation.
+**`infra.CopyFile()` for rootfs copy.** Uses the existing sendfile/userspace fallback and `fdatasync`; a new subprocess
+call is unnecessary for this operation.
 
-**Snapshots don't pin images.** A snapshot stores `image_id`, `kernel_id`, `network_id`, and `binary_id` for metadata and enrichment, but the rootfs is copied at snapshot time — the snapshot can be restored without the original image.
+**Snapshots copy the rootfs.** A snapshot stores `image_id`, `kernel_id`, `network_id`, and `binary_id` for metadata and
+enrichment, but restore reads the snapshot's fixed rootfs copy rather than the original image file.
 
-**Vsock override + separate CID update.** The vsock UDS path is overridable via `vsock_override` on `/snapshot/load`, but the guest CID requires a separate `PUT /vsock` call after load.
+**Vsock override preserves the CID.** Restore passes the fixed UDS path through `vsock_override` on `/snapshot/load` and
+keeps the guest CID captured in vmstate; it does not issue a separate `PUT /vsock`.

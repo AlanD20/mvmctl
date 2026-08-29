@@ -95,7 +95,7 @@ Three-layer flow: **CLI → API → Core**
 - Performs state detection (checking current system state to branch execution)
 - Guards invariants that protect against system damage
 - Does NOT validate caller input
-- Constructor takes repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker)`
+- Constructor takes repos/options only: `network.NewService(repo Repository, tracker *firewall.FirewallTracker, policyRepo ServiceAccessPolicyRepository)`
 - Wired once at startup in `app.Initialize()`
 - Service methods that don't reference the Service struct live in `utils.go`
 
@@ -183,7 +183,7 @@ Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 
 | Location | Why DefaultRunner doesn't work |
 |----------|-------------------------------|
-| `internal/core/vm/firecracker.go` | Needs `pass_fds` for VM API socket and log file descriptors |
+| `internal/service/jailer/entry.go` | Privileged Jailer handoff uses `syscall.Exec` to preserve console stdio and process identity after chroot setup |
 | `internal/core/ssh/utils.go` | SSH connectivity probe uses `exec.CommandContext` with short-lived probe context |
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine with chained losetup/mount/umount/chroot |
 | `internal/service/agent/exec.go` | Guest agent command execution via `su`/`sh` with `exec.CommandContext` |
@@ -254,10 +254,12 @@ pool.Seq[T,R](ctx, items, fn)             // sequential fail-fast, returns []Res
 
 ## 12. Testing
 
-Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for the full specification.
+Read `docs/system-test-architecture.md` for the test architecture and
+`docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS.md` for authoring guidance.
 
 ### L0: Pure Function Tests (Go)
-- Table-driven `map[string]struct{...}` with `t.Run()`. No I/O, no DB, no subprocess.
+- Use named table cases with `t.Run()`. Use a map when order must not matter. Use a slice when deterministic order makes
+  the contract clearer. L0 has no I/O, database, or subprocess work.
 - Input → output only. Runs in microseconds.
 - Example: `ParseDiskSize("1G") == 1073741824`
 
@@ -267,11 +269,14 @@ Three-level architecture — see `docs/development/HOW_AGENTS_WRITE_SYSTEM_TESTS
 - Example: seed DB → call handler → verify JSON output via `cmp.Diff`.
 - Run via `go test ./...`.
 
-### L2: Runner VM System Tests (Python in `tests/system/`)
-- Real binary, real subprocess, real infrastructure inside a disposable Firecracker VM with nested KVM.
+### L2: Real-binary system tests (Python in `tests/system/`)
+- Real binary, real subprocess, and real infrastructure. T1 and T2 run inside disposable Firecracker VMs. T3 runs only
+  on a clean host-direct qualification machine for behavior that cannot run correctly under nesting.
 - No mocking of any kind — the binary is real, the subprocesses are real.
+- Install the release candidate through `host install-system`; T1/T2 tests invoke exact `/usr/local/bin/mvm`.
+- Directly copying a binary onto the canonical path or relying on PATH lookup does not qualify the installer or release.
 - **Ground truth:** A feature is not tested until it has an L2 test. L0/L1 are fast pre-filters, not replacements.
-- Run via `pytest tests/system/` inside the runner VM.
+- Run through `scripts/run-system-tests.py`. It selects the execution tier and invokes pytest in the correct environment.
 
 ## 13. CLI Patterns
 

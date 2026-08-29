@@ -28,6 +28,7 @@ func TestNewHostCmd(t *testing.T) {
 		hasAlias bool
 		alias    string
 	}{
+		{use: "install-system", hasAlias: false},
 		{use: "init", hasAlias: false},
 		{use: "status", hasAlias: false},
 		{use: "info", hasAlias: false},
@@ -60,6 +61,37 @@ func TestNewHostCmd(t *testing.T) {
 			assert.True(t, expected[sub.Name()], "unexpected subcommand: %s", sub.Name())
 		}
 	})
+}
+
+// Rationale: Installing the trusted system image is an explicit administrator
+// bootstrap operation, not an implicit side effect of host initialization.
+func TestNewHostCmd_InstallSystemBinary(t *testing.T) {
+	wantErr := errors.New("durability uncertain")
+	hostAPI := &installSystemHostAPI{
+		MockHostAPI: &testutil.MockHostAPI{},
+		changed:     true,
+		err:         wantErr,
+	}
+	cmd := cli.NewHostCmd(hostAPI)
+
+	installCmd, _, err := cmd.Find([]string{"install-system"})
+	require.NoError(t, err)
+	require.Equal(t, "install-system", installCmd.Use)
+	err = installCmd.RunE(installCmd, nil)
+	require.ErrorIs(t, err, wantErr)
+	assert.Equal(t, 1, hostAPI.calls)
+}
+
+type installSystemHostAPI struct {
+	*testutil.MockHostAPI
+	changed bool
+	err     error
+	calls   int
+}
+
+func (f *installSystemHostAPI) HostInstallSystemBinary(context.Context) (bool, error) {
+	f.calls++
+	return f.changed, f.err
 }
 
 // --- Host info (via host info) ---

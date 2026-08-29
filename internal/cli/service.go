@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"mvmctl/internal/service/console"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/loopmount"
 	"mvmctl/internal/service/nocloudnet"
 
@@ -30,7 +31,45 @@ func newRunCmd() *cobra.Command {
 	cmd.AddCommand(newNoCloudNetCmd())
 	cmd.AddCommand(newConsoleCmd())
 	cmd.AddCommand(newProvisionCmd())
+	cmd.AddCommand(newJailerServiceCmd())
 
+	return cmd
+}
+
+func newJailerServiceCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "jailer", Short: "Run the privileged Firecracker Jailer service"}
+	for _, action := range []string{
+		"install", "launch", "cleanup", "expose-snapshot", "expose-volume", "remove-volume", "remove-release",
+	} {
+		action := action
+		sub := &cobra.Command{Use: action, Short: "Run the " + action + " Jailer operation"}
+		sub.Flags().String("version", "", "Exact Firecracker release version")
+		sub.Flags().String("arch", "", "Firecracker release architecture")
+		sub.Flags().String("sha256", "", "Verified release archive SHA-256")
+		sub.Flags().String("vm-id", "", "VM ID")
+		sub.Flags().String("vm-dir", "", "Per-VM directory")
+		sub.Flags().String("snapshot-dir", "", "Snapshot directory")
+		sub.Flags().String("drive-id", "", "Firecracker drive ID")
+		sub.Flags().String("host-path", "", "Managed volume path")
+		sub.Flags().Bool("read-only", false, "Expose the managed volume read-only")
+		sub.RunE = func(c *cobra.Command, _ []string) error {
+			version, _ := c.Flags().GetString("version")
+			arch, _ := c.Flags().GetString("arch")
+			sha256, _ := c.Flags().GetString("sha256")
+			vmID, _ := c.Flags().GetString("vm-id")
+			vmDir, _ := c.Flags().GetString("vm-dir")
+			snapshotDir, _ := c.Flags().GetString("snapshot-dir")
+			driveID, _ := c.Flags().GetString("drive-id")
+			hostPath, _ := c.Flags().GetString("host-path")
+			readOnly, _ := c.Flags().GetBool("read-only")
+			return jailer.Run(c.Context(), jailer.Config{
+				Action: action, Version: version, Arch: arch, SHA256: sha256,
+				VMID: vmID, VMDir: vmDir, SnapshotDir: snapshotDir,
+				DriveID: driveID, HostPath: hostPath, ReadOnly: readOnly,
+			})
+		}
+		cmd.AddCommand(sub)
+	}
 	return cmd
 }
 
@@ -112,9 +151,6 @@ func newConsoleRelayCmd() *cobra.Command {
 	cmd.Flags().String("vm-path", "", "VM path (required)")
 	cmd.Flags().String("vm-name", "", "VM name")
 	cmd.Flags().Int("pty-fd", 0, "PTY file descriptor (required)")
-	cmd.Flags().String("pid-filename", "", "PID file name (default: console.pid)")
-	cmd.Flags().String("socket-filename", "", "Socket file name (default: console.sock)")
-	cmd.Flags().String("log-filename", "", "Log file name (default: firecracker.console.log)")
 	cmd.Flags().Bool("daemon", false, "Run as a background daemon process")
 	cmd.MarkFlagRequired("vm-id")
 	cmd.MarkFlagRequired("vm-path")
@@ -125,19 +161,13 @@ func newConsoleRelayCmd() *cobra.Command {
 		vmPath, _ := c.Flags().GetString("vm-path")
 		vmName, _ := c.Flags().GetString("vm-name")
 		ptyFD, _ := c.Flags().GetInt("pty-fd")
-		pidFilename, _ := c.Flags().GetString("pid-filename")
-		socketFilename, _ := c.Flags().GetString("socket-filename")
-		logFilename, _ := c.Flags().GetString("log-filename")
 		daemon, _ := c.Flags().GetBool("daemon")
 
 		cfg := console.Config{
-			VMID:           vmID,
-			VMPath:         vmPath,
-			VMName:         vmName,
-			PtyFD:          ptyFD,
-			PIDFilename:    pidFilename,
-			SocketFilename: socketFilename,
-			LogFilename:    logFilename,
+			VMID:   vmID,
+			VMPath: vmPath,
+			VMName: vmName,
+			PtyFD:  ptyFD,
 		}
 		if daemon {
 			ptyFile := os.NewFile(uintptr(ptyFD), "pty")

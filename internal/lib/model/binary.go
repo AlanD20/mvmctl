@@ -20,3 +20,9 @@ type BinaryItem struct {
 	VMs       []*VMItem       `json:"vms,omitempty"`
 	Snapshots []*SnapshotItem `json:"snapshots,omitempty"`
 }
+
+// BinaryPair is an exact-version Firecracker and Jailer release pair.
+type BinaryPair struct {
+	Firecracker *BinaryItem `json:"firecracker" db:"-"`
+	Jailer      *BinaryItem `json:"jailer"      db:"-"`
+}

@@ -87,6 +87,7 @@ type ResolvedVMCreateInput struct {
 	Image               *model.ImageItem
 	Kernel              *model.KernelItem
 	Binary              *model.BinaryItem
+	Jailer              *model.BinaryItem
 	NetworkPrefixLen    int
 	CloudInitMode       model.CloudInitMode
 	SkipCINetworkConfig bool
@@ -104,18 +105,8 @@ type ResolvedVMCreateInput struct {
 	DiskSizeMib         int
 	LSMFlags            string
 	// Firecracker
-	LogLevel              string
-	LogFilename           string
-	SerialOutputFilename  string
-	MetricsFilename       string
-	APISocketFilename     string
-	PIDFilename           string
-	ConfigFilename        string
-	ConsoleSocketFilename string
-	ConsolePIDFilename    string
-	VsockFilename         string
+	LogLevel string
 	// Cloud-init
-	CloudInitISOName      string
 	NocloudPortRangeStart int
 	NocloudPortRangeEnd   int
 	NocloudMaxPortRetries int
@@ -139,6 +130,7 @@ type ResolvedVMCreateInput struct {
 	Volumes          []*model.VolumeItem
 	VsockPort        int  // vsock port (0 = disabled / no vsock)
 	Writeback        bool // cache type override: when true, use "Writeback" for rootfs + volumes
+	CgroupLimits     model.VMCgroupLimits
 }
 
 // VMCreateRequest resolves all DB-backed defaults and validates VM creation inputs.
@@ -420,6 +412,16 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	if input.VCPUCount != nil && *input.VCPUCount > 0 {
 		vcpuCount = *input.VCPUCount
 	}
+	cgroupHeadroomMiB, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
+	cgroupCPUWeight, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
+	cgroupPIDsMax, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
+	cgroupSwapMaxBytes, _ := r.cfg.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+	cgroupLimits := model.NewVMCgroupLimits(vcpuCount, memMib, model.VMCgroupPolicy{
+		VMMHeadroomMiB: int64(cgroupHeadroomMiB),
+		CPUWeight:      int64(cgroupCPUWeight),
+		PIDsMax:        int64(cgroupPIDsMax),
+		SwapMaxBytes:   int64(cgroupSwapMaxBytes),
+	})
 	// Resolve cloud-init mode
 	// Default to "off" when no explicit mode is set — the provisioner injects
 	// SSH keys directly into the rootfs regardless of cloud-init mode.
@@ -524,16 +526,6 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 	userGID, _ := r.cfg.GetInt(ctx, "defaults.vm", "user_gid")
 	guestMACPrefix, _ := r.cfg.GetString(ctx, "defaults.vm", "guest_mac_prefix")
 	logLevel, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_level")
-	logFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "log_filename")
-	serialOutputFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "serial_output_filename")
-	metricsFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "metrics_filename")
-	apiSocketFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "api_socket_filename")
-	pidFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "pid_filename")
-	configFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "config_filename")
-	consoleSocketFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_socket_filename")
-	consolePIDFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "console_pid_filename")
-	vsockFilename, _ := r.cfg.GetString(ctx, "defaults.firecracker", "vsock_filename")
-	ciIsoName, _ := r.cfg.GetString(ctx, "defaults.cloudinit", "iso_name")
 	nocloudPortStart, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_start")
 	nocloudPortEnd, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_port_range_end")
 	nocloudMaxRetries, _ := r.cfg.GetInt(ctx, "defaults.cloudinit", "nocloud_max_port_retries")
@@ -589,24 +581,15 @@ func (r *VMCreateRequest) Resolve(ctx context.Context) (*ResolvedVMCreateInput, 
 		Volumes:               vols,
 		ExtraDrives:           extraDrives,
 		// Firecracker defaults
-		LogLevel:              logLevel,
-		LogFilename:           logFilename,
-		SerialOutputFilename:  serialOutputFilename,
-		MetricsFilename:       metricsFilename,
-		APISocketFilename:     apiSocketFilename,
-		PIDFilename:           pidFilename,
-		ConfigFilename:        configFilename,
-		ConsoleSocketFilename: consoleSocketFilename,
-		ConsolePIDFilename:    consolePIDFilename,
-		VsockFilename:         vsockFilename,
+		LogLevel: logLevel,
 		// Cloud-init defaults
-		CloudInitISOName:      ciIsoName,
 		NocloudPortRangeStart: nocloudPortStart,
 		NocloudPortRangeEnd:   nocloudPortEnd,
 		NocloudMaxPortRetries: nocloudMaxRetries,
 		NoCloudKillAfter:      nocloudKillAfter,
 		VsockPort:             vsockPort,
 		Writeback:             writeback,
+		CgroupLimits:          cgroupLimits,
 	}
 	// Validate
 	if err := r.ensureValidate(ctx, result); err != nil {

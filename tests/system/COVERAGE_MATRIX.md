@@ -10,14 +10,46 @@ removed, or when test coverage changes.
 |--------|---------|
 | ✅ Deep | L3 Option C verification |
 | ⚡ Shallow | L0-L2 verification (returncode, output, JSON) |
-| 🟡 Partial | Test exists but skips under some conditions |
+| 🟡 Partial | Coverage exists, but required behavior remains unproved and/or conditional |
 | 🔴 Missing | No test exists |
 | ⏭️ Skip | Test defined but always skips (broken setup) |
 | **?** | Needs investigation — coverage unclear |
 
+## v0.3.0 release-security qualification overlay
+
+The command tables below describe tests for the currently implemented CLI, including transitional behavior that v0.3.0
+will remove. A `✅ Deep` row proves only the behavior named in that row; it is not evidence that the clean-break security
+architecture is release-qualified. The authoritative release gate is `tasks/todo.md` Task 17 plus `docs/RC_QA.md`.
+
+| v0.3.0 security capability | Status | Required release evidence |
+|---|---|---|
+| Installed system candidate and clean bootstrap | 🟡 Partial | Installed-candidate and happy-path init coverage exists; clean group/membership setup, root journal, rollback, fail-closed host mutation, and marker-only sudoers denial remain missing. |
+| fd-0 privileged control transport | 🔴 Missing | Go L1 framing/EOF/peer/cancellation abuse coverage plus installed-CLI lifecycle integration. |
+| Root VM authority and cross-UID denial | 🔴 Missing | Root-record/process/cache identity checks, constrained two-user denial, tombstone and zero-leak assertions. |
+| Independent trusted Firecracker/Jailer releases | 🔴 Missing | Root manifest/ELF/hash authority, atomic failure injection, and installed-CLI release lifecycle. |
+| Descriptor-pinned resources and private mount namespace | 🔴 Missing | Type/owner/mode/link checks, replacement races, namespace mounts, cleanup, restart, and restore. |
+| Mandatory per-VM network namespace | 🔴 Missing | Distinct namespace inodes/topology, root-record binding, rollback, reconciliation, and zero leaked links/TAPs. |
+| nftables-only engine | 🔴 Missing | Atomic bridge-family generation and removal of iptables/backend-selection tests and product paths. |
+| Typed `traffic` policy | 🔴 Missing | Same/cross-network default deny and exact source/protocol/port allows plus spoof/reverse/IP-reuse denials. |
+| Typed VM-to-VM `exec` policy | 🔴 Missing | Directional non-root authorization for same/cross/no-IP networks plus identity, bounds, and redaction denials. |
+| Cgroup/process identity lifecycle | 🟡 Partial | Existing L2 tests cover cgroup limits; root-record, pidfd, mount/cgroup cleanup, and reconciliation binding remain missing. |
+| Crash reconciliation and repeated zero-leak runs | 🔴 Missing | Every applicable domain twice with aggregated teardown and absence checks after failure and reboot. |
+
+Specific legacy conflicts that must be rewritten before release:
+
+- `network/test_policies.py` still exercises both firewall backends and rejects same-network policy creation.
+- `full_journeys/test_full_journeys.py` still expects same-network VM traffic without an allow policy.
+- `exec/test_exec.py` covers host-to-VM execution only; two cases still use a PATH-selected `mvm`.
+- `vm/test_jailer.py` observes process/chroot outcomes through user-visible state but does not qualify root authority or
+  the fd-0 transport.
+- Shared cleanup and several test-local teardowns still suppress errors or mutate host state with broad raw sudo.
+- `run provision` and `run jailer` coverage names public routes that the final release must remove.
+
 ## Table of Contents
 
+- [v0.3.0 release-security qualification overlay](#v030-release-security-qualification-overlay)
 - [Root CLI](#root-cli)
+- [mvm self-update](#mvm-self-update)
 - [mvm init](#mvm-init)
 - [mvm config](#mvm-config)
 - [mvm network](#mvm-network)
@@ -53,6 +85,17 @@ removed, or when test coverage changes.
 | `help` (consistency) | ⚡ Shallow | `cli/test_cli.py` | `TestHelpOutputConsistentFormat`, `TestHelpSubcommandShowsCorrectly`, `TestHelpOutputShowsSubcommands` | Check: Usage:, Commands:, --help in every group, subcommands listed |
 | `version` (command) | ⚡ Shallow | `cli/test_cli.py` | `TestHelpCommand` | L1: stdout has version-like content with digits |
 | `completion bash\|zsh\|fish\|powershell` | ⚡ Shallow | `cli/test_cli.py` | `TestHelpCommand` | L1: stdout contains shell completion definitions |
+
+---
+
+## `mvm self-update`
+
+| Command/Flag | Status | Test File | Test Class(es) | Notes |
+|---|---|---|---|---|
+| `self-update` (user-owned artifact) | 🔴 Missing | — | — | Success/update behavior for a user-owned executable is not covered at L2. |
+| `self-update check` | 🔴 Missing | — | — | Release-check output is not covered at L2. |
+| `self-update apply` (user-owned artifact) | 🔴 Missing | — | — | Successful replacement of a user-owned executable is not covered at L2. |
+| `self-update apply --force` (system installation) | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 seeds the existing HTTP cache with a newer release, invokes exact `/usr/local/bin/mvm`, verifies refusal before update download, and proves the system-binary hash is unchanged. The cache entry is restored or removed exactly. |
 
 ---
 
@@ -125,6 +168,7 @@ removed, or when test coverage changes.
 | `network rm` rejects with active VM | ✅ Deep | `network/test_network.py` | `TestNetworkVMDependency` | L3: rm fails without --force when VM uses network; inspect shows VM count |
 | nftables firewall backend | ✅ Deep | `network/test_nftables.py` | `TestNFTablesFirewallBackend` | L3: set nftables backend, create VM, SSH, ping, verify nftables rules, cleanup, reset to iptables |
 | nftables atomic rule sync | ✅ Deep | `network/test_nftables.py` | `TestAtomicRuleSync` | L3: batch_ensure_rules idempotent, conntrack rule present, rule count stable, MASQUERADE persists |
+| Routed service-access policies | ✅ Deep | `network/test_policies.py` | `test_routed_service_access_policy_specification` | L2: nftables and iptables default deny, exact VM/port-range allow, NoCloud precedence, host deny, internet egress, sync recovery, and deletion invalidation |
 
 ---
 
@@ -506,7 +550,11 @@ removed, or when test coverage changes.
 | `host clean` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostCleanSafety` | L1 |
 | `host reset --force` | ⚡ Shallow | `host/test_host.py` | `TestHostCleanDestructive` | L1 — exit 0, non-empty stdout. Marked host_reset (excluded from default runs) |
 | `host reset` blocked by running VM | ⚡ Shallow | `host/test_host.py` | `TestHostResetSafety` | L1 |
-| `host init` | 🟡 Partial | `host/test_host.py` | `TestHostInit` | Non-sudo path verified; sudo path requires host_reset marker |
+| `host install-system` | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | The Python runner stages the RC, invokes the real administrator installer, and then all `_run_mvm` calls use exact `/usr/local/bin/mvm`. L2 verifies root ownership, mode, trusted ancestors, content hash, no temporary sibling, and idempotence. |
+| `host install-system` rejection cases | ✅ Deep | `host/test_system_install.py` | `TestSystemBinaryInstall` | L2 verifies unprivileged and malformed invocations preserve the target, and an existing target symlink is rejected without changing its destination. Symlink-test restoration is mandatory and asserted. |
+| `host install-system` pre-rename failure | ✅ Deep | `host/test_system_install.py`, `internal/core/host/system_binary_test.go` | `TestSystemBinaryInstall`, `TestInstallSystemBinary_PreRenameFailuresPreserveTarget` | L1 covers each injected pre-rename stage. L2 bind-remounts `/usr/local/bin` read-only, invokes the exact staged candidate, verifies the public failure and unchanged canonical metadata/hash, then requires rw remount, unmount, no mount leak, and executable restoration. |
+| `host install-system` remaining partial failures | ⚡ Shallow | `internal/core/host/system_binary_test.go`, `pkg/api/host_system_binary_test.go` | `TestInstallSystemBinary_PreRenameFailuresPreserveTarget`, `TestInstallSystemBinary_ReportsPostRenameAndCleanupFailures`, `TestHostInstallSystemBinary_PreservesPartialSuccess` | L1 deterministically covers write/metadata/fsync/close/rename failures, cleanup failure, and post-rename durability reporting. No safe deterministic public-boundary L2 injection exists for those individual stages; uncontrolled disk filling, timing kills, and production test hooks are explicitly rejected. |
+| `host init` | 🟡 Partial | `host/test_system_install.py`, `host/test_host.py` | `TestSystemBinaryInstall`, `TestHostInit` | L2 invokes exact `sudo /usr/local/bin/mvm host init` in a runner that already has the `mvm` group and membership. It proves happy-path sudoers reconciliation and invoking-user cache/config ownership. Task 13 gaps: group creation/membership, root-owned journal, rollback, and fail-closed mutation errors. |
 
 ---
 
@@ -587,6 +635,7 @@ removed, or when test coverage changes.
 | `run nocloudnet serve --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
 | `run console relay --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
 | `run provision --help` | ⚡ Shallow | `run/test_run.py` | `TestRunHelp` | L1 — help output |
+| `run jailer` | ✅ Deep | `vm/test_jailer.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2 — indirectly verifies privileged install, launch, cleanup, and no fallback |
 
 > Internal service subprocesses are tested indirectly through VM operations (console relay, nocloudnet HTTP, volume provisioning).
 
@@ -609,67 +658,62 @@ removed, or when test coverage changes.
 | Stress create/destroy | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestStressCreateDestroy` | L2: 5 sequential create→destroy cycles |
 | Export/import config journey | ⚡ Shallow | `full_journeys/test_full_journeys.py` | `TestExportImport` | L2: inspect --json schema verification |
 | Concurrent VM creation | ✅ Deep | `full_journeys/test_full_journeys.py` | `TestConcurrentVMCreation` | L3: 10 concurrent VMs, all running via ls --json, SSH into each |
+| Canonical Jailer lifecycle | ✅ Deep | `vm/test_jailer.py`, `full_journeys/test_full_journeys.py` | `TestCanonicalJailerLaunch`, `TestJailerFailClosed` | L2: trusted pair, non-root jailed process, lifecycle, volume, snapshot, fail-closed |
+| Typed cgroup-v2 envelope | ✅ Deep | `vm/test_cgroup.py`, `vm/test_jailer.py` | `TestVMCgroupEnvelope`, `TestCanonicalJailerLaunch` | L2: exact membership and limits, inspect state, snapshot preservation, stop/start/remove cleanup, prerequisite fail-closed |
 
 ---
 
 ## Summary Statistics
 
-| Category | Total Scenarios | ✅ Deep | ⚡ Shallow | 🔴 Missing | ⏭️ Skip |
-|----------|----------------|---------|-------------|-------------|----------|
-| Root CLI | 8 | 0 | 8 | 0 | 0 |
-| init | 5 | 0 | 5 | 0 | 0 |
-| config | 12 | 0 | 12 | 0 | 0 |
-| network | 34 | 13 | 19 | 0 | 0 |
-| vm | 101 | 17 | 72 | 0 | 0 |
-| exec | 8 | 0 | 8 | 0 | 0 |
-| snapshot | 14 | 1 | 10 | 0 | 0 |
-| volume | 36 | 4 | 31 | 0 | 0 |
-| key | 28 | 3 | 25 | 0 | 0 |
-| image | 42 | 0 | 13 | 1 | 28 |
-| kernel | 31 | 1 | 21 | 0 | 9 |
-| bin | 17 | 2 | 7 | 0 | 8 |
-| ssh | 6 | 4 | 2 | 0 | 0 |
-| console | 6 | 0 | 6 | 0 | 0 |
-| logs | 9 | 0 | 9 | 0 | 0 |
-| host | 11 | 3 | 7 | 0 | 1 |
-| cache | 13 | 3 | 6 | 0 | 1 |
-| cp | 12 | 7 | 5 | 0 | 0 |
-| env | 22 | 9 | 13 | 0 | 0 |
-| run | 3 | 0 | 3 | 0 | 0 |
-| full-journeys | 13 | 5 | 8 | 0 | 0 |
-| **Total** | **431** | **72** | **292** | **1** | **47** |
+| Category | Total Scenarios | ✅ Deep | ⚡ Shallow | 🟡 Partial | 🔴 Missing | ⏭️ Skip |
+|----------|----------------|---------|-------------|------------|-------------|----------|
+| Root CLI | 7 | 0 | 7 | 0 | 0 | 0 |
+| self-update | 4 | 1 | 0 | 0 | 3 | 0 |
+| init | 5 | 0 | 4 | 1 | 0 | 0 |
+| config | 12 | 0 | 12 | 0 | 0 | 0 |
+| network | 35 | 14 | 21 | 0 | 0 | 0 |
+| vm | 94 | 18 | 71 | 5 | 0 | 0 |
+| exec | 8 | 0 | 8 | 0 | 0 | 0 |
+| snapshot | 13 | 1 | 12 | 0 | 0 | 0 |
+| volume | 35 | 4 | 29 | 2 | 0 | 0 |
+| key | 28 | 3 | 25 | 0 | 0 | 0 |
+| image | 41 | 0 | 11 | 3 | 1 | 26 |
+| kernel | 30 | 2 | 15 | 6 | 0 | 7 |
+| bin | 17 | 2 | 6 | 1 | 0 | 8 |
+| ssh | 6 | 4 | 1 | 1 | 0 | 0 |
+| console | 6 | 0 | 6 | 0 | 0 | 0 |
+| logs | 9 | 0 | 9 | 0 | 0 | 0 |
+| host | 15 | 6 | 7 | 1 | 0 | 1 |
+| cache | 13 | 3 | 9 | 0 | 0 | 1 |
+| cp | 12 | 8 | 3 | 1 | 0 | 0 |
+| env | 22 | 9 | 13 | 0 | 0 | 0 |
+| run | 4 | 1 | 3 | 0 | 0 | 0 |
+| full-journeys | 15 | 7 | 8 | 0 | 0 | 0 |
+| **Total** | **431** | **83** | **280** | **21** | **4** | **43** |
 
-**Coverage health:**
-- ✅ Deep (L3): 72/431 = 16.7%
-- ⚡ Shallow (L0-L2 incl. 🟡 Partial): 292/431 = 67.7%
-- 🔴 Missing: **1/431 = 0.2%** — `image inspect --tree` does not exist as a CLI command
-- ⏭️ Skip-prone: 47/431 = 10.9%
+**Current-row coverage health:**
+- ✅ Deep (L3): 83/431 = 19.3%
+- ⚡ Shallow (L0-L2): 280/431 = 65.0%
+- 🟡 Partial: 21/431 = 4.9%
+- 🔴 Missing: **4/431 = 0.9%** — three user-owned `self-update` success/check paths plus the phantom
+  `image inspect --tree` entry
+- ⏭️ Skip-prone: 43/431 = 10.0%
 
-**CLI gaps: all resolved.** The only remaining `🔴 Missing` entry is `image inspect --tree`, which is a phantom command — the CLI has no `--tree` flag for `image inspect`. All 21 real gaps are now covered with system tests.
+These counts inventory rows for the transitional CLI only. They do not include the separate v0.3.0 security blockers in
+the qualification overlay. Successful user-owned `self-update` check/apply behavior remains unqualified at L2. The
+`image inspect --tree` missing entry is a phantom command because the CLI has no such flag.
 
 ---
 
-**QA update (latest):**
-- ✅ Coverage matrix fully audited against actual CLI flags from Go source
-- ✅ All stale flag names corrected: `--vcpus`→`--vcpu`, `--user-data`→`--cloudinit-config`, `--enable-pci`/`--no-enable-pci`→`--no-pci`, `--no-console`→default behavior
-- ✅ Phantom commands removed: `vm export`, `vm import`, `cp --user`, `cp --key`, `--firecracker-bin`
-- ✅ Missing command categories added: `mvm snapshot` (top-level), `mvm env`, `mvm run`, `vm exec`, `completion powershell`, `init --skip-host`, `key import`
-- ✅ Missing flags documented: `vm create --console`, `--force`, `--vsock-port`; `config reset --force`; `volume create --shareable`; `image import --version`
-- ✅ Snapshot moved from under `vm` to its own top-level section
-- ✅ Cross-referenced ALL test classes against actual test code
-- ✅ Fixed wrong class references: `TestVMCreate`→🔴 Missing (tests don't exist), `TestKeyAddOverwrite`→`TestKeyImportOverwrite`, `TestImageLifecycle`→`TestImageRemove`, `TestImageInspectTree`→🔴 Missing (doesn't exist), `TestEnvApply`→🔴 Missing (doesn't exist)
-- ✅ Fixed `TestVMNocloudNetPort` reference (was incorrectly attributed to `TestVMCloudInit` only)
-- ✅ Recalculated summary statistics (420 total scenarios, 22 🔴 Missing)
-- ✅ Added all undocumented test classes (34+) across network nftables, volume hotplug/detach, image/kernel/bin dependency, env ls/diff, full-journeys (13 classes), and cache prune/clean
+**QA audit — 2026-08-23:**
 
-**June 27, 2026 — Mass gap-fill:**
-- ✅ **VM (8 new tests)**: `--console` (L2), `--count N` (L2), `--atomic --count N` (L2), `--count --ip`/`--mac`/`-1` error (L1), `--force` (L2), `--vsock-port` (L2)
-- ✅ **exec (8 tests, new file)**: Basic command (L2), interactive shell (L2), `--port` (L2), `--timeout` (L1), `--user` (L2), nonexistent VM (L1), invalid port (L1), empty command (L2)
-- ✅ **snapshot (5 new tests)**: `--name` (L2), `--pause` (L2), `inspect` (L1), `inspect --json` (L2), `restore --network` (L2)
-- ✅ **volume (1 new test)**: `--shareable` (L2)
-- ✅ **key (1 new test)**: `import <name> <path>` (L2)
-- ✅ **image (1 new test)**: `import --version` (L2)
-- ✅ **21 of 22 gaps closed** (only `image inspect --tree` remains 🔴 — phantom flag)
+- Recounted the current command rows directly: 431 total, with the exact status totals above.
+- Added the v0.3.0 security overlay so legacy CLI breadth is not represented as clean-break release evidence.
+- Confirmed that Jailer/cgroup tests do not yet verify root records, exact process identity, cross-UID denial, private
+  mount/network namespaces, or complete cleanup.
+- Confirmed that policy/full-journey tests still encode superseded dual-firewall and implicit same-network behavior.
+- Confirmed that VM-to-VM typed exec, final marker-only sudoers denial, repeated zero-leak runs, and aggregated teardown
+  failure reporting remain missing.
 
 **System test machine requirements:**
 To run the full system test suite with zero skips, the dedicated test machine must have:
@@ -684,10 +728,13 @@ To run the full system test suite with zero skips, the dedicated test machine mu
 | Network access | Image pull, bin pull, remote listing | Required for HTTP downloads |
 | `/dev/kvm` | All VM creation tests | KVM-capable CPU + `kvm` kernel module |
 | `mvm` group membership | All privileged operations | `sudo usermod -aG mvm $USER` |
-| `~/.local/bin/mvm` binary | host clean/reset tests | Build with `scripts/build.sh release` |
+| Exact `/usr/local/bin/mvm` plus separate candidate | v0.3 qualification | Install the release candidate through `host install-system`; keep the outer controller separate. |
 
-**Skip behavior on dedicated vs developer machines:**
-- **Dedicated machine** (all deps installed): Skips nearly never trigger. Skip ratio ≈ 0%.
-- **Developer machine** (missing deps): Tests skip gracefully with clear `# Skip-reason:` explaining what to install.
+**Prerequisite behavior on dedicated vs developer machines:**
+- **Dedicated qualification machine:** every prerequisite is mandatory; release evidence requires zero skips, XFAILs,
+  XPASSes, deselections, collection errors, or omitted domains.
+- **Developer machine:** a focused run may fail prerequisite admission when dependencies are absent. Such a run is useful
+  for diagnosis but cannot serve as release evidence.
 
-**431 scenarios documented — 1 remaining 🔴 (phantom `image inspect --tree` flag, not a real CLI command). 21 real gaps closed.**
+**431 transitional CLI scenarios are documented. Four rows are marked missing; the v0.3.0 qualification overlay lists
+additional release-security gaps that must close before signoff.**

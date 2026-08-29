@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/infra"
 	consolesvc "mvmctl/internal/service/console"
 )
 
@@ -27,8 +28,7 @@ import (
 // A Controller is not safe for concurrent use. The API layer serializes
 // calls per-VM through its own execution model.
 type Controller struct {
-	vmID, vmPath, vmName        string
-	pidFilename, socketFilename string
+	vmID, vmPath, vmName string
 
 	// PTY state
 	masterFD int // PTY master → relay subprocess
@@ -43,16 +43,14 @@ type Controller struct {
 }
 
 // NewController creates a new Controller for the given VM.
-func NewController(vmID, vmPath, vmName, pidFilename, socketFilename string) *Controller {
+func NewController(vmID, vmPath, vmName string) *Controller {
 	if vmName == "" {
 		vmName = vmID
 	}
 	return &Controller{
-		vmID:           vmID,
-		vmPath:         vmPath,
-		vmName:         vmName,
-		pidFilename:    pidFilename,
-		socketFilename: socketFilename,
+		vmID:   vmID,
+		vmPath: vmPath,
+		vmName: vmName,
 	}
 }
 
@@ -113,11 +111,9 @@ func (cc *Controller) Start(ctx context.Context) (string, *int, error) {
 	}
 
 	cfg := consolesvc.Config{
-		VMID:           cc.vmID,
-		VMPath:         cc.vmPath,
-		VMName:         cc.vmName,
-		PIDFilename:    cc.pidFilename,
-		SocketFilename: cc.socketFilename,
+		VMID:   cc.vmID,
+		VMPath: cc.vmPath,
+		VMName: cc.vmName,
 	}
 
 	result, err := consolesvc.Spawn(ctx, cfg, ptyFile)
@@ -131,8 +127,8 @@ func (cc *Controller) Start(ctx context.Context) (string, *int, error) {
 
 	// Create the relay manager now that the subprocess is alive.
 	// Spawn already wrote the PID file, so the Relay can find the PID.
-	pidPath := filepath.Join(cc.vmPath, cc.pidFilename)
-	sockPath := filepath.Join(cc.vmPath, cc.socketFilename)
+	pidPath := filepath.Join(cc.vmPath, infra.VMConsolePIDFilename)
+	sockPath := filepath.Join(cc.vmPath, infra.VMConsoleSocketFilename)
 	cc.relayManager = consolesvc.NewRelay(cc.vmName, pidPath, sockPath)
 
 	return result.SocketPath, &result.PID, nil

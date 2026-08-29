@@ -1,6 +1,7 @@
 package host_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -32,6 +33,20 @@ func TestGenerateSudoersContent(t *testing.T) {
 		for _, bin := range infra.PrivilegedBinariesOrdered {
 			assert.Contains(t, got, bin,
 				"sudoers content must include privileged binary %s", bin)
+		}
+	})
+
+	// Rationale: During Tasks 2-8 the legacy raw-tool grants must remain live,
+	// but sudo must stop targeting whichever user/development image ran init.
+	t.Run("uses_fixed_system_binary_with_transitional_entries", func(t *testing.T) {
+		got := host.GenerateSudoersContent("mvm")
+		currentExecutable, err := os.Executable()
+		require.NoError(t, err)
+
+		assert.Contains(t, got, infra.SystemBinaryPath+" *")
+		assert.NotContains(t, got, currentExecutable+" *")
+		for _, binary := range infra.PrivilegedBinariesOrdered {
+			assert.Contains(t, got, binary, "transitional sudoers must retain %s", binary)
 		}
 	})
 

@@ -8,41 +8,56 @@ Usage:
 
   # Run all domains (T1 + T2 + T3)
   MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror \\
-    python3 scripts/run-system-tests.py --all
+    python3 scripts/run-system-tests.py --all --host-direct
 
   # Run specific domains
-  python3 scripts/run-system-tests.py cli network vm_nested_virt
+  python3 scripts/run-system-tests.py cli network exec
 
   # Run specific tiers (comma-separated, executed in the given order)
   python3 scripts/run-system-tests.py --tier 1
   python3 scripts/run-system-tests.py --tier 2,1
-  python3 scripts/run-system-tests.py --tier 1,3
-  python3 scripts/run-system-tests.py --tier 3,2,1
+  python3 scripts/run-system-tests.py --tier 1,3 --host-direct
+  python3 scripts/run-system-tests.py --tier 3,2,1 --host-direct
 
-  # Rebuild shared assets and (optionally) run tests
-  python3 scripts/run-system-tests.py --rebuild --all
+  # Rebuild and qualify an explicit release candidate
+  python3 scripts/run-system-tests.py --release-qualification --all \\
+    --host-direct --rebuild --candidate-version 0.3.0
   python3 scripts/run-system-tests.py --volume --image --prepare
   python3 scripts/run-system-tests.py --volume
   python3 scripts/run-system-tests.py --image
 
   # Limit parallel workers (default: 4)
-  python3 scripts/run-system-tests.py --all --workers 2
+  python3 scripts/run-system-tests.py --all --host-direct --workers 2
 """
 
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import os
+import re
 import shlex
+import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+
+from system_test_release import (
+    validate_release_build_paths,
+    verify_release_binary_identity,
+)
+from system_test_outcomes import (
+    MAX_PYTEST_OUTCOME_REPORT_BYTES,
+    PYTEST_OUTCOME_REPORT_ENV,
+    read_pytest_outcome_report,
+    require_complete_pytest_outcomes,
+)
 
 # ============================================================================
 # Configuration
@@ -51,13 +66,40 @@ from typing import Any
 ASSET_MIRROR_HOST = os.path.expanduser("~/.cache/mvm-asset-mirror")
 if os.environ.get("MVM_ASSET_MIRROR"):
     ASSET_MIRROR_HOST = os.environ["MVM_ASSET_MIRROR"]
-MVM_BINARY = os.environ.get("MVM_BINARY", os.path.expanduser("~/.local/bin/mvm"))
+MVM_BINARY = os.environ.get("MVM_BINARY", "/usr/local/bin/mvm")
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+MVM_CANDIDATE_CONFIGURED = Path(
+    os.environ.get("MVM_CANDIDATE_BINARY", _REPO_ROOT / "dist" / "mvm")
+).expanduser()
+MVM_CANDIDATE_BINARY = str(
+    MVM_CANDIDATE_CONFIGURED.resolve()
+)
 SHARED_VOLUME_NAME = "asset-mirror"
 SHARED_VOLUME_SIZE = "6G"
 TEST_NETWORK_NAME = "sys-test-net"
+# These markers qualify DownloadFile artifact bytes. Fixed checksum metadata
+# fetched through GetBody may still use its configured upstream origin.
+LOCAL_MIRROR_READ_MARKER = "Using local mirror for download"
+FORBIDDEN_BUILDER_PULL_MARKERS = (
+    "Mirror checksum mismatch, falling back to HTTP download",
+    "Copied to asset mirror",
+)
+BUILDER_PULL_OUTPUT_LIMIT = 8 * 1024
 
 # Custom base image built during --prepare
 BASE_IMAGE_NAME = "mvm-test-runner"
+
+# Root-owned staging location used to exercise the real administrator install
+# flow inside every disposable runner VM.  Tests execute the installed binary
+# at /usr/local/bin/mvm; they never treat this candidate path as the CLI.
+RUNNER_SYSTEM_CANDIDATE_DIR = "/opt/mvmctl-test"
+RUNNER_SYSTEM_CANDIDATE = f"{RUNNER_SYSTEM_CANDIDATE_DIR}/mvm-candidate"
+RUNNER_SYSTEM_UPLOAD = "/home/runner/.mvm-system-candidate.upload"
+RUNNER_USER_INIT_COMMAND = (
+    "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
+    "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm init --non-interactive "
+    "--binary-version 1.16.0"
+)
 
 # Base VM used to build the custom image
 BASE_VM_NAME = "base-img-builder"
@@ -65,9 +107,26 @@ BASE_VM_DISK = "12G"
 
 # SSH key for provisioning runner user in builder & test VMs
 BUILDER_KEY_NAME = "builder-key"
+_SEMVER_CORE_NUMBER = r"(?:0|[1-9][0-9]*)"
+_SEMVER_PRERELEASE_ID = (
+    r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+)
+_SEMVER_BUILD_ID = r"[0-9A-Za-z-]+"
+_CANDIDATE_VERSION_PATTERN = re.compile(
+    rf"^v?(?P<version>{_SEMVER_CORE_NUMBER}\."
+    rf"{_SEMVER_CORE_NUMBER}\.{_SEMVER_CORE_NUMBER}"
+    rf"(?:-{_SEMVER_PRERELEASE_ID}(?:\.{_SEMVER_PRERELEASE_ID})*)?"
+    rf"(?:\+{_SEMVER_BUILD_ID}(?:\.{_SEMVER_BUILD_ID})*)?)$"
+)
+
+
+class _UnsafeVolumeBackingPath(RuntimeError):
+    """The volume record points outside the one runner-managed backing path."""
+
 
 # Tier 1: shared volume, host-level CLI operations (no nested virt needed)
 TIER1_DOMAINS: dict[str, list[str]] = {
+    "system_install": ["tests/system/host/test_system_install.py"],
     "cli": ["tests/system/cli/test_cli.py"],
     "config": ["tests/system/config/test_config.py"],
     "init": ["tests/system/init/test_init.py"],
@@ -93,16 +152,21 @@ TIER2_DOMAINS: dict[str, list[str]] = {
     ],
     "vm_lifecycle": ["tests/system/vm/test_vm_lifecycle.py"],
     "vm_data_persistence": ["tests/system/vm/test_vm_data_persistence.py"],
+    "jailer": [
+        "tests/system/vm/test_jailer.py",
+        "tests/system/vm/test_cgroup.py",
+    ],
+    "exec": ["tests/system/exec/test_exec.py"],
     "ssh": ["tests/system/ssh/test_ssh.py"],
     "console": ["tests/system/console/test_console.py"],
     "logs": ["tests/system/logs/test_logs.py"],
     "full_journeys": ["tests/system/full_journeys/test_full_journeys.py"],
     "nftables": ["tests/system/network/test_nftables.py"],
+    "policies": ["tests/system/network/test_policies.py"],
 }
 
 # Tier 3: directly on host (no runner VM)
 TIER3_DOMAINS: dict[str, list[str]] = {
-    "nested_virt": ["tests/system/vm/test_vm_fresh_env.py"],
     "nested_isolated": ["tests/system/vm/test_vm_nested_isolated.py"],
     "fresh_env": ["tests/system/vm/test_vm_fresh_env.py"],
     "snapshot_load": ["tests/system/vm/test_vm_snapshot_load.py"],
@@ -186,10 +250,14 @@ def mvm(
         if result.stderr:
             print(result.stderr, end="", flush=True, file=sys.stderr)
     if check and result.returncode != 0:
+        if result.stderr is None:
+            stderr = "(streamed; not captured)" if not capture else "(not available)"
+        else:
+            stderr = result.stderr.strip() or "(empty)"
         raise RuntimeError(
-            f"mvm command failed: {' '.join(args)}\n"
+            f"mvm command failed: {shlex.join(cmd)}\n"
             f"  rc: {result.returncode}\n"
-            f"  stderr: {result.stderr.strip()}"
+            f"  stderr: {stderr}"
         )
     return result
 
@@ -200,26 +268,122 @@ def log(msg: str) -> None:
     print(f"[{ts}] {msg}", flush=True)
 
 
-def _build_mvm_binary() -> None:
-    """Build the mvm release binary and install it to ~/.local/bin/mvm."""
-    log("Building mvm binary...")
+def _parse_candidate_version(value: str) -> str:
+    """Parse one explicit release identity accepted by the build script."""
+    match = _CANDIDATE_VERSION_PATTERN.fullmatch(value.strip())
+    if match is None:
+        raise argparse.ArgumentTypeError(
+            "candidate version must be X.Y.Z with optional prerelease/build metadata"
+        )
+    return match.group("version")
+
+
+def _resolve_candidate_build_version(explicit_version: str | None) -> str:
+    """Resolve an explicit version or one clean, exact release tag at HEAD."""
+    if explicit_version is not None:
+        try:
+            return _parse_candidate_version(explicit_version)
+        except argparse.ArgumentTypeError as exc:
+            raise RuntimeError(str(exc)) from exc
+
+    tags = subprocess.run(
+        ["git", "tag", "--points-at", "HEAD", "--list", "v[0-9]*"],
+        cwd=str(_REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if tags.returncode != 0:
+        raise RuntimeError(
+            "cannot inspect release tags; pass --candidate-version with --rebuild"
+        )
+    exact_versions: list[str] = []
+    for tag in tags.stdout.splitlines():
+        try:
+            exact_versions.append(_parse_candidate_version(tag))
+        except argparse.ArgumentTypeError:
+            continue
+    if len(exact_versions) != 1:
+        raise RuntimeError(
+            "--rebuild requires --candidate-version unless HEAD has exactly "
+            "one valid release tag"
+        )
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+        cwd=str(_REPO_ROOT),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if status.returncode != 0 or status.stdout.strip():
+        raise RuntimeError(
+            "--rebuild requires --candidate-version when the release-tagged "
+            "checkout has uncommitted files"
+        )
+    return exact_versions[0]
+
+
+def _build_mvm_binary(candidate_version: str) -> None:
+    """Build the release candidate without replacing the outer controller."""
+    try:
+        version = _parse_candidate_version(candidate_version)
+    except argparse.ArgumentTypeError as exc:
+        raise RuntimeError(str(exc)) from exc
+    if MVM_CANDIDATE_CONFIGURED.is_symlink():
+        raise RuntimeError(
+            "MVM_CANDIDATE_BINARY build target must not be a symlink: "
+            f"{MVM_CANDIDATE_CONFIGURED}"
+        )
+    _require_distinct_candidate_controller()
+    log(f"Building mvm release candidate at {MVM_CANDIDATE_BINARY}...")
     script_dir = Path(__file__).resolve().parent
     repo_root = script_dir.parent
     build_script = repo_root / "scripts" / "build.sh"
-    output_path = Path("~/.local/bin/mvm").expanduser()
+    output_path = Path(MVM_CANDIDATE_BINARY)
     result = subprocess.run(
         [
             str(build_script),
             "release",
+            "--version",
+            version,
             "--output",
             str(output_path),
         ],
         cwd=str(repo_root),
     )
     if result.returncode != 0:
-        log("ERROR: mvm binary build failed")
-        sys.exit(1)
+        raise RuntimeError(f"mvm binary build failed with rc={result.returncode}")
+    reported_version = _get_mvm_version()
+    if reported_version != version:
+        raise RuntimeError(
+            "built candidate version mismatch: "
+            f"requested {version}, reported {reported_version}"
+        )
     log("Build complete")
+
+
+def _controller_executable_path() -> Path:
+    """Resolve the executable used only to manage outer host resources."""
+    command = shlex.split(MVM_BINARY)
+    if not command:
+        raise RuntimeError("MVM_BINARY must contain an executable path")
+    executable = shutil.which(command[0]) or command[0]
+    return Path(executable).expanduser().resolve()
+
+
+def _require_distinct_candidate_controller() -> None:
+    """Reject path and inode aliases before a candidate build can overwrite mvm."""
+    candidate = Path(MVM_CANDIDATE_BINARY).expanduser().resolve()
+    controller = _controller_executable_path()
+    aliases = candidate == controller
+    if not aliases and candidate.exists() and controller.exists():
+        aliases = os.path.samefile(candidate, controller)
+    if aliases:
+        raise RuntimeError(
+            "MVM_CANDIDATE_BINARY must not alias the outer controller "
+            f"MVM_BINARY ({controller})"
+        )
 
 
 def _run_pytest(
@@ -254,23 +418,195 @@ def _run_pytest(
 # ============================================================================
 
 
-def _get_volume_path(name: str) -> str | None:
-    """Get the on-disk path of a volume, or None if it doesn't exist."""
+def _inspect_volume_path(name: str) -> tuple[bool, str | None]:
+    """Return whether a volume record exists and its recorded backing path."""
     result = mvm("volume", "inspect", name, "--json", check=False, timeout=30)
     if result.returncode != 0:
-        return None
+        return False, None
     try:
         info = json.loads(result.stdout)
-        return info.get("volume", {}).get("path")
-    except (json.JSONDecodeError, KeyError):
-        return None
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"volume inspect returned invalid JSON for '{name}': {exc}"
+        ) from exc
+    path = info.get("volume", {}).get("path")
+    return True, path if isinstance(path, str) and path else None
+
+
+def _get_volume_path(name: str) -> str | None:
+    """Get the recorded on-disk path of a volume, or None if absent."""
+    _exists, path = _inspect_volume_path(name)
+    return path
+
+
+def _expected_shared_volume_path() -> Path:
+    """Return the lexical managed path without following any symlinks."""
+    cache_root = Path(
+        os.environ.get("MVM_CACHE_DIR", "~/.cache/mvmctl")
+    ).expanduser()
+    return Path(
+        os.path.abspath(cache_root / "volumes" / f"{SHARED_VOLUME_NAME}.raw")
+    )
+
+
+def _validated_volume_backing_path(raw_path: str | os.PathLike[str]) -> Path:
+    """Require the exact regular, non-symlink runner volume backing file."""
+    path = Path(os.path.abspath(Path(raw_path).expanduser()))
+    expected = _expected_shared_volume_path()
+    if path != expected:
+        raise _UnsafeVolumeBackingPath(
+            "unexpected shared volume backing path: "
+            f"expected {expected}, got {path}"
+        )
+    try:
+        info = path.lstat()
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"volume backing file is missing: {path}") from exc
+    except OSError as exc:
+        raise RuntimeError(f"cannot inspect volume backing file {path}: {exc}") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise RuntimeError(f"volume backing path must not be a symlink: {path}")
+    if not stat.S_ISREG(info.st_mode):
+        raise RuntimeError(f"volume backing path is not a regular file: {path}")
+    return path
+
+
+def _open_directory_without_symlinks(path: Path) -> int:
+    """Open an absolute directory path one pinned, no-follow component at a time."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    current_fd = os.open(os.sep, flags)
+    try:
+        for component in path.parts[1:]:
+            next_fd = os.open(component, flags, dir_fd=current_fd)
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd
+    except BaseException:
+        os.close(current_fd)
+        raise
+
+
+def _require_shared_volume_path_absent_before_create() -> None:
+    """Refuse create if old cleanup left any object at the canonical path."""
+    expected = _expected_shared_volume_path()
+    try:
+        expected.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot verify shared volume path before create {expected}: {exc}"
+        ) from exc
+    raise _UnsafeVolumeBackingPath(
+        f"shared volume backing path still exists before volume create: {expected}"
+    )
+
+
+def _populate_volume_image(volume_path: Path, mirror_path: Path) -> None:
+    """Format and populate one ext4 image without sudo or loop mounts."""
+    backing = _validated_volume_backing_path(volume_path)
+    mirror = mirror_path.expanduser().resolve()
+    if not mirror.is_dir():
+        raise RuntimeError(f"asset mirror is not a directory: {mirror}")
+
+    path_info = backing.lstat()
+    try:
+        parent_fd = _open_directory_without_symlinks(backing.parent)
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot safely open shared volume directory {backing.parent}: {exc}"
+        ) from exc
+    try:
+        try:
+            backing_fd = os.open(
+                backing.name,
+                os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=parent_fd,
+            )
+        except OSError as exc:
+            raise RuntimeError(
+                f"cannot safely open shared volume backing file {backing}: {exc}"
+            ) from exc
+    finally:
+        os.close(parent_fd)
+
+    try:
+        pinned_before = os.fstat(backing_fd)
+        if not stat.S_ISREG(pinned_before.st_mode):
+            raise RuntimeError(
+                f"shared volume backing descriptor is not a regular file: {backing}"
+            )
+        if (pinned_before.st_dev, pinned_before.st_ino) != (
+            path_info.st_dev,
+            path_info.st_ino,
+        ):
+            raise RuntimeError(
+                f"shared volume backing file changed before population: {backing}"
+            )
+        try:
+            result = subprocess.run(
+                [
+                    "mkfs.ext4",
+                    "-F",
+                    "-d",
+                    str(mirror),
+                    f"/proc/self/fd/{backing_fd}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=900,
+                pass_fds=(backing_fd,),
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "mkfs.ext4 is required to populate the shared asset volume"
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                "mkfs.ext4 timed out while populating the volume"
+            ) from exc
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
+            raise RuntimeError(f"mkfs.ext4 failed to populate {backing}: {detail}")
+
+        pinned_after = os.fstat(backing_fd)
+        try:
+            current = backing.lstat()
+        except OSError as exc:
+            raise RuntimeError(
+                f"shared volume backing path was replaced during population: {backing}"
+            ) from exc
+        if not stat.S_ISREG(current.st_mode) or (
+            current.st_dev,
+            current.st_ino,
+        ) != (pinned_after.st_dev, pinned_after.st_ino):
+            raise RuntimeError(
+                f"shared volume backing path was replaced during population: {backing}"
+            )
+        if (pinned_after.st_uid, pinned_after.st_gid) != (
+            pinned_before.st_uid,
+            pinned_before.st_gid,
+        ):
+            raise RuntimeError(
+                "mkfs.ext4 changed shared volume backing ownership: "
+                f"expected {pinned_before.st_uid}:{pinned_before.st_gid}, "
+                f"got {pinned_after.st_uid}:{pinned_after.st_gid}"
+            )
+    finally:
+        os.close(backing_fd)
 
 
 def _create_and_seed_volume() -> None:
     """Create the shared asset volume and seed it with asset mirror contents.
 
-    This requires sudo for loop mount. Prompts the user for a password.
+    ``mkfs.ext4 -d`` copies the mirror directly into the image, so this never
+    needs sudo, a loop device, or a host mount.
     """
+    mirror_path = Path(ASSET_MIRROR_HOST).expanduser().resolve()
+    if not mirror_path.is_dir():
+        raise RuntimeError(f"asset mirror is not a directory: {mirror_path}")
+
+    _require_shared_volume_path_absent_before_create()
     log(f"Creating shared volume '{SHARED_VOLUME_NAME}' ({SHARED_VOLUME_SIZE})...")
     mvm(
         "volume",
@@ -285,65 +621,37 @@ def _create_and_seed_volume() -> None:
         timeout=30,
     )
 
-    vol_path = _get_volume_path(SHARED_VOLUME_NAME)
-    if not vol_path:
-        log("ERROR: Failed to find volume path after creation")
-        sys.exit(1)
-
-    # Check if asset mirror has content
-    mirror_path = Path(ASSET_MIRROR_HOST).expanduser()
-    if not mirror_path.exists() or not any(mirror_path.iterdir()):
-        log(f"WARNING: Asset mirror at {mirror_path} is empty or missing.")
-        log(
-            "Populating volume with empty filesystem. Tests that need assets will fail."
-        )
-
-    # Need sudo for loop mount
-    log("Populating volume with asset mirror contents (requires sudo)...")
-    password = getpass.getpass("sudo password: ")
-
-    def sudo_run(cmd_args: list[str], input_data: str | None = None) -> None:
-        full_cmd = ["sudo", "-S"] + cmd_args
-        subprocess.run(
-            full_cmd,
-            input=input_data or "",
-            text=True,
-            capture_output=True,
-            check=True,
-            timeout=120,
-        )
-
-    mount_point = "/mnt/.mvm-asset-populate"
     try:
-        sudo_run(["mkfs.ext4", "-F", vol_path], password)
-        Path(mount_point).mkdir(parents=True, exist_ok=True)
-        sudo_run(["mount", "-o", "loop", vol_path, mount_point], password)
-        sudo_run(
-            ["cp", "-r"]
-            + [str(p) for p in mirror_path.glob("*")]
-            + [f"{mount_point}/"],
-            password,
-        )
-        sudo_run(["chmod", "-R", "a+rX", mount_point], password)
-        log(f"Seeded volume with contents from {mirror_path}")
-    except subprocess.CalledProcessError as e:
-        log(f"ERROR: Failed to populate volume: {e.stderr if e.stderr else e}")
-        # Clean up mount if it succeeded
-        subprocess.run(
-            ["sudo", "-S", "umount", mount_point],
-            input=password,
-            text=True,
-            capture_output=True,
+        record_exists, raw_path = _inspect_volume_path(SHARED_VOLUME_NAME)
+        if not record_exists or not raw_path:
+            raise RuntimeError("created shared volume has no recorded backing path")
+        vol_path = _validated_volume_backing_path(raw_path)
+
+        if not any(mirror_path.iterdir()):
+            log(f"WARNING: Asset mirror at {mirror_path} is empty.")
+            log(
+                "Populating volume with empty filesystem. "
+                "Tests that need assets will fail."
+            )
+        _populate_volume_image(vol_path, mirror_path)
+    except _UnsafeVolumeBackingPath:
+        raise
+    except RuntimeError as primary:
+        cleanup = mvm(
+            "volume",
+            "rm",
+            SHARED_VOLUME_NAME,
+            "--force",
             check=False,
             timeout=30,
         )
-        sys.exit(1)
-    finally:
-        sudo_run(["umount", mount_point], password)
-        try:
-            Path(mount_point).rmdir()
-        except OSError:
-            pass
+        if cleanup.returncode != 0:
+            raise RuntimeError(
+                f"{primary}; failed to remove incomplete shared volume: "
+                f"{cleanup.stderr.strip()}"
+            ) from primary
+        raise
+    log(f"Seeded volume with contents from {mirror_path}")
 
 
 def ensure_shared_volume(*, rebuild: bool = False) -> None:
@@ -359,14 +667,28 @@ def ensure_shared_volume(*, rebuild: bool = False) -> None:
             "Create it first by pulling images/kernels/binaries with MVM_ASSET_MIRROR set."
         )
 
-    existing_path = _get_volume_path(SHARED_VOLUME_NAME)
-    if existing_path and not rebuild:
+    record_exists, raw_path = _inspect_volume_path(SHARED_VOLUME_NAME)
+    existing_path: Path | None = None
+    if record_exists:
+        try:
+            if raw_path is None:
+                raise RuntimeError("volume record has no backing path")
+            existing_path = _validated_volume_backing_path(raw_path)
+        except _UnsafeVolumeBackingPath:
+            raise
+        except RuntimeError as exc:
+            log(
+                f"Shared volume '{SHARED_VOLUME_NAME}' is stale ({exc}); "
+                "removing its record before recreation"
+            )
+
+    if existing_path is not None and not rebuild:
         log(f"Shared volume '{SHARED_VOLUME_NAME}' already exists at {existing_path}")
         return
 
-    if existing_path and rebuild:
+    if record_exists:
         log(f"Rebuilding: removing existing volume '{SHARED_VOLUME_NAME}'...")
-        mvm("volume", "rm", SHARED_VOLUME_NAME, "--force", check=False, timeout=30)
+        mvm("volume", "rm", SHARED_VOLUME_NAME, "--force", timeout=30)
 
     _create_and_seed_volume()
 
@@ -397,20 +719,119 @@ def ensure_test_network() -> None:
 
 
 def _get_mvm_version() -> str:
-    """Get the mvm binary version string (e.g. '0.1.0' or '0.1.0-7-gdeadbeef').
-
-    Strips the ``-dirty`` suffix if present — the base image was built from a
-    clean tree and uses the version without ``-dirty``.
-    """
-    result = mvm("--version", timeout=10)
+    """Get the candidate version without consulting or touching host state."""
+    with tempfile.TemporaryDirectory(prefix="mvm-candidate-version-") as root:
+        isolation_root = Path(root)
+        cache_dir = isolation_root / "cache"
+        config_dir = isolation_root / "config"
+        temp_dir = isolation_root / "tmp"
+        cache_dir.mkdir()
+        config_dir.mkdir()
+        temp_dir.mkdir()
+        env = {
+            **os.environ,
+            "NO_COLOR": "1",
+            "MVM_CACHE_DIR": str(cache_dir),
+            "MVM_CONFIG_DIR": str(config_dir),
+            "MVM_TEMP_DIR": str(temp_dir),
+        }
+        result = subprocess.run(
+            [MVM_CANDIDATE_BINARY, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+        )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "candidate version probe failed: "
+            f"{result.stderr.strip() or f'rc={result.returncode}'}"
+        )
     # "mvm 0.1.0" → "0.1.0"
     parts = result.stdout.strip().split()
-    version = parts[-1] if len(parts) >= 2 else "latest"
-    return version.removesuffix("-dirty")
+    if len(parts) < 2 or parts[0] != "mvm" or not parts[-1]:
+        raise RuntimeError(
+            f"candidate returned an invalid version response: {result.stdout!r}"
+        )
+    return parts[-1]
 
 
 def _unique_name(prefix: str = "sys-runner") -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+def _install_system_binary_in_runner(vm_name: str) -> None:
+    """Stage the RC and install it through ``host install-system``.
+
+    Copying directly onto /usr/local/bin/mvm would bypass the administrator
+    bootstrap path that the system-install L2 domain exists to qualify.
+    """
+    mvm(
+        "cp",
+        "-f",
+        MVM_CANDIDATE_BINARY,
+        f"{vm_name}:{RUNNER_SYSTEM_UPLOAD}",
+        timeout=60,
+    )
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        f"test -f {RUNNER_SYSTEM_UPLOAD} && "
+        f"test ! -L {RUNNER_SYSTEM_UPLOAD} && "
+        f"sudo test ! -L {RUNNER_SYSTEM_CANDIDATE_DIR} && "
+        f"sudo install -d -o root -g root -m 0755 {RUNNER_SYSTEM_CANDIDATE_DIR} && "
+        f"sudo test ! -L {RUNNER_SYSTEM_CANDIDATE_DIR} && "
+        f"sudo test ! -L {RUNNER_SYSTEM_CANDIDATE} && "
+        f"sudo install -o root -g root -m 0755 "
+        f"{RUNNER_SYSTEM_UPLOAD} {RUNNER_SYSTEM_CANDIDATE} && "
+        f"rm -f {RUNNER_SYSTEM_UPLOAD} && "
+        f"test ! -L {RUNNER_SYSTEM_CANDIDATE} && "
+        f"test \"$(stat -c '%u:%g:%a' {RUNNER_SYSTEM_CANDIDATE})\" = '0:0:755' && "
+        f"sudo {RUNNER_SYSTEM_CANDIDATE} host install-system && "
+        "test \"$(stat -c '%u:%g:%a' /usr/local/bin/mvm)\" = '0:0:755'",
+        timeout=90,
+    )
+
+
+def _initialize_system_binary_in_runner(vm_name: str) -> None:
+    """Run host initialization through the canonical installed executable."""
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        "sudo /usr/local/bin/mvm host init",
+        timeout=180,
+    )
+
+
+def _initialize_runner_user(
+    vm_name: str,
+    *,
+    timeout: int,
+    capture: bool = True,
+) -> None:
+    """Initialize runner-owned state with the release-pinned Firecracker pair."""
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        RUNNER_USER_INIT_COMMAND,
+        timeout=timeout,
+        capture=capture,
+    )
 
 
 def _ensure_builder_key() -> None:
@@ -460,21 +881,12 @@ def provision_t1(vm_name: str, mvm_version: str) -> None:
         SHARED_VOLUME_NAME,
         timeout=180,
     )
+    _install_system_binary_in_runner(vm_name)
+    _initialize_system_binary_in_runner(vm_name)
     # CRITICAL: mvm init MUST run as the unprivileged user (runner), NOT via sudo.
     # Running as root creates the cache dir with root ownership — test VMs inherit
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
-    mvm(
-        "exec",
-        vm_name,
-        "--user",
-        "runner",
-        "--timeout",
-        "10",
-        "--",
-        "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-        "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-        timeout=360,
-    )
+    _initialize_runner_user(vm_name, timeout=360)
 
 
 def _ensure_official_kernel_on_host(vm_name: str) -> None:
@@ -551,24 +963,15 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         SHARED_VOLUME_NAME,
         timeout=300,
     )
+    _install_system_binary_in_runner(vm_name)
+    _initialize_system_binary_in_runner(vm_name)
 
     # Inside VM: mount shared volume, init, register assets
     # CRITICAL: mvm init MUST run as the unprivileged user (runner), NOT via sudo.
     # Running as root creates the cache dir with root ownership — test VMs inherit
     # this state and break with 'permission denied' on /home/runner/.cache/mvmctl.
     log(f"  Initializing mvm inside '{vm_name}'...")
-    mvm(
-        "exec",
-        vm_name,
-        "--user",
-        "runner",
-        "--timeout",
-        "10",
-        "--",
-        "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-        "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-        timeout=180,
-    )
+    _initialize_runner_user(vm_name, timeout=180)
 
     log(f"  Registering assets in '{vm_name}' (cache hits)...")
     mvm(
@@ -579,7 +982,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt mvm kernel pull --type firecracker "
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm kernel pull --type firecracker "
         "--version v1.15 --default",
         timeout=150,
     )
@@ -591,7 +994,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull alpine:3.23",
         timeout=150,
     )
     mvm(
@@ -602,7 +1005,7 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu:noble",
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu:noble",
         timeout=360,
     )
     mvm(
@@ -613,15 +1016,141 @@ def provision_t2(vm_name: str, mvm_version: str) -> None:
         "--timeout",
         "10",
         "--",
-        "MVM_ASSET_MIRROR=/mnt mvm bin pull firecracker "
+        "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull firecracker "
         "--version 1.16.0 --default --force",
         timeout=150,
     )
 
 
-def destroy_vm(vm_name: str) -> None:
+def destroy_vm(vm_name: str, *, check: bool = True) -> None:
     """Destroy a runner VM."""
-    mvm("vm", "rm", vm_name, "--force", timeout=60, check=False)
+    mvm("vm", "rm", vm_name, "--force", timeout=60, check=check)
+
+
+def _record_runner_destruction(
+    result: dict[str, Any],
+    vm_name: str,
+) -> None:
+    """Make mandatory runner destruction part of the domain result."""
+    try:
+        destroy_vm(vm_name)
+    except Exception as exc:
+        result["passed"] = False
+        cleanup_failure = f"runner VM destruction failed for {vm_name}: {exc}"
+        primary_output = result["output"].rstrip()
+        result["output"] = (
+            f"{primary_output}\n{cleanup_failure}"
+            if primary_output
+            else cleanup_failure
+        )
+
+
+def _bounded_builder_pull_output(
+    result: subprocess.CompletedProcess[str],
+) -> str:
+    """Render captured pull output without flooding the qualification log."""
+    sections = []
+    if result.stdout:
+        sections.append(f"[stdout]\n{result.stdout.rstrip()}")
+    if result.stderr:
+        sections.append(f"[stderr]\n{result.stderr.rstrip()}")
+    output = "\n".join(sections) or "(no captured output)"
+    if len(output) <= BUILDER_PULL_OUTPUT_LIMIT:
+        return output
+
+    marker = "\n... builder pull output truncated ...\n"
+    remaining = BUILDER_PULL_OUTPUT_LIMIT - len(marker)
+    head = remaining // 2
+    return f"{output[:head]}{marker}{output[-(remaining - head):]}"
+
+
+def _pull_builder_assets(vm_name: str) -> None:
+    """Pull base-image assets serially and require local-mirror evidence."""
+    pulls = (
+        (
+            "Firecracker kernel",
+            (
+                "kernel",
+                "pull",
+                "--type",
+                "firecracker",
+                "--version",
+                "v1.15",
+                "--default",
+            ),
+        ),
+        (
+            "Alpine image",
+            ("image", "pull", "alpine:3.23"),
+        ),
+        (
+            "Ubuntu Minimal image",
+            ("image", "pull", "ubuntu-minimal:24.04"),
+        ),
+        (
+            "Ubuntu image",
+            ("image", "pull", "ubuntu", "--version", "24.04"),
+        ),
+    )
+    for label, pull_args in pulls:
+        log(f"  Pulling {label} into '{vm_name}'...")
+        command = shlex.join(
+            (
+                "MVM_ASSET_MIRROR=/mnt",
+                "MVM_LOG_LEVEL=INFO",
+                "/usr/local/bin/mvm",
+                *pull_args,
+            )
+        )
+        result = mvm(
+            "exec",
+            vm_name,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            command,
+            timeout=600,
+            capture=True,
+            check=False,
+        )
+        output = f"{result.stdout or ''}\n{result.stderr or ''}"
+        bounded_output = _bounded_builder_pull_output(result)
+        print(f"  {label} output:\n{bounded_output}", flush=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"builder asset pull failed for {label}: rc={result.returncode}"
+            )
+        for forbidden_marker in FORBIDDEN_BUILDER_PULL_MARKERS:
+            if forbidden_marker in output:
+                raise RuntimeError(
+                    f"builder asset pull for {label} reported forbidden mirror "
+                    f"event: {forbidden_marker}"
+                )
+        if LOCAL_MIRROR_READ_MARKER not in output:
+            raise RuntimeError(
+                f"builder asset pull for {label} did not prove a local mirror "
+                "artifact read"
+            )
+
+    log(f"  Verifying cached image integrity in '{vm_name}'...")
+    mvm(
+        "exec",
+        vm_name,
+        "--user",
+        "runner",
+        "--timeout",
+        "10",
+        "--",
+        "echo 'Verifying cached image integrity...' && "
+        "for f in /home/runner/.cache/mvmctl/images/*.zst; do "
+        'zstd -t "$f" || exit 1; '
+        "done && "
+        "echo 'All images verified OK'",
+        timeout=180,
+        capture=False,
+    )
 
 
 def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
@@ -661,7 +1190,7 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             return img_tag
 
     # Clean up any leftover builder VM from a previous aborted run
-    destroy_vm(BASE_VM_NAME)
+    destroy_vm(BASE_VM_NAME, check=False)
 
     log(f"  Creating builder VM '{BASE_VM_NAME}'...")
     mvm(
@@ -687,8 +1216,8 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         timeout=180,
     )
     try:
-        log(f"  Copying mvm binary and system tests into '{BASE_VM_NAME}'...")
-        mvm("cp", MVM_BINARY, f"{BASE_VM_NAME}:/usr/local/bin/mvm", timeout=60)
+        log(f"  Installing mvm system binary and tests into '{BASE_VM_NAME}'...")
+        _install_system_binary_in_runner(BASE_VM_NAME)
         # Verify the binary transferred correctly
         verify = mvm(
             "exec",
@@ -698,14 +1227,17 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "--timeout",
             "10",
             "--",
+            f"stat -c%s {RUNNER_SYSTEM_CANDIDATE} && "
             "stat -c%s /usr/local/bin/mvm",
             timeout=20,
         )
-        expected = Path(shlex.split(MVM_BINARY)[0]).expanduser().stat().st_size
-        actual = int(verify.stdout.strip())
-        if actual != expected:
+        expected = Path(MVM_CANDIDATE_BINARY).stat().st_size
+        installed_sizes = [int(value) for value in verify.stdout.splitlines()]
+        if installed_sizes != [expected, expected]:
             raise RuntimeError(
-                f"mvm binary size mismatch in builder VM: expected {expected}, got {actual}"
+                "mvm binary size mismatch in builder VM: "
+                f"expected candidate and system sizes {[expected, expected]}, "
+                f"got {installed_sizes}"
             )
         mvm("cp", "tests/system", f"{BASE_VM_NAME}:/tests/", timeout=60)
 
@@ -753,6 +1285,8 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
             "sudo usermod -aG kvm runner",
             timeout=30,
         )
+        log(f"  Initializing host through the system binary in '{BASE_VM_NAME}'...")
+        _initialize_system_binary_in_runner(BASE_VM_NAME)
         log("  Changing ownership of /tests to runner user...")
         mvm(
             "exec",
@@ -772,49 +1306,13 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
         # need /home/runner/.cache/mvmctl owned by runner. Permission denied = broken.
         # Asset pulls are pre-baked into the base image so each test VM doesn't
         # re-pull them (saves ~3 min per T1 VM).
-        mvm(
-            "exec",
-            BASE_VM_NAME,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && "
-            "sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-            timeout=180,
-            capture=False,
-        )
+        _initialize_runner_user(BASE_VM_NAME, timeout=180, capture=False)
 
-        log(f"  Pulling assets into '{BASE_VM_NAME}' in parallel from mirror...")
         # Asset pulls are pre-baked into the base image so each test VM doesn't
-        # re-pull them (saves ~3 min per T1 VM). Run them in parallel inside one
-        # exec; wait on each PID so any failure propagates to the exec exit code.
-        mvm(
-            "exec",
-            BASE_VM_NAME,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "set -e && "
-            'pids="" && '
-            'MVM_ASSET_MIRROR=/mnt mvm binary pull firecracker --default --force --version 1.16.0 & pids="$pids $!" && '
-            'MVM_ASSET_MIRROR=/mnt mvm kernel pull --type firecracker --version v1.15 --default & pids="$pids $!" && '
-            'MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23 & pids="$pids $!" && '
-            'MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu-minimal:24.04 & pids="$pids $!" && '
-            'MVM_ASSET_MIRROR=/mnt mvm image pull ubuntu --version 24.04 & pids="$pids $!" && '
-            'for pid in $pids; do wait "$pid" || exit $?; done && '
-            "echo 'Verifying cached image integrity...' && "
-            "for f in /home/runner/.cache/mvmctl/images/*.zst; do "
-            'zstd -t "$f" || exit 1; '
-            "done && "
-            "echo 'All images verified OK'",
-            timeout=360,
-            capture=False,
-        )
+        # re-pull them (saves ~3 min per T1 VM). Keep each pull in its own exec:
+        # concurrent downloads/decompression can exhaust this 3 GiB builder,
+        # while separate streamed sessions preserve the exact failing command.
+        _pull_builder_assets(BASE_VM_NAME)
         log(f"  Stopping '{BASE_VM_NAME}'...")
         mvm("vm", "stop", BASE_VM_NAME, timeout=60)
 
@@ -838,6 +1336,174 @@ def _build_base_image(mvm_version: str, *, rebuild: bool = False) -> str:
 # ============================================================================
 # Test Execution per Domain
 # ============================================================================
+
+
+def _remote_pytest_report_path(vm_name: str) -> str:
+    """Return one fixed report receiver derived from the unique runner VM."""
+    if re.fullmatch(r"[A-Za-z0-9_-]+", vm_name) is None:
+        raise RuntimeError(f"unsafe runner VM name for outcome report: {vm_name!r}")
+    return f"/tmp/mvmctl-pytest-outcomes-{vm_name}.json"
+
+
+def _remote_pytest_command(
+    vm_name: str,
+    test_files: list[str],
+    report_path: str,
+) -> str:
+    pytest_command = shlex.join(
+        [
+            "python3",
+            "-m",
+            "pytest",
+            *(f"/{test_file}" for test_file in test_files),
+            "--tb=short",
+            "-q",
+        ]
+    )
+    environment = " ".join(
+        (
+            "MVM_ASSET_MIRROR=/mnt",
+            f"MVM_TEST_VM={shlex.quote(vm_name)}",
+            f"{PYTEST_OUTCOME_REPORT_ENV}={shlex.quote(report_path)}",
+        )
+    )
+    return f"cd / && {environment} {pytest_command}"
+
+
+def _run_remote_pytest(
+    vm_name: str,
+    test_files: list[str],
+    *,
+    timeout: int,
+) -> tuple[subprocess.CompletedProcess[str], str | None]:
+    """Run pytest in a runner VM and validate its bounded outcome report."""
+    report_path = _remote_pytest_report_path(vm_name)
+    pytest_result: subprocess.CompletedProcess[str] | None = None
+    validation_failures: list[str] = []
+    execution_error: Exception | None = None
+    try:
+        pytest_result = mvm(
+            "exec",
+            vm_name,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            _remote_pytest_command(vm_name, test_files, report_path),
+            check=False,
+            timeout=timeout,
+        )
+        retrieve_result = mvm(
+            "exec",
+            vm_name,
+            "--user",
+            "runner",
+            "--timeout",
+            "10",
+            "--",
+            f"head -c {MAX_PYTEST_OUTCOME_REPORT_BYTES + 1} -- "
+            f"{shlex.quote(report_path)}",
+            check=False,
+            timeout=30,
+        )
+        if retrieve_result.returncode != 0:
+            detail = (retrieve_result.stderr or "").strip() or "report read failed"
+            raise RuntimeError(
+                f"remote pytest outcome report is missing: {detail}"
+            )
+        require_complete_pytest_outcomes(
+            retrieve_result.stdout.encode(),
+            process_returncode=pytest_result.returncode,
+        )
+    except Exception as exc:
+        execution_error = exc
+    finally:
+        try:
+            mvm(
+                "exec",
+                vm_name,
+                "--user",
+                "runner",
+                "--timeout",
+                "10",
+                "--",
+                f"rm -f -- {shlex.quote(report_path)} && "
+                f"test ! -e {shlex.quote(report_path)}",
+                check=True,
+                timeout=30,
+            )
+        except Exception as exc:
+            validation_failures.append(
+                f"remote outcome report cleanup failed: {exc}"
+            )
+
+    if pytest_result is None:
+        if execution_error is not None:
+            validation_failures.insert(0, str(execution_error))
+        raise RuntimeError("; ".join(validation_failures))
+    if execution_error is not None:
+        validation_failures.insert(0, str(execution_error))
+    reason = "; ".join(validation_failures) or None
+    return pytest_result, reason
+
+
+def _pytest_result_output(
+    pytest_result: subprocess.CompletedProcess[str],
+    validation_failure: str | None,
+) -> str:
+    output = (pytest_result.stdout or "") + (pytest_result.stderr or "")
+    if validation_failure is not None:
+        output += (
+            "\npytest outcome validation failed: "
+            f"{validation_failure}\n"
+        )
+    return output
+
+
+def _run_local_pytest(
+    domain: str,
+    test_files: list[str],
+    *,
+    timeout: int,
+) -> tuple[subprocess.CompletedProcess[str], str | None]:
+    """Run host-direct pytest with a private report and checked cleanup."""
+    report_directory = tempfile.TemporaryDirectory(
+        prefix=f"mvmctl-pytest-{domain}-"
+    )
+    report_path = Path(report_directory.name) / "outcomes.json"
+    pytest_result: subprocess.CompletedProcess[str] | None = None
+    validation_failures: list[str] = []
+    execution_error: Exception | None = None
+    try:
+        pytest_result = _run_pytest(
+            test_files,
+            timeout=timeout,
+            extra_env={PYTEST_OUTCOME_REPORT_ENV: str(report_path)},
+        )
+        payload = read_pytest_outcome_report(report_path)
+        require_complete_pytest_outcomes(
+            payload,
+            process_returncode=pytest_result.returncode,
+        )
+    except Exception as exc:
+        execution_error = exc
+    finally:
+        try:
+            report_directory.cleanup()
+        except Exception as exc:
+            validation_failures.append(
+                f"local outcome report cleanup failed: {exc}"
+            )
+
+    if pytest_result is None:
+        if execution_error is not None:
+            validation_failures.insert(0, str(execution_error))
+        raise RuntimeError("; ".join(validation_failures))
+    if execution_error is not None:
+        validation_failures.insert(0, str(execution_error))
+    reason = "; ".join(validation_failures) or None
+    return pytest_result, reason
 
 
 def run_tier1_domain(
@@ -871,25 +1537,20 @@ def run_tier1_domain(
                 timeout=30,
             )
         log(f"  Running {domain} tests...")
-        pytest_result = mvm(
-            "exec",
+        pytest_result, validation_failure = _run_remote_pytest(
             vm_name,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            f"cd / && MVM_ASSET_MIRROR=/mnt MVM_TEST_VM={vm_name} "
-            f"python3 -m pytest {' '.join(f'/{f}' for f in test_files)} --tb=short -q",
-            check=False,
+            test_files,
             timeout=660,
         )
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
     except Exception as e:
         result["output"] = str(e)
     finally:
-        destroy_vm(vm_name)
+        _record_runner_destruction(result, vm_name)
 
     return result
 
@@ -925,25 +1586,20 @@ def run_tier2_domain(
                 timeout=30,
             )
         log(f"  Running {domain} tests...")
-        pytest_result = mvm(
-            "exec",
+        pytest_result, validation_failure = _run_remote_pytest(
             vm_name,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            f"cd / && MVM_ASSET_MIRROR=/mnt MVM_TEST_VM={vm_name} "
-            f"python3 -m pytest {' '.join(f'/{f}' for f in test_files)} --tb=short -q",
-            check=False,
+            test_files,
             timeout=960,
         )
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
     except Exception as e:
         result["output"] = str(e)
     finally:
-        destroy_vm(vm_name)
+        _record_runner_destruction(result, vm_name)
 
     return result
 
@@ -960,9 +1616,16 @@ def run_tier3_domain(
     }
     log(f"  Running {domain} tests on host (timeout={timeout}s)...")
     try:
-        pytest_result = _run_pytest(test_files, timeout=timeout)
-        result["passed"] = pytest_result.returncode == 0
-        result["output"] = pytest_result.stdout + pytest_result.stderr
+        pytest_result, validation_failure = _run_local_pytest(
+            domain,
+            test_files,
+            timeout=timeout,
+        )
+        result["passed"] = validation_failure is None
+        result["output"] = _pytest_result_output(
+            pytest_result,
+            validation_failure,
+        )
     except Exception as e:
         result["output"] = str(e)
     return result
@@ -971,6 +1634,34 @@ def run_tier3_domain(
 # ============================================================================
 # Main Orchestrator
 # ============================================================================
+
+
+def _timed_out_domain_result(
+    future: Future[dict[str, Any]],
+    domain: str,
+    tier: int,
+    timeout: int,
+) -> dict[str, Any]:
+    """Build one failed result after the timed-out worker is contained."""
+    output = [f"Domain timed out after {timeout}s"]
+    if future.cancelled():
+        output.append("Worker was canceled before it started")
+    else:
+        try:
+            late_result = future.result()
+        except Exception as exc:
+            output.append(f"Late worker error: {exc}")
+        else:
+            late_output = str(late_result.get("output", "")).rstrip()
+            if late_output:
+                output.append(f"Late worker output:\n{late_output}")
+
+    return {
+        "domain": domain,
+        "tier": tier,
+        "passed": False,
+        "output": "\n".join(output),
+    }
 
 
 def run_domains(
@@ -989,6 +1680,7 @@ def run_domains(
     results: list[dict[str, Any]] = []
     # Overall timeout per domain: 15 minutes.
     domain_timeout = 900
+    timed_out: dict[Future[dict[str, Any]], str] = {}
 
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
@@ -1006,21 +1698,15 @@ def run_domains(
                 return_when=concurrent.futures.FIRST_COMPLETED,
             )
             if not done:
-                # Timeout reached — no futures completed within domain_timeout
+                # Running threads cannot be force-canceled safely. Cancel work
+                # that has not started, then join active workers before moving on.
                 log(
-                    f"  [TIMEOUT] {len(remaining)} domain(s) timed out after {domain_timeout}s — moving on"
+                    f"  [TIMEOUT] {len(remaining)} domain(s) timed out after "
+                    f"{domain_timeout}s — containing workers before continuing"
                 )
                 for future in remaining:
-                    domain = future_map[future]
-                    results.append(
-                        {
-                            "domain": domain,
-                            "tier": tier,
-                            "passed": False,
-                            "output": f"Domain timed out after {domain_timeout}s",
-                        }
-                    )
-                    log(f"  [TIMEOUT] {domain}")
+                    future.cancel()
+                    timed_out[future] = future_map[future]
                 break
             for future in done:
                 domain = future_map[future]
@@ -1042,8 +1728,18 @@ def run_domains(
                     )
                     log(f"  [ERROR] {domain}: {e}")
     finally:
-        # Don't wait for timed-out threads — they'll be daemon-killed on exit
-        pool.shutdown(wait=False, cancel_futures=True)
+        pool.shutdown(wait=True, cancel_futures=True)
+
+    for future, domain in sorted(timed_out.items(), key=lambda item: item[1]):
+        domain_result = _timed_out_domain_result(
+            future,
+            domain,
+            tier,
+            domain_timeout,
+        )
+        results.append(domain_result)
+        log(f"  [TIMEOUT] {domain}")
+        _print_failure(domain, domain_result)
 
     return results
 
@@ -1077,6 +1773,212 @@ def print_summary(all_results: list[dict[str, Any]]) -> None:
         sys.exit(1)
 
 
+def _selection_requests_tier3(args: argparse.Namespace) -> bool:
+    """Return whether any requested selector names host-direct Tier 3 work."""
+    return (
+        args.all
+        or (args.tier is not None and 3 in args.tier)
+        or any(domain in TIER3_DOMAINS for domain in args.domains)
+    )
+
+
+def _validate_release_qualification_args(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    """Reject incomplete or narrowed release qualification before any work."""
+    if not args.release_qualification:
+        return
+    valid = (
+        args.all
+        and args.host_direct
+        and args.rebuild
+        and args.candidate_version is not None
+        and not args.domains
+        and args.tier is None
+        and not args.skip_volume_check
+    )
+    if not valid:
+        parser.error(
+            "--release-qualification requires --all --host-direct --rebuild "
+            "and an explicit --candidate-version; positional domains, --tier, "
+            "and --skip-volume-check are not allowed"
+        )
+
+
+def _validate_system_test_registry(parser: argparse.ArgumentParser) -> None:
+    """Reject an ambiguous or incomplete system-test domain registry."""
+    seen: set[str] = set()
+    duplicate_domains: set[str] = set()
+    empty_domains: list[str] = []
+    registered_files: list[str] = []
+    for domains in (TIER1_DOMAINS, TIER2_DOMAINS, TIER3_DOMAINS):
+        for domain, test_files in domains.items():
+            if domain in seen:
+                duplicate_domains.add(domain)
+            seen.add(domain)
+            if not test_files:
+                empty_domains.append(domain)
+            registered_files.extend(test_files)
+    if duplicate_domains:
+        parser.error(
+            "duplicate system-test domains: "
+            f"{', '.join(sorted(duplicate_domains))}"
+        )
+    if empty_domains:
+        parser.error(
+            "empty system-test domains: "
+            f"{', '.join(sorted(empty_domains))}"
+        )
+    duplicate_files = sorted(
+        {
+            test_file
+            for test_file in registered_files
+            if registered_files.count(test_file) > 1
+        }
+    )
+    if duplicate_files:
+        parser.error(
+            "duplicate registered system-test files: "
+            f"{', '.join(duplicate_files)}"
+        )
+    invalid_paths: list[str] = []
+    for registered_file in registered_files:
+        relative_path = Path(registered_file)
+        parts = relative_path.parts
+        canonical = (
+            not relative_path.is_absolute()
+            and relative_path.as_posix() == registered_file
+            and ".." not in parts
+        )
+        system_test = (
+            len(parts) >= 3
+            and parts[:2] == ("tests", "system")
+            and relative_path.name.startswith("test_")
+            and relative_path.suffix == ".py"
+        )
+        if not canonical or not system_test:
+            invalid_paths.append(registered_file)
+    if invalid_paths:
+        parser.error(
+            "invalid system-test paths: "
+            f"{', '.join(sorted(invalid_paths))}"
+        )
+    repo_root = _REPO_ROOT.resolve()
+    missing_files: list[str] = []
+    non_regular_files: list[str] = []
+    for registered_file in registered_files:
+        test_file = repo_root / registered_file
+        try:
+            file_mode = test_file.lstat().st_mode
+        except FileNotFoundError:
+            missing_files.append(registered_file)
+            continue
+        except OSError:
+            non_regular_files.append(registered_file)
+            continue
+        if not stat.S_ISREG(file_mode) or test_file.resolve() != test_file:
+            non_regular_files.append(registered_file)
+    if missing_files:
+        parser.error(
+            "missing system-test files: "
+            f"{', '.join(sorted(missing_files))}"
+        )
+    if non_regular_files:
+        parser.error(
+            "non-regular system-test files: "
+            f"{', '.join(sorted(non_regular_files))}"
+        )
+    system_test_root = repo_root / "tests" / "system"
+    discovered_files = {
+        test_file.relative_to(repo_root).as_posix()
+        for test_file in system_test_root.rglob("test_*.py")
+        if test_file.is_file()
+    }
+    unregistered_files = sorted(discovered_files - set(registered_files))
+    if unregistered_files:
+        parser.error(
+            "unregistered system-test files: "
+            f"{', '.join(unregistered_files)}"
+        )
+
+
+def _validate_test_selection_args(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+) -> None:
+    """Reject test selections that cannot resolve to known test domains."""
+    tier_domains = {
+        1: TIER1_DOMAINS,
+        2: TIER2_DOMAINS,
+        3: TIER3_DOMAINS,
+    }
+    domains_by_name = {
+        **TIER1_DOMAINS,
+        **TIER2_DOMAINS,
+        **TIER3_DOMAINS,
+    }
+    unknown = list(
+        dict.fromkeys(
+            domain for domain in args.domains if domain not in domains_by_name
+        )
+    )
+    if unknown:
+        parser.error(f"unknown domains: {', '.join(unknown)}")
+    selectors = sum((bool(args.domains), args.tier is not None, args.all))
+    if selectors > 1:
+        parser.error(
+            "choose exactly one test selector: positional domains, --tier, or --all"
+        )
+    duplicate_domains = list(
+        dict.fromkeys(
+            domain
+            for index, domain in enumerate(args.domains)
+            if domain in args.domains[:index]
+        )
+    )
+    if duplicate_domains:
+        parser.error(f"duplicate domains: {', '.join(duplicate_domains)}")
+    tiers = args.tier or []
+    duplicate_tiers = list(
+        dict.fromkeys(
+            tier
+            for index, tier in enumerate(tiers)
+            if tier in tiers[:index]
+        )
+    )
+    if duplicate_tiers:
+        parser.error(
+            f"duplicate tiers: {', '.join(str(tier) for tier in duplicate_tiers)}"
+        )
+
+    if args.domains:
+        selected_domains = list(args.domains)
+    elif args.tier is not None:
+        selected_domains = [
+            domain
+            for tier in args.tier
+            for domain in tier_domains[tier]
+        ]
+    elif args.all:
+        selected_domains = [
+            domain
+            for domains in tier_domains.values()
+            for domain in domains
+        ]
+    else:
+        return
+    if not selected_domains:
+        parser.error("test selection resolves to zero tests")
+    empty_domains = sorted(
+        domain for domain in selected_domains if not domains_by_name[domain]
+    )
+    if empty_domains:
+        parser.error(
+            f"selected domains have no test files: {', '.join(empty_domains)}"
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run mvmctl system tests with per-domain VM isolation.",
@@ -1090,6 +1992,20 @@ def _build_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         help="Run all T1 + T2 + T3 domains.",
+    )
+    parser.add_argument(
+        "--host-direct",
+        action="store_true",
+        help="Acknowledge that selected Tier 3 tests run directly on and may "
+        "mutate the outer host. Required for --all, --tier including 3, or "
+        "a Tier 3 domain.",
+    )
+    parser.add_argument(
+        "--release-qualification",
+        action="store_true",
+        help="Run the full release binary identity gate before host-direct "
+        "qualification. Requires --all --host-direct --rebuild and an "
+        "explicit --candidate-version.",
     )
     parser.add_argument(
         "--tier",
@@ -1106,9 +2022,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="Build the mvm binary, then rebuild the shared volume and custom "
-        "base image and run the provisioning smoke-test. After prepare the "
-        "script stops unless a test-running flag is also given.",
+        help="Build MVM_CANDIDATE_BINARY (never MVM_BINARY), then rebuild the "
+        "shared volume and custom base image and run the provisioning "
+        "smoke-test. After prepare the script stops unless a test-running "
+        "flag is also given.",
+    )
+    parser.add_argument(
+        "--candidate-version",
+        type=_parse_candidate_version,
+        help="Explicit X.Y.Z identity passed to build.sh --version. Required "
+        "with --rebuild unless HEAD is one clean, exact release tag.",
     )
     parser.add_argument(
         "--volume",
@@ -1118,9 +2041,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--image",
         action="store_true",
-        help="Rebuild the mvm binary, then rebuild only the custom base image "
-        "(mvm-test-runner:<version>). Ensures the shared asset volume exists first "
-        "because the builder VM attaches it.",
+        help="Rebuild only the custom base image from MVM_CANDIDATE_BINARY. "
+        "Ensures the shared asset volume exists first because the builder VM "
+        "attaches it.",
     )
     parser.add_argument(
         "--skip-volume-check",
@@ -1210,18 +2133,7 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
     )
     try:
         log(f"      Running mvm init inside '{t1}'...")
-        mvm(
-            "exec",
-            t1,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-            timeout=90,
-        )
+        _initialize_runner_user(t1, timeout=90)
     finally:
         destroy_vm(t1)
 
@@ -1255,18 +2167,7 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
     )
     try:
         log(f"[7/8] Setting up '{t2}' (mount + init)...")
-        mvm(
-            "exec",
-            t2,
-            "--user",
-            "runner",
-            "--timeout",
-            "10",
-            "--",
-            "sudo mkdir -p /mnt && sudo mount /dev/vdb /mnt && "
-            "MVM_ASSET_MIRROR=/mnt mvm init --non-interactive",
-            timeout=180,
-        )
+        _initialize_runner_user(t2, timeout=180)
 
         log(f"[8/8] Validating cache hit (pulling 1 asset)...")
         result = mvm(
@@ -1277,7 +2178,8 @@ def run_prepare(*, rebuild_volume: bool = False, rebuild_image: bool = False) ->
             "--timeout",
             "10",
             "--",
-            "MVM_ASSET_MIRROR=/mnt mvm image pull alpine:3.23 2>&1 | head -5",
+            "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull "
+            "alpine:3.23 2>&1 | head -5",
             timeout=150,
             check=False,
         )
@@ -1307,6 +2209,19 @@ def main() -> None:
     parser = _build_parser()
     args = parser.parse_args()
 
+    _validate_release_qualification_args(parser, args)
+    _validate_system_test_registry(parser)
+    _validate_test_selection_args(parser, args)
+
+    if _selection_requests_tier3(args) and not args.host_direct:
+        parser.error(
+            "Tier 3 tests run directly on and may mutate the outer host; "
+            "pass --host-direct to acknowledge this"
+        )
+
+    if args.candidate_version is not None and not args.rebuild:
+        parser.error("--candidate-version requires --rebuild")
+
     test_flags = args.all or args.domains or args.tier
     prep_flags = args.prepare or args.image or args.volume or args.rebuild
 
@@ -1314,15 +2229,64 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
-    # Handle --rebuild: build binary before anything else
+    if args.release_qualification:
+        try:
+            validate_release_build_paths(
+                controller_command=MVM_BINARY,
+                configured_candidate=MVM_CANDIDATE_CONFIGURED,
+                candidate=Path(MVM_CANDIDATE_BINARY),
+            )
+        except RuntimeError as exc:
+            log(f"ERROR: {exc}")
+            sys.exit(1)
+
+    # Handle --rebuild: build the distinct release candidate before anything else.
     if args.rebuild:
-        _build_mvm_binary()
+        try:
+            candidate_version = _resolve_candidate_build_version(
+                args.candidate_version
+            )
+            _build_mvm_binary(candidate_version)
+        except RuntimeError as exc:
+            log(f"ERROR: {exc}")
+            sys.exit(1)
+
+    if args.release_qualification:
+        try:
+            verify_release_binary_identity(
+                controller_command=MVM_BINARY,
+                configured_candidate=MVM_CANDIDATE_CONFIGURED,
+                candidate=Path(MVM_CANDIDATE_BINARY),
+                requested_version=args.candidate_version,
+            )
+        except RuntimeError as exc:
+            log(f"ERROR: {exc}")
+            sys.exit(1)
 
     # Validate MVM_BINARY exists
     binary = shlex.split(MVM_BINARY)[0]
     if not shutil.which(binary) and not Path(binary).is_file():
         log(f"ERROR: mvm binary not found: {MVM_BINARY}")
         log("Set MVM_BINARY or ensure 'mvm' is in PATH.")
+        sys.exit(1)
+
+    configured_candidate = MVM_CANDIDATE_CONFIGURED
+    candidate = Path(MVM_CANDIDATE_BINARY)
+    if (
+        configured_candidate.is_symlink()
+        or not candidate.is_file()
+        or not os.access(candidate, os.X_OK)
+    ):
+        log(
+            "ERROR: MVM_CANDIDATE_BINARY must be a regular, non-symlink, "
+            f"executable file: {configured_candidate}"
+        )
+        sys.exit(1)
+
+    try:
+        _require_distinct_candidate_controller()
+    except RuntimeError as exc:
+        log(f"ERROR: {exc}")
         sys.exit(1)
 
     # Handle prep actions.
@@ -1337,7 +2301,6 @@ def main() -> None:
         if args.prepare:
             run_prepare(rebuild_volume=rebuild_volume, rebuild_image=rebuild_image)
         elif args.image:
-            _build_mvm_binary()
             # The builder VM attaches the shared volume, so ensure it exists first.
             ensure_shared_volume(rebuild=rebuild_volume)
             ensure_test_network()

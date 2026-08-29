@@ -30,7 +30,6 @@ type Config struct {
 
 	// Resolved from defaults
 	UserPassword          string // from defaults.vm.user_password
-	CloudInitISOName      string // from defaults.cloudinit.iso_name
 	NocloudPortRangeStart int    // from defaults.cloudinit.nocloud_port_range_start
 	NocloudPortRangeEnd   int    // from defaults.cloudinit.nocloud_port_range_end
 	NocloudMaxPortRetries int    // from defaults.cloudinit.nocloud_max_port_retries

@@ -102,6 +102,12 @@ func (op *Operation) VMCreate(
 	if err != nil {
 		return nil, err
 	}
+	pair, err := op.Services.Binary.ResolvePair(ctx, sharedResolved.Binary)
+	if err != nil {
+		return nil, err
+	}
+	sharedResolved.Binary = pair.Firecracker
+	sharedResolved.Jailer = pair.Jailer
 	sharedResolved.Provisioner = model.ProvisionerType(op.ProvisionerType)
 	// Network bridge setup (shared across all VMs in the batch, done once).
 	bridgeAddr, calcErr := network.ComputeBridgeAddress(
@@ -360,7 +366,7 @@ func (op *Operation) vmBuilderExecute(
 		return fmt.Errorf("failed to resolve necessary dependencies")
 	}
 	// Validate socket path before any expensive operations (cloud-init, resize, etc.).
-	if apiSocketPath := filepath.Join(builder.vmDir, resolved.APISocketFilename); len(apiSocketPath) >= 108 {
+	if apiSocketPath := filepath.Join(builder.vmDir, infra.VMFirecrackerAPISocketFilename); len(apiSocketPath) >= 108 {
 		return fmt.Errorf(
 			"VM ID '%s' produces a socket path that is too long (%d chars, max 107). "+
 				"This is a system limit for Unix domain sockets. Path: %s",
@@ -515,7 +521,6 @@ func (op *Operation) vmBuilderExecute(
 				NocloudNetPort:        resolved.NocloudNetPort,
 				CloudInitISOPath:      resolved.CloudInitISOPath,
 				KeepCloudInitISO:      resolved.KeepCloudInitISO,
-				CloudInitISOName:      resolved.CloudInitISOName,
 				NocloudPortRangeStart: resolved.NocloudPortRangeStart,
 				NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
 				NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
@@ -564,7 +569,6 @@ func (op *Operation) vmBuilderExecute(
 				NocloudNetPort:        resolved.NocloudNetPort,
 				CloudInitISOPath:      resolved.CloudInitISOPath,
 				KeepCloudInitISO:      resolved.KeepCloudInitISO,
-				CloudInitISOName:      resolved.CloudInitISOName,
 				NocloudPortRangeStart: resolved.NocloudPortRangeStart,
 				NocloudPortRangeEnd:   resolved.NocloudPortRangeEnd,
 				NocloudMaxPortRetries: resolved.NocloudMaxPortRetries,
@@ -610,7 +614,7 @@ func (op *Operation) vmBuilderExecute(
 		if resolved.VsockPort > 0 {
 			builder.vsockPort = resolved.VsockPort
 			builder.vsockToken = crypto.UUIDV4()
-			builder.vsockUDSPath = filepath.Join(builder.vmDir, resolved.VsockFilename)
+			builder.vsockUDSPath = filepath.Join(builder.vmDir, infra.VMVsockSocketFilename)
 			if agentBin := vsock.AgentBinary(); len(agentBin) > 0 {
 				if err := backend.InjectAgent(ctx, agentBin, builder.vsockPort, builder.vsockToken); err != nil {
 					provisionErr = fmt.Errorf("inject agent: %w", err)
@@ -669,8 +673,7 @@ func (op *Operation) vmBuilderExecute(
 		firecrackerReady = true
 		// Console relay setup (before spawn)
 		if resolved.EnableConsole {
-			consoleCtrl := console.NewController(builder.vmID, builder.vmDir, builder.name,
-				resolved.ConsolePIDFilename, resolved.ConsoleSocketFilename)
+			consoleCtrl := console.NewController(builder.vmID, builder.vmDir, builder.name)
 			ptyFD, ptyErr := consoleCtrl.CreatePTY()
 			if ptyErr != nil {
 				fcErr = fmt.Errorf("console PTY creation failed: %w", ptyErr)
@@ -680,7 +683,7 @@ func (op *Operation) vmBuilderExecute(
 			fcConfig.RelayClientFD = &ptyFD
 		}
 		// Spawn Firecracker
-		if err := spawner.Spawn(); err != nil {
+		if err := spawner.Spawn(ctx); err != nil {
 			fcErr = fmt.Errorf("failed to spawn Firecracker: %w", err)
 			return
 		}
@@ -738,7 +741,7 @@ func (op *Operation) vmBuilderCleanup(ctx context.Context, builder *VMCreateBuil
 	// Firecracker: stop firecracker process
 	if builder.wasCreated("firecracker") && builder.fcManager != nil {
 		fcSpawner := vm.NewFirecrackerSpawner(builder.fcManager)
-		fcSpawner.Cleanup()
+		fcSpawner.Cleanup(ctx)
 	}
 	// VM directory: remove all created files
 	if builder.wasCreated("vm_dir") && builder.vmDir != "" {
@@ -806,10 +809,19 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 		controller.Stop(ctx, input.Force)
 		// Defense-in-depth: force-kill
 		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
-			proc, err := os.FindProcess(vmLocal.PID)
-			if err == nil {
-				_ = proc.Kill()
-			}
+			system.GracefulShutdown(system.ShutdownConfig{
+				Pid: vmLocal.PID, IsChild: false, GracefulTimeout: 100 * time.Millisecond,
+				KillTimeout: 100 * time.Millisecond, ExpectedStartTime: vmLocal.ProcessStartTime,
+			})
+		}
+		if err := vm.CleanupJail(ctx, vmLocal.ID); err != nil {
+			slog.Error("failed to clean VM jail and cgroup during removal", "vm", vmLocal.Name, "error", err)
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodeVMCgroupCleanupFailed),
+				Item: vmLocal, Message: fmt.Sprintf("failed to clean resources for VM '%s': %v", vmLocal.Name, err),
+				Exception: err,
+			})
+			continue
 		}
 		// Console relay, TAP, IP lease cleanup
 		if vmLocal.RelayPID != nil {
@@ -853,6 +865,20 @@ func (op *Operation) VMRemove(ctx context.Context, input inputs.VMInput) *errs.B
 		// Delete from DB
 		if err := repo.Delete(ctx, vmLocal.ID); err != nil {
 			slog.Warn("failed to delete VM from DB", "vm", vmLocal.Name, "error", err)
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodeDatabaseError), Item: vmLocal,
+				Message: fmt.Sprintf("failed to delete VM '%s': %v", vmLocal.Name, err), Exception: err,
+			})
+			continue
+		}
+		if err := op.reconcileServiceAccessPolicies(ctx); err != nil {
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodePolicySyncFailed), Item: vmLocal,
+				Message: fmt.Sprintf("failed to reconcile service-access policies after removing VM '%s': %v",
+					vmLocal.Name, err),
+				Exception: err,
+			})
+			continue
 		}
 		if vmDir != "" {
 			os.RemoveAll(vmDir)
@@ -935,23 +961,23 @@ func (op *Operation) VMGet(ctx context.Context, input inputs.VMInput) (*model.VM
 
 // Inspect returns detailed VM info with enriched data.
 func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*results.VMInspect, error) {
-	vm, err := op.VMGet(ctx, input)
+	vmItem, err := op.VMGet(ctx, input)
 	if err != nil {
 		return nil, err
 	}
 	// Enrich all relations at once instead of manual repo calls.
-	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vm},
+	if err := op.Enr.EnrichVM(ctx, []*model.VMItem{vmItem},
 		"kernel", "image", "binary", "network", "volumes", "vsock",
 	); err != nil {
 		return nil, err
 	}
-	relayRunning := vm.RelayPID != nil && system.IsProcessRunning(*vm.RelayPID)
-	vmDir := infra.GetVMDirByID(vm.ID)
+	relayRunning := vmItem.RelayPID != nil && system.IsProcessRunning(*vmItem.RelayPID)
+	vmDir := infra.GetVMDirByID(vmItem.ID)
 	// Volumes (enriched vm.Volumes or fallback to manual lookup).
 	volumes := make([]results.VMVolume, 0)
-	srcVols := vm.Volumes
-	if len(srcVols) == 0 && len(vm.VolumeIDs) > 0 {
-		vols, err := op.Repos.Volume.FindByIDs(ctx, vm.VolumeIDs)
+	srcVols := vmItem.Volumes
+	if len(srcVols) == 0 && len(vmItem.VolumeIDs) > 0 {
+		vols, err := op.Repos.Volume.FindByIDs(ctx, vmItem.VolumeIDs)
 		if err == nil {
 			srcVols = vols
 		}
@@ -962,47 +988,62 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 			Format: string(v.Format), Status: string(v.Status),
 		})
 	}
-	configPath := &vm.ConfigPath
-	if vm.ConfigPath == "" {
+	configPath := &vmItem.ConfigPath
+	if vmItem.ConfigPath == "" {
 		configPath = nil
+	}
+	if vmItem.CgroupLimits.PolicyVersion == 0 {
+		vmItem.CgroupLimits = op.resolveVMCgroupLimits(ctx, vmItem.VCPUCount, vmItem.MemSizeMiB)
+	}
+	cgroupState := model.VMCgroupState{
+		Path: vm.CgroupPath(vmItem.ID), Requested: vmItem.CgroupLimits, Status: model.VMCgroupEnforcementInactive,
+	}
+	if vmItem.PID > 0 && system.IsProcessAlive(vmItem.PID, vmItem.ProcessStartTime) {
+		observed, inspectErr := vm.InspectCgroup(ctx, vmItem.ID, vmItem.PID, vmItem.CgroupLimits)
+		if inspectErr != nil {
+			cgroupState.Status = model.VMCgroupEnforcementUnavailable
+			cgroupState.Mismatches = []string{inspectErr.Error()}
+		} else {
+			cgroupState = *observed
+		}
 	}
 	return &results.VMInspect{
 		VM: results.VMItemInfo{
-			Name: vm.Name, ID: vm.ID, Status: string(vm.Status),
-			PID: vm.PID, ExitCode: vm.ExitCode,
-			SSHKeys: vm.SSHKeys, SSHUser: vm.SSHUser,
-			CloudInitMode:  vm.CloudInitMode,
-			NocloudNetPort: vm.NocloudNetPort, NocloudNetPID: vm.NocloudNetPID,
-			PCIEnabled: vm.PCIEnabled, NestedVirt: vm.NestedVirt,
-			EnableConsole: vm.EnableConsole,
-			EnableLogging: vm.EnableLogging, EnableMetrics: vm.EnableMetrics,
-			AllowRemoteExec: vm.RemoteExec,
-			CreatedAt:       vm.CreatedAt, UpdatedAt: vm.UpdatedAt,
+			Name: vmItem.Name, ID: vmItem.ID, Status: string(vmItem.Status),
+			PID: vmItem.PID, ExitCode: vmItem.ExitCode,
+			SSHKeys: vmItem.SSHKeys, SSHUser: vmItem.SSHUser,
+			CloudInitMode:  vmItem.CloudInitMode,
+			NocloudNetPort: vmItem.NocloudNetPort, NocloudNetPID: vmItem.NocloudNetPID,
+			PCIEnabled: vmItem.PCIEnabled, NestedVirt: vmItem.NestedVirt,
+			EnableConsole: vmItem.EnableConsole,
+			EnableLogging: vmItem.EnableLogging, EnableMetrics: vmItem.EnableMetrics,
+			AllowRemoteExec: vmItem.RemoteExec,
+			CreatedAt:       vmItem.CreatedAt, UpdatedAt: vmItem.UpdatedAt,
 		},
 		Resources: results.VMResourcesInfo{
-			VCPU: vm.VCPUCount, Mem: vm.MemSizeMiB, Disk: vm.DiskSizeMiB,
+			VCPU: vmItem.VCPUCount, Mem: vmItem.MemSizeMiB, Disk: vmItem.DiskSizeMiB, Cgroup: cgroupState,
 		},
 		Networking: results.VMNetworkingInfo{
-			IPv4: vm.IPv4, MAC: vm.MAC,
-			Network: vm.Network, TapDevice: vm.TapDevice,
+			IPv4: vmItem.IPv4, MAC: vmItem.MAC,
+			Network: vmItem.Network, TapDevice: vmItem.TapDevice,
 		},
 		Assets: results.VMAssetsInfo{
-			Image:  vm.Image,
-			Kernel: vm.Kernel,
-			Binary: vm.Binary,
+			Image:  vmItem.Image,
+			Kernel: vmItem.Kernel,
+			Binary: vmItem.Binary,
 		},
 		Filesystem: results.VMFilesystemInfo{
-			VMDir: vmDir, RootfsPath: vm.RootfsPath,
+			VMDir: vmDir, RootfsPath: vmItem.RootfsPath,
 			ConfigPath:       configPath,
-			LogPath:          vm.LogPath,
-			SerialOutputPath: vm.SerialOutputPath,
+			LogPath:          vmItem.LogPath,
+			SerialOutputPath: vmItem.SerialOutputPath,
 		},
 		Console: results.VMConsoleInfo{
-			RelayRunning: relayRunning, RelayPID: vm.RelayPID,
-			RelaySocketPath: vm.RelaySocketPath,
+			RelayRunning: relayRunning, RelayPID: vmItem.RelayPID,
+			RelaySocketPath: vmItem.RelaySocketPath,
 		},
 		Volumes: volumes,
-		Vsock:   vsockToInspectInfo(vm.Vsock),
+		Vsock:   vsockToInspectInfo(vmItem.Vsock),
 	}, nil
 }
 
@@ -1047,7 +1088,7 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 	for _, vmLocal := range vms {
 		// If VM is stopped, respawn Firecracker process
 		if vmLocal.Status == model.VMStatusStopped {
-			if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
+			if err := op.vmRespawnFirecracker(ctx, vmLocal, false, ""); err != nil {
 				results = append(results, errs.OperationResult{
 					Status: "error", Code: "vm.start_failed",
 					Message:   fmt.Sprintf("start '%s': %v", vmLocal.Name, err),
@@ -1102,10 +1143,18 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 		controller.Stop(ctx, input.Force)
 		// Defense-in-depth: force-kill if stop() silently left the Firecracker process alive
 		if vmLocal.PID > 0 && system.IsProcessRunning(vmLocal.PID) {
-			proc, _ := os.FindProcess(vmLocal.PID)
-			if proc != nil {
-				_ = proc.Kill()
-			}
+			system.GracefulShutdown(system.ShutdownConfig{
+				Pid: vmLocal.PID, IsChild: false, GracefulTimeout: 100 * time.Millisecond,
+				KillTimeout: 100 * time.Millisecond, ExpectedStartTime: vmLocal.ProcessStartTime,
+			})
+		}
+		if err := vm.CleanupJail(ctx, vmLocal.ID); err != nil {
+			slog.Error("failed to clean VM jail and cgroup after stop", "vm", vmLocal.Name, "error", err)
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: string(errs.CodeVMCgroupCleanupFailed),
+				Item: vmLocal, Message: fmt.Sprintf("stop '%s': cleanup failed: %v", vmLocal.Name, err), Exception: err,
+			})
+			continue
 		}
 		op.AuditLog.LogOperation("vm.stop", nil, fmt.Sprintf("name=%s", vmLocal.Name))
 		results = append(results, errs.OperationResult{
@@ -1116,7 +1165,18 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 	}
 	return &errs.BatchResult{Items: results}
 }
-func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, snapshotMode bool) error {
+func (op *Operation) vmRespawnFirecracker(
+	ctx context.Context,
+	v *model.VMItem,
+	snapshotMode bool,
+	snapshotDir string,
+) error {
+	if v.CgroupLimits.PolicyVersion == 0 {
+		v.CgroupLimits = op.resolveVMCgroupLimits(ctx, v.VCPUCount, v.MemSizeMiB)
+		if err := op.Repos.VM.Upsert(ctx, v); err != nil {
+			return fmt.Errorf("persist migrated VM cgroup limits: %w", err)
+		}
+	}
 	vmDir := infra.GetVMDirByID(v.ID)
 	// Network info is required — the VM record must have it pre-loaded.
 	if v.Network == nil {
@@ -1125,11 +1185,20 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	if v.Binary == nil || v.Binary.Path == "" {
 		return fmt.Errorf("binary info is required for VM respawn")
 	}
+	pair, err := op.Services.Binary.ResolvePair(ctx, v.Binary)
+	if err != nil {
+		return err
+	}
+	if v.JailerBinaryID != "" && pair.Jailer.ID != v.JailerBinaryID {
+		return errs.New(errs.CodeBinaryPairInvalid,
+			fmt.Sprintf("persisted Jailer does not match Firecracker version %s", v.Binary.Version))
+	}
 	if v.KernelID == "" || v.Kernel == nil || v.Kernel.Path == "" {
 		return fmt.Errorf("kernel info is required for VM respawn")
 	}
-	if v.RootfsPath == "" {
-		return fmt.Errorf("rootfs path is required for VM respawn")
+	managedRootfsPath := filepath.Join(vmDir, infra.VMRootfsFilename)
+	if _, err := os.Stat(managedRootfsPath); err != nil {
+		return fmt.Errorf("managed VM rootfs is unavailable: %w", err)
 	}
 	if v.ImageID != "" && v.Image == nil {
 		return fmt.Errorf("image info is required for VM respawn")
@@ -1176,52 +1245,11 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 		libnet.FlushARP(ctx, v.Network.Bridge)
 	}
 	logLevel, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_level")
-	fcPIDFilename, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "pid_filename")
-	fcConfig := &model.FirecrackerConfig{
-		VMDir:          vmDir,
-		RootfsPath:     v.RootfsPath,
-		BinaryPath:     v.Binary.Path,
-		KernelPath:     v.Kernel.Path,
-		VCPUCount:      v.VCPUCount,
-		MemSizeMiB:     v.MemSizeMiB,
-		GuestIP:        v.IPv4,
-		GuestMAC:       v.MAC,
-		TapName:        v.TapDevice,
-		NetworkGateway: v.Network.IPv4Gateway,
-		PCIEnabled:     v.PCIEnabled,
-		NestedVirt:     v.NestedVirt,
-		EnableConsole:  v.EnableConsole,
-		EnableLogging:  v.EnableLogging,
-		EnableMetrics:  v.EnableMetrics,
-		BootArgs:       v.BootArgs,
-		LSMFlags:       v.LSMFlags,
-		SnapshotMode:   snapshotMode,
-		ImageFSUUID:    v.Image.FSUUID,
-		ImageFSType:    v.Image.FSType,
-		// Full paths from DB (field names match DB column names)
-		ConfigPath:       v.ConfigPath,
-		APISocketPath:    v.APISocketPath,
-		LogPath:          infra.DerefOrZero(v.LogPath),
-		SerialOutputPath: infra.DerefOrZero(v.SerialOutputPath),
-		LogLevel:         logLevel,
-		PIDPath:          filepath.Join(vmDir, fcPIDFilename),
-	}
-	// --- Vsock config ---
-	if v.Vsock != nil {
-		fcConfig.Vsock = &model.VsockConfig{
-			GuestCID: v.Vsock.GuestCID,
-			UDSPath:  v.Vsock.UDSPath,
-		}
-	}
-	// --- Attach volumes (extra drives) ---
-	if len(v.Volumes) > 0 {
-		fcConfig.ExtraDrives = volume.VolumesToDrives(v.Volumes)
-	}
+	fcConfig := buildRespawnFirecrackerConfig(v, pair, vmDir, snapshotMode, snapshotDir, logLevel)
 	// --- Console relay setup (before spawn) ---
 	var consoleController *console.Controller
 	if v.EnableConsole {
-		consoleController = console.NewController(v.ID, vmDir, v.Name,
-			v.ConsolePIDFilename, v.ConsoleSocketFilename)
+		consoleController = console.NewController(v.ID, vmDir, v.Name)
 		ptyFD, ptyErr := consoleController.CreatePTY()
 		if ptyErr != nil {
 			slog.Warn("Console PTY creation failed during respawn", "vm", v.Name, "error", ptyErr)
@@ -1234,7 +1262,7 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	if err := spawner.WriteToFile(); err != nil {
 		return fmt.Errorf("write firecracker config: %w", err)
 	}
-	if err := spawner.Spawn(); err != nil {
+	if err := spawner.Spawn(ctx); err != nil {
 		slog.Warn("Failed to respawn Firecracker", "vm", v.Name, "error", err)
 		return err
 	}
@@ -1271,6 +1299,74 @@ func (op *Operation) vmRespawnFirecracker(ctx context.Context, v *model.VMItem, 
 	return nil
 }
 
+// buildRespawnFirecrackerConfig reconstructs launch paths from the managed VM
+// directory. Persisted path columns are descriptive metadata, never authority.
+func buildRespawnFirecrackerConfig(
+	v *model.VMItem,
+	pair *model.BinaryPair,
+	vmDir string,
+	snapshotMode bool,
+	snapshotDir string,
+	logLevel string,
+) *model.FirecrackerConfig {
+	config := &model.FirecrackerConfig{
+		VMDir:            vmDir,
+		RootfsPath:       filepath.Join(vmDir, infra.VMRootfsFilename),
+		BinaryPath:       v.Binary.Path,
+		JailerPath:       pair.Jailer.Path,
+		BinaryVersion:    pair.Firecracker.Version,
+		KernelPath:       v.Kernel.Path,
+		VCPUCount:        v.VCPUCount,
+		MemSizeMiB:       v.MemSizeMiB,
+		CgroupLimits:     v.CgroupLimits,
+		GuestIP:          v.IPv4,
+		GuestMAC:         v.MAC,
+		TapName:          v.TapDevice,
+		NetworkGateway:   v.Network.IPv4Gateway,
+		PCIEnabled:       v.PCIEnabled,
+		NestedVirt:       v.NestedVirt,
+		EnableConsole:    v.EnableConsole,
+		EnableLogging:    v.EnableLogging,
+		EnableMetrics:    v.EnableMetrics,
+		BootArgs:         v.BootArgs,
+		LSMFlags:         v.LSMFlags,
+		SnapshotMode:     snapshotMode,
+		SnapshotDir:      snapshotDir,
+		ImageFSUUID:      v.Image.FSUUID,
+		ImageFSType:      v.Image.FSType,
+		ConfigPath:       filepath.Join(vmDir, infra.VMFirecrackerConfigFilename),
+		APISocketPath:    filepath.Join(vmDir, infra.VMFirecrackerAPISocketFilename),
+		LogPath:          filepath.Join(vmDir, infra.VMFirecrackerLogFilename),
+		SerialOutputPath: filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename),
+		MetricsPath:      filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename),
+		LogLevel:         logLevel,
+		PIDPath:          filepath.Join(vmDir, infra.VMFirecrackerPIDFilename),
+	}
+	if v.Vsock != nil {
+		config.Vsock = &model.VsockConfig{
+			GuestCID: v.Vsock.GuestCID,
+			UDSPath:  filepath.Join(vmDir, infra.VMVsockSocketFilename),
+		}
+	}
+	if len(v.Volumes) > 0 {
+		config.ExtraDrives = volume.VolumesToDrives(v.Volumes)
+	}
+	return config
+}
+
+func (op *Operation) resolveVMCgroupLimits(ctx context.Context, vcpuCount, memoryMiB int) model.VMCgroupLimits {
+	headroomMiB, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_vmm_headroom_mib")
+	cpuWeight, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_cpu_weight")
+	pidsMax, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_pids_max")
+	swapMaxBytes, _ := op.Services.Config.GetInt(ctx, "defaults.vm", "cgroup_swap_max_bytes")
+	return model.NewVMCgroupLimits(vcpuCount, memoryMiB, model.VMCgroupPolicy{
+		VMMHeadroomMiB: int64(headroomMiB),
+		CPUWeight:      int64(cpuWeight),
+		PIDsMax:        int64(pidsMax),
+		SwapMaxBytes:   int64(swapMaxBytes),
+	})
+}
+
 // --- Reboot / Pause / Resume ---
 // Reboot reboots one or more VMs.
 func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
@@ -1298,7 +1394,7 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 		controller := vm.NewController(vmLocal, repo)
 		controller.Stop(ctx, input.Force)
 		// After stop, respawn a fresh firecracker process
-		if err := op.vmRespawnFirecracker(ctx, vmLocal, false); err != nil {
+		if err := op.vmRespawnFirecracker(ctx, vmLocal, false, ""); err != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.reboot_failed",
 				Message:   fmt.Sprintf("reboot '%s': %v", vmLocal.Name, err),
@@ -1437,7 +1533,7 @@ func (c *VMCreateBuilder) cloneImage(
 	if fsType == "" {
 		return fmt.Errorf("fsType is required")
 	}
-	vmRootfsPath := filepath.Join(c.vmDir, "rootfs."+fsType)
+	vmRootfsPath := filepath.Join(c.vmDir, infra.VMRootfsFilename)
 	if _, err := imageSvc.EnsureCached([]*model.ImageItem{resolved.Image}); err != nil {
 		return fmt.Errorf("ensure cached image: %w", err)
 	}
@@ -1476,9 +1572,12 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		VMDir:           c.vmDir,
 		RootfsPath:      c.rootfsPath,
 		BinaryPath:      c.resolved.Binary.Path,
+		JailerPath:      c.resolved.Jailer.Path,
+		BinaryVersion:   c.resolved.Binary.Version,
 		KernelPath:      c.resolved.Kernel.Path,
 		VCPUCount:       c.resolved.VCPUCount,
 		MemSizeMiB:      c.resolved.MemSizeMib,
+		CgroupLimits:    c.resolved.CgroupLimits,
 		GuestIP:         c.guestIP,
 		GuestMAC:        c.guestMAC,
 		TapName:         c.tapName,
@@ -1499,14 +1598,13 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		LogLevel:        c.resolved.LogLevel,
 		ExtraDrives:     c.resolved.ExtraDrives,
 		Writeback:       c.resolved.Writeback,
-		// Full paths constructed from VMDir + resolved filenames.
-		// Field names match DB column names for respawn compatibility.
-		ConfigPath:       filepath.Join(c.vmDir, c.resolved.ConfigFilename),
-		APISocketPath:    filepath.Join(c.vmDir, c.resolved.APISocketFilename),
-		LogPath:          filepath.Join(c.vmDir, c.resolved.LogFilename),
-		SerialOutputPath: filepath.Join(c.vmDir, c.resolved.SerialOutputFilename),
-		MetricsPath:      filepath.Join(c.vmDir, c.resolved.MetricsFilename),
-		PIDPath:          filepath.Join(c.vmDir, c.resolved.PIDFilename),
+		// Fixed managed paths; field names match DB columns used during respawn.
+		ConfigPath:       filepath.Join(c.vmDir, infra.VMFirecrackerConfigFilename),
+		APISocketPath:    filepath.Join(c.vmDir, infra.VMFirecrackerAPISocketFilename),
+		LogPath:          filepath.Join(c.vmDir, infra.VMFirecrackerLogFilename),
+		SerialOutputPath: filepath.Join(c.vmDir, infra.VMFirecrackerConsoleLogFilename),
+		MetricsPath:      filepath.Join(c.vmDir, infra.VMFirecrackerMetricsFilename),
+		PIDPath:          filepath.Join(c.vmDir, infra.VMFirecrackerPIDFilename),
 	}
 	// Cloud-init info from result (isoPath, nocloudURL)
 	if c.cloudInitResult != nil {
@@ -1537,8 +1635,8 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		return nil
 	}
 	now := time.Now().Format(time.RFC3339)
-	logPath := filepath.Join(c.vmDir, c.resolved.LogFilename)
-	serialPath := filepath.Join(c.vmDir, c.resolved.SerialOutputFilename)
+	logPath := filepath.Join(c.vmDir, infra.VMFirecrackerLogFilename)
+	serialPath := filepath.Join(c.vmDir, infra.VMFirecrackerConsoleLogFilename)
 	vm := &model.VMItem{
 		ID:               c.vmID,
 		Name:             c.resolved.Name,
@@ -1552,11 +1650,13 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		ImageID:          c.resolved.Image.ID,
 		KernelID:         c.resolved.Kernel.ID,
 		BinaryID:         c.resolved.Binary.ID,
+		JailerBinaryID:   c.resolved.Jailer.ID,
 		VCPUCount:        c.resolved.VCPUCount,
 		MemSizeMiB:       c.resolved.MemSizeMib,
+		CgroupLimits:     c.resolved.CgroupLimits,
 		DiskSizeMiB:      c.resolved.DiskSizeMib,
-		APISocketPath:    filepath.Join(c.vmDir, c.resolved.APISocketFilename),
-		ConfigPath:       filepath.Join(c.vmDir, c.resolved.ConfigFilename),
+		APISocketPath:    filepath.Join(c.vmDir, infra.VMFirecrackerAPISocketFilename),
+		ConfigPath:       filepath.Join(c.vmDir, infra.VMFirecrackerConfigFilename),
 		CloudInitMode:    string(c.resolved.CloudInitMode),
 		RootfsPath:       c.rootfsPath,
 		RootfsSuffix:     c.resolved.Image.FSType,

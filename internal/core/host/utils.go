@@ -142,10 +142,9 @@ func ValidateSudoersBinaries() error {
 // --- GenerateSudoersContent ---
 // Map iteration order is random; iterate over an ordered key slice instead.
 func GenerateSudoersContent(groupName string) string {
-	// Service binaries via "mvm run <service>" pattern (sudoers wildcard)
-	// Use the current binary's path so sudoers matches how provisioner invokes it.
-	mvmPath, _ := os.Executable()
-	runCmd := mvmPath + " *"
+	// IMPORTANT: This wildcard and the raw tool entries remain transitional
+	// until Tasks 4-8 migrate their live callsites to typed privileged actions.
+	runCmd := infra.SystemBinaryPath + " *"
 	binaries := append(infra.PrivilegedBinariesOrdered[:], runCmd)
 	binariesStr := strings.Join(binaries, ", ")
 	return fmt.Sprintf(

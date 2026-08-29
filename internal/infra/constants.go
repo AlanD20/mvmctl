@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -20,6 +21,12 @@ const BootstrapName = "mvmctl"
 
 // CLIName is the canonical CLI name. A compiled Go binary has one name.
 const CLIName = "mvm"
+
+// SystemBinaryPath is the canonical root-owned executable used for privileged dispatch.
+const SystemBinaryPath = "/usr/local/bin/mvm"
+
+// PrivilegedProtocolMarker selects the current fixed internal privileged protocol.
+const PrivilegedProtocolMarker = "__mvm_privileged_v1"
 
 // MvmctlGitHubRepo is the GitHub repository for mvmctl self-update.
 const MvmctlGitHubRepo = "AlanD20/mvmctl"
@@ -46,11 +53,67 @@ const MVMUnixGroup = CLIName
 
 const MVMDBFilename = "mvmdb.db"
 
+// TrustedBinaryRoot contains root-owned Firecracker release pairs used by Jailer.
+const TrustedBinaryRoot = "/var/lib/mvmctl/binaries"
+
+// JailerChrootBase is the fixed root-owned base directory for per-VM jails.
+const JailerChrootBase = "/var/lib/mvmctl/jailer"
+
+// JailerInstanceRoot contains persistent root-owned VM authority records.
+const JailerInstanceRoot = "/var/lib/mvmctl/instances"
+
+// JailerRuntimeRoot contains ephemeral root-owned locks and launch state.
+const JailerRuntimeRoot = "/run/mvmctl"
+
+// JailerCgroupParent is the fixed cgroup-v2 subtree used by canonical Jailer launches.
+const JailerCgroupParent = "mvmctl"
+
+// CgroupV2Root is the unified Linux cgroup-v2 mount point required by VM launches.
+const CgroupV2Root = "/sys/fs/cgroup"
+
+// JailerManifestFilename is the fixed per-VM launch manifest name.
+const JailerManifestFilename = "jailer-launch.json"
+
+const (
+	// VMRootfsFilename is the fixed managed VM root filesystem leaf.
+	VMRootfsFilename = "rootfs.img"
+	// VMCloudInitISOFilename is the fixed managed VM cloud-init ISO leaf.
+	VMCloudInitISOFilename = "cloud-init.iso"
+	// VMFirecrackerConfigFilename is the fixed managed Firecracker configuration leaf.
+	VMFirecrackerConfigFilename = "firecracker.json"
+	// VMFirecrackerLogFilename is the fixed managed Firecracker log leaf.
+	VMFirecrackerLogFilename = "firecracker.log"
+	// VMFirecrackerConsoleLogFilename is the fixed managed Firecracker console log leaf.
+	VMFirecrackerConsoleLogFilename = "firecracker.console.log"
+	// VMFirecrackerMetricsFilename is the fixed managed Firecracker metrics leaf.
+	VMFirecrackerMetricsFilename = "firecracker.metrics"
+	// VMFirecrackerAPISocketFilename is the fixed Firecracker API socket leaf.
+	VMFirecrackerAPISocketFilename = "firecracker.api.socket"
+	// VMVsockSocketFilename is the fixed Firecracker vsock host socket leaf.
+	VMVsockSocketFilename = "vsock.sock"
+	// VMConsoleSocketFilename is the fixed console relay socket leaf.
+	VMConsoleSocketFilename = "console.sock"
+	// VMFirecrackerPIDFilename is the fixed display-only Firecracker PID leaf.
+	VMFirecrackerPIDFilename = "firecracker.pid"
+	// VMConsolePIDFilename is the fixed display-only console relay PID leaf.
+	VMConsolePIDFilename = "console.pid"
+	// SnapshotRootfsFilename is the fixed managed snapshot root filesystem leaf.
+	SnapshotRootfsFilename = "rootfs.img"
+	// SnapshotMemoryFilename is the fixed managed snapshot memory leaf.
+	SnapshotMemoryFilename = "memory"
+	// SnapshotStateFilename is the fixed managed snapshot state leaf.
+	SnapshotStateFilename = "vmstate"
+)
+
 const MVMForwardChain = "MVM-FORWARD"
 
 const MVMPostroutingChain = "MVM-POSTROUTING"
 
 const MVMNocloudNetInputChain = "MVM-NOCLOUDNET-INPUT"
+
+const MVMRoutedPolicyChain = "MVM-ROUTED-POLICY"
+
+const MVMHostInputChain = "MVM-HOST-INPUT"
 
 func SudoersDropInPath() string {
 	return fmt.Sprintf("/etc/sudoers.d/%s", CLIName)
@@ -65,27 +128,31 @@ var OverridableDefaults = map[string]map[string]any{
 		"ssh_timeout_sec": 10,
 	},
 	"defaults.vm": {
-		"vcpu_count":          1,
-		"mem_size_mib":        512,
-		"ssh_user":            "root",
-		"user_password":       "password",
-		"dns_server":          "1.1.1.1",
-		"root_uid":            0,
-		"root_gid":            0,
-		"user_uid":            1000,
-		"user_gid":            1000,
-		"pci_enabled":         true,
-		"nested_virt":         false,
-		"enable_logging":      true,
-		"enable_metrics":      false,
-		"enable_console":      false,
-		"lsm_flags":           "landlock,lockdown,yama,integrity,selinux,bpf",
-		"boot_args":           "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false",
-		"guest_mac_prefix":    "02:FC",
-		"vsock_port":          1024,
-		"allow_remote_exec":   false,
-		"vsock_user":          "root",
-		"vsock_probe_timeout": 5,
+		"vcpu_count":              1,
+		"mem_size_mib":            512,
+		"ssh_user":                "root",
+		"user_password":           "password",
+		"dns_server":              "1.1.1.1",
+		"root_uid":                0,
+		"root_gid":                0,
+		"user_uid":                1000,
+		"user_gid":                1000,
+		"pci_enabled":             true,
+		"nested_virt":             false,
+		"enable_logging":          true,
+		"enable_metrics":          false,
+		"enable_console":          false,
+		"lsm_flags":               "landlock,lockdown,yama,integrity,selinux,bpf",
+		"boot_args":               "console=ttyS0 reboot=k panic=1 net.ifnames=0 rw rootwait quiet loglevel=3 no_timer_check clocksource=kvm-clock systemd.show_status=false",
+		"guest_mac_prefix":        "02:FC",
+		"vsock_port":              1024,
+		"allow_remote_exec":       false,
+		"vsock_user":              "root",
+		"vsock_probe_timeout":     5,
+		"cgroup_vmm_headroom_mib": 128,
+		"cgroup_cpu_weight":       100,
+		"cgroup_pids_max":         256,
+		"cgroup_swap_max_bytes":   0,
 	},
 	"defaults.network": {
 		"name":        "net",
@@ -104,22 +171,12 @@ var OverridableDefaults = map[string]map[string]any{
 		"remote_list_cache_ttl": 14400,
 	},
 	"defaults.firecracker": {
-		"log_level":               "Debug",
-		"log_filename":            "firecracker.log",
-		"serial_output_filename":  "firecracker.console.log",
-		"metrics_filename":        "firecracker.metrics",
-		"api_socket_filename":     "firecracker.api.socket",
-		"pid_filename":            "firecracker.pid",
-		"config_filename":         "firecracker.json",
-		"console_socket_filename": "console.sock",
-		"console_pid_filename":    "console.pid",
-		"vsock_filename":          "vsock.sock",
+		"log_level": "Debug",
 	},
 	"defaults.volume": {
 		"cache_type": "Unsafe",
 	},
 	"defaults.cloudinit": {
-		"iso_name":                 "cloud-init.iso",
 		"nocloud_port_range_start": 8000,
 		"nocloud_port_range_end":   9000,
 		"nocloud_max_port_retries": 100,
@@ -465,25 +522,15 @@ var (
 
 func GetCacheDir() (string, error) {
 	cacheDirOnce.Do(func() {
-		override, ok := EnvGet("CACHE_DIR")
-		if ok && override != "" {
-			var resolved string
-			resolved, cacheDirErr = filepath.Abs(override)
-			if cacheDirErr != nil {
-				cacheDirErr = fmt.Errorf("invalid cache dir path: %w", cacheDirErr)
-				return
-			}
-			// Ensure the directory exists with proper permissions.
-			if err := ensureDirAndChown(resolved); err != nil {
-				cacheDirErr = fmt.Errorf("create cache dir: %w", err)
-				return
-			}
-			cacheDirVal = resolved
-			return
-		}
-		path := filepath.Join(GetRealHome(), ".cache", ProjectName)
-		if err := ensureDirAndChown(path); err != nil {
-			cacheDirErr = fmt.Errorf("create default cache dir: %w", err)
+		override, _ := EnvGet("CACHE_DIR")
+		path, err := resolveUserDir(
+			context.Background(),
+			defaultUserCacheDir,
+			override,
+			realDefaultUserDirDeps(),
+		)
+		if err != nil {
+			cacheDirErr = fmt.Errorf("create cache dir: %w", err)
 			return
 		}
 		cacheDirVal = path
@@ -492,21 +539,15 @@ func GetCacheDir() (string, error) {
 }
 
 func GetConfigDir() (string, error) {
-	override, ok := EnvGet("CONFIG_DIR")
-	if ok && override != "" {
-		resolved, err := filepath.Abs(override)
-		if err != nil {
-			return "", fmt.Errorf("invalid config dir path: %w", err)
-		}
-		// Ensure the directory exists with proper permissions.
-		if err := ensureDirAndChown(resolved); err != nil {
-			return "", fmt.Errorf("create config dir: %w", err)
-		}
-		return resolved, nil
-	}
-	path := filepath.Join(GetRealHome(), ".config", ProjectName)
-	if err := ensureDirAndChown(path); err != nil {
-		return "", fmt.Errorf("create default config dir: %w", err)
+	override, _ := EnvGet("CONFIG_DIR")
+	path, err := resolveUserDir(
+		context.Background(),
+		defaultUserConfigDir,
+		override,
+		realDefaultUserDirDeps(),
+	)
+	if err != nil {
+		return "", fmt.Errorf("create config dir: %w", err)
 	}
 	return path, nil
 }
@@ -615,9 +656,9 @@ func GetVolumesDir() string {
 	return path
 }
 
-// GetVolumePath returns the filesystem path for a volume with the given name and format.
-func GetVolumePath(name, format string) string {
-	return filepath.Join(GetVolumesDir(), fmt.Sprintf("%s.%s", name, format))
+// GetVolumePath returns the canonical managed path for a volume ID and format.
+func GetVolumePath(volumeID, format string) string {
+	return filepath.Join(GetVolumesDir(), fmt.Sprintf("%s.%s", volumeID, format))
 }
 
 func GetBinDir() string {

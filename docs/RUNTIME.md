@@ -281,7 +281,7 @@ inside the guest VM, not on the host.
 
 ### 3.1 Service Architecture
 
-Three foreground services and one embedded guest agent share the same binary.
+Four foreground services and one embedded guest agent share the same binary.
 No separate service binaries, no symlinks, no extraction step.
 
 | Service | Entry Point | Runs As | Purpose |
@@ -289,6 +289,7 @@ No separate service binaries, no symlinks, no extraction step.
 | `mvm run console relay` | `console.Run(ctx, cfg)` | user | PTY-to-socket relay for serial console |
 | `mvm run nocloudnet serve` | `nocloudnet.Run(ctx, cfg)` | user | HTTP server for cloud-init nocloud-net |
 | `mvm run provision` | `loopmount.Run(ctx, cfg)` | **root** (sudo) | Loop-mount rootfs provisioning |
+| `mvm run jailer` | `jailer.Run(ctx, cfg)` | **root** (sudo) | Trusted release installation, jail setup, and Firecracker launch |
 | `agent/` (embedded) | Guest agent binary | root (in-VM) | Command execution and file transfer inside the guest |
 
 The vsock agent is cross-compiled at build time, zstd-compressed, embedded via
@@ -404,7 +405,24 @@ API layer → provisioner.NewBackend() → LoopMountBackend
 raw block device operations. The JSON protocol ensures no state leaks between
 invocations.
 
-### 3.5 Service Lifecycle
+### 3.5 Firecracker Jailer Service
+
+Jailer is the only VM launch path. `mvm bin pull` streams the checksum-verified Firecracker release archive to the privileged installer, which atomically installs the exact Firecracker/Jailer pair under `/var/lib/mvmctl/binaries/<version>/`. VM launch then exposes only that VM's required resources inside `/var/lib/mvmctl/jailer/firecracker/<vm-id>/root/` and execs the trusted Jailer binary.
+
+Jailer does not daemonize, so the serial-console descriptors remain attached. The service derives the non-root Firecracker UID/GID from the sudo caller, translates Firecracker configuration paths into the jail, and records the actual Firecracker PID. Stop, remove, reboot, hotplug, and snapshot operations reconcile the corresponding jail mounts and cgroup.
+
+There is no direct-Firecracker fallback. Every launch requires cgroup v2 with the CPU, memory, and PID controllers and creates `/sys/fs/cgroup/mvmctl/<vm-id>`. mvmctl persists typed CPU, memory, swap, and PID limits, passes only internally derived Jailer arguments, and verifies exact membership and values after launch. Verification failure terminates the VM. `mvm vm inspect` reports requested limits, observed limits, usage, mismatches, and enforcement status. Network namespaces remain separate follow-up work.
+
+**Key files:**
+
+| File | Purpose |
+|------|---------|
+| `internal/service/jailer/entry.go` | Validates privileged operations, installs trusted pairs, mounts resources, and execs Jailer |
+| `internal/service/jailer/spawn.go` | Typed normal-user calls into the privileged service |
+| `internal/core/vm/jailer.go` | Per-VM manifest generation and host-to-jail path translation |
+| `internal/core/vm/firecracker.go` | Firecracker configuration and caller-facing spawn lifecycle |
+
+### 3.6 Service Lifecycle
 
 | Phase | Action | Component |
 |-------|--------|-----------|
@@ -412,6 +430,7 @@ invocations.
 | **Create VM** | Provision rootfs via loop-mount or guestfs | `backend.Run()` |
 | **Create VM** | Start NoCloud server (net mode) or inject cloud-init (inject mode) | `nocloudnet.Spawn()` / `backend.InjectCloudInit()` |
 | **Create VM** | Start console relay (when `--console` is set) | `console.Spawn()` |
+| **Create/start/restore VM** | Launch exact Firecracker/Jailer pair in per-VM jail | `jailer.Launch()` |
 | **Remove VM** | Stop console relay + NoCloud server + clean firewall rules | `console.Stop()`, `nocloudnet.Stop()` |
 | **Cache prune** | Clean up stale PID files + orphan processes | `cache.Service.Prune()` |
 
@@ -419,8 +438,8 @@ invocations.
 
 ## 4. Firewall Backends
 
-Firewall backends manage NAT rules, forwarding rules, and per-VM access control
-for nocloud-net servers. Two backends are available, selected by the
+Firewall backends manage NAT rules, forwarding rules, routed service-access
+policies, and per-VM access control for nocloud-net servers. Two backends are available, selected by the
 `firewall_backend` setting in the database (default: `nftables`).
 
 A **`FirewallTracker`** in `internal/lib/firewall/tracker.go` provides a unified
@@ -435,11 +454,21 @@ resolves the actual backend setting, it replaces the tracker via
 | **nftables** | Yes (`firewall_backend: nftables`) | `tracker.go`, `nftables.go`, `nftables_repository.go` |
 | **iptables** | Opt-in (`firewall_backend: iptables`) | `tracker.go`, `iptables.go`, `iptables_repository.go` |
 
-Both backends manage the same three chain types: `MVM-FORWARD` (ip filter),
-`MVM-POSTROUTING` (ip nat), and `MVM-NOCLOUDNET-INPUT` (ip filter). The nftables
+Both backends manage five chain types: `MVM-FORWARD` (ip filter),
+`MVM-POSTROUTING` (ip nat), `MVM-NOCLOUDNET-INPUT` (ip filter),
+`MVM-ROUTED-POLICY` (ip filter), and `MVM-HOST-INPUT` (ip filter). The nftables
 backend adds jump rules at position 0 of the built-in chains, using non-hook
 chains so that `accept` verdicts are terminal within the mvm table — matching
 the behavior users expect from iptables.
+
+Service-access intent stores a source network ID, exact destination VM ID,
+TCP or UDP, and a destination port or bounded range. The API resolves current
+network, bridge, VM, and IP state; the network domain compiles backend-neutral
+derived rules. Reconciliation commits desired rows before atomically rebuilding
+the active backend. `MVM-ROUTED-POLICY` orders established replies, exact allows,
+then managed-bridge default deny. `MVM-NOCLOUDNET-INPUT` precedes
+`MVM-HOST-INPUT`, which permits established replies and denies other traffic
+from managed bridges. Internet egress does not match the managed-output drop.
 
 **Why two backends?** Different Linux distributions ship with different firewall
 defaults. Some use nftables natively; others use iptables or iptables-legacy.
@@ -501,10 +530,13 @@ SSH-based probe. All images use the loop-mount provisioning backend (the default
 The `mvm` binary is a standard Go binary that includes all services compiled in:
 
 ```bash
-go build -o dist/mvm ./cmd/mvm
+./scripts/build.sh release
+sudo ./dist/mvm host install-system
 ```
 
-The three `mvm run` services (console relay, nocloud-net server, loopmount provisioner) plus the vsock guest agent binary are all compiled into the same binary. No separate service binaries, no symlinks, no extraction step.
+The release artifact and the root-owned `/usr/local/bin/mvm` installation are the same single executable. Background
+services and the vsock guest agent are compiled into it; there is no separate privileged helper, service binary,
+symlink, or extraction step. User-owned development artifacts are not sudo targets.
 
 ### Service Invocation
 
@@ -521,8 +553,10 @@ Services are spawned in the background by the core layer via `system.SpawnServic
 
 ### Sudoers
 
-Only `mvm run provision` requires passwordless sudo. Managed by `mvm host init` which
-creates a drop-in at `/etc/sudoers.d/mvm` granting the `mvm` group passwordless sudo.
+During the privilege-boundary migration, `mvm host init` targets only root-owned `/usr/local/bin/mvm` but still retains
+the legacy raw-tool and public-service grants needed by unmigrated callers. Task 14 removes those grants, after Tasks
+8–13 migrate every caller, and leaves only the versioned early privileged marker. See ADR-0016; the transitional policy
+is not the final security model.
 
 ---
 

@@ -325,6 +325,41 @@ func TestValidateMACPrefix(t *testing.T) {
 	})
 }
 
+func TestValidateCgroupDefaults_Boundaries(t *testing.T) {
+	tests := map[string]struct {
+		key     string
+		value   any
+		wantErr string
+	}{
+		"headroom_zero":        {key: "cgroup_vmm_headroom_mib", value: 0},
+		"headroom_negative":    {key: "cgroup_vmm_headroom_mib", value: -1, wantErr: "non-negative"},
+		"swap_zero":            {key: "cgroup_swap_max_bytes", value: 0},
+		"swap_negative":        {key: "cgroup_swap_max_bytes", value: -1, wantErr: "non-negative"},
+		"cpu_weight_minimum":   {key: "cgroup_cpu_weight", value: 1},
+		"cpu_weight_maximum":   {key: "cgroup_cpu_weight", value: 10000},
+		"cpu_weight_below_min": {key: "cgroup_cpu_weight", value: 0, wantErr: "between 1 and 10000"},
+		"cpu_weight_above_max": {key: "cgroup_cpu_weight", value: 10001, wantErr: "between 1 and 10000"},
+		"pids_minimum":         {key: "cgroup_pids_max", value: 1},
+		"pids_zero":            {key: "cgroup_pids_max", value: 0, wantErr: "must be positive"},
+		"non_numeric":          {key: "cgroup_pids_max", value: "invalid", wantErr: "expected numeric value"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			r := config.NewConstraintRegistry()
+			config.RegisterBuiltinConstraints(r)
+			constraints := r.Get("defaults.vm", tc.key)
+			require.Len(t, constraints, 1)
+			err := constraints[0](tc.key, resolveMap(map[string]any{tc.key: tc.value}))
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
 // --- RegisterBuiltinConstraints ---
 // Rationale: Must register both constraints in the correct categories and keys.
 
@@ -349,6 +384,16 @@ func TestRegisterBuiltinConstraints(t *testing.T) {
 
 		constraints := r.Get("defaults.vm", "guest_mac_prefix")
 		assert.Len(t, constraints, 1, "guest_mac_prefix should have 1 constraint")
+	})
+
+	t.Run("registers_cgroup_defaults", func(t *testing.T) {
+		r := config.NewConstraintRegistry()
+		config.RegisterBuiltinConstraints(r)
+		for _, key := range []string{
+			"cgroup_vmm_headroom_mib", "cgroup_cpu_weight", "cgroup_pids_max", "cgroup_swap_max_bytes",
+		} {
+			assert.Len(t, r.Get("defaults.vm", key), 1, "%s should have one constraint", key)
+		}
 	})
 
 	t.Run("unregistered_key_has_no_constraints", func(t *testing.T) {

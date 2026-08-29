@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mvmctl/internal/core/network"
@@ -96,6 +97,9 @@ func (op *Operation) NetworkCreate(ctx context.Context, input inputs.NetworkCrea
 	// Update bridge_active
 	bridgeActive := libnet.DefaultNetOps.BridgeExists(ctx, resolved.Bridge)
 	_ = op.Repos.Network.UpdateBridgeActive(ctx, networkID, bridgeActive)
+	if reconcileErr := op.reconcileServiceAccessPolicies(ctx); reconcileErr != nil {
+		return nil, op.rollbackCreatedNetwork(ctx, networkItem, reconcileErr)
+	}
 	// Re-fetch
 	updated, err := op.Repos.Network.GetByName(ctx, resolved.Name)
 	if err != nil || updated == nil {
@@ -121,7 +125,10 @@ func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInpu
 		return errs.WrapMsg(errs.CodeNetworkRemoveFailed, err.Error(), err)
 	}
 	// Batch-enrich with VM and snapshot references
-	op.Enr.EnrichNetwork(ctx, networks, "vm", "snapshots")
+	if err := op.Enr.EnrichNetwork(ctx, networks, "vm", "snapshots"); err != nil {
+		return errs.WrapMsg(errs.CodeNetworkRemoveFailed,
+			"failed to resolve network dependencies before removal", err)
+	}
 	// service.Remove raises error on failure.
 	// Return the first error encountered.
 	for _, net := range networks {
@@ -132,6 +139,20 @@ func (op *Operation) NetworkRemove(ctx context.Context, input inputs.NetworkInpu
 				code = "network.in_use"
 			}
 			return errs.WrapMsg(code, errorMsg, err)
+		}
+		if err := op.Services.Network.InvalidateServiceAccessPoliciesBySourceNetwork(ctx, net.ID); err != nil {
+			return err
+		}
+		for _, destinationVM := range net.VMs {
+			if destinationVM == nil {
+				continue
+			}
+			if err := op.Services.Network.InvalidateServiceAccessPoliciesByVM(ctx, destinationVM.ID); err != nil {
+				return err
+			}
+		}
+		if err := op.reconcileServiceAccessPolicies(ctx); err != nil {
+			return err
 		}
 		op.AuditLog.LogOperation("network.remove", map[string]any{"id": net.ID, "name": net.Name}, "")
 	}
@@ -299,17 +320,16 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 		}
 	}
 
+	resolvedPolicies, activeNetworks, err := op.resolveServiceAccessPolicyState(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	// 2. Build the set of all networks to sync. When syncing a specific subset,
 	//    we must include ALL DB networks in the batch rebuild so that
 	//    unrequested networks' firewall rules are preserved in the kernel.
 	//    Stats are returned only for the requested networks.
-	allNetworks := requested
-	if len(input.Identifiers) > 0 {
-		allNetworks, err = op.Repos.Network.ListAll(ctx)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list all networks: %v", err), err)
-		}
-	}
+	allNetworks := activeNetworks
 
 	// Capture batch results for stat extraction after the closure.
 	var batchResults map[string]*network.SyncResult
@@ -348,7 +368,7 @@ func (op *Operation) NetworkSync(ctx context.Context, input inputs.NetworkInput)
 		}
 		// Step 3: Sync firewall rules — all networks in a single batch
 		var syncErr2 error
-		batchResults, syncErr2 = op.Services.Network.SyncIPTablesRulesBatch(ctx, allNetworks)
+		batchResults, syncErr2 = op.Services.Network.SyncIPTablesRulesBatch(ctx, allNetworks, resolvedPolicies)
 		if syncErr2 != nil {
 			return fmt.Errorf("sync firewall rules: %w", syncErr2)
 		}
@@ -383,6 +403,10 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list networks: %v", err), err)
 	}
+	if err := op.Enr.EnrichNetwork(ctx, networks, "vm", "snapshots"); err != nil {
+		return nil, errs.WrapMsg(errs.CodeNetworkRemoveFailed,
+			"failed to resolve network dependencies before pruning", err)
+	}
 	// Get referenced network IDs from VMs
 	allVMs, _ := op.Repos.VM.ListAll(ctx)
 	referencedIDs := make(map[string]bool)
@@ -409,7 +433,14 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 		}
 		if !dryRun {
 			if !network.IsPresent {
-				_ = op.Repos.Network.Delete(ctx, network.ID)
+				if err := op.Repos.Network.Delete(ctx, network.ID); err != nil {
+					slog.Warn("Failed to delete network", "name", network.Name, "error", err)
+					continue
+				}
+				if err := op.invalidateRemovedNetworkPolicies(ctx, network); err != nil {
+					slog.Warn("Failed to invalidate network policies", "name", network.Name, "error", err)
+					continue
+				}
 			} else {
 				err := op.NetworkRemove(ctx, inputs.NetworkInput{Identifiers: []string{network.Name}}, includeAll)
 				if err != nil {
@@ -421,6 +452,48 @@ func (op *Operation) NetworkPrune(ctx context.Context, dryRun bool, includeAll b
 		removed = append(removed, network.Name)
 	}
 	return removed, nil
+}
+
+func (op *Operation) invalidateRemovedNetworkPolicies(ctx context.Context, network *model.NetworkItem) error {
+	if err := op.Services.Network.InvalidateServiceAccessPoliciesBySourceNetwork(ctx, network.ID); err != nil {
+		return err
+	}
+	for _, destinationVM := range network.VMs {
+		if destinationVM == nil {
+			continue
+		}
+		if err := op.Services.Network.InvalidateServiceAccessPoliciesByVM(ctx, destinationVM.ID); err != nil {
+			return err
+		}
+	}
+	return op.reconcileServiceAccessPolicies(ctx)
+}
+
+func (op *Operation) rollbackCreatedNetwork(
+	ctx context.Context,
+	network *model.NetworkItem,
+	reconcileErr error,
+) error {
+	causes := []error{reconcileErr}
+	details := map[string]any{"reconciliation_error": reconcileErr.Error()}
+	if cleanupErr := op.Services.Network.Remove(ctx, network, true); cleanupErr != nil {
+		causes = append(causes, cleanupErr)
+		details["cleanup_error"] = cleanupErr.Error()
+	}
+	if deleteErr := op.Repos.Network.Delete(ctx, network.ID); deleteErr != nil {
+		causes = append(causes, deleteErr)
+		details["row_cleanup_error"] = deleteErr.Error()
+	}
+	if recoveryErr := op.reconcileServiceAccessPolicies(ctx); recoveryErr != nil {
+		causes = append(causes, recoveryErr)
+		details["recovery_error"] = recoveryErr.Error()
+	}
+	code := errs.CodeNetworkCreateFailed
+	var domainErr *errs.DomainError
+	if errors.As(reconcileErr, &domainErr) {
+		code = domainErr.Code
+	}
+	return errs.WrapMsg(code, reconcileErr.Error(), errors.Join(causes...), errs.WithDetails(details))
 }
 
 // NetworkCreateDefaultNetwork creates the default network if it doesn't exist.
