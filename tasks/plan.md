@@ -482,11 +482,11 @@ plan and are not implemented:
      accepts at most 128 MiB and remove accepts zero. A fresh five-second response deadline starts immediately before
      delivery; the handler preserves one result or original `DomainError`, half-closes, and never closes fd 0.
      Success semantics and ADR-0016's direct L1 abuse matrix are covered, including blocked read cancellation, invalid
-     effect results, phase deadlines, transport failures, and all closed outcomes. Both actions remain unknown/no-read
-     in the central switch until step 6 completes the typed client capability.
+     effect results, phase deadlines, transport failures, and all closed outcomes. Both actions remained unknown/no-read
+     until step 6 completed the typed client capability; they are now exact registered actions.
    The already-resolved caller upload, response-EOF, and reap behavior is not reopened in either substep.
-6. **Add typed client methods and actions.** Give Jailer one private minimal `Exchange` interface, named install/remove
-   methods, a dedicated fake, and exact privileged action registrations. Dispatch must distinguish a handler-owned
+6. **Add typed client methods and actions — implemented.** Jailer has one private minimal `Exchange` interface, named
+   install/remove methods, a dedicated fake, and exact privileged action registrations. Dispatch distinguishes a handler-owned
    response transport failure from an unhandled action so outer `run` never writes a second frame. The client uses the
    existing EOF-qualified
    response authority and remote-result precedence over upload/reap diagnostics. Capability tests confirm those resolved

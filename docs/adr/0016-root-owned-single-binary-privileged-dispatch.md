@@ -157,10 +157,10 @@ argv action is available, completes the response frame before `SHUT_WR`, and rem
 EOF-delimited JSON decoder. A rejected closed action is not drained. The second increment adds closed, typed
 trusted-release install/remove request and result values plus directly tested handlers. Install alone may consume its
 declared payload through Jailer-owned exact-length and EOF admission; zero-payload install and remove require EOF before
-their effects. Both handlers remain unregistered, and the central action switch stays closed, until the named Jailer
-client capability and its response-authority tests are complete.
+their effects. Both handlers remained unregistered until the named Jailer client capability and its response-authority
+tests completed in slice 6; they are now exact entries in the central switch.
 
-### Implemented unregistered trusted-release handlers
+### Implemented trusted-release handlers
 
 Slice 5b implements the approved contract without registering either action. The two exact compiled internal actions
 are `jailer-release-install` and `jailer-release-remove`. Their constants and all shared closed values live in
@@ -238,11 +238,11 @@ converts only the fully re-admitted private manifest result into the exact resul
 privileged package owns framing, deadlines, response delivery, and private exact install/remove function dependencies
 for direct handler tests. There is no action registry, generic server interface, generic dispatcher, or decoder hook.
 
-Each unregistered handler owns exactly one response transaction. Zero-payload install and remove require EOF before the
+Each registered handler owns exactly one response transaction. Zero-payload install and remove require EOF before the
 named effect. Nonzero install invokes `Install` once with the private stream; Jailer owns stream/EOF admission and no
 canonical effect occurs before admission succeeds. The handler then emits exactly one typed success result or preserved
-`DomainError` followed by `SHUT_WR`. Slice 6 must distinguish unhandled action from handler-owned response failure so
-outer `run` never writes a second frame.
+`DomainError` followed by `SHUT_WR`. Dispatch distinguishes an unhandled action from a handler-owned response failure,
+so outer `run` never writes a second frame.
 
 Each request reader carries the original operation context and one absolute deadline. It uses raw
 `Recvmsg(MSG_DONTWAIT)` plus `POLLIN`, never `os.File.Read`, `SO_RCVTIMEO`, or mutable `O_NONBLOCK`. With cancellable
@@ -258,15 +258,15 @@ receiver invocation starts. Final error delivery computes that deadline before `
 earlier context deadline. The original `DomainError`, class, code, entity, and bounded postcommit details are preserved;
 a response contains exactly one result or one error. Before success encode, require a valid three-value outcome, valid
 slot exactly matching the request, lowercase 64-character archive/executable hashes, policy-valid executable sizes, and
-exact nested values. Slice 6 repeats this semantic validation after decode. Remove Boolean is already closed. Normal
-SQLite projection and postcommit retry acceptance belong to slice 7, not these handlers.
+exact nested values. The typed client repeats this semantic validation after decode. Remove Boolean is already closed.
+Normal SQLite projection and postcommit retry acceptance belong to slice 7, not these handlers.
 
 Focused L1 tests cover strict fields, types, nulls, duplicates, case conflicts, action mismatch, magic, schema,
 truncation, and oversize; install zero/nonzero/oversize/truncated/trailing payloads; remove payload/trailing input; both
 read deadlines, blocked-header/payload cancellation, and post-admission status mutation; zero/remove effects after EOF;
 nonzero install once with publication only after Jailer admits EOF; all outcomes/remove Booleans; invalid fake effect
-results; preserved `DomainError` details; response short writes, errors, half-close, and no double frame. Until slice 6,
-the central switch still rejects both exact actions as unknown without reading.
+results; preserved `DomainError` details; response short writes, errors, half-close, and no double frame. The central
+switch now registers only the two exact trusted-release actions; unknown actions remain rejected without reading.
 
 ### Authorization roles
 
@@ -757,9 +757,9 @@ also implements atomic installed-release removal and the reserved-directory reco
 existing-only traversal, full canonical admission before recovery, exact reference proof, an eight-attempt
 `RENAME_NOREPLACE` commit, explicit committed/close-only target state, ordered fixed-leaf retirement, and exact
 post-commit details. Recovery now rechecks each reserved directory's device/inode binding before leaf cleanup and
-before `rmdir`. This private path now has unregistered typed receiver handlers but no caller capability or central
-dispatch registration. The aarch64 archive audit, typed client/action integration, and L2 release qualification remain
-Task 6 work.
+before `rmdir`. This private path now has registered typed receiver handlers and a named caller capability. The aarch64
+archive audit, public binary-authority cutover, and L2 release qualification remain Task 6 work.
+
 The strict wire codec and caller socketpair process transport, including concurrent upload/response, EOF qualification,
 half-close, and bounded reaping, are implemented. Receiver increments 5a and 5b are also implemented. The production
 entry owns fd 0 directly; admission sets and rechecks `CLOEXEC`, rejects initial `O_NONBLOCK`, verifies
@@ -787,8 +787,15 @@ the frame, and then calls `SHUT_WR`. Install results are checked for their close
 SHA-256 values, and executable-size policy before success. Focused Jailer and privileged L1 tests cover closed decoding,
 all outcomes, zero/nonzero stream ownership, payload and EOF rejection, blocked cancellation, phase deadlines, status
 mutation, invalid effect results, error details, response failure/half-close, and the no-read unknown-action boundary.
-The central action switch remains empty; slice 6 must add the typed client and register these handlers without allowing
-outer dispatch to write a second frame after a handler-owned response failure.
+Slice 6 adds the private minimal exchange seam and named `TrustedReleaseClient.Install` and `Remove` methods. Valid
+install input transfers payload ownership exactly once; pre-exchange failure closes it and reports known pre-start
+status, while rejected public input retains caller ownership. Only actual response EOF establishes response authority;
+impossible pre-start EOF, missing, malformed, truncated, mismatched, or non-EOF responses fail with the required known
+or unknown outcome classification. A valid root success or `DomainError` wins over later upload, exit, or reap
+diagnostics. The central switch registers exactly the two trusted-release actions and distinguishes handler-owned
+delivery failure from an unhandled action, preventing an outer second frame. Focused normal and race tests cover named
+routing, semantic result admission, cancellation, ownership, response evidence, remote-error precedence, and both
+install/remove no-double-frame paths.
 
 ### Paths, process identity, and runtime state
 

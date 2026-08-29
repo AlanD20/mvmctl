@@ -49,8 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the fixed fd-0 Unix socketpair client transport for
   `/usr/bin/sudo -n -- /usr/local/bin/mvm __mvm_privileged_v1 <fixed-action>`. It uses close-on-exec endpoints,
   concurrent bounded upload and response handling, actual peer EOF, early-response upload interruption, cancellation,
-  bounded diagnostics, and bounded process reaping without extending the generic command runner. Capability-specific
-  clients and actions are still release blockers below.
+  bounded diagnostics, and bounded process reaping without extending the generic command runner. Trusted release now
+  has a named capability client; the remaining privileged capabilities are still release blockers below.
 - Added root-side fd-0 receiver admission. The production entry owns `os.Stdin` directly, sets and verifies `CLOEXEC`,
   rejects initially nonblocking or non-`AF_UNIX`/`SOCK_STREAM` descriptors, requires a positive `SO_PEERCRED` PID, and
   matches the peer UID/GID to the authenticated sudo caller before environment sanitization, executable verification,
@@ -67,7 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   receiver handlers. Nonzero archives stream once through Jailer-owned exact-length and EOF admission; zero-payload
   install and remove require EOF before effects. Raw nonblocking receive with absolute `POLLIN` deadlines provides
   bounded cancellation, results receive semantic authority checks, and each response gets a fresh bounded deadline
-  before `SHUT_WR`. The handlers remain unregistered and the action switch is still closed pending the typed client.
+  before `SHUT_WR`.
+- Added the named trusted-release install/remove client and registered only its two exact privileged actions. The client
+  transfers valid archive ownership exactly once, requires actual response EOF, rejects impossible pre-start response
+  evidence, preserves valid root `DomainError` details over process diagnostics, and repeats closed success-semantic
+  validation. Dispatch distinguishes handler-owned response failures from unknown actions so it never emits a second
+  frame; focused normal and race tests cover both routes and failure boundaries.
 - Added authenticated sudo identity and current `mvm` group checks, fixed root environment sanitization, and executable
   device/inode verification against the root-owned `/usr/local/bin/mvm` image.
 - Added ADR-0016, which defines the single-binary privilege boundary, trusted state layout, typed operation catalog,

@@ -380,9 +380,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
     - [x] L1 covers strict fields/types/null/duplicate/case conflicts, action/magic/schema, truncation/oversize,
       install zero/nonzero/oversize/truncated/trailing, remove payload/trailing, blocked header/payload cancellation,
       status mutation, zero/remove effects after EOF, nonzero publication after EOF, every outcome/remove Boolean,
-      invalid effect results, `DomainError` details, response short/error/half-close/no-double-frame, and both actions
-      remaining unknown/no-read in the central switch.
-- [ ] 6. Add Jailer's private minimal `Exchange`, dedicated fake, named typed install/remove client methods, and exact
+      invalid effect results, `DomainError` details, response short/error/half-close/no-double-frame, and unknown actions
+      remaining no-read after exact trusted-release registration.
+- [x] 6. Add Jailer's private minimal `Exchange`, dedicated fake, named typed install/remove client methods, and exact
   action registrations. Distinguish a handler-owned response transport failure from an unhandled action so outer `run`
   never writes a second frame. Use the existing EOF-qualified response authority and remote-result precedence over
   uploader/exit/reap diagnostics; capability tests confirm those resolved semantics, preserve partial-state details,
