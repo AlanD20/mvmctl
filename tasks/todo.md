@@ -448,6 +448,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Owner:** engineer
 **Dependencies:** Tasks 4, 7, and 8
 
+- [x] Add the private topology-preparation foundation: derive owner/network and owner/VM names, require a non-forgeable
+  held-VM-lock capability before the network lock, retain exact mutation progress, and provide state-gated,
+  cancellation-independent rollback. No production locker/effect adapter or live-topology handoff is wired yet.
 - [ ] Persist minimal root-owned network identity and serialize network/VM topology mutations.
 - [ ] Acquire the network lock only after the applicable VM launch/registered lease; the full order is
   `release -> global index -> VM -> network`.

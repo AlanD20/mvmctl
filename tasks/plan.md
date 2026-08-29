@@ -529,6 +529,12 @@ Namespace paths and interface names are derived from UID and immutable IDs. The 
 down, installs the complete nftables generation and anti-spoofing rules, then brings links up and passes a pinned
 namespace handle to Jailer.
 
+The private topology-preparation foundation now derives owner/network-bound managed bridges and owner/VM-bound links,
+enforces the VM-before-network lock seam, records mutation-plus-error identities, and retains the network lock and
+namespace pin through rollback-safe cleanup. It deliberately exposes no production constructor or live-topology
+release. A concrete root network authority/locker, netlink effect adapter, firewall and activation stages, durable
+record, and Jailer capability transfer remain pending.
+
 The root-side adapter lives in `internal/service/firewall/` and receives only mvmctl-owned typed intent. It uses a
 reviewed, pinned `github.com/google/nftables` version to submit one complete generation through one `Conn.Flush` call.
 Neither its types nor `github.com/mdlayher/netlink` types cross the privileged wire or enter the network domain. The

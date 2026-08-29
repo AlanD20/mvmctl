@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dedicated structured error code. These foundations are not yet exposed through the final public policy commands or
   connected to nftables/vsock enforcement; the transitional routed policy remains active until that atomic cutover.
 
+#### Per-VM network topology transaction foundation
+- Added a private root-side transaction that derives the shared managed bridge from owner/network identity and every
+  VM link and namespace handle from owner/VM identity. It requires the earlier VM-lock capability, retains the network
+  lock and namespace pin, validates returned kernel identities, and rolls back mutation-plus-error states in reverse
+  order without allowing cancellation to suppress cleanup.
+- The foundation cannot expose partial or cleaned topology as launch authority. It remains intentionally inactive until
+  the concrete root network records/locker, netlink effects, nftables and link-activation stages, Jailer `--netns`
+  handoff, and persistent lifecycle integration are implemented and qualified.
+
 #### Root-owned single-binary installation
 - Added the exact administrator bootstrap command `sudo <trusted-mvm-binary> host install-system`, which installs the
   same `mvm` artifact at `/usr/local/bin/mvm` as `root:root` mode `0755`.
