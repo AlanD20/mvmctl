@@ -62,8 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POLLOUT` waits against the fixed absolute response deadline. This remains deadline-safe if a duplicate descriptor
   later changes shared `O_NONBLOCK` state and makes response EOF observable independently of process exit.
 - Removed the obsolete standalone EOF-delimited privileged JSON decoder. The strict length-framed codec is now the only
-  request framing foundation; trusted-release request values and handlers remain unregistered and the action switch is
-  still closed.
+  request framing foundation.
+- Added closed internal trusted-release install/remove values, a concrete root authority server, and directly tested
+  receiver handlers. Nonzero archives stream once through Jailer-owned exact-length and EOF admission; zero-payload
+  install and remove require EOF before effects. Raw nonblocking receive with absolute `POLLIN` deadlines provides
+  bounded cancellation, results receive semantic authority checks, and each response gets a fresh bounded deadline
+  before `SHUT_WR`. The handlers remain unregistered and the action switch is still closed pending the typed client.
 - Added authenticated sudo identity and current `mvm` group checks, fixed root environment sanitization, and executable
   device/inode verification against the root-owned `/usr/local/bin/mvm` image.
 - Added ADR-0016, which defines the single-binary privilege boundary, trusted state layout, typed operation catalog,
@@ -117,8 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened reserved-candidate recovery by retaining each admitted directory's device/inode identity and rechecking its
   exact name binding before the first leaf unlink and again before `rmdir`, preventing cleanup from deleting a replaced
   directory name.
-- This authority remains private and unwired. The aarch64 archive audit, typed caller/privileged transport integration,
-  and L2/system release qualification are still release blockers.
+- This authority and its receiver handlers remain unavailable through the public CLI. The aarch64 archive audit, typed
+  caller capability and privileged action registration, and L2/system release qualification are still release blockers.
 
 #### Descriptor-pinned managed-cache and base launch-resource substrates
 

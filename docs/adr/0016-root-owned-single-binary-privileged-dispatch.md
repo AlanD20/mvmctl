@@ -150,20 +150,20 @@ client decodes an EOF-qualified response with a non-cancelled context and lets e
 `DomainError` win over upload `EPIPE`, non-zero exit, or later reap diagnostics. Without one valid envelope, a pre-start
 failure reports `process_started: false, outcome_unknown: false`; every post-start failure reports both values as true.
 
-Receiver integration lands in two audit-friendly increments before any release action is registered. The implemented
-first increment admits only fd 0, sets and verifies close-on-exec, validates blocking `AF_UNIX`/`SOCK_STREAM` and
+Receiver integration landed in two audit-friendly increments before any release action is registered. The first
+increment admits only fd 0, sets and verifies close-on-exec, validates blocking `AF_UNIX`/`SOCK_STREAM` and
 `SO_PEERCRED`, emits bounded early error envelopes only after structural channel admission and when a valid version-1
 argv action is available, completes the response frame before `SHUT_WR`, and removes the obsolete standalone
-EOF-delimited JSON decoder. A rejected closed action is not drained. The pending second increment adds closed, typed
+EOF-delimited JSON decoder. A rejected closed action is not drained. The second increment adds closed, typed
 trusted-release install/remove request and result values plus directly tested handlers. Install alone may consume its
-declared payload and must require its exact EOF; remove requires zero payload and EOF before effects. These handlers
-remain unregistered, and the central action switch stays closed, until the named Jailer client capability and its
-response-authority tests are complete.
+declared payload through Jailer-owned exact-length and EOF admission; zero-payload install and remove require EOF before
+their effects. Both handlers remain unregistered, and the central action switch stays closed, until the named Jailer
+client capability and its response-authority tests are complete.
 
-### Approved unregistered trusted-release handlers
+### Implemented unregistered trusted-release handlers
 
-This slice-5b contract is approved but not implemented. The two exact compiled internal actions are
-`jailer-release-install` and `jailer-release-remove`. Their constants and all shared closed values live in
+Slice 5b implements the approved contract without registering either action. The two exact compiled internal actions
+are `jailer-release-install` and `jailer-release-remove`. Their constants and all shared closed values live in
 `internal/service/jailer`; they are exported only across Go's repository-local `internal` boundary and are not public
 CLI or `pkg/api` interfaces. The closed shape is:
 
@@ -757,11 +757,12 @@ also implements atomic installed-release removal and the reserved-directory reco
 existing-only traversal, full canonical admission before recovery, exact reference proof, an eight-attempt
 `RENAME_NOREPLACE` commit, explicit committed/close-only target state, ordered fixed-leaf retirement, and exact
 post-commit details. Recovery now rechecks each reserved directory's device/inode binding before leaf cleanup and
-before `rmdir`. This private path is not wired to callers or the privileged transport. The aarch64 archive audit, typed
-privileged install/removal integration, and L2 release qualification remain Task 6 work.
+before `rmdir`. This private path now has unregistered typed receiver handlers but no caller capability or central
+dispatch registration. The aarch64 archive audit, typed client/action integration, and L2 release qualification remain
+Task 6 work.
 The strict wire codec and caller socketpair process transport, including concurrent upload/response, EOF qualification,
-half-close, and bounded reaping, are implemented. Receiver increment 5a is also implemented: the production entry owns
-fd 0 directly; admission sets and rechecks `CLOEXEC`, rejects initial `O_NONBLOCK`, verifies
+half-close, and bounded reaping, are implemented. Receiver increments 5a and 5b are also implemented. The production
+entry owns fd 0 directly; admission sets and rechecks `CLOEXEC`, rejects initial `O_NONBLOCK`, verifies
 `AF_UNIX`/`SOCK_STREAM` and a positive peer PID from `SO_PEERCRED`, and matches the peer UID/GID to the authenticated
 sudo caller before environment sanitization, executable verification, group authorization, or action dispatch.
 Structurally admitted failures receive one matching bounded error frame
@@ -773,10 +774,21 @@ L1 fault tests cover admission and ordering, grammar parity, peer mismatch, fram
 cancellation, no-drain behavior, and cleanup. Real socketpair tests prove kernel peer authentication and response EOF
 while the receiver process remains alive, plus the status-flag mutation deadline case. Independent audit findings on
 initial blocking-mode validation, post-admission status-flag mutation-safe response deadlines, caller/receiver grammar
-parity, and process-independent EOF proof were corrected before commit. Closed install/remove wire values and handlers
-remain pending in increment 5b; the action switch is still empty. The current 5a-only entry computes its early-error
-response deadline at run entry and retains unused `os.File.Read`/`SO_RCVTIMEO` read scaffolding. Slice 5b must replace
-both before either trusted-release handler can be registered.
+parity, and process-independent EOF proof were corrected before commit.
+
+Slice 5b adds the exact closed release values and concrete authority-owning `TrustedReleaseServer`. Its install method
+accepts the typed request plus one reader and declared length; nonzero input streams once into Jailer's existing archive
+stage, which owns exact-length and EOF admission before extraction or canonical publication. Zero-payload install and
+remove require EOF before their effects. Private request readers use raw `Recvmsg(MSG_DONTWAIT)` with absolute-deadline
+`POLLIN`; cancellable waits recheck the original context at most every 100 ms. Header reads receive five seconds,
+nonzero payload reads receive a fresh five minutes, and zero/remove EOF checks retain the header deadline. Each success
+or error delivery receives a fresh five-second deadline, emits one typed result or preserved `DomainError`, completes
+the frame, and then calls `SHUT_WR`. Install results are checked for their closed outcome, exact request slot, lowercase
+SHA-256 values, and executable-size policy before success. Focused Jailer and privileged L1 tests cover closed decoding,
+all outcomes, zero/nonzero stream ownership, payload and EOF rejection, blocked cancellation, phase deadlines, status
+mutation, invalid effect results, error details, response failure/half-close, and the no-read unknown-action boundary.
+The central action switch remains empty; slice 6 must add the typed client and register these handlers without allowing
+outer dispatch to write a second frame after a handler-owned response failure.
 
 ### Paths, process identity, and runtime state
 

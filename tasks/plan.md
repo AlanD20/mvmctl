@@ -251,7 +251,7 @@ independently fetched checksum before parsing it. A zero-payload install instead
 archive request under the separate closed transport contract in ADR-0016. Root never opens a caller path or accepts a
 caller URL or checksum, and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority.
 
-The approved slice-5b wire contract is not implemented. `internal/service/jailer` owns the exact internal action
+The implemented but unregistered slice-5b wire contract lives in `internal/service/jailer`, which owns the exact action
 constants `jailer-release-install` and `jailer-release-remove`; `ReleaseSlot`; install request with
 `AllowReplacement`; remove request; a typed string outcome closed to `installed|replaced|unchanged`; install result with
 the exact slot, archive SHA-256, and each executable's SHA-256 and size; and a remove result containing only `Removed`.
@@ -430,8 +430,8 @@ func (p *preparedRelease) Release(ctx context.Context) error
 Preparation and checked release are implemented first. The later launch slice adds only the typed ownership transfer
 that it actually needs; it does not expose raw descriptors, paths, caller-supplied hashes, or a generic operation hook.
 
-The trusted-release work proceeds in this order. Steps 1 through 4 and receiver substep 5a are complete. Substep 5b and
-steps 6 through 9 remain an acceptance plan and are not implemented:
+The trusted-release work proceeds in this order. Steps 1 through 5 are complete. Steps 6 through 9 remain an acceptance
+plan and are not implemented:
 
 1. **Freeze the fetch and removal contracts.** ADR-0016 and the task ledger must record the exact trust inputs, commit
    points, crash states, error details, and prohibited fallbacks. Acceptance is a documentation diff review with no
@@ -473,18 +473,22 @@ steps 6 through 9 remain an acceptance plan and are not implemented:
      admission, peer mismatch, deadline/write/half-close failures, cancellation, no-drain behavior,
      process-independent EOF, cleanup, and status-flag mutation. Independent audit findings were corrected before
      commit.
-   - **5b. Add the approved closed release handlers without registration.** Put the exact action constants, closed
-     request/result values, and authority-owning `TrustedReleaseServer` in Jailer. Named install takes the request plus
-     one `io.Reader`/length; privileged supplies it. Zero/remove require EOF before effect; nonzero streams through
-     Jailer-owned length/EOF admission without buffer, second stage, `LimitReader`, or publication before EOF. Readers
-     cap each cancellable poll wait at 100 ms; payload deadline limits only reads, not post-EOF work. Install accepts at
-     most 128 MiB and remove accepts zero. Establish a fresh five-second response deadline immediately before delivery,
-     preserve one result or original `DomainError`, half-close, never close fd 0, and prevent outer double framing.
-     Validate success semantics and direct L1 abuse-test ADR-0016's matrix. Keep both actions unknown/no-read in central
-     switch until step 6 completes the typed client capability.
+   - **5b. Add the approved closed release handlers without registration — implemented.** Jailer now owns the exact
+     action constants, closed request/result values, and authority-owning `TrustedReleaseServer`. Named install takes
+     the request plus one `io.Reader`/length; privileged supplies it. Zero/remove require EOF before effect. Nonzero
+     install streams through Jailer-owned length/EOF admission without buffer, second stage, `LimitReader`, or
+     publication before EOF.
+     Readers cap each cancellable poll wait at 100 ms; payload deadline limits only reads, not post-EOF work. Install
+     accepts at most 128 MiB and remove accepts zero. A fresh five-second response deadline starts immediately before
+     delivery; the handler preserves one result or original `DomainError`, half-closes, and never closes fd 0.
+     Success semantics and ADR-0016's direct L1 abuse matrix are covered, including blocked read cancellation, invalid
+     effect results, phase deadlines, transport failures, and all closed outcomes. Both actions remain unknown/no-read
+     in the central switch until step 6 completes the typed client capability.
    The already-resolved caller upload, response-EOF, and reap behavior is not reopened in either substep.
 6. **Add typed client methods and actions.** Give Jailer one private minimal `Exchange` interface, named install/remove
-   methods, a dedicated fake, and exact privileged action registrations. The client uses the existing EOF-qualified
+   methods, a dedicated fake, and exact privileged action registrations. Dispatch must distinguish a handler-owned
+   response transport failure from an unhandled action so outer `run` never writes a second frame. The client uses the
+   existing EOF-qualified
    response authority and remote-result precedence over upload/reap diagnostics. Capability tests confirm those resolved
    semantics while preserving partial-state details and exposing no generic privileged call, decoder hook, executable,
    argv, environment, path, URL, checksum, force, or reference-bypass input.
