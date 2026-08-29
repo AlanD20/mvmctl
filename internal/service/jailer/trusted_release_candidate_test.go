@@ -1133,6 +1133,13 @@ type trustedReleaseCandidateFixture struct {
 }
 
 func newTrustedReleaseCandidateFixture(t *testing.T) *trustedReleaseCandidateFixture {
+	return newTrustedReleaseCandidateFixtureWithSlotLease(t, nil)
+}
+
+func newTrustedReleaseCandidateFixtureWithSlotLease(
+	t *testing.T,
+	slotLease *releaseSlotLease,
+) *trustedReleaseCandidateFixture {
 	t.Helper()
 
 	store := newTrustedReleaseStoreFixture(t)
@@ -1140,10 +1147,10 @@ func newTrustedReleaseCandidateFixture(t *testing.T) *trustedReleaseCandidateFix
 	writer, err := openTrustedReleaseStoreForWrite(t.Context(), store.deps, store.policy)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, writer.Release(context.Background())) })
-	architecture, err := writer.openArchitectureForWrite(
-		t.Context(),
-		trustedReleaseSlotLeaseForWriteTest(store.slot),
-	)
+	if slotLease == nil {
+		slotLease = trustedReleaseSlotLeaseForWriteTest(store.slot)
+	}
+	architecture, err := writer.openArchitectureForWrite(t.Context(), slotLease)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, architecture.Release(context.Background())) })
 	prefix, err := trustedReleaseCandidatePrefix(store.slot)

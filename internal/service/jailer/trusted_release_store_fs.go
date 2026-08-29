@@ -36,6 +36,7 @@ type trustedReleaseStoreDeps struct {
 	candidateName            func(context.Context, releaseSlot) (string, error)
 	linkAnonymousLeaf        func(context.Context, int, int, string) error
 	renameCandidateNoReplace func(context.Context, int, string, string) error
+	exchangeCandidate        func(context.Context, int, string, string) error
 }
 
 type trustedReleaseStorePolicy struct {
@@ -505,5 +506,6 @@ func realTrustedReleaseStoreDeps() trustedReleaseStoreDeps {
 		candidateName:            randomTrustedReleaseCandidateName,
 		linkAnonymousLeaf:        linkAnonymousTrustedReleaseLeaf,
 		renameCandidateNoReplace: renameTrustedReleaseCandidateNoReplace,
+		exchangeCandidate:        exchangeTrustedReleaseCandidate,
 	}
 }

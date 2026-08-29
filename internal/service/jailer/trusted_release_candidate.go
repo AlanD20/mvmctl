@@ -19,6 +19,7 @@ type trustedReleaseCandidateState uint8
 const (
 	trustedReleaseCandidateReady trustedReleaseCandidateState = iota
 	trustedReleaseCandidateInstalled
+	trustedReleaseCandidateReplaced
 	trustedReleaseCandidateReleased
 )
 
@@ -405,7 +406,7 @@ func (candidate *trustedReleaseCandidate) Release(ctx context.Context) error {
 	switch candidate.state {
 	case trustedReleaseCandidateReady:
 		return candidate.discard(context.WithoutCancel(ctx), true, nil)
-	case trustedReleaseCandidateInstalled:
+	case trustedReleaseCandidateInstalled, trustedReleaseCandidateReplaced:
 		return candidate.closeInstalled(context.WithoutCancel(ctx), nil)
 	case trustedReleaseCandidateReleased:
 		return nil
