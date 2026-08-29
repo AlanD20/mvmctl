@@ -95,6 +95,8 @@ func TestTrustedReleaseClientEncodesNamedRequestsAndTransfersPayloadOwnership(t 
 	assert.Equal(t, 2, exchange.calls)
 }
 
+// Rationale: Public input rejection occurs before ownership transfer. The caller must retain the payload, and no
+// exchanger may observe a request that failed admission.
 func TestTrustedReleaseClientRetainsRejectedPayloadOwnership(t *testing.T) {
 	tests := map[string]struct {
 		ctx           context.Context
@@ -139,10 +141,9 @@ func TestTrustedReleaseClientRetainsRejectedPayloadOwnership(t *testing.T) {
 			exchange := &fakeTrustedReleaseExchange{}
 			client := newTrustedReleaseClient(exchange)
 
-			result, err := client.Install(test.ctx, test.request, test.payload, test.payloadLength)
+			_, err := client.Install(test.ctx, test.request, test.payload, test.payloadLength)
 
 			assert.Error(t, err)
-			assert.Zero(t, result)
 			assert.Zero(t, exchange.calls)
 			if payload, ok := test.payload.(*trustedReleaseClientPayload); ok {
 				assert.Zero(t, payload.closeCount.Load())
@@ -160,14 +161,13 @@ func TestTrustedReleaseClientClosesTransferredPayloadOnPreExchangeFailure(t *tes
 		payload := &trustedReleaseClientPayload{closeErr: closeErr}
 		var client *TrustedReleaseClient
 
-		result, err := client.Install(
+		_, err := client.Install(
 			t.Context(),
 			trustedReleaseClientInstallRequest(),
 			payload,
 			1,
 		)
 
-		assert.Zero(t, result)
 		assertTrustedReleaseUnknownOutcome(t, err, false)
 		assert.ErrorIs(t, err, closeErr)
 		assert.Equal(t, int32(1), payload.closeCount.Load())
@@ -180,14 +180,13 @@ func TestTrustedReleaseClientClosesTransferredPayloadOnPreExchangeFailure(t *tes
 		exchange := &fakeTrustedReleaseExchange{}
 		client := newTrustedReleaseClient(exchange)
 
-		result, err := client.Install(
+		_, err := client.Install(
 			ctx,
 			trustedReleaseClientInstallRequest(),
 			payload,
 			1,
 		)
 
-		assert.Zero(t, result)
 		assertTrustedReleaseUnknownOutcome(t, err, false)
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.ErrorIs(t, err, closeErr)
@@ -196,6 +195,8 @@ func TestTrustedReleaseClientClosesTransferredPayloadOnPreExchangeFailure(t *tes
 	})
 }
 
+// Rationale: Actual response EOF is transport authority independent of later caller cancellation and reap diagnostics.
+// A complete valid response must remain authoritative after the privileged process started.
 func TestTrustedReleaseClientUsesEOFQualifiedResponseAfterCallerCancellation(t *testing.T) {
 	request := trustedReleaseClientInstallRequest()
 	result := trustedReleaseClientInstallResult(request, TrustedReleaseUnchanged)
@@ -224,6 +225,8 @@ func TestTrustedReleaseClientUsesEOFQualifiedResponseAfterCallerCancellation(t *
 	}
 }
 
+// Rationale: A valid EOF-qualified remote DomainError is operation authority. Upload and reap diagnostics must not
+// replace its stable code, class, entity, message, or partial-state details.
 func TestTrustedReleaseClientRemoteDomainErrorWinsTransportDiagnostics(t *testing.T) {
 	request := TrustedReleaseRemoveRequest{Slot: trustedReleaseClientInstallRequest().Slot}
 	remoteErr := errs.New(
@@ -248,19 +251,22 @@ func TestTrustedReleaseClientRemoteDomainErrorWinsTransportDiagnostics(t *testin
 	}}
 	client := newTrustedReleaseClient(exchange)
 
-	result, err := client.Remove(t.Context(), request)
+	_, err := client.Remove(t.Context(), request)
 
-	assert.Zero(t, result)
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
 	assert.Equal(t, remoteErr.Code, domainErr.Code)
 	assert.Equal(t, remoteErr.Class, domainErr.Class)
 	assert.Equal(t, remoteErr.Message, domainErr.Message)
 	assert.Equal(t, remoteErr.Entity, domainErr.Entity)
-	assert.Equal(t, remoteErr.Details, domainErr.Details)
+	if diff := cmp.Diff(remoteErr.Details, domainErr.Details); diff != "" {
+		t.Errorf("remote error details mismatch (-want +got):\n%s", diff)
+	}
 	assert.NotContains(t, domainErr.Error(), "upload EPIPE")
 }
 
+// Rationale: A syntactically valid success frame is still untrusted. Closed outcome, slot, digest, and executable-size
+// semantics must be re-admitted by the client before the result becomes authority.
 func TestTrustedReleaseClientRejectsInvalidSuccessSemantics(t *testing.T) {
 	request := trustedReleaseClientInstallRequest()
 	valid := trustedReleaseClientInstallResult(request, TrustedReleaseInstalled)
@@ -293,14 +299,15 @@ func TestTrustedReleaseClientRejectsInvalidSuccessSemantics(t *testing.T) {
 			}}
 			client := newTrustedReleaseClient(exchange)
 
-			result, err := client.Install(t.Context(), request, nil, 0)
+			_, err := client.Install(t.Context(), request, nil, 0)
 
-			assert.Zero(t, result)
 			assertTrustedReleaseUnknownOutcome(t, err, true)
 		})
 	}
 }
 
+// Rationale: Missing, malformed, non-EOF, or impossible response evidence cannot establish operation authority.
+// Classification must distinguish known pre-start failure from unknown post-start outcome.
 func TestTrustedReleaseClientClassifiesMissingOrMalformedResponseByStartState(t *testing.T) {
 	request := TrustedReleaseRemoveRequest{Slot: trustedReleaseClientInstallRequest().Slot}
 	tests := map[string]struct {
@@ -350,29 +357,28 @@ func TestTrustedReleaseClientClassifiesMissingOrMalformedResponseByStartState(t 
 		t.Run(name, func(t *testing.T) {
 			client := newTrustedReleaseClient(&fakeTrustedReleaseExchange{outcome: test.outcome})
 
-			result, err := client.Remove(t.Context(), request)
+			_, err := client.Remove(t.Context(), request)
 
-			assert.Zero(t, result)
 			assertTrustedReleaseUnknownOutcome(t, err, test.started)
 		})
 	}
 }
 
+// Rationale: The zero-value client is intentionally inactive. Both named methods must fail with structured errors
+// rather than dereferencing a nil capability binding.
 func TestTrustedReleaseClientRejectsInactiveClientWithoutPanicking(t *testing.T) {
 	var client *TrustedReleaseClient
 
-	installResult, installErr := client.Install(
+	_, installErr := client.Install(
 		t.Context(),
 		trustedReleaseClientInstallRequest(),
 		nil,
 		0,
 	)
-	removeResult, removeErr := client.Remove(t.Context(), TrustedReleaseRemoveRequest{
+	_, removeErr := client.Remove(t.Context(), TrustedReleaseRemoveRequest{
 		Slot: trustedReleaseClientInstallRequest().Slot,
 	})
 
-	assert.Zero(t, installResult)
-	assert.Zero(t, removeResult)
 	assert.Error(t, installErr)
 	assert.Error(t, removeErr)
 }
