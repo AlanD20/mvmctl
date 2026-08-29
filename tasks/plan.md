@@ -293,9 +293,9 @@ then rechecks the reserved-name binding, removes that directory, and fsyncs the 
 errors preserve the primary `DomainError` and report the committed state, uncertain durability, and retained old
 release precisely. Fault injection covers referenced-release and corrupt-authority rejection, name-binding races,
 cancellation boundaries, commit syscalls, both parent fsyncs, every retirement step, cleanup, recovery, and combined
-error metadata. This remains a private, unwired substrate. The aarch64 audit, root-origin fetch,
-caller/privileged-transport wiring, actual release removal, L2 qualification, and
-remaining release integration work are still pending.
+error metadata. This remains a private, unwired substrate. Private end-to-end install composition, the aarch64 audit,
+caller/privileged-transport wiring, actual release removal, L2 qualification, and remaining release integration work
+are still pending.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are
