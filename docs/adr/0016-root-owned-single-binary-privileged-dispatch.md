@@ -208,9 +208,9 @@ and system-damage invariants. These are receiver trust-boundary checks, not dupl
 The caller supplies a validated release version and architecture and may stream an exact-length bounded archive body for
 cache efficiency. Privileged release code constructs the permitted Firecracker release and checksum URLs and obtains the
 checksum independently from the fixed official origin with a dedicated bounded HTTPS-only client and proxies disabled.
-It hashes the complete archive body against that checksum before parsing it. If no body is supplied, root may fetch the
-fixed archive itself. Root never opens a caller path or accepts a caller URL or checksum. The normal-user client may read
-`MVM_ASSET_MIRROR`, but those streamed bytes are transport, never release authority.
+It hashes the complete archive body against that checksum before parsing it. If no body is supplied, root uses the fixed
+archive-fetch contract below. Root never opens a caller path or accepts a caller URL or checksum. The normal-user client
+may read `MVM_ASSET_MIRROR`, but those streamed bytes are transport, never release authority.
 
 Extraction reads the anonymous root-owned archive stage with bounded compressed/decompressed input and validates the
 complete reviewed archive contract below before publishing any path. Only the exact Firecracker/Jailer pair is copied
@@ -309,6 +309,28 @@ That redirect must remain HTTPS, contain no user information or fragment, and ta
 The response must be HTTP 200 and no more than 256 bytes whether or not it declares a content length. The accepted body
 is exactly `<64 lowercase hexadecimal characters><two ASCII spaces><derived archive name><LF>`. Missing or additional
 lines, CRLF, alternate filenames, uppercase digests, GNU binary markers, and other whitespace are rejected.
+
+Zero-payload install uses a separate root-origin archive client. It revalidates the complete receiver-derived source
+before constructing the request and performs exactly one HTTPS GET of the derived archive URL. Its dedicated transport
+uses TLS 1.2 or newer, no proxy, cache, retry, compression, or keepalive path, at most one live connection, 5-second
+dial, TLS-handshake, and response-header timeouts, a 16 KiB response-header limit, and an exact five-minute total
+deadline. It applies only fixed `Accept: application/octet-stream`, `Accept-Encoding: identity`,
+`Cache-Control: no-store`, and `User-Agent: mvmctl-trusted-release/1` headers.
+
+At most one redirect is accepted. The redirect must remain HTTPS and target the exact host
+`release-assets.githubusercontent.com` without a port, user information, or fragment. Its opaque signed query is
+permitted because GitHub derives it; none of its fields become mvmctl authority. The redirected request is stripped of
+all inherited headers and receives only the same fixed safe headers, with no authorization or cookie header.
+
+The archive response must be HTTP 200 and declare one valid `Content-Length` from 1 byte through 128 MiB. A missing,
+chunked, malformed, conflicting, zero, negative, or out-of-range length is rejected before the anonymous archive stage
+is mutated. The checked response body is streamed exactly once and directly into the already-created root-owned
+anonymous stage. The existing exact-length positioned-write, digest, EOF-probe, file-fsync, stable-metadata, and
+zero-offset admission compares those bytes with the independently fetched checksum. Once stage receive begins, any
+stream, digest, EOF, fsync, or stable-metadata failure poisons that stage, so only checked `Release` remains valid. A
+response-body close failure after otherwise successful receive also poisons the stage and prevents parsing. Body close
+is checked on every path. Root creates no temporary path, in-memory copy, replay stream, ordinary-downloader request,
+or asset-mirror access for this path.
 
 The fixed `manifest.json` leaf uses schema version 1 and is at most 4 KiB. Its closed JSON schema contains exactly the
 canonical release slot, the archive SHA-256 digest, and separate Firecracker and Jailer objects containing a SHA-256
@@ -433,10 +455,87 @@ unreadable state fails closed before cleanup and leaves every candidate for oper
 
 Once cleanup begins it is cancellation-independent and resumable. For each admitted candidate, recovery unlinks only
 the fixed leaves in a deterministic order, fsyncs the candidate directory, removes the now-empty directory, and fsyncs
-the architecture directory. A final architecture-directory fsync also runs when no candidate remains, allowing a
-retry to confirm a prior removal whose final durability report failed. Recovery never recursively removes content.
-This covers both pre-commit candidate remnants and post-exchange retired directories without treating arbitrary
+the architecture directory. Admission records each reserved directory's device and inode. Recovery reopens its exact
+reserved name and rechecks that binding immediately before the first leaf unlink and again before `rmdir`; a replaced
+name is never deleted. A final architecture-directory fsync also runs when no candidate remains, allowing a retry to
+confirm a prior removal whose final durability report failed. Recovery never recursively removes content. This covers
+pre-commit candidates, post-exchange retired directories, and post-removal remnants without treating arbitrary
 architecture-directory entries as disposable.
+
+Atomic removal is a separate private transaction with this intentionally narrow interface:
+
+```go
+func (authority *releaseAuthority) removeInstalled(
+    ctx context.Context,
+    slot releaseSlot,
+) (removed bool, err error)
+```
+
+The method accepts only a validated release slot. It accepts no path, URL, digest, force flag, reference bypass, or
+generic operation. It acquires that slot's release lease before opening the store and retains the lease through final
+cleanup and fsync. Read traversal is existing-only and never creates the store, architecture, or version directory. A
+safely absent store or architecture is idempotent unchanged and performs no reference scan. Unsafe or unreadable state
+fails closed.
+
+Within an existing architecture, removal inspects the canonical name before recovery mutates any reserved remnant. If
+the canonical version is safely absent, it runs matching-remnant recovery under the same lease and then returns
+unchanged without a reference scan. If the canonical version exists, it must first contain exactly `manifest.json`,
+`jailer`, and `firecracker`, pass the shared strict manifest, full-file hash, and ELF admission, reside on the
+architecture directory's filesystem, and have its directory device and inode retained. A corrupt or unsafe canonical
+release therefore causes zero recovery mutation. Only after that complete admission and identity binding succeeds does
+removal recover matching reserved remnants under the same lease.
+
+After recovery, the active slot lease passes the canonical release's exact manifest-derived identity to
+`requireUnreferenced`; unreadable or corrupt reference authority fails closed. Immediately before commit, removal
+reopens the canonical name, verifies its retained device/inode binding, and checks cancellation.
+
+Removal generates only the exact slot-scoped reserved-name grammar above and validates every generated name. The
+name-generation and no-replace-rename transaction permits at most eight total attempts: the first plus at most seven
+retries. Only `EEXIST` from the no-replace rename is retryable; name generation, grammar validation, cancellation,
+binding, and every other rename error fail immediately. The sole commit is descriptor-relative
+`renameat2(RENAME_NOREPLACE)` from the canonical version name to one fresh reserved name within the pinned architecture
+directory. Unsupported kernel semantics, cross-filesystem movement, or any other rename failure has no fallback to
+plain rename, per-file movement, copying, or recursive removal. Rename success immediately transitions the private
+removal target to committed, close-only state and fixes `removed=true` before any later fallible operation.
+
+Post-commit work ignores cancellation and first fsyncs the architecture directory. It then closes the old executable
+admission but continues best-effort cleanup if close fails, verifies that the reserved name still binds the retained old
+directory, unlinks `manifest.json`, `jailer`, and `firecracker` in that fixed order through the retained directory
+descriptor, and fsyncs that directory. It reverifies the reserved binding before `rmdir` and fsyncs the architecture
+directory again after a successful removal. Leaf failures do not prevent later safe fixed-leaf cleanup, but `rmdir`
+occurs only after the fixed leaves, old-directory fsync, and binding checks permit it. Target release is always
+close-only; no release path may unlink the canonical name or a replacement reserved name.
+
+Removal-owned rename, fsync, unlink, and `rmdir` failures use `CodeBinaryRemoveFailed` with `ClassInternal`. Shared
+store admission and reference-authority `DomainError` values retain their original code, class, entity, details, and
+wrapped cause; removal cleanup and annotations never recode them.
+
+Every error after the rename preserves the primary `DomainError` and adds `release_removed=true`. Failure of the first
+architecture fsync also adds `durability_uncertain=true` and `retired_release_retained=true`. A failure before `rmdir`
+or a failed `rmdir` adds `retired_release_retained=true`; failure only at the final architecture fsync adds
+`durability_uncertain=true` without claiming that the retired directory remains. Pre-commit errors add none of these
+details because the canonical release remains installed.
+
+The commit makes the canonical slot absent in one directory operation; it never exposes a partial canonical release. A
+crash before commit leaves the complete canonical release. A crash after commit leaves the canonical slot absent and a
+complete or safe fixed-leaf subset under the reserved name. A retry follows the same admission order: it admits an
+existing canonical release before recovery, or recovers first and returns unchanged when canonical is safely absent. A
+retry after `rmdir` still fsyncs the architecture directory to confirm durability. Corrupt recovery state always fails
+closed for operator inspection. `RemoveAll`, pathname reconstruction, and recursive cleanup are prohibited.
+
+L1 removal tests cover absence at each store level without a reference scan; complete admission and exact reference
+identity; corrupt-canonical rejection with zero recovery mutation; referenced and corrupt-reference rejection;
+same-filesystem and both canonical/reserved binding races; success on the eighth total attempt; exhaustion after eight
+`EEXIST` results; immediate failure without retry for every non-`EEXIST` error; cancellation before and after commit;
+every no-replace syscall classification; the first parent fsync; admission close; all three leaf unlinks; old-directory
+fsync; both reserved-binding checks; `rmdir`; the final parent fsync; error-code and combined primary-error metadata;
+close-only release; and crash/retry at every commit and cleanup boundary. Recovery tests prove all matching entries are
+admitted before mutation, binding replacement cannot delete a different directory, only safe subsets of the three fixed
+leaves are accepted, and every observable canonical slot is one complete three-file release or absent.
+
+A future public `--force` may bypass only an untrusted SQLite projection warning in the ordinary process. It is never
+sent to root and never bypasses root-owned instance references, corrupt reference authority, store admission, or any
+other receiver invariant.
 
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
@@ -472,9 +571,11 @@ also passed against all eight cached audited x86_64 archives. Both executable st
 The write side now creates and pins the fixed architecture directory only while the exact active release-slot lease is
 held, durably admitting that directory before use. Slot-scoped recovery enforces the complete reserved candidate-name
 grammar and fail-closed directory/leaf metadata policy, admits all matching candidates before deletion, and performs
-only cancellation-independent, resumable fixed-leaf cleanup with the durability order specified above. Strict manifest
-staging and candidate assembly are now implemented: the canonical manifest is written and fsynced anonymously; the
-finalized Firecracker, Jailer, and manifest objects are linked into one exact root-owned mode-`0700` reserved candidate;
+only cancellation-independent, resumable fixed-leaf cleanup with ordered fsyncs. The device/inode binding rechecks
+required above remain pending and must land with removal before recovery is used by a privileged action. Strict
+manifest staging and candidate assembly are now implemented. The canonical manifest is written and fsynced anonymously.
+The finalized Firecracker, Jailer, and manifest objects are linked into one exact root-owned mode-`0700` reserved
+candidate;
 the linked files are fsynced first, followed by the candidate directory and then the architecture directory; all
 writable descriptors are checked closed; and the complete exact candidate is re-admitted through the shared
 installed-release verifier. The production linker uses only `AT_EMPTY_PATH`. Fault injection covers candidate creation,
@@ -498,6 +599,9 @@ cover reference and corrupt-authority rejection, both binding races, cancellatio
 both parent fsyncs, every fixed retirement step, cleanup, recovery, and combined-error metadata. This private path is
 not wired to callers or the privileged transport. Root-origin archive fetching, the aarch64 archive audit, typed
 privileged install/removal integration, actual release removal, and L2 release qualification remain Task 6 work.
+The strict wire codec and caller socketpair process transport, including concurrent upload/response, EOF qualification,
+half-close, and bounded reaping, are implemented. Receiver-side fd-0 type and peer authentication, independent
+`CLOEXEC`, one-request framing/EOF and response half-close, and closed install/remove handlers remain pending.
 
 ### Paths, process identity, and runtime state
 

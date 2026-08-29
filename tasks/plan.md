@@ -223,14 +223,28 @@ no VM effects after such an error.
 
 ### Trusted release authority
 
-Task 6 adds a private `releaseAuthority` in `internal/service/jailer`. Its public privileged request contains only a
-validated release version, architecture, and explicit replacement intent. Root constructs the fixed official checksum
-and archive URLs and obtains the checksum independently through a dedicated bounded HTTPS-only client with proxies
-disabled. For mirror efficiency, the normal-user client may stream an exact-length bounded archive body through the
-typed install transport; root hashes it against the independently fetched checksum before parsing it. If no body is
-supplied, root may fetch the fixed archive itself. Root never opens a caller path or accepts a caller URL or checksum,
-and `MVM_ASSET_MIRROR` supplies bytes rather than authority. Extraction validates the reviewed complete upstream member
-allowlist and extracts only Firecracker and Jailer.
+Task 6 adds a private `releaseAuthority` in `internal/service/jailer`. Its later install request contains only a
+validated release version, architecture, and explicit replacement intent; removal carries only the same validated
+slot. Root constructs the fixed official checksum and archive URLs and obtains the checksum independently through a
+dedicated bounded HTTPS-only client with proxies disabled. For mirror efficiency, the normal-user client may stream an
+exact-length bounded archive body through the typed install transport; root hashes it against the independently fetched
+checksum before parsing it. A zero-payload install instead makes one receiver-derived root-origin archive request under
+the separate closed transport contract in ADR-0016. Root never opens a caller path or accepts a caller URL or checksum,
+and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority. Extraction validates the reviewed
+complete upstream member allowlist and extracts only Firecracker and Jailer.
+
+The zero-payload root fetch revalidates the receiver-derived source before a one-attempt HTTPS GET. Its dedicated
+TLS-1.2-or-newer transport has no proxy, cache, retry, compression, or keepalive path and permits one live connection.
+It applies 5-second dial/TLS/header timeouts, a 16 KiB header limit, and an exact five-minute total deadline. At most
+one HTTPS redirect may target exact host `release-assets.githubusercontent.com` without a port, user information, or
+fragment. The opaque signed query is allowed, but only the fixed safe headers are reapplied; no authorization or cookie
+is carried. HTTP 200 and a mandatory valid `Content-Length` from 1 byte through 128 MiB are required before stage
+mutation.
+The response is streamed once into the existing anonymous archive stage and admitted through its exact-length
+positioned-write, independent-digest, EOF, fsync, stable-metadata, and zero-offset checks. Any failure after receive
+starts poisons the stage. A body-close failure after an otherwise successful receive also poisons it, so only checked
+`Release` remains valid. Header, status, and length rejections happen before mutation. There is no temporary path,
+memory copy, replay, ordinary downloader, or root asset-mirror access.
 
 The frozen v0.3 extraction contract accepts only audited x86_64 archives for `1.10.1`, `1.14.2`, `1.14.3`, `1.14.4`,
 `1.15.0`, `1.15.1`, `1.16.0`, and `1.16.1`. Each must contain the exact order-independent 24-member set recorded in
@@ -253,7 +267,8 @@ complete path has passed against all eight cached audited x86_64 archives. Both 
 The fixed architecture-directory and recovery slice is implemented under the exact active release-slot lease. It
 admits every matching reserved candidate before deletion, fails closed on malformed or unsafe state, and uses
 cancellation-independent, resumable fixed-leaf cleanup with candidate and architecture directory fsyncs after the
-corresponding namespace mutations. Strict manifest staging and complete candidate assembly are also implemented. The
+corresponding namespace mutations. Its required reserved-name device/inode rechecks remain pending and must land with
+removal before privileged wiring. Strict manifest staging and complete candidate assembly are also implemented. The
 canonical manifest is positioned-written and fsynced in an anonymous root-owned descriptor; production links it and
 the finalized anonymous Firecracker/Jailer pair into one exact root-owned mode-`0700` reserved candidate using only
 `AT_EMPTY_PATH`. The linked files, candidate directory, and architecture directory are fsynced in that order; every
@@ -278,8 +293,8 @@ remaining release integration work are still pending.
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are
 validated as ELF for the selected architecture without execution. Descriptor-relative atomic install, exchange, and
-removal use only fixed leaves and preserve an old complete release or expose a new complete release, never a partial
-pair. Post-commit errors report `release_installed`, `release_replaced`, `release_removed`, `durability_uncertain`, and
+removal use only fixed leaves. The canonical slot is always one complete three-file release or absent. Post-commit
+errors report `release_installed`, `release_replaced`, `release_removed`, `durability_uncertain`, and
 `retired_release_retained` details without replacing the primary error identity.
 
 Publication holds the release-slot lease and uses a root-owned `0700` candidate directory beneath the pinned
@@ -296,6 +311,48 @@ uses `renameat2(RENAME_EXCHANGE)`, and neither has a non-atomic fallback. Rename
 commit point. Subsequent errors annotate the committed state and durability; replacement retirement removes only the
 old fixed leaves and reserved directory after the first parent fsync and never rolls back the new release.
 
+Removal is private and deliberately deeper than its implementation details:
+
+```go
+func (authority *releaseAuthority) removeInstalled(
+    ctx context.Context,
+    slot releaseSlot,
+) (removed bool, err error)
+```
+
+It accepts only a validated slot and acquires that slot's release lease before any store read. Existing-only traversal
+creates nothing; a safely missing store or architecture is unchanged without a reference scan. Within an existing
+architecture, removal inspects the canonical version before recovery. A safely absent version triggers recovery and
+then returns unchanged without a reference scan. An existing version first passes exact-three-leaf shared admission,
+same-filesystem and directory-identity binding; corrupt canonical state therefore causes zero recovery mutation. Only
+after that admission does removal recover reserved remnants, then pass the exact manifest-derived identity to
+`requireUnreferenced`. Corrupt store or reference authority fails closed.
+
+Commit moves the complete canonical version directory to one newly generated exact slot-scoped reserved name through
+descriptor-relative `renameat2(RENAME_NOREPLACE)`. Generated names are grammar-checked. The first attempt plus at most
+seven retries permits eight total name/rename attempts; only `EEXIST` is retryable. Canonical name binding and
+cancellation are rechecked immediately before each attempt. There is no force, reference bypass, plain-rename, copy,
+per-file, or recursive fallback. Rename success immediately makes the removal target committed and close-only.
+
+Uncancelled post-commit work fsyncs the architecture, closes the old admission while continuing safe best-effort
+cleanup, verifies the reserved name binding, removes only `manifest.json`, `jailer`, and `firecracker` through the
+retained old-directory descriptor, fsyncs that directory, reverifies the reserved binding, removes the directory, and
+fsyncs the architecture again. Post-commit errors preserve the primary `DomainError` and distinguish removed state,
+uncertain durability, and a retained retired directory exactly as ADR-0016 specifies.
+
+Removal-owned rename, fsync, unlink, and `rmdir` failures use `CodeBinaryRemoveFailed`/`ClassInternal`. Shared admission
+and reference `DomainError` values preserve their original code, class, entity, details, and cause through cleanup and
+post-commit annotation.
+
+The removal slice also corrects shared recovery before any privileged action can use it. Every admitted reserved
+directory records device/inode identity, and recovery reopens and rechecks the exact name immediately before leaf unlink
+and before `rmdir`. It still admits all matching entries before mutation, accepts only safe subsets of the three fixed
+leaves, and never recursively deletes content. A crash before commit leaves the complete canonical release; a crash
+after commit leaves the canonical slot absent and an identity-bound safe remnant for retry. When canonical is absent,
+the retry recovers first and then reports unchanged; when canonical exists, it is admitted before recovery. `--force`
+may later suppress only an untrusted SQLite warning in the ordinary process; it is never carried to root or allowed to
+bypass root references.
+
 Launch uses a private prepared value that owns the release-slot lease, verified manifest, pinned release directory, and
 pinned executable descriptors. It alone supplies release hashes to instance registration. The privileged transport must
 return a strict versioned response envelope before release install/remove is wired, because generic subprocess errors
@@ -308,6 +365,58 @@ func (p *preparedRelease) Release(ctx context.Context) error
 
 Preparation and checked release are implemented first. The later launch slice adds only the typed ownership transfer
 that it actually needs; it does not expose raw descriptors, paths, caller-supplied hashes, or a generic operation hook.
+
+The remaining trusted-release work proceeds in this order. This sequence is an acceptance plan and does not mark any
+pending implementation complete:
+
+1. **Freeze the fetch and removal contracts.** ADR-0016 and the task ledger must record the exact trust inputs, commit
+   points, crash states, error details, and prohibited fallbacks. Acceptance is a documentation diff review with no
+   implementation or changelog claim; verification checks links, referenced paths, line length, stale wording, and the
+   unchanged completed-checklist set.
+2. **Implement the private root-origin fetch.** Add the dedicated zero-payload archive client and stream its one
+   response directly into the anonymous archive stage. Acceptance requires the exact source, transport, redirect,
+   response, size, stream, and checked-close policy above. Hermetic L1 tests cover every request, redirect, header,
+   status, and length boundary, plus short/long body, digest mismatch, cancellation, timeout, receive-stage poisoning,
+   post-receive close poisoning, and no pre-admission mutation. Focused format, golines, vet, normal tests, and race
+   tests must pass.
+3. **Compose private end-to-end install.** One private release-authority method selects caller-stream or root-fetch
+   input, independently fetches checksum authority, admits the anonymous archive, extracts and finalizes both
+   executables, assembles the strict candidate, and performs absent publication or explicit replacement. Acceptance
+   requires checked reverse cleanup and preservation of the first `DomainError` and commit details at every boundary,
+   with no wire, CLI, API, mirror-path, or legacy-downloader dependency. L1 covers both body modes, idempotency,
+   replacement intent, every stage handoff, cancellation, and cleanup fault.
+4. **Implement private removal and recovery correction.** Add only `releaseAuthority.removeInstalled(ctx, slot)` under
+   the exact lease, canonical admission before recovery, no-replace commit, eight-attempt bound, close-only state,
+   fixed-leaf retirement, and error classification above. In the same slice, bind recovery names to admitted directory
+   device/inode before leaf unlink and `rmdir`. Acceptance is the full absence, admission-order, reference, collision,
+   non-retryable error, binding-race, syscall, fsync, cleanup, combined-error, and crash/retry L1 matrix. It must also
+   prove that every canonical slot is one complete three-file release or absent.
+5. **Add the receiver transport foundation.** Build on the implemented caller process transport and strict wire codec.
+   The receiver requires fd 0 to be `AF_UNIX`/`SOCK_STREAM`, authenticates `SO_PEERCRED` against the sudo caller, sets
+   `CLOEXEC`, reads one framed request through declared payload and EOF, writes one framed response, and half-closes its
+   write side. Then add closed install/remove request values and handlers with exact payload policy and action matching.
+   Receiver tests cover descriptor type, peer mismatch, framing/EOF, response half-close, unknown or extra fields,
+   action mismatch, payload on removal, and early rejection. The already-resolved caller upload, response-EOF, and reap
+   behavior is not reopened, and the action catalog remains closed until the release capability is complete.
+6. **Add typed client methods and actions.** Give Jailer one private minimal `Exchange` interface, named install/remove
+   methods, a dedicated fake, and exact privileged action registrations. The client uses the existing EOF-qualified
+   response authority and remote-result precedence over upload/reap diagnostics. Capability tests confirm those resolved
+   semantics while preserving partial-state details and exposing no generic privileged call, decoder hook, executable,
+   argv, environment, path, URL, checksum, force, or reference-bypass input.
+7. **Switch API authority and remove the legacy path.** Treat SQLite binary data only as an untrusted user-facing
+   projection, route public install/remove/list selection through the typed release client, and delete the old root
+   downloader/path-based binary mutation route rather than preserving compatibility. Acceptance includes
+   repository/API tests for projection mismatch and local `--force` warning behavior, searches proving no legacy
+   privileged path remains, and public result/error tests that retain root partial-state details.
+8. **Audit aarch64 packaging.** Inspect a real aarch64 release archive and freeze its exact member/format/version
+   contract before enabling extraction. Acceptance requires independently recorded evidence and mirror-backed
+   parser/staging tests. Source derivation and ELF support alone remain fail-closed and do not count as architecture
+   support.
+9. **Qualify through Python system tests.** Extend the existing registered system-test domains and coverage matrix,
+   build a release candidate, install it only inside disposable nested-virt runner VMs, and set
+   `MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror` for asset workflows. Acceptance covers installed-CLI install,
+   idempotency, replacement, referenced denial, removal, crash/retry, reboot, cross-user abuse, malformed transport, and
+   zero leaked release/runtime resources; full release signoff still requires the later complete CI and QA gates.
 
 ### Network topology and policy
 

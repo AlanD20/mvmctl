@@ -56,7 +56,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 ### Task 3: Complete the early privileged protocol foundation
 
 **Owner:** engineer
-**Status:** Codec and transport implemented; capability clients and action catalog pending later tasks
+**Status:** Codec and caller process transport implemented; receiver foundation, capability clients, and action catalog
+pending later tasks
 **Dependencies:** Task 1
 
 - [x] Reserved marker selected before Cobra and application initialization.
@@ -271,10 +272,78 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     - [x] Complete the replacement/exchange fault matrix for reference-scan, commit, parent-fsync, retirement, and final
       fsync edges; verify one complete old/new release plus exact partial-state details, never a partial installed
       directory.
+
+The completed recovery foundation above covers grammar, metadata, safe fixed-leaf subsets, ordering, and durability.
+The reserved-name device/inode rechecks are deliberately still unchecked below and must land with removal before
+privileged wiring.
+
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] Complete L1 fault injection for release removal and typed privileged integration. After every reference-scan,
   cancellation, syscall, fsync, and cleanup failure, each canonical slot contains one complete three-file release or is
   absent, never a partial release.
+
+**Ordered remaining Task 6 slices:**
+
+- [x] 1. Freeze the zero-payload root-fetch and atomic-removal contracts in ADR-0016 and the release plan. Review the
+  documentation diff, paths, links, line length, stale wording, and completed-checkbox set without claiming either
+  behavior is implemented or changing the changelog.
+- [ ] 2. Implement the private zero-payload root-origin archive fetch. Revalidate the receiver-derived source, perform
+  one HTTPS GET with TLS 1.2+, no proxy/cache/retry/compression/keepalive, and at most one live connection. Apply
+  5-second phase timeouts, 16 KiB headers, and an exact five-minute deadline. Permit at most one redirect to exact
+  no-port `release-assets.githubusercontent.com`, reapply only fixed safe headers, require HTTP 200 and mandatory valid
+  1-byte-through-128-MiB `Content-Length` before stage mutation, and stream once into existing exact-length/digest/EOF/
+  fsync admission with no path, memory, replay, ordinary downloader, or root mirror access. Poison the stage after any
+  started receive failure and after a body-close failure following otherwise successful receive, leaving only checked
+  `Release` valid. Hermetic L1 must cover every source, request, redirect, header, status, length, stream, timeout,
+  cancellation, digest, stage-state, and body-close edge. Run focused format, golines, vet, tests, and race tests.
+- [ ] 3. Compose one private end-to-end install method from source/checksum authority, caller-stream or root-fetch
+  archive admission, strict extraction/finalization, candidate assembly, and absent publication or explicit
+  replacement. Preserve primary `DomainError` and commit details through checked reverse cleanup. L1 covers both body
+  modes, idempotency, intent, every handoff, cancellation, and cleanup fault; add no transport, CLI, API, path, mirror,
+  or legacy-downloader dependency.
+- [ ] 4. Implement only `releaseAuthority.removeInstalled(ctx, slot) (removed bool, err error)`: acquire and retain the
+  slot lease before existing-only traversal. Return unchanged for safe store/architecture absence. Within an existing
+  architecture, inspect canonical first: if safely absent, recover then return unchanged without reference scan; if
+  present, fully admit and identity-bind it before recovery, so corrupt canonical state causes zero recovery mutation.
+  Recover only after successful admission, then pass the exact identity to `requireUnreferenced`.
+  - [ ] Commit only by moving canonical to a fresh validated reserved name through descriptor-relative
+    `renameat2(RENAME_NOREPLACE)` with at most eight total name/rename attempts: the first plus seven retries. Only
+    `EEXIST` is retryable; every name-generation, grammar, cancellation, binding, and other rename failure stops.
+  - [ ] Make removal committed/close-only immediately after rename. Use uncancelled first parent fsync, best-effort
+    admission close and fixed `manifest.json`, `jailer`, `firecracker` unlink, old-directory fsync, reserved-binding
+    recheck, `rmdir`, and final parent fsync. Preserve the primary error and exact `release_removed`,
+    `durability_uncertain`, and `retired_release_retained` details.
+  - [ ] Classify removal-owned rename/fsync/unlink/`rmdir` failures as `CodeBinaryRemoveFailed`/`ClassInternal`.
+    Preserve every shared admission/reference `DomainError` code, class, entity, details, and cause through cleanup and
+    annotation.
+  - [ ] Correct recovery in this same slice: retain every admitted reserved directory device/inode, reopen and recheck
+    its exact name immediately before leaf unlink and again before `rmdir`, admit all matching entries before mutation,
+    accept only safe subsets of the three fixed leaves, and never delete a replacement name or use `RemoveAll`.
+  - [ ] L1 covers absence at every level, corrupt canonical with zero recovery mutation, exact reference identity,
+    referenced/corrupt authority, same-filesystem and both binding races, invalid names, success on attempt eight,
+    exhaustion after eight `EEXIST` results, immediate non-`EEXIST` failure, cancellation, every syscall/fsync/close/
+    unlink/`rmdir` edge, exact error classification, combined metadata, close-only release, and crash/retry. Canonical
+    remains a complete three-file release or absent. A future `--force` bypasses only a local untrusted-SQLite warning
+    and is never sent to root.
+- [ ] 5. Build the receiver foundation over the implemented caller transport and strict wire codec. Require fd 0
+  `AF_UNIX`/`SOCK_STREAM`, authenticate `SO_PEERCRED` against the sudo caller, set `CLOEXEC`, read one framed request
+  through payload and EOF, write one framed response, and half-close the write side. Then add closed install/remove
+  values and handlers with exact action and payload policy. Abuse-test descriptor type, peer mismatch, framing/EOF,
+  response half-close, unknown/extra fields, action mismatch, payload on removal, and early rejection. Do not reopen
+  resolved caller upload/response-EOF/reap behavior; keep the action catalog closed until capability completion.
+- [ ] 6. Add Jailer's private minimal `Exchange`, dedicated fake, named typed install/remove client methods, and exact
+  action registrations. Use the existing EOF-qualified response authority and remote-result precedence over
+  uploader/exit/reap diagnostics; capability tests confirm those resolved semantics, preserve partial-state details,
+  and expose no generic call/decoder, executable/argv/environment, path/URL/checksum, force, or reference-bypass input.
+- [ ] 7. Switch the public binary API to root release authority, keep SQLite rows display-only and untrusted, and delete
+  the legacy downloader/path-based privileged mutation path without compatibility code. Test projection mismatch and
+  local `--force` warning behavior, preserve root error details, and search for every removed legacy route.
+- [ ] 8. Audit a real aarch64 archive and freeze its version/member/format contract before enabling extraction. Record
+  evidence and pass mirror-backed parser/staging tests; source and ELF support alone remain fail-closed.
+- [ ] 9. Extend the existing registered Python system-test domains and coverage matrix, then qualify the release build
+  only inside disposable nested-virt runner VMs with `MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror`. Cover installed-CLI
+  install/idempotency/replacement/removal, referenced denial, crash/retry, reboot, cross-user abuse, malformed
+  transport, and zero leaked release/runtime resources before the later full CI and release gates.
 
 ### Task 7: Add private mount and process identity primitives
 
