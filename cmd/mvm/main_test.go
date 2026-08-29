@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -17,8 +16,8 @@ func TestRun_RoutesPrivilegedInvocationBeforeNormalInitialization(t *testing.T) 
 	privilegedCalls := 0
 	normalCalls := 0
 
-	exitCode := run(context.Background(), []string{privileged.Marker, "unknown"}, strings.NewReader("{}"), entrypoints{
-		privileged: func(context.Context, []string, io.Reader) error {
+	exitCode := run(context.Background(), []string{privileged.Marker, "unknown"}, entrypoints{
+		privileged: func(context.Context, []string) error {
 			privilegedCalls++
 			return sentinel
 		},
@@ -39,8 +38,8 @@ func TestRun_RoutesUnsupportedPrivilegedVersionToFailClosedEntry(t *testing.T) {
 	privilegedCalls := 0
 	normalCalls := 0
 
-	exitCode := run(context.Background(), []string{"__mvm_privileged_v999", "unknown"}, nil, entrypoints{
-		privileged: func(context.Context, []string, io.Reader) error {
+	exitCode := run(context.Background(), []string{"__mvm_privileged_v999", "unknown"}, entrypoints{
+		privileged: func(context.Context, []string) error {
 			privilegedCalls++
 			return nil
 		},
@@ -59,8 +58,8 @@ func TestRun_RoutesOrdinaryArgumentsToNormalCLI(t *testing.T) {
 	privilegedCalls := 0
 	normalCalls := 0
 
-	exitCode := run(context.Background(), []string{"vm", "list"}, nil, entrypoints{
-		privileged: func(context.Context, []string, io.Reader) error {
+	exitCode := run(context.Background(), []string{"vm", "list"}, entrypoints{
+		privileged: func(context.Context, []string) error {
 			privilegedCalls++
 			return nil
 		},
@@ -80,7 +79,7 @@ func TestRun_RoutesSystemInstallBeforeNormalInitialization(t *testing.T) {
 	installCalls := 0
 	normalCalls := 0
 
-	exitCode := run(context.Background(), []string{"host", "install-system"}, nil, entrypoints{
+	exitCode := run(context.Background(), []string{"host", "install-system"}, entrypoints{
 		systemInstall: func(_ context.Context, args []string) error {
 			installCalls++
 			assert.Equal(t, []string{"host", "install-system"}, args)
@@ -111,7 +110,7 @@ func TestRun_RoutesMalformedSystemInstallWithoutNormalFallthrough(t *testing.T) 
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			installCalls := 0
 			normalCalls := 0
-			exitCode := run(context.Background(), args, nil, entrypoints{
+			exitCode := run(context.Background(), args, entrypoints{
 				systemInstall: func(_ context.Context, got []string) error {
 					installCalls++
 					assert.Equal(t, args, got)

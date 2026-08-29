@@ -108,9 +108,12 @@ func validPrivilegedControlAction(action string) bool {
 	if len(action) == 0 || len(action) > privilegedControlMaxActionBytes {
 		return false
 	}
+	if !isPrivilegedControlASCIIAlphaNumeric(action[0]) {
+		return false
+	}
 	for index := range len(action) {
 		value := action[index]
-		if value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value >= '0' && value <= '9' {
+		if isPrivilegedControlASCIIAlphaNumeric(value) {
 			continue
 		}
 		if value != '.' && value != '_' && value != '-' {
@@ -118,6 +121,12 @@ func validPrivilegedControlAction(action string) bool {
 		}
 	}
 	return true
+}
+
+func isPrivilegedControlASCIIAlphaNumeric(value byte) bool {
+	return value >= 'a' && value <= 'z' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9'
 }
 
 type privilegedControlPayloadOwner struct {

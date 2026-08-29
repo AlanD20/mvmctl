@@ -3,7 +3,6 @@ package privileged
 import (
 	"context"
 	"os/user"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,7 +36,8 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 		return originalLookupUser(uid)
 	}
 
-	err := run(context.Background(), []string{Marker, "unknown"}, strings.NewReader("{}"), runtimeDeps{
+	endpoint := newReceiverEndpoint()
+	err := run(context.Background(), []string{Marker, "unknown"}, endpoint, runtimeDeps{
 		identity: identityDeps{
 			effectiveUID: func() int {
 				calls = append(calls, "identity.euid")
@@ -51,9 +51,11 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 		environment:   environment.deps(),
 		executable:    executable.deps,
 		authorization: authorization,
+		control:       validControlDeps(endpoint, &calls),
 	})
-	require.Error(t, err)
-	assert.ErrorContains(t, err, `unknown privileged action "unknown"`)
+	require.NoError(t, err)
+	operationErr := decodeReceiverError(t, endpoint.output.Bytes(), "unknown")
+	assert.ErrorContains(t, operationErr, `unknown privileged action "unknown"`)
 	identityIndex := callIndex(calls, "identity.SUDO_GID")
 	sanitizeStartIndex := callIndex(calls, "environment.clear")
 	sanitizeEndIndex := callIndex(calls, "environment.set.LC_ALL")
@@ -81,7 +83,8 @@ func TestRun_RejectsNonMemberBeforeActionDispatch(t *testing.T) {
 	authorization := memberAuthorizationDeps()
 	authorization.groupIDs = func(*user.User) ([]string, error) { return []string{"1000"}, nil }
 
-	err := run(context.Background(), []string{Marker, "unknown"}, strings.NewReader("{}"), runtimeDeps{
+	endpoint := newReceiverEndpoint()
+	err := run(context.Background(), []string{Marker, "unknown"}, endpoint, runtimeDeps{
 		identity: identityDeps{
 			effectiveUID: func() int { return 0 },
 			lookupEnv:    mapLookup(map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"}),
@@ -89,10 +92,12 @@ func TestRun_RejectsNonMemberBeforeActionDispatch(t *testing.T) {
 		environment:   newEnvironmentStore(nil).deps(),
 		executable:    trustedExecutableDeps(),
 		authorization: authorization,
+		control:       validControlDeps(endpoint, nil),
 	})
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "is not a current member of the "+infra.MVMUnixGroup+" group")
-	assert.NotContains(t, err.Error(), "unknown privileged action")
+	require.NoError(t, err)
+	operationErr := decodeReceiverError(t, endpoint.output.Bytes(), "unknown")
+	assert.ErrorContains(t, operationErr, "is not a current member of the "+infra.MVMUnixGroup+" group")
+	assert.NotContains(t, operationErr.Error(), "unknown privileged action")
 }
 
 func callIndex(calls []string, target string) int {

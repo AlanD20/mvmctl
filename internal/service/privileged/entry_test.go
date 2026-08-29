@@ -2,7 +2,6 @@ package privileged
 
 import (
 	"context"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,11 +13,9 @@ import (
 
 func TestRun_FailsClosedBeforeDispatch(t *testing.T) {
 	tests := map[string]struct {
-		args         []string
-		effectiveUID int
-		environment  map[string]string
-		wantCode     errs.Code
-		wantErr      string
+		args     []string
+		wantCode errs.Code
+		wantErr  string
 	}{
 		"unsupported_protocol": {
 			args:     []string{markerPrefix + "2", "vm-cleanup"},
@@ -30,33 +27,19 @@ func TestRun_FailsClosedBeforeDispatch(t *testing.T) {
 			wantCode: errs.CodeValidationFailed,
 			wantErr:  "requires exactly one action",
 		},
-		"rootless_unknown_action": {
-			args:         []string{Marker, "run-command"},
-			effectiveUID: 1000,
-			wantCode:     errs.CodePrivilegeRequired,
-			wantErr:      "requires effective UID 0",
-		},
-		"direct_root_unknown_action": {
-			args:     []string{Marker, "run-command"},
-			wantCode: errs.CodePrivilegeRequired,
-			wantErr:  "missing SUDO_UID",
-		},
-		"sudo_unknown_action": {
-			args:        []string{Marker, "run-command"},
-			environment: map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"},
-			wantCode:    errs.CodeValidationFailed,
-			wantErr:     `unknown privileged action "run-command"`,
+		"invalid_action_grammar": {
+			args:     []string{Marker, "run/command"},
+			wantCode: errs.CodeValidationFailed,
+			wantErr:  "1-64 byte ASCII identifier",
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			err := run(
-				context.Background(),
-				tc.args,
-				strings.NewReader(`{"command":"id"}`),
-				testRuntimeDeps(tc.effectiveUID, tc.environment),
-			)
+			endpoint := newReceiverEndpoint()
+			runtime := testRuntimeDeps(0, nil)
+			runtime.control = validControlDeps(endpoint, nil)
+			err := run(context.Background(), tc.args, endpoint, runtime)
 			require.Error(t, err)
 			assert.ErrorContains(t, err, tc.wantErr)
 			assert.Equal(t, tc.wantCode, errs.AsDomainError(err).Code)
@@ -71,11 +54,14 @@ func TestRun_VerifiesSystemExecutableBeforeActionDispatch(t *testing.T) {
 	deps.executable = func() (string, error) { return "/tmp/user-owned-mvm", nil }
 	runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
 	runtime.executable = deps
+	endpoint := newReceiverEndpoint()
+	runtime.control = validControlDeps(endpoint, nil)
 
-	err := run(context.Background(), []string{Marker, "run-command"}, strings.NewReader("{}"), runtime)
-	require.Error(t, err)
-	assert.ErrorContains(t, err, "must run from "+infra.SystemBinaryPath)
-	assert.NotContains(t, err.Error(), "unknown privileged action")
+	err := run(context.Background(), []string{Marker, "run-command"}, endpoint, runtime)
+	require.NoError(t, err)
+	operationErr := decodeReceiverError(t, endpoint.output.Bytes(), "run-command")
+	assert.ErrorContains(t, operationErr, "must run from "+infra.SystemBinaryPath)
+	assert.NotContains(t, operationErr.Error(), "unknown privileged action")
 }
 
 func testRuntimeDeps(effectiveUID int, identityEnvironment map[string]string) runtimeDeps {

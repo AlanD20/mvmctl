@@ -194,13 +194,16 @@ func TestNewPrivilegedControlRequestRejectsUnboundedOrInvalidInput(t *testing.T)
 		payloadLength uint64
 		payload       io.ReadCloser
 	}{
-		"empty_action":      {action: "", frame: []byte("frame")},
-		"path_action":       {action: "../launch", frame: []byte("frame")},
-		"oversized_action":  {action: strings.Repeat("a", 65), frame: []byte("frame")},
-		"empty_frame":       {action: "launch"},
-		"oversized_frame":   {action: "launch", frame: make([]byte, privilegedControlMaxRequestFrameBytes+1)},
-		"oversized_payload": {action: "launch", frame: []byte("frame"), payloadLength: 128*1024*1024 + 1},
-		"missing_payload":   {action: "launch", frame: []byte("frame"), payloadLength: 1},
+		"empty_action":              {action: "", frame: []byte("frame")},
+		"leading_dot_action":        {action: ".launch", frame: []byte("frame")},
+		"leading_dash_action":       {action: "-launch", frame: []byte("frame")},
+		"leading_underscore_action": {action: "_launch", frame: []byte("frame")},
+		"path_action":               {action: "../launch", frame: []byte("frame")},
+		"oversized_action":          {action: strings.Repeat("a", 65), frame: []byte("frame")},
+		"empty_frame":               {action: "launch"},
+		"oversized_frame":           {action: "launch", frame: make([]byte, privilegedControlMaxRequestFrameBytes+1)},
+		"oversized_payload":         {action: "launch", frame: []byte("frame"), payloadLength: 128*1024*1024 + 1},
+		"missing_payload":           {action: "launch", frame: []byte("frame"), payloadLength: 1},
 	}
 
 	for name, test := range tests {
@@ -213,13 +216,22 @@ func TestNewPrivilegedControlRequestRejectsUnboundedOrInvalidInput(t *testing.T)
 }
 
 func TestRejectedPrivilegedControlRequestRetainsCallerPayloadOwnership(t *testing.T) {
-	payload := newPrivilegedControlTrackingPayload(nil)
+	for name, action := range map[string]string{
+		"leading_dot":        ".invalid",
+		"leading_dash":       "-invalid",
+		"leading_underscore": "_invalid",
+		"path":               "../invalid",
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := newPrivilegedControlTrackingPayload(nil)
 
-	request, err := NewPrivilegedControlRequest("../invalid", []byte("frame"), 0, payload)
+			request, err := NewPrivilegedControlRequest(action, []byte("frame"), 0, payload)
 
-	assert.Nil(t, request)
-	assert.Error(t, err)
-	assert.Zero(t, payload.CloseCount())
+			assert.Nil(t, request)
+			assert.Error(t, err)
+			assert.Zero(t, payload.CloseCount())
+		})
+	}
 }
 
 func TestWritePrivilegedControlExactHandlesPartialAndZeroWrites(t *testing.T) {
