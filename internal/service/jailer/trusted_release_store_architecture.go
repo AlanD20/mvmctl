@@ -32,6 +32,18 @@ type trustedReleaseRecoveryCandidate struct {
 	leaves []string
 }
 
+func (architecture *trustedReleaseArchitectureWriteLease) requireActiveSlotLease() error {
+	if architecture == nil || architecture.fd < 0 {
+		return trustedReleaseStoreError("trusted release architecture write lease is not active", nil)
+	}
+	if architecture.slotLease == nil || architecture.slotLease.roots == nil ||
+		architecture.slotLease.releaseLock == nil || architecture.slotLease.releaseLock.fd < 0 ||
+		architecture.slotLease.slot != architecture.slot {
+		return trustedReleaseStoreError("release slot lease is not active for trusted release architecture", nil)
+	}
+	return nil
+}
+
 // CRITICAL: Architecture creation is the only durable write-side namespace effect allowed before a complete release
 // candidate exists. The directory is fixed by the validated slot, pinned once, and safe to retain empty after failure.
 func (lease *trustedReleaseStoreWriteLease) openArchitectureForWrite(
@@ -98,13 +110,8 @@ func validateTrustedReleaseCandidateName(prefix, name string) error {
 func (architecture *trustedReleaseArchitectureWriteLease) recoverCandidates(
 	ctx context.Context,
 ) (returnErr error) {
-	if architecture == nil || architecture.fd < 0 {
-		return trustedReleaseStoreError("trusted release architecture write lease is not active", nil)
-	}
-	if architecture.slotLease == nil || architecture.slotLease.roots == nil ||
-		architecture.slotLease.releaseLock == nil || architecture.slotLease.releaseLock.fd < 0 ||
-		architecture.slotLease.slot != architecture.slot {
-		return trustedReleaseStoreError("release slot lease is not active for trusted release recovery", nil)
+	if err := architecture.requireActiveSlotLease(); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
 		return trustedReleaseStoreError("recover trusted release candidates", err)
