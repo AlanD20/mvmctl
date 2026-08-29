@@ -155,9 +155,13 @@ func verifyInstanceRegularFile(
 }
 
 func releaseLockName(slot releaseSlot) string {
+	return releaseSlotDigest(slot) + ".lock"
+}
+
+func releaseSlotDigest(slot releaseSlot) string {
 	canonical := slot.version + "\x00" + slot.architecture
 	digest := sha256.Sum256([]byte(canonical))
-	return hex.EncodeToString(digest[:]) + ".lock"
+	return hex.EncodeToString(digest[:])
 }
 
 func instanceLockError(message string, cause error) *errs.DomainError {
