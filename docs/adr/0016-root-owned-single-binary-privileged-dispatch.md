@@ -288,11 +288,13 @@ header is rejected.
 The gzip body contains exactly one member and no trailing compressed bytes. The decompressed tar stream is at most
 32 MiB; the audited archives are 20,049,920 through 23,941,120 bytes. Each logical member is at most 8 MiB; the audited
 maximum is 3,527,456 bytes. The logical count is exactly 24, while the compressed-body limit remains 128 MiB and the
-selected-executable and manifest limits remain independently enforced. Every numeric field in every admitted tar header
-uses canonical octal encoding; non-octal or base-256 encoding and invalid header checksums are rejected. After the final
-logical member, the stream contains exactly two all-zero tar end blocks followed only by all-zero padding through gzip
-EOF. Non-zero padding, decompressed overflow, truncation, concatenated gzip members, compressed trailing bytes, and any
-bytes outside this closed structure fail admission.
+selected-executable and manifest limits remain independently enforced. In every admitted regular and local-PAX header,
+mode, uid, gid, size, and mtime use canonical octal encoding; the checksum uses its canonical six-octal-digit/NUL/space
+form; and the unused device-major and device-minor fields are entirely NUL-filled. Non-octal or base-256 encoding in the
+five admitted numeric fields, a non-canonical or invalid checksum, and any non-NUL device field, including octal zero,
+are rejected. After the final logical member, the stream contains exactly two all-zero tar end blocks followed only by
+all-zero padding through gzip EOF. Non-zero padding, decompressed overflow, truncation, concatenated gzip members,
+compressed trailing bytes, and any bytes outside this closed structure fail admission.
 
 Validation is set-based and duplicate-sensitive, not order-sensitive. Only the exact Firecracker and Jailer members
 are copied into private root-owned staging descriptors, and no executable, manifest, version directory, or other trusted
