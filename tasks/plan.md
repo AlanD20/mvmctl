@@ -253,8 +253,14 @@ complete path has passed against all eight cached audited x86_64 archives. Both 
 The fixed architecture-directory and recovery slice is implemented under the exact active release-slot lease. It
 admits every matching reserved candidate before deletion, fails closed on malformed or unsafe state, and uses
 cancellation-independent, resumable fixed-leaf cleanup with candidate and architecture directory fsyncs after the
-corresponding namespace mutations. The aarch64 audit, root-origin fetch, version-directory publication, manifest
-staging/writing, and descriptor-relative atomic publication or replacement remain implementation work.
+corresponding namespace mutations. Strict manifest staging and complete candidate assembly are also implemented. The
+canonical manifest is positioned-written and fsynced in an anonymous root-owned descriptor; production links it and
+the finalized anonymous Firecracker/Jailer pair into one exact root-owned mode-`0700` reserved candidate using only
+`AT_EMPTY_PATH`. The linked files, candidate directory, and architecture directory are fsynced in that order; every
+writable descriptor is checked closed before exact shared re-admission. Candidate discard, recovery, cancellation, and
+partial-failure edges have fault-injection coverage. This is still an unpublished candidate: the aarch64 audit,
+root-origin fetch, caller/privileged-transport wiring, canonical version publication, idempotent exact-manifest
+handling, `RENAME_NOREPLACE`, and replacement/exchange remain implementation work.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are

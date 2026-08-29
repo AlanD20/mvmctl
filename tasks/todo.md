@@ -256,8 +256,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     - [x] Create and durably verify the fixed architecture directory under the exact active slot lease; admit every
       matching exact-name candidate before deletion, fail closed on unsafe state, and safely remove only fixed leaves
       with cancellation-independent resumable cleanup and ordered directory fsyncs, never recursive fallback.
-    - [ ] Link the finalized anonymous executables and strict manifest into one root-owned candidate directory, fsync
-      every file and directory, and re-admit the complete candidate through the installed-release verifier.
+    - [x] Stage and write the strict manifest anonymously; link it and the finalized anonymous executables into one
+      exact root-owned mode-`0700` reserved candidate with production-only `AT_EMPTY_PATH`; fsync each linked file,
+      then the candidate and architecture directories; close every writable descriptor; and re-admit the complete
+      candidate through the installed-release verifier. Cover discard, recovery, cancellation, and partial-failure
+      edges.
     - [ ] Implement idempotent exact-manifest detection and absent publication with descriptor-relative
       `renameat2(RENAME_NOREPLACE)`, including post-commit state and durability details.
     - [ ] Implement explicit replacement only after complete old-release admission and unreferenced-identity proof;

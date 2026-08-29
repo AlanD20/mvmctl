@@ -391,10 +391,13 @@ structure, not an installed release. A candidate directory is exact `root:root` 
 slot-scoped name `.mvm-release-<slot-digest>-<nonce>.tmp`, where `<slot-digest>` is the 64-character lowercase SHA-256
 used by the release-slot lock and `<nonce>` is 32 lowercase hexadecimal characters from 16 cryptographically random
 bytes. The candidate contains only the fixed `firecracker`, `jailer`, and `manifest.json` leaves. Both finalized
-anonymous executables are linked into it descriptor-relatively; the strict manifest is staged without accepting a
-pathname. The linked files, candidate directory, and architecture directory are fsynced in that order before commit,
-and the complete candidate is re-admitted through its retained directory descriptor by the same manifest/executable
-read path used for installed releases.
+anonymous executables are linked into it descriptor-relatively; the strict manifest is encoded, positioned-written,
+and fsynced in an anonymous root-owned mode-`0600` descriptor without accepting a pathname. Production links each
+anonymous object with descriptor-to-descriptor `linkat(..., AT_EMPTY_PATH)`; `/proc/self/fd` linkage exists only in
+tests and is not a production authority path. Each linked file, the candidate directory, and the architecture directory
+are fsynced in that order before commit. Every writable staging descriptor is checked closed before the complete exact
+three-leaf candidate is re-admitted through its retained directory descriptor by the same manifest/executable read path
+used for installed releases.
 
 An exact canonical-manifest match at the installed slot is idempotent and reports unchanged even when replacement was
 requested. It does not scan instance references because the release authority bytes and identity do not change. A
@@ -465,9 +468,16 @@ also passed against all eight cached audited x86_64 archives. Both executable st
 The write side now creates and pins the fixed architecture directory only while the exact active release-slot lease is
 held, durably admitting that directory before use. Slot-scoped recovery enforces the complete reserved candidate-name
 grammar and fail-closed directory/leaf metadata policy, admits all matching candidates before deletion, and performs
-only cancellation-independent, resumable fixed-leaf cleanup with the durability order specified above. Root-origin
-archive fetching, version-directory publication, manifest staging and writing, and descriptor-relative atomic
-publication or replacement remain Task 6 work.
+only cancellation-independent, resumable fixed-leaf cleanup with the durability order specified above. Strict manifest
+staging and candidate assembly are now implemented: the canonical manifest is written and fsynced anonymously; the
+finalized Firecracker, Jailer, and manifest objects are linked into one exact root-owned mode-`0700` reserved candidate;
+the linked files are fsynced first, followed by the candidate directory and then the architecture directory; all
+writable descriptors are checked closed; and the complete exact candidate is re-admitted through the shared
+installed-release verifier. The production linker uses only `AT_EMPTY_PATH`. Fault injection covers candidate creation,
+linking, metadata checks, fsyncs, checked writable-stage closure, re-admission, discard, recovery, cancellation, and
+partial failures. This capability creates no canonical version directory and publishes no installed release.
+Root-origin archive fetching, the aarch64 archive audit, caller/privileged-transport wiring, canonical version
+publication, idempotent exact-manifest handling, `RENAME_NOREPLACE`, and replacement/exchange remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
