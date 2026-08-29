@@ -8,9 +8,11 @@ import (
 )
 
 type releaseAuthority struct {
-	instances   *instanceAuthority
-	storeDeps   trustedReleaseStoreDeps
-	storePolicy trustedReleaseStorePolicy
+	instances         *instanceAuthority
+	storeDeps         trustedReleaseStoreDeps
+	storePolicy       trustedReleaseStorePolicy
+	checksumAuthority *trustedReleaseChecksumAuthority
+	archiveFetcher    *trustedReleaseArchiveFetcher
 }
 
 type preparedRelease struct {
@@ -34,9 +36,11 @@ func newReleaseAuthorityWithPolicy(
 	storePolicy trustedReleaseStorePolicy,
 ) *releaseAuthority {
 	return &releaseAuthority{
-		instances:   instances,
-		storeDeps:   storeDeps,
-		storePolicy: storePolicy,
+		instances:         instances,
+		storeDeps:         storeDeps,
+		storePolicy:       storePolicy,
+		checksumAuthority: newTrustedReleaseChecksumAuthority(),
+		archiveFetcher:    newTrustedReleaseArchiveFetcher(),
 	}
 }
 
