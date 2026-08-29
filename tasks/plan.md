@@ -246,9 +246,12 @@ is recorded.
 Only the two selected executables may enter private root-owned staging descriptors, and nothing may be published until
 the complete archive and both ELF files validate. The strict bounded gzip/PAX/GNU-tar parser and its private
 selected-writer seam are implemented and have been validated against all eight mirrored x86_64 release archives. That
-writer seam is not yet backed by concrete anonymous selected-executable staging descriptors. Binding each complete
-selected file's digest and size to ELF admission, finalizing those descriptors, the aarch64 audit, and atomic
-publication remain implementation work.
+writer seam now owns concrete anonymous root-owned Firecracker/Jailer descriptors. Extraction uses bounded positioned
+writes; finalization binds exact size and full-file SHA-256 to closed ELF admission, applies exact mode `0755`, fsyncs
+both files, and re-verifies final identity, metadata, and zero offset. Unit and fault tests cover the lifecycle, and the
+complete path has passed against all eight cached audited x86_64 archives. Both stages remain anonymous and unpublished.
+The aarch64 audit, root-origin fetch, architecture/version slot and manifest staging/writing, and descriptor-relative
+atomic publication or replacement remain implementation work.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are

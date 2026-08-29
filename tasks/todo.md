@@ -209,6 +209,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     policy. The ordinary downloader and its proxy/cache/retry behavior are outside this trust boundary.
   - [x] Implement and verify the private checksum authority and typed archive digest: source-integrity revalidation,
     proxy-free bounded HTTPS, one closed redirect, exact status/body/grammar checks, cancellation, and checked cleanup.
+  - [ ] Implement the zero-payload root-origin archive fetch without relaxing source, transport, stream, or staging
+    policy.
 - [x] Implement the strict bounded gzip/PAX/GNU-tar parser: reject traversal, links, devices, sparse files, duplicates,
   unexpected or missing members, malformed headers and metadata, concatenated/trailing input, and size/count overflow;
   route only exact Firecracker/Jailer bytes through the private selected-writer seam.
@@ -225,8 +227,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Implement and verify the private ELF header validator: exact source identity and 64-byte header length, closed
     identity/type/machine/program-header policy, no untrusted allocation, and no executable loading or execution.
   - [x] Bind ELF admission to the bounded actual file size and reject a truncated declared program-header table.
-  - [ ] Back the parser's selected-writer seam with concrete anonymous root-owned executable staging descriptors; bind
-    each complete selected file's exact size and digest to ELF admission, then finalize it without publishing a path.
+  - [x] Back the parser's selected-writer seam with concrete anonymous root-owned Firecracker/Jailer staging descriptors;
+    extract with positioned writes, bind exact size and full-file SHA-256 to closed ELF admission, apply exact mode
+    `0755`, fsync, and verify final identity, metadata, and zero offset without publishing a path.
+  - [x] Exercise the complete selected-executable staging, extraction, and finalization path against all eight cached
+    audited x86_64 archives.
 - [ ] Exact Firecracker/Jailer bytes and a root manifest install atomically and durably.
   - [x] Create or open only the fixed write-side `mvmctl/binaries` store components relative to pinned safe ancestors;
     enforce exact root ownership/mode and fsync newly observed child and parent directories before staging bytes.
@@ -245,6 +250,9 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     offsets, exact descriptor retention, cancellation, and checked reverse cleanup.
   - [x] Compose the release-slot lease, pinned store and version directory, verified manifest identity, and exact
     executable descriptors into one private prepared installed-release lease with strict reverse checked cleanup.
+  - [ ] Create the architecture/version slot, stage and write the strict manifest, and publish or replace the complete
+    three-file release descriptor-relatively and atomically; the anonymous executable stages remain unpublished until
+    this transition succeeds.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.
 

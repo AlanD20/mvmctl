@@ -410,10 +410,14 @@ metadata grammar, and extraction bounds are now frozen above; aarch64 remains fa
 The strict bounded gzip/PAX/GNU-tar parser now enforces that closed contract, routes bytes only for the exact
 Firecracker/Jailer members through its private selected-writer seam, retains the anonymous archive descriptor at offset
 zero, and poisons the stage after any started failure. Mirror-backed validation passed for all eight audited x86_64
-release archives listed above. The selected-writer seam does not yet own concrete anonymous selected-executable staging
-descriptors. Binding each complete selected executable's size and digest to ELF admission, finalizing those descriptors,
-root-origin archive fetching, architecture/version creation, manifest writing, and atomic trusted-store publication
-remain Task 6 work.
+release archives listed above. The selected-writer seam is now backed by two root-owned anonymous selected-executable
+staging descriptors. Extraction writes only the exact Firecracker/Jailer bytes with positioned sequential writes.
+Finalization binds each complete file's exact size and full-file SHA-256 digest to the closed ELF admission policy,
+changes both admitted files to exact mode `0755`, fsyncs them, and re-verifies final descriptor identity, metadata, and
+zero offset. Unit and fault tests cover this lifecycle, and the complete staging, extraction, and finalization path has
+also passed against all eight cached audited x86_64 archives. Both executable stages remain anonymous and unpublished.
+Root-origin archive fetching, architecture/version slot creation, manifest staging and writing, and descriptor-relative
+atomic publication or replacement remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
