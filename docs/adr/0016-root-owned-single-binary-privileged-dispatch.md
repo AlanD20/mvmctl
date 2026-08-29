@@ -212,11 +212,11 @@ It hashes the complete archive body against that checksum before parsing it. If 
 fixed archive itself. Root never opens a caller path or accepts a caller URL or checksum. The normal-user client may read
 `MVM_ASSET_MIRROR`, but those streamed bytes are transport, never release authority.
 
-Extraction occurs in a root-owned temporary directory with bounded compressed/decompressed input, a reviewed allowlist
-for the complete upstream archive layout, and rejection of path traversal, symlinks, hardlinks, devices, sparse files,
-duplicates, unexpected members, and size/count overflow. Only the exact Firecracker/Jailer pair is extracted. Their ELF
-class and machine must match the selected architecture without executing downloaded code. The pair and strict root-owned
-release manifest are fsynced and atomically renamed into the trusted store. A referenced release cannot be
+Extraction reads the anonymous root-owned archive stage with bounded compressed/decompressed input and validates the
+complete reviewed archive contract below before publishing any path. Only the exact Firecracker/Jailer pair is copied
+to private root-owned staging descriptors. Their ELF class and machine must match the selected architecture without
+executing downloaded code. The pair and strict root-owned release manifest are fsynced and atomically renamed into the
+trusted store only after the complete archive and both executables pass admission. A referenced release cannot be
 force-replaced.
 
 ELF admission reads exactly the first 64 bytes of each extracted binary and performs no executable handoff. It requires
@@ -248,9 +248,56 @@ derivation is:
 | Trusted-store leaves | `firecracker`, `jailer`, and `manifest.json` |
 
 This table freezes source construction and the two extracted member identities. It does not claim that those are the
-only members in the upstream archive: Task 6 separately records and enforces the complete reviewed upstream allowlist
-before extraction is accepted. A packaging change must update the reviewed contract and tests; it must not fall back to
-basename matching, caller-selected member names, or permissive extraction.
+only members in the upstream archive: the complete reviewed allowlist and format contract follow, and Task 6 must
+enforce them before extraction is accepted. A packaging change must update the reviewed contract and tests; it must not
+fall back to basename matching, caller-selected member names, or permissive extraction.
+
+The v0.3 archive parser accepts only the separately audited x86_64 releases `1.10.1`, `1.14.2`, `1.14.3`, `1.14.4`,
+`1.15.0`, `1.15.1`, `1.16.0`, and `1.16.1`. Source derivation and ELF admission also understand `aarch64`, but that does
+not authorize an aarch64 archive: the available asset mirror contains no aarch64 release archive, so extraction for
+that architecture fails closed until an architecture-specific member and format audit updates this decision and its
+tests. Versions outside the exact audited x86_64 set likewise fail closed rather than assuming that a nearby release
+uses the same packaging.
+
+For an accepted version, let `<root>` be `release-v<version>-x86_64` and `<binary>` be
+`v<version>-x86_64`. The logical archive contains exactly 24 regular-file members, in any order, with this exact set:
+
+- `<root>/{SHA256SUMS,LICENSE,THIRD-PARTY,NOTICE}`;
+- `<root>/firecracker_spec-v<version>.yaml` and `<root>/seccomp-filter-<binary>.json`;
+- `<root>/{firecracker,jailer,cpu-template-helper,rebase-snap,seccompiler-bin,snapshot-editor}-<binary>`, plus the
+  corresponding exact `.debug` member for each tool; and
+- six CPU-template leaves `<root>/<template>-v<version>.json`, where `<template>` is exactly one of
+  `c3`, `t2a`, `t2`, `t2s`, `v1n1`, and `t2cl` for `1.10.1`, or exactly one of `C3`, `T2A`, `T2`, `T2S`, `V1N1`, and
+  `T2CL` for the audited `1.14.2`, `1.14.3`, `1.14.4`, `1.15.0`, `1.15.1`, `1.16.0`, and `1.16.1` releases.
+
+The six non-debug tool binaries are exact mode `0755`. Every other logical member, including every `.debug` member, is
+exact mode `0644`. Member order, archive uid/gid, and archive mtime are not authority. Every logical member is a GNU
+regular-file header with an empty prefix, link name, and device fields; its final full member name is at most 63 bytes.
+Traversal, absolute or non-exact names, missing or duplicate members, alternate modes, and any directory, symbolic link,
+hard link, device, FIFO, sparse, or other type are rejected.
+
+The mirrored archives report as POSIX pax interchange archives at the logical layer. Their reviewed raw representation
+is stricter: each logical regular-file header is immediately preceded by exactly one GNU local-PAX header named
+`././@PaxHeader`. Its payload uses canonical POSIX records of the form `<decimal-length> <key>=<value>\n`, contains
+exactly one `mtime` key and at most one each of `uid` and `gid`, and contains no other or duplicate key. `mtime` is a
+canonical decimal seconds value with a decimal fraction; `uid` and `gid`, when present, are canonical unsigned decimal
+integers. These metadata values are parsed only to constrain the format and are never used as ownership, mode, or time
+authority. Any malformed record length or value, global PAX header, GNU long-name/long-link header, or other extension
+header is rejected.
+
+The gzip body contains exactly one member and no trailing compressed bytes. The decompressed tar stream is at most
+32 MiB; the audited archives are 20,049,920 through 23,941,120 bytes. Each logical member is at most 8 MiB; the audited
+maximum is 3,527,456 bytes. The logical count is exactly 24, while the compressed-body limit remains 128 MiB and the
+selected-executable and manifest limits remain independently enforced. Every numeric field in every admitted tar header
+uses canonical octal encoding; non-octal or base-256 encoding and invalid header checksums are rejected. After the final
+logical member, the stream contains exactly two all-zero tar end blocks followed only by all-zero padding through gzip
+EOF. Non-zero padding, decompressed overflow, truncation, concatenated gzip members, compressed trailing bytes, and any
+bytes outside this closed structure fail admission.
+
+Validation is set-based and duplicate-sensitive, not order-sensitive. Only the exact Firecracker and Jailer members
+are copied into private root-owned staging descriptors, and no executable, manifest, version directory, or other trusted
+store path is published until the parser has consumed and validated the complete archive and both staged executables
+have passed the closed ELF policy.
 
 Checksum authority uses a dedicated client rather than the ordinary downloader. It performs one retrieval attempt of
 the derived sidecar URL with a 15-second total deadline, 5-second dial/TLS/header timeouts, a 16 KiB response-header
@@ -356,8 +403,10 @@ and durably syncs each newly observed child and parent. It can now create and re
 described above, including fail-closed metadata admission, cancellation-independent cleanup, and cleanup-error
 preservation. That stage now admits one bounded exact-length caller stream with positioned writes, exact EOF,
 independent-digest verification, fsync, stable identity and metadata, zero offset, and permanent poisoning after any
-started failure. Root-origin archive fetching, extraction, the complete member allowlist, architecture/version
-creation, manifest writing, and atomic trusted-store installation remain Task 6 work.
+started failure. The exact audited x86_64 archive versions, complete 24-member allowlists, raw gzip/PAX/tar structure,
+metadata grammar, and extraction bounds are now frozen above; aarch64 remains fail-closed pending its own archive audit.
+The parser and bounded extraction, root-origin archive fetching, architecture/version creation, manifest writing, and
+atomic trusted-store installation remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 

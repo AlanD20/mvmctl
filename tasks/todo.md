@@ -212,8 +212,12 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
 - [ ] Bounded extraction rejects traversal, links, devices, duplicates, unexpected members, and size/count overflow.
 - [ ] Validate the complete reviewed upstream member allowlist while extracting only Firecracker and Jailer; validate
   their ELF class/machine without executing downloaded code.
-  - [ ] Complete the architecture-specific member audit. The existing asset mirror proves the 24-member x86_64 layout
-    across v1.10.1 and v1.14.2-v1.16.1, but contains no aarch64 archive; do not infer its allowlist from x86_64.
+  - [x] Freeze the exact audited x86_64 contract for versions 1.10.1, 1.14.2, 1.14.3, 1.14.4, 1.15.0, 1.15.1,
+    1.16.0, and 1.16.1: complete order-independent 24-member allowlists, lower/uppercase CPU-template variants, GNU
+    local-PAX plus regular-file structure, closed PAX keys, exact modes, one gzip member, 32-MiB decompressed and 8-MiB
+    member bounds, and strict tar termination.
+  - [ ] Audit an actual aarch64 archive and freeze its architecture-specific member and format contract; source
+    derivation and ELF support do not authorize extraction, and x86_64 packaging must not be inferred.
   - [x] Freeze the exact bounded ELF64 header-admission policy for x86_64 and aarch64.
   - [x] Implement and verify the private ELF header validator: exact source identity and 64-byte header length, closed
     identity/type/machine/program-header policy, no untrusted allocation, and no executable loading or execution.

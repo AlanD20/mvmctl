@@ -232,6 +232,20 @@ supplied, root may fetch the fixed archive itself. Root never opens a caller pat
 and `MVM_ASSET_MIRROR` supplies bytes rather than authority. Extraction validates the reviewed complete upstream member
 allowlist and extracts only Firecracker and Jailer.
 
+The frozen v0.3 extraction contract accepts only audited x86_64 archives for `1.10.1`, `1.14.2`, `1.14.3`, `1.14.4`,
+`1.15.0`, `1.15.1`, `1.16.0`, and `1.16.1`. Each must contain the exact order-independent 24-member set recorded in
+ADR-0016, encoded as one GNU local-PAX header plus one GNU regular-file header per logical member. The parser accepts
+only the closed `mtime` plus optional `uid`/`gid` PAX grammar, exact modes and names, canonical octal fields, one gzip
+member, at most 32 MiB decompressed, at most 8 MiB per logical member, exactly two tar end blocks, and only decompressed
+zero padding through gzip EOF. It rejects every unexpected extension, member, type, duplicate, malformed checksum,
+overflow, concatenated gzip member, and trailing byte. Archive metadata is never authority. Source and ELF support for
+`aarch64` does not imply archive support; aarch64 extraction remains fail-closed until its own archive audit is
+recorded.
+
+Only the two selected executables enter private root-owned staging descriptors, and nothing is published until the
+complete archive and both ELF files validate. This contract and the x86_64 member audit are complete; the parser,
+extraction, aarch64 audit, and atomic publication are still implementation work.
+
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are
 validated as ELF for the selected architecture without execution. Descriptor-relative atomic install, exchange, and
