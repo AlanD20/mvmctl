@@ -27,9 +27,10 @@ type trustedReleaseArchitectureWriteLease struct {
 }
 
 type trustedReleaseRecoveryCandidate struct {
-	name   string
-	fd     int
-	leaves []string
+	name              string
+	fd                int
+	directoryIdentity unix.Stat_t
+	leaves            []string
 }
 
 func (architecture *trustedReleaseArchitectureWriteLease) requireActiveSlotLease() error {
@@ -150,6 +151,13 @@ func (architecture *trustedReleaseArchitectureWriteLease) recoverCandidates(
 
 	cleanupCtx := context.WithoutCancel(ctx)
 	for _, candidate := range candidates {
+		if err := architecture.verifyRecoveryCandidateBinding(
+			cleanupCtx,
+			candidate,
+			"before cleanup",
+		); err != nil {
+			return err
+		}
 		for _, leaf := range candidate.leaves {
 			if err := architecture.deps.unlinkAt(cleanupCtx, candidate.fd, leaf, 0); err != nil {
 				return trustedReleaseStoreError("remove trusted release recovery leaf "+leaf, err)
@@ -157,6 +165,13 @@ func (architecture *trustedReleaseArchitectureWriteLease) recoverCandidates(
 		}
 		if err := architecture.deps.fsync(cleanupCtx, candidate.fd); err != nil {
 			return trustedReleaseStoreError("sync cleaned trusted release recovery candidate", err)
+		}
+		if err := architecture.verifyRecoveryCandidateBinding(
+			cleanupCtx,
+			candidate,
+			"before directory removal",
+		); err != nil {
+			return err
 		}
 		if err := architecture.deps.unlinkAt(
 			cleanupCtx,
@@ -217,6 +232,13 @@ func (architecture *trustedReleaseArchitectureWriteLease) openRecoveryCandidate(
 	); err != nil {
 		return trustedReleaseRecoveryCandidate{}, err
 	}
+	var directoryIdentity unix.Stat_t
+	if err := architecture.deps.fstat(ctx, fd, &directoryIdentity); err != nil {
+		return trustedReleaseRecoveryCandidate{}, trustedReleaseStoreError(
+			"inspect trusted release recovery candidate identity",
+			err,
+		)
+	}
 
 	names, err := architecture.deps.readDirNames(ctx, fd)
 	if err != nil {
@@ -254,7 +276,66 @@ func (architecture *trustedReleaseArchitectureWriteLease) openRecoveryCandidate(
 			nil,
 		)
 	}
-	return trustedReleaseRecoveryCandidate{name: name, fd: fd, leaves: ordered}, nil
+	return trustedReleaseRecoveryCandidate{
+		name: name, fd: fd, directoryIdentity: directoryIdentity, leaves: ordered,
+	}, nil
+}
+
+func (architecture *trustedReleaseArchitectureWriteLease) verifyRecoveryCandidateBinding(
+	ctx context.Context,
+	candidate trustedReleaseRecoveryCandidate,
+	description string,
+) (returnErr error) {
+	fd, err := architecture.deps.openAt(
+		ctx,
+		architecture.fd,
+		candidate.name,
+		trustedReleaseStoreDirectoryFlags,
+		0,
+	)
+	if err != nil {
+		if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
+			return trustedReleaseStoreUntrusted(
+				"trusted release recovery candidate changed "+description,
+				err,
+			)
+		}
+		return trustedReleaseStoreError(
+			"open trusted release recovery candidate "+description,
+			err,
+		)
+	}
+	defer func() {
+		returnErr = appendTrustedReleaseStoreError(
+			returnErr,
+			"close trusted release recovery candidate binding check "+description,
+			architecture.deps.close(context.WithoutCancel(ctx), fd),
+		)
+	}()
+	if err := verifyTrustedReleaseStoreDirectory(
+		ctx,
+		architecture.deps,
+		fd,
+		"recovery candidate "+description,
+		architecture.policy,
+		true,
+	); err != nil {
+		return err
+	}
+	var stat unix.Stat_t
+	if err := architecture.deps.fstat(ctx, fd, &stat); err != nil {
+		return trustedReleaseStoreError(
+			"inspect trusted release recovery candidate binding "+description,
+			err,
+		)
+	}
+	if stat.Dev != candidate.directoryIdentity.Dev || stat.Ino != candidate.directoryIdentity.Ino {
+		return trustedReleaseStoreUntrusted(
+			"trusted release recovery candidate identity changed "+description,
+			nil,
+		)
+	}
+	return nil
 }
 
 func (architecture *trustedReleaseArchitectureWriteLease) admitRecoveryLeaf(
