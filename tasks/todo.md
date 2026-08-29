@@ -355,18 +355,41 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
     process-independent EOF, status mutation, cancellation, and cleanup. Independent audit findings were corrected
     before commit.
   - [ ] 5b. Add unregistered closed install/remove request and result values plus directly tested typed handlers.
-    Enforce exact action matching and the fixed header deadline. Install alone accepts zero or one declared bounded
-    payload and requires its exact EOF under the five-minute payload deadline; remove rejects payload and requires EOF
-    before effects. Abuse-test unknown/extra fields, action mismatch, truncation, trailing bytes, payload on removal,
-    handler errors, and the fixed response deadline. Keep the action switch closed until step 6 completes the typed
-    client capability.
+    - [ ] Put exact `jailer-release-install` / `jailer-release-remove` constants and the closed internal `ReleaseSlot`,
+      install/remove requests, string outcome, manifest-derived install result, executable metadata, and Boolean remove
+      result in `internal/service/jailer`. Carry no path, URL, caller hash, force, reference override, generic action,
+      reader field, or decoder hook.
+    - [ ] Add authority-owning `TrustedReleaseServer`. Named `Install` takes
+      `(ctx, request, payload io.Reader, payloadLength uint64)`. Privileged imports Jailer and supplies the private
+      reader; future Jailer client imports system/privilegedwire, never privileged.
+    - [ ] Zero install/remove require EOF before effect. Nonzero install streams once through existing Jailer
+      archive-stage length/EOF admission. Permit staging during read but no extraction/publication before EOF. Add no
+      128 MiB buffer, second stage, `LimitReader`, replay, registry, or generic dispatcher.
+    - [ ] Make each handler own exactly one success-or-`DomainError` response plus `SHUT_WR`. Preserve original details
+      and prevent outer `run` from double-framing a handler-owned transport error.
+    - [ ] Replace the unused read-deadline path with raw `Recvmsg(MSG_DONTWAIT)` plus absolute `POLLIN` polling. Start
+      the five-second header deadline immediately before decode; after a nonzero install header, start a fresh
+      five-minute stream/EOF reader deadline. Each reader carries context/deadline and rechecks cancellable context at a
+      compiled maximum 100 ms interval. No individual cancellable poll waits longer than that bound. Pass original
+      context to Jailer; the payload deadline does not limit post-EOF work. Zero/remove retain the header deadline for
+      EOF. Install accepts at most 128 MiB, remove accepts zero, and fd 0 is never closed.
+    - [ ] Establish the five-second response deadline immediately before each delivery, not at invocation start. Compute
+      the final-error deadline before `context.WithoutCancel`; a long valid effect does not consume the write budget.
+    - [ ] Before success, validate outcome, exact valid request slot, lowercase 64-character hashes, size policy, and
+      nested values. Add invalid fake-effect results; slice 6 repeats semantic validation after decode.
+    - [ ] L1 covers strict fields/types/null/duplicate/case conflicts, action/magic/schema, truncation/oversize,
+      install zero/nonzero/oversize/truncated/trailing, remove payload/trailing, blocked header/payload cancellation,
+      status mutation, zero/remove effects after EOF, nonzero publication after EOF, every outcome/remove Boolean,
+      invalid effect results, `DomainError` details, response short/error/half-close/no-double-frame, and both actions
+      remaining unknown/no-read in the central switch.
 - [ ] 6. Add Jailer's private minimal `Exchange`, dedicated fake, named typed install/remove client methods, and exact
   action registrations. Use the existing EOF-qualified response authority and remote-result precedence over
   uploader/exit/reap diagnostics; capability tests confirm those resolved semantics, preserve partial-state details,
   and expose no generic call/decoder, executable/argv/environment, path/URL/checksum, force, or reference-bypass input.
 - [ ] 7. Switch the public binary API to root release authority, keep SQLite rows display-only and untrusted, and delete
   the legacy downloader/path-based privileged mutation path without compatibility code. Test projection mismatch and
-  local `--force` warning behavior, preserve root error details, and search for every removed legacy route.
+  local `--force` warning behavior. Do not update SQLite after root postcommit error; retry/idempotency obtains root
+  truth and repairs projection. Preserve root error details and search for every removed legacy route.
 - [ ] 8. Audit a real aarch64 archive and freeze its version/member/format contract before enabling extraction. Record
   evidence and pass mirror-backed parser/staging tests; source and ELF support alone remain fail-closed.
 - [ ] 9. Extend the existing registered Python system-test domains and coverage matrix, then qualify the release build

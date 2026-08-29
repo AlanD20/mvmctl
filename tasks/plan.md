@@ -103,13 +103,15 @@ payload length, the strict schema-version-1 header, and the exact optional paylo
 action and must match it. An action is 1 through 64 ASCII bytes, starts with an ASCII alphanumeric byte, and thereafter
 contains only ASCII alphanumeric bytes, `.`, `_`, or `-`; caller and receiver enforce the same grammar. Only typed
 release install accepts a payload: zero bytes or at most 128 MiB. The caller half-closes after the declared bytes. Root
-requires exact length and EOF before payload-dependent effects and before all zero-payload effects, but may respond to
-pre-effect authentication/header failure without draining a claimed payload. The request-header read deadline is a
-fixed five seconds; the install archive-payload read deadline is a fixed five minutes.
+requires exact length and EOF before extraction/canonical publication; anonymous staging may occur while reading.
+Zero-payload operations require EOF before effects. Root may reject authentication/header failure without draining.
+The request-header read deadline is a fixed five seconds; the install archive-payload read deadline is a fixed five
+minutes.
 Responses use `MVMRES01`, a 32-bit length capped at 64 KiB, and one strict matching-action success/result or
-error/`DomainError` envelope under a fixed five-second response-write deadline. Each receiver deadline uses the earlier
-current context deadline when one exists. Final error delivery may use `context.WithoutCancel`, but retains the absolute
-deadline established before cancellation was detached. These are compiled, non-configurable security policy.
+error/`DomainError` envelope. Each delivery establishes its fixed five-second absolute deadline immediately before the
+write, so a long valid effect does not consume the response budget; an earlier context deadline wins. Final error
+delivery computes the deadline before `context.WithoutCancel` and never gains a fresh or unbounded interval. These are
+compiled, non-configurable security policy.
 
 A delivered envelope is the final effect record even if process reaping later reports an anomaly; root half-closes its
 socket write side after the complete frame, so response EOF does not depend on process exit. The codec exposes a
@@ -247,8 +249,30 @@ bodyless GETs internally and violate the one-retrieval-attempt contract. For mir
 may stream an exact-length bounded archive body through the typed install transport; root hashes it against the
 independently fetched checksum before parsing it. A zero-payload install instead makes one receiver-derived root-origin
 archive request under the separate closed transport contract in ADR-0016. Root never opens a caller path or accepts a
-caller URL or checksum, and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority. Extraction
-validates the reviewed complete upstream member allowlist and extracts only Firecracker and Jailer.
+caller URL or checksum, and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority.
+
+The approved slice-5b wire contract is not implemented. `internal/service/jailer` owns the exact internal action
+constants `jailer-release-install` and `jailer-release-remove`; `ReleaseSlot`; install request with
+`AllowReplacement`; remove request; a typed string outcome closed to `installed|replaced|unchanged`; install result with
+the exact slot, archive SHA-256, and each executable's SHA-256 and size; and a remove result containing only `Removed`.
+These values carry no path, URL, caller hash, force, reference override, generic action, reader, or decoder field. One
+concrete `TrustedReleaseServer` owns authority. Its named install takes
+`(ctx, request, payload io.Reader, payloadLength uint64)`. Privileged imports Jailer and supplies the private raw
+reader; the future Jailer client imports only system/privilegedwire, never privileged.
+
+Zero install/remove require EOF before effect. Nonzero install streams once through Jailer-owned archive-stage
+length/EOF admission; staging may occur during read but canonical publication cannot occur before EOF. There is no
+128 MiB buffer, second stage, `LimitReader`, replay, registry, or generic dispatcher. Each handler owns one response and
+`SHUT_WR`; handled/unhandled disposition prevents outer double framing.
+
+Readers carry operation context and absolute deadline and use raw `Recvmsg(MSG_DONTWAIT)` plus `POLLIN`. No cancellable
+poll waits longer than the compiled 100 ms maximum, so cancellation does not wait for the full read deadline. Header gets
+five seconds; nonzero payload gets a new five-minute reader deadline; zero/remove retain the header deadline for EOF.
+Original context reaches Jailer and the payload deadline does not constrain post-EOF work. Validate outcome, exact
+request slot, lowercase hashes, sizes, and nested values before success; slice 6 repeats after decode. Remove bool is
+closed. Response timing, original `DomainError`, fd ownership, and no-double-frame rules remain as above.
+
+Extraction validates the reviewed complete upstream member allowlist and extracts only Firecracker and Jailer.
 
 The implemented zero-payload root fetch revalidates the receiver-derived source before one retrieval attempt and
 redirect chain: one initial HTTPS GET plus at most one redirect GET, with no retry. It disables HTTP/2 and uses fresh
@@ -449,13 +473,15 @@ steps 6 through 9 remain an acceptance plan and are not implemented:
      admission, peer mismatch, deadline/write/half-close failures, cancellation, no-drain behavior,
      process-independent EOF, cleanup, and status-flag mutation. Independent audit findings were corrected before
      commit.
-   - **5b. Add closed release wire values and handlers without registration.** Add exact install/remove request and
-     result values plus directly tested typed handlers. The five-second header deadline, five-minute install-payload
-     deadline, five-second response deadline, earlier-context rule, action match, exact declared length, and EOF are
-     receiver invariants. Install alone accepts zero or bounded archive payload; remove rejects payload and requires EOF
-     before effects. Unknown/extra fields, mismatched actions, truncation, trailing bytes, payload on removal, and
-     handler errors are abuse-tested. The action switch remains closed until step 6 completes the named typed client
-     capability.
+   - **5b. Add the approved closed release handlers without registration.** Put the exact action constants, closed
+     request/result values, and authority-owning `TrustedReleaseServer` in Jailer. Named install takes the request plus
+     one `io.Reader`/length; privileged supplies it. Zero/remove require EOF before effect; nonzero streams through
+     Jailer-owned length/EOF admission without buffer, second stage, `LimitReader`, or publication before EOF. Readers
+     cap each cancellable poll wait at 100 ms; payload deadline limits only reads, not post-EOF work. Install accepts at
+     most 128 MiB and remove accepts zero. Establish a fresh five-second response deadline immediately before delivery,
+     preserve one result or original `DomainError`, half-close, never close fd 0, and prevent outer double framing.
+     Validate success semantics and direct L1 abuse-test ADR-0016's matrix. Keep both actions unknown/no-read in central
+     switch until step 6 completes the typed client capability.
    The already-resolved caller upload, response-EOF, and reap behavior is not reopened in either substep.
 6. **Add typed client methods and actions.** Give Jailer one private minimal `Exchange` interface, named install/remove
    methods, a dedicated fake, and exact privileged action registrations. The client uses the existing EOF-qualified
@@ -464,7 +490,8 @@ steps 6 through 9 remain an acceptance plan and are not implemented:
    argv, environment, path, URL, checksum, force, or reference-bypass input.
 7. **Switch API authority and remove the legacy path.** Treat SQLite binary data only as an untrusted user-facing
    projection, route public install/remove/list selection through the typed release client, and delete the old root
-   downloader/path-based binary mutation route rather than preserving compatibility. Acceptance includes
+   downloader/path-based binary mutation route rather than preserving compatibility. Do not update SQLite after a root
+   postcommit error; retry/idempotency obtains root truth and repairs the projection. Add
    repository/API tests for projection mismatch and local `--force` warning behavior, searches proving no legacy
    privileged path remains, and public result/error tests that retain root partial-state details.
 8. **Audit aarch64 packaging.** Inspect a real aarch64 release archive and freeze its exact member/format/version

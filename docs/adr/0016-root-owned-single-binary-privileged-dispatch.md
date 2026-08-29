@@ -113,7 +113,8 @@ action-specific body. The action is 1 through 64 ASCII bytes, starts with an ASC
 contains only ASCII alphanumeric bytes, `.`, `_`, or `-`; the caller and receiver enforce the same grammar. The repeated
 action must match. Only release install may carry a payload: either zero bytes or an exact stream of at most 128 MiB.
 The caller half-closes its write side after the declared bytes, and root requires EOF so truncation or trailing bytes
-fail closed before any payload-dependent effect. Zero-payload operations likewise require EOF before effects.
+fail closed before extraction, canonical publication, or promotion of unadmitted bytes. Anonymous staging may occur
+while the declared stream is read. Zero-payload operations require EOF before effects.
 Authentication, framing, and header failures may return an early error without draining an advertised payload; the
 concurrent client treats the resulting uploader `EPIPE` as expected once it has a valid response. The request-header
 read deadline is a fixed five seconds, and the release-install archive-payload read deadline is a fixed five minutes.
@@ -132,10 +133,11 @@ malformed frame. A start failure has known no-effect status; any started process
 mismatched, oversized, or non-EOF response returns `CodeProcessError` with `process_started: true` and
 `outcome_unknown: true`.
 
-Every response write has a fixed five-second deadline and uses the earlier current context deadline when one exists.
-Final error-envelope delivery may use `context.WithoutCancel` after operation cleanup, but it retains the absolute
-deadline established before cancellation was detached; it never gains a fresh or unbounded interval. The request-header,
-archive-payload, and response-write limits are compiled, non-configurable security policy.
+Every success or error response establishes its fixed five-second absolute write deadline immediately before delivery
+and uses the earlier current context deadline when one exists. A valid long-running effect therefore does not consume
+the response-write budget. Final error-envelope delivery computes that absolute deadline before applying
+`context.WithoutCancel`; it never gains a fresh or unbounded interval after cancellation is detached. The
+request-header, archive-payload, and response-write limits are compiled, non-configurable security policy.
 
 The receiver rejects an initially nonblocking fd 0. Response writes do not depend on mutable shared file-status flags:
 they use raw `SendmsgN` with `MSG_DONTWAIT|MSG_NOSIGNAL` and bounded `POLLOUT` waits against the already-established
@@ -157,6 +159,114 @@ trusted-release install/remove request and result values plus directly tested ha
 declared payload and must require its exact EOF; remove requires zero payload and EOF before effects. These handlers
 remain unregistered, and the central action switch stays closed, until the named Jailer client capability and its
 response-authority tests are complete.
+
+### Approved unregistered trusted-release handlers
+
+This slice-5b contract is approved but not implemented. The two exact compiled internal actions are
+`jailer-release-install` and `jailer-release-remove`. Their constants and all shared closed values live in
+`internal/service/jailer`; they are exported only across Go's repository-local `internal` boundary and are not public
+CLI or `pkg/api` interfaces. The closed shape is:
+
+```go
+const (
+    TrustedReleaseInstallAction = "jailer-release-install"
+    TrustedReleaseRemoveAction  = "jailer-release-remove"
+)
+
+type ReleaseSlot struct {
+    Version      string `json:"version"`
+    Architecture string `json:"architecture"`
+}
+
+type TrustedReleaseInstallRequest struct {
+    Slot             ReleaseSlot `json:"slot"`
+    AllowReplacement bool        `json:"allow_replacement"`
+}
+
+type TrustedReleaseRemoveRequest struct {
+    Slot ReleaseSlot `json:"slot"`
+}
+
+type TrustedReleaseInstallOutcome string
+
+const (
+    TrustedReleaseInstalled TrustedReleaseInstallOutcome = "installed"
+    TrustedReleaseReplaced  TrustedReleaseInstallOutcome = "replaced"
+    TrustedReleaseUnchanged TrustedReleaseInstallOutcome = "unchanged"
+)
+
+type TrustedReleaseExecutableResult struct {
+    SHA256    string `json:"sha256"`
+    SizeBytes uint64 `json:"size_bytes"`
+}
+
+type TrustedReleaseInstallResult struct {
+    Outcome       TrustedReleaseInstallOutcome   `json:"outcome"`
+    Slot          ReleaseSlot                    `json:"slot"`
+    ArchiveSHA256 string                         `json:"archive_sha256"`
+    Firecracker   TrustedReleaseExecutableResult `json:"firecracker"`
+    Jailer        TrustedReleaseExecutableResult `json:"jailer"`
+}
+
+type TrustedReleaseRemoveResult struct {
+    Removed bool `json:"removed"`
+}
+```
+
+The names, JSON fields, value domains, and action strings above are fixed. No request or result carries a path, URL,
+caller hash, force flag, reference override, generic action, reader, or decoder field. The sole stream seam is:
+
+```go
+func (server *TrustedReleaseServer) Install(
+    ctx context.Context,
+    request TrustedReleaseInstallRequest,
+    payload io.Reader,
+    payloadLength uint64,
+) (TrustedReleaseInstallResult, error)
+```
+
+The privileged adapter supplies one private deadline-aware raw-socket reader. Zero payload requires EOF before
+`Install(ctx, request, nil, 0)`. Nonzero payload streams once through `Install`; existing Jailer archive-stage receive
+exclusively owns declared-length and EOF admission. Anonymous staging may occur during the read, but no extraction,
+canonical publication, or promotion of unadmitted bytes occurs before exact EOF. There is no 128 MiB buffer, second
+stage, `io.LimitReader`, reusable reader interface, or replay.
+
+One concrete `jailer.TrustedReleaseServer` owns the private `releaseAuthority` and exposes only named `Install` and
+`Remove` methods. Privileged imports Jailer; the future Jailer client imports only `internal/lib/system` and
+`internal/lib/privilegedwire`, never privileged. The server maps `AllowReplacement` to the existing closed intent and
+converts only the fully re-admitted private manifest result into the exact result above. The
+privileged package owns framing, deadlines, response delivery, and private exact install/remove function dependencies
+for direct handler tests. There is no action registry, generic server interface, generic dispatcher, or decoder hook.
+
+Each unregistered handler owns exactly one response transaction. Zero-payload install and remove require EOF before the
+named effect. Nonzero install invokes `Install` once with the private stream; Jailer owns stream/EOF admission and no
+canonical effect occurs before admission succeeds. The handler then emits exactly one typed success result or preserved
+`DomainError` followed by `SHUT_WR`. Slice 6 must distinguish unhandled action from handler-owned response failure so
+outer `run` never writes a second frame.
+
+Each request reader carries the original operation context and one absolute deadline. It uses raw
+`Recvmsg(MSG_DONTWAIT)` plus `POLLIN`, never `os.File.Read`, `SO_RCVTIMEO`, or mutable `O_NONBLOCK`. With cancellable
+context, polling wakes and rechecks context at a compiled maximum 100 ms interval; uncancellable context may wait to the
+absolute deadline. No individual cancellable poll waits longer than 100 ms, so cancellation never waits for the full
+read deadline. The five-second header deadline starts immediately before decode. Nonzero install gets a separate
+five-minute reader deadline after header decode for stream/EOF admission. Zero install/remove retain the header deadline
+for EOF. The original context reaches Jailer; after EOF, the payload deadline does not constrain extraction/publication.
+Install permits at most 128 MiB, remove permits zero, and the endpoint is never closed.
+
+The response deadline is established immediately before each success or error delivery, not when the process or
+receiver invocation starts. Final error delivery computes that deadline before `context.WithoutCancel` and retains the
+earlier context deadline. The original `DomainError`, class, code, entity, and bounded postcommit details are preserved;
+a response contains exactly one result or one error. Before success encode, require a valid three-value outcome, valid
+slot exactly matching the request, lowercase 64-character archive/executable hashes, policy-valid executable sizes, and
+exact nested values. Slice 6 repeats this semantic validation after decode. Remove Boolean is already closed. Normal
+SQLite projection and postcommit retry acceptance belong to slice 7, not these handlers.
+
+Focused L1 tests cover strict fields, types, nulls, duplicates, case conflicts, action mismatch, magic, schema,
+truncation, and oversize; install zero/nonzero/oversize/truncated/trailing payloads; remove payload/trailing input; both
+read deadlines, blocked-header/payload cancellation, and post-admission status mutation; zero/remove effects after EOF;
+nonzero install once with publication only after Jailer admits EOF; all outcomes/remove Booleans; invalid fake effect
+results; preserved `DomainError` details; response short writes, errors, half-close, and no double frame. Until slice 6,
+the central switch still rejects both exact actions as unknown without reading.
 
 ### Authorization roles
 
@@ -664,7 +774,9 @@ cancellation, no-drain behavior, and cleanup. Real socketpair tests prove kernel
 while the receiver process remains alive, plus the status-flag mutation deadline case. Independent audit findings on
 initial blocking-mode validation, post-admission status-flag mutation-safe response deadlines, caller/receiver grammar
 parity, and process-independent EOF proof were corrected before commit. Closed install/remove wire values and handlers
-remain pending in increment 5b; the action switch is still empty.
+remain pending in increment 5b; the action switch is still empty. The current 5a-only entry computes its early-error
+response deadline at run entry and retains unused `os.File.Read`/`SO_RCVTIMEO` read scaffolding. Slice 5b must replace
+both before either trusted-release handler can be registered.
 
 ### Paths, process identity, and runtime state
 
