@@ -210,8 +210,8 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     policy. The ordinary downloader and its proxy/cache/retry behavior are outside this trust boundary.
   - [x] Implement and verify the private checksum authority and typed archive digest: source-integrity revalidation,
     proxy-free bounded HTTPS, one closed redirect, exact status/body/grammar checks, cancellation, and checked cleanup.
-  - [ ] Implement the zero-payload root-origin archive fetch without relaxing source, transport, stream, or staging
-    policy.
+  - [ ] Compose the implemented zero-payload root-origin archive fetch into private end-to-end release installation
+    without relaxing source, transport, stream, or staging policy.
 - [x] Implement the strict bounded gzip/PAX/GNU-tar parser: reject traversal, links, devices, sparse files, duplicates,
   unexpected or missing members, malformed headers and metadata, concatenated/trailing input, and size/count overflow;
   route only exact Firecracker/Jailer bytes through the private selected-writer seam.
@@ -287,10 +287,11 @@ privileged wiring.
 - [x] 1. Freeze the zero-payload root-fetch and atomic-removal contracts in ADR-0016 and the release plan. Review the
   documentation diff, paths, links, line length, stale wording, and completed-checkbox set without claiming either
   behavior is implemented or changing the changelog.
-- [ ] 2. Implement the private zero-payload root-origin archive fetch. Revalidate the receiver-derived source and use
-  one retrieval attempt and redirect chain: one initial HTTPS GET plus at most one redirect GET, with no retry. Use
-  TLS 1.2+, no proxy/cache/compression/keepalive, at most one live connection, 5-second phase timeouts, 16 KiB headers,
-  and a fixed five-minute maximum further bounded by the caller context/deadline. Restrict the redirect to exact no-port
+- [x] 2. Implement the private zero-payload root-origin archive fetch. Revalidate the receiver-derived source and use
+  one retrieval attempt and redirect chain: one initial HTTPS GET plus at most one redirect GET, with no retry. Disable
+  HTTP/2 and use fresh HTTP/1 connections because Go's HTTP/2 transport may retry bodyless GETs internally. Use TLS
+  1.2+, no proxy/cache/compression/keepalive, at most one live connection, 5-second phase timeouts, 16 KiB headers, and
+  a fixed five-minute maximum further bounded by the caller context/deadline. Restrict the redirect to exact no-port
   `release-assets.githubusercontent.com` and reapply only fixed safe headers. Require HTTP 200 and one effective
   validated 1-byte-through-128-MiB `Content-Length` after Go `net/http` processing before stage mutation: rely on
   `net/http` to reject malformed/conflicting duplicates and deduplicate identical duplicates, and reject missing or

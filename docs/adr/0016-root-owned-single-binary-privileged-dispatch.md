@@ -312,10 +312,12 @@ lines, CRLF, alternate filenames, uppercase digests, GNU binary markers, and oth
 
 Zero-payload install uses a separate root-origin archive client. It revalidates the complete receiver-derived source
 before constructing the request and performs one retrieval attempt and redirect chain: one initial HTTPS GET plus at
-most one redirect GET, with no retry. Its dedicated transport uses TLS 1.2 or newer, no proxy, cache, compression, or
-keepalive path, at most one live connection, 5-second dial, TLS-handshake, and response-header timeouts, a 16 KiB
-response-header limit, and a fixed five-minute maximum further bounded by the caller context and its deadline. It
-applies only fixed `Accept: application/octet-stream`, `Accept-Encoding: identity`,
+most one redirect GET, with no retry. The client disables HTTP/2 and uses fresh HTTP/1 connections because Go's HTTP/2
+transport may retry bodyless GETs internally, which would violate the no-retry contract. Its dedicated transport uses
+TLS 1.2 or newer, no proxy, cache, compression, or keepalive path, at most one live connection, 5-second dial,
+TLS-handshake, and response-header timeouts, a 16 KiB response-header limit, and a fixed five-minute maximum further
+bounded by the caller context and its deadline. It applies only fixed `Accept: application/octet-stream`,
+`Accept-Encoding: identity`,
 `Cache-Control: no-store`, and `User-Agent: mvmctl-trusted-release/1` headers.
 
 At most one redirect is accepted. The redirect must remain HTTPS and target the exact host

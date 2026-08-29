@@ -233,11 +233,12 @@ the separate closed transport contract in ADR-0016. Root never opens a caller pa
 and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority. Extraction validates the reviewed
 complete upstream member allowlist and extracts only Firecracker and Jailer.
 
-The zero-payload root fetch revalidates the receiver-derived source before one retrieval attempt and redirect chain:
-one initial HTTPS GET plus at most one redirect GET, with no retry. Its dedicated TLS-1.2-or-newer transport has no
-proxy, cache, compression, or keepalive path and permits one live connection. It applies 5-second dial/TLS/header
-timeouts, a 16 KiB header limit, and a fixed five-minute maximum further bounded by the caller context and its
-deadline. The redirect may target only exact host `release-assets.githubusercontent.com` without a port, user
+The implemented zero-payload root fetch revalidates the receiver-derived source before one retrieval attempt and
+redirect chain: one initial HTTPS GET plus at most one redirect GET, with no retry. It disables HTTP/2 and uses fresh
+HTTP/1 connections because Go's HTTP/2 transport may retry bodyless GETs internally. Its dedicated TLS-1.2-or-newer
+transport has no proxy, cache, compression, or keepalive path and permits one live connection. It applies 5-second
+dial/TLS/header timeouts, a 16 KiB header limit, and a fixed five-minute maximum further bounded by the caller context
+and its deadline. The redirect may target only exact host `release-assets.githubusercontent.com` without a port, user
 information, or fragment. The opaque signed query is allowed, but only the fixed safe headers are reapplied; no
 authorization or cookie is carried. HTTP 200 and one effective validated `Content-Length` from 1 byte through 128 MiB
 after Go `net/http` processing are required before stage mutation. `net/http` rejects malformed or conflicting
@@ -248,6 +249,9 @@ positioned-write, independent-digest, EOF, fsync, stable-metadata, and zero-offs
 starts poisons the stage. A body-close failure after an otherwise successful receive also poisons it, so only checked
 `Release` remains valid. Header, status, and length rejections happen before mutation. There is no temporary path,
 memory copy, replay, ordinary downloader, or root asset-mirror access.
+
+The private fetch and anonymous-stage admission are implemented with hermetic L1 coverage. Private end-to-end install
+composition and typed privileged, API, and CLI wiring remain pending.
 
 The frozen v0.3 extraction contract accepts only audited x86_64 archives for `1.10.1`, `1.14.2`, `1.14.3`, `1.14.4`,
 `1.15.0`, `1.15.1`, `1.16.0`, and `1.16.1`. Each must contain the exact order-independent 24-member set recorded in
@@ -369,19 +373,18 @@ func (p *preparedRelease) Release(ctx context.Context) error
 Preparation and checked release are implemented first. The later launch slice adds only the typed ownership transfer
 that it actually needs; it does not expose raw descriptors, paths, caller-supplied hashes, or a generic operation hook.
 
-The remaining trusted-release work proceeds in this order. This sequence is an acceptance plan and does not mark any
-pending implementation complete:
+The trusted-release work proceeds in this order. Steps 1 and 2 are complete; steps 3 through 9 remain an acceptance
+plan and are not implemented:
 
 1. **Freeze the fetch and removal contracts.** ADR-0016 and the task ledger must record the exact trust inputs, commit
    points, crash states, error details, and prohibited fallbacks. Acceptance is a documentation diff review with no
    implementation or changelog claim; verification checks links, referenced paths, line length, stale wording, and the
    unchanged completed-checklist set.
-2. **Implement the private root-origin fetch.** Add the dedicated zero-payload archive client and stream its one
-   response directly into the anonymous archive stage. Acceptance requires the exact source, transport, redirect,
-   response, size, stream, and checked-close policy above. Hermetic L1 tests cover every request, redirect, header,
-   status, and length boundary, plus short/long body, digest mismatch, cancellation, timeout, receive-stage poisoning,
-   post-receive close poisoning, and no pre-admission mutation. Focused format, golines, vet, normal tests, and race
-   tests must pass.
+2. **Implement the private root-origin fetch.** The dedicated zero-payload archive client now streams its final accepted
+   response directly into the anonymous archive stage. It enforces the exact source, transport, redirect, response,
+   size, stream, and checked-close policy above. Hermetic L1 tests cover request, redirect, header, status, length,
+   short/long body, digest mismatch, cancellation, timeout, receive-stage poisoning, post-receive close poisoning, and
+   no pre-admission mutation.
 3. **Compose private end-to-end install.** One private release-authority method selects caller-stream or root-fetch
    input, independently fetches checksum authority, admits the anonymous archive, extracts and finalizes both
    executables, assembles the strict candidate, and performs absent publication or explicit replacement. Acceptance
