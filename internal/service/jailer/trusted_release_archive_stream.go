@@ -22,6 +22,7 @@ const (
 	trustedReleaseArchiveStageEmpty trustedReleaseArchiveStageState = iota
 	trustedReleaseArchiveStageReady
 	trustedReleaseArchiveStageFailed
+	trustedReleaseArchiveStageExtracted
 )
 
 // CRITICAL: Body is the authenticated raw request stream positioned at the payload start, not a pre-limited reader;

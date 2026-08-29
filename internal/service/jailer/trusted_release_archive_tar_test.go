@@ -70,6 +70,13 @@ func TestParseTrustedReleaseTarHeaderRejectsNonCanonicalEncoding(t *testing.T) {
 		},
 		"nonzero name padding":  func(raw []byte) { raw[99] = 'x' },
 		"nonzero GNU extension": func(raw []byte) { raw[trustedReleaseTarGNUExtensionOffset] = '1' },
+		"octal device field": func(raw []byte) {
+			writeTrustedReleaseTarOctalForTest(
+				t,
+				raw[trustedReleaseTarDeviceMajorOffset:trustedReleaseTarDeviceMinorOffset],
+				0,
+			)
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -210,8 +217,12 @@ func trustedReleaseTarHeaderForTest(t *testing.T, header trustedReleaseTarHeader
 	copy(raw[263:265], []byte{'0', '0'})
 	writeTrustedReleaseTarStringForTest(t, raw[265:297], header.userName)
 	writeTrustedReleaseTarStringForTest(t, raw[297:329], header.groupName)
-	writeTrustedReleaseTarOctalForTest(t, raw[329:337], header.deviceMajor)
-	writeTrustedReleaseTarOctalForTest(t, raw[337:345], header.deviceMinor)
+	if header.deviceMajor != 0 {
+		writeTrustedReleaseTarOctalForTest(t, raw[329:337], header.deviceMajor)
+	}
+	if header.deviceMinor != 0 {
+		writeTrustedReleaseTarOctalForTest(t, raw[337:345], header.deviceMinor)
+	}
 	writeTrustedReleaseTarChecksumForTest(t, raw)
 	return raw
 }

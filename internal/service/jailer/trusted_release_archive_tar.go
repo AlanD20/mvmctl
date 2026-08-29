@@ -121,17 +121,12 @@ func parseTrustedReleaseTarHeader(raw []byte) (trustedReleaseTarHeader, error) {
 	if err != nil {
 		return trustedReleaseTarHeader{}, err
 	}
-	deviceMajor, err := parseTrustedReleaseTarOctal(
-		raw[trustedReleaseTarDeviceMajorOffset:trustedReleaseTarDeviceMinorOffset],
-	)
-	if err != nil {
-		return trustedReleaseTarHeader{}, err
-	}
-	deviceMinor, err := parseTrustedReleaseTarOctal(
-		raw[trustedReleaseTarDeviceMinorOffset:trustedReleaseTarGNUExtensionOffset],
-	)
-	if err != nil {
-		return trustedReleaseTarHeader{}, err
+	if !allTrustedReleaseArchiveBytesZero(
+		raw[trustedReleaseTarDeviceMajorOffset:trustedReleaseTarGNUExtensionOffset],
+	) {
+		return trustedReleaseTarHeader{}, trustedReleaseArchiveFormatError(
+			"trusted release tar header contains a device field",
+		)
 	}
 
 	return trustedReleaseTarHeader{
@@ -145,8 +140,8 @@ func parseTrustedReleaseTarHeader(raw []byte) (trustedReleaseTarHeader, error) {
 		linkName:    linkName,
 		userName:    userName,
 		groupName:   groupName,
-		deviceMajor: deviceMajor,
-		deviceMinor: deviceMinor,
+		deviceMajor: 0,
+		deviceMinor: 0,
 	}, nil
 }
 
