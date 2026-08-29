@@ -94,8 +94,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaves after the first architecture-directory fsync, fsyncs the retired directory, rechecks its name binding, removes
   it, and fsyncs the architecture directory again. Post-commit failures preserve the primary error and report
   `release_replaced`, `durability_uncertain`, and `retired_release_retained` state where applicable.
+- Added private atomic release removal under the exact release-slot lease. Existing canonical state is fully admitted
+  before recovery, exact references block removal, and the complete version directory moves to a validated reserved
+  name through `renameat2(RENAME_NOREPLACE)` with eight bounded `EEXIST`-only attempts and no fallback. Rename success
+  makes the target committed and close-only; cancellation-independent cleanup fsyncs the architecture, removes only
+  the three fixed leaves through retained descriptors, verifies both reserved-name bindings, removes the retired
+  directory, and fsyncs the architecture again. Post-commit errors preserve the primary error and report
+  `release_removed`, `durability_uncertain`, and `retired_release_retained` precisely.
+- Hardened reserved-candidate recovery by retaining each admitted directory's device/inode identity and rechecking its
+  exact name binding before the first leaf unlink and again before `rmdir`, preventing cleanup from deleting a replaced
+  directory name.
 - This authority remains private and unwired. The aarch64 archive audit, typed caller/privileged transport integration,
-  actual release removal, and L2/system release qualification are still release blockers.
+  and L2/system release qualification are still release blockers.
 
 #### Descriptor-pinned managed-cache and base launch-resource substrates
 
@@ -275,8 +285,8 @@ The following items are release blockers and are intentionally not described abo
   caller-writable configuration from the whole mounted VM directory. The final receiver must consume pinned individual
   resources and derive/verify every jail-visible path after durable registration.
 - Wire the private trusted-release authority through typed privileged install/remove operations; complete the aarch64
-  archive audit, actual release removal, and CLI-level qualification. The implemented atomic install and explicit
-  replacement substrate is not yet reachable from public `mvm bin` operations.
+  archive audit and CLI-level qualification. The implemented atomic install, replacement, and removal substrate is not
+  yet reachable from public `mvm bin` operations.
 - Migrate Jailer, loopmount, network, firewall, and supported host mutations to distinct typed privileged actions; remove
   the public root `mvm run jailer` and `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link

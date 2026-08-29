@@ -618,8 +618,12 @@ both parent fsyncs, every fixed retirement step, cleanup, recovery, and combined
 install composition now selects caller-stream or root-fetch admission, independently resolves checksum authority,
 assembles and publishes the exact candidate, and returns a closed outcome with fully re-admitted manifest metadata.
 Precommit failure returns a zero result, while committed results survive post-commit cleanup errors. This private path
-is not wired to callers or the privileged transport. The aarch64 archive audit, typed privileged install/removal
-integration, actual release removal, and L2 release qualification remain Task 6 work.
+also implements atomic installed-release removal and the reserved-directory recovery binding correction. Removal uses
+existing-only traversal, full canonical admission before recovery, exact reference proof, an eight-attempt
+`RENAME_NOREPLACE` commit, explicit committed/close-only target state, ordered fixed-leaf retirement, and exact
+post-commit details. Recovery now rechecks each reserved directory's device/inode binding before leaf cleanup and
+before `rmdir`. This private path is not wired to callers or the privileged transport. The aarch64 archive audit, typed
+privileged install/removal integration, and L2 release qualification remain Task 6 work.
 The strict wire codec and caller socketpair process transport, including concurrent upload/response, EOF qualification,
 half-close, and bounded reaping, are implemented. Receiver-side fd-0 type and peer authentication, independent
 `CLOEXEC`, one-request framing/EOF and response half-close, and closed install/remove handlers remain pending.

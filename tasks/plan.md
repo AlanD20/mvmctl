@@ -299,8 +299,7 @@ error metadata. The private end-to-end method composes independent checksum auth
 archive admission, strict extraction/finalization, candidate assembly, and absent/identical/replacement selection. It
 returns only a closed outcome and fully re-admitted manifest metadata, preserves committed results through post-commit
 errors, and returns a zero result for precommit failure. This remains a private, unwired substrate. The aarch64 audit,
-caller/privileged-transport wiring, actual release removal, L2 qualification, and remaining release integration work
-are still pending.
+caller/privileged-transport wiring, L2 qualification, and remaining release integration work are still pending.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are
@@ -375,6 +374,10 @@ the retry recovers first and then reports unchanged; when canonical exists, it i
 may later suppress only an untrusted SQLite warning in the ordinary process; it is never carried to root or allowed to
 bypass root references.
 
+Private atomic removal and the recovery binding correction are implemented with L1 fault coverage for safe absence,
+admission and references, bounded collision retry, every commit/cleanup boundary, exact post-commit details,
+close-only target state, device/inode replacement races, crash/retry, and slot-lock retention through final durability.
+
 Launch uses a private prepared value that owns the release-slot lease, verified manifest, pinned release directory, and
 pinned executable descriptors. It alone supplies release hashes to instance registration. The privileged transport must
 return a strict versioned response envelope before release install/remove is wired, because generic subprocess errors
@@ -388,7 +391,7 @@ func (p *preparedRelease) Release(ctx context.Context) error
 Preparation and checked release are implemented first. The later launch slice adds only the typed ownership transfer
 that it actually needs; it does not expose raw descriptors, paths, caller-supplied hashes, or a generic operation hook.
 
-The trusted-release work proceeds in this order. Steps 1 through 3 are complete; steps 4 through 9 remain an acceptance
+The trusted-release work proceeds in this order. Steps 1 through 4 are complete; steps 5 through 9 remain an acceptance
 plan and are not implemented:
 
 1. **Freeze the fetch and removal contracts.** ADR-0016 and the task ledger must record the exact trust inputs, commit

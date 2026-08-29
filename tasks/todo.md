@@ -274,14 +274,13 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
       fsync edges; verify one complete old/new release plus exact partial-state details, never a partial installed
       directory.
 
-The completed recovery foundation above covers grammar, metadata, safe fixed-leaf subsets, ordering, and durability.
-The reserved-name device/inode rechecks are deliberately still unchecked below and must land with removal before
-privileged wiring.
+The completed recovery foundation above covers grammar, metadata, safe fixed-leaf subsets, ordering, durability, and
+the reserved-name device/inode rechecks required before leaf cleanup and directory removal.
 
-- [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
-- [ ] Complete L1 fault injection for release removal and typed privileged integration. After every reference-scan,
-  cancellation, syscall, fsync, and cleanup failure, each canonical slot contains one complete three-file release or is
-  absent, never a partial release.
+- [x] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
+- [ ] Complete L1 fault injection for typed privileged integration. Private release removal now proves that after every
+  reference-scan, cancellation, syscall, fsync, and cleanup failure, each canonical slot contains one complete
+  three-file release or is absent, never a partial release.
 
 **Ordered Task 6 slices:**
 
@@ -315,25 +314,25 @@ privileged wiring.
   both body modes, both permission values across absent/identical/differing canonical states, exact results, every
   handoff and commit boundary, cancellation, and cleanup fault. Add no transport, CLI, API, path, mirror, or
   legacy-downloader dependency.
-- [ ] 4. Implement only `releaseAuthority.removeInstalled(ctx, slot) (removed bool, err error)`: acquire and retain the
+- [x] 4. Implement only `releaseAuthority.removeInstalled(ctx, slot) (removed bool, err error)`: acquire and retain the
   slot lease before existing-only traversal. Return unchanged for safe store/architecture absence. Within an existing
   architecture, inspect canonical first: if safely absent, recover then return unchanged without reference scan; if
   present, fully admit and identity-bind it before recovery, so corrupt canonical state causes zero recovery mutation.
   Recover only after successful admission, then pass the exact identity to `requireUnreferenced`.
-  - [ ] Commit only by moving canonical to a fresh validated reserved name through descriptor-relative
+  - [x] Commit only by moving canonical to a fresh validated reserved name through descriptor-relative
     `renameat2(RENAME_NOREPLACE)` with at most eight total name/rename attempts: the first plus seven retries. Only
     `EEXIST` is retryable; every name-generation, grammar, cancellation, binding, and other rename failure stops.
-  - [ ] Make removal committed/close-only immediately after rename. Use uncancelled first parent fsync, best-effort
+  - [x] Make removal committed/close-only immediately after rename. Use uncancelled first parent fsync, best-effort
     admission close and fixed `manifest.json`, `jailer`, `firecracker` unlink, old-directory fsync, reserved-binding
     recheck, `rmdir`, and final parent fsync. Preserve the primary error and exact `release_removed`,
     `durability_uncertain`, and `retired_release_retained` details.
-  - [ ] Classify removal-owned rename/fsync/unlink/`rmdir` failures as `CodeBinaryRemoveFailed`/`ClassInternal`.
+  - [x] Classify removal-owned rename/fsync/unlink/`rmdir` failures as `CodeBinaryRemoveFailed`/`ClassInternal`.
     Preserve every shared admission/reference `DomainError` code, class, entity, details, and cause through cleanup and
     annotation.
-  - [ ] Correct recovery in this same slice: retain every admitted reserved directory device/inode, reopen and recheck
+  - [x] Correct recovery in this same slice: retain every admitted reserved directory device/inode, reopen and recheck
     its exact name immediately before leaf unlink and again before `rmdir`, admit all matching entries before mutation,
     accept only safe subsets of the three fixed leaves, and never delete a replacement name or use `RemoveAll`.
-  - [ ] L1 covers absence at every level, corrupt canonical with zero recovery mutation, exact reference identity,
+  - [x] L1 covers absence at every level, corrupt canonical with zero recovery mutation, exact reference identity,
     referenced/corrupt authority, same-filesystem and both binding races, invalid names, success on attempt eight,
     exhaustion after eight `EEXIST` results, immediate non-`EEXIST` failure, cancellation, every syscall/fsync/close/
     unlink/`rmdir` edge, exact error classification, combined metadata, close-only release, and crash/retry. Canonical
