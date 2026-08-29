@@ -1,10 +1,10 @@
--- Migration: 004_service_access_policies
+-- Migration: 004_typed_policies
 -- Version: 4
--- Description: Routed service-access policy intent and derived firewall rule identity
+-- Description: Closed traffic and VM-to-VM execution policy intent
 
 PRAGMA foreign_keys = OFF;
 
-CREATE TABLE service_access_policies (
+CREATE TABLE network_traffic_policies (
     id TEXT PRIMARY KEY,
     source_network_id TEXT NOT NULL,
     destination_vm_id TEXT NOT NULL,
@@ -17,8 +17,40 @@ CREATE TABLE service_access_policies (
     FOREIGN KEY (destination_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
     UNIQUE(source_network_id, destination_vm_id, protocol, destination_port_start, destination_port_end)
 );
-CREATE INDEX idx_service_access_policies_source ON service_access_policies(source_network_id);
-CREATE INDEX idx_service_access_policies_destination_vm ON service_access_policies(destination_vm_id);
+CREATE INDEX idx_network_traffic_source ON network_traffic_policies(source_network_id);
+CREATE INDEX idx_network_traffic_destination ON network_traffic_policies(destination_vm_id);
+
+CREATE TABLE vm_traffic_policies (
+    id TEXT PRIMARY KEY,
+    source_vm_id TEXT NOT NULL,
+    destination_vm_id TEXT NOT NULL,
+    protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
+    destination_port_start INTEGER NOT NULL CHECK(destination_port_start BETWEEN 1 AND 65535),
+    destination_port_end INTEGER NOT NULL CHECK(destination_port_end BETWEEN destination_port_start AND 65535),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    FOREIGN KEY (source_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    FOREIGN KEY (destination_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    CHECK(source_vm_id <> destination_vm_id),
+    UNIQUE(source_vm_id, destination_vm_id, protocol, destination_port_start, destination_port_end)
+);
+CREATE INDEX idx_vm_traffic_source ON vm_traffic_policies(source_vm_id);
+CREATE INDEX idx_vm_traffic_destination ON vm_traffic_policies(destination_vm_id);
+
+CREATE TABLE exec_policies (
+    id TEXT PRIMARY KEY,
+    source_vm_id TEXT NOT NULL,
+    destination_vm_id TEXT NOT NULL,
+    target_user TEXT NOT NULL CHECK(length(target_user) BETWEEN 1 AND 32 AND target_user <> 'root'),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    FOREIGN KEY (source_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    FOREIGN KEY (destination_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,
+    CHECK(source_vm_id <> destination_vm_id),
+    UNIQUE(source_vm_id, destination_vm_id, target_user)
+);
+CREATE INDEX idx_exec_policy_source ON exec_policies(source_vm_id);
+CREATE INDEX idx_exec_policy_destination ON exec_policies(destination_vm_id);
 
 ALTER TABLE iptables_rules RENAME TO iptables_rules_v3;
 CREATE TABLE iptables_rules (
@@ -45,8 +77,7 @@ CREATE TABLE iptables_rules (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     last_verified_at TIMESTAMP NULL,
     is_active INTEGER DEFAULT 1 NOT NULL CHECK(is_active IN (0, 1)),
-    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE,
-    FOREIGN KEY (service_access_policy_id) REFERENCES service_access_policies(id) ON DELETE CASCADE
+    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
 );
 INSERT INTO iptables_rules (
     id, table_name, chain_name, rule_type, protocol, source, destination, in_interface,
@@ -94,8 +125,7 @@ CREATE TABLE nftables_rules (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     last_verified_at TIMESTAMP NULL,
     is_active INTEGER DEFAULT 1 NOT NULL CHECK(is_active IN (0, 1)),
-    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE,
-    FOREIGN KEY (service_access_policy_id) REFERENCES service_access_policies(id) ON DELETE CASCADE
+    FOREIGN KEY (network_id) REFERENCES networks(id) ON DELETE CASCADE
 );
 INSERT INTO nftables_rules (
     id, chain, rule_type, table_name, protocol, source, destination, in_interface,
