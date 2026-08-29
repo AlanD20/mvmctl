@@ -253,6 +253,16 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [ ] Create the architecture/version slot, stage and write the strict manifest, and publish or replace the complete
     three-file release descriptor-relatively and atomically; the anonymous executable stages remain unpublished until
     this transition succeeds.
+    - [ ] Create and durably verify the fixed architecture directory; admit and safely remove only slot-scoped reserved
+      candidate/retired directories with fixed-leaf cleanup and no recursive fallback.
+    - [ ] Link the finalized anonymous executables and strict manifest into one root-owned candidate directory, fsync
+      every file and directory, and re-admit the complete candidate through the installed-release verifier.
+    - [ ] Implement idempotent exact-manifest detection and absent publication with descriptor-relative
+      `renameat2(RENAME_NOREPLACE)`, including post-commit state and durability details.
+    - [ ] Implement explicit replacement only after complete old-release admission and unreferenced-identity proof;
+      commit with `renameat2(RENAME_EXCHANGE)` and retire only fixed old leaves after the first parent fsync.
+    - [ ] Add L1 crash/failure injection for every pre-commit, commit, parent-fsync, retirement, and final-fsync edge;
+      verify one complete old/new release plus exact partial-state details, never a partial installed directory.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
 - [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.
 

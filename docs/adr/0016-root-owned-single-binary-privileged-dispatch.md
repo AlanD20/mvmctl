@@ -385,6 +385,46 @@ then the release-slot lease. Cleanup always uses a cancellation-independent cont
 error while joining cleanup diagnostics. This slice exposes only preparation and checked release. Launch registration
 remains deferred until the process-identity work can transfer the release lease and executable ownership together.
 
+Trusted-release publication is one descriptor-relative directory transaction under that same release-slot lease. A
+verified and fsynced architecture directory may remain empty after a failed or interrupted install; it is safe managed
+structure, not an installed release. A candidate directory is exact `root:root` mode `0700` and uses the reserved,
+slot-scoped name `.mvm-release-<slot-digest>-<nonce>.tmp`, where `<slot-digest>` is the 64-character lowercase SHA-256
+used by the release-slot lock and `<nonce>` is 32 lowercase hexadecimal characters from 16 cryptographically random
+bytes. The candidate contains only the fixed `firecracker`, `jailer`, and `manifest.json` leaves. Both finalized
+anonymous executables are linked into it descriptor-relatively; the strict manifest is staged without accepting a
+pathname. The linked files, candidate directory, and architecture directory are fsynced in that order before commit,
+and the complete candidate is re-admitted through its retained directory descriptor by the same manifest/executable
+read path used for installed releases.
+
+An exact canonical-manifest match at the installed slot is idempotent and reports unchanged even when replacement was
+requested. It does not scan instance references because the release authority bytes and identity do not change. A
+different existing release may be replaced only when the request explicitly authorizes replacement, the current
+manifest and both executable leaves pass complete installed-release admission, and
+`requireUnreferenced(current.releaseIdentity())` succeeds while the slot lease remains held. An unreadable, incomplete,
+or corrupt installed slot always fails closed; replacement is not a repair bypass.
+
+An absent install commits with descriptor-relative `renameat2(RENAME_NOREPLACE)` from the reserved candidate name to
+the canonical version leaf. A replacement commits with descriptor-relative `renameat2(RENAME_EXCHANGE)`, which moves
+the old complete version directory to the reserved candidate name. Lack of either kernel operation is a host-capability
+failure; there is no plain-rename, copy, per-file, or other non-atomic fallback. Successful rename/exchange is the
+observable commit point. Any later error preserves the primary `DomainError` and adds `release_installed=true` or
+`release_replaced=true`. Failure to fsync the architecture directory after that commit also adds
+`durability_uncertain=true`; code never attempts to roll back a visible committed release.
+
+After a replacement commit and successful architecture-directory fsync, retirement unlinks only the three fixed leaves
+through the retained old-directory descriptor, fsyncs that directory, removes the reserved directory, and fsyncs the
+architecture directory again. Failure before the old directory is removed adds `retired_release_retained=true` and
+does not disturb the new installed release. Failure of the final architecture fsync adds `durability_uncertain=true`.
+Cancellation after commit follows the same state-reporting and cancellation-independent cleanup rules.
+
+Before staging a new candidate, recovery under the release-slot lease scans only names with that slot's exact reserved
+prefix. It opens each without following links and removes it only when it is an exact managed directory containing a
+subset of the three fixed leaves, each a root-owned regular file with its fixed mode, one hard link, and bounded size.
+Recovery unlinks only those fixed leaves and removes the now-empty directory; it never recursively removes content.
+Any unexpected entry, type, owner, mode, link count, size, or unreadable state fails closed and leaves the directory for
+operator inspection. This covers both pre-commit candidate remnants and post-exchange retired directories without
+treating arbitrary architecture-directory entries as disposable.
+
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
 dedicated checksum authority independently fetches the derived sidecar with the closed transport policy above and

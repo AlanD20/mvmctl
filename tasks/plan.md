@@ -260,6 +260,20 @@ removal use only fixed leaves and preserve an old complete release or expose a n
 pair. Post-commit errors report `release_installed`, `release_replaced`, `release_removed`, `durability_uncertain`, and
 `retired_release_retained` details without replacing the primary error identity.
 
+Publication holds the release-slot lease and uses a root-owned `0700` candidate directory beneath the pinned
+architecture directory. Its reserved slot-scoped name is
+`.mvm-release-<64-lowercase-slot-digest>-<32-lowercase-random-hex>.tmp`; recovery examines only that exact slot prefix,
+admits only a subset of the three fixed safe leaves, and performs fixed-leaf unlink plus `rmdir`, never recursive
+removal. Empty verified architecture directories may remain. The finalized executable stages and strict manifest are
+linked into the candidate, fsynced, and re-admitted as one complete release before commit.
+
+An exact canonical-manifest match is an idempotent unchanged result regardless of replacement intent. A differing
+installed release requires explicit replacement, complete admission of the old release, and an unreferenced old full
+identity; corrupt state fails closed. Absent install uses descriptor-relative `renameat2(RENAME_NOREPLACE)`, replacement
+uses `renameat2(RENAME_EXCHANGE)`, and neither has a non-atomic fallback. Rename/exchange success is the observable
+commit point. Subsequent errors annotate the committed state and durability; replacement retirement removes only the
+old fixed leaves and reserved directory after the first parent fsync and never rolls back the new release.
+
 Launch uses a private prepared value that owns the release-slot lease, verified manifest, pinned release directory, and
 pinned executable descriptors. It alone supplies release hashes to instance registration. The privileged transport must
 return a strict versioned response envelope before release install/remove is wired, because generic subprocess errors
