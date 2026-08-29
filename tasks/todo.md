@@ -223,7 +223,7 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     enforce exact root ownership/mode and fsync newly observed child and parent directories before staging bytes.
   - [x] Create a private anonymous `O_TMPFILE|O_EXCL` archive-stage lease on the pinned trusted-store filesystem with
     exact empty, unlinked, root-owned `0600` metadata and no pathname, memory, or alternate-filesystem fallback.
-  - [ ] Admit one exact caller-supplied 1-byte through 128-MiB stream into that stage with bounded positioned writes,
+  - [x] Admit one exact caller-supplied 1-byte through 128-MiB stream into that stage with bounded positioned writes,
     authoritative SHA-256 comparison, exact EOF, fsync, stable metadata, zero offset, and fail-closed poisoning.
   - [x] Freeze the strict schema-v1 manifest contract, 4 KiB record bound, typed SHA-256 fields, and 120-byte through
     64 MiB executable-size policy; the fixed store leaf is `manifest.json`.

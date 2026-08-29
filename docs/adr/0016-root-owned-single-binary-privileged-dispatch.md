@@ -354,8 +354,10 @@ are not yet wired to the privileged request or legacy installer. The write-side 
 only the fixed managed `mvmctl/binaries` base through pinned ancestors, corrects metadata only on directories it created,
 and durably syncs each newly observed child and parent. It can now create and retain the fixed anonymous archive stage
 described above, including fail-closed metadata admission, cancellation-independent cleanup, and cleanup-error
-preservation. Bounded streaming and digest verification, extraction, the complete member allowlist,
-architecture/version creation, manifest writing, and atomic trusted-store installation remain Task 6 work.
+preservation. That stage now admits one bounded exact-length caller stream with positioned writes, exact EOF,
+independent-digest verification, fsync, stable identity and metadata, zero offset, and permanent poisoning after any
+started failure. Root-origin archive fetching, extraction, the complete member allowlist, architecture/version
+creation, manifest writing, and atomic trusted-store installation remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
