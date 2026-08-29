@@ -250,7 +250,7 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     offsets, exact descriptor retention, cancellation, and checked reverse cleanup.
   - [x] Compose the release-slot lease, pinned store and version directory, verified manifest identity, and exact
     executable descriptors into one private prepared installed-release lease with strict reverse checked cleanup.
-  - [ ] Create the architecture/version slot, stage and write the strict manifest, and publish or replace the complete
+  - [x] Create the architecture/version slot, stage and write the strict manifest, and publish or replace the complete
     three-file release descriptor-relatively and atomically; the anonymous executable stages remain unpublished until
     this transition succeeds.
     - [x] Create and durably verify the fixed architecture directory under the exact active slot lease; admit every
@@ -266,13 +266,15 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
       `renameat2(RENAME_NOREPLACE)` and no fallback; transition to installed before parent fsync and close-only cleanup;
       report `release_installed`/`durability_uncertain`; and cover pre-commit, commit, parent-fsync, close,
       cancellation, and reserved-name binding faults.
-    - [ ] Implement explicit replacement only after complete old-release admission and unreferenced-identity proof;
+    - [x] Implement explicit replacement only after complete old-release admission and unreferenced-identity proof;
       commit with `renameat2(RENAME_EXCHANGE)` and retire only fixed old leaves after the first parent fsync.
-    - [ ] Complete the replacement/exchange fault matrix for reference-scan, commit, parent-fsync, retirement, and final
+    - [x] Complete the replacement/exchange fault matrix for reference-scan, commit, parent-fsync, retirement, and final
       fsync edges; verify one complete old/new release plus exact partial-state details, never a partial installed
       directory.
 - [ ] Referenced release removal/replacement holds the release lease and fails closed on unreadable records.
-- [ ] L1 failure injection proves an old complete pair or no pair, never a partial trusted release.
+- [ ] Complete L1 fault injection for release removal and typed privileged integration. After every reference-scan,
+  cancellation, syscall, fsync, and cleanup failure, each canonical slot contains one complete three-file release or is
+  absent, never a partial release.
 
 ### Task 7: Add private mount and process identity primitives
 

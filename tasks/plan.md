@@ -258,15 +258,22 @@ canonical manifest is positioned-written and fsynced in an anonymous root-owned 
 the finalized anonymous Firecracker/Jailer pair into one exact root-owned mode-`0700` reserved candidate using only
 `AT_EMPTY_PATH`. The linked files, candidate directory, and architecture directory are fsynced in that order; every
 writable descriptor is checked closed before exact shared re-admission. Candidate discard, recovery, cancellation, and
-partial-failure edges have fault-injection coverage. Private absent-only publication is now implemented. An existing
-canonical version must contain exactly the three fixed leaves and pass shared strict manifest, full-file hash, and ELF
-admission before an identical canonical manifest returns unchanged; a different complete release conflicts, and unsafe
-or corrupt state fails closed. An absent slot commits with descriptor-relative `renameat2(RENAME_NOREPLACE)` and no
-fallback. The candidate becomes installed before the post-commit parent fsync and close-only cleanup; later errors
-report `release_installed` and, for parent-fsync failure, `durability_uncertain`. Fault injection covers absent-path
-pre-commit, commit, parent-fsync, close, cancellation, and reserved-name binding edges. This remains a private, unwired
-substrate. The aarch64 audit, root-origin fetch, caller/privileged-transport wiring, replacement/exchange with an exact
-reference scan, retirement, and the remaining replacement/final-fsync fault matrix remain implementation work.
+partial-failure edges have fault-injection coverage. Both private publication transitions are now implemented. An
+existing canonical version must contain exactly the three fixed leaves and pass shared strict manifest, full-file hash,
+and ELF admission before an identical canonical manifest returns unchanged without a reference scan. A different
+complete release conflicts on absent-only publication, and unsafe or corrupt state fails closed. An absent slot commits
+with descriptor-relative `renameat2(RENAME_NOREPLACE)` and no fallback. Explicit replacement fully admits the old
+release, uses the active release-slot lease to prove its exact identity unreferenced, and rechecks both directory
+bindings. It commits only through descriptor-relative `renameat2(RENAME_EXCHANGE)` without an absent-install fallback.
+The candidate becomes installed or replaced before post-commit fsync and close-only cleanup. Replacement retirement
+unlinks only the three fixed old leaves through the retained old-directory descriptor and fsyncs that directory. It
+then rechecks the reserved-name binding, removes that directory, and fsyncs the architecture directory again. Later
+errors preserve the primary `DomainError` and report the committed state, uncertain durability, and retained old
+release precisely. Fault injection covers referenced-release and corrupt-authority rejection, name-binding races,
+cancellation boundaries, commit syscalls, both parent fsyncs, every retirement step, cleanup, recovery, and combined
+error metadata. This remains a private, unwired substrate. The aarch64 audit, root-origin fetch,
+caller/privileged-transport wiring, actual release removal, L2 qualification, and
+remaining release integration work are still pending.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are

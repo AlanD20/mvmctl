@@ -479,17 +479,25 @@ the linked files are fsynced first, followed by the candidate directory and then
 writable descriptors are checked closed; and the complete exact candidate is re-admitted through the shared
 installed-release verifier. The production linker uses only `AT_EMPTY_PATH`. Fault injection covers candidate creation,
 linking, metadata checks, fsyncs, checked writable-stage closure, re-admission, discard, recovery, cancellation, and
-partial failures. Candidate assembly itself creates no canonical version directory. The separate private absent-only
-publication transition is now implemented. An existing canonical version must have exactly the three fixed
-leaves and pass the shared strict manifest, full-file hash, and ELF admission before an identical canonical manifest
-returns unchanged; a different complete release conflicts, and unsafe or corrupt state fails closed. An absent slot
-commits only through descriptor-relative `renameat2(RENAME_NOREPLACE)` with no fallback. Rename success changes the
-candidate to installed state before the cancellation-independent parent fsync and close-only cleanup. Post-commit
-errors report `release_installed=true`; a failed parent fsync also reports `durability_uncertain=true`. L1 fault tests
-cover absent-path pre-commit admission, commit failure and collision, parent fsync, descriptor close, cancellation, and
-reserved-name binding edges. This private path is not wired to callers or the privileged transport. Root-origin archive
-fetching, the aarch64 archive audit, replacement/exchange with an exact reference scan, old-release retirement, and the
-remaining replacement/final-fsync fault matrix remain Task 6 work.
+partial failures. Candidate assembly itself creates no canonical version directory. Both private publication
+transitions are now implemented. An existing canonical version must have exactly the three fixed leaves and pass the
+shared strict manifest, full-file hash, and ELF admission before an identical canonical manifest returns unchanged
+without a reference scan. A different complete release conflicts on absent-only publication; explicit replacement
+passes the old manifest-derived identity to the active release-slot lease's exact `requireUnreferenced` scan. Unsafe or
+corrupt installed or reference-authority state fails closed. Immediately before replacement, both the candidate and
+canonical directory name-to-identity bindings are rechecked.
+
+An absent slot commits only through descriptor-relative `renameat2(RENAME_NOREPLACE)` with no fallback. Explicit
+replacement commits only through descriptor-relative `renameat2(RENAME_EXCHANGE)` with no absent-install fallback.
+Exchange success changes the candidate to replaced, close-only state before cancellation-independent post-commit work.
+That work fsyncs the architecture directory, unlinks only the three fixed old-release leaves through the retained old
+directory descriptor, fsyncs the retired directory, rechecks its reserved-name binding, removes it, and fsyncs the
+architecture directory again. Post-commit errors preserve the primary `DomainError` and report
+`release_replaced=true`, plus `durability_uncertain=true` or `retired_release_retained=true` where applicable. L1 tests
+cover reference and corrupt-authority rejection, both binding races, cancellation boundaries, exchange syscall errors,
+both parent fsyncs, every fixed retirement step, cleanup, recovery, and combined-error metadata. This private path is
+not wired to callers or the privileged transport. Root-origin archive fetching, the aarch64 archive audit, typed
+privileged install/removal integration, actual release removal, and L2 release qualification remain Task 6 work.
 
 ### Paths, process identity, and runtime state
 
