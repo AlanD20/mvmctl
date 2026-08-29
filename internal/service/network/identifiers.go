@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	linuxInterfaceNameMax = 15
+	linuxInterfaceNameMax  = 15
 	namespaceAuthorityRoot = "/run/mvmctl/authority"
 	namespaceHandleMode    = uint32(0600)
 )
@@ -54,13 +54,12 @@ type topologyNames struct {
 	tap             linkName
 }
 
-// NewTopologyKey validates immutable ownership and resource IDs before any lock or host effect.
-func NewTopologyKey(ownerUID uint32, vmID, networkID string) (topologyKey, error) {
+func newTopologyKey(ownerUID uint32, vmID, networkID string) (topologyKey, error) {
 	if ownerUID == 0 {
 		return topologyKey{}, topologyValidationError("owner UID must identify a non-root user")
 	}
 	if !vmIDPattern.MatchString(vmID) {
-		return topologyKey{}, topologyValidationError("VM ID must be 32 lowercase hexadecimal characters")
+		return topologyKey{}, topologyValidationError("vm ID must be 32 lowercase hexadecimal characters")
 	}
 	if !networkIDPattern.MatchString(networkID) {
 		return topologyKey{}, topologyValidationError("network ID must be 64 lowercase hexadecimal characters")
@@ -95,7 +94,7 @@ func (name linkName) String() string { return string(name) }
 func (path namespaceHandlePath) String() string { return string(path) }
 
 func validateTopologyKey(key topologyKey) error {
-	_, err := NewTopologyKey(uint32(key.ownerUID), string(key.vmID), string(key.networkID))
+	_, err := newTopologyKey(uint32(key.ownerUID), string(key.vmID), string(key.networkID))
 	return err
 }
 
@@ -115,18 +114,27 @@ func deriveTopologyNames(key topologyKey) topologyNames {
 		namespaceHandle: namespaceHandlePath(
 			namespaceAuthorityRoot + "/" + uid + "/netns/" + string(key.vmID),
 		),
-		managedBridge: deriveLinkName("mvb", key, "managed-bridge"),
-		hostVeth:      deriveLinkName("mvh", key, "host-veth"),
-		namespaceVeth: deriveLinkName("mvn", key, "namespace-veth"),
-		localBridge:   deriveLinkName("mvl", key, "local-bridge"),
-		tap:           deriveLinkName("mvt", key, "tap"),
+		managedBridge: deriveNetworkLinkName("mvb", key.Network(), "managed-bridge"),
+		hostVeth:      deriveVMLinkName("mvh", key.ownerUID, key.vmID, "host-veth"),
+		namespaceVeth: deriveVMLinkName("mvn", key.ownerUID, key.vmID, "namespace-veth"),
+		localBridge:   deriveVMLinkName("mvl", key.ownerUID, key.vmID, "local-bridge"),
+		tap:           deriveVMLinkName("mvt", key.ownerUID, key.vmID, "tap"),
 	}
 }
 
-func deriveLinkName(prefix string, key topologyKey, role string) linkName {
+func deriveNetworkLinkName(prefix string, key networkKey, role string) linkName {
 	// NUL separators prevent ambiguous concatenations from producing the same preimage. Prefix plus twelve hexadecimal
 	// characters fits Linux IFNAMSIZ while the complete immutable identity remains in the authority record.
-	value := fmt.Sprintf("%d\x00%s\x00%s\x00%s", key.ownerUID, key.vmID, key.networkID, role)
+	value := fmt.Sprintf("%d\x00%s\x00%s", key.ownerUID, key.networkID, role)
+	return hashedLinkName(prefix, value)
+}
+
+func deriveVMLinkName(prefix string, ownerUID OwnerUID, vmID VMID, role string) linkName {
+	value := fmt.Sprintf("%d\x00%s\x00%s", ownerUID, vmID, role)
+	return hashedLinkName(prefix, value)
+}
+
+func hashedLinkName(prefix, value string) linkName {
 	digest := sha256.Sum256([]byte(value))
 	return linkName(prefix + hex.EncodeToString(digest[:])[:linuxInterfaceNameMax-len(prefix)])
 }

@@ -66,12 +66,14 @@ type TopologyRecord struct {
 	VethPair      VethPairIdentity
 }
 
-// VMLaunchLease proves the caller still holds the earlier VM lock. Implementations are expected to be retained launch
-// leases from the VM authority layer; the topology service never acquires an earlier lock itself.
-type VMLaunchLease interface {
-	NetworkOwnerUID() OwnerUID
-	NetworkVMID() VMID
-	NetworkVMLockHeld() bool
+type vmLockCapability struct{}
+
+// vmLaunchLease is deliberately private until the Jailer launch authority transfers its concrete held VM lock into
+// this package. A caller cannot satisfy this boundary with identity values and a forgeable boolean.
+type vmLaunchLease struct {
+	ownerUID OwnerUID
+	vmID     VMID
+	lock     *vmLockCapability
 }
 
 // NetworkLocker acquires the final lock class for one root-owned managed network.
@@ -113,19 +115,23 @@ type vethCreateSpec struct {
 
 // TopologyEffects is the closed root-side effect boundary. Each create method creates exactly the named resource down;
 // link activation and nftables policy are deliberately separate later transaction stages.
+//
+// CRITICAL: A create method that mutates the host before returning an error must return the exact surviving pin or
+// identity. A nil result with an error certifies that the adapter removed its partial mutation before returning. This
+// lets the transaction record progress before inspecting the error and makes every mutation rollback-visible.
 type TopologyEffects interface {
 	CreateNamespace(ctx context.Context, spec namespaceCreateSpec) (NamespacePin, error)
 	CreateLocalBridgeDown(
 		ctx context.Context,
 		namespace NamespacePin,
 		spec localBridgeCreateSpec,
-	) (linkIdentity, error)
-	CreateTAPDown(ctx context.Context, namespace NamespacePin, spec tapCreateSpec) (linkIdentity, error)
+	) (*linkIdentity, error)
+	CreateTAPDown(ctx context.Context, namespace NamespacePin, spec tapCreateSpec) (*linkIdentity, error)
 	CreateVethPairDown(
 		ctx context.Context,
 		namespace NamespacePin,
 		spec vethCreateSpec,
-	) (vethPairIdentity, error)
+	) (*vethPairIdentity, error)
 	AttachNamespaceVethToLocalBridge(
 		ctx context.Context,
 		namespace NamespacePin,

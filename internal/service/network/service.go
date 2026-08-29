@@ -9,15 +9,24 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// Service coordinates one fixed per-VM namespace topology without owning transport, filesystem, or netlink details.
-type Service struct {
+type service struct {
 	locker  NetworkLocker
 	effects TopologyEffects
 }
 
-// TopologyLease retains the network lock and pinned namespace identity across firewall installation, link activation,
-// Jailer handoff, and durable launch registration. It is not safe for concurrent use.
-type TopologyLease struct {
+type topologyPreparationState uint8
+
+const (
+	topologyPreparationBuilding topologyPreparationState = iota
+	topologyPreparationPrepared
+	topologyPreparationCleaning
+	topologyPreparationCleaned
+)
+
+// topologyPreparation retains the network lock and pinned namespace identity for later firewall, link activation,
+// Jailer, and persistence integration. It cannot release a live topology: until those stages exist, Cleanup is the
+// only terminal transition. It is not safe for concurrent use.
+type topologyPreparation struct {
 	effects TopologyEffects
 	lock    NetworkLock
 	pin     NamespacePin
@@ -28,56 +37,54 @@ type TopologyLease struct {
 	localBridgeMade  bool
 	tapMade          bool
 	vethMade         bool
-	complete         bool
-	cleaned          bool
-	released         bool
+	state            topologyPreparationState
 }
 
-// NewService constructs the closed topology transaction service.
-func NewService(locker NetworkLocker, effects TopologyEffects) *Service {
+// newService remains private until the complete launch transaction can provide a concrete held VM-lock capability.
+func newService(locker NetworkLocker, effects TopologyEffects) *service {
 	if locker == nil {
 		panic("network topology locker is required")
 	}
 	if effects == nil {
 		panic("network topology effects are required")
 	}
-	return &Service{locker: locker, effects: effects}
+	return &service{locker: locker, effects: effects}
 }
 
-// Create creates the namespace, namespace-local bridge, TAP, and veth pair down and attaches them to their exact
-// derived bridges. The returned lease deliberately retains the final network lock and namespace pin. No method in this
-// package brings links up, installs firewall policy, or launches Jailer.
-func (service *Service) Create(
+// prepare creates the namespace, namespace-local bridge, TAP, and veth pair down and attaches them to their exact
+// derived bridges. The returned preparation retains the final network lock and namespace pin and cannot be released
+// without cleanup. No method in this package brings links up, installs firewall policy, or launches Jailer.
+func (service *service) prepare(
 	ctx context.Context,
-	launch VMLaunchLease,
+	launch *vmLaunchLease,
 	networkID NetworkID,
-) (*TopologyLease, error) {
+) (*topologyPreparation, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, service.createError("admit topology transaction", "", err, false)
+		return nil, service.prepareError("admit topology transaction", "", err, false)
 	}
 	if launch == nil {
-		return nil, service.createError(
+		return nil, service.prepareError(
 			"admit topology transaction",
 			"",
-			topologyValidationError("VM launch lease is required"),
+			topologyValidationError("vm launch lease is required"),
 			false,
 		)
 	}
-	if !launch.NetworkVMLockHeld() {
-		return nil, service.createError(
+	if launch.lock == nil {
+		return nil, service.prepareError(
 			"admit topology transaction",
-			string(launch.NetworkVMID()),
-			topologyValidationError("VM launch lease is not active"),
+			string(launch.vmID),
+			topologyValidationError("vm launch lease is not active"),
 			false,
 		)
 	}
-	key, err := NewTopologyKey(
-		uint32(launch.NetworkOwnerUID()),
-		string(launch.NetworkVMID()),
+	key, err := newTopologyKey(
+		uint32(launch.ownerUID),
+		string(launch.vmID),
 		string(networkID),
 	)
 	if err != nil {
-		return nil, service.createError("validate topology identity", string(launch.NetworkVMID()), err, false)
+		return nil, service.prepareError("validate topology identity", string(launch.vmID), err, false)
 	}
 	names := deriveTopologyNames(key)
 
@@ -85,45 +92,54 @@ func (service *Service) Create(
 	// release -> global index -> VM -> network without a callback or a generic lock operation.
 	lock, err := service.locker.LockNetwork(ctx, key.Network())
 	if err != nil {
-		return nil, service.createError("acquire network topology lock", string(key.vmID), err, false)
+		return nil, service.prepareError("acquire network topology lock", string(key.vmID), err, false)
 	}
-	lease := &TopologyLease{
+	preparation := &topologyPreparation{
 		effects: service.effects,
 		lock:    lock,
 		topology: Topology{
 			key: key,
 		},
+		state: topologyPreparationBuilding,
 	}
 	if lock == nil {
-		return service.abortCreate(ctx, lease, "verify network topology lock", errors.New("network lock is nil"))
+		return service.abortPrepare(
+			ctx,
+			preparation,
+			"verify network topology lock",
+			errors.New("network lock is nil"),
+		)
 	}
-	if err := validateNetworkLock(lock, key.Network(), names.managedBridge); err != nil {
-		return service.abortCreate(ctx, lease, "verify network topology lock", err)
+	managedBridge := lock.ManagedBridge()
+	if err := validateNetworkLock(lock.Key(), managedBridge, key.Network(), names.managedBridge); err != nil {
+		return service.abortPrepare(ctx, preparation, "verify network topology lock", err)
 	}
-	lease.topology.managedBridge = lock.ManagedBridge()
+	preparation.topology.managedBridge = managedBridge
 
 	pin, err := service.effects.CreateNamespace(ctx, namespaceCreateSpec{key: key, path: names.namespaceHandle})
+	if pin != nil {
+		preparation.pin = pin
+		preparation.namespaceCreated = true
+		preparation.topology.handle = pin.Handle()
+	}
 	if err != nil {
-		return service.abortCreate(ctx, lease, "create VM network namespace", err)
+		return service.abortPrepare(ctx, preparation, "create VM network namespace", err)
 	}
 	if pin == nil {
-		return service.abortCreate(
+		return service.abortPrepare(
 			ctx,
-			lease,
+			preparation,
 			"pin VM network namespace",
 			errors.New("namespace effect returned a nil pin"),
 		)
 	}
-	lease.pin = pin
-	lease.namespaceCreated = true
-	lease.topology.handle = pin.Handle()
-	if err := validateNamespaceHandle(lease.topology.handle, names.namespaceHandle); err != nil {
-		return service.abortCreate(ctx, lease, "verify VM network namespace pin", err)
+	if err := validateNamespaceHandle(preparation.topology.handle, names.namespaceHandle); err != nil {
+		return service.abortPrepare(ctx, preparation, "verify VM network namespace pin", err)
 	}
-	if lease.topology.managedBridge.namespace == lease.topology.handle.identity {
-		return service.abortCreate(
+	if preparation.topology.managedBridge.namespace == preparation.topology.handle.identity {
+		return service.abortPrepare(
 			ctx,
-			lease,
+			preparation,
 			"verify managed bridge namespace",
 			errors.New("managed bridge is not in the host namespace"),
 		)
@@ -134,18 +150,28 @@ func (service *Service) Create(
 		pin,
 		localBridgeCreateSpec{name: names.localBridge},
 	)
-	if err != nil {
-		return service.abortCreate(ctx, lease, "create namespace-local bridge down", err)
+	if localBridge != nil {
+		preparation.localBridgeMade = true
+		preparation.topology.localBridge = *localBridge
 	}
-	lease.localBridgeMade = true
-	lease.topology.localBridge = localBridge
+	if err != nil {
+		return service.abortPrepare(ctx, preparation, "create namespace-local bridge down", err)
+	}
+	if localBridge == nil {
+		return service.abortPrepare(
+			ctx,
+			preparation,
+			"create namespace-local bridge down",
+			errors.New("local bridge effect returned no identity"),
+		)
+	}
 	if err := validateLinkIdentity(
-		localBridge,
+		*localBridge,
 		names.localBridge,
-		lease.topology.handle.identity,
+		preparation.topology.handle.identity,
 		"namespace-local bridge",
 	); err != nil {
-		return service.abortCreate(ctx, lease, "verify namespace-local bridge", err)
+		return service.abortPrepare(ctx, preparation, "verify namespace-local bridge", err)
 	}
 
 	tap, err := service.effects.CreateTAPDown(
@@ -153,16 +179,36 @@ func (service *Service) Create(
 		pin,
 		tapCreateSpec{name: names.tap, ownerUID: key.ownerUID},
 	)
-	if err != nil {
-		return service.abortCreate(ctx, lease, "create namespace-local TAP down", err)
+	if tap != nil {
+		preparation.tapMade = true
+		preparation.topology.tap = *tap
 	}
-	lease.tapMade = true
-	lease.topology.tap = tap
-	if err := validateLinkIdentity(tap, names.tap, lease.topology.handle.identity, "namespace-local TAP"); err != nil {
-		return service.abortCreate(ctx, lease, "verify namespace-local TAP", err)
+	if err != nil {
+		return service.abortPrepare(ctx, preparation, "create namespace-local TAP down", err)
+	}
+	if tap == nil {
+		return service.abortPrepare(
+			ctx,
+			preparation,
+			"create namespace-local TAP down",
+			errors.New("tap effect returned no identity"),
+		)
+	}
+	if err := validateLinkIdentity(
+		*tap,
+		names.tap,
+		preparation.topology.handle.identity,
+		"namespace-local TAP",
+	); err != nil {
+		return service.abortPrepare(ctx, preparation, "verify namespace-local TAP", err)
 	}
 	if tap.ifIndex == localBridge.ifIndex {
-		return service.abortCreate(ctx, lease, "verify namespace-local TAP", errors.New("TAP reuses bridge ifindex"))
+		return service.abortPrepare(
+			ctx,
+			preparation,
+			"verify namespace-local TAP",
+			errors.New("tap reuses bridge ifindex"),
+		)
 	}
 
 	veth, err := service.effects.CreateVethPairDown(
@@ -170,18 +216,28 @@ func (service *Service) Create(
 		pin,
 		vethCreateSpec{hostName: names.hostVeth, peerName: names.namespaceVeth},
 	)
-	if err != nil {
-		return service.abortCreate(ctx, lease, "create VM veth pair down", err)
+	if veth != nil {
+		preparation.vethMade = true
+		preparation.topology.veth = *veth
 	}
-	lease.vethMade = true
-	lease.topology.veth = veth
+	if err != nil {
+		return service.abortPrepare(ctx, preparation, "create VM veth pair down", err)
+	}
+	if veth == nil {
+		return service.abortPrepare(
+			ctx,
+			preparation,
+			"create VM veth pair down",
+			errors.New("veth effect returned no identity"),
+		)
+	}
 	if err := validateVethPair(
-		veth,
+		*veth,
 		names,
-		lease.topology.managedBridge.namespace,
-		lease.topology.handle.identity,
+		preparation.topology.managedBridge.namespace,
+		preparation.topology.handle.identity,
 	); err != nil {
-		return service.abortCreate(ctx, lease, "verify VM veth pair", err)
+		return service.abortPrepare(ctx, preparation, "verify VM veth pair", err)
 	}
 	if duplicateIfIndex(
 		localBridge.ifIndex,
@@ -189,122 +245,107 @@ func (service *Service) Create(
 		veth.host.ifIndex,
 		veth.peer.ifIndex,
 	) {
-		return service.abortCreate(ctx, lease, "verify VM link identities", errors.New("link ifindexes are not unique"))
+		return service.abortPrepare(
+			ctx,
+			preparation,
+			"verify VM link identities",
+			errors.New("link ifindexes are not unique"),
+		)
 	}
 
-	if err := service.effects.AttachNamespaceVethToLocalBridge(ctx, pin, veth, localBridge); err != nil {
-		return service.abortCreate(ctx, lease, "attach namespace veth to local bridge", err)
+	if err := service.effects.AttachNamespaceVethToLocalBridge(ctx, pin, *veth, *localBridge); err != nil {
+		return service.abortPrepare(ctx, preparation, "attach namespace veth to local bridge", err)
 	}
-	if err := service.effects.AttachTAPToLocalBridge(ctx, pin, tap, localBridge); err != nil {
-		return service.abortCreate(ctx, lease, "attach TAP to local bridge", err)
+	if err := service.effects.AttachTAPToLocalBridge(ctx, pin, *tap, *localBridge); err != nil {
+		return service.abortPrepare(ctx, preparation, "attach TAP to local bridge", err)
 	}
 	if err := service.effects.AttachHostVethToManagedBridge(
 		ctx,
-		veth,
-		lease.topology.managedBridge,
+		*veth,
+		preparation.topology.managedBridge,
 	); err != nil {
-		return service.abortCreate(ctx, lease, "attach host veth to managed bridge", err)
+		return service.abortPrepare(ctx, preparation, "attach host veth to managed bridge", err)
 	}
 
-	lease.complete = true
-	return lease, nil
+	preparation.state = topologyPreparationPrepared
+	return preparation, nil
 }
 
 // Topology returns the exact identities established by the transaction.
-func (lease *TopologyLease) Topology() Topology {
-	if lease == nil {
+func (preparation *topologyPreparation) Topology() Topology {
+	if preparation == nil {
 		return Topology{}
 	}
-	return lease.topology
+	return preparation.topology
 }
 
-// Release hands off a complete topology without deleting it. It is idempotent and closes the namespace pin before
-// releasing the later network lock.
-func (lease *TopologyLease) Release(ctx context.Context) error {
-	if lease == nil || lease.released {
+// Cleanup removes only the exact identities created by this preparation, in reverse dependency order. Successful
+// steps are remembered, making retry and repeated cleanup idempotent without probing caller-controlled names.
+func (preparation *topologyPreparation) Cleanup(ctx context.Context) error {
+	if preparation == nil || preparation.state == topologyPreparationCleaned {
 		return nil
 	}
-	if !lease.complete && !lease.cleaned {
-		return topologyRemoveError(
-			lease.entity(),
-			"cannot release incomplete topology; cleanup is required",
-			nil,
-		)
-	}
-	if err := lease.releasePin(ctx); err != nil {
-		slog.Error("network topology namespace pin release failed", "vm_id", lease.entity(), "error", err)
-		return topologyRemoveError(lease.entity(), "failed to release network namespace pin", err)
-	}
-	if err := lease.releaseLock(ctx); err != nil {
-		slog.Error("network topology lock release failed", "vm_id", lease.entity(), "error", err)
-		return topologyRemoveError(lease.entity(), "failed to release network topology lock", err)
-	}
-	lease.released = true
-	return nil
-}
-
-// Cleanup removes only the exact identities created by this lease, in reverse dependency order. Successful steps are
-// remembered, making retry and repeated cleanup idempotent without probing caller-controlled names.
-func (lease *TopologyLease) Cleanup(ctx context.Context) error {
-	if lease == nil || lease.cleaned {
-		return nil
-	}
-	if lease.released {
-		return topologyRemoveError(
-			lease.entity(),
-			"cannot clean topology after its authority lease was released",
-			nil,
-		)
-	}
-	if lease.vethMade {
-		if err := lease.effects.DeleteVethPair(ctx, lease.pin, lease.topology.veth); err != nil {
-			return lease.cleanupFailure("delete VM veth pair", err)
+	preparation.state = topologyPreparationCleaning
+	if preparation.vethMade {
+		if err := preparation.effects.DeleteVethPair(
+			ctx,
+			preparation.pin,
+			preparation.topology.veth,
+		); err != nil {
+			return preparation.cleanupFailure("delete VM veth pair", err)
 		}
-		lease.vethMade = false
+		preparation.vethMade = false
 	}
-	if lease.tapMade {
-		if err := lease.effects.DeleteTAP(ctx, lease.pin, lease.topology.tap); err != nil {
-			return lease.cleanupFailure("delete namespace-local TAP", err)
+	if preparation.tapMade {
+		if err := preparation.effects.DeleteTAP(ctx, preparation.pin, preparation.topology.tap); err != nil {
+			return preparation.cleanupFailure("delete namespace-local TAP", err)
 		}
-		lease.tapMade = false
+		preparation.tapMade = false
 	}
-	if lease.localBridgeMade {
-		if err := lease.effects.DeleteLocalBridge(ctx, lease.pin, lease.topology.localBridge); err != nil {
-			return lease.cleanupFailure("delete namespace-local bridge", err)
+	if preparation.localBridgeMade {
+		if err := preparation.effects.DeleteLocalBridge(
+			ctx,
+			preparation.pin,
+			preparation.topology.localBridge,
+		); err != nil {
+			return preparation.cleanupFailure("delete namespace-local bridge", err)
 		}
-		lease.localBridgeMade = false
+		preparation.localBridgeMade = false
 	}
-	if lease.namespaceCreated {
-		if err := lease.effects.DeleteNamespace(ctx, lease.pin, lease.topology.handle.identity); err != nil {
-			return lease.cleanupFailure("delete VM network namespace", err)
+	if preparation.namespaceCreated {
+		if err := preparation.effects.DeleteNamespace(
+			ctx,
+			preparation.pin,
+			preparation.topology.handle.identity,
+		); err != nil {
+			return preparation.cleanupFailure("delete VM network namespace", err)
 		}
-		lease.namespaceCreated = false
+		preparation.namespaceCreated = false
 	}
-	lease.cleaned = true
-	if err := lease.Release(ctx); err != nil {
-		lease.cleaned = false
+	if err := preparation.releaseAuthorities(ctx); err != nil {
 		return err
 	}
+	preparation.state = topologyPreparationCleaned
 	return nil
 }
 
-func (service *Service) abortCreate(
+func (service *service) abortPrepare(
 	ctx context.Context,
-	lease *TopologyLease,
+	preparation *topologyPreparation,
 	stage string,
 	cause error,
-) (*TopologyLease, error) {
+) (*topologyPreparation, error) {
 	// CRITICAL: Cancellation at the failure point must not suppress rollback. The retained typed lease and identities
 	// bound every cleanup effect; context.WithoutCancel does not broaden the cleanup target.
-	cleanupErr := lease.Cleanup(context.WithoutCancel(ctx))
+	cleanupErr := preparation.Cleanup(context.WithoutCancel(ctx))
 	if cleanupErr != nil {
 		combined := errors.Join(cause, cleanupErr)
-		return lease, service.createError(stage, lease.entity(), combined, true)
+		return preparation, service.prepareError(stage, preparation.entity(), combined, true)
 	}
-	return nil, service.createError(stage, lease.entity(), cause, false)
+	return nil, service.prepareError(stage, preparation.entity(), cause, false)
 }
 
-func (service *Service) createError(stage, vmID string, cause error, cleanupRequired bool) *errs.DomainError {
+func (service *service) prepareError(stage, vmID string, cause error, cleanupRequired bool) *errs.DomainError {
 	message := "failed to " + stage
 	if cause == nil {
 		cause = errors.New(message)
@@ -320,48 +361,61 @@ func (service *Service) createError(stage, vmID string, cause error, cleanupRequ
 	return errs.WrapMsg(errs.CodeNetworkCreateFailed, message, cause, options...)
 }
 
-func (lease *TopologyLease) cleanupFailure(stage string, cause error) *errs.DomainError {
-	slog.Error("network namespace topology cleanup failed", "stage", stage, "vm_id", lease.entity(), "error", cause)
-	return topologyRemoveError(lease.entity(), "failed to "+stage, cause)
+func (preparation *topologyPreparation) cleanupFailure(stage string, cause error) *errs.DomainError {
+	slog.Error(
+		"network namespace topology cleanup failed",
+		"stage", stage,
+		"vm_id", preparation.entity(),
+		"error", cause,
+	)
+	return topologyRemoveError(preparation.entity(), "failed to "+stage, cause)
 }
 
-func (lease *TopologyLease) releasePin(ctx context.Context) error {
-	if lease.pin == nil {
-		return nil
+func (preparation *topologyPreparation) releaseAuthorities(ctx context.Context) error {
+	if preparation.pin != nil {
+		if err := preparation.pin.Release(ctx); err != nil {
+			slog.Error(
+				"network topology namespace pin release failed",
+				"vm_id", preparation.entity(),
+				"error", err,
+			)
+			return topologyRemoveError(preparation.entity(), "failed to release network namespace pin", err)
+		}
+		preparation.pin = nil
 	}
-	if err := lease.pin.Release(ctx); err != nil {
-		return err
+	if preparation.lock != nil {
+		if err := preparation.lock.Release(ctx); err != nil {
+			slog.Error(
+				"network topology lock release failed",
+				"vm_id", preparation.entity(),
+				"error", err,
+			)
+			return topologyRemoveError(preparation.entity(), "failed to release network topology lock", err)
+		}
+		preparation.lock = nil
 	}
-	lease.pin = nil
 	return nil
 }
 
-func (lease *TopologyLease) releaseLock(ctx context.Context) error {
-	if lease.lock == nil {
-		return nil
-	}
-	if err := lease.lock.Release(ctx); err != nil {
-		return err
-	}
-	lease.lock = nil
-	return nil
-}
-
-func (lease *TopologyLease) entity() string {
-	if lease == nil {
+func (preparation *topologyPreparation) entity() string {
+	if preparation == nil {
 		return ""
 	}
-	return string(lease.topology.key.vmID)
+	return string(preparation.topology.key.vmID)
 }
 
-func validateNetworkLock(lock NetworkLock, expected networkKey, expectedName linkName) error {
-	if err := validateNetworkKey(lock.Key()); err != nil {
+func validateNetworkLock(
+	actualKey networkKey,
+	bridge linkIdentity,
+	expectedKey networkKey,
+	expectedName linkName,
+) error {
+	if err := validateNetworkKey(actualKey); err != nil {
 		return err
 	}
-	if lock.Key() != expected {
+	if actualKey != expectedKey {
 		return errors.New("network lock identity does not match requested topology")
 	}
-	bridge := lock.ManagedBridge()
 	if bridge.name != expectedName {
 		return errors.New("managed bridge name does not match derived network identity")
 	}
