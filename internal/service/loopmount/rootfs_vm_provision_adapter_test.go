@@ -44,6 +44,154 @@ func TestRootfsVMProvisionAdapterConvergedReplayUsesClosedReadWriteFlow(t *testi
 	)
 }
 
+// Rationale: First admission at the old size must grow the retained backing descriptor exactly once, then complete
+// the interrupted ext filesystem grow through only the fixed offline tools before reporting the requested size.
+func TestRootfsVMProvisionAdapterFirstGrowConvergesBackingAndExtFilesystem(t *testing.T) {
+	t.Parallel()
+
+	oldBytes := minimumRootfsBytes
+	targetBytes := oldBytes * 2
+	fixture := newTestRootfsVMProvisionFixture(t)
+	fixture.target = targetBytes
+	fixture.backingBytes = oldBytes
+	fixture.initialFilesystemBytes = oldBytes
+	fixture.base.lease.admittedBytes = oldBytes
+	fixture.base.lease.metadata.size = oldBytes
+	var commands [][]string
+	fixture.runTool = func(
+		_ context.Context,
+		args []string,
+		_ system.RunCmdOpts,
+	) (*system.RunResult, error) {
+		commands = append(commands, slices.Clone(args))
+		return &system.RunResult{ExitCode: 0}, nil
+	}
+
+	outcome, err := fixture.adapter().ProvisionVM(
+		t.Context(),
+		fixture.base.lease,
+		FilesystemExt4,
+		VMProvisionPlan{ResizeBytes: targetBytes},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, vmProvisionEffectStateModified, outcome.state)
+	assert.Equal(t, targetBytes, outcome.rootfsBytes)
+	assert.Equal(t, uint32(2), outcome.commandsRun)
+	assert.Zero(t, outcome.filesWritten)
+	assert.Equal(t, 1, fixture.truncateCalls)
+	wantCommands := [][]string{
+		{rootfsE2fsckPath, "-f", "-p", "/dev/loop3p1"},
+		{rootfsResize2fsPath, "/dev/loop3p1"},
+	}
+	if diff := cmp.Diff(wantCommands, commands); diff != "" {
+		t.Errorf("first-grow commands mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestRootfsVMProvisionAdapterClassifiesBackingGrowFaults(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		configure func(*testRootfsVMProvisionFixture)
+		want      vmProvisionEffectState
+	}{
+		"truncate_failure_is_known_unchanged": {
+			configure: func(f *testRootfsVMProvisionFixture) { f.truncateErr = errors.New("truncate") },
+			want:      vmProvisionEffectStateUnchanged,
+		},
+		"post_truncate_sync_failure_is_durability_uncertain": {
+			configure: func(f *testRootfsVMProvisionFixture) {
+				f.backingFsyncErrors = []error{errors.New("sync grown backing"), nil}
+			},
+			want: vmProvisionEffectStateModifiedDurabilityUncertain,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			oldBytes := minimumRootfsBytes
+			fixture := newTestRootfsVMProvisionFixture(t)
+			fixture.target = oldBytes * 2
+			fixture.backingBytes = oldBytes
+			fixture.initialFilesystemBytes = oldBytes
+			fixture.base.lease.admittedBytes = oldBytes
+			fixture.base.lease.metadata.size = oldBytes
+			tc.configure(fixture)
+
+			outcome, err := fixture.adapter().ProvisionVM(
+				t.Context(),
+				fixture.base.lease,
+				FilesystemExt4,
+				VMProvisionPlan{ResizeBytes: fixture.target},
+			)
+			require.Error(t, err)
+			assert.Equal(t, tc.want, outcome.state)
+			assert.Equal(t, 1, fixture.truncateCalls)
+			assert.NotContains(t, fixture.base.events, "attach")
+		})
+	}
+}
+
+func TestRootfsVMProvisionAdapterClassifiesGrowToolAndRemountFaults(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		configure       func(*testRootfsVMProvisionFixture)
+		wantCommandsRun uint32
+	}{
+		"filesystem_check_failure_is_unknown": {
+			configure: func(f *testRootfsVMProvisionFixture) {
+				f.runTool = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
+					return &system.RunResult{ExitCode: 4}, nil
+				}
+			},
+		},
+		"filesystem_resize_failure_is_unknown": {
+			configure: func(f *testRootfsVMProvisionFixture) {
+				calls := 0
+				f.runTool = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
+					calls++
+					if calls == 2 {
+						return &system.RunResult{ExitCode: 4}, nil
+					}
+					return &system.RunResult{ExitCode: 0}, nil
+				}
+			},
+			wantCommandsRun: 1,
+		},
+		"post_grow_remount_failure_is_unknown": {
+			configure: func(f *testRootfsVMProvisionFixture) {
+				f.runTool = func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
+					return &system.RunResult{ExitCode: 0}, nil
+				}
+				f.remountErr = errors.New("remount")
+			},
+			wantCommandsRun: 2,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			oldBytes := minimumRootfsBytes
+			fixture := newTestRootfsVMProvisionFixture(t)
+			fixture.target = oldBytes * 2
+			fixture.backingBytes = oldBytes
+			fixture.initialFilesystemBytes = oldBytes
+			fixture.base.lease.admittedBytes = oldBytes
+			fixture.base.lease.metadata.size = oldBytes
+			tc.configure(fixture)
+
+			outcome, err := fixture.adapter().ProvisionVM(
+				t.Context(),
+				fixture.base.lease,
+				FilesystemExt4,
+				VMProvisionPlan{ResizeBytes: fixture.target},
+			)
+			require.Error(t, err)
+			assert.Equal(t, vmProvisionEffectStateOutcomeUnknown, outcome.state)
+			assert.Equal(t, tc.wantCommandsRun, outcome.commandsRun)
+		})
+	}
+}
+
 func TestRootfsVMProvisionAdapterClassifiesBoundaryFaults(t *testing.T) {
 	t.Parallel()
 
@@ -459,6 +607,414 @@ func TestApplyRootfsProvisionPlanRejectsUnprovedAgentInitLayoutBeforeWrites(t *t
 	}
 }
 
+// Rationale: One complete plan exercises the adapter's ordered content contract across account-scoped SSH, sudo,
+// persistent agent authentication, fixed boot enablement, and the bounded hosts and fstab rewrites.
+func TestApplyRootfsProvisionPlanPublishesEverySupportedContentEffect(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	for _, directory := range []string{
+		"etc", "etc/ssh", "home/alice", "usr/bin", "usr/lib/systemd", "etc/systemd",
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Join(root, directory), 0755))
+	}
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "usr/lib/systemd/systemd"),
+		[]byte("systemd"),
+		0755,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "etc/passwd"),
+		[]byte("root:x:0:0:root:/root:/bin/sh\nalice:x:1000:1000:Alice:/home/alice:/bin/sh\n"),
+		0644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "etc/hosts"),
+		[]byte("127.0.0.1\tlocalhost\n127.0.1.1\told-name\n"),
+		0644,
+	))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(root, "etc/fstab"),
+		[]byte("/dev/vda / ext4 defaults 0 1\n/dev/vda1 /boot ext4 defaults 0 2\n"),
+		0644,
+	))
+	hostname := "vm-a"
+	dns := "192.0.2.53"
+	user := "alice"
+	token := "5c9a355a-eafa-48e5-9305-76b95e9967ca"
+	keys := []string{"ssh-ed25519 AAAAtest-one", "ssh-ed25519 AAAAtest-two"}
+	plan := VMProvisionPlan{
+		Hostname: &hostname,
+		DNS:      &dns,
+		SSH:      &SSHSetup{User: user, PublicKeys: keys},
+		SudoUser: &user,
+		FixFstab: true,
+		Agent:    &AgentSetup{Port: 1024, Token: token},
+	}
+	tree := newTestUnprivilegedRootfsGuestTree(t, root)
+	filesWritten, err := applyRootfsProvisionPlan(t.Context(), tree, rootfsVMProvisionDeps{
+		agentBinary: func(context.Context) ([]byte, error) { return []byte("agent-binary"), nil },
+	}, plan)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(11), filesWritten)
+
+	expectedFiles := []struct {
+		path    string
+		content []byte
+		mode    os.FileMode
+	}{
+		{rootfsHostnamePath, []byte("vm-a\n"), 0644},
+		{rootfsHostsPath, []byte("127.0.0.1\tlocalhost\n127.0.1.1\tvm-a\n"), 0644},
+		{rootfsDNSPath, []byte("nameserver 192.0.2.53\n"), 0644},
+		{"/home/alice/.ssh/authorized_keys", []byte(strings.Join(keys, "\n") + "\n"), 0600},
+		{rootfsSSHConfigPath, rootfsSSHDConfig(user), 0644},
+		{rootfsSudoPolicyPath, []byte("alice ALL=(ALL) NOPASSWD: ALL\n"), 0440},
+		{rootfsAgentBinaryPath, []byte("agent-binary"), 0755},
+		{rootfsAgentTokenPath, []byte(token + "\n"), 0600},
+		{rootfsAgentSystemdPath, rootfsAgentSystemdService(1024), 0644},
+		{
+			rootfsFstabPath,
+			[]byte("/dev/vda / ext4 noatime,defaults 0 1\n# mvmctl: /dev/vda1 /boot ext4 defaults 0 2\n"),
+			0644,
+		},
+	}
+	for _, expected := range expectedFiles {
+		assertRootfsProvisionedFile(t, root, expected.path, expected.content, expected.mode)
+	}
+	assertRootfsProvisionedSymlink(t, root, rootfsAgentSystemdWantsLink, rootfsAgentSystemdWantsTarget)
+}
+
+func TestRootfsGuestTreeAtomicallyReplacesAndReplaysWithoutFollowingSymlinks(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "etc"), 0755))
+	victim := filepath.Join(root, "victim")
+	require.NoError(t, os.WriteFile(victim, []byte("outside\n"), 0600))
+	require.NoError(t, os.Symlink(victim, filepath.Join(root, "etc", "hostname")))
+	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Close(rootFD)) })
+
+	var sequence atomic.Uint32
+	tracker := &rootfsProvisionTracker{}
+	tree := rootfsGuestTree{rootFD: rootFD, tracker: tracker, deps: testSystemRootfsGuestTreeDeps(&sequence)}
+	file := rootfsProvisionFile{
+		path: "/etc/hostname", content: []byte("vm-a\n"), mode: 0640,
+		uid: uint32(os.Getuid()), gid: uint32(os.Getgid()),
+	}
+	changed, err := tree.replaceFile(t.Context(), file)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, vmProvisionEffectStateModifiedDurabilityUncertain, tracker.state())
+	got, err := os.ReadFile(filepath.Join(root, "etc", "hostname"))
+	require.NoError(t, err)
+	if diff := cmp.Diff(file.content, got); diff != "" {
+		t.Errorf("published guest file mismatch (-want +got):\n%s", diff)
+	}
+	victimContent, err := os.ReadFile(victim)
+	require.NoError(t, err)
+	if diff := cmp.Diff([]byte("outside\n"), victimContent); diff != "" {
+		t.Errorf("symlink victim content mismatch (-want +got):\n%s", diff)
+	}
+
+	replayTracker := &rootfsProvisionTracker{}
+	tree.tracker = replayTracker
+	changed, err = tree.replaceFile(t.Context(), file)
+	require.NoError(t, err)
+	assert.False(t, changed)
+	assert.Equal(t, vmProvisionEffectStateUnchanged, replayTracker.state())
+
+	require.NoError(t, os.Symlink(root, filepath.Join(root, "etc", "escape")))
+	_, err = tree.replaceFile(t.Context(), rootfsProvisionFile{
+		path: "/etc/escape/file", content: []byte("blocked"), mode: 0600,
+		uid: uint32(os.Getuid()), gid: uint32(os.Getgid()),
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "parent")
+}
+
+// Rationale: Failure before atomic rename leaves no published file or temporary artifact, but creating and writing
+// the temporary inode still makes the durability outcome uncertain.
+func TestRootfsGuestTreePublicationFailureCleansTemporaryFileAndReportsUncertainty(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "etc"), 0755))
+	tree := newTestUnprivilegedRootfsGuestTree(t, root)
+	tree.deps.renameAt = func(context.Context, int, string, int, string) error {
+		return errors.New("publish fault")
+	}
+
+	changed, err := tree.replaceFile(t.Context(), rootfsProvisionFile{
+		path: "/etc/hostname", content: []byte("vm-a\n"), mode: 0644,
+	})
+	require.Error(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, vmProvisionEffectStateModifiedDurabilityUncertain, tree.tracker.state())
+	assert.NoFileExists(t, filepath.Join(root, "etc/hostname"))
+	entries, readErr := os.ReadDir(filepath.Join(root, "etc"))
+	require.NoError(t, readErr)
+	assert.Empty(t, entries)
+}
+
+// Rationale: Parent-directory fsync failure occurs after publication, so the target payload is observable while the
+// tracker correctly refuses to claim durable completion.
+func TestRootfsGuestTreeParentSyncFailureRetainsPublishedFileAndReportsUncertainty(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(root, "etc"), 0755))
+	tree := newTestUnprivilegedRootfsGuestTree(t, root)
+	systemFsync := tree.deps.fsync
+	fsyncCalls := 0
+	tree.deps.fsync = func(ctx context.Context, fd int) error {
+		fsyncCalls++
+		if fsyncCalls == 2 {
+			return errors.New("parent sync fault")
+		}
+		return systemFsync(ctx, fd)
+	}
+
+	changed, err := tree.replaceFile(t.Context(), rootfsProvisionFile{
+		path: "/etc/hostname", content: []byte("vm-a\n"), mode: 0644,
+	})
+	require.Error(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, vmProvisionEffectStateModifiedDurabilityUncertain, tree.tracker.state())
+	assertRootfsProvisionedFile(t, root, "/etc/hostname", []byte("vm-a\n"), 0644)
+}
+
+func TestRootfsGuestTreeReplaceFixedSymlinkReplacesWrongTarget(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	linkPath := filepath.Join(root, strings.TrimPrefix(rootfsAgentSystemdWantsLink, "/"))
+	require.NoError(t, os.MkdirAll(filepath.Dir(linkPath), 0755))
+	require.NoError(t, os.Symlink("../wrong-agent.service", linkPath))
+	tree := newTestUnprivilegedRootfsGuestTree(t, root)
+
+	changed, err := tree.replaceFixedSymlink(
+		t.Context(),
+		rootfsAgentSystemdWantsLink,
+		rootfsAgentSystemdWantsTarget,
+	)
+	require.NoError(t, err)
+	assert.True(t, changed)
+	assert.Equal(t, vmProvisionEffectStateModifiedDurabilityUncertain, tree.tracker.state())
+	assertRootfsProvisionedSymlink(t, root, rootfsAgentSystemdWantsLink, rootfsAgentSystemdWantsTarget)
+	assertNoRootfsProvisionTemporaryLeaves(t, filepath.Dir(linkPath))
+}
+
+// Rationale: Replacement authority covers an existing one-link symlink only; a regular file or a multiply linked
+// symlink could carry authority beyond the fixed leaf and must remain untouched.
+func TestRootfsGuestTreeReplaceFixedSymlinkRejectsUnsafeExistingLeaf(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		setup  func(*testing.T, string)
+		verify func(*testing.T, string)
+	}{
+		"regular_file": {
+			setup: func(t *testing.T, linkPath string) {
+				require.NoError(t, os.WriteFile(linkPath, []byte("do not replace"), 0644))
+			},
+			verify: func(t *testing.T, linkPath string) {
+				content, err := os.ReadFile(linkPath)
+				require.NoError(t, err)
+				if diff := cmp.Diff([]byte("do not replace"), content); diff != "" {
+					t.Errorf("rejected regular leaf changed (-want +got):\n%s", diff)
+				}
+			},
+		},
+		"hardlinked_symlink": {
+			setup: func(t *testing.T, linkPath string) {
+				require.NoError(t, os.Symlink("../wrong-agent.service", linkPath))
+				require.NoError(t, os.Link(linkPath, linkPath+".alias"))
+			},
+			verify: func(t *testing.T, linkPath string) {
+				for _, path := range []string{linkPath, linkPath + ".alias"} {
+					target, err := os.Readlink(path)
+					require.NoError(t, err)
+					assert.Equal(t, "../wrong-agent.service", target)
+				}
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			linkPath := filepath.Join(root, strings.TrimPrefix(rootfsAgentSystemdWantsLink, "/"))
+			require.NoError(t, os.MkdirAll(filepath.Dir(linkPath), 0755))
+			tc.setup(t, linkPath)
+			tree := newTestUnprivilegedRootfsGuestTree(t, root)
+
+			changed, err := tree.replaceFixedSymlink(
+				t.Context(),
+				rootfsAgentSystemdWantsLink,
+				rootfsAgentSystemdWantsTarget,
+			)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "unsafe type")
+			assert.False(t, changed)
+			assert.Equal(t, vmProvisionEffectStateUnchanged, tree.tracker.state())
+			tc.verify(t, linkPath)
+			assertNoRootfsProvisionTemporaryLeaves(t, filepath.Dir(linkPath))
+		})
+	}
+}
+
+// Rationale: Each publication boundary reports whether an inode may have changed and removes its deterministic
+// temporary leaf, including the post-rename directory-sync boundary where the final link is already observable.
+func TestRootfsGuestTreeReplaceFixedSymlinkClassifiesPublicationFaults(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		inject        func(*rootfsGuestTree)
+		wantChanged   bool
+		wantState     vmProvisionEffectState
+		wantPublished bool
+		wantError     string
+	}{
+		"symlink_creation": {
+			inject: func(tree *rootfsGuestTree) {
+				tree.deps.symlinkAt = func(context.Context, string, int, string) error {
+					return errors.New("symlink fault")
+				}
+			},
+			wantState: vmProvisionEffectStateUnchanged,
+			wantError: "create managed guest agent temporary link",
+		},
+		"temporary_readback": {
+			inject: func(tree *rootfsGuestTree) {
+				tree.deps.readlinkAt = func(context.Context, int, string, []byte) (int, error) {
+					return 0, errors.New("readlink fault")
+				}
+			},
+			wantChanged: true,
+			wantState:   vmProvisionEffectStateModifiedDurabilityUncertain,
+			wantError:   "read managed guest agent enablement link",
+		},
+		"atomic_rename": {
+			inject: func(tree *rootfsGuestTree) {
+				tree.deps.renameAt = func(context.Context, int, string, int, string) error {
+					return errors.New("rename fault")
+				}
+			},
+			wantChanged: true,
+			wantState:   vmProvisionEffectStateModifiedDurabilityUncertain,
+			wantError:   "publish managed guest agent enablement link",
+		},
+		"parent_fsync": {
+			inject: func(tree *rootfsGuestTree) {
+				tree.deps.fsync = func(context.Context, int) error { return errors.New("fsync fault") }
+			},
+			wantChanged:   true,
+			wantState:     vmProvisionEffectStateModifiedDurabilityUncertain,
+			wantPublished: true,
+			wantError:     "sync managed guest agent link parent",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			linkPath := filepath.Join(root, strings.TrimPrefix(rootfsAgentSystemdWantsLink, "/"))
+			require.NoError(t, os.MkdirAll(filepath.Dir(linkPath), 0755))
+			tree := newTestUnprivilegedRootfsGuestTree(t, root)
+			tc.inject(&tree)
+
+			changed, err := tree.replaceFixedSymlink(
+				t.Context(),
+				rootfsAgentSystemdWantsLink,
+				rootfsAgentSystemdWantsTarget,
+			)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.wantError)
+			assert.Equal(t, tc.wantChanged, changed)
+			assert.Equal(t, tc.wantState, tree.tracker.state())
+			assertNoRootfsProvisionTemporaryLeaves(t, filepath.Dir(linkPath))
+			if tc.wantPublished {
+				assertRootfsProvisionedSymlink(
+					t,
+					root,
+					rootfsAgentSystemdWantsLink,
+					rootfsAgentSystemdWantsTarget,
+				)
+				return
+			}
+			_, statErr := os.Lstat(linkPath)
+			assert.ErrorIs(t, statErr, os.ErrNotExist)
+		})
+	}
+}
+
+// Rationale: Once an ancestor close is attempted its numeric descriptor is consumed, while the newly opened child
+// remains owned and must still be closed exactly once on the error path.
+func TestRootfsGuestTreeEnsureDirectoryTransfersChildOwnershipBeforeAncestorClose(t *testing.T) {
+	t.Parallel()
+
+	opened := []int{10, 11}
+	var closes []int
+	tree := rootfsGuestTree{
+		rootFD:  1,
+		tracker: &rootfsProvisionTracker{},
+		deps: rootfsGuestTreeDeps{
+			openAt2: func(context.Context, int, string, *unix.OpenHow) (int, error) {
+				fd := opened[0]
+				opened = opened[1:]
+				return fd, nil
+			},
+			close: func(_ context.Context, fd int) error {
+				closes = append(closes, fd)
+				if fd == 10 {
+					return errors.New("ambiguous ancestor close")
+				}
+				return nil
+			},
+		},
+	}
+
+	_, err := tree.ensureDirectory(t.Context(), "/etc/mvmctl", 0700, 0, 0)
+	require.Error(t, err)
+	if diff := cmp.Diff([]int{10, 11}, closes); diff != "" {
+		t.Errorf("closed descriptors mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: Parent traversal has the same ownership transfer boundary as directory creation and must not leak the
+// newly opened child or retry an ambiguous close against a descriptor number the kernel may already have reused.
+func TestRootfsGuestTreeOpenParentTransfersChildOwnershipBeforeAncestorClose(t *testing.T) {
+	t.Parallel()
+
+	opened := []int{10, 11}
+	var closes []int
+	tree := rootfsGuestTree{
+		rootFD: 1,
+		deps: rootfsGuestTreeDeps{
+			openAt2: func(context.Context, int, string, *unix.OpenHow) (int, error) {
+				fd := opened[0]
+				opened = opened[1:]
+				return fd, nil
+			},
+			close: func(_ context.Context, fd int) error {
+				closes = append(closes, fd)
+				if fd == 10 {
+					return errors.New("ambiguous ancestor close")
+				}
+				return nil
+			},
+		},
+	}
+
+	_, _, err := tree.openParent(t.Context(), "/etc/systemd/system/mvm-agent.service")
+	require.Error(t, err)
+	if diff := cmp.Diff([]int{10, 11}, closes); diff != "" {
+		t.Errorf("closed descriptors mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// newTestUnprivilegedRootfsGuestTree uses real descriptor-relative operations while simulating successful root
+// ownership changes by inode, allowing the privileged write contract to remain hermetic under an unprivileged test UID.
 func newTestUnprivilegedRootfsGuestTree(t *testing.T, root string) rootfsGuestTree {
 	t.Helper()
 
@@ -517,24 +1073,92 @@ func assertRootfsProvisionedSymlink(t *testing.T, root, path, wantTarget string)
 	assert.Equal(t, wantTarget, target)
 }
 
+// assertNoRootfsProvisionTemporaryLeaves verifies cleanup without assuming anything about the final fixed leaf.
+func assertNoRootfsProvisionTemporaryLeaves(t *testing.T, directory string) {
+	t.Helper()
+
+	entries, err := os.ReadDir(directory)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		assert.False(t, strings.HasPrefix(entry.Name(), ".mvmctl-provision-"), entry.Name())
+	}
+}
+
+// testSystemRootfsGuestTreeDeps returns real descriptor-relative guest-tree effects with deterministic temp names.
+func testSystemRootfsGuestTreeDeps(sequence *atomic.Uint32) rootfsGuestTreeDeps {
+	return rootfsGuestTreeDeps{
+		openAt2: func(_ context.Context, fd int, path string, how *unix.OpenHow) (int, error) {
+			return unix.Openat2(fd, path, how)
+		},
+		mkdirAt: func(_ context.Context, fd int, path string, mode uint32) error {
+			return unix.Mkdirat(fd, path, mode)
+		},
+		fstat: func(_ context.Context, fd int, stat *unix.Stat_t) error { return unix.Fstat(fd, stat) },
+		fstatAt: func(_ context.Context, fd int, path string, stat *unix.Stat_t, flags int) error {
+			return unix.Fstatat(fd, path, stat, flags)
+		},
+		pread: func(_ context.Context, fd int, data []byte, offset int64) (int, error) {
+			count, err := unix.Pread(fd, data, offset)
+			if count == 0 && err == nil {
+				return 0, io.EOF
+			}
+			return count, err
+		},
+		pwrite: func(_ context.Context, fd int, data []byte, offset int64) (int, error) {
+			return unix.Pwrite(fd, data, offset)
+		},
+		fchown: func(_ context.Context, fd, uid, gid int) error { return unix.Fchown(fd, uid, gid) },
+		fchmod: func(_ context.Context, fd int, mode uint32) error { return unix.Fchmod(fd, mode) },
+		fsync:  func(_ context.Context, fd int) error { return unix.Fsync(fd) },
+		renameAt: func(_ context.Context, oldFD int, oldName string, newFD int, newName string) error {
+			return unix.Renameat(oldFD, oldName, newFD, newName)
+		},
+		symlinkAt: func(_ context.Context, target string, fd int, name string) error {
+			return unix.Symlinkat(target, fd, name)
+		},
+		readlinkAt: func(_ context.Context, fd int, path string, buffer []byte) (int, error) {
+			return unix.Readlinkat(fd, path, buffer)
+		},
+		unlinkAt: func(_ context.Context, fd int, name string, flags int) error {
+			return unix.Unlinkat(fd, name, flags)
+		},
+		close: func(_ context.Context, fd int) error { return unix.Close(fd) },
+		tempName: func(context.Context) (string, error) {
+			suffix := rootfsTestDecimal(int(sequence.Add(1)))
+			return ".mvmctl-provision-" + strings.Repeat("0", 32-len(suffix)) + suffix, nil
+		},
+	}
+}
+
 type testRootfsVMProvisionFixture struct {
-	t                *testing.T
-	base             *testRootfsImageInspectFixture
-	target           uint64
-	truncateCalls    int
-	attachErr        error
-	syncfsErr        error
-	finalSizeDelta   uint64
-	cancelDuringSync context.CancelFunc
+	t                      *testing.T
+	base                   *testRootfsImageInspectFixture
+	target                 uint64
+	backingBytes           uint64
+	initialFilesystemBytes uint64
+	filesystemStatCalls    int
+	truncateCalls          int
+	truncateErr            error
+	backingFsyncCalls      int
+	backingFsyncErrors     []error
+	rootfsMountCalls       int
+	remountErr             error
+	runTool                func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error)
+	attachErr              error
+	syncfsErr              error
+	finalSizeDelta         uint64
+	cancelDuringSync       context.CancelFunc
 }
 
 // newTestRootfsVMProvisionFixture constructs a complete inert provisioning effect with observable cleanup state.
 func newTestRootfsVMProvisionFixture(t *testing.T) *testRootfsVMProvisionFixture {
 	t.Helper()
 	fixture := &testRootfsVMProvisionFixture{
-		t:      t,
-		base:   newTestRootfsImageInspectFixture(t),
-		target: minimumRootfsBytes,
+		t:                      t,
+		base:                   newTestRootfsImageInspectFixture(t),
+		target:                 minimumRootfsBytes,
+		backingBytes:           minimumRootfsBytes,
+		initialFilesystemBytes: minimumRootfsBytes,
 	}
 	fixture.base.lease.access = rootfsReadWrite
 	fixture.base.lease.admittedBytes = fixture.target
@@ -547,14 +1171,38 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 	baseDeps := fixture.base.deps()
 	deps := rootfsVMProvisionDeps{
 		lockOSThread: baseDeps.lockOSThread, unlockOSThread: baseDeps.unlockOSThread,
-		unshare: baseDeps.unshare, mount: baseDeps.mount, unmount: baseDeps.unmount, open: baseDeps.open,
-		openAt2: baseDeps.openAt2, mkdirAt: baseDeps.mkdirAt, fstat: baseDeps.fstat,
+		unshare: baseDeps.unshare,
+		mount: func(ctx context.Context, source, target, filesystem string, flags uintptr, data string) error {
+			if target == rootfsInspectMountPath {
+				fixture.rootfsMountCalls++
+				if fixture.rootfsMountCalls > 1 && fixture.remountErr != nil {
+					return fixture.remountErr
+				}
+			}
+			return baseDeps.mount(ctx, source, target, filesystem, flags, data)
+		},
+		unmount: baseDeps.unmount, open: baseDeps.open,
+		openAt2: func(ctx context.Context, fd int, path string, how *unix.OpenHow) (int, error) {
+			openedFD, err := baseDeps.openAt2(ctx, fd, path, how)
+			if err != nil && fd == 10 && path == rootfsInspectMountName &&
+				fixture.rootfsMountCalls > 1 && how.Flags == rootfsGuestDirectoryFlags &&
+				how.Resolve == rootfsInspectResolveFlags {
+				return 13, nil
+			}
+			return openedFD, err
+		},
+		mkdirAt: baseDeps.mkdirAt, fstat: baseDeps.fstat,
 		fstatAt: func(context.Context, int, string, *unix.Stat_t, int) error { return unix.ENOENT },
 		fstatfs: func(_ context.Context, fd int, stat *unix.Statfs_t) error {
 			assert.Equal(fixture.t, 13, fd)
+			fixture.filesystemStatCalls++
+			capacity := fixture.target
+			if fixture.filesystemStatCalls <= 2 {
+				capacity = fixture.initialFilesystemBytes
+			}
 			stat.Type = unix.EXT4_SUPER_MAGIC
 			stat.Bsize = 4096
-			stat.Blocks = fixture.target / 4096
+			stat.Blocks = capacity / 4096
 			return nil
 		},
 		statx: func(ctx context.Context, fd, flags, mask int, stat *unix.Statx_t) error {
@@ -568,7 +1216,7 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 			*stat = unix.Statx_t{
 				Mask: rootfsStatxRequiredFile, Dev_major: 8, Dev_minor: 1, Ino: 99,
 				Mode: unix.S_IFREG | 0600, Uid: 1000, Gid: 1000, Nlink: 1,
-				Size: fixture.target,
+				Size: fixture.backingBytes,
 			}
 			if fixture.base.snapshotCalls > 1 {
 				stat.Size += fixture.finalSizeDelta
@@ -576,14 +1224,26 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 			fixture.base.events = append(fixture.base.events, "snapshot")
 			return nil
 		},
-		pread:     func(context.Context, int, []byte, int64) (int, error) { return 0, io.EOF },
-		pwrite:    func(context.Context, int, []byte, int64) (int, error) { return 0, errors.New("unexpected write") },
-		ftruncate: func(context.Context, int, int64) error { fixture.truncateCalls++; return nil },
-		fchown:    func(context.Context, int, int, int) error { return nil },
-		fchmod:    func(context.Context, int, uint32) error { return nil },
+		pread:  func(context.Context, int, []byte, int64) (int, error) { return 0, io.EOF },
+		pwrite: func(context.Context, int, []byte, int64) (int, error) { return 0, errors.New("unexpected write") },
+		ftruncate: func(_ context.Context, _ int, size int64) error {
+			fixture.truncateCalls++
+			if fixture.truncateErr != nil {
+				return fixture.truncateErr
+			}
+			fixture.backingBytes = uint64(size)
+			return nil
+		},
+		fchown: func(context.Context, int, int, int) error { return nil },
+		fchmod: func(context.Context, int, uint32) error { return nil },
 		fsync: func(ctx context.Context, fd int) error {
 			fixture.base.recordCleanupContext(ctx)
 			fixture.base.events = append(fixture.base.events, "backing-fsync")
+			call := fixture.backingFsyncCalls
+			fixture.backingFsyncCalls++
+			if call < len(fixture.backingFsyncErrors) {
+				return fixture.backingFsyncErrors[call]
+			}
 			return nil
 		},
 		syncfs: func(ctx context.Context, fd int) error {
@@ -605,7 +1265,10 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 		tempName: func(context.Context) (string, error) {
 			return ".mvmctl-provision-00000000000000000000000000000001", nil
 		},
-		run: func(context.Context, []string, system.RunCmdOpts) (*system.RunResult, error) {
+		run: func(ctx context.Context, args []string, opts system.RunCmdOpts) (*system.RunResult, error) {
+			if fixture.runTool != nil {
+				return fixture.runTool(ctx, args, opts)
+			}
 			return nil, errors.New("unexpected grow tool")
 		},
 		agentBinary: func(context.Context) ([]byte, error) { return []byte("agent"), nil },
