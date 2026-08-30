@@ -131,7 +131,7 @@ func TestServerImageOperationsUseActionSpecificAccessAndOutcomes(t *testing.T) {
 			events.append("rootfs")
 			return closeRootfs(ctx, fd)
 		}
-		effects := &fakeServerRootfsEffects{
+		optimizeEffects := &fakeServerImageOptimizeEffects{
 			optimizeOutcome: imageOptimizeEffectOutcome{
 				state:      imageOptimizeEffectStateModified,
 				filesystem: want.Filesystem,
@@ -140,7 +140,7 @@ func TestServerImageOperationsUseActionSpecificAccessAndOutcomes(t *testing.T) {
 			},
 		}
 		locks := &fakeServerResourceLocks{lease: &fakeServerResourceLockLease{events: events}}
-		server := &Server{rootfsAuthority: rootfsAuthority, effects: effects, locks: locks}
+		server := &Server{rootfsAuthority: rootfsAuthority, optimizeEffects: optimizeEffects, locks: locks}
 
 		got, err := server.OptimizeImage(t.Context(), testRootfsCaller(), request)
 		require.NoError(t, err)
@@ -148,9 +148,9 @@ func TestServerImageOperationsUseActionSpecificAccessAndOutcomes(t *testing.T) {
 		if diff := cmp.Diff(want, got); diff != "" {
 			t.Errorf("OptimizeImage() result mismatch (-want +got):\n%s", diff)
 		}
-		assert.Equal(t, rootfsReadWrite, effects.optimizeAccess)
-		assert.Equal(t, request.Filesystem, effects.optimizeFilesystem)
-		if diff := cmp.Diff(request.Plan, effects.optimizePlan); diff != "" {
+		assert.Equal(t, rootfsReadWrite, optimizeEffects.optimizeAccess)
+		assert.Equal(t, request.Filesystem, optimizeEffects.optimizeFilesystem)
+		if diff := cmp.Diff(request.Plan, optimizeEffects.optimizePlan); diff != "" {
 			t.Errorf("OptimizeImage() plan mismatch (-want +got):\n%s", diff)
 		}
 		assert.Equal(t, rootfsImageOptimizeSelection, locks.selection.kind)
@@ -160,6 +160,64 @@ func TestServerImageOperationsUseActionSpecificAccessAndOutcomes(t *testing.T) {
 		if diff := cmp.Diff(wantEvents, events.snapshot()); diff != "" {
 			t.Errorf("OptimizeImage() cleanup order mismatch (-want +got):\n%s", diff)
 		}
+	})
+}
+
+// Rationale: Production-capable provisioning/inspection and deferred image optimization are separate privileges.
+// Missing one effect seam must fail only its named action before lock or rootfs authority is acquired.
+func TestServerRejectsMissingActionEffectDependencyBeforeAuthority(t *testing.T) {
+	t.Parallel()
+
+	t.Run("VM provision requires production-capable effects", func(t *testing.T) {
+		fixture := newRootfsAuthorityFixture(t, []string{"srv", "cache", "vms", testVMID, "rootfs.img"})
+		locks := &fakeServerResourceLocks{lease: &fakeServerResourceLockLease{events: &serverEventLog{}}}
+		server := &Server{
+			rootfsAuthority: fixture.deps(), optimizeEffects: &fakeServerImageOptimizeEffects{}, locks: locks,
+		}
+
+		got, err := server.ProvisionVM(t.Context(), testRootfsCaller(), testVMProvisionRequest())
+		require.Error(t, err)
+
+		if diff := cmp.Diff(VMProvisionResult{}, got); diff != "" {
+			t.Errorf("missing provision effects published a result (-want +got):\n%s", diff)
+		}
+		assert.Equal(t, errs.CodeLoopMountError, errs.AsDomainError(err).Code)
+		assert.Equal(t, 0, locks.acquireCount)
+		assert.Empty(t, fixture.openCalls)
+	})
+
+	t.Run("image inspection requires production-capable effects", func(t *testing.T) {
+		fixture := newRootfsAuthorityFixture(t, []string{"srv", "cache", "vms", testVMID, "rootfs.img"})
+		locks := &fakeServerResourceLocks{lease: &fakeServerResourceLockLease{events: &serverEventLog{}}}
+		server := &Server{
+			rootfsAuthority: fixture.deps(), optimizeEffects: &fakeServerImageOptimizeEffects{}, locks: locks,
+		}
+
+		got, err := server.InspectImage(t.Context(), testRootfsCaller(), testImageInspectRequest())
+		require.Error(t, err)
+
+		if diff := cmp.Diff(ImageInspectResult{}, got); diff != "" {
+			t.Errorf("missing inspection effects published a result (-want +got):\n%s", diff)
+		}
+		assert.Equal(t, errs.CodeLoopMountError, errs.AsDomainError(err).Code)
+		assert.Equal(t, 0, locks.acquireCount)
+		assert.Empty(t, fixture.openCalls)
+	})
+
+	t.Run("image optimization requires only its deferred effect", func(t *testing.T) {
+		fixture := newRootfsAuthorityFixture(t, []string{"srv", "cache", "vms", testVMID, "rootfs.img"})
+		locks := &fakeServerResourceLocks{lease: &fakeServerResourceLockLease{events: &serverEventLog{}}}
+		server := &Server{rootfsAuthority: fixture.deps(), effects: &fakeServerRootfsEffects{}, locks: locks}
+
+		got, err := server.OptimizeImage(t.Context(), testRootfsCaller(), testImageOptimizeRequest())
+		require.Error(t, err)
+
+		if diff := cmp.Diff(ImageOptimizeResult{}, got); diff != "" {
+			t.Errorf("missing optimization effects published a result (-want +got):\n%s", diff)
+		}
+		assert.Equal(t, errs.CodeLoopMountError, errs.AsDomainError(err).Code)
+		assert.Equal(t, 0, locks.acquireCount)
+		assert.Empty(t, fixture.openCalls)
 	})
 }
 
@@ -350,7 +408,7 @@ func TestServerEffectErrorsCarryClosedMutationEvidence(t *testing.T) {
 			errs.WithEntity(request.ImageID),
 			errs.WithDetails(map[string]any{"original": "retained"}),
 		)
-		effects := &fakeServerRootfsEffects{
+		optimizeEffects := &fakeServerImageOptimizeEffects{
 			optimizeOutcome: imageOptimizeEffectOutcome{
 				state: imageOptimizeEffectStateImageReplacedDurabilityUncertain,
 				lease: &fakeImageOptimizeEffectLease{events: events},
@@ -359,7 +417,7 @@ func TestServerEffectErrorsCarryClosedMutationEvidence(t *testing.T) {
 		}
 		server := &Server{
 			rootfsAuthority: rootfsAuthority,
-			effects:         effects,
+			optimizeEffects: optimizeEffects,
 			locks: &fakeServerResourceLocks{
 				lease: &fakeServerResourceLockLease{events: events},
 			},
@@ -546,20 +604,23 @@ func TestServerRejectsZeroEffectOutcomes(t *testing.T) {
 				return closeRootfs(ctx, fd)
 			}
 			effects := &fakeServerRootfsEffects{}
+			optimizeEffects := &fakeServerImageOptimizeEffects{}
 			switch tc.kind {
 			case rootfsVMProvisionSelection:
 				effects.provisionErr = tc.effectErr
 			case rootfsImageInspectSelection:
 				effects.inspectErr = tc.effectErr
 			case rootfsImageOptimizeSelection:
-				effects.optimizeErr = tc.effectErr
+				optimizeEffects.optimizeErr = tc.effectErr
 			default:
 				t.Fatalf("unhandled test action %d", tc.kind)
 			}
 			lockLease := &fakeServerResourceLockLease{events: events}
 			server := &Server{
-				rootfsAuthority: rootfsAuthority, effects: effects,
-				locks: &fakeServerResourceLocks{lease: lockLease},
+				rootfsAuthority: rootfsAuthority,
+				effects:         effects,
+				optimizeEffects: optimizeEffects,
+				locks:           &fakeServerResourceLocks{lease: lockLease},
 			}
 
 			var operationErr error
@@ -584,7 +645,7 @@ func TestServerRejectsZeroEffectOutcomes(t *testing.T) {
 				if diff := cmp.Diff(ImageOptimizeResult{}, got); diff != "" {
 					t.Errorf("zero optimization outcome published a result (-want +got):\n%s", diff)
 				}
-				assert.Equal(t, 1, effects.optimizeCallCount)
+				assert.Equal(t, 1, optimizeEffects.optimizeCallCount)
 			}
 			require.Error(t, operationErr)
 			if tc.effectErr != nil {
@@ -625,8 +686,11 @@ func TestServerRejectsMissingResourceLockAuthorityBeforeAdmission(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			fixture := newRootfsAuthorityFixture(t, []string{"srv", "cache", "vms", testVMID, "rootfs.img"})
 			effects := &fakeServerRootfsEffects{}
+			optimizeEffects := &fakeServerImageOptimizeEffects{}
 			locks := &fakeServerResourceLocks{}
-			server := &Server{rootfsAuthority: fixture.deps(), effects: effects, locks: locks}
+			server := &Server{
+				rootfsAuthority: fixture.deps(), effects: effects, optimizeEffects: optimizeEffects, locks: locks,
+			}
 
 			var operationErr error
 			switch test.kind {
@@ -658,7 +722,7 @@ func TestServerRejectsMissingResourceLockAuthorityBeforeAdmission(t *testing.T) 
 			assert.Empty(t, fixture.openCalls)
 			assert.Equal(t, 0, effects.provisionCallCount)
 			assert.Equal(t, 0, effects.inspectCallCount)
-			assert.Equal(t, 0, effects.optimizeCallCount)
+			assert.Equal(t, 0, optimizeEffects.optimizeCallCount)
 		})
 	}
 }
@@ -697,7 +761,10 @@ func TestServerReleasesPartialLockAcquisitionForEveryAction(t *testing.T) {
 			lockLease := &fakeServerResourceLockLease{events: events, err: releaseErr}
 			locks := &fakeServerResourceLocks{lease: lockLease, acquireErr: primary, cancel: cancel}
 			server := &Server{
-				rootfsAuthority: fixture.deps(), effects: &fakeServerRootfsEffects{}, locks: locks,
+				rootfsAuthority: fixture.deps(),
+				effects:         &fakeServerRootfsEffects{},
+				optimizeEffects: &fakeServerImageOptimizeEffects{},
+				locks:           locks,
 			}
 
 			var err error
@@ -872,23 +939,17 @@ func (log *serverEventLog) snapshot() []string {
 type fakeServerRootfsEffects struct {
 	provisionOutcome       vmProvisionEffectOutcome
 	inspectOutcome         imageInspectEffectOutcome
-	optimizeOutcome        imageOptimizeEffectOutcome
 	provisionErr           error
 	inspectErr             error
-	optimizeErr            error
 	cancel                 context.CancelFunc
 	provisionAccess        rootfsAccess
 	inspectAccess          rootfsAccess
-	optimizeAccess         rootfsAccess
 	provisionFilesystem    Filesystem
 	provisionPlan          VMProvisionPlan
 	inspectFilesystem      Filesystem
-	optimizeFilesystem     Filesystem
-	optimizePlan           ImageOptimizePlan
 	provisionAdmittedBytes uint64
 	provisionCallCount     int
 	inspectCallCount       int
-	optimizeCallCount      int
 }
 
 func (effects *fakeServerRootfsEffects) ProvisionVM(
@@ -919,7 +980,16 @@ func (effects *fakeServerRootfsEffects) InspectImage(
 	return effects.inspectOutcome, effects.inspectErr
 }
 
-func (effects *fakeServerRootfsEffects) OptimizeImage(
+type fakeServerImageOptimizeEffects struct {
+	optimizeOutcome    imageOptimizeEffectOutcome
+	optimizeErr        error
+	optimizeAccess     rootfsAccess
+	optimizeFilesystem Filesystem
+	optimizePlan       ImageOptimizePlan
+	optimizeCallCount  int
+}
+
+func (effects *fakeServerImageOptimizeEffects) OptimizeImage(
 	_ context.Context,
 	lease *rootfsLease,
 	filesystem Filesystem,

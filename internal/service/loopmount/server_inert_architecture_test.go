@@ -146,7 +146,7 @@ func isInertRootfsLockAdapterType(name string) bool {
 	return name == "authorityFSRootfsResourceLocks" || name == "systemLoopMountAuthorityTree"
 }
 
-// allowedServerDeclarationPositions returns only the existing type name and its four method receiver references.
+// allowedServerDeclarationPositions returns only the existing type name and method receiver references.
 func allowedServerDeclarationPositions(name string, parsed *ast.File) map[token.Pos]struct{} {
 	allowed := make(map[token.Pos]struct{})
 	if name != "server.go" {

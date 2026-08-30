@@ -15,6 +15,7 @@ const maxServerCleanupDetailBytes = 512
 type Server struct {
 	rootfsAuthority rootfsAuthorityDeps
 	effects         rootfsEffects
+	optimizeEffects imageOptimizeEffects
 	locks           rootfsResourceLocks
 }
 
@@ -26,6 +27,9 @@ type rootfsEffects interface {
 		VMProvisionPlan,
 	) (vmProvisionEffectOutcome, error)
 	InspectImage(context.Context, *rootfsLease, Filesystem) (imageInspectEffectOutcome, error)
+}
+
+type imageOptimizeEffects interface {
 	OptimizeImage(
 		context.Context,
 		*rootfsLease,
@@ -119,7 +123,7 @@ func (server *Server) ProvisionVM(
 	caller Caller,
 	request VMProvisionRequest,
 ) (_ VMProvisionResult, returnErr error) {
-	if err := server.validateDependencies(); err != nil {
+	if err := server.validateRootfsEffectsDependencies(); err != nil {
 		return VMProvisionResult{}, err
 	}
 	if err := request.Validate(); err != nil {
@@ -211,7 +215,7 @@ func (server *Server) InspectImage(
 	caller Caller,
 	request ImageInspectRequest,
 ) (_ ImageInspectResult, returnErr error) {
-	if err := server.validateDependencies(); err != nil {
+	if err := server.validateRootfsEffectsDependencies(); err != nil {
 		return ImageInspectResult{}, err
 	}
 	if err := request.Validate(); err != nil {
@@ -297,7 +301,7 @@ func (server *Server) OptimizeImage(
 	caller Caller,
 	request ImageOptimizeRequest,
 ) (_ ImageOptimizeResult, returnErr error) {
-	if err := server.validateDependencies(); err != nil {
+	if err := server.validateImageOptimizeDependencies(); err != nil {
 		return ImageOptimizeResult{}, err
 	}
 	if err := request.Validate(); err != nil {
@@ -349,7 +353,7 @@ func (server *Server) OptimizeImage(
 		)
 	}()
 
-	outcome, effectErr := server.effects.OptimizeImage(ctx, rootfsLease, request.Filesystem, request.Plan)
+	outcome, effectErr := server.optimizeEffects.OptimizeImage(ctx, rootfsLease, request.Filesystem, request.Plan)
 	defer func() {
 		returnErr = appendServerCleanupError(
 			returnErr,
@@ -378,9 +382,16 @@ func (server *Server) OptimizeImage(
 	return result, nil
 }
 
-func (server *Server) validateDependencies() error {
+func (server *Server) validateRootfsEffectsDependencies() error {
 	if server == nil || server.effects == nil || server.locks == nil {
-		return rootfsAtomicError("loopmount server dependencies are incomplete", nil)
+		return rootfsAtomicError("loopmount provisioning and inspection dependencies are incomplete", nil)
+	}
+	return validateRootfsAuthorityDeps(server.rootfsAuthority)
+}
+
+func (server *Server) validateImageOptimizeDependencies() error {
+	if server == nil || server.optimizeEffects == nil || server.locks == nil {
+		return rootfsAtomicError("loopmount image optimization dependencies are incomplete", nil)
 	}
 	return validateRootfsAuthorityDeps(server.rootfsAuthority)
 }
