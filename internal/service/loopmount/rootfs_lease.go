@@ -99,7 +99,7 @@ func appendRootfsCleanupError(primary error, message string, cause error) error 
 	if _, exists := result.Details[rootfsCleanupDetailKey]; !exists {
 		result.Details[rootfsCleanupDetailKey] = detail
 	}
-	result.Err = errors.Join(domainErr.Err, cause)
+	result.Err = errors.Join(primary, cause)
 	return &result
 }
 

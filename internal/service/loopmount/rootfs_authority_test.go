@@ -3,6 +3,7 @@ package loopmount
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -685,9 +686,12 @@ func TestAppendRootfsCleanupErrorPreservesPrimaryDomainError(t *testing.T) {
 		errs.WithDetails(primaryDetails),
 	)
 	wantMetadata := metadata(primary)
+	outerWrapper := fmt.Errorf("outer rootfs admission wrapper: %w", primary)
+	siblingCause := errors.New("sibling admission cause")
+	primaryChain := errors.Join(outerWrapper, siblingCause)
 	firstCleanupCause := errors.New(strings.Repeat("cleanup", maxRootfsCleanupDetailBytes))
 	first := appendRootfsCleanupError(
-		primary,
+		primaryChain,
 		"close rejected descriptors",
 		firstCleanupCause,
 	)
@@ -699,7 +703,11 @@ func TestAppendRootfsCleanupErrorPreservesPrimaryDomainError(t *testing.T) {
 	if diff := cmp.Diff(wantMetadata, metadata(firstDomain)); diff != "" {
 		t.Errorf("primary DomainError metadata changed (-want +got):\n%s", diff)
 	}
+	assert.ErrorIs(t, first, primaryChain)
+	assert.ErrorIs(t, first, outerWrapper)
+	assert.ErrorIs(t, first, primary)
 	assert.ErrorIs(t, first, primaryCause)
+	assert.ErrorIs(t, first, siblingCause)
 	assert.ErrorIs(t, first, firstCleanupCause)
 	firstDetail, ok := firstDomain.Details[rootfsCleanupDetailKey].(string)
 	require.True(t, ok)
@@ -709,7 +717,7 @@ func TestAppendRootfsCleanupErrorPreservesPrimaryDomainError(t *testing.T) {
 	wantFirstDetails := map[string]any{
 		"admission_stage":      "leaf",
 		rootfsCleanupFailedKey: true,
-		rootfsCleanupDetailKey: firstDetail,
+		rootfsCleanupDetailKey: wantFirstDetail,
 	}
 	if diff := cmp.Diff(wantFirstDetails, firstDomain.Details); diff != "" {
 		t.Errorf("cleanup evidence mismatch (-want +got):\n%s", diff)
@@ -720,7 +728,12 @@ func TestAppendRootfsCleanupErrorPreservesPrimaryDomainError(t *testing.T) {
 	secondDomain := errs.AsDomainError(second)
 	require.NotNil(t, secondDomain)
 	require.NotSame(t, firstDomain, secondDomain)
+	assert.ErrorIs(t, second, first)
+	assert.ErrorIs(t, second, primaryChain)
+	assert.ErrorIs(t, second, outerWrapper)
+	assert.ErrorIs(t, second, primary)
 	assert.ErrorIs(t, second, primaryCause)
+	assert.ErrorIs(t, second, siblingCause)
 	assert.ErrorIs(t, second, firstCleanupCause)
 	assert.ErrorIs(t, second, secondCleanupCause)
 	if diff := cmp.Diff(wantMetadata, metadata(secondDomain)); diff != "" {
@@ -751,6 +764,11 @@ func TestAppendRootfsCleanupErrorPreservesExistingDetailKeys(t *testing.T) {
 		rootfsCleanupFailedKey: true,
 		rootfsCleanupDetailKey: "earlier cleanup detail",
 	}
+	wantDetails := map[string]any{
+		"admission_stage":      "leaf",
+		rootfsCleanupFailedKey: true,
+		rootfsCleanupDetailKey: "earlier cleanup detail",
+	}
 	primary := errs.WrapMsg(
 		errs.CodeVMAtomicFailed,
 		"primary failure",
@@ -765,11 +783,39 @@ func TestAppendRootfsCleanupErrorPreservesExistingDetailKeys(t *testing.T) {
 	require.NotSame(t, primary, domainErr)
 	assert.ErrorIs(t, joined, primaryCause)
 	assert.ErrorIs(t, joined, cleanupCause)
-	if diff := cmp.Diff(primaryDetails, domainErr.Details); diff != "" {
+	if diff := cmp.Diff(wantDetails, domainErr.Details); diff != "" {
 		t.Errorf("existing cleanup evidence changed (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(primaryDetails, primary.Details); diff != "" {
+	if diff := cmp.Diff(wantDetails, primary.Details); diff != "" {
 		t.Errorf("original primary details mutated (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(wantDetails, primaryDetails); diff != "" {
+		t.Errorf("caller-owned primary detail map mutated (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: cleanup annotation must preserve the complete error chain even when no DomainError exists to clone.
+func TestAppendRootfsCleanupErrorPreservesNonDomainPrimaryChain(t *testing.T) {
+	t.Parallel()
+
+	primaryCause := errors.New("primary read cause")
+	primary := fmt.Errorf("read admitted rootfs: %w", primaryCause)
+	cleanupCause := errors.New("close admitted rootfs failed")
+	joined := appendRootfsCleanupError(primary, "close admitted rootfs", cleanupCause)
+
+	domainErr := errs.AsDomainError(joined)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeLoopMountError, domainErr.Code)
+	assert.Equal(t, "close admitted rootfs: close admitted rootfs failed", domainErr.Message)
+	assert.ErrorIs(t, joined, primary)
+	assert.ErrorIs(t, joined, primaryCause)
+	assert.ErrorIs(t, joined, cleanupCause)
+	wantDetails := map[string]any{
+		rootfsCleanupFailedKey: true,
+		rootfsCleanupDetailKey: "close admitted rootfs: close admitted rootfs failed",
+	}
+	if diff := cmp.Diff(wantDetails, domainErr.Details); diff != "" {
+		t.Errorf("non-domain cleanup evidence mismatch (-want +got):\n%s", diff)
 	}
 }
 
