@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -48,6 +49,65 @@ func TestProbeRootfsMountSourceBindsRawDescriptor(t *testing.T) {
 	assertRootfsBlkidCall(t, fixture.calls[0], "/dev/loop3")
 	assert.False(t, parent.state.released)
 	assert.False(t, partitions.state.released)
+}
+
+func TestRootfsSelectedSourceReleaseIsSharedAndCancellationIndependent(t *testing.T) {
+	t.Parallel()
+
+	parent := testRootfsPartitionParent(3, rootfsReadOnly)
+	partitions := testRootfsProbePartitionSet(parent, nil)
+	source := &rootfsSelectedSource{state: &rootfsSelectedSourceState{
+		parent: parent.state, partitions: partitions.state, kind: rootfsMountSourceRaw,
+		fd: 50, identity: parent.state.identity, filesystem: FilesystemExt4,
+	}}
+	copyOfSource := *source
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	require.NoError(t, source.Release(ctx))
+	require.NoError(t, copyOfSource.Release(t.Context()))
+	assert.True(t, source.state.released)
+	assert.Nil(t, source.state.parent)
+	assert.Nil(t, source.state.partitions)
+	assert.Equal(t, -1, source.state.fd)
+	assert.Zero(t, source.state.identity)
+	assert.Zero(t, source.state.kind)
+	assert.Zero(t, source.state.partition)
+	assert.Empty(t, source.state.filesystem)
+}
+
+// Rationale: copied source capabilities share one revocation transition; cleanup must remain race-safe when deferred
+// paths converge concurrently after cancellation or a partial inspection failure.
+func TestRootfsSelectedSourceReleaseSerializesConcurrentCopies(t *testing.T) {
+	t.Parallel()
+
+	parent := testRootfsPartitionParent(3, rootfsReadOnly)
+	partitions := testRootfsProbePartitionSet(parent, nil)
+	source := &rootfsSelectedSource{state: &rootfsSelectedSourceState{
+		parent: parent.state, partitions: partitions.state, kind: rootfsMountSourceRaw,
+		fd: 50, identity: parent.state.identity, filesystem: FilesystemExt4,
+	}}
+
+	const callers = 32
+	start := make(chan struct{})
+	results := make(chan error, callers)
+	var ready sync.WaitGroup
+	ready.Add(callers)
+	for range callers {
+		copyOfSource := *source
+		go func() {
+			ready.Done()
+			<-start
+			results <- copyOfSource.Release(t.Context())
+		}()
+	}
+	ready.Wait()
+	close(start)
+	for range callers {
+		require.NoError(t, <-results)
+	}
+	assert.True(t, source.state.released)
+	assert.Equal(t, -1, source.state.fd)
 }
 
 func TestProbeRootfsMountSourceProbesSparsePartitionsAndBindsMatch(t *testing.T) {

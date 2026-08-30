@@ -17,6 +17,8 @@ const (
 	systemRootfsResourceLocksFactory      = "newSystemRootfsResourceLocks"
 	systemRootfsPartitionDiscoveryFactory = "systemRootfsPartitionDiscoveryDeps"
 	rootfsPartitionDiscoveryEntry         = "discoverRootfsPartitionDevices"
+	systemRootfsImageInspectFactory       = "newSystemRootfsImageInspectAdapter"
+	rootfsImageInspectAdapterType         = "rootfsImageInspectAdapter"
 )
 
 // Rationale: The current Server and system lock adapter are reviewed foundations, not an authorized privileged action.
@@ -40,6 +42,7 @@ func TestLoopMountServerRemainsInertUntilExplicitActivation(t *testing.T) {
 		require.NoError(t, parseErr)
 		assertInertLoopMountFile(t, files, name, parsed)
 		assertInertRootfsPartitionDiscovery(t, files, parsed)
+		assertInertRootfsImageInspectAdapter(t, files, parsed)
 	}
 }
 
@@ -54,6 +57,7 @@ func assertInertRootfsPartitionDiscovery(t *testing.T, files *token.FileSet, par
 		),
 		rootfsPartitionDiscoveryEntry: functionDeclarationPosition(parsed, rootfsPartitionDiscoveryEntry),
 	}
+	allowedFactoryBody := identifiersWithinFunction(parsed, systemRootfsImageInspectFactory)
 	ast.Inspect(parsed, func(node ast.Node) bool {
 		identifier, isIdentifier := node.(*ast.Ident)
 		if !isIdentifier {
@@ -61,10 +65,85 @@ func assertInertRootfsPartitionDiscovery(t *testing.T, files *token.FileSet, par
 		}
 		declaration, guarded := allowed[identifier.Name]
 		if guarded && identifier.Pos() != declaration {
+			if _, insideFactory := allowedFactoryBody[identifier.Pos()]; insideFactory {
+				return true
+			}
 			t.Errorf("production partition discovery activation found at %s", files.Position(identifier.Pos()))
 		}
 		return true
 	})
+}
+
+// assertInertRootfsImageInspectAdapter permits only its declaration, method receivers, and its unused system factory.
+// Constructing the adapter elsewhere would activate a permanently unshared OS thread without handler-exit semantics.
+func assertInertRootfsImageInspectAdapter(t *testing.T, files *token.FileSet, parsed *ast.File) {
+	t.Helper()
+
+	factoryDeclaration := functionDeclarationPosition(parsed, systemRootfsImageInspectFactory)
+	allowedAdapter := identifiersWithinFunction(parsed, systemRootfsImageInspectFactory)
+	for _, declaration := range parsed.Decls {
+		switch value := declaration.(type) {
+		case *ast.GenDecl:
+			for _, spec := range value.Specs {
+				typeSpec, isTypeSpec := spec.(*ast.TypeSpec)
+				if isTypeSpec && typeSpec.Name.Name == rootfsImageInspectAdapterType {
+					allowedAdapter[typeSpec.Name.Pos()] = struct{}{}
+				}
+			}
+		case *ast.FuncDecl:
+			if value.Recv == nil || len(value.Recv.List) != 1 {
+				continue
+			}
+			ast.Inspect(value.Recv.List[0].Type, func(node ast.Node) bool {
+				identifier, ok := node.(*ast.Ident)
+				if ok && identifier.Name == rootfsImageInspectAdapterType {
+					allowedAdapter[identifier.Pos()] = struct{}{}
+				}
+				return true
+			})
+		}
+	}
+	nonTypeNames := nonTypeNamePositions(parsed)
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		identifier, ok := node.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if identifier.Name == systemRootfsImageInspectFactory && identifier.Pos() != factoryDeclaration {
+			t.Errorf(
+				"production image inspection adapter factory reference found at %s",
+				files.Position(identifier.Pos()),
+			)
+			return true
+		}
+		if identifier.Name != rootfsImageInspectAdapterType {
+			return true
+		}
+		if _, excluded := nonTypeNames[identifier.Pos()]; excluded {
+			return true
+		}
+		if _, allowed := allowedAdapter[identifier.Pos()]; !allowed {
+			t.Errorf("production image inspection adapter construction found at %s", files.Position(identifier.Pos()))
+		}
+		return true
+	})
+}
+
+func identifiersWithinFunction(parsed *ast.File, name string) map[token.Pos]struct{} {
+	positions := make(map[token.Pos]struct{})
+	for _, declaration := range parsed.Decls {
+		function, isFunction := declaration.(*ast.FuncDecl)
+		if !isFunction || function.Name.Name != name {
+			continue
+		}
+		ast.Inspect(function, func(node ast.Node) bool {
+			if identifier, ok := node.(*ast.Ident); ok {
+				positions[identifier.Pos()] = struct{}{}
+			}
+			return true
+		})
+	}
+	return positions
 }
 
 func functionDeclarationPosition(parsed *ast.File, name string) token.Pos {

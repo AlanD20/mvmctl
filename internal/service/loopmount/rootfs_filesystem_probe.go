@@ -3,6 +3,7 @@ package loopmount
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"golang.org/x/sys/unix"
 
@@ -35,6 +36,8 @@ type rootfsSelectedSource struct {
 }
 
 type rootfsSelectedSourceState struct {
+	mu sync.Mutex
+
 	parent     *rootfsLoopDeviceState
 	partitions *rootfsPartitionSetState
 	kind       rootfsMountSourceKind
@@ -42,6 +45,37 @@ type rootfsSelectedSourceState struct {
 	identity   rootfsBlockIdentity
 	partition  uint8
 	filesystem Filesystem
+	released   bool
+	releaseErr error
+}
+
+// Release revokes this borrowed selection before its owning partition and loop capabilities are released.
+// The selection owns no descriptor, but explicit revocation prevents stale copies from authorizing a later mount.
+func (source *rootfsSelectedSource) Release(ctx context.Context) error {
+	if source == nil {
+		return nil
+	}
+	if source.state == nil {
+		return rootfsAtomicError("selected rootfs source is not active", nil)
+	}
+	state := source.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return state.releaseErr
+	}
+	if ctx == nil {
+		state.releaseErr = rootfsAtomicError("selected rootfs source cleanup context is required", nil)
+	}
+	state.parent = nil
+	state.partitions = nil
+	state.kind = 0
+	state.fd = -1
+	state.identity = rootfsBlockIdentity{}
+	state.partition = 0
+	state.filesystem = ""
+	state.released = true
+	return state.releaseErr
 }
 
 // probeRootfsMountSource probes only receiver-derived loop nodes and binds the selected retained descriptor.
