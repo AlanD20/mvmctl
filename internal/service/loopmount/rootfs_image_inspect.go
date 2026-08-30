@@ -10,20 +10,26 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/lib/system"
+	"mvmctl/pkg/errs"
 )
 
 const (
-	rootfsInspectRuntimeDirectory = "/run/mvmctl"
-	rootfsInspectMountName        = "rootfs"
-	rootfsInspectMountPath        = rootfsInspectRuntimeDirectory + "/" + rootfsInspectMountName
-	rootfsInspectMountMode        = 0700
-	rootfsInspectMountFlags       = unix.MS_RDONLY | unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
-	rootfsInspectPrivateFlags     = unix.MS_REC | unix.MS_PRIVATE
-	rootfsInspectOpenFlags        = unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
-	rootfsInspectFileOpenFlags    = unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW
-	rootfsInspectResolveFlags     = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS
-	rootfsInspectLeafResolveFlags = rootfsInspectResolveFlags | unix.RESOLVE_NO_XDEV
-	rootfsInspectSnapshotMask     = unix.STATX_BASIC_STATS | unix.STATX_MNT_ID | unix.STATX_MNT_ID_UNIQUE
+	rootfsInspectRuntimeDirectory      = "/run/mvmctl"
+	rootfsInspectRuntimeMode           = 0711
+	rootfsInspectMountName             = "rootfs"
+	rootfsInspectMountPath             = rootfsInspectRuntimeDirectory + "/" + rootfsInspectMountName
+	rootfsInspectMountMode             = 0700
+	rootfsInspectMountFlags            = unix.MS_RDONLY | unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
+	rootfsInspectPrivateFlags          = unix.MS_REC | unix.MS_PRIVATE
+	rootfsInspectOpenFlags             = unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	rootfsInspectFileOpenFlags         = unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	rootfsInspectResolveFlags          = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS
+	rootfsInspectLeafResolveFlags      = rootfsInspectResolveFlags | unix.RESOLVE_NO_XDEV
+	rootfsInspectSnapshotMask          = unix.STATX_BASIC_STATS | unix.STATX_MNT_ID | unix.STATX_MNT_ID_UNIQUE
+	maxRootfsInspectCleanupDetailBytes = 512
+
+	rootfsInspectCleanupFailedKey = "loopmount_image_inspect_cleanup_failed"
+	rootfsInspectCleanupDetailKey = "loopmount_image_inspect_cleanup_detail"
 )
 
 var rootfsInspectOSReleaseLeaves = [...]string{"etc/os-release", "usr/lib/os-release"}
@@ -186,6 +192,13 @@ func (adapter *rootfsImageInspectAdapter) InspectImage(
 	}
 	if err := adapter.deps.lockOSThread(ctx); err != nil {
 		return outcome, rootfsAtomicError("lock image inspection OS thread", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return outcome, appendRootfsInspectCleanupError(
+			rootfsAtomicError("image inspection context ended before mount namespace creation", err),
+			"unlock image inspection OS thread",
+			adapter.deps.unlockOSThread(context.WithoutCancel(ctx)),
+		)
 	}
 	if err := adapter.deps.unshare(ctx, unix.CLONE_NEWNS); err != nil {
 		return outcome, appendRootfsInspectCleanupError(
@@ -375,8 +388,8 @@ func prepareRootfsInspectMountpoint(
 		return nil, rootfsAtomicError("inspect fixed image inspection runtime directory", err)
 	}
 	if parentStat.Mode&unix.S_IFMT != unix.S_IFDIR || parentStat.Uid != 0 || parentStat.Gid != 0 ||
-		parentStat.Mode&0022 != 0 {
-		return nil, rootfsAtomicError("fixed image inspection runtime directory has unsafe ownership or mode", nil)
+		parentStat.Mode&07777 != rootfsInspectRuntimeMode {
+		return nil, rootfsAtomicError("fixed image inspection runtime directory is not root:root mode 0711", nil)
 	}
 	if err := deps.mkdirAt(ctx, parentFD, rootfsInspectMountName, rootfsInspectMountMode); err != nil {
 		if !errors.Is(err, unix.EEXIST) {
@@ -664,8 +677,32 @@ func appendRootfsInspectCleanupError(primary error, message string, cause error)
 	if cause == nil {
 		return primary
 	}
-	if primary == nil {
-		return rootfsCleanupError(message, cause)
+	detail := fmt.Sprintf("%s: %v", message, cause)
+	if len(detail) > maxRootfsInspectCleanupDetailBytes {
+		detail = detail[:maxRootfsInspectCleanupDetailBytes-3] + "..."
 	}
-	return appendRootfsCleanupError(primary, message, fmt.Errorf("%s: %w", message, cause))
+	if primary == nil {
+		domainErr := rootfsAtomicError(detail, cause)
+		domainErr.Details = map[string]any{
+			rootfsInspectCleanupFailedKey: true,
+			rootfsInspectCleanupDetailKey: detail,
+		}
+		return domainErr
+	}
+	if domainErr := errs.AsDomainError(primary); domainErr != nil {
+		domainErr.Message += "; " + detail
+		domainErr.Err = errors.Join(domainErr.Err, cause)
+		if domainErr.Details == nil {
+			domainErr.Details = make(map[string]any)
+		}
+		domainErr.Details[rootfsInspectCleanupFailedKey] = true
+		domainErr.Details[rootfsInspectCleanupDetailKey] = detail
+		return domainErr
+	}
+	domainErr := rootfsAtomicError(detail, errors.Join(primary, cause))
+	domainErr.Details = map[string]any{
+		rootfsInspectCleanupFailedKey: true,
+		rootfsInspectCleanupDetailKey: detail,
+	}
+	return domainErr
 }

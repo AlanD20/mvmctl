@@ -70,7 +70,13 @@ func TestRootfsSelectedSourceReleaseIsSharedAndCancellationIndependent(t *testin
 	assert.Nil(t, source.state.parent)
 	assert.Nil(t, source.state.partitions)
 	assert.Equal(t, -1, source.state.fd)
-	assert.Zero(t, source.state.identity)
+	if diff := cmp.Diff(
+		rootfsBlockIdentity{},
+		source.state.identity,
+		cmp.AllowUnexported(rootfsBlockIdentity{}),
+	); diff != "" {
+		t.Errorf("released source identity mismatch (-want +got):\n%s", diff)
+	}
 	assert.Zero(t, source.state.kind)
 	assert.Zero(t, source.state.partition)
 	assert.Empty(t, source.state.filesystem)

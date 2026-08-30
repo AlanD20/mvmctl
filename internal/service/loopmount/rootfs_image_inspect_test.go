@@ -5,11 +5,15 @@ import (
 	"errors"
 	"io"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"mvmctl/pkg/errs"
 )
 
 func TestRootfsImageInspectAdapterUsesClosedReadOnlyNamespaceFlow(t *testing.T) {
@@ -23,11 +27,16 @@ func TestRootfsImageInspectAdapterUsesClosedReadOnlyNamespaceFlow(t *testing.T) 
 	require.NotNil(t, outcome.lease)
 	require.NoError(t, outcome.cleanup(t.Context()))
 
-	require.Len(t, fixture.mounts, 2)
-	assert.Equal(t, testRootfsInspectMountCall{target: "/", flags: rootfsInspectPrivateFlags}, fixture.mounts[0])
-	assert.Equal(t, testRootfsInspectMountCall{
-		source: "/dev/loop3", target: rootfsInspectMountPath, filesystem: "ext4", flags: rootfsInspectMountFlags,
-	}, fixture.mounts[1])
+	wantMounts := []testRootfsInspectMountCall{
+		{target: "/", flags: rootfsInspectPrivateFlags},
+		{
+			source: "/dev/loop3p1", target: rootfsInspectMountPath,
+			filesystem: "ext4", flags: rootfsInspectMountFlags,
+		},
+	}
+	if diff := cmp.Diff(wantMounts, fixture.mounts, cmp.AllowUnexported(testRootfsInspectMountCall{})); diff != "" {
+		t.Errorf("image inspection mounts mismatch (-want +got):\n%s", diff)
+	}
 	assert.False(t, fixture.unlocked, "a thread with a private mount namespace must never rejoin the runtime pool")
 	assert.True(t, fixture.source.state.released)
 	assert.True(t, fixture.partitions.state.released)
@@ -52,6 +61,39 @@ func TestRootfsImageInspectAdapterUnlocksOnlyWhenUnshareFails(t *testing.T) {
 	assert.Equal(t, 1, fixture.snapshotCalls)
 }
 
+// Rationale: cancellation after thread pinning but before unshare must not create a thread-local namespace for an
+// abandoned request. The still-shared thread is safe to return to Go only after cancellation-independent unlock.
+func TestRootfsImageInspectAdapterCancelsBeforeUnshare(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	fixture := newTestRootfsImageInspectFixture(t)
+	fixture.cancelAfterLock = cancel
+	outcome, err := fixture.adapter().InspectImage(ctx, fixture.lease, FilesystemExt4)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, imageInspectEffectStateUnchanged, outcome.state)
+	assert.True(t, fixture.unlocked)
+	assert.False(t, fixture.unlockSawCancellation)
+	assert.False(t, fixture.unshareCalled)
+	assert.Empty(t, fixture.mounts)
+	assert.Equal(t, 1, fixture.snapshotCalls)
+}
+
+func TestPrepareRootfsInspectMountpointRejectsNonCanonicalRuntimeMode(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: /run/mvmctl is a shared managed layout root. Accepting a merely non-writable mode would permit this
+	// effect to proceed while ordinary users cannot traverse runtime state or can list names that policy hides.
+	fixture := newTestRootfsImageInspectFixture(t)
+	fixture.runtimeMode = 0755
+	mountpoint, err := prepareRootfsInspectMountpoint(t.Context(), fixture.deps())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "root:root mode 0711")
+	assert.Nil(t, mountpoint)
+	assert.Contains(t, fixture.events, "close:10")
+}
+
 func TestRootfsImageInspectAdapterClassifiesPostUnshareFaultsUnknownAndCleansInReverse(t *testing.T) {
 	t.Parallel()
 
@@ -63,7 +105,7 @@ func TestRootfsImageInspectAdapterClassifiesPostUnshareFaultsUnknownAndCleansInR
 			fixture.imageMountErr = errors.New("mount failed")
 		},
 		"source identity": func(fixture *testRootfsImageInspectFixture) {
-			fixture.sourceIdentityChanged = true
+			fixture.changeSourceBeforeMount = true
 		},
 		"OS release read": func(fixture *testRootfsImageInspectFixture) {
 			fixture.readErr = errors.New("read failed")
@@ -90,6 +132,38 @@ func TestRootfsImageInspectAdapterClassifiesPostUnshareFaultsUnknownAndCleansInR
 			}
 		})
 	}
+}
+
+// Rationale: the retained source is rechecked after the pathname-based mount. A pre-mount-only check would permit a
+// kernel device-node replacement to authorize inspection of a different block device.
+func TestRootfsImageInspectAdapterRejectsSourceChangedAfterMount(t *testing.T) {
+	t.Parallel()
+
+	fixture := newTestRootfsImageInspectFixture(t)
+	fixture.changeSourceAfterMount = true
+	outcome, err := fixture.adapter().InspectImage(t.Context(), fixture.lease, FilesystemExt4)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "identity changed")
+	assert.True(t, fixture.mounted)
+	assert.Equal(t, 2, fixture.sourceFstatCalls)
+	assert.Equal(t, imageInspectEffectStateOutcomeUnknown, outcome.state)
+	assert.Empty(t, outcome.osType)
+}
+
+// Rationale: the fixed path is still a pathname mount target. Replacement between admission and mount must fail
+// closed before the image mount syscall even though both objects have otherwise admissible metadata.
+func TestRootfsImageInspectAdapterRejectsMountpointReplacement(t *testing.T) {
+	t.Parallel()
+
+	fixture := newTestRootfsImageInspectFixture(t)
+	fixture.mountpointIdentityChanged = true
+	outcome, err := fixture.adapter().InspectImage(t.Context(), fixture.lease, FilesystemExt4)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "mountpoint identity changed")
+	assert.Equal(t, imageInspectEffectStateOutcomeUnknown, outcome.state)
+	assert.False(t, fixture.mounted)
+	require.Len(t, fixture.mounts, 1)
+	assert.Equal(t, "/", fixture.mounts[0].target)
 }
 
 func TestRootfsImageInspectAdapterCleanupIgnoresCancellation(t *testing.T) {
@@ -127,6 +201,43 @@ func TestRootfsImageInspectAdapterNeverClaimsUnchangedWhenCleanupOrSnapshotIsUnc
 			require.Error(t, err)
 			assert.Equal(t, imageInspectEffectStateOutcomeUnknown, outcome.state)
 			assert.Empty(t, outcome.osType)
+		})
+	}
+}
+
+// Rationale: every owned capability must be released even after success. Any close, detach, or partition cleanup
+// failure prevents an unchanged result and must retain bounded image-inspection-specific recovery evidence.
+func TestRootfsImageInspectAdapterClassifiesCapabilityCleanupFaults(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*testRootfsImageInspectFixture){
+		"mounted root close": func(fixture *testRootfsImageInspectFixture) {
+			fixture.mountedRootCloseErr = errors.New("close mounted root failed")
+		},
+		"partition close": func(fixture *testRootfsImageInspectFixture) {
+			fixture.partitionCloseErr = errors.New("close partition failed")
+		},
+		"loop clear": func(fixture *testRootfsImageInspectFixture) {
+			fixture.loopClearErr = errors.New("clear loop failed")
+		},
+		"loop close with bounded detail": func(fixture *testRootfsImageInspectFixture) {
+			fixture.loopCloseErr = errors.New(strings.Repeat("x", 1024))
+		},
+	}
+	for name, configure := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newTestRootfsImageInspectFixture(t)
+			configure(fixture)
+			outcome, err := fixture.adapter().InspectImage(t.Context(), fixture.lease, FilesystemExt4)
+			require.Error(t, err)
+			assert.Equal(t, imageInspectEffectStateOutcomeUnknown, outcome.state)
+			assert.Empty(t, outcome.osType)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, true, domainErr.Details["loopmount_image_inspect_cleanup_failed"])
+			detail, ok := domainErr.Details["loopmount_image_inspect_cleanup_detail"].(string)
+			require.True(t, ok)
+			assert.LessOrEqual(t, len(detail), 512)
 		})
 	}
 }
@@ -217,23 +328,36 @@ type testRootfsImageInspectFixture struct {
 	openAt2Count  int
 	snapshotCalls int
 
-	unlocked                bool
-	mounted                 bool
-	cleanupSawCancellation  bool
-	unshareErr              error
-	privateErr              error
-	imageMountErr           error
-	unmountErr              error
-	readErr                 error
-	sourceIdentityChanged   bool
-	changeSecondSnapshot    bool
-	etcOSReleaseUnavailable bool
-	cancelDuringRead        context.CancelFunc
+	unlocked                  bool
+	unlockSawCancellation     bool
+	mounted                   bool
+	cleanupSawCancellation    bool
+	unshareCalled             bool
+	unshareErr                error
+	privateErr                error
+	imageMountErr             error
+	unmountErr                error
+	readErr                   error
+	changeSourceBeforeMount   bool
+	changeSourceAfterMount    bool
+	sourceFstatCalls          int
+	mountpointIdentityChanged bool
+	changeSecondSnapshot      bool
+	etcOSReleaseUnavailable   bool
+	cancelDuringRead          context.CancelFunc
+	cancelAfterLock           context.CancelFunc
+	runtimeMode               uint32
+	mountedRootCloseErr       error
+	partitionCloseErr         error
+	loopClearErr              error
+	loopCloseErr              error
 }
 
 func newTestRootfsImageInspectFixture(t *testing.T) *testRootfsImageInspectFixture {
 	t.Helper()
-	fixture := &testRootfsImageInspectFixture{t: t, content: []byte("NAME=Alpine\nID=alpine\n")}
+	fixture := &testRootfsImageInspectFixture{
+		t: t, content: []byte("NAME=Alpine\nID=alpine\n"), runtimeMode: 0711,
+	}
 	metadata := rootfsStableMetadata{
 		deviceMajor: 8, deviceMinor: 1, inode: 99, mode: unix.S_IFREG | 0600,
 		uid: 1000, gid: 1000, nlink: 1, size: 4096,
@@ -247,12 +371,12 @@ func newTestRootfsImageInspectFixture(t *testing.T) *testRootfsImageInspectFixtu
 			fixture.recordCleanupContext(ctx)
 			assert.True(t, fixture.partitions.state.released)
 			fixture.events = append(fixture.events, "loop-clear")
-			return nil
+			return fixture.loopClearErr
 		},
 		close: func(ctx context.Context, _ int) error {
 			fixture.recordCleanupContext(ctx)
 			fixture.events = append(fixture.events, "loop-close")
-			return nil
+			return fixture.loopCloseErr
 		},
 	}
 	fixture.partitions = &rootfsPartitionSet{state: &rootfsPartitionSetState{
@@ -263,11 +387,12 @@ func newTestRootfsImageInspectFixture(t *testing.T) *testRootfsImageInspectFixtu
 		fixture.recordCleanupContext(ctx)
 		assert.True(t, fixture.source == nil || fixture.source.state.released)
 		fixture.events = append(fixture.events, "partition-close:41")
-		return nil
+		return fixture.partitionCloseErr
 	}}
 	fixture.source = &rootfsSelectedSource{state: &rootfsSelectedSourceState{
-		parent: fixture.loop.state, partitions: fixture.partitions.state, kind: rootfsMountSourceRaw,
-		fd: 40, identity: fixture.loop.state.identity, filesystem: FilesystemExt4,
+		parent: fixture.loop.state, partitions: fixture.partitions.state, kind: rootfsMountSourcePartition,
+		fd: 41, identity: fixture.partitions.state.devices[0].identity,
+		partition: 1, filesystem: FilesystemExt4,
 	}}
 	return fixture
 }
@@ -280,14 +405,21 @@ func (fixture *testRootfsImageInspectFixture) deps() rootfsImageInspectDeps {
 	return rootfsImageInspectDeps{
 		lockOSThread: func(context.Context) error {
 			fixture.events = append(fixture.events, "lock-thread")
+			if fixture.cancelAfterLock != nil {
+				fixture.cancelAfterLock()
+			}
 			return nil
 		},
-		unlockOSThread: func(context.Context) error {
+		unlockOSThread: func(ctx context.Context) error {
 			fixture.unlocked = true
+			fixture.unlockSawCancellation = ctx.Err() != nil
 			fixture.events = append(fixture.events, "unlock-thread")
 			return nil
 		},
-		unshare: func(context.Context, int) error { return fixture.unshareErr },
+		unshare: func(context.Context, int) error {
+			fixture.unshareCalled = true
+			return fixture.unshareErr
+		},
 		mount: func(_ context.Context, source, target, filesystem string, flags uintptr, _ string) error {
 			fixture.mounts = append(fixture.mounts, testRootfsInspectMountCall{
 				source: source, target: target, filesystem: filesystem, flags: flags,
@@ -331,6 +463,9 @@ func (fixture *testRootfsImageInspectFixture) deps() rootfsImageInspectDeps {
 		close: func(ctx context.Context, fd int) error {
 			fixture.recordCleanupContext(ctx)
 			fixture.events = append(fixture.events, "close:"+rootfsTestDecimal(fd))
+			if fd == 13 {
+				return fixture.mountedRootCloseErr
+			}
 			return nil
 		},
 		attachLoop: func(context.Context, *rootfsLease) (*rootfsLoopDevice, error) {
@@ -386,15 +521,24 @@ func (fixture *testRootfsImageInspectFixture) openAt2(
 func (fixture *testRootfsImageInspectFixture) fstat(_ context.Context, fd int, stat *unix.Stat_t) error {
 	switch fd {
 	case 10:
-		*stat = unix.Stat_t{Mode: unix.S_IFDIR | 0755, Uid: 0, Gid: 0, Dev: 1, Ino: 1, Nlink: 2}
-	case 11, 12:
+		*stat = unix.Stat_t{Mode: unix.S_IFDIR | fixture.runtimeMode, Uid: 0, Gid: 0, Dev: 1, Ino: 1, Nlink: 2}
+	case 11:
 		*stat = unix.Stat_t{Mode: unix.S_IFDIR | 0700, Uid: 0, Gid: 0, Dev: 1, Ino: 2, Nlink: 2}
+	case 12:
+		inode := uint64(2)
+		if fixture.mountpointIdentityChanged {
+			inode++
+		}
+		*stat = unix.Stat_t{Mode: unix.S_IFDIR | 0700, Uid: 0, Gid: 0, Dev: 1, Ino: inode, Nlink: 2}
 	case 40:
-		minor := uint32(3)
-		if fixture.sourceIdentityChanged {
+		*stat = unix.Stat_t{Mode: unix.S_IFBLK | 0600, Rdev: unix.Mkdev(7, 3)}
+	case 41:
+		fixture.sourceFstatCalls++
+		minor := uint32(1)
+		if fixture.changeSourceBeforeMount || (fixture.changeSourceAfterMount && fixture.sourceFstatCalls == 2) {
 			minor++
 		}
-		*stat = unix.Stat_t{Mode: unix.S_IFBLK | 0600, Rdev: unix.Mkdev(7, minor)}
+		*stat = unix.Stat_t{Mode: unix.S_IFBLK | 0600, Rdev: unix.Mkdev(259, minor)}
 	case 14:
 		*stat = unix.Stat_t{
 			Mode: unix.S_IFREG | 0644, Uid: 0, Gid: 0, Dev: 2, Ino: 5, Nlink: 1,

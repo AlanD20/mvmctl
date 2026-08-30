@@ -17,14 +17,14 @@ const (
 // is absent.
 func parseRootfsOSRelease(content []byte) (string, error) {
 	if len(content) > maxRootfsOSReleaseBytes {
-		return "", rootfsAtomicError("OS release content exceeds the supported byte bound", nil)
+		return "", rootfsAtomicError("os-release content exceeds the supported byte bound", nil)
 	}
 	if !utf8.Valid(content) {
-		return "", rootfsAtomicError("OS release content is not valid UTF-8", nil)
+		return "", rootfsAtomicError("os-release content is not valid UTF-8", nil)
 	}
 	for _, character := range content {
 		if character == '\r' || character == 0 || (character < ' ' && character != '\n' && character != '\t') {
-			return "", rootfsAtomicError("OS release content contains a control character", nil)
+			return "", rootfsAtomicError("os-release content contains a control character", nil)
 		}
 	}
 
@@ -34,7 +34,7 @@ func parseRootfsOSRelease(content []byte) (string, error) {
 	fields := 0
 	for lineNumber, rawLine := range lines {
 		if len(rawLine) > maxRootfsOSReleaseLineBytes {
-			return "", rootfsAtomicError("OS release line exceeds the supported byte bound", nil)
+			return "", rootfsAtomicError("os-release line exceeds the supported byte bound", nil)
 		}
 		line := string(rawLine)
 		if line == "" || line[0] == '#' {
@@ -42,27 +42,27 @@ func parseRootfsOSRelease(content []byte) (string, error) {
 		}
 		fields++
 		if fields > maxRootfsOSReleaseFields {
-			return "", rootfsAtomicError("OS release assignment count exceeds the supported bound", nil)
+			return "", rootfsAtomicError("os-release assignment count exceeds the supported bound", nil)
 		}
 		separator := bytes.IndexByte(rawLine, '=')
 		if separator <= 0 {
-			return "", rootfsAtomicError(fmt.Sprintf("OS release line %d is not an assignment", lineNumber+1), nil)
+			return "", rootfsAtomicError(fmt.Sprintf("os-release line %d is not an assignment", lineNumber+1), nil)
 		}
 		key := line[:separator]
 		if !validRootfsOSReleaseKey(key) {
-			return "", rootfsAtomicError(fmt.Sprintf("OS release line %d has an invalid key", lineNumber+1), nil)
+			return "", rootfsAtomicError(fmt.Sprintf("os-release line %d has an invalid key", lineNumber+1), nil)
 		}
 		if _, duplicate := seen[key]; duplicate {
-			return "", rootfsAtomicError("OS release key is duplicated", nil)
+			return "", rootfsAtomicError("os-release key is duplicated", nil)
 		}
 		seen[key] = struct{}{}
 		value, err := parseRootfsOSReleaseValue(line[separator+1:])
 		if err != nil {
-			return "", rootfsAtomicError(fmt.Sprintf("parse OS release line %d: %v", lineNumber+1, err), err)
+			return "", rootfsAtomicError(fmt.Sprintf("parse os-release line %d: %v", lineNumber+1, err), err)
 		}
 		if key == "ID" {
 			if !validOSIdentifier(value) {
-				return "", rootfsAtomicError("OS release ID is not a valid OS identifier", nil)
+				return "", rootfsAtomicError("os-release ID is not a valid OS identifier", nil)
 			}
 			osType = value
 		}
