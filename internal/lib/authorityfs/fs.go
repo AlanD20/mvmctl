@@ -69,10 +69,11 @@ type JailerUID struct {
 }
 
 type jailerUIDState struct {
-	// mu guards fd and every lifecycle field below.
+	// mu guards fd and every lifecycle field below. ownerUID is immutable after construction.
 	mu         sync.Mutex
 	deps       dependencies
 	policy     policy
+	ownerUID   uint32
 	fd         int
 	active     bool
 	released   bool
@@ -209,7 +210,7 @@ func (jailer *Jailer) OpenUID(ctx context.Context, uid uint32) (*JailerUID, erro
 		return nil, err
 	}
 	return &JailerUID{state: &jailerUIDState{
-		deps: state.deps, policy: state.policy, fd: fd, active: true,
+		deps: state.deps, policy: state.policy, ownerUID: uid, fd: fd, active: true,
 	}}, nil
 }
 

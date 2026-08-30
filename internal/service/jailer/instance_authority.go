@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"mvmctl/internal/lib/authorityfs"
 	"mvmctl/pkg/errs"
 )
 
@@ -23,7 +24,7 @@ type launchLease struct {
 type launchLeaseState struct {
 	mu          sync.Mutex
 	directories *instanceUIDDirectories
-	vmLock      *authorityLock
+	vmLock      *vmAuthorityLease
 	prepared    *preparedRelease
 	record      instanceRecord
 	released    bool
@@ -41,14 +42,14 @@ type launchLeaseSnapshot struct {
 type activeLease struct {
 	roots       *instanceAuthorityRoots
 	directories *instanceUIDDirectories
-	vmLock      *authorityLock
+	vmLock      *vmAuthorityLease
 	record      instanceRecord
 }
 
 type cleanupLease struct {
 	roots       *instanceAuthorityRoots
 	directories *instanceUIDDirectories
-	vmLock      *authorityLock
+	vmLock      *vmAuthorityLease
 	record      instanceRecord
 }
 
@@ -61,7 +62,7 @@ type releaseSlotLease struct {
 type lockedInstance struct {
 	roots       *instanceAuthorityRoots
 	directories *instanceUIDDirectories
-	vmLock      *authorityLock
+	vmLock      *vmAuthorityLease
 	record      instanceRecord
 }
 
@@ -150,7 +151,8 @@ func (prepared *preparedRelease) registerLaunching(
 	if releaseSlotForIdentity(release) != preparedState.slotLease.slot {
 		return nil, instanceAtomicError("prepared release identity does not match held release slot", nil)
 	}
-	var indexLock, vmLock *authorityLock
+	var indexLock *authorityLock
+	var vmLock *vmAuthorityLease
 	var directories *instanceUIDDirectories
 	defer func() {
 		if returnErr == nil {
@@ -414,7 +416,8 @@ func (authority *instanceAuthority) lockOwnedInstance(
 	if err != nil {
 		return nil, err
 	}
-	var indexLock, vmLock *authorityLock
+	var indexLock *authorityLock
+	var vmLock *vmAuthorityLease
 	var directories *instanceUIDDirectories
 	defer func() {
 		if returnErr == nil {
@@ -499,10 +502,19 @@ func (lease *launchLease) Release(ctx context.Context) error {
 	if state.released {
 		return state.cleanupErr
 	}
+	var vmReleaseErr error
+	if state.vmLock != nil {
+		vmReleaseErr = state.vmLock.Release(context.WithoutCancel(ctx))
+	}
+	if errors.Is(vmReleaseErr, authorityfs.ErrTopologyRetained) {
+		return vmReleaseErr
+	}
+	state.vmLock = nil
+	state.cleanupErr = appendInstanceOperationError(nil, "release VM lock", vmReleaseErr)
 	state.cleanupErr = releaseInstanceOperationResources(
 		ctx,
+		state.cleanupErr,
 		nil,
-		state.vmLock,
 		nil,
 		nil,
 		state.directories,
@@ -515,11 +527,25 @@ func (lease *launchLease) Release(ctx context.Context) error {
 			state.prepared.Release(context.WithoutCancel(ctx)),
 		)
 	}
-	state.vmLock = nil
 	state.directories = nil
 	state.prepared = nil
 	state.released = true
 	return state.cleanupErr
+}
+
+func (lease *launchLease) retainTopologyAuthority(
+	ctx context.Context,
+) (*topologyAuthorityLease, error) {
+	if lease == nil || lease.state == nil {
+		return nil, instanceStateError("", "launch lease is not active")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.vmLock == nil {
+		return nil, instanceStateError("", "launch lease is not active")
+	}
+	return state.vmLock.retainTopologyAuthority(ctx)
 }
 
 func (lease *launchLease) snapshot() launchLeaseSnapshot {
@@ -601,7 +627,7 @@ func (locked *lockedInstance) Release(ctx context.Context) error {
 func releaseInstanceOperationResources(
 	ctx context.Context,
 	primary error,
-	vmLock *authorityLock,
+	vmLock *vmAuthorityLease,
 	indexLock *authorityLock,
 	releaseLock *authorityLock,
 	directories *instanceUIDDirectories,

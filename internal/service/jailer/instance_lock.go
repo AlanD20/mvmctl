@@ -49,7 +49,7 @@ func (roots *instanceAuthorityRoots) acquireReleaseSlotLock(
 func (directories *instanceUIDDirectories) acquireVMLock(
 	ctx context.Context,
 	vmID string,
-) (*authorityLock, error) {
+) (*vmAuthorityLease, error) {
 	if !vmIDPattern.MatchString(vmID) {
 		return nil, instanceValidationError("vm ID is invalid")
 	}
@@ -61,7 +61,9 @@ func (directories *instanceUIDDirectories) acquireVMLock(
 	if err != nil {
 		return nil, err
 	}
-	return &authorityLock{value: value, active: true}, nil
+	return &vmAuthorityLease{state: &vmAuthorityLeaseState{
+		value: value, ownerUID: directories.uid, key: key, active: true,
+	}}, nil
 }
 
 func (lock *authorityLock) Release(ctx context.Context) error {

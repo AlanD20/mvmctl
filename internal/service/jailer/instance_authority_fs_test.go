@@ -66,6 +66,32 @@ type testInstanceAuthorityLock struct {
 	releaseErr error
 }
 
+type testInstanceVMAuthority struct {
+	tree     *testInstanceAuthorityTree
+	gate     *testInstanceLockGate
+	ownerUID uint32
+	key      authorityfs.VMKey
+	// mu guards topologyHolds and every lifecycle field below.
+	mu            sync.Mutex
+	topologyHolds uint64
+	released      bool
+	releaseErr    error
+}
+
+type testInstanceTopologyAuthority struct {
+	state *testInstanceTopologyAuthorityState
+}
+
+type testInstanceTopologyAuthorityState struct {
+	// mu guards released and releaseErr. parent, ownerUID, and key are immutable.
+	mu         sync.Mutex
+	parent     *testInstanceVMAuthority
+	ownerUID   uint32
+	key        authorityfs.VMKey
+	released   bool
+	releaseErr error
+}
+
 type testInstanceVMKey struct {
 	uid uint32
 	key authorityfs.VMKey
@@ -179,7 +205,7 @@ func (authority *testInstanceJailerAuthority) Release(context.Context) error {
 func (uid *testInstanceJailerUID) acquireVM(
 	ctx context.Context,
 	key authorityfs.VMKey,
-) (instanceAuthorityLock, error) {
+) (instanceVMAuthority, error) {
 	uid.mu.Lock()
 	released := uid.released
 	uid.mu.Unlock()
@@ -199,7 +225,10 @@ func (uid *testInstanceJailerUID) acquireVM(
 		uid.tree.vms[mapKey] = gate
 	}
 	uid.tree.mu.Unlock()
-	return uid.tree.acquire(ctx, gate, "vm")
+	if err := uid.tree.waitAcquire(ctx, gate, "vm"); err != nil {
+		return nil, err
+	}
+	return &testInstanceVMAuthority{tree: uid.tree, gate: gate, ownerUID: uid.uid, key: key}, nil
 }
 
 func (uid *testInstanceJailerUID) Release(context.Context) error {
@@ -223,8 +252,19 @@ func (tree *testInstanceAuthorityTree) acquire(
 	gate *testInstanceLockGate,
 	description string,
 ) (instanceAuthorityLock, error) {
+	if err := tree.waitAcquire(ctx, gate, description); err != nil {
+		return nil, err
+	}
+	return &testInstanceAuthorityLock{tree: tree, gate: gate, description: description}, nil
+}
+
+func (tree *testInstanceAuthorityTree) waitAcquire(
+	ctx context.Context,
+	gate *testInstanceLockGate,
+	description string,
+) error {
 	if err := ctx.Err(); err != nil {
-		return nil, instanceLockContextError(description, err)
+		return instanceLockContextError(description, err)
 	}
 	select {
 	case <-gate.token:
@@ -232,20 +272,20 @@ func (tree *testInstanceAuthorityTree) acquire(
 		tree.acquired = append(tree.acquired, description)
 		tree.mu.Unlock()
 		tree.observeAcquire(ctx, description)
-		return &testInstanceAuthorityLock{tree: tree, gate: gate, description: description}, nil
+		return nil
 	default:
 		gate.waitOnce.Do(func() { close(gate.waitObserved) })
 	}
 	select {
 	case <-ctx.Done():
-		return nil, instanceLockContextError(description, ctx.Err())
+		return instanceLockContextError(description, ctx.Err())
 	case <-gate.token:
 	}
 	tree.mu.Lock()
 	tree.acquired = append(tree.acquired, description)
 	tree.mu.Unlock()
 	tree.observeAcquire(ctx, description)
-	return &testInstanceAuthorityLock{tree: tree, gate: gate, description: description}, nil
+	return nil
 }
 
 func (tree *testInstanceAuthorityTree) releaseWaitObserved(t *testing.T, slot releaseSlot) <-chan struct{} {
@@ -283,6 +323,87 @@ func (lock *testInstanceAuthorityLock) Release(ctx context.Context) error {
 	}
 	lock.gate.token <- struct{}{}
 	return lock.releaseErr
+}
+
+func (authority *testInstanceVMAuthority) retainTopology(
+	ctx context.Context,
+) (instanceTopologyAuthority, error) {
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	if authority.released {
+		return nil, instanceStateError("", "VM authority is not active")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, instanceLockContextError("VM topology authority", err)
+	}
+	authority.topologyHolds++
+	return &testInstanceTopologyAuthority{state: &testInstanceTopologyAuthorityState{
+		parent: authority, ownerUID: authority.ownerUID, key: authority.key,
+	}}, nil
+}
+
+func (authority *testInstanceVMAuthority) Release(ctx context.Context) error {
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	if authority.released {
+		return authority.releaseErr
+	}
+	if authority.topologyHolds != 0 {
+		return instanceLockError("release VM authority", authorityfs.ErrTopologyRetained)
+	}
+	authority.released = true
+	authority.tree.mu.Lock()
+	var releaseErr error
+	if authority.tree.lockReleaseErrDescription == "" || authority.tree.lockReleaseErrDescription == "vm" {
+		releaseErr = authority.tree.lockReleaseErr
+		authority.tree.lockReleaseErr = nil
+	}
+	onRelease := authority.tree.onRelease
+	authority.tree.mu.Unlock()
+	if onRelease != nil {
+		releaseErr = errors.Join(releaseErr, onRelease(ctx, "vm"))
+	}
+	if releaseErr != nil {
+		authority.releaseErr = instanceLockError("release authority lock", releaseErr)
+	}
+	authority.gate.token <- struct{}{}
+	return authority.releaseErr
+}
+
+func (authority *testInstanceTopologyAuthority) ownerUID() uint32 {
+	if authority == nil || authority.state == nil {
+		return 0
+	}
+	return authority.state.ownerUID
+}
+
+func (authority *testInstanceTopologyAuthority) vmKey() authorityfs.VMKey {
+	if authority == nil || authority.state == nil {
+		return authorityfs.VMKey{}
+	}
+	return authority.state.key
+}
+
+func (authority *testInstanceTopologyAuthority) Release(context.Context) error {
+	if authority == nil || authority.state == nil {
+		return nil
+	}
+	state := authority.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return state.releaseErr
+	}
+	state.parent.mu.Lock()
+	if state.parent.topologyHolds == 0 {
+		state.releaseErr = instanceAtomicError("test VM topology hold counter underflow", nil)
+	} else {
+		state.parent.topologyHolds--
+	}
+	state.parent.mu.Unlock()
+	state.parent = nil
+	state.released = true
+	return state.releaseErr
 }
 
 func (tree *testInstanceAuthorityTree) observeAcquire(ctx context.Context, description string) {
@@ -331,6 +452,18 @@ func TestSystemAuthorityAdaptersPreserveCachedReleaseResult(t *testing.T) {
 	lock := &systemAuthorityLock{released: true, releaseErr: lockErr}
 	assertSameError(t, lockErr, lock.Release(t.Context()))
 	assertSameError(t, lockErr, lock.Release(t.Context()))
+
+	vmErr := instanceLockError("release VM authority", errors.New("VM release failed"))
+	vm := &systemVMAuthority{released: true, releaseErr: vmErr}
+	assertSameError(t, vmErr, vm.Release(t.Context()))
+	assertSameError(t, vmErr, vm.Release(t.Context()))
+
+	topologyErr := instanceLockError("release VM topology authority", errors.New("topology release failed"))
+	topology := &systemTopologyAuthority{state: &systemTopologyAuthorityState{
+		released: true, releaseErr: topologyErr,
+	}}
+	assertSameError(t, topologyErr, topology.Release(t.Context()))
+	assertSameError(t, topologyErr, topology.Release(t.Context()))
 }
 
 func TestSystemAuthorityAdaptersRejectAcquireAfterRelease(t *testing.T) {
@@ -356,6 +489,11 @@ func TestSystemAuthorityAdaptersRejectAcquireAfterRelease(t *testing.T) {
 	require.NoError(t, err)
 	vm, err := uidAuthority.acquireVM(t.Context(), vmKey)
 	assert.Nil(t, vm)
+	require.Error(t, err)
+
+	vmAuthority := &systemVMAuthority{released: true}
+	topology, err := vmAuthority.retainTopology(t.Context())
+	assert.Nil(t, topology)
 	require.Error(t, err)
 }
 
@@ -424,6 +562,7 @@ func TestZeroValueSystemAuthorityAdaptersFailClosedAndCacheError(t *testing.T) {
 		"Jailer":     (&systemJailerAuthority{}).Release,
 		"Jailer UID": (&systemJailerUID{}).Release,
 		"lock":       (&systemAuthorityLock{}).Release,
+		"VM":         (&systemVMAuthority{}).Release,
 	}
 	for name, release := range tests {
 		t.Run(name, func(t *testing.T) {

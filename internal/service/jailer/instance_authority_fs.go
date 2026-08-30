@@ -20,11 +20,22 @@ type instanceJailerAuthority interface {
 }
 
 type instanceJailerUID interface {
-	acquireVM(context.Context, authorityfs.VMKey) (instanceAuthorityLock, error)
+	acquireVM(context.Context, authorityfs.VMKey) (instanceVMAuthority, error)
 	Release(context.Context) error
 }
 
 type instanceAuthorityLock interface {
+	Release(context.Context) error
+}
+
+type instanceVMAuthority interface {
+	retainTopology(context.Context) (instanceTopologyAuthority, error)
+	Release(context.Context) error
+}
+
+type instanceTopologyAuthority interface {
+	ownerUID() uint32
+	vmKey() authorityfs.VMKey
 	Release(context.Context) error
 }
 
@@ -50,6 +61,28 @@ type systemAuthorityLock struct {
 	// mu guards value and every lifecycle field below.
 	mu         sync.Mutex
 	value      *authorityfs.Lock
+	released   bool
+	releaseErr error
+}
+
+type systemVMAuthority struct {
+	// mu guards value and every lifecycle field below.
+	mu         sync.Mutex
+	value      *authorityfs.JailerVM
+	released   bool
+	releaseErr error
+}
+
+type systemTopologyAuthority struct {
+	state *systemTopologyAuthorityState
+}
+
+type systemTopologyAuthorityState struct {
+	// mu guards value and every lifecycle field below. ownerUID and key are immutable.
+	mu         sync.Mutex
+	value      *authorityfs.TopologyHold
+	ownerUID   uint32
+	key        authorityfs.VMKey
 	released   bool
 	releaseErr error
 }
@@ -136,7 +169,7 @@ func (authority *systemJailerAuthority) Release(ctx context.Context) error {
 func (uid *systemJailerUID) acquireVM(
 	ctx context.Context,
 	key authorityfs.VMKey,
-) (instanceAuthorityLock, error) {
+) (instanceVMAuthority, error) {
 	uid.mu.Lock()
 	defer uid.mu.Unlock()
 	if uid.released || uid.value == nil {
@@ -146,7 +179,7 @@ func (uid *systemJailerUID) acquireVM(
 	if err != nil {
 		return nil, mapAuthorityFSLockError("VM", err)
 	}
-	return &systemAuthorityLock{value: value}, nil
+	return &systemVMAuthority{value: value}, nil
 }
 
 func (uid *systemJailerUID) Release(ctx context.Context) error {
@@ -199,6 +232,86 @@ func (lock *systemAuthorityLock) Release(ctx context.Context) error {
 		lock.releaseErr = instanceLockError("release authority lock", err)
 	}
 	return lock.releaseErr
+}
+
+func (authority *systemVMAuthority) retainTopology(
+	ctx context.Context,
+) (instanceTopologyAuthority, error) {
+	if authority == nil {
+		return nil, instanceStateError("", "vm authority is not active")
+	}
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	if authority.released || authority.value == nil {
+		return nil, instanceStateError("", "vm authority is not active")
+	}
+	value, err := authority.value.RetainTopology(ctx)
+	if err != nil {
+		return nil, instanceLockError("retain VM topology authority", err)
+	}
+	return &systemTopologyAuthority{state: &systemTopologyAuthorityState{
+		value: value, ownerUID: value.OwnerUID(), key: value.VMKey(),
+	}}, nil
+}
+
+func (authority *systemVMAuthority) Release(ctx context.Context) error {
+	if authority == nil {
+		return nil
+	}
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	if authority.released {
+		return authority.releaseErr
+	}
+	if authority.value == nil {
+		authority.released = true
+		authority.releaseErr = instanceStateError("", "vm authority is not active")
+		return authority.releaseErr
+	}
+	err := authority.value.Release(context.WithoutCancel(ctx))
+	if errors.Is(err, authorityfs.ErrTopologyRetained) {
+		return instanceLockError("release VM authority", err)
+	}
+	authority.value = nil
+	authority.released = true
+	if err != nil {
+		authority.releaseErr = instanceLockError("release VM authority", err)
+	}
+	return authority.releaseErr
+}
+
+func (authority *systemTopologyAuthority) ownerUID() uint32 {
+	if authority == nil || authority.state == nil {
+		return 0
+	}
+	return authority.state.ownerUID
+}
+
+func (authority *systemTopologyAuthority) vmKey() authorityfs.VMKey {
+	if authority == nil || authority.state == nil {
+		return authorityfs.VMKey{}
+	}
+	return authority.state.key
+}
+
+func (authority *systemTopologyAuthority) Release(ctx context.Context) error {
+	if authority == nil || authority.state == nil {
+		return nil
+	}
+	state := authority.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return state.releaseErr
+	}
+	if state.value == nil {
+		state.releaseErr = instanceStateError("", "vm topology authority is not active")
+	} else if err := state.value.Release(context.WithoutCancel(ctx)); err != nil {
+		state.releaseErr = instanceLockError("release VM topology authority", err)
+	}
+	state.value = nil
+	state.released = true
+	return state.releaseErr
 }
 
 func mapAuthorityFSLockError(description string, err error) error {

@@ -81,8 +81,8 @@ func (jailer *Jailer) AcquireRelease(ctx context.Context, key ReleaseKey) (*Lock
 	return acquireLock(ctx, state.deps, state.policy, state.releases, key.value+".lock", "Jailer release")
 }
 
-// AcquireVM acquires the Jailer lock for one canonical VM identity.
-func (uid *JailerUID) AcquireVM(ctx context.Context, key VMKey) (*Lock, error) {
+// AcquireVM acquires the Jailer VM authority for one canonical owner-bound VM identity.
+func (uid *JailerUID) AcquireVM(ctx context.Context, key VMKey) (*JailerVM, error) {
 	if !isLowerHex(key.value, vmKeyLength) {
 		return nil, fmt.Errorf("authorityfs: VM key is invalid")
 	}
@@ -95,7 +95,13 @@ func (uid *JailerUID) AcquireVM(ctx context.Context, key VMKey) (*Lock, error) {
 	if !state.active {
 		return nil, fmt.Errorf("authorityfs: Jailer UID authority is released")
 	}
-	return acquireLock(ctx, state.deps, state.policy, state.fd, key.value+".lock", "Jailer VM")
+	lock, err := acquireLock(ctx, state.deps, state.policy, state.fd, key.value+".lock", "Jailer VM")
+	if err != nil {
+		return nil, err
+	}
+	return &JailerVM{state: &jailerVMState{
+		lock: lock, ownerUID: state.ownerUID, key: key,
+	}}, nil
 }
 
 // AcquireNetwork acquires the managed-network authority class for one owner-bound network.
