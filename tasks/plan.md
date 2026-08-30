@@ -70,8 +70,11 @@ continue without silently deleting it.
   reviewed private lock adapter binds the seam to `authorityfs` using only the authenticated caller UID and canonical
   VM/image identity. An inert deterministic mount-source policy accepts only pathless receiver-derived probes, at most
   16 partitions, and either a matching raw filesystem with no partitions or exactly one matching partition; malformed,
-  duplicate, and ambiguous layouts fail closed. Discovery, ioctls, mounts, mount namespaces, effects, production
-  `Server` construction, receiver handling, dispatch, public/backend cutover, and legacy-route removal remain pending.
+  duplicate, and ambiguous layouts fail closed. A pure loop-device contract fixes control identity `10:237`, derives
+  block-major-`7` devices from exact 20-bit minors, and builds only an admitted-FD `AUTOCLEAR|PARTSCAN` configuration
+  with `READ_ONLY` for read-only access. Device opens, ioctls, attach, detach, discovery, mounts, mount namespaces,
+  effects, production `Server` construction, receiver handling, dispatch, public/backend cutover, and legacy-route
+  removal remain pending.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -661,6 +664,14 @@ and its filesystem exactly matches the request; a partitioned layout requires ex
 reused, or duplicate block identities, duplicate or out-of-range partition numbers, raw-plus-partition ambiguity, and
 missing or multiple matches fail closed. Receiver discovery and identity verification, loop ioctls, mounts, private
 mount-namespace setup, effect implementation, and `Server` activation remain pending.
+
+The private inert loop-device kernel contract fixes `/dev/loop-control` to character-device identity `10:237` and
+derives `/dev/loop<N>` only for `N` from `0` through `2^20-1`. The derived device must be a block device with major `7`
+and minor exactly `N`. Its `unix.LoopConfig` carries the exact admitted rootfs descriptor with only
+`LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, adding `LO_FLAGS_READ_ONLY` only for read-only access. Every other field remains
+zero; direct I/O and legacy setup are excluded. Invalid descriptors, access, indices, or identities fail closed through
+the private LoopMount `DomainError` path. This is a pure contract: device opens, ioctls, attach, detach, discovery,
+mounts, mount-namespace setup, effects, `Server` construction, handlers, and registrations remain unimplemented.
 
 The private inactive `Server` transaction foundation splits its effects between `rootfsEffects`, which contains exactly
 `ProvisionVM` and `InspectImage`, and private `imageOptimizeEffects`, which contains only `OptimizeImage`. Provisioning

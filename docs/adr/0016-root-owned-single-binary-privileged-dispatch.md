@@ -479,10 +479,19 @@ and its filesystem exactly matches the closed request. Otherwise exactly one par
 or filesystem values, reused or duplicate block identities, duplicate or out-of-range partition numbers,
 raw-plus-partition ambiguity, and missing or multiple matches fail closed.
 
+The private inert loop-device kernel contract admits only the fixed `/dev/loop-control` path with exact character-device
+major `10` and minor `237`. It derives `/dev/loop<N>` only when `N` is a 20-bit index from `0` through `2^20-1`, then
+requires the opened candidate to be a block device with major `7` and minor exactly `N`. Its `unix.LoopConfig` contains
+the exact admitted rootfs descriptor and only `LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, with `LO_FLAGS_READ_ONLY` added
+only for read-only access. Every offset, size limit, name, encryption value, block-size override, and legacy setup field
+remains zero, and direct I/O is not enabled. Invalid descriptors, access modes, indices, or device identities fail
+closed through the private LoopMount `DomainError` path with no usable result.
+
 Receiver discovery of kernel-created loop children and verification of the identities supplied to that policy remain
-future effect work. No discovery, loop ioctl, mount, private mount namespace, effect implementation, or `Server`
-activation exists yet. The future grow effect supports a raw filesystem or a partition whose already-admitted capacity
-reaches the target; rewriting MBR or GPT is outside this capability.
+future effect work. The pure contract does not open `/dev/loop-control` or `/dev/loop<N>` and performs no ioctl, attach,
+detach, discovery, mount, or private mount-namespace setup. No effect implementation, `Server` construction, receiver
+handler, or dispatcher registration exists yet. The future grow effect supports a raw filesystem or a partition whose
+already-admitted capacity reaches the target; rewriting MBR or GPT is outside this capability.
 
 Provisioning writes only receiver-generated, fixed-purpose content through the mounted-root descriptor. The accepted
 first subset is hostname and hosts content, DNS content, SSH keys and sudo policy for root or an already-existing parsed
@@ -512,12 +521,12 @@ user-visible reduction or defer cutover until a safe typed replacement exists.
 This section combines implemented inactive authority and selection-policy foundations with accepted future effect
 design, not current runtime behavior. The shared cycle-free authority module now has separate Jailer and LoopMount
 capability families, the private LoopMount service adapter implements the coordinator's canonical resource-lock seam,
-and the deterministic mount-source policy remains pathless and inert. No production constructor activates that
-`Server`; discovery, loop ioctls, mounts, private mount-namespace setup, and concrete LoopMount effects do not exist; no
-LoopMount receiver handler or dispatcher action is registered; and the backend/public path still uses
-`mvm run provision`, raw wire operations and sudo, arbitrary unmount, and PID-killing cleanup. The implemented
-foundations therefore authorize no privileged mount effect. The legacy `Provisioner`, `Op`, path protocol, and cleanup
-functions must not be wrapped by the new adapter.
+the deterministic mount-source policy remains pathless and inert, and the loop-device kernel contract remains pure.
+No production constructor activates that `Server`; device opens, discovery, loop ioctls, attach, detach, mounts,
+private mount-namespace setup, and concrete LoopMount effects do not exist; no LoopMount receiver handler or dispatcher
+action is registered; and the backend/public path still uses `mvm run provision`, raw wire operations and sudo,
+arbitrary unmount, and PID-killing cleanup. The implemented foundations therefore authorize no privileged mount
+effect. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
 
 ### Release trust
 

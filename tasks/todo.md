@@ -553,10 +553,11 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, inactive receiver-transaction
-foundations, and deterministic rootfs mount-source policy are implemented; the shared authority filesystem, its
-separate Jailer and LoopMount capability families, canonical VM/image locks, and the private service lock adapter are
-implemented and reviewed; discovery, ioctls, mounts, namespaces, effects, `Server` activation, receiver registration,
-backend/public cutover, legacy removal, and host-mutation migration remain pending
+foundations, deterministic rootfs mount-source policy, and pure loop-device kernel contract are implemented; the
+shared authority filesystem, its separate Jailer and LoopMount capability families, canonical VM/image locks, and the
+private service lock adapter are implemented and reviewed; device opens, ioctls, attach, detach, discovery, mounts,
+namespaces, effects, `Server` activation, receiver registration, backend/public cutover, legacy removal, and
+host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -611,6 +612,11 @@ backend/public cutover, legacy removal, and host-mutation migration remain pendi
       one matching partition. Reject malformed probes, reused or duplicate identities, duplicate partition numbers,
       raw-plus-partition ambiguity, and missing or multiple matches. This implements no discovery, ioctl, mount,
       namespace, effect, or `Server` activation.
+    - [x] Define the inert pure loop-device kernel contract: fixed `/dev/loop-control` character-device identity
+      `10:237`; derived `/dev/loop<N>` block major `7` with exact 20-bit minor `N`; and an exact admitted-FD
+      `unix.LoopConfig` with `AUTOCLEAR|PARTSCAN`, `READ_ONLY` only for read-only access, and every other field zero.
+      Exclude legacy setup and direct I/O; fail closed with a private `DomainError`. This opens no device and performs
+      no ioctl, attach, detach, discovery, mount, namespace, effect, `Server` construction, handler, or registration.
   - [ ] Implement read-only `InspectImage` first. Consume the admitted descriptor, share the image lock with future
     optimization, mount `ro,nosuid,nodev,noexec`, read only bounded fixed OS-release leaves, prove byte-for-byte image
     stability, and return only unchanged or outcome-unknown evidence.

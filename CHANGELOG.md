@@ -119,6 +119,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request; otherwise exactly one partition must match. Malformed probes, reused or duplicate block identities,
   duplicate partition numbers, raw-plus-partition ambiguity, and missing or multiple matches fail closed. Device
   discovery, ioctls, mounts, mount namespaces, effects, and `Server` activation remain pending.
+- Added an inert pure loop-device kernel contract. It admits only `/dev/loop-control` as character device `10:237` and
+  derives `/dev/loop<N>` only for a 20-bit index whose block identity is major `7` and minor exactly `N`. Its
+  `unix.LoopConfig` binds the exact admitted rootfs descriptor with `LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, adds
+  `LO_FLAGS_READ_ONLY` only for read-only access, and leaves every other field zero without legacy setup or direct I/O.
+  Invalid values fail closed through the private LoopMount `DomainError` path. No device open, ioctl, attach, detach,
+  discovery, mount, namespace, effect, `Server` construction, handler, or registration exists.
 - Added an inactive private receiver-transaction foundation with two action-specific effect seams:
   `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while private `imageOptimizeEffects` contains only
   `OptimizeImage`. Each action validates only its effect dependency plus the shared rootfs authority and per-resource

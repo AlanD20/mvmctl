@@ -356,6 +356,14 @@ Malformed probes, reused or duplicate block identities, duplicate partition numb
 missing or multiple matches fail closed. Block-device discovery, loop ioctls, mounts, private mount-namespace setup,
 effect implementations, and `Server` activation remain pending.
 
+The inert pure loop-device kernel contract admits only fixed `/dev/loop-control` character-device identity `10:237`.
+It derives `/dev/loop<N>` only for an index from `0` through `2^20-1` and requires block major `7` with minor exactly
+`N`. The generated `unix.LoopConfig` carries the exact admitted rootfs descriptor and only
+`LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, plus `LO_FLAGS_READ_ONLY` for read-only access; every other field remains zero,
+direct I/O is disabled, and no legacy setup fields are used. Invalid inputs fail closed through the private LoopMount
+`DomainError` path. This contract opens no device and performs no ioctl, attach, detach, discovery, mount, namespace,
+effect, `Server` construction, handler, or registration.
+
 An inactive private `Server` now coordinates each admitted operation through two action-specific effect seams.
 `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while the private `imageOptimizeEffects` contains
 only `OptimizeImage`. Provisioning and inspection validate `rootfsEffects`; optimization validates
