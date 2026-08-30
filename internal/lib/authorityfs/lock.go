@@ -16,6 +16,11 @@ const (
 
 // Lock owns one acquired root-only advisory lock.
 type Lock struct {
+	state *lockState
+}
+
+type lockState struct {
+	// mu guards fd and every lifecycle field below.
 	mu         sync.Mutex
 	deps       dependencies
 	fd         int
@@ -26,15 +31,16 @@ type Lock struct {
 
 // AcquireIndex acquires the global Jailer instance-index lock.
 func (jailer *Jailer) AcquireIndex(ctx context.Context) (*Lock, error) {
-	if jailer == nil {
+	if jailer == nil || jailer.state == nil {
 		return nil, fmt.Errorf("authorityfs: Jailer authority is not active")
 	}
-	jailer.mu.Lock()
-	defer jailer.mu.Unlock()
-	if !jailer.active {
+	state := jailer.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active {
 		return nil, fmt.Errorf("authorityfs: Jailer authority is released")
 	}
-	return acquireLock(ctx, jailer.deps, jailer.policy, jailer.authority, "index.lock", "Jailer index")
+	return acquireLock(ctx, state.deps, state.policy, state.authority, "index.lock", "Jailer index")
 }
 
 // AcquireRelease acquires the Jailer lock for one canonical release-slot digest.
@@ -42,15 +48,16 @@ func (jailer *Jailer) AcquireRelease(ctx context.Context, key ReleaseKey) (*Lock
 	if !isLowerHex(key.value, releaseKeyLength) {
 		return nil, fmt.Errorf("authorityfs: release key is invalid")
 	}
-	if jailer == nil {
+	if jailer == nil || jailer.state == nil {
 		return nil, fmt.Errorf("authorityfs: Jailer authority is not active")
 	}
-	jailer.mu.Lock()
-	defer jailer.mu.Unlock()
-	if !jailer.active {
+	state := jailer.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active {
 		return nil, fmt.Errorf("authorityfs: Jailer authority is released")
 	}
-	return acquireLock(ctx, jailer.deps, jailer.policy, jailer.releases, key.value+".lock", "Jailer release")
+	return acquireLock(ctx, state.deps, state.policy, state.releases, key.value+".lock", "Jailer release")
 }
 
 // AcquireVM acquires the Jailer lock for one canonical VM identity.
@@ -58,15 +65,16 @@ func (uid *JailerUID) AcquireVM(ctx context.Context, key VMKey) (*Lock, error) {
 	if !isLowerHex(key.value, vmKeyLength) {
 		return nil, fmt.Errorf("authorityfs: VM key is invalid")
 	}
-	if uid == nil {
+	if uid == nil || uid.state == nil {
 		return nil, fmt.Errorf("authorityfs: Jailer UID authority is not active")
 	}
-	uid.mu.Lock()
-	defer uid.mu.Unlock()
-	if !uid.active {
+	state := uid.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active {
 		return nil, fmt.Errorf("authorityfs: Jailer UID authority is released")
 	}
-	return acquireLock(ctx, uid.deps, uid.policy, uid.fd, key.value+".lock", "Jailer VM")
+	return acquireLock(ctx, state.deps, state.policy, state.fd, key.value+".lock", "Jailer VM")
 }
 
 func acquireLock(
@@ -120,9 +128,12 @@ func acquireLock(
 		}
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return abort(err)
+		}
 		err := deps.flock(ctx, fd, unix.LOCK_EX|unix.LOCK_NB)
 		if err == nil {
-			return &Lock{deps: deps, fd: fd, active: true}, nil
+			return &Lock{state: &lockState{deps: deps, fd: fd, active: true}}, nil
 		}
 		if errors.Is(err, unix.EINTR) {
 			continue
@@ -158,25 +169,26 @@ func verifyLock(
 
 // Release unlocks and closes the lock exactly once, preserving context values while ignoring cancellation.
 func (lock *Lock) Release(ctx context.Context) error {
-	if lock == nil {
+	if lock == nil || lock.state == nil {
 		return nil
 	}
-	lock.mu.Lock()
-	defer lock.mu.Unlock()
-	if lock.released {
-		return lock.releaseErr
+	state := lock.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return state.releaseErr
 	}
-	if !lock.active {
+	if !state.active {
 		return nil
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
-	unlockErr := lock.deps.flock(cleanupCtx, lock.fd, unix.LOCK_UN)
-	closeErr := lock.deps.close(cleanupCtx, lock.fd)
-	lock.fd = -1
-	lock.active = false
-	lock.released = true
+	unlockErr := state.deps.flock(cleanupCtx, state.fd, unix.LOCK_UN)
+	closeErr := state.deps.close(cleanupCtx, state.fd)
+	state.fd = -1
+	state.active = false
+	state.released = true
 	if err := errors.Join(unlockErr, closeErr); err != nil {
-		lock.releaseErr = fmt.Errorf("authorityfs: release lock: %w", err)
+		state.releaseErr = fmt.Errorf("authorityfs: release lock: %w", err)
 	}
-	return lock.releaseErr
+	return state.releaseErr
 }

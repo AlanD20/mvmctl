@@ -31,6 +31,7 @@ type instanceAuthorityLock interface {
 type systemInstanceAuthorityTree struct{}
 
 type systemJailerAuthority struct {
+	// mu guards value and every lifecycle field below.
 	mu         sync.Mutex
 	value      *authorityfs.Jailer
 	released   bool
@@ -38,6 +39,7 @@ type systemJailerAuthority struct {
 }
 
 type systemJailerUID struct {
+	// mu guards value and every lifecycle field below.
 	mu         sync.Mutex
 	value      *authorityfs.JailerUID
 	released   bool
@@ -45,6 +47,7 @@ type systemJailerUID struct {
 }
 
 type systemAuthorityLock struct {
+	// mu guards value and every lifecycle field below.
 	mu         sync.Mutex
 	value      *authorityfs.Lock
 	released   bool
@@ -62,7 +65,7 @@ func (systemInstanceAuthorityTree) openJailer(ctx context.Context) (instanceJail
 func (authority *systemJailerAuthority) acquireIndex(ctx context.Context) (instanceAuthorityLock, error) {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
-	if authority.released {
+	if authority.released || authority.value == nil {
 		return nil, instanceLockError("acquire global index lock", errors.New("Jailer authority is released"))
 	}
 	value, err := authority.value.AcquireIndex(ctx)
@@ -78,7 +81,7 @@ func (authority *systemJailerAuthority) acquireRelease(
 ) (instanceAuthorityLock, error) {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
-	if authority.released {
+	if authority.released || authority.value == nil {
 		return nil, instanceLockError("acquire release lock", errors.New("Jailer authority is released"))
 	}
 	value, err := authority.value.AcquireRelease(ctx, key)
@@ -94,7 +97,7 @@ func (authority *systemJailerAuthority) openUID(
 ) (instanceJailerUID, error) {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
-	if authority.released {
+	if authority.released || authority.value == nil {
 		return nil, instanceAtomicError("open Jailer UID authority", errors.New("Jailer authority is released"))
 	}
 	value, err := authority.value.OpenUID(ctx, uid)
@@ -113,6 +116,14 @@ func (authority *systemJailerAuthority) Release(ctx context.Context) error {
 	if authority.released {
 		return authority.releaseErr
 	}
+	if authority.value == nil {
+		authority.released = true
+		authority.releaseErr = instanceAtomicError(
+			"release Jailer authority tree",
+			errors.New("Jailer authority is not active"),
+		)
+		return authority.releaseErr
+	}
 	err := authority.value.Release(ctx)
 	authority.value = nil
 	authority.released = true
@@ -128,7 +139,7 @@ func (uid *systemJailerUID) acquireVM(
 ) (instanceAuthorityLock, error) {
 	uid.mu.Lock()
 	defer uid.mu.Unlock()
-	if uid.released {
+	if uid.released || uid.value == nil {
 		return nil, instanceLockError("acquire VM lock", errors.New("Jailer UID authority is released"))
 	}
 	value, err := uid.value.AcquireVM(ctx, key)
@@ -147,6 +158,14 @@ func (uid *systemJailerUID) Release(ctx context.Context) error {
 	if uid.released {
 		return uid.releaseErr
 	}
+	if uid.value == nil {
+		uid.released = true
+		uid.releaseErr = instanceAtomicError(
+			"release Jailer UID authority",
+			errors.New("Jailer UID authority is not active"),
+		)
+		return uid.releaseErr
+	}
 	err := uid.value.Release(ctx)
 	uid.value = nil
 	uid.released = true
@@ -163,6 +182,14 @@ func (lock *systemAuthorityLock) Release(ctx context.Context) error {
 	lock.mu.Lock()
 	defer lock.mu.Unlock()
 	if lock.released {
+		return lock.releaseErr
+	}
+	if lock.value == nil {
+		lock.released = true
+		lock.releaseErr = instanceLockError(
+			"release authority lock",
+			errors.New("authority lock is not active"),
+		)
 		return lock.releaseErr
 	}
 	err := lock.value.Release(ctx)

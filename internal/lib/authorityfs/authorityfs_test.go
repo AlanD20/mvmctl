@@ -273,8 +273,8 @@ func TestJailerCreationFaultClosesEveryDescriptor(t *testing.T) {
 func TestLockCreationFaultClosesDescriptor(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]func(*dependencies, *Jailer, *int){
-		"owner": func(deps *dependencies, _ *Jailer, lockFD *int) {
+	tests := map[string]func(*dependencies, *jailerState, *int){
+		"owner": func(deps *dependencies, _ *jailerState, lockFD *int) {
 			realFchown := deps.fchown
 			deps.fchown = func(ctx context.Context, fd, uid, gid int) error {
 				if fd == *lockFD {
@@ -283,7 +283,7 @@ func TestLockCreationFaultClosesDescriptor(t *testing.T) {
 				return realFchown(ctx, fd, uid, gid)
 			}
 		},
-		"mode": func(deps *dependencies, _ *Jailer, lockFD *int) {
+		"mode": func(deps *dependencies, _ *jailerState, lockFD *int) {
 			realFchmod := deps.fchmod
 			deps.fchmod = func(ctx context.Context, fd int, mode uint32) error {
 				if fd == *lockFD {
@@ -292,7 +292,7 @@ func TestLockCreationFaultClosesDescriptor(t *testing.T) {
 				return realFchmod(ctx, fd, mode)
 			}
 		},
-		"metadata": func(deps *dependencies, _ *Jailer, lockFD *int) {
+		"metadata": func(deps *dependencies, _ *jailerState, lockFD *int) {
 			realFstat := deps.fstat
 			deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
 				if fd == *lockFD {
@@ -301,7 +301,7 @@ func TestLockCreationFaultClosesDescriptor(t *testing.T) {
 				return realFstat(ctx, fd, stat)
 			}
 		},
-		"lock sync": func(deps *dependencies, _ *Jailer, lockFD *int) {
+		"lock sync": func(deps *dependencies, _ *jailerState, lockFD *int) {
 			realFsync := deps.fsync
 			deps.fsync = func(ctx context.Context, fd int) error {
 				if fd == *lockFD {
@@ -310,10 +310,10 @@ func TestLockCreationFaultClosesDescriptor(t *testing.T) {
 				return realFsync(ctx, fd)
 			}
 		},
-		"parent sync": func(deps *dependencies, jailer *Jailer, lockFD *int) {
+		"parent sync": func(deps *dependencies, state *jailerState, lockFD *int) {
 			realFsync := deps.fsync
 			deps.fsync = func(ctx context.Context, fd int) error {
-				if *lockFD >= 0 && fd == jailer.authority {
+				if *lockFD >= 0 && fd == state.authority {
 					return errors.New("parent sync failed")
 				}
 				return realFsync(ctx, fd)
@@ -328,11 +328,12 @@ func TestLockCreationFaultClosesDescriptor(t *testing.T) {
 			jailer, err := openJailerWithPolicy(t.Context(), realDependencies(), testPolicy(root))
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, jailer.Release(context.Background())) })
-			realOpenAt2 := jailer.deps.openAt2
-			realClose := jailer.deps.close
+			state := jailer.state
+			realOpenAt2 := state.deps.openAt2
+			realClose := state.deps.close
 			lockFD := -1
 			closed := 0
-			jailer.deps.openAt2 = func(
+			state.deps.openAt2 = func(
 				ctx context.Context,
 				parentFD int,
 				entry string,
@@ -344,13 +345,13 @@ func TestLockCreationFaultClosesDescriptor(t *testing.T) {
 				}
 				return fd, openErr
 			}
-			jailer.deps.close = func(ctx context.Context, fd int) error {
+			state.deps.close = func(ctx context.Context, fd int) error {
 				if fd == lockFD {
 					closed++
 				}
 				return realClose(ctx, fd)
 			}
-			inject(&jailer.deps, jailer, &lockFD)
+			inject(&state.deps, state, &lockFD)
 
 			lock, err := jailer.AcquireIndex(t.Context())
 			assert.Nil(t, lock)
@@ -408,7 +409,7 @@ func TestCapabilitiesCacheFirstReleaseErrorWithoutRetry(t *testing.T) {
 		calls   *atomic.Int32
 	}
 	jailerCalls := &atomic.Int32{}
-	jailer := &Jailer{
+	jailer := &Jailer{state: &jailerState{
 		deps: dependencies{close: func(context.Context, int) error {
 			jailerCalls.Add(1)
 			return releaseErr
@@ -417,20 +418,20 @@ func TestCapabilitiesCacheFirstReleaseErrorWithoutRetry(t *testing.T) {
 		releases:  11,
 		retained:  []int{12},
 		active:    true,
-	}
+	}}
 	uidCalls := &atomic.Int32{}
-	uid := &JailerUID{deps: dependencies{close: func(context.Context, int) error {
+	uid := &JailerUID{state: &jailerUIDState{deps: dependencies{close: func(context.Context, int) error {
 		uidCalls.Add(1)
 		return releaseErr
-	}}, fd: 10, active: true}
+	}}, fd: 10, active: true}}
 	lockCalls := &atomic.Int32{}
-	lock := &Lock{deps: dependencies{
+	lock := &Lock{state: &lockState{deps: dependencies{
 		flock: func(context.Context, int, int) error {
 			lockCalls.Add(1)
 			return releaseErr
 		},
 		close: func(context.Context, int) error { return nil },
-	}, fd: 10, active: true}
+	}, fd: 10, active: true}}
 	tests := map[string]releaseTest{
 		"Jailer":     {release: jailer.Release, calls: jailerCalls},
 		"Jailer UID": {release: uid.Release, calls: uidCalls},
@@ -445,6 +446,101 @@ func TestCapabilitiesCacheFirstReleaseErrorWithoutRetry(t *testing.T) {
 			assert.Equal(t, int32(1), test.calls.Load())
 		})
 	}
+}
+
+func TestCopiedCapabilitiesShareExactlyOnceReleaseState(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*atomic.Int32) (func(context.Context) error, func(context.Context) error){
+		"Jailer": func(calls *atomic.Int32) (func(context.Context) error, func(context.Context) error) {
+			original := Jailer{state: &jailerState{
+				deps: dependencies{close: func(context.Context, int) error {
+					calls.Add(1)
+					return nil
+				}},
+				retained: []int{10}, active: true,
+			}}
+			copied := original
+			return original.Release, copied.Release
+		},
+		"Jailer UID": func(calls *atomic.Int32) (func(context.Context) error, func(context.Context) error) {
+			original := JailerUID{state: &jailerUIDState{
+				deps: dependencies{close: func(context.Context, int) error {
+					calls.Add(1)
+					return nil
+				}},
+				fd: 10, active: true,
+			}}
+			copied := original
+			return original.Release, copied.Release
+		},
+		"lock": func(calls *atomic.Int32) (func(context.Context) error, func(context.Context) error) {
+			original := Lock{state: &lockState{
+				deps: dependencies{
+					flock: func(context.Context, int, int) error { return nil },
+					close: func(context.Context, int) error {
+						calls.Add(1)
+						return nil
+					},
+				},
+				fd: 10, active: true,
+			}}
+			copied := original
+			return original.Release, copied.Release
+		},
+	}
+	for name, build := range tests {
+		t.Run(name, func(t *testing.T) {
+			calls := &atomic.Int32{}
+			releaseOriginal, releaseCopy := build(calls)
+			require.NoError(t, releaseOriginal(t.Context()))
+			require.NoError(t, releaseCopy(t.Context()))
+			assert.Equal(t, int32(1), calls.Load(), "a copied capability must not act on a reused descriptor")
+		})
+	}
+}
+
+func TestLockEINTRRetryObservesCancellationAndClosesDescriptor(t *testing.T) {
+	t.Parallel()
+
+	root := prepareTestRoot(t)
+	jailer, err := openJailerWithPolicy(t.Context(), realDependencies(), testPolicy(root))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, jailer.Release(context.Background())) })
+	state := jailer.state
+	realOpenAt2 := state.deps.openAt2
+	realClose := state.deps.close
+	lockFD := -1
+	closed := 0
+	state.deps.openAt2 = func(
+		ctx context.Context,
+		parentFD int,
+		entry string,
+		how *unix.OpenHow,
+	) (int, error) {
+		fd, openErr := realOpenAt2(ctx, parentFD, entry, how)
+		if openErr == nil && entry == "index.lock" {
+			lockFD = fd
+		}
+		return fd, openErr
+	}
+	state.deps.close = func(ctx context.Context, fd int) error {
+		if fd == lockFD {
+			closed++
+		}
+		return realClose(ctx, fd)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	state.deps.flock = func(context.Context, int, int) error {
+		cancel()
+		return unix.EINTR
+	}
+
+	lock, err := jailer.AcquireIndex(ctx)
+	assert.Nil(t, lock)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.GreaterOrEqual(t, lockFD, 0)
+	assert.Equal(t, 1, closed)
 }
 
 func TestZeroValueCapabilitiesFailClosed(t *testing.T) {

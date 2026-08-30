@@ -42,6 +42,11 @@ type policy struct {
 
 // Jailer pins the fixed Jailer authority directories and creates only Jailer locks and UID capabilities.
 type Jailer struct {
+	state *jailerState
+}
+
+type jailerState struct {
+	// mu guards every descriptor and lifecycle field below.
 	mu         sync.Mutex
 	deps       dependencies
 	policy     policy
@@ -55,6 +60,11 @@ type Jailer struct {
 
 // JailerUID pins one fixed root-owned Jailer UID directory.
 type JailerUID struct {
+	state *jailerUIDState
+}
+
+type jailerUIDState struct {
+	// mu guards fd and every lifecycle field below.
 	mu         sync.Mutex
 	deps       dependencies
 	policy     policy
@@ -136,9 +146,9 @@ func openJailerWithPolicy(
 	}
 	retained = append(retained, releasesFD)
 
-	return &Jailer{
+	return &Jailer{state: &jailerState{
 		deps: deps, policy: policy, authority: authorityFD, releases: releasesFD, retained: retained, active: true,
-	}, nil
+	}}, nil
 }
 
 // OpenUID opens or creates the fixed root-owned directory for uid.
@@ -146,76 +156,81 @@ func (jailer *Jailer) OpenUID(ctx context.Context, uid uint32) (*JailerUID, erro
 	if uid == 0 {
 		return nil, fmt.Errorf("authorityfs: Jailer UID must be non-zero")
 	}
-	if jailer == nil {
+	if jailer == nil || jailer.state == nil {
 		return nil, fmt.Errorf("authorityfs: Jailer authority is not active")
 	}
-	jailer.mu.Lock()
-	defer jailer.mu.Unlock()
-	if !jailer.active {
+	state := jailer.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active {
 		return nil, fmt.Errorf("authorityfs: Jailer authority is released")
 	}
 	name := formatUID(uid)
 	fd, err := openManagedDirectory(
 		ctx,
-		jailer.deps,
-		jailer.authority,
+		state.deps,
+		state.authority,
 		name,
 		directoryMode,
 		resolveManaged,
-		jailer.policy,
+		state.policy,
 	)
 	if err != nil {
 		return nil, err
 	}
-	return &JailerUID{deps: jailer.deps, policy: jailer.policy, fd: fd, active: true}, nil
+	return &JailerUID{state: &jailerUIDState{
+		deps: state.deps, policy: state.policy, fd: fd, active: true,
+	}}, nil
 }
 
 // Release closes the descriptors owned by the Jailer capability. Children and acquired locks remain valid.
 func (jailer *Jailer) Release(ctx context.Context) error {
-	if jailer == nil {
+	if jailer == nil || jailer.state == nil {
 		return nil
 	}
-	jailer.mu.Lock()
-	defer jailer.mu.Unlock()
-	if jailer.released {
-		return jailer.releaseErr
+	state := jailer.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return state.releaseErr
 	}
-	if !jailer.active {
+	if !state.active {
 		return nil
 	}
-	err := closeFDs(context.WithoutCancel(ctx), jailer.deps, jailer.retained)
-	jailer.retained = nil
-	jailer.authority = -1
-	jailer.releases = -1
-	jailer.active = false
-	jailer.released = true
+	err := closeFDs(context.WithoutCancel(ctx), state.deps, state.retained)
+	state.retained = nil
+	state.authority = -1
+	state.releases = -1
+	state.active = false
+	state.released = true
 	if err != nil {
-		jailer.releaseErr = fmt.Errorf("authorityfs: release Jailer authority: %w", err)
+		state.releaseErr = fmt.Errorf("authorityfs: release Jailer authority: %w", err)
 	}
-	return jailer.releaseErr
+	return state.releaseErr
 }
 
 // Release closes the descriptor owned by the Jailer UID capability. Acquired locks remain valid.
 func (uid *JailerUID) Release(ctx context.Context) error {
-	if uid == nil {
+	if uid == nil || uid.state == nil {
 		return nil
 	}
-	uid.mu.Lock()
-	defer uid.mu.Unlock()
-	if uid.released {
-		return uid.releaseErr
+	state := uid.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return state.releaseErr
 	}
-	if !uid.active {
+	if !state.active {
 		return nil
 	}
-	err := uid.deps.close(context.WithoutCancel(ctx), uid.fd)
-	uid.fd = -1
-	uid.active = false
-	uid.released = true
+	err := state.deps.close(context.WithoutCancel(ctx), state.fd)
+	state.fd = -1
+	state.active = false
+	state.released = true
 	if err != nil {
-		uid.releaseErr = fmt.Errorf("authorityfs: release Jailer UID authority: %w", err)
+		state.releaseErr = fmt.Errorf("authorityfs: release Jailer UID authority: %w", err)
 	}
-	return uid.releaseErr
+	return state.releaseErr
 }
 
 func openExistingDirectory(

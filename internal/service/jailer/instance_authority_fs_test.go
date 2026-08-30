@@ -8,11 +8,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/lib/authorityfs"
+	"mvmctl/pkg/errs"
 )
 
 type testInstanceAuthorityTree struct {
+	// mu guards mutable fake configuration, lock maps, callbacks, and acquisition history.
 	mu                        sync.Mutex
 	index                     *testInstanceLockGate
 	releases                  map[authorityfs.ReleaseKey]*testInstanceLockGate
@@ -31,15 +34,17 @@ type testInstanceAuthorityTree struct {
 }
 
 type testInstanceJailerAuthority struct {
-	tree       *testInstanceAuthorityTree
+	tree *testInstanceAuthorityTree
+	// mu guards released and releaseErr.
 	mu         sync.Mutex
 	released   bool
 	releaseErr error
 }
 
 type testInstanceJailerUID struct {
-	tree       *testInstanceAuthorityTree
-	uid        uint32
+	tree *testInstanceAuthorityTree
+	uid  uint32
+	// mu guards released and releaseErr.
 	mu         sync.Mutex
 	released   bool
 	releaseErr error
@@ -55,9 +60,10 @@ type testInstanceAuthorityLock struct {
 	tree        *testInstanceAuthorityTree
 	gate        *testInstanceLockGate
 	description string
-	mu          sync.Mutex
-	released    bool
-	releaseErr  error
+	// mu guards released and releaseErr.
+	mu         sync.Mutex
+	released   bool
+	releaseErr error
 }
 
 type testInstanceVMKey struct {
@@ -79,9 +85,15 @@ func newTestInstanceLockGate() *testInstanceLockGate {
 	return gate
 }
 
-func (tree *testInstanceAuthorityTree) openJailer(context.Context) (instanceJailerAuthority, error) {
-	if tree.openErr != nil {
-		return nil, tree.openErr
+func (tree *testInstanceAuthorityTree) openJailer(ctx context.Context) (instanceJailerAuthority, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, instanceAtomicError("open Jailer authority tree", err)
+	}
+	tree.mu.Lock()
+	openErr := tree.openErr
+	tree.mu.Unlock()
+	if openErr != nil {
+		return nil, instanceAtomicError("open Jailer authority tree", openErr)
 	}
 	return &testInstanceJailerAuthority{tree: tree}, nil
 }
@@ -89,8 +101,17 @@ func (tree *testInstanceAuthorityTree) openJailer(context.Context) (instanceJail
 func (authority *testInstanceJailerAuthority) acquireIndex(
 	ctx context.Context,
 ) (instanceAuthorityLock, error) {
-	if authority.tree.indexErr != nil {
-		return nil, authority.tree.indexErr
+	authority.mu.Lock()
+	released := authority.released
+	authority.mu.Unlock()
+	if released {
+		return nil, instanceLockError("acquire global index lock", errors.New("Jailer authority is released"))
+	}
+	authority.tree.mu.Lock()
+	indexErr := authority.tree.indexErr
+	authority.tree.mu.Unlock()
+	if indexErr != nil {
+		return nil, mapAuthorityFSLockError("global index", indexErr)
 	}
 	return authority.tree.acquire(ctx, authority.tree.index, "index")
 }
@@ -99,10 +120,18 @@ func (authority *testInstanceJailerAuthority) acquireRelease(
 	ctx context.Context,
 	key authorityfs.ReleaseKey,
 ) (instanceAuthorityLock, error) {
-	if authority.tree.releaseErr != nil {
-		return nil, authority.tree.releaseErr
+	authority.mu.Lock()
+	released := authority.released
+	authority.mu.Unlock()
+	if released {
+		return nil, instanceLockError("acquire release lock", errors.New("Jailer authority is released"))
 	}
 	authority.tree.mu.Lock()
+	releaseErr := authority.tree.releaseErr
+	if releaseErr != nil {
+		authority.tree.mu.Unlock()
+		return nil, mapAuthorityFSLockError("release", releaseErr)
+	}
 	gate := authority.tree.releases[key]
 	if gate == nil {
 		gate = newTestInstanceLockGate()
@@ -113,9 +142,21 @@ func (authority *testInstanceJailerAuthority) acquireRelease(
 }
 
 func (authority *testInstanceJailerAuthority) openUID(
-	_ context.Context,
+	ctx context.Context,
 	uid uint32,
 ) (instanceJailerUID, error) {
+	authority.mu.Lock()
+	released := authority.released
+	authority.mu.Unlock()
+	if released {
+		return nil, instanceAtomicError("open Jailer UID authority", errors.New("Jailer authority is released"))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, instanceAtomicError("open Jailer UID authority", err)
+	}
+	if uid == 0 {
+		return nil, instanceAtomicError("open Jailer UID authority", errors.New("Jailer UID must be non-zero"))
+	}
 	return &testInstanceJailerUID{tree: authority.tree, uid: uid}, nil
 }
 
@@ -126,7 +167,12 @@ func (authority *testInstanceJailerAuthority) Release(context.Context) error {
 		return authority.releaseErr
 	}
 	authority.released = true
-	authority.releaseErr = authority.tree.treeReleaseErr
+	authority.tree.mu.Lock()
+	treeReleaseErr := authority.tree.treeReleaseErr
+	authority.tree.mu.Unlock()
+	if treeReleaseErr != nil {
+		authority.releaseErr = instanceAtomicError("release Jailer authority tree", treeReleaseErr)
+	}
 	return authority.releaseErr
 }
 
@@ -134,10 +180,18 @@ func (uid *testInstanceJailerUID) acquireVM(
 	ctx context.Context,
 	key authorityfs.VMKey,
 ) (instanceAuthorityLock, error) {
-	if uid.tree.vmErr != nil {
-		return nil, uid.tree.vmErr
+	uid.mu.Lock()
+	released := uid.released
+	uid.mu.Unlock()
+	if released {
+		return nil, instanceLockError("acquire VM lock", errors.New("Jailer UID authority is released"))
 	}
 	uid.tree.mu.Lock()
+	vmErr := uid.tree.vmErr
+	if vmErr != nil {
+		uid.tree.mu.Unlock()
+		return nil, mapAuthorityFSLockError("VM", vmErr)
+	}
 	mapKey := testInstanceVMKey{uid: uid.uid, key: key}
 	gate := uid.tree.vms[mapKey]
 	if gate == nil {
@@ -155,7 +209,12 @@ func (uid *testInstanceJailerUID) Release(context.Context) error {
 		return uid.releaseErr
 	}
 	uid.released = true
-	uid.releaseErr = uid.tree.uidReleaseErr
+	uid.tree.mu.Lock()
+	uidReleaseErr := uid.tree.uidReleaseErr
+	uid.tree.mu.Unlock()
+	if uidReleaseErr != nil {
+		uid.releaseErr = instanceAtomicError("release Jailer UID authority", uidReleaseErr)
+	}
 	return uid.releaseErr
 }
 
@@ -164,6 +223,9 @@ func (tree *testInstanceAuthorityTree) acquire(
 	gate *testInstanceLockGate,
 	description string,
 ) (instanceAuthorityLock, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, instanceLockContextError(description, err)
+	}
 	select {
 	case <-gate.token:
 		tree.mu.Lock()
@@ -295,6 +357,82 @@ func TestSystemAuthorityAdaptersRejectAcquireAfterRelease(t *testing.T) {
 	vm, err := uidAuthority.acquireVM(t.Context(), vmKey)
 	assert.Nil(t, vm)
 	require.Error(t, err)
+}
+
+func TestTestAuthorityAdapterMapsErrorsLikeSystemAdapter(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		cause     error
+		wantClass errs.Class
+	}{
+		"raw failure":  {cause: unix.EIO, wantClass: errs.ClassUnknown},
+		"cancellation": {cause: context.Canceled, wantClass: errs.ClassRetryable},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			tree := newTestInstanceAuthorityTree()
+			tree.indexErr = test.cause
+			authorityValue, err := tree.openJailer(t.Context())
+			require.NoError(t, err)
+			lock, err := authorityValue.acquireIndex(t.Context())
+			assert.Nil(t, lock)
+			require.ErrorIs(t, err, test.cause)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+			assert.Equal(t, test.wantClass, domainErr.Class)
+		})
+	}
+
+	tree := newTestInstanceAuthorityTree()
+	tree.openErr = unix.EIO
+	authorityValue, err := tree.openJailer(t.Context())
+	assert.Nil(t, authorityValue)
+	require.ErrorIs(t, err, unix.EIO)
+	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+}
+
+func TestTestAuthorityAdapterRejectsUseAfterRelease(t *testing.T) {
+	t.Parallel()
+
+	tree := newTestInstanceAuthorityTree()
+	authorityValue, err := tree.openJailer(t.Context())
+	require.NoError(t, err)
+	uidValue, err := authorityValue.openUID(t.Context(), testAuthorityUID)
+	require.NoError(t, err)
+	require.NoError(t, uidValue.Release(t.Context()))
+	vmKey, err := authorityfs.NewVMKey(testVMID)
+	require.NoError(t, err)
+	vm, err := uidValue.acquireVM(t.Context(), vmKey)
+	assert.Nil(t, vm)
+	require.Error(t, err)
+
+	require.NoError(t, authorityValue.Release(t.Context()))
+	index, err := authorityValue.acquireIndex(t.Context())
+	assert.Nil(t, index)
+	require.Error(t, err)
+	uidValue, err = authorityValue.openUID(t.Context(), testAuthorityUID)
+	assert.Nil(t, uidValue)
+	require.Error(t, err)
+}
+
+func TestZeroValueSystemAuthorityAdaptersFailClosedAndCacheError(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(context.Context) error{
+		"Jailer":     (&systemJailerAuthority{}).Release,
+		"Jailer UID": (&systemJailerUID{}).Release,
+		"lock":       (&systemAuthorityLock{}).Release,
+	}
+	for name, release := range tests {
+		t.Run(name, func(t *testing.T) {
+			first := release(t.Context())
+			require.Error(t, first)
+			second := release(t.Context())
+			assertSameError(t, first, second)
+		})
+	}
 }
 
 func assertSameError(t *testing.T, want error, got error) {

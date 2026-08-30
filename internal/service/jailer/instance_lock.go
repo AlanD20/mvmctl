@@ -12,6 +12,7 @@ import (
 )
 
 type authorityLock struct {
+	// mu guards value and every lifecycle field below.
 	mu         sync.Mutex
 	value      instanceAuthorityLock
 	active     bool
