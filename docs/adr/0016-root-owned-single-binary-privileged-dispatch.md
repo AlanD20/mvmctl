@@ -434,11 +434,13 @@ stable device/inode identity. Lock files are never unlinked during the boot: rep
 old and new inodes. A lease performs checked, idempotent unlock and close under `context.WithoutCancel`, preserving a
 primary `DomainError` and bounding cleanup details.
 
-This lock layout depends on the shared privileged authority layout. Before implementing the concrete LoopMount lock,
-the implementation must either extract a narrow, cycle-free fixed authority-tree capability/module or have the early
-privileged receiver pass LoopMount a typed root capability. LoopMount must not import Jailer or create a second
-pathname-based `/run/mvmctl` initializer. This ADR reserves the names and modes; it does not establish the shared
-layout's implementation status.
+This lock layout depends on the shared privileged authority layout. The private Jailer instance authority now creates
+or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`
+`/run/mvmctl/authority`, with Jailer index, release, UID, and VM-lock descendants beneath it. Jailer still owns that
+initializer; it is not a reusable authority-tree capability. Before implementing the concrete LoopMount lock, extract
+a narrow, cycle-free closed capability in `internal/lib/authorityfs` or have the early privileged receiver pass
+LoopMount an equivalent typed root capability. LoopMount must not import Jailer or create a second pathname-based
+initializer. `internal/lib/authorityfs` is the immediate pending slice, not implemented behavior.
 
 Each effect runs in the short-lived privileged receiver's new private mount namespace. It makes propagation recursively
 private before attaching anything. The admitted `rootfsFD` is passed directly to loop-control ioctls with partition scan
@@ -484,11 +486,11 @@ file/copy/command operations, custom shells, partition-table growth, shrink, con
 public-cutover blockers, not permission to silently drop behavior. An explicit scope decision must either accept each
 user-visible reduction or defer cutover until a safe typed replacement exists.
 
-This section records accepted future design, not current runtime behavior. This ADR does not establish implementation
-status for the shared privileged authority layout; the concrete LoopMount lock and effects do not exist; no LoopMount
-receiver action is registered; and the backend/public path still uses `mvm run provision`, raw wire operations and
-sudo, arbitrary unmount, and PID-killing cleanup. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions
-must not be wrapped by the new adapter.
+This section records accepted future design, not current runtime behavior. Jailer's private initializer establishes the
+top-level authority path and modes, but no shared cycle-free capability exists for LoopMount. The concrete LoopMount
+lock and effects do not exist; no LoopMount receiver action is registered; and the backend/public path still uses
+`mvm run provision`, raw wire operations and sudo, arbitrary unmount, and PID-killing cleanup. The legacy
+`Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
 
 ### Release trust
 
@@ -1059,6 +1061,14 @@ ephemeral runtime tree:
             ├── firecracker.pid
             └── console.pid
 ```
+
+Implementation note (2026-08-30): the private Jailer instance authority currently owns the descriptor-relative
+initializer for `/run/mvmctl` and `/run/mvmctl/authority`. Its index lock, release-lock directory, per-UID authority
+directories, and per-VM locks now use that tree, while persistent records remain at `/var/lib/mvmctl/instances`.
+Existing managed objects are verified and never repaired; focused L1 evidence covers modes, symlinks, concurrent
+creation, creation faults and descriptor cleanup, scans, and lock placement. This implementation creates no
+`/run/mvmctl/runtime` tree, activates no public action, and exposes no shared `internal/lib/authorityfs` capability.
+The runtime subtree and every non-Jailer consumer in the diagram remain target design.
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and

@@ -33,6 +33,11 @@ continue without silently deleting it.
   protocol failures, and bounded safe `DomainError` preservation.
 - Private root-owned VM ownership/lifecycle records with strict codecs, descriptor-relative atomic storage, exact
   release references, global VM-ID claims, and release/index/VM locking.
+- Private Jailer ephemeral-authority isolation with exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root`
+  mode-`0700` `/run/mvmctl/authority`. Jailer index/release/UID/VM-lock state now lives beneath that tree while
+  `/var/lib/mvmctl/instances` remains unchanged. Existing managed objects are verified rather than repaired, with L1
+  mode, symlink, concurrent-creation, creation-fault, scan, and lock evidence. Jailer still owns the initializer; no
+  shared `internal/lib/authorityfs` capability or `/run/mvmctl/runtime` tree exists yet.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional
@@ -85,6 +90,11 @@ remains transitional. The routed policy, dual firewall backends, host-global TAP
 | Cgroups | `/sys/fs/cgroup/mvmctl/<vm-id>` | Kernel runtime state |
 
 Durable user state does not move wholesale to `/run` or `/var/run`. XDG state separation remains a separate project.
+
+Implementation status: Jailer currently owns the descriptor-relative initializer for exact `/run/mvmctl` and
+`/run/mvmctl/authority` modes and uses it for its private index, release, UID, and VM-lock state. It does not create the
+runtime-output tree or expose a reusable capability. The immediate next slice is a narrow cycle-free
+`internal/lib/authorityfs` closed capability before LoopMount, network, or firewall consumes this layout.
 
 ### Module and layer rules
 
@@ -653,10 +663,10 @@ The accepted implementation splits production provisioning and inspection from a
 locks use the shared privileged descriptor-safe authority layout at
 `/run/mvmctl/authority/<uid>/loopmount/{vm-<32hex>,image-<64hex>}.lock`. They are root-owned mode `0600`, keyed only by
 authenticated UID, family, and canonical ID, and never unlinked during the boot. Inspection and future optimization
-share the image lock. Before the concrete lock, either extract a narrow, cycle-free fixed authority-tree
-capability/module or have the early privileged receiver pass a typed root capability. LoopMount must not import Jailer
-or duplicate a pathname initializer. This plan records the shared privileged authority-layout dependency, not its
-implementation status.
+share the image lock. Jailer's private initializer now establishes the top-level path and modes, but it is not a shared
+capability. Before the concrete lock, extract a narrow, cycle-free `internal/lib/authorityfs` closed capability or have
+the early privileged receiver pass an equivalent typed root capability. LoopMount must not import Jailer or duplicate
+a pathname initializer. The shared capability remains pending.
 
 The concrete effect uses a private mount namespace, direct loop/mount/descriptor syscalls, and only fixed host
 filesystem probes and grow tools. It consumes the admitted rootfs descriptor directly and never reopens or passes a

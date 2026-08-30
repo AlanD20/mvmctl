@@ -260,12 +260,22 @@ privileged caller uses the typed dispatcher. A system-installed executable canno
 `mvm self-update`; an administrator installs the newly downloaded trusted artifact with `host install-system`.
 
 The v0.3 privileged target splits state by authority and lifetime. Durable ownership and release records live beneath
-`/var/lib/mvmctl`; root-only locks and launch handshakes will live beneath `/run/mvmctl/authority/<uid>`. API, vsock, and
-console sockets plus display-only PID mirrors will use a separate pinned caller-owned VM directory beneath
+`/var/lib/mvmctl`; root-only locks and launch handshakes use `/run/mvmctl/authority/<uid>`. API, vsock, and console
+sockets plus display-only PID mirrors will use a separate pinned caller-owned VM directory beneath
 `/run/mvmctl/runtime/<uid>/<vm-id>`. Persistent configuration, disks, logs, console logs, and optional metrics remain in
 the caller's managed cache. Final privileged code must never mount the whole cache VM directory, trust a runtime leaf as
 authority, or signal a PID read from a PID mirror. ADR-0016 defines the exact ownership, modes, launch ordering, and
 cleanup contract; `tasks/todo.md` records implementation status.
+
+The private Jailer instance authority now establishes the implemented portion of that split. It creates or admits
+exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700` `/run/mvmctl/authority`, then places its
+global index lock, release-lock directory, per-UID authority directories, and per-VM locks beneath the private tree.
+Persistent instance records remain beneath `/var/lib/mvmctl/instances`. Existing managed objects are verified and never
+repaired; L1 tests cover exact modes, symlinks, concurrent creation, creation-fault descriptor cleanup, record scans,
+and lock placement. This is not a runtime activation: Jailer still owns the initializer, no reusable
+`internal/lib/authorityfs` capability exists, and no `/run/mvmctl/runtime` tree or public privileged action is created.
+Extracting a narrow cycle-free shared authority-tree capability is the immediate prerequisite before LoopMount,
+network, or firewall consumes this layout.
 
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
 requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`

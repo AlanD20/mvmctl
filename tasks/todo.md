@@ -553,8 +553,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction
-foundations are implemented; the concrete lock/effects design is accepted but not implemented; shared privileged
-authority-layout boundary, receiver registration, legacy removal, and host-mutation migration remain pending
+foundations are implemented; Jailer's private ephemeral-authority layout is implemented; the shared authority
+capability, concrete lock/effects, receiver registration, legacy removal, and host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -575,10 +575,15 @@ authority-layout boundary, receiver registration, legacy removal, and host-mutat
     `DomainError`; and require action-specific cleanup authority before success.
   - [x] Admit a VM grow replay only at the exact old or target rootfs size, reject every third size before effects, and
     hand the actually admitted stable size to `rootfsEffects.ProvisionVM` through its private lease.
-  - [ ] Resolve the shared privileged descriptor-safe `/run/mvmctl/authority/<uid>` layout prerequisite before the
-    concrete LoopMount lock. Either extract a narrow, cycle-free fixed authority-tree capability/module or have the
-    early privileged receiver pass a typed root capability. LoopMount must not import Jailer or create a second
-    pathname-based initializer. This task records the dependency, not its implementation status.
+  - [x] Establish the Jailer-owned portion of the ephemeral authority split: exact `root:root` mode-`0711`
+    `/run/mvmctl`, exact `root:root` mode-`0700` `/run/mvmctl/authority`, and Jailer index/release/UID/VM-lock state
+    beneath it. Keep `/var/lib/mvmctl/instances` unchanged; verify rather than repair existing managed objects; cover
+    modes, symlinks, concurrent creation, creation faults, scans, and lock placement in L1. This creates no runtime
+    output tree and activates no public action.
+  - [ ] Extract the Jailer-owned initializer into a narrow, cycle-free `internal/lib/authorityfs` closed capability, or
+    have the early privileged receiver pass an equivalent typed root capability, before the concrete LoopMount lock.
+    LoopMount must not import Jailer or create a second pathname-based initializer. Network and firewall consumers also
+    remain pending; `internal/lib/authorityfs` is not implemented yet.
   - [ ] Implement exclusive, never-unlinked LoopMount locks beneath the shared layout. Use root-owned mode-`0600`
     `loopmount/vm-<32hex>.lock` and `loopmount/image-<64hex>.lock` leaves. Key only by authenticated UID,
     resource family, and canonical ID. Exclude cache locator, sizes, filesystem, action, and plan; inspection and

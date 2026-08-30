@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
 > authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a canonical
-> generation digest, and typed
+> generation digest, the private Jailer ephemeral-authority split, and typed
 > LoopMount client/protocol, rootfs-authority, and receiver-transaction foundations described below are implemented.
 > The mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final
@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - VM create, start, reboot, and snapshot restore now require an exact Firecracker/Jailer release pair and run through a root-owned Jailer chroot with no direct-launch fallback.
 - Release pairs are installed from a checksum-checked archive; each jail exposes only that VM's kernel, rootfs, volumes,
   runtime files, and selected snapshot. Independent privileged release verification remains a release blocker below.
+
+#### Jailer ephemeral authority isolation
+- The private Jailer instance authority now creates exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root`
+  mode-`0700` `/run/mvmctl/authority`. Its global index lock, release-lock directory, per-UID authority directories, and
+  per-VM locks live beneath that private authority tree; persistent instance records remain unchanged beneath
+  `/var/lib/mvmctl/instances`.
+- Existing managed objects are admitted only after exact ownership, mode, type, and no-symlink checks and are never
+  repaired. L1 evidence covers exact modes, symlinks, concurrent creation, creation faults and descriptor cleanup,
+  record scans, and lock placement.
+- Jailer still owns this initializer. No reusable `internal/lib/authorityfs` capability, `/run/mvmctl/runtime` output
+  tree, public privileged action, or runtime cutover is implemented yet. A narrow cycle-free shared capability remains
+  the immediate prerequisite before LoopMount, network, or firewall can consume the authority tree.
 
 #### Enforced VM resource envelopes
 - Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.
@@ -380,9 +392,11 @@ The following items are release blockers and are intentionally not described abo
   the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
   private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
   outputs, and image provisioning.
-- Split root-only locks/handshakes beneath `/run/mvmctl/authority` from caller-owned socket/PID output directories beneath
-  `/run/mvmctl/runtime`; stop mounting the whole cache VM directory. Pin persistent config/output leaves individually,
-  truncate enabled `0600` log/console/metrics files only after durable launch registration, and retain them after stop.
+- Extract the Jailer-owned `/run/mvmctl/authority` initializer into a narrow cycle-free shared capability before
+  LoopMount, network, or firewall consumes that tree. Then create the separate caller-owned socket/PID output
+  directories beneath `/run/mvmctl/runtime`; stop mounting the whole cache VM directory, pin persistent config/output
+  leaves individually, truncate enabled `0600` log/console/metrics files only after durable launch registration, and
+  retain them after stop. The runtime tree is not implemented by the completed Jailer authority split.
 - Treat the current fixed-name Jailer checks as transitional defense-in-depth only: public Firecracker launch still
   reads a caller-writable configuration from the whole mounted VM directory. Wire the implemented sealed root-built
   configuration capability into the final descriptor-only mount transaction and derive/verify every jail-visible path
