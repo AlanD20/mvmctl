@@ -9,9 +9,10 @@ import (
 )
 
 type kernelObservation struct {
-	empty        bool
-	generationID string
-	tables       []kernelObservedTable
+	empty           bool
+	nftBaseSequence uint16
+	generationID    string
+	tables          []kernelObservedTable
 }
 
 type kernelObservedTable struct {
@@ -32,19 +33,19 @@ type kernelObservedChain struct {
 	policy          nftables.ChainPolicy
 	policyPresent   bool
 	device          string
+	use             uint32
 }
 
 type kernelObservedRule struct {
 	table       tableIdentity
 	chain       string
-	position    uint64
 	flags       uint32
 	userdata    []byte
 	expressions []expr.Any
 }
 
-// compareKernelObservation treats every compiler-projected field as authority. Kernel-assigned handles and use
-// counters are admitted by the raw decoder but deliberately excluded, matching the generation digest contract.
+// compareKernelObservation treats every compiler-projected field as authority. Kernel handles, predecessor positions,
+// use counters, and nft_base_seq evidence are validated by the raw decoder but excluded from the generation digest.
 func compareKernelObservation(observed kernelObservation, expected compiledGeneration) error {
 	if expected.empty {
 		if !observed.empty || observed.generationID != "" || len(observed.tables) != 0 {
@@ -139,8 +140,8 @@ func compareKernelObservedRule(observed kernelObservedRule, expected compiledRul
 	}
 	expectedTable := tableIdentity{family: expected.rule.Table.Family, name: expected.rule.Table.Name}
 	if observed.table != expectedTable || observed.chain != expected.rule.Chain.Name ||
-		observed.position != expected.rule.Position || observed.flags != expected.rule.Flags {
-		return fmt.Errorf("identity, chain, position, or flags differ")
+		observed.flags != expected.rule.Flags {
+		return fmt.Errorf("identity, chain, or flags differ")
 	}
 	wantUserdata, err := encodeRuleIdentity(ruleIdentity{generation: generationID, rule: expected.identity})
 	if err != nil {

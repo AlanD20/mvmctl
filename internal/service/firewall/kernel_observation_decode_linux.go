@@ -28,6 +28,7 @@ const (
 
 	kernelNetfilterSubsystemType = unix.NFNL_SUBSYS_NFTABLES << 8
 	kernelNFTATableHandle        = uint16(4)
+	kernelNFTATablePad           = uint16(5)
 	kernelNFTAChainFlags         = uint16(10)
 	kernelNFTChainBase           = uint32(1)
 )
@@ -42,13 +43,23 @@ type kernelObservationMessages struct {
 }
 
 type kernelAttributeRule struct {
-	flags    uint16
-	required bool
+	flags      uint16
+	required   bool
+	zeroLength bool
 }
 
 type decodedKernelTable struct {
-	use    uint32
-	handle uint64
+	use uint32
+}
+
+type kernelBaseSequence struct {
+	set   bool
+	value uint16
+}
+
+type decodedKernelRuleChain struct {
+	lastHandle uint64
+	ruleCount  uint32
 }
 
 // CRITICAL: This parser exists because google/nftables v0.3.0 silently skips expression names it does not know.
@@ -61,16 +72,18 @@ func decodeKernelObservation(raw kernelObservationMessages) (kernelObservation, 
 		return kernelObservation{}, invalidKernelObservation("managed tables contain a set, object, or flowtable")
 	}
 
-	observed, tables, err := decodeKernelTables(raw.tableReplies)
+	sequence := kernelBaseSequence{}
+	observed, tables, err := decodeKernelTables(raw.tableReplies, &sequence)
 	if err != nil {
 		return kernelObservation{}, err
 	}
-	if err := decodeKernelChains(raw.chainReplies, tables, &observed); err != nil {
+	if err := decodeKernelChains(raw.chainReplies, tables, &observed, &sequence); err != nil {
 		return kernelObservation{}, err
 	}
-	if err := decodeKernelRules(raw.ruleReplies, &observed); err != nil {
+	if err := decodeKernelRules(raw.ruleReplies, &observed, &sequence); err != nil {
 		return kernelObservation{}, err
 	}
+	observed.nftBaseSequence = sequence.value
 	return observed, nil
 }
 
@@ -113,7 +126,10 @@ func validateKernelObservationCaps(raw kernelObservationMessages) error {
 	return nil
 }
 
-func decodeKernelTables(messages []netlink.Message) (kernelObservation, []decodedKernelTable, error) {
+func decodeKernelTables(
+	messages []netlink.Message,
+	sequence *kernelBaseSequence,
+) (kernelObservation, []decodedKernelTable, error) {
 	if len(messages) == 0 {
 		return kernelObservation{empty: true}, nil, nil
 	}
@@ -126,7 +142,7 @@ func decodeKernelTables(messages []netlink.Message) (kernelObservation, []decode
 	handles := make(map[uint64]struct{}, len(messages))
 	for index, message := range messages {
 		expected := managedTableIdentities[index]
-		family, attrs, err := decodeKernelMessage(
+		family, baseSequence, attrs, err := decodeKernelMessage(
 			message,
 			unix.NFT_MSG_NEWTABLE,
 			netlink.Multi,
@@ -136,9 +152,13 @@ func decodeKernelTables(messages []netlink.Message) (kernelObservation, []decode
 				unix.NFTA_TABLE_FLAGS: {required: true},
 				unix.NFTA_TABLE_USE:   {required: true},
 				kernelNFTATableHandle: {required: true},
+				kernelNFTATablePad:    {zeroLength: true},
 			},
 		)
 		if err != nil {
+			return kernelObservation{}, nil, err
+		}
+		if err := sequence.observe(baseSequence); err != nil {
 			return kernelObservation{}, nil, err
 		}
 		name, err := kernelAttributeString(attrs[unix.NFTA_TABLE_NAME], "table name")
@@ -165,7 +185,7 @@ func decodeKernelTables(messages []netlink.Message) (kernelObservation, []decode
 		}
 		handles[handle] = struct{}{}
 		observed.tables = append(observed.tables, kernelObservedTable{family: family, name: name, flags: flags})
-		decoded = append(decoded, decodedKernelTable{use: use, handle: handle})
+		decoded = append(decoded, decodedKernelTable{use: use})
 	}
 	return observed, decoded, nil
 }
@@ -174,6 +194,7 @@ func decodeKernelChains(
 	messages []netlink.Message,
 	tables []decodedKernelTable,
 	observed *kernelObservation,
+	sequence *kernelBaseSequence,
 ) error {
 	if len(tables) == 0 {
 		if len(messages) != 0 {
@@ -193,7 +214,7 @@ func decodeKernelChains(
 	}
 	lastTableIndex := 0
 	for _, message := range messages {
-		family, attrs, err := decodeKernelMessage(
+		family, baseSequence, attrs, err := decodeKernelMessage(
 			message,
 			unix.NFT_MSG_NEWCHAIN,
 			netlink.Multi,
@@ -202,14 +223,18 @@ func decodeKernelChains(
 				unix.NFTA_CHAIN_TABLE:  {required: true},
 				unix.NFTA_CHAIN_HANDLE: {required: true},
 				unix.NFTA_CHAIN_NAME:   {required: true},
-				unix.NFTA_CHAIN_HOOK:   {flags: netlink.Nested, required: true},
+				unix.NFTA_CHAIN_HOOK:   {required: true},
 				unix.NFTA_CHAIN_POLICY: {required: true},
 				unix.NFTA_CHAIN_USE:    {required: true},
 				unix.NFTA_CHAIN_TYPE:   {required: true},
 				kernelNFTAChainFlags:   {required: true},
+				unix.NFTA_CHAIN_PAD:    {zeroLength: true},
 			},
 		)
 		if err != nil {
+			return err
+		}
+		if err := sequence.observe(baseSequence); err != nil {
 			return err
 		}
 		tableName, err := kernelAttributeString(attrs[unix.NFTA_CHAIN_TABLE], "chain table")
@@ -265,8 +290,8 @@ func decodeKernelChains(
 		if err != nil {
 			return err
 		}
-		if use != 0 || chainFlags != kernelNFTChainBase {
-			return invalidKernelObservation("chain use or flags are invalid")
+		if chainFlags != kernelNFTChainBase {
+			return invalidKernelObservation("chain flags are invalid")
 		}
 
 		observed.tables[tableIndex].chains = append(observed.tables[tableIndex].chains, kernelObservedChain{
@@ -278,6 +303,7 @@ func decodeKernelChains(
 			chainType:       nftables.ChainType(chainType),
 			policy:          nftables.ChainPolicy(policyValue),
 			policyPresent:   true,
+			use:             use,
 		})
 	}
 	for index := range observed.tables {
@@ -288,7 +314,11 @@ func decodeKernelChains(
 	return nil
 }
 
-func decodeKernelRules(messages []netlink.Message, observed *kernelObservation) error {
+func decodeKernelRules(
+	messages []netlink.Message,
+	observed *kernelObservation,
+	sequence *kernelBaseSequence,
+) error {
 	if observed.empty {
 		if len(messages) != 0 {
 			return invalidKernelObservation("rules exist without managed tables")
@@ -297,14 +327,20 @@ func decodeKernelRules(messages []netlink.Message, observed *kernelObservation) 
 	}
 
 	handles := make([]map[uint64]struct{}, len(observed.tables))
+	chains := make([]map[string]*decodedKernelRuleChain, len(observed.tables))
 	ruleIDs := make(map[string]struct{}, len(messages))
 	for index := range handles {
 		handles[index] = make(map[uint64]struct{})
+		chains[index] = make(map[string]*decodedKernelRuleChain, len(observed.tables[index].chains))
+		for chainIndex := range observed.tables[index].chains {
+			chains[index][observed.tables[index].chains[chainIndex].name] = &decodedKernelRuleChain{}
+		}
 	}
 	lastTableIndex := 0
+	lastChainIndexes := make([]int, len(observed.tables))
 	totalExpressions := 0
 	for _, message := range messages {
-		family, attrs, err := decodeKernelMessage(
+		family, baseSequence, attrs, err := decodeKernelMessage(
 			message,
 			unix.NFT_MSG_NEWRULE,
 			netlink.Multi|netlink.Append,
@@ -313,11 +349,16 @@ func decodeKernelRules(messages []netlink.Message, observed *kernelObservation) 
 				unix.NFTA_RULE_TABLE:       {required: true},
 				unix.NFTA_RULE_CHAIN:       {required: true},
 				unix.NFTA_RULE_HANDLE:      {required: true},
-				unix.NFTA_RULE_EXPRESSIONS: {flags: netlink.Nested, required: true},
+				unix.NFTA_RULE_EXPRESSIONS: {required: true},
+				unix.NFTA_RULE_POSITION:    {},
 				unix.NFTA_RULE_USERDATA:    {required: true},
+				unix.NFTA_RULE_PAD:         {zeroLength: true},
 			},
 		)
 		if err != nil {
+			return err
+		}
+		if err := sequence.observe(baseSequence); err != nil {
 			return err
 		}
 		tableName, err := kernelAttributeString(attrs[unix.NFTA_RULE_TABLE], "rule table")
@@ -333,9 +374,14 @@ func decodeKernelRules(messages []netlink.Message, observed *kernelObservation) 
 		if err != nil {
 			return err
 		}
-		if !kernelObservedChainExists(observed.tables[tableIndex].chains, chainName) {
+		chainIndex, exists := kernelObservedChainIndex(observed.tables[tableIndex].chains, chainName)
+		if !exists {
 			return invalidKernelObservation("rule references an unknown chain")
 		}
+		if chainIndex < lastChainIndexes[tableIndex] {
+			return invalidKernelObservation("rule chain order is invalid")
+		}
+		lastChainIndexes[tableIndex] = chainIndex
 		handle, err := kernelAttributeUint64(attrs[unix.NFTA_RULE_HANDLE], "rule handle")
 		if err != nil {
 			return err
@@ -346,7 +392,26 @@ func decodeKernelRules(messages []netlink.Message, observed *kernelObservation) 
 		if _, exists := handles[tableIndex][handle]; exists {
 			return invalidKernelObservation("rule handle is duplicated")
 		}
+		chainState := chains[tableIndex][chainName]
+		position, positionPresent := attrs[unix.NFTA_RULE_POSITION]
+		if chainState.ruleCount == 0 && positionPresent {
+			return invalidKernelObservation("first rule in chain contains a predecessor position")
+		}
+		if chainState.ruleCount != 0 {
+			if !positionPresent {
+				return invalidKernelObservation("non-first rule in chain is missing its predecessor position")
+			}
+			previousHandle, positionErr := kernelAttributeUint64(position, "rule predecessor position")
+			if positionErr != nil {
+				return positionErr
+			}
+			if previousHandle != chainState.lastHandle {
+				return invalidKernelObservation("rule predecessor position is invalid")
+			}
+		}
 		handles[tableIndex][handle] = struct{}{}
+		chainState.lastHandle = handle
+		chainState.ruleCount++
 
 		userdata := attrs[unix.NFTA_RULE_USERDATA].Data
 		if len(userdata) == 0 || len(userdata) > maxKernelObservationUserdataBytes {
@@ -370,10 +435,10 @@ func decodeKernelRules(messages []netlink.Message, observed *kernelObservation) 
 		if err != nil {
 			return err
 		}
-		if len(expressions) > maxKernelObservationExpressions-totalExpressions {
-			return invalidKernelObservation("expression object count exceeds limit")
+		totalExpressions, err = checkedKernelExpressionTotal(totalExpressions, len(expressions))
+		if err != nil {
+			return err
 		}
-		totalExpressions += len(expressions)
 		observed.tables[tableIndex].rules = append(observed.tables[tableIndex].rules, kernelObservedRule{
 			table:       tableIdentity{family: family, name: tableName},
 			chain:       chainName,
@@ -384,7 +449,22 @@ func decodeKernelRules(messages []netlink.Message, observed *kernelObservation) 
 	if observed.generationID == "" {
 		return invalidKernelObservation("nonempty managed tables contain no generation-bound rules")
 	}
+	for tableIndex := range observed.tables {
+		for chainIndex := range observed.tables[tableIndex].chains {
+			chain := observed.tables[tableIndex].chains[chainIndex]
+			if chains[tableIndex][chain.name].ruleCount != chain.use {
+				return invalidKernelObservation("chain use does not match observed rule count")
+			}
+		}
+	}
 	return nil
+}
+
+func checkedKernelExpressionTotal(total int, additional int) (int, error) {
+	if additional > maxKernelObservationExpressions-total {
+		return 0, invalidKernelObservation("expression object count exceeds limit")
+	}
+	return total + additional, nil
 }
 
 func decodeKernelMessage(
@@ -393,23 +473,34 @@ func decodeKernelMessage(
 	responseFlags netlink.HeaderFlags,
 	objectName string,
 	rules map[uint16]kernelAttributeRule,
-) (nftables.TableFamily, map[uint16]netlink.Attribute, error) {
+) (nftables.TableFamily, uint16, map[uint16]netlink.Attribute, error) {
 	if message.Header.Length != uint32(netlinkHeaderBytes+len(message.Data)) {
-		return 0, nil, invalidKernelObservation(objectName + " response length is invalid")
+		return 0, 0, nil, invalidKernelObservation(objectName + " response length is invalid")
 	}
 	wantType := netlink.HeaderType(kernelNetfilterSubsystemType | responseType)
 	if message.Header.Type != wantType || message.Header.Flags != responseFlags {
-		return 0, nil, invalidKernelObservation(objectName + " response type or flags are invalid")
+		return 0, 0, nil, invalidKernelObservation(objectName + " response type or flags are invalid")
 	}
-	if len(message.Data) < netfilterHeaderBytes || message.Data[1] != 0 || message.Data[2] != 0 ||
-		message.Data[3] != 0 {
-		return 0, nil, invalidKernelObservation(objectName + " netfilter header is invalid")
+	if len(message.Data) < netfilterHeaderBytes || message.Data[1] != 0 {
+		return 0, 0, nil, invalidKernelObservation(objectName + " netfilter header is invalid")
 	}
 	attrs, err := decodeUniqueKernelAttributes(message.Data[netfilterHeaderBytes:], objectName, rules)
 	if err != nil {
-		return 0, nil, err
+		return 0, 0, nil, err
 	}
-	return nftables.TableFamily(message.Data[0]), attrs, nil
+	return nftables.TableFamily(message.Data[0]), binary.BigEndian.Uint16(message.Data[2:4]), attrs, nil
+}
+
+func (sequence *kernelBaseSequence) observe(value uint16) error {
+	if !sequence.set {
+		sequence.set = true
+		sequence.value = value
+		return nil
+	}
+	if sequence.value != value {
+		return invalidKernelObservation("netfilter base sequence is inconsistent")
+	}
+	return nil
 }
 
 func decodeKernelHook(raw []byte) (uint32, uint32, error) {
@@ -441,12 +532,12 @@ func decodeKernelExpressions(raw []byte, family nftables.TableFamily) ([]expr.An
 	}
 	result := make([]expr.Any, 0, len(attrs))
 	for _, attr := range attrs {
-		if kernelAttributeType(attr) != unix.NFTA_LIST_ELEM || kernelAttributeFlags(attr) != netlink.Nested {
+		if kernelAttributeType(attr) != unix.NFTA_LIST_ELEM || kernelAttributeFlags(attr) != 0 {
 			return nil, invalidKernelObservation("expression list contains an unknown attribute")
 		}
 		expressionAttrs, err := decodeUniqueKernelAttributes(attr.Data, "expression", map[uint16]kernelAttributeRule{
 			unix.NFTA_EXPR_NAME: {required: true},
-			unix.NFTA_EXPR_DATA: {flags: netlink.Nested, required: true},
+			unix.NFTA_EXPR_DATA: {required: true},
 		})
 		if err != nil {
 			return nil, err
@@ -522,8 +613,8 @@ func decodeKernelBitwise(raw []byte) (expr.Any, error) {
 		unix.NFTA_BITWISE_SREG: {required: true},
 		unix.NFTA_BITWISE_DREG: {required: true},
 		unix.NFTA_BITWISE_LEN:  {required: true},
-		unix.NFTA_BITWISE_MASK: {flags: netlink.Nested, required: true},
-		unix.NFTA_BITWISE_XOR:  {flags: netlink.Nested, required: true},
+		unix.NFTA_BITWISE_MASK: {required: true},
+		unix.NFTA_BITWISE_XOR:  {required: true},
 	})
 	if err != nil {
 		return nil, err
@@ -555,7 +646,7 @@ func decodeKernelComparison(raw []byte) (expr.Any, error) {
 	attrs, err := decodeUniqueKernelAttributes(raw, "comparison expression", map[uint16]kernelAttributeRule{
 		unix.NFTA_CMP_SREG: {required: true},
 		unix.NFTA_CMP_OP:   {required: true},
-		unix.NFTA_CMP_DATA: {flags: netlink.Nested, required: true},
+		unix.NFTA_CMP_DATA: {required: true},
 	})
 	if err != nil {
 		return nil, err
@@ -632,8 +723,8 @@ func decodeKernelRange(raw []byte) (expr.Any, error) {
 	attrs, err := decodeUniqueKernelAttributes(raw, "range expression", map[uint16]kernelAttributeRule{
 		unix.NFTA_RANGE_SREG:      {required: true},
 		unix.NFTA_RANGE_OP:        {required: true},
-		unix.NFTA_RANGE_FROM_DATA: {flags: netlink.Nested, required: true},
-		unix.NFTA_RANGE_TO_DATA:   {flags: netlink.Nested, required: true},
+		unix.NFTA_RANGE_FROM_DATA: {required: true},
+		unix.NFTA_RANGE_TO_DATA:   {required: true},
 	})
 	if err != nil {
 		return nil, err
@@ -660,7 +751,7 @@ func decodeKernelRange(raw []byte) (expr.Any, error) {
 func decodeKernelVerdict(raw []byte) (expr.Any, error) {
 	attrs, err := decodeUniqueKernelAttributes(raw, "verdict immediate expression", map[uint16]kernelAttributeRule{
 		unix.NFTA_IMMEDIATE_DREG: {required: true},
-		unix.NFTA_IMMEDIATE_DATA: {flags: netlink.Nested, required: true},
+		unix.NFTA_IMMEDIATE_DATA: {required: true},
 	})
 	if err != nil {
 		return nil, err
@@ -673,7 +764,7 @@ func decodeKernelVerdict(raw []byte) (expr.Any, error) {
 		return nil, invalidKernelObservation("immediate expression does not target the verdict register")
 	}
 	dataAttrs, err := decodeUniqueKernelAttributes(attrs[unix.NFTA_IMMEDIATE_DATA].Data, "verdict data",
-		map[uint16]kernelAttributeRule{unix.NFTA_DATA_VERDICT: {flags: netlink.Nested, required: true}})
+		map[uint16]kernelAttributeRule{unix.NFTA_DATA_VERDICT: {required: true}})
 	if err != nil {
 		return nil, err
 	}
@@ -727,6 +818,11 @@ func decodeUniqueKernelAttributes(
 				fmt.Sprintf("%s contains duplicate attribute %d", objectName, attrType),
 			)
 		}
+		if rule.zeroLength && len(attr.Data) != 0 {
+			return nil, invalidKernelObservation(
+				fmt.Sprintf("%s padding attribute %d is not empty", objectName, attrType),
+			)
+		}
 		result[attrType] = attr
 	}
 	for attrType, rule := range rules {
@@ -752,6 +848,7 @@ func decodeKernelAttributeList(raw []byte, objectName string) ([]netlink.Attribu
 }
 
 func validateKernelAttributeWire(raw []byte, objectName string) error {
+	attributeCount := 0
 	for offset := 0; offset < len(raw); {
 		if len(raw)-offset < 4 {
 			return invalidKernelObservation(objectName + " contains a truncated attribute header")
@@ -759,6 +856,10 @@ func validateKernelAttributeWire(raw []byte, objectName string) error {
 		length := int(binary.NativeEndian.Uint16(raw[offset : offset+2]))
 		if length < 4 || length > len(raw)-offset {
 			return invalidKernelObservation(objectName + " contains an invalid attribute length")
+		}
+		attributeCount++
+		if attributeCount > maxKernelObservationAttributes {
+			return invalidKernelObservation(objectName + " attribute count exceeds limit")
 		}
 		alignedLength := (length + 3) &^ 3
 		if alignedLength > len(raw)-offset {
@@ -817,11 +918,11 @@ func kernelObservedTableIndex(
 	return 0, false
 }
 
-func kernelObservedChainExists(chains []kernelObservedChain, name string) bool {
-	for _, chain := range chains {
-		if chain.name == name {
-			return true
+func kernelObservedChainIndex(chains []kernelObservedChain, name string) (int, bool) {
+	for index := range chains {
+		if chains[index].name == name {
+			return index, true
 		}
 	}
-	return false
+	return 0, false
 }
