@@ -64,10 +64,11 @@ The privileged launch transaction must:
 7. pass the pinned namespace handle to Jailer; and
 8. persist exact namespace and process identity before reporting the VM active.
 
-The complete lock order is `release -> global index -> VM -> network`. An operation may acquire a suffix or subset but
-must never acquire an earlier class while holding a later one. This permits `RegisterLaunch` to return a VM-locked lease
-before the first network effect without creating a two-phase ownership claim or importing network behavior into the
-Jailer authority module.
+The complete lock order is `release -> global index -> VM -> network -> firewall`. An operation may acquire a suffix or
+subset but must never acquire an earlier class while holding a later one. This permits `RegisterLaunch` to return a
+VM-locked lease before the first network effect without creating a two-phase ownership claim or importing network
+behavior into the Jailer authority module. The firewall lock is host-global because one generation owns both reserved
+tables across all users and managed networks.
 
 Failure after the first effect invokes typed rollback while the same locks and lifecycle handle remain held. Cleanup
 verifies namespace inode, interface ownership, process identity, and cgroup membership before removing anything.
@@ -121,13 +122,51 @@ Implementation note (2026-08-30): `go.mod` now pins `github.com/google/nftables 
 prerouting chain has raw priority and holds source MAC/IPv4/ARP anti-spoofing plus unsupported-L3 guards; the bridge
 forward chain holds same-network policy. Inet forward/input/postrouting cover routed policy, established replies,
 managed host services, default deny, conditional uplink egress, and NAT. Masquerade-disabled networks receive no uplink
-egress allow. The compiler rejects overlapping prefixes and unusable IPv4 authorities, encodes generation identity in
-strict rule userdata, orders output deterministically, and has bounded allocation-growth evidence for 1,000 VMs.
+egress allow. The compiler rejects overlapping prefixes and unusable IPv4 authorities, encodes the validated input
+generation value and rule identity in strict userdata, orders output deterministically, and has bounded
+allocation-growth evidence for 1,000 VMs. The input generation value is not final kernel or deletion authority.
 
 This is an inert compiler foundation, not the root-owned adapter described above. It has no `nftables.Conn`/`Flush`,
 kernel inspection or adoption, empty-generation removal, namespace-scoped execution, privileged action, public policy
 cutover, legacy `nft` CLI removal, or L2 qualification. No atomic kernel-application or release-readiness claim follows
 from the compiler tests.
+
+#### Firewall generation authority and inspection gates
+
+The final adapter serializes every inspection, application, recovery, and empty-generation removal with the
+never-unlinked root-owned `/run/mvmctl/authority/firewall.lock`. Its strict persistent authority is
+`/var/lib/mvmctl/firewall/generation.json`. The enclosing root-owned directories are mode `0700`; the record and lock
+are mode `0600`. The record binds schema and lifecycle, host boot ID, host network-namespace device/inode, an empty flag,
+the last committed generation, and the exact observed `before` and compiled `target` identities while applying.
+
+The final generation identity is a canonical digest of compiler-owned normalized intent and output. A caller-provided
+identifier is neither generation identity nor deletion authority. An empty generation means both `mvmctl_bridge` and
+`mvmctl_inet` are absent: a pristine empty target performs no netlink transaction, while removal of an existing
+generation requires exact committed authority and deletes both reserved tables in the same qualified batch. Missing,
+corrupt, wrong-boot, wrong-namespace, mismatched, partial, or foreign fixed-name state fails closed and is never adopted
+or deleted automatically.
+
+`github.com/google/nftables v0.3.0` cannot by itself prove that a fixed-name table or chain belongs to mvmctl: table and
+chain values expose no userdata or equivalent provenance. Rule userdata is necessary evidence but does not establish
+ownership of its containing table. Its structured `GetRules` path can also omit expression types the library does not
+understand, so re-marshalling parsed expressions cannot prove that no extra kernel expression exists. Production
+activation therefore requires an accepted threat model for another root or `CAP_NET_ADMIN` actor, root-record-bound
+exact-state authority within that model, and an inspection mechanism that detects unknown raw expressions rather than
+silently ignoring them. Ambiguity always blocks `DelTable`.
+
+Application writes a durable `applying` record before kernel mutation, queues the complete delete/create/chain/rule
+replacement on one fresh explicitly namespace-bound lasting connection, and calls `Flush` once. It then closes that
+connection and verifies the exact target through a fresh inspection before committing the record. Cancellation closes
+the lasting connection; a failed or cancelled flush is never retried on that connection. While retaining the same
+global lock and namespace pin, one bounded fresh recovery inspection may classify the kernel as exact `before`, exact
+`target`, or unknown. Unknown state retains recoverable `applying` authority and keeps links down.
+
+One `Flush` protocol batch is not yet proof that delete-and-recreate behaves atomically on every supported kernel. A
+disposable isolated-network-namespace compatibility gate must prove that a valid replacement changes both reserved
+tables together, a late invalid command leaves the exact prior generation, an empty target removes both or neither,
+explicit namespace selection affects only that namespace, and every emitted expression survives exact inspection.
+Until those gates pass, no adapter, privileged action, link activation, public cutover, or legacy-backend removal may
+use the compiler foundation.
 
 ### Two public policy families
 
@@ -267,11 +306,12 @@ capabilities require new typed policy families and explicit enforcement contract
 
 ## Release Gate
 
-The private compiler tests now cover its bridge/IP/NAT expression construction, stable generation identity,
-deterministic ordering, validation, and bounded allocation growth for a representative 1,000-VM generation. Before
-production integration, the remaining compatibility spike must prove these expressions against the kernel plus
-namespace-scoped connections, context cancellation/deadlines, structured inspection/adoption and removal, atomic
-invalid-batch failure, and representative 1,000-VM runtime within a reviewed performance budget.
+The private compiler tests now cover its bridge/IP/NAT expression construction, strict input-provided generation
+userdata, deterministic ordering, validation, and bounded allocation growth for a representative 1,000-VM generation.
+Before production integration, the remaining work must derive the canonical generation digest, implement and fault-test
+the root authority/lock state machine, explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary, detect unknown
+raw expressions, and prove the emitted expressions plus namespace binding, cancellation/close behavior, delete/create
+and invalid-batch atomicity, empty removal, and representative 1,000-VM runtime against supported kernels.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

@@ -462,7 +462,7 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   is wired yet.
 - [ ] Persist minimal root-owned network identity and serialize network/VM topology mutations.
 - [ ] Acquire the network lock only after the applicable VM launch/registered lease; the full order is
-  `release -> global index -> VM -> network`.
+  `release -> global index -> VM -> network -> firewall`.
 - [ ] Derive namespace/interface names from UID and immutable IDs; accept no raw name, path, or `ip` argv.
 - [ ] Create namespace, local bridge, TAP, and veth pair with links down.
 - [ ] Attach only the verified host veth to the verified managed bridge.
@@ -482,9 +482,20 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   overlap/unusable-IPv4 rejection. It performs no kernel or privileged effect.
 - [x] Add deterministic input-order coverage and bounded allocation-growth evidence for a 1,000-VM, 1,000-grant
   generation.
-- [ ] Complete the compatibility spike against the kernel: prove required expressions, structured inspection/adoption
-  and removal, namespace-scoped connections, cancellation/deadlines, atomic invalid-batch failure, and representative
-  1,000-VM runtime within a reviewed budget.
+- [ ] Derive the generation identity as a canonical compiler digest; an input-provided ID is never kernel or deletion
+  authority.
+- [ ] Add the never-unlinked root-owned `/run/mvmctl/authority/firewall.lock` after the network lock and the strict
+  committed/applying `/var/lib/mvmctl/firewall/generation.json` record bound to boot ID, host netns identity, empty
+  state, and exact before/target generations.
+- [ ] Define empty as both reserved tables absent; never create empty tables or delete ambiguous, foreign, partial,
+  missing-record, corrupt-record, wrong-boot, wrong-netns, or mismatched fixed-name state.
+- [ ] Resolve the v0.3.0 inspection gaps before activation: table/chain values have no ownership userdata and
+  structured `GetRules` can omit unknown expressions. Explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary
+  for record-bound authority and detect unknown raw expressions instead of silently adopting them.
+- [ ] Complete the isolated-netns compatibility spike: prove required expression round-trips, explicit namespace
+  isolation, lasting-connection cancellation/checked close, valid delete/create replacement, late-invalid-batch
+  atomicity, both-table empty removal, recovery inspection, and representative 1,000-VM runtime within a reviewed
+  budget.
 - [ ] Add typed privileged nftables application under `internal/service/firewall/`; caller cannot pass syntax, files,
   includes, commands, or library/netlink types across the privileged wire.
 - [ ] Keep `github.com/mdlayher/netlink` transitive only; do not add a second low-level adapter or a production CLI

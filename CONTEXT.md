@@ -362,19 +362,29 @@ chains. Bridge prerouting uses raw priority for source MAC/IPv4/ARP anti-spoofin
 bridge forward compiles same-network allows and default deny. Inet forward/input/postrouting compile routed allows,
 established replies, host-service access, default deny, and conditional egress/NAT; disabling masquerade emits neither
 uplink egress nor NAT. Compilation rejects overlapping managed IPv4 prefixes and unusable network, host, or endpoint
-addresses. Strict rule userdata binds every rule to its generation identity, input ordering is deterministic, and L1
-evidence bounds allocation growth for a 1,000-VM generation.
+addresses. Strict rule userdata binds every rule to the compiler input's validated generation value and rule identity;
+that input value is not final kernel authority. Input ordering is deterministic, and L1 evidence bounds allocation
+growth for a 1,000-VM generation.
 
 This foundation is inert. It creates no `nftables.Conn`, calls no `Flush`, and provides no inspection/adoption,
 empty-generation removal, namespace execution, privileged action, public policy cutover, legacy `nft` CLI removal, or
 L2 qualification. It is not evidence of atomic kernel application or release readiness; the transitional backends and
 public policy path above remain active.
 
-ADR-0017 defines the remaining clean-break replacement. The final adapter must apply one complete generation directly,
-then remove iptables, the backend selector, backend-specific repositories, and the production `nft` CLI path. Library
-and netlink types stay private to that adapter; there is no final CLI fallback. Kernel nftables, bridge-family,
-connection-tracking, NAT, and privilege capabilities remain host requirements. A disposable QA runner may use the
-`nft` CLI only as an independent read-only oracle.
+ADR-0017 defines the remaining clean-break replacement. Before any fixed-name table can be replaced or removed, root
+must hold the never-unlinked global `/run/mvmctl/authority/firewall.lock` and bind the exact observed generation to the
+strict `/var/lib/mvmctl/firewall/generation.json` authority record. The final generation identity is a canonical digest
+derived by the compiler, never a caller-selected ID. An empty generation means both reserved tables are absent; missing,
+corrupt, mismatched, or ambiguous authority never permits deletion.
+
+`github.com/google/nftables v0.3.0` exposes rule userdata but no table/chain ownership metadata, and its structured rule
+reader can omit expression types it does not understand. Root-record-bound exact inspection, the threat-model boundary
+for another root or `CAP_NET_ADMIN` actor, raw unknown-expression detection, and real-kernel delete/recreate batch
+atomicity therefore remain explicit activation gates. The final adapter must resolve those gates, apply one complete
+generation directly, then remove iptables, the backend selector, backend-specific repositories, and the production
+`nft` CLI path. Library and netlink types stay private to that adapter; there is no final CLI fallback. Kernel nftables,
+bridge-family, connection-tracking, NAT, and privilege capabilities remain host requirements. A disposable QA runner
+may use the `nft` CLI only as an independent read-only oracle.
 
 ## Relationships
 

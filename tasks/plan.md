@@ -72,8 +72,10 @@ remains transitional. The routed policy, dual firewall backends, host-global TAP
 | Trusted Firecracker/Jailer pairs | `/var/lib/mvmctl/binaries/<architecture>/<version>` | Root-owned persistent |
 | VM ownership/lifecycle records | `/var/lib/mvmctl/instances/<uid>` | Root-owned persistent |
 | Network ownership/topology records | `/var/lib/mvmctl/networks/<uid>` | Root-owned persistent |
+| Firewall generation record | `/var/lib/mvmctl/firewall/generation.json` | Root-owned persistent; exact committed/applying kernel authority |
 | Global capacity allocations | `/var/lib/mvmctl/allocations` | Root-owned persistent |
 | Locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700` ephemeral; no persistent mount-namespace handles |
+| Global firewall lock | `/run/mvmctl/authority/firewall.lock` | Root-owned `0600`, ephemeral, and never unlinked |
 | VM sockets and PID mirrors | `/run/mvmctl/runtime/<uid>/<vm-id>` | Root-controlled parent, caller-owned `0700` VM directory; ephemeral and non-authoritative |
 | Jailer chroots | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
 | Cgroups | `/sys/fs/cgroup/mvmctl/<vm-id>` | Kernel runtime state |
@@ -209,7 +211,7 @@ mount-namespace identity, and the executable hash against the exact release. Fai
 The global lock order is:
 
 ```text
-release lock -> global index lock -> VM lock -> network lock
+release lock -> global index lock -> VM lock -> network lock -> firewall lock
 ```
 
 Operations may acquire a suffix or subset but never an earlier class while holding a later class. Global VM-ID claims
@@ -566,11 +568,25 @@ namespace execution, privileged registration/application, public policy cutover,
 qualification remain pending. The final adapter must submit one complete generation through one `Conn.Flush` call;
 until then there is no atomic kernel-application evidence. Library and transitive netlink types must stay private.
 
+Before any fixed-name deletion, the final adapter must hold the never-unlinked host-global
+`/run/mvmctl/authority/firewall.lock` and admit the strict root-owned
+`/var/lib/mvmctl/firewall/generation.json` record. The record binds committed/applying state, boot ID, host network
+namespace identity, empty state, and exact before/target generation identities. The compiler, not the caller, derives
+the canonical generation digest. Empty means both reserved tables are absent; missing, corrupt, mismatched, partial, or
+foreign fixed-name state is never adopted or deleted.
+
+The pinned library exposes rule userdata but no table/chain ownership metadata, and structured `GetRules` can omit
+unknown expression types. Root-record-bound exact state can become authority only within an explicitly accepted threat
+model for other root/`CAP_NET_ADMIN` actors and an inspection path that detects unknown raw expressions. A fresh
+explicitly namespace-bound lasting connection performs one replacement batch; a fresh connection inspects the result.
+Cancellation or a flush failure gets one bounded recovery inspection under the same lock and namespace pin, never a
+retry on the used connection. Real-kernel isolated-namespace tests must still prove delete/create and late-invalid-batch
+atomicity, both-table empty removal, namespace isolation, exact expression inspection, cancellation/close behavior, and
+the reviewed 1,000-VM budget before activation.
+
 The final production path must not execute or parse the `nft` CLI, use `libnftnl`, depend on `nftables.service`, or
 retain a CLI fallback. Host readiness must probe kernel capabilities directly. A disposable QA runner may use `nft`
-only as an independent read-only oracle. The remaining compatibility spike must prove kernel expression support,
-atomic invalid-batch failure, namespace-scoped connections, structured inspection/adoption and removal,
-cancellation/deadline behavior, and representative 1,000-VM runtime within a reviewed performance budget.
+only as an independent read-only oracle.
 
 The public policy families are:
 

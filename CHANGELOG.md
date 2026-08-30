@@ -47,8 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default deny, and conditional internet egress/NAT. A network with masquerade disabled receives neither an uplink
   egress allow nor a masquerade rule. Invalid resolved intent rejects overlapping managed prefixes, prefixes without
   usable hosts, network/broadcast addresses, and conflicting host/VM addresses.
-- Every rule carries a strict userdata identity containing the generation and rule identity. L1 evidence proves
-  deterministic ordering across input order and bounds allocation growth for a 1,000-VM, 1,000-grant generation.
+- Every rule carries a strict userdata identity containing the validated input generation value and rule identity. L1
+  evidence proves deterministic ordering across input order and bounds allocation growth for a 1,000-VM, 1,000-grant
+  generation. Deriving the authoritative generation digest inside the compiler remains a release gate below.
 - This compiler foundation is inert: it creates no `nftables.Conn` and calls no `Flush`; it has no kernel
   inspection/adoption, empty-generation removal, namespace execution, privileged action, public policy cutover, legacy
   `nft` CLI removal, or L2 qualification. It therefore provides no atomic kernel-application or release-readiness
@@ -379,9 +380,12 @@ The following items are release blockers and are intentionally not described abo
   `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
-- Connect the private typed compiler to owner-bound inspection/adoption, empty-generation removal, namespace-scoped
-  execution, and one privileged `Conn.Flush` application before links become usable. Then remove the iptables backend,
-  backend selector, and production `nft` CLI subprocess/parser; the compiler alone is not an atomic kernel application.
+- Derive the nftables generation digest inside the compiler and add the root-owned global firewall lock plus durable
+  committed/applying generation record. Resolve the pinned library's missing table/chain provenance and unknown
+  expression-inspection gaps, then prove namespace-scoped delete/recreate, invalid-batch, recovery, and empty-generation
+  behavior against supported kernels before one privileged `Conn.Flush` application can make links usable. Only then
+  remove the iptables backend, backend selector, and production `nft` CLI subprocess/parser; the compiler alone is not
+  an atomic kernel application.
 - Complete the public API, CLI, nftables application, and vsock relay cutover from routed `ServiceAccessPolicy` and the
   `allow_remote_exec` trust mesh to the implemented typed traffic/exec persistence foundations; then remove the
   transitional tables, flags, and paths atomically.
