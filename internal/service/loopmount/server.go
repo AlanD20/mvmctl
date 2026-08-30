@@ -19,9 +19,19 @@ type Server struct {
 }
 
 type rootfsEffects interface {
-	ProvisionVM(context.Context, *rootfsLease, VMProvisionRequest) (vmProvisionEffectOutcome, error)
-	InspectImage(context.Context, *rootfsLease, ImageInspectRequest) (imageInspectEffectOutcome, error)
-	OptimizeImage(context.Context, *rootfsLease, ImageOptimizeRequest) (imageOptimizeEffectOutcome, error)
+	ProvisionVM(
+		context.Context,
+		*rootfsLease,
+		Filesystem,
+		VMProvisionPlan,
+	) (vmProvisionEffectOutcome, error)
+	InspectImage(context.Context, *rootfsLease, Filesystem) (imageInspectEffectOutcome, error)
+	OptimizeImage(
+		context.Context,
+		*rootfsLease,
+		Filesystem,
+		ImageOptimizePlan,
+	) (imageOptimizeEffectOutcome, error)
 }
 
 type vmProvisionEffectCleanup interface {
@@ -36,19 +46,56 @@ type imageOptimizeEffectCleanup interface {
 	CleanupOptimizeImage(context.Context) error
 }
 
+type vmProvisionEffectState uint8
+
+const (
+	vmProvisionEffectStateInvalid vmProvisionEffectState = iota
+	vmProvisionEffectStateUnchanged
+	vmProvisionEffectStateModified
+	vmProvisionEffectStateModifiedDurabilityUncertain
+	vmProvisionEffectStateOutcomeUnknown
+)
+
+type imageInspectEffectState uint8
+
+const (
+	imageInspectEffectStateInvalid imageInspectEffectState = iota
+	imageInspectEffectStateUnchanged
+	imageInspectEffectStateOutcomeUnknown
+)
+
+type imageOptimizeEffectState uint8
+
+const (
+	imageOptimizeEffectStateInvalid imageOptimizeEffectState = iota
+	imageOptimizeEffectStateUnchanged
+	imageOptimizeEffectStateModified
+	imageOptimizeEffectStateImageReplaced
+	imageOptimizeEffectStateModifiedDurabilityUncertain
+	imageOptimizeEffectStateImageReplacedDurabilityUncertain
+	imageOptimizeEffectStateOutcomeUnknown
+)
+
 type vmProvisionEffectOutcome struct {
-	result VMProvisionResult
-	lease  vmProvisionEffectCleanup
+	state        vmProvisionEffectState
+	filesystem   Filesystem
+	rootfsBytes  uint64
+	filesWritten uint32
+	commandsRun  uint32
+	lease        vmProvisionEffectCleanup
 }
 
 type imageInspectEffectOutcome struct {
-	result ImageInspectResult
+	state  imageInspectEffectState
+	osType string
 	lease  imageInspectEffectCleanup
 }
 
 type imageOptimizeEffectOutcome struct {
-	result ImageOptimizeResult
-	lease  imageOptimizeEffectCleanup
+	state      imageOptimizeEffectState
+	filesystem Filesystem
+	imageBytes uint64
+	lease      imageOptimizeEffectCleanup
 }
 
 type rootfsResourceLocks interface {
@@ -57,6 +104,13 @@ type rootfsResourceLocks interface {
 
 type rootfsResourceLockLease interface {
 	Release(context.Context) error
+}
+
+type rootfsEffectEvidence struct {
+	rootfsModified      bool
+	imageReplaced       bool
+	durabilityUncertain bool
+	outcomeUnknown      bool
 }
 
 // ProvisionVM executes one closed VM provisioning request against its admitted rootfs.
@@ -74,26 +128,36 @@ func (server *Server) ProvisionVM(
 	if err := validateRootfsCaller(caller); err != nil {
 		return VMProvisionResult{}, err
 	}
+	var finalEvidence rootfsEffectEvidence
+	effectStateObserved := false
+	defer func() {
+		if returnErr != nil && effectStateObserved {
+			returnErr = annotateServerEffectFailure(returnErr, finalEvidence, nil)
+		}
+	}()
 	selection := rootfsSelection{
 		kind:          rootfsVMProvisionSelection,
 		resourceID:    request.VMID,
 		expectedBytes: request.ExpectedRootfsBytes,
+		replayBytes:   request.Plan.ResizeBytes,
 	}
-	lockLease, err := server.locks.Acquire(ctx, caller, selection)
-	if err != nil {
-		return VMProvisionResult{}, preserveServerError("acquire managed VM rootfs lock", err)
+	lockLease, acquireErr := server.locks.Acquire(ctx, caller, selection)
+	if lockLease != nil {
+		defer func() {
+			returnErr = appendServerCleanupError(
+				returnErr,
+				"resource_lock_release",
+				"release managed VM rootfs lock",
+				lockLease.Release(context.WithoutCancel(ctx)),
+			)
+		}()
+	}
+	if acquireErr != nil {
+		return VMProvisionResult{}, preserveServerError("acquire managed VM rootfs lock", acquireErr)
 	}
 	if lockLease == nil {
 		return VMProvisionResult{}, rootfsAtomicError("managed VM rootfs lock authority is missing", nil)
 	}
-	defer func() {
-		returnErr = appendServerCleanupError(
-			returnErr,
-			"resource_lock_release",
-			"release managed VM rootfs lock",
-			lockLease.Release(context.WithoutCancel(ctx)),
-		)
-	}()
 
 	rootfsLease, err := admitVMProvisionRootfs(ctx, server.rootfsAuthority, caller, request)
 	if err != nil {
@@ -108,7 +172,7 @@ func (server *Server) ProvisionVM(
 		)
 	}()
 
-	outcome, effectErr := server.effects.ProvisionVM(ctx, rootfsLease, request)
+	outcome, effectErr := server.effects.ProvisionVM(ctx, rootfsLease, request.Filesystem, request.Plan)
 	defer func() {
 		returnErr = appendServerCleanupError(
 			returnErr,
@@ -117,13 +181,28 @@ func (server *Server) ProvisionVM(
 			outcome.cleanup(context.WithoutCancel(ctx)),
 		)
 	}()
+	evidence, stateErr := outcome.state.evidence()
+	finalEvidence = evidence
+	effectStateObserved = true
 	if effectErr != nil {
-		return VMProvisionResult{}, preserveServerError("provision managed VM rootfs", effectErr)
+		primary := preserveServerError("provision managed VM rootfs", effectErr)
+		return VMProvisionResult{}, annotateServerEffectFailure(primary, evidence, stateErr)
 	}
-	if err := outcome.result.Validate(request); err != nil {
-		return VMProvisionResult{}, err
+	if stateErr != nil || !outcome.state.allowsSuccess() {
+		primary := rootfsAtomicError("managed VM rootfs effect state cannot authorize success", stateErr)
+		return VMProvisionResult{}, annotateServerEffectFailure(primary, evidence, stateErr)
 	}
-	return outcome.result, nil
+	result := VMProvisionResult{
+		VMID:         request.VMID,
+		Filesystem:   outcome.filesystem,
+		RootfsBytes:  outcome.rootfsBytes,
+		FilesWritten: outcome.filesWritten,
+		CommandsRun:  outcome.commandsRun,
+	}
+	if err := result.Validate(request); err != nil {
+		return VMProvisionResult{}, annotateServerEffectFailure(err, evidence, nil)
+	}
+	return result, nil
 }
 
 // InspectImage executes one read-only inspection against its admitted staging rootfs.
@@ -141,26 +220,35 @@ func (server *Server) InspectImage(
 	if err := validateRootfsCaller(caller); err != nil {
 		return ImageInspectResult{}, err
 	}
+	var finalEvidence rootfsEffectEvidence
+	effectStateObserved := false
+	defer func() {
+		if returnErr != nil && effectStateObserved {
+			returnErr = annotateServerEffectFailure(returnErr, finalEvidence, nil)
+		}
+	}()
 	selection := rootfsSelection{
 		kind:          rootfsImageInspectSelection,
 		resourceID:    request.ImageID,
 		expectedBytes: request.ExpectedImageBytes,
 	}
-	lockLease, err := server.locks.Acquire(ctx, caller, selection)
-	if err != nil {
-		return ImageInspectResult{}, preserveServerError("acquire managed image inspection lock", err)
+	lockLease, acquireErr := server.locks.Acquire(ctx, caller, selection)
+	if lockLease != nil {
+		defer func() {
+			returnErr = appendServerCleanupError(
+				returnErr,
+				"resource_lock_release",
+				"release managed image inspection lock",
+				lockLease.Release(context.WithoutCancel(ctx)),
+			)
+		}()
+	}
+	if acquireErr != nil {
+		return ImageInspectResult{}, preserveServerError("acquire managed image inspection lock", acquireErr)
 	}
 	if lockLease == nil {
 		return ImageInspectResult{}, rootfsAtomicError("managed image inspection lock authority is missing", nil)
 	}
-	defer func() {
-		returnErr = appendServerCleanupError(
-			returnErr,
-			"resource_lock_release",
-			"release managed image inspection lock",
-			lockLease.Release(context.WithoutCancel(ctx)),
-		)
-	}()
 
 	rootfsLease, err := admitImageInspectRootfs(ctx, server.rootfsAuthority, caller, request)
 	if err != nil {
@@ -175,7 +263,7 @@ func (server *Server) InspectImage(
 		)
 	}()
 
-	outcome, effectErr := server.effects.InspectImage(ctx, rootfsLease, request)
+	outcome, effectErr := server.effects.InspectImage(ctx, rootfsLease, request.Filesystem)
 	defer func() {
 		returnErr = appendServerCleanupError(
 			returnErr,
@@ -184,16 +272,26 @@ func (server *Server) InspectImage(
 			outcome.cleanup(context.WithoutCancel(ctx)),
 		)
 	}()
+	evidence, stateErr := outcome.state.evidence()
+	finalEvidence = evidence
+	effectStateObserved = true
 	if effectErr != nil {
-		return ImageInspectResult{}, preserveServerError("inspect managed image rootfs", effectErr)
+		primary := preserveServerError("inspect managed image rootfs", effectErr)
+		return ImageInspectResult{}, annotateServerEffectFailure(primary, evidence, stateErr)
 	}
-	if err := outcome.result.Validate(request); err != nil {
-		return ImageInspectResult{}, err
+	if stateErr != nil || !outcome.state.allowsSuccess() {
+		primary := rootfsAtomicError("managed image inspection effect state cannot authorize success", stateErr)
+		return ImageInspectResult{}, annotateServerEffectFailure(primary, evidence, stateErr)
 	}
-	return outcome.result, nil
+	result := ImageInspectResult{ImageID: request.ImageID, OSType: outcome.osType}
+	if err := result.Validate(request); err != nil {
+		return ImageInspectResult{}, annotateServerEffectFailure(err, evidence, nil)
+	}
+	return result, nil
 }
 
 // OptimizeImage executes one closed mutation plan against its admitted staging rootfs.
+// CRITICAL: OptimizeImage cannot be registered until durable replacement and shrink replay authority is implemented.
 func (server *Server) OptimizeImage(
 	ctx context.Context,
 	caller Caller,
@@ -208,26 +306,35 @@ func (server *Server) OptimizeImage(
 	if err := validateRootfsCaller(caller); err != nil {
 		return ImageOptimizeResult{}, err
 	}
+	var finalEvidence rootfsEffectEvidence
+	effectStateObserved := false
+	defer func() {
+		if returnErr != nil && effectStateObserved {
+			returnErr = annotateServerEffectFailure(returnErr, finalEvidence, nil)
+		}
+	}()
 	selection := rootfsSelection{
 		kind:          rootfsImageOptimizeSelection,
 		resourceID:    request.ImageID,
 		expectedBytes: request.ExpectedImageBytes,
 	}
-	lockLease, err := server.locks.Acquire(ctx, caller, selection)
-	if err != nil {
-		return ImageOptimizeResult{}, preserveServerError("acquire managed image optimization lock", err)
+	lockLease, acquireErr := server.locks.Acquire(ctx, caller, selection)
+	if lockLease != nil {
+		defer func() {
+			returnErr = appendServerCleanupError(
+				returnErr,
+				"resource_lock_release",
+				"release managed image optimization lock",
+				lockLease.Release(context.WithoutCancel(ctx)),
+			)
+		}()
+	}
+	if acquireErr != nil {
+		return ImageOptimizeResult{}, preserveServerError("acquire managed image optimization lock", acquireErr)
 	}
 	if lockLease == nil {
 		return ImageOptimizeResult{}, rootfsAtomicError("managed image optimization lock authority is missing", nil)
 	}
-	defer func() {
-		returnErr = appendServerCleanupError(
-			returnErr,
-			"resource_lock_release",
-			"release managed image optimization lock",
-			lockLease.Release(context.WithoutCancel(ctx)),
-		)
-	}()
 
 	rootfsLease, err := admitImageOptimizeRootfs(ctx, server.rootfsAuthority, caller, request)
 	if err != nil {
@@ -242,7 +349,7 @@ func (server *Server) OptimizeImage(
 		)
 	}()
 
-	outcome, effectErr := server.effects.OptimizeImage(ctx, rootfsLease, request)
+	outcome, effectErr := server.effects.OptimizeImage(ctx, rootfsLease, request.Filesystem, request.Plan)
 	defer func() {
 		returnErr = appendServerCleanupError(
 			returnErr,
@@ -251,13 +358,24 @@ func (server *Server) OptimizeImage(
 			outcome.cleanup(context.WithoutCancel(ctx)),
 		)
 	}()
+	evidence, stateErr := outcome.state.evidence()
+	finalEvidence = evidence
+	effectStateObserved = true
 	if effectErr != nil {
-		return ImageOptimizeResult{}, preserveServerError("optimize managed image rootfs", effectErr)
+		primary := preserveServerError("optimize managed image rootfs", effectErr)
+		return ImageOptimizeResult{}, annotateServerEffectFailure(primary, evidence, stateErr)
 	}
-	if err := outcome.result.Validate(request); err != nil {
-		return ImageOptimizeResult{}, err
+	if stateErr != nil || !outcome.state.allowsSuccess() {
+		primary := rootfsAtomicError("managed image optimization effect state cannot authorize success", stateErr)
+		return ImageOptimizeResult{}, annotateServerEffectFailure(primary, evidence, stateErr)
 	}
-	return outcome.result, nil
+	result := ImageOptimizeResult{
+		ImageID: request.ImageID, Filesystem: outcome.filesystem, ImageBytes: outcome.imageBytes,
+	}
+	if err := result.Validate(request); err != nil {
+		return ImageOptimizeResult{}, annotateServerEffectFailure(err, evidence, nil)
+	}
+	return result, nil
 }
 
 func (server *Server) validateDependencies() error {
@@ -288,11 +406,100 @@ func (outcome imageOptimizeEffectOutcome) cleanup(ctx context.Context) error {
 	return outcome.lease.CleanupOptimizeImage(ctx)
 }
 
+func (state vmProvisionEffectState) evidence() (rootfsEffectEvidence, error) {
+	switch state {
+	case vmProvisionEffectStateUnchanged:
+		return rootfsEffectEvidence{}, nil
+	case vmProvisionEffectStateModified:
+		return rootfsEffectEvidence{rootfsModified: true}, nil
+	case vmProvisionEffectStateModifiedDurabilityUncertain:
+		return rootfsEffectEvidence{rootfsModified: true, durabilityUncertain: true}, nil
+	case vmProvisionEffectStateOutcomeUnknown:
+		return rootfsEffectEvidence{rootfsModified: true, durabilityUncertain: true, outcomeUnknown: true}, nil
+	default:
+		return rootfsEffectEvidence{rootfsModified: true, durabilityUncertain: true, outcomeUnknown: true},
+			rootfsAtomicError("managed VM rootfs effect state is invalid", nil)
+	}
+}
+
+func (state vmProvisionEffectState) allowsSuccess() bool {
+	return state == vmProvisionEffectStateUnchanged || state == vmProvisionEffectStateModified
+}
+
+func (state imageInspectEffectState) evidence() (rootfsEffectEvidence, error) {
+	switch state {
+	case imageInspectEffectStateUnchanged:
+		return rootfsEffectEvidence{}, nil
+	case imageInspectEffectStateOutcomeUnknown:
+		return rootfsEffectEvidence{outcomeUnknown: true}, nil
+	default:
+		return rootfsEffectEvidence{outcomeUnknown: true},
+			rootfsAtomicError("managed image inspection effect state is invalid", nil)
+	}
+}
+
+func (state imageInspectEffectState) allowsSuccess() bool {
+	return state == imageInspectEffectStateUnchanged
+}
+
+func (state imageOptimizeEffectState) evidence() (rootfsEffectEvidence, error) {
+	switch state {
+	case imageOptimizeEffectStateUnchanged:
+		return rootfsEffectEvidence{}, nil
+	case imageOptimizeEffectStateModified:
+		return rootfsEffectEvidence{rootfsModified: true}, nil
+	case imageOptimizeEffectStateImageReplaced:
+		return rootfsEffectEvidence{rootfsModified: true, imageReplaced: true}, nil
+	case imageOptimizeEffectStateModifiedDurabilityUncertain:
+		return rootfsEffectEvidence{rootfsModified: true, durabilityUncertain: true}, nil
+	case imageOptimizeEffectStateImageReplacedDurabilityUncertain:
+		return rootfsEffectEvidence{rootfsModified: true, imageReplaced: true, durabilityUncertain: true}, nil
+	case imageOptimizeEffectStateOutcomeUnknown:
+		return rootfsEffectEvidence{
+			rootfsModified: true, imageReplaced: true, durabilityUncertain: true, outcomeUnknown: true,
+		}, nil
+	default:
+		return rootfsEffectEvidence{
+			rootfsModified: true, imageReplaced: true, durabilityUncertain: true, outcomeUnknown: true,
+		}, rootfsAtomicError("managed image optimization effect state is invalid", nil)
+	}
+}
+
+func (state imageOptimizeEffectState) allowsSuccess() bool {
+	return state == imageOptimizeEffectStateUnchanged || state == imageOptimizeEffectStateModified ||
+		state == imageOptimizeEffectStateImageReplaced
+}
+
 func preserveServerError(message string, cause error) error {
 	if errs.AsDomainError(cause) != nil {
 		return cause
 	}
 	return rootfsAtomicError(message, cause)
+}
+
+func annotateServerEffectFailure(primary error, evidence rootfsEffectEvidence, stateErr error) error {
+	domainErr := errs.AsDomainError(primary)
+	if domainErr == nil {
+		domainErr = rootfsAtomicError("loopmount effect failed", primary)
+	}
+	result := *domainErr
+	result.Details = maps.Clone(domainErr.Details)
+	if result.Details == nil {
+		result.Details = make(map[string]any)
+	}
+	result.Details["rootfs_modified"] = evidence.rootfsModified
+	result.Details["image_replaced"] = evidence.imageReplaced
+	result.Details["durability_uncertain"] = evidence.durabilityUncertain
+	result.Details["outcome_unknown"] = evidence.outcomeUnknown
+	if stateErr != nil {
+		result.Details["loopmount_effect_state_invalid"] = true
+		result.Details["loopmount_effect_state_detail"] = boundedServerCleanupDetail(
+			"validate loopmount effect state",
+			stateErr,
+		)
+		result.Err = errors.Join(domainErr.Err, stateErr)
+	}
+	return &result
 }
 
 func appendServerCleanupError(primary error, annotation, message string, cause error) error {

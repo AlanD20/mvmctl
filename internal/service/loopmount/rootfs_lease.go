@@ -19,6 +19,8 @@ type rootfsLease struct {
 	caller        Caller
 	cacheIdentity rootfsCacheIdentity
 	metadata      rootfsStableMetadata
+	// admittedBytes is the stable pre-effect size used to converge an interrupted grow replay.
+	admittedBytes uint64
 	access        rootfsAccess
 	parentFD      int
 	stagingFD     int
@@ -43,6 +45,7 @@ func (lease *rootfsLease) Release(ctx context.Context) error {
 	lease.caller = Caller{}
 	lease.cacheIdentity = rootfsCacheIdentity{}
 	lease.metadata = rootfsStableMetadata{}
+	lease.admittedBytes = 0
 	lease.access = 0
 	lease.parentFD = -1
 	lease.stagingFD = -1

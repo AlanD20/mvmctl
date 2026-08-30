@@ -157,6 +157,50 @@ func TestRootfsAuthorityUsesFixedSelectionAndAccess(t *testing.T) {
 	}
 }
 
+// Rationale: A grow may have completed before response delivery. Retry admission must accept the stable old or exact
+// target size so the effect can converge, while rejecting every unrelated size as ambiguous authority.
+func TestVMProvisionRootfsAdmissionAcceptsOnlyGrowReplaySizes(t *testing.T) {
+	t.Parallel()
+
+	const (
+		targetBytes = 256 << 20
+		thirdBytes  = 192 << 20
+	)
+	tests := map[string]struct {
+		actualBytes uint64
+		wantErr     bool
+	}{
+		"old size admits first attempt":     {actualBytes: testExpectedRootfsBytes},
+		"target size admits replay":         {actualBytes: targetBytes},
+		"unrelated third size fails closed": {actualBytes: thirdBytes, wantErr: true},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			request := testVMProvisionRequest()
+			request.Plan.ResizeBytes = targetBytes
+			components := []string{"srv", "cache", "vms", request.VMID, "rootfs.img"}
+			fixture := newRootfsAuthorityFixture(t, components)
+			rootfsFD := fixture.rootFD + len(components)
+			fixture.stats[rootfsFD] = []unix.Statx_t{
+				rootfsFileStat(testRootfsCallerUID, 0600, tc.actualBytes, 99),
+				rootfsFileStat(testRootfsCallerUID, 0600, tc.actualBytes, 99),
+			}
+
+			lease, err := admitVMProvisionRootfs(t.Context(), fixture.deps(), testRootfsCaller(), request)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, lease)
+				assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+				return
+			}
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+			assert.Equal(t, tc.actualBytes, lease.admittedBytes)
+		})
+	}
+}
+
 func TestRootfsCacheAdmissionEnforcesOwnershipModesAndTopology(t *testing.T) {
 	t.Parallel()
 

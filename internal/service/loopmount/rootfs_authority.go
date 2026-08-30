@@ -107,11 +107,13 @@ type rootfsSelection struct {
 	kind          rootfsSelectionKind
 	resourceID    string
 	expectedBytes uint64
+	replayBytes   uint64
 }
 
 type rootfsPolicy struct {
 	directories      []string
 	expectedBytes    uint64
+	replayBytes      uint64
 	minimumBytes     uint64
 	maximumBytes     uint64
 	access           rootfsAccess
@@ -191,6 +193,7 @@ func admitVMProvisionRootfs(
 		kind:          rootfsVMProvisionSelection,
 		resourceID:    request.VMID,
 		expectedBytes: request.ExpectedRootfsBytes,
+		replayBytes:   request.Plan.ResizeBytes,
 	})
 }
 
@@ -359,6 +362,7 @@ func admitRootfs(
 		caller:        caller,
 		cacheIdentity: cacheIdentity,
 		metadata:      metadata,
+		admittedBytes: metadata.size,
 		access:        policy.access,
 		parentFD:      parentFD,
 		stagingFD:     stagingFD,
@@ -383,9 +387,14 @@ func rootfsPolicyForSelection(selection rootfsSelection) (rootfsPolicy, error) {
 			selection.expectedBytes > maximumRootfsBytes {
 			return rootfsPolicy{}, rootfsValidationError("managed VM rootfs selection is invalid")
 		}
+		if selection.replayBytes != 0 && (selection.replayBytes < selection.expectedBytes ||
+			selection.replayBytes > maximumRootfsBytes) {
+			return rootfsPolicy{}, rootfsValidationError("managed VM rootfs replay size is invalid")
+		}
 		return rootfsPolicy{
 			directories:   []string{"vms", selection.resourceID},
 			expectedBytes: selection.expectedBytes,
+			replayBytes:   selection.replayBytes,
 			minimumBytes:  minimumRootfsBytes,
 			maximumBytes:  maximumRootfsBytes,
 			access:        rootfsReadWrite,
@@ -574,9 +583,9 @@ func inspectRootfsFile(
 	if first.Size < policy.minimumBytes || first.Size > policy.maximumBytes {
 		return rootfsStableMetadata{}, rootfsValidationError("managed rootfs image size is outside the supported range")
 	}
-	if first.Size != policy.expectedBytes {
+	if first.Size != policy.expectedBytes && (policy.replayBytes == 0 || first.Size != policy.replayBytes) {
 		return rootfsStableMetadata{}, rootfsValidationError(
-			"managed rootfs image size does not match the expected size",
+			"managed rootfs image size does not match an admitted size",
 		)
 	}
 	return firstMetadata, nil
