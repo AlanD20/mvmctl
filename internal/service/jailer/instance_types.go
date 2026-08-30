@@ -71,7 +71,6 @@ type launchIntent struct {
 	vmID          string
 	hostBootID    string
 	cacheIdentity managedCacheIdentity
-	release       releaseIdentity
 	process       instanceProcessLocator
 	relay         instanceLaunchRelay
 }
@@ -153,6 +152,7 @@ type instanceRecord struct {
 func registerLaunchingInstanceRecord(
 	caller instanceCaller,
 	intent launchIntent,
+	release releaseIdentity,
 	existing *instanceRecord,
 ) (instanceRecord, error) {
 	if err := validateInstanceCaller(caller); err != nil {
@@ -160,6 +160,9 @@ func registerLaunchingInstanceRecord(
 	}
 	if err := validateLaunchIntent(intent); err != nil {
 		return instanceRecord{}, err
+	}
+	if err := validateReleaseIdentityValue(release); err != nil {
+		return instanceRecord{}, instanceAtomicError(err.Error(), nil)
 	}
 	launchGeneration := uint64(1)
 	cleanupGeneration := uint64(0)
@@ -192,7 +195,7 @@ func registerLaunchingInstanceRecord(
 		process:       intent.process,
 		relay:         intent.relay,
 		cacheIdentity: intent.cacheIdentity,
-		release:       intent.release,
+		release:       release,
 	}
 	record := instanceRecord{
 		schemaVersion:     instanceRecordSchemaVersion,
@@ -302,7 +305,6 @@ func validateLaunchIntent(intent launchIntent) error {
 		intent.process,
 		intent.relay,
 		intent.cacheIdentity,
-		intent.release,
 	); err != nil {
 		return instanceValidationError(err.Error())
 	}
@@ -370,7 +372,6 @@ func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
 		launch.process,
 		launch.relay,
 		launch.cacheIdentity,
-		launch.release,
 	)
 }
 
@@ -379,7 +380,6 @@ func validateInstanceLaunchValues(
 	process instanceProcessLocator,
 	relay instanceLaunchRelay,
 	cacheIdentity managedCacheIdentity,
-	release releaseIdentity,
 ) error {
 	if !hostBootIDPattern.MatchString(hostBootID) {
 		return fmt.Errorf("instance authority host boot ID is invalid")
@@ -390,10 +390,13 @@ func validateInstanceLaunchValues(
 	if err := validateInstanceLaunchRelay(relay); err != nil {
 		return err
 	}
+	if relay.kind == instanceRelayPresent && relay.locator.pid == process.pid {
+		return fmt.Errorf("instance authority relay PID matches the Firecracker child PID")
+	}
 	if err := validateManagedCacheIdentityValue(cacheIdentity); err != nil {
 		return err
 	}
-	return validateReleaseIdentityValue(release)
+	return nil
 }
 
 func validateInstanceProcessLocator(locator instanceProcessLocator) error {

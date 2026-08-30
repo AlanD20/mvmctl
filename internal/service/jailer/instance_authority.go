@@ -14,10 +14,9 @@ type instanceAuthority struct {
 }
 
 type launchLease struct {
-	roots       *instanceAuthorityRoots
 	directories *instanceUIDDirectories
-	releaseLock *authorityLock
 	vmLock      *authorityLock
+	prepared    *preparedRelease
 	record      instanceRecord
 }
 
@@ -100,13 +99,18 @@ func (authority *instanceAuthority) lockReleaseSlot(
 	return lease, nil
 }
 
-func (lease *releaseSlotLease) registerLaunching(
+// registerLaunching consumes the prepared release only after the launching record has replaced its predecessor. That
+// keeps the exact manifest identity and pinned executable descriptors under the release-slot lock, and leaves no
+// caller-shaped seam that could substitute release hashes.
+func (prepared *preparedRelease) registerLaunching(
 	ctx context.Context,
 	caller instanceCaller,
 	intent launchIntent,
 ) (_ *launchLease, returnErr error) {
-	if lease == nil || lease.roots == nil || !lease.releaseLock.isActive() {
-		return nil, instanceStateError(intent.vmID, "release slot lease is not active")
+	if prepared == nil || prepared.slotLease == nil || prepared.slotLease.roots == nil ||
+		!prepared.slotLease.releaseLock.isActive() || prepared.store == nil || prepared.directory == nil ||
+		prepared.admission == nil || prepared.admission.executables == nil {
+		return nil, instanceStateError(intent.vmID, "prepared release is not active")
 	}
 	if err := validateInstanceCaller(caller); err != nil {
 		return nil, err
@@ -114,8 +118,12 @@ func (lease *releaseSlotLease) registerLaunching(
 	if err := validateLaunchIntent(intent); err != nil {
 		return nil, err
 	}
-	if releaseSlotForIdentity(intent.release) != lease.slot {
-		return nil, instanceValidationError("launch release identity does not match held release slot")
+	release := prepared.admission.identity
+	if err := validateReleaseIdentityValue(release); err != nil {
+		return nil, instanceAtomicError("prepared release identity is invalid", err)
+	}
+	if releaseSlotForIdentity(release) != prepared.slotLease.slot {
+		return nil, instanceAtomicError("prepared release identity does not match held release slot", nil)
 	}
 	var indexLock, vmLock *authorityLock
 	var directories *instanceUIDDirectories
@@ -134,16 +142,16 @@ func (lease *releaseSlotLease) registerLaunching(
 		)
 	}()
 
-	indexLock, err := lease.roots.acquireIndexLock(ctx)
+	indexLock, err := prepared.slotLease.roots.acquireIndexLock(ctx)
 	if err != nil {
 		return nil, err
 	}
-	location, err := lease.roots.findInstance(ctx, intent.vmID)
+	location, err := prepared.slotLease.roots.findInstance(ctx, intent.vmID)
 	if err != nil {
 		return nil, err
 	}
 	if location != nil && location.uid != caller.uid {
-		if closeErr := lease.roots.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
+		if closeErr := prepared.slotLease.roots.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
 			return nil, appendInstanceOperationError(
 				unauthorizedInstanceError(intent.vmID),
 				"close foreign instance authority directory",
@@ -154,12 +162,12 @@ func (lease *releaseSlotLease) registerLaunching(
 	}
 	var existing *instanceRecord
 	if location == nil {
-		directories, err = lease.roots.openUIDDirectories(ctx, caller.uid)
+		directories, err = prepared.slotLease.roots.openUIDDirectories(ctx, caller.uid)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		directories, err = lease.roots.openAuthorityForLocation(ctx, location)
+		directories, err = prepared.slotLease.roots.openAuthorityForLocation(ctx, location)
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +186,7 @@ func (lease *releaseSlotLease) registerLaunching(
 		}
 		existing = &record
 	}
-	record, err := registerLaunchingInstanceRecord(caller, intent, existing)
+	record, err := registerLaunchingInstanceRecord(caller, intent, release, existing)
 	if err != nil {
 		return nil, err
 	}
@@ -187,14 +195,20 @@ func (lease *releaseSlotLease) registerLaunching(
 		return nil, writeErr
 	}
 	launch := &launchLease{
-		roots:       lease.roots,
 		directories: directories,
-		releaseLock: lease.releaseLock,
 		vmLock:      vmLock,
-		record:      record,
+		prepared: &preparedRelease{
+			slotLease: prepared.slotLease,
+			store:     prepared.store,
+			directory: prepared.directory,
+			admission: prepared.admission,
+		},
+		record: record,
 	}
-	lease.roots = nil
-	lease.releaseLock = nil
+	prepared.slotLease = nil
+	prepared.store = nil
+	prepared.directory = nil
+	prepared.admission = nil
 	directories = nil
 	vmLock = nil
 	indexReleaseErr := indexLock.Release(context.WithoutCancel(ctx))
@@ -452,14 +466,20 @@ func (lease *launchLease) Release(ctx context.Context) error {
 		nil,
 		lease.vmLock,
 		nil,
-		lease.releaseLock,
+		nil,
 		lease.directories,
-		lease.roots,
+		nil,
 	)
+	if lease.prepared != nil {
+		err = appendInstanceOperationError(
+			err,
+			"release launching prepared release authority",
+			lease.prepared.Release(context.WithoutCancel(ctx)),
+		)
+	}
 	lease.vmLock = nil
-	lease.releaseLock = nil
 	lease.directories = nil
-	lease.roots = nil
+	lease.prepared = nil
 	return err
 }
 

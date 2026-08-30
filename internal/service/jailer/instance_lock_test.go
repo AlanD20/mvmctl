@@ -10,7 +10,7 @@ import (
 func TestReleaseLockNameUsesCanonicalStoreSlot(t *testing.T) {
 	t.Parallel()
 
-	release := testLaunchIntent(false).release
+	release := testReleaseIdentity()
 	sameSlot := testAlternateReleaseIdentity()
 	differentVersion := release
 	differentVersion.version = "1.17.0"
@@ -35,7 +35,7 @@ func TestReleaseLockNameUsesCanonicalStoreSlot(t *testing.T) {
 }
 
 func testAlternateReleaseIdentity() releaseIdentity {
-	release := testLaunchIntent(false).release
+	release := testReleaseIdentity()
 	release.firecrackerSHA256 = strings.Repeat("a", 64)
 	release.jailerSHA256 = strings.Repeat("b", 64)
 	return release

@@ -195,7 +195,7 @@ func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {
 	caller := testInstanceCaller()
 	intent := testLaunchIntent(false)
 
-	launching, err := registerLaunchingInstanceRecord(caller, intent, nil)
+	launching, err := registerLaunchingInstanceRecord(caller, intent, testReleaseIdentity(), nil)
 	require.NoError(t, err)
 	assert.Equal(t, instanceLifecycleLaunching, launching.lifecycle)
 	assert.Equal(t, uint64(1), launching.launchGeneration)
@@ -203,7 +203,7 @@ func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {
 	require.NotNil(t, launching.launch)
 	assert.Nil(t, launching.active)
 
-	_, err = registerLaunchingInstanceRecord(caller, intent, &launching)
+	_, err = registerLaunchingInstanceRecord(caller, intent, testReleaseIdentity(), &launching)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAlreadyExists, errs.AsDomainError(err).Code)
 
@@ -233,7 +233,7 @@ func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {
 	assert.Nil(t, cleaned.launch)
 	assert.Nil(t, cleaned.active)
 
-	relaunched, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(true), &cleaned)
+	relaunched, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(true), testReleaseIdentity(), &cleaned)
 	require.NoError(t, err)
 	assert.Equal(t, instanceLifecycleLaunching, relaunched.lifecycle)
 	assert.Equal(t, uint64(2), relaunched.launchGeneration)
@@ -246,7 +246,7 @@ func TestInstanceLifecycleCanAbortBeforeActivation(t *testing.T) {
 	t.Parallel()
 
 	caller := testInstanceCaller()
-	launching, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(true), nil)
+	launching, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(true), testReleaseIdentity(), nil)
 	require.NoError(t, err)
 
 	cleaning, err := beginInstanceCleanup(caller, launching)
@@ -262,7 +262,7 @@ func TestInstanceLifecycleRejectsForeignCaller(t *testing.T) {
 	record := testLaunchingInstanceRecord()
 	foreign := instanceCaller{uid: testAuthorityUID + 1, gid: testAuthorityGID}
 
-	_, err := registerLaunchingInstanceRecord(foreign, testLaunchIntent(false), &record)
+	_, err := registerLaunchingInstanceRecord(foreign, testLaunchIntent(false), testReleaseIdentity(), &record)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeUnauthorized, errs.AsDomainError(err).Code)
 	assert.NotContains(t, err.Error(), "1000")
@@ -310,7 +310,20 @@ func TestInstanceActivationRejectsIncompleteOrMismatchedFinalIdentity(t *testing
 	}
 }
 
-func TestLaunchIntentRejectsInvalidReleaseAsValidation(t *testing.T) {
+func TestLaunchIntentRejectsRelaySharingFirecrackerPID(t *testing.T) {
+	t.Parallel()
+
+	intent := testLaunchIntent(true)
+	intent.relay.locator.pid = intent.process.pid
+	_, err := registerLaunchingInstanceRecord(testInstanceCaller(), intent, testReleaseIdentity(), nil)
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeValidationFailed, domainErr.Code)
+	assert.Equal(t, errs.ClassValidation, domainErr.Class)
+}
+
+func TestLaunchingTransitionRejectsInvalidPreparedReleaseAsAtomicFailure(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
@@ -325,11 +338,11 @@ func TestLaunchIntentRejectsInvalidReleaseAsValidation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			intent := testLaunchIntent(false)
-			intent.release.version = version
-			_, err := registerLaunchingInstanceRecord(testInstanceCaller(), intent, nil)
+			release := testReleaseIdentity()
+			release.version = version
+			_, err := registerLaunchingInstanceRecord(testInstanceCaller(), testLaunchIntent(false), release, nil)
 			require.Error(t, err)
-			assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 		})
 	}
 }
@@ -341,7 +354,7 @@ func TestInstanceTransitionRejectsCorruptExistingRecord(t *testing.T) {
 	corrupt := testLaunchingInstanceRecord()
 	corrupt.launchGeneration = 0
 
-	_, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(false), &corrupt)
+	_, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(false), testReleaseIdentity(), &corrupt)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 
@@ -371,7 +384,9 @@ func TestInstanceRelaunchRejectsExhaustedGeneration(t *testing.T) {
 		cleanupGeneration: math.MaxUint64,
 	}
 
-	_, err := registerLaunchingInstanceRecord(testInstanceCaller(), testLaunchIntent(false), &cleaned)
+	_, err := registerLaunchingInstanceRecord(
+		testInstanceCaller(), testLaunchIntent(false), testReleaseIdentity(), &cleaned,
+	)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(err).Code)
 }
@@ -392,14 +407,17 @@ func testLaunchIntent(relayPresent bool) launchIntent {
 		vmID:          testVMID,
 		hostBootID:    "123e4567-e89b-42d3-a456-426614174000",
 		cacheIdentity: testManagedCacheIdentity(),
-		release: releaseIdentity{
-			version:           "1.16.0",
-			architecture:      "x86_64",
-			firecrackerSHA256: testReleaseHash,
-			jailerSHA256:      testJailerHash,
-		},
-		process: instanceProcessLocator{pid: 4242, startTimeTicks: 987654},
-		relay:   relay,
+		process:       instanceProcessLocator{pid: 4242, startTimeTicks: 987654},
+		relay:         relay,
+	}
+}
+
+func testReleaseIdentity() releaseIdentity {
+	return releaseIdentity{
+		version:           "1.16.0",
+		architecture:      "x86_64",
+		firecrackerSHA256: testReleaseHash,
+		jailerSHA256:      testJailerHash,
 	}
 }
 
@@ -448,7 +466,9 @@ func testLaunchingInstanceRecord() instanceRecord {
 }
 
 func testLaunchingInstanceRecordWithRelay(relayPresent bool) instanceRecord {
-	record, err := registerLaunchingInstanceRecord(testInstanceCaller(), testLaunchIntent(relayPresent), nil)
+	record, err := registerLaunchingInstanceRecord(
+		testInstanceCaller(), testLaunchIntent(relayPresent), testReleaseIdentity(), nil,
+	)
 	if err != nil {
 		panic(err)
 	}
