@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-08-30 (two-phase launch and firewall-before-handoff ordering)
+**Last Updated:** 2026-08-30 (inert firewall generation authority foundation)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -161,18 +161,26 @@ version bump.
 On the isolated representative 1,000-VM compiler benchmark, the observed range was roughly 23–28 ms with about 10 MB
 and 179,000 allocations. L1 retains ratio-based growth evidence and enforces a 250,000-allocation regression ceiling.
 
-This is an inert compiler foundation, not the root-owned adapter described above. It has no `nftables.Conn`/`Flush`,
-kernel inspection or adoption, unknown raw-expression detection, root firewall record/lock, actual empty-generation
+This remains an inert compiler foundation. The separate generation authority described below is implemented, but there
+is no `nftables.Conn`/`Flush`, kernel inspection or adoption, unknown raw-expression detection, actual empty-generation
 deletion/application, namespace-scoped execution, privileged action, public policy cutover, legacy `nft` CLI removal,
-or L2 qualification. No kernel-application, atomicity, or release-readiness claim follows from the compiler tests.
+or L2 qualification. No kernel-application, atomicity, or release-readiness claim follows from these foundations.
 
 #### Firewall generation authority and inspection gates
 
-The final adapter serializes every inspection, application, recovery, and empty-generation removal with the
-never-unlinked root-owned `/run/mvmctl/authority/firewall.lock`. Its strict persistent authority is
+The implemented private authority foundation provides the never-unlinked root-owned
+`/run/mvmctl/authority/firewall.lock` and strict persistent record at
 `/var/lib/mvmctl/firewall/generation.json`. The enclosing root-owned directories are mode `0700`; the record and lock
 are mode `0600`. The record binds schema and lifecycle, host boot ID, host network-namespace device/inode, an empty flag,
 the last committed generation, and the exact observed `before` and compiled `target` identities while applying.
+
+Its bounded exact codec rejects missing, unknown, duplicate, case-colliding, trailing, and invalid committed/applying
+state. The descriptor-relative store creates the managed tree and initial record exclusively, never repairs or
+overwrites existing state, and preserves post-rename creation/durability evidence. A private acquisition seam requires
+the earlier network authority before opening the global firewall capability, then admits only a same-boot,
+same-host-network-namespace record and retains store, lock, and authority through pointer-shared cached close-once
+cleanup. It deliberately rejects a missing record because qualified kernel inspection must establish initial truth.
+No production consumer invokes this seam.
 
 The implemented generation identity is the compiler-derived canonical digest described above; callers provide no
 identifier. The digest alone is neither kernel ownership nor deletion authority. An applied empty generation must mean
@@ -347,9 +355,9 @@ identity, strict digest-bound userdata, deterministic ordering, explicit empty o
 closed eight-type expression set, typed-nil and unknown-expression rejection, and bounded allocation growth for a
 representative 1,000-VM generation.
 
-Before production integration, the remaining work must implement and fault-test the root authority record and global
-firewall lock, explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary, detect unknown raw expressions during
-inspection, and prove the emitted expressions plus namespace binding, cancellation/close behavior, delete/create and
+Before production integration, the remaining work must explicitly accept the root/`CAP_NET_ADMIN` threat-model
+boundary, complete raw inspection that detects unknown expressions rather than silently dropping them, and prove the
+emitted expressions plus namespace binding, cancellation/close behavior, delete/create and
 invalid-batch atomicity, actual empty-generation deletion/application, and representative 1,000-VM runtime against
 supported kernels. `nftables.Conn`, `Flush`, privileged application, public policy cutover, legacy CLI removal, and L2
 qualification all remain pending.

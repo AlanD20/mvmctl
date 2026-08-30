@@ -38,11 +38,11 @@ continue without silently deleting it.
   `/var/lib/mvmctl/instances` remains unchanged. Existing managed objects are verified rather than repaired, with L1
   mode, symlink, concurrent-creation, creation-fault, scan, and lock evidence. The cycle-free
   `internal/lib/authorityfs` leaf module now owns the initializer and closed Jailer/UID/lock capabilities; copied values
-  share lifecycle state, and checked idempotent release caches its first result without retry. Its separate LoopMount
-  family now pins authenticated UID authority and canonical VM/image locks beneath the same tree. A closed Network
-  family now supplies global-index and per-network locks to an inert persistent registration authority. No
-  `/run/mvmctl/runtime` tree, firewall consumer, live network topology consumer, or public LoopMount activation exists
-  yet.
+  share lifecycle state, and checked idempotent release caches its first result without retry. Its separate LoopMount,
+  Network, and Firewall families provide canonical resource locks to their owning services. The firewall family is
+  consumed only by an inert generation authority, and the LoopMount provision/inspect actions are registered only in
+  the private receiver; no `/run/mvmctl/runtime` tree, live network topology, public LoopMount backend cutover, or
+  firewall kernel effect exists yet.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional
@@ -65,7 +65,7 @@ continue without silently deleting it.
   VM resize, bounded typed values, and strict process-start/response-EOF authority. A private rootfs authority pins the
   caller-owned cache and fixed VM/image rootfs through retained descriptors, enforces local-filesystem, identity, mode,
   size, and no-cross-mount policies, and has deterministic before/after-open replacement-race evidence for every
-  caller-owned component. An inactive private server now splits effects between `rootfsEffects`, containing exactly
+  caller-owned component. A private server now splits effects between `rootfsEffects`, containing exactly
   `ProvisionVM` and `InspectImage`, and private `imageOptimizeEffects`, containing only `OptimizeImage`. It validates
   dependencies per action and adds a per-resource lock seam, ordered cancellation-independent cleanup, closed
   mutation/durability evidence, and old-or-target VM grow replay admission with actual admitted-size handoff. The
@@ -79,10 +79,21 @@ continue without silently deleting it.
   paths or descriptors. Stable bounded sysfs partition admission and fixed `/usr/bin/blkid` probing bind the selected
   source to exact pre/post-probe identity. An inert read-only inspection adapter uses a private mount namespace, fixed
   `ro,nosuid,nodev,noexec` mount, exact source/mount/image revalidation, bounded OS-release reads, stability proof, and
-  reverse cleanup with preserved primary errors. A private `ProvisionVM` adapter now consumes the same admitted
-  capabilities for descriptor-bound fixed guest writes and ext4/Btrfs grow convergence, but its factory is likewise
-  unreferenced. Production `Server` construction, receiver handling, dispatch, live-kernel qualification,
-  public/backend cutover, and legacy-route removal remain pending.
+  reverse cleanup with preserved primary errors. A private `ProvisionVM` adapter consumes the same admitted
+  capabilities for descriptor-bound fixed guest writes and ext4/Btrfs grow convergence. Both adapter factories are
+  used by the production provision/inspect server. Their exact receiver handlers and early-dispatch entries are
+  registered with the embedded-agent accessor bound at the composition root. Live-kernel qualification,
+  public/backend cutover, legacy-route removal, and every optimize receiver path remain pending.
+- Private strict schema-3 Jailer record/codec and pure lifecycle transitions. Consuming
+  `preparedRelease.registerLaunching` derives the release identity internally and transfers the pinned store, slot lock,
+  executable admission, and VM lock into a durable launch lease after record replacement. The prepared value and launch
+  lease use pointer-shared close-once cleanup state. Production child/pidfd launch, activation, abort/cleanup,
+  network/firewall lease transfer, observation, reconciliation, API wiring, and system tests remain pending.
+- Private firewall generation authority with a strict committed/applying record and codec, descriptor-relative
+  exclusive store at `/var/lib/mvmctl/firewall/generation.json`, and never-unlinked global
+  `/run/mvmctl/authority/firewall.lock`. Acquisition requires earlier network authority and admits only the current boot
+  and host network namespace. It has no initial kernel inspection, raw unknown-expression decoder, record replacement,
+  `Conn.Flush`, recovery, privileged action, public consumer, or system tests.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -112,9 +123,10 @@ Durable user state does not move wholesale to `/run` or `/var/run`. XDG state se
 
 Implementation status: `internal/lib/authorityfs` now owns the descriptor-relative initializer for exact
 `/run/mvmctl` and `/run/mvmctl/authority` modes. Jailer uses its private adapters over the module's closed index,
-release, UID, and VM-lock capabilities. Separate LoopMount and Network families provide per-UID canonical VM/image
-locking and global-index/per-network locking to their inactive service seams. The module does not create the
-runtime-output tree; network topology/firewall consumers and every public activation remain pending.
+release, UID, and VM-lock capabilities. Separate LoopMount, Network, and Firewall families provide canonical locking
+to their owning service seams. LoopMount provision/inspect and firewall generation authority now consume their exact
+families, but the module does not create the runtime-output tree; public LoopMount cutover, network topology, and
+firewall kernel application remain pending.
 
 ### Module and layer rules
 
@@ -265,9 +277,11 @@ exact derived cgroup and the separate closed topology capability's network names
 process identity, and may be relaunched only by that UID. Mount identity is deliberately not retained across cleanup
 because it is valid for only one mount lifetime.
 
-Implementation status: main currently contains the private schema-1 `registered -> cleaning -> cleaned` substrate and
-its locks. It is not consumed by production VM lifecycle operations. The incompatible schema-3 correction above,
-including `launching -> active`, is pending and replaces rather than migrates the old record during the clean install.
+Implementation status: main now contains the private strict schema-3 record/codec and pure lifecycle transitions. A
+prepared release can consume its manifest-derived identity and pinned store/slot/executable authority into a durable
+`launching` lease that retains the VM lock; the prepared value and launch lease are pointer-shared and close once. No
+production VM lifecycle consumes that record yet. Child/pidfd launch, `activateVerifiedProcess`, typed abort/cleanup,
+observation, and reconciliation remain pending.
 
 The global lock order is:
 
@@ -539,7 +553,7 @@ func (p *preparedRelease) Release(ctx context.Context) error
 Preparation and checked release are implemented first. The later launch slice adds only the typed ownership transfer
 that it actually needs; it does not expose raw descriptors, paths, caller-supplied hashes, or a generic operation hook.
 
-The trusted-release work proceeds in this order. Steps 1 through 5 are complete. Steps 6 through 9 remain an acceptance
+The trusted-release work proceeds in this order. Steps 1 through 6 are complete. Steps 7 through 9 remain an acceptance
 plan and are not implemented:
 
 1. **Freeze the fetch and removal contracts.** ADR-0016 and the task ledger must record the exact trust inputs, commit
@@ -677,11 +691,13 @@ validation, encoding, or finalization failures. Module or expression-set changes
 digest-version bump. The isolated representative 1,000-VM benchmark was roughly 23–28 ms, 10 MB, and 179,000
 allocations, with a 250,000-allocation L1 ceiling.
 
-This foundation creates no `nftables.Conn` and calls no `Flush`. The root firewall record/lock, inspection/adoption,
-unknown raw-expression detection, actual empty-generation deletion/application, namespace execution, privileged
-registration/application, public policy cutover, legacy `nft` CLI removal, and L2 qualification remain pending. The
-final adapter must submit one complete generation through one `Conn.Flush` call; until then there is no kernel effect or
-atomicity evidence. Library and transitive netlink types must stay private.
+This compiler creates no `nftables.Conn` and calls no `Flush`. A separate implemented private foundation provides the
+strict committed/applying generation record and codec, its exclusive descriptor-relative store, the global firewall
+lock, same-boot/host-netns admission after earlier network authority, and cached close-once cleanup. Initial kernel
+inspection, raw unknown-expression detection, application-time record replacement, actual empty-generation
+deletion/application, namespace execution, privileged registration/application, public policy cutover, legacy `nft`
+CLI removal, and L2 qualification remain pending. The final adapter must submit one complete generation through one
+`Conn.Flush` call; until then there is no kernel effect or atomicity evidence.
 
 Before any fixed-name deletion, the final adapter must hold the never-unlinked host-global
 `/run/mvmctl/authority/firewall.lock` and admit the strict root-owned
@@ -754,25 +770,24 @@ admitted rootfs descriptor/access and never issues `LOOP_CLR_FD` after configure
 no path or descriptor accessor and releases through checked, idempotent, cancellation-independent `LOOP_CLR_FD` plus
 close, with `AUTOCLEAR` as crash safety. A configured lease remains available for cleanup if control close fails.
 
-The implemented inert `InspectImage` adapter locks its OS thread, creates a private propagation mount namespace, and
+The implemented `InspectImage` adapter locks its OS thread, creates a private propagation mount namespace, and
 mounts only at fixed `/run/mvmctl/rootfs` with `ro,nosuid,nodev,noexec`. It revalidates the exact source, mountpoint,
 filesystem, and backing image; reads only bounded fixed `etc/os-release` or `usr/lib/os-release` leaves; proves the
 admitted/statx snapshot stable; and unwinds root, mount, source, partitions, loop, mountpoint, and backing authority in
 reverse.
 It returns `unchanged` only after complete cleanup/stability and otherwise preserves the primary `DomainError` with
-bounded cleanup evidence and `outcome_unknown`. Its factory remains unreferenced; no production `Server`, receiver
-handler, dispatcher entry, live-kernel qualification, or public cutover activates it.
+bounded cleanup evidence and `outcome_unknown`. The production provision/inspect server constructs this adapter for its
+exact private receiver action; live-kernel qualification and public cutover remain pending.
 
-The private inactive `Server` transaction foundation splits its effects between `rootfsEffects`, which contains exactly
+The private `Server` transaction foundation splits its effects between `rootfsEffects`, which contains exactly
 `ProvisionVM` and `InspectImage`, and private `imageOptimizeEffects`, which contains only `OptimizeImage`. Provisioning
 and inspection validate the rootfs effect dependency; optimization validates its separate effect dependency; all three
 validate the shared rootfs authority and narrow `rootfsResourceLocks.Acquire` lease seam. The coordinator validates the
 request and caller before authority acquisition, retains a partially acquired lock lease for checked release, admits
 the fixed rootfs, invokes one effect, and validates the request-bound result. The private service adapter now provides
-the concrete resource-lock implementation over `authorityfs`, but no production constructor injects it. The optimize
-seam has no production implementation or construction, receiver handler, or dispatcher registration. Private
-descriptor-consuming `ProvisionVM` and `InspectImage` adapters exist, but both factories are deliberately unreferenced
-and the entire `Server` remains inert.
+the concrete resource-lock implementation over `authorityfs`. The production provision/inspect server injects it and
+registers only the exact VM-provision and image-inspect receiver actions. The optimize seam has no production
+implementation or construction, receiver handler, or dispatcher registration.
 
 Every action requires its own effect cleanup capability and unwinds effect cleanup, rootfs authority, then resource
 lock with `context.WithoutCancel`. Closed action-specific effect states derive mandatory `rootfs_modified`,
@@ -785,8 +800,8 @@ rootfs lease. The implemented adapter distinguishes first execution from a conve
 path. `OptimizeImage` remains blocked from registration until durable shrink and replacement replay authority is
 implemented.
 
-The implemented private seam split isolates provisioning and inspection from deferred optimization without activating
-production behavior. Exclusive locks use the shared privileged descriptor-safe authority layout at
+The implemented private seam split isolates activated private provisioning/inspection actions from deferred
+optimization. Exclusive locks use the shared privileged descriptor-safe authority layout at
 `/run/mvmctl/authority/<uid>/loopmount/{vm-<32hex>,image-<64hex>}.lock`. They are root-owned mode `0600`, keyed only by
 authenticated UID, family, and canonical ID, and never unlinked during the boot. Inspection and future optimization
 share the image lock. `internal/lib/authorityfs` now owns the top-level tree and separate closed Jailer and LoopMount
@@ -813,13 +828,12 @@ execution, partition-table growth, shrink, conversion, and replacement remain un
 silently reduce behavior: an explicit scope decision must accept each reduction or keep the old public workflow until
 a safe typed replacement exists.
 
-These remain inactive foundations. The canonical resource locks, private service adapter, read-only inspection effect,
-and fixed `ProvisionVM` effect exist, but no production `Server` constructor activates them. There is no receiver
-handler, dispatcher entry, live-kernel qualification, backend/public cutover, or legacy-route removal, and no newly
-reachable privileged mount effect. The current path still uses
+The canonical resource locks, private service adapter, read-only inspection effect, and fixed `ProvisionVM` effect are
+now composed behind exact private receiver handlers and dispatcher entries. There is still no live-kernel
+qualification, backend/public cutover, optimize action, or legacy-route removal. The current public path still uses
 `mvm run provision`, raw wire operations and sudo, including arbitrary unmount/cleanup. Task 13 proceeds in the slices
-recorded in `tasks/todo.md`; no LoopMount action can enter the final marker-only sudo policy before cutover and legacy
-removal.
+recorded in `tasks/todo.md`; handler registration alone does not authorize the final marker-only sudo policy before
+cutover and legacy removal.
 
 ### Daemonless status reconciliation and relaunch parity
 

@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-08-30 (recoverable schema-3 Jailer and console-relay authority)
+**Last Updated:** 2026-08-30 (schema-3 launch authority and LoopMount receiver activation)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md)
@@ -384,15 +384,15 @@ through checked, cancellation-independent cleanup while preserving the primary `
 real-filesystem tests exchange every caller-owned cache/resource ancestor and leaf immediately before and after its
 open; a request can only fail closed or retain the originally admitted rootfs, never the attacker object.
 
-The private inactive `Server` transaction foundation currently depends on exactly three narrow seams. `rootfsEffects`
+The private `Server` transaction foundation depends on exactly three narrow seams. `rootfsEffects`
 contains exactly the named `ProvisionVM` and `InspectImage` methods, the private `imageOptimizeEffects` contains only
 `OptimizeImage`, and `rootfsResourceLocks` contains only
 `Acquire(context.Context, Caller, rootfsSelection) (rootfsResourceLockLease, error)`. A private service adapter now
 implements the lock seam through the separate `authorityfs` LoopMount UID and canonical VM/image lock capabilities.
 Provisioning and inspection validate the rootfs effect seam, while optimization validates only its separate effect
-seam; every action also validates the shared rootfs authority and resource-lock dependencies. Private concrete
-`ProvisionVM` and `InspectImage` adapters now exist, but neither factory is referenced by a production `Server`
-constructor, so the entire coordinator remains inert.
+seam; every action also validates the shared rootfs authority and resource-lock dependencies. The production
+composition root constructs only the concrete `ProvisionVM` and `InspectImage` adapters, binds the exact embedded-agent
+accessor, and registers their exact handlers in the early privileged switch. Optimization remains unconstructed.
 
 Each operation validates its closed request and authenticated caller before acquiring authority. It then acquires the
 resource-lock lease, admits the fixed rootfs, invokes the named effect, validates the request-bound result, and unwinds
@@ -415,12 +415,10 @@ records the actually observed size on the private rootfs lease delivered to `roo
 adapter uses it to distinguish a first grow from an already-converged replay without reopening a path or trusting
 caller-reported post-effect state.
 
-The accepted effect seam is split without activating production behavior. The implemented descriptor-consuming
-adapters satisfy only `rootfsEffects.ProvisionVM` and `rootfsEffects.InspectImage`; `imageOptimizeEffects` remains a
-separate private seam containing only `OptimizeImage`. The optimize seam has no production implementation or
-construction, receiver handler, or dispatcher registration and cannot gain them until durable shrink and image
-replacement replay authority exists. Keeping the named optimize client and protocol types does not activate that
-capability, and the complete `Server` remains inert.
+The accepted effect seam keeps `rootfsEffects.ProvisionVM` and `rootfsEffects.InspectImage` separate from the private
+`imageOptimizeEffects` seam containing only `OptimizeImage`. Production constructs and registers only the provision
+and inspect handlers. The optimize seam has no production implementation, construction, receiver handler, or
+dispatcher registration and cannot gain them until durable shrink and image-replacement replay authority exists.
 
 LoopMount operations serialize through exclusive, root-owned advisory locks at exactly:
 
@@ -475,7 +473,7 @@ environment. No shell, `chroot`, guest executable, arbitrary operation, `losetup
 or `/tmp` workspace is permitted. A tool that may have started a mutation but lacks authoritative completion makes the
 effect outcome unknown.
 
-The private inert mount-source selection policy now consumes only pathless receiver-derived block identities and
+The private mount-source selection policy consumes only pathless receiver-derived block identities and
 filesystem probes. It accepts at most 16 partition probes. A raw source is accepted only when there are no partitions
 and its filesystem exactly matches the closed request. Otherwise exactly one partition must match. Invalid identities
 or filesystem values, reused or duplicate block identities, duplicate or out-of-range partition numbers,
@@ -488,7 +486,7 @@ any earlier caller deadline winning, 32-byte stdout and 512-byte stderr ceilings
 pre/post block-identity revalidation. The selected source is pointer-bound to that exact probe and exposes no path or
 descriptor accessor.
 
-The private inert loop-device kernel contract admits only the fixed `/dev/loop-control` path with exact character-device
+The private loop-device kernel contract admits only the fixed `/dev/loop-control` path with exact character-device
 major `10` and minor `237`. It derives `/dev/loop<N>` only when `N` is a 20-bit index from `0` through `2^20-1`, then
 requires the opened candidate to be a block device with major `7` and minor exactly `N`. Its `unix.LoopConfig` contains
 the exact admitted rootfs descriptor and only `LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, with `LO_FLAGS_READ_ONLY` added
@@ -507,15 +505,15 @@ uses `LOOP_CLR_FD` and closes the loop descriptor under `context.WithoutCancel`;
 crash safety. If configuration succeeds but closing the loop-control descriptor fails, attachment returns both the
 configured lease and the close error so the caller retains cleanup authority.
 
-The implemented inert read-only image-inspection adapter locks its OS thread, unshares a private mount namespace,
+The implemented read-only image-inspection adapter locks its OS thread, unshares a private mount namespace,
 makes propagation private, and mounts only the exact selected source at fixed `/run/mvmctl/rootfs` with
 `ro,nosuid,nodev,noexec`. It revalidates source, mountpoint, filesystem, mount table, and backing-image identity; reads
 only bounded no-symlink/no-cross-mount `etc/os-release` or `usr/lib/os-release`; and unwinds root, mount, source,
 partitions, loop, mountpoint, and image authority in reverse. `unchanged` requires the final admitted/statx snapshot to
 remain stable and cleanup to succeed; uncertainty is `outcome_unknown`, with the primary `DomainError` preserved and
-cleanup evidence bounded. The factory remains unreferenced because the short-lived handler must exit rather than
-return its unshared OS thread to the Go runtime. Production `Server` construction, receiver handlers, dispatcher
-registration, live-kernel qualification, and activation remain future work. The implemented grow effect supports a raw
+cleanup evidence bounded. The short-lived privileged receiver exits rather than returning its unshared OS thread to the
+Go runtime. Live-kernel qualification and public/backend activation remain future work. The implemented grow effect
+supports a raw
 filesystem or a partition whose already-admitted capacity reaches the target; rewriting MBR or GPT is outside this
 capability.
 
@@ -548,15 +546,15 @@ generation, arbitrary file/copy/command operations, custom shells, partition-tab
 replacement. These are public-cutover blockers, not permission to silently drop behavior. An explicit scope decision
 must either accept each user-visible reduction or defer cutover until a safe typed replacement exists.
 
-This section records implemented inactive authority, selection-policy, inspection, and provisioning foundations, not
-current runtime behavior. The shared cycle-free authority module now has separate Jailer and LoopMount
+This section records the implemented authority, selection-policy, inspection, provisioning, and private receiver path,
+not public LoopMount backend behavior. The shared cycle-free authority module has separate Jailer and LoopMount
 capability families, the private LoopMount service adapter implements the coordinator's canonical resource-lock seam,
 the deterministic mount-source policy remains pathless, and the pure loop contract, attach/release capability, bounded
-partition/probe admission, and read-only inspection and `ProvisionVM` adapters are implemented but unused. No production
-constructor activates that `Server`; no LoopMount receiver handler or dispatcher action is registered; and the
-backend/public path still uses `mvm run provision`, raw wire operations and sudo, arbitrary
-unmount, and PID-killing cleanup. No live-kernel qualification or public privileged mount effect follows from the inert
-adapter. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
+partition/probe admission, and read-only inspection and `ProvisionVM` adapters are implemented. Production constructs
+the provision/inspect server and registers only `loopmount-provision-vm` and `loopmount-inspect-image`; the public
+backend path still uses `mvm run provision`, raw wire operations and sudo, arbitrary unmount, and PID-killing cleanup.
+No live-kernel qualification or public backend cutover follows from handler registration. The legacy `Provisioner`,
+`Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
 
 ### Release trust
 
@@ -1136,7 +1134,8 @@ creation, creation faults and descriptor cleanup, scans, lock placement, copied-
 errors, cancellation, and concurrent acquire/release. Capability values share pointer-held state, making checked
 release exactly once and idempotent even after a value copy. This implementation creates no `/run/mvmctl/runtime`
 tree and activates no public action. The separate implemented LoopMount UID/VM/image lock family and its private service
-adapter remain inert as described above. A separate closed Network family now backs the private managed-network
+adapter are used by the exact provision/inspect receiver actions described above. A separate closed Network family now
+backs the private managed-network
 registration authority's global-index and per-network locks. Its strict schema-1 record/codec/store persists only owner,
 network, boot, and derived bridge identity beneath `/var/lib/mvmctl/networks/<uid>` with atomic no-replace publication,
 post-rename authority evidence, and exact reverse cached close-once cleanup. That entry point is private and unreferenced:
@@ -1281,8 +1280,9 @@ The activation order is fixed:
    non-mounted stale fixed tree descriptor-relatively and bottom-up. Any unexpected entry, mount at or below the tree,
    replacement race, or incomplete admission returns `unavailable`; Jailer is not executed. Recheck the pinned parent
    and destination absence immediately before handoff so every accepted destination is freshly created by this Jailer.
-5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. Retain the launch
-   lease's VM lock and acquire and retain only the later network, then firewall leases; create namespace/local and host
+5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. With the launch
+   lease's VM lock already retained, acquire and retain only the later network, then firewall leases; create
+   namespace/local and host
    links down; apply the complete nftables
    generation atomically and verify it through a fresh inspection. Only after firewall success may the exact links be
    raised and reverified. A failure keeps links down and both children blocked while typed abort unwinds through the
@@ -1340,11 +1340,13 @@ lease first. Those post-rename failures return that lease together with a `Domai
 bounded cleanup diagnostics, and never acts through the stale source lease. No process, VM, release, network, or
 firewall lock is dropped between record replacement and cleaning.
 
-Implementation note (2026-08-30): main currently implements the private schema-1 `registered -> cleaning -> cleaned`
-authority substrate and its locks, but no production lifecycle consumes it. The schema-2 complete-identity experiment
-in isolated commits was not integrated because it fabricated pre-Jailer final identity and compared the trusted-store
-inode with Jailer's copy. Schema 3, final-copy sealing, `launching -> active`, complete observation, and the production
-launch/cleanup/reconciliation consumers remain pending release work.
+Implementation note (2026-08-30): main implements the private strict schema-3 record/codec and pure lifecycle
+transitions. `preparedRelease.registerLaunching` derives and validates the manifest release identity, writes durable
+`launching`, and transfers the pinned store, release-slot lock, executable admission, and VM lock into a launch lease.
+The prepared value and launch lease share mutex-protected close-once state and cache their first cleanup result. The
+schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and compared
+the trusted-store inode with Jailer's copy. Production child/pidfd launch, `activateVerifiedProcess`, final-copy
+sealing, network/firewall acquisition, typed abort/cleanup, observation, and reconciliation remain pending.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
 that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain

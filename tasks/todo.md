@@ -57,8 +57,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 
 **Owner:** engineer
 **Status:** Shared codec, caller transport, and fd-0 receiver implemented; trusted-release actions registered;
-LoopMount client/protocol, private rootfs authority, canonical resource locks, private lock adapter, and inactive
-receiver-transaction foundations implemented without receiver registration; remaining capabilities stay pending
+LoopMount client/protocol, private rootfs authority, canonical resource locks, private lock adapter, and exact
+provision/inspect receiver actions implemented and registered; remaining capabilities stay pending
 **Dependencies:** Task 1
 
 - [x] Reserved marker selected before Cobra and application initialization.
@@ -82,16 +82,16 @@ receiver-transaction foundations implemented without receiver registration; rema
 ### Task 4: Add private root-owned VM instance authority
 
 **Owner:** engineer
-**Status:** Complete as the private schema-1 substrate; Task 7 replaces its one-phase lifecycle with schema 3 before
-production activation
+**Status:** Complete as the private strict schema-3 record/registration foundation; production process activation,
+abort/cleanup, observation, and reconciliation remain in Tasks 7-8 and 15
 **Dependencies:** Tasks 1 and 3
 
 **Interface:**
 
 - [x] Implement private `lockReleaseSlot(ctx, slot) (*releaseSlotLease, error)` before release identity resolution.
-- [x] Implement private `releaseSlotLease.registerLaunch(ctx, caller, registration) (*launchLease, error)` with
-  ownership transfer only after durable registration.
-- [x] Implement private `LockRegistered(ctx, caller, vmID) (*registeredLease, error)`.
+- [x] Implement consuming private `preparedRelease.registerLaunching(ctx, caller, intent) (*launchLease, error)` with
+  manifest-derived release identity and ownership transfer only after durable registration.
+- [x] Implement private `LockActive(ctx, caller, vmID) (*activeLease, error)` over strict schema-3 authority.
 - [x] Implement private `BeginCleanup(ctx, caller, vmID) (*cleanupLease, error)`.
 - [x] Implement context-first `cleanupLease.Complete(ctx)` and checked lease release.
 - [x] Implement private `releaseSlotLease.requireUnreferenced(ctx, release)` for exact-identity removal/replacement.
@@ -99,14 +99,16 @@ production activation
 
 **Authority and lifecycle:**
 
-- [x] Persist strict versioned records under `/var/lib/mvmctl/instances/<uid>/<vm-id>.json`.
-- [x] Store only owner UID, VM ID, lifecycle, exact release identity, process identity, cgroup path, and cleanup generation.
-- [x] Implement `absent|cleaned -> registered -> cleaning -> cleaned`; failed cleanup remains recoverable.
+- [x] Persist strict schema-3 records under `/var/lib/mvmctl/instances/<uid>/<vm-id>.json`; reject schema 1/2 and every
+  unknown, duplicate, case-colliding, missing, trailing, or lifecycle-inconsistent shape.
+- [x] Store the exact owner/generation fields, `launching` intent, and state-appropriate receiver-observed `active`
+  identity defined by ADR-0016; validate release identity against the manifest-derived hashes.
+- [x] Implement pure `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent
+  `cleaning` transitions; production effects and transition consumers remain pending.
 - [x] Keep a `cleaned` ownership tombstone; foreign UIDs never acquire the VM ID.
 - [x] Establish the global VM-ID claim while holding the global index lock and scanning pinned numeric UID directories.
 - [x] Reject foreign, duplicate, corrupt, unreadable, unsafe, or inconsistent records without disclosing the owner UID.
-- [x] Preserve this as implementation history only: no production VM lifecycle consumes schema 1, and the clean-install
-  schema-3 `launching -> active` correction below supersedes rather than migrates it.
+- [x] Keep the schema-3 foundation private: no production VM lifecycle consumes it, and v0.3 migrates no old record.
 
 **Filesystem and locking:**
 
@@ -132,7 +134,10 @@ production activation
   different identities for one slot serialize.
 - [x] Prove competing identities serialize on the slot, transfer occurs only after durable registration, pre-transfer
   failures retain a releasable lease, and a mismatched slot writes no record or acquires index/VM locks.
-- [ ] Task 6 proves this lease is acquired before root manifest/hash resolution and supplies only the manifest identity.
+- [x] Task 6 acquires the slot lease before root manifest/hash resolution; consuming registration supplies only the
+  admitted manifest identity and transfers the prepared authority into the launch lease.
+- [x] Make prepared-release and launch-lease cleanup pointer-shared, mutex-protected, cancellation-independent, and
+  close-once across copies, with the first cleanup result cached. Other composite lifecycle leases remain Task 7 work.
 
 **Expected files:** fixed root constants; private instance types, codec, descriptor store, lock, authority, and focused tests
 under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, or network changes.
@@ -413,7 +418,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Foundation dependency:** Task 4
 **Full acceptance dependencies:** Tasks 5, 6, and 8
 
-- [ ] Replace schema 1 with strict schema 3 and reject every old/partial record. Persist
+- [ ] Activate the implemented strict schema 3 throughout the production lifecycle while rejecting every old/partial
+  record. Persist
   `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
   `launching` contains owner UID/GID, VM ID, pinned cache identity, exact release identity, host boot ID,
   launch/cleanup generations, the blocked child PID/start locator, and an explicit absent relay or blocked relay
@@ -422,6 +428,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   namespace/root, and exact root-owned `/usr/local/bin/mvm` executable identity. Activation also
   verifies exact derived cgroup membership and the closed topology capability's network namespace. `cleaned` retains
   only the same-UID tombstone and generations, with no launch-specific GID, cache, release, or process identity.
+  - [x] The strict record/codec, lifecycle-shape validation, pure transitions, and manifest release validation are
+    implemented. Production activation, cgroup/topology verification, and lifecycle consumers keep this item open.
 - [ ] Launch a child blocked by an inherited EOF-fails-closed two-way handshake in an initial private mount namespace
   and an optional blocked dropped-caller console relay in the host mount namespace. Open each pidfd, issue a fresh
   parent challenge, and require the still-blocked child to acknowledge it before accepting PID-derived evidence;
@@ -433,6 +441,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   identity internally, and transfer them into the launch lease. Make `activateVerifiedProcess(ctx)` consume only that
   retained prepared release. Pre-rename failure keeps the source lease; post-rename failure returns the non-nil target
   lease with exact `record_replaced` and any `durability_uncertain` evidence.
+  - [x] Consuming registration and prepared-to-launch ownership transfer are implemented, including post-rename launch
+    authority and close-once prepared/launch cleanup. `activateVerifiedProcess` remains unimplemented.
 - [ ] Before Jailer execution, prove `/var/lib/mvmctl/jailer/firecracker/<vm-id>` absent/fresh under the retained locks.
   Remove only an exactly admitted non-mounted stale fixed tree after process absence; replacement, unexpected entries,
   mounts, or incomplete evidence fail unavailable. Recheck absence immediately before release.
@@ -535,9 +545,12 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   or rules. Cover all fields of exactly the eight emitted v0.3.0 expression structs, reject typed-nil/unknown
   expressions, stream digest encoding through a fixed 64-KiB buffer with surfaced errors, require schema audit/version
   bump for module or expression changes, and retain the representative 1,000-VM 250,000-allocation regression ceiling.
-- [ ] Add the never-unlinked root-owned `/run/mvmctl/authority/firewall.lock` after the network lock and the strict
+- [x] Add the never-unlinked root-owned `/run/mvmctl/authority/firewall.lock` after the network lock and the strict
   committed/applying `/var/lib/mvmctl/firewall/generation.json` record bound to boot ID, host netns identity, empty
   state, and exact before/target generations.
+- [x] Add the bounded strict generation codec, descriptor-relative exclusive record store, earlier-network-authority
+  acquisition seam, same-boot/host-netns admission, and pointer-shared cached close-once cleanup. This is inert and
+  creates no initial record from kernel state.
 - [ ] Define empty as both reserved tables absent; never create empty tables or delete ambiguous, foreign, partial,
   missing-record, corrupt-record, wrong-boot, wrong-netns, or mismatched fixed-name state.
 - [ ] Resolve the v0.3.0 inspection gaps before activation: table/chain values have no ownership userdata and
@@ -600,13 +613,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 13: Migrate loopmount and supported host mutations
 
 **Owner:** engineer
-**Status:** Pending — typed LoopMount client/protocol, private rootfs authority, inactive receiver-transaction
-foundations, deterministic rootfs mount-source policy, pure loop-device contract, inert attach/release capability,
-bounded partition discovery/fixed-tool filesystem probing, and private read-only inspection and `ProvisionVM` adapters
-are implemented; the shared authority filesystem, its separate Jailer and LoopMount capability families, canonical
-VM/image locks, and the private service lock adapter are implemented and reviewed; both effect factories remain
-unreferenced, while production `Server` activation, receiver registration, live-kernel qualification, backend/public
-cutover, legacy removal, and host-mutation migration remain pending
+**Status:** Pending — the production provision/inspect server, exact receiver handlers, and central-dispatch entries now
+activate the typed private LoopMount effects. Live-kernel qualification, public/backend cutover, legacy removal,
+optimization, unsupported-behavior scope decisions, and host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -621,7 +630,7 @@ cutover, legacy removal, and host-mutation migration remain pending
   - [x] Add private descriptor-pinned VM rootfs and image-staging leases with canonical cache traversal, fixed resource
     selection, caller ownership, stable identity/mode/size admission, local-filesystem and no-cross-mount policy,
     checked reverse cleanup, and deterministic before/after-open replacement races for every caller-owned component.
-  - [x] Add the inactive private `Server` transaction coordinator with action-specific effect dependencies and the
+  - [x] Add the private `Server` transaction coordinator with action-specific effect dependencies and the
     `rootfsResourceLocks.Acquire` lease seam. Validate request/caller before authority; unwind effect, rootfs, then lock
     with `context.WithoutCancel`; derive closed mutation/durability evidence; preserve the primary `DomainError`; and
     require action-specific cleanup authority before success.
@@ -643,15 +652,13 @@ cutover, legacy removal, and host-mutation migration remain pending
     image lock. Prove descriptor-safe creation/admission and checked idempotent release. LoopMount must not import
     Jailer or create a second pathname initializer. The reviewed implementation also preserves unrelated-resource
     concurrency on one parent capability while another key is contended.
-  - [x] Bind the inactive `rootfsResourceLocks` seam through a private service adapter that opens only the authenticated
+  - [x] Bind the `rootfsResourceLocks` seam through a private service adapter that opens only the authenticated
     UID capability, maps only the closed VM/image selection to canonical keys, retains partial acquisition for cleanup,
     maps cancellation/deadline acquisition failures as retryable, and releases lock before parent authority exactly
-    once. No production `Server` constructor, receiver handler, dispatcher entry, backend/public path, or privileged
-    mount effect uses this adapter. Network topology, firewall, and `/run/mvmctl/runtime` consumers remain pending.
-  - [x] Split the inactive effect authority so `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while
+    once. The production provision/inspect server uses this adapter; backend/public cutover remains pending.
+  - [x] Split the effect authority so `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while
     private `imageOptimizeEffects` contains only `OptimizeImage`, with dependency validation scoped to each action. The
-    optimize seam has no production implementation or construction, receiver handler, or dispatcher registration, and
-    the entire `Server` remains inert.
+    optimize seam has no production implementation or construction, receiver handler, or dispatcher registration.
   - [x] Implement the private mount/loop foundation. Use a private-propagation mount namespace, direct loop, mount,
     unmount, descriptor, sync, and detach syscalls, bounded partition discovery, autoclear, and read-only inspection.
     Permit only fixed host filesystem probes/grow tools; reject caller paths, `/proc` FD passthrough, chroot, guest
@@ -677,20 +684,20 @@ cutover, legacy removal, and host-mutation migration remain pending
       Retain exact block/source capabilities, bind the selected source to pre/post probe identity, bound entries,
       partitions, stdout/stderr, and exit states, and expose no caller path, device name, raw descriptor, or tool
       selection.
-  - [x] Implement the inert read-only `InspectImage` adapter. Consume the admitted capability, share the image lock with
+  - [x] Implement the read-only `InspectImage` adapter. Consume the admitted capability, share the image lock with
     future optimization, enter a private-propagation mount namespace on a locked OS thread, mount only at fixed
     `/run/mvmctl/rootfs` with `ro,nosuid,nodev,noexec`, revalidate exact source/mount/image identity, read only bounded
     fixed OS-release leaves, prove the admitted/statx snapshot stable, and unwind in checked reverse order. Return only
-    unchanged or outcome-unknown evidence while preserving the primary error. Its factory remains unreferenced: no
-    production `Server`, receiver handler, dispatcher registration, live-kernel QA, or public cutover activates it.
-  - [x] Implement the private inert `ProvisionVM` adapter with descriptor-bound guest reads/writes; fixed
+    unchanged or outcome-unknown evidence while preserving the primary error. The exact private receiver action now
+    constructs it; live-kernel QA and public cutover remain pending.
+  - [x] Implement the private `ProvisionVM` adapter with descriptor-bound guest reads/writes; fixed
     hostname/hosts, DNS, existing-account SSH/sudo, SSH service, embedded-agent, and fstab content; root-only persistent
     `/etc/mvmctl/agent.token`; and exactly one admitted systemd `sysinit.target` or OpenRC default-runlevel enablement.
     Use only fixed ext-family/Btrfs grow tools, prove ext4/Btrfs convergence from the exact old or target size, cap fixed
     `/usr/bin/blkid` at five seconds and grow tools at five minutes with an earlier caller deadline winning, and preserve
-    closed mutation/durability outcomes plus cancellation-independent reverse cleanup. Its factory remains unreferenced;
-    no receiver or dispatcher activates it.
-  - [ ] Add only provision and inspect receiver handlers and exact central-dispatch entries for the already-separated
+    closed mutation/durability outcomes plus cancellation-independent reverse cleanup. The exact private receiver action
+    now constructs it; live-kernel QA and public cutover remain pending.
+  - [x] Add only provision and inspect receiver handlers and exact central-dispatch entries for the already-separated
     `rootfsEffects` seam. `OptimizeImage` remains without a production implementation or construction, handler, or
     registration until durable shrink and replacement replay authority exists.
   - [ ] Before public cutover, obtain an explicit scope decision for every unsupported legacy behavior: missing-user
