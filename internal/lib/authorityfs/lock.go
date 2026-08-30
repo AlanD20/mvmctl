@@ -98,7 +98,7 @@ func (uid *JailerUID) AcquireVM(ctx context.Context, key VMKey) (*Lock, error) {
 	return acquireLock(ctx, state.deps, state.policy, state.fd, key.value+".lock", "Jailer VM")
 }
 
-// AcquireNetwork acquires the final authority class for one owner-bound managed network.
+// AcquireNetwork acquires the managed-network authority class for one owner-bound network.
 func (uid *NetworkUID) AcquireNetwork(ctx context.Context, key NetworkKey) (*Lock, error) {
 	if !isLowerHex(key.value, networkKeyLength) {
 		return nil, fmt.Errorf("authorityfs: network key is invalid")

@@ -252,6 +252,7 @@ func TestNetworkCreatesOnlyFixedAuthorityHierarchyAndLocks(t *testing.T) {
 	assert.Equal(t, "network-"+testNetworkID+".lock", uidEntries[0].Name())
 }
 
+// Rationale: copied child capabilities and their locks must retain independent authority after every parent is closed.
 func TestNetworkChildrenAndLocksOutliveParentCapabilities(t *testing.T) {
 	t.Parallel()
 
@@ -265,8 +266,12 @@ func TestNetworkChildrenAndLocksOutliveParentCapabilities(t *testing.T) {
 	require.NoError(t, err)
 	held, err := uid.AcquireNetwork(t.Context(), key)
 	require.NoError(t, err)
+	otherKey, err := NewNetworkKey(testAlternateNetworkID)
+	require.NoError(t, err)
 
 	require.NoError(t, authority.Release(t.Context()))
+	otherHeld, err := uid.AcquireNetwork(t.Context(), otherKey)
+	require.NoError(t, err)
 	require.NoError(t, uid.Release(t.Context()))
 	reopened := openTestNetwork(t, root)
 	reopenedUID, err := reopened.OpenUID(t.Context(), testUID)
@@ -282,16 +287,26 @@ func TestNetworkChildrenAndLocksOutliveParentCapabilities(t *testing.T) {
 	blockedNetwork, err := reopenedUID.AcquireNetwork(lockCtx, key)
 	assert.Nil(t, blockedNetwork)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
+	otherLockCtx, cancelOtherLock := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancelOtherLock()
+	blockedOtherNetwork, err := reopenedUID.AcquireNetwork(otherLockCtx, otherKey)
+	assert.Nil(t, blockedOtherNetwork)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 
 	require.NoError(t, held.Release(t.Context()))
+	require.NoError(t, otherHeld.Release(t.Context()))
 	require.NoError(t, index.Release(t.Context()))
 	reacquired, err := reopenedUID.AcquireNetwork(t.Context(), key)
 	require.NoError(t, err)
 	require.NoError(t, reacquired.Release(t.Context()))
+	otherReacquired, err := reopenedUID.AcquireNetwork(t.Context(), otherKey)
+	require.NoError(t, err)
+	require.NoError(t, otherReacquired.Release(t.Context()))
 	require.NoError(t, reopenedUID.Release(t.Context()))
 	require.NoError(t, reopened.Release(t.Context()))
 }
 
+// Rationale: one contended resource must not serialize independent resources through the retained UID capability.
 func TestNetworkContendedKeyDoesNotBlockIndependentKeyOnSameCapability(t *testing.T) {
 	t.Parallel()
 
@@ -440,6 +455,7 @@ func TestNetworkRejectsUnsafeExistingLocksWithoutRepair(t *testing.T) {
 	}
 }
 
+// Rationale: every rejected UID creation stage must close its accepted descriptor exactly once.
 func TestNetworkUIDCreationFaultClosesRejectedDescriptor(t *testing.T) {
 	t.Parallel()
 
@@ -688,6 +704,7 @@ func TestCopiedNetworkCapabilitiesCacheReleaseAndCloseOnce(t *testing.T) {
 	}
 }
 
+// Rationale: concurrent creators must converge on one fixed hierarchy while each acquired lock remains authoritative.
 func TestNetworkConcurrentCreationAndAcquireReleaseAreCoherent(t *testing.T) {
 	t.Parallel()
 
