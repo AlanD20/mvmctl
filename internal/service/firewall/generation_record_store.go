@@ -56,7 +56,7 @@ func readGenerationRecord(
 	}
 	fd, err := deps.openAt2(ctx, directoryFD, generationRecordName, &unix.OpenHow{
 		Flags:   generationRecordReadFlags,
-		Resolve: generationRecordResolve,
+		Resolve: generationRecordManagedResolve,
 	})
 	if errors.Is(err, unix.ENOENT) {
 		if contextErr := ctx.Err(); contextErr != nil {
@@ -395,7 +395,7 @@ func createGenerationRecordTemp(
 		fd, err := deps.openAt2(ctx, directoryFD, name, &unix.OpenHow{
 			Flags:   generationRecordTempFlags,
 			Mode:    uint64(generationRecordFileMode),
-			Resolve: generationRecordResolve,
+			Resolve: generationRecordManagedResolve,
 		})
 		if errors.Is(err, unix.EEXIST) {
 			continue

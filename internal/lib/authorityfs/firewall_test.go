@@ -2,9 +2,11 @@ package authorityfs
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,4 +87,61 @@ func TestFirewallLockWaitIsCancellableAndCopiedReleaseIsExactOnce(t *testing.T) 
 	reacquired, err := authority.Acquire(t.Context())
 	require.NoError(t, err)
 	require.NoError(t, reacquired.Release(t.Context()))
+}
+
+// Rationale: Firewall values are capabilities. Copies must share one terminal decision so a failed close is cached
+// and never retried against a descriptor that the kernel may already have reused.
+func TestFirewallCapabilityCopiesReleaseReverseOnceCachedWithoutCancellation(t *testing.T) {
+	t.Parallel()
+
+	type contextKey struct{}
+	closeFault := errors.New("injected firewall authority close failure")
+	closed := make([]int, 0, 2)
+	var unsafeContexts atomic.Int32
+	authority := &Firewall{state: &firewallState{
+		deps: dependencies{close: func(ctx context.Context, fd int) error {
+			closed = append(closed, fd)
+			if ctx.Err() != nil || ctx.Value(contextKey{}) != "retained" {
+				unsafeContexts.Add(1)
+			}
+			if fd == 12 {
+				return closeFault
+			}
+			return nil
+		}},
+		authority: 12,
+		retained:  []int{11, 12},
+		active:    true,
+	}}
+	copyOfAuthority := *authority
+	cancelled, cancel := context.WithCancel(context.WithValue(t.Context(), contextKey{}, "retained"))
+	cancel()
+
+	const callers = 24
+	results := make(chan error, callers)
+	var group sync.WaitGroup
+	for index := range callers {
+		group.Add(1)
+		go func(useCopy bool) {
+			defer group.Done()
+			if useCopy {
+				results <- copyOfAuthority.Release(cancelled)
+				return
+			}
+			results <- authority.Release(cancelled)
+		}(index%2 == 0)
+	}
+	group.Wait()
+	close(results)
+	var first error
+	for releaseErr := range results {
+		require.ErrorIs(t, releaseErr, closeFault)
+		if first == nil {
+			first = releaseErr
+		} else {
+			assert.Same(t, first, releaseErr)
+		}
+	}
+	assert.Equal(t, []int{12, 11}, closed)
+	assert.Zero(t, unsafeContexts.Load())
 }

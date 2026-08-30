@@ -54,6 +54,53 @@ func TestGenerationRecordStoreCreatesStrictTreeAndExclusiveRecord(t *testing.T) 
 	assertGenerationRecordExactMode(t, generationRecordTestPath(root), 0600)
 }
 
+// Rationale: /var/lib/mvmctl may intentionally start on a different local filesystem. Traversal may cross mounts
+// while pinning that managed root, but every descendant must remain on the pinned managed filesystem.
+func TestGenerationRecordStoreAllowsManagedRootMountCrossingAndRejectsDescendantCrossing(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ancestor and managed root crossings are allowed", func(t *testing.T) {
+		t.Parallel()
+		root := prepareGenerationRecordTestRoot(t)
+		deps := realGenerationRecordStoreDeps()
+		realOpenAt2 := deps.openAt2
+		var protectedDescendant atomic.Bool
+		deps.openAt2 = func(ctx context.Context, parentFD int, name string, how *unix.OpenHow) (int, error) {
+			if name != "firewall" && how.Resolve&unix.RESOLVE_NO_XDEV != 0 {
+				return -1, unix.EXDEV
+			}
+			if name == "firewall" {
+				protectedDescendant.Store(how.Resolve&unix.RESOLVE_NO_XDEV != 0)
+			}
+			return realOpenAt2(ctx, parentFD, name, how)
+		}
+
+		store, err := openGenerationRecordStore(t.Context(), deps, testGenerationRecordStorePolicy(root))
+		require.NoError(t, err)
+		require.NoError(t, store.Release(t.Context()))
+		assert.True(t, protectedDescendant.Load())
+	})
+
+	t.Run("crossing below managed root is rejected", func(t *testing.T) {
+		t.Parallel()
+		root := prepareGenerationRecordTestRoot(t)
+		deps := realGenerationRecordStoreDeps()
+		realOpenAt2 := deps.openAt2
+		deps.openAt2 = func(ctx context.Context, parentFD int, name string, how *unix.OpenHow) (int, error) {
+			if name == "firewall" && how.Resolve&unix.RESOLVE_NO_XDEV != 0 {
+				return -1, unix.EXDEV
+			}
+			return realOpenAt2(ctx, parentFD, name, how)
+		}
+
+		store, err := openGenerationRecordStore(t.Context(), deps, testGenerationRecordStorePolicy(root))
+		assert.Nil(t, store)
+		require.ErrorIs(t, err, unix.EXDEV)
+		_, statErr := os.Lstat(filepath.Join(root, "var/lib/mvmctl/firewall"))
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+	})
+}
+
 func TestGenerationRecordStoreRejectsUnsafeRecordWithoutRepair(t *testing.T) {
 	t.Parallel()
 
@@ -93,6 +140,80 @@ func TestGenerationRecordStoreRejectsUnsafeRecordWithoutRepair(t *testing.T) {
 				require.NoError(t, statErr)
 				assert.Equal(t, os.FileMode(0644), info.Mode().Perm())
 			}
+		})
+	}
+}
+
+func TestGenerationRecordStoreRejectsWrongRecordOwnerWithoutRepair(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*unix.Stat_t){
+		"wrong UID": func(stat *unix.Stat_t) { stat.Uid++ },
+		"wrong GID": func(stat *unix.Stat_t) { stat.Gid++ },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := prepareGenerationRecordTestRoot(t)
+			seed := openTestGenerationRecordStore(t, root)
+			_, err := seed.create(t.Context(), testCommittedGenerationRecord(t))
+			require.NoError(t, err)
+			require.NoError(t, seed.Release(t.Context()))
+
+			deps := realGenerationRecordStoreDeps()
+			realFstat := deps.fstat
+			deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+				if err := realFstat(ctx, fd, stat); err != nil {
+					return err
+				}
+				if stat.Mode&unix.S_IFMT == unix.S_IFREG && stat.Size > 0 {
+					mutate(stat)
+				}
+				return nil
+			}
+			store, err := openGenerationRecordStore(t.Context(), deps, testGenerationRecordStorePolicy(root))
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, store.Release(context.Background())) })
+
+			_, _, _, err = store.read(t.Context())
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "unexpected owner or mode")
+			assertGenerationAuthorityErrorMetadata(t, err)
+		})
+	}
+}
+
+func TestGenerationRecordStoreRejectsWrongManagedDirectoryOwnerWithoutRepair(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*unix.Stat_t){
+		"wrong UID": func(stat *unix.Stat_t) { stat.Uid++ },
+		"wrong GID": func(stat *unix.Stat_t) { stat.Gid++ },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			root := prepareGenerationRecordTestRoot(t)
+			managedRoot := filepath.Join(root, "var/lib/mvmctl")
+			require.NoError(t, os.MkdirAll(filepath.Join(managedRoot, "firewall"), 0700))
+			deps := realGenerationRecordStoreDeps()
+			realFstat := deps.fstat
+			var directories atomic.Int32
+			deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+				if err := realFstat(ctx, fd, stat); err != nil {
+					return err
+				}
+				if stat.Mode&unix.S_IFMT == unix.S_IFDIR && directories.Add(1) == 4 {
+					mutate(stat)
+				}
+				return nil
+			}
+
+			store, err := openGenerationRecordStore(t.Context(), deps, testGenerationRecordStorePolicy(root))
+			assert.Nil(t, store)
+			require.Error(t, err)
+			assertGenerationAuthorityErrorMetadata(t, err)
+			assertGenerationRecordExactMode(t, managedRoot, 0700)
 		})
 	}
 }
@@ -237,6 +358,69 @@ func TestGenerationRecordStoreCreationFaultsHaveClosedOutcomes(t *testing.T) {
 			assertNoGenerationRecordTemps(t, root)
 		})
 	}
+}
+
+func TestGenerationRecordStoreSetsExactRecordOwnerAndClassifiesFchownFailure(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sets policy owner", func(t *testing.T) {
+		t.Parallel()
+		root := prepareGenerationRecordTestRoot(t)
+		seed := openTestGenerationRecordStore(t, root)
+		require.NoError(t, seed.Release(t.Context()))
+		policy := testGenerationRecordStorePolicy(root)
+		deps := realGenerationRecordStoreDeps()
+		realFchown := deps.fchown
+		var calls atomic.Int32
+		deps.fchown = func(ctx context.Context, fd, uid, gid int) error {
+			calls.Add(1)
+			assert.Equal(t, int(policy.expectedUID), uid)
+			assert.Equal(t, int(policy.expectedGID), gid)
+			return realFchown(ctx, fd, uid, gid)
+		}
+		store, err := openGenerationRecordStore(t.Context(), deps, policy)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, store.Release(context.Background())) })
+
+		proof, err := store.create(t.Context(), testCommittedGenerationRecord(t))
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), calls.Load())
+		assert.Equal(t, policy.expectedUID, proof.uid)
+		assert.Equal(t, policy.expectedGID, proof.gid)
+	})
+
+	t.Run("failure remains precommit and classified", func(t *testing.T) {
+		t.Parallel()
+		root := prepareGenerationRecordTestRoot(t)
+		seed := openTestGenerationRecordStore(t, root)
+		require.NoError(t, seed.Release(t.Context()))
+		policy := testGenerationRecordStorePolicy(root)
+		deps := realGenerationRecordStoreDeps()
+		fault := errors.New("injected fchown failure")
+		var calls atomic.Int32
+		deps.fchown = func(_ context.Context, _ int, uid, gid int) error {
+			calls.Add(1)
+			assert.Equal(t, int(policy.expectedUID), uid)
+			assert.Equal(t, int(policy.expectedGID), gid)
+			return fault
+		}
+		store, err := openGenerationRecordStore(t.Context(), deps, policy)
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, store.Release(context.Background())) })
+
+		proof, err := store.create(t.Context(), testCommittedGenerationRecord(t))
+		require.ErrorIs(t, err, fault)
+		assert.Equal(t, int32(1), calls.Load())
+		assert.Zero(t, proof)
+		assertGenerationAuthorityErrorMetadata(t, err)
+		domainErr := errs.AsDomainError(err)
+		require.NotNil(t, domainErr)
+		_, created := domainErr.Details["record_created"]
+		assert.False(t, created)
+		_, statErr := os.Lstat(generationRecordTestPath(root))
+		assert.ErrorIs(t, statErr, os.ErrNotExist)
+		assertNoGenerationRecordTemps(t, root)
+	})
 }
 
 func TestGenerationRecordStoreConcurrentCreatePublishesOnce(t *testing.T) {
@@ -476,4 +660,12 @@ func assertNoGenerationRecordTemps(t *testing.T, root string) {
 	for _, entry := range entries {
 		assert.False(t, generationRecordTempNamePattern.MatchString(entry.Name()), "temporary record leaked")
 	}
+}
+
+func assertGenerationAuthorityErrorMetadata(t *testing.T, err error) {
+	t.Helper()
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeNetworkFirewallFailed, domainErr.Code)
+	assert.Equal(t, errs.ClassInternal, domainErr.Class)
 }

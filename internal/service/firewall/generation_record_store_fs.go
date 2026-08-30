@@ -29,10 +29,10 @@ const (
 	generationRecordIOChunk       = 1024
 	generationRecordName          = "generation.json"
 
-	generationRecordResolve = unix.RESOLVE_BENEATH |
+	generationRecordTraversalResolve = unix.RESOLVE_BENEATH |
 		unix.RESOLVE_NO_SYMLINKS |
-		unix.RESOLVE_NO_MAGICLINKS |
-		unix.RESOLVE_NO_XDEV
+		unix.RESOLVE_NO_MAGICLINKS
+	generationRecordManagedResolve = generationRecordTraversalResolve | unix.RESOLVE_NO_XDEV
 )
 
 type generationRecordStoreDeps struct {
@@ -127,7 +127,13 @@ func openGenerationRecordStore(
 	parentFD := rootFD
 	for index, name := range names {
 		managed := index >= 2
-		fd, openErr := openGenerationRecordDirectory(ctx, deps, parentFD, name, managed, policy)
+		// CRITICAL: /var, /var/lib, and the managed mvmctl root may each be a deliberate local mount boundary.
+		// RESOLVE_NO_XDEV begins only after mvmctl is pinned, so no later firewall authority component can cross it.
+		resolve := uint64(generationRecordTraversalResolve)
+		if index >= 3 {
+			resolve = generationRecordManagedResolve
+		}
+		fd, openErr := openGenerationRecordDirectory(ctx, deps, parentFD, name, managed, resolve, policy)
 		if openErr != nil {
 			return nil, openErr
 		}
@@ -161,12 +167,13 @@ func openGenerationRecordDirectory(
 	parentFD int,
 	name string,
 	managed bool,
+	resolve uint64,
 	policy generationRecordStorePolicy,
 ) (int, error) {
 	if err := ctx.Err(); err != nil {
 		return -1, generationAuthorityError("open firewall generation directory "+name, err, nil)
 	}
-	how := &unix.OpenHow{Flags: generationRecordDirectoryFlags, Resolve: generationRecordResolve}
+	how := &unix.OpenHow{Flags: generationRecordDirectoryFlags, Resolve: resolve}
 	fd, err := deps.openAt2(ctx, parentFD, name, how)
 	if err == nil {
 		if verifyErr := verifyGenerationRecordDirectory(ctx, deps, fd, name, policy, managed); verifyErr != nil {
