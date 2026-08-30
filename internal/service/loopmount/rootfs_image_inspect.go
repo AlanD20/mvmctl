@@ -3,8 +3,8 @@ package loopmount
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
+	"maps"
 	"runtime"
 
 	"golang.org/x/sys/unix"
@@ -193,6 +193,8 @@ func (adapter *rootfsImageInspectAdapter) InspectImage(
 	if err := adapter.deps.lockOSThread(ctx); err != nil {
 		return outcome, rootfsAtomicError("lock image inspection OS thread", err)
 	}
+	// CRITICAL: Cancellation must be observed after LockOSThread and before unshare. Only a thread that still shares
+	// the process mount namespace may be unlocked and returned to Go's thread pool.
 	if err := ctx.Err(); err != nil {
 		return outcome, appendRootfsInspectCleanupError(
 			rootfsAtomicError("image inspection context ended before mount namespace creation", err),
@@ -387,6 +389,8 @@ func prepareRootfsInspectMountpoint(
 	if err := deps.fstat(ctx, parentFD, &parentStat); err != nil {
 		return nil, rootfsAtomicError("inspect fixed image inspection runtime directory", err)
 	}
+	// CRITICAL: /run/mvmctl is the fixed shared authority layout. Inspection rejects ownership or exact-mode drift and
+	// never repairs it, so a privileged effect cannot silently change host policy established during installation.
 	if parentStat.Mode&unix.S_IFMT != unix.S_IFDIR || parentStat.Uid != 0 || parentStat.Gid != 0 ||
 		parentStat.Mode&07777 != rootfsInspectRuntimeMode {
 		return nil, rootfsAtomicError("fixed image inspection runtime directory is not root:root mode 0711", nil)
@@ -677,10 +681,7 @@ func appendRootfsInspectCleanupError(primary error, message string, cause error)
 	if cause == nil {
 		return primary
 	}
-	detail := fmt.Sprintf("%s: %v", message, cause)
-	if len(detail) > maxRootfsInspectCleanupDetailBytes {
-		detail = detail[:maxRootfsInspectCleanupDetailBytes-3] + "..."
-	}
+	detail := boundedRootfsInspectCleanupDetail(message, cause)
 	if primary == nil {
 		domainErr := rootfsAtomicError(detail, cause)
 		domainErr.Details = map[string]any{
@@ -689,20 +690,37 @@ func appendRootfsInspectCleanupError(primary error, message string, cause error)
 		}
 		return domainErr
 	}
-	if domainErr := errs.AsDomainError(primary); domainErr != nil {
-		domainErr.Message += "; " + detail
-		domainErr.Err = errors.Join(domainErr.Err, cause)
-		if domainErr.Details == nil {
-			domainErr.Details = make(map[string]any)
+	domainErr := errs.AsDomainError(primary)
+	if domainErr == nil {
+		domainErr = rootfsAtomicError(detail, errors.Join(primary, cause))
+		domainErr.Details = map[string]any{
+			rootfsInspectCleanupFailedKey: true,
+			rootfsInspectCleanupDetailKey: detail,
 		}
-		domainErr.Details[rootfsInspectCleanupFailedKey] = true
-		domainErr.Details[rootfsInspectCleanupDetailKey] = detail
 		return domainErr
 	}
-	domainErr := rootfsAtomicError(detail, errors.Join(primary, cause))
-	domainErr.Details = map[string]any{
-		rootfsInspectCleanupFailedKey: true,
-		rootfsInspectCleanupDetailKey: detail,
+	result := *domainErr
+	result.Details = maps.Clone(domainErr.Details)
+	if result.Details == nil {
+		result.Details = make(map[string]any)
 	}
-	return domainErr
+	if _, exists := result.Details[rootfsInspectCleanupFailedKey]; !exists {
+		result.Details[rootfsInspectCleanupFailedKey] = true
+	}
+	if _, exists := result.Details[rootfsInspectCleanupDetailKey]; !exists {
+		result.Details[rootfsInspectCleanupDetailKey] = detail
+	}
+	result.Err = errors.Join(domainErr.Err, cause)
+	return &result
+}
+
+func boundedRootfsInspectCleanupDetail(message string, cause error) string {
+	detail := message
+	if cause != nil {
+		detail += ": " + cause.Error()
+	}
+	if len(detail) <= maxRootfsInspectCleanupDetailBytes {
+		return detail
+	}
+	return detail[:maxRootfsInspectCleanupDetailBytes-3] + "..."
 }

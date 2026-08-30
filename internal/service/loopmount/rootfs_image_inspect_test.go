@@ -47,6 +47,49 @@ func TestRootfsImageInspectAdapterUsesClosedReadOnlyNamespaceFlow(t *testing.T) 
 	)
 }
 
+func TestRootfsImageInspectAdapterUsesValidRawImageSource(t *testing.T) {
+	t.Parallel()
+
+	fixture := newTestRootfsImageInspectFixture(t)
+	fixture.partitions.state.devices = nil
+	fixture.source = &rootfsSelectedSource{state: &rootfsSelectedSourceState{
+		parent: fixture.loop.state, partitions: fixture.partitions.state, kind: rootfsMountSourceRaw,
+		fd: 40, identity: fixture.loop.state.identity, filesystem: FilesystemExt4,
+	}}
+
+	outcome, err := fixture.adapter().InspectImage(t.Context(), fixture.lease, FilesystemExt4)
+	require.NoError(t, err)
+	assert.Equal(t, imageInspectEffectStateUnchanged, outcome.state)
+	assert.Equal(t, "alpine", outcome.osType)
+	require.NotNil(t, outcome.lease)
+	require.NoError(t, outcome.cleanup(t.Context()))
+
+	wantMounts := []testRootfsInspectMountCall{
+		{target: "/", flags: rootfsInspectPrivateFlags},
+		{
+			source: "/dev/loop3", target: rootfsInspectMountPath,
+			filesystem: "ext4", flags: rootfsInspectMountFlags,
+		},
+	}
+	if diff := cmp.Diff(wantMounts, fixture.mounts, cmp.AllowUnexported(testRootfsInspectMountCall{})); diff != "" {
+		t.Errorf("raw image inspection mounts mismatch (-want +got):\n%s", diff)
+	}
+	assert.False(t, fixture.unlocked, "a thread with a private mount namespace must never rejoin the runtime pool")
+	assert.True(t, fixture.source.state.released)
+	assert.True(t, fixture.partitions.state.released)
+	assert.True(t, fixture.loop.state.released)
+	assert.Equal(t, 2, fixture.sourceFstatCalls)
+	assert.Equal(t, 2, fixture.snapshotCalls)
+	wantEvents := []string{
+		"snapshot", "lock-thread", "attach", "discover", "probe", "close:12", "read", "close:14", "close:13",
+		"unmount", "loop-clear", "loop-close", "close:11", "close:10", "snapshot",
+	}
+	if diff := cmp.Diff(wantEvents, fixture.events); diff != "" {
+		t.Errorf("raw image inspection cleanup order mismatch (-want +got):\n%s", diff)
+	}
+	assert.NotContains(t, fixture.events, "partition-close:41")
+}
+
 func TestRootfsImageInspectAdapterUnlocksOnlyWhenUnshareFails(t *testing.T) {
 	t.Parallel()
 
@@ -240,6 +283,84 @@ func TestRootfsImageInspectAdapterClassifiesCapabilityCleanupFaults(t *testing.T
 			assert.LessOrEqual(t, len(detail), 512)
 		})
 	}
+}
+
+// Rationale: cleanup diagnostics supplement the authoritative operation error. They must not mutate or reclassify the
+// original DomainError, and a later cleanup failure must not overwrite the first action-specific bounded detail.
+func TestAppendRootfsInspectCleanupErrorPreservesPrimaryDomainError(t *testing.T) {
+	t.Parallel()
+
+	primaryCause := errors.New("primary cause")
+	primaryDetails := map[string]any{"stage": "read-os-release"}
+	primary := &errs.DomainError{
+		Code: errs.CodeImageError, Message: "primary inspection failure", Op: "image.inspect",
+		Entity: "image-abc", Class: errs.ClassRetryable, Err: primaryCause, Details: primaryDetails,
+	}
+	firstCleanupCause := errors.New("close OS release failed")
+	first := appendRootfsInspectCleanupError(primary, "close fixed OS release leaf", firstCleanupCause)
+	firstDomain := errs.AsDomainError(first)
+	require.NotNil(t, firstDomain)
+	require.NotSame(t, primary, firstDomain)
+
+	wantMetadata := struct {
+		Code    errs.Code
+		Message string
+		Op      string
+		Entity  string
+		Class   errs.Class
+	}{
+		Code: primary.Code, Message: primary.Message, Op: primary.Op, Entity: primary.Entity, Class: primary.Class,
+	}
+	gotMetadata := struct {
+		Code    errs.Code
+		Message string
+		Op      string
+		Entity  string
+		Class   errs.Class
+	}{
+		Code: firstDomain.Code, Message: firstDomain.Message, Op: firstDomain.Op,
+		Entity: firstDomain.Entity, Class: firstDomain.Class,
+	}
+	if diff := cmp.Diff(wantMetadata, gotMetadata); diff != "" {
+		t.Errorf("primary DomainError metadata changed (-want +got):\n%s", diff)
+	}
+	assert.ErrorIs(t, first, primaryCause)
+	assert.ErrorIs(t, first, firstCleanupCause)
+	firstDetail, ok := firstDomain.Details[rootfsInspectCleanupDetailKey].(string)
+	require.True(t, ok)
+	assert.Equal(t, "close fixed OS release leaf: close OS release failed", firstDetail)
+	assert.LessOrEqual(t, len(firstDetail), maxRootfsInspectCleanupDetailBytes)
+	wantFirstDetails := map[string]any{
+		"stage":                       "read-os-release",
+		rootfsInspectCleanupFailedKey: true,
+		rootfsInspectCleanupDetailKey: firstDetail,
+	}
+	if diff := cmp.Diff(wantFirstDetails, firstDomain.Details); diff != "" {
+		t.Errorf("cleanup evidence mismatch (-want +got):\n%s", diff)
+	}
+
+	secondCleanupCause := errors.New("unmount failed")
+	second := appendRootfsInspectCleanupError(first, "unmount inspected rootfs", secondCleanupCause)
+	secondDomain := errs.AsDomainError(second)
+	require.NotNil(t, secondDomain)
+	require.NotSame(t, firstDomain, secondDomain)
+	assert.ErrorIs(t, second, primaryCause)
+	assert.ErrorIs(t, second, firstCleanupCause)
+	assert.ErrorIs(t, second, secondCleanupCause)
+	if diff := cmp.Diff(wantFirstDetails, secondDomain.Details); diff != "" {
+		t.Errorf("existing cleanup evidence overwritten (-want +got):\n%s", diff)
+	}
+
+	wantPrimaryDetails := map[string]any{"stage": "read-os-release"}
+	if diff := cmp.Diff(wantPrimaryDetails, primary.Details); diff != "" {
+		t.Errorf("original primary details mutated (-want +got):\n%s", diff)
+	}
+	assert.Same(t, primaryCause, primary.Err)
+	assert.Equal(t, "primary inspection failure", primary.Message)
+	assert.Equal(t, "image.inspect", primary.Op)
+	assert.Equal(t, "image-abc", primary.Entity)
+	assert.Equal(t, errs.CodeImageError, primary.Code)
+	assert.Equal(t, errs.ClassRetryable, primary.Class)
 }
 
 func TestReadRootfsOSReleaseUsesFixedNoSymlinkFallback(t *testing.T) {
@@ -531,6 +652,7 @@ func (fixture *testRootfsImageInspectFixture) fstat(_ context.Context, fd int, s
 		}
 		*stat = unix.Stat_t{Mode: unix.S_IFDIR | 0700, Uid: 0, Gid: 0, Dev: 1, Ino: inode, Nlink: 2}
 	case 40:
+		fixture.sourceFstatCalls++
 		*stat = unix.Stat_t{Mode: unix.S_IFBLK | 0600, Rdev: unix.Mkdev(7, 3)}
 	case 41:
 		fixture.sourceFstatCalls++
