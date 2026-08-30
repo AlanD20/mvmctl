@@ -1,11 +1,89 @@
 package network
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"mvmctl/pkg/errs"
 )
+
+func abortTopologyPrepare(
+	ctx context.Context,
+	preparation *topologyPreparation,
+	stage string,
+	cause error,
+) (*topologyPreparation, error) {
+	// CRITICAL: Cancellation at the failure point must not suppress rollback. The retained typed lease and identities
+	// bound every cleanup effect; context.WithoutCancel does not broaden the cleanup target.
+	cleanupErr := preparation.Cleanup(context.WithoutCancel(ctx))
+	if cleanupErr != nil {
+		return preparation, topologyPrepareError(
+			stage,
+			preparation.entity(),
+			errors.Join(cause, cleanupErr),
+			true,
+		)
+	}
+	return nil, topologyPrepareError(stage, preparation.entity(), cause, false)
+}
+
+func abortTopologyPreparePreservingPrimary(
+	ctx context.Context,
+	preparation *topologyPreparation,
+	stage string,
+	primary error,
+) (*topologyPreparation, error) {
+	// CRITICAL: A lock returned with an error remains authority owned by this transaction. Rollback is detached from
+	// caller cancellation, while an already-classified DomainError remains the authoritative failure returned upstream.
+	cleanupErr := preparation.Cleanup(context.WithoutCancel(ctx))
+	domainErr := errs.AsDomainError(primary)
+	if domainErr == nil {
+		if cleanupErr != nil {
+			return preparation, topologyPrepareError(
+				stage,
+				preparation.entity(),
+				errors.Join(primary, cleanupErr),
+				true,
+			)
+		}
+		return nil, topologyPrepareError(stage, preparation.entity(), primary, false)
+	}
+
+	slog.Error(
+		"network namespace topology transaction failed",
+		"stage", stage,
+		"vm_id", preparation.entity(),
+		"error", primary,
+	)
+	if cleanupErr == nil {
+		return nil, domainErr
+	}
+	if domainErr.Details == nil {
+		domainErr.Details = make(map[string]any)
+	}
+	domainErr.Details["cleanup_required"] = true
+	domainErr.Message += "; failed to release network topology authority: " + cleanupErr.Error()
+	domainErr.Err = errors.Join(domainErr.Err, cleanupErr)
+	return preparation, domainErr
+}
+
+func topologyPrepareError(stage, vmID string, cause error, cleanupRequired bool) *errs.DomainError {
+	message := "failed to " + stage
+	if cause == nil {
+		cause = errors.New(message)
+	}
+	slog.Error("network namespace topology transaction failed", "stage", stage, "vm_id", vmID, "error", cause)
+	options := []errs.ErrorOption{errs.WithClass(errs.ClassInternal)}
+	if vmID != "" {
+		options = append(options, errs.WithEntity(vmID))
+	}
+	if cleanupRequired {
+		options = append(options, errs.WithDetails(map[string]any{"cleanup_required": true}))
+	}
+	return errs.WrapMsg(errs.CodeNetworkCreateFailed, message, cause, options...)
+}
 
 func validateNetworkLock(
 	actualKey networkKey,
@@ -99,7 +177,7 @@ func topologyAccessError(vmID string) *errs.DomainError {
 	}
 	return errs.New(
 		errs.CodeNetworkError,
-		"network topology authority is unavailable outside the prepared state",
+		"network topology authority is unavailable outside the committed state",
 		options...,
 	)
 }

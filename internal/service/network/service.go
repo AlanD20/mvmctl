@@ -17,7 +17,7 @@ type topologyPreparationState uint8
 
 const (
 	topologyPreparationBuilding topologyPreparationState = iota
-	topologyPreparationPrepared
+	topologyPreparationCommitted
 	topologyPreparationCleaning
 	topologyPreparationCleaned
 )
@@ -59,10 +59,10 @@ func (service *service) prepare(
 	networkID NetworkID,
 ) (*topologyPreparation, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, service.prepareError("admit topology transaction", "", err, false)
+		return nil, topologyPrepareError("admit topology transaction", "", err, false)
 	}
 	if launch == nil {
-		return nil, service.prepareError(
+		return nil, topologyPrepareError(
 			"admit topology transaction",
 			"",
 			topologyValidationError("vm launch lease is required"),
@@ -70,7 +70,7 @@ func (service *service) prepare(
 		)
 	}
 	if launch.lock == nil {
-		return nil, service.prepareError(
+		return nil, topologyPrepareError(
 			"admit topology transaction",
 			string(launch.vmID),
 			topologyValidationError("vm launch lease is not active"),
@@ -83,7 +83,7 @@ func (service *service) prepare(
 		string(networkID),
 	)
 	if err != nil {
-		return nil, service.prepareError("validate topology identity", string(launch.vmID), err, false)
+		return nil, topologyPrepareError("validate topology identity", string(launch.vmID), err, false)
 	}
 	names := deriveTopologyNames(key)
 
@@ -99,10 +99,10 @@ func (service *service) prepare(
 		state: topologyPreparationBuilding,
 	}
 	if err != nil {
-		return service.abortPrepare(ctx, preparation, "acquire network topology lock", err)
+		return abortTopologyPreparePreservingPrimary(ctx, preparation, "acquire network topology lock", err)
 	}
 	if lock == nil {
-		return service.abortPrepare(
+		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"verify network topology lock",
@@ -111,7 +111,7 @@ func (service *service) prepare(
 	}
 	managedBridge := lock.ManagedBridge()
 	if err := validateNetworkLock(lock.Key(), managedBridge, key.Network(), names.managedBridge); err != nil {
-		return service.abortPrepare(ctx, preparation, "verify network topology lock", err)
+		return abortTopologyPrepare(ctx, preparation, "verify network topology lock", err)
 	}
 	preparation.topology.managedBridge = managedBridge
 
@@ -122,10 +122,10 @@ func (service *service) prepare(
 		preparation.topology.handle = pin.Handle()
 	}
 	if err != nil {
-		return service.abortPrepare(ctx, preparation, "create VM network namespace", err)
+		return abortTopologyPrepare(ctx, preparation, "create VM network namespace", err)
 	}
 	if pin == nil {
-		return service.abortPrepare(
+		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"pin VM network namespace",
@@ -133,10 +133,10 @@ func (service *service) prepare(
 		)
 	}
 	if err := validateNamespaceHandle(preparation.topology.handle, names.namespaceHandle); err != nil {
-		return service.abortPrepare(ctx, preparation, "verify VM network namespace pin", err)
+		return abortTopologyPrepare(ctx, preparation, "verify VM network namespace pin", err)
 	}
 	if preparation.topology.managedBridge.namespace == preparation.topology.handle.identity {
-		return service.abortPrepare(
+		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"verify managed bridge namespace",
@@ -154,10 +154,10 @@ func (service *service) prepare(
 		preparation.topology.localBridge = *localBridge
 	}
 	if err != nil {
-		return service.abortPrepare(ctx, preparation, "create namespace-local bridge down", err)
+		return abortTopologyPrepare(ctx, preparation, "create namespace-local bridge down", err)
 	}
 	if localBridge == nil {
-		return service.abortPrepare(
+		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"create namespace-local bridge down",
@@ -170,7 +170,7 @@ func (service *service) prepare(
 		preparation.topology.handle.identity,
 		"namespace-local bridge",
 	); err != nil {
-		return service.abortPrepare(ctx, preparation, "verify namespace-local bridge", err)
+		return abortTopologyPrepare(ctx, preparation, "verify namespace-local bridge", err)
 	}
 
 	tap, err := service.effects.CreateTAPDown(
@@ -183,10 +183,10 @@ func (service *service) prepare(
 		preparation.topology.tap = *tap
 	}
 	if err != nil {
-		return service.abortPrepare(ctx, preparation, "create namespace-local TAP down", err)
+		return abortTopologyPrepare(ctx, preparation, "create namespace-local TAP down", err)
 	}
 	if tap == nil {
-		return service.abortPrepare(
+		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"create namespace-local TAP down",
@@ -199,10 +199,10 @@ func (service *service) prepare(
 		preparation.topology.handle.identity,
 		"namespace-local TAP",
 	); err != nil {
-		return service.abortPrepare(ctx, preparation, "verify namespace-local TAP", err)
+		return abortTopologyPrepare(ctx, preparation, "verify namespace-local TAP", err)
 	}
 	if tap.ifIndex == localBridge.ifIndex {
-		return service.abortPrepare(
+		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"verify namespace-local TAP",
@@ -220,10 +220,10 @@ func (service *service) prepare(
 		preparation.topology.veth = *veth
 	}
 	if err != nil {
-		return service.abortPrepare(ctx, preparation, "create VM veth pair down", err)
+		return abortTopologyPrepare(ctx, preparation, "create VM veth pair down", err)
 	}
 	if veth == nil {
-		return service.abortPrepare(
+		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"create VM veth pair down",
@@ -236,7 +236,7 @@ func (service *service) prepare(
 		preparation.topology.managedBridge.namespace,
 		preparation.topology.handle.identity,
 	); err != nil {
-		return service.abortPrepare(ctx, preparation, "verify VM veth pair", err)
+		return abortTopologyPrepare(ctx, preparation, "verify VM veth pair", err)
 	}
 	if duplicateIfIndex(
 		localBridge.ifIndex,
@@ -244,7 +244,7 @@ func (service *service) prepare(
 		veth.host.ifIndex,
 		veth.peer.ifIndex,
 	) {
-		return service.abortPrepare(
+		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"verify VM link identities",
@@ -253,27 +253,27 @@ func (service *service) prepare(
 	}
 
 	if err := service.effects.AttachNamespaceVethToLocalBridge(ctx, pin, *veth, *localBridge); err != nil {
-		return service.abortPrepare(ctx, preparation, "attach namespace veth to local bridge", err)
+		return abortTopologyPrepare(ctx, preparation, "attach namespace veth to local bridge", err)
 	}
 	if err := service.effects.AttachTAPToLocalBridge(ctx, pin, *tap, *localBridge); err != nil {
-		return service.abortPrepare(ctx, preparation, "attach TAP to local bridge", err)
+		return abortTopologyPrepare(ctx, preparation, "attach TAP to local bridge", err)
 	}
 	if err := service.effects.AttachHostVethToManagedBridge(
 		ctx,
 		*veth,
 		preparation.topology.managedBridge,
 	); err != nil {
-		return service.abortPrepare(ctx, preparation, "attach host veth to managed bridge", err)
+		return abortTopologyPrepare(ctx, preparation, "attach host veth to managed bridge", err)
 	}
 
-	preparation.state = topologyPreparationPrepared
+	preparation.state = topologyPreparationCommitted
 	return preparation, nil
 }
 
 // Topology returns the exact identities only while every preparation stage is complete and its authority remains held.
 func (preparation *topologyPreparation) Topology() (Topology, error) {
 	if preparation == nil ||
-		preparation.state != topologyPreparationPrepared ||
+		preparation.state != topologyPreparationCommitted ||
 		preparation.lock == nil ||
 		preparation.pin == nil ||
 		!preparation.namespaceCreated ||
@@ -339,38 +339,6 @@ func (preparation *topologyPreparation) Cleanup(ctx context.Context) error {
 	}
 	preparation.state = topologyPreparationCleaned
 	return nil
-}
-
-func (service *service) abortPrepare(
-	ctx context.Context,
-	preparation *topologyPreparation,
-	stage string,
-	cause error,
-) (*topologyPreparation, error) {
-	// CRITICAL: Cancellation at the failure point must not suppress rollback. The retained typed lease and identities
-	// bound every cleanup effect; context.WithoutCancel does not broaden the cleanup target.
-	cleanupErr := preparation.Cleanup(context.WithoutCancel(ctx))
-	if cleanupErr != nil {
-		combined := errors.Join(cause, cleanupErr)
-		return preparation, service.prepareError(stage, preparation.entity(), combined, true)
-	}
-	return nil, service.prepareError(stage, preparation.entity(), cause, false)
-}
-
-func (service *service) prepareError(stage, vmID string, cause error, cleanupRequired bool) *errs.DomainError {
-	message := "failed to " + stage
-	if cause == nil {
-		cause = errors.New(message)
-	}
-	slog.Error("network namespace topology transaction failed", "stage", stage, "vm_id", vmID, "error", cause)
-	options := []errs.ErrorOption{errs.WithClass(errs.ClassInternal)}
-	if vmID != "" {
-		options = append(options, errs.WithEntity(vmID))
-	}
-	if cleanupRequired {
-		options = append(options, errs.WithDetails(map[string]any{"cleanup_required": true}))
-	}
-	return errs.WrapMsg(errs.CodeNetworkCreateFailed, message, cause, options...)
 }
 
 func (preparation *topologyPreparation) cleanupFailure(stage string, cause error) *errs.DomainError {

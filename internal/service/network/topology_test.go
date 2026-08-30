@@ -14,9 +14,15 @@ import (
 )
 
 const (
-	testOwnerUID  = uint32(1000)
-	testVMID      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	testNetworkID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	testOwnerUID      = uint32(1000)
+	testVMID          = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testNetworkID     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	testManagedBridge = linkName("mvbeec319e5586b")
+	testHostVeth      = linkName("mvhe89e2abf9abd")
+	testNamespaceVeth = linkName("mvne40ca9fc46c4")
+	testLocalBridge   = linkName("mvlbc942db0d115")
+	testTAP           = linkName("mvt0444ca744944")
+	testNamespacePath = namespaceHandlePath("/run/mvmctl/authority/1000/netns/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 )
 
 // Rationale: Root-side topology admission must reject caller-shaped identifiers before acquiring authority locks or
@@ -55,24 +61,64 @@ func TestNewTopologyKeyRejectsUntrustedIdentityShapes(t *testing.T) {
 	}
 }
 
+// Rationale: Link names are persisted root-authority identifiers. These expected names are independent SHA-256
+// contract vectors calculated from the displayed NUL-separated preimages, not copied from deriveTopologyNames output.
+func TestHashedLinkNameMatchesIndependentContractVectors(t *testing.T) {
+	tests := map[string]struct {
+		prefix   string
+		preimage string
+		want     linkName
+	}{
+		"managed_bridge": {
+			prefix:   "mvb",
+			preimage: "1000\x00" + testNetworkID + "\x00managed-bridge",
+			want:     testManagedBridge,
+		},
+		"host_veth": {
+			prefix:   "mvh",
+			preimage: "1000\x00" + testVMID + "\x00host-veth",
+			want:     testHostVeth,
+		},
+		"namespace_veth": {
+			prefix:   "mvn",
+			preimage: "1000\x00" + testVMID + "\x00namespace-veth",
+			want:     testNamespaceVeth,
+		},
+		"local_bridge": {
+			prefix:   "mvl",
+			preimage: "1000\x00" + testVMID + "\x00local-bridge",
+			want:     testLocalBridge,
+		},
+		"tap": {
+			prefix:   "mvt",
+			preimage: "1000\x00" + testVMID + "\x00tap",
+			want:     testTAP,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got := hashedLinkName(tc.prefix, tc.preimage)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // Rationale: These names are a shared security contract for the topology, authority, and firewall stages. A bridge is
 // network-bound while namespace-local links are VM-bound, so neither may accidentally inherit the other's identity.
 func TestDeriveTopologyNamesIsStableAndIdentityBound(t *testing.T) {
 	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
 
 	got := deriveTopologyNames(key)
-	// CONTRACT: Each suffix is the first 12 lowercase hexadecimal characters of SHA-256 over the literal NUL-separated
-	// identity: owner+network+"managed-bridge" for mvb, and owner+VM+role for mvh/mvn/mvl/mvt. These vectors were
-	// derived from those byte strings independently of deriveTopologyNames.
+	// CONTRACT: Namespace paths contain the immutable VM ID. Link literals are the independent vectors above.
 	want := topologyNames{
-		namespaceHandle: namespaceHandlePath(
-			"/run/mvmctl/authority/1000/netns/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		),
-		managedBridge: linkName("mvbeec319e5586b"),
-		hostVeth:      linkName("mvhe89e2abf9abd"),
-		namespaceVeth: linkName("mvne40ca9fc46c4"),
-		localBridge:   linkName("mvlbc942db0d115"),
-		tap:           linkName("mvt0444ca744944"),
+		namespaceHandle: testNamespacePath,
+		managedBridge:   testManagedBridge,
+		hostVeth:        testHostVeth,
+		namespaceVeth:   testNamespaceVeth,
+		localBridge:     testLocalBridge,
+		tap:             testTAP,
 	}
 
 	if diff := cmp.Diff(want, got, cmp.AllowUnexported(topologyNames{})); diff != "" {
@@ -119,6 +165,8 @@ func TestDeriveTopologyNamesIsStableAndIdentityBound(t *testing.T) {
 	assert.Equal(t, got.tap, otherNetwork.tap)
 }
 
+// Rationale: A prepared topology becomes privileged authority for later firewall and Jailer stages. The transaction
+// must establish every exact identity while retaining both leases, and cleanup must revoke that authority in reverse.
 func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T) {
 	fixture := newTopologyFixture(t)
 
@@ -171,7 +219,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 		VMID:      testVMID,
 		NetworkID: testNetworkID,
 		Namespace: NamespaceHandle{
-			Path: "/run/mvmctl/authority/1000/netns/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			Path: testNamespacePath.String(),
 			Identity: NamespaceIdentity{
 				Device: 41,
 				Inode:  42,
@@ -181,7 +229,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 			Mode:     namespaceHandleMode,
 		},
 		ManagedBridge: LinkIdentity{
-			Name:    "mvbeec319e5586b",
+			Name:    testManagedBridge.String(),
 			IfIndex: 10,
 			Namespace: NamespaceIdentity{
 				Device: 51,
@@ -189,7 +237,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 			},
 		},
 		LocalBridge: LinkIdentity{
-			Name:    "mvlbc942db0d115",
+			Name:    testLocalBridge.String(),
 			IfIndex: 20,
 			Namespace: NamespaceIdentity{
 				Device: 41,
@@ -197,7 +245,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 			},
 		},
 		TAP: LinkIdentity{
-			Name:    "mvt0444ca744944",
+			Name:    testTAP.String(),
 			IfIndex: 21,
 			Namespace: NamespaceIdentity{
 				Device: 41,
@@ -206,7 +254,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 		},
 		VethPair: VethPairIdentity{
 			Host: LinkIdentity{
-				Name:    "mvhe89e2abf9abd",
+				Name:    testHostVeth.String(),
 				IfIndex: 22,
 				Namespace: NamespaceIdentity{
 					Device: 51,
@@ -214,7 +262,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 				},
 			},
 			Peer: LinkIdentity{
-				Name:    "mvne40ca9fc46c4",
+				Name:    testNamespaceVeth.String(),
 				IfIndex: 23,
 				Namespace: NamespaceIdentity{
 					Device: 41,
@@ -226,7 +274,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 	if diff := cmp.Diff(wantRecord, topology.Export()); diff != "" {
 		t.Errorf("exported topology authority mismatch (-want +got):\n%s", diff)
 	}
-	assert.Equal(t, topologyPreparationPrepared, preparation.state)
+	assert.Equal(t, topologyPreparationCommitted, preparation.state)
 
 	require.NoError(t, preparation.Cleanup(context.Background()))
 	require.NoError(t, preparation.Cleanup(context.Background()))
@@ -306,6 +354,71 @@ func TestServicePrepareReleasesLockReturnedWithError(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Rationale: Lock admission may already classify a root-authority failure for the caller. Rolling back the retained
+// lock must not replace that exact DomainError with a generic topology-creation error.
+func TestServicePreparePreservesDomainErrorReturnedWithLock(t *testing.T) {
+	primary := errs.New(
+		errs.CodeNetworkError,
+		"managed network authority record failed verification",
+		errs.WithClass(errs.ClassConflict),
+		errs.WithEntity(testNetworkID),
+		errs.WithDetails(map[string]any{"record_mismatch": true}),
+	)
+	fixture := newTopologyFixtureWithLocker(t, fakeNetworkLockerConfig{lockError: primary})
+
+	preparation, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
+
+	require.Error(t, err)
+	assert.Nil(t, preparation)
+	assert.Same(t, primary, errs.AsDomainError(err))
+	assert.Equal(t, errs.CodeNetworkError, primary.Code)
+	assert.Equal(t, errs.ClassConflict, primary.Class)
+	assert.Equal(t, testNetworkID, primary.Entity)
+	assert.Equal(t, "managed network authority record failed verification", primary.Message)
+	assert.Equal(t, true, primary.Details["record_mismatch"])
+	assert.True(t, fixture.lock.released)
+	assert.False(t, fixture.lock.releaseSawCancellation)
+	if diff := cmp.Diff(
+		[]string{"lock_network", "release_network_lock"},
+		*fixture.events,
+	); diff != "" {
+		t.Errorf("DomainError lock cleanup order mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: A second failure while releasing an admitted lock must be attached to the original classified failure.
+// Recovery needs cleanup_required without losing the lock verifier's code, class, entity, or existing details.
+func TestServicePrepareRetainsPrimaryDomainErrorWhenLockCleanupFails(t *testing.T) {
+	primary := errs.New(
+		errs.CodeNetworkError,
+		"managed network authority record failed verification",
+		errs.WithClass(errs.ClassConflict),
+		errs.WithEntity(testNetworkID),
+		errs.WithDetails(map[string]any{"record_mismatch": true}),
+	)
+	releaseErr := errors.New("injected network lock release failure")
+	fixture := newTopologyFixtureWithLocker(t, fakeNetworkLockerConfig{lockError: primary})
+	fixture.lock.releaseError = releaseErr
+
+	preparation, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
+
+	require.Error(t, err)
+	require.NotNil(t, preparation)
+	assert.Same(t, primary, errs.AsDomainError(err))
+	assert.ErrorIs(t, err, releaseErr)
+	assert.Equal(t, errs.CodeNetworkError, primary.Code)
+	assert.Equal(t, errs.ClassConflict, primary.Class)
+	assert.Equal(t, testNetworkID, primary.Entity)
+	assert.Contains(t, primary.Message, "failed to release network topology authority")
+	assert.Equal(t, true, primary.Details["record_mismatch"])
+	assert.Equal(t, true, primary.Details["cleanup_required"])
+	assert.False(t, fixture.lock.released)
+	assertTopologyUnavailable(t, preparation)
+
+	fixture.lock.releaseError = nil
+	require.NoError(t, preparation.Cleanup(context.Background()))
 }
 
 // Rationale: If releasing a lock returned with an acquisition error also fails, the exact lock must remain in a
@@ -524,6 +637,7 @@ func TestTopologyPreparationCleanupRetriesOnlyTheFailedSuffix(t *testing.T) {
 	}
 	assert.False(t, fixture.lock.released)
 	assert.False(t, fixture.pin.released)
+	assertTopologyUnavailable(t, preparation)
 
 	delete(fixture.effects.deleteFailures, "delete_tap")
 	require.NoError(t, preparation.Cleanup(context.Background()))
@@ -540,6 +654,62 @@ func TestTopologyPreparationCleanupRetriesOnlyTheFailedSuffix(t *testing.T) {
 	}
 	assert.True(t, fixture.lock.released)
 	assert.True(t, fixture.pin.released)
+	assertTopologyUnavailable(t, preparation)
+}
+
+// Rationale: Only the exact committed state may authorize later privileged stages. Building, rollback, recovery, and
+// deleted preparations can retain stale identity fields and must still return zero authority.
+func TestTopologyPreparationTopologyRequiresExactCommittedState(t *testing.T) {
+	fixture := newTopologyFixture(t)
+	prepared, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
+	require.NoError(t, err)
+
+	tests := map[string]func(*topologyPreparation){
+		"building": func(candidate *topologyPreparation) {
+			candidate.state = topologyPreparationBuilding
+		},
+		"rollback_in_progress": func(candidate *topologyPreparation) {
+			candidate.state = topologyPreparationCleaning
+		},
+		"deleted": func(candidate *topologyPreparation) {
+			candidate.state = topologyPreparationCleaned
+		},
+		"committed_without_lock": func(candidate *topologyPreparation) {
+			candidate.lock = nil
+		},
+		"committed_without_namespace_pin": func(candidate *topologyPreparation) {
+			candidate.pin = nil
+		},
+		"committed_after_partial_veth_rollback": func(candidate *topologyPreparation) {
+			candidate.vethMade = false
+		},
+		"committed_after_partial_tap_rollback": func(candidate *topologyPreparation) {
+			candidate.tapMade = false
+		},
+		"committed_after_partial_bridge_rollback": func(candidate *topologyPreparation) {
+			candidate.localBridgeMade = false
+		},
+		"committed_after_namespace_removal": func(candidate *topologyPreparation) {
+			candidate.namespaceCreated = false
+		},
+	}
+
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			candidate := *prepared
+			mutate(&candidate)
+
+			assertTopologyUnavailable(t, &candidate)
+		})
+	}
+
+	// CONTRACT: The untouched committed value still holds both leases and all four created-resource identities.
+	topology, err := prepared.Topology()
+	require.NoError(t, err)
+	assert.Equal(t, testVMID, topology.Export().VMID)
+	assert.Equal(t, testNamespacePath.String(), topology.Export().Namespace.Path)
+
+	require.NoError(t, prepared.Cleanup(context.Background()))
 }
 
 // Rationale: The create context may be cancelled at the failure point. Rollback must deliberately use a non-cancelled
@@ -634,8 +804,10 @@ func newTopologyFixture(t *testing.T) *topologyFixture {
 	return newTopologyFixtureWithLocker(t, fakeNetworkLockerConfig{})
 }
 
-// newTopologyFixtureWithLocker constructs the same valid topology while injecting only lock-acquisition behavior
-// needed by acquisition/cleanup regressions.
+// newTopologyFixtureWithLocker constructs a valid held-VM-lock transaction while injecting only network-lock behavior.
+// Kernel namespace identities and ifindexes are literal fixture inputs, and expected link names come from the independent
+// contract vectors above. The helper never reads a produced Topology to build its expected state, which prevents the
+// setup from teaching assertions to accept an implementation-derived identity.
 func newTopologyFixtureWithLocker(t *testing.T, config fakeNetworkLockerConfig) *topologyFixture {
 	t.Helper()
 	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
@@ -695,7 +867,7 @@ func mustTopologyKey(t *testing.T, ownerUID uint32, vmID, networkID string) topo
 	return key
 }
 
-// assertTopologyUnavailable verifies that non-prepared lifecycle states return no usable authority identity and a
+// assertTopologyUnavailable verifies that non-committed lifecycle states return no usable authority identity and a
 // structured network-domain failure.
 func assertTopologyUnavailable(t *testing.T, preparation *topologyPreparation) {
 	t.Helper()
