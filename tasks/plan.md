@@ -78,6 +78,7 @@ remains transitional. The routed policy, dual firewall backends, host-global TAP
 | Firewall generation record | `/var/lib/mvmctl/firewall/generation.json` | Root-owned persistent; exact committed/applying kernel authority |
 | Global capacity allocations | `/var/lib/mvmctl/allocations` | Root-owned persistent |
 | Locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700` ephemeral; no persistent mount-namespace handles |
+| LoopMount locks | Per-UID authority `loopmount/` | Root-owned `0600`; exclusive; never unlinked during the boot |
 | Global firewall lock | `/run/mvmctl/authority/firewall.lock` | Root-owned `0600`, ephemeral, and never unlinked |
 | VM sockets and PID mirrors | `/run/mvmctl/runtime/<uid>/<vm-id>` | Root-controlled parent, caller-owned `0700` VM directory; ephemeral and non-authoritative |
 | Jailer chroots | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
@@ -632,11 +633,11 @@ bounded size, and action-specific access. It retains the image staging descripto
 replacement, closes the complete chain in checked reverse order, and has deterministic before/after-open replacement
 tests for every caller-owned component.
 
-The private inactive `Server` transaction foundation uses exactly the named `rootfsEffects.ProvisionVM`,
+The private inactive `Server` transaction foundation currently uses the named `rootfsEffects.ProvisionVM`,
 `InspectImage`, and `OptimizeImage` methods plus the narrow `rootfsResourceLocks.Acquire` lease seam. It validates the
 request and caller before authority acquisition, retains a partially acquired lock lease for checked release, admits
-the fixed rootfs, invokes one effect, and validates the request-bound result. This is only a per-resource lock seam;
-there is no concrete production lock or effect adapter and no production `Server` constructor.
+the fixed rootfs, invokes one effect, and validates the request-bound result. There is no concrete production lock,
+effect adapter, or `Server` constructor.
 
 Every action requires its own effect cleanup capability and unwinds effect cleanup, rootfs authority, then resource
 lock with `context.WithoutCancel`. Closed action-specific effect states derive mandatory `rootfs_modified`,
@@ -648,11 +649,29 @@ before effect invocation and hands the stable actually admitted size to `rootfsE
 rootfs lease, allowing a future effect to distinguish first execution from a converged replay. `OptimizeImage` remains
 blocked from registration until durable shrink and replacement replay authority is implemented.
 
-These remain inactive foundations. The privileged receiver has no concrete descriptor-consuming effect adapter or
-resource lock, LoopMount handler, dispatcher entry, backend/public cutover, or legacy-route removal. The current path
-still uses `mvm run provision`, raw wire operations and sudo, including the arbitrary unmount/cleanup surface. Task 13
-remains pending and must finish receiver wiring, cut over all callers, and remove the legacy route before any LoopMount
-action can enter the final marker-only sudo policy.
+The accepted implementation splits production provisioning and inspection from an absent optimization seam. Exclusive
+locks use the shared Jailer-owned descriptor-safe authority layout at
+`/run/mvmctl/authority/<uid>/loopmount/{vm-<32hex>,image-<64hex>}.lock`. They are root-owned mode `0600`, keyed only by
+authenticated UID, family, and canonical ID, and never unlinked during the boot. Inspection and future optimization
+share the image lock. The shared Jailer authority layout is a prerequisite currently being implemented elsewhere; this
+plan does not claim it has landed.
+
+The concrete effect uses a private mount namespace, direct loop/mount/descriptor syscalls, and only fixed host
+filesystem probes and grow tools. It consumes the admitted rootfs descriptor directly and never reopens or passes a
+caller path, synthesizes a `/proc` FD path, executes a guest binary or chroot, accepts generic operations, scans or
+kills PIDs, or stages beneath `/tmp`. Grow converges from the exact old or target size and returns closed
+modified/durability-uncertain/outcome-unknown evidence.
+
+The first provisioning subset is fixed host-side hostname/hosts, DNS, existing-account SSH/sudo, fixed SSH service,
+embedded-agent, and fstab content. Missing-user creation, unpinned cloud-init copying, deblob/package commands,
+recursive guest cleanup, guest-code execution, partition-table growth, shrink, conversion, and replacement remain
+unsupported. No public cutover may silently reduce behavior: an explicit scope decision must accept each reduction or
+keep the old public workflow until a safe typed replacement exists.
+
+These remain inactive foundations and accepted design. There is no concrete LoopMount lock or effect, handler,
+dispatcher entry, backend/public cutover, or legacy-route removal. The current path still uses `mvm run provision`, raw
+wire operations and sudo, including arbitrary unmount/cleanup. Task 13 proceeds in the slices recorded in
+`tasks/todo.md`; no LoopMount action can enter the final marker-only sudo policy before cutover and legacy removal.
 
 ### Daemonless status reconciliation and relaunch parity
 

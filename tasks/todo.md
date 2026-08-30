@@ -553,8 +553,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction
-foundations are implemented; concrete effect/lock implementations, receiver registration, legacy removal, and
-host-mutation migration remain pending
+foundations are implemented; the concrete lock/effects design is accepted but not implemented; Jailer authority layout,
+receiver registration, legacy removal, and host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -575,12 +575,32 @@ host-mutation migration remain pending
     `DomainError`; and require action-specific cleanup authority before success.
   - [x] Admit a VM grow replay only at the exact old or target rootfs size, reject every third size before effects, and
     hand the actually admitted stable size to `rootfsEffects.ProvisionVM` through its private lease.
-  - [ ] Implement the concrete descriptor-consuming effect adapter and concrete per-resource transaction lock, then add
-    receiver handlers and exact central-dispatch entries. `OptimizeImage` must remain unregistered until durable shrink
-    and replacement replay authority exists; no LoopMount action is registered yet.
-  - [ ] Cut the production backend and public API over to those actions; the current path still sends raw wire
-    operations through sudo to `mvm run provision`.
-- [ ] Remove public `mvm run provision` and arbitrary unmount behavior.
+  - [ ] Land the shared Jailer descriptor-safe `/run/mvmctl/authority/<uid>` layout prerequisite. LoopMount must consume
+    that implementation and must not create a second pathname-based initializer. This prerequisite is in progress
+    elsewhere and is not complete in this branch.
+  - [ ] Implement exclusive, never-unlinked LoopMount locks beneath the shared layout. Use root-owned mode-`0600`
+    `loopmount/vm-<32hex>.lock` and `loopmount/image-<64hex>.lock` leaves. Key only by authenticated UID,
+    resource family, and canonical ID. Exclude cache locator, sizes, filesystem, action, and plan; inspection and
+    optimization share the image lock. Prove descriptor-safe creation/admission and checked idempotent release.
+  - [ ] Implement the private mount/loop foundation. Use a private-propagation mount namespace, direct loop, mount,
+    unmount, descriptor, sync, and detach syscalls, bounded partition discovery, autoclear, and read-only inspection.
+    Permit only fixed host filesystem probes/grow tools; reject caller paths, `/proc` FD passthrough, chroot, guest
+    executables, generic operations, PID scan/kill, and `/tmp` workspaces.
+  - [ ] Implement read-only `InspectImage` first. Consume the admitted descriptor, share the image lock with future
+    optimization, mount `ro,nosuid,nodev,noexec`, read only bounded fixed OS-release leaves, prove byte-for-byte image
+    stability, and return only unchanged or outcome-unknown evidence.
+  - [ ] Implement fixed `ProvisionVM` content and grow convergence. Support only hostname/hosts, DNS, existing-account
+    SSH/sudo, fixed SSH service, embedded-agent, and fstab content. Converge grow from the exact old or target size and
+    prove modified, durability-uncertain, and outcome-unknown mappings plus cancellation-independent cleanup.
+  - [ ] Split the production ProvisionVM/InspectImage effect interface from the absent OptimizeImage seam, then add only
+    provision and inspect receiver handlers and exact central-dispatch entries. `OptimizeImage` remains without a
+    production implementation, handler, or registration until durable shrink and replacement replay authority exists.
+  - [ ] Before public cutover, obtain an explicit scope decision for every unsupported legacy behavior: missing-user
+    creation, unpinned cloud-init copying, deblob/package commands, recursive guest cleanup, guest-code execution,
+    partition-table growth, shrink, conversion, and replacement. No cutover may silently reduce public behavior.
+  - [ ] After the scope gate, cut the production backend/API to the approved actions and remove public
+    `mvm run provision`, raw wire/sudo operations, arbitrary unmount, PID scanning/killing cleanup, and the legacy
+    `Provisioner`/`Op` path. Repository searches must prove that no legacy wrapper remains.
 - [ ] Move required module/sysctl/host mutations behind exact compiled allowlists.
 - [ ] Keep `host init`, `host reset`, group membership, and sudoers changes as explicit administrator operations; do not
   route authorization-boundary changes through the passwordless operator dispatcher.

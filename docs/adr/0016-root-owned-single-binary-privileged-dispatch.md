@@ -382,12 +382,11 @@ through checked, cancellation-independent cleanup while preserving the primary `
 real-filesystem tests exchange every caller-owned cache/resource ancestor and leaf immediately before and after its
 open; a request can only fail closed or retain the originally admitted rootfs, never the attacker object.
 
-The private inactive `Server` transaction foundation depends on exactly two narrow seams. `rootfsEffects` contains only
-the named `ProvisionVM`, `InspectImage`, and `OptimizeImage` methods, each consuming the retained private rootfs lease,
-closed filesystem, and action-specific plan where applicable. `rootfsResourceLocks` contains only
-`Acquire(context.Context, Caller, rootfsSelection) (rootfsResourceLockLease, error)`, and its lease exposes only checked
-`Release(context.Context)`. This is a per-resource lock seam, not a concrete production lock implementation. There is
-also no production effect adapter or `Server` constructor.
+The private inactive `Server` transaction foundation currently depends on exactly two narrow seams. Its existing
+`rootfsEffects` interface contains the named `ProvisionVM`, `InspectImage`, and `OptimizeImage` methods, and
+`rootfsResourceLocks` contains only
+`Acquire(context.Context, Caller, rootfsSelection) (rootfsResourceLockLease, error)`. There is no concrete production
+lock, effect adapter, or `Server` constructor.
 
 Each operation validates its closed request and authenticated caller before acquiring authority. It then acquires the
 resource-lock lease, admits the fixed rootfs, invokes the named effect, validates the request-bound result, and unwinds
@@ -410,12 +409,84 @@ records the actually observed size on the private rootfs lease delivered to `roo
 future concrete effect distinguish a first grow from an already-converged replay without reopening a path or trusting
 caller-reported post-effect state.
 
-No LoopMount receiver handler or central-switch registration exists yet. `OptimizeImage` is explicitly barred from
-registration until durable shrink and replacement replay authority is implemented. There is also no concrete
-descriptor-consuming effect adapter or resource lock, backend/public API cutover, or removal of the legacy
-`mvm run provision`, raw sudo/wire operation, arbitrary unmount, and PID-killing cleanup paths. The typed foundations
-are not permission to adapt a legacy resource path or operation into the new client; Task 13 remains pending and must
-finish receiver wiring and legacy removal as one migration.
+The accepted production seam will split before activation. One concrete descriptor-consuming adapter will implement
+only `ProvisionVM` and `InspectImage`. `OptimizeImage` will move to a separate private effect seam with no production
+implementation, constructor dependency, receiver handler, or dispatcher registration until durable shrink and image
+replacement replay authority exists. Keeping the named optimize client and protocol types does not activate that
+capability.
+
+LoopMount operations serialize through exclusive, root-owned advisory locks at exactly:
+
+```text
+/run/mvmctl/                                      root:root 0711
+└── authority/                                    root:root 0700
+    └── <authenticated-uid>/                      root:root 0700
+        └── loopmount/                            root:root 0700
+            ├── vm-<32-lowercase-hex>.lock        root:root 0600
+            └── image-<64-lowercase-hex>.lock     root:root 0600
+```
+
+The lock key is only authenticated UID, resource family, and canonical resource ID. Cache locator, admitted or target
+size, filesystem, action, and plan are excluded. `InspectImage` and future `OptimizeImage` therefore contend on the same
+image lock. Lock files are created descriptor-relatively beneath pinned directories with no-follow, beneath, and
+no-cross-mount resolution. Every component is rechecked for exact type, owner, mode, link count where applicable, and
+stable device/inode identity. Lock files are never unlinked during the boot: replacement could split exclusion across
+old and new inodes. A lease performs checked, idempotent unlock and close under `context.WithoutCancel`, preserving a
+primary `DomainError` and bounding cleanup details.
+
+This lock layout depends on the shared Jailer authority-directory implementation. That prerequisite is in progress in
+the Jailer work and is not present merely because this ADR reserves the names and modes. LoopMount must consume the
+shared descriptor-safe layout implementation; it must not create a second pathname-based `/run/mvmctl` initializer.
+
+Each effect runs in the short-lived privileged receiver's new private mount namespace. It makes propagation recursively
+private before attaching anything. The admitted `rootfsFD` is passed directly to loop-control ioctls with partition scan
+and autoclear enabled; inspection also configures the loop device read-only. Namespace setup, loop configuration,
+partition-device admission, mount/unmount, descriptor-relative guest-tree access, truncate, fsync, syncfs, and detach
+use direct Linux syscalls. No caller path is reopened or passed to a child, and no `/proc/self/fd` or
+`/proc/<pid>/fd` passthrough is constructed. Kernel-derived loop-device names and the root-owned private mountpoint are
+the only paths a fixed host filesystem tool may receive.
+
+The external host-tool allowlist is closed to read-only filesystem probing plus `e2fsck`, `resize2fs`, and `btrfs` for
+their named filesystem grow operations. Each invocation uses a fixed executable and argv under the dispatcher's cleared
+environment. No shell, `chroot`, guest executable, arbitrary operation, `losetup`, `mount`, `umount`, PID scan or kill,
+or `/tmp` workspace is permitted. A tool that may have started a mutation but lacks authoritative completion makes the
+effect outcome unknown.
+
+Partition discovery is bounded and admits only kernel-created children of the configured loop device. The effect
+verifies block-device identity and the closed filesystem type before selecting a raw filesystem or deterministic root
+partition. Ambiguous or unsupported layouts fail closed. Grow initially supports a raw filesystem or a partition whose
+already-admitted capacity reaches the target; rewriting MBR or GPT is outside this capability.
+
+Provisioning writes only receiver-generated, fixed-purpose content through the mounted-root descriptor. The accepted
+first subset is hostname and hosts content, DNS content, SSH keys and sudo policy for root or an already-existing parsed
+guest account, fixed SSH service content, the embedded mvm agent and its fixed service/token content, and a bounded
+fstab rewrite. Reads and replacements are bounded, no-follow, descriptor-relative, and durably synced. Service
+enablement or key generation that requires guest code is deferred to guest boot; root never executes it on the host.
+`InspectImage` mounts read-only with `nosuid`, `nodev`, and `noexec`, and reads only bounded fixed OS-release leaves.
+
+A grow admitted at the old size truncates the retained descriptor to the exact target, syncs it, then grows the selected
+filesystem. A replay admitted at the target never truncates again: it probes filesystem capacity and either reports
+convergence or completes the interrupted filesystem grow. Any third backing-file size is rejected by the existing
+authority before effects. Fixed-content writes are idempotent, so the same request converges after a crash without a
+caller-path reopen.
+
+Before mutation, failure state is `unchanged`. A known mutation followed by leaf, directory, filesystem, unmount,
+detach, and backing-file durability is `modified`. Failure to prove final durability after a known mutation is
+`modified durability uncertain`. A possibly started mutating tool or otherwise non-authoritative mutation boundary is
+`outcome unknown`. Effect cleanup precedes rootfs-lease and lock release and is cancellation-independent. Private mount
+namespace teardown and loop autoclear contain a receiver crash; cleanup never guesses a host mount or kills a process.
+
+The first adapter deliberately does not preserve missing-user creation, cloud-init directory copying without its own
+pinned capability, package-manager or deblob commands, recursive guest cleanup, guest host-key generation, arbitrary
+file/copy/command operations, custom shells, partition-table growth, shrink, conversion, or image replacement. These are
+public-cutover blockers, not permission to silently drop behavior. An explicit scope decision must either accept each
+user-visible reduction or defer cutover until a safe typed replacement exists.
+
+This section records accepted future design, not current runtime behavior. The Jailer authority layout prerequisite is
+still being implemented elsewhere; the concrete LoopMount lock and effects do not exist; no LoopMount receiver action is
+registered; and the backend/public path still uses `mvm run provision`, raw wire operations and sudo, arbitrary unmount,
+and PID-killing cleanup. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the
+new adapter.
 
 ### Release trust
 
