@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
-> authority, typed traffic/exec policy persistence, topology preparation, and typed LoopMount client/protocol
-> foundations described below are implemented. The mandatory per-VM network namespace, nftables-only `traffic` policy,
-> exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final marker-only sudo policy, and remaining typed
-> privileged operations are not implemented yet; see
+> authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation, and typed
+> LoopMount client/protocol foundations described below are implemented. The mandatory per-VM network namespace,
+> nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final
+> marker-only sudo policy, and remaining typed privileged operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
 
 ### Added
@@ -36,6 +36,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - VM invalidation removes both typed traffic families in one transaction, and execution authorization failures use a
   dedicated structured error code. These foundations are not yet exposed through the final public policy commands or
   connected to nftables/vsock enforcement; the transitional routed policy remains active until that atomic cutover.
+
+#### Typed nftables compiler foundation
+- Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
+  `mvmctl_inet` tables and their fixed prerouting, forward, input, and postrouting chains. Bridge prerouting uses raw
+  priority for source MAC/IPv4/ARP anti-spoofing and unsupported-L3 guards; bridge forward compiles same-network ARP,
+  established-reply, typed allow, and default-deny policy.
+- The inet generation compiles routed typed allows, established replies, managed host-service access, inbound/outbound
+  default deny, and conditional internet egress/NAT. A network with masquerade disabled receives neither an uplink
+  egress allow nor a masquerade rule. Invalid resolved intent rejects overlapping managed prefixes, prefixes without
+  usable hosts, network/broadcast addresses, and conflicting host/VM addresses.
+- Every rule carries a strict userdata identity containing the generation and rule identity. L1 evidence proves
+  deterministic ordering across input order and bounds allocation growth for a 1,000-VM, 1,000-grant generation.
+- This compiler foundation is inert: it creates no `nftables.Conn` and calls no `Flush`; it has no kernel
+  inspection/adoption, empty-generation removal, namespace execution, privileged action, public policy cutover, legacy
+  `nft` CLI removal, or L2 qualification. It therefore provides no atomic kernel-application or release-readiness
+  evidence.
 
 #### Per-VM network topology transaction foundation
 - Added a private root-side transaction that derives the shared managed bridge from owner/network identity and every
@@ -355,10 +371,10 @@ The following items are release blockers and are intentionally not described abo
   the public root `mvm run jailer` and `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
-- Remove the iptables backend, backend selector, and production `nft` CLI subprocess/parser. Apply one atomic generation
-  directly through a reviewed, pinned `github.com/google/nftables` version that default-denies both same-network and
-  cross-network VM traffic while preserving required system traffic and internet egress.
-- Complete the public API, CLI, nftables compiler, and vsock relay cutover from routed `ServiceAccessPolicy` and the
+- Connect the private typed compiler to owner-bound inspection/adoption, empty-generation removal, namespace-scoped
+  execution, and one privileged `Conn.Flush` application before links become usable. Then remove the iptables backend,
+  backend selector, and production `nft` CLI subprocess/parser; the compiler alone is not an atomic kernel application.
+- Complete the public API, CLI, nftables application, and vsock relay cutover from routed `ServiceAccessPolicy` and the
   `allow_remote_exec` trust mesh to the implemented typed traffic/exec persistence foundations; then remove the
   transitional tables, flags, and paths atomically.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the

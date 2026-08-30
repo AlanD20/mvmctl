@@ -1,8 +1,8 @@
 # Per-VM Network Namespaces and Typed Connectivity Policies
 
-**Status:** Accepted — v0.3.0 implementation pending
+**Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-08-28 (direct Go nftables adapter)
+**Last Updated:** 2026-08-30 (typed nftables compiler foundation)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -83,27 +83,28 @@ firewall and activation stages, durable topology record, production constructor,
 
 ### nftables is the only firewall backend
 
-v0.3.0 requires nftables. The iptables backend, configuration option, repositories, renderers, fallback behavior, and
-tests are removed.
+v0.3.0 requires nftables. The final implementation removes the iptables backend, configuration option, repositories,
+renderers, fallback behavior, and tests.
 
-The root-owned adapter in `internal/service/firewall/` programs the kernel through a reviewed, pinned version of
-`github.com/google/nftables`. The module speaks the nftables netlink protocol directly; `github.com/mdlayher/netlink`
-may remain its transitive implementation dependency but is not a second mvmctl adapter. Production does not execute or
-parse the `nft` CLI, link `libnftnl`, depend on `nftables.service`, or fall back to a CLI implementation. Hosts still
-require the applicable kernel nftables, bridge-family, connection-tracking, and NAT capabilities, and the privileged
-receiver still requires the authority needed to program them.
+The final root-owned adapter in `internal/service/firewall/` must program the kernel through a reviewed, pinned version
+of `github.com/google/nftables`. The module speaks the nftables netlink protocol directly;
+`github.com/mdlayher/netlink`
+may remain its transitive implementation dependency but is not a second mvmctl adapter. Final production must not
+execute or parse the `nft` CLI, link `libnftnl`, depend on `nftables.service`, or fall back to a CLI implementation.
+Hosts still require the applicable kernel nftables, bridge-family, connection-tracking, and NAT capabilities, and the
+privileged receiver still requires the authority needed to program them.
 
-Only mvmctl-owned typed intent crosses the privileged protocol. Types from `github.com/google/nftables` and
-`github.com/mdlayher/netlink` remain private to the root-side firewall adapter. One reconciliation constructs a complete
-generation and submits it in one `Conn.Flush` transaction. The adapter takes `context.Context` first, binds cancellation
-and deadlines to the netlink operation, and maps failures to `pkg/errs.DomainError`; a cancelled operation cannot be
-reported as successful.
+Only mvmctl-owned typed intent may cross the final privileged protocol. Types from `github.com/google/nftables` and
+`github.com/mdlayher/netlink` must remain private to the root-side firewall adapter. One reconciliation must construct a
+complete generation and submit it in one `Conn.Flush` transaction. The adapter must take `context.Context` first, bind
+cancellation and deadlines to the netlink operation, and map failures to `pkg/errs.DomainError`; a cancelled operation
+cannot be reported as successful.
 
-Host readiness uses direct kernel capability probes rather than executable lookup, `nft --version`, or parsing CLI
-diagnostics. The `nft` CLI may remain installed in disposable QA runners as an independent, read-only observation
-oracle. It is not a production dependency or a sudo target.
+Final host readiness must use direct kernel capability probes rather than executable lookup, `nft --version`, or
+parsing CLI diagnostics. The `nft` CLI may remain installed in disposable QA runners as an independent, read-only
+observation oracle. It is not a production dependency or a sudo target.
 
-One nftables implementation owns complete atomic generations for:
+The final nftables implementation must own complete atomic generations for:
 
 - bridge-family same-network filtering and source MAC/IP anti-spoofing;
 - IP-family routed filtering between managed networks;
@@ -111,9 +112,22 @@ One nftables implementation owns complete atomic generations for:
 - established reply handling and required mvmctl host services; and
 - managed internet egress/NAT.
 
-Managed VM-to-VM traffic is default-deny whether the VMs share a network or use different networks. Required ARP and
-system traffic are derived internally. Links are not made usable before the applicable deny and allow generation is
-installed successfully.
+Managed VM-to-VM traffic must be default-deny whether the VMs share a network or use different networks. Required ARP
+and system traffic are derived internally. Links must not become usable before the applicable deny and allow generation
+is installed successfully.
+
+Implementation note (2026-08-30): `go.mod` now pins `github.com/google/nftables v0.3.0`, and the private
+`internal/service/firewall/` compiler builds fixed bridge/inet tables and chains from closed resolved intent. Its bridge
+prerouting chain has raw priority and holds source MAC/IPv4/ARP anti-spoofing plus unsupported-L3 guards; the bridge
+forward chain holds same-network policy. Inet forward/input/postrouting cover routed policy, established replies,
+managed host services, default deny, conditional uplink egress, and NAT. Masquerade-disabled networks receive no uplink
+egress allow. The compiler rejects overlapping prefixes and unusable IPv4 authorities, encodes generation identity in
+strict rule userdata, orders output deterministically, and has bounded allocation-growth evidence for 1,000 VMs.
+
+This is an inert compiler foundation, not the root-owned adapter described above. It has no `nftables.Conn`/`Flush`,
+kernel inspection or adoption, empty-generation removal, namespace-scoped execution, privileged action, public policy
+cutover, legacy `nft` CLI removal, or L2 qualification. No atomic kernel-application or release-readiness claim follows
+from the compiler tests.
 
 ### Two public policy families
 
@@ -253,11 +267,11 @@ capabilities require new typed policy families and explicit enforcement contract
 
 ## Release Gate
 
-Before production integration, a focused compatibility spike must prove the pinned Go module supports bridge-family
-MAC/IP anti-spoofing, same-network and routed filtering, established/related state, TCP/UDP ranges, NAT masquerade,
-stable mvmctl generation identity, namespace-scoped connections, context cancellation/deadlines, and structured
-inspection. It must also prove that one invalid expression aborts the complete transaction and benchmark a
-representative 1,000-VM generation within a reviewed budget.
+The private compiler tests now cover its bridge/IP/NAT expression construction, stable generation identity,
+deterministic ordering, validation, and bounded allocation growth for a representative 1,000-VM generation. Before
+production integration, the remaining compatibility spike must prove these expressions against the kernel plus
+namespace-scoped connections, context cancellation/deadlines, structured inspection/adoption and removal, atomic
+invalid-batch failure, and representative 1,000-VM runtime within a reviewed performance budget.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

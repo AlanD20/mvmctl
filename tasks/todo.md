@@ -475,11 +475,17 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Owner:** engineer
 **Dependencies:** Tasks 3 and 9
 
-- [ ] Run a focused compatibility spike against a reviewed, pinned `github.com/google/nftables` version. Prove every
-  required bridge/IP/NAT expression, structured inspection, namespace-scoped connections, cancellation/deadlines,
-  atomic invalid-batch failure, and a representative 1,000-VM generation within a reviewed budget.
-- [ ] Add typed privileged nftables generation/application under `internal/service/firewall/`; caller cannot pass syntax,
-  files, includes, commands, or library/netlink types across the privileged wire.
+- [x] Pin `github.com/google/nftables v0.3.0` and add the private typed compiler for fixed bridge/inet tables and
+  chains, raw-priority anti-spoof/unsupported-L3 guards,
+  same-network/routed/host-service/default-deny/conditional-egress/NAT rules, generation userdata, and
+  overlap/unusable-IPv4 rejection. It performs no kernel or privileged effect.
+- [x] Add deterministic input-order coverage and bounded allocation-growth evidence for a 1,000-VM, 1,000-grant
+  generation.
+- [ ] Complete the compatibility spike against the kernel: prove required expressions, structured inspection/adoption
+  and removal, namespace-scoped connections, cancellation/deadlines, atomic invalid-batch failure, and representative
+  1,000-VM runtime within a reviewed budget.
+- [ ] Add typed privileged nftables application under `internal/service/firewall/`; caller cannot pass syntax, files,
+  includes, commands, or library/netlink types across the privileged wire.
 - [ ] Keep `github.com/mdlayher/netlink` transitive only; do not add a second low-level adapter or a production CLI
   fallback.
 - [ ] Install bridge-family anti-spoofing and same-network filtering.
@@ -490,8 +496,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   sudo rule, and obsolete documentation; do not require `libnftnl` or `nftables.service` at runtime.
 - [ ] Probe required kernel nftables, bridge-family, connection-tracking, and NAT capabilities directly rather than
   using executable lookup, `nft --version`, or parsed CLI diagnostics.
-- [ ] L1 proves typed compilation, atomic failure, cancellation, reconciliation, and scale. L2 may use the `nft` CLI only
-  as an independent read-only oracle and proves the installed product has no production CLI dependency.
+- [ ] Complete L1 with kernel-application atomic failure, cancellation, reconciliation, and runtime scale. L2 may use
+  the `nft` CLI only as an independent read-only oracle and prove the installed product has no production CLI
+  dependency.
 
 ### Task 11: Replace service-access policy with typed traffic policies
 

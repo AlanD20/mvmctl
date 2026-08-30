@@ -344,12 +344,25 @@ Selection logic in `firewall.NewFirewallTracker(backend, xtcommentAvail, db)`. B
 
 The `FirewallTracker` also reads an `iptables_xtcomment` user setting that adds comment tags to iptables rules for easier identification.
 
-ADR-0017 defines the clean-break v0.3.0 replacement. It removes iptables, the backend selector, backend-specific
-repositories, and the production `nft` CLI path. The root-owned `internal/service/firewall/` adapter will accept only
-mvmctl-owned typed intent and use a reviewed, pinned `github.com/google/nftables` version to program the kernel directly
-in one complete transaction. Library and netlink types stay private to that adapter; there is no CLI fallback. Kernel
-nftables, bridge-family, connection-tracking, NAT, and privilege capabilities remain host requirements. A disposable QA
-runner may use the `nft` CLI only as an independent read-only oracle.
+The private v0.3.0 compiler foundation under `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and
+accepts only fully resolved mvmctl-owned intent. It emits fixed `mvmctl_bridge` and `mvmctl_inet` tables and fixed hook
+chains. Bridge prerouting uses raw priority for source MAC/IPv4/ARP anti-spoofing and unsupported-L3 guards, while
+bridge forward compiles same-network allows and default deny. Inet forward/input/postrouting compile routed allows,
+established replies, host-service access, default deny, and conditional egress/NAT; disabling masquerade emits neither
+uplink egress nor NAT. Compilation rejects overlapping managed IPv4 prefixes and unusable network, host, or endpoint
+addresses. Strict rule userdata binds every rule to its generation identity, input ordering is deterministic, and L1
+evidence bounds allocation growth for a 1,000-VM generation.
+
+This foundation is inert. It creates no `nftables.Conn`, calls no `Flush`, and provides no inspection/adoption,
+empty-generation removal, namespace execution, privileged action, public policy cutover, legacy `nft` CLI removal, or
+L2 qualification. It is not evidence of atomic kernel application or release readiness; the transitional backends and
+public policy path above remain active.
+
+ADR-0017 defines the remaining clean-break replacement. The final adapter must apply one complete generation directly,
+then remove iptables, the backend selector, backend-specific repositories, and the production `nft` CLI path. Library
+and netlink types stay private to that adapter; there is no final CLI fallback. Kernel nftables, bridge-family,
+connection-tracking, NAT, and privilege capabilities remain host requirements. A disposable QA runner may use the
+`nft` CLI only as an independent read-only oracle.
 
 ## Relationships
 

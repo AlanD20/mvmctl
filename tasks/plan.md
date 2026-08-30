@@ -47,6 +47,10 @@ continue without silently deleting it.
   and the clean-break removal of the transitional policy path remain pending.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
+- Private typed nftables compiler pinned to `github.com/google/nftables v0.3.0`, with fixed bridge/inet tables and
+  chains, raw-priority ingress guards, same-network/routed/host-service/default-deny/conditional-egress/NAT rules,
+  strict generation userdata, resolved-IPv4 rejection, and deterministic bounded 1,000-VM L1 evidence. It performs no
+  kernel or privileged effect yet.
 - Named typed LoopMount client/protocol methods for VM provisioning and image inspection/optimization, with grow-only
   VM resize, bounded typed values, and strict process-start/response-EOF authority. No LoopMount receiver action or
   descriptor-pinned resource lease is wired yet.
@@ -547,17 +551,24 @@ while adding `cleanup_required=true`. The foundation deliberately exposes no pro
 release. A concrete root network authority/locker, netlink effect adapter, firewall and activation stages, durable
 record, and Jailer capability transfer remain pending.
 
-The root-side adapter lives in `internal/service/firewall/` and receives only mvmctl-owned typed intent. It uses a
-reviewed, pinned `github.com/google/nftables` version to submit one complete generation through one `Conn.Flush` call.
-Neither its types nor `github.com/mdlayher/netlink` types cross the privileged wire or enter the network domain. The
-latter may remain a transitive dependency only; mvmctl does not maintain a second low-level netlink adapter.
+The private root-side compiler in `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and receives
+only mvmctl-owned typed resolved intent. It builds fixed bridge and inet tables/chains. Raw-priority bridge prerouting
+holds source MAC/IPv4/ARP anti-spoofing and unsupported-L3 guards; bridge forward holds same-network policy. Inet
+forward/input/postrouting cover routed policy, established replies, host services, default deny, and conditional
+egress/NAT, with neither uplink egress nor NAT when masquerade is false. It rejects overlapping managed prefixes and
+unusable IPv4 authorities, gives every rule strict generation userdata, orders output deterministically, and has
+bounded allocation-growth evidence for a 1,000-VM generation.
 
-Production does not execute or parse the `nft` CLI, use `libnftnl`, depend on `nftables.service`, or retain a CLI
-fallback. Host readiness probes kernel capabilities directly. The `nft` CLI may be present in disposable QA runners as
-an independent read-only state oracle, never as a production dependency or sudo target. Before integration, a focused
-compatibility spike must prove every expression and family required by ADR-0017, atomic invalid-batch failure,
-namespace-scoped connections, structured inspection, cancellation/deadline behavior, and a representative 1,000-VM
-generation within a reviewed performance budget.
+This foundation creates no `nftables.Conn` and calls no `Flush`. Inspection/adoption, empty-generation removal,
+namespace execution, privileged registration/application, public policy cutover, legacy `nft` CLI removal, and L2
+qualification remain pending. The final adapter must submit one complete generation through one `Conn.Flush` call;
+until then there is no atomic kernel-application evidence. Library and transitive netlink types must stay private.
+
+The final production path must not execute or parse the `nft` CLI, use `libnftnl`, depend on `nftables.service`, or
+retain a CLI fallback. Host readiness must probe kernel capabilities directly. A disposable QA runner may use `nft`
+only as an independent read-only oracle. The remaining compatibility spike must prove kernel expression support,
+atomic invalid-batch failure, namespace-scoped connections, structured inspection/adoption and removal,
+cancellation/deadline behavior, and representative 1,000-VM runtime within a reviewed performance budget.
 
 The public policy families are:
 
