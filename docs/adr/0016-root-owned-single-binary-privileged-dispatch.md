@@ -434,9 +434,11 @@ stable device/inode identity. Lock files are never unlinked during the boot: rep
 old and new inodes. A lease performs checked, idempotent unlock and close under `context.WithoutCancel`, preserving a
 primary `DomainError` and bounding cleanup details.
 
-This lock layout depends on the shared Jailer authority-directory implementation. That prerequisite is in progress in
-the Jailer work and is not present merely because this ADR reserves the names and modes. LoopMount must consume the
-shared descriptor-safe layout implementation; it must not create a second pathname-based `/run/mvmctl` initializer.
+This lock layout depends on the shared privileged authority layout. Before implementing the concrete LoopMount lock,
+the implementation must either extract a narrow, cycle-free fixed authority-tree capability/module or have the early
+privileged receiver pass LoopMount a typed root capability. LoopMount must not import Jailer or create a second
+pathname-based `/run/mvmctl` initializer. This ADR reserves the names and modes; it does not establish the shared
+layout's implementation status.
 
 Each effect runs in the short-lived privileged receiver's new private mount namespace. It makes propagation recursively
 private before attaching anything. The admitted `rootfsFD` is passed directly to loop-control ioctls with partition scan
@@ -482,11 +484,11 @@ file/copy/command operations, custom shells, partition-table growth, shrink, con
 public-cutover blockers, not permission to silently drop behavior. An explicit scope decision must either accept each
 user-visible reduction or defer cutover until a safe typed replacement exists.
 
-This section records accepted future design, not current runtime behavior. The Jailer authority layout prerequisite is
-still being implemented elsewhere; the concrete LoopMount lock and effects do not exist; no LoopMount receiver action is
-registered; and the backend/public path still uses `mvm run provision`, raw wire operations and sudo, arbitrary unmount,
-and PID-killing cleanup. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the
-new adapter.
+This section records accepted future design, not current runtime behavior. This ADR does not establish implementation
+status for the shared privileged authority layout; the concrete LoopMount lock and effects do not exist; no LoopMount
+receiver action is registered; and the backend/public path still uses `mvm run provision`, raw wire operations and
+sudo, arbitrary unmount, and PID-killing cleanup. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions
+must not be wrapped by the new adapter.
 
 ### Release trust
 

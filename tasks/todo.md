@@ -553,8 +553,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction
-foundations are implemented; the concrete lock/effects design is accepted but not implemented; Jailer authority layout,
-receiver registration, legacy removal, and host-mutation migration remain pending
+foundations are implemented; the concrete lock/effects design is accepted but not implemented; shared privileged
+authority-layout boundary, receiver registration, legacy removal, and host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -575,9 +575,10 @@ receiver registration, legacy removal, and host-mutation migration remain pendin
     `DomainError`; and require action-specific cleanup authority before success.
   - [x] Admit a VM grow replay only at the exact old or target rootfs size, reject every third size before effects, and
     hand the actually admitted stable size to `rootfsEffects.ProvisionVM` through its private lease.
-  - [ ] Land the shared Jailer descriptor-safe `/run/mvmctl/authority/<uid>` layout prerequisite. LoopMount must consume
-    that implementation and must not create a second pathname-based initializer. This prerequisite is in progress
-    elsewhere and is not complete in this branch.
+  - [ ] Resolve the shared privileged descriptor-safe `/run/mvmctl/authority/<uid>` layout prerequisite before the
+    concrete LoopMount lock. Either extract a narrow, cycle-free fixed authority-tree capability/module or have the
+    early privileged receiver pass a typed root capability. LoopMount must not import Jailer or create a second
+    pathname-based initializer. This task records the dependency, not its implementation status.
   - [ ] Implement exclusive, never-unlinked LoopMount locks beneath the shared layout. Use root-owned mode-`0600`
     `loopmount/vm-<32hex>.lock` and `loopmount/image-<64hex>.lock` leaves. Key only by authenticated UID,
     resource family, and canonical ID. Exclude cache locator, sizes, filesystem, action, and plan; inspection and

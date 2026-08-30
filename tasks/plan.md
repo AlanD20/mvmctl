@@ -650,11 +650,13 @@ rootfs lease, allowing a future effect to distinguish first execution from a con
 blocked from registration until durable shrink and replacement replay authority is implemented.
 
 The accepted implementation splits production provisioning and inspection from an absent optimization seam. Exclusive
-locks use the shared Jailer-owned descriptor-safe authority layout at
+locks use the shared privileged descriptor-safe authority layout at
 `/run/mvmctl/authority/<uid>/loopmount/{vm-<32hex>,image-<64hex>}.lock`. They are root-owned mode `0600`, keyed only by
 authenticated UID, family, and canonical ID, and never unlinked during the boot. Inspection and future optimization
-share the image lock. The shared Jailer authority layout is a prerequisite currently being implemented elsewhere; this
-plan does not claim it has landed.
+share the image lock. Before the concrete lock, either extract a narrow, cycle-free fixed authority-tree
+capability/module or have the early privileged receiver pass a typed root capability. LoopMount must not import Jailer
+or duplicate a pathname initializer. This plan records the shared privileged authority-layout dependency, not its
+implementation status.
 
 The concrete effect uses a private mount namespace, direct loop/mount/descriptor syscalls, and only fixed host
 filesystem probes and grow tools. It consumes the admitted rootfs descriptor directly and never reopens or passes a
