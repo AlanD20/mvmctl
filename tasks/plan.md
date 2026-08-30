@@ -72,9 +72,10 @@ continue without silently deleting it.
   16 partitions, and either a matching raw filesystem with no partitions or exactly one matching partition; malformed,
   duplicate, and ambiguous layouts fail closed. A pure loop-device contract fixes control identity `10:237`, derives
   block-major-`7` devices from exact 20-bit minors, and builds only an admitted-FD `AUTOCLEAR|PARTSCAN` configuration
-  with `READ_ONLY` for read-only access. Device opens, ioctls, attach, detach, discovery, mounts, mount namespaces,
-  effects, production `Server` construction, receiver handling, dispatch, public/backend cutover, and legacy-route
-  removal remain pending.
+  with `READ_ONLY` for read-only access. A private inert capability now performs identity-rechecked fixed-device opens,
+  bounded free-device allocation and atomic configure, plus checked cancellation-independent release without exposing
+  paths or descriptors. Rootfs discovery and partition probing, mounts, mount namespaces, effects, production `Server`
+  construction, receiver handling, dispatch, public/backend cutover, and legacy-route removal remain pending.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -670,8 +671,14 @@ derives `/dev/loop<N>` only for `N` from `0` through `2^20-1`. The derived devic
 and minor exactly `N`. Its `unix.LoopConfig` carries the exact admitted rootfs descriptor with only
 `LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, adding `LO_FLAGS_READ_ONLY` only for read-only access. Every other field remains
 zero; direct I/O and legacy setup are excluded. Invalid descriptors, access, indices, or identities fail closed through
-the private LoopMount `DomainError` path. This is a pure contract: device opens, ioctls, attach, detach, discovery,
-mounts, mount-namespace setup, effects, `Server` construction, handlers, and registrations remain unimplemented.
+the private LoopMount `DomainError` path. A private inert attach/release capability opens only the fixed control and
+derived loop leaves with `O_RDWR|O_CLOEXEC|O_NOFOLLOW`, rechecks their identities with `fstat`, obtains candidates via
+`LOOP_CTL_GET_FREE`, and retries configure-time `EBUSY` at most 16 times. It applies one atomic `LOOP_CONFIGURE` from the
+admitted rootfs descriptor/access and never issues `LOOP_CLR_FD` after configure failure. A successful lease exposes
+no path or descriptor accessor and releases through checked, idempotent, cancellation-independent `LOOP_CLR_FD` plus
+close, with `AUTOCLEAR` as crash safety. A configured lease remains available for cleanup if control close fails.
+Rootfs discovery and partition probing, mounts, mount-namespace setup, effects, production `Server` construction,
+handlers, registrations, and activation remain unimplemented.
 
 The private inactive `Server` transaction foundation splits its effects between `rootfsEffects`, which contains exactly
 `ProvisionVM` and `InspectImage`, and private `imageOptimizeEffects`, which contains only `OptimizeImage`. Provisioning

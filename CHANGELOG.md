@@ -117,14 +117,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added an inert deterministic rootfs mount-source policy over pathless receiver-derived probes. It accepts at most 16
   partition probes. A raw source is accepted only when no partitions exist and its filesystem exactly matches the
   request; otherwise exactly one partition must match. Malformed probes, reused or duplicate block identities,
-  duplicate partition numbers, raw-plus-partition ambiguity, and missing or multiple matches fail closed. Device
-  discovery, ioctls, mounts, mount namespaces, effects, and `Server` activation remain pending.
+  duplicate partition numbers, raw-plus-partition ambiguity, and missing or multiple matches fail closed. Receiver
+  rootfs-source discovery and partition probing, mounts, mount namespaces, effects, and `Server` activation remain
+  pending.
 - Added an inert pure loop-device kernel contract. It admits only `/dev/loop-control` as character device `10:237` and
   derives `/dev/loop<N>` only for a 20-bit index whose block identity is major `7` and minor exactly `N`. Its
   `unix.LoopConfig` binds the exact admitted rootfs descriptor with `LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, adds
   `LO_FLAGS_READ_ONLY` only for read-only access, and leaves every other field zero without legacy setup or direct I/O.
-  Invalid values fail closed through the private LoopMount `DomainError` path. No device open, ioctl, attach, detach,
-  discovery, mount, namespace, effect, `Server` construction, handler, or registration exists.
+  Invalid values fail closed through the private LoopMount `DomainError` path. The pure constructor itself performs no
+  I/O; the separate private capability below consumes the contract.
+- Added a private, inert loop-device attach/release capability. It opens only fixed `/dev/loop-control` and derived
+  `/dev/loop<N>` leaves with `O_RDWR|O_CLOEXEC|O_NOFOLLOW`, then rechecks their exact identities with `fstat`. Each
+  candidate comes from `LOOP_CTL_GET_FREE`; configure-time `EBUSY` is bounded to 16 attempts. One atomic
+  `LOOP_CONFIGURE` binds the admitted rootfs descriptor and access mode. A failed configure is never followed by
+  `LOOP_CLR_FD`, because a competing process may own that device.
+- Successful attachment returns a private lease with no path or descriptor accessor. Its checked, idempotent,
+  cancellation-independent release issues `LOOP_CLR_FD` and closes the loop descriptor, while `AUTOCLEAR` remains
+  receiver-crash safety. If loop configuration succeeds but closing loop-control fails, the configured lease is still
+  returned with the error so it can be released. Rootfs discovery and partition probing, mounts, namespaces, effects,
+  production `Server` construction, receiver handlers, dispatcher registration, and activation remain pending.
 - Added an inactive private receiver-transaction foundation with two action-specific effect seams:
   `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while private `imageOptimizeEffects` contains only
   `OptimizeImage`. Each action validates only its effect dependency plus the shared rootfs authority and per-resource

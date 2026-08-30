@@ -353,16 +353,27 @@ The inert private rootfs mount-source policy consumes only pathless receiver-der
 probes. It accepts at most 16 partition probes. A raw source is valid only when there are no partitions and its probed
 filesystem exactly matches the request; a partitioned source is valid only when exactly one partition matches.
 Malformed probes, reused or duplicate block identities, duplicate partition numbers, raw-plus-partition ambiguity, and
-missing or multiple matches fail closed. Block-device discovery, loop ioctls, mounts, private mount-namespace setup,
-effect implementations, and `Server` activation remain pending.
+missing or multiple matches fail closed. Receiver rootfs-source discovery and partition probing, mounts, private
+mount-namespace setup, effect implementations, and `Server` activation remain pending.
 
 The inert pure loop-device kernel contract admits only fixed `/dev/loop-control` character-device identity `10:237`.
 It derives `/dev/loop<N>` only for an index from `0` through `2^20-1` and requires block major `7` with minor exactly
 `N`. The generated `unix.LoopConfig` carries the exact admitted rootfs descriptor and only
 `LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, plus `LO_FLAGS_READ_ONLY` for read-only access; every other field remains zero,
 direct I/O is disabled, and no legacy setup fields are used. Invalid inputs fail closed through the private LoopMount
-`DomainError` path. This contract opens no device and performs no ioctl, attach, detach, discovery, mount, namespace,
-effect, `Server` construction, handler, or registration.
+`DomainError` path. The pure constructor itself performs no I/O; the private attach/release capability consumes it.
+
+That private capability is inert. It opens only fixed `/dev/loop-control` and the kernel-derived `/dev/loop<N>` with
+`O_RDWR|O_CLOEXEC|O_NOFOLLOW`, then uses `fstat` to recheck the exact control and block-device identities. It obtains
+each candidate through `LOOP_CTL_GET_FREE` and retries only configure-time `EBUSY`, for at most 16 attempts. One atomic
+`LOOP_CONFIGURE` binds the admitted rootfs descriptor and closed access mode. Configure failure closes the candidate
+without `LOOP_CLR_FD`, because another process may have won the free-device race.
+
+The resulting package-private lease exposes no path or descriptor accessor. Its checked, idempotent release uses
+`LOOP_CLR_FD` and closes the loop descriptor under cancellation-independent cleanup; `AUTOCLEAR` remains crash safety.
+If configuration succeeds but loop-control close fails, attachment returns both the configured lease and the error so
+the caller can still release it. Rootfs discovery and partition probing, mounts, private namespaces, effects,
+production `Server` construction, receiver handlers, dispatcher registration, and activation remain pending.
 
 An inactive private `Server` now coordinates each admitted operation through two action-specific effect seams.
 `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while the private `imageOptimizeEffects` contains

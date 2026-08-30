@@ -553,11 +553,11 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, inactive receiver-transaction
-foundations, deterministic rootfs mount-source policy, and pure loop-device kernel contract are implemented; the
-shared authority filesystem, its separate Jailer and LoopMount capability families, canonical VM/image locks, and the
-private service lock adapter are implemented and reviewed; device opens, ioctls, attach, detach, discovery, mounts,
-namespaces, effects, `Server` activation, receiver registration, backend/public cutover, legacy removal, and
-host-mutation migration remain pending
+foundations, deterministic rootfs mount-source policy, pure loop-device kernel contract, and private inert
+attach/release capability are implemented; the shared authority filesystem, its separate Jailer and LoopMount
+capability families, canonical VM/image locks, and the private service lock adapter are implemented and reviewed;
+rootfs discovery and partition probing, mounts, namespaces, effects, `Server` activation, receiver registration,
+backend/public cutover, legacy removal, and host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -615,8 +615,16 @@ host-mutation migration remain pending
     - [x] Define the inert pure loop-device kernel contract: fixed `/dev/loop-control` character-device identity
       `10:237`; derived `/dev/loop<N>` block major `7` with exact 20-bit minor `N`; and an exact admitted-FD
       `unix.LoopConfig` with `AUTOCLEAR|PARTSCAN`, `READ_ONLY` only for read-only access, and every other field zero.
-      Exclude legacy setup and direct I/O; fail closed with a private `DomainError`. This opens no device and performs
-      no ioctl, attach, detach, discovery, mount, namespace, effect, `Server` construction, handler, or registration.
+      Exclude legacy setup and direct I/O; fail closed with a private `DomainError`. The pure constructor performs no
+      I/O; the private attach/release capability below consumes it.
+    - [x] Implement the private inert loop-device attach/release capability. Open only fixed control and derived device
+      leaves with `O_RDWR|O_CLOEXEC|O_NOFOLLOW`; recheck exact identities with `fstat`; select candidates through
+      `LOOP_CTL_GET_FREE`; and bound configure-time `EBUSY` to 16 attempts. Apply one atomic `LOOP_CONFIGURE` from the
+      admitted rootfs descriptor/access, never issue `LOOP_CLR_FD` after configure failure, and return a configured
+      lease with a control-close error so cleanup authority is retained. Expose no path or descriptor accessor. Use
+      checked, idempotent, cancellation-independent `LOOP_CLR_FD` plus close on release, with `AUTOCLEAR` for crash
+      safety. Rootfs discovery and partition probing, mounts, namespaces, effects, production `Server` construction,
+      handlers, registration, and activation remain pending.
   - [ ] Implement read-only `InspectImage` first. Consume the admitted descriptor, share the image lock with future
     optimization, mount `ro,nosuid,nodev,noexec`, read only bounded fixed OS-release leaves, prove byte-for-byte image
     stability, and return only unchanged or outcome-unknown evidence.

@@ -487,11 +487,19 @@ only for read-only access. Every offset, size limit, name, encryption value, blo
 remains zero, and direct I/O is not enabled. Invalid descriptors, access modes, indices, or device identities fail
 closed through the private LoopMount `DomainError` path with no usable result.
 
-Receiver discovery of kernel-created loop children and verification of the identities supplied to that policy remain
-future effect work. The pure contract does not open `/dev/loop-control` or `/dev/loop<N>` and performs no ioctl, attach,
-detach, discovery, mount, or private mount-namespace setup. No effect implementation, `Server` construction, receiver
-handler, or dispatcher registration exists yet. The future grow effect supports a raw filesystem or a partition whose
-already-admitted capacity reaches the target; rewriting MBR or GPT is outside this capability.
+The implemented package-private attach capability opens only fixed `/dev/loop-control` and derived `/dev/loop<N>`
+leaves with `O_RDWR|O_CLOEXEC|O_NOFOLLOW`, then uses `fstat` to recheck their exact identities. It obtains each candidate
+with `LOOP_CTL_GET_FREE` and retries only configure-time `EBUSY`, with a hard limit of 16 attempts. It passes the pure
+contract's exact admitted rootfs descriptor and access mode to one atomic `LOOP_CONFIGURE`. Configure failure closes
+the candidate without issuing `LOOP_CLR_FD`, because another process may have won the free-device race.
+
+A successful attach returns only a private lease, never a path or descriptor accessor. Its checked, idempotent release
+uses `LOOP_CLR_FD` and closes the loop descriptor under `context.WithoutCancel`; `LO_FLAGS_AUTOCLEAR` remains receiver-
+crash safety. If configuration succeeds but closing the loop-control descriptor fails, attachment returns both the
+configured lease and the close error so the caller retains cleanup authority. Rootfs discovery and partition probing,
+mounts, private mount-namespace setup, effect implementation, production `Server` construction, receiver handlers,
+dispatcher registration, and activation remain future work. The future grow effect supports a raw filesystem or a
+partition whose already-admitted capacity reaches the target; rewriting MBR or GPT is outside this capability.
 
 Provisioning writes only receiver-generated, fixed-purpose content through the mounted-root descriptor. The accepted
 first subset is hostname and hosts content, DNS content, SSH keys and sudo policy for root or an already-existing parsed
@@ -521,12 +529,13 @@ user-visible reduction or defer cutover until a safe typed replacement exists.
 This section combines implemented inactive authority and selection-policy foundations with accepted future effect
 design, not current runtime behavior. The shared cycle-free authority module now has separate Jailer and LoopMount
 capability families, the private LoopMount service adapter implements the coordinator's canonical resource-lock seam,
-the deterministic mount-source policy remains pathless and inert, and the loop-device kernel contract remains pure.
-No production constructor activates that `Server`; device opens, discovery, loop ioctls, attach, detach, mounts,
-private mount-namespace setup, and concrete LoopMount effects do not exist; no LoopMount receiver handler or dispatcher
-action is registered; and the backend/public path still uses `mvm run provision`, raw wire operations and sudo,
-arbitrary unmount, and PID-killing cleanup. The implemented foundations therefore authorize no privileged mount
-effect. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
+the deterministic mount-source policy remains pathless and inert, the loop-device kernel contract remains pure, and
+the private attach/release capability is implemented but unused. No production constructor activates that `Server`;
+rootfs discovery and partition probing, mounts, private mount-namespace setup, and concrete LoopMount effects do not
+exist; no LoopMount receiver handler or dispatcher action is registered; and the backend/public path still uses
+`mvm run provision`, raw wire operations and sudo, arbitrary unmount, and PID-killing cleanup. The implemented
+foundations therefore authorize no privileged mount effect. The legacy `Provisioner`, `Op`, path protocol, and cleanup
+functions must not be wrapped by the new adapter.
 
 ### Release trust
 
