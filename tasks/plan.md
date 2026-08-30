@@ -96,8 +96,9 @@ continue without silently deleting it.
   `Conn.Flush`, recovery, privileged action, public consumer, or system tests.
 - ADR-0016 for the single-binary privilege boundary.
 
-Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
-remains transitional. The routed policy, dual firewall backends, host-global TAP topology, public `mvm run jailer` /
+Only the exact trusted-release install/remove and LoopMount provision/inspect actions are registered in the privileged
+switch, and the sudoers policy remains transitional. The routed policy, dual firewall backends, host-global TAP
+topology, public `mvm run jailer` /
 `mvm run provision` services, and `allow_remote_exec` trust mesh must not survive the final release.
 
 ## Approved Architecture
