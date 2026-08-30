@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > foundations described below are implemented.
 > The mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final
-> marker-only sudo policy, and remaining typed privileged operations are not implemented yet; see
+> marker-only sudo policy, schema-3 two-phase Jailer activation/reconciliation, and remaining typed privileged
+> operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
 
 ### Added
@@ -216,6 +217,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   trusted release removal can acquire a lease only when no active authority record references the exact release.
 - This substrate is private and not yet wired into public VM lifecycle operations; that integration remains a release
   blocker below.
+- The implemented authority remains schema 1 with the one-phase `registered -> cleaning -> cleaned` lifecycle. The
+  accepted release design replaces it with clean-install schema 3 `launching -> active`; that correction, final Jailer
+  copy/root sealing, typed observation, and recovery are pending and are not claimed as implemented behavior.
 
 #### Private trusted-release authority substrate
 
@@ -424,8 +428,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The following items are release blockers and are intentionally not described above as completed behavior:
 
-- Wire every privileged VM action to the implemented root-owned global VM-ID ownership claim, lifecycle record, exact
-  process identity, and per-VM lock.
+- Replace the private schema-1 `registered` record with strict clean-install schema 3. Persist owner/cache/release/boot
+  identity and only the blocked PID/start locator as `launching` before effects; commit `active` only after Jailer has
+  copied Firecracker, joined cgroup/netns, pivoted to its final mount namespace, dropped credentials, and execed the
+  copy. Require empty supplementary groups, verify the final process root and copied inode, seal the jail root and copy
+  to `root:root 0755` beneath `root:root 0700` ancestors, and hash the copy against the exact release. Jailer must use
+  neither `--daemonize` nor `--new-pid-ns`.
+- Make every composite instance lease pointer-shared and close-once across copies/concurrent release, with the first
+  cleanup result cached. Add exact interrupted-`launching` recovery and closed `running`, `stopped`, `crashed`, and
+  `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and per-VM lock.
 - Add root-owned managed-network identity and global capacity authority; user SQLite state must not authorize host-global
   namespace, link, firewall, process, mount, cgroup, or admission decisions.
 - Carry the managed-cache locator and base launch selection through the privileged protocol, bind the cache identity in

@@ -82,7 +82,8 @@ receiver-transaction foundations implemented without receiver registration; rema
 ### Task 4: Add private root-owned VM instance authority
 
 **Owner:** engineer
-**Status:** Complete; Tasks 6 and 8 consume the prepared authority lease
+**Status:** Complete as the private schema-1 substrate; Task 7 replaces its one-phase lifecycle with schema 3 before
+production activation
 **Dependencies:** Tasks 1 and 3
 
 **Interface:**
@@ -104,6 +105,8 @@ receiver-transaction foundations implemented without receiver registration; rema
 - [x] Keep a `cleaned` ownership tombstone; foreign UIDs never acquire the VM ID.
 - [x] Establish the global VM-ID claim while holding the global index lock and scanning pinned numeric UID directories.
 - [x] Reject foreign, duplicate, corrupt, unreadable, unsafe, or inconsistent records without disclosing the owner UID.
+- [x] Preserve this as implementation history only: no production VM lifecycle consumes schema 1, and the clean-install
+  schema-3 `launching -> active` correction below supersedes rather than migrates it.
 
 **Filesystem and locking:**
 
@@ -410,16 +413,34 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Foundation dependency:** Task 4
 **Full acceptance dependencies:** Tasks 5, 6, and 8
 
-- [ ] Extend the strict instance record once with owner GID, host boot ID, mount-namespace device/inode, and Task 5's
-  pinned cache identity; bump the schema version and reject old/partial records.
-- [ ] Launch a blocked Firecracker child in a private mount namespace and an optional blocked dropped-caller console
-  relay in the host mount namespace; pin their pidfds and the Firecracker namespace FD, persist the complete record
-  before externally mutable effects, create/truncate fixed outputs, mark propagation private, mount the pinned runtime
-  directory and individual persistent resources, including the sealed root-built Firecracker configuration, publish
-  display-only PID mirrors, then release Firecracker only after named mounts and relay readiness succeed. The relay
-  receives inherited descriptors and never reopens a caller path or retains the VM namespace.
-- [ ] Verify PID, boot ID, start ticks, all UID/GID identities, supplementary groups, exact cgroup, namespace inode,
-  process liveness, and pinned executable hash against the Task 6 release manifest before signal or `setns`.
+- [ ] Replace schema 1 with strict schema 3 and reject every old/partial record. Persist
+  `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
+  `launching` contains owner UID/GID, VM ID, pinned cache identity, exact release identity, host boot ID,
+  launch/cleanup generations, and only the blocked child PID/start locator. `active` adds receiver-observed final
+  credentials, empty supplementary groups, final mount namespace, jail root, and copied executable. Activation also
+  verifies exact derived cgroup membership and the closed topology capability's network namespace. `cleaned` retains
+  only the same-UID tombstone and generations, with no launch-specific GID, cache, release, or process identity.
+- [ ] Launch a child blocked by an inherited EOF-fails-closed two-way handshake in an initial private mount namespace
+  and an optional blocked dropped-caller console relay in the host mount namespace. Open each pidfd, issue a fresh
+  parent challenge, and require the still-blocked child to acknowledge it before accepting PID-derived evidence;
+  persist `launching` before externally mutable effects, create/truncate fixed outputs, mark propagation private, mount
+  the pinned runtime directory and individual persistent resources including the sealed root-built Firecracker
+  configuration, and publish display-only PID mirrors. The relay receives only inherited descriptors and never reopens
+  a caller path or retains the VM namespace.
+- [ ] Release the child only after named mounts, network topology, and relay readiness succeed. Invoke Jailer 1.16.1
+  without `--daemonize` or `--new-pid-ns`; the original PID/start/pidfd must survive Jailer and Firecracker exec. Do not
+  trust Jailer's PID file or a user-visible PID mirror.
+- [ ] Wait until `/proc/<pid>/exe` is Jailer's copied Firecracker, then descriptor-relatively require the host jail root
+  and `/proc/<pid>/root` to be the same device/inode and the jail `firecracker` leaf to equal `/proc/<pid>/exe`. Seal the
+  jail root and copied executable to exact `root:root` mode `0755` beneath exact `root:root` mode-`0700` ancestors, hash
+  the copy against Task 6's release manifest, and only then atomically commit `active`. Never compare its inode with the
+  trusted-store Firecracker inode.
+- [ ] Recheck PID, boot ID, start ticks, all UID/GID identities, the exact empty supplementary-group set, cgroup, final
+  namespace/root/executable identity, process liveness, and release binding before signal or `setns`. The network
+  namespace identity remains owned by the closed topology capability rather than a raw path/fd field.
+- [ ] Make launch, active, cleanup, release-slot, authority-root, and UID-directory leases pointer-shared,
+  mutex-protected, close-once across copies/concurrent release, cancellation-independent during cleanup, and repeat the
+  cached first cleanup result.
 - [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, wait through the pidfd,
   and fail host capability admission instead of falling back to raw PID signaling.
 - [ ] Reopen and pin `/proc/<pid>/ns/mnt` for each verified live operation; do not persist a mount-namespace handle that
@@ -431,6 +452,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   leaves, requires cgroup emptiness, unlinks only the five runtime leaves, and removes descriptor-relative allowlisted
   directories bottom-up only when empty; never recursively traverse a caller-writable tree or one containing a mount.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
+- [ ] L1 crash-window tests cover pre-record handshake EOF, every `launching` effect stage, partial final-copy sealing,
+  post-rename durability uncertainty, `launching -> active`, and repeated `cleaning` recovery.
 
 ## Phase 2: Final Jailer and networking paths
 
@@ -442,7 +465,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 - [ ] Add distinct typed install, launch, abort, cleanup, snapshot exposure, volume exposure/removal, and release removal
   actions to the privileged dispatcher.
 - [ ] Preserve existing named Jailer caller methods; replace their transport without adding a generic action method.
-- [ ] Persist `registered` authority before the first privileged launch effect and retain the lease through exec.
+- [ ] Persist schema-3 `launching` authority before the first privileged launch effect, retain its release/VM locks and
+  original pidfd through Jailer exec, and commit `active` only after the final copy/root/namespace identity is sealed and
+  verified.
 - [ ] Every post-effect failure invokes verified typed abort and leaves recoverable authority.
 - [ ] Remove public `mvm run jailer` and its Cobra/service dispatch.
 - [ ] Search finds no ordinary CLI route to a privileged Jailer handler.
@@ -461,7 +486,7 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   `cleanup_required` recovery detail without replacing it. No production locker/effect adapter or live-topology handoff
   is wired yet.
 - [ ] Persist minimal root-owned network identity and serialize network/VM topology mutations.
-- [ ] Acquire the network lock only after the applicable VM launch/registered lease; the full order is
+- [ ] Acquire the network lock only after the applicable VM launching/active lease; the full order is
   `release -> global index -> VM -> network -> firewall`.
 - [ ] Derive namespace/interface names from UID and immutable IDs; accept no raw name, path, or `ip` argv.
 - [ ] Create namespace, local bridge, TAP, and veth pair with links down.
@@ -677,10 +702,15 @@ backend/public cutover, legacy removal, and host-mutation migration remain pendi
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,
   chroots, mounts, and nftables generations.
 - [ ] Reconcile observed runtime status before `mvm vm ls`, `mvm vm ps`, and `mvm vm inspect` filter or render. Use a
-  bounded typed root-authority batch, make a host boot-ID mismatch immediately non-live, update SQLite only as a
-  `stopped` projection, classify a same-boot missing/mismatched process as `crashed`, and never perform a per-VM sudo,
-  Firecracker API, SSH, or guest-agent liveness tick. Change the list API to return an error rather than stale rows when
-  authority cannot complete the observation.
+  bounded typed root-authority batch with closed `running`, `stopped`, `crashed`, and `unavailable` outcomes. Make an
+  absent/cleaned record or host boot-ID mismatch `stopped`, classify a same-boot missing/dead/mismatched active process
+  as `crashed`, and treat permission, I/O, corrupt-record, missing-capability, or incomplete inspection as
+  `unavailable`. Update SQLite only after a complete authoritative result and never perform a per-VM sudo, Firecracker
+  API, SSH, or guest-agent liveness tick. Any unavailable item fails the read instead of returning partial/stale rows.
+- [ ] Reconcile interrupted `launching` records exactly: boot mismatch cleans without signaling; PID/start mismatch
+  never signals; the same task with the exact final copied Firecracker may complete idempotent sealing and commit
+  `active`; the same task still in Jailer/transient/mismatched exec is terminated only through its pidfd; unavailable
+  identity causes no guessed kill or deletion. Resume `cleaning` idempotently.
 - [ ] Benchmark 1,000 authority records in L1 and enforce the reviewed regression budget without one goroutine, process,
   or control connection per VM.
 - [ ] Add root-owned global capacity reservation so separate CLI processes and users cannot over-admit the host.

@@ -2,6 +2,7 @@
 
 **Status:** Active
 **Date:** 2026-08-09
+**Last Updated:** 2026-08-30 (two-phase process authority and mandatory network namespace)
 **See also:** [Project Hosting with MicroVMs](../roadmaps/TENANT_MICROVM.md), [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md), [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
 ## Context
@@ -19,10 +20,14 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - Firecracker and Jailer are resolved and validated as one exact-version pair. Missing or mismatched pairs fail before launch.
 - Jailer launch replaces direct Firecracker execution; there is no silent fallback and no generic launcher extension interface.
 - The existing VM-domain spawner remains the caller-facing seam and owns jailed path translation, process tracking, socket probing, and cleanup.
-- Root-requiring setup is encapsulated in a privileged `mvm run` subprocess, following the loopmount precedent. Users continue to invoke `mvm` without sudo.
+- Root-requiring setup enters the reserved early privileged dispatcher in the same `mvm` binary; the public
+  `mvm run jailer` service is removed at the v0.3 cutover. Users continue to invoke `mvm` without sudo.
 - Executable and chroot paths trusted by Jailer are root-owned and not writable by the invoking user. The ordinary per-user mvmctl database and cache model remains unchanged.
 - Every launch requires cgroup v2 with the CPU, memory, and PID controllers. mvmctl persists a typed resource envelope, derives fixed Jailer arguments internally, and fails the launch if post-start membership or values differ. Raw cgroup key/value input is not public.
-- Jailer does not daemonize initially, preserving serial-console standard descriptors. New PID and network namespaces are deferred until their lifecycle and TAP implications are designed separately.
+- Jailer never uses `--daemonize` or `--new-pid-ns`. The receiver-owned PID and pidfd must continue to identify the
+  same task through Jailer and Firecracker `exec`, while serial-console standard descriptors remain attached. The
+  separately designed mandatory per-VM network namespace is joined through Jailer's fixed `--netns` argument; its
+  concrete handoff and lifecycle integration remain pending.
 - VM resources are exposed inside the jail through validated paths without duplicating large rootfs and volume files. Mount cleanup is idempotent across failed starts, stop, remove, and host recovery.
 
 ## Consequences
@@ -40,12 +45,13 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - Console, vsock, snapshots, hotplug volumes, PID handling, and partial-failure cleanup require full parity testing.
 - Jailer adds fixed launch overhead and depends on the number of host mount points; benchmarks must track the regression budget.
 - The initial memory maximum is guest-visible RAM plus a configurable 128 MiB VMM headroom; versioned L2 measurements must validate or revise that conservative default.
-- Network namespace isolation remains future work because the current TAP belongs to a host bridge.
+- Mandatory per-VM network namespace isolation is the accepted v0.3 target, but the concrete root-side namespace,
+  Jailer `--netns` handoff, TAP/link activation, reconciliation, and qualification remain release blockers.
 - Release pairs are reinstalled into the trusted store by `mvm bin pull`; hosts without cgroup v2 and the CPU, memory, and PID controllers cannot launch VMs.
 
 ## Related Decisions
 
-- ADR-0002: Privileged Jailer work remains inside the single `mvm` binary through a service subcommand.
-- ADR-0005: Normal-user operation and constrained internal privilege escalation remain mandatory.
+- ADR-0002: Privileged Jailer work remains inside the single `mvm` binary.
+- ADR-0005: Normal-user operation remains mandatory; ADR-0016 replaces its pre-v0.3 wildcard sudo boundary at cutover.
 - ADR-0012: Real Jailer/cgroup behavior requires L2 verification.
 - ADR-0013: Socket readiness remains an internal probe, not a total launch timeout.

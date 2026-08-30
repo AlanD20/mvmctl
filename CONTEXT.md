@@ -267,6 +267,34 @@ the caller's managed cache. Final privileged code must never mount the whole cac
 authority, or signal a PID read from a PID mirror. ADR-0016 defines the exact ownership, modes, launch ordering, and
 cleanup contract; `tasks/todo.md` records implementation status.
 
+The final Jailer instance record is strict schema 3 with
+`absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
+`launching` is durable pre-effect intent: owner UID/GID, VM ID, managed-cache identity, exact Firecracker/Jailer release
+identity, host boot ID, launch/cleanup generations, and the handshake-blocked child's PID/start locator. It does not
+claim final credentials, cgroup membership, final mount namespace, jail root, or executable identity. `active` records
+the receiver-observed credentials, final mount namespace, jail root, and executable, requires empty supplementary
+groups and exact derived cgroup membership, and binds the final copied Firecracker to the release. Network namespace
+identity remains in the separate closed topology capability and is compared during activation rather than stored as a
+raw path or descriptor.
+`cleaned` is the same-UID tombstone and carries no launch-specific GID, cache, release, or process identity; mount
+identity is valid for one mount lifetime and must not prevent a legitimate relaunch after reboot.
+
+This split is required by Firecracker Jailer 1.16.1: Jailer copies Firecracker, joins netns/cgroup, then unshares and
+pivots into a new mount namespace before dropping credentials and execing the copy. The trusted-store inode therefore
+cannot equal `/proc/<pid>/exe`, and the final namespace/root cannot be known before effects. The receiver persists
+`launching` before effects, invokes Jailer without `--daemonize` or `--new-pid-ns`, retains the original pidfd through
+exec, verifies the final jail root and copy, seals both to `root:root 0755` beneath `root:root 0700` ancestors, hashes the
+copy against the exact manifest, rechecks full identity, and only then commits `active`. All composite instance leases
+must use pointer-shared mutex-protected close-once state and cache the first cleanup result.
+
+Root status observation has four closed outcomes: `running`, `stopped`, `crashed`, and `unavailable`. An absent/cleaned
+record or boot mismatch is stopped; a same-boot missing/dead/mismatched active process is crashed; incomplete authority
+is unavailable and fails the complete read. Interrupted `launching` records are reconciled by boot/PID/start/final-copy
+identity: only the exact same task may be promoted or pidfd-terminated, and ambiguous state is neither killed nor
+deleted. These are accepted target rules, not current runtime behavior. Main still implements only the private schema-1
+`registered -> cleaning -> cleaned` substrate, and no production VM lifecycle consumes it; schema 3 and its launch,
+activation, cleanup, observation, and reconciliation paths remain pending.
+
 The cycle-free `internal/lib/authorityfs` leaf module now establishes the implemented portion of that split. It creates
 or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`
 `/run/mvmctl/authority`. Jailer's global index lock, release-lock directory, per-UID authority directories, and per-VM

@@ -180,7 +180,7 @@ drained.
 
 ### VM authority interface
 
-The first implementation slice is private to `internal/service/jailer`. It uses unexported typed values and these
+The final interface remains private to `internal/service/jailer`. Schema 3 uses unexported typed values and these
 operations:
 
 ```go
@@ -189,22 +189,33 @@ func (a *instanceAuthority) lockReleaseSlot(
     slot releaseSlot,
 ) (*releaseSlotLease, error)
 
-func (l *releaseSlotLease) registerLaunch(
+func (l *releaseSlotLease) registerLaunching(
     ctx context.Context,
     caller instanceCaller,
-    registration launchRegistration,
+    intent launchIntent,
 ) (*launchLease, error)
+
+func (l *launchLease) activateVerifiedProcess(
+    ctx context.Context,
+    prepared *preparedRelease,
+) (*activeLease, error)
 
 func (l *releaseSlotLease) requireUnreferenced(
     ctx context.Context,
     release releaseIdentity,
 ) error
 
-func (a *instanceAuthority) LockRegistered(
+func (a *instanceAuthority) LockActive(
     ctx context.Context,
     caller instanceCaller,
     vmID string,
-) (*registeredLease, error)
+) (*activeLease, error)
+
+func (a *instanceAuthority) ObserveOwnedBatch(
+    ctx context.Context,
+    caller instanceCaller,
+    vmIDs []string,
+) ([]instanceObservation, error)
 
 func (a *instanceAuthority) BeginCleanup(
     ctx context.Context,
@@ -215,7 +226,7 @@ func (a *instanceAuthority) BeginCleanup(
 func (l *cleanupLease) Complete(ctx context.Context) error
 
 func (l *launchLease) Release(ctx context.Context) error
-func (l *registeredLease) Release(ctx context.Context) error
+func (l *activeLease) Release(ctx context.Context) error
 func (l *cleanupLease) Release(ctx context.Context) error
 func (l *releaseSlotLease) Release(ctx context.Context) error
 ```
@@ -223,20 +234,29 @@ func (l *releaseSlotLease) Release(ctx context.Context) error
 Each lease retains its pinned directory and lock descriptors and provides a checked context-first release operation.
 There is no public `Get`, `Put`, `Delete`, `Run`, raw path, arbitrary state string, or callback interface.
 
-The durable lifecycle is intentionally small:
+The schema-3 durable lifecycle is intentionally small:
 
 ```text
-absent  ── registerLaunch ──> registered
-cleaned ── registerLaunch ──> registered
-registered ─ BeginCleanup ──> cleaning
-cleaning ─── BeginCleanup ──> cleaning
-cleaning ───── Complete ─────> cleaned
+absent  ── registerLaunching ──> launching ── activateVerifiedProcess ──> active
+cleaned ── registerLaunching ──> launching
+launching ── BeginCleanup ──> cleaning
+active    ── BeginCleanup ──> cleaning
+cleaning  ── BeginCleanup ──> cleaning
+cleaning  ───── Complete ─────> cleaned
 ```
 
-`registered` means launch identity is durable; it does not claim the process is healthy. Process health is derived by
-verifying host boot ID, PID, start ticks, all UID/GID identities and supplementary groups, cgroup membership, pinned
-mount-namespace identity, and the executable hash against the exact release. Failed cleanup remains `cleaning`.
-`cleaned` is a persistent ownership tombstone and may be relaunched only by the same UID.
+`launching` means only that exact pre-effect intent is durable. It stores owner UID/GID, VM ID, cache identity, exact
+release identity, host boot ID, launch/cleanup generations, and the blocked child PID/start locator. `active` adds the
+receiver-observed final credentials with an empty supplementary-group set, final mount namespace and jail root, and
+Jailer's copied Firecracker identity after it is sealed and hashed against the release. Activation also verifies the
+exact derived cgroup and the separate closed topology capability's network namespace. Failed cleanup remains
+`cleaning`. `cleaned` is a persistent same-UID ownership tombstone, carries no launch-specific GID, cache, release, or
+process identity, and may be relaunched only by that UID. Mount identity is deliberately not retained across cleanup
+because it is valid for only one mount lifetime.
+
+Implementation status: main currently contains the private schema-1 `registered -> cleaning -> cleaned` substrate and
+its locks. It is not consumed by production VM lifecycle operations. The incompatible schema-3 correction above,
+including `launching -> active`, is pending and replaces rather than migrates the old record during the clean install.
 
 The global lock order is:
 
@@ -254,29 +274,41 @@ identities for one store slot must therefore serialize before install, replace, 
 
 Task 6 acquires the release-slot lease before it reads a manifest or computes a launch identity. Its prepared launch
 value retains that lease together with the verified manifest and pinned Firecracker/Jailer descriptors. Only that value
-may call `releaseSlotLease.registerLaunch`; it supplies the exact release identity from the root-owned manifest rather
+may call `releaseSlotLease.registerLaunching`; it supplies the exact release identity from the root-owned manifest rather
 than accepting hashes from the normal user process. Registration then acquires the index and VM locks, establishes the
-durable record before the first network or launch effect, and transfers the held release lock into the returned launch
-lease. A mismatch or registration failure performs no external effect and leaves a checked, releasable slot lease.
+durable `launching` record before the first network or launch effect, and transfers the held release lock into the
+returned launch lease. A mismatch or registration failure performs no external effect and leaves a checked, releasable
+slot lease.
 Task 4 owns release, index, and VM locking; it does not import network code or predeclare a network implementation.
 
-The mount-namespace launch seam uses a blocked Firecracker child in a private mount namespace and, when enabled, a
-blocked console relay running as the dropped caller in the host mount namespace. The parent pins both pidfds and the
-Firecracker namespace descriptor, persists the complete launch identity, and only then creates/truncates fixed
-persistent outputs and creates the per-VM runtime directory. It enters the Firecracker namespace, marks propagation
-private, mounts the runtime directory at `/run/mvm/runtime` and each persistent resource through its pinned descriptor,
-publishes display-only PID mirrors, releases and verifies the relay, and releases Firecracker to exec. The relay receives
-only inherited PTY, pinned log, and pinned runtime-directory descriptors; it never reopens a caller path or retains the
-VM namespace. Here, "first launch effect" means the first externally mutable effect; allocating blocked processes and
-the namespace is preparation. Mutating process operations require pidfds and never fall back to `kill(pid)`. Live mount
-operations reopen and verify `/proc/<pid>/ns/mnt`; a persistent mount-namespace handle is prohibited because it would
-retain the namespace's mounts after process exit.
+The launch seam uses a child blocked by an inherited private two-way handshake in an initial private mount namespace
+and, when enabled, a blocked console relay running as the dropped caller in the host mount namespace. After opening each
+pidfd, the parent sends a fresh challenge and requires acknowledgement from the still-blocked child before accepting
+PID-derived evidence. It then persists only `launching` intent, creates/truncates fixed persistent outputs, creates the
+runtime directory, marks propagation private, and installs named mounts through pinned descriptors. The relay receives
+only inherited PTY, pinned log, and pinned runtime-directory descriptors and never retains the VM namespace.
+
+Only after those effects and relay readiness does the parent release the child to Jailer. Jailer 1.16.1 copies
+Firecracker, joins netns/cgroup, unshares and pivots into a new final mount namespace, drops credentials, and execs its
+copy. The initial namespace therefore cannot be recorded as the final namespace, and the trusted-store inode cannot be
+recorded as `/proc/<pid>/exe`. `activateVerifiedProcess` waits through the original pidfd, opens the fixed jail root and
+final proc objects, seals the jail root and copy to `root:root 0755` below `root:root 0700` ancestors, hashes the copy,
+rechecks complete final identity, and then commits `active`. Jailer never receives `--daemonize` or `--new-pid-ns`.
+
+Here, "first launch effect" means the first externally mutable effect; allocating a handshake-blocked child and its
+initial namespace is preparation. Mutating process operations require pidfds and never fall back to `kill(pid)`. Live
+mount operations reopen and verify the final `/proc/<pid>/ns/mnt`; a persistent mount-namespace handle is prohibited
+because it would retain the namespace's mounts after process exit.
+
+All composite leases use pointer-shared mutex-protected state, close/unlock exactly once across copies and concurrent
+release, ignore cancellation during cleanup, and cache the first cleanup result. They expose no raw path, descriptor,
+callback, or generic state mutation.
 
 The persistent VM outputs are fixed caller-owned `0600` one-link regular files: `firecracker.log`,
 `firecracker.console.log`, and, when enabled, `firecracker.metrics`. They are truncated once per launch after durable
-registration and retained after stop or crash. Direct Firecracker output supports bounded readers and one-launch
-retention but not a truthful hard live-size cap; such a cap would require a separately supervised FIFO collector. API,
-vsock, and console sockets plus the two PID mirrors are fixed ephemeral leaves beneath
+`launching` registration and retained after stop or crash. Direct Firecracker output supports bounded readers and
+one-launch retention but not a truthful hard live-size cap; such a cap would require a separately supervised FIFO
+collector. API, vsock, and console sockets plus the two PID mirrors are fixed ephemeral leaves beneath
 `/run/mvmctl/runtime/<uid>/<vm-id>`. Root retains the directory descriptor through setup and rollback but never treats
 its caller-writable contents as authority. The cache VM directory is never mounted wholesale. Cleanup unlinks only the
 fixed runtime leaves and removes the directory only when empty; it never recursively deletes caller-writable contents.
@@ -735,11 +767,19 @@ before cutover and legacy removal.
 
 `mvm vm ls`, `mvm vm ps`, and `mvm vm inspect` must report observed runtime state rather than replaying a stale SQLite
 status. Before status filtering or rendering, the API obtains a bounded batch observation from the root VM authority.
-The receiver verifies boot ID and the complete recorded process identity. A host reboot therefore classifies every old
-process identity as non-live without waiting for a VM, Firecracker API, SSH, or agent timeout. The user database may be
-updated after the authoritative observation, but it never decides whether a privileged process is live. A boot-ID
-mismatch projects `stopped`; a missing or mismatched process in the current boot projects `crashed`. The list API must
-return an error when authority cannot complete the observation, not silently return stale rows.
+The receiver verifies boot ID and the complete active process identity. Its closed observation outcomes are `running`,
+`stopped`, `crashed`, and `unavailable`. An absent/cleaned record or host boot-ID mismatch projects `stopped`; a
+same-boot missing, dead, or mismatched active process projects `crashed`; permission, I/O, corrupt-record,
+missing-capability, and incomplete inspection outcomes are `unavailable`. Stopped and crashed are successful
+observations. Any unavailable item fails the complete list/inspect operation rather than returning partial or stale
+rows. The user database may be updated after the authoritative observation, but it never decides whether a privileged
+process is live.
+
+An interrupted `launching` record is reconciled before projection. Boot mismatch cleans without signaling. Missing PID
+or start mismatch never signals a current task. The exact same task already running the final copied Firecracker may
+finish idempotent sealing and commit active; the exact same task still in Jailer, another transient exec, or a mismatched
+exec is terminated only through its verified pidfd and cleaned. Inability to classify returns unavailable and performs
+no guessed deletion.
 
 This is a local metadata operation, not a heartbeat. The implementation must not start one sudo process, open one
 control connection, or launch one goroutine per VM. L1 benchmarks cover 1,000 authority records and set a regression
