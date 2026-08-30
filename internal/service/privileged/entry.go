@@ -127,7 +127,7 @@ func run(
 	defer func() {
 		returnErr = appendPrivilegedExecutableReleaseError(
 			returnErr,
-			pinnedExecutable.Release(context.WithoutCancel(ctx)),
+			deps.executable.release(context.WithoutCancel(ctx), pinnedExecutable),
 		)
 	}()
 	if err := authorizeCaller(caller, deps.authorization); err != nil {
@@ -164,7 +164,7 @@ func appendPrivilegedExecutableReleaseError(primary error, cleanup error) error 
 		result.Details = make(map[string]any)
 	}
 	result.Details["pinned_executable_cleanup_failed"] = true
-	result.Err = errors.Join(domain.Err, cleanup)
+	result.Err = errors.Join(primary, cleanup)
 	return &result
 }
 

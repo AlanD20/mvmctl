@@ -34,18 +34,22 @@ type PinnedExecutableIdentity struct {
 // PinnedExecutable retains the exact canonical and running executable admitted by the privileged receiver.
 //
 // The capability deliberately exposes identity rather than descriptors or paths. Copies share one lifecycle.
+//
+// THREAD-SAFE: all methods may be called concurrently and copies share the same synchronized state.
 type PinnedExecutable struct {
 	state *pinnedExecutableState
 }
 
 type pinnedExecutableState struct {
-	mu          sync.Mutex
-	deps        pinnedExecutableDeps
-	retained    []int
-	canonicalFD int
-	identity    PinnedExecutableIdentity
-	released    bool
-	releaseErr  error
+	// mu guards descriptor ownership, identity, release state, and the cached cleanup result.
+	mu           sync.Mutex
+	deps         pinnedExecutableDeps
+	retained     []int
+	canonicalFD  int
+	admittedStat unix.Stat_t
+	identity     PinnedExecutableIdentity
+	released     bool
+	releaseErr   error
 }
 
 type pinnedExecutableDeps struct {
@@ -67,14 +71,14 @@ func pinSystemExecutable(
 	deps pinnedExecutableDeps,
 ) (_ *PinnedExecutable, returnErr error) {
 	if ctx == nil {
-		return nil, pinnedExecutableAuthorityError("pin system executable: context is required", nil)
+		return nil, pinnedExecutableInternalError("pin system executable: context is required", nil)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, pinnedExecutableAuthorityError("pin system executable: context ended", err)
+		return nil, pinnedExecutableContextError("pin system executable: context ended", err)
 	}
 	executable, err := deps.executable(ctx)
 	if err != nil {
-		return nil, pinnedExecutableAuthorityError("resolve running executable", err)
+		return nil, pinnedExecutableInternalError("resolve running executable", err)
 	}
 	if executable != infra.SystemBinaryPath {
 		return nil, pinnedExecutableAuthorityError(
@@ -98,7 +102,7 @@ func pinSystemExecutable(
 	directoryFlags := unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	rootFD, err := deps.open(ctx, "/", directoryFlags, 0)
 	if err != nil {
-		return nil, pinnedExecutableAuthorityError("open trusted executable root", err)
+		return nil, pinnedExecutableInternalError("open trusted executable root", err)
 	}
 	capability.state.retained = append(capability.state.retained, rootFD)
 	if err := verifyPinnedExecutableDirectory(ctx, deps, rootFD, "/"); err != nil {
@@ -107,7 +111,7 @@ func pinSystemExecutable(
 
 	parts := strings.Split(strings.TrimPrefix(infra.SystemBinaryPath, "/"), "/")
 	if len(parts) < 2 {
-		return nil, pinnedExecutableAuthorityError(
+		return nil, pinnedExecutableInternalError(
 			"canonical system executable path is invalid",
 			errors.New("system executable path has no parent"),
 		)
@@ -116,7 +120,7 @@ func pinSystemExecutable(
 	for _, component := range parts[:len(parts)-1] {
 		fd, openErr := deps.openAt(ctx, parentFD, component, directoryFlags, 0)
 		if openErr != nil {
-			return nil, pinnedExecutableAuthorityError(
+			return nil, pinnedExecutableInternalError(
 				fmt.Sprintf("open trusted executable path component %s", component),
 				openErr,
 			)
@@ -138,7 +142,7 @@ func pinSystemExecutable(
 		0,
 	)
 	if err != nil {
-		return nil, pinnedExecutableAuthorityError("open canonical system executable", err)
+		return nil, pinnedExecutableInternalError("open canonical system executable", err)
 	}
 	capability.state.retained = append(capability.state.retained, canonicalFD)
 	capability.state.canonicalFD = canonicalFD
@@ -152,12 +156,12 @@ func pinSystemExecutable(
 	// Source: https://man7.org/linux/man-pages/man5/proc_pid_exe.5.html
 	runningFD, err := deps.open(ctx, "/proc/self/exe", unix.O_PATH|unix.O_CLOEXEC, 0)
 	if err != nil {
-		return nil, pinnedExecutableAuthorityError("open running process image", err)
+		return nil, pinnedExecutableInternalError("open running process image", err)
 	}
 	capability.state.retained = append(capability.state.retained, runningFD)
 	var runningStat unix.Stat_t
 	if err := deps.fstat(ctx, runningFD, &runningStat); err != nil {
-		return nil, pinnedExecutableAuthorityError("inspect running process image descriptor", err)
+		return nil, pinnedExecutableInternalError("inspect running process image descriptor", err)
 	}
 	if canonicalStat.Dev != runningStat.Dev || canonicalStat.Ino != runningStat.Ino {
 		return nil, pinnedExecutableAuthorityError(
@@ -172,7 +176,7 @@ func pinSystemExecutable(
 	}
 	var runningFinal unix.Stat_t
 	if err := deps.fstat(ctx, runningFD, &runningFinal); err != nil {
-		return nil, pinnedExecutableAuthorityError("reinspect running process image descriptor", err)
+		return nil, pinnedExecutableInternalError("reinspect running process image descriptor", err)
 	}
 	if !samePinnedExecutableStat(canonicalStat, runningFinal) {
 		return nil, pinnedExecutableAuthorityError(
@@ -182,6 +186,7 @@ func pinSystemExecutable(
 	}
 
 	capability.state.identity = identity
+	capability.state.admittedStat = canonicalStat
 	committed = true
 	return capability, nil
 }
@@ -189,7 +194,7 @@ func pinSystemExecutable(
 // Identity returns the immutable admitted identity only while the capability remains live.
 func (capability *PinnedExecutable) Identity(ctx context.Context) (PinnedExecutableIdentity, error) {
 	if capability == nil || capability.state == nil {
-		return PinnedExecutableIdentity{}, pinnedExecutableAuthorityError(
+		return PinnedExecutableIdentity{}, pinnedExecutableInternalError(
 			"pinned system executable is not active",
 			errors.New("missing pinned executable state"),
 		)
@@ -201,7 +206,7 @@ func (capability *PinnedExecutable) Identity(ctx context.Context) (PinnedExecuta
 		return PinnedExecutableIdentity{}, err
 	}
 	if state.released || state.canonicalFD < 0 {
-		return PinnedExecutableIdentity{}, pinnedExecutableAuthorityError(
+		return PinnedExecutableIdentity{}, pinnedExecutableInternalError(
 			"pinned system executable is not active",
 			errors.New("pinned executable was released"),
 		)
@@ -212,7 +217,7 @@ func (capability *PinnedExecutable) Identity(ctx context.Context) (PinnedExecuta
 // Reinspect proves that the retained executable still has the admitted metadata and digest.
 func (capability *PinnedExecutable) Reinspect(ctx context.Context) (PinnedExecutableIdentity, error) {
 	if capability == nil || capability.state == nil {
-		return PinnedExecutableIdentity{}, pinnedExecutableAuthorityError(
+		return PinnedExecutableIdentity{}, pinnedExecutableInternalError(
 			"pinned system executable is not active",
 			errors.New("missing pinned executable state"),
 		)
@@ -224,7 +229,7 @@ func (capability *PinnedExecutable) Reinspect(ctx context.Context) (PinnedExecut
 		return PinnedExecutableIdentity{}, err
 	}
 	if state.released || state.canonicalFD < 0 {
-		return PinnedExecutableIdentity{}, pinnedExecutableAuthorityError(
+		return PinnedExecutableIdentity{}, pinnedExecutableInternalError(
 			"pinned system executable is not active",
 			errors.New("pinned executable was released"),
 		)
@@ -232,6 +237,12 @@ func (capability *PinnedExecutable) Reinspect(ctx context.Context) (PinnedExecut
 	stat, err := inspectPinnedExecutable(ctx, state.deps, state.canonicalFD)
 	if err != nil {
 		return PinnedExecutableIdentity{}, err
+	}
+	if !samePinnedExecutableStat(state.admittedStat, stat) {
+		return PinnedExecutableIdentity{}, pinnedExecutableAuthorityError(
+			"pinned system executable metadata changed",
+			errors.New("retained executable metadata does not match admission"),
+		)
 	}
 	identity, err := hashPinnedExecutable(ctx, state.deps, state.canonicalFD, stat)
 	if err != nil {
@@ -267,6 +278,7 @@ func (capability *PinnedExecutable) Release(ctx context.Context) error {
 	}
 	state.retained = nil
 	state.canonicalFD = -1
+	state.admittedStat = unix.Stat_t{}
 	state.identity = PinnedExecutableIdentity{}
 	state.released = true
 	if cleanupErr != nil {
@@ -290,7 +302,7 @@ func verifyPinnedExecutableDirectory(
 ) error {
 	var stat unix.Stat_t
 	if err := deps.fstat(ctx, fd, &stat); err != nil {
-		return pinnedExecutableAuthorityError(
+		return pinnedExecutableInternalError(
 			fmt.Sprintf("inspect trusted executable descriptor %s", component),
 			err,
 		)
@@ -326,7 +338,7 @@ func inspectPinnedExecutable(
 	}
 	var stat unix.Stat_t
 	if err := deps.fstat(ctx, fd, &stat); err != nil {
-		return unix.Stat_t{}, pinnedExecutableAuthorityError(
+		return unix.Stat_t{}, pinnedExecutableInternalError(
 			"inspect canonical system executable descriptor",
 			err,
 		)
@@ -367,14 +379,14 @@ func hashPinnedExecutable(
 		}
 		count, err := deps.pread(ctx, fd, buffer, offset)
 		if count < 0 || count > len(buffer) {
-			return PinnedExecutableIdentity{}, pinnedExecutableAuthorityError(
+			return PinnedExecutableIdentity{}, pinnedExecutableInternalError(
 				"hash canonical system executable",
 				errors.New("executable read returned an invalid byte count"),
 			)
 		}
 		if count > 0 {
 			if _, writeErr := digest.Write(buffer[:count]); writeErr != nil {
-				return PinnedExecutableIdentity{}, pinnedExecutableAuthorityError(
+				return PinnedExecutableIdentity{}, pinnedExecutableInternalError(
 					"hash canonical system executable",
 					writeErr,
 				)
@@ -388,7 +400,7 @@ func hashPinnedExecutable(
 			}
 		}
 		if err != nil && !errors.Is(err, io.EOF) {
-			return PinnedExecutableIdentity{}, pinnedExecutableAuthorityError(
+			return PinnedExecutableIdentity{}, pinnedExecutableInternalError(
 				"hash canonical system executable",
 				err,
 			)
@@ -443,10 +455,10 @@ func samePinnedExecutableStat(first unix.Stat_t, second unix.Stat_t) bool {
 
 func validatePinnedExecutableContext(ctx context.Context) error {
 	if ctx == nil {
-		return pinnedExecutableAuthorityError("pinned system executable context is required", nil)
+		return pinnedExecutableInternalError("pinned system executable context is required", nil)
 	}
 	if err := ctx.Err(); err != nil {
-		return pinnedExecutableAuthorityError("pinned system executable context ended", err)
+		return pinnedExecutableContextError("pinned system executable context ended", err)
 	}
 	return nil
 }
@@ -460,6 +472,29 @@ func pinnedExecutableAuthorityError(message string, cause error) *errs.DomainErr
 		message,
 		cause,
 		errs.WithClass(errs.ClassNeedsInteraction),
+		errs.WithEntity(infra.SystemBinaryPath),
+	)
+}
+
+func pinnedExecutableInternalError(message string, cause error) *errs.DomainError {
+	if cause == nil {
+		cause = errors.New(message)
+	}
+	return errs.WrapMsg(
+		errs.CodeInternal,
+		message,
+		cause,
+		errs.WithClass(errs.ClassInternal),
+		errs.WithEntity(infra.SystemBinaryPath),
+	)
+}
+
+func pinnedExecutableContextError(message string, cause error) *errs.DomainError {
+	return errs.WrapMsg(
+		errs.CodeInternal,
+		message,
+		cause,
+		errs.WithClass(errs.ClassRetryable),
 		errs.WithEntity(infra.SystemBinaryPath),
 	)
 }
@@ -488,7 +523,7 @@ func appendPinnedExecutableCleanupError(primary error, cleanup error) error {
 		result.Details = make(map[string]any)
 	}
 	result.Details["pinned_executable_cleanup_failed"] = true
-	result.Err = errors.Join(domain.Err, cleanup)
+	result.Err = errors.Join(primary, cleanup)
 	return &result
 }
 

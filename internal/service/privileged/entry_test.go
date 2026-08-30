@@ -2,14 +2,54 @@ package privileged
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
+
+func TestRunReleasesPinnedExecutableAndPreservesDeliveryFailure(t *testing.T) {
+	t.Parallel()
+
+	primaryCause := errors.New("deliver response failed")
+	cleanupCause := errors.New("release executable failed")
+	ctx, cancel := context.WithCancel(t.Context())
+	endpoint := newReceiverEndpoint()
+	runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+	runtime.control = validControlDeps(endpoint, nil)
+	live := false
+	runtime.executable.identity = func(context.Context, *system.PinnedExecutable) (
+		system.PinnedExecutableIdentity,
+		error,
+	) {
+		live = true
+		return system.PinnedExecutableIdentity{SHA256: "test-authority"}, nil
+	}
+	endpoint.writeFunc = func([]byte) (int, error) {
+		assert.True(t, live)
+		cancel()
+		return 0, primaryCause
+	}
+	releaseCalls := 0
+	runtime.executable.release = func(cleanupCtx context.Context, _ *system.PinnedExecutable) error {
+		releaseCalls++
+		assert.NoError(t, cleanupCtx.Err())
+		live = false
+		return cleanupCause
+	}
+
+	err := run(ctx, []string{Marker, "unknown"}, endpoint, runtime)
+	require.Error(t, err)
+	assert.Equal(t, 1, releaseCalls)
+	assert.False(t, live)
+	assert.ErrorIs(t, err, primaryCause)
+	assert.ErrorIs(t, err, cleanupCause)
+}
 
 func TestRun_FailsClosedBeforeDispatch(t *testing.T) {
 	tests := map[string]struct {
