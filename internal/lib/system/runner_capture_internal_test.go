@@ -222,6 +222,26 @@ func TestRealRunnerRunRejectsInvalidCaptureLimitsBeforeStart(t *testing.T) {
 	}
 }
 
+func TestRealRunnerRunPreservesTimeoutClassification(t *testing.T) {
+	// Rationale: Callers must distinguish a compiled subprocess deadline from other process failures through the error
+	// chain. The rendered message is diagnostic and may change without weakening recovery decisions.
+	t.Parallel()
+
+	result, err := (&RealRunner{}).Run(
+		t.Context(),
+		realRunnerRunHelperCommand("block"),
+		RunCmdOpts{Capture: true, Timeout: 50 * time.Millisecond},
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+	assert.Equal(t, errs.ClassInternal, domainErr.Class)
+	require.NotNil(t, result)
+	assert.Equal(t, -1, result.ExitCode)
+}
+
 func TestRealRunnerRunHelper(t *testing.T) {
 	action, arguments, ok := realRunnerRunHelperArguments(os.Args)
 	if !ok {
@@ -265,6 +285,9 @@ func TestRealRunnerRunHelper(t *testing.T) {
 		if err != nil || written != len(payload) {
 			os.Exit(99)
 		}
+	case "block":
+		// Bound a timeout-regression failure independently from `go test`'s much larger package timeout.
+		time.Sleep(2 * time.Second)
 	default:
 		os.Exit(95)
 	}

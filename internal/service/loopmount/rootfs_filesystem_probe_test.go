@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -309,6 +310,41 @@ func TestProbeRootfsMountSourceRejectsCommandAndIdentityFailures(t *testing.T) {
 	}
 }
 
+func TestProbeRootfsMountSourceClassifiesRunnerContextErrors(t *testing.T) {
+	// Rationale: The compiled probe deadline and caller cancellation must remain machine-classifiable after the
+	// subprocess error crosses the LoopMount DomainError boundary; parsing a user-facing message is not authority.
+	t.Parallel()
+
+	tests := map[string]struct {
+		cause error
+	}{
+		"deadline":     {cause: context.DeadlineExceeded},
+		"cancellation": {cause: context.Canceled},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newTestRootfsFilesystemProbeFixture(3)
+			fixture.runErrors = []error{test.cause}
+			parent := testRootfsPartitionParent(3, rootfsReadWrite)
+			partitions := testRootfsProbePartitionSet(parent, nil)
+
+			source, err := probeRootfsMountSource(
+				t.Context(), fixture.dependencies(), FilesystemExt4, parent, partitions,
+			)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, test.cause)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeLoopMountError, domainErr.Code)
+			assert.Equal(t, errs.ClassInternal, domainErr.Class)
+			assert.Nil(t, source)
+			assert.Len(t, fixture.calls, 1)
+			assert.False(t, parent.state.released)
+			assert.False(t, partitions.state.released)
+		})
+	}
+}
+
 func TestProbeRootfsMountSourceRejectsPartitionIdentityRace(t *testing.T) {
 	// Rationale: A retained partition descriptor must be rejected if its kernel identity changes across the external
 	// filesystem probe; otherwise probe output could authorize a different block device than the selected capability.
@@ -477,6 +513,7 @@ func assertRootfsBlkidCall(t *testing.T, call testRootfsFilesystemProbeCall, pat
 	wantOpts := system.RunCmdOpts{
 		Check:          false,
 		Capture:        true,
+		Timeout:        5 * time.Second,
 		Env:            map[string]string{"LANG": "C", "LC_ALL": "C"},
 		ReplaceEnv:     true,
 		MaxStdoutBytes: maxRootfsBlkidStdoutBytes,

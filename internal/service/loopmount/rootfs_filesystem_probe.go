@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -15,8 +16,11 @@ const (
 	rootfsBlkidNoSignatureExitCode = 2
 	rootfsBlkidFailureExitCode     = 4
 	rootfsBlkidAmbivalentExitCode  = 8
-	maxRootfsBlkidStdoutBytes      = 32
-	maxRootfsBlkidStderrBytes      = 512
+	// CRITICAL: blkid probes one fixed local block device. A finite deadline prevents a wedged probe from retaining
+	// the privileged VM/image locks indefinitely without making timeout policy caller-controlled.
+	rootfsBlkidTimeout        = 5 * time.Second
+	maxRootfsBlkidStdoutBytes = 32
+	maxRootfsBlkidStderrBytes = 512
 )
 
 type rootfsFilesystemProbeDeps struct {
@@ -242,6 +246,7 @@ func probeRootfsDeviceFilesystem(
 	}, system.RunCmdOpts{
 		Check:          false,
 		Capture:        true,
+		Timeout:        rootfsBlkidTimeout,
 		Env:            map[string]string{"LANG": "C", "LC_ALL": "C"},
 		ReplaceEnv:     true,
 		MaxStdoutBytes: maxRootfsBlkidStdoutBytes,

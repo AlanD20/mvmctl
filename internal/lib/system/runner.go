@@ -460,8 +460,12 @@ func (r *RealRunner) Run(ctx context.Context, args []string, opts RunCmdOpts) (*
 			if !strings.ContainsRune(timeoutStr, '.') {
 				timeoutStr += ".0"
 			}
-			return result, errs.New(errs.CodeProcessError,
-				fmt.Sprintf("Command timed out after %ss: %s", timeoutStr, cmdArgs[0]))
+			return result, errs.WrapMsg(
+				errs.CodeProcessError,
+				fmt.Sprintf("Command timed out after %ss: %s", timeoutStr, cmdArgs[0]),
+				runCtx.Err(),
+				errs.WithClass(errs.ClassInternal),
+			)
 		}
 
 		// 2. Command not found
