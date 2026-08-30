@@ -13,7 +13,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const systemRootfsResourceLocksFactory = "newSystemRootfsResourceLocks"
+const (
+	systemRootfsResourceLocksFactory      = "newSystemRootfsResourceLocks"
+	systemRootfsPartitionDiscoveryFactory = "systemRootfsPartitionDiscoveryDeps"
+	rootfsPartitionDiscoveryEntry         = "discoverRootfsPartitionDevices"
+)
 
 // Rationale: The current Server and system lock adapter are reviewed foundations, not an authorized privileged action.
 // Any production reference must land with the explicit activation review that removes this gate.
@@ -35,7 +39,42 @@ func TestLoopMountServerRemainsInertUntilExplicitActivation(t *testing.T) {
 		parsed, parseErr := parser.ParseFile(files, filepath.Join(packageDir, name), nil, 0)
 		require.NoError(t, parseErr)
 		assertInertLoopMountFile(t, files, name, parsed)
+		assertInertRootfsPartitionDiscovery(t, files, parsed)
 	}
+}
+
+// assertInertRootfsPartitionDiscovery rejects production construction or invocation outside reviewed declarations.
+func assertInertRootfsPartitionDiscovery(t *testing.T, files *token.FileSet, parsed *ast.File) {
+	t.Helper()
+
+	allowed := map[string]token.Pos{
+		systemRootfsPartitionDiscoveryFactory: functionDeclarationPosition(
+			parsed,
+			systemRootfsPartitionDiscoveryFactory,
+		),
+		rootfsPartitionDiscoveryEntry: functionDeclarationPosition(parsed, rootfsPartitionDiscoveryEntry),
+	}
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		identifier, isIdentifier := node.(*ast.Ident)
+		if !isIdentifier {
+			return true
+		}
+		declaration, guarded := allowed[identifier.Name]
+		if guarded && identifier.Pos() != declaration {
+			t.Errorf("production partition discovery activation found at %s", files.Position(identifier.Pos()))
+		}
+		return true
+	})
+}
+
+func functionDeclarationPosition(parsed *ast.File, name string) token.Pos {
+	for _, declaration := range parsed.Decls {
+		function, isFunction := declaration.(*ast.FuncDecl)
+		if isFunction && function.Name.Name == name {
+			return function.Name.Pos()
+		}
+	}
+	return token.NoPos
 }
 
 // assertInertLoopMountFile rejects every production reference outside the reviewed type and method declarations.

@@ -37,6 +37,7 @@ type rootfsLoopDeviceState struct {
 	fd         int
 	index      int
 	identity   rootfsBlockIdentity
+	access     rootfsAccess
 	released   bool
 	releaseErr error
 }
@@ -119,7 +120,7 @@ func attachRootfsLoopDevice(
 		configureErr := deps.configure(ctx, loopFD, &attemptConfig)
 		if configureErr == nil {
 			return &rootfsLoopDevice{state: &rootfsLoopDeviceState{
-				deps: deps, fd: loopFD, index: index, identity: identity,
+				deps: deps, fd: loopFD, index: index, identity: identity, access: lease.access,
 			}}, nil
 		}
 
@@ -189,6 +190,7 @@ func (device *rootfsLoopDevice) Release(ctx context.Context) error {
 	state.fd = -1
 	state.index = -1
 	state.identity = rootfsBlockIdentity{}
+	state.access = 0
 	state.released = true
 	state.releaseErr = result
 	return state.releaseErr

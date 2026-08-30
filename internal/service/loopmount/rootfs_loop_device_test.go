@@ -59,6 +59,7 @@ func TestAttachRootfsLoopDeviceUsesOnlyAdmittedDescriptorAndClosedAccess(t *test
 			}
 			assert.Equal(t, 3, device.state.index)
 			assert.Equal(t, rootfsBlockIdentity{major: 7, minor: 3}, device.state.identity)
+			assert.Equal(t, test.access, device.state.access)
 			assert.Equal(t, []string{"close.10"}, fixture.events)
 
 			require.NoError(t, device.Release(t.Context()))
