@@ -47,15 +47,18 @@ func TestNetworkAuthorityRegisterPersistsExactOwnerBootAndBridge(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, canonicalNetworkAuthorityJSON(testOwnerUID, testNetworkID, testBootID), string(raw))
 	assertNetworkAuthorityMetadata(t, recordPath, 0600)
-	for _, path := range []string{
-		filepath.Join(fixture.root, "var/lib/mvmctl"),
-		filepath.Join(fixture.root, "var/lib/mvmctl/networks"),
-		filepath.Join(fixture.root, "var/lib/mvmctl/networks", fmt.Sprint(testOwnerUID)),
+	for name, path := range map[string]string{
+		"service root": filepath.Join(fixture.root, "var/lib/mvmctl"),
+		"network root": filepath.Join(fixture.root, "var/lib/mvmctl/networks"),
+		"owner root": filepath.Join(
+			fixture.root, "var/lib/mvmctl/networks", fmt.Sprint(testOwnerUID),
+		),
 	} {
-		assertNetworkAuthorityMetadata(t, path, 0700)
+		t.Run(name, func(t *testing.T) { assertNetworkAuthorityMetadata(t, path, 0700) })
 	}
-	assert.Equal(t, []string{"acquire_index", "acquire_network", "release_network", "release_lock_uid",
-		"release_lock_root", "release_index"}, fixture.tree.eventsSnapshot())
+	assertNetworkAuthorityEvents(t, []string{
+		"acquire_index", "acquire_network", "release_network", "release_lock_uid", "release_index", "release_lock_root",
+	}, fixture.tree.eventsSnapshot())
 }
 
 // Rationale: identity availability is globally serialized, but authorization discloses only the invoking UID's claim.
@@ -85,7 +88,7 @@ func TestNetworkAuthorityRegistrationIsIdempotentAndUIDOwned(t *testing.T) {
 		NetworkID(testNetworkID),
 		testManagedBridge(t, testOwnerUID+1, testNetworkID),
 	)
-	assert.Equal(t, networkAuthorityRecord{}, foreign)
+	assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, foreign)
 	require.Error(t, err)
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
@@ -140,7 +143,7 @@ func TestNetworkAuthorityRegistrationRejectsStaleBootAndDifferentExactBridge(t *
 				NetworkID(testNetworkID),
 				tc.mutateBridge(bridge),
 			)
-			assert.Equal(t, networkAuthorityRecord{}, got)
+			assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, got)
 			require.Error(t, err)
 			domainErr := errs.AsDomainError(err)
 			require.NotNil(t, domainErr)
@@ -177,7 +180,7 @@ func TestNetworkAuthorityRegistrationRejectsCorruptOrDuplicateIndex(t *testing.T
 				NetworkID(testNetworkID),
 				testManagedBridge(t, testOwnerUID+2, testNetworkID),
 			)
-			assert.Equal(t, networkAuthorityRecord{}, got)
+			assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, got)
 			require.Error(t, err)
 			domainErr := errs.AsDomainError(err)
 			require.NotNil(t, domainErr)
@@ -222,7 +225,7 @@ func TestNetworkAuthorityRegistrationRejectsUnsafeRecordWithoutRepair(t *testing
 				NetworkID(testNetworkID),
 				testManagedBridge(t, testOwnerUID, testNetworkID),
 			)
-			assert.Equal(t, networkAuthorityRecord{}, got)
+			assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, got)
 			require.Error(t, err)
 			after, statErr := os.Lstat(target)
 			require.NoError(t, statErr)
@@ -243,18 +246,26 @@ func TestNetworkAuthorityValidatesBeforeEffects(t *testing.T) {
 	}
 	invalidBridge := testManagedBridge(t, testOwnerUID, testNetworkID)
 	invalidBridge.name = "mvb000000000000"
-	tests := []struct {
+	tests := map[string]struct {
 		caller    networkCaller
 		networkID NetworkID
 		bridge    linkIdentity
 	}{
-		{caller: networkCaller{}, networkID: NetworkID(testNetworkID), bridge: invalidBridge},
-		{caller: networkCaller{uid: testOwnerUID}, networkID: NetworkID("bad"), bridge: invalidBridge},
-		{caller: networkCaller{uid: testOwnerUID}, networkID: NetworkID(testNetworkID), bridge: invalidBridge},
+		"zero caller": {
+			caller: networkCaller{}, networkID: NetworkID(testNetworkID), bridge: invalidBridge,
+		},
+		"invalid network": {
+			caller: networkCaller{uid: testOwnerUID}, networkID: NetworkID("bad"), bridge: invalidBridge,
+		},
+		"invalid bridge": {
+			caller: networkCaller{uid: testOwnerUID}, networkID: NetworkID(testNetworkID), bridge: invalidBridge,
+		},
 	}
-	for _, tc := range tests {
-		_, err := fixture.authority.registerManagedNetwork(t.Context(), tc.caller, tc.networkID, tc.bridge)
-		require.Error(t, err)
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := fixture.authority.registerManagedNetwork(t.Context(), tc.caller, tc.networkID, tc.bridge)
+			require.Error(t, err)
+		})
 	}
 	assert.Zero(t, bootCalls.Load())
 	assert.Zero(t, fixture.tree.openCalls.Load())
@@ -272,7 +283,7 @@ func TestNetworkAuthorityObservesBootBeforeLockEffectsAndPreservesFailure(t *tes
 		NetworkID(testNetworkID),
 		testManagedBridge(t, testOwnerUID, testNetworkID),
 	)
-	assert.Equal(t, networkAuthorityRecord{}, got)
+	assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, got)
 	assert.ErrorIs(t, err, fault)
 	assert.Zero(t, fixture.tree.openCalls.Load())
 }
@@ -332,7 +343,7 @@ func TestNetworkAuthorityRegistrationIndexWaitIsCancellable(t *testing.T) {
 		NetworkID(testNetworkID),
 		testManagedBridge(t, testOwnerUID, testNetworkID),
 	)
-	assert.Equal(t, networkAuthorityRecord{}, got)
+	assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, got)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	domainErr := errs.AsDomainError(err)
@@ -342,6 +353,7 @@ func TestNetworkAuthorityRegistrationIndexWaitIsCancellable(t *testing.T) {
 	assert.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
+// Rationale: each authority acquisition failure must remain observable after releasing the exact completed prefix.
 func TestNetworkAuthorityRegistrationPreservesLockStageFaults(t *testing.T) {
 	t.Parallel()
 
@@ -359,14 +371,14 @@ func TestNetworkAuthorityRegistrationPreservesLockStageFaults(t *testing.T) {
 		},
 		"open UID": {
 			inject:     func(tree *testNetworkAuthorityTree, fault error) { tree.openUIDErr = fault },
-			wantEvents: []string{"acquire_index", "release_lock_root", "release_index"},
+			wantEvents: []string{"acquire_index", "release_index", "release_lock_root"},
 		},
 		"acquire network": {
 			inject: func(tree *testNetworkAuthorityTree, fault error) {
 				tree.acquireNetworkErr = fault
 			},
 			wantEvents: []string{
-				"acquire_index", "release_lock_uid", "release_lock_root", "release_index",
+				"acquire_index", "release_lock_uid", "release_index", "release_lock_root",
 			},
 		},
 	}
@@ -381,9 +393,9 @@ func TestNetworkAuthorityRegistrationPreservesLockStageFaults(t *testing.T) {
 				NetworkID(testNetworkID),
 				testManagedBridge(t, testOwnerUID, testNetworkID),
 			)
-			assert.Equal(t, networkAuthorityRecord{}, got)
+			assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, got)
 			assert.ErrorIs(t, err, fault)
-			assert.Equal(t, tc.wantEvents, fixture.tree.eventsSnapshot())
+			assertNetworkAuthorityEvents(t, tc.wantEvents, fixture.tree.eventsSnapshot())
 			_, statErr := os.Stat(fixture.recordPath(testOwnerUID, testNetworkID))
 			assert.ErrorIs(t, statErr, os.ErrNotExist)
 		})
@@ -434,19 +446,51 @@ func TestNetworkAuthorityRegistrationReleasesInReverseOrderWithCleanupContext(t 
 		NetworkID(testNetworkID),
 		testManagedBridge(t, testOwnerUID, testNetworkID),
 	)
-	assert.Equal(t, networkAuthorityRecord{}, got)
+	assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, got)
 	require.ErrorIs(t, err, writeFault)
-	assert.Equal(t, []string{
+	assertNetworkAuthorityEvents(t, []string{
 		"acquire_index", "acquire_network", "release_network", "release_lock_uid", "release_store_uid",
-		"release_store_root", "release_lock_root", "release_index",
+		"release_store_root", "release_index", "release_lock_root",
 	}, recorder.snapshot())
 	assert.True(t, recorder.allCleanupContextsSafe())
 }
 
+// Rationale: all six cleanup resources are independent evidence and none may replace the authoritative write failure.
 func TestNetworkAuthorityRegistrationPreservesPrimaryAndEveryCleanupFault(t *testing.T) {
 	t.Parallel()
 
 	fixture := newNetworkAuthorityFixture(t, testBootID)
+	recorder := fixture.tree.recorder
+	realOpenAt2 := fixture.authority.storeDeps.openAt2
+	realClose := fixture.authority.storeDeps.close
+	var storeRootFD, storeUIDFD atomic.Int64
+	storeRootFault := errors.New("release store root failed")
+	storeUIDFault := errors.New("release store UID failed")
+	fixture.authority.storeDeps.openAt2 = func(
+		ctx context.Context, parentFD int, name string, how *unix.OpenHow,
+	) (int, error) {
+		fd, err := realOpenAt2(ctx, parentFD, name, how)
+		if err == nil && name == "networks" {
+			storeRootFD.Store(int64(fd))
+		}
+		if err == nil && name == fmt.Sprint(testOwnerUID) {
+			storeUIDFD.Store(int64(fd))
+		}
+		return fd, err
+	}
+	fixture.authority.storeDeps.close = func(ctx context.Context, fd int) error {
+		closeErr := realClose(ctx, fd)
+		switch int64(fd) {
+		case storeUIDFD.Load():
+			recorder.add("release_store_uid")
+			return errors.Join(closeErr, storeUIDFault)
+		case storeRootFD.Load():
+			recorder.add("release_store_root")
+			return errors.Join(closeErr, storeRootFault)
+		default:
+			return closeErr
+		}
+	}
 	primary := errors.New("record write failed")
 	fixture.authority.storeDeps.write = func(context.Context, int, []byte) (int, error) { return 0, primary }
 	fixture.tree.releaseNetworkErr = errors.New("release network failed")
@@ -459,15 +503,112 @@ func TestNetworkAuthorityRegistrationPreservesPrimaryAndEveryCleanupFault(t *tes
 		NetworkID(testNetworkID),
 		testManagedBridge(t, testOwnerUID, testNetworkID),
 	)
-	for _, want := range []error{
-		primary, fixture.tree.releaseNetworkErr, fixture.tree.releaseUIDErr,
-		fixture.tree.releaseRootErr, fixture.tree.releaseIndexErr,
+	for name, want := range map[string]error{
+		"primary":      primary,
+		"network lock": fixture.tree.releaseNetworkErr,
+		"lock UID":     fixture.tree.releaseUIDErr,
+		"store UID":    storeUIDFault,
+		"store root":   storeRootFault,
+		"index lock":   fixture.tree.releaseIndexErr,
+		"lock root":    fixture.tree.releaseRootErr,
 	} {
-		assert.ErrorIs(t, err, want)
+		t.Run(name, func(t *testing.T) { assert.ErrorIs(t, err, want) })
 	}
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
 	assert.Equal(t, errs.CodeNetworkError, domainErr.Code)
+	cleanupRequired, ok := domainErr.Details["cleanup_required"].(bool)
+	require.True(t, ok)
+	assert.True(t, cleanupRequired)
+	assertNetworkAuthorityEvents(t, []string{
+		"acquire_index", "acquire_network", "release_network", "release_lock_uid", "release_store_uid",
+		"release_store_root", "release_index", "release_lock_root",
+	}, recorder.snapshot())
+}
+
+// Rationale: cleanup diagnostics must never mutate or replace the classified primary, even through outer wrappers.
+func TestAppendNetworkAuthorityErrorClonesPrimaryAndPreservesEveryCause(t *testing.T) {
+	t.Parallel()
+
+	t.Run("domain primary and repeated cleanup", func(t *testing.T) {
+		primaryCause := errors.New("primary cause")
+		sibling := errors.New("primary sibling")
+		firstCleanup := errors.New("first cleanup")
+		secondCleanup := errors.New("second cleanup")
+		primary := &errs.DomainError{
+			Code:    errs.CodeNetworkAlreadyExists,
+			Message: "classified primary message",
+			Op:      "network-register",
+			Entity:  testNetworkID,
+			Class:   errs.ClassConflict,
+			Err:     primaryCause,
+			Details: map[string]any{"record_created": true, "evidence": "original"},
+		}
+		outer := fmt.Errorf("outer wrapper: %w", errors.Join(primary, sibling))
+
+		first := appendNetworkAuthorityError(outer, "release managed-network lock", firstCleanup)
+		firstDomain := errs.AsDomainError(first)
+		require.NotNil(t, firstDomain)
+		assert.NotSame(t, primary, firstDomain)
+		wantMetadata := testNetworkAuthorityErrorMetadata{
+			Code: errs.CodeNetworkAlreadyExists, Message: "classified primary message", Op: "network-register",
+			Entity: testNetworkID, Class: errs.ClassConflict,
+			Details: map[string]any{
+				"record_created": true, "evidence": "original", "cleanup_required": true,
+				"cleanup_diagnostic": "release managed-network lock",
+			},
+		}
+		assertNetworkAuthorityErrorMetadata(t, wantMetadata, firstDomain)
+		assertNetworkAuthorityErrorMetadata(t, testNetworkAuthorityErrorMetadata{
+			Code: errs.CodeNetworkAlreadyExists, Message: "classified primary message", Op: "network-register",
+			Entity: testNetworkID, Class: errs.ClassConflict,
+			Details: map[string]any{"record_created": true, "evidence": "original"},
+		}, primary)
+		assert.Same(t, primaryCause, primary.Err)
+
+		second := appendNetworkAuthorityError(first, "release network owner", secondCleanup)
+		secondDomain := errs.AsDomainError(second)
+		require.NotNil(t, secondDomain)
+		assert.NotSame(t, firstDomain, secondDomain)
+		assertNetworkAuthorityErrorMetadata(t, wantMetadata, secondDomain)
+		assertNetworkAuthorityErrorMetadata(t, wantMetadata, firstDomain)
+		for name, want := range map[string]error{
+			"outer wrapper":   outer,
+			"domain object":   primary,
+			"primary cause":   primaryCause,
+			"primary sibling": sibling,
+			"first cleanup":   firstCleanup,
+			"second cleanup":  secondCleanup,
+		} {
+			t.Run(name, func(t *testing.T) { assert.ErrorIs(t, second, want) })
+		}
+	})
+
+	t.Run("non-domain wrapper and sibling", func(t *testing.T) {
+		primaryCause := errors.New("non-domain primary")
+		sibling := errors.New("non-domain sibling")
+		cleanup := errors.New("non-domain cleanup")
+		primary := fmt.Errorf("outer non-domain wrapper: %w", errors.Join(primaryCause, sibling))
+
+		got := appendNetworkAuthorityError(primary, "release network record root", cleanup)
+		domainErr := errs.AsDomainError(got)
+		require.NotNil(t, domainErr)
+		assert.Equal(t, primary.Error(), domainErr.Message)
+		if diff := cmp.Diff(map[string]any{
+			"cleanup_required":   true,
+			"cleanup_diagnostic": "release network record root",
+		}, domainErr.Details); diff != "" {
+			t.Errorf("non-domain cleanup details mismatch (-want +got):\n%s", diff)
+		}
+		for name, want := range map[string]error{
+			"outer wrapper":   primary,
+			"primary cause":   primaryCause,
+			"primary sibling": sibling,
+			"cleanup":         cleanup,
+		} {
+			t.Run(name, func(t *testing.T) { assert.ErrorIs(t, got, want) })
+		}
+	})
 }
 
 // Rationale: concurrent registrants must converge on one immutable record without duplicate cross-UID ownership.
@@ -477,10 +618,14 @@ func TestNetworkAuthorityConcurrentRegistrationSerializesClaims(t *testing.T) {
 	t.Run("same owner is idempotent", func(t *testing.T) {
 		fixture := newNetworkAuthorityFixture(t, testBootID)
 		const workers = 24
-		results := make(chan networkAuthorityRecord, workers)
-		errorsFound := make(chan error, workers)
+		type outcome struct {
+			record networkAuthorityRecord
+			err    error
+		}
+		outcomes := make(chan outcome, workers)
 		var wait sync.WaitGroup
 		bridge := testManagedBridge(t, testOwnerUID, testNetworkID)
+		want := testNetworkAuthorityRecord(t, testOwnerUID, testNetworkID, testBootID)
 		for range workers {
 			wait.Add(1)
 			go func() {
@@ -491,29 +636,34 @@ func TestNetworkAuthorityConcurrentRegistrationSerializesClaims(t *testing.T) {
 					NetworkID(testNetworkID),
 					bridge,
 				)
-				if err != nil {
-					errorsFound <- err
-					return
-				}
-				results <- record
+				outcomes <- outcome{record: record, err: err}
 			}()
 		}
 		wait.Wait()
-		close(errorsFound)
-		close(results)
-		assert.Empty(t, errorsFound)
-		assert.Len(t, results, workers)
-		entries, err := os.ReadDir(filepath.Dir(fixture.recordPath(testOwnerUID, testNetworkID)))
+		close(outcomes)
+		count := 0
+		for outcome := range outcomes {
+			require.NoError(t, outcome.err)
+			assertNetworkAuthorityRecordEqual(t, want, outcome.record)
+			count++
+		}
+		assert.Equal(t, workers, count)
+		raw, err := os.ReadFile(fixture.recordPath(testOwnerUID, testNetworkID))
 		require.NoError(t, err)
-		assert.Len(t, entries, 1)
+		persisted, err := decodeNetworkAuthorityRecord(raw)
+		require.NoError(t, err)
+		assertNetworkAuthorityRecordEqual(t, want, persisted)
 	})
 
 	t.Run("different owners produce exactly one claim", func(t *testing.T) {
 		fixture := newNetworkAuthorityFixture(t, testBootID)
 		const workers = 20
-		var successes atomic.Int32
-		var unauthorized atomic.Int32
-		var unexpected atomic.Int32
+		type outcome struct {
+			uid    uint32
+			record networkAuthorityRecord
+			err    error
+		}
+		outcomes := make(chan outcome, workers)
 		var wait sync.WaitGroup
 		bridges := make([]linkIdentity, workers)
 		for index := range workers {
@@ -523,31 +673,44 @@ func TestNetworkAuthorityConcurrentRegistrationSerializesClaims(t *testing.T) {
 			wait.Add(1)
 			go func(uid uint32) {
 				defer wait.Done()
-				_, err := fixture.authority.registerManagedNetwork(
+				record, err := fixture.authority.registerManagedNetwork(
 					t.Context(),
 					networkCaller{uid: uid},
 					NetworkID(testNetworkID),
 					bridges[index],
 				)
-				if err == nil {
-					successes.Add(1)
-					return
-				}
-				domainErr := errs.AsDomainError(err)
-				if domainErr != nil && domainErr.Code == errs.CodeUnauthorized {
-					unauthorized.Add(1)
-					return
-				}
-				unexpected.Add(1)
+				outcomes <- outcome{uid: uid, record: record, err: err}
 			}(testOwnerUID + uint32(index))
 		}
 		wait.Wait()
-		assert.Equal(t, int32(1), successes.Load())
-		assert.Equal(t, int32(workers-1), unauthorized.Load())
-		assert.Zero(t, unexpected.Load())
+		close(outcomes)
+		successes := 0
+		unauthorized := 0
+		var winner networkAuthorityRecord
+		for outcome := range outcomes {
+			if outcome.err == nil {
+				want := testNetworkAuthorityRecord(t, outcome.uid, testNetworkID, testBootID)
+				assertNetworkAuthorityRecordEqual(t, want, outcome.record)
+				winner = outcome.record
+				successes++
+				continue
+			}
+			assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, outcome.record)
+			domainErr := errs.AsDomainError(outcome.err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeUnauthorized, domainErr.Code)
+			unauthorized++
+		}
+		assert.Equal(t, 1, successes)
+		assert.Equal(t, workers-1, unauthorized)
 		matches, err := filepath.Glob(filepath.Join(fixture.stateRoot(), "*", testNetworkID+".json"))
 		require.NoError(t, err)
-		assert.Len(t, matches, 1)
+		require.Len(t, matches, 1)
+		raw, err := os.ReadFile(matches[0])
+		require.NoError(t, err)
+		persisted, err := decodeNetworkAuthorityRecord(raw)
+		require.NoError(t, err)
+		assertNetworkAuthorityRecordEqual(t, winner, persisted)
 	})
 }
 
@@ -618,6 +781,36 @@ func assertNetworkAuthorityRecordEqual(t *testing.T, want, got networkAuthorityR
 		networkAuthorityRecord{}, linkIdentity{}, namespaceIdentity{},
 	)); diff != "" {
 		t.Errorf("network authority record mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func assertNetworkAuthorityEvents(t *testing.T, want, got []string) {
+	t.Helper()
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("network authority events mismatch (-want +got):\n%s", diff)
+	}
+}
+
+type testNetworkAuthorityErrorMetadata struct {
+	Code    errs.Code
+	Message string
+	Op      string
+	Entity  string
+	Class   errs.Class
+	Details map[string]any
+}
+
+func assertNetworkAuthorityErrorMetadata(
+	t *testing.T,
+	want testNetworkAuthorityErrorMetadata,
+	got *errs.DomainError,
+) {
+	t.Helper()
+	actual := testNetworkAuthorityErrorMetadata{
+		Code: got.Code, Message: got.Message, Op: got.Op, Entity: got.Entity, Class: got.Class, Details: got.Details,
+	}
+	if diff := cmp.Diff(want, actual); diff != "" {
+		t.Errorf("network authority error metadata mismatch (-want +got):\n%s", diff)
 	}
 }
 

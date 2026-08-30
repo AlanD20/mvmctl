@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"maps"
 	"regexp"
 
 	"mvmctl/pkg/errs"
@@ -134,13 +135,31 @@ func appendNetworkAuthorityError(primary error, message string, cause error) err
 		return primary
 	}
 	if primary == nil {
-		return networkAuthorityEffectError(message, cause)
+		result := networkAuthorityEffectError(message, cause)
+		result.Details = networkAuthorityCleanupDetails(nil, message)
+		return result
 	}
 	domainErr := errs.AsDomainError(primary)
 	if domainErr == nil {
-		return networkAuthorityEffectError(message, errors.Join(primary, cause))
+		result := networkAuthorityEffectError(primary.Error(), errors.Join(primary, cause))
+		result.Details = networkAuthorityCleanupDetails(nil, message)
+		return result
 	}
-	domainErr.Message += "; " + message
-	domainErr.Err = errors.Join(domainErr.Err, cause)
-	return domainErr
+	result := *domainErr
+	result.Details = networkAuthorityCleanupDetails(domainErr.Details, message)
+	result.Err = errors.Join(primary, cause)
+	return &result
+}
+
+func networkAuthorityCleanupDetails(details map[string]any, diagnostic string) map[string]any {
+	result := maps.Clone(details)
+	if result == nil {
+		result = make(map[string]any, 2)
+	}
+	result["cleanup_required"] = true
+	if _, exists := result["cleanup_diagnostic"]; !exists {
+		// The diagnostic is one fixed call-site string; cleanup cause text remains only in the error chain.
+		result["cleanup_diagnostic"] = diagnostic
+	}
+	return result
 }

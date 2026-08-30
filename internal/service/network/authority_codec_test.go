@@ -35,6 +35,7 @@ func TestNetworkAuthorityCodecRoundTripUsesExactCanonicalProjection(t *testing.T
 	}
 }
 
+// Rationale: persisted authority is privileged input, so every non-canonical or schema-expanding form must fail closed.
 func TestNetworkAuthorityCodecRejectsAnythingOutsideClosedSchema(t *testing.T) {
 	t.Parallel()
 
@@ -95,6 +96,7 @@ func TestNetworkAuthorityCodecRejectsAnythingOutsideClosedSchema(t *testing.T) {
 	}
 }
 
+// Rationale: registration authority is exactly UID-, boot-, and bridge-bound rather than caller-extensible state.
 func TestNetworkAuthorityRecordBindsOwnerBootAndExactBridge(t *testing.T) {
 	t.Parallel()
 

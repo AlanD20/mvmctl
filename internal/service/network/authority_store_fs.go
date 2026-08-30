@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/sys/unix"
 
@@ -58,17 +59,23 @@ type networkStorePolicy struct {
 }
 
 type networkStoreRoot struct {
-	deps     networkStoreDeps
-	policy   networkStorePolicy
-	stateFD  int
-	retained []int
+	mu         sync.Mutex
+	deps       networkStoreDeps
+	policy     networkStorePolicy
+	stateFD    int
+	retained   []int
+	released   bool
+	releaseErr error
 }
 
 type networkStoreUID struct {
-	deps    networkStoreDeps
-	policy  networkStorePolicy
-	uid     uint32
-	stateFD int
+	mu         sync.Mutex
+	deps       networkStoreDeps
+	policy     networkStorePolicy
+	uid        uint32
+	stateFD    int
+	released   bool
+	releaseErr error
 }
 
 func productionNetworkStorePolicy() networkStorePolicy {
@@ -266,28 +273,42 @@ func (root *networkStoreRoot) openUID(ctx context.Context, uid uint32, create bo
 }
 
 func (root *networkStoreRoot) Release(ctx context.Context) error {
-	if root == nil || len(root.retained) == 0 {
+	if root == nil {
 		return nil
 	}
+	root.mu.Lock()
+	defer root.mu.Unlock()
+	if root.released {
+		return root.releaseErr
+	}
+	root.released = true
 	err := closeNetworkStoreFDs(context.WithoutCancel(ctx), root.deps, root.retained)
 	root.retained = nil
 	root.stateFD = -1
 	if err != nil {
-		return networkAuthorityEffectError("release network authority root descriptors", err)
+		root.releaseErr = networkAuthorityEffectError("release network authority root descriptors", err)
 	}
-	return nil
+	return root.releaseErr
 }
 
 func (uid *networkStoreUID) Release(ctx context.Context) error {
-	if uid == nil || uid.stateFD < 0 {
+	if uid == nil {
 		return nil
 	}
+	uid.mu.Lock()
+	defer uid.mu.Unlock()
+	if uid.released {
+		return uid.releaseErr
+	}
+	uid.released = true
 	fd := uid.stateFD
 	uid.stateFD = -1
-	if err := uid.deps.close(context.WithoutCancel(ctx), fd); err != nil {
-		return networkAuthorityEffectError("release network authority UID descriptor", err)
+	if fd >= 0 {
+		if err := uid.deps.close(context.WithoutCancel(ctx), fd); err != nil {
+			uid.releaseErr = networkAuthorityEffectError("release network authority UID descriptor", err)
+		}
 	}
-	return nil
+	return uid.releaseErr
 }
 
 func closeRejectedNetworkStoreFD(ctx context.Context, deps networkStoreDeps, fd int, primary error) error {

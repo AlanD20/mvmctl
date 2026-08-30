@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -25,6 +27,7 @@ type networkStoreFixture struct {
 	recordPath string
 }
 
+// Rationale: only an active ENOENT is absence; cancellation, I/O failure, and corruption must remain distinguishable.
 func TestNetworkStoreReadDistinguishesMissingCancellationIOAndCorruption(t *testing.T) {
 	t.Parallel()
 
@@ -33,7 +36,7 @@ func TestNetworkStoreReadDistinguishesMissingCancellationIOAndCorruption(t *test
 		record, found, err := fixture.uid.readRecord(t.Context(), NetworkID(testNetworkID))
 		require.NoError(t, err)
 		assert.False(t, found)
-		assert.Equal(t, networkAuthorityRecord{}, record)
+		assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, record)
 	})
 
 	t.Run("already canceled", func(t *testing.T) {
@@ -41,7 +44,7 @@ func TestNetworkStoreReadDistinguishesMissingCancellationIOAndCorruption(t *test
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		record, found, err := fixture.uid.readRecord(ctx, NetworkID(testNetworkID))
-		assert.Equal(t, networkAuthorityRecord{}, record)
+		assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, record)
 		assert.False(t, found)
 		assert.ErrorIs(t, err, context.Canceled)
 		assertNetworkAuthorityErrorClass(t, err, errs.ClassRetryable)
@@ -55,7 +58,7 @@ func TestNetworkStoreReadDistinguishesMissingCancellationIOAndCorruption(t *test
 			return -1, unix.ENOENT
 		}
 		record, found, err := fixture.uid.readRecord(ctx, NetworkID(testNetworkID))
-		assert.Equal(t, networkAuthorityRecord{}, record)
+		assertNetworkAuthorityRecordEqual(t, networkAuthorityRecord{}, record)
 		assert.False(t, found)
 		assert.ErrorIs(t, err, context.Canceled)
 		assertNetworkAuthorityErrorClass(t, err, errs.ClassRetryable)
@@ -95,6 +98,7 @@ func TestNetworkStoreReadDistinguishesMissingCancellationIOAndCorruption(t *test
 	})
 }
 
+// Rationale: descriptor cleanup evidence must be retained without erasing a successful read or its primary failure.
 func TestNetworkStoreReadReturnsRecordWithCloseFaultAndPreservesPrimary(t *testing.T) {
 	t.Parallel()
 
@@ -296,6 +300,7 @@ func TestNetworkStoreAtomicWriteReportsPostcommitDurabilityUncertainty(t *testin
 	assert.Equal(t, canonicalNetworkAuthorityJSON(testOwnerUID, testNetworkID, testBootID), string(raw))
 }
 
+// Rationale: publication is create-only so an attacker-controlled or concurrently-created identity is never replaced.
 func TestNetworkStoreAtomicWriteNeverReplacesExistingEntry(t *testing.T) {
 	t.Parallel()
 
@@ -422,6 +427,94 @@ func TestNetworkStoreRejectsUnsafeManagedDirectoryWithoutRepair(t *testing.T) {
 	assert.Equal(t, os.FileMode(0755), info.Mode().Perm())
 }
 
+// Rationale: release owns descriptor lifetime and must cache one exact result while closing in reverse acquisition order.
+func TestNetworkStoreRootReleaseClosesReverseOnceWithCleanupContext(t *testing.T) {
+	t.Parallel()
+
+	rootPath := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(rootPath, "var/lib"), 0755))
+	deps := realNetworkStoreDeps()
+	realOpen := deps.open
+	realOpenAt2 := deps.openAt2
+	realClose := deps.close
+	accepted := make([]int, 0, 5)
+	closed := make([]int, 0, 5)
+	contextsSafe := make([]bool, 0, 5)
+	deps.open = func(ctx context.Context, path string, flags int, mode uint32) (int, error) {
+		fd, err := realOpen(ctx, path, flags, mode)
+		if err == nil {
+			accepted = append(accepted, fd)
+		}
+		return fd, err
+	}
+	deps.openAt2 = func(ctx context.Context, parentFD int, name string, how *unix.OpenHow) (int, error) {
+		fd, err := realOpenAt2(ctx, parentFD, name, how)
+		if err == nil {
+			accepted = append(accepted, fd)
+		}
+		return fd, err
+	}
+	closeFault := errors.New("root close failed")
+	deps.close = func(ctx context.Context, fd int) error {
+		closed = append(closed, fd)
+		contextsSafe = append(contextsSafe,
+			ctx.Err() == nil && ctx.Value(testAuthorityContextKey{}) == "retained")
+		closeErr := realClose(ctx, fd)
+		if len(accepted) > 0 && fd == accepted[len(accepted)-1] {
+			return errors.Join(closeErr, closeFault)
+		}
+		return closeErr
+	}
+	root, err := openNetworkStoreRoot(t.Context(), deps, networkStorePolicy{
+		rootPath: rootPath, stateRoot: "/var/lib/mvmctl/networks",
+		expectedUID: uint32(os.Geteuid()), expectedGID: uint32(os.Getegid()),
+	})
+	require.NoError(t, err)
+	require.Len(t, accepted, 5)
+	releaseCtx, cancel := context.WithCancel(context.WithValue(
+		t.Context(), testAuthorityContextKey{}, "retained",
+	))
+	cancel()
+	first := root.Release(releaseCtx)
+	second := root.Release(context.Background())
+	require.ErrorIs(t, first, closeFault)
+	assert.Same(t, first, second)
+	wantClosed := slices.Clone(accepted)
+	slices.Reverse(wantClosed)
+	if diff := cmp.Diff(wantClosed, closed); diff != "" {
+		t.Errorf("network store root close order mismatch (-want +got):\n%s", diff)
+	}
+	assert.NotEmpty(t, contextsSafe)
+	assert.NotContains(t, contextsSafe, false)
+}
+
+// Rationale: a UID descriptor close failure remains the stable release result and must never trigger a second close.
+func TestNetworkStoreUIDReleaseClosesOnceWithCleanupContext(t *testing.T) {
+	t.Parallel()
+
+	fixture := newNetworkStoreFixtureWithoutCleanup(t)
+	realClose := fixture.uid.deps.close
+	closeFault := errors.New("UID close failed")
+	var closeCalls atomic.Int32
+	var contextSafe atomic.Bool
+	fixture.uid.deps.close = func(ctx context.Context, fd int) error {
+		closeCalls.Add(1)
+		contextSafe.Store(ctx.Err() == nil && ctx.Value(testAuthorityContextKey{}) == "retained")
+		return errors.Join(realClose(ctx, fd), closeFault)
+	}
+	releaseCtx, cancel := context.WithCancel(context.WithValue(
+		t.Context(), testAuthorityContextKey{}, "retained",
+	))
+	cancel()
+	first := fixture.uid.Release(releaseCtx)
+	second := fixture.uid.Release(context.Background())
+	require.ErrorIs(t, first, closeFault)
+	assert.Same(t, first, second)
+	assert.Equal(t, int32(1), closeCalls.Load())
+	assert.True(t, contextSafe.Load())
+	require.NoError(t, fixture.storeRoot.Release(context.Background()))
+}
+
 type networkStoreWriteObservation struct {
 	tempCloseCalls atomic.Int32
 	unlinkCalls    atomic.Int32
@@ -532,6 +625,14 @@ func wrapNetworkStoreFDModeFault(
 
 func newNetworkStoreFixture(t *testing.T) *networkStoreFixture {
 	t.Helper()
+	fixture := newNetworkStoreFixtureWithoutCleanup(t)
+	t.Cleanup(func() { require.NoError(t, fixture.storeRoot.Release(context.Background())) })
+	t.Cleanup(func() { require.NoError(t, fixture.uid.Release(context.Background())) })
+	return fixture
+}
+
+func newNetworkStoreFixtureWithoutCleanup(t *testing.T) *networkStoreFixture {
+	t.Helper()
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib"), 0755))
 	policy := networkStorePolicy{
@@ -540,10 +641,8 @@ func newNetworkStoreFixture(t *testing.T) *networkStoreFixture {
 	}
 	storeRoot, err := openNetworkStoreRoot(t.Context(), realNetworkStoreDeps(), policy)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, storeRoot.Release(context.Background())) })
 	uid, err := storeRoot.openUID(t.Context(), testOwnerUID, true)
 	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, uid.Release(context.Background())) })
 	record := testNetworkAuthorityRecord(t, testOwnerUID, testNetworkID, testBootID)
 	return &networkStoreFixture{
 		root: root, policy: policy, storeRoot: storeRoot, uid: uid, record: record,

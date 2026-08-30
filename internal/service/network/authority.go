@@ -93,18 +93,18 @@ func (authority *networkAuthority) registerManagedNetwork(
 				storeRoot.Release(cleanupCtx),
 			)
 		}
-		if lockRoot != nil {
-			returnErr = appendNetworkAuthorityError(
-				returnErr,
-				"release network lock root",
-				lockRoot.Release(cleanupCtx),
-			)
-		}
 		if indexLock != nil {
 			returnErr = appendNetworkAuthorityError(
 				returnErr,
 				"release network ownership-index lock",
 				indexLock.Release(cleanupCtx),
+			)
+		}
+		if lockRoot != nil {
+			returnErr = appendNetworkAuthorityError(
+				returnErr,
+				"release network lock root",
+				lockRoot.Release(cleanupCtx),
 			)
 		}
 	}()
