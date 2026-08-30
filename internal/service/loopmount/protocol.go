@@ -20,15 +20,16 @@ const (
 	// ImageOptimizeAction selects fixed optimization of one receiver-derived image staging rootfs.
 	ImageOptimizeAction = "loopmount-optimize-image"
 
-	minimumRootfsBytes uint64 = 128 << 20
-	maximumRootfsBytes uint64 = 16 << 40
-	minimumImageBytes  uint64 = 1
-	maximumImageBytes  uint64 = 16 << 40
-	maxSSHKeys                = 64
-	maxSSHKeyBytes            = 16 << 10
-	maxSSHKeysBytes           = 48 << 10
-	maxOperationCount         = 16
-	maxResultCount            = 1 << 20
+	minimumRootfsBytes    uint64 = 128 << 20
+	maximumRootfsBytes    uint64 = 16 << 40
+	minimumImageBytes     uint64 = 1
+	maximumImageBytes     uint64 = 16 << 40
+	maxSSHKeys                   = 64
+	maxSSHKeyBytes               = 16 << 10
+	maxSSHKeysBytes              = 48 << 10
+	maxGuestUsernameBytes        = 32
+	maxOperationCount            = 16
+	maxResultCount               = 1 << 20
 )
 
 // Filesystem is a closed filesystem type admitted by loopmount operations.
@@ -175,6 +176,12 @@ func (plan VMProvisionPlan) Validate() error {
 	}
 	if plan.SudoUser != nil {
 		operations++
+		if len(*plan.SudoUser) > maxGuestUsernameBytes {
+			return validationError(fmt.Sprintf(
+				"managed VM sudo username exceeds %d-byte limit",
+				maxGuestUsernameBytes,
+			))
+		}
 		if err := validators.SSHUsername(*plan.SudoUser); err != nil {
 			return validationError(err.Error())
 		}
@@ -208,6 +215,12 @@ func (plan VMProvisionPlan) Validate() error {
 
 // Validate enforces bounded SSH setup values before fixed receiver templates use them.
 func (setup SSHSetup) Validate() error {
+	if len(setup.User) > maxGuestUsernameBytes {
+		return validationError(fmt.Sprintf(
+			"managed VM SSH username exceeds %d-byte limit",
+			maxGuestUsernameBytes,
+		))
+	}
 	if err := validators.SSHUsername(setup.User); err != nil {
 		return validationError(err.Error())
 	}
@@ -315,8 +328,12 @@ func (result VMProvisionResult) Validate(request VMProvisionRequest) error {
 	if result.RootfsBytes < minimumRootfsBytes || result.RootfsBytes > maximumRootfsBytes {
 		return validationError("managed VM provision result size is outside policy")
 	}
-	if request.Plan.ResizeBytes != 0 && result.RootfsBytes != request.Plan.ResizeBytes {
-		return validationError("managed VM provision result size does not match requested resize")
+	expectedRootfsBytes := request.ExpectedRootfsBytes
+	if request.Plan.ResizeBytes != 0 {
+		expectedRootfsBytes = request.Plan.ResizeBytes
+	}
+	if result.RootfsBytes != expectedRootfsBytes {
+		return validationError("managed VM provision result size does not match request")
 	}
 	if result.FilesWritten > maxResultCount || result.CommandsRun > maxResultCount {
 		return validationError("managed VM provision result count exceeds policy")

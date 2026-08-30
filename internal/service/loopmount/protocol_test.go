@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	testVMID    = "0123456789abcdef0123456789abcdef"
-	testImageID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	testVMID                  = "0123456789abcdef0123456789abcdef"
+	testImageID               = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	testMaxGuestUsernameBytes = 32
 )
 
 func TestVMProvisionRequestValidate(t *testing.T) {
@@ -78,6 +79,8 @@ func TestVMProvisionRequestValidate(t *testing.T) {
 }
 
 func TestVMProvisionRequestRejectsUntrustedAuthorityAndUnboundedValues(t *testing.T) {
+	// Rationale: Every value crossing into the privileged receiver must be either a closed enum or independently
+	// bounded before it can influence guest filesystem mutation.
 	valid := func() VMProvisionRequest {
 		return VMProvisionRequest{
 			CacheLocator:        "/srv/mvm-cache",
@@ -92,6 +95,7 @@ func TestVMProvisionRequestRejectsUntrustedAuthorityAndUnboundedValues(t *testin
 		overlongKeys[index] = "ssh-ed25519 AAAA"
 	}
 	largeKey := "ssh-ed25519 " + strings.Repeat("A", maxSSHKeyBytes)
+	overlongUsername := strings.Repeat("a", testMaxGuestUsernameBytes+1)
 
 	tests := map[string]struct {
 		mutate  func(*VMProvisionRequest)
@@ -149,6 +153,12 @@ func TestVMProvisionRequestRejectsUntrustedAuthorityAndUnboundedValues(t *testin
 			},
 			wantErr: "SSH username",
 		},
+		"SSH username exceeds receiver limit": {
+			mutate: func(request *VMProvisionRequest) {
+				request.Plan.SSH = &SSHSetup{User: overlongUsername}
+			},
+			wantErr: "SSH username exceeds",
+		},
 		"too many SSH keys": {
 			mutate: func(request *VMProvisionRequest) {
 				request.Plan.SSH = &SSHSetup{User: "root", PublicKeys: overlongKeys}
@@ -174,9 +184,21 @@ func TestVMProvisionRequestRejectsUntrustedAuthorityAndUnboundedValues(t *testin
 			},
 			wantErr: "SSH username",
 		},
-		"agent privileged port": {
+		"sudo username exceeds receiver limit": {
 			mutate: func(request *VMProvisionRequest) {
-				request.Plan.Agent = &AgentSetup{Port: 22, Token: "01234567-89ab-4def-8123-456789abcdef"}
+				request.Plan.SudoUser = &overlongUsername
+			},
+			wantErr: "sudo username exceeds",
+		},
+		"agent port below closed range": {
+			mutate: func(request *VMProvisionRequest) {
+				request.Plan.Agent = &AgentSetup{Port: 0, Token: "01234567-89ab-4def-8123-456789abcdef"}
+			},
+			wantErr: "agent port",
+		},
+		"agent port above closed range": {
+			mutate: func(request *VMProvisionRequest) {
+				request.Plan.Agent = &AgentSetup{Port: 65536, Token: "01234567-89ab-4def-8123-456789abcdef"}
 			},
 			wantErr: "agent port",
 		},
@@ -202,6 +224,43 @@ func TestVMProvisionRequestRejectsUntrustedAuthorityAndUnboundedValues(t *testin
 			err := request.Validate()
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
+		})
+	}
+}
+
+// Rationale: The shared username validator constrains characters but not length. The privileged protocol owns an
+// explicit byte boundary and must accept its exact maximum for both guest-account fields.
+func TestVMProvisionRequestAcceptsGuestUsernameBoundary(t *testing.T) {
+	username := strings.Repeat("a", testMaxGuestUsernameBytes)
+	request := VMProvisionRequest{
+		CacheLocator:        "/srv/mvm-cache",
+		VMID:                testVMID,
+		ExpectedRootfsBytes: 512 << 20,
+		Filesystem:          FilesystemExt4,
+		Plan: VMProvisionPlan{
+			SSH:      &SSHSetup{User: username},
+			SudoUser: &username,
+		},
+	}
+
+	require.NoError(t, request.Validate())
+}
+
+// Rationale: AF_VSOCK ports do not have TCP's privileged-port boundary. The closed product range deliberately admits
+// every value from 1 through 65535, including port 22.
+func TestAgentSetupAcceptsFullVsockPortRange(t *testing.T) {
+	tests := map[string]int{
+		"minimum":             1,
+		"TCP privileged port": 22,
+		"maximum":             65535,
+	}
+
+	for name, port := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, (AgentSetup{
+				Port:  port,
+				Token: "01234567-89ab-4def-8123-456789abcdef",
+			}).Validate())
 		})
 	}
 }
@@ -289,7 +348,9 @@ func TestImageRequestsRejectPathsAndGenericOperations(t *testing.T) {
 				ImageID:            testImageID,
 				ExpectedImageBytes: 256 << 20,
 				Filesystem:         FilesystemExt4,
-				Plan:               ImageOptimizePlan{DeblobOS: func() *string { value := distro + "$(id)"; return &value }()},
+				Plan: ImageOptimizePlan{
+					DeblobOS: func() *string { value := distro + "$(id)"; return &value }(),
+				},
 			},
 			wantErr: "OS identifier",
 		},
@@ -347,4 +408,29 @@ func TestLoopMountResultsBindToRequestIdentity(t *testing.T) {
 		ImageBytes: 192 << 20,
 	}
 	assert.Error(t, wrongImage.Validate(imageRequest))
+}
+
+// Rationale: Without a resize operation, a changed rootfs size is not an authoritative result of the closed plan.
+// Requiring the admitted pre-operation size prevents an unrelated or compromised receiver mutation from being accepted.
+func TestVMProvisionResultRequiresUnchangedSizeWithoutResize(t *testing.T) {
+	request := VMProvisionRequest{
+		CacheLocator:        "/srv/mvm-cache",
+		VMID:                testVMID,
+		ExpectedRootfsBytes: 512 << 20,
+		Filesystem:          FilesystemExt4,
+		Plan:                VMProvisionPlan{FixFstab: true},
+	}
+	valid := VMProvisionResult{
+		VMID:        testVMID,
+		Filesystem:  FilesystemExt4,
+		RootfsBytes: request.ExpectedRootfsBytes,
+	}
+
+	require.NoError(t, valid.Validate(request))
+
+	changed := valid
+	changed.RootfsBytes++
+	err := changed.Validate(request)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "size does not match")
 }

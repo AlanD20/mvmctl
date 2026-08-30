@@ -104,39 +104,48 @@ func exchangeLoopMount[Request any, Result any](
 	if ctx == nil {
 		return zero, validationError("privileged client context is required")
 	}
-	if err := ctx.Err(); err != nil {
-		return zero, errs.WrapMsg(errs.CodeProcessError, "start loopmount privileged operation", err)
-	}
-	if client == nil || client.exchanger == nil {
-		return zero, errs.New(
-			errs.CodeProcessError,
-			"loopmount privileged client is not active",
-			errs.WithClass(errs.ClassInternal),
-			errs.WithDetails(map[string]any{"process_started": false, "outcome_unknown": false}),
-		)
-	}
 	if validateRequest == nil || validateResult == nil {
-		return zero, errs.New(
-			errs.CodeInternal,
-			"loopmount privileged client contract is incomplete",
-			errs.WithClass(errs.ClassInternal),
+		return zero, unknownLoopMountOutcome(
+			action,
+			false,
+			errors.New("loopmount privileged client contract is incomplete"),
 		)
 	}
 	if err := validateRequest(); err != nil {
 		return zero, err
 	}
+	if err := ctx.Err(); err != nil {
+		return zero, unknownLoopMountOutcome(action, false, err)
+	}
+	if client == nil || client.exchanger == nil {
+		return zero, unknownLoopMountOutcome(
+			action,
+			false,
+			errors.New("loopmount privileged client is not active"),
+		)
+	}
 
 	var frame bytes.Buffer
 	if err := privilegedwire.EncodeRequest(ctx, &frame, action, request, 0); err != nil {
-		return zero, err
+		return zero, unknownLoopMountOutcome(action, false, err)
 	}
 	controlRequest, err := system.NewPrivilegedControlRequest(action, frame.Bytes(), 0, nil)
 	if err != nil {
-		return zero, err
+		return zero, unknownLoopMountOutcome(action, false, err)
 	}
 	outcome := client.exchanger.Exchange(ctx, controlRequest)
 	if outcome == nil {
 		return zero, unknownLoopMountOutcome(action, false, errors.New("privileged exchange returned no outcome"))
+	}
+	if outcome.ResponseEOF() && !outcome.ProcessStarted() {
+		return zero, unknownLoopMountOutcome(
+			action,
+			false,
+			joinLoopMountOutcomeErrors(
+				errors.New("privileged response arrived before process start"),
+				outcome.Diagnostic(),
+			),
+		)
 	}
 
 	if outcome.ResponseEOF() {
@@ -176,6 +185,8 @@ func exchangeLoopMount[Request any, Result any](
 	)
 }
 
+// unknownLoopMountOutcome converts transport evidence into the stable retry-safety contract. Before start, no effect
+// is possible; after start, any missing authority leaves the effect outcome unknown.
 func unknownLoopMountOutcome(action string, processStarted bool, cause error) *errs.DomainError {
 	return errs.WrapMsg(
 		errs.CodeProcessError,
@@ -190,6 +201,8 @@ func unknownLoopMountOutcome(action string, processStarted bool, cause error) *e
 	)
 }
 
+// joinLoopMountOutcomeErrors retains transport diagnostics as causes without allowing them to replace response
+// authority or the client's stable outer classification.
 func joinLoopMountOutcomeErrors(primary error, diagnostic *errs.DomainError) error {
 	if diagnostic == nil {
 		return primary
