@@ -1,6 +1,9 @@
 package loopmount
 
 import (
+	"bytes"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -50,6 +53,33 @@ func TestRewriteRootfsHostsConvergesToOneManagedHostname(t *testing.T) {
 	}
 }
 
+func TestRewriteRootfsHostsRejectsUnboundedRenderedContent(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		current  []byte
+		hostname string
+		wantErr  string
+	}{
+		"global_limit": {
+			current:  bytes.Repeat([]byte("#\n"), maxRootfsProvisionTextBytes/2),
+			hostname: "vm-a",
+			wantErr:  "content exceeds",
+		},
+		"line_limit": {
+			hostname: strings.Repeat("a", maxRootfsProvisionLineBytes),
+			wantErr:  "line exceeds",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := rewriteRootfsHosts(tc.current, tc.hostname)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
 func TestRewriteRootfsFstabAppliesOnlyClosedFirecrackerPolicy(t *testing.T) {
 	t.Parallel()
 
@@ -81,6 +111,57 @@ func TestRewriteRootfsFstabAppliesOnlyClosedFirecrackerPolicy(t *testing.T) {
 	}
 }
 
+func TestRewriteRootfsFstabRejectsMalformedOrUnboundedContent(t *testing.T) {
+	t.Parallel()
+
+	boundedRowPrefix := "UUID="
+	boundedRowSuffix := " / ext4"
+	boundedRow := boundedRowPrefix +
+		strings.Repeat("a", maxRootfsProvisionLineBytes-len(boundedRowPrefix)-len(boundedRowSuffix)) +
+		boundedRowSuffix + "\n"
+	globalRow := []byte("UUID=a / ext4 defaults 0 1\n")
+	tests := map[string]struct {
+		current []byte
+		wantErr string
+	}{
+		"malformed_active_row": {
+			current: []byte("/dev/vda /\n"),
+			wantErr: "malformed active row",
+		},
+		"nul": {
+			current: []byte("tmpfs /tmp tmpfs defaults 0 0\x00\n"),
+			wantErr: "NUL-free UTF-8",
+		},
+		"invalid_utf8": {
+			current: []byte{0xff, '\n'},
+			wantErr: "NUL-free UTF-8",
+		},
+		"crlf": {
+			current: []byte("tmpfs /tmp tmpfs defaults 0 0\r\n"),
+			wantErr: "crlf content",
+		},
+		"input_size": {
+			current: bytes.Repeat([]byte("#"), maxRootfsProvisionTextBytes+1),
+			wantErr: "content exceeds",
+		},
+		"rendered_global_limit": {
+			current: bytes.Repeat(globalRow, maxRootfsProvisionTextBytes/len(globalRow)),
+			wantErr: "content exceeds",
+		},
+		"rendered_line_limit": {
+			current: []byte(boundedRow),
+			wantErr: "line exceeds",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := rewriteRootfsFstab(tc.current)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
 func TestParseRootfsGuestAccountRequiresOneCanonicalExistingAccount(t *testing.T) {
 	t.Parallel()
 
@@ -101,6 +182,38 @@ func TestParseRootfsGuestAccountRequiresOneCanonicalExistingAccount(t *testing.T
 			username: "alice",
 			passwd:   []byte("alice:x:1000:1000::home/alice:/bin/sh\n"),
 			wantErr:  "home",
+		},
+		"rejects_noncanonical_uid": {
+			username: "alice",
+			passwd:   []byte("alice:x:01000:1000::/home/alice:/bin/sh\n"),
+			wantErr:  "UID",
+		},
+		"rejects_noncanonical_gid": {
+			username: "alice",
+			passwd:   []byte("alice:x:1000:01000::/home/alice:/bin/sh\n"),
+			wantErr:  "GID",
+		},
+		"rejects_chown_uid_sentinel": {
+			username: "alice",
+			passwd: []byte("alice:x:" + strconv.FormatUint(math.MaxUint32, 10) +
+				":1000::/home/alice:/bin/sh\n"),
+			wantErr: "UID",
+		},
+		"rejects_chown_gid_sentinel": {
+			username: "alice",
+			passwd: []byte("alice:x:1000:" + strconv.FormatUint(math.MaxUint32, 10) +
+				"::/home/alice:/bin/sh\n"),
+			wantErr: "GID",
+		},
+		"rejects_invalid_root_identity": {
+			username: "root",
+			passwd:   []byte("root:x:0:0:root:/home/root:/bin/sh\n"),
+			wantErr:  "root account identity",
+		},
+		"rejects_non_root_uid_zero": {
+			username: "alice",
+			passwd:   []byte("alice:x:0:1000::/home/alice:/bin/sh\n"),
+			wantErr:  "root authority",
 		},
 		"rejects_missing": {username: "bob", passwd: passwd, wantErr: "does not exist"},
 		"accepts_existing": {

@@ -3,6 +3,7 @@ package loopmount
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -44,9 +45,16 @@ func rewriteRootfsHosts(current []byte, hostname string) ([]byte, error) {
 		result = append(result, line)
 	}
 	result = append(result, "127.0.1.1\t"+hostname)
-	return []byte(strings.Join(result, "\n") + "\n"), nil
+	rendered, err := renderBoundedRootfsLines(result)
+	if err != nil {
+		return nil, rootfsAtomicError("rewrite managed guest hosts file: "+err.Error(), err)
+	}
+	return rendered, nil
 }
 
+// rewriteRootfsFstab applies the closed Firecracker root-disk contract: preserve unrelated rows, disable
+// identity-, partition-, EFI-, and swap-based mounts, and add noatime to the unpartitioned /dev/vda root mount.
+// Rationale: legacy image rows must not claim devices that the fixed microVM disk topology does not provide.
 func rewriteRootfsFstab(current []byte) ([]byte, error) {
 	lines, err := splitBoundedRootfsLines(current)
 	if err != nil {
@@ -72,7 +80,11 @@ func rewriteRootfsFstab(current []byte) ([]byte, error) {
 			lines[index] = strings.Join(fields, " ")
 		}
 	}
-	return []byte(strings.Join(lines, "\n") + "\n"), nil
+	rendered, err := renderBoundedRootfsLines(lines)
+	if err != nil {
+		return nil, rootfsAtomicError("rewrite managed guest fstab: "+err.Error(), err)
+	}
+	return rendered, nil
 }
 
 func splitBoundedRootfsLines(content []byte) ([]string, error) {
@@ -92,10 +104,23 @@ func splitBoundedRootfsLines(content []byte) ([]string, error) {
 			return nil, fmt.Errorf("line exceeds %d-byte limit", maxRootfsProvisionLineBytes)
 		}
 		if strings.HasSuffix(line, "\r") {
-			return nil, fmt.Errorf("CRLF content is unsupported")
+			return nil, fmt.Errorf("crlf content is unsupported")
 		}
 	}
 	return lines, nil
+}
+
+func renderBoundedRootfsLines(lines []string) ([]byte, error) {
+	for _, line := range lines {
+		if len(line) > maxRootfsProvisionLineBytes {
+			return nil, fmt.Errorf("line exceeds %d-byte limit", maxRootfsProvisionLineBytes)
+		}
+	}
+	rendered := []byte(strings.Join(lines, "\n") + "\n")
+	if len(rendered) > maxRootfsProvisionTextBytes {
+		return nil, fmt.Errorf("content exceeds %d-byte limit", maxRootfsProvisionTextBytes)
+	}
+	return rendered, nil
 }
 
 func isRootfsPartitionDevice(source string) bool {
@@ -142,9 +167,16 @@ func parseRootfsGuestAccount(passwd []byte, username string) (rootfsGuestAccount
 		if parseErr != nil || strconv.FormatUint(uid, 10) != fields[2] {
 			return rootfsGuestAccount{}, rootfsAtomicError("managed guest account UID is not canonical", parseErr)
 		}
+		// CRITICAL identity invariant: MaxUint32 is chown(2)'s "do not change" sentinel, not an account identity.
+		if uid == math.MaxUint32 {
+			return rootfsGuestAccount{}, rootfsAtomicError("managed guest account UID is reserved", nil)
+		}
 		gid, parseErr := strconv.ParseUint(fields[3], 10, 32)
 		if parseErr != nil || strconv.FormatUint(gid, 10) != fields[3] {
 			return rootfsGuestAccount{}, rootfsAtomicError("managed guest account GID is not canonical", parseErr)
+		}
+		if gid == math.MaxUint32 {
+			return rootfsGuestAccount{}, rootfsAtomicError("managed guest account GID is reserved", nil)
 		}
 		home, homeErr := canonicalRootfsGuestPath(fields[5])
 		if homeErr != nil {
