@@ -3,6 +3,7 @@ package jailer
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"mvmctl/pkg/errs"
 )
@@ -16,10 +17,40 @@ type releaseAuthority struct {
 }
 
 type preparedRelease struct {
-	slotLease *releaseSlotLease
-	store     *trustedReleaseStore
-	directory *trustedReleaseDirectory
-	admission *trustedReleaseDirectoryAdmission
+	state *preparedReleaseState
+}
+
+type preparedReleaseState struct {
+	mu         sync.Mutex
+	status     preparedReleaseStatus
+	slotLease  *releaseSlotLease
+	store      *trustedReleaseStore
+	directory  *trustedReleaseDirectory
+	admission  *trustedReleaseDirectoryAdmission
+	cleanupErr error
+}
+
+type preparedReleaseStatus uint8
+
+const (
+	preparedReleaseOpen preparedReleaseStatus = iota + 1
+	preparedReleaseTransferred
+	preparedReleaseReleased
+)
+
+type preparedReleaseSnapshot struct {
+	status            preparedReleaseStatus
+	slot              releaseSlot
+	manifest          trustedReleaseManifest
+	identity          releaseIdentity
+	hasSlotLease      bool
+	releaseLockActive bool
+	hasStore          bool
+	hasDirectory      bool
+	hasAdmission      bool
+	hasExecutables    bool
+	firecrackerFD     int
+	jailerFD          int
 }
 
 func newReleaseAuthority() *releaseAuthority {
@@ -98,10 +129,13 @@ func (authority *releaseAuthority) prepareInstalled(
 	}
 
 	prepared := &preparedRelease{
-		slotLease: slotLease,
-		store:     store,
-		directory: directory,
-		admission: admission,
+		state: &preparedReleaseState{
+			status:    preparedReleaseOpen,
+			slotLease: slotLease,
+			store:     store,
+			directory: directory,
+			admission: admission,
+		},
 	}
 	slotLease = nil
 	store = nil
@@ -111,23 +145,67 @@ func (authority *releaseAuthority) prepareInstalled(
 }
 
 func (prepared *preparedRelease) Release(ctx context.Context) error {
-	if prepared == nil {
+	if prepared == nil || prepared.state == nil {
 		return nil
 	}
-	err := releasePreparedReleaseResources(
+	state := prepared.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.status == preparedReleaseTransferred || state.status == preparedReleaseReleased {
+		return state.cleanupErr
+	}
+	if state.status != preparedReleaseOpen {
+		state.cleanupErr = trustedReleaseStoreError("prepared release state is invalid", nil)
+		state.status = preparedReleaseReleased
+		return state.cleanupErr
+	}
+	state.cleanupErr = releasePreparedReleaseResources(
 		ctx,
 		nil,
-		prepared.admission,
-		prepared.directory,
-		prepared.store,
-		prepared.slotLease,
+		state.admission,
+		state.directory,
+		state.store,
+		state.slotLease,
 		"release prepared trusted release",
 	)
-	prepared.admission = nil
-	prepared.directory = nil
-	prepared.store = nil
-	prepared.slotLease = nil
-	return err
+	state.admission = nil
+	state.directory = nil
+	state.store = nil
+	state.slotLease = nil
+	state.status = preparedReleaseReleased
+	return state.cleanupErr
+}
+
+func (prepared *preparedRelease) snapshot() preparedReleaseSnapshot {
+	if prepared == nil || prepared.state == nil {
+		return preparedReleaseSnapshot{}
+	}
+	state := prepared.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	snapshot := preparedReleaseSnapshot{
+		status:         state.status,
+		hasSlotLease:   state.slotLease != nil,
+		hasStore:       state.store != nil,
+		hasDirectory:   state.directory != nil,
+		hasAdmission:   state.admission != nil,
+		hasExecutables: state.admission != nil && state.admission.executables != nil,
+		firecrackerFD:  -1,
+		jailerFD:       -1,
+	}
+	if state.slotLease != nil {
+		snapshot.slot = state.slotLease.slot
+		snapshot.releaseLockActive = state.slotLease.releaseLock.isActive()
+	}
+	if state.admission != nil {
+		snapshot.manifest = state.admission.manifest
+		snapshot.identity = state.admission.identity
+		if state.admission.executables != nil {
+			snapshot.firecrackerFD = state.admission.executables.firecrackerFD
+			snapshot.jailerFD = state.admission.executables.jailerFD
+		}
+	}
+	return snapshot
 }
 
 func releasePreparedReleaseResources(

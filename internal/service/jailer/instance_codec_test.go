@@ -295,6 +295,7 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
 			require.NotNil(t, domainErr)
 			assert.Equal(t, errs.CodeVMAtomicFailed, domainErr.Code)
 			assert.Equal(t, errs.ClassInternal, domainErr.Class)
+			assert.Empty(t, domainErr.Entity)
 		})
 	}
 }
@@ -308,6 +309,7 @@ func TestDecodeInstanceRecordRejectsOversizedInput(t *testing.T) {
 	require.NotNil(t, domainErr)
 	assert.Equal(t, errs.CodeVMAtomicFailed, domainErr.Code)
 	assert.Equal(t, errs.ClassInternal, domainErr.Class)
+	assert.Empty(t, domainErr.Entity)
 }
 
 func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {

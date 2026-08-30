@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,30 +27,22 @@ func TestReleaseAuthorityPreparesInstalledReleaseUnderSlotLease(t *testing.T) {
 	require.NoError(t, err)
 	wantIdentity, err := fixture.release.manifest.releaseIdentity()
 	require.NoError(t, err)
+	snapshot := prepared.snapshot()
 	if diff := cmp.Diff(
 		fixture.release.manifest,
-		prepared.admission.manifest,
+		snapshot.manifest,
 		cmp.AllowUnexported(trustedReleaseManifest{}, releaseSlot{}, trustedReleaseExecutable{}),
 	); diff != "" {
 		t.Errorf("prepared manifest mismatch (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff(wantIdentity, prepared.admission.identity, cmp.AllowUnexported(releaseIdentity{})); diff != "" {
+	if diff := cmp.Diff(wantIdentity, snapshot.identity, cmp.AllowUnexported(releaseIdentity{})); diff != "" {
 		t.Errorf("prepared release identity mismatch (-want +got):\n%s", diff)
 	}
-	assert.NotNil(t, prepared.slotLease)
-	assert.NotNil(t, prepared.store)
-	assert.NotNil(t, prepared.directory)
-	assert.NotNil(t, prepared.admission)
-	assert.NotNil(t, prepared.admission.executables)
-	assert.GreaterOrEqual(t, prepared.admission.executables.firecrackerFD, 0)
-	assert.GreaterOrEqual(t, prepared.admission.executables.jailerFD, 0)
+	assertPreparedReleaseSnapshotOpen(t, snapshot)
 
 	require.NoError(t, prepared.Release(t.Context()))
 	require.NoError(t, prepared.Release(t.Context()))
-	assert.Nil(t, prepared.slotLease)
-	assert.Nil(t, prepared.store)
-	assert.Nil(t, prepared.directory)
-	assert.Nil(t, prepared.admission)
+	assert.Equal(t, preparedReleaseReleased, prepared.snapshot().status)
 	assertPreparedReleaseSlotReacquirable(t, fixture.instances, fixture.release.store.slot)
 }
 
@@ -262,20 +255,72 @@ func TestPreparedReleaseContinuesCleanupAfterExecutableCloseFailure(t *testing.T
 	fixture := newPreparedReleaseFixture(t)
 	prepared, err := fixture.authority().prepareInstalled(t.Context(), fixture.release.store.slot)
 	require.NoError(t, err)
-	realClose := prepared.admission.executables.deps.close
-	prepared.admission.executables.deps.close = func(ctx context.Context, fd int) error {
+	state := prepared.state
+	state.mu.Lock()
+	realClose := state.admission.executables.deps.close
+	state.admission.executables.deps.close = func(ctx context.Context, fd int) error {
 		return errors.Join(realClose(ctx, fd), unix.EIO)
 	}
+	state.mu.Unlock()
 
 	err = prepared.Release(t.Context())
 	require.Error(t, err)
 	assert.ErrorIs(t, err, unix.EIO)
 	assert.Equal(t, errs.CodeBinaryTrustedInstallFailed, errs.AsDomainError(err).Code)
-	assert.Nil(t, prepared.slotLease)
-	assert.Nil(t, prepared.store)
-	assert.Nil(t, prepared.directory)
-	assert.Nil(t, prepared.admission)
+	assert.Equal(t, preparedReleaseReleased, prepared.snapshot().status)
 	assertPreparedReleaseSlotReacquirable(t, fixture.instances, fixture.release.store.slot)
+}
+
+// Rationale: prepared release values are composite capabilities and may be copied inside a future typed operation.
+// Every copy must converge on one cleanup, one cached result, and one release of each pinned descriptor.
+func TestPreparedReleaseCopiesConcurrentlyReleaseExactlyOnceAndCacheError(t *testing.T) {
+	t.Parallel()
+
+	fixture := newPreparedReleaseFixture(t)
+	prepared, err := fixture.authority().prepareInstalled(t.Context(), fixture.release.store.slot)
+	require.NoError(t, err)
+	copied := *prepared
+	cleanupErr := errors.New("injected prepared executable close failure")
+	var targetCloseCount atomic.Int32
+	state := prepared.state
+	state.mu.Lock()
+	targetFD := state.admission.executables.firecrackerFD
+	realClose := state.admission.executables.deps.close
+	state.admission.executables.deps.close = func(ctx context.Context, fd int) error {
+		closeErr := realClose(ctx, fd)
+		if fd == targetFD {
+			targetCloseCount.Add(1)
+			return errors.Join(closeErr, cleanupErr)
+		}
+		return closeErr
+	}
+	state.mu.Unlock()
+
+	const releases = 16
+	results := make(chan error, releases)
+	start := make(chan struct{})
+	for index := range releases {
+		candidate := prepared
+		if index%2 == 1 {
+			candidate = &copied
+		}
+		go func() {
+			<-start
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			results <- candidate.Release(ctx)
+		}()
+	}
+	close(start)
+	first := <-results
+	require.Error(t, first)
+	assert.ErrorIs(t, first, cleanupErr)
+	for range releases - 1 {
+		assert.Same(t, first, <-results)
+	}
+	assert.Equal(t, int32(1), targetCloseCount.Load())
+	assert.Equal(t, preparedReleaseReleased, prepared.snapshot().status)
+	assert.Equal(t, preparedReleaseReleased, copied.snapshot().status)
 }
 
 type preparedReleaseFixture struct {

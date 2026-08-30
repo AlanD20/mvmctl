@@ -486,6 +486,11 @@ func TestReleaseAuthorityRemoveInstalledRetainsCommittedResultAcrossOuterCleanup
 			require.NotNil(t, domainErr)
 			assert.Equal(t, test.wantCode, domainErr.Code)
 			wantDetails := map[string]any{"release_removed": true}
+			if test.wantCode == errs.CodeProcessError {
+				wantDetails["instance_authority_cleanup_failed"] = true
+				wantDetails["instance_authority_cleanup_detail"] =
+					"release release lock: release authority lock: input/output error"
+			}
 			if diff := cmp.Diff(wantDetails, domainErr.Details); diff != "" {
 				t.Errorf("postcommit cleanup details mismatch (-want +got):\n%s", diff)
 			}

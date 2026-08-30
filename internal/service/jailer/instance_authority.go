@@ -3,6 +3,7 @@ package jailer
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"mvmctl/pkg/errs"
 )
@@ -13,11 +14,28 @@ type instanceAuthority struct {
 	authorityTree instanceAuthorityTree
 }
 
+const maxInstanceAuthorityCleanupDetailBytes = 512
+
 type launchLease struct {
+	state *launchLeaseState
+}
+
+type launchLeaseState struct {
+	mu          sync.Mutex
 	directories *instanceUIDDirectories
 	vmLock      *authorityLock
 	prepared    *preparedRelease
 	record      instanceRecord
+	released    bool
+	cleanupErr  error
+}
+
+type launchLeaseSnapshot struct {
+	record         instanceRecord
+	hasVMLock      bool
+	hasDirectories bool
+	prepared       preparedReleaseSnapshot
+	released       bool
 }
 
 type activeLease struct {
@@ -107,9 +125,16 @@ func (prepared *preparedRelease) registerLaunching(
 	caller instanceCaller,
 	intent launchIntent,
 ) (_ *launchLease, returnErr error) {
-	if prepared == nil || prepared.slotLease == nil || prepared.slotLease.roots == nil ||
-		!prepared.slotLease.releaseLock.isActive() || prepared.store == nil || prepared.directory == nil ||
-		prepared.admission == nil || prepared.admission.executables == nil {
+	if prepared == nil || prepared.state == nil {
+		return nil, instanceStateError(intent.vmID, "prepared release is not active")
+	}
+	preparedState := prepared.state
+	preparedState.mu.Lock()
+	defer preparedState.mu.Unlock()
+	if preparedState.status != preparedReleaseOpen || preparedState.slotLease == nil ||
+		preparedState.slotLease.roots == nil || !preparedState.slotLease.releaseLock.isActive() ||
+		preparedState.store == nil || preparedState.directory == nil || preparedState.admission == nil ||
+		preparedState.admission.executables == nil {
 		return nil, instanceStateError(intent.vmID, "prepared release is not active")
 	}
 	if err := validateInstanceCaller(caller); err != nil {
@@ -118,11 +143,11 @@ func (prepared *preparedRelease) registerLaunching(
 	if err := validateLaunchIntent(intent); err != nil {
 		return nil, err
 	}
-	release := prepared.admission.identity
+	release := preparedState.admission.identity
 	if err := validateReleaseIdentityValue(release); err != nil {
 		return nil, instanceAtomicError("prepared release identity is invalid", err)
 	}
-	if releaseSlotForIdentity(release) != prepared.slotLease.slot {
+	if releaseSlotForIdentity(release) != preparedState.slotLease.slot {
 		return nil, instanceAtomicError("prepared release identity does not match held release slot", nil)
 	}
 	var indexLock, vmLock *authorityLock
@@ -142,16 +167,16 @@ func (prepared *preparedRelease) registerLaunching(
 		)
 	}()
 
-	indexLock, err := prepared.slotLease.roots.acquireIndexLock(ctx)
+	indexLock, err := preparedState.slotLease.roots.acquireIndexLock(ctx)
 	if err != nil {
 		return nil, err
 	}
-	location, err := prepared.slotLease.roots.findInstance(ctx, intent.vmID)
+	location, err := preparedState.slotLease.roots.findInstance(ctx, intent.vmID)
 	if err != nil {
 		return nil, err
 	}
 	if location != nil && location.uid != caller.uid {
-		if closeErr := prepared.slotLease.roots.deps.close(
+		if closeErr := preparedState.slotLease.roots.deps.close(
 			context.WithoutCancel(ctx),
 			location.stateFD,
 		); closeErr != nil {
@@ -165,12 +190,12 @@ func (prepared *preparedRelease) registerLaunching(
 	}
 	var existing *instanceRecord
 	if location == nil {
-		directories, err = prepared.slotLease.roots.openUIDDirectories(ctx, caller.uid)
+		directories, err = preparedState.slotLease.roots.openUIDDirectories(ctx, caller.uid)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		directories, err = prepared.slotLease.roots.openAuthorityForLocation(ctx, location)
+		directories, err = preparedState.slotLease.roots.openAuthorityForLocation(ctx, location)
 		if err != nil {
 			return nil, err
 		}
@@ -198,20 +223,24 @@ func (prepared *preparedRelease) registerLaunching(
 		return nil, writeErr
 	}
 	launch := &launchLease{
-		directories: directories,
-		vmLock:      vmLock,
-		prepared: &preparedRelease{
-			slotLease: prepared.slotLease,
-			store:     prepared.store,
-			directory: prepared.directory,
-			admission: prepared.admission,
+		state: &launchLeaseState{
+			directories: directories,
+			vmLock:      vmLock,
+			prepared: &preparedRelease{state: &preparedReleaseState{
+				status:    preparedReleaseOpen,
+				slotLease: preparedState.slotLease,
+				store:     preparedState.store,
+				directory: preparedState.directory,
+				admission: preparedState.admission,
+			}},
+			record: record,
 		},
-		record: record,
 	}
-	prepared.slotLease = nil
-	prepared.store = nil
-	prepared.directory = nil
-	prepared.admission = nil
+	preparedState.slotLease = nil
+	preparedState.store = nil
+	preparedState.directory = nil
+	preparedState.admission = nil
+	preparedState.status = preparedReleaseTransferred
 	directories = nil
 	vmLock = nil
 	indexReleaseErr := indexLock.Release(context.WithoutCancel(ctx))
@@ -461,29 +490,69 @@ func unauthorizedInstanceError(vmID string) *errs.DomainError {
 }
 
 func (lease *launchLease) Release(ctx context.Context) error {
-	if lease == nil {
+	if lease == nil || lease.state == nil {
 		return nil
 	}
-	err := releaseInstanceOperationResources(
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return state.cleanupErr
+	}
+	state.cleanupErr = releaseInstanceOperationResources(
 		ctx,
 		nil,
-		lease.vmLock,
+		state.vmLock,
 		nil,
 		nil,
-		lease.directories,
+		state.directories,
 		nil,
 	)
-	if lease.prepared != nil {
-		err = appendInstanceOperationError(
-			err,
+	if state.prepared != nil {
+		state.cleanupErr = appendInstanceOperationError(
+			state.cleanupErr,
 			"release launching prepared release authority",
-			lease.prepared.Release(context.WithoutCancel(ctx)),
+			state.prepared.Release(context.WithoutCancel(ctx)),
 		)
 	}
-	lease.vmLock = nil
-	lease.directories = nil
-	lease.prepared = nil
-	return err
+	state.vmLock = nil
+	state.directories = nil
+	state.prepared = nil
+	state.released = true
+	return state.cleanupErr
+}
+
+func (lease *launchLease) snapshot() launchLeaseSnapshot {
+	if lease == nil || lease.state == nil {
+		return launchLeaseSnapshot{}
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	snapshot := launchLeaseSnapshot{
+		record:         cloneInstanceRecord(state.record),
+		hasVMLock:      state.vmLock != nil,
+		hasDirectories: state.directories != nil,
+		released:       state.released,
+	}
+	if state.prepared != nil {
+		snapshot.prepared = state.prepared.snapshot()
+	}
+	return snapshot
+}
+
+func cloneInstanceRecord(record instanceRecord) instanceRecord {
+	if record.launch != nil {
+		launch := *record.launch
+		record.launch = &launch
+	}
+	if record.active != nil {
+		active := *record.active
+		active.supplementaryGroups = append([]uint32{}, active.supplementaryGroups...)
+		active.relay.supplementaryGroups = append([]uint32{}, active.relay.supplementaryGroups...)
+		record.active = &active
+	}
+	return record
 }
 
 func (lease *activeLease) Release(ctx context.Context) error {
@@ -570,13 +639,53 @@ func appendInstanceOperationError(primary error, message string, cause error) er
 	if cause == nil {
 		return primary
 	}
-	if primary == nil {
-		return cause
+	joined := cause
+	if primary != nil {
+		joined = errors.Join(primary, cause)
 	}
-	if domainErr := errs.AsDomainError(primary); domainErr != nil {
-		domainErr.Message += "; " + message + ": " + cause.Error()
-		domainErr.Err = errors.Join(domainErr.Err, cause)
-		return domainErr
+	source := errs.AsDomainError(primary)
+	if source == nil {
+		source = errs.AsDomainError(cause)
 	}
-	return instanceAtomicError(message+": "+cause.Error(), errors.Join(primary, cause))
+	var result *errs.DomainError
+	if source == nil {
+		result = instanceAtomicError("instance authority cleanup failed", joined)
+	} else {
+		cloned := *source
+		cloned.Details = cloneInstanceErrorDetails(source.Details)
+		cloned.Err = joined
+		result = &cloned
+	}
+	if result.Details == nil {
+		result.Details = make(map[string]any, 2)
+	}
+	result.Details["instance_authority_cleanup_failed"] = true
+	if _, exists := result.Details["instance_authority_cleanup_detail"]; !exists {
+		result.Details["instance_authority_cleanup_detail"] = boundedInstanceCleanupDetail(message, cause)
+	}
+	return result
+}
+
+func cloneInstanceErrorDetails(details map[string]any) map[string]any {
+	if details == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(details)+2)
+	for key, value := range details {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func boundedInstanceCleanupDetail(message string, cause error) string {
+	detail := message + ": " + cause.Error()
+	if len(detail) <= maxInstanceAuthorityCleanupDetailBytes {
+		return detail
+	}
+	const suffix = "..."
+	limit := maxInstanceAuthorityCleanupDetailBytes - len(suffix)
+	for limit > 0 && detail[limit]&0xc0 == 0x80 {
+		limit--
+	}
+	return detail[:limit] + suffix
 }

@@ -3,8 +3,10 @@ package jailer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -39,8 +41,9 @@ func TestPreparedReleaseTransfersToSuccessfulLaunch(t *testing.T) {
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchIntent(false)
 	prepared := prepareTestRelease(t, authority)
-	slot := prepared.slotLease.slot
-	wantRelease := prepared.admission.identity
+	preparedBefore := prepared.snapshot()
+	slot := preparedBefore.slot
+	wantRelease := preparedBefore.identity
 
 	launch, err := prepared.registerLaunching(
 		context.Background(),
@@ -49,15 +52,12 @@ func TestPreparedReleaseTransfersToSuccessfulLaunch(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, launch)
-	assert.Nil(t, prepared.slotLease)
-	assert.Nil(t, prepared.store)
-	assert.Nil(t, prepared.directory)
-	assert.Nil(t, prepared.admission)
-	require.NotNil(t, launch.prepared)
-	assert.NotNil(t, launch.prepared.store)
-	assert.NotNil(t, launch.prepared.directory)
-	assert.NotNil(t, launch.prepared.admission)
-	assert.Equal(t, wantRelease, launch.record.launch.release)
+	assertPreparedReleaseTransferred(t, prepared)
+	launchSnapshot := launch.snapshot()
+	assert.True(t, launchSnapshot.hasVMLock)
+	assert.True(t, launchSnapshot.hasDirectories)
+	assertPreparedReleaseSnapshotOpen(t, launchSnapshot.prepared)
+	assert.Equal(t, wantRelease, launchSnapshot.record.launch.release)
 	assert.FileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
 	require.NoError(t, prepared.Release(context.Background()))
 
@@ -86,6 +86,127 @@ func TestPreparedReleaseTransfersToSuccessfulLaunch(t *testing.T) {
 	case <-waitCtx.Done():
 		require.Failf(t, "transferred release lock remained blocked", "error: %v", waitCtx.Err())
 	}
+}
+
+// Rationale: copied launch values must remain one capability. Concurrent cleanup must close every owned descriptor
+// once, preserve reverse lock order, ignore caller cancellation, and return the exact first cleanup result to all copies.
+func TestLaunchLeaseCopiesConcurrentlyReleaseExactlyOnceAndCacheError(t *testing.T) {
+	t.Parallel()
+
+	root := prepareInstanceAuthorityTestRoot(t)
+	deps := realInstanceAuthorityDeps()
+	tree := newTestInstanceAuthorityTree()
+	releaseEvents := make(chan string, 3)
+	tree.onRelease = func(_ context.Context, description string) error {
+		releaseEvents <- description
+		return nil
+	}
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
+	prepared := prepareTestRelease(t, authority)
+	launch, err := prepared.registerLaunching(context.Background(), testInstanceCaller(), testLaunchIntent(false))
+	require.NoError(t, err)
+	require.Equal(t, "index", <-releaseEvents)
+	assert.Equal(t, []string{"release", "index", "vm"}, tree.acquisitionSnapshot())
+
+	copied := *launch
+	cleanupErr := errors.New("injected launch directory close failure")
+	var targetCloseCount atomic.Int32
+	state := launch.state
+	state.mu.Lock()
+	targetFD := state.directories.stateFD
+	realClose := state.directories.deps.close
+	state.directories.deps.close = func(ctx context.Context, fd int) error {
+		closeErr := realClose(ctx, fd)
+		if fd == targetFD {
+			targetCloseCount.Add(1)
+			return errors.Join(closeErr, cleanupErr)
+		}
+		return closeErr
+	}
+	state.mu.Unlock()
+
+	const releases = 16
+	results := make(chan error, releases)
+	start := make(chan struct{})
+	for index := range releases {
+		candidate := launch
+		if index%2 == 1 {
+			candidate = &copied
+		}
+		go func() {
+			<-start
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			results <- candidate.Release(ctx)
+		}()
+	}
+	close(start)
+	first := <-results
+	require.Error(t, first)
+	assert.ErrorIs(t, first, cleanupErr)
+	for range releases - 1 {
+		assert.Same(t, first, <-results)
+	}
+	domainErr := errs.AsDomainError(first)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, true, domainErr.Details["instance_authority_cleanup_failed"])
+	detail, ok := domainErr.Details["instance_authority_cleanup_detail"].(string)
+	require.True(t, ok)
+	assert.Equal(t, "release instance UID directories: release instance UID directory descriptors", detail)
+	assert.LessOrEqual(t, len(detail), maxInstanceAuthorityCleanupDetailBytes)
+	assert.Equal(t, int32(1), targetCloseCount.Load())
+	assert.Equal(t, "vm", <-releaseEvents)
+	assert.Equal(t, "release", <-releaseEvents)
+	assert.True(t, launch.snapshot().released)
+	assert.True(t, copied.snapshot().released)
+}
+
+func TestPreparedReleaseSerializesReleaseAgainstLaunchingTransfer(t *testing.T) {
+	t.Parallel()
+
+	root := prepareInstanceAuthorityTestRoot(t)
+	deps := realInstanceAuthorityDeps()
+	tree := newTestInstanceAuthorityTree()
+	indexAcquire := make(chan struct{})
+	continueRegistration := make(chan struct{})
+	tree.onAcquire = func(_ context.Context, description string) {
+		if description == "index" {
+			close(indexAcquire)
+			<-continueRegistration
+		}
+	}
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
+	prepared := prepareTestRelease(t, authority)
+	type launchResult struct {
+		lease *launchLease
+		err   error
+	}
+	launchResults := make(chan launchResult, 1)
+	go func() {
+		lease, err := prepared.registerLaunching(context.Background(), testInstanceCaller(), testLaunchIntent(false))
+		launchResults <- launchResult{lease: lease, err: err}
+	}()
+	<-indexAcquire
+	releaseStarted := make(chan struct{})
+	releaseResults := make(chan error, 1)
+	go func() {
+		close(releaseStarted)
+		releaseResults <- prepared.Release(context.Background())
+	}()
+	<-releaseStarted
+	select {
+	case err := <-releaseResults:
+		require.Failf(t, "prepared release escaped serialized transfer", "release error: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(continueRegistration)
+	result := <-launchResults
+	require.NoError(t, result.err)
+	require.NotNil(t, result.lease)
+	require.NoError(t, <-releaseResults)
+	assertPreparedReleaseTransferred(t, prepared)
+	assertPreparedReleaseSnapshotOpen(t, result.lease.snapshot().prepared)
+	require.NoError(t, result.lease.Release(context.Background()))
 }
 
 func TestReleaseSlotLeaseRequiresResolvedIdentityToBeUnreferenced(t *testing.T) {
@@ -124,10 +245,7 @@ func TestPreparedReleaseInvalidLaunchDoesNotConsumeAuthority(t *testing.T) {
 	assert.Equal(t, errs.CodeValidationFailed, domainErr.Code)
 	assert.Equal(t, []string{"release"}, tree.acquisitionSnapshot())
 	assert.NoFileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
-	assert.NotNil(t, prepared.slotLease)
-	assert.NotNil(t, prepared.store)
-	assert.NotNil(t, prepared.directory)
-	assert.NotNil(t, prepared.admission)
+	assertPreparedReleaseSnapshotOpen(t, prepared.snapshot())
 	require.NoError(t, prepared.Release(context.Background()))
 }
 
@@ -147,10 +265,7 @@ func TestPreparedReleaseIndexFailureRetainsPreparedAuthority(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, indexErr)
 	assert.Equal(t, []string{"release"}, tree.acquisitionSnapshot())
-	assert.NotNil(t, prepared.slotLease)
-	assert.NotNil(t, prepared.store)
-	assert.NotNil(t, prepared.directory)
-	assert.NotNil(t, prepared.admission)
+	assertPreparedReleaseSnapshotOpen(t, prepared.snapshot())
 	assert.NoFileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
 	require.NoError(t, prepared.Release(context.Background()))
 }
@@ -164,7 +279,8 @@ func TestInstanceAuthorityReleaseSlotRegistersLaunchingAuthority(t *testing.T) {
 
 	launch, err := registerTestLaunch(t, context.Background(), authority, caller, registration)
 	require.NoError(t, err)
-	assert.Equal(t, instanceLifecycleLaunching, launch.record.lifecycle)
+	launchRecord := launch.snapshot().record
+	assert.Equal(t, instanceLifecycleLaunching, launchRecord.lifecycle)
 	assert.FileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
@@ -179,7 +295,7 @@ func TestInstanceAuthorityReleaseSlotRegistersLaunchingAuthority(t *testing.T) {
 	assert.Nil(t, active)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMNotRunning, errs.AsDomainError(err).Code)
-	activeRecord, err := activateInstanceRecord(launch.record, testActiveIdentityForLaunch(launch.record, false))
+	activeRecord, err := activateInstanceRecord(launchRecord, testActiveIdentityForLaunch(launchRecord, false))
 	require.NoError(t, err)
 	writeTestAuthorityRecord(t, root, activeRecord)
 
@@ -223,10 +339,11 @@ func TestInstanceAuthorityCleanupAndSameOwnerRelaunch(t *testing.T) {
 	relaunchIntent.cacheIdentity.inode++
 	relaunched, err := registerTestLaunch(t, context.Background(), authority, relaunchCaller, relaunchIntent)
 	require.NoError(t, err)
-	assert.Equal(t, uint64(1), relaunched.record.cleanupGeneration)
-	assert.Equal(t, uint64(2), relaunched.record.launchGeneration)
-	assert.Equal(t, relaunchCaller.gid, relaunched.record.launch.ownerGID)
-	assert.Equal(t, relaunchIntent.cacheIdentity, relaunched.record.launch.cacheIdentity)
+	relaunchedRecord := relaunched.snapshot().record
+	assert.Equal(t, uint64(1), relaunchedRecord.cleanupGeneration)
+	assert.Equal(t, uint64(2), relaunchedRecord.launchGeneration)
+	assert.Equal(t, relaunchCaller.gid, relaunchedRecord.launch.ownerGID)
+	assert.Equal(t, relaunchIntent.cacheIdentity, relaunchedRecord.launch.cacheIdentity)
 	require.NoError(t, relaunched.Release(context.Background()))
 }
 
@@ -333,8 +450,7 @@ func TestInstanceAuthorityRejectsCorruptGlobalClaim(t *testing.T) {
 	assert.Nil(t, lease)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
-	assert.NotNil(t, prepared.slotLease)
-	assert.NotNil(t, prepared.admission)
+	assertPreparedReleaseSnapshotOpen(t, prepared.snapshot())
 	require.NoError(t, prepared.Release(context.Background()))
 }
 
@@ -367,7 +483,8 @@ func TestInstanceAuthorityReleaseSlotReferenceCheckTracksLifecycle(t *testing.T)
 	caller := testInstanceCaller()
 	launch, err := registerTestLaunch(t, context.Background(), authority, caller, testLaunchIntent(false))
 	require.NoError(t, err)
-	release := launch.record.launch.release
+	launchRecord := launch.snapshot().record
+	release := launchRecord.launch.release
 	require.NoError(t, launch.Release(context.Background()))
 
 	slotLease, err := authority.lockReleaseSlot(context.Background(), releaseSlotForIdentity(release))
@@ -378,7 +495,7 @@ func TestInstanceAuthorityReleaseSlotReferenceCheckTracksLifecycle(t *testing.T)
 	assert.NotNil(t, slotLease.roots)
 	assert.NotNil(t, slotLease.releaseLock)
 	require.NoError(t, slotLease.Release(context.Background()))
-	activeRecord, err := activateInstanceRecord(launch.record, testActiveIdentityForLaunch(launch.record, false))
+	activeRecord, err := activateInstanceRecord(launchRecord, testActiveIdentityForLaunch(launchRecord, false))
 	require.NoError(t, err)
 	writeTestAuthorityRecord(t, root, activeRecord)
 
@@ -596,6 +713,57 @@ func TestInstanceAuthorityUsesOnlyFixedRootPathOpen(t *testing.T) {
 	assert.Equal(t, []string{root}, opened)
 }
 
+func TestPreparedReleaseRegistrationFailuresBeforeRenameRetainAuthority(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*instanceAuthorityDeps, error){
+		"write": func(deps *instanceAuthorityDeps, fault error) {
+			deps.write = func(context.Context, int, []byte) (int, error) { return 0, fault }
+		},
+		"file fsync": func(deps *instanceAuthorityDeps, fault error) {
+			realFsync := deps.fsync
+			deps.fsync = func(ctx context.Context, fd int) error {
+				var stat unix.Stat_t
+				if err := unix.Fstat(fd, &stat); err == nil && stat.Mode&unix.S_IFMT == unix.S_IFREG {
+					return fault
+				}
+				return realFsync(ctx, fd)
+			}
+		},
+		"rename": func(deps *instanceAuthorityDeps, fault error) {
+			deps.renameAt = func(context.Context, int, string, int, string) error { return fault }
+		},
+	}
+	for name, inject := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := prepareInstanceAuthorityTestRoot(t)
+			deps := realInstanceAuthorityDeps()
+			fault := errors.New("injected " + name + " failure")
+			inject(&deps, fault)
+			authority := newInstanceAuthorityWithPolicy(
+				deps,
+				testInstanceAuthorityPolicy(root),
+				newTestInstanceAuthorityTree(),
+			)
+			prepared := prepareTestRelease(t, authority)
+
+			launch, err := prepared.registerLaunching(
+				context.Background(),
+				testInstanceCaller(),
+				testLaunchIntent(false),
+			)
+			assert.Nil(t, launch)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, fault)
+			assertPreparedReleaseSnapshotOpen(t, prepared.snapshot())
+			assert.NoFileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
+			require.NoError(t, prepared.Release(context.Background()))
+		})
+	}
+}
+
 func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *testing.T) {
 	t.Parallel()
 
@@ -620,6 +788,7 @@ func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *t
 	deps := realInstanceAuthorityDeps()
 	realFsync := deps.fsync
 	syncErr := errors.New("record directory sync failed")
+	indexErr := errors.New("index release failed")
 	var fileSynced atomic.Bool
 	deps.fsync = func(ctx context.Context, fd int) error {
 		var stat unix.Stat_t
@@ -632,7 +801,10 @@ func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *t
 		}
 		return realFsync(ctx, fd)
 	}
-	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), newTestInstanceAuthorityTree())
+	tree := newTestInstanceAuthorityTree()
+	tree.lockReleaseErrDescription = "index"
+	tree.lockReleaseErr = indexErr
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchIntent(false)
 	prepared := prepareTestRelease(t, authority)
 
@@ -648,14 +820,30 @@ func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *t
 	assert.Equal(t, errs.CodeVMAtomicFailed, domainErr.Code)
 	assert.Equal(t, errs.ClassInternal, domainErr.Class)
 	assert.Empty(t, domainErr.Entity)
+	assert.Equal(t, "vm", domainErr.Op)
+	assert.Equal(t, "sync instance authority record directory", domainErr.Message)
 	assert.ErrorIs(t, err, syncErr)
+	assert.ErrorIs(t, err, indexErr)
 	assert.Equal(t, true, domainErr.Details["record_replaced"])
 	assert.Equal(t, true, domainErr.Details["durability_uncertain"])
-	assert.FileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
-	assert.Nil(t, prepared.slotLease)
-	assert.Nil(t, prepared.store)
-	assert.Nil(t, prepared.directory)
-	assert.Nil(t, prepared.admission)
+	assert.Equal(t, true, domainErr.Details["instance_authority_cleanup_failed"])
+	detail, ok := domainErr.Details["instance_authority_cleanup_detail"].(string)
+	require.True(t, ok)
+	assert.Equal(
+		t,
+		"release global index lock after launching record replacement: release authority lock: index release failed",
+		detail,
+	)
+	assert.LessOrEqual(t, len(detail), maxInstanceAuthorityCleanupDetailBytes)
+	recordPath := filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json")
+	raw, readErr := os.ReadFile(recordPath)
+	require.NoError(t, readErr)
+	persisted, decodeErr := decodeInstanceRecord(raw)
+	require.NoError(t, decodeErr)
+	leaseSnapshot := lease.snapshot()
+	assertInstanceRecordEqual(t, leaseSnapshot.record, persisted)
+	assertPreparedReleaseSnapshotOpen(t, leaseSnapshot.prepared)
+	assertPreparedReleaseTransferred(t, prepared)
 	require.NoError(t, prepared.Release(context.Background()))
 	require.NoError(t, lease.Release(context.Background()))
 }
@@ -711,6 +899,52 @@ func TestInstanceAuthorityPostRenameCleanupErrorReturnsCleanupLease(t *testing.T
 	require.NoError(t, resumed.Release(context.Background()))
 }
 
+func TestAppendInstanceOperationErrorClonesMetadataAndBoundsFirstDiagnostic(t *testing.T) {
+	t.Parallel()
+
+	primaryCause := errors.New("primary cause")
+	siblingCause := errors.New("sibling cause")
+	cleanupCause := errors.New(strings.Repeat("cleanup", 200))
+	originalDetails := map[string]any{"record_replaced": true}
+	primary := errs.WrapMsg(
+		errs.CodeVMAtomicFailed,
+		"stable primary message",
+		primaryCause,
+		errs.WithClass(errs.ClassInternal),
+		errs.WithEntity(testVMID),
+		errs.WithDetails(originalDetails),
+	)
+	primary.Op = "original-op"
+	wrapper := fmt.Errorf("outer wrapper: %w", errors.Join(primary, siblingCause))
+
+	got := appendInstanceOperationError(wrapper, "release first resource", cleanupCause)
+	domainErr := errs.AsDomainError(got)
+	require.NotNil(t, domainErr)
+	assert.NotSame(t, primary, domainErr)
+	assert.Equal(t, primary.Code, domainErr.Code)
+	assert.Equal(t, primary.Class, domainErr.Class)
+	assert.Equal(t, primary.Entity, domainErr.Entity)
+	assert.Equal(t, primary.Op, domainErr.Op)
+	assert.Equal(t, primary.Message, domainErr.Message)
+	assert.Equal(t, map[string]any{"record_replaced": true}, primary.Details)
+	assert.Equal(t, "stable primary message", primary.Message)
+	assert.ErrorIs(t, got, primaryCause)
+	assert.ErrorIs(t, got, siblingCause)
+	assert.ErrorIs(t, got, cleanupCause)
+	assert.Equal(t, true, domainErr.Details["instance_authority_cleanup_failed"])
+	detail, ok := domainErr.Details["instance_authority_cleanup_detail"].(string)
+	require.True(t, ok)
+	assert.LessOrEqual(t, len(detail), maxInstanceAuthorityCleanupDetailBytes)
+	assert.True(t, strings.HasPrefix(detail, "release first resource: cleanup"))
+
+	secondCleanup := errors.New("second cleanup cause")
+	combined := appendInstanceOperationError(got, "release second resource", secondCleanup)
+	combinedDomain := errs.AsDomainError(combined)
+	require.NotNil(t, combinedDomain)
+	assert.Equal(t, detail, combinedDomain.Details["instance_authority_cleanup_detail"])
+	assert.ErrorIs(t, combined, secondCleanup)
+}
+
 func newTestInstanceAuthority(t *testing.T) (*instanceAuthority, string) {
 	t.Helper()
 
@@ -761,6 +995,33 @@ func testActiveIdentityForLaunch(record instanceRecord, relayPresent bool) insta
 	identity := testActiveIdentity(relayPresent)
 	identity.executable.manifestSHA256 = record.launch.release.firecrackerSHA256
 	return identity
+}
+
+func assertPreparedReleaseSnapshotOpen(t *testing.T, snapshot preparedReleaseSnapshot) {
+	t.Helper()
+
+	assert.Equal(t, preparedReleaseOpen, snapshot.status)
+	assert.True(t, snapshot.hasSlotLease)
+	assert.True(t, snapshot.releaseLockActive)
+	assert.True(t, snapshot.hasStore)
+	assert.True(t, snapshot.hasDirectory)
+	assert.True(t, snapshot.hasAdmission)
+	assert.True(t, snapshot.hasExecutables)
+	assert.GreaterOrEqual(t, snapshot.firecrackerFD, 0)
+	assert.GreaterOrEqual(t, snapshot.jailerFD, 0)
+}
+
+func assertPreparedReleaseTransferred(t *testing.T, prepared *preparedRelease) {
+	t.Helper()
+
+	snapshot := prepared.snapshot()
+	assert.Equal(t, preparedReleaseTransferred, snapshot.status)
+	assert.False(t, snapshot.hasSlotLease)
+	assert.False(t, snapshot.releaseLockActive)
+	assert.False(t, snapshot.hasStore)
+	assert.False(t, snapshot.hasDirectory)
+	assert.False(t, snapshot.hasAdmission)
+	assert.False(t, snapshot.hasExecutables)
 }
 
 func writeTestAuthorityRecord(t *testing.T, root string, record instanceRecord) {
