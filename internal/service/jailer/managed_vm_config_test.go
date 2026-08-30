@@ -835,6 +835,12 @@ func TestPrepareManagedFirecrackerConfigRejectsStrictJSONAndIntentMismatches(t *
 	valid := mustMarshalManagedFirecrackerConfig(t, expected)
 
 	tests := map[string][]byte{
+		"case-conflicting field": bytes.Replace(
+			valid,
+			[]byte(`"smt":false`),
+			[]byte(`"smt":false,"SMT":false`),
+			1,
+		),
 		"unknown field": bytes.Replace(
 			valid,
 			[]byte(`{"boot-source":{`),
@@ -843,8 +849,20 @@ func TestPrepareManagedFirecrackerConfigRejectsStrictJSONAndIntentMismatches(t *
 		),
 		"missing required field": bytes.Replace(valid, []byte(`"smt":false,`), nil, 1),
 		"null required field":    bytes.Replace(valid, []byte(`"smt":false`), []byte(`"smt":null`), 1),
-		"duplicate field":        bytes.Replace(valid, []byte(`"smt":false`), []byte(`"smt":false,"smt":false`), 1),
-		"trailing JSON":          append(bytes.Clone(valid), []byte(` {}`)...),
+		"null optional field": bytes.Replace(
+			valid,
+			[]byte(`"kernel_image_path"`),
+			[]byte(`"initrd_path":null,"kernel_image_path"`),
+			1,
+		),
+		"duplicate field": bytes.Replace(valid, []byte(`"smt":false`), []byte(`"smt":false,"smt":false`), 1),
+		"nested collection element": bytes.Replace(
+			valid,
+			[]byte(`"KVM_CAP_ONE_REG"`),
+			[]byte(`["KVM_CAP_ONE_REG"]`),
+			1,
+		),
+		"trailing JSON": append(bytes.Clone(valid), []byte(` {}`)...),
 	}
 
 	mismatches := map[string]func(*managedFirecrackerConfig){
@@ -924,6 +942,33 @@ func TestPrepareManagedFirecrackerConfigCreatesSealedCanonicalCapability(t *test
 
 	deps, sourceFD := managedFirecrackerConfigTestSource(t, formatted.Bytes())
 	prepareManagedFirecrackerRootDepsForUnprivilegedTest(&deps)
+	var sourceStat unix.Stat_t
+	require.NoError(t, unix.Fstat(sourceFD, &sourceStat))
+
+	// CRITICAL: Occupying the released source descriptor during memfd creation prevents Linux from reusing its numeric
+	// value. This lets the test prove both ownership transfer and object separation through independent kernel state.
+	realMemfdCreate := deps.memfdCreate
+	deps.memfdCreate = func(ctx context.Context, name string, flags int) (int, error) {
+		guardFD, openErr := unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		if openErr != nil {
+			return -1, openErr
+		}
+		if guardFD != sourceFD {
+			return -1, errors.Join(
+				errors.New("source descriptor remained open before memfd creation"),
+				unix.Close(guardFD),
+			)
+		}
+		memfdFD, createErr := realMemfdCreate(ctx, name, flags)
+		closeErr := unix.Close(guardFD)
+		if createErr != nil {
+			return -1, errors.Join(createErr, closeErr)
+		}
+		if closeErr != nil {
+			return -1, errors.Join(closeErr, unix.Close(memfdFD))
+		}
+		return memfdFD, nil
+	}
 	closes := observeManagedFirecrackerConfigCloses(&deps)
 	prepared, err := prepareManagedFirecrackerConfig(context.Background(), deps, sourceFD, intent)
 	require.NoError(t, err)
@@ -936,9 +981,16 @@ func TestPrepareManagedFirecrackerConfigCreatesSealedCanonicalCapability(t *test
 		[]managedFirecrackerConfigClosePhase{managedFirecrackerSourceClosePhase},
 		closes.closePhases,
 	)
+	var closedSourceStat unix.Stat_t
+	assert.ErrorIs(t, unix.Fstat(sourceFD, &closedSourceStat), unix.EBADF)
 
 	var stat unix.Stat_t
 	require.NoError(t, unix.Fstat(prepared.fd, &stat))
+	assert.False(
+		t,
+		sourceStat.Dev == stat.Dev && sourceStat.Ino == stat.Ino,
+		"prepared configuration must not retain the caller source object",
+	)
 	assert.Equal(t, uint32(0444), stat.Mode&07777)
 	assert.Zero(t, stat.Nlink)
 	assert.Equal(t, int64(len(canonical)), stat.Size)
