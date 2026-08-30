@@ -97,12 +97,31 @@ func TestInstanceRecordCodecOmitsWrongLifecycleObjects(t *testing.T) {
 	assert.NotContains(t, string(cleanedRaw), `"pid":`)
 }
 
+// Rationale: the durable root is attacker-controlled input after host storage tampering. Each malformed case pins one
+// strict-schema boundary and must fail closed as an internal atomic-authority error rather than being defaulted.
 func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
 	t.Parallel()
 
 	valid, err := encodeInstanceRecord(testActiveInstanceRecord(true))
 	require.NoError(t, err)
 	validText := string(valid)
+	validLaunching := schemaThreeCanonicalJSON()["launching"]
+	validCleaned := schemaThreeCanonicalJSON()["cleaned"]
+	launchOffset := strings.LastIndex(validLaunching, `,"launch":`)
+	require.Positive(t, launchOffset)
+	activeOffset := strings.LastIndex(validText, `,"active":`)
+	require.Positive(t, activeOffset)
+	launchArray := validLaunching[:launchOffset] + `,"launch":[]}`
+	activeArray := validText[:activeOffset] + `,"active":[]}`
+	nullActive := validText[:activeOffset] + `,"active":null}`
+	launchObjectOnCleaned := strings.Replace(validLaunching, `"lifecycle":"launching"`, `"lifecycle":"cleaned"`, 1)
+	launchObjectOnCleaned = strings.Replace(
+		launchObjectOnCleaned,
+		`"cleanup_generation":0`,
+		`"cleanup_generation":1`,
+		1,
+	)
+	cleanedWithActive := validCleaned[:len(validCleaned)-1] + validText[activeOffset:]
 
 	tests := map[string]string{
 		"empty":                 "",
@@ -132,8 +151,29 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
 			`"relay":{"kind":"present","pid":4343}`,
 			1,
 		),
-		"old_schema_one": strings.Replace(validText, `"schema_version":3`, `"schema_version":1`, 1),
-		"old_schema_two": strings.Replace(validText, `"schema_version":3`, `"schema_version":2`, 1),
+		"old_schema_one":         strings.Replace(validText, `"schema_version":3`, `"schema_version":1`, 1),
+		"old_schema_two":         strings.Replace(validText, `"schema_version":3`, `"schema_version":2`, 1),
+		"unknown_schema":         strings.Replace(validText, `"schema_version":3`, `"schema_version":4`, 1),
+		"owner_uid_string":       strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":"1000"`, 1),
+		"owner_uid_negative":     strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":-1`, 1),
+		"owner_uid_fractional":   strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":1000.5`, 1),
+		"owner_uid_overflow":     strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":4294967296`, 1),
+		"lifecycle_number":       strings.Replace(validText, `"lifecycle":"active"`, `"lifecycle":1`, 1),
+		"launch_array":           launchArray,
+		"active_array":           activeArray,
+		"launch_generation_zero": strings.Replace(validText, `"launch_generation":1`, `"launch_generation":0`, 1),
+		"cleanup_generation_mismatch": strings.Replace(
+			validText,
+			`"cleanup_generation":0`,
+			`"cleanup_generation":1`,
+			1,
+		),
+		"generation_numeric_overflow": strings.Replace(
+			validText,
+			`"launch_generation":1`,
+			`"launch_generation":18446744073709551616`,
+			1,
+		),
 		"old_registered_lifecycle": strings.Replace(
 			validText,
 			`"lifecycle":"active"`,
@@ -146,13 +186,9 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
 			`"lifecycle":"launching"`,
 			1,
 		),
-		"launch_object_on_cleaned": strings.Replace(
-			validText,
-			`"lifecycle":"active"`,
-			`"lifecycle":"cleaned"`,
-			1,
-		),
-		"null_active_object": strings.Replace(validText, `"active":{`, `"active":null,"ignored":{`, 1),
+		"launch_object_on_cleaned": launchObjectOnCleaned,
+		"active_object_on_cleaned": cleanedWithActive,
+		"null_active_object":       nullActive,
 		"final_identity_in_launch": strings.Replace(
 			validText,
 			`"owner_gid":1001,`,
@@ -163,6 +199,68 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
 			validText,
 			`"relay":{"kind":"present","pid":4343,"start_time_ticks":876543}`,
 			`"relay":{"kind":"absent","pid":4343,"start_time_ticks":876543}`,
+			1,
+		),
+		"relay_pid_matches_firecracker": strings.Replace(
+			validText,
+			`"relay":{"kind":"present","pid":4343`,
+			`"relay":{"kind":"present","pid":4242`,
+			1,
+		),
+		"firecracker_pid_zero": strings.Replace(validText, `"pid":4242`, `"pid":0`, 1),
+		"firecracker_pid_too_large": strings.Replace(
+			validText,
+			`"pid":4242`,
+			`"pid":2147483648`,
+			1,
+		),
+		"firecracker_start_zero": strings.Replace(
+			validText,
+			`"start_time_ticks":987654`,
+			`"start_time_ticks":0`,
+			1,
+		),
+		"present_relay_pid_zero": strings.Replace(validText, `"pid":4343`, `"pid":0`, 1),
+		"present_relay_start_zero": strings.Replace(
+			validText,
+			`"start_time_ticks":876543`,
+			`"start_time_ticks":0`,
+			1,
+		),
+		"active_relay_absent_with_identity": strings.Replace(
+			validText,
+			`"relay":{"kind":"present","user_ids":`,
+			`"relay":{"kind":"absent","user_ids":`,
+			1,
+		),
+		"present_active_relay_missing_digest": strings.Replace(
+			validText,
+			`,"sha256":"`+testRelayHash+`"`,
+			``,
+			1,
+		),
+		"supplementary_groups_object": strings.Replace(
+			validText,
+			`"supplementary_groups":[]`,
+			`"supplementary_groups":{}`,
+			1,
+		),
+		"supplementary_groups_negative": strings.Replace(
+			validText,
+			`"supplementary_groups":[]`,
+			`"supplementary_groups":[-1]`,
+			1,
+		),
+		"supplementary_groups_fractional": strings.Replace(
+			validText,
+			`"supplementary_groups":[]`,
+			`"supplementary_groups":[1.5]`,
+			1,
+		),
+		"supplementary_groups_overflow": strings.Replace(
+			validText,
+			`"supplementary_groups":[]`,
+			`"supplementary_groups":[4294967296]`,
 			1,
 		),
 		"null_scalar": strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":null`, 1),
@@ -177,6 +275,7 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
 			domainErr := errs.AsDomainError(decodeErr)
 			require.NotNil(t, domainErr)
 			assert.Equal(t, errs.CodeVMAtomicFailed, domainErr.Code)
+			assert.Equal(t, errs.ClassInternal, domainErr.Class)
 		})
 	}
 }
@@ -186,7 +285,10 @@ func TestDecodeInstanceRecordRejectsOversizedInput(t *testing.T) {
 
 	_, err := decodeInstanceRecord([]byte(strings.Repeat(" ", maxInstanceRecordBytes+1)))
 	require.Error(t, err)
-	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeVMAtomicFailed, domainErr.Code)
+	assert.Equal(t, errs.ClassInternal, domainErr.Class)
 }
 
 func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {

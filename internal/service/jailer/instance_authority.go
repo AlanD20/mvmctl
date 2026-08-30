@@ -151,7 +151,10 @@ func (prepared *preparedRelease) registerLaunching(
 		return nil, err
 	}
 	if location != nil && location.uid != caller.uid {
-		if closeErr := prepared.slotLease.roots.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
+		if closeErr := prepared.slotLease.roots.deps.close(
+			context.WithoutCancel(ctx),
+			location.stateFD,
+		); closeErr != nil {
 			return nil, appendInstanceOperationError(
 				unauthorizedInstanceError(intent.vmID),
 				"close foreign instance authority directory",
