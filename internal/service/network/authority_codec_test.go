@@ -163,6 +163,30 @@ func TestNetworkAuthorityRecordBindsOwnerBootAndExactBridge(t *testing.T) {
 	assert.NotContains(t, err.Error(), fmt.Sprint(testOwnerUID))
 }
 
+func TestNetworkStorePathComponentsRejectsNonCanonicalRoots(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"relative":      "var/lib/mvmctl/networks",
+		"dot component": "/var/./lib/mvmctl/networks",
+		"wrong depth":   "/var/lib/networks",
+		"root":          "/",
+	}
+	for name, value := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := networkStorePathComponents(value)
+			require.Error(t, err)
+		})
+	}
+
+	got, err := networkStorePathComponents("/var/lib/mvmctl/networks")
+	require.NoError(t, err)
+	want := [4]string{"var", "lib", "mvmctl", "networks"}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("network authority root components mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func canonicalNetworkAuthorityJSON(uid uint32, networkID, bootID string) string {
 	names := contractTopologyNames(uid, testVMID, networkID)
 	return `{"schema_version":1,"owner_uid":` + fmt.Sprint(uid) + `,"network_id":"` + networkID +
