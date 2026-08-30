@@ -554,6 +554,54 @@ func TestRunLoopMountResponseFailureIsNotDoubleFramed(t *testing.T) {
 	assert.LessOrEqual(t, bytes.Count(endpoint.output.Bytes(), []byte("MVMRES01")), 1)
 }
 
+// Rationale: The composition root must not hand LoopMount the shared embedded slice or authorize an empty agent.
+// Cancellation must win before the generated binary becomes effect input.
+func TestCopyEmbeddedLoopMountAgentBinaryRequiresContextAndIndependentNonEmptyBytes(t *testing.T) {
+	t.Run("copies_non_empty_generated_agent", func(t *testing.T) {
+		embedded := []byte{0x7f, 'E', 'L', 'F', 1}
+		want := bytes.Clone(embedded)
+
+		got, err := copyEmbeddedLoopMountAgentBinary(t.Context(), embedded)
+
+		require.NoError(t, err)
+		require.NotEmpty(t, got)
+		if diff := cmp.Diff(want, got); diff != "" {
+			t.Errorf("embedded agent mismatch (-want +got):\n%s", diff)
+		}
+		embedded[0] = 0
+		assert.Equal(t, byte(0x7f), got[0])
+		got[1] = 0
+		assert.Equal(t, byte('E'), want[1])
+	})
+
+	t.Run("rejects_empty_agent", func(t *testing.T) {
+		got, err := copyEmbeddedLoopMountAgentBinary(t.Context(), nil)
+
+		require.Error(t, err)
+		assert.Nil(t, got)
+		assert.Equal(t, errs.CodeLoopMountError, errs.AsDomainError(err).Code)
+	})
+
+	t.Run("rejects_nil_context", func(t *testing.T) {
+		got, err := copyEmbeddedLoopMountAgentBinary(nil, []byte("generated-agent"))
+
+		require.Error(t, err)
+		assert.Nil(t, got)
+		assert.Equal(t, errs.CodeInternal, errs.AsDomainError(err).Code)
+	})
+
+	t.Run("observes_cancellation_before_copy", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		got, err := copyEmbeddedLoopMountAgentBinary(ctx, []byte("generated-agent"))
+
+		require.Error(t, err)
+		assert.Nil(t, got)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+}
+
 func validLoopMountProvisionRequest() loopmount.VMProvisionRequest {
 	return loopmount.VMProvisionRequest{
 		CacheLocator:        "/home/alice/.cache/mvmctl",

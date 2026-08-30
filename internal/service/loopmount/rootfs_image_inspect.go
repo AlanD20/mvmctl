@@ -103,9 +103,9 @@ type completedImageInspectCleanup struct{}
 
 func (completedImageInspectCleanup) CleanupInspectImage(context.Context) error { return nil }
 
-// newSystemRootfsImageInspectAdapter is intentionally unreferenced. Once unshare(CLONE_NEWNS) succeeds, the locked
-// thread must terminate with the short-lived receiver process; it must never be unlocked or returned to Go's thread
-// pool. Production activation therefore requires a handler boundary whose success and failure paths both exit.
+// newSystemRootfsImageInspectAdapter constructs the production read-only inspection effect. Once
+// unshare(CLONE_NEWNS) succeeds, the locked thread must terminate with the short-lived receiver process; it must never
+// be unlocked or returned to Go's thread pool.
 func newSystemRootfsImageInspectAdapter() *rootfsImageInspectAdapter {
 	loopDeps := systemRootfsLoopDeps()
 	partitionDeps := systemRootfsPartitionDiscoveryDeps()

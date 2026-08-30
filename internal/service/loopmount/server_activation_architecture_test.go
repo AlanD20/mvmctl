@@ -44,16 +44,16 @@ func TestLoopMountProductionActivationRemainsClosedToProvisionAndInspect(t *test
 		}
 		parsed, parseErr := parser.ParseFile(files, filepath.Join(packageDir, name), nil, 0)
 		require.NoError(t, parseErr)
-		assertInertLoopMountFile(t, files, name, parsed)
-		assertInertRootfsPartitionDiscovery(t, files, parsed)
-		assertInertRootfsImageInspectAdapter(t, files, parsed)
-		assertInertRootfsVMProvisionAdapter(t, files, parsed)
-		assertInertImageOptimizeEffects(t, files, parsed)
+		assertClosedLoopMountActivationFile(t, files, name, parsed)
+		assertClosedRootfsPartitionDiscovery(t, files, parsed)
+		assertClosedRootfsImageInspectAdapter(t, files, parsed)
+		assertClosedRootfsVMProvisionAdapter(t, files, parsed)
+		assertImageOptimizeEffectsRemainUnassigned(t, files, parsed)
 	}
 }
 
-// assertInertRootfsPartitionDiscovery rejects production construction or invocation outside reviewed declarations.
-func assertInertRootfsPartitionDiscovery(t *testing.T, files *token.FileSet, parsed *ast.File) {
+// assertClosedRootfsPartitionDiscovery rejects production invocation outside the reviewed effect factories.
+func assertClosedRootfsPartitionDiscovery(t *testing.T, files *token.FileSet, parsed *ast.File) {
 	t.Helper()
 
 	allowed := map[string]token.Pos{
@@ -84,12 +84,12 @@ func assertInertRootfsPartitionDiscovery(t *testing.T, files *token.FileSet, par
 	})
 }
 
-// assertInertRootfsVMProvisionAdapter permits only its declaration, method receivers, and unused system factory.
-// Construction elsewhere would activate a permanently unshared OS thread without handler-exit semantics.
-func assertInertRootfsVMProvisionAdapter(t *testing.T, files *token.FileSet, parsed *ast.File) {
+// assertClosedRootfsVMProvisionAdapter permits only its declaration, method receivers, system factory, and reviewed
+// production constructor. Construction elsewhere could activate a permanently unshared OS thread without exit safety.
+func assertClosedRootfsVMProvisionAdapter(t *testing.T, files *token.FileSet, parsed *ast.File) {
 	t.Helper()
 
-	assertInertRootfsEffectAdapter(
+	assertClosedRootfsEffectAdapter(
 		t,
 		files,
 		parsed,
@@ -99,7 +99,7 @@ func assertInertRootfsVMProvisionAdapter(t *testing.T, files *token.FileSet, par
 	)
 }
 
-func assertInertRootfsEffectAdapter(
+func assertClosedRootfsEffectAdapter(
 	t *testing.T,
 	files *token.FileSet,
 	parsed *ast.File,
@@ -166,8 +166,8 @@ func assertInertRootfsEffectAdapter(
 	})
 }
 
-// assertInertImageOptimizeEffects permits only the existing field declaration and inactive Server method paths.
-func assertInertImageOptimizeEffects(t *testing.T, files *token.FileSet, parsed *ast.File) {
+// assertImageOptimizeEffectsRemainUnassigned permits only the field declaration and inactive Server method paths.
+func assertImageOptimizeEffectsRemainUnassigned(t *testing.T, files *token.FileSet, parsed *ast.File) {
 	t.Helper()
 
 	allowed := identifiersWithinFunctions(parsed, "OptimizeImage", "validateImageOptimizeDependencies")
@@ -206,12 +206,12 @@ func assertInertImageOptimizeEffects(t *testing.T, files *token.FileSet, parsed 
 	})
 }
 
-// assertInertRootfsImageInspectAdapter permits only its declaration, method receivers, and its unused system factory.
-// Constructing the adapter elsewhere would activate a permanently unshared OS thread without handler-exit semantics.
-func assertInertRootfsImageInspectAdapter(t *testing.T, files *token.FileSet, parsed *ast.File) {
+// assertClosedRootfsImageInspectAdapter permits only its declaration, method receivers, system factory, and reviewed
+// production constructor. Construction elsewhere could activate a permanently unshared OS thread without exit safety.
+func assertClosedRootfsImageInspectAdapter(t *testing.T, files *token.FileSet, parsed *ast.File) {
 	t.Helper()
 
-	assertInertRootfsEffectAdapter(
+	assertClosedRootfsEffectAdapter(
 		t,
 		files,
 		parsed,
@@ -281,8 +281,8 @@ func functionDeclarationPosition(parsed *ast.File, name string) token.Pos {
 	return token.NoPos
 }
 
-// assertInertLoopMountFile rejects every production reference outside the reviewed type and method declarations.
-func assertInertLoopMountFile(t *testing.T, files *token.FileSet, name string, parsed *ast.File) {
+// assertClosedLoopMountActivationFile rejects production references outside reviewed declarations and construction.
+func assertClosedLoopMountActivationFile(t *testing.T, files *token.FileSet, name string, parsed *ast.File) {
 	t.Helper()
 
 	allowedServer := allowedServerDeclarationPositions(name, parsed)
@@ -305,7 +305,7 @@ func assertInertLoopMountFile(t *testing.T, files *token.FileSet, name string, p
 			return true
 		}
 		if identifier.Name != "Server" {
-			if isInertRootfsLockAdapterType(identifier.Name) {
+			if isRootfsLockAdapterType(identifier.Name) {
 				if _, isNonTypeName := nonTypeNames[identifier.Pos()]; isNonTypeName {
 					return true
 				}
@@ -334,7 +334,7 @@ func assertInertLoopMountFile(t *testing.T, files *token.FileSet, name string, p
 	})
 }
 
-// allowedRootfsLockAdapterPositions permits only declarations, method receivers, and the unused system factory body.
+// allowedRootfsLockAdapterPositions permits only declarations, method receivers, and the system factory body.
 func allowedRootfsLockAdapterPositions(name string, parsed *ast.File) map[token.Pos]struct{} {
 	allowed := make(map[token.Pos]struct{})
 	if name != "rootfs_lock.go" {
@@ -348,7 +348,7 @@ func allowedRootfsLockAdapterPositions(name string, parsed *ast.File) map[token.
 				if !isTypeSpec {
 					continue
 				}
-				if isInertRootfsLockAdapterType(typeSpec.Name.Name) {
+				if isRootfsLockAdapterType(typeSpec.Name.Name) {
 					allowed[typeSpec.Name.Pos()] = struct{}{}
 				}
 			}
@@ -356,7 +356,7 @@ func allowedRootfsLockAdapterPositions(name string, parsed *ast.File) map[token.
 			if value.Name.Name == systemRootfsResourceLocksFactory {
 				ast.Inspect(value.Body, func(node ast.Node) bool {
 					identifier, isIdentifier := node.(*ast.Ident)
-					if isIdentifier && isInertRootfsLockAdapterType(identifier.Name) {
+					if isIdentifier && isRootfsLockAdapterType(identifier.Name) {
 						allowed[identifier.Pos()] = struct{}{}
 					}
 					return true
@@ -377,7 +377,7 @@ func allowedRootfsLockAdapterPositions(name string, parsed *ast.File) map[token.
 func guardedAdapterTypeIdentifier(expression ast.Expr) *ast.Ident {
 	switch value := expression.(type) {
 	case *ast.Ident:
-		if isInertRootfsLockAdapterType(value.Name) {
+		if isRootfsLockAdapterType(value.Name) {
 			return value
 		}
 	case *ast.StarExpr:
@@ -388,8 +388,8 @@ func guardedAdapterTypeIdentifier(expression ast.Expr) *ast.Ident {
 	return nil
 }
 
-// isInertRootfsLockAdapterType identifies the concrete adapter types reserved to the unreferenced system factory.
-func isInertRootfsLockAdapterType(name string) bool {
+// isRootfsLockAdapterType identifies concrete adapter types reserved to the reviewed system factory.
+func isRootfsLockAdapterType(name string) bool {
 	return name == "authorityFSRootfsResourceLocks" || name == "systemLoopMountAuthorityTree"
 }
 

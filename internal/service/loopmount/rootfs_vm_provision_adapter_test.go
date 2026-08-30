@@ -1287,7 +1287,7 @@ type testRootfsVMProvisionFixture struct {
 	cancelDuringSync       context.CancelFunc
 }
 
-// newTestRootfsVMProvisionFixture constructs a complete inert provisioning effect with observable cleanup state.
+// newTestRootfsVMProvisionFixture constructs a complete hermetic provisioning effect with observable cleanup state.
 func newTestRootfsVMProvisionFixture(t *testing.T) *testRootfsVMProvisionFixture {
 	t.Helper()
 	fixture := &testRootfsVMProvisionFixture{

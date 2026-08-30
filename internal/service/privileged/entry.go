@@ -1,11 +1,13 @@
 package privileged
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
 	"os"
 
+	"mvmctl/internal/service/agent"
 	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/loopmount"
 	"mvmctl/pkg/errs"
@@ -32,7 +34,7 @@ const (
 // CRITICAL: This entry point accepts only the reserved versioned marker and fixed action switch.
 func Run(ctx context.Context, args []string) error {
 	trustedRelease := jailer.NewTrustedReleaseServer()
-	loopMount := loopmount.NewProvisionInspectServer()
+	loopMount := loopmount.NewProvisionInspectServer(systemLoopMountAgentBinary)
 	return run(ctx, args, newStdinControlEndpoint(os.Stdin), runtimeDeps{
 		identity:      realIdentityDeps(),
 		environment:   realEnvironmentDeps(),
@@ -48,6 +50,42 @@ func Run(ctx context.Context, args []string) error {
 			inspectImage: loopMount.InspectImage,
 		},
 	})
+}
+
+func systemLoopMountAgentBinary(ctx context.Context) ([]byte, error) {
+	if err := validateLoopMountAgentBinaryContext(ctx); err != nil {
+		return nil, err
+	}
+	return copyEmbeddedLoopMountAgentBinary(ctx, agent.AgentBinary())
+}
+
+func copyEmbeddedLoopMountAgentBinary(ctx context.Context, embedded []byte) ([]byte, error) {
+	if err := validateLoopMountAgentBinaryContext(ctx); err != nil {
+		return nil, err
+	}
+	if len(embedded) == 0 {
+		return nil, errs.New(
+			errs.CodeLoopMountError,
+			"embedded managed VM agent binary is unavailable",
+			errs.WithClass(errs.ClassInternal),
+		)
+	}
+	return bytes.Clone(embedded), nil
+}
+
+func validateLoopMountAgentBinaryContext(ctx context.Context) error {
+	if ctx == nil {
+		return errs.New(errs.CodeInternal, "loopmount agent binary context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return errs.WrapMsg(
+			errs.CodeLoopMountError,
+			"load embedded managed VM agent binary",
+			err,
+			errs.WithClass(errs.ClassInternal),
+		)
+	}
+	return nil
 }
 
 func run(ctx context.Context, args []string, endpoint controlEndpoint, deps runtimeDeps) error {

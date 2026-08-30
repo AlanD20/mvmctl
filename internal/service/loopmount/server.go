@@ -126,11 +126,11 @@ type rootfsEffectEvidence struct {
 // NewProvisionInspectServer constructs the exact root-side VM-provision and image-inspection authority.
 // CRITICAL: Each effect may permanently unshare its locked OS thread, so this server may run only in the short-lived
 // one-request privileged receiver process.
-func NewProvisionInspectServer() *Server {
+func NewProvisionInspectServer(agentBinary func(context.Context) ([]byte, error)) *Server {
 	return &Server{
 		rootfsAuthority: systemRootfsAuthorityDeps(),
 		effects: &provisionInspectRootfsEffects{
-			provision: newSystemRootfsVMProvisionAdapter(),
+			provision: newSystemRootfsVMProvisionAdapter(agentBinary),
 			inspect:   newSystemRootfsImageInspectAdapter(),
 		},
 		locks: newSystemRootfsResourceLocks(),
