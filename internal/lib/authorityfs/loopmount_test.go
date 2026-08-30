@@ -209,6 +209,90 @@ func TestLoopMountLockWaitIsCancellationAware(t *testing.T) {
 	require.NoError(t, firstAuthority.Release(t.Context()))
 }
 
+func TestLoopMountContendedKeyDoesNotBlockUnrelatedKeyOnSameCapability(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: Lock contention is resource-scoped. A waiter must not monopolize the parent capability and serialize
+	// unrelated VM or image keys owned by the same authenticated caller.
+	root := prepareTestRoot(t)
+	deps := realDependencies()
+	realWait := deps.waitLock
+	var waitOnce sync.Once
+	waitObserved := make(chan struct{})
+	deps.waitLock = func(ctx context.Context) error {
+		waitOnce.Do(func() { close(waitObserved) })
+		return realWait(ctx)
+	}
+	authorityA, err := openLoopMountWithPolicy(t.Context(), deps, testPolicy(root), testUID)
+	require.NoError(t, err)
+	authorityB, err := openLoopMountWithPolicy(t.Context(), deps, testPolicy(root), testUID)
+	require.NoError(t, err)
+	vmKey, err := NewVMKey(testVMID)
+	require.NoError(t, err)
+	imageKey, err := NewImageKey(testImageID)
+	require.NoError(t, err)
+	held, err := authorityA.AcquireVM(t.Context(), vmKey)
+	require.NoError(t, err)
+
+	type lockResult struct {
+		lock *Lock
+		err  error
+	}
+	waitCtx, cancelWait := context.WithCancel(t.Context())
+	waitResult := make(chan lockResult, 1)
+	unrelatedResult := make(chan lockResult, 1)
+	unrelatedStarted := false
+	unrelatedConsumed := false
+	go func() {
+		lock, acquireErr := authorityB.AcquireVM(waitCtx, vmKey)
+		waitResult <- lockResult{lock: lock, err: acquireErr}
+	}()
+	cleanup := func() {
+		// Best-effort cleanup deliberately cannot mask this test's primary bounded-liveness assertion. The result
+		// channels are drained so every started goroutine and any lock it returned still terminate before test exit.
+		cancelWait()
+		_ = held.Release(context.Background())
+		select {
+		case result := <-waitResult:
+			if result.lock != nil {
+				_ = result.lock.Release(context.Background())
+			}
+		case <-time.After(time.Second):
+		}
+		if unrelatedStarted && !unrelatedConsumed {
+			select {
+			case result := <-unrelatedResult:
+				if result.lock != nil {
+					_ = result.lock.Release(context.Background())
+				}
+			case <-time.After(time.Second):
+			}
+		}
+		_ = authorityB.Release(context.Background())
+		_ = authorityA.Release(context.Background())
+	}
+	defer cleanup()
+	select {
+	case <-waitObserved:
+	case <-time.After(time.Second):
+		require.FailNow(t, "contended LoopMount acquisition did not reach lock wait")
+	}
+	unrelatedStarted = true
+	go func() {
+		lock, acquireErr := authorityB.AcquireImage(t.Context(), imageKey)
+		unrelatedResult <- lockResult{lock: lock, err: acquireErr}
+	}()
+	select {
+	case result := <-unrelatedResult:
+		unrelatedConsumed = true
+		require.NoError(t, result.err)
+		require.NotNil(t, result.lock)
+		require.NoError(t, result.lock.Release(t.Context()))
+	case <-time.After(100 * time.Millisecond):
+		require.FailNow(t, "unrelated LoopMount key was blocked behind contended key")
+	}
+}
+
 func TestLoopMountLocksOutliveParentCapability(t *testing.T) {
 	t.Parallel()
 
@@ -257,9 +341,106 @@ func TestCopiedLoopMountSharesCachedReleaseState(t *testing.T) {
 	require.ErrorIs(t, first, releaseErr)
 	closedAfterFirst := closes.Load()
 	second := copied.Release(ctx)
-	assert.Equal(t, first, second)
+	require.Same(t, first, second)
 	assert.Equal(t, closedAfterFirst, closes.Load())
 	assert.True(t, contextObserved.Load())
+}
+
+func TestCopiedLoopMountSuccessfulReleaseClosesEveryOpenedDescriptorOnce(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: A successful copied-capability release must prove descriptor ownership, not only return nil: every
+	// opened descriptor closes once, cleanup retains context values despite cancellation, and the copy performs no work.
+	root := prepareTestRoot(t)
+	deps := realDependencies()
+	realOpen := deps.open
+	realOpenAt2 := deps.openAt2
+	realClose := deps.close
+	var evidenceMu sync.Mutex
+	opened := make(map[int]int)
+	closed := make(map[int]int)
+	contextValues := make(map[int]bool)
+	type contextKey struct{}
+	deps.open = func(ctx context.Context, name string, flags int, mode uint32) (int, error) {
+		fd, err := realOpen(ctx, name, flags, mode)
+		if err == nil {
+			evidenceMu.Lock()
+			opened[fd]++
+			evidenceMu.Unlock()
+		}
+		return fd, err
+	}
+	deps.openAt2 = func(ctx context.Context, parentFD int, name string, how *unix.OpenHow) (int, error) {
+		fd, err := realOpenAt2(ctx, parentFD, name, how)
+		if err == nil {
+			evidenceMu.Lock()
+			opened[fd]++
+			evidenceMu.Unlock()
+		}
+		return fd, err
+	}
+	deps.close = func(ctx context.Context, fd int) error {
+		evidenceMu.Lock()
+		closed[fd]++
+		contextValues[fd] = ctx.Value(contextKey{}) == "retained"
+		evidenceMu.Unlock()
+		return realClose(ctx, fd)
+	}
+	authority, err := openLoopMountWithPolicy(t.Context(), deps, testPolicy(root), testUID)
+	require.NoError(t, err)
+	copied := *authority
+	ctx, cancel := context.WithCancel(context.WithValue(t.Context(), contextKey{}, "retained"))
+	cancel()
+
+	require.NoError(t, authority.Release(ctx))
+	evidenceMu.Lock()
+	closesAfterFirst := len(closed)
+	evidenceMu.Unlock()
+	require.NoError(t, copied.Release(ctx))
+
+	evidenceMu.Lock()
+	defer evidenceMu.Unlock()
+	assert.Len(t, opened, 6)
+	assert.Len(t, closed, len(opened))
+	assert.Equal(t, closesAfterFirst, len(closed))
+	for fd, openCount := range opened {
+		assert.Equal(t, 1, openCount, "descriptor %d was opened more than once", fd)
+		assert.Equal(t, 1, closed[fd], "descriptor %d was not closed exactly once", fd)
+		assert.True(t, contextValues[fd], "descriptor %d lost caller context values", fd)
+	}
+}
+
+func TestLoopMountInactiveCapabilitiesFailClosed(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: Closed capability values may be copied or zero-initialized internally; none may regain authority or
+	// dereference absent lifecycle state after release.
+	vmKey, err := NewVMKey(testVMID)
+	require.NoError(t, err)
+	imageKey, err := NewImageKey(testImageID)
+	require.NoError(t, err)
+	assertInactive := func(t *testing.T, authority *LoopMount) {
+		t.Helper()
+
+		vm, vmErr := authority.AcquireVM(t.Context(), vmKey)
+		assert.Nil(t, vm)
+		require.Error(t, vmErr)
+		image, imageErr := authority.AcquireImage(t.Context(), imageKey)
+		assert.Nil(t, image)
+		require.Error(t, imageErr)
+	}
+
+	var zero LoopMount
+	assertInactive(t, &zero)
+	require.NoError(t, zero.Release(t.Context()))
+	assertInactive(t, nil)
+	var nilAuthority *LoopMount
+	require.NoError(t, nilAuthority.Release(t.Context()))
+
+	root := prepareTestRoot(t)
+	released := openTestLoopMount(t, root, testUID)
+	require.NoError(t, released.Release(t.Context()))
+	assertInactive(t, released)
 }
 
 func TestLoopMountRejectsUnsafeUniqueDirectoriesWithoutRepair(t *testing.T) {

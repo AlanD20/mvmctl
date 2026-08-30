@@ -86,8 +86,8 @@ func (authority *LoopMount) AcquireVM(ctx context.Context, key VMKey) (*Lock, er
 		return nil, fmt.Errorf("authorityfs: LoopMount authority is not active")
 	}
 	state := authority.state
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	state.mu.RLock()
+	defer state.mu.RUnlock()
 	if !state.active {
 		return nil, fmt.Errorf("authorityfs: LoopMount authority is released")
 	}
@@ -103,8 +103,8 @@ func (authority *LoopMount) AcquireImage(ctx context.Context, key ImageKey) (*Lo
 		return nil, fmt.Errorf("authorityfs: LoopMount authority is not active")
 	}
 	state := authority.state
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	state.mu.RLock()
+	defer state.mu.RUnlock()
 	if !state.active {
 		return nil, fmt.Errorf("authorityfs: LoopMount authority is released")
 	}

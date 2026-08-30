@@ -14,7 +14,7 @@ type LoopMount struct {
 
 type loopMountState struct {
 	// mu guards fd and every lifecycle field below.
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	deps       dependencies
 	policy     policy
 	fd         int
