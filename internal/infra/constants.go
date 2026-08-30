@@ -62,6 +62,9 @@ const JailerChrootBase = "/var/lib/mvmctl/jailer"
 // JailerInstanceRoot contains persistent root-owned VM authority records.
 const JailerInstanceRoot = "/var/lib/mvmctl/instances"
 
+// FirewallGenerationRoot contains the persistent root-owned firewall generation authority.
+const FirewallGenerationRoot = "/var/lib/mvmctl/firewall"
+
 // NetworkAuthorityRoot contains persistent root-owned managed-network identity records.
 const NetworkAuthorityRoot = "/var/lib/mvmctl/networks"
 
