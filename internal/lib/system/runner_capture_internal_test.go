@@ -1,11 +1,14 @@
 package system
 
 import (
+	"context"
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -59,8 +62,8 @@ func TestRealRunnerRunAcceptsExactStdoutAndStderrLimits(t *testing.T) {
 }
 
 func TestRealRunnerRunRejectsOneByteCaptureOverflow(t *testing.T) {
-	// Rationale: One excess byte must become a bounded process error without retaining attacker-controlled output beyond
-	// the configured limit; helper-only writer tests do not prove os/exec propagates the copy failure correctly.
+	// Rationale: One excess byte must become a bounded process error after execution without retaining attacker-controlled
+	// output beyond the configured limit; helper-only writer tests do not prove the os/exec boundary behaves correctly.
 	t.Parallel()
 
 	tests := []struct {
@@ -94,6 +97,71 @@ func TestRealRunnerRunRejectsOneByteCaptureOverflow(t *testing.T) {
 				realRunnerRunHelperCommand("output", test.stdout, test.stderr),
 				test.opts,
 			)
+			require.Error(t, err)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+			assert.ErrorContains(t, err, test.wantError)
+			require.NotNil(t, result)
+			assert.Equal(t, -1, result.ExitCode)
+			assert.Equal(t, test.wantStdout, result.Stdout)
+			assert.Equal(t, test.wantStderr, result.Stderr)
+		})
+	}
+}
+
+func TestRealRunnerRunDrainsCaptureFarBeyondPipeBuffer(t *testing.T) {
+	// Rationale: Returning a short write at the capture limit stops os/exec's pipe copier and can deadlock a child whose
+	// remaining output exceeds the pipe buffer, so prove both streams are fully drained while only the bounded prefix stays.
+	t.Parallel()
+
+	const (
+		payloadBytes = 1 << 20
+		captureBytes = 4 << 10
+	)
+	tests := []struct {
+		name       string
+		stream     string
+		content    string
+		opts       RunCmdOpts
+		wantStdout string
+		wantStderr string
+		wantError  string
+	}{
+		{
+			name:       "stdout",
+			stream:     "stdout",
+			content:    "o",
+			opts:       RunCmdOpts{Capture: true, MaxStdoutBytes: captureBytes},
+			wantStdout: strings.Repeat("o", captureBytes),
+			wantError:  "stdout exceeded capture limit",
+		},
+		{
+			name:       "stderr",
+			stream:     "stderr",
+			content:    "e",
+			opts:       RunCmdOpts{Capture: true, MaxStderrBytes: captureBytes},
+			wantStderr: strings.Repeat("e", captureBytes),
+			wantError:  "stderr exceeded capture limit",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			result, err := (&RealRunner{}).Run(
+				ctx,
+				realRunnerRunHelperCommand(
+					"repeated-output",
+					test.stream,
+					test.content,
+					strconv.Itoa(payloadBytes),
+				),
+				test.opts,
+			)
+			breakerErr := ctx.Err()
+			cancel()
+
+			assert.NoError(t, breakerErr, "runner must finish before the circuit breaker")
 			require.Error(t, err)
 			domainErr := errs.AsDomainError(err)
 			require.NotNil(t, domainErr)
@@ -178,6 +246,25 @@ func TestRealRunnerRunHelper(t *testing.T) {
 		if _, err := os.Stderr.WriteString(arguments[1]); err != nil {
 			os.Exit(94)
 		}
+	case "repeated-output":
+		if len(arguments) != 3 || len(arguments[1]) != 1 {
+			os.Exit(96)
+		}
+		byteCount, err := strconv.Atoi(arguments[2])
+		if err != nil || byteCount < 0 {
+			os.Exit(97)
+		}
+		output := os.Stdout
+		if arguments[0] == "stderr" {
+			output = os.Stderr
+		} else if arguments[0] != "stdout" {
+			os.Exit(98)
+		}
+		payload := strings.Repeat(arguments[1], byteCount)
+		written, err := output.WriteString(payload)
+		if err != nil || written != len(payload) {
+			os.Exit(99)
+		}
 	default:
 		os.Exit(95)
 	}
@@ -210,20 +297,19 @@ func TestCommandEnvironmentReplacesInheritedValuesWithClosedSet(t *testing.T) {
 	}
 }
 
-func TestBoundedCaptureWriterRejectsOverflowWithoutRetainingExcess(t *testing.T) {
+func TestBoundedCaptureWriterDrainsOverflowWithoutRetainingExcess(t *testing.T) {
 	t.Parallel()
 
 	writer := newBoundedCaptureWriter(4)
 	written, err := writer.Write([]byte("abcdef"))
-	require.Error(t, err)
-	assert.ErrorIs(t, err, errCommandOutputLimit)
-	assert.Equal(t, 4, written)
+	require.NoError(t, err)
+	assert.Equal(t, 6, written)
 	assert.Equal(t, "abcd", writer.String())
 	assert.True(t, writer.Exceeded())
 
 	written, err = writer.Write([]byte("z"))
-	assert.Equal(t, 0, written)
-	assert.ErrorIs(t, err, errCommandOutputLimit)
+	require.NoError(t, err)
+	assert.Equal(t, 1, written)
 	assert.Equal(t, "abcd", writer.String())
 }
 
@@ -232,7 +318,7 @@ func TestCommandOutputLimitErrorTakesPriorityOverProcessFailure(t *testing.T) {
 
 	stdout := newBoundedCaptureWriter(4)
 	_, writeErr := stdout.Write([]byte("oversized"))
-	require.Error(t, writeErr)
+	require.NoError(t, writeErr)
 	stderr := newBoundedCaptureWriter(8)
 
 	result, err := capturedRunResult(stdout, stderr, errors.New("process stopped"))

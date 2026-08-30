@@ -67,17 +67,20 @@ func (writer *boundedCaptureWriter) Write(content []byte) (int, error) {
 	if writer.limit == 0 {
 		return writer.builder.Write(content)
 	}
-	remaining := writer.limit - writer.builder.Len()
-	if remaining <= 0 {
-		writer.exceeded = true
-		return 0, errCommandOutputLimit
+	if len(content) == 0 {
+		return 0, nil
 	}
-	if len(content) <= remaining {
+	remaining := writer.limit - writer.builder.Len()
+	if remaining > 0 && len(content) <= remaining {
 		return writer.builder.Write(content)
 	}
-	written, _ := writer.builder.Write(content[:remaining])
+	if remaining > 0 {
+		if _, err := writer.builder.Write(content[:remaining]); err != nil {
+			return 0, err
+		}
+	}
 	writer.exceeded = true
-	return written, errCommandOutputLimit
+	return len(content), nil
 }
 
 func (writer *boundedCaptureWriter) String() string {
