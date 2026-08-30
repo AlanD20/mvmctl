@@ -218,8 +218,10 @@ func TestServerPreservesPrimaryDomainErrorAcrossCancellationAndCleanupFailures(t
 		events.append("rootfs")
 		return closeRootfs(ctx, fd)
 	}
-	longCause := errors.New(strings.Repeat("cleanup-failure-", 80))
-	fixture.closeError[fixture.rootFD+5] = longCause
+	effectCleanupCause := errors.New(strings.Repeat("effect-cleanup-failure-", 40))
+	rootfsCleanupCause := errors.New(strings.Repeat("rootfs-cleanup-failure-", 40))
+	lockCleanupCause := errors.New(strings.Repeat("lock-cleanup-failure-", 40))
+	fixture.closeError[fixture.rootFD+5] = rootfsCleanupCause
 	primary := errs.New(
 		errs.CodeImageError,
 		"primary effect failure",
@@ -227,9 +229,13 @@ func TestServerPreservesPrimaryDomainErrorAcrossCancellationAndCleanupFailures(t
 		errs.WithEntity(request.VMID),
 		errs.WithDetails(map[string]any{"original": "retained"}),
 	)
-	ctx, cancel := context.WithCancel(context.Background())
-	effectLease := &fakeVMProvisionEffectLease{events: events, err: longCause}
-	lockLease := &fakeServerResourceLockLease{events: events, err: longCause}
+	ctx, cancel := context.WithCancel(context.WithValue(
+		context.Background(),
+		rootfsCleanupContextKey{},
+		"server-cleanup",
+	))
+	effectLease := &fakeVMProvisionEffectLease{events: events, err: effectCleanupCause}
+	lockLease := &fakeServerResourceLockLease{events: events, err: lockCleanupCause}
 	effects := &fakeServerRootfsEffects{
 		provisionOutcome: vmProvisionEffectOutcome{
 			state: vmProvisionEffectStateOutcomeUnknown,
@@ -252,6 +258,9 @@ func TestServerPreservesPrimaryDomainErrorAcrossCancellationAndCleanupFailures(t
 	assert.Equal(t, primary.Message, domainErr.Message)
 	assert.Equal(t, primary.Op, domainErr.Op)
 	assert.Equal(t, "retained", domainErr.Details["original"])
+	assert.ErrorIs(t, err, effectCleanupCause)
+	assert.ErrorIs(t, err, rootfsCleanupCause)
+	assert.ErrorIs(t, err, lockCleanupCause)
 	assertServerEffectEvidence(t, domainErr, rootfsEffectEvidence{
 		rootfsModified: true, durabilityUncertain: true, outcomeUnknown: true,
 	})
@@ -265,9 +274,12 @@ func TestServerPreservesPrimaryDomainErrorAcrossCancellationAndCleanupFailures(t
 		t.Errorf("primary error details mutated (-want +got):\n%s", diff)
 	}
 	assert.NoError(t, effectLease.contextErr)
+	assert.Equal(t, "server-cleanup", effectLease.contextMark)
 	assert.NoError(t, lockLease.contextErr)
+	assert.Equal(t, "server-cleanup", lockLease.contextMark)
 	for _, closeCall := range fixture.closeCalls {
 		assert.NoError(t, closeCall.contextErr)
+		assert.Equal(t, "server-cleanup", closeCall.contextMark)
 	}
 	wantEvents := []string{"effect", "rootfs", "rootfs", "rootfs", "rootfs", "rootfs", "rootfs", "lock"}
 	if diff := cmp.Diff(wantEvents, events.snapshot()); diff != "" {
@@ -477,6 +489,177 @@ func TestServerFailsClosedWithoutEffectCleanupAuthority(t *testing.T) {
 	wantEvents := []string{"rootfs", "rootfs", "rootfs", "rootfs", "rootfs", "rootfs", "rootfs", "lock"}
 	if diff := cmp.Diff(wantEvents, events.snapshot()); diff != "" {
 		t.Errorf("missing-effect-authority cleanup order mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: A zero effect outcome carries neither an admissible state nor cleanup authority. Every action must reject
+// it conservatively, publish no result, and still release the admitted rootfs and resource lock.
+func TestServerRejectsZeroEffectOutcomes(t *testing.T) {
+	t.Parallel()
+
+	vmEffectErr := errors.New("zero VM effect outcome")
+	tests := []struct {
+		name             string
+		kind             rootfsSelectionKind
+		effectErr        error
+		wantEvidence     rootfsEffectEvidence
+		wantRootfsCloses int
+	}{
+		{
+			name: "VM provision without effect error", kind: rootfsVMProvisionSelection,
+			wantEvidence: rootfsEffectEvidence{
+				rootfsModified: true, durabilityUncertain: true, outcomeUnknown: true,
+			},
+			wantRootfsCloses: 6,
+		},
+		{
+			name: "VM provision with effect error", kind: rootfsVMProvisionSelection, effectErr: vmEffectErr,
+			wantEvidence: rootfsEffectEvidence{
+				rootfsModified: true, durabilityUncertain: true, outcomeUnknown: true,
+			},
+			wantRootfsCloses: 6,
+		},
+		{
+			name: "image inspection without effect error", kind: rootfsImageInspectSelection,
+			wantEvidence: rootfsEffectEvidence{outcomeUnknown: true}, wantRootfsCloses: 7,
+		},
+		{
+			name: "image optimization without effect error", kind: rootfsImageOptimizeSelection,
+			wantEvidence: rootfsEffectEvidence{
+				rootfsModified: true, imageReplaced: true, durabilityUncertain: true, outcomeUnknown: true,
+			},
+			wantRootfsCloses: 7,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			events := &serverEventLog{}
+			components := []string{"srv", "cache", "vms", testVMID, "rootfs.img"}
+			if tc.kind != rootfsVMProvisionSelection {
+				components = []string{"srv", "cache", "images", "staging", testImageID, "rootfs.img"}
+			}
+			fixture := newRootfsAuthorityFixture(t, components)
+			rootfsAuthority := fixture.deps()
+			closeRootfs := rootfsAuthority.close
+			rootfsAuthority.close = func(ctx context.Context, fd int) error {
+				events.append("rootfs")
+				return closeRootfs(ctx, fd)
+			}
+			effects := &fakeServerRootfsEffects{}
+			switch tc.kind {
+			case rootfsVMProvisionSelection:
+				effects.provisionErr = tc.effectErr
+			case rootfsImageInspectSelection:
+				effects.inspectErr = tc.effectErr
+			case rootfsImageOptimizeSelection:
+				effects.optimizeErr = tc.effectErr
+			default:
+				t.Fatalf("unhandled test action %d", tc.kind)
+			}
+			lockLease := &fakeServerResourceLockLease{events: events}
+			server := &Server{
+				rootfsAuthority: rootfsAuthority, effects: effects,
+				locks: &fakeServerResourceLocks{lease: lockLease},
+			}
+
+			var operationErr error
+			switch tc.kind {
+			case rootfsVMProvisionSelection:
+				got, err := server.ProvisionVM(t.Context(), testRootfsCaller(), testVMProvisionRequest())
+				operationErr = err
+				if diff := cmp.Diff(VMProvisionResult{}, got); diff != "" {
+					t.Errorf("zero VM outcome published a result (-want +got):\n%s", diff)
+				}
+				assert.Equal(t, 1, effects.provisionCallCount)
+			case rootfsImageInspectSelection:
+				got, err := server.InspectImage(t.Context(), testRootfsCaller(), testImageInspectRequest())
+				operationErr = err
+				if diff := cmp.Diff(ImageInspectResult{}, got); diff != "" {
+					t.Errorf("zero inspection outcome published a result (-want +got):\n%s", diff)
+				}
+				assert.Equal(t, 1, effects.inspectCallCount)
+			case rootfsImageOptimizeSelection:
+				got, err := server.OptimizeImage(t.Context(), testRootfsCaller(), testImageOptimizeRequest())
+				operationErr = err
+				if diff := cmp.Diff(ImageOptimizeResult{}, got); diff != "" {
+					t.Errorf("zero optimization outcome published a result (-want +got):\n%s", diff)
+				}
+				assert.Equal(t, 1, effects.optimizeCallCount)
+			}
+			require.Error(t, operationErr)
+			if tc.effectErr != nil {
+				assert.ErrorIs(t, operationErr, tc.effectErr)
+			}
+			domainErr := errs.AsDomainError(operationErr)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, true, domainErr.Details["loopmount_effect_state_invalid"])
+			assert.Equal(t, true, domainErr.Details["loopmount_effect_cleanup_failed"])
+			assertServerEffectEvidence(t, domainErr, tc.wantEvidence)
+			assert.Len(t, fixture.closeCalls, tc.wantRootfsCloses)
+			assert.Equal(t, 1, lockLease.releaseCount)
+			wantEvents := make([]string, tc.wantRootfsCloses+1)
+			for index := range tc.wantRootfsCloses {
+				wantEvents[index] = "rootfs"
+			}
+			wantEvents[len(wantEvents)-1] = "lock"
+			if diff := cmp.Diff(wantEvents, events.snapshot()); diff != "" {
+				t.Errorf("zero-outcome cleanup order mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// Rationale: A lock provider returning neither a lease nor an error has failed to establish exclusion. The server must
+// reject that missing authority before opening the rootfs or invoking a privileged effect.
+func TestServerRejectsMissingResourceLockAuthorityBeforeAdmission(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		kind rootfsSelectionKind
+	}{
+		{name: "VM provision", kind: rootfsVMProvisionSelection},
+		{name: "image inspection", kind: rootfsImageInspectSelection},
+		{name: "image optimization", kind: rootfsImageOptimizeSelection},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newRootfsAuthorityFixture(t, []string{"srv", "cache", "vms", testVMID, "rootfs.img"})
+			effects := &fakeServerRootfsEffects{}
+			locks := &fakeServerResourceLocks{}
+			server := &Server{rootfsAuthority: fixture.deps(), effects: effects, locks: locks}
+
+			var operationErr error
+			switch test.kind {
+			case rootfsVMProvisionSelection:
+				got, err := server.ProvisionVM(t.Context(), testRootfsCaller(), testVMProvisionRequest())
+				operationErr = err
+				if diff := cmp.Diff(VMProvisionResult{}, got); diff != "" {
+					t.Errorf("missing VM lock published a result (-want +got):\n%s", diff)
+				}
+			case rootfsImageInspectSelection:
+				got, err := server.InspectImage(t.Context(), testRootfsCaller(), testImageInspectRequest())
+				operationErr = err
+				if diff := cmp.Diff(ImageInspectResult{}, got); diff != "" {
+					t.Errorf("missing inspection lock published a result (-want +got):\n%s", diff)
+				}
+			case rootfsImageOptimizeSelection:
+				got, err := server.OptimizeImage(t.Context(), testRootfsCaller(), testImageOptimizeRequest())
+				operationErr = err
+				if diff := cmp.Diff(ImageOptimizeResult{}, got); diff != "" {
+					t.Errorf("missing optimization lock published a result (-want +got):\n%s", diff)
+				}
+			default:
+				t.Fatalf("unhandled test action %d", test.kind)
+			}
+			require.Error(t, operationErr)
+			assert.Equal(t, errs.CodeLoopMountError, errs.AsDomainError(operationErr).Code)
+			assert.Equal(t, 1, locks.acquireCount)
+			assert.Equal(t, test.kind, locks.selection.kind)
+			assert.Empty(t, fixture.openCalls)
+			assert.Equal(t, 0, effects.provisionCallCount)
+			assert.Equal(t, 0, effects.inspectCallCount)
+			assert.Equal(t, 0, effects.optimizeCallCount)
+		})
 	}
 }
 
@@ -750,14 +933,16 @@ func (effects *fakeServerRootfsEffects) OptimizeImage(
 }
 
 type fakeVMProvisionEffectLease struct {
-	events     *serverEventLog
-	err        error
-	contextErr error
+	events      *serverEventLog
+	err         error
+	contextErr  error
+	contextMark string
 }
 
 func (lease *fakeVMProvisionEffectLease) CleanupProvisionVM(ctx context.Context) error {
 	lease.events.append("effect")
 	lease.contextErr = ctx.Err()
+	lease.contextMark, _ = ctx.Value(rootfsCleanupContextKey{}).(string)
 	return lease.err
 }
 
@@ -806,12 +991,14 @@ type fakeServerResourceLockLease struct {
 	events       *serverEventLog
 	err          error
 	contextErr   error
+	contextMark  string
 	releaseCount int
 }
 
 func (lease *fakeServerResourceLockLease) Release(ctx context.Context) error {
 	lease.events.append("lock")
 	lease.contextErr = ctx.Err()
+	lease.contextMark, _ = ctx.Value(rootfsCleanupContextKey{}).(string)
 	lease.releaseCount++
 	return lease.err
 }
