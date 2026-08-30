@@ -30,14 +30,15 @@ func TestOpenInstanceAuthorityRootsCreatesFixedManagedTree(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, roots.Release(context.Background())) })
 
 	assertExactMode(t, filepath.Join(root, "var/lib/mvmctl/instances"), 0700)
-	assertExactMode(t, filepath.Join(root, "run/mvmctl"), 0700)
-	assertExactMode(t, filepath.Join(root, "run/mvmctl/releases"), 0700)
+	assertExactMode(t, filepath.Join(root, "run/mvmctl"), 0711)
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority"), 0700)
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/releases"), 0700)
 
 	uidDirs, err := roots.openUIDDirectories(context.Background(), testAuthorityUID)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
 	assertExactMode(t, filepath.Join(root, "var/lib/mvmctl/instances/1000"), 0700)
-	assertExactMode(t, filepath.Join(root, "run/mvmctl/1000"), 0700)
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/1000"), 0700)
 }
 
 func TestOpenInstanceAuthorityRootsRejectsUnsafeTree(t *testing.T) {
@@ -100,12 +101,17 @@ func TestOpenInstanceAuthorityRootsRejectsSymlinkAtEveryFixedLevel(t *testing.T)
 			require.NoError(t, os.Remove(filepath.Join(root, "run")))
 			require.NoError(t, os.Symlink("attacker", filepath.Join(root, "run")))
 		},
-		"runtime_base": func(t *testing.T, root string) {
+		"ephemeral_base": func(t *testing.T, root string) {
 			require.NoError(t, os.Symlink("attacker", filepath.Join(root, "run/mvmctl")))
 		},
+		"authority": func(t *testing.T, root string) {
+			require.NoError(t, os.Mkdir(filepath.Join(root, "run/mvmctl"), 0711))
+			require.NoError(t, os.Symlink("attacker", filepath.Join(root, "run/mvmctl/authority")))
+		},
 		"release_locks": func(t *testing.T, root string) {
-			require.NoError(t, os.Mkdir(filepath.Join(root, "run/mvmctl"), 0700))
-			require.NoError(t, os.Symlink("attacker", filepath.Join(root, "run/mvmctl/releases")))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "run/mvmctl/authority"), 0700))
+			require.NoError(t, os.Chmod(filepath.Join(root, "run/mvmctl"), 0711))
+			require.NoError(t, os.Symlink("attacker", filepath.Join(root, "run/mvmctl/authority/releases")))
 		},
 	}
 
@@ -140,7 +146,8 @@ func TestOpenInstanceAuthorityRootsRejectsWritableModeAtEveryFixedLevel(t *testi
 		"var/lib/mvmctl/instances",
 		"run",
 		"run/mvmctl",
-		"run/mvmctl/releases",
+		"run/mvmctl/authority",
+		"run/mvmctl/authority/releases",
 	}
 	for _, relativePath := range relativePaths {
 		relativePath := relativePath
@@ -149,7 +156,8 @@ func TestOpenInstanceAuthorityRootsRejectsWritableModeAtEveryFixedLevel(t *testi
 
 			root := prepareInstanceAuthorityTestRoot(t)
 			require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib/mvmctl/instances"), 0700))
-			require.NoError(t, os.MkdirAll(filepath.Join(root, "run/mvmctl/releases"), 0700))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "run/mvmctl/authority/releases"), 0700))
+			require.NoError(t, os.Chmod(filepath.Join(root, "run/mvmctl"), 0711))
 			require.NoError(t, os.Chmod(filepath.Join(root, relativePath), 0777))
 
 			roots, err := openInstanceAuthorityRoots(
@@ -194,6 +202,9 @@ func TestOpenInstanceAuthorityRootsTreatsMkdirEEXISTAsConcurrentCreation(t *test
 	require.NoError(t, roots.Release(context.Background()))
 	assert.Zero(t, chownCalls.Load())
 	assert.Zero(t, chmodCalls.Load())
+	assertExactMode(t, filepath.Join(root, "run/mvmctl"), 0711)
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority"), 0700)
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/releases"), 0700)
 }
 
 func TestOpenInstanceAuthorityRootsRejectsManagedModeAndType(t *testing.T) {
@@ -207,6 +218,12 @@ func TestOpenInstanceAuthorityRootsRejectsManagedModeAndType(t *testing.T) {
 		"managed_type": func(t *testing.T, root string) {
 			require.NoError(t, os.Mkdir(filepath.Join(root, "var/lib/mvmctl"), 0700))
 			require.NoError(t, os.WriteFile(filepath.Join(root, "var/lib/mvmctl/instances"), nil, 0600))
+		},
+		"ephemeral_base_mode": func(t *testing.T, root string) {
+			require.NoError(t, os.Mkdir(filepath.Join(root, "run/mvmctl"), 0700))
+		},
+		"authority_mode": func(t *testing.T, root string) {
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "run/mvmctl/authority"), 0711))
 		},
 	}
 
@@ -252,6 +269,133 @@ func TestOpenInstanceAuthorityRootsRejectsSimulatedAncestorOwnerMismatch(t *test
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 }
 
+func TestOpenInstanceAuthorityRootsRejectsExistingEphemeralOwnerMismatch(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: Existing base and authority directories are admission evidence, not repair targets. A mismatched owner
+	// must fail closed before any authority object is used.
+	tests := map[string]func(string, int) bool{
+		"base": func(name string, occurrence int) bool {
+			return name == "mvmctl" && occurrence == 2
+		},
+		"authority": func(name string, _ int) bool {
+			return name == "authority"
+		},
+	}
+	for name, matchesTarget := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := prepareInstanceAuthorityTestRoot(t)
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib/mvmctl/instances"), 0700))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "run/mvmctl/authority/releases"), 0700))
+			require.NoError(t, os.Chmod(filepath.Join(root, "run/mvmctl"), 0711))
+
+			deps := realInstanceAuthorityDeps()
+			realOpenAt := deps.openAt
+			targetFD := -1
+			mvmctlOccurrences := 0
+			deps.openAt = func(ctx context.Context, parentFD int, component string, flags int, mode uint32) (int, error) {
+				fd, err := realOpenAt(ctx, parentFD, component, flags, mode)
+				if err != nil {
+					return fd, err
+				}
+				if component == "mvmctl" {
+					mvmctlOccurrences++
+				}
+				if matchesTarget(component, mvmctlOccurrences) {
+					targetFD = fd
+				}
+				return fd, nil
+			}
+			realFstat := deps.fstat
+			deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
+				if err := realFstat(ctx, fd, stat); err != nil {
+					return err
+				}
+				if fd == targetFD {
+					stat.Uid++
+				}
+				return nil
+			}
+
+			roots, err := openInstanceAuthorityRoots(context.Background(), deps, testInstanceAuthorityPolicy(root))
+			assert.Nil(t, roots)
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+		})
+	}
+}
+
+func TestOpenInstanceAuthorityRootsCreationFaultClosesDescriptors(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: A partial authority-tree creation must not leak a descriptor that pins rejected filesystem state.
+	tests := map[string]func(*instanceAuthorityDeps){
+		"owner": func(deps *instanceAuthorityDeps) {
+			deps.fchown = func(context.Context, int, int, int) error { return errors.New("owner failed") }
+		},
+		"mode": func(deps *instanceAuthorityDeps) {
+			deps.fchmod = func(context.Context, int, uint32) error { return errors.New("mode failed") }
+		},
+		"directory_sync": func(deps *instanceAuthorityDeps) {
+			deps.fsync = func(context.Context, int) error { return errors.New("directory sync failed") }
+		},
+		"parent_sync": func(deps *instanceAuthorityDeps) {
+			realFsync := deps.fsync
+			var calls atomic.Int32
+			deps.fsync = func(ctx context.Context, fd int) error {
+				if calls.Add(1) == 2 {
+					return errors.New("parent sync failed")
+				}
+				return realFsync(ctx, fd)
+			}
+		},
+	}
+	for name, inject := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			root := prepareInstanceAuthorityTestRoot(t)
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "var/lib/mvmctl/instances"), 0700))
+			deps := realInstanceAuthorityDeps()
+			realOpen := deps.open
+			realOpenAt := deps.openAt
+			realClose := deps.close
+			var opened atomic.Int32
+			var closed atomic.Int32
+			deps.open = func(ctx context.Context, path string, flags int, mode uint32) (int, error) {
+				fd, err := realOpen(ctx, path, flags, mode)
+				if err == nil {
+					opened.Add(1)
+				}
+				return fd, err
+			}
+			deps.openAt = func(ctx context.Context, parentFD int, component string, flags int, mode uint32) (int, error) {
+				fd, err := realOpenAt(ctx, parentFD, component, flags, mode)
+				if err == nil {
+					opened.Add(1)
+				}
+				return fd, err
+			}
+			deps.close = func(ctx context.Context, fd int) error {
+				err := realClose(ctx, fd)
+				if err == nil {
+					closed.Add(1)
+				}
+				return err
+			}
+			inject(&deps)
+
+			roots, err := openInstanceAuthorityRoots(context.Background(), deps, testInstanceAuthorityPolicy(root))
+			assert.Nil(t, roots)
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+			assert.Equal(t, opened.Load(), closed.Load())
+		})
+	}
+}
+
 func TestInstanceAuthorityVMLockIsCancellableAndPersistent(t *testing.T) {
 	t.Parallel()
 
@@ -273,7 +417,7 @@ func TestInstanceAuthorityVMLockIsCancellableAndPersistent(t *testing.T) {
 	assert.Equal(t, errs.ClassRetryable, errs.AsDomainError(err).Class)
 
 	require.NoError(t, first.Release(context.Background()))
-	assertExactMode(t, filepath.Join(root, "run/mvmctl/1000/"+testVMID+".lock"), 0600)
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/1000/"+testVMID+".lock"), 0600)
 
 	reacquired, err := uidDirs.acquireVMLock(context.Background(), testVMID)
 	require.NoError(t, err)
@@ -289,7 +433,7 @@ func TestInstanceAuthorityLockRejectsSymlink(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
 
-	lockPath := filepath.Join(root, "run/mvmctl/1000/"+testVMID+".lock")
+	lockPath := filepath.Join(root, "run/mvmctl/authority/1000/"+testVMID+".lock")
 	require.NoError(t, os.Symlink("attacker", lockPath))
 
 	lock, err := uidDirs.acquireVMLock(context.Background(), testVMID)
@@ -318,7 +462,7 @@ func TestInstanceAuthorityLockRejectsUnsafeModeAndType(t *testing.T) {
 			uidDirs, err := roots.openUIDDirectories(context.Background(), testAuthorityUID)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
-			path := filepath.Join(root, "run/mvmctl/1000/"+testVMID+".lock")
+			path := filepath.Join(root, "run/mvmctl/authority/1000/"+testVMID+".lock")
 			create(t, path)
 
 			lock, err := uidDirs.acquireVMLock(context.Background(), testVMID)

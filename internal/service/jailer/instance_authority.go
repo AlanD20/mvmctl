@@ -153,7 +153,7 @@ func (lease *releaseSlotLease) registerLaunch(
 			return nil, err
 		}
 	} else {
-		directories, err = lease.roots.openRuntimeForLocation(ctx, location)
+		directories, err = lease.roots.openAuthorityForLocation(ctx, location)
 		if err != nil {
 			return nil, err
 		}
@@ -376,7 +376,7 @@ func (authority *instanceAuthority) lockOwnedInstance(
 		}
 		return nil, unauthorizedInstanceError(vmID)
 	}
-	directories, err = roots.openRuntimeForLocation(ctx, location)
+	directories, err = roots.openAuthorityForLocation(ctx, location)
 	if err != nil {
 		return nil, err
 	}

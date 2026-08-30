@@ -27,11 +27,21 @@ const (
 	instanceLockFlags      = unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	instanceLockCreate     = instanceLockFlags | unix.O_CREAT | unix.O_EXCL
 
-	instanceManagedDirMode = uint32(0700)
-	instanceStateFileMode  = uint32(0600)
-	instanceTempAttempts   = 8
-	instanceIOChunk        = 4096
-	instanceLockPoll       = 10 * time.Millisecond
+	instancePrivateDirMode     = uint32(0700)
+	instanceTraversableDirMode = uint32(0711)
+	instanceStateFileMode      = uint32(0600)
+	instanceTempAttempts       = 8
+	instanceIOChunk            = 4096
+	instanceLockPoll           = 10 * time.Millisecond
+)
+
+type instanceDirectoryClass uint8
+
+const (
+	instanceAncestorDirectory instanceDirectoryClass = iota
+	instanceStateBaseDirectory
+	instancePrivateDirectory
+	instanceTraversableDirectory
 )
 
 type instanceAuthorityDeps struct {
@@ -60,20 +70,20 @@ type instanceAuthorityPolicy struct {
 }
 
 type instanceAuthorityRoots struct {
-	deps       instanceAuthorityDeps
-	policy     instanceAuthorityPolicy
-	stateFD    int
-	runtimeFD  int
-	releasesFD int
-	retained   []int
+	deps        instanceAuthorityDeps
+	policy      instanceAuthorityPolicy
+	stateFD     int
+	authorityFD int
+	releasesFD  int
+	retained    []int
 }
 
 type instanceUIDDirectories struct {
-	deps      instanceAuthorityDeps
-	policy    instanceAuthorityPolicy
-	uid       uint32
-	stateFD   int
-	runtimeFD int
+	deps        instanceAuthorityDeps
+	policy      instanceAuthorityPolicy
+	uid         uint32
+	stateFD     int
+	authorityFD int
 }
 
 func productionInstanceAuthorityPolicy() instanceAuthorityPolicy {
@@ -96,11 +106,11 @@ func openInstanceAuthorityRoots(
 	if err != nil {
 		return nil, err
 	}
-	runtimeNames, err := instanceAuthorityPathComponents(infra.JailerRuntimeRoot, 2)
+	authorityNames, err := instanceAuthorityPathComponents(infra.JailerAuthorityRoot, 3)
 	if err != nil {
 		return nil, err
 	}
-	retained := make([]int, 0, 8)
+	retained := make([]int, 0, 9)
 	defer func() {
 		if returnErr == nil {
 			return
@@ -115,54 +125,130 @@ func openInstanceAuthorityRoots(
 		return nil, instanceAtomicError("open filesystem root for instance authority", err)
 	}
 	retained = append(retained, rootFD)
-	if err := verifyInstanceDirectory(ctx, deps, rootFD, "filesystem root", policy, false); err != nil {
+	if err := verifyInstanceDirectory(
+		ctx,
+		deps,
+		rootFD,
+		"filesystem root",
+		policy,
+		instanceAncestorDirectory,
+	); err != nil {
 		return nil, err
 	}
 
-	varFD, err := openInstanceDirectory(ctx, deps, rootFD, stateNames[0], false, false, policy)
+	varFD, err := openInstanceDirectory(
+		ctx,
+		deps,
+		rootFD,
+		stateNames[0],
+		false,
+		instanceAncestorDirectory,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}
 	retained = append(retained, varFD)
-	libFD, err := openInstanceDirectory(ctx, deps, varFD, stateNames[1], false, false, policy)
+	libFD, err := openInstanceDirectory(
+		ctx,
+		deps,
+		varFD,
+		stateNames[1],
+		false,
+		instanceAncestorDirectory,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}
 	retained = append(retained, libFD)
-	stateBaseFD, err := openInstanceDirectory(ctx, deps, libFD, stateNames[2], true, false, policy)
+	stateBaseFD, err := openInstanceDirectory(
+		ctx,
+		deps,
+		libFD,
+		stateNames[2],
+		true,
+		instanceStateBaseDirectory,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}
 	retained = append(retained, stateBaseFD)
-	stateFD, err := openInstanceDirectory(ctx, deps, stateBaseFD, stateNames[3], true, true, policy)
+	stateFD, err := openInstanceDirectory(
+		ctx,
+		deps,
+		stateBaseFD,
+		stateNames[3],
+		true,
+		instancePrivateDirectory,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}
 	retained = append(retained, stateFD)
 
-	runFD, err := openInstanceDirectory(ctx, deps, rootFD, runtimeNames[0], false, false, policy)
+	runFD, err := openInstanceDirectory(
+		ctx,
+		deps,
+		rootFD,
+		authorityNames[0],
+		false,
+		instanceAncestorDirectory,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}
 	retained = append(retained, runFD)
-	runtimeFD, err := openInstanceDirectory(ctx, deps, runFD, runtimeNames[1], true, true, policy)
+	ephemeralBaseFD, err := openInstanceDirectory(
+		ctx,
+		deps,
+		runFD,
+		authorityNames[1],
+		true,
+		instanceTraversableDirectory,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}
-	retained = append(retained, runtimeFD)
-	releasesFD, err := openInstanceDirectory(ctx, deps, runtimeFD, "releases", true, true, policy)
+	retained = append(retained, ephemeralBaseFD)
+	authorityFD, err := openInstanceDirectory(
+		ctx,
+		deps,
+		ephemeralBaseFD,
+		authorityNames[2],
+		true,
+		instancePrivateDirectory,
+		policy,
+	)
+	if err != nil {
+		return nil, err
+	}
+	retained = append(retained, authorityFD)
+	releasesFD, err := openInstanceDirectory(
+		ctx,
+		deps,
+		authorityFD,
+		"releases",
+		true,
+		instancePrivateDirectory,
+		policy,
+	)
 	if err != nil {
 		return nil, err
 	}
 	retained = append(retained, releasesFD)
 
 	return &instanceAuthorityRoots{
-		deps:       deps,
-		policy:     policy,
-		stateFD:    stateFD,
-		runtimeFD:  runtimeFD,
-		releasesFD: releasesFD,
-		retained:   retained,
+		deps:        deps,
+		policy:      policy,
+		stateFD:     stateFD,
+		authorityFD: authorityFD,
+		releasesFD:  releasesFD,
+		retained:    retained,
 	}, nil
 }
 
@@ -190,11 +276,27 @@ func (roots *instanceAuthorityRoots) openUIDDirectories(
 		return nil, instanceValidationError("instance authority UID must be non-zero")
 	}
 	name := strconv.FormatUint(uint64(uid), 10)
-	stateFD, err := openInstanceDirectory(ctx, roots.deps, roots.stateFD, name, true, true, roots.policy)
+	stateFD, err := openInstanceDirectory(
+		ctx,
+		roots.deps,
+		roots.stateFD,
+		name,
+		true,
+		instancePrivateDirectory,
+		roots.policy,
+	)
 	if err != nil {
 		return nil, err
 	}
-	runtimeFD, err := openInstanceDirectory(ctx, roots.deps, roots.runtimeFD, name, true, true, roots.policy)
+	authorityFD, err := openInstanceDirectory(
+		ctx,
+		roots.deps,
+		roots.authorityFD,
+		name,
+		true,
+		instancePrivateDirectory,
+		roots.policy,
+	)
 	if err != nil {
 		if closeErr := roots.deps.close(context.WithoutCancel(ctx), stateFD); closeErr != nil {
 			err = joinInstanceAtomicError(err, "close instance UID state directory", closeErr)
@@ -202,11 +304,11 @@ func (roots *instanceAuthorityRoots) openUIDDirectories(
 		return nil, err
 	}
 	return &instanceUIDDirectories{
-		deps:      roots.deps,
-		policy:    roots.policy,
-		uid:       uid,
-		stateFD:   stateFD,
-		runtimeFD: runtimeFD,
+		deps:        roots.deps,
+		policy:      roots.policy,
+		uid:         uid,
+		stateFD:     stateFD,
+		authorityFD: authorityFD,
 	}, nil
 }
 
@@ -216,7 +318,7 @@ func openInstanceDirectory(
 	parentFD int,
 	name string,
 	allowCreate bool,
-	requireManagedMode bool,
+	directoryClass instanceDirectoryClass,
 	policy instanceAuthorityPolicy,
 ) (int, error) {
 	if err := ctx.Err(); err != nil {
@@ -224,7 +326,7 @@ func openInstanceDirectory(
 	}
 	fd, err := deps.openAt(ctx, parentFD, name, instanceDirectoryFlags, 0)
 	if err == nil {
-		if verifyErr := verifyInstanceDirectory(ctx, deps, fd, name, policy, requireManagedMode); verifyErr != nil {
+		if verifyErr := verifyInstanceDirectory(ctx, deps, fd, name, policy, directoryClass); verifyErr != nil {
 			return -1, closeRejectedInstanceFD(ctx, deps, fd, verifyErr)
 		}
 		return fd, nil
@@ -232,7 +334,11 @@ func openInstanceDirectory(
 	if !errors.Is(err, unix.ENOENT) || !allowCreate {
 		return -1, instanceAtomicError("open instance authority directory "+name, err)
 	}
-	mkdirErr := deps.mkdirAt(ctx, parentFD, name, instanceManagedDirMode)
+	createMode, err := instanceDirectoryCreateMode(directoryClass)
+	if err != nil {
+		return -1, err
+	}
+	mkdirErr := deps.mkdirAt(ctx, parentFD, name, createMode)
 	created := mkdirErr == nil
 	if mkdirErr != nil && !errors.Is(mkdirErr, unix.EEXIST) {
 		return -1, instanceAtomicError("create instance authority directory "+name, mkdirErr)
@@ -242,7 +348,7 @@ func openInstanceDirectory(
 		return -1, instanceAtomicError("open created instance authority directory "+name, err)
 	}
 	if !created {
-		if verifyErr := verifyInstanceDirectory(ctx, deps, fd, name, policy, requireManagedMode); verifyErr != nil {
+		if verifyErr := verifyInstanceDirectory(ctx, deps, fd, name, policy, directoryClass); verifyErr != nil {
 			return -1, closeRejectedInstanceFD(ctx, deps, fd, verifyErr)
 		}
 		return fd, nil
@@ -255,7 +361,7 @@ func openInstanceDirectory(
 			instanceAtomicError("set instance authority directory owner "+name, err),
 		)
 	}
-	if err := deps.fchmod(ctx, fd, instanceManagedDirMode); err != nil {
+	if err := deps.fchmod(ctx, fd, createMode); err != nil {
 		return -1, closeRejectedInstanceFD(
 			ctx,
 			deps,
@@ -263,7 +369,7 @@ func openInstanceDirectory(
 			instanceAtomicError("set instance authority directory mode "+name, err),
 		)
 	}
-	if err := verifyInstanceDirectory(ctx, deps, fd, name, policy, true); err != nil {
+	if err := verifyInstanceDirectory(ctx, deps, fd, name, policy, directoryClass); err != nil {
 		return -1, closeRejectedInstanceFD(ctx, deps, fd, err)
 	}
 	if err := deps.fsync(ctx, fd); err != nil {
@@ -285,13 +391,24 @@ func openInstanceDirectory(
 	return fd, nil
 }
 
+func instanceDirectoryCreateMode(directoryClass instanceDirectoryClass) (uint32, error) {
+	switch directoryClass {
+	case instanceStateBaseDirectory, instancePrivateDirectory:
+		return instancePrivateDirMode, nil
+	case instanceTraversableDirectory:
+		return instanceTraversableDirMode, nil
+	default:
+		return 0, instanceAtomicError("instance authority ancestor directory cannot be created", nil)
+	}
+}
+
 func verifyInstanceDirectory(
 	ctx context.Context,
 	deps instanceAuthorityDeps,
 	fd int,
 	name string,
 	policy instanceAuthorityPolicy,
-	requireManagedMode bool,
+	directoryClass instanceDirectoryClass,
 ) error {
 	var stat unix.Stat_t
 	if err := deps.fstat(ctx, fd, &stat); err != nil {
@@ -303,7 +420,14 @@ func verifyInstanceDirectory(
 	if stat.Uid != policy.expectedUID || stat.Mode&0022 != 0 {
 		return instanceAtomicError("instance authority directory "+name+" has unsafe ownership or mode", nil)
 	}
-	if requireManagedMode && (stat.Gid != policy.expectedGID || stat.Mode&07777 != instanceManagedDirMode) {
+	if directoryClass == instanceAncestorDirectory || directoryClass == instanceStateBaseDirectory {
+		return nil
+	}
+	expectedMode, err := instanceDirectoryCreateMode(directoryClass)
+	if err != nil {
+		return err
+	}
+	if stat.Gid != policy.expectedGID || stat.Mode&07777 != expectedMode {
 		return instanceAtomicError("managed instance authority directory "+name+" has unexpected owner or mode", nil)
 	}
 	return nil
@@ -327,9 +451,9 @@ func (directories *instanceUIDDirectories) Release(ctx context.Context) error {
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
 	var result error
-	if directories.runtimeFD >= 0 {
-		result = errors.Join(result, directories.deps.close(cleanupCtx, directories.runtimeFD))
-		directories.runtimeFD = -1
+	if directories.authorityFD >= 0 {
+		result = errors.Join(result, directories.deps.close(cleanupCtx, directories.authorityFD))
+		directories.authorityFD = -1
 	}
 	if directories.stateFD >= 0 {
 		result = errors.Join(result, directories.deps.close(cleanupCtx, directories.stateFD))

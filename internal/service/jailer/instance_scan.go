@@ -40,16 +40,24 @@ func (roots *instanceAuthorityRoots) findInstance(
 		if !ok {
 			return nil, instanceAtomicError("instance authority owner directory name is invalid", nil)
 		}
-		stateFD, err := openInstanceDirectory(ctx, roots.deps, roots.stateFD, name, false, true, roots.policy)
+		stateFD, err := openInstanceDirectory(
+			ctx,
+			roots.deps,
+			roots.stateFD,
+			name,
+			false,
+			instancePrivateDirectory,
+			roots.policy,
+		)
 		if err != nil {
 			return nil, err
 		}
 		directories := &instanceUIDDirectories{
-			deps:      roots.deps,
-			policy:    roots.policy,
-			uid:       uid,
-			stateFD:   stateFD,
-			runtimeFD: -1,
+			deps:        roots.deps,
+			policy:      roots.policy,
+			uid:         uid,
+			stateFD:     stateFD,
+			authorityFD: -1,
 		}
 		_, exists, readErr := directories.readRecord(ctx, vmID)
 		if readErr != nil {
@@ -77,12 +85,20 @@ func (roots *instanceAuthorityRoots) findInstance(
 	return found, nil
 }
 
-func (roots *instanceAuthorityRoots) openRuntimeForLocation(
+func (roots *instanceAuthorityRoots) openAuthorityForLocation(
 	ctx context.Context,
 	location *instanceLocation,
 ) (*instanceUIDDirectories, error) {
 	name := fmt.Sprintf("%d", location.uid)
-	runtimeFD, err := openInstanceDirectory(ctx, roots.deps, roots.runtimeFD, name, true, true, roots.policy)
+	authorityFD, err := openInstanceDirectory(
+		ctx,
+		roots.deps,
+		roots.authorityFD,
+		name,
+		true,
+		instancePrivateDirectory,
+		roots.policy,
+	)
 	if err != nil {
 		if closeErr := roots.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
 			err = appendInstanceOperationError(err, "close located instance authority directory", closeErr)
@@ -90,11 +106,11 @@ func (roots *instanceAuthorityRoots) openRuntimeForLocation(
 		return nil, err
 	}
 	return &instanceUIDDirectories{
-		deps:      roots.deps,
-		policy:    roots.policy,
-		uid:       location.uid,
-		stateFD:   location.stateFD,
-		runtimeFD: runtimeFD,
+		deps:        roots.deps,
+		policy:      roots.policy,
+		uid:         location.uid,
+		stateFD:     location.stateFD,
+		authorityFD: authorityFD,
 	}, nil
 }
 
@@ -119,7 +135,7 @@ func (roots *instanceAuthorityRoots) releaseIsReferenced(
 			roots.stateFD,
 			ownerName,
 			false,
-			true,
+			instancePrivateDirectory,
 			roots.policy,
 		)
 		if err != nil {
@@ -171,36 +187,36 @@ func (roots *instanceAuthorityRoots) releaseReferencedByOwner(
 			return false, instanceAtomicError("duplicate global VM authority claim", nil)
 		}
 		seenVMs[vmID] = struct{}{}
-		runtimeFD, err := openInstanceDirectory(
+		authorityFD, err := openInstanceDirectory(
 			ctx,
 			roots.deps,
-			roots.runtimeFD,
+			roots.authorityFD,
 			fmt.Sprintf("%d", uid),
 			true,
-			true,
+			instancePrivateDirectory,
 			roots.policy,
 		)
 		if err != nil {
 			return false, err
 		}
 		directories := &instanceUIDDirectories{
-			deps: roots.deps, policy: roots.policy, uid: uid, stateFD: stateFD, runtimeFD: runtimeFD,
+			deps: roots.deps, policy: roots.policy, uid: uid, stateFD: stateFD, authorityFD: authorityFD,
 		}
 		vmLock, err := directories.acquireVMLock(ctx, vmID)
 		if err != nil {
 			return false, appendInstanceOperationError(
 				err,
-				"close rejected VM runtime directory",
-				roots.deps.close(context.WithoutCancel(ctx), runtimeFD),
+				"close rejected VM authority directory",
+				roots.deps.close(context.WithoutCancel(ctx), authorityFD),
 			)
 		}
 		record, found, readErr := directories.readRecord(ctx, vmID)
 		releaseErr := vmLock.Release(context.WithoutCancel(ctx))
-		closeErr := roots.deps.close(context.WithoutCancel(ctx), runtimeFD)
+		closeErr := roots.deps.close(context.WithoutCancel(ctx), authorityFD)
 		if readErr != nil {
 			return false, appendInstanceOperationError(
 				appendInstanceOperationError(readErr, "release scanned VM lock", releaseErr),
-				"close scanned VM runtime directory",
+				"close scanned VM authority directory",
 				closeErr,
 			)
 		}

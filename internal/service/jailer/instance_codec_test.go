@@ -21,7 +21,7 @@ func TestInstanceAuthorityRootConstants(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "/var/lib/mvmctl/instances", infra.JailerInstanceRoot)
-	assert.Equal(t, "/run/mvmctl", infra.JailerRuntimeRoot)
+	assert.Equal(t, "/run/mvmctl/authority", infra.JailerAuthorityRoot)
 }
 
 func TestInstanceRecordCodecRoundTrip(t *testing.T) {

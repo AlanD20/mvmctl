@@ -18,7 +18,7 @@ type authorityLock struct {
 }
 
 func (roots *instanceAuthorityRoots) acquireIndexLock(ctx context.Context) (*authorityLock, error) {
-	return acquireAuthorityLock(ctx, roots.deps, roots.policy, roots.runtimeFD, "index.lock", "global index")
+	return acquireAuthorityLock(ctx, roots.deps, roots.policy, roots.authorityFD, "index.lock", "global index")
 }
 
 func (roots *instanceAuthorityRoots) acquireReleaseSlotLock(
@@ -49,7 +49,7 @@ func (directories *instanceUIDDirectories) acquireVMLock(
 		ctx,
 		directories.deps,
 		directories.policy,
-		directories.runtimeFD,
+		directories.authorityFD,
 		vmID+".lock",
 		"VM",
 	)

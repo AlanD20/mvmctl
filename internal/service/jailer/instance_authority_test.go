@@ -20,7 +20,7 @@ import (
 func TestInstanceAuthorityLocksReleaseSlotBeforeIdentityResolution(t *testing.T) {
 	t.Parallel()
 
-	authority, _ := newTestInstanceAuthority(t)
+	authority, root := newTestInstanceAuthority(t)
 	release := testLaunchRegistration().release
 	slot := releaseSlot{version: release.version, architecture: release.architecture}
 
@@ -29,6 +29,8 @@ func TestInstanceAuthorityLocksReleaseSlotBeforeIdentityResolution(t *testing.T)
 	require.NotNil(t, lease)
 	assert.Equal(t, slot, lease.slot)
 	require.NoError(t, lease.Release(context.Background()))
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/releases", releaseLockName(slot)), 0600)
+	assert.NoFileExists(t, filepath.Join(root, "run/mvmctl/releases", releaseLockName(slot)))
 }
 
 func TestReleaseSlotLeaseTransfersToSuccessfulLaunch(t *testing.T) {
@@ -429,6 +431,31 @@ func TestInstanceAuthorityReleaseSlotReferenceCheckTracksLifecycle(t *testing.T)
 	require.NoError(t, slotLease.Release(context.Background()))
 }
 
+func TestInstanceAuthorityReleaseScanCreatesLockUnderAuthorityRoot(t *testing.T) {
+	t.Parallel()
+
+	// Rationale: Release scans create their serialization lock lazily. It must share the private authority tree and
+	// never recreate the former top-level UID layout.
+	root := prepareInstanceAuthorityTestRoot(t)
+	record := testRegisteredInstanceRecord()
+	raw, err := encodeInstanceRecord(record)
+	require.NoError(t, err)
+	recordDir := filepath.Join(root, "var/lib/mvmctl/instances/1000")
+	require.NoError(t, os.MkdirAll(recordDir, 0700))
+	require.NoError(t, os.WriteFile(filepath.Join(recordDir, testVMID+".json"), raw, 0600))
+	authority := newInstanceAuthorityWithPolicy(realInstanceAuthorityDeps(), testInstanceAuthorityPolicy(root))
+
+	lease, err := authority.lockReleaseSlot(context.Background(), releaseSlotForIdentity(record.release))
+	require.NoError(t, err)
+	err = lease.requireUnreferenced(context.Background(), record.release)
+	require.Error(t, err)
+	assert.Equal(t, errs.ClassConflict, errs.AsDomainError(err).Class)
+	require.NoError(t, lease.Release(context.Background()))
+
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/1000/"+testVMID+".lock"), 0600)
+	assert.NoFileExists(t, filepath.Join(root, "run/mvmctl/1000/"+testVMID+".lock"))
+}
+
 func TestInstanceAuthorityReleaseSlotLeaseSerializesCompetingIdentities(t *testing.T) {
 	t.Parallel()
 
@@ -607,6 +634,8 @@ func TestInstanceAuthorityRegisterLockOrder(t *testing.T) {
 	assert.Equal(t, "index.lock", acquired[1])
 	assert.Equal(t, testVMID+".lock", acquired[2])
 	assert.NotEqual(t, "index.lock", acquired[0])
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/index.lock"), 0600)
+	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/1000/"+testVMID+".lock"), 0600)
 }
 
 func TestInstanceAuthorityUsesOnlyFixedRootPathOpen(t *testing.T) {
