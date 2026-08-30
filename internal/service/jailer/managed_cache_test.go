@@ -1022,7 +1022,7 @@ func prepareManagedCacheFixture(t *testing.T) managedCacheFixture {
 	return managedCacheFixture{
 		deps:       deps,
 		policy:     managedCachePolicy{rootPath: root, trustedUID: uint32(os.Geteuid())},
-		caller:     instanceCaller{uid: callerUID},
+		caller:     instanceCaller{uid: callerUID, gid: callerUID},
 		locator:    locator,
 		root:       root,
 		ownerDir:   ownerDir,

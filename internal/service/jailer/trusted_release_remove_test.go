@@ -87,9 +87,9 @@ func TestReleaseAuthorityRemoveInstalledUsesExactManifestIdentityForReferences(t
 		t.Parallel()
 
 		fixture := newTrustedReleaseRemovalFixture(t)
-		record := testRegisteredInstanceRecord()
-		record.release.version = fixture.store.slot.version
-		record.release.architecture = fixture.store.slot.architecture
+		record := testLaunchingInstanceRecord()
+		record.launch.release.version = fixture.store.slot.version
+		record.launch.release.architecture = fixture.store.slot.architecture
 		writeTestAuthorityRecord(t, fixture.instanceRoot, record)
 
 		removed, err := fixture.authority.removeInstalled(t.Context(), fixture.store.slot)
@@ -104,8 +104,8 @@ func TestReleaseAuthorityRemoveInstalledUsesExactManifestIdentityForReferences(t
 		fixture := newTrustedReleaseRemovalFixture(t)
 		identity, err := fixture.manifest.releaseIdentity()
 		require.NoError(t, err)
-		record := testRegisteredInstanceRecord()
-		record.release = identity
+		record := testLaunchingInstanceRecord()
+		record.launch.release = identity
 		writeTestAuthorityRecord(t, fixture.instanceRoot, record)
 
 		removed, err := fixture.authority.removeInstalled(t.Context(), fixture.store.slot)

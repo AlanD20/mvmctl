@@ -147,8 +147,8 @@ func TestTrustedReleaseCandidateReplacementScansExactOldIdentity(t *testing.T) {
 	candidate, err := fixture.architecture.stageCandidate(t.Context(), fixture.selected)
 	require.NoError(t, err)
 	writeDifferentInstalledReleaseForTest(t, fixture)
-	record := testRegisteredInstanceRecord()
-	record.release = candidate.admission.identity
+	record := testLaunchingInstanceRecord()
+	record.launch.release = candidate.admission.identity
 	writeTestAuthorityRecord(t, authorityRoot, record)
 
 	changed, err := candidate.replaceInstalled(t.Context())
@@ -174,8 +174,8 @@ func TestTrustedReleaseCandidateReferencedOldReleaseCannotBeReplaced(t *testing.
 	require.NoError(t, err)
 	oldIdentity, err := manifest.releaseIdentity()
 	require.NoError(t, err)
-	record := testRegisteredInstanceRecord()
-	record.release = oldIdentity
+	record := testLaunchingInstanceRecord()
+	record.launch.release = oldIdentity
 	writeTestAuthorityRecord(t, authorityRoot, record)
 	exchangeCalled := false
 	candidate.architecture.deps.exchangeCandidate = func(context.Context, int, string, string) error {

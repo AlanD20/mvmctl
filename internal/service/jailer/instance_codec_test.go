@@ -1,11 +1,14 @@
 package jailer
 
 import (
+	"math"
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
 	"mvmctl/pkg/errs"
@@ -13,8 +16,10 @@ import (
 
 const (
 	testAuthorityUID = uint32(1000)
+	testAuthorityGID = uint32(1001)
 	testReleaseHash  = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	testJailerHash   = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	testRelayHash    = "1111111111111111111111111111111111111111111111111111111111111111"
 )
 
 func TestInstanceAuthorityDurableRootConstant(t *testing.T) {
@@ -23,52 +28,144 @@ func TestInstanceAuthorityDurableRootConstant(t *testing.T) {
 	assert.Equal(t, "/var/lib/mvmctl/instances", infra.JailerInstanceRoot)
 }
 
-func TestInstanceRecordCodecRoundTrip(t *testing.T) {
+func TestInstanceRecordCodecRoundTripsEverySchemaThreeShape(t *testing.T) {
 	t.Parallel()
 
-	want := testRegisteredInstanceRecord()
-	raw, err := encodeInstanceRecord(want)
+	launching := testLaunchingInstanceRecord()
+	activeAbsent := testActiveInstanceRecord(false)
+	activePresent := testActiveInstanceRecord(true)
+	cleaningLaunch := launching
+	cleaningLaunch.lifecycle = instanceLifecycleCleaning
+	cleaningLaunch.cleanupGeneration = cleaningLaunch.launchGeneration
+	cleaningActive := activePresent
+	cleaningActive.lifecycle = instanceLifecycleCleaning
+	cleaningActive.cleanupGeneration = cleaningActive.launchGeneration
+	cleaned, err := completeInstanceCleanup(cleaningActive)
 	require.NoError(t, err)
-	assert.LessOrEqual(t, len(raw), maxInstanceRecordBytes)
 
-	got, err := decodeInstanceRecord(raw)
-	require.NoError(t, err)
-	assert.Equal(t, want, got)
-	assert.NotContains(t, string(raw), "password")
-	assert.NotContains(t, string(raw), "token")
-	assert.NotContains(t, string(raw), "rootfs")
+	tests := map[string]instanceRecord{
+		"launching":            launching,
+		"active_without_relay": activeAbsent,
+		"active_with_relay":    activePresent,
+		"cleaning_from_launch": cleaningLaunch,
+		"cleaning_from_active": cleaningActive,
+		"same_owner_tombstone": cleaned,
+	}
+	for name, want := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			raw, encodeErr := encodeInstanceRecord(want)
+			require.NoError(t, encodeErr)
+			assert.LessOrEqual(t, len(raw), maxInstanceRecordBytes)
+
+			got, decodeErr := decodeInstanceRecord(raw)
+			require.NoError(t, decodeErr)
+			if diff := diffInstanceRecord(want, got); diff != "" {
+				t.Errorf("instance record round trip mismatch (-want +got):\n%s", diff)
+			}
+			assert.NotContains(t, string(raw), "password")
+			assert.NotContains(t, string(raw), "token")
+			assert.NotContains(t, string(raw), "cgroup")
+		})
+	}
 }
 
-func TestDecodeInstanceRecordRejectsMalformedSchema(t *testing.T) {
+func TestInstanceRecordCodecOmitsWrongLifecycleObjects(t *testing.T) {
 	t.Parallel()
 
-	valid, err := encodeInstanceRecord(testRegisteredInstanceRecord())
+	launchingRaw, err := encodeInstanceRecord(testLaunchingInstanceRecord())
 	require.NoError(t, err)
-	expectedCgroup := infra.CgroupV2Root + "/" + infra.JailerCgroupParent + "/" + testVMID
+	assert.Contains(t, string(launchingRaw), `"launch":`)
+	assert.NotContains(t, string(launchingRaw), `"active":`)
+	assert.NotContains(t, string(launchingRaw), `"user_ids":`)
+	assert.NotContains(t, string(launchingRaw), `"mount_namespace":`)
+	assert.NotContains(t, string(launchingRaw), `"executable":`)
+
+	cleaning := testActiveInstanceRecord(true)
+	cleaning.lifecycle = instanceLifecycleCleaning
+	cleaning.cleanupGeneration = cleaning.launchGeneration
+	cleaned, err := completeInstanceCleanup(cleaning)
+	require.NoError(t, err)
+	cleanedRaw, err := encodeInstanceRecord(cleaned)
+	require.NoError(t, err)
+	assert.NotContains(t, string(cleanedRaw), `"launch":`)
+	assert.NotContains(t, string(cleanedRaw), `"active":`)
+	assert.NotContains(t, string(cleanedRaw), `"owner_gid":`)
+	assert.NotContains(t, string(cleanedRaw), `"managed_cache":`)
+	assert.NotContains(t, string(cleanedRaw), `"release":`)
+	assert.NotContains(t, string(cleanedRaw), `"pid":`)
+}
+
+func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
+	t.Parallel()
+
+	valid, err := encodeInstanceRecord(testActiveInstanceRecord(true))
+	require.NoError(t, err)
+	validText := string(valid)
 
 	tests := map[string]string{
 		"empty":                 "",
-		"trailing":              string(valid) + `{}`,
-		"unknown_top_level":     strings.Replace(string(valid), `"vm_id":`, `"unknown":1,"vm_id":`, 1),
-		"case_variant_field":    strings.Replace(string(valid), `"vm_id":`, `"VM_ID":`, 1),
-		"duplicate_field":       strings.Replace(string(valid), `"vm_id":`, `"vm_id":"`+testVMID+`","vm_id":`, 1),
-		"case_folded_duplicate": strings.Replace(string(valid), `"vm_id":`, `"VM_ID":"`+testVMID+`","vm_id":`, 1),
-		"nested_unknown":        strings.Replace(string(valid), `"version":`, `"unknown":1,"version":`, 1),
-		"nested_duplicate":      strings.Replace(string(valid), `"version":`, `"version":"1.16.0","version":`, 1),
-		"nested_case_duplicate": strings.Replace(string(valid), `"version":`, `"VERSION":"1.16.0","version":`, 1),
-		"missing_required":      strings.Replace(string(valid), `"owner_uid":1000,`, "", 1),
-		"unsupported_version":   strings.Replace(string(valid), `"schema_version":1`, `"schema_version":2`, 1),
-		"invalid_lifecycle":     strings.Replace(string(valid), `"lifecycle":"registered"`, `"lifecycle":"running"`, 1),
-		"owner_zero":            strings.Replace(string(valid), `"owner_uid":1000`, `"owner_uid":0`, 1),
-		"pid_zero":              strings.Replace(string(valid), `"pid":4242`, `"pid":0`, 1),
-		"start_ticks_zero":      strings.Replace(string(valid), `"start_time_ticks":987654`, `"start_time_ticks":0`, 1),
-		"wrong_cgroup": strings.Replace(
-			string(valid),
-			`"cgroup_path":"`+expectedCgroup+`"`,
-			`"cgroup_path":"/sys/fs/cgroup/mvmctl/ffffffffffffffffffffffffffffffff"`,
+		"trailing":              validText + `{}`,
+		"unknown_top_level":     strings.Replace(validText, `"vm_id":`, `"unknown":1,"vm_id":`, 1),
+		"case_variant_field":    strings.Replace(validText, `"vm_id":`, `"VM_ID":`, 1),
+		"duplicate_field":       strings.Replace(validText, `"vm_id":`, `"vm_id":"`+testVMID+`","vm_id":`, 1),
+		"case_folded_duplicate": strings.Replace(validText, `"vm_id":`, `"VM_ID":"`+testVMID+`","vm_id":`, 1),
+		"nested_unknown": strings.Replace(
+			validText,
+			`"managed_cache":{"device_major":`,
+			`"managed_cache":{"unknown":1,"device_major":`,
 			1,
 		),
-		"uppercase_release_hash": strings.Replace(string(valid), testReleaseHash, strings.ToUpper(testReleaseHash), 1),
+		"nested_duplicate": strings.Replace(
+			validText,
+			`"host_boot_id":`,
+			`"host_boot_id":"123e4567-e89b-42d3-a456-426614174000","host_boot_id":`,
+			1,
+		),
+		"missing_common_field": strings.Replace(validText, `"cleanup_generation":0,`, "", 1),
+		"missing_launch_field": strings.Replace(validText, `"owner_gid":1001,`, "", 1),
+		"missing_active_field": strings.Replace(validText, `"supplementary_groups":[],`, "", 1),
+		"missing_present_relay_locator": strings.Replace(
+			validText,
+			`"relay":{"kind":"present","pid":4343,"start_time_ticks":876543}`,
+			`"relay":{"kind":"present","pid":4343}`,
+			1,
+		),
+		"old_schema_one": strings.Replace(validText, `"schema_version":3`, `"schema_version":1`, 1),
+		"old_schema_two": strings.Replace(validText, `"schema_version":3`, `"schema_version":2`, 1),
+		"old_registered_lifecycle": strings.Replace(
+			validText,
+			`"lifecycle":"active"`,
+			`"lifecycle":"registered"`,
+			1,
+		),
+		"active_object_during_launching": strings.Replace(
+			validText,
+			`"lifecycle":"active"`,
+			`"lifecycle":"launching"`,
+			1,
+		),
+		"launch_object_on_cleaned": strings.Replace(
+			validText,
+			`"lifecycle":"active"`,
+			`"lifecycle":"cleaned"`,
+			1,
+		),
+		"null_active_object": strings.Replace(validText, `"active":{`, `"active":null,"ignored":{`, 1),
+		"final_identity_in_launch": strings.Replace(
+			validText,
+			`"owner_gid":1001,`,
+			`"owner_gid":1001,"user_ids":{"real":1000,"effective":1000,"saved":1000,"filesystem":1000},`,
+			1,
+		),
+		"absent_relay_with_locator": strings.Replace(
+			validText,
+			`"relay":{"kind":"present","pid":4343,"start_time_ticks":876543}`,
+			`"relay":{"kind":"absent","pid":4343,"start_time_ticks":876543}`,
+			1,
+		),
+		"null_scalar": strings.Replace(validText, `"owner_uid":1000`, `"owner_uid":null`, 1),
 	}
 
 	for name, raw := range tests {
@@ -77,7 +174,9 @@ func TestDecodeInstanceRecordRejectsMalformedSchema(t *testing.T) {
 
 			_, decodeErr := decodeInstanceRecord([]byte(raw))
 			require.Error(t, decodeErr)
-			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(decodeErr).Code)
+			domainErr := errs.AsDomainError(decodeErr)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeVMAtomicFailed, domainErr.Code)
 		})
 	}
 }
@@ -90,47 +189,80 @@ func TestDecodeInstanceRecordRejectsOversizedInput(t *testing.T) {
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 }
 
-func TestInstanceLifecycleTransitions(t *testing.T) {
+func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {
 	t.Parallel()
 
-	caller := instanceCaller{uid: testAuthorityUID}
-	registration := testLaunchRegistration()
+	caller := testInstanceCaller()
+	intent := testLaunchIntent(false)
 
-	registered, err := registerInstanceRecord(caller, registration, nil)
+	launching, err := registerLaunchingInstanceRecord(caller, intent, nil)
 	require.NoError(t, err)
-	assert.Equal(t, instanceLifecycleRegistered, registered.lifecycle)
-	assert.Zero(t, registered.cleanupGeneration)
+	assert.Equal(t, instanceLifecycleLaunching, launching.lifecycle)
+	assert.Equal(t, uint64(1), launching.launchGeneration)
+	assert.Zero(t, launching.cleanupGeneration)
+	require.NotNil(t, launching.launch)
+	assert.Nil(t, launching.active)
 
-	_, err = registerInstanceRecord(caller, registration, &registered)
+	_, err = registerLaunchingInstanceRecord(caller, intent, &launching)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAlreadyExists, errs.AsDomainError(err).Code)
 
-	cleaning, err := beginInstanceCleanup(caller, registered)
+	active, err := activateInstanceRecord(launching, testActiveIdentity(false))
+	require.NoError(t, err)
+	assert.Equal(t, instanceLifecycleActive, active.lifecycle)
+	require.NotNil(t, active.active)
+
+	cleaning, err := beginInstanceCleanup(caller, active)
 	require.NoError(t, err)
 	assert.Equal(t, instanceLifecycleCleaning, cleaning.lifecycle)
 	assert.Equal(t, uint64(1), cleaning.cleanupGeneration)
+	require.NotNil(t, cleaning.launch)
+	require.NotNil(t, cleaning.active)
 
 	retry, err := beginInstanceCleanup(caller, cleaning)
 	require.NoError(t, err)
-	assert.Equal(t, cleaning, retry)
+	if diff := diffInstanceRecord(cleaning, retry); diff != "" {
+		t.Errorf("idempotent cleanup changed the record (-want +got):\n%s", diff)
+	}
 
 	cleaned, err := completeInstanceCleanup(cleaning)
 	require.NoError(t, err)
 	assert.Equal(t, instanceLifecycleCleaned, cleaned.lifecycle)
+	assert.Equal(t, uint64(1), cleaned.launchGeneration)
+	assert.Equal(t, uint64(1), cleaned.cleanupGeneration)
+	assert.Nil(t, cleaned.launch)
+	assert.Nil(t, cleaned.active)
 
-	relaunched, err := registerInstanceRecord(caller, registration, &cleaned)
+	relaunched, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(true), &cleaned)
 	require.NoError(t, err)
-	assert.Equal(t, instanceLifecycleRegistered, relaunched.lifecycle)
-	assert.Equal(t, cleaned.cleanupGeneration, relaunched.cleanupGeneration)
+	assert.Equal(t, instanceLifecycleLaunching, relaunched.lifecycle)
+	assert.Equal(t, uint64(2), relaunched.launchGeneration)
+	assert.Equal(t, uint64(1), relaunched.cleanupGeneration)
+	require.NotNil(t, relaunched.launch)
+	assert.Equal(t, testAuthorityGID, relaunched.launch.ownerGID)
+}
+
+func TestInstanceLifecycleCanAbortBeforeActivation(t *testing.T) {
+	t.Parallel()
+
+	caller := testInstanceCaller()
+	launching, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(true), nil)
+	require.NoError(t, err)
+
+	cleaning, err := beginInstanceCleanup(caller, launching)
+	require.NoError(t, err)
+	assert.Equal(t, instanceLifecycleCleaning, cleaning.lifecycle)
+	require.NotNil(t, cleaning.launch)
+	assert.Nil(t, cleaning.active)
 }
 
 func TestInstanceLifecycleRejectsForeignCaller(t *testing.T) {
 	t.Parallel()
 
-	record := testRegisteredInstanceRecord()
-	foreign := instanceCaller{uid: testAuthorityUID + 1}
+	record := testLaunchingInstanceRecord()
+	foreign := instanceCaller{uid: testAuthorityUID + 1, gid: testAuthorityGID}
 
-	_, err := registerInstanceRecord(foreign, testLaunchRegistration(), &record)
+	_, err := registerLaunchingInstanceRecord(foreign, testLaunchIntent(false), &record)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeUnauthorized, errs.AsDomainError(err).Code)
 	assert.NotContains(t, err.Error(), "1000")
@@ -140,7 +272,45 @@ func TestInstanceLifecycleRejectsForeignCaller(t *testing.T) {
 	assert.Equal(t, errs.CodeUnauthorized, errs.AsDomainError(err).Code)
 }
 
-func TestLaunchRegistrationRejectsInvalidReleaseAsValidation(t *testing.T) {
+func TestInstanceActivationRejectsIncompleteOrMismatchedFinalIdentity(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*instanceActiveIdentity){
+		"nonempty_supplementary_groups": func(identity *instanceActiveIdentity) {
+			identity.supplementaryGroups = []uint32{testAuthorityGID}
+		},
+		"wrong_firecracker_uid": func(identity *instanceActiveIdentity) {
+			identity.userIDs.effective++
+		},
+		"wrong_firecracker_digest": func(identity *instanceActiveIdentity) {
+			identity.executable.manifestSHA256 = testJailerHash
+		},
+		"relay_presence_mismatch": func(identity *instanceActiveIdentity) {
+			identity.relay = instanceActiveRelay{kind: instanceRelayAbsent}
+		},
+		"relay_wrong_owner": func(identity *instanceActiveIdentity) {
+			identity.relay.userIDs.saved++
+		},
+		"relay_nonempty_supplementary_groups": func(identity *instanceActiveIdentity) {
+			identity.relay.supplementaryGroups = []uint32{testAuthorityGID}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			launching := testLaunchingInstanceRecordWithRelay(true)
+			identity := testActiveIdentity(true)
+			mutate(&identity)
+
+			_, err := activateInstanceRecord(launching, identity)
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(err).Code)
+		})
+	}
+}
+
+func TestLaunchIntentRejectsInvalidReleaseAsValidation(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
@@ -155,13 +325,9 @@ func TestLaunchRegistrationRejectsInvalidReleaseAsValidation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			registration := testLaunchRegistration()
-			registration.release.version = version
-			_, err := registerInstanceRecord(
-				instanceCaller{uid: testAuthorityUID},
-				registration,
-				nil,
-			)
+			intent := testLaunchIntent(false)
+			intent.release.version = version
+			_, err := registerLaunchingInstanceRecord(testInstanceCaller(), intent, nil)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
 		})
@@ -171,16 +337,18 @@ func TestLaunchRegistrationRejectsInvalidReleaseAsValidation(t *testing.T) {
 func TestInstanceTransitionRejectsCorruptExistingRecord(t *testing.T) {
 	t.Parallel()
 
-	caller := instanceCaller{uid: testAuthorityUID}
-	corrupt := testRegisteredInstanceRecord()
-	corrupt.lifecycle = instanceLifecycleCleaned
-	corrupt.process.cgroupPath = "/sys/fs/cgroup/foreign"
+	caller := testInstanceCaller()
+	corrupt := testLaunchingInstanceRecord()
+	corrupt.launchGeneration = 0
 
-	_, err := registerInstanceRecord(caller, testLaunchRegistration(), &corrupt)
+	_, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(false), &corrupt)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 
-	corrupt.lifecycle = instanceLifecycleRegistered
+	_, err = activateInstanceRecord(corrupt, testActiveIdentity(false))
+	require.Error(t, err)
+	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+
 	_, err = beginInstanceCleanup(caller, corrupt)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
@@ -191,32 +359,140 @@ func TestInstanceTransitionRejectsCorruptExistingRecord(t *testing.T) {
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 }
 
-func testLaunchRegistration() launchRegistration {
-	return launchRegistration{
-		vmID: testVMID,
+func TestInstanceRelaunchRejectsExhaustedGeneration(t *testing.T) {
+	t.Parallel()
+
+	cleaned := instanceRecord{
+		schemaVersion:     instanceRecordSchemaVersion,
+		ownerUID:          testAuthorityUID,
+		vmID:              testVMID,
+		lifecycle:         instanceLifecycleCleaned,
+		launchGeneration:  math.MaxUint64,
+		cleanupGeneration: math.MaxUint64,
+	}
+
+	_, err := registerLaunchingInstanceRecord(testInstanceCaller(), testLaunchIntent(false), &cleaned)
+	require.Error(t, err)
+	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(err).Code)
+}
+
+func testInstanceCaller() instanceCaller {
+	return instanceCaller{uid: testAuthorityUID, gid: testAuthorityGID}
+}
+
+func testLaunchIntent(relayPresent bool) launchIntent {
+	relay := instanceLaunchRelay{kind: instanceRelayAbsent}
+	if relayPresent {
+		relay = instanceLaunchRelay{
+			kind:    instanceRelayPresent,
+			locator: instanceProcessLocator{pid: 4343, startTimeTicks: 876543},
+		}
+	}
+	return launchIntent{
+		vmID:          testVMID,
+		hostBootID:    "123e4567-e89b-42d3-a456-426614174000",
+		cacheIdentity: testManagedCacheIdentity(),
 		release: releaseIdentity{
 			version:           "1.16.0",
 			architecture:      "x86_64",
 			firecrackerSHA256: testReleaseHash,
 			jailerSHA256:      testJailerHash,
 		},
-		process: processIdentity{
-			pid:            4242,
-			startTimeTicks: 987654,
-			cgroupPath:     infra.CgroupV2Root + "/" + infra.JailerCgroupParent + "/" + testVMID,
-		},
+		process: instanceProcessLocator{pid: 4242, startTimeTicks: 987654},
+		relay:   relay,
 	}
 }
 
-func testRegisteredInstanceRecord() instanceRecord {
-	registration := testLaunchRegistration()
-	return instanceRecord{
-		schemaVersion:     instanceRecordSchemaVersion,
-		ownerUID:          testAuthorityUID,
-		vmID:              registration.vmID,
-		lifecycle:         instanceLifecycleRegistered,
-		release:           registration.release,
-		process:           registration.process,
-		cleanupGeneration: 0,
+func testActiveIdentity(relayPresent bool) instanceActiveIdentity {
+	userIDs := processCredentialIdentity{
+		real: testAuthorityUID, effective: testAuthorityUID,
+		saved: testAuthorityUID, filesystem: testAuthorityUID,
 	}
+	groupIDs := processCredentialIdentity{
+		real: testAuthorityGID, effective: testAuthorityGID,
+		saved: testAuthorityGID, filesystem: testAuthorityGID,
+	}
+	identity := instanceActiveIdentity{
+		userIDs:             userIDs,
+		groupIDs:            groupIDs,
+		supplementaryGroups: []uint32{},
+		mountNamespace:      instanceObjectIdentity{device: 41, inode: 42},
+		jailRoot:            instanceObjectIdentity{device: 43, inode: 44},
+		executable: instanceFirecrackerExecutableIdentity{
+			device: 45, inode: 46, sizeBytes: trustedReleaseExecutableMinBytes,
+			mode: unix.S_IFREG | trustedReleaseStoreExecutableMode,
+			uid:  0, gid: 0, links: 1, manifestSHA256: testReleaseHash,
+		},
+		relay: instanceActiveRelay{kind: instanceRelayAbsent},
+	}
+	if relayPresent {
+		identity.relay = instanceActiveRelay{
+			kind:                instanceRelayPresent,
+			userIDs:             userIDs,
+			groupIDs:            groupIDs,
+			supplementaryGroups: []uint32{},
+			mountNamespace:      instanceObjectIdentity{device: 51, inode: 52},
+			root:                instanceObjectIdentity{device: 53, inode: 54},
+			executable: instanceRelayExecutableIdentity{
+				device: 55, inode: 56, sizeBytes: trustedReleaseExecutableMinBytes,
+				mode: unix.S_IFREG | trustedReleaseStoreExecutableMode,
+				uid:  0, gid: 0, links: 1, sha256: testRelayHash,
+			},
+		}
+	}
+	return identity
+}
+
+func testLaunchingInstanceRecord() instanceRecord {
+	return testLaunchingInstanceRecordWithRelay(false)
+}
+
+func testLaunchingInstanceRecordWithRelay(relayPresent bool) instanceRecord {
+	record, err := registerLaunchingInstanceRecord(testInstanceCaller(), testLaunchIntent(relayPresent), nil)
+	if err != nil {
+		panic(err)
+	}
+	return record
+}
+
+func testActiveInstanceRecord(relayPresent bool) instanceRecord {
+	record, err := activateInstanceRecord(
+		testLaunchingInstanceRecordWithRelay(relayPresent),
+		testActiveIdentity(relayPresent),
+	)
+	if err != nil {
+		panic(err)
+	}
+	return record
+}
+
+func testManagedCacheIdentity() managedCacheIdentity {
+	return managedCacheIdentity{
+		deviceMajor: 8,
+		deviceMinor: 1,
+		inode:       12345,
+		mountID:     67890,
+		mountIDKind: managedCacheMountIdentityUnique,
+	}
+}
+
+func diffInstanceRecord(want, got instanceRecord) string {
+	return cmp.Diff(
+		want,
+		got,
+		cmp.AllowUnexported(
+			instanceRecord{},
+			instanceLaunchRecord{},
+			instanceActiveIdentity{},
+			instanceLaunchRelay{},
+			instanceActiveRelay{},
+			instanceProcessLocator{},
+			processCredentialIdentity{},
+			instanceObjectIdentity{},
+			instanceFirecrackerExecutableIdentity{},
+			instanceRelayExecutableIdentity{},
+			managedCacheIdentity{},
+			releaseIdentity{},
+		),
+	)
 }

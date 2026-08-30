@@ -325,7 +325,7 @@ func TestInstanceRecordRejectsSimulatedOwnerMismatch(t *testing.T) {
 	uidDirs, err := roots.openUIDDirectories(context.Background(), testAuthorityUID)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
-	require.NoError(t, uidDirs.writeRecord(context.Background(), testRegisteredInstanceRecord()))
+	require.NoError(t, uidDirs.writeRecord(context.Background(), testLaunchingInstanceRecord()))
 
 	realFstat := uidDirs.deps.fstat
 	uidDirs.deps.fstat = func(ctx context.Context, fd int, stat *unix.Stat_t) error {
@@ -351,7 +351,7 @@ func TestInstanceRecordAtomicWriteAndRead(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
 
-	record := testRegisteredInstanceRecord()
+	record := testLaunchingInstanceRecord()
 	require.NoError(t, uidDirs.writeRecord(context.Background(), record))
 
 	got, found, err := uidDirs.readRecord(context.Background(), testVMID)
@@ -377,7 +377,7 @@ func TestInstanceRecordWriteHandlesPartialWrites(t *testing.T) {
 		}
 		return realWrite(ctx, fd, value)
 	}
-	require.NoError(t, uidDirs.writeRecord(context.Background(), testRegisteredInstanceRecord()))
+	require.NoError(t, uidDirs.writeRecord(context.Background(), testLaunchingInstanceRecord()))
 
 	_, found, err := uidDirs.readRecord(context.Background(), testVMID)
 	require.NoError(t, err)
@@ -394,7 +394,7 @@ func TestInstanceRecordWriteVerifiesActualTemporarySize(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
 	uidDirs.deps.write = func(_ context.Context, _ int, value []byte) (int, error) { return len(value), nil }
 
-	err = uidDirs.writeRecord(context.Background(), testRegisteredInstanceRecord())
+	err = uidDirs.writeRecord(context.Background(), testLaunchingInstanceRecord())
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 	_, statErr := os.Lstat(filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
@@ -411,7 +411,7 @@ func TestInstanceRecordPreRenameFailurePreservesOldRecordAndCleansTemp(t *testin
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
 
-	want := testRegisteredInstanceRecord()
+	want := testLaunchingInstanceRecord()
 	require.NoError(t, uidDirs.writeRecord(context.Background(), want))
 	uidDirs.deps.renameAt = func(context.Context, int, string, int, string) error {
 		return errors.New("rename failed")
@@ -488,7 +488,7 @@ func TestInstanceRecordEveryPreRenameFailurePreservesOldRecord(t *testing.T) {
 			uidDirs, err := roots.openUIDDirectories(context.Background(), testAuthorityUID)
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
-			old := testRegisteredInstanceRecord()
+			old := testLaunchingInstanceRecord()
 			require.NoError(t, uidDirs.writeRecord(context.Background(), old))
 			recordPath := filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json")
 			oldRaw, err := os.ReadFile(recordPath)
@@ -530,7 +530,7 @@ func TestInstanceRecordCleanupFailureIsReturned(t *testing.T) {
 		return errors.New("unlink completion failed")
 	}
 
-	err = uidDirs.writeRecord(context.Background(), testRegisteredInstanceRecord())
+	err = uidDirs.writeRecord(context.Background(), testLaunchingInstanceRecord())
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "unlink completion failed")
 	assertNoInstanceTemps(t, filepath.Join(root, "var/lib/mvmctl/instances/1000"))
@@ -563,7 +563,7 @@ func TestInstanceRecordWriteRejectsExistingUnsafeTarget(t *testing.T) {
 			recordPath := filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json")
 			create(t, recordPath)
 
-			err = uidDirs.writeRecord(context.Background(), testRegisteredInstanceRecord())
+			err = uidDirs.writeRecord(context.Background(), testLaunchingInstanceRecord())
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 			assertNoInstanceTemps(t, filepath.Dir(recordPath))
@@ -579,7 +579,7 @@ func TestInstanceRecordReadHandlesPartialReadsAndRejectsOversize(t *testing.T) {
 	uidDirs, err := roots.openUIDDirectories(context.Background(), testAuthorityUID)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
-	require.NoError(t, uidDirs.writeRecord(context.Background(), testRegisteredInstanceRecord()))
+	require.NoError(t, uidDirs.writeRecord(context.Background(), testLaunchingInstanceRecord()))
 
 	realRead := uidDirs.deps.read
 	uidDirs.deps.read = func(ctx context.Context, fd int, value []byte) (int, error) {
@@ -618,7 +618,7 @@ func TestInstanceRecordPostRenameFailureReportsPartialSuccess(t *testing.T) {
 		return realFsync(ctx, fd)
 	}
 
-	err = uidDirs.writeRecord(context.Background(), testRegisteredInstanceRecord())
+	err = uidDirs.writeRecord(context.Background(), testLaunchingInstanceRecord())
 	require.Error(t, err)
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
@@ -639,7 +639,7 @@ func TestInstanceRecordCancellationBeforeRenamePreservesOldRecord(t *testing.T) 
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
 
-	want := testRegisteredInstanceRecord()
+	want := testLaunchingInstanceRecord()
 	require.NoError(t, uidDirs.writeRecord(context.Background(), want))
 	ctx, cancel := context.WithCancel(context.Background())
 	realFsync := uidDirs.deps.fsync
@@ -704,7 +704,7 @@ func TestInstanceRecordReadCloseFailureReturnsDomainError(t *testing.T) {
 	uidDirs, err := roots.openUIDDirectories(context.Background(), testAuthorityUID)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, uidDirs.Release(context.Background())) })
-	require.NoError(t, uidDirs.writeRecord(context.Background(), testRegisteredInstanceRecord()))
+	require.NoError(t, uidDirs.writeRecord(context.Background(), testLaunchingInstanceRecord()))
 
 	realClose := uidDirs.deps.close
 	uidDirs.deps.close = func(ctx context.Context, fd int) error {

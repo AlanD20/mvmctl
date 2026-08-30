@@ -21,7 +21,7 @@ type launchLease struct {
 	record      instanceRecord
 }
 
-type registeredLease struct {
+type activeLease struct {
 	roots       *instanceAuthorityRoots
 	directories *instanceUIDDirectories
 	vmLock      *authorityLock
@@ -100,21 +100,21 @@ func (authority *instanceAuthority) lockReleaseSlot(
 	return lease, nil
 }
 
-func (lease *releaseSlotLease) registerLaunch(
+func (lease *releaseSlotLease) registerLaunching(
 	ctx context.Context,
 	caller instanceCaller,
-	registration launchRegistration,
+	intent launchIntent,
 ) (_ *launchLease, returnErr error) {
 	if lease == nil || lease.roots == nil || !lease.releaseLock.isActive() {
-		return nil, instanceStateError(registration.vmID, "release slot lease is not active")
+		return nil, instanceStateError(intent.vmID, "release slot lease is not active")
 	}
 	if err := validateInstanceCaller(caller); err != nil {
 		return nil, err
 	}
-	if err := validateLaunchRegistration(registration); err != nil {
+	if err := validateLaunchIntent(intent); err != nil {
 		return nil, err
 	}
-	if releaseSlotForIdentity(registration.release) != lease.slot {
+	if releaseSlotForIdentity(intent.release) != lease.slot {
 		return nil, instanceValidationError("launch release identity does not match held release slot")
 	}
 	var indexLock, vmLock *authorityLock
@@ -138,19 +138,19 @@ func (lease *releaseSlotLease) registerLaunch(
 	if err != nil {
 		return nil, err
 	}
-	location, err := lease.roots.findInstance(ctx, registration.vmID)
+	location, err := lease.roots.findInstance(ctx, intent.vmID)
 	if err != nil {
 		return nil, err
 	}
 	if location != nil && location.uid != caller.uid {
 		if closeErr := lease.roots.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
 			return nil, appendInstanceOperationError(
-				unauthorizedInstanceError(registration.vmID),
+				unauthorizedInstanceError(intent.vmID),
 				"close foreign instance authority directory",
 				closeErr,
 			)
 		}
-		return nil, unauthorizedInstanceError(registration.vmID)
+		return nil, unauthorizedInstanceError(intent.vmID)
 	}
 	var existing *instanceRecord
 	if location == nil {
@@ -164,12 +164,12 @@ func (lease *releaseSlotLease) registerLaunch(
 			return nil, err
 		}
 	}
-	vmLock, err = directories.acquireVMLock(ctx, registration.vmID)
+	vmLock, err = directories.acquireVMLock(ctx, intent.vmID)
 	if err != nil {
 		return nil, err
 	}
 	if location != nil {
-		record, found, readErr := directories.readRecord(ctx, registration.vmID)
+		record, found, readErr := directories.readRecord(ctx, intent.vmID)
 		if readErr != nil {
 			return nil, readErr
 		}
@@ -178,7 +178,7 @@ func (lease *releaseSlotLease) registerLaunch(
 		}
 		existing = &record
 	}
-	record, err := registerInstanceRecord(caller, registration, existing)
+	record, err := registerLaunchingInstanceRecord(caller, intent, existing)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +238,7 @@ func (lease *releaseSlotLease) requireUnreferenced(
 	if referenced {
 		return errs.New(
 			errs.CodeVMStateInvalid,
-			"release is referenced by active privileged VM authority",
+			"release is referenced by live privileged VM authority",
 			errs.WithClass(errs.ClassConflict),
 		)
 	}
@@ -250,25 +250,25 @@ func (lease *releaseSlotLease) requireUnreferenced(
 	return nil
 }
 
-func (authority *instanceAuthority) LockRegistered(
+func (authority *instanceAuthority) LockActive(
 	ctx context.Context,
 	caller instanceCaller,
 	vmID string,
-) (*registeredLease, error) {
+) (*activeLease, error) {
 	locked, err := authority.lockOwnedInstance(ctx, caller, vmID)
 	if err != nil {
 		return nil, err
 	}
-	if locked.record.lifecycle != instanceLifecycleRegistered {
+	if locked.record.lifecycle != instanceLifecycleActive {
 		releaseErr := locked.Release(ctx)
 		stateErr := errs.New(
 			errs.CodeVMNotRunning,
-			"vm has no registered privileged runtime",
+			"vm has no active privileged runtime",
 			errs.WithEntity(vmID),
 		)
 		return nil, appendInstanceOperationError(stateErr, "release inactive instance lease", releaseErr)
 	}
-	return &registeredLease{
+	return &activeLease{
 		roots:       locked.roots,
 		directories: locked.directories,
 		vmLock:      locked.vmLock,
@@ -440,7 +440,7 @@ func (lease *launchLease) Release(ctx context.Context) error {
 	return err
 }
 
-func (lease *registeredLease) Release(ctx context.Context) error {
+func (lease *activeLease) Release(ctx context.Context) error {
 	if lease == nil {
 		return nil
 	}

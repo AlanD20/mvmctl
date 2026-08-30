@@ -207,8 +207,8 @@ func (roots *instanceAuthorityRoots) releaseReferencedByOwner(
 		if !found {
 			return false, instanceAtomicError("instance authority record disappeared while locked", nil)
 		}
-		if (record.lifecycle == instanceLifecycleRegistered || record.lifecycle == instanceLifecycleCleaning) &&
-			record.release == release {
+		if (record.lifecycle == instanceLifecycleLaunching || record.lifecycle == instanceLifecycleActive ||
+			record.lifecycle == instanceLifecycleCleaning) && record.launch.release == release {
 			return true, nil
 		}
 	}

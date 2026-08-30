@@ -324,8 +324,8 @@ func TestReleaseAuthorityInstallRejectsReferencedOrCorruptAuthority(t *testing.T
 			prepare: func(t *testing.T, fixture *trustedReleaseInstallFixture, old trustedReleaseManifest) {
 				identity, err := old.releaseIdentity()
 				require.NoError(t, err)
-				record := testRegisteredInstanceRecord()
-				record.release = identity
+				record := testLaunchingInstanceRecord()
+				record.launch.release = identity
 				writeTestAuthorityRecord(t, fixture.instanceRoot, record)
 			},
 			wantCode: errs.CodeVMStateInvalid,
