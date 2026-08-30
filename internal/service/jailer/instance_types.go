@@ -297,14 +297,13 @@ func validateLaunchIntent(intent launchIntent) error {
 	if !vmIDPattern.MatchString(intent.vmID) {
 		return instanceValidationError("vm ID is invalid")
 	}
-	if err := validateInstanceLaunchRecord(instanceLaunchRecord{
-		ownerGID:      1,
-		hostBootID:    intent.hostBootID,
-		process:       intent.process,
-		relay:         intent.relay,
-		cacheIdentity: intent.cacheIdentity,
-		release:       intent.release,
-	}); err != nil {
+	if err := validateInstanceLaunchValues(
+		intent.hostBootID,
+		intent.process,
+		intent.relay,
+		intent.cacheIdentity,
+		intent.release,
+	); err != nil {
 		return instanceValidationError(err.Error())
 	}
 	return nil
@@ -366,19 +365,35 @@ func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
 	if launch.ownerGID == 0 || launch.ownerGID == math.MaxUint32 {
 		return fmt.Errorf("instance authority owner GID is invalid")
 	}
-	if !hostBootIDPattern.MatchString(launch.hostBootID) {
+	return validateInstanceLaunchValues(
+		launch.hostBootID,
+		launch.process,
+		launch.relay,
+		launch.cacheIdentity,
+		launch.release,
+	)
+}
+
+func validateInstanceLaunchValues(
+	hostBootID string,
+	process instanceProcessLocator,
+	relay instanceLaunchRelay,
+	cacheIdentity managedCacheIdentity,
+	release releaseIdentity,
+) error {
+	if !hostBootIDPattern.MatchString(hostBootID) {
 		return fmt.Errorf("instance authority host boot ID is invalid")
 	}
-	if err := validateInstanceProcessLocator(launch.process); err != nil {
+	if err := validateInstanceProcessLocator(process); err != nil {
 		return err
 	}
-	if err := validateInstanceLaunchRelay(launch.relay); err != nil {
+	if err := validateInstanceLaunchRelay(relay); err != nil {
 		return err
 	}
-	if err := validateManagedCacheIdentityValue(launch.cacheIdentity); err != nil {
+	if err := validateManagedCacheIdentityValue(cacheIdentity); err != nil {
 		return err
 	}
-	return validateReleaseIdentityValue(launch.release)
+	return validateReleaseIdentityValue(release)
 }
 
 func validateInstanceProcessLocator(locator instanceProcessLocator) error {

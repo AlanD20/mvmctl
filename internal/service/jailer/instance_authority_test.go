@@ -205,6 +205,16 @@ func TestInstanceAuthorityReleaseSlotRegistersLaunchingAuthority(t *testing.T) {
 	assert.Nil(t, active)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMNotRunning, errs.AsDomainError(err).Code)
+	activeRecord, err := activateInstanceRecord(launch.record, testActiveIdentity(false))
+	require.NoError(t, err)
+	writeTestAuthorityRecord(t, root, activeRecord)
+
+	active, err = authority.LockActive(context.Background(), caller, testVMID)
+	require.NoError(t, err)
+	if diff := diffInstanceRecord(activeRecord, active.record); diff != "" {
+		t.Errorf("locked active record mismatch (-want +got):\n%s", diff)
+	}
+	require.NoError(t, active.Release(context.Background()))
 
 	duplicate, err := registerTestLaunch(context.Background(), authority, caller, registration)
 	assert.Nil(t, duplicate)
@@ -234,9 +244,15 @@ func TestInstanceAuthorityCleanupAndSameOwnerRelaunch(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMNotRunning, errs.AsDomainError(err).Code)
 
-	relaunched, err := registerTestLaunch(context.Background(), authority, caller, testLaunchIntent(false))
+	relaunchCaller := instanceCaller{uid: caller.uid, gid: caller.gid + 1}
+	relaunchIntent := testLaunchIntent(false)
+	relaunchIntent.cacheIdentity.inode++
+	relaunched, err := registerTestLaunch(context.Background(), authority, relaunchCaller, relaunchIntent)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(1), relaunched.record.cleanupGeneration)
+	assert.Equal(t, uint64(2), relaunched.record.launchGeneration)
+	assert.Equal(t, relaunchCaller.gid, relaunched.record.launch.ownerGID)
+	assert.Equal(t, relaunchIntent.cacheIdentity, relaunched.record.launch.cacheIdentity)
 	require.NoError(t, relaunched.Release(context.Background()))
 }
 
@@ -377,7 +393,7 @@ func TestInstanceAuthorityRejectsRecordDirectoryIdentityMismatch(t *testing.T) {
 func TestInstanceAuthorityReleaseSlotReferenceCheckTracksLifecycle(t *testing.T) {
 	t.Parallel()
 
-	authority, _ := newTestInstanceAuthority(t)
+	authority, root := newTestInstanceAuthority(t)
 	caller := testInstanceCaller()
 	release := testLaunchIntent(false).release
 	launch, err := registerTestLaunch(context.Background(), authority, caller, testLaunchIntent(false))
@@ -392,8 +408,29 @@ func TestInstanceAuthorityReleaseSlotReferenceCheckTracksLifecycle(t *testing.T)
 	assert.NotNil(t, slotLease.roots)
 	assert.NotNil(t, slotLease.releaseLock)
 	require.NoError(t, slotLease.Release(context.Background()))
+	activeRecord, err := activateInstanceRecord(launch.record, testActiveIdentity(false))
+	require.NoError(t, err)
+	writeTestAuthorityRecord(t, root, activeRecord)
+
+	slotLease, err = authority.lockReleaseSlot(context.Background(), releaseSlotForIdentity(release))
+	require.NoError(t, err)
+	err = slotLease.requireUnreferenced(context.Background(), release)
+	require.Error(t, err)
+	assert.Equal(t, errs.ClassConflict, errs.AsDomainError(err).Class)
+	require.NoError(t, slotLease.Release(context.Background()))
 
 	cleanup, err := authority.BeginCleanup(context.Background(), caller, testVMID)
+	require.NoError(t, err)
+	require.NoError(t, cleanup.Release(context.Background()))
+
+	slotLease, err = authority.lockReleaseSlot(context.Background(), releaseSlotForIdentity(release))
+	require.NoError(t, err)
+	err = slotLease.requireUnreferenced(context.Background(), release)
+	require.Error(t, err)
+	assert.Equal(t, errs.ClassConflict, errs.AsDomainError(err).Class)
+	require.NoError(t, slotLease.Release(context.Background()))
+
+	cleanup, err = authority.BeginCleanup(context.Background(), caller, testVMID)
 	require.NoError(t, err)
 	require.NoError(t, cleanup.Complete(context.Background()))
 	require.NoError(t, cleanup.Release(context.Background()))
@@ -597,7 +634,7 @@ func TestInstanceAuthorityUsesOnlyFixedRootPathOpen(t *testing.T) {
 	assert.Equal(t, []string{root}, opened)
 }
 
-func TestInstanceAuthorityPostRenameErrorReturnsNoLeaseAndDurableRecord(t *testing.T) {
+func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *testing.T) {
 	t.Parallel()
 
 	root := prepareInstanceAuthorityTestRoot(t)
@@ -645,16 +682,63 @@ func TestInstanceAuthorityPostRenameErrorReturnsNoLeaseAndDurableRecord(t *testi
 		testInstanceCaller(),
 		registration,
 	)
-	assert.Nil(t, lease)
+	require.NotNil(t, lease)
 	require.Error(t, err)
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
 	assert.Equal(t, true, domainErr.Details["record_replaced"])
 	assert.Equal(t, true, domainErr.Details["durability_uncertain"])
 	assert.FileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
-	assert.NotNil(t, slotLease.roots)
-	assert.NotNil(t, slotLease.releaseLock)
+	assert.Nil(t, slotLease.roots)
+	assert.Nil(t, slotLease.releaseLock)
 	require.NoError(t, slotLease.Release(context.Background()))
+	require.NoError(t, lease.Release(context.Background()))
+}
+
+func TestInstanceAuthorityPostRenameCleanupErrorReturnsCleanupLease(t *testing.T) {
+	t.Parallel()
+
+	root := prepareInstanceAuthorityTestRoot(t)
+	writeTestAuthorityRecord(t, root, testLaunchingInstanceRecord())
+	deps := realInstanceAuthorityDeps()
+	realFsync := deps.fsync
+	var fileSynced atomic.Bool
+	deps.fsync = func(ctx context.Context, fd int) error {
+		var stat unix.Stat_t
+		if err := unix.Fstat(fd, &stat); err == nil && stat.Mode&unix.S_IFMT == unix.S_IFREG {
+			fileSynced.Store(true)
+			return realFsync(ctx, fd)
+		}
+		if fileSynced.Load() {
+			return errors.New("cleanup record directory sync failed")
+		}
+		return realFsync(ctx, fd)
+	}
+	authority := newInstanceAuthorityWithPolicy(
+		deps,
+		testInstanceAuthorityPolicy(root),
+		newTestInstanceAuthorityTree(),
+	)
+
+	cleanup, err := authority.BeginCleanup(context.Background(), testInstanceCaller(), testVMID)
+	require.NotNil(t, cleanup)
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, true, domainErr.Details["record_replaced"])
+	assert.Equal(t, true, domainErr.Details["durability_uncertain"])
+	assert.Equal(t, instanceLifecycleCleaning, cleanup.record.lifecycle)
+	require.NoError(t, cleanup.Release(context.Background()))
+
+	stableAuthority := newInstanceAuthorityWithPolicy(
+		realInstanceAuthorityDeps(),
+		testInstanceAuthorityPolicy(root),
+		newTestInstanceAuthorityTree(),
+	)
+	resumed, err := stableAuthority.BeginCleanup(context.Background(), testInstanceCaller(), testVMID)
+	require.NoError(t, err)
+	assert.Equal(t, instanceLifecycleCleaning, resumed.record.lifecycle)
+	require.NoError(t, resumed.Release(context.Background()))
 }
 
 func newTestInstanceAuthority(t *testing.T) (*instanceAuthority, string) {

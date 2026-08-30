@@ -182,14 +182,10 @@ func (lease *releaseSlotLease) registerLaunching(
 	if err != nil {
 		return nil, err
 	}
-	if err := directories.writeRecord(ctx, record); err != nil {
-		return nil, err
+	writeErr := directories.writeRecord(ctx, record)
+	if writeErr != nil && !instanceRecordWasReplaced(writeErr) {
+		return nil, writeErr
 	}
-	if err := indexLock.Release(ctx); err != nil {
-		indexLock = nil
-		return nil, annotateInstanceRecordReplacement(err, false)
-	}
-	indexLock = nil
 	launch := &launchLease{
 		roots:       lease.roots,
 		directories: directories,
@@ -201,7 +197,28 @@ func (lease *releaseSlotLease) registerLaunching(
 	lease.releaseLock = nil
 	directories = nil
 	vmLock = nil
+	indexReleaseErr := indexLock.Release(context.WithoutCancel(ctx))
+	indexLock = nil
+	if writeErr != nil {
+		return launch, appendInstanceOperationError(
+			writeErr,
+			"release global index lock after launching record replacement",
+			indexReleaseErr,
+		)
+	}
+	if indexReleaseErr != nil {
+		return launch, annotateInstanceRecordReplacement(indexReleaseErr, false)
+	}
 	return launch, nil
+}
+
+func instanceRecordWasReplaced(err error) bool {
+	domainErr := errs.AsDomainError(err)
+	if domainErr == nil {
+		return false
+	}
+	replaced, ok := domainErr.Details["record_replaced"].(bool)
+	return ok && replaced
 }
 
 func (lease *releaseSlotLease) requireUnreferenced(
@@ -293,21 +310,27 @@ func (authority *instanceAuthority) BeginCleanup(
 			locked.Release(ctx),
 		)
 	}
+	var writeErr error
 	if updated != locked.record {
-		if err := locked.directories.writeRecord(ctx, updated); err != nil {
+		writeErr = locked.directories.writeRecord(ctx, updated)
+		if writeErr != nil && !instanceRecordWasReplaced(writeErr) {
 			return nil, appendInstanceOperationError(
-				err,
+				writeErr,
 				"release failed cleanup registration",
 				locked.Release(ctx),
 			)
 		}
 	}
-	return &cleanupLease{
+	cleanup := &cleanupLease{
 		roots:       locked.roots,
 		directories: locked.directories,
 		vmLock:      locked.vmLock,
 		record:      updated,
-	}, nil
+	}
+	if writeErr != nil {
+		return cleanup, writeErr
+	}
+	return cleanup, nil
 }
 
 func (lease *cleanupLease) Complete(ctx context.Context) error {
