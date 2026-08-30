@@ -9,6 +9,7 @@ import (
 	"math"
 	"runtime"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -17,10 +18,13 @@ import (
 )
 
 const (
-	rootfsProvisionMountFlags       = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
-	rootfsE2fsckPath                = "/usr/sbin/e2fsck"
-	rootfsResize2fsPath             = "/usr/sbin/resize2fs"
-	rootfsBtrfsPath                 = "/usr/bin/btrfs"
+	rootfsProvisionMountFlags = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
+	rootfsE2fsckPath          = "/usr/sbin/e2fsck"
+	rootfsResize2fsPath       = "/usr/sbin/resize2fs"
+	rootfsBtrfsPath           = "/usr/bin/btrfs"
+	// CRITICAL: filesystem growth is privileged and may retain the VM lock plus mounted capabilities. Keep the
+	// absolute subprocess bound compiled into the effect while allowing an earlier caller deadline to win.
+	rootfsGrowToolTimeout           = 5 * time.Minute
 	maxRootfsGrowToolStdoutBytes    = 4 << 10
 	maxRootfsGrowToolStderrBytes    = 4 << 10
 	rootfsAgentBinaryPath           = "/usr/bin/mvm-agent"
@@ -224,6 +228,15 @@ func (adapter *rootfsVMProvisionAdapter) ProvisionVM(
 	}
 	if err := adapter.deps.lockOSThread(ctx); err != nil {
 		return outcome, rootfsAtomicError("lock VM provisioning OS thread", err)
+	}
+	// CRITICAL: Cancellation must be observed after LockOSThread and before unshare. Only a thread that still shares
+	// the process mount namespace may be unlocked and returned to Go's thread pool.
+	if err := ctx.Err(); err != nil {
+		return outcome, appendRootfsProvisionCleanupError(
+			rootfsAtomicError("vm provisioning context ended before mount namespace creation", err),
+			"unlock VM provisioning OS thread",
+			adapter.deps.unlockOSThread(context.WithoutCancel(ctx)),
+		)
 	}
 	if err := adapter.deps.unshare(ctx, unix.CLONE_NEWNS); err != nil {
 		return outcome, appendRootfsProvisionCleanupError(
@@ -650,7 +663,8 @@ func runRootfsGrowTool(
 ) error {
 	tracker.outcomeUnknown = true
 	result, runErr := deps.run(ctx, args, system.RunCmdOpts{
-		Check: false, Capture: true, Cwd: "/", Env: map[string]string{"LANG": "C", "LC_ALL": "C"}, ReplaceEnv: true,
+		Check: false, Capture: true, Cwd: "/", Timeout: rootfsGrowToolTimeout,
+		Env: map[string]string{"LANG": "C", "LC_ALL": "C"}, ReplaceEnv: true,
 		MaxStdoutBytes: maxRootfsGrowToolStdoutBytes, MaxStderrBytes: maxRootfsGrowToolStderrBytes,
 	})
 	if runErr != nil || result == nil {

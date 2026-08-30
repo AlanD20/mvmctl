@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -18,6 +19,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
+	"mvmctl/pkg/errs"
 )
 
 func TestRootfsVMProvisionAdapterConvergedReplayUsesClosedReadWriteFlow(t *testing.T) {
@@ -192,6 +194,73 @@ func TestRootfsVMProvisionAdapterClassifiesGrowToolAndRemountFaults(t *testing.T
 	}
 }
 
+func TestRootfsVMProvisionAdapterClassifiesGrowRunnerContextErrorsAndCleansCapabilities(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		cause        error
+		cancelCaller bool
+	}{
+		"compiled_timeout": {cause: context.DeadlineExceeded},
+		"caller_cancellation": {
+			cause:        context.Canceled,
+			cancelCaller: true,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			cancel := func() {}
+			if tc.cancelCaller {
+				var cancelContext context.CancelFunc
+				ctx, cancelContext = context.WithCancel(ctx)
+				cancel = cancelContext
+				t.Cleanup(cancelContext)
+			}
+			oldBytes := minimumRootfsBytes
+			fixture := newTestRootfsVMProvisionFixture(t)
+			fixture.target = oldBytes * 2
+			fixture.backingBytes = oldBytes
+			fixture.initialFilesystemBytes = oldBytes
+			fixture.base.lease.admittedBytes = oldBytes
+			fixture.base.lease.metadata.size = oldBytes
+			fixture.runTool = func(
+				runCtx context.Context,
+				_ []string,
+				opts system.RunCmdOpts,
+			) (*system.RunResult, error) {
+				assert.Equal(t, 5*time.Minute, opts.Timeout)
+				cancel()
+				if tc.cancelCaller {
+					return nil, runCtx.Err()
+				}
+				return nil, tc.cause
+			}
+
+			outcome, err := fixture.adapter().ProvisionVM(
+				ctx,
+				fixture.base.lease,
+				FilesystemExt4,
+				VMProvisionPlan{ResizeBytes: fixture.target},
+			)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, tc.cause)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeLoopMountError, domainErr.Code)
+			assert.Equal(t, errs.ClassInternal, domainErr.Class)
+			assert.Equal(t, vmProvisionEffectStateOutcomeUnknown, outcome.state)
+			assert.Zero(t, outcome.commandsRun)
+			assert.False(t, fixture.base.cleanupSawCancellation)
+			assert.True(t, fixture.base.source.state.released)
+			assert.True(t, fixture.base.partitions.state.released)
+			assert.True(t, fixture.base.loop.state.released)
+			assert.Equal(t, 2, fixture.base.snapshotCalls)
+			assert.False(t, fixture.base.unlocked)
+		})
+	}
+}
+
 func TestRootfsVMProvisionAdapterClassifiesBoundaryFaults(t *testing.T) {
 	t.Parallel()
 
@@ -264,6 +333,31 @@ func TestRootfsVMProvisionAdapterUnlocksThreadWhenUnshareFails(t *testing.T) {
 	assertRootfsInspectEventOrder(t, fixture.base.events, "lock-thread", "unlock-thread")
 }
 
+func TestRootfsVMProvisionAdapterCancelsAfterThreadLockBeforeUnshare(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	fixture := newTestRootfsVMProvisionFixture(t)
+	fixture.base.cancelAfterLock = cancel
+	outcome, err := fixture.adapter().ProvisionVM(
+		ctx,
+		fixture.base.lease,
+		FilesystemExt4,
+		VMProvisionPlan{ResizeBytes: fixture.target},
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, vmProvisionEffectStateUnchanged, outcome.state)
+	assert.True(t, fixture.base.unlocked)
+	assert.False(t, fixture.base.unlockSawCancellation)
+	assert.False(t, fixture.base.unshareCalled)
+	assert.Empty(t, fixture.base.mounts)
+	if diff := cmp.Diff([]string{"snapshot", "lock-thread", "unlock-thread"}, fixture.base.events); diff != "" {
+		t.Errorf("pre-unshare cancellation events mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestRootfsVMProvisionAdapterCleanupIgnoresCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -308,6 +402,7 @@ func TestRunRootfsGrowToolUsesExactCommandAndClassifiesCompletion(t *testing.T) 
 	tests := map[string]struct {
 		result    *system.RunResult
 		runErr    error
+		wantCause error
 		wantErr   bool
 		wantState vmProvisionEffectState
 	}{
@@ -321,6 +416,18 @@ func TestRunRootfsGrowToolUsesExactCommandAndClassifiesCompletion(t *testing.T) 
 			runErr: errors.New(
 				"wait status unavailable",
 			),
+			wantErr:   true,
+			wantState: vmProvisionEffectStateOutcomeUnknown,
+		},
+		"runner_timeout_is_classified_and_unknown": {
+			runErr:    context.DeadlineExceeded,
+			wantCause: context.DeadlineExceeded,
+			wantErr:   true,
+			wantState: vmProvisionEffectStateOutcomeUnknown,
+		},
+		"runner_cancellation_is_classified_and_unknown": {
+			runErr:    context.Canceled,
+			wantCause: context.Canceled,
 			wantErr:   true,
 			wantState: vmProvisionEffectStateOutcomeUnknown,
 		},
@@ -341,6 +448,7 @@ func TestRunRootfsGrowToolUsesExactCommandAndClassifiesCompletion(t *testing.T) 
 				assert.False(t, opts.Check)
 				assert.True(t, opts.Capture)
 				assert.Equal(t, "/", opts.Cwd)
+				assert.Equal(t, 5*time.Minute, opts.Timeout)
 				assert.True(t, opts.ReplaceEnv)
 				if diff := cmp.Diff(map[string]string{"LANG": "C", "LC_ALL": "C"}, opts.Env); diff != "" {
 					t.Errorf("grow environment mismatch (-want +got):\n%s", diff)
@@ -351,10 +459,39 @@ func TestRunRootfsGrowToolUsesExactCommandAndClassifiesCompletion(t *testing.T) 
 			}}
 			err := runRootfsGrowTool(t.Context(), deps, command, []int{0, 1, 2}, tracker)
 			assert.Equal(t, tc.wantErr, err != nil)
+			if tc.wantCause != nil {
+				assert.ErrorIs(t, err, tc.wantCause)
+			}
 			assert.True(t, called)
 			assert.Equal(t, tc.wantState, tracker.state())
 		})
 	}
+}
+
+func TestRunRootfsGrowToolPassesEarlierCallerDeadlineToRunner(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	t.Cleanup(cancel)
+	wantDeadline, ok := ctx.Deadline()
+	require.True(t, ok)
+	tracker := &rootfsProvisionTracker{}
+	deps := rootfsVMProvisionDeps{run: func(
+		runCtx context.Context,
+		_ []string,
+		opts system.RunCmdOpts,
+	) (*system.RunResult, error) {
+		gotDeadline, hasDeadline := runCtx.Deadline()
+		assert.True(t, hasDeadline)
+		assert.True(t, gotDeadline.Equal(wantDeadline))
+		assert.Equal(t, 5*time.Minute, opts.Timeout)
+		return nil, context.DeadlineExceeded
+	}}
+
+	err := runRootfsGrowTool(ctx, deps, []string{rootfsResize2fsPath, "/dev/loop3p1"}, []int{0}, tracker)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.Equal(t, vmProvisionEffectStateOutcomeUnknown, tracker.state())
 }
 
 func TestConvergeRootfsProvisionGrowUsesOnlyFilesystemSpecificFixedTools(t *testing.T) {
