@@ -12,33 +12,53 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
 )
 
 const (
-	rootfsProvisionMountFlags      = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
-	rootfsE2fsckPath               = "/usr/sbin/e2fsck"
-	rootfsResize2fsPath            = "/usr/sbin/resize2fs"
-	rootfsBtrfsPath                = "/usr/bin/btrfs"
-	maxRootfsGrowToolStdoutBytes   = 4 << 10
-	maxRootfsGrowToolStderrBytes   = 4 << 10
-	rootfsAgentBinaryPath          = "/usr/bin/mvm-agent"
-	rootfsAgentTokenPath           = "/run/mvm-agent.token"
-	rootfsAgentSystemdPath         = "/etc/systemd/system/mvm-agent.service"
-	rootfsAgentOpenRCPath          = "/etc/init.d/mvm-agent"
-	rootfsSSHConfigPath            = "/etc/ssh/sshd_config.d/mvm.conf"
-	rootfsSudoPolicyPath           = "/etc/sudoers.d/mvm"
-	rootfsPasswdPath               = "/etc/passwd"
-	rootfsHostnamePath             = "/etc/hostname"
-	rootfsHostsPath                = "/etc/hosts"
-	rootfsDNSPath                  = "/etc/resolv.conf"
-	rootfsFstabPath                = "/etc/fstab"
-	rootfsProvisionReadBufferLimit = maxRootfsProvisionTextBytes
+	rootfsProvisionMountFlags       = unix.MS_NOSUID | unix.MS_NODEV | unix.MS_NOEXEC
+	rootfsE2fsckPath                = "/usr/sbin/e2fsck"
+	rootfsResize2fsPath             = "/usr/sbin/resize2fs"
+	rootfsBtrfsPath                 = "/usr/bin/btrfs"
+	maxRootfsGrowToolStdoutBytes    = 4 << 10
+	maxRootfsGrowToolStderrBytes    = 4 << 10
+	rootfsAgentBinaryPath           = "/usr/bin/mvm-agent"
+	rootfsAgentConfigDirectory      = infra.GuestAgentConfigDirectory
+	rootfsAgentTokenPath            = infra.GuestAgentTokenPath
+	rootfsAgentSystemdPath          = "/etc/systemd/system/mvm-agent.service"
+	rootfsAgentSystemdEvidencePath  = "/usr/lib/systemd/systemd"
+	rootfsAgentSystemdConfigPath    = "/etc/systemd"
+	rootfsAgentSystemdWantsPath     = "/etc/systemd/system/sysinit.target.wants"
+	rootfsAgentSystemdWantsLink     = rootfsAgentSystemdWantsPath + "/mvm-agent.service"
+	rootfsAgentSystemdWantsTarget   = "../mvm-agent.service"
+	rootfsAgentOpenRCPath           = "/etc/init.d/mvm-agent"
+	rootfsAgentOpenRCEvidencePath   = "/sbin/openrc"
+	rootfsAgentOpenRCInitPath       = "/etc/init.d"
+	rootfsAgentOpenRCRunlevelPath   = "/etc/runlevels/default"
+	rootfsAgentOpenRCRunlevelLink   = rootfsAgentOpenRCRunlevelPath + "/mvm-agent"
+	rootfsAgentOpenRCRunlevelTarget = "/etc/init.d/mvm-agent"
+	rootfsSSHConfigPath             = "/etc/ssh/sshd_config.d/mvm.conf"
+	rootfsSudoPolicyPath            = "/etc/sudoers.d/mvm"
+	rootfsPasswdPath                = "/etc/passwd"
+	rootfsHostnamePath              = "/etc/hostname"
+	rootfsHostsPath                 = "/etc/hosts"
+	rootfsDNSPath                   = "/etc/resolv.conf"
+	rootfsFstabPath                 = "/etc/fstab"
+	rootfsProvisionReadBufferLimit  = maxRootfsProvisionTextBytes
 )
 
 type rootfsVMProvisionAdapter struct {
 	deps rootfsVMProvisionDeps
 }
+
+type rootfsAgentInitLayout uint8
+
+const (
+	rootfsAgentInitUnknown rootfsAgentInitLayout = iota
+	rootfsAgentInitSystemd
+	rootfsAgentInitOpenRC
+)
 
 type rootfsVMProvisionDeps struct {
 	lockOSThread       func(context.Context) error
@@ -61,6 +81,8 @@ type rootfsVMProvisionDeps struct {
 	fsync              func(context.Context, int) error
 	syncfs             func(context.Context, int) error
 	renameAt           func(context.Context, int, string, int, string) error
+	symlinkAt          func(context.Context, string, int, string) error
+	readlinkAt         func(context.Context, int, string, []byte) (int, error)
 	unlinkAt           func(context.Context, int, string, int) error
 	close              func(context.Context, int) error
 	deviceBytes        func(context.Context, int) (uint64, error)
@@ -127,6 +149,12 @@ func newSystemRootfsVMProvisionAdapter(
 		syncfs:    func(_ context.Context, fd int) error { return unix.Syncfs(fd) },
 		renameAt: func(_ context.Context, oldFD int, oldName string, newFD int, newName string) error {
 			return unix.Renameat(oldFD, oldName, newFD, newName)
+		},
+		symlinkAt: func(_ context.Context, target string, fd int, name string) error {
+			return unix.Symlinkat(target, fd, name)
+		},
+		readlinkAt: func(_ context.Context, fd int, path string, buffer []byte) (int, error) {
+			return unix.Readlinkat(fd, path, buffer)
 		},
 		unlinkAt: func(_ context.Context, fd int, name string, flags int) error {
 			return unix.Unlinkat(fd, name, flags)
@@ -387,7 +415,8 @@ func (deps rootfsVMProvisionDeps) guestTreeDeps() rootfsGuestTreeDeps {
 	return rootfsGuestTreeDeps{
 		openAt2: deps.openAt2, mkdirAt: deps.mkdirAt, fstat: deps.fstat, fstatAt: deps.fstatAt,
 		pread: deps.pread, pwrite: deps.pwrite, fchown: deps.fchown, fchmod: deps.fchmod, fsync: deps.fsync,
-		renameAt: deps.renameAt, unlinkAt: deps.unlinkAt, close: deps.close, tempName: deps.tempName,
+		renameAt: deps.renameAt, symlinkAt: deps.symlinkAt, readlinkAt: deps.readlinkAt,
+		unlinkAt: deps.unlinkAt, close: deps.close, tempName: deps.tempName,
 	}
 }
 
@@ -781,25 +810,57 @@ func applyRootfsProvisionPlan(
 		}
 	}
 	if plan.Agent != nil {
+		layout, err := detectRootfsAgentInitLayout(ctx, tree)
+		if err != nil {
+			return filesWritten, err
+		}
 		binary, err := deps.agentBinary(ctx)
 		if err != nil || len(binary) == 0 || len(binary) > maxRootfsAgentBytes {
 			return filesWritten, rootfsAtomicError("embedded managed VM agent binary is unavailable or unbounded", err)
 		}
-		for _, directory := range []string{"/usr/bin", "/run", "/etc/systemd/system", "/etc/init.d"} {
-			if _, err := tree.ensureDirectory(ctx, directory, 0755, 0, 0); err != nil {
-				return filesWritten, err
-			}
+		if _, err := tree.ensureDirectory(ctx, "/usr/bin", 0755, 0, 0); err != nil {
+			return filesWritten, err
+		}
+		if _, err := tree.ensureDirectory(ctx, rootfsAgentConfigDirectory, 0700, 0, 0); err != nil {
+			return filesWritten, err
 		}
 		files := []rootfsProvisionFile{
 			{path: rootfsAgentBinaryPath, content: binary, mode: 0755},
 			{path: rootfsAgentTokenPath, content: []byte(plan.Agent.Token + "\n"), mode: 0600},
-			{path: rootfsAgentSystemdPath, content: rootfsAgentSystemdService(plan.Agent.Port), mode: 0644},
-			{path: rootfsAgentOpenRCPath, content: rootfsAgentOpenRCService(plan.Agent.Port), mode: 0755},
+		}
+		switch layout {
+		case rootfsAgentInitSystemd:
+			for _, directory := range []string{"/etc/systemd/system", rootfsAgentSystemdWantsPath} {
+				if _, err := tree.ensureDirectory(ctx, directory, 0755, 0, 0); err != nil {
+					return filesWritten, err
+				}
+			}
+			files = append(files, rootfsProvisionFile{
+				path: rootfsAgentSystemdPath, content: rootfsAgentSystemdService(plan.Agent.Port), mode: 0644,
+			})
+		case rootfsAgentInitOpenRC:
+			for _, directory := range []string{rootfsAgentOpenRCInitPath, rootfsAgentOpenRCRunlevelPath} {
+				if _, err := tree.ensureDirectory(ctx, directory, 0755, 0, 0); err != nil {
+					return filesWritten, err
+				}
+			}
+			files = append(files, rootfsProvisionFile{
+				path: rootfsAgentOpenRCPath, content: rootfsAgentOpenRCService(plan.Agent.Port), mode: 0755,
+			})
+		default:
+			return filesWritten, rootfsAtomicError("managed guest agent init layout is unsupported", nil)
 		}
 		for _, file := range files {
 			if err := write(file); err != nil {
 				return filesWritten, err
 			}
+		}
+		changed, err := tree.replaceAgentEnablementLink(ctx, layout)
+		if changed {
+			filesWritten++
+		}
+		if err != nil {
+			return filesWritten, err
 		}
 	}
 	if plan.FixFstab {
@@ -818,6 +879,49 @@ func applyRootfsProvisionPlan(
 		}
 	}
 	return filesWritten, nil
+}
+
+func detectRootfsAgentInitLayout(
+	ctx context.Context,
+	tree rootfsGuestTree,
+) (rootfsAgentInitLayout, error) {
+	systemdBinary, err := tree.fixedPathHasType(ctx, rootfsAgentSystemdEvidencePath, unix.S_IFREG)
+	if err != nil {
+		return rootfsAgentInitUnknown, err
+	}
+	systemdConfig, err := tree.fixedPathHasType(ctx, rootfsAgentSystemdConfigPath, unix.S_IFDIR)
+	if err != nil {
+		return rootfsAgentInitUnknown, err
+	}
+	openRCBinary, err := tree.fixedPathHasType(ctx, rootfsAgentOpenRCEvidencePath, unix.S_IFREG)
+	if err != nil {
+		return rootfsAgentInitUnknown, err
+	}
+	openRCInit, err := tree.fixedPathHasType(ctx, rootfsAgentOpenRCInitPath, unix.S_IFDIR)
+	if err != nil {
+		return rootfsAgentInitUnknown, err
+	}
+	openRCRunlevel, err := tree.fixedPathHasType(ctx, rootfsAgentOpenRCRunlevelPath, unix.S_IFDIR)
+	if err != nil {
+		return rootfsAgentInitUnknown, err
+	}
+	systemd := systemdBinary && systemdConfig
+	openRC := openRCBinary && openRCInit && openRCRunlevel
+	if systemd == openRC {
+		return rootfsAgentInitUnknown, rootfsAtomicError(
+			"managed guest agent init layout is missing or ambiguous",
+			nil,
+		)
+	}
+	if systemd {
+		return rootfsAgentInitSystemd, nil
+	}
+	return rootfsAgentInitOpenRC, nil
+}
+
+func validRootfsAgentEnablementLink(path string, target string) bool {
+	return path == rootfsAgentSystemdWantsLink && target == rootfsAgentSystemdWantsTarget ||
+		path == rootfsAgentOpenRCRunlevelLink && target == rootfsAgentOpenRCRunlevelTarget
 }
 
 func rootfsSSHDConfig(user string) []byte {
@@ -841,13 +945,13 @@ DefaultDependencies=no
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/mvm-agent -port %d -token-file /run/mvm-agent.token
+ExecStart=/usr/bin/mvm-agent -port %d -token-file %s
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=sysinit.target
-`, port)
+`, port, rootfsAgentTokenPath)
 }
 
 func rootfsAgentOpenRCService(port int) []byte {
@@ -855,12 +959,12 @@ func rootfsAgentOpenRCService(port int) []byte {
 
 description="MVM Agent"
 command=/usr/bin/mvm-agent
-command_args="-port %d -token-file /run/mvm-agent.token"
+command_args="-port %d -token-file %s"
 pidfile=/run/mvm-agent.pid
 command_background=true
 
 depend() {
     need localmount
 }
-`, port)
+`, port, rootfsAgentTokenPath)
 }

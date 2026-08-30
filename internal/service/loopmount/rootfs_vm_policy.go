@@ -12,7 +12,7 @@ func (tracker *rootfsProvisionTracker) markModified() {
 }
 
 func (tracker *rootfsProvisionTracker) completeMutation() {
-	tracker.modified = true
+	tracker.markModified()
 	tracker.outcomeUnknown = false
 }
 

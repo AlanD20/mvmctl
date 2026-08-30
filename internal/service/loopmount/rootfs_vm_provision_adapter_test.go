@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -12,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
 )
 
@@ -29,9 +34,11 @@ func TestRootfsVMProvisionAdapterConvergedReplayUsesClosedReadWriteFlow(t *testi
 	assert.Zero(t, fixture.truncateCalls, "a replay admitted at the target must not truncate again")
 	assert.False(t, fixture.base.unlocked)
 	require.Len(t, fixture.base.mounts, 2)
-	assert.Equal(t, testRootfsInspectMountCall{
+	if diff := cmp.Diff(testRootfsInspectMountCall{
 		source: "/dev/loop3p1", target: rootfsInspectMountPath, filesystem: "ext4", flags: rootfsProvisionMountFlags,
-	}, fixture.base.mounts[1])
+	}, fixture.base.mounts[1], cmp.AllowUnexported(testRootfsInspectMountCall{})); diff != "" {
+		t.Errorf("read-write mount mismatch (-want +got):\n%s", diff)
+	}
 	assertRootfsInspectEventOrder(t, fixture.base.events,
 		"syncfs", "close:13", "unmount", "partition-close:41", "loop-clear", "close:11", "close:10", "backing-fsync",
 	)
@@ -90,6 +97,23 @@ func TestRootfsVMProvisionAdapterClassifiesBoundaryFaults(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Rationale: An unshare failure leaves the thread in the original namespace, so it must be returned to the runtime.
+func TestRootfsVMProvisionAdapterUnlocksThreadWhenUnshareFails(t *testing.T) {
+	t.Parallel()
+
+	fixture := newTestRootfsVMProvisionFixture(t)
+	fixture.base.unshareErr = errors.New("unshare failed")
+	_, err := fixture.adapter().ProvisionVM(
+		t.Context(),
+		fixture.base.lease,
+		FilesystemExt4,
+		VMProvisionPlan{ResizeBytes: fixture.target},
+	)
+	require.Error(t, err)
+	assert.True(t, fixture.base.unlocked)
+	assertRootfsInspectEventOrder(t, fixture.base.events, "lock-thread", "unlock-thread")
 }
 
 func TestRootfsVMProvisionAdapterCleanupIgnoresCancellation(t *testing.T) {
@@ -170,7 +194,9 @@ func TestRunRootfsGrowToolUsesExactCommandAndClassifiesCompletion(t *testing.T) 
 				assert.True(t, opts.Capture)
 				assert.Equal(t, "/", opts.Cwd)
 				assert.True(t, opts.ReplaceEnv)
-				assert.Equal(t, map[string]string{"LANG": "C", "LC_ALL": "C"}, opts.Env)
+				if diff := cmp.Diff(map[string]string{"LANG": "C", "LC_ALL": "C"}, opts.Env); diff != "" {
+					t.Errorf("grow environment mismatch (-want +got):\n%s", diff)
+				}
 				assert.Equal(t, maxRootfsGrowToolStdoutBytes, opts.MaxStdoutBytes)
 				assert.Equal(t, maxRootfsGrowToolStderrBytes, opts.MaxStderrBytes)
 				return tc.result, tc.runErr
@@ -218,7 +244,12 @@ func TestConvergeRootfsProvisionGrowUsesOnlyFilesystemSpecificFixedTools(t *test
 		assert.Equal(t, 13, rootFD)
 		assert.True(t, mounted)
 		assert.Equal(t, uint32(1), commandsRun)
-		assert.Equal(t, []string{rootfsBtrfsPath, "filesystem", "resize", "max", rootfsInspectMountPath}, gotCommand)
+		if diff := cmp.Diff(
+			[]string{rootfsBtrfsPath, "filesystem", "resize", "max", rootfsInspectMountPath},
+			gotCommand,
+		); diff != "" {
+			t.Errorf("btrfs grow command mismatch (-want +got):\n%s", diff)
+		}
 	})
 
 	t.Run("ext_offline", func(t *testing.T) {
@@ -297,7 +328,9 @@ func TestGrowRootfsProvisionBackingUsesRetainedDescriptorOnce(t *testing.T) {
 		},
 	}, lease, targetBytes, tracker)
 	require.NoError(t, err)
-	assert.Equal(t, []string{"truncate", "fsync"}, calls)
+	if diff := cmp.Diff([]string{"truncate", "fsync"}, calls); diff != "" {
+		t.Errorf("backing grow calls mismatch (-want +got):\n%s", diff)
+	}
 	assert.Equal(t, vmProvisionEffectStateModifiedDurabilityUncertain, tracker.state())
 }
 
@@ -313,9 +346,175 @@ func TestRootfsProvisionFixedServiceContentUsesAProtectedTokenFile(t *testing.T)
 			assert.Contains(t, string(content), "-token-file "+rootfsAgentTokenPath)
 		})
 	}
-	assert.Equal(t, "/run/mvm-agent.token", rootfsAgentTokenPath)
+	assert.Contains(t, string(rootfsAgentSystemdService(1024)), "WantedBy=sysinit.target")
+	assert.Equal(t, infra.GuestAgentTokenPath, rootfsAgentTokenPath)
 	assert.Contains(t, string(rootfsSSHDConfig("root")), "PermitRootLogin prohibit-password")
 	assert.Contains(t, string(rootfsSSHDConfig("alice")), "AllowUsers alice")
+}
+
+// Rationale: A systemd guest must receive only its matching service and one fixed wants link, while authentication
+// state remains beneath a persistent root-only directory rather than the boot-time /run mount.
+func TestApplyRootfsProvisionPlanEnablesAgentForExistingSystemdLayout(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "usr/lib/systemd"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/systemd"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "usr/lib/systemd/systemd"), []byte("systemd"), 0755))
+	tree := newTestUnprivilegedRootfsGuestTree(t, root)
+	token := "5c9a355a-eafa-48e5-9305-76b95e9967ca"
+	deps := rootfsVMProvisionDeps{
+		agentBinary: func(context.Context) ([]byte, error) { return []byte("agent-binary"), nil },
+	}
+	plan := VMProvisionPlan{Agent: &AgentSetup{Port: 1024, Token: token}}
+
+	filesWritten, err := applyRootfsProvisionPlan(t.Context(), tree, deps, plan)
+	require.NoError(t, err)
+	assert.Equal(t, uint32(4), filesWritten)
+	assertRootfsProvisionedFile(t, root, "/usr/bin/mvm-agent", []byte("agent-binary"), 0755)
+	assertRootfsProvisionedFile(t, root, infra.GuestAgentTokenPath, []byte(token+"\n"), 0600)
+	assertRootfsProvisionedFile(
+		t,
+		root,
+		"/etc/systemd/system/mvm-agent.service",
+		rootfsAgentSystemdService(1024),
+		0644,
+	)
+	assertRootfsProvisionedSymlink(
+		t,
+		root,
+		"/etc/systemd/system/sysinit.target.wants/mvm-agent.service",
+		"../mvm-agent.service",
+	)
+	assert.NoDirExists(t, filepath.Join(root, "etc/init.d"))
+	info, err := os.Stat(filepath.Join(root, strings.TrimPrefix(infra.GuestAgentConfigDirectory, "/")))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0700), info.Mode().Perm())
+
+	tree.tracker = &rootfsProvisionTracker{}
+	replayedFiles, err := applyRootfsProvisionPlan(t.Context(), tree, deps, plan)
+	require.NoError(t, err)
+	assert.Zero(t, replayedFiles)
+	assert.Equal(t, vmProvisionEffectStateUnchanged, tree.tracker.state())
+}
+
+// Rationale: An OpenRC guest must not require or create /etc/systemd and must receive only its fixed default-runlevel
+// link after existing OpenRC layout evidence is pinned.
+func TestApplyRootfsProvisionPlanEnablesAgentForExistingOpenRCLayout(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "usr"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "sbin"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/init.d"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/runlevels/default"), 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(root, "sbin/openrc"), []byte("openrc"), 0755))
+	tree := newTestUnprivilegedRootfsGuestTree(t, root)
+	token := "5c9a355a-eafa-48e5-9305-76b95e9967ca"
+
+	filesWritten, err := applyRootfsProvisionPlan(t.Context(), tree, rootfsVMProvisionDeps{
+		agentBinary: func(context.Context) ([]byte, error) { return []byte("agent-binary"), nil },
+	}, VMProvisionPlan{Agent: &AgentSetup{Port: 1024, Token: token}})
+	require.NoError(t, err)
+	assert.Equal(t, uint32(4), filesWritten)
+	assertRootfsProvisionedFile(t, root, infra.GuestAgentTokenPath, []byte(token+"\n"), 0600)
+	assertRootfsProvisionedFile(t, root, "/etc/init.d/mvm-agent", rootfsAgentOpenRCService(1024), 0755)
+	assertRootfsProvisionedSymlink(t, root, "/etc/runlevels/default/mvm-agent", "/etc/init.d/mvm-agent")
+	assert.NoDirExists(t, filepath.Join(root, "etc/systemd"))
+}
+
+// Rationale: Missing or ambiguous fixed init evidence must reject agent provisioning before any executable, token,
+// service, or enablement link is published.
+func TestApplyRootfsProvisionPlanRejectsUnprovedAgentInitLayoutBeforeWrites(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*testing.T, string){
+		"missing": func(*testing.T, string) {},
+		"ambiguous": func(t *testing.T, root string) {
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "usr/lib/systemd"), 0755))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/systemd"), 0755))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "sbin"), 0755))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/init.d"), 0755))
+			require.NoError(t, os.MkdirAll(filepath.Join(root, "etc/runlevels/default"), 0755))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "usr/lib/systemd/systemd"), []byte("systemd"), 0755))
+			require.NoError(t, os.WriteFile(filepath.Join(root, "sbin/openrc"), []byte("openrc"), 0755))
+		},
+	}
+	for name, setup := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			setup(t, root)
+			tree := newTestUnprivilegedRootfsGuestTree(t, root)
+			filesWritten, err := applyRootfsProvisionPlan(t.Context(), tree, rootfsVMProvisionDeps{
+				agentBinary: func(context.Context) ([]byte, error) { return []byte("agent-binary"), nil },
+			}, VMProvisionPlan{Agent: &AgentSetup{
+				Port: 1024, Token: "5c9a355a-eafa-48e5-9305-76b95e9967ca",
+			}})
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "init layout")
+			assert.Zero(t, filesWritten)
+			assert.NoFileExists(t, filepath.Join(root, "usr/bin/mvm-agent"))
+			assert.NoFileExists(t, filepath.Join(root, strings.TrimPrefix(infra.GuestAgentTokenPath, "/")))
+		})
+	}
+}
+
+func newTestUnprivilegedRootfsGuestTree(t *testing.T, root string) rootfsGuestTree {
+	t.Helper()
+
+	rootFD, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, unix.Close(rootFD)) })
+	var sequence atomic.Uint32
+	deps := testSystemRootfsGuestTreeDeps(&sequence)
+	owners := make(map[uint64][2]uint32)
+	deps.fchown = func(_ context.Context, fd, uid, gid int) error {
+		var stat unix.Stat_t
+		if err := unix.Fstat(fd, &stat); err != nil {
+			return err
+		}
+		owners[stat.Ino] = [2]uint32{uint32(uid), uint32(gid)}
+		return nil
+	}
+	deps.fstat = func(_ context.Context, fd int, stat *unix.Stat_t) error {
+		if err := unix.Fstat(fd, stat); err != nil {
+			return err
+		}
+		if owner, ok := owners[stat.Ino]; ok {
+			stat.Uid = owner[0]
+			stat.Gid = owner[1]
+		}
+		return nil
+	}
+	return rootfsGuestTree{deps: deps, rootFD: rootFD, tracker: &rootfsProvisionTracker{}}
+}
+
+// assertRootfsProvisionedFile verifies the durable payload and mode through the mounted-tree test filesystem.
+func assertRootfsProvisionedFile(t *testing.T, root, path string, want []byte, mode os.FileMode) {
+	t.Helper()
+
+	fullPath := filepath.Join(root, strings.TrimPrefix(path, "/"))
+	got, err := os.ReadFile(fullPath)
+	require.NoError(t, err)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("provisioned file content mismatch (-want +got):\n%s", diff)
+	}
+	info, err := os.Stat(fullPath)
+	require.NoError(t, err)
+	assert.Equal(t, mode, info.Mode().Perm())
+}
+
+// assertRootfsProvisionedSymlink verifies one exact boot-enablement link without following it.
+func assertRootfsProvisionedSymlink(t *testing.T, root, path, wantTarget string) {
+	t.Helper()
+
+	fullPath := filepath.Join(root, strings.TrimPrefix(path, "/"))
+	info, err := os.Lstat(fullPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.ModeSymlink, info.Mode().Type())
+	target, err := os.Readlink(fullPath)
+	require.NoError(t, err)
+	assert.Equal(t, wantTarget, target)
 }
 
 type testRootfsVMProvisionFixture struct {
@@ -329,6 +528,7 @@ type testRootfsVMProvisionFixture struct {
 	cancelDuringSync context.CancelFunc
 }
 
+// newTestRootfsVMProvisionFixture constructs a complete inert provisioning effect with observable cleanup state.
 func newTestRootfsVMProvisionFixture(t *testing.T) *testRootfsVMProvisionFixture {
 	t.Helper()
 	fixture := &testRootfsVMProvisionFixture{
@@ -397,6 +597,8 @@ func (fixture *testRootfsVMProvisionFixture) adapter() *rootfsVMProvisionAdapter
 			return fixture.syncfsErr
 		},
 		renameAt:    func(context.Context, int, string, int, string) error { return nil },
+		symlinkAt:   func(context.Context, string, int, string) error { return nil },
+		readlinkAt:  func(context.Context, int, string, []byte) (int, error) { return 0, nil },
 		unlinkAt:    func(context.Context, int, string, int) error { return nil },
 		close:       baseDeps.close,
 		deviceBytes: func(context.Context, int) (uint64, error) { return fixture.target, nil },

@@ -74,6 +74,12 @@ const CgroupV2Root = "/sys/fs/cgroup"
 // JailerManifestFilename is the fixed per-VM launch manifest name.
 const JailerManifestFilename = "jailer-launch.json"
 
+// GuestAgentConfigDirectory is the persistent root-only guest directory containing agent authentication state.
+const GuestAgentConfigDirectory = "/etc/mvmctl"
+
+// GuestAgentTokenPath is the fixed persistent guest-agent authentication token leaf.
+const GuestAgentTokenPath = GuestAgentConfigDirectory + "/agent.token"
+
 const (
 	// VMRootfsFilename is the fixed managed VM root filesystem leaf.
 	VMRootfsFilename = "rootfs.img"

@@ -13,26 +13,30 @@ import (
 
 const (
 	rootfsGuestDirectoryFlags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC | unix.O_NOFOLLOW
+	rootfsGuestInspectFlags   = unix.O_PATH | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	rootfsGuestReadFlags      = unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	rootfsGuestTempFlags      = unix.O_WRONLY | unix.O_CREAT | unix.O_EXCL | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	rootfsGuestResolveFlags   = unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS |
 		unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV
+	maxRootfsGuestSymlinkTargetBytes = 4096
 )
 
 type rootfsGuestTreeDeps struct {
-	openAt2  func(context.Context, int, string, *unix.OpenHow) (int, error)
-	mkdirAt  func(context.Context, int, string, uint32) error
-	fstat    func(context.Context, int, *unix.Stat_t) error
-	fstatAt  func(context.Context, int, string, *unix.Stat_t, int) error
-	pread    func(context.Context, int, []byte, int64) (int, error)
-	pwrite   func(context.Context, int, []byte, int64) (int, error)
-	fchown   func(context.Context, int, int, int) error
-	fchmod   func(context.Context, int, uint32) error
-	fsync    func(context.Context, int) error
-	renameAt func(context.Context, int, string, int, string) error
-	unlinkAt func(context.Context, int, string, int) error
-	close    func(context.Context, int) error
-	tempName func(context.Context) (string, error)
+	openAt2    func(context.Context, int, string, *unix.OpenHow) (int, error)
+	mkdirAt    func(context.Context, int, string, uint32) error
+	fstat      func(context.Context, int, *unix.Stat_t) error
+	fstatAt    func(context.Context, int, string, *unix.Stat_t, int) error
+	pread      func(context.Context, int, []byte, int64) (int, error)
+	pwrite     func(context.Context, int, []byte, int64) (int, error)
+	fchown     func(context.Context, int, int, int) error
+	fchmod     func(context.Context, int, uint32) error
+	fsync      func(context.Context, int) error
+	renameAt   func(context.Context, int, string, int, string) error
+	symlinkAt  func(context.Context, string, int, string) error
+	readlinkAt func(context.Context, int, string, []byte) (int, error)
+	unlinkAt   func(context.Context, int, string, int) error
+	close      func(context.Context, int) error
+	tempName   func(context.Context) (string, error)
 }
 
 type rootfsGuestTree struct {
@@ -256,6 +260,143 @@ func (tree rootfsGuestTree) replaceFile(
 	return true, nil
 }
 
+func (tree rootfsGuestTree) fixedPathHasType(
+	ctx context.Context,
+	path string,
+	wantType uint32,
+) (_ bool, returnErr error) {
+	parentFD, leaf, err := tree.openParent(ctx, path)
+	if err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer func() {
+		returnErr = appendRootfsProvisionCleanupError(
+			returnErr,
+			"close fixed guest evidence parent",
+			tree.deps.close(context.WithoutCancel(ctx), parentFD),
+		)
+	}()
+	fd, err := tree.deps.openAt2(ctx, parentFD, leaf, &unix.OpenHow{
+		Flags: rootfsGuestInspectFlags, Resolve: rootfsGuestResolveFlags,
+	})
+	if err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return false, nil
+		}
+		return false, rootfsAtomicError("open fixed guest layout evidence", err)
+	}
+	defer func() {
+		returnErr = appendRootfsProvisionCleanupError(
+			returnErr,
+			"close fixed guest layout evidence",
+			tree.deps.close(context.WithoutCancel(ctx), fd),
+		)
+	}()
+	var stat unix.Stat_t
+	if err := tree.deps.fstat(ctx, fd, &stat); err != nil {
+		return false, rootfsAtomicError("inspect fixed guest layout evidence", err)
+	}
+	if stat.Mode&unix.S_IFMT != wantType {
+		return false, rootfsAtomicError("fixed guest layout evidence has an unsafe type", nil)
+	}
+	return true, nil
+}
+
+func (tree rootfsGuestTree) replaceAgentEnablementLink(
+	ctx context.Context,
+	layout rootfsAgentInitLayout,
+) (bool, error) {
+	switch layout {
+	case rootfsAgentInitSystemd:
+		return tree.replaceFixedSymlink(
+			ctx,
+			rootfsAgentSystemdWantsLink,
+			rootfsAgentSystemdWantsTarget,
+		)
+	case rootfsAgentInitOpenRC:
+		return tree.replaceFixedSymlink(
+			ctx,
+			rootfsAgentOpenRCRunlevelLink,
+			rootfsAgentOpenRCRunlevelTarget,
+		)
+	default:
+		return false, rootfsAtomicError("managed guest agent init layout is unsupported", nil)
+	}
+}
+
+// CRITICAL: Callers cannot choose a guest path or target; only the two fixed agent enablement links reach this helper.
+func (tree rootfsGuestTree) replaceFixedSymlink(
+	ctx context.Context,
+	path string,
+	target string,
+) (_ bool, returnErr error) {
+	if !validRootfsAgentEnablementLink(path, target) {
+		return false, rootfsAtomicError("managed guest agent enablement link is outside policy", nil)
+	}
+	parentFD, leaf, err := tree.openParent(ctx, path)
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		returnErr = appendRootfsProvisionCleanupError(
+			returnErr,
+			"close managed guest agent link parent",
+			tree.deps.close(context.WithoutCancel(ctx), parentFD),
+		)
+	}()
+	equal, err := rootfsGuestSymlinkAlreadyEqual(ctx, tree.deps, parentFD, leaf, target)
+	if err != nil {
+		return false, err
+	}
+	if equal {
+		return false, nil
+	}
+	tempName, err := tree.deps.tempName(ctx)
+	if err != nil || !validRootfsGuestTempName(tempName) {
+		return false, rootfsAtomicError("derive managed guest link temporary leaf", err)
+	}
+	if err := tree.deps.symlinkAt(ctx, target, parentFD, tempName); err != nil {
+		return false, rootfsAtomicError("create managed guest agent temporary link", err)
+	}
+	tempPresent := true
+	defer func() {
+		if !tempPresent {
+			return
+		}
+		returnErr = appendRootfsProvisionCleanupError(
+			returnErr,
+			"remove managed guest agent temporary link",
+			tree.deps.unlinkAt(context.WithoutCancel(ctx), parentFD, tempName, 0),
+		)
+	}()
+	tree.tracker.markModified()
+	equal, err = rootfsGuestSymlinkAlreadyEqual(ctx, tree.deps, parentFD, tempName, target)
+	if err != nil {
+		return true, err
+	}
+	if !equal {
+		return true, rootfsAtomicError("managed guest agent temporary link does not match", nil)
+	}
+	if err := tree.deps.renameAt(ctx, parentFD, tempName, parentFD, leaf); err != nil {
+		return true, rootfsAtomicError("publish managed guest agent enablement link", err)
+	}
+	tempPresent = false
+	if err := tree.deps.fsync(ctx, parentFD); err != nil {
+		return true, rootfsCleanupError("sync managed guest agent link parent", err)
+	}
+	equal, err = rootfsGuestSymlinkAlreadyEqual(ctx, tree.deps, parentFD, leaf, target)
+	if err != nil {
+		return true, err
+	}
+	if !equal {
+		return true, rootfsAtomicError("published managed guest agent enablement link does not match", nil)
+	}
+	return true, nil
+}
+
 func (tree rootfsGuestTree) openParent(
 	ctx context.Context,
 	path string,
@@ -404,6 +545,34 @@ func rootfsGuestFileAlreadyEqual(
 		bytes.Equal(content, file.content), nil
 }
 
+func rootfsGuestSymlinkAlreadyEqual(
+	ctx context.Context,
+	deps rootfsGuestTreeDeps,
+	parentFD int,
+	leaf string,
+	wantTarget string,
+) (bool, error) {
+	var stat unix.Stat_t
+	if err := deps.fstatAt(ctx, parentFD, leaf, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return false, nil
+		}
+		return false, rootfsAtomicError("inspect managed guest agent enablement link", err)
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFLNK || stat.Nlink != 1 {
+		return false, rootfsAtomicError("managed guest agent enablement leaf has an unsafe type", nil)
+	}
+	buffer := make([]byte, maxRootfsGuestSymlinkTargetBytes+1)
+	count, err := deps.readlinkAt(ctx, parentFD, leaf, buffer)
+	if err != nil {
+		return false, rootfsAtomicError("read managed guest agent enablement link", err)
+	}
+	if count < 0 || count > maxRootfsGuestSymlinkTargetBytes || count > len(buffer) {
+		return false, rootfsAtomicError("managed guest agent enablement target is unbounded", nil)
+	}
+	return string(buffer[:count]) == wantTarget, nil
+}
+
 func inspectInitialRootfsGuestTemp(ctx context.Context, deps rootfsGuestTreeDeps, fd int) error {
 	var stat unix.Stat_t
 	if err := deps.fstat(ctx, fd, &stat); err != nil {
@@ -472,7 +641,8 @@ func validRootfsGuestTempName(name string) bool {
 func validateRootfsGuestTreeDeps(deps rootfsGuestTreeDeps) error {
 	if deps.openAt2 == nil || deps.mkdirAt == nil || deps.fstat == nil || deps.fstatAt == nil || deps.pread == nil ||
 		deps.pwrite == nil || deps.fchown == nil || deps.fchmod == nil || deps.fsync == nil || deps.renameAt == nil ||
-		deps.unlinkAt == nil || deps.close == nil || deps.tempName == nil {
+		deps.symlinkAt == nil || deps.readlinkAt == nil || deps.unlinkAt == nil || deps.close == nil ||
+		deps.tempName == nil {
 		return rootfsAtomicError("managed guest tree dependencies are incomplete", nil)
 	}
 	return nil

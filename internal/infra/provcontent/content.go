@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"mvmctl/internal/infra"
 )
 
 // --- Operation types -- pure data, no execution logic ---
@@ -596,7 +598,7 @@ func (pc Builder) BuildDeblobOps(osType string) []Operation {
 //
 // Produces:
 // - FileOp: /usr/bin/mvm-agent (agent binary, mode 0755)
-// - FileOp: /var/run/mvm-agent.token (auth token, mode 0644)
+// - FileOp: /etc/mvmctl/agent.token (auth token, mode 0600)
 // - FileOp: /etc/systemd/system/mvm-agent.service (systemd unit, mode 0644)
 // - FileOp: /etc/init.d/mvm-agent (OpenRC init script, mode 0755)
 // - ChrootOp: detect init system and enable agent
@@ -610,7 +612,7 @@ func (Builder) BuildAgentOps(agentBinary []byte, port int, token string) []Opera
 			GID:  0,
 		},
 		FileOp{
-			Path: "/var/run/mvm-agent.token",
+			Path: infra.GuestAgentTokenPath,
 			Data: []byte(token),
 			Mode: 0600,
 			UID:  0,
@@ -624,13 +626,13 @@ DefaultDependencies=no
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/mvm-agent -port %d
+ExecStart=/usr/bin/mvm-agent -port %d -token-file %s
 Restart=always
 RestartSec=2
 
 [Install]
 WantedBy=sysinit.target
-`, port),
+`, port, infra.GuestAgentTokenPath),
 			Mode: 0644,
 			UID:  0,
 			GID:  0,
@@ -642,29 +644,35 @@ WantedBy=sysinit.target
 description="MVM Agent"
 
 command=/usr/bin/mvm-agent
-command_args="-port %d"
+command_args="-port %d -token-file %s"
 pidfile=/var/run/mvm-agent.pid
 command_background=true
 
 depend() {
     need localmount
 }
-`, port),
+`, port, infra.GuestAgentTokenPath),
 			Mode: 0755,
 			UID:  0,
 			GID:  0,
 		},
 		ChrootOp{
-			Command: `
-	if command -v systemctl >/dev/null 2>&1; then
-    mkdir -p /etc/systemd/system/multi-user.target.wants 2>/dev/null || true
-    ln -sf /etc/systemd/system/mvm-agent.service /etc/systemd/system/multi-user.target.wants/mvm-agent.service 2>/dev/null || true
-elif rc-update >/dev/null 2>&1; then
-    rc-update add mvm-agent default
-else
-    echo "mvm: warning - unknown init system, mvm-agent not auto-enabled"
+			Command: fmt.Sprintf(`
+	if [ ! -d %[1]s ]; then
+    echo "mvm: managed agent config directory is missing" >&2
+    exit 1
 fi
-`,
+chmod 0700 %[1]s || exit 1
+	if command -v systemctl >/dev/null 2>&1; then
+    mkdir -p /etc/systemd/system/sysinit.target.wants || exit 1
+    ln -sf /etc/systemd/system/mvm-agent.service /etc/systemd/system/sysinit.target.wants/mvm-agent.service || exit 1
+elif rc-update >/dev/null 2>&1; then
+    rc-update add mvm-agent default || exit 1
+else
+    echo "mvm: unsupported init system; managed agent was not enabled" >&2
+    exit 1
+fi
+`, infra.GuestAgentConfigDirectory),
 		},
 	}
 }

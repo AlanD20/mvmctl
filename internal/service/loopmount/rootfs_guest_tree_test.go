@@ -160,6 +160,12 @@ func testSystemRootfsGuestTreeDeps(sequence *atomic.Uint32) rootfsGuestTreeDeps 
 		renameAt: func(_ context.Context, oldFD int, oldName string, newFD int, newName string) error {
 			return unix.Renameat(oldFD, oldName, newFD, newName)
 		},
+		symlinkAt: func(_ context.Context, target string, fd int, name string) error {
+			return unix.Symlinkat(target, fd, name)
+		},
+		readlinkAt: func(_ context.Context, fd int, path string, buffer []byte) (int, error) {
+			return unix.Readlinkat(fd, path, buffer)
+		},
 		unlinkAt: func(_ context.Context, fd int, name string, flags int) error {
 			return unix.Unlinkat(fd, name, flags)
 		},
