@@ -26,6 +26,7 @@ type launchLeaseState struct {
 	directories *instanceUIDDirectories
 	vmLock      *vmAuthorityLease
 	prepared    *preparedRelease
+	processes   *blockedLaunchProcesses
 	record      instanceRecord
 	released    bool
 	cleanupErr  error
@@ -35,6 +36,7 @@ type launchLeaseSnapshot struct {
 	record         instanceRecord
 	hasVMLock      bool
 	hasDirectories bool
+	hasProcesses   bool
 	prepared       preparedReleaseSnapshot
 	released       bool
 }
@@ -50,6 +52,8 @@ type cleanupLease struct {
 	roots       *instanceAuthorityRoots
 	directories *instanceUIDDirectories
 	vmLock      *vmAuthorityLease
+	prepared    *preparedRelease
+	processes   *blockedLaunchProcesses
 	record      instanceRecord
 }
 
@@ -125,6 +129,7 @@ func (prepared *preparedRelease) registerLaunching(
 	ctx context.Context,
 	caller instanceCaller,
 	intent launchIntent,
+	processes *blockedLaunchProcesses,
 ) (_ *launchLease, returnErr error) {
 	if prepared == nil || prepared.state == nil {
 		return nil, instanceStateError(intent.vmID, "prepared release is not active")
@@ -144,6 +149,11 @@ func (prepared *preparedRelease) registerLaunching(
 	if err := validateLaunchIntent(intent); err != nil {
 		return nil, err
 	}
+	processState, locators, err := processes.lockForRegistration(ctx, intent.vmID)
+	if err != nil {
+		return nil, err
+	}
+	defer processState.mu.Unlock()
 	release := preparedState.admission.identity
 	if err := validateReleaseIdentityValue(release); err != nil {
 		return nil, instanceAtomicError("prepared release identity is invalid", err)
@@ -169,7 +179,7 @@ func (prepared *preparedRelease) registerLaunching(
 		)
 	}()
 
-	indexLock, err := preparedState.slotLease.roots.acquireIndexLock(ctx)
+	indexLock, err = preparedState.slotLease.roots.acquireIndexLock(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +226,7 @@ func (prepared *preparedRelease) registerLaunching(
 		}
 		existing = &record
 	}
-	record, err := registerLaunchingInstanceRecord(caller, intent, release, existing)
+	record, err := registerLaunchingInstanceRecord(caller, intent, locators, release, existing)
 	if err != nil {
 		return nil, err
 	}
@@ -224,6 +234,7 @@ func (prepared *preparedRelease) registerLaunching(
 	if writeErr != nil && !instanceRecordWasReplaced(writeErr) {
 		return nil, writeErr
 	}
+	transferredProcesses := transferBlockedLaunchProcessesLocked(processState)
 	launch := &launchLease{
 		state: &launchLeaseState{
 			directories: directories,
@@ -235,7 +246,8 @@ func (prepared *preparedRelease) registerLaunching(
 				directory: preparedState.directory,
 				admission: preparedState.admission,
 			}},
-			record: record,
+			processes: transferredProcesses,
+			record:    record,
 		},
 	}
 	preparedState.slotLease = nil
@@ -520,6 +532,13 @@ func (lease *launchLease) Release(ctx context.Context) error {
 		state.directories,
 		nil,
 	)
+	if state.processes != nil {
+		state.cleanupErr = appendInstanceOperationError(
+			state.cleanupErr,
+			"release blocked launch process authority",
+			state.processes.Release(context.WithoutCancel(ctx)),
+		)
+	}
 	if state.prepared != nil {
 		state.cleanupErr = appendInstanceOperationError(
 			state.cleanupErr,
@@ -528,9 +547,59 @@ func (lease *launchLease) Release(ctx context.Context) error {
 		)
 	}
 	state.directories = nil
+	state.processes = nil
 	state.prepared = nil
 	state.released = true
 	return state.cleanupErr
+}
+
+// Abort consumes a live launch lease into cleanup only after the cleaning record replaces launching authority.
+func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr error) {
+	if lease == nil || lease.state == nil {
+		return nil, instanceStateError("", "launch lease is not active")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.vmLock == nil || state.directories == nil || state.prepared == nil ||
+		state.processes == nil {
+		return nil, instanceStateError(state.record.vmID, "launch lease is not active")
+	}
+	if ctx == nil {
+		return nil, instanceStateError(state.record.vmID, "launch abort context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, instanceAtomicError("abort launch authority", err)
+	}
+	if state.record.launch == nil {
+		return nil, instanceStateError(state.record.vmID, "launch authority identity is incomplete")
+	}
+	caller := instanceCaller{uid: state.record.ownerUID, gid: state.record.launch.ownerGID}
+	record, err := beginInstanceCleanup(caller, cloneInstanceRecord(state.record))
+	if err != nil {
+		return nil, err
+	}
+	writeErr := state.directories.writeRecord(ctx, record)
+	if writeErr != nil && !instanceRecordWasReplaced(writeErr) {
+		return nil, writeErr
+	}
+	target := &cleanupLease{
+		directories: state.directories,
+		vmLock:      state.vmLock,
+		prepared:    state.prepared,
+		processes:   state.processes,
+		record:      record,
+	}
+	state.directories = nil
+	state.vmLock = nil
+	state.prepared = nil
+	state.processes = nil
+	state.record = record
+	state.released = true
+	if writeErr != nil {
+		return target, writeErr
+	}
+	return target, nil
 }
 
 func (lease *launchLease) retainTopologyAuthority(
@@ -559,6 +628,7 @@ func (lease *launchLease) snapshot() launchLeaseSnapshot {
 		record:         cloneInstanceRecord(state.record),
 		hasVMLock:      state.vmLock != nil,
 		hasDirectories: state.directories != nil,
+		hasProcesses:   state.processes != nil,
 		released:       state.released,
 	}
 	if state.prepared != nil {
@@ -597,9 +667,25 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 		return nil
 	}
 	err := releaseInstanceOperationResources(ctx, nil, lease.vmLock, nil, nil, lease.directories, lease.roots)
+	if lease.processes != nil {
+		err = appendInstanceOperationError(
+			err,
+			"release cleanup process authority",
+			lease.processes.Release(context.WithoutCancel(ctx)),
+		)
+	}
+	if lease.prepared != nil {
+		err = appendInstanceOperationError(
+			err,
+			"release cleanup prepared release authority",
+			lease.prepared.Release(context.WithoutCancel(ctx)),
+		)
+	}
 	lease.vmLock = nil
 	lease.directories = nil
 	lease.roots = nil
+	lease.processes = nil
+	lease.prepared = nil
 	return err
 }
 

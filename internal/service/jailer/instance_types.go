@@ -71,8 +71,6 @@ type launchIntent struct {
 	vmID          string
 	hostBootID    string
 	cacheIdentity managedCacheIdentity
-	process       instanceProcessLocator
-	relay         instanceLaunchRelay
 }
 
 type instanceLaunchRecord struct {
@@ -152,6 +150,7 @@ type instanceRecord struct {
 func registerLaunchingInstanceRecord(
 	caller instanceCaller,
 	intent launchIntent,
+	processes launchProcessLocators,
 	release releaseIdentity,
 	existing *instanceRecord,
 ) (instanceRecord, error) {
@@ -159,6 +158,9 @@ func registerLaunchingInstanceRecord(
 		return instanceRecord{}, err
 	}
 	if err := validateLaunchIntent(intent); err != nil {
+		return instanceRecord{}, err
+	}
+	if err := validateLaunchProcessLocators(processes); err != nil {
 		return instanceRecord{}, err
 	}
 	if err := validateReleaseIdentityValue(release); err != nil {
@@ -192,8 +194,8 @@ func registerLaunchingInstanceRecord(
 	launch := &instanceLaunchRecord{
 		ownerGID:      caller.gid,
 		hostBootID:    intent.hostBootID,
-		process:       intent.process,
-		relay:         intent.relay,
+		process:       processes.process,
+		relay:         processes.relay,
 		cacheIdentity: intent.cacheIdentity,
 		release:       release,
 	}
@@ -300,13 +302,24 @@ func validateLaunchIntent(intent launchIntent) error {
 	if !vmIDPattern.MatchString(intent.vmID) {
 		return instanceValidationError("vm ID is invalid")
 	}
-	if err := validateInstanceLaunchValues(
-		intent.hostBootID,
-		intent.process,
-		intent.relay,
-		intent.cacheIdentity,
-	); err != nil {
+	if !hostBootIDPattern.MatchString(intent.hostBootID) {
+		return instanceValidationError("instance authority host boot ID is invalid")
+	}
+	if err := validateManagedCacheIdentityValue(intent.cacheIdentity); err != nil {
 		return instanceValidationError(err.Error())
+	}
+	return nil
+}
+
+func validateLaunchProcessLocators(processes launchProcessLocators) error {
+	if err := validateInstanceProcessLocator(processes.process); err != nil {
+		return instanceValidationError(err.Error())
+	}
+	if err := validateInstanceLaunchRelay(processes.relay); err != nil {
+		return instanceValidationError(err.Error())
+	}
+	if processes.relay.kind == instanceRelayPresent && processes.relay.locator.pid == processes.process.pid {
+		return instanceValidationError("instance authority relay PID matches the Firecracker child PID")
 	}
 	return nil
 }

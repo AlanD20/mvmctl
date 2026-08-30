@@ -318,7 +318,13 @@ func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {
 	caller := testInstanceCaller()
 	intent := testLaunchIntent(false)
 
-	launching, err := registerLaunchingInstanceRecord(caller, intent, testReleaseIdentity(), nil)
+	launching, err := registerLaunchingInstanceRecord(
+		caller,
+		intent,
+		testLaunchProcessLocators(false),
+		testReleaseIdentity(),
+		nil,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, instanceLifecycleLaunching, launching.lifecycle)
 	assert.Equal(t, uint64(1), launching.launchGeneration)
@@ -326,7 +332,9 @@ func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {
 	require.NotNil(t, launching.launch)
 	assert.Nil(t, launching.active)
 
-	_, err = registerLaunchingInstanceRecord(caller, intent, testReleaseIdentity(), &launching)
+	_, err = registerLaunchingInstanceRecord(
+		caller, intent, testLaunchProcessLocators(false), testReleaseIdentity(), &launching,
+	)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAlreadyExists, errs.AsDomainError(err).Code)
 
@@ -356,7 +364,9 @@ func TestInstanceLifecycleTransitionsPreserveOnlyStateAuthority(t *testing.T) {
 	assert.Nil(t, cleaned.launch)
 	assert.Nil(t, cleaned.active)
 
-	relaunched, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(true), testReleaseIdentity(), &cleaned)
+	relaunched, err := registerLaunchingInstanceRecord(
+		caller, testLaunchIntent(true), testLaunchProcessLocators(true), testReleaseIdentity(), &cleaned,
+	)
 	require.NoError(t, err)
 	assert.Equal(t, instanceLifecycleLaunching, relaunched.lifecycle)
 	assert.Equal(t, uint64(2), relaunched.launchGeneration)
@@ -369,7 +379,9 @@ func TestInstanceLifecycleCanAbortBeforeActivation(t *testing.T) {
 	t.Parallel()
 
 	caller := testInstanceCaller()
-	launching, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(true), testReleaseIdentity(), nil)
+	launching, err := registerLaunchingInstanceRecord(
+		caller, testLaunchIntent(true), testLaunchProcessLocators(true), testReleaseIdentity(), nil,
+	)
 	require.NoError(t, err)
 
 	cleaning, err := beginInstanceCleanup(caller, launching)
@@ -385,7 +397,9 @@ func TestInstanceLifecycleRejectsForeignCaller(t *testing.T) {
 	record := testLaunchingInstanceRecord()
 	foreign := instanceCaller{uid: testAuthorityUID + 1, gid: testAuthorityGID}
 
-	_, err := registerLaunchingInstanceRecord(foreign, testLaunchIntent(false), testReleaseIdentity(), &record)
+	_, err := registerLaunchingInstanceRecord(
+		foreign, testLaunchIntent(false), testLaunchProcessLocators(false), testReleaseIdentity(), &record,
+	)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeUnauthorized, errs.AsDomainError(err).Code)
 	assert.NotContains(t, err.Error(), "1000")
@@ -433,12 +447,14 @@ func TestInstanceActivationRejectsIncompleteOrMismatchedFinalIdentity(t *testing
 	}
 }
 
-func TestLaunchIntentRejectsRelaySharingFirecrackerPID(t *testing.T) {
+func TestLaunchProcessLocatorsRejectRelaySharingFirecrackerPID(t *testing.T) {
 	t.Parallel()
 
-	intent := testLaunchIntent(true)
-	intent.relay.locator.pid = intent.process.pid
-	_, err := registerLaunchingInstanceRecord(testInstanceCaller(), intent, testReleaseIdentity(), nil)
+	processes := testLaunchProcessLocators(true)
+	processes.relay.locator.pid = processes.process.pid
+	_, err := registerLaunchingInstanceRecord(
+		testInstanceCaller(), testLaunchIntent(true), processes, testReleaseIdentity(), nil,
+	)
 	require.Error(t, err)
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
@@ -463,7 +479,9 @@ func TestLaunchingTransitionRejectsInvalidPreparedReleaseAsAtomicFailure(t *test
 
 			release := testReleaseIdentity()
 			release.version = version
-			_, err := registerLaunchingInstanceRecord(testInstanceCaller(), testLaunchIntent(false), release, nil)
+			_, err := registerLaunchingInstanceRecord(
+				testInstanceCaller(), testLaunchIntent(false), testLaunchProcessLocators(false), release, nil,
+			)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 		})
@@ -477,7 +495,9 @@ func TestInstanceTransitionRejectsCorruptExistingRecord(t *testing.T) {
 	corrupt := testLaunchingInstanceRecord()
 	corrupt.launchGeneration = 0
 
-	_, err := registerLaunchingInstanceRecord(caller, testLaunchIntent(false), testReleaseIdentity(), &corrupt)
+	_, err := registerLaunchingInstanceRecord(
+		caller, testLaunchIntent(false), testLaunchProcessLocators(false), testReleaseIdentity(), &corrupt,
+	)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 
@@ -508,7 +528,11 @@ func TestInstanceRelaunchRejectsExhaustedGeneration(t *testing.T) {
 	}
 
 	_, err := registerLaunchingInstanceRecord(
-		testInstanceCaller(), testLaunchIntent(false), testReleaseIdentity(), &cleaned,
+		testInstanceCaller(),
+		testLaunchIntent(false),
+		testLaunchProcessLocators(false),
+		testReleaseIdentity(),
+		&cleaned,
 	)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(err).Code)
@@ -518,7 +542,15 @@ func testInstanceCaller() instanceCaller {
 	return instanceCaller{uid: testAuthorityUID, gid: testAuthorityGID}
 }
 
-func testLaunchIntent(relayPresent bool) launchIntent {
+func testLaunchIntent(_ bool) launchIntent {
+	return launchIntent{
+		vmID:          testVMID,
+		hostBootID:    "123e4567-e89b-42d3-a456-426614174000",
+		cacheIdentity: testManagedCacheIdentity(),
+	}
+}
+
+func testLaunchProcessLocators(relayPresent bool) launchProcessLocators {
 	relay := instanceLaunchRelay{kind: instanceRelayAbsent}
 	if relayPresent {
 		relay = instanceLaunchRelay{
@@ -526,12 +558,9 @@ func testLaunchIntent(relayPresent bool) launchIntent {
 			locator: instanceProcessLocator{pid: 4343, startTimeTicks: 876543},
 		}
 	}
-	return launchIntent{
-		vmID:          testVMID,
-		hostBootID:    "123e4567-e89b-42d3-a456-426614174000",
-		cacheIdentity: testManagedCacheIdentity(),
-		process:       instanceProcessLocator{pid: 4242, startTimeTicks: 987654},
-		relay:         relay,
+	return launchProcessLocators{
+		process: instanceProcessLocator{pid: 4242, startTimeTicks: 987654},
+		relay:   relay,
 	}
 }
 
@@ -590,7 +619,8 @@ func testLaunchingInstanceRecord() instanceRecord {
 
 func testLaunchingInstanceRecordWithRelay(relayPresent bool) instanceRecord {
 	record, err := registerLaunchingInstanceRecord(
-		testInstanceCaller(), testLaunchIntent(relayPresent), testReleaseIdentity(), nil,
+		testInstanceCaller(), testLaunchIntent(relayPresent), testLaunchProcessLocators(relayPresent),
+		testReleaseIdentity(), nil,
 	)
 	if err != nil {
 		panic(err)

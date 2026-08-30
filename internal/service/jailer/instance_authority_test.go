@@ -11,10 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
 
@@ -44,11 +46,13 @@ func TestPreparedReleaseTransfersToSuccessfulLaunch(t *testing.T) {
 	preparedBefore := prepared.snapshot()
 	slot := preparedBefore.slot
 	wantRelease := preparedBefore.identity
+	processes := newTestBlockedLaunchProcesses(t, false)
 
 	launch, err := prepared.registerLaunching(
 		context.Background(),
 		testInstanceCaller(),
 		registration,
+		processes,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, launch)
@@ -56,8 +60,10 @@ func TestPreparedReleaseTransfersToSuccessfulLaunch(t *testing.T) {
 	launchSnapshot := launch.snapshot()
 	assert.True(t, launchSnapshot.hasVMLock)
 	assert.True(t, launchSnapshot.hasDirectories)
+	assert.True(t, launchSnapshot.hasProcesses)
 	assertPreparedReleaseSnapshotOpen(t, launchSnapshot.prepared)
 	assert.Equal(t, wantRelease, launchSnapshot.record.launch.release)
+	assert.Equal(t, blockedLaunchProcessesTransferred, processes.state.status)
 	assert.FileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
 	require.NoError(t, prepared.Release(context.Background()))
 
@@ -103,7 +109,9 @@ func TestLaunchLeaseCopiesConcurrentlyReleaseExactlyOnceAndCacheError(t *testing
 	}
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	prepared := prepareTestRelease(t, authority)
-	launch, err := prepared.registerLaunching(context.Background(), testInstanceCaller(), testLaunchIntent(false))
+	launch, err := prepared.registerLaunching(
+		context.Background(), testInstanceCaller(), testLaunchIntent(false), newTestBlockedLaunchProcesses(t, false),
+	)
 	require.NoError(t, err)
 	require.Equal(t, "index", <-releaseEvents)
 	assert.Equal(t, []string{"release", "index", "vm"}, tree.acquisitionSnapshot())
@@ -183,7 +191,12 @@ func TestPreparedReleaseSerializesReleaseAgainstLaunchingTransfer(t *testing.T) 
 	}
 	launchResults := make(chan launchResult, 1)
 	go func() {
-		lease, err := prepared.registerLaunching(context.Background(), testInstanceCaller(), testLaunchIntent(false))
+		lease, err := prepared.registerLaunching(
+			context.Background(),
+			testInstanceCaller(),
+			testLaunchIntent(false),
+			newTestBlockedLaunchProcesses(t, false),
+		)
 		launchResults <- launchResult{lease: lease, err: err}
 	}()
 	<-indexAcquire
@@ -229,14 +242,16 @@ func TestPreparedReleaseInvalidLaunchDoesNotConsumeAuthority(t *testing.T) {
 	tree := newTestInstanceAuthorityTree()
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchIntent(false)
-	registration.process.pid = 0
+	registration.hostBootID = ""
 	prepared := prepareTestRelease(t, authority)
+	processes := newTestBlockedLaunchProcesses(t, false)
 	assert.Equal(t, []string{"release"}, tree.acquisitionSnapshot())
 
 	launch, err := prepared.registerLaunching(
 		context.Background(),
 		testInstanceCaller(),
 		registration,
+		processes,
 	)
 	assert.Nil(t, launch)
 	require.Error(t, err)
@@ -246,7 +261,36 @@ func TestPreparedReleaseInvalidLaunchDoesNotConsumeAuthority(t *testing.T) {
 	assert.Equal(t, []string{"release"}, tree.acquisitionSnapshot())
 	assert.NoFileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
 	assertPreparedReleaseSnapshotOpen(t, prepared.snapshot())
+	assert.Equal(t, blockedLaunchProcessesOpen, processes.state.status)
 	require.NoError(t, prepared.Release(context.Background()))
+}
+
+func TestLaunchAbortTransfersOriginalProcessAuthorityToCleanup(t *testing.T) {
+	t.Parallel()
+
+	authority, _ := newTestInstanceAuthority(t)
+	prepared := prepareTestRelease(t, authority)
+	fixture := newBlockedProcessFixture(true)
+	processes, err := fixture.admit(t.Context())
+	require.NoError(t, err)
+	launch, err := prepared.registerLaunching(
+		t.Context(), testInstanceCaller(), testLaunchIntent(true), processes,
+	)
+	require.NoError(t, err)
+
+	cleanup, err := launch.Abort(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, cleanup)
+	assert.Equal(t, instanceLifecycleCleaning, cleanup.record.lifecycle)
+	assert.True(t, launch.snapshot().released)
+	require.NoError(t, launch.Release(t.Context()))
+	assert.Empty(t, fixture.eventsSnapshot())
+
+	require.NoError(t, cleanup.Release(t.Context()))
+	if diff := cmp.Diff([]string{"receiver", "relay:101", "firecracker:100"}, fixture.eventsSnapshot()); diff != "" {
+		t.Errorf("cleanup order mismatch (-want +got):\n%s", diff)
+	}
+	require.NoError(t, processes.Release(t.Context()))
 }
 
 func TestPreparedReleaseIndexFailureRetainsPreparedAuthority(t *testing.T) {
@@ -260,7 +304,9 @@ func TestPreparedReleaseIndexFailureRetainsPreparedAuthority(t *testing.T) {
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	prepared := prepareTestRelease(t, authority)
 
-	launch, err := prepared.registerLaunching(context.Background(), testInstanceCaller(), testLaunchIntent(false))
+	launch, err := prepared.registerLaunching(
+		context.Background(), testInstanceCaller(), testLaunchIntent(false), newTestBlockedLaunchProcesses(t, false),
+	)
 	assert.Nil(t, launch)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, indexErr)
@@ -446,6 +492,7 @@ func TestInstanceAuthorityRejectsCorruptGlobalClaim(t *testing.T) {
 		context.Background(),
 		instanceCaller{uid: testAuthorityUID + 1, gid: testAuthorityGID},
 		registration,
+		newTestBlockedLaunchProcesses(t, false),
 	)
 	assert.Nil(t, lease)
 	require.Error(t, err)
@@ -681,6 +728,7 @@ func TestInstanceAuthorityRegisterLockOrder(t *testing.T) {
 		context.Background(),
 		testInstanceCaller(),
 		registration,
+		newTestBlockedLaunchProcesses(t, false),
 	)
 	require.NoError(t, err)
 	require.NoError(t, lease.Release(context.Background()))
@@ -707,6 +755,7 @@ func TestInstanceAuthorityUsesOnlyFixedRootPathOpen(t *testing.T) {
 		context.Background(),
 		testInstanceCaller(),
 		registration,
+		newTestBlockedLaunchProcesses(t, false),
 	)
 	require.NoError(t, err)
 	require.NoError(t, lease.Release(context.Background()))
@@ -748,16 +797,19 @@ func TestPreparedReleaseRegistrationFailuresBeforeRenameRetainAuthority(t *testi
 				newTestInstanceAuthorityTree(),
 			)
 			prepared := prepareTestRelease(t, authority)
+			processes := newTestBlockedLaunchProcesses(t, false)
 
 			launch, err := prepared.registerLaunching(
 				context.Background(),
 				testInstanceCaller(),
 				testLaunchIntent(false),
+				processes,
 			)
 			assert.Nil(t, launch)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, fault)
 			assertPreparedReleaseSnapshotOpen(t, prepared.snapshot())
+			assert.Equal(t, blockedLaunchProcessesOpen, processes.state.status)
 			assert.NoFileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
 			require.NoError(t, prepared.Release(context.Background()))
 		})
@@ -775,11 +827,13 @@ func TestInstanceAuthorityIndexReleaseAfterDurableLaunchReturnsTransferredLease(
 	tree.lockReleaseErr = indexErr
 	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	prepared := prepareTestRelease(t, authority)
+	processes := newTestBlockedLaunchProcesses(t, false)
 
 	lease, err := prepared.registerLaunching(
 		context.Background(),
 		testInstanceCaller(),
 		testLaunchIntent(false),
+		processes,
 	)
 	require.NotNil(t, lease)
 	require.Error(t, err)
@@ -796,9 +850,11 @@ func TestInstanceAuthorityIndexReleaseAfterDurableLaunchReturnsTransferredLease(
 	assert.False(t, durabilityUncertain)
 
 	assertPreparedReleaseTransferred(t, prepared)
+	assert.Equal(t, blockedLaunchProcessesTransferred, processes.state.status)
 	leaseSnapshot := lease.snapshot()
 	assert.True(t, leaseSnapshot.hasVMLock)
 	assert.True(t, leaseSnapshot.hasDirectories)
+	assert.True(t, leaseSnapshot.hasProcesses)
 	assertPreparedReleaseSnapshotOpen(t, leaseSnapshot.prepared)
 	recordPath := filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json")
 	raw, readErr := os.ReadFile(recordPath)
@@ -859,6 +915,7 @@ func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *t
 		context.Background(),
 		testInstanceCaller(),
 		registration,
+		newTestBlockedLaunchProcesses(t, false),
 	)
 	require.NotNil(t, lease)
 	require.Error(t, err)
@@ -1013,7 +1070,7 @@ func registerTestLaunch(
 	t.Helper()
 
 	prepared := prepareTestRelease(t, authority)
-	launch, err := prepared.registerLaunching(ctx, caller, registration)
+	launch, err := prepared.registerLaunching(ctx, caller, registration, newTestBlockedLaunchProcesses(t, false))
 	if err != nil && launch == nil {
 		return nil, appendInstanceOperationError(
 			err,
@@ -1022,6 +1079,38 @@ func registerTestLaunch(
 		)
 	}
 	return launch, err
+}
+
+func newTestBlockedLaunchProcesses(t *testing.T, relayPresent bool) *blockedLaunchProcesses {
+	t.Helper()
+
+	deps := blockedLaunchProcessDeps{
+		pidfdAlive:      func(context.Context, int) (bool, error) { return true, nil },
+		descriptorFlags: func(context.Context, int) (int, error) { return unix.FD_CLOEXEC, nil },
+		pinnedExecutableIdentity: func(
+			context.Context,
+			*system.PinnedExecutable,
+		) (system.PinnedExecutableIdentity, error) {
+			return system.PinnedExecutableIdentity{
+				Device: 1, Inode: 2, SizeBytes: 3, Mode: unix.S_IFREG | 0755,
+				UID: 0, GID: 0, Links: 1, SHA256: testRelayHash,
+			}, nil
+		},
+		releasePinnedExecutable: func(context.Context, *system.PinnedExecutable) error { return nil },
+		close:                   func(context.Context, int) error { return nil },
+	}
+	firecracker := blockedLaunchProcess{locator: testLaunchProcessLocators(false).process, pidfd: 9000}
+	var relay *blockedLaunchProcess
+	if relayPresent {
+		value := blockedLaunchProcess{locator: testLaunchProcessLocators(true).relay.locator, pidfd: 9001}
+		relay = &value
+	}
+	processes, err := newBlockedLaunchProcesses(
+		t.Context(), deps, testVMID, firecracker, relay, &system.PinnedExecutable{},
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, processes.Release(context.Background())) })
+	return processes
 }
 
 func prepareTestRelease(t *testing.T, authority *instanceAuthority) *preparedRelease {

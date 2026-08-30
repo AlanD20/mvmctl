@@ -37,7 +37,7 @@ func TestInstanceSchemaThreeTransitionsMatchIndependentRecords(t *testing.T) {
 
 	want := schemaThreeProofRecords()
 	launching, err := registerLaunchingInstanceRecord(
-		testInstanceCaller(), testLaunchIntent(false), testReleaseIdentity(), nil,
+		testInstanceCaller(), testLaunchIntent(false), testLaunchProcessLocators(false), testReleaseIdentity(), nil,
 	)
 	require.NoError(t, err)
 	assertInstanceRecordEqual(t, want["launching"], launching)
@@ -67,7 +67,11 @@ func TestInstanceSchemaThreeTransitionsMatchIndependentRecords(t *testing.T) {
 	assertInstanceRecordEqual(t, want["cleaned"], cleaned)
 
 	relaunched, err := registerLaunchingInstanceRecord(
-		testInstanceCaller(), testLaunchIntent(false), testReleaseIdentity(), &cleaned,
+		testInstanceCaller(),
+		testLaunchIntent(false),
+		testLaunchProcessLocators(false),
+		testReleaseIdentity(),
+		&cleaned,
 	)
 	require.NoError(t, err)
 	wantRelaunched := want["launching"]
