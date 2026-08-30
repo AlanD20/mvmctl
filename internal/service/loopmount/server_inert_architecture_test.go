@@ -19,6 +19,8 @@ const (
 	rootfsPartitionDiscoveryEntry         = "discoverRootfsPartitionDevices"
 	systemRootfsImageInspectFactory       = "newSystemRootfsImageInspectAdapter"
 	rootfsImageInspectAdapterType         = "rootfsImageInspectAdapter"
+	systemRootfsVMProvisionFactory        = "newSystemRootfsVMProvisionAdapter"
+	rootfsVMProvisionAdapterType          = "rootfsVMProvisionAdapter"
 )
 
 // Rationale: The current Server and system lock adapter are reviewed foundations, not an authorized privileged action.
@@ -43,6 +45,7 @@ func TestLoopMountServerRemainsInertUntilExplicitActivation(t *testing.T) {
 		assertInertLoopMountFile(t, files, name, parsed)
 		assertInertRootfsPartitionDiscovery(t, files, parsed)
 		assertInertRootfsImageInspectAdapter(t, files, parsed)
+		assertInertRootfsVMProvisionAdapter(t, files, parsed)
 	}
 }
 
@@ -57,7 +60,11 @@ func assertInertRootfsPartitionDiscovery(t *testing.T, files *token.FileSet, par
 		),
 		rootfsPartitionDiscoveryEntry: functionDeclarationPosition(parsed, rootfsPartitionDiscoveryEntry),
 	}
-	allowedFactoryBody := identifiersWithinFunction(parsed, systemRootfsImageInspectFactory)
+	allowedFactoryBody := identifiersWithinFunctions(
+		parsed,
+		systemRootfsImageInspectFactory,
+		systemRootfsVMProvisionFactory,
+	)
 	ast.Inspect(parsed, func(node ast.Node) bool {
 		identifier, isIdentifier := node.(*ast.Ident)
 		if !isIdentifier {
@@ -74,19 +81,39 @@ func assertInertRootfsPartitionDiscovery(t *testing.T, files *token.FileSet, par
 	})
 }
 
-// assertInertRootfsImageInspectAdapter permits only its declaration, method receivers, and its unused system factory.
-// Constructing the adapter elsewhere would activate a permanently unshared OS thread without handler-exit semantics.
-func assertInertRootfsImageInspectAdapter(t *testing.T, files *token.FileSet, parsed *ast.File) {
+// assertInertRootfsVMProvisionAdapter permits only its declaration, method receivers, and unused system factory.
+// Construction elsewhere would activate a permanently unshared OS thread without handler-exit semantics.
+func assertInertRootfsVMProvisionAdapter(t *testing.T, files *token.FileSet, parsed *ast.File) {
 	t.Helper()
 
-	factoryDeclaration := functionDeclarationPosition(parsed, systemRootfsImageInspectFactory)
-	allowedAdapter := identifiersWithinFunction(parsed, systemRootfsImageInspectFactory)
+	assertInertRootfsEffectAdapter(
+		t,
+		files,
+		parsed,
+		systemRootfsVMProvisionFactory,
+		rootfsVMProvisionAdapterType,
+		"VM provisioning",
+	)
+}
+
+func assertInertRootfsEffectAdapter(
+	t *testing.T,
+	files *token.FileSet,
+	parsed *ast.File,
+	factoryName string,
+	adapterType string,
+	operation string,
+) {
+	t.Helper()
+
+	factoryDeclaration := functionDeclarationPosition(parsed, factoryName)
+	allowedAdapter := identifiersWithinFunction(parsed, factoryName)
 	for _, declaration := range parsed.Decls {
 		switch value := declaration.(type) {
 		case *ast.GenDecl:
 			for _, spec := range value.Specs {
 				typeSpec, isTypeSpec := spec.(*ast.TypeSpec)
-				if isTypeSpec && typeSpec.Name.Name == rootfsImageInspectAdapterType {
+				if isTypeSpec && typeSpec.Name.Name == adapterType {
 					allowedAdapter[typeSpec.Name.Pos()] = struct{}{}
 				}
 			}
@@ -96,7 +123,7 @@ func assertInertRootfsImageInspectAdapter(t *testing.T, files *token.FileSet, pa
 			}
 			ast.Inspect(value.Recv.List[0].Type, func(node ast.Node) bool {
 				identifier, ok := node.(*ast.Ident)
-				if ok && identifier.Name == rootfsImageInspectAdapterType {
+				if ok && identifier.Name == adapterType {
 					allowedAdapter[identifier.Pos()] = struct{}{}
 				}
 				return true
@@ -109,24 +136,36 @@ func assertInertRootfsImageInspectAdapter(t *testing.T, files *token.FileSet, pa
 		if !ok {
 			return true
 		}
-		if identifier.Name == systemRootfsImageInspectFactory && identifier.Pos() != factoryDeclaration {
-			t.Errorf(
-				"production image inspection adapter factory reference found at %s",
-				files.Position(identifier.Pos()),
-			)
+		if identifier.Name == factoryName && identifier.Pos() != factoryDeclaration {
+			t.Errorf("production %s adapter factory reference found at %s", operation, files.Position(identifier.Pos()))
 			return true
 		}
-		if identifier.Name != rootfsImageInspectAdapterType {
+		if identifier.Name != adapterType {
 			return true
 		}
 		if _, excluded := nonTypeNames[identifier.Pos()]; excluded {
 			return true
 		}
 		if _, allowed := allowedAdapter[identifier.Pos()]; !allowed {
-			t.Errorf("production image inspection adapter construction found at %s", files.Position(identifier.Pos()))
+			t.Errorf("production %s adapter construction found at %s", operation, files.Position(identifier.Pos()))
 		}
 		return true
 	})
+}
+
+// assertInertRootfsImageInspectAdapter permits only its declaration, method receivers, and its unused system factory.
+// Constructing the adapter elsewhere would activate a permanently unshared OS thread without handler-exit semantics.
+func assertInertRootfsImageInspectAdapter(t *testing.T, files *token.FileSet, parsed *ast.File) {
+	t.Helper()
+
+	assertInertRootfsEffectAdapter(
+		t,
+		files,
+		parsed,
+		systemRootfsImageInspectFactory,
+		rootfsImageInspectAdapterType,
+		"image inspection",
+	)
 }
 
 func identifiersWithinFunction(parsed *ast.File, name string) map[token.Pos]struct{} {
@@ -142,6 +181,16 @@ func identifiersWithinFunction(parsed *ast.File, name string) map[token.Pos]stru
 			}
 			return true
 		})
+	}
+	return positions
+}
+
+func identifiersWithinFunctions(parsed *ast.File, names ...string) map[token.Pos]struct{} {
+	positions := make(map[token.Pos]struct{})
+	for _, name := range names {
+		for position := range identifiersWithinFunction(parsed, name) {
+			positions[position] = struct{}{}
+		}
 	}
 	return positions
 }
