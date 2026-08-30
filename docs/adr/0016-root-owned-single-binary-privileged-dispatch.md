@@ -319,6 +319,7 @@ application architecture:
 | `internal/service/loopmount/` | Existing typed provisioning protocol and confined rootfs operations | Accept arbitrary host roots or unrelated unmount/PID targets |
 | `internal/service/network/` | Typed root-side bridge, TAP, address, route, and neighbor mutations | Accept raw `ip` argv or own network business orchestration |
 | `internal/service/firewall/` | Typed root-side firewall inspection and atomic managed-ruleset application | Accept raw nftables/iptables text from the caller |
+| `internal/lib/authorityfs/` | Fixed descriptor-relative root-only ephemeral authority tree and closed named capability families | Import services, core domains, API, or CLI; expose raw paths/descriptors or generic lock names |
 | `internal/lib/model/` | Shared typed request/value models used across boundaries | Import services, core domains, API, or CLI |
 | `internal/lib/system/` | Subprocess transport and low-level process helpers | Become a generic privileged-operation API or render domain commands |
 | `internal/core/{domain}/` | Existing domain logic and typed backend interfaces | Import another core domain or perform cross-domain orchestration |
@@ -434,13 +435,14 @@ stable device/inode identity. Lock files are never unlinked during the boot: rep
 old and new inodes. A lease performs checked, idempotent unlock and close under `context.WithoutCancel`, preserving a
 primary `DomainError` and bounding cleanup details.
 
-This lock layout depends on the shared privileged authority layout. The private Jailer instance authority now creates
-or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`
-`/run/mvmctl/authority`, with Jailer index, release, UID, and VM-lock descendants beneath it. Jailer still owns that
-initializer; it is not a reusable authority-tree capability. Before implementing the concrete LoopMount lock, extract
-a narrow, cycle-free closed capability in `internal/lib/authorityfs` or have the early privileged receiver pass
-LoopMount an equivalent typed root capability. LoopMount must not import Jailer or create a second pathname-based
-initializer. `internal/lib/authorityfs` is the immediate pending slice, not implemented behavior.
+This lock layout depends on the shared privileged authority layout. The cycle-free `internal/lib/authorityfs` leaf
+module now creates or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`
+`/run/mvmctl/authority`. Jailer index, release, UID, and VM-lock authority has migrated to the module's closed named
+capabilities. Those capabilities share pointer-held lifecycle state across copied values and perform checked,
+idempotent release exactly once, caching the first cleanup result instead of retrying a potentially reused descriptor.
+The module currently exposes only the Jailer authority family. Before implementing the concrete LoopMount lock, add a
+separate closed LoopMount capability family or have the early privileged receiver pass an equivalent typed capability.
+LoopMount must not import Jailer or create a second pathname-based initializer.
 
 Each effect runs in the short-lived privileged receiver's new private mount namespace. It makes propagation recursively
 private before attaching anything. The admitted `rootfsFD` is passed directly to loop-control ioctls with partition scan
@@ -486,11 +488,11 @@ file/copy/command operations, custom shells, partition-table growth, shrink, con
 public-cutover blockers, not permission to silently drop behavior. An explicit scope decision must either accept each
 user-visible reduction or defer cutover until a safe typed replacement exists.
 
-This section records accepted future design, not current runtime behavior. Jailer's private initializer establishes the
-top-level authority path and modes, but no shared cycle-free capability exists for LoopMount. The concrete LoopMount
-lock and effects do not exist; no LoopMount receiver action is registered; and the backend/public path still uses
-`mvm run provision`, raw wire operations and sudo, arbitrary unmount, and PID-killing cleanup. The legacy
-`Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
+This section records accepted future design, not current runtime behavior. The shared cycle-free authority module now
+exists and Jailer consumes its named family, but no LoopMount capability or lock exists. The concrete LoopMount effects
+do not exist; no LoopMount receiver action is registered; and the backend/public path still uses `mvm run provision`,
+raw wire operations and sudo, arbitrary unmount, and PID-killing cleanup. The legacy `Provisioner`, `Op`, path protocol,
+and cleanup functions must not be wrapped by the new adapter.
 
 ### Release trust
 
@@ -1062,13 +1064,15 @@ ephemeral runtime tree:
             └── console.pid
 ```
 
-Implementation note (2026-08-30): the private Jailer instance authority currently owns the descriptor-relative
-initializer for `/run/mvmctl` and `/run/mvmctl/authority`. Its index lock, release-lock directory, per-UID authority
-directories, and per-VM locks now use that tree, while persistent records remain at `/var/lib/mvmctl/instances`.
+Implementation note (2026-08-30): `internal/lib/authorityfs` now owns the descriptor-relative initializer for
+`/run/mvmctl` and `/run/mvmctl/authority`. Jailer's index lock, release-lock directory, per-UID authority directories,
+and per-VM locks use its closed named capabilities, while persistent records remain at `/var/lib/mvmctl/instances`.
 Existing managed objects are verified and never repaired; focused L1 evidence covers modes, symlinks, concurrent
-creation, creation faults and descriptor cleanup, scans, and lock placement. This implementation creates no
-`/run/mvmctl/runtime` tree, activates no public action, and exposes no shared `internal/lib/authorityfs` capability.
-The runtime subtree and every non-Jailer consumer in the diagram remain target design.
+creation, creation faults and descriptor cleanup, scans, lock placement, copied-capability release, cached cleanup
+errors, cancellation, and concurrent acquire/release. Capability values share pointer-held state, making checked
+release exactly once and idempotent even after a value copy. This implementation creates no `/run/mvmctl/runtime`
+tree and activates no public action. The runtime subtree and every non-Jailer consumer in the diagram remain target
+design.
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and

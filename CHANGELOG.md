@@ -33,9 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Existing managed objects are admitted only after exact ownership, mode, type, and no-symlink checks and are never
   repaired. L1 evidence covers exact modes, symlinks, concurrent creation, creation faults and descriptor cleanup,
   record scans, and lock placement.
-- Jailer still owns this initializer. No reusable `internal/lib/authorityfs` capability, `/run/mvmctl/runtime` output
-  tree, public privileged action, or runtime cutover is implemented yet. A narrow cycle-free shared capability remains
-  the immediate prerequisite before LoopMount, network, or firewall can consume the authority tree.
+- Added the cycle-free `internal/lib/authorityfs` leaf module and migrated Jailer's index, release, UID, and VM-lock
+  authority to its closed `Jailer`, `JailerUID`, and `Lock` capabilities. Capability copies share pointer-held lifecycle
+  state; checked release runs exactly once across copies, ignores cancellation, and returns the cached first cleanup
+  result instead of retrying a descriptor that may have been reused. Child capabilities and acquired locks remain valid
+  after their parent is released.
+- This shared module currently exposes only the named Jailer authority family. LoopMount, network, and firewall do not
+  consume it yet, and no `/run/mvmctl/runtime` output tree, public privileged action, or runtime cutover is activated.
 
 #### Enforced VM resource envelopes
 - Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.
@@ -392,11 +396,12 @@ The following items are release blockers and are intentionally not described abo
   the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
   private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
   outputs, and image provisioning.
-- Extract the Jailer-owned `/run/mvmctl/authority` initializer into a narrow cycle-free shared capability before
-  LoopMount, network, or firewall consumes that tree. Then create the separate caller-owned socket/PID output
-  directories beneath `/run/mvmctl/runtime`; stop mounting the whole cache VM directory, pin persistent config/output
-  leaves individually, truncate enabled `0600` log/console/metrics files only after durable launch registration, and
-  retain them after stop. The runtime tree is not implemented by the completed Jailer authority split.
+- Add closed, named `internal/lib/authorityfs` capabilities for LoopMount, network, and firewall before those consumers
+  use the shared tree; they must not reuse Jailer's capability family or accept generic paths, descriptors, or lock
+  names. Then create the separate caller-owned socket/PID output directories beneath `/run/mvmctl/runtime`; stop
+  mounting the whole cache VM directory, pin persistent config/output leaves individually, truncate enabled `0600`
+  log/console/metrics files only after durable launch registration, and retain them after stop. The runtime tree is not
+  implemented by the completed Jailer authority migration.
 - Treat the current fixed-name Jailer checks as transitional defense-in-depth only: public Firecracker launch still
   reads a caller-writable configuration from the whole mounted VM directory. Wire the implemented sealed root-built
   configuration capability into the final descriptor-only mount transaction and derive/verify every jail-visible path

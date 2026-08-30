@@ -267,15 +267,19 @@ the caller's managed cache. Final privileged code must never mount the whole cac
 authority, or signal a PID read from a PID mirror. ADR-0016 defines the exact ownership, modes, launch ordering, and
 cleanup contract; `tasks/todo.md` records implementation status.
 
-The private Jailer instance authority now establishes the implemented portion of that split. It creates or admits
-exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700` `/run/mvmctl/authority`, then places its
-global index lock, release-lock directory, per-UID authority directories, and per-VM locks beneath the private tree.
-Persistent instance records remain beneath `/var/lib/mvmctl/instances`. Existing managed objects are verified and never
-repaired; L1 tests cover exact modes, symlinks, concurrent creation, creation-fault descriptor cleanup, record scans,
-and lock placement. This is not a runtime activation: Jailer still owns the initializer, no reusable
-`internal/lib/authorityfs` capability exists, and no `/run/mvmctl/runtime` tree or public privileged action is created.
-Extracting a narrow cycle-free shared authority-tree capability is the immediate prerequisite before LoopMount,
-network, or firewall consumes this layout.
+The cycle-free `internal/lib/authorityfs` leaf module now establishes the implemented portion of that split. It creates
+or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`
+`/run/mvmctl/authority`. Jailer's global index lock, release-lock directory, per-UID authority directories, and per-VM
+locks have migrated to its closed `Jailer`, `JailerUID`, and `Lock` capabilities, while persistent instance records
+remain beneath `/var/lib/mvmctl/instances`. Existing managed objects are verified and never repaired; L1 tests cover
+exact modes, symlinks, concurrent creation, creation-fault descriptor cleanup, record scans, and lock placement.
+
+The capability structs retain pointer-shared lifecycle state, so even a copied value performs checked release exactly
+once, caches and repeats the first cleanup result, and never retries an unlock or close against a potentially reused
+descriptor. Release preserves context values while ignoring cancellation; child capabilities and acquired locks remain
+valid after their parent closes its own descriptors. The module exposes closed Jailer-specific keys and methods, not a
+raw path, descriptor, or generic lock interface. This is not runtime activation: no LoopMount, network, or firewall
+consumer exists yet, and no `/run/mvmctl/runtime` tree or public privileged action is created.
 
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
 requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`

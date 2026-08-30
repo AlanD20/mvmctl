@@ -553,8 +553,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction
-foundations are implemented; Jailer's private ephemeral-authority layout is implemented; the shared authority
-capability, concrete lock/effects, receiver registration, legacy removal, and host-mutation migration remain pending
+foundations are implemented; the shared authority filesystem and its Jailer capability family are implemented; the
+LoopMount consumer capability, concrete lock/effects, receiver registration, legacy removal, and host-mutation
+migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -575,19 +576,21 @@ capability, concrete lock/effects, receiver registration, legacy removal, and ho
     `DomainError`; and require action-specific cleanup authority before success.
   - [x] Admit a VM grow replay only at the exact old or target rootfs size, reject every third size before effects, and
     hand the actually admitted stable size to `rootfsEffects.ProvisionVM` through its private lease.
-  - [x] Establish the Jailer-owned portion of the ephemeral authority split: exact `root:root` mode-`0711`
+  - [x] Establish the Jailer portion of the ephemeral authority split: exact `root:root` mode-`0711`
     `/run/mvmctl`, exact `root:root` mode-`0700` `/run/mvmctl/authority`, and Jailer index/release/UID/VM-lock state
     beneath it. Keep `/var/lib/mvmctl/instances` unchanged; verify rather than repair existing managed objects; cover
     modes, symlinks, concurrent creation, creation faults, scans, and lock placement in L1. This creates no runtime
     output tree and activates no public action.
-  - [ ] Extract the Jailer-owned initializer into a narrow, cycle-free `internal/lib/authorityfs` closed capability, or
-    have the early privileged receiver pass an equivalent typed root capability, before the concrete LoopMount lock.
-    LoopMount must not import Jailer or create a second pathname-based initializer. Network and firewall consumers also
-    remain pending; `internal/lib/authorityfs` is not implemented yet.
-  - [ ] Implement exclusive, never-unlinked LoopMount locks beneath the shared layout. Use root-owned mode-`0600`
-    `loopmount/vm-<32hex>.lock` and `loopmount/image-<64hex>.lock` leaves. Key only by authenticated UID,
-    resource family, and canonical ID. Exclude cache locator, sizes, filesystem, action, and plan; inspection and
-    optimization share the image lock. Prove descriptor-safe creation/admission and checked idempotent release.
+  - [x] Extract the initializer and Jailer locks into the narrow, cycle-free `internal/lib/authorityfs` leaf module.
+    Expose only closed Jailer, UID, and lock capabilities with canonical typed keys; share lifecycle state through
+    pointers so copied values release exactly once; cache the first checked idempotent release result; preserve children
+    and acquired locks across parent release; and migrate Jailer through private error-mapping adapters.
+  - [ ] Implement exclusive, never-unlinked LoopMount locks beneath the shared layout through a separate closed
+    LoopMount `internal/lib/authorityfs` capability family. Use root-owned mode-`0600`
+    `loopmount/vm-<32hex>.lock` and `loopmount/image-<64hex>.lock` leaves. Key only by authenticated UID, resource family,
+    and canonical ID. Exclude cache locator, sizes, filesystem, action, and plan; inspection and optimization share the
+    image lock. Prove descriptor-safe creation/admission and checked idempotent release. LoopMount must not import
+    Jailer or create a second pathname initializer; network and firewall consumers also remain pending.
   - [ ] Implement the private mount/loop foundation. Use a private-propagation mount namespace, direct loop, mount,
     unmount, descriptor, sync, and detach syscalls, bounded partition discovery, autoclear, and read-only inspection.
     Permit only fixed host filesystem probes/grow tools; reject caller paths, `/proc` FD passthrough, chroot, guest
