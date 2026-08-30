@@ -40,6 +40,11 @@ type policy struct {
 	expectedGID uint32
 }
 
+type authorityRoot struct {
+	authority int
+	retained  []int
+}
+
 // Jailer pins the fixed Jailer authority directories and creates only Jailer locks and UID capabilities.
 type Jailer struct {
 	state *jailerState
@@ -91,7 +96,11 @@ func openJailerWithPolicy(
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("authorityfs: open Jailer authority: %w", err)
 	}
-	retained := make([]int, 0, 5)
+	root, err := openAuthorityRoot(ctx, deps, policy)
+	if err != nil {
+		return nil, fmt.Errorf("authorityfs: open Jailer authority: %w", err)
+	}
+	retained := root.retained
 	defer func() {
 		if returnErr == nil {
 			return
@@ -101,22 +110,59 @@ func openJailerWithPolicy(
 		}
 	}()
 
+	releasesFD, err := openManagedDirectory(
+		ctx,
+		deps,
+		root.authority,
+		"releases",
+		directoryMode,
+		resolveManaged,
+		policy,
+	)
+	if err != nil {
+		return nil, err
+	}
+	retained = append(retained, releasesFD)
+
+	return &Jailer{state: &jailerState{
+		deps: deps, policy: policy, authority: root.authority, releases: releasesFD, retained: retained, active: true,
+	}}, nil
+}
+
+func openAuthorityRoot(
+	ctx context.Context,
+	deps dependencies,
+	policy policy,
+) (_ authorityRoot, returnErr error) {
+	if err := ctx.Err(); err != nil {
+		return authorityRoot{}, fmt.Errorf("authorityfs: open authority root: %w", err)
+	}
+	retained := make([]int, 0, 4)
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		if err := closeFDs(context.WithoutCancel(ctx), deps, retained); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("authorityfs: close rejected authority root: %w", err))
+		}
+	}()
+
 	rootFD, err := deps.open(ctx, policy.rootPath, directoryFlags, 0)
 	if err != nil {
-		return nil, fmt.Errorf("authorityfs: open filesystem root: %w", err)
+		return authorityRoot{}, fmt.Errorf("authorityfs: open filesystem root: %w", err)
 	}
 	retained = append(retained, rootFD)
 	if err := verifyDirectory(ctx, deps, rootFD, "filesystem root", policy, 0, false); err != nil {
-		return nil, err
+		return authorityRoot{}, err
 	}
 	runFD, err := openExistingDirectory(ctx, deps, rootFD, "run", resolveBeneath, policy)
 	if err != nil {
-		return nil, err
+		return authorityRoot{}, err
 	}
 	retained = append(retained, runFD)
 	mvmctlFD, err := openManagedDirectory(ctx, deps, runFD, "mvmctl", baseMode, resolveManaged, policy)
 	if err != nil {
-		return nil, err
+		return authorityRoot{}, err
 	}
 	retained = append(retained, mvmctlFD)
 	authorityFD, err := openManagedDirectory(
@@ -129,26 +175,10 @@ func openJailerWithPolicy(
 		policy,
 	)
 	if err != nil {
-		return nil, err
+		return authorityRoot{}, err
 	}
 	retained = append(retained, authorityFD)
-	releasesFD, err := openManagedDirectory(
-		ctx,
-		deps,
-		authorityFD,
-		"releases",
-		directoryMode,
-		resolveManaged,
-		policy,
-	)
-	if err != nil {
-		return nil, err
-	}
-	retained = append(retained, releasesFD)
-
-	return &Jailer{state: &jailerState{
-		deps: deps, policy: policy, authority: authorityFD, releases: releasesFD, retained: retained, active: true,
-	}}, nil
+	return authorityRoot{authority: authorityFD, retained: retained}, nil
 }
 
 // OpenUID opens or creates the fixed root-owned directory for uid.

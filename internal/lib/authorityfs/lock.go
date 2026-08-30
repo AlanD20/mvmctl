@@ -77,6 +77,40 @@ func (uid *JailerUID) AcquireVM(ctx context.Context, key VMKey) (*Lock, error) {
 	return acquireLock(ctx, state.deps, state.policy, state.fd, key.value+".lock", "Jailer VM")
 }
 
+// AcquireVM acquires the LoopMount lock for one canonical VM identity.
+func (authority *LoopMount) AcquireVM(ctx context.Context, key VMKey) (*Lock, error) {
+	if !isLowerHex(key.value, vmKeyLength) {
+		return nil, fmt.Errorf("authorityfs: VM key is invalid")
+	}
+	if authority == nil || authority.state == nil {
+		return nil, fmt.Errorf("authorityfs: LoopMount authority is not active")
+	}
+	state := authority.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active {
+		return nil, fmt.Errorf("authorityfs: LoopMount authority is released")
+	}
+	return acquireLock(ctx, state.deps, state.policy, state.fd, "vm-"+key.value+".lock", "LoopMount VM")
+}
+
+// AcquireImage acquires the LoopMount lock for one canonical image identity.
+func (authority *LoopMount) AcquireImage(ctx context.Context, key ImageKey) (*Lock, error) {
+	if !isLowerHex(key.value, imageKeyLength) {
+		return nil, fmt.Errorf("authorityfs: image key is invalid")
+	}
+	if authority == nil || authority.state == nil {
+		return nil, fmt.Errorf("authorityfs: LoopMount authority is not active")
+	}
+	state := authority.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active {
+		return nil, fmt.Errorf("authorityfs: LoopMount authority is released")
+	}
+	return acquireLock(ctx, state.deps, state.policy, state.fd, "image-"+key.value+".lock", "LoopMount image")
+}
+
 func acquireLock(
 	ctx context.Context,
 	deps dependencies,
@@ -158,8 +192,8 @@ func verifyLock(
 	if err := deps.fstat(ctx, fd, &stat); err != nil {
 		return fmt.Errorf("inspect %s lock: %w", description, err)
 	}
-	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 1 {
-		return fmt.Errorf("%s lock is not a one-link regular file", description)
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 1 || stat.Size != 0 {
+		return fmt.Errorf("%s lock is not an empty one-link regular file", description)
 	}
 	if stat.Uid != policy.expectedUID || stat.Gid != policy.expectedGID || stat.Mode&07777 != lockMode {
 		return fmt.Errorf("%s lock has unexpected owner or mode", description)

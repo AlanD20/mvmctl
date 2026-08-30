@@ -4,12 +4,29 @@ import "fmt"
 
 const (
 	vmKeyLength      = 32
+	imageKeyLength   = 64
 	releaseKeyLength = 64
 )
 
-// VMKey identifies one canonical Jailer VM lock.
+// VMKey identifies one canonical VM lock in a closed authority family.
 type VMKey struct {
 	value string
+}
+
+// ImageKey identifies one canonical LoopMount image lock.
+type ImageKey struct {
+	value string
+}
+
+// NewImageKey admits one 64-character lowercase hexadecimal image identity.
+func NewImageKey(value string) (ImageKey, error) {
+	if !isLowerHex(value, imageKeyLength) {
+		return ImageKey{}, fmt.Errorf(
+			"authorityfs: image key must be %d lowercase hexadecimal characters",
+			imageKeyLength,
+		)
+	}
+	return ImageKey{value: value}, nil
 }
 
 // NewVMKey admits one 32-character lowercase hexadecimal VM identity.
