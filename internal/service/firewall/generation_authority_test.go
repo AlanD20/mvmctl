@@ -59,7 +59,7 @@ func TestPersistentGenerationAuthorityAcquiresOnlyAfterNetworkProofAndAdmitsExac
 	}
 	require.NoError(t, lease.Release(t.Context()))
 
-	assert.Equal(t, []string{
+	wantEvents := []string{
 		"network authority",
 		"open firewall authority",
 		"acquire firewall lock",
@@ -69,7 +69,10 @@ func TestPersistentGenerationAuthorityAcquiresOnlyAfterNetworkProofAndAdmitsExac
 		"release record store",
 		"release firewall lock",
 		"release firewall authority",
-	}, events)
+	}
+	if diff := cmp.Diff(wantEvents, events); diff != "" {
+		t.Errorf("generation authority event order mismatch (-want +got):\n%s", diff)
+	}
 }
 
 // Rationale: Applying state is durable recovery authority only when the complete exact transition and host binding
@@ -151,6 +154,31 @@ func TestPersistentGenerationAuthorityRejectsMissingCorruptAndForeignStateWithou
 			assert.Equal(t, int32(1), global.releaseCalls.Load())
 		})
 	}
+}
+
+func TestPersistentGenerationAuthorityClassifiesRawRecordStoreReadFailure(t *testing.T) {
+	t.Parallel()
+
+	rawFailure := errors.New("injected raw record read failure")
+	record := mustCommittedGenerationRecord(
+		t,
+		testGenerationRecordBinding(),
+		generationRecordIdentity{id: testFirewallGenerationA},
+	)
+	authority, global, store := testPersistentGenerationAuthority(record, true)
+	store.readErr = rawFailure
+
+	lease, err := authority.acquireAfterNetwork(t.Context(), testGenerationNetworkAuthority())
+	assert.Nil(t, lease)
+	require.ErrorIs(t, err, rawFailure)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeNetworkFirewallFailed, domainErr.Code)
+	assert.Equal(t, errs.ClassInternal, domainErr.Class)
+	assert.Equal(t, "read firewall generation authority record", domainErr.Message)
+	assert.Equal(t, int32(1), store.releaseCalls.Load())
+	assert.Equal(t, int32(1), global.lock.releaseCalls.Load())
+	assert.Equal(t, int32(1), global.releaseCalls.Load())
 }
 
 func TestPersistentGenerationAuthorityNeverOpensFirewallBeforeValidNetworkProof(t *testing.T) {
@@ -256,7 +284,9 @@ func TestPersistentGenerationAuthorityReleasesEveryPartiallyReturnedCapabilityIn
 			lease, err := authority.acquireAfterNetwork(t.Context(), testGenerationNetworkAuthority())
 			assert.Nil(t, lease)
 			require.ErrorIs(t, err, injected)
-			assert.Equal(t, tc.wantRelease, events)
+			if diff := cmp.Diff(tc.wantRelease, events); diff != "" {
+				t.Errorf("partial authority release order mismatch (-want +got):\n%s", diff)
+			}
 		})
 	}
 }

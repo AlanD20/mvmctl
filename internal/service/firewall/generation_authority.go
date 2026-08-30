@@ -63,9 +63,7 @@ type persistentGenerationLeaseState struct {
 	global       firewallGlobalAuthority
 	lock         firewallGlobalLock
 	store        generationAuthorityStore
-	network      generationNetworkAuthority
 	record       generationRecord
-	recordProof  generationRecordFileEvidence
 	active       bool
 	released     bool
 	releaseError error
@@ -152,9 +150,9 @@ func (authority *persistentGenerationAuthority) acquireAfterNetwork(
 	if err := validateGenerationRecordBinding(binding); err != nil {
 		return nil, err
 	}
-	record, proof, found, err := store.read(ctx)
+	record, _, found, err := store.read(ctx)
 	if err != nil {
-		return nil, err
+		return nil, preserveGenerationAuthorityError("read firewall generation authority record", err)
 	}
 	if !found {
 		return nil, generationAuthorityError(
@@ -168,8 +166,8 @@ func (authority *persistentGenerationAuthority) acquireAfterNetwork(
 	}
 
 	lease := &persistentGenerationLease{state: &persistentGenerationLeaseState{
-		global: global, lock: lock, store: store, network: network,
-		record: cloneGenerationRecord(record), recordProof: proof, active: true,
+		global: global, lock: lock, store: store,
+		record: cloneGenerationRecord(record), active: true,
 	}}
 	global = nil
 	lock = nil
@@ -231,9 +229,7 @@ func (lease *persistentGenerationLease) Release(ctx context.Context) error {
 	state.store = nil
 	state.lock = nil
 	state.global = nil
-	state.network = nil
 	state.record = generationRecord{}
-	state.recordProof = generationRecordFileEvidence{}
 	state.active = false
 	state.released = true
 	return state.releaseError
