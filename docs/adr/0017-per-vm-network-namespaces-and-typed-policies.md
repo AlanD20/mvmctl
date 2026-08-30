@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-08-30 (canonical nftables generation digest)
+**Last Updated:** 2026-08-30 (two-phase launch and firewall-before-handoff ordering)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -55,23 +55,29 @@ desired logical configuration but never authorizes a root namespace, device, bri
 
 The privileged launch transaction must:
 
-1. authenticate the caller and register the durable VM launch identity while holding the global claim and VM locks;
-2. acquire the later network lock and verify the root-owned VM and network records;
-3. create the namespace and namespace-local devices with links down;
-4. create and attach the host veth to the exact managed bridge;
-5. install the complete nftables generation and anti-spoofing rules;
-6. bring the verified links up;
-7. pass the pinned namespace handle to Jailer; and
-8. persist exact namespace and process identity before reporting the VM active.
+1. authenticate the caller and consume the prepared release through `preparedRelease.registerLaunching`, durably
+   recording `launching` while retaining the release and VM locks;
+2. acquire and retain the later network lease, then verify the root-owned VM and network records;
+3. create the namespace, namespace-local devices, host veth, and exact managed-bridge attachment with every link down;
+4. acquire and retain the firewall lease, apply the complete nftables generation and anti-spoofing rules in one atomic
+   transaction, then verify the exact generation through a fresh inspection;
+5. only after firewall verification, bring the exact links up and reverify their identity and state;
+6. only after those stages and relay readiness, release the blocked child to Jailer with the pinned namespace handle;
+   and
+7. persist exact namespace and final process identity through `launchLease.activateVerifiedProcess` before reporting
+   the VM active.
 
 The complete lock order is `release -> global index -> VM -> network -> firewall`. An operation may acquire a suffix or
-subset but must never acquire an earlier class while holding a later one. This permits `RegisterLaunch` to return a
-VM-locked lease before the first network effect without creating a two-phase ownership claim or importing network
-behavior into the Jailer authority module. The firewall lock is host-global because one generation owns both reserved
-tables across all users and managed networks.
+subset but must never acquire an earlier class while holding a later one. The schema-3 launch lease is the durable
+two-phase ownership claim and retains the VM, network, and firewall leases across application, activation, rollback,
+and cleanup without unlocking and reacquiring the VM. Network behavior remains in the network service and nftables
+behavior in the firewall service rather than the Jailer authority module. The firewall lock is host-global because one
+generation owns both reserved tables across all users and managed networks.
 
-Failure after the first effect invokes typed rollback while the same locks and lifecycle handle remain held. Cleanup
-verifies namespace inode, interface ownership, process identity, and cgroup membership before removing anything.
+Failure before link activation leaves links down and the Jailer child blocked. Failure after verified activation first
+lowers and reverifies the exact links, then invokes the launch lease's typed abort while the same locks and lifecycle
+handle remain held. An unknown firewall outcome never raises a link or releases the child. Cleanup verifies namespace
+inode, interface ownership, process identity, and cgroup membership before removing anything.
 
 Implementation note (2026-08-30): the private topology-preparation foundation now exposes topology authority only from
 its exact committed state while the network lock, namespace pin, and namespace/local-bridge/TAP/veth creation markers

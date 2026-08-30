@@ -270,12 +270,15 @@ cleanup contract; `tasks/todo.md` records implementation status.
 The final Jailer instance record is strict schema 3 with
 `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
 `launching` is durable pre-effect intent: owner UID/GID, VM ID, managed-cache identity, exact Firecracker/Jailer release
-identity, host boot ID, launch/cleanup generations, and the handshake-blocked child's PID/start locator. It does not
+identity, host boot ID, launch/cleanup generations, the handshake-blocked child's PID/start locator, and an explicit
+absent relay or handshake-blocked relay PID/start locator. It does not
 claim final credentials, cgroup membership, final mount namespace, jail root, or executable identity. `active` records
 the receiver-observed credentials, final mount namespace, jail root, and executable, requires empty supplementary
-groups and exact derived cgroup membership, and binds the final copied Firecracker to the release. Network namespace
-identity remains in the separate closed topology capability and is compared during activation rather than stored as a
-raw path or descriptor.
+groups and exact derived cgroup membership, and binds the final copied Firecracker to the release. A present active
+relay records its caller credentials, empty groups, host mount namespace/root, and exact root-owned
+`/usr/local/bin/mvm` executable metadata and digest; absence is explicit, and `console.pid` remains display-only.
+Network namespace identity remains in the separate closed topology capability and is compared during activation rather
+than stored as a raw path or descriptor.
 `cleaned` is the same-UID tombstone and carries no launch-specific GID, cache, release, or process identity; mount
 identity is valid for one mount lifetime and must not prevent a legitimate relaunch after reboot.
 
@@ -286,6 +289,21 @@ cannot equal `/proc/<pid>/exe`, and the final namespace/root cannot be known bef
 exec, verifies the final jail root and copy, seals both to `root:root 0755` beneath `root:root 0700` ancestors, hashes the
 copy against the exact manifest, rechecks full identity, and only then commits `active`. All composite instance leases
 must use pointer-shared mutex-protected close-once state and cache the first cleanup result.
+
+The prepared release's consuming registration method derives release identity internally and transfers its pinned
+admission, store, slot lock, and executable resources into the launch lease. That lease retains the VM, network, and
+firewall leases; creates links down; applies and freshly verifies the complete atomic nftables generation; raises links
+only after firewall success; and only afterward releases the blocked child to Jailer. A fixed jail destination must be
+proved absent/fresh immediately before that release; only an exactly admitted, non-mounted stale fixed tree may be
+removed after process absence. `launchLease.Abort` and `activeLease.BeginCleanup` transfer their resources directly
+into cleanup without releasing and reacquiring the VM lock. Authority-level cleanup admission is recovery-only.
+
+The original pidfd provides stable task identity and exit detection but does not notify `exec`. Activation uses a
+bounded context-aware `/proc/<pid>/exe` observation loop, stopping immediately on pidfd-observed exit, before final
+identity admission. After any active-record rename, even a later fsync/close error returns a non-nil active lease with
+`record_replaced` and any `durability_uncertain` evidence so cleanup never uses stale launching authority. Recovery
+re-admits a present console relay by its exact locator and final credential/namespace/root/executable identity; it never
+signals an ambiguous or reused PID.
 
 Root status observation has four closed outcomes: `running`, `stopped`, `crashed`, and `unavailable`. An absent/cleaned
 record or boot mismatch is stopped; a same-boot missing/dead/mismatched active process is crashed; incomplete authority
@@ -381,8 +399,10 @@ The inert private rootfs mount-source policy consumes only pathless receiver-der
 probes. It accepts at most 16 partition probes. A raw source is valid only when there are no partitions and its probed
 filesystem exactly matches the request; a partitioned source is valid only when exactly one partition matches.
 Malformed probes, reused or duplicate block identities, duplicate partition numbers, raw-plus-partition ambiguity, and
-missing or multiple matches fail closed. Receiver rootfs-source discovery and partition probing, mounts, private
-mount-namespace setup, effect implementations, and `Server` activation remain pending.
+missing or multiple matches fail closed. Receiver discovery now enumerates fixed `/sys/class/block` with bounded entry
+and partition counts, proves stable membership and exact block identities through retained descriptors, probes only
+through fixed `/usr/bin/blkid` with bounded output and exit policy, and returns a pathless source capability bound to
+the exact probe. No caller-selected tool, path, or device name crosses the seam.
 
 The inert pure loop-device kernel contract admits only fixed `/dev/loop-control` character-device identity `10:237`.
 It derives `/dev/loop<N>` only for an index from `0` through `2^20-1` and requires block major `7` with minor exactly
@@ -400,8 +420,16 @@ without `LOOP_CLR_FD`, because another process may have won the free-device race
 The resulting package-private lease exposes no path or descriptor accessor. Its checked, idempotent release uses
 `LOOP_CLR_FD` and closes the loop descriptor under cancellation-independent cleanup; `AUTOCLEAR` remains crash safety.
 If configuration succeeds but loop-control close fails, attachment returns both the configured lease and the error so
-the caller can still release it. Rootfs discovery and partition probing, mounts, private namespaces, effects,
-production `Server` construction, receiver handlers, dispatcher registration, and activation remain pending.
+the caller can still release it.
+
+An inert read-only image-inspection adapter is also implemented. It locks its OS thread, enters a private mount
+namespace, makes propagation private, mounts only the admitted source at fixed `/run/mvmctl/rootfs` with
+`ro,nosuid,nodev,noexec`, and revalidates the exact source, mountpoint, filesystem, and backing-image identity. It reads
+only bounded fixed `etc/os-release` or `usr/lib/os-release` leaves through no-symlink/no-cross-mount traversal, then
+releases root, mount, source, partition, loop, mountpoint, and image authority in checked reverse order. `unchanged`
+requires complete admitted/statx stability and successful cleanup; otherwise the closed result is `outcome_unknown`,
+while the primary `DomainError` and bounded cleanup details are preserved. Because the process cannot safely return an
+unshared OS thread to the Go runtime, production activation requires a short-lived receiver handler that exits.
 
 An inactive private `Server` now coordinates each admitted operation through two action-specific effect seams.
 `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while the private `imageOptimizeEffects` contains
@@ -411,8 +439,9 @@ validating the closed request and authenticated caller, the coordinator acquires
 `rootfsResourceLocks` seam, admits the fixed rootfs, invokes the corresponding effect, and validates the request-bound
 result. The lock seam has a private adapter over the implemented `authorityfs` LoopMount UID and canonical VM/image
 lock capabilities. The optimize seam has no production implementation or construction, and no receiver handler or
-dispatcher entry registers it. The entire `Server` remains inert: there is no production constructor or concrete
-mount/effect adapter for any action.
+dispatcher entry registers it. The entire `Server` remains inert: there is no production constructor or provisioning
+effect, and the inspection adapter's factory is intentionally unreferenced. There is no receiver handler, dispatcher
+registration, live-kernel qualification, or public/backend cutover for any action.
 
 The coordinator requires an action-specific effect cleanup capability and unwinds effect cleanup, rootfs authority,
 then the resource lock, each with `context.WithoutCancel`. Effect outcomes use closed action-specific states to derive
@@ -424,9 +453,10 @@ VM grow replay admission accepts only the stable pre-grow size or the exact requ
 size before an effect begins, and retains the actually admitted size on the rootfs lease handed to the narrow effect
 seam. Image optimization remains blocked from privileged registration until durable shrink and replacement replay
 authority exists. This is not the active LoopMount receiver path: the implemented lock adapter is not injected into a
-production `Server`, and there is no concrete mount/effect adapter, privileged handler, dispatcher entry,
-backend/public cutover, or removal of `mvm run provision`, caller-shaped raw wire/sudo, and the legacy arbitrary
-cleanup/unmount surface. No new privileged mount effect occurs. Task 13 remains pending.
+production `Server`, and the concrete read-only inspection adapter is deliberately unreachable. There is no
+provisioning effect, privileged handler, dispatcher entry, live-kernel qualification, backend/public cutover, or
+removal of `mvm run provision`, caller-shaped raw wire/sudo, and the legacy arbitrary cleanup/unmount surface. No new
+publicly reachable privileged mount effect occurs. Task 13 remains pending.
 
 **Performance:** GuestFS is 3–5x slower than LoopMount for VM creation (9–14s vs 2–5s wall-clock, sequential). Under parallel load GuestFS degrades further due to QEMU lock contention. See `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` for full benchmark data.
 

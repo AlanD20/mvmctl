@@ -416,8 +416,10 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 - [ ] Replace schema 1 with strict schema 3 and reject every old/partial record. Persist
   `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
   `launching` contains owner UID/GID, VM ID, pinned cache identity, exact release identity, host boot ID,
-  launch/cleanup generations, and only the blocked child PID/start locator. `active` adds receiver-observed final
-  credentials, empty supplementary groups, final mount namespace, jail root, and copied executable. Activation also
+  launch/cleanup generations, the blocked child PID/start locator, and an explicit absent relay or blocked relay
+  PID/start locator. `active` adds receiver-observed final credentials, empty supplementary groups, final mount
+  namespace, jail root, copied executable, and, when present, the relay's caller credentials, empty groups, host
+  namespace/root, and exact root-owned `/usr/local/bin/mvm` executable identity. Activation also
   verifies exact derived cgroup membership and the closed topology capability's network namespace. `cleaned` retains
   only the same-UID tombstone and generations, with no launch-specific GID, cache, release, or process identity.
 - [ ] Launch a child blocked by an inherited EOF-fails-closed two-way handshake in an initial private mount namespace
@@ -426,11 +428,22 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   persist `launching` before externally mutable effects, create/truncate fixed outputs, mark propagation private, mount
   the pinned runtime directory and individual persistent resources including the sealed root-built Firecracker
   configuration, and publish display-only PID mirrors. The relay receives only inherited descriptors and never reopens
-  a caller path or retains the VM namespace.
-- [ ] Release the child only after named mounts, network topology, and relay readiness succeed. Invoke Jailer 1.16.1
+  a caller path or retains the VM namespace. Its `console.pid` is never authority.
+- [ ] Make `preparedRelease.registerLaunching` consume its pinned admission/store/slot resources, derive release
+  identity internally, and transfer them into the launch lease. Make `activateVerifiedProcess(ctx)` consume only that
+  retained prepared release. Pre-rename failure keeps the source lease; post-rename failure returns the non-nil target
+  lease with exact `record_replaced` and any `durability_uncertain` evidence.
+- [ ] Before Jailer execution, prove `/var/lib/mvmctl/jailer/firecracker/<vm-id>` absent/fresh under the retained locks.
+  Remove only an exactly admitted non-mounted stale fixed tree after process absence; replacement, unexpected entries,
+  mounts, or incomplete evidence fail unavailable. Recheck absence immediately before release.
+- [ ] Retain VM, network, and firewall leases; create links down; apply and freshly verify the complete atomic nftables
+  generation; then raise and reverify links. Release the child only after named mounts, firewall-protected topology,
+  and exact relay readiness succeed. Invoke Jailer 1.16.1
   without `--daemonize` or `--new-pid-ns`; the original PID/start/pidfd must survive Jailer and Firecracker exec. Do not
   trust Jailer's PID file or a user-visible PID mirror.
-- [ ] Wait until `/proc/<pid>/exe` is Jailer's copied Firecracker, then descriptor-relatively require the host jail root
+- [ ] Observe `/proc/<pid>/exe` with a bounded context-aware 10-second budget and 25-millisecond minimum interval until
+  it is Jailer's copied Firecracker. Retain the original pidfd for stable identity and nonblocking exit detection; it
+  does not notify `exec`, and observed exit ends the loop. Then descriptor-relatively require the host jail root
   and `/proc/<pid>/root` to be the same device/inode and the jail `firecracker` leaf to equal `/proc/<pid>/exe`. Seal the
   jail root and copied executable to exact `root:root` mode `0755` beneath exact `root:root` mode-`0700` ancestors, hash
   the copy against Task 6's release manifest, and only then atomically commit `active`. Never compare its inode with the
@@ -441,8 +454,12 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 - [ ] Make launch, active, cleanup, release-slot, authority-root, and UID-directory leases pointer-shared,
   mutex-protected, close-once across copies/concurrent release, cancellation-independent during cleanup, and repeat the
   cached first cleanup result.
-- [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, wait through the pidfd,
-  and fail host capability admission instead of falling back to raw PID signaling.
+- [ ] Add consuming `launchLease.Abort(ctx)` and `activeLease.BeginCleanup(ctx)` transitions that transfer held release,
+  VM, pidfd, mount, network, and firewall resources into cleanup without unlocking/reacquiring the VM. Keep
+  authority-level `BeginCleanup` only for fresh recovery admission.
+- [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, observe exit through the
+  pidfd, and fail host capability admission instead of falling back to raw PID signaling. Re-admit a present relay by
+  exact locator and complete final identity after a crash; never signal an ambiguous or reused PID.
 - [ ] Reopen and pin `/proc/<pid>/ns/mnt` for each verified live operation; do not persist a mount-namespace handle that
   would retain mounts after process exit.
 - [ ] Lock the OS thread for `setns`, pin/restore/verify the original host namespace, and terminate the short-lived
@@ -578,11 +595,12 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, inactive receiver-transaction
-foundations, deterministic rootfs mount-source policy, pure loop-device kernel contract, and private inert
-attach/release capability are implemented; the shared authority filesystem, its separate Jailer and LoopMount
-capability families, canonical VM/image locks, and the private service lock adapter are implemented and reviewed;
-rootfs discovery and partition probing, mounts, namespaces, effects, `Server` activation, receiver registration,
-backend/public cutover, legacy removal, and host-mutation migration remain pending
+foundations, deterministic rootfs mount-source policy, pure loop-device contract, inert attach/release capability,
+bounded partition discovery/fixed-tool filesystem probing, and inert read-only image-inspection adapter are implemented;
+the shared authority filesystem, its separate Jailer and LoopMount capability families, canonical VM/image locks, and
+the private service lock adapter are implemented and reviewed; provisioning, production `Server` activation, receiver
+registration, live-kernel qualification, backend/public cutover, legacy removal, and host-mutation migration remain
+pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -648,11 +666,17 @@ backend/public cutover, legacy removal, and host-mutation migration remain pendi
       admitted rootfs descriptor/access, never issue `LOOP_CLR_FD` after configure failure, and return a configured
       lease with a control-close error so cleanup authority is retained. Expose no path or descriptor accessor. Use
       checked, idempotent, cancellation-independent `LOOP_CLR_FD` plus close on release, with `AUTOCLEAR` for crash
-      safety. Rootfs discovery and partition probing, mounts, namespaces, effects, production `Server` construction,
-      handlers, registration, and activation remain pending.
-  - [ ] Implement read-only `InspectImage` first. Consume the admitted descriptor, share the image lock with future
-    optimization, mount `ro,nosuid,nodev,noexec`, read only bounded fixed OS-release leaves, prove byte-for-byte image
-    stability, and return only unchanged or outcome-unknown evidence.
+      safety.
+    - [x] Implement stable bounded partition admission from fixed sysfs and fixed `/usr/bin/blkid` filesystem probing.
+      Retain exact block/source capabilities, bind the selected source to pre/post probe identity, bound entries,
+      partitions, stdout/stderr, and exit states, and expose no caller path, device name, raw descriptor, or tool
+      selection.
+  - [x] Implement the inert read-only `InspectImage` adapter. Consume the admitted capability, share the image lock with
+    future optimization, enter a private-propagation mount namespace on a locked OS thread, mount only at fixed
+    `/run/mvmctl/rootfs` with `ro,nosuid,nodev,noexec`, revalidate exact source/mount/image identity, read only bounded
+    fixed OS-release leaves, prove the admitted/statx snapshot stable, and unwind in checked reverse order. Return only
+    unchanged or outcome-unknown evidence while preserving the primary error. Its factory remains unreferenced: no
+    production `Server`, receiver handler, dispatcher registration, live-kernel QA, or public cutover activates it.
   - [ ] Implement fixed `ProvisionVM` content and grow convergence. Support only hostname/hosts, DNS, existing-account
     SSH/sudo, fixed SSH service, embedded-agent, and fstab content. Converge grow from the exact old or target size and
     prove modified, durability-uncertain, and outcome-unknown mappings plus cancellation-independent cleanup.
@@ -709,8 +733,10 @@ backend/public cutover, legacy removal, and host-mutation migration remain pendi
   API, SSH, or guest-agent liveness tick. Any unavailable item fails the read instead of returning partial/stale rows.
 - [ ] Reconcile interrupted `launching` records exactly: boot mismatch cleans without signaling; PID/start mismatch
   never signals; the same task with the exact final copied Firecracker may complete idempotent sealing and commit
-  `active`; the same task still in Jailer/transient/mismatched exec is terminated only through its pidfd; unavailable
-  identity causes no guessed kill or deletion. Resume `cleaning` idempotently.
+  `active` only when the optional relay proves its state-appropriate identity; the same task still in
+  Jailer/transient/mismatched exec is terminated only through its pidfd; a present relay is signaled only through its
+  separately verified pidfd. Unavailable identity causes no guessed kill or deletion, and `console.pid` is never
+  authority. Resume `cleaning` idempotently.
 - [ ] Benchmark 1,000 authority records in L1 and enforce the reviewed regression budget without one goroutine, process,
   or control connection per VM.
 - [ ] Add root-owned global capacity reservation so separate CLI processes and users cannot over-admit the host.

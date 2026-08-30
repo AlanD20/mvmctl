@@ -119,8 +119,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   partition probes. A raw source is accepted only when no partitions exist and its filesystem exactly matches the
   request; otherwise exactly one partition must match. Malformed probes, reused or duplicate block identities,
   duplicate partition numbers, raw-plus-partition ambiguity, and missing or multiple matches fail closed. Receiver
-  rootfs-source discovery and partition probing, mounts, mount namespaces, effects, and `Server` activation remain
-  pending.
+  discovery now admits a stable bounded partition set from fixed sysfs, retains the selected block identities, probes
+  filesystems only through fixed `/usr/bin/blkid` with bounded output/exit policy, and binds the selected source to the
+  exact probed identity without exposing a path or descriptor.
 - Added an inert pure loop-device kernel contract. It admits only `/dev/loop-control` as character device `10:237` and
   derives `/dev/loop<N>` only for a 20-bit index whose block identity is major `7` and minor exactly `N`. Its
   `unix.LoopConfig` binds the exact admitted rootfs descriptor with `LO_FLAGS_AUTOCLEAR|LO_FLAGS_PARTSCAN`, adds
@@ -135,8 +136,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Successful attachment returns a private lease with no path or descriptor accessor. Its checked, idempotent,
   cancellation-independent release issues `LOOP_CLR_FD` and closes the loop descriptor, while `AUTOCLEAR` remains
   receiver-crash safety. If loop configuration succeeds but closing loop-control fails, the configured lease is still
-  returned with the error so it can be released. Rootfs discovery and partition probing, mounts, namespaces, effects,
-  production `Server` construction, receiver handlers, dispatcher registration, and activation remain pending.
+  returned with the error so it can be released.
+- Added an inert read-only image-inspection adapter. It enters a private mount namespace on a locked OS thread, makes
+  propagation private, mounts the admitted source only at fixed `/run/mvmctl/rootfs` with
+  `ro,nosuid,nodev,noexec`, revalidates the exact source/mount/image identities, and reads only bounded fixed
+  `etc/os-release` or `usr/lib/os-release` leaves through no-symlink/no-cross-mount traversal. It unwinds root,
+  unmount, source, partition, loop, and backing-image authority in reverse order, preserves the primary structured
+  error with bounded cleanup evidence, and returns `unchanged` only after exact admitted/statx stability; uncertainty
+  returns `outcome_unknown`.
+- The inspection factory remains intentionally unreferenced. No production `Server`, receiver handler, dispatcher
+  registration, provisioning effect, live-kernel qualification, backend/public cutover, or privileged action activates
+  this adapter yet.
 - Added an inactive private receiver-transaction foundation with two action-specific effect seams:
   `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while private `imageOptimizeEffects` contains only
   `OptimizeImage`. Each action validates only its effect dependency plus the shared rootfs authority and per-resource
@@ -149,11 +159,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   partially acquired authority for cleanup, and releases the lock before its parent capability exactly once. No
   production `Server` constructor uses the adapter yet.
 - This is foundation only. The optimize seam has no production implementation or construction, receiver handler, or
-  dispatcher registration. The entire `Server` remains inert: no concrete LoopMount mount/effect adapter, production
-  constructor, receiver handler, dispatcher entry, backend/public cutover, or legacy raw-sudo removal has landed, and
-  no privileged mount effect uses the new authority. `OptimizeImage` stays unregistered until durable shrink and
-  replacement replay authority exists; `mvm run provision` and its arbitrary unmount/cleanup surface remain
-  transitional release blockers.
+  dispatcher registration. The entire `Server` remains inert: the concrete read-only inspection adapter is
+  deliberately unreferenced, while no provisioning effect, production constructor, receiver handler, dispatcher entry,
+  live-kernel qualification, backend/public cutover, or legacy raw-sudo removal has landed. `OptimizeImage` stays
+  unregistered until durable shrink and replacement replay authority exists; `mvm run provision` and its arbitrary
+  unmount/cleanup surface remain transitional release blockers.
 
 #### Root-owned single-binary installation
 - Added the exact administrator bootstrap command `sudo <trusted-mvm-binary> host install-system`, which installs the
@@ -429,11 +439,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The following items are release blockers and are intentionally not described above as completed behavior:
 
 - Replace the private schema-1 `registered` record with strict clean-install schema 3. Persist owner/cache/release/boot
-  identity and only the blocked PID/start locator as `launching` before effects; commit `active` only after Jailer has
-  copied Firecracker, joined cgroup/netns, pivoted to its final mount namespace, dropped credentials, and execed the
-  copy. Require empty supplementary groups, verify the final process root and copied inode, seal the jail root and copy
-  to `root:root 0755` beneath `root:root 0700` ancestors, and hash the copy against the exact release. Jailer must use
-  neither `--daemonize` nor `--new-pid-ns`.
+  identity, the blocked PID/start locator, and an explicit absent relay or blocked relay locator as `launching` before
+  effects. Commit `active` only after Jailer has copied Firecracker, joined cgroup/netns, pivoted to its final mount
+  namespace, dropped credentials, and execed the copy. Require empty supplementary groups, verify the final process
+  root and copied inode, and persist a present relay's exact caller credentials, host namespace/root, and root-owned
+  `/usr/local/bin/mvm` executable identity. Seal the jail root and copy to `root:root 0755` beneath `root:root 0700`
+  ancestors and hash the copy against the exact release.
+  Jailer must use neither `--daemonize` nor `--new-pid-ns`; `console.pid` remains display-only.
+- Make prepared-release registration consuming and derive release identity internally. Transfer prepared/slot/VM and
+  later network/firewall resources through launch, active, and cleaning leases without lock release/reacquisition.
+  Return a non-nil target lease plus `record_replaced` and any `durability_uncertain` evidence after a successful record
+  rename so abort/cleanup never uses stale authority.
+- Before Jailer executes, prove its fixed per-VM destination absent/fresh and remove only an exactly admitted,
+  non-mounted stale fixed tree after process absence. Create links down, apply and freshly verify the complete atomic
+  nftables generation, then raise links; release the blocked child only after firewall and relay success. Observe the
+  Jailer-to-Firecracker executable transition through bounded `/proc/<pid>/exe` checks while retaining the original
+  pidfd for stable identity and exit detection; pidfds do not notify `exec`.
 - Make every composite instance lease pointer-shared and close-once across copies/concurrent release, with the first
   cleanup result cached. Add exact interrupted-`launching` recovery and closed `running`, `stopped`, `crashed`, and
   `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and per-VM lock.
@@ -458,9 +479,9 @@ The following items are release blockers and are intentionally not described abo
   install/remove actions; complete the aarch64 archive audit and CLI-level qualification. The implemented atomic
   authority is not yet reachable from public `mvm bin` operations.
 - Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; complete the
-  concrete LoopMount descriptor-consuming mount/effect adapter, receiver handlers, and backend cutover behind its typed
-  inactive authority and transaction-lock foundations; and remove the public root `mvm run jailer` and
-  `mvm run provision` entry points.
+  LoopMount provisioning effect, receiver handlers, live-kernel qualification, and backend cutover behind its typed
+  inactive authority, transaction-lock, and read-only inspection foundations; and remove the public root
+  `mvm run jailer` and `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
 - Add the root-owned global firewall lock plus durable committed/applying generation record. Resolve the pinned

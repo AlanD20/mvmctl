@@ -2,7 +2,7 @@
 
 **Status:** Active
 **Date:** 2026-08-09
-**Last Updated:** 2026-08-30 (two-phase process authority and mandatory network namespace)
+**Last Updated:** 2026-08-30 (recoverable two-phase launch and mandatory network namespace)
 **See also:** [Project Hosting with MicroVMs](../roadmaps/TENANT_MICROVM.md), [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md), [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
 ## Context
@@ -26,8 +26,13 @@ Jailer will be the canonical launcher for every normal mvmctl VM lifecycle opera
 - Every launch requires cgroup v2 with the CPU, memory, and PID controllers. mvmctl persists a typed resource envelope, derives fixed Jailer arguments internally, and fails the launch if post-start membership or values differ. Raw cgroup key/value input is not public.
 - Jailer never uses `--daemonize` or `--new-pid-ns`. The receiver-owned PID and pidfd must continue to identify the
   same task through Jailer and Firecracker `exec`, while serial-console standard descriptors remain attached. The
-  separately designed mandatory per-VM network namespace is joined through Jailer's fixed `--netns` argument; its
+  pidfd reports task exit, not `exec`; the receiver uses bounded `/proc/<pid>/exe` observation while retaining the
+  original pidfd. The separately designed mandatory per-VM network namespace is joined through Jailer's fixed
+  `--netns` argument only after the complete firewall generation and down-link topology are applied and verified;
   concrete handoff and lifecycle integration remain pending.
+- Before executing Jailer, root proves the fixed per-VM destination absent. It may remove only an exactly admitted,
+  non-mounted stale tree after process absence is proved; ambiguous, mounted, replaced, or unexpected state fails
+  unavailable. Jailer must freshly create the destination whose final root and copied executable are activated.
 - VM resources are exposed inside the jail through validated paths without duplicating large rootfs and volume files. Mount cleanup is idempotent across failed starts, stop, remove, and host recovery.
 
 ## Consequences

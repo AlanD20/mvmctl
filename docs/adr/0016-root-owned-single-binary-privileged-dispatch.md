@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-08-30 (schema-3 two-phase Jailer process authority)
+**Last Updated:** 2026-08-30 (recoverable schema-3 Jailer and console-relay authority)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md)
@@ -480,6 +480,12 @@ and its filesystem exactly matches the closed request. Otherwise exactly one par
 or filesystem values, reused or duplicate block identities, duplicate or out-of-range partition numbers,
 raw-plus-partition ambiguity, and missing or multiple matches fail closed.
 
+The implemented receiver derives partition candidates only from fixed `/sys/class/block`, bounds directory admission
+to 65,536 entries and 16 partitions, retains exact device capabilities, and proves stable partition membership before
+selection. Filesystem probing invokes only fixed `/usr/bin/blkid` with a fixed argv/environment, 32-byte stdout and
+512-byte stderr ceilings, exact accepted exit states, and pre/post block-identity revalidation. The selected source is
+pointer-bound to that exact probe and exposes no path or descriptor accessor.
+
 The private inert loop-device kernel contract admits only the fixed `/dev/loop-control` path with exact character-device
 major `10` and minor `237`. It derives `/dev/loop<N>` only when `N` is a 20-bit index from `0` through `2^20-1`, then
 requires the opened candidate to be a block device with major `7` and minor exactly `N`. Its `unix.LoopConfig` contains
@@ -497,9 +503,18 @@ the candidate without issuing `LOOP_CLR_FD`, because another process may have wo
 A successful attach returns only a private lease, never a path or descriptor accessor. Its checked, idempotent release
 uses `LOOP_CLR_FD` and closes the loop descriptor under `context.WithoutCancel`; `LO_FLAGS_AUTOCLEAR` remains receiver-
 crash safety. If configuration succeeds but closing the loop-control descriptor fails, attachment returns both the
-configured lease and the close error so the caller retains cleanup authority. Rootfs discovery and partition probing,
-mounts, private mount-namespace setup, effect implementation, production `Server` construction, receiver handlers,
-dispatcher registration, and activation remain future work. The future grow effect supports a raw filesystem or a
+configured lease and the close error so the caller retains cleanup authority.
+
+The implemented inert read-only image-inspection adapter locks its OS thread, unshares a private mount namespace,
+makes propagation private, and mounts only the exact selected source at fixed `/run/mvmctl/rootfs` with
+`ro,nosuid,nodev,noexec`. It revalidates source, mountpoint, filesystem, mount table, and backing-image identity; reads
+only bounded no-symlink/no-cross-mount `etc/os-release` or `usr/lib/os-release`; and unwinds root, mount, source,
+partitions, loop, mountpoint, and image authority in reverse. `unchanged` requires the final admitted/statx snapshot to
+remain stable and cleanup to succeed; uncertainty is `outcome_unknown`, with the primary `DomainError` preserved and
+cleanup evidence bounded. The factory remains unreferenced because the short-lived handler must exit rather than
+return its unshared OS thread to the Go runtime. Production `Server` construction, receiver handlers, dispatcher
+registration, live-kernel qualification, provisioning, and activation remain future work. The future grow effect
+supports a raw filesystem or a
 partition whose already-admitted capacity reaches the target; rewriting MBR or GPT is outside this capability.
 
 Provisioning writes only receiver-generated, fixed-purpose content through the mounted-root descriptor. The accepted
@@ -530,13 +545,12 @@ user-visible reduction or defer cutover until a safe typed replacement exists.
 This section combines implemented inactive authority and selection-policy foundations with accepted future effect
 design, not current runtime behavior. The shared cycle-free authority module now has separate Jailer and LoopMount
 capability families, the private LoopMount service adapter implements the coordinator's canonical resource-lock seam,
-the deterministic mount-source policy remains pathless and inert, the loop-device kernel contract remains pure, and
-the private attach/release capability is implemented but unused. No production constructor activates that `Server`;
-rootfs discovery and partition probing, mounts, private mount-namespace setup, and concrete LoopMount effects do not
-exist; no LoopMount receiver handler or dispatcher action is registered; and the backend/public path still uses
-`mvm run provision`, raw wire operations and sudo, arbitrary unmount, and PID-killing cleanup. The implemented
-foundations therefore authorize no privileged mount effect. The legacy `Provisioner`, `Op`, path protocol, and cleanup
-functions must not be wrapped by the new adapter.
+the deterministic mount-source policy remains pathless, and the pure loop contract, attach/release capability, bounded
+partition/probe admission, and read-only inspection adapter are implemented but unused. No production constructor
+activates that `Server`; no LoopMount receiver handler or dispatcher action is registered; provisioning remains
+unimplemented; and the backend/public path still uses `mvm run provision`, raw wire operations and sudo, arbitrary
+unmount, and PID-killing cleanup. No live-kernel qualification or public privileged mount effect follows from the inert
+adapter. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
 
 ### Release trust
 
@@ -1142,14 +1156,18 @@ derived display/local metadata during the clean break, but privileged handlers r
 identities and never authorize a path from SQLite.
 
 Every privileged VM operation is serialized by a root-owned per-VM lock and authorized by a minimal root-owned instance
-record. Mutating operations require a pidfd, use `pidfd_send_signal`, and wait through that pidfd; a host without the
-required pidfd support fails capability admission instead of falling back to a racy raw PID signal. PID reuse fails
-closed.
+record. Mutating operations require a pidfd, use `pidfd_send_signal`, and observe process exit through that pidfd; a
+host without the required pidfd support fails capability admission instead of falling back to a racy raw PID signal.
+PID reuse fails closed.
 
 Release launch preparation acquires the `(version, architecture)` release-slot lock before resolving the root manifest.
 The prepared value retains the verified manifest, pinned release directory, and pinned Firecracker/Jailer descriptors.
-It supplies the full release identity to instance registration itself, then transfers the release lock into the launch
-lease only after the owner-bound record is durable. The unprivileged caller never supplies executable hashes.
+Its consuming `registerLaunching(ctx, caller, intent)` method derives the full release identity internally, then
+transfers its pinned store admission, release directory, executable descriptors, and release-slot lease into the launch
+lease as soon as the owner-bound record replacement occurs. A pre-rename failure leaves the prepared value live; a
+post-rename durability failure returns the launch lease. The launch lease therefore owns the prepared release used by
+its zero-additional-argument `activateVerifiedProcess(ctx)` method. The unprivileged caller never supplies executable
+hashes, and a separate release-slot registration seam cannot construct a launch record.
 
 #### Two-phase Jailer process authority
 
@@ -1173,9 +1191,9 @@ The strict instance-record schema version is therefore 3, with this lifecycle:
 ```text
 absent  ── registerLaunching ──> launching ── activateVerifiedProcess ──> active
 cleaned ── registerLaunching ──> launching
-launching ── BeginCleanup ──> cleaning
+launching ──── Abort ────> cleaning
 active    ── BeginCleanup ──> cleaning
-cleaning  ── BeginCleanup ──> cleaning
+launching|active|cleaning ── recovery BeginCleanup ──> cleaning
 cleaning  ───── Complete ─────> cleaned
 ```
 
@@ -1184,13 +1202,16 @@ The strict on-disk shape has these fixed fields; state-specific objects are omit
 | Scope | Exact fields | Present in |
 |---|---|---|
 | Record | `schema_version`, `owner_uid`, `vm_id`, `lifecycle`, `launch_generation`, `cleanup_generation` | Every state |
-| `launch` | `owner_gid`, `host_boot_id`, `pid`, `start_time_ticks`, `managed_cache`, `release` | `launching`, `active`, `cleaning` |
+| `launch` | `owner_gid`, `host_boot_id`, `pid`, `start_time_ticks`, `relay`, `managed_cache`, `release` | `launching`, `active`, `cleaning` |
+| `launch.relay` | `kind`; when `present`, also `pid`, `start_time_ticks` | Nested under `launch` |
 | `managed_cache` | `device_major`, `device_minor`, `inode`, `mount_identity.kind`, `mount_identity.id` | Nested under `launch` |
 | `release` | `version`, `architecture`, `firecracker_sha256`, `jailer_sha256` | Nested under `launch` |
-| `active` | `user_ids`, `group_ids`, `supplementary_groups`, `mount_namespace`, `jail_root`, `executable` | `active`, and `cleaning` only after activation |
+| `active` | `user_ids`, `group_ids`, `supplementary_groups`, `mount_namespace`, `jail_root`, `executable`, `relay` | `active`, and `cleaning` only after activation |
+| `active.relay` | `kind`; when `present`, also `user_ids`, `group_ids`, `supplementary_groups`, `mount_namespace`, `root`, `executable` | Nested under `active` |
 | Each credential set | `real`, `effective`, `saved`, `filesystem` | Nested under `active` |
 | Each namespace/root identity | `device`, `inode` | Nested under `active` |
-| `executable` | `device`, `inode`, `size_bytes`, `mode`, `uid`, `gid`, `links`, `manifest_sha256` | Nested under `active` |
+| `active.executable` | `device`, `inode`, `size_bytes`, `mode`, `uid`, `gid`, `links`, `manifest_sha256` | Nested under `active` |
+| `active.relay.executable` | `device`, `inode`, `size_bytes`, `mode`, `uid`, `gid`, `links`, `sha256` | Nested under `active.relay` when present |
 
 The strict codec rejects schema 1 and 2, unknown or duplicate fields, missing required fields, and a state-specific
 object that is present or absent in the wrong lifecycle. v0.3 performs no record migration or adoption.
@@ -1199,15 +1220,32 @@ object that is present or absent in the wrong lifecycle. v0.3 performs no record
 VM ID and compiled constants; the exact cgroup membership and fixed jail metadata are verified rather than duplicated
 as caller-shaped strings. The record carries no caller path, raw descriptor, Jailer argv, or fabricated final identity.
 
+The relay field is an explicit closed union in both state-specific objects. `launch.relay.kind` is either `absent`,
+with no locator fields, or `present`, with the handshake-blocked relay's PID and start ticks. `active.relay.kind` must
+agree and is either `absent`, with no identity fields, or `present`, with receiver-observed UID and GID sets, the exact
+empty supplementary-group set, host mount-namespace and host-root device/inode identities, and the relay executable's
+device, inode, size, mode, owner, link count, and SHA-256. Every real/effective/saved/filesystem relay UID must equal the
+authenticated caller UID and every GID must equal the authenticated caller GID. A present relay remains in the
+receiver's host mount namespace with a root equal to the receiver's host `/` and executes the exact receiver-pinned
+root-owned `/usr/local/bin/mvm` content. The record stores no socket path, PID-file path, raw descriptor, or argv.
+`console.pid` and every other PID mirror remain display-only.
+
 `active` retains that intent and adds receiver-observed final identity: every real/effective/saved/filesystem UID and
 GID, the exact empty supplementary-group set, final mount-namespace device/inode, final
 process-root/jail-root device/inode and fixed metadata, and the copied Firecracker's device/inode, exact size, mode,
-owner, link count, and manifest digest. Rust's Unix
+owner, link count, and manifest digest. Every Firecracker UID field must equal `owner_uid`, and every GID field must
+equal `launch.owner_gid`. Rust's Unix
 [`Command::uid`](https://doc.rust-lang.org/stable/std/os/unix/process/trait.CommandExt.html#tymethod.uid) calls
 `setgroups(0, NULL)` when no groups are specified, and Jailer specifies none; v0.3 therefore requires an empty set
 rather than accepting an arbitrary sorted set. Activation also requires exact membership in the derived cgroup.
 Network namespace identity remains owned by the closed network topology capability and is compared during activation
 without importing a raw path or descriptor into the record interface.
+
+After dispatcher exit or crash, fresh recovery may re-admit a present relay only by opening a pidfd, matching boot ID,
+PID, start ticks, every final credential, host namespace/root identity, and exact executable metadata and digest. A
+missing or mismatched task is never signaled by PID; incomplete or ambiguous evidence returns `unavailable` and
+preserves authority. A launching relay may be aborted only after its locator and expected blocked executable identity
+are both proved. An absent relay requires no relay cleanup.
 
 `cleaning` preserves the launch locator and any committed active identity required for exact cleanup. `cleaned` is the
 persistent same-UID tombstone and retains only the record fields above; it carries no launch, cache, release, or process
@@ -1219,23 +1257,43 @@ it.
 
 The activation order is fixed:
 
-1. Spawn a child blocked on an inherited private two-way handshake. EOF makes the child exit without exec or external
-   effect.
-2. Open its pidfd, then send a fresh parent challenge and require the still-blocked child to acknowledge it before
-   accepting PID-derived evidence. Read and recheck start ticks while the child remains blocked. A dead child cannot
+1. Spawn the Firecracker child and, when enabled, the dropped-caller console relay, each blocked on its own inherited
+   private two-way handshake. EOF makes either child exit without exec or external effect.
+2. Open the Firecracker-child pidfd and, when present, the relay pidfd, then send fresh parent challenges and require
+   each still-blocked child to acknowledge before accepting PID-derived evidence. Read and recheck start ticks while
+   each child remains blocked. A dead child cannot
    authenticate a reused PID, and a live acknowledged child cannot coexist with another task using that PID.
-3. Atomically persist `launching` before output, mount, cgroup, link, namespace, chroot, or executable-handoff effects.
-4. Prepare fixed outputs, the runtime directory, private inherited mount namespace, named mounts, network topology, and
-   console relay under the established lock order. The initial namespace is preparation, not Jailer's final namespace.
-5. Recheck the pinned release while its slot lock is held, verify relay readiness, and release the child to the exact
-   Jailer. The prepared release supplies the fixed Firecracker store path; the caller supplies neither hash nor path.
-6. Wait through the original pidfd until `/proc/<pid>/exe` is the copied Firecracker rather than transient Jailer state.
-7. Open the derived jail root descriptor-relatively. Require the host jail-root leaf and `/proc/<pid>/root` to be the
+3. Consume the prepared release to atomically persist `launching` before output, mount, cgroup, link, namespace,
+   chroot, or executable-handoff effects. The returned launch lease retains the release and VM locks, the Firecracker
+   pidfd, the optional relay pidfd, and every later resource lease until it is consumed by activation or abort.
+4. Under those locks, reconcile the exact derived Jailer destination
+   `/var/lib/mvmctl/jailer/firecracker/<vm-id>`. Process absence must be proved before removing an exactly admitted,
+   non-mounted stale fixed tree descriptor-relatively and bottom-up. Any unexpected entry, mount at or below the tree,
+   replacement race, or incomplete admission returns `unavailable`; Jailer is not executed. Recheck the pinned parent
+   and destination absence immediately before handoff so every accepted destination is freshly created by this Jailer.
+5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. Acquire and retain
+   the VM, network, then firewall leases; create namespace/local and host links down; apply the complete nftables
+   generation atomically and verify it through a fresh inspection. Only after firewall success may the exact links be
+   raised and reverified. A failure keeps links down and both children blocked while typed abort unwinds through the
+   same leases.
+6. Release the relay, observe and record its exact caller credentials, empty supplementary groups, host mount
+   namespace/root, root-owned `/usr/local/bin/mvm` executable metadata and digest, and verify readiness.
+7. Recheck the pinned release and fresh jail-destination absence, then release the Firecracker child to the exact
+   Jailer with the pinned network namespace. The prepared release supplies the fixed store paths; the caller supplies
+   neither a hash nor path. This release occurs only after the complete firewall generation and links are verified.
+8. Retain the original pidfd for stable task identity and exit detection while bounded, context-aware observation
+   repeatedly opens and verifies `/proc/<pid>/exe` until it is the copied Firecracker rather than transient Jailer
+   state. The compiled observation budget is 10 seconds with a 25-millisecond minimum interval; an earlier context
+   deadline wins. Each interval checks the pidfd nonblocking for exit and rechecks boot ID, PID, and start ticks. An
+   exited pidfd ends observation immediately. A pidfd becomes readable for exit, not for `exec`, so it is never used as
+   an executable-transition notification; see [`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html).
+   No busy or unbounded loop is permitted.
+9. Open the derived jail root descriptor-relatively. Require the host jail-root leaf and `/proc/<pid>/root` to be the
    same device/inode, and require its fixed `firecracker` leaf to be the same inode as `/proc/<pid>/exe`.
-8. Change the final jail root and copied executable to exact `root:root` mode `0755`, beneath exact `root:root` mode
+10. Change the final jail root and copied executable to exact `root:root` mode `0755`, beneath exact `root:root` mode
    `0700` Jailer base and per-VM ancestors. Hash the sealed copy against the exact release manifest and recheck metadata.
-9. Re-observe boot ID, PID/start ticks, credentials, empty groups, cgroup, namespaces, root, executable, and pidfd
-   liveness, then atomically replace `launching` with `active`.
+11. Re-observe boot ID, PID/start ticks, credentials, empty groups, cgroup, namespaces, root, executable, relay identity,
+    and pidfd liveness, then atomically replace `launching` with `active`.
 
 Sealing makes the copied inode immutable to the dropped caller and preserves the exact-content proof established at
 activation. Later status batches can compare the root-owned inode and metadata without rehashing every executable;
@@ -1252,6 +1310,24 @@ leases, uses pointer-shared mutex-protected lifecycle state. Checked release run
 callers, ignores cancellation while preserving context values, and caches and repeats the first cleanup result. It
 never retries an unlock or close against a descriptor number that the kernel may have reused. This matches the closed
 `authorityfs` capabilities and `verifiedProcessLease`; it does not add a generic callback, raw fd, or raw path seam.
+
+`launchLease.Abort(ctx)` and `activeLease.BeginCleanup(ctx)` are consuming transitions. They atomically move the held
+release reference and slot lock, VM lock, pidfds, and every acquired output, mount, topology, network, and firewall
+resource lease into one `cleanupLease`; the source lease becomes inert. A post-registration error never releases and
+reacquires the VM lock before cleaning. `instanceAuthority.BeginCleanup(ctx, caller, vmID)` exists only for a fresh
+dispatcher performing recovery admission and reacquires the exact record and locks in global order. It is not the
+error-path transition for a live launch or active lease. There is one named `Abort` method, not interchangeable aliases
+or a generic state transition.
+
+Every durable transition has a typed commit result. Before rename, registration returns no launch lease and leaves the
+prepared release live; activation returns no active lease and leaves the launch lease live. Once the launching rename
+succeeds, registration transfers in-memory ownership to a non-nil launch lease before any later parent-directory
+`fsync` or checked close. Once the active rename succeeds, activation likewise transfers ownership to a non-nil active
+lease first. Those post-rename failures return that lease together with a `DomainError` carrying
+`record_replaced=true` and, when persistence is uncertain, `durability_uncertain=true`. The caller invokes
+`launchLease.Abort` or `activeLease.BeginCleanup` through the returned authority, preserves the primary error plus
+bounded cleanup diagnostics, and never acts through the stale source lease. No process, VM, release, network, or
+firewall lock is dropped between record replacement and cleaning.
 
 Implementation note (2026-08-30): main currently implements the private schema-1 `registered -> cleaning -> cleaned`
 authority substrate and its locks, but no production lifecycle consumes it. The schema-2 complete-identity experiment
@@ -1287,8 +1363,8 @@ Moving durable user state out of `~/.cache/mvmctl` is a separate XDG migration d
 A durable `launching` record exists before the first externally mutable privileged launch side effect. A blocked child
 may exist first only while an inherited private handshake makes external mutation impossible and EOF forces exit.
 Every post-registration failure retains a live lifecycle handle and invokes a typed abort that verifies the persistent
-PID/start locator, terminates only through its pidfd, checks cgroup emptiness, and cleans namespace/chroot/instance state
-in order.
+VM and optional relay PID/start locators, terminates either process only through its separately verified pidfd, checks
+cgroup emptiness, and cleans namespace/chroot/instance state in order.
 
 Startup and pre-launch reconciliation compare root instance records, processes, cgroups, and chroot directories. They do
 not trust the user database as root authorization. Operations are idempotent and either converge to a known state or
@@ -1305,17 +1381,19 @@ Reconciliation handles an interrupted `launching` record by exact case. A boot m
 fixed artifacts without signaling. A same-boot missing PID or start-tick mismatch becomes crashed and never signals the
 current PID. The exact same task already running the final copied Firecracker may complete the idempotent seal,
 reverification, and `active` commit. The exact same task still in Jailer, another transient exec state, or a mismatched
-exec is terminated only through its verified pidfd and proceeds to cleaning. If authority cannot distinguish these
-states, it returns unavailable and neither guesses nor deletes ambiguous state. `cleaning` always resumes idempotently.
+exec is terminated only through its verified pidfd and proceeds to cleaning. A present relay is separately re-admitted
+through its locator and complete state-appropriate identity; `console.pid` is never read for authority. A boot
+mismatch, missing relay, or locator mismatch never signals any current PID. If either process cannot be classified,
+recovery returns unavailable and neither guesses nor deletes ambiguous state. `cleaning` always resumes idempotently.
 
 | Durable state and observation | Required recovery | Outcome returned by that recovery pass |
 |---|---|---|
 | `launching`, host boot mismatch | Do not signal; clean fixed host artifacts and commit `cleaned` | `stopped` |
 | `launching`, PID absent or start mismatch | Do not signal any current PID; clean fixed artifacts and commit `cleaned` | `crashed` |
-| `launching`, exact task is the final copied Firecracker | Finish sealing and verification, then commit `active` | `running` |
-| `launching`, exact task is Jailer/transient/wrong exec | Terminate only through the verified pidfd, then clean | `crashed` |
+| `launching`, exact task and optional relay prove final identities | Finish sealing and verification, then commit `active` | `running` |
+| `launching`, exact task is Jailer/transient/wrong exec and optional relay is exactly admitted | Terminate only through verified pidfds, then clean | `crashed` |
 | `active`, host boot mismatch | Do not signal; reconcile fixed artifacts to `cleaned` | `stopped` |
-| `active`, same-boot process absent/dead/identity mismatch | Do not signal an unverified task; reconcile through `cleaning` | `crashed` |
+| `active`, same-boot VM or present relay absent/dead/identity mismatch | Do not signal an unverified task; reconcile through `cleaning` | `crashed` |
 | `cleaning` | Resume the recorded cleanup generation idempotently | `stopped` |
 | Any state that cannot be classified completely | Preserve authority and perform no guessed kill/delete | `unavailable`; fail the read |
 

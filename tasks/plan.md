@@ -74,8 +74,12 @@ continue without silently deleting it.
   block-major-`7` devices from exact 20-bit minors, and builds only an admitted-FD `AUTOCLEAR|PARTSCAN` configuration
   with `READ_ONLY` for read-only access. A private inert capability now performs identity-rechecked fixed-device opens,
   bounded free-device allocation and atomic configure, plus checked cancellation-independent release without exposing
-  paths or descriptors. Rootfs discovery and partition probing, mounts, mount namespaces, effects, production `Server`
-  construction, receiver handling, dispatch, public/backend cutover, and legacy-route removal remain pending.
+  paths or descriptors. Stable bounded sysfs partition admission and fixed `/usr/bin/blkid` probing bind the selected
+  source to exact pre/post-probe identity. An inert read-only inspection adapter uses a private mount namespace, fixed
+  `ro,nosuid,nodev,noexec` mount, exact source/mount/image revalidation, bounded OS-release reads, stability proof, and
+  reverse cleanup with preserved primary errors. Its factory is unreferenced; provisioning, production `Server`
+  construction, receiver handling, dispatch, live-kernel qualification, public/backend cutover, and legacy-route
+  removal remain pending.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -184,21 +188,21 @@ The final interface remains private to `internal/service/jailer`. Schema 3 uses 
 operations:
 
 ```go
-func (a *instanceAuthority) lockReleaseSlot(
+func (a *releaseAuthority) prepareInstalled(
     ctx context.Context,
     slot releaseSlot,
-) (*releaseSlotLease, error)
+) (*preparedRelease, error)
 
-func (l *releaseSlotLease) registerLaunching(
+func (p *preparedRelease) registerLaunching(
     ctx context.Context,
     caller instanceCaller,
     intent launchIntent,
 ) (*launchLease, error)
 
-func (l *launchLease) activateVerifiedProcess(
-    ctx context.Context,
-    prepared *preparedRelease,
-) (*activeLease, error)
+func (l *launchLease) activateVerifiedProcess(ctx context.Context) (*activeLease, error)
+
+func (l *launchLease) Abort(ctx context.Context) (*cleanupLease, error)
+func (l *activeLease) BeginCleanup(ctx context.Context) (*cleanupLease, error)
 
 func (l *releaseSlotLease) requireUnreferenced(
     ctx context.Context,
@@ -225,6 +229,7 @@ func (a *instanceAuthority) BeginCleanup(
 
 func (l *cleanupLease) Complete(ctx context.Context) error
 
+func (p *preparedRelease) Release(ctx context.Context) error
 func (l *launchLease) Release(ctx context.Context) error
 func (l *activeLease) Release(ctx context.Context) error
 func (l *cleanupLease) Release(ctx context.Context) error
@@ -239,16 +244,19 @@ The schema-3 durable lifecycle is intentionally small:
 ```text
 absent  ── registerLaunching ──> launching ── activateVerifiedProcess ──> active
 cleaned ── registerLaunching ──> launching
-launching ── BeginCleanup ──> cleaning
+launching ──── Abort ────> cleaning
 active    ── BeginCleanup ──> cleaning
-cleaning  ── BeginCleanup ──> cleaning
+launching|active|cleaning ── recovery BeginCleanup ──> cleaning
 cleaning  ───── Complete ─────> cleaned
 ```
 
 `launching` means only that exact pre-effect intent is durable. It stores owner UID/GID, VM ID, cache identity, exact
-release identity, host boot ID, launch/cleanup generations, and the blocked child PID/start locator. `active` adds the
-receiver-observed final credentials with an empty supplementary-group set, final mount namespace and jail root, and
-Jailer's copied Firecracker identity after it is sealed and hashed against the release. Activation also verifies the
+release identity, host boot ID, launch/cleanup generations, the blocked child PID/start locator, and an explicit
+`absent` relay or the blocked relay PID/start locator. `active` adds receiver-observed final credentials with an empty
+supplementary-group set, final mount namespace and jail root, and
+Jailer's copied Firecracker identity after it is sealed and hashed against the release. A present relay adds its full
+receiver-observed caller credentials, empty groups, host namespace/root, and exact root-owned `/usr/local/bin/mvm`
+executable metadata and digest; `console.pid` remains display-only. Activation also verifies the
 exact derived cgroup and the separate closed topology capability's network namespace. Failed cleanup remains
 `cleaning`. `cleaned` is a persistent same-UID ownership tombstone, carries no launch-specific GID, cache, release, or
 process identity, and may be relaunched only by that UID. Mount identity is deliberately not retained across cleanup
@@ -274,26 +282,35 @@ identities for one store slot must therefore serialize before install, replace, 
 
 Task 6 acquires the release-slot lease before it reads a manifest or computes a launch identity. Its prepared launch
 value retains that lease together with the verified manifest and pinned Firecracker/Jailer descriptors. Only that value
-may call `releaseSlotLease.registerLaunching`; it supplies the exact release identity from the root-owned manifest rather
-than accepting hashes from the normal user process. Registration then acquires the index and VM locks, establishes the
-durable `launching` record before the first network or launch effect, and transfers the held release lock into the
-returned launch lease. A mismatch or registration failure performs no external effect and leaves a checked, releasable
-slot lease.
+may call its consuming `registerLaunching`; it derives the exact release identity internally rather than accepting
+hashes from the normal user process. Registration acquires the index and VM locks, establishes durable `launching`
+before the first network or launch effect, and transfers the pinned admission, store/directory descriptors, and release
+lock into the returned launch lease. Pre-rename failure leaves the prepared value live. Post-rename failure returns a
+non-nil launch lease plus `record_replaced` and any `durability_uncertain` evidence so typed abort retains authority.
 Task 4 owns release, index, and VM locking; it does not import network code or predeclare a network implementation.
 
 The launch seam uses a child blocked by an inherited private two-way handshake in an initial private mount namespace
 and, when enabled, a blocked console relay running as the dropped caller in the host mount namespace. After opening each
 pidfd, the parent sends a fresh challenge and requires acknowledgement from the still-blocked child before accepting
-PID-derived evidence. It then persists only `launching` intent, creates/truncates fixed persistent outputs, creates the
-runtime directory, marks propagation private, and installs named mounts through pinned descriptors. The relay receives
-only inherited PTY, pinned log, and pinned runtime-directory descriptors and never retains the VM namespace.
+PID-derived evidence. It then persists only `launching` intent. Before Jailer can execute, reconciliation under the
+held release/VM locks proves `/var/lib/mvmctl/jailer/firecracker/<vm-id>` absent; it removes only an exactly admitted,
+non-mounted stale fixed tree after process absence, and ambiguous state is unavailable. It creates/truncates fixed
+persistent outputs, creates the runtime directory, marks propagation private, and installs named mounts through pinned
+descriptors. The relay receives only inherited PTY, pinned log, and pinned runtime-directory descriptors and never
+retains the VM namespace.
 
-Only after those effects and relay readiness does the parent release the child to Jailer. Jailer 1.16.1 copies
+The launch lease retains VM, network, and firewall leases. It creates all links down, applies the complete atomic
+nftables generation, verifies it freshly, and only then raises and reverifies links. An unknown firewall outcome keeps
+links down and both children blocked. Only after those effects and exact relay readiness does the parent recheck the
+fresh jail destination and release the child to Jailer with the pinned netns. Jailer 1.16.1 copies
 Firecracker, joins netns/cgroup, unshares and pivots into a new final mount namespace, drops credentials, and execs its
 copy. The initial namespace therefore cannot be recorded as the final namespace, and the trusted-store inode cannot be
-recorded as `/proc/<pid>/exe`. `activateVerifiedProcess` waits through the original pidfd, opens the fixed jail root and
-final proc objects, seals the jail root and copy to `root:root 0755` below `root:root 0700` ancestors, hashes the copy,
-rechecks complete final identity, and then commits `active`. Jailer never receives `--daemonize` or `--new-pid-ns`.
+recorded as `/proc/<pid>/exe`. `activateVerifiedProcess(ctx)` consumes the launch lease's retained prepared release and
+uses bounded context-aware `/proc/<pid>/exe` observation with a 10-second budget and 25-millisecond minimum interval,
+while the original pidfd supplies stable task identity and exit detection. Pidfds do not notify `exec`; an exited pidfd
+ends observation. It then opens the fixed jail root and final proc objects, seals the jail root and copy to
+`root:root 0755` below `root:root 0700` ancestors, hashes the copy, rechecks complete VM and relay identity, and commits
+`active`. Jailer never receives `--daemonize` or `--new-pid-ns`.
 
 Here, "first launch effect" means the first externally mutable effect; allocating a handshake-blocked child and its
 initial namespace is preparation. Mutating process operations require pidfds and never fall back to `kill(pid)`. Live
@@ -303,6 +320,11 @@ because it would retain the namespace's mounts after process exit.
 All composite leases use pointer-shared mutex-protected state, close/unlock exactly once across copies and concurrent
 release, ignore cancellation during cleanup, and cache the first cleanup result. They expose no raw path, descriptor,
 callback, or generic state mutation.
+
+`launchLease.Abort` and `activeLease.BeginCleanup` consume their source directly into a cleanup lease, transferring
+release/VM locks, pidfds, and all mount/network/firewall resources without unlock/reacquire. Authority-level
+`BeginCleanup` is only fresh recovery admission. Cleanup and reconciliation re-admit a present relay through pidfd plus
+its state-appropriate exact locator or full identity and never signal an ambiguous or reused PID.
 
 The persistent VM outputs are fixed caller-owned `0600` one-link regular files: `firecracker.log`,
 `firecracker.console.log`, and, when enabled, `firecracker.metrics`. They are truncated once per launch after durable
@@ -315,8 +337,10 @@ fixed runtime leaves and removes the directory only when empty; it never recursi
 
 Atomic record replacement uses a random exclusive temporary file, bounded writes, root ownership and exact modes, file
 `fsync`, checked close, `renameat`, and parent-directory `fsync`. Pre-rename failure preserves the old record.
-Post-rename failure returns details that distinguish `record_replaced` and `durability_uncertain`; the caller starts
-no VM effects after such an error.
+For activation, pre-rename failure leaves the launch lease live. Once the active rename occurs, in-memory ownership
+first transfers to a non-nil active lease; a later failure returns that lease with a `DomainError` carrying
+`record_replaced=true` and any `durability_uncertain=true`. The caller cleans through active authority, never stale
+launching authority. Registration follows the corresponding prepared-to-launch contract above.
 
 ### Trusted release authority
 
@@ -604,8 +628,9 @@ host managed bridge
 ```
 
 Namespace paths and interface names are derived from UID and immutable IDs. The privileged transaction creates links
-down, installs the complete nftables generation and anti-spoofing rules, then brings links up and passes a pinned
-namespace handle to Jailer.
+down, retains VM/network/firewall leases, installs and freshly verifies the complete atomic nftables generation and
+anti-spoofing rules, then brings the exact links up and reverifies them. Only afterward may it pass the pinned namespace
+handle to the blocked Jailer child.
 
 The private topology-preparation foundation now derives owner/network-bound managed bridges and owner/VM-bound links,
 enforces the VM-before-network lock seam, records mutation-plus-error identities, and retains the network lock and
@@ -695,8 +720,10 @@ The private inert mount-source policy consumes only receiver-derived block ident
 path or device name. It accepts no more than 16 partitions. A raw source is selected only when there are no partitions
 and its filesystem exactly matches the request; a partitioned layout requires exactly one matching partition. Invalid,
 reused, or duplicate block identities, duplicate or out-of-range partition numbers, raw-plus-partition ambiguity, and
-missing or multiple matches fail closed. Receiver discovery and identity verification, loop ioctls, mounts, private
-mount-namespace setup, effect implementation, and `Server` activation remain pending.
+missing or multiple matches fail closed. Implemented receiver discovery enumerates fixed `/sys/class/block` within
+65,536 entries and 16 partitions, retains descriptors, proves stable partition membership and block identity, probes
+only through fixed `/usr/bin/blkid` with bounded output and accepted exit states, and binds the selected pathless source
+to the exact probe. No caller path, device name, raw descriptor, or tool selection crosses the seam.
 
 The private inert loop-device kernel contract fixes `/dev/loop-control` to character-device identity `10:237` and
 derives `/dev/loop<N>` only for `N` from `0` through `2^20-1`. The derived device must be a block device with major `7`
@@ -709,8 +736,15 @@ derived loop leaves with `O_RDWR|O_CLOEXEC|O_NOFOLLOW`, rechecks their identitie
 admitted rootfs descriptor/access and never issues `LOOP_CLR_FD` after configure failure. A successful lease exposes
 no path or descriptor accessor and releases through checked, idempotent, cancellation-independent `LOOP_CLR_FD` plus
 close, with `AUTOCLEAR` as crash safety. A configured lease remains available for cleanup if control close fails.
-Rootfs discovery and partition probing, mounts, mount-namespace setup, effects, production `Server` construction,
-handlers, registrations, and activation remain unimplemented.
+
+The implemented inert `InspectImage` adapter locks its OS thread, creates a private propagation mount namespace, and
+mounts only at fixed `/run/mvmctl/rootfs` with `ro,nosuid,nodev,noexec`. It revalidates the exact source, mountpoint,
+filesystem, and backing image; reads only bounded fixed `etc/os-release` or `usr/lib/os-release` leaves; proves the
+admitted/statx snapshot stable; and unwinds root, mount, source, partitions, loop, mountpoint, and backing authority in
+reverse.
+It returns `unchanged` only after complete cleanup/stability and otherwise preserves the primary `DomainError` with
+bounded cleanup evidence and `outcome_unknown`. Its factory remains unreferenced; no production `Server`, receiver
+handler, dispatcher entry, live-kernel qualification, or public cutover activates it.
 
 The private inactive `Server` transaction foundation splits its effects between `rootfsEffects`, which contains exactly
 `ProvisionVM` and `InspectImage`, and private `imageOptimizeEffects`, which contains only `OptimizeImage`. Provisioning
@@ -720,7 +754,7 @@ request and caller before authority acquisition, retains a partially acquired lo
 the fixed rootfs, invokes one effect, and validates the request-bound result. The private service adapter now provides
 the concrete resource-lock implementation over `authorityfs`, but no production constructor injects it. The optimize
 seam has no production implementation or construction, receiver handler, or dispatcher registration. There is no
-concrete mount/effect adapter or activation for the entire `Server`.
+provisioning effect or activation for the entire `Server`; the inspection adapter remains deliberately inert.
 
 Every action requires its own effect cleanup capability and unwinds effect cleanup, rootfs authority, then resource
 lock with `context.WithoutCancel`. Closed action-specific effect states derive mandatory `rootfs_modified`,
@@ -744,11 +778,11 @@ coordinator's resource-lock seam, including partial-acquisition cleanup, retryab
 lock-before-parent checked release. Review corrected an initial parent-capability serialization bug before this record
 was updated. LoopMount does not import Jailer or duplicate a pathname initializer.
 
-The future concrete effect uses a private mount namespace, direct loop/mount/descriptor syscalls, and only fixed host
-filesystem probes and grow tools. It consumes the admitted rootfs descriptor directly and never reopens or passes a
-caller path, synthesizes a `/proc` FD path, executes a guest binary or chroot, accepts generic operations, scans or
-kills PIDs, or stages beneath `/tmp`. Grow converges from the exact old or target size and returns closed
-modified/durability-uncertain/outcome-unknown evidence. None of these effect operations is implemented yet.
+The remaining provisioning effect uses the implemented private namespace/loop/source foundation plus only fixed host
+filesystem grow tools. It consumes admitted capabilities directly and never reopens or passes a caller path,
+synthesizes a `/proc` FD path, executes a guest binary or chroot, accepts generic operations, scans or kills PIDs, or
+stages beneath `/tmp`. Grow converges from the exact old or target size and returns closed
+modified/durability-uncertain/outcome-unknown evidence. Provisioning is not implemented.
 
 The first provisioning subset is fixed host-side hostname/hosts, DNS, existing-account SSH/sudo, fixed SSH service,
 embedded-agent, and fstab content. Missing-user creation, unpinned cloud-init copying, deblob/package commands,
@@ -757,11 +791,12 @@ unsupported. No public cutover may silently reduce behavior: an explicit scope d
 keep the old public workflow until a safe typed replacement exists.
 
 These remain inactive foundations and accepted design. The canonical resource locks and private service adapter are
-implemented, but no production `Server` constructor activates them. There is no concrete LoopMount mount/effect,
-handler, dispatcher entry, backend/public cutover, or legacy-route removal, and no new privileged mount effect. The
-current path still uses `mvm run provision`, raw wire operations and sudo, including arbitrary unmount/cleanup. Task 13
-proceeds in the slices recorded in `tasks/todo.md`; no LoopMount action can enter the final marker-only sudo policy
-before cutover and legacy removal.
+implemented, and the read-only inspection effect exists, but no production `Server` constructor activates them. There
+is no provisioning effect, handler, dispatcher entry, live-kernel qualification, backend/public cutover, or
+legacy-route removal, and no newly reachable privileged mount effect. The current path still uses
+`mvm run provision`, raw wire operations and sudo, including arbitrary unmount/cleanup. Task 13 proceeds in the slices
+recorded in `tasks/todo.md`; no LoopMount action can enter the final marker-only sudo policy before cutover and legacy
+removal.
 
 ### Daemonless status reconciliation and relaunch parity
 
@@ -777,9 +812,10 @@ process is live.
 
 An interrupted `launching` record is reconciled before projection. Boot mismatch cleans without signaling. Missing PID
 or start mismatch never signals a current task. The exact same task already running the final copied Firecracker may
-finish idempotent sealing and commit active; the exact same task still in Jailer, another transient exec, or a mismatched
-exec is terminated only through its verified pidfd and cleaned. Inability to classify returns unavailable and performs
-no guessed deletion.
+finish idempotent sealing and commit active only when the optional relay also proves its state-appropriate exact
+identity. The exact same task still in Jailer, another transient exec, or a mismatched exec is terminated only through
+its verified pidfd, and a present relay only through its separately verified pidfd. Inability to classify either task
+returns unavailable and performs no guessed signal or deletion; `console.pid` is never authority.
 
 This is a local metadata operation, not a heartbeat. The implementation must not start one sudo process, open one
 control connection, or launch one goroutine per VM. L1 benchmarks cover 1,000 authority records and set a regression
