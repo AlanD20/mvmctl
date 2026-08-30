@@ -32,22 +32,37 @@ func TestDiscoverRootfsPartitionDevicesAdmitsRawOnlyLayout(t *testing.T) {
 
 	assert.Empty(t, set.state.devices)
 	assert.Equal(t, 3, set.state.parentIndex)
-	assert.Equal(t, rootfsBlockIdentity{major: 7, minor: 3}, set.state.parentIdentity)
-	assert.Equal(t, 1, fixture.listCalls)
-	assert.Equal(t, []int{rootfsPartitionDirectoryEntryLimit}, fixture.listLimits)
-	assert.Equal(t, []testRootfsPartitionOpen{
+	if diff := cmp.Diff(
+		rootfsBlockIdentity{major: 7, minor: 3},
+		set.state.parentIdentity,
+		cmp.AllowUnexported(rootfsBlockIdentity{}),
+	); diff != "" {
+		t.Errorf("parent identity mismatch (-want +got):\n%s", diff)
+	}
+	assert.Equal(t, 2, fixture.listCalls)
+	assertRootfsPartitionIntSliceDiff(
+		t,
+		[]int{rootfsPartitionDirectoryEntryLimit, rootfsPartitionDirectoryEntryLimit},
+		fixture.listLimits,
+	)
+	wantOpens := []testRootfsPartitionOpen{
 		{path: rootfsSysfsBlockPath, flags: rootfsSysfsDirectoryOpenFlags},
 		{path: "/sys/class/block/loop3/dev", flags: rootfsSysfsAttributeOpenFlags},
 		{path: "/sys/class/block/loop3/dev", flags: rootfsSysfsAttributeOpenFlags},
-	}, fixture.opens)
-	assert.Equal(t, []string{
+		{path: rootfsSysfsBlockPath, flags: rootfsSysfsDirectoryOpenFlags},
+	}
+	if diff := cmp.Diff(wantOpens, fixture.opens, cmp.AllowUnexported(testRootfsPartitionOpen{})); diff != "" {
+		t.Errorf("partition discovery opens mismatch (-want +got):\n%s", diff)
+	}
+	assertRootfsPartitionStringSliceDiff(t, []string{
 		"close:/sys/class/block/loop3/dev",
 		"close:/sys/class/block/loop3/dev",
+		"close:/sys/class/block",
 		"close:/sys/class/block",
 	}, fixture.events)
 
 	require.NoError(t, set.Release(t.Context()))
-	assert.Len(t, fixture.events, 3)
+	assert.Len(t, fixture.events, 4)
 }
 
 func TestDiscoverRootfsPartitionDevicesUsesClosedAccessAndExactEvidence(t *testing.T) {
@@ -90,7 +105,7 @@ func TestDiscoverRootfsPartitionDevicesUsesClosedAccessAndExactEvidence(t *testi
 			); diff != "" {
 				t.Errorf("admitted partition devices mismatch (-want +got):\n%s", diff)
 			}
-			assert.Equal(t, []testRootfsPartitionOpen{
+			wantOpens := []testRootfsPartitionOpen{
 				{path: rootfsSysfsBlockPath, flags: rootfsSysfsDirectoryOpenFlags},
 				{path: "/sys/class/block/loop12/dev", flags: rootfsSysfsAttributeOpenFlags},
 				{path: "/sys/class/block/loop12p1/partition", flags: rootfsSysfsAttributeOpenFlags},
@@ -99,11 +114,19 @@ func TestDiscoverRootfsPartitionDevicesUsesClosedAccessAndExactEvidence(t *testi
 				{path: "/sys/class/block/loop12p1/partition", flags: rootfsSysfsAttributeOpenFlags},
 				{path: "/sys/class/block/loop12p1/dev", flags: rootfsSysfsAttributeOpenFlags},
 				{path: "/sys/class/block/loop12/dev", flags: rootfsSysfsAttributeOpenFlags},
-			}, fixture.opens)
-			assert.Equal(t, 1, fixture.listCalls)
+				{path: rootfsSysfsBlockPath, flags: rootfsSysfsDirectoryOpenFlags},
+			}
+			if diff := cmp.Diff(
+				wantOpens,
+				fixture.opens,
+				cmp.AllowUnexported(testRootfsPartitionOpen{}),
+			); diff != "" {
+				t.Errorf("partition discovery opens mismatch (-want +got):\n%s", diff)
+			}
+			assert.Equal(t, 2, fixture.listCalls)
 
 			require.NoError(t, set.Release(t.Context()))
-			assert.Equal(t, []int{20}, fixture.deviceCloses)
+			assertRootfsPartitionIntSliceDiff(t, []int{20}, fixture.deviceCloses)
 		})
 	}
 }
@@ -299,7 +322,7 @@ func TestDiscoverRootfsPartitionDevicesRejectsEvidenceChangedAfterOpen(t *testin
 			)
 			assert.Nil(t, set)
 			requireRootfsPartitionContractError(t, err, test.wantErr)
-			assert.Equal(t, []int{20}, fixture.deviceCloses)
+			assertRootfsPartitionIntSliceDiff(t, []int{20}, fixture.deviceCloses)
 		})
 	}
 }
@@ -393,7 +416,7 @@ func TestDiscoverRootfsPartitionDevicesClosesPartialAdmissionInReverse(t *testin
 	assert.Nil(t, set)
 	require.ErrorIs(t, err, unix.EACCES)
 	require.ErrorIs(t, err, closeCause)
-	assert.Equal(t, []int{21, 20}, fixture.deviceCloses)
+	assertRootfsPartitionIntSliceDiff(t, []int{21, 20}, fixture.deviceCloses)
 	assert.False(t, parent.state.released)
 	assert.Equal(t, 50, parent.state.fd)
 }
@@ -418,8 +441,94 @@ func TestDiscoverRootfsPartitionDevicesStopsAfterCancellationBetweenEntries(t *t
 	)
 	assert.Nil(t, set)
 	require.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, []int{20}, fixture.deviceCloses)
-	assert.Equal(t, []string{"/dev/loop3p1"}, fixture.deviceOpens)
+	assertRootfsPartitionIntSliceDiff(t, []int{20}, fixture.deviceCloses)
+	assertRootfsPartitionStringSliceDiff(t, []string{"/dev/loop3p1"}, fixture.deviceOpens)
+}
+
+// Rationale: Authority must describe one stable kernel partition set, not a mixture of two directory snapshots.
+func TestDiscoverRootfsPartitionDevicesRejectsMembershipChangesBeforeReturningAuthority(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		initial   []string
+		final     []string
+		wantErr   string
+		wantClose []int
+	}{
+		"partition added": {
+			initial: []string{"loop3", "loop3p1"},
+			final:   []string{"loop3", "loop3p1", "loop3p2"},
+			wantErr: "partition membership changed", wantClose: []int{20},
+		},
+		"partition removed": {
+			initial: []string{"loop3", "loop3p1", "loop3p2"},
+			final:   []string{"loop3", "loop3p1"},
+			wantErr: "partition membership changed", wantClose: []int{21, 20},
+		},
+		"partition renamed": {
+			initial: []string{"loop3", "loop3p1"},
+			final:   []string{"loop3", "loop3p2"},
+			wantErr: "partition membership changed", wantClose: []int{20},
+		},
+		"partition became malformed": {
+			initial: []string{"loop3", "loop3p1"},
+			final:   []string{"loop3", "loop3p01"},
+			wantErr: "partition name is malformed", wantClose: []int{20},
+		},
+		"partition became duplicated": {
+			initial: []string{"loop3", "loop3p1"},
+			final:   []string{"loop3", "loop3p1", "loop3p1"},
+			wantErr: "partition number is duplicated", wantClose: []int{20},
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newTestRootfsPartitionFixture(3)
+			fixture.addPartition(1, rootfsBlockIdentity{major: 259, minor: 1}, 20)
+			fixture.addPartition(2, rootfsBlockIdentity{major: 259, minor: 2}, 21)
+			fixture.directorySnapshots = [][]string{test.initial, test.final}
+
+			set, err := discoverRootfsPartitionDevices(
+				t.Context(), fixture.dependencies(), testRootfsPartitionParent(3, rootfsReadWrite),
+			)
+			if set != nil {
+				require.NoError(t, set.Release(t.Context()))
+			}
+			assert.Nil(t, set)
+			requireRootfsPartitionContractError(t, err, test.wantErr)
+			assert.Equal(t, 2, fixture.listCalls)
+			assertRootfsPartitionIntSliceDiff(t, test.wantClose, fixture.deviceCloses)
+			for _, observed := range fixture.closeContexts {
+				assert.NoError(t, observed.Err())
+			}
+		})
+	}
+}
+
+// Rationale: Cancellation during the final membership snapshot must not retain already-pinned partition descriptors.
+func TestDiscoverRootfsPartitionDevicesCleansPinnedDevicesWhenFinalEnumerationIsCancelled(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	fixture := newTestRootfsPartitionFixture(3)
+	fixture.addPartition(1, rootfsBlockIdentity{major: 259, minor: 1}, 20)
+	fixture.addPartition(2, rootfsBlockIdentity{major: 259, minor: 2}, 21)
+	fixture.listHook = func(call int) {
+		if call == 2 {
+			cancel()
+		}
+	}
+
+	set, err := discoverRootfsPartitionDevices(
+		ctx, fixture.dependencies(), testRootfsPartitionParent(3, rootfsReadWrite),
+	)
+	assert.Nil(t, set)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 2, fixture.listCalls)
+	assertRootfsPartitionIntSliceDiff(t, []int{21, 20}, fixture.deviceCloses)
+	for _, observed := range fixture.closeContexts {
+		assert.NoError(t, observed.Err())
+	}
 }
 
 func TestDiscoverRootfsPartitionDevicesReturnsLeaseWhenDirectoryCloseFails(t *testing.T) {
@@ -439,7 +548,7 @@ func TestDiscoverRootfsPartitionDevicesReturnsLeaseWhenDirectoryCloseFails(t *te
 	assert.Empty(t, fixture.deviceCloses)
 
 	require.NoError(t, set.Release(t.Context()))
-	assert.Equal(t, []int{20}, fixture.deviceCloses)
+	assertRootfsPartitionIntSliceDiff(t, []int{20}, fixture.deviceCloses)
 }
 
 func TestDiscoverRootfsPartitionDevicesSurfacesInfrastructureFaults(t *testing.T) {
@@ -600,7 +709,7 @@ func TestRootfsPartitionSetReleaseIsSharedCheckedAndCancellationIndependent(t *t
 	err := set.Release(cleanupCtx)
 	require.ErrorIs(t, err, firstCause)
 	require.ErrorIs(t, err, secondCause)
-	assert.Equal(t, []int{21, 20}, fixture.deviceCloses)
+	assertRootfsPartitionIntSliceDiff(t, []int{21, 20}, fixture.deviceCloses)
 	for _, observed := range fixture.closeContexts {
 		assert.NoError(t, observed.Err())
 		assert.Same(t, value, observed.Value(rootfsPartitionContextKey{}))
@@ -610,7 +719,7 @@ func TestRootfsPartitionSetReleaseIsSharedCheckedAndCancellationIndependent(t *t
 	assert.Same(t, err, secondErr)
 	require.ErrorIs(t, secondErr, firstCause)
 	require.ErrorIs(t, secondErr, secondCause)
-	assert.Equal(t, []int{21, 20}, fixture.deviceCloses)
+	assertRootfsPartitionIntSliceDiff(t, []int{21, 20}, fixture.deviceCloses)
 }
 
 // Rationale: A copied capability must not close reused descriptors twice; all copies share one release transition.
@@ -641,7 +750,7 @@ func TestRootfsPartitionSetReleaseSerializesConcurrentCopies(t *testing.T) {
 	for range callers {
 		require.NoError(t, <-results)
 	}
-	assert.Equal(t, []int{20}, fixture.deviceCloses)
+	assertRootfsPartitionIntSliceDiff(t, []int{20}, fixture.deviceCloses)
 }
 
 func TestRootfsPartitionSetReleaseHandlesNilAndZeroState(t *testing.T) {
@@ -700,30 +809,33 @@ type testRootfsPartitionReadState struct {
 }
 
 type testRootfsPartitionFixture struct {
-	names           []string
-	attributes      map[string][][]byte
-	attributeOpens  map[string]int
-	attributeStats  map[string]unix.Stat_t
-	deviceFDs       map[string]int
-	deviceStats     map[string]unix.Stat_t
-	openErrors      map[string]error
-	statErrors      map[string]error
-	readErrors      map[string]error
-	readNoProgress  map[string]bool
-	closeErrors     map[string]error
-	readHook        func(string, int)
-	listErr         error
-	listCalls       int
-	listLimits      []int
-	opens           []testRootfsPartitionOpen
-	deviceOpens     []string
-	deviceCloses    []int
-	closeContexts   []context.Context
-	events          []string
-	fdPaths         map[int]string
-	reads           map[int]*testRootfsPartitionReadState
-	nextAttributeFD int
-	directoryStat   unix.Stat_t
+	names              []string
+	directorySnapshots [][]string
+	attributes         map[string][][]byte
+	attributeOpens     map[string]int
+	attributeStats     map[string]unix.Stat_t
+	deviceFDs          map[string]int
+	deviceStats        map[string]unix.Stat_t
+	openErrors         map[string]error
+	statErrors         map[string]error
+	readErrors         map[string]error
+	readNoProgress     map[string]bool
+	closeErrors        map[string]error
+	readHook           func(string, int)
+	listHook           func(int)
+	listErr            error
+	listCalls          int
+	listLimits         []int
+	opens              []testRootfsPartitionOpen
+	deviceOpens        []string
+	deviceCloses       []int
+	closeContexts      []context.Context
+	events             []string
+	fdPaths            map[int]string
+	reads              map[int]*testRootfsPartitionReadState
+	nextAttributeFD    int
+	nextDirectoryFD    int
+	directoryStat      unix.Stat_t
 }
 
 func newTestRootfsPartitionFixture(loopIndex int) *testRootfsPartitionFixture {
@@ -741,9 +853,10 @@ func newTestRootfsPartitionFixture(loopIndex int) *testRootfsPartitionFixture {
 		readErrors:      make(map[string]error),
 		readNoProgress:  make(map[string]bool),
 		closeErrors:     make(map[string]error),
-		fdPaths:         map[int]string{10: rootfsSysfsBlockPath},
+		fdPaths:         make(map[int]string),
 		reads:           make(map[int]*testRootfsPartitionReadState),
 		nextAttributeFD: 100,
+		nextDirectoryFD: 10,
 		directoryStat:   unix.Stat_t{Mode: unix.S_IFDIR | 0o755},
 	}
 }
@@ -788,7 +901,10 @@ func (fixture *testRootfsPartitionFixture) dependencies() rootfsPartitionDiscove
 				return -1, err
 			}
 			if path == rootfsSysfsBlockPath {
-				return 10, nil
+				fd := fixture.nextDirectoryFD
+				fixture.nextDirectoryFD++
+				fixture.fdPaths[fd] = path
+				return fd, nil
 			}
 			if fd, exists := fixture.deviceFDs[path]; exists {
 				fixture.deviceOpens = append(fixture.deviceOpens, path)
@@ -810,14 +926,23 @@ func (fixture *testRootfsPartitionFixture) dependencies() rootfsPartitionDiscove
 			fixture.reads[fd] = &testRootfsPartitionReadState{path: path, value: value}
 			return fd, nil
 		},
-		list: func(_ context.Context, fd int, limit int) ([]string, error) {
+		list: func(ctx context.Context, fd int, limit int) ([]string, error) {
 			fixture.listCalls++
 			fixture.listLimits = append(fixture.listLimits, limit)
-			if fd != 10 {
+			if fixture.fdPaths[fd] != rootfsSysfsBlockPath {
 				return nil, unix.EBADF
+			}
+			if fixture.listHook != nil {
+				fixture.listHook(fixture.listCalls)
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
 			if fixture.listErr != nil {
 				return nil, fixture.listErr
+			}
+			if index := fixture.listCalls - 1; index < len(fixture.directorySnapshots) {
+				return append([]string(nil), fixture.directorySnapshots[index]...), nil
 			}
 			return append([]string(nil), fixture.names...), nil
 		},
@@ -924,4 +1049,18 @@ func requireRootfsPartitionContractError(t *testing.T, err error, contains strin
 	require.Error(t, err)
 	assert.ErrorContains(t, err, contains)
 	assert.Equal(t, errs.CodeLoopMountError, errs.AsDomainError(err).Code)
+}
+
+func assertRootfsPartitionIntSliceDiff(t *testing.T, want, got []int) {
+	t.Helper()
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("integer slice mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func assertRootfsPartitionStringSliceDiff(t *testing.T, want, got []string) {
+	t.Helper()
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("string slice mismatch (-want +got):\n%s", diff)
+	}
 }

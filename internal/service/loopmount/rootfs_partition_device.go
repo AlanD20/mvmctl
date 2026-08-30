@@ -86,40 +86,28 @@ func discoverRootfsPartitionDevices(
 		return nil, err
 	}
 
-	directoryFD, err := deps.open(ctx, rootfsSysfsBlockPath, rootfsSysfsDirectoryOpenFlags, 0)
+	directoryFD, err := openRootfsSysfsBlockDirectory(ctx, deps)
 	if err != nil {
-		return nil, rootfsAtomicError("open sysfs block directory", err)
+		return nil, err
 	}
+	directoryFDs := []int{directoryFD}
 	retained := make([]rootfsPartitionDevice, 0, maxRootfsPartitionCount)
 	defer func() {
 		cleanupCtx := context.WithoutCancel(ctx)
 		if returnErr != nil && result == nil {
 			returnErr = closeRootfsPartitionDevices(cleanupCtx, deps, retained, returnErr)
 		}
-		returnErr = appendRootfsPartitionCleanupError(
-			returnErr,
-			"close sysfs block directory",
-			deps.close(cleanupCtx, directoryFD),
-		)
+		for index := len(directoryFDs) - 1; index >= 0; index-- {
+			returnErr = appendRootfsPartitionCleanupError(
+				returnErr,
+				"close sysfs block directory",
+				deps.close(cleanupCtx, directoryFDs[index]),
+			)
+		}
 	}()
 
-	var directoryStat unix.Stat_t
-	if err := deps.fstat(ctx, directoryFD, &directoryStat); err != nil {
-		return nil, rootfsAtomicError("inspect sysfs block directory", err)
-	}
-	if directoryStat.Mode&unix.S_IFMT != unix.S_IFDIR {
-		return nil, rootfsAtomicError("opened sysfs block path is not a directory", nil)
-	}
-
-	names, err := deps.list(ctx, directoryFD, rootfsPartitionDirectoryEntryLimit)
-	if err != nil {
-		return nil, rootfsAtomicError("enumerate sysfs block devices", err)
-	}
-	if len(names) > rootfsPartitionDirectoryEntryLimit {
-		return nil, rootfsAtomicError("sysfs block directory exceeds the supported entry bound", nil)
-	}
 	rawName := "loop" + strconv.Itoa(parentState.index)
-	partitionNumbers, err := parseRootfsLoopPartitionNames(rawName, names)
+	partitionNumbers, err := listRootfsLoopPartitionNumbers(ctx, deps, directoryFD, rawName)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +194,19 @@ func discoverRootfsPartitionDevices(
 		}
 	}
 
+	verificationDirectoryFD, err := openRootfsSysfsBlockDirectory(ctx, deps)
+	if err != nil {
+		return nil, err
+	}
+	directoryFDs = append(directoryFDs, verificationDirectoryFD)
+	observedPartitions, err := listRootfsLoopPartitionNumbers(ctx, deps, verificationDirectoryFD, rawName)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Equal(partitionNumbers, observedPartitions) {
+		return nil, rootfsAtomicError("sysfs loop partition membership changed during discovery", nil)
+	}
+
 	result = &rootfsPartitionSet{state: &rootfsPartitionSetState{
 		deps:           deps,
 		parent:         parentState,
@@ -214,6 +215,57 @@ func discoverRootfsPartitionDevices(
 		devices:        retained,
 	}}
 	return result, nil
+}
+
+func openRootfsSysfsBlockDirectory(
+	ctx context.Context,
+	deps rootfsPartitionDiscoveryDeps,
+) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return -1, rootfsAtomicError("partition discovery context ended", err)
+	}
+	directoryFD, err := deps.open(ctx, rootfsSysfsBlockPath, rootfsSysfsDirectoryOpenFlags, 0)
+	if err != nil {
+		return -1, rootfsAtomicError("open sysfs block directory", err)
+	}
+
+	var directoryStat unix.Stat_t
+	if err := deps.fstat(ctx, directoryFD, &directoryStat); err != nil {
+		primary := rootfsAtomicError("inspect sysfs block directory", err)
+		return -1, appendRootfsPartitionCleanupError(
+			primary,
+			"close rejected sysfs block directory",
+			deps.close(context.WithoutCancel(ctx), directoryFD),
+		)
+	}
+	if directoryStat.Mode&unix.S_IFMT != unix.S_IFDIR {
+		primary := rootfsAtomicError("opened sysfs block path is not a directory", nil)
+		return -1, appendRootfsPartitionCleanupError(
+			primary,
+			"close rejected sysfs block directory",
+			deps.close(context.WithoutCancel(ctx), directoryFD),
+		)
+	}
+	return directoryFD, nil
+}
+
+func listRootfsLoopPartitionNumbers(
+	ctx context.Context,
+	deps rootfsPartitionDiscoveryDeps,
+	directoryFD int,
+	rawName string,
+) ([]uint8, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, rootfsAtomicError("partition discovery context ended", err)
+	}
+	names, err := deps.list(ctx, directoryFD, rootfsPartitionDirectoryEntryLimit)
+	if err != nil {
+		return nil, rootfsAtomicError("enumerate sysfs block devices", err)
+	}
+	if len(names) > rootfsPartitionDirectoryEntryLimit {
+		return nil, rootfsAtomicError("sysfs block directory exceeds the supported entry bound", nil)
+	}
+	return parseRootfsLoopPartitionNames(rawName, names)
 }
 
 // Release closes every admitted partition descriptor in reverse order without releasing the parent loop capability.
