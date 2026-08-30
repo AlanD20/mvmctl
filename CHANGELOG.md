@@ -114,6 +114,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Caller ownership, safe modes, one-link regular-file identity, exact bounded size, local-filesystem topology, mount
   identity, no-cross-mount descendant traversal, and reverse checked cleanup are enforced before a lease can become
   authority. L1 tests deterministically replace every caller-owned ancestor and leaf immediately before and after open.
+- Added an inert deterministic rootfs mount-source policy over pathless receiver-derived probes. It accepts at most 16
+  partition probes. A raw source is accepted only when no partitions exist and its filesystem exactly matches the
+  request; otherwise exactly one partition must match. Malformed probes, reused or duplicate block identities,
+  duplicate partition numbers, raw-plus-partition ambiguity, and missing or multiple matches fail closed. Device
+  discovery, ioctls, mounts, mount namespaces, effects, and `Server` activation remain pending.
 - Added an inactive private receiver-transaction foundation with two action-specific effect seams:
   `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while private `imageOptimizeEffects` contains only
   `OptimizeImage`. Each action validates only its effect dependency plus the shared rootfs authority and per-resource

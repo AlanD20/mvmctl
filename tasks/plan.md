@@ -68,8 +68,10 @@ continue without silently deleting it.
   dependencies per action and adds a per-resource lock seam, ordered cancellation-independent cleanup, closed
   mutation/durability evidence, and old-or-target VM grow replay admission with actual admitted-size handoff. The
   reviewed private lock adapter binds the seam to `authorityfs` using only the authenticated caller UID and canonical
-  VM/image identity. No concrete mount/effect adapter, production `Server` constructor, receiver handler, dispatcher
-  entry, public/backend cutover, or legacy-route removal is wired.
+  VM/image identity. An inert deterministic mount-source policy accepts only pathless receiver-derived probes, at most
+  16 partitions, and either a matching raw filesystem with no partitions or exactly one matching partition; malformed,
+  duplicate, and ambiguous layouts fail closed. Discovery, ioctls, mounts, mount namespaces, effects, production
+  `Server` construction, receiver handling, dispatch, public/backend cutover, and legacy-route removal remain pending.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -653,6 +655,13 @@ bounded size, and action-specific access. It retains the image staging descripto
 replacement, closes the complete chain in checked reverse order, and has deterministic before/after-open replacement
 tests for every caller-owned component.
 
+The private inert mount-source policy consumes only receiver-derived block identities and filesystem values, never a
+path or device name. It accepts no more than 16 partitions. A raw source is selected only when there are no partitions
+and its filesystem exactly matches the request; a partitioned layout requires exactly one matching partition. Invalid,
+reused, or duplicate block identities, duplicate or out-of-range partition numbers, raw-plus-partition ambiguity, and
+missing or multiple matches fail closed. Receiver discovery and identity verification, loop ioctls, mounts, private
+mount-namespace setup, effect implementation, and `Server` activation remain pending.
+
 The private inactive `Server` transaction foundation splits its effects between `rootfsEffects`, which contains exactly
 `ProvisionVM` and `InspectImage`, and private `imageOptimizeEffects`, which contains only `OptimizeImage`. Provisioning
 and inspection validate the rootfs effect dependency; optimization validates its separate effect dependency; all three
@@ -685,11 +694,11 @@ coordinator's resource-lock seam, including partial-acquisition cleanup, retryab
 lock-before-parent checked release. Review corrected an initial parent-capability serialization bug before this record
 was updated. LoopMount does not import Jailer or duplicate a pathname initializer.
 
-The concrete effect uses a private mount namespace, direct loop/mount/descriptor syscalls, and only fixed host
+The future concrete effect uses a private mount namespace, direct loop/mount/descriptor syscalls, and only fixed host
 filesystem probes and grow tools. It consumes the admitted rootfs descriptor directly and never reopens or passes a
 caller path, synthesizes a `/proc` FD path, executes a guest binary or chroot, accepts generic operations, scans or
 kills PIDs, or stages beneath `/tmp`. Grow converges from the exact old or target size and returns closed
-modified/durability-uncertain/outcome-unknown evidence.
+modified/durability-uncertain/outcome-unknown evidence. None of these effect operations is implemented yet.
 
 The first provisioning subset is fixed host-side hostname/hosts, DNS, existing-account SSH/sudo, fixed SSH service,
 embedded-agent, and fstab content. Missing-user creation, unpinned cloud-init copying, deblob/package commands,

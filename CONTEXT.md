@@ -349,6 +349,13 @@ releases every descriptor in checked reverse order with cancellation-independent
 replace each caller-owned ancestor and leaf immediately before and after open; admission either fails closed or retains
 the original object rather than attacker content.
 
+The inert private rootfs mount-source policy consumes only pathless receiver-derived block-identity and filesystem
+probes. It accepts at most 16 partition probes. A raw source is valid only when there are no partitions and its probed
+filesystem exactly matches the request; a partitioned source is valid only when exactly one partition matches.
+Malformed probes, reused or duplicate block identities, duplicate partition numbers, raw-plus-partition ambiguity, and
+missing or multiple matches fail closed. Block-device discovery, loop ioctls, mounts, private mount-namespace setup,
+effect implementations, and `Server` activation remain pending.
+
 An inactive private `Server` now coordinates each admitted operation through two action-specific effect seams.
 `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while the private `imageOptimizeEffects` contains
 only `OptimizeImage`. Provisioning and inspection validate `rootfsEffects`; optimization validates

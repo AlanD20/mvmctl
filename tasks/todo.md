@@ -552,10 +552,11 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 13: Migrate loopmount and supported host mutations
 
 **Owner:** engineer
-**Status:** Pending — typed LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction
-foundations are implemented; the shared authority filesystem, its separate Jailer and LoopMount capability families,
-canonical VM/image locks, and the private service lock adapter are implemented and reviewed; mount/effects, `Server`
-activation, receiver registration, backend/public cutover, legacy removal, and host-mutation migration remain pending
+**Status:** Pending — typed LoopMount client/protocol, private rootfs authority, inactive receiver-transaction
+foundations, and deterministic rootfs mount-source policy are implemented; the shared authority filesystem, its
+separate Jailer and LoopMount capability families, canonical VM/image locks, and the private service lock adapter are
+implemented and reviewed; discovery, ioctls, mounts, namespaces, effects, `Server` activation, receiver registration,
+backend/public cutover, legacy removal, and host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -605,6 +606,11 @@ activation, receiver registration, backend/public cutover, legacy removal, and h
     unmount, descriptor, sync, and detach syscalls, bounded partition discovery, autoclear, and read-only inspection.
     Permit only fixed host filesystem probes/grow tools; reject caller paths, `/proc` FD passthrough, chroot, guest
     executables, generic operations, PID scan/kill, and `/tmp` workspaces.
+    - [x] Define the inert deterministic mount-source policy over pathless receiver-derived probes. Accept at most 16
+      partitions; select raw only with no partitions and an exact requested-filesystem match; otherwise require exactly
+      one matching partition. Reject malformed probes, reused or duplicate identities, duplicate partition numbers,
+      raw-plus-partition ambiguity, and missing or multiple matches. This implements no discovery, ioctl, mount,
+      namespace, effect, or `Server` activation.
   - [ ] Implement read-only `InspectImage` first. Consume the admitted descriptor, share the image lock with future
     optimization, mount `ro,nosuid,nodev,noexec`, read only bounded fixed OS-release leaves, prove byte-for-byte image
     stability, and return only unchanged or outcome-unknown evidence.

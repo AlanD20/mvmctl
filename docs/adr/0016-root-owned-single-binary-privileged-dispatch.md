@@ -473,10 +473,16 @@ environment. No shell, `chroot`, guest executable, arbitrary operation, `losetup
 or `/tmp` workspace is permitted. A tool that may have started a mutation but lacks authoritative completion makes the
 effect outcome unknown.
 
-Partition discovery is bounded and admits only kernel-created children of the configured loop device. The effect
-verifies block-device identity and the closed filesystem type before selecting a raw filesystem or deterministic root
-partition. Ambiguous or unsupported layouts fail closed. Grow initially supports a raw filesystem or a partition whose
-already-admitted capacity reaches the target; rewriting MBR or GPT is outside this capability.
+The private inert mount-source selection policy now consumes only pathless receiver-derived block identities and
+filesystem probes. It accepts at most 16 partition probes. A raw source is accepted only when there are no partitions
+and its filesystem exactly matches the closed request. Otherwise exactly one partition must match. Invalid identities
+or filesystem values, reused or duplicate block identities, duplicate or out-of-range partition numbers,
+raw-plus-partition ambiguity, and missing or multiple matches fail closed.
+
+Receiver discovery of kernel-created loop children and verification of the identities supplied to that policy remain
+future effect work. No discovery, loop ioctl, mount, private mount namespace, effect implementation, or `Server`
+activation exists yet. The future grow effect supports a raw filesystem or a partition whose already-admitted capacity
+reaches the target; rewriting MBR or GPT is outside this capability.
 
 Provisioning writes only receiver-generated, fixed-purpose content through the mounted-root descriptor. The accepted
 first subset is hostname and hosts content, DNS content, SSH keys and sudo policy for root or an already-existing parsed
@@ -503,13 +509,15 @@ file/copy/command operations, custom shells, partition-table growth, shrink, con
 public-cutover blockers, not permission to silently drop behavior. An explicit scope decision must either accept each
 user-visible reduction or defer cutover until a safe typed replacement exists.
 
-This section combines implemented inactive authority foundations with accepted future effect design, not current runtime
-behavior. The shared cycle-free authority module now has separate Jailer and LoopMount capability families, and the
-private LoopMount service adapter implements the coordinator's canonical resource-lock seam. No production constructor
-activates that `Server`; the concrete LoopMount mount/effects do not exist; no LoopMount receiver handler or dispatcher
-action is registered; and the backend/public path still uses `mvm run provision`, raw wire operations and sudo,
-arbitrary unmount, and PID-killing cleanup. The implemented locks therefore authorize no privileged mount effect. The
-legacy `Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
+This section combines implemented inactive authority and selection-policy foundations with accepted future effect
+design, not current runtime behavior. The shared cycle-free authority module now has separate Jailer and LoopMount
+capability families, the private LoopMount service adapter implements the coordinator's canonical resource-lock seam,
+and the deterministic mount-source policy remains pathless and inert. No production constructor activates that
+`Server`; discovery, loop ioctls, mounts, private mount-namespace setup, and concrete LoopMount effects do not exist; no
+LoopMount receiver handler or dispatcher action is registered; and the backend/public path still uses
+`mvm run provision`, raw wire operations and sudo, arbitrary unmount, and PID-killing cleanup. The implemented
+foundations therefore authorize no privileged mount effect. The legacy `Provisioner`, `Op`, path protocol, and cleanup
+functions must not be wrapped by the new adapter.
 
 ### Release trust
 
