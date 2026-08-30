@@ -159,9 +159,6 @@ func TestCompileGenerationBindsInternetEgressToMasqueradeCapability(t *testing.T
 
 func TestCompileGenerationRejectsInvalidResolvedIntent(t *testing.T) {
 	tests := map[string]func(*generationIntent){
-		"generation identity": func(intent *generationIntent) {
-			intent.id = "caller supplied text"
-		},
 		"duplicate VM identity": func(intent *generationIntent) {
 			intent.endpoints[1].id = intent.endpoints[0].id
 		},
@@ -258,22 +255,330 @@ func TestRuleUserDataRoundTripRejectsAmbiguity(t *testing.T) {
 
 func TestCompileGenerationIsDeterministicAcrossInputOrder(t *testing.T) {
 	ordered := compatibilityIntent()
+	ordered.vmGrants = append(ordered.vmGrants, vmTrafficGrant{
+		id:              "policy-vm-second",
+		sourceVMID:      ordered.endpoints[2].id,
+		destinationVMID: ordered.endpoints[0].id,
+		protocol:        protocolUDP,
+		ports:           portInterval{first: 53, last: 53},
+	})
+	ordered.hostServices = append(ordered.hostServices, hostServiceIntent{
+		id:              "service-second",
+		sourceNetworkID: ordered.networks[1].id,
+		protocol:        protocolUDP,
+		ports:           portInterval{first: 5353, last: 5353},
+	})
 	shuffled := compatibilityIntent()
+	shuffled.vmGrants = append(shuffled.vmGrants, vmTrafficGrant{
+		id:              "policy-vm-second",
+		sourceVMID:      shuffled.endpoints[2].id,
+		destinationVMID: shuffled.endpoints[0].id,
+		protocol:        protocolUDP,
+		ports:           portInterval{first: 53, last: 53},
+	})
+	shuffled.hostServices = append(shuffled.hostServices, hostServiceIntent{
+		id:              "service-second",
+		sourceNetworkID: shuffled.networks[1].id,
+		protocol:        protocolUDP,
+		ports:           portInterval{first: 5353, last: 5353},
+	})
 	shuffled.endpoints[0], shuffled.endpoints[2] = shuffled.endpoints[2], shuffled.endpoints[0]
 	shuffled.networks[0], shuffled.networks[1] = shuffled.networks[1], shuffled.networks[0]
+	shuffled.vmGrants[0], shuffled.vmGrants[1] = shuffled.vmGrants[1], shuffled.vmGrants[0]
 	shuffled.networkGrants[0], shuffled.networkGrants[1] = shuffled.networkGrants[1], shuffled.networkGrants[0]
+	shuffled.hostServices[0], shuffled.hostServices[1] = shuffled.hostServices[1], shuffled.hostServices[0]
 
 	first, err := compileGeneration(ordered)
 	require.NoError(t, err)
 	second, err := compileGeneration(shuffled)
 	require.NoError(t, err)
 
-	assert.Equal(t, compiledRuleIdentities(t, first), compiledRuleIdentities(t, second))
+	assert.Equal(t, first.id, second.id)
+	if diff := cmp.Diff(
+		compiledRuleIdentities(t, first),
+		compiledRuleIdentities(t, second),
+		cmp.AllowUnexported(ruleIdentity{}),
+	); diff != "" {
+		t.Errorf("compiled rule identities mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestCompileGenerationCanonicalDigestGoldenVectors(t *testing.T) {
+	// Rationale: fixed literals make these vectors independent of the implementation under test. The empty vector is
+	// also reproducible directly from the documented v1 TLV field sequence without compiling an nftables expression.
+	tests := map[string]struct {
+		intent    generationIntent
+		wantID    string
+		wantEmpty bool
+	}{
+		"explicit empty generation": {
+			intent:    generationIntent{},
+			wantID:    "a686883941eb9b92f4c31e6fd9e82861b1f0135f64954041cb890a4f5826f4bb",
+			wantEmpty: true,
+		},
+		"complete compatibility generation": {
+			intent: compatibilityIntent(),
+			wantID: "3ade5c53dfc88ffda31d76216cd61f9174a63296266109f42fd265183916644e",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			compiled, err := compileGeneration(tc.intent)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.wantID, compiled.id)
+			assert.Equal(t, tc.wantEmpty, compiled.empty)
+			if tc.wantEmpty {
+				assert.Empty(t, compiled.tableIdentities())
+				assert.Empty(t, compiled.rules())
+			}
+		})
+	}
+}
+
+func TestCompileGenerationDigestCoversSemanticIntentAndOutputOrder(t *testing.T) {
+	baseline, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+
+	intentMutations := map[string]func(*generationIntent){
+		"endpoint identity": func(intent *generationIntent) {
+			intent.endpoints[0].id = strings.Repeat("4", 32)
+			intent.vmGrants[0].sourceVMID = intent.endpoints[0].id
+		},
+		"endpoint network": func(intent *generationIntent) {
+			intent.endpoints[0].networkID = intent.networks[1].id
+			intent.endpoints[0].ipv4 = netip.MustParseAddr("10.1.0.4")
+		},
+		"endpoint host interface": func(intent *generationIntent) {
+			intent.endpoints[0].hostVeth = "mvma1"
+		},
+		"endpoint IPv4": func(intent *generationIntent) {
+			intent.endpoints[0].ipv4 = netip.MustParseAddr("10.0.0.4")
+		},
+		"endpoint MAC": func(intent *generationIntent) {
+			intent.endpoints[0].mac[5] = 4
+		},
+		"network host bridge": func(intent *generationIntent) {
+			intent.networks[0].hostBridge = "mvmbr2"
+		},
+		"network identity": func(intent *generationIntent) {
+			intent.networks[0].id = strings.Repeat("7", 64)
+			for index := range 2 {
+				intent.endpoints[index].networkID = intent.networks[0].id
+			}
+			intent.networkGrants[0].sourceNetworkID = intent.networks[0].id
+			intent.networkGrants[1].sourceNetworkID = intent.networks[0].id
+			intent.hostServices[0].sourceNetworkID = intent.networks[0].id
+		},
+		"network subnet": func(intent *generationIntent) {
+			intent.networks[0].subnet = netip.MustParsePrefix("10.2.0.0/24")
+			intent.networks[0].hostIPv4 = netip.MustParseAddr("10.2.0.1")
+			intent.endpoints[0].ipv4 = netip.MustParseAddr("10.2.0.2")
+			intent.endpoints[1].ipv4 = netip.MustParseAddr("10.2.0.3")
+		},
+		"network host IPv4": func(intent *generationIntent) {
+			intent.networks[0].hostIPv4 = netip.MustParseAddr("10.0.0.254")
+		},
+		"network uplink": func(intent *generationIntent) {
+			intent.networks[0].uplinkInterface = "eth1"
+		},
+		"network masquerade": func(intent *generationIntent) {
+			intent.networks[0].masquerade = false
+		},
+		"VM grant protocol": func(intent *generationIntent) {
+			intent.vmGrants[0].protocol = protocolUDP
+		},
+		"VM grant identity": func(intent *generationIntent) {
+			intent.vmGrants[0].id = "policy-vm-changed"
+		},
+		"VM grant source": func(intent *generationIntent) {
+			intent.vmGrants[0].sourceVMID = intent.endpoints[2].id
+		},
+		"VM grant destination": func(intent *generationIntent) {
+			intent.vmGrants[0].destinationVMID = intent.endpoints[2].id
+		},
+		"VM grant first port": func(intent *generationIntent) {
+			intent.vmGrants[0].ports = portInterval{first: 444, last: 444}
+		},
+		"VM grant last port": func(intent *generationIntent) {
+			intent.vmGrants[0].ports = portInterval{first: 443, last: 444}
+		},
+		"network grant identity": func(intent *generationIntent) {
+			intent.networkGrants[1].id = "policy-network-changed"
+		},
+		"network grant source": func(intent *generationIntent) {
+			intent.networkGrants[1].sourceNetworkID = strings.Repeat("c", 64)
+		},
+		"network grant destination": func(intent *generationIntent) {
+			intent.networkGrants[1].destinationVMID = intent.endpoints[1].id
+		},
+		"network grant protocol": func(intent *generationIntent) {
+			intent.networkGrants[1].protocol = protocolTCP
+		},
+		"network grant first port": func(intent *generationIntent) {
+			intent.networkGrants[1].ports = portInterval{first: 5001, last: 5010}
+		},
+		"network grant last port": func(intent *generationIntent) {
+			intent.networkGrants[1].ports = portInterval{first: 5000, last: 5011}
+		},
+		"host service identity": func(intent *generationIntent) {
+			intent.hostServices[0].id = "service-changed"
+		},
+		"host service source": func(intent *generationIntent) {
+			intent.hostServices[0].sourceNetworkID = intent.networks[1].id
+		},
+		"host service protocol": func(intent *generationIntent) {
+			intent.hostServices[0].protocol = protocolUDP
+		},
+		"host service first port": func(intent *generationIntent) {
+			intent.hostServices[0].ports = portInterval{first: 8081, last: 8088}
+		},
+		"host service last port": func(intent *generationIntent) {
+			intent.hostServices[0].ports = portInterval{first: 8080, last: 8089}
+		},
+	}
+
+	for name, mutate := range intentMutations {
+		t.Run(name, func(t *testing.T) {
+			intent := compatibilityIntent()
+			mutate(&intent)
+
+			compiled, err := compileGeneration(intent)
+			require.NoError(t, err)
+			assert.NotEqual(t, baseline.id, compiled.id)
+		})
+	}
+
+	outputMutations := map[string]func(*compiledGeneration){
+		"table family": func(generation *compiledGeneration) {
+			generation.bridge.table.Family = nftables.TableFamilyIPv4
+		},
+		"table name": func(generation *compiledGeneration) {
+			generation.bridge.table.Name = "mvmctl_bridge_changed"
+		},
+		"table flags": func(generation *compiledGeneration) {
+			generation.bridge.table.Flags = 1
+		},
+		"chain order": func(generation *compiledGeneration) {
+			generation.bridge.chains[0], generation.bridge.chains[1] =
+				generation.bridge.chains[1], generation.bridge.chains[0]
+		},
+		"chain name": func(generation *compiledGeneration) {
+			generation.bridge.chains[0].Name = "prerouting-changed"
+		},
+		"chain hook": func(generation *compiledGeneration) {
+			hook := nftables.ChainHookInput
+			generation.bridge.chains[0].Hooknum = hook
+		},
+		"chain priority": func(generation *compiledGeneration) {
+			priority := nftables.ChainPriority(-299)
+			generation.bridge.chains[0].Priority = &priority
+		},
+		"chain type": func(generation *compiledGeneration) {
+			generation.bridge.chains[0].Type = nftables.ChainTypeRoute
+		},
+		"chain policy": func(generation *compiledGeneration) {
+			policy := nftables.ChainPolicyDrop
+			generation.bridge.chains[0].Policy = &policy
+		},
+		"chain device": func(generation *compiledGeneration) {
+			generation.bridge.chains[0].Device = "eth0"
+		},
+		"rule identity": func(generation *compiledGeneration) {
+			generation.bridge.rules[0].identity = "bridge.spoof.mac.changed"
+		},
+		"rule table": func(generation *compiledGeneration) {
+			generation.bridge.rules[0].rule.Table = generation.inet.table
+		},
+		"rule chain": func(generation *compiledGeneration) {
+			generation.bridge.rules[0].rule.Chain = generation.bridge.chains[1]
+		},
+		"rule position": func(generation *compiledGeneration) {
+			generation.bridge.rules[0].rule.Position = 1
+		},
+		"rule flags": func(generation *compiledGeneration) {
+			generation.bridge.rules[0].rule.Flags = 1
+		},
+		"expression field": func(generation *compiledGeneration) {
+			meta := generation.bridge.rules[0].rule.Exprs[0].(*expr.Meta)
+			meta.Register = 2
+		},
+		"compiled rule order": func(generation *compiledGeneration) {
+			generation.bridge.rules[0], generation.bridge.rules[1] =
+				generation.bridge.rules[1], generation.bridge.rules[0]
+		},
+		"compiled expression order": func(generation *compiledGeneration) {
+			generation.bridge.rules[0].rule.Exprs[0], generation.bridge.rules[0].rule.Exprs[1] =
+				generation.bridge.rules[0].rule.Exprs[1], generation.bridge.rules[0].rule.Exprs[0]
+		},
+	}
+
+	for name, mutate := range outputMutations {
+		t.Run(name, func(t *testing.T) {
+			mutated, err := compileGeneration(compatibilityIntent())
+			require.NoError(t, err)
+			mutate(&mutated)
+
+			got, err := deriveGenerationID(compatibilityIntent(), mutated)
+			require.NoError(t, err)
+			assert.NotEqual(t, baseline.id, got)
+		})
+	}
+}
+
+func TestCompileGenerationBindsDerivedDigestToRuleUserData(t *testing.T) {
+	compiled, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+
+	require.NotEmpty(t, compiled.rules())
+	for _, rule := range compiled.rules() {
+		identity, err := decodeRuleIdentity(rule.UserData)
+		require.NoError(t, err)
+		assert.Equal(t, compiled.id, identity.generation)
+	}
+}
+
+func TestDeriveGenerationIDRejectsInconsistentCompiledOutput(t *testing.T) {
+	tests := map[string]func(generationIntent, compiledGeneration) (generationIntent, compiledGeneration){
+		"empty marker with non-empty intent": func(
+			intent generationIntent,
+			generation compiledGeneration,
+		) (generationIntent, compiledGeneration) {
+			generation.empty = true
+			return intent, generation
+		},
+		"empty generation with table output": func(
+			_ generationIntent,
+			generation compiledGeneration,
+		) (generationIntent, compiledGeneration) {
+			return generationIntent{}, compiledGeneration{empty: true, bridge: generation.bridge}
+		},
+		"rule without identity": func(
+			intent generationIntent,
+			generation compiledGeneration,
+		) (generationIntent, compiledGeneration) {
+			generation.bridge.rules[0].identity = ""
+			return intent, generation
+		},
+	}
+
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			intent := compatibilityIntent()
+			compiled, err := compileGeneration(intent)
+			require.NoError(t, err)
+			intent, compiled = mutate(intent, compiled)
+
+			_, err = deriveGenerationID(intent, compiled)
+			require.Error(t, err)
+			assert.ErrorContains(t, err, "firewall generation is invalid")
+		})
+	}
 }
 
 func compatibilityIntent() generationIntent {
 	return generationIntent{
-		id: strings.Repeat("a", 64),
 		endpoints: []endpointIntent{
 			{
 				id:        strings.Repeat("1", 32),

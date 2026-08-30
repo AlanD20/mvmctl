@@ -3,7 +3,6 @@ package firewall
 import (
 	"fmt"
 	"net/netip"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -47,7 +46,6 @@ func largeCompatibilityIntent(vmCount int) generationIntent {
 		networkID = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	)
 	intent := generationIntent{
-		id: strings.Repeat("a", 64),
 		networks: []networkIntent{
 			{
 				id:              networkID,

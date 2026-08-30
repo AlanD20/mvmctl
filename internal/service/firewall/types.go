@@ -71,10 +71,9 @@ type hostServiceIntent struct {
 	ports           portInterval
 }
 
-// generationIntent is fully resolved root-side intent. It deliberately exposes
-// neither nftables expressions nor generic actions to callers.
+// generationIntent is fully resolved root-side intent. It deliberately exposes neither nftables expressions, generic
+// actions, nor a caller-selectable generation identity. The compiler derives identity from normalized semantic state.
 type generationIntent struct {
-	id            string
 	endpoints     []endpointIntent
 	networks      []networkIntent
 	vmGrants      []vmTrafficGrant
@@ -95,11 +94,17 @@ var managedTableIdentities = [...]tableIdentity{
 type compiledTable struct {
 	table  *nftables.Table
 	chains []*nftables.Chain
-	rules  []*nftables.Rule
+	rules  []compiledRule
+}
+
+type compiledRule struct {
+	identity string
+	rule     *nftables.Rule
 }
 
 type compiledGeneration struct {
 	id            string
+	empty         bool
 	bridge        compiledTable
 	inet          compiledTable
 	ingressGuards map[string]ingressGuardSet
@@ -114,6 +119,9 @@ type ingressGuardSet struct {
 }
 
 func (generation compiledGeneration) tableIdentities() []tableIdentity {
+	if generation.empty {
+		return nil
+	}
 	return []tableIdentity{
 		{family: generation.bridge.table.Family, name: generation.bridge.table.Name},
 		{family: generation.inet.table.Family, name: generation.inet.table.Name},
@@ -122,7 +130,11 @@ func (generation compiledGeneration) tableIdentities() []tableIdentity {
 
 func (generation compiledGeneration) rules() []*nftables.Rule {
 	rules := make([]*nftables.Rule, 0, len(generation.bridge.rules)+len(generation.inet.rules))
-	rules = append(rules, generation.bridge.rules...)
-	rules = append(rules, generation.inet.rules...)
+	for _, compiled := range generation.bridge.rules {
+		rules = append(rules, compiled.rule)
+	}
+	for _, compiled := range generation.inet.rules {
+		rules = append(rules, compiled.rule)
+	}
 	return rules
 }

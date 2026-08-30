@@ -18,31 +18,41 @@ type generationCompiler struct {
 	generation *compiledGeneration
 	endpoints  map[string]endpointIntent
 	networks   map[string]networkIntent
-	err        error
 }
 
 func compileGeneration(intent generationIntent) (compiledGeneration, error) {
-	compiler, err := newGenerationCompiler(intent)
-	if err != nil {
+	if err := validateIntent(intent); err != nil {
 		return compiledGeneration{}, err
 	}
+	if generationIntentIsEmpty(intent) {
+		generation := compiledGeneration{empty: true, ingressGuards: map[string]ingressGuardSet{}}
+		generationID, err := deriveGenerationID(intent, generation)
+		if err != nil {
+			return compiledGeneration{}, err
+		}
+		generation.id = generationID
+		return generation, nil
+	}
+
+	compiler := newGenerationCompiler(intent)
 
 	compiler.compileBridge(intent)
 	compiler.compileINet(intent)
-	if compiler.err != nil {
-		return compiledGeneration{}, compiler.err
-	}
 	if err := validateIngressGuardInvariant(intent, *compiler.generation); err != nil {
+		return compiledGeneration{}, err
+	}
+	generationID, err := deriveGenerationID(intent, *compiler.generation)
+	if err != nil {
+		return compiledGeneration{}, err
+	}
+	compiler.generation.id = generationID
+	if err := bindGenerationRuleData(compiler.generation); err != nil {
 		return compiledGeneration{}, err
 	}
 	return *compiler.generation, nil
 }
 
-func newGenerationCompiler(intent generationIntent) (*generationCompiler, error) {
-	if err := validateIntent(intent); err != nil {
-		return nil, err
-	}
-
+func newGenerationCompiler(intent generationIntent) *generationCompiler {
 	bridgeTable := &nftables.Table{Family: nftables.TableFamilyBridge, Name: managedBridgeTableName}
 	inetTable := &nftables.Table{Family: nftables.TableFamilyINet, Name: managedINetTableName}
 	bridgePrerouting := filterChain(
@@ -78,7 +88,6 @@ func newGenerationCompiler(intent generationIntent) (*generationCompiler, error)
 	}
 
 	generation := &compiledGeneration{
-		id:            intent.id,
 		ingressGuards: make(map[string]ingressGuardSet, len(intent.endpoints)),
 		bridge: compiledTable{
 			table:  bridgeTable,
@@ -101,7 +110,7 @@ func newGenerationCompiler(intent generationIntent) (*generationCompiler, error)
 	for _, network := range intent.networks {
 		compiler.networks[network.id] = network
 	}
-	return compiler, nil
+	return compiler
 }
 
 func filterChain(
@@ -127,34 +136,16 @@ func (compiler *generationCompiler) addRule(
 	identity string,
 	expressions []expr.Any,
 ) *nftables.Rule {
-	if compiler.err != nil {
-		return nil
-	}
-	userdata, err := encodeRuleIdentity(ruleIdentity{generation: compiler.generation.id, rule: identity})
-	if err != nil {
-		compiler.err = errs.WrapMsg(
-			errs.CodeNetworkFirewallFailed,
-			"firewall generation is invalid: compiled rule identity cannot be encoded",
-			err,
-			errs.WithClass(errs.ClassInternal),
-		)
-		return nil
-	}
 	rule := &nftables.Rule{
-		Table:    table.table,
-		Chain:    chain,
-		Exprs:    expressions,
-		UserData: userdata,
+		Table: table.table,
+		Chain: chain,
+		Exprs: expressions,
 	}
-	table.rules = append(table.rules, rule)
+	table.rules = append(table.rules, compiledRule{identity: identity, rule: rule})
 	return rule
 }
 
 func validateIntent(intent generationIntent) error {
-	if err := validateGenerationID(intent.id); err != nil {
-		return err
-	}
-
 	networks := make(map[string]networkIntent, len(intent.networks))
 	interfaces := make(map[string]string, len(intent.networks)*2+len(intent.endpoints))
 	uplinks := make(map[string]struct{}, len(intent.networks))
@@ -230,6 +221,11 @@ func validateIntent(intent generationIntent) error {
 		}
 	}
 	return nil
+}
+
+func generationIntentIsEmpty(intent generationIntent) bool {
+	return len(intent.endpoints) == 0 && len(intent.networks) == 0 && len(intent.vmGrants) == 0 &&
+		len(intent.networkGrants) == 0 && len(intent.hostServices) == 0
 }
 
 func validateNetwork(
