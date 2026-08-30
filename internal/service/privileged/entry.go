@@ -3,10 +3,12 @@ package privileged
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
+	"maps"
 	"os"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/service/agent"
 	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/loopmount"
@@ -88,7 +90,12 @@ func validateLoopMountAgentBinaryContext(ctx context.Context) error {
 	return nil
 }
 
-func run(ctx context.Context, args []string, endpoint controlEndpoint, deps runtimeDeps) error {
+func run(
+	ctx context.Context,
+	args []string,
+	endpoint controlEndpoint,
+	deps runtimeDeps,
+) (returnErr error) {
 	if ctx == nil {
 		return errs.New(errs.CodeInternal, "privileged request context is required")
 	}
@@ -113,14 +120,15 @@ func run(ctx context.Context, args []string, endpoint controlEndpoint, deps runt
 	if err := sanitizeEnvironment(deps.environment); err != nil {
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
-	pinnedExecutable, err := verifySystemExecutable(deps.executable)
+	pinnedExecutable, err := verifySystemExecutable(ctx, deps.executable)
 	if err != nil {
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	defer func() {
-		if err := pinnedExecutable.close(); err != nil {
-			slog.Warn("close privileged executable descriptors", "error", err)
-		}
+		returnErr = appendPrivilegedExecutableReleaseError(
+			returnErr,
+			pinnedExecutable.Release(context.WithoutCancel(ctx)),
+		)
 	}()
 	if err := authorizeCaller(caller, deps.authorization); err != nil {
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
@@ -130,6 +138,34 @@ func run(ctx context.Context, args []string, endpoint controlEndpoint, deps runt
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	return err
+}
+
+func appendPrivilegedExecutableReleaseError(primary error, cleanup error) error {
+	if cleanup == nil {
+		return primary
+	}
+	if primary == nil {
+		return cleanup
+	}
+	domain := errs.AsDomainError(primary)
+	if domain == nil {
+		return errs.WrapMsg(
+			errs.CodeInternal,
+			primary.Error(),
+			errors.Join(primary, cleanup),
+			errs.WithClass(errs.ClassInternal),
+			errs.WithEntity(infra.SystemBinaryPath),
+			errs.WithDetails(map[string]any{"pinned_executable_cleanup_failed": true}),
+		)
+	}
+	result := *domain
+	result.Details = maps.Clone(domain.Details)
+	if result.Details == nil {
+		result.Details = make(map[string]any)
+	}
+	result.Details["pinned_executable_cleanup_failed"] = true
+	result.Err = errors.Join(domain.Err, cleanup)
+	return &result
 }
 
 func dispatch(

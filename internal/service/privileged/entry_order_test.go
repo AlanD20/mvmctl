@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/system"
 )
 
 // Rationale: Authorization lookups must not observe caller-controlled locale,
@@ -23,11 +24,11 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 	})
 	environment.calls = &calls
 
-	executable := newExecutableFixture()
-	originalOpen := executable.deps.open
-	executable.deps.open = func(path string, flags int, mode uint32) (int, error) {
-		calls = append(calls, "executable.open")
-		return originalOpen(path, flags, mode)
+	executable := trustedExecutableDeps()
+	originalPin := executable.pin
+	executable.pin = func(ctx context.Context) (*system.PinnedExecutable, error) {
+		calls = append(calls, "executable.pin")
+		return originalPin(ctx)
 	}
 	authorization := memberAuthorizationDeps()
 	originalLookupUser := authorization.lookupUserID
@@ -49,7 +50,7 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 			},
 		},
 		environment:   environment.deps(),
-		executable:    executable.deps,
+		executable:    executable,
 		authorization: authorization,
 		control:       validControlDeps(endpoint, &calls),
 	})
@@ -59,7 +60,7 @@ func TestRun_SanitizesBeforeExecutableAndUIDBoundAuthorization(t *testing.T) {
 	identityIndex := callIndex(calls, "identity.SUDO_GID")
 	sanitizeStartIndex := callIndex(calls, "environment.clear")
 	sanitizeEndIndex := callIndex(calls, "environment.set.LC_ALL")
-	executableIndex := callIndex(calls, "executable.open")
+	executableIndex := callIndex(calls, "executable.pin")
 	authorizationIndex := callIndex(calls, "authorization.lookup_user")
 	for _, index := range []int{
 		identityIndex, sanitizeStartIndex, sanitizeEndIndex, executableIndex, authorizationIndex,

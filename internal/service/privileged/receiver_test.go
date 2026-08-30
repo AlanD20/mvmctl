@@ -18,6 +18,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/lib/privilegedwire"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
 
@@ -185,13 +186,13 @@ func TestRun_AdmissionOrdering(t *testing.T) {
 	environment := newEnvironmentStore(nil)
 	environment.calls = &calls
 	runtime.environment = environment.deps()
-	executable := newExecutableFixture()
-	originalOpen := executable.deps.open
-	executable.deps.open = func(path string, flags int, mode uint32) (int, error) {
-		calls = append(calls, "executable.open")
-		return originalOpen(path, flags, mode)
+	executable := trustedExecutableDeps()
+	originalPin := executable.pin
+	executable.pin = func(ctx context.Context) (*system.PinnedExecutable, error) {
+		calls = append(calls, "executable.pin")
+		return originalPin(ctx)
 	}
-	runtime.executable = executable.deps
+	runtime.executable = executable
 	authorization := memberAuthorizationDeps()
 	originalLookup := authorization.lookupUserID
 	authorization.lookupUserID = func(uid string) (*user.User, error) {
@@ -216,7 +217,7 @@ func TestRun_AdmissionOrdering(t *testing.T) {
 		"identity.SUDO_GID",
 		"environment.clear",
 		"environment.set.LC_ALL",
-		"executable.open",
+		"executable.pin",
 		"authorization.lookup_user",
 		"control.deadline",
 		"control.write",
@@ -301,9 +302,7 @@ func TestRun_AuthenticatedFailuresReturnOneMatchingFramedError(t *testing.T) {
 		},
 		"executable": {
 			mutate: func(deps *runtimeDeps) {
-				executable := trustedExecutableDeps()
-				executable.executable = func() (string, error) { return "/tmp/untrusted-mvm", nil }
-				deps.executable = executable
+				deps.executable = rejectedExecutableDeps("privileged protocol must run from /usr/local/bin/mvm")
 			},
 			wantCode: errs.CodePrivilegeRequired,
 			wantErr:  "must run from /usr/local/bin/mvm",

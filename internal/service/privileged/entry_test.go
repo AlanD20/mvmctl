@@ -50,8 +50,7 @@ func TestRun_FailsClosedBeforeDispatch(t *testing.T) {
 // Rationale: Caller identity alone does not establish code integrity; a root
 // dispatcher reached through a user-replaceable executable remains root code execution.
 func TestRun_VerifiesSystemExecutableBeforeActionDispatch(t *testing.T) {
-	deps := trustedExecutableDeps()
-	deps.executable = func() (string, error) { return "/tmp/user-owned-mvm", nil }
+	deps := rejectedExecutableDeps("privileged protocol must run from " + infra.SystemBinaryPath)
 	runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
 	runtime.executable = deps
 	endpoint := newReceiverEndpoint()
