@@ -367,12 +367,15 @@ func validateInstanceLaunchRecord(launch instanceLaunchRecord) error {
 	if launch.ownerGID == 0 || launch.ownerGID == math.MaxUint32 {
 		return fmt.Errorf("instance authority owner GID is invalid")
 	}
-	return validateInstanceLaunchValues(
+	if err := validateInstanceLaunchValues(
 		launch.hostBootID,
 		launch.process,
 		launch.relay,
 		launch.cacheIdentity,
-	)
+	); err != nil {
+		return err
+	}
+	return validateReleaseIdentityValue(launch.release)
 }
 
 func validateInstanceLaunchValues(

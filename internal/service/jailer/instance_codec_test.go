@@ -227,6 +227,25 @@ func TestDecodeInstanceRecordRejectsMalformedSchemaThree(t *testing.T) {
 			`"start_time_ticks":0`,
 			1,
 		),
+		"release_version_invalid": strings.Replace(validText, `"version":"1.16.0"`, `"version":"../1.16.0"`, 1),
+		"release_architecture_invalid": strings.Replace(
+			validText,
+			`"architecture":"x86_64"`,
+			`"architecture":"amd64"`,
+			1,
+		),
+		"release_firecracker_digest_invalid": strings.Replace(
+			validText,
+			`"firecracker_sha256":"`+testReleaseHash+`"`,
+			`"firecracker_sha256":"invalid"`,
+			1,
+		),
+		"release_jailer_digest_invalid": strings.Replace(
+			validText,
+			`"jailer_sha256":"`+testJailerHash+`"`,
+			`"jailer_sha256":"invalid"`,
+			1,
+		),
 		"active_relay_absent_with_identity": strings.Replace(
 			validText,
 			`"relay":{"kind":"present","user_ids":`,
