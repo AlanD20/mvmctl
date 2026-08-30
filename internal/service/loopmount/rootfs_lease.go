@@ -4,12 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 
 	"mvmctl/pkg/errs"
 )
 
-const maxRootfsCleanupDetailBytes = 512
+const (
+	maxRootfsCleanupDetailBytes = 512
+
+	rootfsCleanupFailedKey = "loopmount_rootfs_descriptor_cleanup_failed"
+	rootfsCleanupDetailKey = "loopmount_rootfs_descriptor_cleanup_detail"
+)
 
 type rootfsLease struct {
 	// mu guards one checked descriptor close and the cached idempotent result.
@@ -69,25 +75,32 @@ func closeRootfsDescriptors(ctx context.Context, deps rootfsAuthorityDeps, descr
 	return result
 }
 
+// CRITICAL: Cleanup diagnostics must never mutate or reclassify the authoritative operation failure.
 func appendRootfsCleanupError(primary error, message string, cause error) error {
 	if cause == nil {
 		return primary
 	}
-	if primary == nil {
-		return rootfsCleanupError(message, cause)
-	}
 	detail := boundedRootfsCleanupDetail(message, cause)
-	if domainErr := errs.AsDomainError(primary); domainErr != nil {
-		domainErr.Message += "; " + detail
-		domainErr.Err = errors.Join(domainErr.Err, cause)
-		if domainErr.Details == nil {
-			domainErr.Details = make(map[string]any)
-		}
-		domainErr.Details["loopmount_rootfs_descriptor_cleanup_failed"] = true
-		domainErr.Details["loopmount_rootfs_descriptor_cleanup_detail"] = detail
-		return domainErr
+	if primary == nil {
+		return newRootfsCleanupError(detail, cause)
 	}
-	return newRootfsCleanupError(detail, errors.Join(primary, cause))
+	domainErr := errs.AsDomainError(primary)
+	if domainErr == nil {
+		return newRootfsCleanupError(detail, errors.Join(primary, cause))
+	}
+	result := *domainErr
+	result.Details = maps.Clone(domainErr.Details)
+	if result.Details == nil {
+		result.Details = make(map[string]any)
+	}
+	if _, exists := result.Details[rootfsCleanupFailedKey]; !exists {
+		result.Details[rootfsCleanupFailedKey] = true
+	}
+	if _, exists := result.Details[rootfsCleanupDetailKey]; !exists {
+		result.Details[rootfsCleanupDetailKey] = detail
+	}
+	result.Err = errors.Join(domainErr.Err, cause)
+	return &result
 }
 
 func rootfsCleanupError(message string, cause error) *errs.DomainError {
@@ -98,8 +111,8 @@ func rootfsCleanupError(message string, cause error) *errs.DomainError {
 func newRootfsCleanupError(detail string, cause error) *errs.DomainError {
 	domainErr := rootfsAtomicError(detail, cause)
 	domainErr.Details = map[string]any{
-		"loopmount_rootfs_descriptor_cleanup_failed": true,
-		"loopmount_rootfs_descriptor_cleanup_detail": detail,
+		rootfsCleanupFailedKey: true,
+		rootfsCleanupDetailKey: detail,
 	}
 	return domainErr
 }

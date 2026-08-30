@@ -655,37 +655,122 @@ func TestCancelledRootfsAdmissionClosesPartialAuthorityInReverse(t *testing.T) {
 	}
 }
 
-func TestRejectedRootfsAdmissionPreservesPrimaryDomainMetadataAndBoundsCleanup(t *testing.T) {
+// Rationale: cleanup diagnostics supplement the authoritative admission error. They must not mutate or reclassify the
+// original DomainError, and a later cleanup failure must not overwrite the first bounded descriptor-cleanup detail.
+func TestAppendRootfsCleanupErrorPreservesPrimaryDomainError(t *testing.T) {
 	t.Parallel()
 
+	type errorMetadata struct {
+		Code    errs.Code
+		Message string
+		Op      string
+		Entity  string
+		Class   errs.Class
+	}
+	metadata := func(domainErr *errs.DomainError) errorMetadata {
+		return errorMetadata{
+			Code: domainErr.Code, Message: domainErr.Message, Op: domainErr.Op,
+			Entity: domainErr.Entity, Class: domainErr.Class,
+		}
+	}
+
 	primaryCause := errors.New("primary cause")
+	primaryDetails := map[string]any{"admission_stage": "leaf"}
 	primary := errs.WrapMsg(
 		errs.CodeVMAtomicFailed,
 		"primary failure",
 		primaryCause,
 		errs.WithClass(errs.ClassConflict),
 		errs.WithEntity(testVMID),
-		errs.WithDetails(map[string]any{"admission_stage": "leaf"}),
+		errs.WithDetails(primaryDetails),
 	)
-	joined := appendRootfsCleanupError(
+	wantMetadata := metadata(primary)
+	firstCleanupCause := errors.New(strings.Repeat("cleanup", maxRootfsCleanupDetailBytes))
+	first := appendRootfsCleanupError(
 		primary,
 		"close rejected descriptors",
-		errors.New(strings.Repeat("cleanup", maxRootfsCleanupDetailBytes)),
+		firstCleanupCause,
 	)
+
+	firstDomain := errs.AsDomainError(first)
+	require.NotNil(t, firstDomain)
+	require.NotSame(t, primary, firstDomain)
+
+	if diff := cmp.Diff(wantMetadata, metadata(firstDomain)); diff != "" {
+		t.Errorf("primary DomainError metadata changed (-want +got):\n%s", diff)
+	}
+	assert.ErrorIs(t, first, primaryCause)
+	assert.ErrorIs(t, first, firstCleanupCause)
+	firstDetail, ok := firstDomain.Details[rootfsCleanupDetailKey].(string)
+	require.True(t, ok)
+	unboundedFirstDetail := "close rejected descriptors: " + firstCleanupCause.Error()
+	wantFirstDetail := unboundedFirstDetail[:maxRootfsCleanupDetailBytes-3] + "..."
+	assert.Equal(t, wantFirstDetail, firstDetail)
+	wantFirstDetails := map[string]any{
+		"admission_stage":      "leaf",
+		rootfsCleanupFailedKey: true,
+		rootfsCleanupDetailKey: firstDetail,
+	}
+	if diff := cmp.Diff(wantFirstDetails, firstDomain.Details); diff != "" {
+		t.Errorf("cleanup evidence mismatch (-want +got):\n%s", diff)
+	}
+
+	secondCleanupCause := errors.New("close cache root failed")
+	second := appendRootfsCleanupError(first, "close cache root", secondCleanupCause)
+	secondDomain := errs.AsDomainError(second)
+	require.NotNil(t, secondDomain)
+	require.NotSame(t, firstDomain, secondDomain)
+	assert.ErrorIs(t, second, primaryCause)
+	assert.ErrorIs(t, second, firstCleanupCause)
+	assert.ErrorIs(t, second, secondCleanupCause)
+	if diff := cmp.Diff(wantMetadata, metadata(secondDomain)); diff != "" {
+		t.Errorf("repeated cleanup changed primary DomainError metadata (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(wantFirstDetails, secondDomain.Details); diff != "" {
+		t.Errorf("existing cleanup evidence overwritten (-want +got):\n%s", diff)
+	}
+
+	wantPrimaryDetails := map[string]any{"admission_stage": "leaf"}
+	if diff := cmp.Diff(wantPrimaryDetails, primary.Details); diff != "" {
+		t.Errorf("original primary details mutated (-want +got):\n%s", diff)
+	}
+	assert.Same(t, primaryCause, primary.Err)
+	if diff := cmp.Diff(wantMetadata, metadata(primary)); diff != "" {
+		t.Errorf("original primary metadata mutated (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: callers may already own the fixed detail keys. Cleanup annotation must preserve those values instead of
+// silently replacing evidence from an earlier boundary.
+func TestAppendRootfsCleanupErrorPreservesExistingDetailKeys(t *testing.T) {
+	t.Parallel()
+
+	primaryCause := errors.New("primary cause")
+	primaryDetails := map[string]any{
+		"admission_stage":      "leaf",
+		rootfsCleanupFailedKey: true,
+		rootfsCleanupDetailKey: "earlier cleanup detail",
+	}
+	primary := errs.WrapMsg(
+		errs.CodeVMAtomicFailed,
+		"primary failure",
+		primaryCause,
+		errs.WithDetails(primaryDetails),
+	)
+	cleanupCause := errors.New("later cleanup cause")
+	joined := appendRootfsCleanupError(primary, "later cleanup", cleanupCause)
 
 	domainErr := errs.AsDomainError(joined)
 	require.NotNil(t, domainErr)
-	assert.Same(t, primary, domainErr)
-	assert.Equal(t, errs.CodeVMAtomicFailed, domainErr.Code)
-	assert.Equal(t, errs.ClassConflict, domainErr.Class)
-	assert.Equal(t, primary.Op, domainErr.Op)
-	assert.Equal(t, testVMID, domainErr.Entity)
-	assert.Equal(t, "leaf", domainErr.Details["admission_stage"])
-	assert.ErrorIs(t, domainErr, primaryCause)
-	detail, ok := domainErr.Details["loopmount_rootfs_descriptor_cleanup_detail"].(string)
-	require.True(t, ok)
-	assert.LessOrEqual(t, len(detail), maxRootfsCleanupDetailBytes)
-	assert.Contains(t, domainErr.Message, "primary failure; close rejected descriptors")
+	require.NotSame(t, primary, domainErr)
+	assert.ErrorIs(t, joined, primaryCause)
+	assert.ErrorIs(t, joined, cleanupCause)
+	if diff := cmp.Diff(primaryDetails, domainErr.Details); diff != "" {
+		t.Errorf("existing cleanup evidence changed (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(primaryDetails, primary.Details); diff != "" {
+		t.Errorf("original primary details mutated (-want +got):\n%s", diff)
+	}
 }
 
 type rootfsOpenCall struct {
