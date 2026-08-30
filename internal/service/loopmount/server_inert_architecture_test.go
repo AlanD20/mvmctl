@@ -21,11 +21,13 @@ const (
 	rootfsImageInspectAdapterType         = "rootfsImageInspectAdapter"
 	systemRootfsVMProvisionFactory        = "newSystemRootfsVMProvisionAdapter"
 	rootfsVMProvisionAdapterType          = "rootfsVMProvisionAdapter"
+	provisionInspectServerFactory         = "NewProvisionInspectServer"
+	provisionInspectEffectsType           = "provisionInspectRootfsEffects"
 )
 
-// Rationale: The current Server and system lock adapter are reviewed foundations, not an authorized privileged action.
-// Any production reference must land with the explicit activation review that removes this gate.
-func TestLoopMountServerRemainsInertUntilExplicitActivation(t *testing.T) {
+// Rationale: Production activation is closed to the one reviewed provision/inspect constructor. OptimizeImage must
+// remain without a production effect assignment even though its protocol types and inactive Server method exist.
+func TestLoopMountProductionActivationRemainsClosedToProvisionAndInspect(t *testing.T) {
 	t.Parallel()
 
 	_, currentFile, _, ok := runtime.Caller(0)
@@ -46,6 +48,7 @@ func TestLoopMountServerRemainsInertUntilExplicitActivation(t *testing.T) {
 		assertInertRootfsPartitionDiscovery(t, files, parsed)
 		assertInertRootfsImageInspectAdapter(t, files, parsed)
 		assertInertRootfsVMProvisionAdapter(t, files, parsed)
+		assertInertImageOptimizeEffects(t, files, parsed)
 	}
 }
 
@@ -108,6 +111,13 @@ func assertInertRootfsEffectAdapter(
 
 	factoryDeclaration := functionDeclarationPosition(parsed, factoryName)
 	allowedAdapter := identifiersWithinFunction(parsed, factoryName)
+	for position := range identifiersWithinFunction(parsed, provisionInspectServerFactory) {
+		allowedAdapter[position] = struct{}{}
+	}
+	for position := range identifiersWithinType(parsed, provisionInspectEffectsType) {
+		allowedAdapter[position] = struct{}{}
+	}
+	allowedFactoryReferences := identifiersWithinFunction(parsed, provisionInspectServerFactory)
 	for _, declaration := range parsed.Decls {
 		switch value := declaration.(type) {
 		case *ast.GenDecl:
@@ -137,6 +147,9 @@ func assertInertRootfsEffectAdapter(
 			return true
 		}
 		if identifier.Name == factoryName && identifier.Pos() != factoryDeclaration {
+			if _, allowed := allowedFactoryReferences[identifier.Pos()]; allowed {
+				return true
+			}
 			t.Errorf("production %s adapter factory reference found at %s", operation, files.Position(identifier.Pos()))
 			return true
 		}
@@ -148,6 +161,46 @@ func assertInertRootfsEffectAdapter(
 		}
 		if _, allowed := allowedAdapter[identifier.Pos()]; !allowed {
 			t.Errorf("production %s adapter construction found at %s", operation, files.Position(identifier.Pos()))
+		}
+		return true
+	})
+}
+
+// assertInertImageOptimizeEffects permits only the existing field declaration and inactive Server method paths.
+func assertInertImageOptimizeEffects(t *testing.T, files *token.FileSet, parsed *ast.File) {
+	t.Helper()
+
+	allowed := identifiersWithinFunctions(parsed, "OptimizeImage", "validateImageOptimizeDependencies")
+	for _, declaration := range parsed.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range general.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != "Server" {
+				continue
+			}
+			structure, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				continue
+			}
+			for _, field := range structure.Fields.List {
+				for _, name := range field.Names {
+					if name.Name == "optimizeEffects" {
+						allowed[name.Pos()] = struct{}{}
+					}
+				}
+			}
+		}
+	}
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		identifier, ok := node.(*ast.Ident)
+		if !ok || identifier.Name != "optimizeEffects" {
+			return true
+		}
+		if _, ok := allowed[identifier.Pos()]; !ok {
+			t.Errorf("production image optimization effect activation found at %s", files.Position(identifier.Pos()))
 		}
 		return true
 	})
@@ -195,6 +248,29 @@ func identifiersWithinFunctions(parsed *ast.File, names ...string) map[token.Pos
 	return positions
 }
 
+func identifiersWithinType(parsed *ast.File, name string) map[token.Pos]struct{} {
+	positions := make(map[token.Pos]struct{})
+	for _, declaration := range parsed.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range general.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != name {
+				continue
+			}
+			ast.Inspect(typeSpec, func(node ast.Node) bool {
+				if identifier, ok := node.(*ast.Ident); ok {
+					positions[identifier.Pos()] = struct{}{}
+				}
+				return true
+			})
+		}
+	}
+	return positions
+}
+
 func functionDeclarationPosition(parsed *ast.File, name string) token.Pos {
 	for _, declaration := range parsed.Decls {
 		function, isFunction := declaration.(*ast.FuncDecl)
@@ -212,6 +288,7 @@ func assertInertLoopMountFile(t *testing.T, files *token.FileSet, name string, p
 	allowedServer := allowedServerDeclarationPositions(name, parsed)
 	allowedAdapters := allowedRootfsLockAdapterPositions(name, parsed)
 	factoryDeclaration := factoryDeclarationPosition(parsed)
+	allowedFactoryReferences := identifiersWithinFunction(parsed, provisionInspectServerFactory)
 	nonTypeNames := nonTypeNamePositions(parsed)
 	ast.Inspect(parsed, func(node ast.Node) bool {
 		identifier, isIdentifier := node.(*ast.Ident)
@@ -220,6 +297,9 @@ func assertInertLoopMountFile(t *testing.T, files *token.FileSet, name string, p
 		}
 		if identifier.Name == systemRootfsResourceLocksFactory {
 			if identifier.Pos() != factoryDeclaration {
+				if _, allowed := allowedFactoryReferences[identifier.Pos()]; allowed {
+					return true
+				}
 				t.Errorf("production lock adapter reference found at %s", files.Position(identifier.Pos()))
 			}
 			return true
@@ -318,6 +398,9 @@ func allowedServerDeclarationPositions(name string, parsed *ast.File) map[token.
 	allowed := make(map[token.Pos]struct{})
 	if name != "server.go" {
 		return allowed
+	}
+	for position := range identifiersWithinFunction(parsed, provisionInspectServerFactory) {
+		allowed[position] = struct{}{}
 	}
 	for _, declaration := range parsed.Decls {
 		switch value := declaration.(type) {

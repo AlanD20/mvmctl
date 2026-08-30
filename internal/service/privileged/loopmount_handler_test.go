@@ -373,6 +373,187 @@ func TestLoopMountHandlersPreserveCleanupAndResponseFailures(t *testing.T) {
 	}
 }
 
+func TestRunRoutesExactLoopMountActionsWithAuthenticatedCaller(t *testing.T) {
+	caller := loopmount.Caller{UID: 1000, GID: 1000}
+
+	t.Run("provision_vm", func(t *testing.T) {
+		request := validLoopMountProvisionRequest()
+		want := validLoopMountProvisionResult(request)
+		endpoint := newReceiverEndpoint()
+		endpoint.input = *bytes.NewReader(encodeLoopMountRequest(t, loopmount.VMProvisionAction, request, 0))
+		provisionCalls := 0
+		inspectCalls := 0
+		runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+		runtime.control = trustedReleaseControlDeps(t, endpoint)
+		runtime.loopMount = loopMountHandlerEffects{
+			provisionVM: func(
+				ctx context.Context,
+				gotCaller loopmount.Caller,
+				gotRequest loopmount.VMProvisionRequest,
+			) (loopmount.VMProvisionResult, error) {
+				provisionCalls++
+				assert.Same(t, t.Context(), ctx)
+				if diff := cmp.Diff(caller, gotCaller); diff != "" {
+					t.Errorf("authenticated caller mismatch (-want +got):\n%s", diff)
+				}
+				if diff := cmp.Diff(request, gotRequest); diff != "" {
+					t.Errorf("provision request mismatch (-want +got):\n%s", diff)
+				}
+				return want, nil
+			},
+			inspectImage: func(
+				context.Context,
+				loopmount.Caller,
+				loopmount.ImageInspectRequest,
+			) (loopmount.ImageInspectResult, error) {
+				inspectCalls++
+				return loopmount.ImageInspectResult{}, nil
+			},
+		}
+
+		err := run(t.Context(), []string{Marker, loopmount.VMProvisionAction}, endpoint, runtime)
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, provisionCalls)
+		assert.Zero(t, inspectCalls)
+		response, decodeErr := privilegedwire.DecodeResponse[loopmount.VMProvisionResult](
+			context.Background(),
+			bytes.NewReader(endpoint.output.Bytes()),
+			loopmount.VMProvisionAction,
+		)
+		require.NoError(t, decodeErr)
+		assert.Nil(t, response.OperationError())
+		if diff := cmp.Diff(want, response.Result()); diff != "" {
+			t.Errorf("provision response mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("inspect_image", func(t *testing.T) {
+		request := validLoopMountInspectRequest()
+		want := validLoopMountInspectResult(request)
+		endpoint := newReceiverEndpoint()
+		endpoint.input = *bytes.NewReader(encodeLoopMountRequest(t, loopmount.ImageInspectAction, request, 0))
+		provisionCalls := 0
+		inspectCalls := 0
+		runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+		runtime.control = trustedReleaseControlDeps(t, endpoint)
+		runtime.loopMount = loopMountHandlerEffects{
+			provisionVM: func(
+				context.Context,
+				loopmount.Caller,
+				loopmount.VMProvisionRequest,
+			) (loopmount.VMProvisionResult, error) {
+				provisionCalls++
+				return loopmount.VMProvisionResult{}, nil
+			},
+			inspectImage: func(
+				ctx context.Context,
+				gotCaller loopmount.Caller,
+				gotRequest loopmount.ImageInspectRequest,
+			) (loopmount.ImageInspectResult, error) {
+				inspectCalls++
+				assert.Same(t, t.Context(), ctx)
+				if diff := cmp.Diff(caller, gotCaller); diff != "" {
+					t.Errorf("authenticated caller mismatch (-want +got):\n%s", diff)
+				}
+				if diff := cmp.Diff(request, gotRequest); diff != "" {
+					t.Errorf("inspect request mismatch (-want +got):\n%s", diff)
+				}
+				return want, nil
+			},
+		}
+
+		err := run(t.Context(), []string{Marker, loopmount.ImageInspectAction}, endpoint, runtime)
+
+		require.NoError(t, err)
+		assert.Zero(t, provisionCalls)
+		assert.Equal(t, 1, inspectCalls)
+		response, decodeErr := privilegedwire.DecodeResponse[loopmount.ImageInspectResult](
+			context.Background(),
+			bytes.NewReader(endpoint.output.Bytes()),
+			loopmount.ImageInspectAction,
+		)
+		require.NoError(t, decodeErr)
+		assert.Nil(t, response.OperationError())
+		if diff := cmp.Diff(want, response.Result()); diff != "" {
+			t.Errorf("inspect response mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+// Rationale: Retaining protocol types and a named normal-user client does not authorize root-side optimization. The
+// central switch must reject OptimizeImage without consuming a byte from its request body.
+func TestRunLeavesLoopMountOptimizeImageUnhandledAndUnread(t *testing.T) {
+	request := loopmount.ImageOptimizeRequest{
+		CacheLocator:       "/home/alice/.cache/mvmctl",
+		ImageID:            strings.Repeat("c", 64),
+		ExpectedImageBytes: 1 << 30,
+		Filesystem:         loopmount.FilesystemExt4,
+		Plan:               loopmount.ImageOptimizePlan{Shrink: true},
+	}
+	endpoint := newReceiverEndpoint()
+	endpoint.input = *bytes.NewReader(encodeLoopMountRequest(t, loopmount.ImageOptimizeAction, request, 0))
+	effectCalls := 0
+	runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+	runtime.control = trustedReleaseControlDeps(t, endpoint)
+	runtime.loopMount = loopMountHandlerEffects{
+		provisionVM: func(
+			context.Context,
+			loopmount.Caller,
+			loopmount.VMProvisionRequest,
+		) (loopmount.VMProvisionResult, error) {
+			effectCalls++
+			return loopmount.VMProvisionResult{}, nil
+		},
+		inspectImage: func(
+			context.Context,
+			loopmount.Caller,
+			loopmount.ImageInspectRequest,
+		) (loopmount.ImageInspectResult, error) {
+			effectCalls++
+			return loopmount.ImageInspectResult{}, nil
+		},
+	}
+
+	err := run(t.Context(), []string{Marker, loopmount.ImageOptimizeAction}, endpoint, runtime)
+
+	require.NoError(t, err)
+	assert.Zero(t, endpoint.readCalls)
+	assert.Zero(t, effectCalls)
+	operationErr := decodeReceiverError(t, endpoint.output.Bytes(), loopmount.ImageOptimizeAction)
+	assert.Equal(t, errs.CodeValidationFailed, operationErr.Code)
+	assert.ErrorContains(t, operationErr, `unknown privileged action "`+loopmount.ImageOptimizeAction+`"`)
+}
+
+// Rationale: Exact LoopMount dispatch transfers response ownership to the selected handler. An outer second frame
+// could conceal the first response failure and corrupt the one-request protocol transaction.
+func TestRunLoopMountResponseFailureIsNotDoubleFramed(t *testing.T) {
+	request := validLoopMountProvisionRequest()
+	endpoint := newReceiverEndpoint()
+	endpoint.input = *bytes.NewReader(encodeLoopMountRequest(t, loopmount.VMProvisionAction, request, 0))
+	sentinel := errors.New("write sentinel")
+	endpoint.writeFunc = func(value []byte) (int, error) {
+		endpoint.output.Write(value[:1])
+		return 1, sentinel
+	}
+	runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+	runtime.control = trustedReleaseControlDeps(t, endpoint)
+	runtime.loopMount = loopMountHandlerEffects{provisionVM: func(
+		context.Context,
+		loopmount.Caller,
+		loopmount.VMProvisionRequest,
+	) (loopmount.VMProvisionResult, error) {
+		return validLoopMountProvisionResult(request), nil
+	}}
+
+	err := run(t.Context(), []string{Marker, loopmount.VMProvisionAction}, endpoint, runtime)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, sentinel)
+	assert.Equal(t, 1, endpoint.writeCalls)
+	assert.LessOrEqual(t, bytes.Count(endpoint.output.Bytes(), []byte("MVMRES01")), 1)
+}
+
 func validLoopMountProvisionRequest() loopmount.VMProvisionRequest {
 	return loopmount.VMProvisionRequest{
 		CacheLocator:        "/home/alice/.cache/mvmctl",

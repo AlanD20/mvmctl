@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"mvmctl/internal/service/jailer"
+	"mvmctl/internal/service/loopmount"
 	"mvmctl/pkg/errs"
 )
 
@@ -17,6 +18,7 @@ type runtimeDeps struct {
 	authorization  authorizationDeps
 	control        controlDeps
 	trustedRelease trustedReleaseHandlerEffects
+	loopMount      loopMountHandlerEffects
 }
 
 type dispatchDisposition uint8
@@ -30,6 +32,7 @@ const (
 // CRITICAL: This entry point accepts only the reserved versioned marker and fixed action switch.
 func Run(ctx context.Context, args []string) error {
 	trustedRelease := jailer.NewTrustedReleaseServer()
+	loopMount := loopmount.NewProvisionInspectServer()
 	return run(ctx, args, newStdinControlEndpoint(os.Stdin), runtimeDeps{
 		identity:      realIdentityDeps(),
 		environment:   realEnvironmentDeps(),
@@ -39,6 +42,10 @@ func Run(ctx context.Context, args []string) error {
 		trustedRelease: trustedReleaseHandlerEffects{
 			install: trustedRelease.Install,
 			remove:  trustedRelease.Remove,
+		},
+		loopMount: loopMountHandlerEffects{
+			provisionVM:  loopMount.ProvisionVM,
+			inspectImage: loopMount.InspectImage,
 		},
 	})
 }
@@ -80,7 +87,7 @@ func run(ctx context.Context, args []string, endpoint controlEndpoint, deps runt
 	if err := authorizeCaller(caller, deps.authorization); err != nil {
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
-	disposition, err := dispatch(ctx, request, endpoint, deps)
+	disposition, err := dispatch(ctx, request, endpoint, caller, deps)
 	if err != nil && disposition == dispatchUnhandled {
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
@@ -91,6 +98,7 @@ func dispatch(
 	ctx context.Context,
 	request invocation,
 	endpoint controlEndpoint,
+	caller callerIdentity,
 	deps runtimeDeps,
 ) (dispatchDisposition, error) {
 	switch request.action {
@@ -98,6 +106,22 @@ func dispatch(
 		return dispatchHandled, handleTrustedReleaseInstall(ctx, endpoint, deps.trustedRelease, deps.control)
 	case jailer.TrustedReleaseRemoveAction:
 		return dispatchHandled, handleTrustedReleaseRemove(ctx, endpoint, deps.trustedRelease, deps.control)
+	case loopmount.VMProvisionAction:
+		return dispatchHandled, handleLoopMountProvisionVM(
+			ctx,
+			endpoint,
+			loopmount.Caller{UID: caller.uid, GID: caller.gid},
+			deps.loopMount,
+			deps.control,
+		)
+	case loopmount.ImageInspectAction:
+		return dispatchHandled, handleLoopMountInspectImage(
+			ctx,
+			endpoint,
+			loopmount.Caller{UID: caller.uid, GID: caller.gid},
+			deps.loopMount,
+			deps.control,
+		)
 	default:
 		return dispatchUnhandled, errs.New(
 			errs.CodeValidationFailed,

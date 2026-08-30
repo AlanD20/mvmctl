@@ -15,6 +15,7 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
+	"mvmctl/internal/service/agent"
 )
 
 const (
@@ -107,11 +108,9 @@ type completedVMProvisionCleanup struct{}
 
 func (completedVMProvisionCleanup) CleanupProvisionVM(context.Context) error { return nil }
 
-// newSystemRootfsVMProvisionAdapter is intentionally unreferenced. The eventual receiver handler must supply the
-// embedded agent accessor and must exit after this adapter unshares the permanently locked OS thread.
-func newSystemRootfsVMProvisionAdapter(
-	agentBinary func(context.Context) ([]byte, error),
-) *rootfsVMProvisionAdapter {
+// newSystemRootfsVMProvisionAdapter binds the receiver binary's exact embedded agent. The privileged receiver must
+// exit after this adapter unshares its permanently locked OS thread.
+func newSystemRootfsVMProvisionAdapter() *rootfsVMProvisionAdapter {
 	loopDeps := systemRootfsLoopDeps()
 	partitionDeps := systemRootfsPartitionDiscoveryDeps()
 	probeDeps := systemRootfsFilesystemProbeDeps()
@@ -178,8 +177,13 @@ func newSystemRootfsVMProvisionAdapter(
 			}
 			return ".mvmctl-provision-" + hex.EncodeToString(value[:]), nil
 		},
-		run:         system.DefaultRunner.Run,
-		agentBinary: agentBinary,
+		run: system.DefaultRunner.Run,
+		agentBinary: func(ctx context.Context) ([]byte, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return agent.AgentBinary(), nil
+		},
 		attachLoop: func(ctx context.Context, lease *rootfsLease) (*rootfsLoopDevice, error) {
 			return attachRootfsLoopDevice(ctx, loopDeps, lease)
 		},

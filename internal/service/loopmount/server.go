@@ -11,7 +11,8 @@ import (
 const maxServerCleanupDetailBytes = 512
 
 // Server coordinates one admitted LoopMount operation without exposing effect or descriptor authority.
-// CRITICAL: Server is an inert receiver foundation. It has no production constructor or dispatcher registration.
+// CRITICAL: Production construction activates only VM provisioning and read-only image inspection. Image optimization
+// has no production effect, construction, or privileged dispatch entry.
 type Server struct {
 	rootfsAuthority rootfsAuthorityDeps
 	effects         rootfsEffects
@@ -27,6 +28,11 @@ type rootfsEffects interface {
 		VMProvisionPlan,
 	) (vmProvisionEffectOutcome, error)
 	InspectImage(context.Context, *rootfsLease, Filesystem) (imageInspectEffectOutcome, error)
+}
+
+type provisionInspectRootfsEffects struct {
+	provision *rootfsVMProvisionAdapter
+	inspect   *rootfsImageInspectAdapter
 }
 
 type imageOptimizeEffects interface {
@@ -115,6 +121,43 @@ type rootfsEffectEvidence struct {
 	imageReplaced       bool
 	durabilityUncertain bool
 	outcomeUnknown      bool
+}
+
+// NewProvisionInspectServer constructs the exact root-side VM-provision and image-inspection authority.
+// CRITICAL: Each effect may permanently unshare its locked OS thread, so this server may run only in the short-lived
+// one-request privileged receiver process.
+func NewProvisionInspectServer() *Server {
+	return &Server{
+		rootfsAuthority: systemRootfsAuthorityDeps(),
+		effects: &provisionInspectRootfsEffects{
+			provision: newSystemRootfsVMProvisionAdapter(),
+			inspect:   newSystemRootfsImageInspectAdapter(),
+		},
+		locks: newSystemRootfsResourceLocks(),
+	}
+}
+
+func (effects *provisionInspectRootfsEffects) ProvisionVM(
+	ctx context.Context,
+	lease *rootfsLease,
+	filesystem Filesystem,
+	plan VMProvisionPlan,
+) (vmProvisionEffectOutcome, error) {
+	if effects == nil || effects.provision == nil {
+		return vmProvisionEffectOutcome{}, rootfsAtomicError("managed VM provisioning effect is not active", nil)
+	}
+	return effects.provision.ProvisionVM(ctx, lease, filesystem, plan)
+}
+
+func (effects *provisionInspectRootfsEffects) InspectImage(
+	ctx context.Context,
+	lease *rootfsLease,
+	filesystem Filesystem,
+) (imageInspectEffectOutcome, error) {
+	if effects == nil || effects.inspect == nil {
+		return imageInspectEffectOutcome{}, rootfsAtomicError("image inspection effect is not active", nil)
+	}
+	return effects.inspect.InspectImage(ctx, lease, filesystem)
 }
 
 // ProvisionVM executes one closed VM provisioning request against its admitted rootfs.
