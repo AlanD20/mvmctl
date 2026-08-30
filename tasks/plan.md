@@ -49,8 +49,8 @@ continue without silently deleting it.
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private typed nftables compiler pinned to `github.com/google/nftables v0.3.0`, with fixed bridge/inet tables and
   chains, raw-priority ingress guards, same-network/routed/host-service/default-deny/conditional-egress/NAT rules,
-  strict generation userdata, resolved-IPv4 rejection, and deterministic bounded 1,000-VM L1 evidence. It performs no
-  kernel or privileged effect yet.
+  compiler-derived canonical SHA-256 generation identity, strict digest-bound userdata, explicit empty output,
+  resolved-IPv4 rejection, and deterministic bounded 1,000-VM L1 evidence. It performs no kernel or privileged effect.
 - Named typed LoopMount client/protocol methods for VM provisioning and image inspection/optimization, with grow-only
   VM resize, bounded typed values, and strict process-start/response-EOF authority. A private rootfs authority pins the
   caller-owned cache and fixed VM/image rootfs through retained descriptors, enforces local-filesystem, identity, mode,
@@ -563,20 +563,32 @@ only mvmctl-owned typed resolved intent. It builds fixed bridge and inet tables/
 holds source MAC/IPv4/ARP anti-spoofing and unsupported-L3 guards; bridge forward holds same-network policy. Inet
 forward/input/postrouting cover routed policy, established replies, host services, default deny, and conditional
 egress/NAT, with neither uplink egress nor NAT when masquerade is false. It rejects overlapping managed prefixes and
-unusable IPv4 authorities, gives every rule strict generation userdata, orders output deterministically, and has
-bounded allocation-growth evidence for a 1,000-VM generation.
+unusable IPv4 authorities and orders output deterministically. The caller supplies no generation identity. Explicit
+empty input emits no reserved tables or rules.
 
-This foundation creates no `nftables.Conn` and calls no `Flush`. Inspection/adoption, empty-generation removal,
-namespace execution, privileged registration/application, public policy cutover, legacy `nft` CLI removal, and L2
-qualification remain pending. The final adapter must submit one complete generation through one `Conn.Flush` call;
-until then there is no atomic kernel-application evidence. Library and transitive netlink types must stay private.
+Generation identity is SHA-256 over a versioned canonical closed projection of normalized intent and the exact managed
+tables, chains, rules, expressions, order, and userdata schema. A fixed digest placeholder breaks userdata
+self-reference before the derived digest and rule identity are bound into every rule. The projection covers every
+field of exactly the emitted `expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`,
+`expr.Range`, and `expr.Verdict` structs from pinned `github.com/google/nftables v0.3.0`; typed-nil and unknown
+expressions fail closed. The bounded 64-KiB encoder streams into SHA-256 and returns canonical validation, encoding,
+or finalization failures. Module or expression-set changes require a schema audit and digest-version bump. The isolated
+representative 1,000-VM benchmark was roughly 23–28 ms, 10 MB, and 179,000 allocations, with a 250,000-allocation L1
+ceiling.
+
+This foundation creates no `nftables.Conn` and calls no `Flush`. The root firewall record/lock, inspection/adoption,
+unknown raw-expression detection, actual empty-generation deletion/application, namespace execution, privileged
+registration/application, public policy cutover, legacy `nft` CLI removal, and L2 qualification remain pending. The
+final adapter must submit one complete generation through one `Conn.Flush` call; until then there is no kernel effect or
+atomicity evidence. Library and transitive netlink types must stay private.
 
 Before any fixed-name deletion, the final adapter must hold the never-unlinked host-global
 `/run/mvmctl/authority/firewall.lock` and admit the strict root-owned
 `/var/lib/mvmctl/firewall/generation.json` record. The record binds committed/applying state, boot ID, host network
-namespace identity, empty state, and exact before/target generation identities. The compiler, not the caller, derives
-the canonical generation digest. Empty means both reserved tables are absent; missing, corrupt, mismatched, partial, or
-foreign fixed-name state is never adopted or deleted.
+namespace identity, empty state, and exact before/target generation identities. The compiler now derives the canonical
+generation digest, but it is not kernel ownership or deletion authority. Applied empty state means both reserved tables
+are absent; the compiler's empty output does not delete or apply them. Missing, corrupt, mismatched, partial, or foreign
+fixed-name state is never adopted or deleted.
 
 The pinned library exposes rule userdata but no table/chain ownership metadata, and structured `GetRules` can omit
 unknown expression types. Root-record-bound exact state can become authority only within an explicitly accepted threat

@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-08-30 (typed nftables compiler foundation)
+**Last Updated:** 2026-08-30 (canonical nftables generation digest)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -122,14 +122,26 @@ Implementation note (2026-08-30): `go.mod` now pins `github.com/google/nftables 
 prerouting chain has raw priority and holds source MAC/IPv4/ARP anti-spoofing plus unsupported-L3 guards; the bridge
 forward chain holds same-network policy. Inet forward/input/postrouting cover routed policy, established replies,
 managed host services, default deny, conditional uplink egress, and NAT. Masquerade-disabled networks receive no uplink
-egress allow. The compiler rejects overlapping prefixes and unusable IPv4 authorities, encodes the validated input
-generation value and rule identity in strict userdata, orders output deterministically, and has bounded
-allocation-growth evidence for 1,000 VMs. The input generation value is not final kernel or deletion authority.
+egress allow. The compiler rejects overlapping prefixes and unusable IPv4 authorities and orders output
+deterministically. The caller no longer supplies generation identity. Explicit empty intent compiles to an empty
+generation with no reserved tables or rules.
+
+The compiler derives SHA-256 from a versioned canonical closed projection of normalized intent and the exact managed
+tables, chains, rules, expressions, order, and userdata schema. The userdata generation slot uses a fixed placeholder
+while hashing to break self-reference; the derived digest and rule identity are then bound into every emitted rule.
+The projection covers every field of exactly the eight expression structs emitted from
+`github.com/google/nftables v0.3.0`: `expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`,
+`expr.Range`, and `expr.Verdict`. Typed-nil and unknown expressions fail closed. The bounded 64-KiB encoder streams
+directly into SHA-256, and validation, encoding, and finalization failures surface as compiler errors. Any nftables
+module upgrade or emitted-expression change requires an explicit field-coverage audit and digest-schema version bump.
+
+On the isolated representative 1,000-VM compiler benchmark, the observed range was roughly 23–28 ms with about 10 MB
+and 179,000 allocations. L1 retains ratio-based growth evidence and enforces a 250,000-allocation regression ceiling.
 
 This is an inert compiler foundation, not the root-owned adapter described above. It has no `nftables.Conn`/`Flush`,
-kernel inspection or adoption, empty-generation removal, namespace-scoped execution, privileged action, public policy
-cutover, legacy `nft` CLI removal, or L2 qualification. No atomic kernel-application or release-readiness claim follows
-from the compiler tests.
+kernel inspection or adoption, unknown raw-expression detection, root firewall record/lock, actual empty-generation
+deletion/application, namespace-scoped execution, privileged action, public policy cutover, legacy `nft` CLI removal,
+or L2 qualification. No kernel-application, atomicity, or release-readiness claim follows from the compiler tests.
 
 #### Firewall generation authority and inspection gates
 
@@ -139,12 +151,13 @@ never-unlinked root-owned `/run/mvmctl/authority/firewall.lock`. Its strict pers
 are mode `0600`. The record binds schema and lifecycle, host boot ID, host network-namespace device/inode, an empty flag,
 the last committed generation, and the exact observed `before` and compiled `target` identities while applying.
 
-The final generation identity is a canonical digest of compiler-owned normalized intent and output. A caller-provided
-identifier is neither generation identity nor deletion authority. An empty generation means both `mvmctl_bridge` and
-`mvmctl_inet` are absent: a pristine empty target performs no netlink transaction, while removal of an existing
-generation requires exact committed authority and deletes both reserved tables in the same qualified batch. Missing,
-corrupt, wrong-boot, wrong-namespace, mismatched, partial, or foreign fixed-name state fails closed and is never adopted
-or deleted automatically.
+The implemented generation identity is the compiler-derived canonical digest described above; callers provide no
+identifier. The digest alone is neither kernel ownership nor deletion authority. An applied empty generation must mean
+both `mvmctl_bridge` and `mvmctl_inet` are absent: a pristine empty target performs no netlink transaction, while
+removal of an existing generation requires exact committed authority and deletes both reserved tables in the same
+qualified batch. The compiler's empty output does not implement either case. Missing, corrupt, wrong-boot,
+wrong-namespace, mismatched, partial, or foreign fixed-name state fails closed and is never adopted or deleted
+automatically.
 
 `github.com/google/nftables v0.3.0` cannot by itself prove that a fixed-name table or chain belongs to mvmctl: table and
 chain values expose no userdata or equivalent provenance. Rule userdata is necessary evidence but does not establish
@@ -306,12 +319,17 @@ capabilities require new typed policy families and explicit enforcement contract
 
 ## Release Gate
 
-The private compiler tests now cover its bridge/IP/NAT expression construction, strict input-provided generation
-userdata, deterministic ordering, validation, and bounded allocation growth for a representative 1,000-VM generation.
-Before production integration, the remaining work must derive the canonical generation digest, implement and fault-test
-the root authority/lock state machine, explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary, detect unknown
-raw expressions, and prove the emitted expressions plus namespace binding, cancellation/close behavior, delete/create
-and invalid-batch atomicity, empty removal, and representative 1,000-VM runtime against supported kernels.
+The private compiler tests now cover bridge/IP/NAT expression construction, compiler-derived canonical generation
+identity, strict digest-bound userdata, deterministic ordering, explicit empty output, validation, all fields of the
+closed eight-type expression set, typed-nil and unknown-expression rejection, and bounded allocation growth for a
+representative 1,000-VM generation.
+
+Before production integration, the remaining work must implement and fault-test the root authority record and global
+firewall lock, explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary, detect unknown raw expressions during
+inspection, and prove the emitted expressions plus namespace binding, cancellation/close behavior, delete/create and
+invalid-batch atomicity, actual empty-generation deletion/application, and representative 1,000-VM runtime against
+supported kernels. `nftables.Conn`, `Flush`, privileged application, public policy cutover, legacy CLI removal, and L2
+qualification all remain pending.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

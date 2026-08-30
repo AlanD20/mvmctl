@@ -375,20 +375,30 @@ chains. Bridge prerouting uses raw priority for source MAC/IPv4/ARP anti-spoofin
 bridge forward compiles same-network allows and default deny. Inet forward/input/postrouting compile routed allows,
 established replies, host-service access, default deny, and conditional egress/NAT; disabling masquerade emits neither
 uplink egress nor NAT. Compilation rejects overlapping managed IPv4 prefixes and unusable network, host, or endpoint
-addresses. Strict rule userdata binds every rule to the compiler input's validated generation value and rule identity;
-that input value is not final kernel authority. Input ordering is deterministic, and L1 evidence bounds allocation
-growth for a 1,000-VM generation.
+addresses. The caller supplies no generation identity. The compiler derives SHA-256 from a versioned canonical closed
+projection of normalized intent and the exact managed tables, chains, rules, expressions, order, and userdata schema.
+The userdata generation slot uses a fixed placeholder while hashing to break self-reference; the derived digest and
+rule identity are then bound into every rule. Explicit empty intent emits no reserved tables or rules.
+
+The projection covers all fields of exactly the eight emitted `github.com/google/nftables v0.3.0` expression structs:
+`expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`, `expr.Range`, and `expr.Verdict`.
+Typed-nil or unknown expressions fail closed. A bounded 64-KiB encoder streams directly into SHA-256, and canonical
+validation, encoding, and finalization errors surface to the compiler caller. Any nftables-module upgrade or change to
+the emitted expression set requires an explicit schema audit and digest-version bump. Input ordering is deterministic.
+On the isolated representative 1,000-VM benchmark, compilation was roughly 23–28 ms with about 10 MB and 179,000
+allocations; the regression test enforces a 250,000-allocation ceiling.
 
 This foundation is inert. It creates no `nftables.Conn`, calls no `Flush`, and provides no inspection/adoption,
-empty-generation removal, namespace execution, privileged action, public policy cutover, legacy `nft` CLI removal, or
-L2 qualification. It is not evidence of atomic kernel application or release readiness; the transitional backends and
-public policy path above remain active.
+unknown raw-expression detection, root firewall record/lock, actual empty-generation deletion/application, namespace
+execution, privileged action, public policy cutover, legacy `nft` CLI removal, or L2 qualification. It is not evidence
+of kernel application, atomicity, or release readiness; the transitional backends and public policy path remain active.
 
 ADR-0017 defines the remaining clean-break replacement. Before any fixed-name table can be replaced or removed, root
 must hold the never-unlinked global `/run/mvmctl/authority/firewall.lock` and bind the exact observed generation to the
-strict `/var/lib/mvmctl/firewall/generation.json` authority record. The final generation identity is a canonical digest
-derived by the compiler, never a caller-selected ID. An empty generation means both reserved tables are absent; missing,
-corrupt, mismatched, or ambiguous authority never permits deletion.
+strict `/var/lib/mvmctl/firewall/generation.json` authority record. The compiler now derives the canonical digest, but
+that digest alone is neither kernel ownership nor deletion authority. An applied empty generation must mean both
+reserved tables are absent; the implemented empty compiler output does not yet inspect, delete, or apply kernel state.
+Missing, corrupt, mismatched, or ambiguous authority never permits deletion.
 
 `github.com/google/nftables v0.3.0` exposes rule userdata but no table/chain ownership metadata, and its structured rule
 reader can omit expression types it does not understand. Root-record-bound exact inspection, the threat-model boundary

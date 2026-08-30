@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **Security release status:** `0.3.0` is still under development. The canonical Jailer, cgroup policy, routed
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
-> authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation, and typed
+> authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a canonical
+> generation digest, and typed
 > LoopMount client/protocol, rootfs-authority, and receiver-transaction foundations described below are implemented.
 > The mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final
@@ -47,13 +48,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default deny, and conditional internet egress/NAT. A network with masquerade disabled receives neither an uplink
   egress allow nor a masquerade rule. Invalid resolved intent rejects overlapping managed prefixes, prefixes without
   usable hosts, network/broadcast addresses, and conflicting host/VM addresses.
-- Every rule carries a strict userdata identity containing the validated input generation value and rule identity. L1
-  evidence proves deterministic ordering across input order and bounds allocation growth for a 1,000-VM, 1,000-grant
-  generation. Deriving the authoritative generation digest inside the compiler remains a release gate below.
+- The caller no longer supplies generation identity. The compiler derives SHA-256 from its versioned canonical closed
+  projection of normalized intent and the exact managed table, chain, rule, expression, order, and userdata schema;
+  the userdata generation slot uses a fixed placeholder while hashing to break self-reference, then every rule is
+  bound to the derived digest and its rule identity. Explicit empty intent produces an empty generation with no
+  reserved table or rule output.
+- The projection covers every field of exactly the eight `github.com/google/nftables v0.3.0` expression structs the
+  compiler emits: `expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`, `expr.Range`, and
+  `expr.Verdict`. Typed-nil and unknown expressions fail closed. The bounded encoder streams directly into SHA-256;
+  validation, encoding, and finalization errors surface to the compiler caller. A module upgrade or expression-set
+  change requires an explicit schema audit and digest-version bump.
+- Deterministic input-order evidence remains in L1. On the isolated representative 1,000-VM benchmark, compilation was
+  roughly 23–28 ms with about 10 MB and 179,000 allocations; the regression test enforces a 250,000-allocation ceiling.
 - This compiler foundation is inert: it creates no `nftables.Conn` and calls no `Flush`; it has no kernel
-  inspection/adoption, empty-generation removal, namespace execution, privileged action, public policy cutover, legacy
-  `nft` CLI removal, or L2 qualification. It therefore provides no atomic kernel-application or release-readiness
-  evidence.
+  inspection/adoption or unknown raw-expression detection, root firewall record/lock, empty-generation deletion or
+  application, namespace execution, privileged action, public policy cutover, legacy `nft` CLI removal, or L2
+  qualification. It therefore provides no kernel-application, atomicity, or release-readiness evidence.
 
 #### Per-VM network topology transaction foundation
 - Added a private root-side transaction that derives the shared managed bridge from owner/network identity and every
@@ -386,12 +396,11 @@ The following items are release blockers and are intentionally not described abo
   points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
-- Derive the nftables generation digest inside the compiler and add the root-owned global firewall lock plus durable
-  committed/applying generation record. Resolve the pinned library's missing table/chain provenance and unknown
-  expression-inspection gaps, then prove namespace-scoped delete/recreate, invalid-batch, recovery, and empty-generation
-  behavior against supported kernels before one privileged `Conn.Flush` application can make links usable. Only then
-  remove the iptables backend, backend selector, and production `nft` CLI subprocess/parser; the compiler alone is not
-  an atomic kernel application.
+- Add the root-owned global firewall lock plus durable committed/applying generation record. Resolve the pinned
+  library's missing table/chain provenance and unknown raw-expression inspection gaps, then prove namespace-scoped
+  delete/recreate, invalid-batch, recovery, and actual empty-generation deletion/application against supported kernels
+  before one privileged `Conn.Flush` application can make links usable. Only then remove the iptables backend, backend
+  selector, and production `nft` CLI subprocess/parser; the canonical compiler digest is not a kernel application.
 - Complete the public API, CLI, nftables application, and vsock relay cutover from routed `ServiceAccessPolicy` and the
   `allow_remote_exec` trust mesh to the implemented typed traffic/exec persistence foundations; then remove the
   transitional tables, flags, and paths atomically.
