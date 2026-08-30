@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -570,13 +569,4 @@ func mustReadNetworkStoreEntries(t *testing.T, path string) []os.DirEntry {
 	entries, err := os.ReadDir(path)
 	require.NoError(t, err)
 	return entries
-}
-
-func assertNetworkAuthorityRecordEqual(t *testing.T, want, got networkAuthorityRecord) {
-	t.Helper()
-	if diff := cmp.Diff(want, got, cmp.AllowUnexported(
-		networkAuthorityRecord{}, linkIdentity{}, namespaceIdentity{},
-	)); diff != "" {
-		t.Errorf("network authority record mismatch (-want +got):\n%s", diff)
-	}
 }
