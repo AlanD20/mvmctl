@@ -10,10 +10,11 @@ const (
 	managedBridgeTableName = "mvmctl_bridge"
 	managedINetTableName   = "mvmctl_inet"
 
-	managedBridgeForwardChainName = "forward"
-	managedINetForwardChainName   = "forward"
-	managedINetInputChainName     = "input"
-	managedINetNATChainName       = "postrouting"
+	managedBridgePreroutingChainName = "prerouting"
+	managedBridgeForwardChainName    = "forward"
+	managedINetForwardChainName      = "forward"
+	managedINetInputChainName        = "input"
+	managedINetNATChainName          = "postrouting"
 )
 
 type protocol uint8
@@ -98,9 +99,18 @@ type compiledTable struct {
 }
 
 type compiledGeneration struct {
-	id     string
-	bridge compiledTable
-	inet   compiledTable
+	id            string
+	bridge        compiledTable
+	inet          compiledTable
+	ingressGuards map[string]ingressGuardSet
+}
+
+type ingressGuardSet struct {
+	mac           *nftables.Rule
+	ipv4          *nftables.Rule
+	arpMAC        *nftables.Rule
+	arpIPv4       *nftables.Rule
+	unsupportedL3 *nftables.Rule
 }
 
 func (generation compiledGeneration) tableIdentities() []tableIdentity {

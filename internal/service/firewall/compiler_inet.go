@@ -13,14 +13,16 @@ func (compiler *generationCompiler) compileINet(intent generationIntent) {
 	for _, network := range networks {
 		compiler.addRule(&compiler.generation.inet, forward, "inet.forward.established."+network.id,
 			joinExpressions(matchOutputInterface(network.hostBridge), acceptEstablishedRelated()))
-		compiler.addRule(&compiler.generation.inet, forward, "inet.forward.egress."+network.id,
-			joinExpressions(
-				matchInputInterface(network.hostBridge),
-				matchOutputInterface(network.uplinkInterface),
-				matchIPv4Family(),
-				matchIPv4Prefix(12, network.subnet),
-				acceptVerdict(),
-			))
+		if network.masquerade {
+			compiler.addRule(&compiler.generation.inet, forward, "inet.forward.egress."+network.id,
+				joinExpressions(
+					matchInputInterface(network.hostBridge),
+					matchOutputInterface(network.uplinkInterface),
+					matchIPv4Family(),
+					matchIPv4Prefix(12, network.subnet),
+					acceptVerdict(),
+				))
+		}
 	}
 
 	for _, grant := range sortedCopy(intent.vmGrants, func(grant vmTrafficGrant) string { return grant.id }) {

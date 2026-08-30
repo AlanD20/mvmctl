@@ -5,49 +5,55 @@ import (
 )
 
 func (compiler *generationCompiler) compileBridge(intent generationIntent) {
-	chain := compiler.generation.bridge.chains[0]
+	prerouting := compiler.generation.bridge.chains[0]
+	forward := compiler.generation.bridge.chains[1]
 	endpoints := sortedCopy(intent.endpoints, func(endpoint endpointIntent) string { return endpoint.id })
 
 	for _, endpoint := range endpoints {
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.spoof.mac."+endpoint.id,
+		guards := ingressGuardSet{}
+		guards.mac = compiler.addRule(&compiler.generation.bridge, prerouting, "bridge.spoof.mac."+endpoint.id,
 			joinExpressions(
 				matchInputInterface(endpoint.hostVeth),
 				matchMACSource(endpoint.mac, expr.CmpOpNeq),
 				dropVerdict(),
 			))
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.spoof.ipv4."+endpoint.id,
+		guards.ipv4 = compiler.addRule(&compiler.generation.bridge, prerouting, "bridge.spoof.ipv4."+endpoint.id,
 			joinExpressions(
 				matchInputInterface(endpoint.hostVeth),
 				matchEtherType(etherTypeIPv4),
 				rejectIPv4AddressMismatch(12, endpoint.ipv4),
 				dropVerdict(),
 			))
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.spoof.arp-mac."+endpoint.id,
+		guards.arpMAC = compiler.addRule(&compiler.generation.bridge, prerouting, "bridge.spoof.arp-mac."+endpoint.id,
 			joinExpressions(
 				matchInputInterface(endpoint.hostVeth),
 				matchEtherType(etherTypeARP),
 				matchARPSourceMAC(endpoint.mac, expr.CmpOpNeq),
 				dropVerdict(),
 			))
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.spoof.arp-ipv4."+endpoint.id,
+		guards.arpIPv4 = compiler.addRule(&compiler.generation.bridge, prerouting, "bridge.spoof.arp-ipv4."+endpoint.id,
 			joinExpressions(
 				matchInputInterface(endpoint.hostVeth),
 				matchEtherType(etherTypeARP),
 				matchARPAddress(14, endpoint.ipv4, expr.CmpOpNeq),
 				dropVerdict(),
 			))
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.unsupported-l3."+endpoint.id,
+		guards.unsupportedL3 = compiler.addRule(
+			&compiler.generation.bridge,
+			prerouting,
+			"bridge.unsupported-l3."+endpoint.id,
 			joinExpressions(matchInputInterface(endpoint.hostVeth), rejectUnsupportedEtherType()))
+		compiler.generation.ingressGuards[endpoint.id] = guards
 	}
 
 	for _, endpoint := range endpoints {
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.arp."+endpoint.id,
+		compiler.addRule(&compiler.generation.bridge, forward, "bridge.arp."+endpoint.id,
 			joinExpressions(
 				matchInputInterface(endpoint.hostVeth),
 				matchEtherType(etherTypeARP),
 				acceptVerdict(),
 			))
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.established."+endpoint.id,
+		compiler.addRule(&compiler.generation.bridge, forward, "bridge.established."+endpoint.id,
 			joinExpressions(matchInputInterface(endpoint.hostVeth), acceptEstablishedRelated()))
 	}
 
@@ -57,7 +63,7 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 		if source.networkID != destination.networkID {
 			continue
 		}
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.allow.vm."+grant.id,
+		compiler.addRule(&compiler.generation.bridge, forward, "bridge.allow.vm."+grant.id,
 			bridgeVMGrantExpressions(source, destination, grant.protocol, grant.ports))
 	}
 
@@ -67,12 +73,12 @@ func (compiler *generationCompiler) compileBridge(intent generationIntent) {
 		if source.id != destination.networkID {
 			continue
 		}
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.allow.network."+grant.id,
+		compiler.addRule(&compiler.generation.bridge, forward, "bridge.allow.network."+grant.id,
 			bridgeNetworkGrantExpressions(source, destination, grant.protocol, grant.ports))
 	}
 
 	for _, endpoint := range endpoints {
-		compiler.addRule(&compiler.generation.bridge, chain, "bridge.default-deny."+endpoint.id,
+		compiler.addRule(&compiler.generation.bridge, forward, "bridge.default-deny."+endpoint.id,
 			joinExpressions(matchInputInterface(endpoint.hostVeth), dropVerdict()))
 	}
 }

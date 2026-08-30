@@ -2,6 +2,7 @@ package firewall
 
 import (
 	"cmp"
+	"encoding/binary"
 	"fmt"
 	"net/netip"
 	"slices"
@@ -31,6 +32,9 @@ func compileGeneration(intent generationIntent) (compiledGeneration, error) {
 	if compiler.err != nil {
 		return compiledGeneration{}, compiler.err
 	}
+	if err := validateIngressGuardInvariant(intent, *compiler.generation); err != nil {
+		return compiledGeneration{}, err
+	}
 	return *compiler.generation, nil
 }
 
@@ -41,9 +45,30 @@ func newGenerationCompiler(intent generationIntent) (*generationCompiler, error)
 
 	bridgeTable := &nftables.Table{Family: nftables.TableFamilyBridge, Name: managedBridgeTableName}
 	inetTable := &nftables.Table{Family: nftables.TableFamilyINet, Name: managedINetTableName}
-	bridgeForward := filterChain(bridgeTable, managedBridgeForwardChainName, nftables.ChainHookForward)
-	inetForward := filterChain(inetTable, managedINetForwardChainName, nftables.ChainHookForward)
-	inetInput := filterChain(inetTable, managedINetInputChainName, nftables.ChainHookInput)
+	bridgePrerouting := filterChain(
+		bridgeTable,
+		managedBridgePreroutingChainName,
+		nftables.ChainHookPrerouting,
+		nftables.ChainPriorityRaw,
+	)
+	bridgeForward := filterChain(
+		bridgeTable,
+		managedBridgeForwardChainName,
+		nftables.ChainHookForward,
+		nftables.ChainPriorityFilter,
+	)
+	inetForward := filterChain(
+		inetTable,
+		managedINetForwardChainName,
+		nftables.ChainHookForward,
+		nftables.ChainPriorityFilter,
+	)
+	inetInput := filterChain(
+		inetTable,
+		managedINetInputChainName,
+		nftables.ChainHookInput,
+		nftables.ChainPriorityFilter,
+	)
 	inetNAT := &nftables.Chain{
 		Name:     managedINetNATChainName,
 		Table:    inetTable,
@@ -53,10 +78,11 @@ func newGenerationCompiler(intent generationIntent) (*generationCompiler, error)
 	}
 
 	generation := &compiledGeneration{
-		id: intent.id,
+		id:            intent.id,
+		ingressGuards: make(map[string]ingressGuardSet, len(intent.endpoints)),
 		bridge: compiledTable{
 			table:  bridgeTable,
-			chains: []*nftables.Chain{bridgeForward},
+			chains: []*nftables.Chain{bridgePrerouting, bridgeForward},
 		},
 		inet: compiledTable{
 			table:  inetTable,
@@ -78,13 +104,18 @@ func newGenerationCompiler(intent generationIntent) (*generationCompiler, error)
 	return compiler, nil
 }
 
-func filterChain(table *nftables.Table, name string, hook *nftables.ChainHook) *nftables.Chain {
+func filterChain(
+	table *nftables.Table,
+	name string,
+	hook *nftables.ChainHook,
+	priority *nftables.ChainPriority,
+) *nftables.Chain {
 	policy := nftables.ChainPolicyAccept
 	return &nftables.Chain{
 		Name:     name,
 		Table:    table,
 		Hooknum:  hook,
-		Priority: nftables.ChainPriorityFilter,
+		Priority: priority,
 		Type:     nftables.ChainTypeFilter,
 		Policy:   &policy,
 	}
@@ -95,9 +126,9 @@ func (compiler *generationCompiler) addRule(
 	chain *nftables.Chain,
 	identity string,
 	expressions []expr.Any,
-) {
+) *nftables.Rule {
 	if compiler.err != nil {
-		return
+		return nil
 	}
 	userdata, err := encodeRuleIdentity(ruleIdentity{generation: compiler.generation.id, rule: identity})
 	if err != nil {
@@ -107,14 +138,16 @@ func (compiler *generationCompiler) addRule(
 			err,
 			errs.WithClass(errs.ClassInternal),
 		)
-		return
+		return nil
 	}
-	table.rules = append(table.rules, &nftables.Rule{
+	rule := &nftables.Rule{
 		Table:    table.table,
 		Chain:    chain,
 		Exprs:    expressions,
 		UserData: userdata,
-	})
+	}
+	table.rules = append(table.rules, rule)
+	return rule
 }
 
 func validateIntent(intent generationIntent) error {
@@ -139,6 +172,9 @@ func validateIntent(intent generationIntent) error {
 			return invalidGeneration("duplicate network identity")
 		}
 		networks[network.id] = network
+	}
+	if err := validateManagedPrefixSet(intent.networks); err != nil {
+		return err
 	}
 
 	endpoints := make(map[string]endpointIntent, len(intent.endpoints))
@@ -210,7 +246,7 @@ func validateNetwork(
 	if _, collision := uplinks[network.hostBridge]; collision {
 		return invalidGeneration("bridge interface collides with an uplink interface")
 	}
-	if !validIPv4Prefix(network.subnet) || !validIPv4(network.hostIPv4) || !network.subnet.Contains(network.hostIPv4) {
+	if !validIPv4Prefix(network.subnet) || !usableIPv4Address(network.subnet, network.hostIPv4) {
 		return invalidGeneration("invalid network IPv4 authority")
 	}
 	return nil
@@ -235,7 +271,7 @@ func validateEndpoint(
 	if _, collision := uplinks[endpoint.hostVeth]; collision {
 		return invalidGeneration("VM interface collides with an uplink interface")
 	}
-	if !validIPv4(endpoint.ipv4) || !network.subnet.Contains(endpoint.ipv4) || endpoint.ipv4 == network.hostIPv4 {
+	if !usableIPv4Address(network.subnet, endpoint.ipv4) || endpoint.ipv4 == network.hostIPv4 {
 		return invalidGeneration("invalid VM IPv4 authority")
 	}
 	if endpoint.mac == (macAddress{}) || endpoint.mac[0]&1 != 0 {
@@ -313,7 +349,87 @@ func validIPv4(address netip.Addr) bool {
 }
 
 func validIPv4Prefix(prefix netip.Prefix) bool {
-	return prefix.IsValid() && prefix.Addr().Is4() && prefix == prefix.Masked()
+	return prefix.IsValid() && prefix.Addr().Is4() && prefix == prefix.Masked() && prefix.Bits() <= 30
+}
+
+func usableIPv4Address(prefix netip.Prefix, address netip.Addr) bool {
+	if !validIPv4(address) || !validIPv4Prefix(prefix) || !prefix.Contains(address) {
+		return false
+	}
+	value := ipv4Value(address)
+	start, end := ipv4PrefixRange(prefix)
+	return value != start && value != end
+}
+
+type managedPrefixRange struct {
+	start uint32
+	end   uint32
+}
+
+func validateManagedPrefixSet(networks []networkIntent) error {
+	ranges := make([]managedPrefixRange, 0, len(networks))
+	for _, network := range networks {
+		start, end := ipv4PrefixRange(network.subnet)
+		ranges = append(ranges, managedPrefixRange{start: start, end: end})
+	}
+	slices.SortFunc(ranges, func(left, right managedPrefixRange) int {
+		if result := cmp.Compare(left.start, right.start); result != 0 {
+			return result
+		}
+		return cmp.Compare(left.end, right.end)
+	})
+	for index := 1; index < len(ranges); index++ {
+		if ranges[index].start <= ranges[index-1].end {
+			return invalidGeneration("managed IPv4 prefixes overlap")
+		}
+	}
+	return nil
+}
+
+func ipv4PrefixRange(prefix netip.Prefix) (uint32, uint32) {
+	start := ipv4Value(prefix.Masked().Addr())
+	hostBits := 32 - prefix.Bits()
+	hostMask := uint32((uint64(1) << hostBits) - 1)
+	return start, start | hostMask
+}
+
+func ipv4Value(address netip.Addr) uint32 {
+	bytes := address.As4()
+	return binary.BigEndian.Uint32(bytes[:])
+}
+
+func validateIngressGuardInvariant(intent generationIntent, generation compiledGeneration) error {
+	var prerouting *nftables.Chain
+	for _, chain := range generation.bridge.chains {
+		if chain.Name == managedBridgePreroutingChainName {
+			prerouting = chain
+			break
+		}
+	}
+	if prerouting == nil || prerouting.Table != generation.bridge.table || prerouting.Hooknum == nil ||
+		*prerouting.Hooknum != *nftables.ChainHookPrerouting || prerouting.Priority == nil ||
+		*prerouting.Priority != *nftables.ChainPriorityRaw || prerouting.Type != nftables.ChainTypeFilter {
+		return invalidGeneration("bridge ingress guard chain is invalid")
+	}
+
+	for _, endpoint := range intent.endpoints {
+		guards, exists := generation.ingressGuards[endpoint.id]
+		if !exists {
+			return invalidGeneration("VM ingress guard is absent from bridge prerouting")
+		}
+		for _, rule := range [...](*nftables.Rule){
+			guards.mac,
+			guards.ipv4,
+			guards.arpMAC,
+			guards.arpIPv4,
+			guards.unsupportedL3,
+		} {
+			if rule == nil || rule.Table != generation.bridge.table || rule.Chain != prerouting {
+				return invalidGeneration("VM ingress guard is absent from bridge prerouting")
+			}
+		}
+	}
+	return nil
 }
 
 func allCharacters(value string, allowed func(byte) bool) bool {

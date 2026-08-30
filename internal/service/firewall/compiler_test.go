@@ -96,6 +96,67 @@ func TestCompileGenerationBuildsClosedRuleFamilies(t *testing.T) {
 	assert.Equal(t, expr.VerdictDrop, finalVerdict(t, inputDrop.Exprs).Kind)
 }
 
+func TestCompileGenerationSeparatesIngressGuardsFromForwardPolicy(t *testing.T) {
+	intent := compatibilityIntent()
+	routedGrant := vmTrafficGrant{
+		id:              strings.Repeat("8", 32),
+		sourceVMID:      intent.endpoints[0].id,
+		destinationVMID: intent.endpoints[2].id,
+		protocol:        protocolTCP,
+		ports:           portInterval{first: 8443, last: 8443},
+	}
+	intent.vmGrants = append(intent.vmGrants, routedGrant)
+
+	compiled, err := compileGeneration(intent)
+	require.NoError(t, err)
+
+	prerouting := requireCompiledChain(t, compiled.bridge, managedBridgePreroutingChainName)
+	require.NotNil(t, prerouting.Hooknum)
+	require.NotNil(t, prerouting.Priority)
+	assert.Equal(t, *nftables.ChainHookPrerouting, *prerouting.Hooknum)
+	assert.Equal(t, *nftables.ChainPriorityRaw, *prerouting.Priority)
+	assert.Equal(t, nftables.ChainTypeFilter, prerouting.Type)
+
+	forward := requireCompiledChain(t, compiled.bridge, managedBridgeForwardChainName)
+	for _, identityPrefix := range []string{
+		"bridge.spoof.mac.",
+		"bridge.spoof.ipv4.",
+		"bridge.spoof.arp-mac.",
+		"bridge.spoof.arp-ipv4.",
+		"bridge.unsupported-l3.",
+	} {
+		rule := requireCompiledRule(t, compiled, identityPrefix+intent.endpoints[0].id)
+		assert.Same(t, prerouting, rule.Chain)
+	}
+	for _, identity := range []string{
+		"bridge.arp." + intent.endpoints[0].id,
+		"bridge.established." + intent.endpoints[0].id,
+		"bridge.allow.vm." + intent.vmGrants[0].id,
+		"bridge.default-deny." + intent.endpoints[0].id,
+	} {
+		assert.Same(t, forward, requireCompiledRule(t, compiled, identity).Chain)
+	}
+
+	routedRule := requireCompiledRule(t, compiled, "inet.forward.allow.vm."+routedGrant.id)
+	assert.NotNil(t, routedRule)
+	guard := requireCompiledRule(t, compiled, "bridge.spoof.ipv4."+routedGrant.sourceVMID)
+	guard.Chain = forward
+	assert.Error(t, validateIngressGuardInvariant(intent, compiled),
+		"an exact-source routed policy must be rejected if its source ingress guard is absent from prerouting")
+}
+
+func TestCompileGenerationBindsInternetEgressToMasqueradeCapability(t *testing.T) {
+	intent := compatibilityIntent()
+	intent.networks[0].masquerade = false
+
+	compiled, err := compileGeneration(intent)
+	require.NoError(t, err)
+	assertCompiledRuleAbsent(t, compiled, "inet.forward.egress."+intent.networks[0].id)
+	assertCompiledRuleAbsent(t, compiled, "inet.nat.masquerade."+intent.networks[0].id)
+	requireCompiledRule(t, compiled, "inet.forward.egress."+intent.networks[1].id)
+	requireCompiledRule(t, compiled, "inet.nat.masquerade."+intent.networks[1].id)
+}
+
 func TestCompileGenerationRejectsInvalidResolvedIntent(t *testing.T) {
 	tests := map[string]func(*generationIntent){
 		"generation identity": func(intent *generationIntent) {
@@ -122,6 +183,30 @@ func TestCompileGenerationRejectsInvalidResolvedIntent(t *testing.T) {
 		"duplicate endpoint MAC": func(intent *generationIntent) {
 			intent.endpoints[1].mac = intent.endpoints[0].mac
 		},
+		"overlapping managed prefixes": func(intent *generationIntent) {
+			intent.networks[1].subnet = netip.MustParsePrefix("10.0.0.0/25")
+			intent.networks[1].hostIPv4 = netip.MustParseAddr("10.0.0.10")
+			intent.endpoints[2].ipv4 = netip.MustParseAddr("10.0.0.20")
+		},
+		"network address as host": func(intent *generationIntent) {
+			intent.networks[0].hostIPv4 = netip.MustParseAddr("10.0.0.0")
+		},
+		"broadcast address as host": func(intent *generationIntent) {
+			intent.networks[0].hostIPv4 = netip.MustParseAddr("10.0.0.255")
+		},
+		"network address as endpoint": func(intent *generationIntent) {
+			intent.endpoints[0].ipv4 = netip.MustParseAddr("10.0.0.0")
+		},
+		"broadcast address as endpoint": func(intent *generationIntent) {
+			intent.endpoints[0].ipv4 = netip.MustParseAddr("10.0.0.255")
+		},
+		"host address as endpoint": func(intent *generationIntent) {
+			intent.endpoints[0].ipv4 = intent.networks[0].hostIPv4
+		},
+		"prefix without usable hosts": func(intent *generationIntent) {
+			intent.networks[0].subnet = netip.MustParsePrefix("10.0.0.0/31")
+			intent.networks[0].hostIPv4 = netip.MustParseAddr("10.0.0.0")
+		},
 	}
 
 	for name, mutate := range tests {
@@ -134,6 +219,16 @@ func TestCompileGenerationRejectsInvalidResolvedIntent(t *testing.T) {
 			assert.ErrorContains(t, err, "firewall generation is invalid")
 		})
 	}
+}
+
+func TestCompileGenerationAllowsAdjacentManagedPrefixes(t *testing.T) {
+	intent := compatibilityIntent()
+	intent.networks[1].subnet = netip.MustParsePrefix("10.0.1.0/24")
+	intent.networks[1].hostIPv4 = netip.MustParseAddr("10.0.1.1")
+	intent.endpoints[2].ipv4 = netip.MustParseAddr("10.0.1.2")
+
+	_, err := compileGeneration(intent)
+	require.NoError(t, err)
 }
 
 func TestRuleUserDataRoundTripRejectsAmbiguity(t *testing.T) {
@@ -258,6 +353,26 @@ func requireCompiledRule(t *testing.T, compiled compiledGeneration, identity str
 		}
 	}
 	t.Fatalf("compiled rule %q not found", identity)
+	return nil
+}
+
+func assertCompiledRuleAbsent(t *testing.T, compiled compiledGeneration, identity string) {
+	t.Helper()
+	for _, rule := range compiled.rules() {
+		decoded, err := decodeRuleIdentity(rule.UserData)
+		require.NoError(t, err)
+		assert.NotEqual(t, identity, decoded.rule)
+	}
+}
+
+func requireCompiledChain(t *testing.T, table compiledTable, name string) *nftables.Chain {
+	t.Helper()
+	for _, chain := range table.chains {
+		if chain.Name == name {
+			return chain
+		}
+	}
+	t.Fatalf("compiled chain %q not found", name)
 	return nil
 }
 
