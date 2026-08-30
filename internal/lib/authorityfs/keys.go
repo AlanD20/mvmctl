@@ -5,6 +5,7 @@ import "fmt"
 const (
 	vmKeyLength      = 32
 	imageKeyLength   = 64
+	networkKeyLength = 64
 	releaseKeyLength = 64
 )
 
@@ -18,6 +19,11 @@ type ImageKey struct {
 	value string
 }
 
+// NetworkKey identifies one canonical managed-network lock.
+type NetworkKey struct {
+	value string
+}
+
 // NewImageKey admits one 64-character lowercase hexadecimal image identity.
 func NewImageKey(value string) (ImageKey, error) {
 	if !isLowerHex(value, imageKeyLength) {
@@ -27,6 +33,17 @@ func NewImageKey(value string) (ImageKey, error) {
 		)
 	}
 	return ImageKey{value: value}, nil
+}
+
+// NewNetworkKey admits one 64-character lowercase hexadecimal network identity.
+func NewNetworkKey(value string) (NetworkKey, error) {
+	if !isLowerHex(value, networkKeyLength) {
+		return NetworkKey{}, fmt.Errorf(
+			"authorityfs: network key must be %d lowercase hexadecimal characters",
+			networkKeyLength,
+		)
+	}
+	return NetworkKey{value: value}, nil
 }
 
 // NewVMKey admits one 32-character lowercase hexadecimal VM identity.

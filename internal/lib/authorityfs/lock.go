@@ -43,6 +43,27 @@ func (jailer *Jailer) AcquireIndex(ctx context.Context) (*Lock, error) {
 	return acquireLock(ctx, state.deps, state.policy, state.authority, "index.lock", "Jailer index")
 }
 
+// AcquireIndex acquires the global managed-network ownership-index lock.
+func (authority *Network) AcquireIndex(ctx context.Context) (*Lock, error) {
+	if authority == nil || authority.state == nil {
+		return nil, fmt.Errorf("authorityfs: network authority is not active")
+	}
+	state := authority.state
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	if !state.active {
+		return nil, fmt.Errorf("authorityfs: network authority is released")
+	}
+	return acquireLock(
+		ctx,
+		state.deps,
+		state.policy,
+		state.authority,
+		networkIndexLockName,
+		"network index",
+	)
+}
+
 // AcquireRelease acquires the Jailer lock for one canonical release-slot digest.
 func (jailer *Jailer) AcquireRelease(ctx context.Context, key ReleaseKey) (*Lock, error) {
 	if !isLowerHex(key.value, releaseKeyLength) {
@@ -75,6 +96,30 @@ func (uid *JailerUID) AcquireVM(ctx context.Context, key VMKey) (*Lock, error) {
 		return nil, fmt.Errorf("authorityfs: Jailer UID authority is released")
 	}
 	return acquireLock(ctx, state.deps, state.policy, state.fd, key.value+".lock", "Jailer VM")
+}
+
+// AcquireNetwork acquires the final authority class for one owner-bound managed network.
+func (uid *NetworkUID) AcquireNetwork(ctx context.Context, key NetworkKey) (*Lock, error) {
+	if !isLowerHex(key.value, networkKeyLength) {
+		return nil, fmt.Errorf("authorityfs: network key is invalid")
+	}
+	if uid == nil || uid.state == nil {
+		return nil, fmt.Errorf("authorityfs: network UID authority is not active")
+	}
+	state := uid.state
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	if !state.active {
+		return nil, fmt.Errorf("authorityfs: network UID authority is released")
+	}
+	return acquireLock(
+		ctx,
+		state.deps,
+		state.policy,
+		state.fd,
+		"network-"+key.value+".lock",
+		"managed network",
+	)
 }
 
 // AcquireVM acquires the LoopMount lock for one canonical VM identity.
