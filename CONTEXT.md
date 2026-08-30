@@ -326,12 +326,20 @@ cancellation, and independent-resource concurrency.
 The capability structs retain pointer-shared lifecycle state, so even a copied value performs checked release exactly
 once, caches and repeats the first cleanup result, and never retries an unlock or close against a potentially reused
 descriptor. Release preserves context values while ignoring cancellation; child capabilities and acquired locks remain
-valid after their parent closes its own descriptors. The module exposes closed Jailer- and LoopMount-specific keys and
-methods, not a raw path, descriptor, or generic lock interface. The private LoopMount service adapter now binds the
-transaction coordinator's resource-lock seam to the authenticated UID and canonical VM/image keys, retains partial
-acquisition for cleanup, and releases the lock before its authority capability. This is not runtime activation: no
-production `Server` constructor, receiver handler, dispatcher entry, backend/public cutover, or privileged mount effect
-uses the adapter; network, firewall, and the `/run/mvmctl/runtime` tree remain unimplemented.
+valid after their parent closes its own descriptors. The module exposes closed Jailer-, LoopMount-, and Network-specific
+keys and methods, not a raw path, descriptor, or generic lock interface. The private LoopMount service adapter now binds
+the transaction coordinator's resource-lock seam to the authenticated UID and canonical VM/image keys, retains partial
+acquisition for cleanup, and releases the lock before its authority capability.
+
+The private network registration foundation now serializes a global network-ID index and each canonical network. Its
+strict schema-1 record persists only owner UID, network ID, current boot ID, and exact derived bridge
+name/ifindex/host-namespace device and inode at `/var/lib/mvmctl/networks/<uid>/<network-id>.json`. Root-owned mode-`0700`
+directories and one-link mode-`0600` records are admitted descriptor-relatively; a bounded exact codec and atomic
+no-replace publication preserve both created-record and durability-uncertain evidence. Registration releases its
+network, UID/store, index, and root authority in exact reverse order with pointer-shared cached close-once results. This
+is not runtime activation: the registration entry point remains private and unreferenced, does not receive the Jailer
+VM-lock lease, and creates no namespace, link, TAP, route, topology record, firewall state, or public action. The
+firewall consumer and `/run/mvmctl/runtime` tree also remain unimplemented.
 
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
 requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`
@@ -401,8 +409,9 @@ filesystem exactly matches the request; a partitioned source is valid only when 
 Malformed probes, reused or duplicate block identities, duplicate partition numbers, raw-plus-partition ambiguity, and
 missing or multiple matches fail closed. Receiver discovery now enumerates fixed `/sys/class/block` with bounded entry
 and partition counts, proves stable membership and exact block identities through retained descriptors, probes only
-through fixed `/usr/bin/blkid` with bounded output and exit policy, and returns a pathless source capability bound to
-the exact probe. No caller-selected tool, path, or device name crosses the seam.
+through fixed `/usr/bin/blkid` with bounded output and exit policy, a five-second cap, and any earlier caller deadline,
+then returns a pathless source capability bound to the exact probe. No caller-selected tool, path, or device name
+crosses the seam.
 
 The inert pure loop-device kernel contract admits only fixed `/dev/loop-control` character-device identity `10:237`.
 It derives `/dev/loop<N>` only for an index from `0` through `2^20-1` and requires block major `7` with minor exactly
@@ -431,6 +440,16 @@ requires complete admitted/statx stability and successful cleanup; otherwise the
 while the primary `DomainError` and bounded cleanup details are preserved. Because the process cannot safely return an
 unshared OS thread to the Go runtime, production activation requires a short-lived receiver handler that exits.
 
+An inert private `ProvisionVM` adapter is also implemented and consumes the admitted rootfs capability directly. It
+grows the admitted ext-family filesystem through fixed `e2fsck`/`resize2fs` or Btrfs through fixed
+`btrfs filesystem resize`, with a five-minute tool cap and any earlier caller deadline, and has ext4/Btrfs convergence
+evidence from either the exact old or target backing size. Every guest read and write is descriptor-bound beneath the
+admitted mounted root. Its closed content set is hostname/hosts, DNS,
+existing-account SSH/sudo, fixed SSH service, embedded agent, fstab, a root-only persistent
+`/etc/mvmctl/agent.token`, and exactly one admitted init-system enablement: systemd `sysinit.target` or OpenRC default
+runlevel. Cleanup unwinds root, mount, source, partitions, loop, mountpoint, and backing authority in reverse and maps
+mutation, durability uncertainty, and unknown outcomes without losing the primary error.
+
 An inactive private `Server` now coordinates each admitted operation through two action-specific effect seams.
 `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while the private `imageOptimizeEffects` contains
 only `OptimizeImage`. Provisioning and inspection validate `rootfsEffects`; optimization validates
@@ -439,8 +458,8 @@ validating the closed request and authenticated caller, the coordinator acquires
 `rootfsResourceLocks` seam, admits the fixed rootfs, invokes the corresponding effect, and validates the request-bound
 result. The lock seam has a private adapter over the implemented `authorityfs` LoopMount UID and canonical VM/image
 lock capabilities. The optimize seam has no production implementation or construction, and no receiver handler or
-dispatcher entry registers it. The entire `Server` remains inert: there is no production constructor or provisioning
-effect, and the inspection adapter's factory is intentionally unreferenced. There is no receiver handler, dispatcher
+dispatcher entry registers it. The entire `Server` remains inert: there is no production constructor, and both the
+provisioning and inspection adapter factories are intentionally unreferenced. There is no receiver handler, dispatcher
 registration, live-kernel qualification, or public/backend cutover for any action.
 
 The coordinator requires an action-specific effect cleanup capability and unwinds effect cleanup, rootfs authority,
@@ -453,10 +472,10 @@ VM grow replay admission accepts only the stable pre-grow size or the exact requ
 size before an effect begins, and retains the actually admitted size on the rootfs lease handed to the narrow effect
 seam. Image optimization remains blocked from privileged registration until durable shrink and replacement replay
 authority exists. This is not the active LoopMount receiver path: the implemented lock adapter is not injected into a
-production `Server`, and the concrete read-only inspection adapter is deliberately unreachable. There is no
-provisioning effect, privileged handler, dispatcher entry, live-kernel qualification, backend/public cutover, or
-removal of `mvm run provision`, caller-shaped raw wire/sudo, and the legacy arbitrary cleanup/unmount surface. No new
-publicly reachable privileged mount effect occurs. Task 13 remains pending.
+production `Server`, and the concrete provisioning and read-only inspection adapters are deliberately unreachable.
+There is no privileged handler, dispatcher entry, live-kernel qualification, backend/public cutover, or removal of
+`mvm run provision`, caller-shaped raw wire/sudo, and the legacy arbitrary cleanup/unmount surface. No new publicly
+reachable privileged mount effect occurs. Task 13 remains pending.
 
 **Performance:** GuestFS is 3–5x slower than LoopMount for VM creation (9–14s vs 2–5s wall-clock, sequential). Under parallel load GuestFS degrades further due to QEMU lock contention. See `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` for full benchmark data.
 

@@ -79,14 +79,30 @@ lowers and reverifies the exact links, then invokes the launch lease's typed abo
 handle remain held. An unknown firewall outcome never raises a link or releases the child. Cleanup verifies namespace
 inode, interface ownership, process identity, and cgroup membership before removing anything.
 
-Implementation note (2026-08-30): the private topology-preparation foundation now exposes topology authority only from
-its exact committed state while the network lock, namespace pin, and namespace/local-bridge/TAP/veth creation markers
-remain present. Building, cleanup-in-progress, cleaned, missing-lease, and partially rolled-back values return no
-topology authority even when stale identity fields remain in memory. Rollback stays cancellation-independent and
-retryable. If network-lock acquisition returns a classified `DomainError` with a retained lock, successful lock cleanup
-returns that exact error unchanged; cleanup failure retains its code, class, entity, prior details, and cause while
-adding `cleanup_required=true` and the cleanup diagnostic. A concrete authority/locker, netlink effect adapter,
-firewall and activation stages, durable topology record, production constructor, and Jailer handoff remain pending.
+Implementation note (2026-08-30): a private strict schema-1 managed-network authority record, codec, persistent store,
+and inert registration authority are implemented. The record is at
+`/var/lib/mvmctl/networks/<uid>/<network-id>.json` and contains exactly schema version, owner UID, 64-lowercase-hex
+network ID, host boot ID, and the derived managed bridge's name, ifindex, and host namespace device/inode. The strict
+4-KiB codec rejects missing, unknown, duplicate, case-colliding, nested, trailing, and invalid values. Root-owned
+managed directories are exact mode `0700`; one-link records are exact mode `0600`. Descriptor-relative no-symlink
+admission, stable before/after reads, exclusive temporary creation, file sync, checked close, no-replace rename, and
+parent sync define publication. A post-rename parent-sync failure returns the created record with
+`record_created=true` and `durability_uncertain=true`.
+
+Registration takes the global network ownership-index lock before enumerating all owner directories, then takes the
+owner-bound per-network lock. It denies a foreign or duplicate claim, rejects a prior-boot record as stale, returns an
+exact same-boot bridge record unchanged, and rejects a different bridge identity. Registration releases per-network
+lock, lock UID, store UID, store root, index lock, then lock root in exact reverse order under cancellation-independent
+cleanup. Capability releases are pointer-shared, close once, and repeat the first cached cleanup result; cleanup failure
+preserves the primary `DomainError` and adds bounded `cleanup_required` evidence.
+
+This authority remains deliberately inert: no production constructor calls registration, no real Jailer VM-lock lease
+is transferred into it or the topology transaction, and no namespace, link, TAP, route, firewall, or other kernel
+effect consumes the record. The separate topology-preparation foundation exposes topology authority only from its exact
+committed in-memory state while the network lock, namespace pin, and all creation markers remain present. Building,
+cleanup-in-progress, cleaned, missing-lease, and partially rolled-back values return no authority. VM-lock transfer,
+netlink effects, firewall/link activation, durable VM-topology lifecycle, production construction, Jailer handoff, and
+live qualification remain pending.
 
 ### nftables is the only firewall backend
 

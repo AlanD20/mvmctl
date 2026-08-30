@@ -39,8 +39,10 @@ continue without silently deleting it.
   mode, symlink, concurrent-creation, creation-fault, scan, and lock evidence. The cycle-free
   `internal/lib/authorityfs` leaf module now owns the initializer and closed Jailer/UID/lock capabilities; copied values
   share lifecycle state, and checked idempotent release caches its first result without retry. Its separate LoopMount
-  family now pins authenticated UID authority and canonical VM/image locks beneath the same tree. No
-  `/run/mvmctl/runtime` tree, network/firewall consumer, or public LoopMount activation exists yet.
+  family now pins authenticated UID authority and canonical VM/image locks beneath the same tree. A closed Network
+  family now supplies global-index and per-network locks to an inert persistent registration authority. No
+  `/run/mvmctl/runtime` tree, firewall consumer, live network topology consumer, or public LoopMount activation exists
+  yet.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional
@@ -77,9 +79,10 @@ continue without silently deleting it.
   paths or descriptors. Stable bounded sysfs partition admission and fixed `/usr/bin/blkid` probing bind the selected
   source to exact pre/post-probe identity. An inert read-only inspection adapter uses a private mount namespace, fixed
   `ro,nosuid,nodev,noexec` mount, exact source/mount/image revalidation, bounded OS-release reads, stability proof, and
-  reverse cleanup with preserved primary errors. Its factory is unreferenced; provisioning, production `Server`
-  construction, receiver handling, dispatch, live-kernel qualification, public/backend cutover, and legacy-route
-  removal remain pending.
+  reverse cleanup with preserved primary errors. A private `ProvisionVM` adapter now consumes the same admitted
+  capabilities for descriptor-bound fixed guest writes and ext4/Btrfs grow convergence, but its factory is likewise
+  unreferenced. Production `Server` construction, receiver handling, dispatch, live-kernel qualification,
+  public/backend cutover, and legacy-route removal remain pending.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -95,7 +98,7 @@ remains transitional. The routed policy, dual firewall backends, host-global TAP
 | User configuration, SQLite DB, and VM artifacts | Existing `MVM_CACHE_DIR` | Untrusted for root authorization |
 | Trusted Firecracker/Jailer pairs | `/var/lib/mvmctl/binaries/<architecture>/<version>` | Root-owned persistent |
 | VM ownership/lifecycle records | `/var/lib/mvmctl/instances/<uid>` | Root-owned persistent |
-| Network ownership/topology records | `/var/lib/mvmctl/networks/<uid>` | Root-owned persistent |
+| Managed-network owner/bridge identity records; future VM topology | `/var/lib/mvmctl/networks/<uid>` | Root-owned persistent; current schema 1 is not VM-topology authority |
 | Firewall generation record | `/var/lib/mvmctl/firewall/generation.json` | Root-owned persistent; exact committed/applying kernel authority |
 | Global capacity allocations | `/var/lib/mvmctl/allocations` | Root-owned persistent |
 | Locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700` ephemeral; no persistent mount-namespace handles |
@@ -109,9 +112,9 @@ Durable user state does not move wholesale to `/run` or `/var/run`. XDG state se
 
 Implementation status: `internal/lib/authorityfs` now owns the descriptor-relative initializer for exact
 `/run/mvmctl` and `/run/mvmctl/authority` modes. Jailer uses its private adapters over the module's closed index,
-release, UID, and VM-lock capabilities. A separate LoopMount family and private service adapter now provide per-UID
-canonical VM/image locking to the inactive transaction seam. The module does not create the runtime-output tree;
-network/firewall consumers and every public activation remain pending.
+release, UID, and VM-lock capabilities. Separate LoopMount and Network families provide per-UID canonical VM/image
+locking and global-index/per-network locking to their inactive service seams. The module does not create the
+runtime-output tree; network topology/firewall consumers and every public activation remain pending.
 
 ### Module and layer rules
 
@@ -639,8 +642,22 @@ both leases and all namespace/local-bridge/TAP/veth creation markers present. Bu
 missing-lease, and partial-rollback states return no authority. A classified `DomainError` from lock acquisition
 survives successful rollback exactly; failed lock cleanup preserves its code, class, entity, prior details, and cause
 while adding `cleanup_required=true`. The foundation deliberately exposes no production constructor or live-topology
-release. A concrete root network authority/locker, netlink effect adapter, firewall and activation stages, durable
-record, and Jailer capability transfer remain pending.
+release.
+
+The private strict schema-1 managed-network record/codec/store and inert registration authority are implemented. Root
+persists only owner, network, current boot, and exact derived managed-bridge name/ifindex/host-namespace identity at
+`/var/lib/mvmctl/networks/<uid>/<network-id>.json`, beneath exact root-owned mode-`0700` directories with a mode-`0600`
+one-link record. The 4-KiB strict codec rejects missing/unknown/duplicate/case-colliding/trailing structure. Publication
+uses descriptor-relative stable admission, exclusive temporary creation, file sync, checked close, no-replace rename,
+and parent sync; a post-rename sync failure returns the record with `record_created` and `durability_uncertain`.
+Registration holds the global ownership-index then per-network lock, scans all owners to reject cross-UID duplicates,
+and cleans per-network lock, lock/store UID capabilities, store root, index lock, then lock root in exact reverse order.
+Cleanup is cancellation-independent, close-once, and repeats cached results while preserving primary error identity.
+
+This remains an inert identity foundation. No production path calls registration; no real VM-lock lease is transferred
+into registration or topology preparation; and no namespace/link/firewall kernel effect consumes the record. VM-lock
+transfer, netlink effects, firewall/link activation, durable per-VM topology lifecycle, global capacity authority,
+production construction, Jailer handoff, public cutover, and live qualification remain pending.
 
 The private root-side compiler in `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and receives
 only mvmctl-owned typed resolved intent. It builds fixed bridge and inet tables/chains. Raw-priority bridge prerouting
@@ -753,8 +770,9 @@ validate the shared rootfs authority and narrow `rootfsResourceLocks.Acquire` le
 request and caller before authority acquisition, retains a partially acquired lock lease for checked release, admits
 the fixed rootfs, invokes one effect, and validates the request-bound result. The private service adapter now provides
 the concrete resource-lock implementation over `authorityfs`, but no production constructor injects it. The optimize
-seam has no production implementation or construction, receiver handler, or dispatcher registration. There is no
-provisioning effect or activation for the entire `Server`; the inspection adapter remains deliberately inert.
+seam has no production implementation or construction, receiver handler, or dispatcher registration. Private
+descriptor-consuming `ProvisionVM` and `InspectImage` adapters exist, but both factories are deliberately unreferenced
+and the entire `Server` remains inert.
 
 Every action requires its own effect cleanup capability and unwinds effect cleanup, rootfs authority, then resource
 lock with `context.WithoutCancel`. Closed action-specific effect states derive mandatory `rootfs_modified`,
@@ -763,8 +781,9 @@ authorize success. Cleanup details are bounded and preserve the primary `DomainE
 
 For a requested VM grow, admission accepts only the exact pre-grow size or exact target size. It rejects a third size
 before effect invocation and hands the stable actually admitted size to `rootfsEffects.ProvisionVM` through the private
-rootfs lease, allowing a future effect to distinguish first execution from a converged replay. `OptimizeImage` remains
-blocked from registration until durable shrink and replacement replay authority is implemented.
+rootfs lease. The implemented adapter distinguishes first execution from a converged replay without reopening a caller
+path. `OptimizeImage` remains blocked from registration until durable shrink and replacement replay authority is
+implemented.
 
 The implemented private seam split isolates provisioning and inspection from deferred optimization without activating
 production behavior. Exclusive locks use the shared privileged descriptor-safe authority layout at
@@ -778,22 +797,26 @@ coordinator's resource-lock seam, including partial-acquisition cleanup, retryab
 lock-before-parent checked release. Review corrected an initial parent-capability serialization bug before this record
 was updated. LoopMount does not import Jailer or duplicate a pathname initializer.
 
-The remaining provisioning effect uses the implemented private namespace/loop/source foundation plus only fixed host
+The implemented private `ProvisionVM` adapter uses the private namespace/loop/source foundation plus only fixed host
 filesystem grow tools. It consumes admitted capabilities directly and never reopens or passes a caller path,
 synthesizes a `/proc` FD path, executes a guest binary or chroot, accepts generic operations, scans or kills PIDs, or
-stages beneath `/tmp`. Grow converges from the exact old or target size and returns closed
-modified/durability-uncertain/outcome-unknown evidence. Provisioning is not implemented.
+stages beneath `/tmp`. All guest reads and writes remain descriptor-bound beneath the admitted mounted root. Fixed
+`/usr/bin/blkid` probing has a five-second cap and the fixed ext-family/Btrfs grow tools have a five-minute cap, with an
+earlier caller deadline always winning. Ext4/Btrfs evidence proves convergence from the exact old or target size; the
+adapter returns closed modified/durability-uncertain/outcome-unknown evidence.
 
-The first provisioning subset is fixed host-side hostname/hosts, DNS, existing-account SSH/sudo, fixed SSH service,
-embedded-agent, and fstab content. Missing-user creation, unpinned cloud-init copying, deblob/package commands,
-recursive guest cleanup, guest-code execution, partition-table growth, shrink, conversion, and replacement remain
-unsupported. No public cutover may silently reduce behavior: an explicit scope decision must accept each reduction or
-keep the old public workflow until a safe typed replacement exists.
+The implemented provisioning subset is fixed host-side hostname/hosts, DNS, existing-account SSH/sudo, fixed SSH
+service, embedded agent, and fstab content. It persists the root-only agent token at `/etc/mvmctl/agent.token` and
+enables exactly one admitted init system: systemd through `sysinit.target`, or OpenRC through its default runlevel.
+Missing-user creation, unpinned cloud-init copying, deblob/package commands, recursive guest cleanup, guest-code
+execution, partition-table growth, shrink, conversion, and replacement remain unsupported. No public cutover may
+silently reduce behavior: an explicit scope decision must accept each reduction or keep the old public workflow until
+a safe typed replacement exists.
 
-These remain inactive foundations and accepted design. The canonical resource locks and private service adapter are
-implemented, and the read-only inspection effect exists, but no production `Server` constructor activates them. There
-is no provisioning effect, handler, dispatcher entry, live-kernel qualification, backend/public cutover, or
-legacy-route removal, and no newly reachable privileged mount effect. The current path still uses
+These remain inactive foundations. The canonical resource locks, private service adapter, read-only inspection effect,
+and fixed `ProvisionVM` effect exist, but no production `Server` constructor activates them. There is no receiver
+handler, dispatcher entry, live-kernel qualification, backend/public cutover, or legacy-route removal, and no newly
+reachable privileged mount effect. The current path still uses
 `mvm run provision`, raw wire operations and sudo, including arbitrary unmount/cleanup. Task 13 proceeds in the slices
 recorded in `tasks/todo.md`; no LoopMount action can enter the final marker-only sudo policy before cutover and legacy
 removal.

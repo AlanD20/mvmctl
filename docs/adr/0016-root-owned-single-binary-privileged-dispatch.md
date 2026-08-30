@@ -390,8 +390,9 @@ contains exactly the named `ProvisionVM` and `InspectImage` methods, the private
 `Acquire(context.Context, Caller, rootfsSelection) (rootfsResourceLockLease, error)`. A private service adapter now
 implements the lock seam through the separate `authorityfs` LoopMount UID and canonical VM/image lock capabilities.
 Provisioning and inspection validate the rootfs effect seam, while optimization validates only its separate effect
-seam; every action also validates the shared rootfs authority and resource-lock dependencies. There is no concrete
-production mount/effect adapter or `Server` constructor, so the entire coordinator remains inert.
+seam; every action also validates the shared rootfs authority and resource-lock dependencies. Private concrete
+`ProvisionVM` and `InspectImage` adapters now exist, but neither factory is referenced by a production `Server`
+constructor, so the entire coordinator remains inert.
 
 Each operation validates its closed request and authenticated caller before acquiring authority. It then acquires the
 resource-lock lease, admits the fixed rootfs, invokes the named effect, validates the request-bound result, and unwinds
@@ -410,13 +411,13 @@ against the admitted request before publication.
 
 A VM resize replay may observe either the exact request's pre-grow rootfs size or its exact nonzero target size. The
 rootfs authority admits only those two stable values, rejects any unrelated third size before effect invocation, and
-records the actually observed size on the private rootfs lease delivered to `rootfsEffects.ProvisionVM`. This lets a
-future concrete effect distinguish a first grow from an already-converged replay without reopening a path or trusting
+records the actually observed size on the private rootfs lease delivered to `rootfsEffects.ProvisionVM`. The implemented
+adapter uses it to distinguish a first grow from an already-converged replay without reopening a path or trusting
 caller-reported post-effect state.
 
-The accepted effect seam is now split without activating production behavior. A future concrete descriptor-consuming
-adapter can implement only `rootfsEffects.ProvisionVM` and `rootfsEffects.InspectImage`; `imageOptimizeEffects` remains
-a separate private seam containing only `OptimizeImage`. The optimize seam has no production implementation or
+The accepted effect seam is split without activating production behavior. The implemented descriptor-consuming
+adapters satisfy only `rootfsEffects.ProvisionVM` and `rootfsEffects.InspectImage`; `imageOptimizeEffects` remains a
+separate private seam containing only `OptimizeImage`. The optimize seam has no production implementation or
 construction, receiver handler, or dispatcher registration and cannot gain them until durable shrink and image
 replacement replay authority exists. Keeping the named optimize client and protocol types does not activate that
 capability, and the complete `Server` remains inert.
@@ -482,9 +483,10 @@ raw-plus-partition ambiguity, and missing or multiple matches fail closed.
 
 The implemented receiver derives partition candidates only from fixed `/sys/class/block`, bounds directory admission
 to 65,536 entries and 16 partitions, retains exact device capabilities, and proves stable partition membership before
-selection. Filesystem probing invokes only fixed `/usr/bin/blkid` with a fixed argv/environment, 32-byte stdout and
-512-byte stderr ceilings, exact accepted exit states, and pre/post block-identity revalidation. The selected source is
-pointer-bound to that exact probe and exposes no path or descriptor accessor.
+selection. Filesystem probing invokes only fixed `/usr/bin/blkid` with a fixed argv/environment, a five-second cap with
+any earlier caller deadline winning, 32-byte stdout and 512-byte stderr ceilings, exact accepted exit states, and
+pre/post block-identity revalidation. The selected source is pointer-bound to that exact probe and exposes no path or
+descriptor accessor.
 
 The private inert loop-device kernel contract admits only the fixed `/dev/loop-control` path with exact character-device
 major `10` and minor `237`. It derives `/dev/loop<N>` only when `N` is a 20-bit index from `0` through `2^20-1`, then
@@ -513,9 +515,9 @@ partitions, loop, mountpoint, and image authority in reverse. `unchanged` requir
 remain stable and cleanup to succeed; uncertainty is `outcome_unknown`, with the primary `DomainError` preserved and
 cleanup evidence bounded. The factory remains unreferenced because the short-lived handler must exit rather than
 return its unshared OS thread to the Go runtime. Production `Server` construction, receiver handlers, dispatcher
-registration, live-kernel qualification, provisioning, and activation remain future work. The future grow effect
-supports a raw filesystem or a
-partition whose already-admitted capacity reaches the target; rewriting MBR or GPT is outside this capability.
+registration, live-kernel qualification, and activation remain future work. The implemented grow effect supports a raw
+filesystem or a partition whose already-admitted capacity reaches the target; rewriting MBR or GPT is outside this
+capability.
 
 Provisioning writes only receiver-generated, fixed-purpose content through the mounted-root descriptor. The accepted
 first subset is hostname and hosts content, DNS content, SSH keys and sudo policy for root or an already-existing parsed
@@ -524,11 +526,13 @@ fstab rewrite. Reads and replacements are bounded, no-follow, descriptor-relativ
 enablement or key generation that requires guest code is deferred to guest boot; root never executes it on the host.
 `InspectImage` mounts read-only with `nosuid`, `nodev`, and `noexec`, and reads only bounded fixed OS-release leaves.
 
-A grow admitted at the old size truncates the retained descriptor to the exact target, syncs it, then grows the selected
-filesystem. A replay admitted at the target never truncates again: it probes filesystem capacity and either reports
-convergence or completes the interrupted filesystem grow. Any third backing-file size is rejected by the existing
-authority before effects. Fixed-content writes are idempotent, so the same request converges after a crash without a
-caller-path reopen.
+A grow admitted at the old size truncates the retained descriptor to the exact target, syncs it, then grows the admitted
+ext-family filesystem through fixed `e2fsck`/`resize2fs` or Btrfs through fixed `btrfs filesystem resize`, with
+ext4/Btrfs convergence evidence. Grow-tool execution has a five-minute cap, with any earlier caller deadline winning. A
+replay admitted at the target never truncates again: it probes filesystem
+capacity and either reports convergence or completes the interrupted filesystem grow. Any third backing-file size is
+rejected by the existing authority before effects. Fixed-content writes are idempotent, so the same request converges
+after a crash without a caller-path reopen.
 
 Before mutation, failure state is `unchanged`. A known mutation followed by leaf, directory, filesystem, unmount,
 detach, and backing-file durability is `modified`. Failure to prove final durability after a known mutation is
@@ -536,19 +540,21 @@ detach, and backing-file durability is `modified`. Failure to prove final durabi
 `outcome unknown`. Effect cleanup precedes rootfs-lease and lock release and is cancellation-independent. Private mount
 namespace teardown and loop autoclear contain a receiver crash; cleanup never guesses a host mount or kills a process.
 
-The first adapter deliberately does not preserve missing-user creation, cloud-init directory copying without its own
-pinned capability, package-manager or deblob commands, recursive guest cleanup, guest host-key generation, arbitrary
-file/copy/command operations, custom shells, partition-table growth, shrink, conversion, or image replacement. These are
-public-cutover blockers, not permission to silently drop behavior. An explicit scope decision must either accept each
-user-visible reduction or defer cutover until a safe typed replacement exists.
+The adapter persists the canonical agent token only at root-owned mode-`0600` `/etc/mvmctl/agent.token` beneath a
+root-owned mode-`0700` `/etc/mvmctl`, and enables exactly one admitted init system: systemd through `sysinit.target`, or
+OpenRC through its default runlevel. It deliberately does not preserve missing-user creation, cloud-init directory
+copying without its own pinned capability, package-manager or deblob commands, recursive guest cleanup, guest host-key
+generation, arbitrary file/copy/command operations, custom shells, partition-table growth, shrink, conversion, or image
+replacement. These are public-cutover blockers, not permission to silently drop behavior. An explicit scope decision
+must either accept each user-visible reduction or defer cutover until a safe typed replacement exists.
 
-This section combines implemented inactive authority and selection-policy foundations with accepted future effect
-design, not current runtime behavior. The shared cycle-free authority module now has separate Jailer and LoopMount
+This section records implemented inactive authority, selection-policy, inspection, and provisioning foundations, not
+current runtime behavior. The shared cycle-free authority module now has separate Jailer and LoopMount
 capability families, the private LoopMount service adapter implements the coordinator's canonical resource-lock seam,
 the deterministic mount-source policy remains pathless, and the pure loop contract, attach/release capability, bounded
-partition/probe admission, and read-only inspection adapter are implemented but unused. No production constructor
-activates that `Server`; no LoopMount receiver handler or dispatcher action is registered; provisioning remains
-unimplemented; and the backend/public path still uses `mvm run provision`, raw wire operations and sudo, arbitrary
+partition/probe admission, and read-only inspection and `ProvisionVM` adapters are implemented but unused. No production
+constructor activates that `Server`; no LoopMount receiver handler or dispatcher action is registered; and the
+backend/public path still uses `mvm run provision`, raw wire operations and sudo, arbitrary
 unmount, and PID-killing cleanup. No live-kernel qualification or public privileged mount effect follows from the inert
 adapter. The legacy `Provisioner`, `Op`, path protocol, and cleanup functions must not be wrapped by the new adapter.
 
@@ -1130,8 +1136,12 @@ creation, creation faults and descriptor cleanup, scans, lock placement, copied-
 errors, cancellation, and concurrent acquire/release. Capability values share pointer-held state, making checked
 release exactly once and idempotent even after a value copy. This implementation creates no `/run/mvmctl/runtime`
 tree and activates no public action. The separate implemented LoopMount UID/VM/image lock family and its private service
-adapter remain inert as described above; the runtime subtree and the network/firewall consumers in the diagram remain
-target design.
+adapter remain inert as described above. A separate closed Network family now backs the private managed-network
+registration authority's global-index and per-network locks. Its strict schema-1 record/codec/store persists only owner,
+network, boot, and derived bridge identity beneath `/var/lib/mvmctl/networks/<uid>` with atomic no-replace publication,
+post-rename authority evidence, and exact reverse cached close-once cleanup. That entry point is private and unreferenced:
+it does not receive the Jailer VM lock or activate topology, namespace, link, TAP, route, firewall, runtime-subtree, or
+public behavior. Those consumers in the diagram remain target design.
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and
@@ -1350,6 +1360,7 @@ State is split by authority and lifetime:
 | User DB and VM artifacts | Existing `MVM_CACHE_DIR`, normally `~/.cache/mvmctl` | User-owned, persistent |
 | Trusted release pairs and manifests | `/var/lib/mvmctl/binaries/<architecture>/<version>` | Root-owned, persistent |
 | Privileged instance ownership/release records | `/var/lib/mvmctl/instances/<uid>` | Root-owned, persistent, minimal |
+| Managed-network owner/bridge identity records | `/var/lib/mvmctl/networks/<uid>` | Root-owned, persistent, minimal; not VM-topology authority |
 | Jailer chroot directories | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
 | Per-VM locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700`, ephemeral; no persistent mount-namespace handles |
 | VM sockets and PID mirrors | `/run/mvmctl/runtime/<uid>/<vm-id>` | Root-controlled parent, caller-owned `0700` VM directory, ephemeral and non-authoritative |

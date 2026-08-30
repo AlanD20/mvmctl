@@ -88,6 +88,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   application, namespace execution, privileged action, public policy cutover, legacy `nft` CLI removal, or L2
   qualification. It therefore provides no kernel-application, atomicity, or release-readiness evidence.
 
+#### Persistent managed-network authority foundation
+- Added a private strict schema-1 managed-network record, exact codec, and descriptor-relative store. Root persists only
+  owner UID, network ID, current boot ID, and exact derived bridge name/ifindex/host-namespace identity at
+  `/var/lib/mvmctl/networks/<uid>/<network-id>.json`; managed directories are root-owned mode `0700` and one-link records
+  are root-owned mode `0600` with a 4-KiB ceiling.
+- Atomic no-replace publication preserves created-record and durability-uncertain evidence after rename. A closed
+  `authorityfs` Network family and private registration authority serialize the global network-ID index and each
+  network, deny foreign or prior-boot claims, admit an exact same-owner/current-boot bridge replay, and release all
+  retained authorities in exact reverse order with pointer-shared cached close-once cleanup.
+- This foundation is inert. The registration entry point is private and unreferenced, does not receive the Jailer VM
+  lock, and creates no persistent VM topology, namespace, link, TAP, route, firewall state, privileged action, or public
+  behavior.
+
 #### Per-VM network topology transaction foundation
 - Added a private root-side transaction that derives the shared managed bridge from owner/network identity and every
   VM link and namespace handle from owner/VM identity. It requires the earlier VM-lock capability, retains the network
@@ -97,9 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   topology authority. Building, cleaning, cleaned, missing-lease, and partial-rollback states remain unavailable even
   when they retain stale identity fields. Lock-acquisition `DomainError` identity/details survive rollback, with
   `cleanup_required=true` added only when retained authority still needs cleanup.
-- The foundation remains intentionally inactive until the concrete root network records/locker, netlink effects,
-  nftables and link-activation stages, Jailer `--netns` handoff, and persistent lifecycle integration are implemented
-  and qualified.
+- The foundation remains intentionally inactive until the applicable Jailer VM-lock lease is transferred into network
+  registration/topology and the netlink effects, nftables and link-activation stages, Jailer `--netns` handoff,
+  persistent VM-topology integration, and qualification are implemented.
 
 #### Typed LoopMount privilege foundations
 - Added named `ProvisionVM`, `InspectImage`, and `OptimizeImage` clients with fixed actions and closed VM/image request,
@@ -144,9 +157,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unmount, source, partition, loop, and backing-image authority in reverse order, preserves the primary structured
   error with bounded cleanup evidence, and returns `unchanged` only after exact admitted/statx stability; uncertainty
   returns `outcome_unknown`.
-- The inspection factory remains intentionally unreferenced. No production `Server`, receiver handler, dispatcher
-  registration, provisioning effect, live-kernel qualification, backend/public cutover, or privileged action activates
-  this adapter yet.
+- Added a private inert `ProvisionVM` adapter. All guest reads and writes remain descriptor-bound beneath the admitted
+  mounted root. Its fixed content set covers hostname/hosts, DNS, existing-account SSH/sudo, fixed SSH service, embedded
+  agent, fstab, root-only persistent `/etc/mvmctl/agent.token`, and exactly one admitted systemd `sysinit.target` or
+  OpenRC default-runlevel enablement. Fixed ext-family/Btrfs grow tools have ext4/Btrfs convergence evidence from the
+  exact old or target backing size; `/usr/bin/blkid` is capped at five seconds and grow tools at five minutes, with any
+  earlier caller deadline winning. Reverse cleanup preserves the closed mutation, durability-uncertain, and
+  unknown-outcome evidence.
+- The inspection and provisioning factories remain intentionally unreferenced. No production `Server`, receiver
+  handler, dispatcher registration, live-kernel qualification, backend/public cutover, or privileged action activates
+  either adapter yet.
 - Added an inactive private receiver-transaction foundation with two action-specific effect seams:
   `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while private `imageOptimizeEffects` contains only
   `OptimizeImage`. Each action validates only its effect dependency plus the shared rootfs authority and per-resource
@@ -159,8 +179,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   partially acquired authority for cleanup, and releases the lock before its parent capability exactly once. No
   production `Server` constructor uses the adapter yet.
 - This is foundation only. The optimize seam has no production implementation or construction, receiver handler, or
-  dispatcher registration. The entire `Server` remains inert: the concrete read-only inspection adapter is
-  deliberately unreferenced, while no provisioning effect, production constructor, receiver handler, dispatcher entry,
+  dispatcher registration. The entire `Server` remains inert: the concrete provisioning and read-only inspection
+  adapters are deliberately unreferenced, while no production constructor, receiver handler, dispatcher entry,
   live-kernel qualification, backend/public cutover, or legacy raw-sudo removal has landed. `OptimizeImage` stays
   unregistered until durable shrink and replacement replay authority exists; `mvm run provision` and its arbitrary
   unmount/cleanup surface remain transitional release blockers.
@@ -458,14 +478,15 @@ The following items are release blockers and are intentionally not described abo
 - Make every composite instance lease pointer-shared and close-once across copies/concurrent release, with the first
   cleanup result cached. Add exact interrupted-`launching` recovery and closed `running`, `stopped`, `crashed`, and
   `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and per-VM lock.
-- Add root-owned managed-network identity and global capacity authority; user SQLite state must not authorize host-global
-  namespace, link, firewall, process, mount, cgroup, or admission decisions.
+- Transfer the Jailer VM-lock lease into the implemented root-owned managed-network registration foundation, add
+  persistent per-VM topology and global capacity authority, and activate neither through user SQLite state. User state
+  must not authorize host-global namespace, link, firewall, process, mount, cgroup, or admission decisions.
 - Carry the managed-cache locator and base launch selection through the privileged protocol, bind the cache identity in
   the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
   private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
   outputs, and image provisioning.
-- Add closed, named `internal/lib/authorityfs` capabilities for network and firewall before those consumers use the
-  shared tree; they must not reuse the implemented Jailer or LoopMount capability families or accept generic paths,
+- Add a closed, named `internal/lib/authorityfs` capability for firewall before that consumer uses the shared tree; it
+  must not reuse the implemented Jailer, LoopMount, or Network capability families or accept generic paths,
   descriptors, or lock names. Then create the separate caller-owned socket/PID output directories beneath
   `/run/mvmctl/runtime`; stop
   mounting the whole cache VM directory, pin persistent config/output leaves individually, truncate enabled `0600`
@@ -478,9 +499,10 @@ The following items are release blockers and are intentionally not described abo
 - Switch the public binary API from its legacy downloader/path mutation to the registered typed trusted-release
   install/remove actions; complete the aarch64 archive audit and CLI-level qualification. The implemented atomic
   authority is not yet reachable from public `mvm bin` operations.
-- Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; complete the
-  LoopMount provisioning effect, receiver handlers, live-kernel qualification, and backend cutover behind its typed
-  inactive authority, transaction-lock, and read-only inspection foundations; and remove the public root
+- Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; activate the
+  implemented LoopMount provisioning/inspection effects through exact receiver handlers, complete live-kernel
+  qualification and backend cutover behind their typed inactive authority and transaction-lock foundations, and remove
+  the public root
   `mvm run jailer` and `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.

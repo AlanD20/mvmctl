@@ -502,7 +502,13 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   a classified lock-acquisition `DomainError` keeps its code/class/entity/details, and failed lock cleanup adds exact
   `cleanup_required` recovery detail without replacing it. No production locker/effect adapter or live-topology handoff
   is wired yet.
-- [ ] Persist minimal root-owned network identity and serialize network/VM topology mutations.
+- [x] Implement the strict schema-1 root-owned managed-network record/codec/store and private registration authority.
+  Persist only owner, network, current boot, and exact derived bridge identity beneath
+  `/var/lib/mvmctl/networks/<uid>`; serialize global claims and each network; preserve post-rename authority evidence;
+  and release acquired capabilities in exact reverse order with cached close-once cleanup. The registration entry point
+  remains private and unreferenced.
+- [ ] Transfer the applicable Jailer VM-lock lease into network registration and serialize each topology mutation under
+  both VM and network authority. No current network record authorizes a VM topology.
 - [ ] Acquire the network lock only after the applicable VM launching/active lease; the full order is
   `release -> global index -> VM -> network -> firewall`.
 - [ ] Derive namespace/interface names from UID and immutable IDs; accept no raw name, path, or `ip` argv.
@@ -596,11 +602,11 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, inactive receiver-transaction
 foundations, deterministic rootfs mount-source policy, pure loop-device contract, inert attach/release capability,
-bounded partition discovery/fixed-tool filesystem probing, and inert read-only image-inspection adapter are implemented;
-the shared authority filesystem, its separate Jailer and LoopMount capability families, canonical VM/image locks, and
-the private service lock adapter are implemented and reviewed; provisioning, production `Server` activation, receiver
-registration, live-kernel qualification, backend/public cutover, legacy removal, and host-mutation migration remain
-pending
+bounded partition discovery/fixed-tool filesystem probing, and private read-only inspection and `ProvisionVM` adapters
+are implemented; the shared authority filesystem, its separate Jailer and LoopMount capability families, canonical
+VM/image locks, and the private service lock adapter are implemented and reviewed; both effect factories remain
+unreferenced, while production `Server` activation, receiver registration, live-kernel qualification, backend/public
+cutover, legacy removal, and host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -641,12 +647,12 @@ pending
     UID capability, maps only the closed VM/image selection to canonical keys, retains partial acquisition for cleanup,
     maps cancellation/deadline acquisition failures as retryable, and releases lock before parent authority exactly
     once. No production `Server` constructor, receiver handler, dispatcher entry, backend/public path, or privileged
-    mount effect uses this adapter. Network, firewall, and `/run/mvmctl/runtime` consumers remain pending.
+    mount effect uses this adapter. Network topology, firewall, and `/run/mvmctl/runtime` consumers remain pending.
   - [x] Split the inactive effect authority so `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while
     private `imageOptimizeEffects` contains only `OptimizeImage`, with dependency validation scoped to each action. The
     optimize seam has no production implementation or construction, receiver handler, or dispatcher registration, and
     the entire `Server` remains inert.
-  - [ ] Implement the private mount/loop foundation. Use a private-propagation mount namespace, direct loop, mount,
+  - [x] Implement the private mount/loop foundation. Use a private-propagation mount namespace, direct loop, mount,
     unmount, descriptor, sync, and detach syscalls, bounded partition discovery, autoclear, and read-only inspection.
     Permit only fixed host filesystem probes/grow tools; reject caller paths, `/proc` FD passthrough, chroot, guest
     executables, generic operations, PID scan/kill, and `/tmp` workspaces.
@@ -677,9 +683,13 @@ pending
     fixed OS-release leaves, prove the admitted/statx snapshot stable, and unwind in checked reverse order. Return only
     unchanged or outcome-unknown evidence while preserving the primary error. Its factory remains unreferenced: no
     production `Server`, receiver handler, dispatcher registration, live-kernel QA, or public cutover activates it.
-  - [ ] Implement fixed `ProvisionVM` content and grow convergence. Support only hostname/hosts, DNS, existing-account
-    SSH/sudo, fixed SSH service, embedded-agent, and fstab content. Converge grow from the exact old or target size and
-    prove modified, durability-uncertain, and outcome-unknown mappings plus cancellation-independent cleanup.
+  - [x] Implement the private inert `ProvisionVM` adapter with descriptor-bound guest reads/writes; fixed
+    hostname/hosts, DNS, existing-account SSH/sudo, SSH service, embedded-agent, and fstab content; root-only persistent
+    `/etc/mvmctl/agent.token`; and exactly one admitted systemd `sysinit.target` or OpenRC default-runlevel enablement.
+    Use only fixed ext-family/Btrfs grow tools, prove ext4/Btrfs convergence from the exact old or target size, cap fixed
+    `/usr/bin/blkid` at five seconds and grow tools at five minutes with an earlier caller deadline winning, and preserve
+    closed mutation/durability outcomes plus cancellation-independent reverse cleanup. Its factory remains unreferenced;
+    no receiver or dispatcher activates it.
   - [ ] Add only provision and inspect receiver handlers and exact central-dispatch entries for the already-separated
     `rootfsEffects` seam. `OptimizeImage` remains without a production implementation or construction, handler, or
     registration until durable shrink and replacement replay authority exists.
