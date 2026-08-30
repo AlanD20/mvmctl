@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
 > authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation, and typed
-> LoopMount client/protocol and rootfs-authority foundations described below are implemented. The mandatory per-VM
-> network namespace,
+> LoopMount client/protocol, rootfs-authority, and receiver-transaction foundations described below are implemented.
+> The mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final
 > marker-only sudo policy, and remaining typed privileged operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
@@ -82,9 +82,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Caller ownership, safe modes, one-link regular-file identity, exact bounded size, local-filesystem topology, mount
   identity, no-cross-mount descendant traversal, and reverse checked cleanup are enforced before a lease can become
   authority. L1 tests deterministically replace every caller-owned ancestor and leaf immediately before and after open.
-- These remain inactive foundations. No LoopMount effect adapter, per-resource transaction lock, receiver handler or
-  dispatcher entry, backend/public cutover, or legacy raw-sudo removal has landed; `mvm run provision` and its
-  arbitrary unmount/cleanup surface remain transitional release blockers.
+- Added an inactive private receiver-transaction foundation with only the named `ProvisionVM`, `InspectImage`, and
+  `OptimizeImage` effect methods and a per-resource lock lease seam. It unwinds effect cleanup, rootfs authority, then
+  the lock with cancellation detached; derives closed mutation, replacement, durability, and unknown-outcome evidence;
+  and preserves primary structured errors through bounded cleanup diagnostics. VM grow replay admits only the exact
+  old or target size and hands the stable actually admitted size to the effect seam.
+- This is foundation only. No concrete LoopMount effect adapter or resource lock, receiver handler, dispatcher entry,
+  backend/public cutover, or legacy raw-sudo removal has landed. `OptimizeImage` stays unregistered until durable shrink
+  and replacement replay authority exists; `mvm run provision` and its arbitrary unmount/cleanup surface remain
+  transitional release blockers.
 
 #### Root-owned single-binary installation
 - Added the exact administrator bootstrap command `sudo <trusted-mvm-binary> host install-system`, which installs the
@@ -375,9 +381,9 @@ The following items are release blockers and are intentionally not described abo
   install/remove actions; complete the aarch64 archive audit and CLI-level qualification. The implemented atomic
   authority is not yet reachable from public `mvm bin` operations.
 - Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; complete the
-  LoopMount descriptor-consuming effect adapter, transaction locks, receiver handlers, and backend cutover behind its
-  typed client/protocol and rootfs-authority foundations; and remove the public root `mvm run jailer` and
-  `mvm run provision` entry points.
+  concrete LoopMount descriptor-consuming effect adapter and transaction locks, receiver handlers, and backend cutover
+  behind its typed inactive foundations; and remove the public root `mvm run jailer` and `mvm run provision` entry
+  points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
 - Derive the nftables generation digest inside the compiler and add the root-owned global firewall lock plus durable

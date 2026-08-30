@@ -382,11 +382,40 @@ through checked, cancellation-independent cleanup while preserving the primary `
 real-filesystem tests exchange every caller-owned cache/resource ancestor and leaf immediately before and after its
 open; a request can only fail closed or retain the originally admitted rootfs, never the attacker object.
 
-No LoopMount receiver handler or central-switch registration exists yet. There is also no LoopMount-specific
-descriptor-consuming effect adapter, per-resource transaction lock, response/rollback transaction, backend/public API
-cutover, or removal of the legacy `mvm run provision`, raw sudo/wire operation, arbitrary unmount, and PID-killing
-cleanup paths. The typed foundations are not permission to adapt a legacy resource path or operation into the new
-client; Task 13 must complete the receiver transaction and legacy removal as one migration.
+The private inactive `Server` transaction foundation depends on exactly two narrow seams. `rootfsEffects` contains only
+the named `ProvisionVM`, `InspectImage`, and `OptimizeImage` methods, each consuming the retained private rootfs lease,
+closed filesystem, and action-specific plan where applicable. `rootfsResourceLocks` contains only
+`Acquire(context.Context, Caller, rootfsSelection) (rootfsResourceLockLease, error)`, and its lease exposes only checked
+`Release(context.Context)`. This is a per-resource lock seam, not a concrete production lock implementation. There is
+also no production effect adapter or `Server` constructor.
+
+Each operation validates its closed request and authenticated caller before acquiring authority. It then acquires the
+resource-lock lease, admits the fixed rootfs, invokes the named effect, validates the request-bound result, and unwinds
+the action-specific effect cleanup lease, rootfs lease, and resource-lock lease in that exact order. Every cleanup uses
+`context.WithoutCancel`. A partial lock acquisition that returns both a lease and an error still releases that lease
+exactly once. Cleanup errors add bounded action-specific details without changing the primary `DomainError` code,
+class, entity, operation, message, or existing details.
+
+Effect code cannot supply generic mutation booleans or an arbitrary details map. VM provisioning has closed
+`unchanged`, `modified`, `modified durability uncertain`, and `outcome unknown` states; image inspection has only
+`unchanged` and `outcome unknown`; image optimization has closed unchanged, modified, image-replaced, corresponding
+durability-uncertain, and outcome-unknown states. The coordinator derives the exact Boolean error details
+`rootfs_modified`, `image_replaced`, `durability_uncertain`, and `outcome_unknown`. A missing, invalid, uncertain, or
+otherwise non-success state fails closed even when result fields look valid, and every post-effect result is validated
+against the admitted request before publication.
+
+A VM resize replay may observe either the exact request's pre-grow rootfs size or its exact nonzero target size. The
+rootfs authority admits only those two stable values, rejects any unrelated third size before effect invocation, and
+records the actually observed size on the private rootfs lease delivered to `rootfsEffects.ProvisionVM`. This lets a
+future concrete effect distinguish a first grow from an already-converged replay without reopening a path or trusting
+caller-reported post-effect state.
+
+No LoopMount receiver handler or central-switch registration exists yet. `OptimizeImage` is explicitly barred from
+registration until durable shrink and replacement replay authority is implemented. There is also no concrete
+descriptor-consuming effect adapter or resource lock, backend/public API cutover, or removal of the legacy
+`mvm run provision`, raw sudo/wire operation, arbitrary unmount, and PID-killing cleanup paths. The typed foundations
+are not permission to adapt a legacy resource path or operation into the new client; Task 13 remains pending and must
+finish receiver wiring and legacy removal as one migration.
 
 ### Release trust
 

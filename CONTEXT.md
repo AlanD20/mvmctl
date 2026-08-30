@@ -329,11 +329,24 @@ releases every descriptor in checked reverse order with cancellation-independent
 replace each caller-owned ancestor and leaf immediately before and after open; admission either fails closed or retains
 the original object rather than attacker content.
 
-This is not the active LoopMount receiver path. None of the three actions is registered in the privileged dispatcher,
-there is no descriptor-consuming effect adapter, per-resource transaction lock, receiver handler, or response/rollback
-transaction, and the public/backend path still uses `mvm run provision`, caller-shaped raw wire operations, sudo, and
-the legacy arbitrary cleanup/unmount surface. Task 13 must finish that receiver transaction, cut over callers, and
-remove those legacy routes atomically.
+An inactive private `Server` now coordinates each admitted operation through the exact narrow `rootfsEffects` methods
+`ProvisionVM`, `InspectImage`, and `OptimizeImage`. It validates the closed request and authenticated caller, acquires a
+resource lease through the private `rootfsResourceLocks` seam, admits the fixed rootfs, invokes the corresponding
+effect, and validates the request-bound result. This adds only the per-resource lock seam: there is no concrete lock
+implementation or production effect adapter, and `Server` has no production constructor.
+
+The coordinator requires an action-specific effect cleanup capability and unwinds effect cleanup, rootfs authority,
+then the resource lock, each with `context.WithoutCancel`. Effect outcomes use closed action-specific states to derive
+the mandatory `rootfs_modified`, `image_replaced`, `durability_uncertain`, and `outcome_unknown` error evidence;
+invalid or missing state cannot authorize success. Cleanup failures add bounded details without replacing the primary
+`DomainError` identity.
+
+VM grow replay admission accepts only the stable pre-grow size or the exact requested target size, rejects any third
+size before an effect begins, and retains the actually admitted size on the rootfs lease handed to the narrow effect
+seam. Image optimization remains blocked from privileged registration until durable shrink and replacement replay
+authority exists. This is not the active LoopMount receiver path: there is no concrete adapter or lock, privileged
+handler, dispatcher entry, backend/public cutover, or removal of `mvm run provision`, caller-shaped raw wire/sudo, and
+the legacy arbitrary cleanup/unmount surface. Task 13 remains pending.
 
 **Performance:** GuestFS is 3–5x slower than LoopMount for VM creation (9–14s vs 2–5s wall-clock, sequential). Under parallel load GuestFS degrades further due to QEMU lock contention. See `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` for full benchmark data.
 

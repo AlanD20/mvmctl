@@ -55,7 +55,10 @@ continue without silently deleting it.
   VM resize, bounded typed values, and strict process-start/response-EOF authority. A private rootfs authority pins the
   caller-owned cache and fixed VM/image rootfs through retained descriptors, enforces local-filesystem, identity, mode,
   size, and no-cross-mount policies, and has deterministic before/after-open replacement-race evidence for every
-  caller-owned component. No effect adapter, per-resource lock, receiver action, or public/backend cutover is wired yet.
+  caller-owned component. An inactive private server now adds exact action-specific effect and per-resource lock seams,
+  ordered cancellation-independent cleanup, closed mutation/durability evidence, and old-or-target VM grow replay
+  admission with actual admitted-size handoff. No concrete effect adapter or lock, receiver handler, dispatcher entry,
+  public/backend cutover, or legacy-route removal is wired yet.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -617,11 +620,27 @@ bounded size, and action-specific access. It retains the image staging descripto
 replacement, closes the complete chain in checked reverse order, and has deterministic before/after-open replacement
 tests for every caller-owned component.
 
-These are still inactive foundations. The privileged receiver has no descriptor-consuming effect adapter,
-per-resource transaction lock, LoopMount handler, response/rollback transaction, or dispatcher entry. The current
-backend/public path still uses `mvm run provision`, raw wire operations and sudo, including the arbitrary
-unmount/cleanup surface. Task 13 must complete the receiver transaction, cut over all callers, and remove the legacy
-route before any LoopMount action can enter the final marker-only sudo policy.
+The private inactive `Server` transaction foundation uses exactly the named `rootfsEffects.ProvisionVM`,
+`InspectImage`, and `OptimizeImage` methods plus the narrow `rootfsResourceLocks.Acquire` lease seam. It validates the
+request and caller before authority acquisition, retains a partially acquired lock lease for checked release, admits
+the fixed rootfs, invokes one effect, and validates the request-bound result. This is only a per-resource lock seam;
+there is no concrete production lock or effect adapter and no production `Server` constructor.
+
+Every action requires its own effect cleanup capability and unwinds effect cleanup, rootfs authority, then resource
+lock with `context.WithoutCancel`. Closed action-specific effect states derive mandatory `rootfs_modified`,
+`image_replaced`, `durability_uncertain`, and `outcome_unknown` evidence; missing, invalid, or uncertain states cannot
+authorize success. Cleanup details are bounded and preserve the primary `DomainError` identity.
+
+For a requested VM grow, admission accepts only the exact pre-grow size or exact target size. It rejects a third size
+before effect invocation and hands the stable actually admitted size to `rootfsEffects.ProvisionVM` through the private
+rootfs lease, allowing a future effect to distinguish first execution from a converged replay. `OptimizeImage` remains
+blocked from registration until durable shrink and replacement replay authority is implemented.
+
+These remain inactive foundations. The privileged receiver has no concrete descriptor-consuming effect adapter or
+resource lock, LoopMount handler, dispatcher entry, backend/public cutover, or legacy-route removal. The current path
+still uses `mvm run provision`, raw wire operations and sudo, including the arbitrary unmount/cleanup surface. Task 13
+remains pending and must finish receiver wiring, cut over all callers, and remove the legacy route before any LoopMount
+action can enter the final marker-only sudo policy.
 
 ### Daemonless status reconciliation and relaunch parity
 

@@ -57,8 +57,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 
 **Owner:** engineer
 **Status:** Shared codec, caller transport, and fd-0 receiver implemented; trusted-release actions registered;
-LoopMount client/protocol and private rootfs-authority foundations implemented without receiver registration; remaining
-capabilities stay pending
+LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction foundations implemented without
+receiver registration; remaining capabilities stay pending
 **Dependencies:** Task 1
 
 - [x] Reserved marker selected before Cobra and application initialization.
@@ -549,8 +549,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 13: Migrate loopmount and supported host mutations
 
 **Owner:** engineer
-**Status:** Typed LoopMount client/protocol and private rootfs-authority foundations implemented; effect adapter,
-receiver registration, legacy removal, and host-mutation migration pending
+**Status:** Pending — typed LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction
+foundations are implemented; concrete effect/lock implementations, receiver registration, legacy removal, and
+host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -565,8 +566,15 @@ receiver registration, legacy removal, and host-mutation migration pending
   - [x] Add private descriptor-pinned VM rootfs and image-staging leases with canonical cache traversal, fixed resource
     selection, caller ownership, stable identity/mode/size admission, local-filesystem and no-cross-mount policy,
     checked reverse cleanup, and deterministic before/after-open replacement races for every caller-owned component.
-  - [ ] Add the descriptor-consuming effect adapter, per-resource transaction lock, receiver handlers, response and
-    rollback transaction, and exact central-dispatch entries; no LoopMount action is registered yet.
+  - [x] Add the inactive private `Server` transaction coordinator with exactly the action-specific `rootfsEffects`
+    methods and `rootfsResourceLocks.Acquire` lease seam. Validate request/caller before authority; unwind effect,
+    rootfs, then lock with `context.WithoutCancel`; derive closed mutation/durability evidence; preserve the primary
+    `DomainError`; and require action-specific cleanup authority before success.
+  - [x] Admit a VM grow replay only at the exact old or target rootfs size, reject every third size before effects, and
+    hand the actually admitted stable size to `rootfsEffects.ProvisionVM` through its private lease.
+  - [ ] Implement the concrete descriptor-consuming effect adapter and concrete per-resource transaction lock, then add
+    receiver handlers and exact central-dispatch entries. `OptimizeImage` must remain unregistered until durable shrink
+    and replacement replay authority exists; no LoopMount action is registered yet.
   - [ ] Cut the production backend and public API over to those actions; the current path still sends raw wire
     operations through sudo to `mvm run provision`.
 - [ ] Remove public `mvm run provision` and arbitrary unmount behavior.
