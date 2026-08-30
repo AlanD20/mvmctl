@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
 > authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a canonical
-> generation digest, the private Jailer ephemeral-authority split, and typed
-> LoopMount client/protocol, rootfs-authority, and receiver-transaction foundations described below are implemented.
+> generation digest, the private Jailer and LoopMount ephemeral-authority capabilities, and typed
+> LoopMount client/protocol, rootfs-authority, resource-lock adapter, and receiver-transaction foundations described
+> below are implemented.
 > The mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final
 > marker-only sudo policy, and remaining typed privileged operations are not implemented yet; see
@@ -38,8 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state; checked release runs exactly once across copies, ignores cancellation, and returns the cached first cleanup
   result instead of retrying a descriptor that may have been reused. Child capabilities and acquired locks remain valid
   after their parent is released.
-- This shared module currently exposes only the named Jailer authority family. LoopMount, network, and firewall do not
-  consume it yet, and no `/run/mvmctl/runtime` output tree, public privileged action, or runtime cutover is activated.
+- Added the separate closed LoopMount UID authority and canonical VM/image lock capability beneath
+  `/run/mvmctl/authority/<uid>/loopmount`. Its empty one-link `root:root` mode-`0600`
+  `vm-<32-lowercase-hex>.lock` and `image-<64-lowercase-hex>.lock` files are exclusive, never unlinked during the boot,
+  and serialize only the same UID, resource family, and canonical identity. Reviewed L1 evidence covers exact layout,
+  unsafe-object rejection without repair, cancellation, release, contention, and unrelated-resource concurrency.
+- Network and firewall do not consume the shared authority tree yet, and no `/run/mvmctl/runtime` output tree, public
+  privileged action, or runtime cutover is activated.
 
 #### Enforced VM resource envelopes
 - Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.
@@ -113,10 +119,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the lock with cancellation detached; derives closed mutation, replacement, durability, and unknown-outcome evidence;
   and preserves primary structured errors through bounded cleanup diagnostics. VM grow replay admits only the exact
   old or target size and hands the stable actually admitted size to the effect seam.
-- This is foundation only. No concrete LoopMount effect adapter or resource lock, receiver handler, dispatcher entry,
-  backend/public cutover, or legacy raw-sudo removal has landed. `OptimizeImage` stays unregistered until durable shrink
-  and replacement replay authority exists; `mvm run provision` and its arbitrary unmount/cleanup surface remain
-  transitional release blockers.
+- Added the reviewed private service adapter for that lock seam. It derives only the authenticated caller UID and the
+  canonical VM/image key from the closed rootfs selection, maps cancellation and deadline failures as retryable, retains
+  partially acquired authority for cleanup, and releases the lock before its parent capability exactly once. No
+  production `Server` constructor uses the adapter yet.
+- This is foundation only. No concrete LoopMount mount/effect adapter, receiver handler, dispatcher entry,
+  backend/public cutover, or legacy raw-sudo removal has landed, and no privileged mount effect uses the new authority.
+  `OptimizeImage` stays unregistered until durable shrink and replacement replay authority exists; `mvm run provision`
+  and its arbitrary unmount/cleanup surface remain transitional release blockers.
 
 #### Root-owned single-binary installation
 - Added the exact administrator bootstrap command `sudo <trusted-mvm-binary> host install-system`, which installs the
@@ -396,9 +406,10 @@ The following items are release blockers and are intentionally not described abo
   the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
   private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
   outputs, and image provisioning.
-- Add closed, named `internal/lib/authorityfs` capabilities for LoopMount, network, and firewall before those consumers
-  use the shared tree; they must not reuse Jailer's capability family or accept generic paths, descriptors, or lock
-  names. Then create the separate caller-owned socket/PID output directories beneath `/run/mvmctl/runtime`; stop
+- Add closed, named `internal/lib/authorityfs` capabilities for network and firewall before those consumers use the
+  shared tree; they must not reuse the implemented Jailer or LoopMount capability families or accept generic paths,
+  descriptors, or lock names. Then create the separate caller-owned socket/PID output directories beneath
+  `/run/mvmctl/runtime`; stop
   mounting the whole cache VM directory, pin persistent config/output leaves individually, truncate enabled `0600`
   log/console/metrics files only after durable launch registration, and retain them after stop. The runtime tree is not
   implemented by the completed Jailer authority migration.
@@ -410,9 +421,9 @@ The following items are release blockers and are intentionally not described abo
   install/remove actions; complete the aarch64 archive audit and CLI-level qualification. The implemented atomic
   authority is not yet reachable from public `mvm bin` operations.
 - Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; complete the
-  concrete LoopMount descriptor-consuming effect adapter and transaction locks, receiver handlers, and backend cutover
-  behind its typed inactive foundations; and remove the public root `mvm run jailer` and `mvm run provision` entry
-  points.
+  concrete LoopMount descriptor-consuming mount/effect adapter, receiver handlers, and backend cutover behind its typed
+  inactive authority and transaction-lock foundations; and remove the public root `mvm run jailer` and
+  `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
 - Add the root-owned global firewall lock plus durable committed/applying generation record. Resolve the pinned

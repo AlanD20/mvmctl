@@ -57,8 +57,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 
 **Owner:** engineer
 **Status:** Shared codec, caller transport, and fd-0 receiver implemented; trusted-release actions registered;
-LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction foundations implemented without
-receiver registration; remaining capabilities stay pending
+LoopMount client/protocol, private rootfs authority, canonical resource locks, private lock adapter, and inactive
+receiver-transaction foundations implemented without receiver registration; remaining capabilities stay pending
 **Dependencies:** Task 1
 
 - [x] Reserved marker selected before Cobra and application initialization.
@@ -553,9 +553,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 
 **Owner:** engineer
 **Status:** Pending — typed LoopMount client/protocol, private rootfs authority, and inactive receiver-transaction
-foundations are implemented; the shared authority filesystem and its Jailer capability family are implemented; the
-LoopMount consumer capability, concrete lock/effects, receiver registration, legacy removal, and host-mutation
-migration remain pending
+foundations are implemented; the shared authority filesystem, its separate Jailer and LoopMount capability families,
+canonical VM/image locks, and the private service lock adapter are implemented and reviewed; mount/effects, `Server`
+activation, receiver registration, backend/public cutover, legacy removal, and host-mutation migration remain pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -585,12 +585,18 @@ migration remain pending
     Expose only closed Jailer, UID, and lock capabilities with canonical typed keys; share lifecycle state through
     pointers so copied values release exactly once; cache the first checked idempotent release result; preserve children
     and acquired locks across parent release; and migrate Jailer through private error-mapping adapters.
-  - [ ] Implement exclusive, never-unlinked LoopMount locks beneath the shared layout through a separate closed
+  - [x] Implement exclusive, never-unlinked LoopMount locks beneath the shared layout through a separate closed
     LoopMount `internal/lib/authorityfs` capability family. Use root-owned mode-`0600`
     `loopmount/vm-<32hex>.lock` and `loopmount/image-<64hex>.lock` leaves. Key only by authenticated UID, resource family,
     and canonical ID. Exclude cache locator, sizes, filesystem, action, and plan; inspection and optimization share the
     image lock. Prove descriptor-safe creation/admission and checked idempotent release. LoopMount must not import
-    Jailer or create a second pathname initializer; network and firewall consumers also remain pending.
+    Jailer or create a second pathname initializer. The reviewed implementation also preserves unrelated-resource
+    concurrency on one parent capability while another key is contended.
+  - [x] Bind the inactive `rootfsResourceLocks` seam through a private service adapter that opens only the authenticated
+    UID capability, maps only the closed VM/image selection to canonical keys, retains partial acquisition for cleanup,
+    maps cancellation/deadline acquisition failures as retryable, and releases lock before parent authority exactly
+    once. No production `Server` constructor, receiver handler, dispatcher entry, backend/public path, or privileged
+    mount effect uses this adapter. Network, firewall, and `/run/mvmctl/runtime` consumers remain pending.
   - [ ] Implement the private mount/loop foundation. Use a private-propagation mount namespace, direct loop, mount,
     unmount, descriptor, sync, and detach syscalls, bounded partition discovery, autoclear, and read-only inspection.
     Permit only fixed host filesystem probes/grow tools; reject caller paths, `/proc` FD passthrough, chroot, guest

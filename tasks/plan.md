@@ -38,8 +38,9 @@ continue without silently deleting it.
   `/var/lib/mvmctl/instances` remains unchanged. Existing managed objects are verified rather than repaired, with L1
   mode, symlink, concurrent-creation, creation-fault, scan, and lock evidence. The cycle-free
   `internal/lib/authorityfs` leaf module now owns the initializer and closed Jailer/UID/lock capabilities; copied values
-  share lifecycle state, and checked idempotent release caches its first result without retry. No
-  `/run/mvmctl/runtime` tree or non-Jailer consumer exists yet.
+  share lifecycle state, and checked idempotent release caches its first result without retry. Its separate LoopMount
+  family now pins authenticated UID authority and canonical VM/image locks beneath the same tree. No
+  `/run/mvmctl/runtime` tree, network/firewall consumer, or public LoopMount activation exists yet.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional
@@ -64,8 +65,9 @@ continue without silently deleting it.
   size, and no-cross-mount policies, and has deterministic before/after-open replacement-race evidence for every
   caller-owned component. An inactive private server now adds exact action-specific effect and per-resource lock seams,
   ordered cancellation-independent cleanup, closed mutation/durability evidence, and old-or-target VM grow replay
-  admission with actual admitted-size handoff. No concrete effect adapter or lock, receiver handler, dispatcher entry,
-  public/backend cutover, or legacy-route removal is wired yet.
+  admission with actual admitted-size handoff. The reviewed private lock adapter binds the seam to `authorityfs` using
+  only the authenticated caller UID and canonical VM/image identity. No concrete mount/effect adapter, production
+  `Server` constructor, receiver handler, dispatcher entry, public/backend cutover, or legacy-route removal is wired.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -95,8 +97,9 @@ Durable user state does not move wholesale to `/run` or `/var/run`. XDG state se
 
 Implementation status: `internal/lib/authorityfs` now owns the descriptor-relative initializer for exact
 `/run/mvmctl` and `/run/mvmctl/authority` modes. Jailer uses its private adapters over the module's closed index,
-release, UID, and VM-lock capabilities. The module does not create the runtime-output tree and currently exposes no
-LoopMount, network, or firewall capability; those consumers and every public activation remain pending.
+release, UID, and VM-lock capabilities. A separate LoopMount family and private service adapter now provide per-UID
+canonical VM/image locking to the inactive transaction seam. The module does not create the runtime-output tree;
+network/firewall consumers and every public activation remain pending.
 
 ### Module and layer rules
 
@@ -651,8 +654,9 @@ tests for every caller-owned component.
 The private inactive `Server` transaction foundation currently uses the named `rootfsEffects.ProvisionVM`,
 `InspectImage`, and `OptimizeImage` methods plus the narrow `rootfsResourceLocks.Acquire` lease seam. It validates the
 request and caller before authority acquisition, retains a partially acquired lock lease for checked release, admits
-the fixed rootfs, invokes one effect, and validates the request-bound result. There is no concrete production lock,
-effect adapter, or `Server` constructor.
+the fixed rootfs, invokes one effect, and validates the request-bound result. The private service adapter now provides
+the concrete resource-lock implementation over `authorityfs`, but no production constructor injects it. There is no
+concrete mount/effect adapter or `Server` activation.
 
 Every action requires its own effect cleanup capability and unwinds effect cleanup, rootfs authority, then resource
 lock with `context.WithoutCancel`. Closed action-specific effect states derive mandatory `rootfs_modified`,
@@ -668,10 +672,13 @@ The accepted implementation splits production provisioning and inspection from a
 locks use the shared privileged descriptor-safe authority layout at
 `/run/mvmctl/authority/<uid>/loopmount/{vm-<32hex>,image-<64hex>}.lock`. They are root-owned mode `0600`, keyed only by
 authenticated UID, family, and canonical ID, and never unlinked during the boot. Inspection and future optimization
-share the image lock. `internal/lib/authorityfs` now owns the top-level tree and Jailer's closed capability family.
-Before the concrete lock, add a separate closed LoopMount capability family or have the early privileged receiver pass
-an equivalent typed capability. LoopMount must not import Jailer or duplicate a pathname initializer. Its consumer
-capability remains pending.
+share the image lock. `internal/lib/authorityfs` now owns the top-level tree and separate closed Jailer and LoopMount
+families. The implemented LoopMount family pins the authenticated nonzero UID and fixed `loopmount` directory, admits
+only the canonical VM/image keys, verifies existing lock files without repair, and retains independent-resource
+concurrency even while another key is contended. Its private service adapter implements only the transaction
+coordinator's resource-lock seam, including partial-acquisition cleanup, retryable cancellation/deadline mapping, and
+lock-before-parent checked release. Review corrected an initial parent-capability serialization bug before this record
+was updated. LoopMount does not import Jailer or duplicate a pathname initializer.
 
 The concrete effect uses a private mount namespace, direct loop/mount/descriptor syscalls, and only fixed host
 filesystem probes and grow tools. It consumes the admitted rootfs descriptor directly and never reopens or passes a
@@ -685,10 +692,12 @@ recursive guest cleanup, guest-code execution, partition-table growth, shrink, c
 unsupported. No public cutover may silently reduce behavior: an explicit scope decision must accept each reduction or
 keep the old public workflow until a safe typed replacement exists.
 
-These remain inactive foundations and accepted design. There is no concrete LoopMount lock or effect, handler,
-dispatcher entry, backend/public cutover, or legacy-route removal. The current path still uses `mvm run provision`, raw
-wire operations and sudo, including arbitrary unmount/cleanup. Task 13 proceeds in the slices recorded in
-`tasks/todo.md`; no LoopMount action can enter the final marker-only sudo policy before cutover and legacy removal.
+These remain inactive foundations and accepted design. The canonical resource locks and private service adapter are
+implemented, but no production `Server` constructor activates them. There is no concrete LoopMount mount/effect,
+handler, dispatcher entry, backend/public cutover, or legacy-route removal, and no new privileged mount effect. The
+current path still uses `mvm run provision`, raw wire operations and sudo, including arbitrary unmount/cleanup. Task 13
+proceeds in the slices recorded in `tasks/todo.md`; no LoopMount action can enter the final marker-only sudo policy
+before cutover and legacy removal.
 
 ### Daemonless status reconciliation and relaunch parity
 
