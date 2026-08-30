@@ -10,7 +10,7 @@ import (
 )
 
 func TestCompileGeneration1000VMAllocationGrowthIsBounded(t *testing.T) {
-	const maximumLargeGenerationAllocations = 400_000
+	const maximumLargeGenerationAllocations = 250_000
 
 	small := largeCompatibilityIntent(250)
 	large := largeCompatibilityIntent(1000)
@@ -31,8 +31,8 @@ func TestCompileGeneration1000VMAllocationGrowthIsBounded(t *testing.T) {
 	// steps while rejecting quadratic allocation growth.
 	assert.Less(t, largeAllocations, smallAllocations*6)
 	// Rationale: A ratio-only ceiling cannot detect a large constant-factor regression in canonical digest encoding.
-	// This fixed ceiling retains substantial headroom over the reviewed compiler baseline while preventing one digest
-	// from allocating hundreds of megabytes at the representative 1,000-VM release scale.
+	// This fixed ceiling retains headroom over the reviewed digest baseline while rejecting the prior small-allocation
+	// explosion at the representative 1,000-VM release scale.
 	assert.Less(t, largeAllocations, float64(maximumLargeGenerationAllocations))
 }
 
