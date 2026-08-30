@@ -383,12 +383,14 @@ through checked, cancellation-independent cleanup while preserving the primary `
 real-filesystem tests exchange every caller-owned cache/resource ancestor and leaf immediately before and after its
 open; a request can only fail closed or retain the originally admitted rootfs, never the attacker object.
 
-The private inactive `Server` transaction foundation currently depends on exactly two narrow seams. Its existing
-`rootfsEffects` interface contains the named `ProvisionVM`, `InspectImage`, and `OptimizeImage` methods, and
-`rootfsResourceLocks` contains only
+The private inactive `Server` transaction foundation currently depends on exactly three narrow seams. `rootfsEffects`
+contains exactly the named `ProvisionVM` and `InspectImage` methods, the private `imageOptimizeEffects` contains only
+`OptimizeImage`, and `rootfsResourceLocks` contains only
 `Acquire(context.Context, Caller, rootfsSelection) (rootfsResourceLockLease, error)`. A private service adapter now
 implements the lock seam through the separate `authorityfs` LoopMount UID and canonical VM/image lock capabilities.
-There is no concrete production mount/effect adapter or `Server` constructor, so the adapter remains inert.
+Provisioning and inspection validate the rootfs effect seam, while optimization validates only its separate effect
+seam; every action also validates the shared rootfs authority and resource-lock dependencies. There is no concrete
+production mount/effect adapter or `Server` constructor, so the entire coordinator remains inert.
 
 Each operation validates its closed request and authenticated caller before acquiring authority. It then acquires the
 resource-lock lease, admits the fixed rootfs, invokes the named effect, validates the request-bound result, and unwinds
@@ -411,11 +413,12 @@ records the actually observed size on the private rootfs lease delivered to `roo
 future concrete effect distinguish a first grow from an already-converged replay without reopening a path or trusting
 caller-reported post-effect state.
 
-The accepted production seam will split before activation. One concrete descriptor-consuming adapter will implement
-only `ProvisionVM` and `InspectImage`. `OptimizeImage` will move to a separate private effect seam with no production
-implementation, constructor dependency, receiver handler, or dispatcher registration until durable shrink and image
+The accepted effect seam is now split without activating production behavior. A future concrete descriptor-consuming
+adapter can implement only `rootfsEffects.ProvisionVM` and `rootfsEffects.InspectImage`; `imageOptimizeEffects` remains
+a separate private seam containing only `OptimizeImage`. The optimize seam has no production implementation or
+construction, receiver handler, or dispatcher registration and cannot gain them until durable shrink and image
 replacement replay authority exists. Keeping the named optimize client and protocol types does not activate that
-capability.
+capability, and the complete `Server` remains inert.
 
 LoopMount operations serialize through exclusive, root-owned advisory locks at exactly:
 

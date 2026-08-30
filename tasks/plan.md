@@ -63,11 +63,13 @@ continue without silently deleting it.
   VM resize, bounded typed values, and strict process-start/response-EOF authority. A private rootfs authority pins the
   caller-owned cache and fixed VM/image rootfs through retained descriptors, enforces local-filesystem, identity, mode,
   size, and no-cross-mount policies, and has deterministic before/after-open replacement-race evidence for every
-  caller-owned component. An inactive private server now adds exact action-specific effect and per-resource lock seams,
-  ordered cancellation-independent cleanup, closed mutation/durability evidence, and old-or-target VM grow replay
-  admission with actual admitted-size handoff. The reviewed private lock adapter binds the seam to `authorityfs` using
-  only the authenticated caller UID and canonical VM/image identity. No concrete mount/effect adapter, production
-  `Server` constructor, receiver handler, dispatcher entry, public/backend cutover, or legacy-route removal is wired.
+  caller-owned component. An inactive private server now splits effects between `rootfsEffects`, containing exactly
+  `ProvisionVM` and `InspectImage`, and private `imageOptimizeEffects`, containing only `OptimizeImage`. It validates
+  dependencies per action and adds a per-resource lock seam, ordered cancellation-independent cleanup, closed
+  mutation/durability evidence, and old-or-target VM grow replay admission with actual admitted-size handoff. The
+  reviewed private lock adapter binds the seam to `authorityfs` using only the authenticated caller UID and canonical
+  VM/image identity. No concrete mount/effect adapter, production `Server` constructor, receiver handler, dispatcher
+  entry, public/backend cutover, or legacy-route removal is wired.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -651,12 +653,15 @@ bounded size, and action-specific access. It retains the image staging descripto
 replacement, closes the complete chain in checked reverse order, and has deterministic before/after-open replacement
 tests for every caller-owned component.
 
-The private inactive `Server` transaction foundation currently uses the named `rootfsEffects.ProvisionVM`,
-`InspectImage`, and `OptimizeImage` methods plus the narrow `rootfsResourceLocks.Acquire` lease seam. It validates the
+The private inactive `Server` transaction foundation splits its effects between `rootfsEffects`, which contains exactly
+`ProvisionVM` and `InspectImage`, and private `imageOptimizeEffects`, which contains only `OptimizeImage`. Provisioning
+and inspection validate the rootfs effect dependency; optimization validates its separate effect dependency; all three
+validate the shared rootfs authority and narrow `rootfsResourceLocks.Acquire` lease seam. The coordinator validates the
 request and caller before authority acquisition, retains a partially acquired lock lease for checked release, admits
 the fixed rootfs, invokes one effect, and validates the request-bound result. The private service adapter now provides
-the concrete resource-lock implementation over `authorityfs`, but no production constructor injects it. There is no
-concrete mount/effect adapter or `Server` activation.
+the concrete resource-lock implementation over `authorityfs`, but no production constructor injects it. The optimize
+seam has no production implementation or construction, receiver handler, or dispatcher registration. There is no
+concrete mount/effect adapter or activation for the entire `Server`.
 
 Every action requires its own effect cleanup capability and unwinds effect cleanup, rootfs authority, then resource
 lock with `context.WithoutCancel`. Closed action-specific effect states derive mandatory `rootfs_modified`,
@@ -668,8 +673,8 @@ before effect invocation and hands the stable actually admitted size to `rootfsE
 rootfs lease, allowing a future effect to distinguish first execution from a converged replay. `OptimizeImage` remains
 blocked from registration until durable shrink and replacement replay authority is implemented.
 
-The accepted implementation splits production provisioning and inspection from an absent optimization seam. Exclusive
-locks use the shared privileged descriptor-safe authority layout at
+The implemented private seam split isolates provisioning and inspection from deferred optimization without activating
+production behavior. Exclusive locks use the shared privileged descriptor-safe authority layout at
 `/run/mvmctl/authority/<uid>/loopmount/{vm-<32hex>,image-<64hex>}.lock`. They are root-owned mode `0600`, keyed only by
 authenticated UID, family, and canonical ID, and never unlinked during the boot. Inspection and future optimization
 share the image lock. `internal/lib/authorityfs` now owns the top-level tree and separate closed Jailer and LoopMount

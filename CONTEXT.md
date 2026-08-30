@@ -349,12 +349,16 @@ releases every descriptor in checked reverse order with cancellation-independent
 replace each caller-owned ancestor and leaf immediately before and after open; admission either fails closed or retains
 the original object rather than attacker content.
 
-An inactive private `Server` now coordinates each admitted operation through the exact narrow `rootfsEffects` methods
-`ProvisionVM`, `InspectImage`, and `OptimizeImage`. It validates the closed request and authenticated caller, acquires a
-resource lease through the private `rootfsResourceLocks` seam, admits the fixed rootfs, invokes the corresponding
-effect, and validates the request-bound result. The seam has a private adapter over the implemented `authorityfs`
-LoopMount UID and canonical VM/image lock capabilities. There is no production mount/effect adapter, and `Server` has
-no production constructor.
+An inactive private `Server` now coordinates each admitted operation through two action-specific effect seams.
+`rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while the private `imageOptimizeEffects` contains
+only `OptimizeImage`. Provisioning and inspection validate `rootfsEffects`; optimization validates
+`imageOptimizeEffects`; every action separately validates the shared rootfs authority and resource-lock seam. After
+validating the closed request and authenticated caller, the coordinator acquires a resource lease through the private
+`rootfsResourceLocks` seam, admits the fixed rootfs, invokes the corresponding effect, and validates the request-bound
+result. The lock seam has a private adapter over the implemented `authorityfs` LoopMount UID and canonical VM/image
+lock capabilities. The optimize seam has no production implementation or construction, and no receiver handler or
+dispatcher entry registers it. The entire `Server` remains inert: there is no production constructor or concrete
+mount/effect adapter for any action.
 
 The coordinator requires an action-specific effect cleanup capability and unwinds effect cleanup, rootfs authority,
 then the resource lock, each with `context.WithoutCancel`. Effect outcomes use closed action-specific states to derive

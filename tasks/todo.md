@@ -570,10 +570,10 @@ activation, receiver registration, backend/public cutover, legacy removal, and h
   - [x] Add private descriptor-pinned VM rootfs and image-staging leases with canonical cache traversal, fixed resource
     selection, caller ownership, stable identity/mode/size admission, local-filesystem and no-cross-mount policy,
     checked reverse cleanup, and deterministic before/after-open replacement races for every caller-owned component.
-  - [x] Add the inactive private `Server` transaction coordinator with exactly the action-specific `rootfsEffects`
-    methods and `rootfsResourceLocks.Acquire` lease seam. Validate request/caller before authority; unwind effect,
-    rootfs, then lock with `context.WithoutCancel`; derive closed mutation/durability evidence; preserve the primary
-    `DomainError`; and require action-specific cleanup authority before success.
+  - [x] Add the inactive private `Server` transaction coordinator with action-specific effect dependencies and the
+    `rootfsResourceLocks.Acquire` lease seam. Validate request/caller before authority; unwind effect, rootfs, then lock
+    with `context.WithoutCancel`; derive closed mutation/durability evidence; preserve the primary `DomainError`; and
+    require action-specific cleanup authority before success.
   - [x] Admit a VM grow replay only at the exact old or target rootfs size, reject every third size before effects, and
     hand the actually admitted stable size to `rootfsEffects.ProvisionVM` through its private lease.
   - [x] Establish the Jailer portion of the ephemeral authority split: exact `root:root` mode-`0711`
@@ -597,6 +597,10 @@ activation, receiver registration, backend/public cutover, legacy removal, and h
     maps cancellation/deadline acquisition failures as retryable, and releases lock before parent authority exactly
     once. No production `Server` constructor, receiver handler, dispatcher entry, backend/public path, or privileged
     mount effect uses this adapter. Network, firewall, and `/run/mvmctl/runtime` consumers remain pending.
+  - [x] Split the inactive effect authority so `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while
+    private `imageOptimizeEffects` contains only `OptimizeImage`, with dependency validation scoped to each action. The
+    optimize seam has no production implementation or construction, receiver handler, or dispatcher registration, and
+    the entire `Server` remains inert.
   - [ ] Implement the private mount/loop foundation. Use a private-propagation mount namespace, direct loop, mount,
     unmount, descriptor, sync, and detach syscalls, bounded partition discovery, autoclear, and read-only inspection.
     Permit only fixed host filesystem probes/grow tools; reject caller paths, `/proc` FD passthrough, chroot, guest
@@ -607,9 +611,9 @@ activation, receiver registration, backend/public cutover, legacy removal, and h
   - [ ] Implement fixed `ProvisionVM` content and grow convergence. Support only hostname/hosts, DNS, existing-account
     SSH/sudo, fixed SSH service, embedded-agent, and fstab content. Converge grow from the exact old or target size and
     prove modified, durability-uncertain, and outcome-unknown mappings plus cancellation-independent cleanup.
-  - [ ] Split the production ProvisionVM/InspectImage effect interface from the absent OptimizeImage seam, then add only
-    provision and inspect receiver handlers and exact central-dispatch entries. `OptimizeImage` remains without a
-    production implementation, handler, or registration until durable shrink and replacement replay authority exists.
+  - [ ] Add only provision and inspect receiver handlers and exact central-dispatch entries for the already-separated
+    `rootfsEffects` seam. `OptimizeImage` remains without a production implementation or construction, handler, or
+    registration until durable shrink and replacement replay authority exists.
   - [ ] Before public cutover, obtain an explicit scope decision for every unsupported legacy behavior: missing-user
     creation, unpinned cloud-init copying, deblob/package commands, recursive guest cleanup, guest-code execution,
     partition-table growth, shrink, conversion, and replacement. No cutover may silently reduce public behavior.

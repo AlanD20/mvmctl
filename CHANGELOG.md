@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
 > authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a canonical
 > generation digest, the private Jailer and LoopMount ephemeral-authority capabilities, and typed
-> LoopMount client/protocol, rootfs-authority, resource-lock adapter, and receiver-transaction foundations described
-> below are implemented.
+> LoopMount client/protocol, rootfs-authority, resource-lock adapter, split effect seams, and receiver-transaction
+> foundations described below are implemented.
 > The mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final
 > marker-only sudo policy, and remaining typed privileged operations are not implemented yet; see
@@ -114,19 +114,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Caller ownership, safe modes, one-link regular-file identity, exact bounded size, local-filesystem topology, mount
   identity, no-cross-mount descendant traversal, and reverse checked cleanup are enforced before a lease can become
   authority. L1 tests deterministically replace every caller-owned ancestor and leaf immediately before and after open.
-- Added an inactive private receiver-transaction foundation with only the named `ProvisionVM`, `InspectImage`, and
-  `OptimizeImage` effect methods and a per-resource lock lease seam. It unwinds effect cleanup, rootfs authority, then
-  the lock with cancellation detached; derives closed mutation, replacement, durability, and unknown-outcome evidence;
-  and preserves primary structured errors through bounded cleanup diagnostics. VM grow replay admits only the exact
-  old or target size and hands the stable actually admitted size to the effect seam.
+- Added an inactive private receiver-transaction foundation with two action-specific effect seams:
+  `rootfsEffects` contains exactly `ProvisionVM` and `InspectImage`, while private `imageOptimizeEffects` contains only
+  `OptimizeImage`. Each action validates only its effect dependency plus the shared rootfs authority and per-resource
+  lock seam. The coordinator unwinds effect cleanup, rootfs authority, then the lock with cancellation detached;
+  derives closed mutation, replacement, durability, and unknown-outcome evidence; and preserves primary structured
+  errors through bounded cleanup diagnostics. VM grow replay admits only the exact old or target size and hands the
+  stable actually admitted size to the effect seam.
 - Added the reviewed private service adapter for that lock seam. It derives only the authenticated caller UID and the
   canonical VM/image key from the closed rootfs selection, maps cancellation and deadline failures as retryable, retains
   partially acquired authority for cleanup, and releases the lock before its parent capability exactly once. No
   production `Server` constructor uses the adapter yet.
-- This is foundation only. No concrete LoopMount mount/effect adapter, receiver handler, dispatcher entry,
-  backend/public cutover, or legacy raw-sudo removal has landed, and no privileged mount effect uses the new authority.
-  `OptimizeImage` stays unregistered until durable shrink and replacement replay authority exists; `mvm run provision`
-  and its arbitrary unmount/cleanup surface remain transitional release blockers.
+- This is foundation only. The optimize seam has no production implementation or construction, receiver handler, or
+  dispatcher registration. The entire `Server` remains inert: no concrete LoopMount mount/effect adapter, production
+  constructor, receiver handler, dispatcher entry, backend/public cutover, or legacy raw-sudo removal has landed, and
+  no privileged mount effect uses the new authority. `OptimizeImage` stays unregistered until durable shrink and
+  replacement replay authority exists; `mvm run provision` and its arbitrary unmount/cleanup surface remain
+  transitional release blockers.
 
 #### Root-owned single-binary installation
 - Added the exact administrator bootstrap command `sudo <trusted-mvm-binary> host install-system`, which installs the
