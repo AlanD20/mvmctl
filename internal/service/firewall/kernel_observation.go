@@ -92,13 +92,17 @@ func compareKernelObservedTable(observed kernelObservedTable, expected compiledT
 		}
 	}
 
-	if len(observed.rules) != len(expected.rules) {
+	expectedRules, err := compiledRulesInKernelDumpOrder(expected)
+	if err != nil {
+		return err
+	}
+	if len(observed.rules) != len(expectedRules) {
 		return invalidKernelObservation(
 			fmt.Sprintf("rule count for table %q does not match compiler output", observed.name),
 		)
 	}
-	for index := range expected.rules {
-		if err := compareKernelObservedRule(observed.rules[index], expected.rules[index], generationID); err != nil {
+	for index := range expectedRules {
+		if err := compareKernelObservedRule(observed.rules[index], expectedRules[index], generationID); err != nil {
 			return invalidKernelObservation(fmt.Sprintf(
 				"rule %d for table %q does not match compiler output: %v",
 				index,
@@ -108,6 +112,26 @@ func compareKernelObservedTable(observed kernelObservedTable, expected compiledT
 		}
 	}
 	return nil
+}
+
+// compiledRulesInKernelDumpOrder groups rules by declared chain while retaining compiler insertion order within each
+// chain, matching Linux's chain-by-chain NFT_MSG_GETRULE dump traversal.
+func compiledRulesInKernelDumpOrder(table compiledTable) ([]compiledRule, error) {
+	ordered := make([]compiledRule, 0, len(table.rules))
+	for _, chain := range table.chains {
+		if chain == nil {
+			return nil, invalidGeneration("compiled chain is absent from kernel comparison")
+		}
+		for _, rule := range table.rules {
+			if rule.rule != nil && rule.rule.Chain == chain {
+				ordered = append(ordered, rule)
+			}
+		}
+	}
+	if len(ordered) != len(table.rules) {
+		return nil, invalidGeneration("compiled rule references an undeclared chain")
+	}
+	return ordered, nil
 }
 
 func kernelObservedChainMatches(observed kernelObservedChain, expected *nftables.Chain) bool {

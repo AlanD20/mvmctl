@@ -191,8 +191,22 @@ func TestKernelExpressionEqualRejectsEveryComparedFieldAndUnknownType(t *testing
 		"range upper":             {&expr.Range{ToData: []byte{1}}, &expr.Range{}},
 		"verdict kind":            {&expr.Verdict{Kind: expr.VerdictAccept}, &expr.Verdict{}},
 		"verdict chain":           {&expr.Verdict{Chain: "foreign"}, &expr.Verdict{}},
-		"typed nil observed":      {(*expr.Meta)(nil), &expr.Meta{}},
-		"typed nil expected":      {&expr.Meta{}, (*expr.Meta)(nil)},
+		"meta nil observed":       {(*expr.Meta)(nil), &expr.Meta{}},
+		"meta nil expected":       {&expr.Meta{}, (*expr.Meta)(nil)},
+		"masq nil observed":       {(*expr.Masq)(nil), &expr.Masq{}},
+		"masq nil expected":       {&expr.Masq{}, (*expr.Masq)(nil)},
+		"bitwise nil observed":    {(*expr.Bitwise)(nil), &expr.Bitwise{}},
+		"bitwise nil expected":    {&expr.Bitwise{}, (*expr.Bitwise)(nil)},
+		"comparison nil observed": {(*expr.Cmp)(nil), &expr.Cmp{}},
+		"comparison nil expected": {&expr.Cmp{}, (*expr.Cmp)(nil)},
+		"conntrack nil observed":  {(*expr.Ct)(nil), &expr.Ct{}},
+		"conntrack nil expected":  {&expr.Ct{}, (*expr.Ct)(nil)},
+		"payload nil observed":    {(*expr.Payload)(nil), &expr.Payload{}},
+		"payload nil expected":    {&expr.Payload{}, (*expr.Payload)(nil)},
+		"range nil observed":      {(*expr.Range)(nil), &expr.Range{}},
+		"range nil expected":      {&expr.Range{}, (*expr.Range)(nil)},
+		"verdict nil observed":    {(*expr.Verdict)(nil), &expr.Verdict{}},
+		"verdict nil expected":    {&expr.Verdict{}, (*expr.Verdict)(nil)},
 		"unknown expected type":   {&expr.Counter{}, &expr.Counter{}},
 		"unknown observed type":   {&expr.Counter{}, &expr.Meta{}},
 	}
@@ -239,14 +253,22 @@ func kernelObservationFromCompiled(compiled compiledGeneration) kernelObservatio
 			observedChain.policyPresent = true
 			observedTable.chains = append(observedTable.chains, observedChain)
 		}
-		for _, compiledRule := range table.rules {
-			observedTable.rules = append(observedTable.rules, kernelObservedRule{
-				table:       tableIdentity{family: compiledRule.rule.Table.Family, name: compiledRule.rule.Table.Name},
-				chain:       compiledRule.rule.Chain.Name,
-				flags:       compiledRule.rule.Flags,
-				userdata:    slices.Clone(compiledRule.rule.UserData),
-				expressions: cloneObservedExpressions(compiledRule.rule.Exprs),
-			})
+		for _, chain := range table.chains {
+			for _, compiledRule := range table.rules {
+				if compiledRule.rule.Chain != chain {
+					continue
+				}
+				observedTable.rules = append(observedTable.rules, kernelObservedRule{
+					table: tableIdentity{
+						family: compiledRule.rule.Table.Family,
+						name:   compiledRule.rule.Table.Name,
+					},
+					chain:       compiledRule.rule.Chain.Name,
+					flags:       compiledRule.rule.Flags,
+					userdata:    slices.Clone(compiledRule.rule.UserData),
+					expressions: cloneObservedExpressions(compiledRule.rule.Exprs),
+				})
+			}
 		}
 		result.tables = append(result.tables, observedTable)
 	}

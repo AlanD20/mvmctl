@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
 	"github.com/mdlayher/netlink"
@@ -33,11 +34,26 @@ func TestDecodeKernelObservationAcceptsExactCompilerMessages(t *testing.T) {
 
 	observed, err := decodeKernelObservation(raw)
 	require.NoError(t, err)
-	require.Equal(t, want, observed)
+	assertKernelObservationEqual(t, want, observed)
 
 	compiled, err := compileGeneration(kernelFixtureIntent())
 	require.NoError(t, err)
 	require.Equal(t, testKernelGenerationID, compiled.id)
+	assert.NoError(t, compareKernelObservation(observed, compiled))
+}
+
+// Rationale: Linux dumps all rules for one declared chain before advancing to the next. With two masqueraded networks,
+// compiler insertion interleaves input and postrouting rules, so comparison must canonicalize compiler order by chain.
+func TestDecodeKernelObservationComparesTwoNetworkChainOrderedDump(t *testing.T) {
+	intent := compatibilityIntent()
+	compiled, err := compileGeneration(generationIntent{networks: slices.Clone(intent.networks)})
+	require.NoError(t, err)
+	want := kernelDumpObservationFromCompiled(compiled)
+	raw := kernelMessagesFromObservation(t, want)
+
+	observed, err := decodeKernelObservation(raw)
+	require.NoError(t, err)
+	assertKernelObservationEqual(t, want, observed)
 	assert.NoError(t, compareKernelObservation(observed, compiled))
 }
 
@@ -118,6 +134,10 @@ func TestDecodeKernelObservationRejectsMessageAndObjectIdentityChanges(t *testin
 		"header length": func(raw *kernelObservationMessages) {
 			raw.tableReplies[0].Header.Length++
 		},
+		"truncated nfgen header": func(raw *kernelObservationMessages) {
+			raw.tableReplies[0].Data = raw.tableReplies[0].Data[:netfilterHeaderBytes-1]
+			raw.tableReplies[0].Header.Length = uint32(netlinkHeaderBytes + len(raw.tableReplies[0].Data))
+		},
 		"netfilter version": func(raw *kernelObservationMessages) {
 			raw.tableReplies[0].Data[1] = 1
 		},
@@ -144,6 +164,9 @@ func TestDecodeKernelObservationRejectsMessageAndObjectIdentityChanges(t *testin
 		},
 		"chain order": func(raw *kernelObservationMessages) {
 			raw.chainReplies[0], raw.chainReplies[1] = raw.chainReplies[1], raw.chainReplies[0]
+		},
+		"cross-table chain regression": func(raw *kernelObservationMessages) {
+			raw.chainReplies[1], raw.chainReplies[2] = raw.chainReplies[2], raw.chainReplies[1]
 		},
 		"rule order": func(raw *kernelObservationMessages) {
 			raw.ruleReplies[0], raw.ruleReplies[1] = raw.ruleReplies[1], raw.ruleReplies[0]
@@ -351,6 +374,9 @@ func TestDecodeKernelObservationRejectsNestedAndExpressionAmbiguity(t *testing.T
 					return slices.Repeat(attrs[:1], maxKernelObservationExpressionsPerRule+1)
 				})
 		},
+		"empty expression list": func(raw *kernelObservationMessages) {
+			setMessageAttributeData(t, &raw.ruleReplies[0], unix.NFTA_RULE_EXPRESSIONS, nil)
+		},
 	}
 
 	for name, mutate := range tests {
@@ -391,7 +417,7 @@ func TestDecodeKernelObservationAcceptsZeroSequenceAndAbsentPadding(t *testing.T
 	observed, err := decodeKernelObservation(raw)
 	require.NoError(t, err)
 	want.nftBaseSequence = 0
-	assert.Equal(t, want, observed)
+	assertKernelObservationEqual(t, want, observed)
 }
 
 // Rationale: Dump envelopes can be syntactically valid while representing partial parents, duplicate identities, or
@@ -401,6 +427,9 @@ func TestDecodeKernelObservationRejectsObjectIntegrityDrift(t *testing.T) {
 	tests := map[string]func(*kernelObservationMessages){
 		"partial tables": func(raw *kernelObservationMessages) {
 			raw.tableReplies = raw.tableReplies[:1]
+		},
+		"partial chains": func(raw *kernelObservationMessages) {
+			raw.chainReplies = raw.chainReplies[:4]
 		},
 		"chains without tables": func(raw *kernelObservationMessages) {
 			raw.tableReplies = nil
@@ -462,6 +491,12 @@ func TestDecodeKernelObservationRejectsObjectIntegrityDrift(t *testing.T) {
 		},
 		"chain use mismatch": func(raw *kernelObservationMessages) {
 			setMessageAttributeData(t, &raw.chainReplies[2], unix.NFTA_CHAIN_USE, testBigEndianUint32(2))
+		},
+		"invalid chain policy": func(raw *kernelObservationMessages) {
+			setMessageAttributeData(t, &raw.chainReplies[0], unix.NFTA_CHAIN_POLICY, testBigEndianUint32(2))
+		},
+		"invalid chain flags": func(raw *kernelObservationMessages) {
+			setMessageAttributeData(t, &raw.chainReplies[0], testNFTAChainFlags, testBigEndianUint32(0))
 		},
 		"cross-table rule order": func(raw *kernelObservationMessages) {
 			bridgeRule := cloneKernelMessages(raw.ruleReplies[:1])[0]
@@ -657,25 +692,31 @@ func TestKernelAttributePrimitiveBounds(t *testing.T) {
 	assert.Equal(t, uint32(7), mustKernelUint32(t, testBigEndianUint32(7)))
 	assert.Equal(t, uint64(9), mustKernelUint64(t, testBigEndianUint64(9)))
 
-	invalidStrings := [][]byte{
-		nil,
-		{0},
-		[]byte("missing-nul"),
-		{'a', 0, 'b', 0},
-		{0xff, 0},
-		append(bytes.Repeat([]byte{'a'}, maxKernelObservationStringBytes), 0),
+	invalidStrings := map[string][]byte{
+		"nil":                nil,
+		"only terminator":    {0},
+		"missing terminator": []byte("missing-nul"),
+		"embedded NUL":       {'a', 0, 'b', 0},
+		"invalid UTF-8":      {0xff, 0},
+		"over limit":         append(bytes.Repeat([]byte{'a'}, maxKernelObservationStringBytes), 0),
 	}
-	for _, raw := range invalidStrings {
-		_, err = kernelAttributeString(netlink.Attribute{Data: raw}, "test")
-		requireKernelObservationRejected(t, err)
+	for name, raw := range invalidStrings {
+		t.Run("string/"+name, func(t *testing.T) {
+			_, stringErr := kernelAttributeString(netlink.Attribute{Data: raw}, "test")
+			requireKernelObservationRejected(t, stringErr)
+		})
 	}
-	for _, width := range []int{3, 5} {
-		_, err = kernelAttributeUint32(netlink.Attribute{Data: make([]byte, width)}, "test")
-		requireKernelObservationRejected(t, err)
+	for name, width := range map[string]int{"short": 3, "long": 5} {
+		t.Run("uint32/"+name, func(t *testing.T) {
+			_, scalarErr := kernelAttributeUint32(netlink.Attribute{Data: make([]byte, width)}, "test")
+			requireKernelObservationRejected(t, scalarErr)
+		})
 	}
-	for _, width := range []int{7, 9} {
-		_, err = kernelAttributeUint64(netlink.Attribute{Data: make([]byte, width)}, "test")
-		requireKernelObservationRejected(t, err)
+	for name, width := range map[string]int{"short": 7, "long": 9} {
+		t.Run("uint64/"+name, func(t *testing.T) {
+			_, scalarErr := kernelAttributeUint64(netlink.Attribute{Data: make([]byte, width)}, "test")
+			requireKernelObservationRejected(t, scalarErr)
+		})
 	}
 	for _, width := range []int{1, 64} {
 		value, dataErr := decodeKernelDataValue(mustMarshalKernelAttributes(t,
@@ -683,10 +724,12 @@ func TestKernelAttributePrimitiveBounds(t *testing.T) {
 		require.NoError(t, dataErr)
 		assert.Len(t, value, width)
 	}
-	for _, width := range []int{0, 65} {
-		_, err = decodeKernelDataValue(mustMarshalKernelAttributes(t,
-			[]netlink.Attribute{{Type: unix.NFTA_DATA_VALUE, Data: make([]byte, width)}}), "test data")
-		requireKernelObservationRejected(t, err)
+	for name, width := range map[string]int{"empty": 0, "over limit": 65} {
+		t.Run("data/"+name, func(t *testing.T) {
+			_, dataErr := decodeKernelDataValue(mustMarshalKernelAttributes(t,
+				[]netlink.Attribute{{Type: unix.NFTA_DATA_VALUE, Data: make([]byte, width)}}), "test data")
+			requireKernelObservationRejected(t, dataErr)
+		})
 	}
 }
 
@@ -698,7 +741,7 @@ func TestDecodeKernelExpressionsAcceptsClosedTypesAndRejectsEnvelopeAmbiguity(t 
 			raw := mustMarshalKernelAttributes(t, []netlink.Attribute{testKernelExpression(t, value)})
 			decoded, err := decodeKernelExpressions(raw, nftables.TableFamilyINet)
 			require.NoError(t, err)
-			assert.True(t, kernelExpressionsEqual(decoded, []expr.Any{value}))
+			assertKernelExpressionsEqual(t, []expr.Any{value}, decoded)
 		})
 
 		mutations := map[string]func(*netlink.Attribute, []netlink.Attribute) []netlink.Attribute{
@@ -750,6 +793,16 @@ func TestDecodeKernelExpressionsAcceptsClosedTypesAndRejectsEnvelopeAmbiguity(t 
 	}
 }
 
+// Rationale: The compiler emits masquerade with no type-specific data, so even a known masquerade attribute would
+// represent unsupported semantics and must be rejected.
+func TestDecodeKernelMasqRejectsAnyAttribute(t *testing.T) {
+	raw := mutateTestKernelExpressionData(t, &expr.Masq{}, func(attrs []netlink.Attribute) []netlink.Attribute {
+		return append(attrs, netlink.Attribute{Type: unix.NFTA_MASQ_FLAGS, Data: testBigEndianUint32(0)})
+	})
+	_, err := decodeKernelExpressions(raw, nftables.TableFamilyINet)
+	requireKernelObservationRejected(t, err)
+}
+
 // Rationale: Type-specific attribute sets are closed independently of the common expression envelope; scalar width
 // drift and flags must not be normalized into a compiler-supported expression.
 func TestDecodeKernelExpressionsRejectsTypeSpecificAttributeAmbiguity(t *testing.T) {
@@ -759,7 +812,13 @@ func TestDecodeKernelExpressionsRejectsTypeSpecificAttributeAmbiguity(t *testing
 	}{
 		"meta": {value: &expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1}, requiredAttr: unix.NFTA_META_DREG},
 		"bitwise": {
-			value:        &expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 1, Mask: []byte{1}, Xor: []byte{0}},
+			value: &expr.Bitwise{
+				SourceRegister: 2,
+				DestRegister:   3,
+				Len:            4,
+				Mask:           []byte{0xff, 0xf0, 0x0f, 0xaa},
+				Xor:            []byte{0x11, 0x22, 0x33, 0x44},
+			},
 			requiredAttr: unix.NFTA_BITWISE_SREG,
 		},
 		"cmp": {
@@ -768,7 +827,12 @@ func TestDecodeKernelExpressionsRejectsTypeSpecificAttributeAmbiguity(t *testing
 		},
 		"ct": {value: &expr.Ct{Register: 1, Key: expr.CtKeySTATE}, requiredAttr: unix.NFTA_CT_DREG},
 		"payload": {
-			value:        &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Len: 1},
+			value: &expr.Payload{
+				DestRegister: 4,
+				Base:         expr.PayloadBaseTransportHeader,
+				Offset:       7,
+				Len:          2,
+			},
 			requiredAttr: unix.NFTA_PAYLOAD_DREG,
 		},
 		"range": {
@@ -1039,6 +1103,30 @@ func capturedKernelObservationFixture(t *testing.T) (kernelObservationMessages, 
 	return kernelMessagesFromObservation(t, want), want
 }
 
+// kernelDumpObservationFromCompiled independently projects compiler rules into Linux's declared-chain dump order.
+func kernelDumpObservationFromCompiled(compiled compiledGeneration) kernelObservation {
+	observed := kernelObservationFromCompiled(compiled)
+	observed.nftBaseSequence = testNFTBaseSequence
+	for tableIndex := range observed.tables {
+		table := &observed.tables[tableIndex]
+		insertionOrder := slices.Clone(table.rules)
+		if len(insertionOrder) == 0 {
+			continue
+		}
+		table.rules = make([]kernelObservedRule, 0, len(insertionOrder))
+		for chainIndex := range table.chains {
+			for _, rule := range insertionOrder {
+				if rule.chain != table.chains[chainIndex].name {
+					continue
+				}
+				table.rules = append(table.rules, rule)
+				table.chains[chainIndex].use++
+			}
+		}
+	}
+	return observed
+}
+
 // kernelMessagesFromObservation serializes only the explicit captured-style test literal into flagless dump nests.
 func kernelMessagesFromObservation(t *testing.T, observed kernelObservation) kernelObservationMessages {
 	t.Helper()
@@ -1220,12 +1308,13 @@ func testKernelExpression(t *testing.T, expression expr.Any) netlink.Attribute {
 // testKernelExpressionValues enumerates the compiler's complete admitted expression type set.
 func testKernelExpressionValues() map[string]expr.Any {
 	return map[string]expr.Any{
-		"meta":    &expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
-		"masq":    &expr.Masq{},
-		"bitwise": &expr.Bitwise{SourceRegister: 1, DestRegister: 1, Len: 1, Mask: []byte{1}, Xor: []byte{0}},
+		"meta": &expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+		"masq": &expr.Masq{},
+		"bitwise": &expr.Bitwise{SourceRegister: 2, DestRegister: 3, Len: 4,
+			Mask: []byte{0xff, 0xf0, 0x0f, 0xaa}, Xor: []byte{0x11, 0x22, 0x33, 0x44}},
 		"cmp":     &expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{1}},
 		"ct":      &expr.Ct{Register: 1, Key: expr.CtKeySTATE},
-		"payload": &expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 1, Len: 1},
+		"payload": &expr.Payload{DestRegister: 4, Base: expr.PayloadBaseTransportHeader, Offset: 7, Len: 2},
 		"range":   &expr.Range{Op: expr.CmpOpEq, Register: 1, FromData: []byte{1}, ToData: []byte{2}},
 		"verdict": &expr.Verdict{Kind: expr.VerdictAccept},
 	}
@@ -1527,4 +1616,26 @@ func mustKernelUint64(t *testing.T, raw []byte) uint64 {
 	value, err := kernelAttributeUint64(netlink.Attribute{Data: raw}, "test")
 	require.NoError(t, err)
 	return value
+}
+
+// assertKernelObservationEqual reports a readable structural diff for the full private observation graph.
+func assertKernelObservationEqual(t *testing.T, want kernelObservation, got kernelObservation) {
+	t.Helper()
+	if diff := cmp.Diff(want, got, cmp.AllowUnexported(
+		kernelObservation{},
+		kernelObservedTable{},
+		kernelObservedChain{},
+		kernelObservedRule{},
+		tableIdentity{},
+	)); diff != "" {
+		t.Errorf("kernel observation mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// assertKernelExpressionsEqual compares decoded fields directly rather than relying on the production comparator.
+func assertKernelExpressionsEqual(t *testing.T, want []expr.Any, got []expr.Any) {
+	t.Helper()
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("kernel expressions mismatch (-want +got):\n%s", diff)
+	}
 }
