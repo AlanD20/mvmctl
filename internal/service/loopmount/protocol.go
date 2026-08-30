@@ -28,7 +28,6 @@ const (
 	maxSSHKeyBytes               = 16 << 10
 	maxSSHKeysBytes              = 48 << 10
 	maxGuestUsernameBytes        = 32
-	maxOperationCount            = 16
 	maxResultCount               = 1 << 20
 )
 
@@ -144,38 +143,41 @@ func (request VMProvisionRequest) Validate() error {
 	if err := request.Filesystem.Validate(); err != nil {
 		return err
 	}
-	return request.Plan.Validate()
+	return request.Plan.Validate(request.ExpectedRootfsBytes)
 }
 
-// Validate enforces the closed VM provisioning plan.
-func (plan VMProvisionPlan) Validate() error {
-	operations := 0
+// Validate enforces the closed VM provisioning plan relative to the admitted rootfs size.
+func (plan VMProvisionPlan) Validate(expectedRootfsBytes uint64) error {
+	hasOperation := false
 	if plan.ResizeBytes != 0 {
-		operations++
+		hasOperation = true
 		if plan.ResizeBytes < minimumRootfsBytes || plan.ResizeBytes > maximumRootfsBytes {
 			return validationError("managed VM resize is outside the supported range")
 		}
+		if plan.ResizeBytes < expectedRootfsBytes {
+			return validationError("managed VM resize cannot shrink the rootfs")
+		}
 	}
 	if plan.Hostname != nil {
-		operations++
+		hasOperation = true
 		if err := validators.VMName(*plan.Hostname); err != nil {
 			return validationError("managed VM hostname is invalid: " + err.Error())
 		}
 	}
 	if plan.DNS != nil {
-		operations++
+		hasOperation = true
 		if net.ParseIP(*plan.DNS) == nil {
 			return validationError("managed VM DNS must be one IP address")
 		}
 	}
 	if plan.SSH != nil {
-		operations++
+		hasOperation = true
 		if err := plan.SSH.Validate(); err != nil {
 			return err
 		}
 	}
 	if plan.SudoUser != nil {
-		operations++
+		hasOperation = true
 		if len(*plan.SudoUser) > maxGuestUsernameBytes {
 			return validationError(fmt.Sprintf(
 				"managed VM sudo username exceeds %d-byte limit",
@@ -187,28 +189,25 @@ func (plan VMProvisionPlan) Validate() error {
 		}
 	}
 	if plan.InjectCloudInit {
-		operations++
+		hasOperation = true
 	}
 	if plan.DeblobOS != nil {
-		operations++
+		hasOperation = true
 		if !validOSIdentifier(*plan.DeblobOS) {
 			return validationError("managed VM OS identifier is invalid")
 		}
 	}
 	if plan.FixFstab {
-		operations++
+		hasOperation = true
 	}
 	if plan.Agent != nil {
-		operations++
+		hasOperation = true
 		if err := plan.Agent.Validate(); err != nil {
 			return err
 		}
 	}
-	if operations == 0 {
+	if !hasOperation {
 		return validationError("managed VM provision plan requires at least one operation")
-	}
-	if operations > maxOperationCount {
-		return validationError("managed VM provision plan exceeds operation limit")
 	}
 	return nil
 }

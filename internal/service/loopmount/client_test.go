@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -138,6 +139,98 @@ func TestLoopMountClientNamedImageCapabilitiesDecodeTypedResults(t *testing.T) {
 	if diff := cmp.Diff(optimizeResult, gotOptimize); diff != "" {
 		t.Errorf("OptimizeImage() mismatch (-want +got):\n%s", diff)
 	}
+}
+
+// Rationale: InspectImage and OptimizeImage own distinct request validators. Invalid typed requests must be rejected
+// before the process boundary so a future callback wiring regression cannot send them to root.
+func TestLoopMountClientRejectsInvalidImageRequestsWithoutExchange(t *testing.T) {
+	tests := map[string]func(context.Context, *Client) error{
+		"inspect image": func(ctx context.Context, client *Client) error {
+			_, err := client.InspectImage(ctx, ImageInspectRequest{
+				CacheLocator:       "/srv/mvm-cache",
+				ImageID:            "../../etc/shadow",
+				ExpectedImageBytes: 256 << 20,
+				Filesystem:         FilesystemExt4,
+			})
+			return err
+		},
+		"optimize image": func(ctx context.Context, client *Client) error {
+			_, err := client.OptimizeImage(ctx, ImageOptimizeRequest{
+				CacheLocator:       "/srv/mvm-cache",
+				ImageID:            testImageID,
+				ExpectedImageBytes: 256 << 20,
+				Filesystem:         FilesystemExt4,
+				Plan:               ImageOptimizePlan{},
+			})
+			return err
+		},
+	}
+
+	for name, call := range tests {
+		t.Run(name, func(t *testing.T) {
+			exchanger := &fakeLoopMountExchanger{}
+			client := newClientWithExchanger(exchanger)
+
+			err := call(t.Context(), client)
+
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, errs.CodeValidationFailed, domainErr.Code)
+			assert.Zero(t, exchanger.calls)
+		})
+	}
+}
+
+// Rationale: InspectImage and OptimizeImage own distinct result validators. A valid transport envelope is not
+// authoritative until the exact capability callback re-admits its identity, filesystem, OS, and size semantics.
+func TestLoopMountClientRejectsInvalidImageSuccessResponses(t *testing.T) {
+	t.Run("inspect image", func(t *testing.T) {
+		request := ImageInspectRequest{
+			CacheLocator:       "/srv/mvm-cache",
+			ImageID:            testImageID,
+			ExpectedImageBytes: 256 << 20,
+			Filesystem:         FilesystemExt4,
+		}
+		exchanger := &fakeLoopMountExchanger{outcome: &fakeLoopMountOutcome{
+			response: encodeLoopMountSuccess(t, ImageInspectAction, ImageInspectResult{
+				ImageID: strings.Repeat("f", 64),
+				OSType:  "alpine",
+			}),
+			responseEOF: true,
+			started:     true,
+		}}
+		client := newClientWithExchanger(exchanger)
+
+		_, err := client.InspectImage(t.Context(), request)
+
+		assertLoopMountTransportError(t, err, true, true)
+		assert.Equal(t, 1, exchanger.calls)
+	})
+
+	t.Run("optimize image", func(t *testing.T) {
+		request := ImageOptimizeRequest{
+			CacheLocator:       "/srv/mvm-cache",
+			ImageID:            testImageID,
+			ExpectedImageBytes: 256 << 20,
+			Filesystem:         FilesystemExt4,
+			Plan:               ImageOptimizePlan{Shrink: true},
+		}
+		exchanger := &fakeLoopMountExchanger{outcome: &fakeLoopMountOutcome{
+			response: encodeLoopMountSuccess(t, ImageOptimizeAction, ImageOptimizeResult{
+				ImageID:    testImageID,
+				Filesystem: FilesystemBtrfs,
+				ImageBytes: 192 << 20,
+			}),
+			responseEOF: true,
+			started:     true,
+		}}
+		client := newClientWithExchanger(exchanger)
+
+		_, err := client.OptimizeImage(t.Context(), request)
+
+		assertLoopMountTransportError(t, err, true, true)
+		assert.Equal(t, 1, exchanger.calls)
+	})
 }
 
 // Rationale: A valid EOF-qualified remote DomainError is operation authority. Transport diagnostics must not replace

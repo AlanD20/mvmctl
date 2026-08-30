@@ -228,6 +228,48 @@ func TestVMProvisionRequestRejectsUntrustedAuthorityAndUnboundedValues(t *testin
 	}
 }
 
+// Rationale: Resize is a grow-only privileged effect. The request's admitted rootfs size is the authority boundary;
+// an equal size is an idempotent resize, while even one byte below it would authorize an undeclared shrink.
+func TestVMProvisionRequestResizeIntentIsGrowOnly(t *testing.T) {
+	const expectedRootfsBytes = uint64(512 << 20)
+	tests := map[string]struct {
+		resizeBytes uint64
+		wantErr     string
+	}{
+		"one byte below admitted size": {
+			resizeBytes: expectedRootfsBytes - 1,
+			wantErr:     "cannot shrink",
+		},
+		"equal to admitted size": {
+			resizeBytes: expectedRootfsBytes,
+		},
+		"one byte above admitted size": {
+			resizeBytes: expectedRootfsBytes + 1,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			request := VMProvisionRequest{
+				CacheLocator:        "/srv/mvm-cache",
+				VMID:                testVMID,
+				ExpectedRootfsBytes: expectedRootfsBytes,
+				Filesystem:          FilesystemExt4,
+				Plan:                VMProvisionPlan{ResizeBytes: test.resizeBytes},
+			}
+
+			err := request.Validate()
+
+			if test.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
 // Rationale: The shared username validator constrains characters but not length. The privileged protocol owns an
 // explicit byte boundary and must accept its exact maximum for both guest-account fields.
 func TestVMProvisionRequestAcceptsGuestUsernameBoundary(t *testing.T) {
@@ -433,4 +475,55 @@ func TestVMProvisionResultRequiresUnchangedSizeWithoutResize(t *testing.T) {
 	err := changed.Validate(request)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "size does not match")
+}
+
+// Rationale: Result admission must use the same request-relative boundary as request admission. Equal and growing
+// resize results are authoritative only at the exact requested size; returning the old size after a grow is invalid.
+func TestVMProvisionResultBindsGrowOnlyResize(t *testing.T) {
+	const expectedRootfsBytes = uint64(512 << 20)
+	tests := map[string]struct {
+		resizeBytes uint64
+		resultBytes uint64
+		wantErr     string
+	}{
+		"equal resize result": {
+			resizeBytes: expectedRootfsBytes,
+			resultBytes: expectedRootfsBytes,
+		},
+		"growing resize result": {
+			resizeBytes: expectedRootfsBytes + 1,
+			resultBytes: expectedRootfsBytes + 1,
+		},
+		"grow returned old size": {
+			resizeBytes: expectedRootfsBytes + 1,
+			resultBytes: expectedRootfsBytes,
+			wantErr:     "size does not match",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			request := VMProvisionRequest{
+				CacheLocator:        "/srv/mvm-cache",
+				VMID:                testVMID,
+				ExpectedRootfsBytes: expectedRootfsBytes,
+				Filesystem:          FilesystemExt4,
+				Plan:                VMProvisionPlan{ResizeBytes: test.resizeBytes},
+			}
+			result := VMProvisionResult{
+				VMID:        testVMID,
+				Filesystem:  FilesystemExt4,
+				RootfsBytes: test.resultBytes,
+			}
+
+			err := result.Validate(request)
+
+			if test.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
