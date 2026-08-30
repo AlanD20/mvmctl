@@ -13,13 +13,24 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/service/agent"
+	"mvmctl/pkg/errs"
 )
 
 // Rationale: The release build's generated guest agent is the only executable byte source authorized for VM
 // provisioning. Each effect request must receive an independent copy rather than the agent package's shared slice.
-func TestSystemLoopMountAgentBinaryReturnsFreshGeneratedAgent(t *testing.T) {
+func TestSystemLoopMountAgentBinaryRejectsPlaceholderOrReturnsFreshGeneratedAgent(t *testing.T) {
 	embedded := agent.AgentBinary()
-	require.NotEmpty(t, embedded)
+	if len(embedded) == 0 {
+		got, err := systemLoopMountAgentBinary(t.Context())
+
+		require.Error(t, err)
+		assert.Nil(t, got)
+		domainErr := errs.AsDomainError(err)
+		require.NotNil(t, domainErr)
+		assert.Equal(t, errs.CodeLoopMountError, domainErr.Code)
+		assert.Equal(t, errs.ClassInternal, domainErr.Class)
+		return
+	}
 
 	first, err := systemLoopMountAgentBinary(t.Context())
 	require.NoError(t, err)
