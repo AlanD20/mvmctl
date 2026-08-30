@@ -17,11 +17,10 @@ const (
 	testJailerHash   = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 )
 
-func TestInstanceAuthorityRootConstants(t *testing.T) {
+func TestInstanceAuthorityDurableRootConstant(t *testing.T) {
 	t.Parallel()
 
 	assert.Equal(t, "/var/lib/mvmctl/instances", infra.JailerInstanceRoot)
-	assert.Equal(t, "/run/mvmctl/authority", infra.PrivilegedAuthorityRoot)
 }
 
 func TestInstanceRecordCodecRoundTrip(t *testing.T) {

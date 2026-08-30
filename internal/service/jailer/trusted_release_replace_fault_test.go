@@ -23,7 +23,7 @@ func TestTrustedReleaseCandidateReplacementRejectsInvalidAuthorityBeforeExchange
 			return t.Context()
 		},
 		"inactive release slot lease": func(t *testing.T, candidate *trustedReleaseCandidate) context.Context {
-			candidate.architecture.slotLease.releaseLock.fd = -1
+			candidate.architecture.slotLease.releaseLock.active = false
 			return t.Context()
 		},
 		"pre-canceled context": func(t *testing.T, _ *trustedReleaseCandidate) context.Context {

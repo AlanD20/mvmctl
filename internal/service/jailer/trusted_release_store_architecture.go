@@ -38,7 +38,7 @@ func (architecture *trustedReleaseArchitectureWriteLease) requireActiveSlotLease
 		return trustedReleaseStoreError("trusted release architecture write lease is not active", nil)
 	}
 	if architecture.slotLease == nil || architecture.slotLease.roots == nil ||
-		architecture.slotLease.releaseLock == nil || architecture.slotLease.releaseLock.fd < 0 ||
+		!architecture.slotLease.releaseLock.isActive() ||
 		architecture.slotLease.slot != architecture.slot {
 		return trustedReleaseStoreError("release slot lease is not active for trusted release architecture", nil)
 	}
@@ -54,7 +54,7 @@ func (lease *trustedReleaseStoreWriteLease) openArchitectureForWrite(
 	if lease == nil || lease.store == nil || lease.store.binariesFD < 0 || len(lease.store.retained) == 0 {
 		return nil, trustedReleaseStoreError("trusted release store write lease is not active", nil)
 	}
-	if slotLease == nil || slotLease.roots == nil || slotLease.releaseLock == nil || slotLease.releaseLock.fd < 0 {
+	if slotLease == nil || slotLease.roots == nil || !slotLease.releaseLock.isActive() {
 		return nil, trustedReleaseStoreError("release slot lease is not active for trusted release write", nil)
 	}
 	slot := slotLease.slot

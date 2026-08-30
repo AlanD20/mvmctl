@@ -4,21 +4,27 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
+	"sync"
 
-	"golang.org/x/sys/unix"
-
+	"mvmctl/internal/lib/authorityfs"
 	"mvmctl/pkg/errs"
 )
 
 type authorityLock struct {
-	deps instanceAuthorityDeps
-	fd   int
+	mu         sync.Mutex
+	value      instanceAuthorityLock
+	active     bool
+	released   bool
+	releaseErr error
 }
 
 func (roots *instanceAuthorityRoots) acquireIndexLock(ctx context.Context) (*authorityLock, error) {
-	return acquireAuthorityLock(ctx, roots.deps, roots.policy, roots.authorityFD, "index.lock", "global index")
+	value, err := roots.authority.acquireIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &authorityLock{value: value, active: true}, nil
 }
 
 func (roots *instanceAuthorityRoots) acquireReleaseSlotLock(
@@ -28,14 +34,15 @@ func (roots *instanceAuthorityRoots) acquireReleaseSlotLock(
 	if err := validateReleaseSlotValue(slot); err != nil {
 		return nil, instanceValidationError(err.Error())
 	}
-	return acquireAuthorityLock(
-		ctx,
-		roots.deps,
-		roots.policy,
-		roots.releasesFD,
-		releaseLockName(slot),
-		"release",
-	)
+	key, err := authorityfs.NewReleaseKey(releaseSlotDigest(slot))
+	if err != nil {
+		return nil, instanceValidationError(err.Error())
+	}
+	value, err := roots.authority.acquireRelease(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	return &authorityLock{value: value, active: true}, nil
 }
 
 func (directories *instanceUIDDirectories) acquireVMLock(
@@ -45,113 +52,47 @@ func (directories *instanceUIDDirectories) acquireVMLock(
 	if !vmIDPattern.MatchString(vmID) {
 		return nil, instanceValidationError("vm ID is invalid")
 	}
-	return acquireAuthorityLock(
-		ctx,
-		directories.deps,
-		directories.policy,
-		directories.authorityFD,
-		vmID+".lock",
-		"VM",
-	)
-}
-
-func acquireAuthorityLock(
-	ctx context.Context,
-	deps instanceAuthorityDeps,
-	policy instanceAuthorityPolicy,
-	parentFD int,
-	name string,
-	description string,
-) (*authorityLock, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, instanceLockContextError(description, err)
-	}
-	fd, err := deps.openAt(ctx, parentFD, name, instanceLockCreate, instanceStateFileMode)
-	created := err == nil
-	if errors.Is(err, unix.EEXIST) {
-		fd, err = deps.openAt(ctx, parentFD, name, instanceLockFlags, 0)
-	}
+	key, err := authorityfs.NewVMKey(vmID)
 	if err != nil {
-		return nil, instanceLockError("open "+description+" lock", err)
+		return nil, instanceValidationError(err.Error())
 	}
-	abort := func(cause error) (*authorityLock, error) {
-		if closeErr := deps.close(context.WithoutCancel(ctx), fd); closeErr != nil {
-			cause = errors.Join(cause, closeErr)
-		}
-		return nil, instanceLockError("prepare "+description+" lock", cause)
+	value, err := directories.authority.acquireVM(ctx, key)
+	if err != nil {
+		return nil, err
 	}
-	if created {
-		if err := deps.fchown(ctx, fd, int(policy.expectedUID), int(policy.expectedGID)); err != nil {
-			return abort(err)
-		}
-		if err := deps.fchmod(ctx, fd, instanceStateFileMode); err != nil {
-			return abort(err)
-		}
-	}
-	if err := verifyInstanceRegularFile(ctx, deps, fd, description+" lock", policy); err != nil {
-		return abort(err)
-	}
-	if created {
-		if err := deps.fsync(ctx, fd); err != nil {
-			return abort(err)
-		}
-		if err := deps.fsync(ctx, parentFD); err != nil {
-			return abort(err)
-		}
-	}
-	for {
-		err := deps.flock(ctx, fd, unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			return &authorityLock{deps: deps, fd: fd}, nil
-		}
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
-			return abort(err)
-		}
-		if err := deps.waitLock(ctx); err != nil {
-			if closeErr := deps.close(context.WithoutCancel(ctx), fd); closeErr != nil {
-				err = errors.Join(err, closeErr)
-			}
-			return nil, instanceLockContextError(description, err)
-		}
-	}
+	return &authorityLock{value: value, active: true}, nil
 }
 
 func (lock *authorityLock) Release(ctx context.Context) error {
-	if lock == nil || lock.fd < 0 {
+	if lock == nil {
 		return nil
 	}
-	cleanupCtx := context.WithoutCancel(ctx)
-	unlockErr := lock.deps.flock(cleanupCtx, lock.fd, unix.LOCK_UN)
-	closeErr := lock.deps.close(cleanupCtx, lock.fd)
-	lock.fd = -1
-	if err := errors.Join(unlockErr, closeErr); err != nil {
-		return instanceLockError("release authority lock", err)
+	lock.mu.Lock()
+	defer lock.mu.Unlock()
+	if lock.released {
+		return lock.releaseErr
 	}
-	return nil
+	if !lock.active {
+		return nil
+	}
+	if lock.value == nil {
+		return instanceStateError("", "authority lock is not active")
+	}
+	err := lock.value.Release(context.WithoutCancel(ctx))
+	lock.active = false
+	lock.value = nil
+	lock.released = true
+	lock.releaseErr = err
+	return lock.releaseErr
 }
 
-func verifyInstanceRegularFile(
-	ctx context.Context,
-	deps instanceAuthorityDeps,
-	fd int,
-	description string,
-	policy instanceAuthorityPolicy,
-) error {
-	var stat unix.Stat_t
-	if err := deps.fstat(ctx, fd, &stat); err != nil {
-		return instanceAtomicError("inspect "+description, err)
+func (lock *authorityLock) isActive() bool {
+	if lock == nil {
+		return false
 	}
-	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
-		return instanceAtomicError(description+" is not a regular file", nil)
-	}
-	if stat.Uid != policy.expectedUID || stat.Gid != policy.expectedGID ||
-		stat.Mode&07777 != instanceStateFileMode {
-		return instanceAtomicError(description+" has unexpected owner or mode", nil)
-	}
-	return nil
+	lock.mu.Lock()
+	defer lock.mu.Unlock()
+	return lock.active
 }
 
 func releaseLockName(slot releaseSlot) string {

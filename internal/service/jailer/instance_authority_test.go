@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ import (
 func TestInstanceAuthorityLocksReleaseSlotBeforeIdentityResolution(t *testing.T) {
 	t.Parallel()
 
-	authority, root := newTestInstanceAuthority(t)
+	authority, _ := newTestInstanceAuthority(t)
 	release := testLaunchRegistration().release
 	slot := releaseSlot{version: release.version, architecture: release.architecture}
 
@@ -29,8 +28,6 @@ func TestInstanceAuthorityLocksReleaseSlotBeforeIdentityResolution(t *testing.T)
 	require.NotNil(t, lease)
 	assert.Equal(t, slot, lease.slot)
 	require.NoError(t, lease.Release(context.Background()))
-	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/releases", releaseLockName(slot)), 0600)
-	assert.NoFileExists(t, filepath.Join(root, "run/mvmctl/releases", releaseLockName(slot)))
 }
 
 func TestReleaseSlotLeaseTransfersToSuccessfulLaunch(t *testing.T) {
@@ -38,20 +35,8 @@ func TestReleaseSlotLeaseTransfersToSuccessfulLaunch(t *testing.T) {
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	deps := realInstanceAuthorityDeps()
-	realWaitLock := deps.waitLock
-	contentionObserved := make(chan struct{})
-	retryLock := make(chan struct{})
-	var contentionOnce sync.Once
-	deps.waitLock = func(ctx context.Context) error {
-		contentionOnce.Do(func() { close(contentionObserved) })
-		select {
-		case <-retryLock:
-			return realWaitLock(ctx)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
+	tree := newTestInstanceAuthorityTree()
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchRegistration()
 	slot := releaseSlotForIdentity(registration.release)
 	slotLease, err := authority.lockReleaseSlot(
@@ -85,12 +70,11 @@ func TestReleaseSlotLeaseTransfersToSuccessfulLaunch(t *testing.T) {
 		resultCh <- result{lease: lease, err: lockErr}
 	}()
 	select {
-	case <-contentionObserved:
+	case <-tree.releaseWaitObserved(t, slot):
 	case <-waitCtx.Done():
 		require.Failf(t, "transferred release lock contention was not observed", "error: %v", waitCtx.Err())
 	}
 	require.NoError(t, launch.Release(context.Background()))
-	close(retryLock)
 	select {
 	case acquired := <-resultCh:
 		require.NoError(t, acquired.err)
@@ -118,23 +102,15 @@ func TestReleaseSlotLeaseRejectsMismatchedLaunchWithoutWritingRecord(t *testing.
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	deps := realInstanceAuthorityDeps()
-	realFlock := deps.flock
-	var exclusiveAcquisitions atomic.Int32
-	deps.flock = func(ctx context.Context, fd int, how int) error {
-		err := realFlock(ctx, fd, how)
-		if err == nil && how == unix.LOCK_EX|unix.LOCK_NB {
-			exclusiveAcquisitions.Add(1)
-		}
-		return err
-	}
-	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
+	tree := newTestInstanceAuthorityTree()
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchRegistration()
 	slotLease, err := authority.lockReleaseSlot(
 		context.Background(),
 		releaseSlotForIdentity(registration.release),
 	)
 	require.NoError(t, err)
-	assert.Equal(t, int32(1), exclusiveAcquisitions.Load())
+	assert.Equal(t, []string{"release"}, tree.acquisitionSnapshot())
 
 	registration.release.version = "1.17.0"
 	launch, err := slotLease.registerLaunch(
@@ -147,7 +123,7 @@ func TestReleaseSlotLeaseRejectsMismatchedLaunchWithoutWritingRecord(t *testing.
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
 	assert.Equal(t, errs.CodeValidationFailed, domainErr.Code)
-	assert.Equal(t, int32(1), exclusiveAcquisitions.Load())
+	assert.Equal(t, []string{"release"}, tree.acquisitionSnapshot())
 	assert.NoFileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
 	assert.NotNil(t, slotLease.roots)
 	assert.NotNil(t, slotLease.releaseLock)
@@ -178,16 +154,14 @@ func TestReleaseSlotLeaseIndexFailureRetainsPreparedSlot(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			root := prepareInstanceAuthorityTestRoot(t)
 			deps := realInstanceAuthorityDeps()
-			realFlock := deps.flock
 			indexErr := errors.New("index lock failed")
-			var exclusiveAttempts atomic.Int32
-			deps.flock = func(ctx context.Context, fd int, how int) error {
-				if how == unix.LOCK_EX|unix.LOCK_NB && exclusiveAttempts.Add(1) == 2 {
-					return indexErr
-				}
-				return realFlock(ctx, fd, how)
-			}
-			authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
+			tree := newTestInstanceAuthorityTree()
+			tree.indexErr = indexErr
+			authority := newInstanceAuthorityWithPolicy(
+				deps,
+				testInstanceAuthorityPolicy(root),
+				tree,
+			)
 			registration := testLaunchRegistration()
 			lease, err := authority.lockReleaseSlot(
 				context.Background(),
@@ -198,7 +172,7 @@ func TestReleaseSlotLeaseIndexFailureRetainsPreparedSlot(t *testing.T) {
 			err = run(context.Background(), lease, registration)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, indexErr)
-			assert.Equal(t, int32(2), exclusiveAttempts.Load())
+			assert.Equal(t, []string{"release"}, tree.acquisitionSnapshot())
 			assert.NotNil(t, lease.roots)
 			assert.NotNil(t, lease.releaseLock)
 			assert.NoFileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
@@ -443,7 +417,11 @@ func TestInstanceAuthorityReleaseScanCreatesLockUnderAuthorityRoot(t *testing.T)
 	recordDir := filepath.Join(root, "var/lib/mvmctl/instances/1000")
 	require.NoError(t, os.MkdirAll(recordDir, 0700))
 	require.NoError(t, os.WriteFile(filepath.Join(recordDir, testVMID+".json"), raw, 0600))
-	authority := newInstanceAuthorityWithPolicy(realInstanceAuthorityDeps(), testInstanceAuthorityPolicy(root))
+	authority := newInstanceAuthorityWithPolicy(
+		realInstanceAuthorityDeps(),
+		testInstanceAuthorityPolicy(root),
+		newTestInstanceAuthorityTree(),
+	)
 
 	lease, err := authority.lockReleaseSlot(context.Background(), releaseSlotForIdentity(record.release))
 	require.NoError(t, err)
@@ -452,8 +430,7 @@ func TestInstanceAuthorityReleaseScanCreatesLockUnderAuthorityRoot(t *testing.T)
 	assert.Equal(t, errs.ClassConflict, errs.AsDomainError(err).Class)
 	require.NoError(t, lease.Release(context.Background()))
 
-	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/1000/"+testVMID+".lock"), 0600)
-	assert.NoFileExists(t, filepath.Join(root, "run/mvmctl/1000/"+testVMID+".lock"))
+	assert.FileExists(t, filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json"))
 }
 
 func TestInstanceAuthorityReleaseSlotLeaseSerializesCompetingIdentities(t *testing.T) {
@@ -461,20 +438,8 @@ func TestInstanceAuthorityReleaseSlotLeaseSerializesCompetingIdentities(t *testi
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	deps := realInstanceAuthorityDeps()
-	realWaitLock := deps.waitLock
-	contentionObserved := make(chan struct{})
-	retryLock := make(chan struct{})
-	var contentionOnce sync.Once
-	deps.waitLock = func(ctx context.Context) error {
-		contentionOnce.Do(func() { close(contentionObserved) })
-		select {
-		case <-retryLock:
-			return realWaitLock(ctx)
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
+	tree := newTestInstanceAuthorityTree()
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	held, err := authority.lockReleaseSlot(
 		context.Background(),
 		releaseSlotForIdentity(testLaunchRegistration().release),
@@ -502,14 +467,13 @@ func TestInstanceAuthorityReleaseSlotLeaseSerializesCompetingIdentities(t *testi
 	}()
 
 	select {
-	case <-contentionObserved:
+	case <-tree.releaseWaitObserved(t, held.slot):
 	case <-waitCtx.Done():
 		require.Failf(t, "release lock contention was not observed", "error: %v", waitCtx.Err())
 	}
 
 	require.NoError(t, held.Release(context.Background()))
 	held = nil
-	close(retryLock)
 	select {
 	case acquired := <-resultCh:
 		require.NoError(t, acquired.err)
@@ -525,14 +489,8 @@ func TestInstanceAuthorityReleaseSlotWaitIsCancellableAndOwnerRemainsActive(t *t
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	deps := realInstanceAuthorityDeps()
-	contentionObserved := make(chan struct{})
-	var contentionOnce sync.Once
-	deps.waitLock = func(ctx context.Context) error {
-		contentionOnce.Do(func() { close(contentionObserved) })
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
+	tree := newTestInstanceAuthorityTree()
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	slot := releaseSlotForIdentity(testLaunchRegistration().release)
 	held, err := authority.lockReleaseSlot(context.Background(), slot)
 	require.NoError(t, err)
@@ -549,7 +507,7 @@ func TestInstanceAuthorityReleaseSlotWaitIsCancellableAndOwnerRemainsActive(t *t
 	}()
 
 	select {
-	case <-contentionObserved:
+	case <-tree.releaseWaitObserved(t, slot):
 	case <-time.After(time.Second):
 		require.Fail(t, "release slot lock contention was not observed")
 	}
@@ -591,30 +549,8 @@ func TestInstanceAuthorityRegisterLockOrder(t *testing.T) {
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	deps := realInstanceAuthorityDeps()
-	realOpenAt := deps.openAt
-	realFlock := deps.flock
-	namesByFD := make(map[int]string)
-	var namesMu sync.Mutex
-	deps.openAt = func(ctx context.Context, parentFD int, name string, flags int, mode uint32) (int, error) {
-		fd, err := realOpenAt(ctx, parentFD, name, flags, mode)
-		if err == nil {
-			namesMu.Lock()
-			namesByFD[fd] = name
-			namesMu.Unlock()
-		}
-		return fd, err
-	}
-	acquired := make([]string, 0, 3)
-	deps.flock = func(ctx context.Context, fd int, how int) error {
-		err := realFlock(ctx, fd, how)
-		if err == nil && how == unix.LOCK_EX|unix.LOCK_NB {
-			namesMu.Lock()
-			acquired = append(acquired, namesByFD[fd])
-			namesMu.Unlock()
-		}
-		return err
-	}
-	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
+	tree := newTestInstanceAuthorityTree()
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
 	registration := testLaunchRegistration()
 	slotLease, err := authority.lockReleaseSlot(
 		context.Background(),
@@ -630,12 +566,7 @@ func TestInstanceAuthorityRegisterLockOrder(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, lease.Release(context.Background()))
 
-	require.Len(t, acquired, 3)
-	assert.Equal(t, "index.lock", acquired[1])
-	assert.Equal(t, testVMID+".lock", acquired[2])
-	assert.NotEqual(t, "index.lock", acquired[0])
-	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/index.lock"), 0600)
-	assertExactMode(t, filepath.Join(root, "run/mvmctl/authority/1000/"+testVMID+".lock"), 0600)
+	assert.Equal(t, []string{"release", "index", "vm"}, tree.acquisitionSnapshot())
 }
 
 func TestInstanceAuthorityUsesOnlyFixedRootPathOpen(t *testing.T) {
@@ -649,7 +580,7 @@ func TestInstanceAuthorityUsesOnlyFixedRootPathOpen(t *testing.T) {
 		opened = append(opened, path)
 		return realOpen(ctx, path, flags, mode)
 	}
-	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), newTestInstanceAuthorityTree())
 	registration := testLaunchRegistration()
 	slotLease, err := authority.lockReleaseSlot(
 		context.Background(),
@@ -702,7 +633,7 @@ func TestInstanceAuthorityPostRenameErrorReturnsNoLeaseAndDurableRecord(t *testi
 		}
 		return realFsync(ctx, fd)
 	}
-	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root))
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), newTestInstanceAuthorityTree())
 	registration := testLaunchRegistration()
 	slotLease, err := authority.lockReleaseSlot(
 		context.Background(),
@@ -734,6 +665,7 @@ func newTestInstanceAuthority(t *testing.T) (*instanceAuthority, string) {
 	return newInstanceAuthorityWithPolicy(
 		realInstanceAuthorityDeps(),
 		testInstanceAuthorityPolicy(root),
+		newTestInstanceAuthorityTree(),
 	), root
 }
 
@@ -765,6 +697,7 @@ func writeTestAuthorityRecord(t *testing.T, root string, record instanceRecord) 
 		context.Background(),
 		realInstanceAuthorityDeps(),
 		testInstanceAuthorityPolicy(root),
+		newTestInstanceAuthorityTree(),
 	)
 	require.NoError(t, err)
 	uidDirs, err := roots.openUIDDirectories(context.Background(), record.ownerUID)

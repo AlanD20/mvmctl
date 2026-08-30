@@ -11,7 +11,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -24,15 +23,10 @@ const (
 	instanceReadFlags      = unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	instanceInspectFlags   = unix.O_PATH | unix.O_CLOEXEC | unix.O_NOFOLLOW
 	instanceTempFlags      = unix.O_WRONLY | unix.O_CREAT | unix.O_EXCL | unix.O_CLOEXEC | unix.O_NOFOLLOW
-	instanceLockFlags      = unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW
-	instanceLockCreate     = instanceLockFlags | unix.O_CREAT | unix.O_EXCL
-
-	instancePrivateDirMode     = uint32(0700)
-	instanceTraversableDirMode = uint32(0711)
-	instanceStateFileMode      = uint32(0600)
-	instanceTempAttempts       = 8
-	instanceIOChunk            = 4096
-	instanceLockPoll           = 10 * time.Millisecond
+	instancePrivateDirMode = uint32(0700)
+	instanceStateFileMode  = uint32(0600)
+	instanceTempAttempts   = 8
+	instanceIOChunk        = 4096
 )
 
 type instanceDirectoryClass uint8
@@ -41,7 +35,6 @@ const (
 	instanceAncestorDirectory instanceDirectoryClass = iota
 	instanceStateBaseDirectory
 	instancePrivateDirectory
-	instanceTraversableDirectory
 )
 
 type instanceAuthorityDeps struct {
@@ -57,10 +50,8 @@ type instanceAuthorityDeps struct {
 	close        func(context.Context, int) error
 	renameAt     func(context.Context, int, string, int, string) error
 	unlinkAt     func(context.Context, int, string, int) error
-	flock        func(context.Context, int, int) error
 	randomName   func(context.Context) (string, error)
 	readDirNames func(context.Context, int) ([]string, error)
-	waitLock     func(context.Context) error
 }
 
 type instanceAuthorityPolicy struct {
@@ -70,20 +61,19 @@ type instanceAuthorityPolicy struct {
 }
 
 type instanceAuthorityRoots struct {
-	deps        instanceAuthorityDeps
-	policy      instanceAuthorityPolicy
-	stateFD     int
-	authorityFD int
-	releasesFD  int
-	retained    []int
+	deps      instanceAuthorityDeps
+	policy    instanceAuthorityPolicy
+	stateFD   int
+	authority instanceJailerAuthority
+	retained  []int
 }
 
 type instanceUIDDirectories struct {
-	deps        instanceAuthorityDeps
-	policy      instanceAuthorityPolicy
-	uid         uint32
-	stateFD     int
-	authorityFD int
+	deps      instanceAuthorityDeps
+	policy    instanceAuthorityPolicy
+	uid       uint32
+	stateFD   int
+	authority instanceJailerUID
 }
 
 func productionInstanceAuthorityPolicy() instanceAuthorityPolicy {
@@ -98,6 +88,7 @@ func openInstanceAuthorityRoots(
 	ctx context.Context,
 	deps instanceAuthorityDeps,
 	policy instanceAuthorityPolicy,
+	authorityTree instanceAuthorityTree,
 ) (_ *instanceAuthorityRoots, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return nil, instanceAtomicError("open instance authority roots", err)
@@ -106,14 +97,18 @@ func openInstanceAuthorityRoots(
 	if err != nil {
 		return nil, err
 	}
-	authorityNames, err := instanceAuthorityPathComponents(infra.PrivilegedAuthorityRoot, 3)
-	if err != nil {
-		return nil, err
-	}
-	retained := make([]int, 0, 9)
+	retained := make([]int, 0, 5)
+	var authority instanceJailerAuthority
 	defer func() {
 		if returnErr == nil {
 			return
+		}
+		if authority != nil {
+			returnErr = appendInstanceOperationError(
+				returnErr,
+				"release rejected Jailer authority tree",
+				authority.Release(context.WithoutCancel(ctx)),
+			)
 		}
 		if err := closeInstanceFDs(ctx, deps, retained); err != nil {
 			returnErr = joinInstanceAtomicError(returnErr, "close rejected instance authority roots", err)
@@ -189,66 +184,16 @@ func openInstanceAuthorityRoots(
 	}
 	retained = append(retained, stateFD)
 
-	runFD, err := openInstanceDirectory(
-		ctx,
-		deps,
-		rootFD,
-		authorityNames[0],
-		false,
-		instanceAncestorDirectory,
-		policy,
-	)
+	if authorityTree == nil {
+		return nil, instanceAtomicError("Jailer authority tree is not configured", nil)
+	}
+	authority, err = authorityTree.openJailer(ctx)
 	if err != nil {
 		return nil, err
 	}
-	retained = append(retained, runFD)
-	ephemeralBaseFD, err := openInstanceDirectory(
-		ctx,
-		deps,
-		runFD,
-		authorityNames[1],
-		true,
-		instanceTraversableDirectory,
-		policy,
-	)
-	if err != nil {
-		return nil, err
-	}
-	retained = append(retained, ephemeralBaseFD)
-	authorityFD, err := openInstanceDirectory(
-		ctx,
-		deps,
-		ephemeralBaseFD,
-		authorityNames[2],
-		true,
-		instancePrivateDirectory,
-		policy,
-	)
-	if err != nil {
-		return nil, err
-	}
-	retained = append(retained, authorityFD)
-	releasesFD, err := openInstanceDirectory(
-		ctx,
-		deps,
-		authorityFD,
-		"releases",
-		true,
-		instancePrivateDirectory,
-		policy,
-	)
-	if err != nil {
-		return nil, err
-	}
-	retained = append(retained, releasesFD)
 
 	return &instanceAuthorityRoots{
-		deps:        deps,
-		policy:      policy,
-		stateFD:     stateFD,
-		authorityFD: authorityFD,
-		releasesFD:  releasesFD,
-		retained:    retained,
+		deps: deps, policy: policy, stateFD: stateFD, authority: authority, retained: retained,
 	}, nil
 }
 
@@ -288,15 +233,7 @@ func (roots *instanceAuthorityRoots) openUIDDirectories(
 	if err != nil {
 		return nil, err
 	}
-	authorityFD, err := openInstanceDirectory(
-		ctx,
-		roots.deps,
-		roots.authorityFD,
-		name,
-		true,
-		instancePrivateDirectory,
-		roots.policy,
-	)
+	authority, err := roots.authority.openUID(ctx, uid)
 	if err != nil {
 		if closeErr := roots.deps.close(context.WithoutCancel(ctx), stateFD); closeErr != nil {
 			err = joinInstanceAtomicError(err, "close instance UID state directory", closeErr)
@@ -304,11 +241,11 @@ func (roots *instanceAuthorityRoots) openUIDDirectories(
 		return nil, err
 	}
 	return &instanceUIDDirectories{
-		deps:        roots.deps,
-		policy:      roots.policy,
-		uid:         uid,
-		stateFD:     stateFD,
-		authorityFD: authorityFD,
+		deps:      roots.deps,
+		policy:    roots.policy,
+		uid:       uid,
+		stateFD:   stateFD,
+		authority: authority,
 	}, nil
 }
 
@@ -395,8 +332,6 @@ func instanceDirectoryCreateMode(directoryClass instanceDirectoryClass) (uint32,
 	switch directoryClass {
 	case instanceStateBaseDirectory, instancePrivateDirectory:
 		return instancePrivateDirMode, nil
-	case instanceTraversableDirectory:
-		return instanceTraversableDirMode, nil
 	default:
 		return 0, instanceAtomicError("instance authority ancestor directory cannot be created", nil)
 	}
@@ -433,12 +368,35 @@ func verifyInstanceDirectory(
 	return nil
 }
 
+func verifyInstanceRegularFile(
+	ctx context.Context,
+	deps instanceAuthorityDeps,
+	fd int,
+	description string,
+	policy instanceAuthorityPolicy,
+) error {
+	var stat unix.Stat_t
+	if err := deps.fstat(ctx, fd, &stat); err != nil {
+		return instanceAtomicError("inspect "+description, err)
+	}
+	if stat.Mode&unix.S_IFMT != unix.S_IFREG {
+		return instanceAtomicError(description+" is not a regular file", nil)
+	}
+	if stat.Uid != policy.expectedUID || stat.Gid != policy.expectedGID ||
+		stat.Mode&07777 != instanceStateFileMode {
+		return instanceAtomicError(description+" has unexpected owner or mode", nil)
+	}
+	return nil
+}
+
 func (roots *instanceAuthorityRoots) Release(ctx context.Context) error {
 	if roots == nil || len(roots.retained) == 0 {
 		return nil
 	}
-	err := closeInstanceFDs(context.WithoutCancel(ctx), roots.deps, roots.retained)
+	err := roots.authority.Release(context.WithoutCancel(ctx))
+	err = errors.Join(err, closeInstanceFDs(context.WithoutCancel(ctx), roots.deps, roots.retained))
 	roots.retained = nil
+	roots.authority = nil
 	if err != nil {
 		return instanceAtomicError("release instance authority root descriptors", err)
 	}
@@ -451,9 +409,9 @@ func (directories *instanceUIDDirectories) Release(ctx context.Context) error {
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
 	var result error
-	if directories.authorityFD >= 0 {
-		result = errors.Join(result, directories.deps.close(cleanupCtx, directories.authorityFD))
-		directories.authorityFD = -1
+	if directories.authority != nil {
+		result = errors.Join(result, directories.authority.Release(cleanupCtx))
+		directories.authority = nil
 	}
 	if directories.stateFD >= 0 {
 		result = errors.Join(result, directories.deps.close(cleanupCtx, directories.stateFD))
@@ -536,17 +494,6 @@ func readInstanceDirectoryNames(ctx context.Context, fd int) ([]string, error) {
 	return names, nil
 }
 
-func waitForInstanceLock(ctx context.Context) error {
-	timer := time.NewTimer(instanceLockPoll)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
 func realInstanceAuthorityDeps() instanceAuthorityDeps {
 	return instanceAuthorityDeps{
 		open: func(_ context.Context, path string, flags int, mode uint32) (int, error) {
@@ -571,10 +518,8 @@ func realInstanceAuthorityDeps() instanceAuthorityDeps {
 		unlinkAt: func(_ context.Context, parentFD int, name string, flags int) error {
 			return unix.Unlinkat(parentFD, name, flags)
 		},
-		flock:        func(_ context.Context, fd, how int) error { return unix.Flock(fd, how) },
 		randomName:   randomInstanceTempName,
 		readDirNames: readInstanceDirectoryNames,
-		waitLock:     waitForInstanceLock,
 	}
 }
 

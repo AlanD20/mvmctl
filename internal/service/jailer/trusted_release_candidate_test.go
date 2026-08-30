@@ -101,7 +101,7 @@ func TestTrustedReleaseArchitectureRejectsCandidateAuthorityBeforeNamespaceMutat
 		},
 		"released slot lease": {
 			mutate: func(fixture *trustedReleaseCandidateFixture) {
-				fixture.architecture.slotLease.releaseLock.fd = -1
+				fixture.architecture.slotLease.releaseLock.active = false
 			},
 		},
 		"missing stages": {
@@ -133,7 +133,7 @@ func TestTrustedReleaseArchitectureRejectsCandidateAuthorityBeforeNamespaceMutat
 			fixture := newTrustedReleaseCandidateFixture(t)
 			before := directoryNamesForTest(t, fixture.store.architecturePath)
 			originalArchitectureFD := fixture.architecture.fd
-			originalReleaseLockFD := fixture.architecture.slotLease.releaseLock.fd
+			originalReleaseLockActive := fixture.architecture.slotLease.releaseLock.active
 			if test.mutate != nil {
 				test.mutate(fixture)
 			}
@@ -149,7 +149,7 @@ func TestTrustedReleaseArchitectureRejectsCandidateAuthorityBeforeNamespaceMutat
 
 			candidate, err := fixture.architecture.stageCandidate(t.Context(), selected)
 			fixture.architecture.fd = originalArchitectureFD
-			fixture.architecture.slotLease.releaseLock.fd = originalReleaseLockFD
+			fixture.architecture.slotLease.releaseLock.active = originalReleaseLockActive
 			require.Error(t, err)
 			assert.Nil(t, candidate)
 			assert.Equal(t, errs.CodeBinaryTrustedInstallFailed, errs.AsDomainError(err).Code)
@@ -882,6 +882,9 @@ func TestTrustedReleaseCandidateWritableStageCloseFailuresDiscardCandidate(t *te
 				fixture.architecture.deps.close = func(ctx context.Context, fd int) error {
 					err := realClose(ctx, fd)
 					if fd == manifestFD {
+						// Descriptor numbers may be reused during rollback. Inject only the
+						// intended manifest-stage close fault, not later cleanup closes.
+						manifestFD = -1
 						return errors.Join(err, unix.EIO)
 					}
 					return err

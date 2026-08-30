@@ -117,7 +117,7 @@ func TestOpenTrustedReleaseArchitectureForWriteRequiresActiveSlotLeaseBeforeMuta
 		},
 		"released lock": func(slot releaseSlot) *releaseSlotLease {
 			lease := trustedReleaseSlotLeaseForWriteTest(slot)
-			lease.releaseLock.fd = -1
+			lease.releaseLock.active = false
 			return lease
 		},
 	}
@@ -506,7 +506,7 @@ func TestTrustedReleaseArchitectureRecoveryRequiresSameActiveSlotLease(t *testin
 			architecture.slotLease = nil
 		},
 		"released lease": func(architecture *trustedReleaseArchitectureWriteLease) {
-			architecture.slotLease.releaseLock.fd = -1
+			architecture.slotLease.releaseLock.active = false
 		},
 		"mismatched lease": func(architecture *trustedReleaseArchitectureWriteLease) {
 			architecture.slotLease.slot.version = "1.16.0"
@@ -830,7 +830,7 @@ func writeTrustedReleaseRecoveryCandidate(
 func trustedReleaseSlotLeaseForWriteTest(slot releaseSlot) *releaseSlotLease {
 	return &releaseSlotLease{
 		roots:       &instanceAuthorityRoots{},
-		releaseLock: &authorityLock{fd: 123},
+		releaseLock: &authorityLock{active: true},
 		slot:        slot,
 	}
 }

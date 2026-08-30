@@ -8,8 +8,9 @@ import (
 )
 
 type instanceAuthority struct {
-	deps   instanceAuthorityDeps
-	policy instanceAuthorityPolicy
+	deps          instanceAuthorityDeps
+	policy        instanceAuthorityPolicy
+	authorityTree instanceAuthorityTree
 }
 
 type launchLease struct {
@@ -48,14 +49,19 @@ type lockedInstance struct {
 }
 
 func newInstanceAuthority() *instanceAuthority {
-	return newInstanceAuthorityWithPolicy(realInstanceAuthorityDeps(), productionInstanceAuthorityPolicy())
+	return newInstanceAuthorityWithPolicy(
+		realInstanceAuthorityDeps(),
+		productionInstanceAuthorityPolicy(),
+		systemInstanceAuthorityTree{},
+	)
 }
 
 func newInstanceAuthorityWithPolicy(
 	deps instanceAuthorityDeps,
 	policy instanceAuthorityPolicy,
+	authorityTree instanceAuthorityTree,
 ) *instanceAuthority {
-	return &instanceAuthority{deps: deps, policy: policy}
+	return &instanceAuthority{deps: deps, policy: policy, authorityTree: authorityTree}
 }
 
 func (authority *instanceAuthority) lockReleaseSlot(
@@ -65,7 +71,7 @@ func (authority *instanceAuthority) lockReleaseSlot(
 	if err := validateReleaseSlotValue(slot); err != nil {
 		return nil, instanceValidationError(err.Error())
 	}
-	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy)
+	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy, authority.authorityTree)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +105,7 @@ func (lease *releaseSlotLease) registerLaunch(
 	caller instanceCaller,
 	registration launchRegistration,
 ) (_ *launchLease, returnErr error) {
-	if lease == nil || lease.roots == nil || lease.releaseLock == nil || lease.releaseLock.fd < 0 {
+	if lease == nil || lease.roots == nil || !lease.releaseLock.isActive() {
 		return nil, instanceStateError(registration.vmID, "release slot lease is not active")
 	}
 	if err := validateInstanceCaller(caller); err != nil {
@@ -202,7 +208,7 @@ func (lease *releaseSlotLease) requireUnreferenced(
 	ctx context.Context,
 	release releaseIdentity,
 ) (returnErr error) {
-	if lease == nil || lease.roots == nil || lease.releaseLock == nil || lease.releaseLock.fd < 0 {
+	if lease == nil || lease.roots == nil || !lease.releaseLock.isActive() {
 		return instanceStateError("", "release slot lease is not active")
 	}
 	if err := validateReleaseIdentityValue(release); err != nil {
@@ -305,7 +311,7 @@ func (authority *instanceAuthority) BeginCleanup(
 }
 
 func (lease *cleanupLease) Complete(ctx context.Context) error {
-	if lease == nil || lease.vmLock == nil || lease.vmLock.fd < 0 {
+	if lease == nil || !lease.vmLock.isActive() {
 		return instanceStateError("", "cleanup lease is not active")
 	}
 	updated, err := completeInstanceCleanup(lease.record)
@@ -335,7 +341,7 @@ func (authority *instanceAuthority) lockOwnedInstance(
 	if !vmIDPattern.MatchString(vmID) {
 		return nil, instanceValidationError("vm ID is invalid")
 	}
-	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy)
+	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy, authority.authorityTree)
 	if err != nil {
 		return nil, err
 	}

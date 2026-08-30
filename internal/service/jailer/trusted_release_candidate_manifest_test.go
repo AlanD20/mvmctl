@@ -113,7 +113,7 @@ func TestTrustedReleaseArchitectureRejectsManifestStageAuthorityBeforeAnonymousO
 		},
 		"released slot lease": {
 			mutateArchitecture: func(architecture *trustedReleaseArchitectureWriteLease) {
-				architecture.slotLease.releaseLock.fd = -1
+				architecture.slotLease.releaseLock.active = false
 			},
 			code: errs.CodeBinaryTrustedInstallFailed,
 		},
@@ -137,7 +137,7 @@ func TestTrustedReleaseArchitectureRejectsManifestStageAuthorityBeforeAnonymousO
 			fixture, architecture := newTrustedReleaseArchitectureFixture(t)
 			manifest := testTrustedReleaseManifest(fixture.slot)
 			originalArchitectureFD := architecture.fd
-			originalReleaseLockFD := architecture.slotLease.releaseLock.fd
+			originalReleaseLockActive := architecture.slotLease.releaseLock.active
 			if test.mutateArchitecture != nil {
 				test.mutateArchitecture(architecture)
 			}
@@ -152,7 +152,7 @@ func TestTrustedReleaseArchitectureRejectsManifestStageAuthorityBeforeAnonymousO
 
 			stage, err := architecture.createManifestStage(t.Context(), manifest)
 			architecture.fd = originalArchitectureFD
-			architecture.slotLease.releaseLock.fd = originalReleaseLockFD
+			architecture.slotLease.releaseLock.active = originalReleaseLockActive
 			require.Error(t, err)
 			assert.Nil(t, stage)
 			assert.Equal(t, test.code, errs.AsDomainError(err).Code)

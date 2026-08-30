@@ -375,16 +375,13 @@ func TestReleaseAuthorityRemoveInstalledHoldsSlotLeaseThroughFinalCleanup(t *tes
 	fixture := newTrustedReleaseRemovalFixture(t)
 	realOpenAt := fixture.authority.storeDeps.openAt
 	realFsync := fixture.authority.storeDeps.fsync
-	realWaitLock := fixture.authority.instances.deps.waitLock
 	var architectureFD atomic.Int64
 	architectureFD.Store(-1)
 	var architectureFsyncs atomic.Int32
 	finalCleanupEntered := make(chan struct{})
 	releaseFinalCleanup := make(chan struct{})
-	contentionObserved := make(chan struct{})
 	var finalOnce sync.Once
 	var releaseOnce sync.Once
-	var contentionOnce sync.Once
 	releaseCleanup := func() { releaseOnce.Do(func() { close(releaseFinalCleanup) }) }
 	defer releaseCleanup()
 	fixture.authority.storeDeps.openAt = func(
@@ -413,11 +410,6 @@ func TestReleaseAuthorityRemoveInstalledHoldsSlotLeaseThroughFinalCleanup(t *tes
 		}
 		return realFsync(ctx, fd)
 	}
-	fixture.authority.instances.deps.waitLock = func(ctx context.Context) error {
-		contentionOnce.Do(func() { close(contentionObserved) })
-		return realWaitLock(ctx)
-	}
-
 	type result struct {
 		removed bool
 		err     error
@@ -435,6 +427,7 @@ func TestReleaseAuthorityRemoveInstalledHoldsSlotLeaseThroughFinalCleanup(t *tes
 	case <-ctx.Done():
 		require.Failf(t, "first removal did not reach final cleanup", "error: %v", ctx.Err())
 	}
+	contentionObserved := testAuthorityTree(t, fixture.authority.instances).releaseWaitObserved(t, fixture.store.slot)
 	go func() {
 		removed, err := fixture.authority.removeInstalled(ctx, fixture.store.slot)
 		secondResult <- result{removed: removed, err: err}
@@ -589,32 +582,14 @@ func TestReleaseAuthorityRemoveInstalledRetirementEventOrderUnderSlotLease(t *te
 		return nil
 	}
 
-	instanceDeps := &fixture.authority.instances.deps
-	realInstanceOpenAt := instanceDeps.openAt
-	realFlock := instanceDeps.flock
-	releaseLockFD := -1
 	unlockObserved := false
 	unlockBeforeFinal := false
-	wantReleaseLock := releaseLockName(fixture.store.slot)
-	instanceDeps.openAt = func(
-		ctx context.Context,
-		parentFD int,
-		name string,
-		flags int,
-		mode uint32,
-	) (int, error) {
-		fd, err := realInstanceOpenAt(ctx, parentFD, name, flags, mode)
-		if err == nil && name == wantReleaseLock {
-			releaseLockFD = fd
-		}
-		return fd, err
-	}
-	instanceDeps.flock = func(ctx context.Context, fd int, how int) error {
-		if fd == releaseLockFD && how == unix.LOCK_UN {
+	testAuthorityTree(t, fixture.authority.instances).onRelease = func(_ context.Context, description string) error {
+		if description == "release" {
 			unlockObserved = true
 			unlockBeforeFinal = len(events) == 0 || events[len(events)-1] != "final-architecture-fsync"
 		}
-		return realFlock(ctx, fd, how)
+		return nil
 	}
 
 	removed, err := fixture.authority.removeInstalled(t.Context(), fixture.store.slot)
@@ -1104,33 +1079,9 @@ func injectTrustedReleaseRemovalStoreClose(t *testing.T, fixture *trustedRelease
 func injectTrustedReleaseRemovalSlotUnlock(t *testing.T, fixture *trustedReleaseRemovalFixture) {
 	t.Helper()
 
-	deps := &fixture.authority.instances.deps
-	realOpenAt := deps.openAt
-	realFlock := deps.flock
-	releaseLockFD := -1
-	failed := false
-	wantName := releaseLockName(fixture.store.slot)
-	deps.openAt = func(
-		ctx context.Context,
-		parentFD int,
-		name string,
-		flags int,
-		mode uint32,
-	) (int, error) {
-		fd, err := realOpenAt(ctx, parentFD, name, flags, mode)
-		if err == nil && name == wantName {
-			releaseLockFD = fd
-		}
-		return fd, err
-	}
-	deps.flock = func(ctx context.Context, fd int, how int) error {
-		err := realFlock(ctx, fd, how)
-		if fd == releaseLockFD && how == unix.LOCK_UN && !failed {
-			failed = true
-			return errors.Join(err, unix.EIO)
-		}
-		return err
-	}
+	tree := testAuthorityTree(t, fixture.authority.instances)
+	tree.lockReleaseErr = unix.EIO
+	tree.lockReleaseErrDescription = "release"
 }
 
 func detailBoolForRemoveTest(domainErr *errs.DomainError, key string) bool {

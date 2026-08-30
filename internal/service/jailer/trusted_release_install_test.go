@@ -638,20 +638,9 @@ func (fixture *trustedReleaseInstallFixture) callerArchive() *trustedReleaseCall
 func (fixture *trustedReleaseInstallFixture) failReleaseSlotUnlock(t *testing.T) {
 	t.Helper()
 
-	realFlock := fixture.instances.deps.flock
-	releaseLockFD := -1
-	failed := false
-	fixture.instances.deps.flock = func(ctx context.Context, fd int, how int) error {
-		err := realFlock(ctx, fd, how)
-		if err == nil && how == unix.LOCK_EX|unix.LOCK_NB && releaseLockFD < 0 {
-			releaseLockFD = fd
-		}
-		if err == nil && how == unix.LOCK_UN && fd == releaseLockFD && !failed {
-			failed = true
-			return unix.EIO
-		}
-		return err
-	}
+	tree := testAuthorityTree(t, fixture.instances)
+	tree.lockReleaseErr = unix.EIO
+	tree.lockReleaseErrDescription = "release"
 }
 
 func installIntentNameForTest(intent trustedReleaseInstallIntent) string {

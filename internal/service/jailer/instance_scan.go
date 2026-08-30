@@ -3,7 +3,6 @@ package jailer
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 )
@@ -53,11 +52,7 @@ func (roots *instanceAuthorityRoots) findInstance(
 			return nil, err
 		}
 		directories := &instanceUIDDirectories{
-			deps:        roots.deps,
-			policy:      roots.policy,
-			uid:         uid,
-			stateFD:     stateFD,
-			authorityFD: -1,
+			deps: roots.deps, policy: roots.policy, uid: uid, stateFD: stateFD,
 		}
 		_, exists, readErr := directories.readRecord(ctx, vmID)
 		if readErr != nil {
@@ -89,16 +84,7 @@ func (roots *instanceAuthorityRoots) openAuthorityForLocation(
 	ctx context.Context,
 	location *instanceLocation,
 ) (*instanceUIDDirectories, error) {
-	name := fmt.Sprintf("%d", location.uid)
-	authorityFD, err := openInstanceDirectory(
-		ctx,
-		roots.deps,
-		roots.authorityFD,
-		name,
-		true,
-		instancePrivateDirectory,
-		roots.policy,
-	)
+	authority, err := roots.authority.openUID(ctx, location.uid)
 	if err != nil {
 		if closeErr := roots.deps.close(context.WithoutCancel(ctx), location.stateFD); closeErr != nil {
 			err = appendInstanceOperationError(err, "close located instance authority directory", closeErr)
@@ -106,11 +92,11 @@ func (roots *instanceAuthorityRoots) openAuthorityForLocation(
 		return nil, err
 	}
 	return &instanceUIDDirectories{
-		deps:        roots.deps,
-		policy:      roots.policy,
-		uid:         location.uid,
-		stateFD:     location.stateFD,
-		authorityFD: authorityFD,
+		deps:      roots.deps,
+		policy:    roots.policy,
+		uid:       location.uid,
+		stateFD:   location.stateFD,
+		authority: authority,
 	}, nil
 }
 
@@ -187,32 +173,24 @@ func (roots *instanceAuthorityRoots) releaseReferencedByOwner(
 			return false, instanceAtomicError("duplicate global VM authority claim", nil)
 		}
 		seenVMs[vmID] = struct{}{}
-		authorityFD, err := openInstanceDirectory(
-			ctx,
-			roots.deps,
-			roots.authorityFD,
-			fmt.Sprintf("%d", uid),
-			true,
-			instancePrivateDirectory,
-			roots.policy,
-		)
+		authority, err := roots.authority.openUID(ctx, uid)
 		if err != nil {
 			return false, err
 		}
 		directories := &instanceUIDDirectories{
-			deps: roots.deps, policy: roots.policy, uid: uid, stateFD: stateFD, authorityFD: authorityFD,
+			deps: roots.deps, policy: roots.policy, uid: uid, stateFD: stateFD, authority: authority,
 		}
 		vmLock, err := directories.acquireVMLock(ctx, vmID)
 		if err != nil {
 			return false, appendInstanceOperationError(
 				err,
 				"close rejected VM authority directory",
-				roots.deps.close(context.WithoutCancel(ctx), authorityFD),
+				authority.Release(context.WithoutCancel(ctx)),
 			)
 		}
 		record, found, readErr := directories.readRecord(ctx, vmID)
 		releaseErr := vmLock.Release(context.WithoutCancel(ctx))
-		closeErr := roots.deps.close(context.WithoutCancel(ctx), authorityFD)
+		closeErr := authority.Release(context.WithoutCancel(ctx))
 		if readErr != nil {
 			return false, appendInstanceOperationError(
 				appendInstanceOperationError(readErr, "release scanned VM lock", releaseErr),

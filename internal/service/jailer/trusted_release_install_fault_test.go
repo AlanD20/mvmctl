@@ -167,13 +167,7 @@ func TestReleaseAuthorityInstallPrecommitHandoffFailures(t *testing.T) {
 			caller: installCallerArchiveForFaultTest,
 			intent: trustedReleaseInstallAbsentOnly,
 			mutate: func(_ *testing.T, fixture *trustedReleaseInstallFixture) {
-				realFlock := fixture.instances.deps.flock
-				fixture.instances.deps.flock = func(ctx context.Context, fd int, how int) error {
-					if how == unix.LOCK_EX|unix.LOCK_NB {
-						return unix.EIO
-					}
-					return realFlock(ctx, fd, how)
-				}
+				testAuthorityTree(t, fixture.instances).releaseErr = unix.EIO
 			},
 		},
 		"architecture open": {
@@ -578,17 +572,6 @@ func TestReleaseAuthorityInstallSerializesSameSlotTransactions(t *testing.T) {
 		return prefix + "00000000000000000000000000000000.tmp", nil
 	}
 
-	secondLockAttempted := make(chan struct{})
-	var secondLockOnce sync.Once
-	var exclusiveAttempts atomic.Int32
-	realFlock := fixture.instances.deps.flock
-	fixture.instances.deps.flock = func(ctx context.Context, fd int, how int) error {
-		if how == unix.LOCK_EX|unix.LOCK_NB && exclusiveAttempts.Add(1) == 2 {
-			secondLockOnce.Do(func() { close(secondLockAttempted) })
-		}
-		return realFlock(ctx, fd, how)
-	}
-
 	type installResponse struct {
 		result trustedReleaseInstallResult
 		err    error
@@ -602,6 +585,7 @@ func TestReleaseAuthorityInstallSerializesSameSlotTransactions(t *testing.T) {
 	}
 	go install()
 	requireInstallSignal(t, ctx, firstCandidateEntered, "first candidate entered while holding slot lock")
+	secondLockAttempted := testAuthorityTree(t, fixture.instances).releaseWaitObserved(t, fixture.store.slot)
 	go install()
 	requireInstallSignal(t, ctx, secondLockAttempted, "second install attempted the held slot lock")
 	assert.Equal(t, int32(1), candidateCalls.Load())
@@ -705,18 +689,19 @@ func TestReleaseAuthorityInstallOrdersLockAndDescriptorOwnership(t *testing.T) {
 		}
 		return err
 	}
-	realFlock := fixture.instances.deps.flock
-	fixture.instances.deps.flock = func(ctx context.Context, fd int, how int) error {
-		err := realFlock(ctx, fd, how)
-		if err == nil && how == unix.LOCK_EX|unix.LOCK_NB && !locked {
+	tree := testAuthorityTree(t, fixture.instances)
+	tree.onAcquire = func(_ context.Context, description string) {
+		if description == "release" && !locked {
 			locked = true
 			appendEvent("slot-lock")
 		}
-		if err == nil && how == unix.LOCK_UN && locked {
+	}
+	tree.onRelease = func(_ context.Context, description string) error {
+		if description == "release" && locked {
 			appendEvent("slot-unlock")
 			locked = false
 		}
-		return err
+		return nil
 	}
 	fixture.authority.storeDeps.candidateName = func(context.Context, releaseSlot) (string, error) {
 		assert.True(t, locked)

@@ -62,9 +62,6 @@ const JailerChrootBase = "/var/lib/mvmctl/jailer"
 // JailerInstanceRoot contains persistent root-owned VM authority records.
 const JailerInstanceRoot = "/var/lib/mvmctl/instances"
 
-// PrivilegedAuthorityRoot contains shared ephemeral root-owned locks and launch state.
-const PrivilegedAuthorityRoot = "/run/mvmctl/authority"
-
 // JailerCgroupParent is the fixed cgroup-v2 subtree used by canonical Jailer launches.
 const JailerCgroupParent = "mvmctl"
 

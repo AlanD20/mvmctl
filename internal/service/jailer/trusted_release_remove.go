@@ -201,7 +201,7 @@ func (store *trustedReleaseStore) openExistingArchitecture(
 	if store == nil || store.binariesFD < 0 || len(store.retained) == 0 {
 		return nil, trustedReleaseRemovalError("trusted release store is not active for removal", nil)
 	}
-	if slotLease == nil || slotLease.roots == nil || slotLease.releaseLock == nil || slotLease.releaseLock.fd < 0 {
+	if slotLease == nil || slotLease.roots == nil || !slotLease.releaseLock.isActive() {
 		return nil, trustedReleaseRemovalError("release slot lease is not active for removal", nil)
 	}
 	if err := ctx.Err(); err != nil {

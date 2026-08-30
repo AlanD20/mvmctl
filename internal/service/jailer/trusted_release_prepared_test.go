@@ -58,16 +58,17 @@ func TestReleaseAuthorityLocksSlotBeforeTrustedStoreResolution(t *testing.T) {
 
 	fixture := newPreparedReleaseFixture(t)
 	lockHeld := false
-	realFlock := fixture.instances.deps.flock
-	fixture.instances.deps.flock = func(ctx context.Context, fd int, how int) error {
-		err := realFlock(ctx, fd, how)
-		if err == nil && how == unix.LOCK_EX|unix.LOCK_NB {
+	tree := testAuthorityTree(t, fixture.instances)
+	tree.onAcquire = func(_ context.Context, description string) {
+		if description == "release" {
 			lockHeld = true
 		}
-		if err == nil && how == unix.LOCK_UN {
+	}
+	tree.onRelease = func(_ context.Context, description string) error {
+		if description == "release" {
 			lockHeld = false
 		}
-		return err
+		return nil
 	}
 	storeOpenedWhileLocked := false
 	realOpen := fixture.release.store.deps.open
@@ -169,13 +170,13 @@ func TestPreparedReleaseReleasesResourcesInReverseWithoutCancellation(t *testing
 		events = append(events, "store:"+fdNames[fd])
 		return realStoreClose(ctx, fd)
 	}
-	realFlock := fixture.instances.deps.flock
-	fixture.instances.deps.flock = func(ctx context.Context, fd int, how int) error {
-		if how == unix.LOCK_UN {
+	tree := testAuthorityTree(t, fixture.instances)
+	tree.onRelease = func(ctx context.Context, description string) error {
+		if description == "release" {
 			cleanupWasCanceled = cleanupWasCanceled || ctx.Err() != nil
 			events = append(events, "instance:release-lock")
 		}
-		return realFlock(ctx, fd, how)
+		return nil
 	}
 
 	prepared, err := fixture.authority().prepareInstalled(t.Context(), fixture.release.store.slot)
