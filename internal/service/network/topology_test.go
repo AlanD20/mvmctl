@@ -2,7 +2,10 @@ package network
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -14,16 +17,35 @@ import (
 )
 
 const (
-	testOwnerUID      = uint32(1000)
-	testVMID          = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	testNetworkID     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	testManagedBridge = linkName("mvbeec319e5586b")
-	testHostVeth      = linkName("mvhe89e2abf9abd")
-	testNamespaceVeth = linkName("mvne40ca9fc46c4")
-	testLocalBridge   = linkName("mvlbc942db0d115")
-	testTAP           = linkName("mvt0444ca744944")
-	testNamespacePath = namespaceHandlePath("/run/mvmctl/authority/1000/netns/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	testOwnerUID       = uint32(1000)
+	testVMID           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	testNetworkID      = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	testNamespacePath  = namespaceHandlePath("/run/mvmctl/authority/1000/netns/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	testLinuxIfNameMax = 15
 )
+
+var testNames = contractTopologyNames(testOwnerUID, testVMID, testNetworkID)
+
+// contractTopologyNames derives expected resource names directly from ADR-0017's owner/network and owner/VM binding.
+// It deliberately uses a test-side preimage builder and fmt's hexadecimal encoder rather than production helpers.
+func contractTopologyNames(ownerUID uint32, vmID, networkID string) topologyNames {
+	uid := strconv.FormatUint(uint64(ownerUID), 10)
+	return topologyNames{
+		namespaceHandle: namespaceHandlePath(namespaceAuthorityRoot + "/" + uid + "/netns/" + vmID),
+		managedBridge:   contractLinkName("mvb", uid, networkID, "managed-bridge"),
+		hostVeth:        contractLinkName("mvh", uid, vmID, "host-veth"),
+		namespaceVeth:   contractLinkName("mvn", uid, vmID, "namespace-veth"),
+		localBridge:     contractLinkName("mvl", uid, vmID, "local-bridge"),
+		tap:             contractLinkName("mvt", uid, vmID, "tap"),
+	}
+}
+
+// contractLinkName computes the documented 15-byte Linux name through a test-only encoding path.
+func contractLinkName(prefix string, identityFields ...string) linkName {
+	digest := sha256.Sum256([]byte(strings.Join(identityFields, "\x00")))
+	encoded := fmt.Sprintf("%x", digest)
+	return linkName(prefix + encoded[:testLinuxIfNameMax-len(prefix)])
+}
 
 // Rationale: Root-side topology admission must reject caller-shaped identifiers before acquiring authority locks or
 // constructing host resource names.
@@ -61,46 +83,43 @@ func TestNewTopologyKeyRejectsUntrustedIdentityShapes(t *testing.T) {
 	}
 }
 
-// Rationale: Link names are persisted root-authority identifiers. These expected names are independent SHA-256
-// contract vectors calculated from the displayed NUL-separated preimages, not copied from deriveTopologyNames output.
-func TestHashedLinkNameMatchesIndependentContractVectors(t *testing.T) {
+// Rationale: Link names are persisted root-authority identifiers. A separately composed SHA-256 expectation proves
+// the fixed prefix, NUL-separated preimage, lowercase hexadecimal encoding, and Linux interface-name width.
+func TestHashedLinkNameMatchesIndependentContract(t *testing.T) {
 	tests := map[string]struct {
 		prefix   string
 		preimage string
-		want     linkName
 	}{
 		"managed_bridge": {
 			prefix:   "mvb",
 			preimage: "1000\x00" + testNetworkID + "\x00managed-bridge",
-			want:     testManagedBridge,
 		},
 		"host_veth": {
 			prefix:   "mvh",
 			preimage: "1000\x00" + testVMID + "\x00host-veth",
-			want:     testHostVeth,
 		},
 		"namespace_veth": {
 			prefix:   "mvn",
 			preimage: "1000\x00" + testVMID + "\x00namespace-veth",
-			want:     testNamespaceVeth,
 		},
 		"local_bridge": {
 			prefix:   "mvl",
 			preimage: "1000\x00" + testVMID + "\x00local-bridge",
-			want:     testLocalBridge,
 		},
 		"tap": {
 			prefix:   "mvt",
 			preimage: "1000\x00" + testVMID + "\x00tap",
-			want:     testTAP,
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			got := hashedLinkName(tc.prefix, tc.preimage)
+			digest := sha256.Sum256([]byte(tc.preimage))
+			encoded := fmt.Sprintf("%x", digest)
+			want := linkName(tc.prefix + encoded[:testLinuxIfNameMax-len(tc.prefix)])
 
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, want, got)
 		})
 	}
 }
@@ -114,11 +133,11 @@ func TestDeriveTopologyNamesIsStableAndIdentityBound(t *testing.T) {
 	// CONTRACT: Namespace paths contain the immutable VM ID. Link literals are the independent vectors above.
 	want := topologyNames{
 		namespaceHandle: testNamespacePath,
-		managedBridge:   testManagedBridge,
-		hostVeth:        testHostVeth,
-		namespaceVeth:   testNamespaceVeth,
-		localBridge:     testLocalBridge,
-		tap:             testTAP,
+		managedBridge:   testNames.managedBridge,
+		hostVeth:        testNames.hostVeth,
+		namespaceVeth:   testNames.namespaceVeth,
+		localBridge:     testNames.localBridge,
+		tap:             testNames.tap,
 	}
 
 	if diff := cmp.Diff(want, got, cmp.AllowUnexported(topologyNames{})); diff != "" {
@@ -127,7 +146,7 @@ func TestDeriveTopologyNamesIsStableAndIdentityBound(t *testing.T) {
 	for _, name := range []linkName{
 		got.managedBridge, got.hostVeth, got.namespaceVeth, got.localBridge, got.tap,
 	} {
-		assert.LessOrEqual(t, len(name.String()), linuxInterfaceNameMax)
+		assert.LessOrEqual(t, len(name.String()), testLinuxIfNameMax)
 	}
 
 	otherOwner := deriveTopologyNames(mustTopologyKey(t, testOwnerUID+1, testVMID, testNetworkID))
@@ -229,7 +248,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 			Mode:     namespaceHandleMode,
 		},
 		ManagedBridge: LinkIdentity{
-			Name:    testManagedBridge.String(),
+			Name:    testNames.managedBridge.String(),
 			IfIndex: 10,
 			Namespace: NamespaceIdentity{
 				Device: 51,
@@ -237,7 +256,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 			},
 		},
 		LocalBridge: LinkIdentity{
-			Name:    testLocalBridge.String(),
+			Name:    testNames.localBridge.String(),
 			IfIndex: 20,
 			Namespace: NamespaceIdentity{
 				Device: 41,
@@ -245,7 +264,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 			},
 		},
 		TAP: LinkIdentity{
-			Name:    testTAP.String(),
+			Name:    testNames.tap.String(),
 			IfIndex: 21,
 			Namespace: NamespaceIdentity{
 				Device: 41,
@@ -254,7 +273,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 		},
 		VethPair: VethPairIdentity{
 			Host: LinkIdentity{
-				Name:    testHostVeth.String(),
+				Name:    testNames.hostVeth.String(),
 				IfIndex: 22,
 				Namespace: NamespaceIdentity{
 					Device: 51,
@@ -262,7 +281,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 				},
 			},
 			Peer: LinkIdentity{
-				Name:    testNamespaceVeth.String(),
+				Name:    testNames.namespaceVeth.String(),
 				IfIndex: 23,
 				Namespace: NamespaceIdentity{
 					Device: 41,
@@ -663,6 +682,7 @@ func TestTopologyPreparationTopologyRequiresExactCommittedState(t *testing.T) {
 	fixture := newTopologyFixture(t)
 	prepared, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
 	require.NoError(t, err)
+	assertTopologyUnavailable(t, nil)
 
 	tests := map[string]func(*topologyPreparation){
 		"building": func(candidate *topologyPreparation) {
@@ -692,6 +712,25 @@ func TestTopologyPreparationTopologyRequiresExactCommittedState(t *testing.T) {
 		"committed_after_namespace_removal": func(candidate *topologyPreparation) {
 			candidate.namespaceCreated = false
 		},
+		"committed_with_stale_topology_key": func(candidate *topologyPreparation) {
+			candidate.topology.key.networkID = NetworkID(strings.Repeat("c", 64))
+		},
+		"committed_with_stale_managed_bridge": func(candidate *topologyPreparation) {
+			candidate.topology.managedBridge.ifIndex++
+		},
+		"committed_with_stale_network_lock": func(candidate *topologyPreparation) {
+			lock := *candidate.lock.(*fakeNetworkLock)
+			lock.bridge.ifIndex++
+			candidate.lock = &lock
+		},
+		"committed_with_stale_namespace_pin": func(candidate *topologyPreparation) {
+			pin := *candidate.pin.(*fakeNamespacePin)
+			pin.handle.identity.inode++
+			candidate.pin = &pin
+		},
+		"committed_with_invalid_local_link": func(candidate *topologyPreparation) {
+			candidate.topology.localBridge.ifIndex = 0
+		},
 	}
 
 	for name, mutate := range tests {
@@ -710,6 +749,54 @@ func TestTopologyPreparationTopologyRequiresExactCommittedState(t *testing.T) {
 	assert.Equal(t, testNamespacePath.String(), topology.Export().Namespace.Path)
 
 	require.NoError(t, prepared.Cleanup(context.Background()))
+}
+
+// Rationale: Linux allocates ifindexes per network namespace. The two ends of one veth may therefore have the exact
+// same numeric ifindex, while collisions among links in either pinned namespace are stale or ambiguous authority.
+func TestServicePrepareScopesIfIndexUniquenessToNamespace(t *testing.T) {
+	tests := map[string]struct {
+		mutation string
+		wantErr  bool
+	}{
+		"allows_exact_veth_host_peer_equality": {
+			mutation: "reuse_veth_pair_ifindex",
+		},
+		"rejects_host_namespace_collision": {
+			mutation: "reuse_managed_bridge_ifindex",
+			wantErr:  true,
+		},
+		"rejects_vm_namespace_collision": {
+			mutation: "reuse_local_bridge_ifindex",
+			wantErr:  true,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newTopologyFixture(t)
+			fixture.effects.mutateAt = tc.mutation
+
+			preparation, err := fixture.service.prepare(
+				context.Background(),
+				fixture.launch,
+				fixture.key.NetworkID(),
+			)
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, preparation)
+				assert.True(t, fixture.lock.released)
+				assert.True(t, fixture.pin.released)
+				return
+			}
+
+			require.NoError(t, err)
+			require.NotNil(t, preparation)
+			topology, topologyErr := preparation.Topology()
+			require.NoError(t, topologyErr)
+			assert.Equal(t, topology.veth.host.ifIndex, topology.veth.peer.ifIndex)
+			require.NoError(t, preparation.Cleanup(context.Background()))
+		})
+	}
 }
 
 // Rationale: The create context may be cancelled at the failure point. Rollback must deliberately use a non-cancelled
@@ -811,7 +898,7 @@ func newTopologyFixture(t *testing.T) *topologyFixture {
 func newTopologyFixtureWithLocker(t *testing.T, config fakeNetworkLockerConfig) *topologyFixture {
 	t.Helper()
 	key := mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID)
-	names := deriveTopologyNames(key)
+	names := contractTopologyNames(testOwnerUID, testVMID, testNetworkID)
 	vmNamespace := namespaceIdentity{device: 41, inode: 42}
 	hostNamespace := namespaceIdentity{device: 51, inode: 52}
 	events := make([]string, 0, 16)
@@ -1047,6 +1134,15 @@ func (effects *fakeTopologyEffects) CreateVethPairDown(
 	}
 	if effects.mutateAt == "create_veth_pair_down" {
 		identity.peer.name = linkName("caller-name")
+	}
+	if effects.mutateAt == "reuse_veth_pair_ifindex" {
+		identity.host.ifIndex = identity.peer.ifIndex
+	}
+	if effects.mutateAt == "reuse_managed_bridge_ifindex" {
+		identity.host.ifIndex = 10
+	}
+	if effects.mutateAt == "reuse_local_bridge_ifindex" {
+		identity.peer.ifIndex = effects.localBridge.ifIndex
 	}
 	effects.veth = identity
 	if err := effects.afterMutation("create_veth_pair_down"); err != nil {

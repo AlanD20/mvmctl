@@ -149,10 +149,100 @@ func validateVethPair(
 	if err := validateLinkIdentity(veth.peer, names.namespaceVeth, vmNamespace, "namespace veth"); err != nil {
 		return err
 	}
-	if veth.host.ifIndex == veth.peer.ifIndex {
-		return errors.New("veth pair reuses one ifindex")
+	return nil
+}
+
+func validateTopologyIdentities(topology Topology, names topologyNames) error {
+	if err := validateTopologyKey(topology.key); err != nil {
+		return err
+	}
+	if topology.managedBridge.name != names.managedBridge ||
+		topology.managedBridge.ifIndex <= 0 ||
+		!validNamespaceIdentity(topology.managedBridge.namespace) {
+		return errors.New("managed bridge identity is invalid")
+	}
+	if err := validateNamespaceHandle(topology.handle, names.namespaceHandle); err != nil {
+		return err
+	}
+	if topology.managedBridge.namespace == topology.handle.identity {
+		return errors.New("managed bridge is not in the host namespace")
+	}
+	if err := validateLinkIdentity(
+		topology.localBridge,
+		names.localBridge,
+		topology.handle.identity,
+		"namespace-local bridge",
+	); err != nil {
+		return err
+	}
+	if err := validateLinkIdentity(
+		topology.tap,
+		names.tap,
+		topology.handle.identity,
+		"namespace-local TAP",
+	); err != nil {
+		return err
+	}
+	if err := validateVethPair(
+		topology.veth,
+		names,
+		topology.managedBridge.namespace,
+		topology.handle.identity,
+	); err != nil {
+		return err
+	}
+	// Linux ifindexes are namespace-local. Reject collisions only among links sharing one pinned namespace.
+	if duplicateIfIndex(topology.localBridge.ifIndex, topology.tap.ifIndex, topology.veth.peer.ifIndex) {
+		return errors.New("vm namespace link ifindexes are not unique")
+	}
+	if topology.managedBridge.ifIndex == topology.veth.host.ifIndex {
+		return errors.New("host namespace link ifindexes are not unique")
 	}
 	return nil
+}
+
+func validateCommittedTopology(preparation *topologyPreparation) error {
+	if preparation == nil {
+		return errors.New("topology preparation is nil")
+	}
+	if preparation.state != topologyPreparationCommitted {
+		return errors.New("topology preparation is not committed")
+	}
+	if preparation.lock == nil || preparation.pin == nil {
+		return errors.New("topology authority lease is missing")
+	}
+	if !preparation.namespaceCreated ||
+		!preparation.localBridgeMade ||
+		!preparation.tapMade ||
+		!preparation.vethMade {
+		return errors.New("topology preparation is partial")
+	}
+	if err := validateTopologyKey(preparation.topology.key); err != nil {
+		return err
+	}
+
+	names := deriveTopologyNames(preparation.topology.key)
+	lockedBridge := preparation.lock.ManagedBridge()
+	if err := validateNetworkLock(
+		preparation.lock.Key(),
+		lockedBridge,
+		preparation.topology.key.Network(),
+		names.managedBridge,
+	); err != nil {
+		return err
+	}
+	if preparation.topology.managedBridge != lockedBridge {
+		return errors.New("topology managed bridge no longer matches retained network authority")
+	}
+
+	pinnedHandle := preparation.pin.Handle()
+	if err := validateNamespaceHandle(pinnedHandle, names.namespaceHandle); err != nil {
+		return err
+	}
+	if preparation.topology.handle != pinnedHandle {
+		return errors.New("topology namespace handle no longer matches retained pin")
+	}
+	return validateTopologyIdentities(preparation.topology, names)
 }
 
 func validNamespaceIdentity(identity namespaceIdentity) bool {

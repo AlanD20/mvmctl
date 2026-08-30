@@ -238,17 +238,12 @@ func (service *service) prepare(
 	); err != nil {
 		return abortTopologyPrepare(ctx, preparation, "verify VM veth pair", err)
 	}
-	if duplicateIfIndex(
-		localBridge.ifIndex,
-		tap.ifIndex,
-		veth.host.ifIndex,
-		veth.peer.ifIndex,
-	) {
+	if err := validateTopologyIdentities(preparation.topology, names); err != nil {
 		return abortTopologyPrepare(
 			ctx,
 			preparation,
 			"verify VM link identities",
-			errors.New("link ifindexes are not unique"),
+			err,
 		)
 	}
 
@@ -272,20 +267,18 @@ func (service *service) prepare(
 
 // Topology returns the exact identities only while every preparation stage is complete and its authority remains held.
 func (preparation *topologyPreparation) Topology() (Topology, error) {
-	if preparation == nil ||
-		preparation.state != topologyPreparationCommitted ||
-		preparation.lock == nil ||
-		preparation.pin == nil ||
-		!preparation.namespaceCreated ||
-		!preparation.localBridgeMade ||
-		!preparation.tapMade ||
-		!preparation.vethMade {
+	if reason := validateCommittedTopology(preparation); reason != nil {
 		vmID := ""
 		if preparation != nil {
 			vmID = preparation.entity()
 		}
 		err := topologyAccessError(vmID)
-		slog.Error("network topology authority access rejected", "vm_id", vmID, "error", err)
+		slog.Error(
+			"network topology authority access rejected",
+			"vm_id", vmID,
+			"reason", reason,
+			"error", err,
+		)
 		return Topology{}, err
 	}
 	return preparation.topology, nil
