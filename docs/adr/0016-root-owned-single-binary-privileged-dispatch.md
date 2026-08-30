@@ -232,7 +232,7 @@ canonical publication, or promotion of unadmitted bytes occurs before exact EOF.
 stage, `io.LimitReader`, reusable reader interface, or replay.
 
 One concrete `jailer.TrustedReleaseServer` owns the private `releaseAuthority` and exposes only named `Install` and
-`Remove` methods. Privileged imports Jailer; the future Jailer client imports only `internal/lib/system` and
+`Remove` methods. Privileged imports Jailer; the named Jailer client imports only `internal/lib/system` and
 `internal/lib/privilegedwire`, never privileged. The server maps `AllowReplacement` to the existing closed intent and
 converts only the fully re-admitted private manifest result into the exact result above. The
 privileged package owns framing, deadlines, response delivery, and private exact install/remove function dependencies
@@ -337,6 +337,35 @@ review.
 Normal API `Input.Validate`/`Resolve` remains the caller-facing validation layer. Because the privileged dispatcher
 receives data from an untrusted process, it independently enforces authorization, ownership, bounds, path confinement,
 and system-damage invariants. These are receiver trust-boundary checks, not duplicated business validation.
+
+### Implemented LoopMount client/protocol foundation
+
+Task 13 now has a named normal-user client and closed protocol types for exactly three intended capabilities:
+`ProvisionVM`, `InspectImage`, and `OptimizeImage`. The corresponding fixed action strings are
+`loopmount-provision-vm`, `loopmount-inspect-image`, and `loopmount-optimize-image`. The client uses a private minimal
+exchange seam and exposes no generic privileged call, decoder, executable, argv, command, shell, effect path, mount
+target, or arbitrary operation list.
+
+VM provisioning carries a canonical managed-cache locator, fixed-format VM ID, admitted rootfs size, closed filesystem,
+and a typed plan. Image inspection and optimization carry the same namespace locator plus a fixed-format image ID,
+admitted image size, closed filesystem, and, for optimization, a typed plan. VM resize is grow-only relative to the
+admitted rootfs size, and a returned size must equal the requested resize or remain exactly unchanged when no resize was
+requested. Image conversion is closed to ext4, and image shrink results cannot grow. Guest usernames are at most 32
+bytes; SSH input is capped at 64 keys, 16 KiB per key, and 48 KiB total; agent tokens are canonical UUIDv4 values; and
+agent ports are 1 through 65,535. Rootfs sizes are 128 MiB through 16 TiB, image sizes are 1 byte through 16 TiB, and
+each result counter is at most 1,048,576. These validations are protocol admission only and do not make the cache
+locator or resource identifiers root authority.
+
+The client accepts a decoded success or remote `DomainError` only when the process actually started and the transport
+observed authenticated socket EOF. A valid remote error preserves its code, class, entity, message, and bounded details
+over later diagnostics. Every non-authoritative transport outcome uses `CodeProcessError`/`ClassInternal` with the fixed
+action and stable `process_started` / `outcome_unknown` details: both false before start and both true after start.
+
+No LoopMount receiver handler or central-switch registration exists yet. There is also no LoopMount-specific
+descriptor-pinned rootfs/image-staging lease, backend/public API cutover, or removal of the legacy `mvm run provision`,
+raw sudo/wire operation, arbitrary unmount, and PID-killing cleanup paths. The typed foundation is not permission to
+route a legacy resource path through the new client; Task 13 must land receiver-side descriptor authority and the
+legacy removal as one migration.
 
 ### Release trust
 

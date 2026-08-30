@@ -72,6 +72,15 @@ Jailer authority module.
 Failure after the first effect invokes typed rollback while the same locks and lifecycle handle remain held. Cleanup
 verifies namespace inode, interface ownership, process identity, and cgroup membership before removing anything.
 
+Implementation note (2026-08-30): the private topology-preparation foundation now exposes topology authority only from
+its exact committed state while the network lock, namespace pin, and namespace/local-bridge/TAP/veth creation markers
+remain present. Building, cleanup-in-progress, cleaned, missing-lease, and partially rolled-back values return no
+topology authority even when stale identity fields remain in memory. Rollback stays cancellation-independent and
+retryable. If network-lock acquisition returns a classified `DomainError` with a retained lock, successful lock cleanup
+returns that exact error unchanged; cleanup failure retains its code, class, entity, prior details, and cause while
+adding `cleanup_required=true` and the cleanup diagnostic. A concrete authority/locker, netlink effect adapter,
+firewall and activation stages, durable topology record, production constructor, and Jailer handoff remain pending.
+
 ### nftables is the only firewall backend
 
 v0.3.0 requires nftables. The iptables backend, configuration option, repositories, renderers, fallback behavior, and

@@ -56,8 +56,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 ### Task 3: Complete the early privileged protocol foundation
 
 **Owner:** engineer
-**Status:** Codec, caller process transport, and fd-0 receiver admission implemented; release handlers, capability
-clients, and action catalog pending later tasks
+**Status:** Shared codec, caller transport, and fd-0 receiver implemented; trusted-release actions registered;
+LoopMount client/protocol foundation implemented without receiver registration; remaining capabilities stay pending
 **Dependencies:** Task 1
 
 - [x] Reserved marker selected before Cobra and application initialization.
@@ -366,7 +366,7 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
       reader field, or decoder hook.
     - [x] Add authority-owning `TrustedReleaseServer`. Named `Install` takes
       `(ctx, request, payload io.Reader, payloadLength uint64)`. Privileged imports Jailer and supplies the private
-      reader; future Jailer client imports system/privilegedwire, never privileged.
+      reader; the named Jailer client imports system/privilegedwire, never privileged.
     - [x] Zero install/remove require EOF before effect. Nonzero install streams once through existing Jailer
       archive-stage length/EOF admission. Permit staging during read but no extraction/publication before EOF. Add no
       128 MiB buffer, second stage, `LimitReader`, replay, registry, or generic dispatcher.
@@ -454,8 +454,11 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Dependencies:** Tasks 4, 7, and 8
 
 - [x] Add the private topology-preparation foundation: derive owner/network and owner/VM names, require a non-forgeable
-  held-VM-lock capability before the network lock, retain exact mutation progress, and provide state-gated,
-  cancellation-independent rollback. No production locker/effect adapter or live-topology handoff is wired yet.
+  held-VM-lock capability before the network lock, retain exact mutation progress, and expose authority only from the
+  exact committed state while both leases and all creation markers remain present. Rollback is cancellation-independent;
+  a classified lock-acquisition `DomainError` keeps its code/class/entity/details, and failed lock cleanup adds exact
+  `cleanup_required` recovery detail without replacing it. No production locker/effect adapter or live-topology handoff
+  is wired yet.
 - [ ] Persist minimal root-owned network identity and serialize network/VM topology mutations.
 - [ ] Acquire the network lock only after the applicable VM launch/registered lease; the full order is
   `release -> global index -> VM -> network`.
@@ -527,9 +530,23 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 13: Migrate loopmount and supported host mutations
 
 **Owner:** engineer
+**Status:** Typed LoopMount client/protocol foundation implemented; receiver, descriptor authority, legacy removal, and
+host-mutation migration pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
+  - [x] Add exactly three fixed LoopMount actions and named client methods for VM provisioning, image inspection, and
+    image optimization, using one private minimal exchange seam and no generic call/decoder/command/path surface.
+  - [x] Add closed typed VM/image requests, plans, and results with grow-only VM resize, exact request-bound results,
+    closed filesystem/conversion choices, and explicit username, SSH-key, agent-token/port, resource-size, and result
+    bounds.
+  - [x] Require both process start and actual response EOF for result authority; preserve an EOF-qualified remote
+    `DomainError`, and classify every non-authoritative pre/post-start transport outcome with stable `process_started`
+    and `outcome_unknown` details.
+  - [ ] Add descriptor-pinned VM rootfs and image-staging leases, receiver handlers, and exact central-dispatch entries;
+    no LoopMount action is registered yet.
+  - [ ] Cut the production backend and public API over to those actions; the current path still sends raw wire
+    operations through sudo to `mvm run provision`.
 - [ ] Remove public `mvm run provision` and arbitrary unmount behavior.
 - [ ] Move required module/sysctl/host mutations behind exact compiled allowlists.
 - [ ] Keep `host init`, `host reset`, group membership, and sudoers changes as explicit administrator operations; do not

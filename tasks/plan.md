@@ -45,6 +45,11 @@ continue without silently deleting it.
   exact-user VM-to-VM execution grants. Their repositories enforce exact identities, foreign keys, duplicate
   constraints, and atomic cross-table VM invalidation. Public inputs, enforcement compilation, relay authorization,
   and the clean-break removal of the transitional policy path remain pending.
+- Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
+  namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
+- Named typed LoopMount client/protocol methods for VM provisioning and image inspection/optimization, with grow-only
+  VM resize, bounded typed values, and strict process-start/response-EOF authority. No LoopMount receiver action or
+  descriptor-pinned resource lease is wired yet.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -256,14 +261,15 @@ independently fetched checksum before parsing it. A zero-payload install instead
 archive request under the separate closed transport contract in ADR-0016. Root never opens a caller path or accepts a
 caller URL or checksum, and `MVM_ASSET_MIRROR` supplies caller-streamed bytes rather than root authority.
 
-The implemented but unregistered slice-5b wire contract lives in `internal/service/jailer`, which owns the exact action
+Slice 5b introduced the initially unregistered wire contract in `internal/service/jailer`, which owns the exact action
 constants `jailer-release-install` and `jailer-release-remove`; `ReleaseSlot`; install request with
 `AllowReplacement`; remove request; a typed string outcome closed to `installed|replaced|unchanged`; install result with
 the exact slot, archive SHA-256, and each executable's SHA-256 and size; and a remove result containing only `Removed`.
 These values carry no path, URL, caller hash, force, reference override, generic action, reader, or decoder field. One
 concrete `TrustedReleaseServer` owns authority. Its named install takes
 `(ctx, request, payload io.Reader, payloadLength uint64)`. Privileged imports Jailer and supplies the private raw
-reader; the future Jailer client imports only system/privilegedwire, never privileged.
+reader; the implemented named Jailer client imports only system/privilegedwire, never privileged. Slice 6 registered
+only these two exact actions.
 
 Zero install/remove require EOF before effect. Nonzero install streams once through Jailer-owned archive-stage
 length/EOF admission; staging may occur during read but canonical publication cannot occur before EOF. There is no
@@ -342,8 +348,9 @@ cancellation boundaries, commit syscalls, both parent fsyncs, every retirement s
 error metadata. The private end-to-end method composes independent checksum authority, caller-stream or root-fetch
 archive admission, strict extraction/finalization, candidate assembly, and absent/identical/replacement selection. It
 returns only a closed outcome and fully re-admitted manifest metadata, preserves committed results through post-commit
-errors, and returns a zero result for precommit failure. This remains a private, unwired substrate. The aarch64 audit,
-caller/privileged-transport wiring, L2 qualification, and remaining release integration work are still pending.
+errors, and returns a zero result for precommit failure. The named typed client and two privileged actions are wired,
+but the public API/CLI still uses the legacy binary path. The aarch64 audit, public-authority cutover, L2 qualification,
+and remaining release integration work are still pending.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are
@@ -532,7 +539,11 @@ namespace handle to Jailer.
 
 The private topology-preparation foundation now derives owner/network-bound managed bridges and owner/VM-bound links,
 enforces the VM-before-network lock seam, records mutation-plus-error identities, and retains the network lock and
-namespace pin through rollback-safe cleanup. It deliberately exposes no production constructor or live-topology
+namespace pin through rollback-safe cleanup. `Topology()` returns authority only from the exact committed state with
+both leases and all namespace/local-bridge/TAP/veth creation markers present. Building, cleaning, cleaned,
+missing-lease, and partial-rollback states return no authority. A classified `DomainError` from lock acquisition
+survives successful rollback exactly; failed lock cleanup preserves its code, class, entity, prior details, and cause
+while adding `cleanup_required=true`. The foundation deliberately exposes no production constructor or live-topology
 release. A concrete root network authority/locker, netlink effect adapter, firewall and activation stages, durable
 record, and Jailer capability transfer remain pending.
 
@@ -555,6 +566,26 @@ The public policy families are:
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly.
+
+### LoopMount privilege foundation
+
+`internal/service/loopmount` now defines exactly three fixed actions and named client methods: `ProvisionVM`,
+`InspectImage`, and `OptimizeImage`. Their closed VM/image requests, plans, and results carry a managed-cache locator,
+typed resource identity, admitted size, filesystem, and observed operation fields rather than a rootfs path, command,
+shell, mount target, or generic operation list. VM resize is grow-only relative to the admitted rootfs size, no-resize
+results must preserve that exact size, and image results are bound to the request's identity, filesystem, and size
+semantics. Guest usernames, SSH keys, agent port/token, resource sizes, and result counts have compiled limits.
+
+The private minimal exchange seam accepts an operation result only from a started process with actual response EOF. A
+valid EOF-qualified remote `DomainError` wins over later transport diagnostics. Missing, malformed, mismatched,
+non-EOF, impossible pre-start, or semantically invalid results use the stable `CodeProcessError` classification with
+the action and exact `process_started` / `outcome_unknown` details.
+
+This is a protocol and client foundation only. The privileged receiver has no LoopMount handlers or dispatcher entries,
+and no descriptor-pinned VM rootfs or image-staging lease consumes the typed request. The current backend/public path
+still uses `mvm run provision`, raw wire operations and sudo, including the arbitrary unmount/cleanup surface. Task 13
+must add receiver-side resource authority, cut over all callers, and remove the legacy route before any LoopMount action
+can enter the final marker-only sudo policy.
 
 ### Daemonless status reconciliation and relaunch parity
 

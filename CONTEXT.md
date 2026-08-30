@@ -310,6 +310,19 @@ Two independent rootfs provisioning backends. They are **mutually exclusive** --
 
 Provisioner type resolved ONCE at startup in `api.NewOperation()` by reading `settings.guestfs_enabled`. All callers use `op.ProvisionerType` directly. Backend interface defined in `internal/lib/provisioner/backend.go`.
 
+Task 13 now has an inactive typed LoopMount privilege foundation in `internal/service/loopmount/`. Its named
+`ProvisionVM`, `InspectImage`, and `OptimizeImage` client methods use closed VM/image request, plan, and result types.
+VM resize is grow-only relative to the admitted rootfs size. The protocol bounds rootfs and image sizes, guest
+usernames, SSH key count and bytes, agent port, and canonical UUIDv4 token before exchange. A result becomes authority
+only when the privileged process started and the transport observed actual response EOF; otherwise stable transport
+error details report `process_started` and `outcome_unknown`, while an EOF-qualified remote `DomainError` retains its
+code, class, entity, and bounded details.
+
+This is not the active LoopMount receiver path. None of the three actions is registered in the privileged dispatcher,
+there is no descriptor-pinned VM rootfs or image-staging lease for LoopMount, and the public/backend path still uses
+`mvm run provision`, caller-shaped raw wire operations, sudo, and the legacy arbitrary cleanup/unmount surface. Task 13
+must add the receiver and resource authority, cut over callers, and remove those legacy routes atomically.
+
 **Performance:** GuestFS is 3–5x slower than LoopMount for VM creation (9–14s vs 2–5s wall-clock, sequential). Under parallel load GuestFS degrades further due to QEMU lock contention. See `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` for full benchmark data.
 
 **Why no fallback chain:** A fallback (try loop-mount, fall back to guestfs) was rejected because: (1) if a user enables GuestFS, they expect GuestFS behavior -- silent fallback to loop-mount violates least surprise; (2) each backend has different sudoers requirements -- mixing them in one session increases the privilege surface; (3) each backend has independent test suites -- a fallback chain requires testing all combinations; (4) an earlier version incorrectly described GuestFS as a "fallback," which caused regression bugs where a stale `guestfs_enabled=true` silently selected the slow backend.
