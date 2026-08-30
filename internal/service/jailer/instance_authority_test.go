@@ -764,6 +764,53 @@ func TestPreparedReleaseRegistrationFailuresBeforeRenameRetainAuthority(t *testi
 	}
 }
 
+func TestInstanceAuthorityIndexReleaseAfterDurableLaunchReturnsTransferredLease(t *testing.T) {
+	t.Parallel()
+
+	root := prepareInstanceAuthorityTestRoot(t)
+	deps := realInstanceAuthorityDeps()
+	indexErr := errors.New("index release failed after durable launch")
+	tree := newTestInstanceAuthorityTree()
+	tree.lockReleaseErrDescription = "index"
+	tree.lockReleaseErr = indexErr
+	authority := newInstanceAuthorityWithPolicy(deps, testInstanceAuthorityPolicy(root), tree)
+	prepared := prepareTestRelease(t, authority)
+
+	lease, err := prepared.registerLaunching(
+		context.Background(),
+		testInstanceCaller(),
+		testLaunchIntent(false),
+	)
+	require.NotNil(t, lease)
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+	assert.Equal(t, errs.ClassUnknown, domainErr.Class)
+	assert.Empty(t, domainErr.Entity)
+	assert.Equal(t, "process", domainErr.Op)
+	assert.Equal(t, "release authority lock: index release failed after durable launch", domainErr.Message)
+	assert.ErrorIs(t, err, indexErr)
+	assert.Equal(t, true, domainErr.Details["record_replaced"])
+	_, durabilityUncertain := domainErr.Details["durability_uncertain"]
+	assert.False(t, durabilityUncertain)
+
+	assertPreparedReleaseTransferred(t, prepared)
+	leaseSnapshot := lease.snapshot()
+	assert.True(t, leaseSnapshot.hasVMLock)
+	assert.True(t, leaseSnapshot.hasDirectories)
+	assertPreparedReleaseSnapshotOpen(t, leaseSnapshot.prepared)
+	recordPath := filepath.Join(root, "var/lib/mvmctl/instances/1000/"+testVMID+".json")
+	raw, readErr := os.ReadFile(recordPath)
+	require.NoError(t, readErr)
+	persisted, decodeErr := decodeInstanceRecord(raw)
+	require.NoError(t, decodeErr)
+	assertInstanceRecordEqual(t, leaseSnapshot.record, persisted)
+
+	require.NoError(t, prepared.Release(context.Background()))
+	require.NoError(t, lease.Release(context.Background()))
+}
+
 func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *testing.T) {
 	t.Parallel()
 
