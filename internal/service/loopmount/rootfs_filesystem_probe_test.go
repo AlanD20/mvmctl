@@ -345,6 +345,84 @@ func TestProbeRootfsMountSourceClassifiesRunnerContextErrors(t *testing.T) {
 	}
 }
 
+func TestProbeRootfsMountSourcePreservesNestedRunnerTimeoutClassification(t *testing.T) {
+	// Rationale: RealRunner reports its compiled child timeout as a CodeProcessError wrapping DeadlineExceeded. The
+	// LoopMount boundary must add its domain code without erasing either layer's machine-readable identity or class.
+	t.Parallel()
+
+	runnerErr := errs.WrapMsg(
+		errs.CodeProcessError,
+		"filesystem probe process deadline",
+		context.DeadlineExceeded,
+		errs.WithClass(errs.ClassInternal),
+	)
+	fixture := newTestRootfsFilesystemProbeFixture(3)
+	fixture.runErrors = []error{runnerErr}
+	parent := testRootfsPartitionParent(3, rootfsReadWrite)
+	partitions := testRootfsProbePartitionSet(parent, nil)
+
+	source, err := probeRootfsMountSource(
+		t.Context(), fixture.dependencies(), FilesystemExt4, parent, partitions,
+	)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	outer := errs.AsDomainError(err)
+	require.NotNil(t, outer)
+	assert.Equal(t, errs.CodeLoopMountError, outer.Code)
+	assert.Equal(t, errs.ClassInternal, outer.Class)
+	inner := errs.AsDomainError(errors.Unwrap(outer))
+	require.NotNil(t, inner)
+	assert.Same(t, runnerErr, inner)
+	assert.Equal(t, errs.CodeProcessError, inner.Code)
+	assert.Equal(t, errs.ClassInternal, inner.Class)
+	assert.Nil(t, source)
+	assert.Len(t, fixture.calls, 1)
+}
+
+func TestProbeRootfsMountSourcePrefersEarlierParentDeadline(t *testing.T) {
+	// Rationale: An earlier caller deadline must remain the direct LoopMount cause even though every blkid invocation
+	// also carries the longer compiled child timeout. This keeps caller cancellation authoritative over tool policy.
+	const parentTimeout = 100 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(t.Context(), parentTimeout)
+	defer cancel()
+	fixture := newTestRootfsFilesystemProbeFixture(3)
+	deps := fixture.dependencies()
+	var runnerErr error
+	deps.run = func(runCtx context.Context, args []string, opts system.RunCmdOpts) (*system.RunResult, error) {
+		fixture.calls = append(fixture.calls, testRootfsFilesystemProbeCall{
+			args: append([]string(nil), args...), opts: opts,
+		})
+		<-runCtx.Done()
+		runnerErr = errs.WrapMsg(
+			errs.CodeProcessError,
+			"filesystem probe process deadline",
+			runCtx.Err(),
+			errs.WithClass(errs.ClassInternal),
+		)
+		return nil, runnerErr
+	}
+	parent := testRootfsPartitionParent(3, rootfsReadWrite)
+	partitions := testRootfsProbePartitionSet(parent, nil)
+
+	source, err := probeRootfsMountSource(ctx, deps, FilesystemExt4, parent, partitions)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	outer := errs.AsDomainError(err)
+	require.NotNil(t, outer)
+	assert.Equal(t, errs.CodeLoopMountError, outer.Code)
+	assert.Equal(t, errs.ClassInternal, outer.Class)
+	assert.Equal(t, context.DeadlineExceeded, errors.Unwrap(outer))
+	assert.NotEqual(t, runnerErr, errors.Unwrap(outer))
+	assert.Nil(t, errs.AsDomainError(errors.Unwrap(outer)))
+	assert.Nil(t, source)
+	require.Len(t, fixture.calls, 1)
+	assertRootfsBlkidCall(t, fixture.calls[0], "/dev/loop3")
+	if diff := cmp.Diff([]int{50}, fixture.fstatFDs); diff != "" {
+		t.Errorf("parent-deadline identity probes mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestProbeRootfsMountSourceRejectsPartitionIdentityRace(t *testing.T) {
 	// Rationale: A retained partition descriptor must be rejected if its kernel identity changes across the external
 	// filesystem probe; otherwise probe output could authorize a different block device than the selected capability.
