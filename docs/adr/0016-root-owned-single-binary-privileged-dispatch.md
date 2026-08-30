@@ -1271,8 +1271,9 @@ The activation order is fixed:
    non-mounted stale fixed tree descriptor-relatively and bottom-up. Any unexpected entry, mount at or below the tree,
    replacement race, or incomplete admission returns `unavailable`; Jailer is not executed. Recheck the pinned parent
    and destination absence immediately before handoff so every accepted destination is freshly created by this Jailer.
-5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. Acquire and retain
-   the VM, network, then firewall leases; create namespace/local and host links down; apply the complete nftables
+5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. Retain the launch
+   lease's VM lock and acquire and retain only the later network, then firewall leases; create namespace/local and host
+   links down; apply the complete nftables
    generation atomically and verify it through a fresh inspection. Only after firewall success may the exact links be
    raised and reverified. A failure keeps links down and both children blocked while typed abort unwinds through the
    same leases.
