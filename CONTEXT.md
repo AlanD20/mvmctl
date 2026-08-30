@@ -382,9 +382,10 @@ rule identity are then bound into every rule. Explicit empty intent emits no res
 
 The projection covers all fields of exactly the eight emitted `github.com/google/nftables v0.3.0` expression structs:
 `expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`, `expr.Range`, and `expr.Verdict`.
-Typed-nil or unknown expressions fail closed. A bounded 64-KiB encoder streams directly into SHA-256, and canonical
-validation, encoding, and finalization errors surface to the compiler caller. Any nftables-module upgrade or change to
-the emitted expression set requires an explicit schema audit and digest-version bump. Input ordering is deterministic.
+Typed-nil or unknown expressions fail closed. Digest encoding streams through a fixed 64-KiB buffer directly into
+SHA-256, and canonical validation, encoding, and finalization errors surface to the compiler caller. Any
+nftables-module upgrade or change to the emitted expression set requires an explicit schema audit and digest-version
+bump. Input ordering is deterministic.
 On the isolated representative 1,000-VM benchmark, compilation was roughly 23–28 ms with about 10 MB and 179,000
 allocations; the regression test enforces a 250,000-allocation ceiling.
 

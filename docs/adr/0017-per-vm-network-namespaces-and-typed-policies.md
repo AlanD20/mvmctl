@@ -131,9 +131,10 @@ tables, chains, rules, expressions, order, and userdata schema. The userdata gen
 while hashing to break self-reference; the derived digest and rule identity are then bound into every emitted rule.
 The projection covers every field of exactly the eight expression structs emitted from
 `github.com/google/nftables v0.3.0`: `expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`,
-`expr.Range`, and `expr.Verdict`. Typed-nil and unknown expressions fail closed. The bounded 64-KiB encoder streams
-directly into SHA-256, and validation, encoding, and finalization failures surface as compiler errors. Any nftables
-module upgrade or emitted-expression change requires an explicit field-coverage audit and digest-schema version bump.
+`expr.Range`, and `expr.Verdict`. Typed-nil and unknown expressions fail closed. Digest encoding streams through a fixed
+64-KiB buffer directly into SHA-256, and validation, encoding, and finalization failures surface as compiler errors.
+Any nftables module upgrade or emitted-expression change requires an explicit field-coverage audit and digest-schema
+version bump.
 
 On the isolated representative 1,000-VM compiler benchmark, the observed range was roughly 23–28 ms with about 10 MB
 and 179,000 allocations. L1 retains ratio-based growth evidence and enforces a 250,000-allocation regression ceiling.

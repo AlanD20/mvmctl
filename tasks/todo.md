@@ -485,8 +485,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 - [x] Derive SHA-256 generation identity from the versioned canonical closed projection of normalized intent and exact
   compiled managed tables/chains/rules/order/userdata. The caller supplies no ID; explicit empty input emits no tables
   or rules. Cover all fields of exactly the eight emitted v0.3.0 expression structs, reject typed-nil/unknown
-  expressions, stream with bounded memory and surfaced errors, require schema audit/version bump for module or
-  expression changes, and retain the representative 1,000-VM 250,000-allocation regression ceiling.
+  expressions, stream digest encoding through a fixed 64-KiB buffer with surfaced errors, require schema audit/version
+  bump for module or expression changes, and retain the representative 1,000-VM 250,000-allocation regression ceiling.
 - [ ] Add the never-unlinked root-owned `/run/mvmctl/authority/firewall.lock` after the network lock and the strict
   committed/applying `/var/lib/mvmctl/firewall/generation.json` record bound to boot ID, host netns identity, empty
   state, and exact before/target generations.

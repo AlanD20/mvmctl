@@ -55,9 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reserved table or rule output.
 - The projection covers every field of exactly the eight `github.com/google/nftables v0.3.0` expression structs the
   compiler emits: `expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`, `expr.Range`, and
-  `expr.Verdict`. Typed-nil and unknown expressions fail closed. The bounded encoder streams directly into SHA-256;
-  validation, encoding, and finalization errors surface to the compiler caller. A module upgrade or expression-set
-  change requires an explicit schema audit and digest-version bump.
+  `expr.Verdict`. Typed-nil and unknown expressions fail closed. Digest encoding streams through a fixed 64-KiB buffer
+  directly into SHA-256; validation, encoding, and finalization errors surface to the compiler caller. A module
+  upgrade or expression-set change requires an explicit schema audit and digest-version bump.
 - Deterministic input-order evidence remains in L1. On the isolated representative 1,000-VM benchmark, compilation was
   roughly 23–28 ms with about 10 MB and 179,000 allocations; the regression test enforces a 250,000-allocation ceiling.
 - This compiler foundation is inert: it creates no `nftables.Conn` and calls no `Flush`; it has no kernel

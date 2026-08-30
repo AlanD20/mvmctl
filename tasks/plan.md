@@ -571,10 +571,10 @@ tables, chains, rules, expressions, order, and userdata schema. A fixed digest p
 self-reference before the derived digest and rule identity are bound into every rule. The projection covers every
 field of exactly the emitted `expr.Meta`, `expr.Masq`, `expr.Bitwise`, `expr.Cmp`, `expr.Ct`, `expr.Payload`,
 `expr.Range`, and `expr.Verdict` structs from pinned `github.com/google/nftables v0.3.0`; typed-nil and unknown
-expressions fail closed. The bounded 64-KiB encoder streams into SHA-256 and returns canonical validation, encoding,
-or finalization failures. Module or expression-set changes require a schema audit and digest-version bump. The isolated
-representative 1,000-VM benchmark was roughly 23–28 ms, 10 MB, and 179,000 allocations, with a 250,000-allocation L1
-ceiling.
+expressions fail closed. Digest encoding streams through a fixed 64-KiB buffer into SHA-256 and returns canonical
+validation, encoding, or finalization failures. Module or expression-set changes require a schema audit and
+digest-version bump. The isolated representative 1,000-VM benchmark was roughly 23–28 ms, 10 MB, and 179,000
+allocations, with a 250,000-allocation L1 ceiling.
 
 This foundation creates no `nftables.Conn` and calls no `Flush`. The root firewall record/lock, inspection/adoption,
 unknown raw-expression detection, actual empty-generation deletion/application, namespace execution, privileged
