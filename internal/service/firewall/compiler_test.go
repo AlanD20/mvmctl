@@ -304,8 +304,9 @@ func TestCompileGenerationIsDeterministicAcrossInputOrder(t *testing.T) {
 }
 
 func TestCompileGenerationCanonicalDigestGoldenVectors(t *testing.T) {
-	// Rationale: fixed literals make these vectors independent of the implementation under test. The empty vector is
-	// also reproducible directly from the documented v1 TLV field sequence without compiling an nftables expression.
+	// Rationale: fixed literals lock the v1 digest grammar against accidental drift. The empty vector is independently
+	// reproducible from the scalar TLV sequence; the complete vector is a regression lock whose semantics are proven by
+	// the separate field-mutation tests below.
 	tests := map[string]struct {
 		intent    generationIntent
 		wantID    string
@@ -318,7 +319,7 @@ func TestCompileGenerationCanonicalDigestGoldenVectors(t *testing.T) {
 		},
 		"complete compatibility generation": {
 			intent: compatibilityIntent(),
-			wantID: "3ade5c53dfc88ffda31d76216cd61f9174a63296266109f42fd265183916644e",
+			wantID: "d7c37c0a23b5769be18b6555f1c41c70b26d86316ac532dba317b82787c8bd00",
 		},
 	}
 
@@ -487,6 +488,7 @@ func TestCompileGenerationDigestCoversSemanticIntentAndOutputOrder(t *testing.T)
 		},
 		"rule identity": func(generation *compiledGeneration) {
 			generation.bridge.rules[0].identity = "bridge.spoof.mac.changed"
+			generation.bridge.rules[0].rule.UserData = nil
 		},
 		"rule table": func(generation *compiledGeneration) {
 			generation.bridge.rules[0].rule.Table = generation.inet.table
@@ -527,6 +529,80 @@ func TestCompileGenerationDigestCoversSemanticIntentAndOutputOrder(t *testing.T)
 	}
 }
 
+// Rationale: The bounded canonical encoder replaces dependency wire marshaling with a closed projection. Every field
+// of every admitted expression type must therefore change authority, and any unreviewed dependency type must fail.
+func TestDeriveGenerationIDCoversClosedExpressionFields(t *testing.T) {
+	tests := map[string]struct {
+		baseline expr.Any
+		mutated  expr.Any
+	}{
+		"meta key":                     {&expr.Meta{}, &expr.Meta{Key: expr.MetaKeyIIFNAME}},
+		"meta source register":         {&expr.Meta{}, &expr.Meta{SourceRegister: true}},
+		"meta register":                {&expr.Meta{}, &expr.Meta{Register: 1}},
+		"masquerade random":            {&expr.Masq{}, &expr.Masq{Random: true}},
+		"masquerade fully random":      {&expr.Masq{}, &expr.Masq{FullyRandom: true}},
+		"masquerade persistent":        {&expr.Masq{}, &expr.Masq{Persistent: true}},
+		"masquerade ports":             {&expr.Masq{}, &expr.Masq{ToPorts: true}},
+		"masquerade minimum register":  {&expr.Masq{}, &expr.Masq{RegProtoMin: 1}},
+		"masquerade maximum register":  {&expr.Masq{}, &expr.Masq{RegProtoMax: 1}},
+		"bitwise source register":      {&expr.Bitwise{}, &expr.Bitwise{SourceRegister: 1}},
+		"bitwise destination register": {&expr.Bitwise{}, &expr.Bitwise{DestRegister: 1}},
+		"bitwise length":               {&expr.Bitwise{}, &expr.Bitwise{Len: 1}},
+		"bitwise mask":                 {&expr.Bitwise{}, &expr.Bitwise{Mask: []byte{1}}},
+		"bitwise xor":                  {&expr.Bitwise{}, &expr.Bitwise{Xor: []byte{1}}},
+		"comparison operation":         {&expr.Cmp{}, &expr.Cmp{Op: expr.CmpOpNeq}},
+		"comparison register":          {&expr.Cmp{}, &expr.Cmp{Register: 1}},
+		"comparison data":              {&expr.Cmp{}, &expr.Cmp{Data: []byte{1}}},
+		"conntrack register":           {&expr.Ct{}, &expr.Ct{Register: 1}},
+		"conntrack source register":    {&expr.Ct{}, &expr.Ct{SourceRegister: true}},
+		"conntrack key":                {&expr.Ct{}, &expr.Ct{Key: expr.CtKeyDIRECTION}},
+		"conntrack direction":          {&expr.Ct{}, &expr.Ct{Direction: 1}},
+		"payload operation":            {&expr.Payload{}, &expr.Payload{OperationType: expr.PayloadWrite}},
+		"payload destination register": {&expr.Payload{}, &expr.Payload{DestRegister: 1}},
+		"payload source register":      {&expr.Payload{}, &expr.Payload{SourceRegister: 1}},
+		"payload base":                 {&expr.Payload{}, &expr.Payload{Base: expr.PayloadBaseNetworkHeader}},
+		"payload offset":               {&expr.Payload{}, &expr.Payload{Offset: 1}},
+		"payload length":               {&expr.Payload{}, &expr.Payload{Len: 1}},
+		"payload checksum type":        {&expr.Payload{}, &expr.Payload{CsumType: expr.CsumTypeInet}},
+		"payload checksum offset":      {&expr.Payload{}, &expr.Payload{CsumOffset: 1}},
+		"payload checksum flags":       {&expr.Payload{}, &expr.Payload{CsumFlags: 1}},
+		"range operation":              {&expr.Range{}, &expr.Range{Op: expr.CmpOpNeq}},
+		"range register":               {&expr.Range{}, &expr.Range{Register: 1}},
+		"range lower data":             {&expr.Range{}, &expr.Range{FromData: []byte{1}}},
+		"range upper data":             {&expr.Range{}, &expr.Range{ToData: []byte{1}}},
+		"verdict kind":                 {&expr.Verdict{}, &expr.Verdict{Kind: expr.VerdictAccept}},
+		"verdict chain":                {&expr.Verdict{}, &expr.Verdict{Chain: "managed-chain"}},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			baseline, err := deriveGenerationIDWithFirstExpression(tc.baseline)
+			require.NoError(t, err)
+			mutated, err := deriveGenerationIDWithFirstExpression(tc.mutated)
+			require.NoError(t, err)
+			assert.NotEqual(t, baseline, mutated)
+		})
+	}
+
+	_, err := deriveGenerationIDWithFirstExpression(&expr.Counter{})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unsupported expression")
+	var absentMeta *expr.Meta
+	_, err = deriveGenerationIDWithFirstExpression(absentMeta)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "absent meta expression")
+}
+
+func deriveGenerationIDWithFirstExpression(expression expr.Any) (string, error) {
+	intent := compatibilityIntent()
+	compiled, err := compileGeneration(intent)
+	if err != nil {
+		return "", err
+	}
+	compiled.bridge.rules[0].rule.Exprs = []expr.Any{expression}
+	return deriveGenerationID(intent, compiled)
+}
+
 func TestCompileGenerationBindsDerivedDigestToRuleUserData(t *testing.T) {
 	compiled, err := compileGeneration(compatibilityIntent())
 	require.NoError(t, err)
@@ -559,6 +635,13 @@ func TestDeriveGenerationIDRejectsInconsistentCompiledOutput(t *testing.T) {
 			generation compiledGeneration,
 		) (generationIntent, compiledGeneration) {
 			generation.bridge.rules[0].identity = ""
+			return intent, generation
+		},
+		"inconsistent rule userdata": func(
+			intent generationIntent,
+			generation compiledGeneration,
+		) (generationIntent, compiledGeneration) {
+			generation.bridge.rules[0].rule.UserData = []byte("unexpected")
 			return intent, generation
 		},
 	}
