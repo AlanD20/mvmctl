@@ -106,7 +106,7 @@ func openInstanceAuthorityRoots(
 	if err != nil {
 		return nil, err
 	}
-	authorityNames, err := instanceAuthorityPathComponents(infra.JailerAuthorityRoot, 3)
+	authorityNames, err := instanceAuthorityPathComponents(infra.PrivilegedAuthorityRoot, 3)
 	if err != nil {
 		return nil, err
 	}
