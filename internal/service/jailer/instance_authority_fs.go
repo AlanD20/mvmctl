@@ -34,8 +34,7 @@ type instanceVMAuthority interface {
 }
 
 type instanceTopologyAuthority interface {
-	ownerUID() uint32
-	vmKey() authorityfs.VMKey
+	binding() (uint32, authorityfs.VMKey, error)
 	Release(context.Context) error
 }
 
@@ -78,7 +77,7 @@ type systemTopologyAuthority struct {
 }
 
 type systemTopologyAuthorityState struct {
-	// mu guards value and every lifecycle field below. ownerUID and key are immutable.
+	// mu guards value, binding, and every lifecycle field below.
 	mu         sync.Mutex
 	value      *authorityfs.TopologyHold
 	ownerUID   uint32
@@ -249,8 +248,19 @@ func (authority *systemVMAuthority) retainTopology(
 	if err != nil {
 		return nil, instanceLockError("retain VM topology authority", err)
 	}
+	if value == nil {
+		return nil, instanceAtomicError("retained VM topology authority is missing", nil)
+	}
+	ownerUID, key, err := value.Binding()
+	if err != nil {
+		return nil, appendInstanceOperationError(
+			instanceLockError("inspect VM topology authority binding", err),
+			"release rejected VM topology authority",
+			value.Release(context.WithoutCancel(ctx)),
+		)
+	}
 	return &systemTopologyAuthority{state: &systemTopologyAuthorityState{
-		value: value, ownerUID: value.OwnerUID(), key: value.VMKey(),
+		value: value, ownerUID: ownerUID, key: key,
 	}}, nil
 }
 
@@ -280,18 +290,27 @@ func (authority *systemVMAuthority) Release(ctx context.Context) error {
 	return authority.releaseErr
 }
 
-func (authority *systemTopologyAuthority) ownerUID() uint32 {
+func (authority *systemTopologyAuthority) binding() (uint32, authorityfs.VMKey, error) {
 	if authority == nil || authority.state == nil {
-		return 0
+		return 0, authorityfs.VMKey{}, instanceStateError("", "vm topology authority is not active")
 	}
-	return authority.state.ownerUID
-}
-
-func (authority *systemTopologyAuthority) vmKey() authorityfs.VMKey {
-	if authority == nil || authority.state == nil {
-		return authorityfs.VMKey{}
+	state := authority.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.value == nil {
+		return 0, authorityfs.VMKey{}, instanceStateError("", "vm topology authority is not active")
 	}
-	return authority.state.key
+	ownerUID, key, err := state.value.Binding()
+	if err != nil {
+		return 0, authorityfs.VMKey{}, instanceLockError("inspect VM topology authority binding", err)
+	}
+	if ownerUID != state.ownerUID || key != state.key {
+		return 0, authorityfs.VMKey{}, instanceAtomicError(
+			"VM topology authority binding changed while retained",
+			nil,
+		)
+	}
+	return ownerUID, key, nil
 }
 
 func (authority *systemTopologyAuthority) Release(ctx context.Context) error {
@@ -310,6 +329,8 @@ func (authority *systemTopologyAuthority) Release(ctx context.Context) error {
 		state.releaseErr = instanceLockError("release VM topology authority", err)
 	}
 	state.value = nil
+	state.ownerUID = 0
+	state.key = authorityfs.VMKey{}
 	state.released = true
 	return state.releaseErr
 }

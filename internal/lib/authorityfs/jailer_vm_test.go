@@ -18,11 +18,18 @@ func TestJailerVMTopologyHoldBindsOwnerAndKey(t *testing.T) {
 	_, _, authority, key := openTestJailerVM(t, realDependencies())
 	hold, err := authority.RetainTopology(t.Context())
 	require.NoError(t, err)
+	copyOfHold := *hold
 
-	assert.Equal(t, testUID, hold.OwnerUID())
-	assert.Equal(t, key.value, hold.VMKey().value)
+	ownerUID, boundKey, err := hold.Binding()
+	require.NoError(t, err)
+	assert.Equal(t, testUID, ownerUID)
+	assert.Equal(t, key.value, boundKey.value)
 
 	require.NoError(t, hold.Release(t.Context()))
+	ownerUID, boundKey, err = copyOfHold.Binding()
+	assert.Zero(t, ownerUID)
+	assert.Empty(t, boundKey.value)
+	require.Error(t, err)
 	require.NoError(t, authority.Release(t.Context()))
 }
 
@@ -36,8 +43,10 @@ func TestJailerVMTopologyHoldRejectsInactiveStates(t *testing.T) {
 	require.NoError(t, zero.Release(t.Context()))
 
 	var zeroHold TopologyHold
-	assert.Zero(t, zeroHold.OwnerUID())
-	assert.Empty(t, zeroHold.VMKey().value)
+	ownerUID, key, err := zeroHold.Binding()
+	assert.Zero(t, ownerUID)
+	assert.Empty(t, key.value)
+	require.Error(t, err)
 	require.NoError(t, zeroHold.Release(t.Context()))
 
 	_, _, authority, _ := openTestJailerVM(t, realDependencies())
@@ -50,6 +59,81 @@ func TestJailerVMTopologyHoldRejectsInactiveStates(t *testing.T) {
 	hold, err = nilAuthority.RetainTopology(t.Context())
 	assert.Nil(t, hold)
 	require.Error(t, err)
+}
+
+func TestJailerVMRetainTopologyRejectsHoldLimitWithoutWrappingOrUnlocking(t *testing.T) {
+	t.Parallel()
+
+	var unlockCalls atomic.Int32
+	lock := testJailerVMLock(&unlockCalls)
+	authority := &JailerVM{state: &jailerVMState{
+		lock: lock, ownerUID: testUID, topologyHolds: ^uint64(0),
+	}}
+
+	hold, err := authority.RetainTopology(t.Context())
+	assert.Nil(t, hold)
+	require.Error(t, err)
+	assert.Equal(t, ^uint64(0), authority.state.topologyHolds)
+	assert.False(t, authority.state.topologyBroken)
+	releaseErr := authority.Release(t.Context())
+	require.Error(t, releaseErr)
+	assert.ErrorIs(t, releaseErr, ErrTopologyRetained)
+	assert.Equal(t, int32(0), unlockCalls.Load())
+	assert.Same(t, lock, authority.state.lock)
+
+	authority.state.mu.Lock()
+	authority.state.topologyHolds = 0
+	authority.state.mu.Unlock()
+	require.NoError(t, authority.Release(t.Context()))
+	assert.Equal(t, int32(1), unlockCalls.Load())
+}
+
+func TestTopologyHoldReleaseRejectsOrphanAndCachesErrorAcrossCopies(t *testing.T) {
+	t.Parallel()
+
+	key, err := NewVMKey(testVMID)
+	require.NoError(t, err)
+	hold := &TopologyHold{state: &topologyHoldState{ownerUID: testUID, key: key}}
+	copyOfHold := *hold
+
+	ownerUID, boundKey, bindErr := hold.Binding()
+	assert.Zero(t, ownerUID)
+	assert.Empty(t, boundKey.value)
+	require.Error(t, bindErr)
+	first := hold.Release(t.Context())
+	second := copyOfHold.Release(t.Context())
+	require.Error(t, first)
+	assert.Same(t, first, second)
+	assert.Zero(t, hold.state.ownerUID)
+	assert.Empty(t, hold.state.key.value)
+}
+
+func TestTopologyHoldReleaseRejectsCounterUnderflowWithoutUnlockingParent(t *testing.T) {
+	t.Parallel()
+
+	var unlockCalls atomic.Int32
+	lock := testJailerVMLock(&unlockCalls)
+	parent := &jailerVMState{lock: lock, ownerUID: testUID}
+	key, err := NewVMKey(testVMID)
+	require.NoError(t, err)
+	hold := &TopologyHold{state: &topologyHoldState{
+		parent: parent, ownerUID: testUID, key: key,
+	}}
+	copyOfHold := *hold
+
+	first := hold.Release(t.Context())
+	second := copyOfHold.Release(t.Context())
+	require.Error(t, first)
+	assert.Same(t, first, second)
+	assert.Zero(t, parent.topologyHolds)
+	assert.True(t, parent.topologyBroken)
+	parentReleaseErr := (&JailerVM{state: parent}).Release(t.Context())
+	require.Error(t, parentReleaseErr)
+	assert.ErrorIs(t, parentReleaseErr, ErrTopologyRetained)
+	assert.Equal(t, int32(0), unlockCalls.Load())
+	assert.Same(t, lock, parent.lock)
+
+	require.NoError(t, lock.Release(t.Context()))
 }
 
 func TestJailerVMReleaseRejectsMissingUnderlyingLockAndCachesError(t *testing.T) {
@@ -319,7 +403,19 @@ func openTestJailerVM(
 }
 
 var _ interface {
-	OwnerUID() uint32
-	VMKey() VMKey
+	Binding() (uint32, VMKey, error)
 	Release(context.Context) error
 } = (*TopologyHold)(nil)
+
+func testJailerVMLock(unlockCalls *atomic.Int32) *Lock {
+	return &Lock{state: &lockState{
+		deps: dependencies{
+			flock: func(context.Context, int, int) error {
+				unlockCalls.Add(1)
+				return nil
+			},
+			close: func(context.Context, int) error { return nil },
+		},
+		fd: 1, active: true,
+	}}
+}

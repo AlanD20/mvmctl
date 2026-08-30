@@ -17,13 +17,14 @@ type JailerVM struct {
 
 type jailerVMState struct {
 	// mu guards lock, topologyHolds, and every lifecycle field below. ownerUID and key are immutable.
-	mu            sync.Mutex
-	lock          *Lock
-	ownerUID      uint32
-	key           VMKey
-	topologyHolds uint64
-	released      bool
-	releaseErr    error
+	mu             sync.Mutex
+	lock           *Lock
+	ownerUID       uint32
+	key            VMKey
+	topologyHolds  uint64
+	topologyBroken bool
+	released       bool
+	releaseErr     error
 }
 
 // TopologyHold retains one owner-bound VM topology authority without exposing its lock or filesystem representation.
@@ -32,7 +33,7 @@ type TopologyHold struct {
 }
 
 type topologyHoldState struct {
-	// mu guards released and releaseErr. parent, ownerUID, and key are immutable.
+	// mu guards parent, binding, and every lifecycle field below.
 	mu         sync.Mutex
 	parent     *jailerVMState
 	ownerUID   uint32
@@ -49,7 +50,7 @@ func (authority *JailerVM) RetainTopology(ctx context.Context) (*TopologyHold, e
 	state := authority.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.released || state.lock == nil {
+	if state.released || state.lock == nil || state.topologyBroken {
 		return nil, fmt.Errorf("authorityfs: Jailer VM authority is released")
 	}
 	if err := ctx.Err(); err != nil {
@@ -64,20 +65,24 @@ func (authority *JailerVM) RetainTopology(ctx context.Context) (*TopologyHold, e
 	}}, nil
 }
 
-// OwnerUID returns the authenticated non-root owner bound to this topology authority.
-func (hold *TopologyHold) OwnerUID() uint32 {
+// Binding returns the owner and opaque VM key only while this topology authority remains live.
+func (hold *TopologyHold) Binding() (uint32, VMKey, error) {
 	if hold == nil || hold.state == nil {
-		return 0
+		return 0, VMKey{}, fmt.Errorf("authorityfs: Jailer VM topology authority is not active")
 	}
-	return hold.state.ownerUID
-}
-
-// VMKey returns the opaque canonical VM key bound to this topology authority.
-func (hold *TopologyHold) VMKey() VMKey {
-	if hold == nil || hold.state == nil {
-		return VMKey{}
+	state := hold.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.parent == nil {
+		return 0, VMKey{}, fmt.Errorf("authorityfs: Jailer VM topology authority is not active")
 	}
-	return hold.state.key
+	parent := state.parent
+	parent.mu.Lock()
+	defer parent.mu.Unlock()
+	if parent.released || parent.lock == nil || parent.topologyBroken || parent.topologyHolds == 0 {
+		return 0, VMKey{}, fmt.Errorf("authorityfs: Jailer VM topology authority parent is not active")
+	}
+	return state.ownerUID, state.key, nil
 }
 
 // Release drops this topology hold exactly once across copies and concurrent callers.
@@ -98,12 +103,15 @@ func (hold *TopologyHold) Release(ctx context.Context) error {
 		parent.mu.Lock()
 		if parent.topologyHolds == 0 {
 			state.releaseErr = fmt.Errorf("authorityfs: release Jailer VM topology authority: hold counter underflow")
+			parent.topologyBroken = true
 		} else {
 			parent.topologyHolds--
 		}
 		parent.mu.Unlock()
 	}
 	state.parent = nil
+	state.ownerUID = 0
+	state.key = VMKey{}
 	state.released = true
 	return state.releaseErr
 }
@@ -123,6 +131,12 @@ func (authority *JailerVM) Release(ctx context.Context) error {
 		state.released = true
 		state.releaseErr = fmt.Errorf("authorityfs: release Jailer VM authority: lock is not active")
 		return state.releaseErr
+	}
+	if state.topologyBroken {
+		return fmt.Errorf(
+			"authorityfs: release Jailer VM authority: topology hold state is invalid: %w",
+			ErrTopologyRetained,
+		)
 	}
 	if state.topologyHolds != 0 {
 		return fmt.Errorf(

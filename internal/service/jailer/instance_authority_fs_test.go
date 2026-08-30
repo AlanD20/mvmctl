@@ -83,7 +83,7 @@ type testInstanceTopologyAuthority struct {
 }
 
 type testInstanceTopologyAuthorityState struct {
-	// mu guards released and releaseErr. parent, ownerUID, and key are immutable.
+	// mu guards parent, binding, and every lifecycle field below.
 	mu         sync.Mutex
 	parent     *testInstanceVMAuthority
 	ownerUID   uint32
@@ -370,18 +370,17 @@ func (authority *testInstanceVMAuthority) Release(ctx context.Context) error {
 	return authority.releaseErr
 }
 
-func (authority *testInstanceTopologyAuthority) ownerUID() uint32 {
+func (authority *testInstanceTopologyAuthority) binding() (uint32, authorityfs.VMKey, error) {
 	if authority == nil || authority.state == nil {
-		return 0
+		return 0, authorityfs.VMKey{}, instanceStateError("", "VM topology authority is not active")
 	}
-	return authority.state.ownerUID
-}
-
-func (authority *testInstanceTopologyAuthority) vmKey() authorityfs.VMKey {
-	if authority == nil || authority.state == nil {
-		return authorityfs.VMKey{}
+	state := authority.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.parent == nil {
+		return 0, authorityfs.VMKey{}, instanceStateError("", "VM topology authority is not active")
 	}
-	return authority.state.key
+	return state.ownerUID, state.key, nil
 }
 
 func (authority *testInstanceTopologyAuthority) Release(context.Context) error {
@@ -402,6 +401,8 @@ func (authority *testInstanceTopologyAuthority) Release(context.Context) error {
 	}
 	state.parent.mu.Unlock()
 	state.parent = nil
+	state.ownerUID = 0
+	state.key = authorityfs.VMKey{}
 	state.released = true
 	return state.releaseErr
 }
@@ -494,6 +495,12 @@ func TestSystemAuthorityAdaptersRejectAcquireAfterRelease(t *testing.T) {
 	vmAuthority := &systemVMAuthority{released: true}
 	topology, err := vmAuthority.retainTopology(t.Context())
 	assert.Nil(t, topology)
+	require.Error(t, err)
+
+	topologyAuthority := &systemTopologyAuthority{state: &systemTopologyAuthorityState{released: true}}
+	ownerUID, boundKey, err := topologyAuthority.binding()
+	assert.Zero(t, ownerUID)
+	assert.Equal(t, authorityfs.VMKey{}, boundKey)
 	require.Error(t, err)
 }
 

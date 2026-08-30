@@ -28,7 +28,7 @@ type topologyAuthorityLease struct {
 }
 
 type topologyAuthorityLeaseState struct {
-	// mu guards value and every lifecycle field below. ownerUID and key are immutable.
+	// mu guards value, binding, and every lifecycle field below.
 	mu         sync.Mutex
 	value      instanceTopologyAuthority
 	ownerUID   uint32
@@ -56,9 +56,24 @@ func (lease *vmAuthorityLease) retainTopologyAuthority(
 	if value == nil {
 		return nil, instanceAtomicError("retained VM topology authority is missing", nil)
 	}
-	if value.ownerUID() != state.ownerUID || value.vmKey() != state.key {
+	ownerUID, key, err := value.binding()
+	if err != nil {
 		return nil, appendInstanceOperationError(
-			instanceAtomicError("retained VM topology authority binding is invalid", nil),
+			err,
+			"release rejected VM topology authority",
+			value.Release(context.WithoutCancel(ctx)),
+		)
+	}
+	if ownerUID != state.ownerUID {
+		return nil, appendInstanceOperationError(
+			instanceAtomicError("retained VM topology authority owner binding is invalid", nil),
+			"release rejected VM topology authority",
+			value.Release(context.WithoutCancel(ctx)),
+		)
+	}
+	if key != state.key {
+		return nil, appendInstanceOperationError(
+			instanceAtomicError("retained VM topology authority VM binding is invalid", nil),
 			"release rejected VM topology authority",
 			value.Release(context.WithoutCancel(ctx)),
 		)
@@ -106,18 +121,27 @@ func (lease *vmAuthorityLease) isActive() bool {
 	return state.active
 }
 
-func (lease *topologyAuthorityLease) ownerUID() uint32 {
+func (lease *topologyAuthorityLease) binding() (uint32, authorityfs.VMKey, error) {
 	if lease == nil || lease.state == nil {
-		return 0
+		return 0, authorityfs.VMKey{}, instanceStateError("", "vm topology authority lease is not active")
 	}
-	return lease.state.ownerUID
-}
-
-func (lease *topologyAuthorityLease) vmKey() authorityfs.VMKey {
-	if lease == nil || lease.state == nil {
-		return authorityfs.VMKey{}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.value == nil {
+		return 0, authorityfs.VMKey{}, instanceStateError("", "vm topology authority lease is not active")
 	}
-	return lease.state.key
+	ownerUID, key, err := state.value.binding()
+	if err != nil {
+		return 0, authorityfs.VMKey{}, err
+	}
+	if ownerUID != state.ownerUID || key != state.key {
+		return 0, authorityfs.VMKey{}, instanceAtomicError(
+			"VM topology authority binding changed while retained",
+			nil,
+		)
+	}
+	return ownerUID, key, nil
 }
 
 func (lease *topologyAuthorityLease) Release(ctx context.Context) error {
@@ -136,6 +160,8 @@ func (lease *topologyAuthorityLease) Release(ctx context.Context) error {
 		state.releaseErr = state.value.Release(context.WithoutCancel(ctx))
 	}
 	state.value = nil
+	state.ownerUID = 0
+	state.key = authorityfs.VMKey{}
 	state.released = true
 	return state.releaseErr
 }

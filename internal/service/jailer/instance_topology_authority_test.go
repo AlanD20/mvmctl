@@ -28,17 +28,24 @@ func TestLaunchLeaseRetainsOwnerBoundTopologyAuthority(t *testing.T) {
 	require.NoError(t, err)
 	topology, err := launch.retainTopologyAuthority(t.Context())
 	require.NoError(t, err)
+	copyOfTopology := *topology
 	key, err := authorityfs.NewVMKey(testVMID)
 	require.NoError(t, err)
 
-	assert.Equal(t, testAuthorityUID, topology.ownerUID())
-	if topology.vmKey() != key {
+	ownerUID, boundKey, err := topology.binding()
+	require.NoError(t, err)
+	assert.Equal(t, testAuthorityUID, ownerUID)
+	if boundKey != key {
 		t.Error("retained topology authority has the wrong opaque VM key")
 	}
 
 	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
 	require.NoError(t, topology.Release(cancelled))
+	ownerUID, boundKey, err = copyOfTopology.binding()
+	assert.Zero(t, ownerUID)
+	assert.Equal(t, authorityfs.VMKey{}, boundKey)
+	requireTopologyDomainError(t, err, errs.CodeVMStateInvalid, errs.ClassValidation, "", nil, nil)
 	require.NoError(t, launch.Release(cancelled))
 	retained, err := launch.retainTopologyAuthority(t.Context())
 	assert.Nil(t, retained)
@@ -96,6 +103,15 @@ func TestLaunchLeaseReleaseWithTopologyHoldPreservesCompositeAuthority(t *testin
 		releaseErr := <-results
 		require.Error(t, releaseErr)
 		assert.ErrorIs(t, releaseErr, authorityfs.ErrTopologyRetained)
+		requireTopologyDomainError(
+			t,
+			releaseErr,
+			errs.CodeProcessError,
+			errs.ClassUnknown,
+			"",
+			authorityfs.ErrTopologyRetained,
+			nil,
+		)
 	}
 
 	after := launch.snapshot()
@@ -153,33 +169,72 @@ func TestLaunchLeaseVMReleaseErrorKeepsExactCleanupEvidenceAndCachesResult(t *te
 	require.Error(t, first)
 	assert.ErrorIs(t, first, vmReleaseErr)
 	assert.Same(t, first, second)
-	domainErr := errs.AsDomainError(first)
-	require.NotNil(t, domainErr)
-	assert.Equal(t, errs.CodeProcessError, domainErr.Code)
-	assert.Equal(t, true, domainErr.Details["instance_authority_cleanup_failed"])
-	assert.Equal(
+	requireTopologyDomainError(
 		t,
-		"release VM lock: release authority lock: injected VM authority release failure",
-		domainErr.Details["instance_authority_cleanup_detail"],
+		first,
+		errs.CodeProcessError,
+		errs.ClassUnknown,
+		"",
+		vmReleaseErr,
+		map[string]any{
+			"instance_authority_cleanup_failed": true,
+			"instance_authority_cleanup_detail": "release VM lock: release authority lock: injected VM authority release failure",
+		},
 	)
 	assert.True(t, launch.snapshot().released)
 }
 
-func TestVMAuthorityLeaseRejectsMismatchedInjectedTopologyBinding(t *testing.T) {
+func TestVMAuthorityLeaseRejectsOwnerOnlyMismatchAndReleasesChild(t *testing.T) {
 	t.Parallel()
 
 	wantKey, err := authorityfs.NewVMKey(testVMID)
 	require.NoError(t, err)
-	wrongKey, err := authorityfs.NewVMKey("11111111111111111111111111111111")
-	require.NoError(t, err)
-	child := &injectedTopologyAuthority{owner: testAuthorityUID, key: wrongKey}
+	child := &injectedTopologyAuthority{owner: testAuthorityUID + 1, key: wantKey}
 	lease := &vmAuthorityLease{state: &vmAuthorityLeaseState{
 		value: &injectedVMAuthority{child: child}, ownerUID: testAuthorityUID, key: wantKey, active: true,
 	}}
 
 	topology, err := lease.retainTopologyAuthority(t.Context())
 	assert.Nil(t, topology)
-	require.Error(t, err)
+	requireTopologyDomainError(t, err, errs.CodeVMAtomicFailed, errs.ClassInternal, "", nil, nil)
+	assert.Equal(t, 1, child.releaseCount())
+}
+
+func TestVMAuthorityLeaseRejectsKeyOnlyMismatchAndPreservesChildCleanupError(t *testing.T) {
+	t.Parallel()
+
+	wantKey, err := authorityfs.NewVMKey(testVMID)
+	require.NoError(t, err)
+	wrongKey, err := authorityfs.NewVMKey("11111111111111111111111111111111")
+	require.NoError(t, err)
+	cleanupCause := errors.New("injected rejected topology cleanup failure")
+	child := &injectedTopologyAuthority{
+		owner: testAuthorityUID,
+		key:   wrongKey,
+		releaseErr: instanceLockError(
+			"release VM topology authority",
+			cleanupCause,
+		),
+	}
+	lease := &vmAuthorityLease{state: &vmAuthorityLeaseState{
+		value: &injectedVMAuthority{child: child}, ownerUID: testAuthorityUID, key: wantKey, active: true,
+	}}
+
+	topology, err := lease.retainTopologyAuthority(t.Context())
+	assert.Nil(t, topology)
+	requireTopologyDomainError(
+		t,
+		err,
+		errs.CodeVMAtomicFailed,
+		errs.ClassInternal,
+		"",
+		cleanupCause,
+		map[string]any{
+			"instance_authority_cleanup_failed": true,
+			"instance_authority_cleanup_detail": "release rejected VM topology authority: release VM topology authority: " +
+				"injected rejected topology cleanup failure",
+		},
+	)
 	assert.Equal(t, 1, child.releaseCount())
 }
 
@@ -190,8 +245,125 @@ func TestVMAuthorityLeaseReleaseRejectsMissingUnderlyingAuthorityAndCachesError(
 	copyOfLease := *lease
 	first := lease.Release(t.Context())
 	second := copyOfLease.Release(t.Context())
-	require.Error(t, first)
+	requireTopologyDomainError(t, first, errs.CodeVMStateInvalid, errs.ClassValidation, "", nil, nil)
 	assert.Same(t, first, second)
+}
+
+func TestVMAuthorityLeaseRejectsNilRetainResultAndInactiveStates(t *testing.T) {
+	t.Parallel()
+
+	key, err := authorityfs.NewVMKey(testVMID)
+	require.NoError(t, err)
+	nilResult := &vmAuthorityLease{state: &vmAuthorityLeaseState{
+		value: &injectedVMAuthority{}, ownerUID: testAuthorityUID, key: key, active: true,
+	}}
+	topology, err := nilResult.retainTopologyAuthority(t.Context())
+	assert.Nil(t, topology)
+	requireTopologyDomainError(t, err, errs.CodeVMAtomicFailed, errs.ClassInternal, "", nil, nil)
+
+	states := map[string]*vmAuthorityLease{
+		"inactive": {state: &vmAuthorityLeaseState{
+			value: &injectedVMAuthority{}, ownerUID: testAuthorityUID, key: key,
+		}},
+		"released": {state: &vmAuthorityLeaseState{
+			value: &injectedVMAuthority{}, ownerUID: testAuthorityUID, key: key, active: true, released: true,
+		}},
+	}
+	for name, lease := range states {
+		t.Run(name, func(t *testing.T) {
+			topology, retainErr := lease.retainTopologyAuthority(t.Context())
+			assert.Nil(t, topology)
+			requireTopologyDomainError(
+				t,
+				retainErr,
+				errs.CodeVMStateInvalid,
+				errs.ClassValidation,
+				"",
+				nil,
+				nil,
+			)
+		})
+	}
+}
+
+func TestTopologyAuthorityLeaseReleaseRejectsMissingChildAndCachesError(t *testing.T) {
+	t.Parallel()
+
+	key, err := authorityfs.NewVMKey(testVMID)
+	require.NoError(t, err)
+	lease := &topologyAuthorityLease{state: &topologyAuthorityLeaseState{
+		ownerUID: testAuthorityUID, key: key,
+	}}
+	copyOfLease := *lease
+	first := lease.Release(t.Context())
+	second := copyOfLease.Release(t.Context())
+	requireTopologyDomainError(t, first, errs.CodeVMStateInvalid, errs.ClassValidation, "", nil, nil)
+	assert.Same(t, first, second)
+	ownerUID, boundKey, bindErr := copyOfLease.binding()
+	assert.Zero(t, ownerUID)
+	assert.Equal(t, authorityfs.VMKey{}, boundKey)
+	requireTopologyDomainError(t, bindErr, errs.CodeVMStateInvalid, errs.ClassValidation, "", nil, nil)
+}
+
+func TestSystemTopologyAuthorityReleaseRejectsMissingChildAndCachesError(t *testing.T) {
+	t.Parallel()
+
+	authority := &systemTopologyAuthority{state: &systemTopologyAuthorityState{}}
+	copyOfAuthority := *authority
+	first := authority.Release(t.Context())
+	second := copyOfAuthority.Release(t.Context())
+	requireTopologyDomainError(t, first, errs.CodeVMStateInvalid, errs.ClassValidation, "", nil, nil)
+	assert.Same(t, first, second)
+	ownerUID, key, bindErr := copyOfAuthority.binding()
+	assert.Zero(t, ownerUID)
+	assert.Equal(t, authorityfs.VMKey{}, key)
+	requireTopologyDomainError(t, bindErr, errs.CodeVMStateInvalid, errs.ClassValidation, "", nil, nil)
+}
+
+func TestTopologyAuthorityLeaseOwnsChildUntilBindingAdmissionReturns(t *testing.T) {
+	t.Parallel()
+
+	key, err := authorityfs.NewVMKey(testVMID)
+	require.NoError(t, err)
+	bindingStarted := make(chan struct{})
+	allowBinding := make(chan struct{})
+	child := &injectedTopologyAuthority{owner: testAuthorityUID, key: key}
+	lease := &vmAuthorityLease{state: &vmAuthorityLeaseState{
+		value: &injectedVMAuthority{child: child}, ownerUID: testAuthorityUID, key: key, active: true,
+	}}
+	topology, err := lease.retainTopologyAuthority(t.Context())
+	require.NoError(t, err)
+	child.mu.Lock()
+	child.bindingStarted = bindingStarted
+	child.allowBinding = allowBinding
+	child.mu.Unlock()
+
+	type bindingResult struct {
+		ownerUID uint32
+		key      authorityfs.VMKey
+		err      error
+	}
+	bindingResults := make(chan bindingResult, 1)
+	go func() {
+		ownerUID, boundKey, bindingErr := topology.binding()
+		bindingResults <- bindingResult{ownerUID: ownerUID, key: boundKey, err: bindingErr}
+	}()
+	<-bindingStarted
+	releaseResults := make(chan error, 1)
+	go func() { releaseResults <- topology.Release(t.Context()) }()
+	select {
+	case releaseErr := <-releaseResults:
+		require.Failf(t, "topology authority released during binding admission", "release error: %v", releaseErr)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(allowBinding)
+
+	result := <-bindingResults
+	require.NoError(t, result.err)
+	assert.Equal(t, testAuthorityUID, result.ownerUID)
+	assert.Equal(t, key, result.key)
+	require.NoError(t, <-releaseResults)
+	assert.Equal(t, 1, child.releaseCount())
 }
 
 func TestTopologyAuthorityLeaseCopiesConcurrentlyReleaseUnderlyingChildOnce(t *testing.T) {
@@ -199,7 +371,8 @@ func TestTopologyAuthorityLeaseCopiesConcurrentlyReleaseUnderlyingChildOnce(t *t
 
 	key, err := authorityfs.NewVMKey(testVMID)
 	require.NoError(t, err)
-	releaseErr := errors.New("injected topology release failure")
+	releaseCause := errors.New("injected topology release failure")
+	releaseErr := instanceLockError("release VM topology authority", releaseCause)
 	child := &injectedTopologyAuthority{owner: testAuthorityUID, key: key, releaseErr: releaseErr}
 	lease := &vmAuthorityLease{state: &vmAuthorityLeaseState{
 		value: &injectedVMAuthority{child: child}, ownerUID: testAuthorityUID, key: key, active: true,
@@ -222,8 +395,8 @@ func TestTopologyAuthorityLeaseCopiesConcurrentlyReleaseUnderlyingChildOnce(t *t
 		}()
 	}
 	first := <-results
-	require.Error(t, first)
-	assert.ErrorIs(t, first, releaseErr)
+	requireTopologyDomainError(t, first, errs.CodeProcessError, errs.ClassUnknown, "", releaseCause, nil)
+	assert.Same(t, releaseErr, first)
 	for range callers - 1 {
 		assert.Same(t, first, <-results)
 	}
@@ -243,26 +416,39 @@ func (*injectedVMAuthority) Release(context.Context) error {
 }
 
 type injectedTopologyAuthority struct {
-	// mu guards releases.
-	mu         sync.Mutex
-	owner      uint32
-	key        authorityfs.VMKey
-	releases   int
-	releaseErr error
+	// mu guards released and releases.
+	mu             sync.Mutex
+	owner          uint32
+	key            authorityfs.VMKey
+	released       bool
+	releases       int
+	releaseErr     error
+	bindingStarted chan struct{}
+	allowBinding   chan struct{}
 }
 
-func (authority *injectedTopologyAuthority) ownerUID() uint32 {
-	return authority.owner
-}
-
-func (authority *injectedTopologyAuthority) vmKey() authorityfs.VMKey {
-	return authority.key
+func (authority *injectedTopologyAuthority) binding() (uint32, authorityfs.VMKey, error) {
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	if authority.released {
+		return 0, authorityfs.VMKey{}, instanceStateError("", "VM topology authority is not active")
+	}
+	if authority.bindingStarted != nil {
+		close(authority.bindingStarted)
+		authority.bindingStarted = nil
+	}
+	if authority.allowBinding != nil {
+		<-authority.allowBinding
+		authority.allowBinding = nil
+	}
+	return authority.owner, authority.key, nil
 }
 
 func (authority *injectedTopologyAuthority) Release(context.Context) error {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
 	authority.releases++
+	authority.released = true
 	return authority.releaseErr
 }
 
@@ -270,4 +456,30 @@ func (authority *injectedTopologyAuthority) releaseCount() int {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
 	return authority.releases
+}
+
+func requireTopologyDomainError(
+	t *testing.T,
+	err error,
+	code errs.Code,
+	class errs.Class,
+	entity string,
+	cause error,
+	details map[string]any,
+) {
+	t.Helper()
+
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, code, domainErr.Code)
+	assert.Equal(t, class, domainErr.Class)
+	assert.Equal(t, entity, domainErr.Entity)
+	assert.Equal(t, details, domainErr.Details)
+	if cause == nil {
+		assert.NoError(t, domainErr.Err)
+		return
+	}
+	assert.ErrorIs(t, domainErr.Err, cause)
+	assert.ErrorIs(t, err, cause)
 }
