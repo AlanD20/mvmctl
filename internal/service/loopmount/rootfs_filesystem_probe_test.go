@@ -32,10 +32,18 @@ func TestProbeRootfsMountSourceBindsRawDescriptor(t *testing.T) {
 	assert.Same(t, partitions.state, source.state.partitions)
 	assert.Equal(t, rootfsMountSourceRaw, source.state.kind)
 	assert.Equal(t, 50, source.state.fd)
-	assert.Equal(t, rootfsBlockIdentity{major: 7, minor: 3}, source.state.identity)
+	if diff := cmp.Diff(
+		rootfsBlockIdentity{major: 7, minor: 3},
+		source.state.identity,
+		cmp.AllowUnexported(rootfsBlockIdentity{}),
+	); diff != "" {
+		t.Errorf("selected raw identity mismatch (-want +got):\n%s", diff)
+	}
 	assert.Zero(t, source.state.partition)
 	assert.Equal(t, FilesystemExt4, source.state.filesystem)
-	assert.Equal(t, []int{50, 50}, fixture.fstatFDs)
+	if diff := cmp.Diff([]int{50, 50}, fixture.fstatFDs); diff != "" {
+		t.Errorf("raw identity probes mismatch (-want +got):\n%s", diff)
+	}
 	require.Len(t, fixture.calls, 1)
 	assertRootfsBlkidCall(t, fixture.calls[0], "/dev/loop3")
 	assert.False(t, parent.state.released)
@@ -68,9 +76,17 @@ func TestProbeRootfsMountSourceProbesSparsePartitionsAndBindsMatch(t *testing.T)
 	assert.Equal(t, rootfsMountSourcePartition, source.state.kind)
 	assert.Equal(t, 76, source.state.fd)
 	assert.Equal(t, uint8(16), source.state.partition)
-	assert.Equal(t, fixture.identities[76], source.state.identity)
+	if diff := cmp.Diff(
+		fixture.identities[76],
+		source.state.identity,
+		cmp.AllowUnexported(rootfsBlockIdentity{}),
+	); diff != "" {
+		t.Errorf("selected partition identity mismatch (-want +got):\n%s", diff)
+	}
 	assert.Equal(t, FilesystemExt4, source.state.filesystem)
-	assert.Equal(t, []int{50, 50, 61, 61, 67, 67, 76, 76}, fixture.fstatFDs)
+	if diff := cmp.Diff([]int{50, 50, 61, 61, 67, 67, 76, 76}, fixture.fstatFDs); diff != "" {
+		t.Errorf("partition identity probes mismatch (-want +got):\n%s", diff)
+	}
 	require.Len(t, fixture.calls, 4)
 	for index, path := range []string{"/dev/loop9", "/dev/loop9p1", "/dev/loop9p7", "/dev/loop9p16"} {
 		assertRootfsBlkidCall(t, fixture.calls[index], path)
@@ -228,6 +244,8 @@ func TestProbeRootfsMountSourceRejectsCommandAndIdentityFailures(t *testing.T) {
 }
 
 func TestProbeRootfsMountSourceRejectsPartitionIdentityRace(t *testing.T) {
+	// Rationale: A retained partition descriptor must be rejected if its kernel identity changes across the external
+	// filesystem probe; otherwise probe output could authorize a different block device than the selected capability.
 	t.Parallel()
 
 	fixture := newTestRootfsFilesystemProbeFixture(6)
@@ -250,6 +268,7 @@ func TestProbeRootfsMountSourceRejectsPartitionIdentityRace(t *testing.T) {
 }
 
 func TestProbeRootfsMountSourceHonorsCancellation(t *testing.T) {
+	// Rationale: Cancellation must stop probing before any later identity observation can authorize a mount source.
 	t.Parallel()
 
 	t.Run("cancelled before probing", func(t *testing.T) {
@@ -279,7 +298,9 @@ func TestProbeRootfsMountSourceHonorsCancellation(t *testing.T) {
 		requireRootfsFilesystemProbeError(t, err, "context ended")
 		assert.ErrorIs(t, err, context.Canceled)
 		assert.Nil(t, source)
-		assert.Equal(t, []int{50}, fixture.fstatFDs)
+		if diff := cmp.Diff([]int{50}, fixture.fstatFDs); diff != "" {
+			t.Errorf("cancelled identity probes mismatch (-want +got):\n%s", diff)
+		}
 		assert.Len(t, fixture.calls, 1)
 	})
 }
