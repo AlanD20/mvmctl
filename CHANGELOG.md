@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
 > authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation, and typed
-> LoopMount client/protocol foundations described below are implemented. The mandatory per-VM network namespace,
+> LoopMount client/protocol and rootfs-authority foundations described below are implemented. The mandatory per-VM
+> network namespace,
 > nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount receiver/backend cutover, final
 > marker-only sudo policy, and remaining typed privileged operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
@@ -66,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nftables and link-activation stages, Jailer `--netns` handoff, and persistent lifecycle integration are implemented
   and qualified.
 
-#### Typed LoopMount privilege client/protocol foundation
+#### Typed LoopMount privilege foundations
 - Added named `ProvisionVM`, `InspectImage`, and `OptimizeImage` clients with fixed actions and closed VM/image request,
   plan, and result types. VM resize is grow-only from the admitted size; results must match the request's identity,
   filesystem, and size semantics. Protocol admission bounds usernames, SSH keys, agent tokens/ports, sizes, and counts
@@ -74,8 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A success or remote `DomainError` is authoritative only for a started process with actual response EOF. Valid remote
   error details win over later diagnostics; every non-authoritative transport outcome has stable `process_started` and
   `outcome_unknown` details.
-- This is not an active privileged operation. No LoopMount receiver handler or dispatcher entry, descriptor-pinned
-  rootfs/image lease, backend/public cutover, or legacy raw-sudo removal has landed; `mvm run provision` and its
+- Added a private receiver-side authority that pins canonical managed-cache components and the fixed VM or image
+  `rootfs.img` through retained descriptors. VM provisioning opens only `vms/<vm-id>/rootfs.img` read-write; image
+  inspection and optimization open only `images/staging/<image-id>/rootfs.img` read-only or read-write respectively.
+  Caller ownership, safe modes, one-link regular-file identity, exact bounded size, local-filesystem topology, mount
+  identity, no-cross-mount descendant traversal, and reverse checked cleanup are enforced before a lease can become
+  authority. L1 tests deterministically replace every caller-owned ancestor and leaf immediately before and after open.
+- These remain inactive foundations. No LoopMount effect adapter, per-resource transaction lock, receiver handler or
+  dispatcher entry, backend/public cutover, or legacy raw-sudo removal has landed; `mvm run provision` and its
   arbitrary unmount/cleanup surface remain transitional release blockers.
 
 #### Root-owned single-binary installation
@@ -367,8 +374,9 @@ The following items are release blockers and are intentionally not described abo
   install/remove actions; complete the aarch64 archive audit and CLI-level qualification. The implemented atomic
   authority is not yet reachable from public `mvm bin` operations.
 - Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; complete the
-  LoopMount receiver, descriptor authority, and backend cutover behind its typed client/protocol foundation; and remove
-  the public root `mvm run jailer` and `mvm run provision` entry points.
+  LoopMount descriptor-consuming effect adapter, transaction locks, receiver handlers, and backend cutover behind its
+  typed client/protocol and rootfs-authority foundations; and remove the public root `mvm run jailer` and
+  `mvm run provision` entry points.
 - Make one root-owned network namespace mandatory per VM, pass its pinned handle to Jailer, and make namespace/link
   creation, activation, rollback, reconciliation, and cleanup part of the owner-bound VM lifecycle.
 - Connect the private typed compiler to owner-bound inspection/adoption, empty-generation removal, namespace-scoped

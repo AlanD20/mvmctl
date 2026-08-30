@@ -57,7 +57,8 @@ The final marker-only sudoers assertion is deferred until Task 14; current sudoe
 
 **Owner:** engineer
 **Status:** Shared codec, caller transport, and fd-0 receiver implemented; trusted-release actions registered;
-LoopMount client/protocol foundation implemented without receiver registration; remaining capabilities stay pending
+LoopMount client/protocol and private rootfs-authority foundations implemented without receiver registration; remaining
+capabilities stay pending
 **Dependencies:** Task 1
 
 - [x] Reserved marker selected before Cobra and application initialization.
@@ -537,8 +538,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 13: Migrate loopmount and supported host mutations
 
 **Owner:** engineer
-**Status:** Typed LoopMount client/protocol foundation implemented; receiver, descriptor authority, legacy removal, and
-host-mutation migration pending
+**Status:** Typed LoopMount client/protocol and private rootfs-authority foundations implemented; effect adapter,
+receiver registration, legacy removal, and host-mutation migration pending
 **Dependencies:** Tasks 3, 5, and 6
 
 - [ ] Move provisioning/mount operations behind typed descriptor-pinned actions.
@@ -550,8 +551,11 @@ host-mutation migration pending
   - [x] Require both process start and actual response EOF for result authority; preserve an EOF-qualified remote
     `DomainError`, and classify every non-authoritative pre/post-start transport outcome with stable `process_started`
     and `outcome_unknown` details.
-  - [ ] Add descriptor-pinned VM rootfs and image-staging leases, receiver handlers, and exact central-dispatch entries;
-    no LoopMount action is registered yet.
+  - [x] Add private descriptor-pinned VM rootfs and image-staging leases with canonical cache traversal, fixed resource
+    selection, caller ownership, stable identity/mode/size admission, local-filesystem and no-cross-mount policy,
+    checked reverse cleanup, and deterministic before/after-open replacement races for every caller-owned component.
+  - [ ] Add the descriptor-consuming effect adapter, per-resource transaction lock, receiver handlers, response and
+    rollback transaction, and exact central-dispatch entries; no LoopMount action is registered yet.
   - [ ] Cut the production backend and public API over to those actions; the current path still sends raw wire
     operations through sudo to `mvm run provision`.
 - [ ] Remove public `mvm run provision` and arbitrary unmount behavior.

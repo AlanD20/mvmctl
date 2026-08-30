@@ -318,10 +318,22 @@ only when the privileged process started and the transport observed actual respo
 error details report `process_started` and `outcome_unknown`, while an EOF-qualified remote `DomainError` retains its
 code, class, entity, and bounded details.
 
+The private rootfs-authority foundation accepts only an authenticated non-root caller and one canonical managed-cache
+locator. It pins the cache through descriptor-relative no-symlink/no-magic-link traversal, permits mount crossing only
+while locating the cache, requires the final caller-owned cache to use the closed local-filesystem set, and records its
+device, inode, and typed mount identity. Descendants add `RESOLVE_NO_XDEV` and select only fixed
+`vms/<vm-id>/rootfs.img` or `images/staging/<image-id>/rootfs.img` leaves. Admission enforces caller ownership, one-link
+regular-file type, safe owner access and modes, exact bounded size, stable metadata, and action-specific read-only or
+read-write access. The lease retains the image staging directory when replacement will eventually be required and
+releases every descriptor in checked reverse order with cancellation-independent cleanup. Deterministic L1 races
+replace each caller-owned ancestor and leaf immediately before and after open; admission either fails closed or retains
+the original object rather than attacker content.
+
 This is not the active LoopMount receiver path. None of the three actions is registered in the privileged dispatcher,
-there is no descriptor-pinned VM rootfs or image-staging lease for LoopMount, and the public/backend path still uses
-`mvm run provision`, caller-shaped raw wire operations, sudo, and the legacy arbitrary cleanup/unmount surface. Task 13
-must add the receiver and resource authority, cut over callers, and remove those legacy routes atomically.
+there is no descriptor-consuming effect adapter, per-resource transaction lock, receiver handler, or response/rollback
+transaction, and the public/backend path still uses `mvm run provision`, caller-shaped raw wire operations, sudo, and
+the legacy arbitrary cleanup/unmount surface. Task 13 must finish that receiver transaction, cut over callers, and
+remove those legacy routes atomically.
 
 **Performance:** GuestFS is 3–5x slower than LoopMount for VM creation (9–14s vs 2–5s wall-clock, sequential). Under parallel load GuestFS degrades further due to QEMU lock contention. See `docs/adr/0003-loopmount-guestfs-mutual-exclusion.md` for full benchmark data.
 

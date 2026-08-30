@@ -338,7 +338,7 @@ Normal API `Input.Validate`/`Resolve` remains the caller-facing validation layer
 receives data from an untrusted process, it independently enforces authorization, ownership, bounds, path confinement,
 and system-damage invariants. These are receiver trust-boundary checks, not duplicated business validation.
 
-### Implemented LoopMount client/protocol foundation
+### Implemented LoopMount client/protocol and rootfs-authority foundations
 
 Task 13 now has a named normal-user client and closed protocol types for exactly three intended capabilities:
 `ProvisionVM`, `InspectImage`, and `OptimizeImage`. The corresponding fixed action strings are
@@ -361,11 +361,32 @@ observed authenticated socket EOF. A valid remote error preserves its code, clas
 over later diagnostics. Every non-authoritative transport outcome uses `CodeProcessError`/`ClassInternal` with the fixed
 action and stable `process_started` / `outcome_unknown` details: both false before start and both true after start.
 
+The private receiver-side rootfs authority accepts the authenticated non-root caller out of band and treats the cache
+locator only as a namespace hint. It pins `/` and each canonical cache component with retained descriptors, permits
+mount crossing only during cache discovery, enforces the closed local-filesystem policy on the caller-owned cache root,
+and records device, inode, and typed unique/legacy/unavailable mount identity. All resource descendants use
+beneath/no-symlink/no-magic-link/no-cross-mount resolution. The receiver derives only these fixed selections:
+
+| Operation | Rootfs leaf | Descriptor access |
+|---|---|---|
+| Provision VM | `vms/<vm-id>/rootfs.img` | Read-write |
+| Inspect image | `images/staging/<image-id>/rootfs.img` | Read-only |
+| Optimize image | `images/staging/<image-id>/rootfs.img` | Read-write |
+
+Every fixed resource descendant directory is caller-owned with required owner access and no unsafe write or special
+modes. The rootfs is a caller-owned one-link regular file with owner read/write, no group/world write, no execute or
+special bits, and an exact size inside the protocol's hard VM or image bounds. Two synchronized metadata observations
+bind device, inode, type, mode, UID, GID, link count, and size. The private lease retains the complete chain and the image
+staging descriptor, exposes no path or generic descriptor accessor, and closes every descriptor in reverse order
+through checked, cancellation-independent cleanup while preserving the primary `DomainError`. Deterministic
+real-filesystem tests exchange every caller-owned cache/resource ancestor and leaf immediately before and after its
+open; a request can only fail closed or retain the originally admitted rootfs, never the attacker object.
+
 No LoopMount receiver handler or central-switch registration exists yet. There is also no LoopMount-specific
-descriptor-pinned rootfs/image-staging lease, backend/public API cutover, or removal of the legacy `mvm run provision`,
-raw sudo/wire operation, arbitrary unmount, and PID-killing cleanup paths. The typed foundation is not permission to
-route a legacy resource path through the new client; Task 13 must land receiver-side descriptor authority and the
-legacy removal as one migration.
+descriptor-consuming effect adapter, per-resource transaction lock, response/rollback transaction, backend/public API
+cutover, or removal of the legacy `mvm run provision`, raw sudo/wire operation, arbitrary unmount, and PID-killing
+cleanup paths. The typed foundations are not permission to adapt a legacy resource path or operation into the new
+client; Task 13 must complete the receiver transaction and legacy removal as one migration.
 
 ### Release trust
 

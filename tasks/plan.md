@@ -52,8 +52,10 @@ continue without silently deleting it.
   strict generation userdata, resolved-IPv4 rejection, and deterministic bounded 1,000-VM L1 evidence. It performs no
   kernel or privileged effect yet.
 - Named typed LoopMount client/protocol methods for VM provisioning and image inspection/optimization, with grow-only
-  VM resize, bounded typed values, and strict process-start/response-EOF authority. No LoopMount receiver action or
-  descriptor-pinned resource lease is wired yet.
+  VM resize, bounded typed values, and strict process-start/response-EOF authority. A private rootfs authority pins the
+  caller-owned cache and fixed VM/image rootfs through retained descriptors, enforces local-filesystem, identity, mode,
+  size, and no-cross-mount policies, and has deterministic before/after-open replacement-race evidence for every
+  caller-owned component. No effect adapter, per-resource lock, receiver action, or public/backend cutover is wired yet.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove actions are registered in the privileged switch, and the sudoers policy
@@ -592,11 +594,18 @@ valid EOF-qualified remote `DomainError` wins over later transport diagnostics. 
 non-EOF, impossible pre-start, or semantically invalid results use the stable `CodeProcessError` classification with
 the action and exact `process_started` / `outcome_unknown` details.
 
-This is a protocol and client foundation only. The privileged receiver has no LoopMount handlers or dispatcher entries,
-and no descriptor-pinned VM rootfs or image-staging lease consumes the typed request. The current backend/public path
-still uses `mvm run provision`, raw wire operations and sudo, including the arbitrary unmount/cleanup surface. Task 13
-must add receiver-side resource authority, cut over all callers, and remove the legacy route before any LoopMount action
-can enter the final marker-only sudo policy.
+The private rootfs authority pins the canonical cache locator, typed mount identity, fixed VM or image descendant chain,
+and exact `rootfs.img` through retained descriptors. It enforces the closed local-filesystem set at the cache root,
+no-cross-mount descendant traversal, caller ownership, one-link regular-file type, safe modes, stable identity, exact
+bounded size, and action-specific access. It retains the image staging descriptor for future descriptor-relative
+replacement, closes the complete chain in checked reverse order, and has deterministic before/after-open replacement
+tests for every caller-owned component.
+
+These are still inactive foundations. The privileged receiver has no descriptor-consuming effect adapter,
+per-resource transaction lock, LoopMount handler, response/rollback transaction, or dispatcher entry. The current
+backend/public path still uses `mvm run provision`, raw wire operations and sudo, including the arbitrary
+unmount/cleanup surface. Task 13 must complete the receiver transaction, cut over all callers, and remove the legacy
+route before any LoopMount action can enter the final marker-only sudo policy.
 
 ### Daemonless status reconciliation and relaunch parity
 
