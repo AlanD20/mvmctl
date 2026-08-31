@@ -46,6 +46,8 @@ type jailDestinationDeps struct {
 	open   func(context.Context, string, int, uint32) (int, error)
 	openAt func(context.Context, int, string, int, uint32) (int, error)
 	fstat  func(context.Context, int, *unix.Stat_t) error
+	fchmod func(context.Context, int, uint32) error
+	fchown func(context.Context, int, int, int) error
 	close  func(context.Context, int) error
 }
 
@@ -97,7 +99,7 @@ func retainJailDestination(
 			vmID,
 		)
 	}
-	for _, leaf := range []string{"var", "lib", "mvmctl"} {
+	for _, leaf := range []string{"var", "lib"} {
 		nextFD, openErr := deps.openAt(ctx, currentFD, leaf, directoryFlags, 0)
 		if openErr != nil {
 			primary := processAuthorityError(vmID, "open jail destination ancestor "+leaf, openErr)
@@ -120,6 +122,23 @@ func retainJailDestination(
 		}
 		currentFD = nextFD
 	}
+	mvmctlFD, err := deps.openAt(ctx, currentFD, "mvmctl", directoryFlags, 0)
+	closeLibErr := deps.close(context.WithoutCancel(ctx), currentFD)
+	if err != nil || closeLibErr != nil {
+		if mvmctlFD >= 0 {
+			closeLibErr = errors.Join(closeLibErr, deps.close(context.WithoutCancel(ctx), mvmctlFD))
+		}
+		return nil, processAuthorityError(vmID, "open exact mvmctl jail ancestor", errors.Join(err, closeLibErr))
+	}
+	if err := inspectExactJailAncestor(ctx, deps, mvmctlFD, "mvmctl"); err != nil {
+		return nil, appendJailDestinationCleanupError(
+			processAuthorityError(vmID, "inspect exact mvmctl jail ancestor", err),
+			"close rejected mvmctl jail ancestor",
+			deps.close(context.WithoutCancel(ctx), mvmctlFD),
+			vmID,
+		)
+	}
+	currentFD = mvmctlFD
 
 	baseFD, err := deps.openAt(ctx, currentFD, "jailer", directoryFlags, 0)
 	closeAncestorErr := deps.close(context.WithoutCancel(ctx), currentFD)
@@ -147,7 +166,13 @@ func retainJailDestination(
 		return nil, err
 	}
 	parentFD := lease.state.bindings[len(lease.state.bindings)-1].fd
-	executableFD, err := deps.openAt(ctx, parentFD, "firecracker", unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	executableFD, err := deps.openAt(
+		ctx,
+		parentFD,
+		"firecracker",
+		unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOFOLLOW,
+		0,
+	)
 	if err != nil {
 		return nil, processAuthorityError(vmID, "open copied Firecracker authority", err)
 	}
@@ -219,6 +244,17 @@ func inspectTrustedJailAncestor(ctx context.Context, deps jailDestinationDeps, f
 	}
 	if stat.Mode&unix.S_IFMT != unix.S_IFDIR || stat.Uid != 0 || stat.Gid != 0 || stat.Mode&0022 != 0 {
 		return fmt.Errorf("trusted jail ancestor %s has invalid metadata", name)
+	}
+	return nil
+}
+
+func inspectExactJailAncestor(ctx context.Context, deps jailDestinationDeps, fd int, name string) error {
+	var stat unix.Stat_t
+	if err := deps.fstat(ctx, fd, &stat); err != nil {
+		return err
+	}
+	if stat.Mode != unix.S_IFDIR|0700 || stat.Uid != 0 || stat.Gid != 0 {
+		return fmt.Errorf("trusted jail ancestor %s is not exact root:root mode 0700", name)
 	}
 	return nil
 }

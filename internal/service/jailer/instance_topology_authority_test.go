@@ -46,7 +46,7 @@ func TestLaunchLeaseRetainsOwnerBoundTopologyAuthority(t *testing.T) {
 	assert.Zero(t, ownerUID)
 	assert.Equal(t, authorityfs.VMKey{}, boundKey)
 	requireTopologyDomainError(t, err, errs.CodeVMStateInvalid, errs.ClassValidation, "", nil, nil)
-	require.NoError(t, launch.Release(cancelled))
+	releaseTestLaunch(t, launch)
 	retained, err := launch.retainTopologyAuthority(t.Context())
 	assert.Nil(t, retained)
 	require.Error(t, err)
@@ -102,14 +102,14 @@ func TestLaunchLeaseReleaseWithTopologyHoldPreservesCompositeAuthority(t *testin
 	for range callers {
 		releaseErr := <-results
 		require.Error(t, releaseErr)
-		assert.ErrorIs(t, releaseErr, authorityfs.ErrTopologyRetained)
+		assert.Contains(t, releaseErr.Error(), "must be consumed by Abort or activation")
 		requireTopologyDomainError(
 			t,
 			releaseErr,
-			errs.CodeProcessError,
-			errs.ClassUnknown,
-			"",
-			authorityfs.ErrTopologyRetained,
+			errs.CodeVMStateInvalid,
+			errs.ClassValidation,
+			testVMID,
+			nil,
 			nil,
 		)
 	}
@@ -135,7 +135,9 @@ func TestLaunchLeaseReleaseWithTopologyHoldPreservesCompositeAuthority(t *testin
 	assert.Equal(t, "index", <-releaseEvents)
 
 	require.NoError(t, topology.Release(t.Context()))
-	require.NoError(t, copied.Release(t.Context()))
+	cleanup, err := copied.Abort(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, cleanup.Release(t.Context()))
 	assert.Equal(t, "vm", <-releaseEvents)
 	assert.Equal(t, "release", <-releaseEvents)
 	assert.True(t, launch.snapshot().released)
@@ -162,9 +164,11 @@ func TestLaunchLeaseVMReleaseErrorKeepsExactCleanupEvidenceAndCachesResult(t *te
 		testLaunchIntent(false),
 	)
 	require.NoError(t, err)
-	copied := *launch
+	cleanup, err := launch.Abort(t.Context())
+	require.NoError(t, err)
+	copied := *cleanup
 
-	first := launch.Release(t.Context())
+	first := cleanup.Release(t.Context())
 	second := copied.Release(t.Context())
 	require.Error(t, first)
 	assert.ErrorIs(t, first, vmReleaseErr)
@@ -181,7 +185,7 @@ func TestLaunchLeaseVMReleaseErrorKeepsExactCleanupEvidenceAndCachesResult(t *te
 			"instance_authority_cleanup_detail": "release VM lock: release authority lock: injected VM authority release failure",
 		},
 	)
-	assert.True(t, launch.snapshot().released)
+	assert.True(t, cleanup.state.released)
 }
 
 func TestVMAuthorityLeaseRejectsOwnerOnlyMismatchAndReleasesChild(t *testing.T) {

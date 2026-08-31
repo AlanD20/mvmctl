@@ -31,6 +31,12 @@ type blockedLaunchProcessesState struct {
 type blockedLaunchProcess struct {
 	locator instanceProcessLocator
 	pidfd   int
+	gate    *blockedLaunchGate
+}
+
+type blockedLaunchProcessSource struct {
+	pidfd int
+	gate  *blockedLaunchGate
 }
 
 type blockedLaunchProcessStatus uint8
@@ -38,15 +44,17 @@ type blockedLaunchProcessStatus uint8
 const (
 	blockedLaunchProcessesOpen blockedLaunchProcessStatus = iota + 1
 	blockedLaunchProcessesTransferred
+	blockedLaunchProcessesReleasedToJailer
 	blockedLaunchProcessesReleased
 )
 
 type blockedLaunchProcessDeps struct {
-	pidfdAlive               func(context.Context, int) (bool, error)
-	descriptorFlags          func(context.Context, int) (int, error)
-	pinnedExecutableIdentity func(context.Context, *system.PinnedExecutable) (system.PinnedExecutableIdentity, error)
-	releasePinnedExecutable  func(context.Context, *system.PinnedExecutable) error
-	close                    func(context.Context, int) error
+	pidfdAlive                func(context.Context, int) (bool, error)
+	descriptorFlags           func(context.Context, int) (int, error)
+	deriveLocator             func(context.Context, int) (instanceProcessLocator, error)
+	pinnedExecutableReinspect func(context.Context, *system.PinnedExecutable) (system.PinnedExecutableIdentity, error)
+	releasePinnedExecutable   func(context.Context, *system.PinnedExecutable) error
+	close                     func(context.Context, int) error
 }
 
 type launchProcessLocators struct {
@@ -58,8 +66,8 @@ func newBlockedLaunchProcesses(
 	ctx context.Context,
 	deps blockedLaunchProcessDeps,
 	vmID string,
-	firecracker blockedLaunchProcess,
-	relay *blockedLaunchProcess,
+	firecrackerSource blockedLaunchProcessSource,
+	relaySource *blockedLaunchProcessSource,
 	receiverExecutable *system.PinnedExecutable,
 ) (_ *blockedLaunchProcesses, returnErr error) {
 	if err := validateBlockedLaunchProcessDeps(deps); err != nil {
@@ -75,7 +83,7 @@ func newBlockedLaunchProcesses(
 		return nil, instanceValidationError("vm ID is invalid")
 	}
 	capability := &blockedLaunchProcesses{state: &blockedLaunchProcessesState{
-		deps: deps, vmID: vmID, firecracker: firecracker, relay: cloneBlockedLaunchProcess(relay),
+		deps: deps, vmID: vmID, firecracker: blockedLaunchProcess{pidfd: -1},
 		receiverExecutable: receiverExecutable, status: blockedLaunchProcessesOpen,
 	}}
 	committed := false
@@ -90,24 +98,28 @@ func newBlockedLaunchProcesses(
 			vmID,
 		)
 	}()
-	if err := validateBlockedProcess(ctx, deps, firecracker, "Firecracker"); err != nil {
+	firecracker, err := admitBlockedProcess(ctx, deps, firecrackerSource, "Firecracker")
+	if err != nil {
 		return nil, processAuthorityError(vmID, "admit blocked Firecracker process", err)
 	}
-	if relay != nil {
+	capability.state.firecracker = firecracker
+	if relaySource != nil {
+		relay, relayErr := admitBlockedProcess(ctx, deps, *relaySource, "relay")
+		if relayErr != nil {
+			return nil, processAuthorityError(vmID, "admit blocked relay process", relayErr)
+		}
+		capability.state.relay = &relay
 		if relay.locator.pid == firecracker.locator.pid {
 			return nil, instanceValidationError("relay PID must differ from Firecracker PID")
 		}
 		if relay.pidfd == firecracker.pidfd {
 			return nil, processAuthorityError(vmID, "blocked process pidfds must be distinct", nil)
 		}
-		if err := validateBlockedProcess(ctx, deps, *relay, "relay"); err != nil {
-			return nil, processAuthorityError(vmID, "admit blocked relay process", err)
-		}
 	}
 	if receiverExecutable == nil {
 		return nil, processAuthorityError(vmID, "pinned receiver executable is required", nil)
 	}
-	if _, err := deps.pinnedExecutableIdentity(ctx, receiverExecutable); err != nil {
+	if _, err := deps.pinnedExecutableReinspect(ctx, receiverExecutable); err != nil {
 		return nil, processAuthorityError(vmID, "admit pinned receiver executable", err)
 	}
 	committed = true
@@ -123,40 +135,65 @@ func cloneBlockedLaunchProcess(process *blockedLaunchProcess) *blockedLaunchProc
 }
 
 func validateBlockedLaunchProcessDeps(deps blockedLaunchProcessDeps) error {
-	if deps.pidfdAlive == nil || deps.descriptorFlags == nil || deps.pinnedExecutableIdentity == nil ||
+	if deps.pidfdAlive == nil || deps.descriptorFlags == nil || deps.deriveLocator == nil ||
+		deps.pinnedExecutableReinspect == nil ||
 		deps.releasePinnedExecutable == nil || deps.close == nil {
 		return fmt.Errorf("one or more blocked process effects are unavailable")
 	}
 	return nil
 }
 
-func validateBlockedProcess(
+func admitBlockedProcess(
 	ctx context.Context,
 	deps blockedLaunchProcessDeps,
-	process blockedLaunchProcess,
+	source blockedLaunchProcessSource,
 	role string,
-) error {
-	if err := validateInstanceProcessLocator(process.locator); err != nil {
-		return err
+) (_ blockedLaunchProcess, returnErr error) {
+	process := blockedLaunchProcess{pidfd: source.pidfd, gate: source.gate}
+	if process.pidfd < 0 || process.gate == nil || process.gate.state == nil {
+		return blockedLaunchProcess{}, fmt.Errorf("%s pidfd or gate is invalid", role)
 	}
-	if process.pidfd < 0 {
-		return fmt.Errorf("%s pidfd is invalid", role)
-	}
+	committed := false
+	defer func() {
+		if committed {
+			return
+		}
+		returnErr = errors.Join(returnErr, process.gate.Release(context.WithoutCancel(ctx)))
+	}()
 	flags, err := deps.descriptorFlags(ctx, process.pidfd)
 	if err != nil {
-		return fmt.Errorf("inspect %s pidfd flags: %w", role, err)
+		return blockedLaunchProcess{}, fmt.Errorf("inspect %s pidfd flags: %w", role, err)
 	}
 	if flags&unix.FD_CLOEXEC == 0 {
-		return fmt.Errorf("%s pidfd does not have close-on-exec", role)
+		return blockedLaunchProcess{}, fmt.Errorf("%s pidfd does not have close-on-exec", role)
 	}
 	alive, err := deps.pidfdAlive(ctx, process.pidfd)
 	if err != nil {
-		return fmt.Errorf("inspect %s pidfd liveness: %w", role, err)
+		return blockedLaunchProcess{}, fmt.Errorf("inspect %s pidfd liveness: %w", role, err)
 	}
 	if !alive {
-		return fmt.Errorf("%s process exited before registration", role)
+		return blockedLaunchProcess{}, fmt.Errorf("%s process exited before registration", role)
 	}
-	return nil
+	if err := process.gate.challengeAndAcknowledge(ctx); err != nil {
+		return blockedLaunchProcess{}, fmt.Errorf("challenge blocked %s process: %w", role, err)
+	}
+	locator, err := deps.deriveLocator(ctx, process.pidfd)
+	if err != nil {
+		return blockedLaunchProcess{}, fmt.Errorf("derive %s locator from retained pidfd: %w", role, err)
+	}
+	if err := validateInstanceProcessLocator(locator); err != nil {
+		return blockedLaunchProcess{}, err
+	}
+	process.locator = locator
+	alive, err = deps.pidfdAlive(ctx, process.pidfd)
+	if err != nil {
+		return blockedLaunchProcess{}, fmt.Errorf("reinspect %s pidfd liveness: %w", role, err)
+	}
+	if !alive {
+		return blockedLaunchProcess{}, fmt.Errorf("%s process exited during blocked admission", role)
+	}
+	committed = true
+	return process, nil
 }
 
 func (processes *blockedLaunchProcesses) lockForRegistration(
@@ -200,23 +237,82 @@ func (processes *blockedLaunchProcesses) lockForRegistration(
 		state.mu.Unlock()
 		return nil, launchProcessLocators{}, processAuthorityError(vmID, "reinspect blocked launch processes", err)
 	}
-	if err := validateBlockedProcess(ctx, state.deps, state.firecracker, "Firecracker"); err != nil {
+	if err := validateRetainedBlockedProcess(ctx, state.deps, state.firecracker, "Firecracker"); err != nil {
 		state.mu.Unlock()
 		return nil, launchProcessLocators{}, processAuthorityError(vmID, "reinspect blocked Firecracker process", err)
 	}
 	relay := instanceLaunchRelay{kind: instanceRelayAbsent}
 	if state.relay != nil {
-		if err := validateBlockedProcess(ctx, state.deps, *state.relay, "relay"); err != nil {
+		if err := validateRetainedBlockedProcess(ctx, state.deps, *state.relay, "relay"); err != nil {
 			state.mu.Unlock()
 			return nil, launchProcessLocators{}, processAuthorityError(vmID, "reinspect blocked relay process", err)
 		}
 		relay = instanceLaunchRelay{kind: instanceRelayPresent, locator: state.relay.locator}
 	}
-	if _, err := state.deps.pinnedExecutableIdentity(ctx, state.receiverExecutable); err != nil {
+	if _, err := state.deps.pinnedExecutableReinspect(ctx, state.receiverExecutable); err != nil {
 		state.mu.Unlock()
 		return nil, launchProcessLocators{}, processAuthorityError(vmID, "reinspect pinned receiver executable", err)
 	}
 	return state, launchProcessLocators{process: state.firecracker.locator, relay: relay}, nil
+}
+
+func validateRetainedBlockedProcess(
+	ctx context.Context,
+	deps blockedLaunchProcessDeps,
+	process blockedLaunchProcess,
+	role string,
+) error {
+	if err := validateInstanceProcessLocator(process.locator); err != nil {
+		return err
+	}
+	if process.pidfd < 0 || process.gate == nil || process.gate.state == nil || process.gate.isReleased() {
+		return fmt.Errorf("%s retained pidfd or gate is invalid", role)
+	}
+	flags, err := deps.descriptorFlags(ctx, process.pidfd)
+	if err != nil {
+		return fmt.Errorf("inspect %s pidfd flags: %w", role, err)
+	}
+	if flags&unix.FD_CLOEXEC == 0 {
+		return fmt.Errorf("%s pidfd does not have close-on-exec", role)
+	}
+	derived, err := deps.deriveLocator(ctx, process.pidfd)
+	if err != nil {
+		return fmt.Errorf("rederive %s locator from retained pidfd: %w", role, err)
+	}
+	if derived != process.locator {
+		return fmt.Errorf("%s retained pidfd locator changed", role)
+	}
+	alive, err := deps.pidfdAlive(ctx, process.pidfd)
+	if err != nil {
+		return fmt.Errorf("inspect %s pidfd liveness: %w", role, err)
+	}
+	if !alive {
+		return fmt.Errorf("%s process exited before registration", role)
+	}
+	return nil
+}
+
+func releaseRetainedLaunchProcessesToJailerLocked(
+	ctx context.Context,
+	state *blockedLaunchProcessesState,
+	recheckDestination func(context.Context) error,
+) error {
+	if state.status != blockedLaunchProcessesOpen {
+		return processAuthorityError(state.vmID, "blocked launch process authority is not ready for handoff", nil)
+	}
+	if state.relay != nil {
+		if err := state.relay.gate.release(ctx); err != nil {
+			return processAuthorityError(state.vmID, "release blocked relay process", err)
+		}
+	}
+	if err := recheckDestination(ctx); err != nil {
+		return err
+	}
+	if err := state.firecracker.gate.release(ctx); err != nil {
+		return processAuthorityError(state.vmID, "release blocked Firecracker process", err)
+	}
+	state.status = blockedLaunchProcessesReleasedToJailer
+	return nil
 }
 
 func transferBlockedLaunchProcessesLocked(state *blockedLaunchProcessesState) *blockedLaunchProcesses {
@@ -241,12 +337,28 @@ func (processes *blockedLaunchProcesses) Release(ctx context.Context) error {
 	switch state.status {
 	case blockedLaunchProcessesTransferred, blockedLaunchProcessesReleased:
 		return state.releaseErr
-	case blockedLaunchProcessesOpen:
+	case blockedLaunchProcessesOpen, blockedLaunchProcessesReleasedToJailer:
 	default:
 		return processAuthorityError(state.vmID, "blocked launch process authority has invalid lifecycle", nil)
 	}
 	cleanupCtx := processCleanupContext(ctx)
 	result := error(nil)
+	if state.relay != nil && state.relay.gate != nil {
+		result = appendBlockedLaunchProcessCleanupError(
+			result,
+			"close blocked relay gate",
+			state.relay.gate.Release(cleanupCtx),
+			state.vmID,
+		)
+	}
+	if state.firecracker.gate != nil {
+		result = appendBlockedLaunchProcessCleanupError(
+			result,
+			"close blocked Firecracker gate",
+			state.firecracker.gate.Release(cleanupCtx),
+			state.vmID,
+		)
+	}
 	if state.receiverExecutable != nil {
 		result = appendBlockedLaunchProcessCleanupError(
 			result,

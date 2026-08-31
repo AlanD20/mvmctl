@@ -134,9 +134,10 @@ type jailDestinationFixture struct {
 
 func newJailDestinationFixture() *jailDestinationFixture {
 	stats := make(map[int]unix.Stat_t)
-	for fd := 10; fd <= 13; fd++ {
+	for fd := 10; fd <= 12; fd++ {
 		stats[fd] = unix.Stat_t{Dev: 1, Ino: uint64(fd), Mode: unix.S_IFDIR | 0755, Uid: 0, Gid: 0}
 	}
+	stats[13] = unix.Stat_t{Dev: 1, Ino: 13, Mode: unix.S_IFDIR | 0700, Uid: 0, Gid: 0}
 	stats[14] = unix.Stat_t{Dev: 1, Ino: 14, Mode: unix.S_IFDIR | 0700, Uid: 0, Gid: 0}
 	stats[15] = unix.Stat_t{Dev: 1, Ino: 15, Mode: unix.S_IFDIR | 0700, Uid: 0, Gid: 0}
 	stats[16] = unix.Stat_t{Dev: 1, Ino: 16, Mode: unix.S_IFDIR | 0700, Uid: 0, Gid: 0}

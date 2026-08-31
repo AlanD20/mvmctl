@@ -22,8 +22,6 @@ func TestBlockedLaunchProcessesAdmitExactCapabilitiesAndTransferOnce(t *testing.
 	fixture := newBlockedProcessFixture(true)
 	processes, err := fixture.admit(t.Context())
 	require.NoError(t, err)
-	fixture.relay.locator.pid = 9999
-	fixture.relay.pidfd = 999
 
 	state, got, err := processes.lockForRegistration(t.Context(), testVMID)
 	require.NoError(t, err)
@@ -93,7 +91,7 @@ func TestBlockedLaunchProcessesRejectAmbiguousOrDeadSourcesAndCloseOwnedAuthorit
 
 	tests := map[string]func(*blockedProcessFixture){
 		"shared PID": func(fixture *blockedProcessFixture) {
-			fixture.relay.locator.pid = fixture.firecracker.locator.pid
+			fixture.locators[101] = fixture.locators[100]
 		},
 		"shared pidfd": func(fixture *blockedProcessFixture) {
 			fixture.relay.pidfd = fixture.firecracker.pidfd
@@ -123,8 +121,9 @@ func TestBlockedLaunchProcessesRejectAmbiguousOrDeadSourcesAndCloseOwnedAuthorit
 
 type blockedProcessFixture struct {
 	mu          sync.Mutex
-	firecracker blockedLaunchProcess
-	relay       *blockedLaunchProcess
+	firecracker blockedLaunchProcessSource
+	relay       *blockedLaunchProcessSource
+	locators    map[int]instanceProcessLocator
 	flags       map[int]int
 	alive       map[int]bool
 	closeErr    map[int]error
@@ -133,13 +132,18 @@ type blockedProcessFixture struct {
 
 func newBlockedProcessFixture(relayPresent bool) *blockedProcessFixture {
 	fixture := &blockedProcessFixture{
-		firecracker: blockedLaunchProcess{locator: testLaunchProcessLocators(false).process, pidfd: 100},
-		flags:       map[int]int{100: unix.FD_CLOEXEC, 101: unix.FD_CLOEXEC},
-		alive:       map[int]bool{100: true, 101: true},
-		closeErr:    make(map[int]error),
+		firecracker: blockedLaunchProcessSource{pidfd: 100},
+		locators: map[int]instanceProcessLocator{
+			100: testLaunchProcessLocators(false).process,
+			101: testLaunchProcessLocators(true).relay.locator,
+		},
+		flags:    map[int]int{100: unix.FD_CLOEXEC, 101: unix.FD_CLOEXEC},
+		alive:    map[int]bool{100: true, 101: true},
+		closeErr: make(map[int]error),
 	}
+	fixture.firecracker.gate = newTestBlockedLaunchGate(200)
 	if relayPresent {
-		relay := blockedLaunchProcess{locator: testLaunchProcessLocators(true).relay.locator, pidfd: 101}
+		relay := blockedLaunchProcessSource{pidfd: 101, gate: newTestBlockedLaunchGate(201)}
 		fixture.relay = &relay
 	}
 	return fixture
@@ -151,7 +155,10 @@ func (fixture *blockedProcessFixture) admit(ctx context.Context) (*blockedLaunch
 		blockedLaunchProcessDeps{
 			pidfdAlive:      func(_ context.Context, fd int) (bool, error) { return fixture.alive[fd], nil },
 			descriptorFlags: func(_ context.Context, fd int) (int, error) { return fixture.flags[fd], nil },
-			pinnedExecutableIdentity: func(
+			deriveLocator: func(_ context.Context, fd int) (instanceProcessLocator, error) {
+				return fixture.locators[fd], nil
+			},
+			pinnedExecutableReinspect: func(
 				context.Context,
 				*system.PinnedExecutable,
 			) (system.PinnedExecutableIdentity, error) {
@@ -178,6 +185,39 @@ func (fixture *blockedProcessFixture) admit(ctx context.Context) (*blockedLaunch
 		fixture.relay,
 		&system.PinnedExecutable{},
 	)
+}
+
+func newTestBlockedLaunchGate(fd int) *blockedLaunchGate {
+	var challenge []byte
+	gate, err := newBlockedLaunchGate(
+		context.Background(),
+		blockedLaunchGateDeps{
+			random: func(_ context.Context, target []byte) error {
+				for index := range target {
+					target[index] = byte(index + 1)
+				}
+				return nil
+			},
+			descriptorFlags: func(context.Context, int) (int, error) { return unix.FD_CLOEXEC, nil },
+			writeFull: func(_ context.Context, _ int, source []byte) error {
+				if len(source) == blockedLaunchChallengeBytes {
+					challenge = append([]byte{}, source...)
+				}
+				return nil
+			},
+			readFull: func(_ context.Context, _ int, target []byte) error {
+				copy(target, challenge)
+				return nil
+			},
+			shutdown: func(context.Context, int) error { return nil },
+			close:    func(context.Context, int) error { return nil },
+		},
+		fd,
+	)
+	if err != nil {
+		panic(err)
+	}
+	return gate
 }
 
 func (fixture *blockedProcessFixture) record(event string) {

@@ -2,7 +2,10 @@ package jailer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"golang.org/x/sys/unix"
 
@@ -13,11 +16,12 @@ func realBlockedLaunchProcessDeps() blockedLaunchProcessDeps {
 	return blockedLaunchProcessDeps{
 		pidfdAlive:      processPIDFDAlive,
 		descriptorFlags: processDescriptorFlags,
-		pinnedExecutableIdentity: func(
+		deriveLocator:   deriveProcessLocatorFromPIDFD,
+		pinnedExecutableReinspect: func(
 			ctx context.Context,
 			executable *system.PinnedExecutable,
 		) (system.PinnedExecutableIdentity, error) {
-			return executable.Identity(ctx)
+			return executable.Reinspect(ctx)
 		},
 		releasePinnedExecutable: func(ctx context.Context, executable *system.PinnedExecutable) error {
 			return executable.Release(ctx)
@@ -26,6 +30,91 @@ func realBlockedLaunchProcessDeps() blockedLaunchProcessDeps {
 			return unix.Close(fd)
 		},
 	}
+}
+
+func deriveProcessLocatorFromPIDFD(ctx context.Context, pidfd int) (_ instanceProcessLocator, returnErr error) {
+	if err := ctx.Err(); err != nil {
+		return instanceProcessLocator{}, err
+	}
+	pid, err := readPIDFDProcessID(ctx, pidfd)
+	if err != nil {
+		return instanceProcessLocator{}, err
+	}
+	processFD, err := openFixedProcessDirectory(ctx, pid)
+	if err != nil {
+		return instanceProcessLocator{}, err
+	}
+	defer func() {
+		returnErr = errors.Join(returnErr, closeProcessDescriptor(context.WithoutCancel(ctx), processFD))
+	}()
+	statRaw, err := readFixedProcessMetadata(ctx, processFD, processStatMetadata, maxProcessStatBytes)
+	if err != nil {
+		return instanceProcessLocator{}, err
+	}
+	startTicks, err := parseProcessStat(statRaw, pid)
+	if err != nil {
+		return instanceProcessLocator{}, err
+	}
+	finalPID, err := readPIDFDProcessID(ctx, pidfd)
+	if err != nil {
+		return instanceProcessLocator{}, err
+	}
+	if finalPID != pid {
+		return instanceProcessLocator{}, fmt.Errorf("pidfd process identity changed during locator derivation")
+	}
+	alive, err := processPIDFDAlive(ctx, pidfd)
+	if err != nil {
+		return instanceProcessLocator{}, err
+	}
+	if !alive {
+		return instanceProcessLocator{}, fmt.Errorf("pidfd process exited during locator derivation")
+	}
+	return instanceProcessLocator{pid: pid, startTimeTicks: startTicks}, nil
+}
+
+func readPIDFDProcessID(ctx context.Context, pidfd int) (_ int, returnErr error) {
+	if pidfd < 0 {
+		return 0, fmt.Errorf("pidfd is invalid")
+	}
+	path := "/proc/self/fdinfo/" + strconv.Itoa(pidfd)
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, unix.Close(fd)) }()
+	raw, err := readBoundedProcessDescriptor(ctx, fd, maxProcessPIDFDInfoBytes)
+	if err != nil {
+		return 0, err
+	}
+	return parsePIDFDProcessID(raw)
+}
+
+func parsePIDFDProcessID(raw []byte) (int, error) {
+	if len(raw) == 0 || len(raw) > maxProcessPIDFDInfoBytes || raw[len(raw)-1] != '\n' {
+		return 0, fmt.Errorf("pidfd info is not a bounded complete record")
+	}
+	pid := 0
+	for _, line := range strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n") {
+		if !strings.HasPrefix(line, "Pid:\t") {
+			continue
+		}
+		if pid != 0 {
+			return 0, fmt.Errorf("pidfd info contains duplicate process IDs")
+		}
+		value := strings.TrimPrefix(line, "Pid:\t")
+		if value == "" || (len(value) > 1 && value[0] == '0') {
+			return 0, fmt.Errorf("pidfd info process ID is not canonical")
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			return 0, fmt.Errorf("pidfd info process ID is invalid")
+		}
+		pid = parsed
+	}
+	if pid == 0 {
+		return 0, fmt.Errorf("pidfd info process ID is absent")
+	}
+	return pid, nil
 }
 
 func processPIDFDAlive(ctx context.Context, pidfd int) (bool, error) {

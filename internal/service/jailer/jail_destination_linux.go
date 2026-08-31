@@ -26,6 +26,18 @@ func realJailDestinationDeps() jailDestinationDeps {
 			}
 			return unix.Fstat(fd, stat)
 		},
+		fchmod: func(ctx context.Context, fd int, mode uint32) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return unix.Fchmod(fd, mode)
+		},
+		fchown: func(ctx context.Context, fd int, uid, gid int) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return unix.Fchown(fd, uid, gid)
+		},
 		close: func(_ context.Context, fd int) error {
 			return unix.Close(fd)
 		},
