@@ -51,11 +51,20 @@ func TestVSockConnectionReadDeadlineInterruptsBlockedIO(t *testing.T) {
 	})
 	require.NoError(t, connection.SetReadDeadline(time.Now().Add(25*time.Millisecond)))
 
-	var value [1]byte
-	_, err = connection.Read(value[:])
-
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, os.ErrDeadlineExceeded), "unexpected deadline error: %v", err)
+	readResult := make(chan error, 1)
+	go func() {
+		var value [1]byte
+		_, readErr := connection.Read(value[:])
+		readResult <- readErr
+	}()
+	select {
+	case err = <-readResult:
+		require.Error(t, err)
+		assert.True(t, errors.Is(err, os.ErrDeadlineExceeded), "unexpected deadline error: %v", err)
+	case <-time.After(time.Second):
+		_ = connection.Close()
+		t.Fatal("vsock read remained blocked after its deadline")
+	}
 }
 
 func TestDestinationUnauthorizedResponseUsesTerminalWriteDeadline(t *testing.T) {
@@ -109,8 +118,18 @@ func TestVSockConnectionCloseIsConcurrentAndIdempotent(t *testing.T) {
 	for range 8 {
 		wait.Go(func() { errorsByCaller <- connection.Close() })
 	}
-	wait.Wait()
-	close(errorsByCaller)
+	waitDone := make(chan struct{})
+	go func() {
+		wait.Wait()
+		close(errorsByCaller)
+		close(waitDone)
+	}()
+	select {
+	case <-waitDone:
+	case <-time.After(time.Second):
+		_ = peer.Close()
+		t.Fatal("concurrent vsock close calls did not complete")
+	}
 	for closeErr := range errorsByCaller {
 		require.NoError(t, closeErr)
 	}
@@ -120,6 +139,7 @@ func TestHandleConnectionCancellationUnblocksPartialProtocolPrefix(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
+	require.NoError(t, client.SetDeadline(time.Now().Add(time.Second)))
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -141,6 +161,7 @@ func TestHandleLocalConnectionCancellationUnblocksPartialRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
+	require.NoError(t, client.SetDeadline(time.Now().Add(time.Second)))
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

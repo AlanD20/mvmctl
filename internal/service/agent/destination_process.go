@@ -130,13 +130,13 @@ func (systemDestinationProcessRunner) Run(command *exec.Cmd) error {
 }
 
 type destinationProcessGroupKiller interface {
-	Kill(pid int) error
+	Kill(pid int, signal unix.Signal) error
 }
 
 type systemDestinationProcessGroupKiller struct{}
 
-func (systemDestinationProcessGroupKiller) Kill(pid int) error {
-	return unix.Kill(pid, unix.SIGKILL)
+func (systemDestinationProcessGroupKiller) Kill(pid int, signal unix.Signal) error {
+	return unix.Kill(pid, signal)
 }
 
 func newDestinationExecutionEffect() destinationExecutionEffect {
@@ -220,7 +220,7 @@ func newDestinationCommand(
 		if process.Process == nil {
 			return os.ErrProcessDone
 		}
-		if err := processGroups.Kill(-process.Process.Pid); err != nil {
+		if err := processGroups.Kill(-process.Process.Pid, unix.SIGKILL); err != nil {
 			if errors.Is(err, unix.ESRCH) {
 				return os.ErrProcessDone
 			}

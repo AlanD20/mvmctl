@@ -32,6 +32,46 @@ type fakeDestinationExecutionEffect struct {
 	execute func(context.Context, string, string, io.Writer, io.Writer) (int, error)
 }
 
+type destinationControlledDeadlineContext struct {
+	context.Context
+	done     chan struct{}
+	once     sync.Once
+	mu       sync.Mutex
+	err      error
+	deadline time.Time
+}
+
+func newDestinationControlledDeadlineContext() *destinationControlledDeadlineContext {
+	return &destinationControlledDeadlineContext{
+		Context:  context.Background(),
+		done:     make(chan struct{}),
+		deadline: time.Now().Add(time.Hour),
+	}
+}
+
+func (ctx *destinationControlledDeadlineContext) Deadline() (time.Time, bool) {
+	return ctx.deadline, true
+}
+
+func (ctx *destinationControlledDeadlineContext) Done() <-chan struct{} {
+	return ctx.done
+}
+
+func (ctx *destinationControlledDeadlineContext) Err() error {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	return ctx.err
+}
+
+func (ctx *destinationControlledDeadlineContext) expire() {
+	ctx.once.Do(func() {
+		ctx.mu.Lock()
+		ctx.err = context.DeadlineExceeded
+		ctx.mu.Unlock()
+		close(ctx.done)
+	})
+}
+
 func (effect *fakeDestinationExecutionEffect) Execute(
 	ctx context.Context,
 	targetUser string,
@@ -252,15 +292,31 @@ func TestDestinationExecutionUsesFixedDeadline(t *testing.T) {
 }
 
 func TestDestinationExecutionHonorsParentTimeout(t *testing.T) {
+	started := make(chan struct{})
 	effect := &fakeDestinationExecutionEffect{
 		execute: func(ctx context.Context, _, _ string, _, _ io.Writer) (int, error) {
+			close(started)
 			<-ctx.Done()
 			return -1, ctx.Err()
 		},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer cancel()
-	frame := runDestinationRequestWithContext(t, ctx, destinationTestToken, effect, destinationTestToken, nil, nil)
+	ctx := newDestinationControlledDeadlineContext()
+	frame := runDestinationRequestWithContext(
+		t,
+		ctx,
+		destinationTestToken,
+		effect,
+		destinationTestToken,
+		nil,
+		func(net.Conn) {
+			select {
+			case <-started:
+				ctx.expire()
+			case <-time.After(destinationTestTimeout):
+				t.Fatal("destination effect did not start before the test deadline")
+			}
+		},
+	)
 	terminal, ok := frame.(vmexecwire.ErrorFrame)
 	require.True(t, ok)
 	assert.Equal(t, destinationTimeoutMessage, terminal.Message)

@@ -151,12 +151,17 @@ func TestDestinationCommandUsesExactCredentialAndSanitizedEnvironment(t *testing
 	assert.Equal(t, 2*time.Second, command.WaitDelay)
 }
 
-type staticDestinationAccountResolver struct {
-	account destinationAccount
-	err     error
+type recordingDestinationAccountResolver struct {
+	account    destinationAccount
+	err        error
+	targetUser string
 }
 
-func (resolver staticDestinationAccountResolver) Resolve(context.Context, string) (destinationAccount, error) {
+func (resolver *recordingDestinationAccountResolver) Resolve(
+	_ context.Context,
+	targetUser string,
+) (destinationAccount, error) {
+	resolver.targetUser = targetUser
 	return resolver.account, resolver.err
 }
 
@@ -169,12 +174,14 @@ func (runner fakeDestinationProcessRunner) Run(command *exec.Cmd) error {
 }
 
 type fakeDestinationProcessGroupKiller struct {
-	pid int
-	err error
+	pid    int
+	signal unix.Signal
+	err    error
 }
 
-func (killer *fakeDestinationProcessGroupKiller) Kill(pid int) error {
+func (killer *fakeDestinationProcessGroupKiller) Kill(pid int, signal unix.Signal) error {
 	killer.pid = pid
+	killer.signal = signal
 	return killer.err
 }
 
@@ -194,6 +201,7 @@ func TestDestinationExecutionRunsConfiguredCommandAndForwardsOutput(t *testing.T
 		groups:   []uint32{1002, 1003},
 	}
 	var captured *exec.Cmd
+	resolver := &recordingDestinationAccountResolver{account: account}
 	runner := fakeDestinationProcessRunner{run: func(command *exec.Cmd) error {
 		captured = command
 		_, stdoutErr := command.Stdout.Write([]byte{0, 0xff, 'o', 'k'})
@@ -203,7 +211,7 @@ func TestDestinationExecutionRunsConfiguredCommandAndForwardsOutput(t *testing.T
 		return nil
 	}}
 	effect := &systemDestinationExecution{
-		accounts:      staticDestinationAccountResolver{account: account},
+		accounts:      resolver,
 		processes:     runner,
 		processGroups: &fakeDestinationProcessGroupKiller{},
 	}
@@ -213,9 +221,30 @@ func TestDestinationExecutionRunsConfiguredCommandAndForwardsOutput(t *testing.T
 
 	require.NoError(t, err)
 	assert.Equal(t, 0, exitCode)
+	assert.Equal(t, "builder", resolver.targetUser)
 	require.NotNil(t, captured)
-	if diff := cmp.Diff([]string{"/bin/sh", "-c", "printf secret"}, captured.Args); diff != "" {
-		t.Errorf("executed command mismatch (-want +got):\n%s", diff)
+	wantCommand := destinationCommandSecurityProjection{
+		args: []string{"/bin/sh", "-c", "printf secret"},
+		dir:  "/home/builder",
+		env: []string{
+			"HOME=/home/builder",
+			"LOGNAME=builder",
+			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+			"SHELL=/bin/sh",
+			"USER=builder",
+		},
+		uid:     1001,
+		gid:     1002,
+		groups:  []uint32{1002, 1003},
+		setpgid: true,
+	}
+	gotCommand := destinationCommandProjection(captured)
+	if diff := cmp.Diff(
+		wantCommand,
+		gotCommand,
+		cmp.AllowUnexported(destinationCommandSecurityProjection{}),
+	); diff != "" {
+		t.Errorf("executed command security projection mismatch (-want +got):\n%s", diff)
 	}
 	if diff := cmp.Diff([]byte{0, 0xff, 'o', 'k'}, stdout.Bytes()); diff != "" {
 		t.Errorf("stdout mismatch (-want +got):\n%s", diff)
@@ -237,10 +266,11 @@ func TestDestinationExecutionMapsExitAndGenericFailures(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
+			resolver := &recordingDestinationAccountResolver{account: destinationAccount{
+				username: "builder", homeDir: "/home/builder", uid: 1001, gid: 1002,
+			}}
 			effect := &systemDestinationExecution{
-				accounts: staticDestinationAccountResolver{account: destinationAccount{
-					username: "builder", homeDir: "/home/builder", uid: 1001, gid: 1002,
-				}},
+				accounts:      resolver,
 				processes:     fakeDestinationProcessRunner{run: func(*exec.Cmd) error { return test.runErr }},
 				processGroups: &fakeDestinationProcessGroupKiller{},
 			}
@@ -272,9 +302,37 @@ func TestDestinationCommandCancellationKillsTheProcessGroup(t *testing.T) {
 	command.Process = &os.Process{Pid: 4242}
 	require.NoError(t, command.Cancel())
 	assert.Equal(t, -4242, killer.pid)
+	assert.Equal(t, unix.SIGKILL, killer.signal)
 
 	killer.err = unix.ESRCH
 	assert.ErrorIs(t, command.Cancel(), os.ErrProcessDone)
+}
+
+type destinationCommandSecurityProjection struct {
+	args    []string
+	dir     string
+	env     []string
+	uid     uint32
+	gid     uint32
+	groups  []uint32
+	setpgid bool
+}
+
+func destinationCommandProjection(command *exec.Cmd) destinationCommandSecurityProjection {
+	projection := destinationCommandSecurityProjection{
+		args: append([]string(nil), command.Args...),
+		dir:  command.Dir,
+		env:  append([]string(nil), command.Env...),
+	}
+	if command.SysProcAttr != nil {
+		projection.setpgid = command.SysProcAttr.Setpgid
+		if command.SysProcAttr.Credential != nil {
+			projection.uid = command.SysProcAttr.Credential.Uid
+			projection.gid = command.SysProcAttr.Credential.Gid
+			projection.groups = append([]uint32(nil), command.SysProcAttr.Credential.Groups...)
+		}
+	}
+	return projection
 }
 
 func TestDestinationAccountResolverWrapsContextCancellation(t *testing.T) {
