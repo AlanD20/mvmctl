@@ -18,9 +18,12 @@ agents. It governs delegation and integration; `AGENTS.md`, `CONTEXT.md`, accept
 4. Do useful local integration work while agents run. Check live state after each bounded local step, on every agent
    message, and before opening another assignment. During a long command, retain and poll its real process handle;
    do not create replacement work from a timeout alone.
-5. Review ready commits, tests first. Inspect the full diff, interfaces, imports, effect boundaries, failure paths,
-   ownership transfer, and cleanup. Run one focused evidence pass. Completion criterion: the commit is approved or has
-   one severity-ranked correction request with exact evidence.
+5. Review each ready implementation commit once, tests first. Inspect its fixed implementation diff, interfaces,
+   imports, effect boundaries, failure paths, ownership transfer, and cleanup. Run one focused evidence pass.
+   Completion criterion: the commit is approved or has one severity-ranked correction request with exact evidence.
+   After that correction, inspect only the correction delta, the previously failed invariants, and their regression
+   tests. Repeat the full implementation review only when the correction materially changes architecture, a public
+   interface, or a security boundary; record that reason before expanding the review.
 6. Integrate one approved slice at a time. Re-run focused checks on the integration branch, then record user-visible
    behavior and remaining limitations in a separate documentation commit. Completion criterion: the main branch is a
    working save point and unrelated user changes are unchanged.
@@ -39,14 +42,32 @@ commit, test result, reproduced blocker, or decision-changing review finding.
   command, broadens scope, or continues reviewing after a release blocker is established.
 - Do not spawn reviewers for a moving uncommitted target. Review a fixed commit; send one correction round to its
   owner; perform final sign-off after the correction.
-- Prefer three productive streams over a larger idle swarm. Add a stream only when its output can integrate without
-  waiting on another active writer.
+- Parallelism has no fixed agent-count target or cap. Open every independent stream whose output can integrate without
+  waiting on another active writer; close a stream when that independence or value disappears. Agent count is not a
+  token-control mechanism.
+
+## Context and token control
+
+Control context and repeated work rather than useful parallelism:
+
+- Give each agent the smallest self-contained packet: exact worktree, fixed base or commit, owned files/effect
+  boundary, relevant references, deliverable, verification gate, and stop condition. Use minimal-history forks; a full
+  conversation fork requires a concrete dependency on that history.
+- Require evidence-dense reports: commit hash, changed-file scope, test commands/results, actionable findings, and an
+  exact blocker when present. Do not request narrative progress histories or repeated repository summaries.
+- Monitor live handle and worktree evidence at bounded checkpoints. One unchanged checkpoint receives one concise
+  status request; a second unchanged checkpoint without a confirmed live command ends the assignment.
+- Assign distinct review axes only when each can change the integration decision. Consolidate overlapping findings
+  into one correction packet, then perform one correction-delta verification instead of another full audit.
+- Spend broad test and review work once per coherent integration milestone. Focused package evidence is sufficient for
+  an isolated commit; unchanged broad checks are not repeated.
 
 ## Circuit breaker
 
-Each review gets one static pass and one focused verification pass. Stop at the first Critical blocker. The owner gets
-one bounded correction round; a repeated blocker returns the slice to dependency planning instead of another review
-loop. Broad CI waits for a coherent integration checkpoint.
+Each implementation gets one fixed-diff review pass. Stop at the first Critical blocker and consolidate the completed
+review axes into one bounded correction packet. The correction receives delta-only verification of the changed lines,
+affected invariants, and targeted regression tests. A repeated blocker returns the slice to dependency planning rather
+than another review loop. Broad CI waits for a coherent integration checkpoint.
 
 Never rerun an unchanged failing command. Change the hypothesis, command, code, or environment first. A quota,
 missing generated asset, sandbox denial, or expired observation is evidence to classify, not a reason to spin.
