@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-08-30 (schema-3 launch authority and LoopMount receiver activation)
+**Last Updated:** 2026-08-31 (private per-VM network-namespace authority and effect)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md)
@@ -1126,7 +1126,7 @@ ephemeral runtime tree:
             └── console.pid
 ```
 
-Implementation note (2026-08-30): `internal/lib/authorityfs` now owns the descriptor-relative initializer for
+Implementation note (2026-08-31): `internal/lib/authorityfs` now owns the descriptor-relative initializer for
 `/run/mvmctl` and `/run/mvmctl/authority`. Jailer's index lock, release-lock directory, per-UID authority directories,
 and per-VM locks use its closed named capabilities, while persistent records remain at `/var/lib/mvmctl/instances`.
 Existing managed objects are verified and never repaired; focused L1 evidence covers modes, symlinks, concurrent
@@ -1138,9 +1138,18 @@ adapter are used by the exact provision/inspect receiver actions described above
 backs the private managed-network
 registration authority's global-index and per-network locks. Its strict schema-1 record/codec/store persists only owner,
 network, boot, and derived bridge identity beneath `/var/lib/mvmctl/networks/<uid>` with atomic no-replace publication,
-post-rename authority evidence, and exact reverse cached close-once cleanup. That entry point is private and unreferenced:
-it does not receive the Jailer VM lock or activate topology, namespace, link, TAP, route, firewall, runtime-subtree, or
-public behavior. Those consumers in the diagram remain target design.
+post-rename authority evidence, and exact reverse cached close-once cleanup. That registration entry point is private
+and unreferenced and does not receive the Jailer VM lock.
+
+The Network family also creates one exact root-owned
+`/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder while retaining its directory, leaf, and mount identity. The
+private network effect creates a new network namespace on a disposable locked OS thread, clones and publishes its exact
+nsfs mount through `open_tree`/`move_mount`, verifies restoration of the pinned host namespace, and removes only the
+retained mount and placeholder with explicit uncertain-unmount evidence. This is not a production topology or public
+action: neither the private topology service nor namespace effect has a production caller, the effect deliberately
+does not implement the complete link-effect boundary, and local bridge, TAP, veth, firewall/link activation, durable
+VM-topology state, Jailer handoff, runtime-subtree creation, public cutover, and live-kernel qualification remain target
+design.
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and

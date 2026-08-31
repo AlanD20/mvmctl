@@ -55,8 +55,8 @@ instead of copying a domain count into documentation.
 
 Domains are strictly isolated from each other. A domain in `internal/core/vm/` cannot import
 `internal/core/network/` or another sibling domain. The Go compiler rejects import cycles, but it does not reject every
-one-way sibling import. Code review currently enforces the broader rule. `tasks/todo.md` tracks a deterministic CI check
-for this boundary.
+one-way sibling import. The deterministic `internal/architecture` CI gate scans every production Go file beneath each
+immediate core domain and rejects imports of a different sibling domain while allowing same-domain subpackages.
 
 The shared model layer at `internal/lib/model/` unifies the domains. It contains concrete structs with `db:"column"`
 and `json:"field"` tags for SQL and JSON serialization. Core domains use these shared types instead of defining
@@ -217,9 +217,10 @@ Tables include `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_
 
 ### Layer compliance enforcement
 
-The Go compiler enforces type safety and rejects import cycles. Code review enforces project-specific dependency rules
-that are stricter than Go's import rules. Task 18 in `tasks/todo.md` tracks machine enforcement for sibling core-domain
-imports. Key rules:
+The Go compiler enforces type safety and rejects import cycles. The `internal/architecture` test adds machine
+enforcement for production imports between sibling core domains and runs as its own CI step before formatting, vet,
+and the full test suite. Code review continues to enforce the remaining project-specific dependency rules that are
+stricter than Go's import rules. Key rules:
 - Core domains never import other `internal/core/*` packages.
 - CLI imports from `pkg/api/`, `pkg/api/inputs`, `pkg/api/results`, `pkg/errs`, `internal/cli/common/`, `internal/infra/`, `internal/lib/`, `internal/service/` -- enforced by code review.
 - API imports `internal/core/*` + `internal/enricher/` + `internal/infra/` + `internal/infra/event` + `internal/lib/*` + `internal/assets` + `internal/service/*` + `pkg/errs` + `pkg/api/inputs` + `pkg/api/results`.
@@ -339,11 +340,19 @@ strict schema-1 record persists only owner UID, network ID, current boot ID, and
 name/ifindex/host-namespace device and inode at `/var/lib/mvmctl/networks/<uid>/<network-id>.json`. Root-owned mode-`0700`
 directories and one-link mode-`0600` records are admitted descriptor-relatively; a bounded exact codec and atomic
 no-replace publication preserve both created-record and durability-uncertain evidence. Registration releases its
-network, UID/store, index, and root authority in exact reverse order with pointer-shared cached close-once results. This
-is not runtime activation: the registration entry point remains private and unreferenced, does not receive the Jailer
-VM-lock lease, and creates no namespace, link, TAP, route, topology record, firewall state, or public action. The
-`/run/mvmctl/runtime` tree remains unimplemented. Firewall now has a separate inert authority foundation; it is not a
-network-topology consumer and performs no kernel effect.
+network, UID/store, index, and root authority in exact reverse order with pointer-shared cached close-once results. The
+registration entry point remains private and unreferenced, does not receive the Jailer VM-lock lease, and does not
+consume the separate namespace capability.
+
+The Network authority family now also creates one exact root-owned
+`/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder and retains its directory, leaf, and mount identities. A private
+network effect can create a network namespace on a disposable locked OS thread, publish its exact nsfs mount onto that
+placeholder through `open_tree`/`move_mount`, verify restoration of the host network namespace, and remove only the
+retained mount and placeholder with explicit uncertain-unmount evidence. This is an inert private effect, not runtime
+activation: neither `newService` nor `newNamespaceEffect` has a production caller, the namespace effect deliberately
+does not implement the complete `TopologyEffects` boundary until the typed link adapter exists, and there is no Jailer
+VM-lock transfer, local bridge, TAP, veth, route, firewall, persistent VM-topology record, privileged action, public
+behavior, or live-kernel qualification. The `/run/mvmctl/runtime` tree remains unimplemented.
 
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
 requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`
@@ -529,11 +538,16 @@ requires earlier network authority, then binds the admitted record to the curren
 namespace while retaining pointer-shared cached close-once cleanup authority. It fails when the record is missing
 because only qualified kernel inspection may establish initial authority.
 
-There is still no kernel inspection/adoption, unknown raw-expression detection, record replacement during application,
-actual empty-generation deletion/application, `nftables.Conn`/`Flush`, namespace execution, privileged action, public
-policy cutover, legacy `nft` CLI removal, or L2 qualification. The raw decoder/inspection work is not complete. These
-foundations are not evidence of kernel application, atomicity, or release readiness; the transitional backends and
-public policy path remain active.
+A separate inert raw-netlink snapshot collector now issues only receiver-chosen read requests for the two exact managed
+tables, five fixed chains, their rules, and the absence of sets, objects, and flowtables. It brackets collection with
+ruleset-generation reads, uses a shared 32-MiB/20,000-message budget across fresh single-request transports, and feeds
+the replies to the strict raw decoder, which rejects unknown expressions and structural drift. No production transport
+factory or call site connects the collector to a live kernel or the generation authority.
+
+Qualified initial inspection/adoption, record replacement during application, actual empty-generation
+deletion/application, `nftables.Conn`/`Flush`, namespace execution, privileged action, public policy cutover, legacy
+`nft` CLI removal, live-kernel qualification, and L2 qualification remain pending. These foundations are not evidence
+of kernel application, atomicity, or release readiness; the transitional backends and public policy path remain active.
 
 ADR-0017 defines the remaining clean-break replacement. Before any fixed-name table can be replaced or removed, root
 must hold the never-unlinked global `/run/mvmctl/authority/firewall.lock` and bind the exact observed generation to the
@@ -543,13 +557,13 @@ reserved tables are absent; the implemented empty compiler output does not yet i
 Missing, corrupt, mismatched, or ambiguous authority never permits deletion.
 
 `github.com/google/nftables v0.3.0` exposes rule userdata but no table/chain ownership metadata, and its structured rule
-reader can omit expression types it does not understand. Root-record-bound exact inspection, the threat-model boundary
-for another root or `CAP_NET_ADMIN` actor, raw unknown-expression detection, and real-kernel delete/recreate batch
-atomicity therefore remain explicit activation gates. The final adapter must resolve those gates, apply one complete
-generation directly, then remove iptables, the backend selector, backend-specific repositories, and the production
-`nft` CLI path. Library and netlink types stay private to that adapter; there is no final CLI fallback. Kernel nftables,
-bridge-family, connection-tracking, NAT, and privilege capabilities remain host requirements. A disposable QA runner
-may use the `nft` CLI only as an independent read-only oracle.
+reader can omit expression types it does not understand. The inert raw collector closes the expression-omission gap,
+but root-record-bound live inspection, the threat-model boundary for another root or `CAP_NET_ADMIN` actor, and
+real-kernel delete/recreate batch atomicity remain explicit activation gates. The final adapter must resolve those
+gates, apply one complete generation directly, then remove iptables, the backend selector, backend-specific
+repositories, and the production `nft` CLI path. Library and netlink types stay private to that adapter; there is no
+final CLI fallback. Kernel nftables, bridge-family, connection-tracking, NAT, and privilege capabilities remain host
+requirements. A disposable QA runner may use the `nft` CLI only as an independent read-only oracle.
 
 ## Relationships
 

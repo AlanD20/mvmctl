@@ -41,7 +41,8 @@ continue without silently deleting it.
   share lifecycle state, and checked idempotent release caches its first result without retry. Its separate LoopMount,
   Network, and Firewall families provide canonical resource locks to their owning services. The firewall family is
   consumed only by an inert generation authority, and the LoopMount provision/inspect actions are registered only in
-  the private receiver; no `/run/mvmctl/runtime` tree, live network topology, public LoopMount backend cutover, or
+  the private receiver. The Network family also owns an exact per-VM namespace placeholder used only by the uncomposed
+  namespace effect; no `/run/mvmctl/runtime` tree, live production topology, public LoopMount backend cutover, or
   firewall kernel effect exists yet.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
@@ -57,6 +58,12 @@ continue without silently deleting it.
   and the clean-break removal of the transitional policy path remain pending.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
+- Private root-pinned network-namespace authority and effect. The authority retains the exact
+  `/run/mvmctl/authority/<uid>/netns/<vm-id>` target identity; the effect creates and pins a new network namespace on a
+  disposable locked thread, publishes it through `open_tree`/`move_mount`, verifies host-namespace restoration, and
+  performs identity-bound non-lazy unmount and placeholder cleanup with explicit uncertainty evidence. It is not
+  production-composed, does not yet implement the complete link-effect boundary, and creates no local bridge, TAP,
+  veth, route, firewall state, public action, or Jailer handoff.
 - Private typed nftables compiler pinned to `github.com/google/nftables v0.3.0`, with fixed bridge/inet tables and
   chains, raw-priority ingress guards, same-network/routed/host-service/default-deny/conditional-egress/NAT rules,
   compiler-derived canonical SHA-256 generation identity, strict digest-bound userdata, explicit empty output,
@@ -92,7 +99,9 @@ continue without silently deleting it.
 - Private firewall generation authority with a strict committed/applying record and codec, descriptor-relative
   exclusive store at `/var/lib/mvmctl/firewall/generation.json`, and never-unlinked global
   `/run/mvmctl/authority/firewall.lock`. Acquisition requires earlier network authority and admits only the current boot
-  and host network namespace. It has no initial kernel inspection, raw unknown-expression decoder, record replacement,
+  and host network namespace. A separate inert bounded raw-netlink snapshot collector now reads only the exact managed
+  tables/chains/rules and rejects unknown expressions, forbidden object classes, generation drift, and cap violations.
+  Neither foundation has a production live-kernel connection factory or authority integration, record replacement,
   `Conn.Flush`, recovery, privileged action, public consumer, or system tests.
 - ADR-0016 for the single-binary privilege boundary.
 
@@ -126,8 +135,10 @@ Implementation status: `internal/lib/authorityfs` now owns the descriptor-relati
 `/run/mvmctl` and `/run/mvmctl/authority` modes. Jailer uses its private adapters over the module's closed index,
 release, UID, and VM-lock capabilities. Separate LoopMount, Network, and Firewall families provide canonical locking
 to their owning service seams. LoopMount provision/inspect and firewall generation authority now consume their exact
-families, but the module does not create the runtime-output tree; public LoopMount cutover, network topology, and
-firewall kernel application remain pending.
+families. Network's family now also provides the exact per-VM namespace placeholder consumed by the private namespace
+effect, but neither that effect nor the topology service has a production caller. The module does not create the
+runtime-output tree; public LoopMount cutover, complete network topology, and firewall kernel application remain
+pending.
 
 ### Module and layer rules
 
@@ -670,9 +681,13 @@ and cleans per-network lock, lock/store UID capabilities, store root, index lock
 Cleanup is cancellation-independent, close-once, and repeats cached results while preserving primary error identity.
 
 This remains an inert identity foundation. No production path calls registration; no real VM-lock lease is transferred
-into registration or topology preparation; and no namespace/link/firewall kernel effect consumes the record. VM-lock
-transfer, netlink effects, firewall/link activation, durable per-VM topology lifecycle, global capacity authority,
-production construction, Jailer handoff, public cutover, and live qualification remain pending.
+into registration or topology preparation; and no namespace/link/firewall kernel effect consumes the record. A
+separate implemented namespace capability creates an exact root-owned per-VM placeholder, while the private namespace
+effect creates, pins, publishes, verifies, and identity-bound removes a network namespace on a disposable locked OS
+thread. It remains uncomposed: neither `newService` nor `newNamespaceEffect` has a production caller, and the namespace
+effect deliberately does not implement the complete `TopologyEffects` boundary until the link adapter exists. VM-lock
+transfer, local-bridge/TAP/veth effects, firewall/link activation, durable per-VM topology lifecycle, global capacity
+authority, production construction, Jailer handoff, public cutover, and live qualification remain pending.
 
 The private root-side compiler in `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and receives
 only mvmctl-owned typed resolved intent. It builds fixed bridge and inet tables/chains. Raw-priority bridge prerouting
@@ -694,8 +709,12 @@ allocations, with a 250,000-allocation L1 ceiling.
 
 This compiler creates no `nftables.Conn` and calls no `Flush`. A separate implemented private foundation provides the
 strict committed/applying generation record and codec, its exclusive descriptor-relative store, the global firewall
-lock, same-boot/host-netns admission after earlier network authority, and cached close-once cleanup. Initial kernel
-inspection, raw unknown-expression detection, application-time record replacement, actual empty-generation
+lock, same-boot/host-netns admission after earlier network authority, and cached close-once cleanup. An inert
+raw-netlink collector now brackets exact managed-table, fixed-chain, rule, set, object, and flowtable observations with
+ruleset-generation reads; applies one shared 32-MiB/20,000-message budget across fresh request transports; and uses the
+strict raw decoder to reject unknown expressions and structural drift. It has no production connection factory or call
+site.
+Qualified initial inspection/adoption, application-time record replacement, actual empty-generation
 deletion/application, namespace execution, privileged registration/application, public policy cutover, legacy `nft`
 CLI removal, and L2 qualification remain pending. The final adapter must submit one complete generation through one
 `Conn.Flush` call; until then there is no kernel effect or atomicity evidence.
@@ -709,9 +728,10 @@ are absent; the compiler's empty output does not delete or apply them. Missing, 
 fixed-name state is never adopted or deleted.
 
 The pinned library exposes rule userdata but no table/chain ownership metadata, and structured `GetRules` can omit
-unknown expression types. Root-record-bound exact state can become authority only within an explicitly accepted threat
-model for other root/`CAP_NET_ADMIN` actors and an inspection path that detects unknown raw expressions. A fresh
-explicitly namespace-bound lasting connection performs one replacement batch; a fresh connection inspects the result.
+unknown expression types. The inert raw collector detects unknown raw expressions, but root-record-bound live state can
+become authority only within an explicitly accepted threat model for other root/`CAP_NET_ADMIN` actors and a qualified
+production integration of that collector. A fresh explicitly namespace-bound lasting connection performs one
+replacement batch; a fresh connection inspects the result.
 Cancellation or a flush failure gets one bounded recovery inspection under the same lock and namespace pin, never a
 retry on the used connection. Real-kernel isolated-namespace tests must still prove delete/create and late-invalid-batch
 atomicity, both-table empty removal, namespace isolation, exact expression inspection, cancellation/close behavior, and
@@ -964,6 +984,7 @@ updated as these gates land. Directly copying the binary into `/usr/local/bin` i
 
 ```bash
 go mod tidy && git diff --exit-code
+go test ./internal/architecture -count=1
 test -z "$(gofmt -l .)"
 golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/
 go generate ./internal/service/agent/...

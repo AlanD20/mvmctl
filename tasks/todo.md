@@ -504,6 +504,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 9: Add root network authority and mandatory per-VM namespaces
 
 **Owner:** engineer
+**Status:** Private namespace target authority and create/remove effect implemented but not production-composed; link,
+firewall, Jailer, persistence, public cutover, and qualification remain pending
 **Dependencies:** Tasks 4, 7, and 8
 
 - [x] Add the private topology-preparation foundation: derive owner/network and owner/VM names, require a non-forgeable
@@ -517,6 +519,12 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   `/var/lib/mvmctl/networks/<uid>`; serialize global claims and each network; preserve post-rename authority evidence;
   and release acquired capabilities in exact reverse order with cached close-once cleanup. The registration entry point
   remains private and unreferenced.
+- [x] Add the closed per-VM namespace target capability and private create/remove effect. Create the exact root-owned
+  `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder, retain its directory/leaf/mount identity, create the network
+  namespace on a disposable locked OS thread, publish it with `open_tree`/`move_mount`, verify host-namespace
+  restoration, and remove only the exact mount and placeholder with explicit uncertainty evidence. The effect remains
+  uncomposed, does not implement the complete link-effect boundary, and has no production constructor call, Jailer
+  handoff, public action, or live-kernel qualification.
 - [ ] Transfer the applicable Jailer VM-lock lease into network registration and serialize each topology mutation under
   both VM and network authority. No current network record authorizes a VM topology.
 - [ ] Acquire the network lock only after the applicable VM launching/active lease; the full order is
@@ -551,11 +559,16 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 - [x] Add the bounded strict generation codec, descriptor-relative exclusive record store, earlier-network-authority
   acquisition seam, same-boot/host-netns admission, and pointer-shared cached close-once cleanup. This is inert and
   creates no initial record from kernel state.
+- [x] Add the inert bounded raw-netlink snapshot transport/collector and strict decoder. It chooses only the exact
+  managed tables, fixed chains, rules, sets, objects, and flowtables; brackets collection with generation reads; shares
+  one 32-MiB/20,000-message budget across fresh request transports; and rejects unknown expressions, forbidden object
+  classes, malformed replies, and generation drift. No production connection factory or authority call site exists.
 - [ ] Define empty as both reserved tables absent; never create empty tables or delete ambiguous, foreign, partial,
   missing-record, corrupt-record, wrong-boot, wrong-netns, or mismatched fixed-name state.
-- [ ] Resolve the v0.3.0 inspection gaps before activation: table/chain values have no ownership userdata and
-  structured `GetRules` can omit unknown expressions. Explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary
-  for record-bound authority and detect unknown raw expressions instead of silently adopting them.
+- [ ] Resolve the remaining v0.3.0 inspection gates before activation: table/chain values have no ownership userdata.
+  Explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary, bind the raw collector to a production connection
+  under record/network authority, and establish qualified initial inspection/adoption without silently adopting
+  ambiguous state.
 - [ ] Complete the isolated-netns compatibility spike: prove required expression round-trips, explicit namespace
   isolation, lasting-connection cancellation/checked close, valid delete/create replacement, late-invalid-batch
   atomicity, both-table empty removal, recovery inspection, and representative 1,000-VM runtime within a reviewed
@@ -817,8 +830,10 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 **Owner:** engineer and qa-engineer
 **Dependencies:** Tasks 3-17
 
-- [ ] Add a deterministic CI architecture check that rejects production imports between sibling `internal/core/*`
-  domains. The check must distinguish a package importing itself from one domain importing another.
+- [x] Add a deterministic CI architecture check that rejects production imports between sibling `internal/core/*`
+  domains while allowing same-domain subpackages. It scans non-test Go files, reports stable repository-relative
+  violations, has fixture coverage for both outcomes, and runs as `go test ./internal/architecture -count=1` before the
+  rest of CI. This marks only the gate implementation; the complete CI run below remains pending.
 - [ ] `go mod tidy && git diff --exit-code`
 - [ ] `test -z "$(gofmt -l .)"`
 - [ ] `golines --max-len=120 --no-reformat-tags --list-files ./internal/ ./pkg/ ./cmd/`

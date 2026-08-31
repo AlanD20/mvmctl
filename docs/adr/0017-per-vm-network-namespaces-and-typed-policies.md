@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-08-30 (inert firewall generation authority foundation)
+**Last Updated:** 2026-08-31 (private namespace effect and inert raw nftables snapshot collector)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -79,7 +79,7 @@ lowers and reverifies the exact links, then invokes the launch lease's typed abo
 handle remain held. An unknown firewall outcome never raises a link or releases the child. Cleanup verifies namespace
 inode, interface ownership, process identity, and cgroup membership before removing anything.
 
-Implementation note (2026-08-30): a private strict schema-1 managed-network authority record, codec, persistent store,
+Implementation note (2026-08-31): a private strict schema-1 managed-network authority record, codec, persistent store,
 and inert registration authority are implemented. The record is at
 `/var/lib/mvmctl/networks/<uid>/<network-id>.json` and contains exactly schema version, owner UID, 64-lowercase-hex
 network ID, host boot ID, and the derived managed bridge's name, ifindex, and host namespace device/inode. The strict
@@ -96,13 +96,20 @@ lock, lock UID, store UID, store root, index lock, then lock root in exact rever
 cleanup. Capability releases are pointer-shared, close once, and repeat the first cached cleanup result; cleanup failure
 preserves the primary `DomainError` and adds bounded `cleanup_required` evidence.
 
-This authority remains deliberately inert: no production constructor calls registration, no real Jailer VM-lock lease
-is transferred into it or the topology transaction, and no namespace, link, TAP, route, firewall, or other kernel
-effect consumes the record. The separate topology-preparation foundation exposes topology authority only from its exact
-committed in-memory state while the network lock, namespace pin, and all creation markers remain present. Building,
-cleanup-in-progress, cleaned, missing-lease, and partially rolled-back values return no authority. VM-lock transfer,
-netlink effects, firewall/link activation, durable VM-topology lifecycle, production construction, Jailer handoff, and
-live qualification remain pending.
+Registration remains deliberately inert: no production constructor calls it, no real Jailer VM-lock lease is
+transferred into it or the topology transaction, and no namespace or link effect consumes the managed-network record.
+The separate topology-preparation foundation exposes topology authority only from its exact committed in-memory state
+while the network lock, namespace pin, and all creation markers remain present. Building, cleanup-in-progress, cleaned,
+missing-lease, and partially rolled-back values return no authority.
+
+A separate implemented Network authority capability creates the exact root-owned
+`/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder and retains its directory, leaf, and mount identities. The
+private namespace effect creates a network namespace on a disposable locked OS thread, publishes the exact nsfs mount
+through `open_tree`/`move_mount`, verifies restoration of the pinned host namespace, and performs identity-bound
+non-lazy unmount and placeholder removal with explicit unknown-outcome evidence. It deliberately does not implement the
+complete `TopologyEffects` boundary until a typed link adapter exists, and neither it nor the private topology service
+has a production caller. VM-lock transfer, local-bridge/TAP/veth effects, firewall/link activation, durable VM-topology
+lifecycle, production construction, Jailer handoff, public cutover, and live qualification remain pending.
 
 ### nftables is the only firewall backend
 
@@ -161,10 +168,11 @@ version bump.
 On the isolated representative 1,000-VM compiler benchmark, the observed range was roughly 23–28 ms with about 10 MB
 and 179,000 allocations. L1 retains ratio-based growth evidence and enforces a 250,000-allocation regression ceiling.
 
-This remains an inert compiler foundation. The separate generation authority described below is implemented, but there
-is no `nftables.Conn`/`Flush`, kernel inspection or adoption, unknown raw-expression detection, actual empty-generation
-deletion/application, namespace-scoped execution, privileged action, public policy cutover, legacy `nft` CLI removal,
-or L2 qualification. No kernel-application, atomicity, or release-readiness claim follows from these foundations.
+This remains an inert compiler foundation. The separate generation authority and bounded raw snapshot collector
+described below are implemented, but there is no production live-kernel connection factory, qualified initial
+inspection or adoption, `nftables.Conn`/`Flush`, actual empty-generation deletion/application, namespace-scoped
+execution, privileged action, public policy cutover, legacy `nft` CLI removal, or L2 qualification. No
+kernel-application, atomicity, or release-readiness claim follows from these foundations.
 
 #### Firewall generation authority and inspection gates
 
@@ -182,6 +190,15 @@ same-host-network-namespace record and retains store, lock, and authority throug
 cleanup. It deliberately rejects a missing record because qualified kernel inspection must establish initial truth.
 No production consumer invokes this seam.
 
+The private raw-netlink snapshot collector is also implemented but deliberately inert. It brackets one logical
+observation with ruleset-generation reads; chooses exact read-only lookups for the two managed tables and five fixed
+chains; dumps only their rules, sets, objects, and flowtables; and rejects any set, object, flowtable, partial table
+state, generation drift, or inconsistent base sequence. Each request owns a fresh checked transport, while a shared
+32-MiB/20,000-message budget bounds the complete observation. The strict raw decoder rejects malformed/unknown
+attributes and expressions rather than relying on `github.com/google/nftables` structured decoding. No production
+factory supplies a live netlink connection, no authority path calls the collector, and no real-kernel result is
+qualified.
+
 The implemented generation identity is the compiler-derived canonical digest described above; callers provide no
 identifier. The digest alone is neither kernel ownership nor deletion authority. An applied empty generation must mean
 both `mvmctl_bridge` and `mvmctl_inet` are absent: a pristine empty target performs no netlink transaction, while
@@ -193,10 +210,10 @@ automatically.
 `github.com/google/nftables v0.3.0` cannot by itself prove that a fixed-name table or chain belongs to mvmctl: table and
 chain values expose no userdata or equivalent provenance. Rule userdata is necessary evidence but does not establish
 ownership of its containing table. Its structured `GetRules` path can also omit expression types the library does not
-understand, so re-marshalling parsed expressions cannot prove that no extra kernel expression exists. Production
-activation therefore requires an accepted threat model for another root or `CAP_NET_ADMIN` actor, root-record-bound
-exact-state authority within that model, and an inspection mechanism that detects unknown raw expressions rather than
-silently ignoring them. Ambiguity always blocks `DelTable`.
+understand, so re-marshalling parsed expressions cannot prove that no extra kernel expression exists. The inert raw
+collector closes that decoder gap, but production activation still requires an accepted threat model for another root
+or `CAP_NET_ADMIN` actor, root-record-bound exact-state authority within that model, a qualified production connection
+and namespace binding for the collector, and live-kernel evidence. Ambiguity always blocks `DelTable`.
 
 Application writes a durable `applying` record before kernel mutation, queues the complete delete/create/chain/rule
 replacement on one fresh explicitly namespace-bound lasting connection, and calls `Flush` once. It then closes that
@@ -355,12 +372,14 @@ identity, strict digest-bound userdata, deterministic ordering, explicit empty o
 closed eight-type expression set, typed-nil and unknown-expression rejection, and bounded allocation growth for a
 representative 1,000-VM generation.
 
+The private snapshot tests cover the closed read-only request catalog, strict raw unknown-expression detection,
+forbidden object classes, generation consistency, malformed replies, cancellation/close faults, and aggregate caps.
 Before production integration, the remaining work must explicitly accept the root/`CAP_NET_ADMIN` threat-model
-boundary, complete raw inspection that detects unknown expressions rather than silently dropping them, and prove the
-emitted expressions plus namespace binding, cancellation/close behavior, delete/create and
-invalid-batch atomicity, actual empty-generation deletion/application, and representative 1,000-VM runtime against
-supported kernels. `nftables.Conn`, `Flush`, privileged application, public policy cutover, legacy CLI removal, and L2
-qualification all remain pending.
+boundary, bind the collector to a production connection under exact record/network-namespace authority, and prove the
+emitted expressions plus namespace binding, cancellation/close behavior, delete/create and invalid-batch atomicity,
+actual empty-generation deletion/application, and representative 1,000-VM runtime against supported kernels.
+`nftables.Conn`, `Flush`, privileged application, public policy cutover, legacy CLI removal, and L2 qualification all
+remain pending.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,
