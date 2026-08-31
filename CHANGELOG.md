@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and down-only link effects,
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
-> effect seams, provision/inspect receiver actions, and the closed bounded VM-exec wire described below are implemented.
+> effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, and its destination-agent
+> non-root execution side described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
 > marker-only sudo policy, schema-3 Jailer launch composition and final live topology/cgroup verification and
@@ -82,9 +83,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The wire rejects root target users and commands over 32 KiB, caps combined stdout and stderr at 8 MiB, and caps the
   reported execution duration at five minutes. Its closed stream grammar permits `stdout` and `stderr` frames followed
   by exactly one `result` or `error` terminal and transport EOF; `cancel` is the sole request-bound control frame.
-- Public execution-policy CRUD and the wire foundation do not activate VM-to-VM execution. The relay listener, runtime
-  policy resolution/enforcement, destination-agent execution, root active-session/capacity authority, legacy flag
-  removal, and positive Python system qualification remain pending; VM-to-VM execution is intentionally unavailable.
+- Added the destination-agent side on the existing vsock port. Only exact `MVMEXEC1` magic enters it; ordinary
+  host-exec and copy traffic retains the legacy protocol. It authenticates the configured canonical token before the
+  effect, resolves an exact non-root account to numeric credentials and a clean absolute home, and runs `/bin/sh -c`
+  with an explicit credential, fixed environment/working directory, and process-group cancellation.
+- Destination requests, output, cancellation, and terminal delivery use effective vsock deadlines and the fixed wire
+  bounds; terminal writes have a separate two-second ceiling. Generic errors and logs omit the command, token, and
+  process cause. L1 covers routing, authentication order, account/credential admission, output/exit behavior, limits,
+  cancellation, deadline interruption, partial-read shutdown, and redaction.
+- Public execution-policy CRUD, the wire, and the destination side still do not activate VM-to-VM execution. The
+  closed source session, API-owned relay listener, runtime policy resolution/enforcement, Task 15 root
+  active-session/capacity authority, legacy flag removal, and positive Python qualification remain pending. The
+  implemented cancellation boundary kills the command's process group; it does not claim per-command cgroup authority
+  or cleanup of descendants that deliberately leave that group.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
@@ -635,9 +646,10 @@ The following items are release blockers and are intentionally not described abo
   supported kernels before one privileged `Conn.Flush` application can make links usable. Only then remove the
   iptables backend and selector plus the production `nft` CLI subprocess/parser; the canonical compiler digest is not
   a kernel application.
-- Complete typed traffic API/CLI and nftables application plus the new authenticated vsock relay over the typed policy
-  foundations. Directional exec-policy CRUD is public but does not activate the relay. The legacy guest relay is
-  already fail-closed; the routed `ServiceAccessPolicy`,
+- Complete typed traffic API/CLI and nftables application plus the new authenticated source session and API-owned
+  vsock relay over the typed policy and destination-agent foundations. Directional exec-policy CRUD is public but does
+  not activate the relay. Add Task 15 root-owned concurrent capacity and positive L2 qualification before claiming the
+  destination path end to end. The legacy guest relay is already fail-closed; the routed `ServiceAccessPolicy`,
   `allow_remote_exec` fields/flags, generic host-frame path, and other transitional surfaces still require atomic
   removal.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the

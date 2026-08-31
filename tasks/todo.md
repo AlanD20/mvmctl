@@ -662,9 +662,9 @@ pending
 ### Task 12: Replace remote-exec flags with typed exec policies
 
 **Owner:** engineer
-**Status:** Public directional exec-policy CRUD and the closed bounded wire implemented; relay listener, runtime
-policy/root authority, destination-agent execution, legacy flag removal, and Python qualification pending, so
-VM-to-VM execution remains fail-closed
+**Status:** Public directional exec-policy CRUD, the closed bounded wire, and destination-agent non-root execution are
+implemented; source session, API-owned relay, runtime policy/root capacity authority, legacy flag removal, and Python
+qualification remain pending, so VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -687,10 +687,16 @@ VM-to-VM execution remains fail-closed
   resolve multiple core domains; the API resolves shared identities only after root runtime admission.
 - [ ] Authenticate source from the active host session and root-owned instance/vsock identity, then resolve and enforce
   the exact directional policy at runtime.
-- [ ] Add destination-agent execution as the authorized non-root target user; reject VM-to-host execution, missing or
-  reverse policy, foreign owner, stale target, and every identity mismatch.
-- [ ] Enforce the wire limits at the relay and destination runtime, enforce root-owned concurrent capacity, and redact
-  full commands from audit logs.
+- [x] Add the destination-agent process side for the strict host-built request. Require the configured canonical token
+  before effects; resolve the exact target to a nonzero numeric UID, numeric groups, and a clean absolute home; run
+  `/bin/sh -c` with explicit credentials and a fixed environment; stream through the wire limits; apply effective
+  request/execution/terminal deadlines; kill the process group on timeout/cancel; and redact command, token, and cause.
+  This is L1 evidence only and does not claim per-command cgroup cleanup for descendants that leave the process group.
+- [ ] Compose that destination capability only behind the authenticated source session and API-owned relay. Reject
+  VM-to-host execution, missing/reverse policy, foreign owner, stale target, and every identity mismatch before the
+  host constructs the destination request.
+- [ ] Enforce the same wire limits at the relay, add Task 15 root-owned concurrent capacity, and add command-redacted
+  source/destination/timing/result audit records.
 - [ ] Python T2 proves same-network, cross-network, and no-IP-network exec behavior plus all denials and limits.
 
 ## Phase 3: Finish the privilege boundary and lifecycle

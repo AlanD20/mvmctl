@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-01 (closed bounded VM-exec wire)
+**Last Updated:** 2026-09-01 (bounded destination-agent execution)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -316,9 +316,24 @@ bounds the command at 32 KiB, combined stdout and stderr at 8 MiB, and reported 
 accepts only `stdout`/`stderr` output followed by exactly one `result` or `error` terminal and transport EOF. `cancel`
 is the sole request-bound control frame.
 
-This package owns framing and validation only. The relay listener, root runtime admission and capacity authority,
-runtime policy resolution/enforcement, destination-agent execution, legacy flag removal, and positive Python system
-qualification remain pending. VM-to-VM execution is unavailable until those dependencies land.
+The fourth slice adds the destination side without activating the source path. The existing guest-agent vsock listener
+routes only an exact `MVMEXEC1` prefix to the closed destination decoder and preserves every legacy host-exec/copy
+prefix. Before an execution effect, it requires a configured canonical agent token and compares it in constant time.
+It resolves the exact account name to a nonzero numeric UID, numeric primary and supplementary groups, and a clean
+absolute home; then it invokes `/bin/sh -c` with the explicit credential, that home as the working directory, and a
+fixed environment. It creates a process group and kills that group on context timeout or matching cancellation.
+
+Accepted vsock streams are close-on-exec and nonblocking so their `net.Conn` deadlines are effective. After exact magic
+routing, destination-request decoding has a five-minute deadline; authenticated execution gets its own fixed
+five-minute context, whose expiry interrupts blocked I/O, and the terminal write receives a separate two-second bound.
+Output is streamed through the wire's combined limit, invalid cancellation or writer failure cannot become a success
+result, and terminal/log messages omit the command, token, and process cause. This is process-group cancellation, not
+per-command cgroup authority; a descendant that deliberately leaves the group is outside this slice's guarantee.
+
+The destination side remains dormant for VM-to-VM use. A closed source session, API-owned relay listener, root runtime
+admission and Task 15 active-session/capacity authority, runtime policy resolution/enforcement, legacy flag removal,
+and positive Python system qualification remain pending. No implemented host path constructs an authorized destination
+request, so VM-to-VM execution is unavailable until those dependencies land.
 
 ### Layer placement
 
@@ -328,6 +343,8 @@ qualification remain pending. VM-to-VM execution is unavailable until those depe
   domains through `internal/vsockhandler/`.
 - `internal/lib/vmexecwire/` owns only the closed bounded framing, request validation, and stream grammar. It performs
   no policy lookup, relay, destination-agent execution, audit, or runtime-capacity effect.
+- `internal/service/agent/` owns the destination request handler and explicit non-root process effect. It performs no
+  source authentication, policy lookup, host relay, audit, or runtime-capacity allocation.
 - `internal/service/network/` owns typed privileged namespace, bridge, veth, TAP, route, and link effects.
 - `internal/service/firewall/` owns typed privileged nftables application.
 - `internal/service/jailer/` consumes a verified namespace handle as part of typed launch; it does not create a generic
@@ -437,8 +454,12 @@ deletion/application, and representative 1,000-VM runtime against supported kern
 privileged application, public policy cutover, legacy CLI removal, and L2 qualification all remain pending.
 
 The VM-exec wire tests cover strict source/destination request separation, malformed-frame rejection, request identity,
-fixed limits, response transitions, combined output, cancellation, one terminal, and required EOF. This is protocol
-evidence only; it does not qualify a relay listener, policy enforcement, destination execution, or a live VM-to-VM path.
+fixed limits, response transitions, combined output, cancellation, one terminal, and required EOF. Destination-agent
+L1 tests additionally cover exact protocol routing without host-exec/copy regression, token-before-effect ordering,
+numeric non-root account/home admission, fixed command credentials/environment, binary output and nonzero exit,
+redaction, output overflow, matching/malformed cancellation, process-group cancellation, effective vsock deadlines,
+bounded terminal writes, and shutdown of partial reads. This does not qualify a source listener, relay policy
+enforcement, root-owned capacity, detached-descendant cleanup, or a live VM-to-VM path.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

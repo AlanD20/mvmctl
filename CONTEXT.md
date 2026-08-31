@@ -445,11 +445,21 @@ limited to 32 KiB, combined stdout and stderr to 8 MiB, and reported execution d
 grammar allows `stdout` and `stderr` followed by exactly one terminal `result` or `error` and then transport EOF;
 `cancel` is the only request-bound control frame.
 
-The public desired-intent surface and the wire package do not activate VM-to-VM execution. No relay listener, runtime
-policy resolution or enforcement, destination-agent execution, root-owned active-session/capacity authority, legacy
-`allow_remote_exec` removal, or Python system qualification is implemented. VM-to-VM execution therefore remains
-unavailable. No SQLite VM status, guest-supplied source ID, socket path, or process-local semaphore may substitute for
-root runtime authority.
+The guest agent now recognizes only the exact `MVMEXEC1` prefix as the destination protocol on its existing vsock port;
+all other prefixes remain on the ordinary host-exec/copy protocol. It strictly decodes the host-built destination
+request, requires the configured canonical token in constant time before effects, resolves the exact target account to
+a nonzero numeric UID plus numeric primary/supplementary groups and a clean absolute home, and executes `/bin/sh -c`
+with that credential, home, working directory, and a fixed environment. Output and duration use the wire limits,
+accepted vsock descriptors are close-on-exec/nonblocking with effective deadlines, cancellation kills the command's
+process group, and terminal writes have a separate two-second bound. Errors and logs do not expose the command, token,
+or process cause. This process-group boundary is not a per-command cgroup guarantee and does not claim cleanup of a
+descendant that deliberately leaves the group.
+
+The destination capability is not a positive VM-to-VM path by itself. No closed source session or API-owned relay
+listener constructs its request, and runtime policy resolution/enforcement, Task 15 root active-session/capacity
+authority, legacy `allow_remote_exec` removal, and Python L2 qualification remain pending. VM-to-VM execution therefore
+remains unavailable. No SQLite VM status, guest-supplied source ID, socket path, or process-local semaphore may
+substitute for root runtime authority.
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)
 
@@ -769,6 +779,7 @@ Rationale: subprocess timeouts are a **safety net**, not a performance floor. Th
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine running losetup/mount/umount/chroot in chained operations with precise error recovery |
 | `internal/service/agent/exec.go` (command execution) | Uses `exec.CommandContext` for `su` user switching and `sh -c` command execution inside the guest agent |
 | `internal/service/agent/pty.go` (PTY session) | Uses `exec.CommandContext` for `su` user switching to establish PTY sessions |
+| `internal/service/agent/destination_process.go` (VM-exec destination) | Uses `exec.CommandContext` only after exact nonzero numeric UID and numeric-group resolution; fixes environment/home and `/bin/sh -c`, creates a process group, and kills that group on cancellation |
 | `internal/lib/archive/archive.go` (xz decompression) | Uses `exec.CommandContext` for `xz -d --stdout` pipe-based decompression |
 | `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of the subprocess abstraction layer (`DefaultRunner`, `RunInteractive`, `SpawnService`). These use raw `os/exec` because they ARE the abstraction boundary |
 

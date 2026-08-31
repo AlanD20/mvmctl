@@ -67,7 +67,12 @@ continue without silently deleting it.
   canonical lowercase UUIDv4 agent token. A 32-lowercase-hex request identity binds the request, output, terminal, and
   cancel frames; non-root target, 32-KiB command, 8-MiB combined output, and five-minute duration limits are fixed. The
   response grammar requires exactly one `result` or `error` terminal and transport EOF after any `stdout`/`stderr`.
-  This is not a relay listener or runtime execution path.
+  The destination-agent side now routes only this exact magic on the existing vsock port, authenticates the configured
+  token before effects, resolves an exact non-root account to numeric credentials and a clean absolute home, and runs
+  `/bin/sh -c` with fixed environment/home and process-group cancellation. Effective vsock deadlines bound request,
+  execution I/O, and a separate two-second terminal write; L1 covers routing, auth order, credential admission,
+  binary output/exit, limits, cancellation, partial-read shutdown, and redaction. This is not a source listener, relay,
+  policy-enforcement path, root capacity authority, or per-command cgroup guarantee.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -789,10 +794,11 @@ The public policy families are:
 - `mvm policy exec`: directional exact source VM to exact destination VM and required non-root target user.
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
-nothing implicitly. The exec family's deterministic non-root intent CRUD and closed bounded wire are implemented, but
-the relay listener, runtime policy resolution/enforcement, root active-session/capacity authority, destination-agent
-execution, legacy flag removal, Python system qualification, and the traffic family's replacement public surface
-remain pending. VM-to-VM execution is unavailable.
+nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, and destination-agent
+non-root process side are implemented. The closed source session, API-owned relay listener, runtime policy
+resolution/enforcement, Task 15 root active-session/capacity authority, legacy flag removal, Python system
+qualification, and the traffic family's replacement public surface remain pending. No implemented host path constructs
+an authorized destination request, so VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 

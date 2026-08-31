@@ -188,6 +188,7 @@ Documented exceptions for direct `os/exec` / `os/exec.CommandContext`:
 | `internal/service/loopmount/provisioner.go` | Direct provisioning engine with chained losetup/mount/umount/chroot |
 | `internal/service/agent/exec.go` | Guest agent command execution via `su`/`sh` with `exec.CommandContext` |
 | `internal/service/agent/pty.go` | Guest agent PTY session via `su` with `exec.CommandContext` |
+| `internal/service/agent/destination_process.go` | Closed VM-exec destination execution requires an exact nonzero numeric UID, numeric groups, fixed environment/home, `/bin/sh -c`, and process-group cancellation that `DefaultRunner` cannot express |
 | `internal/lib/archive/archive.go` | xz decompression via pipe-based `exec.CommandContext` |
 | `internal/lib/system/runner.go`, `interactive_run.go`, `spawn.go` | Implementation of `DefaultRunner.Run()` / `Stream()` / `SpawnService` itself |
 
