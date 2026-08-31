@@ -662,8 +662,9 @@ pending
 ### Task 12: Replace remote-exec flags with typed exec policies
 
 **Owner:** engineer
-**Status:** Public directional exec-policy CRUD implemented; runtime relay/authority/wire/agent enforcement and Python
-qualification pending, so VM-to-VM execution remains fail-closed
+**Status:** Public directional exec-policy CRUD and the closed bounded wire implemented; relay listener, runtime
+policy/root authority, destination-agent execution, legacy flag removal, and Python qualification pending, so
+VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -677,11 +678,19 @@ qualification pending, so VM-to-VM execution remains fail-closed
   `mvm policy exec create|ls|rm`. Derive a deterministic ID from exact VM identities and target user, reject same-VM
   and root-target creation, keep resolution independent of network placement, and isolate list/removal to this family.
   This is desired-state CRUD only and does not authorize a runtime relay.
-- [ ] Add the closed source-session and API-owned relay. `internal/vsockhandler` must not resolve multiple core domains;
-  the API resolves shared identities only after root runtime admission.
-- [ ] Authenticate source from the active host session and root-owned instance/vsock identity.
-- [ ] Enforce request/frame/output/duration/concurrency bounds and redact full commands from audit logs.
-- [ ] Reject root target, VM-to-host execution, missing/reverse policy, foreign owner, stale target, and identity mismatch.
+- [x] Add `internal/lib/vmexecwire` with fixed `MVMEXEC1`/version-1 64-KiB framing and strict closed source and
+  destination request schemas. Keep the canonical lowercase UUIDv4 agent token host-only in the destination request;
+  require a 32-lowercase-hex request identity and non-root target; bound commands at 32 KiB, combined output at 8 MiB,
+  and duration at five minutes; accept only `stdout`/`stderr`, one terminal `result`/`error` plus EOF, and matching
+  `cancel`. This package performs no policy, relay, or execution effects.
+- [ ] Wire the protocol into the closed source-session and API-owned relay listener. `internal/vsockhandler` must not
+  resolve multiple core domains; the API resolves shared identities only after root runtime admission.
+- [ ] Authenticate source from the active host session and root-owned instance/vsock identity, then resolve and enforce
+  the exact directional policy at runtime.
+- [ ] Add destination-agent execution as the authorized non-root target user; reject VM-to-host execution, missing or
+  reverse policy, foreign owner, stale target, and every identity mismatch.
+- [ ] Enforce the wire limits at the relay and destination runtime, enforce root-owned concurrent capacity, and redact
+  full commands from audit logs.
 - [ ] Python T2 proves same-network, cross-network, and no-IP-network exec behavior plus all denials and limits.
 
 ## Phase 3: Finish the privilege boundary and lifecycle

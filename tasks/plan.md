@@ -62,6 +62,12 @@ continue without silently deleting it.
   lookup, payload parsing, destination lookup, vsock dial, or command logging. Ordinary host execution and copy paths
   remain unchanged. Public exec-policy CRUD now records desired intent, but the typed replacement relay and its
   runtime authorization are not active yet.
+- The protocol-only `internal/lib/vmexecwire` foundation uses fixed `MVMEXEC1`/version-1 framing with a 64-KiB body
+  limit and strict closed source/destination schemas. Only the exact host-built destination request carries the
+  canonical lowercase UUIDv4 agent token. A 32-lowercase-hex request identity binds the request, output, terminal, and
+  cancel frames; non-root target, 32-KiB command, 8-MiB combined output, and five-minute duration limits are fixed. The
+  response grammar requires exactly one `result` or `error` terminal and transport EOF after any `stdout`/`stderr`.
+  This is not a relay listener or runtime execution path.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -783,8 +789,10 @@ The public policy families are:
 - `mvm policy exec`: directional exact source VM to exact destination VM and required non-root target user.
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
-nothing implicitly. The exec family's deterministic non-root intent CRUD is public; relay enforcement and the traffic
-family's replacement public surface remain pending.
+nothing implicitly. The exec family's deterministic non-root intent CRUD and closed bounded wire are implemented, but
+the relay listener, runtime policy resolution/enforcement, root active-session/capacity authority, destination-agent
+execution, legacy flag removal, Python system qualification, and the traffic family's replacement public surface
+remain pending. VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 

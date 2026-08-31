@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-01 (public directional exec-policy CRUD)
+**Last Updated:** 2026-09-01 (closed bounded VM-exec wire)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -306,9 +306,19 @@ The second slice exposes directional intent management as
 `mvm policy exec create <source-vm> <destination-vm> <target-user>`, `ls [--json]`, and
 `rm <policy...> [--force]`. The API resolves exact source and destination VM identities, rejects the same VM and root
 target, derives a deterministic identity from source, destination, and user, and neither resolves nor constrains
-network placement. This is desired-state CRUD only. The closed wire, destination capability, authenticated API-owned
-relay, legacy flag removal, root runtime/capacity authority, and positive system qualification remain pending;
-VM-to-VM execution is unavailable until those dependencies land.
+network placement. This is desired-state CRUD only.
+
+The third slice adds the protocol-only `internal/lib/vmexecwire` foundation. Its frames use fixed `MVMEXEC1` magic,
+version 1, a big-endian length, and a 64-KiB body limit. Strict closed schemas separate the guest-source request from
+the exact host-built destination request; only the destination request may carry the canonical lowercase UUIDv4 agent
+token. A 32-lowercase-hex identity binds every request and stream frame. The wire requires a non-root target user,
+bounds the command at 32 KiB, combined stdout and stderr at 8 MiB, and reported execution duration at five minutes, and
+accepts only `stdout`/`stderr` output followed by exactly one `result` or `error` terminal and transport EOF. `cancel`
+is the sole request-bound control frame.
+
+This package owns framing and validation only. The relay listener, root runtime admission and capacity authority,
+runtime policy resolution/enforcement, destination-agent execution, legacy flag removal, and positive Python system
+qualification remain pending. VM-to-VM execution is unavailable until those dependencies land.
 
 ### Layer placement
 
@@ -316,6 +326,8 @@ VM-to-VM execution is unavailable until those dependencies land.
 - `internal/core/network/` owns typed traffic intent and compilation, without importing another core domain.
 - The VM-to-VM exec policy module receives already-resolved shared model identities; it does not import multiple core
   domains through `internal/vsockhandler/`.
+- `internal/lib/vmexecwire/` owns only the closed bounded framing, request validation, and stream grammar. It performs
+  no policy lookup, relay, destination-agent execution, audit, or runtime-capacity effect.
 - `internal/service/network/` owns typed privileged namespace, bridge, veth, TAP, route, and link effects.
 - `internal/service/firewall/` owns typed privileged nftables application.
 - `internal/service/jailer/` consumes a verified namespace handle as part of typed launch; it does not create a generic
@@ -423,6 +435,10 @@ factory into root-record-bound initial inspection and application/recovery, and 
 namespace binding, cancellation/close behavior, delete/create and invalid-batch atomicity, actual empty-generation
 deletion/application, and representative 1,000-VM runtime against supported kernels. `nftables.Conn`, `Flush`,
 privileged application, public policy cutover, legacy CLI removal, and L2 qualification all remain pending.
+
+The VM-exec wire tests cover strict source/destination request separation, malformed-frame rejection, request identity,
+fixed limits, response transitions, combined output, cancellation, one terminal, and required EOF. This is protocol
+evidence only; it does not qualify a relay listener, policy enforcement, destination execution, or a live VM-to-VM path.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

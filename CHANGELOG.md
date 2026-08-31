@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and down-only link effects,
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
-> effect seams, and provision/inspect receiver actions described below are implemented.
+> effect seams, provision/inspect receiver actions, and the closed bounded VM-exec wire described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
 > marker-only sudo policy, schema-3 Jailer launch composition and final live topology/cgroup verification and
@@ -74,9 +74,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The legacy guest-originated `remote_vm` relay now fails closed. Every request receives one terminal unauthorized
   response before source lookup, payload parsing, destination lookup, vsock dial, or command logging. Ordinary host
   execution and copy paths are unchanged.
-- Public execution-policy CRUD records desired authorization intent only. The closed bounded wire, non-root destination
-  execution, authenticated API-owned relay, root runtime/capacity authority, legacy flag removal, and positive
-  VM-to-VM system qualification remain pending; VM-to-VM execution is intentionally unavailable meanwhile.
+- Added the protocol-only `internal/lib/vmexecwire` foundation. Every frame uses fixed `MVMEXEC1` magic, version 1,
+  big-endian length, and a 64-KiB body limit. Strict closed JSON schemas separate guest-source requests from the exact
+  host-built destination request, where only the latter carries the canonical lowercase UUIDv4 agent token. All
+  messages bind one 32-lowercase-hex request ID and reject unknown, duplicate, case-colliding, trailing, or malformed
+  values.
+- The wire rejects root target users and commands over 32 KiB, caps combined stdout and stderr at 8 MiB, and caps the
+  reported execution duration at five minutes. Its closed stream grammar permits `stdout` and `stderr` frames followed
+  by exactly one `result` or `error` terminal and transport EOF; `cancel` is the sole request-bound control frame.
+- Public execution-policy CRUD and the wire foundation do not activate VM-to-VM execution. The relay listener, runtime
+  policy resolution/enforcement, destination-agent execution, root active-session/capacity authority, legacy flag
+  removal, and positive Python system qualification remain pending; VM-to-VM execution is intentionally unavailable.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and

@@ -437,10 +437,19 @@ the same VM and the root target user, and derives a deterministic identity from 
 ID, and target user. It performs no network lookup: the grant is directional and independent of same-network,
 cross-network, or absent IP-network placement. List and removal operate only on the exec-policy family.
 
-This public surface persists desired intent; it does not activate VM-to-VM execution. The closed bounded wire,
-non-root destination execution, authenticated API-owned relay, root-owned active-session/capacity authority, legacy
-`allow_remote_exec` removal, and L2 qualification remain pending. No SQLite VM status, guest-supplied source ID, socket
-path, or process-local semaphore may substitute for root runtime authority.
+The protocol-only `internal/lib/vmexecwire` foundation is implemented. It uses fixed `MVMEXEC1` magic, version 1, a
+big-endian length, and at most 64 KiB per frame. Strict closed schemas distinguish a guest-source request from the exact
+host-built destination request: only the destination request carries the canonical lowercase UUIDv4 agent token. Every
+request and stream frame carries one 32-lowercase-hex request identity; target users must be non-root, commands are
+limited to 32 KiB, combined stdout and stderr to 8 MiB, and reported execution duration to five minutes. The response
+grammar allows `stdout` and `stderr` followed by exactly one terminal `result` or `error` and then transport EOF;
+`cancel` is the only request-bound control frame.
+
+The public desired-intent surface and the wire package do not activate VM-to-VM execution. No relay listener, runtime
+policy resolution or enforcement, destination-agent execution, root-owned active-session/capacity authority, legacy
+`allow_remote_exec` removal, or Python system qualification is implemented. VM-to-VM execution therefore remains
+unavailable. No SQLite VM status, guest-supplied source ID, socket path, or process-local semaphore may substitute for
+root runtime authority.
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)
 
