@@ -1,14 +1,17 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 
 	"mvmctl/internal/lib/version"
+	"mvmctl/internal/lib/vmexecwire"
 )
 
 // handleConnection reads JSON frames from the vsock connection and dispatches
@@ -16,12 +19,24 @@ import (
 // over and this function does not return until the session ends.
 func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	prefix := make([]byte, len(vmexecwire.FrameMagic))
+	if _, err := io.ReadFull(conn, prefix); err != nil {
+		return
+	}
+	reader := io.MultiReader(bytes.NewReader(prefix), conn)
+	if string(prefix) == vmexecwire.FrameMagic {
+		a.handleDestinationConnection(ctx, reader, conn)
+		return
+	}
+	a.handleLegacyConnection(ctx, reader, conn)
+}
 
+func (a *Agent) handleLegacyConnection(ctx context.Context, reader io.Reader, conn net.Conn) {
 	for {
 		// Serialize reads with handleLocalConn to prevent two goroutines
 		// reading from the same vsock conn concurrently.
 		a.readMu.Lock()
-		req, err := readFrame(conn)
+		req, err := readFrame(reader)
 		a.readMu.Unlock()
 		if err != nil {
 			return

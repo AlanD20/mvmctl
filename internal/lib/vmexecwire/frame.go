@@ -11,7 +11,9 @@ import (
 )
 
 const (
-	wireMagic         = "MVMEXEC1"
+	// FrameMagic identifies the closed VM-exec protocol before any JSON is decoded.
+	FrameMagic        = "MVMEXEC1"
+	wireMagic         = FrameMagic
 	wireVersion       = uint16(1)
 	framePrefixBytes  = len(wireMagic) + 2 + 4
 	maxDestinationLen = 64

@@ -21,6 +21,8 @@ type Agent struct {
 	activeConnMu sync.Mutex
 	connMu       sync.Mutex // serializes writes to vsock conn between streamingWriter and handleLocalConn
 	readMu       sync.Mutex // serializes reads from vsock conn between handleConnection and handleLocalConn
+
+	destinationExecution destinationExecutionEffect
 }
 
 // New creates a new Agent with the given configuration.
@@ -32,9 +34,10 @@ func New(port int, token string, localSocket string) *Agent {
 		localSocket = "/var/run/mvm-agent.sock"
 	}
 	return &Agent{
-		port:        port,
-		token:       token,
-		localSocket: localSocket,
+		port:                 port,
+		token:                token,
+		localSocket:          localSocket,
+		destinationExecution: newDestinationExecutionEffect(),
 	}
 }
 
