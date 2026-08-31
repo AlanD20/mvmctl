@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -12,7 +13,28 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"mvmctl/internal/lib/vmexecwire"
 )
+
+type destinationDeadlineRecordingConn struct {
+	net.Conn
+	mu            sync.Mutex
+	writeDeadline time.Time
+}
+
+func (conn *destinationDeadlineRecordingConn) SetWriteDeadline(deadline time.Time) error {
+	conn.mu.Lock()
+	conn.writeDeadline = deadline
+	conn.mu.Unlock()
+	return conn.Conn.SetWriteDeadline(deadline)
+}
+
+func (conn *destinationDeadlineRecordingConn) recordedWriteDeadline() time.Time {
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	return conn.writeDeadline
+}
 
 func TestVSockConnectionReadDeadlineInterruptsBlockedIO(t *testing.T) {
 	fds, err := unix.Socketpair(
@@ -34,6 +56,41 @@ func TestVSockConnectionReadDeadlineInterruptsBlockedIO(t *testing.T) {
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, os.ErrDeadlineExceeded), "unexpected deadline error: %v", err)
+}
+
+func TestDestinationUnauthorizedResponseUsesTerminalWriteDeadline(t *testing.T) {
+	client, rawServer := net.Pipe()
+	server := &destinationDeadlineRecordingConn{Conn: rawServer}
+	require.NoError(t, client.SetDeadline(time.Now().Add(destinationTestTimeout)))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		New(9999, destinationTestToken, "").handleConnection(t.Context(), server)
+	}()
+
+	startedAt := time.Now()
+	request := vmexecwire.DestinationRequest{
+		RequestID:  destinationTestRequestID,
+		AgentToken: "fedcba98-7654-4cba-8765-43210fedcba9",
+		TargetUser: "builder",
+		Command:    "printf secret",
+	}
+	require.NoError(t, vmexecwire.EncodeDestinationRequest(t.Context(), client, request))
+	reader, err := vmexecwire.NewResponseReader(client, destinationTestRequestID)
+	require.NoError(t, err)
+	frame, err := reader.Read(t.Context())
+	require.NoError(t, err)
+	terminal, ok := frame.(vmexecwire.ErrorFrame)
+	require.True(t, ok)
+	assert.Equal(t, destinationUnauthorizedMessage, terminal.Message)
+	_, err = reader.Read(t.Context())
+	require.ErrorIs(t, err, io.EOF)
+	waitForDestinationHandler(t, done)
+
+	deadline := server.recordedWriteDeadline()
+	require.False(t, deadline.IsZero())
+	assert.GreaterOrEqual(t, deadline.Sub(startedAt), destinationTerminalWriteTimeout-time.Second)
+	assert.LessOrEqual(t, deadline.Sub(startedAt), destinationTerminalWriteTimeout+time.Second)
 }
 
 func TestVSockConnectionCloseIsConcurrentAndIdempotent(t *testing.T) {

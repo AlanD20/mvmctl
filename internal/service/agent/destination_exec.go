@@ -41,7 +41,7 @@ func (a *Agent) handleDestinationConnection(ctx context.Context, reader io.Reade
 		return
 	}
 	if a.token == "" || subtle.ConstantTimeCompare([]byte(request.AgentToken), []byte(a.token)) != 1 {
-		_ = response.WriteError(ctx, destinationUnauthorizedMessage)
+		writeDestinationError(ctx, conn, response, destinationUnauthorizedMessage)
 		return
 	}
 
