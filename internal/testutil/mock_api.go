@@ -32,11 +32,17 @@ type MockOperation struct {
 
 // MockPolicyAPI implements api.PolicyAPI for composite-interface compatibility.
 type MockPolicyAPI struct {
-	PolicyCreateFunc  func(context.Context, inputs.PolicyCreateInput) (*results.Policy, error)
-	PolicyListFunc    func(context.Context) ([]*results.Policy, error)
-	PolicyInspectFunc func(context.Context, inputs.PolicyInput) (*results.Policy, error)
-	PolicyRemoveFunc  func(context.Context, inputs.PolicyInput) error
-	PolicySyncFunc    func(context.Context) (*results.PolicySync, error)
+	PolicyCreateFunc     func(context.Context, inputs.PolicyCreateInput) (*results.Policy, error)
+	PolicyListFunc       func(context.Context) ([]*results.Policy, error)
+	PolicyInspectFunc    func(context.Context, inputs.PolicyInput) (*results.Policy, error)
+	PolicyRemoveFunc     func(context.Context, inputs.PolicyInput) error
+	PolicySyncFunc       func(context.Context) (*results.PolicySync, error)
+	ExecPolicyCreateFunc func(
+		context.Context,
+		inputs.VMToVMExecPolicyCreateInput,
+	) (*results.VMToVMExecPolicy, error)
+	ExecPolicyListFunc   func(context.Context) ([]*results.VMToVMExecPolicy, error)
+	ExecPolicyRemoveFunc func(context.Context, inputs.VMToVMExecPolicyInput) error
 }
 
 func (m *MockPolicyAPI) PolicyCreate(ctx context.Context, input inputs.PolicyCreateInput) (*results.Policy, error) {
@@ -72,6 +78,30 @@ func (m *MockPolicyAPI) PolicySync(ctx context.Context) (*results.PolicySync, er
 		return m.PolicySyncFunc(ctx)
 	}
 	return nil, nil
+}
+
+func (m *MockPolicyAPI) ExecPolicyCreate(
+	ctx context.Context,
+	input inputs.VMToVMExecPolicyCreateInput,
+) (*results.VMToVMExecPolicy, error) {
+	if m.ExecPolicyCreateFunc != nil {
+		return m.ExecPolicyCreateFunc(ctx, input)
+	}
+	return nil, nil
+}
+
+func (m *MockPolicyAPI) ExecPolicyList(ctx context.Context) ([]*results.VMToVMExecPolicy, error) {
+	if m.ExecPolicyListFunc != nil {
+		return m.ExecPolicyListFunc(ctx)
+	}
+	return nil, nil
+}
+
+func (m *MockPolicyAPI) ExecPolicyRemove(ctx context.Context, input inputs.VMToVMExecPolicyInput) error {
+	if m.ExecPolicyRemoveFunc != nil {
+		return m.ExecPolicyRemoveFunc(ctx, input)
+	}
+	return nil
 }
 
 // MockUpdateAPI implements api.UpdateAPI for testing.

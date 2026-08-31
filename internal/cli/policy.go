@@ -26,14 +26,109 @@ var policyColumns = []common.ListingColumn{
 	}},
 }
 
-// NewPolicyCmd creates the top-level routed service-access policy command.
+var execPolicyColumns = []common.ListingColumn{
+	{Header: "ID", Extract: func(v any) string { return common.Cli.FormatID(v.(*results.VMToVMExecPolicy).ID) }},
+	{Header: "Source VM", Extract: func(v any) string { return v.(*results.VMToVMExecPolicy).SourceVMName }},
+	{Header: "Destination VM", Extract: func(v any) string { return v.(*results.VMToVMExecPolicy).DestinationVMName }},
+	{Header: "Target User", Extract: func(v any) string { return v.(*results.VMToVMExecPolicy).TargetUser }},
+}
+
+// NewPolicyCmd creates the top-level service-access and execution-policy command.
 func NewPolicyCmd(policyAPI api.PolicyAPI) *cobra.Command {
-	cmd := &cobra.Command{Use: "policy", Short: "Routed service-access policy management"}
+	cmd := &cobra.Command{Use: "policy", Short: "Service-access and VM-to-VM execution policy management"}
 	cmd.AddCommand(newPolicyCreateCmd(policyAPI))
 	cmd.AddCommand(newPolicyListCmd(policyAPI))
 	cmd.AddCommand(newPolicyInspectCmd(policyAPI))
 	cmd.AddCommand(newPolicyRemoveCmd(policyAPI))
 	cmd.AddCommand(newPolicySyncCmd(policyAPI))
+	cmd.AddCommand(newExecPolicyCmd(policyAPI))
+	return cmd
+}
+
+func newExecPolicyCmd(policyAPI api.PolicyAPI) *cobra.Command {
+	cmd := &cobra.Command{Use: "exec", Short: "Directional VM-to-VM execution policy management"}
+	cmd.AddCommand(
+		newExecPolicyCreateCmd(policyAPI),
+		newExecPolicyListCmd(policyAPI),
+		newExecPolicyRemoveCmd(policyAPI),
+	)
+	return cmd
+}
+
+func newExecPolicyCreateCmd(policyAPI api.PolicyAPI) *cobra.Command {
+	return &cobra.Command{
+		Use:               "create [source-vm] [destination-vm] [target-user]",
+		Short:             "Allow one VM to execute as one non-root user on another VM.",
+		Args:              cobra.ExactArgs(3),
+		ValidArgsFunction: completeExecPolicyCreate,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			policy, err := policyAPI.ExecPolicyCreate(cmd.Context(), inputs.VMToVMExecPolicyCreateInput{
+				SourceVM: args[0], DestinationVM: args[1], TargetUser: args[2],
+			})
+			if err != nil {
+				return err
+			}
+			common.Cli.PrintDictTree(common.Cli.ToMap(policy), "VM-to-VM execution policy")
+			return nil
+		},
+	}
+}
+
+func newExecPolicyListCmd(policyAPI api.PolicyAPI) *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use: "ls", Aliases: []string{"list"}, Short: "List VM-to-VM execution policies.", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			policies, err := policyAPI.ExecPolicyList(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if jsonOutput {
+				if policies == nil {
+					policies = []*results.VMToVMExecPolicy{}
+				}
+				data, err := json.MarshalIndent(policies, "", "  ")
+				if err != nil {
+					return err
+				}
+				fmt.Println(string(data))
+				return nil
+			}
+			common.RenderListing(policies, execPolicyColumns, "short")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output as JSON")
+	return cmd
+}
+
+func newExecPolicyRemoveCmd(policyAPI api.PolicyAPI) *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use: "rm [policies...]", Aliases: []string{"remove", "delete", "del"},
+		Short: "Remove VM-to-VM execution policies.", Args: cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeExecPolicyIDs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if !force {
+				confirmed, err := common.Cli.PromptConfirm(
+					cmd.Context(), fmt.Sprintf("Remove %d VM-to-VM execution policy(s)?", len(args)), false)
+				if err != nil {
+					return err
+				}
+				if !confirmed {
+					return nil
+				}
+			}
+			if err := policyAPI.ExecPolicyRemove(
+				cmd.Context(), inputs.VMToVMExecPolicyInput{Identifiers: args},
+			); err != nil {
+				return err
+			}
+			common.Cli.Success(fmt.Sprintf("Removed %d VM-to-VM execution policy(s)", len(args)))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Skip confirmation")
 	return cmd
 }
 

@@ -53,6 +53,37 @@ func completePolicyIDs(cmd *cobra.Command, args []string, toComplete string) ([]
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completeExecPolicyIDs completes directional execution-policy IDs only.
+func completeExecPolicyIDs(cmd *cobra.Command, _ []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if opRef == nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	policies, err := opRef.ExecPolicyList(cmd.Context())
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	var results []string
+	for _, policy := range policies {
+		short := crypto.Truncate(policy.ID, 12)
+		if strings.HasPrefix(short, toComplete) && !slices.Contains(results, short) {
+			results = append(results, short)
+		}
+	}
+	return results, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeExecPolicyCreate completes the source and destination VM positions.
+func completeExecPolicyCreate(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if len(args) < 2 {
+		return completeVMNames(cmd, args, toComplete)
+	}
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
 // completePolicyCreate completes source network, destination VM, and protocol positionally.
 func completePolicyCreate(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	switch len(args) {

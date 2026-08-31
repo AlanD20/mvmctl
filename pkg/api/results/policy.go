@@ -22,3 +22,15 @@ type Policy struct {
 type PolicySync struct {
 	Policies int `json:"policies"`
 }
+
+// VMToVMExecPolicy describes one directional non-root execution grant with current VM names.
+type VMToVMExecPolicy struct {
+	ID                string `json:"id"`
+	SourceVMID        string `json:"source_vm_id"`
+	SourceVMName      string `json:"source_vm_name"`
+	DestinationVMID   string `json:"destination_vm_id"`
+	DestinationVMName string `json:"destination_vm_name"`
+	TargetUser        string `json:"target_user"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+}
