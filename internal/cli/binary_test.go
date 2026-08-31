@@ -250,8 +250,11 @@ func TestNewBinaryPullCmd(t *testing.T) {
 		}
 		cmd := cli.NewBinaryCmd(mock, nil)
 		pullCmd, _, _ := cmd.Find([]string{"pull"})
-		err := pullCmd.RunE(pullCmd, []string{"1.15.0"})
-		assert.NoError(t, err)
+		output := captureBinaryStdout(t, func() {
+			require.NoError(t, pullCmd.RunE(pullCmd, []string{"1.15.0"}))
+		})
+		assert.Contains(t, output, "Trusted release ready: firecracker v1.15.0")
+		assert.NotContains(t, output, "Installed:")
 	})
 
 	t.Run("legacy source and version flags are absent", func(t *testing.T) {

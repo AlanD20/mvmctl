@@ -44,7 +44,10 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list binaries: %v", err), err)
 	}
-	defaultBinary, _ := op.Repos.Binary.GetDefault(ctx, "firecracker", architecture)
+	defaultBinary, err := op.Repos.Binary.GetDefault(ctx, "firecracker", architecture)
+	if err != nil {
+		return nil, err
+	}
 	var defaultVersion string
 	if defaultBinary != nil {
 		defaultVersion = defaultBinary.Version
@@ -70,9 +73,11 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 				force,
 			)
 			if removeResult.HasErrors() {
-				slog.Warn("Failed to remove binary",
-					"version", releaseVersion, "error", removeResult.Errors()[0].Message)
-				continue
+				failure := removeResult.Errors()[0]
+				if failure.Exception != nil {
+					return removed, failure.Exception
+				}
+				return removed, failure.ToError()
 			}
 		}
 		removed = append(removed, releaseVersion)
@@ -178,7 +183,9 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryRemove
 		}
 		if err := op.Repos.Binary.RemoveReleaseProjection(ctx, architecture, releaseVersion); err != nil {
 			projectionErr := releaseProjectionFailure("trusted release removal", rootResult.Removed, err)
-			items = append(items, binaryRemoveError(releaseVersion, projectionErr))
+			item := binaryRemoveError(releaseVersion, projectionErr)
+			item.Warnings = warnings
+			items = append(items, item)
 			continue
 		}
 		if op.AuditLog != nil {
@@ -253,7 +260,7 @@ func (op *Operation) BinaryList(
 	onProgress event.OnProgressCallback,
 ) ([]*model.BinaryItem, []model.VersionInfo, error) {
 	if !remote {
-		items, err := op.Services.Binary.ListAll(ctx, false, true)
+		items, err := op.Services.Binary.ListAll(ctx, false, false)
 		return items, nil, err
 	}
 	emitProgress(onProgress, "listing", "running", "Fetching remote versions...")
@@ -320,7 +327,7 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryIn
 // BinaryEnsureDefault ensures a default Firecracker binary exists.
 // Uses PEP 440-compatible version sorting to pick the newest binary.
 func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem, error) {
-	local, err := op.Services.Binary.ListAll(ctx, true, true)
+	local, err := op.Services.Binary.ListAll(ctx, false, false)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeBinaryEnsureDefaultFailed,

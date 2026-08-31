@@ -133,6 +133,27 @@ func completeBinaryVersions(cmd *cobra.Command, args []string, toComplete string
 	return results, cobra.ShellCompDirectiveNoFileComp
 }
 
+// completeInstalledBinaryReleaseVersions completes exact installed release slots without exposing pair members or IDs.
+func completeInstalledBinaryReleaseVersions(
+	cmd *cobra.Command,
+	args []string,
+	toComplete string,
+) ([]string, cobra.ShellCompDirective) {
+	if opRef == nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	binaries, _, _ := opRef.BinaryList(cmd.Context(), false, nil, nil)
+	versions := make([]string, 0, len(binaries)/2)
+	for _, item := range binaries {
+		if item.Version != "" && strings.HasPrefix(item.Version, toComplete) &&
+			!slices.Contains(versions, item.Version) {
+			versions = append(versions, item.Version)
+		}
+	}
+	sort.Strings(versions)
+	return versions, cobra.ShellCompDirectiveNoFileComp
+}
+
 // completeKeyNames completes with key names, fingerprints (with and without SHA256: prefix).
 func completeKeyNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if opRef == nil {

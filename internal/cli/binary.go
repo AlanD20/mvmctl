@@ -114,7 +114,7 @@ func newBinaryPullCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 		Use:               "pull <version>",
 		Short:             "Install a Firecracker release through the trusted root authority",
 		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeBinaryVersions,
+		ValidArgsFunction: completeInstalledBinaryReleaseVersions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			binaries, err := binaryAPI.BinaryPull(cmd.Context(), inputs.BinaryPullInput{
 				Version:          args[0],
@@ -127,7 +127,7 @@ func newBinaryPullCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 			}
 			for _, b := range binaries {
 				shortID := common.Cli.FormatID(b.ID)
-				common.Cli.Success(fmt.Sprintf("Installed: %s v%s: %s", b.Type, b.Version, b.Path))
+				common.Cli.Success(fmt.Sprintf("Trusted release ready: %s v%s: %s", b.Type, b.Version, b.Path))
 				common.Cli.Info(fmt.Sprintf("  ID: %s", shortID))
 			}
 
@@ -153,7 +153,7 @@ func newBinaryRemoveCmd(binaryAPI api.BinaryAPI) *cobra.Command {
 		Aliases:           []string{"remove", "delete", "del"},
 		Short:             "Remove one or more exact Firecracker release versions",
 		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: completeBinaryVersions,
+		ValidArgsFunction: completeInstalledBinaryReleaseVersions,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			batchResult := binaryAPI.BinaryRemove(
 				cmd.Context(),

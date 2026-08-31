@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -53,13 +54,16 @@ func (client *fakeTrustedReleaseClient) Remove(
 
 type orderedBinaryProjectionRepo struct {
 	binary.Repository
-	rootCalled     bool
-	reads          int
-	writes         int
-	replaced       *model.BinaryPair
-	removedVersion string
-	replaceErr     error
-	removeErr      error
+	rootCalled            bool
+	enforceRootBeforeRead bool
+	reads                 int
+	writes                int
+	presenceWrites        int
+	replaced              *model.BinaryPair
+	removedVersion        string
+	defaultErr            error
+	replaceErr            error
+	removeErr             error
 }
 
 func (repo *orderedBinaryProjectionRepo) GetDefault(
@@ -67,11 +71,23 @@ func (repo *orderedBinaryProjectionRepo) GetDefault(
 	typ string,
 	architecture string,
 ) (*model.BinaryItem, error) {
-	if !repo.rootCalled {
+	if repo.enforceRootBeforeRead && !repo.rootCalled {
 		panic("SQLite read occurred before root install")
 	}
 	repo.reads++
+	if repo.defaultErr != nil {
+		return nil, repo.defaultErr
+	}
 	return repo.Repository.GetDefault(ctx, typ, architecture)
+}
+
+func (repo *orderedBinaryProjectionRepo) UpdateManyIsPresent(
+	ctx context.Context,
+	ids []string,
+	present bool,
+) error {
+	repo.presenceWrites++
+	return repo.Repository.UpdateManyIsPresent(ctx, ids, present)
 }
 
 func (repo *orderedBinaryProjectionRepo) ReplaceReleaseProjection(
@@ -109,7 +125,7 @@ func TestBinaryPullInstallsThroughRootBeforeReadingSQLiteAndProjectsResult(t *te
 	t.Setenv(assetMirrorEnvironment, "")
 	architecture := system.RuntimeArch()
 	baseRepo := testutil.NewBinaryRepo()
-	repo := &orderedBinaryProjectionRepo{Repository: baseRepo}
+	repo := &orderedBinaryProjectionRepo{Repository: baseRepo, enforceRootBeforeRead: true}
 	root := &fakeTrustedReleaseClient{}
 	root.install = func(
 		_ context.Context,
@@ -420,7 +436,14 @@ func TestBinaryRemoveForceCannotChangeRootRequestOrDenial(t *testing.T) {
 
 func TestBinaryRemoveProjectionFailurePreservesKnownRootOutcome(t *testing.T) {
 	projectionErr := errors.New("projection unavailable")
-	repo := &orderedBinaryProjectionRepo{Repository: testutil.NewBinaryRepo(), removeErr: projectionErr}
+	architecture := system.RuntimeArch()
+	baseRepo := testutil.NewBinaryRepo()
+	pair := binaryPairFromTrustedRelease(trustedReleaseResult(jailer.TrustedReleaseInstallRequest{
+		Slot: jailer.ReleaseSlot{Version: "1.16.1", Architecture: architecture},
+	}, jailer.TrustedReleaseInstalled))
+	pair.Firecracker.VMs = []*model.VMItem{{Name: "referencing-vm"}}
+	require.NoError(t, baseRepo.ReplaceReleaseProjection(t.Context(), architecture, "1.16.1", pair, false))
+	repo := &orderedBinaryProjectionRepo{Repository: baseRepo, removeErr: projectionErr}
 	root := &fakeTrustedReleaseClient{}
 	root.remove = func(
 		_ context.Context,
@@ -441,6 +464,106 @@ func TestBinaryRemoveProjectionFailurePreservesKnownRootOutcome(t *testing.T) {
 	require.True(t, errors.As(result.Items[0].Exception, &domainErr))
 	assert.Equal(t, true, domainErr.Details["root_outcome"])
 	assert.Equal(t, true, domainErr.Details["state_repair_required"])
+	assert.Len(t, result.Items[0].Warnings, 1)
+}
+
+func TestBinaryDisplayReadsDoNotVerifyRootOwnedProjectionPaths(t *testing.T) {
+	architecture := system.RuntimeArch()
+	tests := map[string]func(*testing.T, *Operation) *model.BinaryItem{
+		"list": func(t *testing.T, op *Operation) *model.BinaryItem {
+			items, _, err := op.BinaryList(t.Context(), false, nil, nil)
+			require.NoError(t, err)
+			require.Len(t, items, 1)
+			return items[0]
+		},
+		"ensure default": func(t *testing.T, op *Operation) *model.BinaryItem {
+			item, err := op.BinaryEnsureDefault(t.Context())
+			require.NoError(t, err)
+			return item
+		},
+	}
+
+	for name, invoke := range tests {
+		t.Run(name, func(t *testing.T) {
+			baseRepo := testutil.NewBinaryRepo()
+			projected := &model.BinaryItem{
+				ID:           strings.Repeat("d", 64),
+				Type:         "firecracker",
+				Architecture: architecture,
+				Version:      "1.16.1",
+				FullVersion:  "v1.16.1",
+				Path:         filepath.Join(t.TempDir(), "missing", "firecracker"),
+				IsDefault:    true,
+				IsPresent:    true,
+				CreatedAt:    "2026-01-01T00:00:00Z",
+				UpdatedAt:    "2026-01-01T00:00:00Z",
+			}
+			require.NoError(t, baseRepo.Upsert(t.Context(), projected))
+			repo := &orderedBinaryProjectionRepo{Repository: baseRepo}
+			op := &Operation{
+				Repos:    Repos{Binary: repo},
+				Services: Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+			}
+
+			got := invoke(t, op)
+			require.NotNil(t, got)
+			assert.True(t, got.IsPresent)
+			assert.Zero(t, repo.presenceWrites)
+		})
+	}
+}
+
+func TestBinaryPrunePropagatesDefaultLookupFailureBeforeRootRemoval(t *testing.T) {
+	wantErr := errors.New("default projection unavailable")
+	repo := &orderedBinaryProjectionRepo{Repository: testutil.NewBinaryRepo(), defaultErr: wantErr}
+	removeCalls := 0
+	root := &fakeTrustedReleaseClient{}
+	root.remove = func(
+		_ context.Context,
+		_ jailer.TrustedReleaseRemoveRequest,
+	) (jailer.TrustedReleaseRemoveResult, error) {
+		removeCalls++
+		return jailer.TrustedReleaseRemoveResult{}, nil
+	}
+	op := &Operation{Repos: Repos{Binary: repo}, trustedReleaseClient: root}
+
+	removed, err := op.BinaryPrune(t.Context(), false, false)
+	assert.Nil(t, removed)
+	assert.Same(t, wantErr, err)
+	assert.Zero(t, removeCalls)
+}
+
+func TestBinaryPruneStopsOnExactRootErrorAfterReconciledVersions(t *testing.T) {
+	architecture := system.RuntimeArch()
+	baseRepo := testutil.NewBinaryRepo()
+	for index, releaseVersion := range []string{"1.15.1", "1.16.1", "1.17.1"} {
+		pair := binaryPairFromTrustedRelease(trustedReleaseResult(jailer.TrustedReleaseInstallRequest{
+			Slot: jailer.ReleaseSlot{Version: releaseVersion, Architecture: architecture},
+		}, jailer.TrustedReleaseInstalled))
+		createdAt := fmt.Sprintf("2026-01-01T00:00:0%dZ", index)
+		pair.Firecracker.CreatedAt, pair.Jailer.CreatedAt = createdAt, createdAt
+		require.NoError(t, baseRepo.ReplaceReleaseProjection(t.Context(), architecture, releaseVersion, pair, false))
+	}
+	repo := &orderedBinaryProjectionRepo{Repository: baseRepo}
+	wantErr := errs.New(errs.CodeBinaryRemoveFailed, "root removal denied")
+	removeCalls := 0
+	root := &fakeTrustedReleaseClient{}
+	root.remove = func(
+		_ context.Context,
+		_ jailer.TrustedReleaseRemoveRequest,
+	) (jailer.TrustedReleaseRemoveResult, error) {
+		removeCalls++
+		if removeCalls == 2 {
+			return jailer.TrustedReleaseRemoveResult{}, wantErr
+		}
+		return jailer.TrustedReleaseRemoveResult{Removed: true}, nil
+	}
+	op := &Operation{Repos: Repos{Binary: repo}, trustedReleaseClient: root}
+
+	removed, err := op.BinaryPrune(t.Context(), false, false)
+	assert.Equal(t, []string{"1.15.1"}, removed)
+	assert.Same(t, wantErr, err)
+	assert.Equal(t, 2, removeCalls)
 }
 
 func TestBinaryPruneRemovesEachReleaseSlotOnce(t *testing.T) {
