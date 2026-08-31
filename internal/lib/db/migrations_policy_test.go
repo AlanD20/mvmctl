@@ -2,9 +2,11 @@ package db_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,7 +33,7 @@ func migratePolicyFixtureTo(t *testing.T, target int) *db.Handle {
 
 func migratePolicyFixtureToV3(t *testing.T) *db.Handle { return migratePolicyFixtureTo(t, 3) }
 
-func TestMigration004FromValidV3Schema(t *testing.T) {
+func TestMigration004RejectsLegacyFirewallState(t *testing.T) {
 	ctx := context.Background()
 	handle := migratePolicyFixtureToV3(t)
 	database := handle.DB()
@@ -51,56 +53,16 @@ func TestMigration004FromValidV3Schema(t *testing.T) {
 	require.NoError(t, err)
 
 	applied, err := handle.RunMigrationsCtx(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, 1, applied)
+	require.Error(t, err)
+	assert.Zero(t, applied)
 	var version int
-	require.NoError(t, database.GetContext(ctx, &version, "PRAGMA user_version"))
-	assert.Equal(t, 4, version)
-
-	for table, comment := range map[string]string{
-		"iptables_rules": "legacy-iptables", "nftables_rules": "legacy-nftables",
-	} {
-		var count, dportEnd int
-		require.NoError(t, database.QueryRowxContext(ctx,
-			"SELECT COUNT(*), MAX(dport_end) FROM "+table+" WHERE comment_tag = ?", comment).Scan(&count, &dportEnd))
-		assert.Equal(t, 1, count, table+" legacy row")
-		assert.Zero(t, dportEnd, table+" migrated range end")
-	}
-
-	for _, check := range []struct{ table, column string }{
-		{"iptables_rules", "dport_end"}, {"iptables_rules", "service_access_policy_id"},
-		{"nftables_rules", "dport_end"}, {"nftables_rules", "service_access_policy_id"},
-	} {
-		var count int
-		require.NoError(t, database.GetContext(ctx, &count,
-			"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", check.table, check.column))
-		assert.Equal(t, 1, count, check.table+"."+check.column)
-	}
-	for _, index := range []string{
-		"idx_service_access_policies_source", "idx_service_access_policies_destination_vm",
-		"idx_network_traffic_source", "idx_network_traffic_destination",
-		"idx_vm_traffic_source", "idx_vm_traffic_destination",
-		"idx_exec_policy_source", "idx_exec_policy_destination",
-		"idx_iptables_rules_policy", "idx_iptables_rules_unique_active",
-		"idx_nftables_rules_policy", "idx_nftables_rules_unique_active",
-	} {
-		var count int
-		require.NoError(t, database.GetContext(ctx, &count,
-			"SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?", index))
-		assert.Equal(t, 1, count, index)
-	}
-
-	_, err = database.ExecContext(ctx, `INSERT INTO service_access_policies
-		(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
-		VALUES ('bad','source','missing','icmp',0,65536)`)
-	require.Error(t, err, "protocol, port, and foreign-key constraints must reject invalid intent")
+	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
+	assert.Equal(t, 3, version)
 }
 
-func TestMigration004TypedPolicyConstraints(t *testing.T) {
-	ctx := t.Context()
-	handle := migratePolicyFixtureToV3(t)
-	database := handle.DB()
-	_, err := database.ExecContext(ctx, `
+func seedTypedPolicyResources(t *testing.T, ctx context.Context, handle *db.Handle) {
+	t.Helper()
+	_, err := handle.DB().ExecContext(ctx, `
 		INSERT INTO networks
 			(id,name,subnet,bridge,ipv4_gateway,bridge_active,nat_enabled,is_default,is_present)
 		VALUES ('net-a','net-a','10.1.0.0/24','mvm-a','10.1.0.1',1,1,0,1);
@@ -125,36 +87,69 @@ func TestMigration004TypedPolicyConstraints(t *testing.T) {
 			 0,0,0,'',0,0,0,'');
 	`)
 	require.NoError(t, err)
-	_, err = handle.RunMigrationsCtx(ctx)
+}
+
+func TestMigration004RejectsLegacyRemoteExecGrant(t *testing.T) {
+	ctx := t.Context()
+	handle := migratePolicyFixtureToV3(t)
+	seedTypedPolicyResources(t, ctx, handle)
+	_, err := handle.DB().ExecContext(ctx, "UPDATE vm_instances SET remote_exec = 1 WHERE id = 'vm-a'")
 	require.NoError(t, err)
 
+	applied, err := handle.RunMigrationsCtx(ctx)
+	require.Error(t, err)
+	assert.Zero(t, applied)
+	var version int
+	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
+	assert.Equal(t, 3, version)
+}
+
+func TestMigration004TypedPolicyConstraints(t *testing.T) {
+	ctx := t.Context()
+	handle := migratePolicyFixtureToV3(t)
+	database := handle.DB()
+	applied, err := handle.RunMigrationsCtx(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, applied)
+	seedTypedPolicyResources(t, ctx, handle)
+
+	validPolicyID := strings.Repeat("a", 64)
 	tests := map[string]string{
-		"network source missing": `INSERT INTO network_traffic_policies
+		"network source missing": fmt.Sprintf(`INSERT INTO network_traffic_policies
 			(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
-			VALUES ('p','missing','vm-b','tcp',443,443)`,
-		"network protocol invalid": `INSERT INTO network_traffic_policies
+			VALUES ('%s','missing','vm-b','tcp',443,443)`, validPolicyID),
+		"network protocol invalid": fmt.Sprintf(`INSERT INTO network_traffic_policies
 			(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
-			VALUES ('p','net-a','vm-b','icmp',443,443)`,
-		"network port invalid": `INSERT INTO network_traffic_policies
+			VALUES ('%s','net-a','vm-b','icmp',443,443)`, validPolicyID),
+		"network port invalid": fmt.Sprintf(`INSERT INTO network_traffic_policies
 			(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
-			VALUES ('p','net-a','vm-b','tcp',5000,4999)`,
-		"VM self grant": `INSERT INTO vm_traffic_policies
+			VALUES ('%s','net-a','vm-b','tcp',5000,4999)`, validPolicyID),
+		"network policy ID noncanonical": `INSERT INTO network_traffic_policies
+			(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
+			VALUES ('ABC','net-a','vm-b','tcp',443,443)`,
+		"VM self grant": fmt.Sprintf(`INSERT INTO vm_traffic_policies
 			(id,source_vm_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
-			VALUES ('p','vm-a','vm-a','tcp',443,443)`,
-		"VM destination missing": `INSERT INTO vm_traffic_policies
+			VALUES ('%s','vm-a','vm-a','tcp',443,443)`, validPolicyID),
+		"VM destination missing": fmt.Sprintf(`INSERT INTO vm_traffic_policies
 			(id,source_vm_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
-			VALUES ('p','vm-a','missing','tcp',443,443)`,
-		"exec self grant": `INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('p','vm-a','vm-a','app')`,
-		"exec root user": `INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('p','vm-a','vm-b','root')`,
-		"exec empty user": `INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('p','vm-a','vm-b','')`,
-		"exec user too long": `INSERT INTO exec_policies
+			VALUES ('%s','vm-a','missing','tcp',443,443)`, validPolicyID),
+		"exec self grant": fmt.Sprintf(`INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-a','app')`, validPolicyID),
+		"exec root user": fmt.Sprintf(`INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','root')`, validPolicyID),
+		"exec empty user": fmt.Sprintf(`INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','')`, validPolicyID),
+		"exec uppercase user": fmt.Sprintf(`INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','App')`, validPolicyID),
+		"exec numeric-leading user": fmt.Sprintf(`INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','1app')`, validPolicyID),
+		"exec user with spaces": fmt.Sprintf(`INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','vm-a','vm-b','app user')`, validPolicyID),
+		"exec user too long": fmt.Sprintf(`INSERT INTO exec_policies
 			(id,source_vm_id,destination_vm_id,target_user)
-			VALUES ('p','vm-a','vm-b','this-user-name-is-longer-than-32-characters')`,
-		"exec source missing": `INSERT INTO exec_policies
-			(id,source_vm_id,destination_vm_id,target_user) VALUES ('p','missing','vm-b','app')`,
+			VALUES ('%s','vm-a','vm-b','this-user-name-is-longer-than-32-characters')`, validPolicyID),
+		"exec source missing": fmt.Sprintf(`INSERT INTO exec_policies
+			(id,source_vm_id,destination_vm_id,target_user) VALUES ('%s','missing','vm-b','app')`, validPolicyID),
 	}
 	for name, statement := range tests {
 		t.Run(name, func(t *testing.T) {

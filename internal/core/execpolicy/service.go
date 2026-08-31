@@ -15,7 +15,7 @@ type Service struct{ repo Repository }
 func NewService(repo Repository) *Service { return &Service{repo: repo} }
 
 // Create persists trusted execution-policy allow intent.
-func (s *Service) Create(ctx context.Context, intent *model.ExecAllowIntent) error {
+func (s *Service) Create(ctx context.Context, intent *model.VMToVMExecAllowIntent) error {
 	existing, err := s.repo.GetByIdentity(ctx, intent)
 	if err != nil {
 		slog.Error("failed to check execution policy allow intent", "policy", intent.ID, "error", err)
@@ -33,7 +33,7 @@ func (s *Service) Create(ctx context.Context, intent *model.ExecAllowIntent) err
 }
 
 // AllowIntents returns all persisted execution grants without applying relay authorization state.
-func (s *Service) AllowIntents(ctx context.Context) ([]*model.ExecAllowIntent, error) {
+func (s *Service) AllowIntents(ctx context.Context) ([]*model.VMToVMExecAllowIntent, error) {
 	intents, err := s.repo.List(ctx)
 	if err != nil {
 		slog.Error("failed to list execution policy intents", "error", err)

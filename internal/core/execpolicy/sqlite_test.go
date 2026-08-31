@@ -2,6 +2,7 @@ package execpolicy_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -49,8 +50,8 @@ func seedExecPolicyResources(t *testing.T) (*sqlx.DB, execpolicy.Repository) {
 func TestExecPolicySQLiteCRUDDirectionAndExactUser(t *testing.T) {
 	ctx := t.Context()
 	_, repo := seedExecPolicyResources(t)
-	intent := &model.ExecAllowIntent{
-		ID: "exec-policy", SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
+	intent := &model.VMToVMExecAllowIntent{
+		ID: strings.Repeat("a", 64), SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
 		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:01Z",
 	}
 	require.NoError(t, repo.Create(ctx, intent))
@@ -79,7 +80,7 @@ func TestExecPolicySQLiteCRUDDirectionAndExactUser(t *testing.T) {
 	}
 
 	duplicate := *intent
-	duplicate.ID = "different-id"
+	duplicate.ID = strings.Repeat("b", 64)
 	assert.Error(t, repo.Create(ctx, &duplicate))
 	require.NoError(t, repo.DeleteMany(ctx, []string{intent.ID}))
 	listed, err := repo.List(ctx)
@@ -90,8 +91,8 @@ func TestExecPolicySQLiteCRUDDirectionAndExactUser(t *testing.T) {
 func TestExecPolicySQLiteForeignKeyCascade(t *testing.T) {
 	ctx := t.Context()
 	database, repo := seedExecPolicyResources(t)
-	require.NoError(t, repo.Create(ctx, &model.ExecAllowIntent{
-		ID: "exec-policy", SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
+	require.NoError(t, repo.Create(ctx, &model.VMToVMExecAllowIntent{
+		ID: strings.Repeat("a", 64), SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
 	}))
 	_, err := database.ExecContext(ctx, "DELETE FROM vm_instances WHERE id = 'vm-a'")
 	require.NoError(t, err)
@@ -104,12 +105,12 @@ func TestExecPolicyServiceDuplicateAndAuthorizationErrorCodes(t *testing.T) {
 	ctx := context.Background()
 	database, repo := seedExecPolicyResources(t)
 	service := execpolicy.NewService(repo)
-	intent := &model.ExecAllowIntent{
-		ID: "exec-policy", SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
+	intent := &model.VMToVMExecAllowIntent{
+		ID: strings.Repeat("a", 64), SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
 	}
 	require.NoError(t, service.Create(ctx, intent))
-	err := service.Create(ctx, &model.ExecAllowIntent{
-		ID: "different-id", SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
+	err := service.Create(ctx, &model.VMToVMExecAllowIntent{
+		ID: strings.Repeat("b", 64), SourceVMID: "vm-a", DestinationVMID: "vm-b", TargetUser: "app",
 	})
 	var domainErr *errs.DomainError
 	require.ErrorAs(t, err, &domainErr)

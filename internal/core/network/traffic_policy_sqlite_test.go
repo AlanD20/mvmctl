@@ -2,6 +2,7 @@ package network_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -52,32 +53,32 @@ func seedTrafficPolicyResources(t *testing.T) (*sqlx.DB, network.TrafficPolicyRe
 func TestTrafficPolicySQLiteCRUDAndDuplicates(t *testing.T) {
 	ctx := t.Context()
 	_, repo := seedTrafficPolicyResources(t)
-	networkIntent := &model.NetworkTrafficAllowIntent{
-		ID: "net-policy", SourceNetworkID: "net-a", DestinationVMID: "vm-b",
+	networkIntent := &model.NetworkToVMTrafficAllowIntent{
+		ID: strings.Repeat("a", 64), SourceNetworkID: "net-a", DestinationVMID: "vm-b",
 		Protocol: model.TrafficProtocolTCP, DestinationPortStart: 443, DestinationPortEnd: 443,
 		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:01Z",
 	}
-	vmIntent := &model.VMTrafficAllowIntent{
-		ID: "vm-policy", SourceVMID: "vm-a", DestinationVMID: "vm-b",
+	vmIntent := &model.VMToVMTrafficAllowIntent{
+		ID: strings.Repeat("b", 64), SourceVMID: "vm-a", DestinationVMID: "vm-b",
 		Protocol: model.TrafficProtocolUDP, DestinationPortStart: 5000, DestinationPortEnd: 5005,
 		CreatedAt: "2026-01-02T00:00:00Z", UpdatedAt: "2026-01-02T00:00:01Z",
 	}
 
-	require.NoError(t, repo.CreateFromNetwork(ctx, networkIntent))
-	require.NoError(t, repo.CreateFromVM(ctx, vmIntent))
+	require.NoError(t, repo.CreateNetworkToVM(ctx, networkIntent))
+	require.NoError(t, repo.CreateVMToVM(ctx, vmIntent))
 
-	gotNetwork, err := repo.GetFromNetwork(ctx, networkIntent.ID)
+	gotNetwork, err := repo.GetNetworkToVM(ctx, networkIntent.ID)
 	require.NoError(t, err)
 	if diff := cmp.Diff(networkIntent, gotNetwork); diff != "" {
 		t.Errorf("network traffic allow intent readback mismatch (-want +got):\n%s", diff)
 	}
-	gotVM, err := repo.GetFromVM(ctx, vmIntent.ID)
+	gotVM, err := repo.GetVMToVM(ctx, vmIntent.ID)
 	require.NoError(t, err)
 	if diff := cmp.Diff(vmIntent, gotVM); diff != "" {
 		t.Errorf("VM traffic allow intent readback mismatch (-want +got):\n%s", diff)
 	}
 
-	missing, err := repo.GetFromNetwork(ctx, "missing")
+	missing, err := repo.GetNetworkToVM(ctx, "missing")
 	require.NoError(t, err)
 	assert.Nil(t, missing)
 	byIdentity, err := repo.GetVMByIdentity(ctx, vmIntent)
@@ -86,19 +87,19 @@ func TestTrafficPolicySQLiteCRUDAndDuplicates(t *testing.T) {
 	assert.Equal(t, vmIntent.ID, byIdentity.ID)
 
 	duplicateNetwork := *networkIntent
-	duplicateNetwork.ID = "different-network-id"
-	assert.Error(t, repo.CreateFromNetwork(ctx, &duplicateNetwork))
+	duplicateNetwork.ID = strings.Repeat("c", 64)
+	assert.Error(t, repo.CreateNetworkToVM(ctx, &duplicateNetwork))
 	duplicateVM := *vmIntent
-	duplicateVM.ID = "different-vm-id"
-	assert.Error(t, repo.CreateFromVM(ctx, &duplicateVM))
+	duplicateVM.ID = strings.Repeat("d", 64)
+	assert.Error(t, repo.CreateVMToVM(ctx, &duplicateVM))
 	service := network.NewTrafficPolicyService(repo)
-	err = service.CreateFromNetwork(ctx, &duplicateNetwork)
+	err = service.CreateNetworkToVM(ctx, &duplicateNetwork)
 	var domainErr *errs.DomainError
 	require.ErrorAs(t, err, &domainErr)
 	assert.Equal(t, errs.CodePolicyAlreadyExists, domainErr.Code)
 
-	require.NoError(t, repo.DeleteFromNetworks(ctx, []string{networkIntent.ID}))
-	require.NoError(t, repo.DeleteFromVMs(ctx, []string{vmIntent.ID}))
+	require.NoError(t, repo.DeleteNetworkToVM(ctx, []string{networkIntent.ID}))
+	require.NoError(t, repo.DeleteVMToVM(ctx, []string{vmIntent.ID}))
 	allowIntents, err := service.AllowIntents(ctx)
 	require.NoError(t, err)
 	if diff := cmp.Diff(&network.TrafficPolicyAllowIntents{}, allowIntents); diff != "" {
@@ -109,12 +110,12 @@ func TestTrafficPolicySQLiteCRUDAndDuplicates(t *testing.T) {
 func TestTrafficPolicySQLiteInvalidationByVMIsAtomic(t *testing.T) {
 	ctx := t.Context()
 	database, repo := seedTrafficPolicyResources(t)
-	require.NoError(t, repo.CreateFromNetwork(ctx, &model.NetworkTrafficAllowIntent{
-		ID: "net-policy", SourceNetworkID: "net-a", DestinationVMID: "vm-b",
+	require.NoError(t, repo.CreateNetworkToVM(ctx, &model.NetworkToVMTrafficAllowIntent{
+		ID: strings.Repeat("a", 64), SourceNetworkID: "net-a", DestinationVMID: "vm-b",
 		Protocol: model.TrafficProtocolTCP, DestinationPortStart: 443, DestinationPortEnd: 443,
 	}))
-	require.NoError(t, repo.CreateFromVM(ctx, &model.VMTrafficAllowIntent{
-		ID: "vm-policy", SourceVMID: "vm-a", DestinationVMID: "vm-b",
+	require.NoError(t, repo.CreateVMToVM(ctx, &model.VMToVMTrafficAllowIntent{
+		ID: strings.Repeat("b", 64), SourceVMID: "vm-a", DestinationVMID: "vm-b",
 		Protocol: model.TrafficProtocolTCP, DestinationPortStart: 443, DestinationPortEnd: 443,
 	}))
 	_, err := database.Exec(`CREATE TRIGGER reject_vm_policy_invalidation
@@ -124,14 +125,14 @@ func TestTrafficPolicySQLiteInvalidationByVMIsAtomic(t *testing.T) {
 
 	err = repo.InvalidateByVM(ctx, "vm-b")
 	require.Error(t, err)
-	fromNetworks, err := repo.ListFromNetworks(ctx)
+	fromNetworks, err := repo.ListNetworkToVM(ctx)
 	require.NoError(t, err)
-	fromVMs, err := repo.ListFromVMs(ctx)
+	fromVMs, err := repo.ListVMToVM(ctx)
 	require.NoError(t, err)
-	if diff := cmp.Diff([]string{"net-policy"}, trafficNetworkIntentIDs(fromNetworks)); diff != "" {
+	if diff := cmp.Diff([]string{strings.Repeat("a", 64)}, trafficNetworkIntentIDs(fromNetworks)); diff != "" {
 		t.Errorf("network intents after rollback mismatch (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff([]string{"vm-policy"}, trafficVMIntentIDs(fromVMs)); diff != "" {
+	if diff := cmp.Diff([]string{strings.Repeat("b", 64)}, trafficVMIntentIDs(fromVMs)); diff != "" {
 		t.Errorf("VM intents after rollback mismatch (-want +got):\n%s", diff)
 	}
 }
@@ -140,20 +141,20 @@ func TestTrafficPolicySQLiteForeignKeyCascades(t *testing.T) {
 	t.Run("destination VM", func(t *testing.T) {
 		ctx := t.Context()
 		database, repo := seedTrafficPolicyResources(t)
-		require.NoError(t, repo.CreateFromNetwork(ctx, &model.NetworkTrafficAllowIntent{
-			ID: "net-policy", SourceNetworkID: "net-a", DestinationVMID: "vm-b",
+		require.NoError(t, repo.CreateNetworkToVM(ctx, &model.NetworkToVMTrafficAllowIntent{
+			ID: strings.Repeat("a", 64), SourceNetworkID: "net-a", DestinationVMID: "vm-b",
 			Protocol: model.TrafficProtocolTCP, DestinationPortStart: 443, DestinationPortEnd: 443,
 		}))
-		require.NoError(t, repo.CreateFromVM(ctx, &model.VMTrafficAllowIntent{
-			ID: "vm-policy", SourceVMID: "vm-a", DestinationVMID: "vm-b",
+		require.NoError(t, repo.CreateVMToVM(ctx, &model.VMToVMTrafficAllowIntent{
+			ID: strings.Repeat("b", 64), SourceVMID: "vm-a", DestinationVMID: "vm-b",
 			Protocol: model.TrafficProtocolUDP, DestinationPortStart: 53, DestinationPortEnd: 53,
 		}))
 
 		_, err := database.ExecContext(ctx, "DELETE FROM vm_instances WHERE id = 'vm-b'")
 		require.NoError(t, err)
-		fromNetworks, err := repo.ListFromNetworks(ctx)
+		fromNetworks, err := repo.ListNetworkToVM(ctx)
 		require.NoError(t, err)
-		fromVMs, err := repo.ListFromVMs(ctx)
+		fromVMs, err := repo.ListVMToVM(ctx)
 		require.NoError(t, err)
 		assert.Empty(t, fromNetworks)
 		assert.Empty(t, fromVMs)
@@ -161,20 +162,20 @@ func TestTrafficPolicySQLiteForeignKeyCascades(t *testing.T) {
 	t.Run("source network", func(t *testing.T) {
 		ctx := t.Context()
 		database, repo := seedTrafficPolicyResources(t)
-		require.NoError(t, repo.CreateFromNetwork(ctx, &model.NetworkTrafficAllowIntent{
-			ID: "net-policy", SourceNetworkID: "net-c", DestinationVMID: "vm-b",
+		require.NoError(t, repo.CreateNetworkToVM(ctx, &model.NetworkToVMTrafficAllowIntent{
+			ID: strings.Repeat("a", 64), SourceNetworkID: "net-c", DestinationVMID: "vm-b",
 			Protocol: model.TrafficProtocolTCP, DestinationPortStart: 443, DestinationPortEnd: 443,
 		}))
 
 		_, err := database.ExecContext(ctx, "DELETE FROM networks WHERE id = 'net-c'")
 		require.NoError(t, err)
-		fromNetworks, err := repo.ListFromNetworks(ctx)
+		fromNetworks, err := repo.ListNetworkToVM(ctx)
 		require.NoError(t, err)
 		assert.Empty(t, fromNetworks)
 	})
 }
 
-func trafficNetworkIntentIDs(intents []*model.NetworkTrafficAllowIntent) []string {
+func trafficNetworkIntentIDs(intents []*model.NetworkToVMTrafficAllowIntent) []string {
 	ids := make([]string, 0, len(intents))
 	for _, intent := range intents {
 		ids = append(ids, intent.ID)
@@ -182,7 +183,7 @@ func trafficNetworkIntentIDs(intents []*model.NetworkTrafficAllowIntent) []strin
 	return ids
 }
 
-func trafficVMIntentIDs(intents []*model.VMTrafficAllowIntent) []string {
+func trafficVMIntentIDs(intents []*model.VMToVMTrafficAllowIntent) []string {
 	ids := make([]string, 0, len(intents))
 	for _, intent := range intents {
 		ids = append(ids, intent.ID)
@@ -201,14 +202,14 @@ func TestTrafficPolicyServiceClassifiesRepositoryErrors(t *testing.T) {
 		code errs.Code
 	}{
 		"create": {call: func() error {
-			return service.CreateFromNetwork(ctx, &model.NetworkTrafficAllowIntent{ID: "policy"})
+			return service.CreateNetworkToVM(ctx, &model.NetworkToVMTrafficAllowIntent{ID: "policy"})
 		}, code: errs.CodePolicyCreateFailed},
 		"list": {call: func() error {
 			_, err := service.AllowIntents(ctx)
 			return err
 		}, code: errs.CodePolicyListFailed},
 		"remove": {call: func() error {
-			return service.RemoveFromNetworks(ctx, []string{"policy"})
+			return service.RemoveNetworkToVM(ctx, []string{"policy"})
 		}, code: errs.CodePolicyRemoveFailed},
 		"invalidate": {call: func() error {
 			return service.InvalidateByVM(ctx, "vm-a")

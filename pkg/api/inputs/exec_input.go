@@ -11,7 +11,8 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// ExecInput holds the input for executing a command inside a VM via vsock.
+// ExecInput holds an ordinary host-to-VM command request carried over vsock.
+// VM-to-VM authorization uses VMToVMExecPolicyCreateInput and never shares the IP traffic-policy plane.
 type ExecInput struct {
 	Identifier string            `json:"target"            yaml:"target"`
 	Command    string            `json:"command,omitempty" yaml:"cmd,omitempty"` // empty = interactive shell

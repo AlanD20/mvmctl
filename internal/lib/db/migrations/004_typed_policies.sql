@@ -2,6 +2,19 @@
 -- Version: 4
 -- Description: Closed traffic and VM-to-VM execution allow intent
 
+-- Legacy firewall rows and the VM-wide remote-exec bit encode authority that
+-- has no safe conversion to exact typed grants. Abort instead of carrying that
+-- authority into the new schema.
+CREATE TEMP TABLE typed_policy_migration_guard (
+    legacy_policy_authority_count INTEGER NOT NULL CHECK(legacy_policy_authority_count = 0)
+);
+INSERT INTO typed_policy_migration_guard
+SELECT
+    (SELECT COUNT(*) FROM vm_instances WHERE remote_exec <> 0)
+    + (SELECT COUNT(*) FROM iptables_rules)
+    + (SELECT COUNT(*) FROM nftables_rules);
+DROP TABLE typed_policy_migration_guard;
+
 PRAGMA foreign_keys = OFF;
 
 -- Transitional internal dependency: the currently wired v0.3 development
@@ -25,7 +38,7 @@ CREATE INDEX idx_service_access_policies_source ON service_access_policies(sourc
 CREATE INDEX idx_service_access_policies_destination_vm ON service_access_policies(destination_vm_id);
 
 CREATE TABLE network_traffic_policies (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
     source_network_id TEXT NOT NULL,
     destination_vm_id TEXT NOT NULL,
     protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
@@ -41,7 +54,7 @@ CREATE INDEX idx_network_traffic_source ON network_traffic_policies(source_netwo
 CREATE INDEX idx_network_traffic_destination ON network_traffic_policies(destination_vm_id);
 
 CREATE TABLE vm_traffic_policies (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
     source_vm_id TEXT NOT NULL,
     destination_vm_id TEXT NOT NULL,
     protocol TEXT NOT NULL CHECK(protocol IN ('tcp', 'udp')),
@@ -58,10 +71,15 @@ CREATE INDEX idx_vm_traffic_source ON vm_traffic_policies(source_vm_id);
 CREATE INDEX idx_vm_traffic_destination ON vm_traffic_policies(destination_vm_id);
 
 CREATE TABLE exec_policies (
-    id TEXT PRIMARY KEY,
+    id TEXT PRIMARY KEY CHECK(length(id) = 64 AND id NOT GLOB '*[^0-9a-f]*'),
     source_vm_id TEXT NOT NULL,
     destination_vm_id TEXT NOT NULL,
-    target_user TEXT NOT NULL CHECK(length(target_user) BETWEEN 1 AND 32 AND target_user <> 'root'),
+    target_user TEXT NOT NULL CHECK(
+        length(target_user) BETWEEN 1 AND 32
+        AND target_user <> 'root'
+        AND substr(target_user, 1, 1) GLOB '[a-z_]'
+        AND target_user NOT GLOB '*[^a-z0-9_-]*'
+    ),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
     FOREIGN KEY (source_vm_id) REFERENCES vm_instances(id) ON DELETE CASCADE,

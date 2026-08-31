@@ -44,6 +44,8 @@ const (
 	CodePolicyAlreadyExists       Code = "policy.already_exists"
 	CodePolicyProtocolInvalid     Code = "policy.protocol.invalid"
 	CodePolicyPortInvalid         Code = "policy.port.invalid"
+	CodePolicyEndpointInvalid     Code = "policy.endpoint.invalid"
+	CodePolicyExecUserInvalid     Code = "policy.exec.user.invalid"
 	CodePolicySameNetwork         Code = "policy.same_network"
 	CodePolicyCreateFailed        Code = "policy.create.failed"
 	CodePolicyListFailed          Code = "policy.list.failed"

@@ -14,7 +14,7 @@ type sqliteRepo struct{ db *sqlx.DB }
 // NewRepository creates the SQLite execution-policy repository.
 func NewRepository(db *sqlx.DB) Repository { return &sqliteRepo{db: db} }
 
-func (r *sqliteRepo) Create(ctx context.Context, intent *model.ExecAllowIntent) error {
+func (r *sqliteRepo) Create(ctx context.Context, intent *model.VMToVMExecAllowIntent) error {
 	_, err := r.db.ExecContext(ctx, `INSERT INTO exec_policies
 		(id, source_vm_id, destination_vm_id, target_user, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)`, intent.ID, intent.SourceVMID, intent.DestinationVMID,
@@ -22,8 +22,8 @@ func (r *sqliteRepo) Create(ctx context.Context, intent *model.ExecAllowIntent) 
 	return err
 }
 
-func (r *sqliteRepo) Get(ctx context.Context, intentID string) (*model.ExecAllowIntent, error) {
-	var intent model.ExecAllowIntent
+func (r *sqliteRepo) Get(ctx context.Context, intentID string) (*model.VMToVMExecAllowIntent, error) {
+	var intent model.VMToVMExecAllowIntent
 	err := r.db.GetContext(ctx, &intent, `SELECT * FROM exec_policies WHERE id = ?`, intentID)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -33,9 +33,9 @@ func (r *sqliteRepo) Get(ctx context.Context, intentID string) (*model.ExecAllow
 
 func (r *sqliteRepo) GetByIdentity(
 	ctx context.Context,
-	identity *model.ExecAllowIntent,
-) (*model.ExecAllowIntent, error) {
-	var intent model.ExecAllowIntent
+	identity *model.VMToVMExecAllowIntent,
+) (*model.VMToVMExecAllowIntent, error) {
+	var intent model.VMToVMExecAllowIntent
 	err := r.db.GetContext(ctx, &intent, `SELECT * FROM exec_policies
 		WHERE source_vm_id = ? AND destination_vm_id = ? AND target_user = ?`,
 		identity.SourceVMID, identity.DestinationVMID, identity.TargetUser)
@@ -45,15 +45,15 @@ func (r *sqliteRepo) GetByIdentity(
 	return &intent, err
 }
 
-func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.ExecAllowIntent, error) {
-	var intents []*model.ExecAllowIntent
+func (r *sqliteRepo) FindByPrefix(ctx context.Context, prefix string) ([]*model.VMToVMExecAllowIntent, error) {
+	var intents []*model.VMToVMExecAllowIntent
 	err := r.db.SelectContext(ctx, &intents,
 		`SELECT * FROM exec_policies WHERE id LIKE ? ORDER BY created_at, id`, prefix+"%")
 	return intents, err
 }
 
-func (r *sqliteRepo) List(ctx context.Context) ([]*model.ExecAllowIntent, error) {
-	var intents []*model.ExecAllowIntent
+func (r *sqliteRepo) List(ctx context.Context) ([]*model.VMToVMExecAllowIntent, error) {
+	var intents []*model.VMToVMExecAllowIntent
 	err := r.db.SelectContext(ctx, &intents, `SELECT * FROM exec_policies ORDER BY created_at, id`)
 	return intents, err
 }
