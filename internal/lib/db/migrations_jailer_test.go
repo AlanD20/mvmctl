@@ -43,7 +43,7 @@ func TestMigration002_BackfillsJailerBinaryID(t *testing.T) {
 
 	applied, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 3, applied)
+	assert.Equal(t, 4, applied)
 
 	rows := map[string]string{}
 	dbRows, err := database.QueryContext(ctx, "SELECT id, jailer_binary_id FROM vm_instances ORDER BY id")
@@ -64,7 +64,7 @@ func TestMigration002_BackfillsJailerBinaryID(t *testing.T) {
 
 	var schemaVersion int
 	require.NoError(t, database.GetContext(ctx, &schemaVersion, "PRAGMA user_version"))
-	assert.Equal(t, 4, schemaVersion)
+	assert.Equal(t, 5, schemaVersion)
 	var indexCount int
 	require.NoError(t, database.GetContext(ctx, &indexCount,
 		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_vm_instances_jailer_binary'"))
@@ -94,7 +94,7 @@ func TestMigration003_AddsTypedVMCgroupLimitsDefault(t *testing.T) {
 
 	applied, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 2, applied)
+	assert.Equal(t, 3, applied)
 
 	var encoded string
 	require.NoError(t, database.GetContext(ctx, &encoded,
@@ -111,5 +111,5 @@ func TestMigration003_AddsTypedVMCgroupLimitsDefault(t *testing.T) {
 	}`, encoded)
 	var schemaVersion int
 	require.NoError(t, database.GetContext(ctx, &schemaVersion, "PRAGMA user_version"))
-	assert.Equal(t, 4, schemaVersion)
+	assert.Equal(t, 5, schemaVersion)
 }

@@ -21,7 +21,12 @@ func migratePolicyFixtureTo(t *testing.T, target int) *db.Handle {
 	t.Cleanup(func() { require.NoError(t, handle.Close()) })
 	_, thisFile, _, ok := runtime.Caller(0)
 	require.True(t, ok)
-	names := []string{"001_initial_schema.sql", "002_jailer_launch.sql", "003_vm_cgroup_limits.sql"}
+	names := []string{
+		"001_initial_schema.sql",
+		"002_jailer_launch.sql",
+		"003_vm_cgroup_limits.sql",
+		"004_typed_policies.sql",
+	}
 	for _, name := range names[:target] {
 		contents, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "migrations", name))
 		require.NoError(t, err)
@@ -32,6 +37,53 @@ func migratePolicyFixtureTo(t *testing.T, target int) *db.Handle {
 }
 
 func migratePolicyFixtureToV3(t *testing.T) *db.Handle { return migratePolicyFixtureTo(t, 3) }
+
+func migratePolicyFixtureToV4(t *testing.T) *db.Handle { return migratePolicyFixtureTo(t, 4) }
+
+func migrateLegacyPolicyFixtureToV4(t *testing.T) *db.Handle {
+	t.Helper()
+	handle := migratePolicyFixtureToV3(t)
+	_, thisFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	contents, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "testdata", "004_typed_policies_legacy_v4.sql"))
+	require.NoError(t, err)
+	_, err = handle.DB().Exec(string(contents))
+	require.NoError(t, err)
+	return handle
+}
+
+func TestMigration005RejectsLegacyV4Schema(t *testing.T) {
+	ctx := t.Context()
+	handle := migrateLegacyPolicyFixtureToV4(t)
+
+	var legacyTableCount, legacyColumnCount int
+	require.NoError(t, handle.DB().GetContext(ctx, &legacyTableCount,
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'service_access_policies'"))
+	require.NoError(t, handle.DB().GetContext(ctx, &legacyColumnCount,
+		"SELECT COUNT(*) FROM pragma_table_info('vm_instances') WHERE name = 'remote_exec'"))
+	assert.Equal(t, 1, legacyTableCount)
+	assert.Equal(t, 1, legacyColumnCount)
+
+	applied, err := handle.RunMigrationsCtx(ctx)
+	require.Error(t, err)
+	assert.Zero(t, applied)
+	var version int
+	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
+	assert.Equal(t, 4, version)
+}
+
+func TestMigration005AcceptsFreshSchema(t *testing.T) {
+	ctx := t.Context()
+	handle := db.New(filepath.Join(t.TempDir(), "policy-fresh.db"))
+	t.Cleanup(func() { require.NoError(t, handle.Close()) })
+
+	applied, err := handle.RunMigrationsCtx(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 5, applied)
+	var version int
+	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
+	assert.Equal(t, 5, version)
+}
 
 func TestMigration004RejectsLegacyFirewallState(t *testing.T) {
 	ctx := context.Background()
@@ -89,6 +141,36 @@ func seedTypedPolicyResources(t *testing.T, ctx context.Context, handle *db.Hand
 	require.NoError(t, err)
 }
 
+func TestMigration005RejectsLegacyAuthorityState(t *testing.T) {
+	tests := map[string]func(*testing.T, context.Context, *db.Handle){
+		"remote exec grant": func(t *testing.T, ctx context.Context, handle *db.Handle) {
+			_, err := handle.DB().ExecContext(ctx, "UPDATE vm_instances SET remote_exec = 1 WHERE id = 'vm-a'")
+			require.NoError(t, err)
+		},
+		"service access policy": func(t *testing.T, ctx context.Context, handle *db.Handle) {
+			_, err := handle.DB().ExecContext(ctx, `INSERT INTO service_access_policies
+				(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
+				VALUES ('legacy','net-a','vm-b','tcp',443,443)`)
+			require.NoError(t, err)
+		},
+	}
+	for name, seedLegacyAuthority := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			handle := migratePolicyFixtureToV4(t)
+			seedTypedPolicyResources(t, ctx, handle)
+			seedLegacyAuthority(t, ctx, handle)
+
+			applied, err := handle.RunMigrationsCtx(ctx)
+			require.Error(t, err)
+			assert.Zero(t, applied)
+			var version int
+			require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
+			assert.Equal(t, 4, version)
+		})
+	}
+}
+
 func TestMigration004RejectsLegacyRemoteExecGrant(t *testing.T) {
 	ctx := t.Context()
 	handle := migratePolicyFixtureToV3(t)
@@ -110,7 +192,7 @@ func TestMigration004TypedPolicyConstraints(t *testing.T) {
 	database := handle.DB()
 	applied, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 1, applied)
+	assert.Equal(t, 2, applied)
 	seedTypedPolicyResources(t, ctx, handle)
 
 	validPolicyID := strings.Repeat("a", 64)
