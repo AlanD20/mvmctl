@@ -31,11 +31,15 @@ func (i *BinaryInput) Validate() error {
 // Resolve resolves all identifiers in the input to BinaryItem objects.
 // Delegates to binary.Resolver.ResolveMany for batch resolution with
 // deduplication and error collection.
-func (i *BinaryInput) Resolve(ctx context.Context, repo binary.Repository) ([]*model.BinaryItem, error) {
+func (i *BinaryInput) Resolve(
+	ctx context.Context,
+	repo binary.Repository,
+	architecture string,
+) ([]*model.BinaryItem, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
-	resolver := binary.NewResolver(repo)
+	resolver := binary.NewResolver(repo, architecture)
 	result := resolver.ResolveMany(ctx, i.Identifiers, i.IncludeDeleted)
 	if result == nil || len(result.Items) == 0 {
 		return nil, errs.NotFound(errs.CodeBinaryNotFound, "No binary identifiers provided or could be resolved")

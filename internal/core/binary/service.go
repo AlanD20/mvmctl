@@ -28,18 +28,20 @@ var safeTagChars = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
 // Service is the stateless intra-domain orchestrator for binary operations.
 type Service struct {
-	repo     Repository
-	binDir   string
-	cacheDir string
-	dl       *download.Downloader
+	repo         Repository
+	binDir       string
+	cacheDir     string
+	architecture string
+	dl           *download.Downloader
 }
 
-func NewService(repo Repository, binDir, cacheDir string) *Service {
+func NewService(repo Repository, binDir, cacheDir, architecture string) *Service {
 	return &Service{
-		repo:     repo,
-		binDir:   binDir,
-		cacheDir: cacheDir,
-		dl:       download.New(),
+		repo:         repo,
+		binDir:       binDir,
+		cacheDir:     cacheDir,
+		architecture: architecture,
+		dl:           download.New(),
 	}
 }
 
@@ -47,7 +49,7 @@ func NewService(repo Repository, binDir, cacheDir string) *Service {
 
 // ListAll lists all binaries, syncing is_present flag with filesystem.
 func (s *Service) ListAll(ctx context.Context, remote bool, verify bool) ([]*model.BinaryItem, error) {
-	binaries, err := s.repo.ListAll(ctx)
+	binaries, err := s.repo.ListAll(ctx, s.architecture)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +76,7 @@ func (s *Service) ListAll(ctx context.Context, remote bool, verify bool) ([]*mod
 
 // GetDefaultFirecracker returns the default firecracker binary, or nil if not set.
 func (s *Service) GetDefaultFirecracker(ctx context.Context) (*model.BinaryItem, error) {
-	return s.repo.GetDefault(ctx, "firecracker")
+	return s.repo.GetDefault(ctx, "firecracker", s.architecture)
 }
 
 // --- Remote listing ---
@@ -238,15 +240,21 @@ func (s *Service) Remove(ctx context.Context, binary *model.BinaryItem, force bo
 
 // ResolvePair resolves and validates the canonical exact-version launch pair.
 func (s *Service) ResolvePair(ctx context.Context, firecracker *model.BinaryItem) (*model.BinaryPair, error) {
-	if firecracker == nil || firecracker.Type != "firecracker" || firecracker.Version == "" {
+	if firecracker == nil || firecracker.Type != "firecracker" || firecracker.Version == "" ||
+		firecracker.Architecture != s.architecture {
 		return nil, binaryError(errs.CodeBinaryPairInvalid, "invalid Firecracker binary selection")
 	}
-	pairedFirecracker, err := s.repo.GetByTypeAndVersion(ctx, "firecracker", firecracker.Version)
+	pairedFirecracker, err := s.repo.GetByTypeAndVersion(
+		ctx,
+		"firecracker",
+		s.architecture,
+		firecracker.Version,
+	)
 	if err != nil {
 		return nil, binaryError(errs.CodeBinaryPairInvalid,
 			fmt.Sprintf("failed to resolve Firecracker binary: %v", err))
 	}
-	pairedJailer, err := s.repo.GetByTypeAndVersion(ctx, "jailer", firecracker.Version)
+	pairedJailer, err := s.repo.GetByTypeAndVersion(ctx, "jailer", s.architecture, firecracker.Version)
 	if err != nil {
 		return nil, binaryError(errs.CodeBinaryPairInvalid,
 			fmt.Sprintf("failed to resolve Jailer binary: %v", err))
@@ -564,16 +572,17 @@ func (s *Service) createBinaryItem(typ, versionStr, path string, resolveCIVersio
 	now := time.Now().Format(time.RFC3339)
 
 	return &model.BinaryItem{
-		ID:          id,
-		Type:        typ,
-		Version:     versionStr,
-		FullVersion: "v" + versionStr,
-		CIVersion:   ciVer,
-		Path:        path,
-		IsDefault:   false,
-		IsPresent:   true,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:           id,
+		Type:         typ,
+		Architecture: s.architecture,
+		Version:      versionStr,
+		FullVersion:  "v" + versionStr,
+		CIVersion:    ciVer,
+		Path:         path,
+		IsDefault:    false,
+		IsPresent:    true,
+		CreatedAt:    now,
+		UpdatedAt:    now,
 	}, nil
 }
 

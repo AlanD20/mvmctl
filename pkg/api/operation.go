@@ -29,6 +29,7 @@ import (
 	"mvmctl/internal/lib/logging"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/provisioner"
+	"mvmctl/internal/lib/system"
 	"mvmctl/pkg/errs"
 )
 
@@ -120,7 +121,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		Network: network.NewService(r.Network, defaultFwTracker, r.Policy),
 		Image:   image.NewService(r.Image),
 		Kernel:  kernel.NewService(r.Kernel, filepath.Join(cacheDir, "kernels")),
-		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir),
+		Binary:  binary.NewService(r.Binary, filepath.Join(cacheDir, "bin"), cacheDir, system.RuntimeArch()),
 		Key:     key.NewService(r.Key, infra.GetKeysDir()),
 		Host:    host.NewService(r.Host),
 		Config:  config.NewService(r.Config, configReg),
@@ -182,7 +183,7 @@ func emitProgress(onProgress event.OnProgressCallback, phase, status, msg string
 // resolveCIVersion returns the CI version from the default firecracker binary.
 // Returns error if no firecracker binary is installed or it has no CI version.
 func (op *Operation) resolveCIVersion(ctx context.Context) (string, error) {
-	defaultFC, err := op.Repos.Binary.GetDefault(ctx, "firecracker")
+	defaultFC, err := op.Repos.Binary.GetDefault(ctx, "firecracker", system.RuntimeArch())
 	if err != nil {
 		return "", errs.WrapMsg(
 			errs.CodeDatabaseError,

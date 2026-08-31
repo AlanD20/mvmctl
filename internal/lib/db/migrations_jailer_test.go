@@ -22,12 +22,13 @@ func TestMigration002_BackfillsJailerBinaryID(t *testing.T) {
 		VALUES ('img','alpine','1','img','x86_64','/img','ext4',1,1,CURRENT_TIMESTAMP,1);
 		INSERT INTO kernels (id,name,base_name,version,arch,type,path,is_present)
 		VALUES ('kernel','kernel','kernel','1','x86_64','firecracker','/kernel',1);
-		INSERT INTO binaries (id,type,version,full_version,path,is_present,deleted_at) VALUES
-			('fc-match','firecracker','1.16.0','1.16.0','/fc-match',1,NULL),
-			('jl-match','jailer','1.16.0','1.16.0','/jl-match',1,NULL),
-			('fc-missing','firecracker','1.15.0','1.15.0','/fc-missing',1,NULL),
-			('fc-deleted-pair','firecracker','1.14.0','1.14.0','/fc-deleted-pair',1,NULL),
-			('jl-deleted','jailer','1.14.0','1.14.0','/jl-deleted',1,'2026-08-09T00:00:00Z');
+		INSERT INTO binaries (id,type,architecture,version,full_version,path,is_present,deleted_at) VALUES
+			('fc-match','firecracker','x86_64','1.16.0','1.16.0','/fc-match',1,NULL),
+			('jl-match','jailer','x86_64','1.16.0','1.16.0','/jl-match',1,NULL),
+			('jl-other-arch','jailer','aarch64','1.16.0','1.16.0','/jl-other-arch',1,NULL),
+			('fc-missing','firecracker','x86_64','1.15.0','1.15.0','/fc-missing',1,NULL),
+			('fc-deleted-pair','firecracker','x86_64','1.14.0','1.14.0','/fc-deleted-pair',1,NULL),
+			('jl-deleted','jailer','x86_64','1.14.0','1.14.0','/jl-deleted',1,'2026-08-09T00:00:00Z');
 		INSERT INTO vm_instances (id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,
 			api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,rootfs_path,rootfs_suffix,
 			pci_enabled,nested_virt,remote_exec,lsm_flags,enable_logging,enable_metrics,enable_console,boot_args)
@@ -82,8 +83,8 @@ func TestMigration003_AddsTypedVMCgroupLimitsDefault(t *testing.T) {
 		VALUES ('img','alpine','1','img','x86_64','/img','ext4',1,1,CURRENT_TIMESTAMP,1);
 		INSERT INTO kernels (id,name,base_name,version,arch,type,path,is_present)
 		VALUES ('kernel','kernel','kernel','1','x86_64','firecracker','/kernel',1);
-		INSERT INTO binaries (id,type,version,full_version,path,is_present)
-		VALUES ('fc','firecracker','1','1','/fc',1);
+		INSERT INTO binaries (id,type,architecture,version,full_version,path,is_present)
+		VALUES ('fc','firecracker','x86_64','1','1','/fc',1);
 		INSERT INTO vm_instances (id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,
 			jailer_binary_id,api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,rootfs_path,
 			rootfs_suffix,pci_enabled,nested_virt,remote_exec,lsm_flags,enable_logging,enable_metrics,enable_console,boot_args)

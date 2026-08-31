@@ -69,6 +69,13 @@ func BinaryID(filePath, typ, version string) (string, error) {
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
+// BinaryReleaseID derives the stable projection ID for one root-authoritative release executable.
+func BinaryReleaseID(typ, architecture, version, executableSHA256 string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "mvmctl:binary-release:v1:%s:%s:%s:%s", typ, architecture, version, executableSHA256)
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
 // VMID generates a 32-char SHA256 VM ID from name and creation timestamp.
 // 32-char truncation for Unix domain socket path limit (~108 bytes).
 func VMID(name, createdAt string) string {

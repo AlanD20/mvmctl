@@ -16,6 +16,7 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/disk"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 	"net"
@@ -173,7 +174,7 @@ func NewVMCreateRequest(
 		imageResolver:   image.NewResolver(imageRepo),
 		kernelResolver:  kernel.NewResolver(kernelRepo, nil),
 		networkResolver: network.NewResolver(networkRepo, nil),
-		binaryResolver:  binary.NewResolver(binaryRepo),
+		binaryResolver:  binary.NewResolver(binaryRepo, system.RuntimeArch()),
 		keyResolver:     key.NewResolver(keyRepo),
 		volumeResolver:  volume.NewResolver(volumeRepo),
 		leaseRepo:       leaseRepo,

@@ -55,7 +55,8 @@ CREATE INDEX idx_kernels_version ON kernels(version);
 -- JSON mappings: package_version -> version
 CREATE TABLE binaries (
     id TEXT PRIMARY KEY,
-    type TEXT NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('firecracker', 'jailer')),
+    architecture TEXT NOT NULL CHECK(architecture IN ('x86_64', 'aarch64')),
     version TEXT NOT NULL,
     full_version TEXT NOT NULL,
     ci_version TEXT,
@@ -67,7 +68,13 @@ CREATE TABLE binaries (
     deleted_at TIMESTAMP NULL
 );
 CREATE INDEX idx_binaries_type ON binaries(type);
-CREATE INDEX idx_binaries_version ON binaries(version);
+CREATE INDEX idx_binaries_version ON binaries(architecture, version);
+CREATE UNIQUE INDEX idx_binaries_active_release_member
+    ON binaries(type, architecture, version)
+    WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_binaries_active_default
+    ON binaries(type, architecture)
+    WHERE is_default = 1 AND deleted_at IS NULL;
 
 -- VOLUMES: Persistent data disks attachable to VMs
 CREATE TABLE volumes (

@@ -37,11 +37,12 @@ type BinaryAPI interface {
 
 // BinaryPrune prunes unused binaries.
 func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) ([]string, error) {
-	allBinaries, err := op.Repos.Binary.ListAll(ctx)
+	architecture := system.RuntimeArch()
+	allBinaries, err := op.Repos.Binary.ListAll(ctx, architecture)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeDatabaseError, fmt.Sprintf("Failed to list binaries: %v", err), err)
 	}
-	defaultBinary, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
+	defaultBinary, _ := op.Repos.Binary.GetDefault(ctx, "firecracker", architecture)
 	var defaultVersion string
 	if defaultBinary != nil {
 		defaultVersion = defaultBinary.Version
@@ -69,6 +70,7 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 // BinaryPull downloads or builds a binary.
 func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInput,
 	onProgress event.OnProgressCallback) ([]*model.BinaryItem, error) {
+	architecture := system.RuntimeArch()
 	resolved, err := input.Resolve()
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, err.Error(), err)
@@ -80,12 +82,12 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 		if err != nil {
 			return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, fmt.Sprintf("Build failed: %v", err), err)
 		}
-		noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
+		noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker", architecture)
 		shouldSetDefault := resolved.SetDefault || noDefault == nil
 		for _, b := range binaries {
 			_ = op.Repos.Binary.Upsert(ctx, b)
 			if shouldSetDefault {
-				_ = op.Repos.Binary.SetDefault(ctx, b.Type, b.ID)
+				_ = op.Repos.Binary.SetDefault(ctx, b.Type, architecture, b.ID)
 			}
 		}
 		versionStr := ""
@@ -105,8 +107,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, err.Error(), err)
 	}
 	normalized := binary.NormalizeVersion(resolvedVersion)
-	fcExists, _ := op.Repos.Binary.GetByTypeAndVersion(ctx, "firecracker", normalized)
-	jlExists, _ := op.Repos.Binary.GetByTypeAndVersion(ctx, "jailer", normalized)
+	fcExists, _ := op.Repos.Binary.GetByTypeAndVersion(ctx, "firecracker", architecture, normalized)
+	jlExists, _ := op.Repos.Binary.GetByTypeAndVersion(ctx, "jailer", architecture, normalized)
 	versionExists := fcExists != nil && jlExists != nil
 	if versionExists && !resolved.DownloadOverride {
 		return nil, errs.AlreadyExists(
@@ -114,10 +116,10 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 			fmt.Sprintf("Firecracker v%s already exists. Use --force to re-download.", normalized),
 		)
 	}
-	noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker")
+	noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker", architecture)
 	shouldSetDefault := resolved.SetDefault || noDefault == nil
 	// arch maps the current architecture to Firecracker's naming convention.
-	arch := system.RuntimeArch()
+	arch := architecture
 	// Bridge byte-level download progress to phase-level ProgressEvent
 	emitProgress(onProgress, "download", "running", "Downloading Firecracker...")
 	progressBridge := event.FormatProgress(onProgress)
@@ -128,7 +130,7 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	for _, b := range binaries {
 		_ = op.Repos.Binary.Upsert(ctx, b)
 		if shouldSetDefault {
-			_ = op.Repos.Binary.SetDefault(ctx, b.Type, b.ID)
+			_ = op.Repos.Binary.SetDefault(ctx, b.Type, architecture, b.ID)
 		}
 	}
 	op.AuditLog.LogOperation("binary.pull", map[string]any{"version": resolvedVersion}, "")
@@ -140,7 +142,8 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 // Enriches with VM references. Each binary removal is wrapped in per-binary
 // error handling.
 func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput, force bool) *errs.BatchResult {
-	binaries, err := input.Resolve(ctx, op.Repos.Binary)
+	architecture := system.RuntimeArch()
+	binaries, err := input.Resolve(ctx, op.Repos.Binary, architecture)
 	if err != nil {
 		return &errs.BatchResult{
 			Items: []errs.OperationResult{
@@ -156,8 +159,13 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 	paired := make([]*model.BinaryItem, 0, len(binaries)*2)
 	seen := make(map[string]bool)
 	for _, item := range binaries {
-		firecracker, fcErr := op.Repos.Binary.GetByTypeAndVersion(ctx, "firecracker", item.Version)
-		jailer, jailerErr := op.Repos.Binary.GetByTypeAndVersion(ctx, "jailer", item.Version)
+		firecracker, fcErr := op.Repos.Binary.GetByTypeAndVersion(
+			ctx,
+			"firecracker",
+			architecture,
+			item.Version,
+		)
+		jailer, jailerErr := op.Repos.Binary.GetByTypeAndVersion(ctx, "jailer", architecture, item.Version)
 		if fcErr != nil || jailerErr != nil || firecracker == nil || jailer == nil {
 			return &errs.BatchResult{Items: []errs.OperationResult{{
 				Status: "error", Code: string(errs.CodeBinaryPairInvalid),
@@ -223,7 +231,7 @@ func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput,
 // BinaryRemoveByVersion removes both firecracker and jailer for a version.
 // Errors propagate through the DomainError pipeline.
 func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, force bool) error {
-	resolver := binary.NewResolver(op.Repos.Binary)
+	resolver := binary.NewResolver(op.Repos.Binary, system.RuntimeArch())
 	normalized := binary.NormalizeVersion(version)
 	binariesToRemove := make([]*model.BinaryItem, 0)
 	for _, name := range []string{"firecracker", "jailer"} {
@@ -283,7 +291,7 @@ func (op *Operation) BinaryList(
 		return nil, nil, err
 	}
 	// Mark locally cached versions
-	local, _ := op.Repos.Binary.ListAll(ctx)
+	local, _ := op.Repos.Binary.ListAll(ctx, system.RuntimeArch())
 	localSet := make(map[string]bool, len(local))
 	for _, l := range local {
 		localSet[l.Version] = true
@@ -299,7 +307,7 @@ func (op *Operation) BinaryList(
 
 // BinaryGet returns binaries by identifier.
 func (op *Operation) BinaryGet(ctx context.Context, input inputs.BinaryInput) ([]*model.BinaryItem, error) {
-	binaries, err := input.Resolve(ctx, op.Repos.Binary)
+	binaries, err := input.Resolve(ctx, op.Repos.Binary, system.RuntimeArch())
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +317,7 @@ func (op *Operation) BinaryGet(ctx context.Context, input inputs.BinaryInput) ([
 // BinarySetDefault sets a binary as default.
 // Checks for ambiguous results, then delegates to BinaryController.
 func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryInput) (*model.BinaryItem, error) {
-	binaries, err := input.Resolve(ctx, op.Repos.Binary)
+	binaries, err := input.Resolve(ctx, op.Repos.Binary, system.RuntimeArch())
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeBinaryDefaultSetFailed, fmt.Sprintf("Binary not found: %v", err), err)
 	}

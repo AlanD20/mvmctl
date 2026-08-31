@@ -78,7 +78,7 @@ func TestService_ResolvePairFailsClosed(t *testing.T) {
 			for _, item := range tc.seed {
 				require.NoError(t, repo.Upsert(ctx, item))
 			}
-			svc := binary.NewService(repo, t.TempDir(), t.TempDir())
+			svc := binary.NewService(repo, t.TempDir(), t.TempDir(), "x86_64")
 
 			pair, err := svc.ResolvePair(ctx, tc.selected)
 			require.Error(t, err)
@@ -121,7 +121,7 @@ func TestService_RemovePreservesReferencedBinary(t *testing.T) {
 			item.Path = path
 			tc.attachReference(item)
 			require.NoError(t, repo.Upsert(ctx, item))
-			svc := binary.NewService(repo, t.TempDir(), t.TempDir())
+			svc := binary.NewService(repo, t.TempDir(), t.TempDir(), "x86_64")
 
 			removed, err := svc.Remove(ctx, item, false)
 			require.Error(t, err)
@@ -144,7 +144,7 @@ func TestService_RemoveUnreferencedBinary(t *testing.T) {
 	item := binaryItem("binary-id", "firecracker", "1.16.0", true)
 	item.Path = path
 	require.NoError(t, repo.Upsert(ctx, item))
-	svc := binary.NewService(repo, t.TempDir(), t.TempDir())
+	svc := binary.NewService(repo, t.TempDir(), t.TempDir(), "x86_64")
 
 	removed, err := svc.Remove(ctx, item, false)
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func TestService_RemoveUnreferencedBinary(t *testing.T) {
 
 func binaryItem(id, typ, version string, present bool) *model.BinaryItem {
 	return &model.BinaryItem{
-		ID: id, Type: typ, Version: version, FullVersion: "v" + version,
+		ID: id, Type: typ, Architecture: "x86_64", Version: version, FullVersion: "v" + version,
 		Path: "/tmp/untrusted/" + typ, IsPresent: present,
 	}
 }

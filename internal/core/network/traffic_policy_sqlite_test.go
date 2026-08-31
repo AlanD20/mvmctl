@@ -31,8 +31,8 @@ func seedTrafficPolicyResources(t *testing.T) (*sqlx.DB, network.TrafficPolicyRe
 		VALUES ('image','alpine','1','image','x86_64','/image','ext4',1,1,CURRENT_TIMESTAMP,1);
 		INSERT INTO kernels (id,name,base_name,version,arch,type,path,is_present)
 		VALUES ('kernel','kernel','kernel','1','x86_64','firecracker','/kernel',1);
-		INSERT INTO binaries (id,type,version,full_version,path,is_present)
-		VALUES ('firecracker','firecracker','1','1','/firecracker',1);
+		INSERT INTO binaries (id,type,architecture,version,full_version,path,is_present)
+		VALUES ('firecracker','firecracker','x86_64','1','1','/firecracker',1);
 		INSERT INTO vm_instances
 			(id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,
 			 api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,

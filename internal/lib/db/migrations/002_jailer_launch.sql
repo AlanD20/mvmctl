@@ -10,6 +10,7 @@ SET jailer_binary_id = COALESCE((
     FROM binaries AS firecracker
     JOIN binaries AS jailer
       ON jailer.type = 'jailer'
+     AND jailer.architecture = firecracker.architecture
      AND jailer.version = firecracker.version
      AND jailer.deleted_at IS NULL
     WHERE firecracker.id = vm_instances.binary_id
