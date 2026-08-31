@@ -26,9 +26,11 @@ type dependencies struct {
 	openAt2  func(context.Context, int, string, *unix.OpenHow) (int, error)
 	mkdirAt  func(context.Context, int, string, uint32) error
 	fstat    func(context.Context, int, *unix.Stat_t) error
+	statx    func(context.Context, int, int, int, *unix.Statx_t) error
 	fchown   func(context.Context, int, int, int) error
 	fchmod   func(context.Context, int, uint32) error
 	fsync    func(context.Context, int) error
+	unlinkAt func(context.Context, int, string, int) error
 	close    func(context.Context, int) error
 	flock    func(context.Context, int, int) error
 	waitLock func(context.Context) error
@@ -406,10 +408,16 @@ func realDependencies() dependencies {
 		mkdirAt: func(_ context.Context, parentFD int, name string, mode uint32) error {
 			return unix.Mkdirat(parentFD, name, mode)
 		},
-		fstat:    func(_ context.Context, fd int, stat *unix.Stat_t) error { return unix.Fstat(fd, stat) },
-		fchown:   func(_ context.Context, fd, uid, gid int) error { return unix.Fchown(fd, uid, gid) },
-		fchmod:   func(_ context.Context, fd int, mode uint32) error { return unix.Fchmod(fd, mode) },
-		fsync:    func(_ context.Context, fd int) error { return unix.Fsync(fd) },
+		fstat: func(_ context.Context, fd int, stat *unix.Stat_t) error { return unix.Fstat(fd, stat) },
+		statx: func(_ context.Context, fd, flags, mask int, stat *unix.Statx_t) error {
+			return unix.Statx(fd, "", flags, mask, stat)
+		},
+		fchown: func(_ context.Context, fd, uid, gid int) error { return unix.Fchown(fd, uid, gid) },
+		fchmod: func(_ context.Context, fd int, mode uint32) error { return unix.Fchmod(fd, mode) },
+		fsync:  func(_ context.Context, fd int) error { return unix.Fsync(fd) },
+		unlinkAt: func(_ context.Context, parentFD int, name string, flags int) error {
+			return unix.Unlinkat(parentFD, name, flags)
+		},
 		close:    func(_ context.Context, fd int) error { return unix.Close(fd) },
 		flock:    func(_ context.Context, fd, how int) error { return unix.Flock(fd, how) },
 		waitLock: waitForLock,

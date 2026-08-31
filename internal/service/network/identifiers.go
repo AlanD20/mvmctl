@@ -13,7 +13,7 @@ import (
 const (
 	linuxInterfaceNameMax  = 15
 	namespaceAuthorityRoot = "/run/mvmctl/authority"
-	namespaceHandleMode    = uint32(0600)
+	namespaceHandleMode    = uint32(0o444)
 )
 
 var (

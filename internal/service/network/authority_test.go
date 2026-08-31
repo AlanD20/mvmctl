@@ -927,6 +927,13 @@ func (uid *testNetworkLockUID) acquireNetwork(
 	return uid.tree.acquire(ctx, gate, "network", uid.tree.releaseNetworkErr)
 }
 
+func (*testNetworkLockUID) createNamespaceHandle(
+	context.Context,
+	authorityfs.VMKey,
+) (namespaceAuthorityTarget, error) {
+	return nil, errors.New("unexpected namespace handle creation")
+}
+
 func (uid *testNetworkLockUID) Release(ctx context.Context) error {
 	uid.tree.recorder.addContext(ctx, "release_lock_uid")
 	return uid.tree.releaseUIDErr

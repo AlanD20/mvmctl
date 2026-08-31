@@ -245,7 +245,7 @@ func TestServicePrepareBuildsDownTopologyWhileHoldingOrderedLeases(t *testing.T)
 			},
 			OwnerUID: 0,
 			OwnerGID: 0,
-			Mode:     namespaceHandleMode,
+			Mode:     0o444,
 		},
 		ManagedBridge: LinkIdentity{
 			Name:    testNames.managedBridge.String(),
@@ -391,7 +391,9 @@ func TestServicePreparePreservesDomainErrorReturnedWithLock(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Nil(t, preparation)
-	assert.Same(t, primary, errs.AsDomainError(err))
+	returned := errs.AsDomainError(err)
+	require.NotNil(t, returned)
+	assert.NotSame(t, primary, returned)
 	assert.Equal(t, errs.CodeNetworkError, primary.Code)
 	assert.Equal(t, errs.ClassConflict, primary.Class)
 	assert.Equal(t, testNetworkID, primary.Entity)
@@ -425,18 +427,116 @@ func TestServicePrepareRetainsPrimaryDomainErrorWhenLockCleanupFails(t *testing.
 
 	require.Error(t, err)
 	require.NotNil(t, preparation)
-	assert.Same(t, primary, errs.AsDomainError(err))
+	returned := errs.AsDomainError(err)
+	require.NotNil(t, returned)
+	assert.NotSame(t, primary, returned)
 	assert.ErrorIs(t, err, releaseErr)
-	assert.Equal(t, errs.CodeNetworkError, primary.Code)
-	assert.Equal(t, errs.ClassConflict, primary.Class)
-	assert.Equal(t, testNetworkID, primary.Entity)
-	assert.Contains(t, primary.Message, "failed to release network topology authority")
-	assert.Equal(t, true, primary.Details["record_mismatch"])
-	assert.Equal(t, true, primary.Details["cleanup_required"])
+	assert.Equal(t, errs.CodeNetworkError, returned.Code)
+	assert.Equal(t, errs.ClassConflict, returned.Class)
+	assert.Equal(t, testNetworkID, returned.Entity)
+	assert.Contains(t, returned.Message, "failed to release network topology authority")
+	assert.Equal(t, map[string]any{
+		"record_mismatch":    true,
+		"cleanup_required":   true,
+		"cleanup_diagnostic": "release network topology authority",
+	}, returned.Details)
+	assert.Equal(t, "managed network authority record failed verification", primary.Message)
+	assert.Equal(t, map[string]any{"record_mismatch": true}, primary.Details)
 	assert.False(t, fixture.lock.released)
 	assertTopologyUnavailable(t, preparation)
 
 	fixture.lock.releaseError = nil
+	require.NoError(t, preparation.Cleanup(context.Background()))
+}
+
+// Rationale: namespace effect outcome evidence is the primary contract and survives topology rollback unchanged.
+func TestServicePreparePreservesNamespaceEffectDomainErrorEvidence(t *testing.T) {
+	t.Parallel()
+
+	wantDetails := map[string]any{
+		"cleanup_required":        true,
+		"namespace_created":       true,
+		"namespace_pinned":        true,
+		"namespace_published":     true,
+		"publication_verified":    true,
+		"host_namespace_restored": false,
+		"network_worker_retired":  true,
+	}
+	primary := errs.New(
+		errs.CodeNetworkError,
+		"namespace worker failed after publication",
+		errs.WithClass(errs.ClassRetryable),
+		errs.WithEntity(testVMID),
+		errs.WithDetails(wantDetails),
+	)
+	fixture := newTopologyFixture(t)
+	fixture.effects.namespaceCreateError = primary
+
+	preparation, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
+
+	require.Error(t, err)
+	assert.Nil(t, preparation)
+	returned := errs.AsDomainError(err)
+	require.NotNil(t, returned)
+	assert.NotSame(t, primary, returned)
+	assert.Equal(t, errs.CodeNetworkError, returned.Code)
+	assert.Equal(t, errs.ClassRetryable, returned.Class)
+	assert.Equal(t, testVMID, returned.Entity)
+	assert.Equal(t, "namespace worker failed after publication", returned.Message)
+	assert.Equal(t, wantDetails, returned.Details)
+	assert.Equal(t, wantDetails, primary.Details)
+	assert.True(t, fixture.pin.released)
+	assert.True(t, fixture.lock.released)
+}
+
+// Rationale: rollback failure appends cleanup evidence to a clone without mutating the namespace effect's error.
+func TestServicePrepareClonesNamespaceEffectErrorWhenRollbackFails(t *testing.T) {
+	t.Parallel()
+
+	primaryDetails := map[string]any{
+		"cleanup_required":        true,
+		"namespace_created":       true,
+		"namespace_pinned":        true,
+		"namespace_published":     true,
+		"publication_verified":    true,
+		"host_namespace_restored": false,
+	}
+	primary := errs.New(
+		errs.CodeNetworkCreateFailed,
+		"published namespace creation failed",
+		errs.WithClass(errs.ClassConflict),
+		errs.WithEntity(testVMID),
+		errs.WithDetails(primaryDetails),
+	)
+	cleanupErr := errors.New("namespace rollback failed")
+	fixture := newTopologyFixture(t)
+	fixture.effects.namespaceCreateError = primary
+	fixture.effects.deleteFailures["delete_namespace"] = cleanupErr
+
+	preparation, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
+
+	require.ErrorIs(t, err, cleanupErr)
+	require.NotNil(t, preparation)
+	returned := errs.AsDomainError(err)
+	require.NotNil(t, returned)
+	assert.NotSame(t, primary, returned)
+	assert.Equal(t, errs.CodeNetworkCreateFailed, returned.Code)
+	assert.Equal(t, errs.ClassConflict, returned.Class)
+	assert.Equal(t, testVMID, returned.Entity)
+	assert.Equal(t, map[string]any{
+		"cleanup_required":        true,
+		"cleanup_diagnostic":      "release network topology authority",
+		"namespace_created":       true,
+		"namespace_pinned":        true,
+		"namespace_published":     true,
+		"publication_verified":    true,
+		"host_namespace_restored": false,
+	}, returned.Details)
+	assert.Contains(t, returned.Message, "failed to release network topology authority")
+	assert.Equal(t, primaryDetails, primary.Details)
+	assert.Equal(t, "published namespace creation failed", primary.Message)
+
+	delete(fixture.effects.deleteFailures, "delete_namespace")
 	require.NoError(t, preparation.Cleanup(context.Background()))
 }
 
@@ -676,6 +776,45 @@ func TestTopologyPreparationCleanupRetriesOnlyTheFailedSuffix(t *testing.T) {
 	assertTopologyUnavailable(t, preparation)
 }
 
+// Rationale: topology cleanup wrapping preserves the namespace effect's closed removal-state evidence.
+func TestTopologyCleanupPreservesNamespaceRemovalEvidence(t *testing.T) {
+	t.Parallel()
+
+	wantDetails := map[string]any{
+		"cleanup_required":         true,
+		"namespace_published":      true,
+		"namespace_unmounted":      true,
+		"authority_target_removed": false,
+		"unmount_outcome_unknown":  false,
+	}
+	primary := errs.New(
+		errs.CodeNetworkRemoveFailed,
+		"authority target removal failed",
+		errs.WithClass(errs.ClassRetryable),
+		errs.WithEntity(testVMID),
+		errs.WithDetails(wantDetails),
+	)
+	fixture := newTopologyFixture(t)
+	preparation, err := fixture.service.prepare(context.Background(), fixture.launch, fixture.key.NetworkID())
+	require.NoError(t, err)
+	fixture.effects.deleteFailures["delete_namespace"] = primary
+
+	err = preparation.Cleanup(context.Background())
+
+	require.Error(t, err)
+	returned := errs.AsDomainError(err)
+	require.NotNil(t, returned)
+	assert.NotSame(t, primary, returned)
+	assert.Equal(t, errs.CodeNetworkRemoveFailed, returned.Code)
+	assert.Equal(t, errs.ClassRetryable, returned.Class)
+	assert.Equal(t, testVMID, returned.Entity)
+	assert.Equal(t, wantDetails, returned.Details)
+	assert.Equal(t, wantDetails, primary.Details)
+
+	delete(fixture.effects.deleteFailures, "delete_namespace")
+	require.NoError(t, preparation.Cleanup(context.Background()))
+}
+
 // Rationale: Only the exact committed state may authorize later privileged stages. Building, rollback, recovery, and
 // deleted preparations can retain stale identity fields and must still return zero authority.
 func TestTopologyPreparationTopologyRequiresExactCommittedState(t *testing.T) {
@@ -907,7 +1046,7 @@ func newTopologyFixtureWithLocker(t *testing.T, config fakeNetworkLockerConfig) 
 		identity: vmNamespace,
 		ownerUID: 0,
 		ownerGID: 0,
-		mode:     namespaceHandleMode,
+		mode:     uint32(0o444),
 	}}
 	lock := &fakeNetworkLock{
 		key: key.Network(),
@@ -1055,6 +1194,7 @@ type fakeTopologyEffects struct {
 	cancel                 context.CancelFunc
 	cleanupSawCancellation bool
 	deleteFailures         map[string]error
+	namespaceCreateError   error
 }
 
 func (effects *fakeTopologyEffects) CreateNamespace(
@@ -1066,6 +1206,9 @@ func (effects *fakeTopologyEffects) CreateNamespace(
 	}
 	if effects.omitAt == "create_namespace" {
 		return nil, nil
+	}
+	if effects.namespaceCreateError != nil {
+		return effects.pin, effects.namespaceCreateError
 	}
 	if err := effects.afterMutation("create_namespace"); err != nil {
 		return effects.pin, err
@@ -1204,7 +1347,6 @@ func (effects *fakeTopologyEffects) DeleteLocalBridge(
 func (effects *fakeTopologyEffects) DeleteNamespace(
 	ctx context.Context,
 	_ NamespacePin,
-	_ namespaceIdentity,
 ) error {
 	return effects.delete(ctx, "delete_namespace")
 }

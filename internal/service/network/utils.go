@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 
 	"mvmctl/pkg/errs"
 )
@@ -57,16 +58,20 @@ func abortTopologyPreparePreservingPrimary(
 		"vm_id", preparation.entity(),
 		"error", primary,
 	)
+	result := *domainErr
+	result.Details = maps.Clone(domainErr.Details)
+	result.Err = primary
 	if cleanupErr == nil {
-		return nil, domainErr
+		return nil, &result
 	}
-	if domainErr.Details == nil {
-		domainErr.Details = make(map[string]any)
+	if result.Details == nil {
+		result.Details = make(map[string]any, 2)
 	}
-	domainErr.Details["cleanup_required"] = true
-	domainErr.Message += "; failed to release network topology authority: " + cleanupErr.Error()
-	domainErr.Err = errors.Join(domainErr.Err, cleanupErr)
-	return preparation, domainErr
+	result.Details["cleanup_required"] = true
+	result.Details["cleanup_diagnostic"] = "release network topology authority"
+	result.Message += "; failed to release network topology authority: " + cleanupErr.Error()
+	result.Err = errors.Join(primary, cleanupErr)
+	return preparation, &result
 }
 
 func topologyPrepareError(stage, vmID string, cause error, cleanupRequired bool) *errs.DomainError {
@@ -273,6 +278,12 @@ func topologyAccessError(vmID string) *errs.DomainError {
 }
 
 func topologyRemoveError(vmID, message string, cause error) *errs.DomainError {
+	if domainErr := errs.AsDomainError(cause); domainErr != nil {
+		result := *domainErr
+		result.Details = maps.Clone(domainErr.Details)
+		result.Err = cause
+		return &result
+	}
 	options := []errs.ErrorOption{errs.WithClass(errs.ClassInternal)}
 	if vmID != "" {
 		options = append(options, errs.WithEntity(vmID))

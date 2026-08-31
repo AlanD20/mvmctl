@@ -20,6 +20,7 @@ type networkLockRoot interface {
 
 type networkLockUID interface {
 	acquireNetwork(context.Context, authorityfs.NetworkKey) (networkAuthorityLock, error)
+	createNamespaceHandle(context.Context, authorityfs.VMKey) (namespaceAuthorityTarget, error)
 	Release(context.Context) error
 }
 
@@ -91,6 +92,20 @@ func (uid *systemNetworkLockUID) acquireNetwork(
 		return nil, mapNetworkAuthorityLockError("managed network", err)
 	}
 	return value, nil
+}
+
+func (uid *systemNetworkLockUID) createNamespaceHandle(
+	ctx context.Context,
+	key authorityfs.VMKey,
+) (namespaceAuthorityTarget, error) {
+	if uid == nil || uid.value == nil {
+		return nil, networkAuthorityCorruptError("network namespace authority is released", nil)
+	}
+	value, err := uid.value.CreateNamespaceHandle(ctx, key)
+	if value == nil {
+		return nil, err
+	}
+	return &systemNamespaceAuthorityTarget{value: value}, err
 }
 
 func (uid *systemNetworkLockUID) Release(ctx context.Context) error {

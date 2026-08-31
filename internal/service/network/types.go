@@ -97,8 +97,7 @@ type NamespacePin interface {
 }
 
 type namespaceCreateSpec struct {
-	key  topologyKey
-	path namespaceHandlePath
+	key topologyKey
 }
 
 type localBridgeCreateSpec struct {
@@ -154,7 +153,7 @@ type TopologyEffects interface {
 	DeleteVethPair(ctx context.Context, namespace NamespacePin, veth vethPairIdentity) error
 	DeleteTAP(ctx context.Context, namespace NamespacePin, tap linkIdentity) error
 	DeleteLocalBridge(ctx context.Context, namespace NamespacePin, bridge linkIdentity) error
-	DeleteNamespace(ctx context.Context, namespace NamespacePin, identity namespaceIdentity) error
+	DeleteNamespace(ctx context.Context, namespace NamespacePin) error
 }
 
 // Topology is the exact derived and kernel-returned identity needed for durable authority and reconciliation.

@@ -115,14 +115,19 @@ func (service *service) prepare(
 	}
 	preparation.topology.managedBridge = managedBridge
 
-	pin, err := service.effects.CreateNamespace(ctx, namespaceCreateSpec{key: key, path: names.namespaceHandle})
+	pin, err := service.effects.CreateNamespace(ctx, namespaceCreateSpec{key: key})
 	if pin != nil {
 		preparation.pin = pin
 		preparation.namespaceCreated = true
 		preparation.topology.handle = pin.Handle()
 	}
 	if err != nil {
-		return abortTopologyPrepare(ctx, preparation, "create VM network namespace", err)
+		return abortTopologyPreparePreservingPrimary(
+			ctx,
+			preparation,
+			"create VM network namespace",
+			err,
+		)
 	}
 	if pin == nil {
 		return abortTopologyPrepare(
@@ -318,11 +323,7 @@ func (preparation *topologyPreparation) Cleanup(ctx context.Context) error {
 		preparation.localBridgeMade = false
 	}
 	if preparation.namespaceCreated {
-		if err := preparation.effects.DeleteNamespace(
-			ctx,
-			preparation.pin,
-			preparation.topology.handle.identity,
-		); err != nil {
+		if err := preparation.effects.DeleteNamespace(ctx, preparation.pin); err != nil {
 			return preparation.cleanupFailure("delete VM network namespace", err)
 		}
 		preparation.namespaceCreated = false

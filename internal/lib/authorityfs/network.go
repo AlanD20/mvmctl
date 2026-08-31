@@ -32,9 +32,11 @@ type NetworkUID struct {
 
 type networkUIDState struct {
 	// mu guards fd and every lifecycle field below. Read locking preserves resource-scoped lock concurrency.
+	// ownerUID is immutable after construction.
 	mu         sync.RWMutex
 	deps       dependencies
 	policy     policy
+	ownerUID   uint32
 	fd         int
 	active     bool
 	released   bool
@@ -87,7 +89,7 @@ func (authority *Network) OpenUID(ctx context.Context, uid uint32) (*NetworkUID,
 		return nil, err
 	}
 	return &NetworkUID{state: &networkUIDState{
-		deps: state.deps, policy: state.policy, fd: fd, active: true,
+		deps: state.deps, policy: state.policy, ownerUID: uid, fd: fd, active: true,
 	}}, nil
 }
 
