@@ -142,7 +142,7 @@ func TestBinaryPullInstallsThroughRootBeforeReadingSQLiteAndProjectsResult(t *te
 	}
 	op := &Operation{
 		Repos:                Repos{Binary: repo},
-		Services:             Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+		Services:             Services{Binary: binary.NewService(repo, architecture)},
 		trustedReleaseClient: root,
 	}
 
@@ -178,7 +178,7 @@ func TestBinaryPullRepairsProjectionForEveryRootOutcome(t *testing.T) {
 			}
 			op := &Operation{
 				Repos:                Repos{Binary: repo},
-				Services:             Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+				Services:             Services{Binary: binary.NewService(repo, architecture)},
 				trustedReleaseClient: root,
 			}
 
@@ -207,7 +207,7 @@ func TestBinaryPullRootErrorIsReturnedUnchangedWithoutSQLiteAccess(t *testing.T)
 	}
 	op := &Operation{
 		Repos:                Repos{Binary: repo},
-		Services:             Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+		Services:             Services{Binary: binary.NewService(repo, architecture)},
 		trustedReleaseClient: root,
 	}
 
@@ -238,7 +238,7 @@ func TestBinaryPullProjectionFailurePreservesRootOutcomeAndRetryRepairs(t *testi
 	}
 	op := &Operation{
 		Repos:                Repos{Binary: repo},
-		Services:             Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+		Services:             Services{Binary: binary.NewService(repo, architecture)},
 		trustedReleaseClient: root,
 	}
 
@@ -305,7 +305,7 @@ func TestBinaryPullUsesOnlyExactOptionalMirrorArchive(t *testing.T) {
 			}
 			op := &Operation{
 				Repos:                Repos{Binary: repo},
-				Services:             Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+				Services:             Services{Binary: binary.NewService(repo, architecture)},
 				trustedReleaseClient: root,
 			}
 
@@ -342,7 +342,7 @@ func TestBinaryPullClosesMirrorReaderAfterRootReturns(t *testing.T) {
 	}
 	op := &Operation{
 		Repos:                Repos{Binary: repo},
-		Services:             Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+		Services:             Services{Binary: binary.NewService(repo, architecture)},
 		trustedReleaseClient: root,
 	}
 
@@ -502,7 +502,7 @@ func TestBinaryDisplayReadsDoNotVerifyRootOwnedProjectionPaths(t *testing.T) {
 			repo := &orderedBinaryProjectionRepo{Repository: baseRepo}
 			op := &Operation{
 				Repos:    Repos{Binary: repo},
-				Services: Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+				Services: Services{Binary: binary.NewService(repo, architecture)},
 			}
 
 			got := invoke(t, op)

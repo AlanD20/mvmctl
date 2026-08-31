@@ -39,13 +39,10 @@ func newRunCmd() *cobra.Command {
 func newJailerServiceCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "jailer", Short: "Run the privileged Firecracker Jailer service"}
 	for _, action := range []string{
-		"install", "launch", "cleanup", "expose-snapshot", "expose-volume", "remove-volume", "remove-release",
+		"launch", "cleanup", "expose-snapshot", "expose-volume", "remove-volume",
 	} {
 		action := action
 		sub := &cobra.Command{Use: action, Short: "Run the " + action + " Jailer operation"}
-		sub.Flags().String("version", "", "Exact Firecracker release version")
-		sub.Flags().String("arch", "", "Firecracker release architecture")
-		sub.Flags().String("sha256", "", "Verified release archive SHA-256")
 		sub.Flags().String("vm-id", "", "VM ID")
 		sub.Flags().String("vm-dir", "", "Per-VM directory")
 		sub.Flags().String("snapshot-dir", "", "Snapshot directory")
@@ -53,9 +50,6 @@ func newJailerServiceCmd() *cobra.Command {
 		sub.Flags().String("host-path", "", "Managed volume path")
 		sub.Flags().Bool("read-only", false, "Expose the managed volume read-only")
 		sub.RunE = func(c *cobra.Command, _ []string) error {
-			version, _ := c.Flags().GetString("version")
-			arch, _ := c.Flags().GetString("arch")
-			sha256, _ := c.Flags().GetString("sha256")
 			vmID, _ := c.Flags().GetString("vm-id")
 			vmDir, _ := c.Flags().GetString("vm-dir")
 			snapshotDir, _ := c.Flags().GetString("snapshot-dir")
@@ -63,8 +57,7 @@ func newJailerServiceCmd() *cobra.Command {
 			hostPath, _ := c.Flags().GetString("host-path")
 			readOnly, _ := c.Flags().GetBool("read-only")
 			return jailer.Run(c.Context(), jailer.Config{
-				Action: action, Version: version, Arch: arch, SHA256: sha256,
-				VMID: vmID, VMDir: vmDir, SnapshotDir: snapshotDir,
+				Action: action, VMID: vmID, VMDir: vmDir, SnapshotDir: snapshotDir,
 				DriveID: driveID, HostPath: hostPath, ReadOnly: readOnly,
 			})
 		}

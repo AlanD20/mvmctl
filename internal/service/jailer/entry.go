@@ -2,8 +2,6 @@ package jailer
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,10 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"golang.org/x/sys/unix"
-
 	"mvmctl/internal/infra"
-	"mvmctl/internal/lib/archive"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 )
@@ -44,9 +39,6 @@ type managedPaths struct {
 // Config selects one fixed-policy privileged Jailer operation.
 type Config struct {
 	Action      string
-	Version     string
-	Arch        string
-	SHA256      string
 	VMID        string
 	VMDir       string
 	SnapshotDir string
@@ -62,8 +54,6 @@ func Run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("jailer service requires root")
 	}
 	switch cfg.Action {
-	case "install":
-		return installRelease(ctx, cfg)
 	case "launch":
 		return launch(cfg)
 	case "cleanup":
@@ -74,118 +64,9 @@ func Run(ctx context.Context, cfg Config) error {
 		return exposeVolume(cfg.VMID, cfg.VMDir, cfg.DriveID, cfg.HostPath, cfg.ReadOnly)
 	case "remove-volume":
 		return removeVolume(cfg.VMID, cfg.DriveID)
-	case "remove-release":
-		return removeRelease(cfg.Version)
 	default:
 		return fmt.Errorf("unsupported jailer service action %q", cfg.Action)
 	}
-}
-
-func installRelease(ctx context.Context, cfg Config) error {
-	if !versionPattern.MatchString(cfg.Version) {
-		return fmt.Errorf("invalid Firecracker version")
-	}
-	if cfg.Arch != "x86_64" && cfg.Arch != "aarch64" {
-		return fmt.Errorf("unsupported Firecracker architecture")
-	}
-	if len(cfg.SHA256) != sha256.Size*2 {
-		return fmt.Errorf("invalid release checksum")
-	}
-	if err := ensureTrustedDirectoryChain(infra.TrustedBinaryRoot); err != nil {
-		return fmt.Errorf("prepare trusted binary root: %w", err)
-	}
-	tmp, err := os.CreateTemp(infra.TrustedBinaryRoot, ".release-*.tgz")
-	if err != nil {
-		return fmt.Errorf("create trusted archive: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	hash := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmp, hash), os.Stdin); err != nil {
-		tmp.Close()
-		return fmt.Errorf("copy verified release archive: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close trusted archive: %w", err)
-	}
-	actual := hex.EncodeToString(hash.Sum(nil))
-	if !strings.EqualFold(actual, cfg.SHA256) {
-		return fmt.Errorf("release checksum changed before trusted installation")
-	}
-
-	destDir := filepath.Join(infra.TrustedBinaryRoot, cfg.Version)
-	staging, err := os.MkdirTemp(infra.TrustedBinaryRoot, ".pair-*")
-	if err != nil {
-		return fmt.Errorf("create trusted pair staging directory: %w", err)
-	}
-	defer os.RemoveAll(staging)
-	fcPath := filepath.Join(staging, "firecracker")
-	jlPath := filepath.Join(staging, "jailer")
-	if err := archive.ExtractRenamed(ctx, tmpPath, []archive.RenameEntry{
-		{ArchiveName: fmt.Sprintf("firecracker-v%s-%s", cfg.Version, cfg.Arch), OutputPath: fcPath, Mode: 0755},
-		{ArchiveName: fmt.Sprintf("jailer-v%s-%s", cfg.Version, cfg.Arch), OutputPath: jlPath, Mode: 0755},
-	}); err != nil {
-		return fmt.Errorf("extract trusted release pair: %w", err)
-	}
-	if err := os.Chmod(staging, 0755); err != nil {
-		return fmt.Errorf("set trusted release directory mode: %w", err)
-	}
-	if !validTrustedPair(staging) {
-		return fmt.Errorf("staged trusted release pair failed ownership or mode validation")
-	}
-	if err := syncTrustedPair(staging); err != nil {
-		return fmt.Errorf("sync trusted release pair: %w", err)
-	}
-
-	destInfo, destErr := os.Lstat(destDir)
-	switch {
-	case destErr == nil:
-		if destInfo.IsDir() && validTrustedPair(destDir) {
-			same, err := pairsEqual(staging, destDir)
-			if err != nil {
-				return fmt.Errorf("compare trusted release pairs: %w", err)
-			}
-			if same {
-				return writeInstallResult(destDir)
-			}
-		}
-		if err := unix.Renameat2(
-			unix.AT_FDCWD,
-			staging,
-			unix.AT_FDCWD,
-			destDir,
-			unix.RENAME_EXCHANGE,
-		); err != nil {
-			return fmt.Errorf("atomically replace trusted release pair: %w", err)
-		}
-		if err := syncDirectory(infra.TrustedBinaryRoot); err != nil {
-			return fmt.Errorf("sync trusted binary root after replacement: %w", err)
-		}
-		if err := os.RemoveAll(staging); err != nil {
-			return fmt.Errorf("remove replaced trusted release pair: %w", err)
-		}
-		if err := syncDirectory(infra.TrustedBinaryRoot); err != nil {
-			return fmt.Errorf("sync trusted binary root after old-pair removal: %w", err)
-		}
-	case os.IsNotExist(destErr):
-		if err := os.Rename(staging, destDir); err != nil {
-			return fmt.Errorf("install trusted release pair: %w", err)
-		}
-		if err := syncDirectory(infra.TrustedBinaryRoot); err != nil {
-			return fmt.Errorf("sync trusted binary root after installation: %w", err)
-		}
-	default:
-		return fmt.Errorf("inspect existing trusted release pair: %w", destErr)
-	}
-	return writeInstallResult(destDir)
-}
-
-func writeInstallResult(destDir string) error {
-	result := InstallResult{
-		FirecrackerPath: filepath.Join(destDir, "firecracker"),
-		JailerPath:      filepath.Join(destDir, "jailer"),
-	}
-	return json.NewEncoder(os.Stdout).Encode(result)
 }
 
 func launch(cfg Config) error {
@@ -739,19 +620,6 @@ func cgroupPath(vmID string) string {
 	)
 }
 
-func removeRelease(version string) error {
-	if !versionPattern.MatchString(version) {
-		return fmt.Errorf("invalid release version")
-	}
-	if _, err := os.Lstat(infra.TrustedBinaryRoot); os.IsNotExist(err) {
-		return nil
-	}
-	if err := validateTrustedDirectoryChain(infra.TrustedBinaryRoot); err != nil {
-		return fmt.Errorf("validate trusted binary root before removal: %w", err)
-	}
-	return os.RemoveAll(filepath.Join(infra.TrustedBinaryRoot, version))
-}
-
 func jailRoot(vmID string) string {
 	return filepath.Join(infra.JailerChrootBase, "firecracker", vmID, "root")
 }
@@ -843,72 +711,4 @@ func validateTrustedDirectory(path string) error {
 		return fmt.Errorf("trusted path component is not root-owned: %s", path)
 	}
 	return nil
-}
-
-func validTrustedPair(dir string) bool {
-	if err := validateTrustedDirectoryChain(dir); err != nil {
-		return false
-	}
-	for _, name := range []string{"firecracker", "jailer"} {
-		if err := validateTrustedExecutable(filepath.Join(dir, name)); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
-func pairsEqual(first, second string) (bool, error) {
-	for _, name := range []string{"firecracker", "jailer"} {
-		firstHash, err := fileSHA256(filepath.Join(first, name))
-		if err != nil {
-			return false, err
-		}
-		secondHash, err := fileSHA256(filepath.Join(second, name))
-		if err != nil {
-			return false, err
-		}
-		if firstHash != secondHash {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-func syncTrustedPair(dir string) error {
-	for _, name := range []string{"firecracker", "jailer"} {
-		f, err := os.Open(filepath.Join(dir, name))
-		if err != nil {
-			return err
-		}
-		if err := f.Sync(); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
-			return err
-		}
-	}
-	return syncDirectory(dir)
-}
-
-func syncDirectory(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
 }

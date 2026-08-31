@@ -2,8 +2,6 @@ package binary_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -78,7 +76,7 @@ func TestService_ResolvePairFailsClosed(t *testing.T) {
 			for _, item := range tc.seed {
 				require.NoError(t, repo.Upsert(ctx, item))
 			}
-			svc := binary.NewService(repo, t.TempDir(), t.TempDir(), "x86_64")
+			svc := binary.NewService(repo, "x86_64")
 
 			pair, err := svc.ResolvePair(ctx, tc.selected)
 			require.Error(t, err)
@@ -86,74 +84,6 @@ func TestService_ResolvePairFailsClosed(t *testing.T) {
 			assert.Nil(t, pair)
 		})
 	}
-}
-
-// Rationale: A binary referenced by either side of persisted launch state must
-// remain on disk and in the repository unless the caller explicitly forces removal.
-func TestService_RemovePreservesReferencedBinary(t *testing.T) {
-	ctx := context.Background()
-	tests := map[string]struct {
-		attachReference func(*model.BinaryItem)
-	}{
-		"firecracker_vm_reference": {
-			attachReference: func(item *model.BinaryItem) {
-				item.VMs = []*model.VMItem{{ID: "vm-id", Name: "vm-name", BinaryID: item.ID}}
-			},
-		},
-		"jailer_vm_reference": {
-			attachReference: func(item *model.BinaryItem) {
-				item.VMs = []*model.VMItem{{ID: "vm-id", Name: "vm-name", JailerBinaryID: item.ID}}
-			},
-		},
-		"snapshot_reference": {
-			attachReference: func(item *model.BinaryItem) {
-				item.Snapshots = []*model.SnapshotItem{{ID: "snapshot-id", Name: "snapshot-name", BinaryID: item.ID}}
-			},
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			repo := testutil.NewBinaryRepo()
-			path := filepath.Join(t.TempDir(), "firecracker")
-			require.NoError(t, os.WriteFile(path, []byte("release-binary"), 0755))
-			item := binaryItem("binary-id", "firecracker", "1.16.0", true)
-			item.Path = path
-			tc.attachReference(item)
-			require.NoError(t, repo.Upsert(ctx, item))
-			svc := binary.NewService(repo, t.TempDir(), t.TempDir(), "x86_64")
-
-			removed, err := svc.Remove(ctx, item, false)
-			require.Error(t, err)
-			assert.Nil(t, removed)
-			data, readErr := os.ReadFile(path)
-			require.NoError(t, readErr)
-			assert.Equal(t, "release-binary", string(data))
-			persisted, getErr := repo.Get(ctx, item.ID)
-			require.NoError(t, getErr)
-			assert.Same(t, item, persisted)
-		})
-	}
-}
-
-func TestService_RemoveUnreferencedBinary(t *testing.T) {
-	ctx := context.Background()
-	repo := testutil.NewBinaryRepo()
-	path := filepath.Join(t.TempDir(), "firecracker")
-	require.NoError(t, os.WriteFile(path, []byte("release-binary"), 0755))
-	item := binaryItem("binary-id", "firecracker", "1.16.0", true)
-	item.Path = path
-	require.NoError(t, repo.Upsert(ctx, item))
-	svc := binary.NewService(repo, t.TempDir(), t.TempDir(), "x86_64")
-
-	removed, err := svc.Remove(ctx, item, false)
-	require.NoError(t, err)
-	assert.Same(t, item, removed)
-	_, statErr := os.Stat(path)
-	assert.ErrorIs(t, statErr, os.ErrNotExist)
-	persisted, getErr := repo.Get(ctx, item.ID)
-	require.NoError(t, getErr)
-	assert.Nil(t, persisted)
 }
 
 func binaryItem(id, typ, version string, present bool) *model.BinaryItem {

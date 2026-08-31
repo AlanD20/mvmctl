@@ -28,9 +28,3 @@ type LaunchManifest struct {
 	SnapshotMode bool                  `json:"snapshot_mode"`
 	CgroupLimits *model.VMCgroupLimits `json:"cgroup_limits,omitempty"`
 }
-
-// InstallResult identifies the immutable trusted paths installed for a release.
-type InstallResult struct {
-	FirecrackerPath string `json:"firecracker_path"`
-	JailerPath      string `json:"jailer_path"`
-}

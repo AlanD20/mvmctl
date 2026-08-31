@@ -260,7 +260,7 @@ func (op *Operation) BinaryList(
 	onProgress event.OnProgressCallback,
 ) ([]*model.BinaryItem, []model.VersionInfo, error) {
 	if !remote {
-		items, err := op.Services.Binary.ListAll(ctx, false, false)
+		items, err := op.Services.Binary.ListAll(ctx)
 		return items, nil, err
 	}
 	emitProgress(onProgress, "listing", "running", "Fetching remote versions...")
@@ -327,7 +327,7 @@ func (op *Operation) BinarySetDefault(ctx context.Context, input inputs.BinaryIn
 // BinaryEnsureDefault ensures a default Firecracker binary exists.
 // Uses PEP 440-compatible version sorting to pick the newest binary.
 func (op *Operation) BinaryEnsureDefault(ctx context.Context) (*model.BinaryItem, error) {
-	local, err := op.Services.Binary.ListAll(ctx, false, false)
+	local, err := op.Services.Binary.ListAll(ctx)
 	if err != nil {
 		return nil, errs.WrapMsg(
 			errs.CodeBinaryEnsureDefaultFailed,

@@ -28,7 +28,7 @@ func TestBinaryPullAndRemoveCompleteOnlyDeduplicatedInstalledVersions(t *testing
 	}
 	op := &api.Operation{
 		Repos:    api.Repos{Binary: repo},
-		Services: api.Services{Binary: binary.NewService(repo, t.TempDir(), t.TempDir(), architecture)},
+		Services: api.Services{Binary: binary.NewService(repo, architecture)},
 	}
 	previous := opRef
 	opRef = op

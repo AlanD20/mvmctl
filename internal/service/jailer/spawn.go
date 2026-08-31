@@ -3,7 +3,6 @@ package jailer
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,41 +10,6 @@ import (
 
 	"mvmctl/internal/lib/system"
 )
-
-// InstallRelease installs an already checksum-verified release archive into the trusted store.
-func InstallRelease(
-	ctx context.Context,
-	version, arch, archivePath, expectedSHA256 string,
-) (*InstallResult, error) {
-	archiveFile, err := os.Open(archivePath)
-	if err != nil {
-		return nil, fmt.Errorf("open verified Firecracker archive: %w", err)
-	}
-	defer archiveFile.Close()
-
-	var stdout, stderr bytes.Buffer
-	cmd, err := system.SpawnService(ctx, system.SpawnConfig{
-		Name:       "jailer",
-		Privileged: true,
-		Stdin:      archiveFile,
-		Stdout:     &stdout,
-		Stderr:     &stderr,
-		Args: []string{
-			"install", "--version", version, "--arch", arch, "--sha256", expectedSHA256,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("spawn trusted pair installer: %w", err)
-	}
-	if err := cmd.Wait(); err != nil {
-		return nil, fmt.Errorf("trusted pair installer failed: %s: %w", stderr.String(), err)
-	}
-	var result InstallResult
-	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-		return nil, fmt.Errorf("decode trusted pair installer result: %w", err)
-	}
-	return &result, nil
-}
 
 // Launch starts the privileged Jailer service for a validated per-VM manifest.
 func Launch(
@@ -102,11 +66,6 @@ func vmDirForManagedResource(vmID, resourcePath string) string {
 // RemoveVolume unmounts one volume from an existing jail.
 func RemoveVolume(ctx context.Context, vmID, driveID string) error {
 	return runAndWait(ctx, []string{"remove-volume", "--vm-id", vmID, "--drive-id", driveID})
-}
-
-// RemoveRelease removes one trusted exact-version release directory.
-func RemoveRelease(ctx context.Context, version string) error {
-	return runAndWait(ctx, []string{"remove-release", "--version", version})
 }
 
 func runAndWait(ctx context.Context, args []string) error {
