@@ -27,6 +27,9 @@ jobs:
       - name: Tidy
         run: go mod tidy && git diff --exit-code
 
+      - name: Check core domain imports
+        run: go test ./internal/architecture -count=1
+
       - name: Install golines
         run: go install github.com/segmentio/golines@latest
 
