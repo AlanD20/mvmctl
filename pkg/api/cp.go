@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"mvmctl/internal/core/vm"
+	"strings"
+	"time"
+
 	"mvmctl/internal/core/vsock"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
@@ -14,8 +16,6 @@ import (
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
-	"strings"
-	"time"
 )
 
 // CPAPI defines the public interface for copy file operations.
@@ -178,10 +178,7 @@ func (op *Operation) newVsockClient(
 	}
 	client := vsock.NewClient(cfg, probeTimeout)
 	client.VmName = vmName
-	handler := &vsockhandler.Handler{
-		VMResolver: vm.NewResolver(op.Repos.VM),
-		VsockRepo:  op.Repos.Vsock,
-	}
+	handler := &vsockhandler.Handler{}
 	client.OnHostFrame = handler.Handle
 	client.OnUpgradeStarted = func(ctx context.Context, fromVersion, toVersion string) {
 		slog.Info("upgrading agent", "vm", vmName, "from", fromVersion, "to", toVersion)
