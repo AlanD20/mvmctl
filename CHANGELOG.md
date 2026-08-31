@@ -11,9 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > service-access policy, root-owned system installer, early privileged-dispatch foundation, and private root-owned VM
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
 > authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a canonical
-> generation digest, the private firewall generation record/store/lock authority, bounded raw nftables snapshot
-> collection, the private Jailer and LoopMount ephemeral-authority capabilities, the private root-pinned network
-> namespace authority/effect, strict schema-3 Jailer record/registration and private pidfd process-activation/
+> generation digest, the private firewall generation record/store/lock and evidence-bound replacement authority,
+> bounded raw nftables snapshot collection with a retained host-netns transport factory, the private Jailer and
+> LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and down-only link effects,
+> strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, and provision/inspect receiver actions described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
@@ -49,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unsafe-object rejection without repair, cancellation, release, contention, and unrelated-resource concurrency.
 - Firewall consumes its separate closed authority capability only through an inert generation authority, LoopMount
   registers only its exact provision/inspect internal privileged actions, and Network uses its family only for the
-  private namespace target/effect described below. Complete production topology and `/run/mvmctl/runtime` remain
+  private namespace and link effects described below. Complete production topology and `/run/mvmctl/runtime` remain
   unimplemented, and none of these foundations is a public/backend runtime cutover.
 
 #### Enforced VM resource envelopes
@@ -88,23 +89,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deterministic input-order evidence remains in L1. On the isolated representative 1,000-VM benchmark, compilation was
   roughly 23–28 ms with about 10 MB and 179,000 allocations; the regression test enforces a 250,000-allocation ceiling.
 - This compiler foundation is inert: it creates no `nftables.Conn` and calls no `Flush`. The separate raw snapshot
-  collector below detects unknown expressions but has no production live-kernel connection or authority integration.
-  Qualified initial inspection/adoption, empty-generation deletion or application, namespace execution, privileged
-  action, public policy cutover, legacy `nft` CLI removal, and L2 qualification remain pending. These foundations
-  provide no kernel-application, atomicity, or release-readiness evidence.
+  collector below detects unknown expressions, and a retained exact host-netns authority can create its fresh checked
+  transports, but no application or recovery path invokes them. Qualified initial inspection/adoption,
+  empty-generation deletion or application, privileged action, public policy cutover, legacy `nft` CLI removal, and
+  L2 qualification remain pending. These foundations provide no kernel-application, atomicity, or release-readiness
+  evidence.
 
 #### Firewall generation authority foundation
 - Added the separate never-unlinked root-owned `/run/mvmctl/authority/firewall.lock` capability plus a strict
   committed/applying generation record and bounded codec at `/var/lib/mvmctl/firewall/generation.json`.
 - Added descriptor-relative managed-tree admission and exclusive first publication with exact root ownership/modes,
-  stable bounded reads, no-replace rename, fsync, and post-rename creation/durability evidence. Existing state is never
-  repaired or overwritten.
+  stable bounded reads, no-replace rename, fsync, and post-rename creation/durability evidence. The first-publication
+  path never repairs or overwrites existing state.
 - Added a private inert acquisition seam that requires earlier network authority, then admits only a record bound to
   the current boot and pinned host network namespace. Store, lock, and authority cleanup is pointer-shared, close-once,
   cancellation-independent, and caches its first result.
+- Added evidence-bound atomic replacement of an admitted generation record. The store re-admits the exact record and
+  file identity before rename, reads the replacement back afterward, preserves `record_replaced` and
+  `durability_uncertain` evidence, and blocks later replacement through a lease whose outcome became ambiguous.
 - The foundation deliberately rejects a missing record because only qualified kernel inspection may establish initial
-  truth. Production binding of the inert raw collector, record replacement, `nftables.Conn`/`Flush`, empty-generation
-  application, recovery, privileged/public wiring, and system qualification remain pending.
+  truth. Qualified initial inspection, `nftables.Conn`/`Flush`, empty-generation application, recovery,
+  privileged/public wiring, and system qualification remain pending.
 
 #### Bounded raw nftables snapshot foundation
 - Added a private raw-netlink collector that brackets one logical observation with ruleset-generation reads and chooses
@@ -113,8 +118,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Each request uses a fresh checked transport while the complete snapshot shares a 32-MiB/20,000-message receive
   budget. The strict decoder rejects malformed or unknown attributes/expressions, partial managed state, inconsistent
   base sequences, generation drift, forbidden object classes, and cap violations.
-- This collector is inert. No production factory supplies a live netlink connection, no generation-authority path
-  calls it, and no live-kernel qualification, adoption, mutation, privileged action, or public behavior follows from it.
+- Added a retained namespace authority that requires the earlier network and generation capabilities to agree, pins
+  and rechecks the exact current host network namespace, and supplies fresh strict `NETLINK_NETFILTER` transports to
+  the collector through that retained descriptor.
+- The collector and its factory remain inert and uncomposed. No production application path calls them, no real-kernel
+  result is qualified, and no adoption, mutation, recovery, privileged action, or public behavior follows from them.
 
 #### Persistent managed-network authority foundation
 - Added a private strict schema-1 managed-network record, exact codec, and descriptor-relative store. Root persists only
@@ -139,8 +147,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when they retain stale identity fields. Lock-acquisition `DomainError` identity/details survive rollback, with
   `cleanup_required=true` added only when retained authority still needs cleanup.
 - The foundation remains intentionally inactive until the applicable Jailer VM-lock lease is transferred into network
-  registration/topology and the remaining link effects, nftables and link-activation stages, Jailer `--netns` handoff,
-  persistent VM-topology integration, and qualification are implemented.
+  registration/topology and the nftables, route/address, link-activation, Jailer `--netns`, persistent VM-topology,
+  and qualification stages are implemented.
 
 #### Private per-VM network-namespace authority and effect
 - Added a closed Network authority capability for the exact root-owned
@@ -150,9 +158,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a private namespace effect that creates a network namespace on a disposable locked OS thread, pins and publishes
   its exact nsfs mount with `open_tree`/`move_mount`, verifies restoration of the host namespace, and performs
   identity-bound non-lazy unmount plus placeholder cleanup with explicit uncertain-outcome details.
-- The effect deliberately does not implement the complete `TopologyEffects` boundary until the typed link adapter
-  exists. Neither it nor the private topology service has a production caller; local bridge, TAP, veth, firewall/link
-  activation, durable topology, Jailer handoff, public action, and live-kernel qualification remain pending.
+- Added the private typed link adapter and composed it with the namespace effect behind the complete `TopologyEffects`
+  boundary. It creates, attaches, inspects down, and identity-bound deletes the exact local bridge, veth pair, and TAP;
+  every rtnetlink request is bound to an explicit retained namespace descriptor.
+- TAP creation enters the retained VM namespace on a disposable locked thread, opens only fixed `/dev/net/tun`, and
+  uses `TUNSETIFF` plus `TUNSETOWNER` with no group authority. It rechecks the exact owner, no-PI state, down state, and
+  managed alias before `TUNSETPERSIST`, then verifies the persistent TAP through rtnetlink.
+- Neither the private topology service nor these effects has a production caller. VM-lock transfer, route/address and
+  link-up stages, firewall application, durable topology, Jailer handoff, public action, and live-kernel qualification
+  remain pending.
 
 #### Typed LoopMount privilege foundations
 - Added named `ProvisionVM`, `InspectImage`, and `OptimizeImage` clients with fixed actions and closed VM/image request,
@@ -350,6 +364,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory name.
 - This authority and its two registered typed actions remain unavailable through the public CLI. The aarch64 archive
   audit, public binary-authority cutover, and L2/system release qualification are still release blockers.
+
+#### Architecture-scoped binary display projection
+
+- Binary rows now carry the release architecture. List, prefix, type/version, latest, and default resolution are scoped
+  to the runtime architecture, and VM migration pairs a Firecracker row only with a same-architecture Jailer row.
+- Added atomic projection replacement for one exact `(architecture, version)` Firecracker/Jailer pair and exact-slot
+  projection removal. Replacement preserves or explicitly selects each architecture-scoped default, and a failed
+  pair update rolls back both members; another architecture at the same version is unchanged.
+- This is only the display-projection cutover's first slice. Public `mvm bin pull` and `mvm bin rm` still perform the
+  legacy downloader/path mutation instead of invoking trusted-release authority and the new projection reconciliation;
+  that authority wiring remains Slice 2, and legacy-route removal remains Slice 3.
 
 #### Descriptor-pinned managed-cache and base launch-resource substrates
 
@@ -555,9 +580,9 @@ The following items are release blockers and are intentionally not described abo
   the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
   private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
   outputs, and image provisioning.
-- Keep the implemented closed Firewall capability, inert generation authority, and inert raw snapshot collector private
-  until a production connection binds qualified kernel inspection/application after network authority; do not add
-  generic paths, descriptors, or lock names.
+- Keep the implemented closed Firewall capability, evidence-bound generation record replacement, retained host-netns
+  snapshot factory, and inert raw collector private until an application path composes qualified kernel inspection and
+  mutation after network authority; do not add generic paths, descriptors, or lock names.
   Then create the separate caller-owned socket/PID output directories beneath
   `/run/mvmctl/runtime`; stop
   mounting the whole cache VM directory, pin persistent config/output leaves individually, truncate enabled `0600`
@@ -567,22 +592,24 @@ The following items are release blockers and are intentionally not described abo
   reads a caller-writable configuration from the whole mounted VM directory. Wire the implemented sealed root-built
   configuration capability into the final descriptor-only mount transaction and derive/verify every jail-visible path
   after durable registration.
-- Switch the public binary API from its legacy downloader/path mutation to the registered typed trusted-release
-  install/remove actions; complete the aarch64 archive audit and CLI-level qualification. The implemented atomic
-  authority is not yet reachable from public `mvm bin` operations.
+- Complete Slice 2 by switching public binary pull/remove to the registered typed trusted-release actions and
+  reconciling the implemented architecture-scoped SQLite projection only from authoritative results. Complete Slice 3
+  by deleting the legacy downloader/path mutation routes, then finish the aarch64 archive audit and CLI-level
+  qualification. The implemented atomic authority is not yet reachable from public `mvm bin` operations.
 - Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; complete
   live-kernel qualification and backend cutover for the now-registered LoopMount provision/inspect handlers, then remove
   the public root
   `mvm run jailer` and `mvm run provision` entry points.
-- Compose the implemented private namespace authority/effect into the owner-bound VM lifecycle, add the remaining link
-  effects, make one namespace mandatory per VM, pass its pinned handle to Jailer, and integrate activation, rollback,
-  reconciliation, and cleanup.
-- Use the implemented root-owned global firewall lock and durable committed/applying generation record only after
-  resolving the pinned library's missing table/chain provenance, accepting the root/`CAP_NET_ADMIN` threat-model
-  boundary, and binding the raw collector to exact live authority. Then prove namespace-scoped
-  delete/recreate, invalid-batch, recovery, and actual empty-generation deletion/application against supported kernels
-  before one privileged `Conn.Flush` application can make links usable. Only then remove the iptables backend, backend
-  selector, and production `nft` CLI subprocess/parser; the canonical compiler digest is not a kernel application.
+- Compose the implemented private namespace and down-only link effects into the owner-bound VM lifecycle, add the
+  route/address and verified link-up stages, make one namespace mandatory per VM, pass its pinned handle to Jailer,
+  and integrate activation, rollback, reconciliation, and cleanup.
+- Use the implemented root-owned global firewall lock, durable committed/applying generation record replacement, and
+  retained exact-host-netns snapshot factory only after resolving the pinned library's missing table/chain provenance,
+  accepting the root/`CAP_NET_ADMIN` threat-model boundary, and composing qualified inspection. Then prove
+  namespace-scoped delete/recreate, invalid-batch, recovery, and actual empty-generation deletion/application against
+  supported kernels before one privileged `Conn.Flush` application can make links usable. Only then remove the
+  iptables backend and selector plus the production `nft` CLI subprocess/parser; the canonical compiler digest is not
+  a kernel application.
 - Complete the public API, CLI, nftables application, and vsock relay cutover from routed `ServiceAccessPolicy` and the
   `allow_remote_exec` trust mesh to the implemented typed traffic/exec persistence foundations; then remove the
   transitional tables, flags, and paths atomically.

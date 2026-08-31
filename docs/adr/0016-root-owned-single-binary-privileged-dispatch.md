@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-08-31 (private pidfd/Jailer process authority)
+**Last Updated:** 2026-08-31 (architecture-scoped release projection and private network link effects)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md)
@@ -908,6 +908,25 @@ A future public `--force` may bypass only an untrusted SQLite projection warning
 sent to root and never bypasses root-owned instance references, corrupt reference authority, store admission, or any
 other receiver invariant.
 
+#### Architecture-scoped display projection
+
+The SQLite `binaries` table now records `architecture`. Its active-member uniqueness is
+`(type, architecture, version)`, and its default uniqueness is `(type, architecture)`. Binary list, prefix,
+type/version, latest, and default resolution are scoped to the runtime architecture; the Jailer migration pairs a
+Firecracker row only with a same-architecture Jailer row. Stable display IDs for root-authoritative executable results
+derive from type, architecture, version, and executable SHA-256.
+
+The repository now has one atomic `ReplaceReleaseProjection` transaction for a complete
+`(architecture, version)` Firecracker/Jailer pair and one exact-slot `RemoveReleaseProjection` operation. Replacement
+soft-deletes a superseded active member, preserves or explicitly selects each architecture-scoped default, and rolls
+back both members on failure. Removal soft-deletes only the exact architecture/version slot. Neither operation changes
+the same version for another architecture.
+
+This is display-projection Slice 1, not public release-authority cutover. Public `mvm bin pull` and `mvm bin rm` still
+use the legacy downloader/path mutation and do not call these reconciliation methods. Slice 2 routes those public
+operations through the registered typed trusted-release actions and updates the projection only from authoritative
+results. Slice 3 removes the legacy routes. SQLite remains untrusted throughout.
+
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
 dedicated checksum authority independently fetches the derived sidecar with the closed transport policy above and
@@ -1145,11 +1164,20 @@ The Network family also creates one exact root-owned
 `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder while retaining its directory, leaf, and mount identity. The
 private network effect creates a new network namespace on a disposable locked OS thread, clones and publishes its exact
 nsfs mount through `open_tree`/`move_mount`, verifies restoration of the pinned host namespace, and removes only the
-retained mount and placeholder with explicit uncertain-unmount evidence. This is not a production topology or public
-action: neither the private topology service nor namespace effect has a production caller, the effect deliberately
-does not implement the complete link-effect boundary, and local bridge, TAP, veth, firewall/link activation, durable
-VM-topology state, Jailer handoff, runtime-subtree creation, public cutover, and live-kernel qualification remain target
-design.
+retained mount and placeholder with explicit uncertain-unmount evidence. A separate private typed link effect completes
+the `TopologyEffects` boundary. It creates the exact namespace-local bridge, host/namespace veth pair, and TAP down;
+attaches only identity-checked endpoints; inspects every mutation; and deletes only exact retained bridge, veth, and
+TAP identities. Each rtnetlink connection uses an explicit retained namespace descriptor.
+
+TAP creation enters the retained VM namespace on a disposable locked thread, opens only fixed `/dev/net/tun`, and uses
+`TUNSETIFF` with TAP/no-PI/exclusive flags followed by `TUNSETOWNER` for the authenticated non-root UID. It sets no
+group authority. The effect rechecks type, no-PI, owner, absent group, down state, ifindex, and the managed alias
+before final `TUNSETPERSIST`, then verifies the persistent identity through rtnetlink. Host-namespace restoration
+failure retires the contaminated worker.
+
+This remains neither a production topology nor a public action. No production caller constructs the private topology
+service. Jailer VM-lock transfer, route/address and verified link-up stages, firewall application, durable VM-topology
+state, Jailer handoff, runtime-subtree creation, public cutover, and live-kernel qualification remain target design.
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and

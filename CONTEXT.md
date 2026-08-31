@@ -333,6 +333,14 @@ Production topology/cgroup final verification, network/firewall lease transfer, 
 runtime/mount/output cleanup, status observation and full reconciliation, API wiring, and live L2 qualification remain
 pending.
 
+SQLite binary rows are an untrusted display projection of the root release store. The implemented projection schema
+now includes architecture and scopes list, prefix, type/version, latest, and default resolution to the runtime
+architecture. VM migration pairs Firecracker only with a Jailer row of the same architecture. Private repository
+methods atomically replace one complete `(architecture, version)` pair or remove that exact slot while leaving the same
+version for another architecture unchanged. This is only projection Slice 1: public pull/remove still use the legacy
+downloader and path mutation. Slice 2 must route them through trusted-release authority and reconcile this projection;
+Slice 3 removes the legacy routes.
+
 The cycle-free `internal/lib/authorityfs` leaf module now establishes the implemented portion of that split. It creates
 or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`
 `/run/mvmctl/authority`. Jailer's global index lock, release-lock directory, per-UID authority directories, and per-VM
@@ -365,10 +373,15 @@ The Network authority family now also creates one exact root-owned
 network effect can create a network namespace on a disposable locked OS thread, publish its exact nsfs mount onto that
 placeholder through `open_tree`/`move_mount`, verify restoration of the host network namespace, and remove only the
 retained mount and placeholder with explicit uncertain-unmount evidence. This is an inert private effect, not runtime
-activation: neither `newService` nor `newNamespaceEffect` has a production caller, the namespace effect deliberately
-does not implement the complete `TopologyEffects` boundary until the typed link adapter exists, and there is no Jailer
-VM-lock transfer, local bridge, TAP, veth, route, firewall, persistent VM-topology record, privileged action, public
-behavior, or live-kernel qualification. The `/run/mvmctl/runtime` tree remains unimplemented.
+activation. A separate private link effect now completes the `TopologyEffects` boundary: it creates and verifies the
+exact namespace-local bridge, host/namespace veth pair, and TAP down; attaches only identity-checked endpoints; and
+deletes only exact retained identities. Every rtnetlink operation uses an explicit retained network-namespace
+descriptor. TAP creation enters the retained VM namespace on a disposable locked thread, opens only `/dev/net/tun`,
+uses `TUNSETIFF` and `TUNSETOWNER` with no group authority, and reverifies owner, no-PI, down state, and the managed
+alias before final persistence. Neither `newService` nor the composed topology effect has a production caller, and
+there is no Jailer VM-lock transfer, route/address or link-up stage, firewall application, persistent VM-topology
+record, privileged action, public behavior, or live-kernel qualification. The `/run/mvmctl/runtime` tree remains
+unimplemented.
 
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
 requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`
@@ -552,18 +565,22 @@ The compiler remains inert. A separate implemented authority foundation now prov
 descriptor-relative exclusive store at `/var/lib/mvmctl/firewall/generation.json`. Its private acquisition seam first
 requires earlier network authority, then binds the admitted record to the current boot and pinned host network
 namespace while retaining pointer-shared cached close-once cleanup authority. It fails when the record is missing
-because only qualified kernel inspection may establish initial authority.
+because only qualified kernel inspection may establish initial authority. An admitted lease can atomically replace the
+record only after re-reading both its exact contents and retained file evidence; post-rename readback preserves exact
+`record_replaced` and durability evidence and prevents another mutation after an ambiguous outcome.
 
 A separate inert raw-netlink snapshot collector now issues only receiver-chosen read requests for the two exact managed
 tables, five fixed chains, their rules, and the absence of sets, objects, and flowtables. It brackets collection with
 ruleset-generation reads, uses a shared 32-MiB/20,000-message budget across fresh single-request transports, and feeds
-the replies to the strict raw decoder, which rejects unknown expressions and structural drift. No production transport
-factory or call site connects the collector to a live kernel or the generation authority.
+the replies to the strict raw decoder, which rejects unknown expressions and structural drift. A retained namespace
+authority now requires the earlier network and generation identities to agree, pins and rechecks the exact current host
+network namespace, and supplies fresh strict `NETLINK_NETFILTER` transports through that descriptor. No production
+application or recovery path obtains this factory or invokes the collector, and no real-kernel result is qualified.
 
-Qualified initial inspection/adoption, record replacement during application, actual empty-generation
-deletion/application, `nftables.Conn`/`Flush`, namespace execution, privileged action, public policy cutover, legacy
-`nft` CLI removal, live-kernel qualification, and L2 qualification remain pending. These foundations are not evidence
-of kernel application, atomicity, or release readiness; the transitional backends and public policy path remain active.
+Qualified initial inspection/adoption, actual empty-generation deletion/application, `nftables.Conn`/`Flush`, mutation
+and recovery orchestration, privileged action, public policy cutover, legacy `nft` CLI removal, live-kernel
+qualification, and L2 qualification remain pending. These foundations are not evidence of kernel application,
+atomicity, enforcement, or release readiness; the transitional backends and public policy path remain active.
 
 ADR-0017 defines the remaining clean-break replacement. Before any fixed-name table can be replaced or removed, root
 must hold the never-unlinked global `/run/mvmctl/authority/firewall.lock` and bind the exact observed generation to the
@@ -573,13 +590,14 @@ reserved tables are absent; the implemented empty compiler output does not yet i
 Missing, corrupt, mismatched, or ambiguous authority never permits deletion.
 
 `github.com/google/nftables v0.3.0` exposes rule userdata but no table/chain ownership metadata, and its structured rule
-reader can omit expression types it does not understand. The inert raw collector closes the expression-omission gap,
-but root-record-bound live inspection, the threat-model boundary for another root or `CAP_NET_ADMIN` actor, and
-real-kernel delete/recreate batch atomicity remain explicit activation gates. The final adapter must resolve those
-gates, apply one complete generation directly, then remove iptables, the backend selector, backend-specific
-repositories, and the production `nft` CLI path. Library and netlink types stay private to that adapter; there is no
-final CLI fallback. Kernel nftables, bridge-family, connection-tracking, NAT, and privilege capabilities remain host
-requirements. A disposable QA runner may use the `nft` CLI only as an independent read-only oracle.
+reader can omit expression types it does not understand. The inert raw collector and retained host-netns factory close
+the expression-decoder and namespace-selection seams, but root-record-bound live inspection within an accepted threat
+model for another root or `CAP_NET_ADMIN` actor and real-kernel delete/recreate batch atomicity remain explicit
+activation gates. The final adapter must resolve those gates, apply one complete generation directly, then remove
+iptables, the backend selector, backend-specific repositories, and the production `nft` CLI path. Library and netlink
+types stay private to that adapter; there is no final CLI fallback. Kernel nftables, bridge-family, connection-tracking,
+NAT, and privilege capabilities remain host requirements. A disposable QA runner may use the `nft` CLI only as an
+independent read-only oracle.
 
 ## Relationships
 

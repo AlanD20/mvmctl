@@ -401,10 +401,17 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   never writes a second frame. Use the existing EOF-qualified response authority and remote-result precedence over
   uploader/exit/reap diagnostics; capability tests confirm those resolved semantics, preserve partial-state details,
   and expose no generic call/decoder, executable/argv/environment, path/URL/checksum, force, or reference-bypass input.
-- [ ] 7. Switch the public binary API to root release authority, keep SQLite rows display-only and untrusted, and delete
-  the legacy downloader/path-based privileged mutation path without compatibility code. Test projection mismatch and
-  local `--force` warning behavior. Do not update SQLite after root postcommit error; retry/idempotency obtains root
-  truth and repairs projection. Preserve root error details and search for every removed legacy route.
+- [ ] 7. Switch the public binary API to root release authority while keeping SQLite rows display-only and untrusted.
+  - [x] **Slice 1:** add architecture to binary rows and stable root-result display IDs; scope active member/default
+    uniqueness and list/prefix/type-version/latest/default resolution to architecture; pair Jailer migration rows only
+    within the Firecracker architecture; and add atomic exact-slot pair replacement/removal with same-version
+    cross-architecture isolation and rollback evidence.
+  - [ ] **Slice 2:** route public pull/remove/list selection through the typed release client and reconcile the
+    projection only from authoritative results. Test projection mismatch and local `--force` warning behavior. Do not
+    update SQLite after a root postcommit error; retry/idempotency obtains root truth and repairs projection while
+    preserving root error details.
+  - [ ] **Slice 3:** delete the legacy downloader/path-based privileged mutation routes without compatibility code and
+    search for every removed legacy route.
 - [ ] 8. Audit a real aarch64 archive and freeze its version/member/format contract before enabling extraction. Record
   evidence and pass mirror-backed parser/staging tests; source and ELF support alone remain fail-closed.
 - [ ] 9. Extend the existing registered Python system-test domains and coverage matrix, then qualify the release build
@@ -536,8 +543,9 @@ production child launch/composition, complete effects, privileged actions, recon
 ### Task 9: Add root network authority and mandatory per-VM namespaces
 
 **Owner:** engineer
-**Status:** Private namespace target authority and create/remove effect implemented but not production-composed; link,
-firewall, Jailer, persistence, public cutover, and qualification remain pending
+**Status:** Private namespace target authority plus complete down-only bridge/veth/TAP effects implemented but not
+production-composed; route/address, link-up, firewall, Jailer, persistence, public cutover, and qualification remain
+pending
 **Dependencies:** Tasks 4, 7, and 8
 
 - [x] Add the private topology-preparation foundation: derive owner/network and owner/VM names, require a non-forgeable
@@ -554,16 +562,23 @@ firewall, Jailer, persistence, public cutover, and qualification remain pending
 - [x] Add the closed per-VM namespace target capability and private create/remove effect. Create the exact root-owned
   `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder, retain its directory/leaf/mount identity, create the network
   namespace on a disposable locked OS thread, publish it with `open_tree`/`move_mount`, verify host-namespace
-  restoration, and remove only the exact mount and placeholder with explicit uncertainty evidence. The effect remains
-  uncomposed, does not implement the complete link-effect boundary, and has no production constructor call, Jailer
-  handoff, public action, or live-kernel qualification.
+  restoration, and remove only the exact mount and placeholder with explicit uncertainty evidence.
+- [x] Add and compose the private typed link adapter behind the complete `TopologyEffects` boundary. Create and inspect
+  the exact namespace-local bridge, host/namespace veth pair, and TAP down; attach only identity-checked endpoints; and
+  delete only exact retained identities. Bind each rtnetlink request to an explicit retained namespace descriptor.
+- [x] Create TAPs only after entering the retained VM namespace on a disposable locked thread. Open fixed
+  `/dev/net/tun`, use exact `TUNSETIFF` TAP/no-PI/exclusive flags and `TUNSETOWNER`, set no group, and reverify owner,
+  absent group, alias, ifindex, type, and down/non-persistent state before final persistence. The outer link effect
+  reverifies the persistent TAP.
+- [ ] Compose the private service/effect in production. No current constructor call, Jailer handoff, public action, or
+  live-kernel qualification exists.
 - [ ] Transfer the applicable Jailer VM-lock lease into network registration and serialize each topology mutation under
   both VM and network authority. No current network record authorizes a VM topology.
 - [ ] Acquire the network lock only after the applicable VM launching/active lease; the full order is
   `release -> global index -> VM -> network -> firewall`.
 - [ ] Derive namespace/interface names from UID and immutable IDs; accept no raw name, path, or `ip` argv.
-- [ ] Create namespace, local bridge, TAP, and veth pair with links down.
-- [ ] Attach only the verified host veth to the verified managed bridge.
+- [x] Create namespace, local bridge, TAP, and veth pair with links down in the private topology service.
+- [x] Attach only the verified host veth to the verified managed bridge in the private topology service.
 - [ ] Pass the pinned root-owned namespace handle to Jailer with `--netns`.
 - [ ] Record namespace inode and exact device identities for verification/reconciliation.
 - [ ] Typed rollback and cleanup are idempotent and ownership-bound.
@@ -591,16 +606,22 @@ firewall, Jailer, persistence, public cutover, and qualification remain pending
 - [x] Add the bounded strict generation codec, descriptor-relative exclusive record store, earlier-network-authority
   acquisition seam, same-boot/host-netns admission, and pointer-shared cached close-once cleanup. This is inert and
   creates no initial record from kernel state.
+- [x] Add evidence-bound atomic replacement for an admitted generation record. Re-admit the exact expected value and
+  file identity immediately before rename, read back the replacement, retain exact post-rename/durability evidence,
+  and block another mutation after an ambiguous committed outcome. This mutates only the record, not nftables.
 - [x] Add the inert bounded raw-netlink snapshot transport/collector and strict decoder. It chooses only the exact
   managed tables, fixed chains, rules, sets, objects, and flowtables; brackets collection with generation reads; shares
   one 32-MiB/20,000-message budget across fresh request transports; and rejects unknown expressions, forbidden object
-  classes, malformed replies, and generation drift. No production connection factory or authority call site exists.
+  classes, malformed replies, and generation drift.
+- [x] Add the retained exact-host-netns snapshot transport factory after earlier network and generation authority agree.
+  Pin and recheck `/proc/self/ns/net`, then create each fresh strict `NETLINK_NETFILTER` connection through that
+  descriptor with checked close-once cleanup. No production application/recovery path obtains the factory or invokes
+  the collector, and no real-kernel result is qualified.
 - [ ] Define empty as both reserved tables absent; never create empty tables or delete ambiguous, foreign, partial,
   missing-record, corrupt-record, wrong-boot, wrong-netns, or mismatched fixed-name state.
 - [ ] Resolve the remaining v0.3.0 inspection gates before activation: table/chain values have no ownership userdata.
-  Explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary, bind the raw collector to a production connection
-  under record/network authority, and establish qualified initial inspection/adoption without silently adopting
-  ambiguous state.
+  Explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary and compose the raw collector and retained factory
+  into root-record-bound qualified initial inspection/adoption without silently adopting ambiguous state.
 - [ ] Complete the isolated-netns compatibility spike: prove required expression round-trips, explicit namespace
   isolation, lasting-connection cancellation/checked close, valid delete/create replacement, late-invalid-batch
   atomicity, both-table empty removal, recovery inspection, and representative 1,000-VM runtime within a reviewed

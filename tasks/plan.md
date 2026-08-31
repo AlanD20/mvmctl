@@ -61,9 +61,12 @@ continue without silently deleting it.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
   `/run/mvmctl/authority/<uid>/netns/<vm-id>` target identity; the effect creates and pins a new network namespace on a
   disposable locked thread, publishes it through `open_tree`/`move_mount`, verifies host-namespace restoration, and
-  performs identity-bound non-lazy unmount and placeholder cleanup with explicit uncertainty evidence. It is not
-  production-composed, does not yet implement the complete link-effect boundary, and creates no local bridge, TAP,
-  veth, route, firewall state, public action, or Jailer handoff.
+  performs identity-bound non-lazy unmount and placeholder cleanup with explicit uncertainty evidence. A composed
+  private link adapter now completes the topology-effect boundary: it creates, down-inspects, attaches, and
+  identity-bound deletes the exact local bridge, veth pair, and TAP through explicitly namespace-bound rtnetlink. TAP
+  creation uses only fixed `/dev/net/tun`, `TUNSETIFF`, and `TUNSETOWNER`, sets no group, and reverifies its managed
+  alias before persistence. These effects are not production-composed and create no route, firewall state, link-up,
+  public action, or Jailer handoff.
 - Private typed nftables compiler pinned to `github.com/google/nftables v0.3.0`, with fixed bridge/inet tables and
   chains, raw-priority ingress guards, same-network/routed/host-service/default-deny/conditional-egress/NAT rules,
   compiler-derived canonical SHA-256 generation identity, strict digest-bound userdata, explicit empty output,
@@ -105,8 +108,14 @@ continue without silently deleting it.
   `/run/mvmctl/authority/firewall.lock`. Acquisition requires earlier network authority and admits only the current boot
   and host network namespace. A separate inert bounded raw-netlink snapshot collector now reads only the exact managed
   tables/chains/rules and rejects unknown expressions, forbidden object classes, generation drift, and cap violations.
-  Neither foundation has a production live-kernel connection factory or authority integration, record replacement,
-  `Conn.Flush`, recovery, privileged action, public consumer, or system tests.
+  The generation lease now supports evidence-bound atomic record replacement, and a retained exact-host-netns authority
+  can supply fresh checked snapshot transports after network and generation authority agree. No production application
+  or recovery path invokes that factory or collector; `nftables.Conn`/`Flush`, mutation, privileged action, public
+  consumer, and system tests remain absent.
+- Architecture-scoped binary display projection. SQLite now records architecture, scopes release/default queries to the
+  runtime architecture, pairs Jailer migration rows only within the Firecracker architecture, and can atomically
+  replace or exact-slot remove one complete `(architecture, version)` pair. This is Slice 1 only: public pull/remove
+  still use legacy mutation pending Slice 2 authority wiring, and legacy routes remain pending Slice 3.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove and LoopMount provision/inspect actions are registered in the privileged
@@ -479,8 +488,10 @@ error metadata. The private end-to-end method composes independent checksum auth
 archive admission, strict extraction/finalization, candidate assembly, and absent/identical/replacement selection. It
 returns only a closed outcome and fully re-admitted manifest metadata, preserves committed results through post-commit
 errors, and returns a zero result for precommit failure. The named typed client and two privileged actions are wired,
-but the public API/CLI still uses the legacy binary path. The aarch64 audit, public-authority cutover, L2 qualification,
-and remaining release integration work are still pending.
+but the public API/CLI still uses the legacy binary path. SQLite projection Slice 1 is implemented: binary rows and
+queries are architecture-scoped, migration pairing requires the same architecture, and exact-slot pair replacement and
+removal are atomic repository operations. Public authority cutover remains Slice 2 and legacy-route removal remains
+Slice 3. The aarch64 audit, L2 qualification, and remaining release integration work are still pending.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
 The store is exactly `/var/lib/mvmctl/binaries/<architecture>/<version>/{firecracker,jailer,manifest.json}`. Binaries are
@@ -634,12 +645,18 @@ plan and are not implemented:
    response authority and remote-result precedence over upload/reap diagnostics. Capability tests confirm those resolved
    semantics while preserving partial-state details and exposing no generic privileged call, decoder hook, executable,
    argv, environment, path, URL, checksum, force, or reference-bypass input.
-7. **Switch API authority and remove the legacy path.** Treat SQLite binary data only as an untrusted user-facing
-   projection, route public install/remove/list selection through the typed release client, and delete the old root
-   downloader/path-based binary mutation route rather than preserving compatibility. Do not update SQLite after a root
-   postcommit error; retry/idempotency obtains root truth and repairs the projection. Add
-   repository/API tests for projection mismatch and local `--force` warning behavior, searches proving no legacy
-   privileged path remains, and public result/error tests that retain root partial-state details.
+7. **Switch API authority and remove the legacy path in three slices.** SQLite binary data remains an untrusted
+   user-facing projection throughout.
+   - **Slice 1 — implemented:** add architecture to the projection; scope active member/default uniqueness and all
+     release resolution to architecture; pair migration rows only within the same architecture; and add atomic exact
+     `(architecture, version)` pair replacement and removal. The current public pull/remove paths do not call these
+     reconciliation methods.
+   - **Slice 2 — pending:** route public install/remove/list selection through the typed release client and reconcile
+     the projection only from authoritative results. Do not update SQLite after a root postcommit error;
+     retry/idempotency obtains root truth and repairs the projection. Add API tests for projection mismatch and local
+     `--force` warning behavior while preserving root partial-state details.
+   - **Slice 3 — pending:** delete the old root downloader/path-based binary mutation routes without compatibility code
+     and prove through targeted searches that no legacy privileged path remains.
 8. **Audit aarch64 packaging.** Inspect a real aarch64 release archive and freeze its exact member/format/version
    contract before enabling extraction. Acceptance requires independently recorded evidence and mirror-backed
    parser/staging tests. Source derivation and ELF support alone remain fail-closed and do not count as architecture
@@ -691,10 +708,14 @@ This remains an inert identity foundation. No production path calls registration
 into registration or topology preparation; and no namespace/link/firewall kernel effect consumes the record. A
 separate implemented namespace capability creates an exact root-owned per-VM placeholder, while the private namespace
 effect creates, pins, publishes, verifies, and identity-bound removes a network namespace on a disposable locked OS
-thread. It remains uncomposed: neither `newService` nor `newNamespaceEffect` has a production caller, and the namespace
-effect deliberately does not implement the complete `TopologyEffects` boundary until the link adapter exists. VM-lock
-transfer, local-bridge/TAP/veth effects, firewall/link activation, durable per-VM topology lifecycle, global capacity
-authority, production construction, Jailer handoff, public cutover, and live qualification remain pending.
+thread. A private link adapter now completes the `TopologyEffects` boundary and is composed with the namespace effect.
+It creates and inspects the exact local bridge, veth pair, and TAP down, attaches only verified endpoints, and deletes
+only exact retained identities through explicitly namespace-bound rtnetlink. TAP creation enters the retained namespace,
+uses fixed `/dev/net/tun` with `TUNSETIFF`/`TUNSETOWNER` and no group, and reverifies the managed alias before final
+persistence. The complete private effect remains uncomposed: neither `newService` nor `newTopologyEffect` has a
+production caller. VM-lock transfer, route/address and verified link-up stages, firewall application, durable per-VM
+topology lifecycle, global capacity authority, production construction, Jailer handoff, public cutover, and live
+qualification remain pending.
 
 The private root-side compiler in `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and receives
 only mvmctl-owned typed resolved intent. It builds fixed bridge and inet tables/chains. Raw-priority bridge prerouting
@@ -716,15 +737,16 @@ allocations, with a 250,000-allocation L1 ceiling.
 
 This compiler creates no `nftables.Conn` and calls no `Flush`. A separate implemented private foundation provides the
 strict committed/applying generation record and codec, its exclusive descriptor-relative store, the global firewall
-lock, same-boot/host-netns admission after earlier network authority, and cached close-once cleanup. An inert
-raw-netlink collector now brackets exact managed-table, fixed-chain, rule, set, object, and flowtable observations with
-ruleset-generation reads; applies one shared 32-MiB/20,000-message budget across fresh request transports; and uses the
-strict raw decoder to reject unknown expressions and structural drift. It has no production connection factory or call
-site.
-Qualified initial inspection/adoption, application-time record replacement, actual empty-generation
-deletion/application, namespace execution, privileged registration/application, public policy cutover, legacy `nft`
-CLI removal, and L2 qualification remain pending. The final adapter must submit one complete generation through one
-`Conn.Flush` call; until then there is no kernel effect or atomicity evidence.
+lock, same-boot/host-netns admission after earlier network authority, evidence-bound atomic record replacement, and
+cached close-once cleanup. An inert raw-netlink collector now brackets exact managed-table, fixed-chain, rule, set,
+object, and flowtable observations with ruleset-generation reads; applies one shared 32-MiB/20,000-message budget across
+fresh request transports; and uses the strict raw decoder to reject unknown expressions and structural drift. A
+retained exact-host-netns authority requires the earlier network and generation identities to agree and can supply the
+collector with fresh strict `NETLINK_NETFILTER` transports through its rechecked descriptor. No production application
+or recovery call site obtains that factory or invokes the collector.
+Qualified initial inspection/adoption, actual empty-generation deletion/application, `nftables.Conn`/`Flush`, mutation
+and recovery orchestration, privileged registration/application, public policy cutover, legacy `nft` CLI removal, and
+L2 qualification remain pending. Until then there is no kernel effect, enforcement, or atomicity evidence.
 
 Before any fixed-name deletion, the final adapter must hold the never-unlinked host-global
 `/run/mvmctl/authority/firewall.lock` and admit the strict root-owned
@@ -735,10 +757,11 @@ are absent; the compiler's empty output does not delete or apply them. Missing, 
 fixed-name state is never adopted or deleted.
 
 The pinned library exposes rule userdata but no table/chain ownership metadata, and structured `GetRules` can omit
-unknown expression types. The inert raw collector detects unknown raw expressions, but root-record-bound live state can
-become authority only within an explicitly accepted threat model for other root/`CAP_NET_ADMIN` actors and a qualified
-production integration of that collector. A fresh explicitly namespace-bound lasting connection performs one
-replacement batch; a fresh connection inspects the result.
+unknown expression types. The inert raw collector and retained factory detect unknown raw expressions in an exact
+namespace, but root-record-bound live state can become authority only within an explicitly accepted threat model for
+other root/`CAP_NET_ADMIN` actors and a qualified production composition of inspection with application/recovery. A
+fresh explicitly namespace-bound lasting connection performs one replacement batch; a fresh connection inspects the
+result.
 Cancellation or a flush failure gets one bounded recovery inspection under the same lock and namespace pin, never a
 retry on the used connection. Real-kernel isolated-namespace tests must still prove delete/create and late-invalid-batch
 atomicity, both-table empty removal, namespace isolation, exact expression inspection, cancellation/close behavior, and
