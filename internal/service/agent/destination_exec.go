@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/subtle"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -17,6 +18,7 @@ const (
 	destinationCanceledMessage       = "VM-exec execution canceled"
 	destinationCancelErrorMessage    = "VM-exec cancellation frame is invalid"
 	destinationTimeoutMessage        = "VM-exec execution timed out"
+	destinationTerminalWriteTimeout  = 2 * time.Second
 )
 
 type destinationExecutionEffect interface {
@@ -45,9 +47,27 @@ func (a *Agent) handleDestinationConnection(ctx context.Context, reader io.Reade
 
 	executionCtx, cancelExecution := context.WithTimeout(ctx, vmexecwire.MaxExecutionDuration)
 	defer cancelExecution()
+	if conn.SetDeadline(time.Time{}) != nil {
+		return
+	}
+	executionFinished := make(chan struct{})
+	defer close(executionFinished)
+	ioInterruptDone := make(chan struct{})
+	go func() {
+		defer close(ioInterruptDone)
+		select {
+		case <-executionCtx.Done():
+			_ = conn.SetDeadline(time.Now())
+		case <-executionFinished:
+		}
+	}()
 	cancelResult := make(chan error, 1)
 	go func() {
 		cancelErr := vmexecwire.DecodeCancel(executionCtx, conn, request.RequestID)
+		if ctx.Err() != nil || executionCtx.Err() != nil || errors.Is(cancelErr, context.Canceled) ||
+			errors.Is(cancelErr, context.DeadlineExceeded) {
+			return
+		}
 		cancelResult <- cancelErr
 		cancelExecution()
 	}()
@@ -63,14 +83,17 @@ func (a *Agent) handleDestinationConnection(ctx context.Context, reader io.Reade
 		stderr,
 	)
 	duration := min(time.Since(startedAt), vmexecwire.MaxExecutionDuration)
+	if executionCtx.Err() != nil {
+		<-ioInterruptDone
+	}
 
 	select {
 	case cancelErr := <-cancelResult:
 		if cancelErr != nil {
-			_ = response.WriteError(context.WithoutCancel(ctx), destinationCancelErrorMessage)
+			writeDestinationError(ctx, conn, response, destinationCancelErrorMessage)
 			return
 		}
-		_ = response.WriteError(context.WithoutCancel(ctx), destinationCanceledMessage)
+		writeDestinationError(ctx, conn, response, destinationCanceledMessage)
 		return
 	default:
 	}
@@ -79,14 +102,45 @@ func (a *Agent) handleDestinationConnection(ctx context.Context, reader io.Reade
 		if executionCtx.Err() == context.DeadlineExceeded {
 			message = destinationTimeoutMessage
 		}
-		_ = response.WriteError(context.WithoutCancel(ctx), message)
+		writeDestinationError(ctx, conn, response, message)
 		return
 	}
 	if executionErr != nil || stdout.Err() != nil || stderr.Err() != nil || exitCode < 0 || exitCode > 255 {
-		_ = response.WriteError(context.WithoutCancel(ctx), destinationExecutionErrorMessage)
+		writeDestinationError(ctx, conn, response, destinationExecutionErrorMessage)
 		return
 	}
-	_ = response.WriteResult(context.WithoutCancel(ctx), exitCode, duration)
+	terminalCtx, cancelTerminal, ok := destinationTerminalContext(ctx, conn)
+	if !ok {
+		return
+	}
+	defer cancelTerminal()
+	_ = response.WriteResult(terminalCtx, exitCode, duration)
+}
+
+func writeDestinationError(
+	ctx context.Context,
+	conn net.Conn,
+	response *vmexecwire.ResponseWriter,
+	message string,
+) {
+	terminalCtx, cancelTerminal, ok := destinationTerminalContext(ctx, conn)
+	if !ok {
+		return
+	}
+	defer cancelTerminal()
+	_ = response.WriteError(terminalCtx, message)
+}
+
+func destinationTerminalContext(
+	ctx context.Context,
+	conn net.Conn,
+) (context.Context, context.CancelFunc, bool) {
+	deadline := time.Now().Add(destinationTerminalWriteTimeout)
+	if err := conn.SetWriteDeadline(deadline); err != nil {
+		return nil, nil, false
+	}
+	terminalCtx, cancelTerminal := context.WithDeadline(context.WithoutCancel(ctx), deadline)
+	return terminalCtx, cancelTerminal, true
 }
 
 type destinationStdoutWriter struct {

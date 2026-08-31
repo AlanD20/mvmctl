@@ -106,7 +106,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 
 			wg.Go(func() {
-				a.handleLocalConn(conn)
+				a.handleLocalConnection(ctx, conn)
 			})
 		}
 	})
@@ -157,7 +157,7 @@ func listenVsock(port int) (*vsockListener, error) {
 
 // Accept accepts an incoming vsock connection.
 func (l *vsockListener) Accept() (net.Conn, error) {
-	connFd, sa, err := unix.Accept(l.fd)
+	connFd, sa, err := unix.Accept4(l.fd, unix.SOCK_CLOEXEC|unix.SOCK_NONBLOCK)
 	if err != nil {
 		return nil, err
 	}
@@ -191,6 +191,8 @@ type vsockConn struct {
 	file       *os.File
 	remoteCID  uint32
 	remotePort uint32
+	closeOnce  sync.Once
+	closeErr   error
 }
 
 func newVSockConn(fd int, remoteCID, remotePort uint32) *vsockConn {
@@ -212,8 +214,11 @@ func (c *vsockConn) Write(b []byte) (int, error) { return c.file.Write(b) }
 // to block indefinitely. shutdown(SHUT_RDWR) ensures the shutdown
 // packet is sent before the socket is freed.
 func (c *vsockConn) Close() error {
-	_ = unix.Shutdown(c.fd, unix.SHUT_RDWR) // best-effort: ensure clean SHUTDOWN
-	return c.file.Close()
+	c.closeOnce.Do(func() {
+		_ = unix.Shutdown(c.fd, unix.SHUT_RDWR) // best-effort: ensure clean SHUTDOWN
+		c.closeErr = c.file.Close()
+	})
+	return c.closeErr
 }
 
 func (c *vsockConn) LocalAddr() net.Addr {
@@ -224,14 +229,11 @@ func (c *vsockConn) RemoteAddr() net.Addr {
 	return &vsockAddr{net: "vsock", cid: c.remoteCID, port: int(c.remotePort)}
 }
 
-// SetDeadline is not supported for vsock connections.
-func (c *vsockConn) SetDeadline(t time.Time) error { return nil }
+func (c *vsockConn) SetDeadline(t time.Time) error { return c.file.SetDeadline(t) }
 
-// SetReadDeadline is not supported for vsock connections.
-func (c *vsockConn) SetReadDeadline(t time.Time) error { return nil }
+func (c *vsockConn) SetReadDeadline(t time.Time) error { return c.file.SetReadDeadline(t) }
 
-// SetWriteDeadline is not supported for vsock connections.
-func (c *vsockConn) SetWriteDeadline(t time.Time) error { return nil }
+func (c *vsockConn) SetWriteDeadline(t time.Time) error { return c.file.SetWriteDeadline(t) }
 
 // vsockAddr implements net.Addr for vsock addresses.
 type vsockAddr struct {

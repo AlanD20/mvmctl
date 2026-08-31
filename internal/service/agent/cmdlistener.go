@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"time"
 
 	"mvmctl/internal/lib/version"
 	"mvmctl/internal/lib/vmexecwire"
@@ -19,15 +20,37 @@ import (
 // over and this function does not return until the session ends.
 func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	connectionDone := make(chan struct{})
+	defer close(connectionDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.SetReadDeadline(time.Now())
+		case <-connectionDone:
+		}
+	}()
+
 	prefix := make([]byte, len(vmexecwire.FrameMagic))
 	if _, err := io.ReadFull(conn, prefix); err != nil {
 		return
 	}
 	reader := io.MultiReader(bytes.NewReader(prefix), conn)
 	if string(prefix) == vmexecwire.FrameMagic {
+		if err := conn.SetDeadline(time.Now().Add(vmexecwire.MaxExecutionDuration)); err != nil {
+			return
+		}
 		a.handleDestinationConnection(ctx, reader, conn)
 		return
 	}
+	legacyDone := make(chan struct{})
+	defer close(legacyDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-legacyDone:
+		}
+	}()
 	a.handleLegacyConnection(ctx, reader, conn)
 }
 

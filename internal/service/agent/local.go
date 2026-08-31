@@ -1,10 +1,24 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net"
 )
+
+func (a *Agent) handleLocalConnection(ctx context.Context, localConn net.Conn) {
+	connectionDone := make(chan struct{})
+	defer close(connectionDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = localConn.Close()
+		case <-connectionDone:
+		}
+	}()
+	a.handleLocalConn(localConn)
+}
 
 // handleLocalConn handles an incoming connection on the local Unix socket.
 // It reads a RemoteVMRequest from the client, forwards it to the host via the

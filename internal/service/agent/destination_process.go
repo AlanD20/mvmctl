@@ -39,7 +39,12 @@ func (systemDestinationAccountResolver) Resolve(
 	targetUser string,
 ) (destinationAccount, error) {
 	if err := ctx.Err(); err != nil {
-		return destinationAccount{}, err
+		return destinationAccount{}, errs.WrapMsg(
+			errs.CodeProcessError,
+			"resolve VM-exec target account",
+			err,
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	account, err := user.Lookup(targetUser)
 	if err != nil {
@@ -50,7 +55,12 @@ func (systemDestinationAccountResolver) Resolve(
 		return destinationAccount{}, errs.New(errs.CodeProcessError, "resolve VM-exec target groups")
 	}
 	if err := ctx.Err(); err != nil {
-		return destinationAccount{}, err
+		return destinationAccount{}, errs.WrapMsg(
+			errs.CodeProcessError,
+			"resolve VM-exec target account",
+			err,
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
 	return destinationAccountFromUser(targetUser, account, groupIDs)
 }
@@ -104,11 +114,37 @@ func parseDestinationID(value string) (uint32, error) {
 }
 
 type systemDestinationExecution struct {
-	accounts destinationAccountResolver
+	accounts      destinationAccountResolver
+	processes     destinationProcessRunner
+	processGroups destinationProcessGroupKiller
+}
+
+type destinationProcessRunner interface {
+	Run(command *exec.Cmd) error
+}
+
+type systemDestinationProcessRunner struct{}
+
+func (systemDestinationProcessRunner) Run(command *exec.Cmd) error {
+	return command.Run()
+}
+
+type destinationProcessGroupKiller interface {
+	Kill(pid int) error
+}
+
+type systemDestinationProcessGroupKiller struct{}
+
+func (systemDestinationProcessGroupKiller) Kill(pid int) error {
+	return unix.Kill(pid, unix.SIGKILL)
 }
 
 func newDestinationExecutionEffect() destinationExecutionEffect {
-	return &systemDestinationExecution{accounts: systemDestinationAccountResolver{}}
+	return &systemDestinationExecution{
+		accounts:      systemDestinationAccountResolver{},
+		processes:     systemDestinationProcessRunner{},
+		processGroups: systemDestinationProcessGroupKiller{},
+	}
 }
 
 func (effect *systemDestinationExecution) Execute(
@@ -122,9 +158,9 @@ func (effect *systemDestinationExecution) Execute(
 	if err != nil {
 		return -1, err
 	}
-	process := newDestinationCommand(ctx, account, command, stdout, stderr)
-	if err := process.Run(); err != nil {
-		var exitError *exec.ExitError
+	process := newDestinationCommand(ctx, account, command, stdout, stderr, effect.processGroupKiller())
+	if err := effect.processRunner().Run(process); err != nil {
+		var exitError interface{ ExitCode() int }
 		if errors.As(err, &exitError) {
 			exitCode := exitError.ExitCode()
 			if exitCode >= 0 && exitCode <= 255 {
@@ -136,13 +172,31 @@ func (effect *systemDestinationExecution) Execute(
 	return 0, nil
 }
 
+func (effect *systemDestinationExecution) processRunner() destinationProcessRunner {
+	if effect.processes == nil {
+		return systemDestinationProcessRunner{}
+	}
+	return effect.processes
+}
+
+func (effect *systemDestinationExecution) processGroupKiller() destinationProcessGroupKiller {
+	if effect.processGroups == nil {
+		return systemDestinationProcessGroupKiller{}
+	}
+	return effect.processGroups
+}
+
 func newDestinationCommand(
 	ctx context.Context,
 	account destinationAccount,
 	command string,
 	stdout io.Writer,
 	stderr io.Writer,
+	processGroups destinationProcessGroupKiller,
 ) *exec.Cmd {
+	// SECURITY: The destination account is resolved to an exact nonzero numeric credential before this boundary.
+	// The caller controls only the shell command; environment, working directory, credentials, and process-group
+	// cancellation are fixed here.
 	process := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	process.Dir = account.homeDir
 	process.Env = []string{
@@ -166,7 +220,7 @@ func newDestinationCommand(
 		if process.Process == nil {
 			return os.ErrProcessDone
 		}
-		if err := unix.Kill(-process.Process.Pid, unix.SIGKILL); err != nil {
+		if err := processGroups.Kill(-process.Process.Pid); err != nil {
 			if errors.Is(err, unix.ESRCH) {
 				return os.ErrProcessDone
 			}

@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
@@ -22,6 +23,7 @@ import (
 const (
 	destinationTestRequestID = "0123456789abcdef0123456789abcdef"
 	destinationTestToken     = "01234567-89ab-4def-8123-456789abcdef"
+	destinationTestTimeout   = 3 * time.Second
 )
 
 type fakeDestinationExecutionEffect struct {
@@ -59,13 +61,14 @@ func TestHandleConnectionRoutesDestinationAndLegacyProtocols(t *testing.T) {
 				if err != nil {
 					return -1, err
 				}
-				_, err = stderr.Write([]byte("warning\n"))
+				_, err = stderr.Write([]byte{0, 0xfe, 'w', 'a', 'r', 'n'})
 				return 7, err
 			},
 		}
 		agent := New(9999, destinationTestToken, "")
 		agent.destinationExecution = effect
 		client, server := net.Pipe()
+		require.NoError(t, client.SetDeadline(time.Now().Add(destinationTestTimeout)))
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -90,7 +93,7 @@ func TestHandleConnectionRoutesDestinationAndLegacyProtocols(t *testing.T) {
 		require.NoError(t, err)
 		stderr, ok := frame.(vmexecwire.StderrFrame)
 		require.True(t, ok)
-		assert.Equal(t, []byte("warning\n"), stderr.Data)
+		assert.Equal(t, []byte{0, 0xfe, 'w', 'a', 'r', 'n'}, stderr.Data)
 		frame, err = reader.Read(t.Context())
 		require.NoError(t, err)
 		result, ok := frame.(vmexecwire.ResultFrame)
@@ -99,7 +102,7 @@ func TestHandleConnectionRoutesDestinationAndLegacyProtocols(t *testing.T) {
 		_, err = reader.Read(t.Context())
 		assert.ErrorIs(t, err, io.EOF)
 		assert.Equal(t, 1, effect.callCount())
-		<-done
+		waitForDestinationHandler(t, done)
 	})
 
 	t.Run("legacy BOM and whitespace route to the existing JSON loop", func(t *testing.T) {
@@ -111,6 +114,7 @@ func TestHandleConnectionRoutesDestinationAndLegacyProtocols(t *testing.T) {
 		agent := New(9999, destinationTestToken, "")
 		agent.destinationExecution = effect
 		client, server := net.Pipe()
+		require.NoError(t, client.SetDeadline(time.Now().Add(destinationTestTimeout)))
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -130,7 +134,38 @@ func TestHandleConnectionRoutesDestinationAndLegacyProtocols(t *testing.T) {
 		assert.Equal(t, 0, effect.callCount())
 
 		require.NoError(t, client.Close())
-		<-done
+		waitForDestinationHandler(t, done)
+	})
+
+	t.Run("legacy file transfer reaches the binary handoff", func(t *testing.T) {
+		agent := New(9999, destinationTestToken, "")
+		client, server := net.Pipe()
+		require.NoError(t, client.SetDeadline(time.Now().Add(destinationTestTimeout)))
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			agent.handleConnection(t.Context(), server)
+		}()
+
+		request, err := json.Marshal(execRequest{
+			ID: "legacy-file-transfer", Type: requestTypeFileTransfer, Token: destinationTestToken,
+		})
+		require.NoError(t, err)
+		request = append(request, '\n')
+		_, err = client.Write(request)
+		require.NoError(t, err)
+		var response execResponse
+		require.NoError(t, json.NewDecoder(client).Decode(&response))
+		assert.Equal(t, responseTypeFTReady, response.Type)
+
+		require.NoError(t, WriteFTFrame(client, 0xff, nil))
+		frameType, payload, err := ReadFTFrame(client)
+		require.NoError(t, err)
+		assert.Equal(t, FtError, frameType)
+		var transferError FtErrorPayload
+		require.NoError(t, json.Unmarshal(payload, &transferError))
+		assert.Equal(t, "invalid", transferError.Code)
+		waitForDestinationHandler(t, done)
 	})
 }
 
@@ -187,7 +222,7 @@ func TestDestinationExecutionFailureRedactsCommandTokenAndCause(t *testing.T) {
 	assert.NotContains(t, logs.String(), destinationTestToken)
 }
 
-func TestDestinationExecutionEnforcesOutputLimit(t *testing.T) {
+func TestDestinationExecutionRejectsOversizedOutputWrite(t *testing.T) {
 	effect := &fakeDestinationExecutionEffect{
 		execute: func(_ context.Context, _, _ string, stdout, _ io.Writer) (int, error) {
 			_, _ = stdout.Write(bytes.Repeat([]byte{'x'}, vmexecwire.MaxOutputBytes+1))
@@ -277,6 +312,30 @@ func TestDestinationExecutionRejectsMismatchedCancel(t *testing.T) {
 	assert.Equal(t, destinationCancelErrorMessage, terminal.Message)
 }
 
+func TestDestinationExecutionRejectsMalformedCancel(t *testing.T) {
+	effect := &fakeDestinationExecutionEffect{
+		execute: func(ctx context.Context, _, _ string, _, _ io.Writer) (int, error) {
+			<-ctx.Done()
+			return -1, ctx.Err()
+		},
+	}
+	frame := runDestinationRequestWithContext(
+		t,
+		t.Context(),
+		destinationTestToken,
+		effect,
+		destinationTestToken,
+		nil,
+		func(client net.Conn) {
+			writeVMExecTestFrame(t, client, `{"schema_version":1,"request_id":"`+
+				destinationTestRequestID+`","type":"result","exit_code":0,"duration_ms":0}`)
+		},
+	)
+	terminal, ok := frame.(vmexecwire.ErrorFrame)
+	require.True(t, ok)
+	assert.Equal(t, destinationCancelErrorMessage, terminal.Message)
+}
+
 func runDestinationRequest(
 	t *testing.T,
 	configuredToken string,
@@ -301,6 +360,7 @@ func runDestinationRequestWithContext(
 	agent := New(9999, configuredToken, "")
 	agent.destinationExecution = effect
 	client, server := net.Pipe()
+	require.NoError(t, client.SetDeadline(time.Now().Add(destinationTestTimeout)))
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -325,6 +385,25 @@ func runDestinationRequestWithContext(
 	require.NoError(t, err)
 	_, err = reader.Read(t.Context())
 	require.ErrorIs(t, err, io.EOF)
-	<-done
+	waitForDestinationHandler(t, done)
 	return frame
+}
+
+func writeVMExecTestFrame(t *testing.T, writer io.Writer, body string) {
+	t.Helper()
+	prefix := make([]byte, len(vmexecwire.FrameMagic)+2+4)
+	copy(prefix, vmexecwire.FrameMagic)
+	binary.BigEndian.PutUint16(prefix[len(vmexecwire.FrameMagic):], 1)
+	binary.BigEndian.PutUint32(prefix[len(vmexecwire.FrameMagic)+2:], uint32(len(body)))
+	_, err := writer.Write(append(prefix, body...))
+	require.NoError(t, err)
+}
+
+func waitForDestinationHandler(t *testing.T, done <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-done:
+	case <-time.After(destinationTestTimeout):
+		t.Fatal("destination handler did not stop before the test deadline")
+	}
 }
