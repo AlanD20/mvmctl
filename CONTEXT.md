@@ -25,6 +25,7 @@ MicroVM Manager -- a speed-first CLI for managing Firecracker microVMs. Provides
   - [Layer compliance enforcement](#layer-compliance-enforcement)
   - [Public API boundary](#public-api-boundary)
   - [CLI is the canonical interface](#cli-is-the-canonical-interface)
+  - [VM-to-VM execution transition](#vm-to-vm-execution-transition)
   - [Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)](#provisioner-backend-loopmount-vs-guestfs--mutual-exclusion)
   - [Firewall backend transition](#firewall-backend-transition)
 - [Build output (REQUIRED)](#build-output-required)
@@ -416,6 +417,18 @@ The `mvm` CLI is the ONLY supported interface for all mvmctl operations. Do NOT 
 Built with `github.com/spf13/cobra`. Root command in `internal/cli/root.go`. Subcommands in `internal/cli/{domain}.go` -- monolithic files per domain (one file contains all subcommands for that domain).
 
 CLI aliases: Domain-level aliases for faster typing: `mvm net` for `mvm network`, `mvm img` for `mvm image`, `mvm vol` for `mvm volume`, `mvm bin` for `mvm binary`, and `mvm ss` for `mvm snapshot`. Environment workflow subcommands have shorter aliases: `mvm env up` for `mvm env apply` and `mvm env down` for `mvm env destroy`. Every `list` subcommand has both `ls` (Use) and `list` (Alias). Every `remove` subcommand has `rm` (Use), `remove`, `delete`, and `del` (Aliases).
+
+### VM-to-VM execution transition
+
+The legacy guest-originated `remote_vm` handler is fail-closed. It returns one terminal unauthorized response before
+using the source identity or request data and performs no VM lookup, destination vsock lookup, dial, relay, or command
+logging. This deliberately makes VM-to-VM execution unavailable while preserving ordinary host-to-VM execution and
+all copy directions.
+
+The directional exact-user exec-policy repository is only an intent foundation. Public policy CRUD, the closed bounded
+wire, non-root destination execution, authenticated API-owned relay, root-owned active-session/capacity authority,
+legacy `allow_remote_exec` removal, and L2 qualification remain pending. No SQLite VM status, guest-supplied source ID,
+socket path, or process-local semaphore may substitute for root runtime authority.
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)
 

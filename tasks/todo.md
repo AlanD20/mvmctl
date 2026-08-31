@@ -666,9 +666,13 @@ pending
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
   authorization lookup, duplicate/foreign-key constraints, and a dedicated authorization failure code. Relay
   authentication, public inputs, and enforcement are not wired yet.
+- [x] Sever the legacy `remote_vm` authorization bypass. Return one terminal unauthorized response before source
+  lookup, request parsing, destination lookup, vsock dial, relay, or command logging while preserving ordinary host
+  execution and all copy paths.
 - [ ] Remove `allow_remote_exec` from schema, model, config, CLI, environment specs, results, tests, and docs.
 - [ ] Add directional exact source-VM -> target-VM -> non-root-user `mvm policy exec` intent.
-- [ ] Refactor the relay so it no longer imports multiple core domains; API resolves shared identities.
+- [ ] Add the closed source-session and API-owned relay. `internal/vsockhandler` must not resolve multiple core domains;
+  the API resolves shared identities only after root runtime admission.
 - [ ] Authenticate source from the active host session and root-owned instance/vsock identity.
 - [ ] Enforce request/frame/output/duration/concurrency bounds and redact full commands from audit logs.
 - [ ] Reject root target, VM-to-host execution, missing/reverse policy, foreign owner, stale target, and identity mismatch.

@@ -296,8 +296,15 @@ The relay bounds request size, frame size, output bytes, duration, and concurren
 source, destination, target user, timing, and result but not the complete command. An exec policy grants no TCP/UDP
 connectivity.
 
-The legacy `allow_remote_exec` VM field, CLI flags, configuration default, environment-spec property, all-to-all checks,
-and documentation are removed without conversion.
+The clean cutover removes the legacy `allow_remote_exec` VM field, CLI flags, configuration default, environment-spec
+property, all-to-all checks, and documentation without conversion.
+
+Implementation note (2026-08-31): the first exec cutover slice severs the legacy relay before the replacement is
+activated. Every legacy `remote_vm` request receives one terminal unauthorized response before source lookup, request
+parsing, destination lookup, vsock dial, or command logging. Ordinary host execution and copy paths remain unchanged.
+The closed wire, destination capability, authenticated API-owned relay, public policy CRUD, legacy flag removal, root
+runtime/capacity authority, and positive system qualification remain pending; VM-to-VM execution is unavailable until
+those dependencies land.
 
 ### Layer placement
 

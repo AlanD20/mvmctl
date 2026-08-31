@@ -56,6 +56,9 @@ continue without silently deleting it.
   exact-user VM-to-VM execution grants. Their repositories enforce exact identities, foreign keys, duplicate
   constraints, and atomic cross-table VM invalidation. Public inputs, enforcement compilation, relay authorization,
   and the clean-break removal of the transitional policy path remain pending.
+- Legacy guest-originated `remote_vm` requests now fail closed with one terminal unauthorized response before source
+  lookup, payload parsing, destination lookup, vsock dial, or command logging. Ordinary host execution and copy paths
+  remain unchanged. The typed replacement relay and public exec-policy surface are not active yet.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact

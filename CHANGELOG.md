@@ -66,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - VM invalidation removes both typed traffic families in one transaction, and execution authorization failures use a
   dedicated structured error code. These foundations are not yet exposed through the final public policy commands or
   connected to nftables/vsock enforcement; the transitional routed policy remains active until that atomic cutover.
+- The legacy guest-originated `remote_vm` relay now fails closed. Every request receives one terminal unauthorized
+  response before source lookup, payload parsing, destination lookup, vsock dial, or command logging. Ordinary host
+  execution and copy paths are unchanged.
+- This is only the first exec cutover slice. Typed public policy CRUD, the closed bounded wire, non-root destination
+  execution, authenticated API-owned relay, legacy flag removal, and positive VM-to-VM system qualification remain
+  pending; VM-to-VM execution is intentionally unavailable meanwhile.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
@@ -610,9 +616,10 @@ The following items are release blockers and are intentionally not described abo
   supported kernels before one privileged `Conn.Flush` application can make links usable. Only then remove the
   iptables backend and selector plus the production `nft` CLI subprocess/parser; the canonical compiler digest is not
   a kernel application.
-- Complete the public API, CLI, nftables application, and vsock relay cutover from routed `ServiceAccessPolicy` and the
-  `allow_remote_exec` trust mesh to the implemented typed traffic/exec persistence foundations; then remove the
-  transitional tables, flags, and paths atomically.
+- Complete the public API, CLI, nftables application, and new authenticated vsock relay over the typed traffic/exec
+  persistence foundations. The legacy guest relay is already fail-closed; the routed `ServiceAccessPolicy`,
+  `allow_remote_exec` fields/flags, generic host-frame path, and other transitional surfaces still require atomic
+  removal.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the
   root-owned system binary.
 - Separate administrator host state from invoking-user initialization, replace the generic `HostInit` result with a
