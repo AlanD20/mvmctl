@@ -103,6 +103,26 @@ func TestDirectRouteNetlinkSetsOnlyMasterAndEmbedsExplicitVethPeerNamespace(t *t
 	assert.Equal(t, uint32(42), binary.NativeEndian.Uint32(namespaceFD.Data))
 }
 
+func TestDirectRouteNetlinkTAPFollowupSetsOnlyAliasWithoutCreateFlags(t *testing.T) {
+	t.Parallel()
+
+	connection := &fakeRouteNetlinkConnection{replies: []netlink.Message{testRouteACK()}}
+	adapter := &directRouteNetlink{dial: func(int, *netlink.Config) (routeNetlinkConnection, error) {
+		return connection, nil
+	}}
+	require.NoError(t, adapter.setLinkAlias(t.Context(), 41, 21, "mvmctl:v1:tap:mvt012345678901:1000"))
+	require.Len(t, connection.requests, 1)
+
+	request := connection.requests[0]
+	assert.Equal(t, netlink.HeaderType(unix.RTM_NEWLINK), request.Header.Type)
+	assert.Equal(t, netlink.Request|netlink.Acknowledge, request.Header.Flags)
+	assert.Equal(t, uint32(21), binary.NativeEndian.Uint32(request.Data[4:8]))
+	attributes := testDecodeRouteAttributes(t, request.Data[unix.SizeofIfInfomsg:])
+	require.Len(t, attributes, 1)
+	assert.Equal(t, uint16(unix.IFLA_IFALIAS), attributes[0].Type)
+	assert.Equal(t, "mvmctl:v1:tap:mvt012345678901:1000\x00", string(attributes[0].Data))
+}
+
 // Rationale: cancellation must close a blocked socket exactly once so the mutation caller receives an uncertain error.
 func TestDirectRouteNetlinkCancellationClosesBlockedConnectionOnce(t *testing.T) {
 	t.Parallel()

@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"mvmctl/pkg/errs"
 )
 
 func TestLinkEffectCreatesDownOwnedBridgeTAPAndReciprocalVeth(t *testing.T) {
@@ -95,6 +97,54 @@ func TestLinkEffectCreationUncertaintyReturnsIdentityAndInspectsWithoutCancellat
 	)
 	assert.Nil(t, identity)
 	assert.Error(t, err)
+
+	partialTAP := newLinkEffectFixture(t)
+	tapCtx, tapCancel := context.WithCancel(t.Context())
+	partialTAP.tap.createError = context.Canceled
+	partialTAP.tap.cancelCreate = tapCancel
+	tap, err := partialTAP.effect.CreateTAPDown(
+		tapCtx,
+		partialTAP.pin,
+		tapCreateSpec{name: partialTAP.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+	)
+	require.Error(t, err)
+	require.NotNil(t, tap)
+	assert.Equal(t, 21, tap.ifIndex)
+	assert.Equal(t, managedTAPAlias(partialTAP.names.tap, OwnerUID(testOwnerUID)),
+		partialTAP.route.mustLink(t, partialTAP.vmFD, partialTAP.names.tap).alias)
+	assert.False(t, partialTAP.route.lastInspectCancelled(partialTAP.vmFD, partialTAP.names.tap))
+}
+
+func TestLinkEffectTAPAliasFailureLeavesNoPersistentIdentity(t *testing.T) {
+	t.Parallel()
+
+	fixture := newLinkEffectFixture(t)
+	fixture.tap.createError = errors.New("set managed TAP alias: acknowledgement lost")
+	fixture.tap.applyCreate = false
+	identity, err := fixture.effect.CreateTAPDown(
+		t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+	)
+	require.Error(t, err)
+	assert.Nil(t, identity)
+	assert.Nil(t, fixture.route.link(fixture.vmFD, fixture.names.tap))
+}
+
+func TestLinkEffectPreservesFatalTAPWorkerClassificationWithRollbackIdentity(t *testing.T) {
+	t.Parallel()
+
+	fixture := newLinkEffectFixture(t)
+	fixture.tap.createError = markTAPThreadFatal(
+		fixture.names.tap, nil, errors.New("host restoration unproven"),
+	)
+	identity, err := fixture.effect.CreateTAPDown(
+		t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+	)
+	require.Error(t, err)
+	require.NotNil(t, identity)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, true, domainErr.Details["network_worker_retired"])
+	assert.Equal(t, true, domainErr.Details["network_thread_contaminated"])
 }
 
 func TestLinkEffectPartialVethCreationReturnsCleanupCapableIdentity(t *testing.T) {
@@ -154,7 +204,21 @@ func TestLinkEffectRejectsWrongCreatedIdentityAndRetainsRollbackResult(t *testin
 
 	t.Run("TAP owner", func(t *testing.T) {
 		fixture := newLinkEffectFixture(t)
-		fixture.route.afterCreate = func(link *routeLinkObservation) { link.tunOwner = testOwnerUID + 1 }
+		fixture.tap.afterCreate = func(link *routeLinkObservation) { link.tunOwner = testOwnerUID + 1 }
+		identity, err := fixture.effect.CreateTAPDown(
+			t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
+		)
+		require.Error(t, err)
+		require.NotNil(t, identity)
+		assert.Equal(t, 21, identity.ifIndex)
+	})
+
+	t.Run("TAP group authority", func(t *testing.T) {
+		fixture := newLinkEffectFixture(t)
+		fixture.tap.afterCreate = func(link *routeLinkObservation) {
+			link.tunGroup = testOwnerUID
+			link.tunGroupPresent = true
+		}
 		identity, err := fixture.effect.CreateTAPDown(
 			t.Context(), fixture.pin, tapCreateSpec{name: fixture.names.tap, ownerUID: OwnerUID(testOwnerUID)},
 		)
@@ -337,6 +401,7 @@ func TestLinkEffectCloseFailureIsCachedAndCreationResultRemainsVisible(t *testin
 type linkEffectFixture struct {
 	effect        *linkEffect
 	route         *fakeRouteNetlink
+	tap           *fakeTAPCreator
 	retainer      *fakeLinkNamespaceRetainer
 	pin           NamespacePin
 	names         topologyNames
@@ -364,9 +429,11 @@ func newLinkEffectFixture(t *testing.T) *linkEffectFixture {
 		hostFD:        40,
 	}
 	fixture.retainer = &fakeLinkNamespaceRetainer{fixture: fixture}
+	fixture.tap = &fakeTAPCreator{fixture: fixture, applyCreate: true}
 	fixture.effect = &linkEffect{
 		namespaces: fixture.retainer,
 		route:      fixture.route,
+		tap:        fixture.tap,
 		host: func(context.Context) (*linkNamespaceLease, error) {
 			return fixture.lease(fixture.hostFD, fixture.hostNamespace), nil
 		},
@@ -476,6 +543,9 @@ type fakeRouteNetlink struct {
 	inspects            map[string]int
 	inspectCancellation map[string]bool
 	masterMutations     []linkMasterMutation
+	aliasError          error
+	applyAlias          bool
+	cancelAlias         context.CancelFunc
 	deletes             int
 	createError         error
 	applyCreate         bool
@@ -492,6 +562,7 @@ func newFakeRouteNetlink() *fakeRouteNetlink {
 		inspects:            make(map[string]int),
 		inspectCancellation: make(map[string]bool),
 		applyCreate:         true,
+		applyAlias:          true,
 	}
 }
 
@@ -531,20 +602,6 @@ func (route *fakeRouteNetlink) createBridgeDown(
 	alias string,
 ) error {
 	link := routeLinkObservation{name: name, alias: alias, kind: linkKindBridge, ifIndex: 20}
-	return route.create(fd, &link)
-}
-
-func (route *fakeRouteNetlink) createTAPDown(
-	_ context.Context,
-	fd int,
-	name linkName,
-	alias string,
-	owner OwnerUID,
-) error {
-	link := routeLinkObservation{
-		name: name, alias: alias, kind: linkKindTAP, ifIndex: 21,
-		tunOwner: uint32(owner), tunType: unix.IFF_TAP, tunPersist: 1,
-	}
 	return route.create(fd, &link)
 }
 
@@ -611,6 +668,59 @@ func (route *fakeRouteNetlink) setLinkMaster(_ context.Context, fd, ifIndex, mas
 		}
 	}
 	return errors.New("link not found")
+}
+
+func (route *fakeRouteNetlink) setLinkAlias(_ context.Context, fd, ifIndex int, alias string) error {
+	route.mu.Lock()
+	defer route.mu.Unlock()
+	for name, link := range route.links[fd] {
+		if link.ifIndex == ifIndex {
+			if route.applyAlias {
+				link.alias = alias
+				route.links[fd][name] = link
+			}
+			if route.cancelAlias != nil {
+				route.cancelAlias()
+			}
+			return route.aliasError
+		}
+	}
+	return errors.New("link not found")
+}
+
+type fakeTAPCreator struct {
+	fixture      *linkEffectFixture
+	createError  error
+	applyCreate  bool
+	cancelCreate context.CancelFunc
+	afterCreate  func(*routeLinkObservation)
+}
+
+func (creator *fakeTAPCreator) createTAPDown(
+	_ context.Context,
+	fd int,
+	identity namespaceIdentity,
+	name linkName,
+	alias string,
+	owner OwnerUID,
+) error {
+	if identity != creator.fixture.vmNamespace {
+		return errors.New("unexpected TAP namespace identity")
+	}
+	link := routeLinkObservation{
+		name: name, alias: alias, kind: linkKindTAP, ifIndex: 21,
+		tunOwner: uint32(owner), tunType: unix.IFF_TAP, tunPersist: 1,
+	}
+	if creator.afterCreate != nil {
+		creator.afterCreate(&link)
+	}
+	if creator.applyCreate {
+		creator.fixture.route.put(fd, link)
+	}
+	if creator.cancelCreate != nil {
+		creator.cancelCreate()
+	}
+	return creator.createError
 }
 
 func (route *fakeRouteNetlink) deleteLink(_ context.Context, fd, ifIndex int) error {

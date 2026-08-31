@@ -15,6 +15,7 @@ const (
 	routeLinkMessageMax = 64 * 1024
 	vethInfoPeer        = uint16(1)
 	iflaTunOwner        = uint16(1)
+	iflaTunGroup        = uint16(2)
 	iflaTunType         = uint16(3)
 	iflaTunPI           = uint16(4)
 	iflaTunPersist      = uint16(6)
@@ -35,9 +36,12 @@ type routeLinkObservation struct {
 	peer    int
 
 	tunOwner   uint32
+	tunGroup   uint32
 	tunType    uint8
 	tunPI      uint8
 	tunPersist uint8
+
+	tunGroupPresent bool
 }
 
 func managedBridgeAlias(name linkName) string {
@@ -175,11 +179,11 @@ func decodeRouteTUNData(data []byte, observation *routeLinkObservation) error {
 	if err != nil {
 		return fmt.Errorf("decode TAP link data: %w", err)
 	}
-	seen := make(map[uint16]struct{}, 4)
+	seen := make(map[uint16]struct{}, 5)
 	for decoder.Next() {
 		typeID := decoder.Type()
 		switch typeID {
-		case iflaTunOwner, iflaTunType, iflaTunPI, iflaTunPersist:
+		case iflaTunOwner, iflaTunGroup, iflaTunType, iflaTunPI, iflaTunPersist:
 			if _, exists := seen[typeID]; exists {
 				return fmt.Errorf("duplicate TAP link attribute %d", typeID)
 			}
@@ -188,6 +192,9 @@ func decodeRouteTUNData(data []byte, observation *routeLinkObservation) error {
 		switch typeID {
 		case iflaTunOwner:
 			observation.tunOwner = decoder.Uint32()
+		case iflaTunGroup:
+			observation.tunGroup = decoder.Uint32()
+			observation.tunGroupPresent = true
 		case iflaTunType:
 			observation.tunType = decoder.Uint8()
 		case iflaTunPI:

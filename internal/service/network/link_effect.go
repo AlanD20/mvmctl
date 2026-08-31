@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -14,16 +15,23 @@ type linkNamespaceRetainer interface {
 	retainLinkNamespace(context.Context, NamespacePin) (*linkNamespaceLease, error)
 }
 
+type tapLinkCreator interface {
+	createTAPDown(context.Context, int, namespaceIdentity, linkName, string, OwnerUID) error
+}
+
 type linkEffect struct {
 	namespaces linkNamespaceRetainer
 	route      routeNetlink
+	tap        tapLinkCreator
 	host       func(context.Context) (*linkNamespaceLease, error)
 }
 
 func newLinkEffect(namespaces *namespaceEffect) *linkEffect {
+	route := newDirectRouteNetlink()
 	return &linkEffect{
 		namespaces: namespaces,
-		route:      newDirectRouteNetlink(),
+		route:      route,
+		tap:        newTAPEffect(namespaces, route),
 		host: func(ctx context.Context) (*linkNamespaceLease, error) {
 			return retainHostLinkNamespace(ctx, namespaces.deps, namespaces.policy)
 		},
@@ -90,6 +98,11 @@ func (effect *linkEffect) CreateTAPDown(
 			"TAP owner does not match the retained namespace owner",
 		), false)
 	}
+	if effect.tap == nil {
+		return nil, linkCreateError(spec.name, "create TAP down", errors.New(
+			"TAP effect dependency is incomplete",
+		), false)
+	}
 	alias := managedTAPAlias(spec.name, spec.ownerUID)
 	return effect.createSingleLink(
 		ctx,
@@ -100,7 +113,7 @@ func (effect *linkEffect) CreateTAPDown(
 		alias,
 		spec.ownerUID,
 		func(mutationCtx context.Context) error {
-			return effect.route.createTAPDown(mutationCtx, fd, spec.name, alias, spec.ownerUID)
+			return effect.tap.createTAPDown(mutationCtx, fd, identity, spec.name, alias, spec.ownerUID)
 		},
 	)
 }
@@ -680,6 +693,22 @@ func validateManagedLink(
 	master int,
 	owner OwnerUID,
 ) error {
+	if err := validateManagedLinkBase(observation, want, kind, alias, master); err != nil {
+		return err
+	}
+	if kind == linkKindTAP {
+		return validateManagedTAPAuthority(observation, owner, 1)
+	}
+	return nil
+}
+
+func validateManagedLinkBase(
+	observation routeLinkObservation,
+	want linkIdentity,
+	kind string,
+	alias string,
+	master int,
+) error {
 	switch {
 	case observation.name != want.name:
 		return errors.New("link name changed")
@@ -694,9 +723,13 @@ func validateManagedLink(
 	case observation.master != master:
 		return errors.New("link master changed")
 	}
-	if kind == linkKindTAP && (owner == 0 || observation.tunOwner != uint32(owner) ||
-		observation.tunType != unix.IFF_TAP || observation.tunPI != 0 || observation.tunPersist != 1) {
-		return errors.New("TAP type, no-PI, persistence, or authenticated owner changed")
+	return nil
+}
+
+func validateManagedTAPAuthority(observation routeLinkObservation, owner OwnerUID, persistence uint8) error {
+	if owner == 0 || observation.tunOwner != uint32(owner) || observation.tunGroupPresent ||
+		observation.tunType != unix.IFF_TAP || observation.tunPI != 0 || observation.tunPersist != persistence {
+		return errors.New("TAP type, no-PI, persistence, authenticated owner, or group authority changed")
 	}
 	return nil
 }
@@ -721,6 +754,16 @@ func uncertainLinkIdentity(name linkName, namespace namespaceIdentity) linkIdent
 func linkCreateError(name linkName, stage string, cause error, uncertain bool) *errs.DomainError {
 	if cause == nil {
 		cause = errors.New("failed to " + stage)
+	}
+	if domainErr := errs.AsDomainError(cause); domainErr != nil {
+		result := *domainErr
+		result.Details = maps.Clone(domainErr.Details)
+		if result.Details == nil {
+			result.Details = make(map[string]any, 1)
+		}
+		result.Details["mutation_outcome_unknown"] = uncertain
+		result.Err = cause
+		return &result
 	}
 	details := map[string]any{"mutation_outcome_unknown": uncertain}
 	return errs.WrapMsg(

@@ -48,6 +48,21 @@ func TestDecodeRouteLinkMessageAcceptsOwnedBridgeVethAndTAP(t *testing.T) {
 				ifIndex: 24, master: 20, tunOwner: 1000, tunType: unix.IFF_TAP, tunPersist: 1,
 			},
 		},
+		"tap with group authority": {
+			message: testRouteLinkMessage(t, "mvt012345678901", managedTAPAlias("mvt012345678901", 1000), 24,
+				0, 20, 0, linkKindTAP, func(encoder *netlink.AttributeEncoder) {
+					encoder.Uint32(iflaTunOwner, 1000)
+					encoder.Uint32(iflaTunGroup, 1001)
+					encoder.Uint8(iflaTunType, unix.IFF_TAP)
+					encoder.Uint8(iflaTunPI, 0)
+					encoder.Uint8(iflaTunPersist, 1)
+				}),
+			want: routeLinkObservation{
+				name: "mvt012345678901", alias: "mvmctl:v1:tap:mvt012345678901:1000", kind: linkKindTAP,
+				ifIndex: 24, master: 20, tunOwner: 1000, tunGroup: 1001, tunGroupPresent: true,
+				tunType: unix.IFF_TAP, tunPersist: 1,
+			},
+		},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -112,6 +127,16 @@ func TestDecodeRouteLinkMessageRejectsMalformedAndAmbiguousReplies(t *testing.T)
 			func(encoder *netlink.AttributeEncoder) {
 				encoder.Uint32(iflaTunOwner, 1000)
 				encoder.Uint32(iflaTunOwner, 1000)
+				encoder.Uint8(iflaTunType, unix.IFF_TAP)
+				encoder.Uint8(iflaTunPI, 0)
+				encoder.Uint8(iflaTunPersist, 1)
+			})},
+		"tap duplicate group": {message: testRouteLinkMessage(t, "mvt012345678901",
+			managedTAPAlias("mvt012345678901", 1000), 24, 0, 0, 0, linkKindTAP,
+			func(encoder *netlink.AttributeEncoder) {
+				encoder.Uint32(iflaTunOwner, 1000)
+				encoder.Uint32(iflaTunGroup, 1001)
+				encoder.Uint32(iflaTunGroup, 1001)
 				encoder.Uint8(iflaTunType, unix.IFF_TAP)
 				encoder.Uint8(iflaTunPI, 0)
 				encoder.Uint8(iflaTunPersist, 1)

@@ -16,8 +16,8 @@ type routeNetlink interface {
 	inspectLink(context.Context, int, linkName) (*routeLinkObservation, error)
 	listLinks(context.Context, int) ([]routeLinkObservation, error)
 	createBridgeDown(context.Context, int, linkName, string) error
-	createTAPDown(context.Context, int, linkName, string, OwnerUID) error
 	createVethPairDown(context.Context, int, int, linkName, string, linkName, string) error
+	setLinkAlias(context.Context, int, int, string) error
 	setLinkMaster(context.Context, int, int, int) error
 	deleteLink(context.Context, int, int) error
 }
@@ -127,39 +127,6 @@ func (adapter *directRouteNetlink) createBridgeDown(
 	return adapter.mutate(ctx, namespaceFD, unix.RTM_NEWLINK, netlink.Create|netlink.Excl, data)
 }
 
-func (adapter *directRouteNetlink) createTAPDown(
-	ctx context.Context,
-	namespaceFD int,
-	name linkName,
-	alias string,
-	owner OwnerUID,
-) error {
-	data, err := marshalIfInfoMessage(0, 0, 0)
-	if err != nil {
-		return err
-	}
-	data, err = appendRouteAttributes(data, func(encoder *netlink.AttributeEncoder) error {
-		encoder.String(unix.IFLA_IFNAME, name.String())
-		encoder.String(unix.IFLA_IFALIAS, alias)
-		encoder.Nested(unix.IFLA_LINKINFO, func(linkInfo *netlink.AttributeEncoder) error {
-			linkInfo.String(unix.IFLA_INFO_KIND, linkKindTAP)
-			linkInfo.Nested(unix.IFLA_INFO_DATA, func(tun *netlink.AttributeEncoder) error {
-				tun.Uint32(iflaTunOwner, uint32(owner))
-				tun.Uint8(iflaTunType, unix.IFF_TAP)
-				tun.Uint8(iflaTunPI, 0)
-				tun.Uint8(iflaTunPersist, 1)
-				return nil
-			})
-			return nil
-		})
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	return adapter.mutate(ctx, namespaceFD, unix.RTM_NEWLINK, netlink.Create|netlink.Excl, data)
-}
-
 func (adapter *directRouteNetlink) createVethPairDown(
 	ctx context.Context,
 	hostNamespaceFD int,
@@ -225,6 +192,26 @@ func (adapter *directRouteNetlink) setLinkMaster(
 	}
 	data, err = appendRouteAttributes(data, func(encoder *netlink.AttributeEncoder) error {
 		encoder.Uint32(unix.IFLA_MASTER, uint32(masterIfIndex))
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return adapter.mutate(ctx, namespaceFD, unix.RTM_NEWLINK, 0, data)
+}
+
+func (adapter *directRouteNetlink) setLinkAlias(
+	ctx context.Context,
+	namespaceFD int,
+	ifIndex int,
+	alias string,
+) error {
+	data, err := marshalIfInfoMessage(ifIndex, 0, 0)
+	if err != nil {
+		return err
+	}
+	data, err = appendRouteAttributes(data, func(encoder *netlink.AttributeEncoder) error {
+		encoder.String(unix.IFLA_IFALIAS, alias)
 		return nil
 	})
 	if err != nil {
