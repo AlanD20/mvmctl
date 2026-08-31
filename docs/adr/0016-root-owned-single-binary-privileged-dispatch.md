@@ -922,10 +922,16 @@ soft-deletes a superseded active member, preserves or explicitly selects each ar
 back both members on failure. Removal soft-deletes only the exact architecture/version slot. Neither operation changes
 the same version for another architecture.
 
-This is display-projection Slice 1, not public release-authority cutover. Public `mvm bin pull` and `mvm bin rm` still
-use the legacy downloader/path mutation and do not call these reconciliation methods. Slice 2 routes those public
-operations through the registered typed trusted-release actions and updates the projection only from authoritative
-results. Slice 3 removes the legacy routes. SQLite remains untrusted throughout.
+Public release-authority Slice 2 is implemented. `mvm bin pull` resolves one exact release, optionally transfers the
+exact local mirror archive, and calls the registered typed install action before any SQLite read. Only an authoritative
+installed/replaced/unchanged result can replace the projection. A root error is returned unchanged with no SQLite
+write; projection failure retains the root outcome and marks repair required so an idempotent retry can reconcile it.
+
+`mvm bin rm` accepts exact release versions and sends root only version plus runtime architecture. Root removal or
+already-absent results reconcile the exact projection slot. Local VM/snapshot references are advisory only, and
+`--force` suppresses that warning without changing the root request. Local list/default/prune read the architecture-
+scoped display projection without statting root-owned paths. Slice 3 still removes the now-unreachable legacy
+downloader/build/service routes. SQLite remains untrusted throughout.
 
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
@@ -994,8 +1000,9 @@ also implements atomic installed-release removal and the reserved-directory reco
 existing-only traversal, full canonical admission before recovery, exact reference proof, an eight-attempt
 `RENAME_NOREPLACE` commit, explicit committed/close-only target state, ordered fixed-leaf retirement, and exact
 post-commit details. Recovery now rechecks each reserved directory's device/inode binding before leaf cleanup and
-before `rmdir`. This private path now has registered typed receiver handlers and a named caller capability. The aarch64
-archive audit, public binary-authority cutover, and L2 release qualification remain Task 6 work.
+before `rmdir`. This private path now has registered typed receiver handlers, a named caller capability, and public
+pull/remove API consumers. The aarch64 archive audit, legacy-route deletion, and L2 release qualification remain Task 6
+work.
 
 The strict wire codec and caller socketpair process transport, including concurrent upload/response, EOF qualification,
 half-close, and bounded reaping, are implemented. Receiver increments 5a and 5b are also implemented. The production

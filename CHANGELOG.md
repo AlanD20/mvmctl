@@ -368,8 +368,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened reserved-candidate recovery by retaining each admitted directory's device/inode identity and rechecking its
   exact name binding before the first leaf unlink and again before `rmdir`, preventing cleanup from deleting a replaced
   directory name.
-- This authority and its two registered typed actions remain unavailable through the public CLI. The aarch64 archive
-  audit, public binary-authority cutover, and L2/system release qualification are still release blockers.
+- The public CLI now consumes this authority through the typed client described below. The aarch64 archive audit,
+  legacy-route deletion, and L2/system release qualification are still release blockers.
 
 #### Architecture-scoped binary display projection
 
@@ -378,9 +378,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added atomic projection replacement for one exact `(architecture, version)` Firecracker/Jailer pair and exact-slot
   projection removal. Replacement preserves or explicitly selects each architecture-scoped default, and a failed
   pair update rolls back both members; another architecture at the same version is unchanged.
-- This is only the display-projection cutover's first slice. Public `mvm bin pull` and `mvm bin rm` still perform the
-  legacy downloader/path mutation instead of invoking trusted-release authority and the new projection reconciliation;
-  that authority wiring remains Slice 2, and legacy-route removal remains Slice 3.
+- Public `mvm bin pull` now resolves one exact release, optionally streams the exact local mirror archive, invokes root
+  authority before reading SQLite, and reconciles the pair only from an authoritative installed/replaced/unchanged
+  result. Root errors perform no projection write; a later idempotent retry repairs a failed local projection.
+- Public `mvm bin rm` accepts exact versions and sends only version plus runtime architecture to root. `--force`
+  suppresses local reference advisories but cannot alter root policy. Local list/default/prune are architecture-scoped
+  projection reads and never verify root-owned paths. Legacy downloader/build/service routes remain pending Slice 3.
 
 #### Descriptor-pinned managed-cache and base launch-resource substrates
 
@@ -598,10 +601,9 @@ The following items are release blockers and are intentionally not described abo
   reads a caller-writable configuration from the whole mounted VM directory. Wire the implemented sealed root-built
   configuration capability into the final descriptor-only mount transaction and derive/verify every jail-visible path
   after durable registration.
-- Complete Slice 2 by switching public binary pull/remove to the registered typed trusted-release actions and
-  reconciling the implemented architecture-scoped SQLite projection only from authoritative results. Complete Slice 3
-  by deleting the legacy downloader/path mutation routes, then finish the aarch64 archive audit and CLI-level
-  qualification. The implemented atomic authority is not yet reachable from public `mvm bin` operations.
+- Complete Slice 3 by deleting the now-unreachable legacy downloader/build/path mutation routes, then finish the
+  aarch64 archive audit and CLI-level qualification. Public pull/remove already use the registered typed
+  trusted-release actions and reconcile the architecture-scoped projection only from authoritative results.
 - Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; complete
   live-kernel qualification and backend cutover for the now-registered LoopMount provision/inspect handlers, then remove
   the public root

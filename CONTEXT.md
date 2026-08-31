@@ -338,9 +338,12 @@ SQLite binary rows are an untrusted display projection of the root release store
 now includes architecture and scopes list, prefix, type/version, latest, and default resolution to the runtime
 architecture. VM migration pairs Firecracker only with a Jailer row of the same architecture. Private repository
 methods atomically replace one complete `(architecture, version)` pair or remove that exact slot while leaving the same
-version for another architecture unchanged. This is only projection Slice 1: public pull/remove still use the legacy
-downloader and path mutation. Slice 2 must route them through trusted-release authority and reconcile this projection;
-Slice 3 removes the legacy routes.
+version for another architecture unchanged. Public pull/remove now use the typed trusted-release client. Pull invokes
+root before reading SQLite and projects only an authoritative installed/replaced/unchanged result; root failure leaves
+SQLite untouched, while a projection failure retains the root outcome and requires repair by retry. Remove accepts
+exact versions, sends only version plus runtime architecture to root, and treats local references as warning-only;
+`--force` suppresses that advisory without changing the root request. Local list/default/prune never stat root-owned
+paths. Slice 3 still must delete the now-unreachable legacy downloader/build/service routes.
 
 The cycle-free `internal/lib/authorityfs` leaf module now establishes the implemented portion of that split. It creates
 or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`

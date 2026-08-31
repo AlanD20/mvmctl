@@ -406,7 +406,7 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
     uniqueness and list/prefix/type-version/latest/default resolution to architecture; pair Jailer migration rows only
     within the Firecracker architecture; and add atomic exact-slot pair replacement/removal with same-version
     cross-architecture isolation and rollback evidence.
-  - [ ] **Slice 2:** route public pull/remove/list selection through the typed release client and reconcile the
+  - [x] **Slice 2:** route public pull/remove/list selection through the typed release client and reconcile the
     projection only from authoritative results. Test projection mismatch and local `--force` warning behavior. Do not
     update SQLite after a root postcommit error; retry/idempotency obtains root truth and repairs projection while
     preserving root error details.
