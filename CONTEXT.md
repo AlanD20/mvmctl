@@ -430,10 +430,17 @@ using the source identity or request data and performs no VM lookup, destination
 logging. This deliberately makes VM-to-VM execution unavailable while preserving ordinary host-to-VM execution and
 all copy directions.
 
-The directional exact-user exec-policy repository is only an intent foundation. Public policy CRUD, the closed bounded
-wire, non-root destination execution, authenticated API-owned relay, root-owned active-session/capacity authority,
-legacy `allow_remote_exec` removal, and L2 qualification remain pending. No SQLite VM status, guest-supplied source ID,
-socket path, or process-local semaphore may substitute for root runtime authority.
+Directional exact-user exec-policy intent is now public through
+`mvm policy exec create <source-vm> <destination-vm> <target-user>`, `mvm policy exec ls [--json]`, and
+`mvm policy exec rm <policy...> [--force]`. Creation resolves the source and destination through the VM domain, rejects
+the same VM and the root target user, and derives a deterministic identity from the exact source VM ID, destination VM
+ID, and target user. It performs no network lookup: the grant is directional and independent of same-network,
+cross-network, or absent IP-network placement. List and removal operate only on the exec-policy family.
+
+This public surface persists desired intent; it does not activate VM-to-VM execution. The closed bounded wire,
+non-root destination execution, authenticated API-owned relay, root-owned active-session/capacity authority, legacy
+`allow_remote_exec` removal, and L2 qualification remain pending. No SQLite VM status, guest-supplied source ID, socket
+path, or process-local semaphore may substitute for root runtime authority.
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)
 

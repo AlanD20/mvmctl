@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-08-31 (private down-only link effects and retained firewall inspection authority)
+**Last Updated:** 2026-09-01 (public directional exec-policy CRUD)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -299,12 +299,16 @@ connectivity.
 The clean cutover removes the legacy `allow_remote_exec` VM field, CLI flags, configuration default, environment-spec
 property, all-to-all checks, and documentation without conversion.
 
-Implementation note (2026-08-31): the first exec cutover slice severs the legacy relay before the replacement is
+Implementation note (2026-09-01): the first exec cutover slice severs the legacy relay before the replacement is
 activated. Every legacy `remote_vm` request receives one terminal unauthorized response before source lookup, request
 parsing, destination lookup, vsock dial, or command logging. Ordinary host execution and copy paths remain unchanged.
-The closed wire, destination capability, authenticated API-owned relay, public policy CRUD, legacy flag removal, root
-runtime/capacity authority, and positive system qualification remain pending; VM-to-VM execution is unavailable until
-those dependencies land.
+The second slice exposes directional intent management as
+`mvm policy exec create <source-vm> <destination-vm> <target-user>`, `ls [--json]`, and
+`rm <policy...> [--force]`. The API resolves exact source and destination VM identities, rejects the same VM and root
+target, derives a deterministic identity from source, destination, and user, and neither resolves nor constrains
+network placement. This is desired-state CRUD only. The closed wire, destination capability, authenticated API-owned
+relay, legacy flag removal, root runtime/capacity authority, and positive system qualification remain pending;
+VM-to-VM execution is unavailable until those dependencies land.
 
 ### Layer placement
 

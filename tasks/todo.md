@@ -662,16 +662,21 @@ pending
 ### Task 12: Replace remote-exec flags with typed exec policies
 
 **Owner:** engineer
+**Status:** Public directional exec-policy CRUD implemented; runtime relay/authority/wire/agent enforcement and Python
+qualification pending, so VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
   authorization lookup, duplicate/foreign-key constraints, and a dedicated authorization failure code. Relay
-  authentication, public inputs, and enforcement are not wired yet.
+  authentication and enforcement are not wired yet.
 - [x] Sever the legacy `remote_vm` authorization bypass. Return one terminal unauthorized response before source
   lookup, request parsing, destination lookup, vsock dial, relay, or command logging while preserving ordinary host
   execution and all copy paths.
 - [ ] Remove `allow_remote_exec` from schema, model, config, CLI, environment specs, results, tests, and docs.
-- [ ] Add directional exact source-VM -> target-VM -> non-root-user `mvm policy exec` intent.
+- [x] Expose directional exact source-VM -> destination-VM -> non-root-user intent through typed public API methods and
+  `mvm policy exec create|ls|rm`. Derive a deterministic ID from exact VM identities and target user, reject same-VM
+  and root-target creation, keep resolution independent of network placement, and isolate list/removal to this family.
+  This is desired-state CRUD only and does not authorize a runtime relay.
 - [ ] Add the closed source-session and API-owned relay. `internal/vsockhandler` must not resolve multiple core domains;
   the API resolves shared identities only after root runtime admission.
 - [ ] Authenticate source from the active host session and root-owned instance/vsock identity.

@@ -54,11 +54,14 @@ continue without silently deleting it.
   instance record, and the root-side leases and sealed configuration are not consumed by launch.
 - Typed SQLite allow-intent foundations for source-network and exact-source-VM traffic grants plus directional,
   exact-user VM-to-VM execution grants. Their repositories enforce exact identities, foreign keys, duplicate
-  constraints, and atomic cross-table VM invalidation. Public inputs, enforcement compilation, relay authorization,
-  and the clean-break removal of the transitional policy path remain pending.
+  constraints, and atomic cross-table VM invalidation. Directional exec-policy intent is now exposed through typed
+  API methods and `mvm policy exec create|ls|rm`; creation derives a deterministic identity from exact VM identities
+  and target user without consulting network placement. Public traffic CRUD/API/CLI, enforcement compilation, relay
+  authorization, and the clean-break removal of the transitional policy path remain pending.
 - Legacy guest-originated `remote_vm` requests now fail closed with one terminal unauthorized response before source
   lookup, payload parsing, destination lookup, vsock dial, or command logging. Ordinary host execution and copy paths
-  remain unchanged. The typed replacement relay and public exec-policy surface are not active yet.
+  remain unchanged. Public exec-policy CRUD now records desired intent, but the typed replacement relay and its
+  runtime authorization are not active yet.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -780,7 +783,8 @@ The public policy families are:
 - `mvm policy exec`: directional exact source VM to exact destination VM and required non-root target user.
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
-nothing implicitly.
+nothing implicitly. The exec family's deterministic non-root intent CRUD is public; relay enforcement and the traffic
+family's replacement public surface remain pending.
 
 ### LoopMount privilege foundation
 
