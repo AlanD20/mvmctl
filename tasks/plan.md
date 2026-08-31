@@ -115,9 +115,10 @@ continue without silently deleting it.
   can supply fresh checked snapshot transports after network and generation authority agree. No production application
   or recovery path invokes that factory or collector; `nftables.Conn`/`Flush`, mutation, privileged action, public
   consumer, and system tests remain absent.
-- Architecture-scoped binary display projection and public trusted-release cutover. SQLite records architecture and
-  atomically replaces/removes exact release pairs. Public pull/remove invoke typed root authority and reconcile only
-  authoritative results; local list/default/prune never inspect root-owned paths. Legacy routes remain pending Slice 3.
+- Architecture-scoped binary display projection and complete public trusted-release cutover. SQLite records
+  architecture and atomically replaces/removes exact release pairs. Public pull/remove invoke typed root authority and
+  reconcile only authoritative results; local list/default/prune never inspect root-owned paths. The legacy local
+  downloader/build/removal and path-based Jailer service routes are deleted.
 - ADR-0016 for the single-binary privilege boundary.
 
 Only the exact trusted-release install/remove and LoopMount provision/inspect actions are registered in the privileged
@@ -492,7 +493,7 @@ returns only a closed outcome and fully re-admitted manifest metadata, preserves
 errors, and returns a zero result for precommit failure. The named typed client and two privileged actions are wired to
 public pull/remove. SQLite rows remain architecture-scoped display projection, and only authoritative root results can
 replace or remove an exact slot. Root errors perform no projection write; projection errors retain root outcome and
-repair evidence. Legacy-route removal remains Slice 3. The aarch64 audit, L2 qualification, and remaining release
+repair evidence. The legacy mutation routes are deleted. The aarch64 audit, L2 qualification, and remaining release
 integration work are still pending.
 
 The strict root-owned manifest stores schema version, release slot, archive hash, and each executable's hash and size.
@@ -656,8 +657,9 @@ plan and are not implemented:
      authoritative results. Root errors leave SQLite untouched; projection errors preserve root outcome and repair
      evidence. Exact-version removal keeps `--force` local to advisory suppression, while local list/default/prune use
      only the architecture-scoped projection.
-   - **Slice 3 — pending:** delete the old root downloader/path-based binary mutation routes without compatibility code
-     and prove through targeted searches that no legacy privileged path remains.
+   - **Slice 3 — implemented:** delete the old local downloader/source-build/filesystem-removal and path-based Jailer
+     mutation routes without compatibility code. Targeted searches leave only the typed trusted-release actions and
+     the optional normal-user mirror archive path.
 8. **Audit aarch64 packaging.** Inspect a real aarch64 release archive and freeze its exact member/format/version
    contract before enabling extraction. Acceptance requires independently recorded evidence and mirror-backed
    parser/staging tests. Source derivation and ELF support alone remain fail-closed and do not count as architecture

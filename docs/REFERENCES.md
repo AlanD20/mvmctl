@@ -227,7 +227,9 @@ mvm image import base-img my-vm
 
 ### `mvm bin`
 
-Firecracker runtime management — download, list, and remove exact Firecracker/Jailer release pairs. Release downloads are checksum-verified and installed into the root-owned trusted store used by VM launch. Source-built pairs may be listed but cannot launch jailed VMs.
+Firecracker runtime management — install, list, select, and remove Firecracker/Jailer release pairs. Root authority
+fetches or accepts the optional exact mirror archive, verifies it, and atomically publishes the pair in the trusted
+release store. Source builds and manually supplied binary paths are unsupported.
 
 #### Selectors
 
@@ -240,19 +242,19 @@ The binary resolver tries selectors in priority order:
 | Command | Flags | Description |
 |---------|-------|-------------|
 | `mvm bin ls` | `-r, --remote`, `--limit`, `--json`, `--long` | List local (and optionally remote) Firecracker versions |
-| `mvm bin pull` | `[SELECTOR]`, `--version`, `--git-ref`, `--default, -d`, `--force, -f` | Download a Firecracker version or build from source |
+| `mvm bin pull` | `<version>`, `--default, -d`, `--force, -f` | Install one root-authoritative release |
 | `mvm bin default` | `SELECTOR` | Set a binary as the active default |
-| `mvm bin rm` | `[SELECTORS]...`, `--version`, `-f, --force` | Remove one or more binaries, or use `--version` to remove a version pair |
+| `mvm bin rm` | `<exact-version>...`, `-f, --force` | Remove exact releases; force hides local advisories only |
 
 ```
 # List local and remote versions
 mvm bin ls --remote
 
-# Download a specific Firecracker version
-mvm bin pull firecracker:1.15.0
+# Install a specific Firecracker release
+mvm bin pull 1.15.0
 
-# Build from git source
-mvm bin pull firecracker --git-ref v1.15.0
+# Remove the exact architecture-scoped release pair
+mvm bin rm 1.15.0
 ```
 
 ---

@@ -266,7 +266,7 @@ mvm exec <vm-name> --user runner --timeout 120 -- \
 mvm exec <vm-name> --user runner --timeout 120 -- \
   "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm image pull ubuntu:noble"
 mvm exec <vm-name> --user runner --timeout 120 -- \
-  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull firecracker --version 1.16.0 --default --force"
+  "MVM_ASSET_MIRROR=/mnt /usr/local/bin/mvm bin pull 1.16.0 --default --force"
 ```
 
 ---

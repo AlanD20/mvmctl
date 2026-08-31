@@ -343,7 +343,9 @@ root before reading SQLite and projects only an authoritative installed/replaced
 SQLite untouched, while a projection failure retains the root outcome and requires repair by retry. Remove accepts
 exact versions, sends only version plus runtime architecture to root, and treats local references as warning-only;
 `--force` suppresses that advisory without changing the root request. Local list/default/prune never stat root-owned
-paths. Slice 3 still must delete the now-unreachable legacy downloader/build/service routes.
+paths. The old local downloader, source-build, filesystem removal, path/checksum Jailer installer, and
+`mvm run jailer install/remove-release` actions are deleted. Release mutation now has only the typed trusted-release
+authority path. Transitional VM launch still uses `ResolvePair` until the separate launch-authority cutover.
 
 The cycle-free `internal/lib/authorityfs` leaf module now establishes the implemented portion of that split. It creates
 or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`

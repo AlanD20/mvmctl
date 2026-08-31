@@ -930,8 +930,13 @@ write; projection failure retains the root outcome and marks repair required so 
 `mvm bin rm` accepts exact release versions and sends root only version plus runtime architecture. Root removal or
 already-absent results reconcile the exact projection slot. Local VM/snapshot references are advisory only, and
 `--force` suppresses that warning without changing the root request. Local list/default/prune read the architecture-
-scoped display projection without statting root-owned paths. Slice 3 still removes the now-unreachable legacy
-downloader/build/service routes. SQLite remains untrusted throughout.
+scoped display projection without statting root-owned paths.
+
+Release-authority Slice 3 is implemented. The local downloader, source builder, filesystem removal methods, path and
+checksum Jailer installer, `mvm run jailer install/remove-release` actions, and path-bearing legacy install result are
+deleted without compatibility code. The typed trusted-release client/receiver is the sole release mutation path.
+`ResolvePair` and the fixed Jailer launch actions remain only for the explicitly transitional VM launch path. SQLite
+remains untrusted throughout.
 
 Implementation note (2026-08-29): the private Jailer service derives the exact source identity from a validated
 `(version, architecture)` release slot and rejects non-canonical slots before constructing any source value. Its
@@ -1001,8 +1006,8 @@ existing-only traversal, full canonical admission before recovery, exact referen
 `RENAME_NOREPLACE` commit, explicit committed/close-only target state, ordered fixed-leaf retirement, and exact
 post-commit details. Recovery now rechecks each reserved directory's device/inode binding before leaf cleanup and
 before `rmdir`. This private path now has registered typed receiver handlers, a named caller capability, and public
-pull/remove API consumers. The aarch64 archive audit, legacy-route deletion, and L2 release qualification remain Task 6
-work.
+pull/remove API consumers. Legacy routes are deleted; the aarch64 archive audit and L2 release qualification remain
+Task 6 work.
 
 The strict wire codec and caller socketpair process transport, including concurrent upload/response, EOF qualification,
 half-close, and bounded reaping, are implemented. Receiver increments 5a and 5b are also implemented. The production

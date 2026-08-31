@@ -182,7 +182,9 @@ are pinned independently of unrelated ancestor filesystems.
 
 ### Firecracker Jailer
 
-`mvm bin pull` downloads and checksum-verifies a matching Firecracker/Jailer release pair. The privileged Jailer service installs the pair into the root-owned trusted store; users do not install or invoke Jailer directly. Source-built pairs remain untrusted and cannot launch production VMs.
+`mvm bin pull` resolves one release and invokes the typed trusted-release authority. Root either consumes the exact
+optional mirror archive or fetches the fixed upstream release, verifies it, and atomically publishes the matching
+Firecracker/Jailer pair. Users do not invoke an installation service directly; source-built pairs are unsupported.
 
 ---
 
@@ -203,7 +205,8 @@ are pinned independently of unrelated ancestor filesystems.
 | `mvm kernel pull --type firecracker` | Download only (no build tools) |
 | `mvm key create` | `ssh-keygen` |
 | `mvm key import/ls/rm/inspect/export/default` | Internal only |
-| `mvm bin pull/ls/rm/default` | Internal downloads plus privileged `mvm run jailer install/remove-release` |
+| `mvm bin pull/rm` | Typed privileged release actions; no public service subcommand |
+| `mvm bin ls/default` | Internal architecture-scoped SQLite display projection only |
 | `mvm vm create` | trusted `jailer` + `firecracker`, `ip`, `iptables`/`nft`, `mvm run provision`, `losetup`, `blkid`, `blockdev`, `mount`, `umount`, `e2fsck`, `resize2fs`, `tune2fs`, `fstrim`, `chroot` (+ `btrfs` for btrfs images) |
 | `mvm vm start/stop/reboot/pause/resume` | trusted `jailer` + `firecracker`, `ip`, `iptables`/`nft` |
 | `mvm vm rm` | `mvm run jailer cleanup`, `ip`, `iptables`/`nft` |

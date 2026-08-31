@@ -478,19 +478,18 @@ Specific legacy conflicts that must be rewritten before release:
 | `bin ls --json` empty | ⚡ Shallow | `bin/test_bin.py` | `TestBinLifecycle` | L2 |
 | `bin ls --remote` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryEdges` | L1 — skips on network |
 | `bin ls --remote --limit` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryEdges` | L1 — skips on network |
-| `bin pull <version>` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | L2 — often skips |
-| `bin pull --force` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryPullAdvanced` | L1 — often skips |
-| `bin pull --default` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryPullAdvanced` | L2 — often skips |
-| `bin pull --git-ref` | 🟡 Partial | `bin/test_bin.py` | `TestBinaryPullAdvanced` | L2 — builds from git ref, skips if no Docker |
+| `bin pull <version>` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | Uses removed syntax |
+| `bin pull --force` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAdvanced` | Verify replacement authority |
+| `bin pull --default` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAdvanced` | Use positional version |
+| Removed pull flags | ❌ Missing | `bin/test_bin.py` | `TestBinaryPullAdvanced` | Git-ref test is obsolete |
 | `bin pull nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 — no skip |
-| `bin rm --force` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | L3 — file removed from disk |
-| `bin rm <id>` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryEdges` | L2 — may skip |
-| `bin rm --version` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryEdges` | L2 — may skip |
+| `bin rm <exact-version>` | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | Verify typed root removal |
+| Removed rm selectors | ❌ Missing | `bin/test_bin.py` | `TestBinaryEdges` | Add syntax rejection |
 | `bin rm nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 |
-| `bin rm` blocked by stopped VM | ✅ Deep | `bin/test_bin.py` | `TestBinaryStoppedVMDeletion` | L3: rm binary used by stopped VM — VM still listed after deletion |
+| Root reference denial | ❌ Rewrite | `bin/test_bin.py` | `TestBinaryStoppedVMDeletion` | Assert root authority |
 | `bin default <id>` | ⏭️ Skip | `bin/test_bin.py` | `TestBinaryPullAndLifecycle` | L2 — may skip |
 | `bin default nonexistent` | ⚡ Shallow | `bin/test_bin.py` | `TestBinaryEdges` | L1 |
-| Service binary symlinks survive cache clean | ✅ Deep | `bin/test_bin.py` | `TestServiceBinarySymlinks` | L3 — symlinks on disk |
+| Release survives cache clean | ❌ Rewrite | `bin/test_bin.py` | `TestServiceBinarySymlinks` | No legacy symlinks |
 
 ---
 

@@ -368,8 +368,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardened reserved-candidate recovery by retaining each admitted directory's device/inode identity and rechecking its
   exact name binding before the first leaf unlink and again before `rmdir`, preventing cleanup from deleting a replaced
   directory name.
-- The public CLI now consumes this authority through the typed client described below. The aarch64 archive audit,
-  legacy-route deletion, and L2/system release qualification are still release blockers.
+- The public CLI now consumes this authority through the typed client described below. The aarch64 archive audit and
+  L2/system release qualification are still release blockers.
 
 #### Architecture-scoped binary display projection
 
@@ -383,7 +383,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result. Root errors perform no projection write; a later idempotent retry repairs a failed local projection.
 - Public `mvm bin rm` accepts exact versions and sends only version plus runtime architecture to root. `--force`
   suppresses local reference advisories but cannot alter root policy. Local list/default/prune are architecture-scoped
-  projection reads and never verify root-owned paths. Legacy downloader/build/service routes remain pending Slice 3.
+  projection reads and never verify root-owned paths.
+- Removed the parallel local downloader, source-build, filesystem removal, and path-based Jailer installation routes.
+  The internal `mvm run jailer install/remove-release` actions, their path/checksum result, and orphaned archive-remap
+  and file-derived binary-ID helpers no longer exist. The typed trusted-release dispatcher is the sole release mutation
+  path; transitional VM launch pair resolution remains pending the separate launch-authority cutover.
 
 #### Descriptor-pinned managed-cache and base launch-resource substrates
 
@@ -601,9 +605,9 @@ The following items are release blockers and are intentionally not described abo
   reads a caller-writable configuration from the whole mounted VM directory. Wire the implemented sealed root-built
   configuration capability into the final descriptor-only mount transaction and derive/verify every jail-visible path
   after durable registration.
-- Complete Slice 3 by deleting the now-unreachable legacy downloader/build/path mutation routes, then finish the
-  aarch64 archive audit and CLI-level qualification. Public pull/remove already use the registered typed
-  trusted-release actions and reconcile the architecture-scoped projection only from authoritative results.
+- Finish the aarch64 archive audit and CLI-level qualification. Public pull/remove use the registered typed
+  trusted-release actions, reconcile the architecture-scoped projection only from authoritative results, and have no
+  legacy downloader/build/path mutation fallback.
 - Migrate Jailer, network, firewall, and supported host mutations to distinct typed privileged actions; complete
   live-kernel qualification and backend cutover for the now-registered LoopMount provision/inspect handlers, then remove
   the public root

@@ -401,7 +401,7 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   never writes a second frame. Use the existing EOF-qualified response authority and remote-result precedence over
   uploader/exit/reap diagnostics; capability tests confirm those resolved semantics, preserve partial-state details,
   and expose no generic call/decoder, executable/argv/environment, path/URL/checksum, force, or reference-bypass input.
-- [ ] 7. Switch the public binary API to root release authority while keeping SQLite rows display-only and untrusted.
+- [x] 7. Switch the public binary API to root release authority while keeping SQLite rows display-only and untrusted.
   - [x] **Slice 1:** add architecture to binary rows and stable root-result display IDs; scope active member/default
     uniqueness and list/prefix/type-version/latest/default resolution to architecture; pair Jailer migration rows only
     within the Firecracker architecture; and add atomic exact-slot pair replacement/removal with same-version
@@ -410,14 +410,15 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
     projection only from authoritative results. Test projection mismatch and local `--force` warning behavior. Do not
     update SQLite after a root postcommit error; retry/idempotency obtains root truth and repairs projection while
     preserving root error details.
-  - [ ] **Slice 3:** delete the legacy downloader/path-based privileged mutation routes without compatibility code and
-    search for every removed legacy route.
+  - [x] **Slice 3:** delete the legacy downloader/source-build/filesystem-removal and path-based Jailer mutation routes
+    without compatibility code and search for every removed legacy route.
 - [ ] 8. Audit a real aarch64 archive and freeze its version/member/format contract before enabling extraction. Record
   evidence and pass mirror-backed parser/staging tests; source and ELF support alone remain fail-closed.
 - [ ] 9. Extend the existing registered Python system-test domains and coverage matrix, then qualify the release build
   only inside disposable nested-virt runner VMs with `MVM_ASSET_MIRROR=~/.cache/mvm-asset-mirror`. Cover installed-CLI
   install/idempotency/replacement/removal, referenced denial, crash/retry, reboot, cross-user abuse, malformed
-  transport, and zero leaked release/runtime resources before the later full CI and release gates.
+  transport, and zero leaked release/runtime resources before the later full CI and release gates. Rewrite the stale
+  binary tests and `scripts/fresh_env.py` calls that still use removed `--version`/`--git-ref` syntax.
 
 ### Task 7: Add private mount and process identity primitives
 
