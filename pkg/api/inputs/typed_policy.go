@@ -2,17 +2,156 @@ package inputs
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
+	"mvmctl/internal/core/execpolicy"
 	"mvmctl/internal/core/network"
 	"mvmctl/internal/core/vm"
-	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/validators"
 	"mvmctl/pkg/errs"
 )
+
+// NetworkToVMTrafficPolicyInput identifies network-source traffic policies by exact ID or unambiguous prefix.
+type NetworkToVMTrafficPolicyInput struct {
+	Identifiers []string `json:"identifiers"`
+}
+
+// Validate checks the network-source policy identifiers.
+func (i *NetworkToVMTrafficPolicyInput) Validate() error {
+	return validatePolicyIdentifiers(i.Identifiers)
+}
+
+// Resolve binds identifiers only within the network-source traffic-policy family.
+func (i *NetworkToVMTrafficPolicyInput) Resolve(
+	ctx context.Context,
+	repo network.TrafficPolicyRepository,
+) ([]*model.NetworkToVMTrafficAllowIntent, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	intents := make([]*model.NetworkToVMTrafficAllowIntent, 0, len(i.Identifiers))
+	seen := make(map[string]bool, len(i.Identifiers))
+	for _, identifier := range i.Identifiers {
+		matches, err := repo.FindNetworkToVMByPrefix(ctx, identifier)
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodePolicyNotFound, "failed to resolve network traffic policy", err)
+		}
+		if len(matches) == 0 {
+			return nil, errs.NotFound(errs.CodePolicyNotFound, "network traffic policy not found",
+				errs.WithEntity(identifier))
+		}
+		if len(matches) > 1 {
+			return nil, errs.New(errs.CodePolicyAmbiguous,
+				fmt.Sprintf("network traffic policy identifier %q is ambiguous", identifier))
+		}
+		if !seen[matches[0].ID] {
+			intents = append(intents, matches[0])
+			seen[matches[0].ID] = true
+		}
+	}
+	return intents, nil
+}
+
+// VMToVMTrafficPolicyInput identifies VM-source traffic policies by exact ID or unambiguous prefix.
+type VMToVMTrafficPolicyInput struct {
+	Identifiers []string `json:"identifiers"`
+}
+
+// Validate checks the VM-source policy identifiers.
+func (i *VMToVMTrafficPolicyInput) Validate() error { return validatePolicyIdentifiers(i.Identifiers) }
+
+// Resolve binds identifiers only within the VM-source traffic-policy family.
+func (i *VMToVMTrafficPolicyInput) Resolve(
+	ctx context.Context,
+	repo network.TrafficPolicyRepository,
+) ([]*model.VMToVMTrafficAllowIntent, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	intents := make([]*model.VMToVMTrafficAllowIntent, 0, len(i.Identifiers))
+	seen := make(map[string]bool, len(i.Identifiers))
+	for _, identifier := range i.Identifiers {
+		matches, err := repo.FindVMToVMByPrefix(ctx, identifier)
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodePolicyNotFound, "failed to resolve VM traffic policy", err)
+		}
+		if len(matches) == 0 {
+			return nil, errs.NotFound(errs.CodePolicyNotFound, "VM traffic policy not found",
+				errs.WithEntity(identifier))
+		}
+		if len(matches) > 1 {
+			return nil, errs.New(errs.CodePolicyAmbiguous,
+				fmt.Sprintf("VM traffic policy identifier %q is ambiguous", identifier))
+		}
+		if !seen[matches[0].ID] {
+			intents = append(intents, matches[0])
+			seen[matches[0].ID] = true
+		}
+	}
+	return intents, nil
+}
+
+// VMToVMExecPolicyInput identifies directional execution policies by exact ID or unambiguous prefix.
+type VMToVMExecPolicyInput struct {
+	Identifiers []string `json:"identifiers"`
+}
+
+// Validate checks the execution-policy identifiers.
+func (i *VMToVMExecPolicyInput) Validate() error { return validatePolicyIdentifiers(i.Identifiers) }
+
+// Resolve binds identifiers only within the VM-to-VM execution-policy family.
+func (i *VMToVMExecPolicyInput) Resolve(
+	ctx context.Context,
+	repo execpolicy.Repository,
+) ([]*model.VMToVMExecAllowIntent, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
+	}
+	intents := make([]*model.VMToVMExecAllowIntent, 0, len(i.Identifiers))
+	seen := make(map[string]bool, len(i.Identifiers))
+	for _, identifier := range i.Identifiers {
+		matches, err := repo.FindByPrefix(ctx, identifier)
+		if err != nil {
+			return nil, errs.WrapMsg(errs.CodePolicyNotFound, "failed to resolve execution policy", err)
+		}
+		if len(matches) == 0 {
+			return nil, errs.NotFound(errs.CodePolicyNotFound, "execution policy not found",
+				errs.WithEntity(identifier))
+		}
+		if len(matches) > 1 {
+			return nil, errs.New(errs.CodePolicyAmbiguous,
+				fmt.Sprintf("execution policy identifier %q is ambiguous", identifier))
+		}
+		if !seen[matches[0].ID] {
+			intents = append(intents, matches[0])
+			seen[matches[0].ID] = true
+		}
+	}
+	return intents, nil
+}
+
+func validatePolicyIdentifiers(identifiers []string) error {
+	if len(identifiers) == 0 {
+		return errs.New(errs.CodeValidationFailed, "at least one policy identifier is required")
+	}
+	for _, identifier := range identifiers {
+		if len(identifier) < 1 || len(identifier) > 64 {
+			return errs.New(errs.CodeValidationFailed,
+				"policy identifiers must be between 1 and 64 lowercase hexadecimal characters")
+		}
+		for index := range len(identifier) {
+			if (identifier[index] < '0' || identifier[index] > '9') &&
+				(identifier[index] < 'a' || identifier[index] > 'f') {
+				return errs.New(errs.CodeValidationFailed,
+					"policy identifiers must be between 1 and 64 lowercase hexadecimal characters")
+			}
+		}
+	}
+	return nil
+}
 
 // NetworkToVMTrafficPolicyCreateInput is the public input for one managed-network-to-VM IP traffic grant.
 type NetworkToVMTrafficPolicyCreateInput struct {
@@ -20,17 +159,6 @@ type NetworkToVMTrafficPolicyCreateInput struct {
 	DestinationVM   string `json:"destination_vm"   yaml:"destination_vm"`
 	Protocol        string `json:"protocol"         yaml:"protocol"`
 	DestinationPort string `json:"destination_port" yaml:"destination_port"`
-}
-
-// ResolvedNetworkToVMTrafficPolicyCreateInput contains exact resource identities and canonical traffic values.
-type ResolvedNetworkToVMTrafficPolicyCreateInput struct {
-	SourceNetwork        *model.NetworkItem
-	DestinationVM        *model.VMItem
-	DestinationNetwork   *model.NetworkItem
-	Protocol             model.TrafficProtocol
-	DestinationPortStart int
-	DestinationPortEnd   int
-	NetworkRelation      model.ManagedNetworkRelation
 }
 
 // Validate checks the closed network-to-VM traffic policy shape.
@@ -45,56 +173,34 @@ func (i *NetworkToVMTrafficPolicyCreateInput) Validate() error {
 	return err
 }
 
-// Resolve binds the public network-to-VM input to exact current resource identities.
-func (i *NetworkToVMTrafficPolicyCreateInput) Resolve(
+// ResolveSourceNetwork resolves only the network-domain source fact.
+func (i *NetworkToVMTrafficPolicyCreateInput) ResolveSourceNetwork(
 	ctx context.Context,
-	networkRepo network.Repository,
-	vmRepo vm.Repository,
-) (*ResolvedNetworkToVMTrafficPolicyCreateInput, error) {
+	repo network.Repository,
+) (*model.NetworkItem, error) {
 	if err := i.Validate(); err != nil {
 		return nil, err
 	}
-	protocol, portStart, portEnd, err := resolveCanonicalTrafficValues(i.Protocol, i.DestinationPort)
-	if err != nil {
-		return nil, err
-	}
-	source, err := resolveOnePolicyNetwork(ctx, networkRepo, i.SourceNetwork)
-	if err != nil {
-		return nil, err
-	}
-	destination, err := resolveOnePolicyVM(ctx, vmRepo, i.DestinationVM)
-	if err != nil {
-		return nil, err
-	}
-	if destination.NetworkID == "" {
-		return nil, errs.New(errs.CodePolicyEndpointInvalid, "destination VM must have a managed network")
-	}
-	destinationNetwork, err := resolvePolicyNetworkByID(ctx, networkRepo, destination.NetworkID)
-	if err != nil {
-		return nil, err
-	}
-	relation := model.ManagedNetworkRelationCross
-	if source.ID == destination.NetworkID {
-		relation = model.ManagedNetworkRelationSame
-	}
-	return &ResolvedNetworkToVMTrafficPolicyCreateInput{
-		SourceNetwork: source, DestinationVM: destination, DestinationNetwork: destinationNetwork, Protocol: protocol,
-		DestinationPortStart: portStart, DestinationPortEnd: portEnd, NetworkRelation: relation,
-	}, nil
+	return resolveOnePolicyNetwork(ctx, repo, i.SourceNetwork)
 }
 
-// NetworkToVMIntent builds one immutable desired-policy row from the resolved identity.
-func (i *ResolvedNetworkToVMTrafficPolicyCreateInput) NetworkToVMIntent(
-	at time.Time,
-) *model.NetworkToVMTrafficAllowIntent {
-	timestamp := at.UTC().Format(time.RFC3339)
-	intent := &model.NetworkToVMTrafficAllowIntent{
-		SourceNetworkID: i.SourceNetwork.ID, DestinationVMID: i.DestinationVM.ID, Protocol: i.Protocol,
-		DestinationPortStart: i.DestinationPortStart, DestinationPortEnd: i.DestinationPortEnd,
-		CreatedAt: timestamp, UpdatedAt: timestamp,
+// ResolveDestinationVM resolves only the VM-domain destination fact.
+func (i *NetworkToVMTrafficPolicyCreateInput) ResolveDestinationVM(
+	ctx context.Context,
+	repo vm.Repository,
+) (*model.VMItem, error) {
+	if err := i.Validate(); err != nil {
+		return nil, err
 	}
-	intent.ID = crypto.NetworkToVMTrafficPolicyDigest(*intent)
-	return intent
+	return resolveOnePolicyVM(ctx, repo, i.DestinationVM)
+}
+
+// ResolvedTraffic returns the validated protocol and destination port bounds.
+func (i *NetworkToVMTrafficPolicyCreateInput) ResolvedTraffic() (model.TrafficProtocol, int, int, error) {
+	if err := i.Validate(); err != nil {
+		return "", 0, 0, err
+	}
+	return resolveCanonicalTrafficValues(i.Protocol, i.DestinationPort)
 }
 
 // VMToVMTrafficPolicyCreateInput is the public input for one exact-VM-to-VM IP traffic grant.
@@ -103,18 +209,6 @@ type VMToVMTrafficPolicyCreateInput struct {
 	DestinationVM   string `json:"destination_vm"   yaml:"destination_vm"`
 	Protocol        string `json:"protocol"         yaml:"protocol"`
 	DestinationPort string `json:"destination_port" yaml:"destination_port"`
-}
-
-// ResolvedVMToVMTrafficPolicyCreateInput contains exact resource identities and canonical traffic values.
-type ResolvedVMToVMTrafficPolicyCreateInput struct {
-	SourceVM             *model.VMItem
-	SourceNetwork        *model.NetworkItem
-	DestinationVM        *model.VMItem
-	DestinationNetwork   *model.NetworkItem
-	Protocol             model.TrafficProtocol
-	DestinationPortStart int
-	DestinationPortEnd   int
-	NetworkRelation      model.ManagedNetworkRelation
 }
 
 // Validate checks the closed VM-to-VM traffic policy shape.
@@ -129,62 +223,34 @@ func (i *VMToVMTrafficPolicyCreateInput) Validate() error {
 	return err
 }
 
-// Resolve binds the public VM-to-VM input to exact current resource identities.
-func (i *VMToVMTrafficPolicyCreateInput) Resolve(
+// ResolveVMs resolves only the VM-domain source and destination facts.
+func (i *VMToVMTrafficPolicyCreateInput) ResolveVMs(
 	ctx context.Context,
-	vmRepo vm.Repository,
-	networkRepo network.Repository,
-) (*ResolvedVMToVMTrafficPolicyCreateInput, error) {
+	repo vm.Repository,
+) (*model.VMItem, *model.VMItem, error) {
 	if err := i.Validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	protocol, portStart, portEnd, err := resolveCanonicalTrafficValues(i.Protocol, i.DestinationPort)
+	source, err := resolveOnePolicyVM(ctx, repo, i.SourceVM)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	source, err := resolveOnePolicyVM(ctx, vmRepo, i.SourceVM)
+	destination, err := resolveOnePolicyVM(ctx, repo, i.DestinationVM)
 	if err != nil {
-		return nil, err
-	}
-	destination, err := resolveOnePolicyVM(ctx, vmRepo, i.DestinationVM)
-	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if source.ID == destination.ID {
-		return nil, errs.New(errs.CodePolicyEndpointInvalid, "source and destination VM must differ")
+		return nil, nil, errs.New(errs.CodePolicyEndpointInvalid, "source and destination VM must differ")
 	}
-	if source.NetworkID == "" || destination.NetworkID == "" {
-		return nil, errs.New(errs.CodePolicyEndpointInvalid, "traffic policy VMs must have managed networks")
-	}
-	sourceNetwork, err := resolvePolicyNetworkByID(ctx, networkRepo, source.NetworkID)
-	if err != nil {
-		return nil, err
-	}
-	destinationNetwork, err := resolvePolicyNetworkByID(ctx, networkRepo, destination.NetworkID)
-	if err != nil {
-		return nil, err
-	}
-	relation := model.ManagedNetworkRelationCross
-	if source.NetworkID == destination.NetworkID {
-		relation = model.ManagedNetworkRelationSame
-	}
-	return &ResolvedVMToVMTrafficPolicyCreateInput{
-		SourceVM: source, SourceNetwork: sourceNetwork, DestinationVM: destination,
-		DestinationNetwork: destinationNetwork, Protocol: protocol,
-		DestinationPortStart: portStart, DestinationPortEnd: portEnd, NetworkRelation: relation,
-	}, nil
+	return source, destination, nil
 }
 
-// Intent builds one immutable desired-policy row from the resolved VM-to-VM traffic identity.
-func (i *ResolvedVMToVMTrafficPolicyCreateInput) Intent(at time.Time) *model.VMToVMTrafficAllowIntent {
-	timestamp := at.UTC().Format(time.RFC3339)
-	intent := &model.VMToVMTrafficAllowIntent{
-		SourceVMID: i.SourceVM.ID, DestinationVMID: i.DestinationVM.ID, Protocol: i.Protocol,
-		DestinationPortStart: i.DestinationPortStart, DestinationPortEnd: i.DestinationPortEnd,
-		CreatedAt: timestamp, UpdatedAt: timestamp,
+// ResolvedTraffic returns the validated protocol and destination port bounds.
+func (i *VMToVMTrafficPolicyCreateInput) ResolvedTraffic() (model.TrafficProtocol, int, int, error) {
+	if err := i.Validate(); err != nil {
+		return "", 0, 0, err
 	}
-	intent.ID = crypto.VMToVMTrafficPolicyDigest(*intent)
-	return intent
+	return resolveCanonicalTrafficValues(i.Protocol, i.DestinationPort)
 }
 
 // VMToVMExecPolicyCreateInput is the public input for one directional VM-to-VM vsock exec grant.
@@ -192,13 +258,6 @@ type VMToVMExecPolicyCreateInput struct {
 	SourceVM      string `json:"source_vm"      yaml:"source_vm"`
 	DestinationVM string `json:"destination_vm" yaml:"destination_vm"`
 	TargetUser    string `json:"target_user"    yaml:"target_user"`
-}
-
-// ResolvedVMToVMExecPolicyCreateInput contains the exact identities authorized by a VM-to-VM exec policy.
-type ResolvedVMToVMExecPolicyCreateInput struct {
-	SourceVM      *model.VMItem
-	DestinationVM *model.VMItem
-	TargetUser    string
 }
 
 // Validate checks the closed VM-to-VM exec policy shape and rejects root execution.
@@ -221,39 +280,26 @@ func (i *VMToVMExecPolicyCreateInput) Validate() error {
 	return nil
 }
 
-// Resolve binds the public exec-policy input to exact VM identities without consulting managed-network placement.
-func (i *VMToVMExecPolicyCreateInput) Resolve(
+// ResolveVMs resolves only the VM-domain source and destination facts.
+func (i *VMToVMExecPolicyCreateInput) ResolveVMs(
 	ctx context.Context,
-	vmRepo vm.Repository,
-) (*ResolvedVMToVMExecPolicyCreateInput, error) {
+	repo vm.Repository,
+) (*model.VMItem, *model.VMItem, error) {
 	if err := i.Validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	source, err := resolveOnePolicyVM(ctx, vmRepo, i.SourceVM)
+	source, err := resolveOnePolicyVM(ctx, repo, i.SourceVM)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	destination, err := resolveOnePolicyVM(ctx, vmRepo, i.DestinationVM)
+	destination, err := resolveOnePolicyVM(ctx, repo, i.DestinationVM)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if source.ID == destination.ID {
-		return nil, errs.New(errs.CodePolicyEndpointInvalid, "source and destination VM must differ")
+		return nil, nil, errs.New(errs.CodePolicyEndpointInvalid, "source and destination VM must differ")
 	}
-	return &ResolvedVMToVMExecPolicyCreateInput{
-		SourceVM: source, DestinationVM: destination, TargetUser: i.TargetUser,
-	}, nil
-}
-
-// Intent builds one immutable desired-policy row from the resolved VM-to-VM exec identity.
-func (i *ResolvedVMToVMExecPolicyCreateInput) Intent(at time.Time) *model.VMToVMExecAllowIntent {
-	timestamp := at.UTC().Format(time.RFC3339)
-	intent := &model.VMToVMExecAllowIntent{
-		SourceVMID: i.SourceVM.ID, DestinationVMID: i.DestinationVM.ID, TargetUser: i.TargetUser,
-		CreatedAt: timestamp, UpdatedAt: timestamp,
-	}
-	intent.ID = crypto.VMToVMExecPolicyDigest(*intent)
-	return intent
+	return source, destination, nil
 }
 
 func resolveCanonicalTrafficValues(protocolValue, destinationPort string) (model.TrafficProtocol, int, int, error) {
@@ -320,19 +366,4 @@ func resolveOnePolicyVM(ctx context.Context, repo vm.Repository, identifier stri
 		return nil, err
 	}
 	return items[0], nil
-}
-
-func resolvePolicyNetworkByID(
-	ctx context.Context,
-	repo network.Repository,
-	networkID string,
-) (*model.NetworkItem, error) {
-	item, err := repo.Get(ctx, networkID)
-	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeNetworkNotFound, "failed to resolve policy network", err)
-	}
-	if item == nil {
-		return nil, errs.NotFound(errs.CodeNetworkNotFound, "policy network not found", errs.WithEntity(networkID))
-	}
-	return item, nil
 }
