@@ -192,6 +192,9 @@ func processPIDFDAliveWithPoll(
 			}
 			return true, nil
 		}
+		if count != 1 {
+			return false, fmt.Errorf("pidfd poll returned unexpected event count %d", count)
+		}
 		break
 	}
 	if pollFDs[0].Revents&unix.POLLNVAL != 0 {
@@ -203,7 +206,8 @@ func processPIDFDAliveWithPoll(
 	if pollFDs[0].Revents == 0 {
 		return false, fmt.Errorf("pidfd poll returned an event count without flags")
 	}
-	if pollFDs[0].Revents != unix.POLLIN {
+	exitEvents := int16(unix.POLLIN | unix.POLLHUP)
+	if unexpected := pollFDs[0].Revents &^ exitEvents; unexpected != 0 {
 		return false, fmt.Errorf("pidfd poll returned unexpected events %#x", pollFDs[0].Revents)
 	}
 	return false, nil

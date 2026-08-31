@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func TestProcessPIDFDAliveRetriesInterruptAndAcceptsOnlyExitReadiness(t *testing.T) {
+func TestProcessPIDFDAliveRetriesInterruptAndClassifiesPidfdReadiness(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -27,13 +27,19 @@ func TestProcessPIDFDAliveRetriesInterruptAndAcceptsOnlyExitReadiness(t *testing
 			results: []processPIDFDPollResult{{count: 1, events: unix.POLLERR}},
 			wantErr: "poll error",
 		},
-		"invalid fd": {results: []processPIDFDPollResult{{count: 1, events: unix.POLLNVAL}}, wantErr: "invalid"},
-		"unexpected hangup": {
-			results: []processPIDFDPollResult{{count: 1, events: unix.POLLHUP}},
-			wantErr: "unexpected",
+		"invalid fd":     {results: []processPIDFDPollResult{{count: 1, events: unix.POLLNVAL}}, wantErr: "invalid"},
+		"reaped process": {results: []processPIDFDPollResult{{count: 1, events: unix.POLLHUP}}},
+		"exited and reaped process": {
+			results: []processPIDFDPollResult{{count: 1, events: unix.POLLIN | unix.POLLHUP}},
 		},
-		"mixed exit event": {
-			results: []processPIDFDPollResult{{count: 1, events: unix.POLLIN | unix.POLLHUP}}, wantErr: "unexpected",
+		"unexpected readiness": {
+			results: []processPIDFDPollResult{{count: 1, events: unix.POLLPRI}}, wantErr: "unexpected",
+		},
+		"flags without count": {
+			results: []processPIDFDPollResult{{count: 0, events: unix.POLLIN}}, wantErr: "without an event count",
+		},
+		"multiple events for one pidfd": {
+			results: []processPIDFDPollResult{{count: 2, events: unix.POLLIN}}, wantErr: "unexpected event count",
 		},
 		"count without flags": {results: []processPIDFDPollResult{{count: 1}}, wantErr: "without flags"},
 	}
@@ -60,6 +66,25 @@ func TestProcessPIDFDAliveRetriesInterruptAndAcceptsOnlyExitReadiness(t *testing
 			assert.Equal(t, test.want, alive)
 		})
 	}
+}
+
+func TestBlockedLaunchProcessCleanupAcceptsReapedPIDFDHangup(t *testing.T) {
+	t.Parallel()
+
+	fixture := newBlockedProcessFixture(false)
+	processes, err := fixture.admit(t.Context())
+	require.NoError(t, err)
+	processes.state.deps.pidfdAlive = func(ctx context.Context, fd int) (bool, error) {
+		return processPIDFDAliveWithPoll(ctx, fd, func(fds []unix.PollFd, timeout int) (int, error) {
+			assert.Equal(t, 0, timeout)
+			fds[0].Revents = unix.POLLHUP
+			return 1, nil
+		})
+	}
+
+	require.NoError(t, processes.terminateAndReap(t.Context()))
+	require.NoError(t, processes.Release(t.Context()))
+	assert.Equal(t, []string{"signal:100", "reap:100", "receiver", "firecracker:100"}, fixture.eventsSnapshot())
 }
 
 func TestProcessPIDFDAliveHonorsCancellationBetweenInterruptedPolls(t *testing.T) {
