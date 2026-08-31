@@ -105,8 +105,8 @@ func TestDecodeKernelObservationRejectsUnexpectedObjectsAndBounds(t *testing.T) 
 	}
 }
 
-// Rationale: A netlink dump is authoritative only when every envelope and object remains in the exact kernel order and
-// family expected by the closed managed-table grammar.
+// Rationale: Exact parent lookups and table-scoped dumps are authoritative only when every envelope and object remains
+// in the exact kernel order and family expected by the closed managed-table grammar.
 func TestDecodeKernelObservationRejectsMessageAndObjectIdentityChanges(t *testing.T) {
 	valid, _ := capturedKernelObservationFixture(t)
 	compiled, err := compileGeneration(kernelFixtureIntent())
@@ -126,10 +126,10 @@ func TestDecodeKernelObservationRejectsMessageAndObjectIdentityChanges(t *testin
 			raw.ruleReplies[0].Header.Flags = netlink.Multi
 		},
 		"table response flags": func(raw *kernelObservationMessages) {
-			raw.tableReplies[0].Header.Flags = netlink.Multi | netlink.Append
+			raw.tableReplies[0].Header.Flags = netlink.Multi
 		},
 		"chain response flags": func(raw *kernelObservationMessages) {
-			raw.chainReplies[0].Header.Flags = netlink.Multi | netlink.Append
+			raw.chainReplies[0].Header.Flags = netlink.Multi
 		},
 		"header length": func(raw *kernelObservationMessages) {
 			raw.tableReplies[0].Header.Length++
@@ -1137,7 +1137,7 @@ func kernelMessagesFromObservation(t *testing.T, observed kernelObservation) ker
 	for tableIndex := range observed.tables {
 		table := observed.tables[tableIndex]
 		result.tableReplies = append(result.tableReplies, testKernelMessage(t, unix.NFT_MSG_NEWTABLE,
-			table.family, netlink.Multi, []netlink.Attribute{
+			table.family, 0, []netlink.Attribute{
 				{Type: unix.NFTA_TABLE_NAME, Data: []byte(table.name + "\x00")},
 				{Type: unix.NFTA_TABLE_FLAGS, Data: testBigEndianUint32(table.flags)},
 				{Type: unix.NFTA_TABLE_USE, Data: testBigEndianUint32(uint32(len(table.chains)))},
@@ -1152,7 +1152,7 @@ func kernelMessagesFromObservation(t *testing.T, observed kernelObservation) ker
 				{Type: unix.NFTA_HOOK_PRIORITY, Data: testBigEndianUint32(uint32(chain.priority))},
 			})
 			result.chainReplies = append(result.chainReplies, testKernelMessage(t, unix.NFT_MSG_NEWCHAIN,
-				table.family, netlink.Multi, []netlink.Attribute{
+				table.family, 0, []netlink.Attribute{
 					{Type: unix.NFTA_CHAIN_TABLE, Data: []byte(table.name + "\x00")},
 					{Type: unix.NFTA_CHAIN_HANDLE, Data: testBigEndianUint64(chainHandle)},
 					{Type: unix.NFTA_CHAIN_NAME, Data: []byte(chain.name + "\x00")},
@@ -1193,7 +1193,7 @@ func kernelMessagesFromObservation(t *testing.T, observed kernelObservation) ker
 	return result
 }
 
-// testKernelMessage wraps flagless attributes in one exact nftables dump response envelope.
+// testKernelMessage wraps flagless attributes in one exact nftables response envelope.
 func testKernelMessage(
 	t *testing.T,
 	messageType uint16,

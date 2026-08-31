@@ -145,7 +145,7 @@ func decodeKernelTables(
 		family, baseSequence, attrs, err := decodeKernelMessage(
 			message,
 			unix.NFT_MSG_NEWTABLE,
-			netlink.Multi,
+			0,
 			"table",
 			map[uint16]kernelAttributeRule{
 				unix.NFTA_TABLE_NAME:  {required: true},
@@ -217,7 +217,7 @@ func decodeKernelChains(
 		family, baseSequence, attrs, err := decodeKernelMessage(
 			message,
 			unix.NFT_MSG_NEWCHAIN,
-			netlink.Multi,
+			0,
 			"chain",
 			map[uint16]kernelAttributeRule{
 				unix.NFTA_CHAIN_TABLE:  {required: true},

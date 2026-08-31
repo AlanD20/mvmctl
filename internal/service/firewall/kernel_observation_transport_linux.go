@@ -19,6 +19,7 @@ const (
 	kernelObservationMaxErrno      = 4095
 
 	kernelObservationOutcomeUnknownDetailKey = "kernel_observation_outcome_unknown"
+	kernelObservationRejectedRequestMessage  = "kernel rejected observation request"
 )
 
 type kernelObservationNetlinkConnection interface {
@@ -59,6 +60,8 @@ type kernelObservationTransport struct {
 	connection kernelObservationNetlinkConnection
 	recvmsg    kernelObservationRecvmsg
 	limits     kernelObservationTransportLimits
+	// budget is shared by every fresh transport opened for one logical snapshot.
+	budget *kernelObservationReceiveBudget
 
 	// THREAD-SAFE: closeOnce publishes closeErr after exactly one connection close to all concurrent callers.
 	closeOnce sync.Once
@@ -82,6 +85,7 @@ func newKernelObservationTransport(
 	return &kernelObservationTransport{
 		connection: connection,
 		recvmsg:    recvmsg,
+		budget:     &kernelObservationReceiveBudget{},
 		limits: kernelObservationTransportLimits{
 			messageBytes: maxKernelObservationMessageBytes,
 			messages:     maxKernelObservationMessages,
@@ -98,7 +102,7 @@ func (transport *kernelObservationTransport) exchange(
 	request netlink.Message,
 	spec kernelObservationReplySpec,
 ) (replies []netlink.Message, returnErr error) {
-	if transport == nil || transport.connection == nil || transport.recvmsg == nil {
+	if transport == nil || transport.connection == nil || transport.recvmsg == nil || transport.budget == nil {
 		return nil, kernelObservationTransportError("kernel observation transport is unavailable", nil, false)
 	}
 	if ctx == nil {
@@ -174,7 +178,6 @@ func (transport *kernelObservationTransport) exchange(
 		return nil, kernelObservationTransportError("raw kernel observation connection is unavailable", nil, true)
 	}
 
-	budget := kernelObservationReceiveBudget{}
 	storage := make([]byte, kernelObservationDatagramBytes)
 	for {
 		datagram, err := transport.receiveDatagram(ctx, rawConnection, storage)
@@ -188,10 +191,21 @@ func (transport *kernelObservationTransport) exchange(
 			datagram,
 			sentRequest.Header.Sequence,
 			sentRequest.Header.PID,
-			&budget,
+			transport.budget,
 		)
 		if err != nil {
 			return nil, err
+		}
+		if len(messages) != 1 {
+			for _, message := range messages {
+				if message.Header.Type == netlink.Error {
+					return nil, kernelObservationTransportError(
+						"kernel observation error is not the sole datagram message",
+						nil,
+						true,
+					)
+				}
+			}
 		}
 		terminal := false
 		for _, message := range messages {
@@ -253,7 +267,8 @@ func validateKernelObservationRequest(
 		}
 	case kernelObservationReplyMultipart:
 		expectedRequestFlags |= netlink.Dump
-		if spec.flags != netlink.Multi {
+		expectedFlags, ok := kernelObservationMultipartResponseFlags(request.Header.Type)
+		if !ok || spec.flags != expectedFlags {
 			return 0, kernelObservationTransportError(
 				"multipart kernel observation response contract is invalid",
 				nil,
@@ -277,6 +292,22 @@ func validateKernelObservationRequest(
 		return 0, kernelObservationTransportError("kernel observation request type is not read-only", nil, false)
 	}
 	return responseType, nil
+}
+
+func kernelObservationMultipartResponseFlags(requestType netlink.HeaderType) (netlink.HeaderFlags, bool) {
+	switch requestType {
+	case netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETRULE),
+		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETOBJ),
+		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETFLOWTABLE):
+		return netlink.Multi | netlink.Append, true
+	case netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETGEN),
+		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETTABLE),
+		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETCHAIN),
+		netlink.HeaderType(kernelNetfilterSubsystemType | unix.NFT_MSG_GETSET):
+		return netlink.Multi, true
+	default:
+		return 0, false
+	}
 }
 
 func kernelObservationResponseType(requestType netlink.HeaderType) (netlink.HeaderType, bool) {
@@ -479,7 +510,7 @@ func decodeKernelObservationError(message netlink.Message, request netlink.Messa
 		}
 	}
 	return kernelObservationTransportError(
-		"kernel rejected observation request",
+		kernelObservationRejectedRequestMessage,
 		syscall.Errno(-int64(errno)),
 		true,
 	)

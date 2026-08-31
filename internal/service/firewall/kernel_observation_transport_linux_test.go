@@ -232,6 +232,8 @@ func TestKernelObservationTransportRejectsProtocolDrift(t *testing.T) {
 // Rationale: Each reply mode has exactly one terminal grammar. DONE cannot terminate a singular query, and no data or
 // terminal message may follow a completed singular or multipart exchange.
 func TestKernelObservationTransportRejectsTerminalShapeDrift(t *testing.T) {
+	request := testKernelTransportRequest(kernelObservationReplySingular)
+	rejected := testKernelTransportErrorReply(testKernelTransportSentRequest(request), -int32(unix.ENOENT), false)
 	singularData := testKernelTransportMessage(testKernelTransportType, 0, []byte{1})
 	tests := map[string]struct {
 		spec    kernelObservationReplySpec
@@ -252,6 +254,14 @@ func TestKernelObservationTransportRejectsTerminalShapeDrift(t *testing.T) {
 		"extra singular data": {
 			spec:    kernelObservationReplySpec{mode: kernelObservationReplySingular},
 			replies: []netlink.Message{singularData, singularData},
+		},
+		"error before sibling data": {
+			spec:    kernelObservationReplySpec{mode: kernelObservationReplySingular},
+			replies: []netlink.Message{rejected, singularData},
+		},
+		"error before sibling error": {
+			spec:    kernelObservationReplySpec{mode: kernelObservationReplySingular},
+			replies: []netlink.Message{rejected, rejected},
 		},
 	}
 	for name, tc := range tests {
@@ -331,16 +341,22 @@ func TestKernelObservationTransportEnforcesCapsAcrossDatagrams(t *testing.T) {
 // Rationale: This is a read-only seam, not a generic nfnetlink passthrough. Only the seven nftables inspection
 // requests are admitted, their request flags determine singular versus multipart framing, and reply type is derived.
 func TestKernelObservationTransportAdmitsOnlyClosedReadRequests(t *testing.T) {
-	requests := map[uint16]uint16{
-		unix.NFT_MSG_GETGEN:       unix.NFT_MSG_NEWGEN,
-		unix.NFT_MSG_GETTABLE:     unix.NFT_MSG_NEWTABLE,
-		unix.NFT_MSG_GETCHAIN:     unix.NFT_MSG_NEWCHAIN,
-		unix.NFT_MSG_GETRULE:      unix.NFT_MSG_NEWRULE,
-		unix.NFT_MSG_GETSET:       unix.NFT_MSG_NEWSET,
-		unix.NFT_MSG_GETOBJ:       unix.NFT_MSG_NEWOBJ,
-		unix.NFT_MSG_GETFLOWTABLE: unix.NFT_MSG_NEWFLOWTABLE,
+	requests := map[uint16]struct {
+		responseType   uint16
+		multipartFlags netlink.HeaderFlags
+	}{
+		unix.NFT_MSG_GETGEN:   {responseType: unix.NFT_MSG_NEWGEN, multipartFlags: netlink.Multi},
+		unix.NFT_MSG_GETTABLE: {responseType: unix.NFT_MSG_NEWTABLE, multipartFlags: netlink.Multi},
+		unix.NFT_MSG_GETCHAIN: {responseType: unix.NFT_MSG_NEWCHAIN, multipartFlags: netlink.Multi},
+		unix.NFT_MSG_GETRULE:  {responseType: unix.NFT_MSG_NEWRULE, multipartFlags: netlink.Multi | netlink.Append},
+		unix.NFT_MSG_GETSET:   {responseType: unix.NFT_MSG_NEWSET, multipartFlags: netlink.Multi},
+		unix.NFT_MSG_GETOBJ:   {responseType: unix.NFT_MSG_NEWOBJ, multipartFlags: netlink.Multi | netlink.Append},
+		unix.NFT_MSG_GETFLOWTABLE: {
+			responseType:   unix.NFT_MSG_NEWFLOWTABLE,
+			multipartFlags: netlink.Multi | netlink.Append,
+		},
 	}
-	for requestType, responseType := range requests {
+	for requestType, contract := range requests {
 		for _, mode := range []kernelObservationReplyMode{
 			kernelObservationReplySingular,
 			kernelObservationReplyMultipart,
@@ -351,11 +367,15 @@ func TestKernelObservationTransportAdmitsOnlyClosedReadRequests(t *testing.T) {
 				responseFlags := netlink.HeaderFlags(0)
 				replies := []netlink.Message{
 					testKernelTransportMessage(
-						netlink.HeaderType(kernelNetfilterSubsystemType|responseType), responseFlags, []byte{1},
+						netlink.HeaderType(
+							kernelNetfilterSubsystemType|contract.responseType,
+						),
+						responseFlags,
+						[]byte{1},
 					),
 				}
 				if mode == kernelObservationReplyMultipart {
-					responseFlags = netlink.Multi
+					responseFlags = contract.multipartFlags
 					replies[0].Header.Flags = responseFlags
 					replies = append(replies, testKernelTransportDone())
 				}
@@ -370,7 +390,11 @@ func TestKernelObservationTransportAdmitsOnlyClosedReadRequests(t *testing.T) {
 				})
 				require.NoError(t, err)
 				require.Len(t, got, 1)
-				assert.Equal(t, netlink.HeaderType(kernelNetfilterSubsystemType|responseType), got[0].Header.Type)
+				assert.Equal(
+					t,
+					netlink.HeaderType(kernelNetfilterSubsystemType|contract.responseType),
+					got[0].Header.Type,
+				)
 				assert.Zero(t, connection.closeCalls)
 			})
 		}
@@ -460,6 +484,20 @@ func TestKernelObservationTransportRejectsReplyContractDrift(t *testing.T) {
 			request: testKernelTransportRequest(kernelObservationReplyMultipart),
 			spec: kernelObservationReplySpec{
 				flags: netlink.Multi | netlink.DumpFiltered,
+				mode:  kernelObservationReplyMultipart,
+			},
+		},
+		"rule flags omit append": {
+			request: testKernelTransportRequestForType(unix.NFT_MSG_GETRULE, kernelObservationReplyMultipart),
+			spec: kernelObservationReplySpec{
+				flags: netlink.Multi,
+				mode:  kernelObservationReplyMultipart,
+			},
+		},
+		"set flags add append": {
+			request: testKernelTransportRequestForType(unix.NFT_MSG_GETSET, kernelObservationReplyMultipart),
+			spec: kernelObservationReplySpec{
+				flags: netlink.Multi | netlink.Append,
 				mode:  kernelObservationReplyMultipart,
 			},
 		},
