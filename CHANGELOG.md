@@ -13,13 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a canonical
 > generation digest, the private firewall generation record/store/lock authority, bounded raw nftables snapshot
 > collection, the private Jailer and LoopMount ephemeral-authority capabilities, the private root-pinned network
-> namespace authority/effect, strict schema-3 Jailer record/registration authority, and typed LoopMount client/protocol,
-> rootfs-authority, resource-lock adapter, split effect seams, and provision/inspect receiver actions described below
-> are implemented.
+> namespace authority/effect, strict schema-3 Jailer record/registration and private pidfd process-activation/
+> cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
+> effect seams, and provision/inspect receiver actions described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, exact VM-to-VM `exec` policy, LoopMount backend/public cutover, final
-> marker-only sudo policy, schema-3 two-phase Jailer activation/reconciliation, and remaining typed privileged
-> operations are not implemented yet; see
+> marker-only sudo policy, schema-3 Jailer launch composition and final live topology/cgroup verification and
+> reconciliation, and remaining typed privileged operations are not implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
 
 ### Added
@@ -292,9 +292,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `preparedRelease.registerLaunching` now derives release identity internally and, after durable record replacement,
   transfers the pinned store, release-slot lock, executable admission, and VM lock into a launch lease. Prepared and
   launch values use pointer-shared mutex-protected close-once cleanup and cache the first result.
-- This remains private authority foundation. Production child/pidfd launch, final-copy activation and sealing,
-  network/firewall lease transfer, typed abort/cleanup, observation, recovery, public wiring, and system qualification
-  remain release blockers.
+- Added private blocked-process authority for an already-created Firecracker child and optional relay. Fresh
+  challenge/acknowledgement gates fail closed on EOF, retained pidfds require close-on-exec and derive exact PID/start
+  locators, and release registration transfers them with the pinned receiver executable into durable `launching`.
+- Added descriptor-pinned admission for an already-absent fixed Jailer destination and an immediate pre-handoff absence
+  recheck. After Jailer creates the root and copied executable, private activation binds their exact identity, observes
+  the retained task through bounded strict `/proc` parsing, seals the root/copy to `root:root 0755`, verifies the
+  manifest digest, and can replace `launching` with `active` under the existing post-rename lease contract.
+- Private activation repeatedly verifies boot ID, PID/start, pidfd liveness, all credentials, empty supplementary
+  groups, exact derived cgroup, topology-selected network namespace, final mount namespace/root/executable, and optional
+  relay identity. The executable-transition loop is bounded to 10 seconds with a 25-millisecond minimum interval and
+  stops immediately on pidfd-observed exit.
+- Added consuming private launch abort and active cleanup plus fresh-recovery cleanup bounded to the recorded
+  Firecracker and optional relay. Cleanup signals only through pidfds, waits and reaps before writing `cleaned`, accepts
+  exit readability and post-reap `POLLHUP` as dead, and keeps retryable failures in `cleaning` with their process and
+  VM-lock authority. A boot mismatch opens and signals no pidfd; same-boot active cleanup requires the complete recorded
+  identities and executable digests.
+- Process, prepared-destination, destination, active, cleanup, and recovered-process capabilities use pointer-shared
+  close-once state and cache their first cleanup result. This graph remains private: production child spawning and
+  launch composition, network/firewall lease transfer, final live topology/cgroup verification, full runtime cleanup
+  and reconciliation, public wiring, and system qualification remain release blockers.
 
 #### Private trusted-release authority substrate
 
@@ -520,17 +537,17 @@ The following items are release blockers and are intentionally not described abo
   `/usr/local/bin/mvm` executable identity. Seal the jail root and copy to `root:root 0755` beneath `root:root 0700`
   ancestors and hash the copy against the exact release.
   Jailer must use neither `--daemonize` nor `--new-pid-ns`; `console.pid` remains display-only.
-- Extend the implemented consuming prepared-release registration beyond its prepared/slot/VM transfer. Carry later
-  process, mount, network, and firewall resources through launch, active, and cleaning leases without lock
-  release/reacquisition, and implement activation plus typed abort/cleanup on the returned post-rename authority.
-- Before Jailer executes, prove its fixed per-VM destination absent/fresh and remove only an exactly admitted,
-  non-mounted stale fixed tree after process absence. Create links down, apply and freshly verify the complete atomic
-  nftables generation, then raise links; release the blocked child only after firewall and relay success. Observe the
-  Jailer-to-Firecracker executable transition through bounded `/proc/<pid>/exe` checks while retaining the original
-  pidfd for stable identity and exit detection; pidfds do not notify `exec`.
-- Extend the implemented prepared/launch close-once state to active, cleanup, and every remaining composite instance
-  lease. Add exact interrupted-`launching` recovery and closed `running`, `stopped`, `crashed`, and
-  `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and per-VM lock.
+- Compose the implemented private process activation, abort, and cleanup/recovery authority into the production launch
+  action. Carry the remaining mount, network, and firewall resources through launch, active, and cleaning without lock
+  release/reacquisition, and preserve the returned post-rename authority on every failure.
+- Compose the implemented exact-absent Jailer destination and pre-handoff recheck into production; add safe admission
+  and descriptor-relative removal for only an exact non-mounted stale fixed tree after process absence. Create links
+  down, apply and freshly verify the complete atomic nftables generation, then raise links; release the blocked child
+  only after firewall and relay success.
+- Extend the implemented close-once process/destination/active/cleanup foundation to every remaining output, mount,
+  network, and firewall resource. Add complete interrupted-`launching` recovery and closed `running`, `stopped`,
+  `crashed`, and `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and
+  per-VM lock.
 - Transfer the Jailer VM-lock lease into the implemented root-owned managed-network registration foundation, add
   persistent per-VM topology and global capacity authority, and activate neither through user SQLite state. User state
   must not authorize host-global namespace, link, firewall, process, mount, cgroup, or admission decisions.

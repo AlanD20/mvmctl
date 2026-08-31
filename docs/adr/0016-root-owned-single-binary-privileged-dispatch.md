@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-08-31 (private per-VM network-namespace authority and effect)
+**Last Updated:** 2026-08-31 (private pidfd/Jailer process authority)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md)
@@ -1349,13 +1349,31 @@ lease first. Those post-rename failures return that lease together with a `Domai
 bounded cleanup diagnostics, and never acts through the stale source lease. No process, VM, release, network, or
 firewall lock is dropped between record replacement and cleaning.
 
-Implementation note (2026-08-30): main implements the private strict schema-3 record/codec and pure lifecycle
-transitions. `preparedRelease.registerLaunching` derives and validates the manifest release identity, writes durable
-`launching`, and transfers the pinned store, release-slot lock, executable admission, and VM lock into a launch lease.
-The prepared value and launch lease share mutex-protected close-once state and cache their first cleanup result. The
-schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and compared
-the trusted-store inode with Jailer's copy. Production child/pidfd launch, `activateVerifiedProcess`, final-copy
-sealing, network/firewall acquisition, typed abort/cleanup, observation, and reconciliation remain pending.
+Implementation note (2026-08-31): main implements the private strict schema-3 record/codec and the process-authority
+side of its lifecycle. An already-created Firecracker child and optional relay can be admitted behind challenged
+EOF-fails-closed gates with retained close-on-exec pidfds, exact PID/start locators, and a pinned receiver executable.
+`preparedRelease.registerLaunching` rechecks that authority, derives the manifest release identity, writes durable
+`launching`, and transfers the process, pinned store, release-slot lock, executable admission, and VM lock into the
+launch lease. The lease can prove the exact Jailer destination absent immediately before child release, bind the
+Jailer-created root and copy afterward, and retain an owner-bound topology-selected network-namespace identity.
+
+Private `activateVerifiedProcess` uses strict bounded `/proc` parsing and descriptor-pinned observations. It enforces
+the 10-second/25-millisecond executable-transition loop, repeated pidfd liveness and PID/start identity, boot ID,
+credentials, empty supplementary groups, exact derived cgroup, topology-selected network namespace, final root and
+copied executable, release digest, and optional relay identity. It seals the jail root and copied Firecracker to
+`root:root 0755`, then commits `active` with the existing post-rename target-lease contract. Private `Abort`, active
+`BeginCleanup`, fresh-recovery `BeginCleanup`, and `Complete` transfer cleanup ownership without releasing the VM lock.
+They signal only through pidfds, wait and reap before `cleaned`, treat `POLLIN`, `POLLHUP`, and their combination as
+dead pidfds, preserve retryable cleanup authority, and avoid signaling across a boot change. Fresh cleanup recovery is
+bounded to the recorded Firecracker and optional relay and requires complete active identity plus executable digests
+before same-boot cleanup authority is returned. Process, prepared-destination, destination, active, cleanup, and
+recovery capabilities are pointer-shared, close once, and cache their first cleanup result.
+
+The schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and
+compared the trusted-store inode with Jailer's copy. The implemented process graph remains private and uncomposed:
+production child spawning and launch activation, network/firewall acquisition, final live topology/cgroup verification,
+stale-tree and full runtime/mount/output cleanup, status observation and complete reconciliation, privileged/public
+wiring, and live qualification remain pending.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
 that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain

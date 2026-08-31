@@ -82,8 +82,8 @@ provision/inspect receiver actions implemented and registered; remaining capabil
 ### Task 4: Add private root-owned VM instance authority
 
 **Owner:** engineer
-**Status:** Complete as the private strict schema-3 record/registration foundation; production process activation,
-abort/cleanup, observation, and reconciliation remain in Tasks 7-8 and 15
+**Status:** Complete as the private strict schema-3 record/registration foundation; Task 7 now also has private pidfd
+activation and cleanup/recovery authority, while production composition and reconciliation remain in Tasks 7-8 and 15
 **Dependencies:** Tasks 1 and 3
 
 **Interface:**
@@ -415,6 +415,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 7: Add private mount and process identity primitives
 
 **Owner:** engineer
+**Status:** Private blocked-process, pidfd, Jailer-destination, activation, and cleanup/recovery authority implemented;
+production child launch/composition, complete effects, privileged actions, reconciliation, and qualification pending
 **Foundation dependency:** Task 4
 **Full acceptance dependencies:** Tasks 5, 6, and 8
 
@@ -429,7 +431,8 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   verifies exact derived cgroup membership and the closed topology capability's network namespace. `cleaned` retains
   only the same-UID tombstone and generations, with no launch-specific GID, cache, release, or process identity.
   - [x] The strict record/codec, lifecycle-shape validation, pure transitions, and manifest release validation are
-    implemented. Production activation, cgroup/topology verification, and lifecycle consumers keep this item open.
+    implemented. The private process verifier can now commit `active`, but production activation and final live
+    cgroup/topology verification keep this item open.
 - [ ] Launch a child blocked by an inherited EOF-fails-closed two-way handshake in an initial private mount namespace
   and an optional blocked dropped-caller console relay in the host mount namespace. Open each pidfd, issue a fresh
   parent challenge, and require the still-blocked child to acknowledge it before accepting PID-derived evidence;
@@ -437,15 +440,22 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   the pinned runtime directory and individual persistent resources including the sealed root-built Firecracker
   configuration, and publish display-only PID mirrors. The relay receives only inherited descriptors and never reopens
   a caller path or retains the VM namespace. Its `console.pid` is never authority.
-- [ ] Make `preparedRelease.registerLaunching` consume its pinned admission/store/slot resources, derive release
+  - [x] Implement the private authority half for already-created process sources: cancellation-aware challenge and
+    acknowledgement, EOF-fails-closed release gates, close-on-exec pidfd admission, exact PID/start derivation, optional
+    relay separation, pinned receiver-executable verification, and ownership transfer into durable `launching`.
+    Production spawning, initial namespace, outputs, mounts, mirrors, and action composition remain pending.
+- [x] Make `preparedRelease.registerLaunching` consume its pinned admission/store/slot resources, derive release
   identity internally, and transfer them into the launch lease. Make `activateVerifiedProcess(ctx)` consume only that
   retained prepared release. Pre-rename failure keeps the source lease; post-rename failure returns the non-nil target
   lease with exact `record_replaced` and any `durability_uncertain` evidence.
-  - [x] Consuming registration and prepared-to-launch ownership transfer are implemented, including post-rename launch
-    authority and close-once prepared/launch cleanup. `activateVerifiedProcess` remains unimplemented.
+  - [x] Consuming registration and prepared-to-launch ownership transfer are implemented. Private activation consumes
+    only the retained prepared authority, and post-active-rename failures return the active lease for cleanup.
 - [ ] Before Jailer execution, prove `/var/lib/mvmctl/jailer/firecracker/<vm-id>` absent/fresh under the retained locks.
   Remove only an exactly admitted non-mounted stale fixed tree after process absence; replacement, unexpected entries,
   mounts, or incomplete evidence fail unavailable. Recheck absence immediately before release.
+  - [x] Implement descriptor-pinned exact-ancestor and mount-identity admission for an already-absent destination,
+    recheck absence immediately before the blocked child is released, then bind the exact Jailer-created root and copy
+    after handoff. Stale-tree admission/removal and production invocation remain pending.
 - [ ] Retain VM, network, and firewall leases; create links down; apply and freshly verify the complete atomic nftables
   generation; then raise and reverify links. Release the child only after named mounts, firewall-protected topology,
   and exact relay readiness succeed. Invoke Jailer 1.16.1
@@ -458,18 +468,34 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
   jail root and copied executable to exact `root:root` mode `0755` beneath exact `root:root` mode-`0700` ancestors, hash
   the copy against Task 6's release manifest, and only then atomically commit `active`. Never compare its inode with the
   trusted-store Firecracker inode.
+  - [x] Implement the private bounded verifier with strict `/proc` parsing, descriptor-pinned observations, a 10-second
+    budget and 25-millisecond minimum interval, pidfd exit checks, exact root/copy binding, sealing, manifest hashing,
+    and active-record replacement. Production topology/cgroup authority and live final verification remain pending.
 - [ ] Recheck PID, boot ID, start ticks, all UID/GID identities, the exact empty supplementary-group set, cgroup, final
   namespace/root/executable identity, process liveness, and release binding before signal or `setns`. The network
   namespace identity remains owned by the closed topology capability rather than a raw path/fd field.
+  - [x] The private activation verifier repeats these checks and compares the observed network namespace only with an
+    owner-bound topology-selected identity retained by the launch lease. Production topology selection, `setns`, and
+    live qualification remain pending.
 - [ ] Make launch, active, cleanup, release-slot, authority-root, and UID-directory leases pointer-shared,
   mutex-protected, close-once across copies/concurrent release, cancellation-independent during cleanup, and repeat the
   cached first cleanup result.
+  - [x] Extend pointer-shared close-once/cached-result ownership to blocked and recovered processes, prepared and bound
+    Jailer destinations, active leases, and cleanup leases. Later output, mount, network, and firewall resources keep
+    the complete item open.
 - [ ] Add consuming `launchLease.Abort(ctx)` and `activeLease.BeginCleanup(ctx)` transitions that transfer held release,
   VM, pidfd, mount, network, and firewall resources into cleanup without unlocking/reacquiring the VM. Keep
   authority-level `BeginCleanup` only for fresh recovery admission.
+  - [x] Implement consuming abort/active-cleanup transfer for the currently retained prepared release, VM lock, pidfds,
+    Jailer destination, and topology-selected namespace identity. Mount, network, and firewall lease transfer remains
+    pending.
 - [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, observe exit through the
   pidfd, and fail host capability admission instead of falling back to raw PID signaling. Re-admit a present relay by
   exact locator and complete final identity after a crash; never signal an ambiguous or reused PID.
+  - [x] The private authority signals only with `pidfd_send_signal`, waits/reaps through the pidfd, and treats `POLLIN`,
+    post-reap `POLLHUP`, or both as exited. It retains retry authority on failure. Fresh same-boot cleanup reopens exact
+    PID/start locators and requires complete active identities and executable digests; a boot mismatch opens or signals
+    no pidfd. Production capability admission and full reconciliation remain pending.
 - [ ] Reopen and pin `/proc/<pid>/ns/mnt` for each verified live operation; do not persist a mount-namespace handle that
   would retain mounts after process exit.
 - [ ] Lock the OS thread for `setns`, pin/restore/verify the original host namespace, and terminate the short-lived
@@ -478,7 +504,13 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 - [ ] Cleanup parses and verifies mount state, reaps the pidfd-verified relay, unmounts only receiver-derived fixed
   leaves, requires cgroup emptiness, unlinks only the five runtime leaves, and removes descriptor-relative allowlisted
   directories bottom-up only when empty; never recursively traverse a caller-writable tree or one containing a mount.
+  - [x] Private cleanup terminates and reaps the optional relay before Firecracker, releases retained process and Jailer
+    destination descriptors, and writes `cleaned` only afterward. Wait/reap failure leaves locks, resources, and the
+    `cleaning` record available for retry; mount/runtime/cgroup cleanup remains pending.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
+  - [x] Focused L1 evidence covers gate cancellation/EOF, pidfd and locator mismatch, liveness/exit/HUP classification,
+    bounded executable observation, every identity recheck, active post-rename ownership, full-identity recovery,
+    boot-mismatch no-signal behavior, terminate/wait/reap retry, destination substitution, and close-once cleanup.
 - [ ] L1 crash-window tests cover pre-record handshake EOF, every `launching` effect stage, partial final-copy sealing,
   post-rename durability uncertainty, `launching -> active`, and repeated `cleaning` recovery.
 

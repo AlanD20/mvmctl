@@ -91,11 +91,15 @@ continue without silently deleting it.
   used by the production provision/inspect server. Their exact receiver handlers and early-dispatch entries are
   registered with the embedded-agent accessor bound at the composition root. Live-kernel qualification,
   public/backend cutover, legacy-route removal, and every optimize receiver path remain pending.
-- Private strict schema-3 Jailer record/codec and pure lifecycle transitions. Consuming
-  `preparedRelease.registerLaunching` derives the release identity internally and transfers the pinned store, slot lock,
-  executable admission, and VM lock into a durable launch lease after record replacement. The prepared value and launch
-  lease use pointer-shared close-once cleanup state. Production child/pidfd launch, activation, abort/cleanup,
-  network/firewall lease transfer, observation, reconciliation, API wiring, and system tests remain pending.
+- Private strict schema-3 Jailer record/codec and pidfd process-authority lifecycle. Already-created Firecracker and
+  optional relay processes can be challenge-authenticated while blocked, retained through close-on-exec pidfds, and
+  transferred with the prepared release and VM lock into durable `launching` authority. The private launch lease can
+  prove an exact absent Jailer destination before handoff; bind, seal, hash, and verify the resulting root/copy through
+  bounded `/proc` observation; and commit `active`. Private abort, active cleanup, and fresh-recovery cleanup retain
+  pidfd authority, signal/wait/reap without raw PID fallback, accept post-reap pidfd hangup, and keep retryable cleanup
+  ownership. These capabilities use pointer-shared close-once state. Production child spawning and launch composition,
+  network/firewall lease transfer, final live topology/cgroup verification, full runtime cleanup/reconciliation, API
+  wiring, and system tests remain pending.
 - Private firewall generation authority with a strict committed/applying record and codec, descriptor-relative
   exclusive store at `/var/lib/mvmctl/firewall/generation.json`, and never-unlinked global
   `/run/mvmctl/authority/firewall.lock`. Acquisition requires earlier network authority and admits only the current boot
@@ -289,11 +293,14 @@ exact derived cgroup and the separate closed topology capability's network names
 process identity, and may be relaunched only by that UID. Mount identity is deliberately not retained across cleanup
 because it is valid for only one mount lifetime.
 
-Implementation status: main now contains the private strict schema-3 record/codec and pure lifecycle transitions. A
-prepared release can consume its manifest-derived identity and pinned store/slot/executable authority into a durable
-`launching` lease that retains the VM lock; the prepared value and launch lease are pointer-shared and close once. No
-production VM lifecycle consumes that record yet. Child/pidfd launch, `activateVerifiedProcess`, typed abort/cleanup,
-observation, and reconciliation remain pending.
+Implementation status: main now contains the private strict schema-3 record/codec plus blocked-process, pidfd,
+Jailer-destination, activation, and cleanup/recovery authority. A prepared release can consume its manifest-derived
+identity, pinned store/slot/executable authority, exact blocked-process locators, and retained pidfds into a durable
+`launching` lease that keeps the VM lock. Private `activateVerifiedProcess` performs bounded descriptor-pinned
+observation, seals and hashes the Jailer copy, and can commit `active`; consuming abort/cleanup paths retain authority
+until pidfd termination/reaping and `cleaned`. No production VM lifecycle constructs or consumes this graph yet.
+Production child spawning, live topology/cgroup final verification, network/firewall and mount/output resource
+integration, public actions, batch observation, complete reconciliation, and qualification remain pending.
 
 The global lock order is:
 

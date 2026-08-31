@@ -311,11 +311,27 @@ record or boot mismatch is stopped; a same-boot missing/dead/mismatched active p
 is unavailable and fails the complete read. Interrupted `launching` records are reconciled by boot/PID/start/final-copy
 identity: only the exact same task may be promoted or pidfd-terminated, and ambiguous state is neither killed nor
 deleted. These are accepted target rules, not current runtime behavior. Main now implements the private strict schema-3
-record/codec and pure `launching -> active -> cleaning -> cleaned` transitions. A prepared release can consume the
-pinned store, slot-lock, manifest identity, and executable authority into a durable `launching` lease. That prepared
-value and launch lease use pointer-held close-once cleanup state. No production VM lifecycle consumes this foundation;
-pidfd/process activation, final-copy sealing, network/firewall lease transfer, typed abort, cleanup, observation, and
-reconciliation remain pending.
+record/codec and the process-authority side of `launching -> active -> cleaning -> cleaned`. An already-created
+Firecracker child and optional relay can be admitted while handshake-blocked through challenged EOF-fails-closed gates,
+retained close-on-exec pidfds, exact PID/start locators, and a pinned receiver executable. Consuming release
+registration transfers those resources with the pinned store, slot lock, manifest identity, executable authority, and
+VM lock into durable `launching` authority.
+
+The private activation path uses strict bounded `/proc` parsing and descriptor-pinned observations, a 10-second
+executable-transition budget with a 25-millisecond minimum interval, and repeated boot, PID/start, pidfd-liveness,
+credential, empty-group, cgroup, network-namespace, root, copied-executable, release-digest, and optional-relay checks.
+It binds and seals the Jailer-created root and Firecracker copy before replacing `launching` with `active`. Private
+`Abort`, `BeginCleanup`, and `Complete` transitions retain cleanup ownership, signal only through pidfds, wait and reap
+before `cleaned`, accept both exit readability and the post-reap pidfd hangup as dead, and keep retryable failures in
+`cleaning`. Fresh cleanup recovery is bounded to the recorded Firecracker and optional relay and signals nothing across
+a boot change; on the same boot, active cleanup requires their complete recorded identities and executable digests
+before returning cleanup authority. These process, destination, active, and cleanup leases use pointer-held close-once
+state and cache their first cleanup result.
+
+No production child launcher, privileged VM action, or public VM lifecycle constructs or consumes this private graph.
+Production topology/cgroup final verification, network/firewall lease transfer, stale Jailer-tree reconciliation,
+runtime/mount/output cleanup, status observation and full reconciliation, API wiring, and live L2 qualification remain
+pending.
 
 The cycle-free `internal/lib/authorityfs` leaf module now establishes the implemented portion of that split. It creates
 or admits exact `root:root` mode-`0711` `/run/mvmctl` and exact `root:root` mode-`0700`
