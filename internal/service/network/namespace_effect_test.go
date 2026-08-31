@@ -801,6 +801,92 @@ func TestNamespacePinCopiedConcurrentReleaseIsExactOnce(t *testing.T) {
 	}
 }
 
+// Rationale: link effects may operate only through a fresh close-on-exec duplicate of the same admitted namespace.
+func TestNamespaceEffectRetainLinkNamespaceRechecksAndClosesOnce(t *testing.T) {
+	t.Parallel()
+
+	fixture := newNamespaceEffectFixture()
+	effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
+	pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{
+		key: mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID),
+	})
+	require.NoError(t, err)
+
+	lease, err := effect.retainLinkNamespace(t.Context(), pin)
+	require.NoError(t, err)
+	require.NotNil(t, lease)
+	fd, identity, err := lease.descriptor()
+	require.NoError(t, err)
+	assert.Equal(t, 20, fd)
+	assert.Equal(t, namespaceIdentity{device: 5, inode: 400}, identity)
+	owner, err := lease.owner()
+	require.NoError(t, err)
+	assert.Equal(t, OwnerUID(testOwnerUID), owner)
+	assert.Equal(t, 1, fixture.eventCount("dup_cloexec.14.3"))
+	assert.Equal(t, 2, fixture.eventCount("fstat.14"))
+	assert.Equal(t, 1, fixture.eventCount("fstat.20"))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	copyOfLease := *lease
+	require.NoError(t, lease.close(ctx))
+	require.NoError(t, copyOfLease.close(t.Context()))
+	assert.Equal(t, 1, fixture.eventCount("close.20"))
+	_, _, err = lease.descriptor()
+	assert.Error(t, err)
+	_, err = lease.owner()
+	assert.Error(t, err)
+
+	require.NoError(t, effect.DeleteNamespace(t.Context(), pin))
+	require.NoError(t, pin.Release(t.Context()))
+}
+
+// Rationale: a duplicate whose identity drifts cannot authorize a netlink socket and must be closed immediately.
+func TestNamespaceEffectRetainLinkNamespaceRejectsDriftAndInactivePins(t *testing.T) {
+	t.Parallel()
+
+	t.Run("duplicate identity drift", func(t *testing.T) {
+		fixture := newNamespaceEffectFixture()
+		fixture.stats[20] = namespaceEffectNamespaceStat(5, 401)
+		effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
+		pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{
+			key: mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID),
+		})
+		require.NoError(t, err)
+
+		lease, err := effect.retainLinkNamespace(t.Context(), pin)
+		assert.Nil(t, lease)
+		assert.ErrorContains(t, err, "duplicated network namespace identity changed")
+		assert.Equal(t, 1, fixture.eventCount("close.20"))
+
+		require.NoError(t, effect.DeleteNamespace(t.Context(), pin))
+		require.NoError(t, pin.Release(t.Context()))
+	})
+
+	t.Run("foreign capability", func(t *testing.T) {
+		fixture := newNamespaceEffectFixture()
+		effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
+		lease, err := effect.retainLinkNamespace(t.Context(), &fakeNamespacePin{})
+		assert.Nil(t, lease)
+		assert.ErrorContains(t, err, "not owned")
+	})
+
+	t.Run("removed capability", func(t *testing.T) {
+		fixture := newNamespaceEffectFixture()
+		effect := newNamespaceEffectWithDeps(fixture.dependencies(), fixture.authority(), fixture.policy())
+		pin, err := effect.CreateNamespace(t.Context(), namespaceCreateSpec{
+			key: mustTopologyKey(t, testOwnerUID, testVMID, testNetworkID),
+		})
+		require.NoError(t, err)
+		require.NoError(t, effect.DeleteNamespace(t.Context(), pin))
+
+		lease, err := effect.retainLinkNamespace(t.Context(), pin)
+		assert.Nil(t, lease)
+		assert.ErrorContains(t, err, "not live")
+		require.NoError(t, pin.Release(t.Context()))
+	})
+}
+
 func TestOpenNamespaceTargetUsesOrdinaryVerifiedDescriptors(t *testing.T) {
 	t.Parallel()
 
@@ -870,6 +956,10 @@ func TestSystemNamespaceEffectDependenciesRejectCancellationBeforeSyscalls(t *te
 		"fsync":   func() error { return deps.fsync(ctx, -1) },
 		"namespace type": func() error {
 			_, err := deps.ioctlNamespaceType(ctx, -1)
+			return err
+		},
+		"dup cloexec": func() error {
+			_, err := deps.dupCloexec(ctx, -1, 3)
 			return err
 		},
 		"unshare": func() error { return deps.unshare(ctx, unix.CLONE_NEWNET) },
@@ -1086,6 +1176,7 @@ func newNamespaceEffectFixture() *namespaceEffectFixture {
 			17: namespaceEffectNamespaceStat(5, 400),
 			18: namespaceEffectNamespaceStat(5, 300),
 			19: namespaceEffectNamespaceStat(5, 400),
+			20: namespaceEffectNamespaceStat(5, 400),
 		},
 		statxMounts: map[int]unix.Statx_t{
 			11: namespaceEffectStatx(800, true),
@@ -1098,6 +1189,7 @@ func newNamespaceEffectFixture() *namespaceEffectFixture {
 			17: unix.NSFS_MAGIC,
 			18: unix.NSFS_MAGIC,
 			19: unix.NSFS_MAGIC,
+			20: unix.NSFS_MAGIC,
 		},
 		namespaceTypes: map[int]int{
 			13: unix.CLONE_NEWNET,
@@ -1105,6 +1197,7 @@ func newNamespaceEffectFixture() *namespaceEffectFixture {
 			17: unix.CLONE_NEWNET,
 			18: unix.CLONE_NEWNET,
 			19: unix.CLONE_NEWNET,
+			20: unix.CLONE_NEWNET,
 		},
 	}
 }
@@ -1181,6 +1274,16 @@ func (fixture *namespaceEffectFixture) dependencies() namespaceEffectDeps {
 			namespaceType := fixture.namespaceTypes[fd]
 			fixture.mu.Unlock()
 			return namespaceType, nil
+		},
+		dupCloexec: func(ctx context.Context, fd, minimum int) (int, error) {
+			event := fmt.Sprintf("dup_cloexec.%d.%d", fd, minimum)
+			if err := fixture.recordContext(event, ctx, false); err != nil {
+				return -1, err
+			}
+			if fd != 14 || minimum != 3 {
+				return -1, errors.New("unexpected namespace duplicate arguments")
+			}
+			return 20, nil
 		},
 		unshare: func(ctx context.Context, flags int) error {
 			fixture.requireWorker()

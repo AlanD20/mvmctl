@@ -19,6 +19,7 @@ type namespaceEffectDeps struct {
 	fstatfs            func(context.Context, int, *unix.Statfs_t) error
 	fsync              func(context.Context, int) error
 	ioctlNamespaceType func(context.Context, int) (int, error)
+	dupCloexec         func(context.Context, int, int) (int, error)
 	unshare            func(context.Context, int) error
 	setns              func(context.Context, int, int) error
 	openTree           func(context.Context, int, string, uint) (int, error)
@@ -31,7 +32,7 @@ func validateNamespaceEffectDeps(deps namespaceEffectDeps) error {
 	if deps.runWorker == nil || deps.lockThread == nil || deps.unlockThread == nil || deps.open == nil ||
 		deps.openAt2 == nil ||
 		deps.fstat == nil || deps.statx == nil || deps.fstatfs == nil || deps.fsync == nil ||
-		deps.ioctlNamespaceType == nil ||
+		deps.ioctlNamespaceType == nil || deps.dupCloexec == nil ||
 		deps.unshare == nil || deps.setns == nil || deps.openTree == nil || deps.moveMount == nil ||
 		deps.unmount == nil || deps.close == nil {
 		return errors.New("network namespace dependencies are incomplete")
@@ -118,6 +119,12 @@ func systemNamespaceEffectDeps() namespaceEffectDeps {
 				return 0, err
 			}
 			return unix.IoctlRetInt(fd, unix.NS_GET_NSTYPE)
+		},
+		dupCloexec: func(ctx context.Context, fd, minimum int) (int, error) {
+			if err := namespaceEffectContextErr(ctx); err != nil {
+				return -1, err
+			}
+			return unix.FcntlInt(uintptr(fd), unix.F_DUPFD_CLOEXEC, minimum)
 		},
 		unshare: func(ctx context.Context, flags int) error {
 			if err := namespaceEffectContextErr(ctx); err != nil {

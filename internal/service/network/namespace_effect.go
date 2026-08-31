@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"strconv"
 	"sync"
@@ -17,8 +18,8 @@ const (
 	namespaceMoveMountFlags = unix.MOVE_MOUNT_F_EMPTY_PATH | unix.MOVE_MOUNT_T_EMPTY_PATH
 )
 
-// namespaceEffect owns only creation and removal of one root-pinned network namespace. It deliberately does not
-// implement TopologyEffects until the separate typed link adapter exists.
+// namespaceEffect owns only creation and removal of one root-pinned network namespace. The private topology effect
+// composes it with the separate typed link adapter.
 type namespaceEffect struct {
 	deps      namespaceEffectDeps
 	authority namespaceTargetAuthority
@@ -27,6 +28,22 @@ type namespaceEffect struct {
 
 type namespacePin struct {
 	state *namespacePinState
+}
+
+type linkNamespaceLease struct {
+	state *linkNamespaceLeaseState
+}
+
+type linkNamespaceLeaseState struct {
+	// mu guards the retained descriptor and cached close result.
+	mu sync.Mutex
+
+	deps       namespaceEffectDeps
+	fd         int
+	identity   namespaceIdentity
+	ownerUID   OwnerUID
+	closed     bool
+	closeError error
 }
 
 type namespacePinState struct {
@@ -737,6 +754,118 @@ func (pin *namespacePin) Handle() namespaceHandle {
 		return namespaceHandle{}
 	}
 	return state.handle
+}
+
+// retainLinkNamespace duplicates the exact live namespace pin for one link operation. The returned lease exposes no
+// public descriptor or path and remains independent of later closure of the caller's pin.
+func (effect *namespaceEffect) retainLinkNamespace(
+	ctx context.Context,
+	namespace NamespacePin,
+) (_ *linkNamespaceLease, returnErr error) {
+	if ctx == nil {
+		return nil, errors.New("network namespace retention context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	pin, ok := namespace.(*namespacePin)
+	if effect == nil || !ok || pin == nil || pin.state == nil || pin.state.owner != effect {
+		return nil, errors.New("network namespace capability is not owned by this effect")
+	}
+	state := pin.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.removed || !state.admitted || !state.mounted || !state.verified || state.netnsFD <= 0 {
+		return nil, errors.New("network namespace capability is not live")
+	}
+	if state.handle.identity != state.namespaceID || !validNamespaceIdentity(state.namespaceID) {
+		return nil, errors.New("network namespace capability identity is incomplete")
+	}
+	pinned, err := inspectNetworkNamespaceFD(ctx, state.deps, effect.policy, state.netnsFD)
+	if err != nil {
+		return nil, fmt.Errorf("recheck retained network namespace: %w", err)
+	}
+	if pinned != state.namespaceID {
+		return nil, errors.New("retained network namespace identity changed")
+	}
+	fd, err := state.deps.dupCloexec(ctx, state.netnsFD, 3)
+	if err != nil {
+		return nil, fmt.Errorf("duplicate retained network namespace: %w", err)
+	}
+	defer func() {
+		if returnErr == nil || fd < 0 {
+			return
+		}
+		returnErr = errors.Join(
+			returnErr,
+			closeConsumedNamespaceFD(context.WithoutCancel(ctx), state.deps, &fd),
+		)
+	}()
+	if fd <= 0 {
+		return nil, errors.New("duplicated network namespace descriptor is not explicit")
+	}
+	duplicated, err := inspectNetworkNamespaceFD(ctx, state.deps, effect.policy, fd)
+	if err != nil {
+		return nil, fmt.Errorf("inspect duplicated network namespace: %w", err)
+	}
+	if duplicated != state.namespaceID {
+		return nil, errors.New("duplicated network namespace identity changed")
+	}
+	return &linkNamespaceLease{state: &linkNamespaceLeaseState{
+		deps: state.deps, fd: fd, identity: duplicated, ownerUID: state.key.ownerUID,
+	}}, nil
+}
+
+func (lease *linkNamespaceLease) descriptor() (int, namespaceIdentity, error) {
+	if lease == nil || lease.state == nil {
+		return -1, namespaceIdentity{}, errors.New("retained link namespace is inactive")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.closed || state.fd <= 0 || !validNamespaceIdentity(state.identity) {
+		return -1, namespaceIdentity{}, errors.New("retained link namespace is closed")
+	}
+	return state.fd, state.identity, nil
+}
+
+func (lease *linkNamespaceLease) owner() (OwnerUID, error) {
+	if lease == nil || lease.state == nil {
+		return 0, errors.New("retained link namespace is inactive")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.closed || state.fd <= 0 || state.ownerUID == 0 {
+		return 0, errors.New("retained link namespace has no authenticated owner")
+	}
+	return state.ownerUID, nil
+}
+
+func (lease *linkNamespaceLease) close(ctx context.Context) error {
+	if lease == nil {
+		return nil
+	}
+	if lease.state == nil {
+		return errors.New("retained link namespace is inactive")
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.closed {
+		return state.closeError
+	}
+	cleanupCtx := context.Background()
+	if ctx != nil {
+		cleanupCtx = context.WithoutCancel(ctx)
+	}
+	if err := closeConsumedNamespaceFD(cleanupCtx, state.deps, &state.fd); err != nil {
+		state.closeError = err
+	}
+	state.identity = namespaceIdentity{}
+	state.ownerUID = 0
+	state.closed = true
+	return state.closeError
 }
 
 func (pin *namespacePin) Release(ctx context.Context) error {
