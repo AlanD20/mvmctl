@@ -30,6 +30,7 @@ import (
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/provisioner"
 	"mvmctl/internal/lib/system"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/errs"
 )
 
@@ -46,6 +47,7 @@ type Operation struct {
 
 	hostSystemBinaryInstaller hostSystemBinaryInstaller
 	hostSudoersConfigurer     hostSudoersConfigurer
+	trustedReleaseClient      trustedReleaseClient
 }
 
 type hostSystemBinaryInstaller interface {
@@ -169,6 +171,7 @@ func NewOperation(ctx context.Context, conn *db.Handle, cacheDir string) *Operat
 		AuditLog:                  logging.NewAuditLog(),
 		hostSystemBinaryInstaller: s.Host,
 		hostSudoersConfigurer:     s.Host,
+		trustedReleaseClient:      jailer.NewTrustedReleaseClient(),
 	}
 }
 

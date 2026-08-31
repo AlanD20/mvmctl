@@ -2,16 +2,19 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+
 	"mvmctl/internal/core/binary"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
 	"mvmctl/internal/lib/version"
+	"mvmctl/internal/service/jailer"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/errs"
-	"sort"
 )
 
 // BinaryAPI defines the public interface for binary operations.
@@ -22,8 +25,7 @@ type BinaryAPI interface {
 		input inputs.BinaryPullInput,
 		onProgress event.OnProgressCallback,
 	) ([]*model.BinaryItem, error)
-	BinaryRemove(ctx context.Context, input inputs.BinaryInput, force bool) *errs.BatchResult
-	BinaryRemoveByVersion(ctx context.Context, version string, force bool) error
+	BinaryRemove(ctx context.Context, input inputs.BinaryRemoveInput, force bool) *errs.BatchResult
 	BinaryList(
 		ctx context.Context,
 		remote bool,
@@ -47,27 +49,38 @@ func (op *Operation) BinaryPrune(ctx context.Context, dryRun bool, force bool) (
 	if defaultBinary != nil {
 		defaultVersion = defaultBinary.Version
 	}
-	var removed []string
+	versions := make([]string, 0, len(allBinaries)/2)
+	seen := make(map[string]struct{}, len(allBinaries)/2)
 	for _, bin := range allBinaries {
-		if !force {
-			if bin.Version == defaultVersion {
-				continue
-			}
+		if bin.Version == defaultVersion {
+			continue
 		}
+		if _, duplicate := seen[bin.Version]; duplicate {
+			continue
+		}
+		seen[bin.Version] = struct{}{}
+		versions = append(versions, bin.Version)
+	}
+	var removed []string
+	for _, releaseVersion := range versions {
 		if !dryRun {
-			removeResult := op.BinaryRemove(ctx, inputs.BinaryInput{Identifiers: []string{bin.ID}}, force)
+			removeResult := op.BinaryRemove(
+				ctx,
+				inputs.BinaryRemoveInput{Versions: []string{releaseVersion}},
+				force,
+			)
 			if removeResult.HasErrors() {
 				slog.Warn("Failed to remove binary",
-					"type", bin.Type, "version", bin.Version, "error", removeResult.Errors()[0].Message)
+					"version", releaseVersion, "error", removeResult.Errors()[0].Message)
 				continue
 			}
 		}
-		removed = append(removed, fmt.Sprintf("%s:%s", bin.Type, bin.Version))
+		removed = append(removed, releaseVersion)
 	}
 	return removed, nil
 }
 
-// BinaryPull downloads or builds a binary.
+// BinaryPull installs an exact release through the root-owned trusted-release authority.
 func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInput,
 	onProgress event.OnProgressCallback) ([]*model.BinaryItem, error) {
 	architecture := system.RuntimeArch()
@@ -75,190 +88,155 @@ func (op *Operation) BinaryPull(ctx context.Context, input inputs.BinaryPullInpu
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, err.Error(), err)
 	}
-	// --- Git build path (parallel to release download) ---
-	if resolved.GitRef != nil && *resolved.GitRef != "" {
-		emitProgress(onProgress, "build", "running", "Building Firecracker from source...")
-		binaries, err := op.Services.Binary.BuildFromSource(ctx, *resolved.GitRef)
-		if err != nil {
-			return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, fmt.Sprintf("Build failed: %v", err), err)
-		}
-		noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker", architecture)
-		shouldSetDefault := resolved.SetDefault || noDefault == nil
-		for _, b := range binaries {
-			_ = op.Repos.Binary.Upsert(ctx, b)
-			if shouldSetDefault {
-				_ = op.Repos.Binary.SetDefault(ctx, b.Type, architecture, b.ID)
-			}
-		}
-		versionStr := ""
-		if len(binaries) > 0 {
-			versionStr = binaries[0].Version
-		}
-		op.AuditLog.LogOperation("binary.pull", map[string]any{
-			"git_ref": *resolved.GitRef,
-			"version": versionStr,
-		}, "")
-		emitProgress(onProgress, "complete", "complete", "Firecracker built successfully")
-		return binaries, nil
-	}
-	// --- Release download path ---
 	resolvedVersion, err := op.Services.Binary.ResolveVersion(ctx, resolved.Type, resolved.Version)
 	if err != nil {
 		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, err.Error(), err)
 	}
 	normalized := binary.NormalizeVersion(resolvedVersion)
-	fcExists, _ := op.Repos.Binary.GetByTypeAndVersion(ctx, "firecracker", architecture, normalized)
-	jlExists, _ := op.Repos.Binary.GetByTypeAndVersion(ctx, "jailer", architecture, normalized)
-	versionExists := fcExists != nil && jlExists != nil
-	if versionExists && !resolved.DownloadOverride {
-		return nil, errs.AlreadyExists(
-			errs.CodeBinaryAlreadyExists,
-			fmt.Sprintf("Firecracker v%s already exists. Use --force to re-download.", normalized),
+	payload, payloadLength, err := openTrustedReleaseMirrorArchive(normalized, architecture)
+	if err != nil {
+		return nil, err
+	}
+	if payload != nil {
+		defer func() { _ = payload.Close() }()
+		slog.Info(
+			"Using local mirror for trusted release",
+			"version", normalized,
+			"architecture", architecture,
+			"bytes", payloadLength,
+		)
+		emitProgress(onProgress, "mirror", "complete", "Using exact local asset mirror archive")
+	}
+	if op.trustedReleaseClient == nil {
+		return nil, errs.New(errs.CodeInternal, "trusted release client is not configured")
+	}
+	emitProgress(onProgress, "install", "running", "Installing trusted Firecracker release...")
+	rootResult, err := op.trustedReleaseClient.Install(ctx, jailer.TrustedReleaseInstallRequest{
+		Slot:             jailer.ReleaseSlot{Version: normalized, Architecture: architecture},
+		AllowReplacement: resolved.DownloadOverride,
+	}, payload, payloadLength)
+	if err != nil {
+		return nil, err
+	}
+	pair := binaryPairFromTrustedRelease(rootResult)
+	defaultBinary, err := op.Repos.Binary.GetDefault(ctx, "firecracker", architecture)
+	if err != nil {
+		return []*model.BinaryItem{pair.Firecracker, pair.Jailer}, releaseProjectionFailure(
+			"trusted release install",
+			rootResult.Outcome,
+			err,
 		)
 	}
-	noDefault, _ := op.Repos.Binary.GetDefault(ctx, "firecracker", architecture)
-	shouldSetDefault := resolved.SetDefault || noDefault == nil
-	// arch maps the current architecture to Firecracker's naming convention.
-	arch := architecture
-	// Bridge byte-level download progress to phase-level ProgressEvent
-	emitProgress(onProgress, "download", "running", "Downloading Firecracker...")
-	progressBridge := event.FormatProgress(onProgress)
-	binaries, err := op.Services.Binary.DownloadFirecracker(ctx, resolvedVersion, arch, progressBridge)
-	if err != nil {
-		return nil, errs.WrapMsg(errs.CodeBinaryPullFailed, fmt.Sprintf("Download failed: %v", err), err)
+	setDefault := resolved.SetDefault || defaultBinary == nil || defaultBinary.Version == normalized
+	pair.Firecracker.IsDefault = setDefault
+	pair.Jailer.IsDefault = setDefault
+	if err := op.Repos.Binary.ReplaceReleaseProjection(ctx, architecture, normalized, pair, setDefault); err != nil {
+		return []*model.BinaryItem{pair.Firecracker, pair.Jailer}, releaseProjectionFailure(
+			"trusted release install",
+			rootResult.Outcome,
+			err,
+		)
 	}
-	for _, b := range binaries {
-		_ = op.Repos.Binary.Upsert(ctx, b)
-		if shouldSetDefault {
-			_ = op.Repos.Binary.SetDefault(ctx, b.Type, architecture, b.ID)
-		}
+	if op.AuditLog != nil {
+		_ = op.AuditLog.LogOperation("binary.pull", map[string]any{
+			"version": normalized,
+			"outcome": rootResult.Outcome,
+		}, "")
 	}
-	op.AuditLog.LogOperation("binary.pull", map[string]any{"version": resolvedVersion}, "")
-	emitProgress(onProgress, "complete", "complete", "Firecracker downloaded successfully")
-	return binaries, nil
+	emitProgress(onProgress, "complete", "complete", "Trusted Firecracker release installed")
+	return []*model.BinaryItem{pair.Firecracker, pair.Jailer}, nil
 }
 
-// BinaryRemove removes binaries by identifiers.
-// Enriches with VM references. Each binary removal is wrapped in per-binary
-// error handling.
-func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryInput, force bool) *errs.BatchResult {
+// BinaryRemove removes exact release slots through the root-owned trusted-release authority.
+func (op *Operation) BinaryRemove(ctx context.Context, input inputs.BinaryRemoveInput, force bool) *errs.BatchResult {
 	architecture := system.RuntimeArch()
-	binaries, err := input.Resolve(ctx, op.Repos.Binary, architecture)
+	versions, err := input.Resolve()
 	if err != nil {
-		return &errs.BatchResult{
-			Items: []errs.OperationResult{
-				{
-					Status:    "error",
-					Code:      "binary.remove_failed",
-					Message:   err.Error(),
-					Exception: err,
-				},
-			},
-		}
+		return &errs.BatchResult{Items: []errs.OperationResult{binaryRemoveError("", err)}}
 	}
-	paired := make([]*model.BinaryItem, 0, len(binaries)*2)
-	seen := make(map[string]bool)
-	for _, item := range binaries {
-		firecracker, fcErr := op.Repos.Binary.GetByTypeAndVersion(
-			ctx,
-			"firecracker",
-			architecture,
-			item.Version,
-		)
-		jailer, jailerErr := op.Repos.Binary.GetByTypeAndVersion(ctx, "jailer", architecture, item.Version)
-		if fcErr != nil || jailerErr != nil || firecracker == nil || jailer == nil {
-			return &errs.BatchResult{Items: []errs.OperationResult{{
-				Status: "error", Code: string(errs.CodeBinaryPairInvalid),
-				Message: fmt.Sprintf("exact Firecracker/Jailer pair is incomplete for version %s", item.Version),
-			}}}
+	items := make([]errs.OperationResult, 0, len(versions))
+	for _, releaseVersion := range versions {
+		var warnings []string
+		if !force {
+			warnings = op.binaryReleaseAdvisoryWarnings(ctx, architecture, releaseVersion)
 		}
-		for _, member := range []*model.BinaryItem{firecracker, jailer} {
-			if !seen[member.ID] {
-				seen[member.ID] = true
-				paired = append(paired, member)
-			}
-		}
-	}
-	binaries = paired
-	// Enrich binaries with VM and snapshot references.
-	enriched := binaries
-	op.Enr.EnrichBinary(ctx, enriched, "vm", "snapshots")
-	if !force {
-		for _, bin := range enriched {
-			if len(bin.VMs) > 0 || len(bin.Snapshots) > 0 {
-				return &errs.BatchResult{Items: []errs.OperationResult{
-					{
-						Status: "error",
-						Code:   string(errs.CodeBinaryRemoveFailed),
-						Item:   bin,
-						Message: fmt.Sprintf(
-							"cannot remove Firecracker/Jailer pair %s while it is referenced",
-							bin.Version,
-						),
-					},
-				}}
-			}
-		}
-	}
-	items := make([]errs.OperationResult, 0)
-	for _, bin := range enriched {
-		// svc.Remove returns (*BinaryItem, error)
-		if _, err := op.Services.Binary.Remove(ctx, bin, force); err != nil {
-			items = append(items, errs.OperationResult{
-				Status:    "error",
-				Code:      "binary.remove_failed",
-				Message:   fmt.Sprintf("Failed to remove %s v%s: %v", bin.Type, bin.FullVersion, err),
-				Exception: err,
-				Item:      bin,
-			})
+		if op.trustedReleaseClient == nil {
+			items = append(items, binaryRemoveError(
+				releaseVersion,
+				errs.New(errs.CodeInternal, "trusted release client is not configured"),
+			))
 			continue
 		}
-		op.AuditLog.LogOperation("binary.remove", map[string]any{
-			"id":      bin.ID,
-			"type":    bin.Type,
-			"version": bin.FullVersion,
-		}, "")
+		rootResult, err := op.trustedReleaseClient.Remove(ctx, jailer.TrustedReleaseRemoveRequest{
+			Slot: jailer.ReleaseSlot{Version: releaseVersion, Architecture: architecture},
+		})
+		if err != nil {
+			item := binaryRemoveError(releaseVersion, err)
+			item.Warnings = warnings
+			items = append(items, item)
+			continue
+		}
+		if err := op.Repos.Binary.RemoveReleaseProjection(ctx, architecture, releaseVersion); err != nil {
+			projectionErr := releaseProjectionFailure("trusted release removal", rootResult.Removed, err)
+			items = append(items, binaryRemoveError(releaseVersion, projectionErr))
+			continue
+		}
+		if op.AuditLog != nil {
+			_ = op.AuditLog.LogOperation("binary.remove", map[string]any{
+				"version": releaseVersion,
+				"removed": rootResult.Removed,
+			}, "")
+		}
+		status, code, message := "success", "binary.removed", fmt.Sprintf("Removed release v%s", releaseVersion)
+		if !rootResult.Removed {
+			status, code, message = "skipped", "binary.remove_absent", fmt.Sprintf(
+				"Release v%s was already absent",
+				releaseVersion,
+			)
+		}
 		items = append(items, errs.OperationResult{
-			Status:  "success",
-			Code:    "binary.removed",
-			Message: fmt.Sprintf("Removed %s v%s", bin.Type, bin.FullVersion),
-			Item:    bin,
+			Status: status, Code: code, Message: message, Item: releaseVersion, Warnings: warnings,
 		})
 	}
 	return &errs.BatchResult{Items: items}
 }
 
-// BinaryRemoveByVersion removes both firecracker and jailer for a version.
-// Errors propagate through the DomainError pipeline.
-func (op *Operation) BinaryRemoveByVersion(ctx context.Context, version string, force bool) error {
-	resolver := binary.NewResolver(op.Repos.Binary, system.RuntimeArch())
-	normalized := binary.NormalizeVersion(version)
-	binariesToRemove := make([]*model.BinaryItem, 0)
-	for _, name := range []string{"firecracker", "jailer"} {
-		bin, err := resolver.ByTypeVersion(ctx, name, normalized)
-		if err != nil {
-			slog.Debug("Binary not found in DB, skipping",
-				"name", name, "version", normalized, "error", err)
-			continue
+func binaryRemoveError(version string, err error) errs.OperationResult {
+	code := errs.CodeBinaryRemoveFailed
+	var domainErr *errs.DomainError
+	if errors.As(err, &domainErr) {
+		code = domainErr.Code
+	}
+	return errs.OperationResult{
+		Status: "error", Code: string(code), Message: err.Error(), Item: version, Exception: err,
+	}
+}
+
+func (op *Operation) binaryReleaseAdvisoryWarnings(
+	ctx context.Context,
+	architecture string,
+	version string,
+) []string {
+	pair := make([]*model.BinaryItem, 0, 2)
+	for _, typ := range []string{"firecracker", "jailer"} {
+		member, err := op.Repos.Binary.GetByTypeAndVersion(ctx, typ, architecture, version)
+		if err == nil && member != nil {
+			pair = append(pair, member)
 		}
-		binariesToRemove = append(binariesToRemove, bin)
 	}
-	if len(binariesToRemove) == 0 {
-		return errs.New(errs.CodeBinaryNotFound, fmt.Sprintf("No binaries found for version %s", normalized))
+	if len(pair) == 0 {
+		return nil
 	}
-	if err := op.Enr.EnrichBinary(ctx, binariesToRemove, "vm", "snapshots"); err != nil {
-		return errs.WrapMsg(errs.CodeBinaryRemoveFailed,
-			fmt.Sprintf("failed to resolve binary pair references: %v", err), err)
+	if op.Enr != nil {
+		_ = op.Enr.EnrichBinary(ctx, pair, "vm", "snapshots")
 	}
-	for _, bin := range binariesToRemove {
-		if _, err := op.Services.Binary.Remove(ctx, bin, force); err != nil {
-			return errs.WrapMsg(errs.CodeBinaryRemoveFailed, fmt.Sprintf("Failed to remove %s: %v", bin.Type, err), err)
+	for _, member := range pair {
+		if len(member.VMs) > 0 || len(member.Snapshots) > 0 {
+			return []string{fmt.Sprintf(
+				"local state references release v%s; root authority will make the final removal decision",
+				version,
+			)}
 		}
-		op.AuditLog.LogOperation("binary.remove", map[string]any{
-			"id":      bin.ID,
-			"type":    bin.Type,
-			"version": normalized,
-		}, "")
 	}
 	return nil
 }
