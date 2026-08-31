@@ -22,6 +22,7 @@ type jailDestinationLeaseState struct {
 	deps       jailDestinationDeps
 	vmID       string
 	bindings   []jailDestinationBinding
+	sealed     bool
 	released   bool
 	releaseErr error
 }
@@ -30,6 +31,12 @@ type jailDestinationBinding struct {
 	kind     jailDestinationBindingKind
 	fd       int
 	identity instanceObjectIdentity
+	mount    jailDestinationMountIdentity
+}
+
+type jailDestinationMountIdentity struct {
+	kind managedCacheMountIdentityKind
+	id   uint64
 }
 
 type jailDestinationBindingKind uint8
@@ -46,6 +53,7 @@ type jailDestinationDeps struct {
 	open   func(context.Context, string, int, uint32) (int, error)
 	openAt func(context.Context, int, string, int, uint32) (int, error)
 	fstat  func(context.Context, int, *unix.Stat_t) error
+	statx  func(context.Context, int, int, int, *unix.Statx_t) error
 	fchmod func(context.Context, int, uint32) error
 	fchown func(context.Context, int, int, int) error
 	close  func(context.Context, int) error
@@ -71,7 +79,7 @@ func retainJailDestination(
 	if infra.JailerChrootBase != "/var/lib/mvmctl/jailer" {
 		return nil, processAuthorityError(vmID, "Jailer chroot base constant is inconsistent", nil)
 	}
-	lease := &jailDestinationLease{state: &jailDestinationLeaseState{deps: deps, vmID: vmID}}
+	lease := &jailDestinationLease{state: &jailDestinationLeaseState{deps: deps, vmID: vmID, sealed: true}}
 	committed := false
 	defer func() {
 		if committed {
@@ -138,6 +146,15 @@ func retainJailDestination(
 			vmID,
 		)
 	}
+	managedMount, err := inspectJailDestinationMount(ctx, deps, mvmctlFD)
+	if err != nil {
+		return nil, appendJailDestinationCleanupError(
+			processAuthorityError(vmID, "inspect mvmctl jail ancestor mount identity", err),
+			"close rejected mvmctl jail ancestor",
+			deps.close(context.WithoutCancel(ctx), mvmctlFD),
+			vmID,
+		)
+	}
 	currentFD = mvmctlFD
 
 	baseFD, err := deps.openAt(ctx, currentFD, "jailer", directoryFlags, 0)
@@ -150,6 +167,9 @@ func retainJailDestination(
 	}
 	if err := lease.addBinding(ctx, jailDestinationBase, baseFD, unix.S_IFDIR|0700, true); err != nil {
 		return nil, err
+	}
+	if lease.state.bindings[0].mount != managedMount {
+		return nil, processAuthorityError(vmID, "Jailer base is a substituted mount", nil)
 	}
 	if err := lease.openDirectoryBinding(
 		ctx,
@@ -184,7 +204,7 @@ func retainJailDestination(
 }
 
 func validateJailDestinationDeps(deps jailDestinationDeps) error {
-	if deps.open == nil || deps.openAt == nil || deps.fstat == nil || deps.close == nil {
+	if deps.open == nil || deps.openAt == nil || deps.fstat == nil || deps.statx == nil || deps.close == nil {
 		return fmt.Errorf("one or more jail destination effects are unavailable")
 	}
 	return nil
@@ -196,14 +216,24 @@ func (lease *jailDestinationLease) openDirectoryBinding(
 	leaf string,
 	expectedMode uint32,
 ) error {
-	parentFD := lease.state.bindings[len(lease.state.bindings)-1].fd
-	fd, err := lease.state.deps.openAt(
+	return lease.openDirectoryBindingWithFlags(
 		ctx,
-		parentFD,
+		kind,
 		leaf,
+		expectedMode,
 		unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW,
-		0,
 	)
+}
+
+func (lease *jailDestinationLease) openDirectoryBindingWithFlags(
+	ctx context.Context,
+	kind jailDestinationBindingKind,
+	leaf string,
+	expectedMode uint32,
+	flags int,
+) error {
+	parentFD := lease.state.bindings[len(lease.state.bindings)-1].fd
+	fd, err := lease.state.deps.openAt(ctx, parentFD, leaf, flags, 0)
 	if err != nil {
 		return processAuthorityError(lease.state.vmID, "open jail destination binding "+leaf, err)
 	}
@@ -231,10 +261,45 @@ func (lease *jailDestinationLease) addBinding(
 	if !requireDirectory && (stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Size <= 0 || stat.Nlink != 1) {
 		return processAuthorityError(lease.state.vmID, "copied Firecracker metadata is invalid", nil)
 	}
+	mount, err := inspectJailDestinationMount(ctx, lease.state.deps, fd)
+	if err != nil {
+		return processAuthorityError(lease.state.vmID, "inspect jail destination mount identity", err)
+	}
+	if len(lease.state.bindings) > 1 && mount != lease.state.bindings[len(lease.state.bindings)-2].mount {
+		return processAuthorityError(lease.state.vmID, "jail destination contains a substituted mount", nil)
+	}
 	lease.state.bindings[len(lease.state.bindings)-1].identity = instanceObjectIdentity{
 		device: uint64(stat.Dev), inode: stat.Ino,
 	}
+	lease.state.bindings[len(lease.state.bindings)-1].mount = mount
 	return nil
+}
+
+func inspectJailDestinationMount(
+	ctx context.Context,
+	deps jailDestinationDeps,
+	fd int,
+) (jailDestinationMountIdentity, error) {
+	var stat unix.Statx_t
+	mask := unix.STATX_BASIC_STATS | unix.STATX_MNT_ID | unix.STATX_MNT_ID_UNIQUE
+	flags := unix.AT_EMPTY_PATH | unix.AT_NO_AUTOMOUNT | unix.AT_SYMLINK_NOFOLLOW | unix.AT_STATX_FORCE_SYNC
+	if err := deps.statx(ctx, fd, flags, mask, &stat); err != nil {
+		return jailDestinationMountIdentity{}, err
+	}
+	switch {
+	case stat.Mask&unix.STATX_MNT_ID_UNIQUE != 0:
+		if stat.Mnt_id == 0 {
+			return jailDestinationMountIdentity{}, fmt.Errorf("unique mount identity is invalid")
+		}
+		return jailDestinationMountIdentity{kind: managedCacheMountIdentityUnique, id: stat.Mnt_id}, nil
+	case stat.Mask&unix.STATX_MNT_ID != 0:
+		if stat.Mnt_id == 0 {
+			return jailDestinationMountIdentity{}, fmt.Errorf("legacy mount identity is invalid")
+		}
+		return jailDestinationMountIdentity{kind: managedCacheMountIdentityLegacy, id: stat.Mnt_id}, nil
+	default:
+		return jailDestinationMountIdentity{}, fmt.Errorf("mount identity is unavailable")
+	}
 }
 
 func inspectTrustedJailAncestor(ctx context.Context, deps jailDestinationDeps, fd int, name string) error {

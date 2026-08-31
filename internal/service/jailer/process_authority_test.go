@@ -119,6 +119,96 @@ func TestBlockedLaunchProcessesRejectAmbiguousOrDeadSourcesAndCloseOwnedAuthorit
 	}
 }
 
+func TestBlockedLaunchProcessAdmissionClosesPIDFDOnEveryRejectedPath(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*blockedProcessFixture){
+		"flags": func(fixture *blockedProcessFixture) {
+			fixture.flags[fixture.firecracker.pidfd] = 0
+		},
+		"dead": func(fixture *blockedProcessFixture) {
+			fixture.alive[fixture.firecracker.pidfd] = false
+		},
+		"challenge": func(fixture *blockedProcessFixture) {
+			fixture.firecracker.gate.state.deps.writeFull = func(context.Context, int, []byte) error {
+				return errors.New("challenge failed")
+			}
+		},
+		"locator": func(fixture *blockedProcessFixture) {
+			delete(fixture.locators, fixture.firecracker.pidfd)
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			fixture := newBlockedProcessFixture(false)
+			mutate(fixture)
+			processes, err := fixture.admit(t.Context())
+			assert.Nil(t, processes)
+			require.Error(t, err)
+			assert.Equal(t, 1, countProcessFixtureEvent(fixture.eventsSnapshot(), "firecracker:100"))
+		})
+	}
+}
+
+func TestBlockedLaunchProcessesTerminateWaitReapAndVerifyBeforeRelease(t *testing.T) {
+	t.Parallel()
+
+	fixture := newBlockedProcessFixture(true)
+	processes, err := fixture.admit(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, processes.terminateAndReap(t.Context()))
+	require.NoError(t, processes.Release(t.Context()))
+
+	assert.Equal(t, []string{
+		"signal:101", "reap:101", "signal:100", "reap:100",
+		"receiver", "relay:101", "firecracker:100",
+	}, fixture.eventsSnapshot())
+}
+
+func TestBlockedLaunchProcessWaitFailureRetainsPIDFDAuthorityForRetry(t *testing.T) {
+	t.Parallel()
+
+	fixture := newBlockedProcessFixture(false)
+	processes, err := fixture.admit(t.Context())
+	require.NoError(t, err)
+	waitErr := context.DeadlineExceeded
+	calls := 0
+	processes.state.deps.waitReapPIDFD = func(_ context.Context, fd int) error {
+		calls++
+		fixture.record(fmt.Sprintf("reap:%d", fd))
+		if calls == 1 {
+			return waitErr
+		}
+		fixture.alive[fd] = false
+		return nil
+	}
+
+	first := processes.terminateAndReap(t.Context())
+	require.Error(t, first)
+	assert.ErrorIs(t, first, waitErr)
+	domain := errs.AsDomainError(first)
+	require.NotNil(t, domain)
+	assert.Equal(t, errs.ClassRetryable, domain.Class)
+	assert.Equal(t, []string{"signal:100", "reap:100"}, fixture.eventsSnapshot())
+
+	require.NoError(t, processes.terminateAndReap(t.Context()))
+	require.NoError(t, processes.Release(t.Context()))
+	assert.Equal(t, 1, countProcessFixtureEvent(fixture.eventsSnapshot(), "signal:100"))
+	assert.Equal(t, 1, countProcessFixtureEvent(fixture.eventsSnapshot(), "firecracker:100"))
+}
+
+func countProcessFixtureEvent(events []string, target string) int {
+	count := 0
+	for _, event := range events {
+		if event == target {
+			count++
+		}
+	}
+	return count
+}
+
 type blockedProcessFixture struct {
 	mu          sync.Mutex
 	firecracker blockedLaunchProcessSource
@@ -169,6 +259,15 @@ func (fixture *blockedProcessFixture) admit(ctx context.Context) (*blockedLaunch
 			},
 			releasePinnedExecutable: func(context.Context, *system.PinnedExecutable) error {
 				fixture.record("receiver")
+				return nil
+			},
+			terminatePIDFD: func(_ context.Context, fd int) error {
+				fixture.record(fmt.Sprintf("signal:%d", fd))
+				return nil
+			},
+			waitReapPIDFD: func(_ context.Context, fd int) error {
+				fixture.record(fmt.Sprintf("reap:%d", fd))
+				fixture.alive[fd] = false
 				return nil
 			},
 			close: func(_ context.Context, fd int) error {

@@ -51,6 +51,7 @@ func activateVerifiedProcessWithDeps(
 	defer state.mu.Unlock()
 	if state.released || state.directories == nil || state.vmLock == nil || state.prepared == nil ||
 		state.processes == nil || state.processes.state == nil ||
+		state.networkNamespace == nil ||
 		(state.preparedJailDestination == nil && state.jailDestination == nil) {
 		return nil, processVerificationError(vmID, "launch process authority is not active", nil)
 	}
@@ -91,6 +92,7 @@ func activateVerifiedProcessWithDeps(
 		manifest,
 		processState,
 		state.jailDestination,
+		*state.networkNamespace,
 	)
 	if err != nil {
 		return nil, err
@@ -104,18 +106,20 @@ func activateVerifiedProcessWithDeps(
 		return nil, writeErr
 	}
 	target := &activeLease{state: &activeLeaseState{
-		directories:     state.directories,
-		vmLock:          state.vmLock,
-		prepared:        state.prepared,
-		processes:       state.processes,
-		jailDestination: verified.destination,
-		record:          activeRecord,
+		directories:      state.directories,
+		vmLock:           state.vmLock,
+		prepared:         state.prepared,
+		processes:        state.processes,
+		jailDestination:  verified.destination,
+		networkNamespace: state.networkNamespace,
+		record:           activeRecord,
 	}}
 	state.directories = nil
 	state.vmLock = nil
 	state.prepared = nil
 	state.processes = nil
 	state.jailDestination = nil
+	state.networkNamespace = nil
 	state.record = activeRecord
 	state.released = true
 	if writeErr != nil {
@@ -216,6 +220,7 @@ func verifyRetainedLaunchProcesses(
 	manifest trustedReleaseManifest,
 	processes *blockedLaunchProcessesState,
 	destination *jailDestinationLease,
+	networkNamespace topologySelectedNetworkNamespace,
 ) (_ verifiedLaunchIdentity, returnErr error) {
 	vmID := record.vmID
 	bootID, err := deps.readBootID(ctx)
@@ -229,14 +234,6 @@ func verifyRetainedLaunchProcesses(
 			nil,
 		)
 	}
-	firstDestination, err := inspectJailDestination(ctx, deps, destination, manifest.firecracker)
-	if err != nil {
-		return verifiedLaunchIdentity{}, err
-	}
-	firstFirecracker, err := verifyFirecrackerObservation(ctx, deps, record, firstDestination)
-	if err != nil {
-		return verifiedLaunchIdentity{}, err
-	}
 	receiverIdentity, err := deps.pinnedIdentity(ctx, processes.receiverExecutable)
 	if err != nil {
 		return verifiedLaunchIdentity{}, processVerificationError(vmID, "inspect pinned receiver executable", err)
@@ -245,25 +242,57 @@ func verifyRetainedLaunchProcesses(
 	if err != nil {
 		return verifiedLaunchIdentity{}, err
 	}
-	secondDestination, err := inspectJailDestination(ctx, deps, destination, manifest.firecracker)
+	preSealFirecracker, preSealDestination, err := observeFirecrackerExecTransition(
+		ctx,
+		deps,
+		record,
+		processes,
+		destination,
+	)
 	if err != nil {
 		return verifiedLaunchIdentity{}, err
 	}
-	if firstDestination != secondDestination {
+	if preSealFirecracker.networkNamespace != networkNamespace.identity {
 		return verifiedLaunchIdentity{}, processVerificationError(
 			vmID,
-			"jail destination changed during verification",
+			"Firecracker network namespace does not match the topology-selected network namespace",
 			nil,
 		)
 	}
-	secondFirecracker, err := verifyFirecrackerObservation(ctx, deps, record, secondDestination)
+	if err := destination.seal(ctx, record.ownerUID, record.launch.ownerGID); err != nil {
+		return verifiedLaunchIdentity{}, err
+	}
+	sealedDestination, err := inspectJailDestination(ctx, deps, destination, manifest.firecracker)
 	if err != nil {
 		return verifiedLaunchIdentity{}, err
 	}
-	if !observedProcessIdentitiesEqual(firstFirecracker, secondFirecracker) {
+	if sealedDestination.root != preSealDestination.root ||
+		!sameExecutableObject(sealedDestination.executable, preSealDestination.executable) {
 		return verifiedLaunchIdentity{}, processVerificationError(
 			vmID,
-			"Firecracker identity changed during verification",
+			"jail destination changed while sealing",
+			nil,
+		)
+	}
+	finalFirecracker, err := verifyFirecrackerObservation(ctx, deps, record, sealedDestination)
+	if err != nil {
+		return verifiedLaunchIdentity{}, err
+	}
+	if !processObservationsEqual(preSealFirecracker.process, finalFirecracker.process) ||
+		preSealFirecracker.mountNamespace != finalFirecracker.mountNamespace ||
+		preSealFirecracker.networkNamespace != finalFirecracker.networkNamespace ||
+		preSealFirecracker.root != finalFirecracker.root ||
+		!sameExecutableObject(preSealFirecracker.executable, finalFirecracker.executable) {
+		return verifiedLaunchIdentity{}, processVerificationError(
+			vmID,
+			"Firecracker identity changed while sealing",
+			nil,
+		)
+	}
+	if finalFirecracker.networkNamespace != networkNamespace.identity {
+		return verifiedLaunchIdentity{}, processVerificationError(
+			vmID,
+			"Firecracker network namespace does not match the topology-selected network namespace",
 			nil,
 		)
 	}
@@ -278,36 +307,14 @@ func verifyRetainedLaunchProcesses(
 			nil,
 		)
 	}
-	secondRelay, err := verifyRelayObservation(ctx, deps, record, reinspectedReceiver)
+	finalRelay, err := verifyRelayObservation(ctx, deps, record, reinspectedReceiver)
 	if err != nil {
 		return verifiedLaunchIdentity{}, err
 	}
-	if !observedProcessIdentitiesEqual(firstRelay, secondRelay) {
+	if !observedProcessIdentitiesEqual(firstRelay, finalRelay) {
 		return verifiedLaunchIdentity{}, processVerificationError(
 			vmID,
 			"relay identity changed during verification",
-			nil,
-		)
-	}
-	finalDestination, err := inspectJailDestination(ctx, deps, destination, manifest.firecracker)
-	if err != nil {
-		return verifiedLaunchIdentity{}, err
-	}
-	if secondDestination != finalDestination {
-		return verifiedLaunchIdentity{}, processVerificationError(
-			vmID,
-			"jail destination changed after relay verification",
-			nil,
-		)
-	}
-	finalFirecracker, err := verifyFirecrackerObservation(ctx, deps, record, finalDestination)
-	if err != nil {
-		return verifiedLaunchIdentity{}, err
-	}
-	if !observedProcessIdentitiesEqual(secondFirecracker, finalFirecracker) {
-		return verifiedLaunchIdentity{}, processVerificationError(
-			vmID,
-			"Firecracker identity changed after relay verification",
 			nil,
 		)
 	}
@@ -322,32 +329,192 @@ func verifyRetainedLaunchProcesses(
 			nil,
 		)
 	}
-	if err := requireProcessAlive(
+	if err := requireExactPIDFDLocator(
 		ctx,
-		processes.deps.pidfdAlive,
+		deps,
 		processes.firecracker.pidfd,
+		record.launch.process,
 		vmID,
 		"Firecracker",
 	); err != nil {
 		return verifiedLaunchIdentity{}, err
 	}
 	if processes.relay != nil {
-		if err := requireProcessAlive(
+		if err := requireExactPIDFDLocator(
 			ctx,
-			processes.deps.pidfdAlive,
+			deps,
 			processes.relay.pidfd,
+			record.launch.relay.locator,
 			vmID,
 			"relay",
 		); err != nil {
 			return verifiedLaunchIdentity{}, err
 		}
 	}
-	identity := firecrackerActiveIdentity(record, finalFirecracker, finalDestination)
-	identity.relay = relayActiveIdentity(record, secondRelay, reinspectedReceiver)
+	identity := firecrackerActiveIdentity(record, finalFirecracker, sealedDestination)
+	identity.relay = relayActiveIdentity(record, finalRelay, reinspectedReceiver)
 	if err := validateInstanceActiveIdentity(record, identity); err != nil {
 		return verifiedLaunchIdentity{}, processVerificationError(vmID, "observed process identity is invalid", err)
 	}
 	return verifiedLaunchIdentity{identity: identity, destination: destination}, nil
+}
+
+func observeFirecrackerExecTransition(
+	ctx context.Context,
+	deps processIdentityVerifierDeps,
+	record instanceRecord,
+	processes *blockedLaunchProcessesState,
+	destination *jailDestinationLease,
+) (observedProcessIdentity, observedJailDestination, error) {
+	deadline := deps.now().Add(processExecObservationBudget)
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+	}
+	var lastMismatch error
+	for {
+		if err := ctx.Err(); err != nil {
+			return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
+				record.vmID,
+				"observe Jailer to Firecracker executable transition",
+				err,
+			)
+		}
+		if !deps.now().Before(deadline) {
+			return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
+				record.vmID,
+				"Jailer to Firecracker executable transition exceeded its deadline",
+				lastMismatch,
+			)
+		}
+		if err := requireProcessAlive(
+			ctx,
+			deps.pidfdAlive,
+			processes.firecracker.pidfd,
+			record.vmID,
+			"Firecracker",
+		); err != nil {
+			return observedProcessIdentity{}, observedJailDestination{}, err
+		}
+		if err := requireExactPIDFDLocator(
+			ctx,
+			deps,
+			processes.firecracker.pidfd,
+			record.launch.process,
+			record.vmID,
+			"Firecracker",
+		); err != nil {
+			return observedProcessIdentity{}, observedJailDestination{}, err
+		}
+		bootID, err := deps.readBootID(ctx)
+		if err != nil {
+			return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
+				record.vmID,
+				"recheck host boot ID during executable transition",
+				err,
+			)
+		}
+		if bootID != record.launch.hostBootID {
+			return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
+				record.vmID,
+				"host boot ID changed during executable transition",
+				nil,
+			)
+		}
+		preSealDestination, err := inspectPreSealJailDestination(
+			ctx,
+			destination,
+			record.ownerUID,
+			record.launch.ownerGID,
+		)
+		if err != nil {
+			return observedProcessIdentity{}, observedJailDestination{}, err
+		}
+		observed, err := observeProcessIdentityWithExecutableOwner(
+			ctx,
+			deps,
+			record.vmID,
+			"Firecracker",
+			record.launch.process,
+			record.ownerUID,
+			record.launch.ownerGID,
+			true,
+		)
+		if err != nil && !errors.Is(err, unix.ENOENT) {
+			return observedProcessIdentity{}, observedJailDestination{}, err
+		}
+		if err == nil && observed.root == preSealDestination.root &&
+			sameExecutableObject(observed.executable, preSealDestination.executable) {
+			if err := requireExpectedProcessCredentials(
+				observed.process,
+				record.ownerUID,
+				record.launch.ownerGID,
+				"Firecracker",
+			); err != nil {
+				return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
+					record.vmID,
+					err.Error(),
+					nil,
+				)
+			}
+			wantCgroup := infra.CgroupV2Root + "/" + infra.JailerCgroupParent + "/" + record.vmID
+			if observed.process.cgroupPath != wantCgroup {
+				return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
+					record.vmID,
+					"Firecracker cgroup does not match launch authority",
+					nil,
+				)
+			}
+			return observed, preSealDestination, nil
+		}
+		lastMismatch = processVerificationError(
+			record.vmID,
+			"Firecracker root or executable does not yet match retained jail destination",
+			err,
+		)
+		remaining := deadline.Sub(deps.now())
+		if remaining < processExecObservationInterval {
+			if remaining > 0 {
+				if err := deps.wait(ctx, remaining); err != nil {
+					return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
+						record.vmID,
+						"wait for Jailer to Firecracker executable transition",
+						err,
+					)
+				}
+			}
+			continue
+		}
+		if err := deps.wait(ctx, processExecObservationInterval); err != nil {
+			return observedProcessIdentity{}, observedJailDestination{}, processVerificationError(
+				record.vmID,
+				"wait for Jailer to Firecracker executable transition",
+				err,
+			)
+		}
+	}
+}
+
+func requireExactPIDFDLocator(
+	ctx context.Context,
+	deps processIdentityVerifierDeps,
+	pidfd int,
+	expected instanceProcessLocator,
+	vmID string,
+	role string,
+) error {
+	derived, err := deps.deriveLocator(ctx, pidfd)
+	if err != nil {
+		return processVerificationError(vmID, "derive "+role+" locator from pidfd", err)
+	}
+	if derived != expected {
+		return processVerificationError(vmID, role+" pidfd locator does not match launch authority", nil)
+	}
+	return nil
+}
+
+func sameExecutableObject(left, right processExecutableDescriptorIdentity) bool {
+	return left.device == right.device && left.inode == right.inode && left.sizeBytes == right.sizeBytes &&
+		left.mode == right.mode && left.links == right.links
 }
 
 func verifyFirecrackerObservation(
@@ -438,6 +605,96 @@ func verifyRelayObservation(
 	return observed, nil
 }
 
+func inspectPreSealJailDestination(
+	ctx context.Context,
+	destination *jailDestinationLease,
+	ownerUID uint32,
+	ownerGID uint32,
+) (observedJailDestination, error) {
+	if destination == nil || destination.state == nil {
+		return observedJailDestination{}, processVerificationError("", "jail destination authority is not active", nil)
+	}
+	state := destination.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.sealed || len(state.bindings) != 4 {
+		return observedJailDestination{}, processVerificationError(
+			state.vmID,
+			"jail destination is not awaiting verified sealing",
+			nil,
+		)
+	}
+	var result observedJailDestination
+	for _, binding := range state.bindings {
+		var stat unix.Stat_t
+		if err := state.deps.fstat(ctx, binding.fd, &stat); err != nil {
+			return observedJailDestination{}, processVerificationError(
+				state.vmID,
+				"reinspect pre-seal jail destination binding",
+				err,
+			)
+		}
+		if uint64(stat.Dev) != binding.identity.device || stat.Ino != binding.identity.inode {
+			return observedJailDestination{}, processVerificationError(
+				state.vmID,
+				"pre-seal jail destination binding changed",
+				nil,
+			)
+		}
+		mount, err := inspectJailDestinationMount(ctx, state.deps, binding.fd)
+		if err != nil {
+			return observedJailDestination{}, processVerificationError(
+				state.vmID,
+				"reinspect pre-seal jail destination mount",
+				err,
+			)
+		}
+		if mount != binding.mount {
+			return observedJailDestination{}, processVerificationError(
+				state.vmID,
+				"pre-seal jail destination mount changed",
+				nil,
+			)
+		}
+		switch binding.kind {
+		case jailDestinationFirecracker, jailDestinationVM:
+			if stat.Mode != unix.S_IFDIR|0700 || stat.Uid != 0 || stat.Gid != 0 {
+				return observedJailDestination{}, processVerificationError(
+					state.vmID,
+					"pre-seal Jailer ancestor metadata changed",
+					nil,
+				)
+			}
+		case jailDestinationRoot:
+			if stat.Mode != unix.S_IFDIR|0755 || stat.Uid != 0 || stat.Gid != 0 {
+				return observedJailDestination{}, processVerificationError(
+					state.vmID,
+					"pre-seal jail root metadata changed",
+					nil,
+				)
+			}
+			result.root = binding.identity
+		case jailDestinationExecutable:
+			executable, err := processExecutableIdentityFromStat(stat, ownerUID, ownerGID, true)
+			if err != nil {
+				return observedJailDestination{}, processVerificationError(
+					state.vmID,
+					"inspect pre-seal copied Firecracker",
+					err,
+				)
+			}
+			result.executable = executable
+		default:
+			return observedJailDestination{}, processVerificationError(
+				state.vmID,
+				"pre-seal jail destination binding kind is invalid",
+				nil,
+			)
+		}
+	}
+	return result, nil
+}
+
 func inspectJailDestination(
 	ctx context.Context,
 	deps processIdentityVerifierDeps,
@@ -450,7 +707,7 @@ func inspectJailDestination(
 	state := destination.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.released || len(state.bindings) != 4 {
+	if state.released || !state.sealed || len(state.bindings) != 4 {
 		return observedJailDestination{}, processVerificationError(
 			state.vmID,
 			"jail destination authority is not active",
@@ -568,7 +825,7 @@ func samePersistentExecutable(left, right processExecutableDescriptorIdentity) b
 
 func observedProcessIdentitiesEqual(left, right observedProcessIdentity) bool {
 	return processObservationsEqual(left.process, right.process) && left.mountNamespace == right.mountNamespace &&
-		left.root == right.root && left.executable == right.executable
+		left.networkNamespace == right.networkNamespace && left.root == right.root && left.executable == right.executable
 }
 
 func processExecutableMatchesPinned(
@@ -602,7 +859,8 @@ func requireProcessAlive(
 }
 
 func validateProcessIdentityVerifierDeps(deps processIdentityVerifierDeps) error {
-	if deps.readBootID == nil || deps.pidfdAlive == nil || deps.openProcessDirectory == nil ||
+	if deps.readBootID == nil || deps.pidfdAlive == nil || deps.deriveLocator == nil || deps.now == nil ||
+		deps.wait == nil || deps.openProcessDirectory == nil ||
 		deps.readProcessMetadata == nil || deps.pinProcessObject == nil || deps.pinHostMountNamespace == nil ||
 		deps.pinHostRoot == nil || deps.descriptorFlags == nil || deps.fstat == nil || deps.pread == nil ||
 		deps.close == nil || deps.pinnedIdentity == nil || deps.pinnedReinspect == nil {

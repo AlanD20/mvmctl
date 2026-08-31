@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -26,10 +27,50 @@ func realBlockedLaunchProcessDeps() blockedLaunchProcessDeps {
 		releasePinnedExecutable: func(ctx context.Context, executable *system.PinnedExecutable) error {
 			return executable.Release(ctx)
 		},
+		terminatePIDFD: terminateProcessThroughPIDFD,
+		waitReapPIDFD:  waitAndReapProcessThroughPIDFD,
 		close: func(_ context.Context, fd int) error {
 			return unix.Close(fd)
 		},
 	}
+}
+
+func terminateProcessThroughPIDFD(ctx context.Context, pidfd int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	err := unix.PidfdSendSignal(pidfd, unix.SIGKILL, nil, 0)
+	if errors.Is(err, unix.ESRCH) {
+		return nil
+	}
+	return err
+}
+
+func waitAndReapProcessThroughPIDFD(ctx context.Context, pidfd int) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		alive, err := processPIDFDAlive(ctx, pidfd)
+		if err != nil {
+			return err
+		}
+		if !alive {
+			break
+		}
+		timer := time.NewTimer(processExecObservationInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	err := unix.Waitid(unix.P_PIDFD, pidfd, nil, unix.WEXITED|unix.WNOHANG, nil)
+	if errors.Is(err, unix.ECHILD) {
+		return nil
+	}
+	return err
 }
 
 func deriveProcessLocatorFromPIDFD(ctx context.Context, pidfd int) (_ instanceProcessLocator, returnErr error) {
@@ -118,22 +159,52 @@ func parsePIDFDProcessID(raw []byte) (int, error) {
 }
 
 func processPIDFDAlive(ctx context.Context, pidfd int) (bool, error) {
+	return processPIDFDAliveWithPoll(ctx, pidfd, unix.Poll)
+}
+
+func processPIDFDAliveWithPoll(
+	ctx context.Context,
+	pidfd int,
+	poll func([]unix.PollFd, int) (int, error),
+) (bool, error) {
+	if ctx == nil {
+		return false, fmt.Errorf("pidfd poll context is required")
+	}
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	pollFDs := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN | unix.POLLHUP | unix.POLLERR}}
-	count, err := unix.Poll(pollFDs, 0)
-	if err != nil {
-		return false, err
-	}
-	if count == 0 {
-		return true, nil
+	pollFDs := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN}}
+	for {
+		count, err := poll(pollFDs, 0)
+		if errors.Is(err, unix.EINTR) {
+			if contextErr := ctx.Err(); contextErr != nil {
+				return false, contextErr
+			}
+			pollFDs[0].Revents = 0
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if count == 0 {
+			if pollFDs[0].Revents != 0 {
+				return false, fmt.Errorf("pidfd poll returned flags without an event count")
+			}
+			return true, nil
+		}
+		break
 	}
 	if pollFDs[0].Revents&unix.POLLNVAL != 0 {
 		return false, fmt.Errorf("pidfd is invalid")
 	}
+	if pollFDs[0].Revents&unix.POLLERR != 0 {
+		return false, fmt.Errorf("pidfd poll error")
+	}
 	if pollFDs[0].Revents == 0 {
 		return false, fmt.Errorf("pidfd poll returned an event count without flags")
+	}
+	if pollFDs[0].Revents != unix.POLLIN {
+		return false, fmt.Errorf("pidfd poll returned unexpected events %#x", pollFDs[0].Revents)
 	}
 	return false, nil
 }

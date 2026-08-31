@@ -134,6 +134,7 @@ func TestCleanupLeaseCopiesConcurrentlyReleaseExactlyOnceAndCacheError(t *testin
 		return closeErr
 	}
 	state.mu.Unlock()
+	require.NoError(t, cleanup.Complete(context.Background()))
 
 	const releases = 16
 	results := make(chan error, releases)
@@ -288,11 +289,59 @@ func TestLaunchAbortTransfersOriginalProcessAuthorityToCleanup(t *testing.T) {
 	require.NoError(t, launch.Release(t.Context()))
 	assert.Empty(t, fixture.eventsSnapshot())
 
+	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
-	if diff := cmp.Diff([]string{"receiver", "relay:101", "firecracker:100"}, fixture.eventsSnapshot()); diff != "" {
+	if diff := cmp.Diff([]string{
+		"signal:101", "reap:101", "signal:100", "reap:100",
+		"receiver", "relay:101", "firecracker:100",
+	}, fixture.eventsSnapshot()); diff != "" {
 		t.Errorf("cleanup order mismatch (-want +got):\n%s", diff)
 	}
 	require.NoError(t, processes.Release(t.Context()))
+}
+
+func TestCleanupWaitFailureRetainsLocksResourcesAndCleaningRecordForRetry(t *testing.T) {
+	t.Parallel()
+
+	authority, _ := newTestInstanceAuthority(t)
+	launch, err := registerTestLaunch(
+		t,
+		t.Context(),
+		authority,
+		testInstanceCaller(),
+		testLaunchIntent(false),
+	)
+	require.NoError(t, err)
+	exited := false
+	waits := 0
+	launch.state.processes.state.deps.pidfdAlive = func(context.Context, int) (bool, error) {
+		return !exited, nil
+	}
+	launch.state.processes.state.deps.waitReapPIDFD = func(context.Context, int) error {
+		waits++
+		if waits == 1 {
+			return context.DeadlineExceeded
+		}
+		exited = true
+		return nil
+	}
+
+	cleanup, err := launch.Abort(t.Context())
+	require.NoError(t, err)
+	first := cleanup.Complete(t.Context())
+	require.Error(t, first)
+	assert.ErrorIs(t, first, context.DeadlineExceeded)
+	assert.Equal(t, errs.ClassRetryable, errs.AsDomainError(first).Class)
+	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
+	assert.True(t, cleanup.state.vmLock.isActive())
+	assert.NotNil(t, cleanup.state.prepared)
+	assert.NotNil(t, cleanup.state.processes)
+	require.Error(t, cleanup.Release(t.Context()))
+	assert.True(t, cleanup.state.vmLock.isActive())
+
+	require.NoError(t, cleanup.Complete(t.Context()))
+	assert.Equal(t, instanceLifecycleCleaned, cleanup.snapshot().lifecycle)
+	require.NoError(t, cleanup.Release(t.Context()))
 }
 
 func TestPreparedReleaseIndexFailureRetainsPreparedAuthority(t *testing.T) {
@@ -367,9 +416,7 @@ func TestInstanceAuthorityCleanupAndSameOwnerRelaunch(t *testing.T) {
 	caller := testInstanceCaller()
 	launch, err := registerTestLaunch(t, context.Background(), authority, caller, testLaunchIntent(false))
 	require.NoError(t, err)
-	releaseTestLaunch(t, launch)
-
-	cleanup, err := authority.BeginCleanup(context.Background(), caller, testVMID)
+	cleanup, err := launch.Abort(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
 	assert.Equal(t, uint64(1), cleanup.snapshot().cleanupGeneration)
@@ -438,6 +485,9 @@ func TestInstanceAuthorityCrossUIDFirstLaunchRaceHasOneOwner(t *testing.T) {
 				success.Add(1)
 				cleanup, abortErr := lease.Abort(context.Background())
 				err = abortErr
+				if err == nil {
+					err = cleanup.Complete(context.Background())
+				}
 				if err == nil {
 					err = cleanup.Release(context.Background())
 				}
@@ -539,18 +589,20 @@ func TestInstanceAuthorityReleaseSlotReferenceCheckTracksLifecycle(t *testing.T)
 	launchRecord := launch.snapshot().record
 	release := launchRecord.launch.release
 	releaseTestLaunch(t, launch)
+	activeRecord, err := activateInstanceRecord(launchRecord, testActiveIdentityForLaunch(launchRecord, false))
+	require.NoError(t, err)
+	writeTestAuthorityRecord(t, root, activeRecord)
 
 	slotLease, err := authority.lockReleaseSlot(context.Background(), releaseSlotForIdentity(release))
 	require.NoError(t, err)
 	err = slotLease.requireUnreferenced(context.Background(), release)
 	require.Error(t, err)
 	assert.Equal(t, errs.ClassConflict, errs.AsDomainError(err).Class)
-	assert.NotNil(t, slotLease.roots)
-	assert.NotNil(t, slotLease.releaseLock)
 	require.NoError(t, slotLease.Release(context.Background()))
-	activeRecord, err := activateInstanceRecord(launchRecord, testActiveIdentityForLaunch(launchRecord, false))
+
+	cleaningRecord, err := beginInstanceCleanup(caller, activeRecord)
 	require.NoError(t, err)
-	writeTestAuthorityRecord(t, root, activeRecord)
+	writeTestAuthorityRecord(t, root, cleaningRecord)
 
 	slotLease, err = authority.lockReleaseSlot(context.Background(), releaseSlotForIdentity(release))
 	require.NoError(t, err)
@@ -560,17 +612,6 @@ func TestInstanceAuthorityReleaseSlotReferenceCheckTracksLifecycle(t *testing.T)
 	require.NoError(t, slotLease.Release(context.Background()))
 
 	cleanup, err := authority.BeginCleanup(context.Background(), caller, testVMID)
-	require.NoError(t, err)
-	require.NoError(t, cleanup.Release(context.Background()))
-
-	slotLease, err = authority.lockReleaseSlot(context.Background(), releaseSlotForIdentity(release))
-	require.NoError(t, err)
-	err = slotLease.requireUnreferenced(context.Background(), release)
-	require.Error(t, err)
-	assert.Equal(t, errs.ClassConflict, errs.AsDomainError(err).Class)
-	require.NoError(t, slotLease.Release(context.Background()))
-
-	cleanup, err = authority.BeginCleanup(context.Background(), caller, testVMID)
 	require.NoError(t, err)
 	require.NoError(t, cleanup.Complete(context.Background()))
 	require.NoError(t, cleanup.Release(context.Background()))
@@ -958,6 +999,7 @@ func TestInstanceAuthorityPostRenameErrorReturnsLaunchLeaseAndDurableRecord(t *t
 	cleanup, cleanupErr := lease.Abort(context.Background())
 	require.ErrorIs(t, cleanupErr, syncErr)
 	require.NotNil(t, cleanup)
+	require.ErrorIs(t, cleanup.Complete(context.Background()), syncErr)
 	require.NoError(t, cleanup.Release(context.Background()))
 }
 
@@ -999,6 +1041,7 @@ func TestInstanceAuthorityPostRenameCleanupErrorReturnsCleanupLease(t *testing.T
 	assert.Equal(t, true, domainErr.Details["record_replaced"])
 	assert.Equal(t, true, domainErr.Details["durability_uncertain"])
 	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
+	require.ErrorIs(t, cleanup.Complete(context.Background()), syncErr)
 	require.NoError(t, cleanup.Release(context.Background()))
 
 	stableAuthority := newInstanceAuthorityWithPolicy(
@@ -1007,9 +1050,9 @@ func TestInstanceAuthorityPostRenameCleanupErrorReturnsCleanupLease(t *testing.T
 		newTestInstanceAuthorityTree(),
 	)
 	resumed, err := stableAuthority.BeginCleanup(context.Background(), testInstanceCaller(), testVMID)
-	require.NoError(t, err)
-	assert.Equal(t, instanceLifecycleCleaning, resumed.snapshot().lifecycle)
-	require.NoError(t, resumed.Release(context.Background()))
+	assert.Nil(t, resumed)
+	require.Error(t, err)
+	assert.Equal(t, errs.CodeVMNotRunning, errs.AsDomainError(err).Code)
 }
 
 func TestAppendInstanceOperationErrorClonesMetadataAndBoundsFirstDiagnostic(t *testing.T) {
@@ -1093,8 +1136,9 @@ func registerTestLaunch(
 func newTestBlockedLaunchProcesses(t *testing.T, relayPresent bool) *blockedLaunchProcesses {
 	t.Helper()
 
+	reaped := make(map[int]bool)
 	deps := blockedLaunchProcessDeps{
-		pidfdAlive:      func(context.Context, int) (bool, error) { return true, nil },
+		pidfdAlive:      func(_ context.Context, fd int) (bool, error) { return !reaped[fd], nil },
 		descriptorFlags: func(context.Context, int) (int, error) { return unix.FD_CLOEXEC, nil },
 		deriveLocator: func(_ context.Context, fd int) (instanceProcessLocator, error) {
 			if fd == 9001 {
@@ -1112,7 +1156,12 @@ func newTestBlockedLaunchProcesses(t *testing.T, relayPresent bool) *blockedLaun
 			}, nil
 		},
 		releasePinnedExecutable: func(context.Context, *system.PinnedExecutable) error { return nil },
-		close:                   func(context.Context, int) error { return nil },
+		terminatePIDFD:          func(context.Context, int) error { return nil },
+		waitReapPIDFD: func(_ context.Context, fd int) error {
+			reaped[fd] = true
+			return nil
+		},
+		close: func(context.Context, int) error { return nil },
 	}
 	firecracker := blockedLaunchProcessSource{pidfd: 9000, gate: newTestBlockedLaunchGate(9100)}
 	var relay *blockedLaunchProcessSource
@@ -1180,6 +1229,7 @@ func releaseTestLaunch(t *testing.T, launch *launchLease) {
 
 	cleanup, err := launch.Abort(t.Context())
 	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 }
 

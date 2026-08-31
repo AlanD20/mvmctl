@@ -5,10 +5,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/pkg/errs"
 )
@@ -67,10 +69,164 @@ func TestActivateVerifiedProcessUsesRetainedPIDFDsAndPinnedExecutable(t *testing
 	require.NoError(t, fixture.launch.Release(t.Context()))
 	cleanup, err := active.BeginCleanup(t.Context())
 	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 	if diff := cmp.Diff([]int{203, 202, 201, 200}, fixture.fake.destinationCloseOrder()); diff != "" {
 		t.Errorf("destination cleanup order mismatch (-want +got):\n%s", diff)
 	}
+}
+
+func TestBoundJailDestinationUsesOperableRootDescriptor(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	fixture.fake.destinationAbsentChecks = 2
+	destination, err := fixture.fake.destination.bindAfterHandoff(
+		t.Context(),
+		testAuthorityUID,
+		testAuthorityGID,
+	)
+	require.NoError(t, err)
+	assert.Equal(
+		t,
+		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW,
+		fixture.fake.destinationOpenFlags[202],
+	)
+	assert.Zero(t, fixture.fake.destinationOpenFlags[202]&unix.O_PATH)
+	require.NoError(t, destination.Release(t.Context()))
+}
+
+func TestBindAfterHandoffTransfersParentCloseOnceOnFailure(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	fixture.fake.destinationAbsentChecks = 2
+	invalid := fixture.fake.stats[203][0]
+	invalid.Nlink = 2
+	fixture.fake.stats[203][0] = invalid
+
+	destination, err := fixture.fake.destination.bindAfterHandoff(
+		t.Context(),
+		testAuthorityUID,
+		testAuthorityGID,
+	)
+	assert.Nil(t, destination)
+	require.Error(t, err)
+	require.NoError(t, fixture.fake.destination.Release(t.Context()))
+
+	counts := make(map[int]int)
+	for _, fd := range fixture.fake.destinationCloseOrder() {
+		counts[fd]++
+	}
+	assert.Equal(t, 1, counts[200])
+	assert.Equal(t, 1, counts[201])
+	assert.Equal(t, 1, counts[202])
+	assert.Equal(t, 1, counts[203])
+}
+
+func TestActivateVerifiedProcessWaitsForBoundedExecutableTransition(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	makeFirecrackerObservationTransient(fixture, 112, 113)
+	fixture.fake.bootIDs = append(fixture.fake.bootIDs, processTestHostBootID)
+
+	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	assert.Equal(t, []time.Duration{processExecObservationInterval}, fixture.fake.waits)
+	assert.Equal(t, 4, fixture.fake.destinationMutations)
+
+	cleanup, err := active.BeginCleanup(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
+	require.NoError(t, cleanup.Release(t.Context()))
+}
+
+func TestActivateVerifiedProcessExecutableTransitionHonorsEarlierCallerDeadline(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	makeFirecrackerObservationTransient(fixture, 112, 113)
+	makeFirecrackerObservationTransient(fixture, 115, 116)
+	ctx, cancel := context.WithDeadline(t.Context(), fixture.fake.clock.Add(2*processExecObservationInterval))
+	defer cancel()
+
+	active, err := activateVerifiedProcessWithDeps(ctx, fixture.launch, fixture.fake.deps())
+	assert.Nil(t, active)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "deadline")
+	assert.Equal(t, []time.Duration{processExecObservationInterval, processExecObservationInterval}, fixture.fake.waits)
+	assert.Zero(t, fixture.fake.destinationMutations)
+	releaseTestLaunch(t, fixture.launch)
+}
+
+func TestActivateVerifiedProcessExecutableTransitionEnforcesTenSecondBudget(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	makeFirecrackerObservationTransient(fixture, 112, 113)
+	deps := fixture.fake.deps()
+	deps.wait = func(ctx context.Context, wait time.Duration) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		fixture.fake.mu.Lock()
+		defer fixture.fake.mu.Unlock()
+		fixture.fake.waits = append(fixture.fake.waits, wait)
+		fixture.fake.clock = fixture.fake.clock.Add(processExecObservationBudget)
+		return nil
+	}
+
+	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, deps)
+	assert.Nil(t, active)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exceeded its deadline")
+	assert.Equal(t, []time.Duration{processExecObservationInterval}, fixture.fake.waits)
+	assert.Zero(t, fixture.fake.destinationMutations)
+	releaseTestLaunch(t, fixture.launch)
+}
+
+func TestActivateVerifiedProcessExecutableTransitionChecksPIDFDExitEachInterval(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	makeFirecrackerObservationTransient(fixture, 112, 113)
+	fixture.fake.alive[processTestFirecrackerPIDFD] = []bool{true, false}
+
+	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	assert.Nil(t, active)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "process exited")
+	assert.Equal(t, []time.Duration{processExecObservationInterval}, fixture.fake.waits)
+	assert.Zero(t, fixture.fake.destinationMutations)
+	releaseTestLaunch(t, fixture.launch)
+}
+
+func TestActivateVerifiedProcessRejectsTopologyNamespaceMismatch(t *testing.T) {
+	t.Parallel()
+
+	fixture := newProcessIdentityFixture(t, false)
+	fixture.launch.state.networkNamespace = &topologySelectedNetworkNamespace{
+		identity: instanceObjectIdentity{device: fixture.firecrackerNetworkNamespace.device, inode: 999999},
+	}
+
+	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
+	assert.Nil(t, active)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "topology-selected network namespace")
+	releaseTestLaunch(t, fixture.launch)
+}
+
+func makeFirecrackerObservationTransient(fixture *processIdentityFixture, rootFD, executableFD int) {
+	root := fixture.fake.stats[rootFD][0]
+	root.Ino++
+	fixture.fake.stats[rootFD][0] = root
+	executable := fixture.fake.stats[executableFD][0]
+	executable.Ino++
+	executable.Uid = 0
+	executable.Gid = 0
+	fixture.fake.stats[executableFD][0] = executable
 }
 
 func TestActivateVerifiedProcessOmitsAbsentRelay(t *testing.T) {
@@ -84,6 +240,7 @@ func TestActivateVerifiedProcessOmitsAbsentRelay(t *testing.T) {
 	assert.Equal(t, instanceRelayAbsent, activeRecord.active.relay.kind)
 	cleanup, err := active.BeginCleanup(t.Context())
 	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 }
 
@@ -100,7 +257,7 @@ func TestActivateVerifiedProcessFailsClosedAtEveryRecheckBoundary(t *testing.T) 
 			wantErr: "host boot ID does not match",
 		},
 		"final boot drift": {
-			mutate:  func(fixture *processIdentityFixture) { fixture.fake.bootIDs[1] = processOtherBootID },
+			mutate:  func(fixture *processIdentityFixture) { fixture.fake.bootIDs[2] = processOtherBootID },
 			wantErr: "host boot ID changed",
 		},
 		"malformed process stat": {
@@ -141,11 +298,11 @@ func TestActivateVerifiedProcessFailsClosedAtEveryRecheckBoundary(t *testing.T) 
 			wantErr: "cgroup does not match",
 		},
 		"root mismatch": {
-			mutate:  func(fixture *processIdentityFixture) { fixture.fake.stats[112][0].Ino++ },
+			mutate:  func(fixture *processIdentityFixture) { fixture.fake.stats[115][0].Ino++ },
 			wantErr: "root or executable",
 		},
 		"executable mismatch": {
-			mutate:  func(fixture *processIdentityFixture) { fixture.fake.stats[113][0].Ino++ },
+			mutate:  func(fixture *processIdentityFixture) { fixture.fake.stats[116][0].Ino++ },
 			wantErr: "root or executable",
 		},
 		"copied executable digest": {
@@ -154,7 +311,11 @@ func TestActivateVerifiedProcessFailsClosedAtEveryRecheckBoundary(t *testing.T) 
 		},
 		"mount namespace drift": {
 			mutate:  func(fixture *processIdentityFixture) { fixture.fake.stats[114][0].Ino++ },
-			wantErr: "identity changed",
+			wantErr: "identity changed while sealing",
+		},
+		"network namespace mismatch": {
+			mutate:  func(fixture *processIdentityFixture) { fixture.fake.stats[141][0].Ino++ },
+			wantErr: "topology-selected network namespace",
 		},
 		"jail root drift": {
 			mutate:  func(fixture *processIdentityFixture) { fixture.fake.stats[202][2].Ino++ },
@@ -194,12 +355,17 @@ func TestActivateVerifiedProcessFailsClosedAtEveryRecheckBoundary(t *testing.T) 
 		"final Firecracker exit": {
 			mutate: func(fixture *processIdentityFixture) {
 				calls := 0
-				fixture.launch.state.processes.state.deps.pidfdAlive = func(context.Context, int) (bool, error) {
+				fixture.fake.deriveLocatorOverride = func(context.Context, int) (instanceProcessLocator, error) {
 					calls++
-					return calls == 1, nil
+					if calls > 1 {
+						return instanceProcessLocator{}, errors.New("pidfd process exited")
+					}
+					return instanceProcessLocator{
+						pid: processTestFirecrackerPID, startTimeTicks: processTestFirecrackerTicks,
+					}, nil
 				}
 			},
-			wantErr: "Firecracker process exited",
+			wantErr: "pidfd process exited",
 		},
 	}
 	for name, tc := range tests {
@@ -293,5 +459,6 @@ func TestActivateVerifiedProcessReturnsTargetAfterActiveRecordRename(t *testing.
 	cleanup, cleanupErr := active.BeginCleanup(t.Context())
 	require.ErrorIs(t, cleanupErr, fault)
 	require.NotNil(t, cleanup)
+	require.ErrorIs(t, cleanup.Complete(t.Context()), fault)
 	require.NoError(t, cleanup.Release(t.Context()))
 }

@@ -137,6 +137,7 @@ func TestLaunchLeaseReleaseWithTopologyHoldPreservesCompositeAuthority(t *testin
 	require.NoError(t, topology.Release(t.Context()))
 	cleanup, err := copied.Abort(t.Context())
 	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 	assert.Equal(t, "vm", <-releaseEvents)
 	assert.Equal(t, "release", <-releaseEvents)
@@ -167,6 +168,7 @@ func TestLaunchLeaseVMReleaseErrorKeepsExactCleanupEvidenceAndCachesResult(t *te
 	cleanup, err := launch.Abort(t.Context())
 	require.NoError(t, err)
 	copied := *cleanup
+	require.NoError(t, cleanup.Complete(t.Context()))
 
 	first := cleanup.Release(t.Context())
 	second := copied.Release(t.Context())

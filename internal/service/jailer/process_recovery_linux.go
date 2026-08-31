@@ -14,10 +14,11 @@ func realProcessRecoveryDeps() processRecoveryDeps {
 			}
 			return unix.PidfdOpen(pid, 0)
 		},
-		pidfdAlive:           processPIDFDAlive,
-		descriptorFlags:      processDescriptorFlags,
-		openProcessDirectory: openFixedProcessDirectory,
-		readProcessMetadata:  readFixedProcessMetadata,
-		close:                closeProcessDescriptor,
+		pidfdAlive:      processPIDFDAlive,
+		descriptorFlags: processDescriptorFlags,
+		deriveLocator:   deriveProcessLocatorFromPIDFD,
+		terminatePIDFD:  terminateProcessThroughPIDFD,
+		waitReapPIDFD:   waitAndReapProcessThroughPIDFD,
+		close:           closeProcessDescriptor,
 	}
 }

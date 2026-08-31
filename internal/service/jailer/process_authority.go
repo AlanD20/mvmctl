@@ -29,9 +29,11 @@ type blockedLaunchProcessesState struct {
 }
 
 type blockedLaunchProcess struct {
-	locator instanceProcessLocator
-	pidfd   int
-	gate    *blockedLaunchGate
+	locator    instanceProcessLocator
+	pidfd      int
+	gate       *blockedLaunchGate
+	signalSent bool
+	reaped     bool
 }
 
 type blockedLaunchProcessSource struct {
@@ -54,6 +56,8 @@ type blockedLaunchProcessDeps struct {
 	deriveLocator             func(context.Context, int) (instanceProcessLocator, error)
 	pinnedExecutableReinspect func(context.Context, *system.PinnedExecutable) (system.PinnedExecutableIdentity, error)
 	releasePinnedExecutable   func(context.Context, *system.PinnedExecutable) error
+	terminatePIDFD            func(context.Context, int) error
+	waitReapPIDFD             func(context.Context, int) error
 	close                     func(context.Context, int) error
 }
 
@@ -137,7 +141,8 @@ func cloneBlockedLaunchProcess(process *blockedLaunchProcess) *blockedLaunchProc
 func validateBlockedLaunchProcessDeps(deps blockedLaunchProcessDeps) error {
 	if deps.pidfdAlive == nil || deps.descriptorFlags == nil || deps.deriveLocator == nil ||
 		deps.pinnedExecutableReinspect == nil ||
-		deps.releasePinnedExecutable == nil || deps.close == nil {
+		deps.releasePinnedExecutable == nil || deps.terminatePIDFD == nil || deps.waitReapPIDFD == nil ||
+		deps.close == nil {
 		return fmt.Errorf("one or more blocked process effects are unavailable")
 	}
 	return nil
@@ -158,7 +163,12 @@ func admitBlockedProcess(
 		if committed {
 			return
 		}
-		returnErr = errors.Join(returnErr, process.gate.Release(context.WithoutCancel(ctx)))
+		cleanupCtx := processCleanupContext(ctx)
+		returnErr = errors.Join(
+			returnErr,
+			process.gate.Release(cleanupCtx),
+			deps.close(cleanupCtx, process.pidfd),
+		)
 	}()
 	flags, err := deps.descriptorFlags(ctx, process.pidfd)
 	if err != nil {
@@ -325,6 +335,67 @@ func transferBlockedLaunchProcessesLocked(state *blockedLaunchProcessesState) *b
 	state.receiverExecutable = nil
 	state.status = blockedLaunchProcessesTransferred
 	return target
+}
+
+func (processes *blockedLaunchProcesses) terminateAndReap(ctx context.Context) error {
+	if processes == nil || processes.state == nil {
+		return processAuthorityError("", "cleanup process authority is not active", nil)
+	}
+	if ctx == nil {
+		return processAuthorityError(processes.state.vmID, "cleanup process context is required", nil)
+	}
+	state := processes.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.status != blockedLaunchProcessesOpen && state.status != blockedLaunchProcessesReleasedToJailer {
+		return processAuthorityError(state.vmID, "cleanup process authority is not active", nil)
+	}
+	if state.relay != nil {
+		if err := terminateAndReapBlockedProcess(ctx, state, state.relay, "relay"); err != nil {
+			return err
+		}
+	}
+	return terminateAndReapBlockedProcess(ctx, state, &state.firecracker, "Firecracker")
+}
+
+func terminateAndReapBlockedProcess(
+	ctx context.Context,
+	state *blockedLaunchProcessesState,
+	process *blockedLaunchProcess,
+	role string,
+) error {
+	if process == nil || process.pidfd < 0 {
+		return processAuthorityError(state.vmID, role+" cleanup pidfd is invalid", nil)
+	}
+	if process.reaped {
+		return nil
+	}
+	if !process.signalSent {
+		if err := state.deps.terminatePIDFD(ctx, process.pidfd); err != nil {
+			return processCleanupRetryableError(state.vmID, "terminate "+role+" through pidfd", err)
+		}
+		process.signalSent = true
+	}
+	if err := state.deps.waitReapPIDFD(ctx, process.pidfd); err != nil {
+		return processCleanupRetryableError(state.vmID, "wait and reap "+role+" through pidfd", err)
+	}
+	alive, err := state.deps.pidfdAlive(ctx, process.pidfd)
+	if err != nil {
+		return processCleanupRetryableError(state.vmID, "verify "+role+" pidfd exit", err)
+	}
+	if alive {
+		return processCleanupRetryableError(state.vmID, "verify "+role+" pidfd exit", errors.New("pidfd remains live"))
+	}
+	process.reaped = true
+	return nil
+}
+
+func processCleanupRetryableError(vmID, message string, cause error) *errs.DomainError {
+	options := []errs.ErrorOption{errs.WithClass(errs.ClassRetryable)}
+	if vmID != "" {
+		options = append(options, errs.WithEntity(vmID))
+	}
+	return errs.WrapMsg(errs.CodeProcessError, message+": "+cause.Error(), cause, options...)
 }
 
 func (processes *blockedLaunchProcesses) Release(ctx context.Context) error {

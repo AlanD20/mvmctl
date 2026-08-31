@@ -88,6 +88,58 @@ func TestJailDestinationRejectsMetadataDriftAndClosesEveryOpenedDescriptor(t *te
 	}
 }
 
+func TestJailDestinationRejectsSubstitutedMounts(t *testing.T) {
+	t.Parallel()
+
+	for name, fd := range map[string]int{
+		"fixed base": 14,
+		"VM":         16,
+		"root":       17,
+		"executable": 18,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			fixture := newJailDestinationFixture()
+			fixture.mounts[fd] = 88
+
+			lease, err := retainJailDestination(t.Context(), fixture.deps(), testVMID)
+			assert.Nil(t, lease)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "mount")
+			assert.NotEmpty(t, fixture.closedSnapshot())
+		})
+	}
+}
+
+func TestPreparedJailDestinationRejectsSubstitutedFixedAncestorMount(t *testing.T) {
+	t.Parallel()
+
+	for name, fd := range map[string]int{"jailer": 14, "firecracker": 15} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			fixture := newJailDestinationFixture()
+			fixture.mounts[fd] = 88
+			deps := fixture.deps()
+			deps.fchmod = func(context.Context, int, uint32) error { return nil }
+			deps.fchown = func(context.Context, int, int, int) error { return nil }
+			openAt := deps.openAt
+			deps.openAt = func(ctx context.Context, parentFD int, leaf string, flags int, mode uint32) (int, error) {
+				if parentFD == 15 && leaf == testVMID {
+					return -1, unix.ENOENT
+				}
+				return openAt(ctx, parentFD, leaf, flags, mode)
+			}
+
+			prepared, err := prepareJailDestination(t.Context(), deps, testVMID)
+			assert.Nil(t, prepared)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "substituted mount")
+		})
+	}
+}
+
 func TestJailDestinationCopiesConcurrentlyCloseOnceAndCacheFailure(t *testing.T) {
 	t.Parallel()
 
@@ -127,6 +179,7 @@ type jailDestinationFixture struct {
 	mu       sync.Mutex
 	nextFD   int
 	stats    map[int]unix.Stat_t
+	mounts   map[int]uint64
 	opened   []string
 	closed   []int
 	closeErr map[int]error
@@ -145,7 +198,11 @@ func newJailDestinationFixture() *jailDestinationFixture {
 	stats[18] = unix.Stat_t{
 		Dev: 1, Ino: 18, Size: 4096, Mode: unix.S_IFREG | 0755, Uid: 0, Gid: 0, Nlink: 1,
 	}
-	return &jailDestinationFixture{nextFD: 10, stats: stats, closeErr: make(map[int]error)}
+	mounts := make(map[int]uint64)
+	for fd := 10; fd <= 18; fd++ {
+		mounts[fd] = 77
+	}
+	return &jailDestinationFixture{nextFD: 10, stats: stats, mounts: mounts, closeErr: make(map[int]error)}
 }
 
 func (fixture *jailDestinationFixture) deps() jailDestinationDeps {
@@ -168,6 +225,16 @@ func (fixture *jailDestinationFixture) deps() jailDestinationDeps {
 		},
 		fstat: func(_ context.Context, fd int, stat *unix.Stat_t) error {
 			*stat = fixture.stats[fd]
+			return nil
+		},
+		statx: func(_ context.Context, fd int, flags, mask int, stat *unix.Statx_t) error {
+			wantFlags := unix.AT_EMPTY_PATH | unix.AT_NO_AUTOMOUNT | unix.AT_SYMLINK_NOFOLLOW |
+				unix.AT_STATX_FORCE_SYNC
+			if flags != wantFlags {
+				return fmt.Errorf("unexpected statx flags %d", flags)
+			}
+			stat.Mask = uint32(mask)
+			stat.Mnt_id = fixture.mounts[fd]
 			return nil
 		},
 		close: func(_ context.Context, fd int) error {

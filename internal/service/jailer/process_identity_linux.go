@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -13,8 +14,20 @@ import (
 
 func realProcessIdentityVerifierDeps() processIdentityVerifierDeps {
 	return processIdentityVerifierDeps{
-		readBootID:            readCurrentProcessBootID,
-		pidfdAlive:            processPIDFDAlive,
+		readBootID:    readCurrentProcessBootID,
+		pidfdAlive:    processPIDFDAlive,
+		deriveLocator: deriveProcessLocatorFromPIDFD,
+		now:           time.Now,
+		wait: func(ctx context.Context, wait time.Duration) error {
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return nil
+			}
+		},
 		openProcessDirectory:  openFixedProcessDirectory,
 		readProcessMetadata:   readFixedProcessMetadata,
 		pinProcessObject:      pinFixedProcessObject,
@@ -144,6 +157,8 @@ func pinFixedProcessObject(
 	switch object {
 	case processMountNamespaceObject:
 		leaf = "ns/mnt"
+	case processNetworkNamespaceObject:
+		leaf = "ns/net"
 	case processRootObject:
 		leaf = "root"
 	case processExecutableObject:

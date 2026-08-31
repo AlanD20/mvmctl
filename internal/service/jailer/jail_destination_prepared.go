@@ -84,12 +84,23 @@ func prepareJailDestination(
 		}
 		currentFD = nextFD
 	}
+	var managedMount jailDestinationMountIdentity
 	for _, leaf := range []string{"mvmctl", "jailer", "firecracker"} {
 		nextFD, openErr := deps.openAt(ctx, currentFD, leaf, directoryFlags, 0)
 		if openErr != nil {
 			return nil, closeCurrent(processAuthorityError(vmID, "open exact jail destination ancestor "+leaf, openErr))
 		}
 		inspectErr := inspectExactJailAncestor(ctx, deps, nextFD, leaf)
+		mount, mountErr := inspectJailDestinationMount(ctx, deps, nextFD)
+		if inspectErr == nil && mountErr != nil {
+			inspectErr = fmt.Errorf("inspect %s mount identity: %w", leaf, mountErr)
+		}
+		if inspectErr == nil && managedMount.kind != managedCacheMountIdentityUnavailable && mount != managedMount {
+			inspectErr = fmt.Errorf("fixed jail ancestor %s is a substituted mount", leaf)
+		}
+		if inspectErr == nil && managedMount.kind == managedCacheMountIdentityUnavailable {
+			managedMount = mount
+		}
 		closeErr := deps.close(context.WithoutCancel(ctx), currentFD)
 		if inspectErr != nil || closeErr != nil {
 			cleanupErr := deps.close(context.WithoutCancel(ctx), nextFD)
@@ -114,6 +125,7 @@ func prepareJailDestination(
 			identity: instanceObjectIdentity{
 				device: uint64(stat.Dev), inode: stat.Ino,
 			},
+			mount: managedMount,
 		},
 		status: preparedJailDestinationAbsent,
 	}}
@@ -159,6 +171,13 @@ func recheckPreparedJailDestinationAbsentLocked(ctx context.Context, state *prep
 	if uint64(stat.Dev) != state.parent.identity.device || stat.Ino != state.parent.identity.inode ||
 		stat.Mode != unix.S_IFDIR|0700 || stat.Uid != 0 || stat.Gid != 0 {
 		return processAuthorityError(state.vmID, "jail destination parent changed", nil)
+	}
+	mount, err := inspectJailDestinationMount(ctx, state.deps, state.parent.fd)
+	if err != nil {
+		return processAuthorityError(state.vmID, "reinspect jail destination parent mount identity", err)
+	}
+	if mount != state.parent.mount {
+		return processAuthorityError(state.vmID, "jail destination parent mount changed", nil)
 	}
 	fd, err := state.deps.openAt(
 		ctx,
@@ -211,11 +230,14 @@ func (prepared *preparedJailDestination) bindAfterHandoff(
 	if state.status != preparedJailDestinationHandoff || state.parent.fd < 0 {
 		return nil, processAuthorityError(state.vmID, "jail destination handoff is not complete", nil)
 	}
+	parent := state.parent
+	state.parent = jailDestinationBinding{fd: -1}
+	state.status = preparedJailDestinationTransferred
 	lease := &jailDestinationLease{state: &jailDestinationLeaseState{
 		deps: state.deps,
 		vmID: state.vmID,
 		bindings: []jailDestinationBinding{{
-			kind: state.parent.kind, fd: state.parent.fd, identity: state.parent.identity,
+			kind: parent.kind, fd: parent.fd, identity: parent.identity, mount: parent.mount,
 		}},
 	}}
 	committed := false
@@ -233,7 +255,13 @@ func (prepared *preparedJailDestination) bindAfterHandoff(
 	if err := lease.openDirectoryBinding(ctx, jailDestinationVM, state.vmID, unix.S_IFDIR|0700); err != nil {
 		return nil, err
 	}
-	if err := lease.openDirectoryBinding(ctx, jailDestinationRoot, "root", unix.S_IFDIR|0755); err != nil {
+	if err := lease.openDirectoryBindingWithFlags(
+		ctx,
+		jailDestinationRoot,
+		"root",
+		unix.S_IFDIR|0755,
+		unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW,
+	); err != nil {
 		return nil, err
 	}
 	rootFD := lease.state.bindings[len(lease.state.bindings)-1].fd
@@ -260,28 +288,100 @@ func (prepared *preparedJailDestination) bindAfterHandoff(
 		executableStat.Size <= 0 || uint64(executableStat.Size) > maxProcessSystemExecutableBytes {
 		return nil, processAuthorityError(state.vmID, "copied Firecracker pre-seal metadata is invalid", nil)
 	}
-	if err := state.deps.fchown(ctx, rootFD, 0, 0); err != nil {
-		return nil, processAuthorityError(state.vmID, "seal jail root owner", err)
+	executableMount, err := inspectJailDestinationMount(ctx, state.deps, executableFD)
+	if err != nil {
+		return nil, processAuthorityError(state.vmID, "inspect copied Firecracker mount identity", err)
 	}
-	if err := state.deps.fchmod(ctx, rootFD, 0755); err != nil {
-		return nil, processAuthorityError(state.vmID, "seal jail root mode", err)
+	if executableMount != lease.state.bindings[len(lease.state.bindings)-2].mount {
+		return nil, processAuthorityError(state.vmID, "copied Firecracker is a substituted mount", nil)
 	}
-	if err := state.deps.fchown(ctx, executableFD, 0, 0); err != nil {
-		return nil, processAuthorityError(state.vmID, "seal copied Firecracker owner", err)
+	lease.state.bindings[len(lease.state.bindings)-1].identity = instanceObjectIdentity{
+		device: uint64(executableStat.Dev), inode: executableStat.Ino,
 	}
-	if err := state.deps.fchmod(ctx, executableFD, 0755); err != nil {
-		return nil, processAuthorityError(state.vmID, "seal copied Firecracker mode", err)
-	}
-	if err := lease.reinspectBindings(ctx); err != nil {
-		return nil, err
-	}
-	state.parent = jailDestinationBinding{fd: -1}
-	state.status = preparedJailDestinationTransferred
+	lease.state.bindings[len(lease.state.bindings)-1].mount = executableMount
 	committed = true
 	return lease, nil
 }
 
-func (lease *jailDestinationLease) reinspectBindings(ctx context.Context) error {
+func (lease *jailDestinationLease) seal(ctx context.Context, ownerUID, ownerGID uint32) error {
+	if lease == nil || lease.state == nil {
+		return processAuthorityError("", "jail destination authority is not active", nil)
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.sealed || len(state.bindings) != 4 {
+		return processAuthorityError(state.vmID, "jail destination is not ready for sealing", nil)
+	}
+	root := state.bindings[2]
+	executable := state.bindings[3]
+	if err := requireJailDestinationBinding(ctx, state, root, unix.S_IFDIR|0755, 0, 0, false, false); err != nil {
+		return err
+	}
+	if err := requireJailDestinationBinding(
+		ctx,
+		state,
+		executable,
+		unix.S_IFREG|0755,
+		ownerUID,
+		ownerGID,
+		true,
+		true,
+	); err != nil {
+		return err
+	}
+	if err := state.deps.fchown(ctx, root.fd, 0, 0); err != nil {
+		return processAuthorityError(state.vmID, "seal jail root owner", err)
+	}
+	if err := state.deps.fchmod(ctx, root.fd, 0755); err != nil {
+		return processAuthorityError(state.vmID, "seal jail root mode", err)
+	}
+	if err := state.deps.fchown(ctx, executable.fd, 0, 0); err != nil {
+		return processAuthorityError(state.vmID, "seal copied Firecracker owner", err)
+	}
+	if err := state.deps.fchmod(ctx, executable.fd, 0755); err != nil {
+		return processAuthorityError(state.vmID, "seal copied Firecracker mode", err)
+	}
+	if err := lease.reinspectBindingsLocked(ctx); err != nil {
+		return err
+	}
+	state.sealed = true
+	return nil
+}
+
+func requireJailDestinationBinding(
+	ctx context.Context,
+	state *jailDestinationLeaseState,
+	binding jailDestinationBinding,
+	mode uint32,
+	uid uint32,
+	gid uint32,
+	requireOneLink bool,
+	allowRoot bool,
+) error {
+	var stat unix.Stat_t
+	if err := state.deps.fstat(ctx, binding.fd, &stat); err != nil {
+		return processAuthorityError(state.vmID, "reinspect pre-seal jail destination binding", err)
+	}
+	ownerMatches := stat.Uid == uid && stat.Gid == gid
+	if allowRoot && stat.Uid == 0 && stat.Gid == 0 {
+		ownerMatches = true
+	}
+	if uint64(stat.Dev) != binding.identity.device || stat.Ino != binding.identity.inode || stat.Mode != mode ||
+		!ownerMatches || (requireOneLink && stat.Nlink != 1) {
+		return processAuthorityError(state.vmID, "pre-seal jail destination binding changed", nil)
+	}
+	mount, err := inspectJailDestinationMount(ctx, state.deps, binding.fd)
+	if err != nil {
+		return processAuthorityError(state.vmID, "reinspect pre-seal jail destination mount identity", err)
+	}
+	if mount != binding.mount {
+		return processAuthorityError(state.vmID, "pre-seal jail destination mount changed", nil)
+	}
+	return nil
+}
+
+func (lease *jailDestinationLease) reinspectBindingsLocked(ctx context.Context) error {
 	for index := range lease.state.bindings {
 		binding := &lease.state.bindings[index]
 		var stat unix.Stat_t
@@ -303,6 +403,16 @@ func (lease *jailDestinationLease) reinspectBindings(ctx context.Context) error 
 			}
 		default:
 			return processAuthorityError(lease.state.vmID, "sealed jail destination binding kind is invalid", nil)
+		}
+		if uint64(stat.Dev) != binding.identity.device || stat.Ino != binding.identity.inode {
+			return processAuthorityError(lease.state.vmID, "sealed jail destination identity changed", nil)
+		}
+		mount, err := inspectJailDestinationMount(ctx, lease.state.deps, binding.fd)
+		if err != nil {
+			return processAuthorityError(lease.state.vmID, "reinspect sealed jail mount identity", err)
+		}
+		if mount != binding.mount {
+			return processAuthorityError(lease.state.vmID, "sealed jail destination mount changed", nil)
 		}
 		binding.identity = instanceObjectIdentity{device: uint64(stat.Dev), inode: stat.Ino}
 	}

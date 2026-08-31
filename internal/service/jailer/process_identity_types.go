@@ -2,6 +2,7 @@ package jailer
 
 import (
 	"context"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -17,6 +18,8 @@ const (
 	maxProcessSupplementaryGroups    = 256
 	maxProcessSystemExecutableBytes  = 128 * 1024 * 1024
 	processExecutableReadBufferBytes = 32 * 1024
+	processExecObservationBudget     = 10 * time.Second
+	processExecObservationInterval   = 25 * time.Millisecond
 )
 
 const processBootIDPath = "/proc/sys/kernel/random/boot_id"
@@ -33,6 +36,7 @@ type processPinnedObject uint8
 
 const (
 	processMountNamespaceObject processPinnedObject = iota + 1
+	processNetworkNamespaceObject
 	processRootObject
 	processExecutableObject
 )
@@ -40,6 +44,9 @@ const (
 type processIdentityVerifierDeps struct {
 	readBootID            func(context.Context) (string, error)
 	pidfdAlive            func(context.Context, int) (bool, error)
+	deriveLocator         func(context.Context, int) (instanceProcessLocator, error)
+	now                   func() time.Time
+	wait                  func(context.Context, time.Duration) error
 	openProcessDirectory  func(context.Context, int) (int, error)
 	readProcessMetadata   func(context.Context, int, processMetadataKind, int) ([]byte, error)
 	pinProcessObject      func(context.Context, int, processPinnedObject) (int, error)

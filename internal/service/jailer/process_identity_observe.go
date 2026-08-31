@@ -14,10 +14,11 @@ import (
 )
 
 type observedProcessIdentity struct {
-	process        processObservation
-	mountNamespace instanceObjectIdentity
-	root           instanceObjectIdentity
-	executable     processExecutableDescriptorIdentity
+	process          processObservation
+	mountNamespace   instanceObjectIdentity
+	networkNamespace instanceObjectIdentity
+	root             instanceObjectIdentity
+	executable       processExecutableDescriptorIdentity
 }
 
 type processVerificationDescriptors struct {
@@ -32,6 +33,19 @@ func observeProcessIdentity(
 	vmID string,
 	role string,
 	locator instanceProcessLocator,
+) (observedProcessIdentity, error) {
+	return observeProcessIdentityWithExecutableOwner(ctx, deps, vmID, role, locator, 0, 0, false)
+}
+
+func observeProcessIdentityWithExecutableOwner(
+	ctx context.Context,
+	deps processIdentityVerifierDeps,
+	vmID string,
+	role string,
+	locator instanceProcessLocator,
+	ownerUID uint32,
+	ownerGID uint32,
+	allowRoot bool,
 ) (_ observedProcessIdentity, returnErr error) {
 	descriptors := processVerificationDescriptors{deps: deps, vmID: vmID}
 	defer func() {
@@ -68,6 +82,18 @@ func observeProcessIdentity(
 	if err != nil {
 		return observedProcessIdentity{}, err
 	}
+	networkNamespace, err := pinObservedObject(
+		ctx,
+		deps,
+		&descriptors,
+		directoryFD,
+		processNetworkNamespaceObject,
+		role+" network namespace",
+		false,
+	)
+	if err != nil {
+		return observedProcessIdentity{}, err
+	}
 	root, err := pinObservedObject(
 		ctx,
 		deps,
@@ -88,12 +114,13 @@ func observeProcessIdentity(
 	if err := requireProcessDescriptorCLOEXEC(ctx, deps, executableFD, role+" executable"); err != nil {
 		return observedProcessIdentity{}, processVerificationError(vmID, "verify "+role+" executable", err)
 	}
-	executable, err := inspectProcessExecutable(ctx, deps, executableFD)
+	executable, err := inspectProcessExecutableWithOwner(ctx, deps, executableFD, ownerUID, ownerGID, allowRoot)
 	if err != nil {
 		return observedProcessIdentity{}, processVerificationError(vmID, "inspect "+role+" executable", err)
 	}
 	return observedProcessIdentity{
-		process: observation, mountNamespace: mountNamespace, root: root, executable: executable,
+		process: observation, mountNamespace: mountNamespace, networkNamespace: networkNamespace,
+		root: root, executable: executable,
 	}, nil
 }
 
@@ -187,12 +214,36 @@ func inspectProcessExecutable(
 	deps processIdentityVerifierDeps,
 	fd int,
 ) (processExecutableDescriptorIdentity, error) {
+	return inspectProcessExecutableWithOwner(ctx, deps, fd, 0, 0, false)
+}
+
+func inspectProcessExecutableWithOwner(
+	ctx context.Context,
+	deps processIdentityVerifierDeps,
+	fd int,
+	ownerUID uint32,
+	ownerGID uint32,
+	allowRoot bool,
+) (processExecutableDescriptorIdentity, error) {
 	var stat unix.Stat_t
 	if err := deps.fstat(ctx, fd, &stat); err != nil {
 		return processExecutableDescriptorIdentity{}, err
 	}
+	return processExecutableIdentityFromStat(stat, ownerUID, ownerGID, allowRoot)
+}
+
+func processExecutableIdentityFromStat(
+	stat unix.Stat_t,
+	ownerUID uint32,
+	ownerGID uint32,
+	allowRoot bool,
+) (processExecutableDescriptorIdentity, error) {
+	ownerMatches := stat.Uid == ownerUID && stat.Gid == ownerGID
+	if allowRoot && stat.Uid == 0 && stat.Gid == 0 {
+		ownerMatches = true
+	}
 	if stat.Dev == 0 || stat.Ino == 0 || stat.Size <= 0 || uint64(stat.Size) > maxProcessSystemExecutableBytes ||
-		stat.Mode != unix.S_IFREG|0755 || stat.Uid != 0 || stat.Gid != 0 || stat.Nlink != 1 {
+		stat.Mode != unix.S_IFREG|0755 || !ownerMatches || stat.Nlink != 1 {
 		return processExecutableDescriptorIdentity{}, fmt.Errorf("executable metadata does not match trusted policy")
 	}
 	return processExecutableDescriptorIdentity{
