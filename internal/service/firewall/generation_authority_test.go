@@ -104,6 +104,112 @@ func TestPersistentGenerationAuthorityAdmitsExactApplyingRecord(t *testing.T) {
 	}
 }
 
+func TestPersistentGenerationLeaseReplacesFromExactAdmittedRecordAndEvidence(t *testing.T) {
+	t.Parallel()
+
+	current := testCommittedGenerationRecord(t)
+	replacement := testApplyingGenerationRecord(t, current)
+	authority, _, store := testPersistentGenerationAuthority(current, true)
+	store.evidence = generationRecordFileEvidence{device: 17, inode: 23, size: 101}
+	store.replaceProof = generationRecordFileEvidence{device: 17, inode: 29, size: 141}
+	lease, err := authority.acquireAfterNetwork(t.Context(), testGenerationNetworkAuthority())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+
+	err = lease.replaceAdmittedRecord(t.Context(), replacement)
+	require.NoError(t, err)
+	assert.Equal(t, int32(1), store.replaceCalls.Load())
+	if diff := cmp.Diff(current, store.replaceExpected, generationRecordCmpOptions...); diff != "" {
+		t.Errorf("replacement expected record mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(
+		store.evidence,
+		store.replaceExpectedEvidence,
+		cmp.AllowUnexported(generationRecordFileEvidence{}),
+	); diff != "" {
+		t.Errorf("replacement expected evidence mismatch (-want +got):\n%s", diff)
+	}
+	got, err := lease.admittedRecord()
+	require.NoError(t, err)
+	if diff := cmp.Diff(replacement, got, generationRecordCmpOptions...); diff != "" {
+		t.Errorf("lease replacement record mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: A postrename error is still a successful authority transfer when readback returns exact new evidence.
+// Keeping the old in-memory record would let later cleanup reason from authority that no longer exists.
+func TestPersistentGenerationLeaseTransfersProvenReplacementDespitePostcommitError(t *testing.T) {
+	t.Parallel()
+
+	current := testCommittedGenerationRecord(t)
+	replacement := testApplyingGenerationRecord(t, current)
+	postcommit := generationAuthorityError(
+		"injected postcommit failure",
+		errors.New("parent sync failed"),
+		map[string]any{"record_replaced": true, "durability_uncertain": true},
+	)
+	authority, _, store := testPersistentGenerationAuthority(current, true)
+	store.replaceProof = generationRecordFileEvidence{device: 17, inode: 29, size: 141}
+	store.replaceErr = postcommit
+	lease, err := authority.acquireAfterNetwork(t.Context(), testGenerationNetworkAuthority())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+
+	err = lease.replaceAdmittedRecord(t.Context(), replacement)
+	require.ErrorIs(t, err, postcommit)
+	got, admittedErr := lease.admittedRecord()
+	require.NoError(t, admittedErr)
+	if diff := cmp.Diff(replacement, got, generationRecordCmpOptions...); diff != "" {
+		t.Errorf("proven replacement was not transferred (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: Replacement evidence can become unknowable only after rename. The lease must then refuse all later
+// mutation instead of guessing whether its retained record is old or new.
+func TestPersistentGenerationLeaseBlocksMutationAfterAmbiguousReplacement(t *testing.T) {
+	t.Parallel()
+
+	current := testCommittedGenerationRecord(t)
+	replacement := testApplyingGenerationRecord(t, current)
+	ambiguous := generationAuthorityError(
+		"injected ambiguous replacement",
+		errors.New("readback failed"),
+		map[string]any{"record_replaced": true},
+	)
+	authority, _, store := testPersistentGenerationAuthority(current, true)
+	store.replaceErr = ambiguous
+	lease, err := authority.acquireAfterNetwork(t.Context(), testGenerationNetworkAuthority())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+
+	err = lease.replaceAdmittedRecord(t.Context(), replacement)
+	require.ErrorIs(t, err, ambiguous)
+	secondErr := lease.replaceAdmittedRecord(t.Context(), replacement)
+	require.Error(t, secondErr)
+	assert.ErrorContains(t, secondErr, "ambiguous")
+	assert.Equal(t, int32(1), store.replaceCalls.Load())
+}
+
+func TestPersistentGenerationLeasePrecommitFailureRetainsMutationAuthority(t *testing.T) {
+	t.Parallel()
+
+	current := testCommittedGenerationRecord(t)
+	replacement := testApplyingGenerationRecord(t, current)
+	precommit := errors.New("injected precommit failure")
+	authority, _, store := testPersistentGenerationAuthority(current, true)
+	store.replaceErr = precommit
+	lease, err := authority.acquireAfterNetwork(t.Context(), testGenerationNetworkAuthority())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+
+	err = lease.replaceAdmittedRecord(t.Context(), replacement)
+	require.ErrorIs(t, err, precommit)
+	store.replaceErr = nil
+	store.replaceProof = generationRecordFileEvidence{device: 17, inode: 29, size: 141}
+	require.NoError(t, lease.replaceAdmittedRecord(t.Context(), replacement))
+	assert.Equal(t, int32(2), store.replaceCalls.Load())
+}
+
 func TestPersistentGenerationAuthorityRejectsMissingCorruptAndForeignStateWithoutRepair(t *testing.T) {
 	t.Parallel()
 
@@ -421,14 +527,20 @@ func (authority *fakeGenerationNetworkAuthority) firewallGenerationNamespace(
 }
 
 type fakeGenerationAuthorityStore struct {
-	events         func(string)
-	record         generationRecord
-	found          bool
-	readErr        error
-	releaseErr     error
-	inspectContext func(context.Context)
-	releaseCalls   atomic.Int32
-	contextOK      atomic.Bool
+	events                  func(string)
+	record                  generationRecord
+	evidence                generationRecordFileEvidence
+	found                   bool
+	readErr                 error
+	replaceProof            generationRecordFileEvidence
+	replaceErr              error
+	replaceExpected         generationRecord
+	replaceExpectedEvidence generationRecordFileEvidence
+	replaceCalls            atomic.Int32
+	releaseErr              error
+	inspectContext          func(context.Context)
+	releaseCalls            atomic.Int32
+	contextOK               atomic.Bool
 }
 
 func (store *fakeGenerationAuthorityStore) read(
@@ -437,7 +549,19 @@ func (store *fakeGenerationAuthorityStore) read(
 	if store.events != nil {
 		store.events("read record")
 	}
-	return store.record, generationRecordFileEvidence{device: 11, inode: 12}, store.found, store.readErr
+	return store.record, store.evidence, store.found, store.readErr
+}
+
+func (store *fakeGenerationAuthorityStore) replace(
+	_ context.Context,
+	expected generationRecord,
+	expectedEvidence generationRecordFileEvidence,
+	_ generationRecord,
+) (generationRecordFileEvidence, error) {
+	store.replaceCalls.Add(1)
+	store.replaceExpected = cloneGenerationRecord(expected)
+	store.replaceExpectedEvidence = expectedEvidence
+	return store.replaceProof, store.replaceErr
 }
 
 func (store *fakeGenerationAuthorityStore) Release(ctx context.Context) error {
@@ -508,7 +632,9 @@ func testPersistentGenerationAuthority(
 	found bool,
 ) (*persistentGenerationAuthority, *fakeFirewallGlobalAuthority, *fakeGenerationAuthorityStore) {
 	global := &fakeFirewallGlobalAuthority{}
-	store := &fakeGenerationAuthorityStore{record: record, found: found}
+	store := &fakeGenerationAuthorityStore{
+		record: record, evidence: generationRecordFileEvidence{device: 11, inode: 12}, found: found,
+	}
 	authority := newPersistentGenerationAuthorityWithDeps(persistentGenerationAuthorityDeps{
 		openGlobalAuthority: func(context.Context) (firewallGlobalAuthority, error) { return global, nil },
 		openRecordStore:     func(context.Context) (generationAuthorityStore, error) { return store, nil },

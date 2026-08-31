@@ -26,11 +26,18 @@ type generationPersistentAuthority interface {
 
 type generationPersistentLease interface {
 	admittedRecord() (generationRecord, error)
+	replaceAdmittedRecord(context.Context, generationRecord) error
 	Release(context.Context) error
 }
 
 type generationAuthorityStore interface {
 	read(context.Context) (generationRecord, generationRecordFileEvidence, bool, error)
+	replace(
+		context.Context,
+		generationRecord,
+		generationRecordFileEvidence,
+		generationRecord,
+	) (generationRecordFileEvidence, error)
 	Release(context.Context) error
 }
 
@@ -59,14 +66,16 @@ type persistentGenerationLease struct {
 
 type persistentGenerationLeaseState struct {
 	// mu guards the admitted record, retained capabilities, and every lifecycle field below.
-	mu           sync.Mutex
-	global       firewallGlobalAuthority
-	lock         firewallGlobalLock
-	store        generationAuthorityStore
-	record       generationRecord
-	active       bool
-	released     bool
-	releaseError error
+	mu                sync.Mutex
+	global            firewallGlobalAuthority
+	lock              firewallGlobalLock
+	store             generationAuthorityStore
+	record            generationRecord
+	evidence          generationRecordFileEvidence
+	mutationAmbiguous bool
+	active            bool
+	released          bool
+	releaseError      error
 }
 
 func newPersistentGenerationAuthority() generationPersistentAuthority {
@@ -150,7 +159,7 @@ func (authority *persistentGenerationAuthority) acquireAfterNetwork(
 	if err := validateGenerationRecordBinding(binding); err != nil {
 		return nil, err
 	}
-	record, _, found, err := store.read(ctx)
+	record, evidence, found, err := store.read(ctx)
 	if err != nil {
 		return nil, preserveGenerationAuthorityError("read firewall generation authority record", err)
 	}
@@ -167,7 +176,7 @@ func (authority *persistentGenerationAuthority) acquireAfterNetwork(
 
 	lease := &persistentGenerationLease{state: &persistentGenerationLeaseState{
 		global: global, lock: lock, store: store,
-		record: cloneGenerationRecord(record), active: true,
+		record: cloneGenerationRecord(record), evidence: evidence, active: true,
 	}}
 	global = nil
 	lock = nil
@@ -194,6 +203,64 @@ func (lease *persistentGenerationLease) admittedRecord() (generationRecord, erro
 		)
 	}
 	return cloneGenerationRecord(state.record), nil
+}
+
+func (lease *persistentGenerationLease) replaceAdmittedRecord(
+	ctx context.Context,
+	replacement generationRecord,
+) error {
+	if lease == nil || lease.state == nil {
+		return generationAuthorityError("persistent firewall generation lease is unavailable", nil, nil)
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active {
+		return generationAuthorityError("persistent firewall generation lease is released", nil, nil)
+	}
+	if state.mutationAmbiguous {
+		return generationAuthorityError(
+			"firewall generation authority replacement outcome is ambiguous",
+			nil,
+			nil,
+		)
+	}
+	if ctx == nil {
+		return generationAuthorityError("firewall generation replacement context is required", nil, nil)
+	}
+	proof, err := state.store.replace(
+		ctx,
+		cloneGenerationRecord(state.record),
+		state.evidence,
+		cloneGenerationRecord(replacement),
+	)
+	if err != nil {
+		domainErr := errs.AsDomainError(err)
+		recordReplaced := false
+		if domainErr != nil {
+			recordReplaced, _ = domainErr.Details["record_replaced"].(bool)
+		}
+		if recordReplaced {
+			if proof == (generationRecordFileEvidence{}) {
+				state.mutationAmbiguous = true
+			} else {
+				state.record = cloneGenerationRecord(replacement)
+				state.evidence = proof
+			}
+		}
+		return preserveGenerationAuthorityError("replace admitted firewall generation record", err)
+	}
+	if proof == (generationRecordFileEvidence{}) {
+		state.mutationAmbiguous = true
+		return generationAuthorityError(
+			"firewall generation replacement returned no file evidence",
+			nil,
+			nil,
+		)
+	}
+	state.record = cloneGenerationRecord(replacement)
+	state.evidence = proof
+	return nil
 }
 
 // Release closes record traversal, then the firewall lock, then its authority exactly once. Cleanup preserves context
@@ -230,6 +297,8 @@ func (lease *persistentGenerationLease) Release(ctx context.Context) error {
 	state.lock = nil
 	state.global = nil
 	state.record = generationRecord{}
+	state.evidence = generationRecordFileEvidence{}
+	state.mutationAmbiguous = false
 	state.active = false
 	state.released = true
 	return state.releaseError

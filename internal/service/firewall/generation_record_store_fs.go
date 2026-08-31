@@ -47,6 +47,7 @@ type generationRecordStoreDeps struct {
 	fsync           func(context.Context, int) error
 	close           func(context.Context, int) error
 	renameNoReplace func(context.Context, int, string, int, string) error
+	renameReplace   func(context.Context, int, string, int, string) error
 	unlinkAt        func(context.Context, int, string, int) error
 	randomName      func(context.Context) (string, error)
 }
@@ -348,6 +349,9 @@ func realGenerationRecordStoreDeps() generationRecordStoreDeps {
 		close: func(_ context.Context, fd int) error { return unix.Close(fd) },
 		renameNoReplace: func(_ context.Context, oldFD int, oldName string, newFD int, newName string) error {
 			return unix.Renameat2(oldFD, oldName, newFD, newName, unix.RENAME_NOREPLACE)
+		},
+		renameReplace: func(_ context.Context, oldFD int, oldName string, newFD int, newName string) error {
+			return unix.Renameat(oldFD, oldName, newFD, newName)
 		},
 		unlinkAt: func(_ context.Context, parentFD int, name string, flags int) error {
 			return unix.Unlinkat(parentFD, name, flags)

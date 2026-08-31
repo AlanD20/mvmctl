@@ -376,6 +376,218 @@ func (store *generationRecordStore) create(
 	return proof, nil
 }
 
+func (store *generationRecordStore) replace(
+	ctx context.Context,
+	expected generationRecord,
+	expectedEvidence generationRecordFileEvidence,
+	replacement generationRecord,
+) (generationRecordFileEvidence, error) {
+	if store == nil || store.state == nil {
+		return generationRecordFileEvidence{}, generationAuthorityError(
+			"firewall generation record store is unavailable",
+			nil,
+			nil,
+		)
+	}
+	state := store.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if !state.active {
+		return generationRecordFileEvidence{}, generationAuthorityError(
+			"firewall generation record store is released",
+			nil,
+			nil,
+		)
+	}
+	if err := validateGenerationRecord(expected); err != nil {
+		return generationRecordFileEvidence{}, err
+	}
+	raw, err := encodeGenerationRecord(replacement)
+	if err != nil {
+		return generationRecordFileEvidence{}, err
+	}
+
+	tempName, tempFD, err := createGenerationRecordTemp(ctx, state.deps, state.directory)
+	if err != nil {
+		return generationRecordFileEvidence{}, err
+	}
+	tempOpen := true
+	replaced := false
+	abort := func(primary error) error {
+		cleanupCtx := context.WithoutCancel(ctx)
+		result := primary
+		if tempOpen {
+			if closeErr := state.deps.close(cleanupCtx, tempFD); closeErr != nil {
+				result = appendGenerationCleanupError(
+					result,
+					"close incomplete firewall generation replacement",
+					closeErr,
+				)
+			}
+			tempOpen = false
+		}
+		if !replaced {
+			if unlinkErr := state.deps.unlinkAt(cleanupCtx, state.directory, tempName, 0); unlinkErr != nil {
+				result = appendGenerationCleanupError(
+					result,
+					"remove incomplete firewall generation replacement",
+					unlinkErr,
+				)
+			}
+		}
+		return result
+	}
+	if err := writeAllGenerationRecord(ctx, state.deps, tempFD, raw); err != nil {
+		return generationRecordFileEvidence{}, abort(err)
+	}
+	if err := state.deps.fchown(ctx, tempFD, int(state.policy.expectedUID), int(state.policy.expectedGID)); err != nil {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"set firewall generation replacement owner",
+			err,
+			nil,
+		))
+	}
+	if err := state.deps.fchmod(ctx, tempFD, generationRecordFileMode); err != nil {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"set firewall generation replacement mode",
+			err,
+			nil,
+		))
+	}
+	beforeSync, err := inspectGenerationRecordFile(ctx, state.deps, tempFD, state.policy)
+	if err != nil {
+		return generationRecordFileEvidence{}, abort(err)
+	}
+	if beforeSync.size != int64(len(raw)) {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"firewall generation replacement record is incomplete",
+			nil,
+			nil,
+		))
+	}
+	if err := state.deps.fsync(ctx, tempFD); err != nil {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"sync firewall generation replacement record",
+			err,
+			nil,
+		))
+	}
+	afterSync, err := inspectGenerationRecordFile(ctx, state.deps, tempFD, state.policy)
+	if err != nil {
+		return generationRecordFileEvidence{}, abort(err)
+	}
+	if beforeSync != afterSync {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"firewall generation replacement record changed while syncing",
+			nil,
+			nil,
+		))
+	}
+	tempOpen = false
+	if err := state.deps.close(context.WithoutCancel(ctx), tempFD); err != nil {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"close firewall generation replacement record",
+			err,
+			nil,
+		))
+	}
+
+	// CRITICAL: The exact record and inode evidence are re-admitted immediately before replacement. A changed target
+	// is never overwritten merely because the caller still holds the global firewall lock.
+	current, currentEvidence, found, err := readGenerationRecord(
+		ctx,
+		state.deps,
+		state.policy,
+		state.directory,
+	)
+	if err != nil {
+		return generationRecordFileEvidence{}, abort(err)
+	}
+	if !found || !generationRecordsEqual(current, expected) || currentEvidence != expectedEvidence {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"firewall generation authority changed before replacement",
+			nil,
+			nil,
+		))
+	}
+	if err := ctx.Err(); err != nil {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"replace firewall generation authority record",
+			err,
+			nil,
+		))
+	}
+	if err := state.deps.renameReplace(
+		ctx,
+		state.directory,
+		tempName,
+		state.directory,
+		generationRecordName,
+	); err != nil {
+		return generationRecordFileEvidence{}, abort(generationAuthorityError(
+			"atomically replace firewall generation authority record",
+			err,
+			nil,
+		))
+	}
+	replaced = true
+	postCommitCtx := context.WithoutCancel(ctx)
+
+	if err := state.deps.fsync(postCommitCtx, state.directory); err != nil {
+		primary := annotateGenerationRecordReplacement(
+			generationAuthorityError("sync firewall generation authority directory", err, nil),
+			true,
+		)
+		proof, proofErr := readBackGenerationRecordReplacement(
+			postCommitCtx,
+			state.deps,
+			state.policy,
+			state.directory,
+			replacement,
+		)
+		if proofErr != nil {
+			return generationRecordFileEvidence{}, appendGenerationCleanupError(
+				primary,
+				"verify replaced firewall generation authority record",
+				proofErr,
+			)
+		}
+		return proof, primary
+	}
+	proof, err := readBackGenerationRecordReplacement(
+		postCommitCtx,
+		state.deps,
+		state.policy,
+		state.directory,
+		replacement,
+	)
+	if err != nil {
+		return generationRecordFileEvidence{}, annotateGenerationRecordReplacement(err, false)
+	}
+	return proof, nil
+}
+
+func readBackGenerationRecordReplacement(
+	ctx context.Context,
+	deps generationRecordStoreDeps,
+	policy generationRecordStorePolicy,
+	directoryFD int,
+	replacement generationRecord,
+) (generationRecordFileEvidence, error) {
+	readBack, proof, found, err := readGenerationRecord(ctx, deps, policy, directoryFD)
+	if err != nil {
+		return generationRecordFileEvidence{}, err
+	}
+	if !found || !generationRecordsEqual(readBack, replacement) {
+		return generationRecordFileEvidence{}, generationAuthorityError(
+			"firewall generation authority replacement outcome is ambiguous",
+			nil,
+			nil,
+		)
+	}
+	return proof, nil
+}
+
 func createGenerationRecordTemp(
 	ctx context.Context,
 	deps generationRecordStoreDeps,
@@ -500,6 +712,24 @@ func annotateGenerationRecordCreation(err error, durabilityUncertain bool) *errs
 		result.Details = make(map[string]any)
 	}
 	result.Details["record_created"] = true
+	if durabilityUncertain {
+		result.Details["durability_uncertain"] = true
+	}
+	result.Err = err
+	return &result
+}
+
+func annotateGenerationRecordReplacement(err error, durabilityUncertain bool) *errs.DomainError {
+	domainErr := errs.AsDomainError(err)
+	if domainErr == nil {
+		domainErr = generationAuthorityError("firewall generation authority replacement failed", err, nil)
+	}
+	result := *domainErr
+	result.Details = maps.Clone(domainErr.Details)
+	if result.Details == nil {
+		result.Details = make(map[string]any)
+	}
+	result.Details["record_replaced"] = true
 	if durabilityUncertain {
 		result.Details["durability_uncertain"] = true
 	}
