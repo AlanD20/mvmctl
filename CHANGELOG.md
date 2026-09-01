@@ -16,8 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and down-only link effects,
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
-> effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, and its destination-agent
-> non-root execution side described below are implemented.
+> effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
+> non-root execution side, and its isolated process-bound source-session foundation described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
 > marker-only sudo policy, schema-3 Jailer launch composition and final live topology/cgroup verification and
@@ -72,9 +72,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mvm policy exec rm <policy...> [--force]`. Creation resolves exact VM identities, rejects the same VM and root
   target, and derives one deterministic policy ID from source VM, destination VM, and target user without consulting
   network placement. List and removal remain isolated to the execution-policy family.
-- The legacy guest-originated `remote_vm` relay now fails closed. Every request receives one terminal unauthorized
-  response before source lookup, payload parsing, destination lookup, vsock dial, or command logging. Ordinary host
-  execution and copy paths are unchanged.
+- The legacy guest-originated `remote_vm` relay was first severed before source lookup, payload parsing, destination
+  lookup, vsock dial, or command logging, then removed with its generic host-frame/shared-connection path. Ordinary
+  host execution and copy paths are unchanged.
 - Added the protocol-only `internal/lib/vmexecwire` foundation. Every frame uses fixed `MVMEXEC1` magic, version 1,
   big-endian length, and a 64-KiB body limit. Strict closed JSON schemas separate guest-source requests from the exact
   host-built destination request, where only the latter carries the canonical lowercase UUIDv4 agent token. All
@@ -91,11 +91,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bounds; terminal writes have a separate two-second ceiling. Generic errors and logs omit the command, token, and
   process cause. L1 covers routing, authentication order, account/credential admission, output/exit behavior, limits,
   cancellation, deadline interruption, partial-read shutdown, and redaction.
-- Public execution-policy CRUD, the wire, and the destination side still do not activate VM-to-VM execution. The
-  closed source session, API-owned relay listener, runtime policy resolution/enforcement, Task 15 root
-  active-session/capacity authority, legacy flag removal, and positive Python qualification remain pending. The
-  implemented cancellation boundary kills the command's process group; it does not claim per-command cgroup authority
-  or cleanup of descendants that deliberately leave that group.
+- Added an isolated source-session foundation on a dedicated already authority-admitted connection. Exact
+  `MVMSRC01`/version-1 bootstrap and ready frames are capped at 512 bytes, authenticate the configured agent token
+  before registration, and bind one random 32-lowercase-hex session ID to one bounded request/response stream. The
+  named ordinary non-TTY exec path carries only that ID; normal exec, shell, and copy do not open a source session.
+- Added the process-bound source guest broker and `mvm-agent remote --user <non-root> <destination> -- <command>`.
+  The outer source command may run as root or non-root and receives no token through its environment, arguments,
+  filesystem, or local request. The mode-`0666` AF_UNIX
+  socket authorizes through matching peer credentials, `SO_PEERPIDFD`, retained live pidfds, and a twice-stable bounded
+  ancestry chain to the exact outer command. The session ID is correlation, not authority; unavailable pidfd/process
+  evidence fails closed.
+- Source admission is capped at eight concurrent attempts, initial local request reads at two seconds, ancestry at 64
+  processes, and the complete wire at the fixed five-minute/32-KiB command/8-MiB output/64-KiB frame limits. Context
+  cancellation interrupts blocked source reads/writes, outer-command cancellation kills its process group, host/local
+  disconnect closes both relay ends, terminal delivery requires physical EOF, and agent shutdown releases every
+  pending/bound session and pin. The CLI preserves binary output and emits only generic local failures.
+- Removed the legacy `remote_vm` protocol, generic `OnHostFrame`, shared `activeConn`, and
+  `internal/vsockhandler` indirection. Ordinary host execution and all copy paths remain on their existing protocol.
+- Public execution-policy CRUD, the wire, source session, and destination side still do not activate VM-to-VM
+  execution. The API-owned relay listener, root active-runtime/source and Task 15 global-capacity authority, runtime
+  policy resolution/enforcement and redacted audit, legacy `allow_remote_exec` removal, and positive Python L2
+  qualification remain pending. The implemented cancellation boundaries are process-group guarantees, not per-command
+  cgroup authority, and do not claim cleanup of descendants that deliberately leave their group.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
@@ -646,11 +663,12 @@ The following items are release blockers and are intentionally not described abo
   supported kernels before one privileged `Conn.Flush` application can make links usable. Only then remove the
   iptables backend and selector plus the production `nft` CLI subprocess/parser; the canonical compiler digest is not
   a kernel application.
-- Complete typed traffic API/CLI and nftables application plus the new authenticated source session and API-owned
-  vsock relay over the typed policy and destination-agent foundations. Directional exec-policy CRUD is public but does
-  not activate the relay. Add Task 15 root-owned concurrent capacity and positive L2 qualification before claiming the
-  destination path end to end. The legacy guest relay is already fail-closed; the routed `ServiceAccessPolicy`,
-  `allow_remote_exec` fields/flags, generic host-frame path, and other transitional surfaces still require atomic
+- Complete typed traffic API/CLI and nftables application plus the API-owned vsock relay over the implemented isolated
+  source-session, typed policy, and destination-agent foundations. Directional exec-policy CRUD is public but does not
+  activate the relay. Add exact root active-source admission, runtime policy enforcement/redacted audit, Task 15
+  root-owned concurrent capacity, and positive L2 qualification before claiming the destination path end to end. The
+  legacy guest relay, generic host-frame callback, and shared guest connection are removed; the routed
+  `ServiceAccessPolicy`, `allow_remote_exec` fields/flags, and other transitional surfaces still require atomic
   removal.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the
   root-owned system binary.

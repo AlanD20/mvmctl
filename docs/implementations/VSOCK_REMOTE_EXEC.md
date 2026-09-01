@@ -1,239 +1,181 @@
-# Vsock Remote Exec — Inter-VM Command Execution
+# VM-to-VM Exec: Isolated Source and Destination Foundations
 
-## Problem
+## Current status
 
-VM A needs to run a command inside VM B without SSH. The existing `mvm exec` opens a vsock connection from host to guest over which the guest agent streams stdout/stderr frames back. The host already has all the infrastructure: it knows how to resolve VMs, fetch vsock configs from the DB, and create vsock clients to any running VM. The missing piece is allowing the guest agent to **send a frame back** through the existing vsock connection requesting execution on another VM, with the host acting as relay.
+VM-to-VM command execution is intentionally unavailable while the v0.3.0 authority path is completed. The following
+foundations are implemented and covered by Go L0/L1 tests:
 
-## Design
+- directional `mvm policy exec` desired-state CRUD;
+- the closed, bounded `MVMEXEC1` request and response protocol;
+- authenticated non-root execution in the destination guest;
+- a dedicated, one-request source session between the host and source guest;
+- a process-bound local source broker and `mvm-agent remote` client in the source guest; and
+- strict separation between ordinary host-to-VM exec/copy and the dormant VM-to-VM path.
 
-### Core insight
+There is no production API-owned relay listener, root active-runtime/capacity admission, runtime exec-policy
+enforcement, or audit path yet. The legacy `allow_remote_exec` schema/config/CLI surface also remains pending removal,
+and no positive Python L2 system test has qualified the end-to-end behavior. No current host path constructs an
+authorized destination request.
 
-`mvm exec vm-a` opens a vsock connection (host → guest). That connection is full-duplex. The guest agent already writes response frames (`"stdout"`, `"stderr"`, `"result"`) back to the host through it. The same channel can carry a new frame type — `"remote_vm"` — that tells the host: "run this command on VM B and stream the output back to me."
+## Required user flow
 
-### Data flow (step by step)
+Once the remaining host relay is implemented, an authorized source command will use this guest-side shape:
 
-User runs:
-
-```
-mvm exec vm-a -- mvm-agent remote vm-b -- ls -la
-```
-
-| Step | Location | What happens |
-|------|----------|-------------|
-| 1 | Host `mvm` | Opens vsock to VM A, sends `{"type":"exec","command":"mvm-agent remote vm-b -- ls -la"}` |
-| 2 | Guest agent daemon (VM A) | `handleConnection` reads exec frame → `handleExec` runs |
-| 3 | Guest agent daemon (VM A) | `handleExec` calls `exec.Command("sh", "-c", "mvm-agent remote vm-b -- ls -la")`, blocks on `cmd.Wait()` |
-| 4 | Child process (VM A) | `mvm-agent remote` CLI connects to daemon's local Unix socket at `/var/run/mvm-agent.sock` |
-| 5 | Guest agent daemon (VM A) | Background goroutine `handleLocalConn` reads JSON frame from local socket |
-| 6 | Guest agent daemon (VM A) | Locks `connMu`, writes `{"type":"remote_vm","data":"{\"destination\":\"vm-b\",\"command\":\"ls -la\"}"}` to the **same vsock connection** |
-| 7 | Host `mvm` | `Client.Exec()` read loop receives the frame, `resp.Type == "remote_vm"` |
-| 8 | Host `mvm` | Checks source VM A has `remote_exec == true` (fetched via `c.item.VmID`) — if not, rejects immediately |
-| 9 | Host `mvm` | Parses `frame.Data` as JSON → extracts `destination`, `command`, `user`, `timeout` |
-| 10 | Host `mvm` | Resolves "vm-b" → gets target VM B's record |
-| 11 | Host `mvm` | Checks target VM B has `remote_exec == true` and status is `running` |
-| 12 | Host `mvm` | Fetches VM B's vsock config from `vm_vsock_config` table |
-| 13 | Host `mvm` | Opens new vsock connection to VM B via `dialAndHandshake()`, sends `exec` frame |
-| 14 | Host `mvm` | **Streaming relay loop:** for each frame from VM B: `"stdout"` → write `{"type":"stdout","data":"..."}` to VM A's connection immediately; `"stderr"` → same; `"result"` → write `{"type":"remote_vm","status":<exit_code>}` to VM A, then close VM B's connection and return |
-| 15 | Guest agent daemon (VM A) | `handleLocalConn` reads those response frames from vsock (handleExec is blocked in `cmd.Wait()`, not reading), forwards them to local socket client in real time |
-| 16 | Child process (VM A) | Receives output via local socket, prints to its own stdout/stderr, exits |
-| 17 | Guest agent daemon (VM A) | `cmd.Wait()` returns, `handleExec` flushes remaining output, sends final `"result"` frame, returns |
-| 18 | Host `mvm` | Reads final `"result"` frame, returns `ExecResult` to caller |
-
-### Protocol frames
-
-**Guest → Host (via existing vsock exec connection):**
-```json
-{"type":"remote_vm","data":"{\"destination\":\"vm-b\",\"command\":\"ls -la\",\"user\":\"root\",\"timeout\":30}"}
+```text
+mvm exec source-vm -- mvm-agent remote --user app destination-vm -- command arg
 ```
 
-**Host → Guest (relayed response, streaming):**
-```json
-{"type":"stdout","data":"file1\nfile2\n"}
-{"type":"stderr","data":"warning: ..."}
-{"type":"remote_vm","status":0}
+The outer `mvm exec` command may run in the source guest as root or as a non-root account. The destination target passed
+to `--user` is mandatory and must be non-root. Network placement is irrelevant: the final directional exec policy is
+required for same-network, cross-network, and no-IP-network VM pairs.
+
+## Architecture
+
+The design uses two independent host-to-source connections. It never multiplexes a guest request onto the ordinary
+exec response stream.
+
+```text
+host API relay (pending)
+  |
+  | dedicated source transport: MVMSRC01 bootstrap, then one MVMEXEC1 request/response
+  v
+source guest agent
+  | pending source-session ID
+  |
+  | ordinary host exec connection carries only that ID
+  v
+one source command process tree
+  |
+  | AF_UNIX /var/run/mvm-agent.sock, admitted by peer credentials + pidfds + ancestry
+  v
+mvm-agent remote --user <non-root> <destination> -- <command>
 ```
 
-The host uses `"remote_vm"` (not `"result"`) as the final response type so the guest's `handleConnection` dispatch loop does not confuse it with the response of the original exec command.
+The source-session ID is a random correlation handle, not an authorization credential. It may cross the ordinary exec
+request, but the agent token never enters the guest command's environment, arguments, filesystem, or local socket
+request. The destination token remains host-only and appears only in a host-built destination request.
 
-### Frame relay format
+Ordinary `Client.Exec`, shell, and copy operations do not open or inspect a source session. Only the named
+`ExecWithSourceSession` path can attach an already-open source-session ID to a non-TTY exec request. Unknown ordinary
+exec response types are protocol errors; there is no generic host-frame callback.
 
-The `Data` field of a `"remote_vm"` request from guest contains JSON-encoded parameters:
+### 1. Dedicated source transport
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `destination` | string | Target VM name or ID |
-| `command` | string | Shell command to run |
-| `user` | string | Run as this user (default "root") |
-| `timeout` | int | Timeout in seconds (0 = no timeout) |
+`internal/core/vsock.SourceSession` accepts an already authority-admitted connection and the source guest's canonical
+agent token. It does not resolve a VM, consult SQLite, dial a user-provided socket, authorize a policy, or allocate
+runtime capacity.
 
-### Protocol constants
+`Open` generates a cryptographically random 16-byte lowercase hexadecimal session ID, writes an authenticated
+`MVMSRC01` bootstrap, and requires an exact ready response for that ID. The source guest authenticates the agent token
+in constant time before it registers the ID. Duplicate IDs, malformed frames, and unsupported schemas fail closed.
 
-Both the guest agent (`internal/service/agent/protocol.go`) and the host vsock package (`internal/core/vsock/protocol.go`) define the same `"remote_vm"` frame type constant.
+The host session then accepts exactly one closed source request and emits the bounded response stream. A terminal
+`result` or `error` closes the physical transport so the guest must observe EOF. Session and per-operation contexts set
+effective deadlines; cancellation closes the connection to interrupt partial reads and blocked writes. `Close` is
+idempotent and repeats its first cleanup result.
 
-### Exported protocol primitives
+This type is deliberately dormant until `pkg/api` receives a root-admitted active source identity and constructs the
+relay.
 
-`internal/core/vsock/protocol.go` exports three functions for external consumers like the handler package:
+### 2. Binding the source command
 
-- `SendFrame(conn, v)` — writes any value as a newline-delimited JSON frame
-- `ReadFrame(conn)` — reads one frame, returns its type string and raw data bytes
-- `DialVM(ctx, udsPath, port)` — connects to a VM's vsock via UDS + CONNECT handshake
+After the dedicated transport is ready, the future host relay starts one ordinary non-TTY source command with
+`ExecWithSourceSession`. That exec frame contains only the session ID. A normal `Exec` leaves the field empty and stays
+on the existing behavior.
 
-## Security model
+The source guest consumes a pending session only once, resolves the requested outer command account, and starts the
+outer shell in a new session/process group. Go obtains its pidfd atomically at process creation. The agent verifies the
+pidfd, stable PID/start-time identity, and liveness before publishing the binding.
 
-**Disabled by default.** Both the source VM and the target VM must have `remote_exec = true` to participate.
+Context cancellation kills the outer command's process group with `SIGKILL`; the command also has a two-second
+`WaitDelay`. This is a process-group guarantee, not a per-command cgroup guarantee, and it does not claim control of a
+descendant that deliberately escapes the group.
 
-**`--allow-remote-exec` flag on `mvm vm create`:**
-```bash
-mvm vm create my-vm --image ubuntu-noble --allow-remote-exec
-```
+### 3. Local source broker admission
 
-Persisted as a `remote_exec` boolean column on `vm_instances` (default `0`). The flag means both:
-- This VM can **send** remote exec commands to other VMs
-- This VM can **accept** remote exec commands from other VMs
+The guest agent exposes `/var/run/mvm-agent.sock` with mode `0666` so either an authorized root or non-root outer source
+command can reach it. Filesystem possession does not grant authority. Before decoding a local request, the agent:
 
-**Config default** is configurable via `defaults.vm.allow_remote_exec` in the project YAML config (default `false`). The CLI flag overrides the config.
+1. requires an AF_UNIX stream connection;
+2. obtains `SO_PEERCRED` and `SO_PEERPIDFD` during the same descriptor control operation;
+3. requires close-on-exec pidfds and verifies their `/proc/self/fdinfo` PID identity;
+4. rejects exited and zombie processes through pidfd polling and liveness checks;
+5. requires the local peer UID/GID to match the bound outer command account;
+6. reads the peer-to-root parent chain twice, including PID, parent PID, and start time, with a depth limit of 64; and
+7. accepts exactly one live descendant of exactly one unclaimed source binding.
 
-**Host checks both:**
-```
-source_vm.remote_exec == true AND target_vm.remote_exec == true → proceed
-```
+The broker fails closed if `SO_PEERPIDFD` or any required identity/liveness observation is unavailable. Imported or
+custom guest kernels must therefore provide this socket capability; a numeric PID from `SO_PEERCRED` alone is not
+sufficient.
 
-Source VM is checked **before** parsing the frame payload — fail fast on unauthorized sources.
+Local admission is capped at eight concurrent attempts. The request must arrive within two seconds and within the
+source transport's earlier absolute deadline. No local client can select a session ID or token in its request.
 
-**All remote execs are logged** with structured `slog` fields: `source_vm`, `target_vm`, `command`, `exit_code`, `error`.
+### 4. One-request relay inside the source guest
 
-### Guest agent architecture
+After admission, the local client sends one strict `SourceRequest` containing a random request ID, destination selector,
+non-root target user, and command. The broker hands read ownership of the dedicated transport from its disconnect
+monitor to the relay, forwards that one request, and copies the closed response stream back to the local client.
 
-The guest agent daemon runs two listeners concurrently:
+The first disconnect closes both sides and releases the pending/bound session and both process pins. A source-host
+disconnect therefore tears down the broker relay. Cancellation of the ordinary source exec closes its transport and
+kills the outer command process group. Agent shutdown closes every pending and bound source session before waiting for
+its listeners.
 
-```
-┌───────────────────────────────────────────┐
-│          Guest Agent Daemon               │
-│                                           │
-│  ┌─────────────────┐  ┌────────────────┐  │
-│  │ AF_VSOCK listener│  │ Local Unix     │  │
-│  │ (existing)       │  │ socket listener│  │
-│  │ port 1024        │  │ (new)          │  │
-│  │                  │  │ /var/run/      │  │
-│  │                  │  │ mvm-agent│  │
-│  │                  │  │ .sock          │  │
-│  └────────┬─────────┘  └───────┬────────┘  │
-│           │                    │            │
-│           ▼                    ▼            │
-│  ┌─────────────────────────────────────┐    │
-│  │       Dispatch / shared conn        │    │
-│  │  handleConnection reads vsock       │    │
-│  │  handleLocalConn reads local socket │    │
-│  │                                     │    │
-│  │  Both share the same vsock conn     │    │
-│  │  via activeConn + connMu sync       │    │
-│  └─────────────────────────────────────┘    │
-└───────────────────────────────────────────┘
-```
+The `mvm-agent remote` client preserves binary stdout/stderr and returns the remote result exit code only after the
+terminal frame and physical EOF. It prints only generic local errors and does not expose the session ID, token,
+command, or internal process cause in an error.
 
-- The vsock listener (`handleConnection`) handles requests from the host — `exec`, `ping`, etc.
-- The local socket listener (`handleLocalConn`) handles requests from inside the VM — `remote_vm`
-- Both share access to `activeConn` (the current vsock connection) via `activeConnMu` and `connMu`
+### 5. Destination execution
 
-### Guest agent CLI subcommand
+The future host relay must resolve and authorize the source request, build a separate `DestinationRequest`, and open a
+new connection to the destination guest. Only this host-built request contains the destination agent token.
 
-`mvm-agent remote <destination> -- <command>` is a one-shot CLI mode:
+The destination agent accepts only exact `MVMEXEC1` magic on its existing vsock port, authenticates the token before an
+execution effect, resolves an exact non-root account to numeric credentials and a clean absolute home, and runs
+`/bin/sh -c` with fixed environment and process-group cancellation. Ordinary host exec/copy prefixes remain on their
+existing protocol.
 
-```bash
-mvm-agent remote vm-b -- ls -la
-```
+## Wire contracts and limits
 
-When the daemon binary is invoked with `remote` as the first argument, it connects to the daemon's local Unix socket, sends the `remote_vm` request, relays frames to stdout/stderr in real time, and exits with the remote exit code.
-
-## Host-side architecture: vsockhandler
-
-The host executes `mvm exec vm-a` which opens a vsock connection to the guest agent. The response read loop receives frames back from the guest. Frames that the host doesn't understand (including guest-initiated frames like `"remote_vm"`) are dispatched to a **handler** via `Client.OnHostFrame`.
-
-This keeps `internal/core/vsock/` domain-pure (no imports of `vm`, `model`, etc.) while allowing an extensible handler in its own package that imports whatever it needs.
-
-### Client.OnHostFrame
-
-`internal/core/vsock/client.go` adds a single field: `OnHostFrame func(ctx, sourceVMID, conn, type, data)`. In the `Exec()` read loop, any frame that isn't `"stdout"`, `"stderr"`, or `"result"` is dispatched to this callback instead of being logged as unknown. If nil, the frame is silently ignored.
-
-### The handler package: `internal/vsockhandler/`
-
-A new package with a single `Handler` struct holding a `VMResolver` and `VsockRepo`. Its `Handle` method switches on the frame type and dispatches to per-type methods. Currently only `"remote_vm"` is handled; adding a new frame type means adding a new case to the switch and a new method on `Handler`.
-
-### handleRemoteVM — streaming relay
-
-Uses the exported vsock protocol primitives for true frame-by-frame streaming. The flow within `handleRemoteVM`:
-
-1. Resolve source VM by `sourceVMID`, check `RemoteExec` — reject before parsing anything
-2. Parse the `RemoteVMRequest` from the frame data (destination, command, user, timeout)
-3. Resolve target VM via the standard VM resolver
-4. Check target VM's `RemoteExec`
-5. Check target VM's status is `running`
-6. Get target VM's vsock config
-7. Dial target vsock via `DialVM`, send an `exec` frame
-8. Streaming relay loop: for each frame from target, if it's `"stdout"` or `"stderr"`, forward it to source immediately; if it's `"result"`, parse exit code, send final `"remote_vm"` frame to source with the exit status, and return
-
-Every frame from VM B is forwarded to VM A immediately — no buffering, no `targetClient.Exec()`.
-
-### Wiring
-
-In `pkg/api/cp.go`, `newVsockClient()` creates a Handler instance and assigns its `Handle` method to `client.OnHostFrame`. Since every API operation that creates a vsock client goes through `newVsockClient()`, all Exec/Shell sessions automatically get the handler.
-
-## Implementation plan
-
-### File changes
-
-| Step | File | Change |
-|------|------|--------|
-| 1 | `internal/lib/db/migrations/001_initial_schema.sql` | Add `remote_exec INTEGER DEFAULT 0 NOT NULL` to `vm_instances` CREATE TABLE |
-| 2 | `internal/lib/model/vm.go` | Add `RemoteExec bool` field to `VMItem` |
-| 3 | `internal/service/agent/protocol.go` | Add `RemoteVMRequest` and `RemoteVMResponse` structs, `responseTypeRemoteVM` constant |
-| 4 | `internal/core/vsock/protocol.go` | Add `ResponseTypeRemoteVM` constant. Export `SendFrame`, `ReadFrame`, `DialVM`. Add unexported `readFrameRaw`. |
-| 5 | `internal/core/vsock/client.go` | Add `OnHostFrame func(ctx, sourceVMID, conn, type, data)` to `Client`. In `Exec()` read loop, call it in `default:` case. Remove `VmRepo`, `VsockRepo`, `handleRemoteVM`. |
-| 6 | `internal/service/agent/agent.go` | Add `localSocket`, `activeConn`, `activeConnMu` to `Agent`. Start local UDS listener in `Run()`. Set/clear `activeConn` in `handleConnection()`. |
-| 7 | `internal/service/agent/local.go` (new) | `handleLocalConn()` — reads `RemoteVMRequest` from local socket, writes to vsock via `activeConn`, reads response frames, forwards to local socket |
-| 8 | `internal/service/agent/cmd/main.go` | Detect `remote` subcommand via `flag.NArg()` check. |
-| 9 | `internal/service/agent/cmd/remote.go` (new) | `runRemoteSubcommand()` — connects to daemon local socket, sends request, relays response frames to stdout/stderr via `json.NewDecoder` |
-| 10 | **`internal/vsockhandler/handler.go` (new)** | `Handler` struct with `VMResolver`/`VsockRepo`. `Handle(ctx, sourceVMID, conn, type, data)` switch. `handleRemoteVM()` with auth checks and streaming relay. |
-| 11 | `pkg/api/inputs/vm_create.go` | Add `AllowRemoteExec *bool` to `VMCreateInput`, `AllowRemoteExec bool` to `ResolvedVMCreateInput`. Resolve with config default. |
-| 12 | `internal/cli/vm.go` | Add `--allow-remote-exec` flag to `mvm vm create` |
-| 13 | `pkg/api/vm.go` | Persist `remote_exec` to DB when creating VM |
-| 14 | `pkg/api/cp.go` | Wire `handler := &vsockhandler.Handler{...}; client.OnHostFrame = handler.Handle` in `newVsockClient()` |
-| 15 | `pkg/errs/codes.go` | Add `CodeUnauthorized`, `CodeVMNotRunning`, `CodeVsockConfigNotFound` |
-| 16 | `internal/infra/constants.go` | Add `"allow_remote_exec": false` to `OverridableDefaults["defaults.vm"]` |
-
-### Config default
-
-Add `"allow_remote_exec": false,` to `OverridableDefaults["defaults.vm"]` in `internal/infra/constants.go`. The CLI flag overrides the config default.
-
-The resolution in `Resolve()` follows the existing pattern used by `enable_console`, `nested_virt`, `pci_enabled`: read from config first, override if CLI flag is set.
-
-### Auth check flow (in `vsockhandler.handleRemoteVM`)
-
-```
-1. Resolve source VM by sourceVMID, check RemoteExec → reject before parsing anything
-2. Parse data → RemoteVMRequest (destination, command, user, timeout)
-3. Resolve target VM by name/ID/IP/MAC
-4. Check target VM has RemoteExec → reject
-5. Check target VM is running → reject
-6. Get target vsock config from DB
-7. Dial target vsock, send exec
-8. Streaming relay loop (frame-by-frame, no buffering)
-```
-
-### Error codes
-
-| Code | When |
-|------|------|
-| `CodeUnauthorized` | Source or target VM missing `remote_exec` |
-| `CodeVMNotFound` | Target VM cannot be resolved |
-| `CodeVMNotRunning` | Target VM is not running |
-| `CodeVsockConfigNotFound` | Target VM has no vsock config |
-| `CodeVsockExecFailed` | Relay exec fails |
-
-## Relationship to existing features
-
-| Feature | Relation |
+| Boundary | Contract |
 |---|---|
-| `mvm exec` | Host → VM. Remote exec reuses the exec read loop and vsock connection. Shares `client.Exec()`. |
-| Guest agent local socket | New. `/var/run/mvm-agent.sock` for in-VM IPC to the daemon. |
-| Console relay | Different mechanism (AF_UNIX relay), but similar relay architecture. |
+| Source bootstrap | Exact `MVMSRC01`, version 1, big-endian length, 1-512-byte strict JSON body |
+| Bootstrap identity | Canonical lowercase UUIDv4 agent token plus random 32-lowercase-hex source-session ID |
+| Source/destination request | Exact `MVMEXEC1`, version 1, at most 64 KiB per strict JSON frame |
+| Request identity | Random 32-lowercase-hex ID on request, output, terminal, and cancel frames |
+| Target | Destination selector at most 64 bytes; mandatory non-root user at most 32 bytes |
+| Command | Valid UTF-8, no unsafe controls, 1-32 KiB |
+| Output | Binary-safe stdout/stderr frames, 8 MiB combined |
+| Lifetime | Five-minute fixed maximum for one source/destination execution |
+| Terminal | Exactly one `result` or `error`, followed by physical EOF |
+| Control | One matching `cancel` frame; no generic extension frame |
+
+Strict JSON decoding rejects missing, unknown, duplicate, case-colliding, trailing, incorrectly typed, and invalid
+values. A wire or runtime limit is enforced independently at each boundary that consumes it.
+
+## Remaining host authority
+
+The positive path must not be enabled until all of these release blockers are complete:
+
+1. `pkg/api` owns the relay because it is the only layer allowed to coordinate VM, vsock, policy, and runtime domains.
+2. Root authority admits the exact active source instance/vsock identity; SQLite status, a guest-provided source ID,
+   the socket path, and process-local semaphores are not authority.
+3. Runtime authorization enforces owner, exact directional source/destination VM identity, and exact non-root target
+   user before the destination is contacted.
+4. Task 15 supplies root-owned global concurrent-capacity reservation across users and CLI processes.
+5. The relay enforces the same frame, command, output, duration, cancellation, and EOF limits and records a
+   command-redacted source/destination/user/timing/result audit event.
+6. The legacy `allow_remote_exec` schema/model/config/CLI/environment-spec/result/test/documentation surface is removed.
+7. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,
+   foreign owner, stale identity, root target, malformed wire, limit, cancellation, and cleanup denials.
+
+Until these gates land, the source-session components remain a fail-closed foundation and VM-to-VM execution remains
+unavailable.
+
+## Removed legacy design
+
+v0.3.0 no longer uses the legacy `remote_vm` relay, shared `activeConn`, `OnHostFrame`, or
+`internal/vsockhandler`. A guest cannot inject a new operation into an ordinary exec response stream. The remaining
+`allow_remote_exec` compatibility surface is inactive for relay authorization and is scheduled for clean-break removal;
+it must not be mistaken for the new directional policy.

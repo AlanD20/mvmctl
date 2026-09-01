@@ -662,17 +662,17 @@ pending
 ### Task 12: Replace remote-exec flags with typed exec policies
 
 **Owner:** engineer
-**Status:** Public directional exec-policy CRUD, the closed bounded wire, and destination-agent non-root execution are
-implemented; source session, API-owned relay, runtime policy/root capacity authority, legacy flag removal, and Python
-qualification remain pending, so VM-to-VM execution remains fail-closed
+**Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, and the
+isolated process-bound source-session foundation are implemented; API-owned relay, runtime policy/root capacity
+authority, legacy flag removal, and Python qualification remain pending, so VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
   authorization lookup, duplicate/foreign-key constraints, and a dedicated authorization failure code. Relay
   authentication and enforcement are not wired yet.
-- [x] Sever the legacy `remote_vm` authorization bypass. Return one terminal unauthorized response before source
-  lookup, request parsing, destination lookup, vsock dial, relay, or command logging while preserving ordinary host
-  execution and all copy paths.
+- [x] Sever the legacy `remote_vm` authorization bypass before source lookup, request parsing, destination lookup,
+  vsock dial, relay, or command logging; then remove its protocol, generic callback, shared guest connection, and
+  handler package while preserving ordinary host execution and all copy paths.
 - [ ] Remove `allow_remote_exec` from schema, model, config, CLI, environment specs, results, tests, and docs.
 - [x] Expose directional exact source-VM -> destination-VM -> non-root-user intent through typed public API methods and
   `mvm policy exec create|ls|rm`. Derive a deterministic ID from exact VM identities and target user, reject same-VM
@@ -683,8 +683,15 @@ qualification remain pending, so VM-to-VM execution remains fail-closed
   require a 32-lowercase-hex request identity and non-root target; bound commands at 32 KiB, combined output at 8 MiB,
   and duration at five minutes; accept only `stdout`/`stderr`, one terminal `result`/`error` plus EOF, and matching
   `cancel`. This package performs no policy, relay, or execution effects.
-- [ ] Wire the protocol into the closed source-session and API-owned relay listener. `internal/vsockhandler` must not
-  resolve multiple core domains; the API resolves shared identities only after root runtime admission.
+- [x] Add the dedicated one-request source-session and process-bound guest broker. Authenticate exact `MVMSRC01`
+  bootstrap before registering a random session ID; carry only that ID through a named ordinary-exec path; require
+  exact AF_UNIX peer credentials, `SO_PEERPIDFD`, retained pidfds, and stable ancestry to the live outer source command;
+  and bound admission, request read, process depth, wire lifetime, cancellation, disconnect, and cleanup. Normal
+  exec/copy remains unchanged; the generic host-frame/shared-connection path is removed. This is a dormant foundation,
+  not source-VM authorization or a positive relay.
+- [ ] Wire the source session into the API-owned relay listener. `internal/vsockhandler` must not return; the API
+  resolves shared identities only after root runtime admission and supplies an already authority-admitted connection
+  to the source-session module.
 - [ ] Authenticate source from the active host session and root-owned instance/vsock identity, then resolve and enforce
   the exact directional policy at runtime.
 - [x] Add the destination-agent process side for the strict host-built request. Require the configured canonical token

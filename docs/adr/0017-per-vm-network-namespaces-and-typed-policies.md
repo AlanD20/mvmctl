@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-01 (bounded destination-agent execution)
+**Last Updated:** 2026-09-01 (isolated source-session foundation)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -330,21 +330,54 @@ Output is streamed through the wire's combined limit, invalid cancellation or wr
 result, and terminal/log messages omit the command, token, and process cause. This is process-group cancellation, not
 per-command cgroup authority; a descendant that deliberately leaves the group is outside this slice's guarantee.
 
-The destination side remains dormant for VM-to-VM use. A closed source session, API-owned relay listener, root runtime
-admission and Task 15 active-session/capacity authority, runtime policy resolution/enforcement, legacy flag removal,
-and positive Python system qualification remain pending. No implemented host path constructs an authorized destination
-request, so VM-to-VM execution is unavailable until those dependencies land.
+The destination side remains dormant for VM-to-VM use. At this slice, no source session or API-owned relay listener
+constructs its request, and root runtime admission, Task 15 active-session/capacity authority, runtime policy
+resolution/enforcement, legacy flag removal, and positive Python system qualification remain pending.
+
+The fifth slice implements the closed source-session and guest process boundary without activating the host relay. A
+host `SourceSession` owns one already authority-admitted connection, authenticates the source guest through exact
+`MVMSRC01`/version-1 framing and its canonical agent token, and carries one random 32-lowercase-hex session ID plus one
+bounded source request. Bootstrap and ready frames are limited to 512 bytes. The ordinary exec request carries only the
+session ID through a named `ExecWithSourceSession` path; normal exec/copy behavior is unchanged and creates no second
+connection. The session ID is correlation, not authority, and the guest command receives no token through its
+environment, arguments, filesystem, or local request.
+
+The guest source broker is mode `0666` by design so a root or non-root outer command can reach it, but filesystem access
+does not authorize a request. The agent binds the pending session to the exact outer command's atomically acquired
+pidfd, credentials, and stable PID/start identity. A local AF_UNIX peer must provide matching `SO_PEERCRED` and
+`SO_PEERPIDFD` evidence and twice prove a stable ancestry chain to that live command before its single claim. Missing
+pidfd support, exited/zombie state, identity drift, multiple matches, or an unavailable observation fails closed.
+Admission is capped at eight attempts, the initial local request at two seconds, and ancestry at 64 processes.
+
+After admission, the broker hands the dedicated source transport from disconnect monitoring to the one local request.
+The same `MVMEXEC1` command, output, duration, terminal, cancellation, and EOF limits apply. A terminal closes the
+physical source transport; context cancellation closes blocked reads and writes; the first relay disconnect closes
+both ends; agent shutdown releases every session and pin. The outer command runs in a new session/process group and
+that group is killed on cancellation with a two-second wait bound. This is not per-command cgroup authority and does
+not claim control of a descendant that deliberately escapes the process group.
+
+This slice also removes the generic `OnHostFrame`, shared `activeConn`, legacy `remote_vm` protocol, and
+`internal/vsockhandler` package. The local `mvm-agent remote --user <non-root> <destination> -- <command>` client emits
+a strict source request, preserves binary output, requires terminal plus physical EOF, and redacts local failures.
+
+The source and destination foundations remain dormant for positive VM-to-VM use. An API-owned relay listener, root
+active-runtime/source admission, Task 15 global capacity authority, runtime policy resolution/enforcement, redacted
+audit, legacy `allow_remote_exec` removal, and positive Python L2 qualification remain pending. No production path
+opens a `SourceSession` or constructs an authorized destination request, so VM-to-VM execution is still unavailable.
 
 ### Layer placement
 
 - `pkg/api/` remains the sole orchestrator of VM and network domain identities and owns public input validation.
 - `internal/core/network/` owns typed traffic intent and compilation, without importing another core domain.
-- The VM-to-VM exec policy module receives already-resolved shared model identities; it does not import multiple core
-  domains through `internal/vsockhandler/`.
+- The VM-to-VM exec policy module receives already-resolved shared model identities. The removed
+  `internal/vsockhandler/` multi-domain callback path must not return.
 - `internal/lib/vmexecwire/` owns only the closed bounded framing, request validation, and stream grammar. It performs
   no policy lookup, relay, destination-agent execution, audit, or runtime-capacity effect.
+- `internal/core/vsock/` owns the single-use source transport only after a caller supplies an authority-admitted
+  connection. It performs no VM/policy lookup, socket-path resolution, runtime admission, or capacity effect.
 - `internal/service/agent/` owns the destination request handler and explicit non-root process effect. It performs no
-  source authentication, policy lookup, host relay, audit, or runtime-capacity allocation.
+  host source-VM authentication, policy lookup, host relay, audit, or runtime-capacity allocation. Its local source
+  broker proves that one local peer descends from one host-bound outer command; it does not authorize a VM identity.
 - `internal/service/network/` owns typed privileged namespace, bridge, veth, TAP, route, and link effects.
 - `internal/service/firewall/` owns typed privileged nftables application.
 - `internal/service/jailer/` consumes a verified namespace handle as part of typed launch; it does not create a generic
@@ -431,6 +464,8 @@ capabilities require new typed policy families and explicit enforcement contract
   independent read-only observation path.
 - Existing installations and automation must be recreated for v0.3.0.
 - Troubleshooting must distinguish guest, namespace, host bridge, routed, nftables, and vsock planes.
+- Source-session guests require `SO_PEERPIDFD`; custom kernels without that capability fail closed instead of falling
+  back to numeric PID-only authorization.
 
 ## Release Gate
 
@@ -453,13 +488,20 @@ namespace binding, cancellation/close behavior, delete/create and invalid-batch 
 deletion/application, and representative 1,000-VM runtime against supported kernels. `nftables.Conn`, `Flush`,
 privileged application, public policy cutover, legacy CLI removal, and L2 qualification all remain pending.
 
-The VM-exec wire tests cover strict source/destination request separation, malformed-frame rejection, request identity,
-fixed limits, response transitions, combined output, cancellation, one terminal, and required EOF. Destination-agent
-L1 tests additionally cover exact protocol routing without host-exec/copy regression, token-before-effect ordering,
-numeric non-root account/home admission, fixed command credentials/environment, binary output and nonzero exit,
-redaction, output overflow, matching/malformed cancellation, process-group cancellation, effective vsock deadlines,
-bounded terminal writes, and shutdown of partial reads. This does not qualify a source listener, relay policy
-enforcement, root-owned capacity, detached-descendant cleanup, or a live VM-to-VM path.
+The VM-exec wire tests cover strict source/destination request separation, source bootstrap/ready framing,
+malformed-frame rejection, random request/session identity, fixed limits, response transitions, combined output,
+cancellation, one terminal, and required EOF. Destination-agent L1 tests additionally cover exact protocol routing
+without host-exec/copy regression, token-before-effect ordering, numeric non-root account/home admission, fixed command
+credentials/environment, binary output and nonzero exit, redaction, output overflow, matching/malformed cancellation,
+process-group cancellation, effective vsock deadlines, bounded terminal writes, and shutdown of partial reads.
+
+Source-side L1 covers dedicated-transport isolation, ordinary-exec non-regression, one-request sessions, duplicate and
+partial bootstrap, cancellation of blocked reads/writes, terminal close/EOF, concurrent-session isolation, bounded
+local admission/read time, host disconnect and shutdown cleanup, root/non-root outer accounts, exact AF_UNIX
+peer/pidfd checks, PID-reuse and zombie rejection, stable bounded process ancestry, one claim, process-group
+cancellation, binary CLI output, and redacted failures. This does not qualify API/root source-VM admission, relay policy
+enforcement/audit, root-owned capacity, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live
+VM-to-VM path.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

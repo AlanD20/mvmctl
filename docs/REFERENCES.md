@@ -320,7 +320,7 @@ The VM resolver tries selectors in priority order:
 | `--count, -c N` | Create N VMs in batch | `1` |
 | `--atomic` | All-or-nothing batch: roll back all VMs if any creation fails | `false` |
 | `--skip-deblob` | Skip debloat operations on rootfs | `false` |
-| `--allow-remote-exec` / `--deny-remote-exec` | Allow/deny inter-VM remote execution via vsock relay | from config |
+| `--allow-remote-exec` / `--deny-remote-exec` | Legacy inert setting; pending v0.3.0 removal | from config |
 
 **Examples:**
 

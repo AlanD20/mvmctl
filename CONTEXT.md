@@ -425,10 +425,10 @@ CLI aliases: Domain-level aliases for faster typing: `mvm net` for `mvm network`
 
 ### VM-to-VM execution transition
 
-The legacy guest-originated `remote_vm` handler is fail-closed. It returns one terminal unauthorized response before
-using the source identity or request data and performs no VM lookup, destination vsock lookup, dial, relay, or command
-logging. This deliberately makes VM-to-VM execution unavailable while preserving ordinary host-to-VM execution and
-all copy directions.
+The legacy guest-originated `remote_vm` handler and protocol are removed. The cutover first made every legacy request
+fail closed before source lookup, payload parsing, destination lookup, vsock dial, relay, or command logging; the
+isolated source-session slice then removed the generic callback and shared guest connection entirely. VM-to-VM
+execution remains unavailable while ordinary host-to-VM execution and all copy directions are preserved.
 
 Directional exact-user exec-policy intent is now public through
 `mvm policy exec create <source-vm> <destination-vm> <target-user>`, `mvm policy exec ls [--json]`, and
@@ -455,11 +455,36 @@ process group, and terminal writes have a separate two-second bound. Errors and 
 or process cause. This process-group boundary is not a per-command cgroup guarantee and does not claim cleanup of a
 descendant that deliberately leaves the group.
 
-The destination capability is not a positive VM-to-VM path by itself. No closed source session or API-owned relay
-listener constructs its request, and runtime policy resolution/enforcement, Task 15 root active-session/capacity
-authority, legacy `allow_remote_exec` removal, and Python L2 qualification remain pending. VM-to-VM execution therefore
-remains unavailable. No SQLite VM status, guest-supplied source ID, socket path, or process-local semaphore may
-substitute for root runtime authority.
+The isolated source-session foundation is also implemented but remains dormant. A host-side `SourceSession` accepts
+only an already authority-admitted connection, authenticates it with exact `MVMSRC01`/version-1 framing and the
+configured agent token, and binds one random 32-lowercase-hex source-session ID to one request. Bootstrap and ready
+bodies are limited to 512 bytes. The ordinary non-TTY exec path has a separate named method that carries only this
+session ID; normal exec, shell, and copy do not open or inspect a source session. Unknown ordinary exec response types
+are protocol failures. The legacy generic `OnHostFrame`, shared `activeConn`, `remote_vm`, and
+`internal/vsockhandler` paths are removed.
+
+Inside the source guest, the agent binds a pending session to the exact outer command process created by the matching
+ordinary exec. The outer command may run as root or non-root, starts in a new session/process group, and receives no
+token through its environment, arguments, or filesystem. The mode-`0666` local AF_UNIX broker authorizes by process
+identity rather than path access: it acquires `SO_PEERCRED` and `SO_PEERPIDFD` together, validates and retains pidfds,
+requires matching UID/GID, and twice proves a stable PID/parent/start-time chain to the live outer command before one
+claim. The source-session ID is correlation, not authority. Admission is capped at eight concurrent attempts, local
+request reads at two seconds, and parent traversal at 64 identities. Missing `SO_PEERPIDFD` or incomplete process
+evidence fails closed.
+
+The broker transfers the dedicated transport from disconnect monitoring to exactly one local request and relays the
+closed `MVMEXEC1` stream. Terminal delivery requires physical EOF. Context cancellation closes blocked source-session
+reads or writes, ordinary source-command cancellation kills its process group, the first relay disconnect closes both
+transports, and agent shutdown releases all pending/bound sessions and pins. The local client form is
+`mvm-agent remote --user <non-root> <destination> -- <command>`; it preserves binary output and exposes only generic
+local errors.
+
+These components still do not form a positive VM-to-VM path. No API-owned relay listener opens the admitted source
+connection, reads its request, resolves/enforces the exact exec policy, constructs a destination request, allocates
+Task 15 root active-runtime/concurrent-capacity authority, or writes a command-redacted audit record. Legacy
+`allow_remote_exec` removal and Python L2 qualification also remain pending. VM-to-VM execution therefore remains
+unavailable. No SQLite VM status, guest-supplied source ID, socket path, or process-local semaphore may substitute for
+root runtime authority.
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)
 

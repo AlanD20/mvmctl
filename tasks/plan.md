@@ -58,10 +58,10 @@ continue without silently deleting it.
   API methods and `mvm policy exec create|ls|rm`; creation derives a deterministic identity from exact VM identities
   and target user without consulting network placement. Public traffic CRUD/API/CLI, enforcement compilation, relay
   authorization, and the clean-break removal of the transitional policy path remain pending.
-- Legacy guest-originated `remote_vm` requests now fail closed with one terminal unauthorized response before source
-  lookup, payload parsing, destination lookup, vsock dial, or command logging. Ordinary host execution and copy paths
-  remain unchanged. Public exec-policy CRUD now records desired intent, but the typed replacement relay and its
-  runtime authorization are not active yet.
+- The legacy guest-originated `remote_vm` relay was first severed before source lookup, payload parsing, destination
+  lookup, vsock dial, or command logging and is now removed with its generic host-frame/shared-connection path.
+  Ordinary host execution and copy paths remain unchanged. Public exec-policy CRUD records desired intent, but the
+  typed replacement relay and its runtime authorization are not active yet.
 - The protocol-only `internal/lib/vmexecwire` foundation uses fixed `MVMEXEC1`/version-1 framing with a 64-KiB body
   limit and strict closed source/destination schemas. Only the exact host-built destination request carries the
   canonical lowercase UUIDv4 agent token. A 32-lowercase-hex request identity binds the request, output, terminal, and
@@ -71,8 +71,19 @@ continue without silently deleting it.
   token before effects, resolves an exact non-root account to numeric credentials and a clean absolute home, and runs
   `/bin/sh -c` with fixed environment/home and process-group cancellation. Effective vsock deadlines bound request,
   execution I/O, and a separate two-second terminal write; L1 covers routing, auth order, credential admission,
-  binary output/exit, limits, cancellation, partial-read shutdown, and redaction. This is not a source listener, relay,
-  policy-enforcement path, root capacity authority, or per-command cgroup guarantee.
+  binary output/exit, limits, cancellation, partial-read shutdown, and redaction.
+- The isolated source-session foundation uses a dedicated already-admitted connection and exact
+  `MVMSRC01`/version-1 512-byte bootstrap/ready contract. It authenticates the configured token before registering one
+  random 32-lowercase-hex session ID and permits one source request/response stream. A named ordinary non-TTY exec path
+  carries only that ID; normal exec/copy does not open a source session, and the old `remote_vm`, generic
+  `OnHostFrame`, shared `activeConn`, and `internal/vsockhandler` paths are removed.
+  Inside the source guest, the pending session is bound to the exact outer command's atomically acquired pidfd and
+  stable PID/start identity. The mode-`0666` local AF_UNIX broker requires matching `SO_PEERCRED`/`SO_PEERPIDFD`,
+  retained live pidfds, UID/GID, and a twice-stable bounded parent chain before one claim. The session ID is
+  correlation, not authority, and no token enters the command's environment, arguments, filesystem, or local request.
+  Admission, local request read, command/process ancestry, output, duration, cancellation, disconnect, and shutdown
+  cleanup are bounded. The outer source command may be root or non-root; the destination target remains non-root. This
+  is not an API relay, root source-VM admission, runtime policy/audit/capacity path, or per-command cgroup guarantee.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -794,11 +805,11 @@ The public policy families are:
 - `mvm policy exec`: directional exact source VM to exact destination VM and required non-root target user.
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
-nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, and destination-agent
-non-root process side are implemented. The closed source session, API-owned relay listener, runtime policy
-resolution/enforcement, Task 15 root active-session/capacity authority, legacy flag removal, Python system
-qualification, and the traffic family's replacement public surface remain pending. No implemented host path constructs
-an authorized destination request, so VM-to-VM execution is unavailable.
+nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
+non-root process side, and isolated process-bound source session are implemented. The API-owned relay listener, runtime
+policy resolution/enforcement/audit, Task 15 root active-session/capacity authority, legacy flag removal, Python system
+qualification, and the traffic family's replacement public surface remain pending. No production host path opens a
+source session or constructs an authorized destination request, so VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 

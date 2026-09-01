@@ -289,4 +289,10 @@ Common causes:
 
 > **Note:** The default kernel version (`6.19.9`) is **NOT** an LTS kernel. It is the latest upstream stable at the time of release. Use `--version latest` to resolve the most recent version from the upstream directory listing. If you need long-term support, explicitly pass `--version 6.1.102` or `--version 6.12.21` to `mvm kernel pull --type official`. The LTS versions in the table above are tested and known to work — use them for production deployments.
 
+The dormant v0.3.0 VM-to-VM source-session path additionally requires the guest kernel's `SO_PEERPIDFD` socket
+capability. Source-session admission fails closed when that capability is absent; it never falls back to authorizing a
+numeric PID from `SO_PEERCRED` alone. Treat this as a capability requirement for imported or custom kernels rather than
+inferring support from the version label. End-to-end VM-to-VM execution remains unavailable until the host relay and
+Python L2 qualification land.
+
 *See also: [RESOURCE_MANAGEMENTS.md](RESOURCE_MANAGEMENTS.md) for the kernel YAML config reference and [Firecracker official documentation](https://github.com/firecracker-microvm/firecracker/blob/main/docs/getting-started.md).*
