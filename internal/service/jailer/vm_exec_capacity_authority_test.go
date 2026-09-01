@@ -111,10 +111,10 @@ func TestVMExecCapacityAuthoritiesSerializeGlobalCeilingAcrossIndependentInstanc
 	secondReachedStore := make(chan struct{})
 	secondReachedBootObservation := make(chan struct{})
 	var releaseFirstOnce sync.Once
-	var reservationCalls atomic.Int32
+	var publicationCalls atomic.Int32
 	var acquireCalls atomic.Int32
-	fixture.beforeReservationID = func(ctx context.Context) error {
-		if reservationCalls.Add(1) != 1 {
+	fixture.beforeRenameNoReplace = func(ctx context.Context) error {
+		if publicationCalls.Add(1) != 1 {
 			return nil
 		}
 		close(firstPaused)
@@ -163,7 +163,7 @@ func TestVMExecCapacityAuthoritiesSerializeGlobalCeilingAcrossIndependentInstanc
 	select {
 	case <-firstPaused:
 	case <-ctx.Done():
-		t.Fatal("first authority did not pause after scan and before create")
+		t.Fatal("first authority did not pause immediately before capacity publication")
 	}
 	assert.Equal(t, int32(1), fixture.openStoreCalls.Load())
 	assert.Equal(t, int32(1), fixture.bootObservationCalls.Load())
@@ -404,26 +404,26 @@ func TestVMExecCapacityBoottimeEffectRejectsOverflow(t *testing.T) {
 }
 
 type vmExecCapacityFixture struct {
-	root                 string
-	bootID               string
-	boottimeNS           uint64
-	reservationIDs       []string
-	maxReservations      uint32
-	lock                 *testVMExecCapacityLockGate
-	idsMu                sync.Mutex
-	beforeReservationID  func(context.Context) error
-	onLockAcquireAttempt func()
-	onLockAcquireBlocked func()
-	onOpenStore          func(int32)
-	onBootObservation    func(int32)
-	failDirectorySync    error
-	failTempCleanup      error
-	failStoreRelease     error
-	failLockRelease      error
-	failLockRootRelease  error
-	openStoreCalls       atomic.Int32
-	bootObservationCalls atomic.Int32
-	recordUnlinkCalls    atomic.Int32
+	root                  string
+	bootID                string
+	boottimeNS            uint64
+	reservationIDs        []string
+	maxReservations       uint32
+	lock                  *testVMExecCapacityLockGate
+	idsMu                 sync.Mutex
+	beforeRenameNoReplace func(context.Context) error
+	onLockAcquireAttempt  func()
+	onLockAcquireBlocked  func()
+	onOpenStore           func(int32)
+	onBootObservation     func(int32)
+	failDirectorySync     error
+	failTempCleanup       error
+	failStoreRelease      error
+	failLockRelease       error
+	failLockRootRelease   error
+	openStoreCalls        atomic.Int32
+	bootObservationCalls  atomic.Int32
+	recordUnlinkCalls     atomic.Int32
 }
 
 func newVMExecCapacityFixture(t *testing.T, maxReservations uint32) *vmExecCapacityFixture {
@@ -471,12 +471,7 @@ func (fixture *vmExecCapacityFixture) deps() vmExecCapacityAuthorityDeps {
 			}
 			return fixture.bootID, nil
 		},
-		newReservationID: func(ctx context.Context) (vmExecReservationID, error) {
-			if fixture.beforeReservationID != nil {
-				if err := fixture.beforeReservationID(ctx); err != nil {
-					return vmExecReservationID{}, err
-				}
-			}
+		newReservationID: func(context.Context) (vmExecReservationID, error) {
 			fixture.idsMu.Lock()
 			defer fixture.idsMu.Unlock()
 			if len(fixture.reservationIDs) == 0 {
@@ -507,6 +502,21 @@ func (fixture *vmExecCapacityFixture) openStore(ctx context.Context) *vmExecCapa
 			fixture.recordUnlinkCalls.Add(1)
 		}
 		return realUnlink(unlinkCtx, fd, name, flags)
+	}
+	if fixture.beforeRenameNoReplace != nil {
+		realRenameNoReplace := store.state.deps.renameNoReplace
+		store.state.deps.renameNoReplace = func(
+			renameCtx context.Context,
+			oldFD int,
+			oldName string,
+			newFD int,
+			newName string,
+		) error {
+			if err := fixture.beforeRenameNoReplace(renameCtx); err != nil {
+				return err
+			}
+			return realRenameNoReplace(renameCtx, oldFD, oldName, newFD, newName)
+		}
 	}
 	if fixture.failDirectorySync != nil {
 		realSync := store.state.deps.fsync
