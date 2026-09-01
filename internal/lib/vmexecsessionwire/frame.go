@@ -13,9 +13,7 @@ const (
 	wireMagic        = "MVMXSES1"
 	wireVersion      = uint16(1)
 	framePrefixBytes = len(wireMagic) + 2 + 4
-
-	// MaxFrameBytes bounds every retained VM-exec session JSON frame before allocation.
-	MaxFrameBytes = 64 * 1024
+	maxFrameBytes    = 64 * 1024
 )
 
 func encodeFrame(ctx context.Context, writer io.Writer, body []byte) error {
@@ -28,8 +26,8 @@ func encodeFrame(ctx context.Context, writer io.Writer, body []byte) error {
 	if writer == nil {
 		return validationError("retained VM-exec session writer is required")
 	}
-	if len(body) == 0 || len(body) > MaxFrameBytes {
-		return validationError(fmt.Sprintf("retained VM-exec session frame must be 1-%d bytes", MaxFrameBytes))
+	if len(body) == 0 || len(body) > maxFrameBytes {
+		return validationError(fmt.Sprintf("retained VM-exec session frame must be 1-%d bytes", maxFrameBytes))
 	}
 
 	prefix := make([]byte, framePrefixBytes)
@@ -66,8 +64,8 @@ func decodeFrame(ctx context.Context, reader io.Reader) ([]byte, error) {
 		return nil, validationError("unsupported retained VM-exec session frame version")
 	}
 	bodyLength := binary.BigEndian.Uint32(prefix[len(wireMagic)+2:])
-	if bodyLength == 0 || bodyLength > MaxFrameBytes {
-		return nil, validationError(fmt.Sprintf("retained VM-exec session frame must be 1-%d bytes", MaxFrameBytes))
+	if bodyLength == 0 || bodyLength > maxFrameBytes {
+		return nil, validationError(fmt.Sprintf("retained VM-exec session frame must be 1-%d bytes", maxFrameBytes))
 	}
 	body := make([]byte, bodyLength)
 	if _, err := io.ReadFull(reader, body); err != nil {
@@ -77,6 +75,30 @@ func decodeFrame(ctx context.Context, reader io.Reader) ([]byte, error) {
 		return nil, errs.WrapMsg(errs.CodeProcessError, "read retained VM-exec session frame", err)
 	}
 	return body, nil
+}
+
+func requireSessionEOF(ctx context.Context, reader io.Reader) error {
+	if ctx == nil {
+		return validationError("retained VM-exec session context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return errs.WrapMsg(errs.CodeProcessError, "read retained VM-exec session terminal EOF", err)
+	}
+	if reader == nil {
+		return validationError("retained VM-exec session reader is required")
+	}
+	var trailing [1]byte
+	count, err := reader.Read(trailing[:])
+	if contextErr := ctx.Err(); contextErr != nil {
+		return errs.WrapMsg(errs.CodeProcessError, "read retained VM-exec session terminal EOF", contextErr)
+	}
+	if count > 0 || err == nil {
+		return validationError("retained VM-exec session terminal frame contains trailing input")
+	}
+	if err != io.EOF {
+		return errs.WrapMsg(errs.CodeValidationFailed, "read retained VM-exec session terminal EOF", err)
+	}
+	return nil
 }
 
 func writeAll(ctx context.Context, writer io.Writer, value []byte) error {

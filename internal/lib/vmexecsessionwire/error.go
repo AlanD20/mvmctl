@@ -15,7 +15,7 @@ const (
 	maxErrorMessageBytes   = 4 * 1024
 	maxErrorOperationBytes = 128
 	maxErrorEntityBytes    = 64
-	maxErrorDetailCount    = 32
+	maxErrorDetailCount    = maxJSONFields
 	maxErrorDetailKeyBytes = 64
 
 	omittedDetailsKey = "session_details_omitted"
@@ -34,16 +34,19 @@ var domainErrorFields = []string{"code", "class", "message", "operation", "entit
 
 func normalizeDomainError(operationErr error) domainErrorWire {
 	domainErr := errs.AsDomainError(operationErr)
-	if domainErr == nil || !validErrorCode(string(domainErr.Code)) || !validErrorClass(domainErr.Class) ||
-		!validText(domainErr.Message, maxErrorMessageBytes, false) ||
+	if domainErr == nil || !validErrorClass(domainErr.Class) ||
 		!validOptionalIdentifier(domainErr.Op, maxErrorOperationBytes) ||
 		!validErrorEntity(domainErr.Entity) {
+		return fallbackDomainError()
+	}
+	publicMessage, ok := publicErrorMessage(domainErr.Code)
+	if !ok {
 		return fallbackDomainError()
 	}
 	return domainErrorWire{
 		Code:      string(domainErr.Code),
 		Class:     encodeErrorClass(domainErr.Class),
-		Message:   domainErr.Message,
+		Message:   publicMessage,
 		Operation: domainErr.Op,
 		Entity:    domainErr.Entity,
 		Details:   normalizeErrorDetails(domainErr.Details),
@@ -68,6 +71,10 @@ func normalizeErrorDetails(details map[string]any) map[string]json.RawMessage {
 	keys := make([]string, 0, len(details))
 	omitted := false
 	for key, value := range details {
+		if key == omittedDetailsKey {
+			omitted = true
+			continue
+		}
 		if !validDetailKey(key) || !safeDetailValue(value) {
 			omitted = true
 			continue
@@ -106,11 +113,16 @@ func decodeDomainError(raw json.RawMessage) (*errs.DomainError, error) {
 	if err != nil {
 		return nil, err
 	}
-	code, err := decodeField[string](fields["code"], "failure error code")
-	if err != nil || !validErrorCode(code) {
-		if err != nil {
-			return nil, err
-		}
+	codeValue, err := decodeField[string](fields["code"], "failure error code")
+	if err != nil {
+		return nil, err
+	}
+	code := errs.Code(codeValue)
+	publicMessage, ok := publicErrorMessage(code)
+	if !ok {
+		return nil, validationError("retained VM-exec session failure error code is invalid")
+	}
+	if !validErrorCode(codeValue) {
 		return nil, validationError("retained VM-exec session failure error code is invalid")
 	}
 	classValue, err := decodeField[string](fields["class"], "failure error class")
@@ -122,7 +134,7 @@ func decodeDomainError(raw json.RawMessage) (*errs.DomainError, error) {
 		return nil, validationError("retained VM-exec session failure error class is invalid")
 	}
 	message, err := decodeField[string](fields["message"], "failure error message")
-	if err != nil || !validText(message, maxErrorMessageBytes, false) {
+	if err != nil || message != publicMessage || !validText(message, maxErrorMessageBytes, false) {
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +159,7 @@ func decodeDomainError(raw json.RawMessage) (*errs.DomainError, error) {
 		return nil, err
 	}
 	return &errs.DomainError{
-		Code: errs.Code(code), Class: class, Message: message, Op: operation, Entity: entity, Details: details,
+		Code: code, Class: class, Message: message, Op: operation, Entity: entity, Details: details,
 	}, nil
 }
 
@@ -239,6 +251,25 @@ func safeDetailValue(value any) bool {
 
 func validErrorCode(code string) bool {
 	return validRequiredIdentifier(code, maxErrorCodeBytes)
+}
+
+func publicErrorMessage(code errs.Code) (string, bool) {
+	switch code {
+	case errs.CodeValidationFailed:
+		return "retained VM-exec session request was invalid", true
+	case errs.CodeProcessError:
+		return "retained VM-exec session process failed", true
+	case errs.CodeVMAtomicFailed:
+		return "retained VM-exec session transition failed", true
+	case errs.CodeVMResourceExhausted:
+		return "retained VM-exec session capacity is exhausted", true
+	case errs.CodeUnauthorized:
+		return "retained VM-exec session is not authorized", true
+	case errs.CodeInternal:
+		return "retained VM-exec session failed", true
+	default:
+		return "", false
+	}
 }
 
 func validErrorEntity(entity string) bool {

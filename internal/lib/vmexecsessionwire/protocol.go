@@ -25,7 +25,7 @@ var fixedPhaseFields = []string{"schema_version", "phase"}
 var openSourceFields = []string{"schema_version", "phase", "source_vm_id", "destination_vm_id"}
 var failureFields = []string{"schema_version", "phase", "error"}
 
-// OpenSource identifies the exact distinct VM pair whose live source connection accompanies the first frame.
+// OpenSource identifies the exact distinct VM pair named by the first structural-control frame.
 type OpenSource struct {
 	SourceVMID      string `json:"source_vm_id"`
 	DestinationVMID string `json:"destination_vm_id"`
@@ -49,14 +49,46 @@ type failureEnvelope struct {
 	Error         domainErrorWire `json:"error"`
 }
 
-// Outcome is the terminal released or failure response. A failure preserves only the bounded safe DomainError wire
-// projection; its cause and sensitive diagnostic material never cross this protocol.
+// SourceRetainedResult is the exact source-retention success or terminal failure reply.
+type SourceRetainedResult struct {
+	retained       bool
+	operationError *errs.DomainError
+}
+
+// Retained reports whether the sidecar structurally retained the source descriptor.
+func (result SourceRetainedResult) Retained() bool {
+	return result.retained
+}
+
+// OperationError returns the bounded terminal failure, or nil after structural retention.
+func (result SourceRetainedResult) OperationError() *errs.DomainError {
+	return result.operationError
+}
+
+// ReadyResult is the exact structurally-ready success or terminal failure reply.
+type ReadyResult struct {
+	ready          bool
+	operationError *errs.DomainError
+}
+
+// Ready reports whether the sidecar structurally retained both descriptors.
+func (result ReadyResult) Ready() bool {
+	return result.ready
+}
+
+// OperationError returns the bounded terminal failure, or nil after structural readiness.
+func (result ReadyResult) OperationError() *errs.DomainError {
+	return result.operationError
+}
+
+// Outcome is the terminal structurally-released or failure response. A failure preserves only the bounded safe
+// DomainError wire projection; its cause and sensitive diagnostic material never cross this protocol.
 type Outcome struct {
 	released       bool
 	operationError *errs.DomainError
 }
 
-// Released reports whether root released the retained session cleanly.
+// Released reports whether the sidecar structurally released the retained session cleanly.
 func (outcome Outcome) Released() bool {
 	return outcome.released
 }
@@ -122,17 +154,21 @@ func DecodeOpenSource(ctx context.Context, reader io.Reader) (OpenSource, error)
 	return request, nil
 }
 
-// EncodeSourceRetained acknowledges that root retained and authenticated the source connection.
+// EncodeSourceRetained reports structural retention of the source descriptor.
 func EncodeSourceRetained(ctx context.Context, writer io.Writer) error {
 	return encodeFixedPhase(ctx, writer, phaseSourceRetained)
 }
 
-// DecodeSourceRetained reads the exact source-retained acknowledgement.
-func DecodeSourceRetained(ctx context.Context, reader io.Reader) error {
-	return decodeFixedPhase(ctx, reader, phaseSourceRetained)
+// DecodeSourceRetained reads exact structural source retention or one terminal failure.
+func DecodeSourceRetained(ctx context.Context, reader io.Reader) (SourceRetainedResult, error) {
+	success, operationErr, err := decodeSetupResult(ctx, reader, phaseSourceRetained)
+	if err != nil {
+		return SourceRetainedResult{}, err
+	}
+	return SourceRetainedResult{retained: success, operationError: operationErr}, nil
 }
 
-// EncodeBindDestination requests admission of the one destination descriptor attached to this phase.
+// EncodeBindDestination requests structural retention of the one destination descriptor attached to this phase.
 func EncodeBindDestination(ctx context.Context, writer io.Writer) error {
 	return encodeFixedPhase(ctx, writer, phaseBindDestination)
 }
@@ -142,17 +178,21 @@ func DecodeBindDestination(ctx context.Context, reader io.Reader) error {
 	return decodeFixedPhase(ctx, reader, phaseBindDestination)
 }
 
-// EncodeReady acknowledges that root retains and authenticates both VM connections.
+// EncodeReady reports structural retention of both VM descriptors.
 func EncodeReady(ctx context.Context, writer io.Writer) error {
 	return encodeFixedPhase(ctx, writer, phaseReady)
 }
 
-// DecodeReady reads the exact ready acknowledgement.
-func DecodeReady(ctx context.Context, reader io.Reader) error {
-	return decodeFixedPhase(ctx, reader, phaseReady)
+// DecodeReady reads exact structural readiness or one terminal failure.
+func DecodeReady(ctx context.Context, reader io.Reader) (ReadyResult, error) {
+	success, operationErr, err := decodeSetupResult(ctx, reader, phaseReady)
+	if err != nil {
+		return ReadyResult{}, err
+	}
+	return ReadyResult{ready: success, operationError: operationErr}, nil
 }
 
-// EncodeRelease requests explicit release of the retained pair and capacity lease.
+// EncodeRelease requests cleanup of this structural session's retained resources.
 func EncodeRelease(ctx context.Context, writer io.Writer) error {
 	return encodeFixedPhase(ctx, writer, phaseRelease)
 }
@@ -195,6 +235,9 @@ func DecodeOutcome(ctx context.Context, reader io.Reader) (Outcome, error) {
 		if decodeErr := decodePhaseIdentity(fields, phaseReleased); decodeErr != nil {
 			return Outcome{}, decodeErr
 		}
+		if decodeErr := requireSessionEOF(ctx, reader); decodeErr != nil {
+			return Outcome{}, decodeErr
+		}
 		return Outcome{released: true}, nil
 	case phaseFailure:
 		fields, decodeErr := decodeClosedObject(body, failureFields, "failure outcome")
@@ -208,9 +251,56 @@ func DecodeOutcome(ctx context.Context, reader io.Reader) (Outcome, error) {
 		if decodeErr != nil {
 			return Outcome{}, decodeErr
 		}
+		if decodeErr := requireSessionEOF(ctx, reader); decodeErr != nil {
+			return Outcome{}, decodeErr
+		}
 		return Outcome{operationError: operationErr}, nil
 	default:
 		return Outcome{}, validationError("retained VM-exec session outcome has an invalid phase")
+	}
+}
+
+func decodeSetupResult(
+	ctx context.Context,
+	reader io.Reader,
+	expectedSuccessPhase string,
+) (bool, *errs.DomainError, error) {
+	body, err := decodeAndValidateFrame(ctx, reader)
+	if err != nil {
+		return false, nil, err
+	}
+	phase, err := decodePhase(body)
+	if err != nil {
+		return false, nil, err
+	}
+	switch phase {
+	case expectedSuccessPhase:
+		fields, decodeErr := decodeClosedObject(body, fixedPhaseFields, expectedSuccessPhase+" result")
+		if decodeErr != nil {
+			return false, nil, decodeErr
+		}
+		if decodeErr := decodePhaseIdentity(fields, expectedSuccessPhase); decodeErr != nil {
+			return false, nil, decodeErr
+		}
+		return true, nil, nil
+	case phaseFailure:
+		fields, decodeErr := decodeClosedObject(body, failureFields, expectedSuccessPhase+" failure")
+		if decodeErr != nil {
+			return false, nil, decodeErr
+		}
+		if decodeErr := decodePhaseIdentity(fields, phaseFailure); decodeErr != nil {
+			return false, nil, decodeErr
+		}
+		operationErr, decodeErr := decodeDomainError(fields["error"])
+		if decodeErr != nil {
+			return false, nil, decodeErr
+		}
+		if decodeErr := requireSessionEOF(ctx, reader); decodeErr != nil {
+			return false, nil, decodeErr
+		}
+		return false, operationErr, nil
+	default:
+		return false, nil, validationError("retained VM-exec setup result has an invalid phase")
 	}
 }
 
