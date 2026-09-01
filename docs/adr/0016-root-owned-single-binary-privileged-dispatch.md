@@ -160,19 +160,22 @@ and fd-0 AF_UNIX control socket. It handles one relay lease and exits; it is not
 privileged channel, or second protocol listener. File descriptor 0 remains control-only. No `ExtraFiles`, `sudo -C`,
 sudoers extension, environment input, caller path, raw command, or generic operation is permitted.
 
-The normal `pkg/api` process opens and authenticates the existing source and destination Firecracker connections. Only
-after it has read the strict source request, resolved the exact destination, and allowed the directional policy does it
-start this action. The initial closed request names the exact source/destination VM IDs and attaches exactly one source
-connection duplicate with `SCM_RIGHTS` on the first request byte. A closed second phase attaches exactly one destination
-connection duplicate after root pair admission. Every ancillary receive uses `MSG_CMSG_CLOEXEC`, rejects truncation and
-missing, extra, unknown, duplicate, or late control messages, and proves one connected non-listening AF_UNIX stream.
-The action accepts no socket path, agent token, target user, command, policy material, or response payload.
+The normal `pkg/api` process opens and authenticates the existing source Firecracker connection. Only after it has read
+the strict source request, resolved the exact destination, and allowed the directional policy does it start this action.
+The initial closed request names the exact source/destination VM IDs and attaches exactly one source connection duplicate
+with `SCM_RIGHTS` on the first request byte. After root pair admission, the normal process performs only the destination
+Firecracker UDS `CONNECT` handshake, and a closed second phase attaches exactly one destination connection duplicate.
+Every ancillary receive uses `MSG_CMSG_CLOEXEC`, rejects truncation and missing, extra, unknown, duplicate, or late
+control messages, and proves one connected non-listening AF_UNIX stream. The action accepts no socket path, agent token,
+target user, command, policy material, or response payload.
 
 Root binds each live connection to its exact retained Firecracker record with `SO_PEERCRED`, `SO_PEERPIDFD`, PID/start
 identity, complete active-process verification, and final liveness. Socket metadata proves the Firecracker peer, not
-the selected guest port; the normal process's independent token/bootstrap handshake proves the agent endpoint. Root
-reserves the exact active pair at the compiled host-global ceiling of eight, retains the pair/capacity lease and both
-connection duplicates, and returns ready only after both FD proofs pass.
+the selected guest port; the normal process's independent `SourceSession` token/bootstrap handshake proves the source
+agent endpoint. Root reserves the exact active pair at the compiled host-global ceiling of eight, retains the
+pair/capacity lease and both connection duplicates, and returns ready only after both FD proofs pass. Only after that
+ready response may the normal process send the destination's token-and-command-bearing `DestinationRequest`; the
+destination agent validates it before any effect.
 
 The action-specific, closed, versioned session frames are bounded independently of ordinary `MVMRES01`; they cannot be
 selected by another action. Explicit release, control EOF, caller crash, setup failure, or the absolute

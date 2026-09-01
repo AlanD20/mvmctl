@@ -335,12 +335,13 @@ constructed its request, and root runtime admission, Task 15 active-session/capa
 resolution/enforcement, and positive Python system qualification were still pending.
 
 The fifth slice implements the closed source-session and guest process boundary without activating the host relay. A
-host `SourceSession` owns one already authority-admitted connection, authenticates the source guest through exact
+host `SourceSession` owns one caller-opened source connection, authenticates the source guest through exact
 `MVMSRC01`/version-1 framing and its canonical agent token, and carries one random 32-lowercase-hex session ID plus one
 bounded source request. Bootstrap and ready frames are limited to 512 bytes. The ordinary exec request carries only the
 session ID through a named `ExecWithSourceSession` path; normal exec/copy behavior is unchanged and creates no second
 connection. The session ID is correlation, not authority, and the guest command receives no token through its
-environment, arguments, filesystem, or local request.
+environment, arguments, filesystem, or local request. The later root-retained Firecracker-peer admission remains
+mandatory before any destination effect.
 
 The guest source broker is mode `0666` by design so a root or non-root outer command can reach it, but filesystem access
 does not authorize a request. The agent binds the pending session to the exact outer command's atomically acquired
@@ -415,19 +416,22 @@ AF_UNIX control socket only after `pkg/api` has authenticated and read the stric
 destination, and allowed the directional source/destination/non-root-user policy. There is no helper binary, daemon,
 extra inherited descriptor, sudoers expansion, generic privileged action, or generic descriptor channel.
 
-The normal API process continues to perform both existing Firecracker UDS `CONNECT` handshakes and both agent-token
-handshakes. Its initial closed action request names the exact source and destination VM IDs and attaches exactly one
-duplicate of the live source connection with `SCM_RIGHTS` on the first request byte. Root receives ancillary data with
-`MSG_CMSG_CLOEXEC`, rejects missing, extra, unknown, late, or truncated control messages, and requires one connected,
-non-listening `AF_UNIX` `SOCK_STREAM` descriptor with close-on-exec. Root then invokes the active-pair authority with a
-fixed host-global ceiling of eight sessions and binds the received connection to the retained source record through
-`SO_PEERCRED`, `SO_PEERPIDFD`, exact PID/start identity, complete active-process identity, and final liveness.
+The normal API process performs the source Firecracker UDS `CONNECT` handshake and the `SourceSession` token/bootstrap
+before root admission. Its initial closed action request names the exact source and destination VM IDs and attaches
+exactly one duplicate of the live source connection with `SCM_RIGHTS` on the first request byte. Root receives ancillary
+data with `MSG_CMSG_CLOEXEC`, rejects missing, extra, unknown, late, or truncated control messages, and requires one
+connected, non-listening `AF_UNIX` `SOCK_STREAM` descriptor with close-on-exec. Root then invokes the active-pair
+authority with a fixed host-global ceiling of eight sessions and binds the received connection to the retained source
+record through `SO_PEERCRED`, `SO_PEERPIDFD`, exact PID/start identity, complete active-process identity, and final
+liveness.
 
 This socket proof establishes the exact source Firecracker peer, not the selected guest port. The independent
-`SourceSession` token/bootstrap handshake remains the agent-and-port proof. After pair admission, the API dials and
-authenticates the destination, sends exactly one destination-connection duplicate in a closed second phase, and root
-applies the same peer-pidfd, record, identity, and final-liveness proof before returning ready. Root receives no UDS
-path, agent token, target user, command, policy material, or response payload.
+`SourceSession` token/bootstrap handshake remains the source agent-and-port proof. After pair admission, the API
+performs only the destination Firecracker UDS `CONNECT` handshake and sends exactly one destination-connection duplicate
+in a closed second phase. Root applies the same peer-pidfd, record, identity, and final-liveness proof before returning
+ready. Only then does the API send the token-and-command-bearing `DestinationRequest`, which the destination agent must
+validate before any effect. Root receives no UDS path, agent token, target user, command, policy material, or response
+payload.
 
 The root child retains the pair/capacity lease and duplicates of both admitted connections for the entire relay. An
 explicit release, control EOF, API crash, setup failure, or the absolute `CLOCK_BOOTTIME` relay-stop deadline shuts
