@@ -31,13 +31,25 @@ func TestVMExecReleaseFrameReaderReadsOrdinaryBytesAndCleanEOF(t *testing.T) {
 	assert.NoError(t, reader.Close())
 }
 
-func TestVMExecReleaseFrameReaderRejectsAndClosesAnyAncillary(t *testing.T) {
+func TestVMExecReleaseFrameReaderRejectsProtocolViolationsAndClosesAncillary(t *testing.T) {
 	tests := map[string][]fakeVMExecReceive{
 		"initial ancillary": {{payload: []byte("r"), control: unix.UnixRights(40)}},
 		"late ancillary": {
 			{payload: []byte("r")},
 			{payload: []byte("e"), control: unix.UnixRights(40)},
 		},
+		"sender address": {{
+			payload: []byte("r"), control: unix.UnixRights(40), from: &unix.SockaddrUnix{Name: "sender"},
+		}},
+		"unexpected flags": {{
+			payload: []byte("r"), control: unix.UnixRights(40), flags: unix.MSG_OOB,
+		}},
+		"payload truncation": {{
+			payload: []byte("r"), control: unix.UnixRights(40), flags: unix.MSG_TRUNC,
+		}},
+		"control truncation": {{
+			payload: []byte("r"), control: unix.UnixRights(40), flags: unix.MSG_CTRUNC,
+		}},
 	}
 	for name, script := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -54,7 +66,9 @@ func TestVMExecReleaseFrameReaderRejectsAndClosesAnyAncillary(t *testing.T) {
 				}
 			}
 
-			assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+			domainErr := requireVMExecDomainError(t, err)
+			assert.Equal(t, errs.CodeValidationFailed, domainErr.Code)
+			assert.Equal(t, errs.ClassValidation, domainErr.Class)
 			assertVMExecFDClosedOnce(t, tracker, fd)
 			assert.Zero(t, tracker.shutdownCount(fd))
 			_, repeatedErr := reader.Read(make([]byte, 1))

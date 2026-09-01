@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/lib/vmexecsessionwire"
 	"mvmctl/pkg/errs"
 )
 
@@ -23,14 +24,14 @@ type vmExecConnectionReader struct {
 	deadline   time.Time
 	deps       vmExecConnectionReaderDeps
 
-	carrierRead     bool
-	connectionTaken bool
-	closed          bool
-	terminalErr     error
-	closeErr        error
-	connection      *vmExecReceivedConnectionOwner
-	installed       map[int]*vmExecReceivedConnectionOwner
-	installOrder    []*vmExecReceivedConnectionOwner
+	carrierRead  bool
+	phaseDecoded bool
+	closed       bool
+	terminalErr  error
+	closeErr     error
+	connection   *vmExecReceivedConnectionOwner
+	installed    map[int]*vmExecReceivedConnectionOwner
+	installOrder []*vmExecReceivedConnectionOwner
 }
 
 type vmExecReceivedConnectionOwner struct {
@@ -187,18 +188,52 @@ func (reader *vmExecConnectionReader) Close() error {
 	return reader.closeErr
 }
 
-func (reader *vmExecConnectionReader) takeConnection() (*vmExecRetainedConnection, error) {
+func (reader *vmExecConnectionReader) decodeOpenSourceAndRetain(
+	ctx context.Context,
+) (vmexecsessionwire.OpenSource, *vmExecRetainedConnection, error) {
+	var zero vmexecsessionwire.OpenSource
+	if reader == nil {
+		return zero, nil, errs.New(errs.CodeValidationFailed, "VM-exec connection reader is required")
+	}
+	request, err := vmexecsessionwire.DecodeOpenSource(ctx, reader)
+	if err != nil {
+		return zero, nil, reader.fail(err)
+	}
+	reader.phaseDecoded = true
+	connection, err := reader.retainDecodedConnection()
+	if err != nil {
+		return zero, nil, reader.fail(err)
+	}
+	return request, connection, nil
+}
+
+func (reader *vmExecConnectionReader) decodeBindDestinationAndRetain(
+	ctx context.Context,
+) (*vmExecRetainedConnection, error) {
 	if reader == nil {
 		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection reader is required")
 	}
-	if reader.closed || reader.terminalErr != nil || !reader.carrierRead || reader.connection == nil {
+	if err := vmexecsessionwire.DecodeBindDestination(ctx, reader); err != nil {
+		return nil, reader.fail(err)
+	}
+	reader.phaseDecoded = true
+	connection, err := reader.retainDecodedConnection()
+	if err != nil {
+		return nil, reader.fail(err)
+	}
+	return connection, nil
+}
+
+func (reader *vmExecConnectionReader) retainDecodedConnection() (*vmExecRetainedConnection, error) {
+	if reader == nil {
+		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection reader is required")
+	}
+	if reader.closed || reader.terminalErr != nil || !reader.phaseDecoded || reader.connection == nil {
 		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection is not available for transfer")
 	}
-	if reader.connectionTaken {
-		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection was already transferred")
-	}
 	owner := reader.connection
-	reader.connectionTaken = true
+	reader.phaseDecoded = false
+	reader.connection = nil
 	delete(reader.installed, owner.fd)
 	for index := range reader.installOrder {
 		if reader.installOrder[index] == owner {

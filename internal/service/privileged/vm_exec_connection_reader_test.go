@@ -1,6 +1,7 @@
 package privileged
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
+	"mvmctl/internal/lib/vmexecsessionwire"
 	"mvmctl/pkg/errs"
 )
 
@@ -35,6 +37,8 @@ type fakeVMExecCloseTracker struct {
 	shutdownContexts []context.Context
 	err              error
 	shutdownErr      error
+	shutdownStarted  chan<- struct{}
+	shutdownRelease  <-chan struct{}
 }
 
 func TestVMExecConnectionReaderRealSocketRoundTrip(t *testing.T) {
@@ -479,35 +483,103 @@ func TestVMExecConnectionReaderPollsExactDescriptorAndTimeout(t *testing.T) {
 	}
 }
 
-func TestVMExecConnectionReaderTransfersAdmittedConnectionExactlyOnce(t *testing.T) {
-	fd := requireRawTestFD(t)
-	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
-	reader, _ := newScriptedVMExecReader(t, []fakeVMExecReceive{{
-		payload: []byte{0x41},
-		control: unix.UnixRights(fd),
-	}}, tracker)
-	connection, err := reader.takeConnection()
-	assert.Nil(t, connection)
-	assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+func TestVMExecConnectionReaderDecodesTypedPhaseBeforeTransferring(t *testing.T) {
+	request := vmexecsessionwire.OpenSource{
+		SourceVMID:      "0123456789abcdef0123456789abcdef",
+		DestinationVMID: "fedcba9876543210fedcba9876543210",
+	}
+	var openFrame bytes.Buffer
+	require.NoError(t, vmexecsessionwire.EncodeOpenSource(t.Context(), &openFrame, request))
+	var bindFrame bytes.Buffer
+	require.NoError(t, vmexecsessionwire.EncodeBindDestination(t.Context(), &bindFrame))
 
-	_, err = reader.Read(make([]byte, 1))
-	require.NoError(t, err)
-	connection, err = reader.takeConnection()
-	require.NoError(t, err)
-	require.NotNil(t, connection)
-	repeated, err := reader.takeConnection()
-	assert.Nil(t, repeated)
-	assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+	t.Run("open source", func(t *testing.T) {
+		fd := requireRawTestFD(t)
+		tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+		reader := newFramedVMExecConnectionReader(t, openFrame.Bytes(), fd, tracker)
 
-	require.NoError(t, reader.Close())
-	require.NoError(t, reader.Close())
-	_, err = unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
-	require.NoError(t, err)
-	require.NoError(t, connection.shutdownAndClose(t.Context()))
-	require.NoError(t, connection.shutdownAndClose(t.Context()))
+		gotRequest, connection, err := reader.decodeOpenSourceAndRetain(t.Context())
 
-	assertVMExecFDClosedOnce(t, tracker, fd)
-	assert.Equal(t, 1, tracker.shutdownCount(fd))
+		require.NoError(t, err)
+		if diff := cmp.Diff(request, gotRequest); diff != "" {
+			t.Errorf("open-source request mismatch (-want +got):\n%s", diff)
+		}
+		require.NotNil(t, connection)
+		require.NoError(t, reader.Close())
+		_, err = unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+		require.NoError(t, err)
+		require.NoError(t, connection.shutdownAndClose(t.Context()))
+		assertVMExecFDClosedOnce(t, tracker, fd)
+		assert.Equal(t, 1, tracker.shutdownCount(fd))
+	})
+
+	t.Run("bind destination", func(t *testing.T) {
+		fd := requireRawTestFD(t)
+		tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+		reader := newFramedVMExecConnectionReader(t, bindFrame.Bytes(), fd, tracker)
+
+		connection, err := reader.decodeBindDestinationAndRetain(t.Context())
+
+		require.NoError(t, err)
+		require.NotNil(t, connection)
+		require.NoError(t, reader.Close())
+		require.NoError(t, connection.shutdownAndClose(t.Context()))
+		assertVMExecFDClosedOnce(t, tracker, fd)
+		assert.Equal(t, 1, tracker.shutdownCount(fd))
+	})
+}
+
+func TestVMExecConnectionReaderKeepsOwnershipWhenTypedPhaseDecodeFails(t *testing.T) {
+	request := vmexecsessionwire.OpenSource{
+		SourceVMID:      "0123456789abcdef0123456789abcdef",
+		DestinationVMID: "fedcba9876543210fedcba9876543210",
+	}
+	var valid bytes.Buffer
+	require.NoError(t, vmexecsessionwire.EncodeOpenSource(t.Context(), &valid, request))
+	var wrongPhase bytes.Buffer
+	require.NoError(t, vmexecsessionwire.EncodeBindDestination(t.Context(), &wrongPhase))
+
+	tests := map[string]struct {
+		frame  []byte
+		decode func(context.Context, *vmExecConnectionReader) (*vmExecRetainedConnection, error)
+	}{
+		"incomplete prefix": {
+			frame: valid.Bytes()[:5],
+			decode: func(ctx context.Context, reader *vmExecConnectionReader) (*vmExecRetainedConnection, error) {
+				_, connection, err := reader.decodeOpenSourceAndRetain(ctx)
+				return connection, err
+			},
+		},
+		"malformed phase": {
+			frame: wrongPhase.Bytes(),
+			decode: func(ctx context.Context, reader *vmExecConnectionReader) (*vmExecRetainedConnection, error) {
+				_, connection, err := reader.decodeOpenSourceAndRetain(ctx)
+				return connection, err
+			},
+		},
+		"truncated body": {
+			frame: valid.Bytes()[:valid.Len()-1],
+			decode: func(ctx context.Context, reader *vmExecConnectionReader) (*vmExecRetainedConnection, error) {
+				return reader.decodeBindDestinationAndRetain(ctx)
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			fd := requireRawTestFD(t)
+			tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+			reader := newFramedVMExecConnectionReader(t, test.frame, fd, tracker)
+
+			connection, err := test.decode(t.Context(), reader)
+
+			assert.Nil(t, connection)
+			assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+			assertVMExecFDClosedOnce(t, tracker, fd)
+			assert.Zero(t, tracker.shutdownCount(fd))
+			assert.NoError(t, reader.Close())
+		})
+	}
 }
 
 // Rationale: The transferred capability must cache the complete shutdown-and-close result while preserving both
@@ -516,23 +588,51 @@ func TestVMExecRetainedConnectionAggregatesShutdownAndCloseOnce(t *testing.T) {
 	fd := requireRawTestFD(t)
 	shutdownErr := errors.New("shutdown sentinel")
 	closeErr := errors.New("close sentinel")
+	shutdownStarted := make(chan struct{}, 1)
+	shutdownRelease := make(chan struct{})
 	tracker := &fakeVMExecCloseTracker{
 		calls: make(map[int]int), shutdownCalls: make(map[int]int), err: closeErr, shutdownErr: shutdownErr,
+		shutdownStarted: shutdownStarted, shutdownRelease: shutdownRelease,
 	}
-	t.Cleanup(func() { assert.NoError(t, unix.Close(fd)) })
-	reader, _ := newScriptedVMExecReader(t, []fakeVMExecReceive{{
-		payload: []byte{0x41}, control: unix.UnixRights(fd),
-	}}, tracker)
-	_, err := reader.Read(make([]byte, 1))
-	require.NoError(t, err)
-	connection, err := reader.takeConnection()
+	var frame bytes.Buffer
+	require.NoError(t, vmexecsessionwire.EncodeBindDestination(t.Context(), &frame))
+	reader := newFramedVMExecConnectionReader(t, frame.Bytes(), fd, tracker)
+	connection, err := reader.decodeBindDestinationAndRetain(t.Context())
 	require.NoError(t, err)
 	type contextKey struct{}
 	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), contextKey{}, "cleanup-value"))
 	cancel()
 
-	firstErr := connection.shutdownAndClose(ctx)
-	secondErr := connection.shutdownAndClose(context.Background())
+	start := make(chan struct{})
+	ready := make(chan struct{}, 2)
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			ready <- struct{}{}
+			<-start
+			results <- connection.shutdownAndClose(ctx)
+		}()
+	}
+	<-ready
+	<-ready
+	close(start)
+	select {
+	case <-shutdownStarted:
+	case <-time.After(time.Second):
+		t.Fatal("retained connection shutdown did not reach the cleanup phase")
+	}
+	close(shutdownRelease)
+	resultErrors := make([]error, 0, 2)
+	for range 2 {
+		select {
+		case resultErr := <-results:
+			resultErrors = append(resultErrors, resultErr)
+		case <-time.After(time.Second):
+			t.Fatal("concurrent retained connection cleanup did not complete")
+		}
+	}
+	firstErr := resultErrors[0]
+	secondErr := resultErrors[1]
 
 	assert.ErrorIs(t, firstErr, shutdownErr)
 	assert.ErrorIs(t, firstErr, closeErr)
@@ -546,6 +646,47 @@ func TestVMExecRetainedConnectionAggregatesShutdownAndCloseOnce(t *testing.T) {
 	require.Len(t, contexts, 1)
 	assert.NoError(t, contexts[0].Err())
 	assert.Equal(t, "cleanup-value", contexts[0].Value(contextKey{}))
+	closeContexts := tracker.cleanupContexts()
+	require.Len(t, closeContexts, 1)
+	assert.NoError(t, closeContexts[0].Err())
+	assert.Equal(t, "cleanup-value", closeContexts[0].Value(contextKey{}))
+}
+
+func TestVMExecRetainedConnectionIgnoresENOTCONNWhenCloseSucceeds(t *testing.T) {
+	fd := requireRawTestFD(t)
+	tracker := &fakeVMExecCloseTracker{
+		calls: make(map[int]int), shutdownCalls: make(map[int]int), shutdownErr: unix.ENOTCONN,
+	}
+	var frame bytes.Buffer
+	require.NoError(t, vmexecsessionwire.EncodeBindDestination(t.Context(), &frame))
+	reader := newFramedVMExecConnectionReader(t, frame.Bytes(), fd, tracker)
+	connection, err := reader.decodeBindDestinationAndRetain(t.Context())
+	require.NoError(t, err)
+
+	assert.NoError(t, connection.shutdownAndClose(t.Context()))
+	assertVMExecFDClosedOnce(t, tracker, fd)
+	assert.Equal(t, 1, tracker.shutdownCount(fd))
+}
+
+func TestVMExecConnectionReaderClosesAdmittedUntransferredConnectionWithoutShutdown(t *testing.T) {
+	fd := requireRawTestFD(t)
+	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+	reader, _ := newScriptedVMExecReader(t, []fakeVMExecReceive{{
+		payload: []byte{0x41}, control: unix.UnixRights(fd),
+	}}, tracker)
+	_, err := reader.Read(make([]byte, 1))
+	require.NoError(t, err)
+	connection, err := reader.retainDecodedConnection()
+	assert.Nil(t, connection)
+	assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+
+	firstErr := reader.Close()
+	secondErr := reader.Close()
+
+	assert.NoError(t, firstErr)
+	assert.Equal(t, firstErr, secondErr)
+	assertVMExecFDClosedOnce(t, tracker, fd)
+	assert.Zero(t, tracker.shutdownCount(fd))
 }
 
 // Rationale: Cleanup failure is secondary evidence. It must neither replace
@@ -823,6 +964,43 @@ func newScriptedVMExecReader(
 	return reader, &index
 }
 
+func newFramedVMExecConnectionReader(
+	t *testing.T,
+	frame []byte,
+	fd int,
+	tracker *fakeVMExecCloseTracker,
+) *vmExecConnectionReader {
+	t.Helper()
+	deps := successfulVMExecReaderDeps(tracker)
+	offset := 0
+	firstRead := true
+	deps.recvmsg = func(
+		_ context.Context,
+		_ int,
+		payload []byte,
+		control []byte,
+		flags int,
+	) (int, int, int, unix.Sockaddr, error) {
+		assert.Equal(t, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC, flags)
+		if offset == len(frame) {
+			return 0, 0, 0, nil, nil
+		}
+		payloadCount := copy(payload, frame[offset:])
+		offset += payloadCount
+		if !firstRead {
+			return payloadCount, 0, 0, nil, nil
+		}
+		firstRead = false
+		return payloadCount, copy(control, unix.UnixRights(fd)), 0, nil, nil
+	}
+	return newVMExecConnectionReaderWithDeps(
+		context.Background(),
+		23,
+		time.Now().Add(time.Second),
+		deps,
+	)
+}
+
 // successfulVMExecReaderDeps supplies the literal structural-admission shape;
 // individual tests override exactly the dependency whose contract they probe.
 func successfulVMExecReaderDeps(tracker *fakeVMExecCloseTracker) vmExecConnectionReaderDeps {
@@ -882,7 +1060,15 @@ func (tracker *fakeVMExecCloseTracker) shutdown(ctx context.Context, fd int, how
 	tracker.shutdownCalls[fd]++
 	tracker.shutdownContexts = append(tracker.shutdownContexts, ctx)
 	err := tracker.shutdownErr
+	started := tracker.shutdownStarted
+	release := tracker.shutdownRelease
 	tracker.mu.Unlock()
+	if started != nil {
+		started <- struct{}{}
+	}
+	if release != nil {
+		<-release
+	}
 	if how != unix.SHUT_RDWR {
 		return errors.Join(err, errors.New("unexpected shutdown direction"))
 	}
@@ -924,6 +1110,11 @@ func requireRawTestFD(t *testing.T) int {
 	t.Helper()
 	fd, err := unix.Open("/dev/null", unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		if closeErr := unix.Close(fd); closeErr != nil && !errors.Is(closeErr, unix.EBADF) {
+			t.Errorf("close raw VM-exec test descriptor: %v", closeErr)
+		}
+	})
 	return fd
 }
 
