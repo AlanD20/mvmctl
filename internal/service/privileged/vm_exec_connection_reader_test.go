@@ -27,9 +27,11 @@ type fakeVMExecReceive struct {
 }
 
 type fakeVMExecCloseTracker struct {
-	mu    sync.Mutex
-	calls map[int]int
-	err   error
+	// mu guards calls and contexts because cleanup may race test observation.
+	mu       sync.Mutex
+	calls    map[int]int
+	contexts []context.Context
+	err      error
 }
 
 func TestVMExecConnectionReaderRealSocketRoundTrip(t *testing.T) {
@@ -91,15 +93,14 @@ func TestVMExecConnectionReaderRealSocketRoundTrip(t *testing.T) {
 		t.Errorf("VM-exec ordinary frame mismatch (-want +got):\n%s", diff)
 	}
 
-	connection, err := reader.TakeConnection()
-	require.NoError(t, err)
-	t.Cleanup(func() { assert.NoError(t, connection.Close()) })
-	descriptorFlags, err := unix.FcntlInt(connection.Fd(), unix.F_GETFD, 0)
+	require.NotNil(t, reader.connection)
+	receivedFD := reader.connection.fd
+	descriptorFlags, err := unix.FcntlInt(uintptr(receivedFD), unix.F_GETFD, 0)
 	require.NoError(t, err)
 	assert.NotZero(t, descriptorFlags&unix.FD_CLOEXEC)
 	afterSourceStatus, err := unix.FcntlInt(uintptr(connectionFD), unix.F_GETFL, 0)
 	require.NoError(t, err)
-	afterReceivedStatus, err := unix.FcntlInt(connection.Fd(), unix.F_GETFL, 0)
+	afterReceivedStatus, err := unix.FcntlInt(uintptr(receivedFD), unix.F_GETFL, 0)
 	require.NoError(t, err)
 	assert.Equal(t, beforeStatus, afterSourceStatus)
 	assert.Equal(t, beforeStatus, afterReceivedStatus)
@@ -109,14 +110,16 @@ func TestVMExecConnectionReaderRealSocketRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, len(message), written)
 	received := make([]byte, len(message))
-	_, err = io.ReadFull(connection, received)
+	read, err := unix.Read(receivedFD, received)
 	require.NoError(t, err)
+	require.Equal(t, len(received), read)
 	if diff := cmp.Diff(message, received); diff != "" {
-		t.Errorf("transferred connection payload mismatch (-want +got):\n%s", diff)
+		t.Errorf("retained connection payload mismatch (-want +got):\n%s", diff)
 	}
+	require.NoError(t, reader.Close())
+	_, err = unix.FcntlInt(uintptr(receivedFD), unix.F_GETFD, 0)
+	assert.ErrorIs(t, err, unix.EBADF)
 	assert.NoError(t, reader.Close())
-	_, err = reader.TakeConnection()
-	assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
 }
 
 func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *testing.T) {
@@ -125,7 +128,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 
 		_, err := reader.Read(make([]byte, 1))
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 	})
 
 	t.Run("two descriptors", func(t *testing.T) {
@@ -139,7 +142,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 
 		_, err := reader.Read(make([]byte, 1))
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, firstFD)
 		assertVMExecFDClosedOnce(t, tracker, secondFD)
 	})
@@ -156,7 +159,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 		_, validationErr := reader.validateInitialControl(control)
 		err := reader.fail(validationErr)
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, firstFD)
 		assertVMExecFDClosedOnce(t, tracker, secondFD)
 	})
@@ -175,7 +178,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 		assertVMExecFDClosedOnce(t, tracker, fd)
 	})
 
-	t.Run("unknown extra message", func(t *testing.T) {
+	t.Run("unknown message after rights", func(t *testing.T) {
 		fd := requireRawTestFD(t)
 		tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
 		reader, _ := newScriptedVMExecReader(t, nil, tracker)
@@ -187,7 +190,38 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 		_, validationErr := reader.validateInitialControl(control)
 		err := reader.fail(validationErr)
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+		assertVMExecFDClosedOnce(t, tracker, fd)
+	})
+
+	t.Run("unknown message before rights", func(t *testing.T) {
+		fd := requireRawTestFD(t)
+		tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+		reader, _ := newScriptedVMExecReader(t, nil, tracker)
+		unknown := unix.UnixCredentials(&unix.Ucred{Pid: 1, Uid: 1, Gid: 1})
+		controlBytes := append(unknown, unix.UnixRights(fd)...)
+
+		control, parseErr := reader.ownControl(controlBytes)
+		require.NoError(t, parseErr)
+		_, validationErr := reader.validateInitialControl(control)
+		err := reader.fail(validationErr)
+
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+		assertVMExecFDClosedOnce(t, tracker, fd)
+	})
+
+	t.Run("positive payload and control with recv error", func(t *testing.T) {
+		fd := requireRawTestFD(t)
+		tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+		reader, _ := newScriptedVMExecReader(t, []fakeVMExecReceive{{
+			payload: []byte{0x41},
+			control: unix.UnixRights(fd),
+			err:     unix.EIO,
+		}}, tracker)
+
+		_, err := reader.Read(make([]byte, 1))
+
+		assert.Equal(t, errs.CodeProcessError, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, fd)
 	})
 
@@ -202,7 +236,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 
 		_, err := reader.Read(make([]byte, 1))
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, fd)
 	})
 
@@ -220,7 +254,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 		require.Equal(t, 1, count)
 		_, err = reader.Read(make([]byte, 8))
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, initialFD)
 		assertVMExecFDClosedOnce(t, tracker, lateFD)
 	})
@@ -234,7 +268,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 		_, parseErr := reader.ownControl(controlBytes)
 		err := reader.fail(parseErr)
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, fd)
 	})
 
@@ -248,7 +282,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 
 		_, err := reader.Read(make([]byte, 1))
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, fd)
 	})
 
@@ -263,7 +297,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 
 		_, err := reader.Read(make([]byte, 1))
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, fd)
 	})
 
@@ -278,7 +312,7 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 
 		_, err := reader.Read(make([]byte, 1))
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		assertVMExecFDClosedOnce(t, tracker, fd)
 	})
 }
@@ -317,7 +351,118 @@ func TestVMExecConnectionReaderUsesExactRecvmsgShape(t *testing.T) {
 	assertVMExecFDClosedOnce(t, tracker, fd)
 }
 
-func TestVMExecConnectionReaderTakeTransfersOnceAndCloseDoesNotRevoke(t *testing.T) {
+func TestVMExecConnectionReaderClosesInstalledFDOnStructuralRejection(t *testing.T) {
+	fd := requireRawTestFD(t)
+	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+	deps := successfulVMExecReaderDeps(tracker)
+	deps.socketType = func(context.Context, int) (int, error) { return unix.SOCK_DGRAM, nil }
+	deps.recvmsg = oneVMExecReceive(t, fakeVMExecReceive{
+		payload: []byte{0x41},
+		control: unix.UnixRights(fd),
+	})
+	reader := newVMExecConnectionReaderWithDeps(
+		context.Background(),
+		23,
+		time.Now().Add(time.Second),
+		deps,
+	)
+
+	_, err := reader.Read(make([]byte, 1))
+
+	assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+	assertVMExecFDClosedOnce(t, tracker, fd)
+}
+
+func TestVMExecConnectionReaderSecondReadCancellationClosesInstalledFD(t *testing.T) {
+	fd := requireRawTestFD(t)
+	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+	type cleanupContextKey struct{}
+	baseCtx := context.WithValue(context.Background(), cleanupContextKey{}, "retained")
+	ctx, cancel := context.WithCancel(baseCtx)
+	deps := successfulVMExecReaderDeps(tracker)
+	deps.recvmsg = oneVMExecReceive(t, fakeVMExecReceive{
+		payload: []byte{0x41},
+		control: unix.UnixRights(fd),
+	})
+	reader := newVMExecConnectionReaderWithDeps(ctx, 23, time.Now().Add(time.Second), deps)
+	_, err := reader.Read(make([]byte, 1))
+	require.NoError(t, err)
+	cancel()
+
+	_, err = reader.Read(make([]byte, 1))
+
+	assert.True(t, errors.Is(err, context.Canceled))
+	assert.Equal(t, errs.CodeProcessError, requireVMExecDomainError(t, err).Code)
+	assertVMExecFDClosedOnce(t, tracker, fd)
+	contexts := tracker.cleanupContexts()
+	require.Len(t, contexts, 1)
+	assert.NoError(t, contexts[0].Err())
+	assert.Equal(t, "retained", contexts[0].Value(cleanupContextKey{}))
+}
+
+func TestVMExecConnectionReaderPollsExactDescriptorAndTimeout(t *testing.T) {
+	tests := map[string]struct {
+		deadline       func() time.Time
+		maximumTimeout int
+	}{
+		"poll interval": {
+			deadline:       func() time.Time { return time.Now().Add(time.Second) },
+			maximumTimeout: int(vmExecConnectionPollInterval / time.Millisecond),
+		},
+		"near deadline": {
+			deadline:       func() time.Time { return time.Now().Add(40 * time.Millisecond) },
+			maximumTimeout: 40,
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			fd := requireRawTestFD(t)
+			tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+			deps := successfulVMExecReaderDeps(tracker)
+			var recvCalls int
+			deps.recvmsg = func(
+				_ context.Context,
+				actualFD int,
+				payload []byte,
+				control []byte,
+				flags int,
+			) (int, int, int, unix.Sockaddr, error) {
+				recvCalls++
+				assert.Equal(t, 23, actualFD)
+				assert.Equal(t, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC, flags)
+				if recvCalls == 1 {
+					return 0, 0, 0, nil, unix.EAGAIN
+				}
+				payload[0] = 0x41
+				return 1, copy(control, unix.UnixRights(fd)), 0, nil, nil
+			}
+			var pollCalls int
+			deps.poll = func(_ context.Context, pollFDs []unix.PollFd, timeoutMillis int) (int, error) {
+				pollCalls++
+				require.Equal(t, []unix.PollFd{{Fd: 23, Events: unix.POLLIN}}, pollFDs)
+				require.Greater(t, timeoutMillis, 0)
+				require.LessOrEqual(t, timeoutMillis, test.maximumTimeout)
+				pollFDs[0].Revents = unix.POLLIN
+				return 1, nil
+			}
+			reader := newVMExecConnectionReaderWithDeps(
+				context.Background(),
+				23,
+				test.deadline(),
+				deps,
+			)
+
+			_, err := reader.Read(make([]byte, 1))
+			require.NoError(t, err)
+			require.NoError(t, reader.Close())
+			assert.Equal(t, 1, pollCalls)
+			assertVMExecFDClosedOnce(t, tracker, fd)
+		})
+	}
+}
+
+func TestVMExecConnectionReaderRetainsAndClosesAdmittedDescriptorOnce(t *testing.T) {
 	fd := requireRawTestFD(t)
 	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
 	reader, _ := newScriptedVMExecReader(t, []fakeVMExecReceive{{
@@ -326,17 +471,13 @@ func TestVMExecConnectionReaderTakeTransfersOnceAndCloseDoesNotRevoke(t *testing
 	}}, tracker)
 	_, err := reader.Read(make([]byte, 1))
 	require.NoError(t, err)
+	require.NotNil(t, reader.connection)
+	assert.Equal(t, fd, reader.connection.fd)
 
-	connection, err := reader.TakeConnection()
-	require.NoError(t, err)
 	require.NoError(t, reader.Close())
-	_, secondErr := reader.TakeConnection()
+	require.NoError(t, reader.Close())
 
-	assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(secondErr).Code)
-	assert.Zero(t, tracker.count(fd))
-	_, err = connection.Stat()
-	assert.NoError(t, err)
-	assert.NoError(t, connection.Close())
+	assertVMExecFDClosedOnce(t, tracker, fd)
 }
 
 // Rationale: Cleanup failure is secondary evidence. It must neither replace
@@ -387,7 +528,7 @@ func TestVMExecConnectionReaderCancellationAndDeadline(t *testing.T) {
 		_, err := reader.Read(make([]byte, 1))
 
 		assert.True(t, errors.Is(err, context.Canceled))
-		assert.Equal(t, errs.CodeProcessError, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeProcessError, requireVMExecDomainError(t, err).Code)
 	})
 
 	t.Run("expired deadline fails before recvmsg", func(t *testing.T) {
@@ -412,7 +553,7 @@ func TestVMExecConnectionReaderCancellationAndDeadline(t *testing.T) {
 		_, err := reader.Read(make([]byte, 1))
 
 		assert.True(t, errors.Is(err, os.ErrDeadlineExceeded))
-		assert.Equal(t, errs.CodeProcessError, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeProcessError, requireVMExecDomainError(t, err).Code)
 	})
 }
 
@@ -461,7 +602,7 @@ func TestAdmitVMExecConnectionStructuralRejections(t *testing.T) {
 
 			err := admitVMExecConnection(context.Background(), 23, deps)
 
-			assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+			assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 		})
 	}
 }
@@ -474,7 +615,7 @@ func TestAdmitVMExecConnectionRealStructuralRejections(t *testing.T) {
 
 		err = admitVMExecConnection(context.Background(), int(file.Fd()), realVMExecConnectionReaderDeps())
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 	})
 
 	t.Run("Unix listener", func(t *testing.T) {
@@ -488,7 +629,7 @@ func TestAdmitVMExecConnectionRealStructuralRejections(t *testing.T) {
 
 		err = admitVMExecConnection(context.Background(), fd, realVMExecConnectionReaderDeps())
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 	})
 
 	t.Run("unconnected Unix stream", func(t *testing.T) {
@@ -499,7 +640,7 @@ func TestAdmitVMExecConnectionRealStructuralRejections(t *testing.T) {
 
 		err = admitVMExecConnection(context.Background(), fd, realVMExecConnectionReaderDeps())
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 	})
 
 	t.Run("non-Unix socket", func(t *testing.T) {
@@ -513,7 +654,7 @@ func TestAdmitVMExecConnectionRealStructuralRejections(t *testing.T) {
 
 		err = admitVMExecConnection(context.Background(), fd, realVMExecConnectionReaderDeps())
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 	})
 
 	t.Run("Unix datagram", func(t *testing.T) {
@@ -524,27 +665,56 @@ func TestAdmitVMExecConnectionRealStructuralRejections(t *testing.T) {
 
 		err := admitVMExecConnection(context.Background(), firstFD, realVMExecConnectionReaderDeps())
 
-		assert.Equal(t, errs.CodeValidationFailed, errs.AsDomainError(err).Code)
+		assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 	})
 }
 
 func TestAdmitVMExecConnectionDoesNotInspectOrMutateNonblocking(t *testing.T) {
-	firstFD, secondFD := requireVMExecSocketPairFDs(t, unix.SOCK_STREAM)
-	deferRequireUnixClose(t, firstFD)
-	deferRequireUnixClose(t, secondFD)
-	requireVMExecSocketAdmissionAvailable(t, firstFD)
-	require.NoError(t, unix.SetNonblock(firstFD, true))
-	before, err := unix.FcntlInt(uintptr(firstFD), unix.F_GETFL, 0)
-	require.NoError(t, err)
+	for _, nonblocking := range []bool{false, true} {
+		name := "blocking"
+		if nonblocking {
+			name = "nonblocking"
+		}
+		t.Run(name, func(t *testing.T) {
+			firstFD, secondFD := requireVMExecSocketPairFDs(t, unix.SOCK_STREAM)
+			deferRequireUnixClose(t, firstFD)
+			deferRequireUnixClose(t, secondFD)
+			requireVMExecSocketAdmissionAvailable(t, firstFD)
+			require.NoError(t, unix.SetNonblock(firstFD, nonblocking))
+			before, err := unix.FcntlInt(uintptr(firstFD), unix.F_GETFL, 0)
+			require.NoError(t, err)
 
-	require.NoError(t, admitVMExecConnection(context.Background(), firstFD, realVMExecConnectionReaderDeps()))
-	after, err := unix.FcntlInt(uintptr(firstFD), unix.F_GETFL, 0)
-	require.NoError(t, err)
+			require.NoError(t, admitVMExecConnection(context.Background(), firstFD, realVMExecConnectionReaderDeps()))
+			after, err := unix.FcntlInt(uintptr(firstFD), unix.F_GETFL, 0)
+			require.NoError(t, err)
 
-	assert.Equal(t, before, after)
-	assert.NotZero(t, after&unix.O_NONBLOCK)
+			assert.Equal(t, before, after)
+			assert.Equal(t, nonblocking, after&unix.O_NONBLOCK != 0)
+		})
+	}
 }
 
+// oneVMExecReceive copies one scripted recvmsg result into the caller-owned
+// buffers so tests exercise the reader's exact payload and control sizing.
+func oneVMExecReceive(
+	t *testing.T,
+	step fakeVMExecReceive,
+) func(context.Context, int, []byte, []byte, int) (int, int, int, unix.Sockaddr, error) {
+	t.Helper()
+	return func(
+		_ context.Context,
+		_ int,
+		payload []byte,
+		control []byte,
+		flags int,
+	) (int, int, int, unix.Sockaddr, error) {
+		assert.Equal(t, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC, flags)
+		return copy(payload, step.payload), copy(control, step.control), step.flags, step.from, step.err
+	}
+}
+
+// newScriptedVMExecReader builds a deterministic recvmsg script with real
+// descriptor cleanup and successful structural-admission defaults.
 func newScriptedVMExecReader(
 	t *testing.T,
 	script []fakeVMExecReceive,
@@ -582,8 +752,10 @@ func newScriptedVMExecReader(
 	return reader, &index
 }
 
+// successfulVMExecReaderDeps supplies the literal structural-admission shape;
+// individual tests override exactly the dependency whose contract they probe.
 func successfulVMExecReaderDeps(tracker *fakeVMExecCloseTracker) vmExecConnectionReaderDeps {
-	closeFD := unix.Close
+	closeFD := func(_ context.Context, fd int) error { return unix.Close(fd) }
 	if tracker != nil {
 		closeFD = tracker.close
 	}
@@ -617,15 +789,22 @@ func successfulVMExecReaderDeps(tracker *fakeVMExecCloseTracker) vmExecConnectio
 	}
 }
 
-func (tracker *fakeVMExecCloseTracker) close(fd int) error {
+func (tracker *fakeVMExecCloseTracker) close(ctx context.Context, fd int) error {
 	tracker.mu.Lock()
 	tracker.calls[fd]++
+	tracker.contexts = append(tracker.contexts, ctx)
 	err := tracker.err
 	tracker.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	return unix.Close(fd)
+}
+
+func (tracker *fakeVMExecCloseTracker) cleanupContexts() []context.Context {
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	return append([]context.Context(nil), tracker.contexts...)
 }
 
 func (tracker *fakeVMExecCloseTracker) count(fd int) int {
@@ -667,4 +846,12 @@ func requireVMExecSocketAdmissionAvailable(t *testing.T, fd int) {
 		t.Skip("test sandbox blocks Unix socket admission syscalls")
 	}
 	require.NoError(t, err)
+}
+
+func requireVMExecDomainError(t *testing.T, err error) *errs.DomainError {
+	t.Helper()
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	return domainErr
 }

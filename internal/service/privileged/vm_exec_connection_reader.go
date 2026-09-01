@@ -17,10 +17,11 @@ import (
 const vmExecConnectionPollInterval = 100 * time.Millisecond
 
 type vmExecConnectionReader struct {
-	ctx      context.Context
-	fd       int
-	deadline time.Time
-	deps     vmExecConnectionReaderDeps
+	ctx        context.Context
+	cleanupCtx context.Context
+	fd         int
+	deadline   time.Time
+	deps       vmExecConnectionReaderDeps
 
 	carrierRead  bool
 	closed       bool
@@ -32,13 +33,13 @@ type vmExecConnectionReader struct {
 }
 
 type vmExecReceivedConnectionOwner struct {
-	// mu guards pointer-shared close-once ownership and one-time transfer.
-	mu       sync.Mutex
-	fd       int
-	closeFD  func(int) error
-	closed   bool
-	taken    bool
-	closeErr error
+	// mu guards pointer-shared close-once ownership.
+	mu         sync.Mutex
+	cleanupCtx context.Context
+	fd         int
+	closeFD    func(context.Context, int) error
+	closed     bool
+	closeErr   error
 }
 
 type vmExecConnectionReaderDeps struct {
@@ -52,7 +53,7 @@ type vmExecConnectionReaderDeps struct {
 	socketError     func(context.Context, int) (int, error)
 	socketName      func(context.Context, int) (unix.Sockaddr, error)
 	peerName        func(context.Context, int) (unix.Sockaddr, error)
-	closeFD         func(int) error
+	closeFD         func(context.Context, int) error
 }
 
 type vmExecConnectionReceive struct {
@@ -82,12 +83,17 @@ func newVMExecConnectionReaderWithDeps(
 	deadline time.Time,
 	deps vmExecConnectionReaderDeps,
 ) *vmExecConnectionReader {
+	cleanupCtx := context.Background()
+	if ctx != nil {
+		cleanupCtx = context.WithoutCancel(ctx)
+	}
 	return &vmExecConnectionReader{
-		ctx:       ctx,
-		fd:        fd,
-		deadline:  deadline,
-		deps:      deps,
-		installed: make(map[int]*vmExecReceivedConnectionOwner),
+		ctx:        ctx,
+		cleanupCtx: cleanupCtx,
+		fd:         fd,
+		deadline:   deadline,
+		deps:       deps,
+		installed:  make(map[int]*vmExecReceivedConnectionOwner),
 	}
 }
 
@@ -164,18 +170,6 @@ func (reader *vmExecConnectionReader) Read(target []byte) (int, error) {
 		return 0, io.EOF
 	}
 	return copy(target, received.payload), nil
-}
-
-// TakeConnection transfers the admitted descriptor exactly once. The caller
-// must finish reading the closed frame before taking it to preserve late-cmsg detection.
-func (reader *vmExecConnectionReader) TakeConnection() (*os.File, error) {
-	if reader == nil || reader.connection == nil {
-		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection is not admitted")
-	}
-	if reader.terminalErr != nil {
-		return nil, reader.terminalErr
-	}
-	return reader.connection.take()
 }
 
 func (reader *vmExecConnectionReader) Close() error {
@@ -325,7 +319,11 @@ func (reader *vmExecConnectionReader) ownInstalledFD(fd int) *vmExecReceivedConn
 	if owner, exists := reader.installed[fd]; exists {
 		return owner
 	}
-	owner := &vmExecReceivedConnectionOwner{fd: fd, closeFD: reader.deps.closeFD}
+	owner := &vmExecReceivedConnectionOwner{
+		cleanupCtx: reader.cleanupCtx,
+		fd:         fd,
+		closeFD:    reader.deps.closeFD,
+	}
 	reader.installed[fd] = owner
 	reader.installOrder = append(reader.installOrder, owner)
 	return owner
@@ -372,30 +370,19 @@ func (reader *vmExecConnectionReader) closeInstalled(primary error) error {
 	return result
 }
 
-func (owner *vmExecReceivedConnectionOwner) take() (*os.File, error) {
-	owner.mu.Lock()
-	defer owner.mu.Unlock()
-	if owner.closed {
-		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection descriptor is closed")
-	}
-	if owner.taken {
-		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection descriptor was already taken")
-	}
-	owner.taken = true
-	return os.NewFile(uintptr(owner.fd), "mvm-vmexec-connection"), nil
-}
-
 func (owner *vmExecReceivedConnectionOwner) close() error {
 	owner.mu.Lock()
 	defer owner.mu.Unlock()
-	if owner.closed || owner.taken {
+	if owner.closed {
 		return owner.closeErr
 	}
 	owner.closed = true
-	owner.closeErr = owner.closeFD(owner.fd)
+	owner.closeErr = owner.closeFD(owner.cleanupCtx, owner.fd)
 	return owner.closeErr
 }
 
+// CRITICAL: Admission proves only that fd is a connected AF_UNIX stream with
+// the required descriptor shape. It proves no Firecracker, VM, or peer identity.
 func admitVMExecConnection(ctx context.Context, fd int, deps vmExecConnectionReaderDeps) error {
 	if ctx == nil {
 		return errs.New(errs.CodeValidationFailed, "VM-exec connection admission context is required")
@@ -443,6 +430,8 @@ func admitVMExecConnection(ctx context.Context, fd int, deps vmExecConnectionRea
 		return vmExecConnectionSystemError("read VM-exec connection socket error", err)
 	}
 	if socketErr != 0 {
+		// CRITICAL: A pending socket error terminates this session. This is a
+		// structural rejection, not durable authority over peer identity.
 		return errs.New(errs.CodeValidationFailed, "VM-exec connection descriptor has a pending socket error")
 	}
 	local, err := deps.socketName(ctx, fd)
@@ -503,7 +492,9 @@ func realVMExecConnectionReaderDeps() vmExecConnectionReaderDeps {
 		peerName: func(_ context.Context, fd int) (unix.Sockaddr, error) {
 			return unix.Getpeername(fd)
 		},
-		closeFD: unix.Close,
+		closeFD: func(_ context.Context, fd int) error {
+			return unix.Close(fd)
+		},
 	}
 }
 

@@ -81,6 +81,7 @@ func (sender *privilegedControlVMExecConnectionSender) send(
 	if err != nil {
 		return err
 	}
+	defer sender.owner.finishSend()
 	if ctx == nil {
 		return errs.New(errs.CodeValidationFailed, "VM-exec connection send context is required")
 	}
@@ -131,7 +132,7 @@ func (sender *privilegedControlVMExecConnectionSender) send(
 		}
 	}
 
-	if err := writePrivilegedControlExact(ctx, control, frame[1:]); err != nil {
+	if err := sendPrivilegedControlVMExecRemainder(ctx, controlFD, frame[1:], sender.deps); err != nil {
 		return privilegedControlVMExecSystemError("write VM-exec ancillary frame", err)
 	}
 	return nil
@@ -146,15 +147,20 @@ func (sender *privilegedControlVMExecConnectionSender) close() error {
 
 func (owner *privilegedControlVMExecConnectionOwner) beginSend() (int, error) {
 	owner.mu.Lock()
-	defer owner.mu.Unlock()
 	if owner.closed || owner.file == nil {
+		owner.mu.Unlock()
 		return -1, errs.New(errs.CodeValidationFailed, "VM-exec connection duplicate is closed")
 	}
 	if owner.used {
+		owner.mu.Unlock()
 		return -1, errs.New(errs.CodeValidationFailed, "VM-exec connection duplicate was already used")
 	}
 	owner.used = true
 	return int(owner.file.Fd()), nil
+}
+
+func (owner *privilegedControlVMExecConnectionOwner) finishSend() {
+	owner.mu.Unlock()
 }
 
 func (owner *privilegedControlVMExecConnectionOwner) close() error {
@@ -225,6 +231,50 @@ func waitPrivilegedControlVMExecWritable(
 		}
 		return unix.EIO
 	}
+}
+
+// sendPrivilegedControlVMExecRemainder preserves ordinary stream semantics
+// while keeping cancellation and deadlines effective after the ancillary carrier.
+func sendPrivilegedControlVMExecRemainder(
+	ctx context.Context,
+	fd int,
+	remainder []byte,
+	deps privilegedControlVMExecAncillaryDeps,
+) error {
+	for len(remainder) > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		count, err := deps.sendmsg(
+			ctx,
+			fd,
+			remainder,
+			nil,
+			unix.MSG_DONTWAIT|unix.MSG_NOSIGNAL,
+		)
+		if count < 0 || count > len(remainder) {
+			return errors.New("VM-exec remainder sendmsg returned an invalid byte count")
+		}
+		if count > 0 {
+			remainder = remainder[count:]
+		}
+		if err == nil {
+			if count == 0 {
+				return io.ErrShortWrite
+			}
+			continue
+		}
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if !errors.Is(err, unix.EAGAIN) && !errors.Is(err, unix.EWOULDBLOCK) {
+			return err
+		}
+		if err := waitPrivilegedControlVMExecWritable(ctx, fd, deps); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func realPrivilegedControlVMExecAncillaryDeps() privilegedControlVMExecAncillaryDeps {
