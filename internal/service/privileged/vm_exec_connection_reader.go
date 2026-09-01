@@ -23,13 +23,14 @@ type vmExecConnectionReader struct {
 	deadline   time.Time
 	deps       vmExecConnectionReaderDeps
 
-	carrierRead  bool
-	closed       bool
-	terminalErr  error
-	closeErr     error
-	connection   *vmExecReceivedConnectionOwner
-	installed    map[int]*vmExecReceivedConnectionOwner
-	installOrder []*vmExecReceivedConnectionOwner
+	carrierRead     bool
+	connectionTaken bool
+	closed          bool
+	terminalErr     error
+	closeErr        error
+	connection      *vmExecReceivedConnectionOwner
+	installed       map[int]*vmExecReceivedConnectionOwner
+	installOrder    []*vmExecReceivedConnectionOwner
 }
 
 type vmExecReceivedConnectionOwner struct {
@@ -38,6 +39,7 @@ type vmExecReceivedConnectionOwner struct {
 	cleanupCtx context.Context
 	fd         int
 	closeFD    func(context.Context, int) error
+	shutdownFD func(context.Context, int, int) error
 	closed     bool
 	closeErr   error
 }
@@ -54,6 +56,7 @@ type vmExecConnectionReaderDeps struct {
 	socketName      func(context.Context, int) (unix.Sockaddr, error)
 	peerName        func(context.Context, int) (unix.Sockaddr, error)
 	closeFD         func(context.Context, int) error
+	shutdownFD      func(context.Context, int, int) error
 }
 
 type vmExecConnectionReceive struct {
@@ -182,6 +185,39 @@ func (reader *vmExecConnectionReader) Close() error {
 	reader.closed = true
 	reader.closeErr = reader.closeInstalled(nil)
 	return reader.closeErr
+}
+
+func (reader *vmExecConnectionReader) takeConnection() (*vmExecRetainedConnection, error) {
+	if reader == nil {
+		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection reader is required")
+	}
+	if reader.closed || reader.terminalErr != nil || !reader.carrierRead || reader.connection == nil {
+		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection is not available for transfer")
+	}
+	if reader.connectionTaken {
+		return nil, errs.New(errs.CodeValidationFailed, "VM-exec connection was already transferred")
+	}
+	owner := reader.connection
+	reader.connectionTaken = true
+	delete(reader.installed, owner.fd)
+	for index := range reader.installOrder {
+		if reader.installOrder[index] == owner {
+			reader.installOrder = append(reader.installOrder[:index], reader.installOrder[index+1:]...)
+			break
+		}
+	}
+	return &vmExecRetainedConnection{owner: owner}, nil
+}
+
+type vmExecRetainedConnection struct {
+	owner *vmExecReceivedConnectionOwner
+}
+
+func (connection *vmExecRetainedConnection) shutdownAndClose(ctx context.Context) error {
+	if connection == nil || connection.owner == nil {
+		return errs.New(errs.CodeValidationFailed, "retained VM-exec connection is required")
+	}
+	return connection.owner.shutdownAndClose(ctx)
 }
 
 func (reader *vmExecConnectionReader) receive(payloadSize int) vmExecConnectionReceive {
@@ -323,6 +359,7 @@ func (reader *vmExecConnectionReader) ownInstalledFD(fd int) *vmExecReceivedConn
 		cleanupCtx: reader.cleanupCtx,
 		fd:         fd,
 		closeFD:    reader.deps.closeFD,
+		shutdownFD: reader.deps.shutdownFD,
 	}
 	reader.installed[fd] = owner
 	reader.installOrder = append(reader.installOrder, owner)
@@ -378,6 +415,25 @@ func (owner *vmExecReceivedConnectionOwner) close() error {
 	}
 	owner.closed = true
 	owner.closeErr = owner.closeFD(owner.cleanupCtx, owner.fd)
+	return owner.closeErr
+}
+
+func (owner *vmExecReceivedConnectionOwner) shutdownAndClose(ctx context.Context) error {
+	owner.mu.Lock()
+	defer owner.mu.Unlock()
+	if owner.closed {
+		return owner.closeErr
+	}
+	owner.closed = true
+	cleanupCtx := context.Background()
+	if ctx != nil {
+		cleanupCtx = context.WithoutCancel(ctx)
+	}
+	shutdownErr := owner.shutdownFD(cleanupCtx, owner.fd, unix.SHUT_RDWR)
+	if errors.Is(shutdownErr, unix.ENOTCONN) {
+		shutdownErr = nil
+	}
+	owner.closeErr = errors.Join(shutdownErr, owner.closeFD(cleanupCtx, owner.fd))
 	return owner.closeErr
 }
 
@@ -494,6 +550,9 @@ func realVMExecConnectionReaderDeps() vmExecConnectionReaderDeps {
 		},
 		closeFD: func(_ context.Context, fd int) error {
 			return unix.Close(fd)
+		},
+		shutdownFD: func(_ context.Context, fd int, how int) error {
+			return unix.Shutdown(fd, how)
 		},
 	}
 }

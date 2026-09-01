@@ -28,10 +28,13 @@ type fakeVMExecReceive struct {
 
 type fakeVMExecCloseTracker struct {
 	// mu guards calls and contexts because cleanup may race test observation.
-	mu       sync.Mutex
-	calls    map[int]int
-	contexts []context.Context
-	err      error
+	mu               sync.Mutex
+	calls            map[int]int
+	shutdownCalls    map[int]int
+	contexts         []context.Context
+	shutdownContexts []context.Context
+	err              error
+	shutdownErr      error
 }
 
 func TestVMExecConnectionReaderRealSocketRoundTrip(t *testing.T) {
@@ -381,6 +384,7 @@ func TestVMExecConnectionReaderClosesInstalledFDOnStructuralRejection(t *testing
 
 	assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 	assertVMExecFDClosedOnce(t, tracker, fd)
+	assert.Zero(t, tracker.shutdownCount(fd))
 }
 
 func TestVMExecConnectionReaderSecondReadCancellationClosesInstalledFD(t *testing.T) {
@@ -475,22 +479,73 @@ func TestVMExecConnectionReaderPollsExactDescriptorAndTimeout(t *testing.T) {
 	}
 }
 
-func TestVMExecConnectionReaderRetainsAndClosesAdmittedDescriptorOnce(t *testing.T) {
+func TestVMExecConnectionReaderTransfersAdmittedConnectionExactlyOnce(t *testing.T) {
 	fd := requireRawTestFD(t)
 	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
 	reader, _ := newScriptedVMExecReader(t, []fakeVMExecReceive{{
 		payload: []byte{0x41},
 		control: unix.UnixRights(fd),
 	}}, tracker)
-	_, err := reader.Read(make([]byte, 1))
+	connection, err := reader.takeConnection()
+	assert.Nil(t, connection)
+	assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
+
+	_, err = reader.Read(make([]byte, 1))
 	require.NoError(t, err)
-	require.NotNil(t, reader.connection)
-	assert.Equal(t, fd, reader.connection.fd)
+	connection, err = reader.takeConnection()
+	require.NoError(t, err)
+	require.NotNil(t, connection)
+	repeated, err := reader.takeConnection()
+	assert.Nil(t, repeated)
+	assert.Equal(t, errs.CodeValidationFailed, requireVMExecDomainError(t, err).Code)
 
 	require.NoError(t, reader.Close())
 	require.NoError(t, reader.Close())
+	_, err = unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+	require.NoError(t, err)
+	require.NoError(t, connection.shutdownAndClose(t.Context()))
+	require.NoError(t, connection.shutdownAndClose(t.Context()))
 
 	assertVMExecFDClosedOnce(t, tracker, fd)
+	assert.Equal(t, 1, tracker.shutdownCount(fd))
+}
+
+// Rationale: The transferred capability must cache the complete shutdown-and-close result while preserving both
+// independent cleanup failures and removing cancellation without dropping context values.
+func TestVMExecRetainedConnectionAggregatesShutdownAndCloseOnce(t *testing.T) {
+	fd := requireRawTestFD(t)
+	shutdownErr := errors.New("shutdown sentinel")
+	closeErr := errors.New("close sentinel")
+	tracker := &fakeVMExecCloseTracker{
+		calls: make(map[int]int), shutdownCalls: make(map[int]int), err: closeErr, shutdownErr: shutdownErr,
+	}
+	t.Cleanup(func() { assert.NoError(t, unix.Close(fd)) })
+	reader, _ := newScriptedVMExecReader(t, []fakeVMExecReceive{{
+		payload: []byte{0x41}, control: unix.UnixRights(fd),
+	}}, tracker)
+	_, err := reader.Read(make([]byte, 1))
+	require.NoError(t, err)
+	connection, err := reader.takeConnection()
+	require.NoError(t, err)
+	type contextKey struct{}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), contextKey{}, "cleanup-value"))
+	cancel()
+
+	firstErr := connection.shutdownAndClose(ctx)
+	secondErr := connection.shutdownAndClose(context.Background())
+
+	assert.ErrorIs(t, firstErr, shutdownErr)
+	assert.ErrorIs(t, firstErr, closeErr)
+	assert.Equal(t, firstErr, secondErr)
+	wantCounts := map[string]int{"close": 1, "shutdown": 1}
+	gotCounts := map[string]int{"close": tracker.count(fd), "shutdown": tracker.shutdownCount(fd)}
+	if diff := cmp.Diff(wantCounts, gotCounts); diff != "" {
+		t.Errorf("retained connection cleanup counts mismatch (-want +got):\n%s", diff)
+	}
+	contexts := tracker.shutdownCleanupContexts()
+	require.Len(t, contexts, 1)
+	assert.NoError(t, contexts[0].Err())
+	assert.Equal(t, "cleanup-value", contexts[0].Value(contextKey{}))
 }
 
 // Rationale: Cleanup failure is secondary evidence. It must neither replace
@@ -772,8 +827,10 @@ func newScriptedVMExecReader(
 // individual tests override exactly the dependency whose contract they probe.
 func successfulVMExecReaderDeps(tracker *fakeVMExecCloseTracker) vmExecConnectionReaderDeps {
 	closeFD := func(_ context.Context, fd int) error { return unix.Close(fd) }
+	shutdownFD := func(_ context.Context, fd int, how int) error { return unix.Shutdown(fd, how) }
 	if tracker != nil {
 		closeFD = tracker.close
+		shutdownFD = tracker.shutdown
 	}
 	return vmExecConnectionReaderDeps{
 		recvmsg: func(
@@ -801,7 +858,7 @@ func successfulVMExecReaderDeps(tracker *fakeVMExecCloseTracker) vmExecConnectio
 		peerName: func(context.Context, int) (unix.Sockaddr, error) {
 			return &unix.SockaddrUnix{Name: "peer"}, nil
 		},
-		closeFD: closeFD,
+		closeFD: closeFD, shutdownFD: shutdownFD,
 	}
 }
 
@@ -817,6 +874,21 @@ func (tracker *fakeVMExecCloseTracker) close(ctx context.Context, fd int) error 
 	return unix.Close(fd)
 }
 
+func (tracker *fakeVMExecCloseTracker) shutdown(ctx context.Context, fd int, how int) error {
+	tracker.mu.Lock()
+	if tracker.shutdownCalls == nil {
+		tracker.shutdownCalls = make(map[int]int)
+	}
+	tracker.shutdownCalls[fd]++
+	tracker.shutdownContexts = append(tracker.shutdownContexts, ctx)
+	err := tracker.shutdownErr
+	tracker.mu.Unlock()
+	if how != unix.SHUT_RDWR {
+		return errors.Join(err, errors.New("unexpected shutdown direction"))
+	}
+	return err
+}
+
 func (tracker *fakeVMExecCloseTracker) cleanupContexts() []context.Context {
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
@@ -827,6 +899,18 @@ func (tracker *fakeVMExecCloseTracker) count(fd int) int {
 	tracker.mu.Lock()
 	defer tracker.mu.Unlock()
 	return tracker.calls[fd]
+}
+
+func (tracker *fakeVMExecCloseTracker) shutdownCount(fd int) int {
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	return tracker.shutdownCalls[fd]
+}
+
+func (tracker *fakeVMExecCloseTracker) shutdownCleanupContexts() []context.Context {
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	return append([]context.Context(nil), tracker.shutdownContexts...)
 }
 
 func assertVMExecFDClosedOnce(t *testing.T, tracker *fakeVMExecCloseTracker, fd int) {
