@@ -308,8 +308,20 @@ func TestDecodeOpenSourceRejectsForgedVMIdentities(t *testing.T) {
 		source      string
 		destination string
 	}{
+		"short source": {
+			source: testSourceVMID[:31], destination: testDestinationVMID,
+		},
+		"non-hex source": {
+			source: strings.Repeat("g", 32), destination: testDestinationVMID,
+		},
 		"uppercase source": {
 			source: strings.ToUpper(testSourceVMID), destination: testDestinationVMID,
+		},
+		"short destination": {
+			source: testSourceVMID, destination: testDestinationVMID[:31],
+		},
+		"non-hex destination": {
+			source: testSourceVMID, destination: strings.Repeat("g", 32),
 		},
 		"uppercase destination": {
 			source: testSourceVMID, destination: strings.ToUpper(testDestinationVMID),
@@ -493,7 +505,10 @@ func TestFailureProjectionUsesFixedPublicMessages(t *testing.T) {
 }
 
 func TestFailureProjectionOwnsOmissionMarkerAndStaysDecodable(t *testing.T) {
-	details := map[string]any{"session_details_omitted": false}
+	details := map[string]any{
+		"session_details_omitted": false,
+		"safe.token.value":        int64(99),
+	}
 	for index := range 20 {
 		details[fmt.Sprintf("safe_%02d", index)] = int64(index)
 	}
@@ -504,8 +519,13 @@ func TestFailureProjectionOwnsOmissionMarkerAndStaysDecodable(t *testing.T) {
 	outcome, err := vmexecsessionwire.DecodeOutcome(t.Context(), &encoded)
 	require.NoError(t, err)
 	require.NotNil(t, outcome.OperationError())
-	assert.Len(t, outcome.OperationError().Details, 16)
-	assert.Equal(t, true, outcome.OperationError().Details["session_details_omitted"])
+	want := map[string]any{"session_details_omitted": true}
+	for index := range 15 {
+		want[fmt.Sprintf("safe_%02d", index)] = int64(index)
+	}
+	if diff := cmp.Diff(want, outcome.OperationError().Details); diff != "" {
+		t.Errorf("decoded retained details mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func TestFailureProjectionDropsWrappedCause(t *testing.T) {
@@ -590,6 +610,22 @@ func TestDecodeOutcomeRejectsInvalidFailureSemantics(t *testing.T) {
 		"too many details": testFailureBody(
 			"internal", "internal", "retained VM-exec session failed", "", "",
 			`{`+strings.Join(detailFields, ",")+`}`,
+		),
+		"float detail": testFailureBody(
+			"validation.failed", "validation", "retained VM-exec session request was invalid", "", "",
+			`{"safe":1.5}`,
+		),
+		"array detail": testFailureBody(
+			"validation.failed", "validation", "retained VM-exec session request was invalid", "", "",
+			`{"safe":[1]}`,
+		),
+		"object detail": testFailureBody(
+			"validation.failed", "validation", "retained VM-exec session request was invalid", "", "",
+			`{"safe":{"nested":1}}`,
+		),
+		"overflowing integer detail": testFailureBody(
+			"validation.failed", "validation", "retained VM-exec session request was invalid", "", "",
+			`{"safe":9223372036854775808}`,
 		),
 	}
 
