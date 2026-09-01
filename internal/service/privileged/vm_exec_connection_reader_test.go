@@ -71,7 +71,9 @@ func TestVMExecConnectionReaderRealSocketRoundTrip(t *testing.T) {
 	require.NoError(t, unix.Close(controlWriterFD))
 	controlWriterOpen = false
 
-	reader := newVMExecConnectionReader(context.Background(), controlReaderFD, time.Now().Add(2*time.Second))
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	reader := newVMExecConnectionReader(ctx, controlReaderFD, time.Now().Add(2*time.Second))
 	type readResult struct {
 		frame []byte
 		err   error
@@ -86,7 +88,11 @@ func TestVMExecConnectionReaderRealSocketRoundTrip(t *testing.T) {
 	select {
 	case result = <-resultChannel:
 	case <-time.After(3 * time.Second):
-		t.Fatal("VM-exec connection reader did not complete before watchdog")
+		cancel()
+		_ = unix.Shutdown(controlReaderFD, unix.SHUT_RDWR)
+		result = <-resultChannel
+		_ = reader.Close()
+		t.Fatalf("VM-exec connection reader did not complete before watchdog: %v", result.err)
 	}
 	require.NoError(t, result.err)
 	if diff := cmp.Diff(frame, result.frame); diff != "" {
@@ -440,7 +446,10 @@ func TestVMExecConnectionReaderPollsExactDescriptorAndTimeout(t *testing.T) {
 			var pollCalls int
 			deps.poll = func(_ context.Context, pollFDs []unix.PollFd, timeoutMillis int) (int, error) {
 				pollCalls++
-				require.Equal(t, []unix.PollFd{{Fd: 23, Events: unix.POLLIN}}, pollFDs)
+				wantPollFDs := []unix.PollFd{{Fd: 23, Events: unix.POLLIN}}
+				if diff := cmp.Diff(wantPollFDs, pollFDs); diff != "" {
+					t.Errorf("reader poll descriptors mismatch (-want +got):\n%s", diff)
+				}
 				require.Greater(t, timeoutMillis, 0)
 				require.LessOrEqual(t, timeoutMillis, test.maximumTimeout)
 				pollFDs[0].Revents = unix.POLLIN
@@ -483,12 +492,14 @@ func TestVMExecConnectionReaderRetainsAndClosesAdmittedDescriptorOnce(t *testing
 // Rationale: Cleanup failure is secondary evidence. It must neither replace
 // the validation code nor cause a second close against a potentially reused FD.
 func TestVMExecConnectionReaderPreservesPrimaryAndBoundsCleanupEvidence(t *testing.T) {
-	fd := requireRawTestFD(t)
+	firstFD := requireRawTestFD(t)
+	secondFD := requireRawTestFD(t)
 	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int), err: errors.New("injected close failure")}
-	t.Cleanup(func() { assert.NoError(t, unix.Close(fd)) })
+	t.Cleanup(func() { assert.NoError(t, unix.Close(firstFD)) })
+	t.Cleanup(func() { assert.NoError(t, unix.Close(secondFD)) })
 	reader, _ := newScriptedVMExecReader(t, []fakeVMExecReceive{{
 		payload: []byte{0x41},
-		control: unix.UnixRights(fd, fd),
+		control: unix.UnixRights(firstFD, secondFD),
 	}}, tracker)
 
 	_, firstErr := reader.Read(make([]byte, 1))
@@ -503,7 +514,8 @@ func TestVMExecConnectionReaderPreservesPrimaryAndBoundsCleanupEvidence(t *testi
 		assert.Equal(t, "close rejected VM-exec connection descriptor", domainErr.Details["cleanup_diagnostic"])
 	}
 	assert.Error(t, closeErr)
-	assert.Equal(t, 1, tracker.count(fd))
+	assert.Equal(t, 1, tracker.count(firstFD))
+	assert.Equal(t, 1, tracker.count(secondFD))
 }
 
 func TestVMExecConnectionReaderCancellationAndDeadline(t *testing.T) {

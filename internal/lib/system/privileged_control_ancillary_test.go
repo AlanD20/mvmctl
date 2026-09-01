@@ -16,6 +16,8 @@ import (
 	"mvmctl/pkg/errs"
 )
 
+const systemVMExecTestTimeout = 2 * time.Second
+
 func TestPrivilegedControlVMExecConnectionSenderRejectsWithoutTakingOwnership(t *testing.T) {
 	t.Run("nil connection", func(t *testing.T) {
 		sender, err := newPrivilegedControlVMExecConnectionSender(nil)
@@ -47,13 +49,16 @@ func TestPrivilegedControlVMExecConnectionSenderSendsOneCarrierAndOneDescriptor(
 	sender, err := newPrivilegedControlVMExecConnectionSender(connection)
 	require.NoError(t, err)
 	frame := []byte{0x7b, 0x11, 0x22, 0x33}
+	ctx, cancel := context.WithTimeout(context.Background(), systemVMExecTestTimeout)
+	t.Cleanup(cancel)
 
-	require.NoError(t, sender.send(context.Background(), controlParent, frame))
+	require.NoError(t, sender.send(ctx, controlParent, frame))
 	_, statErr := connection.Stat()
 	assert.ErrorIs(t, statErr, os.ErrClosed)
 
 	carrier := make([]byte, 1)
 	control := make([]byte, unix.CmsgSpace(4))
+	requireSystemVMExecReadable(t, int(controlPeer.Fd()))
 	count, controlCount, flags, from, err := unix.Recvmsg(
 		int(controlPeer.Fd()),
 		carrier,
@@ -95,10 +100,13 @@ func TestPrivilegedControlVMExecConnectionSenderSendsOneCarrierAndOneDescriptor(
 	require.NoError(t, err)
 	require.Equal(t, len(payload), written)
 	received := make([]byte, len(payload))
+	requireSystemVMExecReadable(t, receivedFD)
 	read, err := unix.Read(receivedFD, received)
 	require.NoError(t, err)
 	require.Equal(t, len(payload), read)
-	assert.Equal(t, payload, received)
+	if diff := cmp.Diff(payload, received); diff != "" {
+		t.Errorf("received descriptor payload mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func TestPrivilegedControlVMExecConnectionSenderRejectsInvalidSendInputs(t *testing.T) {
@@ -155,7 +163,9 @@ func TestPrivilegedControlVMExecConnectionSenderRejectsRepeatSend(t *testing.T) 
 	t.Cleanup(func() { assert.NoError(t, connectionPeer.Close()) })
 	sender, err := newPrivilegedControlVMExecConnectionSender(connection)
 	require.NoError(t, err)
-	require.NoError(t, sender.send(context.Background(), controlParent, []byte{0x41}))
+	ctx, cancel := context.WithTimeout(context.Background(), systemVMExecTestTimeout)
+	t.Cleanup(cancel)
+	require.NoError(t, sender.send(ctx, controlParent, []byte{0x41}))
 
 	err = sender.send(context.Background(), controlParent, []byte{0x42})
 
@@ -255,25 +265,59 @@ func TestPrivilegedControlVMExecConnectionSenderPinsDescriptorDuringCarrierSend(
 	}
 	sender, err := newPrivilegedControlVMExecConnectionSenderWithDeps(connection, deps)
 	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), systemVMExecTestTimeout)
+	t.Cleanup(cancel)
 	sendResult := make(chan error, 1)
 	go func() {
-		sendResult <- sender.send(context.Background(), controlParent, []byte{0x41})
+		sendResult <- sender.send(ctx, controlParent, []byte{0x41})
 	}()
-	<-entered
+	select {
+	case <-entered:
+	case <-time.After(systemVMExecTestTimeout):
+		cancel()
+		close(release)
+		_ = unix.Shutdown(int(controlParent.Fd()), unix.SHUT_RDWR)
+		<-sendResult
+		t.Fatal("carrier send did not reach sendmsg before watchdog")
+	}
 	closeResult := make(chan error, 1)
 	go func() { closeResult <- sender.close() }()
 
 	select {
 	case err := <-closeResult:
+		cancel()
+		close(release)
+		_ = unix.Shutdown(int(controlParent.Fd()), unix.SHUT_RDWR)
+		<-sendResult
 		t.Fatalf("close returned before carrier send decision: %v", err)
 	case <-time.After(25 * time.Millisecond):
 	}
 	close(release)
-	require.NoError(t, <-sendResult)
-	require.NoError(t, <-closeResult)
+	var sendErr error
+	select {
+	case sendErr = <-sendResult:
+	case <-time.After(systemVMExecTestTimeout):
+		cancel()
+		_ = unix.Shutdown(int(controlParent.Fd()), unix.SHUT_RDWR)
+		sendErr = <-sendResult
+		<-closeResult
+		t.Fatalf("carrier send did not complete before watchdog: %v", sendErr)
+	}
+	require.NoError(t, sendErr)
+	var closeErr error
+	select {
+	case closeErr = <-closeResult:
+	case <-time.After(systemVMExecTestTimeout):
+		cancel()
+		_ = unix.Shutdown(int(controlParent.Fd()), unix.SHUT_RDWR)
+		closeErr = <-closeResult
+		t.Fatalf("concurrent close did not complete before watchdog: %v", closeErr)
+	}
+	require.NoError(t, closeErr)
 
 	carrier := make([]byte, 1)
 	control := make([]byte, unix.CmsgSpace(4))
+	requireSystemVMExecReadable(t, int(controlPeer.Fd()))
 	count, controlCount, _, _, err := unix.Recvmsg(
 		int(controlPeer.Fd()),
 		carrier,
@@ -295,9 +339,12 @@ func TestPrivilegedControlVMExecConnectionSenderPinsDescriptorDuringCarrierSend(
 	_, err = unix.Write(int(connectionPeer.Fd()), payload)
 	require.NoError(t, err)
 	received := make([]byte, len(payload))
+	requireSystemVMExecReadable(t, receivedFD)
 	_, err = unix.Read(receivedFD, received)
 	require.NoError(t, err)
-	assert.Equal(t, payload, received)
+	if diff := cmp.Diff(payload, received); diff != "" {
+		t.Errorf("pinned descriptor payload mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func TestPrivilegedControlVMExecConnectionSenderPreservesCloseFailureEvidence(t *testing.T) {
@@ -312,6 +359,57 @@ func TestPrivilegedControlVMExecConnectionSenderPreservesCloseFailureEvidence(t 
 	assert.Equal(t, true, domainErr.Details["cleanup_required"])
 	assert.Equal(t, "close VM-exec connection duplicate", domainErr.Details["cleanup_diagnostic"])
 	assert.Same(t, sender.owner.closeErr, sender.close())
+}
+
+func TestPrivilegedControlVMExecConnectionSenderReturnsCloseOnlyFailureAfterSuccessfulSend(t *testing.T) {
+	connection := requireInvalidSystemFile(t)
+	control := requireSystemControlFile(t)
+	deps := realPrivilegedControlVMExecAncillaryDeps()
+	var sendCalls int
+	deps.sendmsg = func(_ context.Context, fd int, payload, controlData []byte, flags int) (int, error) {
+		sendCalls++
+		assert.Equal(t, int(control.Fd()), fd)
+		if diff := cmp.Diff([]byte{0x41}, payload); diff != "" {
+			t.Errorf("successful carrier payload mismatch (-want +got):\n%s", diff)
+		}
+		assert.NotEmpty(t, controlData)
+		assert.Equal(t, unix.MSG_DONTWAIT|unix.MSG_NOSIGNAL, flags)
+		return 1, nil
+	}
+	sender, err := newPrivilegedControlVMExecConnectionSenderWithDeps(connection, deps)
+	require.NoError(t, err)
+
+	err = sender.send(context.Background(), control, []byte{0x41})
+
+	domainErr := requireSystemVMExecDomainError(t, err)
+	assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+	assert.Equal(t, true, domainErr.Details["cleanup_required"])
+	assert.Equal(t, "close VM-exec connection duplicate", domainErr.Details["cleanup_diagnostic"])
+	assert.Equal(t, 1, sendCalls)
+}
+
+func TestPrivilegedControlVMExecConnectionSenderRetriesZeroCountEINTR(t *testing.T) {
+	control := requireSystemControlFile(t)
+	connection, connectionPeer := requireSystemSocketPair(t)
+	t.Cleanup(func() { assert.NoError(t, connectionPeer.Close()) })
+	deps := realPrivilegedControlVMExecAncillaryDeps()
+	var sendCalls int
+	deps.sendmsg = func(context.Context, int, []byte, []byte, int) (int, error) {
+		sendCalls++
+		if sendCalls == 1 {
+			return 0, unix.EINTR
+		}
+		return 1, nil
+	}
+	deps.poll = func(context.Context, []unix.PollFd, int) (int, error) {
+		t.Fatal("poll called for EINTR")
+		return 0, nil
+	}
+	sender, err := newPrivilegedControlVMExecConnectionSenderWithDeps(connection, deps)
+	require.NoError(t, err)
+
+	require.NoError(t, sender.send(context.Background(), control, []byte{0x41}))
+	assert.Equal(t, 2, sendCalls)
 }
 
 func TestPrivilegedControlVMExecConnectionSenderHonorsCancellationWhilePolling(t *testing.T) {
@@ -380,10 +478,13 @@ func TestPrivilegedControlVMExecConnectionSenderPollsExactDescriptorAndTimeout(t
 			var pollCalls int
 			deps.poll = func(_ context.Context, pollFDs []unix.PollFd, timeoutMillis int) (int, error) {
 				pollCalls++
-				require.Equal(t, []unix.PollFd{{
+				wantPollFDs := []unix.PollFd{{
 					Fd:     int32(controlParent.Fd()),
 					Events: unix.POLLOUT,
-				}}, pollFDs)
+				}}
+				if diff := cmp.Diff(wantPollFDs, pollFDs); diff != "" {
+					t.Errorf("sender poll descriptors mismatch (-want +got):\n%s", diff)
+				}
 				require.Greater(t, timeoutMillis, 0)
 				require.LessOrEqual(t, timeoutMillis, test.maximumTimeout)
 				pollFDs[0].Revents = unix.POLLOUT
@@ -394,6 +495,7 @@ func TestPrivilegedControlVMExecConnectionSenderPollsExactDescriptorAndTimeout(t
 
 			require.NoError(t, sender.send(test.newContext(t), controlParent, []byte{0x41}))
 			assert.Equal(t, 1, pollCalls)
+			assert.Equal(t, 2, sendCalls)
 		})
 	}
 }
@@ -419,16 +521,23 @@ func TestPrivilegedControlVMExecConnectionSenderRemainderUsesNonblockingSendmsg(
 		assert.Equal(t, int(controlParent.Fd()), fd)
 		assert.Equal(t, unix.MSG_DONTWAIT|unix.MSG_NOSIGNAL, flags)
 		if calls == 1 {
-			assert.Equal(t, []byte{0x41}, payload)
+			if diff := cmp.Diff([]byte{0x41}, payload); diff != "" {
+				t.Errorf("carrier payload mismatch (-want +got):\n%s", diff)
+			}
 			assert.NotEmpty(t, control)
 			return 1, nil
 		}
-		assert.Equal(t, []byte{0x42, 0x43}, payload)
+		if diff := cmp.Diff([]byte{0x42, 0x43}, payload); diff != "" {
+			t.Errorf("remainder payload mismatch (-want +got):\n%s", diff)
+		}
 		assert.Nil(t, control)
 		return 0, unix.EAGAIN
 	}
 	deps.poll = func(_ context.Context, pollFDs []unix.PollFd, timeoutMillis int) (int, error) {
-		assert.Equal(t, []unix.PollFd{{Fd: int32(controlParent.Fd()), Events: unix.POLLOUT}}, pollFDs)
+		wantPollFDs := []unix.PollFd{{Fd: int32(controlParent.Fd()), Events: unix.POLLOUT}}
+		if diff := cmp.Diff(wantPollFDs, pollFDs); diff != "" {
+			t.Errorf("remainder poll descriptors mismatch (-want +got):\n%s", diff)
+		}
 		assert.Greater(t, timeoutMillis, 0)
 		cancel()
 		return 0, nil
@@ -454,15 +563,21 @@ func TestPrivilegedControlVMExecConnectionSenderAdvancesPartialRemainder(t *test
 		calls++
 		switch calls {
 		case 1:
-			assert.Equal(t, []byte{0x41}, payload)
+			if diff := cmp.Diff([]byte{0x41}, payload); diff != "" {
+				t.Errorf("carrier payload mismatch (-want +got):\n%s", diff)
+			}
 			assert.NotEmpty(t, control)
 			return 1, nil
 		case 2:
-			assert.Equal(t, []byte{0x42, 0x43}, payload)
+			if diff := cmp.Diff([]byte{0x42, 0x43}, payload); diff != "" {
+				t.Errorf("partial remainder payload mismatch (-want +got):\n%s", diff)
+			}
 			assert.Nil(t, control)
 			return 1, nil
 		default:
-			assert.Equal(t, []byte{0x43}, payload)
+			if diff := cmp.Diff([]byte{0x43}, payload); diff != "" {
+				t.Errorf("final remainder payload mismatch (-want +got):\n%s", diff)
+			}
 			assert.Nil(t, control)
 			return 1, nil
 		}
@@ -482,6 +597,7 @@ func readSystemVMExecRemainder(t *testing.T, fd int, size int) []byte {
 	for len(remainder) < size {
 		payload := make([]byte, size-len(remainder))
 		control := make([]byte, unix.CmsgSpace(4))
+		requireSystemVMExecReadable(t, fd)
 		count, controlCount, flags, from, err := unix.Recvmsg(fd, payload, control, unix.MSG_CMSG_CLOEXEC)
 		require.NoError(t, err)
 		require.Positive(t, count)
@@ -493,6 +609,19 @@ func readSystemVMExecRemainder(t *testing.T, fd int, size int) []byte {
 	return remainder
 }
 
+// requireSystemVMExecReadable bounds the blocking syscall that follows it by
+// requiring the descriptor to become readable before the test watchdog fires.
+func requireSystemVMExecReadable(t *testing.T, fd int) {
+	t.Helper()
+	pollFDs := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	count, err := unix.Poll(pollFDs, int(systemVMExecTestTimeout/time.Millisecond))
+	require.NoError(t, err)
+	require.Equal(t, 1, count, "descriptor did not become readable before watchdog")
+	require.NotZero(t, pollFDs[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLRDHUP))
+}
+
+// requireSystemControlFile creates a socketpair, schedules both ends for
+// cleanup, and returns the control end for validation tests.
 func requireSystemControlFile(t *testing.T) *os.File {
 	t.Helper()
 	control, peer := requireSystemSocketPair(t)
