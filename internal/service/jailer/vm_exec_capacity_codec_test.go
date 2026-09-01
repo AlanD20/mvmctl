@@ -26,7 +26,7 @@ func TestVMExecCapacityRecordCodecRoundTrip(t *testing.T) {
 		`"owner_uid":1000,"host_boot_id":"123e4567-e89b-42d3-a456-426614174000",` +
 		`"source_vm_id":"0123456789abcdef0123456789abcdef","source_launch_generation":7,` +
 		`"destination_vm_id":"fedcba9876543210fedcba9876543210","destination_launch_generation":9,` +
-		`"created_boottime_ns":1000000000,"expires_boottime_ns":301000000000}`
+		`"created_boottime_ns":1000000000,"expires_boottime_ns":305000000000}`
 	assert.Equal(t, wantJSON, string(raw))
 
 	got, err := decodeVMExecCapacityRecord(raw)
@@ -38,6 +38,7 @@ func TestVMExecCapacityRecordCodecRoundTrip(t *testing.T) {
 
 func TestVMExecCapacityRecordCodecRejectsNonCanonicalInput(t *testing.T) {
 	t.Parallel()
+	// Rationale: the persistent root authority must reject alternate JSON interpretations and schema smuggling.
 
 	valid, err := encodeVMExecCapacityRecord(testVMExecCapacityRecord())
 	require.NoError(t, err)
@@ -50,6 +51,18 @@ func TestVMExecCapacityRecordCodecRejectsNonCanonicalInput(t *testing.T) {
 		"trailing":              validText + `{}`,
 		"unknown":               strings.Replace(validText, `"owner_uid":`, `"unexpected":1,"owner_uid":`, 1),
 		"wrong kind":            strings.Replace(validText, `"vm_exec"`, `"other"`, 1),
+		"short lifetime": strings.Replace(
+			validText,
+			`"expires_boottime_ns":305000000000`,
+			`"expires_boottime_ns":304999999999`,
+			1,
+		),
+		"long lifetime": strings.Replace(
+			validText,
+			`"expires_boottime_ns":305000000000`,
+			`"expires_boottime_ns":305000000001`,
+			1,
+		),
 	}
 	for name, raw := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -64,6 +77,8 @@ func TestVMExecCapacityRecordCodecRejectsNonCanonicalInput(t *testing.T) {
 
 func TestVMExecCapacityRecordValidationRejectsInvalidAuthority(t *testing.T) {
 	t.Parallel()
+	// Rationale: shorter, longer, or malformed lifetimes could otherwise release active capacity too early or retain it
+	// beyond the relay contract.
 
 	tests := map[string]func(*vmExecCapacityRecord){
 		"empty reservation": func(record *vmExecCapacityRecord) { record.reservationID = vmExecReservationID{} },
@@ -74,6 +89,12 @@ func TestVMExecCapacityRecordValidationRejectsInvalidAuthority(t *testing.T) {
 		"zero dest gen":     func(record *vmExecCapacityRecord) { record.destinationLaunchGeneration = 0 },
 		"empty lifetime": func(record *vmExecCapacityRecord) {
 			record.expiresBoottimeNS = record.createdBoottimeNS
+		},
+		"short lifetime": func(record *vmExecCapacityRecord) {
+			record.expiresBoottimeNS--
+		},
+		"long lifetime": func(record *vmExecCapacityRecord) {
+			record.expiresBoottimeNS++
 		},
 	}
 	for name, mutate := range tests {
@@ -88,6 +109,7 @@ func TestVMExecCapacityRecordValidationRejectsInvalidAuthority(t *testing.T) {
 
 func TestNewVMExecReservationIDRequiresExactLowerHex(t *testing.T) {
 	t.Parallel()
+	// Rationale: reservation IDs become fixed filenames, so accepting alternate spellings would create ambiguous names.
 
 	valid, err := newVMExecReservationID(testVMExecReservationID)
 	require.NoError(t, err)
@@ -114,6 +136,6 @@ func testVMExecCapacityRecord() vmExecCapacityRecord {
 		destinationVMID:             testVMExecDestinationID,
 		destinationLaunchGeneration: 9,
 		createdBoottimeNS:           1_000_000_000,
-		expiresBoottimeNS:           301_000_000_000,
+		expiresBoottimeNS:           1_000_000_000 + vmExecCapacityLifetimeNS,
 	}
 }

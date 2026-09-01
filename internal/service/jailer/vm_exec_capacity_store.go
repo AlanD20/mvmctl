@@ -17,14 +17,25 @@ func (store *vmExecCapacityStore) readRecord(
 	reservationID vmExecReservationID,
 ) (record vmExecCapacityRecord, found bool, returnErr error) {
 	if !vmExecReservationIDPattern.MatchString(reservationID.value) {
-		return vmExecCapacityRecord{}, false, vmExecCapacityValidationError("VM-exec reservation ID is invalid")
+		return vmExecCapacityRecord{}, false, vmExecCapacityValidationError("vm-exec reservation ID is invalid")
 	}
-	deps, policy, stateFD, err := store.snapshot()
+	deps, policy, stateFD, finish, err := store.beginOperation()
 	if err != nil {
 		return vmExecCapacityRecord{}, false, err
 	}
+	defer finish()
+	return readVMExecCapacityRecordAt(ctx, deps, policy, stateFD, reservationID)
+}
+
+func readVMExecCapacityRecordAt(
+	ctx context.Context,
+	deps vmExecCapacityStoreDeps,
+	policy vmExecCapacityStorePolicy,
+	stateFD int,
+	reservationID vmExecReservationID,
+) (record vmExecCapacityRecord, found bool, returnErr error) {
 	if err := ctx.Err(); err != nil {
-		return vmExecCapacityRecord{}, false, vmExecCapacityEffectError("open VM-exec capacity record", err)
+		return vmExecCapacityRecord{}, false, vmExecCapacityEffectError("open vm-exec capacity record", err)
 	}
 	fd, err := deps.openAt2(ctx, stateFD, reservationID.value+".json", &unix.OpenHow{
 		Flags: vmExecCapacityReadFlags, Resolve: vmExecCapacityResolve,
@@ -32,18 +43,18 @@ func (store *vmExecCapacityStore) readRecord(
 	if errors.Is(err, unix.ENOENT) {
 		if contextErr := ctx.Err(); contextErr != nil {
 			return vmExecCapacityRecord{}, false, vmExecCapacityEffectError(
-				"open VM-exec capacity record",
+				"open vm-exec capacity record",
 				contextErr,
 			)
 		}
 		return vmExecCapacityRecord{}, false, nil
 	}
 	if err != nil {
-		return vmExecCapacityRecord{}, false, vmExecCapacityEffectError("open VM-exec capacity record", err)
+		return vmExecCapacityRecord{}, false, vmExecCapacityEffectError("open vm-exec capacity record", err)
 	}
 	defer func() {
 		if err := deps.close(context.WithoutCancel(ctx), fd); err != nil {
-			returnErr = appendVMExecCapacityError(returnErr, "close VM-exec capacity record", err)
+			returnErr = appendVMExecCapacityError(returnErr, "close vm-exec capacity record", err)
 		}
 	}()
 	before, err := verifyVMExecCapacityRecordFile(ctx, deps, fd, policy)
@@ -52,7 +63,7 @@ func (store *vmExecCapacityStore) readRecord(
 	}
 	raw, err := readAllVMExecCapacityRecord(ctx, deps, fd)
 	if err != nil {
-		return vmExecCapacityRecord{}, false, vmExecCapacityEffectError("read VM-exec capacity record", err)
+		return vmExecCapacityRecord{}, false, vmExecCapacityEffectError("read vm-exec capacity record", err)
 	}
 	after, err := verifyVMExecCapacityRecordFile(ctx, deps, fd, policy)
 	if err != nil {
@@ -60,7 +71,7 @@ func (store *vmExecCapacityStore) readRecord(
 	}
 	if !sameVMExecCapacityFile(before, after) || after.size != uint64(len(raw)) {
 		return vmExecCapacityRecord{}, false, vmExecCapacityCorruptError(
-			"VM-exec capacity record changed while being read",
+			"vm-exec capacity record changed while being read",
 			nil,
 		)
 	}
@@ -70,7 +81,7 @@ func (store *vmExecCapacityStore) readRecord(
 	}
 	if record.reservationID != reservationID {
 		return vmExecCapacityRecord{}, false, vmExecCapacityCorruptError(
-			"VM-exec capacity record identity is inconsistent",
+			"vm-exec capacity record identity is inconsistent",
 			nil,
 		)
 	}
@@ -81,10 +92,11 @@ func (store *vmExecCapacityStore) createRecord(ctx context.Context, record vmExe
 	if err := validateVMExecCapacityRecord(record); err != nil {
 		return err
 	}
-	deps, policy, stateFD, err := store.snapshot()
+	deps, policy, stateFD, finish, err := store.beginOperation()
 	if err != nil {
 		return err
 	}
+	defer finish()
 	raw, err := encodeVMExecCapacityRecord(record)
 	if err != nil {
 		return err
@@ -111,7 +123,7 @@ func (store *vmExecCapacityStore) createRecord(ctx context.Context, record vmExe
 		return abort(err)
 	}
 	if before.size != uint64(len(raw)) {
-		return abort(vmExecCapacityCorruptError("VM-exec capacity temporary record is incomplete", nil))
+		return abort(vmExecCapacityCorruptError("vm-exec capacity temporary record is incomplete", nil))
 	}
 	if err := deps.fsync(ctx, tempFD); err != nil {
 		return abort(vmExecCapacityEffectError("sync VM-exec capacity temporary record", err))
@@ -121,7 +133,7 @@ func (store *vmExecCapacityStore) createRecord(ctx context.Context, record vmExe
 		return abort(err)
 	}
 	if !sameVMExecCapacityFile(before, after) {
-		return abort(vmExecCapacityCorruptError("VM-exec capacity temporary record changed while syncing", nil))
+		return abort(vmExecCapacityCorruptError("vm-exec capacity temporary record changed while syncing", nil))
 	}
 	tempOpen = false
 	if err := deps.close(context.WithoutCancel(ctx), tempFD); err != nil {
@@ -155,86 +167,92 @@ func (store *vmExecCapacityStore) scanAndPrune(
 	if !hostBootIDPattern.MatchString(hostBootID) {
 		return nil, vmExecCapacityCorruptError("current host boot identity is invalid", nil)
 	}
-	deps, _, stateFD, err := store.snapshot()
+	deps, policy, stateFD, finish, err := store.beginOperation()
 	if err != nil {
 		return nil, err
 	}
+	defer finish()
 	names, err := deps.readDirNames(ctx, stateFD)
 	if err != nil {
 		return nil, vmExecCapacityEffectError("enumerate VM-exec capacity records", err)
 	}
 	active := make([]vmExecCapacityRecord, 0, len(names))
 	crashTemps := make([]string, 0)
-	prune := make([]vmExecReservationID, 0)
+	prune := make([]string, 0)
 	pruned := false
 	for _, name := range names {
 		if err := ctx.Err(); err != nil {
 			return nil, vmExecCapacityEffectError("enumerate VM-exec capacity records", err)
 		}
 		if vmExecCapacityTempNamePattern.MatchString(name) {
-			if err := store.admitSafeCrashTemp(ctx, name); err != nil {
+			if err := admitSafeVMExecCapacityCrashTempAt(ctx, deps, policy, stateFD, name); err != nil {
 				return nil, err
 			}
 			crashTemps = append(crashTemps, name)
 			continue
 		}
 		if !vmExecCapacityRecordNamePattern.MatchString(name) {
-			return nil, vmExecCapacityCorruptError("VM-exec capacity directory contains an ambiguous entry", nil)
+			return nil, vmExecCapacityCorruptError("vm-exec capacity directory contains an ambiguous entry", nil)
 		}
 		reservationID, idErr := newVMExecReservationID(strings.TrimSuffix(name, ".json"))
 		if idErr != nil {
-			return nil, vmExecCapacityCorruptError("VM-exec capacity record name is invalid", idErr)
+			return nil, vmExecCapacityCorruptError("vm-exec capacity record name is invalid", idErr)
 		}
-		record, found, readErr := store.readRecord(ctx, reservationID)
+		record, found, readErr := readVMExecCapacityRecordAt(ctx, deps, policy, stateFD, reservationID)
 		if readErr != nil {
 			return nil, readErr
 		}
 		if !found {
-			return nil, vmExecCapacityCorruptError("VM-exec capacity record disappeared during scan", nil)
+			return nil, vmExecCapacityCorruptError("vm-exec capacity record disappeared during scan", nil)
 		}
 		if record.hostBootID != hostBootID || record.expiresBoottimeNS <= boottimeNS {
-			prune = append(prune, reservationID)
+			prune = append(prune, reservationID.value+".json")
 			continue
 		}
 		if record.createdBoottimeNS > boottimeNS {
-			return nil, vmExecCapacityCorruptError("VM-exec capacity record begins in the future", nil)
+			return nil, vmExecCapacityCorruptError("vm-exec capacity record begins in the future", nil)
 		}
 		active = append(active, record)
 	}
-	for _, name := range crashTemps {
+	prune = append(crashTemps, prune...)
+	for _, name := range prune {
+		if err := ctx.Err(); err != nil {
+			return nil, finishVMExecCapacityPrune(
+				ctx,
+				deps,
+				stateFD,
+				pruned,
+				vmExecCapacityEffectError("prune vm-exec capacity records", err),
+			)
+		}
 		if err := deps.unlinkAt(ctx, stateFD, name, 0); err != nil {
-			return nil, vmExecCapacityEffectError("prune crashed VM-exec capacity temporary record", err)
+			return nil, finishVMExecCapacityPrune(
+				ctx,
+				deps,
+				stateFD,
+				pruned,
+				vmExecCapacityEffectError("prune vm-exec capacity record", err),
+			)
 		}
 		pruned = true
 	}
-	for _, reservationID := range prune {
-		if err := deps.unlinkAt(ctx, stateFD, reservationID.value+".json", 0); err != nil {
-			return nil, vmExecCapacityEffectError("prune VM-exec capacity record", err)
-		}
-		pruned = true
-	}
-	if pruned {
-		if err := deps.fsync(ctx, stateFD); err != nil {
-			result := vmExecCapacityEffectError("sync pruned VM-exec capacity records", err)
-			result.Details = map[string]any{"records_pruned": true, "durability_uncertain": true}
-			return nil, result
-		}
+	if err := finishVMExecCapacityPrune(ctx, deps, stateFD, pruned, nil); err != nil {
+		return nil, err
 	}
 	return active, nil
 }
 
-// admitSafeCrashTemp admits only the exact temporary name and metadata shape that this store creates. Deletion is
-// deferred until the complete directory scan proves there is no other corrupt or ambiguous entry.
-func (store *vmExecCapacityStore) admitSafeCrashTemp(
+// admitSafeVMExecCapacityCrashTempAt admits only the exact temporary name and metadata shape that this store creates.
+// Deletion is deferred until the complete directory scan proves there is no other corrupt or ambiguous entry.
+func admitSafeVMExecCapacityCrashTempAt(
 	ctx context.Context,
+	deps vmExecCapacityStoreDeps,
+	policy vmExecCapacityStorePolicy,
+	stateFD int,
 	name string,
 ) (returnErr error) {
 	if !vmExecCapacityTempNamePattern.MatchString(name) {
-		return vmExecCapacityCorruptError("VM-exec capacity temporary record name is invalid", nil)
-	}
-	deps, policy, stateFD, err := store.snapshot()
-	if err != nil {
-		return err
+		return vmExecCapacityCorruptError("vm-exec capacity temporary record name is invalid", nil)
 	}
 	fd, err := deps.openAt2(ctx, stateFD, name, &unix.OpenHow{
 		Flags: vmExecCapacityReadFlags, Resolve: vmExecCapacityResolve,
@@ -263,16 +281,20 @@ func (store *vmExecCapacityStore) removeRecord(
 	ctx context.Context,
 	reservationID vmExecReservationID,
 ) (bool, error) {
-	record, found, err := store.readRecord(ctx, reservationID)
+	if !vmExecReservationIDPattern.MatchString(reservationID.value) {
+		return false, vmExecCapacityValidationError("vm-exec reservation ID is invalid")
+	}
+	deps, policy, stateFD, finish, err := store.beginOperation()
+	if err != nil {
+		return false, err
+	}
+	defer finish()
+	record, found, err := readVMExecCapacityRecordAt(ctx, deps, policy, stateFD, reservationID)
 	if err != nil || !found {
 		return false, err
 	}
 	if record.reservationID != reservationID {
-		return false, vmExecCapacityCorruptError("VM-exec capacity record identity is inconsistent", nil)
-	}
-	deps, _, stateFD, err := store.snapshot()
-	if err != nil {
-		return false, err
+		return false, vmExecCapacityCorruptError("vm-exec capacity record identity is inconsistent", nil)
 	}
 	if err := deps.unlinkAt(ctx, stateFD, reservationID.value+".json", 0); err != nil {
 		return false, vmExecCapacityEffectError("remove VM-exec capacity record", err)
@@ -283,6 +305,46 @@ func (store *vmExecCapacityStore) removeRecord(
 		return true, result
 	}
 	return true, nil
+}
+
+func finishVMExecCapacityPrune(
+	ctx context.Context,
+	deps vmExecCapacityStoreDeps,
+	stateFD int,
+	recordsPruned bool,
+	primary error,
+) error {
+	if !recordsPruned {
+		return primary
+	}
+	syncErr := deps.fsync(context.WithoutCancel(ctx), stateFD)
+	result := primary
+	if syncErr != nil {
+		if result == nil {
+			result = vmExecCapacityEffectError("sync pruned vm-exec capacity records", syncErr)
+		} else {
+			domainErr := errs.AsDomainError(result)
+			if domainErr == nil {
+				result = vmExecCapacityEffectError("prune vm-exec capacity records", errors.Join(result, syncErr))
+			} else {
+				joined := *domainErr
+				joined.Err = errors.Join(domainErr.Err, fmt.Errorf("sync pruned vm-exec capacity records: %w", syncErr))
+				result = &joined
+			}
+		}
+	}
+	if result == nil {
+		return nil
+	}
+	domainErr := errs.AsDomainError(result)
+	if domainErr == nil {
+		domainErr = vmExecCapacityEffectError("prune vm-exec capacity records", result)
+	}
+	evidenced := *domainErr
+	evidenced.Details = cloneVMExecCapacityDetails(domainErr.Details)
+	evidenced.Details["records_pruned"] = true
+	evidenced.Details["durability_uncertain"] = syncErr != nil
+	return &evidenced
 }
 
 func createVMExecCapacityTemp(
@@ -328,7 +390,7 @@ func readAllVMExecCapacityRecord(ctx context.Context, deps vmExecCapacityStoreDe
 			return nil, fmt.Errorf("invalid read count %d", count)
 		}
 		if len(result)+count > maxVMExecCapacityRecordBytes {
-			return nil, errors.New("VM-exec capacity record exceeds size limit")
+			return nil, errors.New("vm-exec capacity record exceeds size limit")
 		}
 		result = append(result, buffer[:count]...)
 		if errors.Is(err, unix.EINTR) {

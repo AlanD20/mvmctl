@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 
 	"mvmctl/pkg/errs"
@@ -52,7 +53,7 @@ func newVMExecReservationID(value string) (vmExecReservationID, error) {
 	if !vmExecReservationIDPattern.MatchString(value) {
 		return vmExecReservationID{}, vmExecCapacityValidationError(
 			fmt.Sprintf(
-				"VM-exec reservation ID must be %d lowercase hexadecimal characters",
+				"vm-exec reservation ID must be %d lowercase hexadecimal characters",
 				vmExecReservationIDLength,
 			),
 		)
@@ -88,16 +89,16 @@ func newVMExecCapacityRecord(
 
 func validateVMExecCapacityIntent(intent vmExecCapacityIntent) error {
 	if intent.caller.ownerUID == 0 {
-		return vmExecCapacityValidationError("VM-exec capacity caller UID must be non-zero")
+		return vmExecCapacityValidationError("vm-exec capacity caller UID must be non-zero")
 	}
 	if !vmIDPattern.MatchString(intent.sourceVMID) || !vmIDPattern.MatchString(intent.destinationVMID) {
-		return vmExecCapacityValidationError("VM-exec capacity VM identity is invalid")
+		return vmExecCapacityValidationError("vm-exec capacity VM identity is invalid")
 	}
 	if intent.sourceVMID == intent.destinationVMID {
-		return vmExecCapacityValidationError("VM-exec capacity requires distinct source and destination VMs")
+		return vmExecCapacityValidationError("vm-exec capacity requires distinct source and destination VMs")
 	}
 	if intent.sourceLaunchGeneration == 0 || intent.destinationLaunchGeneration == 0 {
-		return vmExecCapacityValidationError("VM-exec capacity launch generation must be positive")
+		return vmExecCapacityValidationError("vm-exec capacity launch generation must be positive")
 	}
 	return nil
 }
@@ -107,7 +108,7 @@ func validateVMExecCapacityRecord(record vmExecCapacityRecord) error {
 		return vmExecCapacityCorruptError("unsupported VM-exec capacity record schema", nil)
 	}
 	if !vmExecReservationIDPattern.MatchString(record.reservationID.value) {
-		return vmExecCapacityCorruptError("VM-exec capacity reservation identity is invalid", nil)
+		return vmExecCapacityCorruptError("vm-exec capacity reservation identity is invalid", nil)
 	}
 	intent := vmExecCapacityIntent{
 		caller:                      vmExecCapacityCaller{ownerUID: record.ownerUID},
@@ -117,13 +118,14 @@ func validateVMExecCapacityRecord(record vmExecCapacityRecord) error {
 		destinationLaunchGeneration: record.destinationLaunchGeneration,
 	}
 	if err := validateVMExecCapacityIntent(intent); err != nil {
-		return vmExecCapacityCorruptError("VM-exec capacity record identity is invalid", err)
+		return vmExecCapacityCorruptError("vm-exec capacity record identity is invalid", err)
 	}
 	if !hostBootIDPattern.MatchString(record.hostBootID) {
-		return vmExecCapacityCorruptError("VM-exec capacity host boot identity is invalid", nil)
+		return vmExecCapacityCorruptError("vm-exec capacity host boot identity is invalid", nil)
 	}
-	if record.expiresBoottimeNS <= record.createdBoottimeNS {
-		return vmExecCapacityCorruptError("VM-exec capacity lifetime is invalid", nil)
+	if record.createdBoottimeNS > math.MaxUint64-vmExecCapacityLifetimeNS ||
+		record.expiresBoottimeNS != record.createdBoottimeNS+vmExecCapacityLifetimeNS {
+		return vmExecCapacityCorruptError("vm-exec capacity lifetime is invalid", nil)
 	}
 	return nil
 }
@@ -148,13 +150,13 @@ func vmExecCapacityEffectError(message string, cause error) *errs.DomainError {
 }
 
 func vmExecCapacityUnauthorizedError() *errs.DomainError {
-	return errs.New(errs.CodeUnauthorized, "VM-exec reservation is not available to the invoking user")
+	return errs.New(errs.CodeUnauthorized, "vm-exec reservation is not available to the invoking user")
 }
 
 func vmExecCapacityExhaustedError() *errs.DomainError {
 	return errs.New(
 		errs.CodeVMResourceExhausted,
-		"VM-exec global capacity is exhausted",
+		"vm-exec global capacity is exhausted",
 		errs.WithClass(errs.ClassConflict),
 	)
 }

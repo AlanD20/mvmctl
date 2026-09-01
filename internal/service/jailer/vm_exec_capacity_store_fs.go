@@ -66,8 +66,9 @@ type vmExecCapacityStore struct {
 }
 
 type vmExecCapacityStoreState struct {
-	// mu guards the retained descriptors and every lifecycle field below.
-	mu         sync.Mutex
+	// mu keeps every operation's descriptor snapshot live until that operation finishes. Release takes the write side
+	// before closing descriptors, so an fd cannot be closed and reused underneath an in-flight operation.
+	mu         sync.RWMutex
 	deps       vmExecCapacityStoreDeps
 	policy     vmExecCapacityStorePolicy
 	stateFD    int
@@ -141,15 +142,15 @@ func openVMExecCapacityStore(
 
 func vmExecCapacityStorePathComponents(value string) ([]string, error) {
 	if !strings.HasPrefix(value, "/") || path.Clean(value) != value {
-		return nil, vmExecCapacityCorruptError("VM-exec capacity root is not canonical", nil)
+		return nil, vmExecCapacityCorruptError("vm-exec capacity root is not canonical", nil)
 	}
 	names := strings.Split(strings.TrimPrefix(value, "/"), "/")
 	if len(names) != 5 {
-		return nil, vmExecCapacityCorruptError("VM-exec capacity root has unexpected depth", nil)
+		return nil, vmExecCapacityCorruptError("vm-exec capacity root has unexpected depth", nil)
 	}
 	for _, name := range names {
 		if name == "" || name == "." || name == ".." {
-			return nil, vmExecCapacityCorruptError("VM-exec capacity root has an unsafe component", nil)
+			return nil, vmExecCapacityCorruptError("vm-exec capacity root has an unsafe component", nil)
 		}
 	}
 	return names, nil
@@ -238,10 +239,10 @@ func verifyVMExecCapacityDirectory(
 		return vmExecCapacityEffectError("inspect VM-exec capacity directory "+description, err)
 	}
 	if evidence.mode&unix.S_IFMT != unix.S_IFDIR {
-		return vmExecCapacityCorruptError("VM-exec capacity path is not a directory", nil)
+		return vmExecCapacityCorruptError("vm-exec capacity path is not a directory", nil)
 	}
 	if evidence.uid != policy.expectedUID || evidence.mode&0022 != 0 {
-		return vmExecCapacityCorruptError("VM-exec capacity directory has unsafe ownership or mode", nil)
+		return vmExecCapacityCorruptError("vm-exec capacity directory has unsafe ownership or mode", nil)
 	}
 	if exact && (evidence.gid != policy.expectedGID || evidence.mode&07777 != uint16(vmExecCapacityDirectoryMode)) {
 		return vmExecCapacityCorruptError("managed VM-exec capacity directory has unexpected owner or mode", nil)
@@ -293,19 +294,19 @@ func verifyVMExecCapacityRecordFile(
 	}
 	if evidence.mode&unix.S_IFMT != unix.S_IFREG || evidence.links != 1 {
 		return vmExecCapacityFileEvidence{}, vmExecCapacityCorruptError(
-			"VM-exec capacity record is not a one-link regular file",
+			"vm-exec capacity record is not a one-link regular file",
 			nil,
 		)
 	}
 	if evidence.uid != policy.expectedUID || evidence.gid != policy.expectedGID ||
 		evidence.mode&07777 != uint16(vmExecCapacityRecordMode) {
 		return vmExecCapacityFileEvidence{}, vmExecCapacityCorruptError(
-			"VM-exec capacity record has unexpected owner or mode",
+			"vm-exec capacity record has unexpected owner or mode",
 			nil,
 		)
 	}
 	if evidence.size == 0 || evidence.size > maxVMExecCapacityRecordBytes {
-		return vmExecCapacityFileEvidence{}, vmExecCapacityCorruptError("VM-exec capacity record size is invalid", nil)
+		return vmExecCapacityFileEvidence{}, vmExecCapacityCorruptError("vm-exec capacity record size is invalid", nil)
 	}
 	return evidence, nil
 }
@@ -335,19 +336,25 @@ func (store *vmExecCapacityStore) Release(ctx context.Context) error {
 	return state.releaseErr
 }
 
-func (store *vmExecCapacityStore) snapshot() (vmExecCapacityStoreDeps, vmExecCapacityStorePolicy, int, error) {
+func (store *vmExecCapacityStore) beginOperation() (
+	vmExecCapacityStoreDeps,
+	vmExecCapacityStorePolicy,
+	int,
+	func(),
+	error,
+) {
 	if store == nil || store.state == nil {
-		return vmExecCapacityStoreDeps{}, vmExecCapacityStorePolicy{}, -1,
-			vmExecCapacityCorruptError("VM-exec capacity store is unavailable", nil)
+		return vmExecCapacityStoreDeps{}, vmExecCapacityStorePolicy{}, -1, nil,
+			vmExecCapacityCorruptError("vm-exec capacity store is unavailable", nil)
 	}
 	state := store.state
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	state.mu.RLock()
 	if state.released || state.stateFD < 0 {
-		return vmExecCapacityStoreDeps{}, vmExecCapacityStorePolicy{}, -1,
-			vmExecCapacityCorruptError("VM-exec capacity store is released", nil)
+		state.mu.RUnlock()
+		return vmExecCapacityStoreDeps{}, vmExecCapacityStorePolicy{}, -1, nil,
+			vmExecCapacityCorruptError("vm-exec capacity store is released", nil)
 	}
-	return state.deps, state.policy, state.stateFD, nil
+	return state.deps, state.policy, state.stateFD, state.mu.RUnlock, nil
 }
 
 func closeRejectedVMExecCapacityFD(

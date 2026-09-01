@@ -7,6 +7,7 @@ import (
 	"errors"
 	"math"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -16,7 +17,13 @@ import (
 )
 
 const (
-	vmExecCapacityLifetimeNS = uint64(vmexecwire.MaxExecutionDuration)
+	// vmExecCapacityTerminalCleanupGrace is the sum of the protocol's fixed two-second forced-process cleanup bound and
+	// fixed two-second terminal-frame write bound. Relay setup consumes the execution budget: later composition must stop
+	// the relay at relayStopBoottimeNS, then finish terminal transport and release inside this grace.
+	vmExecCapacityTerminalCleanupGrace = 4 * time.Second
+	vmExecCapacityLifetimeNS           = uint64(
+		vmexecwire.MaxExecutionDuration + vmExecCapacityTerminalCleanupGrace,
+	)
 	vmExecCapacityIDAttempts = 8
 )
 
@@ -73,11 +80,11 @@ func newVMExecCapacityAuthorityWithDeps(
 	deps vmExecCapacityAuthorityDeps,
 ) (*vmExecCapacityAuthority, error) {
 	if policy.maxReservations == 0 {
-		return nil, vmExecCapacityValidationError("VM-exec capacity maximum must be positive")
+		return nil, vmExecCapacityValidationError("vm-exec capacity maximum must be positive")
 	}
 	if deps.openStore == nil || deps.openLockRoot == nil || deps.currentBootID == nil ||
 		deps.newReservationID == nil || deps.clock == nil {
-		return nil, vmExecCapacityCorruptError("VM-exec capacity authority dependencies are incomplete", nil)
+		return nil, vmExecCapacityCorruptError("vm-exec capacity authority dependencies are incomplete", nil)
 	}
 	return &vmExecCapacityAuthority{policy: policy, deps: deps}, nil
 }
@@ -88,7 +95,7 @@ func (authority *vmExecCapacityAuthority) reserve(
 	intent vmExecCapacityIntent,
 ) (_ *vmExecCapacityLease, returnErr error) {
 	if authority == nil {
-		return nil, vmExecCapacityCorruptError("VM-exec capacity authority is unavailable", nil)
+		return nil, vmExecCapacityCorruptError("vm-exec capacity authority is unavailable", nil)
 	}
 	if err := validateVMExecCapacityIntent(intent); err != nil {
 		return nil, err
@@ -117,7 +124,7 @@ func (authority *vmExecCapacityAuthority) reserve(
 		return nil, vmExecCapacityEffectError("observe CLOCK_BOOTTIME for VM-exec capacity", err)
 	}
 	if boottimeNS > math.MaxUint64-vmExecCapacityLifetimeNS {
-		return nil, vmExecCapacityCorruptError("VM-exec capacity expiration overflows CLOCK_BOOTTIME", nil)
+		return nil, vmExecCapacityCorruptError("vm-exec capacity expiration overflows clock_boottime", nil)
 	}
 	active, err := store.scanAndPrune(ctx, hostBootID, boottimeNS)
 	if err != nil {
@@ -147,6 +154,10 @@ func (authority *vmExecCapacityAuthority) reserve(
 		}
 		createErr := store.createRecord(ctx, record)
 		if errors.Is(createErr, unix.EEXIST) {
+			domainErr := errs.AsDomainError(createErr)
+			if domainErr != nil && domainErr.Details["cleanup_required"] == true {
+				return nil, createErr
+			}
 			continue
 		}
 		if createErr != nil {
@@ -170,21 +181,25 @@ func (authority *vmExecCapacityAuthority) release(
 	reservationID vmExecReservationID,
 ) (returnErr error) {
 	if authority == nil {
-		return vmExecCapacityCorruptError("VM-exec capacity authority is unavailable", nil)
+		return vmExecCapacityCorruptError("vm-exec capacity authority is unavailable", nil)
 	}
 	if caller.ownerUID == 0 {
-		return vmExecCapacityValidationError("VM-exec capacity caller UID must be non-zero")
+		return vmExecCapacityValidationError("vm-exec capacity caller UID must be non-zero")
 	}
 	if !vmExecReservationIDPattern.MatchString(reservationID.value) {
-		return vmExecCapacityValidationError("VM-exec reservation ID is invalid")
+		return vmExecCapacityValidationError("vm-exec reservation ID is invalid")
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
 	lockRoot, lock, store, err := authority.openLockedStore(cleanupCtx)
 	if err != nil {
 		return err
 	}
+	recordDeleted := false
 	defer func() {
 		returnErr = releaseVMExecCapacityOperation(cleanupCtx, returnErr, store, lock, lockRoot)
+		if recordDeleted && returnErr != nil {
+			returnErr = annotateVMExecCapacityRecordDeleted(returnErr)
+		}
 	}()
 	record, found, err := store.readRecord(cleanupCtx, reservationID)
 	if err != nil || !found {
@@ -193,7 +208,7 @@ func (authority *vmExecCapacityAuthority) release(
 	if record.ownerUID != caller.ownerUID {
 		return vmExecCapacityUnauthorizedError()
 	}
-	_, err = store.removeRecord(cleanupCtx, reservationID)
+	recordDeleted, err = store.removeRecord(cleanupCtx, reservationID)
 	return err
 }
 
@@ -233,12 +248,25 @@ func (lease *vmExecCapacityLease) Release(ctx context.Context) error {
 	}
 	cleanupCtx := context.WithoutCancel(ctx)
 	if state.authority == nil {
-		state.releaseErr = vmExecCapacityCorruptError("VM-exec capacity lease authority is unavailable", nil)
+		state.releaseErr = vmExecCapacityCorruptError("vm-exec capacity lease authority is unavailable", nil)
 	} else {
 		state.releaseErr = state.authority.release(cleanupCtx, state.caller, state.record.reservationID)
 	}
 	state.released = true
 	return state.releaseErr
+}
+
+// relayStopBoottimeNS is the absolute CLOCK_BOOTTIME deadline later relay composition must enforce. CLOCK_BOOTTIME
+// advances across suspend, so setup and suspend consume this fixed execution budget before the record becomes pruneable.
+func (lease *vmExecCapacityLease) relayStopBoottimeNS() (uint64, error) {
+	if lease == nil || lease.state == nil {
+		return 0, vmExecCapacityCorruptError("vm-exec capacity lease is unavailable", nil)
+	}
+	created := lease.state.record.createdBoottimeNS
+	if created > math.MaxUint64-uint64(vmexecwire.MaxExecutionDuration) {
+		return 0, vmExecCapacityCorruptError("vm-exec relay stop time overflows clock_boottime", nil)
+	}
+	return created + uint64(vmexecwire.MaxExecutionDuration), nil
 }
 
 func releaseVMExecCapacityOperation(
@@ -265,11 +293,25 @@ func releaseVMExecCapacityOperation(
 func annotateVMExecCapacityRecordCreated(err error) error {
 	domainErr := errs.AsDomainError(err)
 	if domainErr == nil {
-		domainErr = vmExecCapacityEffectError("VM-exec capacity reservation was created", err)
+		domainErr = vmExecCapacityEffectError("vm-exec capacity reservation was created", err)
 	}
 	result := *domainErr
 	result.Details = cloneVMExecCapacityDetails(domainErr.Details)
 	result.Details["record_created"] = true
+	return &result
+}
+
+func annotateVMExecCapacityRecordDeleted(err error) error {
+	domainErr := errs.AsDomainError(err)
+	if domainErr == nil {
+		domainErr = vmExecCapacityEffectError("vm-exec capacity reservation was deleted", err)
+	}
+	result := *domainErr
+	result.Details = cloneVMExecCapacityDetails(domainErr.Details)
+	result.Details["record_deleted"] = true
+	if _, exists := result.Details["durability_uncertain"]; !exists {
+		result.Details["durability_uncertain"] = false
+	}
 	return &result
 }
 
@@ -293,11 +335,11 @@ func (systemVMExecCapacityClock) boottimeNS(ctx context.Context) (uint64, error)
 	}
 	if now.Sec < 0 || now.Nsec < 0 || now.Nsec >= 1_000_000_000 ||
 		uint64(now.Sec) > math.MaxUint64/1_000_000_000 {
-		return 0, errors.New("CLOCK_BOOTTIME returned an invalid value")
+		return 0, errors.New("clock_boottime returned an invalid value")
 	}
 	seconds := uint64(now.Sec) * 1_000_000_000
 	if seconds > math.MaxUint64-uint64(now.Nsec) {
-		return 0, errors.New("CLOCK_BOOTTIME value overflows nanoseconds")
+		return 0, errors.New("clock_boottime value overflows nanoseconds")
 	}
 	return seconds + uint64(now.Nsec), nil
 }
@@ -341,7 +383,7 @@ type systemVMExecCapacityLockRoot struct {
 
 func (root *systemVMExecCapacityLockRoot) acquire(ctx context.Context) (vmExecCapacityLock, error) {
 	if root == nil || root.value == nil {
-		return nil, errors.New("VM-exec capacity lock root is unavailable")
+		return nil, errors.New("vm-exec capacity lock root is unavailable")
 	}
 	value, err := root.value.Acquire(ctx)
 	if err != nil {

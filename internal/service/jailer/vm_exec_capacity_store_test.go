@@ -5,7 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -38,6 +41,7 @@ func TestVMExecCapacityStoreCreatesExactTreeAndRoundTripsRecord(t *testing.T) {
 
 func TestVMExecCapacityStoreRejectsAmbiguousEntriesAndUnsafeRecords(t *testing.T) {
 	t.Parallel()
+	// Rationale: fail-closed scans must not convert attacker-controlled filesystem shapes into trusted capacity state.
 
 	tests := map[string]func(*testing.T, string){
 		"unexpected entry": func(t *testing.T, directory string) {
@@ -69,6 +73,7 @@ func TestVMExecCapacityStoreRejectsAmbiguousEntriesAndUnsafeRecords(t *testing.T
 
 func TestVMExecCapacityStoreRecoversOnlyCanonicalSafeCrashTemps(t *testing.T) {
 	t.Parallel()
+	// Rationale: crash recovery may delete only the exact safe temporary-file shape emitted by this store.
 
 	tests := map[string]struct {
 		mutate  func(*testing.T, string)
@@ -123,20 +128,23 @@ func TestVMExecCapacityStoreRecoversOnlyCanonicalSafeCrashTemps(t *testing.T) {
 
 func TestVMExecCapacityStorePrunesOnlyValidExpiredOrPriorBootRecords(t *testing.T) {
 	t.Parallel()
+	// Rationale: pruning may reclaim only strictly validated stale authority, never a current live reservation.
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	store := openTestVMExecCapacityStore(t, root)
 	active := testVMExecCapacityRecord()
-	active.expiresBoottimeNS = 10_000_000_000
+	active.createdBoottimeNS = 200_000_000_000
+	active.expiresBoottimeNS = active.createdBoottimeNS + vmExecCapacityLifetimeNS
 	expired := testVMExecCapacityRecordWithID(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	expired.expiresBoottimeNS = 2_000_000_000
+	expired.createdBoottimeNS = 1
+	expired.expiresBoottimeNS = expired.createdBoottimeNS + vmExecCapacityLifetimeNS
 	priorBoot := testVMExecCapacityRecordWithID(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	priorBoot.hostBootID = "7d46d84c-f2ae-4abc-9abc-0123456789ab"
 	for _, record := range []vmExecCapacityRecord{active, expired, priorBoot} {
 		require.NoError(t, store.createRecord(t.Context(), record))
 	}
 
-	records, err := store.scanAndPrune(t.Context(), active.hostBootID, 3_000_000_000)
+	records, err := store.scanAndPrune(t.Context(), active.hostBootID, 400_000_000_000)
 	require.NoError(t, err)
 	if diff := cmp.Diff([]vmExecCapacityRecord{active}, records, cmp.AllowUnexported(
 		vmExecCapacityRecord{}, vmExecReservationID{},
@@ -152,6 +160,7 @@ func TestVMExecCapacityStorePrunesOnlyValidExpiredOrPriorBootRecords(t *testing.
 
 func TestVMExecCapacityStoreReturnsCreatedRecordOnPostRenameUncertainty(t *testing.T) {
 	t.Parallel()
+	// Rationale: a failed directory sync occurs after publication, so callers need positive creation evidence.
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	store := openTestVMExecCapacityStore(t, root)
@@ -181,6 +190,7 @@ func TestVMExecCapacityStoreReturnsCreatedRecordOnPostRenameUncertainty(t *testi
 
 func TestVMExecCapacityStoreRemoveIsExactAndIdempotent(t *testing.T) {
 	t.Parallel()
+	// Rationale: release must never use a prefix or directory-wide operation that can affect another reservation.
 
 	root := prepareInstanceAuthorityTestRoot(t)
 	store := openTestVMExecCapacityStore(t, root)
@@ -198,6 +208,219 @@ func TestVMExecCapacityStoreRemoveIsExactAndIdempotent(t *testing.T) {
 	_, found, err := store.readRecord(t.Context(), second.reservationID)
 	require.NoError(t, err)
 	assert.True(t, found)
+}
+
+func TestVMExecCapacityStoreScanFailsClosedWithoutMutatingCanonicalCorruption(t *testing.T) {
+	t.Parallel()
+	// Rationale: canonical names and modes are insufficient authority; malformed, mismatched, and future records must
+	// remain available for diagnosis rather than being interpreted or pruned.
+
+	tests := map[string]struct {
+		filename string
+		raw      func(*testing.T) []byte
+	}{
+		"malformed JSON": {
+			filename: testVMExecReservationID + ".json",
+			raw:      func(*testing.T) []byte { return []byte("{") },
+		},
+		"filename payload mismatch": {
+			filename: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json",
+			raw: func(t *testing.T) []byte {
+				raw, err := encodeVMExecCapacityRecord(testVMExecCapacityRecord())
+				require.NoError(t, err)
+				return raw
+			},
+		},
+		"future record": {
+			filename: testVMExecReservationID + ".json",
+			raw: func(t *testing.T) []byte {
+				record := testVMExecCapacityRecord()
+				record.createdBoottimeNS = 3_000_000_000
+				record.expiresBoottimeNS = record.createdBoottimeNS + vmExecCapacityLifetimeNS
+				raw, err := encodeVMExecCapacityRecord(record)
+				require.NoError(t, err)
+				return raw
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := prepareInstanceAuthorityTestRoot(t)
+			store := openTestVMExecCapacityStore(t, root)
+			directory := filepath.Join(root, "var/lib/mvmctl/allocations/exec")
+			path := filepath.Join(directory, tc.filename)
+			raw := tc.raw(t)
+			require.NoError(t, os.WriteFile(path, raw, 0600))
+
+			_, err := store.scanAndPrune(t.Context(), testVMExecCapacityRecord().hostBootID, 2_000_000_000)
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+			got, readErr := os.ReadFile(path)
+			require.NoError(t, readErr)
+			assert.Equal(t, raw, got)
+		})
+	}
+}
+
+func TestVMExecCapacityStoreDoesNotPartiallyPruneBeforeLaterCorruption(t *testing.T) {
+	t.Parallel()
+	// Rationale: a deterministic name order must not turn discovery of a later ambiguous entry into a partial mutation.
+
+	root := prepareInstanceAuthorityTestRoot(t)
+	store := openTestVMExecCapacityStore(t, root)
+	stale := testVMExecCapacityRecordWithID(t, "00000000000000000000000000000000")
+	stale.hostBootID = "7d46d84c-f2ae-4abc-9abc-0123456789ab"
+	require.NoError(t, store.createRecord(t.Context(), stale))
+	stalePath := filepath.Join(root, "var/lib/mvmctl/allocations/exec/"+stale.reservationID.value+".json")
+	require.NoError(t, os.WriteFile(filepath.Join(filepath.Dir(stalePath), "zz-ambiguous"), []byte("x"), 0600))
+
+	_, err := store.scanAndPrune(t.Context(), testVMExecCapacityRecord().hostBootID, 2_000_000_000)
+	require.Error(t, err)
+	assert.FileExists(t, stalePath)
+}
+
+func TestVMExecCapacityStoreSyncsPartialPruneWithCancellationIndependentEvidence(t *testing.T) {
+	t.Parallel()
+	// Rationale: once an unlink succeeds, every later failure must report mutation and durably settle the directory even
+	// when the initiating context has already been canceled.
+
+	tests := map[string]struct {
+		cancelAfterFirst bool
+		failSecond       bool
+		failSync         bool
+		wantUncertain    bool
+	}{
+		"later unlink failure is durably reported": {failSecond: true},
+		"later cancellation and sync failure is uncertain": {
+			cancelAfterFirst: true,
+			failSync:         true,
+			wantUncertain:    true,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := prepareInstanceAuthorityTestRoot(t)
+			store := openTestVMExecCapacityStore(t, root)
+			first := testVMExecCapacityRecordWithID(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+			second := testVMExecCapacityRecordWithID(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+			first.hostBootID = "7d46d84c-f2ae-4abc-9abc-0123456789ab"
+			second.hostBootID = first.hostBootID
+			require.NoError(t, store.createRecord(t.Context(), first))
+			require.NoError(t, store.createRecord(t.Context(), second))
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			fault := errors.New("injected prune failure")
+			realUnlink := store.state.deps.unlinkAt
+			unlinks := 0
+			store.state.deps.unlinkAt = func(unlinkCtx context.Context, fd int, entry string, flags int) error {
+				unlinks++
+				if unlinks == 1 {
+					err := realUnlink(unlinkCtx, fd, entry, flags)
+					if tc.cancelAfterFirst {
+						cancel()
+					}
+					return err
+				}
+				if tc.failSecond {
+					return fault
+				}
+				return realUnlink(unlinkCtx, fd, entry, flags)
+			}
+			realSync := store.state.deps.fsync
+			syncCalls := 0
+			store.state.deps.fsync = func(syncCtx context.Context, fd int) error {
+				if fd == store.state.stateFD {
+					syncCalls++
+					assert.NoError(t, syncCtx.Err())
+					if tc.failSync {
+						return fault
+					}
+				}
+				return realSync(syncCtx, fd)
+			}
+
+			_, err := store.scanAndPrune(ctx, testVMExecCapacityRecord().hostBootID, 2_000_000_000)
+			require.Error(t, err)
+			domainErr := errs.AsDomainError(err)
+			require.NotNil(t, domainErr)
+			assert.Equal(t, true, domainErr.Details["records_pruned"])
+			assert.Equal(t, tc.wantUncertain, domainErr.Details["durability_uncertain"])
+			assert.Equal(t, 1, syncCalls)
+			assert.NoFileExists(
+				t,
+				filepath.Join(root, "var/lib/mvmctl/allocations/exec/"+first.reservationID.value+".json"),
+			)
+			assert.FileExists(
+				t,
+				filepath.Join(root, "var/lib/mvmctl/allocations/exec/"+second.reservationID.value+".json"),
+			)
+		})
+	}
+}
+
+func TestVMExecCapacityStoreReleaseWaitsForNestedScanRead(t *testing.T) {
+	t.Parallel()
+	// Rationale: Release must not close or recycle the directory descriptor while scan's nested record read is blocked.
+
+	root := prepareInstanceAuthorityTestRoot(t)
+	store := openTestVMExecCapacityStore(t, root)
+	require.NoError(t, store.createRecord(t.Context(), testVMExecCapacityRecord()))
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	var once sync.Once
+	realRead := store.state.deps.read
+	store.state.deps.read = func(ctx context.Context, fd int, value []byte) (int, error) {
+		once.Do(func() { close(entered) })
+		<-unblock
+		return realRead(ctx, fd, value)
+	}
+	scanDone := make(chan error, 1)
+	go func() {
+		_, err := store.scanAndPrune(context.Background(), testVMExecCapacityRecord().hostBootID, 2_000_000_000)
+		scanDone <- err
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scan did not enter the blocked record read")
+	}
+	releaseDone := make(chan error, 1)
+	releaseStarted := make(chan struct{})
+	go func() {
+		close(releaseStarted)
+		releaseDone <- store.Release(context.Background())
+	}()
+	<-releaseStarted
+	writerQueued := time.NewTimer(2 * time.Second)
+	defer writerQueued.Stop()
+	for store.state.mu.TryRLock() {
+		store.state.mu.RUnlock()
+		select {
+		case <-writerQueued.C:
+			t.Fatal("Release did not queue for the store lifecycle lock")
+		default:
+			runtime.Gosched()
+		}
+	}
+	select {
+	case err := <-releaseDone:
+		t.Fatalf("Release returned before the scan completed: %v", err)
+	default:
+	}
+	close(unblock)
+	select {
+	case err := <-scanDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("scan deadlocked with queued Release")
+	}
+	select {
+	case err := <-releaseDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Release did not finish after scan")
+	}
 }
 
 func openTestVMExecCapacityStore(t *testing.T, root string) *vmExecCapacityStore {

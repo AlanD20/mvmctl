@@ -56,7 +56,7 @@ func encodeVMExecCapacityRecord(record vmExecCapacityRecord) ([]byte, error) {
 
 func decodeVMExecCapacityRecord(raw []byte) (vmExecCapacityRecord, error) {
 	if len(raw) == 0 || len(raw) > maxVMExecCapacityRecordBytes {
-		return vmExecCapacityRecord{}, vmExecCapacityCorruptError("VM-exec capacity record size is invalid", nil)
+		return vmExecCapacityRecord{}, vmExecCapacityCorruptError("vm-exec capacity record size is invalid", nil)
 	}
 	if err := validateVMExecCapacityJSON(raw); err != nil {
 		return vmExecCapacityRecord{}, err
@@ -73,7 +73,7 @@ func decodeVMExecCapacityRecord(raw []byte) (vmExecCapacityRecord, error) {
 	reservationID, err := newVMExecReservationID(wire.ReservationID)
 	if err != nil {
 		return vmExecCapacityRecord{}, vmExecCapacityCorruptError(
-			"VM-exec capacity reservation identity is invalid",
+			"vm-exec capacity reservation identity is invalid",
 			err,
 		)
 	}
@@ -106,7 +106,7 @@ func validateVMExecCapacityJSON(raw []byte) error {
 	}
 	delim, ok := token.(json.Delim)
 	if !ok || delim != '{' {
-		return vmExecCapacityCorruptError("VM-exec capacity record must be an object", nil)
+		return vmExecCapacityCorruptError("vm-exec capacity record must be an object", nil)
 	}
 	seen := make(map[string]struct{}, len(vmExecCapacityRecordFields))
 	for decoder.More() {
@@ -116,7 +116,7 @@ func validateVMExecCapacityJSON(raw []byte) error {
 		}
 		field, ok := fieldToken.(string)
 		if !ok {
-			return vmExecCapacityCorruptError("VM-exec capacity field name is invalid", nil)
+			return vmExecCapacityCorruptError("vm-exec capacity field name is invalid", nil)
 		}
 		for existing := range seen {
 			if strings.EqualFold(existing, field) {
@@ -139,7 +139,7 @@ func validateVMExecCapacityJSON(raw []byte) error {
 		return vmExecCapacityCorruptError("close strict VM-exec capacity object", err)
 	}
 	if len(seen) != len(vmExecCapacityRecordFields) {
-		return vmExecCapacityCorruptError("VM-exec capacity record is missing required fields", nil)
+		return vmExecCapacityCorruptError("vm-exec capacity record is missing required fields", nil)
 	}
 	return requireVMExecCapacityJSONEOF(decoder)
 }
@@ -151,7 +151,7 @@ func requireVMExecCapacityJSONEOF(decoder *json.Decoder) error {
 		return nil
 	}
 	if err == nil {
-		return vmExecCapacityCorruptError("VM-exec capacity record contains trailing input", nil)
+		return vmExecCapacityCorruptError("vm-exec capacity record contains trailing input", nil)
 	}
 	return vmExecCapacityCorruptError(fmt.Sprintf("decode trailing VM-exec capacity input: %v", err), err)
 }
