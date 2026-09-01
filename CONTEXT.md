@@ -216,6 +216,14 @@ Tables include `images`, `kernels`, `binaries`, `volumes`, `networks`, `network_
 `host_state_changes`, `service_access_policies`, `iptables_rules`, `nftables_rules`, `ssh_keys`, `user_settings`,
 `vm_vsock_config`, `snapshots`, and `db_migrations`. Read `internal/lib/db/migrations/` for the current schema.
 
+The fresh v0.3.0 schema is version 6 and has no VM-wide `remote_exec` column. Schema-version 3, 4, or 5 databases that
+still contain that removed column are legacy databases, even when every stored value is false. Both pending-migration
+inspection and migration application reject them with a validation-class `database.migration.failed` error before
+schema work, leaving their version and contents unchanged. v0.3.0 does not infer directional exec policies from that
+legacy bit. After stopping the old VMs and preserving desired artifacts, remove the old mvm state directory selected
+by `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) through the documented clean-install procedure and initialize fresh
+v0.3.0 state; never delete live state as an incidental migration step.
+
 ### Layer compliance enforcement
 
 The Go compiler enforces type safety and rejects import cycles. The `internal/architecture` test adds machine
@@ -481,10 +489,11 @@ local errors.
 
 These components still do not form a positive VM-to-VM path. No API-owned relay listener opens the admitted source
 connection, reads its request, resolves/enforces the exact exec policy, constructs a destination request, allocates
-Task 15 root active-runtime/concurrent-capacity authority, or writes a command-redacted audit record. Legacy
-`allow_remote_exec` removal and Python L2 qualification also remain pending. VM-to-VM execution therefore remains
-unavailable. No SQLite VM status, guest-supplied source ID, socket path, or process-local semaphore may substitute for
-root runtime authority.
+Task 15 root active-runtime/concurrent-capacity authority, or writes a command-redacted audit record. The legacy
+VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API, environment
+specs, results, and repository persistence; it has no compatibility path into exec policies. Positive Python L2
+qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status, guest-supplied source
+ID, socket path, or process-local semaphore may substitute for root runtime authority.
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)
 

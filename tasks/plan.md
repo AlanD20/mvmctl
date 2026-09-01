@@ -62,6 +62,10 @@ continue without silently deleting it.
   lookup, vsock dial, or command logging and is now removed with its generic host-frame/shared-connection path.
   Ordinary host execution and copy paths remain unchanged. Public exec-policy CRUD records desired intent, but the
   typed replacement relay and its runtime authorization are not active yet.
+- The clean-break VM-wide remote-exec trust flag is removed from the fresh schema, VM model, configuration defaults,
+  VM create flags/input/result, repository persistence, and environment specifications. Fresh databases end at schema
+  version 6 without that column. Schema-version 3, 4, or 5 databases carrying it fail before pending-migration
+  inspection or migration application and remain unchanged; no legacy value is converted into an exec policy.
 - The protocol-only `internal/lib/vmexecwire` foundation uses fixed `MVMEXEC1`/version-1 framing with a 64-KiB body
   limit and strict closed source/destination schemas. Only the exact host-built destination request carries the
   canonical lowercase UUIDv4 agent token. A 32-lowercase-hex request identity binds the request, output, terminal, and
@@ -149,7 +153,7 @@ continue without silently deleting it.
 Only the exact trusted-release install/remove and LoopMount provision/inspect actions are registered in the privileged
 switch, and the sudoers policy remains transitional. The routed policy, dual firewall backends, host-global TAP
 topology, public `mvm run jailer` /
-`mvm run provision` services, and `allow_remote_exec` trust mesh must not survive the final release.
+`mvm run provision` services must not survive the final release. The VM-wide remote-exec trust mesh is already removed.
 
 ## Approved Architecture
 
@@ -807,9 +811,9 @@ The public policy families are:
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
 non-root process side, and isolated process-bound source session are implemented. The API-owned relay listener, runtime
-policy resolution/enforcement/audit, Task 15 root active-session/capacity authority, legacy flag removal, Python system
-qualification, and the traffic family's replacement public surface remain pending. No production host path opens a
-source session or constructs an authorized destination request, so VM-to-VM execution is unavailable.
+policy resolution/enforcement/audit, Task 15 root active-session/capacity authority, Python system qualification, and
+the traffic family's replacement public surface remain pending. No production host path opens a source session or
+constructs an authorized destination request, so VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 

@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-01 (isolated source-session foundation)
+**Last Updated:** 2026-09-01 (legacy remote-exec trust-flag removal)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -297,7 +297,7 @@ source, destination, target user, timing, and result but not the complete comman
 connectivity.
 
 The clean cutover removes the legacy `allow_remote_exec` VM field, CLI flags, configuration default, environment-spec
-property, all-to-all checks, and documentation without conversion.
+property, all-to-all checks, and active documentation without conversion.
 
 Implementation note (2026-09-01): the first exec cutover slice severs the legacy relay before the replacement is
 activated. Every legacy `remote_vm` request receives one terminal unauthorized response before source lookup, request
@@ -332,7 +332,7 @@ per-command cgroup authority; a descendant that deliberately leaves the group is
 
 The destination side remains dormant for VM-to-VM use. At this slice, no source session or API-owned relay listener
 constructs its request, and root runtime admission, Task 15 active-session/capacity authority, runtime policy
-resolution/enforcement, legacy flag removal, and positive Python system qualification remain pending.
+resolution/enforcement, and positive Python system qualification remain pending.
 
 The fifth slice implements the closed source-session and guest process boundary without activating the host relay. A
 host `SourceSession` owns one already authority-admitted connection, authenticates the source guest through exact
@@ -362,8 +362,15 @@ a strict source request, preserves binary output, requires terminal plus physica
 
 The source and destination foundations remain dormant for positive VM-to-VM use. An API-owned relay listener, root
 active-runtime/source admission, Task 15 global capacity authority, runtime policy resolution/enforcement, redacted
-audit, legacy `allow_remote_exec` removal, and positive Python L2 qualification remain pending. No production path
-opens a `SourceSession` or constructs an authorized destination request, so VM-to-VM execution is still unavailable.
+audit, and positive Python L2 qualification remain pending. No production path opens a `SourceSession` or constructs
+an authorized destination request, so VM-to-VM execution is still unavailable.
+
+The sixth slice removes the VM-wide trust flag without attempting compatibility. Fresh databases end at schema version
+6 with no `remote_exec` column. The VM model, configuration default, create input/result, repository persistence, CLI
+flags, and environment-spec examples no longer expose it. Before either pending-migration inspection or migration
+application, schema-version 3, 4, or 5 databases that still contain the removed column fail with an explicit
+clean-install-required validation error and remain unchanged. The guard treats column presence as legacy state even
+when every stored bit is false; no value is converted into a directional policy.
 
 ### Layer placement
 
@@ -390,11 +397,16 @@ report per-item results explicitly; partial success is never collapsed into a ni
 ## Clean-Installation Contract
 
 v0.3.0 does not read, migrate, backfill, or preserve legacy policy rows, iptables state, host-global TAP ownership, or
-`allow_remote_exec` values. Initialization refuses detected legacy runtime resources and gives the administrator a
-precise cleanup command or diagnostic. It never silently adopts or deletes ambiguous host state.
+VM-wide remote-exec values. The fresh database schema is version 6 and contains no such column. Pending-migration and
+migration admission reject schema-version 3 through 5 databases that still contain it before schema work, leave the
+database unchanged, and return an explicit clean-install-required diagnostic. Initialization never silently adopts or
+deletes ambiguous host state.
 
-Operators must stop and remove old VMs, retain any desired user artifacts separately, clean the old host runtime, and
-install v0.3.0 on a clean state layout. Only the new schema and topology are supported after initialization.
+Operators must stop and remove old VMs, retain any desired user artifacts separately, remove the old mvm state
+directory selected by `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) through the documented clean-install procedure,
+clean the old host runtime through the documented administrator path, and install v0.3.0 on a clean state layout. A
+live state directory must never be deleted as an incidental migration step. Only the new schema and topology are
+supported after initialization.
 
 ## Alternatives Considered
 

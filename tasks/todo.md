@@ -664,7 +664,7 @@ pending
 **Owner:** engineer
 **Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, and the
 isolated process-bound source-session foundation are implemented; API-owned relay, runtime policy/root capacity
-authority, legacy flag removal, and Python qualification remain pending, so VM-to-VM execution remains fail-closed
+authority, and Python qualification remain pending, so VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -673,7 +673,9 @@ authority, legacy flag removal, and Python qualification remain pending, so VM-t
 - [x] Sever the legacy `remote_vm` authorization bypass before source lookup, request parsing, destination lookup,
   vsock dial, relay, or command logging; then remove its protocol, generic callback, shared guest connection, and
   handler package while preserving ordinary host execution and all copy paths.
-- [ ] Remove `allow_remote_exec` from schema, model, config, CLI, environment specs, results, tests, and docs.
+- [x] Remove the VM-wide remote-exec field from the fresh schema, model, configuration default, VM create CLI/API,
+  environment specs, results, repository persistence, and active docs. Fresh databases end at schema version 6 without
+  the column; schema-version 3 through 5 databases carrying it fail closed before migration work and remain unchanged.
 - [x] Expose directional exact source-VM -> destination-VM -> non-root-user intent through typed public API methods and
   `mvm policy exec create|ls|rm`. Derive a deterministic ID from exact VM identities and target user, reject same-VM
   and root-target creation, keep resolution independent of network placement, and isolate list/removal to this family.

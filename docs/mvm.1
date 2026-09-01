@@ -73,9 +73,6 @@ Network to attach to.
 .PP
 .B \-\-count
 Create multiple VMs atomically.
-.PP
-.B \-\-allow-remote-exec
-Allow inter-VM remote execution via vsock relay (default: disabled).
 .RE
 .TP
 .BR vm\ rm
@@ -215,7 +212,7 @@ Set a network as the default for VM creation.
 .TP
 .BR network\ sync
 Sync firewall rules between database and host.
-.SS Routed Service-Access Policies
+.SS Policy Management
 .TP
 .BR policy\ create " SOURCE_NETWORK DESTINATION_VM tcp|udp PORT|START-END"
 Allow routed access to one exact destination VM service.
@@ -231,6 +228,18 @@ Remove policies and reconcile firewall state. Use -f to skip confirmation.
 .TP
 .BR policy\ sync
 Resolve current resource identities and atomically reconcile policy rules.
+.TP
+.BR policy\ exec\ create " SOURCE_VM DESTINATION_VM TARGET_USER"
+Persist one directional VM-to-VM execution grant for an exact non-root destination user.
+.TP
+.BR policy\ exec\ ls
+List directional execution policies. Use --json for structured output.
+.TP
+.BR policy\ exec\ rm " POLICY_IDS..."
+Remove directional execution policies by exact ID or unambiguous prefix. Use -f to skip confirmation.
+.PP
+Execution-policy commands currently manage desired state only. The v0.3.0 development build does not yet activate
+the API-owned VM-to-VM relay.
 .SS SSH Key Management
 .TP
 .BR key\ ls

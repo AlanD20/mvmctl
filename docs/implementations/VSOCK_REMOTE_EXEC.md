@@ -13,8 +13,9 @@ foundations are implemented and covered by Go L0/L1 tests:
 - strict separation between ordinary host-to-VM exec/copy and the dormant VM-to-VM path.
 
 There is no production API-owned relay listener, root active-runtime/capacity admission, runtime exec-policy
-enforcement, or audit path yet. The legacy `allow_remote_exec` schema/config/CLI surface also remains pending removal,
-and no positive Python L2 system test has qualified the end-to-end behavior. No current host path constructs an
+enforcement, or audit path yet, and no positive Python L2 system test has qualified the end-to-end behavior. The
+legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results, persistence,
+and environment specifications; it is not converted into a directional policy. No current host path constructs an
 authorized destination request.
 
 ## Required user flow
@@ -166,8 +167,7 @@ The positive path must not be enabled until all of these release blockers are co
 4. Task 15 supplies root-owned global concurrent-capacity reservation across users and CLI processes.
 5. The relay enforces the same frame, command, output, duration, cancellation, and EOF limits and records a
    command-redacted source/destination/user/timing/result audit event.
-6. The legacy `allow_remote_exec` schema/model/config/CLI/environment-spec/result/test/documentation surface is removed.
-7. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,
+6. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,
    foreign owner, stale identity, root target, malformed wire, limit, cancellation, and cleanup denials.
 
 Until these gates land, the source-session components remain a fail-closed foundation and VM-to-VM execution remains
@@ -176,6 +176,8 @@ unavailable.
 ## Removed legacy design
 
 v0.3.0 no longer uses the legacy `remote_vm` relay, shared `activeConn`, `OnHostFrame`, or
-`internal/vsockhandler`. A guest cannot inject a new operation into an ordinary exec response stream. The remaining
-`allow_remote_exec` compatibility surface is inactive for relay authorization and is scheduled for clean-break removal;
-it must not be mistaken for the new directional policy.
+`internal/vsockhandler`. A guest cannot inject a new operation into an ordinary exec response stream. The VM-wide
+remote-exec field, configuration default, create flags/input/result, repository persistence, and environment-spec
+property are also removed. Fresh databases use schema version 6 without the column. Schema-version 3, 4, or 5
+databases that still contain it are rejected before pending-migration inspection or migration application and remain
+unchanged, even if every stored bit is false. v0.3.0 provides no conversion from that trust mesh to directional policy.

@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
-> non-root execution side, and its isolated process-bound source-session foundation described below are implemented.
+> non-root execution side, its isolated process-bound source-session foundation, and clean-break removal of the
+> VM-wide remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
 > marker-only sudo policy, schema-3 Jailer launch composition and final live topology/cgroup verification and
@@ -108,11 +109,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pending/bound session and pin. The CLI preserves binary output and emits only generic local failures.
 - Removed the legacy `remote_vm` protocol, generic `OnHostFrame`, shared `activeConn`, and
   `internal/vsockhandler` indirection. Ordinary host execution and all copy paths remain on their existing protocol.
+- Removed the VM-wide remote-exec trust bit from the fresh schema, VM model, configuration defaults, VM create
+  flags/input/result, repository persistence, and environment specifications. Fresh databases now finish at schema
+  version 6 without the removed column. Schema-version 3, 4, or 5 databases that still contain it fail before pending
+  migration inspection or migration application with an explicit clean-install-required validation error and remain
+  unchanged; no legacy bit is converted into a directional exec policy.
 - Public execution-policy CRUD, the wire, source session, and destination side still do not activate VM-to-VM
   execution. The API-owned relay listener, root active-runtime/source and Task 15 global-capacity authority, runtime
-  policy resolution/enforcement and redacted audit, legacy `allow_remote_exec` removal, and positive Python L2
-  qualification remain pending. The implemented cancellation boundaries are process-group guarantees, not per-command
-  cgroup authority, and do not claim cleanup of descendants that deliberately leave their group.
+  policy resolution/enforcement and redacted audit, and positive Python L2 qualification remain pending. The
+  implemented cancellation boundaries are process-group guarantees, not per-command cgroup authority, and do not
+  claim cleanup of descendants that deliberately leave their group.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
@@ -558,6 +564,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - v0.3.0 requires a clean installation. It does not migrate, backfill, adopt, or preserve legacy databases, running VMs,
   Jailer directories, cgroups, TAP devices, firewall state, policy rows, or remote-exec flags. Initialization must refuse
   ambiguous legacy runtime state rather than silently adopting or deleting it.
+- Legacy schema-version 3, 4, and 5 databases that contain the removed `remote_exec` column are rejected before
+  pending-migration inspection or migration application, including when every bit is false. The original schema and
+  version remain unchanged. After stopping the old VMs and preserving desired artifacts, follow the final documented
+  clean-install procedure to remove the old mvm state directory selected by `MVM_CACHE_DIR` (normally
+  `~/.cache/mvmctl`) and initialize fresh v0.3.0 state; do not delete live state or infer typed exec policies from it.
 - Operators must stop and remove the old installation, retain any desired user artifacts separately, clean legacy host
   runtime state, and recreate VMs and policies under v0.3.0. The exact fail-closed administrator cleanup procedure is
   still a release blocker and must be documented after `host reset`/cleanup hardening lands; operators must not improvise
@@ -667,9 +678,8 @@ The following items are release blockers and are intentionally not described abo
   source-session, typed policy, and destination-agent foundations. Directional exec-policy CRUD is public but does not
   activate the relay. Add exact root active-source admission, runtime policy enforcement/redacted audit, Task 15
   root-owned concurrent capacity, and positive L2 qualification before claiming the destination path end to end. The
-  legacy guest relay, generic host-frame callback, and shared guest connection are removed; the routed
-  `ServiceAccessPolicy`, `allow_remote_exec` fields/flags, and other transitional surfaces still require atomic
-  removal.
+  legacy guest relay, generic host-frame callback, shared guest connection, and VM-wide remote-exec field/flags are
+  removed; the routed `ServiceAccessPolicy` and other transitional surfaces still require atomic removal.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the
   root-owned system binary.
 - Separate administrator host state from invoking-user initialization, replace the generic `HostInit` result with a

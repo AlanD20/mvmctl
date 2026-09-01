@@ -320,7 +320,6 @@ The VM resolver tries selectors in priority order:
 | `--count, -c N` | Create N VMs in batch | `1` |
 | `--atomic` | All-or-nothing batch: roll back all VMs if any creation fails | `false` |
 | `--skip-deblob` | Skip debloat operations on rootfs | `false` |
-| `--allow-remote-exec` / `--deny-remote-exec` | Legacy inert setting; pending v0.3.0 removal | from config |
 
 **Examples:**
 
@@ -401,7 +400,9 @@ The network resolver tries selectors in priority order:
 
 ### `mvm policy`
 
-Persisted routed access from one source network to one exact destination VM service. Same-network policies are rejected because same-bridge filtering is not implemented.
+Policy management currently exposes the transitional routed service-access family and directional VM-to-VM execution
+desired state. Same-network service-access policies are rejected because same-bridge filtering is not implemented;
+execution-policy identity is independent of IP-network placement.
 
 | Command | Flags | Description |
 |---------|-------|-------------|
@@ -410,8 +411,16 @@ Persisted routed access from one source network to one exact destination VM serv
 | `mvm policy inspect` | `POLICY_ID`, `--json` | Inspect one policy by exact ID or unambiguous prefix |
 | `mvm policy rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more policies and reconcile immediately |
 | `mvm policy sync` | `--json` | Resolve current identities and atomically reconcile policy rules |
+| `mvm policy exec create` | `SOURCE_VM DESTINATION_VM TARGET_USER` | Persist one directional execution grant for an exact non-root destination user |
+| `mvm policy exec ls` | `--json` | List directional execution policies with current VM names |
+| `mvm policy exec rm` | `POLICY_IDS...`, `-f, --force` | Remove one or more execution policies by exact ID or unambiguous prefix |
 
 Policies default-deny other routed traffic between managed networks. NoCloud and established replies precede managed VM-to-host default deny; internet egress remains available.
+
+Execution policies are desired-state records only in the current v0.3.0 development build. They do not activate
+VM-to-VM execution: the API-owned relay, root active-source/capacity admission, runtime enforcement/audit, and positive
+system qualification remain pending. Execution grants are directional, independent of IP-network placement, and
+require a non-root target user.
 
 ---
 
