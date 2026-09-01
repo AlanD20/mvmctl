@@ -161,15 +161,21 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 	cancel()
 	valid := validVMExecSessionOpenRequest()
 	tests := map[string]struct {
-		ctx     context.Context
-		client  *VMExecSessionClient
-		request VMExecSessionOpenRequest
-		conn    bool
-		cause   error
+		ctx       context.Context
+		client    *VMExecSessionClient
+		request   VMExecSessionOpenRequest
+		conn      bool
+		cause     error
+		wantCode  errs.Code
+		wantClass errs.Class
 	}{
-		"nil context": {client: &VMExecSessionClient{}, request: valid, conn: true},
+		"nil context": {
+			client: &VMExecSessionClient{}, request: valid, conn: true,
+			wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
+		},
 		"cancelled context": {
 			ctx: cancelled, client: &VMExecSessionClient{}, request: valid, conn: true, cause: context.Canceled,
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
 		},
 		"short source ID": {
 			ctx:    t.Context(),
@@ -178,7 +184,7 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 				SourceVMID:      valid.SourceVMID[:31],
 				DestinationVMID: valid.DestinationVMID,
 			},
-			conn: true,
+			conn: true, wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
 		},
 		"nonhex source ID": {
 			ctx:    t.Context(),
@@ -187,7 +193,7 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 				SourceVMID:      strings.Repeat("g", 32),
 				DestinationVMID: valid.DestinationVMID,
 			},
-			conn: true,
+			conn: true, wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
 		},
 		"uppercase destination": {
 			ctx:    t.Context(),
@@ -196,17 +202,26 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 				SourceVMID:      valid.SourceVMID,
 				DestinationVMID: strings.ToUpper(valid.DestinationVMID),
 			},
-			conn: true,
+			conn: true, wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
 		},
 		"same VM": {
 			ctx:     t.Context(),
 			client:  &VMExecSessionClient{},
 			request: VMExecSessionOpenRequest{SourceVMID: valid.SourceVMID, DestinationVMID: valid.SourceVMID},
-			conn:    true,
+			conn:    true, wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
 		},
-		"nil client":      {ctx: t.Context(), request: valid, conn: true},
-		"inactive client": {ctx: t.Context(), client: &VMExecSessionClient{}, request: valid, conn: true},
-		"nil connection":  {ctx: t.Context(), client: &VMExecSessionClient{}, request: valid},
+		"nil client": {
+			ctx: t.Context(), request: valid, conn: true,
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
+		},
+		"inactive client": {
+			ctx: t.Context(), client: &VMExecSessionClient{}, request: valid, conn: true,
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
+		},
+		"nil connection": {
+			ctx: t.Context(), client: &VMExecSessionClient{}, request: valid,
+			wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
+		},
 	}
 
 	for name, test := range tests {
@@ -229,6 +244,7 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 
 			assert.Nil(t, session)
 			assert.Error(t, err)
+			assertVMExecSessionClientErrorProjection(t, err, test.wantCode, test.wantClass)
 			assert.Zero(t, duplicator.calls.Load())
 			assert.Zero(t, transport.calls)
 			if test.cause != nil {
@@ -245,7 +261,7 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 // the transport remains client-owned and must be closed.
 func TestVMExecSessionClientClosesDuplicateWhenContextCancelsAfterDuplication(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	source, _ := requireVMExecClientUnixPair(t)
+	source, sourcePeer := requireVMExecClientUnixPair(t)
 	duplicate := requireVMExecClientFile(t)
 	duplicator := &fakeVMExecSessionDuplicator{file: duplicate, hook: cancel}
 	transport := &fakeVMExecSessionTransport{}
@@ -257,6 +273,7 @@ func TestVMExecSessionClientClosesDuplicateWhenContextCancelsAfterDuplication(t 
 	assertVMExecSessionClientCancellation(t, err, context.Canceled)
 	assert.ErrorIs(t, duplicate.Close(), os.ErrClosed)
 	assert.Zero(t, transport.calls)
+	assertVMExecClientConnectionUsable(t, source, sourcePeer, "source-after-post-dup-cancel")
 }
 
 // Rationale: A duplicator can allocate before reporting failure. The client must close that not-yet-transferred file
@@ -290,32 +307,62 @@ func TestVMExecSessionRejectsInactiveNilAndCancelledOperations(t *testing.T) {
 	var nilSession *VMExecSession
 
 	tests := map[string]struct {
-		call  func() error
-		cause error
+		call      func() error
+		cause     error
+		wantCode  errs.Code
+		wantClass errs.Class
 	}{
-		"nil bind context": {call: func() error { return active.BindDestination(nil, destination) }},
+		"nil bind context": {
+			call:     func() error { return active.BindDestination(nil, destination) },
+			wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
+		},
 		"cancelled bind context": {
 			call: func() error { return active.BindDestination(cancelled, destination) }, cause: context.Canceled,
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
 		},
-		"nil destination": {call: func() error { return active.BindDestination(t.Context(), nil) }},
+		"nil destination": {
+			call:     func() error { return active.BindDestination(t.Context(), nil) },
+			wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
+		},
 		"nil session bind": {
-			call: func() error { return nilSession.BindDestination(t.Context(), destination) },
+			call:     func() error { return nilSession.BindDestination(t.Context(), destination) },
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
 		},
-		"nil release context": {call: func() error { return active.Release(nil) }},
+		"nil release context": {
+			call:     func() error { return active.Release(nil) },
+			wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
+		},
 		"cancelled release context": {
 			call: func() error { return active.Release(cancelled) }, cause: context.Canceled,
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
 		},
-		"inactive release":    {call: func() error { return (&VMExecSession{}).Release(t.Context()) }},
-		"nil session release": {call: func() error { return nilSession.Release(t.Context()) }},
-		"nil cancel context":  {call: func() error { return active.Cancel(nil) }},
-		"inactive cancel":     {call: func() error { return (&VMExecSession{}).Cancel(t.Context()) }},
-		"nil session cancel":  {call: func() error { return nilSession.Cancel(t.Context()) }},
+		"inactive release": {
+			call:     func() error { return (&VMExecSession{}).Release(t.Context()) },
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
+		},
+		"nil session release": {
+			call:     func() error { return nilSession.Release(t.Context()) },
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
+		},
+		"nil cancel context": {
+			call:     func() error { return active.Cancel(nil) },
+			wantCode: errs.CodeValidationFailed, wantClass: errs.ClassValidation,
+		},
+		"inactive cancel": {
+			call:     func() error { return (&VMExecSession{}).Cancel(t.Context()) },
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
+		},
+		"nil session cancel": {
+			call:     func() error { return nilSession.Cancel(t.Context()) },
+			wantCode: errs.CodeProcessError, wantClass: errs.ClassInternal,
+		},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			err := test.call()
 			assert.Error(t, err)
+			assertVMExecSessionClientErrorProjection(t, err, test.wantCode, test.wantClass)
 			if test.cause != nil {
 				assertVMExecSessionClientCancellation(t, err, test.cause)
 			}
@@ -438,6 +485,17 @@ func assertVMExecClientDuplicate(t *testing.T, duplicate *os.File) {
 
 func assertVMExecSessionClientCancellation(t *testing.T, err error, cause error) {
 	t.Helper()
+	assertVMExecSessionClientErrorProjection(t, err, errs.CodeProcessError, errs.ClassInternal)
+	assert.ErrorIs(t, err, cause)
+}
+
+func assertVMExecSessionClientErrorProjection(
+	t *testing.T,
+	err error,
+	wantCode errs.Code,
+	wantClass errs.Class,
+) {
+	t.Helper()
 	require.Error(t, err)
 	domainErr := errs.AsDomainError(err)
 	require.NotNil(t, domainErr)
@@ -445,12 +503,11 @@ func assertVMExecSessionClientCancellation(t *testing.T, err error, cause error)
 		Code  errs.Code
 		Class errs.Class
 	}
-	want := projection{Code: errs.CodeProcessError, Class: errs.ClassInternal}
+	want := projection{Code: wantCode, Class: wantClass}
 	got := projection{Code: domainErr.Code, Class: domainErr.Class}
 	if diff := cmp.Diff(want, got); diff != "" {
-		t.Errorf("cancellation error projection mismatch (-want +got):\n%s", diff)
+		t.Errorf("VM-exec client error projection mismatch (-want +got):\n%s", diff)
 	}
-	assert.ErrorIs(t, err, cause)
 }
 
 func validVMExecSessionOpenRequest() VMExecSessionOpenRequest {
