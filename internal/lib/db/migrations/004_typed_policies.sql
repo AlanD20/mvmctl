@@ -2,16 +2,14 @@
 -- Version: 4
 -- Description: Closed traffic and VM-to-VM execution allow intent
 
--- Legacy firewall rows and the VM-wide remote-exec bit encode authority that
--- has no safe conversion to exact typed grants. Abort instead of carrying that
--- authority into the new schema.
+-- Legacy firewall rows encode authority that has no safe conversion to exact
+-- typed grants. Abort instead of carrying that authority into the new schema.
 CREATE TEMP TABLE typed_policy_migration_guard (
     legacy_policy_authority_count INTEGER NOT NULL CHECK(legacy_policy_authority_count = 0)
 );
 INSERT INTO typed_policy_migration_guard
 SELECT
-    (SELECT COUNT(*) FROM vm_instances WHERE remote_exec <> 0)
-    + (SELECT COUNT(*) FROM iptables_rules)
+    (SELECT COUNT(*) FROM iptables_rules)
     + (SELECT COUNT(*) FROM nftables_rules);
 DROP TABLE typed_policy_migration_guard;
 

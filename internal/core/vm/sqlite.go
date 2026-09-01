@@ -299,12 +299,11 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			nocloud_net_port, nocloud_net_pid, relay_pid,
 			exit_code, vcpu_count, mem_size_mib, cgroup_limits, disk_size_mib,
 			rootfs_path, rootfs_suffix, pci_enabled, nested_virt,
-			remote_exec,
 			enable_logging, enable_metrics, enable_console,
 			ssh_keys, ssh_user,
 			created_at, updated_at,
 			log_path, serial_output_path, lsm_flags, boot_args, volume_ids, cpu_config
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			name = excluded.name,
 			status = excluded.status,
@@ -334,7 +333,6 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 			rootfs_suffix = excluded.rootfs_suffix,
 			pci_enabled = excluded.pci_enabled,
 			nested_virt = excluded.nested_virt,
-			remote_exec = excluded.remote_exec,
 			enable_logging = excluded.enable_logging,
 			enable_metrics = excluded.enable_metrics,
 			enable_console = excluded.enable_console,
@@ -377,7 +375,6 @@ func (r *sqliteRepo) Upsert(ctx context.Context, vm *model.VMItem) error {
 		vm.RootfsSuffix,
 		vm.PCIEnabled,
 		vm.NestedVirt,
-		vm.RemoteExec,
 		vm.EnableLogging,
 		vm.EnableMetrics,
 		vm.EnableConsole,

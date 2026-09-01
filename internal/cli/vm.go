@@ -172,8 +172,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 		noPCI           bool
 		nestedVirt      bool
 		noNestedVirt    bool
-		allowRemoteExec bool
-		denyRemoteExec  bool
 		cpuTemplate     string
 		bootArgs        string
 		lsmFlags        string
@@ -296,11 +294,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 			} else if cmd.Flags().Changed("no-nested-virt") {
 				input.NestedVirt = infraptr.Ptr(false)
 			}
-			if cmd.Flags().Changed("allow-remote-exec") {
-				input.AllowRemoteExec = infraptr.Ptr(allowRemoteExec)
-			} else if cmd.Flags().Changed("deny-remote-exec") {
-				input.AllowRemoteExec = infraptr.Ptr(false)
-			}
 			if cmd.Flags().Changed("enable-logging") {
 				input.EnableLogging = infraptr.Ptr(enableLogging)
 			} else if cmd.Flags().Changed("disable-logging") {
@@ -370,10 +363,6 @@ func newVMCreateCmd(vmAPI api.VMAPI) *cobra.Command {
 	cmd.Flags().BoolVar(&noNestedVirt, "no-nested-virt", false, "Disable nested virtualization")
 	cmd.Flags().MarkHidden("no-nested-virt")
 	cmd.MarkFlagsMutuallyExclusive("nested-virt", "no-nested-virt")
-	cmd.Flags().BoolVar(&allowRemoteExec, "allow-remote-exec", false,
-		"Allow this VM to send and receive remote exec commands (default: false)")
-	cmd.Flags().BoolVar(&denyRemoteExec, "deny-remote-exec", false, "Deny remote exec on this VM")
-	cmd.MarkFlagsMutuallyExclusive("allow-remote-exec", "deny-remote-exec")
 	cmd.Flags().
 		StringVar(&cpuTemplate, "cpu-template", "", "Path to CPU template JSON file (merged with nested-virt config if both set)")
 	cmd.Flags().Bool("console", false, "Enable serial console relay (default: disabled)")

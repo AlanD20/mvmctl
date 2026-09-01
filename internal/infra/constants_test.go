@@ -46,6 +46,12 @@ func TestGetDefault(t *testing.T) {
 		assert.Contains(t, err.Error(), "default key not found")
 	})
 
+	t.Run("removed_remote_exec_default", func(t *testing.T) {
+		_, err := infra.GetDefault("defaults.vm", "allow_remote_exec")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "default key not found")
+	})
+
 	t.Run("empty_category", func(t *testing.T) {
 		_, err := infra.GetDefault("", "key")
 		require.Error(t, err)

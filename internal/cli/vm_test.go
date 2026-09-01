@@ -59,6 +59,11 @@ func TestNewVMCmd(t *testing.T) {
 		})
 	}
 
+	createCmd, _, err := cmd.Find([]string{"create"})
+	require.NoError(t, err)
+	assert.Nil(t, createCmd.Flags().Lookup("allow-remote-exec"))
+	assert.Nil(t, createCmd.Flags().Lookup("deny-remote-exec"))
+
 	t.Run("no_extra_subcommands", func(t *testing.T) {
 		expected := make(map[string]bool)
 		for _, sc := range expectedSubcommands {

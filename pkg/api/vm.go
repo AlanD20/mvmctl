@@ -1017,8 +1017,7 @@ func (op *Operation) VMInspect(ctx context.Context, input inputs.VMInput) (*resu
 			PCIEnabled: vmItem.PCIEnabled, NestedVirt: vmItem.NestedVirt,
 			EnableConsole: vmItem.EnableConsole,
 			EnableLogging: vmItem.EnableLogging, EnableMetrics: vmItem.EnableMetrics,
-			AllowRemoteExec: vmItem.RemoteExec,
-			CreatedAt:       vmItem.CreatedAt, UpdatedAt: vmItem.UpdatedAt,
+			CreatedAt: vmItem.CreatedAt, UpdatedAt: vmItem.UpdatedAt,
 		},
 		Resources: results.VMResourcesInfo{
 			VCPU: vmItem.VCPUCount, Mem: vmItem.MemSizeMiB, Disk: vmItem.DiskSizeMiB, Cgroup: cgroupState,
@@ -1662,7 +1661,6 @@ func (c *VMCreateBuilder) toVMModel() *model.VMItem {
 		RootfsSuffix:     c.resolved.Image.FSType,
 		PCIEnabled:       c.resolved.PCIEnabled,
 		NestedVirt:       c.resolved.NestedVirt,
-		RemoteExec:       c.resolved.AllowRemoteExec,
 		EnableLogging:    c.resolved.EnableLogging,
 		EnableMetrics:    c.resolved.EnableMetrics,
 		EnableConsole:    c.resolved.EnableConsole,

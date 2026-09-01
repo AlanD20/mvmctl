@@ -2,6 +2,7 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/lib/db"
+	"mvmctl/pkg/errs"
 )
 
 func migratePolicyFixtureTo(t *testing.T, target int) *db.Handle {
@@ -62,7 +64,7 @@ func TestMigration005RejectsLegacyV4Schema(t *testing.T) {
 	require.NoError(t, handle.DB().GetContext(ctx, &legacyColumnCount,
 		"SELECT COUNT(*) FROM pragma_table_info('vm_instances') WHERE name = 'remote_exec'"))
 	assert.Equal(t, 1, legacyTableCount)
-	assert.Equal(t, 1, legacyColumnCount)
+	assert.Zero(t, legacyColumnCount)
 
 	applied, err := handle.RunMigrationsCtx(ctx)
 	require.Error(t, err)
@@ -79,10 +81,55 @@ func TestMigration005AcceptsFreshSchema(t *testing.T) {
 
 	applied, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 5, applied)
+	assert.Equal(t, 6, applied)
 	var version int
 	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
-	assert.Equal(t, 5, version)
+	assert.Equal(t, 6, version)
+	var legacyColumnCount int
+	require.NoError(t, handle.DB().GetContext(ctx, &legacyColumnCount,
+		"SELECT COUNT(*) FROM pragma_table_info('vm_instances') WHERE name = 'remote_exec'"))
+	assert.Zero(t, legacyColumnCount)
+}
+
+// Rationale: Schema presence, even with every legacy bit false, marks unsupported
+// pre-v0.3 state and must fail before migration or ordinary command admission.
+func TestLegacyRemoteExecSchemaRequiresCleanInstall(t *testing.T) {
+	checks := map[string]func(context.Context, *db.Handle) error{
+		"pending migration admission": func(ctx context.Context, handle *db.Handle) error {
+			_, err := handle.GetPendingMigrations(ctx)
+			return err
+		},
+		"migration admission": func(ctx context.Context, handle *db.Handle) error {
+			_, err := handle.RunMigrationsCtx(ctx)
+			return err
+		},
+	}
+	for name, check := range checks {
+		t.Run(name, func(t *testing.T) {
+			for _, legacyVersion := range []int{3, 4, 5} {
+				t.Run(fmt.Sprintf("schema_v%d", legacyVersion), func(t *testing.T) {
+					handle := db.New(filepath.Join(t.TempDir(), "legacy.db"))
+					t.Cleanup(func() { require.NoError(t, handle.Close()) })
+					_, err := handle.DB().ExecContext(t.Context(), fmt.Sprintf(`
+						CREATE TABLE vm_instances (remote_exec INTEGER NOT NULL DEFAULT 0);
+						PRAGMA user_version = %d;
+					`, legacyVersion))
+					require.NoError(t, err)
+
+					err = check(t.Context(), handle)
+					require.Error(t, err)
+					var domainErr *errs.DomainError
+					require.True(t, errors.As(err, &domainErr))
+					assert.Equal(t, errs.CodeMigrationFailed, domainErr.Code)
+					assert.Equal(t, errs.ClassValidation, domainErr.Class)
+					assert.Contains(t, domainErr.Message, "clean installation required")
+					var version int
+					require.NoError(t, handle.DB().GetContext(t.Context(), &version, "PRAGMA user_version"))
+					assert.Equal(t, legacyVersion, version)
+				})
+			}
+		})
+	}
 }
 
 func TestMigration004RejectsLegacyFirewallState(t *testing.T) {
@@ -128,25 +175,21 @@ func seedTypedPolicyResources(t *testing.T, ctx context.Context, handle *db.Hand
 		INSERT INTO vm_instances
 			(id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,
 			 api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,
-			 rootfs_path,rootfs_suffix,pci_enabled,nested_virt,remote_exec,lsm_flags,
+			 rootfs_path,rootfs_suffix,pci_enabled,nested_virt,lsm_flags,
 			 enable_logging,enable_metrics,enable_console,boot_args)
 		VALUES
 			('vm-a','vm-a','stopped',0,'10.1.0.2','02:00:00:00:00:01','net-a','tap-a',
 			 'image','kernel','firecracker','/api-a','/config-a','inject',1,128,64,'/root-a','',
-			 0,0,0,'',0,0,0,''),
+			 0,0,'',0,0,0,''),
 			('vm-b','vm-b','stopped',0,'10.1.0.3','02:00:00:00:00:02','net-a','tap-b',
 			 'image','kernel','firecracker','/api-b','/config-b','inject',1,128,64,'/root-b','',
-			 0,0,0,'',0,0,0,'');
+			 0,0,'',0,0,0,'');
 	`)
 	require.NoError(t, err)
 }
 
 func TestMigration005RejectsLegacyAuthorityState(t *testing.T) {
 	tests := map[string]func(*testing.T, context.Context, *db.Handle){
-		"remote exec grant": func(t *testing.T, ctx context.Context, handle *db.Handle) {
-			_, err := handle.DB().ExecContext(ctx, "UPDATE vm_instances SET remote_exec = 1 WHERE id = 'vm-a'")
-			require.NoError(t, err)
-		},
 		"service access policy": func(t *testing.T, ctx context.Context, handle *db.Handle) {
 			_, err := handle.DB().ExecContext(ctx, `INSERT INTO service_access_policies
 				(id,source_network_id,destination_vm_id,protocol,destination_port_start,destination_port_end)
@@ -171,28 +214,13 @@ func TestMigration005RejectsLegacyAuthorityState(t *testing.T) {
 	}
 }
 
-func TestMigration004RejectsLegacyRemoteExecGrant(t *testing.T) {
-	ctx := t.Context()
-	handle := migratePolicyFixtureToV3(t)
-	seedTypedPolicyResources(t, ctx, handle)
-	_, err := handle.DB().ExecContext(ctx, "UPDATE vm_instances SET remote_exec = 1 WHERE id = 'vm-a'")
-	require.NoError(t, err)
-
-	applied, err := handle.RunMigrationsCtx(ctx)
-	require.Error(t, err)
-	assert.Zero(t, applied)
-	var version int
-	require.NoError(t, handle.DB().GetContext(ctx, &version, "PRAGMA user_version"))
-	assert.Equal(t, 3, version)
-}
-
 func TestMigration004TypedPolicyConstraints(t *testing.T) {
 	ctx := t.Context()
 	handle := migratePolicyFixtureToV3(t)
 	database := handle.DB()
 	applied, err := handle.RunMigrationsCtx(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, 2, applied)
+	assert.Equal(t, 3, applied)
 	seedTypedPolicyResources(t, ctx, handle)
 
 	validPolicyID := strings.Repeat("a", 64)

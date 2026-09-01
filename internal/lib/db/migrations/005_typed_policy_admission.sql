@@ -21,7 +21,6 @@ SELECT
               'idtextprimarykeycheck(length(id)=64andidnotglob''*[^0-9a-f]*'')'
           ) > 0
     )
-    + (SELECT COUNT(*) FROM vm_instances WHERE remote_exec <> 0)
     + (SELECT COUNT(*) FROM service_access_policies)
     + (SELECT COUNT(*) FROM iptables_rules)
     + (SELECT COUNT(*) FROM nftables_rules);

@@ -124,6 +124,9 @@ func (d *Handle) takeSnapshot(version int) (string, error) {
 // Returns the number of migrations applied (0 if none pending).
 func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 	sqlDB := d.DB()
+	if err := d.rejectLegacyRemoteExecSchema(ctx); err != nil {
+		return 0, err
+	}
 
 	// Ensure the tracking table exists
 	if err := d.ensureMigrationsTable(ctx); err != nil {
@@ -197,6 +200,10 @@ func (d *Handle) RunMigrationsCtx(ctx context.Context) (int, error) {
 
 // GetPendingMigrations returns the list of migration files that haven't been applied yet.
 func (d *Handle) GetPendingMigrations(ctx context.Context) ([]string, error) {
+	if err := d.rejectLegacyRemoteExecSchema(ctx); err != nil {
+		return nil, err
+	}
+
 	var currentVersion int
 	if err := d.DB().QueryRow("PRAGMA user_version").Scan(&currentVersion); err != nil {
 		return nil, fmt.Errorf("get current version: %w", err)
@@ -214,4 +221,24 @@ func (d *Handle) GetPendingMigrations(ctx context.Context) ([]string, error) {
 		}
 	}
 	return pending, nil
+}
+
+func (d *Handle) rejectLegacyRemoteExecSchema(ctx context.Context) error {
+	var legacyColumnCount int
+	if err := d.DB().GetContext(
+		ctx,
+		&legacyColumnCount,
+		"SELECT COUNT(*) FROM pragma_table_info('vm_instances') WHERE name = 'remote_exec'",
+	); err != nil {
+		return errs.WrapMsg(errs.CodeMigrationFailed, "failed to inspect VM schema", err)
+	}
+	if legacyColumnCount == 0 {
+		return nil
+	}
+	return errs.New(
+		errs.CodeMigrationFailed,
+		"clean installation required: v0.3.0 cannot use this legacy VM database; "+
+			"preserve desired artifacts, remove the old mvm state directory, and run mvm init",
+		errs.WithClass(errs.ClassValidation),
+	)
 }
