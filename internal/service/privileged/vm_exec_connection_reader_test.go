@@ -90,9 +90,13 @@ func TestVMExecConnectionReaderRealSocketRoundTrip(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		cancel()
 		_ = unix.Shutdown(controlReaderFD, unix.SHUT_RDWR)
-		result = <-resultChannel
-		_ = reader.Close()
-		t.Fatalf("VM-exec connection reader did not complete before watchdog: %v", result.err)
+		select {
+		case result = <-resultChannel:
+			_ = reader.Close()
+			t.Fatalf("VM-exec connection reader did not complete before watchdog: %v", result.err)
+		case <-time.After(time.Second):
+			t.Fatal("VM-exec connection reader failed to join before recovery watchdog")
+		}
 	}
 	require.NoError(t, result.err)
 	if diff := cmp.Diff(frame, result.frame); diff != "" {

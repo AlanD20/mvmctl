@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -250,6 +251,10 @@ func TestPrivilegedControlVMExecConnectionSenderPinsDescriptorDuringCarrierSend(
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseSendmsg := func() {
+		releaseOnce.Do(func() { close(release) })
+	}
 	deps := realPrivilegedControlVMExecAncillaryDeps()
 	realSendmsg := deps.sendmsg
 	deps.sendmsg = func(
@@ -275,9 +280,12 @@ func TestPrivilegedControlVMExecConnectionSenderPinsDescriptorDuringCarrierSend(
 	case <-entered:
 	case <-time.After(systemVMExecTestTimeout):
 		cancel()
-		close(release)
+		releaseSendmsg()
 		_ = unix.Shutdown(int(controlParent.Fd()), unix.SHUT_RDWR)
-		<-sendResult
+		_, joined := waitSystemVMExecError(sendResult, systemVMExecTestTimeout)
+		if !joined {
+			t.Fatal("carrier send failed to join before recovery watchdog")
+		}
 		t.Fatal("carrier send did not reach sendmsg before watchdog")
 	}
 	closeResult := make(chan error, 1)
@@ -286,22 +294,35 @@ func TestPrivilegedControlVMExecConnectionSenderPinsDescriptorDuringCarrierSend(
 	select {
 	case err := <-closeResult:
 		cancel()
-		close(release)
+		releaseSendmsg()
 		_ = unix.Shutdown(int(controlParent.Fd()), unix.SHUT_RDWR)
-		<-sendResult
+		_, joined := waitSystemVMExecError(sendResult, systemVMExecTestTimeout)
+		if !joined {
+			t.Fatal("carrier send failed to join after premature close")
+		}
 		t.Fatalf("close returned before carrier send decision: %v", err)
 	case <-time.After(25 * time.Millisecond):
 	}
-	close(release)
+	releaseSendmsg()
 	var sendErr error
 	select {
 	case sendErr = <-sendResult:
 	case <-time.After(systemVMExecTestTimeout):
 		cancel()
 		_ = unix.Shutdown(int(controlParent.Fd()), unix.SHUT_RDWR)
-		sendErr = <-sendResult
-		<-closeResult
-		t.Fatalf("carrier send did not complete before watchdog: %v", sendErr)
+		var sendJoined bool
+		sendErr, sendJoined = waitSystemVMExecError(sendResult, systemVMExecTestTimeout)
+		closeErr, closeJoined := waitSystemVMExecError(closeResult, systemVMExecTestTimeout)
+		if !sendJoined || !closeJoined {
+			t.Fatalf(
+				"carrier watchdog recovery failed to join: send=%t close=%t send_err=%v close_err=%v",
+				sendJoined,
+				closeJoined,
+				sendErr,
+				closeErr,
+			)
+		}
+		t.Fatalf("carrier send did not complete before watchdog: send=%v close=%v", sendErr, closeErr)
 	}
 	require.NoError(t, sendErr)
 	var closeErr error
@@ -310,7 +331,11 @@ func TestPrivilegedControlVMExecConnectionSenderPinsDescriptorDuringCarrierSend(
 	case <-time.After(systemVMExecTestTimeout):
 		cancel()
 		_ = unix.Shutdown(int(controlParent.Fd()), unix.SHUT_RDWR)
-		closeErr = <-closeResult
+		var joined bool
+		closeErr, joined = waitSystemVMExecError(closeResult, systemVMExecTestTimeout)
+		if !joined {
+			t.Fatal("concurrent close failed to join before recovery watchdog")
+		}
 		t.Fatalf("concurrent close did not complete before watchdog: %v", closeErr)
 	}
 	require.NoError(t, closeErr)
@@ -382,6 +407,8 @@ func TestPrivilegedControlVMExecConnectionSenderReturnsCloseOnlyFailureAfterSucc
 	err = sender.send(context.Background(), control, []byte{0x41})
 
 	domainErr := requireSystemVMExecDomainError(t, err)
+	require.Error(t, sender.owner.closeErr)
+	assert.True(t, errors.Is(err, sender.owner.closeErr))
 	assert.Equal(t, errs.CodeProcessError, domainErr.Code)
 	assert.Equal(t, true, domainErr.Details["cleanup_required"])
 	assert.Equal(t, "close VM-exec connection duplicate", domainErr.Details["cleanup_diagnostic"])
@@ -618,6 +645,16 @@ func requireSystemVMExecReadable(t *testing.T, fd int) {
 	require.NoError(t, err)
 	require.Equal(t, 1, count, "descriptor did not become readable before watchdog")
 	require.NotZero(t, pollFDs[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLRDHUP))
+}
+
+// waitSystemVMExecError bounds a goroutine join during watchdog recovery.
+func waitSystemVMExecError(result <-chan error, timeout time.Duration) (error, bool) {
+	select {
+	case err := <-result:
+		return err, true
+	case <-time.After(timeout):
+		return nil, false
+	}
 }
 
 // requireSystemControlFile creates a socketpair, schedules both ends for
