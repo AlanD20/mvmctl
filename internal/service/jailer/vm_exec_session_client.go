@@ -13,13 +13,13 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-// VMExecSessionOpenRequest identifies the exact distinct active VM pair for one execution session.
+// VMExecSessionOpenRequest carries the caller-supplied distinct VM identifiers for one execution session.
 type VMExecSessionOpenRequest struct {
-	SourceVMID      string `json:"source_vm_id"`
-	DestinationVMID string `json:"destination_vm_id"`
+	SourceVMID      string
+	DestinationVMID string
 }
 
-// Validate enforces exact lowercase VM identities and rejects a self-pair.
+// Validate checks only exact lowercase identifier syntax and distinctness. It does not prove VM identity or activity.
 func (request VMExecSessionOpenRequest) Validate() error {
 	return request.wire().Validate()
 }
@@ -200,13 +200,13 @@ func (session *VMExecSession) Release(ctx context.Context) error {
 
 // Cancel interrupts the retained sidecar session and releases its owned duplicates.
 func (session *VMExecSession) Cancel(ctx context.Context) error {
-	if err := validateVMExecSessionClientContext(ctx, "cancel retained VM-exec session"); err != nil {
-		return err
+	if ctx == nil {
+		return errs.New(errs.CodeValidationFailed, "retained VM-exec session context is required")
 	}
 	if session == nil || session.control == nil {
 		return vmExecSessionClientFailure("retained VM-exec session is not active", nil)
 	}
-	return session.control.Cancel(ctx)
+	return session.control.Cancel(context.WithoutCancel(ctx))
 }
 
 func duplicateVMExecSessionConnection(

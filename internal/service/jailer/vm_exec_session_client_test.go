@@ -34,6 +34,7 @@ func TestVMExecSessionClientTransfersDuplicatesAndRetainsOriginalConnections(t *
 		bind: func(ctx context.Context, duplicate *os.File) error {
 			assert.Same(t, t.Context(), ctx)
 			destinationDuplicate = duplicate
+			assertVMExecClientDuplicate(t, duplicate)
 			return nil
 		},
 		release: func(ctx context.Context) (vmexecsessionwire.Outcome, error) {
@@ -57,6 +58,7 @@ func TestVMExecSessionClientTransfersDuplicatesAndRetainsOriginalConnections(t *
 				t.Errorf("open request projection mismatch (-want +got):\n%s", diff)
 			}
 			sourceDuplicate = duplicate
+			assertVMExecClientDuplicate(t, duplicate)
 			return control, nil
 		},
 	}
@@ -138,6 +140,18 @@ func TestVMExecSessionClientPreservesOperationErrors(t *testing.T) {
 
 		assert.Same(t, expected, err)
 	})
+
+	t.Run("released with transport error", func(t *testing.T) {
+		transportErr := errors.New("terminal transport sentinel")
+		control := &fakeVMExecSessionControl{release: func(context.Context) (vmexecsessionwire.Outcome, error) {
+			return releasedVMExecClientOutcome(t), transportErr
+		}}
+		session := &VMExecSession{control: control, duplicator: vmExecSessionUnixConnectionDuplicator{}}
+
+		err := session.Release(t.Context())
+
+		assert.Same(t, transportErr, err)
+	})
 }
 
 // Rationale: Admission failures happen before duplication, so the caller's live relay connection remains owned and
@@ -151,9 +165,12 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 		client  *VMExecSessionClient
 		request VMExecSessionOpenRequest
 		conn    bool
+		cause   error
 	}{
-		"nil context":       {client: &VMExecSessionClient{}, request: valid, conn: true},
-		"cancelled context": {ctx: cancelled, client: &VMExecSessionClient{}, request: valid, conn: true},
+		"nil context": {client: &VMExecSessionClient{}, request: valid, conn: true},
+		"cancelled context": {
+			ctx: cancelled, client: &VMExecSessionClient{}, request: valid, conn: true, cause: context.Canceled,
+		},
 		"short source ID": {
 			ctx:    t.Context(),
 			client: &VMExecSessionClient{},
@@ -199,8 +216,9 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 				connection = nil
 			}
 			duplicator := &fakeVMExecSessionDuplicator{}
+			transport := &fakeVMExecSessionTransport{}
 			if test.client != nil {
-				test.client.transport = &fakeVMExecSessionTransport{}
+				test.client.transport = transport
 				test.client.duplicator = duplicator
 				if name == "inactive client" {
 					test.client.transport = nil
@@ -212,11 +230,33 @@ func TestVMExecSessionClientRejectsInvalidOpenWithoutDuplicating(t *testing.T) {
 			assert.Nil(t, session)
 			assert.Error(t, err)
 			assert.Zero(t, duplicator.calls.Load())
+			assert.Zero(t, transport.calls)
+			if test.cause != nil {
+				assertVMExecSessionClientCancellation(t, err, test.cause)
+			}
 			if connection != nil {
 				assertVMExecClientConnectionUsable(t, connection, peer, "rejected-original")
 			}
 		})
 	}
+}
+
+// Rationale: Cancellation can race the descriptor duplication boundary. A duplicate that has not yet transferred to
+// the transport remains client-owned and must be closed.
+func TestVMExecSessionClientClosesDuplicateWhenContextCancelsAfterDuplication(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	source, _ := requireVMExecClientUnixPair(t)
+	duplicate := requireVMExecClientFile(t)
+	duplicator := &fakeVMExecSessionDuplicator{file: duplicate, hook: cancel}
+	transport := &fakeVMExecSessionTransport{}
+	client := newVMExecSessionClient(transport, duplicator)
+
+	session, err := client.Open(ctx, validVMExecSessionOpenRequest(), source)
+
+	assert.Nil(t, session)
+	assertVMExecSessionClientCancellation(t, err, context.Canceled)
+	assert.ErrorIs(t, duplicate.Close(), os.ErrClosed)
+	assert.Zero(t, transport.calls)
 }
 
 // Rationale: A duplicator can allocate before reporting failure. The client must close that not-yet-transferred file
@@ -245,35 +285,64 @@ func TestVMExecSessionRejectsInactiveNilAndCancelledOperations(t *testing.T) {
 	cancel()
 	destination, _ := requireVMExecClientUnixPair(t)
 	duplicator := &fakeVMExecSessionDuplicator{}
-	active := &VMExecSession{control: &fakeVMExecSessionControl{}, duplicator: duplicator}
+	control := &fakeVMExecSessionControl{}
+	active := &VMExecSession{control: control, duplicator: duplicator}
 	var nilSession *VMExecSession
 
 	tests := map[string]struct {
-		call func() error
+		call  func() error
+		cause error
 	}{
-		"nil bind context":       {call: func() error { return active.BindDestination(nil, destination) }},
-		"cancelled bind context": {call: func() error { return active.BindDestination(cancelled, destination) }},
-		"nil destination":        {call: func() error { return active.BindDestination(t.Context(), nil) }},
+		"nil bind context": {call: func() error { return active.BindDestination(nil, destination) }},
+		"cancelled bind context": {
+			call: func() error { return active.BindDestination(cancelled, destination) }, cause: context.Canceled,
+		},
+		"nil destination": {call: func() error { return active.BindDestination(t.Context(), nil) }},
 		"nil session bind": {
 			call: func() error { return nilSession.BindDestination(t.Context(), destination) },
 		},
-		"nil release context":       {call: func() error { return active.Release(nil) }},
-		"cancelled release context": {call: func() error { return active.Release(cancelled) }},
-		"inactive release":          {call: func() error { return (&VMExecSession{}).Release(t.Context()) }},
-		"nil session release":       {call: func() error { return nilSession.Release(t.Context()) }},
-		"nil cancel context":        {call: func() error { return active.Cancel(nil) }},
-		"cancelled cancel context":  {call: func() error { return active.Cancel(cancelled) }},
-		"inactive cancel":           {call: func() error { return (&VMExecSession{}).Cancel(t.Context()) }},
-		"nil session cancel":        {call: func() error { return nilSession.Cancel(t.Context()) }},
+		"nil release context": {call: func() error { return active.Release(nil) }},
+		"cancelled release context": {
+			call: func() error { return active.Release(cancelled) }, cause: context.Canceled,
+		},
+		"inactive release":    {call: func() error { return (&VMExecSession{}).Release(t.Context()) }},
+		"nil session release": {call: func() error { return nilSession.Release(t.Context()) }},
+		"nil cancel context":  {call: func() error { return active.Cancel(nil) }},
+		"inactive cancel":     {call: func() error { return (&VMExecSession{}).Cancel(t.Context()) }},
+		"nil session cancel":  {call: func() error { return nilSession.Cancel(t.Context()) }},
 	}
 
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			err := test.call()
 			assert.Error(t, err)
+			if test.cause != nil {
+				assertVMExecSessionClientCancellation(t, err, test.cause)
+			}
 		})
 	}
 	assert.Zero(t, duplicator.calls.Load())
+	assert.Zero(t, control.bindCalls)
+	assert.Zero(t, control.releaseCalls)
+	assert.Zero(t, control.cancelCalls)
+}
+
+func TestVMExecSessionCancelUsesNonCancelledContextAndPreservesResult(t *testing.T) {
+	type contextKey struct{}
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), contextKey{}, "caller-value"))
+	cancel()
+	cancelErr := errors.New("cancel sentinel")
+	control := &fakeVMExecSessionControl{cancel: func(got context.Context) error {
+		assert.NoError(t, got.Err())
+		assert.Equal(t, "caller-value", got.Value(contextKey{}))
+		return cancelErr
+	}}
+	session := &VMExecSession{control: control, duplicator: vmExecSessionUnixConnectionDuplicator{}}
+
+	err := session.Cancel(ctx)
+
+	assert.Same(t, cancelErr, err)
+	assert.Equal(t, 1, control.cancelCalls)
 }
 
 func TestVMExecSessionReleaseRequiresExactReleasedOutcome(t *testing.T) {
@@ -340,6 +409,7 @@ func (control *fakeVMExecSessionControl) Cancel(ctx context.Context) error {
 type fakeVMExecSessionDuplicator struct {
 	file  *os.File
 	err   error
+	hook  func()
 	calls atomic.Int32
 }
 
@@ -348,7 +418,39 @@ func (duplicator *fakeVMExecSessionDuplicator) Duplicate(
 	*net.UnixConn,
 ) (*os.File, error) {
 	duplicator.calls.Add(1)
+	if duplicator.hook != nil {
+		duplicator.hook()
+	}
 	return duplicator.file, duplicator.err
+}
+
+func assertVMExecClientDuplicate(t *testing.T, duplicate *os.File) {
+	t.Helper()
+	t.Cleanup(func() {
+		if err := duplicate.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			t.Errorf("close captured VM-exec duplicate: %v", err)
+		}
+	})
+	flags, err := unix.FcntlInt(duplicate.Fd(), unix.F_GETFD, 0)
+	require.NoError(t, err)
+	assert.NotZero(t, flags&unix.FD_CLOEXEC)
+}
+
+func assertVMExecSessionClientCancellation(t *testing.T, err error, cause error) {
+	t.Helper()
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	type projection struct {
+		Code  errs.Code
+		Class errs.Class
+	}
+	want := projection{Code: errs.CodeProcessError, Class: errs.ClassInternal}
+	got := projection{Code: domainErr.Code, Class: domainErr.Class}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("cancellation error projection mismatch (-want +got):\n%s", diff)
+	}
+	assert.ErrorIs(t, err, cause)
 }
 
 func validVMExecSessionOpenRequest() VMExecSessionOpenRequest {
