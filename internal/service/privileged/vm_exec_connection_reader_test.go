@@ -582,6 +582,47 @@ func TestVMExecConnectionReaderKeepsOwnershipWhenTypedPhaseDecodeFails(t *testin
 	}
 }
 
+func TestVMExecConnectionReaderKeepsOwnershipWhenTypedPhaseContextCancelsAfterInstall(t *testing.T) {
+	fd := requireRawTestFD(t)
+	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
+	var frame bytes.Buffer
+	require.NoError(t, vmexecsessionwire.EncodeBindDestination(t.Context(), &frame))
+	ctx, cancel := context.WithCancel(context.Background())
+	deps := successfulVMExecReaderDeps(tracker)
+	offset := 0
+	firstRead := true
+	deps.recvmsg = func(
+		_ context.Context,
+		_ int,
+		payload []byte,
+		control []byte,
+		flags int,
+	) (int, int, int, unix.Sockaddr, error) {
+		assert.Equal(t, unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC, flags)
+		if offset == frame.Len() {
+			return 0, 0, 0, nil, nil
+		}
+		payloadCount := copy(payload, frame.Bytes()[offset:])
+		offset += payloadCount
+		if !firstRead {
+			return payloadCount, 0, 0, nil, nil
+		}
+		firstRead = false
+		controlCount := copy(control, unix.UnixRights(fd))
+		cancel()
+		return payloadCount, controlCount, 0, nil, nil
+	}
+	reader := newVMExecConnectionReaderWithDeps(ctx, 23, time.Now().Add(time.Second), deps)
+
+	connection, err := reader.decodeBindDestinationAndRetain(ctx)
+
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Nil(t, connection)
+	assertVMExecFDClosedOnce(t, tracker, fd)
+	assert.Zero(t, tracker.shutdownCount(fd))
+	assert.NoError(t, reader.Close())
+}
+
 // Rationale: The transferred capability must cache the complete shutdown-and-close result while preserving both
 // independent cleanup failures and removing cancellation without dropping context values.
 func TestVMExecRetainedConnectionAggregatesShutdownAndCloseOnce(t *testing.T) {
@@ -606,6 +647,30 @@ func TestVMExecRetainedConnectionAggregatesShutdownAndCloseOnce(t *testing.T) {
 	start := make(chan struct{})
 	ready := make(chan struct{}, 2)
 	results := make(chan error, 2)
+	var releaseOnce sync.Once
+	releaseCleanup := func() {
+		releaseOnce.Do(func() { close(shutdownRelease) })
+	}
+	collectResults := func(resultErrors []error) ([]error, bool) {
+		watchdog := time.NewTimer(time.Second)
+		defer watchdog.Stop()
+		for len(resultErrors) < 2 {
+			select {
+			case resultErr := <-results:
+				resultErrors = append(resultErrors, resultErr)
+			case <-watchdog.C:
+				return resultErrors, false
+			}
+		}
+		return resultErrors, true
+	}
+	recoverAndJoin := func(resultErrors []error, failure string) {
+		releaseCleanup()
+		if _, joined := collectResults(resultErrors); !joined {
+			t.Fatalf("%s; cleanup goroutines did not join after recovery", failure)
+		}
+		t.Fatal(failure)
+	}
 	for range 2 {
 		go func() {
 			ready <- struct{}{}
@@ -619,17 +684,12 @@ func TestVMExecRetainedConnectionAggregatesShutdownAndCloseOnce(t *testing.T) {
 	select {
 	case <-shutdownStarted:
 	case <-time.After(time.Second):
-		t.Fatal("retained connection shutdown did not reach the cleanup phase")
+		recoverAndJoin(nil, "retained connection shutdown did not reach the cleanup phase")
 	}
-	close(shutdownRelease)
-	resultErrors := make([]error, 0, 2)
-	for range 2 {
-		select {
-		case resultErr := <-results:
-			resultErrors = append(resultErrors, resultErr)
-		case <-time.After(time.Second):
-			t.Fatal("concurrent retained connection cleanup did not complete")
-		}
+	releaseCleanup()
+	resultErrors, joined := collectResults(make([]error, 0, 2))
+	if !joined {
+		recoverAndJoin(resultErrors, "concurrent retained connection cleanup did not complete")
 	}
 	firstErr := resultErrors[0]
 	secondErr := resultErrors[1]

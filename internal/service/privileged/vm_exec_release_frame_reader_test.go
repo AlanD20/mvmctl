@@ -32,34 +32,41 @@ func TestVMExecReleaseFrameReaderReadsOrdinaryBytesAndCleanEOF(t *testing.T) {
 }
 
 func TestVMExecReleaseFrameReaderRejectsProtocolViolationsAndClosesAncillary(t *testing.T) {
-	tests := map[string][]fakeVMExecReceive{
-		"initial ancillary": {{payload: []byte("r"), control: unix.UnixRights(40)}},
-		"late ancillary": {
-			{payload: []byte("r")},
-			{payload: []byte("e"), control: unix.UnixRights(40)},
+	tests := map[string]struct {
+		script        []fakeVMExecReceive
+		carriesRights bool
+	}{
+		"initial ancillary": {
+			script: []fakeVMExecReceive{{payload: []byte("r")}}, carriesRights: true,
 		},
-		"sender address": {{
-			payload: []byte("r"), control: unix.UnixRights(40), from: &unix.SockaddrUnix{Name: "sender"},
-		}},
-		"unexpected flags": {{
-			payload: []byte("r"), control: unix.UnixRights(40), flags: unix.MSG_OOB,
-		}},
-		"payload truncation": {{
-			payload: []byte("r"), control: unix.UnixRights(40), flags: unix.MSG_TRUNC,
-		}},
-		"control truncation": {{
-			payload: []byte("r"), control: unix.UnixRights(40), flags: unix.MSG_CTRUNC,
-		}},
+		"late ancillary": {
+			script: []fakeVMExecReceive{{payload: []byte("r")}, {payload: []byte("e")}}, carriesRights: true,
+		},
+		"sender address": {
+			script: []fakeVMExecReceive{{payload: []byte("r"), from: &unix.SockaddrUnix{Name: "sender"}}},
+		},
+		"unexpected flags": {
+			script: []fakeVMExecReceive{{payload: []byte("r"), flags: unix.MSG_OOB}},
+		},
+		"payload truncation": {
+			script: []fakeVMExecReceive{{payload: []byte("r"), flags: unix.MSG_TRUNC}},
+		},
+		"control truncation": {
+			script: []fakeVMExecReceive{{payload: []byte("r"), flags: unix.MSG_CTRUNC}},
+		},
 	}
-	for name, script := range tests {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			fd := requireRawTestFD(t)
-			script[len(script)-1].control = unix.UnixRights(fd)
+			fd := -1
+			if test.carriesRights {
+				fd = requireRawTestFD(t)
+				test.script[len(test.script)-1].control = unix.UnixRights(fd)
+			}
 			tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
-			reader := newScriptedVMExecReleaseFrameReader(t, script, tracker)
+			reader := newScriptedVMExecReleaseFrameReader(t, test.script, tracker)
 
 			var err error
-			for range script {
+			for range test.script {
 				_, err = reader.Read(make([]byte, 8))
 				if err != nil {
 					break
@@ -69,7 +76,11 @@ func TestVMExecReleaseFrameReaderRejectsProtocolViolationsAndClosesAncillary(t *
 			domainErr := requireVMExecDomainError(t, err)
 			assert.Equal(t, errs.CodeValidationFailed, domainErr.Code)
 			assert.Equal(t, errs.ClassValidation, domainErr.Class)
-			assertVMExecFDClosedOnce(t, tracker, fd)
+			if test.carriesRights {
+				assertVMExecFDClosedOnce(t, tracker, fd)
+			} else {
+				assert.Empty(t, tracker.calls)
+			}
 			assert.Zero(t, tracker.shutdownCount(fd))
 			_, repeatedErr := reader.Read(make([]byte, 1))
 			assert.Error(t, repeatedErr)
