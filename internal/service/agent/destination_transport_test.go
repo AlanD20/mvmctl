@@ -168,7 +168,7 @@ func TestHandleLocalConnectionCancellationUnblocksPartialRequest(t *testing.T) {
 		New(9999, destinationTestToken, "").handleLocalConnection(ctx, server)
 	}()
 
-	_, err := client.Write([]byte(`{"destination":"partial`))
+	_, err := client.Write([]byte("MVMEXE"))
 	require.NoError(t, err)
 	cancel()
 

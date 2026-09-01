@@ -14,13 +14,15 @@ import (
 
 // Agent manages the vsock listener and dispatches incoming connections.
 type Agent struct {
-	port         int
-	token        string
-	localSocket  string
-	activeConn   net.Conn
-	activeConnMu sync.Mutex
-	connMu       sync.Mutex // serializes writes to vsock conn between streamingWriter and handleLocalConn
-	readMu       sync.Mutex // serializes reads from vsock conn between handleConnection and handleLocalConn
+	port        int
+	token       string
+	localSocket string
+
+	sourceMu        sync.Mutex
+	pendingSources  map[string]*sourceTransport
+	sourceBindings  map[string]*sourceBinding
+	sourceChanged   chan struct{}
+	sourceProcesses sourceProcessEffects
 
 	destinationExecution destinationExecutionEffect
 }
@@ -37,6 +39,10 @@ func New(port int, token string, localSocket string) *Agent {
 		port:                 port,
 		token:                token,
 		localSocket:          localSocket,
+		pendingSources:       make(map[string]*sourceTransport),
+		sourceBindings:       make(map[string]*sourceBinding),
+		sourceChanged:        make(chan struct{}),
+		sourceProcesses:      newSourceProcessEffects(),
 		destinationExecution: newDestinationExecutionEffect(),
 	}
 }
@@ -59,6 +65,13 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err != nil {
 		vsockListener.Close()
 		return fmt.Errorf("cannot listen on local socket %s: %w", a.localSocket, err)
+	}
+	// CRITICAL: Target commands run as non-root users. Process-tree binding,
+	// not filesystem possession, authorizes a connection after this broad mode.
+	if err := os.Chmod(a.localSocket, 0o666); err != nil {
+		_ = localListener.Close()
+		_ = vsockListener.Close()
+		return fmt.Errorf("set local socket permissions: %w", err)
 	}
 
 	slog.Info("guest agent started", "port", a.port, "local_socket", a.localSocket)
@@ -114,6 +127,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Block until context is cancelled, then wait for all goroutines.
 	<-ctx.Done()
 	slog.Info("shutting down agent")
+	a.closeAllSourceSessions()
 	wg.Wait()
 	return nil
 }

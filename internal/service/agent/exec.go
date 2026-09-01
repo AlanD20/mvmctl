@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -154,7 +155,38 @@ func (w *streamingWriter) Flush() {
 // before the child process exits under extreme CPU starvation, causing
 // (0, io.EOF) to be returned — i.e., no data captured and no frame sent.
 func handleExec(ctx context.Context, req *execRequest, conn net.Conn, connMu *sync.Mutex) {
+	handleExecCommand(ctx, req, conn, connMu, nil, nil)
+}
+
+func (a *Agent) handleExec(ctx context.Context, req *execRequest, conn net.Conn, connMu *sync.Mutex) {
+	if req.SourceSessionID == "" {
+		handleExec(ctx, req, conn, connMu)
+		return
+	}
+	binding, err := a.reserveSourceSession(ctx, req.SourceSessionID, req.User)
+	if err != nil {
+		connMu.Lock()
+		_ = writeFrame(conn, &execResponse{
+			ID: req.ID, Type: responseTypeResult, Status: -1, Error: "source session unavailable",
+		})
+		connMu.Unlock()
+		return
+	}
+	handleExecCommand(ctx, req, conn, connMu, a, binding)
+}
+
+func handleExecCommand(
+	ctx context.Context,
+	req *execRequest,
+	conn net.Conn,
+	connMu *sync.Mutex,
+	agent *Agent,
+	binding *sourceBinding,
+) {
 	start := time.Now()
+	if binding != nil {
+		defer agent.cleanupSourceBinding(binding)
+	}
 
 	if req.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -168,6 +200,9 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn, connMu *sy
 		cmd = exec.CommandContext(ctx, "su", "-", req.User, "-c", req.Command)
 	} else {
 		cmd = exec.CommandContext(ctx, "sh", "-c", req.Command)
+	}
+	if binding != nil {
+		configureSourceCommand(cmd)
 	}
 
 	// Use streaming writers that emit JSON frames in real time.
@@ -199,6 +234,19 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn, connMu *sy
 		})
 		connMu.Unlock()
 		return
+	}
+	if binding != nil {
+		if err := agent.publishSourceBinding(ctx, binding, cmd.Process.Pid); err != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			connMu.Lock()
+			_ = writeFrame(conn, &execResponse{
+				ID: req.ID, Type: responseTypeResult, Status: -1, Error: "source session unavailable",
+			})
+			connMu.Unlock()
+			return
+		}
 	}
 
 	exitCode := 0
@@ -267,4 +315,10 @@ func handleExec(ctx context.Context, req *execRequest, conn net.Conn, connMu *sy
 		DurationMs: int(elapsed.Milliseconds()),
 	})
 	connMu.Unlock()
+}
+
+func configureSourceCommand(cmd *exec.Cmd) {
+	// CRITICAL: The new session is the stable root of the only process tree
+	// allowed to claim this source transport.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }

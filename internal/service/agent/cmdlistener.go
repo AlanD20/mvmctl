@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"sync"
 	"time"
 
 	"mvmctl/internal/lib/version"
@@ -35,6 +36,10 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 		return
 	}
 	reader := io.MultiReader(bytes.NewReader(prefix), conn)
+	if string(prefix) == vmexecwire.SourceSessionMagic {
+		a.handleSourceConnection(ctx, reader, conn)
+		return
+	}
 	if string(prefix) == vmexecwire.FrameMagic {
 		if err := conn.SetDeadline(time.Now().Add(vmexecwire.MaxExecutionDuration)); err != nil {
 			return
@@ -55,12 +60,9 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 }
 
 func (a *Agent) handleLegacyConnection(ctx context.Context, reader io.Reader, conn net.Conn) {
+	connMu := &sync.Mutex{}
 	for {
-		// Serialize reads with handleLocalConn to prevent two goroutines
-		// reading from the same vsock conn concurrently.
-		a.readMu.Lock()
 		req, err := readFrame(reader)
-		a.readMu.Unlock()
 		if err != nil {
 			return
 		}
@@ -70,30 +72,29 @@ func (a *Agent) handleLegacyConnection(ctx context.Context, reader io.Reader, co
 		if req.Type != requestTypePing && a.token != "" &&
 			subtle.ConstantTimeCompare([]byte(req.Token), []byte(a.token)) != 1 {
 			slog.Warn("auth rejected", "id", req.ID, "type", req.Type)
-			a.connMu.Lock()
+			connMu.Lock()
 			_ = writeFrame(conn, &execResponse{
 				ID: req.ID, Type: responseTypeError, Error: "invalid auth token",
 			})
-			a.connMu.Unlock()
+			connMu.Unlock()
 			continue
-		}
-
-		// For TTY sessions, don't register activeConn so handleLocalConn
-		// can't write JSON into a raw binary stream.
-		if req.Type == requestTypeExec {
-			a.activeConnMu.Lock()
-			a.activeConn = conn
-			a.activeConnMu.Unlock()
 		}
 
 		switch req.Type {
 		case requestTypeExec:
-			handleExec(ctx, req, conn, &a.connMu)
-			a.activeConnMu.Lock()
-			if a.activeConn == conn {
-				a.activeConn = nil
+			if req.SourceSessionID == "" {
+				a.handleExec(ctx, req, conn, connMu)
+				continue
 			}
-			a.activeConnMu.Unlock()
+			execCtx, cancel := context.WithCancel(ctx)
+			go func() {
+				var unexpectedInput [1]byte
+				_, _ = conn.Read(unexpectedInput[:])
+				cancel()
+			}()
+			a.handleExec(execCtx, req, conn, connMu)
+			cancel()
+			return
 
 		case requestTypeExecTTY:
 			// Send TTY acknowledgement before switching to raw relay.
@@ -108,11 +109,11 @@ func (a *Agent) handleLegacyConnection(ctx context.Context, reader io.Reader, co
 			return
 
 		case requestTypePing:
-			a.connMu.Lock()
+			connMu.Lock()
 			err = writeFrame(conn, &execResponse{
 				ID: req.ID, Type: responseTypePong,
 			})
-			a.connMu.Unlock()
+			connMu.Unlock()
 			if err != nil {
 				slog.Error("write pong", "id", req.ID, "error", err)
 				return
@@ -123,11 +124,11 @@ func (a *Agent) handleLegacyConnection(ctx context.Context, reader io.Reader, co
 			data, _ := json.Marshal(map[string]string{
 				"agent_version": agentVersion,
 			})
-			a.connMu.Lock()
+			connMu.Lock()
 			err = writeFrame(conn, &execResponse{
 				ID: req.ID, Type: responseTypeVersion, Data: string(data),
 			})
-			a.connMu.Unlock()
+			connMu.Unlock()
 			if err != nil {
 				slog.Error("write version response", "id", req.ID, "error", err)
 				return
@@ -146,11 +147,11 @@ func (a *Agent) handleLegacyConnection(ctx context.Context, reader io.Reader, co
 
 		default:
 			slog.Warn("unknown request type", "id", req.ID, "type", req.Type)
-			a.connMu.Lock()
+			connMu.Lock()
 			_ = writeFrame(conn, &execResponse{
 				ID: req.ID, Type: responseTypeError, Error: "unknown request type: " + req.Type,
 			})
-			a.connMu.Unlock()
+			connMu.Unlock()
 		}
 	}
 }

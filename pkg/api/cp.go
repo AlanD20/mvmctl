@@ -12,7 +12,6 @@ import (
 	"mvmctl/internal/infra"
 	"mvmctl/internal/infra/event"
 	"mvmctl/internal/lib/model"
-	"mvmctl/internal/vsockhandler"
 	"mvmctl/pkg/api/inputs"
 	"mvmctl/pkg/api/results"
 	"mvmctl/pkg/errs"
@@ -178,8 +177,6 @@ func (op *Operation) newVsockClient(
 	}
 	client := vsock.NewClient(cfg, probeTimeout)
 	client.VmName = vmName
-	handler := &vsockhandler.Handler{}
-	client.OnHostFrame = handler.Handle
 	client.OnUpgradeStarted = func(ctx context.Context, fromVersion, toVersion string) {
 		slog.Info("upgrading agent", "vm", vmName, "from", fromVersion, "to", toVersion)
 		if err := op.Repos.Vsock.SetUpgradeLock(ctx, cfg.VmID); err != nil {

@@ -18,19 +18,13 @@ const (
 
 // execResponse type constants.
 const (
-	responseTypeResult   = "result"
-	responseTypeTTY      = "tty"
-	responseTypePong     = "pong"
-	responseTypeVersion  = "version"
-	responseTypeError    = "error"
-	responseTypeStdout   = "stdout"
-	responseTypeStderr   = "stderr"
-	responseTypeRemoteVM = "remote_vm"
-)
-
-// execRequest type constants (additional).
-const (
-	requestTypeRemoteVM = "remote_vm"
+	responseTypeResult  = "result"
+	responseTypeTTY     = "tty"
+	responseTypePong    = "pong"
+	responseTypeVersion = "version"
+	responseTypeError   = "error"
+	responseTypeStdout  = "stdout"
+	responseTypeStderr  = "stderr"
 )
 
 // File-transfer request/response types.
@@ -42,16 +36,17 @@ const (
 
 // execRequest is a JSON frame received from the host agent.
 type execRequest struct {
-	ID      string            `json:"id"`
-	Type    string            `json:"type"`              // "exec", "exec-tty", "ping", "resize"
-	Command string            `json:"command,omitempty"` // shell command for exec/exec-tty
-	Token   string            `json:"token,omitempty"`   // auth token
-	Timeout int               `json:"timeout,omitempty"` // timeout in seconds
-	User    string            `json:"user,omitempty"`    // run as this user
-	Env     map[string]string `json:"env,omitempty"`     // extra environment variables
-	NoSync  bool              `json:"no_sync,omitempty"` // skip sync() after command
-	Rows    int               `json:"rows,omitempty"`    // terminal rows (exec-tty / resize)
-	Cols    int               `json:"cols,omitempty"`    // terminal columns
+	ID              string            `json:"id"`
+	Type            string            `json:"type"`              // "exec", "exec-tty", "ping", "resize"
+	Command         string            `json:"command,omitempty"` // shell command for exec/exec-tty
+	Token           string            `json:"token,omitempty"`   // auth token
+	Timeout         int               `json:"timeout,omitempty"` // timeout in seconds
+	User            string            `json:"user,omitempty"`    // run as this user
+	Env             map[string]string `json:"env,omitempty"`     // extra environment variables
+	NoSync          bool              `json:"no_sync,omitempty"` // skip sync() after command
+	Rows            int               `json:"rows,omitempty"`    // terminal rows (exec-tty / resize)
+	Cols            int               `json:"cols,omitempty"`    // terminal columns
+	SourceSessionID string            `json:"source_session_id,omitempty"`
 }
 
 // execResponse is a JSON frame sent back to the host agent.
@@ -64,24 +59,6 @@ type execResponse struct {
 	Stderr     string `json:"stderr,omitempty"`
 	DurationMs int    `json:"duration_ms,omitempty"`
 	Error      string `json:"error,omitempty"`
-}
-
-// RemoteVMRequest is the JSON payload for a "remote_vm" request from the guest
-// to the host. Sent via local socket from the CLI subcommand to the daemon,
-// then relayed through the vsock connection to the host.
-type RemoteVMRequest struct {
-	Destination string `json:"destination"`
-	Command     string `json:"command"`
-	User        string `json:"user,omitempty"`
-	Timeout     int    `json:"timeout,omitempty"`
-}
-
-// RemoteVMResponse is the JSON response for a "remote_vm" operation, sent by
-// the host back to the guest agent through the vsock connection.
-type RemoteVMResponse struct {
-	Type   string `json:"type"`
-	Status int    `json:"status,omitempty"`
-	Error  string `json:"error,omitempty"`
 }
 
 // readFrame reads one newline-delimited JSON request from r.

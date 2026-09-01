@@ -21,6 +21,7 @@ import (
 	"mvmctl/internal/infra/timinglog"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/version"
+	"mvmctl/internal/lib/vmexecwire"
 	"mvmctl/internal/service/agent"
 	"mvmctl/pkg/errs"
 )
@@ -71,13 +72,6 @@ type Client struct {
 
 	// AgentVersion is set by ensureAgent after a successful version probe.
 	AgentVersion string
-
-	// OnHostFrame is called when the Exec() read loop receives a frame that
-	// is not "stdout", "stderr", or "result". These are guest-initiated frames
-	// that the host must process (e.g., "remote_vm"). If nil, the frame is
-	// silently logged and ignored.
-	// sourceVMID is the VM ID of the client that received the frame.
-	OnHostFrame func(ctx context.Context, sourceVMID string, conn net.Conn, frameType string, data string) error
 
 	// Internal: set during upgrade, cleared on successful retry.
 	upgradeInProgress bool
@@ -137,6 +131,32 @@ func (c *Client) Exec(
 	env map[string]string,
 	noSync bool,
 ) (*ExecResult, error) {
+	return c.exec(ctx, command, user, timeout, env, noSync, "")
+}
+
+// ExecWithSourceSession executes an ordinary non-TTY command bound to one pre-opened source session.
+func (c *Client) ExecWithSourceSession(
+	ctx context.Context,
+	command, user string,
+	timeout int,
+	env map[string]string,
+	noSync bool,
+	sourceSessionID string,
+) (*ExecResult, error) {
+	if err := (vmexecwire.SourceReady{SourceSessionID: sourceSessionID}).Validate(); err != nil {
+		return nil, err
+	}
+	return c.exec(ctx, command, user, timeout, env, noSync, sourceSessionID)
+}
+
+func (c *Client) exec(
+	ctx context.Context,
+	command, user string,
+	timeout int,
+	env map[string]string,
+	noSync bool,
+	sourceSessionID string,
+) (*ExecResult, error) {
 	conn, err := c.ensureAgent(ctx)
 	if err != nil {
 		slog.Error("vsock dial and handshake failed", "vm_id", c.item.VmID, "error", err)
@@ -150,14 +170,15 @@ func (c *Client) Exec(
 	}
 
 	req := execRequest{
-		ID:      "1",
-		Type:    "exec",
-		Command: command,
-		Token:   c.item.Token,
-		Timeout: timeout,
-		User:    user,
-		Env:     env,
-		NoSync:  noSync,
+		ID:              "1",
+		Type:            "exec",
+		Command:         command,
+		Token:           c.item.Token,
+		Timeout:         timeout,
+		User:            user,
+		Env:             env,
+		NoSync:          noSync,
+		SourceSessionID: sourceSessionID,
 	}
 
 	if err := SendFrame(conn, req); err != nil {
@@ -196,17 +217,10 @@ func (c *Client) Exec(
 			result.ExitCode = resp.Status
 			return &result, nil
 		default:
-			// Defensive check — stdout/stderr should be caught above.
-			if resp.Type == "stdout" || resp.Type == "stderr" {
-				break
-			}
-			if c.OnHostFrame != nil {
-				if err := c.OnHostFrame(ctx, c.item.VmID, conn, resp.Type, resp.Data); err != nil {
-					return nil, err
-				}
-			} else {
-				slog.Warn("vsock unknown exec response type", "type", resp.Type)
-			}
+			return nil, errs.New(
+				errs.CodeVsockExecFailed,
+				fmt.Sprintf("unknown exec response type %q", resp.Type),
+			)
 		}
 	}
 }

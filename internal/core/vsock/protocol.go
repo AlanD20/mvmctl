@@ -32,25 +32,23 @@ const (
 
 // execRequest is the JSON frame sent from host to guest agent.
 type execRequest struct {
-	ID      string            `json:"id"`
-	Type    string            `json:"type"` // "exec", "exec-tty", "ping", "resize"
-	Command string            `json:"command,omitempty"`
-	Token   string            `json:"token,omitempty"`
-	Timeout int               `json:"timeout,omitempty"`
-	User    string            `json:"user,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	NoSync  bool              `json:"no_sync,omitempty"`
-	Rows    int               `json:"rows,omitempty"`
-	Cols    int               `json:"cols,omitempty"`
+	ID              string            `json:"id"`
+	Type            string            `json:"type"` // "exec", "exec-tty", "ping", "resize"
+	Command         string            `json:"command,omitempty"`
+	Token           string            `json:"token,omitempty"`
+	Timeout         int               `json:"timeout,omitempty"`
+	User            string            `json:"user,omitempty"`
+	Env             map[string]string `json:"env,omitempty"`
+	NoSync          bool              `json:"no_sync,omitempty"`
+	Rows            int               `json:"rows,omitempty"`
+	Cols            int               `json:"cols,omitempty"`
+	SourceSessionID string            `json:"source_session_id,omitempty"`
 }
-
-// ResponseTypeRemoteVM is the frame type for guest-initiated remote VM execution requests.
-const ResponseTypeRemoteVM = "remote_vm"
 
 // execResponse is the JSON frame received from the guest agent.
 type execResponse struct {
 	ID         string `json:"id"`
-	Type       string `json:"type"` // "result", "tty", "pong", "stdout", "stderr", "remote_vm"
+	Type       string `json:"type"` // "result", "tty", "pong", "stdout", "stderr"
 	Status     int    `json:"status,omitempty"`
 	Data       string `json:"data,omitempty"`
 	Stdout     string `json:"stdout,omitempty"`
