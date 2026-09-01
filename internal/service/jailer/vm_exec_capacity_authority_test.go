@@ -104,26 +104,103 @@ func TestVMExecCapacityAuthoritiesSerializeGlobalCeilingAcrossIndependentInstanc
 
 	fixture := newVMExecCapacityFixture(t, 1)
 	authorities := []*vmExecCapacityAuthority{fixture.authority(t), fixture.authority(t)}
-	start := make(chan struct{})
+	firstPaused := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondAcquireAttempted := make(chan struct{})
+	secondAcquireBlocked := make(chan struct{})
+	secondReachedStore := make(chan struct{})
+	secondReachedBootObservation := make(chan struct{})
+	var releaseFirstOnce sync.Once
+	var reservationCalls atomic.Int32
+	var acquireCalls atomic.Int32
+	fixture.beforeReservationID = func(ctx context.Context) error {
+		if reservationCalls.Add(1) != 1 {
+			return nil
+		}
+		close(firstPaused)
+		select {
+		case <-releaseFirst:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	fixture.onLockAcquireAttempt = func() {
+		if acquireCalls.Add(1) == 2 {
+			close(secondAcquireAttempted)
+		}
+	}
+	fixture.onLockAcquireBlocked = func() {
+		if acquireCalls.Load() == 2 {
+			close(secondAcquireBlocked)
+		}
+	}
+	fixture.onOpenStore = func(call int32) {
+		if call == 2 {
+			close(secondReachedStore)
+		}
+	}
+	fixture.onBootObservation = func(call int32) {
+		if call == 2 {
+			close(secondReachedBootObservation)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer func() {
+		releaseFirstOnce.Do(func() { close(releaseFirst) })
+		cancel()
+	}()
 	type result struct {
 		lease *vmExecCapacityLease
 		err   error
 	}
 	results := make(chan result, len(authorities))
-	for index, authority := range authorities {
-		go func() {
-			<-start
-			lease, err := authority.reserve(context.Background(), testVMExecCapacityIntent(uint32(1000+index)))
-			results <- result{lease: lease, err: err}
-		}()
+	go func() {
+		lease, err := authorities[0].reserve(ctx, testVMExecCapacityIntent(1000))
+		results <- result{lease: lease, err: err}
+	}()
+	select {
+	case <-firstPaused:
+	case <-ctx.Done():
+		t.Fatal("first authority did not pause after scan and before create")
 	}
-	close(start)
+	assert.Equal(t, int32(1), fixture.openStoreCalls.Load())
+	assert.Equal(t, int32(1), fixture.bootObservationCalls.Load())
+
+	go func() {
+		lease, err := authorities[1].reserve(ctx, testVMExecCapacityIntent(2000))
+		results <- result{lease: lease, err: err}
+	}()
+	select {
+	case <-secondAcquireAttempted:
+	case <-ctx.Done():
+		t.Fatal("second authority did not attempt shared-lock acquisition")
+	}
+	select {
+	case <-secondAcquireBlocked:
+	case <-secondReachedStore:
+		t.Fatal("second authority reached the store before the first admission committed")
+	case <-ctx.Done():
+		t.Fatal("second authority did not block on the shared lock")
+	}
+	select {
+	case <-secondReachedStore:
+		t.Fatal("second authority reached the store while the first held the lock")
+	case <-secondReachedBootObservation:
+		t.Fatal("second authority observed boot state while the first held the lock")
+	default:
+	}
+	assert.Equal(t, int32(1), fixture.openStoreCalls.Load())
+	assert.Equal(t, int32(1), fixture.bootObservationCalls.Load())
+	releaseFirstOnce.Do(func() { close(releaseFirst) })
+
 	got := make([]result, 0, len(authorities))
 	for range authorities {
 		select {
 		case item := <-results:
 			got = append(got, item)
-		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
 			t.Fatal("independent capacity authorities did not complete")
 		}
 	}
@@ -327,20 +404,26 @@ func TestVMExecCapacityBoottimeEffectRejectsOverflow(t *testing.T) {
 }
 
 type vmExecCapacityFixture struct {
-	root                string
-	bootID              string
-	boottimeNS          uint64
-	reservationIDs      []string
-	maxReservations     uint32
-	lock                sync.Mutex
-	idsMu               sync.Mutex
-	failDirectorySync   error
-	failTempCleanup     error
-	failStoreRelease    error
-	failLockRelease     error
-	failLockRootRelease error
-	openStoreCalls      atomic.Int32
-	recordUnlinkCalls   atomic.Int32
+	root                 string
+	bootID               string
+	boottimeNS           uint64
+	reservationIDs       []string
+	maxReservations      uint32
+	lock                 *testVMExecCapacityLockGate
+	idsMu                sync.Mutex
+	beforeReservationID  func(context.Context) error
+	onLockAcquireAttempt func()
+	onLockAcquireBlocked func()
+	onOpenStore          func(int32)
+	onBootObservation    func(int32)
+	failDirectorySync    error
+	failTempCleanup      error
+	failStoreRelease     error
+	failLockRelease      error
+	failLockRootRelease  error
+	openStoreCalls       atomic.Int32
+	bootObservationCalls atomic.Int32
+	recordUnlinkCalls    atomic.Int32
 }
 
 func newVMExecCapacityFixture(t *testing.T, maxReservations uint32) *vmExecCapacityFixture {
@@ -351,6 +434,7 @@ func newVMExecCapacityFixture(t *testing.T, maxReservations uint32) *vmExecCapac
 		boottimeNS:      1_000_000_000,
 		reservationIDs:  []string{testVMExecReservationID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		maxReservations: maxReservations,
+		lock:            newTestVMExecCapacityLockGate(),
 	}
 }
 
@@ -367,17 +451,32 @@ func (fixture *vmExecCapacityFixture) authority(t *testing.T) *vmExecCapacityAut
 func (fixture *vmExecCapacityFixture) deps() vmExecCapacityAuthorityDeps {
 	return vmExecCapacityAuthorityDeps{
 		openStore: func(ctx context.Context) (*vmExecCapacityStore, error) {
-			fixture.openStoreCalls.Add(1)
+			call := fixture.openStoreCalls.Add(1)
+			if fixture.onOpenStore != nil {
+				fixture.onOpenStore(call)
+			}
 			return fixture.openStore(ctx), nil
 		},
 		openLockRoot: func(context.Context) (vmExecCapacityLockRoot, error) {
 			return &testVMExecCapacityLockRoot{
-				mutex: &fixture.lock, releaseErr: fixture.failLockRootRelease,
-				lockReleaseErr: fixture.failLockRelease,
+				gate: fixture.lock, releaseErr: fixture.failLockRootRelease,
+				lockReleaseErr: fixture.failLockRelease, onAcquireAttempt: fixture.onLockAcquireAttempt,
+				onAcquireBlocked: fixture.onLockAcquireBlocked,
 			}, nil
 		},
-		currentBootID: func(context.Context) (string, error) { return fixture.bootID, nil },
-		newReservationID: func(context.Context) (vmExecReservationID, error) {
+		currentBootID: func(context.Context) (string, error) {
+			call := fixture.bootObservationCalls.Add(1)
+			if fixture.onBootObservation != nil {
+				fixture.onBootObservation(call)
+			}
+			return fixture.bootID, nil
+		},
+		newReservationID: func(ctx context.Context) (vmExecReservationID, error) {
+			if fixture.beforeReservationID != nil {
+				if err := fixture.beforeReservationID(ctx); err != nil {
+					return vmExecReservationID{}, err
+				}
+			}
 			fixture.idsMu.Lock()
 			defer fixture.idsMu.Unlock()
 			if len(fixture.reservationIDs) == 0 {
@@ -464,20 +563,37 @@ func (clock testVMExecCapacityClock) boottimeNS(ctx context.Context) (uint64, er
 }
 
 type testVMExecCapacityLockRoot struct {
-	mutex          *sync.Mutex
-	releaseErr     error
-	lockReleaseErr error
+	gate             *testVMExecCapacityLockGate
+	releaseErr       error
+	lockReleaseErr   error
+	onAcquireAttempt func()
+	onAcquireBlocked func()
 }
 
-func (root *testVMExecCapacityLockRoot) acquire(context.Context) (vmExecCapacityLock, error) {
-	root.mutex.Lock()
-	return &testVMExecCapacityLock{mutex: root.mutex, releaseErr: root.lockReleaseErr}, nil
+func (root *testVMExecCapacityLockRoot) acquire(ctx context.Context) (vmExecCapacityLock, error) {
+	if root.onAcquireAttempt != nil {
+		root.onAcquireAttempt()
+	}
+	select {
+	case <-root.gate.token:
+		return &testVMExecCapacityLock{gate: root.gate, releaseErr: root.lockReleaseErr}, nil
+	default:
+	}
+	if root.onAcquireBlocked != nil {
+		root.onAcquireBlocked()
+	}
+	select {
+	case <-root.gate.token:
+		return &testVMExecCapacityLock{gate: root.gate, releaseErr: root.lockReleaseErr}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func (root *testVMExecCapacityLockRoot) Release(context.Context) error { return root.releaseErr }
 
 type testVMExecCapacityLock struct {
-	mutex      *sync.Mutex
+	gate       *testVMExecCapacityLockGate
 	released   bool
 	releaseErr error
 }
@@ -485,7 +601,17 @@ type testVMExecCapacityLock struct {
 func (lock *testVMExecCapacityLock) Release(context.Context) error {
 	if !lock.released {
 		lock.released = true
-		lock.mutex.Unlock()
+		lock.gate.token <- struct{}{}
 	}
 	return lock.releaseErr
+}
+
+type testVMExecCapacityLockGate struct {
+	token chan struct{}
+}
+
+func newTestVMExecCapacityLockGate() *testVMExecCapacityLockGate {
+	gate := &testVMExecCapacityLockGate{token: make(chan struct{}, 1)}
+	gate.token <- struct{}{}
+	return gate
 }
