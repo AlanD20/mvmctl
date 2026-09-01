@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-01 (private active VM-exec pair authority)
+**Last Updated:** 2026-09-01 (retained VM-exec authority-sidecar decision)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -409,6 +409,56 @@ private and inert: no production ceiling or constructor is selected, no producti
 no source-connection-FD authority, privileged dispatcher/API relay, policy enforcement, audit consumer, or positive
 VM-to-VM path.
 
+The ninth slice will add one retained authority sidecar without moving the relay into root. The exact privileged action
+is `jailer-vm-exec-session`. It starts one root child through the existing system binary, sudo invocation, and fd-0
+AF_UNIX control socket only after `pkg/api` has authenticated and read the strict source request, resolved the exact
+destination, and allowed the directional source/destination/non-root-user policy. There is no helper binary, daemon,
+extra inherited descriptor, sudoers expansion, generic privileged action, or generic descriptor channel.
+
+The normal API process continues to perform both existing Firecracker UDS `CONNECT` handshakes and both agent-token
+handshakes. Its initial closed action request names the exact source and destination VM IDs and attaches exactly one
+duplicate of the live source connection with `SCM_RIGHTS` on the first request byte. Root receives ancillary data with
+`MSG_CMSG_CLOEXEC`, rejects missing, extra, unknown, late, or truncated control messages, and requires one connected,
+non-listening `AF_UNIX` `SOCK_STREAM` descriptor with close-on-exec. Root then invokes the active-pair authority with a
+fixed host-global ceiling of eight sessions and binds the received connection to the retained source record through
+`SO_PEERCRED`, `SO_PEERPIDFD`, exact PID/start identity, complete active-process identity, and final liveness.
+
+This socket proof establishes the exact source Firecracker peer, not the selected guest port. The independent
+`SourceSession` token/bootstrap handshake remains the agent-and-port proof. After pair admission, the API dials and
+authenticates the destination, sends exactly one destination-connection duplicate in a closed second phase, and root
+applies the same peer-pidfd, record, identity, and final-liveness proof before returning ready. Root receives no UDS
+path, agent token, target user, command, policy material, or response payload.
+
+The root child retains the pair/capacity lease and duplicates of both admitted connections for the entire relay. An
+explicit release, control EOF, API crash, setup failure, or the absolute `CLOCK_BOOTTIME` relay-stop deadline shuts
+down the shared socket descriptions and performs cancellation-detached reverse cleanup. Capacity creation starts the
+five-minute relay budget before destination setup; the separate four-second cleanup/terminal grace never extends
+execution. The action uses a closed, versioned, action-specific leased-session protocol over fd 0. File descriptor 0
+remains control-only. This is the sole narrow exception to the ordinary privileged action's one-response-and-exit
+lifetime; the child still handles one request and one relay lease and never becomes a daemon.
+
+The production ceiling is a compiled root policy:
+
+```go
+const productionVMExecMaxSessions uint32 = 8
+```
+
+It is global across caller UIDs and has no configuration, environment, or CLI override. Eight matches the existing
+guest-side `maxSourceAdmissions` bound and conservatively caps the retained host/guest transports, process pins, VM
+locks, process groups, and minimum-guest pressure until live qualification supports a different fixed policy.
+
+Implementation remains fail-closed and proceeds in these independently reviewable commits:
+
+1. Add exact-one-descriptor ancillary primitives and structural FD admission, without registering an action.
+2. Add the typed `jailer-vm-exec-session` client/server protocol and retained root-side lifecycle, still unregistered.
+3. Bind both descriptors to the pair authority, wire the fixed ceiling and absolute boottime stop, then register the
+   exact privileged action.
+4. Add `SourceSession.WaitCancel`, a closed destination session, and a typed error-reporting audit sink.
+5. Add the explicit public trigger and API relay, then qualify same-network, cross-network, and no-IP-network behavior
+   plus denial, cancellation, crash, reboot, ceiling, and cleanup paths in Python L2.
+
+VM-to-VM execution remains unavailable until all five commits and L2 qualification are complete.
+
 ### Layer placement
 
 - `pkg/api/` remains the sole orchestrator of VM and network domain identities and owns public input validation.
@@ -424,9 +474,9 @@ VM-to-VM path.
   broker proves that one local peer descends from one host-bound outer command; it does not authorize a VM identity.
 - `internal/service/network/` owns typed privileged namespace, bridge, veth, TAP, route, and link effects.
 - `internal/service/firewall/` owns typed privileged nftables application.
-- `internal/service/jailer/` consumes a verified namespace handle as part of typed launch and owns the private exact
-  active-pair/capacity authority; it does not create a generic network-operation interface or authorize a source
-  connection FD.
+- `internal/service/jailer/` consumes a verified namespace handle as part of typed launch and owns the exact
+  active-pair/capacity and Firecracker-peer-FD authority. It does not create a generic network-operation or descriptor
+  interface; the FD authority is exposed only through the fixed leased VM-exec action.
 - Shared policy and resolved-runtime values live in `internal/lib/model/` only when multiple domains require them.
 
 All side-effecting functions take `context.Context` first and return `pkg/errs.DomainError` failures. Batch operations
@@ -452,6 +502,20 @@ supported after initialization.
 
 Rejected. Network placement would remain an implicit authorization mechanism, and same-bridge traffic would bypass the
 managed IP-family policy path.
+
+### Put the VM-exec data plane in root
+
+Rejected. A root relay would unnecessarily parse guest commands and output, handle agent tokens and policy material,
+dial the destination, and duplicate the multi-domain orchestration assigned to `pkg/api`.
+
+### Use a root daemon, extra inherited descriptor, or verify-and-exit helper
+
+Rejected. A daemon adds installation, upgrade, shared-failure, and authorization lifecycle that the single-binary
+one-shot model avoids. An fd above 2 requires `sudo -C` or policy changes and violates the fd-0-only contract. A root
+process that verifies descriptors and exits releases the VM locks and capacity before the relay, so its proof is not a
+retained authority. Root path dialing and descriptor return are also unnecessary: the normal API already owns both
+handshakes, while root can prove the exact Firecracker peers from duplicates of the live connections without accepting
+caller-selected paths.
 
 ### One namespace per managed network
 
