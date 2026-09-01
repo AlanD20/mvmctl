@@ -24,10 +24,12 @@ import (
 )
 
 const (
-	vmExecSessionSourceID         = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-	vmExecSessionDestinationID    = "11111111111111111111111111111111"
-	vmExecSessionDestinationPID   = 5252
-	vmExecSessionDestinationTicks = uint64(765432)
+	vmExecSessionSourceID              = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	vmExecSessionDestinationID         = "11111111111111111111111111111111"
+	vmExecSessionDestinationPID        = 5252
+	vmExecSessionDestinationTicks      = uint64(765432)
+	vmExecSessionSourceGeneration      = uint64(7)
+	vmExecSessionDestinationGeneration = uint64(9)
 )
 
 func TestVMExecSessionAuthorityRetainsBothProcessAuthoritiesUntilRelease(t *testing.T) {
@@ -43,7 +45,7 @@ func TestVMExecSessionAuthorityRetainsBothProcessAuthoritiesUntilRelease(t *test
 	)
 	require.NoError(t, err)
 	require.NotNil(t, lease)
-	assert.Equal(t, []string{
+	wantEvents := []string{
 		"index:acquire",
 		"vm:" + vmExecSessionDestinationID + ":acquire",
 		"vm:" + vmExecSessionSourceID + ":acquire",
@@ -51,7 +53,10 @@ func TestVMExecSessionAuthorityRetainsBothProcessAuthoritiesUntilRelease(t *test
 		"pidfd:" + vmExecSessionSourceID + ":open",
 		"pidfd:" + vmExecSessionDestinationID + ":open",
 		"capacity:reserve",
-	}, fixture.events.snapshot())
+	}
+	if diff := cmp.Diff(wantEvents, fixture.events.snapshot()); diff != "" {
+		t.Errorf("VM-exec session acquisition events mismatch (-want +got):\n%s", diff)
+	}
 
 	// Rationale: closing either pidfd before capacity admission completes would reduce the active-record proof to
 	// replayable numeric PID data. Both process capabilities remain retained until the combined lease is released.
@@ -61,22 +66,36 @@ func TestVMExecSessionAuthorityRetainsBothProcessAuthoritiesUntilRelease(t *test
 }
 
 type vmExecSessionAuthorityFixture struct {
-	authority         *vmExecSessionAuthority
-	instances         *instanceAuthority
-	events            *vmExecSessionEventLog
-	tree              *testInstanceAuthorityTree
-	root              string
-	capacity          *vmExecCapacityFixture
-	identity          *fakeProcessIdentityDeps
-	sourceRecord      instanceRecord
-	destinationRecord instanceRecord
-	processCloses     atomic.Int32
-	sourceKey         authorityfs.VMKey
-	destinationKey    authorityfs.VMKey
-	aliveMu           sync.Mutex
-	aliveCalls        map[int]int
-	failAliveCall     map[int]int
+	authority                *vmExecSessionAuthority
+	instances                *instanceAuthority
+	events                   *vmExecSessionEventLog
+	tree                     *testInstanceAuthorityTree
+	root                     string
+	capacity                 *vmExecCapacityFixture
+	identity                 *fakeProcessIdentityDeps
+	sourceRecord             instanceRecord
+	destinationRecord        instanceRecord
+	processCloses            atomic.Int32
+	sourceKey                authorityfs.VMKey
+	destinationKey           authorityfs.VMKey
+	aliveMu                  sync.Mutex
+	aliveCalls               map[int]int
+	failAliveCall            map[int]int
+	capacityPublished        atomic.Bool
+	phaseMu                  sync.Mutex
+	afterCapacityPublication func()
+	failAliveAfterCapacity   map[int]bool
 }
+
+type vmExecSessionIdentityMutation uint8
+
+const (
+	vmExecSessionMutateExecutable vmExecSessionIdentityMutation = iota + 1
+	vmExecSessionMutateCredentials
+	vmExecSessionMutateNamespace
+	vmExecSessionMutateRoot
+	vmExecSessionMutateCgroup
+)
 
 func newVMExecSessionAuthorityFixture(
 	t *testing.T,
@@ -88,8 +107,12 @@ func newVMExecSessionAuthorityFixture(
 	record, fake := activeRecoveryTestRecord(t)
 	sourceRecord := cloneInstanceRecord(record)
 	sourceRecord.vmID = sourceVMID
+	sourceRecord.launchGeneration = vmExecSessionSourceGeneration
+	sourceRecord.cleanupGeneration = vmExecSessionSourceGeneration - 1
 	destinationRecord := cloneInstanceRecord(record)
 	destinationRecord.vmID = destinationVMID
+	destinationRecord.launchGeneration = vmExecSessionDestinationGeneration
+	destinationRecord.cleanupGeneration = vmExecSessionDestinationGeneration - 1
 	destinationRecord.launch.process = instanceProcessLocator{
 		pid: vmExecSessionDestinationPID, startTimeTicks: vmExecSessionDestinationTicks,
 	}
@@ -140,6 +163,12 @@ func newVMExecSessionAuthorityFixture(
 					vmExecSessionDestinationTicks,
 					"S",
 				)),
+				[]byte(testProcessStat(record.launch.process.pid, record.launch.process.startTimeTicks, "S")),
+				[]byte(testProcessStat(
+					vmExecSessionDestinationPID,
+					vmExecSessionDestinationTicks,
+					"S",
+				)),
 			}
 			continue
 		}
@@ -147,18 +176,38 @@ func newVMExecSessionAuthorityFixture(
 			fake.metadata[key] = [][]byte{
 				[]byte("0::/" + infra.JailerCgroupParent + "/" + sourceVMID + "\n"),
 				[]byte("0::/" + infra.JailerCgroupParent + "/" + destinationVMID + "\n"),
+				[]byte("0::/" + infra.JailerCgroupParent + "/" + sourceVMID + "\n"),
+				[]byte("0::/" + infra.JailerCgroupParent + "/" + destinationVMID + "\n"),
 			}
 			continue
 		}
 		if len(values) > 0 {
-			fake.metadata[key] = [][]byte{append([]byte{}, values[0]...), append([]byte{}, values[0]...)}
+			fake.metadata[key] = [][]byte{
+				append([]byte{}, values[0]...), append([]byte{}, values[0]...),
+				append([]byte{}, values[0]...), append([]byte{}, values[0]...),
+			}
 		}
 	}
 	fake.processObjects[processObjectTestKey{
 		directoryFD: processTestFirecrackerDirFD,
+		object:      processMountNamespaceObject,
+	}] = []int{111, 114, 111, 114}
+	fake.processObjects[processObjectTestKey{
+		directoryFD: processTestFirecrackerDirFD,
+		object:      processNetworkNamespaceObject,
+	}] = []int{141, 142, 141, 142}
+	fake.processObjects[processObjectTestKey{
+		directoryFD: processTestFirecrackerDirFD,
+		object:      processRootObject,
+	}] = []int{112, 115, 112, 115}
+	fake.processObjects[processObjectTestKey{
+		directoryFD: processTestFirecrackerDirFD,
 		object:      processExecutableObject,
-	}] = []int{113, 116, 119, 116}
-	fake.stats[116] = repeatProcessStat(fake.stats[116][0], 6)
+	}] = []int{113, 116, 119, 116, 113, 116, 119, 116}
+	for _, fd := range []int{111, 114, 141, 142, 112, 115, 113, 119} {
+		fake.stats[fd] = repeatProcessStat(fake.stats[fd][0], 2)
+	}
+	fake.stats[116] = repeatProcessStat(fake.stats[116][0], 12)
 	fake.bootIDs = []string{processTestHostBootID, processTestHostBootID, processTestHostBootID}
 	fake.bootIndex = 0
 	fake.processDirectories[vmExecSessionDestinationPID] = processTestFirecrackerDirFD
@@ -168,6 +217,7 @@ func newVMExecSessionAuthorityFixture(
 		sourceRecord: sourceRecord, destinationRecord: destinationRecord,
 		sourceKey: sourceKey, destinationKey: destinationKey,
 		aliveCalls: make(map[int]int), failAliveCall: make(map[int]int),
+		failAliveAfterCapacity: make(map[int]bool),
 	}
 	pidfdVMs := map[int]string{700: sourceVMID, 701: destinationVMID}
 	locators := map[int]instanceProcessLocator{
@@ -192,6 +242,9 @@ func newVMExecSessionAuthorityFixture(
 			fixture.aliveMu.Lock()
 			defer fixture.aliveMu.Unlock()
 			fixture.aliveCalls[fd]++
+			if fixture.capacityPublished.Load() && fixture.failAliveAfterCapacity[fd] {
+				return false, nil
+			}
 			return fixture.failAliveCall[fd] != fixture.aliveCalls[fd], nil
 		},
 		descriptorFlags: func(context.Context, int) (int, error) { return unix.FD_CLOEXEC, nil },
@@ -213,6 +266,15 @@ func newVMExecSessionAuthorityFixture(
 	capacityFixture := newVMExecCapacityFixture(t, 8)
 	fixture.capacity = capacityFixture
 	capacityFixture.bootID = processTestHostBootID
+	capacityFixture.afterReservationPublished = func(context.Context) {
+		fixture.capacityPublished.Store(true)
+		fixture.phaseMu.Lock()
+		hook := fixture.afterCapacityPublication
+		fixture.phaseMu.Unlock()
+		if hook != nil {
+			hook()
+		}
+	}
 	capacityFixture.onOpenStore = func(call int32) {
 		if call == 1 {
 			events.add("capacity:reserve")
@@ -256,6 +318,58 @@ func (fixture *vmExecSessionAuthorityFixture) failProcessLiveness(fd int, call i
 	fixture.aliveMu.Lock()
 	defer fixture.aliveMu.Unlock()
 	fixture.failAliveCall[fd] = call
+}
+
+func (fixture *vmExecSessionAuthorityFixture) failProcessLivenessAfterCapacityPublication(fd int) {
+	fixture.aliveMu.Lock()
+	defer fixture.aliveMu.Unlock()
+	fixture.failAliveAfterCapacity[fd] = true
+}
+
+func (fixture *vmExecSessionAuthorityFixture) mutateSourceIdentityAfterCapacityPublication(
+	mutation vmExecSessionIdentityMutation,
+) {
+	fixture.phaseMu.Lock()
+	defer fixture.phaseMu.Unlock()
+	fixture.afterCapacityPublication = func() {
+		fake := fixture.identity
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		switch mutation {
+		case vmExecSessionMutateExecutable:
+			key := processObjectTestKey{directoryFD: processTestFirecrackerDirFD, object: processExecutableObject}
+			index := fake.processObjectIndex[key]
+			mutatedFD := 803
+			fake.processObjects[key][index] = mutatedFD
+			mutated := fake.stats[113][0]
+			mutated.Ino++
+			fake.stats[mutatedFD] = []unix.Stat_t{mutated}
+		case vmExecSessionMutateCredentials:
+			key := processMetadataTestKey{directoryFD: processTestFirecrackerDirFD, kind: processStatusMetadata}
+			index := fake.metadataIndex[key]
+			fake.metadata[key][index] = []byte(testProcessStatus(testAuthorityUID+1, testAuthorityGID, ""))
+		case vmExecSessionMutateNamespace:
+			key := processObjectTestKey{directoryFD: processTestFirecrackerDirFD, object: processMountNamespaceObject}
+			index := fake.processObjectIndex[key]
+			mutatedFD := 801
+			fake.processObjects[key][index] = mutatedFD
+			fake.stats[mutatedFD] = []unix.Stat_t{objectStat(
+				instanceObjectIdentity{device: 4, inode: 4026533999}, unix.S_IFREG|0444,
+			)}
+		case vmExecSessionMutateRoot:
+			key := processObjectTestKey{directoryFD: processTestFirecrackerDirFD, object: processRootObject}
+			index := fake.processObjectIndex[key]
+			mutatedFD := 802
+			fake.processObjects[key][index] = mutatedFD
+			fake.stats[mutatedFD] = []unix.Stat_t{objectStat(
+				instanceObjectIdentity{device: 259, inode: 99887766}, unix.S_IFDIR|0755,
+			)}
+		case vmExecSessionMutateCgroup:
+			key := processMetadataTestKey{directoryFD: processTestFirecrackerDirFD, kind: processCgroupMetadata}
+			index := fake.metadataIndex[key]
+			fake.metadata[key][index] = []byte("0::/foreign.slice\n")
+		}
+	}
 }
 
 func vmExecSessionVMIDForKey(
@@ -402,6 +516,46 @@ func TestVMExecSessionAuthorityReturnsExactImmutableAdmission(t *testing.T) {
 	require.NoError(t, lease.Release(t.Context()))
 }
 
+func TestVMExecSessionAuthorityPersistsExactDirectionalCapacityProjection(t *testing.T) {
+	t.Parallel()
+
+	fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
+	lease, err := fixture.authority.reserve(
+		t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, lease)
+	t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+
+	store := fixture.capacity.openStore(t.Context())
+	persisted, found, err := store.readRecord(
+		t.Context(), vmExecReservationID{value: testVMExecReservationID},
+	)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NoError(t, store.Release(t.Context()))
+	want := vmExecCapacityRecord{
+		schemaVersion:               vmExecCapacityRecordSchemaVersion,
+		kind:                        vmExecCapacityKind,
+		reservationID:               vmExecReservationID{value: testVMExecReservationID},
+		ownerUID:                    testAuthorityUID,
+		hostBootID:                  processTestHostBootID,
+		sourceVMID:                  vmExecSessionSourceID,
+		sourceLaunchGeneration:      vmExecSessionSourceGeneration,
+		destinationVMID:             vmExecSessionDestinationID,
+		destinationLaunchGeneration: vmExecSessionDestinationGeneration,
+		createdBoottimeNS:           fixture.capacity.boottimeNS,
+		expiresBoottimeNS:           fixture.capacity.boottimeNS + vmExecCapacityLifetimeNS,
+	}
+	if diff := cmp.Diff(
+		want,
+		persisted,
+		cmp.AllowUnexported(vmExecCapacityRecord{}, vmExecReservationID{}),
+	); diff != "" {
+		t.Errorf("persisted VM-exec capacity projection mismatch (-want +got):\n%s", diff)
+	}
+}
+
 // Rationale: failure on the second identity must drop every earlier directory/lock capability without ever reaching
 // process or global-capacity authority.
 func TestVMExecSessionAuthoritySecondIdentityFailuresUnwindEarlierAuthority(t *testing.T) {
@@ -527,7 +681,7 @@ func TestVMExecSessionAuthorityProcessFailuresNeverBecomePositiveAdmission(t *te
 	// partial, so admission returns the combined lease with an error instead of dropping or authorizing it.
 	t.Run("post_capacity_process_failure_returns_cleanup_authority", func(t *testing.T) {
 		fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
-		fixture.failProcessLiveness(701, 5)
+		fixture.failProcessLivenessAfterCapacityPublication(701)
 		lease, err := fixture.authority.reserve(
 			t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
 		)
@@ -573,6 +727,38 @@ func TestVMExecSessionAuthorityBootChangesNeverBecomePositiveAdmission(t *testin
 	})
 }
 
+func TestVMExecSessionAuthorityRejectsFullIdentityMutationAfterCapacityPublication(t *testing.T) {
+	t.Parallel()
+
+	mutations := []struct {
+		name     string
+		mutation vmExecSessionIdentityMutation
+	}{
+		{name: "executable", mutation: vmExecSessionMutateExecutable},
+		{name: "credentials", mutation: vmExecSessionMutateCredentials},
+		{name: "mount_namespace", mutation: vmExecSessionMutateNamespace},
+		{name: "jail_root", mutation: vmExecSessionMutateRoot},
+		{name: "cgroup", mutation: vmExecSessionMutateCgroup},
+	}
+	for _, test := range mutations {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
+			fixture.mutateSourceIdentityAfterCapacityPublication(test.mutation)
+			lease, err := fixture.authority.reserve(
+				t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
+			)
+			if lease != nil {
+				t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+			}
+			require.Error(t, err)
+			require.NotNil(t, lease)
+			_, admissionErr := lease.admission()
+			require.Error(t, admissionErr)
+			assert.Equal(t, errs.CodeProcessError, errs.AsDomainError(err).Code)
+		})
+	}
+}
+
 func TestVMExecSessionCapacityProjectionRequiresEveryProvenField(t *testing.T) {
 	t.Parallel()
 
@@ -597,7 +783,15 @@ func TestVMExecSessionCapacityProjectionRequiresEveryProvenField(t *testing.T) {
 		"source_generation":      func(record *vmExecCapacityRecord) { record.sourceLaunchGeneration++ },
 		"destination_id":         func(record *vmExecCapacityRecord) { record.destinationVMID = testVMExecDestinationID },
 		"destination_generation": func(record *vmExecCapacityRecord) { record.destinationLaunchGeneration++ },
-		"boot":                   func(record *vmExecCapacityRecord) { record.hostBootID = processOtherBootID },
+		"swapped_direction": func(record *vmExecCapacityRecord) {
+			record.sourceVMID, record.destinationVMID = record.destinationVMID, record.sourceVMID
+			record.sourceLaunchGeneration, record.destinationLaunchGeneration =
+				record.destinationLaunchGeneration, record.sourceLaunchGeneration
+		},
+		"reused_source_generation": func(record *vmExecCapacityRecord) {
+			record.destinationLaunchGeneration = record.sourceLaunchGeneration
+		},
+		"boot": func(record *vmExecCapacityRecord) { record.hostBootID = processOtherBootID },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -705,20 +899,73 @@ func TestVMExecSessionLeaseCopiesConcurrentlyReleaseOnce(t *testing.T) {
 	require.NoError(t, err)
 	copied := *lease
 	const callers = 16
+	ready := make(chan struct{}, callers)
+	start := make(chan struct{})
+	attempted := make(chan struct{}, callers)
 	results := make(chan error, callers)
+	releaseEntered := make(chan struct{})
+	allowRelease := make(chan struct{})
+	fixture.capacity.onOpenStore = func(call int32) {
+		if call == 2 {
+			close(releaseEntered)
+			<-allowRelease
+		}
+	}
 	for index := 0; index < callers; index++ {
 		candidate := lease
 		if index%2 == 1 {
 			candidate = &copied
 		}
-		go func() { results <- candidate.Release(context.Background()) }()
+		go func() {
+			ready <- struct{}{}
+			<-start
+			attempted <- struct{}{}
+			results <- candidate.Release(context.Background())
+		}()
+	}
+	watchdog := time.NewTimer(time.Second)
+	defer watchdog.Stop()
+	for range callers {
+		select {
+		case <-ready:
+		case <-watchdog.C:
+			close(allowRelease)
+			t.Fatal("copied VM-exec release callers did not reach the start gate")
+		}
+	}
+	close(start)
+	for range callers {
+		select {
+		case <-attempted:
+		case <-watchdog.C:
+			close(allowRelease)
+			t.Fatal("copied VM-exec release callers did not overlap")
+		}
+	}
+	select {
+	case <-releaseEntered:
+		close(allowRelease)
+	case <-watchdog.C:
+		close(allowRelease)
+		t.Fatal("VM-exec capacity release did not reach the overlap gate")
 	}
 	for range callers {
-		require.NoError(t, <-results)
+		select {
+		case releaseErr := <-results:
+			require.NoError(t, releaseErr)
+		case <-watchdog.C:
+			t.Fatal("copied VM-exec release callers did not complete")
+		}
 	}
 	assert.Equal(t, int32(2), fixture.processCloseCount())
 	assert.Equal(t, int32(1), fixture.capacity.recordUnlinkCalls.Load())
-	assert.Len(t, fixture.vmReleaseEvents(), 2)
+	wantVMReleases := []string{
+		"vm:" + vmExecSessionSourceID + ":release",
+		"vm:" + vmExecSessionDestinationID + ":release",
+	}
+	if diff := cmp.Diff(wantVMReleases, fixture.vmReleaseEvents()); diff != "" {
+		t.Errorf("copied VM-exec release events mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func uniformProcessCredentials(value uint32) processCredentialIdentity {

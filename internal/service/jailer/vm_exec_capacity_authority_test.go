@@ -404,26 +404,27 @@ func TestVMExecCapacityBoottimeEffectRejectsOverflow(t *testing.T) {
 }
 
 type vmExecCapacityFixture struct {
-	root                  string
-	bootID                string
-	boottimeNS            uint64
-	reservationIDs        []string
-	maxReservations       uint32
-	lock                  *testVMExecCapacityLockGate
-	idsMu                 sync.Mutex
-	beforeRenameNoReplace func(context.Context) error
-	onLockAcquireAttempt  func()
-	onLockAcquireBlocked  func()
-	onOpenStore           func(int32)
-	onBootObservation     func(int32)
-	failDirectorySync     error
-	failTempCleanup       error
-	failStoreRelease      error
-	failLockRelease       error
-	failLockRootRelease   error
-	openStoreCalls        atomic.Int32
-	bootObservationCalls  atomic.Int32
-	recordUnlinkCalls     atomic.Int32
+	root                      string
+	bootID                    string
+	boottimeNS                uint64
+	reservationIDs            []string
+	maxReservations           uint32
+	lock                      *testVMExecCapacityLockGate
+	idsMu                     sync.Mutex
+	beforeRenameNoReplace     func(context.Context) error
+	afterReservationPublished func(context.Context)
+	onLockAcquireAttempt      func()
+	onLockAcquireBlocked      func()
+	onOpenStore               func(int32)
+	onBootObservation         func(int32)
+	failDirectorySync         error
+	failTempCleanup           error
+	failStoreRelease          error
+	failLockRelease           error
+	failLockRootRelease       error
+	openStoreCalls            atomic.Int32
+	bootObservationCalls      atomic.Int32
+	recordUnlinkCalls         atomic.Int32
 }
 
 func newVMExecCapacityFixture(t *testing.T, maxReservations uint32) *vmExecCapacityFixture {
@@ -503,7 +504,7 @@ func (fixture *vmExecCapacityFixture) openStore(ctx context.Context) *vmExecCapa
 		}
 		return realUnlink(unlinkCtx, fd, name, flags)
 	}
-	if fixture.beforeRenameNoReplace != nil {
+	if fixture.beforeRenameNoReplace != nil || fixture.afterReservationPublished != nil {
 		realRenameNoReplace := store.state.deps.renameNoReplace
 		store.state.deps.renameNoReplace = func(
 			renameCtx context.Context,
@@ -512,10 +513,16 @@ func (fixture *vmExecCapacityFixture) openStore(ctx context.Context) *vmExecCapa
 			newFD int,
 			newName string,
 		) error {
-			if err := fixture.beforeRenameNoReplace(renameCtx); err != nil {
-				return err
+			if fixture.beforeRenameNoReplace != nil {
+				if err := fixture.beforeRenameNoReplace(renameCtx); err != nil {
+					return err
+				}
 			}
-			return realRenameNoReplace(renameCtx, oldFD, oldName, newFD, newName)
+			err := realRenameNoReplace(renameCtx, oldFD, oldName, newFD, newName)
+			if err == nil && fixture.afterReservationPublished != nil {
+				fixture.afterReservationPublished(renameCtx)
+			}
+			return err
 		}
 	}
 	if fixture.failDirectorySync != nil {

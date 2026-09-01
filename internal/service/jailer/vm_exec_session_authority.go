@@ -141,6 +141,8 @@ func (authority *vmExecSessionAuthority) reserve(
 	postProofErr := authority.recheckActivePairAfterCapacity(
 		ctx,
 		hostBootID,
+		sourceRecord,
+		destinationRecord,
 		sourceProcesses,
 		destinationProcesses,
 	)
@@ -183,9 +185,27 @@ func validateVMExecSessionCapacityProjection(
 func (authority *vmExecSessionAuthority) recheckActivePairAfterCapacity(
 	ctx context.Context,
 	hostBootID string,
+	sourceRecord instanceRecord,
+	destinationRecord instanceRecord,
 	source *reopenedRecordedProcesses,
 	destination *reopenedRecordedProcesses,
 ) error {
+	currentBootID, err := authority.identityDeps.readBootID(ctx)
+	if err != nil {
+		return processVerificationError("", "recheck host boot ID after VM-exec capacity reservation", err)
+	}
+	if !hostBootIDPattern.MatchString(currentBootID) {
+		return processVerificationError("", "host boot ID after VM-exec capacity reservation is invalid", nil)
+	}
+	if currentBootID != hostBootID {
+		return processVerificationError("", "host boot ID changed across VM-exec capacity reservation", nil)
+	}
+	if err := verifyRecoveredActiveIdentity(ctx, authority.identityDeps, sourceRecord); err != nil {
+		return err
+	}
+	if err := verifyRecoveredActiveIdentity(ctx, authority.identityDeps, destinationRecord); err != nil {
+		return err
+	}
 	if source == nil || destination == nil {
 		return vmExecSessionError("vm-exec active-runtime process authority is incomplete", nil)
 	}
@@ -194,13 +214,6 @@ func (authority *vmExecSessionAuthority) recheckActivePairAfterCapacity(
 	}
 	if err := destination.verifyLocators(ctx); err != nil {
 		return err
-	}
-	finalBootID, err := authority.identityDeps.readBootID(ctx)
-	if err != nil {
-		return processVerificationError("", "recheck host boot ID after VM-exec capacity reservation", err)
-	}
-	if finalBootID != hostBootID {
-		return processVerificationError("", "host boot ID changed across VM-exec capacity reservation", nil)
 	}
 	return nil
 }
