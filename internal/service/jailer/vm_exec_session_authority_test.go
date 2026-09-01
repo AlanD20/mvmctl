@@ -89,12 +89,19 @@ type vmExecSessionAuthorityFixture struct {
 
 type vmExecSessionIdentityMutation uint8
 
+type vmExecSessionRole uint8
+
 const (
 	vmExecSessionMutateExecutable vmExecSessionIdentityMutation = iota + 1
 	vmExecSessionMutateCredentials
 	vmExecSessionMutateNamespace
 	vmExecSessionMutateRoot
 	vmExecSessionMutateCgroup
+)
+
+const (
+	vmExecSessionSourceRole vmExecSessionRole = iota + 1
+	vmExecSessionDestinationRole
 )
 
 func newVMExecSessionAuthorityFixture(
@@ -326,7 +333,8 @@ func (fixture *vmExecSessionAuthorityFixture) failProcessLivenessAfterCapacityPu
 	fixture.failAliveAfterCapacity[fd] = true
 }
 
-func (fixture *vmExecSessionAuthorityFixture) mutateSourceIdentityAfterCapacityPublication(
+func (fixture *vmExecSessionAuthorityFixture) mutateIdentityAfterCapacityPublication(
+	role vmExecSessionRole,
 	mutation vmExecSessionIdentityMutation,
 ) {
 	fixture.phaseMu.Lock()
@@ -335,10 +343,14 @@ func (fixture *vmExecSessionAuthorityFixture) mutateSourceIdentityAfterCapacityP
 		fake := fixture.identity
 		fake.mu.Lock()
 		defer fake.mu.Unlock()
+		roleOffset := 0
+		if role == vmExecSessionDestinationRole {
+			roleOffset = 1
+		}
 		switch mutation {
 		case vmExecSessionMutateExecutable:
 			key := processObjectTestKey{directoryFD: processTestFirecrackerDirFD, object: processExecutableObject}
-			index := fake.processObjectIndex[key]
+			index := fake.processObjectIndex[key] + roleOffset*2
 			mutatedFD := 803
 			fake.processObjects[key][index] = mutatedFD
 			mutated := fake.stats[113][0]
@@ -346,11 +358,11 @@ func (fixture *vmExecSessionAuthorityFixture) mutateSourceIdentityAfterCapacityP
 			fake.stats[mutatedFD] = []unix.Stat_t{mutated}
 		case vmExecSessionMutateCredentials:
 			key := processMetadataTestKey{directoryFD: processTestFirecrackerDirFD, kind: processStatusMetadata}
-			index := fake.metadataIndex[key]
+			index := fake.metadataIndex[key] + roleOffset
 			fake.metadata[key][index] = []byte(testProcessStatus(testAuthorityUID+1, testAuthorityGID, ""))
 		case vmExecSessionMutateNamespace:
 			key := processObjectTestKey{directoryFD: processTestFirecrackerDirFD, object: processMountNamespaceObject}
-			index := fake.processObjectIndex[key]
+			index := fake.processObjectIndex[key] + roleOffset
 			mutatedFD := 801
 			fake.processObjects[key][index] = mutatedFD
 			fake.stats[mutatedFD] = []unix.Stat_t{objectStat(
@@ -358,7 +370,7 @@ func (fixture *vmExecSessionAuthorityFixture) mutateSourceIdentityAfterCapacityP
 			)}
 		case vmExecSessionMutateRoot:
 			key := processObjectTestKey{directoryFD: processTestFirecrackerDirFD, object: processRootObject}
-			index := fake.processObjectIndex[key]
+			index := fake.processObjectIndex[key] + roleOffset
 			mutatedFD := 802
 			fake.processObjects[key][index] = mutatedFD
 			fake.stats[mutatedFD] = []unix.Stat_t{objectStat(
@@ -366,7 +378,7 @@ func (fixture *vmExecSessionAuthorityFixture) mutateSourceIdentityAfterCapacityP
 			)}
 		case vmExecSessionMutateCgroup:
 			key := processMetadataTestKey{directoryFD: processTestFirecrackerDirFD, kind: processCgroupMetadata}
-			index := fake.metadataIndex[key]
+			index := fake.metadataIndex[key] + roleOffset
 			fake.metadata[key][index] = []byte("0::/foreign.slice\n")
 		}
 	}
@@ -730,6 +742,14 @@ func TestVMExecSessionAuthorityBootChangesNeverBecomePositiveAdmission(t *testin
 func TestVMExecSessionAuthorityRejectsFullIdentityMutationAfterCapacityPublication(t *testing.T) {
 	t.Parallel()
 
+	roles := []struct {
+		name       string
+		role       vmExecSessionRole
+		wantEntity string
+	}{
+		{name: "source", role: vmExecSessionSourceRole, wantEntity: vmExecSessionSourceID},
+		{name: "destination", role: vmExecSessionDestinationRole, wantEntity: vmExecSessionDestinationID},
+	}
 	mutations := []struct {
 		name     string
 		mutation vmExecSessionIdentityMutation
@@ -740,22 +760,32 @@ func TestVMExecSessionAuthorityRejectsFullIdentityMutationAfterCapacityPublicati
 		{name: "jail_root", mutation: vmExecSessionMutateRoot},
 		{name: "cgroup", mutation: vmExecSessionMutateCgroup},
 	}
-	for _, test := range mutations {
-		t.Run(test.name, func(t *testing.T) {
-			fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
-			fixture.mutateSourceIdentityAfterCapacityPublication(test.mutation)
-			lease, err := fixture.authority.reserve(
-				t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
-			)
-			if lease != nil {
-				t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
-			}
-			require.Error(t, err)
-			require.NotNil(t, lease)
-			_, admissionErr := lease.admission()
-			require.Error(t, admissionErr)
-			assert.Equal(t, errs.CodeProcessError, errs.AsDomainError(err).Code)
-		})
+	for _, role := range roles {
+		for _, mutation := range mutations {
+			t.Run(role.name+"/"+mutation.name, func(t *testing.T) {
+				fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
+				fixture.mutateIdentityAfterCapacityPublication(role.role, mutation.mutation)
+				lease, err := fixture.authority.reserve(
+					t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
+				)
+				if lease != nil {
+					t.Cleanup(func() { require.NoError(t, lease.Release(context.Background())) })
+				}
+				require.Error(t, err)
+				require.NotNil(t, lease)
+				_, admissionErr := lease.admission()
+				require.Error(t, admissionErr)
+				domainErr := errs.AsDomainError(err)
+				require.NotNil(t, domainErr)
+				assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+				assert.Equal(t, role.wantEntity, domainErr.Entity)
+				require.NoError(t, lease.Release(t.Context()))
+				assert.Equal(t, int32(1), fixture.capacity.recordUnlinkCalls.Load())
+				assert.NoFileExists(t, fixture.capacity.recordPath(
+					vmExecReservationID{value: testVMExecReservationID},
+				))
+			})
+		}
 	}
 }
 
