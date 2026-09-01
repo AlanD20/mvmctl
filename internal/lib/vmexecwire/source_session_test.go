@@ -74,18 +74,51 @@ func TestSourceBootstrapUsesFrozenBoundAndDomainErrors(t *testing.T) {
 }
 
 func TestSourceReadyRejectsMalformedFrames(t *testing.T) {
-	tests := map[string]string{
-		"unknown field":   `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","extra":true}`,
-		"duplicate field": `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","source_session_id":"00112233445566778899aabbccddeeff"}`,
-		"case collision":  `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","Source_Session_ID":"00112233445566778899aabbccddeeff"}`,
+	tests := map[string]struct {
+		body    string
+		wantErr string
+	}{
+		"unknown field": {
+			body:    `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","extra":true}`,
+			wantErr: "unknown JSON field",
+		},
+		"duplicate field": {
+			body:    `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","source_session_id":"00112233445566778899aabbccddeeff"}`,
+			wantErr: "duplicate JSON field",
+		},
+		"case collision": {
+			body:    `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","Source_Session_ID":"00112233445566778899aabbccddeeff"}`,
+			wantErr: "case-colliding JSON field",
+		},
+		"missing field": {
+			body:    `{"schema_version":1}`,
+			wantErr: `missing required field "source_session_id"`,
+		},
+		"wrong field type": {
+			body:    `{"schema_version":1,"source_session_id":42}`,
+			wantErr: "decode VM-exec source-session ready ID",
+		},
+		"wrong schema type": {
+			body:    `{"schema_version":"1","source_session_id":"00112233445566778899aabbccddeeff"}`,
+			wantErr: "decode VM-exec source-session schema version",
+		},
+		"unsupported schema": {
+			body:    `{"schema_version":2,"source_session_id":"00112233445566778899aabbccddeeff"}`,
+			wantErr: "unsupported source-session schema version",
+		},
+		"trailing value": {
+			body:    `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff"}{}`,
+			wantErr: "trailing",
+		},
 	}
-	for name, body := range tests {
+	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			wire := rawSourceFrame(t, SourceSessionMagic, SourceSessionVersion, []byte(body))
+			wire := rawSourceFrame(t, SourceSessionMagic, SourceSessionVersion, []byte(tc.body))
 			_, err := DecodeSourceReady(
 				t.Context(), bytes.NewReader(wire), "00112233445566778899aabbccddeeff",
 			)
 			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantErr)
 		})
 	}
 }

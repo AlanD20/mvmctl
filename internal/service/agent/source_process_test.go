@@ -23,29 +23,41 @@ import (
 )
 
 type fakePinnedProcess struct {
-	mu        sync.Mutex
-	aliveErr  error
-	aliveSeq  []error
-	aliveCall int
-	closed    bool
-	closes    int
+	mu             sync.Mutex
+	aliveErr       error
+	aliveSeq       []error
+	aliveCall      int
+	aliveBarrierAt int
+	aliveReached   chan struct{}
+	aliveRelease   <-chan struct{}
+	aliveOnce      sync.Once
+	closed         bool
+	closes         int
 }
 
 func (pin *fakePinnedProcess) Alive(context.Context) error {
 	pin.mu.Lock()
-	defer pin.mu.Unlock()
 	if pin.closed {
+		pin.mu.Unlock()
 		return errors.New("pin closed")
 	}
+	call := pin.aliveCall + 1
+	pin.aliveCall++
+	aliveErr := pin.aliveErr
 	if len(pin.aliveSeq) > 0 {
-		index := pin.aliveCall
-		pin.aliveCall++
+		index := call - 1
 		if index >= len(pin.aliveSeq) {
 			index = len(pin.aliveSeq) - 1
 		}
-		return pin.aliveSeq[index]
+		aliveErr = pin.aliveSeq[index]
 	}
-	return pin.aliveErr
+	barrier := call == pin.aliveBarrierAt && pin.aliveReached != nil
+	pin.mu.Unlock()
+	if barrier {
+		pin.aliveOnce.Do(func() { close(pin.aliveReached) })
+		<-pin.aliveRelease
+	}
+	return aliveErr
 }
 
 func (pin *fakePinnedProcess) Close() error {
@@ -68,6 +80,8 @@ type fakeSourceProcessEffects struct {
 	credentialErr   error
 	credentialsRead chan struct{}
 	credentialOnce  sync.Once
+	claimArrived    chan struct{}
+	claimRelease    <-chan struct{}
 	pins            map[int]*fakePinnedProcess
 	peerPins        []*fakePinnedProcess
 	identities      map[int][]processIdentity
@@ -105,6 +119,10 @@ func (effects *fakeSourceProcessEffects) PeerCredentials(
 	credentials := effects.credentials
 	if effects.credentialFunc != nil {
 		credentials = effects.credentialFunc(conn)
+	}
+	if effects.claimArrived != nil {
+		effects.claimArrived <- struct{}{}
+		<-effects.claimRelease
 	}
 	return credentials, pin, nil
 }
@@ -420,22 +438,36 @@ func TestSourceClaimRejectsUIDGIDAndMultipleMatches(t *testing.T) {
 }
 
 func TestLocalPeerMayArriveBeforeSourceCommandPublication(t *testing.T) {
-	credentialsRead := make(chan struct{})
 	effects := &fakeSourceProcessEffects{
-		credentials:     peerCredentials{PID: 300, UID: 1001, GID: 1002},
-		credentialsRead: credentialsRead,
+		credentials: peerCredentials{PID: 300, UID: 1001, GID: 1002},
 		identities: map[int][]processIdentity{
 			300: {{PID: 300, ParentPID: 100, StartTime: 30}},
 			100: {{PID: 100, ParentPID: 1, StartTime: 10}},
+			50:  {{PID: 50, ParentPID: 1, StartTime: 5}},
 		},
 	}
+	unpublishedSnapshotReached := make(chan struct{})
+	releaseSnapshot := make(chan struct{})
+	var releaseSnapshotOnce sync.Once
+	releasePublicationBarrier := func() { releaseSnapshotOnce.Do(func() { close(releaseSnapshot) }) }
+	t.Cleanup(releasePublicationBarrier)
+	decoy := testPublishedBinding(
+		"ffeeddccbbaa99887766554433221100",
+		sourceAccount{UID: 1001, GID: 1002},
+		processIdentity{PID: 50, ParentPID: 1, StartTime: 5},
+		&fakePinnedProcess{
+			aliveBarrierAt: 3,
+			aliveReached:   unpublishedSnapshotReached,
+			aliveRelease:   releaseSnapshot,
+		},
+	)
 	binding := &sourceBinding{
 		sessionID: "00112233445566778899aabbccddeeff",
 		transport: newSourceTransport(&discardConn{}),
 		account:   sourceAccount{UID: 1001, GID: 1002},
 		published: make(chan struct{}),
 	}
-	agent := testSourceAgent(effects, binding)
+	agent := testSourceAgent(effects, decoy, binding)
 	local, peer := net.Pipe()
 	defer local.Close()
 	defer peer.Close()
@@ -445,7 +477,11 @@ func TestLocalPeerMayArriveBeforeSourceCommandPublication(t *testing.T) {
 		_, err := agent.claimSourceForPeer(context.Background(), local)
 		claimed <- err
 	}()
-	<-credentialsRead
+	select {
+	case <-unpublishedSnapshotReached:
+	case <-time.After(time.Second):
+		t.Fatal("claimant did not inspect an unpublished source snapshot")
+	}
 	select {
 	case err := <-claimed:
 		t.Fatalf("claim completed before source publication: %v", err)
@@ -457,8 +493,15 @@ func TestLocalPeerMayArriveBeforeSourceCommandPublication(t *testing.T) {
 	close(binding.published)
 	agent.notifySourceChangeLocked()
 	agent.sourceMu.Unlock()
-	assert.NoError(t, <-claimed)
+	releasePublicationBarrier()
+	select {
+	case claimErr := <-claimed:
+		assert.NoError(t, claimErr)
+	case <-time.After(time.Second):
+		t.Fatal("claimant did not resume after source publication")
+	}
 	agent.cleanupSourceBinding(binding)
+	agent.cleanupSourceBinding(decoy)
 }
 
 func TestTransportCleanupInterruptsClaimedPartialRequest(t *testing.T) {
@@ -497,8 +540,15 @@ func TestTransportCleanupInterruptsClaimedPartialRequest(t *testing.T) {
 }
 
 func TestConcurrentSourceClaimsHaveExactlyOneWinnerAndClosePeerPinsOnce(t *testing.T) {
+	claimArrived := make(chan struct{}, 2)
+	claimRelease := make(chan struct{})
+	var releaseClaimsOnce sync.Once
+	releaseClaims := func() { releaseClaimsOnce.Do(func() { close(claimRelease) }) }
+	t.Cleanup(releaseClaims)
 	effects := &fakeSourceProcessEffects{
-		credentials: peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		credentials:  peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		claimArrived: claimArrived,
+		claimRelease: claimRelease,
 		identities: map[int][]processIdentity{
 			300: {{PID: 300, ParentPID: 100, StartTime: 30}},
 			100: {{PID: 100, ParentPID: 1, StartTime: 10}},
@@ -518,13 +568,28 @@ func TestConcurrentSourceClaimsHaveExactlyOneWinnerAndClosePeerPinsOnce(t *testi
 	results := make(chan error, 2)
 	go func() { _, err := agent.claimSourceForPeer(t.Context(), first); results <- err }()
 	go func() { _, err := agent.claimSourceForPeer(t.Context(), second); results <- err }()
-	firstErr, secondErr := <-results, <-results
-	winners := 0
-	if firstErr == nil {
-		winners++
+	for range 2 {
+		select {
+		case <-claimArrived:
+		case <-time.After(time.Second):
+			t.Fatal("concurrent source claims did not both reach the admission barrier")
+		}
 	}
-	if secondErr == nil {
-		winners++
+	releaseClaims()
+	claimErrors := make([]error, 0, 2)
+	for range 2 {
+		select {
+		case claimErr := <-results:
+			claimErrors = append(claimErrors, claimErr)
+		case <-time.After(time.Second):
+			t.Fatal("concurrent source claim did not finish")
+		}
+	}
+	winners := 0
+	for _, claimErr := range claimErrors {
+		if claimErr == nil {
+			winners++
+		}
 	}
 	assert.Equal(t, 1, winners)
 	agent.cleanupSourceBinding(binding)
@@ -583,6 +648,43 @@ func TestSourceClaimRejectsStablePeerPIDReuseMismatch(t *testing.T) {
 	_, err := agent.claimSourceForPeer(t.Context(), local)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "changed during admission")
+}
+
+func TestSourceClaimRejectsStableReusedRootPIDMismatchAndCleansPins(t *testing.T) {
+	effects := &fakeSourceProcessEffects{
+		credentials: peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		identities: map[int][]processIdentity{
+			300: {{PID: 300, ParentPID: 100, StartTime: 30}},
+			100: {{PID: 100, ParentPID: 1, StartTime: 11}},
+		},
+	}
+	rootPin := &fakePinnedProcess{}
+	binding := testPublishedBinding(
+		"00112233445566778899aabbccddeeff",
+		sourceAccount{UID: 1001, GID: 1002},
+		processIdentity{PID: 100, ParentPID: 1, StartTime: 10},
+		rootPin,
+	)
+	agent := testSourceAgent(effects, binding)
+	local, peer := net.Pipe()
+	t.Cleanup(func() { _ = local.Close() })
+	t.Cleanup(func() { _ = peer.Close() })
+
+	_, err := agent.claimSourceForPeer(t.Context(), local)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a descendant")
+	agent.cleanupSourceBinding(binding)
+
+	effects.mu.Lock()
+	require.Len(t, effects.peerPins, 1)
+	peerPin := effects.peerPins[0]
+	effects.mu.Unlock()
+	peerPin.mu.Lock()
+	assert.Equal(t, 1, peerPin.closes)
+	peerPin.mu.Unlock()
+	rootPin.mu.Lock()
+	assert.Equal(t, 1, rootPin.closes)
+	rootPin.mu.Unlock()
 }
 
 func TestLocalSourceRelayUsesVMExecWireAndIsBinarySafe(t *testing.T) {
@@ -661,6 +763,10 @@ func TestSharedAgentBindingsAttachInReverseOrderWithoutCrossWire(t *testing.T) {
 	t.Cleanup(func() { _ = secondCLI.Close() })
 	t.Cleanup(func() { _ = firstHost.Close() })
 	t.Cleanup(func() { _ = secondHost.Close() })
+	deadline := time.Now().Add(time.Second)
+	for _, conn := range []net.Conn{firstCLI, secondCLI, firstHost, secondHost} {
+		require.NoError(t, conn.SetDeadline(deadline))
+	}
 	effects := &fakeSourceProcessEffects{
 		credentialFunc: func(conn net.Conn) peerCredentials {
 			if conn == firstLocalAgent {

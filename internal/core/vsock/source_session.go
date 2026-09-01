@@ -154,6 +154,8 @@ func (session *SourceSession) WriteStdout(ctx context.Context, data []byte) erro
 	if err := session.setOperationDeadline(ctx); err != nil {
 		return err
 	}
+	stopContextWatch := session.watchOperationContext(ctx)
+	defer stopContextWatch()
 	return response.WriteStdout(ctx, data)
 }
 
@@ -166,6 +168,8 @@ func (session *SourceSession) WriteStderr(ctx context.Context, data []byte) erro
 	if err := session.setOperationDeadline(ctx); err != nil {
 		return err
 	}
+	stopContextWatch := session.watchOperationContext(ctx)
+	defer stopContextWatch()
 	return response.WriteStderr(ctx, data)
 }
 
@@ -178,7 +182,10 @@ func (session *SourceSession) WriteResult(ctx context.Context, exitCode int, dur
 	if err := session.setOperationDeadline(ctx); err != nil {
 		return errors.Join(err, session.Close())
 	}
-	return errors.Join(response.WriteResult(ctx, exitCode, duration), session.Close())
+	stopContextWatch := session.watchOperationContext(ctx)
+	writeErr := response.WriteResult(ctx, exitCode, duration)
+	stopContextWatch()
+	return errors.Join(writeErr, session.Close())
 }
 
 // WriteError writes the terminal error and closes the physical transport so the peer observes EOF.
@@ -190,7 +197,10 @@ func (session *SourceSession) WriteError(ctx context.Context, message string) er
 	if err := session.setOperationDeadline(ctx); err != nil {
 		return errors.Join(err, session.Close())
 	}
-	return errors.Join(response.WriteError(ctx, message), session.Close())
+	stopContextWatch := session.watchOperationContext(ctx)
+	writeErr := response.WriteError(ctx, message)
+	stopContextWatch()
+	return errors.Join(writeErr, session.Close())
 }
 
 func (session *SourceSession) responseWriter() (*vmexecwire.ResponseWriter, error) {

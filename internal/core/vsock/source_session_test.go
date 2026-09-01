@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -230,6 +231,75 @@ func TestSourceSessionCanceledPartialRequestClosesTransport(t *testing.T) {
 	}
 }
 
+func TestSourceSessionCanceledBlockedWritesCloseTransport(t *testing.T) {
+	tests := map[string]func(context.Context, *SourceSession) error{
+		"stdout": func(ctx context.Context, session *SourceSession) error {
+			return session.WriteStdout(ctx, []byte("blocked"))
+		},
+		"stderr": func(ctx context.Context, session *SourceSession) error {
+			return session.WriteStderr(ctx, []byte("blocked"))
+		},
+		"result": func(ctx context.Context, session *SourceSession) error {
+			return session.WriteResult(ctx, 0, 0)
+		},
+		"error": func(ctx context.Context, session *SourceSession) error {
+			return session.WriteError(ctx, "blocked")
+		},
+	}
+
+	for name, write := range tests {
+		t.Run(name, func(t *testing.T) {
+			hostPipe, agentConn := net.Pipe()
+			hostConn := &controlledSourceConn{Conn: hostPipe, writeStarted: make(chan struct{})}
+			session, err := NewSourceSession(hostConn, sourceSessionTestToken)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = session.Close() })
+			t.Cleanup(func() { _ = agentConn.Close() })
+
+			go func() {
+				bootstrap, decodeErr := vmexecwire.DecodeSourceBootstrap(context.Background(), agentConn)
+				if decodeErr == nil {
+					decodeErr = vmexecwire.EncodeSourceReady(context.Background(), agentConn, vmexecwire.SourceReady{
+						SourceSessionID: bootstrap.SourceSessionID,
+					})
+				}
+				if decodeErr == nil {
+					_ = vmexecwire.EncodeSourceRequest(context.Background(), agentConn, vmexecwire.SourceRequest{
+						RequestID: "00112233445566778899aabbccddeeff", Destination: "target",
+						TargetUser: "alice", Command: "true",
+					})
+				}
+			}()
+			_, err = session.Open(t.Context())
+			require.NoError(t, err)
+			_, err = session.ReadRequest(t.Context())
+			require.NoError(t, err)
+
+			hostConn.observeWrites.Store(true)
+			ctx, cancel := context.WithCancel(context.Background())
+			result := make(chan error, 1)
+			go func() { result <- write(ctx, session) }()
+			select {
+			case <-hostConn.writeStarted:
+			case <-time.After(time.Second):
+				t.Fatal("source write did not reach the blocked transport")
+			}
+			select {
+			case err := <-result:
+				t.Fatalf("source write returned before cancellation: %v", err)
+			default:
+			}
+			cancel()
+			select {
+			case writeErr := <-result:
+				require.Error(t, writeErr)
+			case <-time.After(time.Second):
+				t.Fatal("blocked source write outlived cancellation")
+			}
+		})
+	}
+}
+
 func TestSourceSessionTerminalWriteFailureClosesOnceAndRepeatsCloseError(t *testing.T) {
 	hostPipe, agentConn := net.Pipe()
 	closeErr := errors.New("close failed")
@@ -268,14 +338,20 @@ var errControlledWrite = errors.New("controlled write failure")
 
 type controlledSourceConn struct {
 	net.Conn
-	failWrites atomic.Bool
-	closeCalls atomic.Int32
-	closeErr   error
+	failWrites    atomic.Bool
+	observeWrites atomic.Bool
+	writeOnce     sync.Once
+	writeStarted  chan struct{}
+	closeCalls    atomic.Int32
+	closeErr      error
 }
 
 func (conn *controlledSourceConn) Write(value []byte) (int, error) {
 	if conn.failWrites.Load() {
 		return 0, errControlledWrite
+	}
+	if conn.observeWrites.Load() {
+		conn.writeOnce.Do(func() { close(conn.writeStarted) })
 	}
 	return conn.Conn.Write(value)
 }

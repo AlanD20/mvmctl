@@ -29,14 +29,19 @@ func TestAdoptPIDFDRequiresCLOEXECAndMatchingPID(t *testing.T) {
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			closed := 0
 			effects := linuxSourceProcessEffects{
 				fdFlags: func(int) (int, error) { return tc.flags, nil },
 				fdInfo:  func(context.Context, int) ([]byte, error) { return tc.fdinfo, nil },
-				closeFD: func(int) error { return nil },
+				closeFD: func(int) error {
+					closed++
+					return nil
+				},
 			}
 			_, err := effects.AdoptProcess(t.Context(), 42, 9)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tc.wantErr)
+			assert.Equal(t, 1, closed)
 		})
 	}
 }
