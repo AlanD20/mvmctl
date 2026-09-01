@@ -663,8 +663,9 @@ pending
 
 **Owner:** engineer
 **Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, and the
-isolated process-bound source-session foundation are implemented; API-owned relay, runtime policy/root capacity
-authority, and Python qualification remain pending, so VM-to-VM execution remains fail-closed
+isolated process-bound source-session and private root-owned capacity foundations are implemented; API-owned relay,
+exact active-pair/source-FD admission, production capacity composition, runtime policy, and Python
+qualification remain pending, so VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -704,7 +705,8 @@ authority, and Python qualification remain pending, so VM-to-VM execution remain
 - [ ] Compose that destination capability only behind the authenticated source session and API-owned relay. Reject
   VM-to-host execution, missing/reverse policy, foreign owner, stale target, and every identity mismatch before the
   host constructs the destination request.
-- [ ] Enforce the same wire limits at the relay, add Task 15 root-owned concurrent capacity, and add command-redacted
+- [ ] Enforce the same wire limits at the relay, compose Task 15's implemented private capacity substrate only after an
+  exact active-pair admission and production ceiling are defined, and add command-redacted
   source/destination/timing/result audit records.
 - [ ] Python T2 proves same-network, cross-network, and no-IP-network exec behavior plus all denials and limits.
 
@@ -838,6 +840,8 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 ### Task 15: Complete reconciliation, admission, and lifecycle parity
 
 **Owner:** engineer
+**Status:** Private inert VM-exec capacity reservation foundation implemented; production ceiling/pair composition and
+all reconciliation and lifecycle work remain pending
 **Dependencies:** Tasks 8-14
 
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,
@@ -856,7 +860,19 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
   authority. Resume `cleaning` idempotently.
 - [ ] Benchmark 1,000 authority records in L1 and enforce the reviewed regression budget without one goroutine, process,
   or control connection per VM.
-- [ ] Add root-owned global capacity reservation so separate CLI processes and users cannot over-admit the host.
+- [x] Add the private inert root-owned global VM-exec capacity reservation foundation. Store strict schema-1 records at
+  `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` under exact `root:root` mode-`0700` managed directories
+  with one-link exact `root:root` mode-`0600` records. Bind non-root owner, exact source/destination VM IDs and launch
+  generations, host boot ID, and `CLOCK_BOOTTIME` creation/expiration. Hold the never-unlinked
+  `/run/mvmctl/authority/capacity.lock` across the complete stale-prune/read/check/no-replace-rename transaction so
+  separate processes and users serialize globally. Fail closed on corrupt or ambiguous state, preserve exact
+  creation/deletion/pruning/durability/cleanup evidence, set the relay-stop time to
+  `vmexecwire.MaxExecutionDuration`, and retain a separate four-second terminal/cleanup grace. This foundation is
+  private and has no production caller.
+- [ ] Select an explicit positive production ceiling and compose the capacity authority only after root admits the exact
+  owner, source and destination VM identities, both active launch generations, and the authority-owned source
+  descriptor. Reserve before relay effects, enforce the fixed relay-stop deadline, release within the separate grace,
+  and never substitute SQLite status, a guest-supplied ID, a socket path, or a process-local semaphore.
 - [ ] Make create/start/stop/remove/reboot/snapshot/restore/volume paths transactionally abortable and retryable.
 - [ ] Build one complete typed relaunch state for create/start/reboot/snapshot restore. Preserve a configured vsock CID,
   let root derive the fixed runtime UDS leaf, retain agent port/token only in the normal process, distinguish valid

@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
-> non-root execution side, its isolated process-bound source-session foundation, and clean-break removal of the
-> VM-wide remote-exec trust flag described below are implemented.
+> non-root execution side, its isolated process-bound source-session foundation, the private inert root-owned VM-exec
+> capacity authority, and clean-break removal of the VM-wide remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
 > marker-only sudo policy, schema-3 Jailer launch composition and final live topology/cgroup verification and
@@ -115,10 +115,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   migration inspection or migration application with an explicit clean-install-required validation error and remain
   unchanged; no legacy bit is converted into a directional exec policy.
 - Public execution-policy CRUD, the wire, source session, and destination side still do not activate VM-to-VM
-  execution. The API-owned relay listener, root active-runtime/source and Task 15 global-capacity authority, runtime
-  policy resolution/enforcement and redacted audit, and positive Python L2 qualification remain pending. The
+  execution. The API-owned relay listener, root active-runtime/source-FD and exact active-pair admission,
+  production capacity composition, runtime policy resolution/enforcement and redacted audit, and positive Python L2
+  qualification remain pending. The
   implemented cancellation boundaries are process-group guarantees, not per-command cgroup authority, and do not
   claim cleanup of descendants that deliberately leave their group.
+
+#### Private VM-exec capacity authority substrate
+
+- Added strict schema-1 root-owned capacity reservations at
+  `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json`. Each one-link mode-`0600` record beneath exact mode-`0700`
+  managed directories binds a root-generated reservation ID, non-root owner, exact source/destination VM IDs and launch
+  generations, host boot ID, and `CLOCK_BOOTTIME` creation/expiration.
+- Added the never-unlinked `/run/mvmctl/authority/capacity.lock`. It serializes the complete scan, stale cleanup,
+  ceiling check, and no-replace publication across CLI processes and users. Corrupt or ambiguous state fails closed
+  before canonical pruning; only admitted crash temporaries, prior-boot reservations, and expired reservations are
+  removed and directory-synced.
+- Publication uses exclusive temporary creation, stable metadata, file sync, checked close, no-replace rename, and
+  parent sync. Creation, deletion, partial pruning, durability uncertainty, and cleanup-required results preserve
+  explicit error evidence, including a releasable lease after post-rename creation failure.
+- The future relay-stop deadline is reservation creation plus the fixed five-minute
+  `vmexecwire.MaxExecutionDuration`; setup and suspend consume that budget. Record expiration adds a separate four-second
+  terminal/cleanup grace.
+- This foundation is private and inert. No production ceiling is selected or wired, and there is no exact active
+  two-VM runtime/source-FD admission, relay/API consumer, runtime policy enforcement, redacted audit, or
+  positive VM-to-VM path.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
@@ -638,9 +659,10 @@ The following items are release blockers and are intentionally not described abo
   network, and firewall resource. Add complete interrupted-`launching` recovery and closed `running`, `stopped`,
   `crashed`, and `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and
   per-VM lock.
-- Transfer the Jailer VM-lock lease into the implemented root-owned managed-network registration foundation, add
-  persistent per-VM topology and global capacity authority, and activate neither through user SQLite state. User state
-  must not authorize host-global namespace, link, firewall, process, mount, cgroup, or admission decisions.
+- Transfer the Jailer VM-lock lease into the implemented root-owned managed-network registration foundation and add
+  persistent per-VM topology. Compose the separate implemented VM-exec capacity substrate only after exact active-pair
+  admission and a production ceiling are defined. Activate neither topology nor capacity through user SQLite state;
+  user state must not authorize host-global namespace, link, firewall, process, mount, cgroup, or admission decisions.
 - Carry the managed-cache locator and base launch selection through the privileged protocol, bind the cache identity in
   the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
   private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
@@ -676,8 +698,9 @@ The following items are release blockers and are intentionally not described abo
   a kernel application.
 - Complete typed traffic API/CLI and nftables application plus the API-owned vsock relay over the implemented isolated
   source-session, typed policy, and destination-agent foundations. Directional exec-policy CRUD is public but does not
-  activate the relay. Add exact root active-source admission, runtime policy enforcement/redacted audit, Task 15
-  root-owned concurrent capacity, and positive L2 qualification before claiming the destination path end to end. The
+  activate the relay. Add exact root active source-FD and two-VM launch-generation admission, select and wire
+  the production capacity ceiling, consume the implemented reservation authority, enforce runtime policy/redacted
+  audit, and complete positive L2 qualification before claiming the destination path end to end. The
   legacy guest relay, generic host-frame callback, shared guest connection, and VM-wide remote-exec field/flags are
   removed; the routed `ServiceAccessPolicy` and other transitional surfaces still require atomic removal.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the

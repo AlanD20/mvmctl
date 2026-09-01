@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-01 (legacy remote-exec trust-flag removal)
+**Last Updated:** 2026-09-01 (private VM-exec capacity authority substrate)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -361,9 +361,9 @@ This slice also removes the generic `OnHostFrame`, shared `activeConn`, legacy `
 a strict source request, preserves binary output, requires terminal plus physical EOF, and redacts local failures.
 
 The source and destination foundations remain dormant for positive VM-to-VM use. An API-owned relay listener, root
-active-runtime/source admission, Task 15 global capacity authority, runtime policy resolution/enforcement, redacted
-audit, and positive Python L2 qualification remain pending. No production path opens a `SourceSession` or constructs
-an authorized destination request, so VM-to-VM execution is still unavailable.
+active-runtime/source-FD admission, exact active source/destination pair composition, runtime policy
+resolution/enforcement, redacted audit, and positive Python L2 qualification remain pending. No production path opens
+a `SourceSession` or constructs an authorized destination request, so VM-to-VM execution is still unavailable.
 
 The sixth slice removes the VM-wide trust flag without attempting compatibility. Fresh databases end at schema version
 6 with no `remote_exec` column. The VM model, configuration default, create input/result, repository persistence, CLI
@@ -371,6 +371,28 @@ flags, and environment-spec examples no longer expose it. Before either pending-
 application, schema-version 3, 4, or 5 databases that still contain the removed column fail with an explicit
 clean-install-required validation error and remain unchanged. The guard treats column presence as legacy state even
 when every stored bit is false; no value is converted into a directional policy.
+
+The seventh slice implements Task 15's private capacity substrate without activating the relay. Root stores strict
+schema-1 reservations at `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` beneath exact `root:root` mode-`0700`
+managed directories; each one-link record is exact `root:root` mode `0600`. A record binds its root-generated identity,
+non-root owner UID, exact source and destination VM IDs plus launch generations, current host boot ID, and exact
+creation/expiration times from `CLOCK_BOOTTIME`. The never-unlinked global
+`/run/mvmctl/authority/capacity.lock` serializes the complete scan, stale cleanup, limit check, and no-replace rename
+across users and processes.
+
+The strict 4-KiB codec and descriptor-relative store reject missing, unknown, duplicate, case-colliding, nested,
+trailing, unsafe, corrupt, and ambiguous state. A complete scan occurs before canonical pruning. Only admitted crashed
+temporary files, prior-boot reservations, and reservations whose expiration is at or before the current boottime are
+removed; partial cleanup is directory-synced without cancellation. Atomic creation uses exclusive temporary state,
+stable metadata, file sync, checked close, no-replace rename, and parent sync. Creation, deletion, pruning,
+`durability_uncertain`, and `cleanup_required` evidence survives post-effect and cleanup failures, and a post-rename
+creation failure still returns a releasable lease.
+
+Reservation creation fixes the future relay-stop time at creation plus `vmexecwire.MaxExecutionDuration`, so setup and
+suspend consume the same five-minute `CLOCK_BOOTTIME` budget. Expiration adds a separate four-second grace for the
+protocol's forced-process cleanup and terminal-frame delivery bounds. This foundation has no selected production
+ceiling, constructor call, privileged action, active two-VM runtime admission, source-FD authority, relay/API
+composition, policy enforcement, or audit consumer.
 
 ### Layer placement
 
@@ -512,8 +534,14 @@ partial bootstrap, cancellation of blocked reads/writes, terminal close/EOF, con
 local admission/read time, host disconnect and shutdown cleanup, root/non-root outer accounts, exact AF_UNIX
 peer/pidfd checks, PID-reuse and zombie rejection, stable bounded process ancestry, one claim, process-group
 cancellation, binary CLI output, and redacted failures. This does not qualify API/root source-VM admission, relay policy
-enforcement/audit, root-owned capacity, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live
+enforcement/audit, capacity composition, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live
 VM-to-VM path.
+
+Capacity L1 covers the strict record/codec/store, exact root-owned layout, global lock serialization across independent
+authority instances, cross-owner ceiling enforcement, collision handling, stale-boot/expiration pruning, corrupt-state
+refusal, atomic publication and durability evidence, owner-bound idempotent release, and close-once cleanup. It does not
+select a production ceiling, admit an active source/destination runtime pair, authorize a source FD, or qualify
+a relay.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

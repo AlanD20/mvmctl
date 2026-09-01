@@ -487,13 +487,28 @@ transports, and agent shutdown releases all pending/bound sessions and pins. The
 `mvm-agent remote --user <non-root> <destination> -- <command>`; it preserves binary output and exposes only generic
 local errors.
 
-These components still do not form a positive VM-to-VM path. No API-owned relay listener opens the admitted source
-connection, reads its request, resolves/enforces the exact exec policy, constructs a destination request, allocates
-Task 15 root active-runtime/concurrent-capacity authority, or writes a command-redacted audit record. The legacy
-VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API, environment
-specs, results, and repository persistence; it has no compatibility path into exec policies. Positive Python L2
-qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status, guest-supplied source
-ID, socket path, or process-local semaphore may substitute for root runtime authority.
+The private root-owned VM-exec capacity substrate is also implemented but inert. Strict schema-1 records live at
+`/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json`; they bind the non-root owner, exact source and destination
+VM IDs and launch generations, host boot ID, and creation/expiration times from `CLOCK_BOOTTIME`. The managed
+directories are exact `root:root` mode `0700`, records are one-link exact `root:root` mode `0600`, and the never-unlinked
+global lock is `/run/mvmctl/authority/capacity.lock`. Holding that lock serializes the complete cross-process,
+cross-user scan/prune, ceiling check, and no-replace publication. Corrupt or ambiguous state fails closed before
+canonical pruning; safe crashed temporary files, prior-boot records, and expired records are removed with directory
+sync. Creation, deletion, pruning, durability uncertainty, and cleanup-required outcomes remain explicit error
+evidence.
+
+Each reservation fixes its relay-stop deadline at creation plus `vmexecwire.MaxExecutionDuration`; setup and suspend
+consume that `CLOCK_BOOTTIME` budget. Its record expires only after a separate four-second terminal/cleanup grace. No
+production maximum has been selected or wired, and no caller admits an exact active two-VM runtime pair or consumes a
+reservation.
+
+These components still do not form a positive VM-to-VM path. No API-owned relay listener opens a root-authority-admitted
+source FD, reads its request, enforces the exact runtime exec policy, constructs a destination request, admits
+the exact owner/source/destination launch generations, consumes the capacity substrate, or writes a command-redacted
+audit record. The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create
+CLI/API, environment specs, results, and repository persistence; it has no compatibility path into exec policies.
+Positive Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,
+guest-supplied source ID, socket path, or process-local semaphore may substitute for root runtime authority.
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)
 

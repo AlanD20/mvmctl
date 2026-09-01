@@ -1,4 +1,4 @@
-# VM-to-VM Exec: Isolated Source and Destination Foundations
+# VM-to-VM Exec: Isolated Source, Destination, and Capacity Foundations
 
 ## Current status
 
@@ -9,14 +9,15 @@ foundations are implemented and covered by Go L0/L1 tests:
 - the closed, bounded `MVMEXEC1` request and response protocol;
 - authenticated non-root execution in the destination guest;
 - a dedicated, one-request source session between the host and source guest;
-- a process-bound local source broker and `mvm-agent remote` client in the source guest; and
-- strict separation between ordinary host-to-VM exec/copy and the dormant VM-to-VM path.
+- a process-bound local source broker and `mvm-agent remote` client in the source guest;
+- strict separation between ordinary host-to-VM exec/copy and the dormant VM-to-VM path; and
+- a private inert root-owned global capacity reservation substrate.
 
-There is no production API-owned relay listener, root active-runtime/capacity admission, runtime exec-policy
-enforcement, or audit path yet, and no positive Python L2 system test has qualified the end-to-end behavior. The
-legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results, persistence,
-and environment specifications; it is not converted into a directional policy. No current host path constructs an
-authorized destination request.
+There is no production API-owned relay listener, exact active two-VM runtime/source-FD admission, runtime
+exec-policy enforcement, capacity composition, or audit path yet, and no positive Python L2 system test has qualified
+the end-to-end behavior. The legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create
+path, results, persistence, and environment specifications; it is not converted into a directional policy. No current
+host path constructs an authorized destination request.
 
 ## Required user flow
 
@@ -137,6 +138,26 @@ execution effect, resolves an exact non-root account to numeric credentials and 
 `/bin/sh -c` with fixed environment and process-group cancellation. Ordinary host exec/copy prefixes remain on their
 existing protocol.
 
+### 6. Root-owned capacity substrate
+
+The private `internal/service/jailer` capacity authority stores strict schema-1 reservations at
+`/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json`. Each one-link record binds its root-generated reservation ID,
+the non-root owner UID, exact source and destination VM IDs plus launch generations, current host boot ID, and exact
+creation/expiration times from `CLOCK_BOOTTIME`. Managed directories are exact `root:root` mode `0700`; records are
+exact `root:root` mode `0600` with a 4-KiB bound.
+
+The never-unlinked `/run/mvmctl/authority/capacity.lock` makes scan, stale cleanup, ceiling comparison, and no-replace
+publication one serialized transaction across CLI processes and users. The store fails closed on any unknown,
+ambiguous, unsafe, or corrupt entry before pruning canonical records. It admits and removes only safe crashed temporary
+files, prior-boot records, and expired records, then syncs the directory. Exclusive temporary creation, stable metadata,
+file sync, checked close, no-replace rename, parent sync, and checked reverse cleanup preserve explicit
+`record_created`, `record_deleted`, `records_pruned`, `durability_uncertain`, and `cleanup_required` evidence.
+
+The future relay must stop at the reservation's creation boottime plus `vmexecwire.MaxExecutionDuration`; setup and
+suspend consume that fixed budget. The record expires after a separate four-second grace for forced-process cleanup and
+terminal delivery. No production maximum is selected, no production constructor consumes the authority, and the
+substrate does not itself admit an active source/destination pair or authorize a source FD.
+
 ## Wire contracts and limits
 
 | Boundary | Contract |
@@ -160,11 +181,13 @@ values. A wire or runtime limit is enforced independently at each boundary that 
 The positive path must not be enabled until all of these release blockers are complete:
 
 1. `pkg/api` owns the relay because it is the only layer allowed to coordinate VM, vsock, policy, and runtime domains.
-2. Root authority admits the exact active source instance/vsock identity; SQLite status, a guest-provided source ID,
-   the socket path, and process-local semaphores are not authority.
+2. Root authority admits the exact active source instance/vsock identity and supplies the authority-owned source FD;
+   SQLite status, a guest-provided source ID, the socket path, and process-local semaphores are not authority.
 3. Runtime authorization enforces owner, exact directional source/destination VM identity, and exact non-root target
    user before the destination is contacted.
-4. Task 15 supplies root-owned global concurrent-capacity reservation across users and CLI processes.
+4. Production composition selects an explicit positive global ceiling, admits the exact owner/source/destination
+   launch generations, reserves capacity before relay effects, enforces the fixed relay-stop deadline, and releases
+   the reservation with its terminal/cleanup evidence.
 5. The relay enforces the same frame, command, output, duration, cancellation, and EOF limits and records a
    command-redacted source/destination/user/timing/result audit event.
 6. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,

@@ -87,7 +87,17 @@ continue without silently deleting it.
   correlation, not authority, and no token enters the command's environment, arguments, filesystem, or local request.
   Admission, local request read, command/process ancestry, output, duration, cancellation, disconnect, and shutdown
   cleanup are bounded. The outer source command may be root or non-root; the destination target remains non-root. This
-  is not an API relay, root source-VM admission, runtime policy/audit/capacity path, or per-command cgroup guarantee.
+  is not an API relay, root source-VM admission, runtime policy/audit path, capacity consumer, or per-command cgroup
+  guarantee.
+- Private inert Task 15 VM-exec capacity authority with strict schema-1 root-owned reservations at
+  `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` and a never-unlinked global
+  `/run/mvmctl/authority/capacity.lock`. Exact mode-`0700` managed directories and one-link mode-`0600` records bind the
+  non-root owner, exact source/destination VM IDs and launch generations, host boot ID, and `CLOCK_BOOTTIME` lifecycle.
+  The lock serializes cross-process/cross-user scan, stale cleanup, ceiling check, and no-replace publication. Corrupt
+  or ambiguous state fails closed; creation, deletion, pruning, durability uncertainty, and cleanup failures preserve
+  explicit evidence. The future relay-stop deadline is creation plus `vmexecwire.MaxExecutionDuration`, while record
+  expiration adds a separate four-second terminal/cleanup grace. No production ceiling or active-pair/relay/API
+  composition exists yet.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -166,10 +176,11 @@ topology, public `mvm run jailer` /
 | VM ownership/lifecycle records | `/var/lib/mvmctl/instances/<uid>` | Root-owned persistent |
 | Managed-network owner/bridge identity records; future VM topology | `/var/lib/mvmctl/networks/<uid>` | Root-owned persistent; current schema 1 is not VM-topology authority |
 | Firewall generation record | `/var/lib/mvmctl/firewall/generation.json` | Root-owned persistent; exact committed/applying kernel authority |
-| Global capacity allocations | `/var/lib/mvmctl/allocations` | Root-owned persistent |
+| VM-exec capacity reservations | `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` | Root-owned persistent schema 1; private and inert |
 | Locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700` ephemeral; no persistent mount-namespace handles |
 | LoopMount locks | Per-UID authority `loopmount/` | Root-owned `0600`; exclusive; never unlinked during the boot |
 | Global firewall lock | `/run/mvmctl/authority/firewall.lock` | Root-owned `0600`, ephemeral, and never unlinked |
+| Global VM-exec capacity lock | `/run/mvmctl/authority/capacity.lock` | Root-owned `0600`, ephemeral, and never unlinked |
 | VM sockets and PID mirrors | `/run/mvmctl/runtime/<uid>/<vm-id>` | Root-controlled parent, caller-owned `0700` VM directory; ephemeral and non-authoritative |
 | Jailer chroots | `/var/lib/mvmctl/jailer` | Root-owned lifecycle state |
 | Cgroups | `/sys/fs/cgroup/mvmctl/<vm-id>` | Kernel runtime state |
@@ -746,8 +757,7 @@ only exact retained identities through explicitly namespace-bound rtnetlink. TAP
 uses fixed `/dev/net/tun` with `TUNSETIFF`/`TUNSETOWNER` and no group, and reverifies the managed alias before final
 persistence. The complete private effect remains uncomposed: neither `newService` nor `newTopologyEffect` has a
 production caller. VM-lock transfer, route/address and verified link-up stages, firewall application, durable per-VM
-topology lifecycle, global capacity authority, production construction, Jailer handoff, public cutover, and live
-qualification remain pending.
+topology lifecycle, production construction, Jailer handoff, public cutover, and live qualification remain pending.
 
 The private root-side compiler in `internal/service/firewall/` pins `github.com/google/nftables v0.3.0` and receives
 only mvmctl-owned typed resolved intent. It builds fixed bridge and inet tables/chains. Raw-priority bridge prerouting
@@ -810,10 +820,11 @@ The public policy families are:
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
-non-root process side, and isolated process-bound source session are implemented. The API-owned relay listener, runtime
-policy resolution/enforcement/audit, Task 15 root active-session/capacity authority, Python system qualification, and
-the traffic family's replacement public surface remain pending. No production host path opens a source session or
-constructs an authorized destination request, so VM-to-VM execution is unavailable.
+non-root process side, isolated process-bound source session, and private Task 15 root-owned capacity substrate are
+implemented. The API-owned relay listener, exact active two-VM/source-FD admission, selected production
+capacity ceiling and reservation composition, runtime policy resolution/enforcement/audit, Python system qualification,
+and the traffic family's replacement public surface remain pending. No production host path opens a source session,
+consumes a capacity reservation, or constructs an authorized destination request, so VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 
