@@ -2,10 +2,11 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-08-31 (architecture-scoped release projection and private network link effects)
+**Last Updated:** 2026-09-01 (retained VM-exec authority-sidecar exception)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
-[ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md)
+[ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
+[ADR-0017: Per-VM Network Namespaces and Typed Connectivity Policies](0017-per-vm-network-namespaces-and-typed-policies.md)
 
 ## Context
 
@@ -150,6 +151,39 @@ observed; copying a complete-looking prefix into an in-memory reader cannot fabr
 client decodes an EOF-qualified response with a non-cancelled context and lets either a valid success or valid remote
 `DomainError` win over upload `EPIPE`, non-zero exit, or later reap diagnostics. Without one valid envelope, a pre-start
 failure reports `process_started: false, outcome_unknown: false`; every post-start failure reports both values as true.
+
+### Retained VM-exec authority-sidecar exception
+
+The accepted but not yet implemented `jailer-vm-exec-session` action is the sole leased-lifetime exception to the
+ordinary request/response rule above. It still uses the exact system binary, marker, action switch, sudo invocation,
+and fd-0 AF_UNIX control socket. It handles one relay lease and exits; it is not a helper binary, daemon, generic
+privileged channel, or second protocol listener. File descriptor 0 remains control-only. No `ExtraFiles`, `sudo -C`,
+sudoers extension, environment input, caller path, raw command, or generic operation is permitted.
+
+The normal `pkg/api` process opens and authenticates the existing source and destination Firecracker connections. Only
+after it has read the strict source request, resolved the exact destination, and allowed the directional policy does it
+start this action. The initial closed request names the exact source/destination VM IDs and attaches exactly one source
+connection duplicate with `SCM_RIGHTS` on the first request byte. A closed second phase attaches exactly one destination
+connection duplicate after root pair admission. Every ancillary receive uses `MSG_CMSG_CLOEXEC`, rejects truncation and
+missing, extra, unknown, duplicate, or late control messages, and proves one connected non-listening AF_UNIX stream.
+The action accepts no socket path, agent token, target user, command, policy material, or response payload.
+
+Root binds each live connection to its exact retained Firecracker record with `SO_PEERCRED`, `SO_PEERPIDFD`, PID/start
+identity, complete active-process verification, and final liveness. Socket metadata proves the Firecracker peer, not
+the selected guest port; the normal process's independent token/bootstrap handshake proves the agent endpoint. Root
+reserves the exact active pair at the compiled host-global ceiling of eight, retains the pair/capacity lease and both
+connection duplicates, and returns ready only after both FD proofs pass.
+
+The action-specific, closed, versioned session frames are bounded independently of ordinary `MVMRES01`; they cannot be
+selected by another action. Explicit release, control EOF, caller crash, setup failure, or the absolute
+`CLOCK_BOOTTIME` relay-stop deadline shuts down the shared connection descriptions and performs cancellation-detached
+reverse cleanup before the child exits. The capacity record's four-second terminal/cleanup grace never extends
+execution. A malformed or missing final outcome after process start remains outcome-unknown, and no retained authority
+is inferred from process exit alone.
+
+This exception preserves the ordinary transport unchanged for every other action. Its exact FD grammar, peer-binding
+authority, lifecycle, and client/server protocol must be implemented and tested before the central dispatcher
+registers `jailer-vm-exec-session`.
 
 Receiver integration landed in two audit-friendly increments before any release action is registered. The first
 increment admits only fd 0, sets and verifies close-on-exec, validates blocking `AF_UNIX`/`SOCK_STREAM` and
