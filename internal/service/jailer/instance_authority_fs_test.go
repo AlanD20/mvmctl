@@ -31,6 +31,8 @@ type testInstanceAuthorityTree struct {
 	lockReleaseErrDescription string
 	onAcquire                 func(context.Context, string)
 	onRelease                 func(context.Context, string) error
+	onVMAcquire               func(context.Context, authorityfs.VMKey)
+	onVMRelease               func(context.Context, authorityfs.VMKey) error
 }
 
 type testInstanceJailerAuthority struct {
@@ -228,6 +230,12 @@ func (uid *testInstanceJailerUID) acquireVM(
 	if err := uid.tree.waitAcquire(ctx, gate, "vm"); err != nil {
 		return nil, err
 	}
+	uid.tree.mu.Lock()
+	onVMAcquire := uid.tree.onVMAcquire
+	uid.tree.mu.Unlock()
+	if onVMAcquire != nil {
+		onVMAcquire(ctx, key)
+	}
 	return &testInstanceVMAuthority{tree: uid.tree, gate: gate, ownerUID: uid.uid, key: key}, nil
 }
 
@@ -359,9 +367,13 @@ func (authority *testInstanceVMAuthority) Release(ctx context.Context) error {
 		authority.tree.lockReleaseErr = nil
 	}
 	onRelease := authority.tree.onRelease
+	onVMRelease := authority.tree.onVMRelease
 	authority.tree.mu.Unlock()
 	if onRelease != nil {
 		releaseErr = errors.Join(releaseErr, onRelease(ctx, "vm"))
+	}
+	if onVMRelease != nil {
+		releaseErr = errors.Join(releaseErr, onVMRelease(ctx, authority.key))
 	}
 	if releaseErr != nil {
 		authority.releaseErr = instanceLockError("release authority lock", releaseErr)
