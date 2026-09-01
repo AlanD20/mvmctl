@@ -288,6 +288,7 @@ func TestPrivilegedVMExecSessionRejectsUntrustedOpenReplies(t *testing.T) {
 			sourceDuplicate, closeSourcePeer := requireVMExecSessionSocket(t)
 			t.Cleanup(closeSourcePeer)
 			deps, command := vmExecSessionHelperDeps(test.mode)
+			recovery := installVMExecSessionRecoveryHarness(t, &deps)
 			deadline := 2 * time.Second
 			if !test.immediate {
 				deadline = 100 * time.Millisecond
@@ -312,7 +313,11 @@ func TestPrivilegedVMExecSessionRejectsUntrustedOpenReplies(t *testing.T) {
 			result := awaitVMExecSessionAsync(
 				t,
 				resultReady,
-				cancel,
+				func() {
+					recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), time.Second)
+					defer recoveryCancel()
+					assert.NoError(t, recovery.force(recoveryCtx))
+				},
 				"OpenSource did not return after cancellation recovery",
 			)
 
@@ -340,7 +345,7 @@ func TestPrivilegedVMExecSessionRejectsUntrustedTerminalReplies(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			session, _, command := requireReadyVMExecSession(t, test.mode)
+			session, command, recovery := requireRecoverableReadyVMExecSession(t, test.mode)
 			deadline := 2 * time.Second
 			if !test.immediate {
 				deadline = 100 * time.Millisecond
@@ -359,7 +364,9 @@ func TestPrivilegedVMExecSessionRejectsUntrustedTerminalReplies(t *testing.T) {
 			result := awaitVMExecSessionAsync(
 				t,
 				resultReady,
-				cancel,
+				func() {
+					assert.NoError(t, recoverVMExecSessionRelease(session, recovery))
+				},
 				"Release did not return after cancellation recovery",
 			)
 
@@ -821,6 +828,160 @@ func vmExecSessionHelperDeps(mode string) (privilegedVMExecSessionDeps, **exec.C
 		return command
 	}
 	return deps, &command
+}
+
+type vmExecSessionRecoveryHarness struct {
+	recoveryControl atomic.Pointer[os.File]
+	command         atomic.Pointer[exec.Cmd]
+	realWait        func(context.Context, *exec.Cmd) error
+	waitOnce        sync.Once
+	waitDone        chan struct{}
+	waitErr         error
+}
+
+func installVMExecSessionRecoveryHarness(
+	t *testing.T,
+	deps *privilegedVMExecSessionDeps,
+) *vmExecSessionRecoveryHarness {
+	t.Helper()
+	harness := &vmExecSessionRecoveryHarness{realWait: deps.wait, waitDone: make(chan struct{})}
+	realSocketPair := deps.socketPair
+	deps.socketPair = func(ctx context.Context) (*os.File, *os.File, error) {
+		parent, child, err := realSocketPair(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		recoveryControl, duplicateErr := duplicatePrivilegedVMExecSessionControl(ctx, parent)
+		if duplicateErr != nil {
+			return nil, nil, errors.Join(duplicateErr, parent.Close(), child.Close())
+		}
+		harness.recoveryControl.Store(recoveryControl)
+		return parent, child, nil
+	}
+	realStart := deps.start
+	deps.start = func(ctx context.Context, command *exec.Cmd) error {
+		if err := realStart(ctx, command); err != nil {
+			return err
+		}
+		harness.command.Store(command)
+		return nil
+	}
+	deps.wait = harness.wait
+	t.Cleanup(func() {
+		if control := harness.recoveryControl.Swap(nil); control != nil {
+			_ = control.Close()
+		}
+	})
+	return harness
+}
+
+func (harness *vmExecSessionRecoveryHarness) wait(
+	ctx context.Context,
+	command *exec.Cmd,
+) error {
+	harness.startWait(command)
+	select {
+	case <-harness.waitDone:
+		return harness.waitErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (harness *vmExecSessionRecoveryHarness) startWait(command *exec.Cmd) {
+	harness.waitOnce.Do(func() {
+		go func() {
+			defer close(harness.waitDone)
+			if command == nil {
+				harness.waitErr = errors.New("retained VM-exec recovery command was not captured")
+				return
+			}
+			harness.waitErr = harness.realWait(context.Background(), command)
+		}()
+	})
+}
+
+func (harness *vmExecSessionRecoveryHarness) force(ctx context.Context) error {
+	var recoveryErrors []error
+	if control := harness.recoveryControl.Swap(nil); control != nil {
+		if err := unix.Shutdown(int(control.Fd()), unix.SHUT_RDWR); err != nil &&
+			!errors.Is(err, unix.ENOTCONN) && !errors.Is(err, unix.EBADF) {
+			recoveryErrors = append(recoveryErrors, err)
+		}
+		if err := control.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			recoveryErrors = append(recoveryErrors, err)
+		}
+	}
+	command := harness.command.Load()
+	if command == nil || command.Process == nil {
+		return errors.Join(append(recoveryErrors, errors.New("retained VM-exec recovery process was not captured"))...)
+	}
+	if err := command.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		recoveryErrors = append(recoveryErrors, err)
+	}
+	harness.startWait(command)
+	select {
+	case <-harness.waitDone:
+		return errors.Join(recoveryErrors...)
+	case <-ctx.Done():
+		return errors.Join(append(recoveryErrors, ctx.Err())...)
+	}
+}
+
+func recoverVMExecSessionRelease(
+	session *PrivilegedVMExecSession,
+	recovery *vmExecSessionRecoveryHarness,
+) error {
+	cancelCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- session.Cancel(cancelCtx) }()
+	select {
+	case err := <-cancelDone:
+		return err
+	case <-cancelCtx.Done():
+	}
+
+	recoveryCtx, stopRecovery := context.WithTimeout(context.Background(), time.Second)
+	defer stopRecovery()
+	forceErr := recovery.force(recoveryCtx)
+	select {
+	case cancelErr := <-cancelDone:
+		return errors.Join(forceErr, cancelErr)
+	case <-recoveryCtx.Done():
+		return errors.Join(forceErr, errors.New("retained VM-exec Cancel did not join after direct recovery"))
+	}
+}
+
+func requireRecoverableReadyVMExecSession(
+	t *testing.T,
+	mode string,
+) (*PrivilegedVMExecSession, *exec.Cmd, *vmExecSessionRecoveryHarness) {
+	t.Helper()
+	sourceDuplicate, closeSourcePeer := requireVMExecSessionSocket(t)
+	t.Cleanup(closeSourcePeer)
+	deps, command := vmExecSessionHelperDeps(mode)
+	recovery := installVMExecSessionRecoveryHarness(t, &deps)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	t.Cleanup(cancel)
+	session, err := openPrivilegedVMExecSession(
+		ctx,
+		testVMExecOpenSource,
+		sourceDuplicate,
+		deps,
+		productionPrivilegedVMExecSessionPolicy(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Second)
+		defer cleanupCancel()
+		_ = session.Cancel(cleanupCtx)
+	})
+	destinationDuplicate, closeDestinationPeer := requireVMExecSessionSocket(t)
+	t.Cleanup(closeDestinationPeer)
+	require.NoError(t, session.BindDestination(ctx, destinationDuplicate))
+	return session, *command, recovery
 }
 
 func requireReadyVMExecSessionSource(
