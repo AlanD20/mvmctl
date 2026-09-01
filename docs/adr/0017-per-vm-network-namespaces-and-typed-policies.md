@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-01 (private VM-exec capacity authority substrate)
+**Last Updated:** 2026-09-01 (private active VM-exec pair authority)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -330,9 +330,9 @@ Output is streamed through the wire's combined limit, invalid cancellation or wr
 result, and terminal/log messages omit the command, token, and process cause. This is process-group cancellation, not
 per-command cgroup authority; a descendant that deliberately leaves the group is outside this slice's guarantee.
 
-The destination side remains dormant for VM-to-VM use. At this slice, no source session or API-owned relay listener
-constructs its request, and root runtime admission, Task 15 active-session/capacity authority, runtime policy
-resolution/enforcement, and positive Python system qualification remain pending.
+The destination side remains dormant for VM-to-VM use. At that slice, no source session or API-owned relay listener
+constructed its request, and root runtime admission, Task 15 active-session/capacity authority, runtime policy
+resolution/enforcement, and positive Python system qualification were still pending.
 
 The fifth slice implements the closed source-session and guest process boundary without activating the host relay. A
 host `SourceSession` owns one already authority-admitted connection, authenticates the source guest through exact
@@ -361,7 +361,7 @@ This slice also removes the generic `OnHostFrame`, shared `activeConn`, legacy `
 a strict source request, preserves binary output, requires terminal plus physical EOF, and redacts local failures.
 
 The source and destination foundations remain dormant for positive VM-to-VM use. An API-owned relay listener, root
-active-runtime/source-FD admission, exact active source/destination pair composition, runtime policy
+source-connection-FD admission, production composition of the private active-pair/capacity authority, runtime policy
 resolution/enforcement, redacted audit, and positive Python L2 qualification remain pending. No production path opens
 a `SourceSession` or constructs an authorized destination request, so VM-to-VM execution is still unavailable.
 
@@ -390,9 +390,24 @@ creation failure still returns a releasable lease.
 
 Reservation creation fixes the future relay-stop time at creation plus `vmexecwire.MaxExecutionDuration`, so setup and
 suspend consume the same five-minute `CLOCK_BOOTTIME` budget. Expiration adds a separate four-second grace for the
-protocol's forced-process cleanup and terminal-frame delivery bounds. This foundation has no selected production
-ceiling, constructor call, privileged action, active two-VM runtime admission, source-FD authority, relay/API
-composition, policy enforcement, or audit consumer.
+protocol's forced-process cleanup and terminal-frame delivery bounds.
+
+The eighth slice composes this substrate behind a private active VM-exec pair authority without activating the relay.
+One opening of the instance authority and one index acquisition locate two distinct same-owner records. The authority
+opens each VM authority separately, takes the two VM locks in canonical lexical ID order, requires both records to be
+`active`, releases the index, and retains the shared roots separately from both active leases. For each exact record it
+reopens and retains the recorded processes through pidfds, proves the complete active identity, and performs a final
+pidfd locator/liveness proof. Only then does it reserve root-global capacity. After that reservation it rechecks the
+host boot ID, both complete active identities, and both pidfd locator/liveness proofs before publishing an immutable
+admission containing the owner, source/destination IDs and launch generations, reservation ID, boot ID, and fixed
+relay-stop deadline.
+
+The pair lease is close-once and cleans up without reacquiring a lock: capacity first, destination/source process
+capabilities next, active leases in descending lexical order, and the retained pair roots last. Admission or cleanup
+failures preserve the primary classified error and bounded cleanup evidence. The capacity and pair authorities remain
+private and inert: no production ceiling or constructor is selected, no production caller invokes them, and there is
+no source-connection-FD authority, privileged dispatcher/API relay, policy enforcement, audit consumer, or positive
+VM-to-VM path.
 
 ### Layer placement
 
@@ -409,8 +424,9 @@ composition, policy enforcement, or audit consumer.
   broker proves that one local peer descends from one host-bound outer command; it does not authorize a VM identity.
 - `internal/service/network/` owns typed privileged namespace, bridge, veth, TAP, route, and link effects.
 - `internal/service/firewall/` owns typed privileged nftables application.
-- `internal/service/jailer/` consumes a verified namespace handle as part of typed launch; it does not create a generic
-  network-operation interface.
+- `internal/service/jailer/` consumes a verified namespace handle as part of typed launch and owns the private exact
+  active-pair/capacity authority; it does not create a generic network-operation interface or authorize a source
+  connection FD.
 - Shared policy and resolved-runtime values live in `internal/lib/model/` only when multiple domains require them.
 
 All side-effecting functions take `context.Context` first and return `pkg/errs.DomainError` failures. Batch operations
@@ -540,8 +556,11 @@ VM-to-VM path.
 Capacity L1 covers the strict record/codec/store, exact root-owned layout, global lock serialization across independent
 authority instances, cross-owner ceiling enforcement, collision handling, stale-boot/expiration pruning, corrupt-state
 refusal, atomic publication and durability evidence, owner-bound idempotent release, and close-once cleanup. It does not
-select a production ceiling, admit an active source/destination runtime pair, authorize a source FD, or qualify
-a relay.
+select a production ceiling, authorize a source FD, or qualify a relay. Active-pair L1 covers one-index acquisition,
+same-owner active-record admission, canonical VM lock order, retained roots and per-VM/process capabilities, both exact
+pidfd/full-identity proofs, post-capacity boot/identity/final-liveness revalidation, immutable admission, and close-once
+reverse cleanup. It does not provide a production constructor, source-FD authority, relay, policy enforcement, audit,
+or end-to-end execution.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

@@ -498,16 +498,27 @@ sync. Creation, deletion, pruning, durability uncertainty, and cleanup-required 
 evidence.
 
 Each reservation fixes its relay-stop deadline at creation plus `vmexecwire.MaxExecutionDuration`; setup and suspend
-consume that `CLOCK_BOOTTIME` budget. Its record expires only after a separate four-second terminal/cleanup grace. No
-production maximum has been selected or wired, and no caller admits an exact active two-VM runtime pair or consumes a
-reservation.
+consume that `CLOCK_BOOTTIME` budget. Its record expires only after a separate four-second terminal/cleanup grace.
+
+The private active VM-exec pair authority is implemented and inert. It opens the instance authority once, takes the
+global index once, requires two distinct same-owner `active` records, opens each VM authority separately, and acquires
+the two VM locks in canonical lexical ID order. After releasing the index, it retains the shared roots separately from
+both active leases, reopens both recorded process sets into pidfds, and proves both complete active identities plus
+final pidfd locator/liveness. It then reserves root-global capacity and rechecks the host boot ID, both complete
+identities, and both final pidfd locator/liveness proofs before exposing an immutable owner/source/destination
+launch-generation, reservation, boot, and relay-stop admission. Its close-once cleanup releases capacity,
+destination/source process capabilities, active leases in descending lexical order, and the pair roots last without
+reacquiring a lock.
+
+Neither private authority has a production constructor or caller, and no positive production capacity ceiling has
+been selected or wired.
 
 These components still do not form a positive VM-to-VM path. No API-owned relay listener opens a root-authority-admitted
-source FD, reads its request, enforces the exact runtime exec policy, constructs a destination request, admits
-the exact owner/source/destination launch generations, consumes the capacity substrate, or writes a command-redacted
-audit record. The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create
-CLI/API, environment specs, results, and repository persistence; it has no compatibility path into exec policies.
-Positive Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,
+source FD, binds it to the private pair admission, reads its request, enforces the exact runtime exec policy, constructs
+a destination request, composes the production ceiling and reservation, or writes a command-redacted audit record.
+The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
+environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
+Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,
 guest-supplied source ID, socket path, or process-local semaphore may substitute for root runtime authority.
 
 ### Provisioner Backend (LoopMount vs GuestFS -- mutual exclusion)

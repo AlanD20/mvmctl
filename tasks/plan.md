@@ -96,8 +96,13 @@ continue without silently deleting it.
   The lock serializes cross-process/cross-user scan, stale cleanup, ceiling check, and no-replace publication. Corrupt
   or ambiguous state fails closed; creation, deletion, pruning, durability uncertainty, and cleanup failures preserve
   explicit evidence. The future relay-stop deadline is creation plus `vmexecwire.MaxExecutionDuration`, while record
-  expiration adds a separate four-second terminal/cleanup grace. No production ceiling or active-pair/relay/API
-  composition exists yet.
+  expiration adds a separate four-second terminal/cleanup grace.
+- Private inert Task 15 active-pair authority that takes the instance index once, requires two distinct same-owner
+  `active` records, opens their authorities separately, and locks canonical VM IDs lexically. It retains pair roots,
+  both active leases, and both exact pidfd-bound process authorities; proves both complete identities and final
+  liveness; reserves global capacity; then rechecks boot, both identities, and both locators before exposing an
+  immutable owner/source/destination launch-generation admission. Close-once cleanup releases capacity, process
+  authorities, descending lexical active leases, and roots in reverse. No production caller or relay uses it.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -820,11 +825,12 @@ The public policy families are:
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
-non-root process side, isolated process-bound source session, and private Task 15 root-owned capacity substrate are
-implemented. The API-owned relay listener, exact active two-VM/source-FD admission, selected production
-capacity ceiling and reservation composition, runtime policy resolution/enforcement/audit, Python system qualification,
-and the traffic family's replacement public surface remain pending. No production host path opens a source session,
-consumes a capacity reservation, or constructs an authorized destination request, so VM-to-VM execution is unavailable.
+non-root process side, isolated process-bound source session, and private Task 15 root-owned capacity and active-pair
+authorities are implemented. The API-owned relay listener, source-connection-FD authority, selected production
+capacity ceiling and composition, runtime policy resolution/enforcement/audit, Python system qualification, and the
+traffic family's replacement public surface remain pending. No production host path opens a source session, invokes
+the pair authority, consumes a capacity reservation, or constructs an authorized destination request, so VM-to-VM
+execution is unavailable.
 
 ### LoopMount privilege foundation
 
