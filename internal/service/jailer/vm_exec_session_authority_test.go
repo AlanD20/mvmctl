@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -61,6 +62,7 @@ func TestVMExecSessionAuthorityRetainsBothProcessAuthoritiesUntilRelease(t *test
 
 type vmExecSessionAuthorityFixture struct {
 	authority         *vmExecSessionAuthority
+	instances         *instanceAuthority
 	events            *vmExecSessionEventLog
 	tree              *testInstanceAuthorityTree
 	root              string
@@ -123,6 +125,10 @@ func newVMExecSessionAuthorityFixture(
 		)
 		return nil
 	}
+	tree.onTreeRelease = func(context.Context) error {
+		events.add("roots:release")
+		return nil
+	}
 	instances := newInstanceAuthorityWithPolicy(realInstanceAuthorityDeps(), testInstanceAuthorityPolicy(root), tree)
 
 	for key, values := range fake.metadata {
@@ -158,7 +164,7 @@ func newVMExecSessionAuthorityFixture(
 	fake.processDirectories[vmExecSessionDestinationPID] = processTestFirecrackerDirFD
 
 	fixture := &vmExecSessionAuthorityFixture{
-		events: events, tree: tree, root: root, identity: fake,
+		events: events, tree: tree, root: root, identity: fake, instances: instances,
 		sourceRecord: sourceRecord, destinationRecord: destinationRecord,
 		sourceKey: sourceKey, destinationKey: destinationKey,
 		aliveCalls: make(map[int]int), failAliveCall: make(map[int]int),
@@ -223,6 +229,27 @@ func newVMExecSessionAuthorityFixture(
 	require.NoError(t, err)
 	fixture.authority = authority
 	return fixture
+}
+
+func TestInstanceAuthorityLocksActivePairBehindNamedBoundary(t *testing.T) {
+	t.Parallel()
+
+	fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
+	pair, err := fixture.instances.LockActivePair(
+		t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, pair)
+	require.NotNil(t, pair.roots)
+	require.NotNil(t, pair.source)
+	require.NotNil(t, pair.destination)
+	assert.Nil(t, pair.source.state.roots)
+	assert.Nil(t, pair.destination.state.roots)
+	assert.Equal(t, 1, fixture.indexAcquireCount())
+
+	require.NoError(t, pair.source.Release(t.Context()))
+	require.NoError(t, pair.destination.Release(t.Context()))
+	require.NoError(t, pair.roots.Release(t.Context()))
 }
 
 func (fixture *vmExecSessionAuthorityFixture) failProcessLiveness(fd int, call int) {
@@ -330,10 +357,13 @@ func TestVMExecSessionAuthorityAcquiresVMLocksLexicallyForEitherDirection(t *tes
 			require.NotNil(t, lease)
 			require.NoError(t, lease.Release(t.Context()))
 
-			assert.Equal(t, []string{
+			want := []string{
 				"vm:" + vmExecSessionDestinationID + ":acquire",
 				"vm:" + vmExecSessionSourceID + ":acquire",
-			}, fixture.vmAcquireEvents())
+			}
+			if diff := cmp.Diff(want, fixture.vmAcquireEvents()); diff != "" {
+				t.Errorf("VM lock acquisition order mismatch (-want +got):\n%s", diff)
+			}
 			assert.Equal(t, 1, fixture.indexAcquireCount())
 		})
 	}
@@ -390,7 +420,8 @@ func TestVMExecSessionAuthoritySecondIdentityFailuresUnwindEarlierAuthority(t *t
 					vmExecSessionDestinationID+".json",
 				)))
 			},
-			wantCode: string(errs.CodeVMNotFound),
+			wantCode:       string(errs.CodeVMNotFound),
+			wantVMReleases: []string{},
 		},
 		"second_owner_foreign": {
 			mutate: func(t *testing.T, fixture *vmExecSessionAuthorityFixture) {
@@ -406,7 +437,8 @@ func TestVMExecSessionAuthoritySecondIdentityFailuresUnwindEarlierAuthority(t *t
 				foreign.active.groupIDs = uniformProcessCredentials(testAuthorityGID + 1)
 				writeTestAuthorityRecord(t, fixture.root, foreign)
 			},
-			wantCode: string(errs.CodeUnauthorized),
+			wantCode:       string(errs.CodeUnauthorized),
+			wantVMReleases: []string{},
 		},
 		"second_lifecycle_inactive": {
 			mutate: func(t *testing.T, fixture *vmExecSessionAuthorityFixture) {
@@ -434,7 +466,9 @@ func TestVMExecSessionAuthoritySecondIdentityFailuresUnwindEarlierAuthority(t *t
 			assert.Equal(t, test.wantCode, string(errs.AsDomainError(err).Code))
 			assert.Equal(t, int32(0), fixture.capacity.openStoreCalls.Load())
 			assert.Equal(t, int32(0), fixture.processCloseCount())
-			assert.ElementsMatch(t, test.wantVMReleases, fixture.vmReleaseEvents())
+			if diff := cmp.Diff(test.wantVMReleases, fixture.vmReleaseEvents()); diff != "" {
+				t.Errorf("failure VM lock release order mismatch (-want +got):\n%s", diff)
+			}
 			assert.Equal(t, 1, fixture.indexAcquireCount())
 		})
 	}
@@ -616,22 +650,49 @@ func TestVMExecSessionAuthorityCapacityFailuresPreserveCleanupOwnership(t *testi
 func TestVMExecSessionLeaseReleasesInCanonicalReverseOrderWithCanceledContext(t *testing.T) {
 	t.Parallel()
 
-	fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
-	lease, err := fixture.authority.reserve(
-		t.Context(), testInstanceCaller(), vmExecSessionSourceID, vmExecSessionDestinationID,
-	)
-	require.NoError(t, err)
-	fixture.events.reset()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	require.NoError(t, lease.Release(ctx))
-	assert.Equal(t, []string{
-		"capacity:release",
-		"pidfd:" + vmExecSessionDestinationID + ":close",
-		"vm:" + vmExecSessionDestinationID + ":release",
-		"pidfd:" + vmExecSessionSourceID + ":close",
-		"vm:" + vmExecSessionSourceID + ":release",
-	}, fixture.events.snapshot())
+	for _, direction := range []struct {
+		name        string
+		source      string
+		destination string
+	}{
+		{name: "source_sorts_first", source: vmExecSessionDestinationID, destination: vmExecSessionSourceID},
+		{name: "destination_sorts_first", source: vmExecSessionSourceID, destination: vmExecSessionDestinationID},
+	} {
+		t.Run(direction.name, func(t *testing.T) {
+			fixture := newVMExecSessionAuthorityFixture(t, direction.source, direction.destination)
+			lease, err := fixture.authority.reserve(
+				t.Context(), testInstanceCaller(), direction.source, direction.destination,
+			)
+			require.NoError(t, err)
+			fixture.events.reset()
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			requireVMExecSessionRelease(t, lease, ctx)
+			want := []string{
+				"capacity:release",
+				"pidfd:" + direction.destination + ":close",
+				"pidfd:" + direction.source + ":close",
+				"vm:" + vmExecSessionSourceID + ":release",
+				"vm:" + vmExecSessionDestinationID + ":release",
+				"roots:release",
+			}
+			if diff := cmp.Diff(want, fixture.events.snapshot()); diff != "" {
+				t.Errorf("VM-exec session release order mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func requireVMExecSessionRelease(t *testing.T, lease *vmExecSessionLease, ctx context.Context) {
+	t.Helper()
+	result := make(chan error, 1)
+	go func() { result <- lease.Release(ctx) }()
+	select {
+	case err := <-result:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("VM-exec session release did not complete within one second")
+	}
 }
 
 func TestVMExecSessionLeaseCopiesConcurrentlyReleaseOnce(t *testing.T) {

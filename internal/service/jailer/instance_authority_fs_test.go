@@ -33,6 +33,7 @@ type testInstanceAuthorityTree struct {
 	onRelease                 func(context.Context, string) error
 	onVMAcquire               func(context.Context, authorityfs.VMKey)
 	onVMRelease               func(context.Context, authorityfs.VMKey) error
+	onTreeRelease             func(context.Context) error
 }
 
 type testInstanceJailerAuthority struct {
@@ -188,7 +189,7 @@ func (authority *testInstanceJailerAuthority) openUID(
 	return &testInstanceJailerUID{tree: authority.tree, uid: uid}, nil
 }
 
-func (authority *testInstanceJailerAuthority) Release(context.Context) error {
+func (authority *testInstanceJailerAuthority) Release(ctx context.Context) error {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
 	if authority.released {
@@ -197,7 +198,11 @@ func (authority *testInstanceJailerAuthority) Release(context.Context) error {
 	authority.released = true
 	authority.tree.mu.Lock()
 	treeReleaseErr := authority.tree.treeReleaseErr
+	onTreeRelease := authority.tree.onTreeRelease
 	authority.tree.mu.Unlock()
+	if onTreeRelease != nil {
+		treeReleaseErr = errors.Join(treeReleaseErr, onTreeRelease(ctx))
+	}
 	if treeReleaseErr != nil {
 		authority.releaseErr = instanceAtomicError("release Jailer authority tree", treeReleaseErr)
 	}

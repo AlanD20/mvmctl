@@ -37,6 +37,7 @@ type vmExecSessionLease struct {
 type vmExecSessionLeaseState struct {
 	// mu guards the retained active-runtime and capacity capabilities and every lifecycle field below.
 	mu                   sync.Mutex
+	roots                *instanceAuthorityRoots
 	source               *activeLease
 	destination          *activeLease
 	sourceProcesses      *reopenedRecordedProcesses
@@ -46,14 +47,6 @@ type vmExecSessionLeaseState struct {
 	admissionValid       bool
 	released             bool
 	releaseErr           error
-}
-
-type vmExecPairCandidate struct {
-	vmID        string
-	location    *instanceLocation
-	directories *instanceUIDDirectories
-	vmLock      *vmAuthorityLease
-	record      instanceRecord
 }
 
 func newVMExecSessionAuthorityWithDeps(
@@ -91,20 +84,13 @@ func (authority *vmExecSessionAuthority) reserve(
 	if ctx == nil {
 		return nil, vmExecSessionError("vm-exec session context is required", nil)
 	}
-	if err := validateInstanceCaller(caller); err != nil {
-		return nil, err
-	}
-	if !vmIDPattern.MatchString(sourceVMID) || !vmIDPattern.MatchString(destinationVMID) {
-		return nil, instanceValidationError("vm-exec session VM identity is invalid")
-	}
-	if sourceVMID == destinationVMID {
-		return nil, instanceValidationError("vm-exec session requires distinct source and destination VMs")
-	}
-
-	source, destination, err := authority.lockActivePair(ctx, caller, sourceVMID, destinationVMID)
+	pair, err := authority.instances.LockActivePair(ctx, caller, sourceVMID, destinationVMID)
 	if err != nil {
 		return nil, err
 	}
+	roots := pair.roots
+	source := pair.source
+	destination := pair.destination
 	transferred := false
 	var sourceProcesses *reopenedRecordedProcesses
 	var destinationProcesses *reopenedRecordedProcesses
@@ -113,7 +99,7 @@ func (authority *vmExecSessionAuthority) reserve(
 			return
 		}
 		returnErr = releaseVMExecSessionResources(
-			ctx, returnErr, nil, destinationProcesses, destination, sourceProcesses, source,
+			ctx, returnErr, nil, destinationProcesses, sourceProcesses, destination, source, roots,
 		)
 	}()
 
@@ -138,7 +124,7 @@ func (authority *vmExecSessionAuthority) reserve(
 		return nil, capacityErr
 	}
 	lease := &vmExecSessionLease{state: &vmExecSessionLeaseState{
-		source: source, destination: destination,
+		roots: roots, source: source, destination: destination,
 		sourceProcesses: sourceProcesses, destinationProcesses: destinationProcesses,
 		capacity: capacity,
 	}}
@@ -217,106 +203,6 @@ func (authority *vmExecSessionAuthority) recheckActivePairAfterCapacity(
 		return processVerificationError("", "host boot ID changed across VM-exec capacity reservation", nil)
 	}
 	return nil
-}
-
-func (authority *vmExecSessionAuthority) lockActivePair(
-	ctx context.Context,
-	caller instanceCaller,
-	sourceVMID string,
-	destinationVMID string,
-) (_ *activeLease, _ *activeLease, returnErr error) {
-	roots, err := openInstanceAuthorityRoots(
-		ctx,
-		authority.instances.deps,
-		authority.instances.policy,
-		authority.instances.authorityTree,
-	)
-	if err != nil {
-		return nil, nil, err
-	}
-	var indexLock *authorityLock
-	candidates := []*vmExecPairCandidate{{vmID: sourceVMID}, {vmID: destinationVMID}}
-	defer func() {
-		if returnErr == nil {
-			return
-		}
-		returnErr = releaseVMExecPairCandidates(ctx, returnErr, candidates, indexLock, roots)
-	}()
-	indexLock, err = roots.acquireIndexLock(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, candidate := range candidates {
-		candidate.location, err = roots.findInstance(ctx, candidate.vmID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if candidate.location == nil {
-			return nil, nil, errs.NotFound(
-				errs.CodeVMNotFound,
-				"vm has no privileged authority",
-				errs.WithEntity(candidate.vmID),
-			)
-		}
-		if candidate.location.uid != caller.uid {
-			return nil, nil, unauthorizedInstanceError(candidate.vmID)
-		}
-	}
-	for _, candidate := range candidates {
-		candidate.directories, err = roots.openAuthorityForLocation(ctx, candidate.location)
-		candidate.location = nil
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	lexical := append([]*vmExecPairCandidate{}, candidates...)
-	sort.Slice(lexical, func(left, right int) bool { return lexical[left].vmID < lexical[right].vmID })
-	for _, candidate := range lexical {
-		candidate.vmLock, err = candidate.directories.acquireVMLock(ctx, candidate.vmID)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	for _, candidate := range candidates {
-		var found bool
-		candidate.record, found, err = candidate.directories.readRecord(ctx, candidate.vmID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !found {
-			return nil, nil, instanceAtomicError("instance authority record disappeared while locked", nil)
-		}
-		if err := authorizeInstanceRecord(caller, candidate.record); err != nil {
-			return nil, nil, err
-		}
-		if candidate.record.lifecycle != instanceLifecycleActive {
-			return nil, nil, errs.New(
-				errs.CodeVMNotRunning,
-				"vm has no active privileged runtime",
-				errs.WithEntity(candidate.vmID),
-			)
-		}
-	}
-	if err := indexLock.Release(ctx); err != nil {
-		indexLock = nil
-		return nil, nil, err
-	}
-	indexLock = nil
-	source := &activeLease{state: &activeLeaseState{
-		roots:       roots,
-		directories: candidates[0].directories,
-		vmLock:      candidates[0].vmLock,
-		record:      candidates[0].record,
-	}}
-	destination := &activeLease{state: &activeLeaseState{
-		directories: candidates[1].directories, vmLock: candidates[1].vmLock, record: candidates[1].record,
-	}}
-	roots = nil
-	for _, candidate := range candidates {
-		candidate.directories = nil
-		candidate.vmLock = nil
-	}
-	return source, destination, nil
 }
 
 func (authority *vmExecSessionAuthority) readmitActivePair(
@@ -402,55 +288,6 @@ func releaseVMExecSessionProcesses(
 	return result
 }
 
-func releaseVMExecPairCandidates(
-	ctx context.Context,
-	primary error,
-	candidates []*vmExecPairCandidate,
-	indexLock *authorityLock,
-	roots *instanceAuthorityRoots,
-) error {
-	cleanupCtx := context.WithoutCancel(ctx)
-	result := primary
-	lexical := append([]*vmExecPairCandidate{}, candidates...)
-	sort.Slice(lexical, func(left, right int) bool { return lexical[left].vmID > lexical[right].vmID })
-	for _, candidate := range lexical {
-		if candidate.vmLock != nil {
-			result = appendVMExecSessionError(
-				result,
-				"release VM-exec pair VM lock",
-				candidate.vmLock.Release(cleanupCtx),
-			)
-			candidate.vmLock = nil
-		}
-	}
-	if indexLock != nil {
-		result = appendVMExecSessionError(result, "release VM-exec pair index lock", indexLock.Release(cleanupCtx))
-	}
-	for index := len(candidates) - 1; index >= 0; index-- {
-		candidate := candidates[index]
-		if candidate.location != nil {
-			result = appendVMExecSessionError(
-				result,
-				"close located VM-exec instance directory",
-				roots.deps.close(cleanupCtx, candidate.location.stateFD),
-			)
-			candidate.location = nil
-		}
-		if candidate.directories != nil {
-			result = appendVMExecSessionError(
-				result,
-				"release VM-exec instance directories",
-				candidate.directories.Release(cleanupCtx),
-			)
-			candidate.directories = nil
-		}
-	}
-	if roots != nil {
-		result = appendVMExecSessionError(result, "release VM-exec instance authority roots", roots.Release(cleanupCtx))
-	}
-	return result
-}
-
 func (lease *vmExecSessionLease) admission() (vmExecSessionAdmission, error) {
 	if lease == nil || lease.state == nil {
 		return vmExecSessionAdmission{}, vmExecSessionError("vm-exec session lease is unavailable", nil)
@@ -467,8 +304,8 @@ func (lease *vmExecSessionLease) admission() (vmExecSessionAdmission, error) {
 	return state.admission, nil
 }
 
-// Release drops capacity before both pidfd-retaining active leases in destination/source order. It never reacquires an
-// index or VM lock and runs exactly once across copied lease values with caller cancellation detached.
+// Release drops capacity, destination/source process authorities, active leases in descending lexical VM-ID order,
+// and pair roots last. It never reacquires a lock and runs once across copied leases with cancellation detached.
 func (lease *vmExecSessionLease) Release(ctx context.Context) error {
 	if lease == nil || lease.state == nil {
 		return nil
@@ -490,15 +327,17 @@ func (lease *vmExecSessionLease) Release(ctx context.Context) error {
 		state.releaseErr,
 		state.capacity,
 		state.destinationProcesses,
-		state.destination,
 		state.sourceProcesses,
+		state.destination,
 		state.source,
+		state.roots,
 	)
 	state.capacity = nil
 	state.destinationProcesses = nil
 	state.destination = nil
 	state.sourceProcesses = nil
 	state.source = nil
+	state.roots = nil
 	state.released = true
 	return state.releaseErr
 }
@@ -508,9 +347,10 @@ func releaseVMExecSessionResources(
 	primary error,
 	capacity *vmExecCapacityLease,
 	destinationProcesses *reopenedRecordedProcesses,
-	destination *activeLease,
 	sourceProcesses *reopenedRecordedProcesses,
+	destination *activeLease,
 	source *activeLease,
+	roots *instanceAuthorityRoots,
 ) error {
 	cleanupCtx := context.WithoutCancel(ctx)
 	result := primary
@@ -524,9 +364,6 @@ func releaseVMExecSessionResources(
 			destinationProcesses.Release(cleanupCtx),
 		)
 	}
-	if destination != nil {
-		result = appendVMExecSessionError(result, "release destination active runtime", destination.Release(cleanupCtx))
-	}
 	if sourceProcesses != nil {
 		result = appendVMExecSessionError(
 			result,
@@ -534,10 +371,26 @@ func releaseVMExecSessionResources(
 			sourceProcesses.Release(cleanupCtx),
 		)
 	}
-	if source != nil {
-		result = appendVMExecSessionError(result, "release source active runtime", source.Release(cleanupCtx))
+	active := []*activeLease{source, destination}
+	sort.Slice(active, func(left, right int) bool {
+		return activeLeaseVMID(active[left]) > activeLeaseVMID(active[right])
+	})
+	for _, candidate := range active {
+		if candidate != nil {
+			result = appendVMExecSessionError(result, "release active VM-exec runtime", candidate.Release(cleanupCtx))
+		}
+	}
+	if roots != nil {
+		result = appendVMExecSessionError(result, "release VM-exec pair authority roots", roots.Release(cleanupCtx))
 	}
 	return result
+}
+
+func activeLeaseVMID(lease *activeLease) string {
+	if lease == nil {
+		return ""
+	}
+	return lease.snapshot().vmID
 }
 
 func appendVMExecSessionError(primary error, message string, cause error) error {

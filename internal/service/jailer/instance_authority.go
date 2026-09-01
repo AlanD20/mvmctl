@@ -3,6 +3,7 @@ package jailer
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 
 	"mvmctl/pkg/errs"
@@ -91,6 +92,20 @@ type releaseSlotLease struct {
 
 type lockedInstance struct {
 	roots       *instanceAuthorityRoots
+	directories *instanceUIDDirectories
+	vmLock      *vmAuthorityLease
+	record      instanceRecord
+}
+
+type lockedActivePair struct {
+	roots       *instanceAuthorityRoots
+	source      *activeLease
+	destination *activeLease
+}
+
+type instanceActivePairCandidate struct {
+	vmID        string
+	location    *instanceLocation
 	directories *instanceUIDDirectories
 	vmLock      *vmAuthorityLease
 	record      instanceRecord
@@ -379,6 +394,114 @@ func (authority *instanceAuthority) LockActive(
 			record:      locked.record,
 		},
 	}, nil
+}
+
+func (authority *instanceAuthority) LockActivePair(
+	ctx context.Context,
+	caller instanceCaller,
+	sourceVMID string,
+	destinationVMID string,
+) (_ *lockedActivePair, returnErr error) {
+	if err := validateInstanceCaller(caller); err != nil {
+		return nil, err
+	}
+	if !vmIDPattern.MatchString(sourceVMID) || !vmIDPattern.MatchString(destinationVMID) {
+		return nil, instanceValidationError("active pair VM identity is invalid")
+	}
+	if sourceVMID == destinationVMID {
+		return nil, instanceValidationError("active pair requires distinct VMs")
+	}
+	roots, err := openInstanceAuthorityRoots(ctx, authority.deps, authority.policy, authority.authorityTree)
+	if err != nil {
+		return nil, err
+	}
+	var indexLock *authorityLock
+	candidates := []*instanceActivePairCandidate{{vmID: sourceVMID}, {vmID: destinationVMID}}
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		returnErr = releaseInstanceActivePairCandidates(ctx, returnErr, candidates, indexLock, roots)
+	}()
+	indexLock, err = roots.acquireIndexLock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range candidates {
+		candidate.location, err = roots.findInstance(ctx, candidate.vmID)
+		if err != nil {
+			return nil, err
+		}
+		if candidate.location == nil {
+			return nil, errs.NotFound(
+				errs.CodeVMNotFound,
+				"vm has no privileged authority",
+				errs.WithEntity(candidate.vmID),
+			)
+		}
+		if candidate.location.uid != caller.uid {
+			return nil, unauthorizedInstanceError(candidate.vmID)
+		}
+	}
+	for _, candidate := range candidates {
+		candidate.directories, err = roots.openAuthorityForLocation(ctx, candidate.location)
+		candidate.location = nil
+		if err != nil {
+			return nil, err
+		}
+	}
+	lexical := append([]*instanceActivePairCandidate{}, candidates...)
+	sort.Slice(lexical, func(left, right int) bool { return lexical[left].vmID < lexical[right].vmID })
+	for _, candidate := range lexical {
+		candidate.vmLock, err = candidate.directories.acquireVMLock(ctx, candidate.vmID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for _, candidate := range candidates {
+		var found bool
+		candidate.record, found, err = candidate.directories.readRecord(ctx, candidate.vmID)
+		if err != nil {
+			return nil, err
+		}
+		if !found {
+			return nil, instanceAtomicError("instance authority record disappeared while locked", nil)
+		}
+		if err := authorizeInstanceRecord(caller, candidate.record); err != nil {
+			return nil, err
+		}
+		if candidate.record.lifecycle != instanceLifecycleActive {
+			return nil, errs.New(
+				errs.CodeVMNotRunning,
+				"vm has no active privileged runtime",
+				errs.WithEntity(candidate.vmID),
+			)
+		}
+	}
+	if err := indexLock.Release(ctx); err != nil {
+		indexLock = nil
+		return nil, err
+	}
+	indexLock = nil
+	pair := &lockedActivePair{
+		roots: roots,
+		source: &activeLease{state: &activeLeaseState{
+			directories: candidates[0].directories,
+			vmLock:      candidates[0].vmLock,
+			record:      candidates[0].record,
+		}},
+		destination: &activeLease{state: &activeLeaseState{
+			directories: candidates[1].directories,
+			vmLock:      candidates[1].vmLock,
+			record:      candidates[1].record,
+		}},
+	}
+	roots = nil
+	for _, candidate := range candidates {
+		candidate.directories = nil
+		candidate.vmLock = nil
+	}
+	return pair, nil
 }
 
 func (authority *instanceAuthority) BeginCleanup(
@@ -1054,6 +1177,55 @@ func (locked *lockedInstance) Release(ctx context.Context) error {
 	locked.directories = nil
 	locked.roots = nil
 	return err
+}
+
+func releaseInstanceActivePairCandidates(
+	ctx context.Context,
+	primary error,
+	candidates []*instanceActivePairCandidate,
+	indexLock *authorityLock,
+	roots *instanceAuthorityRoots,
+) error {
+	cleanupCtx := context.WithoutCancel(ctx)
+	result := primary
+	lexical := append([]*instanceActivePairCandidate{}, candidates...)
+	sort.Slice(lexical, func(left, right int) bool { return lexical[left].vmID > lexical[right].vmID })
+	for _, candidate := range lexical {
+		if candidate.vmLock != nil {
+			result = appendInstanceOperationError(
+				result,
+				"release active-pair VM lock",
+				candidate.vmLock.Release(cleanupCtx),
+			)
+			candidate.vmLock = nil
+		}
+	}
+	if indexLock != nil {
+		result = appendInstanceOperationError(result, "release active-pair index lock", indexLock.Release(cleanupCtx))
+	}
+	for index := len(candidates) - 1; index >= 0; index-- {
+		candidate := candidates[index]
+		if candidate.location != nil {
+			result = appendInstanceOperationError(
+				result,
+				"close located active-pair instance directory",
+				roots.deps.close(cleanupCtx, candidate.location.stateFD),
+			)
+			candidate.location = nil
+		}
+		if candidate.directories != nil {
+			result = appendInstanceOperationError(
+				result,
+				"release active-pair instance directories",
+				candidate.directories.Release(cleanupCtx),
+			)
+			candidate.directories = nil
+		}
+	}
+	if roots != nil {
+		result = appendInstanceOperationError(result, "release active-pair authority roots", roots.Release(cleanupCtx))
+	}
+	return result
 }
 
 func releaseInstanceOperationResources(
