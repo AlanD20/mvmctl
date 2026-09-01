@@ -103,6 +103,13 @@ continue without silently deleting it.
   liveness; reserves global capacity; then rechecks boot, both identities, and both locators before exposing an
   immutable owner/source/destination launch-generation admission. Close-once cleanup releases capacity, process
   authorities, descending lexical active leases, and roots in reverse. No production caller or relay uses it.
+- Private inert exact-one VM-exec descriptor transport and structural-admission foundation. Its single-use sender puts
+  one duplicated connection in one `SCM_RIGHTS` message on the first non-NUL frame byte, writes the remainder without
+  ancillary data through cancellation-bounded nonblocking I/O, and closes the duplicate exactly once. The receiver
+  uses `MSG_CMSG_CLOEXEC` on every read, owns every installed descriptor before validation, rejects missing, extra,
+  unknown, late, or truncated control data, and retains only one close-on-exec connected, non-listening `AF_UNIX`
+  `SOCK_STREAM`. The reader intentionally exposes no transfer method and proves no peer process, Firecracker, VM, or
+  policy identity. No action, retained sidecar protocol, production caller, capacity consumer, or relay uses it.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -826,7 +833,8 @@ The public policy families are:
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
 non-root process side, isolated process-bound source session, and private Task 15 root-owned capacity and active-pair
-authorities are implemented. The API-owned relay listener, source-connection-FD authority, selected production
+authorities plus exact-one structural descriptor transport are implemented. The API-owned relay listener, retained
+sidecar protocol, descriptor transfer and source/destination process-and-VM identity binding, selected production
 capacity ceiling and composition, runtime policy resolution/enforcement/audit, Python system qualification, and the
 traffic family's replacement public surface remain pending. No production host path opens a source session, invokes
 the pair authority, consumes a capacity reservation, or constructs an authorized destination request, so VM-to-VM

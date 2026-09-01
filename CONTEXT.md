@@ -510,12 +510,22 @@ launch-generation, reservation, boot, and relay-stop admission. Its close-once c
 destination/source process capabilities, active leases in descending lexical order, and the pair roots last without
 reacquiring a lock.
 
-Neither private authority has a production constructor or caller, and no positive production capacity ceiling has
-been selected or wired.
+The exact-one VM-exec descriptor transport and structural-admission foundation is also implemented and inert. Its
+single-use sender attaches one duplicate through one `SCM_RIGHTS` message on the first non-NUL frame byte, sends the
+ordinary remainder without ancillary data through cancellation-bounded nonblocking I/O, and closes the duplicate
+exactly once. The receiver uses `recvmsg(MSG_CMSG_CLOEXEC)` for every read, takes cleanup ownership of every installed
+descriptor before validation, rejects missing, extra, unknown, late, or truncated control data, and retains only one
+close-on-exec connected, non-listening `AF_UNIX` `SOCK_STREAM`. Structural admission deliberately proves no peer
+process, Firecracker, VM, guest port, or policy identity. The reader has no transfer method, and no privileged action or
+production caller reaches either primitive.
+
+Neither private authority has a production constructor or caller. The descriptor foundation has no registered action
+or production caller, and no positive production capacity ceiling has been selected or wired.
 
 These components still do not form a positive VM-to-VM path. No API-owned relay listener opens a root-authority-admitted
-source FD, binds it to the private pair admission, reads its request, enforces the exact runtime exec policy, constructs
-a destination request, composes the production ceiling and reservation, or writes a command-redacted audit record.
+source FD, completes the retained sidecar protocol, transfers and binds either descriptor to exact process/VM
+authority, reads its request, enforces the exact runtime exec policy, constructs a destination request, composes the
+production ceiling and reservation, or writes a command-redacted audit record.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
 Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,

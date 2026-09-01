@@ -663,9 +663,10 @@ pending
 
 **Owner:** engineer
 **Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, and the
-isolated process-bound source-session and private root-owned capacity/active-pair foundations are implemented;
-API-owned relay, source-connection-FD authority, production capacity ceiling/composition, runtime policy, and Python
-qualification remain pending, so VM-to-VM execution remains fail-closed
+isolated process-bound source-session, private root-owned capacity/active-pair authorities, and inert exact-one
+structural descriptor transport are implemented; API-owned relay, retained sidecar protocol, descriptor transfer and
+source/destination process-and-VM identity binding, production capacity ceiling/composition, runtime policy, and
+Python qualification remain pending, so VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -706,8 +707,8 @@ qualification remain pending, so VM-to-VM execution remains fail-closed
   VM-to-host execution, missing/reverse policy, foreign owner, stale target, and every identity mismatch before the
   host constructs the destination request.
 - [ ] Enforce the same wire limits at the relay, select the production ceiling, compose Task 15's implemented private
-  active-pair/capacity authority with source-connection-FD admission, and add command-redacted
-  source/destination/timing/result audit records.
+  active-pair/capacity authority through the retained sidecar with exact process/VM-bound source and destination
+  descriptors, and add command-redacted source/destination/timing/result audit records.
 - [ ] Python T2 proves same-network, cross-network, and no-IP-network exec behavior plus all denials and limits.
 
 ## Phase 3: Finish the privilege boundary and lifecycle
@@ -840,8 +841,9 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 ### Task 15: Complete reconciliation, admission, and lifecycle parity
 
 **Owner:** engineer
-**Status:** Private inert VM-exec capacity reservation and active-pair foundations implemented; production
-ceiling/composition and all reconciliation and lifecycle work remain pending
+**Status:** Private inert VM-exec capacity reservation, active-pair, and exact-one structural descriptor foundations
+implemented; retained sidecar, identity binding, production ceiling/composition, and all reconciliation and lifecycle
+work remain pending
 **Dependencies:** Tasks 8-14
 
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,
@@ -875,8 +877,15 @@ ceiling/composition and all reconciliation and lifecycle work remain pending
   liveness, reserve root-global capacity, then recheck boot, both identities, and both locators before exposing an
   immutable owner/source/destination launch-generation admission. Release exactly once in reverse authority order.
   This foundation has no production constructor or caller and admits no source connection FD.
-- [ ] Select an explicit positive production ceiling and compose the implemented pair/capacity authority with the
-  authority-owned source connection descriptor. Reserve before relay effects, enforce the fixed relay-stop deadline,
+- [x] Add the private inert exact-one descriptor transport and structural admission foundation. Attach one duplicate
+  through one `SCM_RIGHTS` message on the first non-NUL frame byte; use cancellation-bounded nonblocking ordinary
+  remainder I/O; receive every byte through `recvmsg(MSG_CMSG_CLOEXEC)`; own all installed descriptors before
+  validation; reject missing, extra, unknown, late, or truncated ancillary data; and retain only one close-on-exec
+  connected, non-listening `AF_UNIX` `SOCK_STREAM`. Keep it unregistered and without a transfer method, peer/VM
+  identity claim, capacity effect, or production caller.
+- [ ] Add the action-specific retained sidecar, then select the fixed positive production ceiling and compose the
+  implemented pair/capacity authority with transferred source and destination descriptors only after complete frame
+  decoding and exact process/VM identity binding. Reserve before relay effects, enforce the fixed relay-stop deadline,
   release within the separate grace, and never substitute SQLite status, a guest-supplied ID, a socket path, or a
   process-local semaphore.
 - [ ] Make create/start/stop/remove/reboot/snapshot/restore/volume paths transactionally abortable and retryable.
