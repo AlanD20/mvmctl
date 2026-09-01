@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -19,7 +20,6 @@ import (
 )
 
 const (
-	privilegedVMExecSessionSudoPath   = "/usr/bin/sudo"
 	privilegedVMExecSessionReapPeriod = 5 * time.Second
 )
 
@@ -63,16 +63,18 @@ type privilegedVMExecSessionShared struct {
 	mu sync.Mutex
 
 	state       privilegedVMExecSessionState
-	control     *os.File
+	activePhase *privilegedVMExecSessionPhaseArbiter
 	command     *exec.Cmd
 	deps        privilegedVMExecSessionDeps
 	policy      privilegedVMExecSessionPolicy
+	waitOnce    sync.Once
 	waitResult  <-chan error
-	stdout      *privilegedControlBoundedWriter
-	stderr      *privilegedControlBoundedWriter
 	cleanupOnce sync.Once
 	cleanupErr  error
-	interrupted bool
+
+	lifecycleMu   sync.Mutex
+	control       *os.File
+	controlClosed bool
 
 	releaseDone    chan struct{}
 	releaseOutcome vmexecsessionwire.Outcome
@@ -91,10 +93,44 @@ func productionPrivilegedVMExecSessionPolicy() privilegedVMExecSessionPolicy {
 	}
 }
 
-type privilegedVMExecSessionDeps = privilegedControlDeps
+type privilegedVMExecSessionDeps struct {
+	privilegedControlDeps
+	duplicateControl func(context.Context, *os.File) (*os.File, error)
+	killProcess      func(context.Context, *os.Process) error
+}
 
 func realPrivilegedVMExecSessionDeps() privilegedVMExecSessionDeps {
-	return realPrivilegedControlDeps()
+	return privilegedVMExecSessionDeps{
+		privilegedControlDeps: realPrivilegedControlDeps(),
+		duplicateControl:      duplicatePrivilegedVMExecSessionControl,
+		killProcess: func(_ context.Context, process *os.Process) error {
+			return process.Kill()
+		},
+	}
+}
+
+const (
+	privilegedVMExecSessionPhasePending uint32 = iota
+	privilegedVMExecSessionPhaseDecoded
+	privilegedVMExecSessionPhaseInterrupted
+)
+
+type privilegedVMExecSessionPhaseArbiter struct {
+	winner atomic.Uint32
+}
+
+func (arbiter *privilegedVMExecSessionPhaseArbiter) completeDecode() bool {
+	return arbiter.winner.CompareAndSwap(
+		privilegedVMExecSessionPhasePending,
+		privilegedVMExecSessionPhaseDecoded,
+	)
+}
+
+func (arbiter *privilegedVMExecSessionPhaseArbiter) interrupt() bool {
+	return arbiter.winner.CompareAndSwap(
+		privilegedVMExecSessionPhasePending,
+		privilegedVMExecSessionPhaseInterrupted,
+	)
 }
 
 func openPrivilegedVMExecSession(
@@ -154,7 +190,7 @@ func openPrivilegedVMExecSession(
 	}
 
 	command := deps.command(
-		privilegedVMExecSessionSudoPath,
+		privilegedControlSudoPath,
 		"-n",
 		"--",
 		infra.SystemBinaryPath,
@@ -179,19 +215,12 @@ func openPrivilegedVMExecSession(
 		return nil, closeBeforeStart(err)
 	}
 
-	waitResult := make(chan error, 1)
-	go func() {
-		waitResult <- deps.wait(context.Background(), command)
-	}()
 	shared := &privilegedVMExecSessionShared{
-		state:      privilegedVMExecSessionSourceRetained,
-		control:    parent,
-		command:    command,
-		deps:       deps,
-		policy:     policy,
-		waitResult: waitResult,
-		stdout:     stdout,
-		stderr:     stderr,
+		state:   privilegedVMExecSessionSourceRetained,
+		control: parent,
+		command: command,
+		deps:    deps,
+		policy:  policy,
 	}
 	session := &PrivilegedVMExecSession{shared: shared}
 	if err := closePrivilegedVMExecSessionFile(cleanupCtx, deps, child); err != nil {
@@ -200,29 +229,58 @@ func openPrivilegedVMExecSession(
 		return nil, privilegedVMExecSessionFailure(true, true, errors.Join(err, cleanupErr))
 	}
 
-	finishCancellation := shared.watchCancellation(ctx)
-	if err := sendPrivilegedVMExecSessionDuplicate(ctx, parent, frame.Bytes(), sourceDuplicate); err != nil {
+	phase := shared.beginPhase()
+	finishCancellation := shared.watchCancellation(ctx, phase)
+	control, err := shared.pinControl(ctx)
+	if err != nil {
 		finishCancellation()
+		shared.endPhase(phase)
+		_ = closePrivilegedVMExecSessionFile(cleanupCtx, deps, sourceDuplicate)
 		cleanupErr := shared.cleanup(true, true)
 		return nil, privilegedVMExecSessionFailure(true, true, errors.Join(err, cleanupErr))
 	}
-	result, err := vmexecsessionwire.DecodeSourceRetained(ctx, parent)
+	if err := sendPrivilegedVMExecSessionDuplicate(ctx, control, frame.Bytes(), sourceDuplicate); err != nil {
+		finishCancellation()
+		shared.endPhase(phase)
+		pinCloseErr := closePrivilegedVMExecSessionFile(cleanupCtx, deps, control)
+		cleanupErr := shared.cleanup(true, true)
+		return nil, privilegedVMExecSessionFailure(true, true, errors.Join(err, pinCloseErr, cleanupErr))
+	}
+	result, err := vmexecsessionwire.DecodeSourceRetained(context.WithoutCancel(ctx), control)
+	decodeWon := phase.completeDecode()
 	finishCancellation()
+	shared.endPhase(phase)
+	pinCloseErr := closePrivilegedVMExecSessionFile(cleanupCtx, deps, control)
 	if err != nil {
 		cleanupErr := shared.cleanup(true, true)
-		return nil, privilegedVMExecSessionFailure(true, true, errors.Join(err, cleanupErr))
+		return nil, privilegedVMExecSessionFailure(true, true, errors.Join(err, pinCloseErr, cleanupErr))
 	}
-	if shared.wasInterrupted() {
+	if !decodeWon {
 		cleanupErr := shared.cleanup(true, true)
 		return nil, privilegedVMExecSessionFailure(
 			true,
 			true,
-			errors.Join(errors.New("retained VM-exec source response followed local interruption"), cleanupErr),
+			errors.Join(
+				errors.New("retained VM-exec source response followed local interruption"),
+				pinCloseErr,
+				cleanupErr,
+			),
 		)
 	}
 	if operationErr := result.OperationError(); operationErr != nil {
-		_ = shared.cleanup(false, true)
+		cleanupErr := shared.cleanup(false, true)
+		if pinCloseErr != nil || cleanupErr != nil {
+			return nil, privilegedVMExecSessionFailure(
+				true,
+				false,
+				errors.Join(operationErr, pinCloseErr, cleanupErr),
+			)
+		}
 		return nil, operationErr
+	}
+	if pinCloseErr != nil {
+		cleanupErr := shared.cleanup(true, true)
+		return nil, privilegedVMExecSessionFailure(true, false, errors.Join(pinCloseErr, cleanupErr))
 	}
 	if !result.Retained() {
 		cleanupErr := shared.cleanup(true, true)
@@ -287,34 +345,63 @@ func (shared *privilegedVMExecSessionShared) bindDestination(
 		cleanupErr := shared.cleanup(true, true)
 		return privilegedVMExecSessionFailure(true, true, errors.Join(err, closeErr, cleanupErr))
 	}
-	finishCancellation := shared.watchCancellation(ctx)
+	phase := shared.beginPhase()
+	finishCancellation := shared.watchCancellation(ctx, phase)
+	control, err := shared.pinControl(ctx)
+	if err != nil {
+		finishCancellation()
+		shared.endPhase(phase)
+		closeErr := shared.rejectDuplicate(destinationDuplicate, nil)
+		cleanupErr := shared.cleanup(true, true)
+		return privilegedVMExecSessionFailure(true, true, errors.Join(err, closeErr, cleanupErr))
+	}
 	if err := sendPrivilegedVMExecSessionDuplicate(
 		ctx,
-		shared.control,
+		control,
 		frame.Bytes(),
 		destinationDuplicate,
 	); err != nil {
 		finishCancellation()
+		shared.endPhase(phase)
+		pinCloseErr := closePrivilegedVMExecSessionFile(context.Background(), shared.deps, control)
 		cleanupErr := shared.cleanup(true, true)
-		return privilegedVMExecSessionFailure(true, true, errors.Join(err, cleanupErr))
+		return privilegedVMExecSessionFailure(true, true, errors.Join(err, pinCloseErr, cleanupErr))
 	}
-	result, err := vmexecsessionwire.DecodeReady(ctx, shared.control)
+	result, err := vmexecsessionwire.DecodeReady(context.WithoutCancel(ctx), control)
+	decodeWon := phase.completeDecode()
 	finishCancellation()
+	shared.endPhase(phase)
+	pinCloseErr := closePrivilegedVMExecSessionFile(context.Background(), shared.deps, control)
 	if err != nil {
 		cleanupErr := shared.cleanup(true, true)
-		return privilegedVMExecSessionFailure(true, true, errors.Join(err, cleanupErr))
+		return privilegedVMExecSessionFailure(true, true, errors.Join(err, pinCloseErr, cleanupErr))
 	}
-	if shared.wasInterrupted() {
+	if !decodeWon {
 		cleanupErr := shared.cleanup(true, true)
 		return privilegedVMExecSessionFailure(
 			true,
 			true,
-			errors.Join(errors.New("retained VM-exec ready response followed local interruption"), cleanupErr),
+			errors.Join(
+				errors.New("retained VM-exec ready response followed local interruption"),
+				pinCloseErr,
+				cleanupErr,
+			),
 		)
 	}
 	if operationErr := result.OperationError(); operationErr != nil {
-		_ = shared.cleanup(false, true)
+		cleanupErr := shared.cleanup(false, true)
+		if pinCloseErr != nil || cleanupErr != nil {
+			return privilegedVMExecSessionFailure(
+				true,
+				false,
+				errors.Join(operationErr, pinCloseErr, cleanupErr),
+			)
+		}
 		return operationErr
+	}
+	if pinCloseErr != nil {
+		cleanupErr := shared.cleanup(true, true)
+		return privilegedVMExecSessionFailure(true, false, errors.Join(pinCloseErr, cleanupErr))
 	}
 	if !result.Ready() {
 		cleanupErr := shared.cleanup(true, true)
@@ -396,44 +483,80 @@ func (shared *privilegedVMExecSessionShared) release(
 func (shared *privilegedVMExecSessionShared) runRelease(
 	ctx context.Context,
 ) (vmexecsessionwire.Outcome, error) {
-	finishCancellation := shared.watchCancellation(ctx)
-	if err := vmexecsessionwire.EncodeRelease(ctx, shared.control); err != nil {
-		finishCancellation()
-		cleanupErr := shared.cleanup(true, true)
-		return vmexecsessionwire.Outcome{}, privilegedVMExecSessionFailure(true, true, errors.Join(err, cleanupErr))
-	}
-	if err := shared.deps.shutdown(context.Background(), shared.control, unix.SHUT_WR); err != nil &&
-		!errors.Is(err, unix.ENOTCONN) {
-		finishCancellation()
-		cleanupErr := shared.cleanup(true, true)
-		return vmexecsessionwire.Outcome{}, privilegedVMExecSessionFailure(true, true, errors.Join(err, cleanupErr))
-	}
-	outcome, err := vmexecsessionwire.DecodeOutcome(ctx, shared.control)
-	finishCancellation()
+	phase := shared.beginPhase()
+	finishCancellation := shared.watchCancellation(ctx, phase)
+	control, err := shared.pinControl(ctx)
 	if err != nil {
+		finishCancellation()
+		shared.endPhase(phase)
 		cleanupErr := shared.cleanup(true, true)
 		return vmexecsessionwire.Outcome{}, privilegedVMExecSessionFailure(true, true, errors.Join(err, cleanupErr))
 	}
-	if shared.wasInterrupted() {
+	if err := vmexecsessionwire.EncodeRelease(ctx, control); err != nil {
+		finishCancellation()
+		shared.endPhase(phase)
+		pinCloseErr := closePrivilegedVMExecSessionFile(context.Background(), shared.deps, control)
 		cleanupErr := shared.cleanup(true, true)
 		return vmexecsessionwire.Outcome{}, privilegedVMExecSessionFailure(
 			true,
 			true,
-			errors.Join(errors.New("retained VM-exec terminal response followed local interruption"), cleanupErr),
+			errors.Join(err, pinCloseErr, cleanupErr),
 		)
 	}
-	cleanupErr := shared.cleanup(false, outcome.OperationError() != nil)
-	if cleanupErr != nil {
-		return outcome, privilegedVMExecSessionFailure(true, false, cleanupErr)
+	if err := shared.deps.shutdown(context.Background(), control, unix.SHUT_WR); err != nil &&
+		!errors.Is(err, unix.ENOTCONN) {
+		finishCancellation()
+		shared.endPhase(phase)
+		pinCloseErr := closePrivilegedVMExecSessionFile(context.Background(), shared.deps, control)
+		cleanupErr := shared.cleanup(true, true)
+		return vmexecsessionwire.Outcome{}, privilegedVMExecSessionFailure(
+			true,
+			true,
+			errors.Join(err, pinCloseErr, cleanupErr),
+		)
+	}
+	outcome, err := vmexecsessionwire.DecodeOutcome(context.WithoutCancel(ctx), control)
+	decodeWon := phase.completeDecode()
+	finishCancellation()
+	shared.endPhase(phase)
+	pinCloseErr := closePrivilegedVMExecSessionFile(context.Background(), shared.deps, control)
+	if err != nil {
+		cleanupErr := shared.cleanup(true, true)
+		return vmexecsessionwire.Outcome{}, privilegedVMExecSessionFailure(
+			true,
+			true,
+			errors.Join(err, pinCloseErr, cleanupErr),
+		)
+	}
+	if !decodeWon {
+		cleanupErr := shared.cleanup(true, true)
+		return vmexecsessionwire.Outcome{}, privilegedVMExecSessionFailure(
+			true,
+			true,
+			errors.Join(
+				errors.New("retained VM-exec terminal response followed local interruption"),
+				pinCloseErr,
+				cleanupErr,
+			),
+		)
+	}
+	cleanupErr := shared.cleanup(false, true)
+	if pinCloseErr != nil || cleanupErr != nil {
+		return outcome, privilegedVMExecSessionFailure(true, false, errors.Join(pinCloseErr, cleanupErr))
 	}
 	return outcome, nil
 }
 
-func (shared *privilegedVMExecSessionShared) watchCancellation(ctx context.Context) func() {
+func (shared *privilegedVMExecSessionShared) watchCancellation(
+	ctx context.Context,
+	phase *privilegedVMExecSessionPhaseArbiter,
+) func() {
 	done := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
 		defer close(done)
-		_ = shared.cleanup(true, true)
+		if phase.interrupt() {
+			_ = shared.cleanup(true, true)
+		}
 	})
 	return func() {
 		if !stop() {
@@ -472,49 +595,106 @@ func (session *PrivilegedVMExecSession) Cancel(ctx context.Context) error {
 
 func (shared *privilegedVMExecSessionShared) cleanup(kill bool, ignoreWaitError bool) error {
 	if kill {
-		shared.mu.Lock()
-		shared.interrupted = true
-		shared.mu.Unlock()
+		shared.interruptActivePhase()
 	}
 	shared.cleanupOnce.Do(func() {
 		cleanupCtx := context.Background()
 		var cleanupErrors []error
-		if err := shared.deps.shutdown(cleanupCtx, shared.control, unix.SHUT_RDWR); err != nil &&
-			!errors.Is(err, unix.ENOTCONN) {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("shutdown retained VM-exec control socket: %w", err))
+		if err := shared.closeControl(cleanupCtx); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
 		}
 		if kill {
 			if err := shared.killGroup(cleanupCtx); err != nil {
 				cleanupErrors = append(cleanupErrors, err)
 			}
 		}
-		waitErr, timedOut := waitPrivilegedVMExecSession(shared.waitResult, shared.policy.reapTimeout)
-		if timedOut && !kill {
-			if err := shared.killGroup(cleanupCtx); err != nil {
-				cleanupErrors = append(cleanupErrors, err)
-			}
-			waitErr, timedOut = waitPrivilegedVMExecSession(shared.waitResult, shared.policy.reapTimeout)
-		}
+		waitResult := shared.startWait()
+		waitErr, timedOut := waitPrivilegedVMExecSession(waitResult, shared.policy.reapTimeout)
 		if timedOut {
 			cleanupErrors = append(
 				cleanupErrors,
 				errors.New("retained VM-exec sidecar did not exit before reap deadline"),
 			)
+			if err := shared.killStableProcess(cleanupCtx); err != nil {
+				cleanupErrors = append(cleanupErrors, err)
+			}
+			waitErr, timedOut = waitPrivilegedVMExecSession(waitResult, shared.policy.reapTimeout)
+		}
+		if timedOut {
+			cleanupErrors = append(
+				cleanupErrors,
+				errors.New("retained VM-exec sidecar did not exit after stable process kill"),
+			)
 		} else if waitErr != nil && !ignoreWaitError {
 			cleanupErrors = append(cleanupErrors, fmt.Errorf("wait for retained VM-exec sidecar: %w", waitErr))
-		}
-		if err := closePrivilegedVMExecSessionFile(cleanupCtx, shared.deps, shared.control); err != nil {
-			cleanupErrors = append(cleanupErrors, fmt.Errorf("close retained VM-exec control socket: %w", err))
 		}
 		shared.cleanupErr = errors.Join(cleanupErrors...)
 	})
 	return shared.cleanupErr
 }
 
-func (shared *privilegedVMExecSessionShared) wasInterrupted() bool {
+func (shared *privilegedVMExecSessionShared) beginPhase() *privilegedVMExecSessionPhaseArbiter {
+	phase := &privilegedVMExecSessionPhaseArbiter{}
 	shared.mu.Lock()
-	defer shared.mu.Unlock()
-	return shared.interrupted
+	shared.activePhase = phase
+	shared.mu.Unlock()
+	return phase
+}
+
+func (shared *privilegedVMExecSessionShared) endPhase(phase *privilegedVMExecSessionPhaseArbiter) {
+	shared.mu.Lock()
+	if shared.activePhase == phase {
+		shared.activePhase = nil
+	}
+	shared.mu.Unlock()
+}
+
+func (shared *privilegedVMExecSessionShared) interruptActivePhase() {
+	shared.mu.Lock()
+	phase := shared.activePhase
+	if phase != nil {
+		phase.interrupt()
+	}
+	shared.mu.Unlock()
+}
+
+func (shared *privilegedVMExecSessionShared) pinControl(ctx context.Context) (*os.File, error) {
+	shared.lifecycleMu.Lock()
+	defer shared.lifecycleMu.Unlock()
+	if shared.controlClosed || shared.control == nil {
+		return nil, errors.New("retained VM-exec control socket is closed")
+	}
+	return shared.deps.duplicateControl(ctx, shared.control)
+}
+
+func (shared *privilegedVMExecSessionShared) closeControl(ctx context.Context) error {
+	shared.lifecycleMu.Lock()
+	defer shared.lifecycleMu.Unlock()
+	if shared.controlClosed || shared.control == nil {
+		return nil
+	}
+	control := shared.control
+	shared.control = nil
+	shared.controlClosed = true
+	var closeErrors []error
+	if err := shared.deps.shutdown(ctx, control, unix.SHUT_RDWR); err != nil && !errors.Is(err, unix.ENOTCONN) {
+		closeErrors = append(closeErrors, fmt.Errorf("shutdown retained VM-exec control socket: %w", err))
+	}
+	if err := closePrivilegedVMExecSessionFile(ctx, shared.deps, control); err != nil {
+		closeErrors = append(closeErrors, fmt.Errorf("close retained VM-exec control socket: %w", err))
+	}
+	return errors.Join(closeErrors...)
+}
+
+func (shared *privilegedVMExecSessionShared) startWait() <-chan error {
+	shared.waitOnce.Do(func() {
+		waitResult := make(chan error, 1)
+		shared.waitResult = waitResult
+		go func() {
+			waitResult <- shared.deps.wait(context.Background(), shared.command)
+		}()
+	})
+	return shared.waitResult
 }
 
 func (shared *privilegedVMExecSessionShared) killGroup(ctx context.Context) error {
@@ -523,6 +703,16 @@ func (shared *privilegedVMExecSessionShared) killGroup(ctx context.Context) erro
 	}
 	if err := shared.deps.killGroup(ctx, shared.command.Process.Pid); err != nil && !errors.Is(err, unix.ESRCH) {
 		return fmt.Errorf("kill retained VM-exec sidecar process group: %w", err)
+	}
+	return nil
+}
+
+func (shared *privilegedVMExecSessionShared) killStableProcess(ctx context.Context) error {
+	if shared.command == nil || shared.command.Process == nil {
+		return nil
+	}
+	if err := shared.deps.killProcess(ctx, shared.command.Process); err != nil {
+		return fmt.Errorf("kill retained VM-exec sidecar process: %w", err)
 	}
 	return nil
 }
@@ -539,6 +729,23 @@ func waitPrivilegedVMExecSession(waitResult <-chan error, timeout time.Duration)
 	case <-timer.C:
 		return nil, true
 	}
+}
+
+func duplicatePrivilegedVMExecSessionControl(
+	ctx context.Context,
+	control *os.File,
+) (*os.File, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if control == nil || control.Fd() == ^uintptr(0) {
+		return nil, errors.New("retained VM-exec control socket is invalid")
+	}
+	duplicatedFD, err := unix.FcntlInt(control.Fd(), unix.F_DUPFD_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(duplicatedFD), "mvm-privileged-vm-exec-session-phase"), nil
 }
 
 func sendPrivilegedVMExecSessionDuplicate(

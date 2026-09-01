@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -99,7 +100,7 @@ func TestPrivilegedVMExecSessionReturnsTrustedTerminalFailure(t *testing.T) {
 	require.NotNil(t, command.ProcessState)
 }
 
-func TestPrivilegedVMExecSessionRequiresBoundedReapForSuccessfulRelease(t *testing.T) {
+func TestPrivilegedVMExecSessionTreatsNonzeroWaitAsSecondaryAfterTrustedRelease(t *testing.T) {
 	sourceDuplicate, closeSourcePeer := requireVMExecSessionSocket(t)
 	t.Cleanup(closeSourcePeer)
 	deps, command := vmExecSessionHelperDeps("happy")
@@ -127,7 +128,7 @@ func TestPrivilegedVMExecSessionRequiresBoundedReapForSuccessfulRelease(t *testi
 	outcome, err := session.Release(ctx)
 
 	assert.True(t, outcome.Released())
-	assertVMExecSessionTransportError(t, err, true, false)
+	require.NoError(t, err)
 	require.NotNil(t, (*command).ProcessState)
 }
 
@@ -165,6 +166,44 @@ func TestPrivilegedVMExecSessionReturnsTypedEarlyFailures(t *testing.T) {
 		assert.ErrorIs(t, destinationDuplicate.Close(), os.ErrClosed)
 		require.NotNil(t, command.ProcessState)
 		assert.True(t, command.ProcessState.Exited())
+	})
+
+	t.Run("cleanup failure replaces typed operation authority", func(t *testing.T) {
+		sourceDuplicate, closeSourcePeer := requireVMExecSessionSocket(t)
+		t.Cleanup(closeSourcePeer)
+		deps, command := vmExecSessionHelperDeps("open-failure")
+		realSocketPair := deps.socketPair
+		var parent *os.File
+		deps.socketPair = func(ctx context.Context) (*os.File, *os.File, error) {
+			var child *os.File
+			var err error
+			parent, child, err = realSocketPair(ctx)
+			return parent, child, err
+		}
+		closeSentinel := errors.New("close control failed")
+		realClose := deps.closeFile
+		deps.closeFile = func(ctx context.Context, file *os.File) error {
+			err := realClose(ctx, file)
+			if file == parent {
+				return errors.Join(err, closeSentinel)
+			}
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		t.Cleanup(cancel)
+
+		session, err := openPrivilegedVMExecSession(
+			ctx,
+			testVMExecOpenSource,
+			sourceDuplicate,
+			deps,
+			productionPrivilegedVMExecSessionPolicy(),
+		)
+
+		assert.Nil(t, session)
+		assertVMExecSessionTransportError(t, err, true, false)
+		assert.ErrorIs(t, err, closeSentinel)
+		require.NotNil(t, (*command).ProcessState)
 	})
 }
 
