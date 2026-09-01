@@ -33,26 +33,26 @@ type pinnedProcess interface {
 
 type sourceProcessEffects interface {
 	ResolveAccount(ctx context.Context, username string) (sourceAccount, error)
-	PeerCredentials(ctx context.Context, conn net.Conn) (peerCredentials, error)
-	Pin(ctx context.Context, pid int) (pinnedProcess, error)
+	PeerCredentials(ctx context.Context, conn net.Conn) (peerCredentials, pinnedProcess, error)
+	AdoptProcess(ctx context.Context, pid int, pidFD int) (pinnedProcess, error)
 	ReadIdentity(ctx context.Context, pid int) (processIdentity, error)
 }
 
 func (a *Agent) claimSourceForPeer(ctx context.Context, conn net.Conn) (*sourceBinding, error) {
-	credentials, err := a.sourceProcesses.PeerCredentials(ctx, conn)
+	credentials, peerPin, err := a.sourceProcesses.PeerCredentials(ctx, conn)
 	if err != nil {
 		return nil, fmt.Errorf("read local peer credentials: %w", err)
-	}
-	peerPin, err := a.sourceProcesses.Pin(ctx, credentials.PID)
-	if err != nil {
-		return nil, fmt.Errorf("pin local peer: %w", err)
 	}
 	claimed := false
 	defer func() {
 		if !claimed {
+			// A rejected peer has no later owner for its atomically acquired pidfd.
 			_ = peerPin.Close()
 		}
 	}()
+	if _, err := stablePinnedIdentity(ctx, a.sourceProcesses, peerPin, credentials.PID); err != nil {
+		return nil, fmt.Errorf("identify local peer: %w", err)
+	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, sourcePublicationWait)
 	defer cancel()
@@ -156,6 +156,12 @@ func processDescendsFrom(
 	second, secondMatch, err := sourceParentPath(ctx, effects, peerPID, root)
 	if err != nil {
 		return false, err
+	}
+	if err := peerPin.Alive(ctx); err != nil {
+		return false, fmt.Errorf("local peer died before claim: %w", err)
+	}
+	if err := rootPin.Alive(ctx); err != nil {
+		return false, fmt.Errorf("source command died before claim: %w", err)
 	}
 	if !slices.Equal(first, second) || firstMatch != secondMatch {
 		return false, fmt.Errorf("local peer process ancestry changed during admission")

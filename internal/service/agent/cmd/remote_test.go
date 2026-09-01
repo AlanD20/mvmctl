@@ -3,12 +3,16 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"os"
+	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -63,8 +67,8 @@ func TestRemoteSubcommandUsesVMExecWireAndPreservesBinaryOutput(t *testing.T) {
 		return exitCode
 	})
 	assert.Equal(t, 42, exitCode)
-	assert.Equal(t, wantStdout, []byte(stdout))
-	assert.Equal(t, wantStderr, []byte(stderr))
+	assert.Empty(t, cmp.Diff(wantStdout, []byte(stdout)))
+	assert.Empty(t, cmp.Diff(wantStderr, []byte(stderr)))
 
 	request := <-requests
 	assert.Len(t, request.RequestID, 32)
@@ -139,6 +143,107 @@ func TestRemoteSubcommandRedactsRequestDataFromFailures(t *testing.T) {
 	assert.NotContains(t, stderr, secretCommand)
 	assert.NotContains(t, stderr, request.RequestID)
 	assert.NotContains(t, stderr, "source_session_id")
+}
+
+func TestRemoteExchangeRedactsTerminalErrorAndRequiresEOF(t *testing.T) {
+	client := startSourceDaemon(t, func(conn net.Conn) {
+		request, err := vmexecwire.DecodeSourceRequest(context.Background(), conn)
+		if err != nil {
+			return
+		}
+		writer, err := vmexecwire.NewResponseWriter(conn, request.RequestID)
+		if err == nil {
+			_ = writer.WriteError(context.Background(), "echo command-secret-7c25")
+		}
+	})
+
+	status := -1
+	_, stderr := captureRemoteOutput(t, func() int {
+		status = runRemoteExchange(client, vmexecwire.SourceRequest{
+			RequestID:   "00112233445566778899aabbccddeeff",
+			Destination: "target",
+			TargetUser:  "alice",
+			Command:     "echo command-secret-7c25",
+		})
+		return status
+	})
+	assert.Equal(t, 1, status)
+	assert.Contains(t, stderr, "source execution failed")
+	assert.NotContains(t, stderr, "command-secret-7c25")
+}
+
+func TestRunRemoteSubcommandUsesUnixBrokerContractAndDistinctRequestIDs(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "agent.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if errors.Is(err, syscall.EPERM) {
+		t.Skip("sandbox does not permit creating an AF_UNIX listener")
+	}
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	requests := make(chan vmexecwire.SourceRequest, 2)
+	serverDone := make(chan error, 1)
+	go func() {
+		for index := range 2 {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				serverDone <- acceptErr
+				return
+			}
+			request, decodeErr := vmexecwire.DecodeSourceRequest(context.Background(), conn)
+			if decodeErr == nil {
+				requests <- request
+				var writer *vmexecwire.ResponseWriter
+				writer, decodeErr = vmexecwire.NewResponseWriter(conn, request.RequestID)
+				if decodeErr == nil && index == 0 {
+					decodeErr = writer.WriteResult(context.Background(), 23, time.Millisecond)
+				}
+				if decodeErr == nil && index == 1 {
+					decodeErr = writer.WriteError(context.Background(), "echo request-secret")
+				}
+			}
+			closeErr := conn.Close()
+			if decodeErr != nil {
+				serverDone <- decodeErr
+				return
+			}
+			if closeErr != nil {
+				serverDone <- closeErr
+				return
+			}
+		}
+		serverDone <- nil
+	}()
+
+	firstStatus := -1
+	_, firstStderr := captureRemoteOutput(t, func() int {
+		firstStatus = runRemoteSubcommand(
+			socketPath, []string{"--user", "alice", "target-one", "--", "printf", "first"},
+		)
+		return firstStatus
+	})
+	assert.Equal(t, 23, firstStatus)
+	assert.Empty(t, firstStderr)
+	secondStatus := -1
+	_, secondStderr := captureRemoteOutput(t, func() int {
+		secondStatus = runRemoteSubcommand(
+			socketPath, []string{"--user", "bob", "target-two", "--", "printf", "second"},
+		)
+		return secondStatus
+	})
+	assert.Equal(t, 1, secondStatus)
+	assert.Contains(t, secondStderr, "source execution failed")
+	assert.NotContains(t, secondStderr, "request-secret")
+	require.NoError(t, <-serverDone)
+
+	first := <-requests
+	second := <-requests
+	assert.Empty(t, cmp.Diff(vmexecwire.SourceRequest{
+		RequestID: first.RequestID, Destination: "target-one", TargetUser: "alice", Command: "printf first",
+	}, first))
+	assert.Empty(t, cmp.Diff(vmexecwire.SourceRequest{
+		RequestID: second.RequestID, Destination: "target-two", TargetUser: "bob", Command: "printf second",
+	}, second))
+	assert.NotEqual(t, first.RequestID, second.RequestID)
 }
 
 func startSourceDaemon(t *testing.T, respond func(net.Conn)) net.Conn {

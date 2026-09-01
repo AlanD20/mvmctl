@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
+	"io"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"mvmctl/pkg/errs"
 )
 
 const testSourceToken = "123e4567-e89b-42d3-a456-426614174000"
@@ -24,7 +29,7 @@ func TestSourceBootstrapRoundTrip(t *testing.T) {
 
 	got, err := DecodeSourceBootstrap(t.Context(), &wire)
 	require.NoError(t, err)
-	assert.Equal(t, request, got)
+	assert.Empty(t, cmp.Diff(request, got))
 }
 
 func TestSourceReadyRoundTrip(t *testing.T) {
@@ -34,7 +39,55 @@ func TestSourceReadyRoundTrip(t *testing.T) {
 
 	got, err := DecodeSourceReady(t.Context(), &wire, want.SourceSessionID)
 	require.NoError(t, err)
-	assert.Equal(t, want, got)
+	assert.Empty(t, cmp.Diff(want, got))
+}
+
+func TestSourceBootstrapUsesFrozenBoundAndDomainErrors(t *testing.T) {
+	assert.Equal(t, 512, MaxSourceBootstrapBytes)
+
+	_, err := DecodeSourceBootstrap(t.Context(), bytes.NewReader(nil))
+	require.Error(t, err)
+	domainErr := errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeValidationFailed, domainErr.Code)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = EncodeSourceBootstrap(ctx, io.Discard, SourceBootstrap{
+		AgentToken:      testSourceToken,
+		SourceSessionID: "00112233445566778899aabbccddeeff",
+	})
+	require.Error(t, err)
+	domainErr = errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	err = EncodeSourceBootstrap(t.Context(), failingWriter{}, SourceBootstrap{
+		AgentToken:      testSourceToken,
+		SourceSessionID: "00112233445566778899aabbccddeeff",
+	})
+	require.Error(t, err)
+	domainErr = errs.AsDomainError(err)
+	require.NotNil(t, domainErr)
+	assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+}
+
+func TestSourceReadyRejectsMalformedFrames(t *testing.T) {
+	tests := map[string]string{
+		"unknown field":   `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","extra":true}`,
+		"duplicate field": `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","source_session_id":"00112233445566778899aabbccddeeff"}`,
+		"case collision":  `{"schema_version":1,"source_session_id":"00112233445566778899aabbccddeeff","Source_Session_ID":"00112233445566778899aabbccddeeff"}`,
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			wire := rawSourceFrame(t, SourceSessionMagic, SourceSessionVersion, []byte(body))
+			_, err := DecodeSourceReady(
+				t.Context(), bytes.NewReader(wire), "00112233445566778899aabbccddeeff",
+			)
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestSourceBootstrapRejectsMalformedFrames(t *testing.T) {
@@ -162,3 +215,7 @@ func rawSourceFrame(t *testing.T, magic string, version uint16, body []byte) []b
 	binary.BigEndian.PutUint32(prefix[len(SourceSessionMagic)+2:], uint32(len(body)))
 	return append(prefix, body...)
 }
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }

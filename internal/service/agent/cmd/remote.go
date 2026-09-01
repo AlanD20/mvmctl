@@ -40,15 +40,15 @@ func runRemoteExchange(conn net.Conn, request vmexecwire.SourceRequest) int {
 	}
 
 	exitCode := -1
-	terminalError := ""
+	terminalError := false
 	for {
 		frame, readErr := reader.Read(context.Background())
 		if errors.Is(readErr, io.EOF) {
 			if exitCode >= 0 {
 				return exitCode
 			}
-			if terminalError != "" {
-				fmt.Fprintln(os.Stderr, "error: "+terminalError)
+			if terminalError {
+				fmt.Fprintln(os.Stderr, "error: source execution failed")
 				return 1
 			}
 			fmt.Fprintln(os.Stderr, "error: invalid source response")
@@ -71,7 +71,7 @@ func runRemoteExchange(conn net.Conn, request vmexecwire.SourceRequest) int {
 		case vmexecwire.ResultFrame:
 			exitCode = value.ExitCode
 		case vmexecwire.ErrorFrame:
-			terminalError = value.Message
+			terminalError = true
 		}
 	}
 }

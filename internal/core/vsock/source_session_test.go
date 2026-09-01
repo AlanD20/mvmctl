@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -162,4 +163,125 @@ func TestSourceSessionRejectsInvalidConstruction(t *testing.T) {
 	_, err = NewSourceSession(hostConn, "invalid")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "canonical lowercase UUIDv4")
+}
+
+func TestSourceSessionCanceledPartialOpenClosesTransport(t *testing.T) {
+	hostConn, agentConn := net.Pipe()
+	session, err := NewSourceSession(hostConn, sourceSessionTestToken)
+	require.NoError(t, err)
+	bootstrapRead := make(chan struct{})
+	go func() {
+		_, _ = vmexecwire.DecodeSourceBootstrap(context.Background(), agentConn)
+		close(bootstrapRead)
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, openErr := session.Open(ctx)
+		result <- openErr
+	}()
+	<-bootstrapRead
+	cancel()
+	select {
+	case openErr := <-result:
+		require.Error(t, openErr)
+	case <-time.After(time.Second):
+		t.Fatal("partial source bootstrap outlived cancellation")
+	}
+	_, err = agentConn.Read(make([]byte, 1))
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestSourceSessionCanceledPartialRequestClosesTransport(t *testing.T) {
+	hostConn, agentConn := net.Pipe()
+	session, err := NewSourceSession(hostConn, sourceSessionTestToken)
+	require.NoError(t, err)
+	lifetime, stopLifetime := context.WithCancel(context.Background())
+	t.Cleanup(stopLifetime)
+	ready := make(chan struct{})
+	go func() {
+		bootstrap, decodeErr := vmexecwire.DecodeSourceBootstrap(context.Background(), agentConn)
+		if decodeErr == nil {
+			decodeErr = vmexecwire.EncodeSourceReady(context.Background(), agentConn, vmexecwire.SourceReady{
+				SourceSessionID: bootstrap.SourceSessionID,
+			})
+		}
+		close(ready)
+	}()
+	_, err = session.Open(lifetime)
+	require.NoError(t, err)
+	<-ready
+
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, readErr := session.ReadRequest(requestCtx)
+		result <- readErr
+	}()
+	_, err = agentConn.Write([]byte("MVM"))
+	require.NoError(t, err)
+	cancelRequest()
+	select {
+	case readErr := <-result:
+		require.Error(t, readErr)
+	case <-time.After(time.Second):
+		t.Fatal("partial source request outlived cancellation")
+	}
+}
+
+func TestSourceSessionTerminalWriteFailureClosesOnceAndRepeatsCloseError(t *testing.T) {
+	hostPipe, agentConn := net.Pipe()
+	closeErr := errors.New("close failed")
+	hostConn := &controlledSourceConn{Conn: hostPipe, closeErr: closeErr}
+	session, err := NewSourceSession(hostConn, sourceSessionTestToken)
+	require.NoError(t, err)
+	requestID := "00112233445566778899aabbccddeeff"
+	go func() {
+		bootstrap, decodeErr := vmexecwire.DecodeSourceBootstrap(context.Background(), agentConn)
+		if decodeErr == nil {
+			decodeErr = vmexecwire.EncodeSourceReady(context.Background(), agentConn, vmexecwire.SourceReady{
+				SourceSessionID: bootstrap.SourceSessionID,
+			})
+		}
+		if decodeErr == nil {
+			_ = vmexecwire.EncodeSourceRequest(context.Background(), agentConn, vmexecwire.SourceRequest{
+				RequestID: requestID, Destination: "target", TargetUser: "alice", Command: "true",
+			})
+		}
+	}()
+	_, err = session.Open(t.Context())
+	require.NoError(t, err)
+	_, err = session.ReadRequest(t.Context())
+	require.NoError(t, err)
+	hostConn.failWrites.Store(true)
+
+	err = session.WriteResult(t.Context(), 0, 0)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, errControlledWrite)
+	assert.ErrorIs(t, err, closeErr)
+	assert.ErrorIs(t, session.Close(), closeErr)
+	assert.Equal(t, int32(1), hostConn.closeCalls.Load())
+}
+
+var errControlledWrite = errors.New("controlled write failure")
+
+type controlledSourceConn struct {
+	net.Conn
+	failWrites atomic.Bool
+	closeCalls atomic.Int32
+	closeErr   error
+}
+
+func (conn *controlledSourceConn) Write(value []byte) (int, error) {
+	if conn.failWrites.Load() {
+		return 0, errControlledWrite
+	}
+	return conn.Conn.Write(value)
+}
+
+func (conn *controlledSourceConn) Close() error {
+	conn.closeCalls.Add(1)
+	_ = conn.Conn.Close()
+	return conn.closeErr
 }

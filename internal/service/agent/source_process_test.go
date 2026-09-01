@@ -14,16 +14,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/lib/vmexecwire"
 )
 
 type fakePinnedProcess struct {
-	mu       sync.Mutex
-	aliveErr error
-	closed   bool
+	mu        sync.Mutex
+	aliveErr  error
+	aliveSeq  []error
+	aliveCall int
+	closed    bool
+	closes    int
 }
 
 func (pin *fakePinnedProcess) Alive(context.Context) error {
@@ -32,12 +37,21 @@ func (pin *fakePinnedProcess) Alive(context.Context) error {
 	if pin.closed {
 		return errors.New("pin closed")
 	}
+	if len(pin.aliveSeq) > 0 {
+		index := pin.aliveCall
+		pin.aliveCall++
+		if index >= len(pin.aliveSeq) {
+			index = len(pin.aliveSeq) - 1
+		}
+		return pin.aliveSeq[index]
+	}
 	return pin.aliveErr
 }
 
 func (pin *fakePinnedProcess) Close() error {
 	pin.mu.Lock()
 	pin.closed = true
+	pin.closes++
 	pin.mu.Unlock()
 	return nil
 }
@@ -45,35 +59,61 @@ func (pin *fakePinnedProcess) Close() error {
 type fakeSourceProcessEffects struct {
 	mu sync.Mutex
 
-	account       sourceAccount
-	accountErr    error
-	accountCalls  int
-	credentials   peerCredentials
-	credentialErr error
-	pins          map[int]*fakePinnedProcess
-	identities    map[int][]processIdentity
-	identityFunc  func(int) processIdentity
-	readCounts    map[int]int
+	account         sourceAccount
+	accountErr      error
+	accountCalls    int
+	accountNames    []string
+	credentials     peerCredentials
+	credentialFunc  func(net.Conn) peerCredentials
+	credentialErr   error
+	credentialsRead chan struct{}
+	credentialOnce  sync.Once
+	pins            map[int]*fakePinnedProcess
+	peerPins        []*fakePinnedProcess
+	identities      map[int][]processIdentity
+	identityFunc    func(int) processIdentity
+	readCounts      map[int]int
 }
 
 func (effects *fakeSourceProcessEffects) ResolveAccount(
-	context.Context,
-	string,
+	_ context.Context,
+	username string,
 ) (sourceAccount, error) {
 	effects.mu.Lock()
 	effects.accountCalls++
+	effects.accountNames = append(effects.accountNames, username)
 	effects.mu.Unlock()
 	return effects.account, effects.accountErr
 }
 
 func (effects *fakeSourceProcessEffects) PeerCredentials(
-	context.Context,
-	net.Conn,
-) (peerCredentials, error) {
-	return effects.credentials, effects.credentialErr
+	_ context.Context,
+	conn net.Conn,
+) (peerCredentials, pinnedProcess, error) {
+	if effects.credentialErr != nil {
+		return peerCredentials{}, nil, effects.credentialErr
+	}
+	effects.mu.Lock()
+	pin := &fakePinnedProcess{}
+	effects.peerPins = append(effects.peerPins, pin)
+	effects.mu.Unlock()
+	effects.credentialOnce.Do(func() {
+		if effects.credentialsRead != nil {
+			close(effects.credentialsRead)
+		}
+	})
+	credentials := effects.credentials
+	if effects.credentialFunc != nil {
+		credentials = effects.credentialFunc(conn)
+	}
+	return credentials, pin, nil
 }
 
-func (effects *fakeSourceProcessEffects) Pin(_ context.Context, intPID int) (pinnedProcess, error) {
+func (effects *fakeSourceProcessEffects) AdoptProcess(
+	_ context.Context,
+	intPID int,
+	_ int,
+) (pinnedProcess, error) {
 	effects.mu.Lock()
 	defer effects.mu.Unlock()
 	if effects.pins == nil {
@@ -240,6 +280,23 @@ func TestProcessTreeAdmissionRejectsDepthLimit(t *testing.T) {
 	assert.Contains(t, err.Error(), "exceeds 64")
 }
 
+func TestProcessTreeAdmissionRechecksFinalLiveness(t *testing.T) {
+	effects := &fakeSourceProcessEffects{identities: map[int][]processIdentity{
+		300: {{PID: 300, ParentPID: 100, StartTime: 30}},
+		100: {{PID: 100, ParentPID: 1, StartTime: 10}},
+	}}
+	_, err := processDescendsFrom(
+		t.Context(),
+		effects,
+		&fakePinnedProcess{aliveSeq: []error{nil, nil, errors.New("exited")}},
+		300,
+		&fakePinnedProcess{},
+		processIdentity{PID: 100, ParentPID: 1, StartTime: 10},
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "died before claim")
+}
+
 func TestParseProcessStatHandlesNamesAndRejectsMalformedValues(t *testing.T) {
 	fields := []string{"S", "1"}
 	fields = append(fields, make([]string, 17)...)
@@ -249,7 +306,7 @@ func TestParseProcessStatHandlesNamesAndRejectsMalformedValues(t *testing.T) {
 	fields = append(fields, "99")
 	identity, err := parseProcessStat([]byte(fmt.Sprintf("123 (shell ) worker) %s\n", strings.Join(fields, " "))))
 	require.NoError(t, err)
-	assert.Equal(t, processIdentity{PID: 123, ParentPID: 1, StartTime: 99}, identity)
+	assert.Empty(t, cmp.Diff(processIdentity{PID: 123, ParentPID: 1, StartTime: 99}, identity))
 
 	for name, value := range map[string]string{
 		"missing close":   "123 (shell S 1",
@@ -363,8 +420,10 @@ func TestSourceClaimRejectsUIDGIDAndMultipleMatches(t *testing.T) {
 }
 
 func TestLocalPeerMayArriveBeforeSourceCommandPublication(t *testing.T) {
+	credentialsRead := make(chan struct{})
 	effects := &fakeSourceProcessEffects{
-		credentials: peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		credentials:     peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		credentialsRead: credentialsRead,
 		identities: map[int][]processIdentity{
 			300: {{PID: 300, ParentPID: 100, StartTime: 30}},
 			100: {{PID: 100, ParentPID: 1, StartTime: 10}},
@@ -386,7 +445,12 @@ func TestLocalPeerMayArriveBeforeSourceCommandPublication(t *testing.T) {
 		_, err := agent.claimSourceForPeer(context.Background(), local)
 		claimed <- err
 	}()
-	time.Sleep(10 * time.Millisecond)
+	<-credentialsRead
+	select {
+	case err := <-claimed:
+		t.Fatalf("claim completed before source publication: %v", err)
+	default:
+	}
 	agent.sourceMu.Lock()
 	binding.root = processIdentity{PID: 100, ParentPID: 1, StartTime: 10}
 	binding.rootPin = &fakePinnedProcess{}
@@ -395,6 +459,130 @@ func TestLocalPeerMayArriveBeforeSourceCommandPublication(t *testing.T) {
 	agent.sourceMu.Unlock()
 	assert.NoError(t, <-claimed)
 	agent.cleanupSourceBinding(binding)
+}
+
+func TestTransportCleanupInterruptsClaimedPartialRequest(t *testing.T) {
+	effects := &fakeSourceProcessEffects{
+		credentials: peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		identities: map[int][]processIdentity{
+			300: {{PID: 300, ParentPID: 100, StartTime: 30}},
+			100: {{PID: 100, ParentPID: 1, StartTime: 10}},
+		},
+	}
+	sourceAgent, sourceHost := net.Pipe()
+	t.Cleanup(func() { _ = sourceHost.Close() })
+	binding := testPublishedBinding(
+		"00112233445566778899aabbccddeeff",
+		sourceAccount{UID: 1001, GID: 1002},
+		processIdentity{PID: 100, ParentPID: 1, StartTime: 10},
+		&fakePinnedProcess{},
+	)
+	binding.transport = newSourceTransport(sourceAgent)
+	agent := testSourceAgent(effects, binding)
+	localAgent, localCLI := net.Pipe()
+	t.Cleanup(func() { _ = localCLI.Close() })
+	done := make(chan struct{})
+	go func() {
+		agent.handleLocalConn(context.Background(), localAgent)
+		close(done)
+	}()
+
+	waitForSourceClaim(t, agent, binding)
+	agent.cleanupSourceBinding(binding)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("transport cleanup did not interrupt a claimed partial request")
+	}
+}
+
+func TestConcurrentSourceClaimsHaveExactlyOneWinnerAndClosePeerPinsOnce(t *testing.T) {
+	effects := &fakeSourceProcessEffects{
+		credentials: peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		identities: map[int][]processIdentity{
+			300: {{PID: 300, ParentPID: 100, StartTime: 30}},
+			100: {{PID: 100, ParentPID: 1, StartTime: 10}},
+		},
+	}
+	binding := testPublishedBinding(
+		"00112233445566778899aabbccddeeff",
+		sourceAccount{UID: 1001, GID: 1002},
+		processIdentity{PID: 100, ParentPID: 1, StartTime: 10},
+		&fakePinnedProcess{},
+	)
+	agent := testSourceAgent(effects, binding)
+	first, firstPeer := net.Pipe()
+	second, secondPeer := net.Pipe()
+	t.Cleanup(func() { _ = first.Close(); _ = firstPeer.Close() })
+	t.Cleanup(func() { _ = second.Close(); _ = secondPeer.Close() })
+	results := make(chan error, 2)
+	go func() { _, err := agent.claimSourceForPeer(t.Context(), first); results <- err }()
+	go func() { _, err := agent.claimSourceForPeer(t.Context(), second); results <- err }()
+	firstErr, secondErr := <-results, <-results
+	winners := 0
+	if firstErr == nil {
+		winners++
+	}
+	if secondErr == nil {
+		winners++
+	}
+	assert.Equal(t, 1, winners)
+	agent.cleanupSourceBinding(binding)
+	agent.cleanupSourceBinding(binding)
+	effects.mu.Lock()
+	defer effects.mu.Unlock()
+	for _, pin := range effects.peerPins {
+		pin.mu.Lock()
+		assert.Equal(t, 1, pin.closes)
+		pin.mu.Unlock()
+	}
+}
+
+func TestUnrelatedRootPeerWithSameCredentialsIsRejected(t *testing.T) {
+	effects := &fakeSourceProcessEffects{
+		credentials: peerCredentials{PID: 300, UID: 0, GID: 0},
+		identities: map[int][]processIdentity{
+			300: {{PID: 300, ParentPID: 50, StartTime: 30}},
+			50:  {{PID: 50, ParentPID: 1, StartTime: 5}},
+		},
+	}
+	binding := testPublishedBinding(
+		"00112233445566778899aabbccddeeff",
+		sourceAccount{UID: 0, GID: 0},
+		processIdentity{PID: 100, ParentPID: 1, StartTime: 10},
+		&fakePinnedProcess{},
+	)
+	agent := testSourceAgent(effects, binding)
+	local, peer := net.Pipe()
+	t.Cleanup(func() { _ = local.Close(); _ = peer.Close() })
+	_, err := agent.claimSourceForPeer(t.Context(), local)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not a descendant")
+}
+
+func TestSourceClaimRejectsStablePeerPIDReuseMismatch(t *testing.T) {
+	effects := &fakeSourceProcessEffects{
+		credentials: peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		identities: map[int][]processIdentity{
+			300: {
+				{PID: 300, ParentPID: 100, StartTime: 30},
+				{PID: 300, ParentPID: 100, StartTime: 31},
+			},
+		},
+	}
+	binding := testPublishedBinding(
+		"00112233445566778899aabbccddeeff",
+		sourceAccount{UID: 1001, GID: 1002},
+		processIdentity{PID: 100, ParentPID: 1, StartTime: 10},
+		&fakePinnedProcess{},
+	)
+	agent := testSourceAgent(effects, binding)
+	local, peer := net.Pipe()
+	t.Cleanup(func() { _ = local.Close() })
+	t.Cleanup(func() { _ = peer.Close() })
+	_, err := agent.claimSourceForPeer(t.Context(), local)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "changed during admission")
 }
 
 func TestLocalSourceRelayUsesVMExecWireAndIsBinarySafe(t *testing.T) {
@@ -430,7 +618,7 @@ func TestLocalSourceRelayUsesVMExecWireAndIsBinarySafe(t *testing.T) {
 	require.NoError(t, vmexecwire.EncodeSourceRequest(t.Context(), localCLI, request))
 	forwarded, err := vmexecwire.DecodeSourceRequest(t.Context(), sourceHost)
 	require.NoError(t, err)
-	assert.Equal(t, request, forwarded)
+	assert.Empty(t, cmp.Diff(request, forwarded))
 
 	wantBinary := []byte{0x00, 0xff, '\n', 0x7f}
 	responseDone := make(chan error, 1)
@@ -454,7 +642,7 @@ func TestLocalSourceRelayUsesVMExecWireAndIsBinarySafe(t *testing.T) {
 	require.NoError(t, err)
 	stdout, ok := frame.(vmexecwire.StdoutFrame)
 	require.True(t, ok)
-	assert.Equal(t, wantBinary, stdout.Data)
+	assert.Empty(t, cmp.Diff(wantBinary, stdout.Data))
 	_, err = reader.Read(t.Context())
 	require.NoError(t, err)
 	_, err = reader.Read(t.Context())
@@ -462,6 +650,78 @@ func TestLocalSourceRelayUsesVMExecWireAndIsBinarySafe(t *testing.T) {
 	assert.NoError(t, <-responseDone)
 	_ = localCLI.Close()
 	<-handlerDone
+}
+
+func TestSharedAgentBindingsAttachInReverseOrderWithoutCrossWire(t *testing.T) {
+	firstLocalAgent, firstCLI := net.Pipe()
+	secondLocalAgent, secondCLI := net.Pipe()
+	firstSourceAgent, firstHost := net.Pipe()
+	secondSourceAgent, secondHost := net.Pipe()
+	t.Cleanup(func() { _ = firstCLI.Close() })
+	t.Cleanup(func() { _ = secondCLI.Close() })
+	t.Cleanup(func() { _ = firstHost.Close() })
+	t.Cleanup(func() { _ = secondHost.Close() })
+	effects := &fakeSourceProcessEffects{
+		credentialFunc: func(conn net.Conn) peerCredentials {
+			if conn == firstLocalAgent {
+				return peerCredentials{PID: 301, UID: 1001, GID: 1002}
+			}
+			return peerCredentials{PID: 302, UID: 1001, GID: 1002}
+		},
+		identities: map[int][]processIdentity{
+			301: {{PID: 301, ParentPID: 101, StartTime: 31}},
+			101: {{PID: 101, ParentPID: 1, StartTime: 11}},
+			302: {{PID: 302, ParentPID: 102, StartTime: 32}},
+			102: {{PID: 102, ParentPID: 1, StartTime: 12}},
+		},
+	}
+	firstBinding := testPublishedBinding(
+		"00112233445566778899aabbccddeeff",
+		sourceAccount{UID: 1001, GID: 1002},
+		processIdentity{PID: 101, ParentPID: 1, StartTime: 11},
+		&fakePinnedProcess{},
+	)
+	firstBinding.transport = newSourceTransport(firstSourceAgent)
+	secondBinding := testPublishedBinding(
+		"ffeeddccbbaa99887766554433221100",
+		sourceAccount{UID: 1001, GID: 1002},
+		processIdentity{PID: 102, ParentPID: 1, StartTime: 12},
+		&fakePinnedProcess{},
+	)
+	secondBinding.transport = newSourceTransport(secondSourceAgent)
+	agent := testSourceAgent(effects, firstBinding, secondBinding)
+	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+	go func() { agent.handleLocalConn(context.Background(), secondLocalAgent); close(secondDone) }()
+	go func() { agent.handleLocalConn(context.Background(), firstLocalAgent); close(firstDone) }()
+
+	secondRequest := vmexecwire.SourceRequest{
+		RequestID: "ffeeddccbbaa99887766554433221100", Destination: "second", TargetUser: "alice", Command: "true",
+	}
+	firstRequest := vmexecwire.SourceRequest{
+		RequestID: "00112233445566778899aabbccddeeff", Destination: "first", TargetUser: "alice", Command: "true",
+	}
+	require.NoError(t, vmexecwire.EncodeSourceRequest(t.Context(), secondCLI, secondRequest))
+	forwardedSecond, err := vmexecwire.DecodeSourceRequest(t.Context(), secondHost)
+	require.NoError(t, err)
+	assert.Empty(t, cmp.Diff(secondRequest, forwardedSecond))
+	require.NoError(t, vmexecwire.EncodeSourceRequest(t.Context(), firstCLI, firstRequest))
+	forwardedFirst, err := vmexecwire.DecodeSourceRequest(t.Context(), firstHost)
+	require.NoError(t, err)
+	assert.Empty(t, cmp.Diff(firstRequest, forwardedFirst))
+
+	require.NoError(t, secondCLI.Close())
+	require.NoError(t, firstCLI.Close())
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("second reverse-order relay did not stop")
+	}
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first reverse-order relay did not stop")
+	}
 }
 
 func TestLocalDisconnectCleansClaimedSourceSession(t *testing.T) {
@@ -515,9 +775,39 @@ func TestLocalDisconnectCleansClaimedSourceSession(t *testing.T) {
 
 func TestSourceCommandUsesFreshLinuxSession(t *testing.T) {
 	command := exec.Command("sh", "-c", "true")
-	configureSourceCommand(command)
+	pidFD := -1
+	configureSourceCommand(command, &pidFD)
 	require.NotNil(t, command.SysProcAttr)
 	assert.True(t, command.SysProcAttr.Setsid)
+	assert.Same(t, &pidFD, command.SysProcAttr.PidFD)
+	assert.Equal(t, 2*time.Second, command.WaitDelay)
+}
+
+func TestSourceCommandCancellationKillsDescendantHoldingOutputPipe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	command := exec.CommandContext(ctx, "sh", "-c", "echo ready; sleep 30 & wait")
+	started := make(chan struct{})
+	command.Stdout = &signalWriter{written: started}
+	pidFD := -1
+	configureSourceCommand(command, &pidFD)
+	require.NoError(t, command.Start())
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("source command did not publish its descendant barrier")
+	}
+	cancel()
+	waited := make(chan error, 1)
+	go func() { waited <- command.Wait() }()
+	select {
+	case err := <-waited:
+		require.Error(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("source command cancellation left a descendant holding output pipes")
+	}
+	if pidFD >= 0 {
+		assert.NoError(t, unix.Close(pidFD))
+	}
 }
 
 func TestNormalExecDoesNotTouchSourceSessionEffects(t *testing.T) {
@@ -552,6 +842,45 @@ func TestSourceExecRejectsMissingSessionBeforeStartingCommand(t *testing.T) {
 	assert.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestRootOuterSourceSessionIsAcceptedAndBoundToRootCredentials(t *testing.T) {
+	effects := &fakeSourceProcessEffects{account: sourceAccount{UID: 0, GID: 0}}
+	agent := testSourceAgent(effects)
+	transport := newSourceTransport(&discardConn{})
+	agent.pendingSources["00112233445566778899aabbccddeeff"] = transport
+
+	binding, err := agent.reserveSourceSession(
+		t.Context(), "00112233445566778899aabbccddeeff", "",
+	)
+	require.NoError(t, err)
+	assert.Empty(t, cmp.Diff(sourceAccount{UID: 0, GID: 0}, binding.account))
+	effects.mu.Lock()
+	assert.Equal(t, 1, effects.accountCalls)
+	assert.Empty(t, cmp.Diff([]string{"root"}, effects.accountNames))
+	effects.mu.Unlock()
+	agent.cleanupSourceBinding(binding)
+}
+
+func TestUnauthenticatedPartialLocalConnectionIsRejectedBeforeRequestRead(t *testing.T) {
+	effects := &fakeSourceProcessEffects{credentialErr: errors.New("unauthorized peer")}
+	agent := testSourceAgent(effects)
+	conn := &readCountingConn{}
+
+	agent.handleLocalConn(t.Context(), conn)
+	assert.Zero(t, conn.readCalls)
+	assert.True(t, conn.closed)
+}
+
+func TestSourceAdmissionHasFixedConcurrencyCap(t *testing.T) {
+	agent := testSourceAgent(&fakeSourceProcessEffects{})
+	for range maxSourceAdmissions {
+		assert.True(t, agent.beginSourceAdmission())
+	}
+	assert.False(t, agent.beginSourceAdmission())
+	for range maxSourceAdmissions {
+		<-agent.sourceAdmission
+	}
+}
+
 func testSourceAgent(effects sourceProcessEffects, bindings ...*sourceBinding) *Agent {
 	agent := &Agent{
 		pendingSources:  make(map[string]*sourceTransport),
@@ -563,6 +892,26 @@ func testSourceAgent(effects sourceProcessEffects, bindings ...*sourceBinding) *
 		agent.sourceBindings[binding.sessionID] = binding
 	}
 	return agent
+}
+
+func waitForSourceClaim(t *testing.T, agent *Agent, binding *sourceBinding) {
+	t.Helper()
+	watchdog := time.NewTimer(time.Second)
+	defer watchdog.Stop()
+	for {
+		agent.sourceMu.Lock()
+		claimed := binding.claimed
+		changed := agent.sourceChanged
+		agent.sourceMu.Unlock()
+		if claimed {
+			return
+		}
+		select {
+		case <-changed:
+		case <-watchdog.C:
+			t.Fatal("source binding was not claimed")
+		}
+	}
 }
 
 func testPublishedBinding(
@@ -593,3 +942,34 @@ func (*discardConn) RemoteAddr() net.Addr             { return &net.UnixAddr{} }
 func (*discardConn) SetDeadline(time.Time) error      { return nil }
 func (*discardConn) SetReadDeadline(time.Time) error  { return nil }
 func (*discardConn) SetWriteDeadline(time.Time) error { return nil }
+
+type readCountingConn struct {
+	readCalls int
+	closed    bool
+}
+
+func (conn *readCountingConn) Read([]byte) (int, error) {
+	conn.readCalls++
+	return 0, io.ErrUnexpectedEOF
+}
+
+func (*readCountingConn) Write(value []byte) (int, error) { return len(value), nil }
+func (conn *readCountingConn) Close() error {
+	conn.closed = true
+	return nil
+}
+func (*readCountingConn) LocalAddr() net.Addr              { return &net.UnixAddr{} }
+func (*readCountingConn) RemoteAddr() net.Addr             { return &net.UnixAddr{} }
+func (*readCountingConn) SetDeadline(time.Time) error      { return nil }
+func (*readCountingConn) SetReadDeadline(time.Time) error  { return nil }
+func (*readCountingConn) SetWriteDeadline(time.Time) error { return nil }
+
+type signalWriter struct {
+	once    sync.Once
+	written chan struct{}
+}
+
+func (writer *signalWriter) Write(value []byte) (int, error) {
+	writer.once.Do(func() { close(writer.written) })
+	return len(value), nil
+}

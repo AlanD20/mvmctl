@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"mvmctl/pkg/errs"
 )
 
 const (
@@ -16,7 +18,7 @@ const (
 	// SourceSessionVersion is the only supported source-session wire and schema version.
 	SourceSessionVersion = uint16(1)
 	// MaxSourceBootstrapBytes bounds a source bootstrap or ready frame before allocation.
-	MaxSourceBootstrapBytes = 4 * 1024
+	MaxSourceBootstrapBytes = 512
 
 	sourceFramePrefixBytes = len(SourceSessionMagic) + 2 + 4
 )
@@ -59,7 +61,7 @@ func NewSourceSessionID() (string, error) {
 func newRandomWireID(kind string) (string, error) {
 	var raw [16]byte
 	if _, err := io.ReadFull(rand.Reader, raw[:]); err != nil {
-		return "", fmt.Errorf("generate VM-exec %s ID: %w", kind, err)
+		return "", errs.WrapMsg(errs.CodeProcessError, "generate VM-exec "+kind+" ID", err)
 	}
 	return hex.EncodeToString(raw[:]), nil
 }
@@ -180,7 +182,7 @@ func DecodeSourceReady(ctx context.Context, reader io.Reader, expectedSessionID 
 
 func encodeSourceSessionFrame(ctx context.Context, writer io.Writer, body []byte) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return errs.WrapMsg(errs.CodeProcessError, "write source-session frame", err)
 	}
 	if writer == nil {
 		return validationError("source-session frame writer is required")
@@ -196,24 +198,24 @@ func encodeSourceSessionFrame(ctx context.Context, writer io.Writer, body []byte
 	binary.BigEndian.PutUint16(prefix[len(SourceSessionMagic):], SourceSessionVersion)
 	binary.BigEndian.PutUint32(prefix[len(SourceSessionMagic)+2:], uint32(len(body)))
 	if err := writeAll(ctx, writer, prefix); err != nil {
-		return fmt.Errorf("write source-session frame prefix: %w", err)
+		return errs.WrapMsg(errs.CodeProcessError, "write source-session frame prefix", err)
 	}
 	if err := writeAll(ctx, writer, body); err != nil {
-		return fmt.Errorf("write source-session frame body: %w", err)
+		return errs.WrapMsg(errs.CodeProcessError, "write source-session frame body", err)
 	}
 	return nil
 }
 
 func decodeSourceSessionFrame(ctx context.Context, reader io.Reader) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errs.WrapMsg(errs.CodeProcessError, "read source-session frame", err)
 	}
 	if reader == nil {
 		return nil, validationError("source-session frame reader is required")
 	}
 	prefix := make([]byte, sourceFramePrefixBytes)
 	if _, err := io.ReadFull(reader, prefix); err != nil {
-		return nil, fmt.Errorf("read source-session frame prefix: %w", err)
+		return nil, errs.WrapMsg(errs.CodeValidationFailed, "read source-session frame prefix", err)
 	}
 	if string(prefix[:len(SourceSessionMagic)]) != SourceSessionMagic {
 		return nil, validationError("invalid source-session frame magic")
@@ -233,10 +235,10 @@ func decodeSourceSessionFrame(ctx context.Context, reader io.Reader) ([]byte, er
 	}
 	body := make([]byte, bodyLength)
 	if _, err := io.ReadFull(reader, body); err != nil {
-		return nil, fmt.Errorf("read source-session frame body: %w", err)
+		return nil, errs.WrapMsg(errs.CodeValidationFailed, "read source-session frame body", err)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errs.WrapMsg(errs.CodeProcessError, "read source-session frame", err)
 	}
 	return body, nil
 }

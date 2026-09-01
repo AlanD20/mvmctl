@@ -201,8 +201,9 @@ func handleExecCommand(
 	} else {
 		cmd = exec.CommandContext(ctx, "sh", "-c", req.Command)
 	}
+	sourcePIDFD := -1
 	if binding != nil {
-		configureSourceCommand(cmd)
+		configureSourceCommand(cmd, &sourcePIDFD)
 	}
 
 	// Use streaming writers that emit JSON frames in real time.
@@ -236,7 +237,8 @@ func handleExecCommand(
 		return
 	}
 	if binding != nil {
-		if err := agent.publishSourceBinding(ctx, binding, cmd.Process.Pid); err != nil {
+		if err := agent.publishSourceBinding(ctx, binding, cmd.Process.Pid, sourcePIDFD); err != nil {
+			// Publishing failed before ownership transferred; process-group termination is best effort.
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
@@ -317,8 +319,19 @@ func handleExecCommand(
 	connMu.Unlock()
 }
 
-func configureSourceCommand(cmd *exec.Cmd) {
+func configureSourceCommand(cmd *exec.Cmd, pidFD *int) {
 	// CRITICAL: The new session is the stable root of the only process tree
 	// allowed to claim this source transport.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, PidFD: pidFD}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if errors.Is(err, syscall.ESRCH) {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	cmd.WaitDelay = 2 * time.Second
 }

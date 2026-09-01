@@ -69,6 +69,70 @@ func TestSourceOpenRegistersOnePendingSessionAndCleansUpOnShutdown(t *testing.T)
 	agent.sourceMu.Unlock()
 }
 
+func TestSourceHostCloseAfterReadyImmediatelyCleansPendingSession(t *testing.T) {
+	agent := New(9999, agentSourceTestToken, "/tmp/not-used.sock")
+	host, guest := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		agent.handleConnection(t.Context(), guest)
+		close(done)
+	}()
+
+	sessionID := "00112233445566778899aabbccddeeff"
+	require.NoError(t, vmexecwire.EncodeSourceBootstrap(t.Context(), host, vmexecwire.SourceBootstrap{
+		AgentToken: agentSourceTestToken, SourceSessionID: sessionID,
+	}))
+	_, err := vmexecwire.DecodeSourceReady(t.Context(), host, sessionID)
+	require.NoError(t, err)
+	require.NoError(t, host.Close())
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("host EOF did not stop the source handler")
+	}
+
+	agent.sourceMu.Lock()
+	defer agent.sourceMu.Unlock()
+	assert.Empty(t, agent.pendingSources)
+	assert.Empty(t, agent.sourceBindings)
+}
+
+func TestSourceHostCloseAfterReservationCleansBinding(t *testing.T) {
+	agent := New(9999, agentSourceTestToken, "/tmp/not-used.sock")
+	agent.sourceProcesses = &fakeSourceProcessEffects{account: sourceAccount{UID: 0, GID: 0}}
+	host, guest := net.Pipe()
+	done := make(chan struct{})
+	go func() {
+		agent.handleConnection(t.Context(), guest)
+		close(done)
+	}()
+
+	sessionID := "00112233445566778899aabbccddeeff"
+	require.NoError(t, vmexecwire.EncodeSourceBootstrap(t.Context(), host, vmexecwire.SourceBootstrap{
+		AgentToken: agentSourceTestToken, SourceSessionID: sessionID,
+	}))
+	_, err := vmexecwire.DecodeSourceReady(t.Context(), host, sessionID)
+	require.NoError(t, err)
+	binding, err := agent.reserveSourceSession(t.Context(), sessionID, "")
+	require.NoError(t, err)
+	require.NoError(t, host.Close())
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("host EOF did not stop a reserved source handler")
+	}
+
+	agent.sourceMu.Lock()
+	defer agent.sourceMu.Unlock()
+	assert.Empty(t, agent.pendingSources)
+	assert.Empty(t, agent.sourceBindings)
+	select {
+	case <-binding.transport.done:
+	default:
+		t.Fatal("reserved transport remained open after host EOF")
+	}
+}
+
 func TestDuplicateSourceSessionIsRejected(t *testing.T) {
 	agent := New(9999, agentSourceTestToken, "/tmp/not-used.sock")
 	firstHost, firstAgent := net.Pipe()

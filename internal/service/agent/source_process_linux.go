@@ -3,8 +3,11 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/user"
@@ -16,13 +19,28 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const maxProcStatBytes = 4 * 1024
+const (
+	maxProcStatBytes  = 4 * 1024
+	maxPIDFDInfoBytes = 512
+)
 
-type linuxSourceProcessEffects struct{}
+type linuxSourceProcessEffects struct {
+	socketType func(fd int) (int, error)
+	socketName func(fd int) (unix.Sockaddr, error)
+	socketPeer func(fd int) (*unix.Ucred, int, error)
+	fdFlags    func(fd int) (int, error)
+	fdInfo     func(ctx context.Context, fd int) ([]byte, error)
+	pollFD     func(fd int) (bool, error)
+	signalFD   func(fd int) error
+	closeFD    func(fd int) error
+}
 
 type linuxPinnedProcess struct {
-	mu sync.Mutex
-	fd int
+	mu       sync.Mutex
+	fd       int
+	pollFD   func(fd int) (bool, error)
+	signalFD func(fd int) error
+	closeFD  func(fd int) error
 }
 
 func newSourceProcessEffects() sourceProcessEffects {
@@ -51,27 +69,35 @@ func (linuxSourceProcessEffects) ResolveAccount(
 	return sourceAccount{UID: uint32(uid), GID: uint32(gid)}, nil
 }
 
-func (linuxSourceProcessEffects) PeerCredentials(
+func (effects linuxSourceProcessEffects) PeerCredentials(
 	ctx context.Context,
 	conn net.Conn,
-) (peerCredentials, error) {
+) (peerCredentials, pinnedProcess, error) {
+	return effects.peerCredentials(ctx, conn)
+}
+
+func (effects linuxSourceProcessEffects) peerCredentials(
+	ctx context.Context,
+	conn net.Conn,
+) (peerCredentials, pinnedProcess, error) {
 	if err := ctx.Err(); err != nil {
-		return peerCredentials{}, err
+		return peerCredentials{}, nil, err
 	}
 	syscallConn, ok := conn.(interface {
 		SyscallConn() (syscall.RawConn, error)
 	})
 	if !ok {
-		return peerCredentials{}, fmt.Errorf("local source connection is not an AF_UNIX socket")
+		return peerCredentials{}, nil, fmt.Errorf("local source connection is not an AF_UNIX socket")
 	}
 	raw, err := syscallConn.SyscallConn()
 	if err != nil {
-		return peerCredentials{}, err
+		return peerCredentials{}, nil, err
 	}
 	var credentials *unix.Ucred
+	pidFD := -1
 	var socketErr error
 	if err := raw.Control(func(fd uintptr) {
-		socketType, err := unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_TYPE)
+		socketType, err := effects.getSocketType(int(fd))
 		if err != nil {
 			socketErr = err
 			return
@@ -80,7 +106,7 @@ func (linuxSourceProcessEffects) PeerCredentials(
 			socketErr = fmt.Errorf("local source connection is not SOCK_STREAM")
 			return
 		}
-		localAddress, err := unix.Getsockname(int(fd))
+		localAddress, err := effects.getSocketName(int(fd))
 		if err != nil {
 			socketErr = err
 			return
@@ -89,42 +115,79 @@ func (linuxSourceProcessEffects) PeerCredentials(
 			socketErr = fmt.Errorf("local source connection is not AF_UNIX")
 			return
 		}
-		credentials, socketErr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+		credentials, pidFD, socketErr = effects.getSocketPeer(int(fd))
 	}); err != nil {
-		return peerCredentials{}, err
+		return peerCredentials{}, nil, effects.rejectPIDFD(pidFD, err)
 	}
 	if socketErr != nil {
-		return peerCredentials{}, socketErr
+		return peerCredentials{}, nil, effects.rejectPIDFD(pidFD, socketErr)
 	}
 	if credentials == nil || credentials.Pid <= 0 {
-		return peerCredentials{}, fmt.Errorf("local source peer credentials are invalid")
+		return peerCredentials{}, nil, effects.rejectPIDFD(
+			pidFD,
+			fmt.Errorf("local source peer credentials are invalid"),
+		)
+	}
+	pin, err := effects.AdoptProcess(ctx, int(credentials.Pid), pidFD)
+	if err != nil {
+		return peerCredentials{}, nil, fmt.Errorf("adopt local peer pidfd: %w", err)
 	}
 	return peerCredentials{
 		PID: int(credentials.Pid), UID: credentials.Uid, GID: credentials.Gid,
-	}, nil
+	}, pin, nil
 }
 
-func (linuxSourceProcessEffects) Pin(ctx context.Context, pid int) (pinnedProcess, error) {
+func (effects linuxSourceProcessEffects) AdoptProcess(
+	ctx context.Context,
+	pid int,
+	pidFD int,
+) (pinnedProcess, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, effects.rejectPIDFD(pidFD, err)
 	}
-	fd, err := unix.PidfdOpen(pid, 0)
+	if pid <= 0 || pidFD < 0 {
+		return nil, effects.rejectPIDFD(pidFD, fmt.Errorf("process pidfd is invalid"))
+	}
+	flags, err := effects.getFDFlags(pidFD)
 	if err != nil {
-		return nil, err
+		return nil, effects.rejectPIDFD(pidFD, fmt.Errorf("read process pidfd flags: %w", err))
 	}
-	return &linuxPinnedProcess{fd: fd}, nil
+	if flags&unix.FD_CLOEXEC == 0 {
+		return nil, effects.rejectPIDFD(pidFD, fmt.Errorf("process pidfd is missing CLOEXEC"))
+	}
+	info, err := effects.readFDInfo(ctx, pidFD)
+	if err != nil {
+		return nil, effects.rejectPIDFD(pidFD, fmt.Errorf("read process pidfd identity: %w", err))
+	}
+	pinnedPID, err := parsePIDFDInfo(info)
+	if err != nil {
+		return nil, effects.rejectPIDFD(pidFD, err)
+	}
+	if pinnedPID != pid {
+		return nil, effects.rejectPIDFD(
+			pidFD,
+			fmt.Errorf("process pidfd PID %d does not match expected PID %d", pinnedPID, pid),
+		)
+	}
+	pin := &linuxPinnedProcess{
+		fd:       pidFD,
+		pollFD:   effects.pollPIDFD,
+		signalFD: effects.signalPIDFD,
+		closeFD:  effects.closePIDFD,
+	}
+	if err := pin.Alive(ctx); err != nil {
+		return nil, errors.Join(err, pin.Close())
+	}
+	return pin, nil
 }
 
 func (linuxSourceProcessEffects) ReadIdentity(ctx context.Context, pid int) (processIdentity, error) {
 	if err := ctx.Err(); err != nil {
 		return processIdentity{}, err
 	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	data, err := readBoundedProcFile(fmt.Sprintf("/proc/%d/stat", pid), maxProcStatBytes)
 	if err != nil {
 		return processIdentity{}, err
-	}
-	if len(data) == 0 || len(data) > maxProcStatBytes {
-		return processIdentity{}, fmt.Errorf("process stat size is invalid")
 	}
 	return parseProcessStat(data)
 }
@@ -138,7 +201,14 @@ func (pin *linuxPinnedProcess) Alive(ctx context.Context) error {
 	if pin.fd < 0 {
 		return fmt.Errorf("process pin is closed")
 	}
-	return unix.PidfdSendSignal(pin.fd, 0, nil, 0)
+	exited, err := pin.pollFD(pin.fd)
+	if err != nil {
+		return err
+	}
+	if exited {
+		return fmt.Errorf("process has exited or is a zombie")
+	}
+	return pin.signalFD(pin.fd)
 }
 
 func (pin *linuxPinnedProcess) Close() error {
@@ -147,9 +217,129 @@ func (pin *linuxPinnedProcess) Close() error {
 	if pin.fd < 0 {
 		return nil
 	}
-	err := unix.Close(pin.fd)
+	err := pin.closeFD(pin.fd)
 	pin.fd = -1
 	return err
+}
+
+func (effects linuxSourceProcessEffects) getSocketType(fd int) (int, error) {
+	if effects.socketType != nil {
+		return effects.socketType(fd)
+	}
+	return unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_TYPE)
+}
+
+func (effects linuxSourceProcessEffects) getSocketName(fd int) (unix.Sockaddr, error) {
+	if effects.socketName != nil {
+		return effects.socketName(fd)
+	}
+	return unix.Getsockname(fd)
+}
+
+func (effects linuxSourceProcessEffects) getSocketPeer(fd int) (*unix.Ucred, int, error) {
+	if effects.socketPeer != nil {
+		return effects.socketPeer(fd)
+	}
+	credentials, err := unix.GetsockoptUcred(fd, unix.SOL_SOCKET, unix.SO_PEERCRED)
+	if err != nil {
+		return nil, -1, err
+	}
+	pidFD, err := unix.GetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_PEERPIDFD)
+	if err != nil {
+		return nil, -1, err
+	}
+	return credentials, pidFD, nil
+}
+
+func (effects linuxSourceProcessEffects) getFDFlags(fd int) (int, error) {
+	if effects.fdFlags != nil {
+		return effects.fdFlags(fd)
+	}
+	return unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+}
+
+func (effects linuxSourceProcessEffects) readFDInfo(ctx context.Context, fd int) ([]byte, error) {
+	if effects.fdInfo != nil {
+		return effects.fdInfo(ctx, fd)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return readBoundedProcFile(fmt.Sprintf("/proc/self/fdinfo/%d", fd), maxPIDFDInfoBytes)
+}
+
+func (effects linuxSourceProcessEffects) pollPIDFD(fd int) (bool, error) {
+	if effects.pollFD != nil {
+		return effects.pollFD(fd)
+	}
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	_, err := unix.Poll(fds, 0)
+	if err != nil {
+		return false, err
+	}
+	return fds[0].Revents&(unix.POLLIN|unix.POLLHUP|unix.POLLERR|unix.POLLNVAL) != 0, nil
+}
+
+func (effects linuxSourceProcessEffects) signalPIDFD(fd int) error {
+	if effects.signalFD != nil {
+		return effects.signalFD(fd)
+	}
+	return unix.PidfdSendSignal(fd, 0, nil, 0)
+}
+
+func (effects linuxSourceProcessEffects) closePIDFD(fd int) error {
+	if effects.closeFD != nil {
+		return effects.closeFD(fd)
+	}
+	return unix.Close(fd)
+}
+
+func (effects linuxSourceProcessEffects) rejectPIDFD(fd int, primary error) error {
+	if fd < 0 {
+		return primary
+	}
+	return errors.Join(primary, effects.closePIDFD(fd))
+}
+
+func parsePIDFDInfo(data []byte) (int, error) {
+	if len(data) == 0 || len(data) > maxPIDFDInfoBytes {
+		return 0, fmt.Errorf("process pidfd info size is invalid")
+	}
+	pid := 0
+	for line := range bytes.SplitSeq(data, []byte{'\n'}) {
+		field, value, ok := bytes.Cut(line, []byte{':'})
+		if !ok || string(field) != "Pid" {
+			continue
+		}
+		if pid != 0 {
+			return 0, fmt.Errorf("process pidfd info contains duplicate PID")
+		}
+		parsed, err := strconv.Atoi(strings.TrimSpace(string(value)))
+		if err != nil || parsed <= 0 {
+			return 0, fmt.Errorf("process pidfd info PID is malformed")
+		}
+		pid = parsed
+	}
+	if pid == 0 {
+		return 0, fmt.Errorf("process pidfd info is missing PID")
+	}
+	return pid, nil
+}
+
+func readBoundedProcFile(path string, limit int) (data []byte, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, file.Close()) }()
+	data, err = io.ReadAll(io.LimitReader(file, int64(limit)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || len(data) > limit {
+		return nil, fmt.Errorf("process file size is invalid")
+	}
+	return data, nil
 }
 
 func parseProcessStat(data []byte) (processIdentity, error) {

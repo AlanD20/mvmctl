@@ -37,7 +37,11 @@ func (a *Agent) handleConnection(ctx context.Context, conn net.Conn) {
 	}
 	reader := io.MultiReader(bytes.NewReader(prefix), conn)
 	if string(prefix) == vmexecwire.SourceSessionMagic {
-		a.handleSourceConnection(ctx, reader, conn)
+		sourceDeadline := time.Now().Add(vmexecwire.MaxExecutionDuration)
+		if err := conn.SetDeadline(sourceDeadline); err != nil {
+			return
+		}
+		a.handleSourceConnection(ctx, reader, conn, sourceDeadline)
 		return
 	}
 	if string(prefix) == vmexecwire.FrameMagic {

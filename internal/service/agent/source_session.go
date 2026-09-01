@@ -12,16 +12,32 @@ import (
 	"mvmctl/internal/lib/vmexecwire"
 )
 
-const sourcePublicationWait = 2 * time.Second
+const (
+	sourcePublicationWait = 2 * time.Second
+	sourceDisconnectPoll  = 50 * time.Millisecond
+)
 
 type sourceTransport struct {
 	conn      net.Conn
 	done      chan struct{}
 	closeOnce sync.Once
+	deadline  time.Time
+
+	watchStop      chan struct{}
+	watchDone      chan struct{}
+	watchStartOnce sync.Once
+	watchStopOnce  sync.Once
+	watchErr       error
 }
 
 func newSourceTransport(conn net.Conn) *sourceTransport {
-	return &sourceTransport{conn: conn, done: make(chan struct{})}
+	return &sourceTransport{
+		conn:      conn,
+		done:      make(chan struct{}),
+		deadline:  time.Now().Add(vmexecwire.MaxExecutionDuration),
+		watchStop: make(chan struct{}),
+		watchDone: make(chan struct{}),
+	}
 }
 
 func (transport *sourceTransport) close() {
@@ -29,6 +45,68 @@ func (transport *sourceTransport) close() {
 		_ = transport.conn.Close()
 		close(transport.done)
 	})
+}
+
+func (transport *sourceTransport) startDisconnectWatch(ctx context.Context) {
+	transport.watchStartOnce.Do(func() {
+		go func() {
+			transport.watchErr = transport.watchHostDisconnect(ctx)
+			close(transport.watchDone)
+		}()
+	})
+}
+
+func (transport *sourceTransport) watchHostDisconnect(ctx context.Context) error {
+	var probe [1]byte
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-transport.done:
+			return nil
+		case <-transport.watchStop:
+			return nil
+		default:
+		}
+		if !time.Now().Before(transport.deadline) {
+			return fmt.Errorf("source transport deadline exceeded")
+		}
+		pollDeadline := time.Now().Add(sourceDisconnectPoll)
+		if transport.deadline.Before(pollDeadline) {
+			pollDeadline = transport.deadline
+		}
+		if err := transport.conn.SetReadDeadline(pollDeadline); err != nil {
+			return err
+		}
+		read, err := transport.conn.Read(probe[:])
+		if read > 0 {
+			return fmt.Errorf("source host sent data before a guest request")
+		}
+		if err == nil {
+			return fmt.Errorf("source host read made no progress")
+		}
+		if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+			continue
+		}
+		return err
+	}
+}
+
+func (transport *sourceTransport) handoffReadOwner() error {
+	transport.startDisconnectWatch(context.Background())
+	transport.watchStopOnce.Do(func() { close(transport.watchStop) })
+	// Force a deadline-polled monitor to observe the ownership handoff promptly.
+	_ = transport.conn.SetReadDeadline(time.Now())
+	<-transport.watchDone
+	if transport.watchErr != nil {
+		return transport.watchErr
+	}
+	select {
+	case <-transport.done:
+		return fmt.Errorf("source transport closed before relay handoff")
+	default:
+	}
+	return transport.conn.SetReadDeadline(transport.deadline)
 }
 
 type sourceBinding struct {
@@ -45,7 +123,12 @@ type sourceBinding struct {
 	claimed bool
 }
 
-func (a *Agent) handleSourceConnection(ctx context.Context, reader io.Reader, conn net.Conn) {
+func (a *Agent) handleSourceConnection(
+	ctx context.Context,
+	reader io.Reader,
+	conn net.Conn,
+	deadline time.Time,
+) {
 	bootstrap, err := vmexecwire.DecodeSourceBootstrap(ctx, reader)
 	if err != nil {
 		return
@@ -57,6 +140,7 @@ func (a *Agent) handleSourceConnection(ctx context.Context, reader io.Reader, co
 	}
 
 	transport := newSourceTransport(conn)
+	transport.deadline = deadline
 	if !a.registerPendingSource(bootstrap.SourceSessionID, transport) {
 		return
 	}
@@ -67,13 +151,43 @@ func (a *Agent) handleSourceConnection(ctx context.Context, reader io.Reader, co
 		transport.close()
 		return
 	}
+	transport.startDisconnectWatch(ctx)
 
-	select {
-	case <-ctx.Done():
-		transport.close()
-	case <-transport.done:
+	watchDone := transport.watchDone
+	for {
+		select {
+		case <-ctx.Done():
+			transport.close()
+			watchDone = nil
+		case <-transport.done:
+			a.removePendingSource(bootstrap.SourceSessionID, transport)
+			return
+		case <-watchDone:
+			watchDone = nil
+			if transport.watchErr != nil {
+				a.disconnectSourceTransport(bootstrap.SourceSessionID, transport)
+				return
+			}
+		}
 	}
-	a.removePendingSource(bootstrap.SourceSessionID, transport)
+}
+
+func (a *Agent) disconnectSourceTransport(sessionID string, transport *sourceTransport) {
+	a.sourceMu.Lock()
+	binding := a.sourceBindings[sessionID]
+	if binding != nil && binding.transport != transport {
+		binding = nil
+	}
+	if pending := a.pendingSources[sessionID]; pending == transport {
+		delete(a.pendingSources, sessionID)
+		a.notifySourceChangeLocked()
+	}
+	a.sourceMu.Unlock()
+	if binding != nil {
+		a.cleanupSourceBinding(binding)
+		return
+	}
+	transport.close()
 }
 
 func (a *Agent) registerPendingSource(sessionID string, transport *sourceTransport) bool {
@@ -108,15 +222,13 @@ func (a *Agent) reserveSourceSession(
 	if err := (vmexecwire.SourceReady{SourceSessionID: sessionID}).Validate(); err != nil {
 		return nil, err
 	}
-	if user == "" || user == "root" {
-		return nil, fmt.Errorf("source session requires an ordinary exec as a non-root user")
+	accountName := user
+	if accountName == "" {
+		accountName = "root"
 	}
-	account, err := a.sourceProcesses.ResolveAccount(ctx, user)
+	account, err := a.sourceProcesses.ResolveAccount(ctx, accountName)
 	if err != nil {
 		return nil, fmt.Errorf("resolve source-session user: %w", err)
-	}
-	if account.UID == 0 {
-		return nil, fmt.Errorf("source session requires a non-root user")
 	}
 
 	a.sourceMu.Lock()
@@ -142,8 +254,9 @@ func (a *Agent) publishSourceBinding(
 	ctx context.Context,
 	binding *sourceBinding,
 	pid int,
+	pidFD int,
 ) error {
-	rootPin, err := a.sourceProcesses.Pin(ctx, pid)
+	rootPin, err := a.sourceProcesses.AdoptProcess(ctx, pid, pidFD)
 	if err != nil {
 		return fmt.Errorf("pin source command: %w", err)
 	}
@@ -192,6 +305,9 @@ func stablePinnedIdentity(
 	}
 	if first != second {
 		return processIdentity{}, fmt.Errorf("process identity changed during admission")
+	}
+	if err := pin.Alive(ctx); err != nil {
+		return processIdentity{}, err
 	}
 	return first, nil
 }
@@ -248,6 +364,9 @@ func (a *Agent) ensureSourceStateLocked() {
 	}
 	if a.sourceChanged == nil {
 		a.sourceChanged = make(chan struct{})
+	}
+	if a.sourceAdmission == nil {
+		a.sourceAdmission = make(chan struct{}, maxSourceAdmissions)
 	}
 	if a.sourceProcesses == nil {
 		a.sourceProcesses = newSourceProcessEffects()

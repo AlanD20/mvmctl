@@ -433,9 +433,13 @@ func TestExecRejectsUnknownResponseFrame(t *testing.T) {
 	assert.Equal(t, "exec", req.Type)
 	require.NoError(t, SendFrame(agentConn, execResponse{Type: "unexpected", Data: "forbidden"}))
 
-	err := <-errCh
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown exec response type")
+	select {
+	case err := <-errCh:
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown exec response type")
+	case <-time.After(time.Second):
+		t.Fatal("unknown exec response frame did not fail within watchdog")
+	}
 }
 
 func TestExecWithSourceSessionCarriesOnlySessionID(t *testing.T) {

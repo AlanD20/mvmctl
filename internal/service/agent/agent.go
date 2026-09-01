@@ -22,6 +22,7 @@ type Agent struct {
 	pendingSources  map[string]*sourceTransport
 	sourceBindings  map[string]*sourceBinding
 	sourceChanged   chan struct{}
+	sourceAdmission chan struct{}
 	sourceProcesses sourceProcessEffects
 
 	destinationExecution destinationExecutionEffect
@@ -42,6 +43,7 @@ func New(port int, token string, localSocket string) *Agent {
 		pendingSources:       make(map[string]*sourceTransport),
 		sourceBindings:       make(map[string]*sourceBinding),
 		sourceChanged:        make(chan struct{}),
+		sourceAdmission:      make(chan struct{}, maxSourceAdmissions),
 		sourceProcesses:      newSourceProcessEffects(),
 		destinationExecution: newDestinationExecutionEffect(),
 	}

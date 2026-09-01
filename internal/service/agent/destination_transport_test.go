@@ -162,10 +162,27 @@ func TestHandleLocalConnectionCancellationUnblocksPartialRequest(t *testing.T) {
 	client, server := net.Pipe()
 	t.Cleanup(func() { _ = client.Close() })
 	require.NoError(t, client.SetDeadline(time.Now().Add(time.Second)))
+	effects := &fakeSourceProcessEffects{
+		credentials: peerCredentials{PID: 300, UID: 1001, GID: 1002},
+		identities: map[int][]processIdentity{
+			300: {{PID: 300, ParentPID: 100, StartTime: 30}},
+			100: {{PID: 100, ParentPID: 1, StartTime: 10}},
+		},
+	}
+	sourceAgent, sourceHost := net.Pipe()
+	t.Cleanup(func() { _ = sourceHost.Close() })
+	binding := testPublishedBinding(
+		"00112233445566778899aabbccddeeff",
+		sourceAccount{UID: 1001, GID: 1002},
+		processIdentity{PID: 100, ParentPID: 1, StartTime: 10},
+		&fakePinnedProcess{},
+	)
+	binding.transport = newSourceTransport(sourceAgent)
+	agent := testSourceAgent(effects, binding)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		New(9999, destinationTestToken, "").handleLocalConnection(ctx, server)
+		agent.handleLocalConnection(ctx, server)
 	}()
 
 	_, err := client.Write([]byte("MVMEXE"))
