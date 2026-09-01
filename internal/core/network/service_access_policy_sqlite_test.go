@@ -32,10 +32,10 @@ func seedPolicyResources(
 		INSERT INTO vm_instances (
 			id,name,status,pid,ipv4,mac,network_id,tap_device,image_id,kernel_id,binary_id,jailer_binary_id,
 			api_socket_path,config_path,cloud_init_mode,vcpu_count,mem_size_mib,disk_size_mib,rootfs_path,
-			rootfs_suffix,pci_enabled,nested_virt,remote_exec,lsm_flags,enable_logging,enable_metrics,
+			rootfs_suffix,pci_enabled,nested_virt,lsm_flags,enable_logging,enable_metrics,
 			enable_console,boot_args)
 		VALUES ('vm-a','vm-a','stopped',0,'10.2.0.2','02:00:00:00:00:01','net-b','tap-a','img','kernel','fc',
-			'jailer','/api','/config','inject',1,128,64,'/rootfs','',0,0,0,'',0,0,0,'');
+			'jailer','/api','/config','inject',1,128,64,'/rootfs','',0,0,'',0,0,0,'');
 	`)
 	require.NoError(t, err)
 	repo := network.NewServiceAccessPolicyRepository(database)
