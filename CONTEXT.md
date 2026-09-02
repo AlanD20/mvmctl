@@ -516,16 +516,32 @@ ordinary remainder without ancillary data through cancellation-bounded nonblocki
 exactly once. The receiver uses `recvmsg(MSG_CMSG_CLOEXEC)` for every read, takes cleanup ownership of every installed
 descriptor before validation, rejects missing, extra, unknown, late, or truncated control data, and retains only one
 close-on-exec connected, non-listening `AF_UNIX` `SOCK_STREAM`. Structural admission deliberately proves no peer
-process, Firecracker, VM, guest port, or policy identity. The reader has no transfer method, and no privileged action or
-production caller reaches either primitive.
+process, Firecracker, VM, guest port, or policy identity. Its private phase-specific receiver transfers a connection
+only after the matching closed frame is decoded and exposes only a borrowed connection capability to the next private
+effect.
 
-Neither private authority has a production constructor or caller. The descriptor foundation has no registered action
-or production caller, and no positive production capacity ceiling has been selected or wired.
+The retained sidecar wire, process transport, named Jailer client, and unregistered root handler lifecycle are now
+implemented and inert. The fixed `jailer-vm-exec-session` protocol admits only the ordered `open_source`,
+`source_retained`, `bind_destination`, `ready`, `release`, and `released` phases or one bounded terminal failure. The
+process transport starts one copy of the existing system binary through the existing privileged invocation and an fd-0
+AF_UNIX control socket, transfers one owned connection duplicate in each setup phase, and bounds cancellation, process
+group termination, waiting, and cleanup. The Jailer client duplicates each caller-owned `net.UnixConn`, so the caller
+retains its original source and destination connections.
+
+The private handler structurally retains the source before its acknowledgement, retains and binds the destination
+before ready, and performs close-once cancellation-detached cleanup on explicit release, control EOF, setup failure, or
+response failure. It reports `released` only after explicit-release cleanup succeeds. The handler accepts no path,
+command, token, target user, policy material, payload, or raw descriptor accessor. It is deliberately absent from the
+privileged dispatcher, whose unknown-action path rejects the fixed action without reading its request bytes.
+
+Neither private authority has a production constructor or caller. No production effect binds the retained descriptors
+to Firecracker records, composes the active-pair/capacity authority, selects and enforces the positive production
+ceiling and absolute `CLOCK_BOOTTIME` stop, or registers the sidecar action.
 
 These components still do not form a positive VM-to-VM path. No API-owned relay listener opens a root-authority-admitted
-source FD, completes the retained sidecar protocol, transfers and binds either descriptor to exact process/VM
-authority, reads its request, enforces the exact runtime exec policy, constructs a destination request, composes the
-production ceiling and reservation, or writes a command-redacted audit record.
+source FD, invokes the retained sidecar client, binds either transferred descriptor to exact process/VM authority,
+reads its request, enforces the exact runtime exec policy, constructs a destination request, composes the production
+ceiling and reservation, or writes a command-redacted audit record.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
 Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,

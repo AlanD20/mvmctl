@@ -108,8 +108,13 @@ continue without silently deleting it.
   ancillary data through cancellation-bounded nonblocking I/O, and closes the duplicate exactly once. The receiver
   uses `MSG_CMSG_CLOEXEC` on every read, owns every installed descriptor before validation, rejects missing, extra,
   unknown, late, or truncated control data, and retains only one close-on-exec connected, non-listening `AF_UNIX`
-  `SOCK_STREAM`. The reader intentionally exposes no transfer method and proves no peer process, Firecracker, VM, or
-  policy identity. No action, retained sidecar protocol, production caller, capacity consumer, or relay uses it.
+  `SOCK_STREAM`. Phase-specific private receivers retain a descriptor only after exact frame decoding and expose only a
+  borrowed connection capability. This proves no peer process, Firecracker, VM, or policy identity.
+- Private inert retained VM-exec sidecar foundation. The closed `jailer-vm-exec-session` wire, fixed-phase process
+  transport, named Jailer client, and privileged handler lifecycle transfer owned source and destination duplicates in
+  order, retain caller originals, bound cancellation/reaping, and clean up once on explicit release, EOF, setup, or
+  response failure. The handler is deliberately absent from privileged dispatch and has no production effect,
+  identity binding, capacity composition, boottime stop, policy/audit payload, or relay caller.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -833,12 +838,12 @@ The public policy families are:
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
 non-root process side, isolated process-bound source session, and private Task 15 root-owned capacity and active-pair
-authorities plus exact-one structural descriptor transport are implemented. The API-owned relay listener, retained
-sidecar protocol, descriptor transfer and source/destination process-and-VM identity binding, selected production
-capacity ceiling and composition, runtime policy resolution/enforcement/audit, Python system qualification, and the
-traffic family's replacement public surface remain pending. No production host path opens a source session, invokes
-the pair authority, consumes a capacity reservation, or constructs an authorized destination request, so VM-to-VM
-execution is unavailable.
+authorities plus exact-one structural descriptor transport and unregistered retained-sidecar lifecycle are
+implemented. The API-owned relay listener, production use of the sidecar, source/destination process-and-VM identity
+binding, selected production capacity ceiling and composition, absolute boottime stop, runtime policy
+resolution/enforcement/audit, Python system qualification, and the traffic family's replacement public surface remain
+pending. No production host path opens a source session, invokes the sidecar or pair authority, consumes a capacity
+reservation, or constructs an authorized destination request, so VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 

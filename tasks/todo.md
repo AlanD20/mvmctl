@@ -664,9 +664,10 @@ pending
 **Owner:** engineer
 **Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, and the
 isolated process-bound source-session, private root-owned capacity/active-pair authorities, and inert exact-one
-structural descriptor transport are implemented; API-owned relay, retained sidecar protocol, descriptor transfer and
-source/destination process-and-VM identity binding, production capacity ceiling/composition, runtime policy, and
-Python qualification remain pending, so VM-to-VM execution remains fail-closed
+structural descriptor transport plus unregistered retained-sidecar lifecycle are implemented; API-owned relay,
+production sidecar use, source/destination process-and-VM identity binding, production capacity ceiling/composition,
+absolute boottime stop, runtime policy/audit, and Python qualification remain pending, so VM-to-VM execution remains
+fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -841,9 +842,9 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 ### Task 15: Complete reconciliation, admission, and lifecycle parity
 
 **Owner:** engineer
-**Status:** Private inert VM-exec capacity reservation, active-pair, and exact-one structural descriptor foundations
-implemented; retained sidecar, identity binding, production ceiling/composition, and all reconciliation and lifecycle
-work remain pending
+**Status:** Private inert VM-exec capacity reservation, active-pair, exact-one structural descriptor, and unregistered
+retained-sidecar lifecycle foundations implemented; peer identity binding, production ceiling/composition and boottime
+enforcement, action registration, and all reconciliation and lifecycle work remain pending
 **Dependencies:** Tasks 8-14
 
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,
@@ -883,11 +884,16 @@ work remain pending
   validation; reject missing, extra, unknown, late, or truncated ancillary data; and retain only one close-on-exec
   connected, non-listening `AF_UNIX` `SOCK_STREAM`. Keep it unregistered and without a transfer method, peer/VM
   identity claim, capacity effect, or production caller.
-- [ ] Add the action-specific retained sidecar, then select the fixed positive production ceiling and compose the
-  implemented pair/capacity authority with transferred source and destination descriptors only after complete frame
-  decoding and exact process/VM identity binding. Reserve before relay effects, enforce the fixed relay-stop deadline,
-  release within the separate grace, and never substitute SQLite status, a guest-supplied ID, a socket path, or a
-  process-local semaphore.
+- [x] Add the action-specific closed wire, process transport, named Jailer client, phase-specific descriptor receivers,
+  and private privileged handler lifecycle. Transfer source and destination duplicates only with their exact ordered
+  frames, keep caller originals open, expose only borrowed connection capabilities to private effects, report release
+  only after successful cleanup, and clean up once on EOF, cancellation, setup, response, and explicit-release paths.
+  Keep the fixed action unregistered and the handler without production peer identity, pair/capacity, policy, or relay
+  effects.
+- [ ] Bind both retained descriptors to exact Firecracker process/VM authority, select the fixed positive production
+  ceiling, compose the implemented pair/capacity authority, enforce its absolute `CLOCK_BOOTTIME` relay-stop deadline,
+  and register only the exact sidecar action. Reserve before relay effects, release within the separate grace, and
+  never substitute SQLite status, a guest-supplied ID, a socket path, or a process-local semaphore.
 - [ ] Make create/start/stop/remove/reboot/snapshot/restore/volume paths transactionally abortable and retryable.
 - [ ] Build one complete typed relaunch state for create/start/reboot/snapshot restore. Preserve a configured vsock CID,
   let root derive the fixed runtime UDS leaf, retain agent port/token only in the normal process, distinguish valid
