@@ -1,6 +1,7 @@
 package privileged
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -10,8 +11,30 @@ import (
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/vmexecsessionwire"
 	"mvmctl/pkg/errs"
 )
+
+func TestRunLeavesVMExecSessionActionUnregisteredAndRequestUnread(t *testing.T) {
+	requestBytes := []byte("must remain unread")
+	endpoint := newReceiverEndpoint()
+	endpoint.input = *bytes.NewReader(requestBytes)
+	runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+	runtime.control = validControlDeps(endpoint, nil)
+
+	err := run(
+		t.Context(),
+		[]string{Marker, vmexecsessionwire.Action},
+		endpoint,
+		runtime,
+	)
+
+	require.NoError(t, err)
+	assert.Zero(t, endpoint.readCalls)
+	assert.Equal(t, int64(0), endpoint.input.Size()-int64(endpoint.input.Len()))
+	operationErr := decodeReceiverError(t, endpoint.output.Bytes(), vmexecsessionwire.Action)
+	assert.ErrorContains(t, operationErr, `unknown privileged action "`+vmexecsessionwire.Action+`"`)
+}
 
 func TestRunReleasesPinnedExecutableAndPreservesDeliveryFailure(t *testing.T) {
 	t.Parallel()
