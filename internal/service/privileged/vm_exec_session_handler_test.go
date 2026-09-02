@@ -149,13 +149,17 @@ func TestHandleVMExecSessionGatesIntermediateResponsesOnEffects(t *testing.T) {
 
 	t.Run("destination bind failure never sends ready", func(t *testing.T) {
 		events := make([]string, 0, 8)
+		primary := errs.New(
+			errs.CodeVMAtomicFailed,
+			"destination retention failed",
+			errs.WithClass(errs.ClassConflict),
+			errs.WithEntity(testVMExecHandlerSource),
+			errs.WithDetails(map[string]any{"retention_started": true, "retention_attempt": int64(2)}),
+		)
+		require.NotEmpty(t, primary.Op)
 		lease := &fakeVMExecSessionLease{
-			events: &events,
-			bindErr: errs.New(
-				errs.CodeVMAtomicFailed,
-				"destination retention failed",
-				errs.WithClass(errs.ClassConflict),
-			),
+			events:     &events,
+			bindErr:    primary,
 			releaseErr: errors.New("lease cleanup failed"),
 		}
 		endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(
@@ -177,9 +181,21 @@ func TestHandleVMExecSessionGatesIntermediateResponsesOnEffects(t *testing.T) {
 		assert.False(t, outcome.Released())
 		operationErr := outcome.OperationError()
 		require.NotNil(t, operationErr)
-		assert.Equal(t, errs.CodeVMAtomicFailed, operationErr.Code)
-		assert.Equal(t, errs.ClassConflict, operationErr.Class)
-		assert.Equal(t, true, operationErr.Details["cleanup_failed"])
+		wantOperationErr := &errs.DomainError{
+			Code:    errs.CodeVMAtomicFailed,
+			Message: "retained VM-exec session transition failed",
+			Op:      primary.Op,
+			Entity:  testVMExecHandlerSource,
+			Class:   errs.ClassConflict,
+			Details: map[string]any{
+				"retention_started": true,
+				"retention_attempt": int64(2),
+				"cleanup_failed":    true,
+			},
+		}
+		if diff := cmp.Diff(wantOperationErr, operationErr); diff != "" {
+			t.Errorf("projected operation error mismatch (-want +got):\n%s", diff)
+		}
 		assert.NotContains(t, string(endpoint.responseBytes()), "ready")
 		assert.Equal(t, 1, endpoint.shutdownCount())
 		assertVMExecSessionEvents(t, []string{
@@ -256,6 +272,17 @@ func TestHandleVMExecSessionControlEOFCleansWithoutTerminalClaim(t *testing.T) {
 			},
 			destinationFD: true,
 			cleanupFails:  true,
+		},
+		"after_ready_clean_cleanup": {
+			frames: vmExecSessionFrames(t, true, true, false),
+			wantPhases: []string{
+				"read_open_source", "write_source_retained", "read_bind_destination", "write_ready",
+			},
+			wantCleanup: []string{
+				"open_source", "bind_destination", "shutdown_destination", "close_destination",
+				"shutdown_source", "close_source", "release_lease",
+			},
+			destinationFD: true,
 		},
 	}
 	for name, test := range tests {
