@@ -114,7 +114,7 @@ func handleVMExecSession(
 		)
 	}
 	if err := deliverVMExecSourceRetained(ctx, endpoint, deps.control); err != nil {
-		return errors.Join(err, resources.cleanup(ctx))
+		return withVMExecSessionCleanupEvidence(err, resources.cleanup(ctx))
 	}
 
 	destinationDeadline := boundedReadDeadline(ctx, deps.control.now(), vmExecSessionSetupReadTimeout)
@@ -128,7 +128,7 @@ func handleVMExecSession(
 	destinationCloseErr := destinationReader.Close()
 	if destinationErr != nil {
 		if errors.Is(destinationErr, io.EOF) {
-			return errors.Join(destinationCloseErr, resources.cleanup(ctx))
+			return withVMExecSessionCleanupEvidence(destinationCloseErr, resources.cleanup(ctx))
 		}
 		return failVMExecSession(
 			ctx,
@@ -147,7 +147,7 @@ func handleVMExecSession(
 		return failVMExecSession(ctx, endpoint, resources, err, deps.control)
 	}
 	if err := deliverVMExecReady(ctx, endpoint, deps.control); err != nil {
-		return errors.Join(err, resources.cleanup(ctx))
+		return withVMExecSessionCleanupEvidence(err, resources.cleanup(ctx))
 	}
 
 	releaseDeadline := boundedReadDeadline(ctx, deps.control.now(), vmExecSessionReleaseReadTimeout)
@@ -164,7 +164,7 @@ func handleVMExecSession(
 	releaseCloseErr := releaseReader.Close()
 	if releaseErr != nil {
 		if errors.Is(releaseErr, io.EOF) {
-			return errors.Join(releaseCloseErr, resources.cleanup(ctx))
+			return withVMExecSessionCleanupEvidence(releaseCloseErr, resources.cleanup(ctx))
 		}
 		return failVMExecSession(
 			ctx,

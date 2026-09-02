@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -30,18 +31,22 @@ type fakeVMExecSessionEndpoint struct {
 	writeErr      error
 	writeLimit    int
 	deadlineErr   error
+	deadlineErrAt int
 	writeCalls    int
 	shutdownCalls int
 	shutdownErr   error
+	phaseEvents   *[]string
 }
 
 type fakeVMExecSessionLease struct {
-	events     *[]string
-	bindErr    error
-	releaseErr error
-	bound      bool
-	released   bool
-	releaseCtx context.Context
+	events                *[]string
+	bindErr               error
+	releaseErr            error
+	sourceConnection      vmExecSessionConnection
+	destinationConnection vmExecSessionConnection
+	bound                 bool
+	released              bool
+	releaseCtx            context.Context
 }
 
 func TestHandleVMExecSessionSuccessUsesExactPhasesAndReverseCleanup(t *testing.T) {
@@ -55,16 +60,20 @@ func TestHandleVMExecSessionSuccessUsesExactPhasesAndReverseCleanup(t *testing.T
 	caller := callerIdentity{uid: 1000, gid: 1001}
 	var gotRequest vmexecsessionwire.OpenSource
 	var gotCaller callerIdentity
+	var sourceConnection vmExecSessionConnection
+	phaseEvents := make([]string, 0, 6)
+	endpoint.phaseEvents = &phaseEvents
 	effects := vmExecSessionHandlerEffects{
 		openSource: func(
 			_ context.Context,
 			actualCaller callerIdentity,
 			request vmexecsessionwire.OpenSource,
-			_ vmExecSessionConnection,
+			connection vmExecSessionConnection,
 		) (vmExecSessionHandlerLease, error) {
 			events = append(events, "open_source")
 			gotCaller = actualCaller
 			gotRequest = request
+			sourceConnection = connection
 			return lease, nil
 		},
 	}
@@ -77,6 +86,23 @@ func TestHandleVMExecSessionSuccessUsesExactPhasesAndReverseCleanup(t *testing.T
 	}
 	assert.Equal(t, testVMExecHandlerSource, gotRequest.SourceVMID)
 	assert.Equal(t, testVMExecHandlerDestination, gotRequest.DestinationVMID)
+	require.NotNil(t, sourceConnection.retained)
+	require.NotNil(t, sourceConnection.retained.owner)
+	require.NotNil(t, lease.destinationConnection.retained)
+	require.NotNil(t, lease.destinationConnection.retained.owner)
+	assert.Equal(t, sourceFD, sourceConnection.retained.owner.fd)
+	assert.Equal(t, destinationFD, lease.destinationConnection.retained.owner.fd)
+	assert.NotSame(t, sourceConnection.retained.owner, lease.destinationConnection.retained.owner)
+	assert.True(t, sourceConnection.retained.owner.closed)
+	assert.True(t, lease.destinationConnection.retained.owner.closed)
+	assertVMExecSessionEvents(t, []string{
+		"read_open_source",
+		"write_source_retained",
+		"read_bind_destination",
+		"write_ready",
+		"read_release",
+		"write_released",
+	}, phaseEvents)
 	assertVMExecSessionEvents(t, []string{
 		"open_source",
 		"bind_destination",
@@ -124,10 +150,15 @@ func TestHandleVMExecSessionGatesIntermediateResponsesOnEffects(t *testing.T) {
 	t.Run("destination bind failure never sends ready", func(t *testing.T) {
 		events := make([]string, 0, 8)
 		lease := &fakeVMExecSessionLease{
-			events:  &events,
-			bindErr: errs.New(errs.CodeProcessError, "destination retention failed"),
+			events: &events,
+			bindErr: errs.New(
+				errs.CodeVMAtomicFailed,
+				"destination retention failed",
+				errs.WithClass(errs.ClassConflict),
+			),
+			releaseErr: errors.New("lease cleanup failed"),
 		}
-		endpoint, deps, _, _ := newVMExecSessionHandlerFixture(
+		endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(
 			t,
 			vmExecSessionFrames(t, true, true, false),
 			&events,
@@ -144,9 +175,26 @@ func TestHandleVMExecSessionGatesIntermediateResponsesOnEffects(t *testing.T) {
 		outcome, decodeErr := vmexecsessionwire.DecodeOutcome(t.Context(), responses)
 		require.NoError(t, decodeErr)
 		assert.False(t, outcome.Released())
-		require.NotNil(t, outcome.OperationError())
+		operationErr := outcome.OperationError()
+		require.NotNil(t, operationErr)
+		assert.Equal(t, errs.CodeVMAtomicFailed, operationErr.Code)
+		assert.Equal(t, errs.ClassConflict, operationErr.Class)
+		assert.Equal(t, true, operationErr.Details["cleanup_failed"])
 		assert.NotContains(t, string(endpoint.responseBytes()), "ready")
 		assert.Equal(t, 1, endpoint.shutdownCount())
+		assertVMExecSessionEvents(t, []string{
+			"open_source",
+			"bind_destination",
+			"shutdown_destination",
+			"close_destination",
+			"shutdown_source",
+			"close_source",
+			"release_lease",
+		}, events)
+		assertFDClosed(t, sourceFD)
+		assertFDClosed(t, destinationFD)
+		require.NotNil(t, lease.releaseCtx)
+		assert.NoError(t, lease.releaseCtx.Err())
 	})
 }
 
@@ -180,15 +228,46 @@ func TestHandleVMExecSessionRejectsOutOfOrderPhaseBeforeEffects(t *testing.T) {
 }
 
 func TestHandleVMExecSessionControlEOFCleansWithoutTerminalClaim(t *testing.T) {
-	tests := map[string][]vmExecSessionInputFrame{
-		"after_source_retained": vmExecSessionFrames(t, true, false, false),
-		"after_ready":           vmExecSessionFrames(t, true, true, false),
+	tests := map[string]struct {
+		frames        []vmExecSessionInputFrame
+		wantPhases    []string
+		wantCleanup   []string
+		destinationFD bool
+		cleanupFails  bool
+	}{
+		"after_source_retained": {
+			frames: vmExecSessionFrames(t, true, false, false),
+			wantPhases: []string{
+				"read_open_source", "write_source_retained",
+			},
+			wantCleanup: []string{
+				"open_source", "shutdown_source", "close_source", "release_lease",
+			},
+			cleanupFails: true,
+		},
+		"after_ready": {
+			frames: vmExecSessionFrames(t, true, true, false),
+			wantPhases: []string{
+				"read_open_source", "write_source_retained", "read_bind_destination", "write_ready",
+			},
+			wantCleanup: []string{
+				"open_source", "bind_destination", "shutdown_destination", "close_destination",
+				"shutdown_source", "close_source", "release_lease",
+			},
+			destinationFD: true,
+			cleanupFails:  true,
+		},
 	}
-	for name, frames := range tests {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			events := make([]string, 0, 8)
+			phaseEvents := make([]string, 0, 4)
 			lease := &fakeVMExecSessionLease{events: &events}
-			endpoint, deps, _, _ := newVMExecSessionHandlerFixture(t, frames, &events)
+			if test.cleanupFails {
+				lease.releaseErr = errors.New("EOF cleanup failed")
+			}
+			endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(t, test.frames, &events)
+			endpoint.phaseEvents = &phaseEvents
 
 			err := handleVMExecSession(
 				t.Context(),
@@ -198,11 +277,34 @@ func TestHandleVMExecSessionControlEOFCleansWithoutTerminalClaim(t *testing.T) {
 				deps,
 			)
 
-			require.NoError(t, err)
+			if test.cleanupFails {
+				domainErr := requireVMExecDomainError(t, err)
+				assert.Equal(t, errs.CodeProcessError, domainErr.Code)
+				assert.Equal(t, true, domainErr.Details["cleanup_failed"])
+			} else {
+				require.NoError(t, err)
+			}
 			assert.Equal(t, 0, endpoint.shutdownCount())
-			assert.NotContains(t, string(endpoint.responseBytes()), "released")
-			assert.NotContains(t, string(endpoint.responseBytes()), "failure")
+			assertVMExecSessionEvents(t, test.wantPhases, phaseEvents)
+			assertVMExecSessionEvents(t, test.wantCleanup, events)
+			responses := bytes.NewReader(endpoint.responseBytes())
+			sourceResult, decodeErr := vmexecsessionwire.DecodeSourceRetained(t.Context(), responses)
+			require.NoError(t, decodeErr)
+			assert.True(t, sourceResult.Retained())
+			if test.destinationFD {
+				readyResult, readyErr := vmexecsessionwire.DecodeReady(t.Context(), responses)
+				require.NoError(t, readyErr)
+				assert.True(t, readyResult.Ready())
+			}
+			assert.Zero(t, responses.Len())
 			assert.True(t, lease.released)
+			assertFDClosed(t, sourceFD)
+			if test.destinationFD {
+				assertFDClosed(t, destinationFD)
+			} else {
+				assertFDOpen(t, destinationFD)
+				require.NoError(t, unix.Close(destinationFD))
+			}
 		})
 	}
 }
@@ -255,28 +357,62 @@ func TestHandleVMExecSessionCleanupFailureProducesFailureAndContinues(t *testing
 }
 
 func TestHandleVMExecSessionResponseTransportFailureDoesNotStartSecondFrame(t *testing.T) {
-	tests := map[string]func(*fakeVMExecSessionEndpoint){
-		"deadline": func(endpoint *fakeVMExecSessionEndpoint) {
-			endpoint.deadlineErr = io.ErrClosedPipe
+	tests := map[string]struct {
+		mutate        func(*fakeVMExecSessionEndpoint)
+		wantDeadlines int
+		wantWrites    int
+		wantShutdowns int
+		wantFrames    int
+		cleanupFails  bool
+	}{
+		"deadline": {
+			mutate: func(endpoint *fakeVMExecSessionEndpoint) {
+				endpoint.deadlineErr = io.ErrClosedPipe
+			},
+			wantDeadlines: 1,
+			cleanupFails:  true,
 		},
-		"partial write": func(endpoint *fakeVMExecSessionEndpoint) {
-			endpoint.writeLimit = 5
-			endpoint.writeErr = io.ErrClosedPipe
+		"ready deadline": {
+			mutate: func(endpoint *fakeVMExecSessionEndpoint) {
+				endpoint.deadlineErr = io.ErrClosedPipe
+				endpoint.deadlineErrAt = 2
+			},
+			wantDeadlines: 2,
+			wantWrites:    2,
+			wantFrames:    1,
+			cleanupFails:  true,
 		},
-		"terminal shutdown": func(endpoint *fakeVMExecSessionEndpoint) {
-			endpoint.shutdownErr = io.ErrClosedPipe
+		"partial write": {
+			mutate: func(endpoint *fakeVMExecSessionEndpoint) {
+				endpoint.writeLimit = 5
+				endpoint.writeErr = io.ErrClosedPipe
+			},
+			wantDeadlines: 1,
+			wantWrites:    1,
+		},
+		"terminal shutdown": {
+			mutate: func(endpoint *fakeVMExecSessionEndpoint) {
+				endpoint.shutdownErr = io.ErrClosedPipe
+			},
+			wantDeadlines: 3,
+			wantWrites:    6,
+			wantShutdowns: 1,
+			wantFrames:    3,
 		},
 	}
-	for name, mutate := range tests {
+	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
 			events := make([]string, 0, 8)
 			lease := &fakeVMExecSessionLease{events: &events}
+			if test.cleanupFails {
+				lease.releaseErr = errors.New("transport cleanup failed")
+			}
 			endpoint, deps, _, _ := newVMExecSessionHandlerFixture(
 				t,
 				vmExecSessionFrames(t, true, true, true),
 				&events,
 			)
-			mutate(endpoint)
+			test.mutate(endpoint)
 
 			err := handleVMExecSession(
 				t.Context(),
@@ -288,10 +424,13 @@ func TestHandleVMExecSessionResponseTransportFailureDoesNotStartSecondFrame(t *t
 
 			domainErr := requireVMExecDomainError(t, err)
 			assert.Equal(t, errs.CodeProcessError, domainErr.Code)
-			assert.LessOrEqual(t, bytes.Count(endpoint.responseBytes(), []byte("MVMXSES1")), 3)
-			if name == "partial write" {
-				assert.Equal(t, 1, endpoint.writeCount())
+			if test.cleanupFails {
+				assert.Equal(t, true, domainErr.Details["cleanup_failed"])
 			}
+			assert.Equal(t, test.wantDeadlines, endpoint.deadlineCount())
+			assert.Equal(t, test.wantWrites, endpoint.writeCount())
+			assert.Equal(t, test.wantShutdowns, endpoint.shutdownCount())
+			assert.Equal(t, test.wantFrames, bytes.Count(endpoint.responseBytes(), []byte("MVMXSES1")))
 		})
 	}
 }
@@ -299,12 +438,14 @@ func TestHandleVMExecSessionResponseTransportFailureDoesNotStartSecondFrame(t *t
 func TestHandleVMExecSessionCancellationUsesDetachedCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	events := make([]string, 0, 8)
+	phaseEvents := make([]string, 0, 6)
 	lease := &fakeVMExecSessionLease{events: &events}
-	endpoint, deps, _, _ := newVMExecSessionHandlerFixture(
+	endpoint, deps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(
 		t,
 		vmExecSessionFrames(t, true, true, false),
 		&events,
 	)
+	endpoint.phaseEvents = &phaseEvents
 	effects := vmExecSessionEffectsForLease(lease)
 	recvmsg := deps.connectionReader.recvmsg
 	deps.connectionReader.recvmsg = func(
@@ -324,12 +465,34 @@ func TestHandleVMExecSessionCancellationUsesDetachedCleanup(t *testing.T) {
 
 	err := handleVMExecSession(ctx, endpoint, callerIdentity{uid: 1000, gid: 1000}, effects, deps)
 
-	if err != nil {
-		assert.Equal(t, errs.CodeProcessError, requireVMExecDomainError(t, err).Code)
-	}
+	require.NoError(t, err)
+	responses := bytes.NewReader(endpoint.responseBytes())
+	sourceResult, decodeErr := vmexecsessionwire.DecodeSourceRetained(t.Context(), responses)
+	require.NoError(t, decodeErr)
+	assert.True(t, sourceResult.Retained())
+	readyResult, decodeErr := vmexecsessionwire.DecodeReady(t.Context(), responses)
+	require.NoError(t, decodeErr)
+	assert.True(t, readyResult.Ready())
+	outcome, decodeErr := vmexecsessionwire.DecodeOutcome(t.Context(), responses)
+	require.NoError(t, decodeErr)
+	assert.False(t, outcome.Released())
+	operationErr := outcome.OperationError()
+	require.NotNil(t, operationErr)
+	assert.Equal(t, errs.CodeValidationFailed, operationErr.Code)
+	assert.Equal(t, errs.ClassInternal, operationErr.Class)
+	assertVMExecSessionEvents(t, []string{
+		"read_open_source",
+		"write_source_retained",
+		"read_bind_destination",
+		"write_ready",
+		"write_failure",
+	}, phaseEvents)
+	assert.Equal(t, 1, endpoint.shutdownCount())
 	assert.True(t, lease.released)
 	require.NotNil(t, lease.releaseCtx)
 	assert.NoError(t, lease.releaseCtx.Err())
+	assertFDClosed(t, sourceFD)
+	assertFDClosed(t, destinationFD)
 }
 
 func TestHandleVMExecSessionRejectsInactiveSeamsWithoutPanic(t *testing.T) {
@@ -366,9 +529,10 @@ func TestHandleVMExecSessionRejectsInactiveSeamsWithoutPanic(t *testing.T) {
 
 func (lease *fakeVMExecSessionLease) bindDestination(
 	ctx context.Context,
-	_ vmExecSessionConnection,
+	connection vmExecSessionConnection,
 ) error {
 	appendVMExecSessionEvent(lease.events, "bind_destination")
+	lease.destinationConnection = connection
 	lease.bound = true
 	return lease.bindErr
 }
@@ -383,6 +547,7 @@ func (lease *fakeVMExecSessionLease) release(ctx context.Context) error {
 type vmExecSessionInputFrame struct {
 	frame      []byte
 	descriptor bool
+	phase      string
 }
 
 func vmExecSessionFrames(
@@ -399,17 +564,21 @@ func vmExecSessionFrames(
 			SourceVMID:      testVMExecHandlerSource,
 			DestinationVMID: testVMExecHandlerDestination,
 		}))
-		frames = append(frames, vmExecSessionInputFrame{frame: frame.Bytes(), descriptor: true})
+		frames = append(frames, vmExecSessionInputFrame{
+			frame: frame.Bytes(), descriptor: true, phase: "open_source",
+		})
 	}
 	if includeDestination {
 		var frame bytes.Buffer
 		require.NoError(t, vmexecsessionwire.EncodeBindDestination(t.Context(), &frame))
-		frames = append(frames, vmExecSessionInputFrame{frame: frame.Bytes(), descriptor: true})
+		frames = append(frames, vmExecSessionInputFrame{
+			frame: frame.Bytes(), descriptor: true, phase: "bind_destination",
+		})
 	}
 	if includeRelease {
 		var frame bytes.Buffer
 		require.NoError(t, vmexecsessionwire.EncodeRelease(t.Context(), &frame))
-		frames = append(frames, vmExecSessionInputFrame{frame: frame.Bytes()})
+		frames = append(frames, vmExecSessionInputFrame{frame: frame.Bytes(), phase: "release"})
 	}
 	return frames
 }
@@ -420,6 +589,7 @@ func newVMExecSessionHandlerFixture(
 	events *[]string,
 ) (*fakeVMExecSessionEndpoint, vmExecSessionHandlerDeps, int, int) {
 	t.Helper()
+	endpoint := &fakeVMExecSessionEndpoint{}
 	sourceFD := requireRawTestFD(t)
 	destinationFD := requireRawTestFD(t)
 	descriptorIndex := 0
@@ -439,6 +609,9 @@ func newVMExecSessionHandlerFixture(
 		}
 		frame := frames[frameIndex]
 		start := offset == 0
+		if start {
+			endpoint.recordPhase("read_" + frame.phase)
+		}
 		count := copy(payload, frame.frame[offset:])
 		offset += count
 		controlCount := 0
@@ -467,7 +640,6 @@ func newVMExecSessionHandlerFixture(
 		appendVMExecSessionEvent(events, vmExecSessionFDName(fd, sourceFD, destinationFD, "close"))
 		return unix.Close(fd)
 	}
-	endpoint := &fakeVMExecSessionEndpoint{}
 	control := controlDeps{
 		now: func() time.Time { return time.Now() },
 		shutdownWrite: func(_ context.Context, _ int) error {
@@ -485,9 +657,10 @@ func vmExecSessionEffectsForLease(lease *fakeVMExecSessionLease) vmExecSessionHa
 		_ context.Context,
 		_ callerIdentity,
 		_ vmexecsessionwire.OpenSource,
-		_ vmExecSessionConnection,
+		connection vmExecSessionConnection,
 	) (vmExecSessionHandlerLease, error) {
 		appendVMExecSessionEvent(lease.events, "open_source")
+		lease.sourceConnection = connection
 		return lease, nil
 	}}
 }
@@ -496,6 +669,11 @@ func (endpoint *fakeVMExecSessionEndpoint) Write(value []byte) (int, error) {
 	endpoint.mu.Lock()
 	defer endpoint.mu.Unlock()
 	endpoint.writeCalls++
+	for _, phase := range []string{"source_retained", "ready", "released", "failure"} {
+		if strings.Contains(string(value), `"phase":"`+phase+`"`) {
+			endpoint.recordPhaseLocked("write_" + phase)
+		}
+	}
 	if endpoint.writeErr != nil {
 		limit := endpoint.writeLimit
 		if limit > len(value) {
@@ -515,7 +693,10 @@ func (endpoint *fakeVMExecSessionEndpoint) SetWriteDeadline(deadline time.Time) 
 	endpoint.mu.Lock()
 	defer endpoint.mu.Unlock()
 	endpoint.deadlines = append(endpoint.deadlines, deadline)
-	return endpoint.deadlineErr
+	if endpoint.deadlineErrAt == 0 || endpoint.deadlineErrAt == len(endpoint.deadlines) {
+		return endpoint.deadlineErr
+	}
+	return nil
 }
 
 func (endpoint *fakeVMExecSessionEndpoint) responseBytes() []byte {
@@ -534,6 +715,24 @@ func (endpoint *fakeVMExecSessionEndpoint) writeCount() int {
 	endpoint.mu.Lock()
 	defer endpoint.mu.Unlock()
 	return endpoint.writeCalls
+}
+
+func (endpoint *fakeVMExecSessionEndpoint) deadlineCount() int {
+	endpoint.mu.Lock()
+	defer endpoint.mu.Unlock()
+	return len(endpoint.deadlines)
+}
+
+func (endpoint *fakeVMExecSessionEndpoint) recordPhase(event string) {
+	endpoint.mu.Lock()
+	defer endpoint.mu.Unlock()
+	endpoint.recordPhaseLocked(event)
+}
+
+func (endpoint *fakeVMExecSessionEndpoint) recordPhaseLocked(event string) {
+	if endpoint.phaseEvents != nil {
+		*endpoint.phaseEvents = append(*endpoint.phaseEvents, event)
+	}
 }
 
 func assertVMExecSessionResponses(
@@ -596,4 +795,10 @@ func assertFDClosed(t *testing.T, fd int) {
 	t.Helper()
 	_, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	assert.ErrorIs(t, err, unix.EBADF)
+}
+
+func assertFDOpen(t *testing.T, fd int) {
+	t.Helper()
+	_, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
+	assert.NoError(t, err)
 }
