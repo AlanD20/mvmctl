@@ -143,6 +143,9 @@ func (reader *vmExecConnectionReader) Read(target []byte) (int, error) {
 	if controlErr != nil {
 		return 0, reader.fail(controlErr)
 	}
+	if len(received.payload) == 0 && len(received.control) == 0 {
+		return 0, io.EOF
+	}
 
 	if !reader.carrierRead {
 		if len(received.payload) != 1 || received.payload[0] == 0 {

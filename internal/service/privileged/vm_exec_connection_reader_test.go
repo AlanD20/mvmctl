@@ -334,6 +334,21 @@ func TestVMExecConnectionReaderRejectsAncillaryGrammarAndCleansInstalledFDs(t *t
 	})
 }
 
+func TestVMExecConnectionReaderPreservesPhysicalControlEOFBeforeCarrier(t *testing.T) {
+	reader := newVMExecConnectionReaderWithDeps(
+		context.Background(),
+		23,
+		time.Now().Add(time.Second),
+		successfulVMExecReaderDeps(nil),
+	)
+
+	count, err := reader.Read(make([]byte, 1))
+
+	assert.Zero(t, count)
+	assert.ErrorIs(t, err, io.EOF)
+	assert.NoError(t, reader.Close())
+}
+
 func TestVMExecConnectionReaderUsesExactRecvmsgShape(t *testing.T) {
 	fd := requireRawTestFD(t)
 	tracker := &fakeVMExecCloseTracker{calls: make(map[int]int)}
