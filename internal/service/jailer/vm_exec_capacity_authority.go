@@ -269,6 +269,34 @@ func (lease *vmExecCapacityLease) relayStopBoottimeNS() (uint64, error) {
 	return created + uint64(vmexecwire.MaxExecutionDuration), nil
 }
 
+// CRITICAL: observedRelayBoottimeNS is the capacity lease's narrow clock boundary for enforcing the retained
+// session's fixed relay budget. It holds the lease lifecycle guard while validating and consulting its immutable clock.
+func (lease *vmExecCapacityLease) observedRelayBoottimeNS(ctx context.Context) (uint64, error) {
+	if lease == nil || lease.state == nil {
+		return 0, vmExecCapacityCorruptError("vm-exec capacity lease is unavailable", nil)
+	}
+	if ctx == nil {
+		return 0, vmExecCapacityCorruptError("vm-exec capacity clock context is required", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, vmExecCapacityEffectError("observe VM-exec relay CLOCK_BOOTTIME", err)
+	}
+	state := lease.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released {
+		return 0, vmExecCapacityCorruptError("vm-exec capacity lease is released", nil)
+	}
+	if state.authority == nil || state.authority.deps.clock == nil {
+		return 0, vmExecCapacityCorruptError("vm-exec capacity lease clock is unavailable", nil)
+	}
+	observed, err := state.authority.deps.clock.boottimeNS(ctx)
+	if err != nil {
+		return 0, vmExecCapacityEffectError("observe VM-exec relay CLOCK_BOOTTIME", err)
+	}
+	return observed, nil
+}
+
 func releaseVMExecCapacityOperation(
 	ctx context.Context,
 	primary error,

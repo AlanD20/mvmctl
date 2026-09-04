@@ -135,6 +135,8 @@ func admitVMExecFirecrackerPeer(
 	return peer, nil
 }
 
+// CRITICAL: verifyVMExecFirecrackerPeerIdentity brackets the complete runtime identity proof with exact pidfd locator
+// and liveness checks, preventing a stale or substituted AF_UNIX peer from satisfying admission.
 func verifyVMExecFirecrackerPeerIdentity(
 	ctx context.Context,
 	deps vmExecPeerAuthorityDeps,
@@ -181,6 +183,8 @@ func verifyVMExecFirecrackerPeerIdentity(
 	return nil
 }
 
+// CRITICAL: validateVMExecRetainedProcessAuthority proves that the retained process set is complete, exact, and still
+// owned by the same VM admission before it participates in peer binding.
 func validateVMExecRetainedProcessAuthority(
 	processes *reopenedRecordedProcesses,
 	record instanceRecord,
@@ -236,6 +240,7 @@ func validateVMExecPeerAuthorityDeps(deps vmExecPeerAuthorityDeps) error {
 	return nil
 }
 
+// CRITICAL: recheck repeats the complete Firecracker identity proof through the retained peer and process authorities.
 func (peer *vmExecFirecrackerPeer) recheck(
 	ctx context.Context,
 	identityDeps processIdentityVerifierDeps,
@@ -275,6 +280,47 @@ func (peer *vmExecFirecrackerPeer) recheck(
 		state.pidfd,
 		state.role,
 	)
+}
+
+// CRITICAL: recheckLocatorAndLiveness is the bounded final check used after both complete identity proofs. It observes
+// the retained peer pidfd directly, so recycled numeric credentials cannot satisfy the session's last-look sweep.
+func (peer *vmExecFirecrackerPeer) recheckLocatorAndLiveness(
+	ctx context.Context,
+	record instanceRecord,
+) error {
+	if peer == nil || peer.state == nil {
+		return vmExecPeerError(record.vmID, "retained", "peer authority is unavailable", nil)
+	}
+	state := peer.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if ctx == nil {
+		return vmExecPeerError(record.vmID, state.role, "peer recheck context is required", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return vmExecPeerError(record.vmID, state.role, "peer recheck was cancelled", err)
+	}
+	if record.launch == nil || state.released || state.pidfd < 0 || state.vmID != record.vmID {
+		return vmExecPeerError(record.vmID, state.role, "retained peer authority does not match Firecracker", nil)
+	}
+	if err := validateVMExecPeerAuthorityDeps(state.deps); err != nil {
+		return vmExecPeerError(record.vmID, state.role, "retained peer authority dependencies are incomplete", err)
+	}
+	derived, err := state.deps.deriveLocator(ctx, state.pidfd)
+	if err != nil {
+		return vmExecPeerError(record.vmID, state.role, "rederive retained connection peer locator", err)
+	}
+	if derived != record.launch.process {
+		return vmExecPeerError(record.vmID, state.role, "retained connection peer locator no longer matches Firecracker", nil)
+	}
+	alive, err := state.deps.pidfdAlive(ctx, state.pidfd)
+	if err != nil {
+		return vmExecPeerError(record.vmID, state.role, "recheck retained connection peer liveness", err)
+	}
+	if !alive {
+		return vmExecPeerError(record.vmID, state.role, "retained connection peer is not live", nil)
+	}
+	return nil
 }
 
 // Release closes the retained peer pidfd once across copied capabilities and caches the first classified result.

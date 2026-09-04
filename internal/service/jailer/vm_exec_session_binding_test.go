@@ -32,6 +32,9 @@ type vmExecSessionPeerFixture struct {
 	failAlive   map[int]int
 	closeErrors map[int]error
 	closed      []int
+
+	exitSourceOnDestinationAliveCall int
+	sourceExited                     bool
 }
 
 func TestVMExecSessionBindsAndRetainsBothExactFirecrackerPeers(t *testing.T) {
@@ -53,8 +56,8 @@ func TestVMExecSessionBindsAndRetainsBothExactFirecrackerPeers(t *testing.T) {
 	require.NoError(t, lease.bindDestination(t.Context(), testVMExecDestinationConnectionFD))
 
 	assert.Empty(t, peers.closedSnapshot())
-	assert.Equal(t, 4, peers.aliveCallCount(testVMExecSourcePeerPIDFD))
-	assert.Equal(t, 4, peers.aliveCallCount(testVMExecDestinationPeerPIDFD))
+	assert.Equal(t, 5, peers.aliveCallCount(testVMExecSourcePeerPIDFD))
+	assert.Equal(t, 5, peers.aliveCallCount(testVMExecDestinationPeerPIDFD))
 	require.NoError(t, lease.Release(t.Context()))
 	if diff := cmp.Diff(
 		[]int{testVMExecDestinationPeerPIDFD, testVMExecSourcePeerPIDFD},
@@ -96,6 +99,37 @@ func TestVMExecSessionDestinationBindingRechecksRetainedSourcePeer(t *testing.T)
 		t.Errorf("failed binding peer cleanup mismatch (-want +got):\n%s", diff)
 	}
 	assert.Equal(t, int32(1), fixture.capacity.recordUnlinkCalls.Load())
+}
+
+// Rationale: the source can exit while the destination's expensive full-identity proof is in progress. Both retained
+// peer and process pidfd sets must receive one final bounded sweep after those proofs and before readiness.
+func TestVMExecSessionDestinationBindingRejectsSourceExitDuringDestinationIdentityVerification(t *testing.T) {
+	fixture := newVMExecSessionAuthorityFixture(t, vmExecSessionSourceID, vmExecSessionDestinationID)
+	prepareVMExecSessionBindingIdentity(fixture)
+	peers := newVMExecSessionPeerFixture(fixture.sourceRecord, fixture.destinationRecord)
+	peers.exitSourceOnDestinationAliveCall = 3
+	fixture.authority.peerDeps = peers.deps()
+
+	lease, err := fixture.authority.reserve(
+		t.Context(),
+		testInstanceCaller(),
+		vmExecSessionSourceID,
+		vmExecSessionDestinationID,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, lease)
+	t.Cleanup(func() { assert.NoError(t, lease.Release(context.Background())) })
+	require.NoError(t, lease.bindSource(t.Context(), testVMExecSourceConnectionFD))
+
+	err = lease.bindDestination(t.Context(), testVMExecDestinationConnectionFD)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "source")
+	assert.Contains(t, err.Error(), "not live")
+	lease.state.mu.Lock()
+	destinationBound := lease.state.destinationBound
+	lease.state.mu.Unlock()
+	assert.False(t, destinationBound)
 }
 
 // Rationale: PID/start and pidfd liveness do not prove that the retained task remains the admitted Firecracker. The
@@ -242,6 +276,13 @@ func (fixture *vmExecSessionPeerFixture) deps() vmExecPeerAuthorityDeps {
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
 			fixture.aliveCalls[pidfd]++
+			if pidfd == testVMExecDestinationPeerPIDFD &&
+				fixture.aliveCalls[pidfd] == fixture.exitSourceOnDestinationAliveCall {
+				fixture.sourceExited = true
+			}
+			if pidfd == testVMExecSourcePeerPIDFD && fixture.sourceExited {
+				return false, nil
+			}
 			return fixture.aliveCalls[pidfd] != fixture.failAlive[pidfd], nil
 		},
 		close: func(_ context.Context, pidfd int) error {

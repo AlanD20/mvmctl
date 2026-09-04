@@ -66,7 +66,7 @@ func newVMExecSessionAuthority() (*vmExecSessionAuthority, error) {
 	if err != nil {
 		return nil, vmExecSessionError("construct production VM-exec capacity authority", err)
 	}
-	return newVMExecSessionAuthorityWithPeerDeps(
+	return newVMExecSessionAuthorityWithDeps(
 		newInstanceAuthority(),
 		capacity,
 		realProcessRecoveryDeps(),
@@ -80,6 +80,7 @@ func newVMExecSessionAuthorityWithDeps(
 	capacity *vmExecCapacityAuthority,
 	recoveryDeps processRecoveryDeps,
 	identityDeps processIdentityVerifierDeps,
+	peerDeps vmExecPeerAuthorityDeps,
 ) (*vmExecSessionAuthority, error) {
 	if instances == nil || capacity == nil {
 		return nil, vmExecSessionError("vm-exec session authority dependencies are incomplete", nil)
@@ -90,27 +91,13 @@ func newVMExecSessionAuthorityWithDeps(
 	if err := validateProcessIdentityVerifierDeps(identityDeps); err != nil {
 		return nil, vmExecSessionError("vm-exec session process identity dependencies are incomplete", err)
 	}
-	return &vmExecSessionAuthority{
-		instances: instances, capacity: capacity, recoveryDeps: recoveryDeps, identityDeps: identityDeps,
-	}, nil
-}
-
-func newVMExecSessionAuthorityWithPeerDeps(
-	instances *instanceAuthority,
-	capacity *vmExecCapacityAuthority,
-	recoveryDeps processRecoveryDeps,
-	identityDeps processIdentityVerifierDeps,
-	peerDeps vmExecPeerAuthorityDeps,
-) (*vmExecSessionAuthority, error) {
-	authority, err := newVMExecSessionAuthorityWithDeps(instances, capacity, recoveryDeps, identityDeps)
-	if err != nil {
-		return nil, err
-	}
 	if err := validateVMExecPeerAuthorityDeps(peerDeps); err != nil {
 		return nil, vmExecSessionError("vm-exec session peer authority dependencies are incomplete", err)
 	}
-	authority.peerDeps = peerDeps
-	return authority, nil
+	return &vmExecSessionAuthority{
+		instances: instances, capacity: capacity, recoveryDeps: recoveryDeps, identityDeps: identityDeps,
+		peerDeps: peerDeps,
+	}, nil
 }
 
 // reserve admits two exact active runtimes and only then reserves the root-global execution capacity. The global lock
@@ -440,6 +427,8 @@ func (lease *vmExecSessionLease) bindDestination(ctx context.Context, connection
 	return nil
 }
 
+// CRITICAL: recheckVMExecSessionBoundAuthorities brackets the expensive complete identity proofs with budget checks,
+// then performs one final bounded sweep of every retained peer and runtime pidfd before publishing readiness.
 func recheckVMExecSessionBoundAuthorities(ctx context.Context, state *vmExecSessionLeaseState) error {
 	if err := recheckVMExecSessionBindingBudget(ctx, state); err != nil {
 		return err
@@ -460,7 +449,25 @@ func recheckVMExecSessionBoundAuthorities(ctx context.Context, state *vmExecSess
 	); err != nil {
 		return err
 	}
+	if err := recheckVMExecSessionFinalLocatorsAndLiveness(ctx, state); err != nil {
+		return err
+	}
 	return recheckVMExecSessionBindingBudget(ctx, state)
+}
+
+// CRITICAL: this bounded last-look sweep closes the liveness gap created while the other VM's full credentials,
+// namespaces, executable, and digest are being verified.
+func recheckVMExecSessionFinalLocatorsAndLiveness(ctx context.Context, state *vmExecSessionLeaseState) error {
+	if err := state.sourcePeer.recheckLocatorAndLiveness(ctx, state.source.snapshot()); err != nil {
+		return err
+	}
+	if err := state.destinationPeer.recheckLocatorAndLiveness(ctx, state.destination.snapshot()); err != nil {
+		return err
+	}
+	if err := state.sourceProcesses.verifyLocators(ctx); err != nil {
+		return err
+	}
+	return state.destinationProcesses.verifyLocators(ctx)
 }
 
 func validateVMExecSessionBindingState(ctx context.Context, state *vmExecSessionLeaseState) error {
@@ -500,6 +507,8 @@ func stateIdentityDeps(state *vmExecSessionLeaseState) processIdentityVerifierDe
 	return state.identityDeps
 }
 
+// CRITICAL: the host-boot identity and fixed CLOCK_BOOTTIME deadline are rechecked at each binding boundary so setup
+// cannot publish a session after a reboot or after consuming the relay's execution budget.
 func recheckVMExecSessionBindingBudget(ctx context.Context, state *vmExecSessionLeaseState) error {
 	identityDeps := stateIdentityDeps(state)
 	bootID, err := identityDeps.readBootID(ctx)
@@ -509,13 +518,12 @@ func recheckVMExecSessionBindingBudget(ctx context.Context, state *vmExecSession
 	if bootID != state.admission.hostBootID {
 		return vmExecSessionError("host boot ID changed during VM-exec peer proof", nil)
 	}
-	capacityState := state.capacity.state
-	now, err := capacityState.authority.deps.clock.boottimeNS(ctx)
+	now, err := state.capacity.observedRelayBoottimeNS(ctx)
 	if err != nil {
 		return vmExecSessionError("recheck VM-exec relay CLOCK_BOOTTIME budget", err)
 	}
 	if now >= state.admission.relayStopBoottimeNS {
-		return vmExecSessionError("VM-exec relay CLOCK_BOOTTIME budget is exhausted", nil)
+		return vmExecSessionError("vm-exec relay CLOCK_BOOTTIME budget is exhausted", nil)
 	}
 	return nil
 }

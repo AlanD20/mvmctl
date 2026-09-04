@@ -294,10 +294,27 @@ func newVMExecSessionAuthorityFixture(
 		capacityFixture.authority(t),
 		recoveryDeps,
 		fake.deps(),
+		unusedVMExecPeerAuthorityDeps(),
 	)
 	require.NoError(t, err)
 	fixture.authority = authority
 	return fixture
+}
+
+// unusedVMExecPeerAuthorityDeps keeps reserve-only tests hermetic while satisfying the constructor's mandatory peer
+// dependency contract. Binding tests replace it with a fixture that models the exact VM pair.
+func unusedVMExecPeerAuthorityDeps() vmExecPeerAuthorityDeps {
+	unexpected := errors.New("unexpected VM-exec peer effect")
+	return vmExecPeerAuthorityDeps{
+		peerCredentials: func(context.Context, int) (*unix.Ucred, error) { return nil, unexpected },
+		peerPIDFD:       func(context.Context, int) (int, error) { return -1, unexpected },
+		descriptorFlags: func(context.Context, int) (int, error) { return 0, unexpected },
+		deriveLocator: func(context.Context, int) (instanceProcessLocator, error) {
+			return instanceProcessLocator{}, unexpected
+		},
+		pidfdAlive: func(context.Context, int) (bool, error) { return false, unexpected },
+		close:      func(context.Context, int) error { return unexpected },
+	}
 }
 
 func TestInstanceAuthorityLocksActivePairBehindNamedBoundary(t *testing.T) {
