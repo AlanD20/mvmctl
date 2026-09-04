@@ -42,8 +42,10 @@ continue without silently deleting it.
   Network, and Firewall families provide canonical resource locks to their owning services. The firewall family is
   consumed only by an inert generation authority, and the LoopMount provision/inspect actions are registered only in
   the private receiver. The Network family also owns an exact per-VM namespace placeholder used only by the uncomposed
-  namespace effect; no `/run/mvmctl/runtime` tree, live production topology, public LoopMount backend cutover, or
-  firewall kernel effect exists yet.
+  namespace effect. A separate private Jailer lease now creates and pins the exact root-controlled
+  `/run/mvmctl/runtime/<uid>/<vm-id>` hierarchy and removes only the identity-checked empty VM directory, including
+  effectful-unlink and parent-sync retry reconciliation. It is not transferred through lifecycle authority or mounted
+  yet; no live production topology, public LoopMount backend cutover, or firewall kernel effect exists.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional
@@ -1023,10 +1025,10 @@ persisted-CID errors, preserve the CID plus normal-process port/token, and pass 
 input. The VM/Jailer layer derives fixed host and jail socket leaves, and snapshot load sends the fixed jail-visible
 UDS override while preserving the vmstate CID. The fresh v0.3 schema therefore permits duplicate CIDs across independent
 Firecracker UDS namespaces and retains a non-unique CID index; this is a clean-install-only schema break. Create still
-uses its existing builder state. Root-built descriptor-pinned `/run/mvm/runtime` activation backed by the host
-`/run/mvmctl/runtime` tree, verified stale-socket cleanup, transactional lifecycle, host-reboot reconciliation, and the
-complete L2 exec matrix remain release blockers, so the reported `mvm exec` restart bug is not yet recorded as fully
-fixed.
+uses its existing builder state. The private host `/run/mvmctl/runtime` directory lease is implemented, but root-built
+`/run/mvm/runtime` mount activation, lifecycle-lease transfer, verified stale-socket cleanup, transactional lifecycle,
+host-reboot reconciliation, and the complete L2 exec matrix remain release blockers, so the reported `mvm exec`
+restart bug is not yet recorded as fully fixed.
 
 ## Dependency Order
 

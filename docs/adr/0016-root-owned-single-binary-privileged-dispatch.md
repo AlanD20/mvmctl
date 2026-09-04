@@ -1204,20 +1204,31 @@ ephemeral runtime tree:
             └── console.pid
 ```
 
-Implementation note (2026-08-31): `internal/lib/authorityfs` now owns the descriptor-relative initializer for
+Implementation note (updated 2026-09-04): `internal/lib/authorityfs` owns the descriptor-relative initializer for
 `/run/mvmctl` and `/run/mvmctl/authority`. Jailer's index lock, release-lock directory, per-UID authority directories,
 and per-VM locks use its closed named capabilities, while persistent records remain at `/var/lib/mvmctl/instances`.
 Existing managed objects are verified and never repaired; focused L1 evidence covers modes, symlinks, concurrent
 creation, creation faults and descriptor cleanup, scans, lock placement, copied-capability release, cached cleanup
 errors, cancellation, and concurrent acquire/release. Capability values share pointer-held state, making checked
-release exactly once and idempotent even after a value copy. This implementation creates no `/run/mvmctl/runtime`
-tree and activates no public action. The separate implemented LoopMount UID/VM/image lock family and its private service
-adapter are used by the exact provision/inspect receiver actions described above. A separate closed Network family now
+release exactly once and idempotent even after a value copy. The separate implemented LoopMount UID/VM/image lock
+family and its private service adapter are used by the exact provision/inspect receiver actions described above. A
+separate closed Network family now
 backs the private managed-network
 registration authority's global-index and per-network locks. Its strict schema-1 record/codec/store persists only owner,
 network, boot, and derived bridge identity beneath `/var/lib/mvmctl/networks/<uid>` with atomic no-replace publication,
 post-rename authority evidence, and exact reverse cached close-once cleanup. That registration entry point is private
 and unreferenced and does not receive the Jailer VM lock.
+
+The separate private Jailer runtime-directory foundation now descriptor-relatively creates exact root-owned
+mode-`0711` `/run/mvmctl/runtime` and `<uid>` parents, then exclusively creates and pins the caller-owned mode-`0700`
+`<vm-id>` output directory. It rejects unsafe existing parents and every existing VM directory without repair, retains
+device/inode identity, returns a non-nil lease after post-create metadata failure, and removes only the exact empty
+directory. Removal rechecks the retained and current entry identities, reconciles an unlink that took effect while
+reporting failure, and retries only the parent `fsync` when absence is already proven. Copied leases share one
+mutex-protected, cancellation-independent remove/release state and cache the first release result. This foundation is
+not yet transferred into launch, active, or cleanup leases, mounted at `/run/mvm/runtime`, or wired to any privileged
+or public action. Fixed socket/PID-leaf admission and cleanup, stale-runtime reopening, and launch rollback remain
+pending.
 
 The Network family also creates one exact root-owned
 `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder while retaining its directory, leaf, and mount identity. The
@@ -1236,7 +1247,8 @@ failure retires the contaminated worker.
 
 This remains neither a production topology nor a public action. No production caller constructs the private topology
 service. Jailer VM-lock transfer, route/address and verified link-up stages, firewall application, durable VM-topology
-state, Jailer handoff, runtime-subtree creation, public cutover, and live-kernel qualification remain target design.
+state, Jailer handoff, runtime-lease transfer and mount consumption, public cutover, and live-kernel qualification
+remain target design.
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and

@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
 > non-root execution side, its isolated process-bound source-session foundation, its closed one-request destination
-> session, its typed command-redacted user audit sink, the production-composed root-owned
+> session, its typed command-redacted user audit sink, the private descriptor-pinned VM runtime-directory foundation,
+> the production-composed root-owned
 > VM-exec capacity and active-pair authorities with a fixed global ceiling, its exact Firecracker peer/pidfd binding
 > and absolute-boottime stop, its exact-one descriptor transport and structural admission, its closed retained-sidecar
 > wire/process/Jailer-client/registered-handler lifecycle, partial typed vsock-state preservation across start, reboot,
@@ -58,8 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unsafe-object rejection without repair, cancellation, release, contention, and unrelated-resource concurrency.
 - Firewall consumes its separate closed authority capability only through an inert generation authority, LoopMount
   registers only its exact provision/inspect internal privileged actions, and Network uses its family only for the
-  private namespace and link effects described below. Complete production topology and `/run/mvmctl/runtime` remain
-  unimplemented, and none of these foundations is a public/backend runtime cutover.
+  private namespace and link effects described below. None of these foundations is a public/backend runtime cutover.
+- Added a private Jailer runtime-directory lease that descriptor-relatively creates exact root-owned mode-`0711`
+  `/run/mvmctl/runtime` and per-UID parents, then exclusively creates and pins one caller-owned mode-`0700` VM output
+  directory. Existing VM directories and unsafe parents fail closed without repair; partial VM-directory preparation
+  returns cleanup authority; copied leases share one cancellation-independent remove/release state; and cleanup removes
+  only the exact empty directory after identity rechecks, with effectful-unlink and parent-sync retry reconciliation.
+  The lease is not yet carried by launch/active/cleanup authority, mounted at `/run/mvm/runtime`, or responsible for
+  fixed socket/PID leaves, so runtime relocation and stale-socket cleanup remain pending.
 
 #### Enforced VM resource envelopes
 - Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.

@@ -170,6 +170,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
   - [x] Freeze API/vsock/console socket and PID mirror basenames and remove their filename configuration/relay flags.
   - [ ] Relocate those ephemeral leaves beneath `/run/mvmctl/runtime/<uid>/<vm-id>`; the root-controlled parent and
     pinned caller-owned VM directory must replace the current whole-cache-VM-directory bind.
+    - [x] Add the private descriptor-relative runtime-directory foundation: exact root-owned mode-`0711` runtime/UID
+      parents, exclusive caller-owned mode-`0700` VM-directory creation, device/inode pinning, unsafe/existing-state
+      rejection without repair, cleanup authority after partial preparation, identity-checked empty-only removal,
+      effectful-unlink/parent-sync reconciliation, and pointer-shared cancellation-independent release. Lifecycle
+      transfer, mount consumption, fixed-leaf cleanup, stale-runtime reopening, and public cutover remain pending.
   - [x] Freeze snapshot producer/restore leaves as `rootfs.img`, `memory`, and `vmstate`; derive restore and remove paths
     from the validated snapshot ID rather than SQLite file-path columns.
   - [ ] Remove the transitional `phantom-rootfs.img` symlink through the Task 7 namespace overlay and add the managed
@@ -451,7 +456,9 @@ production child launch/composition, complete effects, privileged actions, recon
   - [x] Implement the private authority half for already-created process sources: cancellation-aware challenge and
     acknowledgement, EOF-fails-closed release gates, close-on-exec pidfd admission, exact PID/start derivation, optional
     relay separation, pinned receiver-executable verification, and ownership transfer into durable `launching`.
-    Production spawning, initial namespace, outputs, mounts, mirrors, and action composition remain pending.
+    The separate private runtime-directory foundation can now create and pin the exact output directory after
+    registration, but it is not transferred into this lease or mounted. Production spawning, initial namespace,
+    outputs, mounts, mirrors, and action composition remain pending.
 - [x] Make `preparedRelease.registerLaunching` consume its pinned admission/store/slot resources, derive release
   identity internally, and transfer them into the launch lease. Make `activateVerifiedProcess(ctx)` consume only that
   retained prepared release. Pre-rename failure keeps the source lease; post-rename failure returns the non-nil target

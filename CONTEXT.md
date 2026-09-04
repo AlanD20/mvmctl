@@ -283,6 +283,14 @@ the caller's managed cache. Final privileged code must never mount the whole cac
 authority, or signal a PID read from a PID mirror. ADR-0016 defines the exact ownership, modes, launch ordering, and
 cleanup contract; `tasks/todo.md` records implementation status.
 
+The private Jailer runtime-directory foundation now creates the fixed root-owned mode-`0711`
+`/run/mvmctl/runtime/<uid>` hierarchy and exclusively creates one caller-owned mode-`0700` `<vm-id>` directory beneath
+it. It pins the VM directory's device/inode identity, rejects existing VM directories and unsafe parents without
+repair, returns cleanup authority after partial VM-directory preparation, and removes only the exact empty directory
+with retryable unlink/parent-sync reconciliation. The lease remains private and exposes no path or descriptor. It is
+not yet transferred through launch/active/cleanup authority, mounted inside the VM namespace, or used by public
+lifecycle operations; fixed socket/PID-leaf cleanup and stale-runtime recovery remain pending.
+
 The final Jailer instance record is strict schema 3 with
 `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
 `launching` is durable pre-effect intent: owner UID/GID, VM ID, managed-cache identity, exact Firecracker/Jailer release
@@ -354,11 +362,11 @@ mismatched VM identity, or an out-of-range CID aborts before respawn. A present 
 normalized to the fixed managed `vsock.sock` leaf, and its CID, agent port, and token remain available to the normal
 process. Only the validated CID enters `model.FirecrackerConfig`; the VM/Jailer path derives the fixed host and
 `/run/mvm/vsock.sock` jail leaves. Snapshot restore preserves the CID stored in vmstate and sends the fixed jail-visible
-vsock UDS override. VM create still uses its existing builder state rather than this common relaunch state. The final
-root-built descriptor-pinned `/run/mvm/runtime` activation backed by the host `/run/mvmctl/runtime` tree,
-authority-verified stale-socket cleanup, transactional lifecycle, host-reboot reconciliation, and L2 `mvm exec`
-relaunch qualification remain pending, so this increment is not evidence that the reported restart failure is fully
-resolved.
+vsock UDS override. VM create still uses its existing builder state rather than this common relaunch state. The private
+host `/run/mvmctl/runtime` directory lease now exists, but its launch-time `/run/mvm/runtime` mount and ownership
+transfer, authority-verified stale-socket cleanup, transactional lifecycle, host-reboot reconciliation, and L2
+`mvm exec` relaunch qualification remain pending, so this increment is not evidence that the reported restart failure
+is fully resolved.
 
 SQLite binary rows are an untrusted display projection of the root release store. The implemented projection schema
 now includes architecture and scopes list, prefix, type/version, latest, and default resolution to the runtime
@@ -413,7 +421,7 @@ uses `TUNSETIFF` and `TUNSETOWNER` with no group authority, and reverifies owner
 alias before final persistence. Neither `newService` nor the composed topology effect has a production caller, and
 there is no Jailer VM-lock transfer, route/address or link-up stage, firewall application, persistent VM-topology
 record, privileged action, public behavior, or live-kernel qualification. The `/run/mvmctl/runtime` tree remains
-unimplemented.
+uncomposed; only the separate private runtime-directory foundation described above can create and pin it.
 
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
 requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`
