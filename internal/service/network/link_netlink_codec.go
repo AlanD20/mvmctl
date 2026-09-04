@@ -27,13 +27,14 @@ const (
 )
 
 type routeLinkObservation struct {
-	name    linkName
-	alias   string
-	kind    string
-	ifIndex int
-	flags   uint32
-	master  int
-	peer    int
+	name       linkName
+	alias      string
+	kind       string
+	deviceType uint16
+	ifIndex    int
+	flags      uint32
+	master     int
+	peer       int
 
 	tunOwner   uint32
 	tunGroup   uint32
@@ -71,8 +72,9 @@ func decodeRouteLinkMessage(message netlink.Message) (routeLinkObservation, erro
 		return routeLinkObservation{}, errors.New("route-link message has invalid ifindex")
 	}
 	observation := routeLinkObservation{
-		ifIndex: index,
-		flags:   binary.NativeEndian.Uint32(message.Data[8:12]),
+		deviceType: binary.NativeEndian.Uint16(message.Data[2:4]),
+		ifIndex:    index,
+		flags:      binary.NativeEndian.Uint32(message.Data[8:12]),
 	}
 	decoder, err := netlink.NewAttributeDecoder(message.Data[unix.SizeofIfInfomsg:])
 	if err != nil {

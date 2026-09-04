@@ -158,10 +158,12 @@ func TestDecodeRouteLinkMessageAcceptsForeignLinksAndKernelNestedEncoding(t *tes
 	t.Parallel()
 
 	minimal := testRouteLinkMessageWithout(t, unix.IFLA_IFALIAS, unix.IFLA_LINKINFO)
+	binary.NativeEndian.PutUint16(minimal.Data[2:4], unix.ARPHRD_LOOPBACK)
 	observation, err := decodeRouteLinkMessage(minimal)
 	require.NoError(t, err)
 	assert.Empty(t, observation.alias)
 	assert.Empty(t, observation.kind)
+	assert.Equal(t, uint16(unix.ARPHRD_LOOPBACK), observation.deviceType)
 
 	kernelStyle := testRouteLinkMessage(t, "mvt012345678901", managedTAPAlias("mvt012345678901", 1000), 24,
 		0, 0, 0, linkKindTAP, func(encoder *netlink.AttributeEncoder) {

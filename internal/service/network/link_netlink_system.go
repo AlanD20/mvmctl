@@ -15,10 +15,14 @@ import (
 type routeNetlink interface {
 	inspectLink(context.Context, int, linkName) (*routeLinkObservation, error)
 	listLinks(context.Context, int) ([]routeLinkObservation, error)
+	listIPv4Addresses(context.Context, int, int) ([]routeAddressObservation, error)
+	listIPv4Routes(context.Context, int, int) ([]routeIPv4Observation, error)
 	createBridgeDown(context.Context, int, linkName, string) error
 	createVethPairDown(context.Context, int, int, linkName, string, linkName, string) error
+	addIPv4Address(context.Context, int, int, addressExpectation) error
 	setLinkAlias(context.Context, int, int, string) error
 	setLinkMaster(context.Context, int, int, int) error
+	setLinkUp(context.Context, int, int, bool) error
 	deleteLink(context.Context, int, int) error
 }
 

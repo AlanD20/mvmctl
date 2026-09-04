@@ -48,6 +48,7 @@ type routeKind uint8
 const (
 	routeKindUnicast routeKind = iota + 1
 	routeKindLocal
+	routeKindBroadcast
 )
 
 type routeProtocol uint8
@@ -127,6 +128,12 @@ type loopbackL3Expectation struct {
 type fabricL3Expectation struct {
 	ipv4Addresses l3Cardinality
 	ipv4Routes    l3Cardinality
+}
+
+type bridgeKernelBookkeeping struct {
+	local            routeExpectation
+	networkBroadcast routeExpectation
+	subnetBroadcast  routeExpectation
 }
 
 var (
@@ -288,6 +295,44 @@ func validateManagedNetworkL3(network managedNetworkL3) error {
 		return topologyValidationError("managed network L3 authority is not canonical")
 	}
 	return nil
+}
+
+func deriveBridgeKernelBookkeeping(network managedNetworkL3) (bridgeKernelBookkeeping, error) {
+	if err := validateManagedNetworkL3(network); err != nil {
+		return bridgeKernelBookkeeping{}, err
+	}
+	prefix := network.prefix.value
+	gateway := network.gateway.value
+	base := routeExpectation{
+		source:    gateway,
+		hasSource: true,
+		table:     routeTableLocal,
+		protocol:  routeProtocolKernel,
+	}
+	result := bridgeKernelBookkeeping{
+		local:            base,
+		networkBroadcast: base,
+		subnetBroadcast:  base,
+	}
+	result.local.destination = netip.PrefixFrom(gateway, 32)
+	result.local.kind = routeKindLocal
+	result.local.scope = routeScopeHost
+	result.networkBroadcast.destination = netip.PrefixFrom(prefix.Addr(), 32)
+	result.networkBroadcast.kind = routeKindBroadcast
+	result.networkBroadcast.scope = routeScopeLink
+	result.subnetBroadcast.destination = netip.PrefixFrom(lastIPv4Address(prefix), 32)
+	result.subnetBroadcast.kind = routeKindBroadcast
+	result.subnetBroadcast.scope = routeScopeLink
+	if err := validateRouteExpectation(result.local); err != nil {
+		return bridgeKernelBookkeeping{}, err
+	}
+	if err := validateRouteExpectation(result.networkBroadcast); err != nil {
+		return bridgeKernelBookkeeping{}, err
+	}
+	if err := validateRouteExpectation(result.subnetBroadcast); err != nil {
+		return bridgeKernelBookkeeping{}, err
+	}
+	return result, nil
 }
 
 func validateEndpointL3(key topologyKey, network managedNetworkL3, endpoint endpointL3) error {
