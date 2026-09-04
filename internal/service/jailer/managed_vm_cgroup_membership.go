@@ -1,0 +1,136 @@
+package jailer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"golang.org/x/sys/unix"
+)
+
+// retainedCgroupProcessVerifier bridges to process authority that already retains the pidfd. Its implementation must
+// prove the locator both before and after this component reads membership; a numeric PID alone cannot satisfy it.
+type retainedCgroupProcessVerifier interface {
+	verifyBeforeCgroupMembership(context.Context, instanceProcessLocator, processObservation) error
+	verifyAfterCgroupMembership(context.Context, instanceProcessLocator, processObservation) error
+}
+
+func readManagedVMCgroupMembership(
+	ctx context.Context,
+	state *managedVMCgroupLeaseState,
+) (_ []int, returnErr error) {
+	how := unix.OpenHow{
+		Flags:   uint64(unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW),
+		Resolve: uint64(managedVMCgroupResolveFlags),
+	}
+	fd, err := state.deps.openAt2(ctx, state.leafFD, "cgroup.procs", &how)
+	if err != nil {
+		return nil, processVerificationError(state.vmID, "open pinned cgroup membership", err)
+	}
+	defer func() {
+		returnErr = appendInstanceOperationError(
+			returnErr,
+			"close pinned cgroup membership",
+			state.deps.close(context.WithoutCancel(ctx), fd),
+		)
+	}()
+	identity, err := inspectManagedVMCgroupFile(ctx, state.deps, fd, "cgroup.procs")
+	if err != nil {
+		return nil, err
+	}
+	if identity.mount != state.leaf.mount || identity.deviceMajor != state.leaf.deviceMajor ||
+		identity.deviceMinor != state.leaf.deviceMinor {
+		return nil, processVerificationError(state.vmID, "cgroup membership is outside the pinned cgroup-v2 mount", nil)
+	}
+	buffer, err := readAllManagedVMCgroupMembership(ctx, state, fd)
+	if err != nil {
+		return nil, err
+	}
+	members, err := parseManagedVMCgroupMembership(buffer)
+	if err != nil {
+		return nil, processVerificationError(state.vmID, "parse pinned cgroup membership", err)
+	}
+	return members, nil
+}
+
+func readAllManagedVMCgroupMembership(
+	ctx context.Context,
+	state *managedVMCgroupLeaseState,
+	fd int,
+) ([]byte, error) {
+	const chunkBytes = 4096
+	raw := make([]byte, 0, chunkBytes)
+	var offset int64
+	for {
+		remaining := managedVMCgroupMaxProcs + 1 - len(raw)
+		readSize := min(chunkBytes, remaining)
+		chunk := make([]byte, readSize)
+		count, err := state.deps.pread(ctx, fd, chunk, offset)
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		if err != nil {
+			return nil, processVerificationError(state.vmID, "read pinned cgroup membership", err)
+		}
+		if count < 0 || count > len(chunk) {
+			return nil, processVerificationError(state.vmID, "pinned cgroup membership read count is invalid", nil)
+		}
+		if count == 0 {
+			return raw, nil
+		}
+		raw = append(raw, chunk[:count]...)
+		if len(raw) > managedVMCgroupMaxProcs {
+			return nil, processVerificationError(state.vmID, "pinned cgroup membership exceeds its bound", nil)
+		}
+		offset += int64(count)
+	}
+}
+
+func inspectManagedVMCgroupFile(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	fd int,
+	description string,
+) (managedVMCgroupIdentity, error) {
+	var stat unix.Statx_t
+	if err := deps.statx(ctx, fd, &stat); err != nil {
+		return managedVMCgroupIdentity{}, instanceAtomicError("inspect "+description, err)
+	}
+	required := uint32(unix.STATX_TYPE | unix.STATX_MODE | unix.STATX_UID | unix.STATX_GID | unix.STATX_INO)
+	if stat.Mask&required != required || stat.Mode&unix.S_IFMT != unix.S_IFREG ||
+		uint32(stat.Mode)&0o7777 != managedVMCgroupProcsMode || stat.Uid != deps.trustedUID ||
+		stat.Gid != deps.trustedGID || stat.Ino == 0 {
+		return managedVMCgroupIdentity{}, instanceAtomicError(description+" metadata is not exact", nil)
+	}
+	mount, err := managedVMCgroupMountFromStatx(stat)
+	if err != nil {
+		return managedVMCgroupIdentity{}, instanceAtomicError(description+" mount identity is unavailable", err)
+	}
+	return managedVMCgroupIdentity{
+		deviceMajor: stat.Dev_major, deviceMinor: stat.Dev_minor, inode: stat.Ino, mount: mount,
+	}, nil
+}
+
+func parseManagedVMCgroupMembership(raw []byte) ([]int, error) {
+	if len(raw) == 0 {
+		return []int{}, nil
+	}
+	if raw[len(raw)-1] != '\n' {
+		return nil, fmt.Errorf("cgroup membership is not newline terminated")
+	}
+	lines := strings.Split(string(raw[:len(raw)-1]), "\n")
+	members := make([]int, 0, len(lines))
+	for _, line := range lines {
+		if line == "" || (len(line) > 1 && line[0] == '0') {
+			return nil, fmt.Errorf("cgroup membership is not canonical")
+		}
+		pid, err := strconv.Atoi(line)
+		if err != nil || pid <= 0 {
+			return nil, fmt.Errorf("cgroup membership contains an invalid process ID")
+		}
+		members = append(members, pid)
+	}
+	return members, nil
+}
