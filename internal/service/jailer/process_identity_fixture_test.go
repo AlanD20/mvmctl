@@ -53,7 +53,7 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 
 	authority, _ := newTestInstanceAuthority(t)
 	cgroup := newManagedVMCgroupTestFixture(t)
-	authority.cgroupDeps = cgroup.deps()
+	authority.cgroupDeps = cgroup.launchDeps()
 	prepared := prepareTestRelease(t, authority)
 	preparedSnapshot := prepared.snapshot()
 	firecrackerContent := readProcessTestDescriptor(

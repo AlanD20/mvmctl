@@ -52,6 +52,33 @@ func (fixture *managedVMCgroupTestFixture) deps() managedVMCgroupDeps {
 	return deps
 }
 
+func (fixture *managedVMCgroupTestFixture) launchDeps() managedVMCgroupDeps {
+	fixture.t.Helper()
+	createManagedVMCgroupControllerFiles(
+		fixture.t,
+		fixture.root,
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+	)
+	deps := fixture.deps()
+	realMkdirAt := deps.mkdirAt
+	deps.mkdirAt = func(ctx context.Context, rootFD int, name string, mode uint32) error {
+		if err := realMkdirAt(ctx, rootFD, name, mode); err != nil {
+			return err
+		}
+		if name == infra.JailerCgroupParent {
+			createManagedVMCgroupControllerFiles(
+				fixture.t,
+				filepath.Join(fixture.root, infra.JailerCgroupParent),
+				"cpu memory pids\n",
+				"cpu memory pids\n",
+			)
+		}
+		return nil
+	}
+	return deps
+}
+
 func (fixture *managedVMCgroupTestFixture) removeCgroupLeaf(
 	_ context.Context,
 	parentFD int,
@@ -857,6 +884,61 @@ func TestPreparedManagedVMCgroupRejectsUnsafeJailerLeaf(t *testing.T) {
 			assert.Nil(t, lease)
 			require.Error(t, err)
 			assert.False(t, prepared.snapshot().released)
+		})
+	}
+}
+
+// Rationale: cgroup.procs is independently security-sensitive. A safe leaf directory cannot lend authority to a
+// membership pseudo-file with substituted type, ownership, mode, or filesystem identity.
+func TestPreparedManagedVMCgroupRejectsUnsafeMembershipControlMetadata(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]func(*unix.Statx_t){
+		"type":         func(stat *unix.Statx_t) { stat.Mode = stat.Mode&^unix.S_IFMT | unix.S_IFDIR },
+		"mode":         func(stat *unix.Statx_t) { stat.Mode = stat.Mode&^0o7777 | 0o600 },
+		"group":        func(stat *unix.Statx_t) { stat.Gid++ },
+		"device major": func(stat *unix.Statx_t) { stat.Dev_major++ },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedVMCgroupTestFixture(t)
+			deps := fixture.deps()
+			membershipFD := -1
+			realOpenAt2 := deps.openAt2
+			deps.openAt2 = func(ctx context.Context, fd int, child string, how *unix.OpenHow) (int, error) {
+				opened, err := realOpenAt2(ctx, fd, child, how)
+				if err == nil && child == "cgroup.procs" {
+					membershipFD = opened
+				}
+				return opened, err
+			}
+			realStatx := deps.statx
+			deps.statx = func(ctx context.Context, fd int, stat *unix.Statx_t) error {
+				if err := realStatx(ctx, fd, stat); err != nil {
+					return err
+				}
+				if fd == membershipFD {
+					mutate(stat)
+				}
+				return nil
+			}
+			prepared, err := prepareManagedVMCgroup(t.Context(), deps, testVMID)
+			require.NoError(t, err)
+			require.NoError(t, prepared.MarkJailerHandoff())
+			fixture.addVMLeaf(testVMID)
+
+			lease, err := prepared.Bind(
+				t.Context(),
+				processTestLocator(),
+				processTestCgroupObservation(),
+				&managedVMCgroupTestProcessVerifier{},
+			)
+			require.Error(t, err)
+			require.NotNil(t, lease)
+			lease.state.deps.statx = realStatx
+			fixture.setMembership(testVMID, "")
+			require.NoError(t, lease.Remove(t.Context()))
+			require.NoError(t, lease.Release(t.Context()))
 		})
 	}
 }

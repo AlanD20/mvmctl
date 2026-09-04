@@ -69,7 +69,7 @@ func TestLaunchManagedVMCgroupPreparationIsExclusive(t *testing.T) {
 
 	authority, _ := newTestInstanceAuthority(t)
 	cgroup := newManagedVMCgroupTestFixture(t)
-	authority.cgroupDeps = cgroup.deps()
+	authority.cgroupDeps = cgroup.launchDeps()
 	launch, err := registerTestLaunch(
 		t,
 		t.Context(),
@@ -117,7 +117,7 @@ func TestLaunchReleaseToJailerRechecksManagedVMCgroupAbsence(t *testing.T) {
 
 	authority, _ := newTestInstanceAuthority(t)
 	cgroup := newManagedVMCgroupTestFixture(t)
-	cgroupDeps := cgroup.deps()
+	cgroupDeps := cgroup.launchDeps()
 	realOpenAt2 := cgroupDeps.openAt2
 	realClose := cgroupDeps.close
 	leafFD := -1
@@ -168,7 +168,7 @@ func TestLaunchFinalCgroupRecheckFailurePreservesRelayPartialHandoffForAbort(t *
 
 	authority, _ := newTestInstanceAuthority(t)
 	cgroup := newManagedVMCgroupTestFixture(t)
-	authority.cgroupDeps = cgroup.deps()
+	authority.cgroupDeps = cgroup.launchDeps()
 	launch := readyTestLaunchForCgroupHandoff(t, authority, true)
 	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
 	processes := launch.state.processes
@@ -195,7 +195,7 @@ func TestAbortCleanupReapsBeforeReleasingAbsentManagedVMCgroup(t *testing.T) {
 
 	authority, _ := newTestInstanceAuthority(t)
 	cgroup := newManagedVMCgroupTestFixture(t)
-	authority.cgroupDeps = cgroup.deps()
+	authority.cgroupDeps = cgroup.launchDeps()
 	launch, err := registerTestLaunch(
 		t,
 		t.Context(),
@@ -250,7 +250,7 @@ func TestAbortCleanupReapsBeforeRemovingJailerManagedVMCgroup(t *testing.T) {
 
 	authority, _ := newTestInstanceAuthority(t)
 	cgroup := newManagedVMCgroupTestFixture(t)
-	cgroupDeps := cgroup.deps()
+	cgroupDeps := cgroup.launchDeps()
 	events := make([]string, 0, 3)
 	reaped := false
 	originalUnlinkAt := cgroupDeps.unlinkAt
@@ -309,7 +309,7 @@ func TestAbortCleanupManagedVMCgroupRemovalFailureRetainsAuthorityForRetry(t *te
 	t.Run("nonempty", func(t *testing.T) {
 		authority, _ := newTestInstanceAuthority(t)
 		cgroup := newManagedVMCgroupTestFixture(t)
-		authority.cgroupDeps = cgroup.deps()
+		authority.cgroupDeps = cgroup.launchDeps()
 		launch := readyTestLaunchForCgroupHandoff(t, authority, false)
 		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
 		require.NoError(t, launch.releaseToJailer(t.Context()))
@@ -337,7 +337,7 @@ func TestAbortCleanupManagedVMCgroupRemovalFailureRetainsAuthorityForRetry(t *te
 	t.Run("busy", func(t *testing.T) {
 		authority, _ := newTestInstanceAuthority(t)
 		cgroup := newManagedVMCgroupTestFixture(t)
-		cgroupDeps := cgroup.deps()
+		cgroupDeps := cgroup.launchDeps()
 		unlinkCalls := 0
 		originalUnlinkAt := cgroupDeps.unlinkAt
 		cgroupDeps.unlinkAt = func(ctx context.Context, fd int, name string, flags int) error {
@@ -386,7 +386,7 @@ func TestAbortCleanupManagedVMCgroupCloseFailureIsReportedOnceAndRetryConverges(
 	t.Run("absent prepared", func(t *testing.T) {
 		authority, _ := newTestInstanceAuthority(t)
 		cgroup := newManagedVMCgroupTestFixture(t)
-		authority.cgroupDeps = cgroup.deps()
+		authority.cgroupDeps = cgroup.launchDeps()
 		launch, err := registerTestLaunch(
 			t,
 			t.Context(),
@@ -423,7 +423,7 @@ func TestAbortCleanupManagedVMCgroupCloseFailureIsReportedOnceAndRetryConverges(
 	t.Run("removed lease", func(t *testing.T) {
 		authority, _ := newTestInstanceAuthority(t)
 		cgroup := newManagedVMCgroupTestFixture(t)
-		authority.cgroupDeps = cgroup.deps()
+		authority.cgroupDeps = cgroup.launchDeps()
 		launch := readyTestLaunchForCgroupHandoff(t, authority, false)
 		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
 		require.NoError(t, launch.releaseToJailer(t.Context()))

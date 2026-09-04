@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -26,9 +27,11 @@ func TestParseManagedVMCgroupControllerSet(t *testing.T) {
 	}{
 		"duplicate required controller": {raw: "cpu memory cpu\n", wantErr: true},
 		"duplicate other controller":    {raw: "cpu io io memory pids\n", wantErr: true},
-		"empty token stream":            {raw: " \t\n", wantErr: true},
+		"empty token stream":            {raw: " \t\n", want: 0},
 		"signed token":                  {raw: "+cpu memory pids\n", wantErr: true},
 		"punctuated token":              {raw: "cpu memory pids,\n", wantErr: true},
+		"uppercase token":               {raw: "CPU memory pids\n", wantErr: true},
+		"leading digit token":           {raw: "2cpu memory pids\n", wantErr: true},
 		"required plus other controllers": {
 			raw:  "cpuset cpu io memory hugetlb pids rdma misc dmem\n",
 			want: managedVMCgroupControllerCPU | managedVMCgroupControllerMemory | managedVMCgroupControllerPIDs,
@@ -241,6 +244,8 @@ func TestReadAndWriteManagedVMCgroupControlUseFixedDescriptorRelativeFiles(t *te
 	require.NoError(t, os.WriteFile(controllersPath, []byte("cpu memory pids\n"), 0o444))
 	cpuMaxPath := filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max")
 	require.NoError(t, os.WriteFile(cpuMaxPath, nil, 0o644))
+	pidsMaxPath := filepath.Join(fixture.vmLeafPath(testVMID), "pids.max")
+	require.NoError(t, os.WriteFile(pidsMaxPath, []byte("128\n"), 0o644))
 
 	deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
 	type openCall struct {
@@ -249,10 +254,16 @@ func TestReadAndWriteManagedVMCgroupControlUseFixedDescriptorRelativeFiles(t *te
 		Resolve uint64
 	}
 	var opened []openCall
+	closed := 0
 	realOpenAt2 := deps.openAt2
 	deps.openAt2 = func(ctx context.Context, parentFD int, name string, how *unix.OpenHow) (int, error) {
 		opened = append(opened, openCall{Name: name, Flags: how.Flags, Resolve: how.Resolve})
 		return realOpenAt2(ctx, parentFD, name, how)
+	}
+	realClose := deps.close
+	deps.close = func(ctx context.Context, fd int) error {
+		closed++
+		return realClose(ctx, fd)
 	}
 	mutationCalls := 0
 	deps.mkdirAt = func(context.Context, int, string, uint32) error { mutationCalls++; return nil }
@@ -260,15 +271,19 @@ func TestReadAndWriteManagedVMCgroupControlUseFixedDescriptorRelativeFiles(t *te
 	deps.fchmod = func(context.Context, int, uint32) error { mutationCalls++; return nil }
 	deps.unlinkAt = func(context.Context, int, string, int) error { mutationCalls++; return nil }
 
-	controllers, err := readManagedVMCgroupControl(
-		t.Context(), deps, leafFD, leaf, managedVMCgroupControllersControl,
-	)
+	controllers, err := readManagedVMCgroupControllers(t.Context(), deps, leafFD, leaf)
 	require.NoError(t, err)
-	if diff := cmp.Diff([]byte("cpu memory pids\n"), controllers); diff != "" {
+	wantControllers := managedVMCgroupControllerCPU |
+		managedVMCgroupControllerMemory |
+		managedVMCgroupControllerPIDs
+	if diff := cmp.Diff(wantControllers, controllers); diff != "" {
 		t.Errorf("read control mismatch (-want +got):\n%s", diff)
 	}
-	require.NoError(t, writeManagedVMCgroupControl(
-		t.Context(), deps, leafFD, leaf, managedVMCgroupCPUMaxControl, []byte("50000 100000\n"),
+	pidsMax, err := readManagedVMCgroupPIDsMax(t.Context(), deps, leafFD, leaf)
+	require.NoError(t, err)
+	assert.Equal(t, uint64(128), pidsMax)
+	require.NoError(t, writeManagedVMCgroupCPUMax(
+		t.Context(), deps, leafFD, leaf, managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
 	))
 	written, err := os.ReadFile(cpuMaxPath)
 	require.NoError(t, err)
@@ -277,19 +292,40 @@ func TestReadAndWriteManagedVMCgroupControlUseFixedDescriptorRelativeFiles(t *te
 	}
 	wantOpened := []openCall{
 		{
-			Name:    "cgroup.controllers",
-			Flags:   uint64(unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW),
-			Resolve: uint64(managedVMCgroupResolveFlags),
+			Name:  "cgroup.controllers",
+			Flags: uint64(unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW),
+			Resolve: uint64(
+				unix.RESOLVE_BENEATH |
+					unix.RESOLVE_NO_SYMLINKS |
+					unix.RESOLVE_NO_MAGICLINKS |
+					unix.RESOLVE_NO_XDEV,
+			),
 		},
 		{
-			Name:    "cpu.max",
-			Flags:   uint64(unix.O_WRONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW),
-			Resolve: uint64(managedVMCgroupResolveFlags),
+			Name:  "pids.max",
+			Flags: uint64(unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW),
+			Resolve: uint64(
+				unix.RESOLVE_BENEATH |
+					unix.RESOLVE_NO_SYMLINKS |
+					unix.RESOLVE_NO_MAGICLINKS |
+					unix.RESOLVE_NO_XDEV,
+			),
+		},
+		{
+			Name:  "cpu.max",
+			Flags: uint64(unix.O_WRONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW),
+			Resolve: uint64(
+				unix.RESOLVE_BENEATH |
+					unix.RESOLVE_NO_SYMLINKS |
+					unix.RESOLVE_NO_MAGICLINKS |
+					unix.RESOLVE_NO_XDEV,
+			),
 		},
 	}
 	if diff := cmp.Diff(wantOpened, opened); diff != "" {
 		t.Errorf("descriptor-relative control opens mismatch (-want +got):\n%s", diff)
 	}
+	assert.Equal(t, 3, closed)
 	assert.Zero(t, mutationCalls)
 }
 
@@ -326,6 +362,21 @@ func TestReadManagedVMCgroupControlRejectsUnsafeFile(t *testing.T) {
 				}
 			},
 		},
+		"wrong group": {
+			prepare: createManagedVMCgroupControlTestFile,
+			configure: func(_ *testing.T, deps *managedVMCgroupDeps, leafFD int) {
+				realStatx := deps.statx
+				deps.statx = func(ctx context.Context, fd int, stat *unix.Statx_t) error {
+					if err := realStatx(ctx, fd, stat); err != nil {
+						return err
+					}
+					if fd != leafFD {
+						stat.Gid++
+					}
+					return nil
+				}
+			},
+		},
 		"wrong mount": {
 			prepare: createManagedVMCgroupControlTestFile,
 			configure: func(_ *testing.T, deps *managedVMCgroupDeps, leafFD int) {
@@ -356,6 +407,21 @@ func TestReadManagedVMCgroupControlRejectsUnsafeFile(t *testing.T) {
 				}
 			},
 		},
+		"wrong device major": {
+			prepare: createManagedVMCgroupControlTestFile,
+			configure: func(_ *testing.T, deps *managedVMCgroupDeps, leafFD int) {
+				realStatx := deps.statx
+				deps.statx = func(ctx context.Context, fd int, stat *unix.Statx_t) error {
+					if err := realStatx(ctx, fd, stat); err != nil {
+						return err
+					}
+					if fd != leafFD {
+						stat.Dev_major++
+					}
+					return nil
+				}
+			},
+		},
 		"stat failure": {
 			prepare: createManagedVMCgroupControlTestFile,
 			configure: func(_ *testing.T, deps *managedVMCgroupDeps, leafFD int) {
@@ -380,9 +446,7 @@ func TestReadManagedVMCgroupControlRejectsUnsafeFile(t *testing.T) {
 				tc.configure(t, &deps, leafFD)
 			}
 
-			_, err := readManagedVMCgroupControl(
-				t.Context(), deps, leafFD, leaf, managedVMCgroupMemoryMaxControl,
-			)
+			_, err := readManagedVMCgroupMemoryMax(t.Context(), deps, leafFD, leaf)
 			requireManagedVMCgroupAtomicError(t, err)
 		})
 	}
@@ -396,7 +460,7 @@ func TestReadManagedVMCgroupControlFailsClosedOnOpen(t *testing.T) {
 	deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
 	deps.openAt2 = func(context.Context, int, string, *unix.OpenHow) (int, error) { return -1, unix.EIO }
 
-	_, err := readManagedVMCgroupControl(t.Context(), deps, leafFD, leaf, managedVMCgroupMemoryMaxControl)
+	_, err := readManagedVMCgroupMemoryMax(t.Context(), deps, leafFD, leaf)
 	require.ErrorIs(t, err, unix.EIO)
 	requireManagedVMCgroupAtomicError(t, err)
 }
@@ -424,7 +488,7 @@ func TestReadManagedVMCgroupControlPreservesInspectionAndCloseErrors(t *testing.
 		return errors.Join(realClose(ctx, fd), closeErr)
 	}
 
-	_, err := readManagedVMCgroupControl(t.Context(), deps, leafFD, leaf, managedVMCgroupMemoryMaxControl)
+	_, err := readManagedVMCgroupMemoryMax(t.Context(), deps, leafFD, leaf)
 	require.ErrorIs(t, err, statErr)
 	require.ErrorIs(t, err, closeErr)
 	requireManagedVMCgroupAtomicError(t, err)
@@ -453,14 +517,55 @@ func TestReadManagedVMCgroupControlRetainsOpenedFileAcrossNameReplacement(t *tes
 		return fd, nil
 	}
 
-	got, err := readManagedVMCgroupControl(t.Context(), deps, leafFD, leaf, managedVMCgroupMemoryMaxControl)
+	got, err := readManagedVMCgroupMemoryMax(t.Context(), deps, leafFD, leaf)
 	require.NoError(t, err)
-	if diff := cmp.Diff([]byte("1024\n"), got); diff != "" {
-		t.Errorf("descriptor-pinned replacement read mismatch (-want +got):\n%s", diff)
-	}
+	assert.Equal(t, uint64(1024), got)
 	replacement, err := os.ReadFile(path)
 	require.NoError(t, err)
 	if diff := cmp.Diff([]byte("replacement\n"), replacement); diff != "" {
+		t.Errorf("replacement file was mutated (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: the typed write must target only the regular file proven through its retained descriptor. Replacing the
+// same basename after open must not redirect the semantic write to the new object.
+func TestWriteManagedVMCgroupControlRetainsOpenedFileAcrossNameReplacement(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	fixture.addVMLeaf(testVMID)
+	path := filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max")
+	replacement := []byte("replacement remains\n")
+	require.NoError(t, os.WriteFile(path, []byte("old detached value\n"), 0o644))
+	deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
+	realOpenAt2 := deps.openAt2
+	deps.openAt2 = func(ctx context.Context, parentFD int, name string, how *unix.OpenHow) (int, error) {
+		fd, err := realOpenAt2(ctx, parentFD, name, how)
+		if err != nil {
+			return fd, err
+		}
+		detached := path + ".detached"
+		require.NoError(t, os.Rename(path, detached))
+		require.NoError(t, os.WriteFile(path, replacement, 0o644))
+		return fd, nil
+	}
+
+	err := writeManagedVMCgroupCPUMax(
+		t.Context(),
+		deps,
+		leafFD,
+		leaf,
+		managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+	)
+	require.NoError(t, err)
+	detached, err := os.ReadFile(path + ".detached")
+	require.NoError(t, err)
+	if diff := cmp.Diff([]byte("50000 100000\nvalue\n"), detached); diff != "" {
+		t.Errorf("detached control mismatch (-want +got):\n%s", diff)
+	}
+	gotReplacement, err := os.ReadFile(path)
+	require.NoError(t, err)
+	if diff := cmp.Diff(replacement, gotReplacement); diff != "" {
 		t.Errorf("replacement file was mutated (-want +got):\n%s", diff)
 	}
 }
@@ -493,7 +598,7 @@ func TestReadManagedVMCgroupControlEnforcesBoundedWholeRead(t *testing.T) {
 				return copy(buffer, tc.raw[offset:]), nil
 			}
 
-			got, err := readManagedVMCgroupControl(
+			got, err := readManagedVMCgroupControlBytes(
 				t.Context(), deps, leafFD, leaf, managedVMCgroupMemoryMaxControl,
 			)
 			if tc.wantErr {
@@ -529,6 +634,10 @@ func TestReadManagedVMCgroupControlRejectsReadFailuresAndInvalidCounts(t *testin
 				return len(buffer) + 1, nil
 			},
 		},
+		"partial EINTR": {
+			pread: func(context.Context, int, []byte, int64) (int, error) { return 1, unix.EINTR },
+			cause: unix.EINTR,
+		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -538,9 +647,7 @@ func TestReadManagedVMCgroupControlRejectsReadFailuresAndInvalidCounts(t *testin
 			deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
 			deps.pread = tc.pread
 
-			_, err := readManagedVMCgroupControl(
-				t.Context(), deps, leafFD, leaf, managedVMCgroupMemoryMaxControl,
-			)
+			_, err := readManagedVMCgroupMemoryMax(t.Context(), deps, leafFD, leaf)
 			if tc.cause != nil {
 				require.ErrorIs(t, err, tc.cause)
 			}
@@ -570,13 +677,9 @@ func TestReadManagedVMCgroupControlRetriesEINTRAndObservesCancellation(t *testin
 			return copy(buffer, raw[offset:]), nil
 		}
 
-		got, err := readManagedVMCgroupControl(
-			t.Context(), deps, leafFD, leaf, managedVMCgroupMemoryMaxControl,
-		)
+		got, err := readManagedVMCgroupMemoryMax(t.Context(), deps, leafFD, leaf)
 		require.NoError(t, err)
-		if diff := cmp.Diff(raw, got); diff != "" {
-			t.Errorf("EINTR retry read mismatch (-want +got):\n%s", diff)
-		}
+		assert.Equal(t, uint64(1024), got)
 		assert.Equal(t, 3, calls)
 	})
 
@@ -593,7 +696,7 @@ func TestReadManagedVMCgroupControlRetriesEINTRAndObservesCancellation(t *testin
 			return 0, unix.EINTR
 		}
 
-		_, err := readManagedVMCgroupControl(ctx, deps, leafFD, leaf, managedVMCgroupMemoryMaxControl)
+		_, err := readManagedVMCgroupMemoryMax(ctx, deps, leafFD, leaf)
 		require.ErrorIs(t, err, context.Canceled)
 		requireManagedVMCgroupAtomicError(t, err)
 		assert.Equal(t, 1, calls)
@@ -628,6 +731,11 @@ func TestWriteManagedVMCgroupControlRejectsFailuresAndNonFullWrites(t *testing.T
 			write:     func(context.Context, int, []byte) (int, error) { return 1, nil },
 			wantCalls: 1,
 		},
+		"partial EINTR": {
+			write:     func(context.Context, int, []byte) (int, error) { return 1, unix.EINTR },
+			cause:     unix.EINTR,
+			wantCalls: 1,
+		},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -641,8 +749,12 @@ func TestWriteManagedVMCgroupControlRejectsFailuresAndNonFullWrites(t *testing.T
 				return tc.write(ctx, fd, value)
 			}
 
-			err := writeManagedVMCgroupControl(
-				t.Context(), deps, leafFD, leaf, managedVMCgroupCPUMaxControl, []byte("50000 100000\n"),
+			err := writeManagedVMCgroupCPUMax(
+				t.Context(),
+				deps,
+				leafFD,
+				leaf,
+				managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
 			)
 			if tc.cause != nil {
 				require.ErrorIs(t, err, tc.cause)
@@ -672,8 +784,12 @@ func TestWriteManagedVMCgroupControlRetriesEINTRAndObservesCancellation(t *testi
 			return realWrite(ctx, fd, value)
 		}
 
-		err := writeManagedVMCgroupControl(
-			t.Context(), deps, leafFD, leaf, managedVMCgroupCPUMaxControl, []byte("50000 100000\n"),
+		err := writeManagedVMCgroupCPUMax(
+			t.Context(),
+			deps,
+			leafFD,
+			leaf,
+			managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
 		)
 		require.NoError(t, err)
 		assert.Equal(t, 2, calls)
@@ -697,8 +813,12 @@ func TestWriteManagedVMCgroupControlRetriesEINTRAndObservesCancellation(t *testi
 			return 0, unix.EINTR
 		}
 
-		err := writeManagedVMCgroupControl(
-			ctx, deps, leafFD, leaf, managedVMCgroupCPUMaxControl, []byte("50000 100000\n"),
+		err := writeManagedVMCgroupCPUMax(
+			ctx,
+			deps,
+			leafFD,
+			leaf,
+			managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
 		)
 		require.ErrorIs(t, err, context.Canceled)
 		requireManagedVMCgroupAtomicError(t, err)
@@ -741,9 +861,7 @@ func TestManagedVMCgroupControlIOPreservesCloseErrorsWithoutCancellation(t *test
 					cancel()
 					return 0, unix.EIO
 				}
-				_, err := readManagedVMCgroupControl(
-					ctx, deps, leafFD, leaf, managedVMCgroupMemoryMaxControl,
-				)
+				_, err := readManagedVMCgroupMemoryMax(ctx, deps, leafFD, leaf)
 				return err
 			},
 		},
@@ -760,8 +878,12 @@ func TestManagedVMCgroupControlIOPreservesCloseErrorsWithoutCancellation(t *test
 					cancel()
 					return 0, unix.EIO
 				}
-				return writeManagedVMCgroupControl(
-					ctx, deps, leafFD, leaf, managedVMCgroupCPUMaxControl, []byte("50000 100000\n"),
+				return writeManagedVMCgroupCPUMax(
+					ctx,
+					deps,
+					leafFD,
+					leaf,
+					managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
 				)
 			},
 		},
@@ -795,34 +917,385 @@ func TestManagedVMCgroupControlIOPreservesCloseErrorsWithoutCancellation(t *test
 	}
 }
 
-func TestManagedVMCgroupControlIORejectsInvalidControlOrWritePayload(t *testing.T) {
+func TestReadManagedVMCgroupControlReturnsSuccessfulOperationCloseError(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	fixture.addVMLeaf(testVMID)
+	createManagedVMCgroupControlTestFile(t, filepath.Join(fixture.vmLeafPath(testVMID), "memory.max"))
+	deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
+	closeErr := errors.New("injected successful control close failure")
+	realClose := deps.close
+	deps.close = func(ctx context.Context, fd int) error {
+		return errors.Join(realClose(ctx, fd), closeErr)
+	}
+
+	_, err := readManagedVMCgroupMemoryMax(t.Context(), deps, leafFD, leaf)
+	require.ErrorIs(t, err, closeErr)
+	requireManagedVMCgroupAtomicError(t, err)
+}
+
+func TestWriteManagedVMCgroupControlBytesEnforcesExactCap(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		size    int
+		wantErr bool
+	}{
+		"exact cap":      {size: managedVMCgroupControlMaxBytes},
+		"one beyond cap": {size: managedVMCgroupControlMaxBytes + 1, wantErr: true},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedVMCgroupTestFixture(t)
+			fixture.addVMLeaf(testVMID)
+			createManagedVMCgroupControlTestFile(t, filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max"))
+			deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
+			writeCalls := 0
+			deps.write = func(_ context.Context, _ int, value []byte) (int, error) {
+				writeCalls++
+				return len(value), nil
+			}
+
+			err := writeManagedVMCgroupControlBytes(
+				t.Context(),
+				deps,
+				leafFD,
+				leaf,
+				managedVMCgroupCPUMaxControl,
+				make([]byte, tc.size),
+			)
+			if tc.wantErr {
+				requireManagedVMCgroupAtomicError(t, err)
+				assert.Zero(t, writeCalls)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, 1, writeCalls)
+		})
+	}
+}
+
+func TestManagedVMCgroupNamedControlOperationsRejectAlreadyCancelledContextBeforeIO(t *testing.T) {
 	t.Parallel()
 
 	fixture := newManagedVMCgroupTestFixture(t)
 	fixture.addVMLeaf(testVMID)
 	deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
 	openCalls := 0
-	deps.openAt2 = func(context.Context, int, string, *unix.OpenHow) (int, error) {
-		openCalls++
-		return -1, errors.New("unexpected open")
+	preadCalls := 0
+	writeCalls := 0
+	deps.openAt2 = func(context.Context, int, string, *unix.OpenHow) (int, error) { openCalls++; return -1, nil }
+	deps.pread = func(context.Context, int, []byte, int64) (int, error) { preadCalls++; return 0, nil }
+	deps.write = func(context.Context, int, []byte) (int, error) { writeCalls++; return 0, nil }
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, readErr := readManagedVMCgroupMemoryMax(ctx, deps, leafFD, leaf)
+	require.ErrorIs(t, readErr, context.Canceled)
+	writeErr := writeManagedVMCgroupCPUMax(
+		ctx,
+		deps,
+		leafFD,
+		leaf,
+		managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+	)
+	require.ErrorIs(t, writeErr, context.Canceled)
+	assert.Zero(t, openCalls)
+	assert.Zero(t, preadCalls)
+	assert.Zero(t, writeCalls)
+}
+
+func TestPrepareManagedVMCgroupForLaunchEnsuresRootThenParentControllers(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	parentPath := createManagedVMCgroupControllerHierarchy(
+		t,
+		fixture,
+		"io cpu memory pids\n",
+		"cpu\n",
+		"pids memory cpu rdma\n",
+		"memory\n",
+	)
+	deps := fixture.deps()
+	var writes []managedVMCgroupControllerWriteCall
+	deps.write = simulatedManagedVMCgroupControllerWrite(t, fixture.root, parentPath, &writes)
+
+	authority, _ := newTestInstanceAuthority(t)
+	authority.cgroupDeps = deps
+	launch, err := registerTestLaunch(
+		t,
+		t.Context(),
+		authority,
+		testInstanceCaller(),
+		testLaunchIntent(false),
+	)
+	require.NoError(t, err)
+	err = launch.prepareManagedVMCgroup(t.Context())
+	require.NoError(t, err)
+	wantWrites := []managedVMCgroupControllerWriteCall{
+		{directory: "root", value: "+memory +pids\n"},
+		{directory: "parent", value: "+cpu +pids\n"},
+	}
+	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
+		t.Errorf("controller enablement mismatch (-want +got):\n%s", diff)
+	}
+	cleanup, err := launch.Abort(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
+	require.NoError(t, cleanup.Release(t.Context()))
+
+	prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), deps, testVMID)
+	require.NoError(t, err)
+	require.NoError(t, prepared.Release(t.Context()))
+	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
+		t.Errorf("retry repeated additive controller writes (-want +got):\n%s", diff)
+	}
+}
+
+func TestPrepareManagedVMCgroupForLaunchFailsClosedOnControllerAvailabilityAndReadback(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		rootControllers string
+		rootSubtree     string
+		write           func(context.Context, int, []byte) (int, error)
+		wantWrites      int
+	}{
+		"required controller missing": {
+			rootControllers: "cpu memory\n",
+			rootSubtree:     "cpu memory\n",
+		},
+		"enablement absent from readback": {
+			rootControllers: "cpu memory pids\n",
+			rootSubtree:     "",
+			write: func(_ context.Context, _ int, value []byte) (int, error) {
+				return len(value), nil
+			},
+			wantWrites: 1,
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedVMCgroupTestFixture(t)
+			createManagedVMCgroupControllerHierarchy(
+				t,
+				fixture,
+				tc.rootControllers,
+				tc.rootSubtree,
+				"cpu memory pids\n",
+				"cpu memory pids\n",
+			)
+			deps := fixture.deps()
+			writeCalls := 0
+			deps.write = func(ctx context.Context, fd int, value []byte) (int, error) {
+				writeCalls++
+				if tc.write == nil {
+					t.Fatal("unexpected controller write")
+				}
+				return tc.write(ctx, fd, value)
+			}
+
+			prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), deps, testVMID)
+			assert.Nil(t, prepared)
+			requireManagedVMCgroupAtomicError(t, err)
+			assert.Equal(t, tc.wantWrites, writeCalls)
+		})
+	}
+}
+
+// Rationale: subtree controller writes are shared additive effects. A later parent failure must not attempt to
+// compensate by disabling controllers that this launch just made ready at the root.
+func TestPrepareManagedVMCgroupForLaunchDoesNotRollbackRootControllerEnablement(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	parentPath := createManagedVMCgroupControllerHierarchy(
+		t,
+		fixture,
+		"cpu memory pids\n",
+		"cpu\n",
+		"cpu memory\n",
+		"cpu memory\n",
+	)
+	deps := fixture.deps()
+	var writes []managedVMCgroupControllerWriteCall
+	deps.write = simulatedManagedVMCgroupControllerWrite(t, fixture.root, parentPath, &writes)
+
+	prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), deps, testVMID)
+	assert.Nil(t, prepared)
+	requireManagedVMCgroupAtomicError(t, err)
+	wantWrites := []managedVMCgroupControllerWriteCall{{directory: "root", value: "+memory +pids\n"}}
+	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
+		t.Errorf("controller writes mismatch (-want +got):\n%s", diff)
+	}
+	rootSubtree, readErr := os.ReadFile(filepath.Join(fixture.root, "cgroup.subtree_control"))
+	require.NoError(t, readErr)
+	if diff := cmp.Diff([]byte("cpu memory pids\n"), rootSubtree); diff != "" {
+		t.Errorf("root enablement was rolled back (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: a controller failure after the parent was created may leave that shared additive object in place, but
+// every locally retained descriptor must still close in reverse order using cancellation-detached context.
+func TestPrepareManagedVMCgroupForLaunchClosesCreatedParentAfterCancelledControllerRead(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	createManagedVMCgroupControllerFiles(t, fixture.root, "cpu memory pids\n", "cpu memory pids\n")
+	parentPath := filepath.Join(fixture.root, "mvmctl")
+	deps := fixture.deps()
+	realMkdirAt := deps.mkdirAt
+	deps.mkdirAt = func(ctx context.Context, rootFD int, name string, mode uint32) error {
+		if err := realMkdirAt(ctx, rootFD, name, mode); err != nil {
+			return err
+		}
+		createManagedVMCgroupControllerFiles(t, parentPath, "cpu memory pids\n", "cpu memory pids\n")
+		return nil
+	}
+	rootFD := -1
+	realOpenRoot := deps.openRoot
+	deps.openRoot = func(ctx context.Context) (int, error) {
+		fd, err := realOpenRoot(ctx)
+		if err == nil {
+			rootFD = fd
+		}
+		return fd, err
+	}
+	parentFD := -1
+	realOpenAt2 := deps.openAt2
+	deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		opened, err := realOpenAt2(ctx, fd, name, how)
+		if err == nil && name == "mvmctl" {
+			parentFD = opened
+		}
+		return opened, err
+	}
+	ctx, cancel := context.WithCancel(context.WithValue(
+		t.Context(), managedVMCgroupControlContextKey{}, "retained",
+	))
+	realPread := deps.pread
+	deps.pread = func(readCtx context.Context, fd int, buffer []byte, offset int64) (int, error) {
+		target, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+		require.NoError(t, err)
+		count, readErr := realPread(readCtx, fd, buffer, offset)
+		if target == filepath.Join(parentPath, "cgroup.controllers") {
+			cancel()
+		}
+		return count, readErr
+	}
+	var retainedCloseOrder []string
+	realClose := deps.close
+	deps.close = func(closeCtx context.Context, fd int) error {
+		assert.NoError(t, closeCtx.Err())
+		assert.Equal(t, "retained", closeCtx.Value(managedVMCgroupControlContextKey{}))
+		switch fd {
+		case parentFD:
+			retainedCloseOrder = append(retainedCloseOrder, "parent")
+		case rootFD:
+			retainedCloseOrder = append(retainedCloseOrder, "root")
+		}
+		return realClose(closeCtx, fd)
 	}
 
-	_, err := readManagedVMCgroupControl(
-		t.Context(), deps, leafFD, leaf, managedVMCgroupControlFile(255),
-	)
-	requireManagedVMCgroupAtomicError(t, err)
-	err = writeManagedVMCgroupControl(
-		t.Context(), deps, leafFD, leaf, managedVMCgroupControllersControl, []byte("cpu\n"),
-	)
-	requireManagedVMCgroupAtomicError(t, err)
-	err = writeManagedVMCgroupControl(
-		t.Context(), deps, leafFD, leaf, managedVMCgroupCPUMaxControl, nil,
-	)
-	requireManagedVMCgroupAtomicError(t, err)
-	assert.Zero(t, openCalls)
+	prepared, err := prepareManagedVMCgroupForLaunch(ctx, deps, testVMID)
+	assert.Nil(t, prepared)
+	require.ErrorIs(t, err, context.Canceled)
+	if diff := cmp.Diff([]string{"parent", "root"}, retainedCloseOrder); diff != "" {
+		t.Errorf("retained descriptor close order mismatch (-want +got):\n%s", diff)
+	}
+	info, statErr := os.Stat(parentPath)
+	require.NoError(t, statErr)
+	assert.True(t, info.IsDir())
+}
+
+func TestPrepareFreshRecoveryManagedVMCgroupDoesNotTouchControllerControls(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	deps := fixture.deps()
+	var opened []string
+	realOpenAt2 := deps.openAt2
+	deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		opened = append(opened, name)
+		return realOpenAt2(ctx, fd, name, how)
+	}
+	writeCalls := 0
+	deps.write = func(context.Context, int, []byte) (int, error) {
+		writeCalls++
+		return 0, errors.New("unexpected controller write")
+	}
+
+	prepared, err := prepareFreshRecoveryManagedVMCgroup(t.Context(), deps, testVMID)
+	require.NoError(t, err)
+	require.NoError(t, prepared.Release(t.Context()))
+	wantOpened := []string{"mvmctl", "mvmctl", testVMID}
+	if diff := cmp.Diff(wantOpened, opened); diff != "" {
+		t.Errorf("fresh recovery opens mismatch (-want +got):\n%s", diff)
+	}
+	assert.Zero(t, writeCalls)
 }
 
 type managedVMCgroupControlContextKey struct{}
+
+type managedVMCgroupControllerWriteCall struct {
+	directory string
+	value     string
+}
+
+func createManagedVMCgroupControllerHierarchy(
+	t *testing.T,
+	fixture *managedVMCgroupTestFixture,
+	rootControllers string,
+	rootSubtree string,
+	parentControllers string,
+	parentSubtree string,
+) string {
+	t.Helper()
+	createManagedVMCgroupControllerFiles(t, fixture.root, rootControllers, rootSubtree)
+	parentPath := filepath.Join(fixture.root, "mvmctl")
+	require.NoError(t, os.Mkdir(parentPath, os.FileMode(managedVMCgroupParentMode)))
+	require.NoError(t, os.Chmod(parentPath, os.FileMode(managedVMCgroupParentMode)))
+	createManagedVMCgroupControllerFiles(t, parentPath, parentControllers, parentSubtree)
+	return parentPath
+}
+
+func createManagedVMCgroupControllerFiles(t *testing.T, directory, controllers, subtree string) {
+	t.Helper()
+	controllersPath := filepath.Join(directory, "cgroup.controllers")
+	require.NoError(t, os.WriteFile(controllersPath, []byte(controllers), 0o444))
+	require.NoError(t, os.Chmod(controllersPath, 0o444))
+	subtreePath := filepath.Join(directory, "cgroup.subtree_control")
+	require.NoError(t, os.WriteFile(subtreePath, []byte(subtree), 0o644))
+	require.NoError(t, os.Chmod(subtreePath, 0o644))
+}
+
+func simulatedManagedVMCgroupControllerWrite(
+	t *testing.T,
+	rootPath string,
+	parentPath string,
+	writes *[]managedVMCgroupControllerWriteCall,
+) func(context.Context, int, []byte) (int, error) {
+	t.Helper()
+	return func(_ context.Context, fd int, value []byte) (int, error) {
+		target, err := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+		require.NoError(t, err)
+		directory := filepath.Dir(target)
+		label := ""
+		switch directory {
+		case rootPath:
+			label = "root"
+		case parentPath:
+			label = "parent"
+		default:
+			t.Fatalf("write targeted unexpected controller directory %q", directory)
+		}
+		*writes = append(*writes, managedVMCgroupControllerWriteCall{directory: label, value: string(value)})
+		require.NoError(t, os.WriteFile(target, []byte("cpu memory pids\n"), 0o644))
+		return len(value), nil
+	}
+}
 
 func createManagedVMCgroupControlTestFile(t *testing.T, path string) {
 	t.Helper()

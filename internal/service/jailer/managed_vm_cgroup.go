@@ -67,6 +67,23 @@ func prepareManagedVMCgroup(
 	deps managedVMCgroupDeps,
 	vmID string,
 ) (_ *preparedManagedVMCgroup, returnErr error) {
+	return prepareManagedVMCgroupWithControllerReadiness(ctx, deps, vmID, false)
+}
+
+func prepareManagedVMCgroupForLaunch(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	vmID string,
+) (_ *preparedManagedVMCgroup, returnErr error) {
+	return prepareManagedVMCgroupWithControllerReadiness(ctx, deps, vmID, true)
+}
+
+func prepareManagedVMCgroupWithControllerReadiness(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	vmID string,
+	requireControllers bool,
+) (_ *preparedManagedVMCgroup, returnErr error) {
 	if ctx == nil {
 		return nil, instanceAtomicError("prepare managed VM cgroup: context is required", nil)
 	}
@@ -114,6 +131,11 @@ func prepareManagedVMCgroup(
 	if filesystem.Type != unix.CGROUP2_SUPER_MAGIC {
 		return nil, instanceAtomicError("fixed cgroup root is not a cgroup-v2 mount", nil)
 	}
+	if requireControllers {
+		if err := ensureManagedVMCgroupControllersReady(ctx, deps, rootFD, root); err != nil {
+			return nil, err
+		}
+	}
 
 	parentFD, parentCreated, err := openOrCreateManagedVMCgroupParent(ctx, deps, rootFD)
 	if err != nil {
@@ -140,6 +162,11 @@ func prepareManagedVMCgroup(
 	}
 	if parent.mount != root.mount || parent.deviceMajor != root.deviceMajor || parent.deviceMinor != root.deviceMinor {
 		return nil, instanceAtomicError("managed cgroup parent is outside the pinned cgroup-v2 mount", nil)
+	}
+	if requireControllers {
+		if err := ensureManagedVMCgroupControllersReady(ctx, deps, parentFD, parent); err != nil {
+			return nil, err
+		}
 	}
 
 	how := unix.OpenHow{

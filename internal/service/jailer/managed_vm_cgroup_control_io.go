@@ -38,6 +38,7 @@ const (
 	managedVMCgroupKnownControllers = managedVMCgroupControllerCPU |
 		managedVMCgroupControllerMemory |
 		managedVMCgroupControllerPIDs
+	managedVMCgroupRequiredControllers = managedVMCgroupKnownControllers
 )
 
 type managedVMCgroupCPUMax struct {
@@ -45,7 +46,179 @@ type managedVMCgroupCPUMax struct {
 	periodMicros uint64
 }
 
-func readManagedVMCgroupControl(
+func readManagedVMCgroupMemoryMax(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) (uint64, error) {
+	return readManagedVMCgroupFiniteControl(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupMemoryMaxControl,
+		"memory.max",
+	)
+}
+
+func readManagedVMCgroupPIDsMax(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) (uint64, error) {
+	return readManagedVMCgroupFiniteControl(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupPIDsMaxControl,
+		"pids.max",
+	)
+}
+
+func writeManagedVMCgroupCPUMax(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+	value managedVMCgroupCPUMax,
+) error {
+	raw, err := formatManagedVMCgroupCPUMax(value)
+	if err != nil {
+		return instanceAtomicError("format cpu.max control", err)
+	}
+	return writeManagedVMCgroupControlBytes(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupCPUMaxControl,
+		raw,
+	)
+}
+
+func readManagedVMCgroupFiniteControl(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+	control managedVMCgroupControlFile,
+	description string,
+) (uint64, error) {
+	raw, err := readManagedVMCgroupControlBytes(ctx, deps, directoryFD, directory, control)
+	if err != nil {
+		return 0, err
+	}
+	value, err := parseManagedVMCgroupFiniteUint(raw)
+	if err != nil {
+		return 0, instanceAtomicError("parse "+description+" control", err)
+	}
+	return value, nil
+}
+
+func readManagedVMCgroupControllers(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) (managedVMCgroupControllerSet, error) {
+	raw, err := readManagedVMCgroupControlBytes(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupControllersControl,
+	)
+	if err != nil {
+		return 0, err
+	}
+	controllers, err := parseManagedVMCgroupControllerSet(raw)
+	if err != nil {
+		return 0, instanceAtomicError("parse cgroup.controllers control", err)
+	}
+	return controllers, nil
+}
+
+func readManagedVMCgroupSubtreeControl(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) (managedVMCgroupControllerSet, error) {
+	raw, err := readManagedVMCgroupControlBytes(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupSubtreeControl,
+	)
+	if err != nil {
+		return 0, err
+	}
+	controllers, err := parseManagedVMCgroupControllerSet(raw)
+	if err != nil {
+		return 0, instanceAtomicError("parse cgroup.subtree_control control", err)
+	}
+	return controllers, nil
+}
+
+func addManagedVMCgroupSubtreeControllers(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+	controllers managedVMCgroupControllerSet,
+) error {
+	raw, err := formatManagedVMCgroupControllerEnablement(controllers)
+	if err != nil {
+		return instanceAtomicError("format cgroup.subtree_control enablement", err)
+	}
+	return writeManagedVMCgroupControlBytes(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupSubtreeControl,
+		raw,
+	)
+}
+
+func ensureManagedVMCgroupControllersReady(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) error {
+	available, err := readManagedVMCgroupControllers(ctx, deps, directoryFD, directory)
+	if err != nil {
+		return err
+	}
+	if err := requireManagedVMCgroupControllers(available, managedVMCgroupRequiredControllers); err != nil {
+		return instanceAtomicError("required cgroup-v2 controller is unavailable", err)
+	}
+	enabled, err := readManagedVMCgroupSubtreeControl(ctx, deps, directoryFD, directory)
+	if err != nil {
+		return err
+	}
+	missing := managedVMCgroupRequiredControllers &^ enabled
+	if missing != 0 {
+		if err := addManagedVMCgroupSubtreeControllers(ctx, deps, directoryFD, directory, missing); err != nil {
+			return err
+		}
+	}
+	enabled, err = readManagedVMCgroupSubtreeControl(ctx, deps, directoryFD, directory)
+	if err != nil {
+		return err
+	}
+	if err := requireManagedVMCgroupControllers(enabled, managedVMCgroupRequiredControllers); err != nil {
+		return instanceAtomicError("required cgroup-v2 controller enablement is incomplete", err)
+	}
+	return nil
+}
+
+func readManagedVMCgroupControlBytes(
 	ctx context.Context,
 	deps managedVMCgroupDeps,
 	directoryFD int,
@@ -75,7 +248,7 @@ func readManagedVMCgroupControl(
 	return readAllManagedVMCgroupControl(ctx, deps, fd, spec.name)
 }
 
-func writeManagedVMCgroupControl(
+func writeManagedVMCgroupControlBytes(
 	ctx context.Context,
 	deps managedVMCgroupDeps,
 	directoryFD int,
@@ -286,9 +459,6 @@ func parseManagedVMCgroupControllerSet(raw []byte) (managedVMCgroupControllerSet
 		case "pids":
 			controllers |= managedVMCgroupControllerPIDs
 		}
-	}
-	if len(seen) == 0 {
-		return 0, fmt.Errorf("cgroup controller set is empty")
 	}
 	return controllers, nil
 }

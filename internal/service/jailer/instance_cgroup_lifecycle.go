@@ -54,7 +54,7 @@ func (lease *launchLease) prepareManagedVMCgroup(ctx context.Context) error {
 		state.processes == nil || state.preparedManagedVMCgroup != nil || state.managedVMCgroup != nil {
 		return instanceStateError(state.record.vmID, "launch lease cannot prepare a managed VM cgroup")
 	}
-	prepared, err := prepareManagedVMCgroup(ctx, state.cgroupDeps, state.record.vmID)
+	prepared, err := prepareManagedVMCgroupForLaunch(ctx, state.cgroupDeps, state.record.vmID)
 	if err != nil {
 		return err
 	}
