@@ -1482,6 +1482,15 @@ termination and reap. Cleanup requires the exact unreplaced leaf to be empty, re
 retryable replacement-safe convergence before durable `cleaned`, and treats a terminal close error after proven
 removal as converged.
 
+Fresh private `BeginCleanup` now integrates that authority without reconstructing a path or extending schema 3. It
+reopens the exact recorded process set through pidfds and start ticks, admits Firecracker as either the complete active
+identity or the exact launching task, durably transfers the record and retained resources into `cleaning`, and
+re-admits the fixed leaf only with exact sole membership. A re-admission or final membership error preserves the same
+cleanup lease and marks cgroup cleanup pending for retry. A host-boot mismatch opens and signals no process; it may
+proceed only after proving the fixed leaf stably absent and rejects a present or changing leaf. Launching recovery
+retains its provisional absence proof through exact task termination and reap before causal `BindForCleanup`. Cleanup
+state remains serialized, but cgroup admission and cleanup callbacks run outside its mutex.
+
 Private `activateVerifiedProcess` uses strict bounded `/proc` parsing and descriptor-pinned observations. It enforces
 the 10-second/25-millisecond executable-transition loop, repeated pidfd liveness and PID/start identity, boot ID,
 credentials, empty supplementary groups, exact derived cgroup, topology-selected network namespace, final root and
@@ -1501,11 +1510,11 @@ state preserves the `cleaning` record and retained VM lock for retry.
 
 The schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and
 compared the trusted-store inode with Jailer's copy. The implemented process graph remains private and uncomposed:
-fresh-dispatcher and reboot cgroup recovery/reconciliation, controller enablement/readiness and exact limit readback,
-replacement of `entry.go`'s path-based cgroup preparation/removal, production child spawning and launch activation,
-network/firewall acquisition, final live topology verification, stale-tree and mount/output cleanup, status observation
-and complete reconciliation, privileged/public create/start/stop wiring, and live L2, Tier 3, and system qualification
-remain pending. The private cgroup capability is not production host enforcement or release evidence.
+same-boot dead-process cgroup reconciliation, controller enablement/readiness and exact limit readback, replacement of
+`entry.go`'s path-based cgroup preparation/removal, production child spawning and launch activation, network/firewall
+acquisition, final live topology verification, stale-tree and mount/output cleanup, status observation and complete
+reconciliation, privileged/public create/start/stop wiring, and live L2, Tier 3, and system qualification remain
+pending. The private cgroup capability is not production host enforcement or release evidence.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
 that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain
@@ -1537,9 +1546,9 @@ A durable `launching` record exists before the first externally mutable privileg
 may exist first only while an inherited private handshake makes external mutation impossible and EOF forces exit.
 Every post-registration failure retains a live lifecycle handle and invokes a typed abort that verifies the persistent
 VM and optional relay PID/start locators, terminates either process only through its separately verified pidfd, checks
-cgroup emptiness through retained private authority, and cleans namespace/chroot/instance state in order. Fresh
-dispatcher or reboot admission of cgroup authority remains pending, so this implemented cleanup applies only while the
-launch/active/cleanup lease graph retains provenance.
+cgroup emptiness through retained private authority, and cleans namespace/chroot/instance state in order. A fresh
+dispatcher can now recover that cgroup authority for an exact active or launching task, or prove stable absence across
+a boot mismatch, before cleanup continues. Same-boot dead-process cgroup reconciliation remains pending.
 
 Startup and pre-launch reconciliation compare root instance records, processes, cgroups, and chroot directories. They do
 not trust the user database as root authorization. Operations are idempotent and either converge to a known state or

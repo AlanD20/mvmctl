@@ -439,8 +439,7 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 **Owner:** engineer
 **Status:** Private blocked-process, pidfd, Jailer-destination, fixed-name cgroup-v2, runtime-directory lifecycle,
 activation, and cleanup/recovery authority implemented; production child launch/composition, complete effects,
-privileged actions,
-fresh-dispatcher/reboot cgroup recovery, reconciliation, and qualification pending
+privileged actions, same-boot dead-process cgroup reconciliation, and qualification pending
 **Foundation dependency:** Task 4
 **Full acceptance dependencies:** Tasks 5, 6, and 8
 
@@ -456,7 +455,8 @@ fresh-dispatcher/reboot cgroup recovery, reconciliation, and qualification pendi
   only the same-UID tombstone and generations, with no launch-specific GID, cache, release, or process identity.
   - [x] The strict record/codec, lifecycle-shape validation, pure transitions, and manifest release validation are
     implemented. The private verifier can now commit `active` with retained exact sole-member cgroup authority, but
-    production activation, topology verification, cgroup controller/limit readiness, and recovery keep this item open.
+    production activation, topology verification, cgroup controller/limit readiness, and same-boot dead-process
+    reconciliation keep this item open.
 - [ ] Launch a child blocked by an inherited EOF-fails-closed two-way handshake in an initial private mount namespace
   and an optional blocked dropped-caller console relay in the host mount namespace. Open each pidfd, issue a fresh
   parent challenge, and require the still-blocked child to acknowledge it before accepting PID-derived evidence;
@@ -524,7 +524,9 @@ fresh-dispatcher/reboot cgroup recovery, reconciliation, and qualification pendi
   - [x] The private authority signals only with `pidfd_send_signal`, waits/reaps through the pidfd, and treats `POLLIN`,
     post-reap `POLLHUP`, or both as exited. It retains retry authority on failure. Fresh same-boot cleanup reopens exact
     PID/start locators and requires complete active identities and executable digests; a boot mismatch opens or signals
-    no pidfd. Production capability admission and full reconciliation remain pending.
+    no pidfd. Fresh cgroup recovery now consumes those exact process proofs, accepting the active or launching
+    Firecracker before durable cleaning transfer and sole-member leaf admission. Production capability admission and
+    same-boot dead-process reconciliation remain pending.
 - [ ] Reopen and pin `/proc/<pid>/ns/mnt` for each verified live operation; do not persist a mount-namespace handle that
   would retain mounts after process exit.
 - [ ] Lock the OS thread for `setns`, pin/restore/verify the original host namespace, and terminate the short-lived
@@ -539,13 +541,17 @@ fresh-dispatcher/reboot cgroup recovery, reconciliation, and qualification pendi
     unexpected runtime leaf leaves locks, resources, and the `cleaning` record available for retry. Fresh cleanup now
     reopens that exact directory without creation or repair. The retained cgroup authority removes only its exact empty,
     unreplaced leaf before durable `cleaned`, preserves the same lease for retry, and converges after a terminal close
-    error when removal is already proven. Mount cleanup and fresh-dispatcher/reboot cgroup recovery remain pending.
+    error when removal is already proven. Fresh recovery preserves the same cleanup lease with cgroup work pending on
+    admission/final-check error; boot mismatch requires stable absence, while launching retains provisional absence
+    through exact task reap. Its callbacks run outside the cleanup mutex. Mount cleanup and same-boot dead-process
+    cgroup reconciliation remain pending.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
   - [x] Focused L1 evidence covers gate cancellation/EOF, pidfd and locator mismatch, liveness/exit/HUP classification,
     bounded executable observation, every identity recheck, active post-rename ownership, full-identity recovery,
     boot-mismatch no-signal behavior, terminate/wait/reap retry, destination substitution, cgroup descriptor/mount
     checks, legacy-leaf refusal, handoff provenance, membership/replacement races, retryable empty removal, terminal
-    close convergence, and close-once cleanup.
+    close convergence, fresh active/launching recovery, boot-mismatch stable-absence rejection, pending same-lease
+    retry, callback re-entry outside the cleanup mutex, and close-once cleanup.
 - [ ] L1 crash-window tests cover pre-record handshake EOF, every `launching` effect stage, partial final-copy sealing,
   post-rename durability uncertainty, `launching -> active`, and repeated `cleaning` recovery.
 
@@ -970,9 +976,14 @@ lifecycle, host-reboot reconciliation, API relay/policy/audit integration, and P
     successful handoff provenance; verify pidfd/start-tick-bound sole membership with same-lease retry; transfer
     launch -> active -> cleanup; bind abort cleanup only after exact task reap; and remove only the exact empty
     unreplaced leaf before durable `cleaned`, including terminal close-error convergence. Store no cgroup path.
-  - [ ] Add fresh-dispatcher/reboot cgroup recovery and reconciliation; enable and prove controller readiness; read back
-    exact limits; replace `entry.go` path-based prepare/remove; wire production/public create/start/stop; and complete
-    live L2, Tier 3, and system qualification. This is not yet host enforcement or release evidence.
+  - [x] Integrate private fresh cleanup recovery: reopen exact pidfd/start-tick process authority; admit active or
+    launching Firecracker observation; durably transfer `cleaning`; re-admit only exact sole-member fixed leaves; retain
+    the same lease and pending work on error; require stable absence and reject present/unstable state across boot
+    mismatch; retain launching provisional absence through reap; and run callbacks outside the cleanup mutex. Add no
+    cgroup path to schema 3.
+  - [ ] Add same-boot dead-process cgroup reconciliation; enable and prove controller readiness; read back exact limits;
+    replace `entry.go` path-based prepare/remove; wire production/public create/start/stop; and complete live L2, Tier 3,
+    and system qualification. This is not yet host enforcement or release evidence.
 - [ ] Remove process-local semaphore admission and user-DB-as-root-authority designs.
 - [ ] L1/L2 fault injection covers kill at every effect stage, reboot, PID reuse, partial cleanup, and repeated reconcile.
 - [ ] L1 proves relaunch emits the vsock device and L2 proves `mvm exec` after stop/start, reboot, host reboot plus start,

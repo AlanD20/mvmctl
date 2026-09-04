@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
-> marker-only sudo policy, schema-3 Jailer launch composition, fresh-dispatcher/reboot cgroup recovery, controller and
-> exact-limit readiness, final live topology verification and reconciliation, complete relaunch parity and
+> marker-only sudo policy, schema-3 Jailer launch composition, same-boot dead-process cgroup reconciliation, controller
+> and exact-limit readiness, final live topology verification and reconciliation, complete relaunch parity and
 > qualification, and remaining typed privileged operations are not
 > implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
@@ -491,10 +491,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before binding. Activation proves the pidfd/start-tick-bound Firecracker is the sole member and preserves the same
   lease for retry. Authority transfers launch -> active -> cleanup; abort binds only after exact task reap; and cleanup
   removes only the exact empty unreplaced leaf before durable `cleaned`, with retryable removal and terminal
-  post-removal close convergence. Fresh-dispatcher/reboot recovery, controller enablement/readiness and exact limit
-  readback, replacement of `entry.go` path-based prepare/remove, production/public create/start/stop wiring, and live
-  L2/Tier 3/system qualification remain pending. This private increment is not production host enforcement or release
-  evidence.
+  post-removal close convergence. Fresh recovery integration is described below; same-boot dead-process
+  reconciliation, controller enablement/readiness and exact limit readback, replacement of `entry.go` path-based
+  prepare/remove, production/public create/start/stop wiring, and live L2/Tier 3/system qualification remain pending.
+  This private increment is not production host enforcement or release evidence.
+- Integrated fresh cgroup cleanup admission into the private lifecycle. Recovery reopens the record's exact processes,
+  accepts the active or launching Firecracker identity, durably transfers `cleaning` authority, and re-admits the fixed
+  leaf only when that task is its sole member. Admission or final-check failure keeps the same cleanup lease and cgroup
+  work pending for retry. A boot mismatch requires stable leaf absence and rejects a present or unstable leaf;
+  launching recovery retains provisional absence through exact task reap. Cgroup callbacks run outside the cleanup
+  mutex, and schema 3 still stores no cgroup path. Same-boot dead-process reconciliation, controller readiness and
+  exact limit readback, raw `entry.go` replacement, public production wiring, and live/system qualification remain
+  pending.
 
 #### Private trusted-release authority substrate
 
@@ -766,8 +774,8 @@ The following items are release blockers and are intentionally not described abo
   action. Carry the remaining mount, network, and firewall resources through launch, active, and cleaning without lock
   release/reacquisition, and preserve the returned post-rename authority on every failure.
 - Compose the private fixed-name cgroup-v2 authority into production create/start/stop and other lifecycle actions. Add
-  fresh-dispatcher/reboot recovery and reconciliation, controller enablement/readiness, exact limit readback, replacement
-  of `entry.go` path-based prepare/remove, and live L2, Tier 3, and system qualification before treating it as host
+  same-boot dead-process reconciliation, controller enablement/readiness, exact limit readback, replacement of
+  `entry.go` path-based prepare/remove, and live L2, Tier 3, and system qualification before treating it as host
   enforcement or release evidence.
 - Compose the implemented exact-absent Jailer destination and pre-handoff recheck into production; add safe admission
   and descriptor-relative removal for only an exact non-mounted stale fixed tree after process absence. Create links

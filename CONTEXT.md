@@ -343,6 +343,15 @@ retryable descriptor-relative removal and commits durable `cleaned` only afterwa
 after proven removal converges rather than retrying a reused descriptor. This authority adds no cgroup path to the
 schema and is not yet production host enforcement.
 
+Fresh private cleanup admission now reopens the record's exact pidfd/start-tick-bound processes and observes the
+Firecracker as either the committed active identity or the exact launching task before durably transferring authority
+to `cleaning`. It then re-admits the fixed cgroup leaf only when that task is its sole member. A re-admission or final
+membership error keeps the same cleanup lease authoritative with cgroup cleanup pending for retry. Across a host-boot
+mismatch it opens and signals no process, requires the fixed leaf to be stably absent, and rejects a present or unstable
+leaf. Recovery from `launching` retains its provisional leaf-absence proof through exact process termination and reap
+before binding for cleanup. Cgroup recovery and cleanup callbacks execute outside the cleanup-state mutex. None of
+this adds a cgroup path to schema 3.
+
 The original pidfd provides stable task identity and exit detection but does not notify `exec`. Activation uses a
 bounded context-aware `/proc/<pid>/exe` observation loop, stopping immediately on pidfd-observed exit, before final
 identity admission. After any active-record rename, even a later fsync/close error returns a non-nil active lease with
@@ -376,11 +385,11 @@ state and cache their first cleanup result.
 Fresh cleanup now reopens the exact existing per-VM runtime directory through the root-controlled hierarchy before
 runtime cleanup. It creates or repairs nothing, treats an absent hierarchy as already clean, and preserves retryable
 `cleaning` on unsafe state. No production child launcher, privileged VM action, or public VM lifecycle constructs or
-consumes this private graph. Fresh-dispatcher and reboot cgroup recovery/reconciliation, cgroup controller enablement
-and readiness plus exact limit readback, replacement of the path-based cgroup prepare/remove calls in `entry.go`,
-production topology and network/firewall lease transfer, stale Jailer-tree reconciliation, mount/output cleanup,
-public create/start/stop and other lifecycle wiring, status observation and full reconciliation, and live L2, Tier 3,
-and system qualification remain pending.
+consumes this private graph. Same-boot dead-process cgroup reconciliation, cgroup controller enablement and readiness
+plus exact limit readback, replacement of the path-based cgroup prepare/remove calls in `entry.go`, production topology
+and network/firewall lease transfer, stale Jailer-tree reconciliation, mount/output cleanup, public create/start/stop
+and other lifecycle wiring, status observation and full reconciliation, and live L2, Tier 3, and system qualification
+remain pending.
 
 The transitional public relaunch path now has a separate, private normal-process `vmRelaunchState` increment. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,

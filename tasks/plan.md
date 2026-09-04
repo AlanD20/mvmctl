@@ -197,11 +197,15 @@ continue without silently deleting it.
   only the exact empty unreplaced leaf before durable `cleaned`; abort binds for cleanup only after exact task reap, and
   terminal post-removal close errors converge. Schema 3 stores no cgroup path. Private abort and active cleanup retain
   pidfd authority, signal/wait/reap without raw PID fallback, accept post-reap pidfd hangup, and keep retryable cleanup
-  ownership. These capabilities use pointer-shared close-once state. Fresh-dispatcher/reboot cgroup recovery,
-  controller enablement/readiness and exact limit readback, replacement of `entry.go` path-based cgroup operations,
-  production child spawning and create/start/stop composition, network/firewall lease transfer, final live topology
-  verification, full reconciliation, API wiring, and live L2/Tier 3/system tests remain pending. This is not yet
-  production host enforcement or release evidence.
+  ownership. Fresh cleanup now reopens the exact recorded active or launching Firecracker process, durably transfers
+  `cleaning` authority, and re-admits only a fixed leaf whose sole member is that process. Failure keeps the same lease
+  and cgroup cleanup pending. Boot mismatch requires stable leaf absence and rejects present/unstable state; launching
+  recovery retains provisional absence through exact task reap. Cgroup callbacks run outside the cleanup mutex. These
+  capabilities use pointer-shared close-once state. Same-boot dead-process reconciliation, controller
+  enablement/readiness and exact limit readback, replacement of `entry.go` path-based cgroup operations, production
+  child spawning and create/start/stop composition, network/firewall lease transfer, final live topology verification,
+  full reconciliation, API wiring, and live L2/Tier 3/system tests remain pending. This is not yet production host
+  enforcement or release evidence.
 - Private firewall generation authority with a strict committed/applying record and codec, descriptor-relative
   exclusive store at `/var/lib/mvmctl/firewall/generation.json`, and never-unlinked global
   `/run/mvmctl/authority/firewall.lock`. Acquisition requires earlier network authority and admits only the current boot
@@ -412,10 +416,14 @@ observation, seals and hashes the Jailer copy, verifies pidfd/start-tick-bound s
 `active`. The cgroup lease pins and exactly checks root/parent/leaf descriptors and mount identity; refuses legacy-leaf
 adoption; requires a final absence recheck and successful handoff provenance; transfers launch -> active -> cleanup;
 and performs exact empty replacement-safe removal before `cleaned`, with same-lease retry and terminal close
-convergence. Abort binds only after exact task reap. No production VM lifecycle constructs or consumes this graph yet.
-Fresh-dispatcher/reboot cgroup recovery, controller readiness and exact limit readback, replacement of `entry.go`
-path-based prepare/remove, production create/start/stop wiring, live topology verification, network/firewall and
-mount/output integration, public actions, reconciliation, and live L2/Tier 3/system qualification remain pending.
+convergence. Abort binds only after exact task reap. Fresh private cleanup reopens exact process authority, accepts the
+active or launching Firecracker identity, durably enters `cleaning`, and re-admits the leaf only with exact sole
+membership. Admission failure retains the same cleanup lease and pending cgroup work. Boot mismatch requires stable
+leaf absence; launching recovery retains provisional absence through reap; callbacks run outside the cleanup mutex. No
+production VM lifecycle constructs or consumes this graph yet. Same-boot dead-process cgroup reconciliation,
+controller readiness and exact limit readback, replacement of `entry.go` path-based prepare/remove, production
+create/start/stop wiring, live topology verification, network/firewall and mount/output integration, public actions,
+reconciliation, and live L2/Tier 3/system qualification remain pending.
 
 The global lock order is:
 
@@ -475,9 +483,12 @@ callback, or generic state mutation.
 `launchLease.Abort` and `activeLease.BeginCleanup` consume their source directly into a cleanup lease, transferring
 release/VM locks, pidfds, and all cgroup/mount/network/firewall resources without unlock/reacquire. Abort binds the
 cgroup leaf for cleanup only after exact task termination and reap. Cleanup requires exact empty replacement-safe
-removal before `cleaned`; a terminal close error after proven removal converges. Authority-level
-`BeginCleanup` is only fresh recovery admission. Cleanup and reconciliation re-admit a present relay through pidfd plus
-its state-appropriate exact locator or full identity and never signal an ambiguous or reused PID.
+removal before `cleaned`; a terminal close error after proven removal converges. Authority-level `BeginCleanup` is only
+fresh recovery admission. It now reopens the exact recorded processes, transfers durable `cleaning` authority, and
+re-admits the fixed leaf only for the exact active or launching Firecracker as sole member. Failure preserves the same
+lease and pending work; boot mismatch requires stable absence, and launching provisional absence remains retained
+through reap. Cgroup callbacks run outside the cleanup mutex. Cleanup and reconciliation re-admit a present relay
+through pidfd plus its state-appropriate exact locator or full identity and never signal an ambiguous or reused PID.
 
 The persistent VM outputs are fixed caller-owned `0600` one-link regular files: `firecracker.log`,
 `firecracker.console.log`, and, when enabled, `firecracker.metrics`. They are truncated once per launch after durable
@@ -1019,6 +1030,10 @@ finish idempotent sealing and commit active only when the optional relay also pr
 identity. The exact same task still in Jailer, another transient exec, or a mismatched exec is terminated only through
 its verified pidfd, and a present relay only through its separately verified pidfd. Inability to classify either task
 returns unavailable and performs no guessed signal or deletion; `console.pid` is never authority.
+
+The private fresh-cleanup path now covers cgroup admission when the record's exact active or launching Firecracker can
+be reopened, or when a boot mismatch has stable leaf-absence proof. It does not yet reconcile a same-boot dead process
+and is not wired to this public status path.
 
 This is a local metadata operation, not a heartbeat. The implementation must not start one sudo process, open one
 control connection, or launch one goroutine per VM. L1 benchmarks cover 1,000 authority records and set a regression
