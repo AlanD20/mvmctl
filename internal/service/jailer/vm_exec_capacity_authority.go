@@ -89,7 +89,7 @@ func newVMExecCapacityAuthorityWithDeps(
 	return &vmExecCapacityAuthority{policy: policy, deps: deps}, nil
 }
 
-// reserve creates one inert owner- and launch-bound capacity claim. No production relay calls this private seam.
+// reserve creates one owner- and launch-bound capacity claim for the retained VM-exec sidecar.
 func (authority *vmExecCapacityAuthority) reserve(
 	ctx context.Context,
 	intent vmExecCapacityIntent,

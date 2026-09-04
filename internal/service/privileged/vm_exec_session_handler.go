@@ -67,7 +67,7 @@ type vmExecSessionResources struct {
 	cleanupErr  error
 }
 
-// CRITICAL: This unregistered handler receives only the exact closed sidecar phases and borrowed connection
+// CRITICAL: This exact-action handler receives only the closed sidecar phases and borrowed connection
 // capabilities. It accepts no action, path, command, token, policy material, raw descriptor, or payload.
 func handleVMExecSession(
 	ctx context.Context,

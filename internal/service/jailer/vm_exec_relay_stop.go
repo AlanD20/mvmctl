@@ -26,8 +26,8 @@ type vmExecRelayStopDeps struct {
 	close  func(context.Context, int) error
 }
 
-// vmExecRelayStopFactory is the private action-specific constructor for the retained VM-exec relay deadline. It has
-// no production caller until the exact jailer-vm-exec-session action composes the accepted authority graph.
+// vmExecRelayStopFactory is the private action-specific constructor for the retained VM-exec relay deadline used by
+// the exact jailer-vm-exec-session authority graph.
 type vmExecRelayStopFactory struct {
 	deps vmExecRelayStopDeps
 }

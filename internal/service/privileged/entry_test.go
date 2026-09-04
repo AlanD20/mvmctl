@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/unix"
 
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/system"
@@ -15,12 +16,28 @@ import (
 	"mvmctl/pkg/errs"
 )
 
-func TestRunLeavesVMExecSessionActionUnregisteredAndRequestUnread(t *testing.T) {
-	requestBytes := []byte("must remain unread")
-	endpoint := newReceiverEndpoint()
-	endpoint.input = *bytes.NewReader(requestBytes)
+func TestRunDispatchesVMExecSessionWithoutOuterResponse(t *testing.T) {
+	events := make([]string, 0, 3)
+	endpoint, handlerDeps, sourceFD, destinationFD := newVMExecSessionHandlerFixture(
+		t,
+		vmExecSessionFrames(t, true, false, false),
+		&events,
+	)
 	runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
-	runtime.control = validControlDeps(endpoint, nil)
+	runtime.control = vmExecSessionRunControlDeps(handlerDeps.control)
+	runtime.vmExecSession = vmExecSessionHandlerEffects{openSource: func(
+		_ context.Context,
+		caller callerIdentity,
+		request vmexecsessionwire.OpenSource,
+		_ vmExecSessionConnection,
+	) (vmExecSessionHandlerLease, error) {
+		assert.Equal(t, uint32(1000), caller.uid)
+		assert.Equal(t, uint32(1000), caller.gid)
+		assert.Equal(t, testVMExecHandlerSource, request.SourceVMID)
+		assert.Equal(t, testVMExecHandlerDestination, request.DestinationVMID)
+		return nil, errs.New(errs.CodeProcessError, "registered VM-exec effect stopped")
+	}}
+	runtime.vmExecConnectionReader = handlerDeps.connectionReader
 
 	err := run(
 		t.Context(),
@@ -30,10 +47,35 @@ func TestRunLeavesVMExecSessionActionUnregisteredAndRequestUnread(t *testing.T) 
 	)
 
 	require.NoError(t, err)
-	assert.Zero(t, endpoint.readCalls)
-	assert.Equal(t, int64(0), endpoint.input.Size()-int64(endpoint.input.Len()))
-	operationErr := decodeReceiverError(t, endpoint.output.Bytes(), vmexecsessionwire.Action)
-	assert.ErrorContains(t, operationErr, `unknown privileged action "`+vmexecsessionwire.Action+`"`)
+	responses := bytes.NewReader(endpoint.responseBytes())
+	outcome, decodeErr := vmexecsessionwire.DecodeOutcome(t.Context(), responses)
+	require.NoError(t, decodeErr)
+	assert.False(t, outcome.Released())
+	operationErr := outcome.OperationError()
+	require.NotNil(t, operationErr)
+	assert.Equal(t, errs.CodeProcessError, operationErr.Code)
+	assert.Equal(t, errs.ClassInternal, operationErr.Class)
+	assert.Zero(t, responses.Len())
+	assert.Equal(t, 1, bytes.Count(endpoint.responseBytes(), []byte("MVMXSES1")))
+	assert.NotContains(t, string(endpoint.responseBytes()), "MVMRES01")
+	assertFDClosed(t, sourceFD)
+	assertFDOpen(t, destinationFD)
+	require.NoError(t, unix.Close(destinationFD))
+}
+
+func vmExecSessionRunControlDeps(handler controlDeps) controlDeps {
+	return controlDeps{
+		descriptorFlags:       func(context.Context, uintptr) (int, error) { return unix.FD_CLOEXEC, nil },
+		setDescriptorFlags:    func(context.Context, uintptr, int) error { return nil },
+		descriptorStatusFlags: func(context.Context, uintptr) (int, error) { return 0, nil },
+		socketDomain:          func(context.Context, int) (int, error) { return unix.AF_UNIX, nil },
+		socketType:            func(context.Context, int) (int, error) { return unix.SOCK_STREAM, nil },
+		peerCredentials: func(context.Context, int) (*unix.Ucred, error) {
+			return &unix.Ucred{Pid: 1, Uid: 1000, Gid: 1000}, nil
+		},
+		shutdownWrite: handler.shutdownWrite,
+		now:           handler.now,
+	}
 }
 
 func TestRunReleasesPinnedExecutableAndPreservesDeliveryFailure(t *testing.T) {

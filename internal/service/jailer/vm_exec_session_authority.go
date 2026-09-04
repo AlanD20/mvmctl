@@ -101,8 +101,8 @@ func newVMExecSessionAuthorityWithDeps(
 }
 
 // reserve admits two exact active runtimes and only then reserves the root-global execution capacity. The global lock
-// order is release -> index -> VM locks in lexical VM-ID order -> exec capacity -> network -> firewall. This inert
-// authority acquires only the index, VM, and capacity suffix and retains every acquired capability for reverse release.
+// order is release -> index -> VM locks in lexical VM-ID order -> exec capacity -> network -> firewall. This authority
+// acquires only the index, VM, and capacity suffix and retains every acquired capability for reverse release.
 func (authority *vmExecSessionAuthority) reserve(
 	ctx context.Context,
 	caller instanceCaller,

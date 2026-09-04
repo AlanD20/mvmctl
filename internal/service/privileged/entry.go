@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"mvmctl/internal/infra"
+	"mvmctl/internal/lib/vmexecsessionwire"
 	"mvmctl/internal/service/agent"
 	"mvmctl/internal/service/jailer"
 	"mvmctl/internal/service/loopmount"
@@ -16,13 +17,15 @@ import (
 )
 
 type runtimeDeps struct {
-	identity       identityDeps
-	environment    environmentDeps
-	executable     executableDeps
-	authorization  authorizationDeps
-	control        controlDeps
-	trustedRelease trustedReleaseHandlerEffects
-	loopMount      loopMountHandlerEffects
+	identity               identityDeps
+	environment            environmentDeps
+	executable             executableDeps
+	authorization          authorizationDeps
+	control                controlDeps
+	trustedRelease         trustedReleaseHandlerEffects
+	loopMount              loopMountHandlerEffects
+	vmExecSession          vmExecSessionHandlerEffects
+	vmExecConnectionReader vmExecConnectionReaderDeps
 }
 
 type dispatchDisposition uint8
@@ -37,12 +40,18 @@ const (
 func Run(ctx context.Context, args []string) error {
 	trustedRelease := jailer.NewTrustedReleaseServer()
 	loopMount := loopmount.NewProvisionInspectServer(systemLoopMountAgentBinary)
+	vmExecSession, err := jailer.NewVMExecSessionServer()
+	if err != nil {
+		return err
+	}
 	return run(ctx, args, newStdinControlEndpoint(os.Stdin), runtimeDeps{
-		identity:      realIdentityDeps(),
-		environment:   realEnvironmentDeps(),
-		executable:    realExecutableDeps(),
-		authorization: realAuthorizationDeps(),
-		control:       realControlDeps(),
+		identity:               realIdentityDeps(),
+		environment:            realEnvironmentDeps(),
+		executable:             realExecutableDeps(),
+		authorization:          realAuthorizationDeps(),
+		control:                realControlDeps(),
+		vmExecSession:          newVMExecSessionHandlerEffects(vmExecSession),
+		vmExecConnectionReader: realVMExecConnectionReaderDeps(),
 		trustedRelease: trustedReleaseHandlerEffects{
 			install: trustedRelease.Install,
 			remove:  trustedRelease.Remove,
@@ -195,6 +204,17 @@ func dispatch(
 			loopmount.Caller{UID: caller.uid, GID: caller.gid},
 			deps.loopMount,
 			deps.control,
+		)
+	case vmexecsessionwire.Action:
+		return dispatchHandled, handleVMExecSession(
+			ctx,
+			endpoint,
+			caller,
+			deps.vmExecSession,
+			vmExecSessionHandlerDeps{
+				control:          deps.control,
+				connectionReader: deps.vmExecConnectionReader,
+			},
 		)
 	default:
 		return dispatchUnhandled, errs.New(
