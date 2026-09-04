@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
@@ -161,6 +164,134 @@ func TestLaunchReleaseToJailerRechecksManagedVMCgroupAbsence(t *testing.T) {
 	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 	assert.False(t, cgroup.vmLeafPresent(testVMID))
+}
+
+// Rationale: controller state can be removed after initial preparation. The irreversible Firecracker gate release
+// must restore and read back root then parent readiness through the already-pinned cgroup authority.
+func TestLaunchReleaseToJailerRechecksAndReenablesManagedVMCgroupControllers(t *testing.T) {
+	t.Parallel()
+
+	authority, _ := newTestInstanceAuthority(t)
+	cgroup := newManagedVMCgroupTestFixture(t)
+	parentPath := createManagedVMCgroupControllerHierarchy(
+		t,
+		cgroup,
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+	)
+	deps := cgroup.deps()
+	rootOpens := 0
+	realOpenRoot := deps.openRoot
+	deps.openRoot = func(ctx context.Context) (int, error) {
+		rootOpens++
+		return realOpenRoot(ctx)
+	}
+	parentOpens := 0
+	realOpenAt2 := deps.openAt2
+	deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		if name == "mvmctl" {
+			parentOpens++
+		}
+		return realOpenAt2(ctx, fd, name, how)
+	}
+	var writes []managedVMCgroupControllerWriteCall
+	deps.write = simulatedManagedVMCgroupControllerWrite(t, cgroup.root, parentPath, &writes)
+	authority.cgroupDeps = deps
+	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
+	prepared := launch.state.preparedManagedVMCgroup
+	require.NotNil(t, prepared)
+	preparedRootOpens := rootOpens
+	preparedParentOpens := parentOpens
+	require.NoError(t, os.WriteFile(filepath.Join(cgroup.root, "cgroup.subtree_control"), []byte("cpu\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(parentPath, "cgroup.subtree_control"), []byte("memory\n"), 0o644))
+
+	require.NoError(t, launch.releaseToJailer(t.Context()))
+	assert.Same(t, prepared, launch.state.preparedManagedVMCgroup)
+	assert.Equal(t, preparedRootOpens, rootOpens)
+	assert.Equal(t, preparedParentOpens, parentOpens)
+	wantWrites := []managedVMCgroupControllerWriteCall{
+		{directory: "root", value: "+memory +pids\n"},
+		{directory: "parent", value: "+cpu +pids\n"},
+	}
+	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
+		t.Errorf("final controller writes mismatch (-want +got):\n%s", diff)
+	}
+	assert.True(t, launch.state.processes.state.firecracker.gate.isReleased())
+	cleanup, err := launch.Abort(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
+	require.NoError(t, cleanup.Release(t.Context()))
+}
+
+// Rationale: a successful controller write without a successful readback cannot release Firecracker. The same pinned
+// preparation must remain retryable, and convergence on retry must not repeat the additive write.
+func TestLaunchFinalControllerReadbackFailureRetainsSameCgroupAuthorityForRetry(t *testing.T) {
+	t.Parallel()
+
+	authority, _ := newTestInstanceAuthority(t)
+	cgroup := newManagedVMCgroupTestFixture(t)
+	parentPath := createManagedVMCgroupControllerHierarchy(
+		t,
+		cgroup,
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+		"cpu memory pids\n",
+	)
+	authority.cgroupDeps = cgroup.deps()
+	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
+	prepared := launch.state.preparedManagedVMCgroup
+	require.NotNil(t, prepared)
+	require.NoError(t, os.WriteFile(
+		filepath.Join(parentPath, "cgroup.subtree_control"),
+		[]byte("cpu memory\n"),
+		0o644,
+	))
+
+	deps := prepared.state.deps
+	readbackErr := errors.New("injected final parent subtree-control readback failure")
+	parentWriteCompleted := false
+	failedReadback := false
+	realPread := deps.pread
+	deps.pread = func(ctx context.Context, fd int, buffer []byte, offset int64) (int, error) {
+		target, readlinkErr := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+		require.NoError(t, readlinkErr)
+		if target == filepath.Join(parentPath, "cgroup.subtree_control") && parentWriteCompleted && !failedReadback {
+			failedReadback = true
+			return 0, readbackErr
+		}
+		return realPread(ctx, fd, buffer, offset)
+	}
+	var writes []managedVMCgroupControllerWriteCall
+	controllerWrite := simulatedManagedVMCgroupControllerWrite(t, cgroup.root, parentPath, &writes)
+	deps.write = func(ctx context.Context, fd int, value []byte) (int, error) {
+		count, err := controllerWrite(ctx, fd, value)
+		if err == nil {
+			parentWriteCompleted = true
+		}
+		return count, err
+	}
+	prepared.state.deps = deps
+
+	err := launch.releaseToJailer(t.Context())
+	require.ErrorIs(t, err, readbackErr)
+	assert.Same(t, prepared, launch.state.preparedManagedVMCgroup)
+	assert.False(t, launch.state.processes.state.firecracker.gate.isReleased())
+	require.NoError(t, launch.releaseToJailer(t.Context()))
+	assert.Same(t, prepared, launch.state.preparedManagedVMCgroup)
+	assert.True(t, launch.state.processes.state.firecracker.gate.isReleased())
+	wantWrites := []managedVMCgroupControllerWriteCall{{directory: "parent", value: "+pids\n"}}
+	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
+		t.Errorf("retry controller writes mismatch (-want +got):\n%s", diff)
+	}
+	cleanup, err := launch.Abort(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, cleanup.Complete(t.Context()))
+	require.NoError(t, cleanup.Release(t.Context()))
 }
 
 func TestLaunchFinalCgroupRecheckFailurePreservesRelayPartialHandoffForAbort(t *testing.T) {

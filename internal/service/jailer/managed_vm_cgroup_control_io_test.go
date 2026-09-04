@@ -1230,33 +1230,25 @@ func TestPrepareManagedVMCgroupForLaunchRejectsParentControllerReadbackFailureAf
 	)
 	deps := fixture.deps()
 	readbackErr := errors.New("injected parent subtree-control readback failure")
-	parentSubtreeOpens := 0
-	readbackFD := -1
-	realOpenAt2 := deps.openAt2
-	deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
-		opened, err := realOpenAt2(ctx, fd, name, how)
-		if err != nil || name != "cgroup.subtree_control" {
-			return opened, err
-		}
-		parent, readlinkErr := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
-		require.NoError(t, readlinkErr)
-		if parent == parentPath {
-			parentSubtreeOpens++
-			if parentSubtreeOpens == 2 {
-				readbackFD = opened
-			}
-		}
-		return opened, nil
-	}
+	parentWriteCompleted := false
 	realPread := deps.pread
 	deps.pread = func(ctx context.Context, fd int, buffer []byte, offset int64) (int, error) {
-		if fd == readbackFD {
+		target, readlinkErr := os.Readlink("/proc/self/fd/" + strconv.Itoa(fd))
+		require.NoError(t, readlinkErr)
+		if target == filepath.Join(parentPath, "cgroup.subtree_control") && parentWriteCompleted {
 			return 0, readbackErr
 		}
 		return realPread(ctx, fd, buffer, offset)
 	}
 	var writes []managedVMCgroupControllerWriteCall
-	deps.write = simulatedManagedVMCgroupControllerWrite(t, fixture.root, parentPath, &writes)
+	controllerWrite := simulatedManagedVMCgroupControllerWrite(t, fixture.root, parentPath, &writes)
+	deps.write = func(ctx context.Context, fd int, value []byte) (int, error) {
+		count, err := controllerWrite(ctx, fd, value)
+		if err == nil {
+			parentWriteCompleted = true
+		}
+		return count, err
+	}
 
 	prepared, err := prepareManagedVMCgroupForLaunch(
 		t.Context(), deps, testVMID, testManagedVMCgroupLimits(),
@@ -1441,8 +1433,9 @@ func TestPrepareFreshRecoveryManagedVMCgroupDoesNotTouchControllerControls(t *te
 
 	prepared, err := prepareFreshRecoveryManagedVMCgroup(t.Context(), deps, testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.RecheckAbsent(t.Context()))
 	require.NoError(t, prepared.Release(t.Context()))
-	wantOpened := []string{"mvmctl", "mvmctl", testVMID}
+	wantOpened := []string{"mvmctl", "mvmctl", testVMID, testVMID}
 	if diff := cmp.Diff(wantOpened, opened); diff != "" {
 		t.Errorf("fresh recovery opens mismatch (-want +got):\n%s", diff)
 	}

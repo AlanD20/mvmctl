@@ -225,7 +225,8 @@ func prepareFreshRecoveryManagedVMCgroup(
 	return prepared, err
 }
 
-// RecheckAbsent proves the derived VM leaf is still absent immediately before the Jailer handoff.
+// RecheckAbsent re-establishes launch controller readiness through the pinned root and parent, then proves the derived
+// VM leaf is still absent immediately before the Jailer handoff. Recovery-only preparation skips controller mutation.
 func (prepared *preparedManagedVMCgroup) RecheckAbsent(ctx context.Context) error {
 	if prepared == nil || prepared.state == nil {
 		return instanceStateError("", "prepared managed VM cgroup is not active")
@@ -247,10 +248,22 @@ func (prepared *preparedManagedVMCgroup) RecheckAbsent(ctx context.Context) erro
 	}
 	state.checking = true
 	deps := state.deps
+	rootFD := state.rootFD
 	parentFD := state.parentFD
+	root := state.root
+	parent := state.parent
 	vmID := state.vmID
+	recheckControllers := state.hasLimitIntent
 	state.mu.Unlock()
 	defer finishManagedVMCgroupAbsentRecheck(state)
+	if recheckControllers {
+		if err := ensureManagedVMCgroupControllersReady(ctx, deps, rootFD, root); err != nil {
+			return err
+		}
+		if err := ensureManagedVMCgroupControllersReady(ctx, deps, parentFD, parent); err != nil {
+			return err
+		}
+	}
 	how := unix.OpenHow{
 		Flags:   uint64(managedVMCgroupDirectoryFlags),
 		Resolve: uint64(managedVMCgroupResolveFlags),
