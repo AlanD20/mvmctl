@@ -202,25 +202,6 @@ func TestParseManagedVMCgroupFiniteUint(t *testing.T) {
 	}
 }
 
-func TestFormatManagedVMCgroupFiniteUint(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		value uint64
-		want  []byte
-	}{
-		"zero":           {value: 0, want: []byte("0\n")},
-		"maximum uint64": {value: math.MaxUint64, want: []byte("18446744073709551615\n")},
-	}
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			if diff := cmp.Diff(tc.want, formatManagedVMCgroupFiniteUint(tc.value)); diff != "" {
-				t.Errorf("finite control value mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
 func TestParseManagedVMCgroupCPUMax(t *testing.T) {
 	t.Parallel()
 
@@ -258,36 +239,6 @@ func TestParseManagedVMCgroupCPUMax(t *testing.T) {
 	}
 }
 
-func TestFormatManagedVMCgroupCPUMax(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		value   managedVMCgroupCPUMax
-		want    []byte
-		wantErr bool
-	}{
-		"zero quota":  {value: managedVMCgroupCPUMax{periodMicros: 100000}, wantErr: true},
-		"zero period": {value: managedVMCgroupCPUMax{quotaMicros: 50000}, wantErr: true},
-		"finite value": {
-			value: managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
-			want:  []byte("50000 100000\n"),
-		},
-	}
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			got, err := formatManagedVMCgroupCPUMax(tc.value)
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			if diff := cmp.Diff(tc.want, got); diff != "" {
-				t.Errorf("cpu.max format mismatch (-want +got):\n%s", diff)
-			}
-		})
-	}
-}
-
 func TestReadAndWriteManagedVMCgroupControlUseFixedDescriptorRelativeFiles(t *testing.T) {
 	t.Parallel()
 
@@ -295,8 +246,8 @@ func TestReadAndWriteManagedVMCgroupControlUseFixedDescriptorRelativeFiles(t *te
 	fixture.addVMLeaf(testVMID)
 	controllersPath := filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.controllers")
 	require.NoError(t, os.WriteFile(controllersPath, []byte("cpu memory pids\n"), 0o444))
-	cpuMaxPath := filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max")
-	require.NoError(t, os.WriteFile(cpuMaxPath, nil, 0o644))
+	subtreeControlPath := filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.subtree_control")
+	require.NoError(t, os.WriteFile(subtreeControlPath, nil, 0o644))
 	pidsMaxPath := filepath.Join(fixture.vmLeafPath(testVMID), "pids.max")
 	require.NoError(t, os.WriteFile(pidsMaxPath, []byte("128\n"), 0o644))
 
@@ -335,12 +286,12 @@ func TestReadAndWriteManagedVMCgroupControlUseFixedDescriptorRelativeFiles(t *te
 	pidsMax, err := readManagedVMCgroupPIDsMax(t.Context(), deps, leafFD, leaf)
 	require.NoError(t, err)
 	assert.Equal(t, uint64(128), pidsMax)
-	require.NoError(t, writeManagedVMCgroupCPUMax(
-		t.Context(), deps, leafFD, leaf, managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+	require.NoError(t, addManagedVMCgroupSubtreeControllers(
+		t.Context(), deps, leafFD, leaf, managedVMCgroupControllerCPU,
 	))
-	written, err := os.ReadFile(cpuMaxPath)
+	written, err := os.ReadFile(subtreeControlPath)
 	require.NoError(t, err)
-	if diff := cmp.Diff([]byte("50000 100000\n"), written); diff != "" {
+	if diff := cmp.Diff([]byte("+cpu\n"), written); diff != "" {
 		t.Errorf("written control mismatch (-want +got):\n%s", diff)
 	}
 	wantOpened := []openCall{
@@ -365,7 +316,7 @@ func TestReadAndWriteManagedVMCgroupControlUseFixedDescriptorRelativeFiles(t *te
 			),
 		},
 		{
-			Name:  "cpu.max",
+			Name:  "cgroup.subtree_control",
 			Flags: uint64(unix.O_WRONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW),
 			Resolve: uint64(
 				unix.RESOLVE_BENEATH |
@@ -587,7 +538,7 @@ func TestWriteManagedVMCgroupControlRetainsOpenedFileAcrossNameReplacement(t *te
 
 	fixture := newManagedVMCgroupTestFixture(t)
 	fixture.addVMLeaf(testVMID)
-	path := filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max")
+	path := filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.subtree_control")
 	replacement := []byte("replacement remains\n")
 	require.NoError(t, os.WriteFile(path, []byte("old detached value\n"), 0o644))
 	deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
@@ -603,17 +554,17 @@ func TestWriteManagedVMCgroupControlRetainsOpenedFileAcrossNameReplacement(t *te
 		return fd, nil
 	}
 
-	err := writeManagedVMCgroupCPUMax(
+	err := addManagedVMCgroupSubtreeControllers(
 		t.Context(),
 		deps,
 		leafFD,
 		leaf,
-		managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+		managedVMCgroupControllerCPU,
 	)
 	require.NoError(t, err)
 	detached, err := os.ReadFile(path + ".detached")
 	require.NoError(t, err)
-	if diff := cmp.Diff([]byte("50000 100000\nvalue\n"), detached); diff != "" {
+	if diff := cmp.Diff([]byte("+cpu\netached value\n"), detached); diff != "" {
 		t.Errorf("detached control mismatch (-want +got):\n%s", diff)
 	}
 	gotReplacement, err := os.ReadFile(path)
@@ -794,7 +745,10 @@ func TestWriteManagedVMCgroupControlRejectsFailuresAndNonFullWrites(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			fixture := newManagedVMCgroupTestFixture(t)
 			fixture.addVMLeaf(testVMID)
-			createManagedVMCgroupControlTestFile(t, filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max"))
+			createManagedVMCgroupControlTestFile(
+				t,
+				filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.subtree_control"),
+			)
 			deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
 			calls := 0
 			deps.write = func(ctx context.Context, fd int, value []byte) (int, error) {
@@ -802,12 +756,12 @@ func TestWriteManagedVMCgroupControlRejectsFailuresAndNonFullWrites(t *testing.T
 				return tc.write(ctx, fd, value)
 			}
 
-			err := writeManagedVMCgroupCPUMax(
+			err := addManagedVMCgroupSubtreeControllers(
 				t.Context(),
 				deps,
 				leafFD,
 				leaf,
-				managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+				managedVMCgroupControllerCPU,
 			)
 			if tc.cause != nil {
 				require.ErrorIs(t, err, tc.cause)
@@ -824,7 +778,7 @@ func TestWriteManagedVMCgroupControlRetriesEINTRAndObservesCancellation(t *testi
 	t.Run("retries EINTR before one full write", func(t *testing.T) {
 		fixture := newManagedVMCgroupTestFixture(t)
 		fixture.addVMLeaf(testVMID)
-		path := filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max")
+		path := filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.subtree_control")
 		createManagedVMCgroupControlTestFile(t, path)
 		deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
 		realWrite := deps.write
@@ -837,18 +791,18 @@ func TestWriteManagedVMCgroupControlRetriesEINTRAndObservesCancellation(t *testi
 			return realWrite(ctx, fd, value)
 		}
 
-		err := writeManagedVMCgroupCPUMax(
+		err := addManagedVMCgroupSubtreeControllers(
 			t.Context(),
 			deps,
 			leafFD,
 			leaf,
-			managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+			managedVMCgroupControllerCPU,
 		)
 		require.NoError(t, err)
 		assert.Equal(t, 2, calls)
 		got, err := os.ReadFile(path)
 		require.NoError(t, err)
-		if diff := cmp.Diff([]byte("50000 100000\n"), got); diff != "" {
+		if diff := cmp.Diff([]byte("+cpu\n"), got); diff != "" {
 			t.Errorf("EINTR write mismatch (-want +got):\n%s", diff)
 		}
 	})
@@ -856,7 +810,7 @@ func TestWriteManagedVMCgroupControlRetriesEINTRAndObservesCancellation(t *testi
 	t.Run("checks cancellation after EINTR", func(t *testing.T) {
 		fixture := newManagedVMCgroupTestFixture(t)
 		fixture.addVMLeaf(testVMID)
-		createManagedVMCgroupControlTestFile(t, filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max"))
+		createManagedVMCgroupControlTestFile(t, filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.subtree_control"))
 		deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
 		ctx, cancel := context.WithCancel(t.Context())
 		calls := 0
@@ -866,12 +820,12 @@ func TestWriteManagedVMCgroupControlRetriesEINTRAndObservesCancellation(t *testi
 			return 0, unix.EINTR
 		}
 
-		err := writeManagedVMCgroupCPUMax(
+		err := addManagedVMCgroupSubtreeControllers(
 			ctx,
 			deps,
 			leafFD,
 			leaf,
-			managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+			managedVMCgroupControllerCPU,
 		)
 		require.ErrorIs(t, err, context.Canceled)
 		requireManagedVMCgroupAtomicError(t, err)
@@ -919,7 +873,7 @@ func TestManagedVMCgroupControlIOPreservesCloseErrorsWithoutCancellation(t *test
 			},
 		},
 		"write primary and close errors": {
-			controlName: "cpu.max",
+			controlName: "cgroup.subtree_control",
 			operation: func(
 				ctx context.Context,
 				cancel context.CancelFunc,
@@ -931,12 +885,12 @@ func TestManagedVMCgroupControlIOPreservesCloseErrorsWithoutCancellation(t *test
 					cancel()
 					return 0, unix.EIO
 				}
-				return writeManagedVMCgroupCPUMax(
+				return addManagedVMCgroupSubtreeControllers(
 					ctx,
 					deps,
 					leafFD,
 					leaf,
-					managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+					managedVMCgroupControllerCPU,
 				)
 			},
 		},
@@ -1056,7 +1010,10 @@ func TestWriteManagedVMCgroupControlBytesEnforcesExactCap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fixture := newManagedVMCgroupTestFixture(t)
 			fixture.addVMLeaf(testVMID)
-			createManagedVMCgroupControlTestFile(t, filepath.Join(fixture.vmLeafPath(testVMID), "cpu.max"))
+			createManagedVMCgroupControlTestFile(
+				t,
+				filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.subtree_control"),
+			)
 			deps, leafFD, leaf := openManagedVMCgroupControlTestLeaf(t, fixture)
 			writeCalls := 0
 			deps.write = func(_ context.Context, _ int, value []byte) (int, error) {
@@ -1069,7 +1026,7 @@ func TestWriteManagedVMCgroupControlBytesEnforcesExactCap(t *testing.T) {
 				deps,
 				leafFD,
 				leaf,
-				managedVMCgroupCPUMaxControl,
+				managedVMCgroupSubtreeControl,
 				make([]byte, tc.size),
 			)
 			if tc.wantErr {
@@ -1100,12 +1057,12 @@ func TestManagedVMCgroupNamedControlOperationsRejectAlreadyCancelledContextBefor
 
 	_, readErr := readManagedVMCgroupMemoryMax(ctx, deps, leafFD, leaf)
 	require.ErrorIs(t, readErr, context.Canceled)
-	writeErr := writeManagedVMCgroupCPUMax(
+	writeErr := addManagedVMCgroupSubtreeControllers(
 		ctx,
 		deps,
 		leafFD,
 		leaf,
-		managedVMCgroupCPUMax{quotaMicros: 50000, periodMicros: 100000},
+		managedVMCgroupControllerCPU,
 	)
 	require.ErrorIs(t, writeErr, context.Canceled)
 	assert.Zero(t, openCalls)

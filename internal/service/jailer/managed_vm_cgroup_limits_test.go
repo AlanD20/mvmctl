@@ -383,7 +383,7 @@ func TestManagedVMCgroupLimitReadbackRetriesOnSamePinnedLease(t *testing.T) {
 	)
 	requireManagedVMCgroupAtomicError(t, err)
 	require.NotNil(t, lease)
-	require.NoError(t, os.WriteFile(pidsPath, formatManagedVMCgroupFiniteUint(uint64(limits.PIDsMax)), 0o644))
+	require.NoError(t, os.WriteFile(pidsPath, encodeManagedVMCgroupTestFiniteUint(limits.PIDsMax), 0o644))
 	require.NoError(t, lease.VerifyMembership(
 		t.Context(), processTestLocator(), processTestCgroupObservation(), verifier,
 	))
@@ -430,23 +430,27 @@ func (fixture *managedVMCgroupTestFixture) addVMLeafWithLimits(vmID string, limi
 	fixture.t.Helper()
 	fixture.addVMLeaf(vmID)
 	leafPath := fixture.vmLeafPath(vmID)
-	cpuMax, err := formatManagedVMCgroupCPUMax(managedVMCgroupCPUMax{
-		quotaMicros: uint64(limits.CPUQuotaMicros), periodMicros: uint64(limits.CPUPeriodMicros),
-	})
-	require.NoError(fixture.t, err)
 	controls := map[string][]byte{
-		"cpu.max":         cpuMax,
-		"cpu.weight":      formatManagedVMCgroupFiniteUint(uint64(limits.CPUWeight)),
-		"memory.high":     formatManagedVMCgroupFiniteUint(uint64(limits.MemoryHighBytes)),
-		"memory.max":      formatManagedVMCgroupFiniteUint(uint64(limits.MemoryMaxBytes)),
-		"memory.swap.max": formatManagedVMCgroupFiniteUint(uint64(limits.SwapMaxBytes)),
-		"pids.max":        formatManagedVMCgroupFiniteUint(uint64(limits.PIDsMax)),
+		"cpu.max":         encodeManagedVMCgroupTestCPUMax(limits.CPUQuotaMicros, limits.CPUPeriodMicros),
+		"cpu.weight":      encodeManagedVMCgroupTestFiniteUint(limits.CPUWeight),
+		"memory.high":     encodeManagedVMCgroupTestFiniteUint(limits.MemoryHighBytes),
+		"memory.max":      encodeManagedVMCgroupTestFiniteUint(limits.MemoryMaxBytes),
+		"memory.swap.max": encodeManagedVMCgroupTestFiniteUint(limits.SwapMaxBytes),
+		"pids.max":        encodeManagedVMCgroupTestFiniteUint(limits.PIDsMax),
 	}
 	for name, raw := range controls {
 		path := filepath.Join(leafPath, name)
 		require.NoError(fixture.t, os.WriteFile(path, raw, 0o644))
 		require.NoError(fixture.t, os.Chmod(path, 0o644))
 	}
+}
+
+func encodeManagedVMCgroupTestFiniteUint(value int64) []byte {
+	return []byte(strconv.FormatInt(value, 10) + "\n")
+}
+
+func encodeManagedVMCgroupTestCPUMax(quotaMicros, periodMicros int64) []byte {
+	return []byte(strconv.FormatInt(quotaMicros, 10) + " " + strconv.FormatInt(periodMicros, 10) + "\n")
 }
 
 func prepareManagedVMCgroupLimitTestBind(

@@ -152,27 +152,6 @@ func readManagedVMCgroupPIDsMax(
 	)
 }
 
-func writeManagedVMCgroupCPUMax(
-	ctx context.Context,
-	deps managedVMCgroupDeps,
-	directoryFD int,
-	directory managedVMCgroupIdentity,
-	value managedVMCgroupCPUMax,
-) error {
-	raw, err := formatManagedVMCgroupCPUMax(value)
-	if err != nil {
-		return instanceAtomicError("format cpu.max control", err)
-	}
-	return writeManagedVMCgroupControlBytes(
-		ctx,
-		deps,
-		directoryFD,
-		directory,
-		managedVMCgroupCPUMaxControl,
-		raw,
-	)
-}
-
 func readManagedVMCgroupFiniteControl(
 	ctx context.Context,
 	deps managedVMCgroupDeps,
@@ -581,10 +560,6 @@ func parseManagedVMCgroupFiniteUint(raw []byte) (uint64, error) {
 	return parseManagedVMCgroupCanonicalUint(raw[:len(raw)-1])
 }
 
-func formatManagedVMCgroupFiniteUint(value uint64) []byte {
-	return append(strconv.AppendUint([]byte{}, value, 10), '\n')
-}
-
 func parseManagedVMCgroupCPUMax(raw []byte) (managedVMCgroupCPUMax, error) {
 	if len(raw) < 4 || raw[len(raw)-1] != '\n' {
 		return managedVMCgroupCPUMax{}, fmt.Errorf("cpu.max is not canonical")
@@ -605,16 +580,6 @@ func parseManagedVMCgroupCPUMax(raw []byte) (managedVMCgroupCPUMax, error) {
 		return managedVMCgroupCPUMax{}, fmt.Errorf("cpu.max values must be positive")
 	}
 	return managedVMCgroupCPUMax{quotaMicros: quota, periodMicros: period}, nil
-}
-
-func formatManagedVMCgroupCPUMax(value managedVMCgroupCPUMax) ([]byte, error) {
-	if value.quotaMicros == 0 || value.periodMicros == 0 {
-		return nil, fmt.Errorf("cpu.max values must be positive")
-	}
-	raw := strconv.AppendUint([]byte{}, value.quotaMicros, 10)
-	raw = append(raw, ' ')
-	raw = strconv.AppendUint(raw, value.periodMicros, 10)
-	return append(raw, '\n'), nil
 }
 
 func parseManagedVMCgroupCanonicalUint(raw []byte) (uint64, error) {
