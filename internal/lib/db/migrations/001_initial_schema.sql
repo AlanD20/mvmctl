@@ -370,7 +370,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_nftables_rules_unique_active
 CREATE TABLE vm_vsock_config (
     id TEXT PRIMARY KEY,
     vm_id TEXT NOT NULL UNIQUE,
-    guest_cid INTEGER NOT NULL UNIQUE,
+    guest_cid INTEGER NOT NULL,
     uds_path TEXT NOT NULL,
     port INTEGER NOT NULL,
     token TEXT NOT NULL,

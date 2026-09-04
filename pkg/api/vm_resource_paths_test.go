@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,8 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/core/image"
+	corevm "mvmctl/internal/core/vm"
 	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/model"
+	"mvmctl/internal/testutil"
 	"mvmctl/pkg/api/inputs"
 )
 
@@ -94,7 +97,8 @@ func TestBuildRespawnFirecrackerConfigIgnoresPersistedPaths(t *testing.T) {
 		Jailer:      &model.BinaryItem{},
 	}
 
-	config := buildRespawnFirecrackerConfig(vmItem, pair, vmDir, false, "", "Info")
+	state := &vmRelaunchState{vm: vmItem, vsock: vmItem.Vsock}
+	config := buildRespawnFirecrackerConfig(state, pair, vmDir, false, "", "Info")
 	require.NotNil(t, config)
 
 	assert.Equal(t, filepath.Join(vmDir, infra.VMRootfsFilename), config.RootfsPath)
@@ -104,8 +108,40 @@ func TestBuildRespawnFirecrackerConfigIgnoresPersistedPaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerConsoleLogFilename), config.SerialOutputPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerMetricsFilename), config.MetricsPath)
 	assert.Equal(t, filepath.Join(vmDir, infra.VMFirecrackerPIDFilename), config.PIDPath)
-	require.NotNil(t, config.Vsock)
-	assert.Equal(t, filepath.Join(vmDir, infra.VMVsockSocketFilename), config.Vsock.UDSPath)
+	require.NotNil(t, config.VsockGuestCID)
+	assert.Equal(t, 42, *config.VsockGuestCID)
+}
+
+// Rationale: a successful database load must carry the exact typed CID across
+// API relaunch config construction into the jailed Firecracker config.
+func TestLoadedRelaunchStateProducesJailedVsockConfig(t *testing.T) {
+	cacheDir := t.TempDir()
+	vmItem := &model.VMItem{
+		ID: "vm-relaunch", Image: &model.ImageItem{}, Binary: &model.BinaryItem{},
+		Kernel: &model.KernelItem{}, Network: &model.NetworkItem{},
+	}
+	repo := testutil.NewVsockRepo()
+	require.NoError(t, repo.Upsert(t.Context(), &model.VsockConfigItem{
+		ID: "vsock-relaunch", VmID: vmItem.ID, GuestCID: 42,
+		UDSPath: "/persisted/selected.sock", Port: 1024, Token: "secret",
+	}))
+	state, err := (&Operation{CacheDir: cacheDir, Repos: Repos{Vsock: repo}}).
+		loadVMRelaunchState(t.Context(), vmItem)
+	require.NoError(t, err)
+
+	vmDir := filepath.Join(cacheDir, "vms", vmItem.ID)
+	config := buildRespawnFirecrackerConfig(state, &model.BinaryPair{
+		Firecracker: &model.BinaryItem{Version: "1.16.0"}, Jailer: &model.BinaryItem{},
+	}, vmDir, false, "", "Info")
+	require.NoError(t, corevm.NewFirecrackerSpawner(config).WriteToFile())
+
+	data, err := os.ReadFile(filepath.Join(vmDir, infra.VMFirecrackerConfigFilename))
+	require.NoError(t, err)
+	var firecrackerConfig model.FirecrackerVMConfig
+	require.NoError(t, json.Unmarshal(data, &firecrackerConfig))
+	require.NotNil(t, firecrackerConfig.Vsock)
+	assert.Equal(t, 42, firecrackerConfig.Vsock.GuestCID)
+	assert.Equal(t, "/run/mvm/vsock.sock", firecrackerConfig.Vsock.UDSPath)
 }
 
 // Rationale: user-owned snapshot metadata must not select an artifact path;

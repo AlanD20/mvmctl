@@ -384,6 +384,6 @@ type FirecrackerConfig struct {
 	// When false, defaults to config value or "Unsafe" (fast, guest fsync ignored).
 	Writeback bool `json:"writeback,omitempty"`
 
-	// Vsock device config
-	Vsock *VsockConfig `json:"vsock,omitempty"`
+	// VsockGuestCID enables the device. The core VM package derives both host and jail socket paths.
+	VsockGuestCID *int `json:"vsock_guest_cid,omitempty"`
 }

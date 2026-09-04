@@ -39,6 +39,10 @@ func (s *FirecrackerSpawner) writeJailerManifest() error {
 		PCIEnabled: s.config.PCIEnabled, SnapshotMode: s.config.SnapshotMode,
 		CgroupLimits: cgroupLimits,
 	}
+	if s.config.VsockGuestCID != nil {
+		cid := *s.config.VsockGuestCID
+		manifest.VsockGuestCID = &cid
+	}
 	data, err := json.Marshal(manifest)
 	if err != nil {
 		return fmt.Errorf("marshal jailed launch manifest: %w", err)
@@ -90,7 +94,7 @@ func translateConfigForJail(config *model.FirecrackerVMConfig) *model.Firecracke
 	}
 	if config.Vsock != nil {
 		vsock := *config.Vsock
-		vsock.UDSPath = jailedRuntimePath(vsock.UDSPath)
+		vsock.UDSPath = jailedRuntimePath(infra.VMVsockSocketFilename)
 		translated.Vsock = &vsock
 	}
 	return &translated

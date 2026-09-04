@@ -11,10 +11,8 @@ import (
 	"mvmctl/internal/lib/crypto"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/version"
+	"mvmctl/pkg/errs"
 )
-
-// maxGuestCID is the maximum valid Firecracker guest CID (2^32 - 1).
-const maxGuestCID = 4294967295
 
 // Service provides intra-domain orchestration for vsock operations.
 type Service struct {
@@ -30,7 +28,7 @@ func NewService(repo Repository) *Service {
 // CIDs 0 (VMADDR_CID_HYPERVISOR), 1 (VMADDR_CID_LOCAL), and 2 (VMADDR_CID_HOST)
 // are reserved by the Linux vsock specification.
 func (s *Service) AllocateCID() (int, error) {
-	maxCID := big.NewInt(maxGuestCID - 2)
+	maxCID := big.NewInt(int64(model.MaxVsockGuestCID) - 2)
 	c, err := rand.Int(rand.Reader, maxCID)
 	if err != nil {
 		return 0, fmt.Errorf("generate vsock CID: %w", err)
@@ -39,8 +37,6 @@ func (s *Service) AllocateCID() (int, error) {
 }
 
 // PersistConfig creates a vsock configuration record for a VM using the given CID.
-// If the Upsert fails (e.g. unique constraint collision on guest_cid), it retries
-// with a fresh random CID up to maxCIDRetries times.
 func (s *Service) PersistConfig(
 	ctx context.Context,
 	cid int,
@@ -48,7 +44,11 @@ func (s *Service) PersistConfig(
 	port int,
 	token string,
 ) error {
-	const maxCIDRetries = 5
+	if !model.IsValidVsockGuestCID(cid) {
+		err := errs.New(errs.CodeValidationFailed, "vsock guest CID is outside the supported range")
+		slog.Error("invalid vsock guest CID", "vm", vmName, "guest_cid", cid, "error", err)
+		return err
+	}
 
 	agentVersion := version.BuildVersion
 	if agentVersion == "" {
@@ -65,22 +65,14 @@ func (s *Service) PersistConfig(
 		AgentVersion: agentVersion,
 	}
 
-	for attempt := range maxCIDRetries {
-		if attempt > 0 {
-			newCID, err := s.AllocateCID()
-			if err != nil {
-				return err
-			}
-			item.GuestCID = newCID
-		}
-
-		if err := s.repo.Upsert(ctx, item); err != nil {
-			slog.Debug("vsock config upsert failed, retrying with new CID",
-				"vm", vmName, "attempt", attempt+1, "error", err)
-			continue
-		}
-		return nil
+	if err := s.repo.Upsert(ctx, item); err != nil {
+		slog.Error("failed to persist vsock config", "vm", vmName, "guest_cid", cid, "error", err)
+		return errs.WrapMsg(
+			errs.CodeDatabaseError,
+			"failed to persist vsock configuration",
+			err,
+			errs.WithClass(errs.ClassInternal),
+		)
 	}
-
-	return fmt.Errorf("persist vsock config after %d retries", maxCIDRetries)
+	return nil
 }

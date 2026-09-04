@@ -31,6 +31,73 @@ func TestLoadManifest_AcceptsExactManagedResources(t *testing.T) {
 	}
 }
 
+// Rationale: the privileged receiver must bind manifest CID presence and value
+// to the fixed jail-visible endpoint in the already admitted Firecracker config.
+func TestLoadManifestRequiresExactVsockCIDAndFixedPath(t *testing.T) {
+	cid := model.MinVsockGuestCID
+	reservedCID := model.MinVsockGuestCID - 1
+	aboveMaximumCID := int(model.MaxVsockGuestCID) + 1
+	tests := map[string]struct {
+		manifestCID *int
+		configVsock *model.VsockConfig
+		wantErr     string
+	}{
+		"absent": {},
+		"present": {
+			manifestCID: &cid,
+			configVsock: &model.VsockConfig{GuestCID: cid, UDSPath: "/run/mvm/vsock.sock"},
+		},
+		"manifest only": {manifestCID: &cid, wantErr: "vsock presence mismatch"},
+		"config only": {
+			configVsock: &model.VsockConfig{GuestCID: cid, UDSPath: "/run/mvm/vsock.sock"},
+			wantErr:     "vsock presence mismatch",
+		},
+		"CID mismatch": {
+			manifestCID: &cid,
+			configVsock: &model.VsockConfig{GuestCID: cid + 1, UDSPath: "/run/mvm/vsock.sock"},
+			wantErr:     "vsock CID mismatch",
+		},
+		"path mismatch": {
+			manifestCID: &cid,
+			configVsock: &model.VsockConfig{GuestCID: cid, UDSPath: "/caller/selected.sock"},
+			wantErr:     "non-canonical managed VM vsock path",
+		},
+		"matching reserved CID": {
+			manifestCID: &reservedCID,
+			configVsock: &model.VsockConfig{GuestCID: reservedCID, UDSPath: "/run/mvm/vsock.sock"},
+			wantErr:     "invalid managed VM vsock CID",
+		},
+		"matching CID above maximum": {
+			manifestCID: &aboveMaximumCID,
+			configVsock: &model.VsockConfig{GuestCID: aboveMaximumCID, UDSPath: "/run/mvm/vsock.sock"},
+			wantErr:     "invalid managed VM vsock CID",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedFixture(t)
+			fixture.manifest.VsockGuestCID = tc.manifestCID
+			data, err := json.Marshal(model.FirecrackerVMConfig{Vsock: tc.configVsock})
+			require.NoError(t, err)
+			require.NoError(t, os.WriteFile(fixture.manifest.ConfigPath, data, 0600))
+			fixture.writeManifest(t)
+
+			got, err := loadManifest(testVMID, fixture.vmDir)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				assert.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			if diff := cmp.Diff(tc.manifestCID, got.VsockGuestCID); diff != "" {
+				t.Errorf("validated vsock CID mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // Rationale: containment is not authority to select a privileged-visible
 // basename. The receiver must accept only its compiled per-VM leaf names.
 func TestLoadManifest_RejectsNonCanonicalVMResourceLeaves(t *testing.T) {

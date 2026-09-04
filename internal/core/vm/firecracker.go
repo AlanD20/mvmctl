@@ -356,9 +356,14 @@ func (s *FirecrackerSpawner) Generate() (*model.FirecrackerVMConfig, error) {
 
 	config.CPUConfig = s.buildCPUConfig()
 
-	if s.config.Vsock != nil {
-		vsockCfg := *s.config.Vsock
-		config.Vsock = &vsockCfg
+	if s.config.VsockGuestCID != nil {
+		if !model.IsValidVsockGuestCID(*s.config.VsockGuestCID) {
+			return nil, errs.New(errs.CodeFirecrackerConfigError, "vsock guest CID is outside the supported range")
+		}
+		config.Vsock = &model.VsockConfig{
+			GuestCID: *s.config.VsockGuestCID,
+			UDSPath:  filepath.Join(s.config.VMDir, infra.VMVsockSocketFilename),
+		}
 	}
 
 	return config, nil

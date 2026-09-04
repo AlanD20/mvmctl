@@ -49,6 +49,7 @@ type Operation struct {
 	hostSystemBinaryInstaller hostSystemBinaryInstaller
 	hostSudoersConfigurer     hostSudoersConfigurer
 	trustedReleaseClient      trustedReleaseClient
+	relaunchSpawn             func(context.Context, *vmRelaunchState, bool, string) error
 }
 
 type hostSystemBinaryInstaller interface {

@@ -2,7 +2,12 @@ package vm_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -14,6 +19,46 @@ import (
 	"mvmctl/internal/testutil"
 	"mvmctl/pkg/errs"
 )
+
+type capturedSnapshotRequest struct {
+	method string
+	path   string
+	body   map[string]any
+	err    error
+}
+
+// Rationale: SnapshotRestore must translate typed vsock presence into the
+// fixed jail-visible socket in the actual Firecracker request body.
+func TestControllerSnapshotRestoreSendsFixedVsockOverride(t *testing.T) {
+	socketPath := fmt.Sprintf("@mvmctl-snapshot-%d", os.Getpid())
+	listener, err := net.Listen("unix", socketPath)
+	require.NoError(t, err)
+
+	received := make(chan capturedSnapshotRequest, 1)
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		decodeErr := json.NewDecoder(r.Body).Decode(&body)
+		received <- capturedSnapshotRequest{method: r.Method, path: r.URL.Path, body: body, err: decodeErr}
+		if decodeErr != nil {
+			http.Error(w, decodeErr.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})}
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(func() { _ = server.Close() })
+
+	ctrl := newController(model.VMStatusStopped, 0, socketPath)
+	err = ctrl.SnapshotRestore(t.Context(), model.SnapshotRestoreConfig{
+		MemFile: "/snapshot/memory", StateFile: "/snapshot/state", VsockEnabled: true,
+	})
+	require.NoError(t, err)
+	request := <-received
+	require.NoError(t, request.err)
+	assert.Equal(t, http.MethodPut, request.method)
+	assert.Equal(t, "/snapshot/load", request.path)
+	assert.Equal(t, map[string]any{"uds_path": "/run/mvm/vsock.sock"}, request.body["vsock_override"])
+}
 
 // --- Pause state validation ---
 // Rationale: Pause must reject invalid state transitions before any I/O.

@@ -38,7 +38,7 @@ func TestFirecrackerSpawner_WriteJailerManifestSelectsOnlyVMResources(t *testing
 			DriveID: testDriveID, HostPath: config.ExtraDrives[0].PathOnHost, ReadOnly: true,
 		}},
 		APISocket: config.APISocketPath, PCIEnabled: true, SnapshotMode: true,
-		CgroupLimits: &config.CgroupLimits,
+		CgroupLimits: &config.CgroupLimits, VsockGuestCID: config.VsockGuestCID,
 	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Errorf("LaunchManifest mismatch (-want +got):\n%s", diff)
@@ -50,6 +50,7 @@ func TestFirecrackerSpawner_WriteJailerManifestSelectsOnlyVMResources(t *testing
 		"pid_path": true, "kernel_path": true, "rootfs_path": true, "iso_path": true,
 		"snapshot_dir": true, "volumes": true, "api_socket": true,
 		"pci_enabled": true, "snapshot_mode": true, "cgroup_limits": true,
+		"vsock_guest_cid": true,
 	}
 	gotKeys := make(map[string]bool, len(raw))
 	for key := range raw {
@@ -71,6 +72,30 @@ func TestFirecrackerSpawner_WriteJailerManifestOmitsAbsentCgroupLimits(t *testin
 	var manifest jailer.LaunchManifest
 	require.NoError(t, json.Unmarshal(data, &manifest))
 	assert.Nil(t, manifest.CgroupLimits)
+}
+
+func TestFirecrackerSpawnerWriteJailerManifestCarriesOnlyOptionalVsockCID(t *testing.T) {
+	vmDir := t.TempDir()
+	config := jailerTestConfig(vmDir)
+	require.NoError(t, NewFirecrackerSpawner(config).writeJailerManifest())
+
+	data, err := os.ReadFile(filepath.Join(vmDir, infra.JailerManifestFilename))
+	require.NoError(t, err)
+	var raw map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &raw))
+	assert.JSONEq(t, `42`, string(raw["vsock_guest_cid"]))
+	assert.NotContains(t, raw, "vsock_uds_path")
+}
+
+// Rationale: the unprivileged producer must use the compiled jail-visible
+// endpoint even if a caller manages to supply another host-side basename.
+func TestTranslateConfigForJailUsesFixedVsockEndpoint(t *testing.T) {
+	translated := translateConfigForJail(&model.FirecrackerVMConfig{Vsock: &model.VsockConfig{
+		GuestCID: 42,
+		UDSPath:  "/caller/selected.sock",
+	}})
+	require.NotNil(t, translated.Vsock)
+	assert.Equal(t, "/run/mvm/vsock.sock", translated.Vsock.UDSPath)
 }
 
 func TestCgroupStateParsingAndExactMismatchReporting(t *testing.T) {
@@ -189,8 +214,8 @@ func TestFirecrackerSpawner_WriteToFileUsesJailedPathsWithoutMutatingHostConfig(
 	assert.Equal(t, "/run/mvm/"+filepath.Base(config.MetricsPath), jailed.Metrics.MetricsPath)
 	require.NotNil(t, hostConfig.Vsock)
 	require.NotNil(t, jailed.Vsock)
-	assert.Equal(t, config.Vsock.UDSPath, hostConfig.Vsock.UDSPath)
-	assert.Equal(t, "/run/mvm/"+filepath.Base(config.Vsock.UDSPath), jailed.Vsock.UDSPath)
+	assert.Equal(t, filepath.Join(vmDir, infra.VMVsockSocketFilename), hostConfig.Vsock.UDSPath)
+	assert.Equal(t, "/run/mvm/"+infra.VMVsockSocketFilename, jailed.Vsock.UDSPath)
 }
 
 // Rationale: Mount destinations form a privileged filesystem boundary and
@@ -217,6 +242,7 @@ func TestJailedPathCalculation(t *testing.T) {
 func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 	cloudInitMode := model.CloudInitModeISO
 	isoPath := filepath.Join(vmDir, infra.VMCloudInitISOFilename)
+	cid := 42
 	return &model.FirecrackerConfig{
 		VMDir: vmDir, RootfsPath: filepath.Join(vmDir, infra.VMRootfsFilename),
 		BinaryPath: "/var/lib/mvmctl/binaries/1.16.0/firecracker",
@@ -241,7 +267,6 @@ func jailerTestConfig(vmDir string) *model.FirecrackerConfig {
 			IsReadOnly: true, CacheType: model.CacheTypeUnsafe, IOEngine: "Sync",
 		}},
 		SnapshotMode: true, SnapshotDir: filepath.Join(filepath.Dir(vmDir), "snapshots", testDriveID),
-		Vsock:     &model.VsockConfig{GuestCID: 42, UDSPath: filepath.Join(vmDir, infra.VMVsockSocketFilename)},
-		CPUVendor: ptr.Ptr("Intel"),
+		VsockGuestCID: &cid, CPUVendor: ptr.Ptr("Intel"),
 	}
 }

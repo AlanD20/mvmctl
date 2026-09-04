@@ -1064,6 +1064,50 @@ func vsockToInspectInfo(v *model.VsockConfigItem) *results.VMVsockInfo {
 }
 
 // --- Start / Stop / Reboot / Pause / Resume ---
+
+type vmRelaunchState struct {
+	vm    *model.VMItem
+	vsock *model.VsockConfigItem
+}
+
+func (op *Operation) loadVMRelaunchState(ctx context.Context, vmItem *model.VMItem) (*vmRelaunchState, error) {
+	row, err := op.Repos.Vsock.GetByVMID(ctx, vmItem.ID)
+	if err != nil {
+		return nil, errs.WrapMsg(errs.CodeDatabaseError, "failed to load VM vsock relaunch state", err)
+	}
+	state := &vmRelaunchState{vm: vmItem}
+	if row == nil {
+		return state, nil
+	}
+	if row.VmID != vmItem.ID {
+		return nil, errs.New(errs.CodeDatabaseError, "persisted vsock configuration has a mismatched VM identity")
+	}
+	if !model.IsValidVsockGuestCID(row.GuestCID) {
+		return nil, errs.New(errs.CodeDatabaseError, "persisted vsock configuration has an invalid guest CID")
+	}
+	cloned := *row
+	if row.UpgradeStartedAt != nil {
+		started := *row.UpgradeStartedAt
+		cloned.UpgradeStartedAt = &started
+	}
+	cloned.UDSPath = filepath.Join(op.CacheDir, "vms", vmItem.ID, infra.VMVsockSocketFilename)
+	state.vsock = &cloned
+	return state, nil
+}
+
+func (op *Operation) relaunchVM(
+	ctx context.Context,
+	state *vmRelaunchState,
+	snapshotMode bool,
+	snapshotDir string,
+) error {
+	state.vm.Vsock = state.vsock
+	if op.relaunchSpawn != nil {
+		return op.relaunchSpawn(ctx, state, snapshotMode, snapshotDir)
+	}
+	return op.vmRespawnFirecracker(ctx, state, snapshotMode, snapshotDir)
+}
+
 // Start starts one or more VMs.
 func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.BatchResult {
 	repo := op.Repos.VM
@@ -1087,7 +1131,11 @@ func (op *Operation) VMStart(ctx context.Context, input inputs.VMInput) *errs.Ba
 	for _, vmLocal := range vms {
 		// If VM is stopped, respawn Firecracker process
 		if vmLocal.Status == model.VMStatusStopped {
-			if err := op.vmRespawnFirecracker(ctx, vmLocal, false, ""); err != nil {
+			state, err := op.loadVMRelaunchState(ctx, vmLocal)
+			if err == nil {
+				err = op.relaunchVM(ctx, state, false, "")
+			}
+			if err != nil {
 				results = append(results, errs.OperationResult{
 					Status: "error", Code: "vm.start_failed",
 					Message:   fmt.Sprintf("start '%s': %v", vmLocal.Name, err),
@@ -1166,10 +1214,11 @@ func (op *Operation) VMStop(ctx context.Context, input inputs.VMInput) *errs.Bat
 }
 func (op *Operation) vmRespawnFirecracker(
 	ctx context.Context,
-	v *model.VMItem,
+	state *vmRelaunchState,
 	snapshotMode bool,
 	snapshotDir string,
 ) error {
+	v := state.vm
 	if v.CgroupLimits.PolicyVersion == 0 {
 		v.CgroupLimits = op.resolveVMCgroupLimits(ctx, v.VCPUCount, v.MemSizeMiB)
 		if err := op.Repos.VM.Upsert(ctx, v); err != nil {
@@ -1244,7 +1293,7 @@ func (op *Operation) vmRespawnFirecracker(
 		libnet.FlushARP(ctx, v.Network.Bridge)
 	}
 	logLevel, _ := op.Services.Config.GetString(ctx, "defaults.firecracker", "log_level")
-	fcConfig := buildRespawnFirecrackerConfig(v, pair, vmDir, snapshotMode, snapshotDir, logLevel)
+	fcConfig := buildRespawnFirecrackerConfig(state, pair, vmDir, snapshotMode, snapshotDir, logLevel)
 	// --- Console relay setup (before spawn) ---
 	var consoleController *console.Controller
 	if v.EnableConsole {
@@ -1301,13 +1350,14 @@ func (op *Operation) vmRespawnFirecracker(
 // buildRespawnFirecrackerConfig reconstructs launch paths from the managed VM
 // directory. Persisted path columns are descriptive metadata, never authority.
 func buildRespawnFirecrackerConfig(
-	v *model.VMItem,
+	state *vmRelaunchState,
 	pair *model.BinaryPair,
 	vmDir string,
 	snapshotMode bool,
 	snapshotDir string,
 	logLevel string,
 ) *model.FirecrackerConfig {
+	v := state.vm
 	config := &model.FirecrackerConfig{
 		VMDir:            vmDir,
 		RootfsPath:       filepath.Join(vmDir, infra.VMRootfsFilename),
@@ -1341,11 +1391,9 @@ func buildRespawnFirecrackerConfig(
 		LogLevel:         logLevel,
 		PIDPath:          filepath.Join(vmDir, infra.VMFirecrackerPIDFilename),
 	}
-	if v.Vsock != nil {
-		config.Vsock = &model.VsockConfig{
-			GuestCID: v.Vsock.GuestCID,
-			UDSPath:  filepath.Join(vmDir, infra.VMVsockSocketFilename),
-		}
+	if state.vsock != nil {
+		cid := state.vsock.GuestCID
+		config.VsockGuestCID = &cid
 	}
 	if len(v.Volumes) > 0 {
 		config.ExtraDrives = volume.VolumesToDrives(v.Volumes)
@@ -1389,11 +1437,20 @@ func (op *Operation) VMReboot(ctx context.Context, input inputs.VMInput) *errs.B
 		// the operation itself.
 	}
 	for _, vmLocal := range vms {
+		state, err := op.loadVMRelaunchState(ctx, vmLocal)
+		if err != nil {
+			results = append(results, errs.OperationResult{
+				Status: "error", Code: "vm.reboot_failed",
+				Message:   fmt.Sprintf("reboot '%s': %v", vmLocal.Name, err),
+				Exception: err,
+			})
+			continue
+		}
 		// Stop the VM first (kills the firecracker process)
 		controller := vm.NewController(vmLocal, repo)
 		controller.Stop(ctx, input.Force)
 		// After stop, respawn a fresh firecracker process
-		if err := op.vmRespawnFirecracker(ctx, vmLocal, false, ""); err != nil {
+		if err := op.relaunchVM(ctx, state, false, ""); err != nil {
 			results = append(results, errs.OperationResult{
 				Status: "error", Code: "vm.reboot_failed",
 				Message:   fmt.Sprintf("reboot '%s': %v", vmLocal.Name, err),
@@ -1621,11 +1678,9 @@ func (c *VMCreateBuilder) buildFirecrackerConfig() *model.FirecrackerConfig {
 		fcConfig.CPUConfig = c.resolved.CPUConfig
 	}
 	// Vsock device config
-	if c.vsockCID > 0 && c.vsockUDSPath != "" {
-		fcConfig.Vsock = &model.VsockConfig{
-			GuestCID: c.vsockCID,
-			UDSPath:  c.vsockUDSPath,
-		}
+	if model.IsValidVsockGuestCID(c.vsockCID) {
+		cid := c.vsockCID
+		fcConfig.VsockGuestCID = &cid
 	}
 	return fcConfig
 }

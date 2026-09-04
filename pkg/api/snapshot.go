@@ -453,18 +453,16 @@ func (op *Operation) SnapshotRestore(
 
 		// --- Vsock setup for restored VM ---
 		// The agent binary, init scripts, and token are already on the
-		// rootfs (ext4 filesystem, preserved in snapshot). Firecracker
-		// auto-updates the guest CID on resume via vsock transport reset.
-		// We only need a fresh CID (the source VM still holds the old one)
-		// and the new UDS path for the restored VM's directory.
+		// rootfs (ext4 filesystem, preserved in snapshot). Snapshot load
+		// restores the original guest CID from vmstate; the transport reset
+		// applies the fixed host UDS override without changing that CID.
 		if snap.ExtraConfig != nil && snap.ExtraConfig.VsockPort > 0 && vmItem.RootfsPath != "" {
 			vsockUDSPath := filepath.Join(vmDir, infra.VMVsockSocketFilename)
 
-			// Use the snapshot's original CID — Firecracker preserves the guest
-			// CID from the vmstate (vsock_override only changes the UDS path).
-			// Allocating a new CID would cause a mismatch with what the host
-			// backend actually has. Different Firecracker processes have their
-			// own CID namespaces, so no conflict with the source VM.
+			// Persist the snapshot's original CID exactly. Selecting a new CID
+			// would disagree with the restored device, while a duplicate CID in
+			// the source VM is valid because each Firecracker process owns an
+			// independent CID namespace.
 			vsockCID := snap.ExtraConfig.VsockCID
 
 			if persistErr := op.Services.Vsock.PersistConfig(
@@ -482,12 +480,6 @@ func (op *Operation) SnapshotRestore(
 				)
 			}
 
-			vmItem.Vsock = &model.VsockConfigItem{
-				GuestCID: vsockCID,
-				UDSPath:  vsockUDSPath,
-				Port:     snap.ExtraConfig.VsockPort,
-				Token:    snap.ExtraConfig.VsockToken,
-			}
 		}
 
 		// Set file paths for the new VM's directory
@@ -503,25 +495,29 @@ func (op *Operation) SnapshotRestore(
 		_ = op.Repos.VM.Upsert(ctx, vmItem)
 
 		// Respawn Firecracker in snapshot mode (stays paused)
-		if err := op.vmRespawnFirecracker(ctx, vmItem, true, snapshotPaths.dir); err != nil {
+		relaunchState, relaunchErr := op.loadVMRelaunchState(ctx, vmItem)
+		if relaunchErr == nil {
+			relaunchErr = op.relaunchVM(ctx, relaunchState, true, snapshotPaths.dir)
+		}
+		if relaunchErr != nil {
 			// Don't rollback — VM record exists, just log error
 			slog.Error("Failed to respawn Firecracker for snapshot restore",
-				"vm", name, "error", err)
+				"vm", name, "error", relaunchErr)
 			// best-effort: mark as errored in DB so user can inspect
 			_ = op.Repos.VM.UpdateStatus(ctx, vmItem.ID, model.VMStatusError)
 			restoreErrors = append(restoreErrors,
-				fmt.Errorf("vm '%s': respawn failed: %w", name, err))
+				fmt.Errorf("vm '%s': respawn failed: %w", name, relaunchErr))
 			createdVMs = append(createdVMs, vmItem)
 			continue
 		}
 
 		// Re-read updated VM from DB to pick up PID/ProcessStartTime
 		// that vmRespawnFirecracker wrote via UpdateProcessInfo.
-		// NOTE: vmItem.Vsock is NOT stored in vm_instances table (no db tag),
-		// so we must save and restore it across the re-read.
+		// NOTE: Vsock is stored separately from vm_instances, so retain the
+		// typed relaunch copy across the VM row re-read.
 		updated, getErr := op.Repos.VM.Get(ctx, vmItem.ID)
 		if getErr == nil && updated != nil {
-			updated.Vsock = vmItem.Vsock
+			updated.Vsock = relaunchState.vsock
 			vmItem = updated
 		}
 
@@ -565,16 +561,12 @@ func (op *Operation) SnapshotRestore(
 			}
 
 			ctrl := vm.NewController(vmItem, op.Repos.VM)
-			vsockUDSPath := ""
-			if vmItem.Vsock != nil {
-				vsockUDSPath = vmItem.Vsock.UDSPath
-			}
 			if err := ctrl.SnapshotRestore(ctx, model.SnapshotRestoreConfig{
 				MemFile:          snapshotPaths.memory,
 				StateFile:        snapshotPaths.state,
 				Resume:           input.Resume,
 				NetworkOverrides: map[string]string{"eth0": vmItem.TapDevice},
-				VsockUDSPath:     vsockUDSPath,
+				VsockEnabled:     relaunchState.vsock != nil,
 				RootfsPath:       vmItem.RootfsPath,
 			}); err != nil {
 				if lockFile != nil {

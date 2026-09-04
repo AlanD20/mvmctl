@@ -654,6 +654,23 @@ func TestFirecrackerSpawner_Generate_fullConfig(t *testing.T) {
 	assert.False(t, got.MachineConfig.TrackDirtyPages)
 }
 
+// Rationale: normal launch input may select only a CID; the core VM package
+// owns the host endpoint beneath the already selected managed VM directory.
+func TestFirecrackerSpawnerGenerateDerivesFixedVsockEndpoint(t *testing.T) {
+	vmDir := t.TempDir()
+	cid := model.MinVsockGuestCID
+	spawner := vm.NewFirecrackerSpawner(&model.FirecrackerConfig{
+		VMDir: vmDir, VsockGuestCID: &cid,
+		GuestIP: "10.0.0.2", NetworkGateway: "10.0.0.1", NetworkNetmask: "255.255.255.0",
+	})
+
+	got, err := spawner.Generate()
+	require.NoError(t, err)
+	require.NotNil(t, got.Vsock)
+	assert.Equal(t, cid, got.Vsock.GuestCID)
+	assert.Equal(t, filepath.Join(vmDir, "vsock.sock"), got.Vsock.UDSPath)
+}
+
 // --- RemoveDrive ---
 // Rationale: Drive removal logic must correctly filter drive entries by
 // drive_id, persist the change to disk, and report whether removal occurred.

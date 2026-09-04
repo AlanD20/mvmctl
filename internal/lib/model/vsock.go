@@ -2,6 +2,18 @@ package model
 
 import "time"
 
+const (
+	// MinVsockGuestCID is the first CID not reserved by the Linux vsock specification.
+	MinVsockGuestCID = 3
+	// MaxVsockGuestCID is the largest CID representable by Firecracker's unsigned 32-bit field.
+	MaxVsockGuestCID uint64 = 1<<32 - 1
+)
+
+// IsValidVsockGuestCID reports whether cid is in Firecracker's supported guest CID range.
+func IsValidVsockGuestCID(cid int) bool {
+	return cid >= MinVsockGuestCID && uint64(cid) <= MaxVsockGuestCID
+}
+
 // VsockConfigItem is the DB record for per-VM vsock configuration.
 type VsockConfigItem struct {
 	ID               string     `json:"id"                           db:"id"`

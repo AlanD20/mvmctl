@@ -50,6 +50,6 @@ type SnapshotRestoreConfig struct {
 	StateFile        string
 	Resume           bool
 	NetworkOverrides map[string]string // iface_id → host_dev_name (TAP)
-	VsockUDSPath     string            // vsock_override UDS path (empty if none)
+	VsockEnabled     bool              // emit the fixed jail-visible vsock override
 	RootfsPath       string            // rootfs path for post-Load PATCH
 }

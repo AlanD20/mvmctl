@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"mvmctl/internal/infra"
 	"mvmctl/internal/lib/firecracker"
 	"mvmctl/internal/lib/model"
 	"mvmctl/internal/lib/system"
@@ -452,6 +453,7 @@ func (c *Controller) SnapshotRestore(ctx context.Context, cfg model.SnapshotRest
 
 	client := firecracker.NewClient(c.vm.APISocketPath)
 	defer client.Close()
+	vsockOverride := snapshotVsockOverride(cfg.VsockEnabled)
 
 	// Map the VM's TAP device to eth0 via network_overrides so Firecracker
 	// doesn't look for the original TAP name from the snapshot vmstate.
@@ -461,7 +463,7 @@ func (c *Controller) SnapshotRestore(ctx context.Context, cfg model.SnapshotRest
 		cfg.StateFile,
 		cfg.Resume,
 		cfg.NetworkOverrides,
-		cfg.VsockUDSPath,
+		vsockOverride,
 	); err != nil {
 		return err
 	}
@@ -485,6 +487,13 @@ func (c *Controller) SnapshotRestore(ctx context.Context, cfg model.SnapshotRest
 		c.vm.Status = model.VMStatusPaused
 	}
 	return nil
+}
+
+func snapshotVsockOverride(enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return jailedRuntimePath(infra.VMVsockSocketFilename)
 }
 
 // --- AttachVolume ---

@@ -217,6 +217,9 @@ func loadManifest(vmID, vmDir string) (*LaunchManifest, error) {
 			return nil, fmt.Errorf("invalid managed VM runtime path: %w", err)
 		}
 	}
+	if err := validateManifestVsockConfig(&manifest); err != nil {
+		return nil, err
+	}
 	for _, runtimePath := range []string{manifest.PIDPath, manifest.APISocket} {
 		if err := validateManagedFile(runtimePath, paths.vmDir, paths.uid, false); err != nil {
 			return nil, fmt.Errorf("invalid managed VM runtime path: %w", err)
@@ -244,6 +247,36 @@ func loadManifest(vmID, vmDir string) (*LaunchManifest, error) {
 		}
 	}
 	return &manifest, nil
+}
+
+func validateManifestVsockConfig(manifest *LaunchManifest) error {
+	if manifest.VsockGuestCID != nil && !model.IsValidVsockGuestCID(*manifest.VsockGuestCID) {
+		return fmt.Errorf("invalid managed VM vsock CID")
+	}
+	f, err := os.OpenFile(manifest.ConfigPath, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("open managed Firecracker configuration: %w", err)
+	}
+	defer f.Close()
+	var config model.FirecrackerVMConfig
+	decoder := json.NewDecoder(io.LimitReader(f, 1<<20))
+	if err := decoder.Decode(&config); err != nil {
+		return fmt.Errorf("decode managed Firecracker configuration: %w", err)
+	}
+	if (manifest.VsockGuestCID == nil) != (config.Vsock == nil) {
+		return fmt.Errorf("managed VM vsock presence mismatch")
+	}
+	if config.Vsock == nil {
+		return nil
+	}
+	if config.Vsock.GuestCID != *manifest.VsockGuestCID {
+		return fmt.Errorf("managed VM vsock CID mismatch")
+	}
+	wantPath := managedVMPersistentMountPath + "/" + infra.VMVsockSocketFilename
+	if config.Vsock.UDSPath != wantPath {
+		return fmt.Errorf("non-canonical managed VM vsock path")
+	}
+	return nil
 }
 
 func validateCanonicalManifestVMResources(manifest *LaunchManifest, vmDir string) error {
