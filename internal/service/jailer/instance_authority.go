@@ -713,6 +713,9 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 		state.recoveredProcesses = nil
 	}
 	if state.runtimeDirectory != nil {
+		if err := state.runtimeDirectory.RemoveFixedLeaves(cleanupCtx); err != nil {
+			return appendInstanceOperationError(nil, "remove cleanup managed VM runtime leaves", err)
+		}
 		if err := state.runtimeDirectory.Remove(cleanupCtx); err != nil {
 			return appendInstanceOperationError(nil, "remove cleanup managed VM runtime directory", err)
 		}
