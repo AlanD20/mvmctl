@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-04 (closed destination session)
+**Last Updated:** 2026-09-04 (canonical VM L3 and retained network authority)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -48,6 +48,94 @@ the veth pair, a local bridge, and the Firecracker TAP. Interface names, namespa
 the invoking UID and immutable resource IDs; callers cannot provide raw interface names, namespace paths, `ip` argv, or
 netns commands.
 
+#### Canonical L2 and L3 contract
+
+The per-VM topology is an L2 extension of the managed bridge, not a routed hop. A managed network accepts only a
+canonical masked IPv4 prefix wholly contained in RFC1918 space and no longer than `/30`. Its resolved gateway is a
+usable address in that prefix; when the public input omits it, the fixed default is the first usable address. A guest
+address is also usable, differs from the gateway, and is neither the network nor broadcast address. The resolved
+prefix, gateway, and guest address are immutable typed values before privileged composition.
+
+Only the host managed bridge and guest `eth0` carry data-plane addresses. The bridge owns `gateway/prefix` and the
+kernel-created main-table connected route for the exact prefix, with no gateway and no explicit route metric. The host
+veth, namespace veth, namespace-local bridge, and TAP are unnumbered bridge members and own no route. Namespace
+loopback is `127.0.0.1/8` with its kernel-created local and connected routes. Guest `eth0` owns `guest/prefix`, its
+connected route, and `0.0.0.0/0` through the resolved gateway; neither guest route has an explicit metric. The trusted
+launch graph derives the Firecracker kernel `ip=` value and, when enabled, cloud-init network configuration from those
+typed values. There is no per-VM host route or namespace route and no IPv6 authority in the v0.3.0 contract.
+
+Default guest MACs use the locally administered unicast prefix `02:fc` followed by the first four bytes of
+`SHA-256("mvmctl:guest-mac:v1\0" || decimal-owner-uid || "\0" || canonical-vm-id)`. The version tag and NUL framing
+are part of the algorithm. An explicitly requested EUI-48 MAC remains permitted only when it is canonical, unicast,
+and globally unique. The selected MAC is persisted; a collision fails closed and is never resolved by hidden salting.
+Existing fabric-link MACs are incidental kernel state rather than caller input or durable identity.
+
+The existing `mvb`, `mvh`, `mvn`, `mvl`, and `mvt` names remain deterministically derived from the authenticated owner,
+immutable network or VM ID, and fixed role. Root re-derives and compares them at every admission. No protocol, public
+input, persistent desired-state row, or recovery request may provide a raw interface name, namespace path, route,
+descriptor, netlink request, or `ip` argument.
+
+#### Retained activation authority
+
+Managed-network registration is a network-creation transaction under the ownership-index and per-network locks. VM
+launch does not re-enter registration after acquiring the VM lock. Instead, the real Jailer VM lease creates its
+opaque `authorityfs.TopologyHold`; topology preparation validates its owner/VM binding and atomically consumes it into
+one retained topology lease. After that consumption, every error returns the non-nil prepared or cleaning lease with
+the error. The hold and namespace pin remain owned through the VM lifetime, so the parent Jailer VM lock cannot release
+while live or retryable topology authority exists.
+
+All links are created and attached down. Firewall application then returns an opaque, non-zero
+`VerifiedVMEndpointLease` only after one complete generation is applied and freshly inspected in the pinned host
+network namespace. The lease has no public constructor or fields and is privately bound to boot and host-namespace
+identity, authenticated owner, network and VM IDs, canonical prefix and gateway, guest address and MAC, managed bridge,
+host veth, and the verified endpoint identity. It retains endpoint cleanup authority without retaining the host-global
+firewall lock for the VM lifetime.
+
+Topology activation consumes that exact firewall lease, compares its private binding with retained network/topology
+authority, and raises links in this order: namespace loopback, namespace-local bridge, TAP, namespace veth, then host
+veth. The host veth is the exposure gate and is always last. Each step rechecks exact namespace, ifindex, kind, alias,
+master, address, route, and `IFF_UP` through a fresh strict `NETLINK_ROUTE` connection opened against an explicitly
+retained namespace descriptor. Carrier and `IFF_RUNNING` are not activation requirements. Only after all link state is
+freshly verified may the pinned namespace handle pass to Jailer. Production route/link activation, the firewall-ready
+capability, its Jailer composition, and system QA remain pending.
+
+#### Durable topology and reconciliation
+
+The production managed-network record persists the authenticated owner, network ID, boot and host-namespace identity,
+canonical prefix and gateway, and exact observed managed-bridge evidence. One root-owned per-VM topology record beneath
+`/var/lib/mvmctl/networks/<uid>/topologies/<vm-id>.json` persists schema and lifecycle, owner/network/VM IDs, boot and
+launch generation, selected guest address and MAC, namespace mount evidence, exact observed link names/ifindices and
+namespace identities, network-record binding, stable firewall endpoint identity, and completed mutation markers.
+
+Names and namespace paths, loopback state, bridge and guest routes, link ordering, and expected unnumbered-link state
+remain derived. Observed names are persisted only as replacement evidence and must equal their derivation. A firewall
+generation digest may be audit evidence but is not retained endpoint or kernel ownership authority because later
+policy reconciliation legitimately replaces generations. User SQLite state remains desired configuration only.
+
+Lifecycle is `preparing_down -> activating -> active -> cleaning -> cleaned`. Root durably records `preparing_down`
+before the first kernel effect and advances exact progress after inspecting every success or error. Desired state after
+an error records committed progress and returns the non-nil target lease with that error; prior state remains retryable;
+replacement, extra L3 state on an mvm-owned fabric link, or ambiguous state enters `cleaning` and never raises the host
+veth or releases the blocked child.
+
+Activation rollback lowers and reverifies the host veth first, then lowers the other links in reverse order. Cleanup
+durably enters `cleaning`, removes exposure first, reacquires the network then firewall lock, removes and freshly
+verifies the endpoint generation, deletes exact links and the namespace in reverse dependency order, and releases the
+firewall endpoint lease, namespace pin, and `TopologyHold` only after effects are proven absent. Completed stages are
+skipped on retry. An effect or durability failure retains retryable cleaning authority; a terminal close failure after
+proven removal is cached and never retries a stale descriptor.
+
+Same-boot recovery reopens only the derived namespace target and admits the recorded inode and exact links/L3 state.
+Prior-boot recovery requires recorded processes and the ephemeral namespace target to be absent before retiring the
+record and performs no speculative host mutation. An active topology whose exact firewall endpoint is no longer
+verified immediately lowers the host veth and enters cleaning.
+
+This is a clean-break contract. `/31` and `/32` networks, prefixes not wholly private, network/broadcast/gateway address
+conflicts, non-canonical or multicast MACs, schema-1 identity-only records, mutable network-name-derived bridges,
+host-global legacy TAPs, and unowned routes or firewall state are not adopted, migrated, repaired, or silently deleted.
+Initialization or launch reports clean-install/recovery-required state before mutation. Operators must remove
+incompatible state through the documented administrator procedure and recreate it under v0.3.0.
+
 Namespace handles and locks are ephemeral root-owned state under `/run/mvmctl/authority/<uid>/`. VM-created sockets and
 display-only PID mirrors use the separate non-authoritative `/run/mvmctl/runtime/<uid>/<vm-id>/` tree defined by
 ADR-0016. Persistent minimal VM and network ownership records remain under `/var/lib/mvmctl/`. The user database stores
@@ -57,10 +145,11 @@ The privileged launch transaction must:
 
 1. authenticate the caller and consume the prepared release through `preparedRelease.registerLaunching`, durably
    recording `launching` while retaining the release and VM locks;
-2. acquire and retain the later network lease, then verify the root-owned VM and network records;
+2. consume the VM lock's `TopologyHold` into the topology lease, acquire the later network mutation lock, and verify
+   the root-owned VM and network records;
 3. create the namespace, namespace-local devices, host veth, and exact managed-bridge attachment with every link down;
-4. acquire and retain the firewall lease, apply the complete nftables generation and anti-spoofing rules in one atomic
-   transaction, then verify the exact generation through a fresh inspection;
+4. acquire and retain the firewall generation lock through activation, apply the complete nftables generation and
+   anti-spoofing rules in one atomic transaction, freshly inspect it, and mint the endpoint lease;
 5. only after firewall verification, bring the exact links up and reverify their identity and state;
 6. only after those stages and relay readiness, release the blocked child to Jailer with the pinned namespace handle;
    and
@@ -69,10 +158,13 @@ The privileged launch transaction must:
 
 The complete lock order is `release -> global index -> VM -> network -> firewall`. An operation may acquire a suffix or
 subset but must never acquire an earlier class while holding a later one. The schema-3 launch lease is the durable
-two-phase ownership claim and retains the VM, network, and firewall leases across application, activation, rollback,
-and cleanup without unlocking and reacquiring the VM. Network behavior remains in the network service and nftables
-behavior in the firewall service rather than the Jailer authority module. The firewall lock is host-global because one
-generation owns both reserved tables across all users and managed networks.
+two-phase ownership claim and retains the VM lock, topology lease, and endpoint cleanup authority across application,
+activation, rollback, and cleanup without unlocking and reacquiring the VM. The per-network and host-global firewall
+mutation locks remain held through their application/activation checkpoint, then release; active lifetime authority
+does not serialize unrelated VMs. Cleanup reacquires the network then firewall suffix under the still-retained VM lock.
+Network behavior remains in the network service and nftables behavior in the firewall service rather than the Jailer
+authority module. The firewall mutation lock is host-global because one generation owns both reserved tables across all
+users and managed networks.
 
 Failure before link activation leaves links down and the Jailer child blocked. Failure after verified activation first
 lowers and reverifies the exact links, then invokes the launch lease's typed abort while the same locks and lifecycle

@@ -820,9 +820,44 @@ host managed bridge
 ```
 
 Namespace paths and interface names are derived from UID and immutable IDs. The privileged transaction creates links
-down, retains VM/network/firewall leases, installs and freshly verifies the complete atomic nftables generation and
-anti-spoofing rules, then brings the exact links up and reverifies them. Only afterward may it pass the pinned namespace
-handle to the blocked Jailer child.
+down, retains VM/topology/endpoint authority, holds the network and firewall mutation locks through their ordered
+activation checkpoints, installs and freshly verifies the complete atomic nftables generation and anti-spoofing rules,
+then brings the exact links up and reverifies them. Only afterward may it pass the pinned namespace handle to the
+blocked Jailer child. The mutation locks then release; retained active authority does not serialize unrelated VMs.
+
+The canonical L3 contract is fixed for this release. Each managed network is one masked RFC1918 IPv4 prefix no longer
+than `/30`; the default gateway is its first usable address. Only the host managed bridge and guest `eth0` are
+numbered. The bridge owns `gateway/prefix` plus its kernel-created connected route. Guest `eth0` owns `guest/prefix`,
+its connected route, and the default route through the gateway. The veth pair, namespace-local bridge, and TAP remain
+unnumbered and have no routes; namespace loopback is `127.0.0.1/8`. No route has an explicit metric, and v0.3.0 gives
+this topology no IPv6 authority.
+
+New default guest MACs use `02:fc` followed by the first four bytes of the versioned, NUL-framed SHA-256 derivation from
+authenticated owner UID and canonical VM ID. Root persists the selected globally unique unicast MAC, canonical
+prefix/gateway/guest address, boot-scoped observed namespace/link evidence, stable firewall endpoint identity, and
+exact lifecycle progress. Names, namespace paths, loopback, routes, unnumbered-link expectations, and activation order
+remain derived and must match their persisted observation evidence; no caller supplies raw names, paths, routes,
+descriptors, netlink messages, or `ip` arguments.
+
+Network creation owns managed-network registration under the global ownership index then network lock. VM launch must
+not re-enter registration. It consumes the real Jailer VM lock's opaque `TopologyHold` into the topology lease, creates
+all topology down, and retains that hold and the namespace pin through active or cleaning state. Firewall application
+must mint an opaque endpoint lease only after fresh exact generation verification. Topology activation consumes that
+lease and raises loopback, local bridge, TAP, namespace veth, then host veth. The host veth is the last exposure gate;
+only its fully reverified activation permits Jailer `--netns` handoff.
+
+The durable per-VM lifecycle is `preparing_down -> activating -> active -> cleaning -> cleaned`. Every mutation is
+followed by exact descriptor-bound inspection, including after an error. Committed state returns its non-nil retained
+lease with the error; prior state remains retryable; replacement, extra L3 state, or ambiguity enters cleaning and
+cannot expose the link. Rollback and cleanup lower the host veth first, freshly remove and verify firewall endpoint
+state, then remove topology in reverse dependency order. Retry skips proven-complete stages and retains authority after
+effect or durability failure.
+
+This is a clean break: `/31` and `/32`, non-RFC1918, unusable/broadcast/conflicting addresses, invalid or duplicate
+MACs, schema-1 identity-only network records, mutable network-name-derived bridges, and legacy host-global or
+ambiguous network/firewall state are refused without adoption, repair, or automatic deletion. Production L3/link
+activation, the opaque verified firewall endpoint lease and kernel application, real `TopologyHold` transfer and
+Jailer composition, durable topology recovery, public lifecycle cutover, and Python system QA remain pending.
 
 The private topology-preparation foundation now derives owner/network-bound managed bridges and owner/VM-bound links,
 enforces the VM-before-network lock seam, records mutation-plus-error identities, and retains the network lock and

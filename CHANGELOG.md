@@ -323,9 +323,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TAP creation enters the retained VM namespace on a disposable locked thread, opens only fixed `/dev/net/tun`, and
   uses `TUNSETIFF` plus `TUNSETOWNER` with no group authority. It rechecks the exact owner, no-PI state, down state, and
   managed alias before `TUNSETPERSIST`, then verifies the persistent TAP through rtnetlink.
-- Neither the private topology service nor these effects has a production caller. VM-lock transfer, route/address and
-  link-up stages, firewall application, durable topology, Jailer handoff, public action, and live-kernel qualification
-  remain pending.
+- Fixed the pending production L3/authority contract: each per-VM namespace is an L2 extension of a canonical RFC1918
+  prefix no longer than `/30`; only the managed bridge and guest are numbered; the default gateway is the first usable
+  address; fabric links remain unnumbered; loopback is `127.0.0.1/8`; and routes have no explicit metric. New default
+  guest MACs are the deterministic versioned `02:fc` owner/VM derivation. Callers supply no raw names, paths, routes,
+  descriptors, netlink requests, or `ip` arguments.
+- The accepted activation contract consumes the real Jailer VM lock's opaque `TopologyHold`, requires a freshly
+  verified opaque firewall endpoint lease, and raises loopback, local bridge, TAP, namespace veth, then host veth.
+  Durable root state retains selected L3/MAC values, boot-scoped observed identities, endpoint identity, and exact
+  lifecycle progress while re-deriving names, paths, routes, and order. Cleanup lowers exposure first and retains
+  retryable authority until firewall and topology absence are proven.
+- This contract is documentation, not completed runtime behavior. Production route/address and link activation,
+  firewall endpoint capability/application, `TopologyHold` and Jailer composition, durable reconciliation, public
+  lifecycle cutover, and system QA remain pending. Incompatible `/31` or `/32`, non-private, schema-1, mutable-name,
+  host-global, or ambiguous legacy state will be refused as a clean break rather than adopted or automatically deleted.
 
 #### Typed LoopMount privilege foundations
 - Added named `ProvisionVM`, `InspectImage`, and `OptimizeImage` clients with fixed actions and closed VM/image request,
@@ -793,10 +804,10 @@ The following items are release blockers and are intentionally not described abo
   network, and firewall resource. Add complete interrupted-`launching` recovery and closed `running`, `stopped`,
   `crashed`, and `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and
   per-VM lock.
-- Transfer the Jailer VM-lock lease into the implemented root-owned managed-network registration foundation and add
-  persistent per-VM topology. Activate neither topology nor the production-composed VM-exec capacity authority through
-  user SQLite state; user state must not authorize host-global namespace, link, firewall, process, mount, cgroup, or
-  admission decisions.
+- Keep managed-network registration in network creation, then consume the real Jailer VM lock's `TopologyHold` into a
+  persistent per-VM topology lease during launch. Activate neither topology nor the production-composed VM-exec
+  capacity authority through user SQLite state; user state must not authorize host-global namespace, link, firewall,
+  process, mount, cgroup, or admission decisions.
 - Carry the managed-cache locator and base launch selection through the privileged protocol, bind the cache identity in
   the root-owned instance record, and create/consume the implemented descriptor lease inside the root process and
   private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
@@ -821,8 +832,9 @@ The following items are release blockers and are intentionally not described abo
   the public root
   `mvm run jailer` and `mvm run provision` entry points.
 - Compose the implemented private namespace and down-only link effects into the owner-bound VM lifecycle, add the
-  route/address and verified link-up stages, make one namespace mandatory per VM, pass its pinned handle to Jailer,
-  and integrate activation, rollback, reconciliation, and cleanup.
+  canonical route/address stages, require the freshly verified opaque firewall endpoint lease, raise host veth last,
+  make one namespace mandatory per VM, and pass its pinned handle to Jailer. Integrate retained activation, rollback,
+  reconciliation, and cleanup, then complete live L2, reboot/failure, clean-break, and leak-free system QA.
 - Use the implemented root-owned global firewall lock, durable committed/applying generation record replacement, and
   retained exact-host-netns snapshot factory only after resolving the pinned library's missing table/chain provenance,
   accepting the root/`CAP_NET_ADMIN` threat-model boundary, and composing qualified inspection. Then prove

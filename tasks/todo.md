@@ -618,17 +618,38 @@ pending
   reverifies the persistent TAP.
 - [ ] Compose the private service/effect in production. No current constructor call, Jailer handoff, public action, or
   live-kernel qualification exists.
-- [ ] Transfer the applicable Jailer VM-lock lease into network registration and serialize each topology mutation under
-  both VM and network authority. No current network record authorizes a VM topology.
+- [ ] Keep managed-network registration in network creation under the ownership-index then per-network locks. During
+  VM launch, validate and consume the real Jailer VM lease's opaque `TopologyHold` into the retained topology lease;
+  do not re-enter registration while holding the VM lock. No current network record authorizes a VM topology.
 - [ ] Acquire the network lock only after the applicable VM launching/active lease; the full order is
   `release -> global index -> VM -> network -> firewall`.
-- [ ] Derive namespace/interface names from UID and immutable IDs; accept no raw name, path, or `ip` argv.
+- [ ] Admit only a canonical masked RFC1918 IPv4 prefix no longer than `/30`; resolve an omitted gateway to the first
+  usable address; and reject network, broadcast, gateway/guest conflicts, and incompatible legacy state before effect.
+- [ ] Give `gateway/prefix` and its connected route only to the host managed bridge. Keep both veth endpoints, the
+  namespace-local bridge, and TAP unnumbered with no routes. Configure `127.0.0.1/8` on namespace loopback and derive
+  guest `eth0` address, connected route, and metric-free default route from typed intent.
+- [ ] Derive namespace/interface names from UID and immutable IDs; accept no raw name, path, route, descriptor, netlink
+  request, or `ip` argv. Default guest MACs are `02:fc` plus the first four bytes of the versioned NUL-framed owner/VM
+  SHA-256 derivation; persist the selected globally unique unicast MAC and reject collisions without hidden salting.
 - [x] Create namespace, local bridge, TAP, and veth pair with links down in the private topology service.
 - [x] Attach only the verified host veth to the verified managed bridge in the private topology service.
+- [ ] After atomic firewall application and fresh inspection, mint an opaque endpoint-bound verified lease with no
+  public constructor or fields. Consume it into topology activation and raise loopback, local bridge, TAP, namespace
+  veth, then host veth, freshly verifying exact descriptor-bound state after every step. Host veth is always last.
 - [ ] Pass the pinned root-owned namespace handle to Jailer with `--netns`.
-- [ ] Record namespace inode and exact device identities for verification/reconciliation.
-- [ ] Typed rollback and cleanup are idempotent and ownership-bound.
+- [ ] Persist root-owned `preparing_down -> activating -> active -> cleaning -> cleaned` per-VM topology progress,
+  canonical network/endpoint values, stable firewall endpoint identity, namespace inode, and exact observed device
+  identities. Re-derive names, paths, routes, loopback, unnumbered-link expectations, and ordering during admission.
+- [ ] Make rollback and cleanup retryable and ownership-bound: lower host veth first, remove and freshly verify firewall
+  endpoint state, delete exact topology in reverse dependency order, skip proven-complete stages, and retain the
+  firewall endpoint lease, namespace pin, and `TopologyHold` until complete cleanup.
+- [ ] Reconcile same-boot records only through re-opened derived namespace targets and exact evidence. Across boot,
+  require process and ephemeral namespace absence before retiring state; never adopt, repair, or automatically delete
+  schema-1, mutable-name, host-global, replaced, or ambiguous legacy state.
 - [ ] Python T2 proves every Firecracker process is in its own namespace and no namespace/link leaks after failure.
+- [ ] Python system QA also proves exact bridge/guest addressing and routes, unnumbered fabric links, deterministic MAC,
+  firewall-before-link activation, anti-spoofing, retry/cleanup convergence, reboot refusal/recovery, and clean-break
+  rejection before Task 9 is release-qualified.
 
 ### Task 10: Replace both firewall backends with one atomic nftables engine
 

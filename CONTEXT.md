@@ -468,6 +468,26 @@ there is no Jailer VM-lock transfer, route/address or link-up stage, firewall ap
 record, privileged action, public behavior, or live-kernel qualification. The `/run/mvmctl/runtime` tree remains
 uncomposed; only the separate private runtime-directory foundation described above can create and pin it.
 
+ADR-0017 now fixes the production L3 contract without claiming implementation. The per-VM namespace is an L2 extension
+of one managed bridge. A canonical RFC1918 IPv4 prefix is limited to `/30` or shorter; an omitted gateway resolves to
+the first usable address. Only the host managed bridge (`gateway/prefix`) and guest `eth0` (`guest/prefix`) are
+numbered. The veth pair, namespace-local bridge, and TAP are unnumbered and own no routes. Namespace loopback is
+`127.0.0.1/8`; the host bridge and guest receive only their kernel-connected routes, and the guest receives the default
+route through the resolved gateway, all without an explicit metric. Default guest MACs use `02:fc` plus four bytes of
+the versioned, NUL-framed owner/VM SHA-256 derivation; the selected globally unique unicast MAC is persisted.
+
+Production topology preparation must consume the opaque child `TopologyHold` from the real Jailer VM lock and retain
+it, the namespace pin, and later firewall endpoint authority through active or retryable cleaning state. After all
+links exist down, an opaque freshly verified firewall endpoint lease is the only activation capability. Activation
+raises loopback, local bridge, TAP, namespace veth, then host veth, with the host veth last as the exposure gate; every
+step uses exact descriptor-bound rtnetlink inspection. Root persists stable network/endpoint inputs, observed
+boot-scoped identities, and lifecycle progress, while re-deriving names, paths, routes, loopback, and ordering. Cleanup
+lowers the host veth first, freshly removes/verifies firewall state, then removes exact topology in reverse dependency
+order without releasing retained authority on retryable failure. Incompatible `/31` or `/32`, non-private, legacy
+host-global, mutable-name, schema-1, or ambiguous state is a clean-break refusal, never adoption or automatic deletion.
+Production route/link activation, firewall capability/application, Jailer launch composition, public lifecycle use,
+reconciliation implementation, and system QA remain pending.
+
 The private Jailer resource foundation now treats caller-owned `firecracker.json` as admission evidence only. It
 requires complete semantic equality with root-built typed intent, closes the source, and retains a root-owned `0444`
 sealed memfd. This is not active runtime protection yet: the typed privileged launch and descriptor-only mount consumer
