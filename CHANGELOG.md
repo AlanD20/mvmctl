@@ -69,9 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   transfers that lease through activation or abort and active cleanup, and refuses to commit `cleaned` until the exact
   empty runtime directory is removed and released. Cleanup first unlinks only the five compiled socket/PID basenames
   through the retained directory descriptor, treats missing leaves as already clean, never follows a symlink or removes
-  a directory, and leaves every unexpected name to block final removal. The directory is not yet mounted at
-  `/run/mvm/runtime`; socket/PID admission, runtime relocation, stale-runtime recovery, and public lifecycle composition
-  remain pending.
+  a directory, and leaves every unexpected name to block final removal. Fresh cleanup after a controller restart
+  reopens only that exact existing hierarchy through root-controlled parents; an absent hierarchy is already clean and
+  is never recreated, while unsafe state keeps the durable record in retryable `cleaning`. The directory is not yet
+  mounted at `/run/mvm/runtime`; socket/PID admission, runtime relocation, and public lifecycle composition remain
+  pending.
 
 #### Enforced VM resource envelopes
 - Jailed VMs now require cgroup v2 and launch with persisted, verified CPU, memory, swap, and PID limits; `mvm vm inspect` reports requested, observed, and current cgroup state.

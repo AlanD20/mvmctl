@@ -46,8 +46,10 @@ continue without silently deleting it.
   `/run/mvmctl/runtime/<uid>/<vm-id>` hierarchy, unlinks only the five compiled runtime leaves, and removes only the
   identity-checked empty VM directory, including effectful-unlink and parent-sync retry reconciliation. Durable launch
   authority retains it through activation or abort and cleanup, which refuses `cleaned` for a directory, mount, or
-  unexpected name. It is not mounted or publicly composed yet; no live production topology, public LoopMount backend
-  cutover, or firewall kernel effect exists.
+  unexpected name. Fresh cleanup reopens only the exact existing root-controlled hierarchy, creates or repairs no
+  recovery state, treats absence as clean, and retains retryable `cleaning` on unsafe state. It is not mounted or
+  publicly composed yet; no live production topology, public LoopMount backend cutover, or firewall kernel effect
+  exists.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional

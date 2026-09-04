@@ -1231,9 +1231,11 @@ remains attached for abort; activation and abort/active cleanup transfer the sam
 cleanup removes and releases the exact empty directory before replacing `cleaning` with `cleaned`. A non-empty runtime
 directory fails closed and leaves retryable cleanup authority. Cleanup first unlinks only the five compiled runtime
 basenames through the retained directory descriptor. `ENOENT` is idempotent, symlinks are not followed, directory or
-mount entries fail closed, and unexpected names remain untouched. The directory is not yet mounted at
-`/run/mvm/runtime` or wired to any privileged or public action. Fixed socket/PID-leaf admission, stale-runtime
-reopening, and production launch rollback remain pending.
+mount entries fail closed, and unexpected names remain untouched. Fresh cleanup after a controller restart reopens
+only this exact existing hierarchy through root-controlled parents and verifies the caller-owned VM leaf before
+retaining it. It never creates or repairs recovery state; absence is already clean, while unsafe state leaves the
+durable record in retryable `cleaning`. The directory is not yet mounted at `/run/mvm/runtime` or wired to any
+privileged or public action. Fixed socket/PID-leaf admission and production launch rollback remain pending.
 
 The Network family also creates one exact root-owned
 `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder while retaining its directory, leaf, and mount identity. The
@@ -1472,13 +1474,16 @@ only through pidfds, wait and reap before `cleaned`, treat `POLLIN`, `POLLHUP`, 
 preserve retryable cleanup authority, and avoid signaling across a boot change. Fresh cleanup recovery is bounded to
 the recorded Firecracker and optional relay and requires complete active identity plus executable digests before
 same-boot cleanup authority is returned. Process, runtime-directory, prepared-destination, destination, active,
-cleanup, and recovery capabilities are pointer-shared, close once, and cache their first cleanup result.
+cleanup, and recovery capabilities are pointer-shared, close once, and cache their first cleanup result. Fresh cleanup
+also reopens the exact existing root-controlled runtime hierarchy without creating or repairing it, then transfers the
+pinned VM directory into the same fixed-leaf and empty-directory cleanup path. Missing state is already clean; unsafe
+state preserves the `cleaning` record and retained VM lock for retry.
 
 The schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and
 compared the trusted-store inode with Jailer's copy. The implemented process graph remains private and uncomposed:
 production child spawning and launch activation, network/firewall acquisition, final live topology/cgroup verification,
-stale-tree and mount/output cleanup, stale-runtime reopening, status observation and complete reconciliation,
-privileged/public wiring, and live qualification remain pending.
+stale-tree and mount/output cleanup, status observation and complete reconciliation, privileged/public wiring, and live
+qualification remain pending.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
 that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain
