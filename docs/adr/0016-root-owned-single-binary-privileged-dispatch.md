@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-09-01 (retained VM-exec authority-sidecar exception)
+**Last Updated:** 2026-09-04 (registered retained VM-exec authority-sidecar)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
@@ -154,7 +154,7 @@ failure reports `process_started: false, outcome_unknown: false`; every post-sta
 
 ### Retained VM-exec authority-sidecar exception
 
-The accepted but not yet implemented `jailer-vm-exec-session` action is the sole leased-lifetime exception to the
+The implemented and registered `jailer-vm-exec-session` action is the sole leased-lifetime exception to the
 ordinary request/response rule above. It still uses the exact system binary, marker, action switch, sudo invocation,
 and fd-0 AF_UNIX control socket. It handles one relay lease and exits; it is not a helper binary, daemon, generic
 privileged channel, or second protocol listener. File descriptor 0 remains control-only. No `ExtraFiles`, `sudo -C`,
@@ -184,9 +184,18 @@ reverse cleanup before the child exits. The capacity record's four-second termin
 execution. A malformed or missing final outcome after process start remains outcome-unknown, and no retained authority
 is inferred from process exit alone.
 
-This exception preserves the ordinary transport unchanged for every other action. Its exact FD grammar, peer-binding
-authority, lifecycle, and client/server protocol must be implemented and tested before the central dispatcher
-registers `jailer-vm-exec-session`.
+This exception preserves the ordinary transport unchanged for every other action. Production dispatch constructs the
+retained server from the exact active-pair, global-capacity, Firecracker-peer, and absolute-stop authorities and
+registers only `jailer-vm-exec-session`. The caller UID/GID passed to that server derives exclusively from the
+authenticated control peer identity and never from request fields. Each source or destination descriptor remains an
+opaque handler-owned capability, pinned and immutable through its sole synchronous binder call.
+
+Authenticated failures that occur after control-channel structural admission but before action dispatch use the
+action-specific `MVMXSES1` terminal failure, not ordinary `MVMRES01`, and do not drain request input. After dispatch,
+the retained handler is the sole response and cleanup owner: it shuts down destination then source, releases the stop,
+then releases destination/source peer pidfds before capacity, followed by process capabilities, active leases, and
+pair roots. The registered action still has no API-owned relay listener/consumer; it receives no policy or relay
+payload, and registration alone does not create a positive VM-to-VM path.
 
 Receiver integration landed in two audit-friendly increments before any release action is registered. The first
 increment admits only fd 0, sets and verifies close-on-exec, validates blocking `AF_UNIX`/`SOCK_STREAM` and
@@ -337,6 +346,7 @@ methods; there is no generic privileged-operation interface.
 | Bridge/TAP lifecycle | Create, configure, or remove an mvmctl-owned bridge or TAP | Invoking UID, network/VM identity, validated interface/address model |
 | Neighbor flush | Flush neighbors only for an mvmctl-owned bridge | Invoking UID and registered network identity |
 | Firewall inspect/reconcile/teardown | Render and atomically apply the complete typed mvmctl ruleset | Invoking UID, typed firewall models, fixed mvmctl tables/chains/comments |
+| Retained VM-exec session | Retain and peer-bind one exact source/destination connection pair under capacity and absolute-stop authority | Authenticated caller UID/GID, exact active VM identities and launch generations, pidfd-bound Firecracker peers |
 
 Cgroup preparation and removal are part of VM launch/abort/cleanup rather than a public generic cgroup operation. Module
 loading and sysctl mutation are administrator-owned host initialization steps, not operator dispatcher capabilities.

@@ -487,7 +487,8 @@ transports, and agent shutdown releases all pending/bound sessions and pins. The
 `mvm-agent remote --user <non-root> <destination> -- <command>`; it preserves binary output and exposes only generic
 local errors.
 
-The private root-owned VM-exec capacity substrate is also implemented but inert. Strict schema-1 records live at
+The root-owned VM-exec capacity substrate is implemented and production-composed only behind the retained authority
+sidecar. Strict schema-1 records live at
 `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json`; they bind the non-root owner, exact source and destination
 VM IDs and launch generations, host boot ID, and creation/expiration times from `CLOCK_BOOTTIME`. The managed
 directories are exact `root:root` mode `0700`, records are one-link exact `root:root` mode `0600`, and the never-unlinked
@@ -500,7 +501,8 @@ evidence.
 Each reservation fixes its relay-stop deadline at creation plus `vmexecwire.MaxExecutionDuration`; setup and suspend
 consume that `CLOCK_BOOTTIME` budget. Its record expires only after a separate four-second terminal/cleanup grace.
 
-The private active VM-exec pair authority is implemented and inert. It opens the instance authority once, takes the
+The active VM-exec pair authority is implemented and production-composed behind that same sidecar. It opens the
+instance authority once, takes the
 global index once, requires two distinct same-owner `active` records, opens each VM authority separately, and acquires
 the two VM locks in canonical lexical ID order. After releasing the index, it retains the shared roots separately from
 both active leases, reopens both recorded process sets into pidfds, and proves both complete active identities plus
@@ -510,19 +512,19 @@ launch-generation, reservation, boot, and relay-stop admission. Its close-once c
 peer pidfds, capacity, destination/source process capabilities, active leases in descending lexical order, and the pair
 roots last without reacquiring a lock.
 
-Its private production constructor fixes a host-global ceiling of eight sessions. Each retained source and destination
+Its production constructor fixes a host-global ceiling of eight sessions. Each retained source and destination
 connection can be bound to the corresponding admitted Firecracker through `SO_PEERCRED` and `SO_PEERPIDFD`, exact
 PID/start identity, matching effective UID/GID, complete active-process identity, and retained-process proof. After
 both expensive identity proofs, readiness performs a bounded final locator/liveness sweep of both peer pidfds and both
-retained process sets, followed by one final host-boot and relay-budget check. The authority and its fixed ceiling have
-no production caller and remain unreachable from privileged dispatch.
+retained process sets, followed by one final host-boot and relay-budget check.
 
-A private absolute `CLOCK_BOOTTIME` stop primitive is also implemented and inert. It arms a close-on-exec,
-nonblocking `timerfd` with `TFD_TIMER_ABSTIME`, waits through bounded polling with cancellation, rejects a concurrent
-second waiter, caches the completed wait result for later calls, and releases once while retaining cleanup-error
-evidence. The retained sidecar does not yet construct or enforce it.
+The absolute `CLOCK_BOOTTIME` stop is also production-composed. It arms a close-on-exec, nonblocking `timerfd` with
+`TFD_TIMER_ABSTIME` and waits through bounded polling with cancellation. Exactly one concurrent waiter is allowed; a
+simultaneous second waiter is rejected rather than sharing the in-flight wait, while calls after completion receive the
+cached result. Release runs once while retaining cleanup-error evidence. The retained handler starts this stop from the
+capacity admission's absolute deadline and owns connection shutdown plus authority cleanup when it completes.
 
-The exact-one VM-exec descriptor transport and structural-admission foundation is also implemented and inert. Its
+The exact-one VM-exec descriptor transport and structural admission are used by the registered sidecar action. Its
 single-use sender attaches one duplicate through one `SCM_RIGHTS` message on the first non-NUL frame byte, sends the
 ordinary remainder without ancillary data through cancellation-bounded nonblocking I/O, and closes the duplicate
 exactly once. The receiver uses `recvmsg(MSG_CMSG_CLOEXEC)` for every read, takes cleanup ownership of every installed
@@ -532,28 +534,34 @@ process, Firecracker, VM, guest port, or policy identity. Its private phase-spec
 only after the matching closed frame is decoded and exposes only a borrowed connection capability to the next private
 effect.
 
-The retained sidecar wire, process transport, named Jailer client, and unregistered root handler lifecycle are now
-implemented and inert. The fixed `jailer-vm-exec-session` protocol admits only the ordered `open_source`,
+The retained sidecar wire, process transport, named Jailer client, and root handler lifecycle are production-composed,
+and the central dispatcher registers exactly `jailer-vm-exec-session`. The fixed protocol admits only the ordered
+`open_source`,
 `source_retained`, `bind_destination`, `ready`, `release`, and `released` phases or one bounded terminal failure. The
 process transport starts one copy of the existing system binary through the existing privileged invocation and an fd-0
 AF_UNIX control socket, transfers one owned connection duplicate in each setup phase, and bounds cancellation, process
 group termination, waiting, and cleanup. The Jailer client duplicates each caller-owned `net.UnixConn`, so the caller
 retains its original source and destination connections.
 
-The private handler structurally retains the source before its acknowledgement, retains and binds the destination
-before ready, and performs close-once cancellation-detached cleanup on explicit release, control EOF, setup failure, or
-response failure. It reports `released` only after explicit-release cleanup succeeds. The handler accepts no path,
-command, token, target user, policy material, payload, or raw descriptor accessor. It is deliberately absent from the
-privileged dispatcher, whose unknown-action path rejects the fixed action without reading its request bytes.
+The handler structurally retains the source before its acknowledgement, retains and binds the destination before ready,
+and performs close-once cancellation-detached cleanup on explicit release, control EOF, setup failure, stop completion,
+or response failure. It reports `released` only after explicit-release cleanup succeeds. The handler accepts no path,
+command, token, target user, policy material, payload, or raw descriptor accessor. Its sole synchronous binder bridge
+keeps each handler-owned descriptor opaque, live, and immutable under its owner lock while Jailer proves the peer; the
+descriptor is never exposed through the public capability.
 
-The peer-bound pair/capacity authority has a private production constructor but no production caller. No production
-effect composes it with the retained descriptors, constructs and enforces the absolute `CLOCK_BOOTTIME` stop, or
-registers the sidecar action.
+Production dispatch constructs the pair/capacity/peer/absolute-stop server and places it behind this retained handler.
+The caller UID/GID passed to Jailer derives only from the authenticated control peer identity and never from request
+fields. Authenticated identity, peer, environment, executable, or authorization failures before action dispatch emit
+one bounded `MVMXSES1` failure without draining request input. Once dispatched, the handler remains the sole owner of
+action-specific responses and destination/source connection cleanup; its server releases the stop first, then the
+destination/source peer pidfds, capacity, destination/source process capabilities, descending lexical active leases,
+and pair roots.
 
-These components still do not form a positive VM-to-VM path. No API-owned relay listener opens a root-authority-admitted
-source FD, invokes the retained sidecar client, binds either transferred descriptor to exact process/VM authority,
-reads its request, enforces the exact runtime exec policy, constructs a destination request, composes the production
-peer-bound authority and stop with the retained sidecar lifecycle, or writes a command-redacted audit record.
+These components still do not form a positive VM-to-VM path. No API-owned relay listener/consumer opens a source
+session, invokes the registered retained-sidecar client, reads and forwards relay payload, resolves and enforces the
+exact runtime directional exec policy, constructs the authorized destination request, or writes a command-redacted
+audit record.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
 Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,

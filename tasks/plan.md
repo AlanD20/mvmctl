@@ -89,7 +89,7 @@ continue without silently deleting it.
   cleanup are bounded. The outer source command may be root or non-root; the destination target remains non-root. This
   is not an API relay, root source-VM admission, runtime policy/audit path, capacity consumer, or per-command cgroup
   guarantee.
-- Private inert Task 15 VM-exec capacity authority with strict schema-1 root-owned reservations at
+- Root-owned Task 15 VM-exec capacity authority with strict schema-1 reservations at
   `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` and a never-unlinked global
   `/run/mvmctl/authority/capacity.lock`. Exact mode-`0700` managed directories and one-link mode-`0600` records bind the
   non-root owner, exact source/destination VM IDs and launch generations, host boot ID, and `CLOCK_BOOTTIME` lifecycle.
@@ -97,7 +97,7 @@ continue without silently deleting it.
   or ambiguous state fails closed; creation, deletion, pruning, durability uncertainty, and cleanup failures preserve
   explicit evidence. The future relay-stop deadline is creation plus `vmexecwire.MaxExecutionDuration`, while record
   expiration adds a separate four-second terminal/cleanup grace.
-- Private inert Task 15 active-pair authority that takes the instance index once, requires two distinct same-owner
+- Task 15 active-pair authority that takes the instance index once, requires two distinct same-owner
   `active` records, opens their authorities separately, and locks canonical VM IDs lexically. It retains pair roots,
   both active leases, and both exact pidfd-bound process authorities; proves both complete identities and final
   liveness; reserves global capacity; then rechecks boot, both identities, and both locators before exposing an
@@ -107,23 +107,24 @@ continue without silently deleting it.
   host-global capacity ceiling at eight. Exact source and destination binding obtains same-socket `SO_PEERCRED` and
   `SO_PEERPIDFD`, immediately owns the close-on-exec pidfd, proves the record's PID/effective UID/GID, complete active
   identity, retained process identity, and liveness, then finishes with a both-peer/both-process locator/liveness sweep
-  before the final boot/budget check. No production caller or relay uses it.
-- Private inert absolute `CLOCK_BOOTTIME` relay-stop primitive. An absolute close-on-exec, nonblocking `timerfd`,
-  bounded polling, cancellation, shared close-once lifecycle, and cleanup-error evidence are implemented, but the
-  retained sidecar does not yet construct or enforce it.
-- Private inert exact-one VM-exec descriptor transport and structural-admission foundation. Its single-use sender puts
+  before the final boot/budget check. The production retained-session server uses it; no API relay calls that server.
+- Production-composed absolute `CLOCK_BOOTTIME` relay stop. Its absolute close-on-exec, nonblocking `timerfd` uses
+  bounded polling, cancellation, one in-flight waiter with cached completed results, shared close-once lifecycle, and
+  cleanup-error evidence. The retained handler closes both connections and releases authority when it completes.
+- Exact-one VM-exec descriptor transport and structural-admission foundation. Its single-use sender puts
   one duplicated connection in one `SCM_RIGHTS` message on the first non-NUL frame byte, writes the remainder without
   ancillary data through cancellation-bounded nonblocking I/O, and closes the duplicate exactly once. The receiver
   uses `MSG_CMSG_CLOEXEC` on every read, owns every installed descriptor before validation, rejects missing, extra,
   unknown, late, or truncated control data, and retains only one close-on-exec connected, non-listening `AF_UNIX`
   `SOCK_STREAM`. Phase-specific private receivers retain a descriptor only after exact frame decoding and expose only a
   borrowed connection capability. This proves no peer process, Firecracker, VM, or policy identity.
-- Private inert retained VM-exec sidecar foundation. The closed `jailer-vm-exec-session` wire, fixed-phase process
+- Registered retained VM-exec authority sidecar. The closed `jailer-vm-exec-session` wire, fixed-phase process
   transport, named Jailer client, and privileged handler lifecycle transfer owned source and destination duplicates in
   order, retain caller originals, bound cancellation/reaping, and clean up once on explicit release, EOF, setup, or
-  response failure. The handler is deliberately absent from privileged dispatch and has no production effect,
-  composition of the separately implemented peer-bound authority or boottime stop, policy/audit payload, or relay
-  caller.
+  response failure. Production dispatch constructs the pair/capacity/peer/absolute-stop server behind the exact action
+  handler. The authenticated control peer is the sole caller UID/GID source, descriptors remain opaque and pinned
+  during their sole synchronous binders, pre-dispatch action failures use `MVMXSES1` without draining input, and the
+  handler owns responses and cleanup. It has no policy/audit payload or API relay caller.
 - Private topology preparation that gates exported authority on the exact committed state, retains the network lock and
   namespace pin through rollback, and preserves a classified lock-acquisition `DomainError` plus cleanup state.
 - Private root-pinned network-namespace authority and effect. The authority retains the exact
@@ -202,7 +203,7 @@ topology, public `mvm run jailer` /
 | VM ownership/lifecycle records | `/var/lib/mvmctl/instances/<uid>` | Root-owned persistent |
 | Managed-network owner/bridge identity records; future VM topology | `/var/lib/mvmctl/networks/<uid>` | Root-owned persistent; current schema 1 is not VM-topology authority |
 | Firewall generation record | `/var/lib/mvmctl/firewall/generation.json` | Root-owned persistent; exact committed/applying kernel authority |
-| VM-exec capacity reservations | `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` | Root-owned persistent schema 1; private and inert |
+| VM-exec capacity reservations | `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` | Root-owned persistent schema 1; consumed only by the exact retained sidecar |
 | Locks and launch handshakes | `/run/mvmctl/authority/<uid>` | Root-owned `0700` ephemeral; no persistent mount-namespace handles |
 | LoopMount locks | Per-UID authority `loopmount/` | Root-owned `0600`; exclusive; never unlinked during the boot |
 | Global firewall lock | `/run/mvmctl/authority/firewall.lock` | Root-owned `0600`, ephemeral, and never unlinked |
@@ -846,13 +847,12 @@ The public policy families are:
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
-non-root process side, isolated process-bound source session, and private Task 15 root-owned capacity, active-pair,
-exact Firecracker peer-binding, fixed-ceiling, absolute-boottime-stop, exact-one structural descriptor, and
-unregistered retained-sidecar foundations are implemented. The API-owned relay listener, production composition and
-registration of the sidecar, absolute-stop enforcement, runtime policy resolution/enforcement/audit, Python system
-qualification, and the traffic family's replacement public surface remain pending. No production host path opens a
-source session, invokes the sidecar or pair authority, consumes a capacity reservation, or constructs an authorized
-destination request, so VM-to-VM execution is unavailable.
+non-root process side, isolated process-bound source session, and Task 15 root-owned capacity, active-pair, exact
+Firecracker peer-binding, fixed-ceiling, absolute-boottime-stop, exact-one structural descriptor, and registered
+production-composed retained sidecar are implemented. The API-owned relay listener/consumer, runtime policy
+resolution/enforcement, redacted audit, relay payload forwarding, Python system qualification, and the traffic
+family's replacement public surface remain pending. No production host path opens a source session, invokes the
+sidecar from the API, or constructs an authorized destination request, so VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 

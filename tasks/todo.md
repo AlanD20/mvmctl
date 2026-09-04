@@ -662,12 +662,12 @@ pending
 ### Task 12: Replace remote-exec flags with typed exec policies
 
 **Owner:** engineer
-**Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, and the
-isolated process-bound source-session, private root-owned capacity/active-pair authorities, and inert exact-one
-structural descriptor transport plus exact Firecracker peer binding, a fixed global ceiling, an absolute-boottime stop
-primitive, and the unregistered retained-sidecar lifecycle are implemented; API-owned relay, production sidecar
-composition/registration and stop enforcement, runtime policy/audit, and Python qualification remain pending, so
-VM-to-VM execution remains fail-closed
+**Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, the
+isolated process-bound source-session, and the registered production-composed root authority sidecar with exact-one
+descriptor transport, active-pair/capacity authority, Firecracker peer binding, fixed global ceiling, and absolute stop
+are implemented. The API-owned relay listener/consumer, runtime directional-policy resolution/enforcement, relay
+payload forwarding, redacted audit, positive VM-to-VM path, and Python qualification remain pending, so VM-to-VM
+execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -708,10 +708,13 @@ VM-to-VM execution remains fail-closed
   VM-to-host execution, missing/reverse policy, foreign owner, stale target, and every identity mismatch before the
   host constructs the destination request.
 - [x] Select a fixed host-global ceiling of eight and add private exact Firecracker peer binding for both retained
-  descriptors plus an absolute `CLOCK_BOOTTIME` stop primitive. Keep all three unreachable from production dispatch.
-- [ ] Enforce the same wire limits at the relay, compose Task 15's implemented private peer-bound
-  active-pair/capacity authority and absolute stop through the retained sidecar, register only the exact action, and add
-  command-redacted source/destination/timing/result audit records.
+  descriptors plus an absolute `CLOCK_BOOTTIME` stop primitive.
+- [x] Compose Task 15's peer-bound active-pair/capacity authority and absolute stop through the retained handler and
+  register only `jailer-vm-exec-session`. Derive caller UID/GID only from the authenticated control peer, keep both
+  descriptors opaque and pinned during their sole synchronous binders, use `MVMXSES1` for pre-dispatch failures without
+  draining request input, and keep response/cleanup ownership in the handler.
+- [ ] Enforce the same wire limits in the API-owned relay, forward the bounded relay payload, and add command-redacted
+  source/destination/timing/result audit records.
 - [ ] Python T2 proves same-network, cross-network, and no-IP-network exec behavior plus all denials and limits.
 
 ## Phase 3: Finish the privilege boundary and lifecycle
@@ -844,10 +847,10 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 ### Task 15: Complete reconciliation, admission, and lifecycle parity
 
 **Owner:** engineer
-**Status:** Private inert VM-exec capacity reservation, active-pair, exact-one structural descriptor, and unregistered
-retained-sidecar lifecycle foundations plus exact Firecracker peer binding, the fixed global ceiling, and the absolute
-boottime-stop primitive are implemented; sidecar composition/enforcement, action registration, and all reconciliation
-and lifecycle work remain pending
+**Status:** The registered retained VM-exec sidecar now production-composes the root-owned capacity reservation,
+active-pair, exact-one structural descriptor, exact Firecracker peer binding, fixed global ceiling, and absolute-stop
+foundations. The API relay/policy/audit/positive path, Python qualification, and all remaining reconciliation and
+lifecycle work remain pending
 **Dependencies:** Tasks 8-14
 
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,
@@ -866,39 +869,37 @@ and lifecycle work remain pending
   authority. Resume `cleaning` idempotently.
 - [ ] Benchmark 1,000 authority records in L1 and enforce the reviewed regression budget without one goroutine, process,
   or control connection per VM.
-- [x] Add the private inert root-owned global VM-exec capacity reservation foundation. Store strict schema-1 records at
+- [x] Add the root-owned global VM-exec capacity reservation foundation. Store strict schema-1 records at
   `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` under exact `root:root` mode-`0700` managed directories
   with one-link exact `root:root` mode-`0600` records. Bind non-root owner, exact source/destination VM IDs and launch
   generations, host boot ID, and `CLOCK_BOOTTIME` creation/expiration. Hold the never-unlinked
   `/run/mvmctl/authority/capacity.lock` across the complete stale-prune/read/check/no-replace-rename transaction so
   separate processes and users serialize globally. Fail closed on corrupt or ambiguous state, preserve exact
   creation/deletion/pruning/durability/cleanup evidence, set the relay-stop time to
-  `vmexecwire.MaxExecutionDuration`, and retain a separate four-second terminal/cleanup grace. This foundation is
-  private and has no production caller.
-- [x] Add the private inert active VM-exec pair authority. Acquire the instance index once, admit two distinct
+  `vmexecwire.MaxExecutionDuration`, and retain a separate four-second terminal/cleanup grace. Only the registered
+  retained sidecar consumes this production authority; no API relay calls it yet.
+- [x] Add the active VM-exec pair authority. Acquire the instance index once, admit two distinct
   same-owner `active` records, open their authorities separately, lock canonical VM IDs lexically, and retain the pair
   roots, both active leases, and both exact pidfd-bound process authorities. Prove both complete identities and final
   liveness, reserve root-global capacity, then recheck boot, both identities, and both locators before exposing an
   immutable owner/source/destination launch-generation admission. Release exactly once in reverse authority order.
-  Its private production constructor and exact peer-binding operations remain without a production caller.
-- [x] Add the private inert exact-one descriptor transport and structural admission foundation. Attach one duplicate
+  Its production constructor and exact peer-binding operations are consumed only by the registered retained sidecar.
+- [x] Add the exact-one descriptor transport and structural admission foundation. Attach one duplicate
   through one `SCM_RIGHTS` message on the first non-NUL frame byte; use cancellation-bounded nonblocking ordinary
   remainder I/O; receive every byte through `recvmsg(MSG_CMSG_CLOEXEC)`; own all installed descriptors before
   validation; reject missing, extra, unknown, late, or truncated ancillary data; and retain only one close-on-exec
-  connected, non-listening `AF_UNIX` `SOCK_STREAM`. Keep it unregistered and without a transfer method, peer/VM
-  identity claim, capacity effect, or production caller.
+  connected, non-listening `AF_UNIX` `SOCK_STREAM`. Keep it without a transfer method or structural peer/VM identity
+  claim; the exact registered handler alone consumes its retained borrowed capability.
 - [x] Add the action-specific closed wire, process transport, named Jailer client, phase-specific descriptor receivers,
   and private privileged handler lifecycle. Transfer source and destination duplicates only with their exact ordered
   frames, keep caller originals open, expose only borrowed connection capabilities to private effects, report release
   only after successful cleanup, and clean up once on EOF, cancellation, setup, response, and explicit-release paths.
-  Keep the fixed action unregistered and the handler without composition of the separately implemented peer identity,
-  pair/capacity, stop, policy, or relay effects.
+  Keep the handler free of policy, relay payload, target-user, token, command, path, and generic descriptor effects.
 - [x] Bind retained source/destination descriptors in the private authority to exact Firecracker process/VM identity
   with same-socket `SO_PEERCRED`/`SO_PEERPIDFD`, close-on-exec pidfd ownership, exact PID/effective UID/GID and locator
   matching, complete active/retained process identity, and a final both-peer/both-process liveness sweep. Fix the
-  host-global production ceiling at eight and add an absolute `CLOCK_BOOTTIME` timerfd stop primitive. Keep all of
-  these boundaries private and unregistered.
-- [ ] Compose the peer-bound pair/capacity authority and absolute stop into the retained handler, close both retained
+  host-global production ceiling at eight and add an absolute `CLOCK_BOOTTIME` timerfd stop primitive.
+- [x] Compose the peer-bound pair/capacity authority and absolute stop into the retained handler, close both retained
   connections on expiry, release within the separate grace, and register only the exact sidecar action. Reserve before
   relay effects and never substitute SQLite status, a guest-supplied ID, a socket path, or a process-local semaphore.
 - [ ] Make create/start/stop/remove/reboot/snapshot/restore/volume paths transactionally abortable and retryable.

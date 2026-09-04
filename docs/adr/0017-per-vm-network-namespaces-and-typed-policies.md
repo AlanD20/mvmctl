@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-04 (inert peer-bound VM-exec authority and boottime-stop foundation)
+**Last Updated:** 2026-09-04 (registered peer-bound VM-exec authority sidecar)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -361,10 +361,11 @@ This slice also removes the generic `OnHostFrame`, shared `activeConn`, legacy `
 `internal/vsockhandler` package. The local `mvm-agent remote --user <non-root> <destination> -- <command>` client emits
 a strict source request, preserves binary output, requires terminal plus physical EOF, and redacts local failures.
 
-The source and destination foundations remain dormant for positive VM-to-VM use. An API-owned relay listener, root
-source-connection-FD admission, production composition of the private active-pair/capacity authority, runtime policy
-resolution/enforcement, redacted audit, and positive Python L2 qualification remain pending. No production path opens
-a `SourceSession` or constructs an authorized destination request, so VM-to-VM execution is still unavailable.
+At the end of the fifth slice, the source and destination foundations remained dormant for positive VM-to-VM use. The
+API-owned relay listener, root source-connection-FD admission, production composition of the private
+active-pair/capacity authority, runtime policy resolution/enforcement, redacted audit, and positive Python L2
+qualification were still pending. No production path opened a `SourceSession` or constructed an authorized destination
+request at that slice.
 
 The sixth slice removes the VM-wide trust flag without attempting compatibility. Fresh databases end at schema version
 6 with no `remote_exec` column. The VM model, configuration default, create input/result, repository persistence, CLI
@@ -405,20 +406,19 @@ relay-stop deadline.
 
 The pair lease is close-once and cleans up without reacquiring a lock: destination/source peer pidfds first, capacity
 next, destination/source process capabilities, active leases in descending lexical order, and the retained pair roots
-last. Admission or cleanup failures preserve the primary classified error and bounded cleanup evidence. The capacity
-and pair authorities remain private and inert: a private production constructor fixes the host-global ceiling at
-eight, but no production caller invokes it and there is no privileged dispatcher/API relay, policy enforcement, audit
-consumer, or positive VM-to-VM path.
+last. Admission or cleanup failures preserve the primary classified error and bounded cleanup evidence. At the end of
+the eighth slice, the capacity and pair authorities remained private and inert behind a production constructor that
+fixed the host-global ceiling at eight; no production caller invoked it yet.
 
-The ninth slice adds one retained authority sidecar without moving the relay into root. Its structural foundation is
-implemented but deliberately unregistered. The exact privileged action is `jailer-vm-exec-session`; the process
+The ninth slice adds one retained authority sidecar without moving the relay into root. Its structural foundation was
+initially implemented without registration. The exact privileged action is `jailer-vm-exec-session`; the process
 transport starts one root child through the existing system binary, sudo invocation, and fd-0 AF_UNIX control socket.
 The final API composition may start it only after `pkg/api` has authenticated and read the strict source request,
 resolved the exact destination, and allowed the directional source/destination/non-root-user policy. There is no helper
 binary, daemon, extra inherited descriptor, sudoers expansion, generic privileged action, or generic descriptor
 channel.
 
-The final normal API process will perform the source Firecracker UDS `CONNECT` handshake and complete the
+The eventual normal API process will perform the source Firecracker UDS `CONNECT` handshake and complete the
 `SourceSession` token/bootstrap before root admission. Its initial closed action request names the exact source and
 destination VM IDs and attaches exactly one duplicate of the live source connection with `SCM_RIGHTS` on the first
 request byte. Root receives ancillary
@@ -426,8 +426,8 @@ data with `MSG_CMSG_CLOEXEC`, rejects missing, extra, unknown, late, or truncate
 connected, non-listening `AF_UNIX` `SOCK_STREAM` descriptor with close-on-exec. The private authority already fixes a
 host-global ceiling of eight sessions and implements binding the received connection to the retained source record
 through `SO_PEERCRED`, `SO_PEERPIDFD`, exact PID/start identity, matching effective UID/GID, complete active-process
-identity, retained-process proof, and final liveness. The pending registered composition must invoke that exact
-authority rather than recreate any of those checks.
+identity, retained-process proof, and final liveness. The registered root composition now invokes that exact authority
+rather than recreating any of those checks; the API listener/consumer that will call it remains pending.
 
 That future socket proof establishes the exact source Firecracker peer, not the selected guest port. The independent
 `SourceSession` token/bootstrap handshake remains the source agent-and-port proof. After pair admission, the API
@@ -438,7 +438,7 @@ peer pidfds and both retained process sets before its final host-boot and relay-
 the token-and-command-bearing `DestinationRequest`, which the destination agent must validate before any effect. Root
 receives no UDS path, agent token, target user, command, policy material, or response payload.
 
-The final root child will retain the pair/capacity lease and duplicates of both admitted connections for the entire
+The registered root child retains the pair/capacity lease and duplicates of both admitted connections for the entire
 relay. An explicit release, control EOF, API crash, setup failure, or the absolute `CLOCK_BOOTTIME` relay-stop deadline
 shuts
 down the shared socket descriptions and performs cancellation-detached reverse cleanup. Capacity creation starts the
@@ -456,21 +456,28 @@ const productionVMExecMaxSessions uint32 = 8
 It is global across caller UIDs and has no configuration, environment, or CLI override. Eight matches the
 existing guest-side `maxSourceAdmissions` bound and conservatively caps the retained host/guest transports, process
 pins, VM locks, process groups, and minimum-guest pressure until live qualification supports a different fixed policy.
-The private production constructor composes that ceiling with active-pair and exact peer authority, but no registered
-handler or relay invokes it.
+The production retained-session server composes that ceiling with active-pair and exact peer authority, and the exact
+registered handler invokes it. No API relay invokes the handler yet.
 
-The private absolute `CLOCK_BOOTTIME` stop primitive is implemented with an absolute close-on-exec, nonblocking
-`timerfd`, bounded polling, cancellation, shared close-once lifecycle, and cleanup-error evidence. It remains inert:
-the retained sidecar does not yet construct it or use expiry to close the retained connections and release authority.
+The absolute `CLOCK_BOOTTIME` stop uses an absolute close-on-exec, nonblocking `timerfd`, bounded polling,
+cancellation, shared close-once lifecycle, and cleanup-error evidence. It permits exactly one in-flight waiter: a
+simultaneous second waiter is rejected rather than sharing that wait, while calls after completion receive its cached
+result. The production retained-session server now arms it from the admitted deadline; stop completion makes the
+handler close both retained connections and release authority.
 
-The implemented inert foundation provides the closed versioned phase codec, bounded safe failure projection, exact-one
+The production-composed retained sidecar provides the closed versioned phase codec, bounded safe failure projection,
+exact-one
 ancillary transfer, ordered process lifecycle, named Jailer client, and private handler. The client duplicates source
 and destination connections while leaving caller originals owned by the API process. The handler transfers each
 installed descriptor into a retained private owner only after its exact phase decodes, exposes only borrowed connection
 capabilities to its effect seam, cleans destination, source, and the effect lease once, and sends `released` only after
 explicit-release cleanup succeeds. Control EOF and failures clean without claiming a successful release. The handler
-accepts no path, token, user, command, policy, relay payload, or raw descriptor accessor. Central dispatch currently
-rejects the action without reading request bytes, so none of this code can create a production VM-to-VM path.
+accepts no path, token, user, command, policy, relay payload, or raw descriptor accessor. Central dispatch registers
+only this exact action. The caller UID/GID supplied to Jailer derives exclusively from the authenticated control peer
+identity, never request fields. Each handler-owned source/destination descriptor stays opaque and pinned under its
+owner lock for the sole synchronous binder call. Authenticated failures before dispatch emit one bounded `MVMXSES1`
+terminal failure without draining request input; once dispatch begins, the handler owns all action-specific responses
+and cleanup. Registration does not create a positive VM-to-VM path because no API relay calls the action.
 
 Implementation remains fail-closed and proceeds in these independently reviewable increments:
 
@@ -479,7 +486,7 @@ Implementation remains fail-closed and proceeds in these independently reviewabl
    unregistered.
 3. [x] Add exact Firecracker peer/pidfd binding, the fixed global ceiling, and the absolute-boottime stop primitive
    behind private, unregistered boundaries.
-4. [ ] Compose those boundaries into the retained sidecar, enforce expiry, then register the exact privileged action.
+4. [x] Compose those boundaries into the retained sidecar, enforce expiry, then register the exact privileged action.
 5. [ ] Add `SourceSession.WaitCancel`, a closed destination session, and a typed error-reporting audit sink.
 6. [ ] Add the explicit public trigger and API relay, then qualify same-network, cross-network, and no-IP-network
    behavior plus denial, cancellation, crash, reboot, ceiling, and cleanup paths in Python L2.
@@ -652,16 +659,18 @@ same-owner active-record admission, canonical VM lock order, retained roots and 
 pidfd/full-identity proofs, post-capacity boot/identity/final-liveness revalidation, immutable admission, and close-once
 reverse cleanup. It also covers same-socket peer credentials and pidfd acquisition, close-on-exec ownership, exact
 PID/effective UID/GID and locator matching, both complete peer identities, and a final both-peer/both-process liveness
-sweep under the fixed global ceiling. The separate absolute-boottime stop L1 covers expiry, cancellation, concurrent
-waiters, descriptor close/reuse races, and cleanup evidence. These foundations still do not provide a registered
-source-FD action, relay, policy enforcement, audit, or end-to-end execution.
+sweep under the fixed global ceiling. The absolute-boottime stop L1 covers expiry, cancellation, rejection of a
+simultaneous second waiter, cached completed results, descriptor close/reuse races, and cleanup evidence. Production
+composition is registered but still does not provide an API relay, runtime policy enforcement, audit, payload
+forwarding, or end-to-end execution.
 
 Retained-sidecar L1 covers closed phase schemas and ordering, bounded failure projection, physical terminal EOF,
 exact-one descriptor ownership and structural admission, source/destination duplicate ownership, copied-session shared
 lifecycle, cancellation races, process-group termination, bounded wait/reap behavior, explicit-release and implicit-EOF
-cleanup, cleanup-error evidence, no duplicate terminal response, and the action's unregistered/unread dispatch state.
-It does not yet compose the separately implemented peer-bound pair/capacity authority or absolute-boottime stop,
-register the action, or qualify an API relay.
+cleanup, cleanup-error evidence, no duplicate terminal response, production pair/capacity/peer/stop composition,
+descriptor pinning during the sole synchronous binder, exact action registration, authenticated caller propagation,
+and `MVMXSES1` pre-dispatch failures without request draining. It does not qualify an API relay, runtime policy/audit,
+relay payload forwarding, a positive VM-to-VM path, or Python L2 behavior.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,

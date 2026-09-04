@@ -17,10 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
-> non-root execution side, its isolated process-bound source-session foundation, the private inert root-owned VM-exec
-> capacity and active-pair authorities with a fixed global ceiling, its exact Firecracker peer/pidfd binding and
-> absolute-boottime stop primitive, its inert exact-one descriptor transport and structural admission, its closed
-> retained-sidecar wire/process/Jailer-client/unregistered-handler lifecycle, and clean-break removal of the VM-wide
+> non-root execution side, its isolated process-bound source-session foundation, the production-composed root-owned
+> VM-exec capacity and active-pair authorities with a fixed global ceiling, its exact Firecracker peer/pidfd binding
+> and absolute-boottime stop, its exact-one descriptor transport and structural admission, its closed retained-sidecar
+> wire/process/Jailer-client/registered-handler lifecycle, and clean-break removal of the VM-wide
 > remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
@@ -117,12 +117,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version 6 without the removed column. Schema-version 3, 4, or 5 databases that still contain it fail before pending
   migration inspection or migration application with an explicit clean-install-required validation error and remain
   unchanged; no legacy bit is converted into a directional exec policy.
-- Public execution-policy CRUD, the wire, source session, and destination side still do not activate VM-to-VM
-  execution. The API-owned relay listener, production use of the retained sidecar, composition of the implemented
-  process/VM-bound authority and fixed capacity ceiling into that sidecar, absolute boottime enforcement, runtime
-  policy resolution/enforcement and redacted audit, and positive Python L2 qualification remain pending. The
-  implemented cancellation boundaries are process-group guarantees, not per-command cgroup authority, and do not
-  claim cleanup of descendants that deliberately leave their group.
+- Public execution-policy CRUD, the wire, source session, destination side, and registered root authority sidecar still
+  do not activate VM-to-VM execution. The API-owned relay listener/consumer, runtime directional-policy resolution and
+  enforcement, relay payload forwarding, command-redacted audit, positive VM-to-VM path, and Python L2 qualification
+  remain pending. The implemented cancellation boundaries are process-group guarantees, not per-command cgroup
+  authority, and do not claim cleanup of descendants that deliberately leave their group.
 
 #### Private VM-exec authorities, descriptor admission, and retained-sidecar foundation
 
@@ -152,10 +151,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   UID/GID to the admitted record, and proves exact PID/start, complete active identity, retained process identity, and
   liveness. Destination binding finishes with a bounded last-look sweep of both peer pidfds and both retained process
   sets before the final host-boot and relay-budget check.
-- Selected a fixed private production ceiling of eight host-global sessions and composed it with the active-pair and
-  peer authorities behind a private constructor. There is still no production caller or registered action.
+- Selected a fixed production ceiling of eight host-global sessions and composed it with the active-pair and peer
+  authorities behind the retained session server used by the exact registered action.
 - Added a private absolute `CLOCK_BOOTTIME` relay-stop primitive backed by an absolute `timerfd`, bounded polling,
-  cancellation, close-once lifecycle, and cleanup-error evidence. It is not yet wired into the retained sidecar.
+  cancellation, a single concurrent waiter with a cached result for later calls, close-once lifecycle, and
+  cleanup-error evidence. The retained session server now arms it from the capacity admission deadline, and the handler
+  closes both retained connections and releases authority when the stop completes.
 - Added a private exact-one VM-exec descriptor transport. Its single-use sender puts one duplicated connection in one
   `SCM_RIGHTS` message on the first non-NUL frame byte, sends the remainder with no ancillary data through
   cancellation-bounded nonblocking I/O, and closes its duplicate exactly once even across copied owners and failures.
@@ -170,14 +171,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added the named Jailer VM-exec session client. It duplicates caller-owned source and destination `net.UnixConn`
   values for the sidecar, preserves the caller's originals, exposes only ordered open/bind/release/cancel operations,
   and requires a successful released outcome plus physical response EOF.
-- Added the private root handler lifecycle and phase-specific descriptor receivers. The handler retains source before
+- Added the root handler lifecycle and phase-specific descriptor receivers. The handler retains source before
   acknowledgement, retains and binds destination before ready, cleans destination/source/effect authority once on
   explicit release, EOF, setup, or response failure, and reports released only after successful cleanup. It accepts no
   path, token, user, command, policy material, relay payload, or raw descriptor accessor.
-- The capacity, pair/peer, descriptor, stop, and retained-sidecar foundations remain private and inert. The exact action
-  is deliberately unregistered and rejected without reading request bytes. No production sidecar composition,
-  absolute boottime enforcement, relay/API consumer, runtime policy enforcement, redacted audit, or positive
-  VM-to-VM path exists.
+- Registered only the exact `jailer-vm-exec-session` privileged action. Production construction composes its handler
+  with the root-owned pair/capacity/peer authority and absolute stop. The caller UID/GID passed into that authority
+  comes only from the authenticated control peer identity, never from action request bytes. Source and destination
+  descriptors remain opaque and pinned by handler ownership during their sole synchronous binder calls. The handler,
+  not outer dispatch, owns every action-specific response and all retained connection/authority cleanup.
+- Authenticated pre-dispatch failures for this action use one bounded `MVMXSES1` terminal failure without draining
+  request input; other actions retain the ordinary `MVMRES01` envelope. No API-owned relay listener/consumer invokes
+  the registered action yet, and runtime directional-policy enforcement, command-redacted audit, relay payload
+  forwarding, a positive VM-to-VM path, and Python L2 qualification remain pending.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
@@ -698,8 +704,7 @@ The following items are release blockers and are intentionally not described abo
   `crashed`, and `unavailable` batch observations before wiring privileged VM actions to the root-owned lifecycle and
   per-VM lock.
 - Transfer the Jailer VM-lock lease into the implemented root-owned managed-network registration foundation and add
-  persistent per-VM topology. Compose the selected fixed VM-exec ceiling and implemented private peer-bound
-  active-pair/capacity authority with the retained sidecar and absolute stop. Activate neither topology nor capacity through
+  persistent per-VM topology. Activate neither topology nor the production-composed VM-exec capacity authority through
   user SQLite state; user state must not authorize host-global namespace, link, firewall, process, mount, cgroup, or
   admission decisions.
 - Carry the managed-cache locator and base launch selection through the privileged protocol, bind the cache identity in
@@ -737,10 +742,10 @@ The following items are release blockers and are intentionally not described abo
   a kernel application.
 - Complete typed traffic API/CLI and nftables application plus the API-owned vsock relay over the implemented isolated
   source-session, typed policy, and destination-agent foundations. Directional exec-policy CRUD is public but does not
-  activate the relay. Compose the retained sidecar with the implemented exact process/VM-bound active-pair/capacity
-  authority, fixed global ceiling, and absolute-boottime stop; enforce stop expiry and runtime policy/redacted audit;
-  register only the exact action; and complete positive L2 qualification before claiming the destination path end to
-  end. The
+  activate the relay. Add the relay listener/consumer, enforce the exact runtime directional policy, forward only the
+  bounded relay payload, emit command-redacted audit records, and complete positive L2 qualification before claiming
+  the destination path end to end. The registered retained sidecar already composes exact process/VM-bound
+  active-pair/capacity authority, the fixed global ceiling, peer binding, and absolute-boottime stop. The
   legacy guest relay, generic host-frame callback, shared guest connection, and VM-wide remote-exec field/flags are
   removed; the routed `ServiceAccessPolicy` and other transitional surfaces still require atomic removal.
 - Replace the transitional wildcard/raw-tool sudoers entries with access only to the reserved privileged marker of the
