@@ -14,6 +14,7 @@ import (
 )
 
 type fakeVMExecSessionServer struct {
+	ctx        context.Context
 	caller     jailer.VMExecSessionCaller
 	request    jailer.VMExecSessionOpenRequest
 	connection jailer.VMExecSessionConnection
@@ -22,11 +23,12 @@ type fakeVMExecSessionServer struct {
 }
 
 func (server *fakeVMExecSessionServer) OpenSource(
-	_ context.Context,
+	ctx context.Context,
 	caller jailer.VMExecSessionCaller,
 	request jailer.VMExecSessionOpenRequest,
 	connection jailer.VMExecSessionConnection,
 ) (*jailer.VMExecSessionServerLease, error) {
+	server.ctx = ctx
 	server.caller = caller
 	server.request = request
 	server.connection = connection
@@ -37,6 +39,24 @@ type fakeVMExecSessionStopWait struct {
 	pending bool
 	err     error
 	events  *[]string
+}
+
+type fakeVMExecSessionDescriptorBinder struct {
+	owner       *vmExecReceivedConnectionOwner
+	ctx         context.Context
+	descriptor  int
+	ownerLocked bool
+}
+
+func (binder *fakeVMExecSessionDescriptorBinder) bind(ctx context.Context, descriptor int) error {
+	binder.ctx = ctx
+	binder.descriptor = descriptor
+	if binder.owner.mu.TryLock() {
+		binder.owner.mu.Unlock()
+	} else {
+		binder.ownerLocked = true
+	}
+	return nil
 }
 
 func (wait *fakeVMExecSessionStopWait) Pending() bool { return wait.pending }
@@ -57,8 +77,10 @@ func TestVMExecSessionEffectsMapAuthenticatedCallerAndClosedRequest(t *testing.T
 		owner: &vmExecReceivedConnectionOwner{fd: 41},
 	}}
 
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	lease, err := effects.openSource(
-		t.Context(),
+		ctx,
 		callerIdentity{uid: 1001, gid: 1002},
 		vmexecsessionwire.OpenSource{
 			SourceVMID:      testVMExecHandlerSource,
@@ -69,6 +91,7 @@ func TestVMExecSessionEffectsMapAuthenticatedCallerAndClosedRequest(t *testing.T
 
 	assert.Same(t, sentinel, err)
 	require.NotNil(t, lease)
+	assert.True(t, server.ctx == ctx, "OpenSource must receive the exact authenticated request context")
 	wantCaller := jailer.VMExecSessionCaller{UID: 1001, GID: 1002}
 	if diff := cmp.Diff(wantCaller, server.caller); diff != "" {
 		t.Errorf("VM-exec caller mismatch (-want +got):\n%s", diff)
@@ -83,6 +106,21 @@ func TestVMExecSessionEffectsMapAuthenticatedCallerAndClosedRequest(t *testing.T
 	gotConnection, ok := server.connection.(vmExecSessionConnection)
 	require.True(t, ok)
 	assert.Same(t, connection.retained.owner, gotConnection.retained.owner)
+}
+
+func TestVMExecSessionConnectionForwardsDescriptorWhileOwnerIsPinned(t *testing.T) {
+	owner := &vmExecReceivedConnectionOwner{fd: 47}
+	connection := vmExecSessionConnection{retained: &vmExecRetainedConnection{owner: owner}}
+	binder := &fakeVMExecSessionDescriptorBinder{owner: owner}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	err := connection.bindVMExecSessionPeer(ctx, binder)
+
+	require.NoError(t, err)
+	assert.True(t, binder.ctx == ctx, "descriptor binder must receive the exact request context")
+	assert.Equal(t, 47, binder.descriptor)
+	assert.True(t, binder.ownerLocked, "connection owner mutex must remain held through the synchronous bind")
 }
 
 func TestFinishVMExecSessionStopWaitSignalsOnlyPendingWait(t *testing.T) {
@@ -176,6 +214,14 @@ func TestVMExecSessionConnectionFailsClosed(t *testing.T) {
 			}},
 			wantCode: errs.CodeValidationFailed,
 			wantErr:  "descriptor is invalid",
+		},
+		"unavailable public binder": {
+			ctx: t.Context(),
+			connection: vmExecSessionConnection{retained: &vmExecRetainedConnection{
+				owner: &vmExecReceivedConnectionOwner{fd: 48},
+			}},
+			wantCode: errs.CodeVMAtomicFailed,
+			wantErr:  "peer binder is unavailable",
 		},
 	}
 

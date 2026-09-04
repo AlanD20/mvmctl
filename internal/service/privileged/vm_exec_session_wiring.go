@@ -26,9 +26,18 @@ type vmExecSessionStopWait interface {
 	Wait() error
 }
 
+type vmExecSessionDescriptorBinder interface {
+	bind(context.Context, int) error
+}
+
+type jailerVMExecSessionDescriptorBinder struct {
+	binder jailer.VMExecSessionPeerBinder
+}
+
 var (
 	_ jailer.VMExecSessionConnection = vmExecSessionConnection{}
 	_ vmExecSessionHandlerLease      = (*vmExecSessionServerLeaseAdapter)(nil)
+	_ vmExecSessionDescriptorBinder  = jailerVMExecSessionDescriptorBinder{}
 )
 
 func newVMExecSessionHandlerEffects(server vmExecSessionServer) vmExecSessionHandlerEffects {
@@ -63,6 +72,13 @@ func (connection vmExecSessionConnection) BindVMExecSessionPeer(
 	ctx context.Context,
 	binder jailer.VMExecSessionPeerBinder,
 ) error {
+	return connection.bindVMExecSessionPeer(ctx, jailerVMExecSessionDescriptorBinder{binder: binder})
+}
+
+func (connection vmExecSessionConnection) bindVMExecSessionPeer(
+	ctx context.Context,
+	binder vmExecSessionDescriptorBinder,
+) error {
 	if connection.retained == nil || connection.retained.owner == nil {
 		return errs.New(errs.CodeValidationFailed, "retained VM-exec connection is required")
 	}
@@ -71,6 +87,9 @@ func (connection vmExecSessionConnection) BindVMExecSessionPeer(
 	defer owner.mu.Unlock()
 	if ctx == nil {
 		return errs.New(errs.CodeValidationFailed, "retained VM-exec connection context is required")
+	}
+	if binder == nil {
+		return errs.New(errs.CodeValidationFailed, "retained VM-exec connection peer binder is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return errs.WrapMsg(errs.CodeProcessError, "bind retained VM-exec connection was cancelled", err)
@@ -81,7 +100,11 @@ func (connection vmExecSessionConnection) BindVMExecSessionPeer(
 	if owner.fd < 0 {
 		return errs.New(errs.CodeValidationFailed, "retained VM-exec connection descriptor is invalid")
 	}
-	return binder.Bind(ctx, owner.fd)
+	return binder.bind(ctx, owner.fd)
+}
+
+func (binder jailerVMExecSessionDescriptorBinder) bind(ctx context.Context, descriptor int) error {
+	return binder.binder.Bind(ctx, descriptor)
 }
 
 func (adapter *vmExecSessionServerLeaseAdapter) bindDestination(

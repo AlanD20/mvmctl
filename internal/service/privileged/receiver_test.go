@@ -19,6 +19,7 @@ import (
 
 	"mvmctl/internal/lib/privilegedwire"
 	"mvmctl/internal/lib/system"
+	"mvmctl/internal/lib/vmexecsessionwire"
 	"mvmctl/pkg/errs"
 )
 
@@ -339,6 +340,73 @@ func TestRun_AuthenticatedFailuresReturnOneMatchingFramedError(t *testing.T) {
 			assert.Equal(t, 1, endpoint.shutdownCalls)
 			assert.Zero(t, endpoint.readCalls)
 			assert.Zero(t, endpoint.closeCalls)
+		})
+	}
+}
+
+// Rationale: Once the exact retained-session action is recognized, every authenticated pre-dispatch rejection must
+// use its closed terminal frame. The VM-exec client does not decode the ordinary privileged response envelope.
+func TestRun_VMExecAuthenticatedFailuresUseActionFrameWithoutReadingRequest(t *testing.T) {
+	tests := map[string]struct {
+		mutate func(*runtimeDeps)
+	}{
+		"identity": {
+			mutate: func(deps *runtimeDeps) {
+				deps.identity.effectiveUID = func() int { return 1000 }
+			},
+		},
+		"peer authentication": {
+			mutate: func(deps *runtimeDeps) {
+				deps.control.peerCredentials = func(context.Context, int) (*unix.Ucred, error) {
+					return &unix.Ucred{Pid: 44, Uid: 1001, Gid: 1000}, nil
+				}
+			},
+		},
+		"environment": {
+			mutate: func(deps *runtimeDeps) {
+				store := newEnvironmentStore(nil)
+				store.setErrorKey = "HOME"
+				deps.environment = store.deps()
+			},
+		},
+		"executable": {
+			mutate: func(deps *runtimeDeps) {
+				deps.executable = rejectedExecutableDeps("privileged system executable rejected")
+			},
+		},
+		"authorization": {
+			mutate: func(deps *runtimeDeps) {
+				authorization := memberAuthorizationDeps()
+				authorization.groupIDs = func(*user.User) ([]string, error) { return []string{"1000"}, nil }
+				deps.authorization = authorization
+			},
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			requestBytes := []byte("must-not-be-read")
+			endpoint := newReceiverEndpoint()
+			endpoint.input = *bytes.NewReader(requestBytes)
+			runtime := testRuntimeDeps(0, map[string]string{"SUDO_UID": "1000", "SUDO_GID": "1000"})
+			runtime.control = validControlDeps(endpoint, nil)
+			test.mutate(&runtime)
+
+			err := run(t.Context(), []string{Marker, vmexecsessionwire.Action}, endpoint, runtime)
+
+			require.NoError(t, err)
+			responses := bytes.NewReader(endpoint.output.Bytes())
+			outcome, decodeErr := vmexecsessionwire.DecodeOutcome(t.Context(), responses)
+			require.NoError(t, decodeErr)
+			operationErr := outcome.OperationError()
+			require.NotNil(t, operationErr)
+			assert.Equal(t, errs.CodeInternal, operationErr.Code)
+			assert.Zero(t, responses.Len())
+			assert.Equal(t, 1, bytes.Count(endpoint.output.Bytes(), []byte("MVMXSES1")))
+			assert.NotContains(t, string(endpoint.output.Bytes()), "MVMRES01")
+			assert.Zero(t, endpoint.readCalls)
+			assert.Equal(t, int64(0), endpoint.input.Size()-int64(endpoint.input.Len()))
+			assert.Equal(t, 1, endpoint.shutdownCalls)
 		})
 	}
 }

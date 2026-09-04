@@ -121,17 +121,17 @@ func run(
 	}
 	caller, err := invokingIdentity(deps.identity)
 	if err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
+		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
 	}
 	if err := authenticateControlPeer(caller, peer); err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
+		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
 	}
 	if err := sanitizeEnvironment(deps.environment); err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
+		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
 	}
 	pinnedExecutable, err := verifySystemExecutable(ctx, deps.executable)
 	if err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
+		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
 	}
 	defer func() {
 		returnErr = appendPrivilegedExecutableReleaseError(
@@ -140,13 +140,26 @@ func run(
 		)
 	}()
 	if err := authorizeCaller(caller, deps.authorization); err != nil {
-		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
+		return deliverPreDispatchError(ctx, endpoint, request.action, err, deps.control)
 	}
 	disposition, err := dispatch(ctx, request, endpoint, caller, deps)
 	if err != nil && disposition == dispatchUnhandled {
 		return deliverOperationError(ctx, endpoint, request.action, err, deps.control)
 	}
 	return err
+}
+
+func deliverPreDispatchError(
+	ctx context.Context,
+	endpoint controlEndpoint,
+	action string,
+	operationErr error,
+	deps controlDeps,
+) error {
+	if action == vmexecsessionwire.Action {
+		return deliverVMExecFailure(ctx, endpoint, operationErr, deps)
+	}
+	return deliverOperationError(ctx, endpoint, action, operationErr, deps)
 }
 
 func appendPrivilegedExecutableReleaseError(primary error, cleanup error) error {
