@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/nftables"
+	"github.com/google/nftables/expr"
 	"github.com/mdlayher/netlink"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,10 +26,11 @@ func TestKernelGenerationApplicationQueuesOneCompleteReplacementBatch(t *testing
 	targetIntent.hostServices = nil
 	target, err := compileGeneration(targetIntent)
 	require.NoError(t, err)
-	observed := kernelObservationFromCompiledGeneration(t, before)
+	observed := kernelObservationFromCompiled(before)
 	connection := &recordingKernelApplicationConnection{}
+	record := kernelApplicationApplyingRecord(t, before, target)
 
-	result, err := applyKernelGeneration(t.Context(), connection, observed, target)
+	result, err := applyKernelGeneration(t.Context(), connection, record, observed, before, target)
 	require.NoError(t, err)
 	assert.True(t, result.commitAttempted)
 
@@ -67,9 +69,14 @@ func TestKernelGenerationApplicationDoesNotDeleteAbsentTables(t *testing.T) {
 
 	target, err := compileGeneration(compatibilityIntent())
 	require.NoError(t, err)
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
 	connection := &recordingKernelApplicationConnection{}
+	record := kernelApplicationApplyingRecord(t, before, target)
 
-	result, err := applyKernelGeneration(t.Context(), connection, kernelObservation{empty: true}, target)
+	result, err := applyKernelGeneration(
+		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	)
 	require.NoError(t, err)
 	assert.True(t, result.commitAttempted)
 	for _, event := range connection.events {
@@ -77,6 +84,87 @@ func TestKernelGenerationApplicationDoesNotDeleteAbsentTables(t *testing.T) {
 	}
 	assert.Equal(t, 1, connection.flushCalls)
 	assert.Equal(t, 1, connection.closeCalls)
+}
+
+func TestKernelGenerationApplicationRejectsEmptyBeforeWithoutEmptyRecordAuthority(t *testing.T) {
+	t.Parallel()
+
+	target, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
+	record := kernelApplicationApplyingRecord(t, before, target)
+	foreignBefore := generationRecordIdentity{id: testFirewallGenerationC}
+	record.committed = foreignBefore
+	record.before = &foreignBefore
+	connection := &recordingKernelApplicationConnection{}
+
+	result, err := applyKernelGeneration(
+		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	)
+	require.Error(t, err)
+	assert.False(t, result.commitAttempted)
+	if diff := cmp.Diff([]string{"close"}, connection.events); diff != "" {
+		t.Errorf("unbound empty pre-state effects mismatch (-want +got):\n%s", diff)
+	}
+}
+
+// Rationale: Fixed table names alone are not deletion authority. The admitted applying record, exact expected-before
+// compiler output, and every semantic field of the fresh observation must agree before either DelTable is queued.
+func TestKernelGenerationApplicationRejectsUnqualifiedPreStateBeforeQueueing(t *testing.T) {
+	t.Parallel()
+
+	before, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	targetIntent := compatibilityIntent()
+	targetIntent.hostServices = nil
+	target, err := compileGeneration(targetIntent)
+	require.NoError(t, err)
+	tests := map[string]func(*generationRecord, *kernelObservation){
+		"empty marker with tables": func(_ *generationRecord, observed *kernelObservation) {
+			observed.empty = true
+		},
+		"partial tables": func(_ *generationRecord, observed *kernelObservation) {
+			observed.tables = observed.tables[:1]
+		},
+		"wrong fixed name": func(_ *generationRecord, observed *kernelObservation) {
+			observed.tables[0].name = "foreign_bridge"
+		},
+		"reordered tables": func(_ *generationRecord, observed *kernelObservation) {
+			observed.tables[0], observed.tables[1] = observed.tables[1], observed.tables[0]
+		},
+		"same-name foreign chain": func(_ *generationRecord, observed *kernelObservation) {
+			observed.tables[0].chains[0].name = "foreign"
+		},
+		"same-name foreign userdata": func(_ *generationRecord, observed *kernelObservation) {
+			observed.tables[0].rules[0].userdata[0] ^= 0xff
+		},
+		"same-name foreign expression": func(_ *generationRecord, observed *kernelObservation) {
+			observed.tables[0].rules[0].expressions[0].(*expr.Meta).Register++
+		},
+		"record target mismatch": func(record *generationRecord, _ *kernelObservation) {
+			record.target = &generationRecordIdentity{id: testFirewallGenerationC}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			record := kernelApplicationApplyingRecord(t, before, target)
+			observed := kernelObservationFromCompiled(before)
+			mutate(&record, &observed)
+			connection := &recordingKernelApplicationConnection{}
+
+			result, err := applyKernelGeneration(
+				t.Context(), connection, record, observed, before, target,
+			)
+			require.Error(t, err)
+			assert.False(t, result.commitAttempted)
+			if diff := cmp.Diff([]string{"close"}, connection.events); diff != "" {
+				t.Errorf("unqualified pre-state effects mismatch (-want +got):\n%s", diff)
+			}
+			assert.Zero(t, connection.flushCalls)
+		})
+	}
 }
 
 // Rationale: Application is the last in-process boundary before root mutates the host firewall. A malformed compiled
@@ -98,6 +186,11 @@ func TestKernelGenerationApplicationRejectsBrokenDefaultDenyAndParentChainBefore
 				Name: "foreign", Table: target.bridge.table,
 			}
 		},
+		"nonempty target clears mutable rule inventory": func(target *compiledGeneration) {
+			target.bridge.rules = nil
+			target.inet.rules = nil
+			target.ingressGuards = nil
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -105,12 +198,20 @@ func TestKernelGenerationApplicationRejectsBrokenDefaultDenyAndParentChainBefore
 			target, err := compileGeneration(compatibilityIntent())
 			require.NoError(t, err)
 			mutate(&target)
+			require.NoError(t, bindGenerationApplicationSeal(&target))
 			connection := &recordingKernelApplicationConnection{}
+			before, beforeErr := compileGeneration(generationIntent{})
+			require.NoError(t, beforeErr)
+			record := kernelApplicationApplyingRecord(t, before, target)
 
-			result, err := applyKernelGeneration(t.Context(), connection, kernelObservation{empty: true}, target)
+			result, err := applyKernelGeneration(
+				t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+			)
 			require.Error(t, err)
 			assert.False(t, result.commitAttempted)
-			assert.Equal(t, []string{"close"}, connection.events)
+			if diff := cmp.Diff([]string{"close"}, connection.events); diff != "" {
+				t.Errorf("invalid target effects mismatch (-want +got):\n%s", diff)
+			}
 		})
 	}
 }
@@ -119,6 +220,8 @@ func TestGoogleNFTablesApplicationConnectionFlushesOneProtocolBatch(t *testing.T
 	t.Parallel()
 
 	target, err := compileGeneration(compatibilityIntent())
+	require.NoError(t, err)
+	before, err := compileGeneration(generationIntent{})
 	require.NoError(t, err)
 	var batches [][]netlink.Message
 	acknowledgements := 0
@@ -139,8 +242,11 @@ func TestGoogleNFTablesApplicationConnectionFlushesOneProtocolBatch(t *testing.T
 	)
 	require.NoError(t, err)
 	connection := &googleNFTablesApplicationConnection{connection: underlying}
+	record := kernelApplicationApplyingRecord(t, before, target)
 
-	result, err := applyKernelGeneration(t.Context(), connection, kernelObservation{empty: true}, target)
+	result, err := applyKernelGeneration(
+		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	)
 	require.NoError(t, err)
 	assert.True(t, result.commitAttempted)
 	require.Len(t, batches, 1)
@@ -159,10 +265,15 @@ func TestKernelGenerationApplicationReturnsAmbiguousSingleFlushFailure(t *testin
 
 	target, err := compileGeneration(compatibilityIntent())
 	require.NoError(t, err)
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
 	flushFailure := errors.New("injected batch failure")
 	connection := &recordingKernelApplicationConnection{flushErr: flushFailure}
+	record := kernelApplicationApplyingRecord(t, before, target)
 
-	result, err := applyKernelGeneration(t.Context(), connection, kernelObservation{empty: true}, target)
+	result, err := applyKernelGeneration(
+		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	)
 	require.ErrorIs(t, err, flushFailure)
 	assert.True(t, result.commitAttempted)
 	assert.Equal(t, 1, connection.flushCalls)
@@ -176,10 +287,15 @@ func TestKernelGenerationApplicationReturnsAmbiguousCloseFailure(t *testing.T) {
 
 	target, err := compileGeneration(compatibilityIntent())
 	require.NoError(t, err)
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
 	closeFailure := errors.New("injected lasting-connection close failure")
 	connection := &recordingKernelApplicationConnection{closeErr: closeFailure}
+	record := kernelApplicationApplyingRecord(t, before, target)
 
-	result, err := applyKernelGeneration(t.Context(), connection, kernelObservation{empty: true}, target)
+	result, err := applyKernelGeneration(
+		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	)
 	require.ErrorIs(t, err, closeFailure)
 	assert.True(t, result.commitAttempted)
 	assert.Equal(t, 1, connection.flushCalls)
@@ -191,11 +307,16 @@ func TestKernelGenerationApplicationPreservesFlushAndCloseFailures(t *testing.T)
 
 	target, err := compileGeneration(compatibilityIntent())
 	require.NoError(t, err)
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
 	flushFailure := errors.New("injected batch failure")
 	closeFailure := errors.New("injected lasting-connection close failure")
 	connection := &recordingKernelApplicationConnection{flushErr: flushFailure, closeErr: closeFailure}
+	record := kernelApplicationApplyingRecord(t, before, target)
 
-	result, err := applyKernelGeneration(t.Context(), connection, kernelObservation{empty: true}, target)
+	result, err := applyKernelGeneration(
+		t.Context(), connection, record, kernelObservation{empty: true}, before, target,
+	)
 	require.ErrorIs(t, err, flushFailure)
 	require.ErrorIs(t, err, closeFailure)
 	assert.True(t, result.commitAttempted)
@@ -210,11 +331,14 @@ func TestKernelGenerationApplicationCancellationBeforeQueueingClosesConnection(t
 
 	target, err := compileGeneration(compatibilityIntent())
 	require.NoError(t, err)
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	connection := &recordingKernelApplicationConnection{}
+	record := kernelApplicationApplyingRecord(t, before, target)
 
-	result, err := applyKernelGeneration(ctx, connection, kernelObservation{empty: true}, target)
+	result, err := applyKernelGeneration(ctx, connection, record, kernelObservation{empty: true}, before, target)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.False(t, result.commitAttempted)
 	assert.Equal(t, 0, connection.flushCalls)
@@ -228,8 +352,11 @@ func TestKernelGenerationApplicationCancellationKeepsLastingConnectionUntilFlush
 
 	target, err := compileGeneration(compatibilityIntent())
 	require.NoError(t, err)
+	before, err := compileGeneration(generationIntent{})
+	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(t.Context())
 	connection := newBlockingKernelApplicationConnection()
+	record := kernelApplicationApplyingRecord(t, before, target)
 	closeCallsDuringFlush := make(chan int, 1)
 	go func() {
 		<-connection.flushStarted
@@ -240,7 +367,7 @@ func TestKernelGenerationApplicationCancellationKeepsLastingConnectionUntilFlush
 		close(connection.flushRelease)
 	}()
 
-	result, err := applyKernelGeneration(ctx, connection, kernelObservation{empty: true}, target)
+	result, err := applyKernelGeneration(ctx, connection, record, kernelObservation{empty: true}, before, target)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.True(t, result.commitAttempted)
 	assert.Equal(t, 0, <-closeCallsDuringFlush)
@@ -528,15 +655,24 @@ func kernelApplicationFamilyName(family nftables.TableFamily) string {
 	}
 }
 
-func kernelObservationFromCompiledGeneration(t *testing.T, generation compiledGeneration) kernelObservation {
+func kernelApplicationApplyingRecord(
+	t *testing.T,
+	before compiledGeneration,
+	target compiledGeneration,
+) generationRecord {
 	t.Helper()
-	if generation.empty {
-		return kernelObservation{empty: true}
-	}
-	return kernelObservation{tables: []kernelObservedTable{
-		{family: generation.bridge.table.Family, name: generation.bridge.table.Name},
-		{family: generation.inet.table.Family, name: generation.inet.table.Name},
-	}}
+	committed, err := newCommittedGenerationRecord(
+		testGenerationRecordBinding(),
+		kernelApplicationGenerationIdentity(before),
+	)
+	require.NoError(t, err)
+	applying, err := beginGenerationRecordApplication(
+		committed,
+		kernelApplicationGenerationIdentity(before),
+		kernelApplicationGenerationIdentity(target),
+	)
+	require.NoError(t, err)
+	return applying
 }
 
 type kernelApplicationNamespaceFixture struct {

@@ -23,7 +23,9 @@ type kernelApplicationResult struct {
 func applyKernelGeneration(
 	ctx context.Context,
 	connection kernelApplicationConnection,
-	before kernelObservation,
+	record generationRecord,
+	observedBefore kernelObservation,
+	expectedBefore compiledGeneration,
 	target compiledGeneration,
 ) (kernelApplicationResult, error) {
 	if ctx == nil {
@@ -43,11 +45,11 @@ func applyKernelGeneration(
 			nil,
 		)
 	}
-	if err := validateKernelApplicationReplacement(before, target); err != nil {
+	if err := validateKernelApplicationReplacement(record, observedBefore, expectedBefore, target); err != nil {
 		return kernelApplicationResult{}, errors.Join(err, connection.close())
 	}
 
-	for _, observed := range before.tables {
+	for _, observed := range observedBefore.tables {
 		connection.deleteTable(&nftables.Table{Family: observed.family, Name: observed.name})
 	}
 	queueKernelApplicationTable(connection, target.bridge)

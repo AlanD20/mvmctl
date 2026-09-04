@@ -31,6 +31,9 @@ func compileGeneration(intent generationIntent) (compiledGeneration, error) {
 			return compiledGeneration{}, err
 		}
 		generation.id = generationID
+		if err := bindGenerationApplicationSeal(&generation); err != nil {
+			return compiledGeneration{}, err
+		}
 		return generation, nil
 	}
 
@@ -47,6 +50,9 @@ func compileGeneration(intent generationIntent) (compiledGeneration, error) {
 	}
 	compiler.generation.id = generationID
 	if err := bindGenerationRuleData(compiler.generation); err != nil {
+		return compiledGeneration{}, err
+	}
+	if err := bindGenerationApplicationSeal(compiler.generation); err != nil {
 		return compiledGeneration{}, err
 	}
 	return *compiler.generation, nil

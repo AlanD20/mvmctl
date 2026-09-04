@@ -8,19 +8,64 @@ import (
 	"github.com/google/nftables/expr"
 )
 
-func validateKernelApplicationReplacement(before kernelObservation, target compiledGeneration) error {
-	if before.empty {
-		if len(before.tables) != 0 {
+func validateKernelApplicationReplacement(
+	record generationRecord,
+	observedBefore kernelObservation,
+	expectedBefore compiledGeneration,
+	target compiledGeneration,
+) error {
+	if err := validateKernelApplicationTarget(expectedBefore); err != nil {
+		return err
+	}
+	if err := validateKernelApplicationTarget(target); err != nil {
+		return err
+	}
+	if err := validateGenerationRecord(record); err != nil {
+		return err
+	}
+	beforeIdentity := kernelApplicationGenerationIdentity(expectedBefore)
+	targetIdentity := kernelApplicationGenerationIdentity(target)
+	if record.lifecycle != generationRecordApplying || record.before == nil || record.target == nil ||
+		record.committed != beforeIdentity || *record.before != beforeIdentity || *record.target != targetIdentity {
+		return generationAuthorityError(
+			"kernel application generations do not match admitted applying authority",
+			nil,
+			nil,
+		)
+	}
+	if err := compareKernelObservation(observedBefore, expectedBefore); err != nil {
+		return err
+	}
+	if observedBefore.empty {
+		if len(observedBefore.tables) != 0 {
 			return invalidKernelObservation("empty pre-application snapshot contains managed tables")
 		}
-	} else if len(before.tables) != len(managedTableIdentities) {
+	} else if len(observedBefore.tables) != len(managedTableIdentities) {
 		return invalidKernelObservation("pre-application snapshot does not contain both managed tables")
 	}
-	for index, observed := range before.tables {
+	for index, observed := range observedBefore.tables {
 		if index >= len(managedTableIdentities) || observed.family != managedTableIdentities[index].family ||
 			observed.name != managedTableIdentities[index].name {
 			return invalidKernelObservation("pre-application snapshot contains a foreign managed-table identity")
 		}
+	}
+	return nil
+}
+
+func kernelApplicationGenerationIdentity(generation compiledGeneration) generationRecordIdentity {
+	return generationRecordIdentity{empty: generation.empty, id: generation.id}
+}
+
+func validateKernelApplicationTarget(target compiledGeneration) error {
+	if err := validateGenerationID(target.id); err != nil {
+		return err
+	}
+	seal, err := deriveGenerationApplicationSeal(target)
+	if err != nil {
+		return err
+	}
+	if seal != target.applicationSeal {
+		return invalidGeneration("kernel application target integrity seal does not match compiler output")
 	}
 	if target.empty {
 		if target.bridge.table != nil || target.inet.table != nil || len(target.bridge.chains) != 0 ||
@@ -28,10 +73,7 @@ func validateKernelApplicationReplacement(before kernelObservation, target compi
 			len(target.ingressGuards) != 0 {
 			return invalidGeneration("empty kernel application target contains managed state")
 		}
-		return validateGenerationID(target.id)
-	}
-	if err := validateGenerationID(target.id); err != nil {
-		return err
+		return nil
 	}
 	if target.bridge.table == nil || target.inet.table == nil ||
 		target.bridge.table.Family != managedTableIdentities[0].family ||
@@ -219,6 +261,9 @@ func validateKernelApplicationDefaultDeny(
 	}
 	if len(endpointIDs) > 0 && len(networkIDs) == 0 {
 		return invalidGeneration("kernel application target has endpoints without a managed network")
+	}
+	if len(networkIDs) == 0 {
+		return invalidGeneration("kernel application target has no authoritative managed-network rule inventory")
 	}
 	for _, id := range networkIDs {
 		for _, required := range [...]struct {

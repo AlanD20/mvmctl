@@ -103,11 +103,12 @@ type compiledRule struct {
 }
 
 type compiledGeneration struct {
-	id            string
-	empty         bool
-	bridge        compiledTable
-	inet          compiledTable
-	ingressGuards map[string]ingressGuardSet
+	id              string
+	empty           bool
+	applicationSeal [32]byte
+	bridge          compiledTable
+	inet            compiledTable
+	ingressGuards   map[string]ingressGuardSet
 }
 
 type ingressGuardSet struct {
