@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > and trusted-release authorities, managed-cache pinning, base launch-resource pinning, sealed Firecracker configuration
 > authority, typed traffic/exec policy persistence, topology preparation, typed nftables compilation with a canonical
 > generation digest, the private firewall generation record/store/lock and evidence-bound replacement authority,
-> bounded raw nftables snapshot collection with a retained host-netns transport factory, the private Jailer and
-> LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and down-only link effects,
+> bounded raw nftables snapshot collection and private exact-host-netns generation application/reconciliation,
+> the private Jailer and LoopMount ephemeral-authority capabilities, the private root-pinned network namespace and
+> down-only link effects,
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority with retained fixed-name cgroup-v2 lifecycle authority, and typed LoopMount
 > client/protocol, rootfs-authority, resource-lock adapter, split
@@ -59,9 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `vm-<32-lowercase-hex>.lock` and `image-<64-lowercase-hex>.lock` files are exclusive, never unlinked during the boot,
   and serialize only the same UID, resource family, and canonical identity. Reviewed L1 evidence covers exact layout,
   unsafe-object rejection without repair, cancellation, release, contention, and unrelated-resource concurrency.
-- Firewall consumes its separate closed authority capability only through an inert generation authority, LoopMount
-  registers only its exact provision/inspect internal privileged actions, and Network uses its family only for the
-  private namespace and link effects described below. None of these foundations is a public/backend runtime cutover.
+- Firewall consumes its separate closed authority capability only through the private generation
+  authority/application coordinator, LoopMount registers only its exact provision/inspect internal privileged actions,
+  and Network uses its family only for the private namespace and link effects described below. None of these foundations
+  is a public/backend runtime cutover.
 - Added a private Jailer runtime-directory lease that descriptor-relatively creates exact root-owned mode-`0711`
   `/run/mvmctl/runtime` and per-UID parents, then exclusively creates and pins one caller-owned mode-`0700` VM output
   directory. Existing VM directories and unsafe parents fail closed without repair; partial VM-directory preparation
@@ -247,12 +249,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   upgrade or expression-set change requires an explicit schema audit and digest-version bump.
 - Deterministic input-order evidence remains in L1. On the isolated representative 1,000-VM benchmark, compilation was
   roughly 23–28 ms with about 10 MB and 179,000 allocations; the regression test enforces a 250,000-allocation ceiling.
-- This compiler foundation is inert: it creates no `nftables.Conn` and calls no `Flush`. The separate raw snapshot
-  collector below detects unknown expressions, and a retained exact host-netns authority can create its fresh checked
-  transports, but no application or recovery path invokes them. Qualified initial inspection/adoption,
-  empty-generation deletion or application, privileged action, public policy cutover, legacy `nft` CLI removal, and
-  L2 qualification remain pending. These foundations provide no kernel-application, atomicity, or release-readiness
-  evidence.
+- The compiler itself remains effect-free. Its sealed output is now consumed by the separate private application and
+  reconciliation foundation below; no public caller or production policy path invokes that foundation.
 
 #### Firewall generation authority foundation
 - Added the separate never-unlinked root-owned `/run/mvmctl/authority/firewall.lock` capability plus a strict
@@ -260,15 +258,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added descriptor-relative managed-tree admission and exclusive first publication with exact root ownership/modes,
   stable bounded reads, no-replace rename, fsync, and post-rename creation/durability evidence. The first-publication
   path never repairs or overwrites existing state.
-- Added a private inert acquisition seam that requires earlier network authority, then admits only a record bound to
+- Added a private acquisition seam that requires earlier network authority, then admits only a record bound to
   the current boot and pinned host network namespace. Store, lock, and authority cleanup is pointer-shared, close-once,
   cancellation-independent, and caches its first result.
 - Added evidence-bound atomic replacement of an admitted generation record. The store re-admits the exact record and
   file identity before rename, reads the replacement back afterward, preserves `record_replaced` and
   `durability_uncertain` evidence, and blocks later replacement through a lease whose outcome became ambiguous.
 - The foundation deliberately rejects a missing record because only qualified kernel inspection may establish initial
-  truth. Qualified initial inspection, `nftables.Conn`/`Flush`, empty-generation application, recovery,
-  privileged/public wiring, and system qualification remain pending.
+  truth. Qualified initial inspection/adoption, privileged/public wiring, and system qualification remain pending.
 
 #### Bounded raw nftables snapshot foundation
 - Added a private raw-netlink collector that brackets one logical observation with ruleset-generation reads and chooses
@@ -280,8 +277,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a retained namespace authority that requires the earlier network and generation capabilities to agree, pins
   and rechecks the exact current host network namespace, and supplies fresh strict `NETLINK_NETFILTER` transports to
   the collector through that retained descriptor.
-- The collector and its factory remain inert and uncomposed. No production application path calls them, no real-kernel
-  result is qualified, and no adoption, mutation, recovery, privileged action, or public behavior follows from them.
+- The collector and retained factory now serve the private application coordinator for already admitted records. No
+  production path calls that coordinator, no real-kernel result is qualified, and no initial adoption, privileged
+  action, public behavior, or enforcement follows from it.
+
+#### Private nftables kernel application and reconciliation foundation
+
+- Added a closed coordinator that retains the generation lease's application mutex across the complete
+  record -> kernel -> record transaction. Copied lease applications, standalone record replacement, and release are
+  serialized while the host-global firewall lock and exact host-network-namespace pin remain retained.
+- Before mutation, application validates the compiler-bound seal, exact resource inventories, table/chain/rule shape,
+  terminal default-deny invariants, applying record, and exact observed-before snapshot. Fixed names or a digest alone
+  never grant deletion authority.
+- Added an exact-host-netns lasting `nftables.Conn`. Construction enters the retained namespace on a disposable locked
+  OS thread, restores and verifies the original namespace before return, verifies 32-MiB socket buffers, and applies
+  the earlier of the caller deadline or a 30-second bound. One replacement queues exact observed-table deletion and
+  the complete target, calls `Flush` once, then closes the lasting connection.
+- Cancellation expires only the retained socket's deadline while `Flush` owns it, preventing a transient connection
+  from being redialed outside the selected namespace. Cancellation, interrupt, flush, and close failures are preserved,
+  and cancellation cannot produce success.
+- The durable applying record precedes mutation. Exact-before authorizes one flush, exact-target takes the
+  record-completion path without replay, and unknown retains applying authority. After a commit attempt, one fresh
+  cancellation-independent five-second inspection classifies before/target/unknown under the same transaction lock,
+  firewall lock, and namespace pin. Exact-before attempts to restore the prior committed record and returns an error;
+  exact-target attempts to commit while retaining any application error; unknown remains recoverable with explicit
+  outcome evidence. Record-finalization failures remain explicit, and ambiguous committed replacement blocks later
+  mutation.
+- Applied empty means both reserved tables are absent. Exact empty-to-empty verifies absence without a netlink
+  transaction; an exact admitted non-empty generation can delete both reserved tables in one batch. Partial, foreign,
+  mismatched, corrupt, wrong-boot, wrong-namespace, missing-record, and ambiguous state cannot authorize deletion.
+- This is private L0/L1 evidence only. Qualified initial inspection/adoption, the root/`CAP_NET_ADMIN` threat-model
+  decision, production privileged/public composition, live policy and link enforcement, legacy backend/CLI removal,
+  direct capability probes, real-kernel/Tier tests, and release qualification remain pending.
 
 #### Persistent managed-network authority foundation
 - Added a private strict schema-1 managed-network record, exact codec, and descriptor-relative store. Root persists only
@@ -826,8 +853,8 @@ The following items are release blockers and are intentionally not described abo
   private mount-namespace launch path. Add separate closed descriptor policies for snapshots, volumes, persistent
   outputs, and image provisioning.
 - Keep the implemented closed Firewall capability, evidence-bound generation record replacement, retained host-netns
-  snapshot factory, and inert raw collector private until an application path composes qualified kernel inspection and
-  mutation after network authority; do not add generic paths, descriptors, or lock names.
+  snapshot factory, raw collector, and application/reconciliation coordinator private until qualified initial kernel
+  inspection/adoption follows network authority; do not add generic paths, descriptors, or lock names.
   Then create the separate caller-owned socket/PID output directories beneath
   `/run/mvmctl/runtime`; stop
   mounting the whole cache VM directory, pin persistent config/output leaves individually, truncate enabled `0600`
@@ -849,13 +876,12 @@ The following items are release blockers and are intentionally not described abo
   make one namespace mandatory per VM, and pass its pinned handle to Jailer. Integrate retained activation, rollback,
   reconciliation, cleanup, root-selected single-uplink NAT authority, and snapshot endpoint preservation, then complete
   live L2, snapshot, reboot/failure, clean-break, and leak-free system QA.
-- Use the implemented root-owned global firewall lock, durable committed/applying generation record replacement, and
-  retained exact-host-netns snapshot factory only after resolving the pinned library's missing table/chain provenance,
-  accepting the root/`CAP_NET_ADMIN` threat-model boundary, and composing qualified inspection. Then prove
-  namespace-scoped delete/recreate, invalid-batch, recovery, and actual empty-generation deletion/application against
-  supported kernels before one privileged `Conn.Flush` application can make links usable. Only then remove the
-  iptables backend and selector plus the production `nft` CLI subprocess/parser; the canonical compiler digest is not
-  a kernel application.
+- Use the private record-bound application/reconciliation coordinator in production only after resolving the pinned
+  library's missing table/chain provenance, accepting the root/`CAP_NET_ADMIN` threat-model boundary, and composing
+  qualified initial inspection/adoption. Prove namespace-scoped delete/recreate, invalid-batch recovery, both-table
+  empty removal, cancellation/close behavior, and runtime scale against supported kernels before a privileged
+  `Conn.Flush` application can make links usable. Only then remove the iptables backend and selector plus the
+  production `nft` CLI subprocess/parser; the canonical compiler digest alone is not kernel authority.
 - Complete typed traffic API/CLI and nftables application plus the API-owned vsock relay over the implemented isolated
   source-session, typed policy, and destination-agent foundations. Directional exec-policy CRUD is public but does not
   activate the relay. Add the relay listener/consumer, enforce the exact runtime directional policy, forward only the

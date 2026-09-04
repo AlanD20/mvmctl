@@ -849,8 +849,8 @@ bump. Input ordering is deterministic.
 On the isolated representative 1,000-VM benchmark, compilation was roughly 23–28 ms with about 10 MB and 179,000
 allocations; the regression test enforces a 250,000-allocation ceiling.
 
-The compiler remains inert. A separate implemented authority foundation now provides the never-unlinked global
-`/run/mvmctl/authority/firewall.lock`, a strict committed/applying generation record and bounded codec, and a
+The compiler itself remains effect-free. A separate implemented authority foundation provides the never-unlinked
+global `/run/mvmctl/authority/firewall.lock`, a strict committed/applying generation record and bounded codec, and a
 descriptor-relative exclusive store at `/var/lib/mvmctl/firewall/generation.json`. Its private acquisition seam first
 requires earlier network authority, then binds the admitted record to the current boot and pinned host network
 namespace while retaining pointer-shared cached close-once cleanup authority. It fails when the record is missing
@@ -858,35 +858,62 @@ because only qualified kernel inspection may establish initial authority. An adm
 record only after re-reading both its exact contents and retained file evidence; post-rename readback preserves exact
 `record_replaced` and durability evidence and prevents another mutation after an ambiguous outcome.
 
-A separate inert raw-netlink snapshot collector now issues only receiver-chosen read requests for the two exact managed
-tables, five fixed chains, their rules, and the absence of sets, objects, and flowtables. It brackets collection with
-ruleset-generation reads, uses a shared 32-MiB/20,000-message budget across fresh single-request transports, and feeds
-the replies to the strict raw decoder, which rejects unknown expressions and structural drift. A retained namespace
-authority now requires the earlier network and generation identities to agree, pins and rechecks the exact current host
-network namespace, and supplies fresh strict `NETLINK_NETFILTER` transports through that descriptor. No production
-application or recovery path obtains this factory or invokes the collector, and no real-kernel result is qualified.
+The admitted lease now also retains a private application mutex across the complete record -> kernel -> record
+transaction. The mutex serializes copied lease values, standalone record replacement, application/reconciliation, and
+release while the global firewall lock and exact host-network-namespace pin remain held. Before any kernel effect, the
+adapter revalidates the compiled generation's closed application seal, resource inventories, table/chain/rule shape,
+and terminal default-deny invariants against the durable applying record and a fresh exact kernel snapshot.
 
-Qualified initial inspection/adoption, actual empty-generation deletion/application, `nftables.Conn`/`Flush`, mutation
-and recovery orchestration, privileged action, public policy cutover, legacy `nft` CLI removal, live-kernel
-qualification, and L2 qualification remain pending. These foundations are not evidence of kernel application,
-atomicity, enforcement, or release readiness; the transitional backends and public policy path remain active.
+The raw-netlink collector issues only receiver-chosen read requests for the two exact managed tables, five fixed chains,
+their rules, and the absence of sets, objects, and flowtables. It brackets collection with ruleset-generation reads,
+uses a shared 32-MiB/20,000-message budget across fresh single-request transports, and feeds the replies to the strict
+raw decoder, which rejects unknown expressions and structural drift. The retained namespace authority requires the
+earlier network and generation identities to agree, pins and rechecks the exact current host network namespace, and
+supplies both fresh snapshot transports and a fresh lasting `nftables.Conn` through that descriptor.
+
+Application creates the lasting connection while a disposable locked OS thread is in the retained namespace, then
+restores and verifies the original namespace before returning it. The retained netlink socket has verified 32-MiB
+receive/send buffers and a deadline equal to the earlier of the caller deadline and 30 seconds. The adapter queues
+deletion only for the exact observed managed tables, queues the complete target, calls `Flush` once, and closes the
+lasting connection. Cancellation expires that retained socket's deadline without clearing the lasting connection
+before `Flush` completes, so it cannot redial a transient socket outside the selected namespace. Cancellation, socket
+interrupt, flush, and close errors are all preserved; cancellation cannot be reported as success.
+
+The durable `applying` record precedes mutation. A fresh exact-before observation authorizes one flush, exact-target
+takes the record-completion path without replay, and unknown state preserves applying authority. After a commit attempt,
+one fresh inspection uses a cancellation-independent five-second recovery context under the same transaction lock,
+global firewall lock, and namespace pin. Exact-before attempts to restore the committed-before record and returns an
+error; exact-target attempts to commit target while retaining any application error; and unknown preserves applying
+state with explicit `kernel_generation_state` and `outcome_unknown` evidence. A known failure before the commit boundary
+attempts to restore committed-before without pretending that a kernel mutation occurred. Record-finalization failures
+remain explicit, and an ambiguous committed replacement blocks later mutation.
+
+Applied empty now means both reserved tables are absent. Exact empty-to-empty verifies absence without a netlink
+transaction; an exact admitted non-empty generation may delete both tables in its one replacement batch. Partial,
+foreign, mismatched, corrupt, wrong-boot, wrong-namespace, missing-record, or otherwise ambiguous state never grants
+deletion authority.
+
+This application and reconciliation path is private and has no production caller. Qualified initial
+inspection/adoption, the root/`CAP_NET_ADMIN` threat-model decision, privileged/public composition, link-activation and
+traffic-policy enforcement, legacy `nft` CLI and backend removal, direct capability probes, real-kernel/Tier evidence,
+and release qualification remain pending. The transitional backends and public policy path remain active.
 
 ADR-0017 defines the remaining clean-break replacement. Before any fixed-name table can be replaced or removed, root
 must hold the never-unlinked global `/run/mvmctl/authority/firewall.lock` and bind the exact observed generation to the
 strict `/var/lib/mvmctl/firewall/generation.json` authority record. The compiler now derives the canonical digest, but
-that digest alone is neither kernel ownership nor deletion authority. An applied empty generation must mean both
-reserved tables are absent; the implemented empty compiler output does not yet inspect, delete, or apply kernel state.
-Missing, corrupt, mismatched, or ambiguous authority never permits deletion.
+that digest alone is neither kernel ownership nor deletion authority. The private adapter implements record-bound
+exact-state deletion and empty application, but no missing-record initial-adoption path. Missing, corrupt, mismatched,
+or ambiguous authority never permits deletion.
 
 `github.com/google/nftables v0.3.0` exposes rule userdata but no table/chain ownership metadata, and its structured rule
-reader can omit expression types it does not understand. The inert raw collector and retained host-netns factory close
-the expression-decoder and namespace-selection seams, but root-record-bound live inspection within an accepted threat
-model for another root or `CAP_NET_ADMIN` actor and real-kernel delete/recreate batch atomicity remain explicit
-activation gates. The final adapter must resolve those gates, apply one complete generation directly, then remove
-iptables, the backend selector, backend-specific repositories, and the production `nft` CLI path. Library and netlink
-types stay private to that adapter; there is no final CLI fallback. Kernel nftables, bridge-family, connection-tracking,
-NAT, and privilege capabilities remain host requirements. A disposable QA runner may use the `nft` CLI only as an
-independent read-only oracle.
+reader can omit expression types it does not understand. The raw collector and retained host-netns factory close the
+expression-decoder and namespace-selection seams. The private application coordinator composes them only for an
+already admitted record; root-record-bound initial live inspection within an accepted threat model for another root or
+`CAP_NET_ADMIN` actor and real-kernel delete/recreate batch atomicity remain explicit activation gates. After those
+gates, production composition must remove iptables, the backend selector, backend-specific repositories, and the
+production `nft` CLI path. Library and netlink types stay private to the adapter; there is no final CLI fallback.
+Kernel nftables, bridge-family, connection-tracking, NAT, and privilege capabilities remain host requirements. A
+disposable QA runner may use the `nft` CLI only as an independent read-only oracle.
 
 ## Relationships
 

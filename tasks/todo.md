@@ -684,15 +684,15 @@ pending
 - [x] Add evidence-bound atomic replacement for an admitted generation record. Re-admit the exact expected value and
   file identity immediately before rename, read back the replacement, retain exact post-rename/durability evidence,
   and block another mutation after an ambiguous committed outcome. This mutates only the record, not nftables.
-- [x] Add the inert bounded raw-netlink snapshot transport/collector and strict decoder. It chooses only the exact
+- [x] Add the private bounded raw-netlink snapshot transport/collector and strict decoder. It chooses only the exact
   managed tables, fixed chains, rules, sets, objects, and flowtables; brackets collection with generation reads; shares
   one 32-MiB/20,000-message budget across fresh request transports; and rejects unknown expressions, forbidden object
   classes, malformed replies, and generation drift.
 - [x] Add the retained exact-host-netns snapshot transport factory after earlier network and generation authority agree.
   Pin and recheck `/proc/self/ns/net`, then create each fresh strict `NETLINK_NETFILTER` connection through that
-  descriptor with checked close-once cleanup. No production application/recovery path obtains the factory or invokes
-  the collector, and no real-kernel result is qualified.
-- [ ] Define empty as both reserved tables absent; never create empty tables or delete ambiguous, foreign, partial,
+  descriptor with checked close-once cleanup. The private application coordinator now obtains the factory and invokes
+  the collector for already admitted records; no production caller or real-kernel result is qualified.
+- [x] Define empty as both reserved tables absent; never create empty tables or delete ambiguous, foreign, partial,
   missing-record, corrupt-record, wrong-boot, wrong-netns, or mismatched fixed-name state.
 - [ ] Resolve the remaining v0.3.0 inspection gates before activation: table/chain values have no ownership userdata.
   Explicitly accept the root/`CAP_NET_ADMIN` threat-model boundary and compose the raw collector and retained factory
@@ -701,14 +701,20 @@ pending
   isolation, lasting-connection cancellation/checked close, valid delete/create replacement, late-invalid-batch
   atomicity, both-table empty removal, recovery inspection, and representative 1,000-VM runtime within a reviewed
   budget.
-- [ ] Add typed privileged nftables application under `internal/service/firewall/`; caller cannot pass syntax, files,
-  includes, commands, or library/netlink types across the privileged wire.
+- [x] Add the private typed nftables kernel-application seam under `internal/service/firewall/`. It accepts only a
+  retained generation lease, exact namespace capability, and sealed compiled generations; it exposes no syntax, files,
+  includes, commands, descriptors, or generic operation. Production privileged/public composition remains pending.
+- [ ] Compose the private application behind a typed privileged action. Caller-controlled syntax, files, includes,
+  commands, and library/netlink types must not cross that wire.
 - [ ] Keep `github.com/mdlayher/netlink` transitive only; do not add a second low-level adapter or a production CLI
   fallback.
 - [ ] Install bridge-family anti-spoofing and same-network filtering.
 - [ ] Install routed, VM-to-host, established reply, required system service, egress, and NAT rules.
-- [ ] Apply each complete generation with one `Conn.Flush` transaction before links become usable.
-- [ ] Propagate every initialization, parent-chain, ordering, and batch failure.
+- [x] Queue each exact-before -> target replacement on one exact-host-netns lasting `nftables.Conn`, call `Flush` once,
+  and freshly reconcile exact before/target/unknown under the retained application transaction lock. Link activation
+  does not consume this private path yet.
+- [x] Propagate initialization, namespace restoration, target-validation, ordering, cancellation, socket-interrupt,
+  flush, close, recovery-inspection, and record-finalization failures in private L0/L1 coverage.
 - [ ] Remove iptables renderer/repository/tests, backend enum/selector/config, production `nft` subprocess/parser, raw
   sudo rule, and obsolete documentation; do not require `libnftnl` or `nftables.service` at runtime.
 - [ ] Probe required kernel nftables, bridge-family, connection-tracking, and NAT capabilities directly rather than
@@ -716,6 +722,11 @@ pending
 - [ ] Complete L1 with kernel-application atomic failure, cancellation, reconciliation, and runtime scale. L2 may use
   the `nft` CLI only as an independent read-only oracle and prove the installed product has no production CLI
   dependency.
+
+The completed application items are a private, uncomposed L0/L1 foundation only. Initial record inspection/adoption,
+the root/`CAP_NET_ADMIN` threat-model decision, the real-kernel isolated-netns spike and runtime budget, production
+privileged/public composition, actual policy and link enforcement, legacy-backend removal, capability probes, Tier
+tests, and release qualification remain blockers.
 
 ### Task 11: Replace service-access policy with typed traffic policies
 

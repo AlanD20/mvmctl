@@ -40,16 +40,16 @@ continue without silently deleting it.
   `internal/lib/authorityfs` leaf module now owns the initializer and closed Jailer/UID/lock capabilities; copied values
   share lifecycle state, and checked idempotent release caches its first result without retry. Its separate LoopMount,
   Network, and Firewall families provide canonical resource locks to their owning services. The firewall family is
-  consumed only by an inert generation authority, and the LoopMount provision/inspect actions are registered only in
-  the private receiver. The Network family also owns an exact per-VM namespace placeholder used only by the uncomposed
-  namespace effect. A separate private Jailer lease now creates and pins the exact root-controlled
+  consumed only by the private generation authority/application coordinator. LoopMount provision/inspect actions are
+  registered only in the private receiver. The Network family also owns an exact per-VM namespace placeholder used only
+  by the uncomposed namespace effect. A separate private Jailer lease now creates and pins the exact root-controlled
   `/run/mvmctl/runtime/<uid>/<vm-id>` hierarchy, unlinks only the five compiled runtime leaves, and removes only the
   identity-checked empty VM directory, including effectful-unlink and parent-sync retry reconciliation. Durable launch
   authority retains it through activation or abort and cleanup, which refuses `cleaned` for a directory, mount, or
   unexpected name. Fresh cleanup reopens only the exact existing root-controlled hierarchy, creates or repairs no
   recovery state, treats absence as clean, and retains retryable `cleaning` on unsafe state. It is not mounted or
-  publicly composed yet; no live production topology, public LoopMount backend cutover, or firewall kernel effect
-  exists.
+  publicly composed yet; no live production topology, public LoopMount backend cutover, or production firewall
+  enforcement exists.
 - Private managed-cache locator and lease foundation with descriptor-relative component traversal, synchronized
   owner/mode/identity checks, an explicit local-filesystem policy, retained descriptors, and identity-checked re-pin.
 - Private base VM launch-resource selection and lease for fixed rootfs, Firecracker configuration, kernel, and optional
@@ -162,7 +162,8 @@ continue without silently deleting it.
 - Private typed nftables compiler pinned to `github.com/google/nftables v0.3.0`, with fixed bridge/inet tables and
   chains, raw-priority ingress guards, same-network/routed/host-service/default-deny/conditional-egress/NAT rules,
   compiler-derived canonical SHA-256 generation identity, strict digest-bound userdata, explicit empty output,
-  resolved-IPv4 rejection, and deterministic bounded 1,000-VM L1 evidence. It performs no kernel or privileged effect.
+  resolved-IPv4 rejection, and deterministic bounded 1,000-VM L1 evidence. The compiler remains effect-free; its output
+  now feeds only the private application/reconciliation foundation described below.
 - Named typed LoopMount client/protocol methods for VM provisioning and image inspection/optimization, with grow-only
   VM resize, bounded typed values, and strict process-start/response-EOF authority. A private rootfs authority pins the
   caller-owned cache and fixed VM/image rootfs through retained descriptors, enforces local-filesystem, identity, mode,
@@ -214,12 +215,15 @@ continue without silently deleting it.
 - Private firewall generation authority with a strict committed/applying record and codec, descriptor-relative
   exclusive store at `/var/lib/mvmctl/firewall/generation.json`, and never-unlinked global
   `/run/mvmctl/authority/firewall.lock`. Acquisition requires earlier network authority and admits only the current boot
-  and host network namespace. A separate inert bounded raw-netlink snapshot collector now reads only the exact managed
+  and host network namespace. A bounded raw-netlink snapshot collector reads only the exact managed
   tables/chains/rules and rejects unknown expressions, forbidden object classes, generation drift, and cap violations.
-  The generation lease now supports evidence-bound atomic record replacement, and a retained exact-host-netns authority
-  can supply fresh checked snapshot transports after network and generation authority agree. No production application
-  or recovery path invokes that factory or collector; `nftables.Conn`/`Flush`, mutation, privileged action, public
-  consumer, and system tests remain absent.
+  The generation lease supports evidence-bound atomic record replacement and retains one application mutex across
+  record -> kernel -> record reconciliation, standalone replacement, and release. After network and generation
+  authority agree, the retained exact-host-netns capability supplies fresh snapshot transports and one lasting
+  application connection with verified buffers and a bounded deadline. Exact-before authorizes one `Flush`,
+  exact-target commits without replay, unknown retains applying authority, and applied empty means both managed tables
+  are absent. This is private L0/L1 behavior only: initial inspection/adoption, a privileged/public consumer,
+  real-kernel/Tier tests, and production enforcement remain absent.
 - Architecture-scoped binary display projection and complete public trusted-release cutover. SQLite records
   architecture and atomically replaces/removes exact release pairs. Public pull/remove invoke typed root authority and
   reconcile only authoritative results; local list/default/prune never inspect root-owned paths. The legacy local
@@ -919,37 +923,51 @@ validation, encoding, or finalization failures. Module or expression-set changes
 digest-version bump. The isolated representative 1,000-VM benchmark was roughly 23–28 ms, 10 MB, and 179,000
 allocations, with a 250,000-allocation L1 ceiling.
 
-This compiler creates no `nftables.Conn` and calls no `Flush`. A separate implemented private foundation provides the
-strict committed/applying generation record and codec, its exclusive descriptor-relative store, the global firewall
-lock, same-boot/host-netns admission after earlier network authority, evidence-bound atomic record replacement, and
-cached close-once cleanup. An inert raw-netlink collector now brackets exact managed-table, fixed-chain, rule, set,
-object, and flowtable observations with ruleset-generation reads; applies one shared 32-MiB/20,000-message budget across
-fresh request transports; and uses the strict raw decoder to reject unknown expressions and structural drift. A
-retained exact-host-netns authority requires the earlier network and generation identities to agree and can supply the
-collector with fresh strict `NETLINK_NETFILTER` transports through its rechecked descriptor. No production application
-or recovery call site obtains that factory or invokes the collector.
-Qualified initial inspection/adoption, actual empty-generation deletion/application, `nftables.Conn`/`Flush`, mutation
-and recovery orchestration, privileged registration/application, public policy cutover, legacy `nft` CLI removal, and
-L2 qualification remain pending. Until then there is no kernel effect, enforcement, or atomicity evidence.
+The compiler itself creates no connection or effect. The admitted generation lease now privately composes its strict
+committed/applying record, exclusive descriptor-relative store, never-unlinked global lock, retained exact-host-netns
+authority, raw collector, and typed application adapter. One retained application mutex serializes the complete
+record -> kernel -> record transaction, standalone record replacement, and release across copied lease values while
+the global firewall lock and namespace pin remain held.
 
-Before any fixed-name deletion, the final adapter must hold the never-unlinked host-global
+Before mutation, the adapter validates the compiler-bound application seal, exact managed-resource inventories,
+table/chain/rule shape, terminal default-deny invariants, applying record, and exact observed-before snapshot. It
+creates one lasting `nftables.Conn` while a disposable locked thread is in the retained namespace, then restores and
+verifies the original namespace. It configures verified 32-MiB socket buffers and the earlier of the caller deadline or
+30 seconds, queues exact observed-table deletion plus the complete target, calls `Flush` once, and closes the
+connection.
+Cancellation expires only the retained socket deadline until `Flush` finishes, preventing a transient namespace redial.
+
+Reconciliation durably records applying before mutation. Exact-before permits one flush; exact-target takes the
+record-completion path without replay; unknown preserves applying authority. After any commit attempt, one fresh
+inspection runs under a cancellation-independent five-second bound and the same transaction lock, global lock, and
+namespace pin. Exact-before attempts to restore committed-before and returns an error; exact-target attempts to commit
+while preserving any cancellation/flush/close error; and unknown retains applying with explicit outcome evidence. A
+known pre-commit failure also attempts to restore committed-before. Record-finalization failures remain explicit, and
+ambiguous committed replacement blocks later mutation.
+
+Applied empty means both reserved tables are absent. Exact empty-to-empty is an inspection-only no-op, while an exact
+admitted non-empty generation can delete both tables in the one replacement batch. Partial, foreign, mismatched,
+corrupt, wrong-boot, wrong-namespace, missing-record, and ambiguous state cannot authorize deletion.
+
+This kernel application/reconciliation path remains private and unreferenced by production composition. Qualified
+initial inspection/adoption, the root/`CAP_NET_ADMIN` threat-model decision, privileged/public wiring, live link and
+traffic-policy enforcement, legacy backend and `nft` CLI removal, direct kernel capability probes, real-kernel/Tier
+evidence, and release qualification remain pending.
+
+Before any fixed-name deletion, the private adapter must hold the never-unlinked host-global
 `/run/mvmctl/authority/firewall.lock` and admit the strict root-owned
 `/var/lib/mvmctl/firewall/generation.json` record. The record binds committed/applying state, boot ID, host network
 namespace identity, empty state, and exact before/target generation identities. The compiler now derives the canonical
 generation digest, but it is not kernel ownership or deletion authority. Applied empty state means both reserved tables
-are absent; the compiler's empty output does not delete or apply them. Missing, corrupt, mismatched, partial, or foreign
-fixed-name state is never adopted or deleted.
+are absent; the private adapter mutates toward it only from exact retained non-empty authority. Missing, corrupt,
+mismatched, partial, or foreign fixed-name state is never adopted or deleted.
 
 The pinned library exposes rule userdata but no table/chain ownership metadata, and structured `GetRules` can omit
-unknown expression types. The inert raw collector and retained factory detect unknown raw expressions in an exact
-namespace, but root-record-bound live state can become authority only within an explicitly accepted threat model for
-other root/`CAP_NET_ADMIN` actors and a qualified production composition of inspection with application/recovery. A
-fresh explicitly namespace-bound lasting connection performs one replacement batch; a fresh connection inspects the
-result.
-Cancellation or a flush failure gets one bounded recovery inspection under the same lock and namespace pin, never a
-retry on the used connection. Real-kernel isolated-namespace tests must still prove delete/create and late-invalid-batch
-atomicity, both-table empty removal, namespace isolation, exact expression inspection, cancellation/close behavior, and
-the reviewed 1,000-VM budget before activation.
+unknown expression types. The raw collector and retained factory detect unknown raw expressions in an exact namespace,
+but root-record-bound initial live state can become authority only within an explicitly accepted threat model for other
+root/`CAP_NET_ADMIN` actors and a qualified production composition. Real-kernel isolated-namespace tests must still
+prove delete/create and late-invalid-batch atomicity, both-table empty removal, namespace isolation, exact expression
+inspection, cancellation/close behavior, and the reviewed 1,000-VM budget before activation.
 
 The final production path must not execute or parse the `nft` CLI, use `libnftnl`, depend on `nftables.service`, or
 retain a CLI fallback. Host readiness must probe kernel capabilities directly. A disposable QA runner may use `nft`
