@@ -112,6 +112,7 @@ func activateVerifiedProcessWithDeps(
 		processes:        state.processes,
 		jailDestination:  verified.destination,
 		networkNamespace: state.networkNamespace,
+		runtimeDirectory: state.runtimeDirectory,
 		record:           activeRecord,
 	}}
 	state.directories = nil
@@ -120,6 +121,7 @@ func activateVerifiedProcessWithDeps(
 	state.processes = nil
 	state.jailDestination = nil
 	state.networkNamespace = nil
+	state.runtimeDirectory = nil
 	state.record = activeRecord
 	state.released = true
 	if writeErr != nil {

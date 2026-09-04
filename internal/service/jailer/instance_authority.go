@@ -30,6 +30,7 @@ type launchLeaseState struct {
 	preparedJailDestination *preparedJailDestination
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
+	runtimeDirectory        *managedVMRuntimeLease
 	record                  instanceRecord
 	released                bool
 	cleanupErr              error
@@ -42,6 +43,7 @@ type launchLeaseSnapshot struct {
 	hasProcesses               bool
 	hasPreparedJailDestination bool
 	hasJailDestination         bool
+	hasRuntimeDirectory        bool
 	prepared                   preparedReleaseSnapshot
 	released                   bool
 }
@@ -59,6 +61,7 @@ type activeLeaseState struct {
 	processes        *blockedLaunchProcesses
 	jailDestination  *jailDestinationLease
 	networkNamespace *topologySelectedNetworkNamespace
+	runtimeDirectory *managedVMRuntimeLease
 	record           instanceRecord
 	released         bool
 	releaseErr       error
@@ -79,6 +82,7 @@ type cleanupLeaseState struct {
 	preparedJailDestination *preparedJailDestination
 	jailDestination         *jailDestinationLease
 	networkNamespace        *topologySelectedNetworkNamespace
+	runtimeDirectory        *managedVMRuntimeLease
 	record                  instanceRecord
 	released                bool
 	releaseErr              error
@@ -708,6 +712,15 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 		}
 		state.recoveredProcesses = nil
 	}
+	if state.runtimeDirectory != nil {
+		if err := state.runtimeDirectory.Remove(cleanupCtx); err != nil {
+			return appendInstanceOperationError(nil, "remove cleanup managed VM runtime directory", err)
+		}
+		if err := state.runtimeDirectory.Release(cleanupCtx); err != nil {
+			return appendInstanceOperationError(nil, "release cleanup managed VM runtime directory", err)
+		}
+		state.runtimeDirectory = nil
+	}
 	return nil
 }
 
@@ -908,6 +921,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 		preparedJailDestination: state.preparedJailDestination,
 		jailDestination:         state.jailDestination,
 		networkNamespace:        state.networkNamespace,
+		runtimeDirectory:        state.runtimeDirectory,
 		record:                  record,
 	}}
 	state.directories = nil
@@ -917,6 +931,7 @@ func (lease *launchLease) Abort(ctx context.Context) (_ *cleanupLease, returnErr
 	state.preparedJailDestination = nil
 	state.jailDestination = nil
 	state.networkNamespace = nil
+	state.runtimeDirectory = nil
 	state.record = record
 	state.released = true
 	if writeErr != nil {
@@ -987,6 +1002,7 @@ func (lease *launchLease) snapshot() launchLeaseSnapshot {
 		hasProcesses:               state.processes != nil,
 		hasPreparedJailDestination: state.preparedJailDestination != nil,
 		hasJailDestination:         state.jailDestination != nil,
+		hasRuntimeDirectory:        state.runtimeDirectory != nil,
 		released:                   state.released,
 	}
 	if state.prepared != nil {
@@ -1049,6 +1065,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 		processes:        state.processes,
 		jailDestination:  state.jailDestination,
 		networkNamespace: state.networkNamespace,
+		runtimeDirectory: state.runtimeDirectory,
 		record:           record,
 	}}
 	state.roots = nil
@@ -1058,6 +1075,7 @@ func (lease *activeLease) BeginCleanup(ctx context.Context) (_ *cleanupLease, re
 	state.processes = nil
 	state.jailDestination = nil
 	state.networkNamespace = nil
+	state.runtimeDirectory = nil
 	state.record = record
 	state.released = true
 	if writeErr != nil {
@@ -1094,7 +1112,8 @@ func (lease *activeLease) Release(ctx context.Context) error {
 	if state.released {
 		return state.releaseErr
 	}
-	if state.prepared != nil || state.processes != nil || state.jailDestination != nil {
+	if state.prepared != nil || state.processes != nil || state.jailDestination != nil ||
+		state.runtimeDirectory != nil {
 		return instanceStateError(state.record.vmID, "live active authority must be consumed by BeginCleanup")
 	}
 	state.releaseErr = releaseInstanceOperationResources(
@@ -1126,7 +1145,8 @@ func (lease *cleanupLease) Release(ctx context.Context) error {
 	if state.record.lifecycle != instanceLifecycleCleaned || state.processes != nil ||
 		state.recoveredProcesses != nil ||
 		state.preparedJailDestination != nil ||
-		state.jailDestination != nil {
+		state.jailDestination != nil ||
+		state.runtimeDirectory != nil {
 		return instanceStateError(state.record.vmID, "cleanup must complete before releasing retained authority")
 	}
 	result := error(nil)
