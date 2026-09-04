@@ -2,10 +2,12 @@ package jailer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -57,6 +59,50 @@ func TestVerifyRecoveredActiveIdentityReturnsNoObservationUntilDigestProofComple
 	}
 }
 
+// Rationale: The returned Firecracker metadata is reusable only after a present relay's complete recorded identity
+// and executable digest have also been verified.
+func TestVerifyRecoveredActiveIdentityReturnsNoObservationUntilRelayProofCompletes(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		mutate func(*instanceRecord, *fakeProcessIdentityDeps)
+		want   string
+	}{
+		"identity": {
+			mutate: func(_ *instanceRecord, fake *fakeProcessIdentityDeps) {
+				wrongNamespace := fake.stats[121][0]
+				wrongNamespace.Ino++
+				fake.stats[121] = []unix.Stat_t{wrongNamespace}
+			},
+			want: "recovered relay does not match full active identity",
+		},
+		"digest": {
+			mutate: func(record *instanceRecord, _ *fakeProcessIdentityDeps) {
+				record.active.relay.executable.sha256 =
+					"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+			},
+			want: "recovered relay digest does not match active identity",
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			record, fake := activeRecoveryTestRecordWithRelay(t, true)
+			tc.mutate(&record, fake)
+
+			observed, err := verifyRecoveredActiveIdentity(t.Context(), fake.deps(), record)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.want)
+			if diff := cmp.Diff(
+				processObservation{},
+				observed,
+				cmp.AllowUnexported(processObservation{}, processCredentialIdentity{}),
+			); diff != "" {
+				t.Errorf("relay-rejected recovered observation mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestReopenedRecordedProcessesObserveLaunchingFirecrackerMetadataOnly(t *testing.T) {
 	t.Parallel()
 
@@ -72,11 +118,49 @@ func TestReopenedRecordedProcessesObserveLaunchingFirecrackerMetadataOnly(t *tes
 	); diff != "" {
 		t.Errorf("launching Firecracker observation mismatch (-want +got):\n%s", diff)
 	}
-	assert.Equal(t, []int{processTestFirecrackerPIDFD, processTestFirecrackerPIDFD}, recovery.aliveFDs)
-	assert.Equal(t, []int{processTestFirecrackerPIDFD, processTestFirecrackerPIDFD}, recovery.locatorFDs)
-	assert.Equal(t, 1, recovery.metadataObservations)
+	wantEvents := []string{
+		"alive:100",
+		"locator:100",
+		"metadata:stat",
+		"metadata:status",
+		"metadata:cgroup",
+		"alive:100",
+		"locator:100",
+		"proc-close:110",
+	}
+	if diff := cmp.Diff(wantEvents, recovery.events); diff != "" {
+		t.Errorf("launching Firecracker proof order mismatch (-want +got):\n%s", diff)
+	}
 	assert.NotContains(t, recovery.aliveFDs, processTestRelayPIDFD)
 	assert.NotContains(t, recovery.locatorFDs, processTestRelayPIDFD)
+	require.NoError(t, processes.Release(t.Context()))
+}
+
+// Rationale: A process-directory close failure is part of the observation operation. The caller must not receive
+// reusable metadata together with that error, and the original close cause must remain discoverable.
+func TestReopenedRecordedProcessesObserveLaunchingFirecrackerCloseFailureReturnsNoObservation(t *testing.T) {
+	t.Parallel()
+
+	processes, probe := newLaunchingRecoveryProcessTestAuthority()
+	closeErr := errors.New("injected process directory close failure")
+	probe.observationCloseErr = closeErr
+
+	observed, err := processes.observeLaunchingFirecracker(
+		t.Context(),
+		launchingRecoveryObservationDeps(probe),
+	)
+	require.ErrorIs(t, err, closeErr)
+	assert.Contains(t, err.Error(), "close temporary process identity descriptor")
+	if diff := cmp.Diff(
+		processObservation{},
+		observed,
+		cmp.AllowUnexported(processObservation{}, processCredentialIdentity{}),
+	); diff != "" {
+		t.Errorf("close-rejected launching observation mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]int{processTestFirecrackerDirFD}, probe.observationClosedFDs); diff != "" {
+		t.Errorf("closed process observation descriptors mismatch (-want +got):\n%s", diff)
+	}
 	require.NoError(t, processes.Release(t.Context()))
 }
 
@@ -154,11 +238,19 @@ func TestReopenedRecordedProcessesObservationCallbacksRunOutsideLockAndRejectCon
 	t.Parallel()
 
 	processes, probe := newLaunchingRecoveryProcessTestAuthority()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
 	callbackEntered := make(chan struct{})
 	resumeCallback := make(chan struct{})
+	var resumeOnce sync.Once
+	resume := func() { resumeOnce.Do(func() { close(resumeCallback) }) }
+	defer resume()
 	probe.onAlive = func() {
 		close(callbackEntered)
-		<-resumeCallback
+		select {
+		case <-resumeCallback:
+		case <-ctx.Done():
+		}
 	}
 	type observationResult struct {
 		observation processObservation
@@ -167,23 +259,32 @@ func TestReopenedRecordedProcessesObservationCallbacksRunOutsideLockAndRejectCon
 	result := make(chan observationResult, 1)
 	go func() {
 		observed, err := processes.observeLaunchingFirecracker(
-			t.Context(),
+			ctx,
 			launchingRecoveryObservationDeps(probe),
 		)
 		result <- observationResult{observation: observed, err: err}
 	}()
-	<-callbackEntered
+	select {
+	case <-callbackEntered:
+	case <-ctx.Done():
+		t.Fatalf("wait for observation callback: %v", ctx.Err())
+	}
 	if !processes.state.mu.TryLock() {
 		t.Fatal("pidfd callback ran while recovery mutex was held")
 	}
 	processes.state.mu.Unlock()
 	_, nestedObservationErr := processes.observeLaunchingFirecracker(
-		t.Context(),
+		ctx,
 		launchingRecoveryObservationDeps(probe),
 	)
-	releaseErr := processes.Release(t.Context())
-	close(resumeCallback)
-	completed := <-result
+	releaseErr := processes.Release(ctx)
+	resume()
+	var completed observationResult
+	select {
+	case completed = <-result:
+	case <-ctx.Done():
+		t.Fatalf("wait for completed observation: %v", ctx.Err())
+	}
 
 	observed, err := completed.observation, completed.err
 	require.NoError(t, err)
@@ -200,7 +301,9 @@ func TestReopenedRecordedProcessesObservationCallbacksRunOutsideLockAndRejectCon
 	assert.Contains(t, releaseErr.Error(), "verification is in progress")
 	assert.Empty(t, probe.closedFDs)
 	require.NoError(t, processes.Release(t.Context()))
-	assert.Equal(t, []int{processTestRelayPIDFD, processTestFirecrackerPIDFD}, probe.closedFDs)
+	if diff := cmp.Diff([]int{processTestRelayPIDFD, processTestFirecrackerPIDFD}, probe.closedFDs); diff != "" {
+		t.Errorf("released recovered process descriptors mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func TestBeginFreshRecoveryCleanupVerifiesFullIdentityAndTerminatesThroughPIDFDs(t *testing.T) {
@@ -222,7 +325,9 @@ func TestBeginFreshRecoveryCleanupVerifiesFullIdentityAndTerminatesThroughPIDFDs
 	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
 	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
-	assert.Equal(t, []string{"open:4242", "signal:700", "reap:700", "close:700"}, events.snapshot())
+	if diff := cmp.Diff([]string{"open:4242", "signal:700", "reap:700", "close:700"}, events.snapshot()); diff != "" {
+		t.Errorf("fresh recovery event order mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func TestBeginFreshRecoveryCleanupRejectsFullIdentityMismatchWithoutSignal(t *testing.T) {
@@ -245,7 +350,9 @@ func TestBeginFreshRecoveryCleanupRejectsFullIdentityMismatchWithoutSignal(t *te
 	assert.Nil(t, cleanup)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "full active identity")
-	assert.Equal(t, []string{"open:4242", "close:700"}, events.snapshot())
+	if diff := cmp.Diff([]string{"open:4242", "close:700"}, events.snapshot()); diff != "" {
+		t.Errorf("rejected fresh recovery event order mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func TestBeginFreshRecoveryCleanupBootMismatchCleansWithoutOpeningOrSignalingPIDFD(t *testing.T) {
@@ -271,8 +378,15 @@ func TestBeginFreshRecoveryCleanupBootMismatchCleansWithoutOpeningOrSignalingPID
 }
 
 func activeRecoveryTestRecord(t *testing.T) (instanceRecord, *fakeProcessIdentityDeps) {
+	return activeRecoveryTestRecordWithRelay(t, false)
+}
+
+func activeRecoveryTestRecordWithRelay(
+	t *testing.T,
+	relayPresent bool,
+) (instanceRecord, *fakeProcessIdentityDeps) {
 	t.Helper()
-	fixture := newProcessIdentityFixture(t, false)
+	fixture := newProcessIdentityFixture(t, relayPresent)
 	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
 	require.NoError(t, err)
 	record := active.snapshot()
@@ -291,6 +405,11 @@ func activeRecoveryTestRecord(t *testing.T) (instanceRecord, *fakeProcessIdentit
 	), 2)
 	fake.stats[116] = repeatProcessStat(fake.stats[113][0], 3)
 	fake.contents[116] = append([]byte{}, fake.contents[203]...)
+	if relayPresent {
+		relayExecutable := fake.stats[126][0]
+		fake.stats[126] = repeatProcessStat(relayExecutable, 3)
+		fake.contents[126] = []byte("exact pinned receiver executable")
+	}
 	return record, fake
 }
 
@@ -343,13 +462,15 @@ func newActiveRecoveryTestAuthority(
 type launchingRecoveryProcessProbe struct {
 	alive                  []bool
 	locators               []instanceProcessLocator
+	events                 []string
 	aliveFDs               []int
 	locatorFDs             []int
 	closedFDs              []int
+	observationClosedFDs   []int
 	aliveIndex             int
 	locatorIndex           int
 	observedStartTimeTicks uint64
-	metadataObservations   int
+	observationCloseErr    error
 	onAlive                func()
 }
 
@@ -363,6 +484,7 @@ func newLaunchingRecoveryProcessTestAuthority() (*reopenedRecordedProcesses, *la
 	state := &reopenedRecordedProcessesState{vmID: testVMID}
 	state.deps = processRecoveryDeps{
 		pidfdAlive: func(_ context.Context, fd int) (bool, error) {
+			probe.events = append(probe.events, fmt.Sprintf("alive:%d", fd))
 			probe.aliveFDs = append(probe.aliveFDs, fd)
 			if probe.onAlive != nil {
 				onAlive := probe.onAlive
@@ -377,6 +499,7 @@ func newLaunchingRecoveryProcessTestAuthority() (*reopenedRecordedProcesses, *la
 			return alive, nil
 		},
 		deriveLocator: func(_ context.Context, fd int) (instanceProcessLocator, error) {
+			probe.events = append(probe.events, fmt.Sprintf("locator:%d", fd))
 			probe.locatorFDs = append(probe.locatorFDs, fd)
 			if probe.locatorIndex >= len(probe.locators) {
 				return instanceProcessLocator{}, io.EOF
@@ -421,26 +544,30 @@ func launchingRecoveryObservationDeps(probe *launchingRecoveryProcessProbe) proc
 			if directoryFD != processTestFirecrackerDirFD {
 				return nil, fmt.Errorf("unexpected process directory fd %d", directoryFD)
 			}
-			if kind == processStatMetadata {
-				probe.metadataObservations++
-			}
 			switch kind {
 			case processStatMetadata:
+				probe.events = append(probe.events, "metadata:stat")
 				return []byte(testProcessStat(
 					processTestFirecrackerPID,
 					probe.observedStartTimeTicks,
 					"S",
 				)), nil
 			case processStatusMetadata:
+				probe.events = append(probe.events, "metadata:status")
 				return []byte(testProcessStatus(testAuthorityUID, testAuthorityGID, "")), nil
 			case processCgroupMetadata:
+				probe.events = append(probe.events, "metadata:cgroup")
 				return []byte("0::/" + infra.JailerCgroupParent + "/" + testVMID + "\n"), nil
 			default:
 				return nil, fmt.Errorf("unexpected process metadata kind %d", kind)
 			}
 		},
 		descriptorFlags: func(context.Context, int) (int, error) { return unix.FD_CLOEXEC, nil },
-		close:           func(context.Context, int) error { return nil },
+		close: func(_ context.Context, fd int) error {
+			probe.events = append(probe.events, fmt.Sprintf("proc-close:%d", fd))
+			probe.observationClosedFDs = append(probe.observationClosedFDs, fd)
+			return probe.observationCloseErr
+		},
 	}
 }
 

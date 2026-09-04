@@ -3,6 +3,7 @@ package jailer
 import (
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -93,8 +94,12 @@ func TestRetainedRecoveredCgroupProcessVerifierReprovesOnlyFirecrackerBeforeAndA
 		processTestLocator(),
 		launchingRecoveryProcessObservation(),
 	))
-	assert.Equal(t, []int{processTestFirecrackerPIDFD, processTestFirecrackerPIDFD}, probe.aliveFDs)
-	assert.Equal(t, []int{processTestFirecrackerPIDFD, processTestFirecrackerPIDFD}, probe.locatorFDs)
+	if diff := cmp.Diff([]int{processTestFirecrackerPIDFD, processTestFirecrackerPIDFD}, probe.aliveFDs); diff != "" {
+		t.Errorf("Firecracker liveness pidfds mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([]int{processTestFirecrackerPIDFD, processTestFirecrackerPIDFD}, probe.locatorFDs); diff != "" {
+		t.Errorf("Firecracker locator pidfds mismatch (-want +got):\n%s", diff)
+	}
 	assert.NotContains(t, probe.aliveFDs, processTestRelayPIDFD)
 	assert.NotContains(t, probe.locatorFDs, processTestRelayPIDFD)
 	require.NoError(t, processes.Release(t.Context()))

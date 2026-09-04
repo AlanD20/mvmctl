@@ -349,7 +349,7 @@ func (processes *reopenedRecordedProcesses) verifyFirecracker(
 func (processes *reopenedRecordedProcesses) observeLaunchingFirecracker(
 	ctx context.Context,
 	deps processIdentityVerifierDeps,
-) (_ processObservation, returnErr error) {
+) (result processObservation, returnErr error) {
 	if deps.openProcessDirectory == nil || deps.readProcessMetadata == nil || deps.descriptorFlags == nil ||
 		deps.close == nil {
 		return processObservation{}, processVerificationError(
@@ -371,7 +371,12 @@ func (processes *reopenedRecordedProcesses) observeLaunchingFirecracker(
 		return processObservation{}, err
 	}
 	descriptors := processVerificationDescriptors{deps: deps, vmID: verification.vmID}
-	defer func() { returnErr = descriptors.closeAll(ctx, returnErr) }()
+	defer func() {
+		returnErr = descriptors.closeAll(ctx, returnErr)
+		if returnErr != nil {
+			result = processObservation{}
+		}
+	}()
 	directoryFD, err := deps.openProcessDirectory(ctx, process.locator.pid)
 	if err != nil {
 		return processObservation{}, processVerificationError(
