@@ -167,7 +167,7 @@ func makePersistentPreRunE() func(*cobra.Command, []string) error {
 		verbose, _ := c.Flags().GetBool("verbose")
 		debug, _ := c.Flags().GetBool("debug")
 		infra.SetDebugMode(debug)
-		logging.SetupLogging(cmd.Context(), verbose, debug)
+		logging.SetupLogging(c.Context(), verbose, debug)
 
 		// Check that the database exists. If not, suggest running 'mvm init'.
 		if opRef != nil && !db.DBExists(opRef.CacheDir) {

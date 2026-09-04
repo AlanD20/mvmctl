@@ -84,6 +84,13 @@ func newRotatingFileWriter(ctx context.Context, path string, deps writerDependen
 	if err := writer.acquireLock(ctx); err != nil {
 		return nil, writer.abortInitialization(ctx, fmt.Errorf("acquire lock: %w", err))
 	}
+	if err := ctx.Err(); err != nil {
+		unlockErr := writer.releaseLock(context.WithoutCancel(ctx))
+		return nil, writer.abortInitialization(
+			ctx,
+			errors.Join(fmt.Errorf("context after acquiring lock: %w", err), unlockErr),
+		)
+	}
 
 	stageErr := ensureRotationStagesAbsent(ctx, deps, writer.path, writer.backupCount)
 	var fileFD int
@@ -131,6 +138,9 @@ func (w *RotatingFileWriter) WriteContext(ctx context.Context, p []byte) (n int,
 			returnErr = errors.Join(returnErr, w.poison(context.WithoutCancel(ctx), unlockErr))
 		}
 	}()
+	if err := ctx.Err(); err != nil {
+		return 0, fmt.Errorf("rotating: write: context after acquiring lock: %w", err)
+	}
 
 	stat, err := w.ensureCurrentFile(ctx)
 	if err != nil {
@@ -432,17 +442,48 @@ func (transaction *rotationTransaction) removeOldest(ctx context.Context, entry 
 	if err := verifyExpectedPath(ctx, transaction.writer.deps, entry.location, entry.stat); err != nil {
 		return err
 	}
-	if err := transaction.writer.deps.unlink(ctx, entry.location); err != nil {
-		return err
+	evidencePath := rotationPruneEvidencePath(transaction.writer.path)
+	evidenceStat, err := createRotationEvidence(ctx, transaction.writer.deps, evidencePath)
+	if err != nil {
+		return fmt.Errorf("create prune evidence: %w", err)
 	}
-	if _, exists, err := inspectManagedPath(ctx, transaction.writer.deps, entry.location); err != nil {
-		return err
-	} else if exists {
-		return fmt.Errorf("removed oldest backup path still exists")
+
+	unlinkErr := transaction.writer.deps.unlink(ctx, entry.location)
+	remainingStat, exists, inspectErr := inspectManagedPath(ctx, transaction.writer.deps, entry.location)
+	if inspectErr != nil {
+		return errors.Join(unlinkErr, fmt.Errorf("inspect oldest backup after unlink: %w", inspectErr))
 	}
+	if exists {
+		var outcomeErr error
+		if sameFileIdentity(remainingStat, entry.stat) {
+			outcomeErr = unlinkErr
+			if outcomeErr == nil {
+				outcomeErr = fmt.Errorf("unlink oldest backup reported success but inode remains")
+			}
+		} else {
+			outcomeErr = errors.Join(unlinkErr, fmt.Errorf("oldest backup inode changed during unlink"))
+			// An unexpected inode at the stage path is itself fail-closed evidence. Retain the explicit evidence too.
+			return outcomeErr
+		}
+		cleanupErr := unlinkExpectedPath(
+			context.WithoutCancel(ctx),
+			transaction.writer.deps,
+			evidencePath,
+			evidenceStat,
+		)
+		return errors.Join(outcomeErr, wrapCleanupError("prune evidence", cleanupErr))
+	}
+
 	entry.exists = false
 	entry.location = ""
-	return nil
+	transaction.committed = true
+	cleanupErr := unlinkExpectedPath(
+		context.WithoutCancel(ctx),
+		transaction.writer.deps,
+		evidencePath,
+		evidenceStat,
+	)
+	return errors.Join(unlinkErr, wrapCleanupError("prune evidence", cleanupErr))
 }
 
 func (transaction *rotationTransaction) rollback(ctx context.Context) error {
@@ -505,11 +546,50 @@ func ensureRotationStagesAbsent(
 			return fmt.Errorf("admit rotation stage %d: unfinished rotation state exists", index)
 		}
 	}
+	evidencePath := rotationPruneEvidencePath(path)
+	if _, exists, err := inspectManagedPath(ctx, deps, evidencePath); err != nil {
+		return fmt.Errorf("inspect rotation prune evidence: %w", err)
+	} else if exists {
+		return fmt.Errorf("admit rotation prune evidence: unfinished rotation state exists")
+	}
 	return nil
 }
 
 func rotationStagePath(path string, index int) string {
 	return fmt.Sprintf("%s.rotate-stage-%d", path, index)
+}
+
+func rotationPruneEvidencePath(path string) string {
+	return path + ".rotate-prune"
+}
+
+func createRotationEvidence(
+	ctx context.Context,
+	deps writerDependencies,
+	path string,
+) (unix.Stat_t, error) {
+	fd, err := deps.open(ctx, path, logOpenFlags|unix.O_CREAT|unix.O_EXCL, managedFileMode)
+	if err != nil {
+		return unix.Stat_t{}, fmt.Errorf("create %q: %w", path, err)
+	}
+	abort := func(primary error) (unix.Stat_t, error) {
+		closeErr := deps.close(context.WithoutCancel(ctx), fd)
+		return unix.Stat_t{}, errors.Join(primary, wrapCloseError(path, closeErr))
+	}
+	if err := deps.fchmod(ctx, fd, managedFileMode); err != nil {
+		return abort(fmt.Errorf("set mode on %q: %w", path, err))
+	}
+	var stat unix.Stat_t
+	if err := deps.fstat(ctx, fd, &stat); err != nil {
+		return abort(fmt.Errorf("stat %q: %w", path, err))
+	}
+	if err := admitManagedFile(path, stat, deps.euid(), true); err != nil {
+		return abort(err)
+	}
+	if err := deps.close(context.WithoutCancel(ctx), fd); err != nil {
+		return unix.Stat_t{}, wrapCloseError(path, err)
+	}
+	return stat, nil
 }
 
 func verifyExpectedPath(ctx context.Context, deps writerDependencies, path string, expected unix.Stat_t) error {
@@ -551,15 +631,18 @@ func unlinkExpectedPath(ctx context.Context, deps writerDependencies, path strin
 	if err := verifyExpectedPath(ctx, deps, path, expected); err != nil {
 		return err
 	}
-	if err := deps.unlink(ctx, path); err != nil {
-		return err
+	unlinkErr := deps.unlink(ctx, path)
+	stat, exists, inspectErr := inspectManagedPath(ctx, deps, path)
+	if inspectErr != nil {
+		return errors.Join(unlinkErr, inspectErr)
 	}
-	if _, exists, err := inspectManagedPath(ctx, deps, path); err != nil {
-		return err
-	} else if exists {
-		return fmt.Errorf("unlinked path still exists")
+	if !exists {
+		return unlinkErr
 	}
-	return nil
+	if sameFileIdentity(stat, expected) {
+		return errors.Join(unlinkErr, fmt.Errorf("unlinked path still exists"))
+	}
+	return errors.Join(unlinkErr, fmt.Errorf("unlinked path names an unexpected inode"))
 }
 
 func sameFileIdentity(left, right unix.Stat_t) bool {
@@ -656,7 +739,7 @@ func admitManagedFile(path string, stat unix.Stat_t, expectedEUID uint32, requir
 }
 
 func shouldRotate(currentSize, writeSize, maxBytes int64) bool {
-	if maxBytes <= 0 || writeSize == 0 {
+	if maxBytes <= 0 || currentSize == 0 || writeSize == 0 {
 		return false
 	}
 	return currentSize > maxBytes-writeSize
@@ -667,6 +750,13 @@ func wrapCloseError(description string, err error) error {
 		return nil
 	}
 	return fmt.Errorf("close %s: %w", description, err)
+}
+
+func wrapCleanupError(description string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("clean up %s: %w", description, err)
 }
 
 func defaultWriterDependencies() writerDependencies {
@@ -690,7 +780,13 @@ func defaultWriterDependencies() writerDependencies {
 			return unix.Close(fd)
 		},
 		rename: func(_ context.Context, oldPath, newPath string) error {
-			return unix.Rename(oldPath, newPath)
+			return unix.Renameat2(
+				unix.AT_FDCWD,
+				oldPath,
+				unix.AT_FDCWD,
+				newPath,
+				unix.RENAME_NOREPLACE,
+			)
 		},
 		unlink: func(_ context.Context, path string) error {
 			return unix.Unlink(path)

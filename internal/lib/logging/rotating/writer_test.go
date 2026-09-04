@@ -83,6 +83,55 @@ func TestNewRotatingFileWriterContextCancelsWhileStableLockIsHeld(t *testing.T) 
 	require.NoError(t, awaitResult(t, firstResult).err)
 }
 
+func TestNewRotatingFileWriterRechecksCancellationAfterAcquiringStableLock(t *testing.T) {
+	// Rationale: cancellation can race a successful nonblocking flock. Constructor effects after the lock must not
+	// begin, and an unlock failure must still detach the retained lock descriptor.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	ctx, cancel := context.WithCancel(t.Context())
+	deps := defaultWriterDependencies()
+	realOpen := deps.open
+	openedLog := false
+	lockFD := -1
+	deps.open = func(ctx context.Context, openedPath string, flags int, mode uint32) (int, error) {
+		fd, err := realOpen(ctx, openedPath, flags, mode)
+		if openedPath == path && err == nil {
+			openedLog = true
+		}
+		if openedPath == path+".lock" && err == nil {
+			lockFD = fd
+		}
+		return fd, err
+	}
+	realFlock := deps.flock
+	unlockFailure := errors.New("injected canceled-constructor unlock failure")
+	deps.flock = func(ctx context.Context, fd, how int) error {
+		if how == unix.LOCK_UN {
+			return unlockFailure
+		}
+		err := realFlock(ctx, fd, how)
+		if err == nil {
+			cancel()
+		}
+		return err
+	}
+	realClose := deps.close
+	var closedFDs []int
+	deps.close = func(ctx context.Context, fd int) error {
+		closedFDs = append(closedFDs, fd)
+		return realClose(ctx, fd)
+	}
+
+	writer, err := newRotatingFileWriter(ctx, path, deps)
+	assert.Nil(t, writer)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, err, unlockFailure)
+	assert.False(t, openedLog)
+	assert.Equal(t, []int{lockFD}, closedFDs)
+}
+
 func TestNewRotatingFileWriterRejectsFIFOsWithoutBlocking(t *testing.T) {
 	// Rationale: a blocking open of an attacker-supplied FIFO can hang logging initialization before type admission.
 	t.Parallel()
@@ -216,6 +265,42 @@ func TestRotatingFileWriterCancellationWhileSameWriterIsBusy(t *testing.T) {
 
 	releaseOnce.Do(func() { close(releaseWrite) })
 	require.NoError(t, awaitResult(t, firstResult).err)
+}
+
+func TestRotatingFileWriterRechecksCancellationAfterAcquiringStableLock(t *testing.T) {
+	// Rationale: a successful flock racing cancellation must install unlock ownership, then stop before reopening or
+	// writing the current log.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	writer := newTestWriter(t, path)
+	ctx, cancel := context.WithCancel(t.Context())
+	realFlock := writer.deps.flock
+	unlockCalls := 0
+	writer.deps.flock = func(ctx context.Context, fd, how int) error {
+		if how == unix.LOCK_UN {
+			unlockCalls++
+			return realFlock(ctx, fd, how)
+		}
+		err := realFlock(ctx, fd, how)
+		if err == nil {
+			cancel()
+		}
+		return err
+	}
+	writeCalls := 0
+	writer.deps.write = func(context.Context, int, []byte) (int, error) {
+		writeCalls++
+		return 0, nil
+	}
+
+	n, err := writer.WriteContext(ctx, []byte("must-not-appear\n"))
+	assert.Zero(t, n)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Zero(t, writeCalls)
+	assert.Equal(t, 1, unlockCalls)
+	assertFileContent(t, path, []byte{})
 }
 
 func TestRotatingFileWriterRefreshesExternallyReplacedCurrentPath(t *testing.T) {
@@ -363,6 +448,105 @@ func TestRotatingFileWriterRollbackFailureLeavesDiscoverableFailClosedState(t *t
 	assert.Contains(t, reopenErr.Error(), "unfinished rotation state")
 }
 
+func TestRotatingFileWriterEffectfulUnlinkErrorCommitsPrunedRotation(t *testing.T) {
+	// Rationale: unlink can report an injected error after removing the oldest stage. A verified-absent inode means
+	// the rotation committed and a retry must write the empty current file instead of rotating it again.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	seedRotationHistory(t, path)
+	writer := newTestWriter(t, path)
+	writer.maxBytes = 1
+	injected := errors.New("injected effectful unlink failure")
+	realUnlink := writer.deps.unlink
+	effectApplied := false
+	writer.deps.unlink = func(ctx context.Context, removedPath string) error {
+		if !effectApplied && removedPath == rotationStagePath(path, writer.backupCount) {
+			effectApplied = true
+			require.NoError(t, realUnlink(ctx, removedPath))
+			return injected
+		}
+		return realUnlink(ctx, removedPath)
+	}
+
+	n, err := writer.WriteContext(t.Context(), []byte("new-record\n"))
+	assert.Zero(t, n)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, injected)
+	assertRotationHistory(t, path, map[string]string{
+		"current": "",
+		".1":      "current\n",
+		".2":      "backup-one\n",
+		".3":      "backup-two\n",
+	})
+	require.NoError(t, writer.Close())
+
+	retry, err := NewRotatingFileWriter(t.Context(), path)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, retry.Close()) })
+	retry.maxBytes = 1
+	_, err = retry.WriteContext(t.Context(), []byte("retry-record\n"))
+	require.NoError(t, err)
+	assertRotationHistory(t, path, map[string]string{
+		"current": "retry-record\n",
+		".1":      "current\n",
+		".2":      "backup-one\n",
+		".3":      "backup-two\n",
+	})
+}
+
+func TestRotatingFileWriterPostUnlinkInspectionFailureLeavesFailClosedEvidence(t *testing.T) {
+	// Rationale: if the oldest inode cannot be observed after unlink, persistent transaction evidence must keep a fresh
+	// writer from interpreting an indeterminate namespace as a safe new rotation starting point.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	seedRotationHistory(t, path)
+	writer := newTestWriter(t, path)
+	writer.maxBytes = 1
+	inspectionFailure := errors.New("injected post-unlink inspection failure")
+	oldestStage := rotationStagePath(path, writer.backupCount)
+	realUnlink := writer.deps.unlink
+	unlinkedOldest := false
+	writer.deps.unlink = func(ctx context.Context, removedPath string) error {
+		err := realUnlink(ctx, removedPath)
+		if removedPath == oldestStage && err == nil {
+			unlinkedOldest = true
+		}
+		return err
+	}
+	realLstat := writer.deps.lstat
+	failedInspection := false
+	writer.deps.lstat = func(ctx context.Context, inspectedPath string, stat *unix.Stat_t) error {
+		if unlinkedOldest && !failedInspection && inspectedPath == oldestStage {
+			failedInspection = true
+			return inspectionFailure
+		}
+		return realLstat(ctx, inspectedPath, stat)
+	}
+
+	n, err := writer.WriteContext(t.Context(), []byte("new-record\n"))
+	assert.Zero(t, n)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, inspectionFailure)
+	assertRotationHistory(t, path, map[string]string{
+		"current": "current\n",
+		".1":      "backup-one\n",
+		".2":      "backup-two\n",
+		".3":      "<absent>",
+	})
+	assertFileContent(t, path+".rotate-prune", []byte{})
+	require.NoError(t, writer.Close())
+
+	reopened, reopenErr := NewRotatingFileWriter(t.Context(), path)
+	if reopened != nil {
+		t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+	}
+	assert.Nil(t, reopened)
+	require.Error(t, reopenErr)
+	assert.Contains(t, reopenErr.Error(), "unfinished rotation state")
+}
+
 func TestRotatingFileWriterDetectsReplacementBeforeBoundRename(t *testing.T) {
 	// Rationale: a cooperative lock cannot prevent an external replacement, so every rename must recheck the exact
 	// inode it intends to move and reject the replacement rather than publish it as retained history.
@@ -396,6 +580,40 @@ func TestRotatingFileWriterDetectsReplacementBeforeBoundRename(t *testing.T) {
 	assertFileContent(t, path+".1", []byte("backup-one\n"))
 	assertFileContent(t, path+".2", []byte("backup-two\n"))
 	assertFileContent(t, path+".3", []byte("backup-three\n"))
+}
+
+func TestRotatingFileWriterDoesNotReplaceDestinationInsertedBeforeRename(t *testing.T) {
+	// Rationale: destination admission and rename are separate operations, so a newly inserted destination must make
+	// the transaction fail closed instead of being overwritten by a replacing rename.
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "audit.log")
+	seedRotationHistory(t, path)
+	writer := newTestWriter(t, path)
+	writer.maxBytes = 1
+	stagePath := rotationStagePath(path, 0)
+	insertedContent := []byte("externally-inserted\n")
+	realRename := writer.deps.rename
+	inserted := false
+	writer.deps.rename = func(ctx context.Context, oldPath, newPath string) error {
+		if !inserted && oldPath == path && newPath == stagePath {
+			inserted = true
+			require.NoError(t, os.WriteFile(stagePath, insertedContent, managedFileMode))
+		}
+		return realRename(ctx, oldPath, newPath)
+	}
+
+	n, err := writer.WriteContext(t.Context(), []byte("new-record\n"))
+	assert.Zero(t, n)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, unix.EEXIST)
+	assertFileContent(t, stagePath, insertedContent)
+	assertRotationHistory(t, path, originalRotationHistory())
+
+	reopened, reopenErr := NewRotatingFileWriter(t.Context(), path)
+	assert.Nil(t, reopened)
+	require.Error(t, reopenErr)
+	assert.Contains(t, reopenErr.Error(), "unfinished rotation state")
 }
 
 func TestRotatingFileWriterCreatesSecureLogAndPersistentLockFiles(t *testing.T) {
@@ -636,6 +854,8 @@ func TestRotatingFileWriterPropagatesFilesystemFailures(t *testing.T) {
 		injected := errors.New("injected rotation close failure")
 		path := filepath.Join(t.TempDir(), "audit.log")
 		writer := newTestWriter(t, path)
+		_, err := writer.WriteContext(t.Context(), []byte("seed\n"))
+		require.NoError(t, err)
 		writer.maxBytes = 1
 		realClose := writer.deps.close
 		initialFileFD := writer.fileFD
@@ -658,6 +878,8 @@ func TestRotatingFileWriterPropagatesFilesystemFailures(t *testing.T) {
 		injected := errors.New("injected rename failure")
 		path := filepath.Join(t.TempDir(), "audit.log")
 		writer := newTestWriter(t, path)
+		_, err := writer.WriteContext(t.Context(), []byte("seed\n"))
+		require.NoError(t, err)
 		writer.maxBytes = 1
 		writer.deps.rename = func(context.Context, string, string) error { return injected }
 
@@ -671,6 +893,8 @@ func TestRotatingFileWriterPropagatesFilesystemFailures(t *testing.T) {
 		injected := errors.New("injected rotation reopen failure")
 		path := filepath.Join(t.TempDir(), "audit.log")
 		writer := newTestWriter(t, path)
+		_, err := writer.WriteContext(t.Context(), []byte("seed\n"))
+		require.NoError(t, err)
 		writer.maxBytes = 1
 		realOpen := writer.deps.open
 		createAttempts := 0
