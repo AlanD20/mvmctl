@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-04 (request-bound source cancellation reader)
+**Last Updated:** 2026-09-04 (closed destination session)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -486,6 +486,17 @@ owner lock for the sole synchronous binder call. Authenticated failures before d
 terminal failure without draining request input; once dispatch begins, the handler owns all action-specific responses
 and cleanup. Registration does not create a positive VM-to-VM path because no API relay calls the action.
 
+The tenth slice adds the closed host-side destination-session primitive without activating the relay. A
+`DestinationSession` consumes an already selected connection and permits one validated `Open` carrying one host-built
+`DestinationRequest`. Its strict request-ID-bound response reader enforces the wire output limits through one
+sequential reader and withholds both `Result` and `Error` until physical EOF. After open, the session permits at most
+one exact matching `Cancel` while the response reader remains active. Independent fixed read/write deadlines share one
+absolute session bound set at open; an earlier opening-context deadline wins, and the lifetime timer closes an idle
+session no later than five minutes. Operation-context cancellation and explicit `Close` interrupt partial I/O.
+Protocol and transport failures close the connection, while cleanup runs once and returns its cached first result.
+The primitive performs no dialing, path selection, policy or VM lookup, root effect, audit, relay forwarding, or API
+composition, so it creates no positive VM-to-VM path.
+
 Implementation remains fail-closed and proceeds in these independently reviewable increments:
 
 1. [x] Add exact-one-descriptor ancillary primitives and structural FD admission, without registering an action.
@@ -496,7 +507,7 @@ Implementation remains fail-closed and proceeds in these independently reviewabl
 4. [x] Compose those boundaries into the retained sidecar, enforce expiry, then register the exact privileged action.
 5. Complete the remaining relay primitives without activating the relay:
    - [x] Add the exact request-ID-bound, single-reader `SourceSession.WaitCancel` lifecycle described above.
-   - [ ] Add a closed destination session.
+   - [x] Add a closed destination session.
    - [ ] Add a typed error-reporting audit sink.
 6. [ ] Add the explicit public trigger and API relay, then qualify same-network, cross-network, and no-IP-network
    behavior plus denial, cancellation, crash, reboot, ceiling, and cleanup paths in Python L2.
@@ -511,8 +522,9 @@ VM-to-VM execution remains unavailable until all six increments and L2 qualifica
   `internal/vsockhandler/` multi-domain callback path must not return.
 - `internal/lib/vmexecwire/` owns only the closed bounded framing, request validation, and stream grammar. It performs
   no policy lookup, relay, destination-agent execution, audit, or runtime-capacity effect.
-- `internal/core/vsock/` owns the single-use source transport only after a caller supplies an authority-admitted
-  connection. It performs no VM/policy lookup, socket-path resolution, runtime admission, or capacity effect.
+- `internal/core/vsock/` owns the single-use source and destination transports only after a caller supplies an
+  authority-admitted source connection or already selected destination connection. It performs no VM/policy lookup,
+  socket-path resolution, dialing, runtime admission, or capacity effect.
 - `internal/service/agent/` owns the destination request handler and explicit non-root process effect. It performs no
   host source-VM authentication, policy lookup, host relay, audit, or runtime-capacity allocation. Its local source
   broker proves that one local peer descends from one host-bound outer command; it does not authorize a VM identity.
@@ -661,6 +673,13 @@ admission/read time, host disconnect and shutdown cleanup, root/non-root outer a
 checks, PID-reuse and zombie rejection, stable bounded process ancestry, one claim, process-group cancellation, binary
 CLI output, and redacted failures. This does not qualify API/root source-VM admission, relay policy enforcement/audit,
 capacity composition, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live VM-to-VM path.
+
+Destination-session L1 covers the single validated open, request-ID binding and strict response/output limits, binary
+output, one sequential reader, terminal withholding through physical EOF, exact single cancellation, concurrent
+full-duplex response/cancel operation with independent fixed directional deadlines, opening and operation-context
+cancellation, absolute idle lifetime, partial-I/O interruption, failure cleanup, and cached close-once results. It does
+not qualify destination dialing or selection, runtime policy, root admission, audit, relay forwarding, API
+composition, or a positive VM-to-VM path.
 
 Capacity L1 covers the strict record/codec/store, exact root-owned layout, global lock serialization across independent
 authority instances, cross-owner ceiling enforcement, collision handling, stale-boot/expiration pruning, corrupt-state

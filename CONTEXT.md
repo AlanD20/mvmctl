@@ -477,6 +477,16 @@ input closes the source transport fail-closed; explicit `Close` and context canc
 cancel reader sets only the read deadline while response writers set only the write deadline, preserving full-duplex
 source response output. This is a dormant source-side primitive, not destination cancellation or relay composition.
 
+The closed host-side `DestinationSession` is also implemented but dormant. It consumes an already selected connection
+and permits one validated `Open` with one host-built `DestinationRequest`. Its strict request-ID-bound response reader
+enforces the wire output limits, permits one sequential reader, and withholds either `Result` or `Error` until physical
+EOF. After open, at most one exact matching `Cancel` may be written concurrently with response reading. Read and write
+operations use independent directional deadlines bounded by one fixed session deadline; the opening context or an
+absolute lifetime no later than five minutes closes even an idle session. Operation-context cancellation and explicit
+`Close` interrupt partial I/O. Protocol or transport failure closes the connection, and cleanup is close-once with the
+first result cached. The type performs no dialing, socket-path selection, VM or policy lookup, root effect, audit, or
+API relay work and does not create a positive VM-to-VM path.
+
 Inside the source guest, the agent binds a pending session to the exact outer command process created by the matching
 ordinary exec. The outer command may run as root or non-root, starts in a new session/process group, and receives no
 token through its environment, arguments, or filesystem. The mode-`0666` local AF_UNIX broker authorizes by process
@@ -564,10 +574,10 @@ action-specific responses and destination/source connection cleanup; its server 
 destination/source peer pidfds, capacity, destination/source process capabilities, descending lexical active leases,
 and pair roots.
 
-These components still do not form a positive VM-to-VM path. No API-owned relay listener/consumer opens a source
-session, invokes the registered retained-sidecar client, reads and forwards relay payload, resolves and enforces the
-exact runtime directional exec policy, constructs the authorized destination request, or writes a command-redacted
-audit record.
+These components still do not form a positive VM-to-VM path. No API-owned relay listener/consumer opens a source or
+destination session, invokes the registered retained-sidecar client, reads and forwards relay payload, resolves and
+enforces the exact runtime directional exec policy, constructs the authorized destination request, or writes through a
+typed command-redacted audit sink.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
 Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,

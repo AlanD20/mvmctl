@@ -663,11 +663,11 @@ pending
 
 **Owner:** engineer
 **Status:** Public directional exec-policy CRUD, the closed bounded wire, destination-agent non-root execution, the
-isolated process-bound source-session, and the registered production-composed root authority sidecar with exact-one
-descriptor transport, active-pair/capacity authority, Firecracker peer binding, fixed global ceiling, and absolute stop
-are implemented. The API-owned relay listener/consumer, runtime directional-policy resolution/enforcement, relay
-payload forwarding, redacted audit, positive VM-to-VM path, and Python qualification remain pending, so VM-to-VM
-execution remains fail-closed
+isolated process-bound source session, the closed one-request destination session, and the registered
+production-composed root authority sidecar with exact-one descriptor transport, active-pair/capacity authority,
+Firecracker peer binding, fixed global ceiling, and absolute stop are implemented. The API-owned relay
+listener/consumer, runtime directional-policy resolution/enforcement, relay payload forwarding, typed redacted audit
+sink, positive VM-to-VM path, and Python qualification remain pending, so VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -698,6 +698,13 @@ execution remains fail-closed
   and close the transport on malformed, non-cancel, wrong-ID, or context-cancelled partial input; make `Close` and
   context cancellation unblock a partial read; and use directional deadlines so concurrent response writes remain
   full-duplex. This is a source-session primitive only.
+- [x] Add the closed one-request `DestinationSession` over an already selected connection. Permit one validated
+  `Open`, bind the strict response/output limits to its request ID, allow one sequential reader, and withhold `Result`
+  or `Error` until physical EOF. After open, permit at most one exact matching `Cancel` concurrently with reads under
+  independent fixed directional deadlines. Make the opening context and an absolute lifetime no later than five
+  minutes close idle sessions, make operation cancellation and `Close` interrupt partial I/O, close on protocol or
+  transport failure, and cache close-once cleanup. Keep it dormant: no dialing, path/policy/VM lookup, root effect,
+  audit, API relay, or positive VM-to-VM behavior.
 - [ ] Wire the source session into the API-owned relay listener. `internal/vsockhandler` must not return; the API
   resolves shared identities only after root runtime admission and supplies an already authority-admitted connection
   to the source-session module.

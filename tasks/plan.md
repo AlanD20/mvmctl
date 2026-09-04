@@ -92,6 +92,14 @@ continue without silently deleting it.
   cleanup are bounded. The outer source command may be root or non-root; the destination target remains non-root. This
   is not an API relay, root source-VM admission, runtime policy/audit path, capacity consumer, or per-command cgroup
   guarantee.
+- The closed one-request destination-session foundation consumes an already selected connection and permits one
+  validated `Open` for one host-built request. Its strict request-ID-bound response reader enforces the wire output
+  limit through one sequential reader and withholds `Result` or `Error` until physical EOF. After open, one exact
+  request-bound cancellation may proceed concurrently with reads under independent fixed directional deadlines. The
+  opening context and an absolute lifetime no later than five minutes also close idle sessions; operation cancellation
+  and explicit `Close` interrupt partial I/O. Protocol/transport failures close the connection, and cleanup runs once
+  with a cached result. This primitive performs no dialing, path selection, VM/policy lookup, root effect, audit, API
+  relay, or positive VM-to-VM execution.
 - Root-owned Task 15 VM-exec capacity authority with strict schema-1 reservations at
   `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` and a never-unlinked global
   `/run/mvmctl/authority/capacity.lock`. Exact mode-`0700` managed directories and one-link mode-`0600` records bind the
@@ -850,12 +858,14 @@ The public policy families are:
 
 Traffic policy never grants vsock execution. Exec policy never grants IP connectivity. Same-network placement grants
 nothing implicitly. The exec family's deterministic non-root intent CRUD, closed bounded wire, destination-agent
-non-root process side, isolated process-bound source session, and Task 15 root-owned capacity, active-pair, exact
-Firecracker peer-binding, fixed-ceiling, absolute-boottime-stop, exact-one structural descriptor, and registered
+non-root process side, isolated process-bound source session, closed one-request destination session, and Task 15
+root-owned capacity, active-pair, exact Firecracker peer-binding, fixed-ceiling, absolute-boottime-stop, exact-one
+structural descriptor, and registered
 production-composed retained sidecar are implemented. The API-owned relay listener/consumer, runtime policy
-resolution/enforcement, redacted audit, relay payload forwarding, Python system qualification, and the traffic
-family's replacement public surface remain pending. No production host path opens a source session, invokes the
-sidecar from the API, or constructs an authorized destination request, so VM-to-VM execution is unavailable.
+resolution/enforcement, typed redacted audit sink, relay payload forwarding, Python system qualification, and the
+traffic family's replacement public surface remain pending. No production host path opens a source or destination
+session, invokes the sidecar from the API, or constructs an authorized destination request, so VM-to-VM execution is
+unavailable.
 
 ### LoopMount privilege foundation
 

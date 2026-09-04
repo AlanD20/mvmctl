@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > strict schema-3 Jailer record/registration and private pidfd process-activation/
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
-> non-root execution side, its isolated process-bound source-session foundation, the production-composed root-owned
+> non-root execution side, its isolated process-bound source-session foundation, its closed one-request destination
+> session, the production-composed root-owned
 > VM-exec capacity and active-pair authorities with a fixed global ceiling, its exact Firecracker peer/pidfd binding
 > and absolute-boottime stop, its exact-one descriptor transport and structural admission, its closed retained-sidecar
 > wire/process/Jailer-client/registered-handler lifecycle, and clean-break removal of the VM-wide
@@ -103,6 +104,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepts only one exact `cancel` frame for that request ID. Malformed, non-cancel, wrong-ID, and context-cancelled
   partial input closes the transport fail-closed; explicit `Close` and context cancellation unblock a partial read.
   Separate read and write deadlines preserve concurrent response output while cancellation is awaited.
+- Added a closed one-request `DestinationSession` over an already selected connection. Its sole `Open` validates and
+  writes one host-built destination request, then binds a strict request-ID response reader with the fixed output
+  limits. One sequential reader returns binary output but withholds either terminal until physical EOF; after open,
+  one exact request-bound `Cancel` may run concurrently with response reads. Independent fixed directional deadlines,
+  the opening context, and an absolute lifetime no later than five minutes bound even idle sessions. Context
+  cancellation and `Close` interrupt partial I/O; protocol/transport failures close the connection, while cleanup
+  runs once and returns its cached result.
 - Added the process-bound source guest broker and `mvm-agent remote --user <non-root> <destination> -- <command>`.
   The outer source command may run as root or non-root and receives no token through its environment, arguments,
   filesystem, or local request. The mode-`0666` AF_UNIX
@@ -121,11 +129,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version 6 without the removed column. Schema-version 3, 4, or 5 databases that still contain it fail before pending
   migration inspection or migration application with an explicit clean-install-required validation error and remain
   unchanged; no legacy bit is converted into a directional exec policy.
-- Public execution-policy CRUD, the wire, source session, destination side, and registered root authority sidecar still
-  do not activate VM-to-VM execution. The API-owned relay listener/consumer, runtime directional-policy resolution and
-  enforcement, relay payload forwarding, command-redacted audit, positive VM-to-VM path, and Python L2 qualification
-  remain pending. The implemented cancellation boundaries are process-group guarantees, not per-command cgroup
-  authority, and do not claim cleanup of descendants that deliberately leave their group.
+- Public execution-policy CRUD, the wire, source and destination sessions, destination process side, and registered
+  root authority sidecar still do not activate VM-to-VM execution. The API-owned relay listener/consumer, runtime
+  directional-policy resolution and enforcement, relay payload forwarding, typed command-redacted audit sink,
+  positive VM-to-VM path, and Python L2 qualification remain pending. The implemented cancellation boundaries are
+  process-group
+  guarantees, not per-command cgroup authority, and do not claim cleanup of descendants that deliberately leave their
+  group.
 
 #### Private VM-exec authorities, descriptor admission, and retained-sidecar foundation
 
@@ -187,8 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry owns authenticated pre-dispatch `MVMXSES1` failures.
 - Authenticated pre-dispatch failures for this action use one bounded `MVMXSES1` terminal failure without draining
   request input; other actions retain the ordinary `MVMRES01` envelope. No API-owned relay listener/consumer invokes
-  the registered action yet, and runtime directional-policy enforcement, command-redacted audit, relay payload
-  forwarding, a positive VM-to-VM path, and Python L2 qualification remain pending.
+  the registered action yet, and runtime directional-policy enforcement, typed command-redacted audit sink, relay
+  payload forwarding, a positive VM-to-VM path, and Python L2 qualification remain pending.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and

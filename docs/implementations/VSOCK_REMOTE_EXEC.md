@@ -9,6 +9,7 @@ foundations are implemented and covered by Go L0/L1 tests:
 - the closed, bounded `MVMEXEC1` request and response protocol;
 - authenticated non-root execution in the destination guest;
 - a dedicated, one-request source session between the host and source guest;
+- a closed, one-request destination session over an already selected connection;
 - a process-bound local source broker and `mvm-agent remote` client in the source guest;
 - strict separation between ordinary host-to-VM exec/copy and the dormant VM-to-VM path; and
 - a private inert root-owned global capacity reservation substrate; and
@@ -19,7 +20,7 @@ production capacity ceiling/composition, or audit path yet, and no positive Pyth
 end-to-end behavior. The private pair authority has no production constructor or caller and performs no relay effect.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results,
 persistence, and environment specifications; it is not converted into a directional policy. No current host path
-constructs an authorized destination request.
+opens the source or destination session or constructs an authorized destination request.
 
 ## Required user flow
 
@@ -143,7 +144,25 @@ execution effect, resolves an exact non-root account to numeric credentials and 
 `/bin/sh -c` with fixed environment and process-group cancellation. Ordinary host exec/copy prefixes remain on their
 existing protocol.
 
-### 6. Root-owned capacity and active-pair authorities
+### 6. Closed destination transport
+
+`internal/core/vsock.DestinationSession` consumes one already selected destination connection. It does not dial or
+resolve a socket path, VM, agent token, policy, or runtime authority. Its only `Open` attempt first validates one
+host-built `DestinationRequest`, writes it, and creates a strict response reader bound to that request ID and the wire's
+combined-output limit.
+
+Exactly one sequential reader accepts binary `stdout` and `stderr`; it withholds both `Result` and `Error` until a
+second read proves physical EOF. After a successful open, at most one exact request-bound `Cancel` can be written while
+the response reader remains active. Read and write deadlines are independent and directional, but both remain bounded
+by the fixed deadline selected at open. An earlier opening-context deadline wins over the five-minute maximum, and an
+absolute lifetime timer closes even an idle session. Operation-context cancellation and explicit `Close` interrupt
+partial reads and writes. Protocol or transport failure closes the connection; cleanup is close-once and repeats its
+cached first result.
+
+This is a dormant relay primitive. It performs no destination dialing, path selection, VM or policy lookup, root
+effect, audit, API relay, or payload-forwarding effect and creates no positive VM-to-VM behavior.
+
+### 7. Root-owned capacity and active-pair authorities
 
 The private `internal/service/jailer` capacity authority stores strict schema-1 reservations at
 `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json`. Each one-link record binds its root-generated reservation ID,
@@ -186,7 +205,7 @@ a relay, policy, or audit effect.
 | Target | Destination selector at most 64 bytes; mandatory non-root user at most 32 bytes |
 | Command | Valid UTF-8, no unsafe controls, 1-32 KiB |
 | Output | Binary-safe stdout/stderr frames, 8 MiB combined |
-| Lifetime | Five-minute fixed maximum for one source/destination execution |
+| Lifetime | Destination open selects an absolute deadline no later than five minutes; idle time consumes it |
 | Terminal | Exactly one `result` or `error`, followed by physical EOF |
 | Control | One matching `cancel` frame; no generic extension frame |
 
@@ -206,9 +225,10 @@ The positive path must not be enabled until all of these release blockers are co
    pair authority, binds its immutable owner/source/destination launch-generation admission to the admitted source FD,
    reserves capacity before relay effects, enforces the fixed relay-stop deadline, and releases the lease with its
    terminal/cleanup evidence.
-5. The relay enforces the same frame, command, output, duration, cancellation, and EOF limits and records a
-   command-redacted source/destination/user/timing/result audit event.
-6. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,
+5. The relay uses `DestinationSession` to forward bounded response payload and exact cancellation under the same frame,
+   command, output, duration, and EOF limits.
+6. A typed error-reporting audit sink records a command-redacted source/destination/user/timing/result event.
+7. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,
    foreign owner, stale identity, root target, malformed wire, limit, cancellation, and cleanup denials.
 
 Until these gates land, the source-session components remain a fail-closed foundation and VM-to-VM execution remains
