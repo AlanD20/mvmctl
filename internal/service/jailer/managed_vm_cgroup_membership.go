@@ -19,8 +19,8 @@ type retainedCgroupProcessVerifier interface {
 	verifyAfterCgroupMembership(context.Context, instanceProcessLocator, processObservation) error
 }
 
-// VerifyMembership proves that the exact retained process is the sole member of this pinned leaf. Calls serialize
-// with removal and release so the descriptor authority and membership observation remain one operation.
+// VerifyMembership proves that the exact retained process is the sole member of this pinned leaf. Concurrent
+// verification, removal, and release fail closed while the proof runs without holding the lease mutex.
 func (lease *managedVMCgroupLease) VerifyMembership(
 	ctx context.Context,
 	locator instanceProcessLocator,
@@ -32,47 +32,68 @@ func (lease *managedVMCgroupLease) VerifyMembership(
 	}
 	state := lease.state
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	if ctx == nil {
+		state.mu.Unlock()
 		return instanceAtomicError("verify managed VM cgroup membership: context is required", nil)
+	}
+	if state.verifying {
+		state.mu.Unlock()
+		return instanceStateError(state.vmID, "managed VM cgroup membership verification is in progress")
 	}
 	if state.released || state.removed || state.rootFD < 0 || state.parentFD < 0 || state.leafFD < 0 ||
 		len(state.retained) != 3 {
+		state.mu.Unlock()
 		return instanceStateError(state.vmID, "managed VM cgroup lease is not active")
 	}
 	if err := ctx.Err(); err != nil {
+		state.mu.Unlock()
 		return instanceAtomicError("verify managed VM cgroup membership", err)
 	}
 	if verifier == nil {
+		state.mu.Unlock()
 		return instanceAtomicError("retained cgroup process verifier is required", nil)
 	}
-	if locator.pid <= 0 || locator.startTimeTicks == 0 || observation.startTimeTicks != locator.startTimeTicks {
-		return processVerificationError(state.vmID, "cgroup process observation does not match its locator", nil)
+	state.verifying = true
+	proof := managedVMCgroupLeaseState{
+		deps:   state.deps,
+		vmID:   state.vmID,
+		leafFD: state.leafFD,
+		leaf:   state.leaf,
 	}
-	wantCgroup := infra.CgroupV2Root + "/" + infra.JailerCgroupParent + "/" + state.vmID
+	state.mu.Unlock()
+	defer func() {
+		state.mu.Lock()
+		state.verifying = false
+		state.mu.Unlock()
+	}()
+
+	if locator.pid <= 0 || locator.startTimeTicks == 0 || observation.startTimeTicks != locator.startTimeTicks {
+		return processVerificationError(proof.vmID, "cgroup process observation does not match its locator", nil)
+	}
+	wantCgroup := infra.CgroupV2Root + "/" + infra.JailerCgroupParent + "/" + proof.vmID
 	if observation.cgroupPath != wantCgroup {
 		return processVerificationError(
-			state.vmID,
+			proof.vmID,
 			"process observation does not match the derived VM cgroup",
 			nil,
 		)
 	}
 	if err := verifier.verifyBeforeCgroupMembership(ctx, locator, observation); err != nil {
-		return processVerificationError(state.vmID, "verify retained process before cgroup membership", err)
+		return processVerificationError(proof.vmID, "verify retained process before cgroup membership", err)
 	}
-	members, err := readManagedVMCgroupMembership(ctx, state)
+	members, err := readManagedVMCgroupMembership(ctx, &proof)
 	if err != nil {
 		return err
 	}
 	if len(members) != 1 || members[0] != locator.pid {
 		return processVerificationError(
-			state.vmID,
+			proof.vmID,
 			"managed VM cgroup membership is not the retained process",
 			nil,
 		)
 	}
 	if err := verifier.verifyAfterCgroupMembership(ctx, locator, observation); err != nil {
-		return processVerificationError(state.vmID, "verify retained process after cgroup membership", err)
+		return processVerificationError(proof.vmID, "verify retained process after cgroup membership", err)
 	}
 	return nil
 }

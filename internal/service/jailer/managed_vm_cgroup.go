@@ -48,6 +48,7 @@ type managedVMCgroupLeaseState struct {
 	parent     managedVMCgroupIdentity
 	leaf       managedVMCgroupIdentity
 	retained   []int
+	verifying  bool
 	removed    bool
 	released   bool
 	releaseErr error
@@ -357,6 +358,9 @@ func (lease *managedVMCgroupLease) Remove(ctx context.Context) error {
 	state := lease.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
+	if state.verifying {
+		return instanceStateError(state.vmID, "managed VM cgroup membership verification is in progress")
+	}
 	if state.released {
 		return instanceStateError(state.vmID, "managed VM cgroup lease is released")
 	}
@@ -473,6 +477,9 @@ func (lease *managedVMCgroupLease) Release(ctx context.Context) error {
 	defer state.mu.Unlock()
 	if state.released {
 		return state.releaseErr
+	}
+	if state.verifying {
+		return instanceStateError(state.vmID, "managed VM cgroup membership verification is in progress")
 	}
 	if !state.removed {
 		return instanceStateError(state.vmID, "managed VM cgroup must be removed before release")
