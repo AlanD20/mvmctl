@@ -31,6 +31,7 @@ type managedVMCgroupDeps struct {
 	statx    func(context.Context, int, *unix.Statx_t) error
 	statfs   func(context.Context, int, *unix.Statfs_t) error
 	pread    func(context.Context, int, []byte, int64) (int, error)
+	write    func(context.Context, int, []byte) (int, error)
 	unlinkAt func(context.Context, int, string, int) error
 	close    func(context.Context, int) error
 
@@ -196,6 +197,32 @@ func inspectManagedVMCgroupReadDirectory(
 	return managedVMCgroupIdentityFromDirectoryStatx(deps, stat, description, wantMode)
 }
 
+func inspectManagedVMCgroupRegularFile(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	fd int,
+	description string,
+	wantMode uint32,
+) (managedVMCgroupIdentity, error) {
+	var stat unix.Statx_t
+	if err := deps.statx(ctx, fd, &stat); err != nil {
+		return managedVMCgroupIdentity{}, instanceAtomicError("inspect "+description, err)
+	}
+	required := uint32(unix.STATX_TYPE | unix.STATX_MODE | unix.STATX_UID | unix.STATX_GID | unix.STATX_INO)
+	if stat.Mask&required != required || stat.Mode&unix.S_IFMT != unix.S_IFREG ||
+		uint32(stat.Mode)&0o7777 != wantMode || stat.Uid != deps.trustedUID || stat.Gid != deps.trustedGID ||
+		stat.Ino == 0 {
+		return managedVMCgroupIdentity{}, instanceAtomicError(description+" metadata is not exact", nil)
+	}
+	mount, err := managedVMCgroupMountFromStatx(stat)
+	if err != nil {
+		return managedVMCgroupIdentity{}, instanceAtomicError(description+" mount identity is unavailable", err)
+	}
+	return managedVMCgroupIdentity{
+		deviceMajor: stat.Dev_major, deviceMinor: stat.Dev_minor, inode: stat.Ino, mount: mount,
+	}, nil
+}
+
 func managedVMCgroupIdentityFromDirectoryStatx(
 	deps managedVMCgroupReadDeps,
 	stat unix.Statx_t,
@@ -282,8 +309,8 @@ func managedVMCgroupMountFromStatx(stat unix.Statx_t) (managedVMCgroupMountIdent
 
 func validateManagedVMCgroupDeps(deps managedVMCgroupDeps) error {
 	if deps.openRoot == nil || deps.openAt2 == nil || deps.mkdirAt == nil || deps.fchown == nil ||
-		deps.fchmod == nil || deps.statx == nil || deps.statfs == nil || deps.pread == nil || deps.unlinkAt == nil ||
-		deps.close == nil {
+		deps.fchmod == nil || deps.statx == nil || deps.statfs == nil || deps.pread == nil || deps.write == nil ||
+		deps.unlinkAt == nil || deps.close == nil {
 		return instanceAtomicError("managed VM cgroup dependencies are incomplete", nil)
 	}
 	return nil

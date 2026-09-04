@@ -117,7 +117,13 @@ func readManagedVMCgroupMembership(
 			state.deps.close(context.WithoutCancel(ctx), fd),
 		)
 	}()
-	identity, err := inspectManagedVMCgroupFile(ctx, state.deps, fd, "cgroup.procs")
+	identity, err := inspectManagedVMCgroupRegularFile(
+		ctx,
+		state.deps,
+		fd,
+		"cgroup.procs",
+		managedVMCgroupProcsMode,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -167,31 +173,6 @@ func readAllManagedVMCgroupMembership(
 		}
 		offset += int64(count)
 	}
-}
-
-func inspectManagedVMCgroupFile(
-	ctx context.Context,
-	deps managedVMCgroupDeps,
-	fd int,
-	description string,
-) (managedVMCgroupIdentity, error) {
-	var stat unix.Statx_t
-	if err := deps.statx(ctx, fd, &stat); err != nil {
-		return managedVMCgroupIdentity{}, instanceAtomicError("inspect "+description, err)
-	}
-	required := uint32(unix.STATX_TYPE | unix.STATX_MODE | unix.STATX_UID | unix.STATX_GID | unix.STATX_INO)
-	if stat.Mask&required != required || stat.Mode&unix.S_IFMT != unix.S_IFREG ||
-		uint32(stat.Mode)&0o7777 != managedVMCgroupProcsMode || stat.Uid != deps.trustedUID ||
-		stat.Gid != deps.trustedGID || stat.Ino == 0 {
-		return managedVMCgroupIdentity{}, instanceAtomicError(description+" metadata is not exact", nil)
-	}
-	mount, err := managedVMCgroupMountFromStatx(stat)
-	if err != nil {
-		return managedVMCgroupIdentity{}, instanceAtomicError(description+" mount identity is unavailable", err)
-	}
-	return managedVMCgroupIdentity{
-		deviceMajor: stat.Dev_major, deviceMinor: stat.Dev_minor, inode: stat.Ino, mount: mount,
-	}, nil
 }
 
 func parseManagedVMCgroupMembership(raw []byte) ([]int, error) {

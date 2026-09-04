@@ -34,6 +34,12 @@ func realManagedVMCgroupDeps() managedVMCgroupDeps {
 		pread: func(_ context.Context, fd int, buffer []byte, offset int64) (int, error) {
 			return unix.Pread(fd, buffer, offset)
 		},
+		write: func(ctx context.Context, fd int, value []byte) (int, error) {
+			if err := ctx.Err(); err != nil {
+				return 0, err
+			}
+			return unix.Write(fd, value)
+		},
 		unlinkAt: func(_ context.Context, parentFD int, name string, flags int) error {
 			return unix.Unlinkat(parentFD, name, flags)
 		},
