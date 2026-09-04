@@ -173,8 +173,11 @@ under `internal/service/jailer/`. No handler, transport, CLI, API, core-domain, 
     - [x] Add the private descriptor-relative runtime-directory foundation: exact root-owned mode-`0711` runtime/UID
       parents, exclusive caller-owned mode-`0700` VM-directory creation, device/inode pinning, unsafe/existing-state
       rejection without repair, cleanup authority after partial preparation, identity-checked empty-only removal,
-      effectful-unlink/parent-sync reconciliation, and pointer-shared cancellation-independent release. Lifecycle
-      transfer, mount consumption, fixed-leaf cleanup, stale-runtime reopening, and public cutover remain pending.
+      effectful-unlink/parent-sync reconciliation, and pointer-shared cancellation-independent release. Mount
+      consumption, fixed-leaf cleanup, stale-runtime reopening, and public cutover remain pending.
+    - [x] Derive runtime ownership from durable `launching` authority; retain partial preparation through abort;
+      transfer the same lease through activation or abort and active cleanup; and remove/release it before `cleaned`,
+      while an unexpected non-empty directory remains in retryable `cleaning`.
   - [x] Freeze snapshot producer/restore leaves as `rootfs.img`, `memory`, and `vmstate`; derive restore and remove paths
     from the validated snapshot ID rather than SQLite file-path columns.
   - [ ] Remove the transitional `phantom-rootfs.img` symlink through the Task 7 namespace overlay and add the managed
@@ -428,8 +431,9 @@ the reserved-name device/inode rechecks required before leaf cleanup and directo
 ### Task 7: Add private mount and process identity primitives
 
 **Owner:** engineer
-**Status:** Private blocked-process, pidfd, Jailer-destination, activation, and cleanup/recovery authority implemented;
-production child launch/composition, complete effects, privileged actions, reconciliation, and qualification pending
+**Status:** Private blocked-process, pidfd, Jailer-destination, runtime-directory lifecycle, activation, and
+cleanup/recovery authority implemented; production child launch/composition, complete effects, privileged actions,
+reconciliation, and qualification pending
 **Foundation dependency:** Task 4
 **Full acceptance dependencies:** Tasks 5, 6, and 8
 
@@ -456,9 +460,9 @@ production child launch/composition, complete effects, privileged actions, recon
   - [x] Implement the private authority half for already-created process sources: cancellation-aware challenge and
     acknowledgement, EOF-fails-closed release gates, close-on-exec pidfd admission, exact PID/start derivation, optional
     relay separation, pinned receiver-executable verification, and ownership transfer into durable `launching`.
-    The separate private runtime-directory foundation can now create and pin the exact output directory after
-    registration, but it is not transferred into this lease or mounted. Production spawning, initial namespace,
-    outputs, mounts, mirrors, and action composition remain pending.
+    The separate private runtime-directory foundation now creates and pins the exact output directory only from that
+    durable authority and transfers it through activation or abort and cleanup. It is not mounted. Production spawning,
+    initial namespace, outputs, mounts, mirrors, and action composition remain pending.
 - [x] Make `preparedRelease.registerLaunching` consume its pinned admission/store/slot resources, derive release
   identity internally, and transfer them into the launch lease. Make `activateVerifiedProcess(ctx)` consume only that
   retained prepared release. Pre-rename failure keeps the source lease; post-rename failure returns the non-nil target
@@ -502,8 +506,8 @@ production child launch/composition, complete effects, privileged actions, recon
   VM, pidfd, mount, network, and firewall resources into cleanup without unlocking/reacquiring the VM. Keep
   authority-level `BeginCleanup` only for fresh recovery admission.
   - [x] Implement consuming abort/active-cleanup transfer for the currently retained prepared release, VM lock, pidfds,
-    Jailer destination, and topology-selected namespace identity. Mount, network, and firewall lease transfer remains
-    pending.
+    Jailer destination, topology-selected namespace identity, and runtime directory. Mount, network, and firewall lease
+    transfer remains pending.
 - [ ] Require pidfd support for every mutating operation, signal only with `pidfd_send_signal`, observe exit through the
   pidfd, and fail host capability admission instead of falling back to raw PID signaling. Re-admit a present relay by
   exact locator and complete final identity after a crash; never signal an ambiguous or reused PID.
@@ -520,8 +524,9 @@ production child launch/composition, complete effects, privileged actions, recon
   leaves, requires cgroup emptiness, unlinks only the five runtime leaves, and removes descriptor-relative allowlisted
   directories bottom-up only when empty; never recursively traverse a caller-writable tree or one containing a mount.
   - [x] Private cleanup terminates and reaps the optional relay before Firecracker, releases retained process and Jailer
-    destination descriptors, and writes `cleaned` only afterward. Wait/reap failure leaves locks, resources, and the
-    `cleaning` record available for retry; mount/runtime/cgroup cleanup remains pending.
+    destination descriptors, removes/releases only the exact empty retained runtime directory, and writes `cleaned`
+    only afterward. Wait/reap failure or an unexpected runtime leaf leaves locks, resources, and the `cleaning` record
+    available for retry; fixed-leaf/mount/cgroup cleanup and stale-runtime reopening remain pending.
 - [ ] L1 fault tests cover source/target replacement, PID mismatch, process exit, setns, mount, unmount, and cleanup.
   - [x] Focused L1 evidence covers gate cancellation/EOF, pidfd and locator mismatch, liveness/exit/HUP classification,
     bounded executable observation, every identity recheck, active post-rename ownership, full-identity recovery,

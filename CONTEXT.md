@@ -287,9 +287,12 @@ The private Jailer runtime-directory foundation now creates the fixed root-owned
 `/run/mvmctl/runtime/<uid>` hierarchy and exclusively creates one caller-owned mode-`0700` `<vm-id>` directory beneath
 it. It pins the VM directory's device/inode identity, rejects existing VM directories and unsafe parents without
 repair, returns cleanup authority after partial VM-directory preparation, and removes only the exact empty directory
-with retryable unlink/parent-sync reconciliation. The lease remains private and exposes no path or descriptor. It is
-not yet transferred through launch/active/cleanup authority, mounted inside the VM namespace, or used by public
-lifecycle operations; fixed socket/PID-leaf cleanup and stale-runtime recovery remain pending.
+with retryable unlink/parent-sync reconciliation. The lease remains private and exposes no path or descriptor. Only a
+durable `launching` lease can derive the recorded owner and VM identity to create it; partial preparation stays retained
+for abort, and activation or abort followed by active cleanup transfers the same lease without reconstructing a path.
+Cleanup removes and releases the exact empty directory before committing `cleaned`; a non-empty directory keeps the
+record in retryable `cleaning`. The directory is not yet mounted inside the VM namespace or used by public lifecycle
+operations; fixed socket/PID-leaf cleanup and stale-runtime recovery remain pending.
 
 The final Jailer instance record is strict schema 3 with
 `absent|cleaned -> launching -> active`, `launching|active -> cleaning -> cleaned`, and idempotent `cleaning`.
@@ -353,8 +356,8 @@ state and cache their first cleanup result.
 
 No production child launcher, privileged VM action, or public VM lifecycle constructs or consumes this private graph.
 Production topology/cgroup final verification, network/firewall lease transfer, stale Jailer-tree reconciliation,
-runtime/mount/output cleanup, status observation and full reconciliation, API wiring, and live L2 qualification remain
-pending.
+fixed-leaf/mount/output cleanup, stale-runtime reopening, status observation and full reconciliation, API wiring, and
+live L2 qualification remain pending.
 
 The transitional public relaunch path now has a separate, private normal-process `vmRelaunchState` increment. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,
@@ -363,10 +366,10 @@ normalized to the fixed managed `vsock.sock` leaf, and its CID, agent port, and 
 process. Only the validated CID enters `model.FirecrackerConfig`; the VM/Jailer path derives the fixed host and
 `/run/mvm/vsock.sock` jail leaves. Snapshot restore preserves the CID stored in vmstate and sends the fixed jail-visible
 vsock UDS override. VM create still uses its existing builder state rather than this common relaunch state. The private
-host `/run/mvmctl/runtime` directory lease now exists, but its launch-time `/run/mvm/runtime` mount and ownership
-transfer, authority-verified stale-socket cleanup, transactional lifecycle, host-reboot reconciliation, and L2
-`mvm exec` relaunch qualification remain pending, so this increment is not evidence that the reported restart failure
-is fully resolved.
+host `/run/mvmctl/runtime` directory lease now transfers through the private launch/active/cleanup graph, but its
+launch-time `/run/mvm/runtime` mount, authority-verified stale-socket cleanup, public transactional lifecycle,
+host-reboot reconciliation, and L2 `mvm exec` relaunch qualification remain pending, so this increment is not evidence
+that the reported restart failure is fully resolved.
 
 SQLite binary rows are an untrusted display projection of the root release store. The implemented projection schema
 now includes architecture and scopes list, prefix, type/version, latest, and default resolution to the runtime

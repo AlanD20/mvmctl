@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-09-04 (partial typed vsock relaunch state)
+**Last Updated:** 2026-09-04 (private runtime-directory lifecycle authority)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
@@ -1225,10 +1225,13 @@ mode-`0711` `/run/mvmctl/runtime` and `<uid>` parents, then exclusively creates 
 device/inode identity, returns a non-nil lease after post-create metadata failure, and removes only the exact empty
 directory. Removal rechecks the retained and current entry identities, reconciles an unlink that took effect while
 reporting failure, and retries only the parent `fsync` when absence is already proven. Copied leases share one
-mutex-protected, cancellation-independent remove/release state and cache the first release result. This foundation is
-not yet transferred into launch, active, or cleanup leases, mounted at `/run/mvm/runtime`, or wired to any privileged
-or public action. Fixed socket/PID-leaf admission and cleanup, stale-runtime reopening, and launch rollback remain
-pending.
+mutex-protected, cancellation-independent remove/release state and cache the first release result. Only the retained
+durable `launching` authority derives the recorded owner UID/GID and VM ID to create it. A partial post-create failure
+remains attached for abort; activation and abort/active cleanup transfer the same lease without reopening a path; and
+cleanup removes and releases the exact empty directory before replacing `cleaning` with `cleaned`. A non-empty runtime
+directory fails closed and leaves retryable cleanup authority. The directory is not yet mounted at `/run/mvm/runtime`
+or wired to any privileged or public action. Fixed socket/PID-leaf admission and cleanup, stale-runtime reopening, and
+production launch rollback remain pending.
 
 The Network family also creates one exact root-owned
 `/run/mvmctl/authority/<uid>/netns/<vm-id>` placeholder while retaining its directory, leaf, and mount identity. The
@@ -1247,8 +1250,7 @@ failure retires the contaminated worker.
 
 This remains neither a production topology nor a public action. No production caller constructs the private topology
 service. Jailer VM-lock transfer, route/address and verified link-up stages, firewall application, durable VM-topology
-state, Jailer handoff, runtime-lease transfer and mount consumption, public cutover, and live-kernel qualification
-remain target design.
+state, Jailer handoff, runtime mount consumption, public cutover, and live-kernel qualification remain target design.
 
 The root-owned UID parent prevents the caller from replacing the VM runtime directory. Root creates and pins that
 directory descriptor-relatively after durable launch registration, verifies its owner, mode, device, and inode, and
@@ -1462,17 +1464,19 @@ credentials, empty supplementary groups, exact derived cgroup, topology-selected
 copied executable, release digest, and optional relay identity. It seals the jail root and copied Firecracker to
 `root:root 0755`, then commits `active` with the existing post-rename target-lease contract. Private `Abort`, active
 `BeginCleanup`, fresh-recovery `BeginCleanup`, and `Complete` transfer cleanup ownership without releasing the VM lock.
-They signal only through pidfds, wait and reap before `cleaned`, treat `POLLIN`, `POLLHUP`, and their combination as
-dead pidfds, preserve retryable cleanup authority, and avoid signaling across a boot change. Fresh cleanup recovery is
-bounded to the recorded Firecracker and optional relay and requires complete active identity plus executable digests
-before same-boot cleanup authority is returned. Process, prepared-destination, destination, active, cleanup, and
-recovery capabilities are pointer-shared, close once, and cache their first cleanup result.
+The launch-owned path now retains the per-VM runtime directory from durable `launching` through activation or abort,
+then removes and releases it before `cleaned` only when it is exactly the retained empty directory. These paths signal
+only through pidfds, wait and reap before `cleaned`, treat `POLLIN`, `POLLHUP`, and their combination as dead pidfds,
+preserve retryable cleanup authority, and avoid signaling across a boot change. Fresh cleanup recovery is bounded to
+the recorded Firecracker and optional relay and requires complete active identity plus executable digests before
+same-boot cleanup authority is returned. Process, runtime-directory, prepared-destination, destination, active,
+cleanup, and recovery capabilities are pointer-shared, close once, and cache their first cleanup result.
 
 The schema-2 complete-identity experiment was not integrated because it fabricated pre-Jailer final identity and
 compared the trusted-store inode with Jailer's copy. The implemented process graph remains private and uncomposed:
 production child spawning and launch activation, network/firewall acquisition, final live topology/cgroup verification,
-stale-tree and full runtime/mount/output cleanup, status observation and complete reconciliation, privileged/public
-wiring, and live qualification remain pending.
+stale-tree, fixed-leaf/mount/output cleanup, stale-runtime reopening, status observation and complete reconciliation,
+privileged/public wiring, and live qualification remain pending.
 
 Live snapshot and volume operations reopen and verify `/proc/<pid>/ns/mnt` while the process is alive and enter only
 that namespace. No persistent mount-namespace handle is retained after the operation, because doing so would retain
