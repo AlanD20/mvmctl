@@ -528,8 +528,9 @@ func recheckVMExecSessionBindingBudget(ctx context.Context, state *vmExecSession
 	return nil
 }
 
-// Release drops capacity, destination/source process authorities, active leases in descending lexical VM-ID order,
-// and pair roots last. It never reacquires a lock and runs once across copied leases with cancellation detached.
+// Release drops destination/source peer authorities, capacity, destination/source process authorities, active leases
+// in descending lexical VM-ID order, and pair roots last. It never reacquires a lock and runs once across copied
+// leases with cancellation detached.
 func (lease *vmExecSessionLease) Release(ctx context.Context) error {
 	if lease == nil || lease.state == nil {
 		return nil
