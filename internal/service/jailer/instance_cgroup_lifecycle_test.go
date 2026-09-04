@@ -3,6 +3,7 @@ package jailer
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -42,14 +43,18 @@ func newTestPreparedJailDestinationForCgroupHandoff() *preparedJailDestination {
 	}}
 }
 
-func readyTestLaunchForCgroupHandoff(t *testing.T, authority *instanceAuthority) *launchLease {
+func readyTestLaunchForCgroupHandoff(
+	t *testing.T,
+	authority *instanceAuthority,
+	relayPresent bool,
+) *launchLease {
 	t.Helper()
-	launch, err := registerTestLaunch(
-		t,
+	prepared := prepareTestRelease(t, authority)
+	launch, err := prepared.registerLaunching(
 		t.Context(),
-		authority,
 		testInstanceCaller(),
-		testLaunchIntent(false),
+		testLaunchIntent(relayPresent),
+		newTestBlockedLaunchProcesses(t, relayPresent),
 	)
 	require.NoError(t, err)
 	launch.state.preparedJailDestination = newTestPreparedJailDestinationForCgroupHandoff()
@@ -75,11 +80,20 @@ func TestLaunchManagedVMCgroupPreparationIsExclusive(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	original := launch.state.preparedManagedVMCgroup
 	assert.True(t, launch.snapshot().hasPreparedManagedVMCgroup)
+	assert.False(t, launch.snapshot().hasManagedVMCgroup)
+	require.Error(t, launch.Release(t.Context()))
 	require.Error(t, launch.prepareManagedVMCgroup(t.Context()))
+	assert.Same(t, original, launch.state.preparedManagedVMCgroup)
+	assert.True(t, launch.snapshot().hasPreparedManagedVMCgroup)
+	assert.False(t, launch.snapshot().hasManagedVMCgroup)
 
 	cleanup, err := launch.Abort(t.Context())
 	require.NoError(t, err)
+	assert.Same(t, original, cleanup.state.preparedManagedVMCgroup)
+	assert.False(t, launch.snapshot().hasPreparedManagedVMCgroup)
+	assert.False(t, launch.snapshot().hasManagedVMCgroup)
 	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 }
@@ -88,7 +102,7 @@ func TestLaunchReleaseToJailerRequiresPreparedManagedVMCgroup(t *testing.T) {
 	t.Parallel()
 
 	authority, _ := newTestInstanceAuthority(t)
-	launch := readyTestLaunchForCgroupHandoff(t, authority)
+	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
 
 	require.Error(t, launch.releaseToJailer(t.Context()))
 	assert.Equal(t, blockedLaunchProcessesOpen, launch.state.processes.state.status)
@@ -104,7 +118,7 @@ func TestLaunchReleaseToJailerRechecksManagedVMCgroupAbsence(t *testing.T) {
 	authority, _ := newTestInstanceAuthority(t)
 	cgroup := newManagedVMCgroupTestFixture(t)
 	authority.cgroupDeps = cgroup.deps()
-	launch := readyTestLaunchForCgroupHandoff(t, authority)
+	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
 	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
 	cgroup.addVMLeaf(testVMID)
 
@@ -113,9 +127,43 @@ func TestLaunchReleaseToJailerRechecksManagedVMCgroupAbsence(t *testing.T) {
 	cleanup, err := launch.Abort(t.Context())
 	require.NoError(t, err)
 	cgroup.setMembership(testVMID, "")
+	require.Error(t, cleanup.Complete(t.Context()))
+	assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
+	assert.Nil(t, launch.state.preparedManagedVMCgroup)
+	assert.NotNil(t, cleanup.state.preparedManagedVMCgroup)
+	assert.True(t, cgroup.vmLeafPresent(testVMID))
+	require.NoError(t, os.Remove(cgroup.vmLeafPath(testVMID)+"/cgroup.procs"))
+	require.NoError(t, os.Remove(cgroup.vmLeafPath(testVMID)))
 	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 	assert.False(t, cgroup.vmLeafPresent(testVMID))
+}
+
+func TestLaunchFinalCgroupRecheckFailurePreservesRelayPartialHandoffForAbort(t *testing.T) {
+	t.Parallel()
+
+	authority, _ := newTestInstanceAuthority(t)
+	cgroup := newManagedVMCgroupTestFixture(t)
+	authority.cgroupDeps = cgroup.deps()
+	launch := readyTestLaunchForCgroupHandoff(t, authority, true)
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	processes := launch.state.processes
+	require.NotNil(t, processes.state.relay)
+	cgroup.addVMLeaf(testVMID)
+
+	require.Error(t, launch.releaseToJailer(t.Context()))
+	assert.True(t, processes.state.relay.gate.isReleased())
+	assert.False(t, processes.state.firecracker.gate.isReleased())
+	assert.Equal(t, blockedLaunchProcessesOpen, processes.state.status)
+	cleanup, err := launch.Abort(t.Context())
+	require.NoError(t, err)
+	require.Error(t, cleanup.Complete(t.Context()))
+	assert.True(t, processes.state.relay.reaped)
+	assert.True(t, processes.state.firecracker.reaped)
+	require.NoError(t, os.Remove(cgroup.vmLeafPath(testVMID)+"/cgroup.procs"))
+	require.NoError(t, os.Remove(cgroup.vmLeafPath(testVMID)))
+	require.NoError(t, cleanup.Complete(t.Context()))
+	require.NoError(t, cleanup.Release(t.Context()))
 }
 
 func TestAbortCleanupReapsBeforeReleasingAbsentManagedVMCgroup(t *testing.T) {
@@ -190,15 +238,9 @@ func TestAbortCleanupReapsBeforeRemovingJailerManagedVMCgroup(t *testing.T) {
 		return originalUnlinkAt(ctx, fd, name, flags)
 	}
 	authority.cgroupDeps = cgroupDeps
-	launch, err := registerTestLaunch(
-		t,
-		t.Context(),
-		authority,
-		testInstanceCaller(),
-		testLaunchIntent(false),
-	)
-	require.NoError(t, err)
+	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
 	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	require.NoError(t, launch.releaseToJailer(t.Context()))
 	cgroup.addVMLeaf(testVMID)
 	originalWait := launch.state.processes.state.deps.waitReapPIDFD
 	launch.state.processes.state.deps.waitReapPIDFD = func(ctx context.Context, fd int) error {
@@ -244,15 +286,9 @@ func TestAbortCleanupManagedVMCgroupRemovalFailureRetainsAuthorityForRetry(t *te
 		authority, _ := newTestInstanceAuthority(t)
 		cgroup := newManagedVMCgroupTestFixture(t)
 		authority.cgroupDeps = cgroup.deps()
-		launch, err := registerTestLaunch(
-			t,
-			t.Context(),
-			authority,
-			testInstanceCaller(),
-			testLaunchIntent(false),
-		)
-		require.NoError(t, err)
+		launch := readyTestLaunchForCgroupHandoff(t, authority, false)
 		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+		require.NoError(t, launch.releaseToJailer(t.Context()))
 		cgroup.addVMLeaf(testVMID)
 		cleanup, err := launch.Abort(t.Context())
 		require.NoError(t, err)
@@ -288,15 +324,9 @@ func TestAbortCleanupManagedVMCgroupRemovalFailureRetainsAuthorityForRetry(t *te
 			return originalUnlinkAt(ctx, fd, name, flags)
 		}
 		authority.cgroupDeps = cgroupDeps
-		launch, err := registerTestLaunch(
-			t,
-			t.Context(),
-			authority,
-			testInstanceCaller(),
-			testLaunchIntent(false),
-		)
-		require.NoError(t, err)
+		launch := readyTestLaunchForCgroupHandoff(t, authority, false)
 		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+		require.NoError(t, launch.releaseToJailer(t.Context()))
 		cgroup.addVMLeaf(testVMID)
 		originalWait := launch.state.processes.state.deps.waitReapPIDFD
 		launch.state.processes.state.deps.waitReapPIDFD = func(ctx context.Context, fd int) error {
@@ -321,6 +351,81 @@ func TestAbortCleanupManagedVMCgroupRemovalFailureRetainsAuthorityForRetry(t *te
 		assert.Equal(t, 2, unlinkCalls)
 		assert.True(t, bound.snapshot().released)
 		assert.Nil(t, cleanup.state.managedVMCgroup)
+		assert.Equal(t, instanceLifecycleCleaned, cleanup.snapshot().lifecycle)
+		require.NoError(t, cleanup.Release(t.Context()))
+	})
+}
+
+func TestAbortCleanupManagedVMCgroupCloseFailureIsReportedOnceAndRetryConverges(t *testing.T) {
+	t.Parallel()
+
+	t.Run("absent prepared", func(t *testing.T) {
+		authority, _ := newTestInstanceAuthority(t)
+		cgroup := newManagedVMCgroupTestFixture(t)
+		authority.cgroupDeps = cgroup.deps()
+		launch, err := registerTestLaunch(
+			t,
+			t.Context(),
+			authority,
+			testInstanceCaller(),
+			testLaunchIntent(false),
+		)
+		require.NoError(t, err)
+		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+		prepared := launch.state.preparedManagedVMCgroup
+		rootFD := prepared.state.rootFD
+		closeErr := errors.New("close absent prepared managed VM cgroup")
+		realClose := prepared.state.deps.close
+		prepared.state.deps.close = func(ctx context.Context, fd int) error {
+			err := realClose(ctx, fd)
+			if fd == rootFD {
+				return errors.Join(err, closeErr)
+			}
+			return err
+		}
+		cleanup, err := launch.Abort(t.Context())
+		require.NoError(t, err)
+
+		first := cleanup.Complete(t.Context())
+		require.ErrorIs(t, first, closeErr)
+		assert.True(t, prepared.snapshot().released)
+		assert.Nil(t, cleanup.state.preparedManagedVMCgroup)
+		assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
+		require.NoError(t, cleanup.Complete(t.Context()))
+		assert.Equal(t, instanceLifecycleCleaned, cleanup.snapshot().lifecycle)
+		require.NoError(t, cleanup.Release(t.Context()))
+	})
+
+	t.Run("removed lease", func(t *testing.T) {
+		authority, _ := newTestInstanceAuthority(t)
+		cgroup := newManagedVMCgroupTestFixture(t)
+		authority.cgroupDeps = cgroup.deps()
+		launch := readyTestLaunchForCgroupHandoff(t, authority, false)
+		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+		require.NoError(t, launch.releaseToJailer(t.Context()))
+		prepared := launch.state.preparedManagedVMCgroup
+		rootFD := prepared.state.rootFD
+		closeErr := errors.New("close removed managed VM cgroup")
+		realClose := prepared.state.deps.close
+		prepared.state.deps.close = func(ctx context.Context, fd int) error {
+			err := realClose(ctx, fd)
+			if fd == rootFD {
+				return errors.Join(err, closeErr)
+			}
+			return err
+		}
+		cgroup.addVMLeaf(testVMID)
+		cgroup.setMembership(testVMID, "")
+		cleanup, err := launch.Abort(t.Context())
+		require.NoError(t, err)
+
+		first := cleanup.Complete(t.Context())
+		require.ErrorIs(t, first, closeErr)
+		assert.Nil(t, cleanup.state.preparedManagedVMCgroup)
+		assert.Nil(t, cleanup.state.managedVMCgroup)
+		assert.Equal(t, instanceLifecycleCleaning, cleanup.snapshot().lifecycle)
+		assert.False(t, cgroup.vmLeafPresent(testVMID))
+		require.NoError(t, cleanup.Complete(t.Context()))
 		assert.Equal(t, instanceLifecycleCleaned, cleanup.snapshot().lifecycle)
 		require.NoError(t, cleanup.Release(t.Context()))
 	})

@@ -15,17 +15,19 @@ type preparedManagedVMCgroup struct {
 type preparedManagedVMCgroupState struct {
 	mu sync.Mutex
 
-	deps       managedVMCgroupDeps
-	vmID       string
-	rootFD     int
-	parentFD   int
-	root       managedVMCgroupIdentity
-	parent     managedVMCgroupIdentity
-	retained   []int
-	leafAbsent bool
-	binding    bool
-	released   bool
-	releaseErr error
+	deps          managedVMCgroupDeps
+	vmID          string
+	rootFD        int
+	parentFD      int
+	root          managedVMCgroupIdentity
+	parent        managedVMCgroupIdentity
+	retained      []int
+	leafAbsent    bool
+	checking      bool
+	binding       bool
+	jailerHandoff bool
+	released      bool
+	releaseErr    error
 }
 
 type preparedManagedVMCgroupSnapshot struct {
@@ -174,30 +176,61 @@ func (prepared *preparedManagedVMCgroup) RecheckAbsent(ctx context.Context) erro
 	}
 	state := prepared.state
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	if ctx == nil {
+		state.mu.Unlock()
 		return instanceAtomicError("recheck managed VM cgroup absence: context is required", nil)
 	}
-	if state.released || state.binding || !state.leafAbsent || state.rootFD < 0 || state.parentFD < 0 {
+	if state.released || state.checking || state.binding || !state.leafAbsent || state.rootFD < 0 ||
+		state.parentFD < 0 {
+		state.mu.Unlock()
 		return instanceStateError(state.vmID, "prepared managed VM cgroup is not active")
 	}
 	if err := ctx.Err(); err != nil {
+		state.mu.Unlock()
 		return instanceAtomicError("recheck managed VM cgroup absence", err)
 	}
+	state.checking = true
+	deps := state.deps
+	parentFD := state.parentFD
+	vmID := state.vmID
+	state.mu.Unlock()
+	defer finishManagedVMCgroupAbsentRecheck(state)
 	how := unix.OpenHow{
 		Flags:   uint64(managedVMCgroupDirectoryFlags),
 		Resolve: uint64(managedVMCgroupResolveFlags),
 	}
-	leafFD, err := state.deps.openAt2(ctx, state.parentFD, state.vmID, &how)
+	leafFD, err := deps.openAt2(ctx, parentFD, vmID, &how)
 	if errors.Is(err, unix.ENOENT) {
 		return nil
 	}
 	if err != nil {
 		return instanceAtomicError("recheck managed VM cgroup leaf absence", err)
 	}
-	closeErr := state.deps.close(context.WithoutCancel(ctx), leafFD)
-	primary := instanceStateError(state.vmID, "managed VM cgroup appeared before Jailer handoff")
+	closeErr := deps.close(context.WithoutCancel(ctx), leafFD)
+	primary := instanceStateError(vmID, "managed VM cgroup appeared before Jailer handoff")
 	return appendInstanceOperationError(primary, "close unexpected managed VM cgroup", closeErr)
+}
+
+func finishManagedVMCgroupAbsentRecheck(state *preparedManagedVMCgroupState) {
+	state.mu.Lock()
+	state.checking = false
+	state.mu.Unlock()
+}
+
+// MarkJailerHandoff records that this preparation remained authoritative until the Firecracker gate was released.
+func (prepared *preparedManagedVMCgroup) MarkJailerHandoff() error {
+	if prepared == nil || prepared.state == nil {
+		return instanceStateError("", "prepared managed VM cgroup is not active")
+	}
+	state := prepared.state
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.released || state.checking || state.binding || state.jailerHandoff || !state.leafAbsent ||
+		state.rootFD < 0 || state.parentFD < 0 {
+		return instanceStateError(state.vmID, "prepared managed VM cgroup cannot record Jailer handoff")
+	}
+	state.jailerHandoff = true
+	return nil
 }
 
 // Bind pins the exact Jailer-created leaf after preparation proved its fixed name absent. After safe leaf admission,
@@ -219,7 +252,8 @@ func (prepared *preparedManagedVMCgroup) Bind(
 		state.mu.Unlock()
 		return nil, instanceAtomicError("bind managed VM cgroup: context is required", nil)
 	}
-	if state.released || state.binding || !state.leafAbsent || state.rootFD < 0 || state.parentFD < 0 {
+	if state.released || state.checking || state.binding || !state.leafAbsent || state.rootFD < 0 ||
+		state.parentFD < 0 {
 		state.mu.Unlock()
 		return nil, instanceStateError(state.vmID, "prepared managed VM cgroup is not active")
 	}
@@ -292,7 +326,8 @@ func (prepared *preparedManagedVMCgroup) Bind(
 // BindForCleanup pins a leaf created after this preparation proved its fixed name absent, without proving process
 // membership. The caller must hold the VM lifecycle lock continuously since preparation and must have terminated and
 // reaped every retained launch task before removing the returned leaf. An absent leaf leaves preparation active and
-// returns nil, false, nil. Safe admission consumes preparation and returns the exact cleanup lease with present true.
+// returns nil, false, nil. A present leaf additionally requires successful Jailer-handoff provenance. Safe admission
+// consumes preparation and returns the exact cleanup lease with present true.
 func (prepared *preparedManagedVMCgroup) BindForCleanup(
 	ctx context.Context,
 ) (*managedVMCgroupLease, bool, error) {
@@ -305,7 +340,8 @@ func (prepared *preparedManagedVMCgroup) BindForCleanup(
 		state.mu.Unlock()
 		return nil, false, instanceAtomicError("bind managed VM cgroup for cleanup: context is required", nil)
 	}
-	if state.released || state.binding || !state.leafAbsent || state.rootFD < 0 || state.parentFD < 0 {
+	if state.released || state.checking || state.binding || !state.leafAbsent || state.rootFD < 0 ||
+		state.parentFD < 0 {
 		state.mu.Unlock()
 		return nil, false, instanceStateError(state.vmID, "prepared managed VM cgroup is not active")
 	}
@@ -319,6 +355,7 @@ func (prepared *preparedManagedVMCgroup) BindForCleanup(
 	rootFD := state.rootFD
 	parentFD := state.parentFD
 	parent := state.parent
+	jailerHandoff := state.jailerHandoff
 	retained := append([]int{}, state.retained...)
 	state.mu.Unlock()
 
@@ -334,6 +371,16 @@ func (prepared *preparedManagedVMCgroup) BindForCleanup(
 	if err != nil {
 		finishRejectedManagedVMCgroupBind(state)
 		return nil, false, instanceAtomicError("open Jailer-created managed VM cgroup for cleanup", err)
+	}
+	if !jailerHandoff {
+		closeErr := closeRejectedManagedVMCgroupFD(
+			ctx,
+			deps,
+			leafFD,
+			instanceStateError(vmID, "managed VM cgroup has no successful Jailer handoff provenance"),
+		)
+		finishRejectedManagedVMCgroupBind(state)
+		return nil, false, closeErr
 	}
 	leaf, err := inspectManagedVMCgroupDirectory(
 		ctx,
@@ -553,8 +600,8 @@ func (prepared *preparedManagedVMCgroup) Release(ctx context.Context) error {
 	if state.released {
 		return state.releaseErr
 	}
-	if state.binding {
-		return instanceStateError(state.vmID, "prepared managed VM cgroup bind is in progress")
+	if state.checking || state.binding {
+		return instanceStateError(state.vmID, "prepared managed VM cgroup operation is in progress")
 	}
 	cleanupCtx := context.Background()
 	if ctx != nil {

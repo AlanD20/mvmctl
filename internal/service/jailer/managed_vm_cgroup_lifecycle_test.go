@@ -157,6 +157,7 @@ func TestPreparedManagedVMCgroupBindForCleanupTransfersPresentEmptyLeaf(t *testi
 	fixture := newManagedVMCgroupTestFixture(t)
 	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	fixture.setMembership(testVMID, "")
 
@@ -176,6 +177,7 @@ func TestPreparedManagedVMCgroupBindForCleanupRejectsUnsafeLeafWithoutTransfer(t
 	fixture := newManagedVMCgroupTestFixture(t)
 	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o700))
 
@@ -220,6 +222,7 @@ func TestPreparedManagedVMCgroupBindForCleanupRejectsLeafOutsidePinnedIdentity(t
 			}
 			prepared, err := prepareManagedVMCgroup(t.Context(), deps, testVMID)
 			require.NoError(t, err)
+			require.NoError(t, prepared.MarkJailerHandoff())
 			originalRootFD := prepared.state.rootFD
 			originalParentFD := prepared.state.parentFD
 			originalRetained := append([]int{}, prepared.state.retained...)
@@ -245,6 +248,7 @@ func TestPreparedManagedVMCgroupBindForCleanupCopiedLeaseReleasesOnce(t *testing
 	fixture := newManagedVMCgroupTestFixture(t)
 	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
 	require.NoError(t, err)
+	require.NoError(t, prepared.MarkJailerHandoff())
 	fixture.addVMLeaf(testVMID)
 	fixture.setMembership(testVMID, "")
 	lease, present, err := prepared.BindForCleanup(t.Context())
@@ -289,4 +293,52 @@ func TestPreparedManagedVMCgroupBindForCleanupCopiedLeaseReleasesOnce(t *testing
 	for fd := range retained {
 		assert.Equal(t, 1, closed[fd])
 	}
+}
+
+func TestPreparedManagedVMCgroupRecheckAbsentRejectsReentryWithoutHoldingLock(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+	require.NoError(t, err)
+	realOpenAt2 := prepared.state.deps.openAt2
+	var callbackLockErr error
+	var snapshot preparedManagedVMCgroupSnapshot
+	var nestedBindErr error
+	var nestedRecheckErr error
+	var releaseErr error
+	prepared.state.deps.openAt2 = func(
+		ctx context.Context,
+		fd int,
+		name string,
+		how *unix.OpenHow,
+	) (int, error) {
+		if name != testVMID {
+			return realOpenAt2(ctx, fd, name, how)
+		}
+		if !prepared.state.mu.TryLock() {
+			callbackLockErr = errors.New("absence dependency ran while prepared mutex was held")
+			return -1, callbackLockErr
+		}
+		prepared.state.mu.Unlock()
+		snapshot = prepared.snapshot()
+		_, nestedBindErr = prepared.Bind(
+			ctx,
+			processTestLocator(),
+			processTestCgroupObservation(),
+			&managedVMCgroupTestProcessVerifier{},
+		)
+		nestedRecheckErr = prepared.RecheckAbsent(ctx)
+		releaseErr = prepared.Release(ctx)
+		return -1, unix.ENOENT
+	}
+
+	require.NoError(t, prepared.RecheckAbsent(t.Context()))
+	assert.NoError(t, callbackLockErr)
+	assert.Equal(t, preparedManagedVMCgroupSnapshot{leafAbsent: true}, snapshot)
+	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(nestedBindErr).Code)
+	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(nestedRecheckErr).Code)
+	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(releaseErr).Code)
+	require.NoError(t, prepared.RecheckAbsent(t.Context()))
+	require.NoError(t, prepared.Release(t.Context()))
 }

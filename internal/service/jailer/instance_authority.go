@@ -760,17 +760,26 @@ func releaseCleanupRuntimeResourcesLocked(ctx context.Context, state *cleanupLea
 func releaseCleanupManagedVMCgroupLocked(ctx context.Context, state *cleanupLeaseState) error {
 	if state.preparedManagedVMCgroup != nil {
 		bound, present, err := state.preparedManagedVMCgroup.BindForCleanup(ctx)
+		if bound != nil {
+			state.managedVMCgroup = bound
+			state.preparedManagedVMCgroup = nil
+		}
 		if err != nil {
 			return err
 		}
 		if present {
+			if bound == nil {
+				return instanceStateError(state.record.vmID, "cleanup managed VM cgroup admission is incomplete")
+			}
 			state.managedVMCgroup = bound
 			state.preparedManagedVMCgroup = nil
 		} else {
-			if err := state.preparedManagedVMCgroup.Release(ctx); err != nil {
-				return appendInstanceOperationError(nil, "release absent cleanup managed VM cgroup", err)
-			}
+			prepared := state.preparedManagedVMCgroup
+			releaseErr := prepared.Release(ctx)
 			state.preparedManagedVMCgroup = nil
+			if releaseErr != nil {
+				return appendInstanceOperationError(nil, "release absent cleanup managed VM cgroup", releaseErr)
+			}
 		}
 	}
 	if state.managedVMCgroup == nil {
@@ -779,10 +788,12 @@ func releaseCleanupManagedVMCgroupLocked(ctx context.Context, state *cleanupLeas
 	if err := state.managedVMCgroup.Remove(ctx); err != nil {
 		return err
 	}
-	if err := state.managedVMCgroup.Release(ctx); err != nil {
-		return appendInstanceOperationError(nil, "release cleanup managed VM cgroup", err)
-	}
+	bound := state.managedVMCgroup
+	releaseErr := bound.Release(ctx)
 	state.managedVMCgroup = nil
+	if releaseErr != nil {
+		return appendInstanceOperationError(nil, "release cleanup managed VM cgroup", releaseErr)
+	}
 	return nil
 }
 
@@ -950,6 +961,9 @@ func (lease *launchLease) releaseToJailer(ctx context.Context) error {
 		},
 	)
 	if err != nil {
+		return err
+	}
+	if err := state.preparedManagedVMCgroup.MarkJailerHandoff(); err != nil {
 		return err
 	}
 	destinationState.status = preparedJailDestinationHandoff
