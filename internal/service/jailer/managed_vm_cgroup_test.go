@@ -216,10 +216,31 @@ func TestPrepareManagedVMCgroupNormalizesOnlyFreshUmaskFilteredParent(t *testing
 		deps.mkdirAt = func(_ context.Context, parentFD int, name string, _ uint32) error {
 			return unix.Mkdirat(parentFD, name, 0o700)
 		}
+		realFchown := deps.fchown
+		fchownCalls := 0
+		initialUID := uint32(0)
+		initialGID := uint32(0)
+		gotUID := -1
+		gotGID := -1
+		deps.fchown = func(ctx context.Context, fd int, uid int, gid int) error {
+			var stat unix.Stat_t
+			require.NoError(t, unix.Fstat(fd, &stat))
+			fchownCalls++
+			initialUID = stat.Uid
+			initialGID = stat.Gid
+			gotUID = uid
+			gotGID = gid
+			return realFchown(ctx, fd, uid, gid)
+		}
 
 		prepared, err := prepareManagedVMCgroup(t.Context(), deps, testVMID)
 		require.NoError(t, err)
 		require.NoError(t, prepared.Release(t.Context()))
+		assert.Equal(t, 1, fchownCalls)
+		assert.Equal(t, deps.trustedUID, initialUID)
+		assert.Equal(t, deps.trustedGID, initialGID)
+		assert.Equal(t, int(deps.trustedUID), gotUID)
+		assert.Equal(t, int(deps.trustedGID), gotGID)
 		info, err := os.Lstat(filepath.Join(fixture.root, infra.JailerCgroupParent))
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(managedVMCgroupParentMode), info.Mode().Perm())
@@ -229,10 +250,29 @@ func TestPrepareManagedVMCgroupNormalizesOnlyFreshUmaskFilteredParent(t *testing
 		fixture := newManagedVMCgroupTestFixture(t)
 		parentPath := filepath.Join(fixture.root, infra.JailerCgroupParent)
 		require.NoError(t, os.Mkdir(parentPath, 0o700))
+		deps := fixture.deps()
+		realOpenAt2 := deps.openAt2
+		parentOpenCalls := 0
+		deps.openAt2 = func(ctx context.Context, parentFD int, name string, how *unix.OpenHow) (int, error) {
+			if name == infra.JailerCgroupParent {
+				parentOpenCalls++
+				if parentOpenCalls == 1 {
+					return -1, unix.ENOENT
+				}
+			}
+			return realOpenAt2(ctx, parentFD, name, how)
+		}
+		deps.mkdirAt = func(context.Context, int, string, uint32) error { return unix.EEXIST }
+		fchownCalls := 0
+		deps.fchown = func(context.Context, int, int, int) error {
+			fchownCalls++
+			return nil
+		}
 
-		prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+		prepared, err := prepareManagedVMCgroup(t.Context(), deps, testVMID)
 		assert.Nil(t, prepared)
 		require.Error(t, err)
+		assert.Equal(t, 0, fchownCalls)
 		info, err := os.Lstat(parentPath)
 		require.NoError(t, err)
 		assert.Equal(t, os.FileMode(0o700), info.Mode().Perm())
@@ -584,6 +624,47 @@ func TestPreparedManagedVMCgroupCopiedConcurrentReleaseClosesOnceAndCachesFirstE
 	}
 }
 
+func TestManagedVMCgroupReleaseConsumesCancellationIndependently(t *testing.T) {
+	t.Parallel()
+
+	t.Run("prepared", func(t *testing.T) {
+		fixture := newManagedVMCgroupTestFixture(t)
+		prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+		require.NoError(t, err)
+		realClose := prepared.state.deps.close
+		prepared.state.deps.close = func(ctx context.Context, fd int) error {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("prepared close received cancelled context: %w", err)
+			}
+			return realClose(ctx, fd)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		require.NoError(t, prepared.Release(ctx))
+		assert.True(t, prepared.snapshot().released)
+	})
+
+	t.Run("bound", func(t *testing.T) {
+		fixture := newManagedVMCgroupTestFixture(t)
+		lease := fixture.bindLease(t, fixture.deps())
+		fixture.setMembership(testVMID, "")
+		require.NoError(t, lease.Remove(t.Context()))
+		realClose := lease.state.deps.close
+		lease.state.deps.close = func(ctx context.Context, fd int) error {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("bound close received cancelled context: %w", err)
+			}
+			return realClose(ctx, fd)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		require.NoError(t, lease.Release(ctx))
+		assert.True(t, lease.snapshot().released)
+	})
+}
+
 func TestPreparedManagedVMCgroupBindHandlesBoundedMembershipReads(t *testing.T) {
 	t.Parallel()
 
@@ -610,6 +691,41 @@ func TestPreparedManagedVMCgroupBindHandlesBoundedMembershipReads(t *testing.T) 
 		)
 		require.NoError(t, err)
 		require.NotNil(t, lease)
+		lease.state.deps.pread = realPread
+		fixture.setMembership(testVMID, "")
+		require.NoError(t, lease.Remove(t.Context()))
+		require.NoError(t, lease.Release(t.Context()))
+	})
+
+	t.Run("rejects cumulative maximum plus one", func(t *testing.T) {
+		fixture := newManagedVMCgroupTestFixture(t)
+		prepared, err := prepareManagedVMCgroup(t.Context(), fixture.deps(), testVMID)
+		require.NoError(t, err)
+		fixture.addVMLeaf(testVMID)
+		realPread := prepared.state.deps.pread
+		totalRead := 0
+		prepared.state.deps.pread = func(_ context.Context, _ int, buffer []byte, offset int64) (int, error) {
+			remaining := managedVMCgroupMaxProcs + 1 - int(offset)
+			if remaining <= 0 {
+				return 0, nil
+			}
+			count := min(len(buffer), remaining)
+			for index := range buffer[:count] {
+				buffer[index] = '1'
+			}
+			totalRead += count
+			return count, nil
+		}
+
+		lease, err := prepared.Bind(
+			t.Context(),
+			processTestLocator(),
+			processTestCgroupObservation(),
+			&managedVMCgroupTestProcessVerifier{},
+		)
+		require.Error(t, err)
+		require.NotNil(t, lease)
+		assert.Equal(t, managedVMCgroupMaxProcs+1, totalRead)
 		lease.state.deps.pread = realPread
 		fixture.setMembership(testVMID, "")
 		require.NoError(t, lease.Remove(t.Context()))
