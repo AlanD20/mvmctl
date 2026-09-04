@@ -324,12 +324,16 @@ copy against the exact manifest, rechecks full identity, and only then commits `
 must use pointer-shared mutex-protected close-once state and cache the first cleanup result.
 
 The prepared release's consuming registration method derives release identity internally and transfers its pinned
-admission, store, slot lock, and executable resources into the launch lease. That lease retains the VM, network, and
-firewall leases; creates links down; applies and freshly verifies the complete atomic nftables generation; raises links
-only after firewall success; and only afterward releases the blocked child to Jailer. A fixed jail destination must be
-proved absent/fresh immediately before that release; only an exactly admitted, non-mounted stale fixed tree may be
-removed after process absence. `launchLease.Abort` and `activeLease.BeginCleanup` transfer their resources directly
-into cleanup without releasing and reacquiring the VM lock. Authority-level cleanup admission is recovery-only.
+admission, store, slot lock, and executable resources into the launch lease. That lease retains the VM lock plus opaque
+topology and endpoint authority. It holds the later network then firewall mutation locks while it creates links down,
+applies and freshly verifies the complete atomic nftables generation, and raises/reverifies links. A failure before
+successful activation-lock release rolls back with those same locks and leaves the child blocked. Success releases the
+firewall then network mutation lock before the blocked child reaches Jailer; active authority does not serialize other
+VMs. A fixed jail destination must be proved absent/fresh immediately before release; only an exactly admitted,
+non-mounted stale fixed tree may be removed after process absence. `launchLease.Abort` and
+`activeLease.BeginCleanup` transfer their resources directly into cleanup without releasing and reacquiring the VM
+lock. Later cleanup reacquires network then firewall under that VM lock. Authority-level cleanup admission is
+recovery-only.
 
 The private schema-3 graph now also carries a fixed-name cgroup-v2 authority for
 `/sys/fs/cgroup/mvmctl/<vm-id>`. It descriptor-pins the cgroup root, compiled parent, and VM leaf and verifies exact
@@ -397,9 +401,9 @@ Fresh cleanup now reopens the exact existing per-VM runtime directory through th
 runtime cleanup. It creates or repairs nothing, treats an absent hierarchy as already clean, and preserves retryable
 `cleaning` on unsafe state. No production child launcher, privileged VM action, or public VM lifecycle constructs or
 consumes this private graph. Same-boot dead-process cgroup reconciliation, replacement of the path-based cgroup
-prepare/remove calls in `entry.go`, production topology and network/firewall lease transfer, stale Jailer-tree
-reconciliation, mount/output cleanup, public create/start/stop and other lifecycle wiring, status observation and full
-reconciliation, and live L2, Tier 3, and system qualification remain pending.
+prepare/remove calls in `entry.go`, production topology/endpoint authority and mutation-lock composition, stale
+Jailer-tree reconciliation, mount/output cleanup, public create/start/stop and other lifecycle wiring, status
+observation and full reconciliation, and live L2, Tier 3, and system qualification remain pending.
 
 The transitional public relaunch path now has a separate, private normal-process `vmRelaunchState` increment. Start,
 reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,
@@ -412,6 +416,13 @@ host `/run/mvmctl/runtime` directory lease now transfers through the private lau
 launch-time `/run/mvm/runtime` mount, authority-verified stale-socket cleanup, public transactional lifecycle,
 host-reboot reconciliation, and L2 `mvm exec` relaunch qualification remain pending, so this increment is not evidence
 that the reported restart failure is fully resolved.
+
+Snapshot restore must also obtain the captured network ID, guest IPv4, and MAC from trusted root snapshot metadata and
+reserve those exact values for the restored endpoint. It fails if the source still owns them, another endpoint
+conflicts, or a different network is requested. v0.3.0 performs no fresh IP/MAC allocation, cross-network restore, or
+simultaneous endpoint clone. A new host TAP name may be derived, but the anti-spoof endpoint must match the embedded
+guest address and MAC. Root snapshot metadata, restore composition, conflict coverage, and live qualification remain
+pending; user SQLite state is not restore authority.
 
 SQLite binary rows are an untrusted display projection of the root release store. The implemented projection schema
 now includes architecture and scopes list, prefix, type/version, latest, and default resolution to the runtime
@@ -475,6 +486,13 @@ numbered. The veth pair, namespace-local bridge, and TAP are unnumbered and own 
 `127.0.0.1/8`; the host bridge and guest receive only their kernel-connected routes, and the guest receives the default
 route through the resolved gateway, all without an explicit metric. Default guest MACs use `02:fc` plus four bytes of
 the versioned, NUL-framed owner/VM SHA-256 derivation; the selected globally unique unicast MAC is persisted.
+
+Public NAT intent is only enabled or disabled; v0.3.0 removes the public/unprivileged `NATGateways` interface-name
+choice. For enabled NAT, root must discover exactly one eligible IPv4 main-table default-route uplink through typed
+rtnetlink pinned to the host network namespace, persist its exact ifindex/name/kind/namespace identity, and revalidate
+it before compile/apply/activation. Zero, multiple, multipath, replaced, or changed candidates fail closed; metrics do
+not select among several routes, and multi-uplink selection is unsupported. Actual input/model/compiler removal and
+its tests remain pending.
 
 Production topology preparation must consume the opaque child `TopologyHold` from the real Jailer VM lock and retain
 it, the namespace pin, and later firewall endpoint authority through active or retryable cleaning state. After all

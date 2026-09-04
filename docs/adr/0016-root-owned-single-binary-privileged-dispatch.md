@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-09-04 (private runtime-directory lifecycle authority)
+**Last Updated:** 2026-09-04 (network lock, uplink, and snapshot endpoint authority)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
@@ -1401,12 +1401,12 @@ The activation order is fixed:
    `pids` controller readiness at the root and then the parent. Enable only missing controllers additively and verify
    each descriptor-relative readback; never disable an existing controller.
 5. Prepare fixed outputs, the runtime directory, initial private mount namespace, and named mounts. With the launch
-   lease's VM lock already retained, acquire and retain only the later network, then firewall leases; create
-   namespace/local and host
-   links down; apply the complete nftables
-   generation atomically and verify it through a fresh inspection. Only after firewall success may the exact links be
-   raised and reverified. A failure keeps links down and both children blocked while typed abort unwinds through the
-   same leases.
+   lease's VM lock already retained, acquire the later network mutation lock, then the host-global firewall mutation
+   lock; create namespace-local and host links down; apply the complete nftables generation atomically and verify it
+   through a fresh inspection. Only after firewall success may the exact links be raised and reverified. Both mutation
+   locks remain held through this activation checkpoint. A failure before their successful release keeps or lowers
+   links and leaves both children blocked while typed abort unwinds with the same locks. After successful activation,
+   release the firewall then network mutation lock while the opaque topology and verified endpoint authority remain.
 6. Release the relay, observe and record its exact caller credentials, empty supplementary groups, host mount
    namespace/root, root-owned `/usr/local/bin/mvm` executable metadata and digest, and verify readiness.
 7. Recheck the pinned release, fresh jail-destination absence, cgroup-leaf absence, and root-then-parent controller
@@ -1432,6 +1432,16 @@ The activation order is fixed:
     authority that the pidfd/start-tick-bound task is the exact leaf's sole member. A failed limit or membership proof
     preserves that same lease, and retry repeats both. Then atomically replace `launching` with `active`.
 
+The v0.3.0 public network/NAT request carries only whether NAT is enabled. It exposes no `NATGateways`, uplink name,
+ifindex, route, or selector. When NAT is enabled, root discovers exactly one eligible IPv4 main-table default-route
+uplink through its typed, host-network-namespace-bound rtnetlink authority. An eligible route is unicast `0.0.0.0/0`,
+has one output interface and no multipath next hops, and resolves to a non-loopback, non-mvm-owned link. Root persists
+the exact ifindex, name, kind, and host network-namespace identity, then revalidates the route and link before firewall
+compilation, application, and topology activation. Zero eligible uplinks, multiple eligible uplinks regardless of
+metric, replacement, or changed identity fails closed. Multi-uplink selection is unsupported in v0.3.0. Removing the
+current public input/model surface, replacing the compiler's raw uplink string with the retained typed identity, and
+adding L1/L2 coverage remain pending; this decision does not claim those code changes.
+
 Sealing makes the copied inode immutable to the dropped caller and preserves the exact-content proof established at
 activation. Later status batches can compare the root-owned inode and metadata without rehashing every executable;
 release installation/removal still uses the exact manifest and release-reference locks. A process becoming `active`
@@ -1449,14 +1459,16 @@ never retries an unlock or close against a descriptor number that the kernel may
 `authorityfs` capabilities and `verifiedProcessLease`; it does not add a generic callback, raw fd, or raw path seam.
 
 `launchLease.Abort(ctx)` and `activeLease.BeginCleanup(ctx)` are consuming transitions. They atomically move the held
-release reference and slot lock, VM lock, pidfds, and every acquired output, mount, topology, network, and firewall
+release reference and slot lock, VM lock, pidfds, and every acquired output, mount, topology, and firewall endpoint
 resource lease, including the fixed-name cgroup authority, into one `cleanupLease`; the source lease becomes inert.
 Abort may call the cgroup authority's causal `BindForCleanup` only after the exact retained task has been terminated
 and reaped. A post-registration error never releases and
 reacquires the VM lock before cleaning. `instanceAuthority.BeginCleanup(ctx, caller, vmID)` exists only for a fresh
 dispatcher performing recovery admission and reacquires the exact record and locks in global order. It is not the
 error-path transition for a live launch or active lease. There is one named `Abort` method, not interchangeable aliases
-or a generic state transition.
+or a generic state transition. Once activation has released its mutation locks, later stop, failure, or recovery
+cleanup reacquires the per-network lock and then the host-global firewall lock under the retained or freshly admitted
+VM lock. Active lifetime authority never holds either mutation lock and therefore does not serialize unrelated VMs.
 
 Every durable transition has a typed commit result. Before rename, registration returns no launch lease and leaves the
 prepared release live; activation returns no active lease and leaves the launch lease live. Once the launching rename
@@ -1466,7 +1478,10 @@ lease first. Those post-rename failures return that lease together with a `Domai
 `record_replaced=true` and, when persistence is uncertain, `durability_uncertain=true`. The caller invokes
 `launchLease.Abort` or `activeLease.BeginCleanup` through the returned authority, preserves the primary error plus
 bounded cleanup diagnostics, and never acts through the stale source lease. No process, VM, release, network, or
-firewall lock is dropped between record replacement and cleaning.
+firewall authority is dropped between a failed pre-release activation checkpoint and cleaning; the network and
+firewall mutation locks remain held. After a fully successful activation checkpoint, the firewall then network
+mutation lock release normally; the active lease retains only the topology and endpoint authority needed to reacquire
+them in canonical order for later cleanup.
 
 Implementation note (updated 2026-09-04): main implements the private strict schema-3 record/codec and process-authority
 side of its lifecycle. An already-created Firecracker child and optional relay can be admitted behind challenged
@@ -1606,6 +1621,15 @@ root derives the fixed runtime UDS leaf. The normal process retains the agent po
 probe instead of exposing them to root. A repository failure aborts launch instead of silently omitting the device.
 Root removes an old fixed vsock socket only after authority proves that no live active or recoverable launching process
 owns it.
+
+Snapshot restore additionally preserves the trusted snapshot-captured network ID, guest IPv4 address, and guest MAC;
+those values are part of the guest's embedded network state rather than fresh allocation inputs. Root must admit
+trusted snapshot metadata, reserve that exact endpoint for the restored VM, and fail before launch when the address or
+MAC conflicts, the source VM still owns the endpoint, or the requested destination network differs. v0.3.0 does not
+support fresh IP/MAC allocation during restore, cross-network restore, or a simultaneous endpoint clone. The new VM's
+derived host TAP name may differ, but the firewall anti-spoof endpoint must use the captured guest address and MAC.
+Root-owned snapshot network metadata, restore composition, conflict tests, and live snapshot qualification remain
+pending; user SQLite rows or caller-supplied snapshot metadata never authorize the reservation.
 
 Implementation note (2026-09-04): the transitional public start, reboot, and snapshot-restore paths now load a private
 normal-process `vmRelaunchState`. An absent vsock row is a valid device absence; lookup failure, mismatched VM identity,

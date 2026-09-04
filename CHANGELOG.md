@@ -330,13 +330,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   descriptors, netlink requests, or `ip` arguments.
 - The accepted activation contract consumes the real Jailer VM lock's opaque `TopologyHold`, requires a freshly
   verified opaque firewall endpoint lease, and raises loopback, local bridge, TAP, namespace veth, then host veth.
-  Durable root state retains selected L3/MAC values, boot-scoped observed identities, endpoint identity, and exact
-  lifecycle progress while re-deriving names, paths, routes, and order. Cleanup lowers exposure first and retains
-  retryable authority until firewall and topology absence are proven.
+  Network then firewall mutation locks remain held through apply and activation; a pre-release failure rolls back with
+  the same locks. Success releases firewall then network while opaque authority remains. Later cleanup reacquires
+  network then firewall under the retained VM lock. Durable root state retains selected L3/MAC values, boot-scoped
+  observed identities, endpoint identity, and lifecycle progress while re-deriving names, paths, routes, and order.
+- Fixed the target NAT authority: public intent retains only enabled/disabled and removes `NATGateways` interface-name
+  selection. For enabled NAT, root discovers exactly one eligible IPv4 main-table default-route uplink through typed
+  host-netns rtnetlink, persists its ifindex/name/kind/namespace identity, and revalidates it. Zero, multiple, changed,
+  or multipath uplinks fail closed; multi-uplink selection is unsupported.
 - This contract is documentation, not completed runtime behavior. Production route/address and link activation,
   firewall endpoint capability/application, `TopologyHold` and Jailer composition, durable reconciliation, public
-  lifecycle cutover, and system QA remain pending. Incompatible `/31` or `/32`, non-private, schema-1, mutable-name,
-  host-global, or ambiguous legacy state will be refused as a clean break rather than adopted or automatically deleted.
+  lifecycle cutover, `NATGateways` input/model/compiler removal and tests, and system QA remain pending. Incompatible
+  `/31` or `/32`, non-private, schema-1, mutable-name, host-global, or ambiguous legacy state will be refused as a clean
+  break rather than adopted or automatically deleted.
 
 #### Typed LoopMount privilege foundations
 - Added named `ProvisionVM`, `InspectImage`, and `OptimizeImage` clients with fixed actions and closed VM/image request,
@@ -494,8 +500,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   identities and executable digests.
 - Process, prepared-destination, destination, active, cleanup, and recovered-process capabilities use pointer-shared
   close-once state and cache their first cleanup result. This graph remains private: production child spawning and
-  launch composition, network/firewall lease transfer, final live topology verification, full runtime cleanup and
-  reconciliation, public wiring, and system qualification remain release blockers.
+  launch composition, topology/endpoint authority and mutation-lock composition, final live topology verification,
+  full runtime cleanup and reconciliation, public wiring, and system qualification remain release blockers.
 - Added a private fixed-name cgroup-v2 authority to the schema-3 lease graph without storing a cgroup path in the
   record. It pins and exactly checks the root, compiled parent, and VM leaf plus mount identity; refuses legacy-leaf
   adoption; proves fresh absence through the last handoff recheck; and requires successful Jailer-handoff provenance
@@ -706,6 +712,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Firecracker launch configuration now carries only the validated guest CID. The core VM/Jailer path derives the fixed
   host `vsock.sock` and jail `/run/mvm/vsock.sock` leaves. Snapshot restore preserves the CID recorded in vmstate and
   supplies the fixed jail-visible UDS override when vsock is enabled.
+- The accepted snapshot-network contract also preserves the trusted snapshot-captured network ID, guest IPv4, and MAC
+  and reserves that exact endpoint for the restored VM. Conflict, source ownership, or a different requested network
+  fails; v0.3.0 permits no fresh IP/MAC allocation, cross-network restore, or simultaneous endpoint clone. A remapped
+  host TAP must still compile anti-spoofing for the embedded guest address/MAC. Root snapshot metadata, composition,
+  conflict tests, and live qualification remain pending.
 - This is an L0/L1-backed partial lifecycle increment, not end-to-end confirmation that the reported `mvm exec`
   restart failure is resolved. VM create does not yet use the same `vmRelaunchState`; receiver-owned
   root-built descriptor-pinned `/run/mvm/runtime` activation backed by the host `/run/mvmctl/runtime` tree, verified
@@ -791,8 +802,10 @@ The following items are release blockers and are intentionally not described abo
   ancestors and hash the copy against the exact release.
   Jailer must use neither `--daemonize` nor `--new-pid-ns`; `console.pid` remains display-only.
 - Compose the implemented private process activation, abort, and cleanup/recovery authority into the production launch
-  action. Carry the remaining mount, network, and firewall resources through launch, active, and cleaning without lock
-  release/reacquisition, and preserve the returned post-rename authority on every failure.
+  action. Carry the remaining mount, topology, and firewall endpoint resources through launch, active, and cleaning
+  without releasing the VM lock. Hold network/firewall mutation locks through activation and same-lock rollback, then
+  release them after success and reacquire network then firewall for later cleanup. Preserve returned post-rename
+  authority on every failure.
 - Compose the private fixed-name cgroup-v2 authority into production create/start/stop and other lifecycle actions. Add
   same-boot dead-process reconciliation, replace `entry.go` path-based prepare/remove, and complete live L2, Tier 3,
   and system qualification before treating it as host enforcement or release evidence.
@@ -834,7 +847,8 @@ The following items are release blockers and are intentionally not described abo
 - Compose the implemented private namespace and down-only link effects into the owner-bound VM lifecycle, add the
   canonical route/address stages, require the freshly verified opaque firewall endpoint lease, raise host veth last,
   make one namespace mandatory per VM, and pass its pinned handle to Jailer. Integrate retained activation, rollback,
-  reconciliation, and cleanup, then complete live L2, reboot/failure, clean-break, and leak-free system QA.
+  reconciliation, cleanup, root-selected single-uplink NAT authority, and snapshot endpoint preservation, then complete
+  live L2, snapshot, reboot/failure, clean-break, and leak-free system QA.
 - Use the implemented root-owned global firewall lock, durable committed/applying generation record replacement, and
   retained exact-host-netns snapshot factory only after resolving the pinned library's missing table/chain provenance,
   accepting the root/`CAP_NET_ADMIN` threat-model boundary, and composing qualified inspection. Then prove

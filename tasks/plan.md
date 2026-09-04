@@ -208,9 +208,9 @@ continue without silently deleting it.
   membership and on retry. Errors retain the same authority; recovery and no-intent launches never mutate controllers.
   Relay and Firecracker handoff progress is independent, so a partial relay-success retry resumes only Firecracker.
   Same-boot dead-process reconciliation, replacement of `entry.go` path-based cgroup operations, production child
-  spawning and create/start/stop composition, network/firewall lease transfer, final live topology verification, full
-  reconciliation, API wiring, and live L2/Tier 3/system tests remain pending. This is not yet production host
-  enforcement or release evidence.
+  spawning and create/start/stop composition, topology/endpoint authority plus mutation-lock composition, final live
+  topology verification, full reconciliation, API wiring, and live L2/Tier 3/system tests remain pending. This is not
+  yet production host enforcement or release evidence.
 - Private firewall generation authority with a strict committed/applying record and codec, descriptor-relative
   exclusive store at `/var/lib/mvmctl/firewall/generation.json`, and never-unlinked global
   `/run/mvmctl/authority/firewall.lock`. Acquisition requires earlier network authority and admits only the current boot
@@ -475,11 +475,14 @@ The last pre-handoff check repeats complete readiness. After Jailer creates the 
 membership; retry repeats both without replacing the authority. Recovery and no-intent launch paths perform no
 controller mutation.
 
-The launch lease retains VM, network, and firewall leases. It creates all links down, applies the complete atomic
-nftables generation, verifies it freshly, and only then raises and reverifies links. An unknown firewall outcome keeps
-links down and both children blocked. Only after those effects and exact relay readiness does the parent recheck the
-fresh jail destination and release the child to Jailer with the pinned netns. Relay and Firecracker handoff progress is
-retained independently: if relay release succeeds and Firecracker release fails, retry resumes only the pending
+The launch lease retains the VM lock plus opaque topology and verified endpoint authority. It holds the network then
+firewall mutation locks while creating all links down, applying and freshly verifying the complete atomic nftables
+generation, and raising/reverifying links. A failure before successful activation-lock release rolls back with those
+same locks and keeps both children blocked. Success releases the firewall then network mutation lock; active authority
+does not serialize unrelated VMs. Later stop/failure cleanup reacquires network then firewall under the retained VM
+lock. Only after activation and exact relay readiness does the parent recheck the fresh jail destination and release
+the child to Jailer with the pinned netns. Relay and Firecracker handoff progress is retained independently: if relay
+release succeeds and Firecracker release fails, retry resumes only the pending
 Firecracker handoff on the same lease. Jailer 1.16.1 copies
 Firecracker, joins netns/cgroup, unshares and pivots into a new final mount namespace, drops credentials, and execs its
 copy. The initial namespace therefore cannot be recorded as the final namespace, and the trusted-store inode cannot be
@@ -839,6 +842,14 @@ exact lifecycle progress. Names, namespace paths, loopback, routes, unnumbered-l
 remain derived and must match their persisted observation evidence; no caller supplies raw names, paths, routes,
 descriptors, netlink messages, or `ip` arguments.
 
+Public network intent retains only NAT enabled/disabled. The `NATGateways` interface-name input and corresponding
+unprivileged model/privileged compiler surface must be removed. When NAT is enabled, root discovers through typed
+host-netns rtnetlink exactly one eligible unicast IPv4 main-table `0.0.0.0/0` route with one non-loopback,
+non-mvm-owned output link and no multipath next hops. It persists exact ifindex/name/kind/namespace identity and
+revalidates route and link before compile, apply, and activation. Zero, multiple, replaced, or changed candidates fail
+closed; route metrics do not choose among several candidates, and multi-uplink selection is unsupported in v0.3.0.
+The input/model/compiler removal, retained typed adapter, reconciliation, and L1/L2 tests remain pending.
+
 Network creation owns managed-network registration under the global ownership index then network lock. VM launch must
 not re-enter registration. It consumes the real Jailer VM lock's opaque `TopologyHold` into the topology lease, creates
 all topology down, and retains that hold and the namespace pin through active or cleaning state. Firewall application
@@ -1101,6 +1112,14 @@ launch request contains only the validated CID and derives the fixed runtime UDS
 agent port and token for later agent client probes. Receiver-owned cleanup removes a stale fixed socket only after
 process authority proves no live instance owns it. L1 verifies the generated Firecracker config. L2 runs `mvm exec`
 after stop/start, reboot, host reboot plus start, and snapshot restore.
+
+Snapshot restore also preserves the trusted snapshot-captured network ID, guest IPv4, and MAC. Root-owned snapshot
+metadata, not user SQLite or restore input, supplies those values. The restore transaction reserves that exact endpoint
+for the new VM before launch and fails if another endpoint conflicts, the source VM still owns it, or a different
+network is requested. v0.3.0 allocates no fresh IP/MAC during restore and supports no cross-network restore or
+simultaneous endpoint clone. The host TAP name may be re-derived for the new VM, but the firewall anti-spoof identity
+must equal the embedded guest state. The root snapshot record/admission, allocator reservation, launch composition,
+conflict tests, and live qualification remain pending.
 
 The 2026-08-26 read-only reproduction isolated the reported defect: `VMStart` and `VMReboot` omitted the `vsock`
 relation, while `vmRespawnFirecracker` emitted a vsock device only when `VMItem.Vsock` was populated. The restarted

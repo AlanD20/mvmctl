@@ -2,7 +2,7 @@
 
 **Status:** Accepted — v0.3.0 implementation in progress
 **Date:** 2026-08-23
-**Last Updated:** 2026-09-04 (canonical VM L3 and retained network authority)
+**Last Updated:** 2026-09-04 (lock lifecycle, root-selected uplink, and snapshot endpoint authority)
 **Supersedes:** [ADR-0014: Routed Service-Access Policies](0014-routed-service-access-policies.md)
 **See also:** [ADR-0016: Root-Owned Single-Binary Privileged Dispatch](0016-root-owned-single-binary-privileged-dispatch.md)
 
@@ -75,6 +75,25 @@ immutable network or VM ID, and fixed role. Root re-derives and compares them at
 input, persistent desired-state row, or recovery request may provide a raw interface name, namespace path, route,
 descriptor, netlink request, or `ip` argument.
 
+#### Root-selected NAT uplink
+
+The v0.3.0 public network contract retains only the NAT enabled/disabled choice. The unprivileged API, configuration,
+user model, and privileged request expose no `NATGateways` list, interface name, ifindex, route, or uplink selector.
+When NAT is disabled, no uplink authority is required and the firewall compiler emits neither uplink egress nor NAT.
+
+When NAT is enabled, root uses a typed rtnetlink authority pinned to the exact host network namespace to discover one
+eligible main-table IPv4 default route. Eligibility requires one unicast `0.0.0.0/0` route with exactly one output
+interface, no multipath next hops, and a resolved link that is neither loopback nor mvm-owned. Root does not rank
+several candidates by metric: zero or multiple eligible routes fail closed because multi-uplink selection is not
+supported in v0.3.0.
+
+The admitted managed-network authority persists the selected uplink's exact ifindex, name, link kind, and host
+network-namespace device/inode. Root reopens and revalidates both route and link immediately before compilation,
+application, and topology activation. A missing route, changed interface or namespace identity, replacement, or
+additional eligible uplink blocks activation and preserves cleanup authority. Only this retained typed identity may
+enter the private compiler; a caller-provided raw link name never does. Removal of the current `NATGateways`
+input/model surface and raw compiler uplink field, plus focused and live tests, remains pending.
+
 #### Retained activation authority
 
 Managed-network registration is a network-creation transaction under the ownership-index and per-network locks. VM
@@ -102,7 +121,8 @@ capability, its Jailer composition, and system QA remain pending.
 #### Durable topology and reconciliation
 
 The production managed-network record persists the authenticated owner, network ID, boot and host-namespace identity,
-canonical prefix and gateway, and exact observed managed-bridge evidence. One root-owned per-VM topology record beneath
+canonical prefix and gateway, exact observed managed-bridge evidence, NAT enabled/disabled, and the exact selected
+uplink evidence only when NAT is enabled. One root-owned per-VM topology record beneath
 `/var/lib/mvmctl/networks/<uid>/topologies/<vm-id>.json` persists schema and lifecycle, owner/network/VM IDs, boot and
 launch generation, selected guest address and MAC, namespace mount evidence, exact observed link names/ifindices and
 namespace identities, network-record binding, stable firewall endpoint identity, and completed mutation markers.
@@ -129,6 +149,19 @@ Same-boot recovery reopens only the derived namespace target and admits the reco
 Prior-boot recovery requires recorded processes and the ephemeral namespace target to be absent before retiring the
 record and performs no speculative host mutation. An active topology whose exact firewall endpoint is no longer
 verified immediately lowers the host veth and enters cleaning.
+
+#### Snapshot restore endpoint identity
+
+A snapshot's associated network ID and guest-visible IPv4 address and MAC are captured state. Restore must obtain them
+from admitted root-owned snapshot metadata and reserve those exact values for the new VM endpoint before any launch
+effect. It fails closed when the address or MAC is already reserved, when the source VM still owns that endpoint, or
+when the requested destination network differs. v0.3.0 performs no fresh address or MAC allocation during restore and
+supports neither cross-network restore nor simultaneous endpoint cloning.
+
+The restored VM receives newly derived host topology identities, so its TAP name may change. Its guest address and MAC
+must not: the freshly compiled anti-spoof endpoint must exactly match the state embedded in the guest snapshot. User
+SQLite rows and caller-supplied network values are not restore authority. The strict root snapshot metadata record,
+reservation/launch composition, conflict and ownership tests, and live snapshot qualification remain pending.
 
 This is a clean-break contract. `/31` and `/32` networks, prefixes not wholly private, network/broadcast/gateway address
 conflicts, non-canonical or multicast MACs, schema-1 identity-only records, mutable network-name-derived bridges,
@@ -166,10 +199,12 @@ Network behavior remains in the network service and nftables behavior in the fir
 authority module. The firewall mutation lock is host-global because one generation owns both reserved tables across all
 users and managed networks.
 
-Failure before link activation leaves links down and the Jailer child blocked. Failure after verified activation first
-lowers and reverifies the exact links, then invokes the launch lease's typed abort while the same locks and lifecycle
-handle remain held. An unknown firewall outcome never raises a link or releases the child. Cleanup verifies namespace
-inode, interface ownership, process identity, and cgroup membership before removing anything.
+Failure before link activation leaves links down and the Jailer child blocked. Failure after links rise but before the
+activation checkpoint releases its mutation locks first lowers and reverifies the exact links, then invokes the launch
+lease's typed abort while those same locks and lifecycle handle remain held. An unknown firewall outcome never raises a
+link or releases the child. A later active stop/failure enters cleanup under the retained VM lock and reacquires network
+then firewall. Cleanup verifies namespace inode, interface ownership, process identity, and cgroup membership before
+removing anything.
 
 Implementation note (2026-08-31): a private strict schema-1 managed-network authority record, codec, persistent store,
 and inert registration authority are implemented. The record is at

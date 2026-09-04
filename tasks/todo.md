@@ -483,9 +483,11 @@ privileged actions, same-boot dead-process cgroup reconciliation, and qualificat
   - [x] Implement descriptor-pinned exact-ancestor and mount-identity admission for an already-absent destination,
     recheck absence immediately before the blocked child is released, then bind the exact Jailer-created root and copy
     after handoff. Stale-tree admission/removal and production invocation remain pending.
-- [ ] Retain VM, network, and firewall leases; create links down; apply and freshly verify the complete atomic nftables
-  generation; then raise and reverify links. Release the child only after named mounts, firewall-protected topology,
-  and exact relay readiness succeed. Invoke Jailer 1.16.1
+- [ ] Retain the VM lock plus opaque topology/endpoint authority. Hold the network then firewall mutation locks through
+  down-link creation, atomic firewall apply/fresh verification, and the complete link-activation checkpoint. Roll back
+  a pre-release failure with the same locks; after success release firewall then network, and reacquire network then
+  firewall under the retained VM lock for later cleanup. Release the child only after named mounts,
+  firewall-protected topology, and exact relay readiness succeed. Invoke Jailer 1.16.1
   without `--daemonize` or `--new-pid-ns`; the original PID/start/pidfd must survive Jailer and Firecracker exec. Do not
   trust Jailer's PID file or a user-visible PID mirror.
   - [x] Implement the private policy-v1 cgroup-control slice. Prove fixed `cpu`, `memory`, and `pids` readiness first at
@@ -625,6 +627,12 @@ pending
   `release -> global index -> VM -> network -> firewall`.
 - [ ] Admit only a canonical masked RFC1918 IPv4 prefix no longer than `/30`; resolve an omitted gateway to the first
   usable address; and reject network, broadcast, gateway/guest conflicts, and incompatible legacy state before effect.
+- [ ] Remove public/unprivileged `NATGateways` and every raw uplink-name input/model/compiler field. Retain only NAT
+  enabled/disabled. For enabled NAT, discover exactly one eligible unicast IPv4 main-table default-route uplink through
+  typed host-netns rtnetlink; reject zero, multiple, or multipath candidates without metric-based selection.
+- [ ] Persist and revalidate the root-selected uplink's exact ifindex, name, kind, and host namespace identity before
+  firewall compile/apply and link activation. Changed or replaced uplinks fail closed. Multi-uplink selection is
+  unsupported in v0.3.0; input/model/compiler removal and L1/L2 tests remain pending.
 - [ ] Give `gateway/prefix` and its connected route only to the host managed bridge. Keep both veth endpoints, the
   namespace-local bridge, and TAP unnumbered with no routes. Configure `127.0.0.1/8` on namespace loopback and derive
   guest `eth0` address, connected route, and metric-free default route from typed intent.
@@ -999,6 +1007,11 @@ lifecycle, host-reboot reconciliation, API relay/policy/audit integration, and P
   - [x] Snapshot restore preserves the vmstate CID, persists it even when another Firecracker process uses the same
     value, and sends the fixed jail-visible vsock UDS override. The fresh v0.3 schema retains a non-unique CID index and
     removes global CID uniqueness as a clean-install-only schema break.
+  - [ ] Persist and admit root-owned snapshot metadata for the captured network ID, guest IPv4, and MAC. Reserve those
+    exact values for the restored VM endpoint and fail when they conflict, the source still owns them, or the requested
+    network differs. Allocate no fresh IP/MAC and support no cross-network restore or simultaneous endpoint clone in
+    v0.3.0. Permit a new derived host TAP name only when anti-spoof identity matches the embedded guest state; add
+    conflict, ownership, and live snapshot qualification.
   - [ ] Move create onto the same `vmRelaunchState`; activate root-built descriptor-pinned `/run/mvm/runtime` backed by
     the host `/run/mvmctl/runtime` tree; clean a stale fixed socket only after verified process absence; and complete
     transactional lifecycle and L2 qualification.
