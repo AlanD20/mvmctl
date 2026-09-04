@@ -8,9 +8,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
+
+	"mvmctl/internal/infra"
 )
 
 func TestRecoverManagedVMCgroupMissingHierarchyIsAbsentWithoutMutation(t *testing.T) {
@@ -25,19 +28,22 @@ func TestRecoverManagedVMCgroupMissingHierarchyIsAbsentWithoutMutation(t *testin
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			fixture := newManagedVMCgroupTestFixture(t)
+			parentPath := filepath.Join(fixture.root, infra.JailerCgroupParent)
 			if tc.addParent {
-				parent := filepath.Join(fixture.root, "mvmctl")
-				require.NoError(t, os.Mkdir(parent, os.FileMode(managedVMCgroupParentMode)))
+				require.NoError(t, os.Mkdir(parentPath, os.FileMode(managedVMCgroupParentMode)))
 			}
 			probe := &managedVMCgroupRecoveryMutationProbe{}
 			deps := probe.deps(fixture)
-			opened := map[int]int{}
-			closed := map[int]int{}
+			rootFD := -1
+			parentFD := -1
+			openedRoles := []string{}
+			closedFDs := []int{}
 			realOpenRoot := deps.openRoot
 			deps.openRoot = func(ctx context.Context) (int, error) {
 				fd, err := realOpenRoot(ctx)
 				if err == nil {
-					opened[fd]++
+					rootFD = fd
+					openedRoles = append(openedRoles, "root")
 				}
 				return fd, err
 			}
@@ -45,13 +51,14 @@ func TestRecoverManagedVMCgroupMissingHierarchyIsAbsentWithoutMutation(t *testin
 			deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
 				openedFD, err := realOpenAt2(ctx, fd, name, how)
 				if err == nil {
-					opened[openedFD]++
+					parentFD = openedFD
+					openedRoles = append(openedRoles, "parent")
 				}
 				return openedFD, err
 			}
 			realClose := deps.close
 			deps.close = func(ctx context.Context, fd int) error {
-				closed[fd]++
+				closedFDs = append(closedFDs, fd)
 				return realClose(ctx, fd)
 			}
 			lease, present, err := recoverManagedVMCgroup(
@@ -66,7 +73,22 @@ func TestRecoverManagedVMCgroupMissingHierarchyIsAbsentWithoutMutation(t *testin
 			assert.Nil(t, lease)
 			assert.False(t, present)
 			probe.assertNone(t)
-			assert.Equal(t, opened, closed)
+			wantOpenedRoles := []string{"root"}
+			wantClosedFDs := []int{rootFD}
+			absentPath := parentPath
+			if tc.addParent {
+				wantOpenedRoles = append(wantOpenedRoles, "parent")
+				wantClosedFDs = []int{parentFD, rootFD}
+				absentPath = fixture.vmLeafPath(testVMID)
+			}
+			if diff := cmp.Diff(wantOpenedRoles, openedRoles); diff != "" {
+				t.Errorf("opened descriptor roles mismatch (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(wantClosedFDs, closedFDs); diff != "" {
+				t.Errorf("closed descriptor order mismatch (-want +got):\n%s", diff)
+			}
+			_, statErr := os.Lstat(absentPath)
+			require.ErrorIs(t, statErr, os.ErrNotExist)
 		})
 	}
 }
@@ -78,6 +100,7 @@ func TestRecoverManagedVMCgroupPinsExistingLeafAndVerifiesMembership(t *testing.
 	fixture.addVMLeaf(testVMID)
 	probe := &managedVMCgroupRecoveryMutationProbe{}
 	deps := probe.deps(fixture)
+	verifier := &managedVMCgroupTestProcessVerifier{}
 
 	lease, present, err := recoverManagedVMCgroup(
 		t.Context(),
@@ -85,11 +108,13 @@ func TestRecoverManagedVMCgroupPinsExistingLeafAndVerifiesMembership(t *testing.
 		testVMID,
 		processTestLocator(),
 		processTestCgroupObservation(),
-		&managedVMCgroupTestProcessVerifier{},
+		verifier,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, lease)
 	assert.True(t, present)
+	assert.Equal(t, 1, verifier.beforeCalls)
+	assert.Equal(t, 1, verifier.afterCalls)
 	probe.assertNone(t)
 	fixture.setMembership(testVMID, "")
 	require.NoError(t, lease.Remove(t.Context()))
@@ -100,17 +125,41 @@ func TestRecoverManagedVMCgroupPinsExistingLeafAndVerifiesMembership(t *testing.
 func TestRecoverManagedVMCgroupRejectsUnsafeExistingHierarchyWithoutMutation(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]func(*managedVMCgroupTestFixture, *managedVMCgroupDeps){
-		"parent metadata": func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
-			require.NoError(t, os.Chmod(filepath.Join(fixture.root, "mvmctl"), 0o700))
-		},
-		"leaf metadata": func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
+	tests := map[string]struct {
+		makeUnsafe      func(*managedVMCgroupTestFixture, *managedVMCgroupDeps)
+		assertPreserved func(*managedVMCgroupTestFixture)
+	}{
+		"parent metadata": {makeUnsafe: func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
+			require.NoError(t, os.Chmod(filepath.Join(fixture.root, infra.JailerCgroupParent), 0o700))
+		}},
+		"leaf metadata": {makeUnsafe: func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
 			require.NoError(t, os.Chmod(fixture.vmLeafPath(testVMID), 0o700))
-		},
-		"cgroup2 mount": func(_ *managedVMCgroupTestFixture, deps *managedVMCgroupDeps) {
+		}},
+		"cgroup2 mount": {makeUnsafe: func(_ *managedVMCgroupTestFixture, deps *managedVMCgroupDeps) {
 			deps.statfs = func(context.Context, int, *unix.Statfs_t) error { return nil }
-		},
-		"leaf mount identity": func(_ *managedVMCgroupTestFixture, deps *managedVMCgroupDeps) {
+		}},
+		"parent mount identity": {makeUnsafe: func(_ *managedVMCgroupTestFixture, deps *managedVMCgroupDeps) {
+			realOpenAt2 := deps.openAt2
+			realStatx := deps.statx
+			parentFD := -1
+			deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+				opened, err := realOpenAt2(ctx, fd, name, how)
+				if err == nil && name == infra.JailerCgroupParent {
+					parentFD = opened
+				}
+				return opened, err
+			}
+			deps.statx = func(ctx context.Context, fd int, stat *unix.Statx_t) error {
+				if err := realStatx(ctx, fd, stat); err != nil {
+					return err
+				}
+				if fd == parentFD {
+					stat.Mnt_id++
+				}
+				return nil
+			}
+		}},
+		"leaf mount identity": {makeUnsafe: func(_ *managedVMCgroupTestFixture, deps *managedVMCgroupDeps) {
 			realOpenAt2 := deps.openAt2
 			realStatx := deps.statx
 			leafFD := -1
@@ -130,15 +179,41 @@ func TestRecoverManagedVMCgroupRejectsUnsafeExistingHierarchyWithoutMutation(t *
 				}
 				return nil
 			}
+		}},
+		"parent symlink": {
+			makeUnsafe: func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
+				parentPath := filepath.Join(fixture.root, infra.JailerCgroupParent)
+				require.NoError(t, os.Remove(filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.procs")))
+				require.NoError(t, os.Remove(fixture.vmLeafPath(testVMID)))
+				require.NoError(t, os.Remove(parentPath))
+				require.NoError(t, os.Symlink("elsewhere", parentPath))
+			},
+			assertPreserved: func(fixture *managedVMCgroupTestFixture) {
+				info, err := os.Lstat(filepath.Join(fixture.root, infra.JailerCgroupParent))
+				require.NoError(t, err)
+				assert.NotZero(t, info.Mode()&os.ModeSymlink)
+			},
+		},
+		"leaf symlink": {
+			makeUnsafe: func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps) {
+				require.NoError(t, os.Remove(filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.procs")))
+				require.NoError(t, os.Remove(fixture.vmLeafPath(testVMID)))
+				require.NoError(t, os.Symlink("elsewhere", fixture.vmLeafPath(testVMID)))
+			},
+			assertPreserved: func(fixture *managedVMCgroupTestFixture) {
+				info, err := os.Lstat(fixture.vmLeafPath(testVMID))
+				require.NoError(t, err)
+				assert.NotZero(t, info.Mode()&os.ModeSymlink)
+			},
 		},
 	}
-	for name, makeUnsafe := range tests {
+	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			fixture := newManagedVMCgroupTestFixture(t)
 			fixture.addVMLeaf(testVMID)
 			probe := &managedVMCgroupRecoveryMutationProbe{}
 			deps := probe.deps(fixture)
-			makeUnsafe(fixture, &deps)
+			tc.makeUnsafe(fixture, &deps)
 
 			lease, present, err := recoverManagedVMCgroup(
 				t.Context(),
@@ -151,7 +226,11 @@ func TestRecoverManagedVMCgroupRejectsUnsafeExistingHierarchyWithoutMutation(t *
 			assert.Nil(t, lease)
 			assert.False(t, present)
 			require.Error(t, err)
-			assert.True(t, fixture.vmLeafPresent(testVMID))
+			if tc.assertPreserved != nil {
+				tc.assertPreserved(fixture)
+			} else {
+				assert.True(t, fixture.vmLeafPresent(testVMID))
+			}
 			probe.assertNone(t)
 		})
 	}
@@ -217,9 +296,13 @@ func TestRecoverManagedVMCgroupPreAdmissionFailuresReturnNoAuthority(t *testing.
 func TestRecoverManagedVMCgroupPostAdmissionProofFailureRetainsSameLeaseForRetry(t *testing.T) {
 	t.Parallel()
 
+	pidReuseErr := errors.New("pidfd locator changed after membership read")
 	tests := map[string]struct {
-		configure func(*managedVMCgroupTestFixture, *managedVMCgroupDeps, *managedVMCgroupTestProcessVerifier)
-		repair    func(*managedVMCgroupTestFixture, *managedVMCgroupTestProcessVerifier)
+		configure      func(*managedVMCgroupTestFixture, *managedVMCgroupDeps, *managedVMCgroupTestProcessVerifier)
+		repair         func(*managedVMCgroupTestFixture, *managedVMCgroupTestProcessVerifier)
+		wantErr        error
+		wantBeforeCall int
+		wantAfterCall  int
 	}{
 		"membership open": {
 			configure: func(_ *managedVMCgroupTestFixture, deps *managedVMCgroupDeps, _ *managedVMCgroupTestProcessVerifier) {
@@ -233,7 +316,8 @@ func TestRecoverManagedVMCgroupPostAdmissionProofFailureRetainsSameLeaseForRetry
 					return realOpenAt2(ctx, fd, name, how)
 				}
 			},
-			repair: func(*managedVMCgroupTestFixture, *managedVMCgroupTestProcessVerifier) {},
+			repair:         func(*managedVMCgroupTestFixture, *managedVMCgroupTestProcessVerifier) {},
+			wantBeforeCall: 1,
 		},
 		"membership mismatch": {
 			configure: func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupDeps, _ *managedVMCgroupTestProcessVerifier) {
@@ -242,14 +326,18 @@ func TestRecoverManagedVMCgroupPostAdmissionProofFailureRetainsSameLeaseForRetry
 			repair: func(fixture *managedVMCgroupTestFixture, _ *managedVMCgroupTestProcessVerifier) {
 				fixture.setMembership(testVMID, "4242\n")
 			},
+			wantBeforeCall: 1,
 		},
 		"PID reuse": {
 			configure: func(_ *managedVMCgroupTestFixture, _ *managedVMCgroupDeps, verifier *managedVMCgroupTestProcessVerifier) {
-				verifier.afterErr = errors.New("pidfd locator changed after membership read")
+				verifier.afterErr = pidReuseErr
 			},
 			repair: func(_ *managedVMCgroupTestFixture, verifier *managedVMCgroupTestProcessVerifier) {
 				verifier.afterErr = nil
 			},
+			wantErr:        pidReuseErr,
+			wantBeforeCall: 1,
+			wantAfterCall:  1,
 		},
 	}
 	for name, tc := range tests {
@@ -270,8 +358,13 @@ func TestRecoverManagedVMCgroupPostAdmissionProofFailureRetainsSameLeaseForRetry
 				verifier,
 			)
 			require.Error(t, err)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			}
 			require.NotNil(t, lease)
 			assert.True(t, present)
+			assert.Equal(t, tc.wantBeforeCall, verifier.beforeCalls)
+			assert.Equal(t, tc.wantAfterCall, verifier.afterCalls)
 			assert.False(t, lease.snapshot().released)
 			assert.True(t, fixture.vmLeafPresent(testVMID))
 			probe.assertNone(t)
@@ -283,12 +376,62 @@ func TestRecoverManagedVMCgroupPostAdmissionProofFailureRetainsSameLeaseForRetry
 				processTestCgroupObservation(),
 				verifier,
 			))
+			assert.Equal(t, tc.wantBeforeCall+1, verifier.beforeCalls)
+			assert.Equal(t, tc.wantAfterCall+1, verifier.afterCalls)
 			fixture.setMembership(testVMID, "")
 			require.NoError(t, lease.Remove(t.Context()))
 			require.NoError(t, lease.Release(t.Context()))
 			probe.assertNone(t)
 		})
 	}
+}
+
+func TestRecoverManagedVMCgroupCancellationDuringMembershipRetainsSameLeaseForRetry(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	fixture.addVMLeaf(testVMID)
+	probe := &managedVMCgroupRecoveryMutationProbe{}
+	deps := probe.deps(fixture)
+	realOpenAt2 := deps.openAt2
+	deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		if err := ctx.Err(); err != nil {
+			return -1, err
+		}
+		return realOpenAt2(ctx, fd, name, how)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	verifier := &cancelingManagedVMCgroupRecoveryVerifier{cancel: cancel}
+
+	lease, present, err := recoverManagedVMCgroup(
+		ctx,
+		deps,
+		testVMID,
+		processTestLocator(),
+		processTestCgroupObservation(),
+		verifier,
+	)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, lease)
+	assert.True(t, present)
+	assert.Equal(t, 1, verifier.beforeCalls)
+	assert.Zero(t, verifier.afterCalls)
+	assert.False(t, lease.snapshot().released)
+	probe.assertNone(t)
+
+	retryVerifier := &managedVMCgroupTestProcessVerifier{}
+	require.NoError(t, lease.VerifyMembership(
+		t.Context(),
+		processTestLocator(),
+		processTestCgroupObservation(),
+		retryVerifier,
+	))
+	assert.Equal(t, 1, retryVerifier.beforeCalls)
+	assert.Equal(t, 1, retryVerifier.afterCalls)
+	fixture.setMembership(testVMID, "")
+	require.NoError(t, lease.Remove(t.Context()))
+	require.NoError(t, lease.Release(t.Context()))
+	probe.assertNone(t)
 }
 
 func TestRecoverManagedVMCgroupRejectsCanceledContextWithoutMutation(t *testing.T) {
@@ -323,12 +466,41 @@ func TestRecoverManagedVMCgroupCopiedConcurrentReleaseClosesOnce(t *testing.T) {
 	fixture.addVMLeaf(testVMID)
 	probe := &managedVMCgroupRecoveryMutationProbe{}
 	deps := probe.deps(fixture)
-	closed := map[int]int{}
+	rootFD := -1
+	parentFD := -1
+	leafFD := -1
+	openedAuthorityRoles := []string{}
+	realOpenRoot := deps.openRoot
+	deps.openRoot = func(ctx context.Context) (int, error) {
+		fd, err := realOpenRoot(ctx)
+		if err == nil {
+			rootFD = fd
+			openedAuthorityRoles = append(openedAuthorityRoles, "root")
+		}
+		return fd, err
+	}
+	realOpenAt2 := deps.openAt2
+	deps.openAt2 = func(ctx context.Context, fd int, name string, how *unix.OpenHow) (int, error) {
+		opened, err := realOpenAt2(ctx, fd, name, how)
+		if err != nil {
+			return opened, err
+		}
+		switch {
+		case name == infra.JailerCgroupParent && parentFD < 0:
+			parentFD = opened
+			openedAuthorityRoles = append(openedAuthorityRoles, "parent")
+		case name == testVMID && leafFD < 0:
+			leafFD = opened
+			openedAuthorityRoles = append(openedAuthorityRoles, "leaf")
+		}
+		return opened, nil
+	}
+	closedFDs := []int{}
 	var closeMu sync.Mutex
 	realClose := deps.close
 	deps.close = func(ctx context.Context, fd int) error {
 		closeMu.Lock()
-		closed[fd]++
+		closedFDs = append(closedFDs, fd)
 		closeMu.Unlock()
 		return realClose(ctx, fd)
 	}
@@ -343,11 +515,21 @@ func TestRecoverManagedVMCgroupCopiedConcurrentReleaseClosesOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, lease)
 	assert.True(t, present)
-	lease.state.mu.Lock()
-	retained := append([]int{}, lease.state.retained...)
-	lease.state.mu.Unlock()
+	if diff := cmp.Diff([]string{"root", "parent", "leaf"}, openedAuthorityRoles); diff != "" {
+		t.Errorf("opened authority descriptor roles mismatch (-want +got):\n%s", diff)
+	}
+	expectedFDs := []int{rootFD, parentFD, leafFD}
+	for _, fd := range expectedFDs {
+		require.NotEqual(t, -1, fd)
+	}
+	require.NotEqual(t, rootFD, parentFD)
+	require.NotEqual(t, rootFD, leafFD)
+	require.NotEqual(t, parentFD, leafFD)
 	fixture.setMembership(testVMID, "")
 	require.NoError(t, lease.Remove(t.Context()))
+	closeMu.Lock()
+	closedFDs = nil
+	closeMu.Unlock()
 
 	copied := *lease
 	results := make(chan error, 16)
@@ -369,11 +551,37 @@ func TestRecoverManagedVMCgroupCopiedConcurrentReleaseClosesOnce(t *testing.T) {
 		require.NoError(t, releaseErr)
 	}
 	closeMu.Lock()
-	for _, fd := range retained {
-		assert.Equal(t, 1, closed[fd])
+	wantClosedFDs := []int{leafFD, parentFD, rootFD}
+	if diff := cmp.Diff(wantClosedFDs, closedFDs); diff != "" {
+		t.Errorf("released descriptor order mismatch (-want +got):\n%s", diff)
 	}
 	closeMu.Unlock()
 	probe.assertNone(t)
+}
+
+type cancelingManagedVMCgroupRecoveryVerifier struct {
+	cancel      context.CancelFunc
+	beforeCalls int
+	afterCalls  int
+}
+
+func (verifier *cancelingManagedVMCgroupRecoveryVerifier) verifyBeforeCgroupMembership(
+	context.Context,
+	instanceProcessLocator,
+	processObservation,
+) error {
+	verifier.beforeCalls++
+	verifier.cancel()
+	return nil
+}
+
+func (verifier *cancelingManagedVMCgroupRecoveryVerifier) verifyAfterCgroupMembership(
+	context.Context,
+	instanceProcessLocator,
+	processObservation,
+) error {
+	verifier.afterCalls++
+	return nil
 }
 
 type managedVMCgroupRecoveryMutationProbe struct {
