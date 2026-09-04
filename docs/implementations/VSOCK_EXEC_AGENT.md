@@ -96,7 +96,18 @@ The agent starts automatically when the VM boots. `Agent.Run()` in `internal/ser
   fi
   ```
 
-The vsock device is configured via the Firecracker JSON config file (`model.VsockConfig` with `guest_cid` and `uds_path`), written to disk before Firecracker starts. The vsock config is persisted to the `vm_vsock_config` database table via `vsockRepo.Upsert()`.
+The vsock device is configured in the final Firecracker JSON as `model.VsockConfig` with `guest_cid` and `uds_path`.
+Normal-process launch input carries only the validated CID; the core VM/Jailer path derives the host `vsock.sock` and
+jail `/run/mvm/vsock.sock` leaves before writing the configuration. CID, UDS metadata, agent port, and token are
+persisted in `vm_vsock_config` via `vsockRepo.Upsert()`.
+
+Start, reboot, and snapshot restore explicitly load a private typed `vmRelaunchState`. A missing vsock row is a valid
+absence, while repository failure, mismatched VM identity, or an invalid CID aborts before respawn. The state preserves
+the CID, port, and token in the normal process. Snapshot restore keeps the CID embedded in vmstate and sends the fixed
+jail-visible UDS override. VM create still uses its existing builder state rather than this common relaunch state, and
+root-built descriptor-pinned `/run/mvm/runtime` activation backed by the host `/run/mvmctl/runtime` tree,
+root-authoritative stale-socket cleanup, host-reboot reconciliation, and L2 `mvm exec` relaunch qualification remain
+pending. This partial implementation is not evidence that the reported restart failure is fully resolved.
 
 ### 2. Agent startup inside the guest
 
@@ -242,8 +253,9 @@ type VsockConfig struct {
 }
 ```
 
-The vsock section is added to the Firecracker JSON config so the device is
-created when Firecracker reads the config at boot:
+The normal-process `model.FirecrackerConfig` carries only `VsockGuestCID *int`. The VM spawner validates that value,
+derives the fixed host UDS leaf, and adds the complete vsock section to the final Firecracker JSON so the device is
+created at boot:
 
 ```go
 type FirecrackerVMConfig struct {
@@ -261,7 +273,7 @@ The `vm_vsock_config` table is created in
 CREATE TABLE vm_vsock_config (
     id TEXT PRIMARY KEY,
     vm_id TEXT NOT NULL UNIQUE,
-    guest_cid INTEGER NOT NULL UNIQUE,
+    guest_cid INTEGER NOT NULL,
     uds_path TEXT NOT NULL,
     port INTEGER NOT NULL,
     token TEXT NOT NULL,
@@ -273,6 +285,11 @@ CREATE TABLE vm_vsock_config (
 CREATE INDEX idx_vsock_config_vm ON vm_vsock_config(vm_id);
 CREATE INDEX idx_vsock_config_cid ON vm_vsock_config(guest_cid);
 ```
+
+`guest_cid` is intentionally not globally unique. Each Firecracker process is reached through its own UDS endpoint and
+has an independent CID namespace; snapshot clones must preserve the CID stored in vmstate. The non-unique index remains
+for lookup. Removing the legacy unique constraint is part of the fresh v0.3.0 clean-install schema break; there is no
+database migration or adoption path for older state.
 
 ### Enricher relation
 

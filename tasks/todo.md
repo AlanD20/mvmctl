@@ -867,8 +867,9 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 **Owner:** engineer
 **Status:** The registered retained VM-exec sidecar now production-composes the root-owned capacity reservation,
 active-pair, exact-one structural descriptor, exact Firecracker peer binding, fixed global ceiling, and absolute-stop
-foundations. The typed user-owned audit sink exists but is not wired. The API relay/policy/audit integration/positive
-path, Python qualification, and all remaining reconciliation and lifecycle work remain pending
+foundations. The typed user-owned audit sink exists but is not wired. Start, reboot, and snapshot restore now preserve
+the private typed normal-process vsock relaunch state, but create, root runtime activation and cleanup, transactional
+lifecycle, host-reboot reconciliation, API relay/policy/audit integration, and Python qualification remain pending
 **Dependencies:** Tasks 8-14
 
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,
@@ -926,6 +927,15 @@ path, Python qualification, and all remaining reconciliation and lifecycle work 
 - [ ] Build one complete typed relaunch state for create/start/reboot/snapshot restore. Preserve a configured vsock CID,
   let root derive the fixed runtime UDS leaf, retain agent port/token only in the normal process, distinguish valid
   absence from lookup failure, and clean an old fixed socket only after verified process absence.
+  - [x] Start, reboot, and snapshot restore load a private typed relaunch state. Valid vsock absence is distinct from a
+    repository failure; persisted VM identity and CID are validated; CID, port, and token are preserved in the normal
+    process; and Firecracker launch input carries only the CID while fixed host/jail socket leaves are derived.
+  - [x] Snapshot restore preserves the vmstate CID, persists it even when another Firecracker process uses the same
+    value, and sends the fixed jail-visible vsock UDS override. The fresh v0.3 schema retains a non-unique CID index and
+    removes global CID uniqueness as a clean-install-only schema break.
+  - [ ] Move create onto the same `vmRelaunchState`; activate root-built descriptor-pinned `/run/mvm/runtime` backed by
+    the host `/run/mvmctl/runtime` tree; clean a stale fixed socket only after verified process absence; and complete
+    transactional lifecycle and L2 qualification.
 - [ ] Preserve exact release identity and jail-visible paths across snapshot restore and live hotplug.
 - [ ] Harden cgroup readiness, membership, values, and process-aware cleanup.
 - [ ] Remove process-local semaphore admission and user-DB-as-root-authority designs.

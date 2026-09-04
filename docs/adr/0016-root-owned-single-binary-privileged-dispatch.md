@@ -2,7 +2,7 @@
 
 **Status:** Accepted — implementation in progress
 **Date:** 2026-08-20
-**Last Updated:** 2026-09-04 (registered retained VM-exec authority-sidecar)
+**Last Updated:** 2026-09-04 (partial typed vsock relaunch state)
 **See also:** [ADR-0002: Single Go Binary Architecture](0002-single-go-binary-architecture.md),
 [ADR-0005: Sudo Privilege Architecture](0005-sudo-privilege-architecture.md),
 [ADR-0015: Jailer Is the Canonical Firecracker Launcher](0015-jailer-canonical-launcher.md), and
@@ -1529,11 +1529,28 @@ The read path never opens one sudo process per VM and never dials the Firecracke
 It may update the user database as a projection only after it receives a complete authoritative result; SQLite remains
 non-authoritative.
 
-Every create, start, reboot, and snapshot-restore path prepares the same complete typed relaunch state. If the VM has a
-persisted vsock configuration, the root launch request includes only its validated CID; root derives the fixed runtime
-UDS leaf. The normal process retains the agent port and token for the post-launch client probe instead of exposing them
-to root. A repository failure aborts launch instead of silently omitting the device. Root removes an old fixed vsock
-socket only after authority proves that no live active or recoverable launching process owns it.
+The target contract is that every create, start, reboot, and snapshot-restore path prepares the same complete typed
+relaunch state. If the VM has a persisted vsock configuration, the root launch request includes only its validated CID;
+root derives the fixed runtime UDS leaf. The normal process retains the agent port and token for the post-launch client
+probe instead of exposing them to root. A repository failure aborts launch instead of silently omitting the device.
+Root removes an old fixed vsock socket only after authority proves that no live active or recoverable launching process
+owns it.
+
+Implementation note (2026-09-04): the transitional public start, reboot, and snapshot-restore paths now load a private
+normal-process `vmRelaunchState`. An absent vsock row is a valid device absence; lookup failure, mismatched VM identity,
+and an invalid persisted CID fail before respawn. A present row is cloned, its UDS metadata is normalized to the fixed
+managed leaf, and its CID, agent port, and token remain available to the normal process. Only the validated CID crosses
+the Firecracker launch-input seam; the core VM/Jailer path derives fixed host and `/run/mvm/vsock.sock` leaves.
+Snapshot restore preserves the vmstate CID and supplies the fixed jail-visible UDS override. Create still uses its
+existing builder state instead of the common relaunch state. Root-built descriptor-pinned `/run/mvm/runtime`
+activation backed by the host `/run/mvmctl/runtime` tree, authority-verified stale-socket cleanup, transactional
+lifecycle, host-reboot reconciliation, and L2 stop/start, reboot, host-reboot, and snapshot-exec qualification remain
+pending. This increment does not establish that the reported host-to-guest `mvm exec` restart failure is fully fixed.
+
+The fresh v0.3 SQLite schema permits the same valid guest CID in multiple `vm_vsock_config` rows and retains a
+non-unique CID index. Firecracker processes with distinct UDS endpoints have independent CID namespaces, and a snapshot
+clone must preserve the CID encoded in its vmstate. Removing global CID uniqueness is a clean-install schema break;
+v0.3 provides no migration or adoption of the older unique constraint.
 
 ## Alternatives Considered
 

@@ -1005,17 +1005,28 @@ control connection, or launch one goroutine per VM. L1 benchmarks cover 1,000 au
 budget from the reviewed baseline. L2 proves correctness after a real host reboot. Guest readiness remains an explicit
 probe performed by commands such as `mvm exec` and `mvm ssh`, not by list output.
 
-All relaunch paths use one complete typed relaunch state. Start, reboot, and snapshot restore must load the persisted
-vsock relation when present and distinguish a valid absence from a repository failure. The root launch request contains
-only the validated CID and derives the fixed runtime UDS leaf. The normal process retains the agent port and token for
-later agent client probes. Receiver-owned cleanup removes a stale fixed socket only after process authority proves no
-live instance owns it. L1 verifies the generated Firecracker config. L2 runs `mvm exec` after stop/start, reboot, host
-reboot plus start, and snapshot restore.
+The target contract uses one complete typed relaunch state for every relaunch path. Start, reboot, and snapshot restore
+must load the persisted vsock relation when present and distinguish a valid absence from a repository failure. The root
+launch request contains only the validated CID and derives the fixed runtime UDS leaf. The normal process retains the
+agent port and token for later agent client probes. Receiver-owned cleanup removes a stale fixed socket only after
+process authority proves no live instance owns it. L1 verifies the generated Firecracker config. L2 runs `mvm exec`
+after stop/start, reboot, host reboot plus start, and snapshot restore.
 
-The 2026-08-26 read-only reproduction isolated the current defect: `VMStart` and `VMReboot` omit the `vsock` relation,
-while `vmRespawnFirecracker` emits a vsock device only when `VMItem.Vsock` is populated. The restarted Firecracker config
-therefore had no vsock entry, its old host UDS remained stale, and the active guest agent had no host endpoint. This
-evidence defines the regression test. It is not approval for a best-effort one-line enrichment patch.
+The 2026-08-26 read-only reproduction isolated the reported defect: `VMStart` and `VMReboot` omitted the `vsock`
+relation, while `vmRespawnFirecracker` emitted a vsock device only when `VMItem.Vsock` was populated. The restarted
+Firecracker config therefore had no vsock entry, its old host UDS remained stale, and the active guest agent had no
+host endpoint. This evidence defines the regression test; it never authorized a best-effort enrichment patch.
+
+The 2026-09-04 partial increment replaces that enrichment dependency for start, reboot, and snapshot restore with a
+private normal-process `vmRelaunchState`. These paths treat an absent row as valid vsock absence, fail on repository or
+persisted-CID errors, preserve the CID plus normal-process port/token, and pass only the CID into Firecracker launch
+input. The VM/Jailer layer derives fixed host and jail socket leaves, and snapshot load sends the fixed jail-visible
+UDS override while preserving the vmstate CID. The fresh v0.3 schema therefore permits duplicate CIDs across independent
+Firecracker UDS namespaces and retains a non-unique CID index; this is a clean-install-only schema break. Create still
+uses its existing builder state. Root-built descriptor-pinned `/run/mvm/runtime` activation backed by the host
+`/run/mvmctl/runtime` tree, verified stale-socket cleanup, transactional lifecycle, host-reboot reconciliation, and the
+complete L2 exec matrix remain release blockers, so the reported `mvm exec` restart bug is not yet recorded as fully
+fixed.
 
 ## Dependency Order
 

@@ -21,12 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > session, its typed command-redacted user audit sink, the production-composed root-owned
 > VM-exec capacity and active-pair authorities with a fixed global ceiling, its exact Firecracker peer/pidfd binding
 > and absolute-boottime stop, its exact-one descriptor transport and structural admission, its closed retained-sidecar
-> wire/process/Jailer-client/registered-handler lifecycle, and clean-break removal of the VM-wide
+> wire/process/Jailer-client/registered-handler lifecycle, partial typed vsock-state preservation across start, reboot,
+> and snapshot restore, and clean-break removal of the VM-wide
 > remote-exec trust flag described below are implemented.
 > Production composition of the mandatory per-VM network namespace,
 > nftables-only `traffic` policy application, VM-to-VM `exec` relay enforcement, LoopMount backend/public cutover, final
 > marker-only sudo policy, schema-3 Jailer launch composition and final live topology/cgroup verification and
-> reconciliation, and remaining typed privileged operations are not implemented yet; see
+> reconciliation, complete relaunch parity and qualification, and remaining typed privileged operations are not
+> implemented yet; see
 > **Security work still pending** before treating this version as release-ready.
 
 ### Added
@@ -641,6 +643,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory and leaves from the validated 64-character lowercase snapshot ID rather than stored file-path columns.
   The temporary `phantom-rootfs.img` mechanism remains until the private mount-namespace overlay lands.
 
+#### Typed vsock relaunch state (partial)
+
+- VM start, reboot, and snapshot restore now load a private typed relaunch state instead of depending on best-effort VM
+  enrichment to attach the vsock relation. A missing vsock row is a valid device absence; a repository failure or an
+  invalid persisted guest CID aborts before respawn. The loaded state preserves the CID and keeps the agent port and
+  token in the normal process.
+- Firecracker launch configuration now carries only the validated guest CID. The core VM/Jailer path derives the fixed
+  host `vsock.sock` and jail `/run/mvm/vsock.sock` leaves. Snapshot restore preserves the CID recorded in vmstate and
+  supplies the fixed jail-visible UDS override when vsock is enabled.
+- This is an L0/L1-backed partial lifecycle increment, not end-to-end confirmation that the reported `mvm exec`
+  restart failure is resolved. VM create does not yet use the same `vmRelaunchState`; receiver-owned
+  root-built descriptor-pinned `/run/mvm/runtime` activation backed by the host `/run/mvmctl/runtime` tree, verified
+  stale-socket cleanup, transactional lifecycle handling, host-reboot reconciliation, and L2 stop/start, reboot,
+  host-reboot, and snapshot-exec qualification remain pending.
+
 #### Network isolation
 - Traffic routed between different managed networks is now denied unless an explicit typed service-access policy permits
   the destination VM protocol and port. Same-network bridge traffic remains unchanged.
@@ -657,6 +674,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version remain unchanged. After stopping the old VMs and preserving desired artifacts, follow the final documented
   clean-install procedure to remove the old mvm state directory selected by `MVM_CACHE_DIR` (normally
   `~/.cache/mvmctl`) and initialize fresh v0.3.0 state; do not delete live state or infer typed exec policies from it.
+- The fresh v0.3.0 `vm_vsock_config.guest_cid` column is no longer globally unique. Firecracker processes backed by
+  separate UDS endpoints have independent CID namespaces, and a snapshot clone must preserve the CID embedded in its
+  vmstate. A non-unique CID index remains for lookup. This schema change is part of the v0.3 clean-install break; no
+  migration or adoption of a legacy unique constraint is provided.
 - Operators must stop and remove the old installation, retain any desired user artifacts separately, clean legacy host
   runtime state, and recreate VMs and policies under v0.3.0. The exact fail-closed administrator cleanup procedure is
   still a release blocker and must be documented after `host reset`/cleanup hardening lands; operators must not improvise
@@ -780,8 +801,10 @@ The following items are release blockers and are intentionally not described abo
 - Make launch, abort, cleanup, reconciliation, snapshots, live volumes, cgroups, and firewall policy crash-consistent and
   fail closed under ownership, PID-reuse, path-race, and partial-failure conditions.
 - Reconcile `mvm vm ls`, `mvm vm ps`, and `mvm vm inspect` against root-owned process identity after host reboot instead
-  of reporting stale SQLite status. Preserve the configured vsock device across start, reboot, and snapshot restore so
-  host-to-guest `mvm exec` remains available after every supported relaunch path.
+  of reporting stale SQLite status. Complete the single typed relaunch state by bringing create into the start/reboot/
+  snapshot-restore seam, activate root-built descriptor-pinned `/run/mvm/runtime` backed by the host
+  `/run/mvmctl/runtime` tree, remove a stale fixed vsock socket only after verified process absence, and qualify
+  host-to-guest `mvm exec` through every supported relaunch path in L2.
 - Complete adversarial L1 coverage, Python `tests/system/` clean-install/fault qualification, leak audits, full CI, and
   the final documentation accuracy review. Go tests support but do not replace CLI-level L2 release signoff.
 - Finish Tier 3 clean-host inventory and ownership-safe cleanup; unify every host-direct CLI call, preserve pre-existing

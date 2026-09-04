@@ -224,6 +224,12 @@ legacy bit. After stopping the old VMs and preserving desired artifacts, remove 
 by `MVM_CACHE_DIR` (normally `~/.cache/mvmctl`) through the documented clean-install procedure and initialize fresh
 v0.3.0 state; never delete live state as an incidental migration step.
 
+The same fresh schema deliberately does not make `vm_vsock_config.guest_cid` globally unique. Each Firecracker process
+serves its vsock device through an independent UDS endpoint and therefore has its own CID namespace, while a snapshot
+clone must preserve the CID embedded in its vmstate. The non-unique `idx_vsock_config_cid` index remains. Removing the
+legacy unique constraint is part of the v0.3.0 clean-install schema break; there is no migration or adoption path for an
+older database constraint.
+
 ### Layer compliance enforcement
 
 The Go compiler enforces type safety and rejects import cycles. The `internal/architecture` test adds machine
@@ -341,6 +347,18 @@ No production child launcher, privileged VM action, or public VM lifecycle const
 Production topology/cgroup final verification, network/firewall lease transfer, stale Jailer-tree reconciliation,
 runtime/mount/output cleanup, status observation and full reconciliation, API wiring, and live L2 qualification remain
 pending.
+
+The transitional public relaunch path now has a separate, private normal-process `vmRelaunchState` increment. Start,
+reboot, and snapshot restore load the per-VM vsock row explicitly: no row is a valid absence, while lookup failure,
+mismatched VM identity, or an out-of-range CID aborts before respawn. A present row is cloned, its host UDS metadata is
+normalized to the fixed managed `vsock.sock` leaf, and its CID, agent port, and token remain available to the normal
+process. Only the validated CID enters `model.FirecrackerConfig`; the VM/Jailer path derives the fixed host and
+`/run/mvm/vsock.sock` jail leaves. Snapshot restore preserves the CID stored in vmstate and sends the fixed jail-visible
+vsock UDS override. VM create still uses its existing builder state rather than this common relaunch state. The final
+root-built descriptor-pinned `/run/mvm/runtime` activation backed by the host `/run/mvmctl/runtime` tree,
+authority-verified stale-socket cleanup, transactional lifecycle, host-reboot reconciliation, and L2 `mvm exec`
+relaunch qualification remain pending, so this increment is not evidence that the reported restart failure is fully
+resolved.
 
 SQLite binary rows are an untrusted display projection of the root release store. The implemented projection schema
 now includes architecture and scopes list, prefix, type/version, latest, and default resolution to the runtime
