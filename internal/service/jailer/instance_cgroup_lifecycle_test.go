@@ -228,7 +228,7 @@ func TestLaunchReleaseToJailerRechecksAndReenablesManagedVMCgroupControllers(t *
 
 // Rationale: a successful controller write without a successful readback cannot release Firecracker. The same pinned
 // preparation must remain retryable, and convergence on retry must not repeat the additive write.
-func TestLaunchFinalControllerReadbackFailureRetainsSameCgroupAuthorityForRetry(t *testing.T) {
+func TestLaunchRelayPresentFinalControllerReadbackFailureRetainsSameAuthorityForRetry(t *testing.T) {
 	t.Parallel()
 
 	authority, _ := newTestInstanceAuthority(t)
@@ -242,10 +242,20 @@ func TestLaunchFinalControllerReadbackFailureRetainsSameCgroupAuthorityForRetry(
 		"cpu memory pids\n",
 	)
 	authority.cgroupDeps = cgroup.deps()
-	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
+	launch := readyTestLaunchForCgroupHandoff(t, authority, true)
 	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 	prepared := launch.state.preparedManagedVMCgroup
 	require.NotNil(t, prepared)
+	processes := launch.state.processes
+	require.NotNil(t, processes.state.relay)
+	relayReleaseWrites := 0
+	realRelayWriteFull := processes.state.relay.gate.state.deps.writeFull
+	processes.state.relay.gate.state.deps.writeFull = func(ctx context.Context, fd int, value []byte) error {
+		if len(value) == 1 && value[0] == blockedLaunchReleaseByte {
+			relayReleaseWrites++
+		}
+		return realRelayWriteFull(ctx, fd, value)
+	}
 	require.NoError(t, os.WriteFile(
 		filepath.Join(parentPath, "cgroup.subtree_control"),
 		[]byte("cpu memory\n"),
@@ -280,10 +290,15 @@ func TestLaunchFinalControllerReadbackFailureRetainsSameCgroupAuthorityForRetry(
 	err := launch.releaseToJailer(t.Context())
 	require.ErrorIs(t, err, readbackErr)
 	assert.Same(t, prepared, launch.state.preparedManagedVMCgroup)
-	assert.False(t, launch.state.processes.state.firecracker.gate.isReleased())
+	assert.True(t, processes.state.relay.gate.isReleased())
+	assert.Equal(t, 1, relayReleaseWrites)
+	assert.False(t, processes.state.firecracker.gate.isReleased())
+	assert.Equal(t, blockedLaunchProcessesRelayReleasedToJailer, processes.state.status)
 	require.NoError(t, launch.releaseToJailer(t.Context()))
 	assert.Same(t, prepared, launch.state.preparedManagedVMCgroup)
-	assert.True(t, launch.state.processes.state.firecracker.gate.isReleased())
+	assert.Equal(t, 1, relayReleaseWrites)
+	assert.True(t, processes.state.firecracker.gate.isReleased())
+	assert.Equal(t, blockedLaunchProcessesReleasedToJailer, processes.state.status)
 	wantWrites := []managedVMCgroupControllerWriteCall{{directory: "parent", value: "+pids\n"}}
 	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
 		t.Errorf("retry controller writes mismatch (-want +got):\n%s", diff)
@@ -309,7 +324,7 @@ func TestLaunchFinalCgroupRecheckFailurePreservesRelayPartialHandoffForAbort(t *
 	require.Error(t, launch.releaseToJailer(t.Context()))
 	assert.True(t, processes.state.relay.gate.isReleased())
 	assert.False(t, processes.state.firecracker.gate.isReleased())
-	assert.Equal(t, blockedLaunchProcessesOpen, processes.state.status)
+	assert.Equal(t, blockedLaunchProcessesRelayReleasedToJailer, processes.state.status)
 	cleanup, err := launch.Abort(t.Context())
 	require.NoError(t, err)
 	require.Error(t, cleanup.Complete(t.Context()))

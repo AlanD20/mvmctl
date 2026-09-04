@@ -45,6 +45,7 @@ type blockedLaunchProcessStatus uint8
 
 const (
 	blockedLaunchProcessesOpen blockedLaunchProcessStatus = iota + 1
+	blockedLaunchProcessesRelayReleasedToJailer
 	blockedLaunchProcessesTransferred
 	blockedLaunchProcessesReleasedToJailer
 	blockedLaunchProcessesReleased
@@ -307,13 +308,14 @@ func releaseRetainedLaunchProcessesToJailerLocked(
 	state *blockedLaunchProcessesState,
 	recheckDestination func(context.Context) error,
 ) error {
-	if state.status != blockedLaunchProcessesOpen {
+	if state.status != blockedLaunchProcessesOpen && state.status != blockedLaunchProcessesRelayReleasedToJailer {
 		return processAuthorityError(state.vmID, "blocked launch process authority is not ready for handoff", nil)
 	}
-	if state.relay != nil {
+	if state.relay != nil && state.status == blockedLaunchProcessesOpen {
 		if err := state.relay.gate.release(ctx); err != nil {
 			return processAuthorityError(state.vmID, "release blocked relay process", err)
 		}
+		state.status = blockedLaunchProcessesRelayReleasedToJailer
 	}
 	if err := recheckDestination(ctx); err != nil {
 		return err
@@ -347,7 +349,8 @@ func (processes *blockedLaunchProcesses) terminateAndReap(ctx context.Context) e
 	state := processes.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if state.status != blockedLaunchProcessesOpen && state.status != blockedLaunchProcessesReleasedToJailer {
+	if state.status != blockedLaunchProcessesOpen && state.status != blockedLaunchProcessesRelayReleasedToJailer &&
+		state.status != blockedLaunchProcessesReleasedToJailer {
 		return processAuthorityError(state.vmID, "cleanup process authority is not active", nil)
 	}
 	if state.relay != nil {
@@ -408,7 +411,8 @@ func (processes *blockedLaunchProcesses) Release(ctx context.Context) error {
 	switch state.status {
 	case blockedLaunchProcessesTransferred, blockedLaunchProcessesReleased:
 		return state.releaseErr
-	case blockedLaunchProcessesOpen, blockedLaunchProcessesReleasedToJailer:
+	case blockedLaunchProcessesOpen, blockedLaunchProcessesRelayReleasedToJailer,
+		blockedLaunchProcessesReleasedToJailer:
 	default:
 		return processAuthorityError(state.vmID, "blocked launch process authority has invalid lifecycle", nil)
 	}
