@@ -13,19 +13,22 @@ import (
 
 // SourceSession owns one already authority-admitted source transport and one VM-exec source request.
 type SourceSession struct {
+	// mu guards sessionID, requestID, response, opened, read, cancelClaimed, closed, and deadline.
 	mu sync.Mutex
 
-	conn      net.Conn
-	token     string
-	sessionID string
-	response  *vmexecwire.ResponseWriter
-	opened    bool
-	read      bool
-	closed    bool
-	deadline  time.Time
-	done      chan struct{}
-	closeOnce sync.Once
-	closeErr  error
+	conn          net.Conn
+	token         string
+	sessionID     string
+	requestID     string
+	response      *vmexecwire.ResponseWriter
+	opened        bool
+	read          bool
+	cancelClaimed bool
+	closed        bool
+	deadline      time.Time
+	done          chan struct{}
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 // NewSourceSession creates a single-use session over an already authority-admitted connection.
@@ -115,7 +118,7 @@ func (session *SourceSession) ReadRequest(ctx context.Context) (vmexecwire.Sourc
 	}
 	session.read = true
 	session.mu.Unlock()
-	if err := session.setOperationDeadline(ctx); err != nil {
+	if err := session.setReadOperationDeadline(ctx); err != nil {
 		return vmexecwire.SourceRequest{}, errors.Join(err, session.Close())
 	}
 	stopContextWatch := session.watchOperationContext(ctx)
@@ -140,9 +143,44 @@ func (session *SourceSession) ReadRequest(ctx context.Context) (vmexecwire.Sourc
 			session.Close(),
 		)
 	}
+	session.requestID = request.RequestID
 	session.response = response
 	session.mu.Unlock()
 	return request, nil
+}
+
+// WaitCancel reads the session's only cancellation control frame for its active request.
+func (session *SourceSession) WaitCancel(ctx context.Context) error {
+	session.mu.Lock()
+	if session.closed {
+		session.mu.Unlock()
+		return errs.New(errs.CodeValidationFailed, "source session is closed")
+	}
+	if session.requestID == "" {
+		session.mu.Unlock()
+		return errs.New(errs.CodeValidationFailed, "source session request has not been read")
+	}
+	if session.cancelClaimed {
+		session.mu.Unlock()
+		return errs.New(errs.CodeValidationFailed, "source session permits a single cancellation waiter")
+	}
+	session.cancelClaimed = true
+	requestID := session.requestID
+	session.mu.Unlock()
+
+	if err := session.setReadOperationDeadline(ctx); err != nil {
+		return errors.Join(err, session.Close())
+	}
+	stopContextWatch := session.watchOperationContext(ctx)
+	defer stopContextWatch()
+
+	if err := vmexecwire.DecodeCancel(ctx, session.conn, requestID); err != nil {
+		if ctx.Err() != nil {
+			err = errs.WrapMsg(errs.CodeProcessError, "wait for source session cancellation", ctx.Err())
+		}
+		return errors.Join(err, session.Close())
+	}
+	return nil
 }
 
 // WriteStdout writes one bounded stdout response frame.
@@ -151,7 +189,7 @@ func (session *SourceSession) WriteStdout(ctx context.Context, data []byte) erro
 	if err != nil {
 		return err
 	}
-	if err := session.setOperationDeadline(ctx); err != nil {
+	if err := session.setWriteOperationDeadline(ctx); err != nil {
 		return err
 	}
 	stopContextWatch := session.watchOperationContext(ctx)
@@ -165,7 +203,7 @@ func (session *SourceSession) WriteStderr(ctx context.Context, data []byte) erro
 	if err != nil {
 		return err
 	}
-	if err := session.setOperationDeadline(ctx); err != nil {
+	if err := session.setWriteOperationDeadline(ctx); err != nil {
 		return err
 	}
 	stopContextWatch := session.watchOperationContext(ctx)
@@ -179,7 +217,7 @@ func (session *SourceSession) WriteResult(ctx context.Context, exitCode int, dur
 	if err != nil {
 		return err
 	}
-	if err := session.setOperationDeadline(ctx); err != nil {
+	if err := session.setWriteOperationDeadline(ctx); err != nil {
 		return errors.Join(err, session.Close())
 	}
 	stopContextWatch := session.watchOperationContext(ctx)
@@ -194,7 +232,7 @@ func (session *SourceSession) WriteError(ctx context.Context, message string) er
 	if err != nil {
 		return err
 	}
-	if err := session.setOperationDeadline(ctx); err != nil {
+	if err := session.setWriteOperationDeadline(ctx); err != nil {
 		return errors.Join(err, session.Close())
 	}
 	stopContextWatch := session.watchOperationContext(ctx)
@@ -235,19 +273,38 @@ func effectiveSourceDeadline(ctx context.Context) time.Time {
 	return deadline
 }
 
-func (session *SourceSession) setOperationDeadline(ctx context.Context) error {
+func (session *SourceSession) operationDeadline(ctx context.Context) (time.Time, error) {
 	session.mu.Lock()
 	deadline := session.deadline
 	closed := session.closed
 	session.mu.Unlock()
 	if closed {
-		return errs.New(errs.CodeProcessError, "source session is closed")
+		return time.Time{}, errs.New(errs.CodeProcessError, "source session is closed")
 	}
 	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
 		deadline = contextDeadline
 	}
-	if err := session.conn.SetDeadline(deadline); err != nil {
-		return errs.WrapMsg(errs.CodeProcessError, "set source session deadline", err)
+	return deadline, nil
+}
+
+func (session *SourceSession) setReadOperationDeadline(ctx context.Context) error {
+	deadline, err := session.operationDeadline(ctx)
+	if err != nil {
+		return err
+	}
+	if err := session.conn.SetReadDeadline(deadline); err != nil {
+		return errs.WrapMsg(errs.CodeProcessError, "set source session read deadline", err)
+	}
+	return nil
+}
+
+func (session *SourceSession) setWriteOperationDeadline(ctx context.Context) error {
+	deadline, err := session.operationDeadline(ctx)
+	if err != nil {
+		return err
+	}
+	if err := session.conn.SetWriteDeadline(deadline); err != nil {
+		return errs.WrapMsg(errs.CodeProcessError, "set source session write deadline", err)
 	}
 	return nil
 }

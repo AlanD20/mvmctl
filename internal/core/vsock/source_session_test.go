@@ -2,6 +2,7 @@ package vsock
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"mvmctl/internal/lib/vmexecwire"
+	"mvmctl/pkg/errs"
 )
 
 const sourceSessionTestToken = "123e4567-e89b-42d3-a456-426614174000"
@@ -93,6 +95,232 @@ func TestSourceSessionUsesAnAdmittedConnectionForOneRequest(t *testing.T) {
 	_, err = session.Open(t.Context())
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "already opened")
+}
+
+func TestSourceSessionWaitCancelAcceptsMatchingRequest(t *testing.T) {
+	hostConn, agentConn := net.Pipe()
+	requestID := "00112233445566778899aabbccddeeff"
+	session := openSourceSessionWithRequest(t, hostConn, agentConn, requestID)
+	agentDone := make(chan error, 1)
+	go func() {
+		agentDone <- vmexecwire.WriteCancel(context.Background(), agentConn, requestID)
+	}()
+
+	assert.NoError(t, session.WaitCancel(t.Context()))
+	assert.NoError(t, <-agentDone)
+}
+
+func TestSourceSessionWaitCancelRejectsInvalidFrames(t *testing.T) {
+	requestID := "00112233445566778899aabbccddeeff"
+	wrongRequestID := "ffeeddccbbaa99887766554433221100"
+	malformed := sourceSessionControlFrameForTest(
+		`{"schema_version":1,"request_id":"` + requestID + `","type":"cancel"}`,
+	)
+	malformed[0] = 'X'
+	tests := map[string][]byte{
+		"wrong request ID": sourceSessionControlFrameForTest(
+			`{"schema_version":1,"request_id":"` + wrongRequestID + `","type":"cancel"}`,
+		),
+		"malformed frame": malformed,
+		"non-cancel frame": sourceSessionControlFrameForTest(
+			`{"schema_version":1,"request_id":"` + requestID + `","type":"result"}`,
+		),
+		"trailing JSON": sourceSessionControlFrameForTest(
+			`{"schema_version":1,"request_id":"` + requestID + `","type":"cancel"}{}`,
+		),
+	}
+
+	for name, frame := range tests {
+		t.Run(name, func(t *testing.T) {
+			hostConn, agentConn := net.Pipe()
+			session := openSourceSessionWithRequest(t, hostConn, agentConn, requestID)
+			writeDone := make(chan error, 1)
+			go func() {
+				_, writeErr := agentConn.Write(frame)
+				writeDone <- writeErr
+			}()
+
+			err := session.WaitCancel(t.Context())
+			require.Error(t, err)
+			assertSourceSessionErrorCode(t, err, errs.CodeValidationFailed)
+			// Invalid prefixes may close the transport before the peer finishes the rejected frame.
+			<-writeDone
+		})
+	}
+}
+
+func TestSourceSessionWaitCancelRejectsInvalidLifecycle(t *testing.T) {
+	t.Run("before request", func(t *testing.T) {
+		hostConn, agentConn := net.Pipe()
+		t.Cleanup(func() { _ = agentConn.Close() })
+		session, err := NewSourceSession(hostConn, sourceSessionTestToken)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = session.Close() })
+
+		err = session.WaitCancel(t.Context())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "request has not been read")
+		assertSourceSessionErrorCode(t, err, errs.CodeValidationFailed)
+	})
+
+	t.Run("after close", func(t *testing.T) {
+		hostConn, agentConn := net.Pipe()
+		session := openSourceSessionWithRequest(
+			t,
+			hostConn,
+			agentConn,
+			"00112233445566778899aabbccddeeff",
+		)
+		require.NoError(t, session.Close())
+
+		err := session.WaitCancel(t.Context())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "source session is closed")
+		assertSourceSessionErrorCode(t, err, errs.CodeValidationFailed)
+	})
+}
+
+func TestSourceSessionWaitCancelPermitsOneWaiter(t *testing.T) {
+	hostPipe, agentConn := net.Pipe()
+	hostConn := &controlledSourceConn{Conn: hostPipe, readStarted: make(chan struct{})}
+	requestID := "00112233445566778899aabbccddeeff"
+	session := openSourceSessionWithRequest(t, hostConn, agentConn, requestID)
+	hostConn.observeReads.Store(true)
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- session.WaitCancel(t.Context()) }()
+	select {
+	case <-hostConn.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first cancellation waiter did not reach the transport")
+	}
+
+	err := session.WaitCancel(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "single cancellation waiter")
+	assertSourceSessionErrorCode(t, err, errs.CodeValidationFailed)
+
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- vmexecwire.WriteCancel(context.Background(), agentConn, requestID) }()
+	select {
+	case err = <-firstResult:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("first cancellation waiter did not consume the matching frame")
+	}
+	assert.NoError(t, <-writeDone)
+
+	err = session.WaitCancel(t.Context())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "single cancellation waiter")
+	assertSourceSessionErrorCode(t, err, errs.CodeValidationFailed)
+}
+
+func TestSourceSessionCanceledPartialCancelClosesTransport(t *testing.T) {
+	hostPipe, agentConn := net.Pipe()
+	hostConn := &controlledSourceConn{Conn: hostPipe, readStarted: make(chan struct{})}
+	session := openSourceSessionWithRequest(
+		t,
+		hostConn,
+		agentConn,
+		"00112233445566778899aabbccddeeff",
+	)
+	hostConn.observeReads.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- session.WaitCancel(ctx) }()
+	select {
+	case <-hostConn.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation waiter did not reach the transport")
+	}
+	_, err := agentConn.Write([]byte("MVM"))
+	require.NoError(t, err)
+	cancel()
+	select {
+	case waitErr := <-result:
+		require.Error(t, waitErr)
+		assert.ErrorIs(t, waitErr, context.Canceled)
+		assertSourceSessionErrorCode(t, waitErr, errs.CodeProcessError)
+	case <-time.After(time.Second):
+		t.Fatal("partial cancellation frame outlived context cancellation")
+	}
+	_, err = agentConn.Read(make([]byte, 1))
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestSourceSessionCloseUnblocksPartialCancel(t *testing.T) {
+	hostPipe, agentConn := net.Pipe()
+	hostConn := &controlledSourceConn{Conn: hostPipe, readStarted: make(chan struct{})}
+	session := openSourceSessionWithRequest(
+		t,
+		hostConn,
+		agentConn,
+		"00112233445566778899aabbccddeeff",
+	)
+	hostConn.observeReads.Store(true)
+	result := make(chan error, 1)
+	go func() { result <- session.WaitCancel(context.Background()) }()
+	select {
+	case <-hostConn.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation waiter did not reach the transport")
+	}
+	_, err := agentConn.Write([]byte("MVM"))
+	require.NoError(t, err)
+	require.NoError(t, session.Close())
+	select {
+	case waitErr := <-result:
+		require.Error(t, waitErr)
+		assertSourceSessionErrorCode(t, waitErr, errs.CodeValidationFailed)
+	case <-time.After(time.Second):
+		t.Fatal("partial cancellation frame outlived session close")
+	}
+	_, err = agentConn.Read(make([]byte, 1))
+	assert.ErrorIs(t, err, io.EOF)
+}
+
+func TestSourceSessionWaitCancelPreservesConcurrentResponseWrite(t *testing.T) {
+	// Rationale: a control read and response write must not overwrite each other's directional deadlines.
+	hostPipe, agentConn := net.Pipe()
+	hostConn := &controlledSourceConn{Conn: hostPipe, readStarted: make(chan struct{})}
+	requestID := "00112233445566778899aabbccddeeff"
+	session := openSourceSessionWithRequest(t, hostConn, agentConn, requestID)
+	hostConn.rejectCombinedDeadline.Store(true)
+	hostConn.observeReads.Store(true)
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- session.WaitCancel(t.Context()) }()
+	select {
+	case <-hostConn.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation waiter did not reach the transport")
+	}
+
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- vmexecwire.WriteCancel(context.Background(), agentConn, requestID) }()
+	responseDone := make(chan error, 1)
+	go func() {
+		reader, readerErr := vmexecwire.NewResponseReader(agentConn, requestID)
+		if readerErr != nil {
+			responseDone <- readerErr
+			return
+		}
+		frame, readerErr := reader.Read(context.Background())
+		if readerErr != nil {
+			responseDone <- readerErr
+			return
+		}
+		stdout, ok := frame.(vmexecwire.StdoutFrame)
+		if !ok || string(stdout.Data) != "still-running" {
+			responseDone <- errors.New("unexpected concurrent stdout frame")
+			return
+		}
+		responseDone <- nil
+	}()
+
+	assert.NoError(t, session.WriteStdout(t.Context(), []byte("still-running")))
+	assert.NoError(t, <-cancelDone)
+	assert.NoError(t, <-waitDone)
+	assert.NoError(t, <-responseDone)
 }
 
 func TestConcurrentSourceSessionsRemainIsolated(t *testing.T) {
@@ -334,16 +562,81 @@ func TestSourceSessionTerminalWriteFailureClosesOnceAndRepeatsCloseError(t *test
 	assert.Equal(t, int32(1), hostConn.closeCalls.Load())
 }
 
+// openSourceSessionWithRequest completes the authenticated handshake and binds one source request.
+func openSourceSessionWithRequest(
+	t *testing.T,
+	hostConn net.Conn,
+	agentConn net.Conn,
+	requestID string,
+) *SourceSession {
+	t.Helper()
+	t.Cleanup(func() { _ = agentConn.Close() })
+	session, err := NewSourceSession(hostConn, sourceSessionTestToken)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close() })
+	agentDone := make(chan error, 1)
+	go func() {
+		bootstrap, agentErr := vmexecwire.DecodeSourceBootstrap(context.Background(), agentConn)
+		if agentErr == nil {
+			agentErr = vmexecwire.EncodeSourceReady(context.Background(), agentConn, vmexecwire.SourceReady{
+				SourceSessionID: bootstrap.SourceSessionID,
+			})
+		}
+		if agentErr == nil {
+			agentErr = vmexecwire.EncodeSourceRequest(context.Background(), agentConn, vmexecwire.SourceRequest{
+				RequestID: requestID, Destination: "target", TargetUser: "alice", Command: "true",
+			})
+		}
+		agentDone <- agentErr
+	}()
+
+	_, err = session.Open(t.Context())
+	require.NoError(t, err)
+	request, err := session.ReadRequest(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, requestID, request.RequestID)
+	require.NoError(t, <-agentDone)
+	return session
+}
+
+// sourceSessionControlFrameForTest creates a raw frame so the session boundary receives invalid control input.
+func sourceSessionControlFrameForTest(body string) []byte {
+	prefix := make([]byte, 14)
+	copy(prefix, vmexecwire.FrameMagic)
+	binary.BigEndian.PutUint16(prefix[8:10], 1)
+	binary.BigEndian.PutUint32(prefix[10:14], uint32(len(body)))
+	return append(prefix, []byte(body)...)
+}
+
+func assertSourceSessionErrorCode(t *testing.T, err error, code errs.Code) {
+	t.Helper()
+	var domainErr *errs.DomainError
+	require.ErrorAs(t, err, &domainErr)
+	assert.Equal(t, code, domainErr.Code)
+}
+
 var errControlledWrite = errors.New("controlled write failure")
+var errCombinedSourceDeadline = errors.New("combined source deadline would couple full-duplex operations")
 
 type controlledSourceConn struct {
 	net.Conn
-	failWrites    atomic.Bool
-	observeWrites atomic.Bool
-	writeOnce     sync.Once
-	writeStarted  chan struct{}
-	closeCalls    atomic.Int32
-	closeErr      error
+	failWrites             atomic.Bool
+	observeWrites          atomic.Bool
+	observeReads           atomic.Bool
+	rejectCombinedDeadline atomic.Bool
+	writeOnce              sync.Once
+	readOnce               sync.Once
+	writeStarted           chan struct{}
+	readStarted            chan struct{}
+	closeCalls             atomic.Int32
+	closeErr               error
+}
+
+func (conn *controlledSourceConn) Read(value []byte) (int, error) {
+	if conn.observeReads.Load() {
+		conn.readOnce.Do(func() { close(conn.readStarted) })
+	}
+	return conn.Conn.Read(value)
 }
 
 func (conn *controlledSourceConn) Write(value []byte) (int, error) {
@@ -354,6 +647,13 @@ func (conn *controlledSourceConn) Write(value []byte) (int, error) {
 		conn.writeOnce.Do(func() { close(conn.writeStarted) })
 	}
 	return conn.Conn.Write(value)
+}
+
+func (conn *controlledSourceConn) SetDeadline(deadline time.Time) error {
+	if conn.rejectCombinedDeadline.Load() {
+		return errCombinedSourceDeadline
+	}
+	return conn.Conn.SetDeadline(deadline)
 }
 
 func (conn *controlledSourceConn) Close() error {
