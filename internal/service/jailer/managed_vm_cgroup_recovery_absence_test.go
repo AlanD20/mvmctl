@@ -16,6 +16,29 @@ import (
 	"mvmctl/pkg/errs"
 )
 
+// Rationale: a stable absence proof is meaningful only while the same per-VM authority lock excludes a concurrent
+// launch or cleanup. The typed composition seam must reject an inactive locked-instance shell before filesystem I/O.
+func TestLockedInstanceRequireFreshRecoveryManagedVMCgroupAbsentRequiresActiveVMLock(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	deps := fixture.deps()
+	openCalls := 0
+	deps.openRoot = func(context.Context) (int, error) {
+		openCalls++
+		return -1, errors.New("unexpected cgroup root open")
+	}
+	locked := &lockedInstance{record: instanceRecord{vmID: testVMID}}
+
+	err := locked.requireFreshRecoveryManagedVMCgroupAbsent(
+		t.Context(),
+		managedVMCgroupReadDepsFrom(deps),
+	)
+	require.Error(t, err)
+	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(err).Code)
+	assert.Zero(t, openCalls)
+}
+
 // Rationale: reboot recovery may observe an absent cgroup hierarchy, but it must never recreate any part of that
 // ephemeral hierarchy while proving the durable VM no longer has a cgroup.
 func TestRequireFreshRecoveryManagedVMCgroupAbsentAcceptsMissingHierarchyWithoutMutation(t *testing.T) {
@@ -39,7 +62,11 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentAcceptsMissingHierarchyWithout
 			before := snapshotManagedVMCgroupRecoveryTree(t, fixture.root)
 			probe := newManagedVMCgroupAbsenceProbe(fixture)
 
-			err := requireFreshRecoveryManagedVMCgroupAbsent(t.Context(), probe.deps, testVMID)
+			err := requireFreshRecoveryManagedVMCgroupAbsent(
+				t.Context(),
+				managedVMCgroupReadDepsFrom(probe.deps),
+				testVMID,
+			)
 			require.NoError(t, err)
 			probe.assertReadOnly(t)
 			if diff := cmp.Diff(before, snapshotManagedVMCgroupRecoveryTree(t, fixture.root)); diff != "" {
@@ -59,6 +86,149 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentAcceptsMissingHierarchyWithout
 	}
 }
 
+func TestRequireFreshRecoveryManagedVMCgroupAbsentNeedsNoMutationOrMembershipDependencies(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	deps := fixture.deps()
+	deps.mkdirAt = nil
+	deps.fchown = nil
+	deps.fchmod = nil
+	deps.pread = nil
+	deps.unlinkAt = nil
+
+	require.NoError(t, requireFreshRecoveryManagedVMCgroupAbsent(
+		t.Context(),
+		managedVMCgroupReadDepsFrom(deps),
+		testVMID,
+	))
+}
+
+// Rationale: ENOENT is authoritative only when both observations agree. An appeared or disappeared fixed parent or
+// leaf is ambiguous concurrent state and must fail closed without repairing or removing either side of the race.
+func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsAppearedOrDisappearedHierarchy(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		prepare func(*testing.T, *managedVMCgroupTestFixture)
+		hook    func(*testing.T, *managedVMCgroupTestFixture, *managedVMCgroupAbsenceProbe)
+	}{
+		"parent appeared": {
+			hook: func(t *testing.T, fixture *managedVMCgroupTestFixture, probe *managedVMCgroupAbsenceProbe) {
+				realOpenAt2 := probe.deps.openAt2
+				parentAttempts := 0
+				probe.deps.openAt2 = func(
+					ctx context.Context,
+					fd int,
+					name string,
+					how *unix.OpenHow,
+				) (int, error) {
+					if name == infra.JailerCgroupParent {
+						parentAttempts++
+						if parentAttempts == 2 {
+							require.NoError(t, os.Mkdir(
+								filepath.Join(fixture.root, infra.JailerCgroupParent),
+								0o755,
+							))
+						}
+					}
+					return realOpenAt2(ctx, fd, name, how)
+				}
+			},
+		},
+		"parent disappeared": {
+			prepare: func(t *testing.T, fixture *managedVMCgroupTestFixture) {
+				require.NoError(t, os.Mkdir(filepath.Join(fixture.root, infra.JailerCgroupParent), 0o755))
+			},
+			hook: func(t *testing.T, fixture *managedVMCgroupTestFixture, probe *managedVMCgroupAbsenceProbe) {
+				realOpenAt2 := probe.deps.openAt2
+				parentAttempts := 0
+				probe.deps.openAt2 = func(
+					ctx context.Context,
+					fd int,
+					name string,
+					how *unix.OpenHow,
+				) (int, error) {
+					if name == infra.JailerCgroupParent {
+						parentAttempts++
+						if parentAttempts == 2 {
+							require.NoError(t, os.Remove(filepath.Join(fixture.root, infra.JailerCgroupParent)))
+						}
+					}
+					return realOpenAt2(ctx, fd, name, how)
+				}
+			},
+		},
+		"leaf appeared": {
+			prepare: func(t *testing.T, fixture *managedVMCgroupTestFixture) {
+				require.NoError(t, os.Mkdir(filepath.Join(fixture.root, infra.JailerCgroupParent), 0o755))
+			},
+			hook: func(t *testing.T, fixture *managedVMCgroupTestFixture, probe *managedVMCgroupAbsenceProbe) {
+				realOpenAt2 := probe.deps.openAt2
+				leafAttempts := 0
+				probe.deps.openAt2 = func(
+					ctx context.Context,
+					fd int,
+					name string,
+					how *unix.OpenHow,
+				) (int, error) {
+					if name == testVMID {
+						leafAttempts++
+						if leafAttempts == 2 {
+							require.NoError(t, os.Mkdir(fixture.vmLeafPath(testVMID), 0o755))
+						}
+					}
+					return realOpenAt2(ctx, fd, name, how)
+				}
+			},
+		},
+		"leaf disappeared": {
+			prepare: func(_ *testing.T, fixture *managedVMCgroupTestFixture) { fixture.addVMLeaf(testVMID) },
+			hook: func(t *testing.T, fixture *managedVMCgroupTestFixture, probe *managedVMCgroupAbsenceProbe) {
+				realOpenAt2 := probe.deps.openAt2
+				leafAttempts := 0
+				probe.deps.openAt2 = func(
+					ctx context.Context,
+					fd int,
+					name string,
+					how *unix.OpenHow,
+				) (int, error) {
+					if name == testVMID {
+						leafAttempts++
+						if leafAttempts == 2 {
+							require.NoError(t, os.Remove(filepath.Join(fixture.vmLeafPath(testVMID), "cgroup.procs")))
+							require.NoError(t, os.Remove(fixture.vmLeafPath(testVMID)))
+						}
+					}
+					return realOpenAt2(ctx, fd, name, how)
+				}
+			},
+		},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedVMCgroupTestFixture(t)
+			if tc.prepare != nil {
+				tc.prepare(t, fixture)
+			}
+			probe := newManagedVMCgroupAbsenceProbe(fixture)
+			tc.hook(t, fixture, probe)
+
+			err := requireFreshRecoveryManagedVMCgroupAbsent(
+				t.Context(),
+				managedVMCgroupReadDepsFrom(probe.deps),
+				testVMID,
+			)
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+			probe.assertReadOnly(t)
+			if diff := cmp.Diff(reverseInts(probe.openedFDs), probe.closedFDs); diff != "" {
+				t.Errorf("closed descriptor order mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 // Rationale: a same-name leaf can belong to an interrupted or foreign lifecycle. Absence recovery must reject even an
 // otherwise exact leaf without reading membership, adopting it, or returning cleanup authority.
 func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsPresentExactLeafWithoutAdoption(t *testing.T) {
@@ -69,7 +239,11 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsPresentExactLeafWithout
 	before := snapshotManagedVMCgroupRecoveryTree(t, fixture.root)
 	probe := newManagedVMCgroupAbsenceProbe(fixture)
 
-	err := requireFreshRecoveryManagedVMCgroupAbsent(t.Context(), probe.deps, testVMID)
+	err := requireFreshRecoveryManagedVMCgroupAbsent(
+		t.Context(),
+		managedVMCgroupReadDepsFrom(probe.deps),
+		testVMID,
+	)
 	require.Error(t, err)
 	assert.Equal(t, errs.CodeVMStateInvalid, errs.AsDomainError(err).Code)
 	probe.assertReadOnly(t)
@@ -173,13 +347,115 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsUnsafeHierarchyWithoutM
 			tc.configure(fixture, probe)
 			before := snapshotManagedVMCgroupRecoveryTree(t, fixture.root)
 
-			err := requireFreshRecoveryManagedVMCgroupAbsent(t.Context(), probe.deps, testVMID)
+			err := requireFreshRecoveryManagedVMCgroupAbsent(
+				t.Context(),
+				managedVMCgroupReadDepsFrom(probe.deps),
+				testVMID,
+			)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 			probe.assertReadOnly(t)
 			if diff := cmp.Diff(before, snapshotManagedVMCgroupRecoveryTree(t, fixture.root)); diff != "" {
 				t.Errorf("managed cgroup tree changed (-before +after):\n%s", diff)
 			}
+			if diff := cmp.Diff(reverseInts(probe.openedFDs), probe.closedFDs); diff != "" {
+				t.Errorf("closed descriptor order mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// Rationale: the first observation cannot bless the second. Every re-opened component must independently pass exact
+// metadata and filesystem checks before its identity may confirm stable absence or presence.
+func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsSecondObservationUnsafeState(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		addLeaf   bool
+		configure func(*managedVMCgroupAbsenceProbe)
+	}{
+		"root owner": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("root", 2, func(stat *unix.Statx_t) { stat.Uid++ })
+		}},
+		"root mode": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("root", 2, func(stat *unix.Statx_t) {
+				stat.Mode = stat.Mode&^0o7777 | 0o700
+			})
+		}},
+		"root type": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("root", 2, func(stat *unix.Statx_t) {
+				stat.Mode = stat.Mode&^unix.S_IFMT | unix.S_IFREG
+			})
+		}},
+		"root filesystem": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			realStatfs := probe.deps.statfs
+			calls := 0
+			probe.deps.statfs = func(ctx context.Context, fd int, stat *unix.Statfs_t) error {
+				calls++
+				if calls == 2 {
+					return nil
+				}
+				return realStatfs(ctx, fd, stat)
+			}
+		}},
+		"root stat": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.failStatx("root", 2)
+		}},
+		"parent owner": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("parent", 2, func(stat *unix.Statx_t) { stat.Gid++ })
+		}},
+		"parent mode": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("parent", 2, func(stat *unix.Statx_t) {
+				stat.Mode = stat.Mode&^0o7777 | 0o700
+			})
+		}},
+		"parent type": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("parent", 2, func(stat *unix.Statx_t) {
+				stat.Mode = stat.Mode&^unix.S_IFMT | unix.S_IFREG
+			})
+		}},
+		"parent stat": {configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.failStatx("parent", 2)
+		}},
+		"leaf owner": {addLeaf: true, configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("leaf", 2, func(stat *unix.Statx_t) { stat.Uid++ })
+		}},
+		"leaf mode": {addLeaf: true, configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("leaf", 2, func(stat *unix.Statx_t) {
+				stat.Mode = stat.Mode&^0o7777 | 0o700
+			})
+		}},
+		"leaf type": {addLeaf: true, configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.rewriteStatxCall("leaf", 2, func(stat *unix.Statx_t) {
+				stat.Mode = stat.Mode&^unix.S_IFMT | unix.S_IFREG
+			})
+		}},
+		"leaf stat": {addLeaf: true, configure: func(probe *managedVMCgroupAbsenceProbe) {
+			probe.failStatx("leaf", 2)
+		}},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newManagedVMCgroupTestFixture(t)
+			if tc.addLeaf {
+				fixture.addVMLeaf(testVMID)
+			} else {
+				require.NoError(t, os.Mkdir(
+					filepath.Join(fixture.root, infra.JailerCgroupParent),
+					os.FileMode(managedVMCgroupParentMode),
+				))
+			}
+			probe := newManagedVMCgroupAbsenceProbe(fixture)
+			tc.configure(probe)
+
+			err := requireFreshRecoveryManagedVMCgroupAbsent(
+				t.Context(),
+				managedVMCgroupReadDepsFrom(probe.deps),
+				testVMID,
+			)
+			require.Error(t, err)
+			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+			probe.assertReadOnly(t)
 			if diff := cmp.Diff(reverseInts(probe.openedFDs), probe.closedFDs); diff != "" {
 				t.Errorf("closed descriptor order mismatch (-want +got):\n%s", diff)
 			}
@@ -209,7 +485,11 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentPreservesSymlinkParentsAndLeav
 			before := snapshotManagedVMCgroupRecoveryTree(t, fixture.root)
 			probe := newManagedVMCgroupAbsenceProbe(fixture)
 
-			err := requireFreshRecoveryManagedVMCgroupAbsent(t.Context(), probe.deps, testVMID)
+			err := requireFreshRecoveryManagedVMCgroupAbsent(
+				t.Context(),
+				managedVMCgroupReadDepsFrom(probe.deps),
+				testVMID,
+			)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 			probe.assertReadOnly(t)
@@ -246,10 +526,20 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsReplacementRaces(t *tes
 			return fd, err
 		}
 
-		err := requireFreshRecoveryManagedVMCgroupAbsent(t.Context(), probe.deps, testVMID)
+		err := requireFreshRecoveryManagedVMCgroupAbsent(
+			t.Context(),
+			managedVMCgroupReadDepsFrom(probe.deps),
+			testVMID,
+		)
 		require.Error(t, err)
 		assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 		probe.assertReadOnly(t)
+		if diff := cmp.Diff([]string{"root", "root"}, probe.openedRoles); diff != "" {
+			t.Errorf("replacement descriptor roles mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(reverseInts(probe.openedFDs), probe.closedFDs); diff != "" {
+			t.Errorf("replacement close order mismatch (-want +got):\n%s", diff)
+		}
 		assert.DirExists(t, root)
 		assert.DirExists(t, root+"-detached")
 	})
@@ -272,10 +562,20 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsReplacementRaces(t *tes
 			return realOpenAt2(ctx, fd, name, how)
 		}
 
-		err := requireFreshRecoveryManagedVMCgroupAbsent(t.Context(), probe.deps, testVMID)
+		err := requireFreshRecoveryManagedVMCgroupAbsent(
+			t.Context(),
+			managedVMCgroupReadDepsFrom(probe.deps),
+			testVMID,
+		)
 		require.Error(t, err)
 		assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 		probe.assertReadOnly(t)
+		if diff := cmp.Diff([]string{"root", "parent", "root", "parent"}, probe.openedRoles); diff != "" {
+			t.Errorf("replacement descriptor roles mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(reverseInts(probe.openedFDs), probe.closedFDs); diff != "" {
+			t.Errorf("replacement close order mismatch (-want +got):\n%s", diff)
+		}
 		assert.DirExists(t, parent)
 		assert.DirExists(t, parent+"-detached")
 	})
@@ -299,10 +599,23 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentRejectsReplacementRaces(t *tes
 			return opened, err
 		}
 
-		err := requireFreshRecoveryManagedVMCgroupAbsent(t.Context(), probe.deps, testVMID)
+		err := requireFreshRecoveryManagedVMCgroupAbsent(
+			t.Context(),
+			managedVMCgroupReadDepsFrom(probe.deps),
+			testVMID,
+		)
 		require.Error(t, err)
 		assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 		probe.assertReadOnly(t)
+		if diff := cmp.Diff(
+			[]string{"root", "parent", "leaf", "root", "parent", "leaf"},
+			probe.openedRoles,
+		); diff != "" {
+			t.Errorf("replacement descriptor roles mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(reverseInts(probe.openedFDs), probe.closedFDs); diff != "" {
+			t.Errorf("replacement close order mismatch (-want +got):\n%s", diff)
+		}
 		assert.DirExists(t, leaf)
 		assert.DirExists(t, leaf+"-detached")
 	})
@@ -361,7 +674,11 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentFailsClosedOnOpenAndStatErrors
 			probe := newManagedVMCgroupAbsenceProbe(fixture)
 			tc.fault(probe)
 
-			err := requireFreshRecoveryManagedVMCgroupAbsent(t.Context(), probe.deps, testVMID)
+			err := requireFreshRecoveryManagedVMCgroupAbsent(
+				t.Context(),
+				managedVMCgroupReadDepsFrom(probe.deps),
+				testVMID,
+			)
 			require.Error(t, err)
 			assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
 			probe.assertReadOnly(t)
@@ -372,6 +689,41 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentFailsClosedOnOpenAndStatErrors
 				t.Errorf("closed descriptor order mismatch (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+// Rationale: descriptor cleanup is diagnostic evidence, not a replacement for the operation failure. Joining both
+// causes must preserve errors.Is matching for the primary observation error and the close failure.
+func TestRequireFreshRecoveryManagedVMCgroupAbsentPreservesPrimaryAndCloseErrors(t *testing.T) {
+	t.Parallel()
+
+	fixture := newManagedVMCgroupTestFixture(t)
+	require.NoError(t, os.Mkdir(
+		filepath.Join(fixture.root, infra.JailerCgroupParent),
+		os.FileMode(managedVMCgroupParentMode),
+	))
+	probe := newManagedVMCgroupAbsenceProbe(fixture)
+	probe.failOpenAt2(testVMID, 2)
+	closeErr := errors.New("injected close failure after primary error")
+	realClose := probe.deps.close
+	probe.deps.close = func(ctx context.Context, fd int) error {
+		err := realClose(ctx, fd)
+		if fd == probe.openedFDs[len(probe.openedFDs)-1] {
+			return errors.Join(err, closeErr)
+		}
+		return err
+	}
+
+	err := requireFreshRecoveryManagedVMCgroupAbsent(
+		t.Context(),
+		managedVMCgroupReadDepsFrom(probe.deps),
+		testVMID,
+	)
+	require.ErrorIs(t, err, unix.EIO)
+	require.ErrorIs(t, err, closeErr)
+	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+	if diff := cmp.Diff(reverseInts(probe.openedFDs), probe.closedFDs); diff != "" {
+		t.Errorf("closed descriptor order mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -420,9 +772,11 @@ func TestRequireFreshRecoveryManagedVMCgroupAbsentPreservesCloseErrorWithoutCanc
 		return err
 	}
 
-	err := requireFreshRecoveryManagedVMCgroupAbsent(ctx, probe.deps, testVMID)
+	err := requireFreshRecoveryManagedVMCgroupAbsent(ctx, managedVMCgroupReadDepsFrom(probe.deps), testVMID)
 	require.ErrorIs(t, err, closeErr)
 	assert.Equal(t, errs.CodeVMAtomicFailed, errs.AsDomainError(err).Code)
+	assert.Equal(t, 2, leafAttempts)
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
 	probe.assertReadOnly(t)
 	if diff := cmp.Diff(reverseInts(probe.openedFDs), probe.closedFDs); diff != "" {
 		t.Errorf("closed descriptor order mismatch (-want +got):\n%s", diff)
@@ -528,6 +882,27 @@ func (probe *managedVMCgroupAbsenceProbe) rewriteStatx(role string, rewrite func
 		}
 		if probe.roleByFD[fd] == role {
 			rewrite(stat)
+		}
+		return nil
+	}
+}
+
+func (probe *managedVMCgroupAbsenceProbe) rewriteStatxCall(
+	role string,
+	wantCall int,
+	rewrite func(*unix.Statx_t),
+) {
+	realStatx := probe.deps.statx
+	calls := 0
+	probe.deps.statx = func(ctx context.Context, fd int, stat *unix.Statx_t) error {
+		if err := realStatx(ctx, fd, stat); err != nil {
+			return err
+		}
+		if probe.roleByFD[fd] == role {
+			calls++
+			if calls == wantCall {
+				rewrite(stat)
+			}
 		}
 		return nil
 	}

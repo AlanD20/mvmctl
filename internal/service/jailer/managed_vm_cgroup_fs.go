@@ -38,6 +38,17 @@ type managedVMCgroupDeps struct {
 	trustedGID uint32
 }
 
+type managedVMCgroupReadDeps struct {
+	openRoot func(context.Context) (int, error)
+	openAt2  func(context.Context, int, string, *unix.OpenHow) (int, error)
+	statx    func(context.Context, int, *unix.Statx_t) error
+	statfs   func(context.Context, int, *unix.Statfs_t) error
+	close    func(context.Context, int) error
+
+	trustedUID uint32
+	trustedGID uint32
+}
+
 type managedVMCgroupMountIdentity struct {
 	kind uint8
 	id   uint64
@@ -128,7 +139,7 @@ func retainedManagedVMCgroupWasUnlinked(ctx context.Context, state *managedVMCgr
 		return false, instanceAtomicError("retained managed VM cgroup link count is unavailable", nil)
 	}
 	identity, err := managedVMCgroupIdentityFromDirectoryStatx(
-		state.deps,
+		managedVMCgroupReadDepsFrom(state.deps),
 		stat,
 		"retained managed VM cgroup link state",
 		managedVMCgroupLeafMode,
@@ -162,6 +173,22 @@ func inspectManagedVMCgroupDirectory(
 	description string,
 	wantMode uint32,
 ) (managedVMCgroupIdentity, error) {
+	return inspectManagedVMCgroupReadDirectory(
+		ctx,
+		managedVMCgroupReadDepsFrom(deps),
+		fd,
+		description,
+		wantMode,
+	)
+}
+
+func inspectManagedVMCgroupReadDirectory(
+	ctx context.Context,
+	deps managedVMCgroupReadDeps,
+	fd int,
+	description string,
+	wantMode uint32,
+) (managedVMCgroupIdentity, error) {
 	var stat unix.Statx_t
 	if err := deps.statx(ctx, fd, &stat); err != nil {
 		return managedVMCgroupIdentity{}, instanceAtomicError("inspect "+description, err)
@@ -170,7 +197,7 @@ func inspectManagedVMCgroupDirectory(
 }
 
 func managedVMCgroupIdentityFromDirectoryStatx(
-	deps managedVMCgroupDeps,
+	deps managedVMCgroupReadDeps,
 	stat unix.Statx_t,
 	description string,
 	wantMode uint32,
@@ -203,6 +230,45 @@ func managedVMCgroupIdentityFromDirectoryStatx(
 	}, nil
 }
 
+func inspectManagedVMCgroupRoot(
+	ctx context.Context,
+	deps managedVMCgroupReadDeps,
+	rootFD int,
+	description string,
+) (managedVMCgroupIdentity, error) {
+	root, err := inspectManagedVMCgroupReadDirectory(ctx, deps, rootFD, description, managedVMCgroupRootMode)
+	if err != nil {
+		return managedVMCgroupIdentity{}, err
+	}
+	var filesystem unix.Statfs_t
+	if err := deps.statfs(ctx, rootFD, &filesystem); err != nil {
+		return managedVMCgroupIdentity{}, instanceAtomicError("inspect "+description+" filesystem", err)
+	}
+	if filesystem.Type != unix.CGROUP2_SUPER_MAGIC {
+		return managedVMCgroupIdentity{}, instanceAtomicError(description+" is not a cgroup-v2 mount", nil)
+	}
+	return root, nil
+}
+
+func inspectManagedVMCgroupChild(
+	ctx context.Context,
+	deps managedVMCgroupReadDeps,
+	fd int,
+	description string,
+	wantMode uint32,
+	parent managedVMCgroupIdentity,
+) (managedVMCgroupIdentity, error) {
+	child, err := inspectManagedVMCgroupReadDirectory(ctx, deps, fd, description, wantMode)
+	if err != nil {
+		return managedVMCgroupIdentity{}, err
+	}
+	if child.mount != parent.mount ||
+		child.deviceMajor != parent.deviceMajor || child.deviceMinor != parent.deviceMinor {
+		return managedVMCgroupIdentity{}, instanceAtomicError(description+" is outside the pinned cgroup-v2 mount", nil)
+	}
+	return child, nil
+}
+
 func managedVMCgroupMountFromStatx(stat unix.Statx_t) (managedVMCgroupMountIdentity, error) {
 	switch {
 	case stat.Mask&unix.STATX_MNT_ID_UNIQUE != 0 && stat.Mnt_id != 0:
@@ -223,7 +289,37 @@ func validateManagedVMCgroupDeps(deps managedVMCgroupDeps) error {
 	return nil
 }
 
+func managedVMCgroupReadDepsFrom(deps managedVMCgroupDeps) managedVMCgroupReadDeps {
+	return managedVMCgroupReadDeps{
+		openRoot: deps.openRoot,
+		openAt2:  deps.openAt2,
+		statx:    deps.statx,
+		statfs:   deps.statfs,
+		close:    deps.close,
+
+		trustedUID: deps.trustedUID,
+		trustedGID: deps.trustedGID,
+	}
+}
+
+func validateManagedVMCgroupReadDeps(deps managedVMCgroupReadDeps) error {
+	if deps.openRoot == nil || deps.openAt2 == nil || deps.statx == nil || deps.statfs == nil || deps.close == nil {
+		return instanceAtomicError("managed VM cgroup read dependencies are incomplete", nil)
+	}
+	return nil
+}
+
 func closeManagedVMCgroupFDs(ctx context.Context, deps managedVMCgroupDeps, fds []int) error {
+	var result error
+	for index := len(fds) - 1; index >= 0; index-- {
+		if err := deps.close(ctx, fds[index]); err != nil {
+			result = errors.Join(result, err)
+		}
+	}
+	return result
+}
+
+func closeManagedVMCgroupReadFDs(ctx context.Context, deps managedVMCgroupReadDeps, fds []int) error {
 	var result error
 	for index := len(fds) - 1; index >= 0; index-- {
 		if err := deps.close(ctx, fds[index]); err != nil {
