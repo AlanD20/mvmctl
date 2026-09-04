@@ -74,9 +74,16 @@ missing generated asset, sandbox denial, or expired observation is evidence to c
 
 ## Worktree durability
 
-Create agent worktrees under a persistent project-owned location such as ignored `dist/worktrees/`. Use `/tmp` only for
-disposable work that has no unique changes. A worktree commit is durable in the main repository object database;
-unstaged, staged, and untracked files are not.
+Create agent worktrees under a persistent project-owned location such as ignored `dist/worktrees/`. Do not use `/tmp`
+for project worktrees, Go build/test caches, Python test roots, or other project-generated bulk data. The host may apply
+a per-user quota to `/tmp` independently of filesystem free space, and exhausting it also prevents the agent sandbox
+from creating its small internal mount markers.
+
+Before a writer runs any command, create a task-specific ignored directory beneath that writer's worktree and set
+`TMPDIR`, `GOTMPDIR`, and `GOCACHE` to descendants of it for every Go command. Give Python/pytest an equivalent
+worktree-local base temporary directory. Do not share writable cache directories between concurrent workers. `/tmp`
+is reserved for small platform-owned disposable files that the workflow cannot redirect. A worktree commit is durable
+in the main repository object database; unstaged, staged, and untracked files are not.
 
 When inheriting a live `/tmp` worktree, preserve its unique state under ignored `dist/agent-snapshots/` before a long
 command or ownership handoff. Capture tracked and staged binary patches separately, archive every untracked file, and
