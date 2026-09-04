@@ -200,9 +200,9 @@ func newProcessIdentityFixture(t *testing.T, relayPresent bool) *processIdentity
 		topologySelectedNetworkNamespace{identity: firecrackerNetworkNamespace},
 	))
 	require.NoError(t, topology.Release(t.Context()))
-	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 	require.NoError(t, launch.releaseToJailer(t.Context()))
-	cgroup.addVMLeaf(testVMID)
+	cgroup.addVMLeafWithLimits(testVMID, testManagedVMCgroupLimits())
 	originalWaitReap := launch.state.processes.state.deps.waitReapPIDFD
 	launch.state.processes.state.deps.waitReapPIDFD = func(ctx context.Context, fd int) error {
 		if err := originalWaitReap(ctx, fd); err != nil {

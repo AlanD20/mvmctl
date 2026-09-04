@@ -92,9 +92,28 @@ func (fixture *managedVMCgroupTestFixture) removeCgroupLeaf(
 	membership, err := os.ReadFile(membershipPath)
 	require.NoError(fixture.t, err)
 	require.NoError(fixture.t, os.Remove(membershipPath))
+	controlContents := make(map[string][]byte)
+	for _, control := range []string{
+		"cpu.max", "cpu.weight", "memory.high", "memory.max", "memory.swap.max", "pids.max",
+	} {
+		path := filepath.Join(parent, name, control)
+		content, readErr := os.ReadFile(path)
+		if readErr == nil {
+			controlContents[path] = content
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			require.NoError(fixture.t, readErr)
+		}
+		removeErr := os.Remove(path)
+		if removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			require.NoError(fixture.t, removeErr)
+		}
+	}
 	err = unix.Unlinkat(parentFD, name, flags)
 	if err != nil {
 		require.NoError(fixture.t, os.WriteFile(membershipPath, membership, 0o644))
+		for path, content := range controlContents {
+			require.NoError(fixture.t, os.WriteFile(path, content, 0o644))
+		}
 	}
 	return err
 }

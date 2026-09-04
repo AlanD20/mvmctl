@@ -3,6 +3,8 @@ package jailer
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -85,11 +87,30 @@ func TestActivateVerifiedProcessUsesRetainedPIDFDsAndPinnedExecutable(t *testing
 	}
 }
 
-func TestActivateVerifiedProcessRetriesMembershipProofOnSameBoundCgroup(t *testing.T) {
+func TestActivateVerifiedProcessRetriesLimitReadbackOnSameBoundCgroup(t *testing.T) {
 	t.Parallel()
 
 	fixture := newProcessIdentityFixture(t, false)
-	fixture.cgroup.setMembership(testVMID, "4343\n")
+	pidsPath := filepath.Join(fixture.cgroup.vmLeafPath(testVMID), "pids.max")
+	require.NoError(t, os.WriteFile(pidsPath, []byte("129\n"), 0o644))
+	leafOpens := 0
+	pidsOpens := 0
+	prepared := fixture.launch.state.preparedManagedVMCgroup
+	realOpenAt2 := prepared.state.deps.openAt2
+	prepared.state.deps.openAt2 = func(
+		ctx context.Context,
+		fd int,
+		name string,
+		how *unix.OpenHow,
+	) (int, error) {
+		if name == testVMID {
+			leafOpens++
+		}
+		if name == "pids.max" {
+			pidsOpens++
+		}
+		return realOpenAt2(ctx, fd, name, how)
+	}
 
 	active, err := activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
 	assert.Nil(t, active)
@@ -99,13 +120,18 @@ func TestActivateVerifiedProcessRetriesMembershipProofOnSameBoundCgroup(t *testi
 	assert.Nil(t, fixture.launch.state.preparedManagedVMCgroup)
 	assert.False(t, fixture.launch.snapshot().hasPreparedManagedVMCgroup)
 	assert.True(t, fixture.launch.snapshot().hasManagedVMCgroup)
+	assert.Equal(t, instanceLifecycleLaunching, fixture.launch.state.record.lifecycle)
+	assert.Equal(t, 1, leafOpens)
+	assert.Equal(t, 1, pidsOpens)
 
-	fixture.cgroup.setMembership(testVMID, "4242\n")
+	require.NoError(t, os.WriteFile(pidsPath, []byte("128\n"), 0o644))
 	fixture.fake.retainPostExecFirecracker()
 	active, err = activateVerifiedProcessWithDeps(t.Context(), fixture.launch, fixture.fake.deps())
 	require.NoError(t, err)
 	require.NotNil(t, active)
 	assert.Same(t, bound, active.state.managedVMCgroup)
+	assert.Equal(t, 1, leafOpens)
+	assert.Equal(t, 2, pidsOpens)
 	cleanup, err := active.BeginCleanup(t.Context())
 	require.NoError(t, err)
 	require.NoError(t, cleanup.Complete(t.Context()))

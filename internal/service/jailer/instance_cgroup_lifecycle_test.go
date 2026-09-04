@@ -79,12 +79,12 @@ func TestLaunchManagedVMCgroupPreparationIsExclusive(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 	original := launch.state.preparedManagedVMCgroup
 	assert.True(t, launch.snapshot().hasPreparedManagedVMCgroup)
 	assert.False(t, launch.snapshot().hasManagedVMCgroup)
 	require.Error(t, launch.Release(t.Context()))
-	require.Error(t, launch.prepareManagedVMCgroup(t.Context()))
+	require.Error(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 	assert.Same(t, original, launch.state.preparedManagedVMCgroup)
 	assert.True(t, launch.snapshot().hasPreparedManagedVMCgroup)
 	assert.False(t, launch.snapshot().hasManagedVMCgroup)
@@ -139,7 +139,7 @@ func TestLaunchReleaseToJailerRechecksManagedVMCgroupAbsence(t *testing.T) {
 	}
 	authority.cgroupDeps = cgroupDeps
 	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
-	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 	cgroup.addVMLeaf(testVMID)
 
 	require.Error(t, launch.releaseToJailer(t.Context()))
@@ -170,7 +170,7 @@ func TestLaunchFinalCgroupRecheckFailurePreservesRelayPartialHandoffForAbort(t *
 	cgroup := newManagedVMCgroupTestFixture(t)
 	authority.cgroupDeps = cgroup.launchDeps()
 	launch := readyTestLaunchForCgroupHandoff(t, authority, true)
-	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 	processes := launch.state.processes
 	require.NotNil(t, processes.state.relay)
 	cgroup.addVMLeaf(testVMID)
@@ -204,7 +204,7 @@ func TestAbortCleanupReapsBeforeReleasingAbsentManagedVMCgroup(t *testing.T) {
 		testLaunchIntent(false),
 	)
 	require.NoError(t, err)
-	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 	prepared := launch.state.preparedManagedVMCgroup
 	reaped := false
 	originalWait := launch.state.processes.state.deps.waitReapPIDFD
@@ -263,7 +263,7 @@ func TestAbortCleanupReapsBeforeRemovingJailerManagedVMCgroup(t *testing.T) {
 	}
 	authority.cgroupDeps = cgroupDeps
 	launch := readyTestLaunchForCgroupHandoff(t, authority, false)
-	require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+	require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 	require.NoError(t, launch.releaseToJailer(t.Context()))
 	cgroup.addVMLeaf(testVMID)
 	originalWait := launch.state.processes.state.deps.waitReapPIDFD
@@ -311,7 +311,7 @@ func TestAbortCleanupManagedVMCgroupRemovalFailureRetainsAuthorityForRetry(t *te
 		cgroup := newManagedVMCgroupTestFixture(t)
 		authority.cgroupDeps = cgroup.launchDeps()
 		launch := readyTestLaunchForCgroupHandoff(t, authority, false)
-		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+		require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 		require.NoError(t, launch.releaseToJailer(t.Context()))
 		cgroup.addVMLeaf(testVMID)
 		cleanup, err := launch.Abort(t.Context())
@@ -349,7 +349,7 @@ func TestAbortCleanupManagedVMCgroupRemovalFailureRetainsAuthorityForRetry(t *te
 		}
 		authority.cgroupDeps = cgroupDeps
 		launch := readyTestLaunchForCgroupHandoff(t, authority, false)
-		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+		require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 		require.NoError(t, launch.releaseToJailer(t.Context()))
 		cgroup.addVMLeaf(testVMID)
 		originalWait := launch.state.processes.state.deps.waitReapPIDFD
@@ -395,7 +395,7 @@ func TestAbortCleanupManagedVMCgroupCloseFailureIsReportedOnceAndRetryConverges(
 			testLaunchIntent(false),
 		)
 		require.NoError(t, err)
-		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+		require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 		prepared := launch.state.preparedManagedVMCgroup
 		rootFD := prepared.state.rootFD
 		closeErr := errors.New("close absent prepared managed VM cgroup")
@@ -425,7 +425,7 @@ func TestAbortCleanupManagedVMCgroupCloseFailureIsReportedOnceAndRetryConverges(
 		cgroup := newManagedVMCgroupTestFixture(t)
 		authority.cgroupDeps = cgroup.launchDeps()
 		launch := readyTestLaunchForCgroupHandoff(t, authority, false)
-		require.NoError(t, launch.prepareManagedVMCgroup(t.Context()))
+		require.NoError(t, launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits()))
 		require.NoError(t, launch.releaseToJailer(t.Context()))
 		prepared := launch.state.preparedManagedVMCgroup
 		rootFD := prepared.state.rootFD

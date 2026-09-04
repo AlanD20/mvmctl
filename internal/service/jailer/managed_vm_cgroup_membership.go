@@ -55,10 +55,12 @@ func (lease *managedVMCgroupLease) VerifyMembership(
 	}
 	state.verifying = true
 	proof := managedVMCgroupLeaseState{
-		deps:   state.deps,
-		vmID:   state.vmID,
-		leafFD: state.leafFD,
-		leaf:   state.leaf,
+		deps:      state.deps,
+		vmID:      state.vmID,
+		leafFD:    state.leafFD,
+		leaf:      state.leaf,
+		limits:    state.limits,
+		hasLimits: state.hasLimits,
 	}
 	state.mu.Unlock()
 	defer func() {
@@ -77,6 +79,11 @@ func (lease *managedVMCgroupLease) VerifyMembership(
 			"process observation does not match the derived VM cgroup",
 			nil,
 		)
+	}
+	if proof.hasLimits {
+		if err := verifyManagedVMCgroupLimits(ctx, proof.deps, proof.leafFD, proof.leaf, proof.limits); err != nil {
+			return err
+		}
 	}
 	if err := verifier.verifyBeforeCgroupMembership(ctx, locator, observation); err != nil {
 		return processVerificationError(proof.vmID, "verify retained process before cgroup membership", err)

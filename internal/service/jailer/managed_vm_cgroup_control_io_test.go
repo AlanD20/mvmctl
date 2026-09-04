@@ -1032,7 +1032,7 @@ func TestPrepareManagedVMCgroupForLaunchEnsuresRootThenParentControllers(t *test
 		testLaunchIntent(false),
 	)
 	require.NoError(t, err)
-	err = launch.prepareManagedVMCgroup(t.Context())
+	err = launch.prepareManagedVMCgroup(t.Context(), testManagedVMCgroupLimits())
 	require.NoError(t, err)
 	wantWrites := []managedVMCgroupControllerWriteCall{
 		{directory: "root", value: "+memory +pids\n"},
@@ -1046,7 +1046,7 @@ func TestPrepareManagedVMCgroupForLaunchEnsuresRootThenParentControllers(t *test
 	require.NoError(t, cleanup.Complete(t.Context()))
 	require.NoError(t, cleanup.Release(t.Context()))
 
-	prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), deps, testVMID)
+	prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), deps, testVMID, testManagedVMCgroupLimits())
 	require.NoError(t, err)
 	require.NoError(t, prepared.Release(t.Context()))
 	if diff := cmp.Diff(wantWrites, writes, cmp.AllowUnexported(managedVMCgroupControllerWriteCall{})); diff != "" {
@@ -1097,7 +1097,9 @@ func TestPrepareManagedVMCgroupForLaunchFailsClosedOnControllerAvailabilityAndRe
 				return tc.write(ctx, fd, value)
 			}
 
-			prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), deps, testVMID)
+			prepared, err := prepareManagedVMCgroupForLaunch(
+				t.Context(), deps, testVMID, testManagedVMCgroupLimits(),
+			)
 			assert.Nil(t, prepared)
 			requireManagedVMCgroupAtomicError(t, err)
 			assert.Equal(t, tc.wantWrites, writeCalls)
@@ -1123,7 +1125,7 @@ func TestPrepareManagedVMCgroupForLaunchDoesNotRollbackRootControllerEnablement(
 	var writes []managedVMCgroupControllerWriteCall
 	deps.write = simulatedManagedVMCgroupControllerWrite(t, fixture.root, parentPath, &writes)
 
-	prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), deps, testVMID)
+	prepared, err := prepareManagedVMCgroupForLaunch(t.Context(), deps, testVMID, testManagedVMCgroupLimits())
 	assert.Nil(t, prepared)
 	requireManagedVMCgroupAtomicError(t, err)
 	wantWrites := []managedVMCgroupControllerWriteCall{{directory: "root", value: "+memory +pids\n"}}
@@ -1199,7 +1201,7 @@ func TestPrepareManagedVMCgroupForLaunchClosesCreatedParentAfterCancelledControl
 		return realClose(closeCtx, fd)
 	}
 
-	prepared, err := prepareManagedVMCgroupForLaunch(ctx, deps, testVMID)
+	prepared, err := prepareManagedVMCgroupForLaunch(ctx, deps, testVMID, testManagedVMCgroupLimits())
 	assert.Nil(t, prepared)
 	require.ErrorIs(t, err, context.Canceled)
 	if diff := cmp.Diff([]string{"parent", "root"}, retainedCloseOrder); diff != "" {

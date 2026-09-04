@@ -1,6 +1,10 @@
 package jailer
 
-import "context"
+import (
+	"context"
+
+	"mvmctl/internal/lib/model"
+)
 
 func releaseCleanupManagedVMCgroupLocked(ctx context.Context, state *cleanupLeaseState) error {
 	if state.preparedManagedVMCgroup != nil {
@@ -43,7 +47,7 @@ func releaseCleanupManagedVMCgroupLocked(ctx context.Context, state *cleanupLeas
 }
 
 // prepareManagedVMCgroup pins the fixed cgroup-v2 root and managed parent while this launch retains its VM lock.
-func (lease *launchLease) prepareManagedVMCgroup(ctx context.Context) error {
+func (lease *launchLease) prepareManagedVMCgroup(ctx context.Context, limits model.VMCgroupLimits) error {
 	if lease == nil || lease.state == nil {
 		return instanceStateError("", "launch lease is not active")
 	}
@@ -54,7 +58,7 @@ func (lease *launchLease) prepareManagedVMCgroup(ctx context.Context) error {
 		state.processes == nil || state.preparedManagedVMCgroup != nil || state.managedVMCgroup != nil {
 		return instanceStateError(state.record.vmID, "launch lease cannot prepare a managed VM cgroup")
 	}
-	prepared, err := prepareManagedVMCgroupForLaunch(ctx, state.cgroupDeps, state.record.vmID)
+	prepared, err := prepareManagedVMCgroupForLaunch(ctx, state.cgroupDeps, state.record.vmID, limits)
 	if err != nil {
 		return err
 	}

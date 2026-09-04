@@ -19,7 +19,10 @@ const (
 	managedVMCgroupControllersControl managedVMCgroupControlFile = iota + 1
 	managedVMCgroupSubtreeControl
 	managedVMCgroupCPUMaxControl
+	managedVMCgroupCPUWeightControl
+	managedVMCgroupMemoryHighControl
 	managedVMCgroupMemoryMaxControl
+	managedVMCgroupMemorySwapMaxControl
 	managedVMCgroupPIDsMaxControl
 )
 
@@ -46,6 +49,61 @@ type managedVMCgroupCPUMax struct {
 	periodMicros uint64
 }
 
+func readManagedVMCgroupCPUMax(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) (managedVMCgroupCPUMax, error) {
+	raw, err := readManagedVMCgroupControlBytes(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupCPUMaxControl,
+	)
+	if err != nil {
+		return managedVMCgroupCPUMax{}, err
+	}
+	value, err := parseManagedVMCgroupCPUMax(raw)
+	if err != nil {
+		return managedVMCgroupCPUMax{}, instanceAtomicError("parse cpu.max control", err)
+	}
+	return value, nil
+}
+
+func readManagedVMCgroupCPUWeight(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) (uint64, error) {
+	return readManagedVMCgroupFiniteControl(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupCPUWeightControl,
+		"cpu.weight",
+	)
+}
+
+func readManagedVMCgroupMemoryHigh(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) (uint64, error) {
+	return readManagedVMCgroupFiniteControl(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupMemoryHighControl,
+		"memory.high",
+	)
+}
+
 func readManagedVMCgroupMemoryMax(
 	ctx context.Context,
 	deps managedVMCgroupDeps,
@@ -59,6 +117,22 @@ func readManagedVMCgroupMemoryMax(
 		directory,
 		managedVMCgroupMemoryMaxControl,
 		"memory.max",
+	)
+}
+
+func readManagedVMCgroupMemorySwapMax(
+	ctx context.Context,
+	deps managedVMCgroupDeps,
+	directoryFD int,
+	directory managedVMCgroupIdentity,
+) (uint64, error) {
+	return readManagedVMCgroupFiniteControl(
+		ctx,
+		deps,
+		directoryFD,
+		directory,
+		managedVMCgroupMemorySwapMaxControl,
+		"memory.swap.max",
 	)
 }
 
@@ -418,8 +492,14 @@ func managedVMCgroupControlSpec(control managedVMCgroupControlFile) (managedVMCg
 		return managedVMCgroupControlFileSpec{name: "cgroup.subtree_control", mode: 0o644, writable: true}, nil
 	case managedVMCgroupCPUMaxControl:
 		return managedVMCgroupControlFileSpec{name: "cpu.max", mode: 0o644, writable: true}, nil
+	case managedVMCgroupCPUWeightControl:
+		return managedVMCgroupControlFileSpec{name: "cpu.weight", mode: 0o644, writable: true}, nil
+	case managedVMCgroupMemoryHighControl:
+		return managedVMCgroupControlFileSpec{name: "memory.high", mode: 0o644, writable: true}, nil
 	case managedVMCgroupMemoryMaxControl:
 		return managedVMCgroupControlFileSpec{name: "memory.max", mode: 0o644, writable: true}, nil
+	case managedVMCgroupMemorySwapMaxControl:
+		return managedVMCgroupControlFileSpec{name: "memory.swap.max", mode: 0o644, writable: true}, nil
 	case managedVMCgroupPIDsMaxControl:
 		return managedVMCgroupControlFileSpec{name: "pids.max", mode: 0o644, writable: true}, nil
 	default:

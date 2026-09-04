@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	"golang.org/x/sys/unix"
+
+	"mvmctl/internal/lib/model"
 )
 
 type preparedManagedVMCgroup struct {
@@ -27,6 +29,8 @@ type preparedManagedVMCgroupState struct {
 	binding              bool
 	jailerHandoff        bool
 	freshRecoveryCleanup bool
+	limits               model.VMCgroupLimits
+	hasLimitIntent       bool
 	released             bool
 	releaseErr           error
 }
@@ -51,6 +55,8 @@ type managedVMCgroupLeaseState struct {
 	parent     managedVMCgroupIdentity
 	leaf       managedVMCgroupIdentity
 	retained   []int
+	limits     model.VMCgroupLimits
+	hasLimits  bool
 	verifying  bool
 	removed    bool
 	released   bool
@@ -74,8 +80,17 @@ func prepareManagedVMCgroupForLaunch(
 	ctx context.Context,
 	deps managedVMCgroupDeps,
 	vmID string,
+	limits model.VMCgroupLimits,
 ) (_ *preparedManagedVMCgroup, returnErr error) {
-	return prepareManagedVMCgroupWithControllerReadiness(ctx, deps, vmID, true)
+	if err := validateManagedVMCgroupLimits(limits); err != nil {
+		return nil, err
+	}
+	prepared, err := prepareManagedVMCgroupWithControllerReadiness(ctx, deps, vmID, true)
+	if prepared != nil {
+		prepared.state.limits = limits
+		prepared.state.hasLimitIntent = true
+	}
+	return prepared, err
 }
 
 func prepareManagedVMCgroupWithControllerReadiness(
@@ -312,6 +327,8 @@ func (prepared *preparedManagedVMCgroup) Bind(
 	rootFD := state.rootFD
 	parentFD := state.parentFD
 	parent := state.parent
+	limits := state.limits
+	hasLimits := state.hasLimitIntent
 	retained := append([]int{}, state.retained...)
 	state.mu.Unlock()
 
@@ -350,7 +367,7 @@ func (prepared *preparedManagedVMCgroup) Bind(
 	retained = append(retained, leafFD)
 	lease := &managedVMCgroupLease{state: &managedVMCgroupLeaseState{
 		deps: deps, vmID: vmID, rootFD: rootFD, parentFD: parentFD, leafFD: leafFD,
-		parent: parent, leaf: leaf, retained: retained,
+		parent: parent, leaf: leaf, retained: retained, limits: limits, hasLimits: hasLimits,
 	}}
 	state.mu.Lock()
 	state.rootFD = -1
@@ -398,6 +415,8 @@ func (prepared *preparedManagedVMCgroup) BindForCleanup(
 	parent := state.parent
 	jailerHandoff := state.jailerHandoff
 	freshRecoveryCleanup := state.freshRecoveryCleanup
+	limits := state.limits
+	hasLimits := state.hasLimitIntent
 	retained := append([]int{}, state.retained...)
 	state.mu.Unlock()
 
@@ -450,7 +469,7 @@ func (prepared *preparedManagedVMCgroup) BindForCleanup(
 	retained = append(retained, leafFD)
 	lease := &managedVMCgroupLease{state: &managedVMCgroupLeaseState{
 		deps: deps, vmID: vmID, rootFD: rootFD, parentFD: parentFD, leafFD: leafFD,
-		parent: parent, leaf: leaf, retained: retained,
+		parent: parent, leaf: leaf, retained: retained, limits: limits, hasLimits: hasLimits,
 	}}
 	state.mu.Lock()
 	state.rootFD = -1
