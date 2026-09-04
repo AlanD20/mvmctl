@@ -574,10 +574,24 @@ action-specific responses and destination/source connection cleanup; its server 
 destination/source peer pidfds, capacity, destination/source process capabilities, descending lexical active leases,
 and pair roots.
 
+The typed `logging.VMExecAuditSink` foundation is implemented separately from the relay. It writes one complete
+schema-1 JSON object per line to the dedicated user-owned `vm-exec-audit.jsonl` file in the mvmctl user cache
+(`~/.cache/mvmctl` by default). Its closed projection contains only `vm_exec`, the request/source/destination
+identities, non-root target user, UTC start time, bounded duration, one of the six fixed results, and the
+result-consistent optional exit code; it contains no command, agent token, or process cause. The sink serializes record
+and close transitions across copies, poisons itself after any incomplete or failed write, closes once, and surfaces
+typed validation, I/O, and cleanup errors.
+
+This file is user-owned observability, not tamper-proof root authority. Construction rejects an effective root caller
+because the user-cache pathname is not retained descriptor-relatively. `Record` observes its supplied context and does
+not detach cancellation itself. When the future relay reaches a terminal cancellation or timeout after its operation
+context is cancelled, the relay must derive a fresh bounded context through `context.WithoutCancel`, call `Record` with
+that context, and surface or join any audit failure with its relay result.
+
 These components still do not form a positive VM-to-VM path. No API-owned relay listener/consumer opens a source or
 destination session, invokes the registered retained-sidecar client, reads and forwards relay payload, resolves and
-enforces the exact runtime directional exec policy, constructs the authorized destination request, or writes through a
-typed command-redacted audit sink.
+enforces the exact runtime directional exec policy, constructs the authorized destination request, or invokes the audit
+sink. Consequently there are no production VM-exec audit records yet.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration defaults, VM create CLI/API,
 environment specs, results, and repository persistence; it has no compatibility path into exec policies. Positive
 Python L2 qualification remains pending, so VM-to-VM execution remains unavailable. No SQLite VM status,

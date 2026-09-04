@@ -666,8 +666,9 @@ pending
 isolated process-bound source session, the closed one-request destination session, and the registered
 production-composed root authority sidecar with exact-one descriptor transport, active-pair/capacity authority,
 Firecracker peer binding, fixed global ceiling, and absolute stop are implemented. The API-owned relay
-listener/consumer, runtime directional-policy resolution/enforcement, relay payload forwarding, typed redacted audit
-sink, positive VM-to-VM path, and Python qualification remain pending, so VM-to-VM execution remains fail-closed
+listener/consumer, runtime directional-policy resolution/enforcement, relay payload forwarding, audit-sink invocation,
+positive VM-to-VM path, and Python qualification remain pending. The typed user-owned audit sink is implemented but
+dormant and has produced no runtime records, so VM-to-VM execution remains fail-closed
 **Dependencies:** Tasks 4, 8, and 9
 
 - [x] Add the directional exact source-VM, destination-VM, and non-root-user SQLite allow-intent foundation with exact
@@ -724,8 +725,14 @@ sink, positive VM-to-VM path, and Python qualification remain pending, so VM-to-
   register only `jailer-vm-exec-session`. Derive caller UID/GID only from the authenticated control peer, keep both
   descriptors opaque and pinned during their sole synchronous binders, use `MVMXSES1` for pre-dispatch failures without
   draining request input, and keep response/cleanup ownership in the handler.
-- [ ] Enforce the same wire limits in the API-owned relay, forward the bounded relay payload, and add command-redacted
-  source/destination/timing/result audit records.
+- [x] Add the typed fixed-schema VM-exec audit sink over the dedicated user-owned `vm-exec-audit.jsonl` cache file.
+  Keep commands, tokens, and process causes out of schema 1; reject effective-root construction; serialize copied
+  lifecycle operations; poison incomplete writes; and surface typed validation, write, and cleanup failures. Treat the
+  user-modifiable file as observability, not tamper-proof root authority. This foundation has no `pkg/api` caller and
+  produces no runtime records.
+- [ ] Enforce the same wire limits in the API-owned relay, forward the bounded relay payload, and invoke the audit sink
+  for every terminal result. Terminal cancellation and timeout paths derive a fresh bounded context through
+  `context.WithoutCancel` before `Record`; relay results surface or join every audit failure.
 - [ ] Python T2 proves same-network, cross-network, and no-IP-network exec behavior plus all denials and limits.
 
 ## Phase 3: Finish the privilege boundary and lifecycle
@@ -860,8 +867,8 @@ optimization, unsupported-behavior scope decisions, and host-mutation migration 
 **Owner:** engineer
 **Status:** The registered retained VM-exec sidecar now production-composes the root-owned capacity reservation,
 active-pair, exact-one structural descriptor, exact Firecracker peer binding, fixed global ceiling, and absolute-stop
-foundations. The API relay/policy/audit/positive path, Python qualification, and all remaining reconciliation and
-lifecycle work remain pending
+foundations. The typed user-owned audit sink exists but is not wired. The API relay/policy/audit integration/positive
+path, Python qualification, and all remaining reconciliation and lifecycle work remain pending
 **Dependencies:** Tasks 8-14
 
 - [ ] Add root-authoritative startup/pre-launch reconciliation for records, processes, cgroups, namespaces, links,

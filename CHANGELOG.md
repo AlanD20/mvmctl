@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > cleanup-recovery authority, and typed LoopMount client/protocol, rootfs-authority, resource-lock adapter, split
 > effect seams, provision/inspect receiver actions, the closed bounded VM-exec wire, its destination-agent
 > non-root execution side, its isolated process-bound source-session foundation, its closed one-request destination
-> session, the production-composed root-owned
+> session, its typed command-redacted user audit sink, the production-composed root-owned
 > VM-exec capacity and active-pair authorities with a fixed global ceiling, its exact Firecracker peer/pidfd binding
 > and absolute-boottime stop, its exact-one descriptor transport and structural admission, its closed retained-sidecar
 > wire/process/Jailer-client/registered-handler lifecycle, and clean-break removal of the VM-wide
@@ -129,10 +129,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version 6 without the removed column. Schema-version 3, 4, or 5 databases that still contain it fail before pending
   migration inspection or migration application with an explicit clean-install-required validation error and remain
   unchanged; no legacy bit is converted into a directional exec policy.
+- Added a typed fixed-schema VM-exec audit sink that writes complete command-redacted JSONL records to the dedicated
+  user-owned `vm-exec-audit.jsonl` cache file. Schema 1 binds the operation, request/source/destination identities,
+  non-root target user, start time, duration, closed result, and result-consistent optional exit code. It never records
+  the command, agent token, or process cause. Construction rejects an effective root caller because this user-cache
+  pathname is not retained descriptor-relatively; the user can modify the file, so it is observability rather than
+  tamper-proof root authority. Writes and close are serialized across copied sink values, incomplete or failed writes
+  poison later records, and validation, write, and cleanup failures remain typed and visible.
 - Public execution-policy CRUD, the wire, source and destination sessions, destination process side, and registered
-  root authority sidecar still do not activate VM-to-VM execution. The API-owned relay listener/consumer, runtime
-  directional-policy resolution and enforcement, relay payload forwarding, typed command-redacted audit sink,
-  positive VM-to-VM path, and Python L2 qualification remain pending. The implemented cancellation boundaries are
+  root authority sidecar still do not activate VM-to-VM execution. The audit sink is not wired into `pkg/api`, and no
+  runtime audit record or positive VM-to-VM execution path exists. The API-owned relay listener/consumer, runtime
+  directional-policy resolution and enforcement, relay payload forwarding, audit integration, and Python L2
+  qualification remain pending. The implemented cancellation boundaries are
   process-group
   guarantees, not per-command cgroup authority, and do not claim cleanup of descendants that deliberately leave their
   group.
@@ -197,8 +205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry owns authenticated pre-dispatch `MVMXSES1` failures.
 - Authenticated pre-dispatch failures for this action use one bounded `MVMXSES1` terminal failure without draining
   request input; other actions retain the ordinary `MVMRES01` envelope. No API-owned relay listener/consumer invokes
-  the registered action yet, and runtime directional-policy enforcement, typed command-redacted audit sink, relay
-  payload forwarding, a positive VM-to-VM path, and Python L2 qualification remain pending.
+  the registered action yet, and runtime directional-policy enforcement, audit-sink invocation, relay payload
+  forwarding, a positive VM-to-VM path, and Python L2 qualification remain pending.
 
 #### Typed nftables compiler foundation
 - Pinned `github.com/google/nftables v0.3.0` and added a private typed compiler for fixed `mvmctl_bridge` and
@@ -758,8 +766,10 @@ The following items are release blockers and are intentionally not described abo
 - Complete typed traffic API/CLI and nftables application plus the API-owned vsock relay over the implemented isolated
   source-session, typed policy, and destination-agent foundations. Directional exec-policy CRUD is public but does not
   activate the relay. Add the relay listener/consumer, enforce the exact runtime directional policy, forward only the
-  bounded relay payload, emit command-redacted audit records, and complete positive L2 qualification before claiming
-  the destination path end to end. The registered retained sidecar already composes exact process/VM-bound
+  bounded relay payload, invoke the typed audit sink, and complete positive L2 qualification before claiming the
+  destination path end to end. Terminal cancellation and timeout paths must call `Record` with a fresh bounded context
+  derived through `context.WithoutCancel`; every audit failure must be surfaced or joined with the relay failure rather
+  than discarded. The registered retained sidecar already composes exact process/VM-bound
   active-pair/capacity authority, the fixed global ceiling, peer binding, and absolute-boottime stop. The
   legacy guest relay, generic host-frame callback, shared guest connection, and VM-wide remote-exec field/flags are
   removed; the routed `ServiceAccessPolicy` and other transitional surfaces still require atomic removal.

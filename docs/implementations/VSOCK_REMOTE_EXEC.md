@@ -1,4 +1,4 @@
-# VM-to-VM Exec: Isolated Source, Destination, Capacity, and Active-Pair Foundations
+# VM-to-VM Exec: Source, Destination, Authority, and Audit Foundations
 
 ## Current status
 
@@ -11,13 +11,15 @@ foundations are implemented and covered by Go L0/L1 tests:
 - a dedicated, one-request source session between the host and source guest;
 - a closed, one-request destination session over an already selected connection;
 - a process-bound local source broker and `mvm-agent remote` client in the source guest;
-- strict separation between ordinary host-to-VM exec/copy and the dormant VM-to-VM path; and
-- a private inert root-owned global capacity reservation substrate; and
-- a private inert authority for an exact active source/destination VM pair and its capacity lease.
+- strict separation between ordinary host-to-VM exec/copy and the dormant VM-to-VM path;
+- a production-composed root-owned capacity, active-pair, peer-binding, and absolute-stop authority behind the retained
+  sidecar; and
+- a typed fixed-schema command-redacted audit sink.
 
-There is no production API-owned relay listener, source-connection-FD authority, runtime exec-policy enforcement,
-production capacity ceiling/composition, or audit path yet, and no positive Python L2 system test has qualified the
-end-to-end behavior. The private pair authority has no production constructor or caller and performs no relay effect.
+There is no production API-owned relay listener, runtime exec-policy enforcement, relay payload forwarding, or audit
+integration yet, and no positive Python L2 system test has qualified the end-to-end behavior. The retained sidecar
+authority performs no relay effect without its pending API caller. The audit sink is dormant: no production path
+constructs or invokes it, so there are no VM-to-VM runtime audit records yet.
 The legacy VM-wide trust flag is removed from the fresh schema, model, configuration, create path, results,
 persistence, and environment specifications; it is not converted into a directional policy. No current host path
 opens the source or destination session or constructs an authorized destination request.
@@ -177,7 +179,7 @@ files, prior-boot records, and expired records, then syncs the directory. Exclus
 file sync, checked close, no-replace rename, parent sync, and checked reverse cleanup preserve explicit
 `record_created`, `record_deleted`, `records_pruned`, `durability_uncertain`, and `cleanup_required` evidence.
 
-The future relay must stop at the reservation's creation boottime plus `vmexecwire.MaxExecutionDuration`; setup and
+The retained sidecar stops at the reservation's creation boottime plus `vmexecwire.MaxExecutionDuration`; setup and
 suspend consume that fixed budget. The record expires after a separate four-second grace for forced-process cleanup and
 terminal delivery.
 
@@ -190,9 +192,28 @@ before exposing an immutable admission bound to the owner, source/destination la
 and fixed relay-stop deadline.
 
 The lease releases exactly once in reverse authority order: capacity, destination/source process capabilities, active
-leases in descending lexical VM-ID order, then the pair roots. No production maximum or constructor is selected, no
-production caller consumes either private authority, and neither authority admits a source connection FD or performs
-a relay, policy, or audit effect.
+leases in descending lexical VM-ID order, then the pair roots. The retained sidecar consumes these authorities under a
+fixed host-global ceiling of eight and admits its exact source and destination connection descriptors, but no API relay
+calls the sidecar or performs a policy, payload, or audit effect.
+
+### 8. Typed command-redacted audit sink
+
+`internal/lib/logging.VMExecAuditSink` is a separate typed boundary for one VM-to-VM execution event. It writes one
+complete fixed schema-1 JSON object per line to the dedicated user-owned `vm-exec-audit.jsonl` file in the mvmctl user
+cache (`~/.cache/mvmctl` by default). Each record contains only `operation=vm_exec`, the request ID, source and
+destination VM IDs, non-root target user, UTC start time, bounded duration, a closed result, and the
+result-consistent optional exit code. It does not contain the command, agent token, or process cause.
+
+The sink serializes record, poison, and close transitions across copied values. A short or failed write poisons the sink
+so a later record cannot be appended to an uncertain partial JSON line; validation, write, and cleanup failures are
+typed and returned. Construction rejects an effective-root caller because the user-cache pathname is not retained
+descriptor-relatively. The file remains user-modifiable and therefore is observability, not tamper-proof root
+authority.
+
+The sink is not wired to `pkg/api` and produces no runtime record by itself. `Record` deliberately observes the context
+it receives. A future relay handling terminal cancellation or timeout after its operation context is cancelled must
+derive a fresh bounded context through `context.WithoutCancel` before calling `Record`, and it must surface or join an
+audit failure with its relay result rather than discard it.
 
 ## Wire contracts and limits
 
@@ -227,7 +248,9 @@ The positive path must not be enabled until all of these release blockers are co
    terminal/cleanup evidence.
 5. The relay uses `DestinationSession` to forward bounded response payload and exact cancellation under the same frame,
    command, output, duration, and EOF limits.
-6. A typed error-reporting audit sink records a command-redacted source/destination/user/timing/result event.
+6. The API relay invokes the implemented typed audit sink for every terminal outcome. Cancellation and timeout paths
+   use a fresh bounded context derived through `context.WithoutCancel`, and every audit failure is surfaced or joined
+   with the relay result.
 7. Python L2 tests prove positive same-network, cross-network, and no-IP-network execution plus missing/reverse policy,
    foreign owner, stale identity, root target, malformed wire, limit, cancellation, and cleanup denials.
 

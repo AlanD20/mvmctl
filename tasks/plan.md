@@ -100,6 +100,12 @@ continue without silently deleting it.
   and explicit `Close` interrupt partial I/O. Protocol/transport failures close the connection, and cleanup runs once
   with a cached result. This primitive performs no dialing, path selection, VM/policy lookup, root effect, audit, API
   relay, or positive VM-to-VM execution.
+- Typed fixed-schema VM-exec audit-sink foundation. It writes complete command-redacted schema-1 JSONL records to the
+  dedicated user-owned `vm-exec-audit.jsonl` cache file, rejects effective-root construction, serializes record/close
+  lifecycle across copies, poisons incomplete writes, and surfaces typed failures. The file is user-modifiable
+  observability rather than tamper-proof root authority. No `pkg/api` relay invokes the sink, so there are no runtime
+  audit records or positive VM-to-VM behavior. Terminal cancellation and timeout relay paths must call `Record` with a
+  fresh bounded context derived through `context.WithoutCancel` and surface or join audit failure.
 - Root-owned Task 15 VM-exec capacity authority with strict schema-1 reservations at
   `/var/lib/mvmctl/allocations/exec/<32-lowercase-hex>.json` and a never-unlinked global
   `/run/mvmctl/authority/capacity.lock`. Exact mode-`0700` managed directories and one-link mode-`0600` records bind the
@@ -210,6 +216,7 @@ topology, public `mvm run jailer` /
 | State | Location | Authority |
 |---|---|---|
 | User configuration, SQLite DB, and VM artifacts | Existing `MVM_CACHE_DIR` | Untrusted for root authorization |
+| VM-exec audit records | User cache `vm-exec-audit.jsonl` | User-owned observability; not tamper-proof root authority |
 | Trusted Firecracker/Jailer pairs | `/var/lib/mvmctl/binaries/<architecture>/<version>` | Root-owned persistent |
 | VM ownership/lifecycle records | `/var/lib/mvmctl/instances/<uid>` | Root-owned persistent |
 | Managed-network owner/bridge identity records; future VM topology | `/var/lib/mvmctl/networks/<uid>` | Root-owned persistent; current schema 1 is not VM-topology authority |
@@ -862,10 +869,10 @@ non-root process side, isolated process-bound source session, closed one-request
 root-owned capacity, active-pair, exact Firecracker peer-binding, fixed-ceiling, absolute-boottime-stop, exact-one
 structural descriptor, and registered
 production-composed retained sidecar are implemented. The API-owned relay listener/consumer, runtime policy
-resolution/enforcement, typed redacted audit sink, relay payload forwarding, Python system qualification, and the
-traffic family's replacement public surface remain pending. No production host path opens a source or destination
-session, invokes the sidecar from the API, or constructs an authorized destination request, so VM-to-VM execution is
-unavailable.
+resolution/enforcement, audit-sink invocation, relay payload forwarding, Python system qualification, and the traffic
+family's replacement public surface remain pending. The typed user-owned audit sink exists but has no `pkg/api` caller
+and has produced no runtime records. No production host path opens a source or destination session, invokes the sidecar
+from the API, or constructs an authorized destination request, so VM-to-VM execution is unavailable.
 
 ### LoopMount privilege foundation
 

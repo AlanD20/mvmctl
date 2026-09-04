@@ -497,6 +497,16 @@ Protocol and transport failures close the connection, while cleanup runs once an
 The primitive performs no dialing, path selection, policy or VM lookup, root effect, audit, relay forwarding, or API
 composition, so it creates no positive VM-to-VM path.
 
+The eleventh slice adds the typed audit sink without activating the relay. It writes one complete fixed schema-1 JSON
+record per line to the dedicated user-owned `vm-exec-audit.jsonl` cache file. The closed record contains the operation,
+request/source/destination identities, non-root target user, UTC start time, bounded duration, result, and
+result-consistent optional exit code, but never the command, agent token, or process cause. Writes and close are
+serialized across copied sink values; an incomplete or failed write poisons later records; validation, I/O, and cleanup
+failures are typed and surfaced. Effective-root construction is rejected because the user-cache pathname is not
+retained descriptor-relatively. The resulting user-modifiable file is observability, not tamper-proof root authority.
+No `pkg/api` relay constructs or invokes the sink, so this slice creates neither a runtime audit record nor a positive
+VM-to-VM execution path.
+
 Implementation remains fail-closed and proceeds in these independently reviewable increments:
 
 1. [x] Add exact-one-descriptor ancillary primitives and structural FD admission, without registering an action.
@@ -508,11 +518,16 @@ Implementation remains fail-closed and proceeds in these independently reviewabl
 5. Complete the remaining relay primitives without activating the relay:
    - [x] Add the exact request-ID-bound, single-reader `SourceSession.WaitCancel` lifecycle described above.
    - [x] Add a closed destination session.
-   - [ ] Add a typed error-reporting audit sink.
+   - [x] Add a typed error-reporting audit sink.
 6. [ ] Add the explicit public trigger and API relay, then qualify same-network, cross-network, and no-IP-network
    behavior plus denial, cancellation, crash, reboot, ceiling, and cleanup paths in Python L2.
 
 VM-to-VM execution remains unavailable until all six increments and L2 qualification are complete.
+
+The relay must not treat audit as best effort. Every terminal path invokes the typed sink and surfaces or joins an audit
+failure with the relay result. Because cancellation and timeout terminal paths may run after the operation context is
+done, those paths derive a fresh bounded context through `context.WithoutCancel` before calling `Record`; the sink does
+not detach caller cancellation itself.
 
 ### Layer placement
 
@@ -672,7 +687,8 @@ deadlines, cancellation of blocked reads/writes, terminal close/EOF, concurrent-
 admission/read time, host disconnect and shutdown cleanup, root/non-root outer accounts, exact AF_UNIX peer/pidfd
 checks, PID-reuse and zombie rejection, stable bounded process ancestry, one claim, process-group cancellation, binary
 CLI output, and redacted failures. This does not qualify API/root source-VM admission, relay policy enforcement/audit,
-capacity composition, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live VM-to-VM path.
+capacity composition, audit integration, detached-descendant cleanup, a kernel lacking `SO_PEERPIDFD`, or a live
+VM-to-VM path.
 
 Destination-session L1 covers the single validated open, request-ID binding and strict response/output limits, binary
 output, one sequential reader, terminal withholding through physical EOF, exact single cancellation, concurrent
@@ -691,8 +707,8 @@ reverse cleanup. It also covers same-socket peer credentials and pidfd acquisiti
 PID/effective UID/GID and locator matching, both complete peer identities, and a final both-peer/both-process liveness
 sweep under the fixed global ceiling. The absolute-boottime stop L1 covers expiry, cancellation, rejection of a
 simultaneous second waiter, cached completed results, descriptor close/reuse races, and cleanup evidence. Production
-composition is registered but still does not provide an API relay, runtime policy enforcement, audit, payload
-forwarding, or end-to-end execution.
+composition is registered but still does not provide an API relay, runtime policy enforcement, audit-sink invocation,
+payload forwarding, or end-to-end execution.
 
 Retained-sidecar L1 covers closed phase schemas and ordering, bounded failure projection, physical terminal EOF,
 exact-one descriptor ownership and structural admission, source/destination duplicate ownership, copied-session shared
@@ -701,6 +717,11 @@ cleanup, cleanup-error evidence, no duplicate terminal response, production pair
 descriptor pinning during the sole synchronous binder, exact action registration, authenticated caller propagation,
 and `MVMXSES1` pre-dispatch failures without request draining. It does not qualify an API relay, runtime policy/audit,
 relay payload forwarding, a positive VM-to-VM path, or Python L2 behavior.
+
+Audit-sink L1 covers the exact command-redacted schema and closed result/exit-code combinations, record validation,
+dedicated user-owned path, privileged-construction denial, whole-record serialization, context cancellation,
+write/short-write poisoning, copied close-once lifecycle, and surfaced typed failures. It does not qualify relay
+integration, runtime records, root-controlled tamper resistance, or a positive VM-to-VM path.
 
 This decision is not complete until L1 and L2 tests prove those adapter properties plus namespace ownership, cross-UID
 denial, anti-spoofing, same-network and cross-network default deny, exact traffic allows, exec-policy directionality,
